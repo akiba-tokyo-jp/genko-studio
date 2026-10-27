@@ -48,6 +48,7 @@
 #include "render/ink_canvas.hpp"
 #include "render/psd.hpp"
 #include "render/psd_adjust.hpp"
+#include "render/psd_filters.hpp"
 #include "render/psd_keep.hpp"
 #include "render/psd_paths.hpp"
 #include "render/psd_shapes.hpp"
@@ -904,6 +905,15 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     std::vector<std::string> shapes_skipped, shapes_read;  // (pen-shapes@1: shape layers this build cannot read, and those read)
     std::map<std::string, std::string> contents_made;  // (PC3 A3: a placed layer's uuid → its contents' id)
     Json smart_objects = Json::array(), placed_pixels = Json::array();
+    // (PC4 D7: Photoshop's smart filters read as Genko's — render/psd_filters —, one descriptor budget for the whole file;
+    // the file's filter effects read when a placed layer has smart filters; the layers read so and those not, at most
+    // kFilterReportsMax of each said)
+    constexpr std::size_t kFilterReportsMax = 256;
+    psd_filters::Budget filters_budget;
+    std::optional<psd_filters::Masks> filter_masks;
+    std::optional<std::vector<psd::File::TaggedBlock>> filter_globals;
+    Json filters_read = Json::array(), filters_shown = Json::array();
+    std::size_t filters_unsaid = 0;
     for (std::size_t i = 0; i < layers.size(); ++i) {
         const psd::Layer& item = layers[i];
         core::Layer layer;
@@ -1061,16 +1071,55 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
                                                                           : std::optional<SmartMade>(SmartMade{{}, {}, "unreadable"});
                 if (smart && smart->why.empty()) *smart = smart_settings(doc, page, where, file, *item.placed, std::move(*smart));
                 if (smart && smart->why.empty()) {
-                    Json picture = Json::object();
                     const auto keep = [&doc](core::Bytes bytes) {
                         const std::string ref = core::bytes_ref(*bytes);
                         doc.smart_files[ref] = std::move(bytes);
                         return ref;
                     };
-                    if (layer.ink_raster) picture["ink_raster"] = keep(layer.ink_raster);
-                    else picture["asset"] = keep(layer.raster_png);
                     const std::string block(file.placed_block(item));
-                    Json record = Json{{"block", item.placed->key}, {"raw", keep(std::make_shared<const std::string>(block))}, {"shown", std::move(picture)}};
+                    // (PC4 D7: its Photoshop smart filters, when they are all in the table, as Genko's — drawn from its
+                    // contents from then on —; else Photoshop's picture, as before, and which said)
+                    std::optional<psd_filters::Read> fx;
+                    if (item.placed->filters && keeping && !merged_only) {
+                        if (!filter_masks) {
+                            filter_globals = file.global_blocks();
+                            filter_masks = psd_filters::read_masks(*filter_globals);
+                        }
+                        psd_filters::Placement placement;
+                        placement.scale_x = static_cast<double>(where.shown_w) / std::max<double>(1.0, static_cast<double>(file.width()));
+                        placement.scale_y = static_cast<double>(where.shown_h) / std::max<double>(1.0, static_cast<double>(file.height()));
+                        placement.at_x = static_cast<double>(where.at_x);
+                        placement.at_y = static_cast<double>(where.at_y);
+                        placement.page_w = static_cast<double>(std::max<std::int64_t>(1, where.page_w));
+                        placement.page_h = static_cast<double>(std::max<std::int64_t>(1, where.page_h));
+                        placement.width_mm = page.spec.width_mm.value();
+                        placement.height_mm = page.spec.height_mm.value();
+                        placement.file_w = static_cast<double>(std::max<std::int64_t>(1, file.width()));
+                        placement.file_h = static_cast<double>(std::max<std::int64_t>(1, file.height()));
+                        fx = psd_filters::read(block, *item.placed, placement, *filter_masks, filters_budget);
+                    }
+                    const bool filtered = fx && fx->filters && !fx->filters->empty();
+                    Json record = Json{{"block", item.placed->key}, {"raw", keep(std::make_shared<const std::string>(block))}};
+                    if (!filtered) {
+                        Json picture = Json::object();
+                        if (layer.ink_raster) picture["ink_raster"] = keep(layer.ink_raster);
+                        else picture["asset"] = keep(layer.raster_png);
+                        record["shown"] = std::move(picture);
+                    }
+                    if (filtered) {
+                        if (filters_read.size() < kFilterReportsMax) filters_read.push_back(layer.id);
+                    } else if (fx && !fx->why.empty()) {
+                        if (filters_shown.size() < kFilterReportsMax) {
+                            Json names = Json::array();
+                            for (const std::string& n : fx->names) names.push_back(n);
+                            Json said{{"id", layer.id}, {"title", layer.title}, {"why", fx->why}};
+                            if (!names.empty()) said["filters"] = std::move(names);
+                            if (fx->more > 0) said["more"] = fx->more;
+                            filters_shown.push_back(std::move(said));
+                        } else {
+                            ++filters_unsaid;
+                        }
+                    }
                     layer.kind = core::LayerKind::Smart;
                     layer.raster_png.reset();
                     layer.raster_relpath.reset();
@@ -1079,6 +1128,10 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
                     layer.clip_to = "none";
                     smart->settings["psd"] = std::move(record);
                     layer.smart = std::move(smart->settings);
+                    if (filtered) {
+                        core::smart::put_setting(layer, "filters", std::move(*fx->filters));
+                        if (!fx->on) core::smart::put_setting(layer, "filters_on", false);
+                    }
                     smart_objects.push_back(Json{{"id", layer.id}, {"contents", smart->contents}});
                 } else {
                     placed_pixels.push_back(Json{{"id", layer.id}, {"why", smart ? smart->why : std::string("no_file")}});
@@ -1123,6 +1176,11 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     // (PC3 A3: the placed layers made smart objects, and those read as their pixels and why — said only when there are)
     if (!smart_objects.empty()) report["smart_objects"] = std::move(smart_objects);
     if (!placed_pixels.empty()) report["placed_as_pixels"] = std::move(placed_pixels);
+    // (PC4 D7: the smart objects whose Photoshop smart filters were read as Genko's, and those shown as Photoshop's picture
+    // and why — said only when there are)
+    if (!filters_read.empty()) report["smart_filters_read"] = std::move(filters_read);
+    if (!filters_shown.empty()) report["smart_filters_shown"] = std::move(filters_shown);
+    if (filters_unsaid > 0) report["smart_filters_shown_more"] = filters_unsaid;
     if (!patterns_read.empty()) report["patterns"] = std::move(patterns_read);  // (patterns@1, PC4 E3: the patterns taken in)
     if (!patterns_filled.empty()) {  // (and the pattern fill layers read)
         Json fills = Json::array();

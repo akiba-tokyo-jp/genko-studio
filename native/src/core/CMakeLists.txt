@@ -73,6 +73,7 @@ genko_library(genko_core
     adjust.cpp
     adjust_kinds.cpp
     filter_kinds.cpp
+    filter_upstream.cpp
     exif.cpp
     lens.cpp
     vanishing.cpp

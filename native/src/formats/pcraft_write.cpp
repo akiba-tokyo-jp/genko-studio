@@ -42,6 +42,7 @@
 #include "render/pcraft_manifest.hpp"
 #include "render/png.hpp"
 #include "render/shape_parts.hpp"
+#include "render/smart_filters.hpp"
 #include "render/zip.hpp"
 #include "render/zstd.hpp"
 #include "storage/asset_store.hpp"
@@ -880,6 +881,23 @@ std::string contents_bytes(Ctx& ctx, const core::SmartContents& contents);
 std::optional<Json> smart_content(Ctx& ctx, const core::Layer& layer, const render::PageLayer* shown, const std::string& name) {
     const core::SmartContents* contents = core::smart::contents_of(ctx.doc, layer);
     if (contents == nullptr) return std::nullopt;
+    // (PC4 D7: its smart filters as PhotoCraft's — core::to_upstream, their places as the page has them —, before its
+    // contents are written. One PhotoCraft has none of makes the whole its picture, said: without it the others would lay
+    // over another picture — the order's meaning changed.)
+    Json filters = Json::array();
+    if (const auto list = layer.smart->find("filters"); list != layer.smart->end() && list->is_array()) {
+        const core::UpstreamCanvas canvas{ctx.page.spec.width_mm.value(), ctx.page.spec.height_mm.value()};
+        for (const Json& f : *list) {
+            const std::string kind = f.value("kind", std::string());
+            const auto mapped = core::to_upstream(kind, render::smart_filters::params_on_page(ctx.doc, ctx.page, layer, f), ctx.dpi, canvas);
+            if (!mapped) {
+                ctx.note("スマートフィルター「" + kind + "」は PhotoCraft に同じものが無いため、スマートオブジェクトを見えのまま画素にしました（「" + name + "」）");
+                return std::nullopt;
+            }
+            filters.push_back(Json{{"command", mapped->first}, {"params", mapped->second}, {"blend", pc::upstream_blend(f.value("blend", std::string("normal")))},
+                                   {"opacity", f.value("opacity", 1.0)}, {"visible", f.value("visible", true)}});
+        }
+    }
     std::string file_name = contents->name.empty() ? std::string("contents") : contents->name;
     std::string blob;  // (its file's: a .pcraft of its page, written once however many layers show it — or its file)
     double cdpi = 72;
@@ -911,19 +929,6 @@ std::optional<Json> smart_content(Ctx& ctx, const core::Layer& layer, const rend
     const pc::Affine t{r6(m.a * k), r6(m.b * k), r6(m.c * k), r6(m.d * k), r6(m.e * ctx.px), r6(m.f * ctx.px)};
     if (layer.smart->contains("perspective") || layer.smart->contains("warp")) {
         ctx.note("スマートオブジェクトの遠近法・ワープは PhotoCraft に書けないため、見えだけを画素（キャッシュ）にしました（「" + name + "」）");
-    }
-    Json filters = Json::array();
-    if (const auto list = layer.smart->find("filters"); list != layer.smart->end() && list->is_array()) {
-        for (const Json& f : *list) {
-            const std::string kind = f.value("kind", std::string());
-            const auto mapped = core::to_upstream(kind, f.value("params", Json::object()), ctx.dpi);
-            if (!mapped) {
-                ctx.note("スマートフィルター「" + kind + "」は PhotoCraft に同じものが無いため外しました（「" + name + "」）");
-                continue;
-            }
-            filters.push_back(Json{{"command", mapped->first}, {"params", mapped->second}, {"blend", pc::upstream_blend(f.value("blend", std::string("normal")))},
-                                   {"opacity", f.value("opacity", 1.0)}, {"visible", f.value("visible", true)}});
-        }
     }
     Json filter_mask = nullptr;
     if (const auto fm = layer.smart->find("filter_mask"); fm != layer.smart->end() && fm->is_object() && fm->contains("asset")) {

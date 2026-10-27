@@ -343,6 +343,7 @@ struct Ctx {
     std::optional<std::array<double, 4>> mask_frame;      // (the layer being read: its hide-all mask's painted area)
     bool names_layers = false;                            // (its PSD resources kept name layers by their ids)
     std::vector<std::int64_t> kept_ids;                   // (the PSD layer ids kept)
+    std::set<std::string> filter_notes;                   // (PC4 D7: the notes naming a smart filter, at most kFilterNotesMax)
     std::map<std::string, std::string> nested;            // (a blob of a smart object's file → its contents' id: read once)
     std::map<std::string, std::string> unread;            // (… or why it could not be: tried once)
 
@@ -1079,6 +1080,16 @@ void forget_psd(Ctx& ctx, core::Layer& layer) {
     layer.native_psd.reset();
 }
 
+// (PC4 D7) A note naming a smart filter (its command: the file's words), at most kFilterNotesMax different ones a file —
+// the rest said without the name.
+constexpr std::size_t kFilterNotesMax = 16;
+std::string filter_note(Ctx& ctx, std::string named, std::string plain) {
+    if (ctx.filter_notes.contains(named)) return named;
+    if (ctx.filter_notes.size() >= kFilterNotesMax) return plain;
+    ctx.filter_notes.insert(named);
+    return named;
+}
+
 bool as_pixels(Ctx& ctx, core::Layer& layer, const Json* cache, const std::string& name) {
     if (cache == nullptr) return false;
     layer.kind = core::LayerKind::Raster;
@@ -1256,6 +1267,50 @@ bool smart_layer(Ctx& ctx, core::Layer& layer, const Json& d, const std::string&
         return false;
     }
     if (kind != "embedded") throw Unreadable("smart: a source this build does not know");
+    // (PC4 D7: its smart filters as Genko's — core::from_upstream —, before its contents are read. A filter PhotoCraft draws
+    // that this build cannot take, or a blend Genko has not, makes the whole its picture: without it the others would lay
+    // over another picture — the order's meaning changed —; one PhotoCraft does not know it draws nothing for, left out and
+    // said.)
+    Json filters = Json::array();
+    std::vector<std::string> dropped;
+    if (const Json* list = optional_field(d, "smart_filters"); list != nullptr && list->is_array()) {
+        // (more than a smart object holds — counted before any is read; a few PhotoCraft does not know besides)
+        if (list->size() > 4 * core::smart::kFiltersMax) {
+            why = "スマートフィルターが " + std::to_string(core::smart::kFiltersMax) + " 個を超えるため、見えのまま画素にしました";
+            return false;
+        }
+        const core::UpstreamCanvas canvas{ctx.w * ctx.mm, ctx.h * ctx.mm};
+        for (const Json& f : *list) {
+            const std::string command = text(field(f, "command", "smart filter"), "smart filter.command");
+            const std::string said = first_chars(core::utf8_replaced(command), 64);
+            const auto mapped = core::from_upstream(command, field(f, "params", "smart filter"), ctx.dpi, canvas);
+            if (!mapped) {
+                if (core::upstream_filter(command)) {
+                    why = filter_note(ctx, "スマートフィルター「" + said + "」をこの版の Genko に写せないため、見えのまま画素にしました",
+                                      "この版の Genko に写せないスマートフィルターがあるため、見えのまま画素にしました");
+                    return false;
+                }
+                if (std::find(dropped.begin(), dropped.end(), said) == dropped.end()) dropped.push_back(said);
+                continue;
+            }
+            const std::string blend = blend_from(field(f, "blend", "smart filter"));
+            const auto genko = genko_blend(blend);
+            if (!genko) {
+                why = filter_note(ctx, "スマートフィルター「" + said + "」の描画モード（" + blend + "）が Genko に無いため、見えのまま画素にしました",
+                                  "Genko に無い描画モードのスマートフィルターがあるため、見えのまま画素にしました");
+                return false;
+            }
+            filters.push_back(Json{{"kind", mapped->first},
+                                   {"params", mapped->second},
+                                   {"blend", *genko},
+                                   {"opacity", std::round(std::clamp(number(field(f, "opacity", "smart filter"), "smart filter.opacity"), 0.0, 1.0) * 1000.0) / 1000.0},
+                                   {"visible", boolean(field(f, "visible", "smart filter"), "smart filter.visible")}});
+        }
+        if (filters.size() > core::smart::kFiltersMax) {
+            why = "スマートフィルターが " + std::to_string(core::smart::kFiltersMax) + " 個を超えるため、見えのまま画素にしました";
+            return false;
+        }
+    }
     const std::string file_name = core::utf8_replaced(text(field(source, "file_name", "smart.source"), "smart.source.file_name"));
     const std::string hash = text(field(source, "blob", "smart.source"), "smart.source.blob");
     double contents_dpi = ctx.dpi;
@@ -1304,27 +1359,10 @@ bool smart_layer(Ctx& ctx, core::Layer& layer, const Json& d, const std::string&
             if (s == up) core::smart::put_setting(layer, "stack", Json(std::string(genko)));
         }
     }
-    Json filters = Json::array();
-    if (const Json* list = optional_field(d, "smart_filters"); list != nullptr && list->is_array()) {
-        for (const Json& f : *list) {
-            if (filters.size() >= core::smart::kFiltersMax) {
-                ctx.notes.name("スマートフィルターが多すぎるため、" + std::to_string(core::smart::kFiltersMax) + " 個までにしました", name);
-                break;
-            }
-            const std::string command = text(field(f, "command", "smart filter"), "smart filter.command");
-            const auto mapped = core::from_upstream(command, field(f, "params", "smart filter"), ctx.dpi);
-            if (!mapped) {
-                ctx.notes.name("スマートフィルター「" + command + "」はこの版の Genko に無いため外しました", name);
-                continue;
-            }
-            const std::string blend = blend_from(field(f, "blend", "smart filter"));
-            const auto genko = genko_blend(blend);
-            filters.push_back(Json{{"kind", mapped->first},
-                                   {"params", mapped->second},
-                                   {"blend", genko ? *genko : std::string("normal")},
-                                   {"opacity", std::round(std::clamp(number(field(f, "opacity", "smart filter"), "smart filter.opacity"), 0.0, 1.0) * 1000.0) / 1000.0},
-                                   {"visible", boolean(field(f, "visible", "smart filter"), "smart filter.visible")}});
-        }
+    for (const std::string& said : dropped) {
+        ctx.notes.name(filter_note(ctx, "スマートフィルター「" + said + "」は PhotoCraft も描かないもののため外しました",
+                                   "PhotoCraft も描かないスマートフィルターを外しました"),
+                       name);
     }
     if (!filters.empty()) {
         core::smart::put_setting(layer, "filters", std::move(filters));

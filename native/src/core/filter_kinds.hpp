@@ -126,11 +126,23 @@ struct FilterPreset {
 };
 const std::vector<FilterPreset>& filter_presets();
 
-// D7 (.pcraft's smart filters, design 2.9): an upstream command and its params (Photoshop's units: the document's
-// pixels at `dpi`, camelCase keys, colours 0..1) as Genko's kind and settings (lengths in working pixels, snake_case),
-// and back. None for a command or kind not in the table. (D0: the blurs of its own; D7 the rest.)
-std::optional<std::pair<std::string, Json>> from_upstream(std::string_view command, const Json& params, double dpi);
-std::optional<std::pair<std::string, Json>> to_upstream(std::string_view kind, const Json& params, double dpi);
+// D7 (.pcraft's smart filters and Photoshop's of a PSD, design 2.9; core/filter_upstream.cpp): an upstream command and
+// its params (PhotoCraft's: camelCase keys and choices, colours 0..1 or #rrggbb, lengths the document's pixels at `dpi`,
+// points its pixels, a path's points shares of its canvas) as Genko's kind and settings in their normal form (snake_case,
+// colours [r, g, b] 0..255, lengths the working 200 dpi's pixels, points the page's mm — the document's pixel (0, 0) the
+// page's (0, 0) —), and back. A command's settings Genko's kind has no key for are left out (PhotoCraft reads only its
+// own too); its one-step presets (filter.blur.blur…) are their kind at their settings; filter.gallery.<effect> and
+// filter.filterGallery are filter_gallery. None for a command or kind not in the table, or settings it cannot take (a
+// displacement map's file, a lighting texture of a channel, a path without `canvas`, one its kind refuses).
+struct UpstreamCanvas {
+    double width_mm = 0, height_mm = 0;  // the document's size on the page (0: not known)
+};
+std::optional<std::pair<std::string, Json>> from_upstream(std::string_view command, const Json& params, double dpi, UpstreamCanvas canvas = {});
+std::optional<std::pair<std::string, Json>> to_upstream(std::string_view kind, const Json& params, double dpi, UpstreamCanvas canvas = {});
+// Is the command one PhotoCraft draws as a smart filter (engine/src/filters.rs apply_filter_to_surface: its filters, the
+// gallery's, Lens Correction, Adaptive Wide Angle, Camera Raw, Liquify, Puppet and Perspective Warp, a plug-in)? One it
+// does not know it leaves the pixels alone for (smart_cmds.rs apply_smart_filters).
+bool upstream_filter(std::string_view command);
 
 // filters@1 (design 2.8): does a smart filter of the book (on its pages or in its contents) use a PC4 kind, or hold a
 // filter's file?
