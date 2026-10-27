@@ -16,6 +16,9 @@ enum class PnmKind { Any, Bitmap, Graymap, Pixmap, Arbitrary, Float };
 struct EncodeOptions {
     int jpeg_quality = 90;  // 1..100 (AVIF's quality too)
     bool jpeg_chroma_subsampling = true;  // 4:2:0 (false: 4:4:4)
+    // (PC4 F-c: Web 用に保存's JPEG) progressive scans; Huffman tables made for the picture (Photoshop's 最適化)
+    bool jpeg_progressive = false;
+    bool jpeg_optimize = false;
     PngCompression png_compression = PngCompression::Default;
     bool png_interlaced = false;
     bool webp_lossless = true;

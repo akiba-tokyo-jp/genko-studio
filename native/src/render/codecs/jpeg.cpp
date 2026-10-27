@@ -72,6 +72,8 @@ struct Writing {
     J_COLOR_SPACE space = JCS_RGB;
     int quality = 90;
     bool subsample = true;
+    bool progressive = false;  // (PC4 F-c)
+    bool optimize = false;
     std::optional<std::pair<int, int>> density;
     std::vector<std::pair<int, std::string>> markers;  // (APPn and their data, after the start of the frame)
 };
@@ -109,6 +111,8 @@ bool compress(WriteState* s, const Writing* w) {
             s->codec.comp_info[c].v_samp_factor = 1;
         }
     }
+    if (w->progressive) jpeg_simple_progression(&s->codec);  // (PC4 F-c: Web 用に保存's プログレッシブ)
+    if (w->optimize) s->codec.optimize_coding = TRUE;
     if (w->density) {
         s->codec.write_JFIF_header = TRUE;  // (a CMYK file's resolution too: JFIF's density is where readers look)
         s->codec.density_unit = 1;
@@ -168,6 +172,8 @@ std::string write_jpeg(const CodecImage& stored, const EncodeOptions& options) {
     w.pixels = reinterpret_cast<const unsigned char*>(inverted.empty() ? stored.data().data() : inverted.data());
     w.quality = std::clamp(options.jpeg_quality, 1, 100);
     w.subsample = options.jpeg_chroma_subsampling;
+    w.progressive = options.jpeg_progressive;
+    w.optimize = options.jpeg_optimize;
     if (stored.meta.dpi && stored.meta.dpi->first > 0 && stored.meta.dpi->second > 0)
         w.density = std::make_pair(density_of(stored.meta.dpi->first), density_of(stored.meta.dpi->second));
     // (the EXIF and the XMP in an APP1 segment each — what does not fit in one is not written, as the losses say —; the

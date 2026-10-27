@@ -69,6 +69,19 @@ std::vector<fs::path> export_print(const core::Document& episode, const fs::path
 // export.export_layers: every page's layers (render::page_layers) as transparent PNGs, a folder per page
 // (<stem>_<p001>/01_紙.png, …), a layer's mask applied, cut to the area.
 std::vector<fs::path> export_layers(const core::Document& episode, const fs::path& dest, int dpi = 350, std::string_view area = "paper");
+// PC4 F-c (file.export.layersToFiles, レイヤーからファイル…; PhotoCraft's file_cmds.rs layers_to_files, MIT): the same with its
+// choices — the format (png: the files as before; jpeg over white at the quality, Photoshop's 0..12; tiff and webp (lossless)
+// with their alpha, through the codecs; psd: each layer a one-layer PSD), a prefix before each file's name, the hidden layers
+// too (visible_only false: the page's layers all shown). `notes`: what a format could not keep.
+struct LayerFiles {
+    std::string format = "png";  // png | jpeg | tiff | psd | webp
+    std::string prefix;          // "": none
+    bool visible_only = true;
+    std::optional<int> quality;  // (jpeg) 0..12
+};
+inline constexpr std::array<std::string_view, 5> kLayerFileFormats{"png", "jpeg", "tiff", "psd", "webp"};
+std::vector<fs::path> export_layers(const core::Document& episode, const fs::path& dest, int dpi, std::string_view area, const LayerFiles& files,
+                                    std::vector<std::string>* notes = nullptr);
 
 // export.export_strip: the pages that are not covers one under another, as one PNG at `dest`.
 fs::path export_strip(const core::Document& episode, const fs::path& dest, int dpi = 150);

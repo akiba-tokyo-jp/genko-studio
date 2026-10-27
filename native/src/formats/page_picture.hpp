@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "core/model.hpp"
@@ -27,6 +29,9 @@ struct PagePicture {
 // The page at `dpi`, cut to `area` (paper | bleed | trim, as the exports cut it). render::NotYetPorted for what this build
 // does not draw yet, core::Error("image_too_large") for a page too large at that resolution.
 PagePicture page_picture(const core::Page& page, const core::Document& doc, int dpi, std::string_view area = "paper");
+// (PC4 F-c) The size page_picture makes at `dpi` (its paper, or the area cut), without drawing it: what 書き出し形式… shows
+// and the size a picture is checked against before it is drawn.
+std::pair<std::uint32_t, std::uint32_t> page_picture_size(const core::Page& page, int dpi, std::string_view area = "paper");
 
 // One layer alone over nothing, the page's size at `dpi`: its own pixels at the page's depth when they are drawn as they
 // are on the page's grid at that resolution — a paint layer of precise pixels (RGBA 16 or 32 bits) or inks (grey or CMYK

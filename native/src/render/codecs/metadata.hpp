@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -31,6 +32,12 @@ FileMetadata read_metadata(Format format, std::string_view bytes);
 int exif_orientation(std::string_view exif);
 // The EXIF block with its orientation set to 1 (upright: the pixels were turned as it said); as it was when it has none.
 std::string exif_upright(std::string exif);
+// PC4 F-c (SPEC.md FILE-01「書き出し」, the review's P2-3): the EXIF block a copy of the page carries — its IFD1 (the
+// camera's thumbnail: the picture before it was edited or cut) and any IFD after it gone, their entries, values and the
+// thumbnail's bytes cleared and cut off the end when nothing else lies past them; the sizes it says (IFD0's ImageWidth and
+// ImageLength, the Exif IFD's PixelXDimension and PixelYDimension) the written picture's. Everything else — the camera,
+// its MakerNote, GPS — as it was. As it was when it is not a TIFF structure.
+std::string exif_for_copy(std::string exif, std::uint32_t width, std::uint32_t height);
 // The colour space its Exif IFD says (0xA001): 1 sRGB, 0xFFFF uncalibrated, 0 when it says none.
 int exif_colour_space(std::string_view exif);
 // An XMP packet with its tiff:Orientation (element or attribute) set to 1.

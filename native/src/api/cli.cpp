@@ -37,6 +37,7 @@
 #include "core/actor.hpp"
 #include "core/clock.hpp"
 #include "core/command_bus.hpp"
+#include "core/covers.hpp"
 #include "core/error.hpp"
 #include "core/file_info.hpp"
 #include "core/ids.hpp"
@@ -45,12 +46,14 @@
 #include "core/ops_schema.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
+#include "formats/copy.hpp"
 #include "formats/export.hpp"
 #include "formats/exporting.hpp"
 #include "formats/open_file.hpp"
 #include "formats/pcraft_write.hpp"
 #include "formats/pillow_save.hpp"
 #include "formats/smart_files.hpp"
+#include "formats/web_export.hpp"
 #include "render/grd.hpp"
 #include "render/gradient_presets.hpp"
 #include "render/anim.hpp"
@@ -808,7 +811,9 @@ int export_command(const QStringList& args, bool ascii) {
                                           {"--color", true},      {"--icc", true},       {"--screen-lpi", true}, {"--screen-shape", true},
                                           {"--area", true},       {"--fps", true},       {"--seconds", true},    {"--page", true},
                                           {"--psd-text", true},   {"--rasterize-unsupported", false}, {"--lut-size", true},
-                                          {"--title", true},      {"--paths", true}};
+                                          {"--title", true},      {"--paths", true},
+                                          // (PC4 F-c, --format layers: レイヤーからファイル…'s choices)
+                                          {"--layer-format", true}, {"--prefix", true}, {"--visible-only", true}, {"--quality", true}};
     Arguments a;
     if (auto error = parse_arguments(args, kOptions, 2, "src, out", a)) return usage("genko export: " + *error);
     // PC2a (file.export.colorLookupTables, the C++ build's own: not among Python's formats, whose choices it leaves as they
@@ -818,6 +823,31 @@ int export_command(const QStringList& args, bool ascii) {
     if (a.value("--format") == std::optional<QString>(QStringLiteral("ai"))) return export_ai(a, ascii);
     if (a.value("--paths")) return usage("genko export: argument --paths: only with --format ai");
     if (a.value("--lut-size") || a.value("--title")) return usage("genko export: argument --lut-size, --title: only with --format cube");
+    // (PC4 F-c: レイヤーからファイル…'s choices, only with --format layers; none of them: the files as before)
+    formats::LayerFiles layer_files;
+    if (a.value("--layer-format") || a.value("--prefix") || a.value("--visible-only") || a.value("--quality")) {
+        if (a.value("--format") != std::optional<QString>(QStringLiteral("layers"))) {
+            return usage("genko export: argument --layer-format, --prefix, --visible-only, --quality: only with --format layers");
+        }
+        if (const auto f = a.value("--layer-format")) {
+            layer_files.format = f->toStdString();
+            if (std::find(formats::kLayerFileFormats.begin(), formats::kLayerFileFormats.end(), layer_files.format) == formats::kLayerFileFormats.end()) {
+                return usage("genko export: argument --layer-format: invalid choice: " + core::py_repr_str(layer_files.format) +
+                             " (choose from 'png', 'jpeg', 'tiff', 'psd', 'webp')");
+            }
+        }
+        if (const auto prefix = a.value("--prefix")) layer_files.prefix = prefix->toStdString();
+        if (const auto visible = a.value("--visible-only")) {
+            if (*visible != QLatin1String("true") && *visible != QLatin1String("false")) return usage("genko export: argument --visible-only: true or false");
+            layer_files.visible_only = *visible == QLatin1String("true");
+        }
+        if (const auto q = a.value("--quality")) {
+            bool ok = false;
+            const int v = q->toInt(&ok);
+            if (!ok || v < 0 || v > 12) return usage("genko export: argument --quality: an integer 0..12");
+            layer_files.quality = v;
+        }
+    }
     // argparse's choices
     const auto choice = [&](const char* name, const char* fallback, std::initializer_list<const char*> choices) -> std::optional<std::string> {
         const std::string value = a.value(name).value_or(QString::fromLatin1(fallback)).toStdString();
@@ -894,6 +924,7 @@ int export_command(const QStringList& args, bool ascii) {
     const std::int64_t spec_dpi = doc.spec.dpi.truthy() ? core::py_int(doc.spec.dpi) : 0;
     std::vector<fs::path> paths;
     std::vector<std::string> pcraft_notes;  // (PC4 F-f: what the .pcraft files could not keep)
+    std::vector<std::string> layer_notes;  // (PC4 F-c: what a layer's file could not keep)
     const core::Page* animated = nullptr;  // (an animation: its page)
     const std::string& f = *fmt;
     // (the resolution of a format that takes one, 1 to 100000 dpi: refused before anything is drawn or made)
@@ -929,7 +960,7 @@ int export_command(const QStringList& args, bool ascii) {
     } else if (f == "pack") {
         paths = formats::export_pack(doc, out, "shueisha", dpi);
     } else if (f == "layers") {
-        paths = formats::export_layers(doc, out, narrow(dpi.value_or(spec_dpi)), *area);
+        paths = formats::export_layers(doc, out, narrow(dpi.value_or(spec_dpi)), *area, layer_files, &layer_notes);
     } else if (f == "kindle") {
         const std::int64_t given = int_or("--long-edge", 2048);
         const std::int64_t long_edge = given != 2048 ? given : formats::kKindleLongEdge;
@@ -970,6 +1001,9 @@ int export_command(const QStringList& args, bool ascii) {
         if (const auto note = formats::ink_note(*animated)) notes.push_back(*note);
     } else if (f == "pcraft") {
         notes = std::move(pcraft_notes);
+    } else if (f == "layers" && !layer_notes.empty()) {  // (PC4 F-c: and the colour mode's, as before)
+        notes = formats::export_notes(doc, f, *color);
+        for (std::string& n : layer_notes) notes.push_back(std::move(n));
     } else if (f != "timelapse") {
         notes = formats::export_notes(doc, f == "psb" ? std::string("psd") : f, f == "cmyk" ? std::string("cmyk") : *color);  // (a PSB's: a PSD's)
     }
@@ -2076,6 +2110,216 @@ int package_command(const QStringList& args, bool ascii) {
     return 0;
 }
 
+
+// PC4 F-c (file.saveACopy, file.export.exportAs, layer.exportAs, file.export.saveForWebLegacy; SPEC.md FILE-01, the C++
+// build's own): `genko copy <book> <out> [--page N | --pages "1-3,5"] [--layer ID] [--as EXT] [--flatten] [--quality Q |
+// Q%] [--scale PCT] [--trim] [--metadata none|copyright|all] [--srgb | --keep-profile] [--text image|editable] [--web
+// '<JSON>'] [--estimate] [--json]` — a page (out a file: the first page, or --page) or pages (out a folder: one file a page,
+// p001.png …) written as コピーを保存… and 書き出し形式… write them (formats/copy.hpp), a layer alone cut to what it holds,
+// or Save for Web's optimised file (--web: PhotoCraft's parameters, formats/web_export.hpp); --estimate writes nothing and
+// says each file's size.
+std::optional<std::vector<std::size_t>> pages_of(const core::Document& doc, const QString& text) {
+    std::vector<std::size_t> out;
+    const auto index_of = [&](std::int64_t number) -> std::optional<std::size_t> {
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (doc.pages[i]->index == core::Num(number)) return i;
+        }
+        return std::nullopt;
+    };
+    for (const QString& part : text.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+        const QStringList ends = part.trimmed().split(QLatin1Char('-'));
+        bool ok_a = false, ok_b = true;
+        const std::int64_t a = ends.value(0).trimmed().toLongLong(&ok_a);
+        const std::int64_t b = ends.size() == 2 ? ends[1].trimmed().toLongLong(&ok_b) : a;
+        if (!ok_a || !ok_b || ends.size() > 2 || b < a || b - a > 100000) return std::nullopt;
+        for (std::int64_t n = a; n <= b; ++n) {
+            const auto at = index_of(n);
+            if (!at) return std::nullopt;
+            if (std::find(out.begin(), out.end(), *at) == out.end()) out.push_back(*at);
+        }
+    }
+    if (out.empty()) return std::nullopt;
+    return out;
+}
+
+int copy_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--json", false},     {"--page", true},         {"--pages", true},   {"--layer", true},
+                                          {"--as", true},        {"--flatten", false},     {"--quality", true}, {"--scale", true},
+                                          {"--trim", false},     {"--metadata", true},     {"--srgb", false},   {"--keep-profile", false},
+                                          {"--text", true},      {"--web", true},          {"--estimate", false}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 2, "src, out", a)) return usage("genko copy: " + *error);
+    if (a.value("--page") && a.value("--pages")) return usage("genko copy: argument --pages: not with --page");
+    if (a.flag("--srgb") && a.flag("--keep-profile")) return usage("genko copy: argument --keep-profile: not with --srgb");
+    const auto lower = [](std::string text) {
+        if (!text.empty() && text[0] == '.') text.erase(0, 1);
+        std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return text == "tiff" ? std::string("tif") : text;
+    };
+    const fs::path src = path_arg(a.positional[0]);
+    const fs::path out = path_arg(a.positional[1]);
+    const std::string suffix = lower(formats::detail::suffix(out));
+    const bool file_given = !suffix.empty();
+    std::string ext = file_given ? suffix : std::string("png");
+    if (const auto as = a.value("--as")) {
+        const std::string asked = lower(as->toStdString());
+        if (file_given && asked != suffix && !((asked == "jpg" || asked == "jpeg") && (suffix == "jpg" || suffix == "jpeg"))) {
+            return usage("genko copy: argument --as: the file's extension says ." + suffix);
+        }
+        ext = asked;
+    }
+    formats::CopyOptions options;
+    std::optional<formats::WebSettings> web;
+    formats::WebSize web_size;
+    if (const auto text = a.value("--web")) {
+        for (const char* other : {"--flatten", "--quality", "--metadata", "--srgb", "--keep-profile", "--text", "--trim"}) {
+            if (a.value(other) || a.flag(other)) return usage(std::string("genko copy: argument ") + other + ": not with --web (its settings say it)");
+        }
+        try {
+            const Json params = core::parse_python_json(text->toStdString());
+            web = formats::web_settings_from_json(params);
+            web_size = formats::web_size_from_json(params);
+        } catch (const core::Error& error) {
+            return usage(std::string("genko copy: argument --web: ") + error.what());
+        }
+        const std::string wanted(formats::web_extension(web->format));
+        if (!file_given && !a.value("--as")) ext = wanted;
+        if (ext != wanted && !(wanted == "jpg" && ext == "jpeg")) return usage("genko copy: argument --web: its format writes ." + wanted + ", not ." + ext);
+    } else {
+        const auto exts = formats::copy_extensions();
+        if (std::find(exts.begin(), exts.end(), ext) == exts.end()) return usage("genko copy: not a format this build writes: ." + ext);
+    }
+    if (const auto q = a.value("--quality")) {
+        const QString text = q->trimmed();
+        bool ok = false;
+        if (text.endsWith(QLatin1Char('%'))) {
+            const int v = text.chopped(1).toInt(&ok);
+            if (!ok || v < 1 || v > 100) return usage("genko copy: argument --quality: 0..12, or 1%..100%");
+            options.quality_percent = v;
+        } else {
+            const int v = text.toInt(&ok);
+            if (!ok || v < 0 || v > 12) return usage("genko copy: argument --quality: 0..12, or 1%..100%");
+            options.quality = v;
+        }
+    }
+    if (const auto s = a.value("--scale")) {
+        bool ok = false;
+        const double v = s->trimmed().remove(QLatin1Char('%')).toDouble(&ok);
+        if (!ok || !std::isfinite(v) || v < 1.0 || v > 1000.0) return usage("genko copy: argument --scale: a percent, 1 to 1000");
+        options.scale = v;
+        if (web && !web_size.percent && !web_size.width && !web_size.height) web_size.percent = v;
+    }
+    if (const auto m = a.value("--metadata")) {
+        const auto found = formats::metadata_of(m->toStdString());
+        if (!found) return usage("genko copy: argument --metadata: none, copyright or all");
+        options.metadata = *found;
+    }
+    if (const auto t = a.value("--text")) {
+        if (*t != QLatin1String("image") && *t != QLatin1String("editable")) return usage("genko copy: argument --text: image or editable");
+        options.editable_text = *t == QLatin1String("editable");
+        if (options.editable_text && ext != "psd" && ext != "psb") return usage("genko copy: argument --text: editable is for a PSD or a PSB");
+    }
+    options.layers = !a.flag("--flatten");
+    options.srgb = a.flag("--srgb");
+    if (a.flag("--trim")) options.area = "trim";
+    if (const auto layer = a.value("--layer")) options.layer = layer->toStdString();
+
+    const auto loaded = storage::load_document(src);
+    const core::Document& doc = loaded.document;
+    render::brushes::clear_custom();
+    render::brushes::register_book(doc);  // (the book's own brushes, and their papers)
+    std::vector<std::size_t> pages;
+    if (const auto page = a.value("--page")) {
+        const auto chosen = pages_of(doc, *page);
+        if (!chosen || chosen->size() != 1) return usage("no page " + page->toStdString(), 1);
+        pages = *chosen;
+    } else if (const auto range = a.value("--pages")) {
+        const auto chosen = pages_of(doc, *range);
+        if (!chosen) return usage("genko copy: argument --pages: page numbers of the book, e.g. \"1-3,5\"", 1);
+        pages = *chosen;
+    } else if (file_given) {
+        pages = {0};
+    } else {
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) pages.push_back(i);
+    }
+    if (doc.pages.empty()) return usage("the book has no page", 1);
+    if (file_given && pages.size() > 1) return usage("genko copy: a file holds one page: give a folder for --pages");
+    if (options.layer && pages.size() > 1) return usage("genko copy: argument --layer: with one page (--page N)");
+
+    const auto dest_of = [&](std::size_t at) { return file_given ? out : out / core::path_from_utf8(core::file_stem(doc.page(at)) + "." + ext); };
+    Json listed = Json::array();
+    std::vector<std::string> notes;
+    const auto note = [&notes](const std::vector<std::string>& said) {
+        for (const std::string& n : said) {
+            if (std::find(notes.begin(), notes.end(), n) == notes.end()) notes.push_back(n);
+        }
+    };
+    std::uint64_t total = 0;
+    std::vector<fs::path> files;
+    for (const std::size_t at : pages) {
+        Json one = Json::object();
+        one["page"] = core::py_int(doc.page(at).index);
+        if (a.flag("--estimate")) {
+            if (web) {
+                const formats::WebResult r = formats::save_for_web(doc, at, *web, web_size, std::nullopt, options.layer);
+                one["bytes"] = static_cast<std::int64_t>(r.bytes);
+                one["width"] = static_cast<std::int64_t>(r.width);
+                one["height"] = static_cast<std::int64_t>(r.height);
+                if (r.colors) one["colors"] = static_cast<std::int64_t>(*r.colors);
+                total += r.bytes;
+                note(r.notes);
+            } else {
+                const formats::CopyEstimate e = formats::estimate_copy(doc, at, ext, options);
+                one["bytes"] = static_cast<std::int64_t>(e.bytes);
+                one["width"] = static_cast<std::int64_t>(e.width);
+                one["height"] = static_cast<std::int64_t>(e.height);
+                total += e.bytes;
+                note(e.notes);
+            }
+            listed.push_back(one);
+            continue;
+        }
+        const fs::path dest = dest_of(at);
+        if (web) {
+            const formats::WebResult r = formats::save_for_web(doc, at, *web, web_size, dest, options.layer);
+            total += r.bytes;
+            note(r.notes);
+        } else {
+            const formats::CopyResult r = formats::write_copy(doc, at, dest, options);
+            total += r.bytes;
+            note(r.notes);
+        }
+        files.push_back(dest);
+    }
+    if (a.flag("--estimate")) {
+        Json json = Json::object();
+        json["ok"] = true;
+        json["estimate"] = true;
+        json["pages"] = listed;
+        json["bytes"] = static_cast<std::int64_t>(total);
+        if (!notes.empty()) json["notes"] = notes;
+        print_json(json, ascii);
+        return 0;
+    }
+    if (a.flag("--json")) {
+        Json listed_files = Json::array();
+        for (const auto& p : files) listed_files.push_back(core::path_to_utf8(p));
+        Json json = Json::object();
+        json["ok"] = true;
+        json["count"] = static_cast<std::int64_t>(files.size());
+        json["files"] = listed_files;
+        json["bytes"] = static_cast<std::int64_t>(total);
+        if (!notes.empty()) json["notes"] = notes;
+        print_json(json, ascii);
+    } else {
+        std::string lines;
+        for (const auto& p : files) lines += core::path_to_utf8(p) + "\n";
+        write_text(lines, stdout);
+        for (const std::string& n : notes) write_text(n + "\n", stderr);
+    }
+    return 0;
+}
+
 }  // namespace
 
 int run_cli(int argc, char** argv) {
@@ -2112,6 +2356,7 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("migrate")) return migrate(args, ascii);
         if (command == QLatin1String("render")) return render_command(args, ascii);
         if (command == QLatin1String("export")) return export_command(args, ascii);
+        if (command == QLatin1String("copy")) return copy_command(args, ascii);  // (PC4 F-c: コピーを保存・書き出し形式・Web 用に保存)
         if (command == QLatin1String("smart")) return smart_command(args, ascii);      // (smart-objects@1, PC3 A1)
         if (command == QLatin1String("package")) return package_command(args, ascii);  // (smart-objects@1, PC3 A1)
         if (command == QLatin1String("shapes")) return shapes_command(args, ascii);    // (pen-shapes@1, PC3 C-b)

@@ -41,6 +41,7 @@ class QTabWidget;
 namespace genko::app {
 
 class MainWindow;
+class ExportPreferencesForm;  // (PC4 F-c: app/export_as_dialog.hpp)
 
 namespace preferences {
 
@@ -189,6 +190,8 @@ public:
     QSpinBox* recent_count = nullptr;
     QCheckBox* lowercase_extension = nullptr;
     QCheckBox* ignore_exif_profile = nullptr;
+    // 書き出し (PC4 F-c, edit.preferences.export: 書き出しの環境設定…'s values)
+    ExportPreferencesForm* export_form = nullptr;
     // 透明部分・色域
     QComboBox* checker_size = nullptr;
     QComboBox* checker_colours = nullptr;

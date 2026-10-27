@@ -191,6 +191,9 @@ genko_library(genko_render
     codecs/exr.cpp
     codecs/hdr.cpp
     codecs/avif.cpp
+    # PC4 F-c (書き出し: Web 用に保存の GIF・PNG-8・WBMP の書き手、絵の大きさを変える)
+    codecs/web.cpp
+    codecs/resize.cpp
     # PC4 E-0 (描く道具の土台: 層のタイル、プリセットの置き場、描く道具とパターンの op の枠)
     tiled_pixels.cpp
     preset_store.cpp

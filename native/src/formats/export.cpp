@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <fstream>
 #include <optional>
 #include <unordered_map>
 #include <utility>
@@ -20,12 +21,15 @@
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "formats/copy.hpp"
 #include "formats/file_xmp.hpp"
+#include "formats/open_file.hpp"
 #include "formats/output.hpp"
 #include "formats/pdf.hpp"
 #include "formats/pillow_save.hpp"
 #include "render/color_canvas.hpp"
 #include "render/channels.hpp"
+#include "render/codecs/codecs.hpp"
 #include "render/colour.hpp"
 #include "render/covers.hpp"
 #include "render/ink_canvas.hpp"
@@ -511,11 +515,96 @@ std::vector<fs::path> detail::print_into(detail::Output& output, const core::Doc
     return written;
 }
 
+namespace {
+
+// (PC4 F-c) One layer's picture (8-bit RGBA, sRGB) as a file of レイヤーからファイル…'s other formats, put among the export's.
+fs::path layer_file(detail::Output& output, const Image& image, const fs::path& folder, const std::string& name, const LayerFiles& files, int dpi,
+                    std::vector<std::string>* notes) {
+    using render::codecs::CodecImage;
+    const Image rgba = image.mode() == "RGBA" ? image : image.convert("RGBA");
+    CodecImage picture = CodecImage::from_bytes(static_cast<std::uint32_t>(rgba.width()), static_cast<std::uint32_t>(rgba.height()),
+                                                render::codecs::Layout::Rgba, render::codecs::Sample::U8, rgba.tobytes());
+    picture.meta.dpi = std::make_pair(double(dpi), double(dpi));
+    std::vector<std::string> said;
+    if (files.format == "psd") {
+        // (a book of its picture, written as a PSD beside its place and taken into the export as it is copied — never held
+        // whole)
+        const fs::path path = detail::join(folder, name + ".psd");
+        Opened alone = picture_book(std::move(picture), name);
+        const fs::path made = detail::join(folder, "." + name + ".psd-layer");
+        export_page_psd(alone.doc, alone.doc.page(0), made, dpi);
+        detail::PartFile part(path);
+        {
+            std::ifstream in(made, std::ios::binary);
+            std::string chunk(1 << 20, '\0');
+            while (in) {
+                in.read(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+                if (in.gcount() > 0) part.write(std::string_view(chunk.data(), static_cast<std::size_t>(in.gcount())));
+            }
+        }
+        std::error_code ec;
+        fs::remove(made, ec);
+        part.close();
+        output.put(std::move(part));
+        return path;
+    }
+    render::codecs::EncodeOptions encode;
+    render::codecs::Format format = render::codecs::Format::Png;
+    std::string ext;
+    if (files.format == "jpeg") {
+        format = render::codecs::Format::Jpeg;
+        ext = ".jpg";
+        encode.jpeg_quality = jpeg_quality_of(files.quality.value_or(10));
+        // (no alpha in a JPEG: over white, as Photoshop's)
+        std::string rgb(std::size_t(picture.width()) * picture.height() * 3, '\0');
+        const auto* from = reinterpret_cast<const unsigned char*>(picture.data().data());
+        for (std::size_t i = 0; i < picture.pixel_count(); ++i) {
+            const unsigned a = from[i * 4 + 3];
+            for (std::size_t c = 0; c < 3; ++c) rgb[i * 3 + c] = static_cast<char>((from[i * 4 + c] * a + 255 * (255 - a) + 127) / 255);
+        }
+        CodecImage flat = CodecImage::from_bytes(picture.width(), picture.height(), render::codecs::Layout::Rgb, render::codecs::Sample::U8, std::move(rgb));
+        flat.meta = picture.meta;
+        picture = std::move(flat);
+    } else if (files.format == "tiff") {
+        format = render::codecs::Format::Tiff;
+        ext = ".tif";
+    } else {
+        format = render::codecs::Format::WebP;
+        ext = ".webp";
+    }
+    const fs::path path = detail::join(folder, name + ext);
+    const std::string bytes = encode_for(std::move(picture), format, encode, false, said);
+    output.put(path, bytes);
+    if (notes != nullptr) {
+        for (std::string& note : said) {
+            if (std::find(notes->begin(), notes->end(), note) == notes->end()) notes->push_back(std::move(note));
+        }
+    }
+    return path;
+}
+
+}  // namespace
+
 std::vector<fs::path> export_layers(const core::Document& episode, const fs::path& dest, int dpi, std::string_view area) {
+    return export_layers(episode, dest, dpi, area, LayerFiles{});
+}
+
+std::vector<fs::path> export_layers(const core::Document& episode, const fs::path& dest, int dpi, std::string_view area, const LayerFiles& files,
+                                    std::vector<std::string>* notes) {
+    if (std::find(kLayerFileFormats.begin(), kLayerFileFormats.end(), files.format) == kLayerFileFormats.end()) {
+        throw core::Error("value", "the layers' format is png, jpeg, tiff, psd or webp");
+    }
+    if (files.quality && (*files.quality < 0 || *files.quality > 12)) throw core::Error("value", "the quality is 0 to 12");
     detail::Output output;
     std::vector<fs::path> written;
     for (const auto& page_ptr : episode.pages) {
-        const core::Page& page = *page_ptr;
+        // (PC4 F-c: the hidden layers too — the page's layers all shown —, when asked)
+        std::optional<core::Page> every_layer;
+        if (!files.visible_only) {
+            every_layer = *page_ptr;
+            for (core::Layer& own : every_layer->layers) own.visible = true;
+        }
+        const core::Page& page = every_layer ? *every_layer : *page_ptr;
         const fs::path folder = detail::join(dest, stem(episode) + "_" + core::file_stem(page));
         detail::make_dirs(folder);
         int n = 0;
@@ -541,9 +630,15 @@ std::vector<fs::path> export_layers(const core::Document& episode, const fs::pat
                 const render::Box whole{0, 0, image.width(), image.height()};
                 image.putalpha(render::chops::multiply(image.getchannel("A"), render::vector_masks::shown(page, *layer.vector_mask, image.size(), whole)));
             }
-            const fs::path path = detail::join(folder, detail::padded(core::Num(n), 2) + "_" + safe_name(layer.name, "layer") + ".png");
-            output.put(path, png_bytes(crop_to(image, page, area, dpi), PngSave{dpi_pair(dpi), {}, false}));
-            written.push_back(path);
+            const std::string name = (files.prefix.empty() ? std::string() : safe_name(files.prefix, "layer") + "_") + detail::padded(core::Num(n), 2) + "_" +
+                                     safe_name(layer.name, "layer");
+            if (files.format == "png") {  // (the files as before)
+                const fs::path path = detail::join(folder, name + ".png");
+                output.put(path, png_bytes(crop_to(image, page, area, dpi), PngSave{dpi_pair(dpi), {}, false}));
+                written.push_back(path);
+                return;
+            }
+            written.push_back(layer_file(output, crop_to(image, page, area, dpi), folder, name, files, dpi, notes));
         });
     }
     output.commit();

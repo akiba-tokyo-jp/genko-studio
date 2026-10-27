@@ -277,6 +277,10 @@ set_tests_properties(test_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offsc
 # capability table and its symmetric guarantee, the losses said and their round trips, the limits before the pixels, the
 # picture's conversions) on this build's table, and the wrapped formats read through this build's readers.
 genko_test(test_codecs SOURCES unit/test_codecs.cpp DEPS genko_test_support genko_render genko_formats LABELS unit)
+# PC4 F-c (SPEC.md FILE-01: Web 用に保存（従来）, クイック書き出し): formats/web_export and render/codecs/web against PhotoCraft's
+# web_cmds tests (the presets, GIF and PNG-8's colours, dither, transparency and matte, Web Snap, JPEG's quality, progressive
+# scans and metadata, the estimate against the file), WBMP's round trip and refusals, and render/codecs/resize.
+genko_test(test_web_export SOURCES unit/test_web_export.cpp DEPS genko_test_support genko_render genko_formats LABELS unit)
 # PC4 F-f (SPEC.md FILE-01, .pcraft): BLAKE3, zstd and the zip read by name and written stored, against PhotoCraft's tests of
 # crates/format (a bundle cut, flipped, missing a tile or swapping one, a manifest not JSON or of a newer version, the limits,
 # a folder bundle, one zipped again with deflate) on bundles upstream's writer made (data/pcraft), and the bombs: zstd frames
@@ -537,6 +541,13 @@ genko_test(test_contract_pcraft SOURCES contract/test_contract_pcraft.cpp DEPS g
 # コピーを保存… in each format; `genko --version` naming OpenEXR, libavif and libaom.
 genko_test(test_contract_codecs SOURCES contract/test_contract_codecs.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS contract TIMEOUT 900)
+# PC4 F-c (SPEC.md FILE-01: 書き出し形式…, クイック書き出し, レイヤーを書き出し, レイヤーからファイル…, `genko copy`): a page at a scale or a
+# size, a layer alone cut to what it holds, the quality, the metadata's three, a CMYK page's colours the same everywhere,
+# too large refused first, the estimate, クイック書き出し's places and formats, レイヤーからファイル… (its default files as before),
+# `genko copy` and `genko export --format layers`' new choices.
+genko_test(test_contract_copy SOURCES contract/test_contract_copy.cpp DEPS genko_test_support genko_formats genko_render_ops
+           LABELS contract TIMEOUT 900)
+add_dependencies(test_contract_copy genko)
 # The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
 # across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a
 # warped line's pictures within ARCHITECTURE.md §9: Python's homography comes from numpy's SVD).

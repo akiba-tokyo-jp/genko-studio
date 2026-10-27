@@ -1,7 +1,7 @@
 // PC4 F-0 (SPEC.md FILE-01; 節 F 5.1・5.2, the coordinator's reading of PC3's decision 5): ファイル in Photoshop's order and
 // names, and the frames of 節 F's new commands. PC4 F-b connects its own — 開く…・指定形式で開く… (app/open_dialog.hpp)・
 // 最近使用したファイルを開く (books and pictures)・すべてを閉じる・その他を閉じる・コピーを保存…・復帰・ファイル情報… and 画像 →
-// 複製…, the drop on the window —; the frames of 書き出し ▸ (F-c) still say they are not in this build yet.
+// 複製…, the drop on the window —; PC4 F-c connects 書き出し ▸ (app/main_window_export.cpp).
 
 #include <QCheckBox>
 #include <QCoreApplication>
@@ -83,9 +83,6 @@ std::string file_bytes(const fs::path& path) { return storage::read_file(path); 
 }  // namespace
 
 void MainWindow::build_file_actions() {
-    const auto later = [this](const char* attribute, const QString& title, const QList<QKeySequence>& keys, const QString& tip) {
-        make(QString::fromLatin1(attribute), title, [this, title] { flash(QStringLiteral("「%1」は、この版の Genko ではまだ使えません").arg(title)); }, keys, tip);
-    };
     const auto key = [](const char* text) { return QList<QKeySequence>{QKeySequence(QString::fromLatin1(text))}; };
     make(QStringLiteral("act_open_as"), QStringLiteral("指定形式で開く…"), [this] { open_dialog(true); }, key("Ctrl+Alt+Shift+O"),
          QStringLiteral("ファイルを、選んだ形式のものとして開きます"));
@@ -96,12 +93,7 @@ void MainWindow::build_file_actions() {
          QStringLiteral("原稿はそのままに、別のファイル（.genko・PSD・TIFF・PNG・JPEG など）に書きます"));
     make(QStringLiteral("act_revert"), QStringLiteral("復帰"), [this] { revert(); }, key("F12"),
          QStringLiteral("最後に保存したとき（無ければ開いたとき）の状態に戻します（取り消せます）"));
-    later("act_quick_export_png", QStringLiteral("PNG としてクイック書き出し"), {}, QStringLiteral("このページを、書き出しの環境設定のとおり PNG に書き出します"));
-    later("act_export_as", QStringLiteral("書き出し形式…"), key("Ctrl+Alt+Shift+W"),
-          QStringLiteral("このページを、形式・大きさ・画質を選んで 1 枚の画像に書き出します"));
-    later("act_export_prefs", QStringLiteral("書き出しの環境設定…"), {}, QStringLiteral("クイック書き出しの形式・保存先・画質・メタデータ"));
-    later("act_save_for_web", QStringLiteral("Web 用に保存（従来）…"), key("Ctrl+Alt+Shift+S"),
-          QStringLiteral("色数や画質を見比べて、Web 用に小さく書き出します"));
+    build_export_actions();  // (PC4 F-c: 書き出し ▸ and レイヤー's: app/main_window_export.cpp)
     make(QStringLiteral("act_file_info"), QStringLiteral("ファイル情報…"), [this] { file_info_dialog(); }, key("Ctrl+Alt+Shift+I"),
          QStringLiteral("作成者・説明・キーワード・著作権情報"));
     // (画像 → 複製…, image.duplicate: placed in ページ's menu after the paper's commands)
@@ -148,6 +140,7 @@ void MainWindow::build_file_menu(QMenu* file) {
     export_menu_->addSeparator();
     export_menu_->addAction(action("act_export"));
     export_menu_->addSeparator();
+    export_menu_->addAction(action("act_layers_to_files"));  // (PC4 F-c: Photoshop's レイヤーからファイル…)
     export_menu_->addAction(action("act_export_paths_ai"));
     file->addSeparator();
     for (const char* name : {"act_place_embedded", "act_place_linked", "act_package"}) file->addAction(action(name));
