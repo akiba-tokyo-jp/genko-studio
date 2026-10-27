@@ -40,12 +40,14 @@
 #include "render/psd_smart.hpp"
 #include "render/smart_decode.hpp"
 #include "psd_build.hpp"
+#include "raw_testgen.hpp"
 #include "testsupport.hpp"
 
 namespace core = genko::core;
 namespace render = genko::render;
 namespace psd = genko::render::psd;
 namespace build = genko::test::psd_build;
+namespace rawgen = genko::test::rawgen;
 namespace fs = std::filesystem;
 using core::Json;
 using psd::descriptor::Writer;
@@ -113,10 +115,11 @@ struct PlacedPsd {
 // A 400 × 600 PSD with a white background layer and one placed layer of a 10 × 8 PNG (red | green) laid at (100, 150)
 // four times larger, its picture — Photoshop's — deliberately blue (to see what is drawn from where).
 // (PC4 D7: `sold` in place of this build's block — Photoshop's, its smart filters with it —, `more` global blocks after lnk2)
+// (PC4 F-e: `file` named `file_name` in place of the PNG — a camera RAW's —)
 PlacedPsd placed_psd(const std::array<double, 8>& corners = {100, 150, 140, 150, 140, 182, 100, 182}, const std::string& sold = {},
-                     const std::string& more = {}) {
+                     const std::string& more = {}, const std::string& file = {}, const std::string& file_name = "in.png") {
     PlacedPsd out;
-    out.png = halves_png(10, 8);
+    out.png = file.empty() ? halves_png(10, 8) : file;
     psd::PlacedOut placed;
     placed.uuid = "uuid-1";
     placed.placed = "placed-1";
@@ -125,7 +128,7 @@ PlacedPsd placed_psd(const std::array<double, 8>& corners = {100, 150, 140, 150,
     placed.height = 8;
     placed.resolution = 72;
     out.sold = sold.empty() ? psd::sold_block(placed) : sold;
-    const std::string framed = psd::linked_item("uuid-1", "in.png", "png ", out.png);
+    const std::string framed = psd::linked_item("uuid-1", file_name, file.empty() ? "png " : "    ", out.png);
     // (the item's own length: what read_linked gives back)
     const auto items = psd::read_linked(framed);
     out.item = std::string(items.at(0).item);
@@ -791,6 +794,46 @@ private slots:
         // opened: said
         const genko::formats::Opened opened = genko::formats::open_file(made.bytes, "filtered.psd");
         QVERIFY2(noted(opened.notes, "Photoshop のスマートフィルターを Genko のスマートフィルターとして読みました"), opened.notes.empty() ? "" : opened.notes[0].c_str());
+    }
+
+    // PC4 F-e (the coordinator's decision on D7's overlap): a smart object of a camera RAW — Photoshop's Camera Raw settings
+    // not read — keeps Photoshop's picture though its smart filters are read, said when opened; set_camera_raw develops it
+    // with Genko's development from then on.
+    void aRawsSmartObjectKeepsPhotoshopsPicture() {
+        const std::size_t w = 40, h = 32;
+        std::vector<std::array<float, 3>> rgb(w * h, std::array<float, 3>{0.15f, 0.3f, 0.21f});
+        rawgen::DngSpec dng = rawgen::DngSpec::cfa_of(w, h, rawgen::mosaic(rgb, w, {0, 1, 1, 2}, 64, 4000));
+        dng.bits = 12;
+        dng.white = 4000;
+        dng.black = {64};
+        dng.as_shot_neutral = std::array<double, 3>{0.5, 1.0, 0.7};
+        dng.color_matrix1 = std::make_pair(std::uint16_t(21), std::array<double, 9>{3.2404542, -1.5371385, -0.4985314, -0.9692660, 1.8760108, 0.0415560,
+                                                                                     0.0556434, -0.2040259, 1.0572252});
+        const PlacedPsd made = placed_psd({100, 150, 140, 150, 140, 182, 100, 182},
+                                          sold_with(filter_fx({filter_item("g", std::make_pair(std::string("GsnB"), gaussian(1)), id4("GsnB"))})), {},
+                                          dng.build(), "in.dng");
+        const core::ApplyResult result = imported(made.bytes);
+        const Json report = result.results.at(0);
+        QVERIFY2(report.contains("smart_filters_read") && report.contains("smart_raw_shown"), report.dump().c_str());
+        const core::Document& doc = result.doc;
+        const core::Layer* so = layer_of(doc, "ps-2");
+        QVERIFY(so != nullptr && so->kind == core::LayerKind::Smart);
+        QCOMPARE((*so->smart)["filters"].size(), std::size_t(1));
+        QVERIFY((*so->smart)["psd"].contains("shown"));
+        const core::SmartContents* contents = core::smart::contents_of(doc, *so);
+        QVERIFY(contents != nullptr && contents->format == "raw" && contents->raw);
+        core::smart::validate_smart(doc);
+        // (Photoshop's blue picture)
+        const std::vector<double> before = at(page_picture(doc), 110, 166);
+        QVERIFY2(before[2] > 200 && before[0] < 60, (QByteArray::number(before[0]) + " " + QByteArray::number(before[2])).constData());
+        const genko::formats::Opened opened = genko::formats::open_file(made.bytes, "raw.psd");
+        QVERIFY(noted(opened.notes, "の中身はカメラ RAW のため、Photoshop の見えのまま表示します"));
+        // (developed: Genko's development of the grey, not Photoshop's blue)
+        const std::string id = *core::smart::contents_id(*so);
+        const core::Document developed = run(doc, Json::array({Json{{"op", "set_camera_raw"}, {"contents", id}, {"develop", Json{{"exposure_ev", 0.5}}}}}));
+        QVERIFY(!(*layer_of(developed, "ps-2")->smart)["psd"].contains("shown"));
+        const std::vector<double> after = at(page_picture(developed), 110, 166);
+        QVERIFY2(std::abs(after[2] - after[0]) < 40 && after[2] < 200, (QByteArray::number(after[0]) + " " + QByteArray::number(after[2])).constData());
     }
 
     // PC4 D7: a stack of which one filter is not in the table — a filter Genko has no kind of, settings it cannot take (a

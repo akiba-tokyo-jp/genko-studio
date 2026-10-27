@@ -39,6 +39,7 @@
 #include "render/pcraft_manifest.hpp"
 #include "render/png.hpp"
 #include "render/proof.hpp"
+#include "render/raw.hpp"
 #include "render/psd_adjust.hpp"
 #include "render/smart_decode.hpp"
 #include "render/zip.hpp"
@@ -1213,7 +1214,9 @@ std::optional<std::string> contents_of(Ctx& ctx, const std::string& file_name, c
     }
     smart::FileInfo info;
     try {
-        info = smart::look_at(*bytes, "");
+        // (PC4 F-e: a TIFF-shaped camera RAW — NEF, ARW… — is known by its name's suffix alone)
+        const auto named_raw = core::smart::suffix_of_name(file_name);
+        info = smart::look_at(*bytes, named_raw && raw::raw_suffix(*named_raw) ? *named_raw : std::string());
     } catch (const NotYetPorted&) {
         why = "この版の Genko が読めない形式の";
         return std::nullopt;
@@ -1240,6 +1243,19 @@ std::optional<std::string> contents_of(Ctx& ctx, const std::string& file_name, c
     contents->depth = info.depth;
     contents->mode = info.mode;
     contents->profile = Json::object({{"use", "keep"}});
+    if (info.format == "raw") {
+        // (PC4 F-e, camera-raw@1: upstream's Camera Raw settings are not read — Genko's default development, its colours its
+        // output space's —; a .pcraft keeps no picture of it to show instead, so said)
+        try {
+            contents->raw = raw::default_raw(*bytes);
+        } catch (const core::Error&) {
+            why = "読めない";
+            return std::nullopt;
+        }
+        contents->profile = Json::object({{"use", "embedded"}, {"intent", "relative"}, {"bpc", true}});
+        ctx.notes.add("スマートオブジェクトの中身「" + contents->name +
+                      "」はカメラ RAW のため、Genko の既定の現像で描きます（PhotoCraft の Camera Raw の設定は写せません。現像の設定はコンテンツを編集の Camera Raw で決めます）");
+    }
     dpi = contents->dpi;
     const std::string id = smart_ops::fresh_contents_id(ctx.doc);
     ctx.doc.smart_contents[id] = std::move(contents);

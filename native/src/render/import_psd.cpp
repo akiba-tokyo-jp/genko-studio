@@ -56,6 +56,7 @@
 #include "render/raster.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/ops_smart_parts.hpp"
+#include "render/raw.hpp"
 #include "render/selection.hpp"
 #include "render/smart_decode.hpp"
 
@@ -371,7 +372,9 @@ std::optional<SmartMade> smart_contents_of(core::Document& doc, const psd::File&
     }
     smart::FileInfo info;
     try {
-        info = smart::look_at(linked->data, "");
+        // (PC4 F-e: a TIFF-shaped camera RAW — NEF, ARW… — is known by its name's suffix alone)
+        const auto named_raw = core::smart::suffix_of_name(linked->name);
+        info = smart::look_at(linked->data, named_raw && raw::raw_suffix(*named_raw) ? *named_raw : std::string());
     } catch (const NotYetPorted&) {
         out.why = "unreadable";
         return out;
@@ -417,6 +420,17 @@ std::optional<SmartMade> smart_contents_of(core::Document& doc, const psd::File&
             use["bpc"] = way.bpc;
             contents->profile = std::move(use);
         }
+    }
+    if (info.format == "raw") {
+        // (PC4 F-e, camera-raw@1: Photoshop's Camera Raw settings are not read — Genko's default development, its colours
+        // its output space's —; Photoshop's picture of it shown until it is developed again: the import keeps `shown`)
+        try {
+            contents->raw = raw::default_raw(bytes);
+        } catch (const core::Error&) {
+            out.why = "unreadable";
+            return out;
+        }
+        contents->profile = Json::object({{"use", "embedded"}, {"intent", "relative"}, {"bpc", true}});
     }
     // (the item without the file's bytes, and where they go: written back as it was while the contents stay)
     const std::size_t at = static_cast<std::size_t>(linked->data.data() - linked->item.data());
@@ -914,6 +928,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     std::optional<psd_filters::Masks> filter_masks;
     std::optional<std::vector<psd::File::TaggedBlock>> filter_globals;
     Json filters_read = Json::array(), filters_shown = Json::array();
+    Json raw_shown = Json::array();  // (PC4 F-e: smart objects of a camera RAW shown as Photoshop drew them)
     std::size_t filters_unsaid = 0;
     for (std::size_t i = 0; i < layers.size(); ++i) {
         const psd::Layer& item = layers[i];
@@ -1100,8 +1115,14 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
                         fx = psd_filters::read(block, *item.placed, placement, *filter_masks, filters_budget);
                     }
                     const bool filtered = fx && fx->filters && !fx->filters->empty();
+                    // (PC4 F-e, the coordinator's decision: a camera RAW's contents — Photoshop's Camera Raw settings not
+                    // read — keep Photoshop's picture even with its filters read, until set_camera_raw or コンテンツを編集
+                    // develops them; said)
+                    const auto inside = doc.smart_contents.find(smart->contents);
+                    const bool raw_inside = inside != doc.smart_contents.end() && inside->second && inside->second->format == "raw";
+                    if (raw_inside && raw_shown.size() < kFilterReportsMax) raw_shown.push_back(Json{{"id", layer.id}, {"title", layer.title}});
                     Json record = Json{{"block", item.placed->key}, {"raw", keep(std::make_shared<const std::string>(block))}};
-                    if (!filtered) {
+                    if (!filtered || raw_inside) {
                         Json picture = Json::object();
                         if (layer.ink_raster) picture["ink_raster"] = keep(layer.ink_raster);
                         else picture["asset"] = keep(layer.raster_png);
@@ -1184,6 +1205,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     // and why — said only when there are)
     if (!filters_read.empty()) report["smart_filters_read"] = std::move(filters_read);
     if (!filters_shown.empty()) report["smart_filters_shown"] = std::move(filters_shown);
+    if (!raw_shown.empty()) report["smart_raw_shown"] = std::move(raw_shown);
     if (filters_unsaid > 0) report["smart_filters_shown_more"] = filters_unsaid;
     if (!patterns_read.empty()) report["patterns"] = std::move(patterns_read);  // (patterns@1, PC4 E3: the patterns taken in)
     if (!patterns_filled.empty()) {  // (and the pattern fill layers read)
