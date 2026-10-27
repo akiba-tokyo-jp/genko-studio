@@ -1581,14 +1581,14 @@ private slots:
             QList<QAction*> offered;
             QTimer::singleShot(0, [&offered] {
                 if (auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget())) {
-                    for (QAction* a : menu->actions()) offered << a;
+                    for (QAction* a : menu->actions())
+                        if (!a->isSeparator()) offered << a;  // (a separator is the menu's own: gone with it)
                     menu->close();
                 }
             });
             const QRect place = list->visualItemRect(list->item(row));
             QMetaObject::invokeMethod(list, "customContextMenuRequested", Qt::DirectConnection, Q_ARG(QPoint, place.center()));
             // (PC4 E6 after them: 混合オプション…, レイヤースタイルをコピー・ペースト・消去)
-            offered.removeIf([](QAction* a) { return a->isSeparator(); });
             QCOMPARE(offered, (QList<QAction*>{studio.act("act_layer_quick_export_png"), studio.act("act_layer_export_as"), studio.act("act_layer_style_blending"),
                                                studio.act("act_layer_style_copy"), studio.act("act_layer_style_paste"), studio.act("act_layer_style_clear")}));
         }

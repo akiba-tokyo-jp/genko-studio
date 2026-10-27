@@ -20,6 +20,7 @@
 #include "render/pattern_library.hpp"
 #include "render/preset_store.hpp"
 #include "render/shape_presets.hpp"
+#include "core/layer_styles.hpp"
 #include "render/style_presets.hpp"
 #include "render/tool_presets.hpp"
 #include "storage/asset_store.hpp"
@@ -398,7 +399,8 @@ Json merge(const std::filesystem::path& config_dir, const Collection& c, bool wh
             std::vector<Json> items;
             for (const Json& item : g.items) {
                 const bool held = std::any_of(lib.groups.begin(), lib.groups.end(), [&](const store::Group& have) {
-                    return std::find(have.items.begin(), have.items.end(), item) != have.items.end();
+                    // (PC4 E6: the same presets whatever the order of their keys — the file is written with them sorted)
+                    return std::any_of(have.items.begin(), have.items.end(), [&](const Json& x) { return core::same_json_unordered(x, item); });
                 });
                 if (!whole && held) continue;
                 items.push_back(item);
@@ -421,7 +423,8 @@ Json merge(const std::filesystem::path& config_dir, const Collection& c, bool wh
                 for (const Json& item : items) {
                     try {
                         if (store_kind(k).check) store_kind(k).check(item);
-                        kept.push_back(item);
+                        // (PC4 E6: a style in its normal form — its keys in the order the library writes them)
+                        kept.push_back(k == "styles" ? style_presets::item_of(item, item.value("name", std::string("スタイル"))) : item);
                     } catch (const core::Error&) {
                     }
                 }
