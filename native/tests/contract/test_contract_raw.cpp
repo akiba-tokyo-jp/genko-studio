@@ -404,7 +404,7 @@ private slots:
         QVERIFY(doc.smart_contents.at(id)->raw);
         const std::string tiff = codecs::encode(codecs::CodecImage::blank(30, 20, codecs::Layout::Rgb, codecs::Sample::U8), codecs::Format::Tiff);
         const core::Document named = run(small_book(), Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(tiff)}, {"name", "fake.nef"}}}));
-        QCOMPARE(named.smart_contents.begin()->second->format, std::string("tif"));
+        QCOMPARE(named.smart_contents.begin()->second->format, std::string("tiff"));
         QVERIFY(!named.smart_contents.begin()->second->raw);
     }
 
