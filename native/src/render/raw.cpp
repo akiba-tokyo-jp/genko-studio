@@ -590,7 +590,12 @@ std::optional<std::string_view> container_preview(std::string_view b) {
 
 // --- what the file is -------------------------------------------------------------------------------------------------------
 
-std::string libraw_version() { return LibRaw::version(); }
+std::string libraw_version() {
+    // (the LibRaw that runs — one put in its place too —, "0.22.2" of its "0.22.2-Release")
+    std::string version = LibRaw::version();
+    if (version.ends_with("-Release")) version.resize(version.size() - std::string_view("-Release").size());
+    return version;
+}
 
 bool raw_suffix(std::string_view suffix) {
     std::string lower(suffix);
