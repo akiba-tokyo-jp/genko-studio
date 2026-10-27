@@ -716,7 +716,7 @@ private slots:
         const Writer fx = filter_fx({filter_item("ぼかし (ガウス)", std::make_pair(std::string("GsnB"), gaussian(4)), id4("GsnB")),
                                      filter_item("アンシャープマスク", std::make_pair(std::string("UnsM"), unsharp), id4("UnsM"), "Mltp", 60),
                                      filter_item("風", std::make_pair(std::string("Wnd "), wind), id4("Wnd "), "Nrml", 100, false),
-                                     filter_item("平均", std::nullopt, id4("Avrg"))});
+                                     filter_item("ファセット", std::nullopt, id4("Fct "))});
         const PlacedPsd made = placed_psd({100, 150, 140, 150, 140, 182, 100, 182}, sold_with(fx));
         const core::ApplyResult result = imported(made.bytes);
         const Json report = result.results.at(0);
@@ -739,13 +739,13 @@ private slots:
         QCOMPARE(filters[2]["params"]["method"], Json("blast"));
         QCOMPARE(filters[2]["params"]["direction"], Json("from_left"));
         QCOMPARE(filters[2]["visible"], Json(false));
-        QCOMPARE(filters[3]["kind"], Json("blur_average"));
+        QCOMPARE(filters[3]["kind"], Json("pixelate_facet"));
         QVERIFY(!(*so->smart).contains("filters_on"));
         QVERIFY(!(*so->smart)["psd"].contains("shown"));
         QCOMPARE(*doc.smart_files.at((*so->smart)["psd"]["raw"].get<std::string>()), made.sold);
         core::smart::validate_smart(doc);
         QVERIFY(core::uses_filters(doc));
-        // drawn from its file (red | green, its mean colour at last), not Photoshop's blue picture
+        // drawn from its file (red | green, blurred), not Photoshop's blue picture
         const render::Image page = page_picture(doc);
         const std::vector<double> left = at(page, 110, 166);
         QVERIFY2(left[2] < 100 && std::max(left[0], left[1]) > 100, (QByteArray::number(left[0]) + " " + QByteArray::number(left[1]) + " " + QByteArray::number(left[2])).constData());
@@ -763,7 +763,8 @@ private slots:
         // (the stack off: read off)
         const PlacedPsd off = placed_psd({100, 150, 140, 150, 140, 182, 100, 182},
                                          sold_with(filter_fx({filter_item("g", std::make_pair(std::string("GsnB"), gaussian(2)), id4("GsnB"))}, false, false)));
-        const core::Layer* so_off = layer_of(imported(off.bytes).doc, "ps-2");
+        const core::ApplyResult read_off = imported(off.bytes);
+        const core::Layer* so_off = layer_of(read_off.doc, "ps-2");
         QVERIFY(so_off && (*so_off->smart)["filters_on"] == Json(false));
         // opened: said
         const genko::formats::Opened opened = genko::formats::open_file(made.bytes, "filtered.psd");
