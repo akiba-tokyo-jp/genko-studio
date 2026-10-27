@@ -28,6 +28,7 @@
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/raw.hpp"
+#include "render/smart.hpp"
 #include "storage/lock.hpp"
 #include "storage/reader.hpp"
 #include "storage/transaction.hpp"
@@ -96,6 +97,7 @@ core::Document small_book() {
     spec.dpi = core::Num(150);
     spec.bleed_mm = core::Num(3);
     spec.inner_margin_mm = core::Num(5);
+    spec.expression = "color";  // (a colour page: a picture drawn as it is, not with a monochrome finish)
     return core::new_episode("raw", core::Num(1), 1, spec, core::Binding::Right);
 }
 
@@ -109,6 +111,16 @@ std::array<int, 3> drawn_at(const core::Document& doc, int x, int y) {
     const std::string bytes = image.tobytes();
     const std::size_t at = (std::size_t(y) * std::size_t(image.width()) + std::size_t(x)) * 3;
     return {static_cast<unsigned char>(bytes[at]), static_cast<unsigned char>(bytes[at + 1]), static_cast<unsigned char>(bytes[at + 2])};
+}
+
+// The first page's layers, said (a failure's words).
+std::string layers_said(const core::Document& doc) {
+    std::string out = "expression " + doc.page(0).spec.expression + ";";
+    for (const core::Layer& l : doc.page(0).layers) {
+        out += " [" + l.title + " kind " + std::to_string(static_cast<int>(l.kind)) + " visible " + std::to_string(l.visible) + " opacity " +
+               std::to_string(l.opacity) + (l.smart ? " smart " + l.smart->dump() : std::string()) + "]";
+    }
+    return out;
 }
 
 std::string contents_id_of(const core::Document& doc) {
@@ -255,7 +267,8 @@ private slots:
     // size turned off, the report; the RAW's bytes never changed; refusals change nothing.
     void placedAndDevelopedAgain() {
         const std::string bytes = grey_dng(0.18, 6).build();
-        core::Document doc = run(small_book(), Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(bytes)}, {"name", "x.dng"}}}));
+        core::Document doc = run(small_book(), Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(bytes)}, {"name", "x.dng"},
+                                                                 {"placement_mm", Json::array({0, 0, 60, 80})}, {"clip_to", "none"}}}));
         const std::string id = contents_id_of(doc);
         QVERIFY(!id.empty());
         const core::SmartContents placed = *doc.smart_contents.at(id);
@@ -265,7 +278,13 @@ private slots:
         QCOMPARE(placed.profile["use"], Json("embedded"));
         const int cx = render::mm_to_px(30, 150), cy = render::mm_to_px(40, 150);
         const auto before = drawn_at(doc, cx, cy);
-        QVERIFY2(std::abs(before[1] - srgb_encode(0.18) * 255) < 4, std::to_string(before[1]).c_str());
+        const auto picture = render::smart::file_picture(doc, placed);
+        QVERIFY2(picture, "the contents' picture");
+        const std::string middle = picture->convert("RGB").tobytes();
+        const std::size_t mid = (std::size_t(picture->height() / 2) * std::size_t(picture->width()) + std::size_t(picture->width() / 2)) * 3;
+        QVERIFY2(std::abs(static_cast<unsigned char>(middle[mid + 1]) - srgb_encode(0.18) * 255) < 4, std::to_string(static_cast<unsigned char>(middle[mid + 1])).c_str());
+        QVERIFY2(std::abs(before[1] - srgb_encode(0.18) * 255) < 4,
+                 (std::to_string(before[0]) + " " + std::to_string(before[1]) + " " + std::to_string(before[2]) + " page " + layers_said(doc)).c_str());
         core::CommandBus bus(render::ops_registry());
         auto applied = bus.apply(doc, Json::array({Json{{"op", "set_camera_raw"}, {"contents", id}, {"develop", Json{{"exposure_ev", 1}}}}}), core::Actor("human:test"));
         const Json report = applied.results.at(0);
@@ -396,7 +415,9 @@ private slots:
         const Json reply = genko::test::one_line(made.out);
         QCOMPARE(reply["ok"], Json(true));
         QVERIFY(reply["notes"][0].get<std::string>().find("sRGB・8 bit") != std::string::npos);
-        QCOMPARE(project(at("cli.genko"))["pages"][0]["spec"]["dpi"], Json(240));
+        const Json cli_saved = project(at("cli.genko"));  // (the page's spec, or the book's when the page has none of its own)
+        const Json& cli_page = cli_saved["pages"][0];
+        QCOMPARE(cli_page.is_object() && cli_page.contains("spec") ? cli_page["spec"]["dpi"] : cli_saved["spec"]["dpi"], Json(240));
         // (a smart object, developed again and undone)
         const QString object = qat("cli-object.genko");
         made = genko::test::run_genko({QStringLiteral("new"), object, QStringLiteral("--from"), file, QStringLiteral("--raw"), QStringLiteral(R"({"smart_object": true})")});
