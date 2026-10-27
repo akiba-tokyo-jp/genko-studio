@@ -464,15 +464,15 @@ void bind_field(const std::shared_ptr<Work>& work, QFormLayout* form, const QStr
     const std::string field = key;
     // (weak: the work holds these through its fields — a strong one would be a ring and the work never let go)
     const auto target = [weak = std::weak_ptr<Work>(work), own]() -> Json* {
-        const auto work = weak.lock();
-        if (!work) return nullptr;
-        if (own) return &work->params;
-        if (work->kind == "blur_path") {
-            Json& paths = work->paths();
-            return work->chosen >= 0 && work->chosen < static_cast<int>(paths.size()) ? &paths[static_cast<std::size_t>(work->chosen)] : nullptr;
+        const auto w = weak.lock();
+        if (!w) return nullptr;
+        if (own) return &w->params;
+        if (w->kind == "blur_path") {
+            Json& paths = w->paths();
+            return w->chosen >= 0 && w->chosen < static_cast<int>(paths.size()) ? &paths[static_cast<std::size_t>(w->chosen)] : nullptr;
         }
-        Json& pins = work->pins();
-        return work->chosen >= 0 && work->chosen < static_cast<int>(pins.size()) ? &pins[static_cast<std::size_t>(work->chosen)] : nullptr;
+        Json& pins = w->pins();
+        return w->chosen >= 0 && w->chosen < static_cast<int>(pins.size()) ? &pins[static_cast<std::size_t>(w->chosen)] : nullptr;
     };
     shows.push_back([box, target, field, fallback, k] {
         const Json* at = target();
@@ -481,11 +481,11 @@ void bind_field(const std::shared_ptr<Work>& work, QFormLayout* form, const QStr
         box->setValue(at != nullptr ? num(*at, field.c_str(), fallback) * k : fallback * k);
     });
     QObject::connect(box, &QDoubleSpinBox::valueChanged, box, [weak = std::weak_ptr<Work>(work), target, field, k](double value) {
-        const auto work = weak.lock();
-        if (!work) return;
+        const auto w = weak.lock();
+        if (!w) return;
         if (Json* at = target()) {
             (*at)[field] = value / k;
-            schedule(work);
+            schedule(w);
         }
     });
 }
