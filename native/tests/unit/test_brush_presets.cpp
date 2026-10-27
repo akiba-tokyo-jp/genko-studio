@@ -215,6 +215,44 @@ private slots:
         QVERIFY(!file.contains("groups"));
         QVERIFY(!file["brushes"]["my_a"].contains("group"));
         QCOMPARE(presets::load(config).groups.back().name, std::string(presets::kOwnGroup));
+        // (review P3-1) renamed, another saved, moved within 自分のブラシ and deleted: still no groups written
+        presets::save(config, std::string("my_b"), Json{{"label", "B"}, {"base", "maru"}}, std::nullopt, std::nullopt);
+        presets::edit(config, Json{{"action", "rename"}, {"preset", "細い線"}, {"name", "極細"}});
+        presets::edit(config, Json{{"action", "move"}, {"preset", "B"}, {"to", std::string(presets::kOwnGroup)}, {"index", 0}});
+        presets::edit(config, Json{{"action", "delete"}, {"preset", "B"}});
+        const Json after = core::parse_python_json(text_of(render::brushes::library_path(config)));
+        QVERIFY(!after.contains("groups"));
+        QCOMPARE(after["brushes"]["my_a"]["label"].get<std::string>(), std::string("極細"));
+        QVERIFY(!after["brushes"]["my_a"].contains("group"));
+        // (moved with "group" naming where it is now, as the other kinds' edits: a wrong one refused)
+        try {
+            presets::edit(config, Json{{"action", "move"}, {"preset", "極細"}, {"group", "線"}, {"to", "線"}});
+            QFAIL("a brush was moved from a group it is not in");
+        } catch (const core::Error&) {
+        }
+    }
+
+    // (review P2-2) A library with entries that are not brushes: the others read, what is wrong said, never written over.
+    void entriesThatAreNotBrushes() {
+        QTemporaryDir dir;
+        const fs::path config(dir.path().toStdString());
+        fs::create_directories(config);
+        const std::string text = R"({"brushes": {"my_x": "x", "my_a": {"label": "A", "base": "gpen"}}})";
+        std::ofstream(render::brushes::library_path(config), std::ios::binary) << text;
+        presets::Library lib;
+        try {
+            lib = presets::load(config);
+        } catch (const std::exception& e) {
+            QFAIL(e.what());
+        }
+        QVERIFY(own(lib, "A") != nullptr);
+        QVERIFY(lib.problem.find("my_x") != std::string::npos);
+        try {
+            presets::save(config, std::nullopt, Json{{"label", "B"}}, std::nullopt, std::nullopt);
+            QFAIL("the library was written over");
+        } catch (const core::Error&) {
+        }
+        QCOMPARE(text_of(render::brushes::library_path(config)), text);
     }
 
     void editedAsTheOtherPresets() {

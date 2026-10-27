@@ -4,6 +4,7 @@
 // abr.rs tests and crates/io/src/abr_map/tests.rs, the files made by its writers (write_v12, write_v6) ported here; a
 // broken or huge file refused before it is unpacked, never read past its end.
 
+#include <QElapsedTimer>
 #include <QtTest/QtTest>
 
 #include <chrono>
@@ -469,6 +470,147 @@ private slots:
                 QCOMPARE(QString::fromStdString(e.code()), QStringLiteral("format"));
             }
         }
+    }
+
+    // (review P1-1) One budget for the whole file: its tips, patterns ("patt") and descriptors ("desc") together — sections
+    // of each, every one within the budget alone, refuse the file before what is past it is unpacked.
+    void oneBudgetForTheWholeFile() {
+        const auto section = [](std::string_view key, const std::string& data) {
+            std::string o = "8BIM";
+            o += key;
+            const std::size_t pad = (4 - data.size() % 4) % 4;
+            const std::uint32_t n = static_cast<std::uint32_t>(data.size() + pad);
+            for (const int shift : {24, 16, 8, 0}) o.push_back(static_cast<char>((n >> shift) & 0xff));
+            o += data;
+            o.append(pad, '\0');
+            return o;
+        };
+        const std::string head("\x00\x06\x00\x02", 4);
+        // the smallest budget (doubling from 1 KiB) that reads a file of one such section
+        const auto least = [](const std::string& file) {
+            std::size_t budget = 1024;
+            for (;; budget *= 2) {
+                try {
+                    (void)abr::parse(file, budget);
+                    return budget;
+                } catch (const core::Error& e) {
+                    if (e.code() != "too_large") throw;
+                }
+            }
+        };
+        render::pat::PsdPattern big;
+        big.mode = 3;
+        big.width = 64;
+        big.height = 64;
+        big.name = "Big";
+        big.id = "big-uuid";
+        for (int c = 0; c < 3; ++c) big.channels.push_back(std::string(64 * 64, static_cast<char>(40 * c)));
+        desc::Writer preset;
+        preset.text("Nm  ", u"Many");
+        for (int i = 0; i < 400; ++i) preset.unit(("k" + std::to_string(i)).c_str(), "#Prc", i);
+        desc::Writer root;
+        root.objects("Brsh", {{"brushPreset", preset}});
+        const std::string patt = section("patt", render::pat::write_block({big}));
+        const std::string desc_one = section("desc", root.versioned("null"));
+        for (const std::string& one : {patt, desc_one}) {
+            // (a file of one: its patterns or its brushes; a sampled tip beside the patterns so the file holds a brush)
+            const std::string tip = section("samp", [] {
+                std::string e;
+                e.push_back(static_cast<char>(0));
+                e.append(264, '\0');
+                for (const std::uint32_t v : {0u, 0u, 2u, 2u})
+                    for (const int shift : {24, 16, 8, 0}) e.push_back(static_cast<char>((v >> shift) & 0xff));
+                e += std::string("\x00\x08\x00", 3);
+                e += std::string(4, '\x80');
+                std::string out;
+                const std::uint32_t n = static_cast<std::uint32_t>(e.size());
+                for (const int shift : {24, 16, 8, 0}) out.push_back(static_cast<char>((n >> shift) & 0xff));
+                out += e;
+                out.append((4 - e.size() % 4) % 4, '\0');
+                return out;
+            }());
+            const std::size_t budget = least(head + tip + one);
+            const std::string three = head + tip + one + one + one;
+            try {
+                (void)abr::parse(three, budget);
+                QFAIL("three sections were read within one section's budget");
+            } catch (const core::Error& e) {
+                QCOMPARE(QString::fromStdString(e.code()), QStringLiteral("too_large"));
+            }
+            QVERIFY(abr::parse(three).warnings.empty());  // (the whole file's budget: all three)
+        }
+    }
+
+    // (review P1-2) A file of countless broken items: the first kMaxWarnings warnings kept and how many more said, the
+    // broken items counted with the brushes (the reading stops at kMaxBrushes).
+    void warningsHaveAnEnd() {
+        std::string samp;
+        const auto entry = [&samp](const std::string& e) {
+            const std::uint32_t n = static_cast<std::uint32_t>(e.size());
+            for (const int shift : {24, 16, 8, 0}) samp.push_back(static_cast<char>((n >> shift) & 0xff));
+            samp += e;
+            samp.append((4 - e.size() % 4) % 4, '\0');
+        };
+        {  // (one tip that can be read)
+            std::string e;
+            e.push_back(static_cast<char>(2));
+            e += "$a";
+            e.append(264, '\0');
+            for (const std::uint32_t v : {0u, 0u, 2u, 2u})
+                for (const int shift : {24, 16, 8, 0}) e.push_back(static_cast<char>((v >> shift) & 0xff));
+            e += std::string("\x00\x08\x00", 3);
+            e += std::string(4, '\xff');
+            entry(e);
+        }
+        for (int i = 0; i < 100000; ++i) entry(std::string(1, '\x05'));  // (each broken: a name longer than the item)
+        std::string file("\x00\x06\x00\x02", 4);
+        file += "8BIMsamp";
+        const std::uint32_t n = static_cast<std::uint32_t>(samp.size());
+        for (const int shift : {24, 16, 8, 0}) file.push_back(static_cast<char>((n >> shift) & 0xff));
+        file += samp;
+        QElapsedTimer clock;
+        clock.start();
+        const abr::File f = abr::parse(file);
+        QCOMPARE(f.samples.size(), std::size_t(1));
+        QCOMPARE(f.warnings.size(), abr::kMaxWarnings);
+        QCOMPARE(f.warning_count, abr::kMaxBrushes);  // (kMaxBrushes − 1 broken items, then where it stopped)
+        QVERIFY(any_warning(f.warnings, "外しました"));
+        const render::abr_map::Import imp = render::abr_map::map_file(f);
+        QCOMPARE(imp.warnings.size(), abr::kMaxWarnings + 1);
+        QVERIFY(imp.warnings.back().starts_with("ほか ") && imp.warnings.back().find("件の知らせがあります") != std::string::npos);
+        QVERIFY2(clock.elapsed() < 20000, qPrintable(QString::number(clock.elapsed())));
+    }
+
+    // (review P2-1) A pattern many presets name as their texture is made a texture once.
+    void aPatternMadeATextureOnce() {
+        render::pat::PsdPattern big;
+        big.mode = 1;
+        big.width = 1024;
+        big.height = 1024;
+        big.name = "Grain";
+        big.id = "grain-uuid";
+        std::string plane(1024 * 1024, '\0');
+        for (std::size_t i = 0; i < plane.size(); ++i) plane[i] = static_cast<char>((i * 2654435761u) >> 24);
+        big.channels = {plane};
+        std::vector<std::pair<std::string, desc::Writer>> presets;
+        for (int i = 0; i < 1000; ++i) {
+            desc::Writer p;
+            p.text("Nm  ", u"Textured");
+            p.boolean("useTexture", true);
+            desc::Writer t;
+            t.text("Nm  ", u"Grain");
+            t.text("Idnt", u"grain-uuid");
+            p.object("Txtr", t, "Ptrn");
+            presets.emplace_back("brushPreset", p);
+        }
+        QElapsedTimer clock;
+        clock.start();
+        const render::abr_map::Import imp = render::abr_map::read(abr::write_v6(2, {}, {big}, presets, true));
+        QCOMPARE(imp.presets.size(), std::size_t(1000));
+        QCOMPARE(imp.pictures.size(), std::size_t(1));  // (one texture, named by all)
+        const std::string ref = core::dabs_from_json(imp.presets[0].settings["dabs"]).texture.pattern.asset;
+        for (const auto& p : imp.presets) QCOMPARE(core::dabs_from_json(p.settings["dabs"]).texture.pattern.asset, ref);
+        QVERIFY2(clock.elapsed() < 20000, qPrintable(QString::number(clock.elapsed())));
     }
 };
 

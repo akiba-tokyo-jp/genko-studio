@@ -109,6 +109,7 @@ void MainWindow::choose_brush(const std::string& key, bool keep_tool) {
 
 void MainWindow::brushes_changed(std::optional<std::string> select, const std::vector<std::string>& forgotten, const std::vector<std::string>& changed) {
     // (review P2-3: once for a change, however many brushes it touched — the library read, the lists made again)
+    ++brushes_changed_;
     try {
         render::brushes::register_brushes(render::brushes::load_own_brushes(config_dir()));
     } catch (const std::exception&) {

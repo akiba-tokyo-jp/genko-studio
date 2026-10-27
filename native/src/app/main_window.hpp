@@ -1121,6 +1121,8 @@ public:
     void brushes_changed(std::optional<std::string> select, const std::vector<std::string>& forgotten = {}, const std::vector<std::string>& changed = {});
     // Whether a book open in this window (any tab) holds a brush of this key.
     bool any_book_holds_brush(const std::string& key) const;
+    // How many times brushes_changed made the lists again (the tests: once for a change of many brushes).
+    int brushes_changed_count() const { return brushes_changed_; }
     // (review P2-4) A dab brush that takes colours between the 描画色 and the 背景色: its line's fields given the 背景色.
     void add_background(core::Json& fields) const;
     std::string book_key_for(const std::string& key) const;
@@ -1157,6 +1159,7 @@ private:
     QDockWidget* brushes_dock_ = nullptr;
     QDockWidget* tool_presets_dock_ = nullptr;
     std::string brush_shown_;  // (the brush the ブラシ設定 panel last showed: it follows a change of brush, not of size)
+    int brushes_changed_ = 0;  // (how many times the brush lists were made again: the tests, review P2-3)
     void build_pattern_actions();
     void build_pattern_menus(QMenu* edit, QMenu* view);
     PatternsPanel* patterns_panel_ = nullptr;

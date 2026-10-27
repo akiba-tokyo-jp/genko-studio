@@ -370,6 +370,59 @@ private slots:
         QCOMPARE(s.window->tool_in_hand(), QStringLiteral("pen"));
     }
 
+    // (review P2-4) A dab brush whose colour moves between the 描画色 and the 背景色 (葉): its line takes the カラー panel's 背景色.
+    void aColourJitterBrushTakesTheBackground() {
+        Studio s;
+        s.window->colours()->set_background({90, 50, 20});
+        s.window->choose_brush("my_genko_foliage");
+        s.trigger("act_pen");
+        s.window->set_target_layer("paint");
+        inject::mouse_stroke(s.window->canvas(), {QPointF(25, 10), QPointF(45, 12)});
+        QVERIFY(gui_test::wait_for([&] { return !s.ops.empty(); }));
+        const Json& last = s.ops.back();
+        const Json& line = last[last.size() - 1];
+        QCOMPARE(line["op"].get<std::string>(), std::string("add_stroke"));
+        QCOMPARE(line["background_rgb"], Json::array({90, 50, 20}));
+        // a brush of Genko's way of drawing: none (its lines as before)
+        s.window->choose_brush("gpen");
+        inject::mouse_stroke(s.window->canvas(), {QPointF(25, 20), QPointF(45, 22)});
+        QVERIFY(gui_test::wait_for([&] { return s.ops.size() >= 2; }));
+        QVERIFY(!s.ops.back()[s.ops.back().size() - 1].contains("background_rgb"));
+    }
+
+    // (review P2-3) A group of many brushes deleted: the lists made again once.
+    void aGroupDeletedAtOnce() {
+        Studio s;
+        for (const char* name : {"一", "二", "三", "四"})
+            presets::save(app::config_dir(), std::nullopt, Json{{"label", name}, {"base", "gpen"}}, std::string(name), std::string("まとめて"));
+        s.window->brushes_dock()->toggleViewAction()->trigger();
+        app::BrushesPanel* panel = s.window->brushes_panel();
+        panel->refresh();
+        QTreeWidgetItem* group = nullptr;
+        for (int i = 0; i < panel->tree()->topLevelItemCount(); ++i)
+            if (panel->tree()->topLevelItem(i)->text(0) == QStringLiteral("まとめて")) group = panel->tree()->topLevelItem(i);
+        QVERIFY(group != nullptr);
+        panel->tree()->setCurrentItem(group);
+        s.answers.responder->question = [](const QString&, const QString&) { return true; };
+        const int before = s.window->brushes_changed_count();
+        panel->remove_group();
+        QCOMPARE(s.window->brushes_changed_count(), before + 1);
+        QVERIFY(own_named("一") == nullptr && own_named("四") == nullptr);
+    }
+
+    // (review P2-2) A library holding an entry that is not a brush: the window starts, the others listed.
+    void aLibraryWithEntriesThatAreNotBrushes() {
+        (void)gui_test::config_folder();
+        std::filesystem::create_directories(app::config_dir());
+        std::ofstream(app::config_dir() / "brushes.json", std::ios::binary)
+            << R"({"brushes": {"my_x": "x", "my_a": {"label": "残ったブラシ", "base": "gpen"}}})";
+        Studio s;
+        QVERIFY(s.window->findChild<QComboBox*>(QStringLiteral("pixel_brush")) != nullptr);
+        s.window->brushes_dock()->toggleViewAction()->trigger();
+        s.window->brushes_panel()->refresh();
+        QVERIFY(item_named(s.window->brushes_panel()->tree(), QStringLiteral("残ったブラシ")) != nullptr);
+    }
+
     // 編集 → プリセット ▸: the Preset Manager's kinds and an edit (a gradient renamed); プリセットを書き出し／読み込み… to a
     // file and back into the library; プリセットを移行 from a settings folder.
     void thePresetsCommands() {

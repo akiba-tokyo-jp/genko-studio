@@ -182,7 +182,7 @@ Built build() {
         s.hardness = 1;
         s.aliased = true;
         s.spacing = 0.1;
-        add("hard_pencil", "鉛筆（ハード）", s);
+        add("hard_pencil", "硬い鉛筆", s);  // (review P3-15: not the 鉛筆ツール's own 鉛筆（ハード）)
         s = base;
         s.size_mm = mm(6);
         s.hardness = 0.6;
@@ -191,7 +191,7 @@ Built build() {
         s.transfer = transfer(pressure_min(0.15), D{});
         s.texture = paper(21, 0.8);
         s.texture.scale = 0.5;
-        add("soft_pencil", "鉛筆（ソフト）", s);
+        add("soft_pencil", "柔らかい鉛筆", s);
         s = base;
         s.size_mm = mm(40);
         s.tip = tip(dabs::chalk_tip(64, 7));
