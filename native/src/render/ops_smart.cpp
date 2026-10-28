@@ -748,6 +748,7 @@ void smart_transform(OpContext& c) {
 bool rasterizable(const Layer& layer, const std::set<std::string>& kinds) {
     if (layer.kind == LayerKind::Smart) return kinds.contains("smart");
     if (layer.kind == LayerKind::Placed) return kinds.contains("placed");
+    if (layer.kind == LayerKind::Type) return kinds.contains("type");  // (type@1, PC5 G-0: its text drawn in)
     if (layer.kind == LayerKind::Fill && ((layer.fill && core::py_truthy(*layer.fill)) || (layer.fill_rgb && !layer.fill_rgb->empty())))
         return kinds.contains("fill");
     if (layer.kind == LayerKind::Tone || (layer.tone && core::py_truthy(*layer.tone))) return kinds.contains("tone");
@@ -890,6 +891,7 @@ void rasterize(Document& doc, std::size_t at, std::size_t i) {
     layer.effect.reset();
     layer.tone.reset();
     layer.smart.reset();
+    layer.type.reset();  // (type@1, PC5 G-0: its text drawn in)
     layer.asset.reset();
     layer.placement_mm.reset();
     layer.frame_id.reset();
@@ -940,14 +942,14 @@ void rasterize_layer(OpContext& c) {
         c.report = Json{{"ids", Json::array({page.layers[i].id})}};
         return;
     }
-    std::set<std::string> kinds{"smart", "fill", "tone", "placed"};
+    std::set<std::string> kinds{"smart", "fill", "tone", "placed", "type"};  // (type@1, PC5 G-0: a type layer)
     if (const Json* given = core::get(c.op, "kinds"); given != nullptr && !given->is_null()) {
-        if (!given->is_array()) throw OpError("kinds is a list of smart, fill, tone, placed, pen");
+        if (!given->is_array()) throw OpError("kinds is a list of smart, fill, tone, placed, pen, type");
         kinds.clear();
         for (const Json& kind : *given) {
             const std::string name = core::py_str(kind);
-            if (name != "smart" && name != "fill" && name != "tone" && name != "placed" && name != "pen")
-                throw OpError("kinds is a list of smart, fill, tone, placed, pen");
+            if (name != "smart" && name != "fill" && name != "tone" && name != "placed" && name != "pen" && name != "type")
+                throw OpError("kinds is a list of smart, fill, tone, placed, pen, type");
             kinds.insert(name);
         }
     }
@@ -967,7 +969,7 @@ void rasterize_layer(OpContext& c) {
     } else {
         const std::size_t i = core::layer_by_id(doc.page(at), core::truthy_at(c.op, "id") ? core::py_str(c.op["id"]) : std::string());
         const Layer& layer = doc.page(at).layers[i];
-        if (!rasterizable(layer, {"smart", "fill", "tone", "placed", "pen"})) throw OpError("layer " + layer.id + " has nothing to rasterize");
+        if (!rasterizable(layer, {"smart", "fill", "tone", "placed", "pen", "type"})) throw OpError("layer " + layer.id + " has nothing to rasterize");
         rasterize(doc, at, i);
         done.push_back(layer.id);
     }
@@ -1185,6 +1187,8 @@ void register_smart_ops(core::OpRegistry& registry) {
 // (PC3 C-e: a placed picture turned with its page, render/ops_pagesize.cpp)
 namespace smart_ops {
 core::Layer placed_to_smart(core::Document& doc, core::Layer placed, const std::string& id) { return render::placed_to_smart(doc, std::move(placed), id); }
+// (type@1, PC5 G-0: a type layer's picture, render/type_layer.cpp)
+Image drawn_alone(Size size, const std::function<void(Image&)>& draw) { return render::drawn_alone(size, draw); }
 
 void fits_deep_page(const core::Document& doc, const core::Page& page) {
     if (page.color || !page.rgb || page.rgb->depth <= 8) return;

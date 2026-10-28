@@ -1122,6 +1122,23 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the smart object contents \\S+ show themselves.*", "スマートオブジェクトの中に、それ自身は置けません"));
         r.push_back(rule("smart objects inside smart objects go deeper than .*", "スマートオブジェクトの入れ子は 8 段までです"));
         r.push_back(rule("layer \\S+ is not a smart object", "スマートオブジェクトを選んでください"));
+        // (type@1, PC5 G-0 — the C++ build's own: type layers and the type record, render/ops_type, core/type_text)
+        r.push_back(rule("a type layer holds no pixels or lines of its own.*", "テキストレイヤーには直接描けません（先にテキストレイヤーをラスタライズします）"));
+        r.push_back(rule("layer \\S+ is not a type layer", "テキストレイヤーを選んでください"));
+        r.push_back(rule("the type layer \\S+ holds no text", "このテキストレイヤーには文字がありません"));
+        r.push_back(rule("text must not be empty", "文字が空です"));
+        r.push_back(rule(R"(box \[x, y, w, h\] \(mm\) is required)", "文字の枠（box）が要ります"));
+        r.push_back(rule("the box's width and height must be above 0", "文字の枠の幅と高さは 0 より大きくします"));
+        r.push_back(rule("line or layer_id names the text.*|line \\(a line's id\\) or page and layer_id.*",
+                         "台詞（line）かテキストレイヤー（page と layer_id）を一つ指定します"));
+        r.push_back(rule("a type layer moves whole: transform it without a selection", "テキストレイヤーは選択範囲なしで変形します"));
+        r.push_back(rule("a type layer turned, scaled or bent is not in this build yet",
+                         "テキストレイヤーの回転・拡大・縮小・ゆがみは、この版の Genko ではまだできません（移動はできます）"));
+        r.push_back(rule(".* takes the style \\S+, which the book does not keep", "原稿に無い文字スタイル・段落スタイルを指定しています"));
+        r.push_back(rule("(?:unknown )?(?:native_type|char|para|run char|paragraph para|type_styles)\\b.*",
+                         "文字の設定（文字・段落の属性、スタイル）の指定が正しくありません"));
+        r.push_back(rule("(?:a run(?:'s| must) |the runs must |a paragraph must |the paragraphs must |a style's (?:id|name) |two (?:character|paragraph) styles ).*",
+                         "文字の範囲・段落・スタイルの指定が正しくありません"));
         r.push_back(rule("the layers have nothing to draw", "選んだレイヤーには、描かれたものがありません"));
         r.push_back(rule("layer \\S+ has nothing to rasterize", "このレイヤーには、ラスタライズするものがありません（すでに画素のレイヤーです）"));
         r.push_back(rule("the transform squashes the smart object flat|the picture would be laid too small", "スマートオブジェクトが潰れてしまう変形はできません"));

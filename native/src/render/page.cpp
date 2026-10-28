@@ -63,6 +63,7 @@
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
 #include "render/tones.hpp"
+#include "render/type_layer.hpp"
 #include "render/vector_masks.hpp"
 
 namespace genko::render {
@@ -785,6 +786,8 @@ std::optional<Image> layer_pixels(const Ctx& ctx, const Layer& layer, const Box&
         } catch (const NotYetPorted& e) {
             skip_unported(ctx, e.element());
         }
+    } else if (layer.kind == LayerKind::Type) {  // (type@1, PC5 G-0: its text set as a line's, render/type_layer)
+        raster = type_layer::picture_8bit(ctx, layer, area);
     } else if (layer.color_raster) {
         if (is_tone(layer)) throw NotYetPorted("high_precision_tone");
         raster = color_raster_preview(core::ColorRasterView(*layer.color_raster), ctx.size, area);

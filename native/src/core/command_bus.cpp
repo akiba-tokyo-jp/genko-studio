@@ -24,6 +24,7 @@
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
 #include "core/studio.hpp"
+#include "core/type_text.hpp"
 
 namespace genko::core {
 
@@ -114,6 +115,7 @@ std::string usage(const Json& op, bool channel = false) {
 bool native_key(std::string_view op, std::string_view key) {
     return (op == "merge_visible" && key == "flatten") || (op == "convert_layer" && key == "preserve_precision") ||
            (op == "define_brush" && key == "paper") || ((op == "add_line" || op == "edit_line") && key == "ruby_spans") ||
+           ((op == "add_line" || op == "edit_line") && key == "native_type") ||  // (type@1, PC5 G-0)
            (op == "add_stroke" && key == "color_rgb") || dab_key(op, key) || fill_key(op, key) ||
            key == "contents" ||  // (smart-objects@1: any op on a smart object's page)
            // PC3 (masks@1): set_layer_mask's linked, density and feather_mm; a pixel op's layer_mask (its layer's mask
@@ -1180,6 +1182,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     vector::validate_vector(work);  // (PC3: vector@1, pen-shapes@1, transform@1, page-spec@1)
                     validate_pattern_fills(work);   // (patterns@1, PC4 E3: no fill names a pattern the book does not keep)
                     validate_layer_styles(work);    // (layer-styles@1, PC4 E6: a style in its normal form, on a layer that takes one)
+                    type_text::validate_type(work);  // (type@1, PC5 G-0: a record in its normal form; a type layer draws its text alone)
                 } catch (const Error& error) {
                     if (error.code() == "not_yet_ported") throw;
                     throw OpError(error.what());

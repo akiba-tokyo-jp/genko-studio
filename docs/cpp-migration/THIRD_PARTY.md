@@ -16,7 +16,7 @@
 | libjpeg-turbo | 2.1.5 / 3.x | IJG AND BSD-3-Clause AND Zlib | JPEG | Windows: 静的。Linux: コンピューターのもの |
 | libtiff | 4.5.1 / 4.7.x | libtiff | TIFF の書き出し（CMYK、1bit）と読み込み（M6: Pillow と同じモード・画素） | Windows: 静的。Linux: コンピューターのもの |
 | FreeType | 2.14.3（署名検証済みの固定archive＋メモリ予算接続override、ソースは両OS共通） | FTL（BSD 型） | 字形。参照Pillowと同じrasterizerで画素互換を保つ | 静的。`native/third_party/freetype/`に原archive・SHA256・来歴・ライセンス |
-| HarfBuzz | 8.3.0 / 10.x | MIT | 字形の配置（縦書きの字形置換・OpenType 機能） | Windows: 静的。Linux: コンピューターのもの |
+| HarfBuzz | 8.3.0 / 10.x | MIT | 字形の配置（縦書きの字形置換・OpenType 機能。PC5 G-0 から描画の render/text/shaping が使う） | Windows: 静的。Linux: コンピューターのもの |
 | libwebp（libwebp・libwebpdemux・libwebpmux） | 1.3.2 / 1.5.x | BSD-3-Clause | WebP の書き出し（タイムラプス・アニメーション）と読み込み（M6: Pillow と同じ画素。アニメーションは最初のコマ） | Windows: 静的。Linux: コンピューターのもの |
 | Little CMS 2 | 2.14 / 2.16 | MIT | 色変換（CMYK、ICC） | Windows: 静的。Linux: コンピューターのもの |
 | OpenEXR（Imath を含む） | 3.1.5（Imath 3.1.9、Ubuntu 24.04）/ 3.4.15（Imath 3.2.3、vcpkg。依存 libdeflate（MIT）・openjph（BSD-2-Clause）） | BSD-3-Clause | OpenEXR の読み書き（PC4 F-a） | Windows: 静的。Linux: コンピューターのもの |

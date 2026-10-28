@@ -461,7 +461,9 @@ private slots:
             "color_replacement", "add_pattern", "rename_pattern", "delete_pattern",  // (PC4 節 E's ops, frames until their groups: SPEC.md COLOR-09)
             "render_picture", "vanishing_point",  // (PC4 節 D's ops: D4 炎・額縁・木, D6 消点 — SPEC.md COLOR-08)
             "set_layer_style", "add_layer_effect", "set_global_light", "scale_layer_style", "show_layer_effects",
-            "layer_style_to_layers"};  // (PC4 E6: layer-styles@1, SPEC.md COLOR-09)
+            "layer_style_to_layers",  // (PC4 E6: layer-styles@1, SPEC.md COLOR-09)
+            "add_type_layer", "edit_type", "type_info", "set_type", "type_style", "line_to_type_layer", "type_layer_to_line",
+            "replace_fonts"};  // (PC5 G-0: type@1, the type ops — G-0's and the later groups' frames, SPEC.md TEXT-02)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);

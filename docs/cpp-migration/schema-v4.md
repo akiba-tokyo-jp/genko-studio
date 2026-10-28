@@ -69,6 +69,7 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `filters@1` | PC4（D0） | スマートフィルターがフィルター メニューの種類（`blur_gaussian` など、PC4 の種類）を持つか、フィルターのファイル（置き換えの地図）を持つこと。COLOR-08（末尾の「フィルター」） |
 | `vanishing-point@1` | PC4（D6） | ページの `vanishing`（消点の面）。COLOR-08（末尾の「消点の面」） |
 | `layer-styles@1` | PC4 E6 | 層の `style`（レイヤースタイル: 効果・塗りの不透明度・ブレンド条件）と本の `global_light`（包括光源）。COLOR-09（「レイヤースタイル」）、この文書の「レイヤースタイル」 |
+| `type@1` | PC5 G-0（G-a・G-b・G-c が使う） | 台詞の `native_type`（Photoshop の文字の設定: 形・アンチエイリアス・組み方・行列・文字と段落の属性・スタイルの参照・範囲）、層の種類 `"type"`（テキストレイヤー）とその `type`（記録）、本の `type_styles`（文字スタイル・段落スタイル・基本段落）。TEXT-02、この文書の「文字」 |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -458,3 +459,19 @@ Photoshop のレイヤー効果と混合オプションの一部（塗りの不�
 - 書き手は面を持つページがあるときだけ `features` に `vanishing-point@1` を加える（無くなれば外す）。面は op `vanishing_point` が `keep_planes`（既定）のときに置き、`"planes": []` で消す（消点の窓で面を全部消して OK）。どの面も消えた本は、面を持ったことのない本と同じ `features`・ページのバイトで書く。元に戻すで戻る。
 - **読み手の検査**: 面の形が上と違う（凸でない・有限でない・`from` が前の面でない・知らない鍵）ページの本は、読み取り専用で開く（絵を後で読むページも、読むときに見る）（`a page's vanishing point planes: …`。面は読んだまま書き戻すので失われない）。vanishing-point@1 を知らない読み手（PC4 D6 より前の C++ 版）は、未知の拡張として読み取り専用で開く。
 - PSD には書かない（上流も持たない。Photoshop の形を確かめられない）。面を持たない原稿は、`features` も保存のバイトも今のまま。
+
+## 文字（type@1。TEXT-02、PC5 G-0）
+
+Photoshop の文字（テキストレイヤー・文字と段落の属性・スタイル）を、台詞と同じ記録に持つ（core/type_text.hpp が正規形と検査）。台詞は台詞のまま（物語の一部）で、テキストレイヤーは層の種類の一つ。どちらも同じ記録を同じ組版で描く。
+
+- **台詞の `"native_type"`**（台詞の鍵の最後、`tails` の後に書く）: `{"shape"?: "point"|"box", "anchor_mm"?: [x, y], "antialias"?: 方法, "shaping"?: "opentype", "transform"?: [a, b, c, d, e, f], "char_style"?: "cs-N", "para_style"?: "ps-N", "char"?: {文字の属性}, "para"?: {段落の属性}, "runs"?: [{"start", "end", "style"?, "char"?}], "paragraphs"?: [{"index", "style"?, "para"?}]}`。鍵はこの順、既定の値（`antialias` の `smooth`）と空のものは書かない。何も残らなければ鍵ごと書かない。`shape` が無い記録は今の台詞の組み方（枠とフキダシに合わせる）。アンチエイリアスの方法は `none`・`sharp`・`crisp`・`strong`・`smooth`・`windowsLcd`・`windows`。
+- **範囲**: `runs` は本文の書記素（ルビと同じ数え方、ruby-layout@1 の「単位」）の `[start, end)`、本文の中で順に重ならない（4096 まで、何も持たない範囲は書かない）。`paragraphs` は本文を改行で分けた段落の番号（順に 1 度ずつ）。本文の編集（`edit_line`・`edit_type`・`replace_text`）で範囲は動く: 前の編集（範囲の直前への挿入も）は両端を動かし、後の編集（範囲の末尾への挿入も）は動かさず、中への挿入は広げ、消えた所は外し、空になった範囲は消える（要確認は無い）。段落の頭の改行が消えると、その段落は前の段落にまとまり、その段落の設定は消える。
+- **文字の属性**（長さは mm、色は 8 bit の sRGB）: `font`（台詞の書式の `font` と同じ: 同梱のキーかファイル）・`family`・`font_style`・`postscript`（ほかの機械で引き直すための名前）・`size_mm`（0.1〜1000）・`scale`（台詞の大きさに対する倍率 0.1〜10。語ごとの書式の `scale`）・`rgb`・`tracking`（字の大きさの −1〜10）・`leading_mm`（`"auto"` か 0〜1000）・`baseline_shift_mm`（±1000）・`scale_x`・`scale_y`（0.01〜10）・`faux_bold`（`normal`・`bold`・`heavy`。true・false も受けて bold・normal にする）・`faux_italic`・`underline`・`strikethrough`・`caps`（`normal`・`small`・`all`）・`kerning`（`metrics`・`optical`・`none`）・`ligatures`・`discretionary_ligatures`・`features`（{OpenType のタグ: 0〜65535}、タグの順、64 まで。タグの一覧も受けて各 1 にする）・`variations`（{軸: −32768〜32767}）・`language`（BCP 47）・`proportional`・`tcy`。
+- **段落の属性**: `align`（`left`・`center`・`right`・`justify`・`justify_center`・`justify_right`・`justify_all`・`top`・`bottom`・`start`）・`first_indent_mm`・`start_indent_mm`・`end_indent_mm`（±1000）・`space_before_mm`・`space_after_mm`（0〜1000）・`auto_leading`（0〜5、既定 1.2）・`kinsoku`（`genko`・`none`・`weak`・`strong`、既定 genko＝今の禁則）・`yakumono`・`hyphenate`・`direction`（`auto`・`ltr`・`rtl`）・`composer`（`japanese`・`world`）。
+- 数は小数 4 桁に丸め、整数は整数で書く。知らない鍵・範囲外の値は op が断る。
+- **解決の順**（後のものが前のものの上に。言うことのある所だけ）: 既定 → 台詞の `style`（属性に当たる鍵: font・size_mm・tracking・rgb・scale_x・tcy・features・weight と bold → faux_bold・italic → faux_italic・align・yakumono）→ 基本段落 → 段落のスタイル（段落の `style`、無ければ全体の `para_style`）→ 全体の `para` → 段落の `para` →（文字）段落のスタイルの `char` → 全体の `char_style` → 全体の `char` → 範囲の `style` → 範囲の `char`。上書きは違う所だけを持つので、スタイルを直すと上書きの無い所が一斉に変わる。
+- **テキストレイヤー**: 層の `"kind": "type"` と `"type": {記録}`（層の鍵の最後、`style` の後）。記録は台詞の鍵から `id`・`page_index`・`speaker`・`frame_id` を除いたもの（`text`・`ruby`・`x_mm`・`y_mm`・`w_mm`・`h_mm`・`balloon`（既定 `"none"`）・`tail`・`wrap`・`ruby_runs`・`ruby_spans`?・`path`・`emphasis_runs`?・`style_runs`?・`style`?・`tails`?・`native_type`?、台詞と同じ順）。層の性質（表示・不透明度・描画モード・マスク・ベクトルマスク・クリッピング・レイヤースタイル・リンク・ロック・フォルダー・表示色）はほかの層と同じ。役は `text`、`panel_clip` は false。画素・線・形の部品・パッチは持たない。
+- **本の `"type_styles"`**（`global_light` の後）: `{"character"?: [{"id": "cs-N", "name", "char"?}], "paragraph"?: [{"id": "ps-N", "name", "para"?, "char"?}], "basic"?: {"para"?, "char"?}}`。id は種類の接頭と 1 からの番号、名前は 1〜64 字で種類の中で一つ、各 512 まで。空なら書かない。
+- 書き手は、`native_type` を持つ台詞、テキストレイヤー（書くページとスマートオブジェクトの中身のページ）、`type_styles` のどれかがあれば `features` に `type@1` を加え、無くなれば外す。持たない原稿は今と同じバイトで書き、同じ画素で描く。
+- **読み手の検査**: 正規形でない `native_type`・`type_styles`、本文の外の範囲、本に無いスタイルの参照、記録の無いテキストレイヤー、画素や線を持つテキストレイヤーの本は、読み取り専用で開く（読んだまま書き戻すので失われない）。記録に台詞だけの鍵があれば知らない鍵として知らせる。type@1 を知らない読み手（PC4 までの C++ 版）は、未知の拡張として読み取り専用で開く。
+- op（C++ 版だけ）: `add_type_layer`・`edit_type`・`type_info`（G-0）、`set_type`・`type_style`・`line_to_type_layer`・`type_layer_to_line`・`replace_fonts`（名前だけ登録、後の群）。`add_line`・`edit_line` は `native_type` を受ける。TEXT-02 の「文字」。

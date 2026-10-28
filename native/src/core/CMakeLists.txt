@@ -128,6 +128,8 @@ genko_library(genko_core
     raw_develop.cpp
     # PC4 E6 (レイヤースタイル: layer-styles@1)
     layer_styles.cpp
+    # PC5 G-0 (文字: type@1 の記録・属性の表・解決・範囲の追従)
+    type_text.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"

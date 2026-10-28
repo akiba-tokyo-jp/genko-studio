@@ -187,6 +187,8 @@ genko_library(genko_app
     layer_style_dialog.cpp
     styles_panel.cpp
     main_window_styles.cpp
+    # PC5 G-0 (書式 メニュー)
+    main_window_type.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

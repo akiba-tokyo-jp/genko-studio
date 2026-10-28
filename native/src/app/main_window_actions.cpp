@@ -701,6 +701,7 @@ void MainWindow::build_menus() {
     layers->addAction(action("act_plugin_settings"));
     build_adjust_menus(layers, edit);  // (PC2: レイヤー → 色調補正, app/main_window_adjust.cpp)
     build_smart_menus(layers, file);   // (PC3: スマートオブジェクト and the placing commands, app/main_window_smart.cpp)
+    build_type_menu(bar->addMenu(QStringLiteral("書式")));  // (PC5 G-0: Photoshop's 書式 after レイヤー, app/main_window_type.cpp)
     build_filter_menus(bar->addMenu(QStringLiteral("フィルター")));  // (PC4 節 D, after レイヤー: app/filter_menu.cpp)
     QMenu* pages = bar->addMenu(QStringLiteral("ページ"));
     for (const char* name : {"act_add_page", "act_dup_page", "act_del_page"}) pages->addAction(action(name));

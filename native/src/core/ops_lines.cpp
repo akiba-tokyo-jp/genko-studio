@@ -35,6 +35,7 @@
 #include "core/pyops.hpp"
 #include "core/pyre.hpp"
 #include "core/ruby.hpp"
+#include "core/type_text.hpp"
 #include "core/vector.hpp"
 
 namespace genko::core {
@@ -88,6 +89,23 @@ bool listed(const std::array<std::string_view, N>& names, std::string_view name)
 }
 
 Json op_value(const Json& op, std::string_view key) { return get_or(op, key, Json()); }
+
+// type@1 (PC5 G-0): a native_type in its normal form (null: none).
+std::optional<Json> optional_type(Json value) {
+    if (value.is_null()) return std::nullopt;
+    return value;
+}
+
+// add_line's and edit_line's native_type (type@1, PC5 G-0: Photoshop's type settings of the line, checked against its text;
+// null takes them away). The book names type@1 from then on.
+void given_native_type(Document& doc, StoryLine& line, const Json& raw) {
+    try {
+        line.native_type = optional_type(type_text::check_native_type(raw, line.text));
+    } catch (const Error& error) {
+        throw OpError(error.what());
+    }
+    type_text::add_feature(doc);
+}
 
 // Python's float / float: ZeroDivisionError ("float division by zero"), which apply_ops lets through
 double divided(double a, double b) {
@@ -636,6 +654,7 @@ void add_line(OpContext& c, const PictureCheck& check) {
     line.balloon = balloon_kind(Json(line.balloon));
     if (has(op, "ruby_spans")) given_spans(line, op);
     ruby::settle(doc, line);
+    if (has(op, "native_type")) given_native_type(doc, line, op["native_type"]);  // (type@1, PC5 G-0)
     require_kept(line, &frame_id);
 }
 
@@ -710,6 +729,12 @@ void edit_line(OpContext& c, const PictureCheck& check) {
                           [&](const std::vector<RubySpan>& spans) { return ruby::follow_text(before, line.text, spans); });
     }
     ruby::settle(c.doc, line);
+    // (type@1, PC5 G-0: Photoshop's type settings given, or their ranges followed through the new text)
+    if (has(op, "native_type")) {
+        given_native_type(c.doc, line, op["native_type"]);
+    } else if (line.native_type && line.text != before) {
+        line.native_type = optional_type(type_text::follow(*line.native_type, before, line.text, {type_text::edit_between(before, line.text)}));
+    }
     change.review = std::max<std::int64_t>(0, ruby::review_count(line) - reviewed);
     report_ruby(c, change);  // (a line of Python's left as Python leaves it: nothing, as Python)
     require_kept(line, get(op, "frame_id"));
@@ -882,6 +907,8 @@ void replace_text(OpContext& c) {
                 return ruby::follow_replacements(before, text, edits, spans);
             });
             ruby::settle(c.doc, line);
+            // (type@1, PC5 G-0: its ranges of type settings followed through the matches)
+            if (line.native_type) line.native_type = optional_type(type_text::follow(*line.native_type, before, text, type_text::edits_of(before, edits)));
             // (a line of Python's left as Python leaves it says nothing, as Python; one whose ruby this build takes away
             // where Python would not — its base's word gone, the same word left elsewhere — says so)
             ruby_review += change.review;
@@ -918,6 +945,8 @@ StoryLine& find_line(Document& doc, const std::string& line_id) {
     }
     throw OpError("no line " + line_id);
 }
+
+Json line_style(const Json& style, const PictureCheck& check) { return merge_style(Json::object(), style, check); }
 
 void stamp_lettering(Document& doc, std::size_t at, const Json& op, const Json& material, const PictureCheck& check) {
     // (each value worked out in Python's order, so the first error is Python's)

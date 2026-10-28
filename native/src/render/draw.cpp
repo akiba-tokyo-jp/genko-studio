@@ -554,6 +554,19 @@ bool bundled_font_present(const std::string& name) {
     }
 }
 
+std::shared_ptr<const QByteArray> font_bytes(const std::string& font) {
+    if (bundled_text_font(font)) return bundled_bytes(font);
+    if (font == kPillowDefaultKey) return bundled_bytes("pillow_default");
+    if (font.size() > 4096) throw core::Error("value", "font name exceeded");
+    QFile source(QString::fromStdString(font));
+    if (!source.open(QIODevice::ReadOnly | QIODevice::Unbuffered)) throw NotYetPorted("default_font");
+    if (source.size() > 256 * 1024 * 1024) throw NotYetPorted("large_font");
+    if (source.size() <= 0) throw NotYetPorted("default_font");
+    auto bytes = std::make_shared<QByteArray>(source.readAll());
+    if (bytes->size() != source.size()) throw core::Error("value", "text font changed during read");
+    return bytes;
+}
+
 struct TrueTypeFonts::State {
     // (members are destroyed in reverse: the fonts, then the library, then the files' bytes and their reservations)
     ImageAllocationBudget budget{512ULL * 1024 * 1024};  // shares, never enlarges, the enclosing image budget

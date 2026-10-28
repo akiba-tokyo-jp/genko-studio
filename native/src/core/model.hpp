@@ -33,7 +33,8 @@ namespace genko::core {
 
 enum class Binding { Right, Left };
 enum class LayerRole { Name, Draft, Ink, Bg, Finish, Tone, Effect, Frames, Text, User };
-enum class LayerKind { Raster, Strokes, Fill, Tone, Folder, Placed, Adjust, Smart };
+// (type@1, PC5 G-0: Type — a type layer, core/type_text.hpp)
+enum class LayerKind { Raster, Strokes, Fill, Tone, Folder, Placed, Adjust, Smart, Type };
 
 std::string_view to_string(Binding binding);
 std::string_view to_string(LayerRole role);
@@ -174,6 +175,8 @@ struct Patch {
     Json after_asset = Json::object();
 };
 
+struct StoryLine;  // (below: a type layer holds one, type@1)
+
 struct Layer {
     std::string id;
     LayerRole role = LayerRole::User;
@@ -240,6 +243,10 @@ struct Layer {
     // emboss, satin, the overlays, the stroke), its fill opacity and Blend If — in its normal form (none: no style, as every
     // layer before it)
     std::optional<Json> style;
+    // PC5 G-0 (type@1, core/type_text.hpp): a type layer's record (kind "type") — a line's record without what only the
+    // story has (its id, page, speaker, panel and reading order), drawn by the lines' typesetting as the layer's picture;
+    // null on any other layer. Shared between copies and never changed once made (an op makes a new one).
+    std::shared_ptr<const StoryLine> type;
 
     std::size_t stroke_count() const { return strokes ? strokes->items.size() : 0; }
 };
@@ -306,6 +313,10 @@ struct StoryLine {
     std::vector<std::pair<std::string, Json>> style_runs;  // [[words, {scale, bold, rgb}]]
     Json style = Json::object();
     std::vector<Json> tails;
+    // PC5 G-0 (type@1, core/type_text.hpp): Photoshop's type settings past the style — its shape (point or box), anti-alias,
+    // OpenType typesetting, matrix, character and paragraph attributes, the styles it takes and its ranges — in their
+    // normal form (none: the line set as before it)
+    std::optional<Json> native_type;
 };
 
 // channels@1 (core/channels.hpp, docs/cpp-migration/schema-v4.md「チャンネル」): a page's alpha or spot channel — one plane
@@ -488,6 +499,9 @@ struct Document {
     // PC4 E6 (layer-styles@1, core/layer_styles.hpp): 包括光源 — the angle and altitude (degrees) of the light its layer
     // styles' effects take when they use the global light (none: Photoshop's 120° and 30°)
     std::optional<std::array<double, 2>> global_light;
+    // PC5 G-0 (type@1, core/type_text.hpp): its character styles, paragraph styles and Basic Paragraph
+    // ({"character": […], "paragraph": […], "basic": {…}} in their normal form; none: none)
+    std::optional<Json> type_styles;
     // PC2a (adjustments@1): the 3D lookup tables its color_lookup corrections use (their "lut"), by their asset ref
     // (core/lut3d: GKLU bytes). Written as assets/<ab>/<64 hex>.gklut; only those a correction uses are written and read.
     std::map<std::string, Bytes> luts;
