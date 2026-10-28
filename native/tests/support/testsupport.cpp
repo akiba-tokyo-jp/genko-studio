@@ -9,6 +9,8 @@
 
 #include <bit>
 #include <cstdint>
+#include <cstdio>
+#include <utility>
 #include <vector>
 
 #include "core/error.hpp"
@@ -454,6 +456,75 @@ std::string book_problems(const QString& dir) {
     std::string out;
     for (const auto& problem : problems) out += (out.empty() ? "" : "; ") + problem;
     return out;
+}
+
+namespace {
+
+// A text as json.dumps(…, ensure_ascii=True) writes it: what is past ASCII as \uXXXX in lower-case hex (the
+// catalogue's words are all in the Basic Multilingual Plane).
+std::string ascii_escaped(const std::string& utf8) {
+    std::string out;
+    for (const QChar c : QString::fromStdString(utf8)) {
+        if (c.unicode() < 0x80) {
+            out += static_cast<char>(c.unicode());
+            continue;
+        }
+        char hex[8];
+        std::snprintf(hex, sizeof hex, "\\u%04x", static_cast<unsigned>(c.unicode()));
+        out += hex;
+    }
+    return out;
+}
+
+// A JSON text inside a JSON string: its quotes and backslashes escaped.
+std::string quoted(const std::string& text) {
+    std::string out;
+    for (const char c : text) {
+        if (c == '"' || c == '\\') out += '\\';
+        out += c;
+    }
+    return out;
+}
+
+// Python's words → this build's, in every form they can be compared in.
+const std::vector<std::pair<std::string, std::string>>& words_of_2026_10_28() {
+    static const std::vector<std::pair<std::string, std::string>> all = [] {
+        const std::vector<std::pair<std::string, std::string>> plain = {
+            {"glow (光彩拡散) radius", "glow (光彩, フィルター → 漫画) radius"},
+            {R"("kind": "pen|paint|folder|fill|gradient|adjust?")",
+             R"x("kind": "pen|paint|folder|fill|gradient|adjust? (paint on an RGB page of 16 or 32 bits: its pixels at the page's depth once painted)")x"},
+        };
+        std::vector<std::pair<std::string, std::string>> out;
+        for (const auto& [python, cpp] : plain) {
+            const std::string escaped_python = ascii_escaped(python), escaped_cpp = ascii_escaped(cpp);
+            for (const auto& [p, c] : {std::pair{python, cpp}, std::pair{escaped_python, escaped_cpp}}) {
+                out.emplace_back(quoted(p), quoted(c));  // (the longer forms first)
+                if (quoted(p) != p) out.emplace_back(p, c);
+            }
+        }
+        return out;
+    }();
+    return all;
+}
+
+}  // namespace
+
+std::string with_words_of_2026_10_28(std::string text) {
+    for (const auto& [python, cpp] : words_of_2026_10_28()) {
+        for (std::size_t at = text.find(python); at != std::string::npos; at = text.find(python, at + cpp.size())) text.replace(at, python.size(), cpp);
+    }
+    return text;
+}
+
+void with_words_of_2026_10_28(core::Json& value) {
+    static const std::string kind = "pen|paint|folder|fill|gradient|adjust?";  // (add_layer's hint as a value of its own)
+    if (value.is_string() && value.get_ref<const std::string&>() == kind) {
+        value = kind + " (paint on an RGB page of 16 or 32 bits: its pixels at the page's depth once painted)";
+    } else if (value.is_string()) {
+        value = with_words_of_2026_10_28(value.get<std::string>());
+    } else if (value.is_array() || value.is_object()) {
+        for (core::Json& item : value) with_words_of_2026_10_28(item);
+    }
 }
 
 }  // namespace genko::test

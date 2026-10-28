@@ -1,7 +1,8 @@
 // `genko inspect` and `genko schema` against `python -m genko inspect` / `python -m genko schema` (the baseline's
 // own command line). The v2 and v3 books must print the same bytes. The v1 book has no layers in its file, so both
 // programs make its four default layers with fresh random ids; those ids are compared by shape (12 hex digits,
-// distinct) and everything else exactly. Skipped when there is no reference Python.
+// distinct) and everything else exactly. `genko schema` is Python's with the catalogue's words the user changed on
+// 2026-10-28 (testsupport's with_words_of_2026_10_28). Skipped when there is no reference Python.
 
 #include <QtTest>
 
@@ -85,11 +86,13 @@ private slots:
         QVERIFY2(py.finished && py.exit_code == 0, py.err.constData());
         const auto cpp = genko::test::run(genko::test::genko_cli(), {"schema"}, QProcessEnvironment::systemEnvironment());
         QVERIFY(cpp.finished && cpp.exit_code == 0);
+        // (the user's decisions of 2026-10-28: filter_raster's glow and add_layer's kind in this build's words)
+        const std::string theirs = genko::test::with_words_of_2026_10_28(py.out.toStdString());
+        QVERIFY(theirs != py.out.toStdString());
         std::string where;
-        QVERIFY2(genko::test::strict_equal(genko::core::parse_python_json(cpp.out.toStdString()),
-                                           genko::core::parse_python_json(py.out.toStdString()), &where),
+        QVERIFY2(genko::test::strict_equal(genko::core::parse_python_json(cpp.out.toStdString()), genko::core::parse_python_json(theirs), &where),
                  where.c_str());
-        QCOMPARE(cpp.out, py.out);
+        QCOMPARE(cpp.out, QByteArray::fromStdString(theirs));
     }
 };
 
