@@ -32,8 +32,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/brush_presets.cpp",
         "native/src/app/main_window_brush_presets.cpp",
@@ -74,8 +74,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/api/cli.cpp",
         "native/src/core/brush_dabs.cpp",
@@ -113,8 +113,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/brush_presets.cpp",
         "native/src/api/cli.cpp",
@@ -154,8 +154,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/abr.cpp",
         "native/src/render/abr_map.cpp",
@@ -199,8 +199,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/brush_presets.cpp",
         "native/src/api/cli.cpp",
@@ -240,8 +240,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/brush_presets.cpp",
         "native/src/render/brushes.cpp",
@@ -284,8 +284,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/brush_panel.cpp",
         "native/src/render/patterns.cpp",
@@ -2241,8 +2241,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_brush_presets.cpp",
         "native/src/render/brush_presets.cpp",
@@ -2340,8 +2340,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_patterns.cpp",
         "native/src/render/patterns.cpp",
@@ -2444,8 +2444,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/fill_dialogs.cpp",
         "native/src/render/ops_masks.cpp",
@@ -2962,8 +2962,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/preferences.cpp",
         "native/src/app/workspace.cpp",
@@ -3063,8 +3063,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-c、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/export_as_dialog.cpp",
         "native/src/app/preferences.cpp",
@@ -3115,8 +3115,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-b、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/preferences.cpp",
         "native/src/app/dialogs.cpp",
@@ -3509,8 +3509,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-e、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/preferences.cpp",
         "native/src/app/camera_raw_open.cpp",
@@ -3833,8 +3833,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/preset_files.cpp",
         "native/src/app/main_window_brush_presets.cpp",
@@ -3890,8 +3890,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/preset_files.cpp",
         "native/src/app/main_window_brush_presets.cpp",
@@ -3940,8 +3940,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/preset_files.cpp",
         "native/src/app/preset_manager.cpp",
@@ -5828,8 +5828,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-b、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window.cpp",
         "native/tests/gui/test_gui_file.cpp"
@@ -5880,8 +5880,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-b、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_file.cpp",
         "native/tests/gui/test_gui_file.cpp"
@@ -5930,8 +5930,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-b、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_file.cpp",
         "native/tests/gui/test_gui_file.cpp"
@@ -6193,8 +6193,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-c、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/copy.cpp",
         "native/src/render/codecs/resize.cpp",
@@ -6252,8 +6252,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-c、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/web_export.cpp",
         "native/src/app/export_as_dialog.cpp",
@@ -6343,8 +6343,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-c、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/export.cpp",
         "native/src/app/export_as_dialog.cpp",
@@ -6433,8 +6433,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-c、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/web_export.cpp",
         "native/src/app/main_window_export.cpp",
@@ -6472,8 +6472,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-c、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/web_export.cpp",
         "native/src/app/main_window_export.cpp",
@@ -6571,8 +6571,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-c、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/web_export.cpp",
         "native/src/render/codecs/web.cpp",
@@ -6623,8 +6623,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-b、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/file_info.cpp",
         "native/src/render/ops_formats.cpp",
@@ -6898,8 +6898,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-b、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/open_file.cpp",
         "native/src/app/dialogs.cpp",
@@ -6944,8 +6944,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-b、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/open_file.cpp",
         "native/src/render/codecs/metadata.cpp",
@@ -7000,8 +7000,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-b、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/open_dialog.cpp",
         "native/src/formats/open_file.cpp",
@@ -7303,8 +7303,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-b、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/session.cpp",
         "native/src/app/main_window_file.cpp",
@@ -7345,8 +7345,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-b、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window.cpp",
         "native/src/app/session.cpp",
@@ -7398,8 +7398,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-b、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/copy.cpp",
         "native/src/formats/file_xmp.cpp",
@@ -7446,8 +7446,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-b、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window.cpp",
         "native/src/app/main_window_file.cpp",
@@ -7854,8 +7854,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/core/lens.cpp",
@@ -7911,8 +7911,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -7965,8 +7965,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D0、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D0、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/app/filter_menu.cpp",
@@ -8028,8 +8028,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D0、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D0、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/app/filter_menu.cpp",
@@ -8091,8 +8091,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D0、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D0、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -8146,8 +8146,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D0、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D0、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -8212,8 +8212,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -8266,8 +8266,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -8331,8 +8331,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -8400,8 +8400,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -8454,8 +8454,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -8508,8 +8508,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -8563,8 +8563,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_gallery_blur.cpp",
@@ -8617,8 +8617,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_gallery_blur.cpp",
@@ -8671,8 +8671,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_gallery_blur.cpp",
@@ -8725,8 +8725,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_gallery_blur.cpp",
@@ -8790,8 +8790,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_gallery_blur.cpp",
@@ -8842,8 +8842,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_camera_raw.cpp",
@@ -8962,8 +8962,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -9020,8 +9020,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -9075,8 +9075,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -9130,8 +9130,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -9185,8 +9185,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -9240,8 +9240,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -9295,8 +9295,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -9361,8 +9361,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -9427,8 +9427,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -9480,8 +9480,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -9521,8 +9521,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -9562,8 +9562,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -9603,8 +9603,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -9644,8 +9644,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -9685,8 +9685,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -9726,8 +9726,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -9767,8 +9767,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -9808,8 +9808,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -9849,8 +9849,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -9890,8 +9890,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -9931,8 +9931,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -9972,8 +9972,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10013,8 +10013,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10065,8 +10065,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10106,8 +10106,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10147,8 +10147,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10188,8 +10188,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10229,8 +10229,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10270,8 +10270,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10311,8 +10311,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10352,8 +10352,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10400,8 +10400,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10441,8 +10441,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10482,8 +10482,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10523,8 +10523,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10564,8 +10564,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10605,8 +10605,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10646,8 +10646,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10687,8 +10687,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10728,8 +10728,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10769,8 +10769,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10810,8 +10810,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10851,8 +10851,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10892,8 +10892,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10933,8 +10933,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -10974,8 +10974,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -11015,8 +11015,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -11056,8 +11056,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -11097,8 +11097,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -11138,8 +11138,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -11179,8 +11179,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -11220,8 +11220,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -11261,8 +11261,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -11302,8 +11302,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -11343,8 +11343,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -11384,8 +11384,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -11425,8 +11425,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/gallery_kinds.cpp",
         "native/src/core/filter_kinds.cpp",
@@ -11479,8 +11479,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D0、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D0、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/filter_menu.cpp",
         "native/tests/gui/test_gui_filters.cpp"
@@ -11524,8 +11524,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/core/lens.cpp",
@@ -11638,8 +11638,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -11704,8 +11704,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -11758,8 +11758,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -11813,8 +11813,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -11868,8 +11868,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -11922,8 +11922,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -11976,8 +11976,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12031,8 +12031,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12085,8 +12085,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12140,8 +12140,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12195,8 +12195,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12249,8 +12249,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12311,8 +12311,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12366,8 +12366,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12421,8 +12421,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12476,8 +12476,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12531,8 +12531,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12597,8 +12597,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12652,8 +12652,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12705,8 +12705,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12758,8 +12758,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12812,8 +12812,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/render_picture.cpp",
@@ -12865,8 +12865,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12919,8 +12919,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -12973,8 +12973,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/render_picture.cpp",
@@ -13026,8 +13026,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/render_picture.cpp",
@@ -13079,8 +13079,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -13143,8 +13143,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -13207,8 +13207,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -13271,8 +13271,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -13336,8 +13336,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -13401,8 +13401,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -13456,8 +13456,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -13511,8 +13511,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -13566,8 +13566,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -13621,8 +13621,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -13676,8 +13676,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -13731,8 +13731,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -13786,8 +13786,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -13841,8 +13841,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -13894,8 +13894,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/vanishing.cpp",
         "native/src/render/vanishing.cpp",
@@ -13958,8 +13958,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -14012,8 +14012,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 D1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 D1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/filter_kinds.cpp",
         "native/src/render/fx_engine.cpp",
@@ -14050,8 +14050,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_paint.cpp",
         "native/src/core/ops_layers.cpp",
@@ -14094,8 +14094,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/preset_store.cpp",
         "native/src/api/cli.cpp",
@@ -14128,8 +14128,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/grd.cpp",
         "native/src/api/cli.cpp",
@@ -14163,8 +14163,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/gradient_presets.cpp",
         "native/src/api/cli.cpp",
@@ -14195,8 +14195,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/gradient_presets.cpp",
         "native/src/api/cli.cpp",
@@ -14229,8 +14229,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/gradient_presets.cpp",
         "native/src/api/cli.cpp",
@@ -14262,8 +14262,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/gradients_panel.cpp",
         "native/src/app/main_window_paint.cpp",
@@ -16352,8 +16352,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-b、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/open_file.cpp",
         "native/src/app/main_window_file.cpp",
@@ -19232,8 +19232,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-c、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/copy.cpp",
         "native/src/app/export_as_dialog.cpp",
@@ -19982,8 +19982,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/layer_styles.cpp",
         "native/src/render/layer_styles.cpp",
@@ -20034,8 +20034,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/layer_styles.cpp",
         "native/src/render/layer_styles.cpp",
@@ -20094,8 +20094,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_styles.cpp",
         "native/src/app/main_window_styles.cpp",
@@ -20148,8 +20148,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/layer_styles.cpp",
         "native/src/render/layer_styles.cpp",
@@ -20209,8 +20209,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_styles.cpp",
         "native/src/app/main_window_styles.cpp",
@@ -20259,8 +20259,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_styles.cpp",
         "native/src/app/main_window_styles.cpp",
@@ -20307,8 +20307,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/layer_styles.cpp",
         "native/src/render/layer_styles.cpp",
@@ -20359,8 +20359,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_styles.cpp",
         "native/src/app/main_window_styles.cpp",
@@ -20407,8 +20407,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/layer_styles.cpp",
         "native/src/render/layer_styles.cpp",
@@ -20459,8 +20459,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_styles.cpp",
         "native/src/app/main_window_styles.cpp",
@@ -20509,8 +20509,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/layer_styles.cpp",
         "native/src/render/layer_styles.cpp",
@@ -20561,8 +20561,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/layer_styles.cpp",
         "native/src/render/layer_styles.cpp",
@@ -20613,8 +20613,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/layer_styles.cpp",
         "native/src/render/layer_styles.cpp",
@@ -20665,8 +20665,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_styles.cpp",
         "native/src/app/main_window_styles.cpp",
@@ -20717,8 +20717,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/layer_styles.cpp",
         "native/src/render/layer_styles.cpp",
@@ -20769,8 +20769,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/layer_styles.cpp",
         "native/src/render/layer_styles.cpp",
@@ -20821,8 +20821,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_styles.cpp",
         "native/src/app/main_window_styles.cpp",
@@ -20854,8 +20854,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_styles.cpp",
         "native/src/app/main_window_styles.cpp",
@@ -20902,8 +20902,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/layer_styles.cpp",
         "native/src/render/layer_styles.cpp",
@@ -23025,8 +23025,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/ops_layers.cpp",
         "native/src/render/composite.cpp",
@@ -23216,8 +23216,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-c、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/web_export.cpp",
         "native/src/app/main_window_export.cpp",
@@ -27501,8 +27501,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_paint_tools.cpp",
         "native/src/render/paint_tools/effects.cpp",
@@ -27535,8 +27535,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_paint_tools.cpp",
         "native/src/render/paint_tools/effects.cpp",
@@ -27577,8 +27577,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/raster_ops.cpp",
         "native/src/render/paint_fill.cpp",
@@ -27623,8 +27623,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_paint_tools.cpp",
         "native/src/render/paint_tools/effects.cpp",
@@ -27693,8 +27693,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_paint_tools.cpp",
         "native/src/render/paint_tools/effects.cpp",
@@ -27728,8 +27728,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_paint_tools.cpp",
         "native/src/render/paint_tools/effects.cpp",
@@ -27763,8 +27763,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/raster_ops.cpp",
         "native/src/render/paint_fill.cpp",
@@ -27919,8 +27919,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_paint_tools.cpp",
         "native/src/render/paint_tools/effects.cpp",
@@ -27960,8 +27960,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/dabs/lines.cpp",
         "native/src/app/main_window_actions.cpp",
@@ -28001,8 +28001,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_paint_tools.cpp",
         "native/src/render/paint_tools/effects.cpp",
@@ -28038,8 +28038,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_paint_tools.cpp",
         "native/src/render/paint_tools/effects.cpp",
@@ -28080,8 +28080,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_paint_tools.cpp",
         "native/src/render/paint_tools/effects.cpp",
@@ -28153,8 +28153,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/dabs/lines.cpp",
         "native/src/render/dab_ops.cpp",
@@ -28498,8 +28498,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_patterns.cpp",
         "native/src/render/pattern_library.cpp",
@@ -28539,8 +28539,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/pat.cpp",
         "native/src/api/cli.cpp",
@@ -28574,8 +28574,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/pat.cpp",
         "native/src/api/cli.cpp",
@@ -28609,8 +28609,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/pattern_library.cpp",
         "native/src/api/cli.cpp",
@@ -28654,8 +28654,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_patterns.cpp",
         "native/src/app/patterns_panel.cpp",
@@ -28699,8 +28699,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/pattern_library.cpp",
         "native/src/render/preset_store.cpp",
@@ -28742,8 +28742,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/pattern_library.cpp",
         "native/src/render/preset_store.cpp",
@@ -28784,8 +28784,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/patterns.cpp",
         "native/src/render/pattern_library.cpp",
@@ -28819,8 +28819,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_patterns.cpp",
         "native/src/app/patterns_panel.cpp",
@@ -28851,8 +28851,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_patterns.cpp",
         "native/src/render/pattern_library.cpp",
@@ -31305,8 +31305,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/style_presets.cpp",
         "native/src/api/cli.cpp",
@@ -31339,8 +31339,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/style_presets.cpp",
         "native/src/api/cli.cpp",
@@ -31373,8 +31373,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/style_presets.cpp",
         "native/src/api/cli.cpp",
@@ -31407,8 +31407,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/style_presets.cpp",
         "native/src/api/cli.cpp",
@@ -31441,8 +31441,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/style_presets.cpp",
         "native/src/api/cli.cpp",
@@ -31704,8 +31704,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/tool_presets.cpp",
         "native/src/app/tool_presets_panel.cpp",
@@ -31738,8 +31738,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/tool_presets.cpp",
         "native/src/app/tool_presets_panel.cpp",
@@ -31773,8 +31773,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/tool_presets.cpp",
         "native/src/app/tool_presets_panel.cpp",
@@ -31808,8 +31808,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/tool_presets.cpp",
         "native/src/app/tool_presets_panel.cpp",
@@ -31842,8 +31842,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/tool_presets.cpp",
         "native/src/app/tool_presets_panel.cpp",
@@ -31878,8 +31878,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_paint.cpp",
         "native/src/app/colours.cpp",
@@ -31911,8 +31911,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/ops_pages.cpp",
         "native/tests/unit/test_dab_lines.cpp"
@@ -31950,8 +31950,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/colours.cpp",
         "native/src/core/ops_pages.cpp",
@@ -31989,8 +31989,8 @@
       },
       "upstream_menu": null,
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_paint.cpp",
         "native/src/app/colours.cpp",
@@ -35420,8 +35420,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_patterns.cpp",
         "native/src/app/canvas_paint.cpp",
@@ -36738,8 +36738,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_paint.cpp",
         "native/src/app/canvas_paint.cpp",
@@ -38466,8 +38466,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/brush_settings_panel.cpp",
         "native/src/app/paint_panels.cpp",
@@ -38510,8 +38510,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/brushes_panel.cpp",
         "native/src/app/paint_panels.cpp",
@@ -38698,8 +38698,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_paint.cpp",
         "native/src/app/colours.cpp",
@@ -38773,8 +38773,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/gradients_panel.cpp",
         "native/src/app/paint_panels.cpp",
@@ -39276,8 +39276,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E3、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E3、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/patterns_panel.cpp",
         "native/src/app/paint_panels.cpp",
@@ -39397,8 +39397,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E6、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E6、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/styles_panel.cpp",
         "native/src/app/paint_panels.cpp",
@@ -39434,8 +39434,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/colours.cpp",
         "native/src/app/paint_panels.cpp",
@@ -39515,8 +39515,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/tool_presets_panel.cpp",
         "native/src/app/paint_panels.cpp",
@@ -40186,8 +40186,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_paint.cpp",
         "native/src/app/canvas_tools.cpp",
@@ -40277,8 +40277,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/brush_panel.cpp",
         "native/src/app/pen.cpp",
@@ -40314,8 +40314,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/dab_ops.cpp",
         "native/src/render/raster_ops.cpp",
@@ -40348,8 +40348,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/paint_tools.cpp",
         "native/src/app/paint_panels.cpp",
@@ -40399,8 +40399,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_paint.cpp",
         "native/src/app/gradients_panel.cpp",
@@ -40431,8 +40431,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E4、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E4、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_paint.cpp",
         "native/src/app/brush_panel.cpp",
@@ -40641,8 +40641,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/paint_tools.cpp",
         "native/src/app/paint_panels.cpp",
@@ -40671,8 +40671,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/paint_tools.cpp",
         "native/src/app/paint_panels.cpp",
@@ -40696,8 +40696,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/paint_tools.cpp",
         "native/src/app/paint_panels.cpp",
@@ -40726,8 +40726,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/paint_tools.cpp",
         "native/src/app/paint_panels.cpp",
@@ -40751,8 +40751,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/paint_tools.cpp",
         "native/src/app/paint_panels.cpp",
@@ -40776,8 +40776,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E5、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E5、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/paint_tools.cpp",
         "native/src/app/paint_panels.cpp",
@@ -41124,8 +41124,8 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-a、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/codecs/png.cpp",
         "native/src/render/png.cpp",
@@ -41165,8 +41165,8 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-a、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/codecs/jpeg.cpp",
         "native/src/render/png.cpp",
@@ -41204,8 +41204,8 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-a、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/codecs/tiff.cpp",
         "native/src/render/tiff_webp.cpp",
@@ -41244,8 +41244,8 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-a、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/codecs/webp.cpp",
         "native/src/render/tiff_webp.cpp",
@@ -41282,8 +41282,8 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-a、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/codecs/gif.cpp",
         "native/src/render/gif.cpp",
@@ -41322,8 +41322,8 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-a、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/codecs/bmp.cpp",
         "native/src/render/bmp.cpp",
@@ -41359,8 +41359,8 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-a、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/codecs/tga.cpp",
         "native/src/render/png.cpp",
@@ -41391,8 +41391,8 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-a、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/codecs/ico.cpp",
         "native/src/render/png.cpp",
@@ -41425,8 +41425,8 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-a、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/codecs/pnm.cpp",
         "native/src/render/png.cpp",
@@ -41459,8 +41459,8 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-a、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/codecs/qoi.cpp",
         "native/src/render/png.cpp",
@@ -41493,8 +41493,8 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-a、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/codecs/exr.cpp",
         "native/src/render/png.cpp",
@@ -41527,8 +41527,8 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-a、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/codecs/hdr.cpp",
         "native/src/render/png.cpp",
@@ -41559,8 +41559,8 @@
       "upstream_source": "crates/codecs/src/format.rs",
       "limitations": "AVIFは非既定featureの出力のみ。各形式の色・深度・metadata capabilityを別々に検査",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-a、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/codecs/avif.cpp",
         "native/src/render/png.cpp",
@@ -41654,8 +41654,8 @@
       "label_ja": "PhotoCraft形式互換",
       "kind": "cross_cutting",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-f、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/zip.cpp",
         "native/src/render/zstd.cpp",
@@ -41695,8 +41695,8 @@
       "label_ja": "PSD/PSB未知ブロックと編集意味の保持",
       "kind": "cross_cutting",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-d、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/psd.cpp",
         "native/src/render/import_psd.cpp",
@@ -41743,8 +41743,8 @@
       "label_ja": "RAW復号・現像",
       "kind": "cross_cutting",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 F-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 F-e、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/raw.cpp",
         "native/src/core/raw_develop.cpp",
@@ -41842,8 +41842,8 @@
       "label_ja": "ブラシ詳細ダイナミクス・再生",
       "kind": "cross_cutting",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E1、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/dabs/dynamics.cpp",
         "native/src/render/dabs/coverage.cpp",
@@ -41877,8 +41877,8 @@
       "label_ja": "ABR/GRD/PAT等の形式別プリセット互換",
       "kind": "cross_cutting",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC4 E2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC4 E2、PC4 として統合 7fb07f8）",
+      "acceptance_status": "Linux V3 合格（PC4 の出口、凍結 7fb07f8、2026-10-28）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/abr.cpp",
         "native/src/render/abr_map.cpp",
