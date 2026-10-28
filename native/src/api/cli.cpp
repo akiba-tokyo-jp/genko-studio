@@ -80,6 +80,8 @@
 #include "render/codecs/codecs.hpp"
 #include "render/png.hpp"
 #include "render/timelapse.hpp"
+#include "service/actions.hpp"
+#include "service/automate.hpp"
 #include "storage/doctor.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/gc.hpp"
@@ -1237,6 +1239,9 @@ int new_book(const QStringList& args, bool ascii) {
     return 0;
 }
 
+int apply_to(const fs::path& dir, const Json& ops, const std::string& agent, bool dry_run, std::optional<std::int64_t> expect,
+             const std::string& txn, const std::string* script, bool ascii);
+
 int apply(const QStringList& args, bool ascii) {
     static constexpr Option kOptions[] = {{"--dry-run", false}, {"--expect-revision", true}, {"--agent", true}, {"--txn", true}};
     Arguments a;
@@ -1265,6 +1270,13 @@ int apply(const QStringList& args, bool ascii) {
         a.value("--agent").value_or(QString()).isEmpty()
             ? (is_studio_project(dir) ? std::string("legacy:unknown") : std::string(core::kLegacyActor))
             : a.value("--agent")->toStdString();
+    return apply_to(dir, ops, agent, dry_run, expect, txn, nullptr, ascii);
+}
+
+// `genko apply`'s ops applied to the book in `dir` and saved; with `script` (PC5 I-0: `genko script`), steps — checked
+// and run by service/automate.hpp, their pseudo ops made ops — saved under the script's name in the journal.
+int apply_to(const fs::path& dir, const Json& ops, const std::string& agent, bool dry_run, std::optional<std::int64_t> expect,
+             const std::string& txn, const std::string* script, bool ascii) {
     refuse_legacy(dir);
     storage::ProjectLock lock(dir, agent);
     lock.try_acquire();
@@ -1272,6 +1284,7 @@ int apply(const QStringList& args, bool ascii) {
     // Read inside the lock, so a concurrent writer's changes are never overwritten.
     const storage::LoadResult loaded = storage::load_document(dir);
     if (loaded.report.source_version < 4) throw storage::NeedsMigration(dir, loaded.report.source_version);
+    if (script != nullptr) service::automate::check_steps(ops, core::Actor(agent));  // (no gate op, no undo; an agent's ops only)
 
     // A retry of a transaction saved before gets its revision back, whatever revision the book has reached since
     // (schema-v4 §4.3); then the base revision is checked.
@@ -1320,7 +1333,8 @@ int apply(const QStringList& args, bool ascii) {
     }
 
     const core::CommandBus bus(render::ops_registry());
-    const core::ApplyResult result = bus.apply(loaded.document, ops, core::Actor(agent), dry_run);
+    const core::ApplyResult result = script != nullptr ? service::automate::run_steps(loaded.document, ops, core::Actor(agent), dry_run)
+                                                       : bus.apply(loaded.document, ops, core::Actor(agent), dry_run);
     Json out = Json::object();
     out["ok"] = true;
     out["applied"] = result.applied;
@@ -1336,6 +1350,7 @@ int apply(const QStringList& args, bool ascii) {
         request.base_revision = loaded.document.revision;
         request.ops = result.journal_ops;
         request.txn = txn;
+        if (script != nullptr) request.script = *script;  // (PC5 I-0: the journal's 「スクリプト: <name>」)
         const bool lapse = render::timelapse::is_on(result.doc);  // (タイムラプス: the pages this save changes)
         Json before;
         if (lapse) {
@@ -2560,6 +2575,117 @@ int copy_command(const QStringList& args, bool ascii) {
     return 0;
 }
 
+// `genko script <src> <steps>` (PC5 I-0, SPEC.md AUTO-01: スクリプト → 参照…'s command line): a script's steps — a JSON array
+// of ops, {"steps": […]} or one op a line — applied to the book as `genko apply` applies ops (its lock, journal, --agent,
+// --dry-run, --expect-revision and --txn, the same reply), checked first (no gate op, no undo; an agent's ops only), their
+// pseudo ops made ops; the journal names the change by the script (--name, else the file's stem).
+int script_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--dry-run", false}, {"--expect-revision", true}, {"--agent", true}, {"--txn", true}, {"--name", true}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 2, "src, steps", a)) return usage("genko script: " + *error);
+    std::optional<std::int64_t> expect;
+    if (const auto value = a.value("--expect-revision")) {
+        expect = int_option(*value);
+        if (!expect) return usage("genko script: argument --expect-revision: invalid int value: " + core::py_repr_str(value->toStdString()));
+    }
+    const std::string txn = a.value("--txn").value_or(QString()).toStdString();
+    if (!txn.empty() && !core::is_txn_id(txn)) return usage("genko script: --txn takes 32 lowercase hex digits");
+    const QString source = a.positional[1];
+    const Json steps = source == QLatin1String("-") ? service::automate::read_steps(read_stdin()) : service::automate::read_steps_file(path_arg(source));
+    std::string name = a.value("--name").value_or(QString()).trimmed().toStdString();
+    if (name.empty()) name = source == QLatin1String("-") ? std::string("script") : core::path_to_utf8(path_arg(source).stem());
+    const fs::path dir = path_arg(a.positional[0]);
+    const std::string agent =
+        a.value("--agent").value_or(QString()).isEmpty()
+            ? (is_studio_project(dir) ? std::string("legacy:unknown") : std::string(core::kLegacyActor))
+            : a.value("--agent")->toStdString();
+    return apply_to(dir, steps, agent, a.flag("--dry-run"), expect, txn, &name, ascii);
+}
+
+// `genko batch <inputs…>` (PC5 I-0, SPEC.md AUTO-01: ファイル → 自動処理 → バッチ…'s command line; PC5 I-e its window): each
+// picture (opened as a book of one page) or .genko book in turn through the steps (--steps <file>: a script's; --action
+// <name>: an オートアクション, played back on each page), then written — --out <folder>: each page a file (コピーを保存, the
+// format --format names, same: the picture's own), --save: each book in place (never a picture), --dry-run: nothing.
+// {"ok", "files", "errors", "skipped"} with --json; exit 1 when a file failed.
+int batch_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--out", true},     {"--save", false},    {"--dry-run", false},       {"--steps", true},
+                                          {"--action", true},  {"--format", true},   {"--quality", true},        {"--prefix", true},
+                                          {"--suffix", true},  {"--recurse", false}, {"--stop-on-error", false}, {"--agent", true},
+                                          {"--json", false},   {"--name", true}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, static_cast<std::size_t>(args.size()), "inputs", a)) {
+        if (a.positional.empty() || error->rfind("the following arguments are required", 0) != 0) return usage("genko batch: " + *error);
+    }
+    if (a.positional.empty()) return usage("genko batch: the following arguments are required: inputs");
+    if (a.value("--steps").has_value() == a.value("--action").has_value()) return usage("genko batch: give --steps <file> or --action <name>");
+    const int ways = (a.value("--out") ? 1 : 0) + (a.flag("--save") ? 1 : 0) + (a.flag("--dry-run") ? 1 : 0);
+    if (ways != 1) return usage("genko batch: give --out <folder>, --save or --dry-run");
+    service::automate::Output output;
+    if (const auto out = a.value("--out")) {
+        output.to = service::automate::Output::To::Folder;
+        output.folder = path_arg(*out);
+    } else {
+        output.to = a.flag("--save") ? service::automate::Output::To::Book : service::automate::Output::To::None;
+    }
+    if (const auto format = a.value("--format")) {
+        std::string f = format->trimmed().toLower().toStdString();
+        if (!f.empty() && f[0] == '.') f.erase(0, 1);
+        const auto exts = formats::copy_extensions();
+        const std::string ext = f == "jpeg" ? "jpg" : f == "tiff" ? "tif" : f;
+        if (f != "same" && std::find(exts.begin(), exts.end(), ext) == exts.end()) return usage("genko batch: not a format this build writes: ." + f);
+        output.format = f;
+    }
+    if (const auto q = a.value("--quality")) {
+        bool ok = false;
+        const int v = q->trimmed().toInt(&ok);
+        if (!ok || v < 0 || v > 12) return usage("genko batch: argument --quality: 0..12");
+        output.quality = v;
+    }
+    output.prefix = a.value("--prefix").value_or(QString()).toStdString();
+    output.suffix = a.value("--suffix").value_or(QString()).toStdString();
+
+    service::automate::Options options;
+    options.actor = core::Actor(a.value("--agent").value_or(QString()).isEmpty() ? std::string(core::kLegacyActor) : a.value("--agent")->toStdString());
+    options.stop_on_error = a.flag("--stop-on-error");
+    Json steps;
+    std::string name;
+    if (const auto file = a.value("--steps")) {
+        steps = service::automate::read_steps_file(path_arg(*file));
+        name = core::path_to_utf8(path_arg(*file).stem());
+    } else {
+        name = a.value("--action")->toStdString();
+        const Json saved = service::actions::load();
+        const auto found = saved.find(name);
+        if (found == saved.end()) return fail("no action " + core::py_repr_str(name), "not_found", ascii, 1);
+        steps = (*found)["ops"];
+        options.recorded = true;
+    }
+    options.script = a.value("--name").value_or(QString()).trimmed().isEmpty() ? name : a.value("--name")->trimmed().toStdString();
+    std::vector<fs::path> given;
+    for (const QString& p : a.positional) given.push_back(path_arg(p));
+    service::automate::InputOptions listing;
+    listing.recurse = a.flag("--recurse");
+    const service::automate::Inputs inputs = service::automate::list_inputs(given, listing);
+    service::automate::Result result = service::automate::run(inputs.items, steps, output, options);
+    Json skipped = inputs.skipped;
+    for (const Json& s : result.skipped) skipped.push_back(s);
+    result.skipped = std::move(skipped);
+    if (a.flag("--json")) {
+        print_json(result.json(), ascii);
+    } else {
+        std::string lines;
+        for (const Json& done : result.files) {
+            if (done.contains("output")) lines += done["output"].get<std::string>() + "\n";
+            if (done.contains("outputs")) {
+                for (const Json& o : done["outputs"]) lines += o.get<std::string>() + "\n";
+            }
+        }
+        write_text(lines, stdout);
+        for (const Json& e : result.errors) write_text(e["input"].get<std::string>() + ": " + e["error"].get<std::string>() + "\n", stderr);
+    }
+    return result.errors.empty() ? 0 : 1;
+}
+
 }  // namespace
 
 int run_cli(int argc, char** argv) {
@@ -2606,6 +2732,8 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("tool-presets")) return tool_presets_command(args, ascii);  // (PC4 E2: tool.presets.*)
         if (command == QLatin1String("presets")) return presets_command(args, ascii);  // (PC4 E2: edit.presets.*)
         if (command == QLatin1String("styles")) return styles_command(args, ascii);  // (PC4 E6: style.presets.*)
+        if (command == QLatin1String("script")) return script_command(args, ascii);  // (PC5 I-0: 自動処理の土台)
+        if (command == QLatin1String("batch")) return batch_command(args, ascii);    // (PC5 I-0: 自動処理の土台)
         if (command == QLatin1String("studio")) return studio_command(args, ascii);
         if (command == QLatin1String("mcp")) return mcp_command(args);
         if (command == QLatin1String("serve")) return serve_command(args);

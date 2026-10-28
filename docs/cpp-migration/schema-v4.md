@@ -84,7 +84,8 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 
 1. 新しい素材（筆跡ブロブ、ラスター、`.state.json`、大きい op 記録 `.ops.json`）を確定する。
 2. `prepare` 行を追記して fsync:
-   `{"v":4,"kind":"prepare","txn":"<32桁16進>","action":"edit|undo|redo|recover","rev":N+1,"base_rev":N,"actor":"…","at":<epoch秒>,"before":"sha256:…(state)","after":"sha256:…(state)","project_sha256":"<新しい project.json バイト列の sha256 16進>","target":"<undo/redo 対象の txn>"?,"ops":[…]?,"ops_asset":"sha256:…"?,"audit":[…]?}`
+   `{"v":4,"kind":"prepare","txn":"<32桁16進>","action":"edit|undo|redo|recover","rev":N+1,"base_rev":N,"actor":"…","at":<epoch秒>,"before":"sha256:…(state)","after":"sha256:…(state)","project_sha256":"<新しい project.json バイト列の sha256 16進>","target":"<undo/redo 対象の txn>"?,"ops":[…]?,"ops_asset":"sha256:…"?,"audit":[…]?,"script":"<名前>"?}`
+   - `script`（PC5 I-0、SPEC.md AUTO-01）: その変更をしたスクリプト・バッチ・スクリプトイベントの名前（イベントは `<名前>（<イベント>）`）。無ければ書かない。読み手は知らないキーとして飛ばしてよい（Undo の列には効かない）。
 3. `project.json` を一時ファイル → fsync → rename → フォルダーの fsync（POSIX）。
 4. `audit` があれば `studio/audit.jsonl` に `{"v":4,"txn":…,"rev":…,"actor":…,"at":…,"changes":[…],"via"?:"undo|redo"}` を追記して fsync。
 5. `commit` 行 `{"v":4,"kind":"commit","txn":…,"rev":N+1}` を追記して fsync。ここで初めて「保存済み」とする。

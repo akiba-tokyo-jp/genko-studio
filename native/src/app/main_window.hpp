@@ -28,6 +28,7 @@
 #include "render/codecs/format.hpp"
 #include "render/image.hpp"
 #include "render/proof.hpp"
+#include "service/script_events.hpp"
 
 class QCheckBox;
 class QComboBox;
@@ -555,6 +556,18 @@ public:
     // 管理（手順を見る・並べ替える・外す）… (shown, modeless; tests)
     QDialog* manage_actions();
     QMenu* actions_menu() const { return actions_menu_; }
+    // --- 自動処理・スクリプト (PC5 I-0, SPEC.md AUTO-01: app/main_window_automate.cpp) --------------------------------
+    // Steps (service/automate.hpp: a script's, or a recorded action's — `recorded` — played on the page in front) run on
+    // the book in front as the window's person, checked first (no gate op, no undo), the journal naming the changes
+    // `label`: a run of ops one change, a pseudo op made ops on the book as it is then (a change of its own). False:
+    // refused or failed (said in the status line), nothing more done.
+    bool run_steps(const core::Json& steps, bool recorded, const QString& label);
+    // A script event raised by this window (I-e calls it where a book is made, opened, saved by the person, closed,
+    // printed or exported, and when the app starts): the steps bound to it run (service/script_events.hpp), unless steps
+    // of an event are running now; a table changed outside Genko is said once and runs nothing.
+    void script_event(service::script_events::Event event);
+    QMenu* automate_menu() const { return automate_menu_; }
+    QMenu* scripts_menu() const { return scripts_menu_; }
     // マスクを編集する (the layer panel's マスク menu): the pen and the eraser paint the mask of the layer drawn on.
     bool mask_edit = false;
     // 画像を読み込む…: a picture into the chosen panel (else over the whole page, out to the bleed), kept in the book as a
@@ -726,6 +739,16 @@ private:
     void build_file_actions();
     void build_file_menu(QMenu* file);
     QMenu* export_menu_ = nullptr;  // ファイル → 書き出し
+    // PC5 I-0 (app/main_window_automate.cpp): the commands of ファイル → 自動処理 ▸ and スクリプト ▸ (the later groups' own —
+    // I-e バッチ…・ドロップレットを作成…・画像プロセッサー…・スクリプトイベントマネージャー…・参照…, I-a すべての空のレイヤーを削除・
+    // すべてのレイヤー効果を統合, I-f コンタクトシート II…, I-g Photomerge…・ファイルをスタックとして読み込み…・統計…, I-h HDR Pro に統合…・
+    // 写真の切り抜きと角度補正 — made in build_automate_actions and put in build_automate_menus); 自動処理 ▸ is shown once it
+    // holds one.
+    void build_automate_actions();
+    void build_automate_menus();
+    QMenu* automate_menu_ = nullptr;  // ファイル → 自動処理
+    QMenu* scripts_menu_ = nullptr;   // ファイル → スクリプト
+    bool script_events_told_ = false;  // (a table changed outside Genko: said once)
 
 public:
     // PC4 F-b (app/main_window_file.cpp; SPEC.md FILE-01, the user's decision 4): ファイル's entrances.

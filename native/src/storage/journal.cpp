@@ -63,6 +63,7 @@ HistoryItem item_of(const Transaction& t) {
     item.actor = get(t.prepare, "actor") != nullptr ? *get(t.prepare, "actor") : Json(nullptr);
     item.before = ref_at(t.prepare, "before");
     item.after = ref_at(t.prepare, "after");
+    item.script = string_at(t.prepare, "script");
     return item;
 }
 

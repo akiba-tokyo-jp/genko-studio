@@ -187,6 +187,8 @@ genko_library(genko_app
     layer_style_dialog.cpp
     styles_panel.cpp
     main_window_styles.cpp
+    # PC5 I-0: ファイル → 自動処理 ▸・スクリプト ▸ (the frame), the steps run in the window, the script events it raises
+    main_window_automate.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

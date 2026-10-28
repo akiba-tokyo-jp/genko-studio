@@ -446,8 +446,12 @@ private slots:
                               QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"), QStringLiteral("ほかの原稿のページを取り込む…"),
                               QStringLiteral("PSD をレイヤーのまま読み込む…"), QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|"),
                               QStringLiteral("プリント…"), QStringLiteral("|"), QStringLiteral("タイムラプスを記録する"), QStringLiteral("タイムラプスを書き出す…"),
-                              QStringLiteral("|"), QStringLiteral("スクリプト ▸"), QStringLiteral("オートアクション ▸"), QStringLiteral("環境設定…"), QStringLiteral("|"),
-                              QStringLiteral("終了")}));
+                              QStringLiteral("|"), QStringLiteral("自動処理 ▸"), QStringLiteral("スクリプト ▸"), QStringLiteral("オートアクション ▸"),
+                              QStringLiteral("環境設定…"), QStringLiteral("|"), QStringLiteral("終了")}));
+        // (PC5 I-0, SPEC.md AUTO-01: 自動処理 ▸ is a frame, shown once a group puts a command in it)
+        QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate")) != nullptr);
+        QVERIFY(!w->findChild<QMenu*>(QStringLiteral("menu_automate"))->menuAction()->isVisible());
+        QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_scripts"))), QStringList{QStringLiteral("すべてのマスクを統合")});
         QMenu* exports = w->findChild<QMenu*>(QStringLiteral("menu_export"));
         QVERIFY(exports != nullptr);
         QCOMPARE(items(exports), (QStringList{QStringLiteral("PNG としてクイック書き出し"), QStringLiteral("書き出し形式…"), QStringLiteral("|"),

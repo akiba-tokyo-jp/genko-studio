@@ -17,7 +17,9 @@ native/
               原稿から読む state（スタジオの op ＝企画・脚本・ネーム・依頼・候補・採用・領域・仕上げ・承認・相談は core の op）
     service/  スタジオの道具（StudioService・HumanService：エージェントと人が呼ぶ 41 の道具と人だけの承認・正式な書き出し）と
               その部品（依頼と下絵の案内・取り込み・アタリ・点検・確認ページ・バックグラウンドの仕事・高解像度化・評価）、
-              利用者向けの言葉（wording）。`genko studio`・MCP・HTTP・アプリが同じものを呼ぶ
+              利用者向けの言葉（wording）。`genko studio`・MCP・HTTP・アプリが同じものを呼ぶ。自動処理の土台（PC5 I-0、SPEC AUTO-01：
+              オートアクションの置き場 actions、手順の読みと実行器 automate、スクリプトイベントの表 script_events。CLI とアプリが呼び、
+              MCP・HTTP からは呼ばない。formats の上に置くのは、再生（actions::replay）と agent_op の表が service にあるため）
     api/      CLI（genko）、HTTP、MCP、設定変換、エラー整形
     app/      Qt Widgets 画面、ペン、IME、案内（GUI だけが Qt Widgets に依存）。スタジオの画面（承認箱・工程・コマの詳細・資料・
               AI と作る・絵柄を選ぶ・genko:// のリンク）も。承認箱の中身（review_model）と AI と作る の Qt を使わない部分（ai_link・

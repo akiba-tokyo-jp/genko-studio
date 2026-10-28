@@ -100,6 +100,7 @@ void MainWindow::build_file_actions() {
     // (画像 → 複製…, image.duplicate: placed in ページ's menu after the paper's commands)
     make(QStringLiteral("act_duplicate_image"), QStringLiteral("複製…"), [this] { duplicate_dialog(); }, {},
          QStringLiteral("このページを、名前の無い 1 ページの原稿として複製します（統合した画像だけにもできます）"));
+    build_automate_actions();  // (PC5 I-0: 自動処理 ▸・スクリプト ▸'s commands, app/main_window_automate.cpp)
     setAcceptDrops(true);
 }
 
@@ -154,7 +155,13 @@ void MainWindow::build_file_menu(QMenu* file) {
     file->addSeparator();
     for (const char* name : {"act_timelapse", "act_timelapse_export"}) file->addAction(action(name));
     file->addSeparator();
-    file->addMenu(QStringLiteral("スクリプト"))->addAction(action("act_flatten_masks"));  // (PC3 B2: file.scripts.*)
+    // (PC5 I-0: 自動処理 ▸ above スクリプト ▸, as Photoshop's; their commands: app/main_window_automate.cpp)
+    automate_menu_ = file->addMenu(QStringLiteral("自動処理"));
+    automate_menu_->setObjectName(QStringLiteral("menu_automate"));
+    scripts_menu_ = file->addMenu(QStringLiteral("スクリプト"));
+    scripts_menu_->setObjectName(QStringLiteral("menu_scripts"));
+    scripts_menu_->addAction(action("act_flatten_masks"));  // (PC3 B2: file.scripts.*)
+    build_automate_menus();
     actions_menu_ = file->addMenu(QStringLiteral("オートアクション"));
     actions_menu_->setProperty("remade", true);
     connect(actions_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_actions_menu);

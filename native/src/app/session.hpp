@@ -164,6 +164,10 @@ public:
     // meanwhile): taken as it is when the book is still `base` (the same change, journal and ids as apply() makes), else
     // applied again with those ids first.
     core::ApplyResult apply_worked(const core::Json& ops, const DocPtr& base, core::ApplyResult result, const std::vector<std::string>& taken);
+    // (PC5 I-0, SPEC.md AUTO-01) The script, batch or script event the changes applied from now on come from: the journal
+    // names each by it (storage::SaveRequest::script); empty: none.
+    void set_script(std::string script) { script_ = std::move(script); }
+    const std::string& script() const { return script_; }
     // Take back the latest change (in memory when it is not saved yet, else through the journal). Throws
     // core::ApplyError("nothing to undo").
     void undo();
@@ -269,6 +273,7 @@ private:
         DocPtr before;
         DocPtr after;
         bool recover = false;          // adopting a recovery point (saved as action "recover")
+        std::string script;            // (PC5 I-0) the script it came from: the journal's "script"
         bool whole = false;            // 復帰: the book put back whole (its ops are not made again on another book)
         std::string txn;               // the transaction that first saved it (the journal's entry for it)
         bool on_disk = false;          // that transaction is committed: undo and redo now go through the journal
@@ -361,6 +366,7 @@ private:
     std::optional<std::int64_t> recover_floor_;
     bool trimmed_ = false;        // trim_history let changes of this session go to the journal
     std::uint64_t redo_floor_ = 0;  // apply(): what was undone before it (an action's seq below this) is not redone
+    std::string script_;            // (PC5 I-0) set_script
     mutable std::shared_ptr<const JournalRead> journal_read_;  // history(): the journal as last read
     // state_at(): the journal's states read last, by their refs (at most kStatesKept, the latest last: a book of many pages
     // read again and again — the History Brush's source changed — is not held without end)

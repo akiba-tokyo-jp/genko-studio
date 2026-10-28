@@ -209,6 +209,7 @@ SaveResult Saver::run(const SaveRequest& request, const std::function<Json(Asset
     if (!request.ops.is_null()) prepare["ops"] = ops_record;
     if (!ops_asset.empty()) prepare["ops_asset"] = ops_asset;
     if (!changes.empty()) prepare["audit"] = changes;
+    if (!request.script.empty()) prepare["script"] = request.script;  // (PC5 I-0: the script that made it)
 
     SaveResult result;
     result.revision = revision;

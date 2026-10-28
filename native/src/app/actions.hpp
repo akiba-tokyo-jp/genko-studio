@@ -14,10 +14,9 @@
 class QListWidget;
 
 // オートアクション (Python's genko/app/actions.py): record what was done (the ops) under a name, and do it again on another
-// page. The recording keeps the ops as they were applied. Played back, they go to the page on screen and the layer
-// being drawn on: "page" becomes the current page, "layer_id" the current layer, a panel the chosen panel (or none),
-// and things the recording made (a layer, a tone, a line…) get new ids each time. Actions are kept in the settings
-// folder (actions.json), so every book can use them.
+// page. Where they are kept and how they are played back (load, store, recordable, replay …) is service/actions.hpp
+// (PC5 I-0: the batch, the droplets, the script events and the command line use them too); these are its calls in the
+// window's words (a QString name, a QString reason), with the dialog that looks at an action's steps.
 
 namespace genko::app {
 

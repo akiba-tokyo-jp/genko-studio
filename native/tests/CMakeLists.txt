@@ -571,6 +571,16 @@ genko_test(test_contract_codecs SOURCES contract/test_contract_codecs.cpp DEPS g
 genko_test(test_contract_copy SOURCES contract/test_contract_copy.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS contract TIMEOUT 900)
 add_dependencies(test_contract_copy genko)
+# PC5 I-0 (SPEC.md AUTO-01: 自動処理の土台): the steps' three forms and their errors, the ops no step may be and an agent's
+# ops only, the pseudo ops, the steps aimed at the pages, the runner's inputs, outputs' names, errors, stop and cancel, a
+# picture through no steps as コピーを保存 writes it, the actions kept by service/actions, the script events' sealed table.
+genko_test(test_automate SOURCES unit/test_automate.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 600)
+# PC5 I-0: `genko script` as `genko apply` (the same reply, the journal's script name; the gates, undo and an agent's ops
+# refused), `genko batch` of a folder of pictures (the files コピーを保存 writes, again under the next free names, --json, a
+# picture never written in place) and of a book (--save: its pages changed, the journal's name).
+genko_test(test_contract_automate SOURCES contract/test_contract_automate.cpp DEPS genko_test_support genko_service
+           LABELS contract TIMEOUT 900)
+add_dependencies(test_contract_automate genko)
 # The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
 # across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a
 # warped line's pictures within ARCHITECTURE.md §9: Python's homography comes from numpy's SVD).

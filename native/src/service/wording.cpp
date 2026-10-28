@@ -558,6 +558,25 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(cannot write over a file the book links: (.*))", "配置・リンクした元のファイルには書き出しません。別の名前か場所を選んでください: \\1"));
         r.push_back(rule(R"(too many files of that name: (.*))", "同じ名前のファイルが多すぎて、クイック書き出しの名前を決められません: \\1"));
         r.push_back(rule(R"(cannot write over the picture a book was opened from: (.*))", "開いた元の画像には書き出しません。別の名前か場所を選んでください: \\1"));
+        // (PC5 I-0, SPEC.md AUTO-01: the steps of a script, a batch, a script event — service/automate, script_events)
+        r.push_back(rule(R"(step ([0-9.]+) \(([a-z_]+)\): (.*))", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("手順 %1（%2）: %3").arg(m.captured(1), m.captured(2), error(m.captured(3)));
+        }));
+        r.push_back(rule(R"(step ([0-9.]+): (\S+) cannot be a step .*)", "手順 \\1: \\2 は手順に入れられません（承認とページのロックは、人が画面でします）"));
+        r.push_back(rule(R"(step ([0-9.]+): undo is not a step.*)", "手順 \\1: 元に戻すは手順に入れられません（手順の変更はまとめて元に戻せます）"));
+        r.push_back(rule(R"(step ([0-9.]+): (\S+) is not an op an agent may run.*)", "手順 \\1: \\2 は AI が流せない操作です（MCP の apply_ops が受ける操作だけ）"));
+        r.push_back(rule(R"(step ([0-9.]+): not an op.*)", "手順 \\1 が操作の形ではありません（{\"op\": 操作の名前, …引数} で書きます）"));
+        r.push_back(rule(R"(line (\d+): (.*))", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("手順の %1 行目が読めません（%2）").arg(m.captured(1), reason(m.captured(2)));
+        }));
+        r.push_back(rule("the steps are larger than 1 MiB", "手順のファイルが大きすぎます（1 MiB まで）"));
+        r.push_back(rule(R"(more than (\d+) steps)", "手順が多すぎます（\\1 まで）"));
+        r.push_back(rule(R"(the steps are run page by page: (.*))", "手順をページごとに流せません（\\1）"));
+        r.push_back(rule(R"(the script was changed after it was bound: (.*))",
+                         "スクリプト「\\1」は結び付けた後で変わりました。スクリプトイベントマネージャーで選び直してください"));
+        r.push_back(rule("a picture's own file is never written: write the batch into a folder", "元の画像には書きません。書き出すフォルダーを選んでください"));
+        r.push_back(rule(R"(more than (\d+) files to take: choose fewer)", "ファイルが多すぎます（\\1 個まで）"));
+        r.push_back(rule(R"(no action (.*))", "オートアクション \\1 がありません"));
         r.push_back(rule(R"(the colour profile cannot be read \((.*)\))", "カラープロファイルを読み込めません"));
         r.push_back(rule(R"(the file cannot be read \(it is larger than 2 GiB\))", "ファイルが大きすぎて読み込めません（2 GiB まで）"));
         // (this build's own: put_raster reads only a regular file — not a device or a pipe, whose reading may not end)

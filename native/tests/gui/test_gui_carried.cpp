@@ -28,7 +28,10 @@
 #include "app/main_window.hpp"
 #include "gui_support.hpp"
 #include "core/smart.hpp"
+#include "service/script_events.hpp"
 #include "storage/asset_store.hpp"
+#include "storage/fsutil.hpp"
+#include "storage/journal.hpp"
 #include "storage/reader.hpp"
 
 using namespace genko;
@@ -169,6 +172,63 @@ private slots:
         for (const core::Layer& l : book.window->current_page()->layers) found = found || l.title == "足した";
         QVERIFY(found);
         for (const char* name : {"影", "混ぜ"}) app::actions::remove(QString::fromUtf8(name));
+    }
+
+    // PC5 I-0 (SPEC.md AUTO-01): steps run in the window — checked first (a gate never a step), the journal naming the
+    // change —, a pseudo op made ops on the book as it is; the script events bound to an action run as the window's
+    // person, a table changed outside Genko runs nothing, no event while an event's steps run; ファイル → 自動処理 ▸ hidden
+    // until a group puts a command in it, スクリプト ▸ beside it.
+    void stepsAndScriptEventsRunInTheWindow() {
+        Book book;
+        app::MainWindow* w = book.window.get();
+        w->go_to_page(1);
+        const std::size_t steps = w->session().history().done.size();
+        QVERIFY(!w->run_steps(Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "a"}}, Json{{"op", "name_ok"}, {"page", 1}}}), false,
+                              QStringLiteral("承認")));
+        QCOMPARE(w->session().history().done.size(), steps);  // (refused before anything ran)
+        QVERIFY(w->status_label()->text().contains(QStringLiteral("手順に入れられません")));
+        QVERIFY(w->run_steps(Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "スクリプト"}}}), false, QStringLiteral("メモ")));
+        QCOMPARE(book.page(0).note, std::string("スクリプト"));
+        w->session().save_now();
+        QVERIFY(w->session().wait_saved(std::chrono::milliseconds(30000)));
+        QCOMPARE(storage::journal::stacks(book.path).undo.back().script, std::string("メモ"));
+        // a recorded action, played on the page in front, by a script event
+        QVERIFY(!app::actions::store(QStringLiteral("影"), Json::array({Json{{"op", "add_layer"}, {"page", 3}, {"kind", "paint"}, {"name", "影"}, {"id", "s"}}})));
+        namespace events = service::script_events;
+        events::Table table;
+        table.enabled = true;
+        table.bindings.push_back({"saveDocument", "影を足す", std::nullopt, std::nullopt, std::string("影")});
+        QVERIFY(!events::save(table));
+        const auto shades = [&book] {
+            int n = 0;
+            for (const core::Layer& l : book.page(0).layers) n += l.title == "影" ? 1 : 0;
+            return n;
+        };
+        w->script_event(events::Event::SaveDocument);
+        QCOMPARE(shades(), 1);
+        w->script_event(events::Event::Print);  // (not bound)
+        QCOMPARE(shades(), 1);
+        {
+            const events::Firing running;  // (an event's steps running: no event)
+            w->script_event(events::Event::SaveDocument);
+        }
+        QCOMPARE(shades(), 1);
+        w->session().save_now();
+        QVERIFY(w->session().wait_saved(std::chrono::milliseconds(30000)));
+        QCOMPARE(storage::journal::stacks(book.path).undo.back().script, std::string("影を足す（ドキュメントを保存）"));
+        // the table changed outside Genko: nothing runs, said
+        const std::string bytes = storage::read_file(events::path());
+        storage::write_atomic(events::path(), bytes + "\n");
+        w->script_event(events::Event::SaveDocument);
+        QCOMPARE(shades(), 1);
+        QVERIFY(w->status_label()->text().contains(QStringLiteral("Genko の外で変わりました")));
+        std::filesystem::remove(events::path());
+        std::filesystem::remove(events::seal_path());
+        app::actions::remove(QStringLiteral("影"));
+        // ファイル → 自動処理 ▸ (hidden while empty) and スクリプト ▸
+        QVERIFY(w->automate_menu() != nullptr && w->scripts_menu() != nullptr);
+        QVERIFY(!w->automate_menu()->menuAction()->isVisible());
+        QVERIFY(w->scripts_menu()->actions().contains(book.act("act_flatten_masks")));
     }
 
     // --- 画像を読み込む --------------------------------------------------------------------------------------------
