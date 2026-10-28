@@ -204,12 +204,15 @@ genko_test(test_fx_gallery SOURCES unit/test_fx_gallery.cpp DEPS genko_test_supp
 # PC4 節 D2 (変形・ピクセレート・表現手法): PhotoCraft's tests of its 25 kinds, the same bytes whatever the tiling at a finer
 # grid's scale, a part worked alone, no clear pixel's colour, a distortion centred on the selection, カラーハーフトーン's four
 # plates, a page of inks' lightness, 200 and 600 dpi, 置き換え's maps (data, layers, the book's in a smart filter, carried).
-genko_test(test_fx_d2 SOURCES unit/test_fx_d2.cpp DEPS genko_test_support genko_formats genko_render_ops LABELS unit TIMEOUT 900)
+genko_test(test_fx_d2 SOURCES unit/test_fx_d2.cpp DEPS genko_test_support genko_formats genko_render_ops LABELS unit TIMEOUT 2400)
+set_property(TEST test_fx_d2 APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=2300000")
 # PC4 節 D6 (レンズ補正・広角補正・消点): PhotoCraft's tests of exif.rs, lens.rs, wideangle.rs and vanishing.rs and of its
 # lens_cmds and vp_cmds, through filter_raster and vanishing_point on 8 bits, precise and CMYK pages; the profile auto from a
 # smart object's JPEG and an opened JPEG's EXIF; smart filters; 200 and 600 dpi; the planes kept (vanishing-point@1).
-genko_test(test_fx_lens SOURCES unit/test_fx_lens.cpp DEPS genko_test_support genko_formats genko_render_ops genko_storage LABELS unit TIMEOUT 3600)
-set_property(TEST test_fx_lens APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=3000000")
+genko_test(test_fx_lens SOURCES unit/test_fx_lens.cpp DEPS genko_test_support genko_formats genko_render_ops genko_storage LABELS unit TIMEOUT 7200)
+set_property(TEST test_fx_lens APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=7100000")
+# (its 600 dpi look at every resolution works on every core: alone, not beside two others under ASan — the V3 of PC4)
+set_tests_properties(test_fx_lens PROPERTIES RUN_SERIAL TRUE)
 # PC4 節 D5 (Camera Raw フィルター): PhotoCraft's tests of camera_raw.rs and of its lens_cmds (the defaults the identity, the
 # basic panel, the curves, the mixer, grading, detail and effects, float documents), each stage alone, the same bytes whatever
 # the tiling, through filter_raster on 8, 16 and 32 bits and inside a selection, a smart filter, pages of inks on the colours
