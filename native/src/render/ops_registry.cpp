@@ -258,6 +258,17 @@ void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& befo
             }
             return true;
         };
+        // (PC5-0, the user's decision of 2026-10-28: a layer cut at the panels is made precise when it was an empty paint
+        // layer before the op — a new paint layer getting its first pixels —; one that had 8-bit pixels keeps them, and
+        // the layers an op makes itself (import_psd's, which may be 8-bit for the book's budget) are as before)
+        const auto was_empty = [&](const core::Layer& layer) {
+            if (was == nullptr) return false;
+            for (const core::Layer& old : was->layers) {
+                if (old.id == layer.id)
+                    return (old.raster_png == nullptr || old.raster_png->empty()) && old.color_raster == nullptr && old.ink_raster == nullptr;
+            }
+            return false;
+        };
         std::vector<std::size_t> todo;
         for (std::size_t i = 0; i < seen.layers.size(); ++i) {
             const core::Layer& layer = seen.layers[i];
@@ -266,7 +277,7 @@ void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& befo
             if ((bitmap || indexed) && (layer.role == core::LayerRole::Name || layer.role == core::LayerRole::Draft)) continue;
             // (deep: a paint layer a precise raster can hold — render/page's and set_color_mode's rule)
             if (deep && (layer.kind != core::LayerKind::Raster || layer.role == core::LayerRole::Tone || layer.stroke_count() || !layer.patches.empty() ||
-                         layer.panel_clip || layer.effect || layer.screen || layer.color)) {
+                         (layer.panel_clip && !was_empty(layer)) || layer.effect || layer.screen || layer.color)) {
                 continue;
             }
             todo.push_back(i);

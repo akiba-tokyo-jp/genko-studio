@@ -64,8 +64,10 @@ bool becomes_precise(const core::Page& page, const core::Layer& layer) {
     const bool deep = !page.color && page.rgb && page.rgb->depth > 8 && !page.rgb->table;
     const bool empty = layer.color_raster == nullptr && layer.ink_raster == nullptr && (layer.raster_png == nullptr || layer.raster_png->empty()) &&
                        layer.stroke_count() == 0 && layer.patches.empty() && !shape_parts::any(layer);
-    return deep && empty && layer.kind == core::LayerKind::Raster && layer.role != core::LayerRole::Tone && !layer.panel_clip && !layer.effect &&
-           !layer.screen && !layer.color;
+    // (PC5-0, the user's decision of 2026-10-28: a layer cut at the panels too — a new paint layer's default —, its pixels
+    // laid cut at them as an 8-bit layer's are, its lines cut where they are drawn)
+    return deep && empty && layer.kind == core::LayerKind::Raster && layer.role != core::LayerRole::Tone && !layer.effect && !layer.screen &&
+           !layer.color;
 }
 
 float dither_noise(int x, int y) {
