@@ -1060,6 +1060,16 @@ void rasterize_lines(OpContext& c) {
     Document& doc = c.doc;
     const std::size_t at = core::require_page(doc, c.op);
     const Page& page = doc.page(at);
+    if (const Json* type_layer = core::get(c.op, "layer_id"); type_layer != nullptr && !type_layer->is_null()) {
+        // (type@1, PC5 G-0: a type layer — テキストレイヤーをラスタライズ — drawn into its own pixels, its settings kept, as
+        // rasterize_layer does)
+        const std::size_t i = core::layer_by_id(page, core::py_str(*type_layer));
+        if (page.layers[i].kind != LayerKind::Type) throw OpError("layer " + page.layers[i].id + " is not a type layer");
+        const std::string id = page.layers[i].id;
+        rasterize(doc, at, i);
+        c.report = Json{{"id", id}, {"lines", Json::array()}};
+        return;
+    }
     std::vector<std::string> named;
     if (const Json* given = core::get(c.op, "ids"); given != nullptr && !given->is_null()) {
         if (!given->is_array() || given->empty()) throw OpError("ids is a list of the lines' ids");

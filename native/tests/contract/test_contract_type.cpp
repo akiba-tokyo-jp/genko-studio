@@ -260,13 +260,13 @@ private slots:
         QCOMPARE((*doc.story[0].native_type)["runs"][0]["start"], Json(2));
         doc = run(doc, Json{{"op", "edit_type"}, {"page", 1}, {"layer_id", "t1"}, {"text", "あいうえ"}});
         QCOMPARE(layer_of(doc, "t1")->type->text, std::string("あいうえ"));
-        const Json info = run_ops(doc, Json::array({Json{{"op", "type_info"}, {"page", 1}, {"layer_id", "t1"}}})).report;
+        const Json info = run_ops(doc, Json::array({Json{{"op", "type_info"}, {"page", 1}, {"layer_id", "t1"}}})).results[0];
         QCOMPARE(info["text"], Json("あいうえ"));
         QCOMPARE(info["graphemes"], Json(4));
         QCOMPARE(info["shape"], Json("line"));
         QCOMPARE(info["runs"][0]["char"]["size_mm"], Json(8));
         QCOMPARE(info["paragraphs"].size(), std::size_t{1});
-        const Json line_info = run_ops(doc, Json::array({Json{{"op", "type_info"}, {"line", "l1"}}})).report;
+        const Json line_info = run_ops(doc, Json::array({Json{{"op", "type_info"}, {"line", "l1"}}})).results[0];
         QCOMPARE(line_info["runs"][1]["char"]["underline"], Json(true));
         // refused: no text, not a type layer, empty text
         QVERIFY(refusal(doc, Json::array({Json{{"op", "edit_type"}, {"page", 1}, {"layer_id", "paint"}, {"text", "x"}}})).find("is not a type layer") !=
@@ -291,6 +291,12 @@ private slots:
         QVERIFY(r != nullptr && r->kind == core::LayerKind::Raster && !r->type);
         QVERIFY(!core::type_text::uses_type(flat));
         QVERIFY2(worst(proof_bytes(flat), proof_bytes(doc)) <= 2, qPrintable(QString::number(worst(proof_bytes(flat), proof_bytes(doc)))));
+        // テキストレイヤーをラスタライズ (rasterize_lines' layer_id): the same
+        const core::Document flat2 = run(doc, Json{{"op", "rasterize_lines"}, {"page", 1}, {"layer_id", "t1"}});
+        QCOMPARE(proof_bytes(flat2), proof_bytes(flat));
+        // 作業用パスを作成 (text_to_path) of a type layer's text: the page's work path
+        const core::Document path = run(doc, Json{{"op", "text_to_path"}, {"page", 1}, {"id", "t1"}});
+        QVERIFY(path.page(0).work_path && !path.page(0).work_path->subpaths.empty());
         const core::Document two = run(doc, Json{{"op", "duplicate_page"}, {"page", 1}});
         QCOMPARE(two.pages.size(), std::size_t{2});
         bool copied = false;
