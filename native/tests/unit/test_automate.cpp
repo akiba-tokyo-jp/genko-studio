@@ -12,6 +12,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -53,6 +54,15 @@ std::pair<std::string, std::string> thrown(F&& f) {
 void write(const fs::path& file, const std::string& bytes) {
     std::ofstream out(file, std::ios::binary);
     out << bytes;
+}
+
+// A white picture's book of w × h at 72 ppi (新規… → 画像).
+core::Document picture(int w, int h) {
+    formats::NewImage image;
+    image.title = "p";
+    image.width = w;
+    image.height = h;
+    return formats::new_image(image).doc;
 }
 
 // A white picture of w × h at 72 ppi as a PNG's bytes.
@@ -133,7 +143,7 @@ private slots:
         QVERIFY(thrown([&] { automate::check_steps(nested, agent); }).second.rfind("step 1.1: resize_pages", 0) == 0);
         QVERIFY(thrown([&] { automate::check_steps(Json::array({Json{{"op", "set_note"}}}), core::Actor("legacy:unknown")); }).first.empty());
         // a pseudo op is checked by what it stands for: fit_image is resize_pages, refused for an agent when it is run
-        const core::Document doc = formats::new_image(formats::NewImage{"p", 200, 100}).doc;
+        const core::Document doc = picture(200, 100);
         const Json fit = Json::array({Json{{"op", "fit_image"}, {"page", 1}, {"width_px", 100}, {"height_px", 100}}});
         automate::check_steps(fit, agent);
         const auto [code, message] = thrown([&] { automate::run_steps(doc, fit, agent); });
@@ -146,7 +156,7 @@ private slots:
         QVERIFY(automate::pseudo_op("fit_image"));
         QVERIFY(automate::pseudo_op("conditional_mode_change"));
         QVERIFY(!automate::pseudo_op("resize_pages"));
-        const core::Document doc = formats::new_image(formats::NewImage{"p", 200, 100}).doc;
+        const core::Document doc = picture(200, 100);
         const Json fit{{"op", "fit_image"}, {"page", 1}, {"width_px", 100}, {"height_px", 100}};
         QCOMPARE(automate::expand_pseudo(doc, fit),
                  Json::array({Json{{"op", "resize_pages"}, {"page", 1}, {"width_px", 50 * 2}, {"height_px", 50}, {"resample", "bicubic"}}}));
@@ -172,8 +182,8 @@ private slots:
         const Json steps = Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "a"}}, fit,
                                         Json{{"op", "set_note"}, {"page", 1}, {"note", "b"}}});
         const core::ApplyResult ran = automate::run_steps(doc, steps, core::Actor("human:leaf"));
-        QCOMPARE(page_px(ran.doc, true), 100.0);
-        QCOMPARE(page_px(ran.doc, false), 50.0);
+        QCOMPARE(std::round(page_px(ran.doc, true)), 100.0);  // (resize_pages keeps the paper in mm)
+        QCOMPARE(std::round(page_px(ran.doc, false)), 50.0);
         QCOMPARE(ran.doc.page(0).note, std::string("b"));
         QCOMPARE(ran.applied, Json::array({"set_note", "resize_pages", "set_note"}));
         QCOMPARE(ran.journal_ops.size(), std::size_t(3));
@@ -192,7 +202,7 @@ private slots:
 
     // The steps aimed at the pages: each page of a picture, a book's pages but the covers; an action played on each.
     void stepsAimedAtThePages() {
-        const core::Document doc = formats::new_image(formats::NewImage{"p", 20, 10}).doc;
+        const core::Document doc = picture(20, 10);
         const Json aimed = automate::aim_steps(doc, Json::array({Json{{"op", "set_note"}, {"page", 9}, {"note", "x"}}}), true, false);
         QCOMPARE(aimed, Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "x"}}}));
         // an action: its layer the picture's top one, a new id for what it makes

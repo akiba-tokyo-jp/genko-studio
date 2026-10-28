@@ -75,7 +75,8 @@ private slots:
         QTemporaryDir dir;
         const fs::path root = path_of(dir.path());
         write_book(root / "a.genko", 40, 20);
-        write_book(root / "b.genko", 40, 20);
+        fs::copy(root / "a.genko", root / "b.genko", fs::copy_options::recursive);  // (the same book twice: its ids too)
+        fs::remove(root / "b.genko" / "project.lock");
         const Json ops = Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "メモ"}},
                                       Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "L1"}, {"name", "影"}}});
         write(root / "ops.json", ops.dump());
