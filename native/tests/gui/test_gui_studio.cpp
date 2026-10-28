@@ -665,7 +665,7 @@ private slots:
         QVERIFY(fs::exists(draft_file(book.path, ticket)));
         const fs::path target = book.root / "saved.genko";
         desk.answers.responder->save_path = [&](const QString&, const QString&) { return QString::fromStdString(core::path_to_utf8(target)); };
-        desk.window->action(QStringLiteral("act_save_as"))->trigger();  // (別の場所に保存…: it waits for the copy)
+        desk.window->action(QStringLiteral("act_save_as"))->trigger();  // (別名で保存…: it waits for the copy)
         QVERIFY(desk.session->path() && *desk.session->path() == target);
         app::Drafts::instance().flush();
         QVERIFY(fs::exists(draft_file(target, ticket)));

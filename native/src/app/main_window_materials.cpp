@@ -39,6 +39,7 @@
 #include "core/paths.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "render/ops_patterns.hpp"
 #include "render/color_edit.hpp"
 #include "render/effects.hpp"
 #include "render/materials.hpp"
@@ -139,8 +140,8 @@ void MainWindow::build_material_dock() {
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    materials_dock_->setWidget(scroll);  // (in the dock first, then the panel in it: styled once — build_tool_settings)
     scroll->setWidget(materials_);
-    materials_dock_->setWidget(scroll);
     materials_dock_->setMinimumWidth(200);
     // (for occasional work: its tab has a close button and it joins the row of tabs when opened)
     materials_dock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
@@ -233,7 +234,7 @@ void MainWindow::put_tone(const Json& item, bool ask_click) {
     }
     if (apply_ops(Json::array({op}))) {
         after_tone(op["id"].get<std::string>());
-        flash(QStringLiteral("「%1」を貼りました。ペンで足す・消しゴムで削る").arg(QString::fromStdString(core::py_str(core::py_get(item, "name", "")))), 3500);
+        flash(QStringLiteral("「%1」を貼りました。ブラシで足す・消しゴムで削る").arg(QString::fromStdString(core::py_str(core::py_get(item, "name", "")))), 3500);
     }
 }
 
@@ -329,6 +330,7 @@ std::optional<Json> MainWindow::copy_selection_items() {
         flash(QStringLiteral("選んだ範囲に、描く先のレイヤーの絵がありません"), 3000);
         return std::nullopt;
     }
+    items.patterns = render::patterns_of_parts(book(), items.shapes);  // (patterns@1, PC4 E3: carried with them)
     return render::selection::items_to_json(items);
 }
 
@@ -418,7 +420,7 @@ void MainWindow::draw_effect_shape(const std::string& effect_id, const std::stri
     // the next pen line becomes a speed line's path, or a focus line's clear middle
     effect_shape_for_ = std::make_pair(effect_id, key);
     choose_tool(QStringLiteral("pen"));
-    flash(QStringLiteral("ペンで 1 本引きます（効果線の形になります。描く先のレイヤーには描かれません）"), 6000);
+    flash(QStringLiteral("ブラシツールで 1 本引きます（効果線の形になります。描く先のレイヤーには描かれません）"), 6000);
 }
 
 bool MainWindow::effect_shape_stroke(const StrokeInput& stroke, const core::Page& page) {
@@ -442,11 +444,11 @@ bool MainWindow::import_image(std::optional<QString> chosen) {
     if (current_page() == nullptr) return false;
     const Asked asked = asking();  // (the book and page asked about: the file dialog waits for the person)
     if (!session_->path()) {
-        flash(QStringLiteral("画像を読み込む前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        flash(QStringLiteral("画像を読み込む前に、原稿を保存します（ファイル → 別名で保存…）"), 6000);
         return false;
     }
     const QString file =
-        chosen ? *chosen : ask::open_path(this, QStringLiteral("画像を読み込む"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.gif *.psd *.psb)"));
+        chosen ? *chosen : ask::open_path(this, QStringLiteral("画像を読み込む"), QStringLiteral("画像 (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.gif *.psd *.psb *.tga *.ico *.pnm *.pbm *.pgm *.ppm *.pam *.pfm *.qoi *.exr *.hdr *.avif)"));
     if (file.isEmpty() || !still(asked)) return false;
     // (smart-objects@1, PC3 decision 2: a smart object of the file itself — its 16 bits, CMYK and profile kept —, laid as
     // the placed picture was: over the panel chosen, else over the page out to the bleed; app/main_window_smart.cpp)

@@ -15,10 +15,17 @@
 #include "core/masks.hpp"
 #include "core/pyconv.hpp"
 #include "core/vector.hpp"
+#include "core/file_info.hpp"
+#include "core/psd_keep.hpp"
 #include "core/ruby.hpp"
+#include "core/filter_kinds.hpp"
+#include "core/vanishing.hpp"
 #include "core/smart.hpp"
 #include "core/strokes.hpp"
 #include "core/version.hpp"
+#include "core/brush_dabs.hpp"
+#include "core/layer_styles.hpp"
+#include "core/patterns.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/reader.hpp"
 
@@ -185,6 +192,8 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
     if (layer.vector_mask) out["vector_mask"] = core::vector::to_json(*layer.vector_mask);
     if (layer.link) out["link"] = *layer.link;
     if (layer.lock_position) out["lock_position"] = true;
+    if (layer.native_psd) out["native_psd"] = core::to_json(*layer.native_psd);  // (psd-keep@1, PC4)
+    if (layer.style) out["style"] = *layer.style;  // (layer-styles@1, PC4 E6)
     if (placed) {
         out["asset"] = opt_string(layer.asset);
         out["frame_id"] = opt_string(layer.frame_id);
@@ -317,6 +326,9 @@ Json page_json(const core::Page& page, AssetStore& store) {
         if (page.spec.trim_origin_mm) spec["trim_origin_mm"] = Json::array({page.spec.trim_origin_mm->first, page.spec.trim_origin_mm->second});
         out["native_spec"] = std::move(spec);
     }
+    // (PC4: file-info@1's source file, psd-keep@1's kept resources and blocks — none: nothing written)
+    if (page.native_source) out["native_source"] = core::to_json(*page.native_source);
+    if (page.native_psd) out["native_psd"] = core::to_json(*page.native_psd);
     for (const auto& [key, value] : page.extra.items()) {
         if (!is_known_page_key(key)) out[key] = value;
     }
@@ -346,6 +358,7 @@ Json spec_to_json(const core::PageSpec& spec) {
         out["trim_h_mm"] = opt_num(spec.trim_h_mm);
     }
     if (spec.margins_mm && !spec.margins_mm->empty()) out["margins_mm"] = nums_json(*spec.margins_mm);
+    if (spec.grid) out["grid"] = *spec.grid;  // (image-grid@1, PC4)
     return out;
 }
 
@@ -381,8 +394,17 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     for (const auto& line : doc.story) {
         if (core::ruby::uses_feature(line)) features.emplace_back(core::kRubyLayoutFeature);
     }
-    // PC2a (adjustments@1): the 3D lookup tables the book's color_lookup corrections use (only those)
-    for (const std::string& ref : core::lut3d::refs_of(doc)) {
+    // PC2a (adjustments@1): the 3D lookup tables the book's color_lookup corrections use (only those) — on its pages and
+    // (PC4 F-f review P1-3) on the pages of the smart objects' contents its pages show, which the reader reads too
+    std::vector<std::string> lut_refs = core::lut3d::refs_of(doc);
+    for (const std::string& id : core::smart::used_contents(doc)) {
+        const auto found = doc.smart_contents.find(id);
+        if (found == doc.smart_contents.end() || !found->second || !found->second->page) continue;
+        for (const std::string& ref : core::lut3d::refs_of(*found->second->page)) {
+            if (std::find(lut_refs.begin(), lut_refs.end(), ref) == lut_refs.end()) lut_refs.push_back(ref);
+        }
+    }
+    for (const std::string& ref : lut_refs) {
         const auto table = doc.luts.find(ref);
         if (table == doc.luts.end() || !table->second) {
             throw core::Error("value", "the lookup table " + ref + " of a color_lookup correction is not held: the book is not written");
@@ -457,6 +479,19 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     }
     std::erase(features, std::string(core::kSmartObjectsFeature));  // (named while a smart object is shown)
     if (!smart_contents.empty()) features.emplace_back(core::kSmartObjectsFeature);
+    // PC4 節 D (filters@1): the files ops gave the smart filters (a displacement map), and the feature while a smart filter
+    // is one of フィルター's kinds or holds a file
+    core::validate_filters(doc);
+    const auto filter_files = core::filter_file_refs(doc);
+    for (const auto& [ref, suffix] : filter_files) {
+        if (const auto file = doc.filter_files.find(ref); file != doc.filter_files.end() && file->second) store.put_known(ref, *file->second, suffix);
+    }
+    std::erase(features, std::string(core::kFiltersFeature));
+    if (core::uses_filters(doc) || !filter_files.empty()) features.emplace_back(core::kFiltersFeature);
+    // PC4 節 D6 (vanishing-point@1): a page's planes of 消点 (its "vanishing"), the feature while a page keeps them
+    core::validate_vanishing(doc);
+    std::erase(features, std::string(core::kVanishingFeature));
+    if (core::uses_vanishing(doc)) features.emplace_back(core::kVanishingFeature);
     core::validate_ink_document(doc);
     core::validate_color_model(doc);
     bool modes = doc.color.has_value() || doc.rgb.has_value() || doc.text_gamma.has_value();
@@ -478,6 +513,45 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
                                                      {core::vector::kTransformFeature, core::vector::uses_transform(doc)},
                                                      {core::vector::kPageSpecFeature, core::vector::uses_page_spec(doc)}};
     for (const auto& [feature, used] : pc3) {
+        std::erase(features, std::string(feature));
+        if (used) features.emplace_back(feature);
+    }
+    // PC4 節 F: file-info@1, image-grid@1, psd-keep@1, formats@1, camera-raw@1 (each named while the book uses it), and the
+    // metadata and kept PSD blocks it names that only the book in memory holds (a book opened from a file)
+    core::validate_file_info(doc);
+    core::validate_psd_keep(doc);
+    const std::pair<std::string_view, bool> pc4f[] = {{core::kFileInfoFeature, core::uses_file_info(doc)},
+                                                      {core::kImageGridFeature, core::uses_image_grid(doc)},
+                                                      {core::kPsdKeepFeature, core::uses_psd_keep(doc)},
+                                                      {core::kFormatsFeature, core::smart::uses_formats(doc)},
+                                                      {core::kCameraRawFeature, core::smart::uses_camera_raw(doc)}};
+    for (const auto& [feature, used] : pc4f) {
+        std::erase(features, std::string(feature));
+        if (used) features.emplace_back(feature);
+    }
+    for (const auto& named : {core::file_info_assets(doc), core::psd_keep_assets(doc)}) {
+        for (const auto& [ref, suffix] : named) {
+            if (const auto held = doc.native_files.find(ref); held != doc.native_files.end() && held->second) store.put_known(ref, *held->second, suffix);
+        }
+    }
+    // PC4 E-0: brushes@1 (the dab brushes and their pictures — only those —, the lines' inputs, the brush state's kind and
+    // background) and patterns@1 (the book's patterns and their pictures), each named while the book uses it
+    core::validate_brushes(doc);
+    for (const std::string& ref : core::dab_asset_refs(doc.brush_custom)) {
+        const auto picture = doc.brush_tips.find(ref);
+        if (picture == doc.brush_tips.end() || !picture->second) {
+            throw core::Error("value", "the brush picture " + ref + " of the book's dab brushes is not held: the book is not written");
+        }
+        store.put_known(ref, *picture->second, ".png");
+    }
+    core::validate_patterns(doc);
+    for (const core::Pattern& pattern : doc.patterns) store.put_known(pattern.asset, *doc.pattern_files.at(pattern.asset), core::pattern_suffix(pattern));
+    // PC4 E6: layer-styles@1 (the layers' styles and the global light), named while the book uses it
+    core::validate_layer_styles(doc);
+    const std::pair<std::string_view, bool> pc4[] = {{core::kBrushesFeature, core::uses_brushes(doc)},
+                                                     {core::kPatternsFeature, core::uses_patterns(doc)},
+                                                     {core::kLayerStylesFeature, core::uses_layer_styles(doc)}};
+    for (const auto& [feature, used] : pc4) {
         std::erase(features, std::string(feature));
         if (used) features.emplace_back(feature);
     }
@@ -507,7 +581,15 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     brush["taper"] = doc.brush_taper;
     brush["curve"] = doc.brush_curve;
     if (core::py_truthy(doc.brush_custom)) brush["custom"] = doc.brush_custom;
+    if (doc.brush_kind) brush["kind"] = *doc.brush_kind;  // (brushes@1)
+    if (doc.brush_background_rgb) brush["background_rgb"] = ints_json(*doc.brush_background_rgb);
     out["brush"] = std::move(brush);
+    if (!doc.patterns.empty()) {  // (patterns@1)
+        Json patterns = Json::array();
+        for (const core::Pattern& pattern : doc.patterns) patterns.push_back(core::pattern_to_json(pattern));
+        out["patterns"] = std::move(patterns);
+    }
+    if (doc.global_light) out["global_light"] = core::global_light_json(*doc.global_light);  // (layer-styles@1, PC4 E6)
     out["spec"] = spec_to_json(doc.spec);
     if (Json color = color_json(store, doc.color, doc.rgb); !color.is_null() || doc.text_gamma) {
         // (the book's text_gamma, last, under its colour model: a default RGB one written for it)
@@ -522,6 +604,7 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     out["bible"] = std::move(bible);
     out["tickets"] = doc.tickets;
     out["studio"] = doc.studio;
+    if (doc.file_info && !doc.file_info->empty()) out["file_info"] = core::to_json(*doc.file_info);  // (file-info@1, PC4)
     if (!smart_contents.empty()) out["smart_contents"] = std::move(smart_contents);  // (smart-objects@1)
     Json pages = Json::array();
     for (const auto& page : doc.pages) pages.push_back(page_json(*page, store));

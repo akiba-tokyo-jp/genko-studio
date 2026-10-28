@@ -33,14 +33,16 @@ namespace {
 const std::map<QString, std::pair<QString, QString>>& titles() {
     static const std::map<QString, std::pair<QString, QString>> all{
         {QStringLiteral("select"), {QStringLiteral("選択（V）"), QStringLiteral("コマをクリックで選ぶ・フキダシをドラッグで動かす・ダブルクリックで打ち直す・何もない所のドラッグで表示を動かす")}},
-        {QStringLiteral("pen"), {QStringLiteral("ペン（B）"), QStringLiteral("描く先はレイヤー パネルで選んだレイヤー。Shift で直線、[ ] で太さ")}},
-        {QStringLiteral("eraser"), {QStringLiteral("消しゴム（E）"), QStringLiteral("ペンの線は触れた所で切れる。トーンの上では削る")}},
+        {QStringLiteral("pen"), {QStringLiteral("ブラシツール（B）"), QStringLiteral("描く先はレイヤー パネルで選んだレイヤー。Shift で直線、[ ] で太さ")}},
+        {QStringLiteral("eraser"), {QStringLiteral("消しゴムツール（E）"), QStringLiteral("ペンの線は触れた所で切れる。トーンの上では削る")}},
+        // (PC4 E1: brushes@1)
+        {QStringLiteral("pencil"), {QStringLiteral("鉛筆ツール"), QStringLiteral("縁のくっきりした線で描く。Shift で直線。「自動消去」で、描画色の所から描き始めると背景色で描く")}},
         {QStringLiteral("text"), {QStringLiteral("テキスト（T）"), QStringLiteral("台詞を入れたい所をクリックして打つ（Ctrl+Enter で決定）")}},
         {QStringLiteral("frame"), {QStringLiteral("コマ割り（F）"), QStringLiteral("コマの中をドラッグで割る（ほぼ水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで動かす・角をドラッグで形を変える。"
                                                                             "「作り方」で長方形・折れ線・フリーハンドにすると、新しいコマを描ける")}},
-        {QStringLiteral("picker"), {QStringLiteral("スポイト（I）"), QStringLiteral("クリックした所の色をペンの色にする")}},
+        {QStringLiteral("picker"), {QStringLiteral("スポイトツール（I）"), QStringLiteral("クリックした所の色を描画色にする")}},
         {QStringLiteral("zoom"), {QStringLiteral("虫めがね（Z）"), QStringLiteral("クリックで拡大、Alt＋クリックで縮小、ドラッグで囲んだ所を画面いっぱいに")}},
-        {QStringLiteral("fill"), {QStringLiteral("塗りつぶし（G）"), QStringLiteral("線で囲まれた所をクリックで塗る。隙間は「隙間を閉じる」の幅まで閉じる")}},
+        {QStringLiteral("fill"), {QStringLiteral("塗りつぶしツール（G）"), QStringLiteral("線で囲まれた所をクリックで塗る。隙間は「隙間を閉じる」の幅まで閉じる")}},
         {QStringLiteral("lassofill"), {QStringLiteral("囲って塗る（Shift+G）"), QStringLiteral("ドラッグで囲んだ所を塗る")}},
         {QStringLiteral("marquee"), {QStringLiteral("選択範囲ツール（M・L・W）"), QStringLiteral("ドラッグで選ぶ。中をドラッグで移動、□で拡大縮小、○で回転（Shift で 15° 刻み）")}},
         {QStringLiteral("vector"), {QStringLiteral("部分選択ツール（Shift+Y）"), QStringLiteral("ペンの線の制御点を動かす・足す・消す。線をつなぐ・切る・色を変える")}},
@@ -57,13 +59,23 @@ const std::map<QString, std::pair<QString, QString>>& titles() {
         {QStringLiteral("stamp"), {QStringLiteral("素材を置く"), QStringLiteral("素材パネルで選んだ素材を、クリックした所に置く")}},
         {QStringLiteral("move"), {QStringLiteral("移動ツール（Q）"),
                                   QStringLiteral("選んだレイヤー（リンクしたレイヤー・フォルダーの中も）をドラッグで動かす。Shift で縦・横・45° に、Ctrl+クリックでそこのレイヤーを選ぶ")}},
-        {QStringLiteral("gradient"), {QStringLiteral("グラデーション（U）"), QStringLiteral("ドラッグの向きに塗る。始めの点がはじめの色、終わりの点が終わりの色。選択範囲があればその中だけ")}},
+        {QStringLiteral("gradient"), {QStringLiteral("グラデーションツール（U）"), QStringLiteral("ドラッグの向きに塗る。始めの点がはじめの色、終わりの点が終わりの色。選択範囲があればその中だけ")}},
         {QStringLiteral("magiceraser"), {QStringLiteral("マジック消しゴムツール"), QStringLiteral("クリックした所に近い色の所を透明にする（描く先のペイントのレイヤー）")}},
         // (PC3 B4: the retouching tools, app/retouch_tools.cpp)
         {QStringLiteral("spotheal"), {QStringLiteral("スポット修復ブラシツール"), QStringLiteral("なぞった所のしみやごみを、まわりの絵から作って埋める")}},
         {QStringLiteral("heal"), {QStringLiteral("修復ブラシツール"), QStringLiteral("Alt+クリックで決めたコピー元の模様を、なぞった所の色になじませて写す")}},
         {QStringLiteral("clone"), {QStringLiteral("コピースタンプツール（S）"), QStringLiteral("Alt+クリックで決めたコピー元を、なぞった所にそのまま写す")}},
         {QStringLiteral("historybrush"), {QStringLiteral("ヒストリーブラシツール"), QStringLiteral("なぞった所を、履歴で選んだ状態（◆）の絵に塗り戻す")}},
+        // (PC4 E5: the brushes that change pixels, app/paint_tools.cpp)
+        {QStringLiteral("blurtool"), {QStringLiteral("ぼかしツール"), QStringLiteral("なぞった所の画素をぼかす")}},
+        {QStringLiteral("sharpentool"), {QStringLiteral("シャープツール"), QStringLiteral("なぞった所の画素をくっきりさせる")}},
+        {QStringLiteral("smudgetool"), {QStringLiteral("指先ツール"), QStringLiteral("なぞった向きに色をのばす")}},
+        {QStringLiteral("dodge"), {QStringLiteral("覆い焼きツール"), QStringLiteral("なぞった所を明るくする")}},
+        {QStringLiteral("burn"), {QStringLiteral("焼き込みツール"), QStringLiteral("なぞった所を暗くする")}},
+        {QStringLiteral("sponge"), {QStringLiteral("スポンジツール"), QStringLiteral("なぞった所の彩度を下げる・上げる")}},
+        {QStringLiteral("mixer"), {QStringLiteral("混合ブラシツール"), QStringLiteral("描画色の絵の具とカンバスの色を混ぜながら描く")}},
+        {QStringLiteral("bgeraser"), {QStringLiteral("背景消しゴムツール"), QStringLiteral("ブラシの中心の色に近い所を透明にする")}},
+        {QStringLiteral("colorreplace"), {QStringLiteral("色の置き換えツール"), QStringLiteral("ブラシの中心の色に近い所の色を描画色に置き換える")}},
     };
     return all;
 }
@@ -241,8 +253,13 @@ ToolSettings::ToolSettings(QWidget* parent) : QWidget(parent) {
     fold_->setCheckable(true);
     fold_->setToolTip(QStringLiteral("ツールの設定をたたむ・開く"));
     connect(fold_, &QPushButton::toggled, this, [this](bool on) { set_folded(on); });
+    badge_ = new QLabel;
+    badge_->setObjectName(QStringLiteral("tool_badge"));
+    theme::hint(badge_);
+    badge_->setVisible(false);
     auto* head = new QHBoxLayout;
     head->addWidget(title_, 1);
+    head->addWidget(badge_);
     head->addWidget(fold_);
     stack_widget_ = new QWidget;  // (the pages, one shown at a time, as tall as the one shown)
     stack_ = new QVBoxLayout(stack_widget_);
@@ -282,6 +299,12 @@ void ToolSettings::set_folded(bool on) {
     while (dock != nullptr && !dock->inherits("QDockWidget")) dock = dock->parentWidget();
     const int title_height = title_->width() > 0 ? title_->heightForWidth(title_->width()) : -1;  // (its lines at its width)
     if (dock != nullptr) dock->setMaximumHeight(on ? (title_height > 0 ? title_height : title_->sizeHint().height()) + 18 : QWIDGETSIZE_MAX);
+}
+
+void ToolSettings::set_badge(const QString& text) {
+    badge_->setText(text);
+    badge_->setToolTip(text.isEmpty() ? QString() : QStringLiteral("ブラシ パネルの「モード」が通常ではありません。この描画モードで、ペイントのレイヤーの画素に描き込みます"));
+    badge_->setVisible(!text.isEmpty());
 }
 
 void ToolSettings::show_tool(const QString& tool) {

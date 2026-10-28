@@ -3,12 +3,14 @@
 // object of that file, Photoshop's picture of it shown until it changes.)
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <climits>
 #include <cmath>
 #include <cstring>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -23,8 +25,12 @@
 #include <fstream>
 #endif
 
+#include "core/color_model.hpp"
+#include "core/color_raster.hpp"
 #include "core/ids.hpp"
 #include "core/ink.hpp"
+#include "core/psd_keep.hpp"
+#include "render/import_psd.hpp"
 #include "core/lut3d.hpp"
 #include "core/masks.hpp"
 #include "core/ops_util.hpp"
@@ -35,15 +41,24 @@
 #include "render/fill.hpp"
 #include "render/import_profile.hpp"
 #include "render/op_limits.hpp"
+#include "core/patterns.hpp"
+#include "render/ops_patterns.hpp"
 #include "render/ops_registry.hpp"
+#include "render/pat.hpp"
 #include "render/ink_canvas.hpp"
 #include "render/psd.hpp"
 #include "render/psd_adjust.hpp"
+#include "render/psd_filters.hpp"
+#include "render/smart_filters.hpp"
+#include "render/psd_keep.hpp"
 #include "render/psd_paths.hpp"
 #include "render/psd_shapes.hpp"
+#include "render/psd_effects.hpp"
+#include "core/layer_styles.hpp"
 #include "render/raster.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/ops_smart_parts.hpp"
+#include "render/raw.hpp"
 #include "render/selection.hpp"
 #include "render/smart_decode.hpp"
 
@@ -260,7 +275,15 @@ struct Placement {
 };
 
 // fileops.placed(page, size, fit)
-Placement placed(const core::Page& page, std::int64_t width, std::int64_t height, const std::string& fit) {
+// (PC4 F-d, `exact`: a page made of the file — its paper the file's pixels at its resolution: the page layer the file's
+// pixels, whatever their size)
+Placement placed(const core::Page& page, std::int64_t width, std::int64_t height, const std::string& fit, bool exact = false) {
+    if (exact) {
+        Placement out;
+        out.page_w = out.shown_w = std::max<std::int64_t>(1, width);
+        out.page_h = out.shown_h = std::max<std::int64_t>(1, height);
+        return out;
+    }
     const core::Num width_mm = page.spec.width_mm;
     const core::Num height_mm = page.spec.height_mm;
     const core::Rect bleed = page.bleed_rect_mm();  // (Python's dict makes both)
@@ -351,7 +374,9 @@ std::optional<SmartMade> smart_contents_of(core::Document& doc, const psd::File&
     }
     smart::FileInfo info;
     try {
-        info = smart::look_at(linked->data, "");
+        // (PC4 F-e: a TIFF-shaped camera RAW — NEF, ARW… — is known by its name's suffix alone)
+        const auto named_raw = core::smart::suffix_of_name(linked->name);
+        info = smart::look_at(linked->data, named_raw && raw::raw_suffix(*named_raw) ? *named_raw : std::string());
     } catch (const NotYetPorted&) {
         out.why = "unreadable";
         return out;
@@ -397,6 +422,17 @@ std::optional<SmartMade> smart_contents_of(core::Document& doc, const psd::File&
             use["bpc"] = way.bpc;
             contents->profile = std::move(use);
         }
+    }
+    if (info.format == "raw") {
+        // (PC4 F-e, camera-raw@1: Photoshop's Camera Raw settings are not read — Genko's default development, its colours
+        // its output space's —; Photoshop's picture of it shown until it is developed again: the import keeps `shown`)
+        try {
+            contents->raw = raw::default_raw(bytes);
+        } catch (const core::Error&) {
+            out.why = "unreadable";
+            return out;
+        }
+        contents->profile = Json::object({{"use", "embedded"}, {"intent", "relative"}, {"bpc", true}});
     }
     // (the item without the file's bytes, and where they go: written back as it was while the contents stay)
     const std::size_t at = static_cast<std::size_t>(linked->data.data() - linked->item.data());
@@ -476,24 +512,275 @@ SmartMade smart_settings(const core::Document& doc, const core::Page& page, cons
     return made;
 }
 
+// --- psd-keep@1 and the layers at their depth (PC4 F-d) ----------------------------------------------------------
+
+// Bytes kept with the book (Document::native_files, written as assets with their suffix), by their asset ref.
+std::string kept(core::Document& doc, std::string_view bytes) {
+    const std::string ref = core::bytes_ref(bytes);
+    if (!doc.native_files.contains(ref)) doc.native_files.emplace(ref, std::make_shared<const std::string>(bytes));
+    return ref;
+}
+
+// Blending ranges all at their default (each channel's source and destination 0..255: 00 00 ff ff twice).
+bool default_ranges(std::string_view ranges) {
+    if (ranges.size() % 8 != 0) return false;
+    static constexpr std::string_view kFull("\x00\x00\xff\xff\x00\x00\xff\xff", 8);
+    for (std::size_t at = 0; at < ranges.size(); at += 8) {
+        if (ranges.substr(at, 8) != kFull) return false;
+    }
+    return true;
+}
+
+// A Pascal name's bytes as text (each byte the code point of its value: the writer gives the same bytes back).
+std::string latin1_text(std::string_view bytes) {
+    std::string out;
+    for (const char c : bytes) {
+        const auto b = static_cast<unsigned char>(c);
+        if (b < 0x80) {
+            out += c;
+        } else {
+            out += static_cast<char>(0xC0 | (b >> 6));
+            out += static_cast<char>(0x80 | (b & 0x3F));
+        }
+    }
+    return out;
+}
+
+// What is kept of one file in all (its blocks and resources together): past it, the rest is not kept (said: `cut`).
+constexpr std::uint64_t kKeptBytesMax = std::uint64_t{1} << 30;
+
+// What one import keeps, and whether anything was left out (more blocks or resources than a layer or a page keeps, one
+// past kPsdBlockMaxBytes, all past kKeptBytesMax: the report's psd_blocks_cut).
+struct Keeping {
+    std::uint64_t bytes = 0;
+    bool cut = false;
+    // May `size` more bytes be kept as the `count`th of a list of at most kPsdKeptMax? (Else it is cut.)
+    bool room(std::size_t count, std::uint64_t size) {
+        if (count >= core::kPsdKeptMax || size > core::kPsdBlockMaxBytes || size > kKeptBytesMax - bytes) {
+            cut = true;
+            return false;
+        }
+        bytes += size;
+        return true;
+    }
+};
+
+// What the file's page holds that this build does not read (the page's resources and global blocks), the patterns of its
+// pattern blocks a fill took into the book left out of them (render/psd_keep's entries) — none when there is none. Its
+// layer comps and slices not when they may name a layer not made (`named_gone`: one not read, or the merged picture read).
+core::PsdPageKeep page_keep(core::Document& doc, const psd::File& file, const std::set<std::string>& patterns_taken, bool named_gone, Keeping& keeping) {
+    core::PsdPageKeep keep;
+    const std::vector<psd::File::ImageResource> resources = file.resources();
+    if (resources.size() > core::kPsdKeptMax) keeping.cut = true;  // (the reader holds one more than a page keeps)
+    for (const psd::File::ImageResource& r : resources) {
+        if (!core::psd_resource_kept(static_cast<int>(r.id))) continue;
+        if (named_gone && core::psd_resource_names_layers(static_cast<int>(r.id))) continue;
+        if (!keeping.room(keep.resources.size(), r.data.size())) continue;
+        keep.resources.push_back(core::PsdResource{static_cast<int>(r.id), latin1_text(r.name), kept(doc, r.data)});
+    }
+    const std::vector<psd::File::TaggedBlock> globals = file.global_blocks();
+    if (globals.size() > core::kPsdKeptMax) keeping.cut = true;
+    for (const psd::File::TaggedBlock& g : globals) {
+        if (!core::psd_global_kept(g.key)) continue;
+        if (core::psd_pattern_key(g.key)) {  // (the patterns no fill took)
+            std::vector<psd_keep::PatternEntry> entries = psd_keep::pattern_entries(g.data);
+            std::erase_if(entries, [&](const psd_keep::PatternEntry& e) { return patterns_taken.contains(e.id); });
+            if (entries.empty()) continue;
+            const std::string payload = psd_keep::pattern_payload(entries);
+            if (!keeping.room(keep.globals.size(), payload.size())) continue;
+            keep.globals.push_back(core::PsdGlobal{g.signature, g.key, kept(doc, payload)});
+            continue;
+        }
+        if (!keeping.room(keep.globals.size(), g.data.size())) continue;
+        keep.globals.push_back(core::PsdGlobal{g.signature, g.key, kept(doc, g.data)});
+    }
+    return keep;
+}
+
+// A layer's own (its blocks this build keeps — its locks' lspf only when it locks something: its bits this build does not
+// read kept so —, its blending ranges unless all at their default, its layer id): none when it has nothing and neither
+// its locks nor its page's (`ids`: its page keeps what names layers by their ids) ask for its id.
+std::optional<core::PsdLayerKeep> layer_keep(core::Document& doc, const psd::File& file, const psd::Layer& item, bool ids, bool& effects, Keeping& keeping) {
+    core::PsdLayerKeep keep;
+    if (file.blocks_cut(item)) keeping.cut = true;
+    for (const psd::File::TaggedBlock& b : file.blocks(item)) {
+        if (!core::psd_layer_block_kept(b.key)) continue;
+        if (b.key.size() != 4 || std::any_of(b.key.begin(), b.key.end(), [](char ch) { return ch < 0x20 || ch >= 0x7f; })) continue;
+        if (b.key == "lspf" && b.data.find_first_not_of('\0') == std::string_view::npos) continue;  // (no lock: nothing to keep)
+        if (!keeping.room(keep.blocks.size(), b.data.size())) continue;
+        keep.blocks.emplace_back(b.key, kept(doc, b.data));
+        effects = effects || (core::psd_effect_key(b.key) && !item.folder);  // (a folder's are not written back: no mark)
+    }
+    if (const std::string_view ranges = file.ranges(item); !ranges.empty() && !default_ranges(ranges) && keeping.room(0, ranges.size())) {
+        keep.ranges = kept(doc, ranges);
+    }
+    const auto locks = file.protection(item);
+    const auto id = file.layer_id(item);
+    if (keep.blocks.empty() && keep.ranges.empty() && !(ids && id) && !(locks && *locks != 0)) return std::nullopt;
+    if (id) keep.id = static_cast<std::int64_t>(*id);
+    return keep;
+}
+
+// layer-styles@1 (PC4 E6): the colour channels of a file's mode as Blend If names them.
+std::vector<std::string> blend_if_names(int mode) {
+    if (mode == 3) return {"red", "green", "blue"};
+    if (mode == 4) return {"cyan", "magenta", "yellow", "black"};
+    if (mode == 9) return {"lightness", "a", "b"};
+    if (mode == 1 || mode == 8) return {"gray"};
+    return {};
+}
+
+// layer-styles@1 (PC4 E6): a record's effects (lmfx, else lfx2), fill opacity (iOpa) and Blend If (its blending ranges) as
+// the layer's style (render/psd_effects) — the effects' blocks still kept, written back as they were while the style is
+// unchanged; the fill opacity and the ranges read so not kept besides. `light`: the file's global light when it is not
+// the book's (an effect that takes the global light takes this one as its own). Whether a style was made. `budget`: the file's one descriptor budget (its smart filters' too).
+bool style_from_record(core::Layer& layer, const psd::File& file, const psd::Layer& item, const psd_shapes::Placement& placement,
+                       const std::optional<std::array<double, 2>>& light, std::vector<std::string>& notes, std::size_t& budget) {
+    std::string_view effects;
+    bool multi = false;
+    std::optional<double> fill;
+    for (const psd::File::TaggedBlock& b : file.blocks(item)) {
+        if (b.key == "lmfx") {
+            effects = b.data;
+            multi = true;
+        } else if (b.key == "lfx2" && !multi) {
+            effects = b.data;
+        } else if (b.key == "iOpa") {
+            fill = psd_effects::fill_of_iopa(b.data);
+        }
+    }
+    Json style = Json{{"effects", Json::array()}};
+    if (!effects.empty()) {
+        if (std::optional<Json> read = psd_effects::style_of(effects, placement, notes, &budget)) style = std::move(*read);
+    }
+    const bool filled = fill && *fill < 1.0;
+    if (filled) style["fill_opacity"] = *fill;
+    Json blend_if = Json::array();
+    if (const std::string_view ranges = file.ranges(item); !ranges.empty() && !blend_if_names(file.mode()).empty()) {
+        blend_if = psd_effects::blend_if_of(ranges, blend_if_names(file.mode()));
+        if (!blend_if.empty()) style["blend_if"] = blend_if;
+    }
+    bool relit = false;
+    if (light) {  // (the book has another light: the file's taken by each effect that took it)
+        for (Json& e : style["effects"]) {
+            if (!e.value("global_light", false)) continue;
+            e["global_light"] = false;
+            e["angle"] = (*light)[0];
+            if (e.contains("altitude")) e["altitude"] = (*light)[1];
+            relit = true;
+        }
+    }
+    Json normal;
+    try {
+        normal = core::layer_style_spec(style);
+    } catch (const core::Error& error) {
+        notes.push_back(std::string("レイヤースタイルを読めませんでした（") + error.what() + "）");
+        return false;
+    }
+    if (normal.is_null()) return false;
+    layer.style = std::move(normal);
+    if (layer.native_psd) {
+        // (review P3-2: an iOpa of 255 says no fill opacity — kept to be written back as it was; one read as the style's
+        // fill opacity is written from it)
+        if (filled) std::erase_if(layer.native_psd->blocks, [](const auto& block) { return block.first == "iOpa"; });
+        // (review P2-7: effects that took the file's global light now hold its angle as their own — the file's effects
+        // block, written back, would take the book's: forgotten, the effects written from the style)
+        if (relit) std::erase_if(layer.native_psd->blocks, [](const auto& block) { return core::psd_effect_key(block.first); });
+        // (the ranges kept as they are: written back while they say the style's Blend If)
+        if (layer.native_psd->empty()) layer.native_psd.reset();
+    }
+    return true;
+}
+
+// Photoshop's locks (lspf: bit 0 transparency, 1 the pixels, 2 the position, 31 all) as the layer's own.
+void take_locks(core::Layer& layer, std::uint32_t locks) {
+    const bool all = (locks & 0x80000000u) != 0;
+    layer.lock_alpha = all || (locks & 1u) != 0;
+    layer.locked = all || (locks & 2u) != 0;
+    layer.lock_position = all || (locks & 4u) != 0;
+}
+
+// The way a layer's pixels come in at their depth (the user's decision 3: the layers at the file's depth): a page in
+// precise colour of an RGB file of its depth, 16 or 32 bits (its values its colour raster's, as the numbers are taken:
+// kept), a page of inks of a grey file of its depth (16, 32), of a CMYK or Lab file of 16 bits in its own mode (a CMYK
+// file's plates as they are: it carries no profile, or the page's) — each when the picture is not resampled. Else 8 bits,
+// as before (a file of another depth than its page's too: a 32-bit file onto a 16-bit page is read as before F-d).
+enum class DeepWay { None, Rgb, Inks };
+DeepWay deep_way(const core::Page& page, const psd::File& file, bool converting, bool same_size) {
+    if (psd::python_view() || converting || !same_size || (file.depth() != 16 && file.depth() != 32)) return DeepWay::None;
+    if (page.rgb && !page.color && page.rgb->depth == file.depth() && !page.rgb->table && file.mode() == 3) return DeepWay::Rgb;
+    if (!page.color || page.color->depth != file.depth() || page.color->bitmap || !page.color->duotone.empty()) return DeepWay::None;
+    const core::PageColor& color = *page.color;
+    if (file.mode() == 1 && color.space == core::InkSpace::Gray) return DeepWay::Inks;
+    if (file.depth() != 16) return DeepWay::None;  // (Photoshop has no 32-bit CMYK or Lab: one is read as before)
+    if (file.mode() == 9 && color.space == core::InkSpace::Lab) return DeepWay::Inks;
+    if (file.mode() == 4 && color.space == core::InkSpace::Cmyk && (file.icc().empty() || (color.icc && *color.icc == file.icc()))) return DeepWay::Inks;
+    return DeepWay::None;
+}
+
+// Is the page's profile linear light (the built-in linear-srgb: an OpenEXR's page, or a 32-bit PSD's opened)?
+bool linear_page(const core::Page& page) {
+    if (!page.rgb || !page.rgb->icc) return false;
+    const core::BuiltinProfile* linear = core::builtin_profile("linear-srgb");
+    return linear != nullptr && linear->bytes && *linear->bytes == *page.rgb->icc;
+}
+
+// A 32-bit file's sample as the page holds it (Photoshop's 32 bits are linear light): as it is on a page of linear light,
+// else encoded by 1/2.2 as this build reads 32 bits everywhere (render/psd's 8-bit picture, smart_decode's deep picture),
+// its values past 1 kept.
+float encoded(float v, bool as_is) { return as_is ? v : static_cast<float>(std::pow(std::max(0.0f, v), 1.0 / 2.2)); }
+
+// A part of the file (a layer's box, or the merged picture) on the page layer (`size` pixels, the file's canvas at `at`),
+// as a page of inks of the page's depth holds it: each sample as it is (a 32-bit grey file's encoded), clear around it.
+core::InkPixels deep_inks(const psd::File::DeepPart& part, const core::PageColor& color, Size size, Point at) {
+    const std::int64_t width = std::max(1, size.width), height = std::max(1, size.height);
+    core::InkPixels canvas = core::blank_ink_pixels(color.space, color.depth, static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height));
+    const unsigned colours = canvas.colours();
+    const bool as_is = part.depth != 32;
+    const std::int64_t left = part.left + at.x, top = part.top + at.y;
+    for (std::int64_t y = std::max<std::int64_t>(0, top); y < std::min(height, top + part.height); ++y) {
+        for (std::int64_t x = std::max<std::int64_t>(0, left); x < std::min(width, left + part.width); ++x) {
+            const std::size_t from = static_cast<std::size_t>((y - top) * part.width + (x - left));
+            const std::size_t to = static_cast<std::size_t>(y * width + x);
+            for (unsigned c = 0; c < colours && c < part.colours; ++c) canvas.set(to, c, encoded(part.value(c, from), as_is));
+            canvas.set(to, colours, std::clamp(part.value(part.colours, from), 0.0f, 1.0f));
+        }
+    }
+    return canvas;
+}
+
+// The same as a colour raster of the page's depth (u16 or f32: the values as they are — a 32-bit file's encoded unless
+// the page is linear —, past 1 kept at 32 bits).
+std::string deep_color_raster(const psd::File::DeepPart& part, int depth, Size size, Point at, bool linear) {
+    const auto w = static_cast<std::uint32_t>(std::max(1, size.width)), h = static_cast<std::uint32_t>(std::max(1, size.height));
+    const bool as_is = part.depth != 32 || linear;
+    return core::encode_color_pixels(w, h, depth == 16 ? "u16" : "f32", [&](std::size_t i) {
+        const std::int64_t x = static_cast<std::int64_t>(i % w) - part.left - at.x, y = static_cast<std::int64_t>(i / w) - part.top - at.y;
+        if (x < 0 || y < 0 || x >= part.width || y >= part.height) return std::array<double, 4>{0.0, 0.0, 0.0, 0.0};
+        const auto k = static_cast<std::size_t>(y * part.width + x);
+        return std::array<double, 4>{encoded(part.value(0, k), as_is), encoded(part.value(1, k), as_is), encoded(part.value(2, k), as_is),
+                                     std::clamp(static_cast<double>(part.value(3, k)), 0.0, 1.0)};
+    });
+}
+
+// The bytes of the precise colour rasters the book holds (each allocation once, as core::validate_color_document counts).
+std::uint64_t book_color_bytes(const core::Document& doc) {
+    std::uint64_t bytes = 0;
+    std::set<const std::string*> seen;
+    for (const auto& page : doc.pages) {
+        if (!page) continue;
+        for (const core::Layer& layer : page->layers) {
+            if (layer.color_raster && seen.insert(layer.color_raster.get()).second) bytes += layer.color_raster->size();
+        }
+    }
+    return bytes;
+}
+
 // --- the op -------------------------------------------------------------------------------------------------------
 
-void import_psd(core::OpContext& c) {
-    core::Document& doc = c.doc;
-    const Json& op = c.op;
+// import_psd's work, of the file's bytes (render/import_psd.hpp): its report.
+Json import_data(core::Document& doc, const Json& op, std::string data, bool exact) {
     const std::size_t index = core::require_page(doc, op);
-    std::string data;
-    if (core::truthy_at(op, "psd")) {
-        try {
-            data = selection::b64decode(Json(core::py_str(op["psd"])));
-        } catch (const core::Error&) {  // (binascii.Error and a str that is not ASCII: ValueError)
-            throw OpError("psd is the file's bytes in base64");
-        }
-    } else if (core::truthy_at(op, "path")) {
-        data = read_path(doc, op["path"]);
-    } else {
-        throw OpError("import_psd needs path or psd (base64)");
-    }
     const std::string fit = core::truthy_at(op, "fit") ? core::py_str(op["fit"]) : std::string("bleed");
     if (fit != "paper" && fit != "bleed" && fit != "trim") throw OpError("fit must be paper, bleed or trim");
     // (color-mode@1: onto a CMYK or Lab page the layers are the page's inks, and a Lab file is read too)
@@ -535,10 +822,56 @@ void import_psd(core::OpContext& c) {
     std::vector<psd::Layer> layers = file.layers();
     std::optional<Image> merged;
     std::optional<core::InkPixels> merged_inks;
+    std::optional<psd::File::DeepPart> merged_deep;  // (PC4 F-d: at its depth)
     bool merged_only = false;
+    const core::Page& page = doc.page(index);
+    // (PC4 F-d: the layers at their depth, when the page holds them so and the picture is not resampled — where it lands
+    // worked out first only then, the errors in Python's order otherwise)
+    std::optional<Placement> early;
+    DeepWay deep = deep_way(page, file, way.converting, true);
+    bool resampled = false;
+    if (deep != DeepWay::None) {
+        early = placed(page, file.width(), file.height(), fit, exact);
+        if (early->shown_w != file.width() || early->shown_h != file.height()) {
+            deep = DeepWay::None;
+            resampled = true;
+        }
+    }
+    // (the PC4 F-d review: a precise colour raster is the page's size, uncompressed, a layer — those of the layers to be
+    // made at their depth, with what the book holds already, kept within the book's high-precision budget
+    // (core::kColorRasterBookBytes) before one is made: past it, the layers come in at 8 bits, as before, and it is said)
+    bool budget = false;
+    if (deep == DeepWay::Rgb) {
+        const std::uint64_t sample = file.depth() == 16 ? 2 : 4;
+        const std::uint64_t each_bytes = 16 + static_cast<std::uint64_t>(std::max<std::int64_t>(1, early->page_w)) *
+                                                  static_cast<std::uint64_t>(std::max<std::int64_t>(1, early->page_h)) * 4 * sample;
+        const auto deep_layers = static_cast<std::uint64_t>(std::max<std::ptrdiff_t>(
+            1, std::count_if(layers.begin(), layers.end(), [](const psd::Layer& l) { return !l.folder && l.kind != "adjust" && l.kind != "smart"; })));
+        const std::uint64_t held = book_color_bytes(doc);
+        if (held > core::kColorRasterBookBytes || deep_layers > (core::kColorRasterBookBytes - held) / each_bytes) {
+            deep = DeepWay::None;
+            budget = true;
+        }
+    }
+    // (why a file deeper than 8 bits onto a page that is deeper too came in at 8 bits: said when the page is made of the
+    // file, and past the budget — the op's report otherwise as before)
+    const int page_depth = page.color ? page.color->depth : page.rgb ? page.rgb->depth : 8;
+    std::string shallow;
+    if (!psd::python_view() && deep == DeepWay::None && file.depth() > 8 && page_depth > 8 && (exact || budget)) {
+        shallow = budget ? "budget" : way.converting ? "converting" : file.depth() != page_depth ? "depth" : resampled ? "resampled" : "mode";
+    }
+    // (psd-keep@1: the layer ids of the file's layers — the comps and slices name them —, before the merged picture may
+    // take their place)
+    std::set<std::int64_t> file_ids;
+    for (const psd::Layer& l : layers) {
+        if (const auto id = file.layer_id(l)) file_ids.insert(static_cast<std::int64_t>(*id));
+    }
     if (std::all_of(layers.begin(), layers.end(), [](const psd::Layer& l) { return l.folder || l.kind == "adjust"; })) {
         merged_only = true;
-        if (mode) {
+        if (deep != DeepWay::None) {
+            merged_deep = file.merged_part();
+            if (!merged_deep) throw OpError("the PSD has no pictures to read");
+        } else if (mode) {
             merged_inks = file.merged_inks(*mode);
             if (!merged_inks) throw OpError("the PSD has no pictures to read");
         } else {
@@ -549,8 +882,7 @@ void import_psd(core::OpContext& c) {
         only.name = core::truthy_at(op, "name") ? core::py_str(op["name"]) : std::string("PSD");
         layers = {only};
     }
-    const core::Page& page = doc.page(index);
-    const Placement where = placed(page, file.width(), file.height(), fit);
+    const Placement where = early ? *early : placed(page, file.width(), file.height(), fit, exact);
     // (MAX_SIDE keeps the page layer within 12000 × 12000 pixels; only a paper of no positive size gets past it)
     if (where.page_w > kMaxPagePixels || where.page_h > kMaxPagePixels || where.page_w * where.page_h > kMaxPagePixels) {
         throw OpError("the page layer is too large (" + std::to_string(where.page_w) + "×" + std::to_string(where.page_h) + " pixels)");
@@ -573,13 +905,29 @@ void import_psd(core::OpContext& c) {
     }
     const std::string prefix = core::truthy_at(op, "id") ? core::py_str(op["id"]) : core::new_id();
     const Json parent = core::truthy_at(op, "parent") ? Json(core::py_str(op["parent"])) : Json(nullptr);
-    const std::int64_t mask_w = std::max<std::int64_t>(1, core::py_round_int(page.spec.width_mm.value() / 25.4 * kMaskDpi));
-    const std::int64_t mask_h = std::max<std::int64_t>(1, core::py_round_int(page.spec.height_mm.value() / 25.4 * kMaskDpi));
+    // (the masks at 150 dpi; PC4 F-d, a page made of the file: at its pixels, the finest grid of its layers)
+    const std::int64_t mask_w = exact ? where.page_w : std::max<std::int64_t>(1, core::py_round_int(page.spec.width_mm.value() / 25.4 * kMaskDpi));
+    const std::int64_t mask_h = exact ? where.page_h : std::max<std::int64_t>(1, core::py_round_int(page.spec.height_mm.value() / 25.4 * kMaskDpi));
     std::vector<std::string> ids;
     for (std::size_t i = 0; i < layers.size(); ++i) ids.push_back(prefix + "-" + std::to_string(i + 1));
     const Size page_px{static_cast<int>(where.page_w), static_cast<int>(where.page_h)};
     const Size shown{static_cast<int>(where.shown_w), static_cast<int>(where.shown_h)};
     const bool same_size = where.shown_w == file.width() && where.shown_h == file.height();
+    // (psd-keep@1, PC4 F-d: what the file's page holds that this build does not read — the page's, unless it keeps an
+    // earlier PSD's (then this file's is not kept: said in the report) —, and whether its layers keep their ids for it:
+    // its layer comps or slices name them)
+    const bool keeping = !psd::python_view();
+    const bool page_had = page.native_psd && !page.native_psd->empty();
+    const bool page_keeps = keeping && !page_had;
+    const std::vector<psd::File::ImageResource> file_resources = file.resources();
+    const std::vector<psd::File::TaggedBlock> file_globals = file.global_blocks();
+    const bool names_layers = page_keeps && std::any_of(file_resources.begin(), file_resources.end(), [](const psd::File::ImageResource& r) {
+                                  return core::psd_resource_names_layers(static_cast<int>(r.id));
+                              });
+    Json effects = Json::array();         // (the layers keeping effects this build does not draw)
+    Keeping kept_so_far;                  // (what is kept, and whether any was left out)
+    bool ranges_kept = false;             // (a layer keeps its blending ranges: its page says the mode they are of)
+    std::vector<std::int64_t> kept_ids;  // (the layer ids of the layers made, which the page's comps and slices name)
     // (vector@1, PC3 C-a: a path of the file — fractions of its canvas — on the page as its picture is placed, mm)
     const double mm_x = page.spec.width_mm.value() / static_cast<double>(where.page_w);
     const double mm_y = page.spec.height_mm.value() / static_cast<double>(where.page_h);
@@ -599,10 +947,86 @@ void import_psd(core::OpContext& c) {
         }
         return mask;
     };
+    // (patterns@1, PC4 E3: the file's patterns — its Patt, Pat2, Pat3 blocks, read within their budget —, each made a
+    // pattern of the book only when a fill names it: by its unique id, else by its name; its pixel 1/dpi inch as the
+    // file's. A block that cannot be read — broken, too large, out of memory —: its fills are not read, as of a pattern
+    // the file does not hold; the PSD is still read)
+    std::vector<pat::PsdPattern> file_patterns;
+    for (const std::string_view block : file.pattern_blocks()) {
+        try {
+            for (pat::PsdPattern& p : pat::parse_block(block)) file_patterns.push_back(std::move(p));
+        } catch (const std::exception&) {
+        }
+    }
+    std::map<std::string, std::optional<std::pair<std::string, double>>> patterns_taken;  // (the file's id → the book's pattern and dpi)
+    Json patterns_read = Json::array();
+    const auto pattern_of = [&](const std::string& id, const std::string& name) -> std::optional<std::pair<std::string, double>> {
+        const auto found = std::find_if(file_patterns.begin(), file_patterns.end(), [&](const pat::PsdPattern& t) { return !id.empty() && t.id == id; });
+        const auto named = found != file_patterns.end()
+                               ? found
+                               : std::find_if(file_patterns.begin(), file_patterns.end(),
+                                              [&](const pat::PsdPattern& t) { return pat::shown_name(t.name) == pat::shown_name(name); });
+        if (named == file_patterns.end()) return std::nullopt;
+        if (const auto kept = patterns_taken.find(named->id); kept != patterns_taken.end()) return kept->second;
+        std::optional<pat::Taken> taken;
+        try {
+            taken = pat::from_psd(*named, file.dpi());
+        } catch (const std::exception&) {  // (its picture cannot be made: as one the file does not hold)
+        }
+        if (!taken) {
+            patterns_taken[named->id] = std::nullopt;
+            return std::nullopt;
+        }
+        core::Pattern given = taken->pattern;
+        if (core::find_pattern(doc, taken->file_id) == nullptr && !taken->file_id.empty() && taken->file_id.size() <= 64 &&
+            std::all_of(taken->file_id.begin(), taken->file_id.end(), [](char ch) { return std::isalnum(static_cast<unsigned char>(ch)) || ch == '-' || ch == '_'; })) {
+            given.id = taken->file_id;  // (its unique id kept: written back the same)
+        }
+        const auto [book_id, added] = keep_pattern(doc, std::move(given), taken->bytes);
+        if (added) patterns_read.push_back(book_id);
+        const std::pair<std::string, double> out{book_id, taken->pattern.dpi};
+        patterns_taken[named->id] = out;
+        return out;
+    };
+    // (layer-styles@1, PC4 E6: the layers' styles in the page's mm as the picture is placed; the file's global light —
+    // resources 1037 and 1049 — the book's when the book is made of the file, else taken by the effects when it differs)
+    psd_shapes::Placement style_placement;
+    style_placement.mm_x = static_cast<double>(where.shown_w) / std::max<double>(1.0, static_cast<double>(file.width())) * mm_x;
+    style_placement.mm_y = static_cast<double>(where.shown_h) / std::max<double>(1.0, static_cast<double>(file.height())) * mm_y;
+    style_placement.x0_mm = static_cast<double>(where.at_x) * mm_x;
+    style_placement.y0_mm = static_cast<double>(where.at_y) * mm_y;
+    style_placement.width_px = static_cast<double>(file.width());
+    style_placement.height_px = static_cast<double>(file.height());
+    style_placement.dpi = file.dpi();
+    style_placement.pattern = pattern_of;
+    std::array<double, 2> file_light{core::kDefaultLightAngle, core::kDefaultLightAltitude};
+    for (const psd::File::ImageResource& r : file_resources) {
+        if (r.id == 1037) {
+            if (const auto v = psd_effects::light_of_resource(r.data)) file_light[0] = std::clamp(*v, -180.0, 180.0);
+        } else if (r.id == 1049) {
+            if (const auto v = psd_effects::light_of_resource(r.data)) file_light[1] = std::clamp(*v, 0.0, 90.0);
+        }
+    }
+    std::optional<std::array<double, 2>> light_differs;
+    const bool book_lit = exact && keeping;  // (the file's light the book's — once a style is read: review P3-1)
+    if (!book_lit && file_light != core::global_light(doc)) light_differs = file_light;
+    Json styled = Json::array();
+    std::vector<std::string> style_notes;
     std::vector<core::Layer> made;
+    std::vector<std::string> patterns_filled;  // (patterns@1: the pattern fill layers read)
     std::vector<std::string> shapes_skipped, shapes_read;  // (pen-shapes@1: shape layers this build cannot read, and those read)
     std::map<std::string, std::string> contents_made;  // (PC3 A3: a placed layer's uuid → its contents' id)
     Json smart_objects = Json::array(), placed_pixels = Json::array();
+    // (PC4 D7: Photoshop's smart filters read as Genko's — render/psd_filters —, one descriptor budget for the whole file;
+    // the file's filter effects read when a placed layer has smart filters; the layers read so and those not, at most
+    // kFilterReportsMax of each said)
+    constexpr std::size_t kFilterReportsMax = 256;
+    psd_filters::Budget filters_budget{file.descriptor_left()};  // (what the file's placed layers left of its one budget)
+    std::optional<psd_filters::Masks> filter_masks;
+    std::optional<std::vector<psd::File::TaggedBlock>> filter_globals;
+    Json filters_read = Json::array(), filters_shown = Json::array();
+    Json raw_shown = Json::array();  // (PC4 F-e: smart objects of a camera RAW shown as Photoshop drew them)
+    std::size_t filters_unsaid = 0;
     for (std::size_t i = 0; i < layers.size(); ++i) {
         const psd::Layer& item = layers[i];
         core::Layer layer;
@@ -655,6 +1079,7 @@ void import_psd(core::OpContext& c) {
                 placement.width_px = static_cast<double>(file.width());
                 placement.height_px = static_cast<double>(file.height());
                 placement.dpi = file.dpi();
+                placement.pattern = pattern_of;  // (patterns@1, PC4 E3)
                 part = psd_shapes::part_of(psd_shapes::Blocks{blocks->fill_key, blocks->fill, blocks->vscg, blocks->vstk, blocks->vogk, blocks->path},
                                            placement);
             }
@@ -674,6 +1099,32 @@ void import_psd(core::OpContext& c) {
             layer.shapes = core::vector::make_shapes({std::move(*part)});
             if (auto mask = mask_of()) layer.mask = std::move(*mask);
             shapes_read.push_back(layer.id);
+        } else if (item.kind == "adjust" && !item.adjust) {
+            // (patterns@1, PC4 E3: a pattern fill layer — a fill layer of the book's pattern, as the PSD shows it: not cut by
+            // the panels; one whose pattern the file does not hold, left out as before)
+            std::optional<Json> spec;
+            if (const auto block = file.fill_block(item); block && block->first == "PtFl") {
+                psd_shapes::Placement placement;
+                placement.mm_x = static_cast<double>(where.shown_w) / std::max<double>(1.0, static_cast<double>(file.width())) * mm_x;
+                placement.mm_y = static_cast<double>(where.shown_h) / std::max<double>(1.0, static_cast<double>(file.height())) * mm_y;
+                placement.x0_mm = static_cast<double>(where.at_x) * mm_x;
+                placement.y0_mm = static_cast<double>(where.at_y) * mm_y;
+                placement.width_px = static_cast<double>(file.width());
+                placement.height_px = static_cast<double>(file.height());
+                placement.dpi = file.dpi();
+                placement.pattern = pattern_of;
+                spec = psd_shapes::pattern_fill_of(block->second, placement);
+            }
+            if (!spec) {
+                shapes_skipped.push_back(item.name);
+                continue;
+            }
+            layer.kind = core::LayerKind::Fill;
+            layer.fill = Json{{"pattern", std::move(*spec)}};
+            layer.panel_clip = false;
+            if (auto mask = mask_of()) layer.mask = std::move(*mask);
+            layer.vector_mask = vector_mask_of(item);
+            patterns_filled.push_back(layer.id);
         } else if (item.kind == "adjust" && item.adjust) {
             // (PC2, the user's decision 5: an adjustment layer a codec read, render/psd_adjust — a correction layer, its
             // blend its native.blend: a correction layer's own blend is not looked at)
@@ -687,7 +1138,23 @@ void import_psd(core::OpContext& c) {
             layer.kind = core::LayerKind::Raster;
             // (a painting app's picture: on a monochrome page it prints in grey and tones)
             layer.source = Json::object({{"kind", "psd"}});
-            if (mode) {  // (color-mode@1: onto a clear layer of the page's inks)
+            // (PC4 F-d: at the file's depth — not a placed layer's picture, which stays Photoshop's 8-bit look until it
+            // changes —, its samples as they are)
+            const std::optional<psd::File::DeepPart> part = deep == DeepWay::None || item.kind == "smart" ? std::nullopt
+                                                            : merged_deep                                     ? merged_deep
+                                                                                                              : file.layer_deep(item);
+            if (deep == DeepWay::Inks && (part || merged_deep)) {
+                layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(
+                    part ? deep_inks(*part, *mode, page_px, paste_corner(where))
+                         : core::blank_ink_pixels(mode->space, mode->depth, static_cast<std::uint32_t>(page_px.width), static_cast<std::uint32_t>(page_px.height))));
+            } else if (deep == DeepWay::Rgb && item.kind != "smart") {
+                layer.color_raster = std::make_shared<const std::string>(
+                    part ? deep_color_raster(*part, page.rgb->depth, page_px, paste_corner(where), linear_page(page))
+                         : core::encode_color_pixels(static_cast<std::uint32_t>(page_px.width), static_cast<std::uint32_t>(page_px.height),
+                                                     page.rgb->depth == 16 ? "u16" : "f32", [](std::size_t) { return std::array<double, 4>{0, 0, 0, 0}; }));
+                if (std::find(doc.features.begin(), doc.features.end(), core::kColorRasterFeature) == doc.features.end())
+                    doc.features.emplace_back(core::kColorRasterFeature);
+            } else if (mode) {  // (color-mode@1: onto a clear layer of the page's inks)
                 core::InkPixels picture = way.converting ? import_profile::taken_inks(numbers_of(merged_inks ? *file.merged() : file.image(item)), way, *mode)
                                           : merged_inks ? *merged_inks
                                                         : file.image_inks(item, *mode);
@@ -706,7 +1173,7 @@ void import_psd(core::OpContext& c) {
                 layer.raster_png = fills::png_bytes(canvas);
                 layer.raster_relpath = raster::page_folder(page) + "/user-" + layer.id + ".png";
             }
-            if (!merged && !merged_inks) {
+            if (!merged && !merged_inks && !merged_deep) {
                 if (auto mask = mask_of()) layer.mask = std::move(*mask);
                 layer.vector_mask = vector_mask_of(item);
             }
@@ -717,16 +1184,61 @@ void import_psd(core::OpContext& c) {
                                                                           : std::optional<SmartMade>(SmartMade{{}, {}, "unreadable"});
                 if (smart && smart->why.empty()) *smart = smart_settings(doc, page, where, file, *item.placed, std::move(*smart));
                 if (smart && smart->why.empty()) {
-                    Json picture = Json::object();
                     const auto keep = [&doc](core::Bytes bytes) {
                         const std::string ref = core::bytes_ref(*bytes);
                         doc.smart_files[ref] = std::move(bytes);
                         return ref;
                     };
-                    if (layer.ink_raster) picture["ink_raster"] = keep(layer.ink_raster);
-                    else picture["asset"] = keep(layer.raster_png);
                     const std::string block(file.placed_block(item));
-                    Json record = Json{{"block", item.placed->key}, {"raw", keep(std::make_shared<const std::string>(block))}, {"shown", std::move(picture)}};
+                    // (PC4 D7: its Photoshop smart filters, when they are all in the table, as Genko's — drawn from its
+                    // contents from then on —; else Photoshop's picture, as before, and which said)
+                    std::optional<psd_filters::Read> fx;
+                    if (item.placed->filters && keeping && !merged_only) {
+                        if (!filter_masks) {
+                            filter_globals = file.global_blocks();
+                            filter_masks = psd_filters::read_masks(*filter_globals);
+                        }
+                        psd_filters::Placement placement;
+                        placement.scale_x = static_cast<double>(where.shown_w) / std::max<double>(1.0, static_cast<double>(file.width()));
+                        placement.scale_y = static_cast<double>(where.shown_h) / std::max<double>(1.0, static_cast<double>(file.height()));
+                        placement.at_x = static_cast<double>(where.at_x);
+                        placement.at_y = static_cast<double>(where.at_y);
+                        placement.page_w = static_cast<double>(std::max<std::int64_t>(1, where.page_w));
+                        placement.page_h = static_cast<double>(std::max<std::int64_t>(1, where.page_h));
+                        placement.width_mm = page.spec.width_mm.value();
+                        placement.height_mm = page.spec.height_mm.value();
+                        placement.file_w = static_cast<double>(std::max<std::int64_t>(1, file.width()));
+                        placement.file_h = static_cast<double>(std::max<std::int64_t>(1, file.height()));
+                        fx = psd_filters::read(block, *item.placed, placement, *filter_masks, filters_budget);
+                    }
+                    const bool filtered = fx && fx->filters && !fx->filters->empty();
+                    // (PC4 F-e, the coordinator's decision: a camera RAW's contents — Photoshop's Camera Raw settings not
+                    // read — keep Photoshop's picture even with its filters read, until set_camera_raw or コンテンツを編集
+                    // develops them; said)
+                    const auto inside = doc.smart_contents.find(smart->contents);
+                    const bool raw_inside = inside != doc.smart_contents.end() && inside->second && inside->second->format == "raw";
+                    if (raw_inside && raw_shown.size() < kFilterReportsMax) raw_shown.push_back(Json{{"id", layer.id}, {"title", layer.title}});
+                    Json record = Json{{"block", item.placed->key}, {"raw", keep(std::make_shared<const std::string>(block))}};
+                    if (!filtered || raw_inside) {
+                        Json picture = Json::object();
+                        if (layer.ink_raster) picture["ink_raster"] = keep(layer.ink_raster);
+                        else picture["asset"] = keep(layer.raster_png);
+                        record["shown"] = std::move(picture);
+                    }
+                    if (filtered) {
+                        if (filters_read.size() < kFilterReportsMax) filters_read.push_back(layer.id);
+                    } else if (fx && !fx->why.empty()) {
+                        if (filters_shown.size() < kFilterReportsMax) {
+                            Json names = Json::array();
+                            for (const std::string& n : fx->names) names.push_back(n);
+                            Json said{{"id", layer.id}, {"title", layer.title}, {"why", fx->why}};
+                            if (!names.empty()) said["filters"] = std::move(names);
+                            if (fx->more > 0) said["more"] = fx->more;
+                            filters_shown.push_back(std::move(said));
+                        } else {
+                            ++filters_unsaid;
+                        }
+                    }
                     layer.kind = core::LayerKind::Smart;
                     layer.raster_png.reset();
                     layer.raster_relpath.reset();
@@ -735,11 +1247,33 @@ void import_psd(core::OpContext& c) {
                     layer.clip_to = "none";
                     smart->settings["psd"] = std::move(record);
                     layer.smart = std::move(smart->settings);
+                    if (filtered) {
+                        core::smart::put_setting(layer, "filters", std::move(*fx->filters));
+                        if (!fx->on) core::smart::put_setting(layer, "filters_on", false);
+                        smart_filters::settle_places(doc, page, layer);  // (their places go with it, as smart_filter_add's)
+                        // (review P2-5: what was read, so that a PSD written while they are the same keeps Photoshop's)
+                        (*layer.smart)["psd"]["filters_read"] = core::smart::filters_digest(layer);
+                    }
                     smart_objects.push_back(Json{{"id", layer.id}, {"contents", smart->contents}});
                 } else {
                     placed_pixels.push_back(Json{{"id", layer.id}, {"why", smart ? smart->why : std::string("no_file")}});
                 }
             }
+        }
+        // (psd-keep@1, PC4 F-d: what its record holds that this build does not read, kept to be written back; its locks)
+        if (keeping && !merged_only) {
+            bool effect = false;
+            layer.native_psd = layer_keep(doc, file, item, names_layers, effect, kept_so_far);
+            // (layer-styles@1, PC4 E6: its effects, fill opacity and Blend If as its style — drawn by this build)
+            if (!item.folder && core::takes_layer_style(layer) &&
+                style_from_record(layer, file, item, style_placement, light_differs, style_notes, filters_budget.left)) {
+                styled.push_back(layer.id);
+                if (core::style_shows_effects(*layer.style) || !(*layer.style)["effects"].empty()) effect = false;
+            }
+            if (effect) effects.push_back(layer.id);
+            if (layer.native_psd && layer.native_psd->id) kept_ids.push_back(*layer.native_psd->id);
+            ranges_kept = ranges_kept || (layer.native_psd && !layer.native_psd->ranges.empty());
+            if (const auto locks = file.protection(item); locks && *locks != 0) take_locks(layer, *locks);
         }
         made.push_back(std::move(layer));
     }
@@ -766,14 +1300,26 @@ void import_psd(core::OpContext& c) {
     for (const std::string& name : shapes_skipped) skipped.push_back(name);
     target.layers.insert(target.layers.begin() + static_cast<std::ptrdiff_t>(at), std::make_move_iterator(made.begin()),
                          std::make_move_iterator(made.end()));
-    c.report = Json::object({{"layers", std::move(listed)}, {"skipped", std::move(skipped)}});
+    Json report = Json::object({{"layers", std::move(listed)}, {"skipped", std::move(skipped)}});
     // (PC3 A3: the placed layers made smart objects, and those read as their pixels and why — said only when there are)
-    if (!smart_objects.empty()) (*c.report)["smart_objects"] = std::move(smart_objects);
-    if (!placed_pixels.empty()) (*c.report)["placed_as_pixels"] = std::move(placed_pixels);
+    if (!smart_objects.empty()) report["smart_objects"] = std::move(smart_objects);
+    if (!placed_pixels.empty()) report["placed_as_pixels"] = std::move(placed_pixels);
+    // (PC4 D7: the smart objects whose Photoshop smart filters were read as Genko's, and those shown as Photoshop's picture
+    // and why — said only when there are)
+    if (!filters_read.empty()) report["smart_filters_read"] = std::move(filters_read);
+    if (!filters_shown.empty()) report["smart_filters_shown"] = std::move(filters_shown);
+    if (!raw_shown.empty()) report["smart_raw_shown"] = std::move(raw_shown);
+    if (filters_unsaid > 0) report["smart_filters_shown_more"] = filters_unsaid;
+    if (!patterns_read.empty()) report["patterns"] = std::move(patterns_read);  // (patterns@1, PC4 E3: the patterns taken in)
+    if (!patterns_filled.empty()) {  // (and the pattern fill layers read)
+        Json fills = Json::array();
+        for (const std::string& id : patterns_filled) fills.push_back(id);
+        report["pattern_fills"] = std::move(fills);
+    }
     if (!shapes_read.empty()) {  // (pen-shapes@1, PC3 C-b: the shape layers read as pen layers of a shape part)
         Json shapes = Json::array();
         for (const std::string& id : shapes_read) shapes.push_back(id);
-        (*c.report)["shapes"] = std::move(shapes);
+        report["shapes"] = std::move(shapes);
     }
     // (vector@1, PC3 C-a: the file's saved paths onto the page — a name the page has already takes a number —, its work
     // path and clipping path where the page has none)
@@ -808,11 +1354,79 @@ void import_psd(core::OpContext& c) {
             target.clipping_path = std::move(*clip);
         }
     }
-    if (!paths.empty()) (*c.report)["paths"] = std::move(paths);
-    if (op.contains("embedded_profile")) (*c.report)["embedded_profile"] = import_profile::report(way);
+    if (!paths.empty()) report["paths"] = std::move(paths);
+    if (op.contains("embedded_profile")) report["embedded_profile"] = import_profile::report(way);
+    // (psd-keep@1, PC4 F-d: the page's own — the patterns a fill took left out of its pattern blocks —, the ids of the
+    // layers read with them; the layers keeping effects; what was not kept)
+    if (page_keeps) {
+        std::set<std::string> taken;
+        for (const auto& [file_id, book] : patterns_taken) {
+            if (book) taken.insert(file_id);
+        }
+        // (its comps and slices not when a layer they may name was not made: one not read, or the merged picture read)
+        const std::set<std::int64_t> made_ids(kept_ids.begin(), kept_ids.end());
+        const bool named_gone = merged_only ? !file_ids.empty()
+                                            : std::any_of(file_ids.begin(), file_ids.end(), [&](std::int64_t id) { return !made_ids.contains(id); });
+        core::PsdPageKeep keep = page_keep(doc, file, taken, named_gone, kept_so_far);
+        if (!keep.resources.empty() || !keep.globals.empty() || ranges_kept) {
+            if (names_layers && !named_gone) keep.ids = kept_ids;
+            keep.from = core::PsdFrom{file.psb() ? 2 : 1, file.mode(), file.depth()};
+            doc.edit_page(index).native_psd = std::move(keep);
+        }
+    } else if (keeping && page_had && (std::any_of(file_resources.begin(), file_resources.end(),
+                                                   [](const psd::File::ImageResource& r) { return core::psd_resource_kept(static_cast<int>(r.id)); }) ||
+                                       std::any_of(file_globals.begin(), file_globals.end(),
+                                                   [](const psd::File::TaggedBlock& g) { return core::psd_global_kept(g.key); }))) {
+        report["psd_page"] = "earlier";  // (the page keeps an earlier PSD's resources and global blocks: this file's are not kept)
+    }
+    if (!effects.empty()) report["effects"] = std::move(effects);
+    if (book_lit && !styled.empty()) {  // (no style read: the book's light left as it is, the file's kept in its resources)
+        doc.global_light = file_light[0] == core::kDefaultLightAngle && file_light[1] == core::kDefaultLightAltitude
+                               ? std::nullopt
+                               : std::optional<std::array<double, 2>>(core::global_light_of(Json{{"angle", file_light[0]}, {"altitude", file_light[1]}}));
+    }
+    if (!styled.empty()) report["layer_styles"] = std::move(styled);  // (layer-styles@1, PC4 E6: the layers whose style was read)
+    if (!style_notes.empty()) {  // (review P3-3: each note once, how many layers it was said of; at most 20 of them)
+        std::vector<std::pair<std::string, std::size_t>> once;
+        for (const std::string& note : style_notes) {
+            const auto it = std::find_if(once.begin(), once.end(), [&](const auto& seen) { return seen.first == note; });
+            if (it != once.end()) ++it->second;
+            else once.emplace_back(note, 1);
+        }
+        Json notes = Json::array();
+        for (std::size_t i = 0; i < once.size() && i < 20; ++i)
+            notes.push_back(once[i].second > 1 ? once[i].first + "（" + std::to_string(once[i].second) + " 層）" : once[i].first);
+        if (once.size() > 20) notes.push_back("ほか " + std::to_string(once.size() - 20) + " 件の知らせ");
+        report["layer_style_notes"] = std::move(notes);
+    }
+    if (kept_so_far.cut) report["psd_blocks_cut"] = true;
+    if (!shallow.empty()) report["in_8_bits"] = shallow;  // (PC4 F-d review: why not at its depth)
+    return report;
+}
+
+
+void import_psd(core::OpContext& c) {
+    core::Document& doc = c.doc;
+    const Json& op = c.op;
+    (void)core::require_page(doc, op);
+    std::string data;
+    if (core::truthy_at(op, "psd")) {
+        try {
+            data = selection::b64decode(Json(core::py_str(op["psd"])));
+        } catch (const core::Error&) {  // (binascii.Error and a str that is not ASCII: ValueError)
+            throw OpError("psd is the file's bytes in base64");
+        }
+    } else if (core::truthy_at(op, "path")) {
+        data = read_path(doc, op["path"]);
+    } else {
+        throw OpError("import_psd needs path or psd (base64)");
+    }
+    c.report = import_data(doc, op, std::move(data), false);
 }
 
 }  // namespace
+
+core::Json import_psd_data(core::Document& doc, const core::Json& op, std::string data, bool exact) { return import_data(doc, op, std::move(data), exact); }
 
 void register_file_ops(core::OpRegistry& registry) { registry.add("import_psd", import_psd); }
 

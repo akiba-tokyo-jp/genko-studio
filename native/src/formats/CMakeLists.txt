@@ -17,5 +17,15 @@ genko_library(genko_formats
     exporting.cpp
     checks.cpp
     smart_files.cpp
+    # PC4 F-0 (形式の土台: ページ・層をその深さの絵に、ファイルから 1 ページの本)
+    page_picture.cpp
+    open_file.cpp
+    # PC4 F-b (ファイルの入口: 本のファイル情報をファイルに、コピーを保存)
+    file_xmp.cpp
+    copy.cpp
+    # PC4 F-f (.pcraft: a page written as PhotoCraft's document)
+    pcraft_write.cpp
+    # PC4 F-c (書き出し: Web 用に保存・書き出しの環境設定・クイック書き出し)
+    web_export.cpp
   PUBLIC_DEPS genko_render genko_core Qt6::Core
   PRIVATE_DEPS genko_storage ZLIB::ZLIB JPEG::JPEG TIFF::TIFF ${GENKO_LCMS2})

@@ -37,7 +37,8 @@ void MainWindow::build_vector_actions() {
     QAction* cut = make("act_vector_cut", QStringLiteral("クリックした所で線を切る"), [] {}, {},
                         QStringLiteral("オンの間、線をクリックするとそこで 2 本に分かれます"), true);
     connect(cut, &QAction::toggled, this, [this](bool on) { canvas_->vector_cut = on; });
-    make("act_vector_colour", QStringLiteral("選んだ線をペンの色にする"), [this] { vector_selected("recolor"); });
+    // (PC4 E-0: the 描画色 — preferences::renamed())
+    make("act_vector_colour", QStringLiteral("選んだ線を描画色にする"), [this] { vector_selected("recolor"); });
     make("act_vector_delete", QStringLiteral("選んだ線を消す"), [this] { vector_selected("delete"); });
     make("act_vector_simplify", QStringLiteral("選んだ線の点を減らす"), [this] { vector_simplify(); }, {},
          QStringLiteral("形を保ったまま、制御点を減らします（単純化）"));

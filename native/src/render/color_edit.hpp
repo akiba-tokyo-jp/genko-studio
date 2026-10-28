@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -33,6 +34,9 @@ double pixel_scale(const core::Page& page, const core::ColorRasterView& raster);
 // pixel); the colour of what stays is kept.
 std::string erase(const core::Page& page, const core::Layer& layer, const core::PenPoints& points, double width_mm,
                   std::string_view texture, const std::string& seed);
+// brushes@1 (PC4 E1): erase by a brush — the alpha loses what `mask_of` (an "L" mask of the page at a resolution:
+// render/dab_ops.hpp eraser_mask) takes at the raster's grid; the colour of what stays is kept.
+std::string erase_masked(const core::Page& page, const core::Layer& layer, const std::function<Image(Size page_size, int dpi)>& mask_of);
 
 // delete_area: the area's pixels cleared (its soft edge partly).
 std::string delete_area(const core::Page& page, const core::Layer& layer, const core::Json& area);

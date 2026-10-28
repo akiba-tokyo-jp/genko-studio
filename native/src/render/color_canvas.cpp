@@ -440,6 +440,21 @@ void ColorCanvas::blend_stroke(const Image& mask, const core::Json& color, doubl
     }
     impl_->previous=true;
 }
+void ColorCanvas::blend_stroke(const std::vector<float>& cover, const core::Json& color, double opacity, const std::vector<std::array<float, 3>>* colours) {
+    core::validate_stroke_color(color);
+    const std::size_t n = std::size_t(impl_->size.width) * impl_->size.height;
+    if (cover.size() != n || (colours != nullptr && colours->size() != n)) throw core::Error("value", "stroke coverage does not match");
+    auto p = linear_srgb(impl_->space, {color["values"][0].get<double>(), color["values"][1].get<double>(), color["values"][2].get<double>(), 1});
+    for (std::size_t i = 0; i < n; ++i) {
+        if (colours != nullptr && cover[i] > 0.0f) {
+            const auto& c = (*colours)[i];
+            p = linear_srgb(impl_->space, {c[0], c[1], c[2], 1});
+        }
+        p[3] = cover[i];
+        impl_->over(i, p, opacity, false, "normal");
+    }
+    impl_->previous = true;
+}
 void ColorCanvas::expose(const core::Exposure& e, double opacity, bool clip, const Image* mask, std::string_view mode) {
     if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "exposure mask does not match");
     if (!supports_blend(mode)) throw core::Error("not_yet_ported", "high-precision blend:" + std::string(mode));
@@ -587,6 +602,40 @@ ColorPicture ColorCanvas::picture() const {
     out.pixels.reserve(impl_->pixels.size());
     for (const Pixel& p : impl_->pixels) out.pixels.push_back({p[0], p[1], p[2], p[3]});
     return out;
+}
+void ColorCanvas::styled(const Box& part, bool clip, const std::vector<float>& own,
+                         const std::function<void(std::vector<float>&, const std::vector<float>&)>& run) {
+    const Size s = impl_->size;
+    if (part.x0 < 0 || part.y0 < 0 || part.x1 > s.width || part.y1 > s.height || part.width() <= 0 || part.height() <= 0)
+        throw core::Error("value", "color canvas part does not match");
+    const std::size_t count = std::size_t(part.width()) * part.height();
+    if (own.size() != count) throw core::Error("value", "color canvas styled layer does not match");
+    std::vector<float> px(count * 4), weight(count, 1.0f);
+    for (int y = 0; y < part.height(); ++y) {
+        for (int x = 0; x < part.width(); ++x) {
+            const std::size_t i = std::size_t(y) * part.width() + x;
+            const Pixel& p = impl_->pixels[std::size_t(y + part.y0) * s.width + x + part.x0];
+            for (unsigned c = 0; c < 4; ++c) px[i * 4 + c] = static_cast<float>(p[c]);
+            if (clip && impl_->previous) weight[i] = static_cast<float>(p[4]);
+        }
+    }
+    run(px, weight);
+    for (int y = 0; y < part.height(); ++y) {
+        for (int x = 0; x < part.width(); ++x) {
+            const std::size_t i = std::size_t(y) * part.width() + x;
+            Pixel& p = impl_->pixels[std::size_t(y + part.y0) * s.width + x + part.x0];
+            for (unsigned c = 0; c < 4; ++c) {
+                if (!std::isfinite(px[i * 4 + c])) throw core::Error("value", "high-precision composite exceeds finite working range");
+                p[c] = px[i * 4 + c];
+            }
+            p[4] = own[i];
+        }
+    }
+}
+void ColorCanvas::styled_done() { impl_->previous = true; }
+std::array<double, 3> blend_linear(std::string_view mode, const std::array<double, 3>& below, const std::array<double, 3>& above) {
+    if (mode.empty() || mode == "normal") return above;
+    return blend_rgb(mode, below, above);
 }
 core::AdjustPtr correction_of(const core::Layer& layer, const core::Page& page, const core::Document* doc) {
     if (!layer.adjust || !layer.adjust->is_object()) return nullptr;

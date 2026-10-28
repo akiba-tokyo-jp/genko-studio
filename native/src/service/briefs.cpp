@@ -565,7 +565,9 @@ Json brushes_list(const core::Document& doc) {
             Json entry = Json::object({{"key", key}});
             if (d.is_object()) {
                 for (const auto& [kk, v] : d.items()) {
-                    if (kk == "label" || kk == "base" || kk == "width_mm" || kk == "texture") entry[kk] = v;
+                    // (PC4 E1: a dab brush's engine too — only those have one)
+                    // (PC4 E2, review P3-16: the library's group too — a book's brushes have none)
+                    if (kk == "label" || kk == "base" || kk == "width_mm" || kk == "texture" || kk == "engine" || kk == "group") entry[kk] = v;
                 }
             }
             out.push_back(std::move(entry));

@@ -28,7 +28,8 @@ inline constexpr int kSelDpi = 200;      // selops.SEL_DPI
 
 // The grid a page's selection is made at (resolve, combine, and the window's areas it makes with to_mask and from_mask):
 // kSelDpi on an 8-bit page, as before; on a precise (16, 32 bits) or ink page the finest grid of its pixel layers, as its
-// layer masks are made (render/layer_masks grid_dpi: 200 dpi at least, 600 at most — the coordinator's 8-2 (b)).
+// layer masks are made (render/layer_masks grid_dpi: 200 dpi at least, 600 at most — the coordinator's 8-2 (b)); and on
+// an 8-bit page whose paper says grid "finest" (image-grid@1, PC4 F-b) the same.
 int grid_dpi(const core::Page& page);
 
 using Matrix = std::array<double, 6>;
@@ -106,6 +107,9 @@ struct Items {
     std::vector<core::StrokePtr> strokes;
     std::vector<core::Patch> patches;
     std::vector<core::vector::ShapePart> shapes;
+    // (patterns@1, PC4 E3: the patterns the shapes' fills name, carried with them to another book —
+    // render::patterns_of_parts' form; an empty list when none)
+    core::Json patterns = core::Json::array();
     bool empty() const { return strokes.empty() && patches.empty() && shapes.empty(); }
 };
 
@@ -119,17 +123,19 @@ Items lift(core::Layer& layer, const core::Json& area, const core::Page& page);
 // selection.drop: lifted (or copied) items put back on the layer through m; fresh ids for a paste. Shape parts go
 // through m exactly (their stroke widths scaled as a line's); on a layer that is not a pen layer they are laid as
 // pictures (patches) instead.
+// `book`: the book whose patterns the parts' pattern fills name (patterns@1, PC4 E3), for their pictures on a layer that
+// is not a pen layer — without it such a part is refused (core::Error "value"), never laid as nothing.
 void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids = false, Resample resample = Resample::Bilinear,
-          const core::Page* page = nullptr);
+          const core::Page* page = nullptr, const core::Document* book = nullptr);
 
 // selection.drop_warped: through a free transform (render/warp.hpp): lines point by point, pixels piece by piece; shape
 // parts bent (render/shape_parts bent).
 using WarpFunction = std::function<std::pair<double, double>(double, double)>;
 void drop_warped(core::Layer& layer, Items items, const WarpFunction& go, Resample resample = Resample::Bilinear,
-                 const core::Page* page = nullptr);
+                 const core::Page* page = nullptr, const core::Document* book = nullptr);
 
 // selection.items_from_json: copied items as an op carries them ({"strokes", "patches": [{…, "png": base64}], "shapes"?:
-// [shape parts]}).
+// [shape parts], "patterns"?: [the patterns the parts name: render::patterns_of_parts]}).
 Items items_from_json(const core::Json& data);
 
 // selection.area_bbox: (x, y, w, h) of a poly; the mask's box as it is (any length) of a mask area.

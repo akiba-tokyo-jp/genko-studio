@@ -22,10 +22,17 @@
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 #include "core/ruby.hpp"
+#include "core/filter_kinds.hpp"
+#include "core/vanishing.hpp"
 #include "core/smart.hpp"
 #include "core/strokes.hpp"
 #include "core/masks.hpp"
 #include "core/vector.hpp"
+#include "core/file_info.hpp"
+#include "core/psd_keep.hpp"
+#include "core/brush_dabs.hpp"
+#include "core/patterns.hpp"
+#include "core/layer_styles.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 
@@ -39,13 +46,17 @@ using core::Point;
 
 namespace {
 
-constexpr std::array<std::string_view, 23> kTopKeys{
+constexpr std::array<std::string_view, 25> kTopKeys{
     "version", "revision", "title", "episode", "binding", "start_side", "strict_gates", "autosave",
     "font_path", "page_locks", "brush", "nombre", "spec", "bible", "tickets", "studio", "pages", "story",
     // v4
     "min_reader", "writer", "book_id", "features",
     // smart-objects@1
-    "smart_contents"};
+    "smart_contents",
+    // patterns@1 (PC4)
+    "patterns",
+    // layer-styles@1 (PC4 E6)
+    "global_light"};
 
 constexpr std::array<std::string_view, 21> kPageKeys{
     "id", "art_ok", "plan", "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
@@ -53,9 +64,13 @@ constexpr std::array<std::string_view, 21> kPageKeys{
 
 // The keys Python reads (or recomputes, like stroke_count) at the other levels; any other key there is lost on
 // saving, in Python as here.
-constexpr std::array<std::string_view, 10> kSpecKeys{"width_mm", "height_mm", "dpi", "bleed_mm", "inner_margin_mm",
-                                                     "trim_w_mm", "trim_h_mm", "margins_mm", "expression", "preset"};
-constexpr std::array<std::string_view, 6> kBrushKeys{"rgb", "width_mm", "stabilize", "taper", "curve", "custom"};
+constexpr std::array<std::string_view, 11> kSpecKeys{"width_mm", "height_mm", "dpi", "bleed_mm", "inner_margin_mm",
+                                                     "trim_w_mm", "trim_h_mm", "margins_mm", "expression", "preset",
+                                                     // image-grid@1 (PC4)
+                                                     "grid"};
+constexpr std::array<std::string_view, 8> kBrushKeys{"rgb", "width_mm", "stabilize", "taper", "curve", "custom",
+                                                     // brushes@1 (PC4)
+                                                     "kind", "background_rgb"};
 constexpr std::array<std::string_view, 3> kBibleKeys{"plot", "characters", "constraints"};
 constexpr std::array<std::string_view, 4> kRectKeys{"x", "y", "width", "height"};
 constexpr std::array<std::string_view, 14> kFrameKeys{"id", "rect", "split_axis", "clip", "bleed", "border_mm",
@@ -65,7 +80,7 @@ constexpr std::array<std::string_view, 20> kLineKeys{"id", "page_index", "text",
                                                      "x_mm", "y_mm", "w_mm", "h_mm", "balloon", "tail", "wrap",
                                                      "ruby_runs", "ruby_spans", "path", "emphasis_runs", "style_runs",
                                                      "style", "tails"};
-constexpr std::array<std::string_view, 49> kLayerKeys{
+constexpr std::array<std::string_view, 51> kLayerKeys{
     "id", "role", "kind", "visible", "exportable", "strokes", "raster_relpath", "fill_rgb", "lpi", "density",
     "region", "opacity", "material_id", "angle", "title", "blend", "clip", "lock_alpha", "locked", "panel_clip",
     "panel_each", "patches", "tone", "parent_id", "asset", "mask", "color", "reference", "fill", "adjust", "effect",
@@ -75,14 +90,22 @@ constexpr std::array<std::string_view, 49> kLayerKeys{
     // smart-objects@1
     "smart",
     // PC3 (pen-shapes@1, vector@1, transform@1)
-    "shapes_blob", "shape_count", "vector_mask", "link", "lock_position"};
+    "shapes_blob", "shape_count", "vector_mask", "link", "lock_position",
+    // PC4 (psd-keep@1)
+    "native_psd",
+    // PC4 E6 (layer-styles@1)
+    "style"};
 constexpr std::array<std::string_view, 5> kPlacedOnlyKeys{"frame_id", "placement_mm", "fit", "clip_to", "finish"};
 constexpr std::array<std::string_view, 5> kMaskKeys{"enabled", "asset",
                                                     // masks@1 (PC3)
                                                     "linked", "density", "feather_mm"};
-constexpr std::array<std::string_view, 10> kPackedStrokeKeys{"id", "kind", "width_mm", "xy", "p", "rgb", "opacity", "r", "po", "color_rgb"};
-constexpr std::array<std::string_view, 11> kDictStrokeKeys{"id", "points", "pressure", "width_mm", "kind", "rgb",
-                                                           "opacity", "rotation", "po", "pressure_opacity", "color_rgb"};
+constexpr std::array<std::string_view, 15> kPackedStrokeKeys{"id", "kind", "width_mm", "xy", "p", "rgb", "opacity", "r", "po", "color_rgb",
+                                                             // brushes@1 (PC4)
+                                                             "tilt", "time_ms", "wheel", "flow", "background_rgb"};
+constexpr std::array<std::string_view, 16> kDictStrokeKeys{"id", "points", "pressure", "width_mm", "kind", "rgb",
+                                                           "opacity", "rotation", "po", "pressure_opacity", "color_rgb",
+                                                           // brushes@1 (PC4)
+                                                           "tilt", "time_ms", "wheel", "flow", "background_rgb"};
 
 template <std::size_t N>
 bool in(const std::array<std::string_view, N>& keys, std::string_view key) {
@@ -365,6 +388,10 @@ private:
     core::Layer read_layer(const Json& data, const std::string& at);
     core::Stroke read_stroke(const Json& raw, const std::string& at);
     void read_papers(core::Document& doc);
+    // brushes@1, patterns@1 (PC4): the dab brushes' pictures, the brush state's kind and background; the book's patterns
+    void read_brush_tips(core::Document& doc);
+    void read_brush_state(const Json& brush, core::Document& doc);
+    void read_patterns(const Json& payload, core::Document& doc);
     void read_lut(const Json& adjust, const std::string& at);
     core::StrokeListPtr read_strokes_blob(const Json& ref_value, const std::string& at);
     core::Bytes read_png(const Json& ref_value, const std::string& at, core::BlobMemo* memo);
@@ -382,6 +409,11 @@ private:
     void read_layer_vectors(core::Layer& layer, const Json& data, const std::string& at);
     core::vector::ShapeListPtr read_shapes_blob(const Json& ref_value, const std::string& at);
     void read_page_vectors(core::Page& page, const std::string& at);
+    // PC4 (file-info@1, psd-keep@1)
+    void read_layer_files(core::Layer& layer, const Json& data, const std::string& at);
+    void read_page_files(core::Page& page, const std::string& at);
+    void read_file_info(core::Document& doc);
+    void check_named(const std::string& ref, std::string_view suffix, const std::string& at, std::string_view noun);
     std::unordered_map<std::string, core::vector::ShapeListPtr> shape_blobs_;  // (shapes read in this load)
 };
 
@@ -405,6 +437,14 @@ core::PageSpec Reader::read_spec(const Json& raw) {
     }
     spec.expression = asis_str(raw, "expression", "mono", at);
     spec.preset = asis_opt_str(raw, "preset", at);
+    // (image-grid@1, PC4: the grid its 8-bit pages work at; one this build does not know is reported: read-only)
+    if (const Json* grid = find(raw, "grid"); grid && !grid->is_null()) {
+        try {
+            spec.grid = core::grid_from_json(*grid);
+        } catch (const core::Error& error) {
+            issue("broken_value", at_key(at, "grid"), {}, error.what());
+        }
+    }
     check_keys(raw, kSpecKeys, at, "spec");
     return spec;
 }
@@ -547,6 +587,71 @@ void Reader::read_papers(core::Document& doc) {
             }
         }
         doc.papers.emplace(ref, std::move(png));
+    }
+}
+
+void Reader::read_brush_tips(core::Document& doc) {
+    // brushes@1 (PC4): the pictures the dab brushes name (a sampled tip, the dual brush's, a texture's tile). One that is
+    // missing or is not the bytes its name says makes the book read-only (read_blob reports it; validate_brushes then
+    // finds it not held): a dab brush is never drawn without its picture, nor written without it.
+    for (const std::string& ref : core::dab_asset_refs(doc.brush_custom)) {
+        if (doc.brush_tips.contains(ref)) continue;
+        core::Bytes png = read_blob(Json(ref), "/brush/custom", nullptr, ".png", "brush picture");
+        if (!png || AssetStore::ref(*png) != ref) continue;  // (missing, or another picture in its place: reported)
+        doc.brush_tips.emplace(ref, std::move(png));
+    }
+}
+
+void Reader::read_brush_state(const Json& brush, core::Document& doc) {
+    // brushes@1 (PC4): the brush state's kind (a brush's key) and background colour; one that is not is reported (the
+    // book opens read-only) and not taken
+    if (const Json* kind = find(brush, "kind"); kind != nullptr && !kind->is_null()) {
+        if (kind->is_string()) {
+            doc.brush_kind = kind->get<std::string>();
+        } else {
+            issue("broken_value", "/brush/kind", {}, "the brush state's kind must be a brush's key");
+        }
+    }
+    if (const Json* rgb = find(brush, "background_rgb"); rgb != nullptr && !rgb->is_null()) {
+        std::vector<std::int64_t> values;
+        if (rgb->is_array()) {
+            for (const Json& v : *rgb) {
+                if (!v.is_number_integer()) break;
+                values.push_back(v.get<std::int64_t>());
+            }
+        }
+        if (rgb->is_array() && values.size() == rgb->size()) {
+            doc.brush_background_rgb = std::move(values);
+        } else {
+            issue("broken_value", "/brush/background_rgb", {}, "the brush state's background_rgb must be three whole numbers 0..255");
+        }
+    }
+}
+
+void Reader::read_patterns(const Json& payload, core::Document& doc) {
+    // patterns@1 (PC4): the patterns the book keeps and their pictures. One that cannot be read is reported (the book
+    // opens read-only) and not taken: written again, the book would lose it; a picture missing, or not the bytes its
+    // name says, likewise (read_blob reports it).
+    const Json* raw = find(payload, "patterns");
+    if (raw == nullptr || raw->is_null()) return;
+    if (!raw->is_array()) {
+        issue("broken_value", "/patterns", {}, "the patterns must be a list, not " + core::py_repr(*raw));
+        return;
+    }
+    for (std::size_t i = 0; i < raw->size(); ++i) {
+        const std::string at = at_index("/patterns", i);
+        core::Pattern pattern;
+        try {
+            pattern = core::pattern_from_json((*raw)[i]);
+        } catch (const core::Error& error) {
+            issue("broken_value", at, {}, error.what());
+            continue;
+        }
+        if (!doc.pattern_files.contains(pattern.asset)) {
+            core::Bytes bytes = read_blob(Json(pattern.asset), at_key(at, "asset"), nullptr, core::pattern_suffix(pattern), "pattern picture");
+            if (bytes && AssetStore::ref(*bytes) == pattern.asset) doc.pattern_files.emplace(pattern.asset, std::move(bytes));
+        }
+        doc.patterns.push_back(std::move(pattern));
     }
 }
 
@@ -1046,6 +1151,12 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
     layer.adjust = dict_if_dict(data, "adjust");
     if (layer.adjust) read_lut(*layer.adjust, at_key(at, "adjust"));
     layer.effect = dict_if_dict(data, "effect");
+    // (layer-styles@1, PC4 E6: its style as the writer writes it — in its normal form —; one that is not, the book
+    // read-only: core::validate_layer_styles below)
+    if (const Json* style = find(data, "style"); style != nullptr && !style->is_null()) {
+        // (a snapshot of the history holds its keys sorted: in the order the writer writes them again)
+        layer.style = core::layer_style_normal(*style) ? core::layer_style_spec(*style) : *style;
+    }
     layer.color_prints = to_bool(data, "color_prints", false);
     layer.screen = dict_if_dict(data, "screen");
     layer.source = dict_if_dict(data, "source");
@@ -1113,6 +1224,7 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
         check_keys(*mask, kMaskKeys, here, "mask");
     }
     read_layer_vectors(layer, data, at);  // (PC3: vector@1's vector mask, transform@1's link and position lock)
+    read_layer_files(layer, data, at);    // (PC4: psd-keep@1's kept blocks)
     check_keys(data, kLayerKeys, at, "layer");
     if (!placed && !smart) {
         for (const auto& key : kPlacedOnlyKeys) {
@@ -1392,6 +1504,7 @@ core::Document Reader::migrate(const Json& payload) {
         check_ink_rasters(page, raw, at);
         read_channels(page, at);
         read_page_vectors(page, at);
+        read_page_files(page, at);
         page_list.push_back(std::make_shared<core::Page>(std::move(page)));
         if (skip_assets_) deferred.push_back(page_list.back());
     }
@@ -1427,6 +1540,19 @@ core::Document Reader::migrate(const Json& payload) {
         for (const auto& [name, value] : custom.items()) doc.brush_custom[name] = core::py_dict(value);
         check_keys(*brush, kBrushKeys, "/brush", "brush");
         read_papers(doc);
+        read_brush_state(*brush, doc);
+        read_brush_tips(doc);
+    }
+    read_patterns(payload, doc);
+    // (layer-styles@1, PC4 E6: the book's global light; one that cannot be read, the book read-only)
+    if (const Json* light = find(payload, "global_light"); light != nullptr && !light->is_null()) {
+        try {
+            const std::array<double, 2> values = core::global_light_of(*light);
+            if (!core::same_json_unordered(*light, core::global_light_json(values))) throw core::Error("value", "the global light is not as the writer writes it");
+            doc.global_light = values;
+        } catch (const core::Error& error) {
+            issue("broken_value", "/global_light", {}, error.what());
+        }
     }
     doc.nombre = dict_or_empty(payload, "nombre");
     if (const Json* bible = find(payload, "bible"); bible && core::py_truthy(*bible)) {
@@ -1439,6 +1565,7 @@ core::Document Reader::migrate(const Json& payload) {
     for (const auto& [key, value] : payload.items()) {
         if (!in(kTopKeys, key)) doc.extra[key] = value;
     }
+    read_file_info(doc);  // (file-info@1, PC4)
     {
         // (color-model@1: the book's text_gamma, under its colour model; a value that is not one is reported: read-only)
         if (const auto it = doc.extra.find("color"); it != doc.extra.end() && it->is_object() && it->contains("text_gamma")) {
@@ -1517,12 +1644,104 @@ core::Document Reader::migrate(const Json& payload) {
     // (smart-objects@1: a smart object's settings, its contents and contents inside contents)
     try { core::smart::validate_smart(doc); }
     catch (const core::Error& error) { issue("broken_value", "/smart_contents", {}, error.what()); }
+    // (filters@1, PC4 節 D: a smart filter's file — a displacement map — an asset ref the book's folder holds)
+    try {
+        core::validate_filters(doc, [this](const std::string& ref, const std::string& suffix) {
+            return dir_.empty() || skip_assets_ || store_.has(ref, suffix);
+        });
+    } catch (const core::Error& error) {
+        issue("missing_asset", "/pages", {}, error.what());
+    }
+    // (vanishing-point@1, PC4 節 D6: a page's planes of 消点 — kept as read; not well formed, the book read-only)
+    try { core::validate_vanishing(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     // (PC3: masks@1's settings and Quick Mask; vector@1, pen-shapes@1, transform@1, page-spec@1)
     try { core::validate_masks(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     try { core::vector::validate_vector(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (PC4: file-info@1, image-grid@1, psd-keep@1)
+    try { core::validate_file_info(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    try { core::validate_psd_keep(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (PC4: brushes@1's dab brushes, their pictures and the brush state; patterns@1's patterns)
+    try { core::validate_brushes(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/brush", {}, error.what()); }
+    try { core::validate_patterns(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/patterns", {}, error.what()); }
+    // (PC4 E6: layer-styles@1's styles, each in its normal form on a layer that takes one)
+    try { core::validate_layer_styles(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     return doc;
+}
+
+// PC4: an asset the book names that only its folder holds (file-info@1's XMP and EXIF, psd-keep@1's blocks: read as they
+// are written back), there or reported missing (the book opens read-only).
+void Reader::check_named(const std::string& ref, std::string_view suffix, const std::string& at, std::string_view noun) {
+    if (ref.empty() || dir_.empty() || !AssetStore::is_ref(ref)) return;
+    if (!store_.has(ref, suffix)) issue("missing_asset", at, ref, "the " + std::string(noun) + " " + AssetStore::relpath(ref, suffix) + " is missing");
+}
+
+// psd-keep@1 (PC4): what a PSD's layer held that this build does not read. One not well formed is reported (the book opens
+// read-only: it is never written without it).
+void Reader::read_layer_files(core::Layer& layer, const Json& data, const std::string& at) {
+    const Json* keep = find(data, "native_psd");
+    if (keep == nullptr || keep->is_null()) return;
+    const std::string here = at_key(at, "native_psd");
+    try {
+        layer.native_psd = core::psd_layer_keep_from_json(*keep);
+    } catch (const core::Error& error) {
+        issue("broken_value", here, {}, error.what());
+        return;
+    }
+    for (const auto& [key, ref] : layer.native_psd->blocks) check_named(ref, core::kPsdBlockSuffix, here, "kept PSD block");
+    check_named(layer.native_psd->ranges, core::kPsdBlockSuffix, here, "kept PSD blending ranges");
+}
+
+// file-info@1 and psd-keep@1 (PC4): the file a page was opened from and what its PSD held, kept under "native_source" and
+// "native_psd" (taken out of the keys written back as they were read). What cannot be read is reported (the book opens
+// read-only) and is kept as it was read: the page is never written without it.
+void Reader::read_page_files(core::Page& page, const std::string& at) {
+    if (const auto it = page.extra.find("native_source"); it != page.extra.end()) {
+        try {
+            if (!it->is_null()) page.native_source = core::native_source_from_json(*it);
+            page.extra.erase(it);
+        } catch (const core::Error& error) {
+            issue("broken_value", at_key(at, "native_source"), {}, error.what());
+        }
+        if (page.native_source) {
+            check_named(page.native_source->exif, core::kExifSuffix, at_key(at, "native_source"), "EXIF");
+            check_named(page.native_source->xmp, core::kXmpSuffix, at_key(at, "native_source"), "XMP");
+        }
+    }
+    if (const auto it = page.extra.find("native_psd"); it != page.extra.end()) {
+        try {
+            if (!it->is_null()) page.native_psd = core::psd_page_keep_from_json(*it);
+            page.extra.erase(it);
+        } catch (const core::Error& error) {
+            issue("broken_value", at_key(at, "native_psd"), {}, error.what());
+        }
+        if (page.native_psd) {
+            for (const core::PsdResource& r : page.native_psd->resources) check_named(r.ref, core::kPsdBlockSuffix, at_key(at, "native_psd"), "kept PSD resource");
+            for (const core::PsdGlobal& g : page.native_psd->globals) check_named(g.ref, core::kPsdBlockSuffix, at_key(at, "native_psd"), "kept PSD block");
+        }
+    }
+}
+
+// file-info@1 (PC4): the book's File Info, kept under "file_info" (taken out of the keys written back as they were read; one
+// that cannot be read is reported and kept so: the book is read-only).
+void Reader::read_file_info(core::Document& doc) {
+    const auto it = doc.extra.find("file_info");
+    if (it == doc.extra.end()) return;
+    try {
+        if (!it->is_null()) doc.file_info = core::file_info_from_json(*it);
+        doc.extra.erase(it);
+    } catch (const core::Error& error) {
+        issue("broken_value", "/file_info", {}, error.what());
+        return;
+    }
+    if (doc.file_info) check_named(doc.file_info->xmp, core::kXmpSuffix, "/file_info", "XMP");
 }
 
 std::map<std::string, std::shared_ptr<const core::SmartContents>> Reader::read_smart_contents(const Json& payload, core::Binding binding) {
@@ -1625,6 +1844,7 @@ core::Page Reader::read_contents_page(const Json& raw, const std::string& at, co
     check_ink_rasters(page, raw, at);
     read_channels(page, at);
     read_page_vectors(page, at);
+    read_page_files(page, at);  // (PC4: file-info@1, psd-keep@1)
     return page;
 }
 
@@ -1689,7 +1909,16 @@ bool is_known_feature(std::string_view feature) {
            feature == core::kAdjustmentsFeature || feature == core::kSmartObjectsFeature ||
            // PC3 (core/masks.hpp, core/vector.hpp)
            feature == core::kMasksFeature || feature == core::vector::kVectorFeature || feature == core::vector::kPenShapesFeature ||
-           feature == core::vector::kTransformFeature || feature == core::vector::kPageSpecFeature;
+           feature == core::vector::kTransformFeature || feature == core::vector::kPageSpecFeature ||
+           // PC4 節 F (core/file_info.hpp, core/psd_keep.hpp, core/smart.hpp)
+           feature == core::kFileInfoFeature || feature == core::kImageGridFeature || feature == core::kPsdKeepFeature ||
+           feature == core::kFormatsFeature || feature == core::kCameraRawFeature ||
+           // PC4 E-0 (core/brush_dabs.hpp, core/patterns.hpp)
+           feature == core::kBrushesFeature || feature == core::kPatternsFeature ||
+           // PC4 節 D (core/filter_kinds.hpp, core/vanishing.hpp)
+           feature == core::kFiltersFeature || feature == core::kVanishingFeature ||
+           // PC4 E6 (core/layer_styles.hpp)
+           feature == core::kLayerStylesFeature;
 }
 
 int project_version(const Json& payload) {

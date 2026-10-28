@@ -860,8 +860,8 @@ private slots:
     // --- tests/test_g3.py -------------------------------------------------------------------------------------------
 
     // test_the_menus_people_look_for: the nine menus in Python's order (the rulers, 3D, tones and effect lines inside
-    // ツール; the panels and the lines inside ページ), the commands people look for in them, and 最近使った原稿 listing
-    // the book.
+    // ツール; the panels and the lines inside ページ), the commands people look for in them, and 最近使用したファイルを開く (PC4
+    // F-0: Photoshop's name for Python's 最近使った原稿) listing the book.
     void test_the_menus_people_look_for() {
         core::Document doc = book_of(2);
         APPLY(doc, Json::array({Json{{"op", "add_line"}, {"page", 1}, {"id", "a"}, {"text", "やあ"}, {"x_mm", 150}, {"y_mm", 40}, {"w_mm", 30},
@@ -869,10 +869,12 @@ private slots:
         Book b(doc, QSize(1280, 800), QStringLiteral("b.genko"), [](const fs::path& path) { app::remember_project(path); });
         QStringList titles;
         for (QAction* top : b.w()->menuBar()->actions()) titles << top->text();
+        // (PC4 節 D, the user's decision 1: フィルター after レイヤー)
         QCOMPARE(titles, (QStringList{QStringLiteral("ファイル"), QStringLiteral("編集"), QStringLiteral("表示"), QStringLiteral("ツール"), QStringLiteral("選択範囲"),
-                                      QStringLiteral("レイヤー"), QStringLiteral("ページ"), QStringLiteral("ウィンドウ"), QStringLiteral("ヘルプ")}));
+                                      QStringLiteral("レイヤー"), QStringLiteral("フィルター"), QStringLiteral("ページ"), QStringLiteral("ウィンドウ"),
+                                      QStringLiteral("ヘルプ")}));
         const QStringList file = texts(b.menu(QStringLiteral("ファイル")));
-        QVERIFY(file.contains(QStringLiteral("最近使った原稿")) && file.contains(QStringLiteral("閉じる")) && file.contains(QStringLiteral("Genko を終わる")));
+        QVERIFY(file.contains(QStringLiteral("最近使用したファイルを開く")) && file.contains(QStringLiteral("閉じる")) && file.contains(QStringLiteral("終了")));
         const QStringList edit = texts(b.menu(QStringLiteral("編集")));
         QVERIFY(edit.contains(QStringLiteral("すべてを選択")) && edit.contains(QStringLiteral("消去")));
         QVERIFY(texts(b.menu(QStringLiteral("レイヤー"))).contains(QStringLiteral("レイヤーマスク")));
@@ -884,7 +886,7 @@ private slots:
         QVERIFY(texts(submenu(tools, QStringLiteral("トーン・効果線"))).contains(QStringLiteral("集中線")));
         QVERIFY(texts(submenu(b.menu(QStringLiteral("ページ")), QStringLiteral("コマ"))).contains(b.act("act_split_h")->text()));
         // recent books
-        QMenu* recent = submenu(b.menu(QStringLiteral("ファイル")), QStringLiteral("最近使った原稿"));
+        QMenu* recent = submenu(b.menu(QStringLiteral("ファイル")), QStringLiteral("最近使用したファイルを開く"));
         QVERIFY(recent != nullptr);
         emit recent->aboutToShow();
         QVERIFY2(texts(recent).contains(QStringLiteral("b")), qPrintable(texts(recent).join(QStringLiteral(" | "))));

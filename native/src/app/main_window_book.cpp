@@ -527,7 +527,7 @@ void MainWindow::assignee_dialog() {
 // them would refer to a picture this book still does not have (Python copies every file as it is): refused, said.
 void MainWindow::merge_book() {
     if (!session_->path()) {
-        flash(QStringLiteral("取り込む前に、この原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        flash(QStringLiteral("取り込む前に、この原稿を保存します（ファイル → 別名で保存…）"), 6000);
         return;
     }
     const Asked asked = asking();

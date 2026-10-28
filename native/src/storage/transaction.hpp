@@ -44,7 +44,7 @@ struct SaveRequest {
     std::string target_txn;              // undo and redo: the transaction (or "legacy:<n>") undone or redone
     std::string txn;                     // the caller's id for this save (a retry with the same id is saved once); new when empty
     std::optional<std::string> expect_state;  // undo and redo: the state the book must come out as
-    // The folder the book was read from, when it is written somewhere else (別の場所に保存): every asset the book names
+    // The folder the book was read from, when it is written somewhere else (別名で保存): every asset the book names
     // that this folder does not hold is copied from there first (copy_named_assets) — a smart object's file, filter mask,
     // PSD record and assigned profile, a placed picture: what only the assets hold, not the book in memory.
     std::optional<std::filesystem::path> assets_from;

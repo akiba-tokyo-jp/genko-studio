@@ -82,6 +82,12 @@ struct Corner {
 };
 Plane triangles(const Plane& src, const std::vector<Corner>& corners, const std::vector<std::array<std::size_t, 3>>& tris, int width, int height,
                 Interp interp, int x0 = 0, int y0 = 0);
+// PC4 D6: where each pixel (x, y) of [x0, x0 + width) × [y0, y0 + height) — the corners' own coordinates, its centre at
+// x + 0.5, y + 0.5 — takes the source through the triangles (source pixels, row-major; NaN where no triangle is): the places
+// triangles() samples, for a caller that samples them itself (render/fx_lens: 広角補正 on a filter's window). The same
+// places whatever box asks for them.
+std::vector<std::array<double, 2>> triangle_places(const std::vector<Corner>& corners, const std::vector<std::array<std::size_t, 3>>& tris, int x0, int y0,
+                                                   int width, int height);
 // PC3 C-c: the plane drawn through an inverse map g (Liquify's field): each destination pixel's centre (x0 + x + 0.5,
 // y0 + y + 0.5) takes the source at g of it (source pixels, their centres at + 0.5). A place g leaves where it was takes
 // its pixel as it is.

@@ -109,6 +109,8 @@ Box rect_px(const core::Rect& rect, int dpi);
 // The same participation rule for page rendering and destructive layer editing.
 bool uses_color_precision(const core::Page& page, bool print);
 class ColorCanvas;
+struct ColorPicture;
+class RgbSpace;
 // Blend an editable precise-colour stroke layer without an RGBA8 intermediate.
 void blend_color_strokes(ColorCanvas& canvas, const core::Page& page, const core::Layer& layer, int dpi, Box area, const core::Document* episode = nullptr);
 // PC2d (document:color-depth-model): whether a layer with precise colour of its own (precise pixels, precise lines) is
@@ -125,6 +127,22 @@ Image page_background(const core::Page& page, Size size, bool name_or_proof);
 // them makes on such a page (render/ink_edit).
 core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<core::Layer>& layers, int dpi, const core::Document* episode,
                                      bool paper = false);
+
+// PC4 E6 (layer-styles@1): `layers` (of `page`, in their order) composited alone over nothing as the page draws them —
+// their styles too — over the whole page at `dpi`: on a page of inks its inks (with their alpha, at its depth); else the
+// "RGBA" picture and, where the page composites them in precise colour, their values (GKCR f32). What baking a style
+// into pixels makes (a merge of a styled layer, レイヤーを作成).
+struct Alone {
+    Image image;
+    std::optional<std::string> precise;
+    std::optional<core::InkPixels> inks;
+};
+Alone composite_alone(const core::Page& page, std::vector<core::Layer> layers, int dpi, const core::Document* episode);
+// PC4 E6: a merge's step for a layer with its style (as the page draws it, proof): laid over `out` (the whole page at
+// dpi, "RGBA"; `prev`: the alpha a layer clipped to it clips to, and after it the layer's own), or over a precise
+// canvas (the whole page at dpi).
+void blend_styled_8bit(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode, Image& out, std::optional<Image>& prev);
+void blend_styled_precise(ColorCanvas& canvas, const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode);
 
 RenderResult render_page(const core::Page& page, int dpi, const RenderOptions& options = {},
                          const core::Document* episode = nullptr);
@@ -153,6 +171,10 @@ Image layer_image_over(const core::Page& page, const core::Layer& layer, int dpi
 // One layer alone over a transparent page (its pixels, fills and lines, panel clip and mask).
 Image layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode = nullptr,
                   bool skip_unported = false, bool bake_color = false);
+// patterns@1 (PC4 E3): a pattern fill layer alone over the whole page in a precise canvas's space (its panels cut; its
+// mask, opacity and blend stay the layer's) — Layer › Rasterize on a page of more than 8 bits —; none for another layer.
+std::optional<ColorPicture> pattern_fill_precise(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode,
+                                                 const RgbSpace& space);
 std::optional<Image> drawable_layer_image(const core::Page& page, const core::Layer& layer, int dpi, const core::Document* episode = nullptr,
                   bool skip_unported = false, bool bake_color = false);
 // color-model@1: does a layer's picture as layer_image and drawable_layer_image make it (`tinted`: its colour laid on)
@@ -191,6 +213,12 @@ struct PageLayer {
     // "group" (above them: the group with the layer's name and settings), no picture of their own.
     const core::vector::ShapePart* shape = nullptr;
     std::string section;
+    // patterns@1 (PC4 E3): a pattern fill layer's pattern fill (a PSD writes the layer as Photoshop's pattern fill layer,
+    // its PtFl block; `image` its look)
+    const core::Json* pattern = nullptr;
+    // layer-styles@1 (PC4 E6, review P2-6): the page layer whose style goes with a picture given without its id — a placed
+    // picture's, the ink layer's lines (a PSD writes the style with it: lfx2, iOpa, blending ranges); none: by `id`
+    const core::Layer* styled = nullptr;
 };
 
 // psd.page_layers(page, episode, dpi), bottom to top: the paper, the page's fills, each visible exported pixel layer
@@ -203,7 +231,8 @@ struct PageLayer {
 // layers): each correction layer shown is handed to it in its place among the layers (Python's leaves them out: their
 // change is in the merged picture only). A pen layer with shape parts (pen-shapes@1, PC3 C-b) is given in its place:
 // with `shapes` (a PSD) as a shape layer of its one part or as a group of its pictures, parts and lines
-// (render/psd_shapes' plan), else (and where a group would not show it the same) as one layer of its look.
+// (render/psd_shapes' plan), else (and where a group would not show it the same) as one layer of its look. With `shapes`
+// (a PSD) a pattern fill layer (patterns@1, PC4 E3) is given too, as a layer of its look with its pattern fill.
 void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each,
                  const std::function<void(const core::StoryLine&)>* line_layers = nullptr,
                  const std::function<void(const core::Layer&)>* adjust_layers = nullptr, bool shapes = false);

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <set>
@@ -16,6 +17,8 @@
 #include "core/masks.hpp"
 #include "core/ops_schema.hpp"
 #include "core/ops_util.hpp"
+#include "core/layer_styles.hpp"
+#include "core/patterns.hpp"
 #include "core/color_raster.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
@@ -55,8 +58,29 @@ std::string join(const std::vector<std::string>& items, std::string_view separat
 
 // define_brush's paper (BRUSH-01): this build's own key, never named an unknown key.
 bool paper_key(const Json& op, std::string_view key) { return key == "paper" && is_op(op, "define_brush"); }
+// add_stroke's color_rgb (PC4 E-0: the 描画色's precise values on a page of 16 or 32 bits): this build's own too.
+bool stroke_colour_key(const Json& op, std::string_view key) { return key == "color_rgb" && is_op(op, "add_stroke"); }
+// brushes@1 (PC4 E1): the keys of the line ops this build adds — add_stroke's line inputs, flow, blend and 背景色,
+// define_brush's dab brush, set_brush's kind, 背景色 and reset, erase's brush (or block) with its opacity and flow.
+bool dab_key(std::string_view op, std::string_view key) {
+    if (op == "add_stroke") return key == "tilt" || key == "time_ms" || key == "wheel" || key == "flow" || key == "blend" || key == "background_rgb";
+    if (op == "define_brush") return key == "engine" || key == "dabs" || key == "format";
+    if (op == "set_brush") return key == "kind" || key == "background_rgb" || key == "reset";
+    if (op == "erase" || op == "erase_raster") return key == "brush" || key == "block" || key == "opacity" || key == "flow";
+    return false;
+}
+
+// PC4 E4 (SPEC.md COLOR-09「塗りつぶし・グラデーション」): gradient_fill's reverse, dither, blend, opacity and transparency,
+// fill's blend and color_rgb.
+bool fill_key(std::string_view op, std::string_view key) {
+    if (op == "gradient_fill") return key == "reverse" || key == "dither" || key == "blend" || key == "opacity" || key == "transparency";
+    if (op == "fill") return key == "blend" || key == "color_rgb";
+    return false;
+}
 
 bool own_setting(const Json& op, std::string_view name, std::string_view key);
+// patterns@1 (PC4 E3): a pattern fill — fill_area's and fill's pattern, add_layer's of kind fill.
+bool pattern_key(std::string_view op, std::string_view key) { return key == "pattern" && (op == "fill_area" || op == "fill" || op == "add_layer"); }
 
 // Python's _usage: the keys given that the op does not take, and how the op is written. (`channel`: the op's "channel"
 // is this build's own there — it names a channel or plate of its page: core::channel_target —, so not one of them; nor
@@ -68,7 +92,8 @@ std::string usage(const Json& op, bool channel = false) {
     std::vector<std::string> strange;
     for (const auto& [key, value] : op.items()) {
         if (!schema->contains(key) && key != "op" && key != "area" && !key.starts_with("_") && !paper_key(op, key) &&
-            !(key == "channel" && channel) && !own_setting(op, name, key)) {
+            !stroke_colour_key(op, key) && !dab_key(name, key) && !pattern_key(name, key) && !fill_key(name, key) && !(key == "channel" && channel) &&
+            !own_setting(op, name, key)) {
             strange.push_back(key);
         }
     }
@@ -84,11 +109,12 @@ std::string usage(const Json& op, bool channel = false) {
 
 // Keys this build's ops take beyond Python's (the precise colour work: merge_visible's flatten, convert_layer's
 // preserve_precision; BRUSH-01: define_brush's paper; TEXT-01's ruby by place: add_line's and edit_line's ruby_spans;
-// channels@1: the pixel ops' channel). They are used, so not reported as ignored; the public list (`genko schema`) stays
-// Python's.
+// channels@1: the pixel ops' channel; PC4 E-0: add_stroke's color_rgb — on a page that does not take it, the op says so
+// in a note of its own). They are used, so not reported as ignored; the public list (`genko schema`) stays Python's.
 bool native_key(std::string_view op, std::string_view key) {
     return (op == "merge_visible" && key == "flatten") || (op == "convert_layer" && key == "preserve_precision") ||
            (op == "define_brush" && key == "paper") || ((op == "add_line" || op == "edit_line") && key == "ruby_spans") ||
+           (op == "add_stroke" && key == "color_rgb") || dab_key(op, key) || fill_key(op, key) ||
            key == "contents" ||  // (smart-objects@1: any op on a smart object's page)
            // PC3 (masks@1): set_layer_mask's linked, density and feather_mm; a pixel op's layer_mask (its layer's mask
            // painted instead of its pixels)
@@ -99,7 +125,9 @@ bool native_key(std::string_view op, std::string_view key) {
            (op == "transform_area" && key == "mask") || (op == "paste" && key == "center_mm") ||
            (op == "fill_area" && key == "preserve_transparency") ||
            // PC3 C-c (SPEC COLOR-07): Filter › Liquify's strokes and its field's spacing
-           (op == "liquify" && (key == "strokes" || key == "mesh_mm"));
+           (op == "liquify" && (key == "strokes" || key == "mesh_mm")) ||
+           // PC4 E3 (patterns@1): a pattern fill — fill_area's and fill's pattern, add_layer's of kind fill
+           pattern_key(op, key);
 }
 
 // PC2 (SPEC COLOR-04): the settings of this build's own an op of Python's reads by what else it was given —
@@ -433,6 +461,14 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
             }
         }
     }
+    if (named && name == "set_camera_raw") {
+        // (PC4 F-e: its "contents" a RAW file's development, not a page to work in — every page showing them is asked)
+        const Json* id = get(op, "contents");
+        if (id != nullptr && id->is_string() && doc.smart_contents.contains(id->get<std::string>())) {
+            for (const std::size_t at : smart::pages_using(doc, id->get<std::string>())) check_held(doc, doc.page(at), doc.page(at).index, actor);
+        }
+        return;
+    }
     // (Python takes a lock on a page the book does not have, and lets it go, without a word: refused here)
     const bool lock_op = named && (name == "lock_page" || name == "unlock_page");
     if (const Json* page_value = get(op, "page"); lock_op && page_value != nullptr) {
@@ -752,6 +788,54 @@ Json journal_op(const Json& op) {
                     *png = "<" + std::to_string(code_points(png->get_ref<const std::string&>())) + " base64 chars>";
                 }
             }
+            // (brushes@1, PC4 E1 — review P3-1: a dab brush's pictures — tips and textures as "png", upstream's tiles'
+            // "data" under "sampled" and "tile" — kept by the book as assets)
+            const std::function<void(Json&)> pictures = [&pictures](Json& v) {
+                if (!v.is_object()) return;
+                for (auto& [key, child] : v.items()) {
+                    if (key == "png" && child.is_string()) {
+                        child = "<" + std::to_string(code_points(child.get_ref<const std::string&>())) + " base64 chars>";
+                    } else if ((key == "sampled" || key == "tile") && child.is_object() && child.contains("data")) {
+                        Json& data = child["data"];
+                        if (data.is_string()) data = "<" + std::to_string(code_points(data.get_ref<const std::string&>())) + " base64 chars>";
+                        if (data.is_array()) data = "<" + std::to_string(data.size()) + " values>";
+                    } else {
+                        pictures(child);
+                    }
+                }
+            };
+            if (const auto dabs = out.find("dabs"); dabs != out.end()) pictures(*dabs);
+        }
+        // (patterns@1, PC4 E3: a pattern's picture — add_pattern's, and a fill's pattern given whole — kept by the book as
+        // an asset)
+        const auto pattern_picture = [](Json& holder) {
+            for (const char* key : {"png", "gkcr", "gkir"}) {
+                if (const auto data = holder.find(key); data != holder.end() && data->is_string()) {
+                    *data = "<" + std::to_string(code_points(data->get_ref<const std::string&>())) + " base64 chars>";
+                }
+            }
+        };
+        if (is_op(out, "add_pattern")) pattern_picture(out);
+        if (const auto pattern = out.find("pattern"); pattern != out.end() && pattern->is_object()) pattern_picture(*pattern);
+        // (layer-styles@1, PC4 E6: a style's patterns given whole — set_layer_style's and add_layer_effect's)
+        const auto style_pictures = [&pattern_picture](Json& effects) {
+            if (!effects.is_array()) return;
+            for (Json& e : effects) {
+                if (!e.is_object()) continue;
+                if (const auto p = e.find("pattern"); p != e.end() && p->is_object()) pattern_picture(*p);
+                if (const auto t = e.find("texture"); t != e.end() && t->is_object()) {
+                    if (const auto p = t->find("pattern"); p != t->end() && p->is_object()) pattern_picture(*p);
+                }
+            }
+        };
+        if (is_op(out, "set_layer_style")) {
+            if (const auto style = out.find("style"); style != out.end() && style->is_object() && style->contains("effects")) style_pictures((*style)["effects"]);
+        } else if (is_op(out, "add_layer_effect")) {
+            if (const auto effect = out.find("effect"); effect != out.end() && effect->is_object()) {
+                Json one = Json::array({*effect});
+                style_pictures(one);
+                *effect = one[0];
+            }
         }
         // (PC2a: a 3D LUT file's text a color_lookup gives — add_layer's and set_layer's adjust, set_adjustment's and
         // filter_raster's own —: its table is the book's asset, and an op is not done again from the journal)
@@ -960,7 +1044,12 @@ std::optional<Json> apply_in_contents(const CommandBus& bus, Document& work, con
     if (!same_book) throw ApplyError(prefix + "this op cannot be used inside smart object contents");
     work.luts = after.luts;
     work.papers = after.papers;
+    work.brush_tips = after.brush_tips;  // (PC4: brushes@1's pictures, patterns@1's patterns the op kept)
+    work.patterns = after.patterns;
+    work.pattern_files = after.pattern_files;
     work.smart_files = after.smart_files;
+    work.filter_files = after.filter_files;  // (filters@1, PC4 節 D: the files its smart filters were given — a displacement map)
+    work.native_files = after.native_files;  // (psd-keep@1, PC4 F-d: the blocks a PSD read into the contents kept)
     work.smart_contents = after.smart_contents;
     work.features = after.features;
     work.studio = after.studio;
@@ -1036,6 +1125,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
     refuse_unread_pages(doc, ops);
     Document work = doc;  // (the pages stay shared until an op changes one)
     std::vector<char> channels(ops.size(), 0);  // (channels@1: the ops whose "channel" named a channel or plate of their page)
+    std::vector<std::string> notes;             // (PC4: what the ops said they did not use, OpContext::notes)
     for (std::size_t i = 0; i < ops.size(); ++i) {
         Json& op = ops[i];
         if (!op.is_object()) throw ApplyError("ops[" + std::to_string(i) + "] must be an object");
@@ -1047,7 +1137,9 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
         Json resolved;
         Json* current = &op;
         std::optional<Json> report;
-        if (get(op, "contents") != nullptr) {  // (smart-objects@1: an op on a smart object's page)
+        // (smart-objects@1: an op on a smart object's page; PC4 F-e's set_camera_raw names a RAW file's contents to develop
+        // again, an op of the book's own)
+        if (get(op, "contents") != nullptr && name_text != "set_camera_raw") {
             report = apply_in_contents(*this, work, op, actor, dry_run, result.warnings, prefix, name_text);
         } else try {
             if (const Json* area = get(op, "area"); area != nullptr && area_needs_resolving(*area)) {
@@ -1086,11 +1178,14 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     smart::validate_smart(work);  // (smart-objects@1: a smart object, its contents; no pixels drawn on it)
                     validate_masks(work);         // (masks@1, PC3: a mask's settings, a page's Quick Mask)
                     vector::validate_vector(work);  // (PC3: vector@1, pen-shapes@1, transform@1, page-spec@1)
+                    validate_pattern_fills(work);   // (patterns@1, PC4 E3: no fill names a pattern the book does not keep)
+                    validate_layer_styles(work);    // (layer-styles@1, PC4 E6: a style in its normal form, on a layer that takes one)
                 } catch (const Error& error) {
                     if (error.code() == "not_yet_ported") throw;
                     throw OpError(error.what());
                 }
                 report = std::move(context.report);
+                for (const std::string& note : context.notes) notes.push_back("ops[" + std::to_string(i) + "] " + name_text + ": " + note);
             }
         } catch (const ApplyError&) {
             throw;
@@ -1127,6 +1222,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
     refuse_changed_unread_pages(doc, work);
     for (auto& warning : validate_document(work)) result.warnings.push_back(std::move(warning));
     for (auto& warning : unknown_key_warnings(ops, channels)) result.warnings.push_back(std::move(warning));
+    for (std::string& note : notes) result.warnings.push_back(std::move(note));
     for (const Json& op : ops) result.journal_ops.push_back(journal_op(op));
     result.doc = std::move(work);
     return result;

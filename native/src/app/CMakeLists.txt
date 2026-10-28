@@ -98,6 +98,17 @@ genko_library(genko_app
     adjust_panels.cpp
     adjust_forms_color.cpp
     image_dialogs.cpp
+    filter_forms.cpp
+    filter_forms_basic.cpp
+    filter_forms_distort.cpp
+    filter_menu.cpp
+    filter_gallery_window.cpp
+    lens_window.cpp
+    vanishing_window.cpp
+    camera_raw_window.cpp
+    blur_gallery_tool.cpp
+    lighting_window.cpp
+    render_dialogs.cpp
     main_window_adjust.cpp
     main_window_smart.cpp
     main_window_page_size.cpp
@@ -145,6 +156,37 @@ genko_library(genko_app
     # PC3 C-d: 表示 → スナップ・スナップ先 (the canvas's snapping), the move tool's options, レイヤー → 整列・分布・重ね順・リンク
     canvas_snap.cpp
     main_window_align.cpp
+    # PC4 F-0: ファイル in Photoshop's order and names, 節 F's new commands as frames
+    main_window_file.cpp
+    # PC4 F-b: 開く…・指定形式で開く… (Genko's own open window), ファイル情報…
+    open_dialog.cpp
+    file_info_dialog.cpp
+    # PC4 F-c: ファイル → 書き出し ▸ (書き出し形式…・書き出しの環境設定…・Web 用に保存（従来）…・クイック書き出し・レイヤーからファイル…) and レイヤー's
+    main_window_export.cpp
+    export_as_dialog.cpp
+    save_for_web_dialog.cpp
+    # PC4 E-0: the drawing tools' groups (the ツール menu, the palette's long press) and the frames of their panels
+    paint_panels.cpp
+    # PC4 E3: the Patterns panel, パターンを定義…, the pattern fill layer, パターンプレビュー
+    patterns_panel.cpp
+    main_window_patterns.cpp
+    # PC4 E4: グラデーション (the panel, the library and the current gradient, the グラデーションエディター)
+    gradients_panel.cpp
+    # PC4 E5: the brushes that change pixels (ぼかし・シャープ・指先・覆い焼き・焼き込み・スポンジ・混合ブラシ・背景消しゴム・色の置き換え)
+    paint_tools.cpp
+    # PC4 E2: ブラシ・ブラシ設定 (F5)・ツールプリセット panels, ブラシを定義…, プリセット ▸ (プリセットマネージャー…・書き出し／読み込み…・移行)
+    brushes_panel.cpp
+    brush_settings_panel.cpp
+    tool_presets_panel.cpp
+    preset_manager.cpp
+    main_window_brush_presets.cpp
+    # PC4 F-e: Camera Raw's window for a camera RAW file (opening one, a RAW smart object's コンテンツを編集)
+    camera_raw_open.cpp
+    main_window_raw.cpp
+    # PC4 E6: レイヤー → レイヤースタイル (the window), the スタイル panel
+    layer_style_dialog.cpp
+    styles_panel.cpp
+    main_window_styles.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

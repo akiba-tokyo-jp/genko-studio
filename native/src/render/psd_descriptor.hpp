@@ -49,6 +49,11 @@ public:
     // items; and a list of unit floats (VlLs of UntF: a shape stroke's dashes).
     void objects(std::string_view key, const std::vector<std::pair<std::string, Writer>>& items);
     void units(std::string_view key, std::string_view unit, const std::vector<double>& values);
+    // (PC4 E6) another writer's items after these (an effect's descriptor made of parts)
+    void append(const Writer& other) {
+        body_ += other.body_;
+        count_ += other.count_;
+    }
     // The class structure (an empty name, the class id), its count and items.
     std::string structure(std::string_view class_id) const;
     // A versioned descriptor: version 16, then the structure.
@@ -64,11 +69,28 @@ private:
 struct Broken : std::runtime_error {
     using std::runtime_error::runtime_error;
 };
+// (PC4 E2, review P1-1) The budget below spent: a Broken, told apart by a reader that refuses the whole file then.
+struct TooLarge : Broken {
+    using Broken::Broken;
+};
 
-// What is read: bytes with a place, every read checked against their end (Broken).
+// (PC4 E4, review P1-1: design 4.3's "ほどいた標本は合わせて 512 MiB まで") What a descriptor read may take in memory: its
+// values, items, texts and lists counted as they are made (a list's slots twice, as a vector grows) — a file of a few
+// bytes a value cannot make some fifty times more of them (a .grd, a PSD block, an ABR or PAT descriptor).
+inline constexpr std::size_t kUnpackedBudget = std::size_t(512) << 20;
+
+// What is read: bytes with a place, every read checked against their end (Broken), and what the values read take in
+// memory against `budget` (Broken "too large" past it).
 class Bytes {
 public:
-    explicit Bytes(std::string_view data) : data_(data) {}
+    explicit Bytes(std::string_view data, std::size_t budget = kUnpackedBudget) : data_(data), budget_(budget) {}
+    // `n` bytes more kept of what is read: Broken when past the budget.
+    void spend(std::size_t n) {
+        if (n > budget_ - spent_) throw TooLarge("its descriptors are too large to read (more than " + std::to_string(budget_ >> 20) + " MB unpacked)");
+        spent_ += n;
+    }
+    // (PC4 E2) What the values read have taken so far.
+    std::size_t spent() const { return spent_; }
     std::size_t left() const { return data_.size() - at_; }
     std::size_t at() const { return at_; }
     std::string_view take(std::size_t n);
@@ -81,6 +103,8 @@ public:
 private:
     std::string_view data_;
     std::size_t at_ = 0;
+    std::size_t budget_ = kUnpackedBudget;
+    std::size_t spent_ = 0;
 };
 
 // A descriptor read back: each item's value by its type.
@@ -115,6 +139,14 @@ std::u16string read_unicode(Bytes& b);
 Object read_structure(Bytes& b, int depth = 0);
 // A versioned descriptor (version 16) at `at` of `payload`.
 Object read_versioned(std::string_view payload, std::size_t at = 0);
+// (PC4 E2, review P1-1) The same within `budget` (shared with the rest of a file), what it took spent from it; TooLarge
+// past it.
+Object read_versioned(std::string_view payload, std::size_t at, std::size_t& budget);
+
+// (PC4 D7, review P3-12) Photoshop's blend mode enumeration (BlnM: a smart filter's blending options, a layer effect's mode)
+// as Genko's of the 20 (core::blend_mode); none for one Genko has not (Dslv, vividLight, linearLight, pinLight, hardMix,
+// darkerColor, lighterColor, Sbtr…). The one table of them for every descriptor reader.
+std::optional<std::string> genko_blend(std::string_view blnm);
 
 }  // namespace genko::render::psd::descriptor
 

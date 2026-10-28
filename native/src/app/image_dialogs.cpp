@@ -448,7 +448,8 @@ std::map<const MainWindow*, FadeSource>& fades() {
 // fadeable commands).
 bool fadeable(const Json& ops) {
     static const std::vector<std::string> names{"filter_raster", "auto_adjust", "apply_image", "fill", "fill_area", "fill_enclosed",
-                                                "flood_fill", "gradient_fill"};
+                                                "flood_fill", "gradient_fill",
+                                                "render_picture", "vanishing_point"};  // (PC4 節 D: フィルター → 描画's and 消点…)
     if (!ops.is_array() || ops.size() != 1 || !ops[0].is_object()) return false;
     const Json* name = core::get(ops[0], "op");
     return name != nullptr && name->is_string() && std::find(names.begin(), names.end(), name->get<std::string>()) != names.end();
@@ -509,7 +510,7 @@ void fade(MainWindow* window) {
         return;
     }
     if (!window->session().path()) {
-        window->flash(QStringLiteral("フェードの前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        window->flash(QStringLiteral("フェードの前に、原稿を保存します（ファイル → 別名で保存…）"), 6000);
         return;
     }
     const auto asked = window->asking();
@@ -560,7 +561,8 @@ void follow_change(MainWindow& window, const BookChange& change) {
         if (made) {
             made->after = change.after;
             const Json* name = core::get(change.ops[0], "op");
-            made->label = name != nullptr && *name == Json("filter_raster") ? QStringLiteral("フィルター・補正") : QStringLiteral("塗り");
+            const bool filter = name != nullptr && (*name == Json("filter_raster") || *name == Json("render_picture") || *name == Json("vanishing_point"));
+            made->label = filter ? QStringLiteral("フィルター・補正") : QStringLiteral("塗り");
         }
     }
     if (made) {

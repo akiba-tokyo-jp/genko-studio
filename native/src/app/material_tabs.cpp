@@ -290,7 +290,7 @@ MaterialPanel::MaterialPanel(MainWindow* window) : window_(window) {
     tone_form->addRow(QStringLiteral("　始まり"), g_start);
     tone_form->addRow(QStringLiteral("　終わり"), g_end);
     tone_form->addRow(QString(), soft);
-    tone_box = new QGroupBox(QStringLiteral("トーン（ペンで足す・消しゴムで削る）"));
+    tone_box = new QGroupBox(QStringLiteral("トーン（ブラシで足す・消しゴムで削る）"));
     tone_box->setLayout(tone_form);
     // --- effect lines on the page
     effects = new QListWidget;
@@ -776,7 +776,7 @@ void MaterialPanel::show_effect() {
         const std::string id = core::py_str(core::py_get(effect_now, "id", ""));
         auto* draw = new QPushButton(kind == "speed" ? QStringLiteral("描いた線に沿わせる") : QStringLiteral("中心の空きを描いた形にする"));
         draw->setObjectName(QStringLiteral("effect:draw"));
-        draw->setToolTip(QStringLiteral("ボタンを押してから、ペンで 1 本引きます（流線はその線に沿い、集中線はその形の外から入る）"));
+        draw->setToolTip(QStringLiteral("ボタンを押してから、ブラシツールで 1 本引きます（流線はその線に沿い、集中線はその形の外から入る）"));
         connect(draw, &QPushButton::clicked, this, [this, id, key] { window_->draw_effect_shape(id, key); });
         effect_form->addRow(draw);
         if (core::py_truthy(core::py_get(params, key))) {
@@ -829,7 +829,7 @@ void MaterialPanel::effect_to_layer() {
     if (found == nullptr || layer == nullptr || page == nullptr) return;
     if (window_->apply_ops(Json::array({Json{{"op", "effect_to_layer"}, {"page", page->index.json()}, {"id", core::py_get(*found, "id")},
                                              {"layer_id", layer->id}}}))) {
-        window_->flash(QStringLiteral("効果線を線にしました。消しゴムやペンで手を入れられます"), 3500);
+        window_->flash(QStringLiteral("効果線を線にしました。消しゴムツールやブラシツールで手を入れられます"), 3500);
     }
 }
 

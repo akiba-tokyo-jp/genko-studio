@@ -37,6 +37,11 @@ class LineSample;
 // A short line drawn with this brush (pressed lightly, hard, lightly), for the brush list.
 QPixmap stroke_preview(const std::string& kind, const std::array<int, 3>& ink, QSize size = {96, 20});
 
+// (PC4 E2) The lines drawn for the lists forgotten (a brush changed in this process: drawn again when next shown).
+void forget_stroke_previews();
+// (PC4 E2, review P2-3) Those of these brushes only (the others kept: the list is not drawn again whole).
+void forget_stroke_previews(const std::vector<std::string>& kinds);
+
 // The sizes offered as chips: the person's own (brush/sizes), or the usual nine.
 std::vector<double> size_presets();
 
@@ -91,10 +96,24 @@ public:
     QComboBox* lasso_mode = nullptr;
     QDoubleSpinBox* gap_size = nullptr;
     QCheckBox* crossing = nullptr;
+    QWidget* fill_section = nullptr;  // (PC4 E4: the fill fields above, shown on the 塗りつぶしツール's page)
     LineSample* sample = nullptr;
+    // brushes@1 (PC4 E1, Photoshop's options bar): 流量 (a dab brush's), モード (the blend a line is painted into a paint
+    // layer with: grey on a pen layer, set_blend_allowed), 滑らかさ (its way and amount), and the 鉛筆ツール's 自動消去
+    QSlider* flow = nullptr;
+    QComboBox* blend = nullptr;
+    QComboBox* smoothing = nullptr;
+    QSlider* smoothing_amount = nullptr;
+    QCheckBox* auto_erase = nullptr;
+    // Whether the layer drawn on takes a blend (a paint layer): else モード is grey and lines are drawn normal.
+    void set_blend_allowed(bool on);
+    // The 鉛筆ツール in hand: its own rows shown (自動消去), the brush list's choice not used.
+    void set_pencil(bool on);
 
 signals:
     void changed();
+    // A colour set (set_colour), even the one it had (PC4 E-0: the カラー panel's precise 描画色 is let go then).
+    void colour_set();
 
 private:
     void fill_kinds();

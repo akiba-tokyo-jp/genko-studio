@@ -1,7 +1,12 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
+#include <functional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <vector>
 
 #include "core/geometry.hpp"
 #include "core/model.hpp"
@@ -15,7 +20,16 @@ namespace genko::render::raster {
 
 inline constexpr int kWorkingDpi = 200;
 
-// raster.ensure_raster: the layer's pixels ("RGBA"), or a clear page at dpi when it has none.
+// image-grid@1 (PC4 F-b, design 8-2 (b)): the grid an 8-bit page works at. On a page whose paper says grid "finest" (an
+// opened picture, a new image) the finest grid of its pixel layers (render/layer_masks grid_dpi: 200 to 600 dpi) — its
+// new pixel layers made at it, its merges and its pixels' own ops kept at it —; kWorkingDpi on any other page (as before).
+int working_dpi(const core::Page& page);
+// The resolution `width` pixels across the page are at (a raster layer's own: an area is laid on its pixels so) on a page
+// of grid "finest"; `fallback` on any other page (its rasters are at kWorkingDpi: the same pixels as before).
+int dpi_across(const core::Page& page, int width, int fallback = kWorkingDpi);
+
+// raster.ensure_raster: the layer's pixels ("RGBA"), or a clear page at dpi when it has none (PC4 F-b: at working_dpi on a
+// page of grid "finest").
 Image ensure_raster(const core::Page& page, const core::Layer& layer, int dpi = kWorkingDpi);
 
 // raster.save_raster: the picture as the layer's PNG, its relpath "pages/<NNN>/<role>.png".
@@ -27,12 +41,21 @@ std::string page_folder(const core::Page& page);
 // ops._bake_vectors: the layer's fills (patches) and pen lines drawn into its pixels as they show on the page; the
 // layer is a paint layer with no lines or fills after it.
 // `page_values`: the pixels are an RGB page of a profile's values (color-model@1), and so are the fills and lines
-// drawn into them (their sRGB colours brought in).
-void bake_vectors(const core::Page& page, core::Layer& layer, bool page_values = false);
+// drawn into them (their sRGB colours brought in). `book`: the book whose patterns its shape parts' pattern fills name
+// (patterns@1, PC4 E3) — none: a layer with such a part is refused (core::Error "value"), its parts never dropped.
+void bake_vectors(const core::Page& page, core::Layer& layer, const core::Document* book, bool page_values = false);
 
 // ops.layer_pixels: the layer's pixels as it shows (its lines and fills drawn in on a copy: the layer is not changed;
 // color-model@1: an RGB page of a profile's paint pixels are its values, and so are the lines and fills drawn in).
+// `book` as bake_vectors' (the two-argument form: none).
+Image layer_pixels(const core::Page& page, const core::Layer& layer, const core::Document* book);
 Image layer_pixels(const core::Page& page, const core::Layer& layer);
+
+// (PC4 E4 review P2-3) A precise layer's or an ink layer's colours at some of its pixels (`wanted`: indices on its own
+// grid; its pixels alone — a precise layer holds no lines, an ink layer's lines are not drawn in): straight sRGB 0..255
+// and the alpha 0..1, read at those pixels only (the layer never copied whole: E1's way for 下地混色).
+std::unordered_map<std::size_t, std::array<float, 4>> layer_colours_at(const core::Page& page, const core::Layer& layer,
+                                                                       const std::vector<std::size_t>& wanted);
 
 // ops._mixed_pieces (下地混色・色延び): the line as short pieces (every 1.5 mm, each starting where the last ended), each
 // in the brush's colour mixed with what is on the layer under it (`mix`), the colour picked up carried along
@@ -45,6 +68,12 @@ std::vector<core::Stroke> mixed_pieces(const core::Page& page, const core::Layer
 // fades out) or "rough" (a grain left behind; its random grain seeded with `seed`, Python's f"{layer.id}{points[0]}").
 void erase_raster(const core::Page& page, core::Layer& layer, const core::PenPoints& points, double width_mm, int dpi,
                   std::string_view texture, const std::string& seed);
+
+// brushes@1 (PC4 E1): erase by a brush (render/dab_ops.hpp eraser_mask) on the layer's 8-bit pixels: the alpha loses
+// what `mask_of(size, dpi)` takes — an "L" mask the size of the layer's picture, `dpi` its pixels an inch across the page
+// (the layer's own grid: a picture not of 200 dpi keeps its size). Its pixels only: the layer's lines are cut by core's
+// erase before (raster_ops erase calls this for a layer that has a picture).
+void erase_raster_masked(const core::Page& page, core::Layer& layer, const std::function<Image(Size, int)>& mask_of);
 
 // What erase_raster takes away, as an "L" mask of `size` (pixels at dpi): 255 where the eraser clears all, less at a
 // soft edge or between the grains of a rough one ("" or "hard": a clean edge).

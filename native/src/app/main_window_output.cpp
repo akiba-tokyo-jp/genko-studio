@@ -63,8 +63,8 @@ QDockWidget* occasional_dock(QMainWindow* window, const QString& title, QWidget*
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    dock->setWidget(scroll);  // (in the dock first, then the panel in it: styled once — build_tool_settings)
     scroll->setWidget(panel);
-    dock->setWidget(scroll);
     dock->setMinimumWidth(200);
     // (for occasional work, as Python's OCCASIONAL_PANELS: its tab has a close button and it joins the row when opened)
     dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
@@ -74,9 +74,10 @@ QDockWidget* occasional_dock(QMainWindow* window, const QString& title, QWidget*
 }  // namespace
 
 void MainWindow::build_output_actions() {
-    make("act_export", QStringLiteral("書き出し…"), [this] { export_book(); }, {QKeySequence(QStringLiteral("Ctrl+E"))},
+    // (PC4 F-0, 節 F 5.1: the book's export is ファイル → 書き出し → 原稿を書き出す…, Ctrl+E as before; 印刷… is プリント…)
+    make("act_export", QStringLiteral("原稿を書き出す…"), [this] { export_book(); }, {QKeySequence(QStringLiteral("Ctrl+E"))},
          QStringLiteral("PDF・TIFF・PSD・縦読み・SNS 用などに書き出します"));
-    make("act_print", QStringLiteral("印刷…"), [this] { print_book(); }, {QKeySequence(QStringLiteral("Ctrl+P"))},
+    make("act_print", QStringLiteral("プリント…"), [this] { print_book(); }, {QKeySequence(QStringLiteral("Ctrl+P"))},
          QStringLiteral("プリンターで紙に印刷します（仕上がりで切る・用紙全体）"));
     make("act_history", QStringLiteral("履歴…"), [this] { show_dock(QStringLiteral("履歴")); }, {QKeySequence(QStringLiteral("Ctrl+H"))},
          QStringLiteral("変更の一覧。クリックでその時点まで戻る・進む"));

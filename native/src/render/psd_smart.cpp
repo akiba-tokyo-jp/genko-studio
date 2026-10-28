@@ -211,6 +211,11 @@ descriptor::Writer warp_writer(const std::optional<Json>& warp, double width, do
 }  // namespace
 
 std::optional<Placed> read_placed(std::string_view key, std::string_view data) {
+    std::size_t budget = descriptor::kUnpackedBudget;
+    return read_placed(key, data, budget);
+}
+
+std::optional<Placed> read_placed(std::string_view key, std::string_view data, std::size_t& budget) {
     try {
         Placed out;
         out.key = std::string(key);
@@ -220,7 +225,7 @@ std::optional<Placed> read_placed(std::string_view key, std::string_view data) {
             Bytes head(data.substr(4, 4));
             const std::uint32_t version = head.u32();
             if (version != 4 && version != 5) return std::nullopt;
-            const Object d = descriptor::read_versioned(data, 8);
+            const Object d = descriptor::read_versioned(data, 8, budget);
             const Value* id = d.get("Idnt");
             if (id == nullptr || id->type != "TEXT" || id->text.empty()) return std::nullopt;
             out.uuid = utf8_of(id->text);
@@ -261,13 +266,18 @@ std::optional<Placed> read_placed(std::string_view key, std::string_view data) {
             try {
                 (void)b.u32();  // (the warp's version)
                 const std::size_t at = b.at();
-                const Object warp = descriptor::read_versioned(data, at);
+                const Object warp = descriptor::read_versioned(data, at, budget);
                 out.warp = warp_of(warp);
+            } catch (const descriptor::TooLarge&) {
+                budget = 0;  // (the file's budget spent: none of its other descriptors either)
             } catch (const Broken&) {
                 // (its warp unread: none)
             }
             return out;
         }
+        return std::nullopt;
+    } catch (const descriptor::TooLarge&) {
+        budget = 0;
         return std::nullopt;
     } catch (const Broken&) {
         return std::nullopt;

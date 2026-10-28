@@ -250,7 +250,16 @@ Json fill_from(const Json& value, const vec::Path& path, std::string_view key) {
     }
     if (value.is_array()) return colour(value);
     if (!value.is_object()) throw OpError(std::string(key) + " is null, {\"rgb\": [r, g, b] | null} or {\"gradient\": {…}}");
-    if (value.contains("pattern")) throw OpError(std::string(key) + ": a pattern fill is not in this build yet");
+    if (const Json* pattern = given(value, "pattern")) {  // (patterns@1, PC4 E3: a pattern the book keeps, by its id)
+        for (const auto& [k, v] : value.items()) {
+            if (k != "pattern") throw OpError(std::string(key) + " has no key " + core::py_repr_str(k));
+        }
+        try {
+            return core::fill_spec(Json{{"pattern", *pattern}});
+        } catch (const OpError& error) {
+            throw OpError(std::string(key) + "'s " + error.what());
+        }
+    }
     if (const Json* g = given(value, "gradient")) {
         for (const auto& [k, v] : value.items()) {
             if (k != "gradient") throw OpError(std::string(key) + " has no key " + core::py_repr_str(k));
@@ -390,6 +399,8 @@ Json place_shape(OpContext& c, std::size_t at, vec::Path path, std::optional<vec
     part.live = std::move(live);
     part.fill = op.contains("fill") ? fill_from(op["fill"], part.path, "fill") : fill_from(default_fill, part.path, "fill");
     if (const Json* stroke = given(op, "stroke")) part.stroke = stroke_from(*stroke, std::nullopt, part.path);
+    core::check_pattern_kept(doc, part.fill);  // (patterns@1, PC4 E3)
+    if (part.stroke) core::check_pattern_kept(doc, part.stroke->fill);
     if (const Json* o = given(op, "opacity")) part.opacity = number(*o, "opacity", 0.0, 1.0);
     if (const Json* o = given(op, "over")) part.over = boolean(*o, "over");
     if (const Json* n = given(op, "name")) {
@@ -495,7 +506,7 @@ void into_lines(Document& doc, const Page& page, Layer& layer, const vec::ShapeP
                 if (auto patch = fills::mask_patch(mask, dpi, colour, part.opacity, {static_cast<double>(b->x0), static_cast<double>(b->y0)}))
                     layer.patches.push_back(std::move(*patch));
             }
-        } else if (auto patch = sp::as_patch(&page, fill_only)) {
+        } else if (auto patch = sp::as_patch(&page, fill_only, &doc)) {
             layer.patches.push_back(std::move(*patch));
         }
     }
@@ -600,6 +611,8 @@ void edit_shape_part(OpContext& c) {
     }
     if (op.contains("fill")) part.fill = fill_from(op["fill"], part.path, "fill");
     if (op.contains("stroke")) part.stroke = stroke_from(op["stroke"], part.stroke, part.path);
+    core::check_pattern_kept(doc, part.fill);  // (patterns@1, PC4 E3)
+    if (part.stroke) core::check_pattern_kept(doc, part.stroke->fill);
     if (const Json* o = given(op, "opacity")) part.opacity = number(*o, "opacity", 0.0, 1.0);
     if (const Json* o = given(op, "over")) part.over = boolean(*o, "over");
     if (op.contains("name")) {
@@ -635,7 +648,7 @@ void edit_shape_part(OpContext& c) {
         if (into != "patch" && into != "lines") throw OpError("to is patch or lines");
         parts.erase(parts.begin() + static_cast<std::ptrdiff_t>(k));
         if (into == "patch") {
-            if (auto patch = sp::as_patch(&page, part)) layer.patches.push_back(std::move(*patch));
+            if (auto patch = sp::as_patch(&page, part, &doc)) layer.patches.push_back(std::move(*patch));
         } else {
             into_lines(doc, page, layer, part);
         }

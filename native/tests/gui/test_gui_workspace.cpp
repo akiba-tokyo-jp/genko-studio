@@ -4,7 +4,7 @@
 // back, はじめの配置に戻す), 道具の名前を表示 and パネルの説明を表示, Python's menus (ファイル → AI と作る…, ヘルプ, the
 // layer panel's menus in the menu bar with their keys, 3D's scenes and poses, このコマの詳細を見る), the first steps over
 // an empty book and what comes next after the first panels (I11), the selection launcher, the tool palette on a short
-// window, and the layers in front at the first show.
+// window, the layers in front at the first show, and every menu item's place as where() finds it.
 
 #include <QtTest>
 
@@ -21,7 +21,10 @@
 #include <QToolBar>
 #include <QToolButton>
 
+#include <functional>
+#include <map>
 #include <memory>
+#include <tuple>
 
 #include "app/canvas.hpp"
 #include "app/config.hpp"
@@ -169,13 +172,13 @@ private slots:
         QVERIFY(wanted >= 6);
         QPushButton* pen = nullptr;
         for (QPushButton* button : panel->buttons) {
-            if (button->accessibleName() == QStringLiteral("ペン")) pen = button;
+            if (button->accessibleName() == QStringLiteral("ブラシツール")) pen = button;  // (PC4 E-0, decision 2)
         }
         QVERIFY(pen != nullptr);
         b.window->choose_tool(QStringLiteral("eraser"));
         pen->click();
         QCOMPARE(b.window->canvas()->tool(), QStringLiteral("pen"));
-        // chosen in its dialog (the test answers it): 履歴… first, then 消しゴム
+        // chosen in its dialog (the test answers it): 履歴… first, then 消しゴムツール
         b.on_dialog = [](QDialog* dialog) {
             auto* choose = qobject_cast<app::ChooseCommands*>(dialog);
             if (choose == nullptr) return 0;
@@ -183,17 +186,17 @@ private slots:
             choose->filter->setText(QStringLiteral("履歴"));
             choose->all->setCurrentRow(0);
             choose->add->click();
-            choose->filter->setText(QStringLiteral("消しゴム"));
+            choose->filter->setText(QStringLiteral("消しゴムツール"));
             for (int i = 0; i < choose->all->count(); ++i) {
-                if (choose->all->item(i)->text() == QStringLiteral("消しゴム")) choose->all->setCurrentRow(i);
+                if (choose->all->item(i)->text() == QStringLiteral("消しゴムツール")) choose->all->setCurrentRow(i);
             }
             choose->add->click();
             choose->add->click();  // (twice: once in the list)
             return static_cast<int>(QDialog::Accepted);
         };
         b.act("act_edit_quick")->trigger();  // (表示 → クイックアクセスを変える…)
-        QCOMPARE(panel->names(), (QStringList{QStringLiteral("履歴…"), QStringLiteral("消しゴム")}));
-        QCOMPARE(app::settings()->value(QStringLiteral("ui/quick")).toString(), QStringLiteral("履歴…\t消しゴム"));
+        QCOMPARE(panel->names(), (QStringList{QStringLiteral("履歴…"), QStringLiteral("消しゴムツール")}));
+        QCOMPARE(app::settings()->value(QStringLiteral("ui/quick")).toString(), QStringLiteral("履歴…\t消しゴムツール"));
         QCOMPARE(panel->buttons.size(), std::size_t{2});
         // はじめの並びに戻す
         b.on_dialog = [](QDialog* dialog) {
@@ -217,7 +220,7 @@ private slots:
             auto* choose = qobject_cast<app::ChooseCommands*>(dialog);
             if (choose == nullptr || choose->line == nullptr) return 0;
             choose->mine->clear();
-            choose->filter->setText(QStringLiteral("書き出し…"));
+            choose->filter->setText(QStringLiteral("原稿を書き出す…"));  // (PC4 F-0: 書き出し…'s new name)
             choose->all->setCurrentRow(0);
             choose->add->click();
             choose->line->click();
@@ -227,7 +230,7 @@ private slots:
             return static_cast<int>(QDialog::Accepted);
         };
         b.act("act_edit_commandbar")->trigger();
-        QCOMPARE(commands_on(), (QStringList{QStringLiteral("書き出し…"), QStringLiteral("|"), QStringLiteral("元に戻す")}));
+        QCOMPARE(commands_on(), (QStringList{QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("元に戻す")}));
         QCOMPARE(b.window->doc_tabs()->isVisibleTo(bar), true);
         // ファイル → 環境設定… opens the preferences (asked before another window takes the answers)
         b.answers.asked.clear();
@@ -240,7 +243,7 @@ private slots:
         for (QAction* a : other.window->command_bar()->actions()) {
             if (!a->property("keep").toBool()) on_other << (a->isSeparator() ? QStringLiteral("|") : a->text());
         }
-        QCOMPARE(on_other, (QStringList{QStringLiteral("書き出し…"), QStringLiteral("|"), QStringLiteral("元に戻す")}));
+        QCOMPARE(on_other, (QStringList{QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("元に戻す")}));
     }
 
     // Workspaces: the panels kept under a name (asked for), listed in ウィンドウ → ワークスペース, put back, deleted;
@@ -362,7 +365,7 @@ private slots:
         QVERIFY(details->isVisible() && !details->visibleRegion().isEmpty());
     }
 
-    // The first steps over a book with nothing in it (コマを割る・ペンで描く・台詞を入れる・AI に頼む…, ×); after the first
+    // The first steps over a book with nothing in it (コマを割る・ブラシで描く・台詞を入れる・AI に頼む…, ×); after the first
     // panels, what comes next (I11): 描く・台詞・保存・書き出し, each marked when done, × hides it for good and ヘルプ →
     // 次の作業の案内を表示 brings it back; neither takes the page's room from the side panels.
     void firstStepsThenWhatComesNext() {
@@ -371,7 +374,7 @@ private slots:
         QVERIFY(first != nullptr && first->isVisible());
         QStringList words;
         for (QPushButton* button : first->findChildren<QPushButton*>()) words << button->text();
-        QVERIFY(words.contains(QStringLiteral("コマを割る（F）")) && words.contains(QStringLiteral("ペンで描く（B）")) &&
+        QVERIFY(words.contains(QStringLiteral("コマを割る（F）")) && words.contains(QStringLiteral("ブラシで描く（B）")) &&
                 words.contains(QStringLiteral("台詞を入れる（T）")) && words.contains(QStringLiteral("AI に頼む…")));
         for (QPushButton* button : first->findChildren<QPushButton*>()) {
             if (button->text() == QStringLiteral("コマを割る（F）")) button->click();
@@ -388,7 +391,7 @@ private slots:
         QVERIFY(next != nullptr && next->isVisible());
         QVERIFY(next->height() < 60);
         const auto button = [next](const char* key) { return next->findChild<QPushButton*>(QStringLiteral("next_") + QString::fromLatin1(key)); };
-        QCOMPARE(button("draw")->text(), QStringLiteral("ペンで描く（B）"));
+        QCOMPARE(button("draw")->text(), QStringLiteral("ブラシで描く（B）"));
         QCOMPARE(button("line")->text(), QStringLiteral("台詞を入れる（T）"));
         button("draw")->click();
         QCOMPARE(b.window->canvas()->tool(), QStringLiteral("pen"));
@@ -400,7 +403,7 @@ private slots:
         QVERIFY(b.window->apply_ops(Json::array({Json{{"op", "add_line"}, {"page", 1}, {"text", "テスト"}, {"x_mm", 40}, {"y_mm", 50}, {"w_mm", 30}, {"h_mm", 40}}})));
         QVERIFY(b.window->session().wait_saved(std::chrono::milliseconds(10000)));
         b.window->refresh_status();
-        QCOMPARE(button("draw")->text(), QStringLiteral("✓ ペンで描く（B）"));
+        QCOMPARE(button("draw")->text(), QStringLiteral("✓ ブラシで描く（B）"));
         QCOMPARE(button("line")->text(), QStringLiteral("✓ 台詞を入れる（T）"));
         QCOMPARE(button("save")->text(), QStringLiteral("✓ 保存"));
         // × hides it (kept for the next window), ヘルプ → 次の作業の案内を表示 brings it back
@@ -459,6 +462,47 @@ private slots:
         QVERIFY(gui_test::wait_for([&] { return !launcher->isVisible(); }, 5000));
     }
 
+    // The menu paths walked once (menu_places: the commands named as the window opens, and コマンドを探す) are where()'s for
+    // every item of every menu — one in two menus at its first place — and so every command's name is its words, with its
+    // place when another command has the same words (the user's decision 8).
+    void everyItemsPlaceIsWhereFindsIt() {
+        Book b;
+        QMainWindow* window = b.window.get();
+        const auto known = app::menu_places(window);
+        QSet<const QAction*> items;
+        QStringList wrong;
+        int deep = 0;
+        std::function<void(QMenu*)> walk = [&](QMenu* menu) {
+            for (QAction* item : menu->actions()) {
+                items.insert(item);
+                const auto found = known.find(item);
+                const QString place = found != known.end() ? found->second : QStringLiteral("(none)");
+                if (place != app::where(window, item)) wrong << item->text() + QStringLiteral(": ") + place + QStringLiteral(" / ") + app::where(window, item);
+                if (place.count(QStringLiteral(" → ")) >= 2) ++deep;
+                if (item->menu() != nullptr) walk(item->menu());
+            }
+        };
+        for (QAction* top : window->menuBar()->actions()) {
+            if (top->menu() != nullptr) walk(top->menu());
+        }
+        QCOMPARE(wrong, QStringList());
+        QCOMPARE(static_cast<qsizetype>(known.size()), items.size());
+        QVERIFY(items.size() > 300);
+        QVERIFY(deep > 0);  // (menus inside menus inside menus too)
+        const auto names = app::command_names(window);
+        std::map<QString, int> count;
+        for (const auto& [action, name] : names) ++count[action->text()];
+        int placed = 0;
+        for (const auto& [action, name] : names) {
+            const QString place = count[action->text()] > 1 ? app::where(window, action) : QString();
+            const QString expected = place.isEmpty() ? action->text() : action->text() + QStringLiteral("（") + place + QStringLiteral("）");
+            if (name != expected) wrong << name + QStringLiteral(" / ") + expected;
+            if (!place.isEmpty()) ++placed;
+        }
+        QCOMPARE(wrong, QStringList());
+        QVERIFY(placed > 0);  // (レベル補正… among them: decision 8)
+    }
+
     // A command renamed since its name was kept in the quick-access panel or the command bar keeps its place under its new
     // name — PC1b's 色の校正 (Python's 「CMYK で見る（色校正）」) among them, as the keys (preferences' RENAMED).
     void aRenamedCommandKeepsItsPlace() {
@@ -481,10 +525,17 @@ private slots:
             now.insert(name);
             now.insert(action->text());  // (words two commands share are told apart by their places there: decision 8)
         }
+        // (a new name may also be a command that holds keys though no menu has it — a tool's settings' button, as PC4
+        // E-0's 選んだ線を描画色にする —: renamed() reads the keys chosen under its old name)
+        QSet<QString> alive = now;
+        const auto names = app::command_names(b.window.get());
+        for (QAction* action : app::preferences::commands(b.window.get())) alive.insert(app::command_name(names, action));
         int pc3 = 0;
         for (const auto& [name, before] : app::preferences::renamed()) {
-            QVERIFY2(now.contains(name), qPrintable(name));
-            QVERIFY2(!now.contains(before), qPrintable(before));
+            QVERIFY2(alive.contains(name), qPrintable(name));
+            // (PC4 E4: an old name a later command took for its own — the グラデーション panel's — is read by the mark of
+            // the list or the key it is in: preferences::reused_names(), theGradientPanelsNameIsApart)
+            QVERIFY2(!now.contains(before) || app::preferences::reused_name(before), qPrintable(before));
             if (name == QStringLiteral("長方形選択ツール") || name == QStringLiteral("カット") || name == QStringLiteral("移動ツール") ||
                 name == QStringLiteral("自由な形に") || name == QStringLiteral("前面へ"))
                 ++pc3;
@@ -527,6 +578,157 @@ private slots:
         app::settings()->remove(QStringLiteral("shortcuts/自由変形（メッシュ・3×3）"));
         QCOMPARE(b.window->action("act_warp_mesh")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+J")));
         QVERIFY(b.window->action("act_smart_warp")->shortcut() != QKeySequence(QStringLiteral("Ctrl+Alt+J")));
+    }
+
+    // PC4 F-0 (節 F 5.1: ファイル's commands by Photoshop's names): each renamed command is read under its old name — the
+    // command bar's and the quick-access panel's places, a key chosen under it — and the old names are in no menu.
+    void theRenamedFileCommandsAreFound() {
+        Book b;
+        const std::vector<std::pair<const char*, const char*>> renamed{
+            {"act_new", "新しい原稿…"},  {"act_save_as", "別の場所に保存…"}, {"act_export", "書き出し…"},
+            {"act_print", "印刷…"},      {"act_quit", "Genko を終わる"},     {"act_export_lookup", "カラールックアップテーブルを書き出す…"}};
+        QSet<QString> now;
+        for (const auto& [action, name] : app::command_names(b.window.get())) now.insert(name);
+        QStringList bar;
+        for (const auto& [attribute, before] : renamed) {
+            const QString old = QString::fromUtf8(before);
+            const QString name = b.window->action(QString::fromLatin1(attribute))->text();
+            QVERIFY2(name != old, attribute);
+            QVERIFY2(now.contains(name) && !now.contains(old), attribute);
+            bool kept = false;
+            for (auto [it, end] = app::preferences::renamed().equal_range(name); it != end; ++it) kept = kept || it->second == old;
+            QVERIFY2(kept, attribute);
+            bar << old;
+        }
+        app::settings()->setValue(QStringLiteral("ui/commandbar"), bar.join(QLatin1Char('\t')));
+        const QStringList read = app::chosen(QStringLiteral("ui/commandbar"), app::kDefaultCommandBar);
+        app::settings()->remove(QStringLiteral("ui/commandbar"));
+        QCOMPARE(read.size(), static_cast<qsizetype>(renamed.size()));
+        for (std::size_t i = 0; i < renamed.size(); ++i) QCOMPARE(read[static_cast<qsizetype>(i)], b.window->action(QString::fromLatin1(renamed[i].first))->text());
+        // (the default command bar ends with the book's export by its new name)
+        QCOMPARE(app::kDefaultCommandBar.back(), QStringLiteral("原稿を書き出す…"));
+        // a key chosen under the old name
+        app::settings()->setValue(QStringLiteral("shortcuts/Genko を終わる"), QStringLiteral("Ctrl+Alt+Shift+Q"));
+        app::preferences::apply_shortcuts(b.window.get());
+        app::settings()->remove(QStringLiteral("shortcuts/Genko を終わる"));
+        QCOMPARE(b.window->action("act_quit")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+Shift+Q")));
+    }
+
+    // PC4 E-0 (the user's decision 2: the drawing tools and the colours by Photoshop's names): each command renamed is
+    // read under its old name (renamed()), its id and key kept; the quick access, the command bar and the keys chosen
+    // under the old names stay with the commands; the layers, lines and brushes keep their names.
+    void theDrawingToolsAreRenamedAndFound() {
+        Book b;
+        const std::vector<std::tuple<const char*, const char*, const char*, const char*>> renamed{
+            {"act_pen", "ペン", "ブラシツール", "B"},
+            {"act_eraser", "消しゴム", "消しゴムツール", "E"},
+            {"act_picker", "スポイト", "スポイトツール", "I"},
+            {"act_fill", "塗りつぶし", "塗りつぶしツール", "G"},
+            {"act_gradient", "グラデーション", "グラデーションツール", "U"},
+            {"act_swap_colour", "メインとサブの色を入れ替える", "描画色と背景色を入れ替え", "X"},
+            {"act_color", "ペンの色…", "カラーピッカー（描画色）…", "C"},
+            {"act_thicker", "太く（ペン・消しゴム）", "ブラシサイズを大きく", "]"},
+            {"act_thinner", "細く（ペン・消しゴム）", "ブラシサイズを小さく", "["},
+            {"act_vector_colour", "選んだ線をペンの色にする", "選んだ線を描画色にする", ""}};
+        QStringList bar;
+        for (const auto& [attribute, before, now, key] : renamed) {
+            QAction* act = b.window->action(QString::fromLatin1(attribute));
+            QCOMPARE(act->text(), QString::fromUtf8(now));
+            QCOMPARE(act->shortcut(), QKeySequence(QString::fromLatin1(key)));
+            bool kept = false;
+            for (auto [it, end] = app::preferences::renamed().equal_range(act->text()); it != end; ++it) kept = kept || it->second == QString::fromUtf8(before);
+            QVERIFY2(kept, attribute);
+            bar << QString::fromUtf8(before);
+        }
+        // the layer mask menu's マスクを編集する (named by its attribute)
+        QAction* mask_edit = nullptr;
+        for (QAction* act : b.window->findChildren<QAction*>())
+            if (act->property("genko_attribute").toString() == QStringLiteral("act_mask_edit")) mask_edit = act;
+        QVERIFY(mask_edit != nullptr);
+        QCOMPARE(mask_edit->text(), QStringLiteral("マスクを編集する（ブラシで見せる・消しゴムで隠す）"));
+        bool mask_kept = false;
+        for (auto [it, end] = app::preferences::renamed().equal_range(mask_edit->text()); it != end; ++it)
+            mask_kept = mask_kept || it->second == QStringLiteral("マスクを編集する（ペンで見せる・消しゴムで隠す）");
+        QVERIFY(mask_kept);
+        // the new: 描画色と背景色を初期設定に戻す (D), F5 ブラシ設定, F6 カラー
+        QCOMPARE(b.window->action(QStringLiteral("act_default_colours"))->shortcut(), QKeySequence(QStringLiteral("D")));
+        const auto toggle = [&](const QString& title) {
+            QDockWidget* dock = b.dock(title);
+            return dock != nullptr ? dock->toggleViewAction() : nullptr;
+        };
+        QVERIFY(toggle(QStringLiteral("ブラシ設定")) != nullptr && toggle(QStringLiteral("カラー")) != nullptr);
+        QCOMPARE(toggle(QStringLiteral("ブラシ設定"))->shortcut(), QKeySequence(QStringLiteral("F5")));
+        QCOMPARE(toggle(QStringLiteral("カラー"))->shortcut(), QKeySequence(QStringLiteral("F6")));
+        // the command bar and the quick access chosen under the old names
+        app::settings()->setValue(QStringLiteral("ui/commandbar"), bar.join(QLatin1Char('\t')));
+        const QStringList read = app::chosen(QStringLiteral("ui/commandbar"), app::kDefaultCommandBar);
+        app::settings()->remove(QStringLiteral("ui/commandbar"));
+        QCOMPARE(read.size(), static_cast<qsizetype>(renamed.size()));
+        for (std::size_t i = 0; i < renamed.size(); ++i) QCOMPARE(read[static_cast<qsizetype>(i)], QString::fromUtf8(std::get<2>(renamed[i])));
+        const auto names = app::by_text(b.window.get());
+        for (const QString& name : app::kDefaultQuick) QVERIFY2(names.count(name), qPrintable(name));
+        // a key chosen under the old name
+        app::settings()->setValue(QStringLiteral("shortcuts/ペン"), QStringLiteral("Ctrl+Alt+K"));
+        app::settings()->setValue(QStringLiteral("shortcuts/メインとサブの色を入れ替える"), QStringLiteral("Ctrl+Alt+J"));
+        app::preferences::apply_shortcuts(b.window.get());
+        app::settings()->remove(QStringLiteral("shortcuts/ペン"));
+        app::settings()->remove(QStringLiteral("shortcuts/メインとサブの色を入れ替える"));
+        QCOMPARE(b.window->action("act_pen")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+K")));
+        QCOMPARE(b.window->action("act_swap_colour")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+J")));
+        app::preferences::apply_shortcuts(b.window.get());
+        QCOMPARE(b.window->action("act_pen")->shortcut(), QKeySequence(QStringLiteral("B")));
+        // the layers and the brushes keep theirs
+        QCOMPARE(b.window->action("act_layer_pen")->text(), QStringLiteral("新しいペンのレイヤー"));
+    }
+
+    // PC4 E4 (E-0's promise): グラデーション — the グラデーションツール's old name — is the グラデーション panel's own name since; a
+    // list and the keys kept before the panel (no mark) read it as the tool, those kept since (marked when written) as the
+    // panel: the two never taken for each other, nor one key given to both.
+    void theGradientPanelsNameIsApart() {
+        Book b;
+        const auto store = app::settings();
+        QAction* panel = b.dock(QStringLiteral("グラデーション"))->toggleViewAction();
+        QAction* tool = b.window->action("act_gradient");
+        QCOMPARE(panel->text(), QStringLiteral("グラデーション"));
+        QVERIFY(app::preferences::reused_name(QStringLiteral("グラデーション")));
+        // a list kept before: the tool; kept since (keep() marks it): the panel
+        store->remove(QStringLiteral("names_current/ui/commandbar"));
+        store->setValue(QStringLiteral("ui/commandbar"), QStringLiteral("グラデーション\tペン"));
+        QCOMPARE(app::chosen(QStringLiteral("ui/commandbar"), app::kDefaultCommandBar),
+                 (QStringList{QStringLiteral("グラデーションツール"), QStringLiteral("ブラシツール")}));
+        app::keep(QStringLiteral("ui/commandbar"), {QStringLiteral("グラデーション"), QStringLiteral("ブラシツール")});
+        QVERIFY(app::preferences::names_current(QStringLiteral("ui/commandbar")));
+        QCOMPARE(app::chosen(QStringLiteral("ui/commandbar"), app::kDefaultCommandBar),
+                 (QStringList{QStringLiteral("グラデーション"), QStringLiteral("ブラシツール")}));
+        const auto names = app::by_text(b.window.get());
+        QCOMPARE(names.find(QStringLiteral("グラデーション"))->second, panel);
+        // the list written again by a build before E4 (the mark is of another list): the tool again
+        store->setValue(QStringLiteral("ui/commandbar"), QStringLiteral("ペン\tグラデーション"));
+        QVERIFY(!app::preferences::names_current(QStringLiteral("ui/commandbar")));
+        QCOMPARE(app::chosen(QStringLiteral("ui/commandbar"), app::kDefaultCommandBar),
+                 (QStringList{QStringLiteral("ブラシツール"), QStringLiteral("グラデーションツール")}));
+        store->remove(QStringLiteral("ui/commandbar"));
+        store->remove(QStringLiteral("names_current/ui/commandbar"));
+        // keys kept before: the tool's (the panel takes none of them)
+        store->remove(QStringLiteral("names_current/shortcuts/グラデーション"));
+        store->setValue(QStringLiteral("shortcuts/グラデーション"), QStringLiteral("Ctrl+Alt+G"));
+        app::preferences::apply_shortcuts(b.window.get());
+        QCOMPARE(tool->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+G")));
+        QVERIFY(panel->shortcut().isEmpty());
+        // kept since (the preferences mark them as they write them): the panel's, the tool its own key
+        app::preferences::mark_names_current(QStringLiteral("shortcuts/グラデーション"));
+        app::preferences::apply_shortcuts(b.window.get());
+        QCOMPARE(panel->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+G")));
+        QCOMPARE(tool->shortcut(), QKeySequence(QStringLiteral("U")));
+        // a key written there again by a build before E4: the tool's again
+        store->setValue(QStringLiteral("shortcuts/グラデーション"), QStringLiteral("Ctrl+Alt+H"));
+        app::preferences::apply_shortcuts(b.window.get());
+        QCOMPARE(tool->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+H")));
+        QVERIFY(panel->shortcut().isEmpty());
+        store->remove(QStringLiteral("shortcuts/グラデーション"));
+        store->remove(QStringLiteral("names_current/shortcuts/グラデーション"));
+        app::preferences::apply_shortcuts(b.window.get());
+        QVERIFY(panel->shortcut().isEmpty());
     }
 
     // A short window: the palette's pictures shrink (down to 16 px) so the last tool stays within reach; the layers'

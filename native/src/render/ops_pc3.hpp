@@ -3,6 +3,8 @@
 #include <optional>
 
 #include "core/command_bus.hpp"
+#include "render/image.hpp"
+#include "render/image_ops.hpp"
 
 // PC3 (選択・マスク・修復・パス・変形・判型; SPEC.md COLOR-06, COLOR-07): the new ops, this build's own (the public list,
 // `genko schema`, and the MCP tools stay as they are; MCP's apply takes them). Each group writes its ops' work in its
@@ -33,6 +35,11 @@ void matting_op(core::OpContext& c);
 // The selection a page's Quick Mask says (as quick_mask's way out gives it: none when the page has none, when it is all
 // white — untouched, nothing masked — or when it selects nothing); {"mask"} at the selection's 200 dpi.
 std::optional<core::Json> quick_mask_selection(const core::Page& page);
+
+// PC4 D6 (消点's new layer: what its stamp copies): the page as it shows — print, without its finish, onion skin, nombre or
+// spot channels, the Clone Stamp's サンプル すべてのレイヤー — over `box` of the paint layer `id`'s grid, as pixels of its
+// kind (past the page: clear). render/ops_retouch.cpp.
+image_ops::Pixels page_shown_over(core::OpContext& c, std::size_t at, const std::string& id, const Box& box);
 
 // A frame for an op whose work is not written yet: refused with not_yet_ported ("<op> is not in the C++ build yet (PC3
 // <group>)"), nothing changed.

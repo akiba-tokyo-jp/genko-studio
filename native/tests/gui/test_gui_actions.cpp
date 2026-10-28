@@ -26,6 +26,7 @@
 #include "app/inject.hpp"
 #include "app/main_window.hpp"
 #include "app/navigator.hpp"
+#include "app/open_dialog.hpp"
 #include "app/pages_panel.hpp"
 #include "app/preferences.hpp"
 #include "app/templates.hpp"
@@ -69,10 +70,11 @@ QKeySequence s(const char* text) { return QKeySequence(QString::fromLatin1(text)
 // Python's words, keys and tips (main.py _build_actions), and the menu each is in.
 const std::vector<Expected>& expected() {
     static const std::vector<Expected> list = {
-        {"act_new", "新しい原稿…", k({QKeySequence(Std::New)}), "", false, "ファイル"},
+        // (PC4 F-0, 節 F 5.1: ファイル's commands by Photoshop's names — 新規…, 別名で保存…, 終了)
+        {"act_new", "新規…", k({QKeySequence(Std::New)}), "", false, "ファイル"},
         {"act_open", "開く…", k({QKeySequence(Std::Open)}), "", false, "ファイル"},
         {"act_save", "保存", k({QKeySequence(Std::Save)}), "変更は自動で保存されます。今すぐ書き込むときに使います", false, "ファイル"},
-        {"act_save_as", "別の場所に保存…", k({QKeySequence(Std::SaveAs)}), "", false, "ファイル"},
+        {"act_save_as", "別名で保存…", k({QKeySequence(Std::SaveAs)}), "", false, "ファイル"},
         {"act_undo", "元に戻す", k({QKeySequence(Std::Undo)}), "", false, "編集"},
         {"act_redo", "やり直す", k({QKeySequence(Std::Redo), s("Ctrl+Y")}), "", false, "編集"},
         {"act_fit", "全体を表示", k({s("Ctrl+0")}), "", false, "表示"},
@@ -95,15 +97,15 @@ const std::vector<Expected>& expected() {
         // (working CMYK coated-cmyk), Python's own conversion kept there as 書き出しの CMYK)
         {"act_cmyk_proof", "色の校正", k({s("Ctrl+Alt+Y")}), "印刷したときの色など、校正の設定で選んだ見え方で表示します（表示だけ。原稿は変わりません）", true, "表示"},
         {"act_select", "選択", k({s("V")}), "コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす", true, "ツール"},
-        {"act_pen", "ペン", k({s("B")}), "レイヤー パネルで選んだレイヤーに描きます", true, "ツール"},
-        {"act_eraser", "消しゴム", k({s("E")}), "ペンの線は触れた所で切れます", true, "ツール"},
+        {"act_pen", "ブラシツール", k({s("B")}), "レイヤー パネルで選んだレイヤーに描きます", true, "ツール"},
+        {"act_eraser", "消しゴムツール", k({s("E")}), "ペンの線は触れた所で切れます", true, "ツール"},
         {"act_frame", "コマ割り", k({s("F")}),
          "コマの中をドラッグして割る（斜めも。水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで間隔を動かす・選んだコマの角をドラッグで形を変える", true,
          "ツール"},
         // (PC3 C-d, decision 5's 移動ツール: the layers chosen and their linked ones, Ctrl+click picking a layer)
         {"act_move", "移動ツール", k({s("Q")}), "選んだレイヤーをリンクしたレイヤーと一緒にドラッグで動かす（Shift で縦・横・45°、Ctrl+クリックでそこのレイヤーを選ぶ）", true, "ツール"},
         {"act_point_wider", "選んだ点を太く", k({s("Ctrl+Alt+]")}), "部分選択ツールで選んだ制御点のところだけ、線を太くします", false, "ツール"},  // (PC3 C-b)
-        {"act_color", "ペンの色…", k({s("C")}), "", false, "ツール"},
+        {"act_color", "カラーピッカー（描画色）…", k({s("C")}), "", false, "ツール"},  // (PC4 E-0, decision 2)
         {"act_split_h", "コマを横に割る（上下に分ける）", k({s("Ctrl+Shift+H")}), "", false, "ページ/コマ"},
         {"act_split_v", "コマを縦に割る（左右に分ける）", k({s("Ctrl+Shift+V")}), "", false, "ページ/コマ"},
         {"act_merge", "コマを結合（割る前に戻す）", k({s("Ctrl+Shift+M")}), "", false, "ページ/コマ"},
@@ -131,7 +133,7 @@ const std::vector<Expected>& expected() {
          "ウィンドウ"},
         {"act_next_doc", "次の原稿", k({s("Ctrl+Tab")}), "", false, "ウィンドウ"},
         {"act_prev_doc", "前の原稿", k({s("Ctrl+Shift+Tab")}), "", false, "ウィンドウ"},
-        {"act_quit", "Genko を終わる", k({QKeySequence(Std::Quit)}), "", false, "ファイル"},
+        {"act_quit", "終了", k({QKeySequence(Std::Quit)}), "", false, "ファイル"},
     };
     return list;
 }
@@ -341,7 +343,39 @@ private slots:
         // act_lock_layers), 表示 → スナップ and スナップ先 ▸ (act_snap_on, act_snap_guides, act_snap_grid, act_snap_layers,
         // act_snap_bounds, act_snap_all, act_snap_none) and the move tool's 自動選択・バウンディングボックスを表示
         // (act_move_auto_select, act_move_show_box) — theirs (test_gui_align).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{453});
+        // and the 10 of PC4 F-0 (SPEC FILE-01) — ファイル の 指定形式で開く…・すべてを閉じる・その他を閉じる・コピーを保存…・復帰・
+        // ファイル情報… and 書き出し ▸ PNG としてクイック書き出し・書き出し形式…・書き出しの環境設定…・Web 用に保存（従来）…
+        // (act_open_as, act_close_all, act_close_others, act_save_copy, act_revert, act_file_info, act_quick_export_png,
+        // act_export_as, act_export_prefs, act_save_for_web): frames until F-b and F-c — theFileMenuIsPhotoshops below.
+        // and the 2 of PC4 E-0 (SPEC COLOR-09) — ツール → 描画色と背景色を初期設定に戻す (act_default_colours) and ウィンドウ →
+        // スウォッチ (act_swatches) — theirs (test_gui_paint).
+        // and the 78 of PC4 節 D0 (SPEC COLOR-08「フィルター」, the user's decision 1) — the フィルター menu's commands
+        // act_filter_<kind> (77: Photoshop's, their kinds' groups D1…D6 lighting them; ぼかし・ぼかし（強）・シャープ・シャープ（強）・
+        // シャープ（輪郭のみ）・輪郭以外をぼかす as act_filter_blur, act_filter_blur_more, act_filter_sharpen, act_filter_sharpen_more,
+        // act_filter_sharpen_edges, act_filter_despeckle; 漫画's five act_filter_manga_<kind>) and 前回のフィルター (act_filter_last)
+        // — theirs (test_gui_filters).
+        // and the 1 of PC4 F-b (SPEC FILE-01) — ページ → 複製… (act_duplicate_image, image.duplicate) — theirs (test_gui_file),
+        // which connects F-0's six frames of ファイル too; and the 2 of PC4 E1 (SPEC COLOR-09「ブラシエンジンと線」) — ツール →
+        // 鉛筆ツール (act_pencil) and 表示 → ブラシプレビュー (act_brush_preview) — theirs (test_gui_brushes).
+        // and the 3 of PC4 E3 (SPEC COLOR-09「パターン」) — 編集 → パターンを定義… (act_define_pattern), レイヤー パネルの
+        // パターンのレイヤー… (act_layer_pattern, layer.newFillLayer.pattern) and 表示 → パターンプレビュー (act_pattern_preview)
+        // — theirs (test_gui_patterns).
+        // and the 9 of PC4 E5 (SPEC COLOR-09「画素を変える筆」) — ツール → ぼかしツール・シャープツール・指先ツール・覆い焼きツール・
+        // 焼き込みツール・スポンジツール・混合ブラシツール・背景消しゴムツール・色の置き換えツール (act_blur_tool, act_sharpen_tool,
+        // act_smudge_tool, act_dodge_tool, act_burn_tool, act_sponge_tool, act_mixer_brush, act_background_eraser,
+        // act_color_replacement) — theirs (test_gui_paint_tools).
+        // and the 4 of PC4 E2 (SPEC COLOR-09「ブラシのプリセット」「プリセットマネージャー」) — 編集 → ブラシを定義… (act_define_brush)
+        // and プリセット ▸ プリセットマネージャー…・プリセットを移行・プリセットを書き出し／読み込み… (act_preset_manager,
+        // act_migrate_presets, act_export_import_presets) — theirs (test_gui_brush_settings).
+        // and the 3 of PC4 F-c (SPEC FILE-01) — ファイル → 書き出し → レイヤーからファイル… (act_layers_to_files), レイヤー の
+        // PNG としてクイック書き出し・書き出し形式… (act_layer_quick_export_png, act_layer_export_as) — theirs (test_gui_output), which
+        // connects F-0's four frames of 書き出し ▸ too.
+        // and the 19 of PC4 E6 (SPEC COLOR-09「レイヤースタイル」) — レイヤー → レイヤースタイル ▸ 混合オプション…・each effect's 10
+        // (act_layer_style_blending, act_layer_style_<kind>), レイヤースタイルをコピー・ペースト・消去 (act_layer_style_copy,
+        // act_layer_style_paste, act_layer_style_clear), 包括光源… (act_global_light), レイヤーを作成 (act_layer_style_layers),
+        // すべての効果を隠す・表示 (act_layer_style_hide_all, act_layer_style_show_all), 効果を拡大・縮小… (act_layer_style_scale)
+        // — theirs (test_gui_styles).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{584});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -378,8 +412,89 @@ private slots:
         // drawing tools and line editing (test_gui_paint), the effect lines and the material tool (test_gui_effects), the
         // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths); the crop tool (PC3 C-e, test_gui_page_size);
         // PC3 B4's four retouching tools (test_gui_retouch); PC3 C-b's five shape tools besides 長方形ツール (test_gui_shapes)
-        // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask)
-        QCOMPARE(w->tools_group()->actions().size(), 43);
+        // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask); PC4 E1's 鉛筆ツール (test_gui_brushes); PC4 E5's
+        // nine brushes that change pixels (test_gui_paint_tools)
+        QCOMPARE(w->tools_group()->actions().size(), 53);
+    }
+
+    // PC4 F-0 (SPEC FILE-01; 節 F 5.1・5.2): ファイル in Photoshop's order and names — the book's export is 書き出し ▸
+    // 原稿を書き出す… (Ctrl+E) —, and 節 F's new commands in their places with Photoshop's keys: F-b's connected (what they
+    // do: test_gui_file), F-c's frames that say they are not in this build yet and change nothing until F-c connects them.
+    void theFileMenuIsPhotoshops() {
+        Studio studio;
+        MainWindow* w = studio.window.get();
+        QMenu* file = nullptr;
+        for (QAction* top : w->menuBar()->actions()) {
+            if (top->menu() != nullptr && top->menu()->title() == QStringLiteral("ファイル")) file = top->menu();
+        }
+        QVERIFY(file != nullptr);
+        const auto items = [](QMenu* menu) {
+            QStringList out;
+            for (QAction* a : menu->actions()) {
+                if (a->isSeparator()) out << QStringLiteral("|");
+                else if (a->menu() != nullptr) out << a->menu()->title() + QStringLiteral(" ▸");
+                else out << a->text();
+            }
+            return out;
+        };
+        QCOMPARE(items(file),
+                 (QStringList{QStringLiteral("新規…"), QStringLiteral("開く…"), QStringLiteral("指定形式で開く…"), QStringLiteral("最近使用したファイルを開く ▸"),
+                              QStringLiteral("|"), QStringLiteral("AI と作る…"), QStringLiteral("|"), QStringLiteral("閉じる"), QStringLiteral("すべてを閉じる"),
+                              QStringLiteral("その他を閉じる"), QStringLiteral("|"), QStringLiteral("保存"), QStringLiteral("別名で保存…"), QStringLiteral("コピーを保存…"),
+                              QStringLiteral("復帰"), QStringLiteral("|"), QStringLiteral("書き出し ▸"), QStringLiteral("|"), QStringLiteral("埋め込みを配置…"),
+                              QStringLiteral("リンクを配置…"), QStringLiteral("パッケージ…"), QStringLiteral("|"), QStringLiteral("画像を読み込む…"),
+                              QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"), QStringLiteral("ほかの原稿のページを取り込む…"),
+                              QStringLiteral("PSD をレイヤーのまま読み込む…"), QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|"),
+                              QStringLiteral("プリント…"), QStringLiteral("|"), QStringLiteral("タイムラプスを記録する"), QStringLiteral("タイムラプスを書き出す…"),
+                              QStringLiteral("|"), QStringLiteral("スクリプト ▸"), QStringLiteral("オートアクション ▸"), QStringLiteral("環境設定…"), QStringLiteral("|"),
+                              QStringLiteral("終了")}));
+        QMenu* exports = w->findChild<QMenu*>(QStringLiteral("menu_export"));
+        QVERIFY(exports != nullptr);
+        QCOMPARE(items(exports), (QStringList{QStringLiteral("PNG としてクイック書き出し"), QStringLiteral("書き出し形式…"), QStringLiteral("|"),
+                                             QStringLiteral("書き出しの環境設定…"), QStringLiteral("|"), QStringLiteral("Web 用に保存（従来）…"), QStringLiteral("|"),
+                                             QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("レイヤーからファイル…"),
+                                             QStringLiteral("パスを Illustrator へ…"), QStringLiteral("カラールックアップテーブル…")}));
+        QCOMPARE(studio.act("act_export")->shortcuts(), QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+E"))});
+        QCOMPARE(studio.act("act_print")->text(), QStringLiteral("プリント…"));
+        // (節 F's new ones: Photoshop's keys — F-b's connected (PC4 F-b: test_gui_file says what they do), F-c's too (PC4 F-c:
+        // test_gui_output) —; F-c's open their windows, the book unchanged when they are closed)
+        const std::vector<std::pair<const char*, const char*>> connected{
+            {"act_open_as", "Ctrl+Alt+Shift+O"}, {"act_close_all", "Ctrl+Alt+W"}, {"act_close_others", "Ctrl+Alt+P"},
+            {"act_save_copy", "Ctrl+Alt+S"},     {"act_revert", "F12"},           {"act_file_info", "Ctrl+Alt+Shift+I"}};
+        for (const auto& [name, key] : connected) {
+            QAction* a = studio.act(name);
+            QVERIFY2(a != nullptr, name);
+            QCOMPARE(a->shortcuts(), QList<QKeySequence>{QKeySequence(QString::fromLatin1(key))});
+        }
+        const std::vector<std::pair<const char*, const char*>> frames{
+            {"act_quick_export_png", ""}, {"act_export_as", "Ctrl+Alt+Shift+W"}, {"act_export_prefs", ""}, {"act_save_for_web", "Ctrl+Alt+Shift+S"}};
+        const std::int64_t revision = studio.doc().revision;
+        const std::size_t books = w->documents().size();
+        // (each opens its window — or, クイック書き出し, asks where —: counted as the responder is asked)
+        int opened = 0;
+        const auto shown = studio.answers->responder->exec;
+        const auto where = studio.answers->responder->save_path;
+        studio.answers->responder->exec = [&](QDialog* dialog) {
+            ++opened;
+            return shown ? shown(dialog) : int(QDialog::Rejected);
+        };
+        studio.answers->responder->save_path = [&](const QString& caption, const QString& suggested) {
+            ++opened;
+            return where ? where(caption, suggested) : QString();
+        };
+        for (const auto& [name, key] : frames) {
+            QAction* a = studio.act(name);
+            QVERIFY2(a != nullptr, name);
+            QCOMPARE(a->shortcuts(), *key == '\0' ? QList<QKeySequence>() : QList<QKeySequence>{QKeySequence(QString::fromLatin1(key))});
+            const int before = opened;
+            a->trigger();  // (its window shut, or — クイック書き出し — no place given: nothing written)
+            QVERIFY2(!w->last_notice().contains(QStringLiteral("まだ使えません")), qPrintable(w->last_notice()));
+            QVERIFY2(opened == before + 1, name);
+        }
+        studio.answers->responder->exec = shown;
+        studio.answers->responder->save_path = where;
+        QCOMPARE(studio.doc().revision, revision);
+        QCOMPARE(w->documents().size(), books);
     }
 
     // No two commands share a key (Qt would take the key as ambiguous and do neither): PC1b's 色の校正 (Ctrl+Alt+Y — Ctrl+Y
@@ -484,7 +599,14 @@ private slots:
                                                   {"shape_polygon", "act_shape_polygon"}, {"shape_line", "act_shape_line"},
                                                   {"shape_custom", "act_shape_custom"},
                                                   // (PC3 B3: クイック選択ツール, オブジェクト選択ツール)
-                                                  {"quick", "act_quick_select"}, {"object", "act_object_select"}};
+                                                  {"quick", "act_quick_select"}, {"object", "act_object_select"},
+                                                  // (PC4 E1: 鉛筆ツール)
+                                                  {"pencil", "act_pencil"},
+                                                  // (PC4 E5: the brushes that change pixels)
+                                                  {"blurtool", "act_blur_tool"}, {"sharpentool", "act_sharpen_tool"}, {"smudgetool", "act_smudge_tool"},
+                                                  {"dodge", "act_dodge_tool"}, {"burn", "act_burn_tool"}, {"sponge", "act_sponge_tool"},
+                                                  {"mixer", "act_mixer_brush"}, {"bgeraser", "act_background_eraser"},
+                                                  {"colorreplace", "act_color_replacement"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());
@@ -641,7 +763,7 @@ private slots:
         Studio studio;
         MainWindow* w = studio.window.get();
         studio.answers->responder->colour = [](const QColor&, const QString& title) {
-            return title == QStringLiteral("色") ? std::optional<QColor>(QColor(200, 30, 40)) : std::nullopt;
+            return title == QStringLiteral("カラーピッカー（描画色）") ? std::optional<QColor>(QColor(200, 30, 40)) : std::nullopt;
         };
         studio.trigger("act_color");
         QCOMPARE(w->pen().rgb, (std::vector<std::int64_t>{200, 30, 40}));
@@ -867,8 +989,12 @@ private slots:
         // 開く…: another book in a new tab
         const fs::path other = path_of(studio.dir.filePath("other.genko"));
         write_book(other, new_doc(2, "別の本"));
-        studio.answers->responder->existing_dir = [other](const QString& caption, const QString&) {
-            return caption == QStringLiteral("原稿（.genko のフォルダ）を開く") ? qpath(other) : QString();
+        // (PC4 F-b: Genko's own open window — a .genko folder or a file, app/open_dialog.hpp — in place of the folder's)
+        studio.answers->responder->exec = [other](QDialog* dialog) {
+            auto* open = qobject_cast<genko::app::OpenDialog*>(dialog);
+            if (open == nullptr) return 0;
+            open->choose({qpath(other)});
+            return static_cast<int>(QDialog::Accepted);
         };
         studio.trigger("act_open");
         QVERIFY(wait_for([&] { return w->documents().size() == 2; }));
@@ -880,7 +1006,7 @@ private slots:
         QCOMPARE(w->book().title, std::string("試し"));
         studio.trigger("act_prev_doc");
         QCOMPARE(w->current_document(), 1);
-        // 新しい原稿…: the dialog makes the book; it opens in a tab
+        // 新規… (新しい原稿…): the dialog makes the book; it opens in a tab
         studio.answers->responder->exec = [&studio](QDialog* dialog) {
             auto* d = qobject_cast<genko::app::NewProjectDialog*>(dialog);
             if (d == nullptr) return 0;
@@ -893,7 +1019,7 @@ private slots:
         QCOMPARE(w->book().title, std::string("新しい本"));
         QVERIFY(w->session().path().has_value());
         QVERIFY(fs::exists(*w->session().path() / "project.json"));
-        // 別の場所に保存…: a copy with a new book id; the work goes on there
+        // 別名で保存… (別の場所に保存…): a copy with a new book id; the work goes on there
         const std::string old_id = w->book().book_id;
         const fs::path copy = path_of(studio.dir.filePath("写し"));
         studio.answers->responder->save_path = [copy](const QString& caption, const QString&) {
@@ -916,7 +1042,7 @@ private slots:
         QCOMPARE(second->session_ptr(), w->session_ptr());
         second->close();
         QCOMPARE(genko::app::documents::windows().size(), windows);
-        // Genko を終わる: every window (each book saved: nothing asked)
+        // 終了 (Genko を終わる): every window (each book saved: nothing asked)
         studio.trigger("act_quit");
         QVERIFY(w->closed());
         QVERIFY(!studio.answers->asked.contains(QStringLiteral("genko::app::CloseGuard")));

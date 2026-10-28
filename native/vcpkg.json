@@ -11,6 +11,10 @@
     {"name": "freetype", "default-features": false, "features": ["zlib", "png"]},
     "harfbuzz",
     "libwebp",
-    "lcms"
+    "lcms",
+    "openexr",
+    {"name": "libavif", "default-features": false, "features": ["aom"]},
+    "zstd",
+    {"name": "libraw", "default-features": false, "features": ["dng-lossy"]}
   ]
 }

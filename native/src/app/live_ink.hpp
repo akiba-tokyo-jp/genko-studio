@@ -28,6 +28,13 @@
 
 namespace genko::app {
 
+// brushes@1 (PC4 E1): the pen's inputs at each point of the line so far, as the canvas keeps them (tilt two a point).
+struct LiveInputs {
+    std::span<const double> tilt;
+    std::span<const double> time_ms;
+    std::span<const double> wheel;
+};
+
 class LiveInk {
 public:
     // doc: the book (kept while the line is shown: its brush colour, custom brushes, the page); page/layer: where the
@@ -36,8 +43,10 @@ public:
     LiveInk(std::shared_ptr<const core::Document> doc, const core::Page& page, const core::Layer& layer, int dpi,
             const core::Json& fields, std::string seed);
 
-    // The line so far (packed points in mm with their pressure, and the pen's turns if it reports them).
-    void follow(const core::PenPoints& points, std::span<const double> rotation = {});
+    // The line so far (packed points in mm with their pressure, and the pen's turns if it reports them; brushes@1: a dab
+    // brush's line with the pen's inputs, drawn whole on every move — its dabs build up, so it is not the union of its
+    // parts).
+    void follow(const core::PenPoints& points, std::span<const double> rotation = {}, const LiveInputs& inputs = {});
     // The committed line, drawn whole in place of the live one.
     void finish(const core::Stroke& stroke);
 
@@ -83,6 +92,12 @@ private:
     double width_mm_ = 0.5;
     std::vector<std::int64_t> rgb_;
     double opacity_ = 1.0;  // the stroke's opacity × the brush's
+    // brushes@1 (PC4 E1): a dab brush's line — the flow and 背景色 it is drawn with, and its colours as last laid (the colour
+    // dynamics: each pixel its own)
+    bool dab_ = false;
+    std::optional<double> flow_;
+    std::optional<std::vector<std::int64_t>> background_;
+    std::shared_ptr<const render::dabs::LineCover> colours_;
     double gamma_ = 1.0;
     std::string curve_;
     std::int64_t stabilize_ = 0;

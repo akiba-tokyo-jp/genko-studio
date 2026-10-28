@@ -250,6 +250,13 @@ private slots:
         app::inject::mouse_stroke(w->canvas(), {QPointF(60, 240), QPointF(62, 250), QPointF(64, 260)});
         QVERIFY(*book.layer(0, "u")->mask->png != before);  // (the mask changed, not the lines)
         QCOMPARE(book.layer(0, "u")->strokes->items.size(), strokes);
+        // (PC4 E1, review P2-7: the 鉛筆ツール edits the mask as the brush tool does — no line, no brush in the book)
+        const std::string after_pen = *book.layer(0, "u")->mask->png;
+        w->choose_tool(QStringLiteral("pencil"));
+        app::inject::mouse_stroke(w->canvas(), {QPointF(90, 240), QPointF(92, 250), QPointF(94, 260)});
+        QVERIFY(*book.layer(0, "u")->mask->png != after_pen);
+        QCOMPARE(book.layer(0, "u")->strokes->items.size(), strokes);
+        QVERIFY(book.window->book().brush_custom.empty());
         panel->mask_edit_action()->setChecked(false);
         QVERIFY(!w->mask_edit);
         // a layer without a mask: one that shows everything first
@@ -307,29 +314,29 @@ private slots:
             QVERIFY(!done.html.contains(token) && !done.html.contains(QStringLiteral("act_")));
         }
         const QString guide = app::help::guide(w);
-        QVERIFY(guide.contains(QStringLiteral("「ファイル → 新しい原稿…」")));
+        QVERIFY(guide.contains(QStringLiteral("「ファイル → 新規…」")));  // (PC4 F-0: Photoshop's name)
         QVERIFY(guide.contains(QStringLiteral("「ウィンドウ → 作業の段階」の「ネームの並び」「作画の並び」")));  // (where the stages are: Python's guide said 表示)
-        QVERIFY(guide.contains(QStringLiteral("ペン（B）")));
+        QVERIFY(guide.contains(QStringLiteral("ブラシツール（B）")));  // (PC4 E-0, decision 2)
         QVERIFY(guide.contains(QStringLiteral("[ と ] で太さ")));
         QVERIFY(guide.contains(QStringLiteral("「ページ → 台詞 → フキダシを手で描く」")));
         const QString faq = app::help::faq(w);
         QVERIFY(faq.contains(QStringLiteral("「ウィンドウ → ワークスペース → はじめの配置に戻す」")));  // (a menu filled as it opens)
-        QVERIFY(faq.contains(QStringLiteral("「マスク ▾」、または「レイヤー → レイヤーマスク → マスクを編集する（ペンで見せる・消しゴムで隠す）」")));
+        QVERIFY(faq.contains(QStringLiteral("「マスク ▾」、または「レイヤー → レイヤーマスク → マスクを編集する（ブラシで見せる・消しゴムで隠す）」")));
         QVERIFY(app::help::shortcut_html(w).contains(QStringLiteral("キーは「ファイル → 環境設定…」で変えられます")));
         // a key changed: the guide and the list say the new one
         book.act("act_pen")->setShortcut(QKeySequence(QStringLiteral("P")));
-        QVERIFY(app::help::guide(w).contains(QStringLiteral("ペン（P）")));
+        QVERIFY(app::help::guide(w).contains(QStringLiteral("ブラシツール（P）")));
         bool listed = false;
-        for (const auto& [menu, command, keys] : app::help::shortcut_rows(w)) listed = listed || (command == QStringLiteral("ペン") && keys == QStringLiteral("P"));
+        for (const auto& [menu, command, keys] : app::help::shortcut_rows(w)) listed = listed || (command == QStringLiteral("ブラシツール") && keys == QStringLiteral("P"));
         QVERIFY(listed);
         // keys taken away: said so, never the command's inner name; a key that is a sign of HTML: written as the sign
         book.act("act_pen")->setShortcuts({});
         const app::help::Rendered keyless = app::help::render(w, QString::fromUtf8(app::help::kGuide));
-        QVERIFY(keyless.html.contains(QStringLiteral("ペン（キーなし）")) && !keyless.html.contains(QStringLiteral("act_")));
+        QVERIFY(keyless.html.contains(QStringLiteral("ブラシツール（キーなし）")) && !keyless.html.contains(QStringLiteral("act_")));
         QCOMPARE(keyless.keyless, QStringList{QStringLiteral("{key:act_pen}")});
         book.act("act_pen")->setShortcut(QKeySequence(Qt::Key_Less));
-        QVERIFY(app::help::guide(w).contains(QStringLiteral("ペン（&lt;）")));
-        QVERIFY(app::help::shortcut_html(w).contains(QStringLiteral("<td>ペン</td><td><b>&lt;</b></td>")));
+        QVERIFY(app::help::guide(w).contains(QStringLiteral("ブラシツール（&lt;）")));
+        QVERIFY(app::help::shortcut_html(w).contains(QStringLiteral("<td>ブラシツール</td><td><b>&lt;</b></td>")));
         book.act("act_pen")->setShortcut(QKeySequence(QStringLiteral("B")));
         // a command not in the menus is found, never described (nor its inner name shown)
         const app::help::Rendered unknown = app::help::render(w, QStringLiteral("{menu:act_no_such_thing} {key:act_pen} {top:ありません}"));
@@ -345,7 +352,7 @@ private slots:
         QVERIFY(shown != nullptr && shown->text->toPlainText().contains(QStringLiteral("線が描けない")));
         book.act("act_help_keys")->trigger();
         shown = qobject_cast<app::help::HelpDialog*>(w->help_dialog());
-        QVERIFY(shown != nullptr && shown->text->toPlainText().contains(QStringLiteral("ペン")));
+        QVERIFY(shown != nullptr && shown->text->toPlainText().contains(QStringLiteral("ブラシツール")));
         QCOMPARE(book.act("act_help_keys")->shortcut(), QKeySequence(Qt::Key_F1));
         auto* keys_window = shown;
         book.act("act_about")->trigger();

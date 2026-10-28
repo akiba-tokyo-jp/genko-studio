@@ -19,12 +19,14 @@
 
 #include <QtTest>
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QElapsedTimer>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -40,6 +42,7 @@
 #include <QSpinBox>
 #include <QStandardItemModel>
 #include <QStatusBar>
+#include <QTabWidget>
 #include <QToolBar>
 
 #include <functional>
@@ -48,13 +51,16 @@
 #include "app/canvas.hpp"
 #include "app/check_panel.hpp"
 #include "app/config.hpp"
+#include "app/export_as_dialog.hpp"
 #include "app/export_dialog.hpp"
 #include "app/fit_preview.hpp"
 #include "app/path_label.hpp"
 #include "app/history_panel.hpp"
 #include "app/icons.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "app/print_dialog.hpp"
+#include "app/save_for_web_dialog.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
 #include "service/wording.hpp"
@@ -62,6 +68,9 @@
 #include "core/pynum.hpp"
 #include "formats/checks.hpp"
 #include "formats/export.hpp"
+#include "formats/web_export.hpp"
+#include "core/paths.hpp"
+#include "storage/fsutil.hpp"
 #include "gui_support.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
@@ -221,8 +230,9 @@ private slots:
             const char* menu;
         };
         const std::vector<Want> wanted = {
-            {"act_export", "書き出し…", "Ctrl+E", "PDF・TIFF・PSD・縦読み・SNS 用などに書き出します", false, "ファイル"},
-            {"act_print", "印刷…", "Ctrl+P", "プリンターで紙に印刷します（仕上がりで切る・用紙全体）", false, "ファイル"},
+            // (PC4 F-0, 節 F 5.1: 書き出し… is ファイル → 書き出し → 原稿を書き出す…, 印刷… is プリント…)
+            {"act_export", "原稿を書き出す…", "Ctrl+E", "PDF・TIFF・PSD・縦読み・SNS 用などに書き出します", false, "ファイル/書き出し"},
+            {"act_print", "プリント…", "Ctrl+P", "プリンターで紙に印刷します（仕上がりで切る・用紙全体）", false, "ファイル"},
             {"act_history", "履歴…", "Ctrl+H", "変更の一覧。クリックでその時点まで戻る・進む", false, "編集"},
             {"act_phone", "スマホの画面の範囲を表示", "", "縦読みの原稿で、スマホ 1 画面に入る範囲と画面の切れ目", true, "表示"},
             {"act_scale", "目盛りを表示", "Ctrl+R", "上と左に mm の目盛り。目盛りからドラッグするとガイド線を引けます", true, "表示"},
@@ -241,27 +251,33 @@ private slots:
             QCOMPARE(a->isCheckable(), e.checkable);
             QVERIFY2(menus_of(w, a) == QStringList{QString::fromUtf8(e.menu)}, e.name);
         }
-        // their places in Python's menus (among the commands this build has)
+        // their places (PC4 F-0, 節 F 5.2: Photoshop's ファイル — the book's export in 書き出し ▸, then PC3 C-a's パスを
+        // Illustrator へ…; プリント… its own group after ファイル情報…: test_gui_actions' theFileMenuIsPhotoshops)
         const QStringList file = menu_items(w, QStringLiteral("ファイル"));
-        QCOMPARE(file.indexOf(QStringLiteral("書き出し…")), file.indexOf(QStringLiteral("PSD をレイヤーのまま読み込む…")) + 1);
-        // (PC3 C-a: パスを Illustrator へ… — Photoshop's 書き出し → パスを Illustrator へ… — right after 書き出し…)
-        QCOMPARE(file.indexOf(QStringLiteral("パスを Illustrator へ…")), file.indexOf(QStringLiteral("書き出し…")) + 1);
-        QCOMPARE(file.indexOf(QStringLiteral("印刷…")), file.indexOf(QStringLiteral("書き出し…")) + 2);
-        QCOMPARE(file.at(file.indexOf(QStringLiteral("印刷…")) + 1), QStringLiteral("|"));
+        QCOMPARE(file.indexOf(QStringLiteral("プリント…")), file.indexOf(QStringLiteral("ファイル情報…")) + 2);
+        QCOMPARE(file.at(file.indexOf(QStringLiteral("プリント…")) - 1), QStringLiteral("|"));
+        QCOMPARE(file.at(file.indexOf(QStringLiteral("プリント…")) + 1), QStringLiteral("|"));
+        QStringList exports;
+        for (QAction* a : w->findChild<QMenu*>(QStringLiteral("menu_export"))->actions()) exports << (a->isSeparator() ? QStringLiteral("|") : a->text());
+        // (PC4 F-c: Photoshop's レイヤーからファイル… first in that group)
+        QCOMPARE(exports.indexOf(QStringLiteral("レイヤーからファイル…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 2);
+        QCOMPARE(exports.indexOf(QStringLiteral("パスを Illustrator へ…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 3);
         const QStringList edit = menu_items(w, QStringLiteral("編集"));
         QCOMPARE(edit.mid(0, 4), (QStringList{QStringLiteral("元に戻す"), QStringLiteral("やり直す"), QStringLiteral("履歴…"), QStringLiteral("|")}));
         const QStringList view = menu_items(w, QStringLiteral("表示"));
         const int guides = view.indexOf(QStringLiteral("仕上がり線・基本枠を表示"));
-        // (PC3 B1: 選択範囲の境界線 — Photoshop's 表示 → 表示・非表示 → 選択範囲の境界線 — after 目盛りを表示)
-        QCOMPARE(view.mid(guides, 5), (QStringList{QStringLiteral("仕上がり線・基本枠を表示"), QStringLiteral("スマホの画面の範囲を表示"),
-                                                   QStringLiteral("目盛りを表示"), QStringLiteral("選択範囲の境界線"),
-                                                   QStringLiteral("前のページを透かす（オニオンスキン）")}));
+        // (PC3 B1: 選択範囲の境界線 — Photoshop's 表示 → 表示・非表示 → 選択範囲の境界線 — after 目盛りを表示; PC4 E1: ブラシ
+        // プレビュー — Photoshop's 表示 → 表示・非表示 → ブラシプレビュー — after it; PC4 E3: パターンプレビュー — Photoshop's
+        // 表示 → パターンプレビュー — after that)
+        QCOMPARE(view.mid(guides, 7), (QStringList{QStringLiteral("仕上がり線・基本枠を表示"), QStringLiteral("スマホの画面の範囲を表示"),
+                                                   QStringLiteral("目盛りを表示"), QStringLiteral("選択範囲の境界線"), QStringLiteral("ブラシプレビュー"),
+                                                   QStringLiteral("パターンプレビュー"), QStringLiteral("前のページを透かす（オニオンスキン）")}));
         const QStringList pages = menu_items(w, QStringLiteral("ページ"));
         // (Python's row: 台詞の検索・置換…, 本の形でプレビュー… (M6), 入稿前の点検)
         QCOMPARE(pages.indexOf(QStringLiteral("本の形でプレビュー…")), pages.indexOf(QStringLiteral("台詞の検索・置換…")) + 1);
         QCOMPARE(pages.indexOf(QStringLiteral("入稿前の点検")), pages.indexOf(QStringLiteral("本の形でプレビュー…")) + 1);
         QCOMPARE(pages.at(pages.indexOf(QStringLiteral("入稿前の点検")) + 1), QStringLiteral("|"));
-        // 書き出し… at the end of the command bar (workspace.DEFAULT_COMMANDBAR), with its picture
+        // 原稿を書き出す… (書き出し…) at the end of the command bar (workspace.DEFAULT_COMMANDBAR), with its picture
         QToolBar* bar = w->findChild<QToolBar*>(QStringLiteral("commands"));
         QVERIFY(bar != nullptr);
         QCOMPARE(bar->actions().back(), s.act("act_export"));
@@ -897,7 +913,7 @@ private slots:
     // another's, from the journal.
     void historyPanel() {
         QCOMPARE(app::history::describe(Json::array()), QStringLiteral("原稿を変えた"));
-        QCOMPARE(app::history::describe(Json::array({Json{{"op", "add_stroke"}}, Json{{"op", "add_stroke"}}})), QStringLiteral("ペンで描いた（2 回）"));
+        QCOMPARE(app::history::describe(Json::array({Json{{"op", "add_stroke"}}, Json{{"op", "add_stroke"}}})), QStringLiteral("ブラシで描いた（2 回）"));
         QCOMPARE(app::history::describe(Json::array({Json{{"op", "split_frame"}}, Json{{"op", "erase"}}, Json{{"op", "zzz"}}})),
                  QStringLiteral("コマを割った ほか 2 件"));
         QCOMPARE(app::history::describe(Json::array({Json{{"op", "no_such_op"}}})), QStringLiteral("原稿を変えた"));
@@ -963,7 +979,7 @@ private slots:
                                               {"layer_id", gui_test::ink_of(w.book().page(0))->id}, {"points", Json::array({Json::array({10, 10}), Json::array({20, 20})})},
                                               {"width_mm", 2}}})));
         QVERIFY(gui_test::wait_for([&] { return texts().size() == 5; }));
-        QVERIFY(texts()[3] == QStringLiteral("ペンで描いた") || texts()[3].startsWith(QStringLiteral("ペンで描いた　")));  // (saved by now, or not yet)
+        QVERIFY(texts()[3] == QStringLiteral("ブラシで描いた") || texts()[3].startsWith(QStringLiteral("ブラシで描いた　")));  // (saved by now, or not yet)
         QVERIFY(texts()[4].startsWith(QStringLiteral("▶ コマを割った ほか 1 件")));
         QVERIFY(session->wait_saved(std::chrono::milliseconds(10000)));
         QVERIFY(gui_test::wait_for([&] { return texts()[4].startsWith(QStringLiteral("▶ コマを割った ほか 1 件　")); }));
@@ -974,7 +990,7 @@ private slots:
         QCOMPARE(w.book().page(0).leaf_frames().size(), std::size_t{1});
         QCOMPARE(gui_test::ink_strokes(w.book(), 0), std::size_t{1});
         shown = texts();
-        QVERIFY(shown[3].startsWith(QStringLiteral("▶ ペンで描いた")));
+        QVERIFY(shown[3].startsWith(QStringLiteral("▶ ブラシで描いた")));
         QVERIFY(shown[4].startsWith(QStringLiteral("コマを割った ほか 1 件（戻した操作）")));
         QCOMPARE(list->item(4)->foreground().color(), QColor(app::theme::tokens().faint));
         // forward again
@@ -991,7 +1007,7 @@ private slots:
                  }),
                  qPrintable(texts().join(QStringLiteral(" | "))));
         QVERIFY(texts()[1].startsWith(QStringLiteral("▶ ページを足した　〔hermes〕")));
-        QVERIFY(texts()[3].startsWith(QStringLiteral("ペンで描いた（戻した操作）")));
+        QVERIFY(texts()[3].startsWith(QStringLiteral("ブラシで描いた（戻した操作）")));
         QVERIFY(texts()[4].startsWith(QStringLiteral("コマを割った ほか 1 件（戻した操作）")));
         // and forward again through the journal: the nombre back
         QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, list->visualItemRect(list->item(2)).center());
@@ -1252,7 +1268,7 @@ private slots:
         QVERIFY(session->job_running());
         const QStringList waiting = texts();
         QVERIFY2(waiting.size() == 5 && waiting[2].startsWith(QStringLiteral("ノンブルを変えた（戻した操作）")) &&
-                     waiting[3].startsWith(QStringLiteral("ペンで描いた（戻した操作）")) && waiting[4].startsWith(QStringLiteral("コマを割った（戻した操作）")),
+                     waiting[3].startsWith(QStringLiteral("ブラシで描いた（戻した操作）")) && waiting[4].startsWith(QStringLiteral("コマを割った（戻した操作）")),
                  qPrintable(waiting.join(QStringLiteral(" | "))));
         click(3);
         QCOMPARE(panel->done(), 1);
@@ -1270,7 +1286,7 @@ private slots:
         QCOMPARE(w.book().page(0).leaf_frames().size(), std::size_t{1});
         QCOMPARE(session->status().kind, app::SaveKind::Saved);
         QVERIFY2(gui_test::wait_for([&] {
-                     return texts().size() == 5 && texts()[3].startsWith(QStringLiteral("▶ ペンで描いた")) &&
+                     return texts().size() == 5 && texts()[3].startsWith(QStringLiteral("▶ ブラシで描いた")) &&
                             texts()[4].startsWith(QStringLiteral("コマを割った（戻した操作）"));
                  }),
                  qPrintable(texts().join(QStringLiteral(" | "))));
@@ -1307,9 +1323,10 @@ private slots:
     // preview, and its own 印刷 button printing nothing, would say nothing); a sheet that cannot be drawn at the
     // printer's resolution, said after the preview has tried it.
     void printPreviewSaysWhatItCannotDraw() {
-        // (a picture placed on page 2 whose asset is a PPM of 2×2: Python draws it, this build does not read the netpbm
-        // formats — a recorded limit. Placed pictures themselves are drawn since M5①, TIFF and WebP since M6.)
-        const std::string webp = genko::core::a2b_base64("UDYKMiAyCjI1NQr/AAAA/wAAAP////8=");
+        // (a picture placed on page 2 whose asset is a JPEG 2000 file: Python draws it, this build does not read JPEG 2000 —
+        // a recorded limit. Placed pictures themselves are drawn since M5①, TIFF and WebP since M6, the netpbm formats since
+        // PC4 F-a.)
+        const std::string webp = genko::core::a2b_base64("AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiA=");
         core::Document book = gui_test::new_doc(2);
         core::Layer placed;
         placed.id = "placed000001";
@@ -1395,6 +1412,271 @@ private slots:
         // (the session's conflict for an adopted recovery point not yet written when another writer saved)
         QCOMPARE(genko::wording::error(QStringLiteral("the recovery point was not taken: the book changed meanwhile")),
                  QStringLiteral("その間に原稿が変わったため、復旧用コピーを採用していません（元に戻すか、別名で保存してください）"));
+    }
+
+    // PC4 F-c (SPEC.md FILE-01; 節 F 5.2・5.3・5.4): ファイル → 書き出し ▸ — 書き出し形式… (its estimate and preview made on a worker,
+    // following the choices; the page at half its size written where asked), PNG としてクイック書き出し (asked where while the
+    // preferences ask; beside the book, unasked, when they say so), 書き出しの環境設定… (its values kept, the same as 環境設定 →
+    // 書き出し), Web 用に保存（従来）… (its panes and estimate from a worker, a preset's settings, the file written), レイヤーからファイル…
+    // (a folder a page) — and レイヤー's: a layer of nothing says so and writes nothing.
+    void theExportMenuWritesPictures() {
+        core::PageSpec spec = core::PageSpec::a4_mono();
+        spec.dpi = core::Num(72);
+        Studio studio(core::new_episode("書き出し", core::Num(1), 2, spec));
+        app::MainWindow* w = studio.window.get();
+        const fs::path out = gui_test::path_of(studio.tmp.path() + QStringLiteral("/out"));
+        fs::create_directories(out);
+        QString save_to;
+        int asked_where = 0;
+        studio.answers.responder->save_path = [&](const QString&, const QString&) {
+            ++asked_where;
+            return save_to;
+        };
+        // (a window's work waited for: its estimates and panes come from a worker)
+        const auto wait_for = [](const std::function<bool()>& done, int ms) {
+            QElapsedTimer clock;
+            clock.start();
+            while (!done() && clock.elapsed() < ms) QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            return done();
+        };
+        std::function<int(QDialog*)> handle;
+        const auto previous = studio.answers.responder->exec;
+        studio.answers.responder->exec = [&](QDialog* dialog) -> int {
+            if (handle && (qobject_cast<app::ExportAsDialog*>(dialog) || qobject_cast<app::SaveForWebDialog*>(dialog) ||
+                           qobject_cast<app::ExportPreferencesDialog*>(dialog) || qobject_cast<app::LayersToFilesDialog*>(dialog))) {
+                return handle(dialog);
+            }
+            return previous(dialog);
+        };
+        // 書き出し形式…: the estimate and the preview follow the choices; JPEG at 50 % written
+        QStringList seen;
+        bool estimated = false, again = false, previewed = false;
+        int width_shown = 0;
+        handle = [&](QDialog* dialog) -> int {
+            auto* d = qobject_cast<app::ExportAsDialog*>(dialog);
+            estimated = wait_for([d] { return d->estimates() >= 1 && !d->estimating(); }, 20000);
+            seen << d->estimate->text();
+            previewed = !d->preview->pixmap().isNull();
+            const int done = d->estimates();
+            d->format->setCurrentIndex(d->format->findData(QStringLiteral("jpg")));
+            d->scale->setValue(50.0);
+            again = wait_for([d, done] { return d->estimates() > done && !d->estimating(); }, 20000);
+            seen << d->estimate->text();
+            width_shown = d->width->value();
+            return int(QDialog::Accepted);
+        };
+        save_to = qs(core::path_to_utf8(out / "half.jpg"));
+        studio.act("act_export_as")->trigger();
+        const int half_width = static_cast<int>(std::lround(render::mm_to_px(spec.width_mm.value(), 72) / 2.0));
+        QVERIFY(estimated && again && previewed);
+        QVERIFY2(seen.value(0).contains(QStringLiteral("約")) && seen.value(1).startsWith(QStringLiteral("JPG")), qPrintable(seen.join(QStringLiteral(" / "))));
+        QCOMPARE(width_shown, half_width);
+        QVERIFY2(fs::is_regular_file(out / "half.jpg"), qPrintable(w->last_notice()));
+        QCOMPARE(render::open_image(storage::read_file(out / "half.jpg")).width(), half_width);
+        // PNG としてクイック書き出し: asked where (the preferences ask); then beside the book, unasked
+        asked_where = 0;
+        save_to = qs(core::path_to_utf8(out / "quick.png"));
+        studio.act("act_quick_export_png")->trigger();
+        QCOMPARE(asked_where, 1);
+        QVERIFY2(fs::is_regular_file(out / "quick.png"), qPrintable(w->last_notice()));
+        formats::ExportPreferences prefs = app::export_preferences();
+        QCOMPARE(prefs.format, std::string("png"));
+        prefs.location = formats::QuickLocation::SameFolder;
+        app::set_export_preferences(prefs);
+        studio.act("act_quick_export_png")->trigger();
+        QCOMPARE(asked_where, 1);
+        QVERIFY2(fs::is_regular_file(studio.path.parent_path() / "book_p001.png"), qPrintable(w->last_notice()));
+        // (again: the file there kept, the next free name written — the coordinator's P3-8)
+        const std::string first = storage::read_file(studio.path.parent_path() / "book_p001.png");
+        studio.act("act_quick_export_png")->trigger();
+        QVERIFY2(fs::is_regular_file(studio.path.parent_path() / "book_p001-2.png"), qPrintable(w->last_notice()));
+        QCOMPARE(storage::read_file(studio.path.parent_path() / "book_p001.png"), first);
+        // 書き出しの環境設定…: JPG kept, and 環境設定 → 書き出し shows it
+        handle = [&](QDialog* dialog) -> int {
+            auto* d = qobject_cast<app::ExportPreferencesDialog*>(dialog);
+            d->form->format->setCurrentIndex(d->form->format->findData(QStringLiteral("jpg")));
+            d->form->quality->setValue(40);
+            d->buttons->button(QDialogButtonBox::Ok)->click();
+            return d->result();
+        };
+        studio.act("act_export_prefs")->trigger();
+        QCOMPARE(app::export_preferences().format, std::string("jpg"));
+        QCOMPARE(app::export_preferences().jpeg_quality, 40);
+        {
+            app::preferences::PreferencesDialog dialog(w);
+            QStringList pages;
+            for (int i = 0; i < dialog.tabs->count(); ++i) pages << dialog.tabs->tabText(i);
+            QVERIFY2(pages.contains(QStringLiteral("書き出し")), qPrintable(pages.join(QStringLiteral(" | "))));
+            QCOMPARE(dialog.export_form->format->currentData().toString(), QStringLiteral("jpg"));
+            dialog.export_form->srgb->setChecked(false);
+            dialog.save();
+            QVERIFY(!app::export_preferences().srgb);
+        }
+        studio.act("act_quick_export_png")->trigger();
+        QVERIFY2(fs::is_regular_file(studio.path.parent_path() / "book_p001.jpg"), qPrintable(w->last_notice()));
+        for (const char* key : {"export/quick_format", "export/quick_location", "export/jpeg_quality", "export/metadata", "export/srgb"})
+            app::settings()->remove(QString::fromLatin1(key));
+        // Web 用に保存（従来）…: a preset's settings, the panes and the estimate, the GIF written
+        seen.clear();
+        bool panes = false, four = false;
+        QString format_after, preset_after;
+        int colours_after = 0;
+        handle = [&](QDialog* dialog) -> int {
+            auto* d = qobject_cast<app::SaveForWebDialog*>(dialog);
+            panes = wait_for([d] { return d->previews() >= 1 && !d->working(); }, 20000);
+            seen << d->estimate->text();
+            const int done = d->previews();
+            d->preset->setCurrentIndex(d->preset->findData(QStringLiteral("GIF 32 Dithered")));
+            format_after = d->format->currentData().toString();
+            colours_after = d->colors->value();
+            again = wait_for([d, done] { return d->previews() > done && !d->working(); }, 20000);
+            seen << d->estimate->text();
+            d->views->setCurrentIndex(3);  // (4 アップ)
+            four = !d->pictures[3]->pixmap().isNull();
+            d->colors->setValue(20);  // (a hand's change: no preset's any more)
+            preset_after = d->preset->currentText();
+            return int(QDialog::Accepted);
+        };
+        save_to = qs(core::path_to_utf8(out / "web.gif"));
+        studio.act("act_save_for_web")->trigger();
+        QVERIFY(panes && again && four);
+        QVERIFY2(seen.value(0).startsWith(QStringLiteral("PNG-24")) && seen.value(1).startsWith(QStringLiteral("GIF")), qPrintable(seen.join(QStringLiteral(" / "))));
+        QCOMPARE(format_after, QStringLiteral("gif"));
+        QCOMPARE(colours_after, 32);
+        QCOMPARE(preset_after, QStringLiteral("（カスタム）"));
+        QVERIFY2(fs::is_regular_file(out / "web.gif"), qPrintable(w->last_notice()));
+        QVERIFY(storage::read_file(out / "web.gif").starts_with("GIF89a"));
+        // レイヤーからファイル…: a folder a page
+        handle = [&](QDialog* dialog) -> int {
+            auto* d = qobject_cast<app::LayersToFilesDialog*>(dialog);
+            d->folder->setText(qs(core::path_to_utf8(out / "layers")));
+            d->prefix->setText(QStringLiteral("p"));
+            return int(QDialog::Accepted);
+        };
+        studio.act("act_layers_to_files")->trigger();
+        QVERIFY2(fs::is_directory(out / "layers"), qPrintable(w->last_notice()));
+        int files = 0;
+        for (const auto& entry : fs::recursive_directory_iterator(out / "layers")) files += entry.is_regular_file() && core::path_to_utf8(entry.path().filename()).starts_with("p_");
+        QVERIFY2(files > 0, qPrintable(w->last_notice()));
+        // レイヤー → 書き出し形式…: 透明部分 on for a PNG; greyed and off for a JPEG (no alpha: over white); as it was again for
+        // a PNG (PC4 F-c's review P2-1)
+        w->set_target_layer(studio.ink());
+        std::vector<std::pair<bool, bool>> transparency;
+        handle = [&](QDialog* dialog) -> int {
+            auto* d = qobject_cast<app::ExportAsDialog*>(dialog);
+            for (const char* ext : {"png", "jpg", "png"}) {
+                d->format->setCurrentIndex(d->format->findData(QString::fromLatin1(ext)));
+                transparency.emplace_back(d->transparency->isEnabled(), d->transparency->isChecked());
+            }
+            return int(QDialog::Rejected);
+        };
+        studio.act("act_layer_export_as")->trigger();
+        QCOMPARE(transparency, (std::vector<std::pair<bool, bool>>{{true, true}, {false, false}, {true, true}}));
+        // the layer panel's right click on a layer: レイヤー's two (PNG としてクイック書き出し・書き出し形式…)
+        {
+            auto* list = w->findChild<QListWidget*>(QStringLiteral("layerList"));
+            QVERIFY(list != nullptr);
+            const int row = list->currentRow();  // (the layer chosen above)
+            QVERIFY(row >= 0);
+            QList<QAction*> offered;
+            QTimer::singleShot(0, [&offered] {
+                if (auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget())) {
+                    for (QAction* a : menu->actions())
+                        if (!a->isSeparator()) offered << a;  // (a separator is the menu's own: gone with it)
+                    menu->close();
+                }
+            });
+            const QRect place = list->visualItemRect(list->item(row));
+            QMetaObject::invokeMethod(list, "customContextMenuRequested", Qt::DirectConnection, Q_ARG(QPoint, place.center()));
+            // (PC4 E6 after them: 混合オプション…, レイヤースタイルをコピー・ペースト・消去)
+            QCOMPARE(offered, (QList<QAction*>{studio.act("act_layer_quick_export_png"), studio.act("act_layer_export_as"), studio.act("act_layer_style_blending"),
+                                               studio.act("act_layer_style_copy"), studio.act("act_layer_style_paste"), studio.act("act_layer_style_clear")}));
+        }
+        // レイヤー → PNG としてクイック書き出し of a layer of nothing: said, nothing written
+        save_to = qs(core::path_to_utf8(out / "nothing.png"));
+        studio.act("act_layer_quick_export_png")->trigger();
+        QVERIFY(!fs::exists(out / "nothing.png"));
+        QVERIFY2(w->last_notice().contains(QStringLiteral("書き出すものがありません")), qPrintable(w->last_notice()));
+    }
+
+    // (PC4 F-c, the coordinator's P3-8) No way out writes into the book: 書き出し形式… (a page, every page), Web 用に保存,
+    // PNG としてクイック書き出し and レイヤーからファイル… refuse its folder and what is in it, said in Japanese, nothing written.
+    // 書き出し形式…'s every page asks once — before anything is written — when files of those names are there: no keeps
+    // them, yes writes over them; a folder of none asks nothing.
+    void exportsGuardTheBookAndAskBeforeReplacing() {
+        core::PageSpec spec = core::PageSpec::a4_mono();
+        spec.dpi = core::Num(72);
+        Studio studio(core::new_episode("守り", core::Num(1), 2, spec));
+        const fs::path out = gui_test::path_of(studio.tmp.path() + QStringLiteral("/pages"));
+        fs::create_directories(out);
+        QString target = QStringLiteral("all");
+        QString folder = qs(core::path_to_utf8(out));
+        QString save_to;
+        int questions = 0;
+        bool replace = false;
+        const auto previous = studio.answers.responder->exec;
+        studio.answers.responder->exec = [&](QDialog* dialog) -> int {
+            if (auto* d = qobject_cast<app::ExportAsDialog*>(dialog)) {
+                d->target->setCurrentIndex(d->target->findData(target));
+                return int(QDialog::Accepted);
+            }
+            if (qobject_cast<app::SaveForWebDialog*>(dialog) != nullptr) return int(QDialog::Accepted);
+            if (auto* d = qobject_cast<app::LayersToFilesDialog*>(dialog)) {
+                d->folder->setText(folder);
+                return int(QDialog::Accepted);
+            }
+            return previous(dialog);
+        };
+        studio.answers.responder->existing_dir = [&](const QString&, const QString&) { return folder; };
+        studio.answers.responder->save_path = [&](const QString&, const QString&) { return save_to; };
+        studio.answers.responder->question = [&](const QString& title, const QString& text) {
+            ++questions;
+            studio.answers.asked << title + QStringLiteral(": ") + text;
+            return replace;
+        };
+        // every page into a folder of none: nothing asked
+        studio.act("act_export_as")->trigger();
+        QCOMPARE(questions, 0);
+        QVERIFY2(fs::is_regular_file(out / "p001.png") && fs::is_regular_file(out / "p002.png"), qPrintable(studio.window->last_notice()));
+        storage::write_atomic(out / "p001.png", "old");
+        // again: asked once; no — nothing written
+        studio.act("act_export_as")->trigger();
+        QCOMPARE(questions, 1);
+        QVERIFY2(studio.answers.asked.last().contains(QStringLiteral("置き換えますか")), qPrintable(studio.answers.asked.last()));
+        QCOMPARE(storage::read_file(out / "p001.png"), std::string("old"));
+        // yes — written over
+        replace = true;
+        studio.act("act_export_as")->trigger();
+        QCOMPARE(questions, 2);
+        QVERIFY(storage::read_file(out / "p001.png") != std::string("old"));
+        // the book's folder: refused by every way out, nothing written
+        const auto refused = [&](const char* what) {
+            const QString said = studio.answers.asked.isEmpty() ? QString() : studio.answers.asked.last();
+            return said.contains(QStringLiteral("原稿")) ? QString() : QString::fromLatin1(what) + QStringLiteral(": ") + said;
+        };
+        folder = qs(core::path_to_utf8(studio.path / "pages"));
+        studio.act("act_export_as")->trigger();
+        QCOMPARE(refused("every page"), QString());
+        QVERIFY(!fs::exists(studio.path / "pages"));
+        target = QStringLiteral("page");
+        save_to = qs(core::path_to_utf8(studio.path / "page.png"));
+        studio.act("act_export_as")->trigger();
+        QCOMPARE(refused("a page"), QString());
+        save_to = qs(core::path_to_utf8(studio.path));
+        studio.act("act_export_as")->trigger();
+        QVERIFY2(studio.answers.asked.last().contains(QStringLiteral("原稿そのもの")), qPrintable(studio.answers.asked.last()));
+        save_to = qs(core::path_to_utf8(studio.path / "web.png"));
+        studio.act("act_save_for_web")->trigger();
+        QCOMPARE(refused("Save for Web"), QString());
+        save_to = qs(core::path_to_utf8(studio.path / "quick.png"));
+        studio.act("act_quick_export_png")->trigger();
+        QCOMPARE(refused("quick"), QString());
+        folder = qs(core::path_to_utf8(studio.path / "layers"));
+        studio.act("act_layers_to_files")->trigger();
+        QCOMPARE(refused("layers"), QString());
+        for (const char* name : {"pages", "page.png", "web.png", "quick.png", "layers"}) QVERIFY2(!fs::exists(studio.path / name), name);
+        QVERIFY(fs::is_directory(studio.path));  // (the book as it was)
+        QVERIFY(fs::is_regular_file(studio.path / "project.json"));
     }
 
     // A book without pages: its export dialog opens, with nothing to show.

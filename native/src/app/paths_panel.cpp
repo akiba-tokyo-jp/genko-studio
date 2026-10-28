@@ -51,9 +51,9 @@ PathsPanel::PathsPanel(MainWindow* window) : QWidget(window), window_(window) {
         grid->addWidget(b, at / 2, at % 2);
         ++at;
     };
-    add_button(QStringLiteral("塗りつぶす"), QStringLiteral("パスを塗りつぶす: パスの中を描く先のレイヤーにペンの色で塗ります"), QStringLiteral("path_fill"),
+    add_button(QStringLiteral("塗りつぶす"), QStringLiteral("パスを塗りつぶす: パスの中を描く先のレイヤーに描画色で塗ります"), QStringLiteral("path_fill"),
                [this] { window_->path_fill(); });
-    add_button(QStringLiteral("境界線を描く"), QStringLiteral("ブラシでパスの境界線を描く: パスに沿って、今のペンで線を引きます"), QStringLiteral("path_stroke"),
+    add_button(QStringLiteral("境界線を描く"), QStringLiteral("ブラシでパスの境界線を描く: パスに沿って、今のブラシで線を引きます"), QStringLiteral("path_stroke"),
                [this] { window_->path_stroke(); });
     add_button(QStringLiteral("選択範囲に"), QStringLiteral("パスを選択範囲として読み込む（Shift で足す、Alt で引く）"), QStringLiteral("path_selection"),
                [this] { window_->path_to_selection(); });

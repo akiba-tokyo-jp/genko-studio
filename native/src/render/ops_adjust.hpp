@@ -55,6 +55,7 @@ struct LocalFilter {
 using LocalFilters = std::vector<std::pair<std::string_view, LocalFilter>>;
 LocalFilters adjust_local_filters();  // PC2a: render/ops_adjust.cpp (equalize)
 LocalFilters tone_local_filters();    // PC2c: render/tone_ops.cpp (shadows_highlights, replace_color, match_color)
+LocalFilters filter_local_filters();  // PC4 節 D: render/ops_filters.cpp (フィルター's kinds, by their kernels: render/fx)
 
 // filter_raster's way of the C++ build's own: a kind of its own, or a Python kind with a native (core::native_filter).
 bool handles(const core::Json& op);

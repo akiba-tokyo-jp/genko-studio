@@ -481,4 +481,190 @@ void write(const std::filesystem::path& path, const std::vector<std::pair<std::s
     storage::write_atomic(path, archive(entries));
 }
 
+// --- PC4 F-f: by name, and stored as it streams (.pcraft) -----------------------------------------------------------
+
+namespace {
+
+[[noreturn]] void pcraft_broken(const std::string& why) { throw core::Error("format", "the .pcraft is broken (zip: " + why + ")"); }
+
+std::uint64_t le(std::string_view b, std::uint64_t at, int n) {
+    if (at > b.size() || static_cast<std::uint64_t>(n) > b.size() - at) pcraft_broken("it ends too soon");
+    std::uint64_t v = 0;
+    for (int i = n - 1; i >= 0; --i) v = v << 8 | static_cast<std::uint8_t>(b[static_cast<std::size_t>(at) + static_cast<std::size_t>(i)]);
+    return v;
+}
+
+std::uint32_t crc_of_view(std::string_view data) {
+    uLong crc = crc32(0, nullptr, 0);
+    for (std::size_t at = 0; at < data.size();) {
+        const std::size_t take = std::min<std::size_t>(data.size() - at, 1u << 30);
+        crc = crc32(crc, reinterpret_cast<const Bytef*>(data.data() + at), static_cast<uInt>(take));
+        at += take;
+    }
+    return static_cast<std::uint32_t>(crc);
+}
+
+}  // namespace
+
+NamedReader::NamedReader(std::string_view bytes) : bytes_(bytes) {
+    constexpr std::uint32_t kEnd = 0x06054b50, kCentral = 0x02014b50, kLocal = 0x04034b50;
+    if (bytes.size() < 22) pcraft_broken("not a zip archive");
+    // (the end record: from the last 22 bytes back over a comment of at most 65535)
+    std::uint64_t end = bytes.size() - 22;
+    const std::uint64_t lowest = bytes.size() >= 22 + 65535 ? bytes.size() - 22 - 65535 : 0;
+    for (;; --end) {
+        if (le(bytes, end, 4) == kEnd) break;
+        if (end == lowest) pcraft_broken("no end of central directory");
+    }
+    const std::uint64_t count = le(bytes, end + 10, 2), cd_size = le(bytes, end + 12, 4), cd_at = le(bytes, end + 16, 4);
+    if (cd_at + cd_size > end) pcraft_broken("the central directory is outside the archive");
+    std::uint64_t p = cd_at;
+    for (std::uint64_t i = 0; i < count; ++i) {
+        if (p + 46 > end || le(bytes, p, 4) != kCentral) pcraft_broken("a bad central directory entry");
+        const std::uint64_t flags = le(bytes, p + 8, 2);
+        Item item;
+        item.method = static_cast<std::uint16_t>(le(bytes, p + 10, 2));
+        item.crc = static_cast<std::uint32_t>(le(bytes, p + 16, 4));
+        item.packed = le(bytes, p + 20, 4);
+        item.size = le(bytes, p + 24, 4);
+        const std::uint64_t name_len = le(bytes, p + 28, 2), extra_len = le(bytes, p + 30, 2), comment_len = le(bytes, p + 32, 2);
+        const std::uint64_t local = le(bytes, p + 42, 4);
+        if (p + 46 + name_len > end) pcraft_broken("a name outside the central directory");
+        std::string name(bytes.substr(static_cast<std::size_t>(p + 46), static_cast<std::size_t>(name_len)));
+        if ((flags & 1) != 0) throw core::Error("format", "the .pcraft is broken (zip: an encrypted file, " + name + ")");
+        if (local + 30 > bytes.size() || le(bytes, local, 4) != kLocal) pcraft_broken("a bad local header");
+        item.at = local + 30 + le(bytes, local + 26, 2) + le(bytes, local + 28, 2);
+        if (item.at > bytes.size() || item.packed > bytes.size() - item.at) pcraft_broken("a file outside the archive (" + name + ")");
+        if (find(name) == nullptr) {
+            order_.push_back(name);
+            items_.emplace(std::move(name), item);
+        }
+        p += 46 + name_len + extra_len + comment_len;
+    }
+}
+
+const NamedReader::Item* NamedReader::find(std::string_view name) const {
+    const auto it = items_.find(name);
+    return it == items_.end() ? nullptr : &it->second;
+}
+
+bool NamedReader::contains(std::string_view name) const { return find(name) != nullptr; }
+
+std::optional<std::uint64_t> NamedReader::unpacked_size(std::string_view name) const {
+    const Item* item = find(name);
+    if (item == nullptr) return std::nullopt;
+    return item->size;
+}
+
+std::vector<std::string> NamedReader::names() const { return order_; }
+
+std::string NamedReader::read(std::string_view name, std::uint64_t max) const {
+    const Item* item = find(name);
+    if (item == nullptr) pcraft_broken("no " + std::string(name));
+    if (item->size > max) {
+        throw core::Error("image_too_large", "the .pcraft holds a file too large to read (" + std::string(name) + ": " + std::to_string(item->size) +
+                                                 " bytes; at most " + std::to_string(max) + ")");
+    }
+    const std::string_view packed = bytes_.substr(static_cast<std::size_t>(item->at), static_cast<std::size_t>(item->packed));
+    std::string data;
+    if (item->method == 0) {
+        if (item->packed != item->size) pcraft_broken("a stored file of the wrong size (" + std::string(name) + ")");
+        data.assign(packed);
+    } else if (item->method == 8) {
+        data.assign(static_cast<std::size_t>(item->size), '\0');
+        z_stream z{};
+        if (inflateInit2(&z, -MAX_WBITS) != Z_OK) pcraft_broken("zlib");
+        z.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(packed.data()));
+        z.avail_in = static_cast<uInt>(packed.size());
+        z.next_out = reinterpret_cast<Bytef*>(data.data());
+        z.avail_out = static_cast<uInt>(data.size());
+        const int result = inflate(&z, Z_FINISH);
+        const bool whole = result == Z_STREAM_END && z.total_out == static_cast<uLong>(item->size);
+        inflateEnd(&z);
+        if (!whole) pcraft_broken("a deflated file is broken (" + std::string(name) + ")");
+    } else {
+        throw core::Error("format", "the .pcraft is broken (zip: compression method " + std::to_string(item->method) + " of " + std::string(name) + ")");
+    }
+    if (crc_of_view(data) != item->crc) pcraft_broken("a file fails its CRC check (" + std::string(name) + ")");
+    return data;
+}
+
+StoreWriter::StoreWriter(std::function<void(std::string_view)> sink) : sink_(std::move(sink)) {}
+
+std::uint32_t crc32_of(std::string_view data, std::uint32_t crc) {
+    while (!data.empty()) {
+        const auto n = static_cast<uInt>(std::min<std::size_t>(data.size(), 1u << 30));
+        crc = static_cast<std::uint32_t>(::crc32(crc, reinterpret_cast<const Bytef*>(data.data()), n));
+        data.remove_prefix(n);
+    }
+    return crc;
+}
+
+void StoreWriter::add(std::string_view name, std::string_view data) {
+    add_known(name, data.size(), crc_of_view(data), [data](const std::function<void(std::string_view)>& put) { put(data); });
+}
+
+void StoreWriter::add_known(std::string_view name, std::uint64_t size, std::uint32_t crc,
+                            const std::function<void(const std::function<void(std::string_view)>&)>& data) {
+    if (finished_) throw core::Error("value", "the archive is finished");
+    const std::uint64_t record = 30 + name.size() + size;
+    // (what the archive would be with this file and the central directory and end record after it)
+    if (count_ >= 0xffff || size > 0xffffffffull || offset_ + record + central_.size() + 46 + name.size() + 22 > 0xffffffffull || name.size() > 0xffff) {
+        throw core::Error("image_too_large", "the .pcraft would be larger than 4 GiB or hold more than 65535 files (a zip without zip64)");
+    }
+    std::string head;
+    put32(head, 0x04034b50);
+    put16(head, 20);      // (version needed)
+    put16(head, 0x0800);  // (UTF-8 names)
+    put16(head, 0);       // (stored)
+    put16(head, 0);       // (time)
+    put16(head, 0x21);    // (1980-01-01)
+    put32(head, crc);
+    put32(head, static_cast<std::uint32_t>(size));
+    put32(head, static_cast<std::uint32_t>(size));
+    put16(head, static_cast<std::uint32_t>(name.size()));
+    put16(head, 0);
+    head.append(name);
+    put32(central_, 0x02014b50);
+    put16(central_, 20);
+    put16(central_, 20);
+    put16(central_, 0x0800);
+    put16(central_, 0);
+    put16(central_, 0);
+    put16(central_, 0x21);
+    put32(central_, crc);
+    put32(central_, static_cast<std::uint32_t>(size));
+    put32(central_, static_cast<std::uint32_t>(size));
+    put16(central_, static_cast<std::uint32_t>(name.size()));
+    central_.append(8, '\0');  // (extra and comment lengths, disk, internal attributes)
+    put32(central_, 0);        // (external attributes)
+    put32(central_, static_cast<std::uint32_t>(offset_));
+    central_.append(name);
+    sink_(head);
+    std::uint64_t given = 0;
+    data([&](std::string_view part) {
+        given += part.size();
+        if (given > size) throw core::Error("io", "an archive's file is longer than it said");
+        sink_(part);
+    });
+    if (given != size) throw core::Error("io", "an archive's file is shorter than it said");
+    offset_ += record;
+    ++count_;
+}
+
+void StoreWriter::finish() {
+    if (finished_) return;
+    finished_ = true;
+    std::string tail = central_;
+    put32(tail, 0x06054b50);
+    put32(tail, 0);  // (disk numbers)
+    put16(tail, count_);
+    put16(tail, count_);
+    put32(tail, static_cast<std::uint32_t>(central_.size()));
+    put32(tail, static_cast<std::uint32_t>(offset_));
+    put16(tail, 0);
+    sink_(tail);
+    offset_ += tail.size();
+}
+
 }  // namespace genko::render::zip

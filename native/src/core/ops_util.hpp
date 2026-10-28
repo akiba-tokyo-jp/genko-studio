@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -64,9 +65,18 @@ std::string blend_mode(const Json& value);
 // ops._gradient_extras(g): 多色 (stops), 楕円 (ratio), 繰り返し (repeat) of a gradient, checked (core/ops_layers.cpp; also
 // gradient_fill's). OpError with Python's words.
 Json gradient_extras(const Json& g);
+// PC4 E4 (vector@1): a gradient's transparency stops [[position 0..1, opacity 0..1], …] (2 to 16) checked, rounded and
+// sorted by place (OpError), and a gradient whose colours (rgb_from, rgb_to, a stop's colour) say "foreground" or
+// "background" with the book's brush colours put in their place (its 描画色 brush_rgb, its 背景色 brush_background_rgb —
+// white when it has none): a fill layer takes them when it is made.
+Json transparency_stops(const Json& value);
+Json live_colours(const Json& gradient, const Document& doc);
 // ops._fill_spec: a fill layer's {"rgb"} or {"gradient"} checked and in its normal form (core/ops_layers.cpp; also a
-// shape part's fill, pen-shapes@1). OpError with Python's words.
+// shape part's fill, pen-shapes@1). OpError with Python's words. (patterns@1, PC4 E3: {"pattern": …} too, in
+// core::pattern_fill_spec's normal form.)
 Json fill_spec(const Json& raw);
+// patterns@1 (PC4 E3): OpError unless a fill's pattern (when it is one) is a pattern the book keeps.
+void check_pattern_kept(const Document& doc, const Json& fill);
 
 // The JSON of a list of ints.
 Json ints_json(const std::vector<std::int64_t>& values);
@@ -125,6 +135,16 @@ using PaperTakeIn = std::function<std::string(std::string_view file_bytes)>;
 // render/paper's. Without `take_in` (core's own registry) a paper given as "png" is refused with not_yet_ported; one
 // given by the "asset" of a paper the book keeps is taken either way.
 void register_define_brush(OpRegistry& registry, PaperTakeIn take_in = {});
+// brushes@1 (PC4 E1): define_brush's dab brush — its pictures given as files ("png", base64) taken in as the grey PNG the
+// book keeps (`picture`: a tip's ink when `ink`, a texture's lightness; at most `edge` pixels a side; its ref and bytes),
+// and upstream's settings ("format": "photocraft") read as Genko's (`photocraft`: the dabs, the pictures they hold, the
+// settings that are not the brush's here). render's (render/dabs/lines.hpp); without them (core's own registry) such
+// a brush is refused with not_yet_ported. OpError with the reason for what cannot be taken.
+struct DabTakeIn {
+    std::function<std::pair<std::string, Bytes>(std::string_view file_bytes, bool ink, std::uint32_t edge)> picture;
+    std::function<Json(const Json& upstream, std::map<std::string, Bytes>& pictures, std::vector<std::string>& ignored)> photocraft;
+};
+void register_define_brush(OpRegistry& registry, PaperTakeIn take_in, DabTakeIn dabs);
 // ops._mixed_pieces (下地混色・色延び): a line drawn with `mix` > 0 on a layer that has something on it, as short pieces,
 // each in the brush's colour mixed with what is on the layer under it (`stretch`: how far the colour picked up is
 // carried). render's (render/raster.hpp mixed_pieces, which sees the layer's pixels).
@@ -132,6 +152,17 @@ using MixPieces = std::function<std::vector<Stroke>(const Page& page, const Laye
 // add_stroke again, able to mix (render::ops_registry registers it with render's mixed_pieces). Without `mix` (core's own
 // registry) such a line is refused with not_yet_ported.
 void register_add_stroke(OpRegistry& registry, MixPieces mix);
+// brushes@1 (PC4 E1): what add_stroke needs of render beyond the mixing — a dab brush's line checked before it is kept
+// (`check_dabs`: its dabs counted, OpError "too_large" past their limit), and a line with a blend (not normal) painted
+// into a paint layer's pixels (`blend`: the page, the layer's id, the line as it would be kept, the blend) instead of
+// kept as a line. Without them (core's own registry) a dab brush's line is kept unchecked and a blend refused with
+// not_yet_ported.
+struct StrokeHooks {
+    MixPieces mix;
+    std::function<void(const Document& doc, const Stroke& stroke)> check_dabs;
+    std::function<void(OpContext& c, std::size_t page, const std::string& layer_id, const Stroke& stroke, const std::string& blend)> blend;
+};
+void register_add_stroke(OpRegistry& registry, StrokeHooks hooks);
 void register_layer_ops(OpRegistry& registry);
 void register_color_ops(OpRegistry& registry);
 // Register the ops of M3-A that draw nothing (move_layers, group_layers, set_paper, set_timelapse, store_area,

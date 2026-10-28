@@ -15,10 +15,13 @@
 #include "core/filters.hpp"
 #include "core/ids.hpp"
 #include "core/ink.hpp"
+#include "core/lut3d.hpp"
 #include "core/ops_util.hpp"
 #include "core/page_geometry.hpp"
+#include "core/patterns.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/raw_develop.hpp"
 #include "core/vector.hpp"
 
 namespace genko::core::smart {
@@ -27,8 +30,10 @@ namespace {
 
 constexpr std::array<std::string_view, 10> kSettingKeys{"contents", "matrix", "perspective", "warp", "interp", "stack",
                                                         "filters", "filters_on", "filter_mask", "psd"};
-constexpr std::array<std::string_view, 13> kFileKeys{"kind", "name", "asset", "suffix", "format", "size_px", "dpi",
-                                                     "depth", "mode", "profile", "link", "psd", "spec"};
+constexpr std::array<std::string_view, 14> kFileKeys{"kind", "name", "asset", "suffix", "format", "size_px", "dpi",
+                                                     "depth", "mode", "profile", "link", "psd", "spec",
+                                                     // camera-raw@1 (PC4)
+                                                     "raw"};
 constexpr std::array<std::string_view, 4> kModes{"gray", "rgb", "cmyk", "lab"};
 constexpr std::array<std::string_view, 3> kUses{"keep", "embedded", "assign"};
 constexpr std::array<std::string_view, 4> kIntents{"perceptual", "relative", "saturation", "absolute"};
@@ -229,6 +234,10 @@ void check_filter(const std::string& who, const Json& f) {
     // (a lookup table of a file is a correction layer's: a smart filter's colour lookup is one of the looks)
     if (name == "color_lookup" && (settings.contains("lut") || settings.contains("data")))
         refuse(who + ": a smart filter's colour lookup is one of the looks (look), not a table");
+    // (PC4 D4: a smart filter's 照明効果 cannot read a channel of the page — its smart object's page has none — : as the
+    // ops that add and set it refuse it)
+    if (const Json* texture = name == "render_lighting_effects" ? get(settings, "texture") : nullptr; texture != nullptr && texture->is_object())
+        refuse(who + ": a smart filter's lighting texture cannot be a channel of the page");
 }
 
 // A PSD's placed layer as a smart object keeps (PC3 A3): {"block": its key, "raw": its payload (an asset), "shown"?:
@@ -236,7 +245,15 @@ void check_filter(const std::string& who, const Json& f) {
 void check_layer_psd(const std::string& who, const Json& psd) {
     if (!psd.is_object()) refuse(who + ": a smart object's psd is {block, raw, shown}");
     for (const auto& [key, value] : psd.items()) {
-        if (key != "block" && key != "raw" && key != "shown") refuse(who + ": the psd key " + py_repr_str(key) + " is not known to this build");
+        if (key != "block" && key != "raw" && key != "shown" && key != "filters_read")
+            refuse(who + ": the psd key " + py_repr_str(key) + " is not known to this build");
+    }
+    // (PC4 D7, review P2-5: the digest of Photoshop's smart filters read from its block, 64 hexadecimal digits)
+    if (const Json* read = get(psd, "filters_read"); read != nullptr) {
+        const bool hex = read->is_string() && read->get_ref<const std::string&>().size() == 64 &&
+                         std::all_of(read->get_ref<const std::string&>().begin(), read->get_ref<const std::string&>().end(),
+                                     [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+        if (!hex) refuse(who + ": a smart object's psd filters_read is a digest (64 hexadecimal digits)");
     }
     const Json* block = get(psd, "block");
     if (block == nullptr || !block->is_string() || (*block != "SoLd" && *block != "SoLE" && *block != "PlLd"))
@@ -322,7 +339,8 @@ void check_contents(const std::string& id, const SmartContents& c) {
     }
     if (c.kind != "file") refuse(who + ": kind is page or file");
     if (!is_ref(c.asset)) refuse(who + ": its file is an asset (sha256:…)");
-    const auto format = format_of_suffix(c.suffix);
+    auto format = format_of_suffix(c.suffix);
+    if (!format) format = later_format_of_suffix(c.suffix);  // (PC4: formats@1, camera-raw@1)
     if (!format || *format != c.format) refuse(who + ": an unknown kind of file (" + c.suffix + ", " + c.format + ")");
     if (c.width_px < 1 || c.height_px < 1 || c.width_px > kSideMax || c.height_px > kSideMax) refuse(who + ": its size in pixels");
     if (!std::isfinite(c.dpi) || c.dpi <= 0 || c.dpi > 1e6) refuse(who + ": its dpi");
@@ -360,6 +378,15 @@ void check_contents(const std::string& id, const SmartContents& c) {
         const Json* at = get(*c.psd, "at");
         if (at == nullptr || !at->is_number_integer() || at->get<std::int64_t>() < 0) refuse(who + ": its psd's at is where the file's bytes go");
     }
+    // (camera-raw@1, PC4 F-e: a RAW file's development settings, core/raw_develop)
+    if (c.raw) {
+        if (c.format != "raw") refuse(who + ": only a RAW file has development settings (raw)");
+        try {
+            raw::check_raw(*c.raw);
+        } catch (const Error& error) {
+            refuse(who + ": " + error.what());
+        }
+    }
 }
 
 }  // namespace
@@ -373,15 +400,82 @@ bool filter_kind(std::string_view kind) {
 
 bool bend_filter(std::string_view kind) { return std::find(kBendFilters.begin(), kBendFilters.end(), kind) != kBendFilters.end(); }
 
-bool placed_filter(std::string_view kind) { return bend_filter(kind) || kind == "radial_blur" || kind == "zoom_blur"; }
+bool placed_filter(std::string_view kind) {
+    if (bend_filter(kind) || kind == "radial_blur" || kind == "zoom_blur") return true;
+    const FilterInfo* info = filter_info(kind);  // (PC4: a kind whose table names places)
+    return info != nullptr && !info->places.empty();
+}
 
 bool in_contents(const Json& filter) {
     const Json* space = filter.is_object() ? get(filter, "space") : nullptr;
     return space != nullptr && space->is_string() && space->get<std::string>() == kContentsSpace;
 }
 
+Json map_places(const std::vector<FilterPlace>& places, const Json& params, const PlaceMap& map) {
+    if (!params.is_object()) return params;
+    Json out = params;
+    const auto point_of = [](const Json& p) -> std::optional<std::pair<double, double>> {
+        if (!p.is_array() || p.size() < 2 || !p[0].is_number() || !p[1].is_number() || p[0].is_boolean() || p[1].is_boolean()) return std::nullopt;
+        return std::make_pair(p[0].get<double>(), p[1].get<double>());
+    };
+    const auto moved = [&](Json& p) {
+        const auto at = point_of(p);
+        if (!at) return;
+        const auto [x, y] = map.point(at->first, at->second);
+        p[0] = x;
+        p[1] = y;
+    };
+    // (where a length is scaled: the first point the object names, else the origin)
+    const auto anchor_of = [&](const Json& object) {
+        for (const FilterPlace& place : places) {
+            const Json* v = get(object, place.key);
+            if (v == nullptr) continue;
+            if (place.kind == FilterPlace::Kind::Point) {
+                if (const auto at = point_of(*v)) return *at;
+            } else if (place.kind == FilterPlace::Kind::Points && v->is_array() && !v->empty()) {
+                if (const auto at = point_of((*v)[0])) return *at;
+            }
+        }
+        return std::make_pair(0.0, 0.0);
+    };
+    const auto through = [&](Json& object, const std::vector<const FilterPlace*>& here) {
+        if (!object.is_object()) return;
+        const auto [ax, ay] = anchor_of(object);
+        const auto j = map.slope(ax, ay);
+        const double scale = std::sqrt(std::abs(j[0] * j[3] - j[1] * j[2]));
+        for (const FilterPlace* place : here) {
+            if (!object.contains(place->key)) continue;
+            Json& v = object[std::string(place->key)];
+            switch (place->kind) {
+                case FilterPlace::Kind::Point: moved(v); break;
+                case FilterPlace::Kind::Points:
+                    if (v.is_array())
+                        for (Json& p : v) moved(p);
+                    break;
+                case FilterPlace::Kind::Length:
+                    if (v.is_number() && !v.is_boolean()) v = v.get<double>() * scale;
+                    break;
+                case FilterPlace::Kind::Centre: break;  // (shares of a box: render/smart_filters)
+            }
+        }
+    };
+    std::vector<const FilterPlace*> own;
+    std::map<std::string, std::vector<const FilterPlace*>, std::less<>> lists;
+    for (const FilterPlace& place : places) {
+        if (place.within.empty()) own.push_back(&place);
+        else lists[std::string(place.within)].push_back(&place);
+    }
+    through(out, own);
+    for (const auto& [key, here] : lists) {
+        if (!out.contains(key) || !out[key].is_array()) continue;
+        for (Json& item : out[key]) through(item, here);
+    }
+    return out;
+}
+
 Json map_filter_places(std::string_view kind, const Json& params, const PlaceMap& map) {
     if (!params.is_object()) return params;
+    if (const FilterInfo* info = filter_info(kind); info != nullptr && !info->places.empty()) return map_places(info->places, params, map);
     Json out = params;
     // (how much the map scales a length near a place, and whether it mirrors there)
     const auto scale_at = [&](double x, double y) {
@@ -586,6 +680,22 @@ bool filters_drawn(const Layer& layer) {
     });
 }
 
+std::string filters_digest(const Layer& layer) {
+    Json stack{{"filters", Json::array()}, {"filters_on", true}};
+    if (layer.smart && layer.smart->is_object()) {
+        if (const Json* filters = get(*layer.smart, "filters"); filters != nullptr) stack["filters"] = *filters;
+        if (const Json* on = get(*layer.smart, "filters_on"); on != nullptr) stack["filters_on"] = *on;
+    }
+    return bytes_ref(stack.dump()).substr(7);  // (its sha256, without "sha256:")
+}
+
+bool photoshop_filters_kept(const Layer& layer) {
+    if (!layer.smart || !layer.smart->is_object()) return false;
+    const Json* psd = get(*layer.smart, "psd");
+    const Json* read = psd != nullptr && psd->is_object() ? get(*psd, "filters_read") : nullptr;
+    return read != nullptr && read->is_string() && read->get<std::string>() == filters_digest(layer);
+}
+
 std::optional<std::string> suffix_of_name(std::string_view name) {
     const auto dot = name.rfind('.');
     if (dot == std::string_view::npos) return std::nullopt;
@@ -601,6 +711,15 @@ std::optional<std::string> suffix_of_name(std::string_view name) {
 
 std::optional<std::string> format_of_suffix(std::string_view suffix) {
     for (const FileFormat& f : kFileFormats) {
+        if (f.suffix == suffix) return std::string(f.format);
+    }
+    // (PC4 F-a: formats@1's, read by the codecs; F-e: camera-raw@1's, read by LibRaw)
+    if (auto later = later_format_of_suffix(suffix)) return later;
+    return std::nullopt;
+}
+
+std::optional<std::string> later_format_of_suffix(std::string_view suffix) {
+    for (const FileFormat& f : kLaterFileFormats) {
         if (f.suffix == suffix) return std::string(f.format);
     }
     return std::nullopt;
@@ -729,6 +848,7 @@ Json file_json(const SmartContents& c) {
     out["profile"] = c.profile;
     if (c.link) out["link"] = *c.link;
     if (c.psd) out["psd"] = *c.psd;
+    if (c.raw) out["raw"] = *c.raw;  // (camera-raw@1, PC4)
     return out;
 }
 
@@ -769,6 +889,7 @@ SmartContents contents_from_json(const Json& value) {
     if (const Json* profile = get(value, "profile"); profile != nullptr) c.profile = *profile;
     if (const Json* link = get(value, "link"); link != nullptr && !link->is_null()) c.link = *link;
     if (const Json* psd = get(value, "psd"); psd != nullptr && !psd->is_null()) c.psd = *psd;
+    if (const Json* raw = get(value, "raw"); raw != nullptr && !raw->is_null()) c.raw = *raw;  // (camera-raw@1, PC4)
     return c;
 }
 
@@ -875,6 +996,23 @@ std::vector<WrittenPage> written_pages(const Document& doc) {
         if (it != doc.smart_contents.end() && it->second && it->second->page) out.push_back(WrittenPage{it->second->page.get(), id});
     }
     return out;
+}
+
+bool uses_formats(const Document& doc) {
+    for (const std::string& id : used_contents(doc)) {
+        const auto it = doc.smart_contents.find(id);
+        if (it == doc.smart_contents.end() || !it->second || it->second->kind != "file") continue;
+        if (it->second->format != "raw" && later_format_of_suffix(it->second->suffix)) return true;
+    }
+    return false;
+}
+
+bool uses_camera_raw(const Document& doc) {
+    for (const std::string& id : used_contents(doc)) {
+        const auto it = doc.smart_contents.find(id);
+        if (it != doc.smart_contents.end() && it->second && it->second->kind == "file" && (it->second->format == "raw" || it->second->raw)) return true;
+    }
+    return false;
 }
 
 bool uses_smart(const Document& doc) {
@@ -1040,9 +1178,53 @@ bool same_panels(const std::vector<Frame>& a, const std::vector<Frame>& b) { ret
 
 void bring_contents(Document& doc, const Document& from, Page& page) {
     std::map<std::string, std::string> renamed;  // (their id → its id here)
+    // (filters@1, PC4 節 D: the files its smart filters hold — a displacement map — that the book it comes from holds in
+    // memory, as its contents' files)
+    const auto bring_filter_files = [&](const Layer& layer) {
+        const Json* filters = layer.smart && layer.smart->is_object() ? get(*layer.smart, "filters") : nullptr;
+        if (filters == nullptr || !filters->is_array()) return;
+        for (const Json& f : *filters) {
+            const Json* kind = f.is_object() ? get(f, "kind") : nullptr;
+            const FilterInfo* info = kind != nullptr && kind->is_string() ? filter_info(kind->get_ref<const std::string&>()) : nullptr;
+            const Json* params = info != nullptr ? get(f, "params") : nullptr;
+            if (params == nullptr || !params->is_object()) continue;
+            for (const std::string_view key : info->files) {
+                const Json* ref = get(*params, key);
+                if (ref == nullptr || !ref->is_string()) continue;
+                if (const auto bytes = from.filter_files.find(ref->get_ref<const std::string&>()); bytes != from.filter_files.end())
+                    doc.filter_files.emplace(bytes->first, bytes->second);
+            }
+        }
+    };
     std::function<void(Page&)> bring = [&](Page& on) {
+        bring_patterns(doc, from, on);  // (patterns@1, PC4 E3: the patterns its fills name, under ids of this book)
+        // (psd-keep@1, PC4 F-d: the PSD's blocks it and its layers keep that the book it comes from holds in memory)
+        const auto bring_native = [&](const std::string& ref) {
+            if (const auto bytes = from.native_files.find(ref); bytes != from.native_files.end()) doc.native_files.emplace(ref, bytes->second);
+        };
+        if (on.native_psd) {
+            for (const PsdResource& r : on.native_psd->resources) bring_native(r.ref);
+            for (const PsdGlobal& g : on.native_psd->globals) bring_native(g.ref);
+        }
+        for (const Layer& layer : on.layers) {
+            if (!layer.native_psd) continue;
+            for (const auto& [key, ref] : layer.native_psd->blocks) bring_native(ref);
+            bring_native(layer.native_psd->ranges);
+        }
+        // (adjustments@1, PC4 F-f review P1-3: the lookup tables its color_lookup corrections name)
+        for (const std::string& ref : lut3d::refs_of(on)) {
+            if (const auto table = from.luts.find(ref); table != from.luts.end()) doc.luts.emplace(ref, table->second);
+        }
+        // (and its smart objects' filter masks, files of the book they come from: PC4 F-f review P1-3)
+        for (const Layer& layer : on.layers) {
+            const Json* mask = layer.smart && layer.smart->is_object() ? get(*layer.smart, "filter_mask") : nullptr;
+            const Json* ref = mask != nullptr && mask->is_object() ? get(*mask, "asset") : nullptr;
+            if (ref == nullptr || !ref->is_string()) continue;
+            if (const auto file = from.smart_files.find(ref->get_ref<const std::string&>()); file != from.smart_files.end()) doc.smart_files.emplace(file->first, file->second);
+        }
         for (Layer& layer : on.layers) {
             if (!is_smart(layer)) continue;
+            bring_filter_files(layer);
             const auto id = contents_id(layer);
             if (!id) continue;
             auto known = renamed.find(*id);

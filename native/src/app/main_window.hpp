@@ -15,6 +15,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <stop_token>
 #include <optional>
 #include <set>
 #include <string>
@@ -24,6 +25,7 @@
 #include "app/canvas.hpp"
 #include "app/pen.hpp"
 #include "app/session.hpp"
+#include "render/codecs/format.hpp"
 #include "render/image.hpp"
 #include "render/proof.hpp"
 
@@ -32,6 +34,7 @@ class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QSpinBox;
+class QSlider;
 class QFormLayout;
 class QTabBar;
 class QToolBar;
@@ -48,17 +51,33 @@ class QVBoxLayout;
 // Every change goes through the book's Session (and so the CommandBus and the Saver): nothing here writes the book or
 // its files. A book with changes not saved (or a save that failed, or one running) is never closed without asking.
 
+namespace genko::formats {
+struct Opened;
+}
+
+namespace genko::formats {
+struct WriteGuard;
+}  // namespace genko::formats
+
 namespace genko::app {
 
 class BrushPanel;
 class ChannelPanel;
 class CloneSourcePanel;
 class PathsPanel;
+class PatternsPanel;
+class BrushesPanel;
+class BrushSettingsPanel;
+class ToolPresetsPanel;
+class StylesPanel;
 class ShapesPanel;
 class HistogramPanel;
 class InfoPanel;
 class CheckPanel;
 class ColourPanel;
+class GradientLibrary;
+class GradientsPanel;
+struct FilterItem;  // (PC4 節 D: app/filter_menu.hpp)
 class HistoryPanel;
 class GuidePanel;
 class SubView;
@@ -114,6 +133,10 @@ struct Document {
     // contents this tab shows (its page; every op it sends goes there), and the name of the layer it was opened from.
     std::optional<std::string> contents;
     QString contents_title;
+    // PC4 F-b: a book in memory made as a picture is (an opened file — `source` its file —, a new image, a page
+    // duplicated): its tab named by its title alone; one opened from a file and not changed since is closed without asking.
+    bool picture = false;
+    std::optional<std::filesystem::path> source;
     QString title() const;
 };
 
@@ -208,6 +231,42 @@ public:
     CloneSourcePanel* clone_source_panel() const { return clone_source_panel_; }
     // ヒストリーブラシのソース: 履歴's row painted back from (none: （はじめ）, the first row).
     std::optional<int> history_brush_row;
+    // 画素を変える筆 (PC4 E5, paint_tools.cpp): ぼかしツール・シャープツール・指先ツール・覆い焼きツール・焼き込みツール・スポンジ
+    // ツール・混合ブラシツール・背景消しゴムツール・色の置き換えツール — the brush (直径 mm; 硬さ・間隔 %) and each tool's own
+    // settings (Photoshop's options bar), and the Mixer Brush's paint (the reservoir the last stroke left: the window's, as
+    // Photoshop keeps it; the op takes and gives it back).
+    struct PixelToolSettings {
+        double size_mm = 5;
+        double hardness = 0;
+        double spacing = 25;
+        double strength = 50;          // (ぼかし・シャープ・指先: 強さ %)
+        bool protect_detail = true;    // (シャープ: ディテールを保持)
+        bool finger_painting = false;  // (指先: フィンガーペイント)
+        std::string range = "midtones";  // (覆い焼き・焼き込み: 範囲 shadows | midtones | highlights)
+        double exposure = 50;           // (覆い焼き・焼き込み: 露光量 %)
+        bool protect_tones = true;      // (覆い焼き・焼き込み: トーンを保護)
+        std::string sponge_mode = "desaturate";  // (スポンジ: モード desaturate | saturate)
+        double sponge_flow = 50;        // (スポンジ: 流量 %)
+        bool vibrance = true;           // (スポンジ: 自然な彩度)
+        double wet = 50, load = 50, mix = 50, mixer_flow = 100;  // (混合ブラシ: ウェット・補充量・ミックス・流量 %)
+        bool load_after = true, clean_after = true, sample_all = false;  // (ストローク後にブラシを補充・クリーン、全レイヤーを対象)
+        std::string sampling = "continuous";  // (背景消しゴム・色の置き換え: サンプル continuous | once | swatch)
+        std::string limits = "contiguous";    // (制限 discontiguous | contiguous | find_edges)
+        double eraser_tolerance = 50;   // (背景消しゴム: 許容値 %)
+        bool protect_foreground = false;  // (背景消しゴム: 描画色を保護)
+        std::string replace_mode = "color";  // (色の置き換え: モード hue | saturation | color | luminosity)
+        double replace_tolerance = 30;  // (色の置き換え: 許容値 %)
+        bool antialias = true;          // (色の置き換え: アンチエイリアス)
+        // (PC4 E2, E5's promise) ブラシ: a dab brush of the library (its key: a built-in's or one's own) the tools lay their
+        // dabs with — its tip, shape, scatter… — through the op's "brush" (put into the book first) and "seed"; "" round
+        std::string brush;
+    };
+    PixelToolSettings pixel_tool_settings;
+    // The Mixer Brush's paint after the last stroke (the op's "reservoir"; null: clean and unloaded).
+    core::Json mixer_reservoir;
+    // 現在のブラシに補充 (the 描画色, full) and ブラシをクリーン (no paint) — the Mixer Brush's buttons.
+    void mixer_load();
+    void mixer_clean();
     // コンテンツに応じた塗りつぶし… (編集; retouch_tools.cpp).
     void content_aware_fill_dialog();
     // PC3 B3 (main_window_smart_select.cpp): クイック選択ツール's エッジを強調, and whether the smart selection (クイック選択・
@@ -247,6 +306,15 @@ public:
     // page as it is.
     void show_preview(std::optional<core::Document> doc);
     LayerPanel* layer_panel() const { return layer_panel_; }
+    // PC4 節 D: the フィルター menu (the layer panel's かける… opens it: the user's decision 1).
+    QMenu* filter_menu() const { return filter_menu_; }
+    // PC4 節 D (app/filter_menu.cpp; the layer panel's スマートフィルターを編集… too): a filter's ops sent — on a thread with
+    // its progress and 中止 when `heavy` (render::fx::work), else at once —; the window's preview of them — on the page at
+    // once, or, `heavy`, worked out on a thread on a copy of the book at the screen's resolution (render::fx::preview_book),
+    // the one before stopped; none: taken away —; and whether such a preview is being worked out now.
+    bool send_filter(const core::Json& ops, const QString& name, bool heavy);
+    void preview_filter(const std::optional<core::Json>& ops, bool heavy);
+    bool filter_previewing() const;
     // channels@1 (main_window_channels.cpp): the channel panel, and what the pixel tools work on and what is shown of a
     // page's channels — the window's, never saved; each page its own —: the target ("" the composite, a colour plate's
     // name, an alpha or spot channel's id; the pixel ops sent are given it as their "channel"), the colour plates
@@ -416,6 +484,15 @@ public:
     QTabBar* doc_tabs() const { return doc_tabs_; }
     // (M6) The tool palette, the command bar under the menus and the quick-access panel (workspace.cpp).
     QToolBar* tool_palette() const { return palette_; }
+    // PC4 E-0 (paint_panels.cpp): the drawing tools' groups — Photoshop's ブラシ, 消しゴム, 塗り, ぼかし, 覆い焼き, スポイト —,
+    // each its tools' ids (the first the palette's; a tool not made yet, its group's, is left out); a tool's group of the
+    // tools made (none: it is in none).
+    struct ToolGroup {
+        const char* name;
+        std::vector<const char*> tools;
+    };
+    static const std::vector<ToolGroup>& paint_tool_groups();
+    std::vector<QAction*> tool_group_of(const QAction* tool) const;
     QToolBar* command_bar() const { return commands_; }
     QuickAccess* quick_access() const { return quick_access_; }
     QDockWidget* quick_dock() const { return quick_dock_; }
@@ -544,6 +621,8 @@ public:
     bool place_embedded(std::optional<QString> path = std::nullopt);
     // (`linked`, PC3 A1: リンクを配置… — the file's place kept with its copy)
     bool place_smart(const QString& file, bool as_placed, bool linked = false);
+    bool place_pcraft(const QString& file);  // (PC4 F-f: 埋め込みを配置… of a .pcraft)
+    void open_pcraft_folder(const std::filesystem::path& path);  // (PC4 F-f: 開く… of a .pcraft folder)
     // レイヤー → スマートオブジェクト・スマートフィルター・ラスタライズ, レイヤーの内容オプション…
     void smart_convert();
     void smart_copy();
@@ -610,6 +689,10 @@ public:
 
 protected:
     void closeEvent(QCloseEvent* event) override;
+    // PC4 F-b (ウィンドウへのドロップ, 節 F 5.3): a .genko folder or a file dropped opens (open_path); a file dropped on the
+    // page is placed embedded (埋め込みを配置…, PC3).
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
     void changeEvent(QEvent* event) override;  // (smart-objects@1: the window come back to looks at its linked files)
     void showEvent(QShowEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
@@ -636,6 +719,78 @@ private:
     void build_path_actions();
     void build_path_menus(QMenu* file, QMenu* view, QMenu* tools, QMenu* layers);
     void build_path_dock();
+    // PC4 F-0 (節 F 5.1・5.2, app/main_window_file.cpp): ファイル in Photoshop's order and names — 新規…・開く…・指定形式で開く…・
+    // 最近使用したファイルを開く ▸ / AI と作る… / 閉じる・すべてを閉じる・その他を閉じる / 保存・別名で保存…・コピーを保存…・復帰 /
+    // 書き出し ▸ / 配置 / 読み込み / ファイル情報… / プリント… / タイムラプス / スクリプト ▸・オートアクション ▸・環境設定… / 終了 —,
+    // and the frames of 節 F's new commands (F-b, F-c: each says it is not in this build yet until its group connects it).
+    void build_file_actions();
+    void build_file_menu(QMenu* file);
+    QMenu* export_menu_ = nullptr;  // ファイル → 書き出し
+
+public:
+    // PC4 F-b (app/main_window_file.cpp; SPEC.md FILE-01, the user's decision 4): ファイル's entrances.
+    // A book's folder (open_project), or a file opened as a book of one page in memory (formats::open_file, read on a
+    // worker; `as`: 指定形式で開く…'s format) — the file never written —, put first in 最近使用したファイルを開く. A file
+    // gone (a recent one) is said and taken out of the list.
+    void open_path(const std::filesystem::path& path, std::optional<render::codecs::Format> as = std::nullopt);
+    // 開く… / 指定形式で開く…: the open window (app/open_dialog.hpp; several chosen: each in a tab of its own).
+    void open_dialog(bool as);
+    // A book in memory (an opened file, a new image, a page duplicated) in a tab of its own, its notes said; カラー設定's
+    // policies applied to it as to a book opened.
+    void add_picture_book(core::Document doc, const std::vector<std::string>& notes, std::optional<std::filesystem::path> source = std::nullopt);
+    // PC4 F-e (app/main_window_raw.cpp): a camera RAW file (its suffix a RAW's, or its first bytes' marks) opened through
+    // Camera Raw's window (`window`; without it — Shift held — as 環境設定 → Camera Raw and 完了 set it), and a RAW smart
+    // object's コンテンツを編集 in the same window (set_camera_raw). False when nothing was changed.
+    static bool is_raw_path(const std::filesystem::path& path);
+    void open_raw_file(const std::filesystem::path& path, bool window = true);
+    bool edit_raw_contents(const std::string& contents_id, const QString& title = {});
+    // カラー設定's "ask when a picture has no profile", for a file opened with none (formats::Opened::profile_missing): the
+    // working space's profile kept, or none chosen — as part of opening it.
+    void ask_missing_profile(formats::Opened& opened);
+    // すべてを閉じる (file.closeAll): every book of this window closed (each asked first as 閉じる asks), the window left
+    // with an untitled book; その他を閉じる (file.closeOthers): the others, the one in front kept. False: one was kept.
+    bool close_all();
+    bool close_others();
+    // 復帰 (file.revert, F12): the book as it was when 保存 was last chosen, else as it was opened (Session::revert: one
+    // change, undone by 取り消し).
+    void revert();
+    // コピーを保存… (file.saveACopy): the book unchanged, a copy written — a .genko (Session::save_copy) or the page in
+    // front as PSD, TIFF, PNG or JPEG (formats::write_copy; the losses asked about first).
+    void save_copy();
+    // A copy of the page in front at `path` (its format by its extension); false when not written.
+    bool save_copy_to(const QString& path);
+    // ファイル情報… (file.fileInfo): app/file_info_dialog.hpp, set_file_info.
+    void file_info_dialog();
+    // 画像 → 複製… (image.duplicate): the page in front as a book of its own in memory (its merged picture alone when
+    // asked).
+    void duplicate_dialog();
+    // The place of the page shown in `doc` (the session's book, or コンテンツを編集's view of its contents), by its id; none
+    // — said — when it is not read yet or not there (never another page in its place).
+    std::optional<std::size_t> shown_page_at(const std::shared_ptr<const core::Document>& doc, const core::Page* page);
+    // PC4 F-c (app/main_window_export.cpp; SPEC.md FILE-01): ファイル → 書き出し ▸ and レイヤー's.
+    // PNG としてクイック書き出し (file.export.quickExportAsPng; layer.quickExportAsPng with `layer`): the page in front — or
+    // that layer alone, cut to what it holds — in the format 書き出しの環境設定 names, written where they name for a saved
+    // book, else where asked; false when nothing was written.
+    bool quick_export(const std::optional<std::string>& layer = std::nullopt);
+    // 書き出し形式… (file.export.exportAs; layer.exportAs with `layer`): app/export_as_dialog.hpp, then where to write.
+    void export_as(const std::optional<std::string>& layer = std::nullopt);
+    // 書き出しの環境設定… (file.export.exportPreferences: the same values as 環境設定 → 書き出し).
+    void export_preferences_dialog();
+    // Web 用に保存（従来）… (file.export.saveForWebLegacy): app/save_for_web_dialog.hpp, then where to write.
+    void save_for_web();
+    // レイヤーからファイル… (file.export.layersToFiles): formats::export_layers with its choices.
+    void layers_to_files();
+
+private:
+    void build_export_actions();
+    // (PC4 F-c) The book to write from and the page in front's place in it (none: said).
+    std::optional<std::size_t> export_page(std::shared_ptr<const core::Document>& doc);
+    // (PC4 F-c; the coordinator's P3-8) True — said — when `path` is a place no export writes to (formats::check_target:
+    // the book or its folder, a linked file, a picture a book here was opened from).
+    bool writes_over_a_source(const std::filesystem::path& path);
+    // Those places: this book's, and every open book's folder and source.
+    formats::WriteGuard export_guard() const;
+
     void path_drawn(const core::Json& subpath);
     void path_edited(const core::Json& path);
     // pen-shapes@1 (PC3 C-b, app/main_window_shapes.cpp): the shape tools and the shape parts' commands, their menus
@@ -684,7 +839,8 @@ private:
     void redo();
     void save();
     void save_as();
-    bool save_as_and_wait(const QString& verb, std::shared_ptr<Session> origin = {});
+    // (`chosen`: the place asked for already — 別名で保存…'s, PC4 F-b —, else asked here)
+    bool save_as_and_wait(const QString& verb, std::shared_ptr<Session> origin = {}, const QString& chosen = {});
     void new_book();
     void open_book();
     void split(const QString& axis);
@@ -732,6 +888,19 @@ private:
     void forget_brush();
     void import_brushes_dialog();
     core::Json eraser_fields(const core::Layer& layer) const;
+    // brushes@1 (PC4 E1): the define_brush that puts a brush of one's own (or the 鉛筆ツール's) into the book before a
+    // line or an eraser uses it (none: the book has it, or it is a built-in one); false when it cannot be found (said).
+    bool own_brush_op(const std::string& kind, core::Json& ops, bool drawing = false);  // (PC4 E2: `drawing` a line: its words say so)
+    // The 鉛筆ツール's brush (render/dabs/lines.hpp pencil_brush): its key for this book — kPencilKey, or the first of
+    // kPencilKey_2 … that neither the book nor this process holds as a brush of other settings —, made known to this
+    // process under it.
+    std::string pencil_key() const;
+    // (PC4 E1, review P2-6) Whether a line with a blend may be painted into this paint layer: when it has lines or pictures
+    // of its own (they become its 200-dpi pixels, no longer lines), asked once a layer while the window is open (描く or
+    // やめる); a layer of pixels only, always.
+    // (PC4 E4: `how` the tool that paints into the pixels — the グラデーションツール, the 塗りつぶしツール with a blend —: none, the
+    // brush's blend)
+    bool blend_bakes_ok(const core::Page& page, const core::Layer& layer, const QString& how = {});
     // the drawing tools and the colour (main_window_paint.cpp)
     void build_paint_actions();
     void build_paint_pages(ToolSettings* ts);
@@ -746,6 +915,30 @@ private:
     void lasso_filled(const QVector<QPointF>& points);
     void shape_drawn(const core::Json& shape);
     void gradient(const QPointF& from, const QPointF& to);
+    // PC4 E4 (main_window_paint.cpp): the 塗りつぶしツール's page (基準 線で囲まれた所・色の近さ, 塗りつぶし, モード, 不透明度,
+    // 許容値, アンチエイリアス, 隣接, 全レイヤー, and the lines' fields of the brush panel), the グラデーションツール's (グラデーション
+    // and 編集…, 形, モード, 不透明度, 逆方向, ディザ, 透明部分) and the スポイトツール's (サンプル範囲, サンプル); the グラデーション
+    // panel; the colour a pick takes (an average, the layers below, a precise page's floats).
+    void build_fill_page(ToolSettings* ts);
+    void build_gradient_page(ToolSettings* ts);
+    void build_picker_page(ToolSettings* ts);
+    void fill_gradient_presets();
+    void refresh_gradient_strips();  // (PC4 E4 review P3-5: the strips of the 描画色 and 背景色 drawn again)
+    void build_gradients_dock();
+    // A preset clicked in the panel: the current gradient, and a gradient fill layer chosen takes its colours.
+    void gradient_chosen(const core::Json& item);
+    // 新規グラデーション塗りつぶしレイヤー (gradient.presets.apply).
+    void gradient_layer(const core::Json& item);
+    // The colour a pick at `mm` takes (straight sRGB, a precise page's past 1 too): an average of size × size pixels of
+    // the page as it shows, the target layer or the layers up to it; none where nothing shows.
+    std::optional<std::array<double, 3>> sampled_colour(const core::Page& page, const QPointF& mm, const QString& source, int size) const;
+    // The fill's colour and opacity (the 塗りつぶしツール's page): {"rgb", "opacity"?, "blend"?}.
+    core::Json fill_tool_fields(bool blend) const;
+    // (PC4 E4 after E3's merge) the 塗りつぶしツール's パターン: its list as the book and the library hold them now, and the
+    // chosen pattern's fill for the op (none when the 塗りつぶし is the 描画色, or nothing is chosen: said) with the
+    // add_pattern op to send first in `before`
+    void refresh_fill_pattern();
+    std::optional<core::Json> fill_pattern_ops(core::Json& before);
     void fill_gaps();
     void nudge_brush(int step);
     bool paint_stroke(const StrokeInput& stroke, const core::Page& page, const core::Layer& layer);
@@ -904,6 +1097,16 @@ private:
     // レイヤーをロック…'s window, the move tool's box (the union of the moved layers' snap boxes).
     void build_align_actions();
     void build_align_menus(QMenu* layers, QMenu* view);
+    // PC4 節 D (SPEC COLOR-08, app/filter_menu.cpp): the フィルター menu (after レイヤー; Photoshop's names, the user's decision
+    // 1) and its commands — each kind's window (app/filter_forms) or a group's own, the presets without one, 漫画's five
+    // (Genko's own filters, their old windows), the plugins' filters —, 前回のフィルター (Ctrl+F: the last one sent again on
+    // the layer drawn on now), the result shown while the settings change and a heavy filter worked on a thread with its
+    // progress and 中止 (design 4.4, 5.1, 5.3).
+    void build_filter_actions();
+    void build_filter_menus(QMenu* filter);
+    void filter_command(const FilterItem& item);
+    void repeat_filter();
+    void follow_filter_menu();
     void build_move_page(ToolSettings* ts);
     void snap_toggles();
     void lock_layers_dialog();
@@ -916,6 +1119,86 @@ private:
     SnapBoxes snap_boxes_;
     std::uint64_t snap_ticket_ = 0;
     void build_tool_groups(QMenu* tools);
+    // PC4 E-0 (paint_panels.cpp): the drawing tools' groups in the menu and on the palette (a long press or a right
+    // click), and the frames of the drawing tools' panels (ブラシ設定 F5, ブラシ, パターン, スタイル, ツールプリセット) and
+    // スウォッチ
+    void build_paint_tool_groups(QMenu* tools);
+    void attach_tool_groups(QToolBar* palette);
+    QDockWidget* paint_dock(const QString& title, const char* name, const QString& about);
+    void build_paint_docks();
+public:
+    // PC4 E3 (main_window_patterns.cpp, patterns_panel.cpp; SPEC.md COLOR-09「パターン」): the chosen pattern
+    // (Photoshop's 今のパターン: "library:<name>" — the window's state in the settings — or "book:<id>" — the open book's,
+    // kept with the window while that book is open, never in the settings: another book's same id is another picture),
+    // パターンを定義…,
+    // a new pattern fill layer and its settings, パターンプレビュー, and the ops that put a library pattern into the book.
+    QString current_pattern() const;
+    void set_current_pattern(const QString& choice);
+    // A pattern fill of the chosen pattern for an op: its spec ({"id", "scale", "angle", "phase_mm", "link"}) and, for a
+    // library pattern the book does not keep yet, the add_pattern op to send first (`before`); none when the choice names
+    // nothing there.
+    std::optional<core::Json> pattern_fill_of(const QString& choice, double scale, double angle, bool link, core::Json& before);
+    void define_pattern(std::optional<QString> name = std::nullopt);
+    void new_pattern_layer(const QString& choice = {});
+    PatternsPanel* patterns_panel() const { return patterns_panel_; }
+    QDockWidget* patterns_dock() const { return patterns_dock_; }
+    // PC4 E2 (main_window_brush_presets.cpp; SPEC.md COLOR-09「ブラシのプリセット」「ツールプリセット」「プリセットマネージャー」):
+    // the brush in hand chosen from the library (render/brush_presets: a built-in dab brush made known under the key this
+    // book takes for it — book_key_for —, one of the library's registered), the panels' lists and the brush list followed
+    // after the library changed (`select`: that brush chosen; `forgotten`: one taken out of it), 編集 → ブラシを定義… (the
+    // selection's paint, the layer drawn on alone when it is a paint layer), a tool preset taken (its tool, brush, fields
+    // and 描画色) and made (the tool page's fields by their objectName), and 編集 → プリセット ▸.
+    void choose_brush(const std::string& key, bool keep_tool = false);
+    // (`forgotten`: brushes taken out of the library — those no open book holds are forgotten by this process, with any
+    // other of one's own the library has no longer —; `changed`: brushes whose settings changed, their lines drawn again)
+    void brushes_changed(std::optional<std::string> select, const std::vector<std::string>& forgotten = {}, const std::vector<std::string>& changed = {});
+    // Whether a book open in this window (any tab) holds a brush of this key.
+    bool any_book_holds_brush(const std::string& key) const;
+    // How many times brushes_changed made the lists again (the tests: once for a change of many brushes).
+    int brushes_changed_count() const { return brushes_changed_; }
+    // (review P2-4) A dab brush that takes colours between the 描画色 and the 背景色: its line's fields given the 背景色.
+    void add_background(core::Json& fields) const;
+    std::string book_key_for(const std::string& key) const;
+    void define_brush_preset(std::optional<QString> name = std::nullopt);
+    BrushesPanel* brushes_panel() const { return brushes_panel_; }
+    BrushSettingsPanel* brush_settings_panel();
+    ToolPresetsPanel* tool_presets_panel() const { return tool_presets_panel_; }
+    QDockWidget* brush_settings_dock() const { return brush_settings_dock_; }
+    QDockWidget* brushes_dock() const { return brushes_dock_; }
+    QDockWidget* tool_presets_dock() const { return tool_presets_dock_; }
+    void edit_brush_settings();
+    void make_brush_settings();
+    QString tool_in_hand() const;
+    QString tool_title(const QString& tool) const;
+    core::Json tool_fields(const QString& tool) const;
+    void apply_tool_fields(const QString& tool, const core::Json& fields);
+    core::Json tool_preset_options(const QString& tool, bool include_colour) const;
+    void use_tool_preset(const core::Json& item);
+    void presets_changed();
+    void preset_manager();
+    void export_import_presets_dialog();
+    void migrate_presets_dialog();
+    core::Json export_presets(const QString& path, const std::vector<std::string>& kinds, bool builtins);
+    core::Json import_presets(const QString& path, const std::vector<std::string>& kinds);
+    core::Json migrate_presets(const QString& from);
+private:
+    void build_brush_preset_actions();
+    void build_brush_preset_menus(QMenu* edit);
+    void build_brush_preset_docks(QDockWidget* settings_dock, QDockWidget* brushes_dock, QDockWidget* tools_dock);
+    BrushesPanel* brushes_panel_ = nullptr;
+    BrushSettingsPanel* brush_settings_panel_ = nullptr;
+    ToolPresetsPanel* tool_presets_panel_ = nullptr;
+    QDockWidget* brush_settings_dock_ = nullptr;
+    QDockWidget* brushes_dock_ = nullptr;
+    QDockWidget* tool_presets_dock_ = nullptr;
+    std::string brush_shown_;  // (the brush the ブラシ設定 panel last showed: it follows a change of brush, not of size)
+    int brushes_changed_ = 0;  // (how many times the brush lists were made again: the tests, review P2-3)
+    void build_pattern_actions();
+    void build_pattern_menus(QMenu* edit, QMenu* view);
+    PatternsPanel* patterns_panel_ = nullptr;
+    QDockWidget* patterns_dock_ = nullptr;
+    QString book_pattern_;                    // (a "book:<id>" chosen, and the session of the book it is of)
+    const void* book_pattern_of_ = nullptr;
     void build_clipboard_menu(QMenu* edit);
     static const std::vector<const char*>& selection_tools();
     static const std::vector<const char*>& retouch_tools();
@@ -945,6 +1228,13 @@ private:
     void clone_source_picked(double x_mm, double y_mm);
     void clone_overlay_picture();
     std::optional<core::Json> history_brush_from(const core::Page& page, const core::Layer& layer);
+    // PC4 E5 (paint_tools.cpp): the brushes that change pixels — their tools, settings page, a stroke made their op (the
+    // layer's lines and pictures become its pixels first: asked once a layer, pixel_tool_bakes_ok), the Mixer Brush's paint.
+    void build_paint_tool_actions();
+    void build_paint_tool_pages(ToolSettings* ts);
+    bool pixel_tool_stroke(const StrokeInput& stroke, const core::Page& page, const core::Layer& layer);
+    bool pixel_tool_bakes_ok(const core::Page& page, const core::Layer& layer, const QString& tool);
+    void mixer_shown();
     bool selection_context_menu(const QPoint& global);
     void build_selection_pages(ToolSettings* ts);
     void color_range_dialog();
@@ -1105,7 +1395,28 @@ private:
     QSpinBox* blend_strength_ = nullptr;
     QComboBox* liquify_mode_ = nullptr;
     QSpinBox* liquify_strength_ = nullptr;
-    QComboBox* gradient_mode_ = nullptr;
+    // PC4 E4: the 塗りつぶしツール's, the グラデーションツール's and the スポイトツール's settings, the gradients
+    QComboBox* fill_basis_ = nullptr;
+    QComboBox* fill_source_ = nullptr;
+    QWidget* fill_pattern_row_ = nullptr;  // (PC4 E4 after E3's merge: the パターン the fill lays — app::pattern_combo)
+    QComboBox* fill_pattern_ = nullptr;
+    QComboBox* fill_blend_ = nullptr;
+    QSpinBox* fill_opacity_ = nullptr;
+    QSpinBox* fill_tolerance_ = nullptr;
+    QCheckBox* fill_antialias_ = nullptr;
+    QCheckBox* fill_contiguous_ = nullptr;
+    QCheckBox* fill_all_layers_ = nullptr;
+    QComboBox* gradient_preset_ = nullptr;
+    QComboBox* gradient_shape_ = nullptr;
+    QComboBox* gradient_blend_ = nullptr;
+    QSpinBox* gradient_opacity_ = nullptr;
+    QCheckBox* gradient_reverse_ = nullptr;
+    QCheckBox* gradient_dither_ = nullptr;
+    QCheckBox* gradient_transparency_ = nullptr;
+    QComboBox* pick_size_ = nullptr;
+    QVBoxLayout* pick_samples_ = nullptr;
+    GradientLibrary* gradients_ = nullptr;
+    GradientsPanel* gradients_panel_ = nullptr;
     QComboBox* vector_mode_ = nullptr;
     QSpinBox* vector_amount_ = nullptr;
     QDoubleSpinBox* vector_join_ = nullptr;
@@ -1115,6 +1426,19 @@ private:
     QDoubleSpinBox* eraser_size_ = nullptr;
     QComboBox* eraser_mode_ = nullptr;
     QComboBox* eraser_texture_ = nullptr;
+    // brushes@1 (PC4 E1): the eraser's モード (ブラシ・鉛筆・ブロック), 不透明度 and 流量
+    QComboBox* eraser_kind_ = nullptr;
+    QSlider* eraser_opacity_ = nullptr;
+    QSlider* eraser_flow_ = nullptr;
+    std::set<std::string> blend_baked_;  // (PC4 E1: the paint layers whose lines became pixels by a blend, asked: page/layer)
+    QLabel* mixer_paint_ = nullptr;  // (PC4 E5: the Mixer Brush's paint shown on its settings page)
+    QComboBox* pixel_brush_ = nullptr;  // (PC4 E2: the pixel tools' ブラシ — the library's dab brushes)
+public:
+    // (PC4 E2) The pixel tools' ブラシ list again (the library's dab brushes; the one chosen kept).
+    void fill_pixel_brushes();
+private:
+    std::string mixer_space_;  // (PC4 E5, review P3-12: the colours the paint is in — the page's RGB profile, "" sRGB)
+    core::Json last_results_ = core::Json::array();  // (PC4 E5: what the ops apply_ops applied last reported — the Mixer Brush's reservoir)
     QCheckBox* eraser_balloons_ = nullptr;  // フキダシを削る (the eraser cuts the balloons it goes over)
     QComboBox* frame_mode_ = nullptr;
     QComboBox* marquee_mode_ = nullptr;
@@ -1197,6 +1521,17 @@ private:
     QToolBar* palette_ = nullptr;
     QToolBar* commands_ = nullptr;
     QMenu* recent_menu_ = nullptr;
+    // PC4 節 D (app/filter_menu.cpp): the フィルター menu, its plugins' submenu (made again when it opens), the last filter
+    // sent from it (前回のフィルター: never kept in the book), a heavy filter's preview being worked out.
+    QMenu* filter_menu_ = nullptr;
+    QMenu* filter_plugins_menu_ = nullptr;
+    std::optional<core::Json> last_filter_;
+    struct FilterJob;
+    std::shared_ptr<FilterJob> filter_job_;
+    // a heavy filter being worked (send_filter: its stop; the window asked to close meanwhile, closed when it is back)
+    std::shared_ptr<std::stop_source> filter_working_;
+    bool close_after_filter_ = false;
+    void stop_filter_work();  // (the window going: a heavy filter's preview and work asked to stop)
     QMenu* view_menu_ = nullptr;
     QMenu* books_menu_ = nullptr;   // ウィンドウ → 開いている原稿 (document.activate)
     QLabel* gamut_label_ = nullptr;  // 色域外警告's count
@@ -1262,6 +1597,35 @@ private:
     // The linked file of the smart object chosen, read for an op (asked first when the book named it, not the person:
     // a path an agent wrote is shown before anything is read). Its bytes put in the book's assets, and their ref.
     std::optional<std::pair<std::string, std::string>> read_linked(const QString& file, bool chosen_here);
+
+public:
+    // PC4 E6 (main_window_styles.cpp, layer_style_dialog.cpp, styles_panel.cpp; SPEC.md COLOR-09「レイヤースタイル」「スタイル」):
+    // レイヤー → レイヤースタイル ▸ and the スタイル panel. The レイヤースタイル window on the target layer, opened at `kind`
+    // ("" 混合オプション): false when it is cancelled or nothing could be set.
+    bool edit_layer_style(const std::string& kind = {});
+    void copy_layer_style();
+    bool paste_layer_style();
+    bool clear_layer_style();
+    bool global_light_dialog();
+    bool scale_layer_style_dialog(std::optional<double> percent = std::nullopt);
+    bool layer_style_to_layers();
+    bool show_all_effects(bool show);
+    // A preset (render/style_presets) applied to the chosen layers (`add`: its effects after theirs: Shift+click).
+    bool apply_style_preset(const core::Json& preset, bool add);
+    // 新規スタイル…: the target layer's effects and blending options into the styles' library (asked when no name).
+    bool new_style_preset(std::optional<QString> name = std::nullopt, bool effects = true, bool blending = true);
+    // The layers a style command acts on: the ones chosen in the layer panel that take a style, else the target layer.
+    std::vector<std::string> style_targets() const;
+    StylesPanel* styles_panel() const { return styles_panel_; }
+    QDockWidget* styles_dock() const { return styles_dock_; }
+
+private:
+    void build_layer_style_actions();
+    void build_layer_style_menus(QMenu* layers);
+    void build_styles_dock(QDockWidget* frame);
+    StylesPanel* styles_panel_ = nullptr;
+    QDockWidget* styles_dock_ = nullptr;
+    QMenu* layer_style_menu_ = nullptr;
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

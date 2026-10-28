@@ -136,8 +136,8 @@ void MainWindow::build_line_dock() {
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    dock->setWidget(scroll);  // (in the dock first, then the panel in it: styled once — build_tool_settings)
     scroll->setWidget(story_);
-    dock->setWidget(scroll);
     dock->setMinimumWidth(200);
     dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);  // (a tab of the row, as Python's)
     addDockWidget(Qt::RightDockWidgetArea, dock);
@@ -161,8 +161,11 @@ void MainWindow::panel_for_tool(const QString& tool) {
     if (lines_dock_ == nullptr || layers == nullptr) return;
     static const QStringList drawing = {QStringLiteral("pen"),   QStringLiteral("eraser"), QStringLiteral("fill"),
                                         QStringLiteral("lassofill"), QStringLiteral("vector"), QStringLiteral("blend"),
-                                        QStringLiteral("liquify"), QStringLiteral("gradient"), QStringLiteral("shape")};
-    QDockWidget* want = tool == QLatin1String("text") ? lines_dock_ : drawing.contains(tool) ? layers : nullptr;
+                                        QStringLiteral("liquify"), QStringLiteral("gradient"), QStringLiteral("shape"),
+                                        QStringLiteral("pencil")};  // (PC4 E1)
+    QDockWidget* want = tool == QLatin1String("text")                              ? lines_dock_
+                        : drawing.contains(tool) || PageCanvas::is_pixel_tool(tool) ? layers  // (PC4 E5: the brushes that change pixels)
+                                                                                    : nullptr;
     QDockWidget* other = want == lines_dock_ ? layers : lines_dock_;
     const auto seen = [this](QDockWidget* dock) { return dock->isVisible() && (dock->isFloating() || rect().intersects(dock->geometry())); };
     if (want != nullptr && !seen(want) && seen(other)) want->raise();
@@ -562,7 +565,7 @@ void MainWindow::draw_text_path(const std::string& line_id) {
     // the next line drawn with the pen becomes the path the words follow
     text_path_for_ = line_id;
     choose_tool(QStringLiteral("pen"));
-    flash(QStringLiteral("文字を沿わせる線を、ペンで 1 本引きます"), 6000);
+    flash(QStringLiteral("文字を沿わせる線を、ブラシツールで 1 本引きます"), 6000);
 }
 
 bool MainWindow::text_path_stroke(const StrokeInput& stroke) {

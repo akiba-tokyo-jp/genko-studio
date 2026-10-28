@@ -15,6 +15,7 @@
 #include "render/color_canvas.hpp"
 #include "render/channels.hpp"
 #include "render/color_edit.hpp"
+#include "render/dab_ops.hpp"
 #include "render/ink_edit.hpp"
 #include "render/ops_3d.hpp"
 #include "render/ops_adjust.hpp"
@@ -27,7 +28,11 @@
 #include "render/raster_ops.hpp"
 #include "render/area_kinds.hpp"
 #include "render/layer_masks.hpp"
+#include "render/ops_filters.hpp"
 #include "render/ops_pc3.hpp"
+#include "render/ops_formats.hpp"
+#include "render/ops_paint_tools.hpp"
+#include "render/ops_layer_styles.hpp"
 
 namespace genko::render {
 
@@ -366,16 +371,21 @@ void register_render_ops(core::OpRegistry& registry) {
     // the studio ops again, place_asset and set_placement able to read an asset's picture size, and those placing a
     // picture able to see it can be drawn (render/placed)
     core::register_studio_ops(registry, core::StudioHooks{asset_picture_size, check_asset_picture});
-    // add_stroke again, able to mix the colour under the line in (下地混色・色延び, render/raster)
-    core::register_add_stroke(registry, raster::mixed_pieces);
-    // define_brush again, able to take a paper's picture in (BRUSH-01, render/paper)
-    core::register_define_brush(registry, [](std::string_view file) {
-        try {
-            return paper::take_in(file);
-        } catch (const core::Error& error) {
-            throw core::OpError(error.what());
-        }
-    });
+    // add_stroke again, able to mix the colour under the line in (下地混色・色延び, render/raster), to check a dab brush's
+    // line and to paint a line with a blend into a paint layer's pixels (brushes@1, PC4 E1: render/dab_ops)
+    core::register_add_stroke(registry, dab_ops::stroke_hooks());
+    // define_brush again, able to take a paper's picture in (BRUSH-01, render/paper) and a dab brush's pictures and
+    // upstream's settings (brushes@1, PC4 E1: render/dab_ops)
+    core::register_define_brush(
+        registry,
+        [](std::string_view file) {
+            try {
+                return paper::take_in(file);
+            } catch (const core::Error& error) {
+                throw core::OpError(error.what());
+            }
+        },
+        dab_ops::take_in());
     // PC3 (選択・マスク・修復・パス・変形・判型): the new ops (each group writes its own in its file) and the kinds and
     // modifiers of an area this build adds, made known to the bus (render/area_kinds)
     register_select_ops(registry);
@@ -383,7 +393,16 @@ void register_render_ops(core::OpRegistry& registry) {
     register_vector2_ops(registry);
     register_transform_ops(registry);
     register_pagesize_ops(registry);
+    // PC4 節 D (フィルター): the frames of its new ops (render/ops_filters)
+    register_filter_ops(registry);
     area_kinds::use_keys();
+    // PC4 節 F (形式): the ops that change what a book keeps of its files (frames until their groups: render/ops_formats.cpp)
+    register_format_ops(registry);
+    // PC4 節 E (描く道具・パターン): the new ops, frames until their groups write them (render/ops_paint_tools.hpp)
+    register_paint_tool_ops(registry);
+    register_pattern_ops(registry);
+    // PC4 E6 (layer-styles@1: a layer's style and the book's global light, render/ops_layer_styles)
+    register_layer_style_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {
@@ -401,6 +420,13 @@ const core::OpRegistry& ops_registry() {
                 // move or clear pixels work the inks themselves, render/raster_ops. color-model@1: on an RGB page of a
                 // profile, the same through sRGB: RgbLending. Then the pictures an op left: lifted page values laid
                 // into the pixels, lines and fills into precise pixels and inks.)
+                if (paints_layer_values(name, c.op, c.doc)) {  // (PC4 E4: gradient_fill on a paint layer's own values, render/paint_fill: not lent)
+                    plain(c);
+                    color_edit::bake_page_values(c.doc);
+                    color_edit::bake_marks(c.doc);
+                    ink_edit::bake_marks(c.doc);
+                    return;
+                }
                 if (ink_edit::lends(name, c.op)) {
                     std::vector<std::size_t> pages = profiled_pages_of(c);
                     std::erase_if(pages, [&](std::size_t at) { return !lends_rgb(name, c.op, c.doc, at); });
@@ -451,6 +477,7 @@ const core::OpRegistry& ops_registry() {
                     plain(inner);
                     (void)lending.take_back(c.doc);
                     c.report = std::move(inner.report);
+                    c.notes = std::move(inner.notes);
                     color_edit::bake_marks(c.doc);
                     ink_edit::bake_marks(c.doc);
                     return;
@@ -471,6 +498,7 @@ const core::OpRegistry& ops_registry() {
                     plain(inner);
                     const bool changed = lending.take_back(c.doc);
                     c.report = std::move(inner.report);
+                    c.notes = std::move(inner.notes);
                     if (changed && lending.depth() > 8) {  // (a 16- or 32-bit channel: what the op changed, drawn at 8 bits)
                         if (!c.report || c.report->is_null()) c.report = core::Json::object();
                         if (c.report->is_object()) (*c.report)["channel_precision"] = 8;
@@ -486,6 +514,7 @@ const core::OpRegistry& ops_registry() {
                 op(inner);
                 keep.restore(c.doc);
                 c.report = std::move(inner.report);
+                c.notes = std::move(inner.notes);
                 channels::follow_depth(c.doc);
                 keep_page_modes(c.doc, before);
             });

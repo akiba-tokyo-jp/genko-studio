@@ -34,11 +34,13 @@
 #include "render/shape_parts.hpp"
 #include "render/page.hpp"
 #include "render/page_internal.hpp"
+#include "render/pcraft_read.hpp"
 #include "render/placed.hpp"
 #include "render/proof.hpp"
 #include "render/raster.hpp"
 #include "render/smart.hpp"
 #include "render/screentone.hpp"
+#include "render/raw.hpp"
 #include "render/smart_decode.hpp"
 #include "render/smart_filters.hpp"
 #include "render/text/balloons.hpp"
@@ -153,7 +155,10 @@ std::pair<std::string, std::string> asset_file(const Document& doc, const std::s
     if (!doc.asset_dir) throw OpError("placing an asset needs a saved project");
     if (!storage::AssetStore::is_ref(ref)) throw OpError("asset must be sha256:…, got " + core::py_repr_str(ref));
     const storage::AssetStore store(*doc.asset_dir);
-    for (const core::smart::FileFormat& format : core::smart::kFileFormats) {
+    std::vector<core::smart::FileFormat> formats(core::smart::kFileFormats.begin(), core::smart::kFileFormats.end());
+    // (PC4 F-a: formats@1's; F-e: camera-raw@1's)
+    for (const core::smart::FileFormat& later : core::smart::kLaterFileFormats) formats.push_back(later);
+    for (const core::smart::FileFormat& format : formats) {
         if (!store.has(ref, format.suffix)) continue;
         std::optional<std::string> bytes;
         try {
@@ -165,7 +170,7 @@ std::pair<std::string, std::string> asset_file(const Document& doc, const std::s
         if (storage::AssetStore::ref(*bytes) != ref) throw OpError("the asset's picture cannot be read (its bytes are not what its name says)");
         return {std::move(*bytes), std::string(format.suffix)};
     }
-    throw OpError("no asset " + ref + " of a picture (png, jpg, tif, webp, bmp, gif, psd)");
+    throw OpError("no asset " + ref + " of a picture (png, jpg, tif, webp, bmp, gif, psd, tga, ico, pnm, qoi, exr, hdr, avif, a camera RAW file)");
 }
 
 // The contents' colour use the op asks for: embedded_profile keep (its numbers), convert (from the profile the file
@@ -360,32 +365,8 @@ void smart_convert(OpContext& c) {
 
 // --- smart_place -----------------------------------------------------------------------------------------------------
 
-void smart_place(OpContext& c) {
-    Document& doc = c.doc;
-    const std::size_t at = core::require_page(doc, c.op);
-    const std::string name = text_at(c.op, "name");
-    std::string bytes, suffix;
-    if (core::truthy_at(c.op, "data")) {
-        try {
-            bytes = core::a2b_base64(text_at(c.op, "data"));
-        } catch (const core::Error&) {
-            throw OpError("data is the file's bytes in base64");
-        }
-        if (bytes.size() > smart::kFileMaxBytes) throw OpError("the file is larger than 256 MiB");
-    } else {
-        const std::string ref = text_at(c.op, "asset");
-        if (!ref.starts_with("sha256:")) throw OpError("smart_place takes an asset ref (sha256:…) or data, not a path");
-        std::tie(bytes, suffix) = asset_file(doc, ref);
-    }
-    smart::FileInfo info;
-    try {
-        info = smart::look_at(bytes, suffix);
-    } catch (const NotYetPorted&) {
-        throw;
-    } catch (const core::Error& error) {
-        throw OpError(std::string("the asset's picture cannot be read (") + error.what() + ")");
-    }
-    const std::string to = text_at(c.op, "to", "art");
+// smart_place's `to` (art, bg, draft, name) as the layer's role, the strict gates asked of art and bg.
+LayerRole place_role(const OpContext& c, const Document& doc, std::size_t at, const std::string& to) {
     LayerRole role = LayerRole::User;
     if (to == "bg") role = LayerRole::Bg;
     else if (to == "draft") role = LayerRole::Draft;
@@ -395,44 +376,19 @@ void smart_place(OpContext& c) {
     if ((to == "art" || to == "bg") && doc.strict_gates && !seen.name_ok) {
         throw OpError("page " + seen.index.repr() + ": approve the name first (strict_gates)");
     }
-    const bool precise_page = !seen.color && seen.rgb && seen.rgb->depth > 8;
-    if (precise_page && info.depth > 8 && static_cast<std::uint64_t>(info.width) * info.height > core::kColorRasterMaxPixels) {
-        throw OpError("the picture is too large to keep its 16 or 32 bits on this page (at most " + std::to_string(core::kColorRasterMaxPixels) +
-                      " pixels)");
-    }
-    const std::string ref = core::bytes_ref(bytes);
-    if (core::truthy_at(c.op, "asset") && ref != text_at(c.op, "asset")) throw OpError("the asset's picture cannot be read (its bytes are not what its name says)");
-    auto contents = std::make_shared<core::SmartContents>();
-    contents->kind = "file";
-    contents->name = name.empty() ? std::string("画像") + info.suffix : name;
-    contents->asset = ref;
-    contents->suffix = info.suffix;
-    contents->format = info.format;
-    contents->width_px = info.width;
-    contents->height_px = info.height;
-    contents->dpi = info.dpi > 0 ? info.dpi : seen.spec.dpi.value();
-    contents->depth = info.depth;
-    contents->mode = info.mode;
-    contents->profile = colour_use(doc, c.op, info);
-    if (const Json* link = core::get(c.op, "link"); link != nullptr && !link->is_null()) contents->link = smart_ops::link_of(c.op, bytes);  // (PC3 A1)
-    if (core::truthy_at(c.op, "data")) doc.smart_files[ref] = std::make_shared<const std::string>(std::move(bytes));
-    const auto [cw, ch] = core::smart::size_mm(*contents);
+    (void)c;
+    return role;
+}
 
-    Layer layer;
-    layer.id = fresh_layer_id(seen, c.op);
-    layer.role = role;
-    layer.kind = LayerKind::Smart;
-    layer.exportable = to == "art" || to == "bg";
-    std::string stem = name;
-    if (const auto slash = stem.find_last_of("/\\"); slash != std::string::npos) stem = stem.substr(slash + 1);
-    if (const auto dot = stem.rfind('.'); dot != std::string::npos && dot > 0) stem = stem.substr(0, dot);
-    layer.title = text_at(c.op, "title", stem.empty() ? std::string("画像") : stem);
-    layer.source = Json::object({{"asset", ref}, {"to", to}, {"by", c.actor.name()}});
+// Where smart_place lays contents of cw × ch mm (w × h pixels: their shape for `fit`): covering a panel, or stretched over
+// the box given (as place_asset lays a picture — the same place, the same pixels); else at its own size in the middle of
+// the page, made smaller to fit the page when it is larger (PhotoCraft's), or at `scale` and `center_mm`. The layer's
+// frame_id and clip_to set so.
+Matrix place_matrix(const OpContext& c, const Page& seen, Layer& layer, double cw, double ch, std::int64_t w, std::int64_t h) {
     Matrix m;
     const bool as_placed = core::truthy_at(c.op, "frame_id") || core::truthy_at(c.op, "placement_mm") || core::truthy_at(c.op, "fit") ||
                            core::truthy_at(c.op, "clip_to");
     if (as_placed) {
-        // (as place_asset lays a picture: cover the panel, or stretch over the box given — the same place, the same pixels)
         core::Rect placement;
         if (core::truthy_at(c.op, "placement_mm")) {
             const std::vector<double> box = core::unpack_floats(c.op["placement_mm"], 4);
@@ -452,12 +408,11 @@ void smart_place(OpContext& c) {
             if (frame == nullptr) target = core::Rect{Num(0), Num(0), seen.spec.width_mm, seen.spec.height_mm};
             else if (layer.clip_to == "bleed") target = core::default_target(seen, *frame, layer.clip_to);
             else target = frame->rect;
-            placement = core::fit_rect(target, info.width, info.height, fit, 0.0, 0.0, 1.0);
+            placement = core::fit_rect(target, w, h, fit, 0.0, 0.0, 1.0);
         }
         core::require_finite(core::rect_to_json(placement), "placement_mm");
         m = Matrix{placement.width.value() / cw, 0, 0, placement.height.value() / ch, placement.x.value(), placement.y.value()};
     } else {
-        // (PhotoCraft's: at its own resolution, in the middle of the page, made smaller to fit the page when it is larger)
         const double pw = seen.spec.width_mm.value(), ph = seen.spec.height_mm.value();
         double s = number_at(c.op, "scale", 0) / 100.0;
         if (s <= 0) s = std::min({1.0, pw / cw, ph / ch});
@@ -471,6 +426,138 @@ void smart_place(OpContext& c) {
         layer.clip_to = "none";
     }
     if (std::abs(m.det()) <= core::smart::kDetMin) throw OpError("the picture would be laid too small");
+    return m;
+}
+
+// A file's name without its folders and its suffix (the layer's title).
+std::string name_stem(std::string stem) {
+    if (const auto slash = stem.find_last_of("/\\"); slash != std::string::npos) stem = stem.substr(slash + 1);
+    if (const auto dot = stem.rfind('.'); dot != std::string::npos && dot > 0) stem = stem.substr(0, dot);
+    return stem;
+}
+
+// PC4 F-f (design 2.8): 埋め込みを配置… of a .pcraft — its page read (render/pcraft_read) made the contents of a smart object
+// (PC3's contents of kind page: a page of its own, its layers, channels and paths), laid as smart_place lays a picture
+// (at its own size in the middle of the page, made smaller to fit; or over a panel or a box). What it could not keep is
+// said in the op's notes.
+void place_pcraft(OpContext& c, std::size_t at, const std::string& bytes, const std::string& name) {
+    Document& doc = c.doc;
+    const std::string to = text_at(c.op, "to", "art");
+    const LayerRole role = place_role(c, doc, at, to);
+    std::vector<std::string> notes;
+    std::string contents_id;
+    try {
+        contents_id = pcraft::place_as_contents(doc, bytes, name.empty() ? std::string("contents.pcraft") : name, notes);
+    } catch (const NotYetPorted&) {
+        throw;
+    } catch (const core::Error& error) {
+        throw OpError(std::string("the .pcraft cannot be read (") + error.what() + ")");
+    }
+    for (std::string& note : notes) c.notes.push_back(std::move(note));
+    const core::SmartContents& contents = *doc.smart_contents.at(contents_id);
+    const auto [cw, ch] = core::smart::size_mm(contents);
+    const core::PageSpec& spec = contents.page->spec;
+    const std::int64_t w = std::llround(spec.width_mm.value() / 25.4 * spec.dpi.value()), h = std::llround(spec.height_mm.value() / 25.4 * spec.dpi.value());
+    const Page& seen = doc.page(at);
+    Layer layer;
+    layer.id = fresh_layer_id(seen, c.op);
+    layer.role = role;
+    layer.kind = LayerKind::Smart;
+    layer.exportable = to == "art" || to == "bg";
+    const std::string stem = name_stem(name);
+    layer.title = text_at(c.op, "title", stem.empty() ? std::string("スマートオブジェクト") : stem);
+    layer.source = Json::object({{"to", to}, {"by", c.actor.name()}});
+    const Matrix m = place_matrix(c, seen, layer, cw, ch, std::max<std::int64_t>(1, w), std::max<std::int64_t>(1, h));
+    layer.smart = core::smart::settings(contents_id, m, "bicubic");
+    const std::size_t placed = insert_under_ink(doc.edit_page(at), std::move(layer));
+    c.report = Json{{"id", doc.page(at).layers[placed].id}, {"contents", contents_id}, {"size_px", Json::array({w, h})}};
+    if (!c.notes.empty()) (*c.report)["notes"] = c.notes;
+}
+
+void smart_place(OpContext& c) {
+    Document& doc = c.doc;
+    const std::size_t at = core::require_page(doc, c.op);
+    const std::string name = text_at(c.op, "name");
+    std::string bytes, suffix;
+    if (core::truthy_at(c.op, "data")) {
+        try {
+            bytes = core::a2b_base64(text_at(c.op, "data"));
+        } catch (const core::Error&) {
+            throw OpError("data is the file's bytes in base64");
+        }
+        if (bytes.size() > smart::kFileMaxBytes) throw OpError("the file is larger than 256 MiB");
+        // (PC4 F-e: a TIFF-shaped camera RAW — NEF, ARW, PEF… — is known by its name's suffix alone)
+        if (const auto named = core::smart::suffix_of_name(name); named && raw::raw_suffix(*named)) suffix = *named;
+    } else {
+        const std::string ref = text_at(c.op, "asset");
+        if (!ref.starts_with("sha256:")) throw OpError("smart_place takes an asset ref (sha256:…) or data, not a path");
+        // (PC4 F-f: a .pcraft kept as the book's asset)
+        if (doc.asset_dir && storage::AssetStore::is_ref(ref) && storage::AssetStore(*doc.asset_dir).has(ref, ".pcraft")) {
+            const std::optional<std::string> got = storage::AssetStore(*doc.asset_dir).get_bytes(ref, ".pcraft", smart::kFileMaxBytes);
+            if (!got || storage::AssetStore::ref(*got) != ref) throw OpError("the asset's .pcraft cannot be read (its bytes are not what its name says)");
+            bytes = *got;
+            suffix = ".pcraft";
+        } else {
+            std::tie(bytes, suffix) = asset_file(doc, ref);
+        }
+    }
+    if (suffix == ".pcraft" || pcraft::is_pcraft(bytes)) {  // (PC4 F-f)
+        place_pcraft(c, at, bytes, name);
+        return;
+    }
+    smart::FileInfo info;
+    try {
+        info = smart::look_at(bytes, suffix);
+    } catch (const NotYetPorted&) {
+        throw;
+    } catch (const core::Error& error) {
+        throw OpError(std::string("the asset's picture cannot be read (") + error.what() + ")");
+    }
+    const std::string to = text_at(c.op, "to", "art");
+    const LayerRole role = place_role(c, doc, at, to);
+    const Page& seen = doc.page(at);
+    const bool precise_page = !seen.color && seen.rgb && seen.rgb->depth > 8;
+    if (precise_page && info.depth > 8 && static_cast<std::uint64_t>(info.width) * info.height > core::kColorRasterMaxPixels) {
+        throw OpError("the picture is too large to keep its 16 or 32 bits on this page (at most " + std::to_string(core::kColorRasterMaxPixels) +
+                      " pixels)");
+    }
+    const std::string ref = core::bytes_ref(bytes);
+    if (core::truthy_at(c.op, "asset") && ref != text_at(c.op, "asset")) throw OpError("the asset's picture cannot be read (its bytes are not what its name says)");
+    auto contents = std::make_shared<core::SmartContents>();
+    contents->kind = "file";
+    contents->name = name.empty() ? std::string("画像") + info.suffix : name;
+    contents->asset = ref;
+    contents->suffix = info.suffix;
+    contents->format = info.format;
+    contents->width_px = info.width;
+    contents->height_px = info.height;
+    contents->dpi = info.dpi > 0 ? info.dpi : seen.spec.dpi.value();
+    contents->depth = info.depth;
+    contents->mode = info.mode;
+    contents->profile = colour_use(doc, c.op, info);
+    if (info.format == "raw") {
+        // (PC4 F-e, camera-raw@1: developed with camera-raw@1's defaults until set_camera_raw — its colours its output
+        // space's, which the developed picture carries)
+        try {
+            contents->raw = raw::default_raw(bytes);
+        } catch (const core::Error& error) {
+            throw OpError(std::string("the asset's picture cannot be read (") + error.what() + ")");
+        }
+        contents->profile = Json::object({{"use", "embedded"}, {"intent", "relative"}, {"bpc", true}});
+    }
+    if (const Json* link = core::get(c.op, "link"); link != nullptr && !link->is_null()) contents->link = smart_ops::link_of(c.op, bytes);  // (PC3 A1)
+    if (core::truthy_at(c.op, "data")) doc.smart_files[ref] = std::make_shared<const std::string>(std::move(bytes));
+    const auto [cw, ch] = core::smart::size_mm(*contents);
+
+    Layer layer;
+    layer.id = fresh_layer_id(seen, c.op);
+    layer.role = role;
+    layer.kind = LayerKind::Smart;
+    layer.exportable = to == "art" || to == "bg";
+    const std::string stem = name_stem(name);
+    layer.title = text_at(c.op, "title", stem.empty() ? std::string("画像") : stem);
+    layer.source = Json::object({{"asset", ref}, {"to", to}, {"by", c.actor.name()}});
+    const Matrix m = place_matrix(c, seen, layer, cw, ch, info.width, info.height);
     const std::string contents_id = fresh_contents_id(doc);
     doc.smart_contents[contents_id] = contents;
     layer.smart = core::smart::settings(contents_id, m, "lanczos");
@@ -489,6 +576,9 @@ void smart_profile(OpContext& c) {
     const core::SmartContents* contents = core::smart::contents_of(doc, layer);
     if (!id || contents == nullptr) throw OpError("the smart object has no contents");
     if (contents->kind != "file") throw OpError("the smart object's contents are a page, not a file: their colours are their layers'");
+    if (contents->format == "raw") {  // (PC4 F-e)
+        throw OpError("the smart object's contents are a camera RAW file: their colours are their development's output space (set_camera_raw)");
+    }
     const core::Bytes bytes = smart::file_bytes(doc, *contents);
     if (!bytes) throw OpError("the smart object's file is not in the book");
     smart::FileInfo info;
@@ -735,6 +825,7 @@ void rasterize(Document& doc, std::size_t at, std::size_t i) {
     look.visible = true;
     look.screen.reset();
     look.color.reset();
+    look.style.reset();  // (PC4 E6: its style stays the layer's, drawn over its pixels as before)
     const int dpi = raster::kWorkingDpi;
     const Size size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
     core::Bytes ink_raster, color_raster;
@@ -762,6 +853,8 @@ void rasterize(Document& doc, std::size_t at, std::size_t i) {
             ctx.mode = "proof";
             ctx.omitted = &omitted;
             deep = smart::picture_precise(ctx, look, Box{0, 0, size.width, size.height}, canvas.space());
+        } else if (look.kind == LayerKind::Fill) {  // (patterns@1, PC4 E3: a pattern's values kept)
+            deep = pattern_fill_precise(page, look, dpi, &doc, canvas.space());
         }
         if (tone) {
             canvas.blend(tone_black(layer_image(page, look, dpi, &doc)), 1.0, false);
@@ -787,6 +880,7 @@ void rasterize(Document& doc, std::size_t at, std::size_t i) {
     }
     if (finished && !finished->is_null() && !(layer.screen && core::py_truthy(*layer.screen))) layer.screen = *finished;
     layer.kind = LayerKind::Raster;
+    layer.native_psd.reset();  // (psd-keep@1, PC4 F-d: rasterized, a PSD's effects and blocks are not its own any more)
     layer.strokes = core::empty_strokes();
     layer.patches.clear();
     layer.shapes = core::vector::empty_shapes();  // (pen-shapes@1: drawn in)
@@ -842,7 +936,7 @@ void rasterize_layer(OpContext& c) {
             return;
         }
         Page& page = doc.edit_page(at);
-        shape_parts::rasterize_parts(page, page.layers[i]);
+        shape_parts::rasterize_parts(page, page.layers[i], &doc);
         c.report = Json{{"ids", Json::array({page.layers[i].id})}};
         return;
     }

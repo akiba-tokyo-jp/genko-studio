@@ -41,6 +41,7 @@ class QTabWidget;
 namespace genko::app {
 
 class MainWindow;
+class ExportPreferencesForm;  // (PC4 F-c: app/export_as_dialog.hpp)
 
 namespace preferences {
 
@@ -55,8 +56,22 @@ constexpr int kSaveAfterDefault = 2000;
 int ui_font_pt();  // 0: the system's size
 QString default_paper();
 int save_after_ms();
+// ファイル管理 (PC4 F-b, edit.preferences.fileHandling; PhotoCraft v0.2.0's prefs.rs FileHandling, MIT): how many files
+// 最近使用したファイルを開く lists (0..100; Photoshop's 20 by default), whether a file written takes its extension in lower
+// case (コピーを保存…), whether an RGB picture's EXIF saying sRGB is ignored when it carries no profile (開く…). Genko's
+// PSD always holds its merged picture (Photoshop's 「PSD と PSB の互換性を優先」 always on: said, not chosen).
+constexpr int kRecentDefault = 20;
+constexpr int kRecentMax = 100;
+int recent_count();
+bool lowercase_extension();
+bool ignore_exif_profile();
 std::optional<double> tablet_gamma();
 QString pen_button();
+// brushes@1 (PC4 E1, edit.preferences.cursors and view.show.brushPreview): 表示 › ブラシプレビュー (the brush's outline at
+// the pointer; on unless turned off) and 環境設定's 描いている間は十字だけ (off unless chosen).
+bool brush_preview();
+void set_brush_preview(bool on);
+bool cross_while_drawing();
 // The pressure curve that turns the person's usual pressing (the median) into the middle width. Throws
 // std::invalid_argument("もう少し長く試し描きします") with too few presses.
 double gamma_for(const std::vector<double>& pressures);
@@ -69,6 +84,16 @@ std::vector<QAction*> commands(QMainWindow* window);
 void name_commands(MainWindow* window);
 // (new name: old name, one or more) a command renamed later keeps the keys and places chosen under an old name
 const std::multimap<QString, QString>& renamed();
+// PC4 E4: the old names a later command took for its own (グラデーション: the グラデーションツール's before PC4 E-0, the
+// グラデーション panel's since E4). A list of commands or the keys kept by a build that knows the new command (marked when
+// it writes them: names_current) mean the new command by such a name; kept before, the renamed one.
+const std::vector<QString>& reused_names();
+bool reused_name(const QString& name);
+// Whether the settings' `key` ("ui/quick", "ui/commandbar", or "shortcuts/<a reused name>") holds what a build that knows
+// reused_names() wrote there — marked as it wrote it: the value then kept beside it (names_current/<key>), so a value a
+// build before them wrote since reads as theirs —, and that it is now.
+bool names_current(const QString& key);
+void mark_names_current(const QString& key);
 void apply_shortcuts(MainWindow* window);
 // Every command's tooltip says its name, its keys as they are now, and what it does (written again when the keys
 // change, so a changed key never shows the old one).
@@ -153,6 +178,7 @@ public:
     QCheckBox* gpu = nullptr;
     QCheckBox* motion = nullptr;
     QComboBox* cursor = nullptr;
+    QCheckBox* cross_drawing = nullptr;  // (PC4 E1: 描いている間は十字だけ)
     QComboBox* alt_tool = nullptr;
     QComboBox* ctrl_tool = nullptr;
     QLineEdit* backup_folder = nullptr;
@@ -160,6 +186,19 @@ public:
     QSpinBox* backup_keep = nullptr;
     QCheckBox* hold_swap = nullptr;
     QPushButton* per_tool = nullptr;
+    // ファイル管理 (PC4 F-b: 原稿と保存 moved here, and the files' own)
+    QSpinBox* recent_count = nullptr;
+    QCheckBox* lowercase_extension = nullptr;
+    QCheckBox* ignore_exif_profile = nullptr;
+    // 書き出し (PC4 F-c, edit.preferences.export: 書き出しの環境設定…'s values)
+    ExportPreferencesForm* export_form = nullptr;
+    // Camera Raw (PC4 F-e, edit.preferences.rawDefaults: the ワークフロー a camera RAW file opens with — app/camera_raw_open)
+    QComboBox* raw_space = nullptr;
+    QComboBox* raw_depth = nullptr;
+    QSpinBox* raw_resolution = nullptr;
+    QComboBox* raw_sharpen = nullptr;
+    QCheckBox* raw_smart = nullptr;
+    QCheckBox* raw_auto = nullptr;
     // 透明部分・色域
     QComboBox* checker_size = nullptr;
     QComboBox* checker_colours = nullptr;

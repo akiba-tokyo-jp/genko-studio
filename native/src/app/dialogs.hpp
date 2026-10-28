@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QDialog>
 #include <QPushButton>
 #include <QString>
@@ -11,6 +12,7 @@
 
 #include "app/templates.hpp"
 #include "core/model.hpp"
+#include "formats/open_file.hpp"
 
 class QCheckBox;
 class QComboBox;
@@ -20,6 +22,7 @@ class QLabel;
 class QLineEdit;
 class QListWidget;
 class QSpinBox;
+class QStackedWidget;
 class QThreadPool;
 
 // The dialogs of Python's genko/app/dialogs.py that M2 needs: the start screen, a new book, the paper settings and
@@ -36,6 +39,12 @@ class PathLabel;
 // The recent books (Python's main.recent_projects / remember_project: <config>/recent.json).
 std::vector<std::filesystem::path> recent_projects();
 void remember_project(const std::filesystem::path& path);
+// PC4 F-b (最近使用したファイルを開く): the same list with the pictures opened as books in it too — each entry still there (a
+// book's folder with its project.json, a file), the latest first, at most 環境設定 → ファイル管理's number of them;
+// remember_file puts one first (a book or a file), forget_recent takes one out (a file gone when it was chosen).
+std::vector<std::filesystem::path> recent_files();
+void remember_file(const std::filesystem::path& path);
+void forget_recent(const std::filesystem::path& path);
 
 // 用紙の設定: a preset, or every number — paper, finished size, bleed and the basic frame's margins.
 class PaperDialog : public QDialog {
@@ -92,9 +101,36 @@ public:
     QComboBox* binding = nullptr;
     QLineEdit* folder = nullptr;
 
+    // PC4 F-b (新規…, file.new; 節 F 5.3): the left of the window chooses 漫画の原稿 (the book above, written to its folder
+    // at once) or 画像 (formats::new_image: a book of one page in memory, its .genko asked for when it is saved — the
+    // user's decision 4). The image's name, preset, size and unit, resolution, colour mode, bits, canvas colour (白・黒・
+    // 背景色 — the window's, set_background — ・透明・カスタム…) and profile (the working space's, or a built-in one).
+    QListWidget* kind = nullptr;
+    QLineEdit* image_name = nullptr;
+    QComboBox* image_preset = nullptr;
+    QDoubleSpinBox* image_width = nullptr;
+    QDoubleSpinBox* image_height = nullptr;
+    QComboBox* image_unit = nullptr;
+    QDoubleSpinBox* image_dpi = nullptr;
+    QComboBox* image_mode = nullptr;
+    QComboBox* image_depth = nullptr;
+    QComboBox* image_background = nullptr;
+    QComboBox* image_profile = nullptr;
+    bool making_image() const;
+    // The image as asked (its pixels from the size and unit at its resolution).
+    formats::NewImage chosen_image() const;
+    void set_background(const QColor& colour);
+    // 画像: made (true) into `image`, the dialog accepted; or what stops it said.
+    bool create_image();
+    std::optional<formats::Opened> image;
+
 private:
     void note();
     void paper_changed();
+    void image_changed();
+    QStackedWidget* kinds_ = nullptr;
+    QColor background_ = QColor(255, 255, 255);
+    QColor custom_ = QColor(255, 255, 255);
 
     std::optional<core::PageSpec> custom_spec_;
     QLabel* paper_note_ = nullptr;

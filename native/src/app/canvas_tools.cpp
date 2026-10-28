@@ -49,9 +49,12 @@ std::optional<core::vector::Path> tool_figure(const QString& kind, const std::ar
 }  // namespace
 
 bool PageCanvas::is_stroke_tool(const QString& tool) {
-    return tool == QLatin1String("pen") || tool == QLatin1String("eraser") || tool == QLatin1String("blend") || tool == QLatin1String("liquify") ||
-           is_retouch_tool(tool);  // (PC3 B4: the retouching brushes, retouch_tools.cpp)
+    return draws_line(tool) || tool == QLatin1String("eraser") || tool == QLatin1String("blend") || tool == QLatin1String("liquify") ||
+           is_retouch_tool(tool) ||  // (PC3 B4: the retouching brushes, retouch_tools.cpp)
+           is_pixel_tool(tool);      // (PC4 E5: the brushes that change pixels, paint_tools.cpp)
 }
+
+bool PageCanvas::draws_line(const QString& tool) { return tool == QLatin1String("pen") || tool == QLatin1String("pencil"); }
 
 bool PageCanvas::tool_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers) {
     if (path_press(pos, mm, modifiers)) return true;  // (ペンツール・曲線ペンツール・パス選択ツール: canvas_pen.cpp)
@@ -99,7 +102,8 @@ bool PageCanvas::tool_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardM
         return true;
     }
     if (tool_ == QLatin1String("picker")) {
-        pick_colour(pos);
+        // (PC4 E4: Alt+click — the スポイトツール in hand, not Alt's eyedropper for a moment — picks the 背景色, Photoshop's)
+        pick_colour(pos, (modifiers & Qt::AltModifier) != 0 && !held_tool_);
         return true;
     }
     if (tool_ == QLatin1String("fill")) {
@@ -216,11 +220,12 @@ bool PageCanvas::cancel_shape() {
     return true;
 }
 
-void PageCanvas::pick_colour(const QPointF& pos) {
+void PageCanvas::pick_colour(const QPointF& pos, bool background) {
     const core::Page* p = page();
     if (p == nullptr) return;
     const QPointF mm = mm_of(pos);
     last_pick = std::make_pair(mm, pick_source == QLatin1String("layer"));
+    last_pick_background = background;
     if (pick_source == QLatin1String("layer") && layer_colour_at) {
         if (const auto rgb = layer_colour_at(mm.x(), mm.y())) emit colourPicked(*rgb);
         return;

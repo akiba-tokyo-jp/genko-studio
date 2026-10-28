@@ -2,12 +2,16 @@
 
 #include <array>
 #include <cstddef>
+#include <functional>
+#include <memory>
+#include <optional>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "render/image.hpp"
 #include "render/image_ops.hpp"
+#include "render/tiled_pixels.hpp"
 
 // PC3 B4 (SPEC.md COLOR-06「修復」): the dabs of the retouching brushes and the way their strokes are laid on a layer —
 // PhotoCraft v0.2.0's paint/src/lib.rs (StrokePoint, Stroke, Dab, dabs, dab_coverage) and paint/src/retouch.rs
@@ -20,8 +24,8 @@
 //   v·(ceil − c)), and a picture made once from the pixels before the stroke (a cloned source, a healed patch, an earlier
 //   state) is laid through it at the stroke's opacity — what the stroke painted is never sampled again (Clone Stamp,
 //   Healing Brush, Spot Healing Brush, History Brush);
-// - sequential dabs (PC4 adds `apply_dab_stroke` here, for Dodge, Burn, Sponge, Blur, Sharpen and Smudge: each dab edits
-//   a working copy the next dab sees, mixed back at the stroke's opacity).
+// - sequential dabs (apply_dab_stroke, PC4 E-0 — for E5's Dodge, Burn, Sponge, Blur, Sharpen and Smudge: each dab edits
+//   a working copy the next dab sees, mixed back at the stroke's opacity), on a layer's tiles (render/tiled_pixels).
 // The pixels are image_ops::Pixels — a layer's own values of any of the three kinds (8 bits, precise, inks: CMYK, Lab,
 // grey and a multichannel page's plates) — so the same code paints every kind; only a blend other than normal goes
 // through the colours (rgba_of, and an ink layer's back by the page's rules).
@@ -55,8 +59,13 @@ struct Dab {
     std::size_t index = 0;
 };
 
+// The most dabs a stroke lays (PC4 D6's review P2-4: a stroke whose points lie far apart — given to an op from outside —
+// refused before its dabs fill the memory; a stroke drawn on a page, even at 600 dpi with the smallest brush, lays far
+// fewer).
+inline constexpr std::size_t kMostDabs = 1000000;
+
 // The dabs of a stroke, `spacing` × the diameter apart along the points (the first point's dab first; a stroke of one
-// point is one dab).
+// point is one dab). core::OpError "a stroke has more than 1000000 dabs (…)" past kMostDabs.
 std::vector<Dab> dabs(const Brush& brush, const std::vector<StrokePoint>& points);
 // The coverage of a round dab at distance d from its centre: the anti-aliased edge, a smoothstep from the hard core.
 float dab_coverage(float d, float radius, float hardness);
@@ -94,6 +103,57 @@ void over(float* dst, const float* src, unsigned colours, float k, bool lock_alp
 // The box of the pixels it changed (none: empty).
 Box apply_coverage(image_ops::Pixels& target, const Box& box, const Coverage& coverage, float opacity, const std::vector<float>* selection,
                    bool lock_alpha, const image_ops::Pixels& paint, std::string_view blend);
+
+// --- sequential dabs (PC4 E-0: upstream's apply_dab_stroke, for E5's Dodge, Burn, Sponge, Blur, Sharpen, Smudge) ----------
+
+// The selection's coverage at a pixel of the grid (0..1); none: everywhere.
+using SelectionAt = std::function<float(int x, int y)>;
+// What a dab does to the working copy: it changes only the pixels of its footprint's box (it may read around it, as far
+// as the stroke's halo).
+using DabEffect = std::function<void(tiled::TiledPixels& work, const Footprint& footprint)>;
+
+// The dabs' boxes of a stroke (one each, in order).
+std::vector<Box> dab_boxes(const Brush& brush, const std::vector<StrokePoint>& points);
+
+// A sequential-dab stroke on a layer's tiles: the tiles its dabs reach, grown by `halo` pixels (what a dab's
+// neighbourhood reads), held in `target` (reached first); a working copy of them edited dab by dab in their order — each
+// sees what the dabs before it left —; then each pixel of the dabs' boxes mixed back into `target` by the stroke's
+// opacity × the selection's (target + (work − target) × k, every value of the layer's own kind; the alpha kept with
+// lock_alpha). A pixel the effect left as it was keeps its bytes. The box of the pixels it changed (none: empty).
+Box apply_dab_stroke(tiled::TiledPixels& target, const Brush& brush, const std::vector<StrokePoint>& points, const SelectionAt& selection,
+                     bool lock_alpha, int halo, const DabEffect& effect);
+
+// PC4 E5: a stroke's dabs as their boxes on the grid and the way each one's footprint is made — a round dab's
+// (round_dabs), or a dab brush's tip and dynamics laid at the grid's resolution (render/dabs, render/ops_paint_tools) —,
+// in their order.
+struct DabSequence {
+    std::vector<Box> rects;
+    std::function<Footprint(std::size_t)> footprint;
+};
+// The round brush's dabs as such a sequence (dabs' and footprint's: the same dabs as apply_dab_stroke above lays).
+DabSequence round_dabs(const Brush& brush, const std::vector<StrokePoint>& points);
+// apply_dab_stroke over a sequence, mixed back at `opacity` × the selection's: the same work, each footprint made when
+// its dab is laid and held in the imaging budget while it is (past it: too_large).
+Box apply_dab_stroke(tiled::TiledPixels& target, const DabSequence& dabs, float opacity, const SelectionAt& selection, bool lock_alpha, int halo,
+                     const DabEffect& effect);
+
+// The Smudge Tool's paint (upstream's Smudge): a patch of colour carried from dab to dab (centred on the dab), laid down
+// at `strength` (0..1) and then picking up what is under the dab; finger painting starts with `finger` (the layer's own
+// values: colours then the alpha) instead of what is under the first dab. Use with apply_dab_stroke and a halo of at
+// least halo() (the patch's reach).
+class Smudge {
+public:
+    Smudge(float strength, std::optional<std::vector<float>> finger, float max_brush_size);
+    int halo() const { return radius_; }
+    void dab(tiled::TiledPixels& work, const Footprint& footprint);
+
+private:
+    float strength_;
+    std::optional<std::vector<float>> finger_;
+    int radius_;
+    std::vector<float> carry_;
+    std::shared_ptr<image_ops::Held> held_;  // (PC4 E5, review P2-3: the carried picture in the imaging budget)
+};
 
 // --- the clone source (Window › Clone Source) --------------------------------------------------------------------------
 

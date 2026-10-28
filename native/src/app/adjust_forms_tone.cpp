@@ -644,21 +644,9 @@ void build_tone_menu(QMenu* adjust, const MenuContext& context) {
     adjust->addAction(context.make(QStringLiteral("act_auto_tone"), QStringLiteral("自動トーン補正"), [window] { run_auto(window, "tone"); }, {}));
     adjust->addAction(context.make(QStringLiteral("act_auto_contrast"), QStringLiteral("自動コントラスト"), [window] { run_auto(window, "contrast"); }, {}));
     adjust->addAction(context.make(QStringLiteral("act_auto_color"), QStringLiteral("自動カラー補正"), [window] { run_auto(window, "color"); }, {}));
-    // ファイル → カラールックアップテーブルを書き出す… (after 書き出し…)
-    QAction* lookup = context.make(QStringLiteral("act_export_lookup"), QStringLiteral("カラールックアップテーブルを書き出す…"), [window] { export_lookup(window); }, {});
-    // (ファイル: its own group after 書き出し… and 印刷…, which Python's menu keeps together)
-    for (QAction* menu : window->menuBar()->actions()) {
-        if (menu->menu() == nullptr || menu->text() != QStringLiteral("ファイル")) continue;
-        const QList<QAction*> items = menu->menu()->actions();
-        QAction* before = nullptr;
-        for (qsizetype i = 0; i < items.size(); ++i) {
-            if (items[i]->property("genko_attribute").toString() == QLatin1String("act_print") && i + 2 < items.size() && items[i + 1]->isSeparator())
-                before = items[i + 2];
-        }
-        menu->menu()->insertAction(before, lookup);
-        if (before != nullptr) menu->menu()->insertSeparator(before);
-        break;
-    }
+    // ファイル → 書き出し → カラールックアップテーブル… (Photoshop's name and place, PC4 F-0: the last of 書き出し ▸)
+    QAction* lookup = context.make(QStringLiteral("act_export_lookup"), QStringLiteral("カラールックアップテーブル…"), [window] { export_lookup(window); }, {});
+    if (auto* exports = window->findChild<QMenu*>(QStringLiteral("menu_export"))) exports->addAction(lookup);
 }
 
 }  // namespace genko::app::adjust_forms

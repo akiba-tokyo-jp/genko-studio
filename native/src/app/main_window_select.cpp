@@ -676,6 +676,7 @@ void MainWindow::flip(int sx, int sy) {
 void MainWindow::delete_area() {
     // (vector@1, PC3 C-a: the pen's last anchor while it draws, the path selection tool's chosen subpath: canvas_pen.cpp)
     if (canvas_->pen_drawing() && canvas_->pen_back()) return;
+    if (canvas_->work_remove()) return;  // (PC4 D4: ぼかしギャラリー's chosen pin or point while its work is on the page)
     if (canvas_->tool() == QLatin1String("pathselect") && canvas_->path_delete()) return;
     if (!selection_area() && canvas_->tool() == QLatin1String("select") && canvas_->selected_line_id) {
         apply_ops(Json::array({Json{{"op", "delete_line"}, {"id", *canvas_->selected_line_id}}}));  // Delete on a picked balloon

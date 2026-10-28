@@ -13,9 +13,11 @@
 #include <vector>
 
 #include "core/color_model.hpp"
+#include "core/file_info.hpp"
 #include "core/geometry.hpp"
 #include "core/ink.hpp"
 #include "core/json.hpp"
+#include "core/psd_keep.hpp"
 #include "core/pynum.hpp"
 #include "core/vector.hpp"
 
@@ -59,6 +61,9 @@ struct PageSpec {
     // PC3 (page-spec@1, core/vector.hpp): where the trim's top left is on a page of its own paper whose trim is not in the
     // paper's middle (none: in the middle)
     std::optional<std::pair<double, double>> trim_origin_mm;
+    // PC4 (image-grid@1, core/file_info.hpp): the grid its 8-bit pages work at ("finest": their pixel layers' finest, as a
+    // page in precise colour or inks; none: the 8-bit page's own, 200 dpi)
+    std::optional<std::string> grid;
 
     struct Margins {
         double top = 0, bottom = 0, inner = 0, outer = 0;
@@ -106,6 +111,16 @@ struct Stroke {
     double opacity = 1.0;
     std::vector<double> rotation;  // the pen's barrel turn at each point (degrees; アートペン)
     double pressure_opacity = 0.0;  // 0..1: how much a light touch also lightens the line
+    // brushes@1 (PC4, core/brush_dabs.hpp): the pen's inputs at each point a dab brush reads — its tilt (x and y,
+    // degrees, ±90: two values a point), the time (ms from the first point) and the airbrush wheel (0..1) — and the
+    // flow the window drew it with (none: the brush's). Empty: none (every line before PC4).
+    std::vector<double> tilt;
+    std::vector<double> time_ms;
+    std::vector<double> wheel;
+    std::optional<double> flow;
+    // (PC4 E1) the 背景色 a dab brush's colour dynamics mix towards (its foreground/background jitter), kept with the
+    // line so it draws the same later (none: white)
+    std::optional<std::vector<std::int64_t>> background_rgb;
 };
 
 using StrokePtr = std::shared_ptr<const Stroke>;
@@ -219,6 +234,12 @@ struct Layer {
     // PC3 (transform@1): its link group (the layers of one link move together) and its position lock
     std::optional<std::string> link;
     bool lock_position = false;
+    // PC4 (psd-keep@1, core/psd_keep.hpp): what a PSD's layer held that this build does not read, written back with it
+    std::optional<PsdLayerKeep> native_psd;
+    // PC4 E6 (layer-styles@1, core/layer_styles.hpp): its layer style — Photoshop's effects (shadows, glows, bevel and
+    // emboss, satin, the overlays, the stroke), its fill opacity and Blend If — in its normal form (none: no style, as every
+    // layer before it)
+    std::optional<Json> style;
 
     std::size_t stroke_count() const { return strokes ? strokes->items.size() : 0; }
 };
@@ -348,6 +369,10 @@ struct Page {
     std::optional<vector::ClippingPath> clipping_path;
     // PC3 (page-spec@1): `spec` is this page's own paper (the book's is doc.spec), written as the page's native_spec.
     bool own_spec = false;
+    // PC4 (file-info@1, core/file_info.hpp): the file the page was opened from; (psd-keep@1, core/psd_keep.hpp) what the
+    // PSD it was read from held that this build does not read — its image resources and global blocks
+    std::optional<NativeSource> native_source;
+    std::optional<PsdPageKeep> native_psd;
 
     Rect paper_rect_mm() const;
     Rect trim_rect_mm() const;
@@ -407,6 +432,24 @@ struct SmartContents {
     Json profile = Json::object({{"use", "keep"}});
     std::optional<Json> link;  // a linked file's place (PC3 A1): the contents are its last copy
     std::optional<Json> psd;   // what a PSD's placed layer kept (PC3 A3)
+    // camera-raw@1 (PC4 F-e): a RAW file's development settings {"develop", "adjust"?, "camera"} (format "raw" only)
+    std::optional<Json> raw;
+};
+
+// patterns@1 (PC4, core/patterns.hpp, schema-v4.md「パターン」): a pattern the book keeps — the copy of one its fills and
+// overlays use (the library of patterns is the machine's: render/preset_store). Its picture is an asset of the book (an
+// 8-bit RGB or grey one a PNG, RGBA or LA; a 16- or 32-bit RGB one GKCR; a grey, CMYK or Lab one of more bits, and CMYK
+// and Lab of any, GKIR version 2), held in Document::pattern_files by its ref. At 100 % one pixel of it is 1/dpi inch.
+struct Pattern {
+    std::string id;           // "pat-1"…: 1..64 of A-Z a-z 0-9 - _
+    std::string name;         // 1..255 characters
+    std::string asset;        // "sha256:…"
+    std::string mode = "rgb";  // rgb | gray | cmyk | lab
+    int depth = 8;            // 8 | 16 | 32
+    std::int64_t width = 0;   // 1..8192, and at most 64 M pixels
+    std::int64_t height = 0;
+    double dpi = 300.0;       // 50..2400
+    friend bool operator==(const Pattern&, const Pattern&) = default;
 };
 
 // Python's Episode (without its undo stack, pending journal and asset folder, which belong to the session).
@@ -431,6 +474,20 @@ struct Document {
     // BRUSH-01 (paper-texture@1): the grey pictures of the papers its brushes keep (brush_custom[key]["paper"]["asset"]),
     // by their asset ref. Written as assets/<ab>/<64 hex>.png; only those a brush keeps are written and read.
     std::map<std::string, Bytes> papers;
+    // brushes@1 (PC4, core/brush_dabs.hpp): the brush state's kind (the brush add_stroke draws with when it names none;
+    // none: the G pen) and background colour (背景色: what the ops' "background" means), none when not set; and the grey
+    // pictures its dab brushes' tips, dual tips and texture tiles are, by their asset ref (assets/<ab>/<64 hex>.png;
+    // only those a brush names are written and read).
+    std::optional<std::string> brush_kind;
+    std::optional<std::vector<std::int64_t>> brush_background_rgb;
+    std::map<std::string, Bytes> brush_tips;
+    // patterns@1 (PC4, core/patterns.hpp): the patterns it keeps (at most 512, in their order) and their pictures, by
+    // their asset ref (written with the suffix their kind takes: core::pattern_suffix).
+    std::vector<Pattern> patterns;
+    std::map<std::string, Bytes> pattern_files;
+    // PC4 E6 (layer-styles@1, core/layer_styles.hpp): 包括光源 — the angle and altitude (degrees) of the light its layer
+    // styles' effects take when they use the global light (none: Photoshop's 120° and 30°)
+    std::optional<std::array<double, 2>> global_light;
     // PC2a (adjustments@1): the 3D lookup tables its color_lookup corrections use (their "lut"), by their asset ref
     // (core/lut3d: GKLU bytes). Written as assets/<ab>/<64 hex>.gklut; only those a correction uses are written and read.
     std::map<std::string, Bytes> luts;
@@ -440,6 +497,16 @@ struct Document {
     // smart-objects@1: the bytes of the files ops were given (their "data") that are not in assets/ yet, by their asset ref;
     // the writer writes those its contents use (with their suffix), as it writes luts.
     std::map<std::string, Bytes> smart_files;
+    // PC4 (file-info@1, core/file_info.hpp): its File Info (none: nothing said)
+    std::optional<FileInfo> file_info;
+    // PC4 (file-info@1, psd-keep@1): the bytes of the metadata and kept PSD blocks it names that are not in assets/ yet (a
+    // book opened from a file, in memory), by their asset ref; the writer writes those it names, with their suffix (as
+    // smart_files)
+    std::map<std::string, Bytes> native_files;
+    // filters@1 (PC4 節 D, core/filter_kinds.hpp): the bytes of the files ops gave its smart filters (a displacement map)
+    // that are not in assets/ yet, by their asset ref; the writer writes those its smart filters hold (with the suffix
+    // the filter names), as it writes smart_files.
+    std::map<std::string, Bytes> filter_files;
     Json nombre = Json::object();
     Json extra = Json::object();  // top-level keys this build does not know; written back unchanged
     std::int64_t revision = 0;

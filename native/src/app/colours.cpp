@@ -1,5 +1,6 @@
 #include "app/colours.hpp"
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -8,6 +9,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QLinearGradient>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QSettings>
@@ -297,6 +299,18 @@ Swatch::Swatch(const Rgb& rgb, int size, QWidget* parent) : QPushButton(parent) 
     connect(this, &QPushButton::clicked, this, [this] { emit picked(rgb_); });
 }
 
+namespace {
+Qt::KeyboardModifiers swatch_held = Qt::NoModifier;
+}  // namespace
+
+Qt::KeyboardModifiers Swatch::held() { return swatch_held; }
+
+void Swatch::mouseReleaseEvent(QMouseEvent* event) {
+    swatch_held = event->modifiers();
+    QPushButton::mouseReleaseEvent(event);  // (clicked: picked)
+    swatch_held = Qt::NoModifier;
+}
+
 void Swatch::set_rgb(const Rgb& rgb) {
     rgb_ = rgb;
     setStyleSheet(QStringLiteral("background: rgb(%1, %2, %3); border: 1px solid %4; border-radius: 3px")
@@ -387,7 +401,7 @@ QWidget* swatch_grid(const std::vector<std::vector<Rgb>>& rows, ColourPanel* pan
     for (std::size_t r = 0; r < rows.size(); ++r) {
         for (std::size_t c = 0; c < rows[r].size(); ++c) {
             auto* swatch = new Swatch(rows[r][c], size);
-            QObject::connect(swatch, &Swatch::picked, panel, [panel](const Rgb& rgb) { panel->choose(rgb); });
+            QObject::connect(swatch, &Swatch::picked, panel, [panel](const Rgb& rgb) { panel->pick_swatch(rgb); });
             grid->addWidget(swatch, static_cast<int>(r), static_cast<int>(c));
         }
     }
@@ -438,6 +452,13 @@ void write_pending_history() {
     pending_history.reset();
 }
 
+// PC4 E-0: a precise colour's 8-bit picture (the nearest; past 0..1 the end).
+Rgb eight_of(const std::array<double, 3>& c) {
+    Rgb out{};
+    for (std::size_t i = 0; i < 3; ++i) out[i] = static_cast<int>(std::lround(std::clamp(std::isfinite(c[i]) ? c[i] : 0.0, 0.0, 1.0) * 255.0));
+    return out;
+}
+
 }  // namespace
 
 // --- the panel ------------------------------------------------------------------------------------------------------
@@ -460,17 +481,26 @@ ColourPanel::ColourPanel(BrushPanel* brush, QWidget* parent) : QWidget(parent), 
     }
     // main / sub / transparent
     main = new Swatch(brush_->rgb(), 30);
-    main->setToolTip(QStringLiteral("メインの色（今の色）"));
+    main->setToolTip(QStringLiteral("描画色（今の色）"));
     sub = new Swatch(sub_rgb_, 22);
-    sub->setToolTip(QStringLiteral("サブの色（X で入れ替え）"));
+    sub->setToolTip(QStringLiteral("背景色（クリックで入れ替え・X、D で初期設定に。右クリックで背景色を選ぶ）"));
     connect(sub, &Swatch::picked, this, [this](const Rgb&) { swap(); });
+    // (PC4 E4, tools.setColors: the 背景色 chosen of its own)
+    sub->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(sub, &QWidget::customContextMenuRequested, this, [this](const QPoint& at) {
+        QMenu menu(this);
+        QAction* chosen = menu.addAction(QStringLiteral("背景色を選ぶ…"));
+        if (menu.exec(sub->mapToGlobal(at)) != chosen) return;
+        if (const auto colour = ask::colour(this, QColor(sub_rgb_[0], sub_rgb_[1], sub_rgb_[2]), QStringLiteral("カラーピッカー（背景色）")))
+            set_background({colour->red(), colour->green(), colour->blue()});
+    });
     swap_button = new QPushButton(QStringLiteral("⇄"));
     swap_button->setFixedWidth(28);
-    swap_button->setToolTip(QStringLiteral("メインとサブを入れ替える（X）"));
+    swap_button->setToolTip(QStringLiteral("描画色と背景色を入れ替え（X）"));
     swap_button->setAccessibleName(swap_button->toolTip());
     connect(swap_button, &QPushButton::clicked, this, [this] { swap(); });
     transparent = new QCheckBox(QStringLiteral("透明色"));
-    transparent->setToolTip(QStringLiteral("透明色で描く: 描いた所が消える（ペンのまま消しゴムになる）"));
+    transparent->setToolTip(QStringLiteral("透明色で描く: 描いた所が消える（ブラシツールのまま消しゴムツールになる）"));
     auto* top = new QHBoxLayout;
     top->addWidget(main);
     top->addWidget(sub);
@@ -524,6 +554,29 @@ ColourPanel::ColourPanel(BrushPanel* brush, QWidget* parent) : QWidget(parent), 
         inks->addWidget(spin);
         ink_spins[i] = spin;
     }
+    // 高精度 (PC4 E4): the 描画色's floats on a page of 16 or 32 bits
+    precise_box = new QWidget;
+    precise_box->setObjectName(QStringLiteral("colour_precise"));
+    auto* precise = new QHBoxLayout(precise_box);
+    precise->setContentsMargins(0, 0, 0, 0);
+    precise->setSpacing(2);
+    for (std::size_t i = 0; i < precise_spins.size(); ++i) {
+        auto* spin = new QDoubleSpinBox;
+        spin->setDecimals(5);
+        spin->setRange(0.0, 1.0);
+        spin->setSingleStep(0.001);
+        spin->setMaximumWidth(72);
+        spin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+        spin->setKeyboardTracking(false);
+        spin->setAccessibleName(QStringLiteral("描画色の %1（高精度）").arg(QString::fromLatin1(labels[i])));
+        connect(spin, &QDoubleSpinBox::editingFinished, this, [this] { from_precise(); });
+        precise->addWidget(new QLabel(QString::fromLatin1(labels[i])));
+        precise->addWidget(spin);
+        precise_spins[i] = spin;
+    }
+    precise->addStretch(1);
+    precise_box->setToolTip(QStringLiteral("16・32 bit のページでは、描画色を 8 bit より細かい値（0〜1、32 bit では 1 を超えても）で選べます"));
+    precise_box->hide();
     gamut = new QLabel(QStringLiteral("⚠ 色域外"));
     gamut->setToolTip(QStringLiteral("この色はページのプロファイルでそのまま刷れません（刷ると近い色になります）"));
     inks->addWidget(gamut);
@@ -532,14 +585,14 @@ ColourPanel::ColourPanel(BrushPanel* brush, QWidget* parent) : QWidget(parent), 
     // sets, history, between, near
     tabs = new QTabWidget;
     set_choice = new QComboBox;
-    set_choice->setAccessibleName(QStringLiteral("カラーセット"));
+    set_choice->setAccessibleName(QStringLiteral("スウォッチのグループ"));
     connect(set_choice, qOverload<int>(&QComboBox::activated), this, [this](int) { fill_set(); });
     set_box = new QWidget;
     set_grid_ = new QGridLayout(set_box);
     set_grid_->setSpacing(2);
     auto* add = new QPushButton(QStringLiteral("今の色を足す"));
     connect(add, &QPushButton::clicked, this, [this] { add_to_set(); });
-    auto* fresh = new QPushButton(QStringLiteral("新しいセット…"));
+    auto* fresh = new QPushButton(QStringLiteral("新しいグループ…"));
     connect(fresh, &QPushButton::clicked, this, [this] { new_set(); });
     auto* sets_page = new QWidget;
     auto* sl = new QVBoxLayout(sets_page);
@@ -560,14 +613,15 @@ ColourPanel::ColourPanel(BrushPanel* brush, QWidget* parent) : QWidget(parent), 
     near_page = new QWidget;
     near_layout_ = new QVBoxLayout(near_page);
     near_layout_->setContentsMargins(2, 2, 2, 2);
-    tabs->addTab(sets_page, QStringLiteral("セット"));
+    tabs->addTab(sets_page, QStringLiteral("スウォッチ"));
     tabs->addTab(history_page, QStringLiteral("履歴"));
     tabs->addTab(between_page, QStringLiteral("中間色"));
     tabs->addTab(near_page, QStringLiteral("近似色"));
     pick_source = new QComboBox;
-    pick_source->addItem(QStringLiteral("スポイト: 見えている色"), QStringLiteral("view"));
-    pick_source->addItem(QStringLiteral("スポイト: 描く先のレイヤーの色"), QStringLiteral("layer"));
-    pick_source->setAccessibleName(QStringLiteral("スポイトで取る色"));
+    pick_source->addItem(QStringLiteral("サンプル: すべてのレイヤー"), QStringLiteral("view"));
+    pick_source->addItem(QStringLiteral("サンプル: 現在のレイヤー"), QStringLiteral("layer"));
+    pick_source->addItem(QStringLiteral("サンプル: 現在のレイヤー以下"), QStringLiteral("below"));  // (PC4 E4)
+    pick_source->setAccessibleName(QStringLiteral("スポイトツールのサンプル"));
     connect(pick_source, qOverload<int>(&QComboBox::activated), this, [this](int) { emit pick_source_chosen(pick_source->currentData().toString()); });
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(2, 2, 2, 2);
@@ -575,6 +629,7 @@ ColourPanel::ColourPanel(BrushPanel* brush, QWidget* parent) : QWidget(parent), 
     layout->addLayout(picker);
     layout->addLayout(numbers);
     layout->addWidget(ink_box);
+    layout->addWidget(precise_box);
     table_index = new QLabel;
     table_index->setObjectName(QStringLiteral("colour_table_index"));
     table_index->hide();
@@ -587,6 +642,12 @@ ColourPanel::ColourPanel(BrushPanel* brush, QWidget* parent) : QWidget(parent), 
     fill_between();
     show_colour(brush_->rgb());
     connect(brush_, &BrushPanel::changed, this, [this] { show_colour(brush_->rgb()); });
+    // (PC4 E-0: an 8-bit colour chosen anywhere — a swatch, the picker, the sub view —, the same one too, lets the precise
+    // 描画色 go; choose_precise() sets it after its colour is chosen)
+    connect(brush_, &BrushPanel::colour_set, this, [this] {
+        fore_precise_.reset();
+        show_precise();
+    });
 }
 
 // --- the colour -----------------------------------------------------------------------------------------------------
@@ -748,10 +809,119 @@ void ColourPanel::from_hex() {
 
 void ColourPanel::swap() {
     const Rgb new_main = sub_rgb_;
+    const std::optional<Precise> fore = is_precise() ? fore_precise_ : std::nullopt;
+    const std::optional<Precise> back = back_precise_ && eight_of(*back_precise_) == sub_rgb_ ? back_precise_ : std::nullopt;
     sub_rgb_ = rgb();
     sub->set_rgb(sub_rgb_);
     settings()->setValue(QStringLiteral("colour/sub"), write_colours({sub_rgb_}));
     choose(new_main);
+    fore_precise_ = back;  // (the floats go with their colours)
+    back_precise_ = fore;
+    show_precise();
+}
+
+void ColourPanel::reset_defaults() {
+    sub_rgb_ = Rgb{255, 255, 255};
+    sub->set_rgb(sub_rgb_);
+    settings()->setValue(QStringLiteral("colour/sub"), write_colours({sub_rgb_}));
+    choose(Rgb{20, 20, 20});
+    fore_precise_.reset();
+    back_precise_.reset();
+}
+
+void ColourPanel::choose_precise(const Precise& srgb) {
+    choose(eight_of(srgb));
+    fore_precise_ = srgb;
+    show_precise();
+}
+
+void ColourPanel::set_background(const Rgb& rgb) {
+    sub_rgb_ = rgb;
+    back_precise_.reset();
+    sub->set_rgb(sub_rgb_);
+    settings()->setValue(QStringLiteral("colour/sub"), write_colours({sub_rgb_}));
+    emit background_set();
+}
+
+void ColourPanel::set_background_precise(const Precise& srgb) {
+    set_background(eight_of(srgb));
+    back_precise_ = srgb;
+}
+
+core::Json ColourPanel::background_json(std::string_view precision) const {
+    const Precise c = background();
+    core::Json values = core::Json::array();
+    for (const double v : c) {
+        if (precision == "u16") values.push_back(std::round(std::clamp(v, 0.0, 1.0) * 65535.0) / 65535.0);
+        else values.push_back(static_cast<double>(static_cast<float>(std::isfinite(v) ? v : 0.0)));
+    }
+    return core::Json{{"precision", std::string(precision)}, {"values", std::move(values)}};
+}
+
+void ColourPanel::pick_swatch(const Rgb& rgb) {
+    if ((Swatch::held() | QApplication::keyboardModifiers()) & Qt::ControlModifier) {
+        set_background(rgb);
+    } else {
+        choose(rgb);
+    }
+}
+
+void ColourPanel::set_precise_depth(int depth) {
+    if ((depth == 16 || depth == 32 ? depth : 0) == precise_depth_) return;
+    precise_depth_ = depth == 16 || depth == 32 ? depth : 0;
+    precise_box->setVisible(precise_depth_ != 0);
+    for (QDoubleSpinBox* spin : precise_spins) spin->setRange(0.0, precise_depth_ == 32 ? 65504.0 : 1.0);
+    show_precise();
+}
+
+void ColourPanel::show_precise() {
+    if (precise_box == nullptr || precise_depth_ == 0) return;
+    const Precise c = foreground();
+    for (std::size_t i = 0; i < precise_spins.size(); ++i) {
+        const QSignalBlocker quiet(precise_spins[i]);
+        precise_spins[i]->setValue(c[i]);
+    }
+}
+
+void ColourPanel::from_precise() {
+    if (loading_ || precise_depth_ == 0) return;
+    Precise c{};
+    for (std::size_t i = 0; i < precise_spins.size(); ++i) c[i] = precise_spins[i]->value();
+    const Precise now = foreground();
+    if (std::abs(c[0] - now[0]) < 5e-6 && std::abs(c[1] - now[1]) < 5e-6 && std::abs(c[2] - now[2]) < 5e-6) return;  // (as it is)
+    choose_precise(c);
+}
+
+ColourPanel::Precise ColourPanel::foreground() const {
+    if (fore_precise_ && eight_of(*fore_precise_) == rgb()) return *fore_precise_;
+    const Rgb now = rgb();
+    return Precise{now[0] / 255.0, now[1] / 255.0, now[2] / 255.0};
+}
+
+ColourPanel::Precise ColourPanel::background() const {
+    if (back_precise_ && eight_of(*back_precise_) == sub_rgb_) return *back_precise_;
+    return Precise{sub_rgb_[0] / 255.0, sub_rgb_[1] / 255.0, sub_rgb_[2] / 255.0};
+}
+
+bool ColourPanel::is_precise() const {
+    if (!fore_precise_ || eight_of(*fore_precise_) != rgb()) return false;
+    for (std::size_t c = 0; c < 3; ++c) {
+        if ((*fore_precise_)[c] * 255.0 != std::round((*fore_precise_)[c] * 255.0)) return true;  // (more than its 8 bits)
+    }
+    return false;
+}
+
+core::Json ColourPanel::foreground_json(std::string_view precision) const {
+    const Precise c = foreground();
+    core::Json values = core::Json::array();
+    for (const double v : c) {
+        if (precision == "u16") {
+            values.push_back(std::round(std::clamp(v, 0.0, 1.0) * 65535.0) / 65535.0);
+        } else {
+            values.push_back(static_cast<double>(static_cast<float>(std::isfinite(v) ? v : 0.0)));
+        }
+    }
+    return core::Json{{"precision", std::string(precision)}, {"values", std::move(values)}};
 }
 
 ColourPanel::~ColourPanel() { write_pending_history(); }
@@ -786,7 +956,7 @@ void ColourPanel::fill_set() {
     int n = 0;
     for (const Rgb& rgb : found->second) {
         auto* swatch = new Swatch(rgb);
-        connect(swatch, &Swatch::picked, this, [this](const Rgb& c) { choose(c); });
+        connect(swatch, &Swatch::picked, this, [this](const Rgb& c) { pick_swatch(c); });
         set_grid_->addWidget(swatch, n / 7, n % 7);  // (7 a row: 22 px swatches fit the panel)
         ++n;
     }
@@ -797,8 +967,8 @@ bool ColourPanel::keep_set(const std::string& name) {
     try {
         colours::save_set(core::poses::config_dir(), name, found != sets_.end() ? std::optional(found->second) : std::nullopt);
     } catch (const std::exception& error) {
-        ask::warning(this, QStringLiteral("カラーセット"),
-                     QStringLiteral("カラーセットを保存できませんでした。\n%1").arg(wording::error(QString::fromUtf8(error.what()))));
+        ask::warning(this, QStringLiteral("スウォッチのグループ"),
+                     QStringLiteral("スウォッチのグループを保存できませんでした。\n%1").arg(wording::error(QString::fromUtf8(error.what()))));
         return false;
     }
     return true;
@@ -832,7 +1002,7 @@ void ColourPanel::new_set(const std::optional<QString>& asked) {
     if (asked) {
         name = *asked;
     } else {
-        const auto typed = ask::get_text(this, QStringLiteral("カラーセット"), QStringLiteral("新しいセットの名前"));
+        const auto typed = ask::get_text(this, QStringLiteral("スウォッチのグループ"), QStringLiteral("新しいグループの名前"));
         if (!typed || typed->trimmed().isEmpty()) return;
         name = *typed;
     }
@@ -851,7 +1021,7 @@ void ColourPanel::fill_history() {
     int n = 0;
     for (const Rgb& rgb : history_) {
         auto* swatch = new Swatch(rgb);
-        connect(swatch, &Swatch::picked, this, [this](const Rgb& c) { choose(c); });
+        connect(swatch, &Swatch::picked, this, [this](const Rgb& c) { pick_swatch(c); });
         history_grid_->addWidget(swatch, n / 7, n % 7);
         ++n;
     }

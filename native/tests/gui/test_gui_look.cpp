@@ -740,13 +740,13 @@ private slots:
         app::MainWindow* w = book.window.get();
         app::preferences::PreferencesDialog dialog(w);
         // two commands on one key are refused
-        dialog.editor(QStringLiteral("ペン"))->setKeySequence(QKeySequence(QStringLiteral("E")));
+        dialog.editor(QStringLiteral("ブラシツール"))->setKeySequence(QKeySequence(QStringLiteral("E")));
         dialog.save();
         QVERIFY(dialog.clash->text().contains(QStringLiteral("「E」")));
         QCOMPARE(book.act("act_pen")->shortcut().toString(), QStringLiteral("B"));
         QCOMPARE(dialog.result(), int(QDialog::Rejected));
         // (a free key: F7 — P is ペンツール's since PC3 C-a, Photoshop's)
-        dialog.editor(QStringLiteral("ペン"))->setKeySequence(QKeySequence(QStringLiteral("F7")));
+        dialog.editor(QStringLiteral("ブラシツール"))->setKeySequence(QKeySequence(QStringLiteral("F7")));
         // the pen tablet: a light hand gets a softer curve
         for (int i = 0; i < 60; ++i) dialog.pad->pressures.push_back(0.25 + 0.01 * (i % 10));
         dialog.measure();
@@ -759,7 +759,7 @@ private slots:
         dialog.save();
         QCOMPARE(dialog.result(), int(QDialog::Accepted));
         QCOMPARE(book.act("act_pen")->shortcut().toString(), QStringLiteral("F7"));
-        QVERIFY(book.act("act_pen")->toolTip().startsWith(QStringLiteral("ペン（F7）")));  // (the tooltip says the new key)
+        QVERIFY(book.act("act_pen")->toolTip().startsWith(QStringLiteral("ブラシツール（F7）")));  // (the tooltip says the new key)
         QCOMPARE(w->save_after(), 5000);
         // (never past the longest wait: a test book saves within 0.4 s, a person's within 10 s)
         QCOMPARE(w->session().idle(), std::min(std::chrono::milliseconds(5000), w->session().longest()));
@@ -859,8 +859,9 @@ private slots:
 
     // --- the backups (test_w15_color) -------------------------------------------------------------------------------
 
-    // zip64 (a backup past 4 GiB or 65535 files, Python's zipfile writes it so): its end records written and read back,
-    // and Python's zipfile reading the same archives whole
+    // zip64 (a backup past 4 GiB or 65535 files, Python's zipfile writes it so): its end records written and read back
+    // (Python's zipfile reading the same archives whole: test_contract_materials' bigZipsAreReadWholeByPython, a
+    // contract test, as it needs the reference Python)
     void bigBackupsAreZip64() {
         QTemporaryDir tmp;
         const auto source = gui_test::path_of(tmp.path() + QStringLiteral("/s.txt"));
@@ -888,17 +889,6 @@ private slots:
             const std::uint64_t old_count = number(end + 10, 2);
             QVERIFY(old_count == 0xffff || (count < 0xffff && old_count == count));
             if (count > 0xffff) QCOMPARE(old_count, std::uint64_t{0xffff});
-        }
-        if (genko::test::python_ref().isEmpty()) QSKIP("no reference Python: set GENKO_PYREF or install /opt/pyref/bin/python");
-        for (const auto& [archive, count] : {std::pair{forced, 2}, std::pair{crowded, 65537}}) {
-            const genko::test::Run check = genko::test::run(
-                genko::test::python_ref(),
-                {QStringLiteral("-I"), QStringLiteral("-c"),
-                 QStringLiteral("import sys, zipfile; z = zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print(len(z.namelist()))"),
-                 gui_test::qpath(archive)},
-                QProcessEnvironment::systemEnvironment(), 120000);
-            QVERIFY2(check.finished && check.exit_code == 0, qPrintable(check.described()));
-            QCOMPARE(check.out.trimmed().toInt(), count);
         }
     }
 

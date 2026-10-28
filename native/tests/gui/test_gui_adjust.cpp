@@ -107,7 +107,7 @@ class TestGuiAdjust : public QObject {
 
 private slots:
     // レイヤー → 色調補正 holds the tone commands; the keys of the design (Ctrl+L, Ctrl+M, Ctrl+I), each once among every
-    // command of the window; カラールックアップテーブルを書き出す… in ファイル, its own group after 印刷….
+    // command of the window; カラールックアップテーブル… (PC4 F-0: Photoshop's name and place) last in ファイル → 書き出し.
     void menusAndKeys() {
         Book book;
         QMenu* layers = book.menu(QStringLiteral("レイヤー"));
@@ -171,14 +171,14 @@ private slots:
                 keys[text] = name;
             }
         }
-        QMenu* file = book.menu(QStringLiteral("ファイル"));
+        QMenu* exports = book.window->findChild<QMenu*>(QStringLiteral("menu_export"));
+        QVERIFY(exports != nullptr);
         QStringList items;
-        for (QAction* a : file->actions()) items << (a->isSeparator() ? QStringLiteral("|") : a->property("genko_attribute").toString());
-        // (its own group after 書き出し…, PC3 C-a's パスを Illustrator へ… and 印刷…: test_gui_output)
-        const qsizetype print = items.indexOf(QStringLiteral("act_print"));
-        QCOMPARE(items.indexOf(QStringLiteral("act_export")), print - 2);
-        QCOMPARE(items.indexOf(QStringLiteral("act_export_paths_ai")), print - 1);
-        QCOMPARE(items.mid(print + 1, 3), (QStringList{QStringLiteral("|"), QStringLiteral("act_export_lookup"), QStringLiteral("|")}));
+        for (QAction* a : exports->actions()) items << (a->isSeparator() ? QStringLiteral("|") : a->property("genko_attribute").toString());
+        // (after 原稿を書き出す…, PC4 F-c's レイヤーからファイル… and PC3 C-a's パスを Illustrator へ…: test_gui_output)
+        QCOMPARE(items.mid(items.size() - 5), (QStringList{QStringLiteral("act_export"), QStringLiteral("|"), QStringLiteral("act_layers_to_files"),
+                                                           QStringLiteral("act_export_paths_ai"), QStringLiteral("act_export_lookup")}));
+        QCOMPARE(book.window->action(QStringLiteral("act_export_lookup"))->text(), QStringLiteral("カラールックアップテーブル…"));
         // the panels in ウィンドウ
         QVERIFY(book.window->findChild<QDockWidget*>(QStringLiteral("色調補正")) != nullptr);
         QVERIFY(book.window->findChild<QDockWidget*>(QStringLiteral("属性")) != nullptr);

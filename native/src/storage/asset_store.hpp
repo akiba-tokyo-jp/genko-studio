@@ -66,7 +66,7 @@ std::size_t copy_assets(const std::filesystem::path& src, const std::filesystem:
 
 // The asset files of these refs (whatever their suffix) that the book at `src` holds and the book at `dest` does not,
 // copied as copy_assets copies them (a link not followed, streamed and hashed on the way, one that does not hold what its
-// name says left); how many were copied. What a book saved somewhere else (別の場所に保存) names but its old folder alone
+// name says left); how many were copied. What a book saved somewhere else (別名で保存) names but its old folder alone
 // holds — a smart object's file, filter mask, PSD record and assigned ICC profile, a placed picture — goes with it so.
 // core::Error("memory") for a file larger than kAssetMaxBytes, core::Error("io") when a file cannot be read or written.
 std::size_t copy_named_assets(const std::filesystem::path& src, const std::filesystem::path& dest, const std::set<std::string>& refs);

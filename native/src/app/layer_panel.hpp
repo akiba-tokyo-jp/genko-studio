@@ -39,19 +39,17 @@ public:
     void refresh();
     // The kinds' marks drawn again in the look's colours now (after the screen's colours change).
     void refresh_look();
-    // The filters again (the plugins chosen to run, after their settings changed).
-    void reload_filters();
     // The layer drawn on chosen in the list (the list as it is: the other layers chosen with it stay chosen).
     void show_target();
     // The layers chosen in the list (Ctrl / Shift+click), bottom first.
     std::vector<std::string> selected_ids() const;
-    // Tests and the window: the list, the filter chooser, the menus.
+    // Tests and the window: the list, the filter button (かける…: the フィルター menu), the menus.
     QListWidget* list() const { return list_; }
-    QComboBox* filter_box() const { return filter_; }
+    QPushButton* filter_button() const { return filter_apply_; }
     QMenu* special_menu() const { return special_; }
     QMenu* many_menu() const { return many_; }
     QMenu* mask_menu() const { return mask_menu_; }
-    // マスクを編集する（ペンで見せる・消しゴムで隠す）: checked while the pen and the eraser paint the mask (a layer without
+    // マスクを編集する（ブラシで見せる・消しゴムで隠す）: checked while the pen and the eraser paint the mask (a layer without
     // one gets a mask showing everything first).
     QAction* mask_edit_action() const { return mask_edit_; }
     void edit_mask(bool on);
@@ -168,7 +166,7 @@ private:
     QMenu* effects_ = nullptr;
     QAction* mask_off_ = nullptr;
     QAction* color_prints_ = nullptr;
-    QComboBox* filter_ = nullptr;
+    QPushButton* filter_apply_ = nullptr;
     QPushButton* details_toggle_ = nullptr;
     QWidget* details_ = nullptr;
     std::map<std::string, std::vector<std::string>> solo_hidden_;  // page id → the layers hidden by solo (this session)

@@ -15,6 +15,10 @@
 #include <zlib.h>
 
 #include "core/version.hpp"
+#include "render/blake3.hpp"
+#include "render/codecs/codecs.hpp"
+#include "render/raw.hpp"
+#include "render/zstd.hpp"
 
 namespace genko::api {
 
@@ -74,6 +78,12 @@ nlohmann::json build_info() {
         {"harfbuzz", hb_version_string()},
         {"webp", webp_version()},
         {"lcms2", lcms_version()},
+        {"openexr", render::codecs::openexr_version()},
+        {"libavif", render::codecs::libavif_version()},
+        {"aom", render::codecs::aom_version()},
+        {"zstd", render::zstd::version()},      // (PC4 F-f: the .pcraft's compression)
+        {"blake3", render::blake3::version()},  // (PC4 F-f: the .pcraft's hashes, built in)
+        {"libraw", render::raw::libraw_version()},  // (PC4 F-e: camera RAW, a shared library beside the program)
         {"nlohmann_json", std::to_string(NLOHMANN_JSON_VERSION_MAJOR) + "." + std::to_string(NLOHMANN_JSON_VERSION_MINOR) +
                               "." + std::to_string(NLOHMANN_JSON_VERSION_PATCH)},
     };

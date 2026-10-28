@@ -81,7 +81,8 @@ void set_meta(OpContext& c) {
         doc.start_side = side->is_null() ? std::nullopt : std::optional<std::string>(side->get<std::string>());
     }
     if (const Json* strict = get(c.op, "strict_gates")) doc.strict_gates = py_truthy(*strict);
-    const auto respec = [&doc](const PageSpec& spec) {
+    const auto respec = [&doc](PageSpec spec) {
+        spec.grid = doc.spec.grid;  // (PC4 F-b, image-grid@1: the paper made again keeps its pages' grid)
         doc.spec = spec;
         for (std::size_t i = 0; i < doc.pages.size(); ++i) {
             Page& page = doc.edit_page(i);

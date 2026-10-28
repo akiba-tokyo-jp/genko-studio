@@ -18,6 +18,8 @@
 
 #include <algorithm>
 #include <functional>
+#include <optional>
+#include <unordered_map>
 
 #include "app/ask.hpp"
 #include "app/config.hpp"
@@ -30,8 +32,8 @@ namespace genko::app {
 const QStringList kDefaultCommandBar{QStringLiteral("元に戻す"), QStringLiteral("やり直す"), QStringLiteral("|"),
                                      QStringLiteral("全体を表示"), QStringLiteral("縮小"), QStringLiteral("拡大"), QStringLiteral("|"),
                                      QStringLiteral("◀ 前のページ"), QStringLiteral("次のページ ▶"), QStringLiteral("|"),
-                                     QStringLiteral("書き出し…")};
-const QStringList kDefaultQuick{QStringLiteral("ペン"), QStringLiteral("消しゴム"), QStringLiteral("塗りつぶし"), QStringLiteral("テキスト"),
+                                     QStringLiteral("原稿を書き出す…")};  // (PC4 F-0: 書き出し…'s new name)
+const QStringList kDefaultQuick{QStringLiteral("ブラシツール"), QStringLiteral("消しゴムツール"), QStringLiteral("塗りつぶしツール"), QStringLiteral("テキスト"),
                                 QStringLiteral("コマ割り"), QStringLiteral("選択範囲・選んだコマにトーンを貼る"), QStringLiteral("集中線"),
                                 QStringLiteral("左右反転して見る")};
 
@@ -58,6 +60,24 @@ bool find_in(QMenu* menu, const QAction* action, QStringList& trail) {
         }
     }
     return false;
+}
+
+// Every item of a menu with its menu path, as find_in finds it (the menus walked in the same order, an item before its
+// own menu: its first place), the ones already known kept.
+void places_in(QMenu* menu, QStringList& trail, std::unordered_map<const QAction*, QString>& out) {
+    for (QAction* item : menu->actions()) {
+        if (!out.contains(item)) out.emplace(item, trail.join(QStringLiteral(" → ")));
+        if (item->menu() != nullptr) {
+            trail << item->text();
+            places_in(item->menu(), trail, out);
+            trail.removeLast();
+        }
+    }
+}
+
+QString place_of(const std::unordered_map<const QAction*, QString>& known, const QAction* action) {
+    const auto found = known.find(action);
+    return found != known.end() ? found->second : QString();
 }
 
 const QString kLine = QStringLiteral("――（区切り）");
@@ -92,28 +112,30 @@ std::vector<QAction*> menu_commands(QMainWindow* window) {
 
 }  // namespace
 
-std::map<const QAction*, QString> command_names(QMainWindow* window) {
-    const std::vector<QAction*> all = menu_commands(window);
+namespace {
+
+// (known: the menu paths, when the caller has them already — else walked here once, when a name needs one)
+std::map<const QAction*, QString> command_names(const std::vector<QAction*>& all, QMainWindow* window,
+                                                const std::unordered_map<const QAction*, QString>* known = nullptr) {
     std::map<QString, int> count;
     for (const QAction* action : all) ++count[action->text()];
     std::map<const QAction*, QString> out;
+    std::optional<std::unordered_map<const QAction*, QString>> walked;
     for (const QAction* action : all) {
-        const QString place = count[action->text()] > 1 ? where(window, action) : QString();
+        QString place;
+        if (count[action->text()] > 1) {
+            if (known == nullptr) known = &walked.emplace(menu_places(window));
+            place = place_of(*known, action);
+        }
         out[action] = place.isEmpty() ? action->text() : QStringLiteral("%1（%2）").arg(action->text(), place);
     }
     return out;
 }
 
-QString command_name(const std::map<const QAction*, QString>& names, const QAction* action) {
-    const auto found = names.find(action);
-    return found != names.end() ? found->second : action->text();
-}
-
-std::vector<QAction*> commands(QMainWindow* window) {
-    const auto names = command_names(window);
+std::vector<QAction*> commands(const std::vector<QAction*>& all, const std::map<const QAction*, QString>& names) {
     std::vector<QAction*> out;
     QSet<QString> seen;
-    for (QAction* action : menu_commands(window)) {
+    for (QAction* action : all) {
         const QString name = command_name(names, action);
         if (seen.contains(name)) continue;
         seen.insert(name);
@@ -122,13 +144,29 @@ std::vector<QAction*> commands(QMainWindow* window) {
     return out;
 }
 
+}  // namespace
+
+std::map<const QAction*, QString> command_names(QMainWindow* window) { return command_names(menu_commands(window), window); }
+
+QString command_name(const std::map<const QAction*, QString>& names, const QAction* action) {
+    const auto found = names.find(action);
+    return found != names.end() ? found->second : action->text();
+}
+
+std::vector<QAction*> commands(QMainWindow* window) {
+    const std::vector<QAction*> all = menu_commands(window);
+    return commands(all, command_names(all, window));
+}
+
 std::map<QString, QAction*> by_text(QMainWindow* window) {
-    const auto names = command_names(window);
+    const std::vector<QAction*> all = menu_commands(window);
+    const auto names = command_names(all, window);
+    const std::vector<QAction*> listed = commands(all, names);
     std::map<QString, QAction*> out;
-    for (QAction* action : commands(window)) out[command_name(names, action)] = action;
+    for (QAction* action : listed) out[command_name(names, action)] = action;
     // (a name kept before others had the same words — the words alone: the first of them in the menus, the one that had
     // them then, as the layer panel's 色調補正のレイヤー's before レイヤー → 色調補正)
-    for (QAction* action : commands(window)) out.emplace(action->text(), action);
+    for (QAction* action : listed) out.emplace(action->text(), action);
     return out;
 }
 
@@ -141,12 +179,24 @@ QString where(QMainWindow* window, const QAction* action) {
     return {};
 }
 
+std::unordered_map<const QAction*, QString> menu_places(QMainWindow* window) {
+    std::unordered_map<const QAction*, QString> out;
+    for (QAction* top : window->menuBar()->actions()) {
+        if (top->menu() == nullptr) continue;
+        QStringList trail{top->text()};
+        places_in(top->menu(), trail, out);
+    }
+    return out;
+}
+
 std::vector<QAction*> search(QMainWindow* window, const QString& words) {
     static const QRegularExpression space(QStringLiteral("\\s+"), QRegularExpression::UseUnicodePropertiesOption);
     const QStringList parts = words.toLower().split(space, Qt::SkipEmptyParts);
     std::vector<QAction*> out;
-    for (QAction* action : commands(window)) {
-        const QString text = (action->text() + QLatin1Char(' ') + where(window, action) + QLatin1Char(' ') + action->statusTip()).toLower();
+    const std::vector<QAction*> all = menu_commands(window);
+    const auto known = menu_places(window);  // (the menus walked once: for the names and the places both)
+    for (QAction* action : commands(all, command_names(all, window, &known))) {
+        const QString text = (action->text() + QLatin1Char(' ') + place_of(known, action) + QLatin1Char(' ') + action->statusTip()).toLower();
         if (std::all_of(parts.begin(), parts.end(), [&text](const QString& part) { return text.contains(part); })) out.push_back(action);
     }
     return out;
@@ -215,7 +265,10 @@ QStringList chosen(const QString& key, const QStringList& defaults) {
     const QVariant value = settings()->value(key);
     if (!value.isValid() || value.toString().isEmpty()) return defaults;
     std::map<QString, QString> old_to_new;
-    for (const auto& [now, before] : preferences::renamed()) old_to_new[before] = now;  // (a command renamed later keeps its place)
+    const bool current = preferences::names_current(key);  // (PC4 E4: a reused name is the new command's in a list kept since)
+    for (const auto& [now, before] : preferences::renamed()) {
+        if (!(current && preferences::reused_name(before))) old_to_new[before] = now;  // (a command renamed later keeps its place)
+    }
     QStringList out;
     for (const QString& name : value.toString().split(QLatin1Char('\t'), Qt::SkipEmptyParts)) {
         const auto found = old_to_new.find(name);
@@ -224,7 +277,10 @@ QStringList chosen(const QString& key, const QStringList& defaults) {
     return out;
 }
 
-void keep(const QString& key, const QStringList& names) { settings()->setValue(key, names.join(QLatin1Char('\t'))); }
+void keep(const QString& key, const QStringList& names) {
+    settings()->setValue(key, names.join(QLatin1Char('\t')));
+    preferences::mark_names_current(key);  // (PC4 E4: its names are this build's)
+}
 
 ChooseCommands::ChooseCommands(QMainWindow* window, const QString& title, const QStringList& current, bool separators)
     : QDialog(window), window_(window) {
@@ -437,7 +493,9 @@ bool known(const Choices& choices, const QString& value) {
 
 const Choices& cursors() {
     static const Choices all{{QStringLiteral("ブラシの大きさの円"), QStringLiteral("circle")}, {QStringLiteral("円と十字"), QStringLiteral("circle_cross")},
-                             {QStringLiteral("十字"), QStringLiteral("cross")}, {QStringLiteral("点"), QStringLiteral("dot")}};
+                             {QStringLiteral("十字"), QStringLiteral("cross")}, {QStringLiteral("点"), QStringLiteral("dot")},
+                             // (PC4 E1: Photoshop's 実際の先端 — a dab brush's own tip, its size and angle; another brush's circle)
+                             {QStringLiteral("ブラシの先端の形"), QStringLiteral("tip")}};
     return all;
 }
 
@@ -447,9 +505,9 @@ QString cursor_kind() {
 }
 
 const Choices& modifier_tool_choices() {
-    static const Choices all{{QStringLiteral("何もしない"), QString()}, {QStringLiteral("スポイト"), QStringLiteral("picker")},
+    static const Choices all{{QStringLiteral("何もしない"), QString()}, {QStringLiteral("スポイトツール"), QStringLiteral("picker")},
                              {QStringLiteral("選択"), QStringLiteral("select")}, {QStringLiteral("移動ツール"), QStringLiteral("move")},
-                             {QStringLiteral("消しゴム"), QStringLiteral("eraser")}};
+                             {QStringLiteral("消しゴムツール"), QStringLiteral("eraser")}};
     return all;
 }
 
@@ -461,19 +519,19 @@ QString modifier_tool(const QString& key) {
 }
 
 const Choices& keyed_tools() {
-    static const Choices all{{QStringLiteral("ペン"), QStringLiteral("pen")},          {QStringLiteral("消しゴム"), QStringLiteral("eraser")},
-                             {QStringLiteral("塗りつぶし"), QStringLiteral("fill")},    {QStringLiteral("選択範囲"), QStringLiteral("marquee")},
+    static const Choices all{{QStringLiteral("ブラシツール"), QStringLiteral("pen")},  {QStringLiteral("消しゴムツール"), QStringLiteral("eraser")},
+                             {QStringLiteral("塗りつぶしツール"), QStringLiteral("fill")},    {QStringLiteral("選択範囲"), QStringLiteral("marquee")},
                              {QStringLiteral("選択"), QStringLiteral("select")},        {QStringLiteral("テキスト"), QStringLiteral("text")},
                              {QStringLiteral("ベクター線の直し"), QStringLiteral("vector")}, {QStringLiteral("色混ぜ"), QStringLiteral("blend")},
-                             {QStringLiteral("グラデーション"), QStringLiteral("gradient")}, {QStringLiteral("コマ"), QStringLiteral("frame")}};
+                             {QStringLiteral("グラデーションツール"), QStringLiteral("gradient")}, {QStringLiteral("コマ"), QStringLiteral("frame")}};
     return all;
 }
 
 const Choices& held_tools() {
     static const Choices all{{QStringLiteral("共通の設定のまま"), QString()}, {QStringLiteral("何もしない"), QStringLiteral("none")},
-                             {QStringLiteral("スポイト"), QStringLiteral("picker")},   {QStringLiteral("選択"), QStringLiteral("select")},
-                             {QStringLiteral("移動ツール"), QStringLiteral("move")},  {QStringLiteral("消しゴム"), QStringLiteral("eraser")},
-                             {QStringLiteral("ペン"), QStringLiteral("pen")},          {QStringLiteral("塗りつぶし"), QStringLiteral("fill")}};
+                             {QStringLiteral("スポイトツール"), QStringLiteral("picker")}, {QStringLiteral("選択"), QStringLiteral("select")},
+                             {QStringLiteral("移動ツール"), QStringLiteral("move")},  {QStringLiteral("消しゴムツール"), QStringLiteral("eraser")},
+                             {QStringLiteral("ブラシツール"), QStringLiteral("pen")},  {QStringLiteral("塗りつぶしツール"), QStringLiteral("fill")}};
     return all;
 }
 

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <set>
 #include <utility>
 
@@ -12,6 +13,7 @@
 #include "core/filters.hpp"
 #include "core/ids.hpp"
 #include "core/lut3d.hpp"
+#include "core/patterns.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 
@@ -104,12 +106,76 @@ Json gradient_extras(const Json& g) {
         if (*repeat != Json("repeat") && *repeat != Json("mirror")) throw OpError("repeat is none, repeat or mirror");
         out["repeat"] = py_str(*repeat);
     }
+    // (vector@1, PC4 E4: transparency stops beside the colour stops — PhotoCraft v0.2.0's gradients.rs:26-33, MIT —, the
+    // opacity at a place the colour stops' times theirs)
+    if (const Json* transparency = get(g, "transparency"); transparency != nullptr && !transparency->is_null()) {
+        out["transparency"] = transparency_stops(*transparency);
+    }
     return out;
+}
+
+Json transparency_stops(const Json& value) {
+    const std::string message = "transparency is [[position 0..1, opacity 0..1], …] (2 to 16 stops)";
+    if (!value.is_array()) throw OpError(message);
+    std::vector<std::pair<double, double>> stops;
+    for (const Json& s : value) {
+        if (!s.is_array() || s.size() != 2 || !s[0].is_number() || !s[1].is_number()) throw OpError(message);
+        const double position = s[0].get<double>(), opacity = s[1].get<double>();
+        if (!(0 <= position && position <= 1) || !(0 <= opacity && opacity <= 1)) throw OpError(message);
+        stops.emplace_back(py_round(position, 4), py_round(opacity, 4));
+    }
+    if (stops.size() < 2 || stops.size() > 16) throw OpError(message);
+    std::stable_sort(stops.begin(), stops.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    Json out = Json::array();
+    for (const auto& [position, opacity] : stops) out.push_back(Json::array({position, opacity}));
+    return out;
+}
+
+Json live_colours(const Json& gradient, const Document& doc) {
+    if (!gradient.is_object()) return gradient;
+    std::vector<std::int64_t> fore = doc.brush_rgb;
+    fore.resize(3, 0);
+    std::vector<std::int64_t> back = doc.brush_background_rgb.value_or(std::vector<std::int64_t>{255, 255, 255});
+    back.resize(3, 0);
+    const auto colour = [&](const Json& v) -> std::optional<Json> {
+        if (v == Json("foreground")) return ints_json(fore);
+        if (v == Json("background")) return ints_json(back);
+        return std::nullopt;
+    };
+    Json out = gradient;
+    for (const char* key : {"rgb_from", "rgb_to"}) {
+        if (const Json* v = get(out, key); v != nullptr) {
+            if (auto c = colour(*v)) out[key] = *c;
+        }
+    }
+    if (Json* stops = out.contains("stops") ? &out["stops"] : nullptr; stops != nullptr && stops->is_array()) {
+        for (Json& s : *stops) {
+            if (s.is_array() && s.size() > 1) {
+                if (auto c = colour(s[1])) s[1] = *c;
+            }
+        }
+    }
+    return out;
+}
+
+// patterns@1 (PC4 E3): a pattern fill names a pattern the book keeps (add_pattern puts one in).
+void check_pattern_kept(const Document& doc, const Json& fill) {
+    const Json* pattern = pattern_of_fill(fill);
+    if (pattern == nullptr) return;
+    const std::string& id = (*pattern)["id"].get_ref<const std::string&>();
+    if (find_pattern(doc, id) == nullptr) throw OpError("the book has no pattern " + id + " (add_pattern puts one in)");
 }
 
 // ops._fill_spec: a fill layer's colour, or its gradient (also a shape part's fill's, pen-shapes@1: render/ops_shapes).
 Json fill_spec(const Json& raw) {
     if (!raw.is_object()) throw OpError("fill is {rgb} or {gradient}");
+    if (const Json* pattern = pattern_of_fill(raw)) {  // (patterns@1, PC4 E3: a pattern the book keeps, by its id)
+        try {
+            return Json::object({{"pattern", pattern_fill_spec(*pattern)}});
+        } catch (const Error& error) {
+            throw OpError(error.what());
+        }
+    }
     const Json* gradient = get(raw, "gradient");
     if (gradient != nullptr && !gradient->is_null()) {
         const Json g = gradient->is_object() ? *gradient : Json::object();
@@ -252,7 +318,11 @@ void set_layer_with(Document& doc, const Json& op) {
     if (has(op, "fill")) {
         if (layer.kind != LayerKind::Fill) throw OpError("fill is set on a fill layer");
         if (py_truthy(op["fill"])) {
-            layer.fill = fill_spec(op["fill"]);
+            // (PC4 E4: a gradient's "foreground" and "background" colours become the book's brush colours now)
+            Json given = op["fill"];
+            if (given.is_object() && given.contains("gradient")) given["gradient"] = live_colours(given["gradient"], doc);
+            layer.fill = fill_spec(given);
+            check_pattern_kept(doc, *layer.fill);  // (patterns@1, PC4 E3)
         } else {
             layer.fill.reset();
         }
@@ -305,11 +375,18 @@ void add_layer(OpContext& c) {
     layer.exportable = true;
     // (a new drawing layer keeps each line in the panel it began in, as CLIP STUDIO's panel folders do)
     layer.panel_each = op.contains("panel_each") ? py_truthy(op["panel_each"]) : (kind_name == "pen" || kind_name == "paint");
-    if (kind_name == "fill") {
+    const Json* pattern_given = get(op, "pattern");  // (patterns@1, PC4 E3: Layer › New Fill Layer › Pattern…)
+    const bool with_pattern = pattern_given != nullptr && !pattern_given->is_null();
+    if (with_pattern && kind_name != "fill") throw OpError("pattern makes a fill layer (kind: fill)");
+    if (with_pattern) {  // (an empty or broken one refused: pattern_fill_spec)
+        layer.fill = fill_spec(Json::object({{"pattern", op["pattern"]}}));
+        check_pattern_kept(doc, *layer.fill);
+        layer.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("パターン");
+    } else if (kind_name == "fill") {
         layer.fill = fill_spec(Json::object({{"rgb", truthy_at(op, "rgb") ? op["rgb"] : Json::array({255, 255, 255})}}));
         layer.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("ベタ塗り");
     } else if (kind_name == "gradient") {
-        layer.fill = fill_spec(Json::object({{"gradient", truthy_at(op, "gradient") ? op["gradient"] : Json::object()}}));
+        layer.fill = fill_spec(Json::object({{"gradient", truthy_at(op, "gradient") ? live_colours(op["gradient"], doc) : Json::object()}}));
         layer.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("グラデーション");
     } else if (kind_name == "adjust") {
         LookupTables made;

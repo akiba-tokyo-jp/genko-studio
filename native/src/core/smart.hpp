@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/filter_kinds.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
 
@@ -28,6 +29,10 @@
 namespace genko::core {
 
 inline constexpr std::string_view kSmartObjectsFeature = "smart-objects@1";
+// PC4 節 F: the contents' files of the new formats (formats@1: TGA, ICO, Netpbm, QOI, OpenEXR, Radiance HDR, AVIF — F-a)
+// and camera RAW files with their development settings (camera-raw@1 — F-e).
+inline constexpr std::string_view kFormatsFeature = "formats@1";
+inline constexpr std::string_view kCameraRawFeature = "camera-raw@1";
 
 namespace smart {
 
@@ -55,10 +60,25 @@ inline constexpr std::array<FileFormat, 8> kFileFormats{{{".png", "png"},
                                                          {".gif", "gif"},
                                                          {".psd", "psd"},
                                                          {".psb", "psd"}}};
+// PC4 節 F: the files of the new formats — formats@1's (TGA, ICO, Netpbm, QOI, OpenEXR, Radiance HDR, AVIF: read by the
+// codecs since F-a) and camera-raw@1's (format "raw": F-e reads them with LibRaw) — known to the reader and the checks, so a
+// book that holds them is read; a book's contents of one name their extension (core/smart.cpp uses_formats). Since F-a
+// format_of_suffix and suffix_of_name give formats@1's too (a smart object is placed from one), and since F-e RAW's.
+inline constexpr std::array<FileFormat, 33> kLaterFileFormats{{{".tga", "tga"},  {".ico", "ico"},  {".pnm", "pnm"},  {".pbm", "pnm"},
+                                                               {".pgm", "pnm"},  {".ppm", "pnm"},  {".pam", "pnm"},  {".pfm", "pnm"},
+                                                               {".qoi", "qoi"},  {".exr", "exr"},  {".hdr", "hdr"},  {".avif", "avif"},
+                                                               {".dng", "raw"},  {".cr2", "raw"},  {".cr3", "raw"},  {".nef", "raw"},
+                                                               {".nrw", "raw"},  {".arw", "raw"},  {".srf", "raw"},  {".sr2", "raw"},
+                                                               {".raf", "raw"},  {".orf", "raw"},  {".rw2", "raw"},  {".pef", "raw"},
+                                                               {".srw", "raw"},  {".x3f", "raw"},  {".3fr", "raw"},  {".iiq", "raw"},
+                                                               {".erf", "raw"},  {".mrw", "raw"},  {".dcr", "raw"},  {".kdc", "raw"},
+                                                               {".mos", "raw"}}};
+// The format of a suffix of kLaterFileFormats, or none.
+std::optional<std::string> later_format_of_suffix(std::string_view suffix);
 // The suffix a file's name gives it (its extension in lower case; .jpeg as .jpg, .tiff as .tif), or none for a kind of
 // file a smart object cannot hold.
 std::optional<std::string> suffix_of_name(std::string_view name);
-// The format of a suffix (kFileFormats), or none.
+// The format of a suffix a smart object is placed from (kFileFormats, and kLaterFileFormats — PC4 F-a, F-e), or none.
 std::optional<std::string> format_of_suffix(std::string_view suffix);
 
 // A smart object's matrix: its contents' mm → the page's mm (x' = a x + c y + e, y' = b x + d y + f: transform_area's
@@ -101,6 +121,12 @@ inline constexpr std::array<std::string_view, 6> kFilterKeys{"kind", "params", "
 bool filter_kind(std::string_view kind);
 // Are the smart object's filters drawn: on, and one of them shown?
 bool filters_drawn(const Layer& layer);
+// (PC4 D7, review P2-5) The digest (sha256, 64 hexadecimal digits) of a smart object's filters and whether they show: a
+// PSD's placed layer whose Photoshop smart filters were read as Genko's keeps it in its psd record ("filters_read"); while
+// the filters are still those (photoshop_filters_kept), the PSD writer writes back the block it was read with — Photoshop's
+// filters with it —, else a block of this build's without them (the filters in the layer's pixels).
+std::string filters_digest(const Layer& layer);
+bool photoshop_filters_kept(const Layer& layer);
 // PC3 A5: the smart filters that bend the picture — 節 C's Liquify (its strokes), Perspective Warp (its planes) and Puppet
 // Warp (its pins), kept with their settings in the page's mm and drawn again on the picture below them each time
 // (render/smart_filters; PhotoCraft keeps them so, engine/src/distort_cmds.rs:233-272). Their settings: {"strokes",
@@ -114,7 +140,7 @@ bool bend_filter(std::string_view kind);
 // it wherever it is moved; without it (a book of before), the page's, as the op gave them (a page's mm, a share of the
 // page). The ops are given them in the page's (render/smart_filters keeps and draws them).
 inline constexpr std::string_view kContentsSpace = "contents";
-bool placed_filter(std::string_view kind);
+bool placed_filter(std::string_view kind);  // (PC4: a kind whose table names places, too)
 bool in_contents(const Json& filter);
 // A map of places (the page's mm and a smart object's, either way): a place's place, and how it bends there (∂x'/∂x,
 // ∂x'/∂y, ∂y'/∂x, ∂y'/∂y).
@@ -124,8 +150,13 @@ struct PlaceMap {
 };
 // A bending filter's settings through the map: its points and corners moved, its lengths (a stroke's size, the mesh, a
 // puppet's expansion) scaled as it scales them there; mirrored, a twirl and a pin's turn the other way. Its other settings
-// as they are.
+// as they are. (PC4: a kind of フィルター's by its places, core::FilterInfo::places — map_places.)
 Json map_filter_places(std::string_view kind, const Json& params, const PlaceMap& map);
+// PC4 (design 2.3, 3.3): settings' places named by a kind's table (core/filter_kinds.hpp) through the map — points and
+// lists of points moved, lengths in mm scaled as the map scales there (at the first point of the settings or of the
+// object holding them; none: at the origin) —, in the settings themselves or in each object of a list. Shares of the
+// base box (FilterPlace::Kind::Centre) are left as they are: they need the boxes (render/smart_filters maps them).
+Json map_places(const std::vector<FilterPlace>& places, const Json& params, const PlaceMap& map);
 
 // A layer of kind smart, its contents' id (nothing when its settings name none), its matrix (the identity when none).
 bool is_smart(const Layer& layer);
@@ -192,6 +223,10 @@ struct WrittenPage {
 std::vector<WrittenPage> written_pages(const Document& doc);
 // Does the book hold a smart object (a layer of kind smart, or contents)? It then names smart-objects@1.
 bool uses_smart(const Document& doc);
+// PC4: do the contents the book writes hold a file of formats@1 (kLaterFileFormats but "raw"), or a RAW file
+// (camera-raw@1: format "raw", or development settings)?
+bool uses_formats(const Document& doc);
+bool uses_camera_raw(const Document& doc);
 // The positions of the book's pages that show these contents (directly or inside other contents).
 std::vector<std::size_t> pages_using(const Document& doc, const std::string& id);
 // The ids of the contents a page shows directly (its smart object layers').
@@ -220,7 +255,9 @@ std::optional<Page> with_plain_layers(const Page& page, const Document* doc);
 
 // A page of another book coming into `doc` (import_pages, a layer pasted from another book): the contents its smart objects
 // show (and those inside them) and the files ops gave them come along, each under an id `doc` does not hold yet (the page's
-// smart objects then name it). The files of `from`'s assets are the caller's to copy first (storage::copy_assets).
+// smart objects then name it), and the files ops gave their smart filters (filters@1) and the patterns their fills name (patterns@1:
+// core::bring_patterns). The files of `from`'s assets are the
+// caller's to copy first (storage::copy_assets).
 void bring_contents(Document& doc, const Document& from, Page& page);
 
 // The same panels as a page's drawing takes them (their boxes, shapes, clipping and borders, and the panels in them).

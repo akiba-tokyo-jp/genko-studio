@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "core/base64.hpp"
+#include "core/brush_dabs.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
@@ -36,6 +37,24 @@ const Json& item(const Json& pt, std::size_t i) {
     if (!pt.is_array()) throw Error("format", "a stroke point must be a list, not " + py_repr(pt));
     if (i >= pt.size()) throw Error("format", "list index out of range");
     return pt[i];
+}
+
+// brushes@1: a line's flow (a number, not a bool), none when not given.
+void read_flow(const Json& raw, Stroke& stroke) {
+    const Json* flow = get(raw, "flow");
+    if (flow != nullptr && !flow->is_null()) {
+        if (!flow->is_number()) throw Error("format", "a line's flow is between 0 and 1");
+        stroke.flow = flow->get<double>();
+    }
+    // (PC4 E1: the 背景色 of its colour dynamics, three whole numbers 0..255)
+    const Json* bg = get(raw, "background_rgb");
+    if (bg == nullptr || bg->is_null()) return;
+    if (!bg->is_array() || bg->size() != 3 || !std::all_of(bg->begin(), bg->end(), [](const Json& v) { return v.is_number_integer(); })) {
+        throw Error("format", "a line's background_rgb is three whole numbers 0..255");
+    }
+    std::vector<std::int64_t> rgb;
+    for (const Json& v : *bg) rgb.push_back(v.is_number_unsigned() && v.get<std::uint64_t>() > 255 ? 256 : v.get<std::int64_t>());
+    stroke.background_rgb = std::move(rgb);
 }
 
 }  // namespace
@@ -104,6 +123,16 @@ Json stroke_to_packed(const Stroke& stroke) {
     if (stroke.opacity != 1.0) out["opacity"] = stroke.opacity;
     if (!stroke.rotation.empty()) out["r"] = pack_doubles(stroke.rotation);
     if (stroke.pressure_opacity != 0.0) out["po"] = stroke.pressure_opacity;
+    // brushes@1 (PC4): the pen's inputs a dab brush reads, packed as "r" is; none for a line without them (a list that
+    // is no longer one a point — its points changed by an op that does not carry them — is not written: inputs_fit)
+    if (has_stroke_inputs(stroke)) {
+        const std::size_t n = stroke.points.size();
+        if (inputs_fit(stroke.tilt, n, 2)) out["tilt"] = pack_doubles(stroke.tilt);
+        if (inputs_fit(stroke.time_ms, n, 1)) out["time_ms"] = pack_doubles(stroke.time_ms);
+        if (inputs_fit(stroke.wheel, n, 1)) out["wheel"] = pack_doubles(stroke.wheel);
+        if (stroke.flow) out["flow"] = *stroke.flow;
+        if (stroke.background_rgb) out["background_rgb"] = *stroke.background_rgb;
+    }
     return out;
 }
 
@@ -143,6 +172,11 @@ Stroke coerce_stroke(const Json& raw) {
         stroke.rotation = unpack_key("r");
         const Json* po = get(raw, "po");
         stroke.pressure_opacity = po && py_truthy(*po) ? py_float(*po) : 0.0;
+        stroke.tilt = unpack_key("tilt");
+        stroke.time_ms = unpack_key("time_ms");
+        stroke.wheel = unpack_key("wheel");
+        read_flow(raw, stroke);
+        validate_stroke_inputs(stroke);
         return stroke;
     }
     if (raw.is_object()) {
@@ -180,6 +214,20 @@ Stroke coerce_stroke(const Json& raw) {
         const Json* po = get(raw, "po");
         if (po == nullptr) po = get(raw, "pressure_opacity");
         stroke.pressure_opacity = po && py_truthy(*po) ? py_float(*po) : 0.0;
+        // (brushes@1: tilt as [[x, y]…], time_ms and wheel as lists, one a point)
+        if (const Json* tilt = get(raw, "tilt"); tilt && py_truthy(*tilt)) {
+            for (const Json& pt : py_list(*tilt)) {
+                stroke.tilt.push_back(py_float(item(pt, 0)));
+                stroke.tilt.push_back(py_float(item(pt, 1)));
+            }
+        }
+        for (const auto& [key, into] : {std::pair<const char*, std::vector<double>*>{"time_ms", &stroke.time_ms}, {"wheel", &stroke.wheel}}) {
+            if (const Json* values = get(raw, key); values && py_truthy(*values)) {
+                for (const Json& v : py_list(*values)) into->push_back(py_float(v));
+            }
+        }
+        read_flow(raw, stroke);
+        validate_stroke_inputs(stroke);
         return stroke;
     }
     if (!raw.is_array()) throw Error("format", "'" + py_type_name(raw) + "' object is not iterable");

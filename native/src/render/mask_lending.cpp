@@ -154,7 +154,7 @@ bool MaskLending::take_back(core::Document& doc) const {
     page.layers.erase(lent);
     const auto owner = std::find_if(page.layers.begin(), page.layers.end(), [&](const core::Layer& l) { return l.id == owner_; });
     if (owner == page.layers.end()) return false;
-    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer);
+    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer, &doc);
     const std::size_t n = static_cast<std::size_t>(lent_size_.width) * static_cast<std::size_t>(lent_size_.height);
     std::vector<std::uint8_t> changed(n, 0);
     std::vector<float> made(n, 0.0f);

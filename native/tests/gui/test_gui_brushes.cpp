@@ -17,16 +17,22 @@
 #include <QSlider>
 #include <QSpinBox>
 #include <fstream>
+#include <stdexcept>
 #include "gui_support.hpp"
 #include "app/brush_panel.hpp"
 #include "app/canvas.hpp"
+#include "app/colours.hpp"
 #include "app/config.hpp"
 #include "app/fields.hpp"
 #include "app/inject.hpp"
 #include "app/main_window.hpp"
 #include "app/tool_settings.hpp"
+#include "core/base64.hpp"
+#include "core/brush_dabs.hpp"
 #include "core/brushes.hpp"
 #include "render/brushes.hpp"
+#include "render/dabs/lines.hpp"
+#include "render/png.hpp"
 using namespace genko;
 using core::Json;
 namespace inject = genko::app::inject;
@@ -325,11 +331,248 @@ private slots:
         QCOMPARE(studio.window->canvas()->eraser_mm, 6.5);
     }
 
+    // brushes@1 (PC4 E1): the 鉛筆ツール — its page and 自動消去, its own hard dab brush the book keeps (not in the brush
+    // list); 表示 › ブラシプレビュー (off: the cross alone) and 環境設定's pointers.
+    void pencilAndBrushPreview() {
+        Studio studio;
+        std::vector<Json> ops;
+        QObject::connect(studio.session.get(), &app::Session::changed, studio.window.get(), [&](const app::BookChange& c) {
+            if (c.why == app::BookChange::Why::Edit) ops.push_back(c.ops);
+        });
+        auto* ts = studio.window->tool_settings();
+        QVERIFY(studio.window->action(QStringLiteral("act_pencil")) != nullptr);
+        studio.window->choose_tool(QStringLiteral("pencil"));
+        QCOMPARE(ts->title()->text(), QStringLiteral("鉛筆ツール"));
+        QVERIFY(studio.brush().auto_erase->isVisibleTo(studio.window.get()));
+        studio.brush().size->setValue(3.0);
+        inject::mouse_stroke(studio.window->canvas(), {QPointF(10, 20), QPointF(40, 20)});
+        QVERIFY(!ops.empty());
+        QCOMPARE(ops.back()[0]["op"], Json("define_brush"));
+        const std::string pencil(render::dabs::kPencilKey);
+        QCOMPARE(ops.back()[0]["key"], Json(pencil));
+        QCOMPARE(ops.back().back()["kind"], Json(pencil));
+        QCOMPARE(studio.session->document().brush_custom[pencil]["engine"], Json("dabs"));
+        QCOMPARE(studio.ink().strokes->items.back()->kind, pencil);
+        for (int i = 0; i < studio.brush().kinds->count(); ++i) {
+            QVERIFY(studio.brush().kinds->item(i)->data(Qt::UserRole).toString().toStdString() != pencil);
+        }
+        // 自動消去: begun on the 描画色, the line is in the 背景色; begun elsewhere, in the 描画色
+        studio.brush().auto_erase->setChecked(true);
+        const auto back = studio.window->colours()->background();
+        const Json back8 = Json::array({std::lround(std::clamp(back[0], 0.0, 1.0) * 255), std::lround(std::clamp(back[1], 0.0, 1.0) * 255),
+                                        std::lround(std::clamp(back[2], 0.0, 1.0) * 255)});
+        inject::mouse_stroke(studio.window->canvas(), {QPointF(25, 20), QPointF(25, 40)});
+        QCOMPARE(ops.back().back()["rgb"], back8);
+        inject::mouse_stroke(studio.window->canvas(), {QPointF(45, 45), QPointF(50, 50)});
+        QVERIFY(ops.back().back()["rgb"] != back8);
+        // a book with a brush of one's own under the pencil's key (review P3-2): kept as it is, the pencil the next key
+        Studio other;
+        QVERIFY(other.window->apply_ops(Json::array({Json{{"op", "define_brush"}, {"key", pencil}, {"label", "わたしの"}, {"base", "gpen"}}})));
+        const Json mine = other.session->document().brush_custom[pencil];
+        other.window->choose_tool(QStringLiteral("pencil"));
+        inject::mouse_stroke(other.window->canvas(), {QPointF(10, 20), QPointF(40, 20)});
+        QCOMPARE(other.session->document().brush_custom[pencil], mine);
+        QCOMPARE(other.ink().strokes->items.back()->kind, pencil + "_2");
+        QCOMPARE(other.session->document().brush_custom[pencil + "_2"]["engine"], Json("dabs"));
+        // the brush tool: no 自動消去, its own brush
+        studio.window->choose_tool(QStringLiteral("pen"));
+        QVERIFY(!studio.brush().auto_erase->isVisibleTo(studio.window.get()));
+        studio.draw({QPointF(10, 50), QPointF(30, 50)});
+        QCOMPARE(studio.ink().strokes->items.back()->kind, std::string(core::kDefaultBrush));
+        // ブラシプレビュー: on at first; off, the pointer is the cross alone
+        auto* preview = studio.window->action(QStringLiteral("act_brush_preview"));
+        QVERIFY(preview != nullptr && preview->isCheckable() && preview->isChecked());
+        QVERIFY(studio.window->canvas()->brush_preview);
+        preview->setChecked(false);
+        QVERIFY(!studio.window->canvas()->brush_preview);
+        QCOMPARE(studio.window->canvas()->cursor().shape(), Qt::CrossCursor);
+        preview->setChecked(true);
+        QVERIFY(studio.window->canvas()->brush_preview);
+    }
+
+    // brushes@1 (PC4 E1): the 消しゴムツール's モード — ブラシ (the brush panel's when it is a dab brush, else the eraser's
+    // own 質 as before), 鉛筆, ブロック — with its 不透明度 and 流量 in the op; the book given the brush first.
+    void eraserModes() {
+        render::brushes::save_to_library(app::config_dir(), "my_dab", Json{{"label", "ダブ"}, {"engine", "dabs"}, {"dabs", Json{{"hardness", 0.5}}}});
+        Studio studio;
+        studio.draw({QPointF(10, 20), QPointF(40, 20)});
+        // a paint layer of pixels (opaque grey)
+        const render::Image grey = render::Image::create("RGBA", render::Size{170, 170}, render::Ink{200, 200, 200, 255});
+        QVERIFY(studio.window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "paint"}},
+                                                      Json{{"op", "set_layer"}, {"page", 1}, {"id", "paint"}, {"panel_each", false}, {"panel_clip", false}},
+                                                      Json{{"op", "put_raster"}, {"page", 1}, {"id", "paint"}, {"png_base64", core::b64encode(render::write_png(grey))}}})));
+        std::vector<Json> ops;
+        QObject::connect(studio.session.get(), &app::Session::changed, studio.window.get(), [&](const app::BookChange& c) {
+            if (c.why == app::BookChange::Why::Edit) ops.push_back(c.ops);
+        });
+        auto* kind = studio.window->findChild<QComboBox*>(QStringLiteral("eraser_kind"));
+        auto* opacity = studio.window->findChild<QSlider*>(QStringLiteral("eraser_opacity"));
+        auto* flow = studio.window->findChild<QSlider*>(QStringLiteral("eraser_flow"));
+        QVERIFY(kind != nullptr && opacity != nullptr && flow != nullptr);
+        QCOMPARE(kind->currentData().toString(), QStringLiteral("brush"));
+        studio.window->choose_tool(QStringLiteral("eraser"));
+        studio.window->set_target_layer("paint");
+        inject::mouse_stroke(studio.window->canvas(), {QPointF(14, 16), QPointF(14, 24)});
+        QCOMPARE(ops.back().back()["op"], Json("erase"));
+        QCOMPARE(ops.back().back()["layer_id"], Json("paint"));
+        QVERIFY(!ops.back().back().contains("brush") && !ops.back().back().contains("block"));
+        // ブロック, half its 不透明度, its 流量 0.8
+        kind->setCurrentIndex(kind->findData(QStringLiteral("block")));
+        opacity->setValue(50);
+        flow->setValue(80);
+        inject::mouse_stroke(studio.window->canvas(), {QPointF(18, 16), QPointF(18, 24)});
+        QCOMPARE(ops.back().back()["block"], Json(true));
+        QCOMPARE(ops.back().back()["opacity"], Json(0.5));
+        QCOMPARE(ops.back().back()["flow"], Json(0.8));
+        // 鉛筆: the pencil's brush, the book given it first
+        kind->setCurrentIndex(kind->findData(QStringLiteral("pencil")));
+        inject::mouse_stroke(studio.window->canvas(), {QPointF(22, 16), QPointF(22, 24)});
+        QCOMPARE(ops.back()[0]["op"], Json("define_brush"));
+        QCOMPARE(ops.back().back()["brush"], Json(std::string(render::dabs::kPencilKey)));
+        // ブラシ with a dab brush chosen in the brush panel
+        kind->setCurrentIndex(kind->findData(QStringLiteral("brush")));
+        studio.choose("my_dab");
+        QCOMPARE(studio.brush().kind(), std::string("my_dab"));
+        studio.window->choose_tool(QStringLiteral("eraser"));
+        studio.window->set_target_layer("paint");
+        inject::mouse_stroke(studio.window->canvas(), {QPointF(26, 16), QPointF(26, 24)});
+        QCOMPARE(ops.back()[0]["op"], Json("define_brush"));
+        QCOMPARE(ops.back().back()["brush"], Json("my_dab"));
+        QVERIFY(!ops.back().back().contains("texture"));
+        QCOMPARE(app::settings()->value(QStringLiteral("eraser/kind")).toString(), QStringLiteral("brush"));
+        QCOMPARE(app::settings()->value(QStringLiteral("eraser/opacity")).toDouble(), 0.5);
+        // a pen layer: its lines cut as before, in every モード — the book given no brush (review P2-4)
+        Studio pen;
+        pen.choose("gpen");  // (the brush panel remembers the last brush chosen: the G pen's line)
+        pen.draw({QPointF(10, 20), QPointF(40, 20)});
+        std::vector<Json> pen_ops;
+        QObject::connect(pen.session.get(), &app::Session::changed, pen.window.get(), [&](const app::BookChange& c) {
+            if (c.why == app::BookChange::Why::Edit) pen_ops.push_back(c.ops);
+        });
+        auto* pen_kind = pen.window->findChild<QComboBox*>(QStringLiteral("eraser_kind"));
+        pen.window->choose_tool(QStringLiteral("eraser"));
+        for (const char* way : {"pencil", "block", "brush"}) {
+            pen_kind->setCurrentIndex(pen_kind->findData(QString::fromLatin1(way)));
+            if (std::string(way) == "brush") pen.choose("my_dab");
+            pen.window->choose_tool(QStringLiteral("eraser"));
+            inject::mouse_stroke(pen.window->canvas(), {QPointF(20, 16), QPointF(20, 24)});
+            QCOMPARE(pen_ops.back().size(), std::size_t(1));
+            QCOMPARE(pen_ops.back()[0]["op"], Json("erase"));
+            QVERIFY2(!pen_ops.back()[0].contains("brush") && !pen_ops.back()[0].contains("block") && !pen_ops.back()[0].contains("opacity"), way);
+        }
+        QVERIFY(!core::uses_brushes(pen.session->document()));
+    }
+
+    // brushes@1 (PC4 E1, review P2-6): a line with a blend on a paint layer that has lines of its own — they become its
+    // pixels — is asked first (やめる: nothing changes; 描く: drawn, not asked again for the layer); a blend other than
+    // 通常 shows beside the tool's name; on a pen layer the モード is grey and lines are drawn normal (review P3-6).
+    void aBlendAsksBeforeTheLinesBecomePixels() {
+        Studio studio;
+        auto* window = studio.window.get();
+        QVERIFY(window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "paint"}},
+                                               Json{{"op", "set_layer"}, {"page", 1}, {"id", "paint"}, {"panel_each", false}, {"panel_clip", false}}})));
+        window->set_target_layer("paint");
+        studio.draw({QPointF(10, 20), QPointF(40, 20)});  // (a line of the paint layer's own)
+        const auto paint = [&]() -> const core::Layer& {
+            for (const core::Layer& l : studio.session->document().page(0).layers)
+                if (l.id == "paint") return l;
+            throw std::runtime_error("no paint layer");
+        };
+        QCOMPARE(paint().stroke_count(), std::size_t(1));
+        auto& brush = studio.brush();
+        brush.blend->setCurrentIndex(brush.blend->findData(QStringLiteral("multiply")));
+        QVERIFY(brush.blend->isEnabled());
+        QVERIFY(window->tool_settings()->badge()->isVisibleTo(window));
+        QVERIFY(window->tool_settings()->badge()->text().contains(QStringLiteral("乗算")));
+        int asked = 0;
+        int answer = QDialog::Rejected;
+        studio.answers.responder->exec = [&](QDialog* dialog) {
+            if (dialog->objectName() != QStringLiteral("blend_bakes")) return int(QDialog::Rejected);
+            ++asked;
+            return answer;
+        };
+        const std::int64_t revision = studio.session->document().revision;
+        inject::mouse_stroke(window->canvas(), {QPointF(10, 30), QPointF(40, 30)});
+        QCOMPARE(asked, 1);
+        QCOMPARE(studio.session->document().revision, revision);  // (やめる: nothing)
+        QCOMPARE(paint().stroke_count(), std::size_t(1));
+        answer = QDialog::Accepted;
+        inject::mouse_stroke(window->canvas(), {QPointF(10, 35), QPointF(40, 35)});
+        QCOMPARE(asked, 2);
+        QCOMPARE(paint().stroke_count(), std::size_t(0));  // (its line became pixels, the blend's line painted in)
+        QVERIFY(paint().raster_png && !paint().raster_png->empty());
+        studio.draw({QPointF(10, 40), QPointF(40, 40)});
+        studio.draw({QPointF(10, 45), QPointF(40, 45)});
+        QCOMPARE(asked, 2);  // (not asked again for the layer)
+        // a pen layer: the モード grey, the line normal, nothing asked
+        window->set_target_layer(studio.ink().id);
+        QVERIFY(!brush.blend->isEnabled());
+        QVERIFY(!window->tool_settings()->badge()->isVisibleTo(window));
+        std::vector<Json> ops;
+        QObject::connect(studio.session.get(), &app::Session::changed, window, [&](const app::BookChange& c) {
+            if (c.why == app::BookChange::Why::Edit) ops.push_back(c.ops);
+        });
+        studio.draw({QPointF(10, 50), QPointF(40, 50)});
+        QVERIFY(!ops.back().back().contains("blend"));
+        // back to the paint layer: its モード as it shows (review P3-6)
+        window->set_target_layer("paint");
+        studio.draw({QPointF(10, 55), QPointF(40, 55)});
+        QCOMPARE(ops.back().back()["blend"], Json("multiply"));
+        brush.blend->setCurrentIndex(0);
+        QVERIFY(!window->tool_settings()->badge()->isVisibleTo(window));
+    }
+
+    // brushes@1 (PC4 E1): the brush tool's 流量 (a dab brush's), 滑らかさ (紐で引く: the window smooths, no stabilize sent)
+    // and the cursor's 描いている間は十字だけにする (review P2-8: the cross while drawing, the circle's blank pointer after).
+    void theBrushToolsSettingsAndPointer() {
+        render::brushes::save_to_library(app::config_dir(), "my_dab", Json{{"label", "ダブ"}, {"engine", "dabs"}, {"dabs", Json{{"hardness", 0.5}}}});
+        Studio studio;
+        auto& brush = studio.brush();
+        std::vector<Json> ops;
+        QObject::connect(studio.session.get(), &app::Session::changed, studio.window.get(), [&](const app::BookChange& c) {
+            if (c.why == app::BookChange::Why::Edit) ops.push_back(c.ops);
+        });
+        studio.choose("my_dab");
+        brush.flow->setValue(30);
+        brush.smoothing->setCurrentIndex(brush.smoothing->findData(QStringLiteral("string")));
+        QVERIFY(brush.smoothing_amount->isEnabled());
+        studio.draw({QPointF(10, 20), QPointF(20, 22), QPointF(30, 20), QPointF(40, 24)});
+        const Json& op = ops.back().back();
+        QCOMPARE(op["kind"], Json("my_dab"));
+        QCOMPARE(op["flow"], Json(0.3));
+        QCOMPARE(op["stabilize"], Json(0));
+        QCOMPARE(studio.window->canvas()->smoothing, QStringLiteral("string"));
+        // the G pen: no flow sent (its line as before)
+        studio.choose("gpen");
+        studio.draw({QPointF(10, 30), QPointF(40, 30)});
+        QVERIFY(!ops.back().back().contains("flow"));
+        // the pointer: the circle (blank system pointer), the cross while drawing
+        auto* canvas = studio.window->canvas();
+        canvas->cursor_kind = QStringLiteral("circle");
+        canvas->cross_while_drawing = true;
+        studio.window->choose_tool(QStringLiteral("pen"));
+        canvas->refresh_cursor();
+        QCOMPARE(canvas->cursor().shape(), Qt::BlankCursor);
+        inject::mouse(canvas, inject::Phase::Press, QPointF(10, 40));
+        QCOMPARE(canvas->cursor().shape(), Qt::CrossCursor);
+        inject::mouse(canvas, inject::Phase::Move, QPointF(30, 40));
+        inject::mouse(canvas, inject::Phase::Release, QPointF(30, 40));
+        QCOMPARE(canvas->cursor().shape(), Qt::BlankCursor);
+        canvas->cross_while_drawing = false;
+        inject::mouse(canvas, inject::Phase::Press, QPointF(10, 45));
+        QCOMPARE(canvas->cursor().shape(), Qt::BlankCursor);
+        inject::mouse(canvas, inject::Phase::Release, QPointF(30, 45));
+        // ブラシの先端の形: a dab brush's tip drawn as the pointer (the system's blank)
+        canvas->cursor_kind = QStringLiteral("tip");
+        canvas->refresh_cursor();
+        QCOMPARE(canvas->cursor().shape(), Qt::BlankCursor);
+    }
+
     // ツールの設定: each tool's name, hint and page; the panel tool's ways and the selection's settings go to the canvas.
     void eachToolsPage() {
         Studio studio;
         auto* ts = studio.window->tool_settings();
-        for (const auto& [tool, title] : {std::pair{"pen", "ペン（B）"}, {"eraser", "消しゴム（E）"}, {"frame", "コマ割り（F）"}, {"select", "選択（V）"},
+        for (const auto& [tool, title] : {std::pair{"pen", "ブラシツール（B）"}, {"eraser", "消しゴムツール（E）"}, {"frame", "コマ割り（F）"}, {"select", "選択（V）"},
                                           {"move", "移動ツール（Q）"}, {"zoom", "虫めがね（Z）"}, {"lasso", "選択範囲ツール（M・L・W）"}}) {
             studio.window->choose_tool(QString::fromLatin1(tool));
             QCOMPARE(ts->title()->text(), QString::fromUtf8(title));

@@ -4,11 +4,17 @@
 #include <cmath>
 #include <cstdint>
 #include <numbers>
+#include <memory>
 #include <optional>
+#include <string>
+
+#include "core/command_bus.hpp"
+#include "core/error.hpp"
 
 // PhotoCraft v0.2.0 crates/paint/src/lib.rs (lines 43-150: StrokePoint, Stroke, Dab, dabs, dab_coverage),
 // crates/paint/src/dynamics.rs (lines 125-215: the path walker's spacing), crates/paint/src/retouch.rs (lines 1-224:
-// Footprint, stroke_coverage, over_native, apply_coverage) and crates/engine/src/presets/clone_source.rs (lines 103-240:
+// Footprint, stroke_coverage, over_native, apply_coverage; PC4 E-0: lines 225-428, apply_dab_stroke and Smudge, on a
+// layer's tiles) and crates/engine/src/presets/clone_source.rs (lines 103-240:
 // Mapping, transform_matrix, resample), MIT: native/third_party/photocraft/NOTICE.md.
 
 namespace genko::render::retouch {
@@ -43,6 +49,8 @@ std::vector<Dab> dabs(const Brush& brush, const std::vector<StrokePoint>& points
         return std::max(static_cast<double>(std::max(diameter(p), 1.0f) * std::max(brush.spacing, 0.01f)), 0.5);
     };
     const auto emit = [&](const StrokePoint& p) {
+        if (out.size() >= kMostDabs)
+            throw core::OpError("a stroke has more than " + std::to_string(kMostDabs) + " dabs (its points lie too far apart for its brush's spacing)");
         Dab d;
         d.x = p.x;
         d.y = p.y;
@@ -195,6 +203,115 @@ Box apply_coverage(Pixels& target, const Box& box, const Coverage& coverage, flo
     }
     if (!normal && target.kind() == Pixels::Kind::Inks && changed.width() > 0) image_ops::from_rgba(target, under);
     return changed;
+}
+
+// --- sequential dabs ---------------------------------------------------------------------------------------------------
+
+std::vector<Box> dab_boxes(const Brush& brush, const std::vector<StrokePoint>& points) {
+    std::vector<Box> out;
+    for (const Dab& d : dabs(brush, points)) out.push_back(dab_rect(d));
+    return out;
+}
+
+DabSequence round_dabs(const Brush& brush, const std::vector<StrokePoint>& points) {
+    auto all = std::make_shared<const std::vector<Dab>>(dabs(brush, points));
+    DabSequence out;
+    out.rects.reserve(all->size());
+    for (const Dab& d : *all) out.rects.push_back(dab_rect(d));
+    const float hardness = brush.hardness;
+    out.footprint = [all, hardness](std::size_t i) { return footprint((*all)[i], hardness); };
+    return out;
+}
+
+Box apply_dab_stroke(tiled::TiledPixels& target, const Brush& brush, const std::vector<StrokePoint>& points, const SelectionAt& selection,
+                     bool lock_alpha, int halo, const DabEffect& effect) {
+    return apply_dab_stroke(target, round_dabs(brush, points), brush.opacity, selection, lock_alpha, halo, effect);
+}
+
+Box apply_dab_stroke(tiled::TiledPixels& target, const DabSequence& dabs, float stroke_opacity, const SelectionAt& selection, bool lock_alpha,
+                     int halo, const DabEffect& effect) {
+    const std::vector<Box>& rects = dabs.rects;
+    if (rects.empty()) return {};
+    std::vector<Box> around;
+    around.reserve(rects.size());
+    for (const Box& r : rects) around.push_back(Box{r.x0 - halo, r.y0 - halo, r.x1 + halo, r.y1 + halo});
+    target.reach(around);
+    tiled::TiledPixels work(target);  // (the working copy: each dab sees what those before it left)
+    for (std::size_t i = 0; i < rects.size(); ++i) {
+        // (a footprint is the dab's box in floats: held in the imaging budget while it is laid — PC4 E5)
+        const image_ops::Held held(std::uint64_t(std::max(rects[i].width(), 0)) * std::uint64_t(std::max(rects[i].height(), 0)) * sizeof(float));
+        effect(work, dabs.footprint(i));
+    }
+    // (mixed back over the tiles the dabs' boxes reach: a pixel the effect did not change has work == target)
+    const Size grid = target.grid();
+    const unsigned n = target.all(), alpha = target.colours();
+    const float opacity = std::clamp(stroke_opacity, 0.0f, 1.0f);
+    Box changed;
+    for (const Box& tile : tiled::tiles_reached(grid, rects)) {
+        for (int y = tile.y0; y < tile.y1; ++y) {
+            for (int x = tile.x0; x < tile.x1; ++x) {
+                const float* w = work.at(x, y);
+                const float* o = target.at(x, y);
+                bool differs = false;
+                for (unsigned c = 0; c < n && !differs; ++c) differs = (!lock_alpha || c != alpha) && w[c] != o[c];
+                if (!differs) continue;
+                const float k = opacity * (selection ? selection(x, y) : 1.0f);
+                if (!(k > 0.0f)) continue;
+                float* out = target.edit(x, y);
+                for (unsigned c = 0; c < n; ++c) {
+                    if (lock_alpha && c == alpha) continue;
+                    out[c] += (w[c] - out[c]) * k;
+                }
+                changed = join(changed, Box{x, y, x + 1, y + 1});
+            }
+        }
+    }
+    return changed;
+}
+
+Smudge::Smudge(float strength, std::optional<std::vector<float>> finger, float max_brush_size)
+    : strength_(std::clamp(strength, 0.0f, 1.0f)), finger_(std::move(finger)), radius_(static_cast<int>(std::ceil(max_brush_size / 2.0f)) + 2) {}
+
+void Smudge::dab(tiled::TiledPixels& work, const Footprint& fp) {
+    const int r = radius_;
+    const unsigned n = work.all();
+    const auto side = std::size_t(2 * r + 1);
+    const int cx = static_cast<int>(std::floor(fp.dab.x)), cy = static_cast<int>(std::floor(fp.dab.y));
+    const Size grid = work.grid();
+    if (finger_ && finger_->size() < n) throw core::Error("value", "the finger painting's colour is not of the layer's values");
+    // (a pixel past the grid: the nearest of it, as upstream's past its work region)
+    const auto clamped = [&](int x, int y) { return work.at(std::clamp(x, 0, grid.width - 1), std::clamp(y, 0, grid.height - 1)); };
+    if (carry_.empty()) {
+        held_ = std::make_shared<image_ops::Held>(std::uint64_t(side) * side * n * sizeof(float));  // (past the budget: too_large)
+        carry_.assign(side * side * n, 0.0f);
+        for (std::size_t qy = 0; qy < side; ++qy) {
+            for (std::size_t qx = 0; qx < side; ++qx) {
+                const float* v = finger_ ? finger_->data() : clamped(cx + static_cast<int>(qx) - r, cy + static_cast<int>(qy) - r);
+                std::copy(v, v + n, carry_.begin() + static_cast<std::ptrdiff_t>((qy * side + qx) * n));
+            }
+        }
+    }
+    // lay down the carried colour
+    for (int y = std::max(fp.rect.y0, 0); y < std::min(fp.rect.y1, grid.height); ++y) {
+        for (int x = std::max(fp.rect.x0, 0); x < std::min(fp.rect.x1, grid.width); ++x) {
+            const float k = fp.at(x, y) * strength_;
+            const int qx = x - cx + r, qy = y - cy + r;
+            if (!(k > 0.0f) || qx < 0 || qy < 0 || qx >= static_cast<int>(side) || qy >= static_cast<int>(side)) continue;
+            const std::size_t q = (std::size_t(qy) * side + std::size_t(qx)) * n;
+            float* px = work.edit(x, y);
+            for (unsigned c = 0; c < n; ++c) px[c] += (carry_[q + c] - px[c]) * k;
+        }
+    }
+    // pick up: the carried colour keeps `strength` of itself
+    for (std::size_t qy = 0; qy < side; ++qy) {
+        for (std::size_t qx = 0; qx < side; ++qx) {
+            const int x = cx + static_cast<int>(qx) - r, y = cy + static_cast<int>(qy) - r;
+            if (x < 0 || y < 0 || x >= grid.width || y >= grid.height) continue;
+            const std::size_t q = (qy * side + qx) * n;
+            const float* px = work.at(x, y);
+            for (unsigned c = 0; c < n; ++c) carry_[q + c] = carry_[q + c] * strength_ + px[c] * (1.0f - strength_);
+        }
+    }
 }
 
 // --- the clone source --------------------------------------------------------------------------------------------------

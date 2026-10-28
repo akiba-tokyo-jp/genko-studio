@@ -31,17 +31,22 @@
 #include "app/icons.hpp"
 #include "app/layer_dialogs.hpp"
 #include "app/main_window.hpp"
+#include "app/patterns_panel.hpp"
+#include "core/patterns.hpp"
 #include "app/preferences.hpp"
 #include "app/theme.hpp"
 #include "app/comfort.hpp"
 #include "service/wording.hpp"
 #include "core/adjust.hpp"
 #include "core/ids.hpp"
+#include "core/layer_styles.hpp"
+#include "core/psd_keep.hpp"
 #include "core/pyconv.hpp"
 #include "core/smart.hpp"
 #include "render/ink.hpp"
 #include "render/plugins.hpp"
 #include "render/page.hpp"
+#include "render/smart.hpp"
 
 namespace genko::app {
 
@@ -225,6 +230,7 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     special_ = new QMenu(add_special_button);
     special_->addAction(QStringLiteral("ベタ塗りのレイヤー…"), this, [this] { add_fill(); });
     special_->addAction(QStringLiteral("グラデーションのレイヤー…"), this, [this] { add_gradient(); });
+    if (QAction* pattern = window_->action(QStringLiteral("act_layer_pattern"))) special_->addAction(pattern);  // (PC4 E3)
     QMenu* adjust = special_->addMenu(QStringLiteral("色調補正のレイヤー"));
     for (const auto& [key, label] : adjustment_kinds()) {
         // (PC2b, the user's decision 3: a new 色相・彩度 is the upstream form, hue_saturation, in its place; a layer of
@@ -290,7 +296,7 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     connect(duplicate_button, &QPushButton::clicked, this, [this] { duplicate(); });
     auto* merge = button(QStringLiteral("下と結合"), QStringLiteral("選んだレイヤーを、すぐ下のレイヤーに合わせます（ペン同士は線のまま）"), QStringLiteral("layer_merge_down"));
     connect(merge, &QPushButton::clicked, this, [this] { merge_down(); });
-    mask_button_ = button(QStringLiteral("マスク ▾"), QStringLiteral("レイヤーの一部を隠す。選択範囲から作り、ペンで見せる所を足し、消しゴムで隠す"),
+    mask_button_ = button(QStringLiteral("マスク ▾"), QStringLiteral("レイヤーの一部を隠す。選択範囲から作り、ブラシで見せる所を足し、消しゴムで隠す"),
                           QStringLiteral("layer_mask"));
     mask_menu_ = new QMenu(mask_button_);
     // (PC3 B2, the user's decision 5: レイヤー → レイヤーマスク by Photoshop's names; マスクを編集する and マスクを反転 Genko's own)
@@ -300,7 +306,8 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     mask_menu_->addAction(QStringLiteral("選択範囲をマスク"), this, [this] { hide_selection(); });
     mask_menu_->addAction(QStringLiteral("透明部分から"), this, [this] { mask_from_transparency(); });
     mask_menu_->addSeparator();
-    mask_edit_ = mask_menu_->addAction(QStringLiteral("マスクを編集する（ペンで見せる・消しゴムで隠す）"));
+    // (PC4 E-0, the user's decision 2: the brush tool's name — preferences::renamed())
+    mask_edit_ = mask_menu_->addAction(QStringLiteral("マスクを編集する（ブラシで見せる・消しゴムで隠す）"));
     mask_edit_->setCheckable(true);
     mask_edit_->setProperty("genko_attribute", QStringLiteral("act_mask_edit"));  // (named, as the window's commands: the help finds it by it)
     connect(mask_edit_, &QAction::toggled, this, [this](bool on) { edit_mask(on); });
@@ -319,10 +326,11 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
         if (!loading_ && layer != nullptr && layer->mask && layer->mask->linked != on) mask(Json{{"linked", on}});
     });
     mask_button_->setMenu(mask_menu_);
-    filter_ = new QComboBox;
-    filter_->setObjectName(QStringLiteral("layer_filter"));
-    reload_filters();
-    auto* apply = button(QStringLiteral("かける…"), QStringLiteral("選んだフィルターをレイヤーにかけます（選択範囲があればその中だけ）"), QStringLiteral("layer_filter_apply"));
+    // (PC4 節 D, the user's decision 1: かける… opens the フィルター menu — Photoshop's filters; the corrections are レイヤー →
+    // 色調補正's)
+    filter_apply_ = button(QStringLiteral("かける…"), QStringLiteral("フィルター メニューを開きます（選んだフィルターをこのレイヤーにかけます。選択範囲があればその中だけ）"),
+                           QStringLiteral("layer_filter_apply"));
+    QPushButton* apply = filter_apply_;
     connect(apply, &QPushButton::clicked, this, [this] { apply_filter(); });
 
     const auto row = [](std::initializer_list<QWidget*> widgets) {
@@ -382,7 +390,7 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     dl->addWidget(tint_);
     dl->addLayout(row({mask_button_, effect_button_}));
     auto* frow = new QHBoxLayout;
-    frow->addWidget(filter_, 1);
+    frow->addWidget(new QLabel(QStringLiteral("フィルター")), 1);
     frow->addWidget(apply);
     dl->addLayout(frow);
     connect(details_toggle_, &QPushButton::toggled, this, [this](bool on) { show_details(on); });
@@ -400,27 +408,11 @@ void LayerPanel::show_details(bool on, bool save) {
     if (save) settings()->setValue(QStringLiteral("ui/layer_details"), on ? QStringLiteral("true") : QStringLiteral("false"));
 }
 
-void LayerPanel::reload_filters() {
-    const QString was = filter_->currentData().toString();
-    filter_->blockSignals(true);
-    filter_->clear();
-    for (const auto& [key, label] : filter_kinds()) filter_->addItem(label, QString::fromStdString(key));
-    try {
-        for (const auto& plugin : render::plugins::available()) {  // (filters a person installed and chose to run)
-            filter_->addItem(QStringLiteral("%1（プラグイン）").arg(QString::fromStdString(plugin.name)),
-                             QString::fromStdString(std::string(render::plugins::kPrefix) + plugin.key));
-        }
-    } catch (const std::exception&) {
-    }
-    if (const int at = filter_->findData(was); at >= 0) filter_->setCurrentIndex(at);
-    filter_->blockSignals(false);
-}
-
 void LayerPanel::edit_mask(bool on) {
     const auto [page, layer] = this->layer();
     if (on && layer != nullptr && !layer->mask) mask(Json{{"fill", "show"}});
     window_->mask_edit = on;
-    window_->flash(on ? QStringLiteral("マスクの編集中: ペンで見せる所を足し、消しゴムで隠します") : QStringLiteral("マスクの編集を終えました"), 4000);
+    window_->flash(on ? QStringLiteral("マスクの編集中: ブラシで見せる所を足し、消しゴムで隠します") : QStringLiteral("マスクの編集を終えました"), 4000);
 }
 
 namespace {
@@ -461,6 +453,12 @@ void LayerPanel::refresh() {
             if (layer.shapes && !layer.shapes->items.empty()) marks << QStringLiteral("形 %1").arg(layer.shapes->items.size());  // (pen-shapes@1)
             if (layer.locked) marks << QStringLiteral("ロック");
             if (layer.lock_position) marks << QStringLiteral("位置ロック");  // (transform@1, PC3 C-d)
+            // (psd-keep@1, PC4 F-d: a PSD's layer effects, kept and written back, which this build does not draw)
+            const bool psd_effects = core::psd_effects_kept(layer);
+            if (psd_effects) marks << QStringLiteral("効果（PSD）");
+            // (layer-styles@1, PC4 E6: its layer style — fx, as Photoshop's panel; its effects hidden said)
+            if (layer.style && layer.style->contains("effects") && !(*layer.style)["effects"].empty())
+                marks << (core::style_shows_effects(*layer.style) ? QStringLiteral("fx") : QStringLiteral("fx（非表示）"));
             if (layer.link) {  // (transform@1, PC3 C-d: its link group, by its number when it has one)
                 const QString group = QString::fromStdString(*layer.link);
                 marks << (group.startsWith(QStringLiteral("link-")) ? QStringLiteral("リンク %1").arg(group.mid(5)) : QStringLiteral("レイヤーリンク"));
@@ -484,7 +482,8 @@ void LayerPanel::refresh() {
             auto* item = new QListWidgetItem(indent + wording::layer_label(layer) + (marks.isEmpty() ? QString() : QStringLiteral("　· ") + marks.join(QStringLiteral(" · "))));
             item->setData(Qt::UserRole + 2, meta.join(QStringLiteral(" · ")));
             item->setData(Qt::UserRole + 3, indent + wording::layer_label(layer));  // (the name alone: the marks go right)
-            item->setToolTip(kind_name(layer.kind));
+            item->setToolTip(psd_effects ? kind_name(layer.kind) + QStringLiteral("\nPSD のレイヤー効果は Genko では描きません（PSD に書き戻すと Photoshop が描きます）")
+                                         : kind_name(layer.kind));
             // its picture, or (nothing drawn yet) a quiet mark of its kind; every row the same height
             const QIcon picture = thumbnail(*page, layer);
             item->setIcon(picture.isNull() ? kind_mark(layer.kind) : picture);
@@ -545,6 +544,9 @@ QIcon LayerPanel::thumbnail(const core::Page& page, const core::Layer& layer) {
     }
     if (const core::SmartContents* contents = core::smart::contents_of(window_->book(), layer)) {  // (its contents as they are now)
         made.state += "|" + std::to_string(reinterpret_cast<std::uintptr_t>(contents));
+        // (PC4 F-e: a camera RAW is never developed here, on the window's thread — its kind's picture until the drawing
+        // has developed it, then the development; asked again at the next refresh)
+        if (contents->format == "raw" && !render::smart::developed_ready(window_->book(), *contents)) return icons::icon("kind_placed");
     }
     if (const auto found = thumbs_.find(key); found != thumbs_.end()) {
         const Thumb& was = found->second;
@@ -556,6 +558,7 @@ QIcon LayerPanel::thumbnail(const core::Page& page, const core::Layer& layer) {
     const preferences::Checker checker = preferences::checker();
     made.checker = checker_key(checker);
     try {
+        const render::smart::QuickScope quick;  // (a camera RAW's contents: what the drawing developed, never developed here)
         const render::Image image = render::layer_image(page, layer, 10, &window_->book(), true);
         if (checker.square <= 0) {  // (no checker: on white)
             render::Image paper = render::Image::create("RGBA", image.size(), render::Ink{255, 255, 255, 255});
@@ -983,6 +986,23 @@ void LayerPanel::edit_special() {
             if (!native.empty()) spec["native"] = native;
         }
         set("adjust", spec);
+    } else if (layer->kind == core::LayerKind::Fill && layer->fill && core::pattern_of_fill(*layer->fill) != nullptr) {
+        // (patterns@1, PC4 E3: its pattern, scale, angle and link; where it starts kept)
+        const Json was = *core::pattern_of_fill(*layer->fill);
+        PatternFillSettings start;
+        start.choice = QStringLiteral("book:") + QString::fromStdString(was.value("id", std::string()));
+        start.scale = was.value("scale", 100.0);
+        start.angle = was.value("angle", 0.0);
+        start.link = was.value("link", true);
+        const auto picked = pattern_fill_dialog(this, window_->book(), start, QStringLiteral("パターンで塗りつぶし"));
+        if (!picked || !window_->still(asked)) return;
+        Json ops;
+        auto spec = window_->pattern_fill_of(picked->choice, picked->scale, picked->angle, picked->link, ops);
+        if (!spec) return;
+        (*spec)["phase_mm"] = was.value("phase_mm", Json::array({0, 0}));
+        window_->set_current_pattern(picked->choice);
+        ops.push_back(Json{{"op", "set_layer"}, {"page", page->index.json()}, {"id", layer->id}, {"fill", Json{{"pattern", *spec}}}});
+        window_->apply_ops(ops);
     } else if (layer->kind == core::LayerKind::Fill && layer->fill && layer->fill->is_object() && layer->fill->contains("gradient")) {
         if (const auto spec = gradient_dialog(this, page, (*layer->fill)["gradient"]); spec && window_->still(asked)) set("fill", Json{{"gradient", *spec}});
     } else if (layer->kind == core::LayerKind::Fill && layer->fill && layer->fill->is_object()) {
@@ -1063,59 +1083,11 @@ std::optional<std::vector<int>> LayerPanel::histogram(const core::Page& page, co
 }
 
 void LayerPanel::apply_filter() {
-    const auto [page, layer] = this->layer();
-    if (layer == nullptr) return;
-    const QString label = filter_->currentText();
-    // (the user's decision 3: 色相・彩度・明度 made new is the upstream form, hue_saturation — its window, app/adjust_forms;
-    // Python's hue stays an op of its own, drawn as before)
-    std::string kind = filter_->currentData().toString().toStdString();
-    if (kind == "hue" && adjust_forms::form_kind("hue_saturation") != nullptr) kind = "hue_saturation";
-    const auto area = window_->selection_area();
-    // (PC3 A2: on a smart object, a smart filter — kept with its settings, the selection its filter mask)
-    const bool smart = layer->kind == core::LayerKind::Smart;
-    const std::string op_name = smart ? "smart_filter_add" : "filter_raster";
-    if (smart && kind.starts_with(render::plugins::kPrefix)) {
-        window_->flash(QStringLiteral("プラグインのフィルターは、スマートフィルターにできません（ラスタライズしてからかけます）"), 5000, true);
-        return;
-    }
-    const QString extra = layer->stroke_count() > 0 ? QStringLiteral("\nペンの線は画像になり、あとから線として消せなくなります。") : QString();
-    const QString where = area ? QStringLiteral("の選択範囲の中") : QStringLiteral("全体");
-    const auto asked = window_->asking();
-    const QString text = smart ? QStringLiteral("スマートオブジェクト「%1」に「%2」をスマートフィルターとして足します（あとから直せます）。%3\n（元に戻す で取り消せます）")
-                                     .arg(wording::layer_label(*layer), label,
-                                          area ? QStringLiteral("\n選択範囲がフィルターマスクになります。") : QString())
-                               : QStringLiteral("レイヤー「%1」%2に「%3」をかけます。%4\n（元に戻す で取り消せます）").arg(wording::layer_label(*layer), where, label, extra);
-    if (!ask::question(this, QStringLiteral("Genko"), text)) return;
-    if (!window_->still(asked)) return;
-    const std::string layer_id = layer->id;
-    const Json index = page->index.json();
-    std::optional<Json> params;
-    const FilterPreview preview = [this, index, layer_id, kind, area, op_name](const std::optional<Json>& values) {
-        if (!values) {
-            window_->preview_ops(std::nullopt);
-            return;
-        }
-        Json op{{"op", op_name}, {"page", index}, {"id", layer_id}, {"kind", kind}};
-        op.update(*values);
-        if (area) op["area"] = *area;
-        window_->preview_ops(Json::array({op}));
-    };
-    if (kind == "gradient_map") {
-        params = adjust_fields(kind);
-    } else if (kind == "hue_saturation") {
-        adjust_forms::FormContext context;
-        context.page = page;
-        const auto& rgb = window_->pen().rgb;
-        context.pen = {static_cast<int>(rgb[0]), static_cast<int>(rgb[1]), static_cast<int>(rgb[2])};
-        params = adjust_forms::adjust_dialog(this, kind, Json::object(), context, preview);
-    } else {
-        params = filter_params(this, kind, Json::object(), preview, kind == "levels" || kind == "curve" ? histogram(*page, *layer) : std::nullopt);
-    }
-    if (!params || !window_->still(asked)) return;
-    Json op{{"op", op_name}, {"page", index}, {"id", layer_id}, {"kind", kind}};
-    op.update(*params);
-    if (area) op["area"] = *area;
-    window_->apply_ops(Json::array({op}));
+    // (PC4 節 D, the user's decision 1: the フィルター menu under the button — its commands work the layer drawn on)
+    QMenu* menu = window_->filter_menu();
+    if (menu == nullptr) return;
+    QWidget* from = filter_apply_ != nullptr && filter_apply_->isVisible() ? static_cast<QWidget*>(filter_apply_) : static_cast<QWidget*>(this);
+    menu->popup(from->mapToGlobal(QPoint(0, from->height())));
 }
 
 QIcon LayerPanel::kind_mark(core::LayerKind kind) {

@@ -40,9 +40,15 @@ namespace adjust_forms {
 struct FormContext {
     const core::Page* page = nullptr;     // (its mode: which channels a channel switch offers)
     std::array<int, 3> pen{20, 20, 20};   // (the main colour: a colour's default where the kind has none)
+    std::array<int, 3> sub{255, 255, 255};  // (PC4: the sub colour — 背景色 — of a filter that reads both)
     std::optional<std::vector<int>> histogram;  // (the layer's lightness: levels and a tone curve)
     // 「自動」(design 3.3): the settings it finds for the layer; none: no such button.
     std::function<std::optional<core::Json>()> automatic;
+    // (PC4) A smart filter's window: settings that read the layer itself (ぼかし（レンズ）'s layer mask) not offered.
+    bool smart = false;
+    // (PC4 D4) The width over the height of the base box a filter's places are shares of (逆光's centre: the selection's box,
+    // else the page); none: the page's.
+    std::optional<double> base_aspect;
 };
 
 // The fields of one correction's settings, laid out as a form. A field's key may be a path into its native

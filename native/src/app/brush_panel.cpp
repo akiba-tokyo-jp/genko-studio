@@ -28,6 +28,8 @@
 #include <set>
 
 #include "app/ask.hpp"
+#include "app/main_window.hpp"
+#include "app/patterns_panel.hpp"
 #include "app/config.hpp"
 #include "app/fields.hpp"
 #include "app/look.hpp"
@@ -39,8 +41,11 @@
 #include "core/pynum.hpp"
 #include "core/stroke_geom.hpp"
 #include "render/abr.hpp"
+#include "render/brush_presets.hpp"
 #include "render/brushes.hpp"
 #include "render/paper.hpp"
+#include "render/patterns.hpp"
+#include "render/png.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 
@@ -203,6 +208,14 @@ QPixmap stroke_preview(const std::string& kind, const std::array<int, 3>& ink, Q
     return pixmap;
 }
 
+void forget_stroke_previews() { previews().clear(); }
+
+void forget_stroke_previews(const std::vector<std::string>& kinds) {
+    std::erase_if(previews(), [&kinds](const auto& entry) {
+        return std::any_of(kinds.begin(), kinds.end(), [&entry](const std::string& k) { return entry.first.starts_with(k + "/"); });
+    });
+}
+
 std::vector<double> size_presets() {
     const QString raw = settings()->value(QStringLiteral("brush/sizes"), QString()).toString();
     std::set<double> values;
@@ -230,6 +243,19 @@ BrushPanel::BrushPanel(QWidget* parent) : QWidget(parent) {
         render::brushes::register_brushes(render::brushes::load_own_brushes(config_dir()));  // the person's own brushes (and papers)
     } catch (const std::exception&) {
         // (a library that cannot be read: the built-in brushes)
+    }
+    // (PC4 E2: a dab brush's pictures read from the library when it is drawn — never all of them now —, and the built-in
+    // dab brush kept in hand last made known again under its key)
+    render::brush_presets::use_library_pictures(config_dir());
+    {
+        const std::string kept = settings()->value(QStringLiteral("brush/kind")).toString().toStdString();
+        if (const render::brush_presets::Preset* builtin = render::brush_presets::builtin_dab_of(kept);
+            builtin != nullptr && render::brushes::brush(kept).key != kept) {
+            try {
+                render::brushes::define_brush(kept, builtin->settings);
+            } catch (const std::exception&) {
+            }
+        }
     }
     kinds = new QListWidget;
     kinds->setObjectName(QStringLiteral("brush_kinds"));
@@ -338,6 +364,52 @@ BrushPanel::BrushPanel(QWidget* parent) : QWidget(parent) {
     gap_size = number_box(0.2, 6, 0.1, 2, QStringLiteral(" mm"));
     gap_size->setToolTip(QStringLiteral("塗り残しとみなす、すき間の大きさ（これより大きい白は残す）"));
     connect(gap_size, &QDoubleSpinBox::valueChanged, this, [this] { save(); });
+    // brushes@1 (PC4 E1): Photoshop's options bar — the flow, the blend, the smoothing's way
+    flow = new QSlider(Qt::Horizontal);
+    flow->setObjectName(QStringLiteral("brush_flow"));
+    flow->setRange(1, 100);
+    flow->setValue(100);
+    flow->setToolTip(QStringLiteral("流量: ダブ（点を打つ描き方）のブラシで、一つの点が置く絵の具の量。重ねるほど濃くなる（不透明度まで）"));
+    connect(flow, &QSlider::valueChanged, this, [this] { save(); });
+    blend = new QComboBox;
+    blend->setObjectName(QStringLiteral("brush_blend"));
+    // (the retouching tools' words and order: retouch_tools.cpp)
+    for (const auto& [label, key] : std::vector<std::pair<QString, QString>>{
+             {QStringLiteral("通常"), QStringLiteral("normal")},          {QStringLiteral("乗算"), QStringLiteral("multiply")},
+             {QStringLiteral("スクリーン"), QStringLiteral("screen")},    {QStringLiteral("加算（発光）"), QStringLiteral("add")},
+             {QStringLiteral("オーバーレイ"), QStringLiteral("overlay")}, {QStringLiteral("比較（暗）"), QStringLiteral("darken")},
+             {QStringLiteral("比較（明）"), QStringLiteral("lighten")},   {QStringLiteral("焼き込みカラー"), QStringLiteral("color_burn")},
+             {QStringLiteral("焼き込み（リニア）"), QStringLiteral("linear_burn")}, {QStringLiteral("覆い焼きカラー"), QStringLiteral("color_dodge")},
+             {QStringLiteral("ソフトライト"), QStringLiteral("soft_light")}, {QStringLiteral("ハードライト"), QStringLiteral("hard_light")},
+             {QStringLiteral("差の絶対値"), QStringLiteral("difference")},  {QStringLiteral("除外"), QStringLiteral("exclusion")},
+             {QStringLiteral("減算"), QStringLiteral("subtract")},          {QStringLiteral("除算"), QStringLiteral("divide")},
+             {QStringLiteral("色相"), QStringLiteral("hue")},               {QStringLiteral("彩度"), QStringLiteral("saturation")},
+             {QStringLiteral("カラー"), QStringLiteral("color")},           {QStringLiteral("輝度"), QStringLiteral("luminosity")}})
+        blend->addItem(label, key);
+    blend->setToolTip(QStringLiteral("描画モード: 通常のほかは、ペイントのレイヤーの画素に描き込みます（線としては残りません）。ペンのレイヤーでは通常だけ"));
+    connect(blend, &QComboBox::currentIndexChanged, this, [this] { save(); });
+    smoothing = new QComboBox;
+    smoothing->setObjectName(QStringLiteral("brush_smoothing"));
+    smoothing->addItem(QStringLiteral("手ぶれ補正（今までの）"), QStringLiteral("stabilize"));
+    smoothing->addItem(QStringLiteral("紐で引く"), QStringLiteral("string"));
+    smoothing->addItem(QStringLiteral("追いつく"), QStringLiteral("catch_up"));
+    smoothing->setToolTip(QStringLiteral("滑らかさの方式。紐で引く: ペンが紐の長さ（滑らかさ × 画面の 100 ピクセル）より離れたときだけ線が付いてくる。"
+                                         "追いつく: ペンを止めると線がペンに追いつく"));
+    connect(smoothing, &QComboBox::currentIndexChanged, this, [this] {
+        if (smoothing_amount != nullptr) smoothing_amount->setEnabled(smoothing->currentData().toString() != QLatin1String("stabilize"));
+        save();
+    });
+    smoothing_amount = new QSlider(Qt::Horizontal);
+    smoothing_amount->setObjectName(QStringLiteral("brush_smoothing_amount"));
+    smoothing_amount->setRange(0, 100);
+    smoothing_amount->setValue(50);
+    smoothing_amount->setEnabled(false);
+    connect(smoothing_amount, &QSlider::valueChanged, this, [this] { save(); });
+    auto_erase = new QCheckBox(QStringLiteral("自動消去"));
+    auto_erase->setObjectName(QStringLiteral("pencil_auto_erase"));
+    auto_erase->setToolTip(QStringLiteral("描画色の所から描き始めると、背景色で描きます（鉛筆ツール）"));
+    auto_erase->setVisible(false);
+    connect(auto_erase, &QCheckBox::toggled, this, [this] { save(); });
     crossing = new QCheckBox(QStringLiteral("消しゴムで交点まで消す"));
     crossing->setToolTip(QStringLiteral("線の交わる所までを一度に消します（はみ出しの掃除）"));
     connect(crossing, &QCheckBox::toggled, this, [this] { save(); });
@@ -358,6 +430,11 @@ BrushPanel::BrushPanel(QWidget* parent) : QWidget(parent) {
     size_grid_->setContentsMargins(0, 0, 0, 0);
     form->addRow(sizes_box);
     form->addRow(QStringLiteral("不透明度"), with_value(opacity));
+    form->addRow(QStringLiteral("流量"), with_value(flow));
+    form->addRow(QStringLiteral("モード"), blend);
+    form->addRow(QStringLiteral("滑らかさ"), smoothing);
+    form->addRow(QString(), with_value(smoothing_amount));
+    form->addRow(auto_erase);
     form->addRow(QStringLiteral("手ぶれ補正"), slider_for(steady));
     form->addRow(speed_steady);
     form->addRow(QStringLiteral("線の端をくっつける"), slider_for(snap_lines));
@@ -398,17 +475,23 @@ BrushPanel::BrushPanel(QWidget* parent) : QWidget(parent) {
     layout->addLayout(make_row);
     layout->addWidget(section(QStringLiteral("描き味")));
     layout->addLayout(form);
-    layout->addWidget(section(QStringLiteral("色"), QStringLiteral("スポイト（I）で原稿から拾えます")));
+    layout->addWidget(section(QStringLiteral("色"), QStringLiteral("スポイトツール（I）で原稿から拾えます")));
     layout->addLayout(colour_row);
-    layout->addWidget(section(QStringLiteral("塗りつぶし（G）")));
-    layout->addLayout(fill_form);
+    // (PC4 E4: shown on the 塗りつぶしツール's and 囲って塗る's page, main_window_paint.cpp)
+    fill_section = new QWidget;
+    fill_section->setObjectName(QStringLiteral("fill_lines_section"));
+    auto* fill_box = new QVBoxLayout(fill_section);
+    fill_box->setContentsMargins(0, 0, 0, 0);
+    fill_box->addWidget(section(QStringLiteral("線で囲まれた所・囲って塗る")));
+    fill_box->addLayout(fill_form);
+    layout->addWidget(fill_section);
     layout->addWidget(crossing);
     layout->addStretch(1);
     loading_ = true;
     set_personal_pressure(preferences::tablet_gamma());  // (offered before the kept choice is read, so it can be the one)
     load();
     loading_ = false;
-    forget->setEnabled(kind().starts_with("my_"));
+    forget->setEnabled(render::brush_presets::is_own(kind()));
 }
 
 void BrushPanel::fill_kinds() {
@@ -420,10 +503,17 @@ void BrushPanel::fill_kinds() {
     const QColor text(theme::tokens().text);
     kinds->setIconSize(QSize(72, 20));
     for (const core::Brush& brush : render::brushes::everything()) {
-        auto* item = new QListWidgetItem((brush.key.starts_with("my_") ? QStringLiteral("★ ") : QString()) + QString::fromStdString(brush.label));
-        item->setIcon(QIcon(stroke_preview(brush.key, {text.red(), text.green(), text.blue()}, QSize(72, 20))));
+        if (render::dabs::is_pencil(core::brush_to_dict(brush))) continue;  // (brushes@1: the 鉛筆ツール's own, not one to pick)
+        auto* item = new QListWidgetItem((render::brush_presets::is_own(brush.key) ? QStringLiteral("★ ") : QString()) + QString::fromStdString(brush.label));
+        // (PC4 E2: a dab brush whose pictures this process does not hold yet is listed without its line — drawing it would
+        // read its pictures from the library now, every brush's at once; it is drawn once the brush is used)
+        bool pictures = true;
+        if (brush.dabs) {
+            for (const std::string& ref : core::dab_assets(*brush.dabs)) pictures = pictures && render::dabs::holds_picture(ref);
+        }
+        if (pictures) item->setIcon(QIcon(stroke_preview(brush.key, {text.red(), text.green(), text.blue()}, QSize(72, 20))));
         item->setData(Qt::UserRole, key_of(brush.key));
-        if (brush.key.starts_with("my_") && !mine.contains(brush.key)) item->setToolTip(QStringLiteral("この原稿に入っていたブラシ"));
+        if (render::brush_presets::is_own(brush.key) && !mine.contains(brush.key)) item->setToolTip(QStringLiteral("この原稿に入っていたブラシ"));
         if (brush.paper) {
             const QString paper = render::paper::bytes(brush.paper->asset)
                                       ? QStringLiteral("紙質あり")
@@ -444,7 +534,7 @@ void BrushPanel::reload_kinds(const std::optional<std::string>& select) {
         if (kinds->item(i)->data(Qt::UserRole).toString().toStdString() == current) row = i;
     kinds->setCurrentRow(row);
     loading_ = false;
-    forget->setEnabled(kind().starts_with("my_"));
+    forget->setEnabled(render::brush_presets::is_own(kind()));
     if (select) kind_changed();
 }
 
@@ -534,7 +624,21 @@ void BrushPanel::load() {
     skip_text->setChecked(store->value(QStringLiteral("fill/skip_text"), QStringLiteral("false")).toString().toLower() == QLatin1String("true"));
     lasso_mode->setCurrentIndex(std::max(0, lasso_mode->findData(store->value(QStringLiteral("fill/lasso"), QStringLiteral("shape")).toString())));
     gap_size->setValue(store->value(QStringLiteral("fill/gap_size"), 1.5).toDouble());
+    // (brushes@1, PC4 E1: the blend, the smoothing's way and the pencil's auto erase, the same for every brush)
+    blend->setCurrentIndex(std::max(0, blend->findData(store->value(QStringLiteral("brush/blend"), QStringLiteral("normal")).toString())));
+    smoothing->setCurrentIndex(std::max(0, smoothing->findData(store->value(QStringLiteral("brush/smoothing"), QStringLiteral("stabilize")).toString())));
+    smoothing_amount->setValue(static_cast<int>(std::lround(std::clamp(store->value(QStringLiteral("brush/smoothing_amount"), 0.5).toDouble(), 0.0, 1.0) * 100)));
+    smoothing_amount->setEnabled(smoothing->currentData().toString() != QLatin1String("stabilize"));
+    auto_erase->setChecked(store->value(QStringLiteral("pencil/auto_erase"), QStringLiteral("false")).toString().toLower() == QLatin1String("true"));
 }
+
+void BrushPanel::set_blend_allowed(bool on) {
+    blend->setEnabled(on);
+    blend->setToolTip(on ? QStringLiteral("描画モード: 通常のほかは、ペイントのレイヤーの画素に描き込みます（線としては残りません）")
+                         : QStringLiteral("描画モードはペイントのレイヤーで使えます（ペンのレイヤーの線は通常で描きます）"));
+}
+
+void BrushPanel::set_pencil(bool on) { auto_erase->setVisible(on); }
 
 void BrushPanel::apply_kind_defaults(const std::string& kind_key, bool stored) {
     const core::Brush brush = render::brushes::brush(kind_key);
@@ -555,6 +659,7 @@ void BrushPanel::apply_kind_defaults(const std::string& kind_key, bool stored) {
     speed_steady->setChecked(kept("speed_steady", false).toString().toLower() == QLatin1String("true"));
     post_fit->setValue(kept("post_fit", 0).toDouble());
     snap_lines->setValue(kept("snap_lines", 0).toDouble());
+    flow->setValue(static_cast<int>(std::lround(std::clamp(kept("flow", 1.0).toDouble(), 0.01, 1.0) * 100)));
     follow_taper();
 }
 
@@ -563,7 +668,7 @@ void BrushPanel::kind_changed() {
     loading_ = true;
     apply_kind_defaults(kind(), true);
     loading_ = false;
-    forget->setEnabled(kind().starts_with("my_"));
+    forget->setEnabled(render::brush_presets::is_own(kind()));
     save();
 }
 
@@ -585,6 +690,11 @@ void BrushPanel::save() {
     store->setValue(prefix + QStringLiteral("speed_steady"), speed_steady->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     store->setValue(prefix + QStringLiteral("post_fit"), post_fit->value());
     store->setValue(prefix + QStringLiteral("snap_lines"), snap_lines->value());
+    store->setValue(prefix + QStringLiteral("flow"), flow->value() / 100.0);
+    store->setValue(QStringLiteral("brush/blend"), blend->currentData());
+    store->setValue(QStringLiteral("brush/smoothing"), smoothing->currentData());
+    store->setValue(QStringLiteral("brush/smoothing_amount"), smoothing_amount->value() / 100.0);
+    store->setValue(QStringLiteral("pencil/auto_erase"), auto_erase->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     follow_taper();
     store->setValue(QStringLiteral("fill/gap"), gap->value());
     store->setValue(QStringLiteral("fill/reference"), reference->currentData());
@@ -623,6 +733,7 @@ void BrushPanel::set_colour(const std::array<int, 3>& rgb) {
     swatch->setToolTip(QStringLiteral("今の色 (%1, %2, %3)").arg(rgb[0]).arg(rgb[1]).arg(rgb[2]));
     settings()->setValue(QStringLiteral("brush/rgb"), QStringLiteral("%1,%2,%3").arg(rgb[0]).arg(rgb[1]).arg(rgb[2]));
     if (sample != nullptr) sample->refresh();
+    emit colour_set();
     emit changed();
 }
 
@@ -673,6 +784,10 @@ PenSettings BrushPanel::pen() const {
     p.speed_steady = speed_steady->isChecked();
     p.post_fit = post_fit->value();
     p.snap_lines = snap_lines->value();
+    p.flow = flow->value() / 100.0;
+    p.blend = blend->isEnabled() ? blend->currentData().toString().toStdString() : std::string("normal");
+    p.smoothing = smoothing->currentData().toString().toStdString();
+    p.smoothing_amount = smoothing_amount->value() / 100.0;
     return p;
 }
 
@@ -762,6 +877,44 @@ BrushDialog::BrushDialog(QWidget* parent, const std::string& base, bool editing)
     paper_picture->setToolTip(QStringLiteral("PNG・JPEG・BMP・GIF（縦横 4096 画素まで）。画像は原稿の中に保存されるので、元のファイルを消したり"
                                              "別の PC で開いたりしても同じ線になります"));
     connect(paper_picture, &QPushButton::clicked, this, [this] { pick_paper(); });
+    // (PC4 E3, brush.texturePattern: a pattern of the library or the book as the paper — its lightness over white)
+    auto* paper_pattern = new QPushButton(QStringLiteral("パターンから…"));
+    paper_pattern->setObjectName(QStringLiteral("paper_pattern"));
+    paper_pattern->setToolTip(QStringLiteral("パターンの明るさを紙質にします（パターン パネルのライブラリと、この原稿のパターンから選びます）"));
+    connect(paper_pattern, &QPushButton::clicked, this, [this] {
+        const auto* window = qobject_cast<const MainWindow*>(parentWidget());
+        static const core::Document none;
+        const core::Document& book = window != nullptr ? window->book() : none;
+        QDialog pick(this);
+        pick.setObjectName(QStringLiteral("paper_pattern_dialog"));
+        pick.setWindowTitle(QStringLiteral("パターンから紙質"));
+        auto* form = new QFormLayout(&pick);
+        QComboBox* choice = pattern_combo(book, window != nullptr ? window->current_pattern() : QString());
+        form->addRow(QStringLiteral("パターン"), choice);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        connect(buttons, &QDialogButtonBox::accepted, &pick, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &pick, &QDialog::reject);
+        form->addRow(buttons);
+        if (choice->count() == 0 || ask::exec(&pick) != QDialog::Accepted) return;
+        const auto chosen = pattern_chosen(book, choice->currentData().toString());
+        if (!chosen) return;
+        try {
+            const std::string grey = render::patterns::grey(chosen->first, *chosen->second);
+            const std::string png = render::write_png(
+                render::Image::frombytes("L", render::Size{static_cast<int>(chosen->first.width), static_cast<int>(chosen->first.height)}, grey));
+            auto taken = std::make_shared<const std::string>(render::paper::take_in(png));
+            paper_asset = storage::AssetStore::ref(*taken);
+            render::paper::keep(paper_asset, std::move(taken));
+        } catch (const std::exception& error) {
+            ask::warning(this, QStringLiteral("パターンから紙質"), wording::error(QString::fromUtf8(error.what())));
+            return;
+        }
+        paper_on->blockSignals(true);
+        paper_on->setChecked(true);
+        paper_on->blockSignals(false);
+        show_paper();
+        draw_sample();
+    });
     paper_preview = new QLabel;
     paper_preview->setObjectName(QStringLiteral("paper_preview"));
     paper_preview->setMinimumSize(160, 120);
@@ -830,6 +983,7 @@ BrushDialog::BrushDialog(QWidget* parent, const std::string& base, bool editing)
     papers->addRow(section(QStringLiteral("紙質"), QStringLiteral("先端の画像とは別に、線の下に敷く紙の画像です")));
     papers->addRow(QString(), paper_on);
     papers->addRow(QString(), paper_picture);
+    papers->addRow(QString(), paper_pattern);  // (PC4 E3)
     papers->addRow(paper_preview);
     papers->addRow(paper_about);
     papers->addRow(QStringLiteral("濃さ"), paper_density);

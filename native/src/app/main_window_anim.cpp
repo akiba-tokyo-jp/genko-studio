@@ -49,7 +49,7 @@ void MainWindow::build_anim_actions() {
     }, {}, QStringLiteral("フィルターのプラグイン（.py）を入れるフォルダー"));
     make("act_plugin_settings", QStringLiteral("プラグインの設定…"), [this] {
         PluginsDialog dialog(this);
-        if (ask::exec(&dialog) == QDialog::Accepted && layer_panel_ != nullptr) layer_panel_->reload_filters();
+        if (ask::exec(&dialog) == QDialog::Accepted) follow_filter_menu();  // (フィルター → プラグイン: the plugins chosen)
     }, {}, QStringLiteral("プラグインを使うか、どの Python で、どれを動かしてよいか"));
 }
 
@@ -86,7 +86,7 @@ void MainWindow::show_dock(const QString& title) {
 void MainWindow::toggle_timelapse(bool on) {
     QAction* act = action("act_timelapse");
     if (on && !session_->path()) {
-        flash(QStringLiteral("タイムラプスの前に、原稿を保存します（ファイル → 別の場所に保存）"), 6000);
+        flash(QStringLiteral("タイムラプスの前に、原稿を保存します（ファイル → 別名で保存…）"), 6000);
         const QSignalBlocker quiet(act);
         act->setChecked(false);
         return;

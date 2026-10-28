@@ -247,8 +247,8 @@ void MainWindow::build_guide_dock() {
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    dock->setWidget(scroll);  // (in the dock first, then the panel in it: styled once — build_tool_settings)
     scroll->setWidget(guides_);
-    dock->setWidget(scroll);
     dock->setMinimumWidth(200);
     // (for occasional work: its tab has a close button and it joins the row of tabs when opened)
     dock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
@@ -323,7 +323,7 @@ void MainWindow::place_ruler(const Json& ruler) {
         action("act_snap")->setChecked(true);
         guide_toggles();
     }
-    flash(QStringLiteral("定規を置きました。ペン（B）で描くと沿います（Ctrl+2 で切り替え）"), 3500);
+    flash(QStringLiteral("定規を置きました。ブラシツール（B）で描くと沿います（Ctrl+2 で切り替え）"), 3500);
     if (guides_ != nullptr) guides_->refresh();
 }
 

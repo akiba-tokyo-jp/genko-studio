@@ -1,6 +1,7 @@
 // 環境設定 (Python's genko/app/preferences.py).
 
 #include "app/preferences.hpp"
+#include "app/export_as_dialog.hpp"
 
 #include <QAction>
 #include <QApplication>
@@ -38,6 +39,7 @@
 
 #include "app/ask.hpp"
 #include "app/brush_panel.hpp"
+#include "app/camera_raw_open.hpp"
 #include "app/canvas.hpp"
 #include "app/comfort.hpp"
 #include "app/config.hpp"
@@ -70,7 +72,7 @@ QComboBox* choice_box(const std::vector<std::pair<QString, QString>>& choices, c
 
 const std::vector<std::pair<QString, QString>>& pen_buttons() {
     static const std::vector<std::pair<QString, QString>> all{{QStringLiteral("右クリック（メニュー）"), QStringLiteral("menu")},
-                                                              {QStringLiteral("スポイト"), QStringLiteral("picker")},
+                                                              {QStringLiteral("スポイトツール"), QStringLiteral("picker")},
                                                               {QStringLiteral("手のひら（表示を動かす）"), QStringLiteral("hand")}};
     return all;
 }
@@ -78,6 +80,16 @@ const std::vector<std::pair<QString, QString>>& pen_buttons() {
 int ui_font_pt() { return settings()->value(QStringLiteral("ui/font_pt"), 0).toInt(); }
 
 QString default_paper() { return settings()->value(QStringLiteral("new/paper"), QString()).toString(); }
+
+int recent_count() {
+    bool ok = false;
+    const int value = settings()->value(QStringLiteral("files/recent_count"), kRecentDefault).toInt(&ok);
+    return ok ? std::clamp(value, 0, kRecentMax) : kRecentDefault;
+}
+
+bool lowercase_extension() { return truthy(settings()->value(QStringLiteral("files/lowercase_extension"), QStringLiteral("true"))); }
+
+bool ignore_exif_profile() { return truthy(settings()->value(QStringLiteral("files/ignore_exif_profile"), QStringLiteral("false"))); }
 
 int save_after_ms() {
     bool ok = false;
@@ -92,6 +104,12 @@ std::optional<double> tablet_gamma() {
     if (!value.isValid() || value.toString().isEmpty() || !ok) return std::nullopt;
     return gamma;
 }
+
+bool brush_preview() { return truthy(settings()->value(QStringLiteral("ui/brush_preview"), QStringLiteral("true"))); }
+
+void set_brush_preview(bool on) { settings()->setValue(QStringLiteral("ui/brush_preview"), on ? QStringLiteral("true") : QStringLiteral("false")); }
+
+bool cross_while_drawing() { return truthy(settings()->value(QStringLiteral("ui/cross_drawing"), QStringLiteral("false"))); }
 
 QString pen_button() {
     const QString value = settings()->value(QStringLiteral("tablet/button"), QStringLiteral("menu")).toString();
@@ -193,8 +211,50 @@ const std::multimap<QString, QString>& renamed() {
                                                      // (PC3 C-b: the shape tools' and the direct selection's)
                                                      {QStringLiteral("長方形ツール"), QStringLiteral("図形")},
                                                      {QStringLiteral("部分選択ツール"), QStringLiteral("線の編集（制御点）")},
-                                                     {QStringLiteral("前方ワープツール"), QStringLiteral("ゆがみ（指で押す）")}};  // (PC3 C-c)
+                                                     {QStringLiteral("前方ワープツール"), QStringLiteral("ゆがみ（指で押す）")},  // (PC3 C-c)
+                                                     // (PC4 F-0, 節 F 5.1: ファイル's commands by Photoshop's names)
+                                                     {QStringLiteral("新規…"), QStringLiteral("新しい原稿…")},
+                                                     {QStringLiteral("別名で保存…"), QStringLiteral("別の場所に保存…")},
+                                                     {QStringLiteral("原稿を書き出す…"), QStringLiteral("書き出し…")},
+                                                     {QStringLiteral("プリント…"), QStringLiteral("印刷…")},
+                                                     {QStringLiteral("終了"), QStringLiteral("Genko を終わる")},
+                                                     {QStringLiteral("カラールックアップテーブル…"), QStringLiteral("カラールックアップテーブルを書き出す…")},
+                                                     // (PC4 E-0, the user's decision 2: the drawing tools and the colours by
+                                                     // Photoshop's names)
+                                                     {QStringLiteral("ブラシツール"), QStringLiteral("ペン")},
+                                                     {QStringLiteral("消しゴムツール"), QStringLiteral("消しゴム")},
+                                                     {QStringLiteral("スポイトツール"), QStringLiteral("スポイト")},
+                                                     {QStringLiteral("塗りつぶしツール"), QStringLiteral("塗りつぶし")},
+                                                     {QStringLiteral("グラデーションツール"), QStringLiteral("グラデーション")},
+                                                     {QStringLiteral("描画色と背景色を入れ替え"), QStringLiteral("メインとサブの色を入れ替える")},
+                                                     {QStringLiteral("カラーピッカー（描画色）…"), QStringLiteral("ペンの色…")},
+                                                     {QStringLiteral("ブラシサイズを大きく"), QStringLiteral("太く（ペン・消しゴム）")},
+                                                     {QStringLiteral("ブラシサイズを小さく"), QStringLiteral("細く（ペン・消しゴム）")},
+                                                     {QStringLiteral("選んだ線を描画色にする"), QStringLiteral("選んだ線をペンの色にする")},
+                                                     {QStringLiteral("マスクを編集する（ブラシで見せる・消しゴムで隠す）"),
+                                                      QStringLiteral("マスクを編集する（ペンで見せる・消しゴムで隠す）")}};
     return all;
+}
+
+const std::vector<QString>& reused_names() {
+    static const std::vector<QString> all{QStringLiteral("グラデーション")};
+    return all;
+}
+
+bool reused_name(const QString& name) {
+    const auto& all = reused_names();
+    return std::find(all.begin(), all.end(), name) != all.end();
+}
+
+bool names_current(const QString& key) {
+    const auto store = settings();
+    const QString mark = QStringLiteral("names_current/") + key;
+    return store->contains(mark) && store->value(mark).toString() == store->value(key).toString();
+}
+
+void mark_names_current(const QString& key) {
+    const auto store = settings();
+    store->setValue(QStringLiteral("names_current/") + key, store->value(key).toString());
 }
 
 void apply_shortcuts(MainWindow* window) {
@@ -203,15 +263,19 @@ void apply_shortcuts(MainWindow* window) {
     std::vector<QAction*> own;          // (the commands with their own keys)
     const auto names = command_names(window);
     const auto first = by_text(window);  // (the words alone: the first command of them in the menus)
+    // (PC4 E4: keys kept under a reused name before it was a command's own name are the renamed command's — reused_names())
+    const auto current = [](const QString& name) { return names_current(QStringLiteral("shortcuts/") + name); };
     for (QAction* action : preferences::commands(window)) {
         const QString name = command_name(names, action);
         QString key = QStringLiteral("shortcuts/%1").arg(name);
+        if (reused_name(name) && !current(name)) key = QStringLiteral("shortcuts_unread/%1").arg(name);  // (none: the old command's)
         // (keys chosen under an old name: renamed() knows the new words, which another command may also have come to
         // have — the user's decision 8 —: then the first of them in the menus had the old name, as below)
         const auto words = first.find(action->text());
         const bool first_of_words = name != action->text() && words != first.end() && words->second == action;
         for (const QString& now : first_of_words ? QStringList{name, action->text()} : QStringList{name}) {
             for (auto [old, end] = renamed().equal_range(now); !store->contains(key) && old != end; ++old) {
+                if (reused_name(old->second) && current(old->second)) continue;  // (the new command's own key now)
                 if (store->contains(QStringLiteral("shortcuts/%1").arg(old->second))) {
                     key = QStringLiteral("shortcuts/%1").arg(old->second);  // (keys chosen under an old name)
                 }
@@ -374,6 +438,8 @@ void apply_all(MainWindow* window) {
     window->refresh_icons();
     window->refresh_first_steps();  // (the keys its buttons show)
     canvas->cursor_kind = cursor_kind();
+    canvas->cross_while_drawing = cross_while_drawing();  // (PC4 E1)
+    canvas->brush_preview = brush_preview();
     canvas->modifier_tools = {{QStringLiteral("alt"), modifier_tool(QStringLiteral("alt"))}, {QStringLiteral("ctrl"), modifier_tool(QStringLiteral("ctrl"))}};
     canvas->tool_modifiers = tool_modifiers();
     canvas->refresh_cursor();
@@ -570,6 +636,10 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     motion->setToolTip(QStringLiteral("メニューの開き方・拡大の寄り方・知らせの出方などの動きを止めます（決めていなければパソコンの設定に合わせます）"));
     motion->setChecked(reduce_motion());
     cursor = choice_box(cursors(), cursor_kind());
+    cross_drawing = new QCheckBox(QStringLiteral("描いている間は十字だけにする"));
+    cross_drawing->setObjectName(QStringLiteral("cross_drawing"));
+    cross_drawing->setToolTip(QStringLiteral("線を引いている間は、ブラシの円や形を隠して十字のポインターだけを見せます（Photoshop の「ペイント時は十字のみ表示」）"));
+    cross_drawing->setChecked(cross_while_drawing());
     alt_tool = choice_box(modifier_tool_choices(), modifier_tool(QStringLiteral("alt")));
     ctrl_tool = choice_box(modifier_tool_choices(), modifier_tool(QStringLiteral("ctrl")));
     for (QComboBox* box : {alt_tool, ctrl_tool}) box->setToolTip(QStringLiteral("押している間だけ、この道具になります（離すと元の道具に戻る）"));
@@ -593,9 +663,9 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     backup_keep->setValue(settings()->value(QStringLiteral("backup/keep"), 10).toInt());
     hold_swap = new QCheckBox(QStringLiteral("道具のキーを押している間だけ持ち替える"));
     hold_swap->setChecked(app::hold_swap());
-    hold_swap->setToolTip(QStringLiteral("道具のキー（E の消しゴムなど）を長く押していると、離したときに前の道具に戻ります。短く押すと持ち替えたまま"));
+    hold_swap->setToolTip(QStringLiteral("道具のキー（E の消しゴムツールなど）を長く押していると、離したときに前の道具に戻ります。短く押すと持ち替えたまま"));
     per_tool = new QPushButton(QStringLiteral("道具ごとの修飾キー…"));
-    per_tool->setToolTip(QStringLiteral("ペン・消しゴムなど道具ごとに、Alt・Ctrl・Shift を押している間の道具を決めます"));
+    per_tool->setToolTip(QStringLiteral("ブラシツール・消しゴムツールなど道具ごとに、Alt・Ctrl・Shift を押している間の道具を決めます"));
     connect(per_tool, &QPushButton::clicked, this, [this] { tool_keys_dialog(this, window_); });
     auto* work = new QWidget;
     QFormLayout* wl = look::form();
@@ -608,12 +678,10 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
           {QStringLiteral("画面の書体"), ui_font}, {QStringLiteral("画面の文字の大きさ"), font_pt}, {QString(), note}, {QString(), mono_icons},
           {QString(), hints}, {QString(), gpu}}},
         {QStringLiteral("描く・操作"),
-         {{QStringLiteral("ペンのカーソル"), cursor}, {QStringLiteral("Alt を押している間"), alt_tool}, {QStringLiteral("Ctrl を押している間"), ctrl_tool},
+         {{QStringLiteral("ペンのカーソル"), cursor}, {QString(), cross_drawing}, {QStringLiteral("Alt を押している間"), alt_tool},
+          {QStringLiteral("Ctrl を押している間"), ctrl_tool},
           {QString(), per_tool}, {QString(), hold_swap}, {QString(), radial}}},
-        {QStringLiteral("長い時間の作業"), {{QStringLiteral("休憩の案内"), rest}, {QString(), motion}, {QString(), requests}}},
-        {QStringLiteral("原稿と保存"),
-         {{QStringLiteral("新しい原稿の用紙"), paper}, {QStringLiteral("変更を保存するまで"), save_after}, {QStringLiteral("バックアップの置き場所"), backup_row},
-          {QStringLiteral("バックアップの間隔"), backup_minutes}, {QStringLiteral("バックアップの数"), backup_keep}}}};
+        {QStringLiteral("長い時間の作業"), {{QStringLiteral("休憩の案内"), rest}, {QString(), motion}, {QString(), requests}}}};
     for (const auto& [head, rows] : sections) {
         wl->addRow(look::section(head));
         for (const auto& [label, widget] : rows) wl->addRow(label, widget);
@@ -625,6 +693,44 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     scroll->setWidget(work);
     tabs->addTab(scroll, QStringLiteral("表示・作業"));
+    // ファイル管理 (PC4 F-b, edit.preferences.fileHandling: 原稿と保存 and the files' own)
+    QWidget* files_page = nullptr;
+    {
+        recent_count = new QSpinBox;
+        recent_count->setObjectName(QStringLiteral("prefs_recent_count"));
+        recent_count->setRange(0, kRecentMax);
+        recent_count->setSuffix(QStringLiteral(" 個"));
+        recent_count->setValue(preferences::recent_count());
+        recent_count->setToolTip(QStringLiteral("ファイル → 最近使用したファイルを開く に並べる原稿・画像の数"));
+        lowercase_extension = new QCheckBox(QStringLiteral("拡張子を小文字にする"));
+        lowercase_extension->setObjectName(QStringLiteral("prefs_lowercase_extension"));
+        lowercase_extension->setChecked(preferences::lowercase_extension());
+        lowercase_extension->setToolTip(QStringLiteral("コピーを保存… で書くファイルの拡張子（.png・.jpg など）を小文字にします"));
+        ignore_exif_profile = new QCheckBox(QStringLiteral("EXIF のプロファイルのタグを無視"));
+        ignore_exif_profile->setObjectName(QStringLiteral("prefs_ignore_exif_profile"));
+        ignore_exif_profile->setChecked(preferences::ignore_exif_profile());
+        ignore_exif_profile->setToolTip(QStringLiteral("プロファイルを持たない画像を開くとき、EXIF の「sRGB」の印を見ずに作業用の RGB を割り当てます"));
+        auto* compatible = new QLabel(QStringLiteral("PSD と PSB の互換性を優先: 常に（Genko の PSD はいつも統合した画像を持ちます）"));
+        compatible->setWordWrap(true);
+        theme::role(compatible, "hint");
+        auto* page = new QWidget;
+        QFormLayout* rows = look::form();
+        page->setLayout(rows);
+        rows->addRow(look::section(QStringLiteral("原稿と保存")));
+        for (const auto& [label, widget] : std::vector<std::pair<QString, QWidget*>>{
+                 {QStringLiteral("新しい原稿の用紙"), paper}, {QStringLiteral("変更を保存するまで"), save_after},
+                 {QStringLiteral("バックアップの置き場所"), backup_row}, {QStringLiteral("バックアップの間隔"), backup_minutes},
+                 {QStringLiteral("バックアップの数"), backup_keep}}) {
+            rows->addRow(label, widget);
+        }
+        rows->addRow(look::section(QStringLiteral("ファイル")));
+        rows->addRow(QStringLiteral("最近使用したファイルの数"), recent_count);
+        rows->addRow(QString(), lowercase_extension);
+        rows->addRow(QString(), ignore_exif_profile);
+        rows->addRow(QString(), compatible);
+        look::quiet_labels(rows);
+        files_page = page;
+    }
     // 透明部分・色域 (edit.preferences.transparencyAndGamut)
     {
         const auto store = settings();
@@ -681,6 +787,57 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
         tabs->addTab(page, QStringLiteral("透明部分・色域"));
         show_checker();
     }
+    tabs->addTab(files_page, QStringLiteral("ファイル管理"));
+    // 書き出し (PC4 F-c, edit.preferences.export: the same values as ファイル → 書き出し → 書き出しの環境設定…)
+    export_form = new ExportPreferencesForm(export_preferences());
+    tabs->addTab(export_form, QStringLiteral("書き出し"));
+    // Camera Raw (PC4 F-e, edit.preferences.rawDefaults; PhotoCraft's prefs.rs RawDefaults: Adobe RGB, 16 bits, 300 ppi, no
+    // sharpening, not a smart object, no automatic tone)
+    {
+        const camera_raw_open::Workflow flow = camera_raw_open::workflow();
+        raw_space = choice_box({{QStringLiteral("Adobe RGB (1998)"), QStringLiteral("adobe-rgb-compat")},
+                                {QStringLiteral("sRGB IEC61966-2.1"), QStringLiteral("srgb")},
+                                {QStringLiteral("ProPhoto RGB"), QStringLiteral("prophoto-compat")},
+                                {QStringLiteral("Display P3"), QStringLiteral("display-p3")}},
+                               QString::fromStdString(flow.space));
+        raw_depth = choice_box({{QStringLiteral("8 bit/チャンネル"), QStringLiteral("8")}, {QStringLiteral("16 bit/チャンネル"), QStringLiteral("16")}},
+                               QString::number(flow.depth));
+        raw_resolution = new QSpinBox;
+        raw_resolution->setRange(1, 100000);
+        raw_resolution->setSuffix(QStringLiteral(" ppi"));
+        raw_resolution->setValue(static_cast<int>(std::lround(flow.dpi)));
+        raw_sharpen = choice_box({{QStringLiteral("なし"), QStringLiteral("none")},
+                                  {QStringLiteral("スクリーン"), QStringLiteral("screen")},
+                                  {QStringLiteral("光沢紙"), QStringLiteral("glossy")},
+                                  {QStringLiteral("マット紙"), QStringLiteral("matte")}},
+                                 QString::fromStdString(flow.sharpen));
+        raw_smart = new QCheckBox(QStringLiteral("スマートオブジェクトとして開く"));
+        raw_smart->setChecked(flow.smart);
+        raw_auto = new QCheckBox(QStringLiteral("自動補正を適用"));
+        raw_auto->setChecked(flow.auto_tone);
+        raw_auto->setToolTip(QStringLiteral("RAW を開くとき、露光量を「自動」で決めます（覚えた設定のあるファイルは、その設定のまま）"));
+        for (auto [name, widget] : std::initializer_list<std::pair<const char*, QWidget*>>{{"raw_space", raw_space}, {"raw_depth", raw_depth},
+                                                                                         {"raw_resolution", raw_resolution}, {"raw_sharpen", raw_sharpen},
+                                                                                         {"raw_smart", raw_smart}, {"raw_auto", raw_auto}})
+            widget->setObjectName(QStringLiteral("prefs_%1").arg(QString::fromLatin1(name)));
+        auto* page = new QWidget;
+        QFormLayout* rows = look::form();
+        page->setLayout(rows);
+        rows->addRow(look::section(QStringLiteral("ワークフロー")));
+        rows->addRow(QStringLiteral("色空間"), raw_space);
+        rows->addRow(QStringLiteral("ビット数"), raw_depth);
+        rows->addRow(QStringLiteral("解像度"), raw_resolution);
+        rows->addRow(QStringLiteral("出力のシャープ"), raw_sharpen);
+        rows->addRow(QString(), raw_smart);
+        rows->addRow(look::section(QStringLiteral("既定の画像設定")));
+        rows->addRow(QString(), raw_auto);
+        auto* hint = new QLabel(QStringLiteral("カメラ RAW を開くときの Camera Raw の窓の、はじめの設定です。Shift を押しながら開くと、窓を出さずにこの設定で開きます。"));
+        hint->setWordWrap(true);
+        theme::role(hint, "hint");
+        rows->addRow(QString(), hint);
+        look::quiet_labels(rows);
+        tabs->addTab(page, QStringLiteral("Camera Raw"));
+    }
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("決める"));
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("やめる"));
@@ -693,7 +850,7 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     pages_list->setObjectName(QStringLiteral("prefsNav"));
     pages_list->setFixedWidth(150);
     int page = 0;
-    for (const char* picture : {"search", "pen", "settings", "kind_tone"}) {
+    for (const char* picture : {"search", "pen", "settings", "kind_tone", "open", "export", "kind_placed"}) {
         pages_list->addItem(new QListWidgetItem(icons::icon(picture), tabs->tabText(page++)));
     }
     connect(pages_list, &QListWidget::currentRowChanged, tabs, &QTabWidget::setCurrentIndex);
@@ -805,6 +962,8 @@ void PreferencesDialog::save() {
             store->setValue(key, now.join(QLatin1Char('|')));
         }
     }
+    // (PC4 E4: the keys under a reused name are kept by this build's names)
+    for (const QString& reused : preferences::reused_names()) preferences::mark_names_current(QStringLiteral("shortcuts/") + reused);
     store->setValue(QStringLiteral("ui/font_pt"), font_pt->value());
     store->setValue(QStringLiteral("ui/ui_font"), ui_font->currentData());
     store->setValue(QStringLiteral("new/paper"), paper->currentData());
@@ -826,12 +985,27 @@ void PreferencesDialog::save() {
         store->setValue(QStringLiteral("ui/reduce_motion"), motion->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     }
     store->setValue(QStringLiteral("ui/cursor"), cursor->currentData());
+    store->setValue(QStringLiteral("ui/cross_drawing"), cross_drawing->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     store->setValue(QStringLiteral("keys/alt_tool"), alt_tool->currentData());
     store->setValue(QStringLiteral("keys/ctrl_tool"), ctrl_tool->currentData());
     store->setValue(QStringLiteral("keys/hold_swap"), hold_swap->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     store->setValue(QStringLiteral("backup/folder"), backup_folder->text().trimmed());
     store->setValue(QStringLiteral("backup/minutes"), backup_minutes->value());
     store->setValue(QStringLiteral("backup/keep"), backup_keep->value());
+    store->setValue(QStringLiteral("files/recent_count"), recent_count->value());
+    store->setValue(QStringLiteral("files/lowercase_extension"), lowercase_extension->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
+    store->setValue(QStringLiteral("files/ignore_exif_profile"), ignore_exif_profile->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
+    set_export_preferences(export_form->value());  // (PC4 F-c: 書き出し)
+    {  // (PC4 F-e: Camera Raw)
+        camera_raw_open::Workflow flow;
+        flow.space = raw_space->currentData().toString().toStdString();
+        flow.depth = raw_depth->currentData().toInt();
+        flow.dpi = raw_resolution->value();
+        flow.sharpen = raw_sharpen->currentData().toString().toStdString();
+        flow.smart = raw_smart->isChecked();
+        flow.auto_tone = raw_auto->isChecked();
+        camera_raw_open::set_workflow(flow);
+    }
     store->setValue(QStringLiteral("view/checker_size"), checker_size->currentData());
     store->setValue(QStringLiteral("view/checker_colors"), checker_colours->currentData());
     store->setValue(QStringLiteral("view/checker_light"), checker_light->property("colour").value<QColor>().name());

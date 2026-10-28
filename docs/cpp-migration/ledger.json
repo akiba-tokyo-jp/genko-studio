@@ -9774,9 +9774,10 @@
    "cpp": [
     "native/src/app/backup.cpp",
     "native/src/app/backup.hpp",
-    "native/tests/gui/test_gui_look.cpp"
+    "native/tests/gui/test_gui_look.cpp",
+    "native/tests/contract/test_contract_materials.cpp"
    ],
-   "note": "backups/make/due ported (zip64 too) and tested in test_gui_look's backup cases."
+   "note": "backups/make/due ported (zip64 too) and tested in test_gui_look's backup cases; the zip64 archives read whole by Python's zipfile in test_contract_materials::bigZipsAreReadWholeByPython."
   },
   {
    "id": "module:balloons",

@@ -469,9 +469,95 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the layers are too large to read", "レイヤーの絵が多すぎて読めません"));
         r.push_back(rule("the picture is too large to read", "絵が大きすぎて読めません"));
         r.push_back(rule(R"(the page layer is too large \(.*\))", "用紙の大きさに対して PSD の絵が大きすぎて、レイヤーにできません"));
+        // (PC4 F-f: a .pcraft read or written — render/pcraft_read, formats/pcraft_write; the op smart_place's "the .pcraft
+        // cannot be read (…)" around them)
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft is broken \(.*\)\)?)", ".pcraft のファイルが壊れているか途中で切れていて、読めません"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft was written by a newer PhotoCraft \(format (\d+); this build reads format (\d+)\)\)?)",
+                         "新しい PhotoCraft で書かれた .pcraft なので読めません（形式 \\1。この版の Genko が読めるのは形式 \\2 です）"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft unpacks to more than this build reads at once \(.*\)\)?)",
+                         ".pcraft の中身が大きすぎて、一度に読めません（展開して 8 GiB まで）"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft holds a (?:blob|file) too large to read \(.*\)\)?)",
+                         ".pcraft の中に、大きすぎて読めないファイルがあります"));
+        // (PC4 F-f review: the read's budgets — its layers, the pixels it makes, what the book keeps, the documents inside)
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft holds more layers than this build reads \(at most (\d+)\)\)?)",
+                         ".pcraft のレイヤーが多すぎて読めません（\\1 枚まで）"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft holds more pixels than this build reads at once \(.*\)\)?)",
+                         ".pcraft のレイヤーとマスクの画素が多すぎて、一度に読めません"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft makes a book larger than this build holds.*)",
+                         ".pcraft の画素とファイルが大きすぎて、本に入りません（作業に使える記憶の上限を超えます）"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft holds more documents inside it than this build reads \(at most (\d+)\)\)?)",
+                         ".pcraft の中の .pcraft が多すぎて読めません（\\1 個まで）"));
+        r.push_back(rule(R"((?:the \.pcraft cannot be read \()?the \.pcraft is too large a page of inks for this build \((\d+)×(\d+) pixels\)\)?)",
+                         ".pcraft の画像が大きすぎて、インキのページにできません（\\1×\\2 px）"));
+        r.push_back(rule(R"(the \.pcraft would be larger than 4 GiB or hold more than 65535 files.*)",
+                         ".pcraft が 4 GiB を超えるか、中のファイルが 65535 を超えるので書けません"));
+        r.push_back(rule(R"(a multichannel page is not written as a \.pcraft by this build.*)",
+                         "マルチチャンネルのページは .pcraft に書き出せません（先に RGB・CMYK・グレースケールにします）"));
+        r.push_back(rule(R"(the asset's \.pcraft cannot be read \(.*\))", "素材の .pcraft を読めません（中身が名前と違います）"));
+        r.push_back(rule(R"(the \.pcraft cannot be read \(.*\))", "読み込めない .pcraft です"));
+        // (PC4 F-e: a camera RAW file — render/raw: LibRaw's refusals, the limits —, its development and set_camera_raw)
+        r.push_back(rule(R"((?:the asset's picture cannot be read \()?the camera RAW file is not one this build reads \(.*)",
+                         "この版の Genko では現像できないカメラ RAW です（LibRaw が知らないカメラか圧縮の形式です）"));
+        r.push_back(rule(R"((?:the asset's picture cannot be read \()?the camera RAW file is too large to read at once \(.*)",
+                         "カメラ RAW が大きすぎて、一度に読めません"));
+        r.push_back(rule(R"((?:the asset's picture cannot be read \()?the camera RAW file cannot be read \(.*)",
+                         "カメラ RAW のファイルが壊れているか途中で切れていて、読めません"));
+        r.push_back(rule(R"(the camera RAW file is empty)", "カメラ RAW のファイルが空です"));
+        r.push_back(rule(R"(the camera RAW development: (.*))", "現像の設定が正しくありません（\\1）"));
+        r.push_back(rule(R"(the smart object contents \S+ are not a camera RAW file.*)", "このスマートオブジェクトの中身はカメラ RAW ではありません"));
+        r.push_back(rule(R"(the smart object's contents are a camera RAW file: their colours are.*)",
+                         "中身はカメラ RAW のため、色は現像の色空間で決まります（コンテンツを編集の Camera Raw で変えます）"));
+        // (PC4 F-a: the codecs' refusals — render/codecs: a picture past the limits, a broken file, what a format holds —
+        // before the PSD's, whose words are of a PSD's layer)
+        r.push_back(rule(R"(the picture is too large \((\d+)×(\d+) pixels; at most (\d+) pixels\))", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("画像が大きすぎて読めません（%1×%2 px。%3 画素まで）").arg(m.captured(1), m.captured(2), m.captured(3));
+        }));
+        r.push_back(rule(R"(the picture is too large \((\d+)×(\d+) pixels; at most (\d+)×(\d+)\))", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("画像が大きすぎて読めません（%1×%2 px。幅 %3・高さ %4 px まで）").arg(m.captured(1), m.captured(2), m.captured(3), m.captured(4));
+        }));
+        r.push_back(rule(R"(the picture is too large to read at once \(\d+ bytes; at most \d+\))",
+                         "画像が大きすぎて、一度に読めません（作業に使える記憶の上限 2 GiB を超えます）"));
+        r.push_back(rule("the picture is too large to count in this computer's memory", "画像が大きすぎて読めません"));
+        r.push_back(rule(R"(the (.+) (?:file|picture) is too large to read)", "\\1 の画像が大きすぎて読めません"));
+        r.push_back(rule(R"(the OpenEXR file has too many (?:channels|tiles) \(.*\))", "OpenEXR のファイルのチャンネルかタイルが多すぎて読めません"));
+        r.push_back(rule(R"(the OpenEXR file's tiles are too large \(.*\))", "OpenEXR のファイルのタイルが大きすぎて読めません"));
+        r.push_back(rule(R"(the OpenEXR file has no R, G, B or Y channels)", "OpenEXR のファイルに R・G・B か Y のチャンネルがありません"));
+        r.push_back(rule(R"(the (.+) file cannot be read \(.*\))", "\\1 のファイルが壊れているか途中で切れていて、読めません"));
+        r.push_back(rule(R"(the file is not an? (.+) file)", "\\1 のファイルではありません"));
+        r.push_back(rule(R"(the bytes are not a picture of a format this build knows)", "この版の Genko が知っている形式の画像ではありません"));
+        r.push_back(rule(R"((.+) holds at most (\d+)×(\d+) pixels)", "\\1 には \\2×\\3 px までしか書けません"));
+        r.push_back(rule(R"(cannot write ([A-Za-z]+)(?:: .*| \(.*\)))", "\\1 のファイルを書けませんでした"));
         r.push_back(rule(R"(the picture is too large \(\d+×\d+ pixels.*\))", "PSD の絵が大きすぎて、レイヤーにできません"));
         r.push_back(rule(R"(the layer mask is too large \(.*\))", "用紙が大きすぎて、PSD のレイヤーマスクを作れません"));
         r.push_back(rule("the PSD has no pictures to read", "PSD に読み込める絵がありません"));
+        // (PC4 F-d: a page past what a PSD holds — 30000 px a side, 2 GiB —, written as a PSB instead)
+        r.push_back(rule(R"(the page is too large for a PSD \((\d+)×(\d+) pixels\): write it as a PSB)", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("ページが大きすぎて PSD に書けません（%1×%2 px。PSD は 1 辺 30000 px まで）。PSB で書き出してください").arg(m.captured(1), m.captured(2));
+        }));
+        r.push_back(rule(R"(the page is too large for a PSD \(past (\d+) GiB\): write it as a PSB)",
+                         "ファイルが PSD に書ける大きさ（2 GB）を超えます。PSB で書き出してください"));
+        // (PC4 F-c: 書き出し形式…, クイック書き出し, Web 用に保存, レイヤーからファイル…, `genko copy`)
+        r.push_back(rule(R"(the picture to write is too large \((\d+)×(\d+) pixels; .*\))", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("書き出す画像が大きすぎます（%1×%2 px。1 億 2 千万画素・1 辺 10 万 px・作業の記憶 2 GiB まで）。倍率か大きさを下げてください")
+                .arg(m.captured(1), m.captured(2));
+        }));
+        r.push_back(rule("the scale is 1 to 1000 percent", "拡大・縮小は 1〜1000 % です"));
+        r.push_back(rule("a side is 1 to 100000 pixels", "幅と高さは 1〜100000 px です"));
+        r.push_back(rule("the quality is 0 to 12", "画質は 0〜12 です"));
+        r.push_back(rule("the quality is 1 to 100", "画質は 1〜100 です"));
+        r.push_back(rule("a folder is written by its layers: choose one of them", "フォルダーは書き出せません。中のレイヤーを選んでください"));
+        r.push_back(rule("the layer has nothing to write", "このレイヤーには書き出すものがありません（空のレイヤーです）"));
+        r.push_back(rule(R"(no such layer: .*)", "そのレイヤーはこのページにありません"));
+        r.push_back(rule(R"(the image has (\d+) colours; Exact needs 256 or fewer)", "この画像には \\1 色あります。減色の「すべての色」は 256 色までです"));
+        r.push_back(rule(R"(unknown (preset|format|palette|dither|metadata|resample) `(.*)`.*)", "Web 用に保存の設定が正しくありません（\\1: \\2）"));
+        r.push_back(rule("the quick export's format is png, jpg, gif or webp", "クイック書き出しの形式は PNG・JPG・GIF・WebP です"));
+        r.push_back(rule("the layers' format is png, jpeg, tiff, psd or webp", "レイヤーからファイルの形式は PNG・JPEG・TIFF・PSD・WebP です"));
+        // (PC4 F-c, the coordinator's P3-8: the places no way out writes to)
+        r.push_back(rule(R"(cannot write over the book: (.*))", "原稿そのものには書き出しません。別の名前か場所を選んでください: \\1"));
+        r.push_back(rule(R"(cannot write inside the book's folder: (.*))", "原稿のフォルダーの中には書き出しません。別の場所を選んでください: \\1"));
+        r.push_back(rule(R"(cannot write over a file the book links: (.*))", "配置・リンクした元のファイルには書き出しません。別の名前か場所を選んでください: \\1"));
+        r.push_back(rule(R"(too many files of that name: (.*))", "同じ名前のファイルが多すぎて、クイック書き出しの名前を決められません: \\1"));
+        r.push_back(rule(R"(cannot write over the picture a book was opened from: (.*))", "開いた元の画像には書き出しません。別の名前か場所を選んでください: \\1"));
         r.push_back(rule(R"(the colour profile cannot be read \((.*)\))", "カラープロファイルを読み込めません"));
         r.push_back(rule(R"(the file cannot be read \(it is larger than 2 GiB\))", "ファイルが大きすぎて読み込めません（2 GiB まで）"));
         // (this build's own: put_raster reads only a regular file — not a device or a pipe, whose reading may not end)
@@ -538,6 +624,165 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("kind must be one of tone, effect, image, lines, lettering, brush, prim", "素材の種類が違います"));
         r.push_back(rule("adjust is set on a correction layer", "補正の設定は、色調補正のレイヤーにだけできます"));
         r.push_back(rule("adjust kind must be one of .*", "色調補正は、レベル補正・トーンカーブ・色相・反転・階調化・2 値化・グラデーションマップ・白黒から選びます"));
+        // (PC4 節 D, filters@1 — the C++ build's own: フィルター's kinds' settings and files, core/filter_kinds, render/fx)
+        // (D3: フィルターギャラリー's stack of effects, core/gallery_kinds)
+        r.push_back(rule(R"(adjust filter_gallery\.effects (?:is required|must be a list of).*)", "フィルターギャラリーには、かけるエフェクトレイヤーが 1〜32 個要ります"));
+        r.push_back(rule(R"(adjust filter_gallery\.effects\[\d+\]\.filter: the gallery has no effect '(.*)')", "フィルターギャラリーに「\\1」という効果はありません"));
+        r.push_back(rule(R"(adjust filter_gallery\.effects\[\d+\]\.filter must be .*)", "フィルターギャラリーの効果の名前が要ります（genko inspect --filters の gallery）"));
+        r.push_back(rule(R"(adjust filter_gallery\.effects\[\d+\] has no setting '(.*)')", "フィルターギャラリーの効果に「\\1」という設定はありません"));
+        r.push_back(rule(R"(adjust filter_gallery\.effects\[\d+\]\.(\S+) (?:must|needs|is) .*)", "フィルターギャラリーの効果の「\\1」の値が使えません"));
+        r.push_back(rule(R"(adjust filter_gallery\.effects\[\d+\] must .*)", "フィルターギャラリーのエフェクトレイヤーの書き方が違います（{filter, params, visible}）"));
+        r.push_back(rule(R"(filter_gallery: every effect is hidden.*)",
+                         "フィルターギャラリーのエフェクトレイヤーが全部隠れているので、何も変わりません（スマートフィルターなら隠したまま持てます）"));
+        // (D2: 置き換え's map and シアー's curve, core/filter_kinds, render/ops_filters)
+        r.push_back(rule(R"(adjust distort_displace\.map is required.*)", "置き換えには置き換えマップが要ります（この原稿のレイヤーか、PNG・PSD のファイル）"));
+        r.push_back(rule(R"(adjust distort_displace\.map_data is larger than 32 MiB)", "置き換えマップのファイルが大きすぎます（32 MiB まで）"));
+        r.push_back(rule(R"(adjust distort_displace\.map_data must be .*)", "置き換えマップのファイルは PNG か PSD です"));
+        r.push_back(rule(R"(adjust distort_displace\.map has no setting '(.*)' .*)", "置き換えマップの指定に「\\1」という設定はありません（page・layer）"));
+        r.push_back(rule(R"(adjust distort_displace\.map(?:\.page|\.layer|_suffix)? must .*)",
+                         "置き換えマップの指定が正しくありません（{\"layer\": レイヤーの id か \"merged\"}、または map_data）"));
+        r.push_back(rule(R"(the displacement map cannot be read \(.*\))", "置き換えマップが読めません（PNG か PSD のファイルを確かめます）"));
+        r.push_back(rule(R"(the displacement map's layer (\S+) is not on the page)", "置き換えマップのレイヤー（\\1）がそのページにありません"));
+        r.push_back(rule(R"(the displacement map's page (\S+) is not in the book)", "置き換えマップのページ（\\1）がこの原稿にありません"));
+        r.push_back(rule(R"(the displacement map's page (\S+) is still being read: try again in a moment)",
+                         "置き換えマップのページ（\\1）をまだ読み込んでいます。少し待ってからもう一度試します"));
+        r.push_back(rule(R"(the displacement map's layer (\S+) has no picture of its own .*)",
+                         "置き換えマップのレイヤー（\\1）はフォルダーか色調補正レイヤーで、絵がありません"));
+        r.push_back(rule(R"(the displacement map \S+ is not in the book)", "置き換えマップのファイルがこの原稿にありません"));
+        r.push_back(rule(R"(adjust distort_shear\.points must be .*)", "シアーの曲線は、2〜64 個の点 [上からの位置 0〜1, ずらす量 −1〜1] で指定します"));
+        // (D6: レンズ補正・広角補正's settings, core/filter_kinds; 消点's planes and op, core/vanishing, render/vanishing)
+        r.push_back(rule(R"(adjust lens_correction\.straighten must be .*)", "レンズ補正の角度補正の線は、離れた 2 点 [[x, y], [x, y]]（mm）で指定します"));
+        r.push_back(rule(R"(lens_correction: the profile auto needs the focal length.*)",
+                         "レンズ補正のプロファイル「自動」には焦点距離が要ります（画像の EXIF に無いときは、焦点距離を入れます）"));
+        r.push_back(rule(R"(adjust adaptive_wide_angle\.constraints must be .*)",
+                         "広角補正の拘束線は 64 本まで、{a: [x, y], b: [x, y]（mm）, orientation: free・horizontal・vertical} で指定します"));
+        r.push_back(rule(R"(vanishing\.planes must be .*)", "消点の面は 1〜32 面です（最初の面は 4 隅 corners_mm、後の面は 4 隅か from・edge・angle・depth）"));
+        r.push_back(rule(R"(vanishing\.planes\[0\] needs its four corners.*)", "消点の最初の面には 4 隅（corners_mm）が要ります"));
+        r.push_back(rule(R"(vanishing\.planes\[\d+\]\.corners_mm must be .*)", "消点の面の 4 隅は、凸の四角形の 4 つの点 [x, y]（mm）です"));
+        r.push_back(rule(R"(vanishing\.planes\[\d+\]\.from must be .*)", "消点の面の from は、それより前の面の番号です"));
+        r.push_back(rule(R"(vanishing\.planes\[\d+\]\.edge must be .*)", "消点の面の edge は top・right・bottom・left のどれかです"));
+        r.push_back(rule(R"(vanishing\.planes\[\d+\]\.(?:angle|depth) must be .*)", "消点の面の角度と奥行きは数で指定します"));
+        r.push_back(rule(R"(vanishing\.planes\[\d+\] has its corners or is torn off.*)", "消点の面は、4 隅か、前の面からの継ぎ足し（from）のどちらかで指定します"));
+        r.push_back(rule(R"(vanishing\.planes\[\d+\] has no setting '(.*)'.*)", "消点の面に「\\1」という設定はありません"));
+        r.push_back(rule(R"(vanishing\.planes\[\d+\] must be .*)", "消点の面の書き方が違います"));
+        r.push_back(rule(R"(vanishing\.focal_mm must be .*)", "消点の焦点距離は、0 より大きい長さ（mm）です"));
+        r.push_back(rule(R"(vanishing has no setting '(.*)'.*)", "消点の面の指定に「\\1」という設定はありません（planes・focal_mm）"));
+        r.push_back(rule(R"(vanishing must be .*)", "消点の面の書き方が違います（{planes, focal_mm}）"));
+        r.push_back(rule(R"(vanishing_point: the plane (\d+) would lie behind the camera)", "消点の面 \\1 がカメラの後ろに回ってしまいます（角度・奥行きを変えます）"));
+        r.push_back(rule(R"(vanishing_point: the plane (\d+) is degenerate)", "消点の面 \\1 がつぶれています"));
+        r.push_back(rule(R"(vanishing_point: the plane (\d+) reaches too far.*)", "消点の面 \\1 が遠くへ伸びすぎます（角度・奥行きを変えます）"));
+        r.push_back(rule(R"(vanishing_point: the page has no planes yet.*)", "このページには消点の面がまだありません（面を作ってから使います）"));
+        r.push_back(rule(R"(vanishing_point: no planes to paste or stamp on.*)", "消点の面をすべて消すときは、貼り付けもスタンプもできません"));
+        r.push_back(rule(R"(vanishing_point: (\d+) dabs reached toward the horizon.*)",
+                         "消点のスタンプの跡のうち \\1 個は、地平線に近く大きくなりすぎるため描きませんでした"));
+        r.push_back(rule(R"(vanishing_point needs the paint layer it lays on.*)", "消点で描くペイントのレイヤーを選ぶか、新しいレイヤーにします"));
+        r.push_back(rule(R"(vanishing_point has no setting '(.*)'.*)", "消点に「\\1」という設定はありません"));
+        r.push_back(rule(R"(vanishing_point has no kind.*)", "消点の種類の指定が違います"));
+        r.push_back(rule(R"(paste must be a list of at most (\d+) .*)", "消点で貼り付ける絵は \\1 個までです"));
+        r.push_back(rule(R"(paste\[\d+\]\.data .*)", "消点で貼り付ける絵のデータが読めません（PNG のファイル、32 MiB まで）"));
+        r.push_back(rule(R"(paste\[\d+\]\.layer: no layer (\S+) on the page)", "消点で貼り付けるレイヤー（\\1）がそのページにありません"));
+        r.push_back(rule(R"(paste\[\d+\]\.plane must be .*)", "消点で貼り付ける面の番号が違います"));
+        r.push_back(rule(R"(paste\[\d+\]\.at must be .*)", "消点で貼り付ける位置（at）は、面の上の [u, v]（数 2 つ）です"));
+        r.push_back(rule(R"(paste\[\d+\]\.width must be .*)", "消点で貼り付ける幅（width）は、面の幅に対する割合の数（0.01〜10）です"));
+        r.push_back(rule(R"(paste\[\d+\] .*)", "消点で貼り付ける絵の指定が違います（{plane, layer か data, at: [u, v], width}）"));
+        r.push_back(rule(R"(clone must be a list of at most (\d+) .*)", "消点のスタンプは \\1 本までです"));
+        r.push_back(rule(R"(clone\[\d+\]\.(?:source|points) must lie near the page.*)",
+                         "消点のスタンプの点とコピー元は、ページとその周り（ページの幅と高さの分）に置きます"));
+        r.push_back(rule(R"(clone\[\d+\].*)", "消点のスタンプの指定が違います（{source: [x, y], points: [[x, y]…]（mm）, size_px, hardness, opacity}）"));
+        r.push_back(rule(R"(a stroke has more than (\d+) dabs.*)", "線が長すぎます（ブラシの間隔で \\1 個を超える跡になります。点を近づけるか、ブラシを大きくします）"));
+        r.push_back(rule(R"(a page's vanishing point planes: .*)", "ページの消点の面が正しくありません（原稿は読み取り専用で開きます）"));
+        // (D5: Camera Raw フィルター's point curves, core/filter_kinds)
+        r.push_back(rule(R"(adjust camera_raw\.point_curve(?:_red|_green|_blue)? must be .*)",
+                         "Camera Raw フィルターのポイントカーブは、[]（直線）か、2〜19 個の点 [入力, 出力]（0〜255）で指定します"));
+        r.push_back(rule(R"(the smart object \S+'s filter \S+_data: .*)", "スマートフィルターのファイルは原稿の素材として持ちます（ファイルのデータのままでは持てません）"));
+        // (PC4 D4: 描画・ぼかしギャラリー's lists, 照明効果's channel, render_picture — 炎・額縁・木)
+        r.push_back(rule(R"(adjust render_lighting_effects\.lights must be a list of at most (\d+) .*)",
+                         "照明効果の光は \\1 個までです（種類・位置・高さ・向き・色・強さ・円錐・ホットスポット・半径）"));
+        r.push_back(rule(R"(adjust render_lighting_effects\.lights' each light is .*)",
+                         "照明効果の光の設定が正しくありません（種類はスポットライト・点光源・無限光、カラーは [r, g, b]、ほかは数です）"));
+        r.push_back(rule(R"(adjust render_lighting_effects\.texture must be .*)",
+                         "照明効果のテクスチャは、なし・レッド・グリーン・ブルー・透明部分・輝度か、ページのアルファチャンネルです"));
+        r.push_back(rule(R"(render_lighting_effects: the page has no channel (.*) for the texture)", "照明効果のテクスチャのチャンネル「\\1」がページにありません"));
+        r.push_back(rule(R"(render_lighting_effects: the texture's channel (.*) is not an alpha channel)",
+                         "照明効果のテクスチャには、アルファチャンネルを使います（「\\1」はアルファチャンネルではありません）"));
+        r.push_back(rule(R"(render_lighting_effects: a smart filter's texture cannot be a channel of the page.*)",
+                         "スマートフィルターの照明効果では、テクスチャにページのチャンネルを使えません（なし・レッド・グリーン・ブルー・透明部分・輝度から選びます）"));
+        r.push_back(rule(R"(adjust blur_(?:field|iris|spin)\.pins must be a list of 1 to (\d+) .*)", "ぼかしギャラリーのピンは 1〜\\1 個です"));
+        r.push_back(rule(R"(adjust blur_(?:field|iris|spin)\.pins' each pin is .*)", "ぼかしギャラリーのピンの設定が正しくありません（場所・ぼかしなどは数です）"));
+        r.push_back(rule(R"(adjust blur_path\.paths' each path is .*)",
+                         "パスぼかしのパスの設定が正しくありません（点は 2 個以上の [x, y]（ページの mm）、速度・先細りは数です）"));
+        r.push_back(rule(R"(adjust blur_path\.paths must be a list of at most (\d+) .*)",
+                         "パスぼかしのパスは \\1 本までで、点は各パス 2 個以上・全部で 4096 個まで（ページの mm）です"));
+        r.push_back(rule(R"(render_picture's kind must be .*)", "描画の種類は、炎（flame）・額縁（picture_frame）・木（tree）から選びます"));
+        r.push_back(rule(R"(render_picture's new_layer must be true or false)", "新しいレイヤーに描くかどうかは true か false で決めます"));
+        r.push_back(rule(R"(render_picture's id must be a layer's id)", "描くレイヤーの指定が違います"));
+        r.push_back(rule(R"(render_picture would draw more than (\d+) shapes.*)",
+                         "描く形が多すぎます（\\1 個を超えます。炎の間隔を広げるか、パスを短くするか、選択範囲を小さくします）"));
+        r.push_back(rule(R"(render_picture flame: the page has no path named '(.*)')", "そのページに「\\1」という名前のパスがありません"));
+        r.push_back(rule(R"(render_picture flame: the path is too long or too finely curved.*)", "炎の道筋のパスが長すぎるか細かすぎて、たどれません"));
+        r.push_back(rule(R"(render_picture (flame|picture_frame|tree) has no setting '(.*)')", [](const QRegularExpressionMatch& m) {
+            const QString kind = m.captured(1) == QStringLiteral("flame") ? QStringLiteral("炎") : m.captured(1) == QStringLiteral("tree") ? QStringLiteral("木") : QStringLiteral("額縁");
+            return QStringLiteral("%1 に「%2」という設定はありません").arg(kind, m.captured(2));
+        }));
+        r.push_back(rule(R"(render_picture (flame|picture_frame|tree)\.(\S+) (?:must|needs|is) .*)", [](const QRegularExpressionMatch& m) {
+            const QString kind = m.captured(1) == QStringLiteral("flame") ? QStringLiteral("炎") : m.captured(1) == QStringLiteral("tree") ? QStringLiteral("木") : QStringLiteral("額縁");
+            return QStringLiteral("%1 の「%2」の値が使えません").arg(kind, m.captured(2));
+        }));
+        r.push_back(rule(R"(adjust ((?:blur|sharpen|noise|other|video|distort|pixelate|stylize|render|filter|camera|lens|adaptive)_\S+?) has no setting '(.*)')",
+                         "フィルター（\\1）に「\\2」という設定はありません"));
+        r.push_back(rule(R"(adjust ((?:blur|sharpen|noise|other|video|distort|pixelate|stylize|render|filter|camera|lens|adaptive)_\S+?)\.(\S+) (?:must|needs|is) .*)",
+                         "フィルター（\\1）の「\\2」の値が使えません"));
+        r.push_back(rule(R"(the smart object \S+'s filter \S+ is not one of the book's files.*)", "スマートフィルターのファイルの指定が正しくありません"));
+        r.push_back(rule(R"(the smart object \S+'s filter \S+_suffix is not .*)", "スマートフィルターのファイルの形式は PNG か PSD です"));
+        r.push_back(rule(R"(the smart object \S+'s filter \S+: the book holds no file .*)",
+                         "スマートフィルターが使うファイルがこの原稿にありません（原稿は読み取り専用で開きます）"));
+        r.push_back(rule("the result exceeds the finite working range", "結果の値が大きすぎて、扱える範囲を超えました（原稿は変わりません）"));
+        // (PC4 E5: the brushes that change pixels — render/ops_paint_tools)
+        r.push_back(rule("range must be one of midtones, shadows, highlights", "範囲は、シャドウ・中間調・ハイライトから選びます"));
+        r.push_back(rule("mode must be one of desaturate, saturate", "スポンジのモードは、彩度を下げる・彩度を上げるから選びます"));
+        r.push_back(rule("mode must be one of color, hue, saturation, luminosity", "色の置き換えのモードは、色相・彩度・カラー・輝度から選びます"));
+        r.push_back(rule("sampling must be one of continuous, once, swatch", "サンプルは、連続・一度・背景のスウォッチから選びます"));
+        r.push_back(rule("limits must be one of contiguous, discontiguous, find_edges", "制限は、隣接されていない・隣接・輪郭検出から選びます"));
+        r.push_back(rule(R"(the stroke is too much work to lay at once.*)",
+                         "筆の仕事が多すぎます（跡の面積が上限を超えます。直径か間隔を変えるか、なぞる長さを短くします）"));
+        r.push_back(rule("points must lie within 100000 mm of the page", "筆の点は、ページから 100 m の内に置きます"));
+        r.push_back(rule(R"(the layer's transparency is locked: the Background Eraser .*)",
+                         "透明部分を保護したレイヤーには、背景消しゴムツールは使えません（保護を外してから使います）"));
+        r.push_back(rule(R"(reservoir.*)", "混合ブラシの絵の具の指定が違います（前のストロークの結果をそのまま渡します）"));
+        r.push_back(rule("seed must be a string or a whole number", "ブラシの揺らぎの種は、文字か整数で指定します"));
+        r.push_back(rule(R"(brush must be a dab brush of the book.*)", "そのブラシは使えません（先端の跡を並べて描くブラシを、原稿のブラシから選びます）"));
+        r.push_back(rule(R"((rgb|foreground_rgb|swatch_rgb) is \[r, g, b\] \(0\.\.255\), "foreground" or "background")",
+                         "色は 0〜255 の 3 つの数か、描画色（foreground）・背景色（background）で指定します"));
+        r.push_back(rule(R"(the smudge is too wide for the layer.*)", "色混ぜの太さが大きすぎます（レイヤーの辺の 4 倍まで）"));
+        r.push_back(rule(R"(the Background Eraser takes away the alpha: it cannot work one colour plate)",
+                         "背景消しゴムツールは透明にする道具なので、色の版 1 つには使えません（描く先をレイヤーに戻します）"));
+        // (PC4 E2: the brush library, tool presets and the presets' files — render/brush_presets, tool_presets, preset_files)
+        r.push_back(rule(R"(the built-in brush (.+) cannot be changed.*)", "組み込みのブラシ（\\1）は変えられません（自分のブラシにしてから変えます）"));
+        r.push_back(rule(R"(no brush of one's own named (.+))", "「\\1」という自分のブラシはありません"));
+        r.push_back(rule(R"(a brush named (.+) is there already)", "「\\1」という名前のブラシがもうあります"));
+        r.push_back(rule(R"(the group (.+) is the built-in brushes'.*)", "「\\1」は組み込みのブラシのグループです（自分のブラシには別のグループ名を付けます）"));
+        r.push_back(rule("a group's name is 1 to 200 characters", "グループ名は 1〜200 文字にします"));
+        r.push_back(rule(R"(a group named (.+) is there already)", "「\\1」というグループがもうあります"));
+        r.push_back(rule(R"(no group named (.+))", "「\\1」というグループはありません"));
+        r.push_back(rule("a brush's name is 1 to 40 characters", "ブラシ名は 1〜40 文字にします"));
+        r.push_back(rule("rename names one brush", "名前を変えるブラシを 1 つ選びます"));
+        r.push_back(rule("preset names (?:no brush|a brush by its key or name.*)", "ブラシを選びます"));
+        r.push_back(rule("a brush of one's own has a key starting with my_.*", "自分のブラシの鍵は my_ で始めます（40 文字まで）"));
+        r.push_back(rule(R"(the library holds (\d+) brushes of one's own at most)", "自分のブラシは \\1 本までです"));
+        r.push_back(rule("nothing there holds paint.*", "そこには描いたもの（白でも透明でもない所）がありません"));
+        r.push_back(rule("the area covers none of the page", "選択範囲がページの外にあります"));
+        r.push_back(rule(R"(the area is too large for a brush tip.*)", "ブラシの先端にするには大きすぎます（2500 画素四方まで。選択範囲を小さくします）"));
+        r.push_back(rule(R"(no tool preset named (.+) \(see tool-presets list\))", "「\\1」というツールプリセットはありません"));
+        r.push_back(rule(R"((?:a tool preset(?:'s)? |options\.|the field ).*)", "ツールプリセットの中身が正しくありません"));
+        r.push_back(rule("the kinds of presets are .*", "プリセットの種類は、ブラシ・グラデーション・パターン・シェイプ・ツールプリセットから選びます"));
+        r.push_back(rule("not a Genko presets file.*", "Genko のプリセットのファイルではありません"));
+        r.push_back(rule(R"((?:the presets are larger than|a presets file is at most) .*)", "プリセットのファイルが大きすぎます（256 MB まで）"));
+        r.push_back(rule("the settings folder is this one: .*", "移行元が今の設定のフォルダーです（別の設定のフォルダーか、書き出したプリセットのファイルを選びます）"));
+        r.push_back(rule(R"(the brush file's tips are too large to read.*)", "ブラシのファイルの先端が大きすぎて読めません（ほどくと 512 MB を越えます）"));
+        r.push_back(rule(R"(the brush file is larger than (\d+) MB)", "ブラシのファイルが大きすぎます（\\1 MB まで）"));
+        r.push_back(rule(R"(brush files of (?:sub)?version (\d+) are not read)", "この版（\\1）のブラシのファイルは読めません（版 1・2・6〜10 を読みます）"));
+        r.push_back(rule(R"(not a brush file that can be read: (.*))", "ブラシのファイルとして読めません（\\1）"));
+        r.push_back(rule(R"(the brush file holds no brush that can be read.*)", "読めるブラシがファイルに入っていません"));
         // (PC2, adjustments@1 — the C++ build's own: a correction's native settings and kinds, core/adjust)
         r.push_back(rule(R"(adjust kind '(.*)' is not a correction layer's kind)", "「\\1」は色調補正のレイヤーの種類ではありません"));
         // (PC2a — the tone corrections' own: set_adjustment, auto_adjust and a colour lookup's table, render/ops_adjust, core/lut3d)
@@ -572,7 +817,7 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the layer \S+ is not a paint layer \(pen or paint\))", "描画のレイヤー（ペン・ペイント）を選びます"));
         r.push_back(rule(R"(id \(the (?:paint layer to trap|layer to fade)\) is required)", "対象のレイヤーが要ります"));
         r.push_back(rule(R"(from \(the layer's pixels before.*\) is required)", "フェードする前の画素（from）が要ります"));
-        r.push_back(rule(R"(fade_layer reads the pixels before from the book's folder.*)", "フェードの前に、原稿を保存します（ファイル → 別の場所に保存）"));
+        r.push_back(rule(R"(fade_layer reads the pixels before from the book's folder.*)", "フェードの前に、原稿を保存します（ファイル → 別名で保存…）"));
         r.push_back(rule(R"(the book has no asset \S+ \((?:a tile of )?the pixels before\))", "フェードする前の画素が、原稿の素材にありません"));
         r.push_back(rule(R"(from as tiles is a precise layer's.*)", "タイルの形の前の画素（from）は、高精度のレイヤーのものです（ほかのレイヤーは素材の sha256 を渡します）"));
         r.push_back(rule(R"(the pixels before are too large to read whole.*)",
@@ -1152,7 +1397,15 @@ QString unported_element(const QString& element) {
         {"text_features", "横書きの文字の字形の指定（OpenType 機能）"}, {"text_warp", "文字のゆがみ"}, {"tones", "トーン"}, {"effects", "効果線"},
         {"prims", "3D"}, {"placed", "配置した画像"}, {"nombre", "ノンブル"}, {"covers", "表紙の折り目"}, {"anim", "アニメーション"},
         {"screen", "トーン化"}, {"finish", "仕上げの白黒化"}, {"brush_library", "自作ブラシの読み込み"},
-        {"image_format", "この版では読めない形式の画像（PPM・ICO・JPEG 2000 など）"}};
+        {"image_format", "この版では読めない形式の画像（PPM・ICO・JPEG 2000 など）"},
+        // PC4 F-0 (render/codecs): a format this build does not write yet
+        {"image_write", "この版では書けない形式の画像"},
+        // PC4 F-b (formats/open_file): the files 開く… opens in later groups
+        {"psd_file", "PSD・PSB を 1 冊として開くこと（ファイル → PSD をレイヤーのまま読み込む… で読み込めます）"},
+        {"raw_file", "カメラ RAW のファイル"},
+        {"pcraft_file", "PhotoCraft の原稿（.pcraft）"}};
+    // (PC4 F-a: PPM and ICO are read since; the formats this build still does not read)
+    if (element == QLatin1String("image_format")) return QStringLiteral("この版では読めない形式の画像（JPEG 2000・ICNS・DDS など）");
     if (const auto it = words.find(element); it != words.end()) return it->second;
     if (element.startsWith(QStringLiteral("adjust:"))) return QStringLiteral("色調補正（%1）").arg(element.mid(7));
     if (element.startsWith(QStringLiteral("smart:"))) {  // (smart-objects@1: what PC3's later steps draw)

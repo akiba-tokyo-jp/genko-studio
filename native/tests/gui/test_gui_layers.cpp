@@ -555,17 +555,18 @@ private slots:
         QVERIFY(!app::adjust_forms::adjust_dialog(nullptr, "blur", Json::object(), {}));  // (a kind without a form: no window)
     }
 
-    // かける: after the question, the filter's numbers in a dialog while the page shows the result; かける applies it
-    // (pen lines become pixels), やめる leaves the page as it was.
+    // A filter (PC4 節 D, the user's decision 1: the panel's かける… opens the フィルター menu, whose ぼかし（ガウス）… is here):
+    // after the question (pen lines become pixels), its numbers in a window while the page shows the result; かける applies
+    // it, やめる leaves the page as it was; a filter without numbers (ぼかし) straight on, after the question.
     void filterWithItsResultShown() {
         Book book;
         const std::string ink = book.ink;
         gui_test::Answers answers;
-        auto& panel = book.panel();
+        answers.responder->question = [&answers](const QString& title, const QString& text) {
+            answers.asked << title + QStringLiteral(": ") + text;
+            return true;
+        };
         QVERIFY(book.choose(ink));
-        auto* filter = panel.filter_box();
-        filter->setCurrentIndex(filter->findData(QStringLiteral("blur")));
-        answers.responder->question = [](const QString&, const QString&) { return true; };
         bool previewed = false;
         auto* canvas = book.window->canvas();
         const auto with_preview = [&](int answer) {
@@ -580,15 +581,16 @@ private slots:
                 return answer;
             };
         };
+        QAction* gaussian = book.window->action(QStringLiteral("act_filter_blur_gaussian"));
         answers.responder->exec = with_preview(QDialog::Rejected);
-        panel.apply_filter();
+        gaussian->trigger();
         QVERIFY(previewed);
         QVERIFY(book.layer(ink)->stroke_count() > 0);
         QTRY_VERIFY(canvas->doc() == book.session->snapshot());
 
         previewed = false;
         answers.responder->exec = with_preview(QDialog::Accepted);
-        panel.apply_filter();
+        gaussian->trigger();
         QVERIFY(previewed);
         QCOMPARE(book.layer(ink)->stroke_count(), std::size_t(0));
         QCOMPARE(book.layer(ink)->kind, core::LayerKind::Raster);
@@ -598,15 +600,16 @@ private slots:
         QVERIFY(book.layer(ink)->stroke_count() > 0);
 
         // a filter without numbers: straight on, after the question
-        filter->setCurrentIndex(filter->findData(QStringLiteral("invert")));
         answers.asked.clear();
         answers.responder->exec = [](QDialog*) { return int(QDialog::Rejected); };
-        panel.apply_filter();
+        book.window->action(QStringLiteral("act_filter_blur"))->trigger();
+        QCOMPARE(answers.asked.size(), qsizetype(1));
+        QVERIFY2(answers.asked[0].contains(QStringLiteral("ペンの線は画像になり")), qPrintable(answers.asked[0]));
         QCOMPARE(book.layer(ink)->stroke_count(), std::size_t(0));
         QVERIFY(book.layer(ink)->raster_png);
     }
 
-    // On high-precision pixels the panel's filter keeps them precise.
+    // On high-precision pixels a filter keeps them precise.
     void filterOnPrecisePixels() {
         auto doc = core::new_episode("高精度", core::Num(1), 1, core::PageSpec::custom(20, 20, 16, 16, 1, 2, 2, 2, 2, 72, "color"));
         doc.edit_page(0).layers.clear();
@@ -617,16 +620,20 @@ private slots:
         doc.edit_page(0).layers[0].id = "paint";
         Book book(doc);
         gui_test::Answers answers;
-        answers.responder->question = [](const QString&, const QString&) { return true; };
-        auto& panel = book.panel();
         QVERIFY(book.choose("paint"));
-        panel.filter_box()->setCurrentIndex(panel.filter_box()->findData(QStringLiteral("invert")));
         const auto before = book.layer("paint")->color_raster;
-        panel.apply_filter();
+        // ぼかし（ガウス）… of 40 working pixels: σ two of this layer's (8 pixels over 20 mm)
+        answers.responder->exec = [](QDialog* dialog) {
+            if (dialog->objectName() != QStringLiteral("filter_dialog")) return int(QDialog::Rejected);
+            dialog->findChild<QDoubleSpinBox*>(QStringLiteral("field_radius"))->setValue(40);
+            return int(QDialog::Accepted);
+        };
+        book.window->action(QStringLiteral("act_filter_blur_gaussian"))->trigger();
         QVERIFY(book.layer("paint")->color_raster && book.layer("paint")->color_raster != before);
         const core::ColorRasterView after(*book.layer("paint")->color_raster);
         QCOMPARE(after.metadata("")["precision"], Json("u16"));
-        QVERIFY(std::abs(after.pixel(3)[0] - (1 - 3000 / 65535.0)) < 1e-9);
+        QVERIFY(std::abs(after.pixel(3)[1] - 30000 / 65535.0) < 1e-9);  // (a flat plate stays flat to the 16 bits: 8 would round it)
+        QVERIFY(after.pixel(3)[0] > 3000 / 65535.0 + 1e-3);              // (blurred: the rows below it are lighter)
     }
 
     // PC3 B2 (the user's decision 5): レイヤー → レイヤーマスク by Photoshop's names — すべての領域を隠す (a new mask linked),

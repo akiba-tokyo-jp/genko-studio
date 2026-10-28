@@ -1409,6 +1409,9 @@ bool box_blur_in_bands(Imaging out, Imaging in, float xradius, float yradius, in
 
 BandCounts band_counts() { return BandCounts{g_banded.load(), g_band_failures.load(), g_most_threads.load()}; }
 
+int take_band_threads(int wanted) { return wanted > 0 ? take_threads(wanted) : 0; }
+void give_band_threads(int n) { give_threads(n); }
+
 void side_by_side(const std::function<void()>& side, const std::function<void()>& main) {
     // (one after the other: both done, the exceptions as below)
     const auto in_turn = [&side, &main] {

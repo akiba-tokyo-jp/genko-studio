@@ -72,6 +72,12 @@ genko_library(genko_core
     color_adjust.cpp
     adjust.cpp
     adjust_kinds.cpp
+    filter_kinds.cpp
+    filter_upstream.cpp
+    exif.cpp
+    lens.cpp
+    vanishing.cpp
+    gallery_kinds.cpp
     adjust_tone.cpp
     adjust_color.cpp
     rulers.cpp
@@ -112,6 +118,16 @@ genko_library(genko_core
     page_geometry.cpp
     # PC3 C-d (表示 → スナップ・スナップ先)
     snap.cpp
+    # PC4 F-0 (形式の土台: file-info@1, image-grid@1, psd-keep@1)
+    file_info.cpp
+    psd_keep.cpp
+    # PC4 E-0 (描く道具の土台: brushes@1, patterns@1)
+    brush_dabs.cpp
+    patterns.cpp
+    # PC4 F-e (カメラ RAW: camera-raw@1 の現像の設定)
+    raw_develop.cpp
+    # PC4 E6 (レイヤースタイル: layer-styles@1)
+    layer_styles.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"

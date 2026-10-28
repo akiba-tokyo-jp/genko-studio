@@ -153,7 +153,7 @@ private slots:
             {"act_content_aware_scale", "コンテンツに応じて拡大・縮小…", "Ctrl+Alt+Shift+C", "編集"},
             {"act_puppet_warp", "パペットワープ", "", "編集"},
             {"act_perspective_warp", "遠近法ワープ", "", "編集"},
-            {"act_liquify_filter", "ゆがみ…", "Ctrl+Shift+X", "編集"},
+            {"act_liquify_filter", "ゆがみ…", "Ctrl+Shift+X", "フィルター"},  // (PC4 節 D: moved to フィルター, PC3 節 A 5 章's promise)
             {"act_transform_again", "再実行", "", "編集/変形"},
             {"act_transform_scale", "拡大・縮小", "", "編集/変形"},
             {"act_transform_rotate", "回転", "", "編集/変形"},

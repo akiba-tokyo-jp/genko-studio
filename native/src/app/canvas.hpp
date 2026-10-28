@@ -20,13 +20,16 @@
 
 #include "app/frame_tools.hpp"
 #include "app/live_ink.hpp"
+#include "app/pen.hpp"
 #include "app/tiles.hpp"
 #include "core/geometry.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
 #include "core/snap.hpp"
+#include "render/dabs/dynamics.hpp"
 
 class QKeyEvent;
+class QPainter;
 class QVariantAnimation;
 
 namespace genko::app {
@@ -65,7 +68,12 @@ struct StrokeInput {
     core::PenPoints points;
     std::vector<double> rotation;
     std::string id;
-    QString tool;  // pen | eraser
+    QString tool;  // pen | pencil | eraser
+    // brushes@1 (PC4 E1): the pen's inputs at each point — its tilt (x and y), the time (ms from the first point) and the
+    // airbrush wheel (0..1) —, what a dab brush's line reads
+    std::vector<double> tilt;
+    std::vector<double> time_ms;
+    std::vector<double> wheel;
 };
 
 class PageCanvas : public QWidget {
@@ -104,6 +112,13 @@ public:
     const core::Json& live_pen() const { return pen_fields_; }
     double brush_width_mm = 0.35;
     double eraser_mm = 2.0;
+    // brushes@1 (PC4 E1): the smoothing's way — "stabilize" (add_stroke's 手ぶれ補正), "string" (紐で引く) or "catch_up"
+    // (追いつく: the pen's input smoothed here, render/dabs Smoother; the line shown and kept is the smoothed one) — and its
+    // amount (0..1)
+    QString smoothing = QStringLiteral("stabilize");
+    double smoothing_amount = 0.5;
+    // The tools that draw a line (ブラシツール, 鉛筆ツール).
+    static bool draws_line(const QString& tool);
     QString frame_mode = QStringLiteral("cut");  // cut | rect | poly | free
     bool show_guides = true;
     bool show_frame_numbers = false;
@@ -225,6 +240,8 @@ public:
     // スポイト: where it picked last (mm) and whether from the drawing layer (color-mode@1: the window reads the inks
     // there on a CMYK or Lab page).
     std::optional<std::pair<QPointF, bool>> last_pick;
+    // (PC4 E4) the last pick was an Alt+click with the スポイトツール in hand — not held for a moment by Alt —: for the 背景色.
+    bool last_pick_background = false;
     // スポイト: the colour as seen ("view") or the drawing layer's own ("layer": asked of layer_colour_at).
     QString pick_source = QStringLiteral("view");
     std::function<std::optional<std::array<int, 3>>(double x_mm, double y_mm)> layer_colour_at;
@@ -237,6 +254,11 @@ public:
     // (clone), ヒストリーブラシツール (historybrush); the two that sample a source (heal, clone: Alt+click sets it).
     static bool is_retouch_tool(const QString& tool);
     static bool is_clone_tool(const QString& tool);
+    // 画素を変える筆 (PC4 E5, app/paint_tools.cpp): ぼかしツール (blurtool), シャープツール (sharpentool), 指先ツール (smudgetool),
+    // 覆い焼きツール (dodge), 焼き込みツール (burn), スポンジツール (sponge), 混合ブラシツール (mixer), 背景消しゴムツール (bgeraser),
+    // 色の置き換えツール (colorreplace); their brush's diameter (mm).
+    static bool is_pixel_tool(const QString& tool);
+    double pixel_tool_mm = 5.0;
     // Their brush's diameter (mm), and the clone source as the window keeps it (コピーソース): where it was set (mm), the
     // destination paired with it by the first stroke after (調整あり; none: the stroke's own start), how the destination's
     // offsets map to the source's (W/H, rotation, flips: clone_matrix's), and the overlay — a picture of what is sampled
@@ -404,6 +426,14 @@ public:
     QString pen_button = QStringLiteral("menu");
     // The pen's pointer on the page: circle (the brush's circle and a dot) | circle_cross | cross | dot.
     QString cursor_kind = QStringLiteral("circle_cross");
+    // brushes@1 (PC4 E1): 表示 › ブラシプレビュー (off: the cross alone) and 描いている間は十字だけ; the pen's brush (its kind: a
+    // dab brush's tip drawn as the pointer for cursor_kind "tip")
+    bool brush_preview = true;
+    // PC4 E3 (view.patternPreview): the page shown repeated around itself, as Photoshop's パターンプレビュー (the book does
+    // not change)
+    bool pattern_preview = false;
+    bool cross_while_drawing = false;
+    std::string pointer_kind;
     // The tool a held Alt or Ctrl switches to for a moment ("": none).
     std::map<QString, QString> modifier_tools{{QStringLiteral("alt"), QStringLiteral("picker")}, {QStringLiteral("ctrl"), QStringLiteral("select")}};
     // 道具ごとの修飾キー: {tool: {alt | ctrl | shift: a tool, or "none"}} — a tool's own wins over the common one; Shift
@@ -437,6 +467,21 @@ public:
     const LiveInk* overlay(std::size_t i) const { return i < overlays_.size() ? overlays_[i].ink.get() : nullptr; }
     bool coasting() const;
     bool gliding() const { return glide_.has_value(); }
+
+    // (PC4 D4) A piece of work over the page that takes the mouse and the keys before the tools do — ぼかしギャラリー's pins
+    // (app/blur_gallery_tool.cpp) —: what it draws over the page (`at`: a place of the page in mm where the painter draws it;
+    // `per_mm`: the screen's pixels a mm), the left button — or the pen, its eraser end too; a double click's second press a press — pressed, dragged and let go (the page's mm, the keys held; true:
+    // taken) and the keys (true: taken). The view still pans (Space, the middle button) and zooms under it. None: the tools.
+    // `remove`: 消去's keys (Delete, Backspace — 編集's command holds them) while it is on: its chosen part taken away.
+    struct CanvasWork {
+        std::function<void(QPainter& painter, const std::function<QPointF(QPointF)>& at, double per_mm)> paint;
+        std::function<bool(QPointF mm, Qt::KeyboardModifiers keys)> press, move, release;
+        std::function<bool(QKeyEvent* event)> key;
+        std::function<bool()> remove;
+    };
+    void set_work(std::shared_ptr<CanvasWork> work);
+    bool has_work() const { return work_ != nullptr; }
+    bool work_remove() { return work_ && work_->remove && work_->remove(); }
 
 signals:
     void changed();
@@ -577,8 +622,13 @@ private:
     // out of the event that drew it.
     void live_sync();
     void live_draw();
-    void begin_stroke(const QPointF& mm, double pressure, double rotation, bool tablet);
-    void extend_stroke(const QPointF& mm, double pressure, double rotation, bool straight);
+    // (brushes@1, PC4 E1) a dab brush's tip as the pointer at `at` (the view's pixels), `size_mm` across; false for a brush
+    // that is not a dab brush (or one that cannot be laid)
+    bool draw_tip(QPainter& painter, const QPointF& at, double size_mm) const;
+    void begin_stroke(const QPointF& mm, double pressure, double rotation, bool tablet, const PenSample& sample = {});
+    void extend_stroke(const QPointF& mm, double pressure, double rotation, bool straight, const PenSample& sample = {});
+    // (brushes@1, PC4 E1) one point of the line being drawn, with its inputs
+    void add_point(const core::PenPoint& p, double rotation, const PenSample& sample);
     void finish_stroke();
     void back_from_eraser_end();
 
@@ -671,7 +721,7 @@ private:
     bool tool_release();
     QPointF constrained(const QPointF& a, const QPointF& b, Qt::KeyboardModifiers modifiers) const;
     std::vector<QPointF> shape_preview(bool& closed) const;
-    void pick_colour(const QPointF& pos);
+    void pick_colour(const QPointF& pos, bool background = false);
     void draw_tools(QPainter& painter) const;
     // the retouching brushes (retouch_tools.cpp): Alt+click sets the clone source (true: taken); the source's cross and
     // the overlay at the brush
@@ -765,6 +815,9 @@ private:
     // the line being drawn
     core::PenPoints stroke_;
     std::vector<double> turns_;
+    std::vector<double> tilts_, times_, wheels_;   // (brushes@1: the pen's inputs, one a point; tilt two)
+    double stroke_t0_ = 0.0;                        // (the time of the line's first point)
+    std::optional<render::dabs::Smoother> smoother_;  // (the smoothing's way, when it is the window's)
     std::string stroke_id_;
     bool stroke_tablet_ = false;
     std::unique_ptr<LiveInk> live_;
@@ -906,6 +959,7 @@ private:
         int rows = 3;
     };
     std::optional<Warp> warp_;
+    std::shared_ptr<CanvasWork> work_;  // (PC4 D4: set_work)
     mutable std::optional<std::pair<std::string, QImage>> mask_picture_;  // (the area and the quick mask it shows)
 
     // gliding between views

@@ -572,6 +572,9 @@ std::string tiff_bytes(const render::Image& image, const TiffSave& params) {
     if (!params.icc.empty()) {
         ok = ok && TIFFSetField(tif, TIFFTAG_ICCPROFILE, static_cast<std::uint32_t>(params.icc.size()), params.icc.data()) == 1;
     }
+    if (!params.xmp.empty()) {  // (PC4 F-b: the book's File Info)
+        ok = ok && TIFFSetField(tif, TIFFTAG_XMLPACKET, static_cast<std::uint32_t>(params.xmp.size()), params.xmp.data()) == 1;
+    }
     std::vector<std::uint16_t> map[3];  // (the palette's 256 entries a channel, 16 bits each: v × 257; the rest black)
     if (mode == "P") {
         const auto palette = image.palette();
@@ -632,6 +635,9 @@ std::string sampled_tiff_bytes(std::uint32_t width, std::uint32_t height, int sa
     if (bits == 32) ok = ok && TIFFSetField(tif, TIFFTAG_SAMPLEFORMAT, SAMPLEFORMAT_IEEEFP) == 1;
     if (!params.icc.empty()) {
         ok = ok && TIFFSetField(tif, TIFFTAG_ICCPROFILE, static_cast<std::uint32_t>(params.icc.size()), params.icc.data()) == 1;
+    }
+    if (!params.xmp.empty()) {  // (PC4 F-b: the book's File Info)
+        ok = ok && TIFFSetField(tif, TIFFTAG_XMLPACKET, static_cast<std::uint32_t>(params.xmp.size()), params.xmp.data()) == 1;
     }
     if (!ok) throw core::Error("io", "encoder error -9 when writing image file");
     std::vector<unsigned char> line(static_cast<std::size_t>(stride));

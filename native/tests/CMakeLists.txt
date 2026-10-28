@@ -130,6 +130,46 @@ genko_test(test_path_raster SOURCES unit/test_path_raster.cpp DEPS genko_test_su
 # PC3 C-b (pen-shapes@1): the live shapes, the path operations' coverage, a stroke's alignments and dashes, the gradient
 # forms, a part baked, cut, erased, bent and transformed; the shape presets' language and settings file.
 genko_test(test_shapes SOURCES unit/test_shapes.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC4 E-0 (SPEC.md COLOR-09, brushes@1 and patterns@1): the dab brush's settings and a line's inputs, the book's patterns,
+# written and read back (a book without them as before; what cannot be opens read-only; gc keeps their pictures); the
+# presets' library in the settings folder; a layer's sparse tiles and the sequential-dab stroke (render/tiled_pixels,
+# retouch_dabs' apply_dab_stroke) on 8-bit, 16-bit, 32-bit, CMYK, Lab and grey layers.
+genko_test(test_brushes_model SOURCES unit/test_brushes_model.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_patterns_model SOURCES unit/test_patterns_model.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_patterns SOURCES unit/test_patterns.cpp DEPS genko_test_support genko_render_ops LABELS unit)  # (PC4 E3)
+genko_test(test_preset_store SOURCES unit/test_preset_store.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_tiled_pixels SOURCES unit/test_tiled_pixels.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC4 E5 (SPEC.md COLOR-09「画素を変える筆」): Dodge, Burn, Sponge, Blur, Sharpen, Smudge, the Mixer Brush, the Background Eraser
+# and Color Replacement as PhotoCraft's tests check them, on 8-bit, 16-bit, 32-bit, CMYK, Lab and grey layers; 色混ぜ's
+# precise and ink values.
+genko_test(test_paint_tools SOURCES unit/test_paint_tools.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
+# PC4 E2 (SPEC.md COLOR-09「ブラシのプリセット」「ツールプリセット」「プリセットマネージャー」): Photoshop brush files read whole
+# and mapped onto the dab brushes (PhotoCraft's abr.rs and abr_map tests, their writers ported), the brush library (the
+# built-in groups, the person's groups and pictures, a file taken in, a brush defined from the pixels), the presets
+# written, read back and migrated, the tool presets and `genko tool-presets`.
+genko_test(test_abr_map SOURCES unit/test_abr_map.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_brush_presets SOURCES unit/test_brush_presets.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_tool_presets SOURCES unit/test_tool_presets.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC4 E1 (SPEC.md COLOR-09「ブラシのダブの描き方」): the dab engine (render/dabs) against PhotoCraft's own brush tests in mm
+# (spacing, tips, dynamics, scatter, colour, transfer, build-up, the textures' modes, dual, wet edges, noise, smoothing,
+# pose), the same dabs at every resolution and in parts; and the line ops with a dab brush (define_brush's dabs and
+# pictures, add_stroke's inputs and blend on 8-bit, 16-bit, 32-bit, CMYK, Lab and grey pages, refused on a pen layer,
+# erase's brush and block, set_brush's kind, 背景色 and reset; saved, opened, undone and redone) — and every other
+# brush's line drawn as before.
+genko_test(test_dab_engine SOURCES unit/test_dab_engine.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_dab_lines SOURCES unit/test_dab_lines.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC4 E4 (SPEC.md COLOR-09「塗りつぶし・グラデーション」「グラデーションのプリセット」): the gradient's shapes, reverse, dither,
+# transparency and live colours, gradient_fill and fill into a paint layer's own values on 8-bit, 16-bit, 32-bit, CMYK, Lab
+# and grey pages (a pen layer's picture, the calls without the new keys as before), 色の近さ; the gradients' library and
+# `genko gradients`; .grd files written, read and made presets.
+genko_test(test_gradient_tool SOURCES unit/test_gradient_tool.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_gradient_presets SOURCES unit/test_gradient_presets.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+genko_test(test_grd SOURCES unit/test_grd.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC4 E6 (SPEC.md COLOR-09「レイヤースタイル」「スタイル」): each effect drawn on 8-bit, 16-bit, 32-bit, CMYK, Lab and grey pages
+# (a page without styles drawn and written as before), the ops, Blend If and the fill, merges, PSD's lfx2 written and read
+# back, saved, opened and undone; the styles' library (upstream's built-in groups), .asl files and `genko styles`.
+genko_test(test_layer_styles SOURCES unit/test_layer_styles.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+genko_test(test_style_presets SOURCES unit/test_style_presets.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
 # PC3 C-e (SPEC.md COLOR-07「判型」): the page size ops on a book in memory — each thing on a page where the map takes it,
@@ -151,6 +191,38 @@ genko_test(test_adjust SOURCES unit/test_adjust.cpp DEPS genko_test_support genk
 # PC2c (COLOR-04): the local corrections (PhotoCraft's algo/tone.rs tests; filter_raster's shadows_highlights,
 # replace_color and match_color on 8-bit, precise and CMYK layers) and hdr_toning's flatten, without Python.
 genko_test(test_tone_ops SOURCES unit/test_tone_ops.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC4 節 D (COLOR-08): フィルター's engine (render/fx: PhotoCraft's own tests of its filter core, the same bytes whatever
+# the tiling and threads, the three ways, a page of inks' ways, 200 and 600 dpi, the budget, stopping, a heavy filter told,
+# the preview's copy, the new ops' frames) and its kinds' table (settings, presets, .pcraft's commands, places, filters@1,
+# the catalogue), without Python.
+genko_test(test_fx SOURCES unit/test_fx.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 3000)
+set_property(TEST test_fx APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=1700000")
+genko_test(test_filter_kinds SOURCES unit/test_filter_kinds.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC4 節 D3 (フィルターギャラリー): its 47 effects' table and settings, each effect on every depth, the same bytes whatever the
+# tiling, a flat picture, the stack's order and hidden effects, the colours, the three ways, 200 and 600 dpi, a smart filter.
+genko_test(test_fx_gallery SOURCES unit/test_fx_gallery.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
+# PC4 節 D2 (変形・ピクセレート・表現手法): PhotoCraft's tests of its 25 kinds, the same bytes whatever the tiling at a finer
+# grid's scale, a part worked alone, no clear pixel's colour, a distortion centred on the selection, カラーハーフトーン's four
+# plates, a page of inks' lightness, 200 and 600 dpi, 置き換え's maps (data, layers, the book's in a smart filter, carried).
+genko_test(test_fx_d2 SOURCES unit/test_fx_d2.cpp DEPS genko_test_support genko_formats genko_render_ops LABELS unit TIMEOUT 2400)
+set_property(TEST test_fx_d2 APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=2300000")
+# PC4 節 D6 (レンズ補正・広角補正・消点): PhotoCraft's tests of exif.rs, lens.rs, wideangle.rs and vanishing.rs and of its
+# lens_cmds and vp_cmds, through filter_raster and vanishing_point on 8 bits, precise and CMYK pages; the profile auto from a
+# smart object's JPEG and an opened JPEG's EXIF; smart filters; 200 and 600 dpi; the planes kept (vanishing-point@1).
+genko_test(test_fx_lens SOURCES unit/test_fx_lens.cpp DEPS genko_test_support genko_formats genko_render_ops genko_storage LABELS unit TIMEOUT 7200)
+set_property(TEST test_fx_lens APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=7100000")
+# (its 600 dpi look at every resolution works on every core: alone, not beside two others under ASan — the V3 of PC4)
+set_tests_properties(test_fx_lens PROPERTIES RUN_SERIAL TRUE)
+# PC4 節 D5 (Camera Raw フィルター): PhotoCraft's tests of camera_raw.rs and of its lens_cmds (the defaults the identity, the
+# basic panel, the curves, the mixer, grading, detail and effects, float documents), each stage alone, the same bytes whatever
+# the tiling, through filter_raster on 8, 16 and 32 bits and inside a selection, a smart filter, pages of inks on the colours
+# they mean, 200 and 600 dpi, the frame, the budget and stopping, the settings' table.
+genko_test(test_fx_camera_raw SOURCES unit/test_fx_camera_raw.cpp DEPS genko_test_support genko_render_ops genko_storage LABELS unit TIMEOUT 900)
+# PC4 節 D4 (描画・ぼかしギャラリー, render_picture): PhotoCraft's tests of render.rs, gallery.rs, extra_cmds.rs's clouds and of
+# render2.rs and render_cmds.rs (炎・木・額縁) through filter_raster and render_picture on 8 bits, precise and ink pages and an
+# opened picture's page; tilings, 200 and 600 dpi, pins moving with a smart object, a channel's bumps, the limits.
+genko_test(test_fx_render SOURCES unit/test_fx_render.cpp DEPS genko_test_support genko_formats genko_render_ops LABELS unit TIMEOUT 2400)
+set_property(TEST test_fx_render APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=1700000")
 # PC2c (COLOR-04): Apply Image and Calculations (Blending, the sources, a layer, a channel, inks; the three results),
 # trapping (algo/trap.rs's tests and the op) and the fade (its mix, the op reading the pixels before from the assets).
 genko_test(test_image_calc SOURCES unit/test_image_calc.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
@@ -183,7 +255,7 @@ set_property(TEST test_smart_filters APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION
 # PC3 A3 (SPEC.md COLOR-05「PSD のスマートオブジェクト」): a PSD's placed layer blocks and linked files (upstream's
 # linked.rs and blocks.rs tests, this build's SoLd and PlLd read back), a PSD or PSB as a smart object's file (16 and 32 bits
 # kept, CMYK inks, Lab, a blank merged picture), import_psd's smart objects drawn and written back byte for byte.
-genko_test(test_psd_smart SOURCES unit/test_psd_smart.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+genko_test(test_psd_smart SOURCES unit/test_psd_smart.cpp support/raw_testgen.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
 # PC3 A4 (SPEC.md COLOR-05「スタックモード」): a smart object's stack mode — PhotoCraft's statistics, the shots combined in
 # the three ways (the median taking the passer-by out), a folder, hidden layers, a part the whole cut there, a file one
 # layer, rasterized; rasterize_lines drawing the lines as the page drew them; a tone rasterized on precise and ink pages.
@@ -212,6 +284,25 @@ set_tests_properties(test_ruby_render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=of
 genko_test(test_psd_text SOURCES unit/test_psd_text.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS unit TIMEOUT 900)
 set_tests_properties(test_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+# PC4 F-0 (SPEC.md FILE-01): render/codecs against PhotoCraft's crates/codecs tests (the magic numbers, the extensions, the
+# capability table and its symmetric guarantee, the losses said and their round trips, the limits before the pixels, the
+# picture's conversions) on this build's table, and the wrapped formats read through this build's readers.
+genko_test(test_codecs SOURCES unit/test_codecs.cpp DEPS genko_test_support genko_render genko_formats LABELS unit)
+# PC4 F-c (SPEC.md FILE-01: Web 用に保存（従来）, クイック書き出し): formats/web_export and render/codecs/web against PhotoCraft's
+# web_cmds tests (the presets, GIF and PNG-8's colours, dither, transparency and matte, Web Snap, JPEG's quality, progressive
+# scans and metadata, the estimate against the file), WBMP's round trip and refusals, and render/codecs/resize.
+genko_test(test_web_export SOURCES unit/test_web_export.cpp DEPS genko_test_support genko_render genko_formats LABELS unit)
+# PC4 F-f (SPEC.md FILE-01, .pcraft): BLAKE3, zstd and the zip read by name and written stored, against PhotoCraft's tests of
+# crates/format (a bundle cut, flipped, missing a tile or swapping one, a manifest not JSON or of a newer version, the limits,
+# a folder bundle, one zipped again with deflate) on bundles upstream's writer made (data/pcraft), and the bombs: zstd frames
+# and zip files that unpack or say they unpack past what may be read, a canvas and tiles past the limits — refused before.
+genko_test(test_pcraft SOURCES unit/test_pcraft.cpp DEPS genko_test_support genko_render_ops genko_formats ${GENKO_ZSTD} LABELS unit TIMEOUT 900)
+# PC4 F-e (SPEC.md FILE-01, カメラ RAW): LibRaw reading PhotoCraft's synthetic RAW files (support/raw_testgen: testgen.rs's DNG
+# — uncompressed, lossless-JPEG strips and tiles, LinearRaw —, CR2, TIFF/EP) — the levels, the white balance, the
+# orientation, the size, the temperature and tint both ways, the exposure, depth and spaces, the adjustments and the
+# sharpening, the window's preview, the embedded preview, the limits before the sensor data, files cut short or corrupted
+# (hostile.rs) —, and camera-raw@1's settings.
+genko_test(test_raw SOURCES unit/test_raw.cpp support/raw_testgen.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
 
 # Against the Python baseline (skipped when there is no reference Python: $GENKO_PYREF or /opt/pyref/bin/python).
 genko_test(test_contract_storage SOURCES contract/test_contract_storage.cpp DEPS genko_test_support LABELS contract
@@ -233,6 +324,16 @@ genko_test(test_contract_render_cli SOURCES contract/test_contract_render_cli.cp
            LABELS contract TIMEOUT 1800)
 # Tones, effect lines and rulers against Python (M3-B): the ops (fixed cases, random sequences, the command line), the
 # drawing, the snapping, and the pen lines and erasers that snap to the rulers (moved from M2-O1's cases).
+# PC4 節 D (COLOR-08) through the command line: フィルター's kinds on 8 and 16 bits, a selection, a channel, saved, undone,
+# the journal; as smart filters (filters@1, read-only for a reader that does not know it); a book without them as it was;
+# genko inspect --filters.
+# PC4 F-e (SPEC.md FILE-01, カメラ RAW): a RAW file opened as a book (developed into a page of its space and depth, or a smart
+# object of it), placed and developed again (set_camera_raw, Undo from the command line), camera-raw@1 read back, a camera
+# LibRaw does not know opened as its preview, `genko new --from x.dng --raw`, the limits.
+genko_test(test_contract_raw SOURCES contract/test_contract_raw.cpp support/raw_testgen.cpp DEPS genko_test_support genko_render_ops genko_formats genko_storage
+           LABELS contract TIMEOUT 900)
+genko_test(test_contract_filters_pc4 SOURCES contract/test_contract_filters_pc4.cpp DEPS genko_test_support genko_render_ops genko_storage
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_tone_ops SOURCES contract/test_contract_tone_ops.cpp DEPS genko_test_support genko_render_ops
            LABELS contract TIMEOUT 3600)
 set_tests_properties(test_contract_tone_ops PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
@@ -333,8 +434,12 @@ set_tests_properties(test_ledger_service_b PROPERTIES ENVIRONMENT "QT_QPA_PLATFO
 # import_psd (M4②b): psd.read_psd and the op against Python's on the PSD and PSB files of psd_cases.json (every file,
 # a few cut after every byte, all of them changed at a few bytes; each step's reply, snapshot and payload, the layers'
 # pixels, the book read back), and hostile files refused without the memory Python would take.
+# PC4 F-d (SPEC.md FILE-01「PSD・PSB」): psd-keep@1 — psd-tools' files (data/psd_keep) opened and written again, what
+# this build does not read back byte for byte (psd-tools, this reader), locks, layer ids, comps and slices dropped with
+# their layers, the book saved and read back —, the layers at their depth (16 and 32 bits, CMYK, Lab, grey, Lr16), PSB
+# written (psd-tools, this reader, lnk2), a page past 30000 px a PSB, hostile blocks bounded.
 genko_test(test_contract_psd SOURCES contract/test_contract_psd.cpp contract/opsupport.cpp
-           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
+           DEPS genko_test_support genko_render_ops genko_formats LABELS contract TIMEOUT 1800)
 # PSD-01 against psd-tools (ACCEPTANCE.md §6): the editable PSD book read by psd-tools (tools/migration/psd_text_check.py)
 # and by render::psd::File, the same layers, groups, texts, runs, fonts, transforms and strokes.
 # color-mode@1 (SPEC.md COLOR-02) against the reference Python (tools/migration/ink_check.py): the conversions as Pillow's
@@ -401,6 +506,16 @@ genko_test(test_contract_retouch SOURCES contract/test_contract_retouch.cpp DEPS
 # shape layers and groups (psd-tools, import_psd).
 genko_test(test_contract_shapes SOURCES contract/test_contract_shapes.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC4 E3 (patterns@1): the book's patterns (add, rename, delete), pattern fill layers on every kind of page, fill_area's and
+# fill's pattern, a shape part's, rasterized; saved, undone, read-only; the PSD's Patt and PtFl (psd-tools, import_psd);
+# `genko patterns`.
+genko_test(test_contract_patterns SOURCES contract/test_contract_patterns.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC4 E5: the brushes that change pixels through the command line — applied, saved, undone and done again, the same input the
+# same bytes, the Mixer Brush's reservoir handed from stroke to stroke, the page drawn after.
+genko_test(test_contract_paint_tools SOURCES contract/test_contract_paint_tools.cpp DEPS genko_test_support genko_render
+           LABELS contract TIMEOUT 2400)
+set_property(TEST test_contract_paint_tools APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=1700000")
 # PC3 C-c: transform_layers on each kind of layer and pixels (exact moves and turns on 8, 16, 32 bits, CMYK, Lab; lines,
 # patches, quads, warps, perspective, puppet; folders, links, masks, areas, parts; smart objects, placed pictures, locks,
 # lines of dialogue), content_aware_scale, liquify's strokes, Warp Text; through the command line saved and undone.
@@ -427,6 +542,35 @@ set_tests_properties(test_contract_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATF
 # same mode, size and bytes; a TIFF in planes said not yet read.
 genko_test(test_contract_tiff_webp SOURCES contract/test_contract_tiff_webp.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
+# PC4 F-0 (SPEC.md FILE-01, the user's decision 4): a PNG, a 16-bit TIFF, a grey picture and a CMYK JPEG opened as a book
+# of one page in memory with their pixels at their depth, given back as the page's picture, saved and read back; a book of
+# none of 節 F's extensions written as before; the five extensions' frames; the files' ops as frames.
+genko_test(test_contract_open SOURCES contract/test_contract_open.cpp DEPS genko_test_support genko_formats genko_render_ops
+           LABELS contract TIMEOUT 900)
+# PC4 F-b (SPEC.md FILE-01, file.fileInfo): ファイル情報… — set_file_info and file-info@1, the eight XMP items written into the
+# packet a picture was opened with (its other properties kept), the packet in the files the exports and コピーを保存… write
+# (read back here and by the reference's Pillow and psd-tools), a picture's EXIF and XMP kept and its orientation applied
+# when it is opened, `genko inspect --file-info`.
+genko_test(test_contract_file_info SOURCES contract/test_contract_file_info.cpp DEPS genko_test_support genko_formats genko_render_ops
+           LABELS contract TIMEOUT 900)
+# PC4 F-f (SPEC.md FILE-01, .pcraft): the .pcraft files PhotoCraft v0.2.0's writer made (data/pcraft) opened as books — their
+# layers, pixels, masks and channels as upstream's reader reads them (MANIFEST.json) —, a book written as a .pcraft and read
+# back, every file read, written and read again, the refusals, 埋め込みを配置 of a .pcraft (contents of kind page), `genko
+# export --format pcraft` and `genko new --from`; with $GENKO_PCRAFT_CHECK, upstream's reader reads what this build wrote.
+genko_test(test_contract_pcraft SOURCES contract/test_contract_pcraft.cpp DEPS genko_test_support genko_formats genko_render_ops
+           LABELS contract TIMEOUT 900)
+# PC4 F-a (SPEC.md FILE-01, the codecs): `genko render --out` of GIF, PPM, PGM, PBM, TGA, ICO, QOI and AVIF; smart objects of
+# the new formats (formats@1) drawn on 8-bit, 16-bit, 32-bit, grey and CMYK pages; a file of each opened as a book;
+# コピーを保存… in each format; `genko --version` naming OpenEXR, libavif and libaom.
+genko_test(test_contract_codecs SOURCES contract/test_contract_codecs.cpp DEPS genko_test_support genko_formats genko_render_ops
+           LABELS contract TIMEOUT 900)
+# PC4 F-c (SPEC.md FILE-01: 書き出し形式…, クイック書き出し, レイヤーを書き出し, レイヤーからファイル…, `genko copy`): a page at a scale or a
+# size, a layer alone cut to what it holds, the quality, the metadata's three, a CMYK page's colours the same everywhere,
+# too large refused first, the estimate, クイック書き出し's places and formats, レイヤーからファイル… (its default files as before),
+# `genko copy` and `genko export --format layers`' new choices.
+genko_test(test_contract_copy SOURCES contract/test_contract_copy.cpp DEPS genko_test_support genko_formats genko_render_ops
+           LABELS contract TIMEOUT 900)
+add_dependencies(test_contract_copy genko)
 # The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
 # across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a
 # warped line's pictures within ARCHITECTURE.md §9: Python's homography comes from numpy's SVD).
@@ -533,6 +677,10 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC2c (COLOR-04): レイヤー → 色調補正's local corrections and image calculations, 編集 → フェード (only right after).
   genko_test(test_gui_image_ops SOURCES gui/test_gui_image_ops.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC4 節 D (COLOR-08): the フィルター menu (its tree, words, keys and greys), a kind's window from its table with the result
+  # on the page, a preset without one, on a smart object a smart filter, 漫画's five, 前回のフィルター (Ctrl+F), フェード after it,
+  # a heavy one's preview and its 中止, the layer panel's かける… opening the menu.
+  genko_test(test_gui_filters SOURCES gui/test_gui_filters.cpp DEPS genko_app GUI TIMEOUT 600)
   # 色調補正 (PC2a, COLOR-04): the tone commands and their keys, their windows (channels by the page's mode, the formula,
   # 自動, a LUT from a file) with the result on the page, the 色調補正 and 属性 panels (one set_adjustment, one Undo), the
   # .cube written from ファイル.
@@ -546,6 +694,14 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_paper SOURCES gui/test_gui_paper.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_anim SOURCES gui/test_gui_anim.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_paint SOURCES gui/test_gui_paint.cpp DEPS genko_app GUI TIMEOUT 600)
+  genko_test(test_gui_patterns SOURCES gui/test_gui_patterns.cpp DEPS genko_app GUI TIMEOUT 600)  # (PC4 E3)
+  genko_test(test_gui_styles SOURCES gui/test_gui_styles.cpp DEPS genko_app GUI TIMEOUT 600)  # (PC4 E6)
+  genko_test(test_gui_paint_tools SOURCES gui/test_gui_paint_tools.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)  # (PC4 E5)
+  # PC4 E2: ブラシ設定 (F5: its sections, a change copying a built-in brush, the sample, a Genko brush made a dab brush),
+  # ブラシ panel (groups, a brush chosen, saved, renamed, deleted, an .abr read off the window's thread), 編集 → ブラシを定義…,
+  # the pixel tools' ブラシ, a dab brush's pictures put into the book with it; ツールプリセット panel, プリセット ▸
+  genko_test(test_gui_brush_settings SOURCES gui/test_gui_brush_settings.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  genko_test(test_gui_tool_presets SOURCES gui/test_gui_tool_presets.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_guides SOURCES gui/test_gui_guides.cpp DEPS genko_app GUI TIMEOUT 900)
   genko_test(test_gui_colours SOURCES gui/test_gui_colours.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_workspace SOURCES gui/test_gui_workspace.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
@@ -611,6 +767,13 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_save SOURCES gui/test_gui_save.cpp DEPS genko_app GUI TIMEOUT 900)
   target_compile_definitions(test_gui_save PRIVATE GENKO_CLI="$<TARGET_FILE:genko>")
   add_dependencies(test_gui_save genko)
+  # PC4 F-b (SPEC.md FILE-01, the user's decision 4): ファイル's entrances — 開く… (a .genko and a picture: a book in memory, the
+  # file never written), 指定形式で開く…, the drop, 最近使用したファイルを開く, a picture's book closed, すべてを閉じる・その他を閉じる,
+  # 復帰 undone, 別名で保存… of another format and コピーを保存…, ファイル情報…, 複製…, 新規… → 画像, 環境設定 → ファイル管理
+  genko_test(test_gui_file SOURCES gui/test_gui_file.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  # PC4 F-e: Camera Raw's window when a RAW is opened (the RAW stage, the preview, 画像を開く, Shift: オブジェクトを開く, 完了,
+  # キャンセル), a RAW opened with Shift held, 環境設定 → Camera Raw, a placed RAW's コンテンツを編集 (set_camera_raw, undone)
+  genko_test(test_gui_camera_raw SOURCES gui/test_gui_camera_raw.cpp support/raw_testgen.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   # the windows on 1024×640 … 1920×1080 at 100–200 %, the long path, the preview, typed Japanese, the picture cache
   genko_test(test_gui_layout SOURCES gui/test_gui_layout.cpp DEPS genko_app genko_test_support GUI TIMEOUT 1200)
   # `genko app` in processes of its own: draw, undo, save, quit, open again; the autosave and the recovery copy across
@@ -663,3 +826,18 @@ if(GENKO_BUILD_APP)
   genko_test(test_soak_app SOURCES perf/test_soak_app.cpp DEPS genko_app LABELS perf TIMEOUT 10800)
   set_tests_properties(test_soak_app PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=10000000")
 endif()
+
+# (VALIDATION's V3 runs ASan three tests at a time: the slowest functions of these tests come near QtTest's own limit
+# for one function, five minutes — test_smart_stack's tone on the precise and ink pages passed it, its test taking 753 s
+# in all the time before. A function of these may take as long as its test's own limit, which still catches a hang,
+# less 100 s.)
+foreach(slow test_contract_raster_ops test_smart_stack test_contract_ops_cli test_contract_ops test_contract_raster_cli test_gui_color
+        test_smart_warp test_precision_merge_controls test_ink_edit test_gui_canvas test_contract_studio test_contract_page_size
+        test_gui_book test_gui_layout test_contract_service test_adjust test_contract_pyre test_contract_psd test_color_model
+        test_ink_filters test_gui_look test_pyre test_masks test_contract_book test_gui_pen test_gui_lines)
+  if(TEST ${slow})
+    get_test_property(${slow} TIMEOUT limit)
+    math(EXPR function_ms "(${limit} - 100) * 1000")
+    set_property(TEST ${slow} APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=${function_ms}")
+  endif()
+endforeach()

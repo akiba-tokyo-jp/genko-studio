@@ -26,6 +26,7 @@
 #include "core/command_bus.hpp"
 #include "core/ids.hpp"
 #include "core/pynum.hpp"
+#include "render/ops_patterns.hpp"
 #include "render/color_edit.hpp"
 #include "render/fill.hpp"
 #include "render/image_ops.hpp"
@@ -60,7 +61,7 @@ std::optional<QImage> items_picture(const core::Page& page, const core::Document
         shown.role = core::LayerRole::User;
         shown.kind = core::LayerKind::Raster;
         shown.panel_clip = false;
-        render::selection::drop(shown, std::move(lifted), render::selection::kIdentity, true);
+        render::selection::drop(shown, std::move(lifted), render::selection::kIdentity, true, render::Resample::Bilinear, nullptr, &doc);
         core::Page bare = page;  // (the items alone: no paper, frames or lines of the page's)
         bare.numero = false;
         const render::Image drawn = render::layer_image(bare, shown, kPictureDpi, &doc, true).convert("RGBA");
@@ -175,8 +176,7 @@ void MainWindow::build_clipboard_menu(QMenu* edit) {
     edit->addAction(action(QStringLiteral("act_content_aware_fill")));  // (PC3 B4: retouch_tools.cpp)
     edit->addSeparator();
     build_transform_items(edit);  // (コンテンツに応じて拡大・縮小… パペットワープ 遠近法ワープ 自由変形: main_window_transform.cpp)
-    build_transform_menu(edit->addMenu(QStringLiteral("変形")));  // (main_window_select.cpp)
-    edit->addAction(action(QStringLiteral("act_liquify_filter")));  // (ゆがみ…: Filter's in Photoshop)
+    build_transform_menu(edit->addMenu(QStringLiteral("変形")));  // (main_window_select.cpp; ゆがみ… is フィルター's: filter_menu.cpp)
 }
 
 std::optional<Json> MainWindow::copied_items(const std::optional<Json>& area, const core::Layer* of) {
@@ -201,6 +201,7 @@ std::optional<Json> MainWindow::copied_items(const std::optional<Json>& area, co
             flash(area ? QStringLiteral("選んだ範囲に、このレイヤーの絵がありません") : QStringLiteral("このレイヤーには、まだ何も描いてありません"), 3000);
             return std::nullopt;
         }
+        lifted.patterns = render::patterns_of_parts(book(), lifted.shapes);  // (patterns@1, PC4 E3: carried to another book)
         items = render::selection::items_to_json(lifted);
     } catch (const std::exception& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 3000, true);
@@ -228,6 +229,10 @@ bool MainWindow::copy() {
 }
 
 void MainWindow::cut() {
+    if (canvas_->has_work()) {  // (PC4 D4: a work over the page holds 消去's keys — ぼかしギャラリー's pins —: nothing cut meanwhile)
+        flash(QStringLiteral("ぼかしギャラリーの作業を Enter で確定するか Esc でやめてから切り取ります"), 4000, true);
+        return;
+    }
     const bool chosen = selection_area().has_value();
     if (!copy()) return;
     if (chosen) {
@@ -272,6 +277,7 @@ void MainWindow::copy_merged() {
             flash(QStringLiteral("選んだ範囲に、見えている絵がありません"), 3000);
             return;
         }
+        lifted.patterns = render::patterns_of_parts(book(), lifted.shapes);  // (patterns@1, PC4 E3: carried to another book)
         items = render::selection::items_to_json(lifted);
     } catch (const std::exception& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 3000, true);

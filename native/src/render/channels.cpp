@@ -13,6 +13,7 @@
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 #include "render/ink.hpp"
+#include "render/ink_edit.hpp"
 #include "render/page.hpp"
 #include "render/op_limits.hpp"
 #include "render/png.hpp"
@@ -620,7 +621,7 @@ bool ChannelLending::take_back(core::Document& doc) const {
     page.layers.erase(lent);
     const std::size_t index = core::channel_index(page, channel_id_);
     if (index >= page.channels.size()) return false;
-    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer);
+    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer, &doc);
     // what the op changed, at 200 dpi: each pixel's density after it, and whether it changed
     const std::size_t n = std::size_t(lent_size_.width) * lent_size_.height;
     std::vector<std::uint8_t> changed(n, 0);
@@ -705,6 +706,8 @@ PlateKeep::PlateKeep(const core::Document& doc, std::size_t at, std::size_t plat
     if (layer->kind != core::LayerKind::Raster) {
         throw core::OpError("only a paint layer's colour plates can be worked one at a time");
     }
+    // (PC4 E5, review P3-10: the Background Eraser takes the alpha away, which a plate keeps: it would change nothing)
+    if (name == "background_eraser") throw core::OpError("the Background Eraser takes away the alpha: it cannot work one colour plate");
     layer_id_ = layer->id;
     before_ = *layer;
 }
@@ -720,8 +723,13 @@ void PlateKeep::restore(core::Document& doc) const {
     const core::Layer& before = *before_;
     if (layer.ink_raster && page.color) {
         core::InkPixels now = core::decode_ink_raster(*layer.ink_raster);
-        const core::InkPixels was = before.ink_raster ? core::decode_ink_raster(*before.ink_raster)
-                                                      : core::blank_ink_pixels(now.space, now.depth, now.width, now.height, now.planes);
+        // (PC4 E5, review P2-1: an op that drew the layer's lines and pictures into its inks — its marks gone — is weighed
+        // against the layer as it showed, its marks drawn in: the lines the op did not reach stay on every plate)
+        const bool drawn_in = layer.stroke_count() == 0 && layer.patches.empty() && !shape_parts::any(layer) &&
+                              (before.stroke_count() > 0 || !before.patches.empty() || shape_parts::any(before));
+        const core::InkPixels was = drawn_in             ? ink_edit::with_marks(page, before, &doc)
+                                    : before.ink_raster ? core::decode_ink_raster(*before.ink_raster)
+                                                        : core::blank_ink_pixels(now.space, now.depth, now.width, now.height, now.planes);
         if (was.width != now.width || was.height != now.height || was.space != now.space || was.depth != now.depth) return;
         const unsigned all = now.channels();
         for (std::size_t i = 0; i < now.pixel_count(); ++i) {
@@ -752,10 +760,10 @@ void PlateKeep::restore(core::Document& doc) const {
         return;
     }
     // (8-bit pixels: the layer's lines and pictures drawn into them first, before and after)
-    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer);
+    if (layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer)) raster::bake_vectors(page, layer, &doc);
     if (!layer.raster_png || layer.raster_png->empty()) return;
     const Image now = open_image(*layer.raster_png, kPillowOpenLimits).convert("RGBA");
-    Image was = raster::layer_pixels(page, before).convert("RGBA");
+    Image was = raster::layer_pixels(page, before, &doc).convert("RGBA");
     if (was.size() != now.size()) was = was.resize(now.size(), Resample::Bilinear);
     std::string made = now.tobytes();
     const std::string old = was.tobytes();

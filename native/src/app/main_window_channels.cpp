@@ -149,7 +149,9 @@ Json MainWindow::with_channel_target(const Json& ops) const {
     // 塗りつぶし, the Magic Eraser, 境界線を描く, the matting —: refused while a channel, the Quick Mask too, is drawn on, rather
     // than changing the layer under it)
     static const std::set<std::string, std::less<>> kLayerOnly{"clone_stamp", "healing_brush", "spot_healing", "history_brush",
-                                                               "content_aware_fill", "magic_erase", "outline_area", "matting"};
+                                                               "content_aware_fill", "magic_erase", "outline_area", "matting",
+                                                               "vanishing_point",  // (PC4 D6: 消点's pastes and strokes)
+                                                               "render_picture"};  // (PC4 D4: 炎・額縁・木 draw on a layer)
     const auto on_this_page = [&](const Json& op) {
         try {
             return core::Num(core::py_int(op.value("page", Json()))) == page->index;
@@ -217,7 +219,7 @@ void MainWindow::load_selection_from_channel(const std::string& id) {
 }
 
 void MainWindow::build_channel_actions() {
-    const QString tip = QStringLiteral("ペン・消しゴム・塗り・フィルターの描く先を、ページのすべての色（合成）に戻す");
+    const QString tip = QStringLiteral("ブラシツール・消しゴムツール・塗り・フィルターの描く先を、ページのすべての色（合成）に戻す");
     make("act_channel_composite", QStringLiteral("合成チャンネルを対象にする"), [this] { target_slot(2); }, {QKeySequence(QStringLiteral("Ctrl+Alt+2"))}, tip);
     for (int slot = 3; slot <= 9; ++slot) {
         make(QStringLiteral("act_channel_%1").arg(slot), QStringLiteral("チャンネル %1 を対象にする").arg(slot), [this, slot] { target_slot(slot); },

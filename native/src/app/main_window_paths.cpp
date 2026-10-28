@@ -111,11 +111,8 @@ void MainWindow::build_path_menus(QMenu* file, QMenu* view, QMenu* tools, QMenu*
     // ツール: after the vector tools
     tools->addSeparator();
     for (const char* name : {"act_path_pen", "act_curvature_pen", "act_path_select"}) tools->addAction(action(QString::fromLatin1(name)));
-    // ファイル: after 書き出し
-    const QList<QAction*> items = file->actions();
-    const qsizetype at = items.indexOf(action("act_export"));
-    QAction* before = at >= 0 && at + 1 < items.size() ? items.at(at + 1) : nullptr;
-    file->insertAction(before, action("act_export_paths_ai"));
+    // (ファイル → 書き出し → パスを Illustrator へ… is put in Photoshop's place by build_file_menu, PC4 F-0)
+    (void)file;
     // 表示
     view->addAction(action("act_show_target_path"));
     // 選択範囲: after 選択範囲を保存…

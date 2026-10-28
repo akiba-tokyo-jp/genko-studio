@@ -21,6 +21,7 @@
 #include <QPainter>
 #include <QScrollArea>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QStyledItemDelegate>
 #include <QThreadPool>
 #include <QTimer>
@@ -35,13 +36,17 @@
 #include "app/ask.hpp"
 #include "app/config.hpp"
 #include "app/icons.hpp"
+#include "app/off_ui.hpp"
 #include "app/look.hpp"
+#include "app/open_dialog.hpp"
 #include "app/path_label.hpp"
+#include "app/preferences.hpp"
 #include "app/theme.hpp"
 #include "service/wording.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"
+#include "core/color_model.hpp"
 #include "formats/export.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
@@ -196,7 +201,10 @@ QPushButton* action_card(const char* icon, const QString& title, const QString& 
 
 // --- recent books -----------------------------------------------------------------------------------------------------
 
-std::vector<fs::path> recent_projects() {
+namespace {
+
+// recent.json's entries in their order (books and, PC4 F-b, files), those still there.
+std::vector<fs::path> recent_entries() {
     std::vector<fs::path> out;
     try {
         const Json items = core::parse_python_json(storage::read_file(config_dir() / "recent.json"));
@@ -205,26 +213,61 @@ std::vector<fs::path> recent_projects() {
             if (!item.is_string()) continue;
             const fs::path path = core::path_from_utf8(item.get<std::string>());
             std::error_code ec;
-            if (fs::is_regular_file(path / "project.json", ec)) out.push_back(path);
+            if (fs::is_regular_file(path / "project.json", ec) || fs::is_regular_file(path, ec)) out.push_back(path);
         }
     } catch (const std::exception&) {
     }
     return out;
 }
 
-void remember_project(const fs::path& path) {
-    std::error_code ec;
-    const fs::path absolute = fs::weakly_canonical(fs::absolute(path, ec), ec);
-    Json items = Json::array({core::path_to_utf8(absolute)});
-    for (const fs::path& p : recent_projects()) {
-        if (fs::weakly_canonical(p, ec) != absolute && items.size() < 12) items.push_back(core::path_to_utf8(p));
-    }
+void keep_recent(const Json& items) {
     try {
         storage::make_dirs_durable(config_dir());
         storage::write_atomic(config_dir() / "recent.json", core::dump_python_indent2(items));
     } catch (const core::Error&) {
         // (the list of recent books is a convenience: not being able to keep it stops nothing)
     }
+}
+
+}  // namespace
+
+std::vector<fs::path> recent_projects() {
+    std::vector<fs::path> out;
+    for (const fs::path& path : recent_entries()) {
+        std::error_code ec;
+        if (fs::is_regular_file(path / "project.json", ec)) out.push_back(path);
+    }
+    return out;
+}
+
+std::vector<fs::path> recent_files() {
+    std::vector<fs::path> out = recent_entries();
+    if (out.size() > static_cast<std::size_t>(preferences::recent_count())) out.resize(static_cast<std::size_t>(preferences::recent_count()));
+    return out;
+}
+
+void remember_project(const fs::path& path) { remember_file(path); }
+
+void remember_file(const fs::path& path) {
+    std::error_code ec;
+    const fs::path absolute = fs::weakly_canonical(fs::absolute(path, ec), ec);
+    // (at least 12, as before PC4 F-b: the start screen's books; more when 環境設定 lists more)
+    const std::size_t most = static_cast<std::size_t>(std::max(12, preferences::recent_count()));
+    Json items = Json::array({core::path_to_utf8(absolute)});
+    for (const fs::path& p : recent_entries()) {
+        if (fs::weakly_canonical(p, ec) != absolute && items.size() < most) items.push_back(core::path_to_utf8(p));
+    }
+    keep_recent(items);
+}
+
+void forget_recent(const fs::path& path) {
+    std::error_code ec;
+    const fs::path absolute = fs::weakly_canonical(fs::absolute(path, ec), ec);
+    Json items = Json::array();
+    for (const fs::path& p : recent_entries()) {
+        if (fs::weakly_canonical(p, ec) != absolute) items.push_back(core::path_to_utf8(p));
+    }
+    keep_recent(items);
 }
 
 // --- the paper ------------------------------------------------------------------------------------------------------
@@ -445,21 +488,209 @@ NewProjectDialog::NewProjectDialog(QWidget* parent) : QDialog(parent) {
     cancel_ = buttons->button(QDialogButtonBox::Cancel);
     ok_->setText(QStringLiteral("作る"));
     cancel_->setText(QStringLiteral("やめる"));
-    connect(buttons, &QDialogButtonBox::accepted, this, [this] { create(); });
+    connect(buttons, &QDialogButtonBox::accepted, this, [this] {
+        if (making_image()) create_image();
+        else create();
+    });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    auto* body = new QVBoxLayout;
-    body->addLayout(book);
-    body->addStretch(1);
+    // PC4 F-b: 画像 (file.new) — the rows of a new image, beside the book's
+    image_name = new QLineEdit;
+    image_name->setObjectName(QStringLiteral("new_image_name"));
+    image_name->setPlaceholderText(QStringLiteral("無題"));
+    image_preset = new QComboBox;
+    image_preset->setObjectName(QStringLiteral("new_image_preset"));
+    struct Preset {
+        const char* label;
+        double w, h;
+        const char* unit;
+        double dpi;
+    };
+    static constexpr Preset kPresets[] = {{"写真 6 × 4 インチ（300 ppi）", 6, 4, "in", 300}, {"印刷 A4（300 ppi）", 210, 297, "mm", 300},
+                                          {"印刷 B5（350 ppi）", 182, 257, "mm", 350},       {"Web 1920 × 1080（72 ppi）", 1920, 1080, "px", 72},
+                                          {"モバイル 1080 × 1920（72 ppi）", 1080, 1920, "px", 72}};
+    image_preset->addItem(QStringLiteral("（数値で決める）"));
+    for (const Preset& p : kPresets) image_preset->addItem(QString::fromUtf8(p.label), QVariantList{p.w, p.h, QString::fromLatin1(p.unit), p.dpi});
+    image_width = new QDoubleSpinBox;
+    image_height = new QDoubleSpinBox;
+    for (QDoubleSpinBox* box : {image_width, image_height}) {
+        box->setRange(0.01, 100000);
+        box->setDecimals(2);
+    }
+    image_width->setObjectName(QStringLiteral("new_image_width"));
+    image_height->setObjectName(QStringLiteral("new_image_height"));
+    image_width->setValue(1920);
+    image_height->setValue(1080);
+    image_unit = new QComboBox;
+    image_unit->setObjectName(QStringLiteral("new_image_unit"));
+    for (const auto& [label, unit] : {std::pair{"ピクセル", "px"}, {"mm", "mm"}, {"cm", "cm"}, {"インチ", "in"}}) image_unit->addItem(QString::fromUtf8(label), QString::fromLatin1(unit));
+    image_dpi = new QDoubleSpinBox;
+    image_dpi->setObjectName(QStringLiteral("new_image_dpi"));
+    image_dpi->setRange(72, 100000);
+    image_dpi->setDecimals(0);
+    image_dpi->setSuffix(QStringLiteral(" ppi"));
+    image_dpi->setValue(72);
+    image_mode = new QComboBox;
+    image_mode->setObjectName(QStringLiteral("new_image_mode"));
+    for (const auto& [label, mode] : {std::pair{"RGB カラー", "rgb"}, {"CMYK カラー", "cmyk"}, {"Lab カラー", "lab"}, {"グレースケール", "gray"}, {"モノクロ 2 階調", "bitmap"}})
+        image_mode->addItem(QString::fromUtf8(label), QString::fromLatin1(mode));
+    image_depth = new QComboBox;
+    image_depth->setObjectName(QStringLiteral("new_image_depth"));
+    image_background = new QComboBox;
+    image_background->setObjectName(QStringLiteral("new_image_background"));
+    for (const auto& [label, value] : {std::pair{"白", "white"}, {"黒", "black"}, {"背景色", "background"}, {"透明", "transparent"}, {"カスタム…", "custom"}})
+        image_background->addItem(QString::fromUtf8(label), QString::fromLatin1(value));
+    image_profile = new QComboBox;
+    image_profile->setObjectName(QStringLiteral("new_image_profile"));
+    QFormLayout* picture = look::form();
+    picture->addRow(look::section(QStringLiteral("画像")));
+    picture->addRow(QStringLiteral("名前"), image_name);
+    picture->addRow(QStringLiteral("プリセット"), image_preset);
+    auto* size = new QHBoxLayout;
+    size->addWidget(image_width, 1);
+    size->addWidget(new QLabel(QStringLiteral("×")));
+    size->addWidget(image_height, 1);
+    size->addWidget(image_unit);
+    picture->addRow(QStringLiteral("幅 × 高さ"), size);
+    picture->addRow(QStringLiteral("解像度"), image_dpi);
+    picture->addRow(look::section(QStringLiteral("カラー")));
+    picture->addRow(QStringLiteral("カラーモード"), image_mode);
+    picture->addRow(QStringLiteral("ビット数"), image_depth);
+    picture->addRow(QStringLiteral("カンバスカラー"), image_background);
+    picture->addRow(QStringLiteral("カラープロファイル"), image_profile);
+    auto* image_note = new QLabel(QStringLiteral("画像は名前の無い 1 ページの原稿として開きます。保存するときに .genko の置き場所を尋ねます。"));
+    image_note->setWordWrap(true);
+    theme::role(image_note, "hint");
+    picture->addRow(QString(), image_note);
+    look::quiet_labels(picture);
+    connect(image_preset, &QComboBox::currentIndexChanged, this, [this](int i) {
+        const QVariantList p = image_preset->itemData(i).toList();
+        if (p.size() != 4) return;
+        image_unit->setCurrentIndex(std::max(0, image_unit->findData(p[2].toString())));
+        image_dpi->setValue(p[3].toDouble());
+        image_width->setValue(p[0].toDouble());
+        image_height->setValue(p[1].toDouble());
+    });
+    connect(image_mode, &QComboBox::currentIndexChanged, this, [this] { image_changed(); });
+    for (QDoubleSpinBox* box : {image_width, image_height, image_dpi}) connect(box, &QDoubleSpinBox::valueChanged, this, [this] { image_changed(); });
+    connect(image_unit, &QComboBox::currentIndexChanged, this, [this] { image_changed(); });
+    connect(image_background, &QComboBox::activated, this, [this](int i) {
+        if (image_background->itemData(i).toString() != QLatin1String("custom")) return;
+        if (const auto chosen = ask::colour(this, custom_, QStringLiteral("カンバスカラー"))) custom_ = *chosen;
+    });
+    auto* book_page = new QWidget;
+    auto* book_layout = new QVBoxLayout(book_page);
+    book_layout->setContentsMargins(0, 0, 0, 0);
+    book_layout->addLayout(book);
+    book_layout->addStretch(1);
+    auto* image_page = new QWidget;
+    auto* image_layout = new QVBoxLayout(image_page);
+    image_layout->setContentsMargins(0, 0, 0, 0);
+    image_layout->addLayout(picture);
+    image_layout->addStretch(1);
+    kinds_ = new QStackedWidget;
+    kinds_->addWidget(book_page);
+    kinds_->addWidget(image_page);
+    kind = new QListWidget;
+    kind->setObjectName(QStringLiteral("new_kind"));
+    kind->addItem(QStringLiteral("漫画の原稿"));
+    kind->addItem(QStringLiteral("画像"));
+    kind->setFixedWidth(120);
+    kind->setCurrentRow(0);
+    connect(kind, &QListWidget::currentRowChanged, this, [this](int row) {
+        kinds_->setCurrentIndex(std::max(0, row));
+        if (row == 1) image_changed(); else paper_changed();
+    });
+    auto* body = new QHBoxLayout;
+    body->addWidget(kind);
+    body->addWidget(kinds_, 1);
     diagram_ = new look::PaperDiagram;
     auto* side = new QVBoxLayout;
     side->addWidget(diagram_, 1);
     side->addWidget(look::legend());
-    look::frame(this, look::header(QStringLiteral("新しい原稿"), QStringLiteral("あとから「ページ → 原稿用紙の設定」で、用紙もページ数も変えられます。")),
-                body, look::card(side, QStringLiteral("原稿用紙")), look::footer(buttons));
-    look::fit_to_screen(this, QSize(780, 500));
+    look::frame(this, look::header(QStringLiteral("新規"), QStringLiteral("漫画の原稿は、あとから「ページ → 原稿用紙の設定」で、用紙もページ数も変えられます。")),
+                body, look::card(side, QStringLiteral("用紙")), look::footer(buttons));
+    look::fit_to_screen(this, QSize(900, 540));
     note();
     paper_changed();
     connect(paper, &QComboBox::currentIndexChanged, this, [this] { paper_changed(); });
+    image_changed();
+}
+
+bool NewProjectDialog::making_image() const { return kind != nullptr && kind->currentRow() == 1; }
+
+void NewProjectDialog::set_background(const QColor& colour) { background_ = colour; }
+
+formats::NewImage NewProjectDialog::chosen_image() const {
+    formats::NewImage made;
+    made.title = image_name->text().trimmed().isEmpty() ? std::string("無題") : image_name->text().trimmed().toStdString();
+    made.dpi = image_dpi->value();
+    const QString unit = image_unit->currentData().toString();
+    const double per = unit == QLatin1String("mm") ? made.dpi / 25.4 : unit == QLatin1String("cm") ? made.dpi / 2.54 : unit == QLatin1String("in") ? made.dpi : 1.0;
+    made.width = std::max<std::int64_t>(1, std::llround(image_width->value() * per));
+    made.height = std::max<std::int64_t>(1, std::llround(image_height->value() * per));
+    made.mode = image_mode->currentData().toString().toStdString();
+    made.depth = image_depth->currentData().toInt();
+    const QString background = image_background->currentData().toString();
+    const QColor colour = background == QLatin1String("background") ? background_ : custom_;
+    made.background = background == QLatin1String("background") || background == QLatin1String("custom") ? colour.name().toStdString() : background.toStdString();
+    made.profile = image_profile->currentData().toString().toStdString();
+    return made;
+}
+
+void NewProjectDialog::image_changed() {
+    // (the bits each mode holds: Photoshop's — RGB and grey 8, 16, 32; CMYK and Lab 8, 16; bitmap 1 (Genko's 8-bit grey of
+    // 0 and 1))
+    const QString mode = image_mode->currentData().toString();
+    const int was = image_depth->currentData().toInt();
+    image_depth->blockSignals(true);
+    image_depth->clear();
+    const std::vector<int> depths = mode == QLatin1String("bitmap") ? std::vector<int>{8}
+                                    : mode == QLatin1String("cmyk") || mode == QLatin1String("lab") ? std::vector<int>{8, 16}
+                                                                                                     : std::vector<int>{8, 16, 32};
+    for (const int d : depths) image_depth->addItem(mode == QLatin1String("bitmap") ? QStringLiteral("1 bit") : QStringLiteral("%1 bit").arg(d), d);
+    image_depth->setCurrentIndex(std::max(0, image_depth->findData(was)));
+    image_depth->blockSignals(false);
+    // (the profiles of the mode's colours: the working space's first)
+    const QString had = image_profile->currentData().toString();
+    image_profile->clear();
+    image_profile->addItem(QStringLiteral("作業用のプロファイル"), QString());
+    const core::ProfileSpace space = mode == QLatin1String("cmyk") ? core::ProfileSpace::Cmyk
+                                     : mode == QLatin1String("gray") || mode == QLatin1String("bitmap") ? core::ProfileSpace::Gray
+                                     : mode == QLatin1String("lab") ? core::ProfileSpace::Lab : core::ProfileSpace::Rgb;
+    if (space != core::ProfileSpace::Lab) {
+        for (const core::BuiltinProfile& p : core::builtin_profiles()) {
+            if (p.space == space) image_profile->addItem(QString::fromUtf8(p.description.data(), static_cast<qsizetype>(p.description.size())), QString::fromLatin1(p.id.data(), static_cast<qsizetype>(p.id.size())));
+        }
+    }
+    image_profile->setCurrentIndex(std::max(0, image_profile->findData(had)));
+    image_profile->setEnabled(space != core::ProfileSpace::Lab);
+    if (!making_image() || diagram_ == nullptr) return;
+    // (its paper, as the book of it will have it)
+    const formats::NewImage made = chosen_image();
+    core::PageSpec spec;
+    spec.width_mm = core::Num(static_cast<double>(made.width) * 25.4 / made.dpi);
+    spec.height_mm = core::Num(static_cast<double>(made.height) * 25.4 / made.dpi);
+    spec.dpi = core::Num(static_cast<std::int64_t>(std::llround(made.dpi)));
+    spec.bleed_mm = core::Num(std::int64_t{0});
+    spec.inner_margin_mm = core::Num(std::int64_t{0});
+    spec.trim_w_mm = spec.width_mm;
+    spec.trim_h_mm = spec.height_mm;
+    spec.margins_mm = core::NumList{core::Num(0.0), core::Num(0.0), core::Num(0.0), core::Num(0.0)};
+    diagram_->show_spec(spec);
+}
+
+bool NewProjectDialog::create_image() {
+    try {
+        // (its pixels made on a worker — a large image takes a moment —, the window drawing itself meanwhile)
+        const formats::NewImage made = chosen_image();
+        const formats::OpenOptions options = file_open_options();
+        image = off_ui([made, options] { return formats::new_image(made, options); });
+    } catch (const std::exception& error) {
+        ask::warning(this, QStringLiteral("Genko"), QStringLiteral("画像を作れませんでした:\n%1").arg(wording::error(QString::fromUtf8(error.what()))));
+        return false;
+    }
+    accept();
+    return true;
 }
 
 fs::path NewProjectDialog::target() const {

@@ -3,6 +3,7 @@
 // Internal to genko_render: the parts of the page renderer (render.py, placement.py, frames.py, filters.py) shared
 // by page.cpp, panels.cpp and composite.cpp.
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <span>
@@ -91,8 +92,9 @@ Image blend_over(const Image& base, const Image& over, std::string_view mode, do
 // The colours of two "RGB" pictures mixed in a blend mode as render._blend_over mixes them (normal or a mode it does not
 // know: `over`'s). (PC2: a correction's native.blend on the 8-bit page, render/adjust.)
 Image blend_colours(const Image& base_rgb, const Image& over_rgb, std::string_view mode);
-// render.fill_layer_image over `area`.
-Image fill_layer_image(const core::Layer& layer, Size size, int dpi, bool mono, const Box& area);
+// render.fill_layer_image over `area`. (patterns@1, PC4 E3: a pattern fill is the pattern of `book` laid over the page —
+// its RGB values as they are, the colours inks mean —; nothing without the book.)
+Image fill_layer_image(const core::Layer& layer, Size size, int dpi, bool mono, const Box& area, const core::Document* book = nullptr);
 // render.layer_effects (the whole of `raster`: the caller gives it a margin).
 Image layer_effects(const core::Layer& layer, Image raster, int dpi);
 // How far layer_effects reaches (px): a picture computed this much larger gives exact pixels inside.
@@ -120,13 +122,25 @@ Image resized_part(const Image& source, Size size, const Box& area, Resample res
 
 // render.gradient_colours(gradient_t(gx, gy, spec), spec) one point at a time (gradient_fill): the colour, each band
 // np.round()ed and cast to uint8 as numpy does, and the opacity (float64) at (gx, gy) in mm.
+// (vector@1, PC4 E4: and the spec's transparency stops, the opacity the colour stops' times theirs.)
+struct GradientStop {
+    double pos = 0;
+    std::array<double, 3> rgb{};  // (0..255, between the levels too)
+    double opacity = 1;
+};
 class GradientColours {
 public:
     explicit GradientColours(const core::Json& spec);
+    // PC4 E4: the spec's shape (from, to, shape, ratio, repeat, reverse) and transparency with these colour stops — their
+    // colours of any precision (a precise 描画色) —, for at()'s floats.
+    GradientColours(const core::Json& spec, const std::vector<GradientStop>& stops);
     ~GradientColours();
     GradientColours(const GradientColours&) = delete;
     GradientColours& operator=(const GradientColours&) = delete;
     void at(double gx, double gy, unsigned char rgb[3], double& opacity) const;
+    // PC4 E4: the colour as it is between the stops — r, g, b 0..255 not rounded — and the opacity (0..1) at (gx, gy) in mm
+    // (OpError for a place along the gradient that cannot be worked out, as at()).
+    void at(double gx, double gy, double rgba[4]) const;
 
 private:
     struct Impl;

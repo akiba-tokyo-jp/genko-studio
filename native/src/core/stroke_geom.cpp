@@ -6,6 +6,7 @@
 #include <set>
 #include <utility>
 
+#include "core/brush_dabs.hpp"
 #include "core/frames.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
@@ -220,8 +221,15 @@ bool near_eraser(double x, double y, const PenPoints& eraser, double radius_mm) 
 }
 
 std::vector<PenPoints> split_by_eraser(const PenPoints& points, const PenPoints& eraser, double radius_mm) {
+    std::vector<std::vector<double>> places;
+    return split_by_eraser(points, eraser, radius_mm, places);
+}
+
+std::vector<PenPoints> split_by_eraser(const PenPoints& points, const PenPoints& eraser, double radius_mm, std::vector<std::vector<double>>& places) {
     // densify so a short eraser still cuts a long segment
     PenPoints dense;
+    std::vector<double> along;  // (brushes@1: each dense point's length along the line)
+    double walked = 0.0;
     const double spacing = py_max(0.2, radius_mm / 2);
     for (std::size_t i = 0; i + 1 < points.size(); ++i) {
         const PenPoint& a = points[i];
@@ -233,20 +241,36 @@ std::vector<PenPoints> split_by_eraser(const PenPoints& points, const PenPoints&
             PenPoint q{a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, std::nullopt};
             if (a.p) q.p = *a.p + ((b.p ? *b.p : *a.p) - *a.p) * t;
             dense.push_back(q);
+            along.push_back(walked + std::hypot(b.x - a.x, b.y - a.y) * t);
         }
+        walked += std::hypot(b.x - a.x, b.y - a.y);
     }
-    if (!points.empty()) dense.push_back(points.back());
+    if (!points.empty()) {
+        dense.push_back(points.back());
+        along.push_back(walked);
+    }
     std::vector<PenPoints> pieces;
+    places.clear();
     PenPoints current;
-    for (const PenPoint& p : dense) {
+    std::vector<double> current_places;
+    for (std::size_t i = 0; i < dense.size(); ++i) {
+        const PenPoint& p = dense[i];
         if (near_eraser(p.x, p.y, eraser, radius_mm)) {
-            if (current.size() >= 2) pieces.push_back(current);
+            if (current.size() >= 2) {
+                pieces.push_back(current);
+                places.push_back(current_places);
+            }
             current.clear();
+            current_places.clear();
         } else {
             current.push_back(p);
+            current_places.push_back(along[i]);
         }
     }
-    if (current.size() >= 2) pieces.push_back(current);
+    if (current.size() >= 2) {
+        pieces.push_back(current);
+        places.push_back(current_places);
+    }
     return pieces;
 }
 
@@ -332,7 +356,8 @@ std::vector<StrokePtr> erase_to_crossing(std::span<const StrokePtr> strokes, con
         }
         const double before = before_value.value_or(0.0);
         const double after = after_value.value_or(pos.back());
-        const auto piece = [&](double lo, double hi) {
+        // (brushes@1, PC4 E1: each point's length along the line, so the piece keeps the pen's inputs there)
+        const auto piece = [&](double lo, double hi, std::vector<double>& places) {
             PenPoints out;
             for (std::size_t i = 0; i + 1 < pts.size(); ++i) {
                 const double la = pos[i], lb = pos[i + 1];
@@ -343,13 +368,18 @@ std::vector<StrokePtr> erase_to_crossing(std::span<const StrokePtr> strokes, con
                 const PointF& b = pts[i + 1];
                 const PenPoint p0{a.x + (b.x - a.x) * t0, a.y + (b.y - a.y) * t0, std::nullopt};
                 const PenPoint p1{a.x + (b.x - a.x) * t1, a.y + (b.y - a.y) * t1, std::nullopt};
-                if (out.empty()) out.push_back(p0);
+                if (out.empty()) {
+                    out.push_back(p0);
+                    places.push_back(la + (lb - la) * t0);
+                }
                 out.push_back(p1);
+                places.push_back(la + (lb - la) * t1);
             }
             return out;
         };
         for (const auto& [lo, hi] : {std::pair<double, double>{0.0, before}, std::pair<double, double>{after, pos.back()}}) {
-            const PenPoints part = piece(lo, hi);
+            std::vector<double> places;
+            const PenPoints part = piece(lo, hi, places);
             if (part.size() >= 2 && dist(part.front().x, part.front().y, part.back().x, part.back().y) > 0.2) {
                 Stroke fresh = coerce_stroke(part);
                 fresh.width_mm = stroke->width_mm;
@@ -357,6 +387,7 @@ std::vector<StrokePtr> erase_to_crossing(std::span<const StrokePtr> strokes, con
                 fresh.rgb = stroke->rgb;
                 fresh.color_rgb = stroke->color_rgb;
                 fresh.opacity = stroke->opacity;
+                carry_inputs(*stroke, fresh, &places);
                 result.push_back(std::make_shared<const Stroke>(std::move(fresh)));
             }
         }

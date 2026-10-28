@@ -256,6 +256,11 @@ QPointF PageCanvas::to_mm(const QPointF& widget) const { return mm_of(unturned(w
 
 QPointF PageCanvas::to_widget(const QPointF& mm) const { return mm_transform().map(mm); }
 
+void PageCanvas::set_work(std::shared_ptr<CanvasWork> work) {
+    work_ = std::move(work);
+    update();
+}
+
 QRectF PageCanvas::seen_mm() const {
     const QPointF corners[] = {to_mm(QPointF(0, 0)), to_mm(QPointF(width(), 0)), to_mm(QPointF(0, height())),
                                to_mm(QPointF(width(), height()))};
@@ -466,7 +471,7 @@ void PageCanvas::live_sync() {
 
 void PageCanvas::live_draw() {
     const core::Page* p = page();
-    if (p == nullptr || tool_ != QLatin1String("pen") || !pen_layer_ || stroke_.empty()) return;
+    if (p == nullptr || !draws_line(tool_) || !pen_layer_ || stroke_.empty()) return;
     const core::Layer* layer = nullptr;
     for (const core::Layer& item : p->layers) {
         if (item.id == *pen_layer_) layer = &item;
@@ -480,13 +485,15 @@ void PageCanvas::live_draw() {
             live_snapped_ = false;
         }
         if (!live_) live_ = std::make_unique<LiveInk>(doc_, *p, *layer, wanted_dpi(), pen_fields_, stroke_id_);
-        live_->follow(stroke_, turns_);
+        live_->follow(stroke_, turns_, LiveInputs{tilts_, times_, wheels_});
         return;
     }
     // snapped to a ruler, with its symmetry copies: drawn whole again each time (Python's LiveInk.redraw)
     const core::PenPoints& main = shown->front();
     live_ = std::make_unique<LiveInk>(doc_, *p, *layer, wanted_dpi(), pen_fields_, stroke_id_);
-    live_->follow(main, main.size() == turns_.size() ? std::span<const double>(turns_) : std::span<const double>());
+    // (brushes@1, PC4 E1: the pen's inputs with the points snapped, one a point as before)
+    live_->follow(main, main.size() == turns_.size() ? std::span<const double>(turns_) : std::span<const double>(),
+                  main.size() == stroke_.size() ? LiveInputs{tilts_, times_, wheels_} : LiveInputs{});
     live_copies_.clear();
     for (std::size_t i = 1; i < shown->size(); ++i) {
         auto copy = std::make_unique<LiveInk>(doc_, *p, *layer, wanted_dpi(), pen_fields_, stroke_id_);

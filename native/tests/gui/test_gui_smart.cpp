@@ -363,7 +363,8 @@ private slots:
         QCOMPARE(core::smart::matrix_of(*book.layer("so")), sheared);
     }
 
-    // PC3 A2: the layer panel's かける… on a smart object adds a smart filter (asked so); its rows under the smart object —
+    // PC3 A2: a filter on a smart object adds a smart filter (PC4 節 D, the user's decision 1: フィルター's commands — the
+    // layer panel's かける… opens that menu —, Photoshop's way: not asked); its rows under the smart object —
     // スマートフィルター and each filter, the top one first — with their eyes; スマートフィルターを編集… in the filter's own
     // window, 描画オプション…, moving one; レイヤー → スマートフィルター's commands; undone.
     void smartFiltersInTheLayerPanel() {
@@ -381,12 +382,13 @@ private slots:
             asked << text;
             return true;
         };
-        panel->filter_box()->setCurrentIndex(panel->filter_box()->findData(QStringLiteral("invert")));
-        panel->apply_filter();
-        QCOMPARE(asked.size(), 1);
-        QVERIFY2(asked[0].contains(QStringLiteral("スマートフィルターとして足します")), qPrintable(asked[0]));
+        book.answers.responder->exec = [](QDialog* dialog) {
+            return dialog->objectName() == QStringLiteral("filter_dialog") ? int(QDialog::Accepted) : int(QDialog::Rejected);
+        };
+        book.act("act_filter_blur_box")->trigger();
+        QVERIFY(asked.isEmpty());
         QCOMPARE(filters().size(), std::size_t(1));
-        QCOMPARE(filters()[0]["kind"], Json("invert"));
+        QCOMPARE(filters()[0]["kind"], Json("blur_box"));
         // (a second one, from an op: the rows list the top one first)
         QVERIFY(w->apply_ops(Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "blur"}, {"radius", 2}}})));
         panel->refresh();

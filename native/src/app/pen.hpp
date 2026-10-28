@@ -25,13 +25,19 @@ struct PenSample {
     double y_mm = 0.0;
     double pressure = 0.7;  // as packed (0.05 … 1)
     double rotation = 0.0;  // the barrel's turn (degrees; pens that report it)
+    // brushes@1 (PC4 E1): what a dab brush reads — the pen's tilt (degrees, W3C's: x to the tablet's right, y to its
+    // bottom), the airbrush wheel (0..1; 1 for a pen without one) and the time (ms, the event's)
+    double tilt_x = 0.0, tilt_y = 0.0;
+    double wheel = 1.0;
+    double time_ms = 0.0;
 };
 
 // A tablet event's point (Python's PageCanvas.tabletEvent): pressure from the pen, the tilt's share
-// (|xTilt| / 60), the rotation as the pen gives it.
+// (|xTilt| / 60), the rotation as the pen gives it; its tilt, wheel (an airbrush's tangential pressure, -1..1 → 0..1)
+// and time.
 PenSample tablet_sample(double x_mm, double y_mm, const QTabletEvent& event);
-// The mouse's point: pressure 0.7.
-PenSample mouse_sample(double x_mm, double y_mm);
+// The mouse's point: pressure 0.7 (and its time).
+PenSample mouse_sample(double x_mm, double y_mm, double time_ms = 0.0);
 
 struct PenSettings {
     std::string kind = std::string(core::kDefaultBrush);
@@ -47,6 +53,14 @@ struct PenSettings {
     bool speed_steady = false;
     double post_fit = 0;
     double snap_lines = 0;
+    // brushes@1 (PC4 E1): the flow a dab brush's line is drawn with (0.01 … 1; Photoshop's 流量), the blend a line is
+    // painted into a paint layer with (normal: kept as a line), the smoothing's way — "stabilize" (the pen's 手ぶれ補正,
+    // add_stroke's stabilize), "string" (紐で引く) or "catch_up" (追いつく: the window smooths the pen's input) — and its
+    // amount (0 … 1)
+    double flow = 1.0;
+    std::string blend = "normal";
+    std::string smoothing = "stabilize";
+    double smoothing_amount = 0.5;
 
     // The kind's own defaults (BrushPanel._apply_kind_defaults without stored values).
     static PenSettings for_kind(const std::string& kind);

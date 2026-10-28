@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "core/base64.hpp"
+#include "core/brush_dabs.hpp"
 #include "core/color_model.hpp"
 #include "core/channels.hpp"
 #include "core/command_bus.hpp"
@@ -25,6 +26,7 @@
 #include "render/page.hpp"
 #include "render/path_trace.hpp"
 #include "render/png.hpp"
+#include "render/raster.hpp"
 #include "render/select_color.hpp"
 #include "render/shape_parts.hpp"
 #include "render/warp.hpp"
@@ -254,6 +256,7 @@ core::Stroke transform_stroke(const core::Stroke& stroke, const Matrix& m) {
     out.rgb = stroke.rgb;
     out.color_rgb = stroke.color_rgb;
     out.opacity = stroke.opacity;
+    core::carry_inputs(stroke, out);  // (brushes@1, PC4 E1: its flow, 背景色 and pen inputs, point for point)
     return out;
 }
 
@@ -487,7 +490,9 @@ Items lift(core::Layer& layer, const Json& area, const core::Page& page) {
     }
     if (layer.raster_png && !layer.raster_png->empty()) {
         const Image raster = open_picture(*layer.raster_png).convert("RGBA");
-        const AreaMask m = area_mask(area, kWorkingDpi);
+        // (PC4 F-b: at the layer's pixels' own resolution on a page of grid "finest" — an opened picture's —, as coverage)
+        const int dpi = raster::dpi_across(page, raster.width());
+        const AreaMask m = area_mask(area, dpi);
         Image local = Image::create("L", raster.size(), Ink(0));
         local.paste(m.mask, Point{static_cast<int>(m.x0), static_cast<int>(m.y0)});
         const Image raster_alpha = raster.getchannel(3);
@@ -502,7 +507,7 @@ Items lift(core::Layer& layer, const Json& area, const core::Page& page) {
             templ.attrs["mode"] = "image";
             templ.attrs["opacity"] = 1.0;
             if (page_values) templ.attrs["rgb_profile"] = page.rgb->profile;  // (color_edit::kPatchProfileKey)
-            if (auto patch = to_patch(piece, 0, 0, templ, kWorkingDpi)) in.patches.push_back(std::move(*patch));
+            if (auto patch = to_patch(piece, 0, 0, templ, dpi)) in.patches.push_back(std::move(*patch));
         }
     }
     layer.strokes = core::make_strokes(std::move(strokes_out));
@@ -515,7 +520,7 @@ namespace {
 
 // pen-shapes@1 (PC3 C-b): the parts put on the layer (each through `move`): a pen layer's parts, an id it has already
 // given a new one; on a layer that is not a pen layer, their pictures as patches.
-void drop_parts(core::Layer& layer, std::vector<core::vector::ShapePart> parts, bool fresh_ids, const core::Page* page,
+void drop_parts(core::Layer& layer, std::vector<core::vector::ShapePart> parts, bool fresh_ids, const core::Page* page, const core::Document* book,
                 const std::function<core::vector::ShapePart(const core::vector::ShapePart&)>& move) {
     namespace vec = core::vector;
     if (parts.empty()) return;
@@ -525,7 +530,10 @@ void drop_parts(core::Layer& layer, std::vector<core::vector::ShapePart> parts, 
     for (const vec::ShapePart& part : parts) {
         vec::ShapePart moved = vec::part_from_json(vec::to_json(move(part)));
         if (layer.kind != core::LayerKind::Strokes) {
-            if (auto patch = shape_parts::as_patch(page, moved)) {
+            if (book == nullptr && shape_parts::has_pattern(moved)) {
+                throw core::Error("value", "a shape part filled with a pattern is drawn with its book's pattern (the book was not given)");
+            }
+            if (auto patch = shape_parts::as_patch(page, moved, book)) {
                 if (fresh_ids) patch_set(*patch, "id", core::new_id());
                 layer.patches.push_back(std::move(*patch));
             }
@@ -547,9 +555,9 @@ void drop_parts(core::Layer& layer, std::vector<core::vector::ShapePart> parts, 
 
 }  // namespace
 
-void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids, Resample resample, const core::Page* page) {
+void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids, Resample resample, const core::Page* page, const core::Document* book) {
     const bool identity = m == kIdentity;  // (-0.0 is 0.0 here, as in Python's tuple comparison)
-    drop_parts(layer, std::move(items.shapes), fresh_ids, page, [&](const core::vector::ShapePart& part) {
+    drop_parts(layer, std::move(items.shapes), fresh_ids, page, book, [&](const core::vector::ShapePart& part) {
         return identity ? part : shape_parts::transformed(part, {m[0], m[1], m[2], m[3], m[4], m[5]}, true);
     });
     std::vector<core::StrokePtr> strokes = layer.strokes->items;
@@ -575,8 +583,8 @@ void drop(core::Layer& layer, Items items, const Matrix& m, bool fresh_ids, Resa
     }
 }
 
-void drop_warped(core::Layer& layer, Items items, const WarpFunction& go, Resample resample, const core::Page* page) {
-    drop_parts(layer, std::move(items.shapes), false, page, [&](const core::vector::ShapePart& part) {
+void drop_warped(core::Layer& layer, Items items, const WarpFunction& go, Resample resample, const core::Page* page, const core::Document* book) {
+    drop_parts(layer, std::move(items.shapes), false, page, book, [&](const core::vector::ShapePart& part) {
         core::vector::ShapePart bent = part;
         bent.path = shape_parts::bent(part.path, go);
         bent.live.reset();
@@ -643,6 +651,11 @@ Items items_from_json(const Json& data) {
                 throw core::OpError(std::string("items' shapes: ") + error.what());
             }
         }
+    }
+    // (patterns@1, PC4 E3: the patterns the parts name, carried from another book — paste puts them into its book)
+    if (const Json* patterns = core::get(data, "patterns"); patterns != nullptr && !patterns->is_null()) {
+        if (!patterns->is_array()) throw core::OpError("items' patterns is a list of patterns");
+        items.patterns = *patterns;
     }
     return items;
 }
@@ -926,7 +939,8 @@ bool only_key(const Json& area, std::string_view key) {
 
 int grid_dpi(const core::Page& page) {
     const bool precise = page.rgb && page.rgb->depth > 8;
-    return page.color || precise ? layer_masks::grid_dpi(page) : kSelDpi;
+    const bool finest = page.spec.grid && *page.spec.grid == "finest";  // (PC4 F-b, image-grid@1)
+    return page.color || precise || finest ? layer_masks::grid_dpi(page) : kSelDpi;
 }
 
 Image to_mask(const Json& area, const core::Page& page, const core::Document* episode, int dpi) {
@@ -1037,6 +1051,7 @@ Json items_to_json(const Items& items) {
         for (const core::vector::ShapePart& part : items.shapes) shapes.push_back(core::vector::to_json(part));
         out["shapes"] = std::move(shapes);
     }
+    if (items.patterns.is_array() && !items.patterns.empty()) out["patterns"] = items.patterns;  // (patterns@1, PC4 E3)
     return out;
 }
 

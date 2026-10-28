@@ -52,6 +52,8 @@ private:
 };
 // render::Cancelled when this thread's work is to stop.
 void check_stop();
+// This thread's stop (none outside a StopScope): PC4's filters hand it to the threads they work on (render/fx).
+const std::stop_token* current_stop();
 
 // --- images and samplers (mod.rs) -------------------------------------------------------------------------------------
 

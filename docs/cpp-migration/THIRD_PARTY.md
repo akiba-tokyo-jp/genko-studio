@@ -19,6 +19,16 @@
 | HarfBuzz | 8.3.0 / 10.x | MIT | 字形の配置（縦書きの字形置換・OpenType 機能） | Windows: 静的。Linux: コンピューターのもの |
 | libwebp（libwebp・libwebpdemux・libwebpmux） | 1.3.2 / 1.5.x | BSD-3-Clause | WebP の書き出し（タイムラプス・アニメーション）と読み込み（M6: Pillow と同じ画素。アニメーションは最初のコマ） | Windows: 静的。Linux: コンピューターのもの |
 | Little CMS 2 | 2.14 / 2.16 | MIT | 色変換（CMYK、ICC） | Windows: 静的。Linux: コンピューターのもの |
+| OpenEXR（Imath を含む） | 3.1.5（Imath 3.1.9、Ubuntu 24.04）/ 3.4.15（Imath 3.2.3、vcpkg。依存 libdeflate（MIT）・openjph（BSD-2-Clause）） | BSD-3-Clause | OpenEXR の読み書き（PC4 F-a） | Windows: 静的。Linux: コンピューターのもの |
+| libavif | 1.0.4（Ubuntu 24.04）/ 1.4.2（vcpkg、機能 aom。依存 libyuv（BSD-3-Clause）） | BSD-2-Clause AND Apache-2.0 | AVIF の読み書き（PC4 F-a。AV1 の符号化・復号は libaom を名指す。Ubuntu の libavif が一緒に読み込む dav1d・libgav1・rav1e・SVT-AV1 は使わない） | Windows: 静的。Linux: コンピューターのもの |
+| libaom | 3.8.2（Ubuntu 24.04）/ 3.15.1（vcpkg） | BSD-2-Clause（と Alliance for Open Media Patent License 1.0） | AV1 の符号化・復号（libavif から、PC4 F-a） | Windows: 静的（libavif の中）。Linux: コンピューターのもの |
+| libdeflate | なし / 1.26（vcpkg、OpenEXR の依存） | MIT | OpenEXR の ZIP の圧縮・展開（Windows、PC4 F-a） | Windows: 静的（OpenEXR の中）。ライセンス文は `licenses/windows/libdeflate.copyright`。Linux の OpenEXR 3.1 は使わない |
+| OpenJPH | なし / 0.32.0（vcpkg、OpenEXR の依存） | BSD-2-Clause | OpenEXR の HTJ2K の圧縮・展開（Windows、PC4 F-a） | Windows: 静的（OpenEXR の中）。ライセンス文は `licenses/windows/openjph.copyright`。Linux の OpenEXR 3.1 は使わない |
+| libyuv | なし / 1916（vcpkg、libavif の依存） | BSD-3-Clause（と Google の特許の許諾） | AVIF の YUV と RGB の変換（Windows、PC4 F-a） | Windows: 静的（libavif の中）。ライセンス文は `licenses/windows/libyuv.copyright`。Linux はコンピューターの libavif が読み込む |
+| Zstandard（zstd） | 1.5.5（Ubuntu 24.04）/ 1.5.7（vcpkg） | BSD-3-Clause OR GPL-2.0-only（BSD-3-Clause で利用） | .pcraft のタイルと blob の圧縮・展開（PC4 F-f。展開は上限を確かめてから） | Windows: 静的。ライセンス文は `licenses/windows/zstd.copyright`。Linux: コンピューターのもの |
+| BLAKE3（C の実装: `blake3.c`・`blake3_dispatch.c`・`blake3_portable.c`・SSE2・SSE4.1・AVX2・AVX-512・NEON の各ファイル） | 1.8.7（crates.io の blake3 1.8.7 の `c/`、crate の sha256 6d9e454f…。各ファイルの sha256 は `PROVENANCE.json`） | CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception（CC0-1.0 で利用） | .pcraft のタイルと blob の名前のハッシュ（PC4 F-f） | 静的。`native/third_party/blake3/` にライセンス文（`LICENSE_CC0`・`LICENSE_A2`・`LICENSE_A2LLVM`）と来歴、配布物の `licenses/blake3/` |
+| LibRaw | 0.22.2（両 OS。Linux は libraw.org の公式の配布 `LibRaw-0.22.2.tar.gz`（sha256 de86b035655accff8d4010f1a221fdf50d353cb7b1422ba26f14a0db92612cfa）を `tools/ci/build_libraw.sh` で組んだもの: 共有ライブラリ、OpenMP・JasPer・Little CMS なし、JPEG と zlib はコンピューターのもの。Windows は vcpkg の libraw 0.22.2、機能 dng-lossy、依存 JasPer・Little CMS・zlib を中に持つ DLL） | LGPL-2.1-only OR CDDL-1.0（LGPL-2.1-only で利用。中の DCB・FBDD・X3F は BSD-3-Clause） | カメラ RAW の読み込みと現像（PC4 F-e: 開く…・スマートオブジェクトの中身 camera-raw@1） | 動的リンク（静的に組み込まない）。Linux: `lib/libraw_r.so.25` を同梱、Windows: `bin\raw_r.dll`（vcpkg の三つ組の上書き `native/cmake/triplets`）。ライセンス文（`licenses/libraw/` の COPYRIGHT・LICENSE.LGPL・LICENSE.CDDL）、ソースの入手先、差し替え方法（`LIBRAW-LGPL-ja.md`）を同梱 |
+| JasPer | なし / 4.2.9（vcpkg、LibRaw の依存） | JasPer-2.0 | LibRaw の JPEG 2000（Windows） | Windows: LibRaw の DLL の中（静的）。ライセンス文は `licenses/windows/jasper.copyright`（上流の 4.2.9 の `LICENSE.txt`、sha256 4ad1bb42aff888c4403d792e6e2c5f1716d6c279fea70b296333c9d577d30b81）。Linux の LibRaw は JasPer なしで組む |
 | Pillow の `libImaging`（C 実装のみ） | 12.3.0（sdist sha256 3b8182a7…7cce） | MIT-CMU（HPND） | 継承描画の画素処理（線・合成・変換・フィルター）。現行版と同じ画素を出すため | 静的。`native/third_party/pillow/`、ライセンス文と変更記録を同梱 |
 | Arm optimized-routines（https://github.com/ARM-software/optimized-routines）の `math/sinf.c`・`cosf.c`・`sincosf.h`・`sincosf_data.c`・`powf.c`・`powf_log2_data.c`・`exp2f_data.c` | v25.01（コミット 3752b981a6f3b89b5468476a87568a29fd9e0822。これらのファイルは v25.07 も同じ）。著作権表示は各ファイルの通り（Copyright (c) 2018-2024, Arm Limited: sinf.c・cosf.c・sincosf.h／2018-2019: sincosf_data.c／2017-2024: powf.c／2017-2019: powf_log2_data.c／2017-2018: exp2f_data.c） | MIT OR Apache-2.0 WITH LLVM-exception（MIT で利用） | numpy の float32 sin・cos・power が参照環境で使う C ライブラリの関数を、どの OS でも同じビットで計算する（`native/src/render/libm_float.cpp` に移植。参照環境の C ライブラリ glibc 2.39 の結果とビット単位で照合する。glibc の同梱版は LGPL のため使わない） | 静的（ソースに移植）。`native/third_party/optimized-routines/LICENSE-MIT`（同リポジトリの `LICENSE` の MIT の部分そのまま） |
 | PhotoCraft（露光量の式とパラメータの境界 `crates/compose/src/adjust.rs`・`crates/engine/src/adjust_params.rs`。PC1 の色モデル・カラー設定・色の校正と色域外警告・チャンネル・量子化と特別な色モード。移した部分と行は `native/third_party/photocraft/NOTICE.md`） | v0.2.0（コミット ad863217386440ca968fccc9bfff65ba24e61142） | MIT | 露光量の補正（`native/src/core/exposure.cpp`）、色モデル・校正・チャンネル・量子化（`native/src/core/color_model.cpp`・`core/ink.cpp`・`render/proof.cpp`・`render/quantize.cpp`・`render/ops_ink.cpp`・`render/ops_channels.cpp` ほか）に移植 | 静的（ソースに移植）。`native/third_party/photocraft/LICENSE-MIT` と `NOTICE.md`、配布物の `licenses/photocraft/` |
@@ -45,6 +55,7 @@
 | 名前 | 出典 | ライセンス | 置き場所 |
 |---|---|---|---|
 | PhotoCraft Coated CMYK（合成 ICC プロファイル、sha256 f7ba9320…a54cc） | PhotoCraft v0.2.0 `crates/cms/profiles/photocraft-coated-cmyk.icc`（pin ad86321） | CC0-1.0 | `native/tests/data/colour/`（CMYK 変換・色校正の契約試験） |
+| .pcraft の固定の資産（RGB 8・16・32 bit、グレー、CMYK、Lab、インデックス、補正の 16 種、層の 7 種と SO・マスク・チャンネル・パス・ガイド） | Genko が `tools/migration/pcraft_fixtures`（開発用の Rust の道具）で PhotoCraft v0.2.0（pin ad86321）の `crates/format` の書き手により作ったもの（来歴は `MANIFEST.json`） | Genko のもの（道具が使う PhotoCraft のクレートは MIT） | `native/tests/data/pcraft/`（test_pcraft・test_contract_pcraft） |
 
 ## 使わないもの
 
@@ -54,4 +65,4 @@
 
 ## 開発だけで使うもの（配布しない）
 
-CMake、Ninja、ccache、aqtinstall、vcpkg、Python 3（参照比較・台帳生成・固定原稿の生成）、Pillow・numpy・psd-tools（参照比較）、Xvfb（画面試験）。
+CMake、Ninja、ccache、aqtinstall、vcpkg、Python 3（参照比較・台帳生成・固定原稿の生成）、Pillow・numpy・psd-tools（参照比較）、Xvfb（画面試験）、Rust と cargo（`tools/migration/pcraft_fixtures`: PhotoCraft の書き手で試験の .pcraft を作る。PC4 F-f。crates.io のクレートは `Cargo.lock` の版）。

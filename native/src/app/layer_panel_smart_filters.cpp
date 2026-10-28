@@ -20,12 +20,16 @@
 
 #include "app/adjust_forms.hpp"
 #include "app/ask.hpp"
+#include "app/filter_forms.hpp"
+#include "app/filter_menu.hpp"
 #include "app/layer_dialogs.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
+#include "core/filter_kinds.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
+#include "render/fx.hpp"
 #include "render/smart_filters.hpp"
 #include "service/wording.hpp"
 
@@ -64,6 +68,7 @@ QString smart_filter_title(const std::string& kind) {
     if (kind == "puppet_warp") return QStringLiteral("パペットワープ");
     for (const auto& [key, label] : filter_kinds())
         if (key == kind) return label;
+    if (core::pc4_filter(kind)) return filter_forms::title(kind);  // (PC4 節 D: フィルター's, by Photoshop's name)
     QString title = adjust_forms::command_title(kind);
     if (title.endsWith(QStringLiteral("…"))) title.chop(1);
     return title.isEmpty() ? QString::fromStdString(kind) : title;
@@ -148,6 +153,38 @@ void LayerPanel::edit_smart_filter(int index) {
     const auto asked = window_->asking();
     const std::string layer_id = layer->id;
     const Json page_index = page->index.json();
+    if (const FilterWindow* own = filter_window(kind)) {  // (PC4 節 D: a group's own window — フィルターギャラリー… —, from its settings)
+        const render::fx::Grid grid = render::fx::layer_grid(*page, *layer);
+        FilterWindowCall call;
+        call.window = window_;
+        call.now = now;
+        call.page = page;
+        call.layer = layer;
+        call.filter = index;
+        call.send = [this, asked, page_index, layer_id, index, kind, grid, now](const Json& values) {
+            if (!window_->still(asked)) return;
+            try {  // (nothing changed: nothing sent — as the table's windows)
+                if (core::normalize_filter(kind, now, nullptr) == values) return;
+            } catch (const std::exception&) {
+            }
+            const bool heavy = render::fx::work(kind, values, std::uint64_t(grid.width) * grid.height, grid.s, grid.levels) >= render::fx::kHeavyWork;
+            window_->send_filter(Json::array({Json{{"op", "smart_filter_set"}, {"page", page_index}, {"id", layer_id}, {"index", index}, {"params", values}}}),
+                                 filter_forms::title(kind), heavy);
+        };
+        // (D4: a window that shows the result on the page — ぼかしギャラリー's work over the canvas —: the filter set again on a
+        // copy of the book, a heavy one on a thread)
+        call.preview = [this, page_index, layer_id, index, kind, grid](const std::optional<Json>& values) {
+            if (!values) {
+                window_->preview_filter(std::nullopt, false);
+                return;
+            }
+            const bool heavy = render::fx::work(kind, *values, std::uint64_t(grid.width) * grid.height, grid.s, grid.levels) >= render::fx::kHeavyWork;
+            window_->preview_filter(Json::array({Json{{"op", "smart_filter_set"}, {"page", page_index}, {"id", layer_id}, {"index", index}, {"params", *values}}}), heavy);
+        };
+        call.previewing = [this] { return window_->filter_previewing(); };
+        (*own)(call);
+        return;
+    }
     // (shown on the page while the numbers change: the filter set again on a copy of the book)
     const FilterPreview preview = [this, page_index, layer_id, index](const std::optional<Json>& values) {
         if (!values) {
@@ -158,7 +195,34 @@ void LayerPanel::edit_smart_filter(int index) {
             {Json{{"op", "smart_filter_set"}, {"page", page_index}, {"id", layer_id}, {"index", index}, {"params", adjust_forms::without_nulls(*values)}}}));
     };
     std::optional<Json> params;
-    if (adjust_forms::form_kind(kind) != nullptr) {  // (PC2's kinds: their own window; what the person changed laid over them)
+    if (core::pc4_filter(kind)) {  // (PC4 節 D: フィルター's kinds, their windows of the table; what the person changed laid over them)
+        adjust_forms::FormContext context;
+        context.page = page;
+        context.smart = true;
+        const auto& rgb = window_->pen().rgb;
+        context.pen = {static_cast<int>(rgb[0]), static_cast<int>(rgb[1]), static_cast<int>(rgb[2])};
+        // (a heavy one — render::fx::work on the smart object's grid —: previewed and set on a thread, as フィルター's commands)
+        const render::fx::Grid grid = render::fx::layer_grid(*page, *layer);
+        const auto heavy = [grid, kind](const Json& values) {
+            return render::fx::work(kind, values, std::uint64_t(grid.width) * grid.height, grid.s, grid.levels) >= render::fx::kHeavyWork;
+        };
+        const FilterPreview shown = [this, page_index, layer_id, index, heavy](const std::optional<Json>& values) {
+            if (!values) {
+                window_->preview_filter(std::nullopt, false);
+                return;
+            }
+            const Json set{{"op", "smart_filter_set"}, {"page", page_index}, {"id", layer_id}, {"index", index}, {"params", adjust_forms::without_nulls(*values)}};
+            window_->preview_filter(Json::array({set}), heavy(*values));
+        };
+        Json opened;
+        const auto values = filter_forms::dialog(this, kind, now, context, filter_forms::Preview{shown, [this] { return window_->filter_previewing(); }}, &opened);
+        if (!values || !window_->still(asked)) return;
+        params = opened.is_object() ? adjust_forms::changes(opened, *values) : *values;
+        if (params->is_object() && params->empty()) return;  // (nothing changed)
+        window_->send_filter(Json::array({Json{{"op", "smart_filter_set"}, {"page", page_index}, {"id", layer_id}, {"index", index}, {"params", *params}}}),
+                             filter_forms::title(kind), heavy(adjust_forms::without_nulls(*values)));
+        return;
+    } else if (adjust_forms::form_kind(kind) != nullptr) {  // (PC2's kinds: their own window; what the person changed laid over them)
         adjust_forms::FormContext context;
         context.page = page;
         const auto& rgb = window_->pen().rgb;
@@ -215,7 +279,18 @@ void LayerPanel::smart_filter_menu(const QPoint& at) {
     if (item == nullptr) return;
     const int row = list_->row(item);
     const int kind = row_kind(row);
-    if (kind == kLayerRow) return;
+    if (kind == kLayerRow) {  // (PC4 F-c: a layer's own — PNG としてクイック書き出し・書き出し形式…, as レイヤー's)
+        list_->setCurrentRow(row);
+        QMenu menu(this);
+        for (const char* name : {"act_layer_quick_export_png", "act_layer_export_as"})
+            if (QAction* act = window_->action(QString::fromLatin1(name))) menu.addAction(act);
+        // (PC4 E6: 混合オプション… and the style's copy, paste and clear, as Photoshop's layer menu has them)
+        if (window_->action(QStringLiteral("act_layer_style_blending")) != nullptr) menu.addSeparator();
+        for (const char* name : {"act_layer_style_blending", "act_layer_style_copy", "act_layer_style_paste", "act_layer_style_clear"})
+            if (QAction* act = window_->action(QString::fromLatin1(name))) menu.addAction(act);
+        if (!menu.isEmpty()) menu.exec(list_->viewport()->mapToGlobal(at));
+        return;
+    }
     list_->setCurrentRow(row);
     const auto [page, layer] = this->layer();
     if (page == nullptr || layer == nullptr) return;

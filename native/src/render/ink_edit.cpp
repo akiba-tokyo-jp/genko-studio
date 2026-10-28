@@ -23,6 +23,7 @@
 #include "render/page.hpp"
 #include "render/page_pixels.hpp"
 #include "render/png.hpp"
+#include "render/layer_masks.hpp"
 #include "render/raster.hpp"
 
 namespace genko::render::ink_edit {
@@ -494,6 +495,17 @@ std::string erase(const core::Page& page, const core::Layer& layer, const core::
             continue;
         }
         out.set_alpha(i, std::max(0.0, out.alpha(i) - m / 255.0));
+    }
+    return out.take();
+}
+
+std::string erase_masked(const core::Page& page, const core::Layer& layer, const std::function<Image(Size, int)>& mask_of) {
+    Inks out = layer_inks(layer);
+    const Grid g = grid_of(page, out.p.width, out.p.height);
+    const std::string taken = on_raster(mask_of(g.page, g.dpi), g).tobytes();
+    for (std::size_t i = 0; i < taken.size(); ++i) {
+        const int m = static_cast<unsigned char>(taken[i]);
+        if (m != 0) out.set_alpha(i, std::max(0.0, out.alpha(i) - m / 255.0));
     }
     return out.take();
 }
@@ -973,7 +985,11 @@ Lending::Lending(core::Document& doc, std::size_t at, std::string_view op, const
             const auto to = text_at(args, "to");
             if (id && to && *to == "paint" && by_id(*id) != nullptr) {
                 merge.target = *id;
-                merge.layers = {as_ground(*by_id(*id))};
+                core::Layer ground = as_ground(*by_id(*id));
+                // (PC4 E6: 描画レイヤーに変換 keeps the layer's style on it, as on an RGB page — its effects not drawn into
+                // its inks as well: they would show twice)
+                ground.style.reset();
+                merge.layers = {ground};
             }
         }
         if (!merge.layers.empty()) {
@@ -1033,7 +1049,8 @@ void Lending::take_back(core::Document& doc) const {
                                 : std::find(ids_before_.begin(), ids_before_.end(), layer.id) == ids_before_.end())) {
                 // (the merge's layer — 8-bit or precise, as the op composited it —: what it composited, made again in
                 // inks; precise lines by the rules, as the page draws them)
-                InkPixels merged = composite_ink_layers(*before_, merge_->layers, raster::kWorkingDpi, &doc, merge_->paper);
+                // (at the finest grid of its pixel layers, 200 to 600 dpi: a picture opened finer than 200 keeps it; PC4 F-b)
+                InkPixels merged = composite_ink_layers(*before_, merge_->layers, layer_masks::grid_dpi(*before_), &doc, merge_->paper);
                 layer.ink_raster = nullptr;
                 made = std::move(merged);
                 layer.color_raster = nullptr;
@@ -1059,7 +1076,7 @@ void Lending::take_back(core::Document& doc) const {
                     drawn.strokes = core::empty_strokes();
                     drawn.shapes = core::vector::empty_shapes();
                     drawn.patches.assign(layer.patches.begin() + std::ptrdiff_t(lent->patches), layer.patches.end());
-                    raster::bake_vectors(page, drawn);
+                    raster::bake_vectors(page, drawn, &doc);
                     layer.raster_png = drawn.raster_png;
                     layer.patches.resize(lent->patches);
                 }

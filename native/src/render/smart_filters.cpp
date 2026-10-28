@@ -24,6 +24,7 @@
 #include "render/ink_filters.hpp"
 #include "render/layer_transform.hpp"
 #include "render/ops_adjust.hpp"
+#include "render/ops_filters.hpp"
 #include "render/page_internal.hpp"
 #include "render/png.hpp"
 #include "render/resample.hpp"
@@ -297,6 +298,34 @@ Json centre_through(const Json& params, const resample::Homography& h, double w,
     return out;
 }
 
+// PC4: a kind's places that are shares of the base box (core::FilterPlace::Kind::Centre) through the map, as a radial
+// blur's centre — in the settings, or in each object of the list holding them.
+Json shares_through(const std::vector<core::FilterPlace>& places, const Json& params, const resample::Homography& h, double w, double hh,
+                    double to_w, double to_h) {
+    Json out = params.is_object() ? params : Json::object();
+    if (!(w > 0) || !(hh > 0) || !(to_w > 0) || !(to_h > 0)) return out;
+    const auto one = [&](Json& object, const core::FilterPlace& place) {
+        if (!object.is_object()) return;
+        const auto share = [&](std::string_view key) {
+            const Json* v = core::get(object, key);
+            return v != nullptr && v->is_number() && !v->is_boolean() ? v->get<double>() : 0.5;
+        };
+        const auto [x, y] = h.apply(share(place.key) * w, share(place.key2) * hh);
+        if (!std::isfinite(x) || !std::isfinite(y)) return;
+        object[std::string(place.key)] = x / to_w;
+        object[std::string(place.key2)] = y / to_h;
+    };
+    for (const core::FilterPlace& place : places) {
+        if (place.kind != core::FilterPlace::Kind::Centre) continue;
+        if (place.within.empty()) {
+            one(out, place);
+        } else if (out.contains(place.within) && out[std::string(place.within)].is_array()) {
+            for (Json& item : out[std::string(place.within)]) one(item, place);
+        }
+    }
+    return out;
+}
+
 // A bending filter's lengths within what its op takes (brought onto the page, a few millionths past its edge: its own).
 Json within_bounds(std::string_view kind, Json params) {
     constexpr double kUnit = 25.4 / 200;  // (a working pixel)
@@ -328,6 +357,11 @@ Json through(std::string_view kind, const Json& params, const resample::Homograp
     const double pw = page.spec.width_mm.value(), ph = page.spec.height_mm.value();
     if (kind == "radial_blur" || kind == "zoom_blur") {
         return onto_page ? centre_through(params, h, box.first, box.second, pw, ph) : centre_through(params, h, pw, ph, box.first, box.second);
+    }
+    if (const core::FilterInfo* info = core::filter_info(kind); info != nullptr && !info->places.empty()) {  // (PC4: by its table)
+        const Json shares = onto_page ? shares_through(info->places, params, h, box.first, box.second, pw, ph)
+                                      : shares_through(info->places, params, h, pw, ph, box.first, box.second);
+        return identity(h) ? shares : core::smart::map_places(info->places, shares, map_of(h));
     }
     if (identity(h)) return params;  // (placed as it is: the same numbers)
     const Json out = core::smart::map_filter_places(kind, params, map_of(h));
@@ -586,7 +620,9 @@ std::size_t push_filter(core::Document& doc, const core::Page& page, core::Layer
                         const std::optional<Json>& area) {
     if (layer.kind != core::LayerKind::Smart || !layer.smart || !layer.smart->is_object()) throw core::OpError("layer " + layer.id + " is not a smart object");
     if (layer.locked) throw core::OpError("the layer is locked");
-    const Json stored = settled(doc, page, kind, params);
+    // (PC4 D2: a filter's file — 置き換え's map given as data or a layer — made the book's first: design 2.6)
+    // (PC4 D6: レンズ補正's and 広角補正's focal length from the smart object's picture's EXIF, kept as resolved)
+    const Json stored = settled(doc, page, kind, resolve_filter(doc, page, &layer, kind, keep_filter_files(doc, page, kind, params)));
     const Json* now = core::get(*layer.smart, "filters");
     Json filters = now != nullptr && now->is_array() ? *now : Json::array();
     if (filters.size() >= core::smart::kFiltersMax)

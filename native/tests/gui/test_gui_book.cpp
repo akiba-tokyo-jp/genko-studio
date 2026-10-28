@@ -430,17 +430,16 @@ private slots:
                               QStringLiteral("原稿用紙の設定…"), QStringLiteral("絵柄を選ぶ…"), QStringLiteral("チャットでの承認…"), QStringLiteral("ノンブルの設定…"), QStringLiteral("このページのノンブルを隠す／出す"),
                               QStringLiteral("表紙・カバーを足す…"), QStringLiteral("このページの担当…"), QStringLiteral("アニメーション（タイムライン）"), QStringLiteral("色モード"),
                               QStringLiteral("|"), QStringLiteral("コマ")}));
-        // ファイル: after the scans, before the export (書き出し and 印刷, M4③b: test_gui_output; PC3 C-a's パスを Illustrator へ…
-        // between them)
+        // ファイル: after the scans (PC4 F-0: Photoshop's order — the export in 書き出し ▸ before them, ファイル情報… after them:
+        // test_gui_actions' theFileMenuIsPhotoshops)
         QMenu* file = top_menu(s.window.get(), QStringLiteral("ファイル"));
         QVERIFY(file != nullptr);
         const QStringList in_file = menu_texts(file);
         const int scanner = static_cast<int>(in_file.indexOf(QStringLiteral("スキャナーから取り込む…")));
         QVERIFY(scanner > 0);
-        QCOMPARE(in_file.mid(scanner - 1, 8), QStringList({QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"),
+        QCOMPARE(in_file.mid(scanner - 1, 7), QStringList({QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"),
                                                            QStringLiteral("ほかの原稿のページを取り込む…"), QStringLiteral("PSD をレイヤーのまま読み込む…"),
-                                                           QStringLiteral("書き出し…"), QStringLiteral("パスを Illustrator へ…"), QStringLiteral("印刷…"),
-                                                           QStringLiteral("|")}));
+                                                           QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|")}));
     }
 
     // 次のページと見開きにする／解除: with the next page when they face each other; else, when the page before faces it,
@@ -1808,7 +1807,7 @@ private slots:
             };
             QVERIFY(s.trigger("act_merge_book"));
             QVERIFY(!asked);
-            QCOMPARE(s.window->last_notice(), QStringLiteral("取り込む前に、この原稿を保存します（ファイル → 別の場所に保存）"));
+            QCOMPARE(s.window->last_notice(), QStringLiteral("取り込む前に、この原稿を保存します（ファイル → 別名で保存…）"));
         }
         Studio s(2);
         const auto before = s.session->snapshot();

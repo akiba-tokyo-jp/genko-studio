@@ -10,6 +10,7 @@
 #include <cmath>
 #include <functional>
 #include <map>
+#include <set>
 #include <unordered_map>
 
 #include "core/channels.hpp"
@@ -20,6 +21,7 @@
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
 #include "core/smart.hpp"
+#include "formats/file_xmp.hpp"
 #include "formats/export.hpp"
 #include "formats/output.hpp"
 #include "formats/pillow_save.hpp"
@@ -32,9 +34,14 @@
 #include "render/not_yet_ported.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/psd_keep.hpp"
 #include "render/psd_smart.hpp"
 #include "render/psd_paths.hpp"
 #include "render/psd_shapes.hpp"
+#include "render/pat.hpp"
+#include "core/layer_styles.hpp"
+#include "core/patterns.hpp"
+#include "render/psd_effects.hpp"
 #include "render/psd_text.hpp"
 #include "render/smart.hpp"
 #include "render/text/balloons.hpp"
@@ -78,6 +85,17 @@ std::uint32_t u32_of(std::uint64_t n) {
     return static_cast<std::uint32_t>(n);
 }
 
+// psd-keep@1 (PC4 F-d): a block or resource the book keeps of a PSD — in memory (a book opened from a file) or among its
+// assets —, null when it is not there (a book missing one opens read-only: it is never written so)
+core::Bytes kept_psd_file(const core::Document& doc, const std::string& ref) {
+    if (ref.empty()) return nullptr;
+    if (const auto held = doc.native_files.find(ref); held != doc.native_files.end() && held->second) return held->second;
+    if (!doc.asset_dir || !storage::AssetStore::is_ref(ref)) return nullptr;
+    auto bytes = storage::AssetStore(*doc.asset_dir).get_bytes(ref, core::kPsdBlockSuffix, storage::kAssetMaxBytes);
+    if (!bytes) return nullptr;
+    return std::make_shared<const std::string>(std::move(*bytes));
+}
+
 // Warp Text (PC3 C-c, the style's native_warp) as the text layer's warp: Photoshop's style by its name ("flag" →
 // "warpFlag"), the bend (the style's own 50 when none is given, as the letters are drawn) and the distortions, along or
 // across.
@@ -96,10 +114,10 @@ void with_warp(render::psd::TextLayer& text, const core::StoryLine& line) {
     text.warp_vertical = w.contains("vertical") && w["vertical"].is_boolean() && w["vertical"].get<bool>();
 }
 
-// psd._packbits_rows of one channel ("L"): each row's byte count (as numpy's ">u2": modulo 65536) and the packed
-// bytes. Runs of 3 or more equal bytes are repeat packets, the rest literal packets, 128 bytes at most each; a run never
-// crosses a row.
-void packbits_rows(const Image& channel, std::string& counts, std::string& packed) {
+// psd._packbits_rows of one channel ("L"): each row's byte count (as numpy's ">u2": modulo 65536; PC4 F-d, `psb`: a
+// PSB's 4 bytes) and the packed bytes. Runs of 3 or more equal bytes are repeat packets, the rest literal packets, 128
+// bytes at most each; a run never crosses a row.
+void packbits_rows(const Image& channel, std::string& counts, std::string& packed, bool psb = false) {
     const int width = channel.width();
     const std::string pixels = channel.tobytes();
     for (int y = 0; y < channel.height(); ++y) {
@@ -134,14 +152,15 @@ void packbits_rows(const Image& channel, std::string& counts, std::string& packe
             }
             at = seg_end;
         }
-        put_u16(counts, static_cast<std::uint32_t>(size % 65536));
+        if (psb) put_u32(counts, static_cast<std::uint32_t>(size));
+        else put_u16(counts, static_cast<std::uint32_t>(size % 65536));
     }
 }
 
 // psd._rle: compression 1, every row's count, the packed rows.
-std::string rle(const Image& channel) {
+std::string rle(const Image& channel, bool psb = false) {
     std::string counts, packed;
-    packbits_rows(channel.mode() == "L" ? channel : channel.convert("L"), counts, packed);
+    packbits_rows(channel.mode() == "L" ? channel : channel.convert("L"), counts, packed, psb);
     std::string out;
     put_u16(out, 1);
     return out + counts + packed;
@@ -211,6 +230,9 @@ std::string blend_key(const std::string& blend) {
 }
 
 // psd._layer_records, one layer at a time: its record and its channels' data.
+// A tagged block of a layer record (below).
+std::string tagged(std::string_view key, std::string payload);
+
 class Records {
 public:
     // (`ink`: a CMYK, Lab or grey page's PSD — its layers in the page's inks; `rgb`: an RGB page of a colour model's —
@@ -240,6 +262,60 @@ public:
 
     // (PC3 B2, masks@1) the page its layers are of: a layer's mask of masks@1 is written with its flags and parameters
     void masks_of(const core::Page& page) { page_ = &page; }
+    // (PC4 F-d) a PSB: its channels' lengths and the layer info's of 8 bytes, its rows' counts of 4, a long key's block's
+    // length of 8
+    void psb(bool on) { psb_ = on; }
+    // psd-keep@1 (PC4 F-d): the next record is of the page's layer `id` — what it keeps of a PSD (its blocks after the
+    // ones this writer makes, its blending ranges, its layer id: the first layer of an id only) and its locks go with it,
+    // once a layer (a layer of none: written as before)
+    void note_keep(const std::string& id) {
+        keep_ = nullptr;
+        if (page_ == nullptr || id.empty()) return;
+        for (const core::Layer& own : page_->layers) {
+            if (own.id != id) continue;
+            if (own.native_psd && kept_layers_.insert(id).second) keep_ = &own;
+            return;
+        }
+    }
+    // patterns@1 (PC4 E3): the book whose patterns its pattern fills name (their names, unique ids and dpi)
+    void patterns_of(const core::Document& book) { book_ = &book; }
+    // layer-styles@1 (PC4 E6): the next record is of the page's layer `id` — its style goes with it: its effects as an lfx2
+    // block (unless it keeps the effects of the PSD it was read from, unchanged since: those written back as they were),
+    // its fill opacity as iOpa, its Blend If as the record's blending ranges
+    void note_style(const render::PageLayer& layer) {
+        style_ = nullptr;
+        if (!layer.section.empty()) return;  // (a pen layer's group: its layers' records carry its style)
+        if (layer.styled != nullptr && layer.id.empty()) {  // (a placed picture's, the ink layer's lines: review P2-6)
+            if (layer.styled->style) style_ = layer.styled;
+            return;
+        }
+        const std::string& id = layer.id;
+        if (page_ == nullptr || id.empty()) return;
+        for (const core::Layer& own : page_->layers) {
+            if (own.id != id) continue;
+            if (own.style) style_ = &own;
+            return;
+        }
+    }
+    std::string style_blocks() const {
+        if (style_ == nullptr) return {};
+        const core::Json& style = *style_->style;
+        std::string out;
+        const bool kept_effects = style_->native_psd && std::any_of(style_->native_psd->blocks.begin(), style_->native_psd->blocks.end(),
+                                                                    [](const auto& block) { return core::psd_effect_key(block.first); });
+        if (!kept_effects) {
+            render::psd_shapes::Canvas canvas;
+            canvas.width_mm = paper_[0];
+            canvas.height_mm = paper_[1];
+            canvas.width_px = size_.width;
+            canvas.height_px = size_.height;
+            canvas.dpi = paper_[0] > 0 ? size_.width / (paper_[0] / 25.4) : 72.0;
+            canvas.book = book_;
+            if (const std::string payload = render::psd_effects::lfx2(style, canvas); !payload.empty()) out += tagged("lfx2", payload);
+        }
+        if (const double fill = core::style_fill_opacity(style); fill < 1.0) out += tagged("iOpa", render::psd_effects::iopa(fill));
+        return out;
+    }
     // The next record's mask settings: the page layer's mask, when it has masks@1's (one not used is written too, as
     // Photoshop keeps it, disabled); none for a mask without them (written as before).
     void note_mask(render::PageLayer& layer) {
@@ -265,7 +341,20 @@ public:
         canvas.width_px = size_.width;
         canvas.height_px = size_.height;
         canvas.dpi = paper_[0] > 0 ? size_.width / (paper_[0] / 25.4) : 72.0;
+        canvas.book = book_;  // (patterns@1, PC4 E3)
         return render::psd_shapes::blocks(part, canvas);
+    }
+    // patterns@1 (PC4 E3): a pattern fill layer's PtFl block on this canvas
+    std::string pattern_blocks(const render::PageLayer& layer) const {
+        if (layer.pattern == nullptr) return {};
+        render::psd_shapes::Canvas canvas;
+        canvas.width_mm = paper_[0];
+        canvas.height_mm = paper_[1];
+        canvas.width_px = size_.width;
+        canvas.height_px = size_.height;
+        canvas.dpi = paper_[0] > 0 ? size_.width / (paper_[0] / 25.4) : 72.0;
+        canvas.book = book_;
+        return tagged("PtFl", render::psd_shapes::pattern_block(*layer.pattern, canvas));
     }
 
     void add(render::PageLayer&& layer) {
@@ -276,13 +365,17 @@ public:
             return;
         }
         note_mask(layer);  // (PC3 B2: its mask's masks@1 settings — a pen layer's group's too)
+        note_keep(layer.id);  // (psd-keep@1, PC4 F-d)
+        note_style(layer);  // (layer-styles@1, PC4 E6: a layer's own record)
         if (layer.section == "group") {
             section(layer.name, 1, blend_key(layer.settings ? layer.blend : std::string("normal")), layer.settings ? layer.opacity : 1.0,
                     layer.mask ? &*layer.mask : nullptr, vector_block(layer.vector_mask));
             return;
         }
         if (layer.shape != nullptr) flags_ = 0x18;  // (bits 3 and 4: its pixel data is not what it shows)
-        const std::string blocks = vector_block(layer.vector_mask) + placed_blocks(layer) + (layer.shape != nullptr ? shape_blocks(*layer.shape) : std::string());
+        const std::string blocks = vector_block(layer.vector_mask) + placed_blocks(layer) + (layer.shape != nullptr ? shape_blocks(*layer.shape) : std::string()) +
+                                   pattern_blocks(layer) +  // (patterns@1, PC4 E3)
+                                   style_blocks();          // (layer-styles@1, PC4 E6)
         const Image rgba = layer.image.mode() == "RGBA" ? std::move(layer.image) : layer.image.convert("RGBA");
         if (ink_) {  // (its colours by the page's rules)
             add_inks(layer.name, render::ink_picture(rgba, *ink_).values, ink_->space, ink_->depth, layer.settings ? layer.opacity : 1.0,
@@ -355,12 +448,12 @@ public:
         info += data_;
         if (info.size() % 2) info += '\0';
         std::string payload;
-        put_u32(payload, u32_of(info.size()));
+        put_length(payload, info.size());
         payload += info;
         put_u32(payload, 0);  // no global layer mask
         payload += global;
         std::string out;
-        put_u32(out, u32_of(payload.size()));
+        put_length(out, payload.size());
         return out + payload;
     }
 
@@ -368,9 +461,9 @@ private:
     void write(const std::string& name, const Image& crop, const render::Box& box, double opacity_given, const std::string& blend, bool clip,
                const Image* mask, const std::string& blocks) {
         const std::vector<Image> bands = crop.split();
-        std::vector<std::pair<int, std::string>> channels{{-1, rle(bands[3])}, {0, rle(bands[0])}, {1, rle(bands[1])}, {2, rle(bands[2])}};
-        record(name, std::move(channels), box, opacity_given, blend, clip, mask ? std::optional<std::string>(rle(mask->convert("L").resize(size_))) : std::nullopt,
-               blocks);
+        std::vector<std::pair<int, std::string>> channels{{-1, rle(bands[3], psb_)}, {0, rle(bands[0], psb_)}, {1, rle(bands[1], psb_)}, {2, rle(bands[2], psb_)}};
+        record(name, std::move(channels), box, opacity_given, blend, clip,
+               mask ? std::optional<std::string>(rle(mask->convert("L").resize(size_), psb_)) : std::nullopt, blocks);
     }
 
     // color-model@1: a layer of an RGB page of a colour model at its depth: its colours in the page's space (drawn in
@@ -468,8 +561,8 @@ private:
 
 public:
     // A plane of samples (rows of `width`, big-endian at 16 bits) as a layer channel's data: 8 bits RLE, 16 raw.
-    static std::string packed_plane(const std::string& bytes, int width, int height, int depth) {
-        if (depth == 8) return rle(Image::frombytes("L", render::Size{width, height}, bytes));
+    std::string packed_plane(const std::string& bytes, int width, int height, int depth) const {
+        if (depth == 8) return rle(Image::frombytes("L", render::Size{width, height}, bytes), psb_);
         std::string out;
         put_u16(out, 0);
         return out + bytes;
@@ -544,7 +637,7 @@ private:
         put_u16(records_, static_cast<std::uint32_t>(channels.size()));
         for (const auto& [id, packed] : channels) {
             put_u16(records_, static_cast<std::uint32_t>(static_cast<std::int16_t>(id)) & 0xffff);
-            put_u32(records_, u32_of(packed.size()));
+            put_length(records_, packed.size());
         }
         const auto opacity = static_cast<unsigned>(std::clamp<std::int64_t>(core::py_round_int(255 * opacity_given), 0, 255));
         records_ += "8BIM" + blend;
@@ -554,8 +647,21 @@ private:
         flags_ = 0;
         put_u8(records_, 0);
         std::string extra = mask_data;
-        put_u32(extra, 0);
+        const core::Layer* keep = std::exchange(keep_, nullptr);  // (psd-keep@1, PC4 F-d: its blending ranges and blocks kept)
+        const core::Layer* styled = std::exchange(style_, nullptr);  // (layer-styles@1, PC4 E6: its Blend If)
+        const core::Json* blend_if = styled != nullptr ? core::get(*styled->style, "blend_if") : nullptr;
+        // (the ranges the file had, as they were, while they say the style's Blend If — Photoshop may write more channels'
+        // pairs than this writer does —; else the style's)
+        std::string ranges = keep != nullptr ? kept_ranges(*keep) : std::string();
+        if (styled != nullptr) {
+            const core::Json now = blend_if != nullptr ? *blend_if : core::Json::array();
+            if (ranges.empty() || !core::same_json_unordered(render::psd_effects::blend_if_of(ranges, channel_names()), now))
+                ranges = blend_if != nullptr ? render::psd_effects::ranges_of(*blend_if, channel_names()) : std::string();
+        }
+        put_u32(extra, u32_of(ranges.size()));
+        extra += ranges;
         extra += pascal(name) + unicode_name(name) + blocks;
+        if (keep != nullptr) extra += kept_blocks(*keep, blocks);
         put_u32(records_, u32_of(extra.size()));
         records_ += extra;
         for (const auto& [id, packed] : channels) data_ += packed;
@@ -585,11 +691,11 @@ private:
         put_u16(records_, static_cast<std::uint32_t>(colours + 1 + (mask_plane ? 1 : 0)));
         for (int id = -1; id < colours; ++id) {
             put_u16(records_, static_cast<std::uint32_t>(static_cast<std::int16_t>(id)) & 0xffff);
-            put_u32(records_, 2);
+            put_length(records_, 2);
         }
         if (mask_plane) {
             put_u16(records_, static_cast<std::uint32_t>(static_cast<std::int16_t>(-2)) & 0xffff);
-            put_u32(records_, u32_of(mask_plane->size()));
+            put_length(records_, mask_plane->size());
         }
         records_ += "8BIM";
         records_ += blend;
@@ -598,7 +704,10 @@ private:
         put_u8(records_, 0x18);  // (flags: visible; Photoshop's bits 3 and 4 — its pixels do not show)
         put_u8(records_, 0);
         std::string extra = mask_data_of(mask_plane.has_value());  // (a pen layer's mask settings and vector mask's too)
-        put_u32(extra, 0);
+        const core::Layer* keep = type == 3 ? nullptr : std::exchange(keep_, nullptr);  // (psd-keep@1, PC4 F-d: a group's own)
+        const std::string ranges = keep != nullptr ? kept_ranges(*keep) : std::string();
+        put_u32(extra, u32_of(ranges.size()));
+        extra += ranges;
         extra += pascal(name) + unicode_name(name) + blocks;
         std::string divider;
         put_u32(divider, type);
@@ -609,12 +718,132 @@ private:
         extra += "8BIMlsct";
         put_u32(extra, static_cast<std::uint32_t>(divider.size()));
         extra += divider;
+        if (keep != nullptr) extra += kept_blocks(*keep, blocks + "8BIMlsct");
         put_u32(records_, u32_of(extra.size()));
         records_ += extra;
         for (int i = 0; i <= colours; ++i) put_u16(data_, 0);  // (each channel raw, with nothing)
         if (mask_plane) data_ += *mask_plane;
         ++count_;
     }
+
+    // (PC4 F-d) a length of the layer info or of a channel: 8 bytes in a PSB
+    void put_length(std::string& out, std::uint64_t n) const {
+        if (psb_) {
+            put_u32(out, static_cast<std::uint32_t>(n >> 32));
+            put_u32(out, static_cast<std::uint32_t>(n & 0xffffffffu));
+        } else {
+            put_u32(out, u32_of(n));
+        }
+    }
+
+    // psd-keep@1 (PC4 F-d): a block the book keeps (kept_psd_file)
+    core::Bytes kept_file(const std::string& ref) const { return book_ != nullptr ? kept_psd_file(*book_, ref) : nullptr; }
+
+    // The kind of colour mode a file of Photoshop's mode number is (grey: bitmap, grey, duotone) and the one written.
+    static int mode_kind(int mode) { return mode == 0 || mode == 8 ? 1 : mode; }
+    int written_mode() const {
+        if (!ink_) return 3;
+        return ink_->space == core::InkSpace::Cmyk ? 4 : ink_->space == core::InkSpace::Gray ? 1 : 9;
+    }
+    // (the page's PSD: its version, mode and depth, when it keeps them)
+    const core::PsdFrom* page_from() const { return page_ != nullptr && page_->native_psd && page_->native_psd->from ? &*page_->native_psd->from : nullptr; }
+
+    // (PC4 E6) the colour channels of the file written, as Blend If names them
+    std::vector<std::string> channel_names() const {
+        if (!ink_) return {"red", "green", "blue"};
+        if (ink_->space == core::InkSpace::Cmyk) return {"cyan", "magenta", "yellow", "black"};
+        if (ink_->space == core::InkSpace::Lab) return {"lightness", "a", "b"};
+        if (ink_->space == core::InkSpace::Gray) return {"gray"};
+        return std::vector<std::string>(core::colour_channels(ink_->space), "-");
+    }
+
+    // Its blending ranges as kept, when they are ranges of this file's channels: read from a file of the mode written (its
+    // page says so: its native_psd's `from`), the composite's and each colour's at least (a file of another mode's are not
+    // written: their channels are other ones).
+    std::string kept_ranges(const core::Layer& own) const {
+        if (own.native_psd->ranges.empty()) return {};
+        const core::PsdFrom* from = page_from();
+        if (from == nullptr || mode_kind(from->mode) != written_mode()) return {};
+        const core::Bytes bytes = kept_file(own.native_psd->ranges);
+        const std::size_t colours = ink_ ? core::colour_channels(ink_->space) : 3;
+        if (!bytes || bytes->size() % 8 != 0 || bytes->size() / 8 < colours + 1) return {};
+        return *bytes;
+    }
+
+    // The keys of the tagged blocks this writer wrote in a record (`blocks`, as it wrote them).
+    std::set<std::string> keys_of(std::string_view blocks) const {
+        std::set<std::string> out;
+        std::size_t at = 0;
+        while (blocks.size() - at >= 12) {
+            const std::string_view sig = blocks.substr(at, 4);
+            if (sig != "8BIM" && sig != "8B64") break;
+            const std::string key(blocks.substr(at + 4, 4));
+            out.insert(key);
+            std::uint64_t length = 0;
+            std::size_t head = 12;
+            const auto byte = [&](std::size_t k) { return static_cast<std::uint64_t>(static_cast<unsigned char>(blocks[k])); };
+            if (psb_ && core::psb_long_key(key)) {
+                if (blocks.size() - at < 16) break;
+                for (std::size_t k = 0; k < 8; ++k) length = (length << 8) | byte(at + 8 + k);
+                head = 16;
+            } else {
+                for (std::size_t k = 0; k < 4; ++k) length = (length << 8) | byte(at + 8 + k);
+            }
+            if (length > blocks.size() - at - head) break;
+            at += head + static_cast<std::size_t>(length);
+            if (at < blocks.size() && length % 2 != 0 && blocks.substr(at, 4) != "8BIM" && blocks.substr(at, 4) != "8B64") ++at;
+        }
+        return out;
+    }
+
+    // Its layer id (lyid: the first layer of the id only), its locks (lspf: bit 0 transparency, 1 the pixels, 2 the
+    // position; all three as Photoshop's "lock all", bit 31 — the value read, its other bits too, while the three are as
+    // read) and the blocks it keeps, as they were read: none of a key this writer wrote in the record (`written`: its own
+    // is the one now), and none of the blocks whose insides a PSB holds otherwise (its long keys') into a file of the other
+    // version than the page's PSD was.
+    std::string kept_blocks(const core::Layer& own, std::string_view written) {
+        const core::PsdLayerKeep& keep = *own.native_psd;
+        const std::set<std::string> theirs = keys_of(written);
+        const core::PsdFrom* from = page_from();
+        const bool same_version = from != nullptr && (from->version == 2) == psb_;
+        std::string out;
+        if (keep.id && !theirs.contains("lyid") && used_ids_.insert(*keep.id).second) {
+            std::string id;
+            put_u32(id, static_cast<std::uint32_t>(*keep.id));
+            out += render::psd_keep::tagged_block("8BIM", "lyid", id, psb_, false);
+        }
+        std::uint32_t locks = own.lock_alpha && own.locked && own.lock_position
+                                  ? 0x80000000u
+                                  : (own.lock_alpha ? 1u : 0u) | (own.locked ? 2u : 0u) | (own.lock_position ? 4u : 0u);
+        for (const auto& [key, ref] : keep.blocks) {
+            if (key != "lspf") continue;
+            const core::Bytes bytes = kept_file(ref);
+            if (!bytes || bytes->size() < 4) continue;
+            std::uint32_t read = 0;
+            for (std::size_t k = 0; k < 4; ++k) read = (read << 8) | static_cast<unsigned char>((*bytes)[k]);
+            const bool all = (read & 0x80000000u) != 0;
+            const bool same = (all || (read & 1u) != 0) == own.lock_alpha && (all || (read & 2u) != 0) == own.locked &&
+                              (all || (read & 4u) != 0) == own.lock_position;
+            locks = same ? read : (read & ~0x80000007u) | locks;
+        }
+        if (locks != 0 && !theirs.contains("lspf")) {
+            std::string value;
+            put_u32(value, locks);
+            out += render::psd_keep::tagged_block("8BIM", "lspf", value, psb_, false);
+        }
+        for (const auto& [key, ref] : keep.blocks) {
+            if (key == "lspf" || key == "lyid" || theirs.contains(key)) continue;
+            if (core::psb_long_key(key) && !same_version) continue;
+            if (const core::Bytes bytes = kept_file(ref)) out += render::psd_keep::tagged_block("8BIM", key, *bytes, psb_, false);
+        }
+        return out;
+    }
+
+    bool psb_ = false;
+    const core::Layer* keep_ = nullptr;  // (the next record's layer and what it keeps: note_keep)
+    const core::Layer* style_ = nullptr;  // (the next record's layer and its style: note_style)
+    std::set<std::string> kept_layers_;  // (the layers whose kept blocks are written)
+    std::set<std::int64_t> used_ids_;    // (the layer ids written)
 
     render::Size size_;
     std::array<double, 2> paper_{0.0, 0.0};
@@ -628,6 +857,7 @@ private:
     std::optional<core::Mask> settings_;  // (the next record's mask settings: note_mask)
     std::optional<core::vector::VectorMask> vector_;  // (the next record's vector mask: vector_block)
     unsigned flags_ = 0;  // (the next record's flags: a shape layer's, pen-shapes@1)
+    const core::Document* book_ = nullptr;  // (patterns@1, PC4 E3)
 };
 
 // A tagged block of a layer record: its key, its length and its payload, padded to 4 bytes.
@@ -704,7 +934,11 @@ public:
                 const std::string block = key->get<std::string>();
                 if (const core::Bytes bytes = kept_bytes(episode_, raw->get<std::string>(), ".bin")) {
                     const auto read = render::psd::read_placed(block, *bytes);
-                    if (read && read->has_corners && read->uuid == uuid && same(read->corners, out.corners)) {
+                    // (PC4 D7, review P2-5: a block with Photoshop's smart filters only while they say what the layer
+                    // draws — Photoshop's picture still shown, or the filters read from it unchanged —; else this build's,
+                    // without them: the filters in the layer's pixels)
+                    const bool filters_hold = !read || !read->filters || core::get(*psd, "shown") != nullptr || core::smart::photoshop_filters_kept(layer);
+                    if (read && read->has_corners && read->uuid == uuid && same(read->corners, out.corners) && filters_hold) {
                         return tagged(block, *bytes) + (block == "PlLd" ? tagged("SoLd", render::psd::sold_block(out)) : tagged("PlLd", render::psd::plld_block(out)));
                     }
                 }
@@ -713,11 +947,12 @@ public:
         return tagged("SoLd", render::psd::sold_block(out)) + tagged("PlLd", render::psd::plld_block(out));
     }
 
-    // The global lnk2 block of the files written (none when there are none).
-    std::string global() const {
+    // The global lnk2 block of the files written (none when there are none). (PC4 F-d: a PSB's length of 8 bytes)
+    std::string global(bool psb = false) const {
         if (items_.empty()) return {};
         std::string out = "8BIMlnk2";
-        put_u32(out, u32_of(items_.size()));
+        if (psb) put_u32(out, static_cast<std::uint32_t>(static_cast<std::uint64_t>(items_.size()) >> 32));
+        put_u32(out, psb ? static_cast<std::uint32_t>(items_.size() & 0xffffffffu) : u32_of(items_.size()));
         return out + items_;
     }
 
@@ -819,6 +1054,7 @@ std::function<void(const core::Layer&)> adjustments(Records& records, const core
         if (auto made = psd_adjust_layer(layer, page, size, notes, &doc)) {
             made->blocks += records.vector_block(layer.vector_mask);  // (vector@1, PC3 C-a)
             if (made->mask) records.note_mask(layer);                  // (PC3 B2: its mask's masks@1 settings)
+            records.note_keep(layer.id);                               // (psd-keep@1, PC4 F-d)
             records.add_adjustment(*made);
         }
     };
@@ -1311,9 +1547,118 @@ std::string channel_samples(const core::Page&, const core::Channel& channel, ren
 
 // The merged picture's extra channels after its colour planes: 8 bits RLE (their rows' counts after the colours', their
 // packed rows after theirs), 16 and 32 raw.
-void put_channels_rle(const core::Page& page, render::Size size, std::string& counts, std::string& packed) {
+void put_channels_rle(const core::Page& page, render::Size size, std::string& counts, std::string& packed, bool psb = false) {
     for (const core::Channel& channel : psd_order(page.channels))
-        packbits_rows(Image::frombytes("L", size, channel_samples(page, channel, size, 8)), counts, packed);
+        packbits_rows(Image::frombytes("L", size, channel_samples(page, channel, size, 8)), counts, packed, psb);
+}
+
+// --- PSB and psd-keep@1 (PC4 F-d) -------------------------------------------------------------------------------------
+
+// The file's signature and version — a PSD's 1, a PSB's 2 — and the reserved bytes: the one start of every file written.
+std::string file_start(bool psb) {
+    std::string body = "8BPS";
+    put_u16(body, psb ? 2 : 1);
+    body.append(6, '\0');
+    return body;
+}
+
+// A length of the layer and mask information: 8 bytes in a PSB.
+void put_section_length(std::string& out, std::uint64_t n, bool psb) {
+    if (psb) put_u32(out, static_cast<std::uint32_t>(n >> 32));
+    put_u32(out, psb ? static_cast<std::uint32_t>(n & 0xffffffffu) : u32_of(n));
+}
+
+// A layer comps' or slices' resource is written back only while every layer read with it is on the page (its lyid kept).
+bool kept_layers_there(const core::Page& page) {
+    std::set<std::int64_t> here;
+    for (const core::Layer& layer : page.layers) {
+        if (layer.native_psd && layer.native_psd->id) here.insert(*layer.native_psd->id);
+    }
+    return std::all_of(page.native_psd->ids.begin(), page.native_psd->ids.end(), [&](std::int64_t id) { return here.contains(id); });
+}
+
+// A name kept as text (each byte's code point) as its bytes again.
+std::string latin1_bytes(const std::string& text) {
+    std::string out;
+    for (std::size_t at = 0; at < text.size();) {
+        const auto lead = static_cast<unsigned char>(text[at]);
+        if (lead < 0x80) {
+            out += text[at++];
+        } else if ((lead & 0xE0) == 0xC0 && at + 1 < text.size()) {
+            const unsigned cp = ((lead & 0x1Fu) << 6) | (static_cast<unsigned char>(text[at + 1]) & 0x3Fu);
+            out += static_cast<char>(cp < 0x100 ? cp : '?');
+            at += 2;
+        } else {
+            out += '?';
+            ++at;
+            while (at < text.size() && (static_cast<unsigned char>(text[at]) & 0xC0) == 0x80) ++at;
+        }
+    }
+    return out;
+}
+
+// The page's resources (`sized_resources`: their length and blocks) and after them the image resources the page keeps
+// from its PSD — layer comps and slices while their layers are there —, their length again.
+std::string with_kept(const std::string& sized_resources, const core::Page& page, const core::Document& doc) {
+    // (layer-styles@1, PC4 E6: a page with a layer's style says the book's global light — 1037 its angle, 1049 its
+    // altitude —, in place of the ones its PSD had)
+    const bool styled = std::any_of(page.layers.begin(), page.layers.end(), [](const core::Layer& l) { return l.style.has_value(); });
+    if (!styled && (!page.native_psd || page.native_psd->resources.empty())) return sized_resources;
+    const bool layers_there = kept_layers_there(page);
+    std::string blocks = sized_resources.substr(4);
+    if (styled) {
+        const std::array<double, 2> light = core::global_light(doc);
+        blocks += image_resource(1037, render::psd_effects::light_resource(light[0]));
+        blocks += image_resource(1049, render::psd_effects::light_resource(light[1]));
+    }
+    for (const core::PsdResource& r : page.native_psd ? page.native_psd->resources : std::vector<core::PsdResource>{}) {
+        if (styled && (r.id == 1037 || r.id == 1049)) continue;
+        if (core::psd_resource_names_layers(r.id) && !layers_there) continue;
+        const core::Bytes data = kept_psd_file(doc, r.ref);
+        if (!data) continue;
+        std::string block = "8BIM";
+        put_u16(block, static_cast<std::uint32_t>(r.id));
+        std::string name = latin1_bytes(r.name);
+        if (name.size() > 255) name.resize(255);
+        block += static_cast<char>(name.size());
+        block += name;
+        if ((name.size() + 1) % 2) block += '\0';
+        put_u32(block, u32_of(data->size()));
+        block += *data;
+        if (data->size() % 2) block += '\0';
+        blocks += block;
+    }
+    std::string out;
+    put_u32(out, u32_of(blocks.size()));
+    return out + blocks;
+}
+
+// The global blocks this writer makes — `linked` (its linked files) and `patterns` (its pattern block: render::pat's
+// global_block, "8BIM", its key, its 4-byte length and its payload, or none) — and after them those the page keeps from
+// its PSD; a kept pattern block of the key of the one made is one block with it: the made one's patterns, then the kept
+// ones it does not have.
+std::string with_kept_globals(const std::string& linked, std::string patterns, const core::Page& page, const core::Document& doc, bool psb) {
+    if (!page.native_psd || page.native_psd->globals.empty()) return linked + patterns;
+    // (a PSB's long keys' blocks hold other insides in a PSD: written only into a file of the version they were read from)
+    const bool same_version = page.native_psd->from && (page.native_psd->from->version == 2) == psb;
+    std::string kept;
+    for (const core::PsdGlobal& g : page.native_psd->globals) {
+        if (core::psb_long_key(g.key) && !same_version) continue;
+        const core::Bytes data = kept_psd_file(doc, g.ref);
+        if (!data) continue;
+        if (core::psd_pattern_key(g.key) && patterns.size() >= 12 && patterns.compare(4, 4, g.key) == 0) {
+            std::vector<render::psd_keep::PatternEntry> entries = render::psd_keep::pattern_entries(std::string_view(patterns).substr(12));
+            std::set<std::string> ids;
+            for (const auto& e : entries) ids.insert(e.id);
+            for (const auto& e : render::psd_keep::pattern_entries(*data)) {
+                if (!ids.contains(e.id)) entries.push_back(e);
+            }
+            patterns = render::psd_keep::tagged_block("8BIM", g.key, render::psd_keep::pattern_payload(entries), psb, true);
+            continue;
+        }
+        kept += render::psd_keep::tagged_block(g.signature, g.key, *data, psb, true);
+    }
+    return linked + patterns + kept;
 }
 
 // The render's options for the merged picture: its spots left out (they are channels of their own).
@@ -1330,7 +1675,7 @@ render::RenderOptions merged_options(const core::Page& page) {
 // color-model@1 (COLOR-03): a grey page's in Grayscale (mode 1), its lightness, its profile embedded; 32 bits as floats
 // for grey — a CMYK or Lab page of 32 bits at 16 (Photoshop has no 32-bit CMYK or Lab: said in the export's notes).
 std::string page_psd_inks(const core::Document& episode, const core::Page& page, std::int64_t dpi, const PsdText& text, PsdTextReport* report,
-                          int depth) {
+                          int depth, bool psb) {
     core::PageColor color = *page.color;
     if (color.depth == 32 && color.space != core::InkSpace::Gray) color.depth = 16;  // (the depth written)
     const bool grey = color.space == core::InkSpace::Gray;
@@ -1342,7 +1687,9 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
     const core::InkPixels& merged = halved ? *halved : *made.inks;
     const render::Size size{static_cast<int>(merged.width), static_cast<int>(merged.height)};
     Records records(size, color);
+    records.psb(psb);  // (PC4 F-d)
     records.masks_of(page);                    // (PC3 B2)
+    records.patterns_of(episode);  // (patterns@1, PC4 E3)
     PlacedLayers placed(episode, dpi, depth);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
@@ -1352,6 +1699,7 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
             return;
         }
         records.note_mask(layer);  // (PC3 B2: its mask's masks@1 settings)
+        records.note_keep(layer.id);  // (psd-keep@1, PC4 F-d)
         const std::vector<double> values = layer.inks ? *layer.inks : render::ink_picture(layer.image, color).values;
         records.add_inks(layer.name, values, color.space, color.depth, layer.settings ? layer.opacity : 1.0,
                          layer.settings ? layer.blend : std::string("normal"), layer.settings && layer.clip, layer.mask ? &*layer.mask : nullptr,
@@ -1367,18 +1715,18 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
         render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true);
     }
     const unsigned n = core::colour_channels(color.space);
-    std::string body = "8BPS";
-    put_u16(body, 1);
-    body.append(6, '\0');
+    std::string body = file_start(psb);
     put_u16(body, n + static_cast<unsigned>(page.channels.size()));
     put_u32(body, merged.height);
     put_u32(body, merged.width);
     put_u16(body, static_cast<std::uint32_t>(color.depth));
     put_u16(body, color.space == core::InkSpace::Cmyk ? 4 : grey ? 1 : 9);
     put_u32(body, 0);  // (no colour mode data)
-    body += with_channels(resources_with_icc(dpi, color.space != core::InkSpace::Lab && color.icc ? std::string_view(*color.icc) : std::string_view()),
-                          page, n);
-    body += records.finish(placed.global());
+    body += with_kept(with_channels(resources_with_icc(dpi, color.space != core::InkSpace::Lab && color.icc ? std::string_view(*color.icc) : std::string_view()),
+                                    page, n),
+                      page, episode);  // (PC4 F-d: psd-keep@1)
+    body += records.finish(with_kept_globals(placed.global(psb), render::pat::global_block(episode, core::patterns_on(page), color.depth), page, episode,
+                                             psb));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
     // the merged picture: each colour plane (CMYK inverted); 8 bits RLE (every row's count first), 16 and 32 raw
     const unsigned all = merged.channels();
     const auto plane = [&](unsigned c) {
@@ -1397,8 +1745,8 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
     };
     if (color.depth == 8) {
         std::string counts, packed;
-        for (unsigned c = 0; c < n; ++c) packbits_rows(Image::frombytes("L", size, plane(c)), counts, packed);
-        put_channels_rle(page, size, counts, packed);
+        for (unsigned c = 0; c < n; ++c) packbits_rows(Image::frombytes("L", size, plane(c)), counts, packed, psb);
+        put_channels_rle(page, size, counts, packed, psb);
         put_u16(body, 1);
         body += counts;
         body += packed;
@@ -1414,7 +1762,7 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
 // profile (or sRGB's) embedded: its layers in its values (what is drawn in sRGB converted into its space), the merged
 // picture its values (render_page's precise: what is drawn over the layers in 8 bits taken into them).
 std::string page_psd_rgb(const core::Document& episode, const core::Page& page, std::int64_t dpi, const PsdText& text, PsdTextReport* report,
-                         int depth_of_contents) {
+                         int depth_of_contents, bool psb) {
     const core::RgbMode& mode = *page.rgb;
     const int depth = mode.depth;
     const render::RenderOptions options = merged_options(page);
@@ -1422,7 +1770,9 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
     const core::ColorRasterView merged(made.values);
     const render::Size size{static_cast<int>(merged.width()), static_cast<int>(merged.height())};
     Records records(size, std::nullopt, RgbOut{depth, render::RgbSpace::of(page)});
+    records.psb(psb);  // (PC4 F-d)
     records.masks_of(page);                                 // (PC3 B2)
+    records.patterns_of(episode);  // (patterns@1, PC4 E3)
     PlacedLayers placed(episode, dpi, depth_of_contents);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
@@ -1436,17 +1786,16 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
     } else {
         render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true);
     }
-    std::string body = "8BPS";
-    put_u16(body, 1);
-    body.append(6, '\0');
+    std::string body = file_start(psb);
     put_u16(body, 3 + static_cast<std::uint32_t>(page.channels.size()));
     put_u32(body, merged.height());
     put_u32(body, merged.width());
     put_u16(body, static_cast<std::uint32_t>(depth));
     put_u16(body, 3);
     put_u32(body, 0);  // (no colour mode data)
-    body += with_channels(resources_with_icc(dpi, detail::rgb_icc(mode)), page, 3);
-    body += records.finish(placed.global());
+    body += with_kept(with_channels(resources_with_icc(dpi, detail::rgb_icc(mode)), page, 3), page, episode);  // (PC4 F-d: psd-keep@1)
+    body += records.finish(with_kept_globals(placed.global(psb), render::pat::global_block(episode, core::patterns_on(page), depth), page, episode,
+                                             psb));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
     // the merged picture: 8 bits RLE (every row's count first), 16 and 32 raw
     const std::size_t pixels = std::size_t(merged.width()) * merged.height();
     const auto plane = [&](unsigned c) {
@@ -1456,8 +1805,8 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
     };
     if (depth == 8) {
         std::string counts, packed;
-        for (unsigned c = 0; c < 3; ++c) packbits_rows(Image::frombytes("L", size, plane(c)), counts, packed);
-        put_channels_rle(page, size, counts, packed);
+        for (unsigned c = 0; c < 3; ++c) packbits_rows(Image::frombytes("L", size, plane(c)), counts, packed, psb);
+        put_channels_rle(page, size, counts, packed, psb);
         put_u16(body, 1);
         body += counts;
         body += packed;
@@ -1476,16 +1825,14 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
 // each plate a channel dark where its ink is, as a spot channel: max − density; names in 1006 and 1045, colours and
 // solidity in 1077 as spots), its alpha and spot channels after them. A bitmap or indexed page's channels are not
 // written (Photoshop has none in those modes: said in the notes); a multichannel page of 32 bits at 16.
-std::string page_psd_flat(const core::Document& episode, const core::Page& page, std::int64_t dpi) {
+std::string page_psd_flat(const core::Document& episode, const core::Page& page, std::int64_t dpi, bool psb) {
     render::RenderOptions options = merged_options(page);
     const bool indexed = !page.color;
     const bool bitmap = page.color && page.color->bitmap;
     options.inks = !indexed;
     const render::RenderResult made = render::render_page(page, static_cast<int>(dpi), options, &episode);
     const render::Size size = made.image.size();
-    std::string body = "8BPS";
-    put_u16(body, 1);
-    body.append(6, '\0');
+    std::string body = file_start(psb);
     if (bitmap) {
         const core::InkPixels& merged = *made.inks;
         put_u16(body, 1);
@@ -1494,8 +1841,8 @@ std::string page_psd_flat(const core::Document& episode, const core::Page& page,
         put_u16(body, 1);
         put_u16(body, 0);
         put_u32(body, 0);  // (no colour mode data)
-        body += with_paths(resources(dpi), page);
-        put_u32(body, 0);  // (no layers)
+        body += with_kept(with_paths(resources(dpi), page), page, episode);  // (PC4 F-d: psd-keep@1)
+        put_section_length(body, 0, psb);  // (no layers)
         put_u16(body, 0);  // (raw)
         const std::size_t row = (std::size_t(merged.width) + 7) / 8;
         for (std::uint32_t y = 0; y < merged.height; ++y) {
@@ -1525,9 +1872,10 @@ std::string page_psd_flat(const core::Document& episode, const core::Page& page,
             put_u16(transparent, static_cast<std::uint32_t>(*table.transparent));
             blocks += image_resource(1047, transparent);
         }
-        put_u32(body, u32_of(blocks.size()));
-        body += blocks;
-        put_u32(body, 0);  // (no layers)
+        std::string sized;
+        put_u32(sized, u32_of(blocks.size()));
+        body += with_kept(sized + blocks, page, episode);  // (PC4 F-d: psd-keep@1)
+        put_section_length(body, 0, psb);  // (no layers)
         const std::string rgb = (made.image.mode() == "RGB" ? made.image : made.image.convert("RGB")).tobytes();
         std::string indices(std::size_t(size.width) * size.height, '\0');
         std::unordered_map<std::uint32_t, std::size_t> nearest;
@@ -1539,7 +1887,7 @@ std::string page_psd_flat(const core::Document& episode, const core::Page& page,
             indices[i] = static_cast<char>(it->second);
         }
         std::string counts, packed;
-        packbits_rows(Image::frombytes("L", size, indices), counts, packed);
+        packbits_rows(Image::frombytes("L", size, indices), counts, packed, psb);
         put_u16(body, 1);
         body += counts;
         body += packed;
@@ -1566,8 +1914,8 @@ std::string page_psd_flat(const core::Document& episode, const core::Page& page,
             plates.push_back(std::move(ink));
         }
         named.channels.insert(named.channels.begin(), plates.begin(), plates.end());
-        body += with_channels(resources(dpi), named, 0);
-        put_u32(body, 0);  // (no layers)
+        body += with_kept(with_channels(resources(dpi), named, 0), page, episode);  // (PC4 F-d: psd-keep@1)
+        put_section_length(body, 0, psb);  // (no layers)
         const auto plane = [&](unsigned c) {
             std::string bytes;
             for (std::size_t i = 0; i < merged.pixel_count(); ++i) put_sample(bytes, 1.0 - merged.value(i, c), depth);
@@ -1575,8 +1923,8 @@ std::string page_psd_flat(const core::Document& episode, const core::Page& page,
         };
         if (depth == 8) {
             std::string counts, packed;
-            for (unsigned c = 0; c < n; ++c) packbits_rows(Image::frombytes("L", size, plane(c)), counts, packed);
-            put_channels_rle(page, size, counts, packed);
+            for (unsigned c = 0; c < n; ++c) packbits_rows(Image::frombytes("L", size, plane(c)), counts, packed, psb);
+            put_channels_rle(page, size, counts, packed, psb);
             put_u16(body, 1);
             body += counts;
             body += packed;
@@ -1592,17 +1940,19 @@ std::string page_psd_flat(const core::Document& episode, const core::Page& page,
 // The page's PSD (export_page_psd) at `dpi`: its bytes. (`depth`: how deep in other contents it is, a smart object's
 // contents written as the file of a placed layer — PC3 A3)
 std::string page_psd_bytes(const core::Document& episode, const core::Page& page, std::int64_t dpi, const PsdText& text, PsdTextReport* report,
-                           int depth) {
+                           int depth, bool psb) {
     if ((page.color && (page.color->bitmap || page.color->space == core::InkSpace::Multi)) || (!page.color && page.rgb && page.rgb->table)) {
-        return page_psd_flat(episode, page, dpi);  // (color-model@1, PC1d: the merged picture only)
+        return page_psd_flat(episode, page, dpi, psb);  // (color-model@1, PC1d: the merged picture only)
     }
-    if (page.color) return page_psd_inks(episode, page, dpi, text, report, depth);
-    if (page.rgb) return page_psd_rgb(episode, page, dpi, text, report, depth);
+    if (page.color) return page_psd_inks(episode, page, dpi, text, report, depth, psb);
+    if (page.rgb) return page_psd_rgb(episode, page, dpi, text, report, depth, psb);
     const render::RenderOptions options = merged_options(page);
     const Image merged = render::render_page(page, static_cast<int>(dpi), options, &episode).image;
     const Image rgb = merged.mode() == "RGB" ? merged : merged.convert("RGB");
     Records records(rgb.size());
+    records.psb(psb);  // (PC4 F-d)
     records.masks_of(page);                    // (PC3 B2)
+    records.patterns_of(episode);  // (patterns@1, PC4 E3)
     PlacedLayers placed(episode, dpi, depth);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
@@ -1616,33 +1966,51 @@ std::string page_psd_bytes(const core::Document& episode, const core::Page& page
     } else {
         render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true);
     }
-    std::string body = "8BPS";
-    put_u16(body, 1);
-    body.append(6, '\0');
+    std::string body = file_start(psb);
     put_u16(body, 3 + static_cast<std::uint32_t>(page.channels.size()));
     put_u32(body, static_cast<std::uint32_t>(rgb.height()));
     put_u32(body, static_cast<std::uint32_t>(rgb.width()));
     put_u16(body, 8);
     put_u16(body, 3);
     put_u32(body, 0);  // (no colour mode data)
-    body += with_channels(resources(dpi), page, 3);
-    body += records.finish(placed.global());
+    body += with_kept(with_channels(resources(dpi), page, 3), page, episode);  // (PC4 F-d: psd-keep@1)
+    body += records.finish(with_kept_globals(placed.global(psb), render::pat::global_block(episode, core::patterns_on(page), 8), page, episode,
+                                             psb));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
     // the merged picture: RLE, every row's count of every channel first
     std::string counts, packed;
-    for (const Image& channel : rgb.split()) packbits_rows(channel, counts, packed);
-    put_channels_rle(page, rgb.size(), counts, packed);
+    for (const Image& channel : rgb.split()) packbits_rows(channel, counts, packed, psb);
+    put_channels_rle(page, rgb.size(), counts, packed, psb);
     put_u16(body, 1);
     body += counts;
     body += packed;
     return body;
 }
 
-// The page's PSD (export_page_psd), put into `output` at `dest`.
+// (PC4 F-d) A PSD past Photoshop's: written as a PSB.
+[[noreturn]] void psd_too_large(const std::string& why) {
+    throw core::Error("psd_too_large", "the page is too large for a PSD (" + why + "): write it as a PSB");
+}
+
+// The page's PSD (export_page_psd), put into `output` at `dest`. (PC4 F-d: `psb` a PSB; a PSD of a page past 30000
+// pixels a side refused before it is drawn, one past 2 GiB before it is written)
 void put_page_psd(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest,
-                  std::optional<std::int64_t> dpi_given, const PsdText& text = {}, PsdTextReport* report = nullptr) {
+                  std::optional<std::int64_t> dpi_given, const PsdText& text = {}, PsdTextReport* report = nullptr, bool psb = false) {
     const std::int64_t dpi = psd_dpi(episode, dpi_given);
     check_dpi(dpi);
-    std::string body = page_psd_bytes(episode, page, dpi, text, report, 0);
+    if (!psb) {
+        const int width = render::mm_to_px(page.spec.width_mm.value(), static_cast<int>(dpi));
+        const int height = render::mm_to_px(page.spec.height_mm.value(), static_cast<int>(dpi));
+        if (width > kPsdMaxSide || height > kPsdMaxSide) psd_too_large(std::to_string(width) + "×" + std::to_string(height) + " pixels");
+    }
+    std::string body;
+    try {
+        body = page_psd_bytes(episode, page, dpi, text, report, 0, psb);
+    } catch (const core::Error& error) {  // (a length past 32 bits: a PSD past 4 GiB)
+        if (!psb && std::string_view(error.what()).starts_with("'I' format requires")) psd_too_large("past 4 GiB");
+        throw;
+    }
+    if (!psb && body.size() > (std::uint64_t{1} << 31)) psd_too_large("past 2 GiB");
+    if (const auto xmp = book_xmp(episode)) body = psd_with_xmp(std::move(body), *xmp);  // (PC4 F-b: the book's File Info, 1060)
     if (dest.has_parent_path()) detail::make_dirs(dest.parent_path());
     output.put(dest, body);
 }
@@ -1652,13 +2020,16 @@ void put_page_psd(detail::Output& output, const core::Document& episode, const c
 // placed layers. A page in precise colour or inks as a page's PSD (with its paper).
 std::string contents_psd_bytes(const core::Document& episode, const core::Page& page, std::int64_t dpi, int depth) {
     check_dpi(dpi);
-    if (page.color || page.rgb) return page_psd_bytes(episode, page, dpi, PsdText{}, nullptr, depth);
+    if (page.color || page.rgb) return page_psd_bytes(episode, page, dpi, PsdText{}, nullptr, depth, false);
+    const bool psb = false;  // (the file of a placed layer: a PSD)
     render::RenderOptions options = merged_options(page);
     options.contents = true;
     const Image drawn = render::render_contents(page, static_cast<int>(dpi), options, &episode).image;
     const Image rgb = render::alpha_composite(Image::create("RGBA", drawn.size(), render::Ink{255, 255, 255, 255}), drawn.convert("RGBA")).convert("RGB");
     Records records(rgb.size());
+    records.psb(psb);  // (PC4 F-d)
     records.masks_of(page);  // (PC3 B2)
+    records.patterns_of(episode);  // (patterns@1, PC4 E3)
     PlacedLayers placed(episode, dpi, depth);
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
@@ -1668,20 +2039,19 @@ std::string contents_psd_bytes(const core::Document& episode, const core::Page& 
     };
     const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, rgb.size(), episode);
     render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true);
-    std::string body = "8BPS";
-    put_u16(body, 1);
-    body.append(6, '\0');
+    std::string body = file_start(psb);
     put_u16(body, 3 + static_cast<std::uint32_t>(page.channels.size()));
     put_u32(body, static_cast<std::uint32_t>(rgb.height()));
     put_u32(body, static_cast<std::uint32_t>(rgb.width()));
     put_u16(body, 8);
     put_u16(body, 3);
     put_u32(body, 0);
-    body += with_channels(resources(dpi), page, 3);
-    body += records.finish(placed.global());
+    body += with_kept(with_channels(resources(dpi), page, 3), page, episode);  // (PC4 F-d: psd-keep@1)
+    body += records.finish(with_kept_globals(placed.global(psb), render::pat::global_block(episode, core::patterns_on(page), 8), page, episode,
+                                             psb));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
     std::string counts, packed;
-    for (const Image& channel : rgb.split()) packbits_rows(channel, counts, packed);
-    put_channels_rle(page, rgb.size(), counts, packed);
+    for (const Image& channel : rgb.split()) packbits_rows(channel, counts, packed, psb);
+    put_channels_rle(page, rgb.size(), counts, packed, psb);
     put_u16(body, 1);
     body += counts;
     body += packed;
@@ -1701,32 +2071,32 @@ void check_psd_text(const core::Document& episode, const PsdText& text, const co
 }
 
 fs::path export_page_psd(const core::Document& episode, const core::Page& page, const fs::path& dest, std::optional<std::int64_t> dpi,
-                         const PsdText& text, PsdTextReport* report) {
+                         const PsdText& text, PsdTextReport* report, bool psb) {
     check_psd_text(episode, text, &page, psd_dpi(episode, dpi));
     detail::Output output;
-    put_page_psd(output, episode, page, dest, dpi, text, report);
+    put_page_psd(output, episode, page, dest, dpi, text, report, psb);
     output.commit();
     return dest;
 }
 
 std::vector<fs::path> export_psd_pages(const core::Document& episode, const fs::path& dest, std::optional<std::int64_t> dpi,
-                                       const PsdText& text, PsdTextReport* report) {
+                                       const PsdText& text, PsdTextReport* report, bool psb) {
     check_psd_text(episode, text, nullptr, psd_dpi(episode, dpi));
     detail::make_dirs(dest);
     detail::Output output;  // (one export: every page's PSD moved into place together)
     std::vector<fs::path> written;
     for (const auto& page : episode.pages) {
-        written.push_back(detail::join(dest, stem(episode) + "_p" + detail::padded(page->index, 3) + ".psd"));
-        put_page_psd(output, episode, *page, written.back(), dpi, text, report);
+        written.push_back(detail::join(dest, stem(episode) + "_p" + detail::padded(page->index, 3) + (psb ? ".psb" : ".psd")));
+        put_page_psd(output, episode, *page, written.back(), dpi, text, report, psb);
     }
     output.commit();
     return written;
 }
 
 fs::path export_psd(const core::Document& episode, const fs::path& dest, std::int64_t dpi, std::int64_t page, const PsdText& text,
-                    PsdTextReport* report) {
+                    PsdTextReport* report, bool psb) {
     for (const auto& p : episode.pages) {
-        if (p->index == core::Num(page)) return export_page_psd(episode, *p, dest, dpi, text, report);
+        if (p->index == core::Num(page)) return export_page_psd(episode, *p, dest, dpi, text, report, psb);
     }
     throw core::Error("key", "no page " + std::to_string(page));  // (Python: StopIteration)
 }
@@ -1744,12 +2114,15 @@ fs::path export_contents_psd(const core::Document& episode, const core::Page& pa
 }
 
 std::vector<std::string> psd_smart_notes(const core::Document& episode) {
-    bool filtered = false, linked = false;
+    bool filtered = false, linked = false, kept = false;
     for (std::size_t i = 0; i < episode.pages.size(); ++i) {
         if (episode.is_deferred(i)) continue;
         for (const core::Layer& layer : episode.pages[i]->layers) {
             if (!core::smart::is_smart(layer) || !layer.visible || !layer.exportable) continue;
-            filtered = filtered || core::smart::filters_drawn(layer);
+            // (PC4 D7, review P2-5: Photoshop's smart filters read and unchanged go back with the block they came in)
+            const bool photoshops = core::smart::photoshop_filters_kept(layer);
+            kept = kept || photoshops;
+            filtered = filtered || (core::smart::filters_drawn(layer) && !photoshops);
             const core::SmartContents* contents = core::smart::contents_of(episode, layer);
             linked = linked || (contents != nullptr && contents->link.has_value());
         }
@@ -1757,6 +2130,10 @@ std::vector<std::string> psd_smart_notes(const core::Document& episode) {
     std::vector<std::string> notes;
     if (filtered) {
         notes.push_back("スマートフィルターは配置レイヤーの画素に焼き込んで書き出しました（Photoshop でコンテンツを編集すると、スマートフィルターは外れます）");
+    }
+    if (kept) {
+        notes.push_back(
+            "PSD から読んだ Photoshop のスマートフィルターは、変えていないので読んだブロックのまま書き戻しました（読んだときと同じ解像度・同じ所のとき。層の画素は Genko の描いた絵です）");
     }
     if (linked) notes.push_back("リンクしたスマートオブジェクトは、その写しを埋め込んだ配置レイヤーとして書き出しました");
     return notes;

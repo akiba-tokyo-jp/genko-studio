@@ -37,8 +37,10 @@ genko_library(genko_render
     color_filters.cpp
     abr.cpp
     psd.cpp
+    psd_keep.cpp
     psd_descriptor.cpp
     psd_smart.cpp
+    psd_filters.cpp
     psd_text.cpp
     movie.cpp
     anim.cpp
@@ -118,6 +120,28 @@ genko_library(genko_render
     matting.cpp
     select_smart.cpp
     ops_matting.cpp
+    # PC4 節 D (フィルター: the table's kinds by one formula on the three ways)
+    fx_engine.cpp
+    fx_blur.cpp
+    fx_blur2.cpp
+    fx_gallery.cpp
+    fx_noise.cpp
+    fx_other.cpp
+    fx_rank.cpp
+    fx_sharpen.cpp
+    fx_video.cpp
+    fx_distort.cpp
+    fx_pixelate.cpp
+    fx_stylize.cpp
+    fx_oil.cpp
+    fx_lens.cpp
+    fx_camera_raw.cpp
+    vanishing.cpp
+    ops_filters.cpp
+    # PC4 D4 (描画・ぼかしギャラリー, op render_picture)
+    fx_render.cpp
+    fx_gallery_blur.cpp
+    render_picture.cpp
     # PC3 C-a (パスとベクトルマスク)
     path_trace.cpp
     path_areas.cpp
@@ -145,10 +169,81 @@ genko_library(genko_render
     layer_align.cpp
     # PC3 A5 (スマートオブジェクトの上の変形: ゆがみ・遠近法ワープ・パペットワープのスマートフィルター)
     smart_bends.cpp
+    # PC4 F-0 (形式の土台: コーデックの型・表・判定・書く計画と失うもの・上限、ファイルの op の枠)
+    codecs/image.cpp
+    codecs/format.cpp
+    codecs/fidelity.cpp
+    codecs/limits.cpp
+    codecs/codecs.cpp
+    ops_formats.cpp
+    # PC4 F-b (ファイルの入口: 開いたファイルの EXIF・XMP・向き・コマの数)
+    codecs/metadata.cpp
+    # PC4 F-a (コーデック: 形式ごとの読み手と書き手。OpenEXR と libavif＋libaom)
+    codecs/png.cpp
+    codecs/jpeg.cpp
+    codecs/tiff.cpp
+    codecs/webp.cpp
+    codecs/gif.cpp
+    codecs/bmp.cpp
+    codecs/tga.cpp
+    codecs/ico.cpp
+    codecs/pnm.cpp
+    codecs/qoi.cpp
+    codecs/exr.cpp
+    codecs/hdr.cpp
+    codecs/avif.cpp
+    # PC4 F-c (書き出し: Web 用に保存の GIF・PNG-8・WBMP の書き手、絵の大きさを変える)
+    codecs/web.cpp
+    codecs/resize.cpp
+    # PC4 E-0 (描く道具の土台: 層のタイル、プリセットの置き場、描く道具とパターンの op の枠)
+    tiled_pixels.cpp
+    preset_store.cpp
+    ops_paint_tools.cpp
+    ops_patterns.cpp
+    # PC4 E1 (ブラシエンジンと線: 上流の点を打つ描き方を線の描き方の 1 つとして、mm で)
+    dabs/maths.cpp
+    dabs/tile.cpp
+    dabs/procedural.cpp
+    dabs/dynamics.cpp
+    dabs/coverage.cpp
+    dabs/lines.cpp
+    dab_ops.cpp
+    # PC4 E3 (パターン: 模様の敷き詰め・.pat と PSD の Patt・ライブラリ)
+    patterns.cpp
+    pat.cpp
+    pattern_library.cpp
+    # PC4 E4 (塗りつぶし・グラデーション・色: 層の値に塗る道、グラデーションのプリセットと .grd)
+    paint_fill.cpp
+    gradient_presets.cpp
+    grd.cpp
+    # PC4 E5 (画素の道具: 覆い焼き・焼き込み・スポンジ・ぼかし・シャープ・指先・混合ブラシ・背景消しゴム・色の置き換え。修復の筆の引数は B4 と共通)
+    brushwork.cpp
+    paint_tools/tone.cpp
+    paint_tools/effects.cpp
+    # PC4 E2 (ブラシのプリセット・Adobe の読み込み・ツールプリセット・プリセット管理)
+    abr_map.cpp
+    brush_presets.cpp
+    tool_presets.cpp
+    preset_files.cpp
+    # PC4 E6 (レイヤースタイル: 効果の描き方・スタイルのプリセット・.asl と PSD の lfx2)
+    layer_styles.cpp
+    ops_layer_styles.cpp
+    psd_effects.cpp
+    asl.cpp
+    style_presets.cpp
+    # PC4 F-f (.pcraft: zip by name and stored, zstd, BLAKE3, the manifest, a .pcraft read as a page)
+    blake3.cpp
+    zstd.cpp
+    pcraft_manifest.cpp
+    pcraft_read.cpp
+    # PC4 F-e (カメラ RAW: LibRaw の包み・現像の設定と色・埋め込みプレビュー、RAW のスマートオブジェクトの op)
+    raw.cpp
+    ops_camera_raw.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core
-  PRIVATE_DEPS genko_storage pillow_imaging PNG::PNG JPEG::JPEG ZLIB::ZLIB TIFF::TIFF Freetype::Freetype ${GENKO_WEBP} ${GENKO_LCMS2})
+  PRIVATE_DEPS genko_storage pillow_imaging PNG::PNG JPEG::JPEG ZLIB::ZLIB TIFF::TIFF Freetype::Freetype ${GENKO_WEBP} ${GENKO_LCMS2}
+               ${GENKO_OPENEXR} ${GENKO_AVIF} ${GENKO_ZSTD} genko_blake3 ${GENKO_LIBRAW})
 # (sin, cos, atan2, hypot, pow, log go through core/pymath.cpp, which calls libm exactly as CPython does)
 # (numpy's float32 hypotf, atan2f: called in libm as numpy calls them; sinf, cosf, powf: glibc's, libm_float.cpp, with
 # std::fma where glibc's FMA build fuses. MSVC: /fp:precise, with which these have no intrinsic forms)
