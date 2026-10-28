@@ -115,6 +115,46 @@ RgbSpace::RgbSpace(const core::RgbMode& mode) {
 
 RgbSpace RgbSpace::of(const core::Page& page) { return page.rgb ? RgbSpace(*page.rgb) : RgbSpace(); }
 
+struct GrayCurve::Impl {
+    cmsToneCurve* curve = nullptr;     // (encoded → linear)
+    cmsToneCurve* reversed = nullptr;  // (linear → encoded)
+    std::optional<Parametric> exact;   // (the same in double precision, when it is parametric)
+    ~Impl() {
+        if (curve != nullptr) cmsFreeToneCurve(curve);
+        if (reversed != nullptr) cmsFreeToneCurve(reversed);
+    }
+};
+
+GrayCurve::GrayCurve(const core::PageColor& color) {
+    if (!color.icc) return;  // (sGray: the sRGB curve)
+    cmsHPROFILE profile = cmsOpenProfileFromMem(color.icc->data(), static_cast<cmsUInt32Number>(color.icc->size()));
+    if (profile == nullptr) throw core::Error("value", "the page's grey profile cannot be read");
+    const auto* curve = static_cast<const cmsToneCurve*>(cmsReadTag(profile, cmsSigGrayTRCTag));
+    if (curve == nullptr) {
+        cmsCloseProfile(profile);
+        throw core::Error("value", "the page's grey profile has no tone curve");
+    }
+    auto impl = std::make_shared<Impl>();
+    impl->curve = cmsDupToneCurve(curve);
+    impl->reversed = cmsReverseToneCurve(curve);
+    if (Parametric exact(curve); exact.type != 0) impl->exact = exact;
+    cmsCloseProfile(profile);
+    if (impl->curve == nullptr || impl->reversed == nullptr) throw core::Error("value", "the page's grey profile cannot be used");
+    impl_ = std::move(impl);
+}
+
+double GrayCurve::decode(double encoded) const {
+    if (!impl_) return core::srgb_to_linear(encoded);
+    if (impl_->exact) return impl_->exact->linear(encoded);
+    return cmsEvalToneCurveFloat(impl_->curve, static_cast<cmsFloat32Number>(encoded));
+}
+
+double GrayCurve::encode(double linear) const {
+    if (!impl_) return core::linear_to_srgb(linear);
+    if (impl_->exact) return impl_->exact->encoded(linear);
+    return cmsEvalToneCurveFloat(impl_->reversed, static_cast<cmsFloat32Number>(linear));
+}
+
 double RgbSpace::decode(unsigned channel, double encoded) const {
     if (!impl_) return core::srgb_to_linear(encoded);
     if (impl_->exact[channel].type != 0) return impl_->exact[channel].linear(encoded);

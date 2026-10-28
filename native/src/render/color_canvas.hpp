@@ -33,6 +33,19 @@ private:
     struct Impl;
     std::shared_ptr<const Impl> impl_;
 };
+// PC5-0 (the user's decision of 2026-10-28): a grey page's tone curve — its profile's (grayTRC), sGray's (the sRGB
+// curve) without one —: its lightness (encoded, 0..1 or HDR) in linear light and back, as RgbSpace's decode and encode.
+class GrayCurve {
+public:
+    GrayCurve() = default;  // (sGray)
+    explicit GrayCurve(const core::PageColor& color);
+    double decode(double encoded) const;
+    double encode(double linear) const;
+
+private:
+    struct Impl;
+    std::shared_ptr<const Impl> impl_;
+};
 // PC2d (document:color-depth-model): a layer's own picture over a part of the page in a canvas's space, before it is
 // composited — a precise layer's pixels with what is drawn on it (its lines, the pictures laid on it, its effects): per
 // pixel straight linear-light RGB (the space's primaries) and its alpha.

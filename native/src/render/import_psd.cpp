@@ -38,6 +38,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
+#include "render/color_canvas.hpp"
 #include "render/fill.hpp"
 #include "render/import_profile.hpp"
 #include "render/op_limits.hpp"
@@ -725,40 +726,45 @@ bool linear_page(const core::Page& page) {
     return linear != nullptr && linear->bytes && *linear->bytes == *page.rgb->icc;
 }
 
-// A 32-bit file's sample as the page holds it (Photoshop's 32 bits are linear light): as it is on a page of linear light,
-// else encoded by 1/2.2 as this build reads 32 bits everywhere (render/psd's 8-bit picture, smart_decode's deep picture),
-// its values past 1 kept.
-float encoded(float v, bool as_is) { return as_is ? v : static_cast<float>(std::pow(std::max(0.0f, v), 1.0 / 2.2)); }
+// A 32-bit file's samples are linear light (Photoshop's 32 bits): taken in at the file's depth they are encoded by the
+// page's own tone curve (PC5-0, the user's decision of 2026-10-28: the inverse of what this build writes, render's
+// RgbSpace and GrayCurve) — as they are on a page of linear light —, values past 0..1 by the same formula.
 
 // A part of the file (a layer's box, or the merged picture) on the page layer (`size` pixels, the file's canvas at `at`),
-// as a page of inks of the page's depth holds it: each sample as it is (a 32-bit grey file's encoded), clear around it.
+// as a page of inks of the page's depth holds it: each sample as it is (a 32-bit grey file's encoded by the page's
+// curve), clear around it.
 core::InkPixels deep_inks(const psd::File::DeepPart& part, const core::PageColor& color, Size size, Point at) {
     const std::int64_t width = std::max(1, size.width), height = std::max(1, size.height);
     core::InkPixels canvas = core::blank_ink_pixels(color.space, color.depth, static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height));
     const unsigned colours = canvas.colours();
     const bool as_is = part.depth != 32;
+    const GrayCurve curve = as_is ? GrayCurve() : GrayCurve(color);
+    const auto encoded = [&](float v) { return as_is ? static_cast<double>(v) : curve.encode(v); };
     const std::int64_t left = part.left + at.x, top = part.top + at.y;
     for (std::int64_t y = std::max<std::int64_t>(0, top); y < std::min(height, top + part.height); ++y) {
         for (std::int64_t x = std::max<std::int64_t>(0, left); x < std::min(width, left + part.width); ++x) {
             const std::size_t from = static_cast<std::size_t>((y - top) * part.width + (x - left));
             const std::size_t to = static_cast<std::size_t>(y * width + x);
-            for (unsigned c = 0; c < colours && c < part.colours; ++c) canvas.set(to, c, encoded(part.value(c, from), as_is));
+            for (unsigned c = 0; c < colours && c < part.colours; ++c) canvas.set(to, c, encoded(part.value(c, from)));
             canvas.set(to, colours, std::clamp(part.value(part.colours, from), 0.0f, 1.0f));
         }
     }
     return canvas;
 }
 
-// The same as a colour raster of the page's depth (u16 or f32: the values as they are — a 32-bit file's encoded unless
-// the page is linear —, past 1 kept at 32 bits).
-std::string deep_color_raster(const psd::File::DeepPart& part, int depth, Size size, Point at, bool linear) {
+// The same as a colour raster of the page's depth (u16 or f32: the values as they are — a 32-bit file's encoded by the
+// page's curves unless the page is linear —, past 0..1 kept at 32 bits).
+std::string deep_color_raster(const psd::File::DeepPart& part, const core::Page& page, Size size, Point at, bool linear) {
+    const int depth = page.rgb->depth;
     const auto w = static_cast<std::uint32_t>(std::max(1, size.width)), h = static_cast<std::uint32_t>(std::max(1, size.height));
     const bool as_is = part.depth != 32 || linear;
+    const RgbSpace space = as_is ? RgbSpace() : RgbSpace::of(page);
+    const auto encoded = [&](unsigned c, float v) { return as_is ? static_cast<double>(v) : space.encode(c, v); };
     return core::encode_color_pixels(w, h, depth == 16 ? "u16" : "f32", [&](std::size_t i) {
         const std::int64_t x = static_cast<std::int64_t>(i % w) - part.left - at.x, y = static_cast<std::int64_t>(i / w) - part.top - at.y;
         if (x < 0 || y < 0 || x >= part.width || y >= part.height) return std::array<double, 4>{0.0, 0.0, 0.0, 0.0};
         const auto k = static_cast<std::size_t>(y * part.width + x);
-        return std::array<double, 4>{encoded(part.value(0, k), as_is), encoded(part.value(1, k), as_is), encoded(part.value(2, k), as_is),
+        return std::array<double, 4>{encoded(0, part.value(0, k)), encoded(1, part.value(1, k)), encoded(2, part.value(2, k)),
                                      std::clamp(static_cast<double>(part.value(3, k)), 0.0, 1.0)};
     });
 }
@@ -1149,7 +1155,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
                          : core::blank_ink_pixels(mode->space, mode->depth, static_cast<std::uint32_t>(page_px.width), static_cast<std::uint32_t>(page_px.height))));
             } else if (deep == DeepWay::Rgb && item.kind != "smart") {
                 layer.color_raster = std::make_shared<const std::string>(
-                    part ? deep_color_raster(*part, page.rgb->depth, page_px, paste_corner(where), linear_page(page))
+                    part ? deep_color_raster(*part, page, page_px, paste_corner(where), linear_page(page))
                          : core::encode_color_pixels(static_cast<std::uint32_t>(page_px.width), static_cast<std::uint32_t>(page_px.height),
                                                      page.rgb->depth == 16 ? "u16" : "f32", [](std::size_t) { return std::array<double, 4>{0, 0, 0, 0}; }));
                 if (std::find(doc.features.begin(), doc.features.end(), core::kColorRasterFeature) == doc.features.end())

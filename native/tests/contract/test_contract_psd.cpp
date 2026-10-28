@@ -57,6 +57,7 @@
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/exposure.hpp"
 #include "core/ids.hpp"
 #include "core/ink.hpp"
 #include "core/paths.hpp"
@@ -1684,8 +1685,9 @@ private slots:
     }
 
     // P2-2: a 32-bit file onto a page of another depth comes in as before F-d (onto a 16-bit page at 8 bits, its values past
-    // 1 no refusal); onto a 32-bit page in sRGB its linear values encoded by 1/2.2 — the same look as the 8-bit page's
-    // (within a step of 8 bits) —; onto a page of linear light as they are.
+    // 1 no refusal; onto the 8-bit page encoded by 1/2.2 as before); onto a 32-bit page in sRGB its linear values encoded
+    // by the page's curve, sRGB's (the user's decision of 2026-10-28: the inverse of the 32-bit PSD this build writes,
+    // before it 1/2.2); onto a page of linear light as they are.
     void thirtyTwoBitFilesComeInAsBefore() {
         namespace core = genko::core;
         const genko::core::CommandBus bus(genko::render::ops_registry());
@@ -1725,9 +1727,10 @@ private slots:
                 const auto shown = png.getpixel(x, y);
                 for (int ch = 0; ch < 3; ++ch) {
                     const double v = below["values"][std::to_string(ch)][static_cast<std::size_t>(y * 8 + x)].get<double>();
-                    const double want = std::pow(std::max(0.0, v), 1 / 2.2);
+                    const double want = genko::core::linear_to_srgb(v);
                     QVERIFY2(std::fabs(px[static_cast<std::size_t>(ch)] - want) < 1e-5, (std::to_string(px[static_cast<std::size_t>(ch)]) + " for " + std::to_string(want)).c_str());
-                    QVERIFY(std::fabs(std::min(1.0, want) * 255 - shown[static_cast<std::size_t>(ch)]) <= 1.0);
+                    const double in_8_bits = std::pow(std::max(0.0, v), 1 / 2.2);
+                    QVERIFY(std::fabs(std::min(1.0, in_8_bits) * 255 - shown[static_cast<std::size_t>(ch)]) <= 1.0);
                 }
             }
         }

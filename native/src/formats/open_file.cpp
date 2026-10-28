@@ -401,8 +401,8 @@ Opened open_psd(std::string_view bytes, const std::string& file, const OpenOptio
             std::string icc = chosen.empty() || render::proof::same_as_srgb(chosen) ? std::string() : chosen;
             // (the PC4 F-d review: a 32-bit file's values are linear light, as Photoshop's 32 bits are — in sRGB's colours
             // (its profile sRGB's, or none) the page is the built-in linear-srgb's and they come in as they are, as an
-            // OpenEXR's do; in another profile's the page is that profile's and they are encoded by 1/2.2, as this build
-            // reads 32 bits elsewhere)
+            // OpenEXR's do; in another profile's the page is that profile's and they are encoded by its tone curves, the
+            // inverse of how this build writes a 32-bit PSD: import_psd, PC5-0)
             if (depth == 32 && icc.empty()) icc = builtin_bytes("linear-srgb");
             if (depth != 8 || !icc.empty()) {
                 core::RgbMode mode;

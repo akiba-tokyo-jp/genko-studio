@@ -42,6 +42,8 @@
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/proof.hpp"
+#include "render/psd.hpp"
+#include "render/raster.hpp"
 #include "render/selection.hpp"
 #include "render/png.hpp"
 #include "storage/asset_store.hpp"
@@ -917,7 +919,7 @@ private slots:
     }
 
     // The exports (COLOR-03, design 4.7): a grey page of 32 bits, an RGB page of Display P3 and 16 bits, a CMYK page of 32
-    // bits. PSD: Grayscale 32 (floats: the page's lightness), RGB 16 (its values) with the profiles as resource 1039,
+    // bits. PSD: Grayscale 32 (floats: the page's lightness in linear light), RGB 16 (its values) with the profiles as resource 1039,
     // CMYK at 16; TIFF: grey MinIsBlack floats (SampleFormat 3), RGB 16 with the profile, CMYK at 16; PDF: ICCBased grey
     // (N 1) and RGB (N 3), 16 bits a channel at most. The notes: 32 bits at 16, pages from the screen's colours.
     void exports() {
@@ -974,7 +976,8 @@ private slots:
             QCOMPARE(grey.mode, 1u);
             QVERIFY(grey.icc == sgray);
             QCOMPARE(grey.compression, 0u);
-            // (its lightness, as the page's inks are: the grey 128 on the left)
+            // (its lightness, as the page's inks are, in linear light — Photoshop's 32 bits, the user's decision of
+            // 2026-10-28: sGray's curve taken off —: the grey 128 on the left)
             render::RenderOptions options;
             options.mode = "print";
             options.inks = true;
@@ -982,8 +985,8 @@ private slots:
             const std::string b = genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(psds[0])));
             const std::size_t i = std::size_t(render::mm_to_px(20, dpi)) * made.inks->width + render::mm_to_px(10, dpi);
             const float v = std::bit_cast<float>(be32(b, grey.merged + i * 4));
-            QCOMPARE(v, made.inks->floats[i * made.inks->channels()]);
-            QVERIFY(std::abs(v - 128 / 255.0) < 0.01);
+            QCOMPARE(v, static_cast<float>(render::GrayCurve(*doc.page(0).color).decode(made.inks->floats[i * made.inks->channels()])));
+            QVERIFY(std::abs(v - core::srgb_to_linear(128 / 255.0)) < 0.01);
         }
         {
             const Psd rgb = psd(psds[1]);
@@ -1073,6 +1076,148 @@ private slots:
         QCOMPARE(t[262], 1u);
         QVERIFY(formats::export_notes(grey8, "tiff", "auto").empty());
         QVERIFY(formats::export_notes(grey8, "tiff", "gray").empty());
+    }
+
+    // PC5-0 (the user's decision of 2026-10-28, SPEC.md FILE-01「PSD の 32 bit」): a 32-bit page's PSD holds its colours in
+    // linear light, as Photoshop reads 32 bits — the page's tone curve taken off (sRGB's, Display P3's, sGray's, gamma
+    // 2.2's), HDR values by the same formula —, its alpha as it is; read back at the file's depth (import_psd onto a page
+    // of the same mode, depth and profile) the values come back (within float error). A 16-bit page's PSD keeps its
+    // values (not linear).
+    void psdOf32BitsIsLinearLight() {
+        QTemporaryDir tmp;
+        const fs::path out = core::path_from_utf8(tmp.path().toStdString());
+        const int dpi = render::raster::kWorkingDpi;  // (the file the page's working grid: import_psd reads it at its depth)
+        // four stripes of colours (8-bit steps, so a layer's 8-bit picture holds them) and, last, an HDR one
+        const std::array<std::array<double, 3>, 4> stripes{{{51 / 255.0, 102 / 255.0, 204 / 255.0},
+                                                            {20 / 255.0, 128 / 255.0, 250 / 255.0},
+                                                            {77 / 255.0, 77 / 255.0, 77 / 255.0},
+                                                            {1.5, 0.25, 2.0}}};
+        const std::array<double, 4> greys{51 / 255.0, 30 / 255.0, 200 / 255.0, 128 / 255.0};  // (an RGB HDR grey is not made grey: set_color_mode refuses it)
+        const auto raster_op = [](const std::vector<std::array<double, 3>>& colours) {
+            Json pixels = Json::array();
+            for (const auto& c : colours) {  // (each 8 pixels wide: the middle of a stripe is its colour, however it is sampled)
+                for (int k = 0; k < 8; ++k) {
+                    for (const double v : c) pixels.push_back(v);
+                    pixels.push_back(1.0);
+                }
+            }
+            return Json{{"op", "put_color_raster"}, {"page", 1}, {"width", 8 * colours.size()}, {"height", 1}, {"precision", "f32"}, {"pixels", pixels}};
+        };
+        const auto one_psd = [&](const core::Document& doc, const std::string& name) {
+            const auto files = formats::export_psd_pages(doc, out / name, dpi);
+            return genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(files.at(0))));
+        };
+        const auto import_back = [&](const core::Document& doc, const std::string& bytes) {
+            return run_ops(doc, Json::array({Json{{"op", "import_psd"}, {"page", 1}, {"psd", core::b64encode(bytes)}, {"fit", "paper"}, {"id", "back"}}})).doc;
+        };
+        const auto titled = [](const core::Document& doc, const std::string& prefix) -> const core::Layer& {
+            for (const core::Layer& l : doc.page(0).layers)
+                if (l.title == "カラー素材" && l.id.rfind(prefix, 0) == 0) return l;
+            throw std::runtime_error("no layer カラー素材 " + prefix);
+        };
+        // RGB: sRGB and Display P3 (assigned: the values kept), 32 bits
+        for (const char* profile : {"none", "display-p3"}) {
+            std::vector<std::array<double, 3>> colours(stripes.begin(), stripes.end());
+            core::Document doc = run_ops(small_book(), Json::array({raster_op(colours), Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 32}},
+                                                                    Json{{"op", "assign_profile"}, {"page", 1}, {"profile", profile}}}))
+                                     .doc;
+            const render::RgbSpace space = render::RgbSpace::of(doc.page(0));
+            QCOMPARE(space.is_srgb(), std::string(profile) == "none");
+            const std::string bytes = one_psd(doc, profile);
+            const render::psd::File file = render::psd::File::read(bytes);
+            QCOMPARE(file.depth(), 32);
+            // the merged picture: the page's values in linear light, each sample
+            render::RenderOptions options;
+            options.mode = "print";
+            options.precise = true;
+            const auto made = render::render_page(doc.page(0), dpi, options, &doc);
+            const core::ColorRasterView page(*made.precise);
+            const auto merged = file.merged_deep();
+            QVERIFY(merged && merged->width == static_cast<std::int64_t>(page.width()) && merged->height == static_cast<std::int64_t>(page.height()));
+            const unsigned all = merged->colours + (merged->alpha ? 1 : 0);
+            double hdr = 0;
+            for (std::size_t i = 0; i < std::size_t(page.width()) * page.height(); ++i) {
+                const auto v = page.pixel(i);
+                for (unsigned c = 0; c < 3; ++c) {
+                    const double want = space.decode(c, v[c]), got = merged->samples[i * all + c];
+                    hdr = std::max(hdr, got);
+                    QVERIFY2(std::fabs(got - want) <= 1e-6 * std::max(1.0, std::fabs(want)), qPrintable(QStringLiteral("%1 %2: %3 for %4").arg(i).arg(c).arg(got).arg(want)));
+                }
+            }
+            QCOMPARE(static_cast<float>(hdr), static_cast<float>(space.decode(2, 2.0)));  // (the HDR stripe's blue, past 1)
+            // read back onto the page (at the file's depth): the layer's values as they were
+            const core::Document back = import_back(doc, bytes);
+            const core::ColorRasterView before(*titled(back, "").color_raster), after(*titled(back, "back-").color_raster);
+            QCOMPARE(after.width(), page.width());
+            // (an RGB layer's pixels are written from its 8-bit picture of the page's values: read back, each value on its
+            // 8-bit step again — the curve undone exactly, where 1/2.2 would leave it between steps —, within a step of
+            // the layer's; the HDR stripe left out: the 8-bit picture holds 1 at most)
+            for (std::size_t s = 0; s < 3; ++s) {
+                const auto was = before.pixel(8 * s + 4);  // (the middle of its stripe)
+                const auto now = after.pixel(std::size_t(page.height() / 2) * after.width() + (2 * s + 1) * after.width() / 8);
+                for (unsigned c = 0; c < 3; ++c) {
+                    const QString told = QStringLiteral("%1 stripe %2: %3 for %4").arg(profile).arg(s).arg(now[c], 0, 'g', 9).arg(was[c]);
+                    QVERIFY2(std::fabs(now[c] * 255 - std::round(now[c] * 255)) < 1e-4, qPrintable(told));
+                    QVERIFY2(std::fabs(now[c] - was[c]) <= 1 / 255.0 + 1e-6, qPrintable(told));
+                }
+                QCOMPARE(now[3], 1.0);
+            }
+        }
+        // grey: sGray and gamma 2.2 (assigned), 32 bits
+        for (const char* profile : {"sgray", "gray-gamma-2.2"}) {
+            std::vector<std::array<double, 3>> colours;
+            for (const double g : greys) colours.push_back({g, g, g});
+            core::Document doc = run_ops(small_book(), Json::array({raster_op(colours), Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}, {"depth", 32}},
+                                                                    Json{{"op", "assign_profile"}, {"page", 1}, {"profile", profile}}}))
+                                     .doc;
+            const render::GrayCurve curve(*doc.page(0).color);
+            const std::string bytes = one_psd(doc, profile);
+            const render::psd::File file = render::psd::File::read(bytes);
+            QCOMPARE(file.depth(), 32);
+            render::RenderOptions options;
+            options.mode = "print";
+            options.inks = true;
+            const auto made = render::render_page(doc.page(0), dpi, options, &doc);
+            const auto merged = file.merged_deep();
+            QVERIFY(merged && merged->colours == 1 && merged->width == static_cast<std::int64_t>(made.inks->width));
+            const unsigned all = merged->colours + (merged->alpha ? 1 : 0);
+            for (std::size_t i = 0; i < made.inks->pixel_count(); ++i) {
+                const double want = curve.decode(made.inks->floats[i * made.inks->channels()]), got = merged->samples[i * all];
+                QVERIFY2(std::fabs(got - want) <= 1e-6 * std::max(1.0, std::fabs(want)), qPrintable(QStringLiteral("%1: %2 for %3").arg(i).arg(got).arg(want)));
+            }
+            // its layers hold their lightness at full precision: read back, as they were
+            const core::Document back = import_back(doc, bytes);
+            const core::InkPixels before = core::decode_ink_raster(*titled(back, "").ink_raster);
+            const core::InkPixels after = core::decode_ink_raster(*titled(back, "back-").ink_raster);
+            for (std::size_t s = 0; s < greys.size(); ++s) {
+                const double was = before.value(std::size_t(before.height / 2) * before.width + (2 * s + 1) * before.width / 8, 0);
+                const double now = after.value(std::size_t(after.height / 2) * after.width + (2 * s + 1) * after.width / 8, 0);
+                QVERIFY2(std::fabs(now - was) < 1e-6 * std::max(1.0, std::fabs(was)), qPrintable(QStringLiteral("%1 stripe %2: %3 for %4").arg(profile).arg(s).arg(now).arg(was)));
+            }
+            QVERIFY(curve.decode(1.5) > 1.5 && std::fabs(curve.encode(curve.decode(1.5)) - 1.5) < 1e-9);  // (an HDR lightness by the same formula, both ways)
+        }
+        // 16 bits: the page's values as they are (rounded), not made linear
+        {
+            core::Document doc = run_ops(small_book(), Json::array({raster_op({stripes[0], stripes[1], stripes[2]}),
+                                                                    Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}},
+                                                                    Json{{"op", "assign_profile"}, {"page", 1}, {"profile", "display-p3"}}}))
+                                     .doc;
+            const render::psd::File file = render::psd::File::read(one_psd(doc, "p3-16"));
+            QCOMPARE(file.depth(), 16);
+            render::RenderOptions options;
+            options.mode = "print";
+            options.precise = true;
+            const core::ColorRasterView page(*render::render_page(doc.page(0), dpi, options, &doc).precise);
+            const auto merged = file.merged_deep();
+            QVERIFY(merged);
+            const unsigned all = merged->colours + (merged->alpha ? 1 : 0);
+            for (std::size_t i = 0; i < std::size_t(page.width()) * page.height(); ++i) {
+                for (unsigned c = 0; c < 3; ++c) {
+                    const double want = std::lround(std::clamp(page.pixel(i)[c], 0.0, 1.0) * 65535) / 65535.0;
+                    QVERIFY(std::fabs(merged->samples[i * all + c] - want) < 1e-9);
+                }
+            }
+        }
     }
     // color-model@1, one rule (review A, R): on an RGB page of a profile every paint pixel is the page's value, whatever
     // its layer's kind — a v2 book's layer of lines with a raster is converted, drawn and merged as a paint layer is —;
