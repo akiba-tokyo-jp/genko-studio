@@ -46,6 +46,7 @@ genko_library(genko_core
     ids.cpp
     paths.cpp
     config_dir.cpp
+    prefs_table.cpp
     base64.cpp
     geometry.cpp
     model.cpp

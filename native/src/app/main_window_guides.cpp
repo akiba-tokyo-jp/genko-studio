@@ -116,8 +116,8 @@ void MainWindow::build_guide_actions() {
         make(QString::fromLatin1(attribute), title, [this] { guide_toggles(); }, key.isEmpty() ? QList<QKeySequence>{} : QList<QKeySequence>{QKeySequence(key)},
              tip, true);
     };
-    toggle("act_snap", QStringLiteral("定規にスナップ"), QStringLiteral("Ctrl+2"), QStringLiteral("ペンの線を定規に沿わせる（切ると自由に描ける）"));
-    toggle("act_show_rulers", QStringLiteral("定規を表示"), QStringLiteral("Ctrl+Shift+R"), QString());
+    toggle("act_snap", QStringLiteral("描画定規にスナップ"), QStringLiteral("Ctrl+2"), QStringLiteral("ペンの線を定規に沿わせる（切ると自由に描ける）"));
+    toggle("act_show_rulers", QStringLiteral("描画定規を表示"), QStringLiteral("Ctrl+Shift+R"), QString());
     toggle("act_grid", QStringLiteral("グリッドを表示"), QStringLiteral("Ctrl+'"), QString());
     toggle("act_grid_snap", QStringLiteral("グリッドにスナップ"), QString(), QStringLiteral("Shift で引く直線と定規の点がグリッドに吸い付く"));
     {

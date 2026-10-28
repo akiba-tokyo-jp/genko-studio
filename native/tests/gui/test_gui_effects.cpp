@@ -153,9 +153,10 @@ private slots:
     void commandsAsPythonsWindowHasThem() {
         Studio s;
         const std::vector<Expected> expected{
-            {"act_effect", "効果線", "K", "コマの中をクリックすると、選んだ効果線（集中線など）が入る。中心の＋をドラッグで動かす", true, "ツール"},
+            {"act_effect", "効果線", "",  // (PC5 H-0: K is コマ割り's in the Photoshop key set)
+             "コマの中をクリックすると、選んだ効果線（集中線など）が入る。中心の＋をドラッグで動かす", true, "ツール"},
             {"act_stamp", "素材を置く", "", "素材パネルで選んだ素材を、クリックした所に置く", true, "ツール"},
-            {"act_tone_here", "選択範囲・選んだコマにトーンを貼る", "Ctrl+Shift+T", "素材パネルで選んだトーン（なければ網点 60 線 30%）を貼ります", false, "ツール/トーン・効果線"},
+            {"act_tone_here", "選択範囲・選んだコマにトーンを貼る", "", "素材パネルで選んだトーン（なければ網点 60 線 30%）を貼ります", false, "ツール/トーン・効果線"},
             {"act_tone_click", "クリックした所にトーンを貼る", "", "線で囲まれた所をクリックすると、そこにトーンが入ります", false, "ツール/トーン・効果線"},
             {"act_effect_within", "選択範囲の中にだけ描く", "", "選んだ効果線を、なげなわ・長方形選択の選択範囲の中にだけ描きます", false, "ツール/トーン・効果線"},
             {"act_effect_avoid", "選択範囲を避ける", "", "選んだ効果線を、選択範囲（顔や人物をなげなわで囲む）の手前で止めます。線は止まる所で細くなります", false,
@@ -170,7 +171,7 @@ private slots:
             {"act_layer_paint", "新しいペイントのレイヤー", "", "", false, "レイヤー"},
             {"act_layer_folder", "新しいフォルダ", "", "", false, "レイヤー"},
             {"act_layer_dup", "レイヤーを複製", "", "", false, "レイヤー"},
-            {"act_layer_merge", "下のレイヤーと結合", "Ctrl+Shift+E", "", false, "レイヤー"},
+            {"act_layer_merge", "下のレイヤーと結合", "Ctrl+E", "", false, "レイヤー"},
             {"act_layer_delete", "レイヤーを消す", "", "", false, "レイヤー"},
             {"act_layer_up", "前面へ", "Ctrl+]", "", false, "レイヤー/重ね順"},
             {"act_layer_down", "背面へ", "Ctrl+[", "", false, "レイヤー/重ね順"},

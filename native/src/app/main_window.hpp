@@ -512,10 +512,11 @@ public:
     // The canvas's menu (a panel's commands when one is under the pointer), filled (tests).
     void fill_context_menu(QMenu& menu, const QString& frame_id);
     // --- 環境設定 and comfort (M6: preferences.cpp, comfort.cpp) ---------------------------------------------------
-    // Each command's own keys (by its words), as the window made them (preferences::name_commands).
+    // Each command's own keys (by its words), as the key set chosen gives them (preferences::name_commands after
+    // key_sets::apply).
     std::map<QString, QList<QKeySequence>> default_shortcuts;
-    // 環境設定… (the dialog, exec'ed).
-    void open_preferences();
+    // 環境設定 (the dialog, exec'ed) — at a pane of 編集 → 環境設定 ▸ (preferences::panes' id; keyboardShortcuts: the keys).
+    void open_preferences(const QString& pane = {});
     // ヘルプ: keys | guide | faq | about, shown (modeless); the one shown last (tests).
     void show_help(const QString& what);
     QDialog* help_dialog() const { return help_dialog_; }
@@ -701,6 +702,18 @@ protected:
 private:
     void build_actions();
     void build_menus();
+    // PC5 H-0 (節 H): 表示 laid out in Photoshop's order (main_window_view.cpp — H-a, H-b make its commands), ウィンドウ →
+    // アレンジ ▸ (main_window_arrange.cpp — H-c), 編集's 検索・キーボードショートカット…・環境設定 ▸ (main_window_edit.cpp —
+    // H-d, H-e, H-f)
+    void build_view_actions();
+    void build_view_menus(QMenu* view);
+    void build_arrange_actions();
+    void build_arrange_menus(QMenu* arrange);
+    void build_edit_actions();
+    void build_edit_menu_tail(QMenu* edit);
+    // PC5 H-0: the panels by Photoshop's names (ナビゲーター, オプション, ヒストリー), their object names — the workspaces' keys —
+    // kept
+    void name_panels();
     void build_toolbars();
     void build_docks();
     QAction* make(const QString& attribute, const QString& title, std::function<void()> slot, const QList<QKeySequence>& keys = {},

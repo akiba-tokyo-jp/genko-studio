@@ -115,9 +115,12 @@ private slots:
         };
         const std::vector<E> expected = {
             {"act_ruler", "定規", "R", "「定規」メニューで選んだ定規を置く（ドラッグ・クリック）。置いた定規の□をドラッグで動かす", true, "ツール"},
-            {"act_3d", "3D 操作", "J", "デッサン人形の関節（○）や箱をドラッグして動かす。箱の上の○で回す", true, "ツール"},
-            {"act_snap", "定規にスナップ", "Ctrl+2", "ペンの線を定規に沿わせる（切ると自由に描ける）", true, "ツール/定規"},
-            {"act_show_rulers", "定規を表示", "Ctrl+Shift+R", "", true, "ツール/定規"},
+            {"act_3d", "3D 操作", "",  // (PC5 H-0, the Photoshop key set: J is スポット修復ブラシツール's)
+             "デッサン人形の関節（○）や箱をドラッグして動かす。箱の上の○で回す", true, "ツール"},
+            {"act_snap", "描画定規にスナップ", "",  // (PC5 H-0: the user's decision 12; Ctrl+2 the composite channel)
+             "ペンの線を定規に沿わせる（切ると自由に描ける）", true, "ツール/定規"},
+            {"act_show_rulers", "描画定規を表示", "",  // (Ctrl+Shift+R: レンズ補正…)
+             "", true, "ツール/定規"},
             {"act_grid", "グリッドを表示", "Ctrl+'", "", true, "ツール/定規"},
             {"act_grid_snap", "グリッドにスナップ", "", "Shift で引く直線と定規の点がグリッドに吸い付く", true, "ツール/定規"},
             {"act_grid_mm", "グリッドの間隔…", "", "", false, "ツール/定規"},

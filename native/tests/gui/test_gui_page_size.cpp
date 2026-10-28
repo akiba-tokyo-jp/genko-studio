@@ -141,7 +141,7 @@ private slots:
             {"act_crop", "切り抜き", "", "ページ"},
             {"act_trim", "トリミング…", "", "ページ"},
             {"act_reveal_all", "すべての領域を表示", "", "ページ"},
-            {"act_crop_tool", "切り抜きツール", "Shift+C", "ツール"}};
+            {"act_crop_tool", "切り抜きツール", "C", "ツール"}  /* (PC5 H-0: the Photoshop key set) */};
         for (const auto& [name, title, key, menu] : commands) {
             QAction* act = w.window->action(QString::fromLatin1(name));
             QVERIFY2(act != nullptr, name);

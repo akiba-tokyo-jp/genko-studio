@@ -89,6 +89,18 @@ const std::multimap<QString, QString>& renamed();
 // it writes them: names_current) mean the new command by such a name; kept before, the renamed one.
 const std::vector<QString>& reused_names();
 bool reused_name(const QString& name);
+// PC5 H-0: words two commands came to share by a rename, and the attribute of the one that had them before ("定規": the
+// 定規 tool's, not 表示 → 定規 — the user's decision 12): keys and lists kept under the words alone are its (by_text,
+// apply_shortcuts), not the first of them in the menus'.
+const std::map<QString, QString>& words_owner();
+// 編集 → 環境設定 ▸ (PC5 H-0, 節 H 5.4): Photoshop's panes in its order (id: core/prefs_table's section), and the page of the
+// dialog each opens — none: its page not made yet (H-e), not in the menu.
+struct Pane {
+    QString id;
+    QString label;
+    QString page;  // the dialog's page by its title
+};
+const std::vector<Pane>& panes();
 // Whether the settings' `key` ("ui/quick", "ui/commandbar", or "shortcuts/<a reused name>") holds what a build that knows
 // reused_names() wrote there — marked as it wrote it: the value then kept beside it (names_current/<key>), so a value a
 // build before them wrote since reads as theirs —, and that it is now.
@@ -157,6 +169,12 @@ public:
     std::vector<std::pair<QString, QKeySequenceEdit*>> editors;  // (the command's words, its keys) in order
     QKeySequenceEdit* editor(const QString& command) const;
     QLabel* clash = nullptr;
+    // キーの組 (PC5 H-0, the user's decision 8: key_sets), and each command's keys in the set chosen (by its name)
+    QComboBox* key_set = nullptr;
+    std::map<QString, QList<QKeySequence>> set_keys;
+    void choose_key_set();
+    // The page of a pane (panes(); keyboardShortcuts: ショートカット) in front.
+    void show_pane(const QString& id);
     // ペンタブレット
     PressurePad* pad = nullptr;
     QLabel* gamma_note = nullptr;

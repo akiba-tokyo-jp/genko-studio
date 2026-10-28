@@ -224,7 +224,7 @@ private slots:
         for (const char* key : {"menu_filter_pixelate", "menu_filter_video", "menu_filter_blur_gallery", "menu_filter_stylize", "menu_filter_distort", "menu_filter_other"})
             QVERIFY2(book.menu(key) != nullptr && !book.menu(key)->isEmpty(), key);
         // the keys (Photoshop's; 前回のフィルター Ctrl+F — Ctrl+Alt+F is 台詞の検索・置換 —, no key for レンズ補正…)
-        QCOMPARE(book.act("act_filter_last")->shortcut(), QKeySequence(QStringLiteral("Ctrl+F")));
+        QCOMPARE(book.act("act_filter_last")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+F")));  // (PC5 H-0: Photoshop's; Ctrl+F is 検索)
         QCOMPARE(book.act("act_filter_camera_raw")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+A")));
         QCOMPARE(book.act("act_filter_adaptive_wide_angle")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+Shift+A")));
         QCOMPARE(book.act("act_filter_vanishing_point")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+V")));

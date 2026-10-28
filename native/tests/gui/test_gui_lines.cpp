@@ -245,8 +245,10 @@ private slots:
             {"act_line_edit", "選んだ台詞をその場で直す", "F2", "", false, "ページ/台詞"},
             {"act_line_delete", "選んだ台詞を消す", "", "", false, "ページ/台詞"},
             {"act_line_wrap", "縦書き・横書きを切り替える", "", "", false, "ページ/台詞"},
-            {"act_story_editor", "ストーリーエディター…", "Ctrl+Shift+L", "全ページの台詞をまとめて直す・台本を流し込む", false, "ページ"},
-            {"act_replace", "台詞の検索・置換…", "Ctrl+Alt+F", "全ページの台詞から言葉を探して置き換えます", false, "ページ"},
+            {"act_story_editor", "ストーリーエディター…", "",  // (PC5 H-0, the Photoshop key set: Ctrl+Shift+L is 自動トーン補正's)
+             "全ページの台詞をまとめて直す・台本を流し込む", false, "ページ"},
+            {"act_replace", "台詞の検索・置換…", "",  // (Ctrl+Alt+F: フィルターの再実行)
+             "全ページの台詞から言葉を探して置き換えます", false, "ページ"},
         };
         for (const Expected& e : expected) {
             QAction* a = s.window->action(QString::fromLatin1(e.attribute));

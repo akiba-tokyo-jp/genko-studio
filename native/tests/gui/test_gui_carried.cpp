@@ -322,7 +322,7 @@ private slots:
         const QString faq = app::help::faq(w);
         QVERIFY(faq.contains(QStringLiteral("「ウィンドウ → ワークスペース → はじめの配置に戻す」")));  // (a menu filled as it opens)
         QVERIFY(faq.contains(QStringLiteral("「マスク ▾」、または「レイヤー → レイヤーマスク → マスクを編集する（ブラシで見せる・消しゴムで隠す）」")));
-        QVERIFY(app::help::shortcut_html(w).contains(QStringLiteral("キーは「ファイル → 環境設定…」で変えられます")));
+        QVERIFY(app::help::shortcut_html(w).contains(QStringLiteral("キーは「編集 → キーボードショートカット…」で変えられます")));  // (PC5 H-0)
         // a key changed: the guide and the list say the new one
         book.act("act_pen")->setShortcut(QKeySequence(QStringLiteral("P")));
         QVERIFY(app::help::guide(w).contains(QStringLiteral("ブラシツール（P）")));
@@ -392,7 +392,7 @@ private slots:
         preview.view->repaint();
         QVERIFY(!preview.pixmap(0).isNull());
         preview.close();
-        QVERIFY(book.act("act_book_preview") != nullptr && book.act("act_book_preview")->shortcut() == QKeySequence(QStringLiteral("Ctrl+Shift+B")));
+        QVERIFY(book.act("act_book_preview") != nullptr && book.act("act_book_preview")->shortcut().isEmpty());  // (PC5 H-0, the Photoshop key set: Ctrl+Shift+B is 自動カラー補正's)
     }
 };
 

@@ -507,7 +507,7 @@ bool MainWindow::add_shape_part_op(Json what, bool closed, const std::optional<v
 void MainWindow::shape_part_drawn(const Json& shape, const QString& mode) {
     const std::optional<vec::Path> path = figure_path(shape);
     if (!path || path->empty()) {
-        if (shape.value("shape", std::string()) == "custom") flash(QStringLiteral("カスタムシェイプをシェイプ パネルかツールの設定で選びます"), 3000);
+        if (shape.value("shape", std::string()) == "custom") flash(QStringLiteral("カスタムシェイプをシェイプ パネルかオプションで選びます"), 3000);
         return;
     }
     const std::string kind = shape.value("shape", std::string());

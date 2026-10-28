@@ -1150,7 +1150,7 @@ private slots:
         QVERIFY(windows != nullptr);
         QStringList texts;
         for (QAction* a : windows->actions()) texts << a->text();
-        QVERIFY(texts.contains(QStringLiteral("新しいウィンドウ（同じ原稿）")) && texts.contains(QStringLiteral("次の原稿")));
+        QVERIFY(texts.contains(QStringLiteral("アレンジ")) && texts.contains(QStringLiteral("次の原稿")));  // (PC5 H-0: アレンジ → 新規ウィンドウ)
         desk.window->resize(1024, 640);
         QCoreApplication::processEvents();
         QVERIFY(desk.window->doc_tabs()->isVisible());

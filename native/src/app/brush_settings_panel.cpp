@@ -417,7 +417,7 @@ void BrushSettingsPanel::build_dab_page(QWidget* page) {
     // (review P3-20, E1 review P3-13: Photoshop's オプションバーの筆圧の 2 つ, kept with the brush as a preset keeps them)
     flag("pressure_size", QStringLiteral("筆圧でサイズを変える"), [](const S& s) { return s.pressure_size; }, [](S& s, bool v) { s.pressure_size = v; });
     flag("pressure_opacity", QStringLiteral("筆圧で不透明度を変える"), [](const S& s) { return s.pressure_opacity; }, [](S& s, bool v) { s.pressure_opacity = v; });
-    outer->addWidget(hint(QStringLiteral("滑らかさ・流量・描画モードはツールの設定で（ブラシごとに覚えます）。")));
+    outer->addWidget(hint(QStringLiteral("滑らかさ・流量・描画モードはオプションで（ブラシごとに覚えます）。")));
     outer->addStretch(1);
 }
 

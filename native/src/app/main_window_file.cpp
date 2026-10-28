@@ -159,7 +159,6 @@ void MainWindow::build_file_menu(QMenu* file) {
     actions_menu_->setProperty("remade", true);
     connect(actions_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_actions_menu);
     fill_actions_menu();
-    file->addAction(action("act_prefs"));
     file->addSeparator();
     file->addAction(action("act_quit"));
 }

@@ -57,6 +57,7 @@
 #include "app/perf.hpp"
 #include "app/reply_box.hpp"
 #include "app/save_status.hpp"
+#include "app/settings_watch.hpp"
 #include "app/studio_widgets.hpp"
 #include "app/icons.hpp"
 #include "app/theme.hpp"
@@ -386,6 +387,10 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     // the person's own keys and ways (環境設定): every command named by its words, its keys as chosen
     preferences::name_commands(this);
     preferences::apply_all(this);
+    // (PC5 H-0: a preference another program writes — genko prefs set — applied to every window open)
+    watch_settings([] {
+        for (MainWindow* window : documents::windows()) preferences::apply_all(window);
+    });
     if (gpu_available()) canvas_->use_gpu(true);  // (the page drawn by the graphics card, when chosen and real)
     theme::name_buttons(this);
     // (tool_settings.fit_narrow, as Python's window does to the side panels and the tool settings: each shrinks to the

@@ -441,7 +441,7 @@ private slots:
         ts->fold_button()->click();
         QCoreApplication::processEvents();
         QVERIFY(ts->folded() && !ts->stack()->isVisible() && ts->title()->text().startsWith(QStringLiteral("コマ割り")));
-        QDockWidget* dock = book.dock(QStringLiteral("ツールの設定"));
+        QDockWidget* dock = book.dock(QStringLiteral("オプション"));  // (PC5 H-0: Photoshop's name)
         QVERIFY(dock != nullptr && dock->maximumHeight() < 100);
         ts->fold_button()->click();
         QCoreApplication::processEvents();

@@ -231,11 +231,13 @@ private slots:
         };
         const std::vector<Want> wanted = {
             // (PC4 F-0, 節 F 5.1: 書き出し… is ファイル → 書き出し → 原稿を書き出す…, 印刷… is プリント…)
-            {"act_export", "原稿を書き出す…", "Ctrl+E", "PDF・TIFF・PSD・縦読み・SNS 用などに書き出します", false, "ファイル/書き出し"},
+            {"act_export", "原稿を書き出す…", "",  // (PC5 H-0, the Photoshop key set: Ctrl+E is 下のレイヤーと結合's)
+             "PDF・TIFF・PSD・縦読み・SNS 用などに書き出します", false, "ファイル/書き出し"},
             {"act_print", "プリント…", "Ctrl+P", "プリンターで紙に印刷します（仕上がりで切る・用紙全体）", false, "ファイル"},
-            {"act_history", "履歴…", "Ctrl+H", "変更の一覧。クリックでその時点まで戻る・進む", false, "編集"},
+            {"act_history", "ヒストリー…", "",  // (PC5 H-0: Photoshop's name; Ctrl+H is エクストラ's)
+             "変更の一覧。クリックでその時点まで戻る・進む", false, "編集"},
             {"act_phone", "スマホの画面の範囲を表示", "", "縦読みの原稿で、スマホ 1 画面に入る範囲と画面の切れ目", true, "表示"},
-            {"act_scale", "目盛りを表示", "Ctrl+R", "上と左に mm の目盛り。目盛りからドラッグするとガイド線を引けます", true, "表示"},
+            {"act_scale", "定規", "Ctrl+R", "上と左に mm の定規。定規からドラッグするとガイド線を引けます", true, "表示"},
             {"act_checks", "入稿前の点検", "F9", "はみ出し・文字の重なりや小ささ・解像度などを探します", false, "ページ"},
         };
         for (const Want& e : wanted) {
@@ -263,15 +265,14 @@ private slots:
         QCOMPARE(exports.indexOf(QStringLiteral("レイヤーからファイル…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 2);
         QCOMPARE(exports.indexOf(QStringLiteral("パスを Illustrator へ…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 3);
         const QStringList edit = menu_items(w, QStringLiteral("編集"));
-        QCOMPARE(edit.mid(0, 4), (QStringList{QStringLiteral("元に戻す"), QStringLiteral("やり直す"), QStringLiteral("履歴…"), QStringLiteral("|")}));
+        QCOMPARE(edit.mid(0, 4), (QStringList{QStringLiteral("取り消し"), QStringLiteral("やり直し"), QStringLiteral("ヒストリー…"), QStringLiteral("|")}));
         const QStringList view = menu_items(w, QStringLiteral("表示"));
         const int guides = view.indexOf(QStringLiteral("仕上がり線・基本枠を表示"));
-        // (PC3 B1: 選択範囲の境界線 — Photoshop's 表示 → 表示・非表示 → 選択範囲の境界線 — after 目盛りを表示; PC4 E1: ブラシ
-        // プレビュー — Photoshop's 表示 → 表示・非表示 → ブラシプレビュー — after it; PC4 E3: パターンプレビュー — Photoshop's
-        // 表示 → パターンプレビュー — after that)
-        QCOMPARE(view.mid(guides, 7), (QStringList{QStringLiteral("仕上がり線・基本枠を表示"), QStringLiteral("スマホの画面の範囲を表示"),
-                                                   QStringLiteral("目盛りを表示"), QStringLiteral("選択範囲の境界線"), QStringLiteral("ブラシプレビュー"),
-                                                   QStringLiteral("パターンプレビュー"), QStringLiteral("前のページを透かす（オニオンスキン）")}));
+        // (PC5 H-0, 節 H 5.1: 表示 in Photoshop's order — 定規 (目盛りを表示 before), ブラシプレビュー and パターンプレビュー in their
+        // places, test_gui_actions' theMenusOfPC5 —, Genko's own after a line)
+        QCOMPARE(view.mid(guides, 4), (QStringList{QStringLiteral("仕上がり線・基本枠を表示"), QStringLiteral("スマホの画面の範囲を表示"),
+                                                   QStringLiteral("選択範囲の境界線"), QStringLiteral("前のページを透かす（オニオンスキン）")}));
+        QVERIFY(view.indexOf(QStringLiteral("定規")) < guides && view.indexOf(QStringLiteral("ブラシプレビュー")) < view.indexOf(QStringLiteral("定規")));
         const QStringList pages = menu_items(w, QStringLiteral("ページ"));
         // (Python's row: 台詞の検索・置換…, 本の形でプレビュー… (M6), 入稿前の点検)
         QCOMPARE(pages.indexOf(QStringLiteral("本の形でプレビュー…")), pages.indexOf(QStringLiteral("台詞の検索・置換…")) + 1);
@@ -289,7 +290,7 @@ private slots:
         QVERIFY(!s.canvas()->phone_view);
         QVERIFY(!s.act("act_scale")->isChecked());
         QVERIFY(!s.canvas()->show_scale);
-        for (const QString& title : {QStringLiteral("履歴"), QStringLiteral("点検")}) {
+        for (const QString& title : {QStringLiteral("ヒストリー"), QStringLiteral("点検")}) {
             QDockWidget* d = s.dock(title);
             QVERIFY(d != nullptr);
             QVERIFY(d->isHidden());
@@ -948,7 +949,7 @@ private slots:
         w.show();
         QDockWidget* dock = nullptr;
         for (QDockWidget* d : w.findChildren<QDockWidget*>()) {
-            if (d->windowTitle() == QStringLiteral("履歴")) dock = d;
+            if (d->windowTitle() == QStringLiteral("ヒストリー")) dock = d;
         }
         QVERIFY(dock != nullptr && dock->isHidden());
         w.action(QStringLiteral("act_history"))->trigger();
@@ -1311,11 +1312,11 @@ private slots:
         QCOMPARE(list->count(), 2);
         // behind the page list: left as it is until it is in front again
         s.dock(QStringLiteral("ページ"))->raise();
-        QVERIFY(gui_test::wait_for([&] { return s.dock(QStringLiteral("履歴"))->geometry().right() < 0; }));
+        QVERIFY(gui_test::wait_for([&] { return s.dock(QStringLiteral("ヒストリー"))->geometry().right() < 0; }));
         QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_page"}, {"count", 1}}})));
         QTest::qWait(400);
         QCOMPARE(list->count(), 2);
-        s.dock(QStringLiteral("履歴"))->raise();
+        s.dock(QStringLiteral("ヒストリー"))->raise();
         QVERIFY(gui_test::wait_for([&] { return list->count() == 3; }));
     }
 

@@ -251,7 +251,7 @@ ToolSettings::ToolSettings(QWidget* parent) : QWidget(parent) {
     fold_->setProperty("iconbtn", true);
     fold_->setFixedSize(24, 24);
     fold_->setCheckable(true);
-    fold_->setToolTip(QStringLiteral("ツールの設定をたたむ・開く"));
+    fold_->setToolTip(QStringLiteral("オプションをたたむ・開く"));
     connect(fold_, &QPushButton::toggled, this, [this](bool on) { set_folded(on); });
     badge_ = new QLabel;
     badge_->setObjectName(QStringLiteral("tool_badge"));

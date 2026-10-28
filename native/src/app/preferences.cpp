@@ -45,11 +45,13 @@
 #include "app/config.hpp"
 #include "app/documents.hpp"
 #include "app/icons.hpp"
+#include "app/key_sets.hpp"
 #include "app/look.hpp"
 #include "app/main_window.hpp"
 #include "app/theme.hpp"
 #include "app/workspace.hpp"
 #include "core/model.hpp"
+#include "core/prefs_table.hpp"
 #include "core/pynum.hpp"
 
 namespace genko::app::preferences {
@@ -77,19 +79,25 @@ const std::vector<std::pair<QString, QString>>& pen_buttons() {
     return all;
 }
 
-int ui_font_pt() { return settings()->value(QStringLiteral("ui/font_pt"), 0).toInt(); }
+// (PC5 H-0: read through 環境設定の表 — core/prefs_table: its fallbacks, ranges and choices)
+namespace {
 
-QString default_paper() { return settings()->value(QStringLiteral("new/paper"), QString()).toString(); }
-
-int recent_count() {
-    bool ok = false;
-    const int value = settings()->value(QStringLiteral("files/recent_count"), kRecentDefault).toInt(&ok);
-    return ok ? std::clamp(value, 0, kRecentMax) : kRecentDefault;
+core::Json pref(const char* path) {
+    const auto store = settings();
+    return core::prefs::value(*store, path);
 }
 
-bool lowercase_extension() { return truthy(settings()->value(QStringLiteral("files/lowercase_extension"), QStringLiteral("true"))); }
+}  // namespace
 
-bool ignore_exif_profile() { return truthy(settings()->value(QStringLiteral("files/ignore_exif_profile"), QStringLiteral("false"))); }
+int ui_font_pt() { return pref("interface.uiFontSize").get<int>(); }
+
+QString default_paper() { return QString::fromStdString(pref("book.newPaper").get<std::string>()); }
+
+int recent_count() { return pref("fileHandling.recentFileCount").get<int>(); }
+
+bool lowercase_extension() { return pref("fileHandling.lowercaseExtension").get<bool>(); }
+
+bool ignore_exif_profile() { return pref("fileHandling.ignoreExifProfileTag").get<bool>(); }
 
 int save_after_ms() {
     bool ok = false;
@@ -98,24 +106,18 @@ int save_after_ms() {
 }
 
 std::optional<double> tablet_gamma() {
-    const QVariant value = settings()->value(QStringLiteral("tablet/gamma"));
-    bool ok = false;
-    const double gamma = value.toString().toDouble(&ok);
-    if (!value.isValid() || value.toString().isEmpty() || !ok) return std::nullopt;
-    return gamma;
+    const core::Json gamma = pref("tablet.pressureGamma");
+    if (!gamma.is_number()) return std::nullopt;  // ("": the usual curve)
+    return gamma.get<double>();
 }
 
-bool brush_preview() { return truthy(settings()->value(QStringLiteral("ui/brush_preview"), QStringLiteral("true"))); }
+bool brush_preview() { return pref("view.brushPreview").get<bool>(); }
 
 void set_brush_preview(bool on) { settings()->setValue(QStringLiteral("ui/brush_preview"), on ? QStringLiteral("true") : QStringLiteral("false")); }
 
-bool cross_while_drawing() { return truthy(settings()->value(QStringLiteral("ui/cross_drawing"), QStringLiteral("false"))); }
+bool cross_while_drawing() { return pref("cursors.showOnlyCrosshairWhilePainting").get<bool>(); }
 
-QString pen_button() {
-    const QString value = settings()->value(QStringLiteral("tablet/button"), QStringLiteral("menu")).toString();
-    const auto& all = pen_buttons();
-    return std::any_of(all.begin(), all.end(), [&value](const auto& b) { return b.second == value; }) ? value : QStringLiteral("menu");
-}
+QString pen_button() { return QString::fromStdString(pref("tablet.penButton").get<std::string>()); }
 
 double gamma_for(const std::vector<double>& pressures) {
     std::vector<double> usable;
@@ -232,12 +234,66 @@ const std::multimap<QString, QString>& renamed() {
                                                      {QStringLiteral("ブラシサイズを小さく"), QStringLiteral("細く（ペン・消しゴム）")},
                                                      {QStringLiteral("選んだ線を描画色にする"), QStringLiteral("選んだ線をペンの色にする")},
                                                      {QStringLiteral("マスクを編集する（ブラシで見せる・消しゴムで隠す）"),
-                                                      QStringLiteral("マスクを編集する（ペンで見せる・消しゴムで隠す）")}};
+                                                      QStringLiteral("マスクを編集する（ペンで見せる・消しゴムで隠す）")},
+                                                     // (PC5 H-0, 節 H 1.2 and the user's decision 12: 表示, ウィンドウ and 編集's
+                                                     // commands and the panels by Photoshop's names; 表示 → 水平方向に反転 and 定規
+                                                     // share their words with 編集 → 変形's and the 定規 tool: by their places)
+                                                     {QStringLiteral("取り消し"), QStringLiteral("元に戻す")},
+                                                     {QStringLiteral("やり直し"), QStringLiteral("やり直す")},
+                                                     {QStringLiteral("画面サイズに合わせる"), QStringLiteral("全体を表示")},
+                                                     {QStringLiteral("ズームイン"), QStringLiteral("拡大")},
+                                                     {QStringLiteral("ズームアウト"), QStringLiteral("縮小")},
+                                                     {QStringLiteral("プリントサイズ"), QStringLiteral("原寸（紙の大きさ）")},
+                                                     {QStringLiteral("ズームツール"), QStringLiteral("虫めがね")},
+                                                     {QStringLiteral("水平方向に反転（表示）"), QStringLiteral("左右反転して見る")},
+                                                     {QStringLiteral("定規（表示）"), QStringLiteral("目盛りを表示")},
+                                                     {QStringLiteral("描画定規を表示"), QStringLiteral("定規を表示")},
+                                                     {QStringLiteral("描画定規にスナップ"), QStringLiteral("定規にスナップ")},
+                                                     {QStringLiteral("ヒストリー…"), QStringLiteral("履歴…")},
+                                                     {QStringLiteral("ヒストリー"), QStringLiteral("履歴")},
+                                                     {QStringLiteral("ナビゲーター"), QStringLiteral("全体図")},
+                                                     {QStringLiteral("オプション"), QStringLiteral("ツールの設定")},
+                                                     {QStringLiteral("検索"), QStringLiteral("コマンドを探す…")},
+                                                     {QStringLiteral("新規ウィンドウ"), QStringLiteral("新しいウィンドウ（同じ原稿）")},
+                                                     {QStringLiteral("一般…"), QStringLiteral("環境設定…")}};
     return all;
 }
 
 const std::vector<QString>& reused_names() {
-    static const std::vector<QString> all{QStringLiteral("グラデーション")};
+    // (PC5 H-0: 書き出し… — 原稿を書き出す…'s before PC4 F-0 — is 編集 → 環境設定 → 書き出し…'s own name since)
+    static const std::vector<QString> all{QStringLiteral("グラデーション"), QStringLiteral("書き出し…")};
+    return all;
+}
+
+const std::map<QString, QString>& words_owner() {
+    static const std::map<QString, QString> all{{QStringLiteral("定規"), QStringLiteral("act_ruler")}};
+    return all;
+}
+
+const std::vector<Pane>& panes() {
+    // (Photoshop's 環境設定 ▸ in its order, then Genko's own; the pages the dialog has now — H-e makes the rest and sorts the
+    // dialog by these panes)
+    static const std::vector<Pane> all{
+        {QStringLiteral("general"), QStringLiteral("一般…"), QStringLiteral("表示・作業")},
+        {QStringLiteral("interface"), QStringLiteral("インターフェイス…"), QStringLiteral("表示・作業")},
+        {QStringLiteral("workspace"), QStringLiteral("ワークスペース…"), QString()},
+        {QStringLiteral("tools"), QStringLiteral("ツール…"), QStringLiteral("表示・作業")},
+        {QStringLiteral("historyLog"), QStringLiteral("ヒストリーログ…"), QString()},
+        {QStringLiteral("fileHandling"), QStringLiteral("ファイル管理…"), QStringLiteral("ファイル管理")},
+        {QStringLiteral("export"), QStringLiteral("書き出し…"), QStringLiteral("書き出し")},
+        {QStringLiteral("performance"), QStringLiteral("パフォーマンス…"), QStringLiteral("表示・作業")},
+        {QStringLiteral("scratchDisks"), QStringLiteral("仮想記憶ディスク…"), QString()},
+        {QStringLiteral("cursors"), QStringLiteral("カーソル…"), QStringLiteral("表示・作業")},
+        {QStringLiteral("transparencyAndGamut"), QStringLiteral("透明部分・色域…"), QStringLiteral("透明部分・色域")},
+        {QStringLiteral("unitsAndRulers"), QStringLiteral("単位・定規…"), QString()},
+        {QStringLiteral("guidesGridAndSlices"), QStringLiteral("ガイド・グリッド・スライス…"), QString()},
+        {QStringLiteral("plugIns"), QStringLiteral("プラグイン…"), QString()},
+        {QStringLiteral("type"), QStringLiteral("テキスト…"), QString()},
+        {QStringLiteral("enhancedControls"), QStringLiteral("拡張コントロール…"), QString()},
+        {QStringLiteral("rawDefaults"), QStringLiteral("Camera Raw…"), QStringLiteral("Camera Raw")},
+        {QStringLiteral("integrations"), QStringLiteral("連携…"), QString()},
+        {QStringLiteral("tablet"), QStringLiteral("ペンタブレット…"), QStringLiteral("ペンタブレット")},
+        {QStringLiteral("comfort"), QStringLiteral("長い時間の作業…"), QStringLiteral("表示・作業")}};
     return all;
 }
 
@@ -319,7 +375,7 @@ void apply_shortcuts(MainWindow* window) {
         if (keys != action->shortcuts()) action->setShortcuts(keys);
     }
     retip(window);
-    if (!taken.isEmpty()) window->flash(taken.join(QLatin1Char('\n')) + QStringLiteral("（環境設定 → ショートカットで変えられます）"), 8000);
+    if (!taken.isEmpty()) window->flash(taken.join(QLatin1Char('\n')) + QStringLiteral("（編集 → キーボードショートカット… で変えられます）"), 8000);
 }
 
 void retip(MainWindow* window) {
@@ -423,9 +479,12 @@ QColor gamut_colour() {
     return colour.isValid() ? colour : QColor(128, 128, 128);
 }
 
-int gamut_opacity() { return std::clamp(settings()->value(QStringLiteral("view/gamut_opacity"), 100).toInt(), 1, 100); }
+int gamut_opacity() { return pref("transparencyAndGamut.gamutWarningOpacity").get<int>(); }
 
 void apply_all(MainWindow* window) {
+    // (PC5 H-0: the key set's keys first — each command's own then —, the person's over them)
+    key_sets::apply(window, key_sets::current());
+    name_commands(window);
     apply_shortcuts(window);
     window->set_save_after(save_after_ms());
     PageCanvas* canvas = window->canvas();
@@ -549,8 +608,20 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     clash->setWordWrap(true);
     auto* reset = new QPushButton(QStringLiteral("すべて最初のキーに戻す"));
     connect(reset, &QPushButton::clicked, this, &PreferencesDialog::reset_keys);
+    // キーの組 (PC5 H-0, the user's decision 8): Photoshop's keys, or Genko's before PC5
+    key_set = new QComboBox;
+    key_set->setObjectName(QStringLiteral("prefs_key_set"));
+    for (const key_sets::Set& one : key_sets::sets()) key_set->addItem(one.label, one.id);
+    key_set->setCurrentIndex(std::max(0, key_set->findData(key_sets::current())));
+    key_set->setToolTip(QStringLiteral("「Photoshop の初期設定」は Photoshop と同じキー、「Genko」は PC5 より前の Genko のキーです。自分で変えたキーはどちらでもそのまま"));
+    choose_key_set();
+    connect(key_set, &QComboBox::currentIndexChanged, this, [this] { choose_key_set(); });
+    auto* set_row = new QHBoxLayout;
+    set_row->addWidget(new QLabel(QStringLiteral("キーの組")));
+    set_row->addWidget(key_set, 1);
     auto* keys = new QWidget;
     auto* kl = new QVBoxLayout(keys);
+    kl->addLayout(set_row);
     kl->addWidget(new QLabel(QStringLiteral("キーを変えたいコマンドの右をクリックして、新しいキーを押します。")));
     kl->addWidget(table, 1);
     kl->addWidget(clash);
@@ -919,8 +990,37 @@ void PreferencesDialog::forget_gamma() {
 
 void PreferencesDialog::reset_keys() {
     for (const auto& [name, edit] : editors) {
-        const auto found = window_->default_shortcuts.find(name);
-        edit->setKeySequence(found != window_->default_shortcuts.end() && !found->second.isEmpty() ? found->second.front() : QKeySequence());
+        const auto found = set_keys.find(name);
+        edit->setKeySequence(found != set_keys.end() && !found->second.isEmpty() ? found->second.front() : QKeySequence());
+    }
+}
+
+void PreferencesDialog::choose_key_set() {
+    // (each command's keys in the set now chosen; a command whose keys are the last set's own takes the new set's — the
+    // person's own stay)
+    const QString set = key_set->currentData().toString();
+    std::map<QString, QList<QKeySequence>> next;
+    const auto names = command_names(window_);
+    for (QAction* action : preferences::commands(window_)) next[command_name(names, action)] = key_sets::keys_of(action, set);
+    if (!set_keys.empty()) {
+        for (const auto& [name, edit] : editors) {
+            const auto was = set_keys.find(name);
+            const QKeySequence old = was != set_keys.end() && !was->second.isEmpty() ? was->second.front() : QKeySequence();
+            if (edit->keySequence() != old) continue;
+            const auto now = next.find(name);
+            edit->setKeySequence(now != next.end() && !now->second.isEmpty() ? now->second.front() : QKeySequence());
+        }
+    }
+    set_keys = std::move(next);
+}
+
+void PreferencesDialog::show_pane(const QString& id) {
+    QString page = id == QLatin1String("keyboardShortcuts") ? QStringLiteral("ショートカット") : QString();
+    for (const Pane& pane : panes()) {
+        if (pane.id == id) page = pane.page;
+    }
+    for (int i = 0; i < tabs->count(); ++i) {
+        if (tabs->tabText(i) == page) tabs->setCurrentIndex(i);
     }
 }
 
@@ -946,13 +1046,14 @@ void PreferencesDialog::save() {
         return;
     }
     const auto store = settings();
+    key_sets::set_current(key_set->currentData().toString());  // (PC5 H-0: the set's keys are each command's own from now)
     std::map<QString, QStringList> chosen(keys.begin(), keys.end());
     const auto names = command_names(window_);
     for (QAction* action : preferences::commands(window_)) {
         const QString name = command_name(names, action);
         const QStringList now = chosen[name];
-        const auto found = window_->default_shortcuts.find(name);
-        const QList<QKeySequence> defaults = found != window_->default_shortcuts.end() ? found->second : QList<QKeySequence>();
+        const auto found = set_keys.find(name);
+        const QList<QKeySequence> defaults = found != set_keys.end() ? found->second : QList<QKeySequence>();
         const QStringList first_default = defaults.isEmpty() ? QStringList() : QStringList{defaults.front().toString()};
         const QString key = QStringLiteral("shortcuts/%1").arg(name);
         if (now == first_default) {
