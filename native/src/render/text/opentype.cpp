@@ -12,6 +12,7 @@
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
 #include "core/type_text.hpp"
+#include "render/text/memo.hpp"
 
 namespace genko::render::text {
 
@@ -38,12 +39,20 @@ bool sets_opentype(const core::StoryLine& line) {
 namespace {
 
 thread_local const Json* g_styles = nullptr;
+thread_local std::string g_digest;
 
 }  // namespace
 
-TypeStyles::TypeStyles(const Json* styles) : was_(g_styles) { g_styles = styles; }
-TypeStyles::~TypeStyles() { g_styles = was_; }
+TypeStyles::TypeStyles(const Json* styles) : was_(g_styles), was_digest_(g_digest) {
+    g_styles = styles;
+    g_digest = styles != nullptr && !styles->is_null() ? detail::digest_of(styles->dump()) : std::string();
+}
+TypeStyles::~TypeStyles() {
+    g_styles = was_;
+    g_digest = was_digest_;
+}
 const Json* TypeStyles::current() { return g_styles; }
+const std::string& TypeStyles::digest() { return g_digest; }
 
 Resolved resolve(const core::StoryLine& line, std::u32string_view text, const std::vector<std::size_t>& from, const Json* styles) {
     Resolved out;

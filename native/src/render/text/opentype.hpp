@@ -72,9 +72,12 @@ public:
     TypeStyles(const TypeStyles&) = delete;
     TypeStyles& operator=(const TypeStyles&) = delete;
     static const core::Json* current();
+    // The styles' digest (SHA-256 of their JSON, made once when they are set; "" for none): the lettering's memo key.
+    static const std::string& digest();
 
 private:
     const core::Json* was_;
+    std::string was_digest_;
 };
 
 // A paragraph shaped: its runs (logical order) and each letter's advance in px — a cluster's on its first letter (with its

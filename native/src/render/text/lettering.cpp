@@ -20,10 +20,12 @@
 #include "core/pyops.hpp"
 #include "core/page_geometry.hpp"
 #include "core/ruby.hpp"
+#include "core/type_text.hpp"
 #include "render/draw.hpp"
 #include "render/imaging.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/op_limits.hpp"
+#include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/resample.hpp"
 #include "render/text/fonts.hpp"
@@ -420,10 +422,13 @@ OpenTypeRows opentype_rows(const OpenTypeIn& q) {
     // (the line's own 長体・平体 and lean are drawn after its letters, as before: each letter's are against them)
     const double line_scale_x = float_or(at(q.st, "scale_x"), 1.0);
     const bool leant_after = float_or(at(q.st, "skew_deg"), 0) != 0.0 || core::py_truthy(at(q.st, "italic"));
-    const double base_mm = float_or(at(q.st, "size_mm"), static_cast<double>(q.em) / px_mm);
+    // (a letter's size_mm against the line's own size — its style's, else the lines' 5 mm —: a line fitted to its balloon
+    // shrinks all its letters alike, review P3-12)
+    const double base_mm = float_or(at(q.st, "size_mm"), kCapMm);
     const Json& line_font = at(q.st, "font");
     // each letter's look
     std::vector<Look> looks;
+    std::map<std::string, std::size_t> look_index;  // (a look's key → its place: found in log time, review P2-5)
     std::vector<std::size_t> look_of(text.size(), 0);
     std::map<std::string, std::vector<std::string>> font_features;  // (font → its OpenType features)
     const auto has_feature = [&](const std::string& font, const std::string& tag) {
@@ -485,13 +490,23 @@ OpenTypeRows opentype_rows(const OpenTypeIn& q) {
         look.shift = attr_num(a, "baseline_shift_mm", 0.0) * px_mm;
         const Json& word_rgb = at(q.styles[i], "rgb");
         look.rgb = core::py_truthy(word_rgb) ? rgb_tuple(word_rgb) : attr(a, "rgb").is_array() ? rgb_tuple(attr(a, "rgb")) : q.fill;
+        // (faux bold: the word's own where Genko's words say it — style_runs —, else the record's resolved attribute, which
+        // holds the line's weight: a word set normal in a bold line stays normal, review P3-1)
         const int faux = attr(a, "faux_bold") == Json("heavy") ? 2 : attr(a, "faux_bold") == Json("bold") ? 1 : 0;
-        look.bold = bold_px(look.size, std::max(weight_level(at(q.styles[i], "bold")), faux));
+        const bool word_bold = q.styles[i].is_object() && q.styles[i].contains("bold");
+        look.bold = bold_px(look.size, word_bold ? weight_level(q.styles[i]["bold"]) : faux);
         look.underline = attr(a, "underline") == Json(true);
         look.strikethrough = attr(a, "strikethrough") == Json(true);
-        const auto found = std::find(looks.begin(), looks.end(), look);
-        look_of[i] = static_cast<std::size_t>(found - looks.begin());
-        if (found == looks.end()) looks.push_back(std::move(look));
+        std::string key = look.font + '|' + std::to_string(look.size) + '|' + look.language + '|' + std::to_string(look.tracking) + '|' +
+                          std::to_string(look.shape.scale_x) + ',' + std::to_string(look.shape.scale_y) + ',' + std::to_string(look.shape.lean) + '|' +
+                          std::to_string(look.shift) + '|' + std::to_string(look.bold) + (look.underline ? "u" : "") + (look.strikethrough ? "s" : "") +
+                          (look.all_caps ? "A" : "") + (look.small_caps ? "c" : "");
+        for (const std::int64_t c : look.rgb) key += ',' + std::to_string(c);
+        for (const auto& [tag, value] : look.features) key += '|' + tag + '=' + std::to_string(value);
+        for (const auto& [tag, value] : look.variations) key += '|' + tag + ':' + std::to_string(value);
+        const auto [it, fresh] = look_index.emplace(std::move(key), looks.size());
+        look_of[i] = it->second;
+        if (fresh) looks.push_back(std::move(look));
     }
     if (looks.empty()) {  // (an empty text: a row of the line's size)
         Look look;
@@ -503,7 +518,7 @@ OpenTypeRows opentype_rows(const OpenTypeIn& q) {
     const auto ascent_of = [&](std::size_t l) {
         return q.fonts.truetype(looks[l].font, looks[l].size, looks[l].variations).getmetrics();
     };
-    const double leading_add = float_or(at(q.st, "leading"), 0);
+    const double leading_add = native ? float_or(at(q.line.style, "leading"), 0) : float_or(at(q.st, "leading"), 0);
     struct Row {
         std::size_t para = 0;     // (which shaped paragraph)
         std::size_t start = 0;    // (letters of the paragraph [start, end), drawn [start, drawn))
@@ -528,10 +543,22 @@ OpenTypeRows opentype_rows(const OpenTypeIn& q) {
     };
     std::vector<Para> paras;
     std::vector<Row> rows;
-    const std::string line_align = core::py_str(core::py_or(at(q.st, "align"), Json("center")));
+    // (a line's alignment as the lines' own setting reads it — left, right and justify kept, anything else, its default
+    // "top" included, centred —; a point or box text's is its own or left: layout_of; review P2-1)
+    std::string line_align = core::py_str(core::py_or(at(q.st, "align"), Json("center")));
+    if (line_align != "left" && line_align != "right" && line_align != "start" && !line_align.starts_with("justify")) line_align = "center";
     std::int64_t pending_after = 0;
+    // (a paragraph ends at a line break, and where Unicode ends one — U+2029, a lone CR, NEL, U+001C..U+001E —: SheenBidi
+    // is never handed a separator inside a paragraph; review P2-4)
+    const auto ends_paragraph = [&](std::size_t i) {
+        const char32_t c = text[i];
+        return c == U'\n' || c == U'\u2029' || c == U'\u0085' || (c >= 0x1C && c <= 0x1E) || (c == U'\r' && (i + 1 >= text.size() || text[i + 1] != U'\n'));
+    };
     for (std::size_t ps = 0;;) {
-        std::size_t pe = text.find(U'\n', ps);
+        if (q.fonts.stop().stop_requested()) throw Cancelled();
+        std::size_t pe = ps;
+        while (pe < text.size() && !ends_paragraph(pe)) ++pe;
+        if (pe >= text.size()) pe = std::u32string::npos;
         const bool last_para = pe == std::u32string::npos;
         if (last_para) pe = text.size();
         const std::size_t probe = ps < text.size() ? ps : (ps > 0 ? ps - 1 : 0);
@@ -694,6 +721,15 @@ OpenTypeRows opentype_rows(const OpenTypeIn& q) {
     }
     const auto drop = static_cast<std::int64_t>(std::ceil(std::max(0.0, -low)));
     total = std::max<std::int64_t>(total, static_cast<std::int64_t>(std::ceil(high))) + drop;
+    // (its size judged before it is made — at 600 dpi, whatever the resolution asked, as layout_of judges a text: what an op
+    // lets in is drawn at any resolution up to it; review P1-1)
+    {
+        const double at600 = 600.0 / static_cast<double>(q.dpi);
+        const double wide = static_cast<double>(out_w) * std::max(1.0, at600), high600 = static_cast<double>(total) * std::max(1.0, at600);
+        if (!std::isfinite(wide) || !std::isfinite(high600) || wide > static_cast<double>(limits::kSide) || high600 > static_cast<double>(limits::kSide) ||
+            wide * high600 > static_cast<double>(limits::kPixels))
+            throw core::Error("image_too_large", "the text is too large to set at this resolution");
+    }
     result.image = blank(out_w, std::max<std::int64_t>(1, total));
     Image& out = result.image;
     const std::string mark_kind = core::py_str(core::py_or(at(q.st, "emphasis_mark"), Json("sesame")));
@@ -807,7 +843,8 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
         if (c != U'\n') flat.push_back(c);
     }
     const int weight = line_weight(st);
-    const std::vector<Json> styles_flat = char_styles(flat, line.style_runs, weight ? Json{{"bold", weight}} : Json());
+    // (the OpenType rows take the line's weight from the record's resolved attributes: the words' own alone here)
+    const std::vector<Json> styles_flat = char_styles(flat, line.style_runs, weight && !opentype ? Json{{"bold", weight}} : Json());
     std::vector<Json> styles;  // (styles per character of the text, "\n" included)
     std::size_t k = 0;
     for (const char32_t c : text) styles.push_back(c == U'\n' ? Json::object() : styles_flat[k++]);
@@ -1583,8 +1620,35 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
                 longest = std::max(longest, ++run);
             }
         }
-        const double step = static_cast<double>(em) * 1.2 * (1 + std::max(0.0, float_or(at(st, "tracking"), 0)));
-        const double rows = static_cast<double>(em) * 1.6 * (1 + std::max(0.0, float_or(at(st, "leading"), 0)));
+        double step = static_cast<double>(em) * 1.2 * (1 + std::max(0.0, float_or(at(st, "tracking"), 0)));
+        double rows = static_cast<double>(em) * 1.6 * (1 + std::max(0.0, float_or(at(st, "leading"), 0)));
+        double extra_along = 0, extra_across = 0;  // (PC5 G-b review P1-1: indents, the space between paragraphs, shifts)
+        if (sets_opentype(line)) {  // (the record's attributes at their largest: its letters' size, tracking and leading)
+            const double px_mm = static_cast<double>(dpi) / 25.4;
+            const double base_mm = float_or(at(st, "size_mm"), kCapMm);
+            double scale = 1.0, tracking = 0.0, leading = 0.0, shift = 0.0;
+            for (const core::type_text::CharRun& char_run : core::type_text::resolve_chars(line, TypeStyles::current())) {
+                const Json& a = char_run.attrs;
+                const double size_ratio = at(a, "size_mm").is_number() && base_mm > 0 ? at(a, "size_mm").get<double>() / base_mm : 1.0;
+                const double s = (at(a, "scale").is_number() ? at(a, "scale").get<double>() : 1.0) * size_ratio *
+                                 std::max(at(a, "scale_x").is_number() ? at(a, "scale_x").get<double>() : 1.0, at(a, "scale_y").is_number() ? at(a, "scale_y").get<double>() : 1.0);
+                scale = std::max(scale, s);
+                if (at(a, "tracking").is_number()) tracking = std::max(tracking, at(a, "tracking").get<double>());
+                if (at(a, "leading_mm").is_number()) leading = std::max(leading, at(a, "leading_mm").get<double>() * px_mm);
+                if (at(a, "baseline_shift_mm").is_number()) shift = std::max(shift, std::abs(at(a, "baseline_shift_mm").get<double>()) * px_mm);
+            }
+            const std::int64_t count = core::type_text::paragraph_count(line.text);
+            for (std::int64_t p = 0; p < count; ++p) {
+                const Json pa = core::type_text::resolve_para(line, TypeStyles::current(), p);
+                const auto mm = [&](const char* key) { return at(pa, key).is_number() ? std::abs(at(pa, key).get<double>()) * px_mm : 0.0; };
+                extra_along = std::max(extra_along, mm("first_indent_mm") + mm("start_indent_mm") + mm("end_indent_mm"));
+                extra_across += mm("space_before_mm") + mm("space_after_mm");
+            }
+            scale = std::min(scale, 30.0);  // (the attributes' own bounds: scale 10 and a word's 3)
+            step = static_cast<double>(em) * scale * 1.2 * (1 + std::max(0.0, tracking));
+            rows = std::max(rows * scale, leading);
+            extra_across += 2 * shift;
+        }
         double along = 0, across = 0;  // (along the rows or columns, and across them)
         if (shape == "point") {
             along = step * static_cast<double>(longest) + static_cast<double>(em);
@@ -1593,6 +1657,8 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
             along = static_cast<double>(vertical ? h : w);
             across = rows * (static_cast<double>(paragraphs) + step * static_cast<double>(text.size()) / std::max(1.0, along)) + static_cast<double>(em);
         }
+        along += extra_along;
+        across += extra_across;
         // (judged as at 600 dpi, whatever the resolution asked: what an op lets in is drawn at any resolution up to it)
         const double at600 = 600.0 / static_cast<double>(dpi);
         along *= at600;
@@ -1926,9 +1992,10 @@ std::optional<std::string> layout_key(const core::StoryLine& line, int dpi, cons
                             Json(line.ruby_runs), Json(line.emphasis_runs), style_runs, dpi, font_path ? Json(*font_path) : Json()});
     if (line.ruby_spans) key.push_back(core::ruby::to_json(*line.ruby_spans));  // (ruby-layout@1: the rubies by place)
     if (line.native_type) key.push_back(Json::array({"native_type", *line.native_type}));  // (type@1: its shape, anti-alias, …)
-    // (PC5 G-b: a record set by the OpenType typesetting reads the book's type styles — Basic Paragraph, the styles it takes)
-    if (line.native_type && TypeStyles::current() != nullptr && !TypeStyles::current()->is_null() && sets_opentype(line))
-        key.push_back(Json::array({"type_styles", *TypeStyles::current()}));
+    // (PC5 G-b: a record set by the OpenType typesetting reads the book's type styles — Basic Paragraph, the styles it takes —,
+    // a line across with features alone too; their digest, made once where they are set: review P2-3, P3-10)
+    if (TypeStyles::current() != nullptr && !TypeStyles::current()->is_null() && sets_opentype(line))
+        key.push_back(Json::array({"type_styles", TypeStyles::digest()}));
     return detail::memo_key(key);
 }
 
