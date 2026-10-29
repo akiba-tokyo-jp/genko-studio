@@ -6729,9 +6729,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/notes_import.cpp",
+        "native/src/render/psd_annotations.cpp",
+        "native/src/render/pcraft_annotations.cpp",
+        "native/tests/unit/test_annotations.cpp",
+        "native/tests/contract/test_contract_annotations.cpp",
+        "native/src/app/main_window_notes.cpp",
+        "native/tests/gui/test_gui_notes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27465,9 +27473,18 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_annotations.cpp",
+        "native/src/core/annotations.cpp",
+        "native/tests/unit/test_annotations.cpp",
+        "native/tests/contract/test_contract_annotations.cpp",
+        "native/src/render/psd_annotations.cpp",
+        "native/src/render/pcraft_annotations.cpp",
+        "native/src/app/main_window_notes.cpp",
+        "native/tests/gui/test_gui_notes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27501,9 +27518,17 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_annotations.cpp",
+        "native/src/core/annotations.cpp",
+        "native/tests/unit/test_annotations.cpp",
+        "native/tests/contract/test_contract_annotations.cpp",
+        "native/src/app/notes_panel.cpp",
+        "native/src/app/main_window_notes.cpp",
+        "native/tests/gui/test_gui_notes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27535,9 +27560,15 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_annotations.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/notes_panel.cpp",
+        "native/tests/contract/test_contract_annotations.cpp",
+        "native/tests/gui/test_gui_notes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27568,9 +27599,18 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_annotations.cpp",
+        "native/src/core/annotations.cpp",
+        "native/tests/unit/test_annotations.cpp",
+        "native/tests/contract/test_contract_annotations.cpp",
+        "native/src/app/notes_panel.cpp",
+        "native/src/app/canvas_notes.cpp",
+        "native/src/app/main_window_notes.cpp",
+        "native/tests/gui/test_gui_notes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37253,9 +37293,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_notes.cpp",
+        "native/src/app/main_window_notes.cpp",
+        "native/tests/gui/test_gui_notes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39332,9 +39376,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/notes_panel.cpp",
+        "native/src/app/main_window_notes.cpp",
+        "native/tests/gui/test_gui_notes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40467,9 +40515,14 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_notes.cpp",
+        "native/src/app/paint_panels.cpp",
+        "native/src/app/main_window_notes.cpp",
+        "native/tests/gui/test_gui_notes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

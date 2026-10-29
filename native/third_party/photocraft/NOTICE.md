@@ -313,3 +313,7 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/io/src/comps_map.rs`（124-310 行: `parse_cmls`・`comps_from_psd`・`write_comps_resource`・`write_cmls`・`set_cmls`）と `crates/psd/src/metadata.rs`（`parse_shmd`・`write_shmd`）→ `native/src/render/psd_comps.{hpp,cpp}`・`native/src/render/psd_production.cpp`（`shmd_items`・`shmd_bytes`・`layer_shmd`。読んだバイトのまま書くかを指紋で決めること・lyid を付けることは Genko のもの）。
   - `crates/format/src/manifest.rs`（99-130 行: `LayerCompM`・`CompStateM`・`CompAppearanceM`）と `crates/format/src/convert.rs`（238-265 行: `comp_m`、324-345 行: `Loader::comp`）→ `native/src/render/pcraft_comps.{hpp,cpp}`。
   - `crates/ui-egui/src/comps_ui.rs`（パネルの行と下のボタン）→ `native/src/app/layer_comps_panel.{hpp,cpp}`（Qt で作り直した）。
+- 注釈（PC5 J-c）:
+  - `crates/engine/src/notes_cmds.rs`（55-150 行: `notes.add`・`notes.set`（印と一緒に枠を動かす、本文・作成者を変えたときだけ日時を変える）・`notes.delete`、160-190 行: `import_notes_from`（紙の外の印を中へ寄せる））→ `native/src/render/ops_annotations.{hpp,cpp}`・`native/src/formats/notes_import.{hpp,cpp}`（op の名前と引数・mm で持つこと・書いた人を持ちエージェントが人の注釈を変えないこと・読み込みを op の並びにすることは Genko のもの）。試験の考え（同じファイルの tests）→ `native/tests/unit/test_annotations.cpp`。
+  - `crates/io/src/annotations_map.rs`（1-205 行: `Anno` の読み書き `parse_entries`・`write_note`・`write_anno`、色の空間 `color_from`、本文の UTF-16 と CR、音声の注釈を元のバイトのまま書き戻すこと）→ `native/src/render/psd_annotations.{hpp,cpp}`（PDF の日付を UTC に直すこと・読んだバイトのまま書くかを指紋で決めることは Genko のもの）。
+  - `crates/doc/src/analysis.rs`（94-125 行: `Note` の形と既定）と `crates/format/src/manifest.rs`（`notes`）→ `native/src/render/pcraft_annotations.{hpp,cpp}`。
