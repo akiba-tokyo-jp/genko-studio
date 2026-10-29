@@ -12,7 +12,7 @@
 // timeline's frame `at`.
 //
 //   J-a (render/ops_layer_comps.cpp, layer-comps@1): new_layer_comp, update_layer_comp, apply_layer_comp, set_layer_comp,
-//       duplicate_layer_comp, delete_layer_comp, clear_layer_comp_warnings
+//       duplicate_layer_comp, delete_layer_comp, clear_layer_comp_warnings — written (not frames any more)
 //   J-b (render/ops_slices.cpp, slices@1): add_slice, set_slice, delete_slices, divide_slice, slices_from_guides
 //   J-c (render/ops_annotations.cpp, annotations@1): add_annotation, set_annotation, delete_annotations
 //   J-d1 (render/ops_measure.cpp, measure@1): set_measurement_scale, add_count, remove_count, move_count, clear_count,
@@ -23,7 +23,7 @@
 
 namespace genko::render {
 
-// The production's ops (the groups' own, in the order above).
+// The production's ops still frames (the groups' own not written yet, in the order above).
 std::span<const std::string_view> production_op_names();
 // Each of them as a frame (not_yet_ported naming it). A group's ops written take their frames' places: its register_* is
 // called after this one in render/ops_registry.cpp (OpRegistry::add puts the later function in place).

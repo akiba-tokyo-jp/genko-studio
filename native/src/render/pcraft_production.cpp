@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 
+#include "render/pcraft_comps.hpp"
 #include "render/pcraft_manifest.hpp"
 
 namespace genko::render::pcraft_production {
@@ -28,7 +29,7 @@ bool measuring(const core::Json& v) {
 // (each group puts its reader and writer here: J-a layer_comps, J-b slices, J-c notes, J-d1 measurement, J-e1 timeline;
 // 節 I's variables — I-d — among them, where PC4 F-f's notes said it: the notes in the order they had)
 constexpr std::array<Row, 6> kRows{{
-    {"layer_comps", "レイヤーカンプ", holds_something, nullptr, nullptr},
+    {"layer_comps", "レイヤーカンプ", holds_something, pcraft_comps::read, pcraft_comps::write},
     {"notes", "注釈", holds_something, nullptr, nullptr},
     {"slices", "スライス", holds_something, nullptr, nullptr},
     {"timeline", "タイムライン", holds_something, nullptr, nullptr},
@@ -41,6 +42,7 @@ constexpr std::array<Row, 6> kRows{{
 std::span<const Row> rows() { return kRows; }
 
 void read(const core::Json& document, ReadContext& context) {
+    context.document = &document;
     for (const Row& row : rows()) {
         const core::Json* value = pcraft::optional_field(document, row.key);
         if (value == nullptr) continue;
@@ -53,6 +55,7 @@ void read(const core::Json& document, ReadContext& context) {
 }
 
 void write(const core::Page& page, core::Json& document, WriteContext& context) {
+    context.document = &document;
     for (const Row& row : rows()) {
         if (row.write == nullptr) continue;
         if (std::optional<core::Json> value = row.write(page, context)) document[std::string(row.key)] = std::move(*value);

@@ -25,12 +25,14 @@ struct ReadContext {
     double mm = 25.4 / 72;                              // mm a pixel of the document
     std::map<std::string, std::string> layers;          // a document layer's id → the layer made of it
     std::function<void(std::string)> say;               // a note of the reading
+    const core::Json* document = nullptr;               // (PC5 J-a) the whole document (a row's keys beside its own)
 };
 
 struct WriteContext {
     double px = 72 / 25.4;                              // the document's pixels a mm
     std::map<std::string, std::string> layers;          // a layer's id → its id in the document
     std::function<void(std::string)> say;               // a note of the writing
+    core::Json* document = nullptr;                     // (PC5 J-a) the whole document (a row's keys beside its own)
 };
 
 struct Row {

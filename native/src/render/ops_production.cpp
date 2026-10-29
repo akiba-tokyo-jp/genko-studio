@@ -11,10 +11,8 @@ namespace genko::render {
 
 namespace {
 
-constexpr std::array<std::string_view, 37> kNames{
-    // J-a: レイヤーカンプ (layer-comps@1)
-    "new_layer_comp", "update_layer_comp", "apply_layer_comp", "set_layer_comp", "duplicate_layer_comp", "delete_layer_comp",
-    "clear_layer_comp_warnings",
+// (J-a's レイヤーカンプ — layer-comps@1 — are written: render/ops_layer_comps)
+constexpr std::array<std::string_view, 30> kNames{
     // J-b: スライス (slices@1)
     "add_slice", "set_slice", "delete_slices", "divide_slice", "slices_from_guides",
     // J-c: 注釈 (annotations@1)

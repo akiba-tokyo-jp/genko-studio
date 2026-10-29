@@ -2789,7 +2789,8 @@ void pen_shape_layers(const Ctx& ctx, const Layer& layer, const std::function<vo
 
 void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each,
                  const std::function<void(const core::StoryLine&)>* line_layers, const std::function<void(const core::Layer&)>* adjust_layers,
-                 bool shapes) {
+                 bool shapes, bool hidden_too) {
+    const std::function<void(PageLayer&&)>& each_shown = each;
     // (smart-objects@1: a smart object that draws exactly as a layer of its own is that layer — given as the smart object's
     // picture all the same, PC3 A3)
     if (auto plain = core::smart::with_plain_layers(page, &episode)) {
@@ -2801,7 +2802,7 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
             }
             each(std::move(layer));
         };
-        return page_layers(*plain, episode, dpi, named, line_layers, adjust_layers, shapes);
+        return page_layers(*plain, episode, dpi, named, line_layers, adjust_layers, shapes, hidden_too);
     }
     // (color-model@1: the book's text_gamma, for the letters of the lines' layers — as render_page draws them)
     const text::TextGamma gamma(episode.text_gamma);
@@ -2833,10 +2834,17 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
         rgba.push_back(255);
         give("塗り " + std::string(core::to_string(role)), Image::create("RGBA", size, Ink::tuple(rgba)));
     }
+    // (PC5 J-a: a hidden layer, when asked for, given marked hidden)
+    const std::function<void(PageLayer&&)> hidden_each = [&each_shown](PageLayer&& l) {
+        l.hidden = true;
+        each_shown(std::move(l));
+    };
     for (const Layer& layer : page.layers) {
         check_cancel(ctx);
-        if (!layer.visible || !layer.exportable || guide_role(layer.role)) continue;
+        if ((!layer.visible && !hidden_too) || !layer.exportable || guide_role(layer.role)) continue;
         if (layer.kind == LayerKind::Folder) continue;
+        if (!layer.visible && (layer.kind == LayerKind::Adjust || is_tone(layer))) continue;  // (a hidden correction, a tone: not)
+        const std::function<void(PageLayer&&)>& give_layer = layer.visible ? each_shown : hidden_each;
         if (adjust_layers != nullptr && layer.kind == LayerKind::Adjust) (*adjust_layers)(layer);  // (PC2: in its place)
         if (layer.kind == LayerKind::Placed) {  // its art before the monochrome finish (mode "name")
             auto art = placed_raster(layer, page, &episode, size, dpi, "name", true, ctx.dots, whole);
@@ -2853,14 +2861,14 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
                 out.name = core::py_strip(label + " " + (!layer.title.empty() ? layer.title : layer.id));
                 out.image = std::move(*art);
                 if (layer.style) out.styled = &layer;  // (layer-styles@1: its style with it, review P2-6)
-                each(std::move(out));
+                give_layer(std::move(out));
             }
             continue;
         }
         // (pen-shapes@1, PC3 C-b: its parts, its lines; for a PSD a pen layer with a vector mask too — one layer of its
         // look with its mask, vector mask and settings, not among the ink's lines)
         if (layer.kind == LayerKind::Strokes && (shape_parts::any(layer) || (shapes && layer.vector_mask))) {
-            pen_shape_layers(ctx, layer, each, shapes);
+            pen_shape_layers(ctx, layer, give_layer, shapes);
             continue;
         }
         if (shapes && layer.kind == LayerKind::Fill && layer.fill && core::pattern_of_fill(*layer.fill)) {
@@ -2879,7 +2887,7 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
             if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled) out.mask = decoded(layer.mask->png, "L").resize(size);
             out.vector_mask = layer.vector_mask;
             out.pattern = core::pattern_of_fill(*layer.fill);
-            each(std::move(out));
+            give_layer(std::move(out));
             continue;
         }
         std::optional<Image> raster;
@@ -2917,7 +2925,7 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
             out.mask = decoded(layer.mask->png, "L").resize(size);
         }
         out.vector_mask = layer.vector_mask;  // (vector@1, PC3 C-a)
-        each(std::move(out));
+        give_layer(std::move(out));
     }
     // the pen lines of the ink layer (page.ink_strokes: its first), each as render._stroke draws it, 3 px wide
     const Layer* ink_layer = page.first_layer(LayerRole::Ink);

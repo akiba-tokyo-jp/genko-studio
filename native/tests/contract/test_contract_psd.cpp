@@ -1042,8 +1042,10 @@ private slots:
                  if (!page.layer_comps || page.layer_comps->empty() || context.lyids.empty()) return std::nullopt;
                  return "own " + page.layer_comps->comps[0].name;
              },
-             [](const core::Page& page) { return page.layer_comps && !page.layer_comps->empty() ? pp::fingerprint_of(core::to_json(*page.layer_comps)) : std::string(); },
-             nullptr},
+             [](const core::Page& page, const core::Document*) {
+                 return page.layer_comps && !page.layer_comps->empty() ? pp::fingerprint_of(core::to_json(*page.layer_comps)) : std::string();
+             },
+             nullptr, {}, nullptr},
             {-1, "Anno", "J-c", false,
              [](core::Page& page, std::string_view, const pp::ReadContext&) {
                  core::Annotation note;
@@ -1058,11 +1060,12 @@ private slots:
                  lent = context.kept_global && context.kept_global("Anno").has_value();  // (its sound notes there)
                  return "own " + page.annotations[0].text;
              },
-             [](const core::Page& page) { return page.annotations.empty() ? std::string() : pp::fingerprint_of(core::to_json(page.annotations)); },
+             [](const core::Page& page, const core::Document*) { return page.annotations.empty() ? std::string() : pp::fingerprint_of(core::to_json(page.annotations)); },
              [](const core::Page&) {
                  ++asked;
                  return false;
-             }},
+             },
+             {}, nullptr},
         };
         const pp::TableForTest table(rows);
         const std::string source = keep_file("keep.psd");
@@ -1277,7 +1280,7 @@ private slots:
         (void)genko::formats::export_page_psd(read.document, read.document.page(0), genko::storage::path_from_utf8(again.toStdString()), 150);
         QVERIFY(genko::test::read_bytes(again) == bytes);
 
-        // a layer deleted: the comps and slices that name it are not written; a merge drops what the merged layer kept; a
+        // a layer deleted: the slices that name it are not written (PC5 J-a: the comps are the page's); a merge drops what the merged layer kept; a
         // duplicate keeps it, its id written once
         const genko::core::CommandBus bus(genko::render::ops_registry());
         const auto applied = [&](const Json& ops) { return bus.apply(doc, ops, core::Actor("human:test")).doc; };
@@ -1292,7 +1295,8 @@ private slots:
         QVERIFY(resource_ids(doc, QStringLiteral("all.psd")).contains(1065));
         const core::Document deleted = applied(Json::array({Json{{"op", "delete_layer"}, {"page", 1}, {"id", plain->id}}}));
         const std::set<unsigned> left = resource_ids(deleted, QStringLiteral("deleted.psd"));
-        QVERIFY(!left.contains(1065) && !left.contains(1050) && left.contains(1037) && left.contains(1054));
+        // (PC5 J-a: the layer comps are the page's — read from 1065 —, kept when a layer is deleted: 1065 written still)
+        QVERIFY(left.contains(1065) && !left.contains(1050) && left.contains(1037) && left.contains(1054));
         // (Blend If is locked, lock all: unlocked first — 効果 too)
         const auto unlocked = [](const std::string& id) {
             return Json{{"op", "set_layer"}, {"page", 1}, {"id", id}, {"locked", false}, {"lock_alpha", false}, {"lock_position", false}};

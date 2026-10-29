@@ -6300,9 +6300,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/copy.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/main_window_layer_comps.cpp",
+        "native/tests/contract/test_contract_layer_comps.cpp",
+        "native/tests/gui/test_gui_layer_comps.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26916,9 +26922,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_comps.cpp",
+        "native/src/core/layer_comps.cpp",
+        "native/tests/unit/test_layer_comps.cpp",
+        "native/tests/contract/test_contract_layer_comps.cpp",
+        "native/src/app/layer_comps_panel.cpp",
+        "native/tests/gui/test_gui_layer_comps.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26944,9 +26957,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_comps.cpp",
+        "native/src/core/layer_comps.cpp",
+        "native/tests/unit/test_layer_comps.cpp",
+        "native/tests/contract/test_contract_layer_comps.cpp",
+        "native/src/app/layer_comps_panel.cpp",
+        "native/tests/gui/test_gui_layer_comps.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26972,9 +26992,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_comps.cpp",
+        "native/src/core/layer_comps.cpp",
+        "native/tests/unit/test_layer_comps.cpp",
+        "native/tests/contract/test_contract_layer_comps.cpp",
+        "native/src/app/layer_comps_panel.cpp",
+        "native/tests/gui/test_gui_layer_comps.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27000,9 +27027,17 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_comps.cpp",
+        "native/src/core/layer_comps.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_layer_comps.cpp",
+        "native/tests/contract/test_contract_layer_comps.cpp",
+        "native/src/app/layer_comps_panel.cpp",
+        "native/tests/gui/test_gui_layer_comps.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27028,9 +27063,19 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_comps.cpp",
+        "native/src/core/layer_comps.cpp",
+        "native/src/render/psd_comps.cpp",
+        "native/src/render/pcraft_comps.cpp",
+        "native/tests/unit/test_layer_comps.cpp",
+        "native/tests/contract/test_contract_layer_comps.cpp",
+        "native/src/app/layer_comps_panel.cpp",
+        "native/src/app/main_window_layer_comps.cpp",
+        "native/tests/gui/test_gui_layer_comps.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27056,9 +27101,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_comps.cpp",
+        "native/src/core/layer_comps.cpp",
+        "native/tests/unit/test_layer_comps.cpp",
+        "native/tests/contract/test_contract_layer_comps.cpp",
+        "native/src/app/layer_comps_panel.cpp",
+        "native/tests/gui/test_gui_layer_comps.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27084,9 +27136,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_comps.cpp",
+        "native/src/core/layer_comps.cpp",
+        "native/tests/unit/test_layer_comps.cpp",
+        "native/tests/contract/test_contract_layer_comps.cpp",
+        "native/src/app/layer_comps_panel.cpp",
+        "native/tests/gui/test_gui_layer_comps.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27112,9 +27171,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_comps.cpp",
+        "native/src/core/layer_comps.cpp",
+        "native/tests/unit/test_layer_comps.cpp",
+        "native/tests/contract/test_contract_layer_comps.cpp",
+        "native/src/app/layer_comps_panel.cpp",
+        "native/tests/gui/test_gui_layer_comps.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27140,9 +27206,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_comps.cpp",
+        "native/src/core/layer_comps.cpp",
+        "native/tests/unit/test_layer_comps.cpp",
+        "native/tests/contract/test_contract_layer_comps.cpp",
+        "native/src/app/layer_comps_panel.cpp",
+        "native/tests/gui/test_gui_layer_comps.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27168,9 +27241,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_comps.cpp",
+        "native/src/core/layer_comps.cpp",
+        "native/tests/unit/test_layer_comps.cpp",
+        "native/tests/contract/test_contract_layer_comps.cpp",
+        "native/src/app/layer_comps_panel.cpp",
+        "native/tests/gui/test_gui_layer_comps.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27196,9 +27276,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_comps.cpp",
+        "native/src/core/layer_comps.cpp",
+        "native/tests/unit/test_layer_comps.cpp",
+        "native/tests/contract/test_contract_layer_comps.cpp",
+        "native/src/app/layer_comps_panel.cpp",
+        "native/tests/gui/test_gui_layer_comps.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27224,9 +27311,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_comps.cpp",
+        "native/src/core/layer_comps.cpp",
+        "native/tests/unit/test_layer_comps.cpp",
+        "native/tests/contract/test_contract_layer_comps.cpp",
+        "native/src/app/layer_comps_panel.cpp",
+        "native/tests/gui/test_gui_layer_comps.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27252,9 +27346,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_layer_comps.cpp",
+        "native/src/core/layer_comps.cpp",
+        "native/tests/unit/test_layer_comps.cpp",
+        "native/tests/contract/test_contract_layer_comps.cpp",
+        "native/src/app/layer_comps_panel.cpp",
+        "native/tests/gui/test_gui_layer_comps.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39053,9 +39154,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-a、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/layer_comps_panel.cpp",
+        "native/src/app/main_window_layer_comps.cpp",
+        "native/tests/gui/test_gui_layer_comps.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

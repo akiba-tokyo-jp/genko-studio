@@ -243,6 +243,7 @@ struct Ctx {
     int depth = 0;
     render::RgbSpace space;                                         // (an RGB page's: its profile's, or sRGB)
     std::map<const core::SmartContents*, std::string> written;      // (contents written as a .pcraft inside: its blob, once)
+    std::map<std::string, std::string> layer_ids;                   // (PC5 J-a: a layer's id → its first layer's id in the document)
 
     void note(const std::string& text) {
         if (said.insert(text).second) notes.push_back(text);
@@ -729,6 +730,7 @@ Json layer_json(Ctx& ctx, const std::string& name, const core::Layer* layer, Jso
              {"fill_cache", nullptr},
              {"link_group", nullptr}};
     if (layer != nullptr) {
+        ctx.layer_ids.emplace(layer->id, out["id"].dump());  // (PC5 J-a: the layer comps' states name it so)
         if (layer->mask && layer->mask->png && !layer->mask->png->empty()) out["mask"] = mask_json(ctx, *layer->mask);
         if (layer->vector_mask) out["vector_mask"] = pc::vector_mask_json(*layer->vector_mask, ctx.px);
         if (layer->link) {
@@ -1268,6 +1270,7 @@ Json document_json(Ctx& ctx) {
     {
         render::pcraft_production::WriteContext production;
         production.px = ctx.px;
+        production.layers = ctx.layer_ids;  // (PC5 J-a)
         production.say = [&ctx](std::string note) {
             if (ctx.said.insert(note).second) ctx.notes.push_back(std::move(note));
         };

@@ -330,6 +330,16 @@ void remap_layer_refs(Page& page, const std::vector<StoryLine*>& lines, const Fr
         for (auto& [name, area] : page.extra["saved_areas"].items()) area_refs(area);
     }
     for (StoryLine* line : lines) remap_key(line->style, "below_layer");
+    // (PC5 J-a, layer-comps@1: the layers its comps record — and 最後のドキュメントの状態 — are the copy's)
+    if (page.layer_comps) {
+        const auto states = [&layers](std::vector<CompLayerState>& list) {
+            for (CompLayerState& s : list) {
+                if (const std::string* to = layers.get(s.layer)) s.layer = *to;
+            }
+        };
+        for (LayerComp& comp : page.layer_comps->comps) states(comp.layers);
+        if (page.layer_comps->last_state) states(*page.layer_comps->last_state);
+    }
 }
 
 }  // namespace genko::core
