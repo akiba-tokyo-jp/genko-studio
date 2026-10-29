@@ -375,7 +375,8 @@ Json check_native_type(const Json& raw, std::string_view text) {
         if (!v->is_array() || v->size() != 6) bad("native_type transform must be [a, b, c, d, e, f]");
         Json m = Json::array();
         for (const Json& x : *v) m.push_back(num(number_of(x, "native_type transform", -1e6, 1e6)));
-        const double det = (*v)[0].get<double>() * (*v)[3].get<double>() - (*v)[1].get<double>() * (*v)[2].get<double>();
+        // (as kept — 4 decimals —: what the reader checks again; review P3-11)
+        const double det = m[0].get<double>() * m[3].get<double>() - m[1].get<double>() * m[2].get<double>();
         if (std::abs(det) < 1e-9) bad("native_type transform must not squash the text flat");
         out["transform"] = std::move(m);
     }
@@ -952,6 +953,13 @@ StoryLine moved(const StoryLine& record, double dx, double dy) {
         anchor = Json::array({num(anchor[0].get<double>() + dx), num(anchor[1].get<double>() + dy)});
     }
     return out;
+}
+
+void move_anchor(StoryLine& record, double dx, double dy) {
+    if (!record.native_type || !record.native_type->is_object() || (dx == 0 && dy == 0)) return;
+    const auto it = record.native_type->find("anchor_mm");
+    if (it == record.native_type->end() || !it->is_array() || it->size() != 2 || !(*it)[0].is_number() || !(*it)[1].is_number()) return;
+    *it = Json::array({num((*it)[0].get<double>() + dx), num((*it)[1].get<double>() + dy)});
 }
 
 std::shared_ptr<const StoryLine> shared_record(StoryLine record) { return std::make_shared<const StoryLine>(std::move(record)); }

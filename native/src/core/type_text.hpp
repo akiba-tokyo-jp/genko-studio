@@ -160,6 +160,9 @@ StoryLine moved(const StoryLine& record, double dx, double dy);
 // PC5 G-a: the record's matrix (native_type.transform: x' = a·x + c·y + e, y' = b·x + d·y + f, the page's mm), none
 // when it has none.
 std::optional<std::array<double, 6>> transform_of(const StoryLine& record);
+// PC5 G-a (review P2-2): a point text's anchor moved by (dx, dy) mm — with its box (move_line, a line laid on its own
+// paper to be turned); nothing for a record with none.
+void move_anchor(StoryLine& record, double dx, double dy);
 // The record shared as Layer::type holds it.
 std::shared_ptr<const StoryLine> shared_record(StoryLine record);
 

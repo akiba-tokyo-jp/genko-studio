@@ -391,7 +391,7 @@ private slots:
         // (act_keyboard_shortcuts, act_prefs_<pane>; 一般… is act_prefs) — theKeySets and theMenusOfPC5 below.
         // and the 17 of PC5 G-a (SPEC TEXT-02) — ツール → 横書き文字ツール (act_text_h), 書式 → アンチエイリアス ▸ 7 (act_type_aa_<method>),
         // 方向 ▸ 横書き・縦書き (act_type_horizontal, act_type_vertical), テキストレイヤーをラスタライズ・ポイントテキストに変換・
-        // 段落テキストに変換・すべてのテキストレイヤーを更新・Lorem ipsum をペースト (act_type_rasterize, act_type_to_point,
+        // 段落テキストに変換・すべてのテキストレイヤーを更新・Lorem Ipsum をペースト (act_type_rasterize, act_type_to_point,
         // act_type_to_box, act_type_update_all, act_type_lorem), 台詞をテキストレイヤーに・テキストレイヤーを台詞に
         // (act_line_to_type_layer, act_type_layer_to_line) — theirs (test_gui_type).
         QCOMPARE(w->actions_by_name().size(), std::size_t{612});

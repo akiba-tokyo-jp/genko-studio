@@ -382,8 +382,20 @@ bool PageCanvas::is_text_tool(const QString& tool) { return tool == QLatin1Strin
 std::optional<std::string> PageCanvas::hit_type_layer(double x_mm, double y_mm) const {
     const core::Page* p = page();
     if (p == nullptr) return std::nullopt;
+    // (review P3-5: one shown — in no folder hidden — and not locked)
+    const auto shown = [p](const core::Layer& layer) {
+        if (!layer.visible) return false;
+        core::Json parent = layer.parent_id;
+        for (int depth = 0; parent.is_string() && depth < 64; ++depth) {
+            const auto folder = std::find_if(p->layers.begin(), p->layers.end(), [&](const core::Layer& l) { return l.id == parent.get<std::string>(); });
+            if (folder == p->layers.end()) break;
+            if (!folder->visible) return false;
+            parent = folder->parent_id;
+        }
+        return true;
+    };
     for (auto it = p->layers.rbegin(); it != p->layers.rend(); ++it) {
-        if (it->kind != core::LayerKind::Type || !it->type || !it->visible) continue;
+        if (it->kind != core::LayerKind::Type || !it->type || it->locked || !shown(*it)) continue;
         const core::StoryLine& record = *it->type;
         double x = x_mm, y = y_mm;
         if (const auto t = core::type_text::transform_of(record)) {  // (where the point is before its matrix)
@@ -401,7 +413,8 @@ std::optional<std::string> PageCanvas::hit_type_layer(double x_mm, double y_mm) 
 }
 
 bool PageCanvas::text_press(const QPointF& mm) {
-    if (const auto layer = hit_type_layer(mm.x(), mm.y())) {  // (PC5 G-a: a type layer's text typed over, as Photoshop's)
+    // (PC5 G-a: a type layer's text typed over, as Photoshop's — making lines, only the type layer chosen: review P3-5)
+    if (const auto layer = hit_type_layer(mm.x(), mm.y()); layer && (type_layers || (type_frame && type_frame->layer_id == *layer))) {
         emit typeLayerClicked(QString::fromStdString(*layer));
         return true;
     }

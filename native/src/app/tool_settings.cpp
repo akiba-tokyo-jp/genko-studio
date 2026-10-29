@@ -246,12 +246,12 @@ TextToolSettings::TextToolSettings(QWidget* parent) : QWidget(parent) {
     form->addRow(note);
 }
 
-TextToolSettings::LineFields TextToolSettings::line_fields() const {
+TextToolSettings::LineFields TextToolSettings::line_fields(const QString& tool) const {
     LineFields fields;
     if (!font->currentData().toString().isEmpty()) fields.style["font"] = font->currentData().toString().toStdString();
     if (size->value() > 0) fields.style["size_mm"] = size->value();
     fields.balloon = balloon->currentData().toString().toStdString();
-    fields.vertical = vertical->isChecked();
+    fields.vertical = tool != QLatin1String("text_h") && vertical->isChecked();
     fields.type_layer = make->currentData().toString() == QLatin1String("type");
     fields.antialias = antialias->currentData().toString().toStdString();
     return fields;

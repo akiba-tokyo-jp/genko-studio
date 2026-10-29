@@ -884,7 +884,7 @@ private slots:
                  (QStringList{QStringLiteral("アンチエイリアス"), QStringLiteral("方向"), QString(), QStringLiteral("作業用パスを作成"), QStringLiteral("シェイプに変換"),
                               QStringLiteral("テキストレイヤーをラスタライズ"), QStringLiteral("ポイントテキストに変換"), QStringLiteral("段落テキストに変換"), QString(),
                               QStringLiteral("ワープテキスト…"), QString(), QStringLiteral("すべてのテキストレイヤーを更新"), QString(),
-                              QStringLiteral("Lorem ipsum をペースト"), QString(), QStringLiteral("台詞をテキストレイヤーに"), QStringLiteral("テキストレイヤーを台詞に")}));
+                              QStringLiteral("Lorem Ipsum をペースト"), QString(), QStringLiteral("台詞をテキストレイヤーに"), QStringLiteral("テキストレイヤーを台詞に")}));
         QVERIFY(texts(submenu(b.menu(QStringLiteral("ページ")), QStringLiteral("台詞"))).contains(QStringLiteral("フキダシの形")));
         QMenu* tools = b.menu(QStringLiteral("ツール"));
         QVERIFY(texts(submenu(tools, QStringLiteral("定規"))).contains(QStringLiteral("直線定規")));

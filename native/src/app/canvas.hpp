@@ -372,6 +372,7 @@ public:
     // its matrix (none: upright), whether a box text's letters run past its box (Photoshop's ⊞ at its foot) — drawn with
     // the text tools and the move tool.
     struct TypeFrame {
+        std::string layer_id;
         QRectF box;
         std::optional<std::array<double, 6>> transform;
         bool box_text = false;

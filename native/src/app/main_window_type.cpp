@@ -1,7 +1,7 @@
 // PC5 節 G (文字; type@1, SPEC.md TEXT-02, design section G 5.1): the 書式 menu — Photoshop's, after レイヤー — and the type
 // layers in the window. G-0 made the menu with the type commands this build had (ワープテキスト…, 作業用パスを作成, シェイプ
 // に変換: the same commands as ページ → 台詞); G-a adds アンチエイリアス ▸, 方向 ▸, テキストレイヤーをラスタライズ, ポイント
-// テキストに変換・段落テキストに変換, すべてのテキストレイヤーを更新, Lorem ipsum をペースト, the 横書き文字ツール, the text
+// テキストに変換・段落テキストに変換, すべてのテキストレイヤーを更新, Lorem Ipsum をペースト, the 横書き文字ツール, the text
 // tools' type layers — a click a point text, a drag a box text, a click on the target path a text on it, a click on a
 // type layer's text typing over it —, and the chosen type layer's box on the canvas. The later groups add theirs in
 // Photoshop's order: パネル ▸, OpenType ▸ (G-b, G-d), フォントプレビューのサイズ ▸, 言語オプション ▸, the fonts' commands and
@@ -28,6 +28,7 @@
 #include "core/vector.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/text/lettering.hpp"
+#include "render/type_layer.hpp"
 
 namespace genko::app {
 
@@ -38,7 +39,7 @@ namespace {
 
 constexpr int kFrameDpi = 150;  // (the chosen type layer's box on the canvas: where its letters are, measured this finely)
 
-// Lorem ipsum をペースト: Photoshop's Latin, or (down) a Japanese dummy of Genko's own words.
+// Lorem Ipsum をペースト: Photoshop's Latin, or (down) a Japanese dummy of Genko's own words.
 const char* kLorem =
     "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. "
     "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.";
@@ -106,7 +107,7 @@ void MainWindow::build_type_actions() {
          QStringLiteral("選んだテキストを、枠の中で折り返す段落テキストにします（枠は今の文字を囲む大きさ）"));
     make("act_type_update_all", QStringLiteral("すべてのテキストレイヤーを更新"), [this] { update_all_type(); }, {},
          QStringLiteral("組んだ文字の覚えを捨てて、テキストレイヤーと台詞を組み直して描き直します（書体を入れ替えた後など）"));
-    make("act_type_lorem", QStringLiteral("Lorem ipsum をペースト"), [this] { paste_lorem(); }, {},
+    make("act_type_lorem", QStringLiteral("Lorem Ipsum をペースト"), [this] { paste_lorem(); }, {},
          QStringLiteral("仮の文を入れます（横書きは Lorem ipsum、縦書きは和文の仮の文）。打っている途中なら、その場所に入れます"));
     // (Genko's own: a line and a type layer each other's — 書式's last)
     make("act_line_to_type_layer", QStringLiteral("台詞をテキストレイヤーに"), [this] { line_to_type_layer(); }, {},
@@ -127,7 +128,7 @@ void MainWindow::build_type_menu(QMenu* menu) {
     type_menu_ = menu;
     menu->setObjectName(QStringLiteral("menu_type"));
     // (Photoshop's 書式: アンチエイリアス ▸, 方向 ▸; 作業用パスを作成, シェイプに変換, テキストレイヤーをラスタライズ, the conversions;
-    // ワープテキスト…; すべてのテキストレイヤーを更新; Lorem ipsum をペースト)
+    // ワープテキスト…; すべてのテキストレイヤーを更新; Lorem Ipsum をペースト)
     QMenu* methods = menu->addMenu(QStringLiteral("アンチエイリアス"));
     methods->setObjectName(QStringLiteral("menu_type_antialias"));
     for (const auto& [key, label] : antialias_names()) methods->addAction(action(QStringLiteral("act_type_aa_") + key));
@@ -317,10 +318,16 @@ void MainWindow::edit_type_layer_inline(const std::string& layer_id) {
         return;
     }
     const core::StoryLine record = core::type_text::line_of(*layer, page->index);
+    // (review P3-5: where its text shows — its corner through its matrix)
+    QPointF at(record.x_mm.value(), record.y_mm.value());
+    if (const auto t = core::type_text::transform_of(record)) {
+        const auto& m = *t;
+        at = QPointF(m[0] * at.x() + m[2] * at.y() + m[4], m[1] * at.x() + m[3] * at.y() + m[5]);
+    }
     const auto origin = session_;
     const std::string page_id = page->id;
-    canvas_->open_editor(record.x_mm.value(), record.y_mm.value(), lettering::with_marks(record), [this, origin, page_id, layer_id](std::optional<QString> typed) {
-        if (!typed || typed->isEmpty() || closed_) return;
+    canvas_->open_editor(at.x(), at.y(), lettering::with_marks(record), [this, origin, page_id, layer_id](std::optional<QString> typed) {
+        if (!typed || closed_) return;
         const core::Page* target = nullptr;
         for (const auto& p : book().pages) {
             if (p->id == page_id) target = p.get();
@@ -334,6 +341,12 @@ void MainWindow::edit_type_layer_inline(const std::string& layer_id) {
             if (l.id == layer_id && l.type) now = &l;
         }
         if (now == nullptr) return;
+        if (typed->isEmpty()) {  // (all its text taken away: the type layer goes, as Photoshop's — review P3-5)
+            apply_ops(Json::array({Json{{"op", "delete_layer"}, {"page", target->index.json()}, {"id", layer_id}}}));
+            if (layer_panel_ != nullptr) layer_panel_->refresh();
+            refresh_type_frame();
+            return;
+        }
         const core::StoryLine current = core::type_text::line_of(*now, target->index);
         const lettering::Marks marks = lettering::parse_marks(*typed);
         if (lettering::same_marks(marks, current)) return;
@@ -362,6 +375,7 @@ void MainWindow::refresh_type_frame() {
     }
     const core::StoryLine& record = *layer->type;
     PageCanvas::TypeFrame frame;
+    frame.layer_id = layer->id;
     frame.box = QRectF(record.x_mm.value(), record.y_mm.value(), record.w_mm.value(), record.h_mm.value());
     frame.transform = core::type_text::transform_of(record);
     frame.box_text = render::text::shape_of(record) == "box";
@@ -380,6 +394,7 @@ void MainWindow::refresh_type_frame() {
 
 void MainWindow::update_all_type() {
     render::text::clear_layout_cache();  // (set again from the fonts as they are now)
+    render::type_layer::forget_extents();  // (and where their letters are found again — review P3-6)
     canvas_->renderer().clear();
     show_page();
     refresh_type_frame();

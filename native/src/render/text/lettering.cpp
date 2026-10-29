@@ -21,6 +21,7 @@
 #include "render/draw.hpp"
 #include "render/imaging.hpp"
 #include "render/not_yet_ported.hpp"
+#include "render/op_limits.hpp"
 #include "render/png.hpp"
 #include "render/resample.hpp"
 #include "render/text/fonts.hpp"
@@ -1022,6 +1023,8 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
         const Json& align = at(st, "align");
         if (align.is_string() && align.get_ref<const std::string&>().starts_with("justify")) st["align"] = line.wrap == "vertical" ? "top" : "left";
     }
+    // (a point or box text with no alignment: Photoshop's left — top, down —, not a line's centre: review P2-5)
+    if (!shape.empty() && !core::py_truthy(at(st, "align"))) st["align"] = line.wrap == "vertical" ? "top" : "left";
     const std::string kind = kind_of(line);
     Fonts fonts(std::move(stop));
     const Json& font_value = at(st, "font");
@@ -1060,6 +1063,31 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
         em = std::max<std::int64_t>(8, vertical ? std::min(w, floordiv(h, longest)) : std::min(h, floordiv(w, longest)));
     } else {
         em = std::max<std::int64_t>(8, px(kCapMm, dpi));
+    }
+    if (!shape.empty()) {  // (type@1, review P2-4: a point text is never broken, a box text may run far past its box —
+                           // what it would come to, roughly, past op_limits' most pixels is refused before it is drawn)
+        const std::u32string text = u32(line.text);
+        std::int64_t paragraphs = 1, longest = 0, run = 0;
+        for (const char32_t c : text) {
+            if (c == U'\n') {
+                ++paragraphs;
+                run = 0;
+            } else {
+                longest = std::max(longest, ++run);
+            }
+        }
+        const double step = static_cast<double>(em) * 1.2 * (1 + std::max(0.0, float_or(at(st, "tracking"), 0)));
+        const double rows = static_cast<double>(em) * 1.6 * (1 + std::max(0.0, float_or(at(st, "leading"), 0)));
+        double along = 0, across = 0;  // (along the rows or columns, and across them)
+        if (shape == "point") {
+            along = step * static_cast<double>(longest) + static_cast<double>(em);
+            across = rows * static_cast<double>(paragraphs) + static_cast<double>(em);
+        } else {
+            along = static_cast<double>(vertical ? h : w);
+            across = rows * (static_cast<double>(paragraphs) + step * static_cast<double>(text.size()) / std::max(1.0, along)) + static_cast<double>(em);
+        }
+        if (along * across > static_cast<double>(limits::kPixels) || along > static_cast<double>(limits::kSide) || across > static_cast<double>(limits::kSide))
+            throw core::Error("image_too_large", "the text is too large to set at this resolution");
     }
     const bool hug = shape.empty() && one_of(kind, kHugged);
     const double keep = hug ? hug_keep(kind, st) : 1.0;

@@ -1682,7 +1682,7 @@ public:
     void edit_type_layer_inline(const std::string& layer_id);
     // The chosen type layer's box on the canvas (and whether a box text runs past it), after a change or a new target.
     void refresh_type_frame();
-    // 書式 → 方向 ▸, すべてのテキストレイヤーを更新, Lorem ipsum をペースト; the menu's checks and what can be done.
+    // 書式 → 方向 ▸, すべてのテキストレイヤーを更新, Lorem Ipsum をペースト; the menu's checks and what can be done.
     void type_direction(bool vertical);
     void update_all_type();
     void paste_lorem();

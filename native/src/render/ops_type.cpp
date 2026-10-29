@@ -51,15 +51,20 @@ std::string text_at(const Json& value, std::string_view what) {
 double round2(double v) { return core::py_round(v, 2); }
 
 // [x, y] (mm) or [x, y, w, h] (mm): finite numbers; a box's width and height above 0.
+constexpr double kFarMm = 1000.0;  // (review P2-4: a place within a metre of the page's corner, a box at most a metre)
 std::array<double, 2> point_at(const Json& v, std::string_view what) {
     if (!v.is_array() || v.size() != 2) throw OpError(std::string(what) + " [x, y] (mm) places a point text");
-    return {core::finite_float(v[0], what), core::finite_float(v[1], what)};
+    const std::array<double, 2> p{core::finite_float(v[0], what), core::finite_float(v[1], what)};
+    if (std::fabs(p[0]) > kFarMm || std::fabs(p[1]) > kFarMm) throw OpError(std::string(what) + " must lie within a metre of the page (x and y -1000..1000 mm)");
+    return p;
 }
 std::array<double, 4> box_at(const Json& v, std::string_view what) {
     if (!v.is_array() || v.size() != 4) throw OpError(std::string(what) + " [x, y, w, h] (mm) places a box text");
     std::array<double, 4> b{};
     for (std::size_t i = 0; i < 4; ++i) b[i] = core::finite_float(v[i], what);
     if (!(b[2] > 0) || !(b[3] > 0)) throw OpError("the box's width and height must be above 0");
+    if (std::fabs(b[0]) > kFarMm || std::fabs(b[1]) > kFarMm || b[2] > kFarMm || b[3] > kFarMm)
+        throw OpError(std::string(what) + " must lie within a metre of the page (x and y -1000..1000 mm, w and h up to 1000 mm)");
     return b;
 }
 
@@ -92,6 +97,10 @@ std::optional<text::Placement> placed(const StoryLine& record, const Document& d
         return text::placement(record, kMeasureDpi, font_of(doc));
     } catch (const NotYetPorted&) {
         return std::nullopt;
+    } catch (const core::Error& error) {  // (review P2-4: a text that would set into too large a picture)
+        if (error.code() == "image_too_large")
+            throw OpError("the text is too large to set (a point text of very long rows, or a box text far past its box)");
+        throw;
     }
 }
 
@@ -100,9 +109,10 @@ std::array<double, 4> mm_of(const Box& b) { return {b.x0 * kPxMm, b.y0 * kPxMm, 
 
 // A point text's box: round its letters (where it is hit, edited and found), as set now.
 void fit_point(StoryLine& record, const Document& doc) {
-    if (text::shape_of(record) != "point") return;
-    const std::optional<text::Placement> p = placed(record, doc);
-    if (!p) return;
+    const std::string shape = text::shape_of(record);
+    if (shape.empty() || core::truthy_at(text::style_of(record), "text_path")) return;
+    const std::optional<text::Placement> p = placed(record, doc);  // (a box text too: one too large to set is refused)
+    if (!p || shape != "point") return;
     const std::array<double, 4> b = mm_of(p->letters.value_or(p->picture));
     record.x_mm = Num(round2(b[0]));
     record.y_mm = Num(round2(b[1]));
@@ -240,6 +250,10 @@ Target target_of(Document& doc, const Json& op, bool edit) {
     if (!core::type_text::is_type_layer(found)) throw OpError("layer " + found.id + " is not a type layer");
     if (!found.type) throw OpError("the type layer " + found.id + " holds no text");
     if (edit && found.locked) throw OpError("the layer is locked");
+    // (review P3-1: what moves it — its anchor, a box or point given, its matrix — keeps to the position's lock)
+    const bool moves = given(op, "anchor") != nullptr || core::has(op, "transform") || (given(op, "point") != nullptr && op["point"].is_array()) ||
+                       (given(op, "box") != nullptr && op["box"].is_array());
+    if (edit && moves && found.lock_position) throw OpError("the position of the layer " + found.id + " is locked");
     return t;
 }
 
@@ -393,6 +407,7 @@ void add_type_layer(OpContext& c) {
     }
     if (const Json* balloon = given(c.op, "balloon")) record.balloon = core::line_balloon(*balloon);  // (as add_line checks it)
     if (has_marks(c.op)) take_marks(record, c.op, doc, doc.page(at).index, c.actor);  // (rubies, emphasis, parts larger or bolder)
+    core::ruby::settle(doc, record);  // (rubies by place: their order, and ruby-layout@1 — review P3-3)
     // (a line's, as add_line takes it: a picture in it checked as the drawing build checks one)
     if (const Json* style = given(c.op, "style")) record.style = core::line_style(*style, [](const std::string& bytes) { verify_style_picture(bytes); });
     if (const Json* pt = given(c.op, "size_pt")) {  // (Photoshop's size: points, the record's mm)
@@ -424,7 +439,8 @@ void add_type_layer(OpContext& c) {
     } else {
         // (段落テキスト; with a balloon, the text set in it as a line's — fitted to it, in its box)
         const std::array<double, 4> b = box_at(*box, "box");
-        if (record.balloon == "none") nt["shape"] = "box";
+        // (letters on a path — style.text_path — follow it, unboxed: no shape — review P3-12)
+        if (record.balloon == "none" && !core::truthy_at(record.style, "text_path")) nt["shape"] = "box";
         record.x_mm = Num(b[0]);
         record.y_mm = Num(b[1]);
         record.w_mm = Num(b[2]);
@@ -468,9 +484,9 @@ void add_type_layer(OpContext& c) {
 void edit_type(OpContext& c) {
     Document& doc = c.doc;
     const Target t = target_of(doc, c.op, true);
-    static constexpr std::array<const char*, 10> kChanges{"text", "replace", "insert", "point", "box", "anchor", "wrap", "antialias", "transform", "title"};
+    static constexpr std::array<const char*, 11> kChanges{"text", "replace", "insert", "point", "box", "anchor", "wrap", "antialias", "transform", "title", "warp"};
     if (std::none_of(kChanges.begin(), kChanges.end(), [&](const char* key) { return core::has(c.op, key); }) && !has_marks(c.op))
-        throw OpError("edit_type changes text, replace, insert, point, box, anchor, wrap, antialias, transform or title");
+        throw OpError("edit_type changes text, replace, insert, point, box, anchor, wrap, antialias, transform, title or warp");
     if (const Json* wrap = given(c.op, "wrap"); wrap != nullptr && *wrap != Json("vertical") && *wrap != Json("horizontal"))
         throw OpError("wrap must be vertical or horizontal");
     if (t.line != nullptr) {
@@ -479,11 +495,12 @@ void edit_type(OpContext& c) {
         std::optional<std::string> text = new_text(t.line->text, c.op);
         if (!text && to_point_in_place(c.op)) text = with_breaks(*t.line, doc);  // (a box text's soft breaks kept as hard ones)
         const Json* wrap = given(c.op, "wrap");
-        if (text || wrap != nullptr || has_marks(c.op)) {  // (a line's text: edit_line's — its rubies and ranges followed, its report)
+        if (text || wrap != nullptr || has_marks(c.op) || core::has(c.op, "warp")) {  // (a line's text: edit_line's — its rubies and ranges followed, its report)
             const core::OpFunction* edit_line = core::OpRegistry::builtin().find("edit_line");
             Json op{{"op", "edit_line"}, {"id", id}};
             if (text) op["text"] = *text;
             if (wrap != nullptr) op["wrap"] = *wrap;
+            if (core::has(c.op, "warp")) op["style"] = Json{{"native_warp", c.op["warp"]}};  // (ワープテキスト: the line's style.native_warp)
             for (const char* key : kMarks) {
                 if (core::has(c.op, key)) op[key] = c.op[key];
             }
@@ -512,6 +529,12 @@ void edit_type(OpContext& c) {
     if (!text && to_point_in_place(c.op)) text = with_breaks(record, doc);  // (a box text's soft breaks kept as hard ones)
     if (text) retext(record, *text, c.report);
     if (const Json* wrap = given(c.op, "wrap")) record.wrap = wrap->get<std::string>();
+    if (core::has(c.op, "warp")) {  // (ワープテキスト — review P2-6: the record's style.native_warp, checked as a line's; null: none)
+        Json style = record.style.is_object() ? record.style : Json::object();
+        if (c.op["warp"].is_null()) style.erase("native_warp");
+        else style["native_warp"] = c.op["warp"];
+        record.style = style.empty() ? Json::object() : core::line_style(style, [](const std::string& bytes) { verify_style_picture(bytes); });
+    }
     if (has_marks(c.op)) take_marks(record, c.op, doc, page.index, c.actor);  // (the marks typed: as add_line reads them)
     core::ruby::settle(doc, record);
     reshape(record, c.op, doc, true);
@@ -645,6 +668,16 @@ void line_to_type_layer(OpContext& c) {
     if (page_at == doc.pages.end()) throw OpError("the line " + id + " is on no page");
     const std::size_t at = static_cast<std::size_t>(page_at - doc.pages.begin());
     StoryLine record = core::type_text::record_of(line);
+    // (review P3-2: what stays the story's said — in the report, and as a note — so type_layer_to_line can give it back)
+    Json dropped = Json::object();
+    if (!line.speaker.empty()) dropped["speaker"] = line.speaker;
+    if (line.frame_id && !line.frame_id->empty()) dropped["frame_id"] = *line.frame_id;
+    {
+        const auto page_lines = doc.story_for_page(line.page_index);
+        const auto it = std::find_if(page_lines.begin(), page_lines.end(), [&](const StoryLine* l) { return l->id == id; });
+        if (it != page_lines.begin() && it != page_lines.end()) dropped["after"] = (*std::prev(it))->id;  // (its place in the reading order)
+    }
+    if (record.style.is_object() && record.style.contains("below_layer")) dropped["below_layer"] = record.style["below_layer"];
     if (record.style.is_object()) record.style.erase("below_layer");  // (its place among the layers is the layer's own)
     Page& page = doc.edit_page(at);
     Layer layer;
@@ -672,6 +705,11 @@ void line_to_type_layer(OpContext& c) {
     }
     core::type_text::add_feature(doc);
     c.report = Json{{"layer_id", made}};
+    if (!dropped.empty()) {
+        (*c.report)["dropped"] = dropped;
+        c.notes.push_back("the line's speaker, panel, place in the reading order and below_layer are the story's: the type layer " + made +
+                          " has none (" + dropped.dump() + "; type_layer_to_line takes speaker, frame_id and after)");
+    }
 }
 
 // テキストレイヤーを台詞に: a type layer's record as a line of its page, last in the reading order, with no speaker —
@@ -700,8 +738,26 @@ void type_layer_to_line(OpContext& c) {
     line.page_index = index;
     line.speaker.clear();
     line.frame_id.reset();
-    core::ruby::settle(doc, line);
-    if (!core::truthy_at(c.op, "keep")) {
+    // (review P3-2: its speaker, panel and place in the reading order given back — line_to_type_layer's `dropped`)
+    if (const Json* speaker = given(c.op, "speaker")) line.speaker = core::py_str(*speaker);
+    if (const Json* frame = given(c.op, "frame_id")) {
+        const std::string frame_id = core::py_str(*frame);
+        if (doc.page(t.page).find_frame(frame_id) == nullptr) throw OpError("no panel " + frame_id + " on the page");
+        line.frame_id = frame_id;
+    }
+    if (const Json* after = given(c.op, "after")) {
+        const std::string other = core::py_str(*after);
+        const auto from = std::find_if(doc.story.begin(), doc.story.end(), [&](const StoryLine& l) { return l.id == id; });
+        const auto to = std::find_if(doc.story.begin(), doc.story.end(), [&](const StoryLine& l) { return l.id == other; });
+        if (to == doc.story.end() || !(to->page_index == index)) throw OpError("after names a line of the page");
+        StoryLine moved_line = std::move(*from);
+        const std::string after_id = to->id;
+        doc.story.erase(from);
+        const auto put = std::find_if(doc.story.begin(), doc.story.end(), [&](const StoryLine& l) { return l.id == after_id; });
+        doc.story.insert(std::next(put), std::move(moved_line));
+    }
+    StoryLine& made = core::find_line(doc, id);
+    core::ruby::settle(doc, made);    if (!core::truthy_at(c.op, "keep")) {
         Page& page = doc.edit_page(t.page);
         std::erase_if(page.layers, [&](const Layer& l) { return l.id == layer_id; });
     }

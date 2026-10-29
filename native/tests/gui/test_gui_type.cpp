@@ -3,7 +3,7 @@
 // 横書き文字ツール (across whatever the option says), a type layer typed over (its text clicked with a text tool, its row in
 // the layer panel double-clicked), the chosen type layer's box on the canvas, and 書式's commands: アンチエイリアス ▸ (the
 // chosen one checked), 方向 ▸, ポイントテキストに変換・段落テキストに変換, テキストレイヤーをラスタライズ, すべてのテキストレイヤー
-// を更新, Lorem ipsum をペースト, 台詞をテキストレイヤーに・テキストレイヤーを台詞に. Each gesture's op as the window applies it.
+// を更新, Lorem Ipsum をペースト, 台詞をテキストレイヤーに・テキストレイヤーを台詞に. Each gesture's op as the window applies it.
 
 #include <QComboBox>
 #include <QCheckBox>
@@ -134,7 +134,7 @@ private slots:
         QCOMPARE(texts(type), QStringList({QStringLiteral("アンチエイリアス"), QStringLiteral("方向"), QStringLiteral("|"), QStringLiteral("作業用パスを作成"),
                                            QStringLiteral("シェイプに変換"), QStringLiteral("テキストレイヤーをラスタライズ"), QStringLiteral("ポイントテキストに変換"),
                                            QStringLiteral("段落テキストに変換"), QStringLiteral("|"), QStringLiteral("ワープテキスト…"), QStringLiteral("|"),
-                                           QStringLiteral("すべてのテキストレイヤーを更新"), QStringLiteral("|"), QStringLiteral("Lorem ipsum をペースト"),
+                                           QStringLiteral("すべてのテキストレイヤーを更新"), QStringLiteral("|"), QStringLiteral("Lorem Ipsum をペースト"),
                                            QStringLiteral("|"), QStringLiteral("台詞をテキストレイヤーに"), QStringLiteral("テキストレイヤーを台詞に")}));
         QCOMPARE(texts(s.menu_at(QStringLiteral("書式/アンチエイリアス"))),
                  QStringList({QStringLiteral("なし"), QStringLiteral("シャープ"), QStringLiteral("鮮明"), QStringLiteral("強く"), QStringLiteral("滑らかに"),

@@ -60,7 +60,8 @@ public:
         bool type_layer = false;
         std::string antialias = "smooth";
     };
-    LineFields line_fields() const;
+    // `tool`: the text tool in hand — 横書き文字ツール ("text_h") sets across whatever 縦書き says (review P2-1).
+    LineFields line_fields(const QString& tool = {}) const;
 
     QComboBox* make = nullptr;
     QComboBox* antialias = nullptr;
