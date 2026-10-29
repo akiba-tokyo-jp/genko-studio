@@ -2037,6 +2037,47 @@ private slots:
             }
         }
     }
+
+    // PC5 I-b (review P3-9): a PSD of groups made by psd-tools, not by this build — a multiply group and a hidden one
+    // (tools/migration/psd_groups_make.py) — opens with them as groups: the multiply group's blend, the hidden group
+    // hidden with what it holds kept in it; drawn as psd-tools composites it.
+    void groupsMadeByPsdTools() {
+        namespace core = genko::core;
+        QDir().mkpath(path(QStringLiteral("groups-made")));
+        const QString file = path(QStringLiteral("groups-made/made.psd")), out = path(QStringLiteral("groups-made/view.json"));
+        const auto env = genko::test::python_env(path(QStringLiteral("pyenv")));
+        auto ran = genko::test::run(genko::test::python_ref(), QStringList{genko::test::repo_root() + QStringLiteral("/tools/migration/psd_groups_make.py"), file}, env);
+        QVERIFY2(ran.exit_code == 0, ran.err.right(2000).constData());
+        ran = genko::test::run(genko::test::python_ref(),
+                               QStringList{genko::test::repo_root() + QStringLiteral("/tools/migration/psd_groups_check.py"), out, QStringLiteral("39,78;118,78"), file}, env);
+        QVERIFY2(ran.exit_code == 0, ran.err.right(2000).constData());
+        const Json seen = genko::test::read_json(out)[file.toStdString()];
+        QVERIFY2(!seen.contains("error"), seen.dump().c_str());
+        const genko::formats::Opened opened = genko::formats::open_file(genko::test::read_bytes(file), "made.psd");
+        const auto named = [&](const std::string& title) -> const core::Layer* {
+            for (const core::Layer& l : opened.doc.page(0).layers)
+                if (l.title == title) return &l;
+            return nullptr;
+        };
+        const core::Layer *mul = named("mul"), *hid = named("hid"), *dark = named("dark"), *black = named("black");
+        QVERIFY(mul != nullptr && hid != nullptr && dark != nullptr && black != nullptr);
+        QVERIFY(mul->group && mul->kind == core::LayerKind::Folder && mul->visible);
+        QCOMPARE(mul->blend, std::string("multiply"));
+        QVERIFY(hid->group && !hid->visible);
+        QCOMPARE(dark->parent_id, Json(mul->id));
+        QCOMPARE(black->parent_id, Json(hid->id));
+        QVERIFY(black->visible);  // (hidden by its group, not itself)
+        genko::render::RenderOptions options;
+        options.mode = "print";
+        const genko::render::Image drawn = genko::render::render_page(opened.doc.page(0), 100, options, &opened.doc).image.convert("RGB");
+        const int w = drawn.width(), h = drawn.height();
+        const std::array<std::array<int, 2>, 2> spots{{{w / 4, h / 2}, {w * 3 / 4, h / 2}}};
+        for (std::size_t k = 0; k < spots.size(); ++k) {
+            const int ours = drawn.getpixel(spots[k][0], spots[k][1])[0];
+            const int theirs = seen["pixels"][k][0].get<int>();
+            QVERIFY2(std::abs(ours - theirs) <= 3, (std::to_string(k) + ": " + std::to_string(ours) + " vs psd-tools " + std::to_string(theirs)).c_str());
+        }
+    }
 };
 
 QTEST_GUILESS_MAIN(TestContractPsd)

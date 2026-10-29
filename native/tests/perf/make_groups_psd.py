@@ -7,7 +7,8 @@ test_perf_render's psd_of_groups_at_350dpi (GENKO_PERF_GROUPS_PSD). Its layers (
   background (group)    normal, opacity 255          ground, sky
 
 Each layer is a page-size raster of random lines or a filled band (random.Random(1)), so that each is drawn over the
-whole page. Made with psd-tools (1.10) and Pillow; it takes a minute and writes about 85 MB.
+whole page. Made with psd-tools (1.10) and Pillow; it takes a minute and writes about 85 MB. (The layers are made
+without the PSD — frompil(…, None, …) — so that their transparency stays: frompil converts to the PSD's RGB otherwise.)
 
     python make_groups_psd.py OUT.psd
 """
@@ -42,32 +43,33 @@ def filled(colour, top, bottom):
 def pass_through(group):
     """通過 as Photoshop writes it (psd-tools' setter leaves the record's blend normal): the record's and lsct's key 'pass'."""
     group._record.blend_mode = BlendMode.PASS_THROUGH
-    group._record.tagged_blocks.get_data(Tag.SECTION_DIVIDER_SETTING).blend_mode = BlendMode.PASS_THROUGH
+    setting = group._record.tagged_blocks.get_data(Tag.SECTION_DIVIDER_SETTING)
+    setting.signature, setting.blend_mode = b"8BIM", BlendMode.PASS_THROUGH
 
 
 def main() -> int:
     psd = PSDImage.new("RGB", (W, H), color=(255, 255, 255))
     background = Group.new("background", parent=psd)
-    background.append(PixelLayer.frompil(filled((200, 220, 255), 0, H), psd, "sky"))
-    background.append(PixelLayer.frompil(filled((120, 160, 90), H * 2 // 3, H), psd, "ground"))
+    background.append(PixelLayer.frompil(filled((200, 220, 255), 0, H), None, "sky"))
+    background.append(PixelLayer.frompil(filled((120, 160, 90), H * 2 // 3, H), None, "ground"))
     person = Group.new("person", parent=psd)
-    person.append(PixelLayer.frompil(lines((230, 180, 150), 300, 40), psd, "colour"))
+    person.append(PixelLayer.frompil(lines((230, 180, 150), 300, 40), None, "colour"))
     shade = Group.new("shade", parent=person)
-    shade.append(PixelLayer.frompil(lines((80, 80, 140), 200, 30, 160), psd, "shade1"))
-    shade.append(PixelLayer.frompil(lines((60, 60, 100), 200, 20, 160), psd, "shade2"))
+    shade.append(PixelLayer.frompil(lines((80, 80, 140), 200, 30, 160), None, "shade1"))
+    shade.append(PixelLayer.frompil(lines((60, 60, 100), 200, 20, 160), None, "shade2"))
     shade.blend_mode = BlendMode.MULTIPLY
-    line = PixelLayer.frompil(lines((20, 20, 20), 1500, 6), psd, "line")
+    line = PixelLayer.frompil(lines((20, 20, 20), 1500, 6), None, "line")
     line.blend_mode = BlendMode.MULTIPLY
     person.append(line)
     pass_through(person)
     person.opacity = 180
     effects = Group.new("effects", parent=psd)
     for k in range(2):
-        glow = PixelLayer.frompil(lines((255, 240, 120), 100, 50, 120), psd, f"glow{k + 1}")
+        glow = PixelLayer.frompil(lines((255, 240, 120), 100, 50, 120), None, f"glow{k + 1}")
         glow.blend_mode = BlendMode.SCREEN
         effects.append(glow)
     pass_through(effects)
-    psd.append(PixelLayer.frompil(lines((0, 0, 0), 60, 12), psd, "words"))
+    psd.append(PixelLayer.frompil(lines((0, 0, 0), 60, 12), None, "words"))
     psd.save(sys.argv[1])
     print([(layer.name, layer.kind, layer._record.blend_mode.name, layer.opacity) for layer in PSDImage.open(sys.argv[1]).descendants()])
     return 0
