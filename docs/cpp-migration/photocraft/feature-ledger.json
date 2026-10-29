@@ -3218,9 +3218,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "一部実装（PC5 H-b、未統合: ガイド・スマートガイド・グリッドの面。スライスの 2 項目は節 J のスライス J-b が同じ面に足す）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/preferences_units.cpp",
+        "native/src/core/prefs_table.cpp",
+        "native/src/app/main_window_guide_view.cpp",
+        "native/src/app/canvas_guides.cpp",
+        "native/tests/gui/test_gui_guides.cpp",
+        "native/tests/unit/test_prefs_table.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -3742,9 +3749,20 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/units.cpp",
+        "native/src/app/view_units.cpp",
+        "native/src/app/preferences_units.cpp",
+        "native/src/core/prefs_table.cpp",
+        "native/src/app/info_panels.cpp",
+        "native/src/app/page_size_dialogs.cpp",
+        "native/src/app/canvas_scale.cpp",
+        "native/tests/gui/test_gui_guides.cpp",
+        "native/tests/contract/test_contract_guides.cpp",
+        "native/tests/unit/test_prefs_table.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34980,9 +34998,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_guide_view.cpp",
+        "native/src/core/ops_rulers.cpp",
+        "native/tests/gui/test_gui_guides.cpp",
+        "native/tests/contract/test_contract_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -35026,9 +35049,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_guide_view.cpp",
+        "native/src/core/ops_rulers.cpp",
+        "native/tests/gui/test_gui_guides.cpp",
+        "native/tests/contract/test_contract_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -35148,9 +35176,14 @@
       },
       "upstream_menu": null,
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_guide_lines.cpp",
+        "native/src/app/canvas_scale.cpp",
+        "native/src/app/main_window_guide_view.cpp",
+        "native/tests/gui/test_gui_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -35187,9 +35220,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_guide_view.cpp",
+        "native/src/app/canvas_guide_lines.cpp",
+        "native/src/app/key_sets.cpp",
+        "native/src/app/canvas.cpp",
+        "native/tests/gui/test_gui_guides.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -35431,9 +35471,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_guide_view.cpp",
+        "native/src/app/canvas_guide_lines.cpp",
+        "native/src/app/key_sets.cpp",
+        "native/tests/gui/test_gui_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -35505,9 +35550,14 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_guide_lines.cpp",
+        "native/src/app/canvas_scale.cpp",
+        "native/src/app/canvas_input.cpp",
+        "native/tests/gui/test_gui_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -35550,9 +35600,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_guide_view.cpp",
+        "native/src/app/guide_dialogs.cpp",
+        "native/tests/gui/test_gui_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -35599,9 +35653,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/ops_rulers.cpp",
+        "native/src/core/guide_layout.hpp",
+        "native/src/app/guide_dialogs.cpp",
+        "native/src/app/main_window_guide_view.cpp",
+        "native/tests/contract/test_contract_guides.cpp",
+        "native/tests/gui/test_gui_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -36780,9 +36841,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_scale.cpp",
+        "native/src/core/units.cpp",
+        "native/src/app/view_units.cpp",
+        "native/tests/gui/test_gui_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -36944,9 +37010,12 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_guide_view.cpp",
+        "native/tests/gui/test_gui_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37056,9 +37125,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_guide_lines.cpp",
+        "native/src/app/main_window_guide_view.cpp",
+        "native/tests/gui/test_gui_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37127,9 +37200,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/main_window_guide_view.cpp",
+        "native/tests/gui/test_gui_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37160,9 +37237,14 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_guides.cpp",
+        "native/src/app/main_window_guides.cpp",
+        "native/src/app/main_window_guide_view.cpp",
+        "native/tests/gui/test_gui_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37200,9 +37282,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_guide_lines.cpp",
+        "native/src/app/main_window_guide_view.cpp",
+        "native/src/app/key_sets.cpp",
+        "native/src/render/psd_guides.cpp",
+        "native/tests/gui/test_gui_guides.cpp",
+        "native/tests/contract/test_contract_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37239,9 +37328,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_guide_lines.cpp",
+        "native/src/app/main_window_guide_view.cpp",
+        "native/tests/gui/test_gui_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37272,9 +37365,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_transform.cpp",
+        "native/src/app/main_window_guide_view.cpp",
+        "native/tests/gui/test_gui_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37416,9 +37513,12 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_guide_view.cpp",
+        "native/tests/gui/test_gui_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37482,9 +37582,14 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/canvas_snap.cpp",
+        "native/src/app/canvas_guide_lines.cpp",
+        "native/src/app/main_window_guide_view.cpp",
+        "native/tests/gui/test_gui_guides.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

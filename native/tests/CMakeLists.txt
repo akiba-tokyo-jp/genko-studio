@@ -547,6 +547,11 @@ genko_test(test_contract_align SOURCES contract/test_contract_align.cpp DEPS gen
 # .pcraft's layer_comps (upstream's reader with $GENKO_PCRAFT_CHECK).
 genko_test(test_contract_layer_comps SOURCES contract/test_contract_layer_comps.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC5 H-b (SPEC.md VIEW-01「ガイド」): add_guide_layout (upstream's own test's values, its ways and refusals), delete_ruler's
+# kind (for_pages too), the layout through the command line and one undo, the PSD's 1032 as psd-tools reads it (none
+# without guides: the file as before), read back here, psd-tools' guides read here; core/units' lengths.
+genko_test(test_contract_guides SOURCES contract/test_contract_guides.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 # PC3 C-e through the command line: every kind of page turned (inspect --pixel), undone and redone; a page of its own paper

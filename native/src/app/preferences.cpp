@@ -36,6 +36,7 @@
 #include <cmath>
 #include <set>
 #include <stdexcept>
+#include <tuple>
 
 #include "app/ask.hpp"
 #include "app/brush_panel.hpp"
@@ -256,7 +257,11 @@ const std::multimap<QString, QString>& renamed() {
                                                      {QStringLiteral("オプション"), QStringLiteral("ツールの設定")},
                                                      {QStringLiteral("検索"), QStringLiteral("コマンドを探す…")},
                                                      {QStringLiteral("新規ウィンドウ"), QStringLiteral("新しいウィンドウ（同じ原稿）")},
-                                                     {QStringLiteral("一般…"), QStringLiteral("環境設定…")}};
+                                                     {QStringLiteral("一般…"), QStringLiteral("環境設定…")},
+                                                     // (PC5 H-b: 表示 → 表示・非表示 ▸ by Photoshop's names — グリッド shares its words
+                                                     // with スナップ先 ▸'s: by its place)
+                                                     {QStringLiteral("選択範囲のエッジ"), QStringLiteral("選択範囲の境界線")},
+                                                     {QStringLiteral("グリッド（表示 → 表示・非表示）"), QStringLiteral("グリッドを表示")}};
     return all;
 }
 
@@ -272,7 +277,12 @@ const std::vector<QString>& reused_names() {
 }
 
 const std::map<QString, QString>& words_owner() {
-    static const std::map<QString, QString> all{{QStringLiteral("定規"), QStringLiteral("act_ruler")}};
+    static const std::map<QString, QString> all{{QStringLiteral("定規"), QStringLiteral("act_ruler")},
+                                                // (PC5 H-b: 表示・非表示 ▸'s ガイド・グリッド・すべて・なし came to share スナップ先 ▸'s words)
+                                                {QStringLiteral("ガイド"), QStringLiteral("act_snap_guides")},
+                                                {QStringLiteral("グリッド"), QStringLiteral("act_snap_grid")},
+                                                {QStringLiteral("すべて"), QStringLiteral("act_snap_all")},
+                                                {QStringLiteral("なし"), QStringLiteral("act_snap_none")}};
     return all;
 }
 
@@ -291,8 +301,8 @@ const std::vector<Pane>& panes() {
         {QStringLiteral("scratchDisks"), QStringLiteral("仮想記憶ディスク…"), QString()},
         {QStringLiteral("cursors"), QStringLiteral("カーソル…"), QStringLiteral("表示・作業")},
         {QStringLiteral("transparencyAndGamut"), QStringLiteral("透明部分・色域…"), QStringLiteral("透明部分・色域")},
-        {QStringLiteral("unitsAndRulers"), QStringLiteral("単位・定規…"), QString()},
-        {QStringLiteral("guidesGridAndSlices"), QStringLiteral("ガイド・グリッド・スライス…"), QString()},
+        {QStringLiteral("unitsAndRulers"), QStringLiteral("単位・定規…"), QStringLiteral("単位・定規")},  // (PC5 H-b)
+        {QStringLiteral("guidesGridAndSlices"), QStringLiteral("ガイド・グリッド・スライス…"), QStringLiteral("ガイド・グリッド・スライス")},
         {QStringLiteral("plugIns"), QStringLiteral("プラグイン…"), QString()},
         {QStringLiteral("type"), QStringLiteral("テキスト…"), QString()},
         {QStringLiteral("enhancedControls"), QStringLiteral("拡張コントロール…"), QString()},
@@ -546,6 +556,7 @@ void apply_all(MainWindow* window) {
     canvas->tool_modifiers = tool_modifiers();
     canvas->refresh_cursor();
     window->apply_proof_view();  // (透明部分・色域: the gamut warning's mark)
+    window->apply_guide_prefs();  // (PC5 H-b: 単位・定規, ガイド・グリッド・スライス)
     canvas->update();
 }
 
@@ -959,6 +970,10 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
         look::quiet_labels(rows);
         tabs->addTab(page, QStringLiteral("Camera Raw"));
     }
+    // 単位・定規 and ガイド・グリッド・スライス (PC5 H-b: app/preferences_units.cpp)
+    std::tie(units_page, guides_page) = unit_pages(this);
+    tabs->addTab(units_page, QStringLiteral("単位・定規"));
+    tabs->addTab(guides_page, QStringLiteral("ガイド・グリッド・スライス"));
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("決める"));
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("やめる"));
@@ -971,7 +986,7 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     pages_list->setObjectName(QStringLiteral("prefsNav"));
     pages_list->setFixedWidth(150);
     int page = 0;
-    for (const char* picture : {"search", "pen", "settings", "kind_tone", "open", "export", "kind_placed"}) {
+    for (const char* picture : {"search", "pen", "settings", "kind_tone", "open", "export", "kind_placed", "ruler", "kind_tone"}) {
         pages_list->addItem(new QListWidgetItem(icons::icon(picture), tabs->tabText(page++)));
     }
     connect(pages_list, &QListWidget::currentRowChanged, tabs, &QTabWidget::setCurrentIndex);
@@ -1168,6 +1183,7 @@ void PreferencesDialog::save() {
     store->setValue(QStringLiteral("view/checker_dark"), checker_dark->property("colour").value<QColor>().name());
     store->setValue(QStringLiteral("view/gamut_color"), gamut_button->property("colour").value<QColor>().name());
     store->setValue(QStringLiteral("view/gamut_opacity"), gamut_percent->value());
+    save_unit_pages(units_page, guides_page);  // (PC5 H-b)
     for (MainWindow* window : documents::windows()) apply_all(window);  // (this computer's: every window)
     accept();
 }

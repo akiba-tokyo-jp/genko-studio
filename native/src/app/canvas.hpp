@@ -26,6 +26,7 @@
 #include "app/pen.hpp"
 #include "app/tiles.hpp"
 #include "core/geometry.hpp"
+#include "core/guide_layout.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
 #include "core/snap.hpp"
@@ -596,6 +597,11 @@ public:
     // moved box has equal to its neighbours on both sides said in the ruler's unit.
     bool show_smart_guides = true;
     QColor smart_colour = QColor(0xe6, 0x49, 0x80);
+    struct Spacing {  // a gap equal on both sides of a moved box: along x (vertical false) or along y, from … to, at `across`
+        bool vertical = false;
+        double from = 0, to = 0, across = 0;
+    };
+    const std::vector<Spacing>& spacing() const { return spacing_; }  // (while a drag lasts)
     // レイヤーエッジ: the chosen layers' boxes (x0, y0, x1, y1 mm, the window's) drawn as thin lines.
     bool show_layer_edges = false;
     std::function<std::vector<std::array<double, 4>>()> layer_edges;
@@ -613,6 +619,8 @@ public:
     // The guide under a point of the widget that a press would grab (none: none, locked, hidden), and the one being dragged.
     std::optional<std::string> guide_at(const QPointF& widget) const;
     std::optional<std::string> dragged_guide() const;
+    // 新規ガイドレイアウトを作成…'s preview: the guides it would add, drawn faintly while its window is open (none: none).
+    std::optional<core::GuideLayout> guide_preview;
 
 signals:
     void changed();
@@ -1117,10 +1125,6 @@ private:
     void draw_guide_lines(QPainter& painter) const;
     void draw_layer_edges(QPainter& painter) const;
     void draw_spacing(QPainter& painter) const;
-    struct Spacing {  // a gap equal on both sides of a moved box: along x (vertical false) or y, from … to at `across`
-        bool vertical = false;
-        double from = 0, to = 0, across = 0;
-    };
     std::vector<Spacing> spacing_;
     void find_spacing(const std::array<double, 4>& box);
     void forget_snap();

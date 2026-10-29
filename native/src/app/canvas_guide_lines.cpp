@@ -100,9 +100,21 @@ bool PageCanvas::guide_grab(const QPointF& widget, Qt::KeyboardModifiers modifie
 }
 
 void PageCanvas::draw_guide_lines(QPainter& painter) const {
-    if (page() == nullptr || !shows(show_guide_lines) || !show_canvas_guides) return;
+    if (page() == nullptr) return;
     // (across the whole view, past the paper: the view's corners in the unturned view)
     const QRectF view = view_transform().inverted().mapRect(QRectF(rect()));
+    if (guide_preview) {  // (新規ガイドレイアウトを作成…: shown whatever is hidden — the window asks for it)
+        painter.save();
+        QColor faint = guide_colour;
+        faint.setAlpha(150);
+        QPen pen(faint, 1, Qt::DashLine);
+        pen.setCosmetic(true);
+        painter.setPen(pen);
+        for (const double x : guide_preview->down) painter.drawLine(QPointF(pt(x, 0).x(), view.top()), QPointF(pt(x, 0).x(), view.bottom()));
+        for (const double y : guide_preview->across) painter.drawLine(QPointF(view.left(), pt(0, y).y()), QPointF(view.right(), pt(0, y).y()));
+        painter.restore();
+    }
+    if (!shows(show_guide_lines) || !show_canvas_guides) return;
     painter.save();
     QPen pen(guide_colour, 1, guide_style);
     pen.setCosmetic(true);

@@ -307,6 +307,11 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/proof_sim.rs`（75-110 行: `HdrPreview` — 方法・露光量 −20〜20・ガンマ 0.1〜9.99 と 0・1 で何もしないこと、265-284 行: `preview_32` の引数と範囲）→ `native/src/render/hdr_preview.cpp`（0..1 に切る前の値に当てること、ハイライト圧縮の式、グレー・インキの道は Genko のもの）。
   - `crates/ui-egui/src/view_cmds.rs`（546-580 行: 200%・プリントサイズと `fit_layers` — 選んだレイヤーの範囲を 20 画素空けて画面に）→ `native/src/app/main_window_view.cpp`（`fit_layers`）・`native/src/app/canvas.cpp`（`fit_box`）。`crates/ui-egui/src/menu_catalog.rs`（642-701 行: 表示 の項目の名前と並び、スクリーンモードの 3 つ）→ `native/src/app/main_window_view.cpp`。
   - `crates/gpu/tests/parity.rs`（GPU と CPU が 1/255 以内という許し）の考え → `native/tests/gui/test_gui_canvas.cpp`（`theCardShowsWhatTheProcessorDraws`。Genko は表示の一致）。
+- ガイド・グリッド・エクストラ・単位（PC5 H-b）:
+  - `crates/engine/src/file_cmds.rs`（886-960 行: `push_unique`・`layout_lines`・`new_guide_layout` — 列・行・溝・マージン・中央揃え・既存を消す）→ `native/src/core/ops_rulers.cpp`（`guide_layout`・op `add_guide_layout`。mm と Genko の基準 用紙・仕上がり線・基本枠）。`crates/engine/src/file_cmds/tests.rs`（325-348 行: `guide_layouts` の値）→ `native/tests/contract/test_contract_guides.cpp`。
+  - `crates/io/src/psd_import.rs`（363-376 行: `parse_guides`）・`crates/io/src/psd_export.rs`（470-484 行: `guides_resource`）→ `native/src/render/psd_guides.cpp`（リソース 1032 のバイトの並び）。
+  - `crates/engine/src/prefs.rs`（52-147 行: `Unit` の `from_px`・`to_px`・`suffix`・`decimals`、`PointSize::per_inch`。497-567 行: `UnitsAndRulers`・`GuidesGridAndSlices` の項目と既定）→ `native/src/core/units.cpp`（mm を元に）・`native/src/core/prefs_table.cpp`・`native/src/app/preferences_units.cpp`。
+  - `crates/ui-egui/src/rulers.rs`（38-48 行: `nice_step`、150-230 行: 定規の刻みと数、ガイドを離した所で動かす・消す）→ `native/src/app/canvas_scale.cpp`（`draw_scale_in_unit`・`guide_release`）・`native/src/app/canvas_guide_lines.cpp`。
 
 ## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1、PC5 節 J）
 

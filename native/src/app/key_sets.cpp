@@ -83,6 +83,10 @@ const std::vector<std::pair<QString, QList<QKeySequence>>>& photoshop_keys() {
         {QStringLiteral("act_actual_pixels"), k({"Ctrl+1"})},
         {QStringLiteral("act_hand_tool"), k({"H"})},
         {QStringLiteral("act_screen_next"), k({"F"})},
+        // (PC5 H-b) エクストラ Ctrl+H, ガイド Ctrl+;, ガイドをロック Ctrl+Alt+;
+        {QStringLiteral("act_extras"), k({"Ctrl+H"})},
+        {QStringLiteral("act_show_guides"), k({"Ctrl+;"})},
+        {QStringLiteral("act_lock_guides"), k({"Ctrl+Alt+;"})},
         // 編集: やり直し Ctrl+Shift+Z (Ctrl+Y is 色の校正), ヒストリー… none (Ctrl+H is エクストラ — H-b), 検索 Ctrl+F, フェード…
         // Ctrl+Shift+F, 同じ位置にペースト Ctrl+Shift+V, 再実行 Ctrl+Shift+T, 一般… Ctrl+K (Ctrl+, kept), キーボードショートカット…
         // Ctrl+Alt+Shift+K
