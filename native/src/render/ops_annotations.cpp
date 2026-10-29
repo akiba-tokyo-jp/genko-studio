@@ -97,12 +97,12 @@ std::string fresh_id(const core::Page& page) {
 
 void add_annotation(core::OpContext& c) {
     const std::size_t at = core::require_page(c.doc, c.op);
-    const core::Page& now = c.doc.page(at);
-    if (now.annotations.size() >= core::kAnnotationsMax) throw OpError("a page holds at most 1000 notes");
+    const core::Page& page = c.doc.page(at);
+    if (page.annotations.size() >= core::kAnnotationsMax) throw OpError("a page holds at most 1000 notes");
     const Json* where = core::get(c.op, "at_mm");
     if (where == nullptr) throw OpError("at_mm is [x, y] (mm)");
     Annotation note;
-    note.id = fresh_id(now);
+    note.id = fresh_id(page);
     note.at_mm = point_given(*where, "at_mm");
     if (const Json* v = given(c.op, "text")) note.text = text_given(*v);
     if (const Json* v = given(c.op, "author")) note.author = author_given(*v);

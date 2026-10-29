@@ -242,7 +242,7 @@ std::optional<std::vector<FileNote>> parse(std::string_view data) {
         const std::size_t end = start + length;
         FileNote note;
         if (r.take(4) != "txtA") {
-            note.text = false;
+            note.is_text = false;
             note.raw = std::string(data.substr(start, length));
             out.push_back(std::move(note));
             r.p = end;
@@ -283,7 +283,7 @@ std::string block(const std::vector<FileNote>& notes) {
     put16(out, 1);
     put32(out, static_cast<std::uint32_t>(notes.size()));
     for (const FileNote& n : notes) {
-        if (!n.text) {
+        if (!n.is_text) {
             out += n.raw;
             continue;
         }
@@ -321,7 +321,7 @@ std::vector<core::Annotation> notes_of(const std::vector<FileNote>& notes, const
     };
     std::vector<core::Annotation> out;
     for (const FileNote& n : notes) {
-        if (!n.text) continue;
+        if (!n.is_text) continue;
         core::Annotation a;
         do {
             a.id = "an_" + core::new_id();
@@ -391,7 +391,7 @@ std::optional<std::string> write(const core::Page& page, const psd_production::W
         if (const std::optional<std::string> kept = context.kept_global(kKey)) {
             if (const auto entries = parse(*kept)) {
                 for (const FileNote& e : *entries)
-                    if (!e.text) notes.push_back(e);
+                    if (!e.is_text) notes.push_back(e);
             }
         }
     }

@@ -235,14 +235,14 @@ private slots:
         QVERIFY(notes);
         QCOMPARE(notes->size(), std::size_t(2));
         const pa::FileNote& n = (*notes)[0];
-        QVERIFY(n.text && n.open);
+        QVERIFY(n.is_text && n.open);
         QCOMPARE(n.author, std::string("author"));
         QCOMPARE(n.text, std::string("メモ\nb"));
         QCOMPARE(n.color, (std::array<int, 3>{255, 204, 0}));
         QCOMPARE(n.at_px, (std::array<double, 2>{2, 2}));
         QCOMPARE(n.popup_px, (std::array<double, 4>{8, 2, 60, 40}));
         QCOMPARE(n.modified, std::string("2021-05-21T22:10:29Z"));  // (+01:00)
-        QVERIFY(!(*notes)[1].text);
+        QVERIFY(!(*notes)[1].is_text);
         QCOMPARE((*notes)[1].raw, sound_note());
         // written again: the sound note's bytes as they were; the text note as PhotoCraft writes one (its name "", its
         // date with Z, its icon 16 × 20)

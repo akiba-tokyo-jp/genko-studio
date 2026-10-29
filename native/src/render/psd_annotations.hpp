@@ -32,7 +32,7 @@ inline constexpr std::string_view kKey = "Anno";
 
 // One note of a block as the file holds it (the file's pixels), or a note of another kind kept as its bytes.
 struct FileNote {
-    bool text = true;
+    bool is_text = true;                 // (a text note, txtA; else another kind kept as its bytes)
     std::string raw;                     // (not a text note: its bytes, its length first)
     bool open = false;
     std::array<double, 2> at_px{};       // the icon's top left (x, y)

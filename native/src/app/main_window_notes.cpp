@@ -7,7 +7,10 @@
 #include <QColorDialog>
 #include <QDockWidget>
 #include <QFileInfo>
+#include <QColor>
 #include <QHBoxLayout>
+#include <QIcon>
+#include <QPixmap>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
@@ -20,6 +23,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <optional>
 
 #include "app/ask.hpp"
 #include "app/canvas.hpp"
@@ -145,9 +149,11 @@ void MainWindow::build_notes_dock() {
     connect(canvas_, &PageCanvas::noteOpened, this, [this](const QString& id) {
         const core::Page* page = current_page();
         if (page == nullptr) return;
-        for (const core::Annotation& a : page->annotations) {
-            if (QString::fromStdString(a.id) == id) note_op(Json{{"op", "set_annotation"}, {"id", a.id}, {"open", !a.open}});
-        }
+        std::optional<bool> open;
+        for (const core::Annotation& a : page->annotations)
+            if (QString::fromStdString(a.id) == id) open = a.open;
+        if (!open) return;
+        note_op(Json{{"op", "set_annotation"}, {"id", id.toStdString()}, {"open", !*open}});
         choose_note(id);
     });
     // the 注釈ツール's options: 作成者・カラー・すべてを消去・注釈パネルの表示切り替え (Photoshop's)

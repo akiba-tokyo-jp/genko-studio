@@ -398,7 +398,9 @@ private slots:
         // (act_line_to_type_layer, act_type_layer_to_line) — theirs (test_gui_type).
                 // and PC5 J-a's ファイル → 書き出し → レイヤーカンプからファイル… (act_comps_to_files; its ウィンドウ → レイヤーカンプ is the
         // frame's attribute made real) — test_gui_layer_comps.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{636});
+        // and PC5 J-c's 3 — ツール → 注釈ツール (act_note), 表示 → 表示・非表示 → 注釈 (act_show_notes), ファイル → 読み込み →
+        // 注釈… (act_import_notes); its ウィンドウ → 注釈 is the frame's attribute made real — test_gui_notes.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{639});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -469,7 +471,8 @@ private slots:
                               QStringLiteral("復帰"), QStringLiteral("|"), QStringLiteral("書き出し ▸"), QStringLiteral("|"), QStringLiteral("埋め込みを配置…"),
                               QStringLiteral("リンクを配置…"), QStringLiteral("パッケージ…"), QStringLiteral("|"), QStringLiteral("画像を読み込む…"),
                               QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"), QStringLiteral("ほかの原稿のページを取り込む…"),
-                              QStringLiteral("PSD をレイヤーのまま読み込む…"), QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|"),
+                              QStringLiteral("PSD をレイヤーのまま読み込む…"), QStringLiteral("読み込み ▸"),  // (PC5 J-c: 読み込み ▸ 注釈…)
+                              QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|"),
                               QStringLiteral("プリント…"), QStringLiteral("|"), QStringLiteral("タイムラプスを記録する"), QStringLiteral("タイムラプスを書き出す…"),
                               QStringLiteral("|"), QStringLiteral("自動処理 ▸"), QStringLiteral("スクリプト ▸"), QStringLiteral("オートアクション ▸"),
                               QStringLiteral("|"), QStringLiteral("終了")}));  // (PC5 H-0: 環境設定 in 編集)
@@ -578,7 +581,7 @@ private slots:
                                  "act_measure_ruler_tool", "act_measure_count_tool", "act_measure_scale_marker", "act_video_from_file", "act_video_blank",
                                  "act_video_insert_blank", "act_video_duplicate", "act_video_delete", "act_video_replace", "act_video_interpret",
                                  "act_video_show_altered", "act_video_restore", "act_video_restore_all", "act_video_reload", "act_video_rasterize",
-                                 "act_panel_actions", "act_panel_measurement_log", "act_panel_notes"}) {  // (PC5 J-a: レイヤーカンプ made real)
+                                 "act_panel_actions", "act_panel_measurement_log"}) {  // (PC5 J-a: レイヤーカンプ made real; J-c: 注釈)
             QAction* a = studio.act(name);
             QVERIFY2(a != nullptr, name);
             QVERIFY2(!a->statusTip().isEmpty(), name);
@@ -607,7 +610,7 @@ private slots:
                                if (view.per_mm > 0 && view.at.map(QPointF(10, 10)) != view.at.map(QPointF(20, 20)) && view.seen_mm.contains(QPointF(10, 10)))
                                    ++drawn;
                            }});
-        QCOMPARE(canvas->extra_keys(), std::vector<QString>{QStringLiteral("count")});
+        QCOMPARE(canvas->extra_keys(), (std::vector<QString>{QStringLiteral("notes"), QStringLiteral("count")}));  // (PC5 J-c's notes first)
         (void)canvas->grab();
         QVERIFY(drawn > 0);
         canvas->show_extra(QStringLiteral("count"), false);

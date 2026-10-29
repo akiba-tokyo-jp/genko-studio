@@ -10,6 +10,8 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
 #include "app/main_window.hpp"
 #include "core/annotations.hpp"
 
