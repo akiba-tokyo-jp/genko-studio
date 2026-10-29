@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <set>
 
 #include "core/error.hpp"
@@ -214,10 +213,10 @@ std::string utc_of_pdf_date(std::string_view pdf) {
     unsigned mo = 0, d = 0;
     civil_from_days(days, y, mo, d);
     if (y < 0 || y > 9999) return {};
-    char out[32];
-    std::snprintf(out, sizeof out, "%04lld-%02u-%02uT%02lld:%02lld:%02lldZ", static_cast<long long>(y), mo, d, static_cast<long long>(rest / 3600),
-                  static_cast<long long>(rest / 60 % 60), static_cast<long long>(rest % 60));
-    return out;
+    const auto two = [](std::int64_t v) { return std::string(1, static_cast<char>('0' + v / 10)) + static_cast<char>('0' + v % 10); };
+    std::string year = std::to_string(y);
+    year.insert(0, 4 - year.size(), '0');
+    return year + "-" + two(mo) + "-" + two(d) + "T" + two(rest / 3600) + ":" + two(rest / 60 % 60) + ":" + two(rest % 60) + "Z";
 }
 
 std::string pdf_date_of(std::string_view utc) {

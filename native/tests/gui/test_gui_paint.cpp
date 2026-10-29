@@ -943,7 +943,9 @@ private slots:
                                                               s.window->action(QStringLiteral("act_magic_eraser"))}));  // (PC4 E5: 背景消しゴムツール)
         QCOMPARE(eraser->contextMenuPolicy(), Qt::CustomContextMenu);
         auto* picker = qobject_cast<QToolButton*>(palette->widgetForAction(s.window->action(QStringLiteral("act_picker"))));
-        QVERIFY(picker != nullptr && picker->menu() == nullptr);
+        // (PC5 J-c: the 注釈ツール in the スポイト group — before it, the スポイトツール alone had none)
+        QVERIFY(picker != nullptr && picker->menu() != nullptr);
+        QCOMPARE(picker->menu()->actions(), (QList<QAction*>{s.window->action(QStringLiteral("act_picker")), s.window->action(QStringLiteral("act_note"))}));
         auto* fill = qobject_cast<QToolButton*>(palette->widgetForAction(s.window->action(QStringLiteral("act_fill"))));
         QVERIFY(fill != nullptr && fill->menu() != nullptr);
         QCOMPARE(fill->menu()->actions().size(), 3);  // (塗りつぶしツール, 囲って塗る, グラデーションツール)

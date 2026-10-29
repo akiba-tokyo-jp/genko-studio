@@ -23,6 +23,7 @@ class NotesPanel : public QWidget {
     Q_OBJECT
 public:
     explicit NotesPanel(MainWindow* window);
+    ~NotesPanel() override;
     // The page's notes again (after a change, another page), the chosen one kept while the page has it.
     void refresh();
     // The note shown ("": none).

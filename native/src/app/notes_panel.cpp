@@ -79,6 +79,10 @@ NotesPanel::NotesPanel(MainWindow* window) : QWidget(window), window_(window) {
     });
 }
 
+NotesPanel::~NotesPanel() {
+    if (text_ != nullptr) text_->removeEventFilter(this);  // (its focus lost as the window goes: no op then)
+}
+
 QToolButton* NotesPanel::button(const QString& name) const { return findChild<QToolButton*>(name); }
 
 void NotesPanel::refresh() {

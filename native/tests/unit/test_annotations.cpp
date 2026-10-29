@@ -68,7 +68,7 @@ std::string one_text_note() {
     std::string one = std::string("txtA") + '\x01' + '\x00' + u16(1);
     for (const unsigned v : {2u, 2u, 6u, 6u, 2u, 8u, 40u, 60u}) one += u32(v);
     one += u16(0) + u16(65535) + u16(52428) + u16(0) + u16(0);
-    for (const std::string p : {std::string("author"), std::string("note"), std::string("D:20210521231029+01'00'")}) {
+    for (const std::string& p : {std::string("author"), std::string("note"), std::string("D:20210521231029+01'00'")}) {
         std::string body = std::string(1, static_cast<char>(p.size())) + p;
         if (body.size() % 2 != 0) body += '\0';
         one += body;

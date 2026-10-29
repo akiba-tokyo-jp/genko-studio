@@ -875,6 +875,7 @@ private slots:
                  (QStringList{QStringLiteral("校正の設定 ▸"), QStringLiteral("色の校正"), QStringLiteral("色域外警告"), QStringLiteral("|"),
                               QStringLiteral("ズームイン"), QStringLiteral("ズームアウト"), QStringLiteral("画面サイズに合わせる"), QStringLiteral("プリントサイズ"),
                               QStringLiteral("|"), QStringLiteral("水平方向に反転"), QStringLiteral("パターンプレビュー"), QStringLiteral("|"),
+                              QStringLiteral("表示・非表示 ▸"),  // (PC5 J-c: 注釈 in it, the first of its items)
                               QStringLiteral("ターゲットパス"), QStringLiteral("ブラシプレビュー"), QStringLiteral("|"), QStringLiteral("定規"), QStringLiteral("|"),
                               QStringLiteral("スナップ"), QStringLiteral("スナップ先 ▸"), QStringLiteral("|"), QStringLiteral("シェイプから新規ガイドを作成"),
                               QStringLiteral("|"), QStringLiteral("上下反転して見る"), QStringLiteral("左に回す（15°）"), QStringLiteral("右に回す（15°）"),
