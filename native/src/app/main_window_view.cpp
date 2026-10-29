@@ -81,6 +81,25 @@ const QStringList& view_rows() {
     return rows;
 }
 
+// 表示 → 表示・非表示 ▸ in Photoshop's order (節 H 4.4, 5.1; the owner 節 H). Each part puts its command in with
+// show_menu(view)->addAction(...) under the attribute named here — a row not made yet is passed over, a command not named
+// here goes after a line. (H-b: レイヤーエッジ…メッシュ・編集ピン, すべて・なし, エクストラオプション…; J-d1: カウント; J-b: スライス;
+// J-c: 注釈; H-a: ピクセルグリッド)
+const QStringList& show_rows() {
+    static const QStringList rows{
+        QStringLiteral("act_show_layer_edges"), QStringLiteral("act_show_selection_edges"), QStringLiteral("act_show_target_path"),
+        QStringLiteral("act_show_grid"), QStringLiteral("act_show_guides"), QStringLiteral("act_show_canvas_guides"),
+        QStringLiteral("act_show_artboard_guides"), QStringLiteral("act_show_artboard_names"), QStringLiteral("act_show_count"),
+        QStringLiteral("act_show_smart_guides"), QStringLiteral("act_show_slices"), QStringLiteral("act_show_notes"),
+        QStringLiteral("act_pixel_grid"), QStringLiteral("act_brush_preview"), QStringLiteral("act_show_mesh"),
+        QStringLiteral("act_show_edit_pins"),
+        QStringLiteral("|"),
+        QStringLiteral("act_show_all"), QStringLiteral("act_show_none"),
+        QStringLiteral("|"),
+        QStringLiteral("act_extras_options")};
+    return rows;
+}
+
 }  // namespace
 
 void MainWindow::build_view_actions() {
@@ -152,11 +171,21 @@ void MainWindow::build_view_menus(QMenu* view) {
     for (const char* name : {"act_screen_standard", "act_screen_full_menu", "act_screen_full"}) screens->addAction(action(QString::fromLatin1(name)));
     screens->addSeparator();
     screens->addAction(action(QStringLiteral("act_screen_next")));
+    show_menu(view)->addAction(action(QStringLiteral("act_pixel_grid")));
+    // (after every part has put its commands in 表示 and in 表示・非表示 ▸: laid out once)
+    lay_out_menu(show_menu(view), show_rows());
+    lay_out_menu(view, view_rows());
+}
+
+QMenu* MainWindow::show_menu(QMenu* view) {
+    // (one 表示・非表示 ▸ whichever part comes first: found by its objectName, else made and put in 表示 — view_rows'
+    // "▸表示・非表示" places it)
+    for (QAction* item : view->actions()) {
+        if (item->menu() != nullptr && item->menu()->objectName() == QLatin1String("menu_show")) return item->menu();
+    }
     QMenu* shown = view->addMenu(QStringLiteral("表示・非表示"));
     shown->setObjectName(QStringLiteral("menu_show"));
-    shown->addAction(action(QStringLiteral("act_pixel_grid")));
-    // (after every part has put its commands in 表示: laid out once)
-    lay_out_menu(view, view_rows());
+    return shown;
 }
 
 void MainWindow::build_view_pages(ToolSettings* ts) {

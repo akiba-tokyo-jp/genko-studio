@@ -733,6 +733,9 @@ private:
     // H-d, H-e, H-f)
     void build_view_actions();
     void build_view_menus(QMenu* view);
+    // 表示 → 表示・非表示 ▸ (objectName "menu_show"; its owner 節 H): found in 表示, or made and put there — the one way in
+    // for every part (H-b, J-b, J-c, J-d1: show_menu(view)->addAction(...)); laid out by H's show_rows() in build_view_menus
+    QMenu* show_menu(QMenu* view);
     // PC5 H-a: 手のひらツール's and ズームツール's pages in オプション (main_window_view.cpp)
     void build_view_pages(ToolSettings* ts);
     void ask_32bit_preview();

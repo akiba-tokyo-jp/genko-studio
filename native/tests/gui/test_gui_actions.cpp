@@ -794,6 +794,9 @@ private slots:
                  (QStringList{QStringLiteral("標準スクリーンモード"), QStringLiteral("メニュー付きフルスクリーンモード"), QStringLiteral("フルスクリーンモード"),
                               QStringLiteral("|"), QStringLiteral("次のスクリーンモード")}));
         QVERIFY(items(w->findChild<QMenu*>(QStringLiteral("menu_show"))).contains(QStringLiteral("ピクセルグリッド")));
+        // (one 表示・非表示 ▸ — show_menu(view), whichever part comes first —, in 表示, found again by show_menu)
+        QCOMPARE(w->findChildren<QMenu*>(QStringLiteral("menu_show")).size(), 1);
+        QCOMPARE(items(menu(QStringLiteral("表示"))).count(QStringLiteral("表示・非表示 ▸")), 1);
         const QStringList window = items(menu(QStringLiteral("ウィンドウ")));
         QCOMPARE(window.mid(0, 4), (QStringList{QStringLiteral("アレンジ ▸"), QStringLiteral("ワークスペース ▸"), QStringLiteral("|"), QStringLiteral("原稿だけを表示")}));
         QMenu* arrange = w->findChild<QMenu*>(QStringLiteral("menu_arrange"));
