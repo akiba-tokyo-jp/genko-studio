@@ -82,6 +82,9 @@ struct RenderOptions {
     // smart-objects@1 (render/smart.hpp): a smart object's contents page — its layers alone over nothing ("RGBA"): no paper,
     // panels' borders, lines, nombres, effect lines, guides or marks (render_contents).
     bool contents = false;
+    // groups@1 (PC5 I-b, render/page's own): with contents, only the alpha of what is drawn matters — a group's shape (on a
+    // page of inks, its layers on a clear canvas; the picture "RGBA", black, that alpha).
+    bool shape_only = false;
 };
 
 struct RenderResult {

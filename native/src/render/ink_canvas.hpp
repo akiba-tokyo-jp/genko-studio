@@ -84,6 +84,7 @@ public:
     InkPicture picture() const;
     void mix_back(const InkPicture& before, double opacity, const Image* mask = nullptr);
     void clip_to(const Image& alpha);
+    Image clip_alpha() const;  // (what the next layer would clip to, "L"; all 255 when nothing is set)
 
     // The page as the screen shows it ("RGB", sRGB).
     Image display() const;

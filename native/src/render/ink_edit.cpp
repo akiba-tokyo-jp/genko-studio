@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "core/base64.hpp"
+#include "core/groups.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
@@ -973,11 +974,15 @@ Lending::Lending(core::Document& doc, std::size_t at, std::string_view op, const
                 if (layer.visible && layer.kind != core::LayerKind::Folder && layer.role != core::LayerRole::Name &&
                     layer.role != core::LayerRole::Draft && shown_in_page(page, layer)) {
                     merge.layers.push_back(layer);
+                } else if (core::is_group(layer)) {
+                    merge.layers.push_back(layer);  // (groups@1, PC5 I-b: drawn through its groups, composite_ink_layers)
                 }
             }
             merge.paper = truthy_or(args, "flatten", false);
+            const auto first = std::find_if(merge.layers.begin(), merge.layers.end(), [](const core::Layer& l) { return l.kind != core::LayerKind::Folder; });
+            if (first == merge.layers.end()) merge.layers.clear();  // (groups@1: groups alone are nothing shown)
             if (!merge.layers.empty()) {
-                if (!truthy_or(args, "copy", true)) merge.target = merge.layers.front().id;  // (else the layer it makes)
+                if (!truthy_or(args, "copy", true)) merge.target = first->id;  // (else the layer it makes)
                 else if (const auto id = text_at(args, "id")) merge.target = *id;
             }
         } else if (op == "convert_layer") {

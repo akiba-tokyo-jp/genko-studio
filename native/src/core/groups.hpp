@@ -23,6 +23,9 @@ namespace genko::core {
 inline constexpr std::string_view kGroupsFeature = "groups@1";
 // A group's blend: what is in it is drawn straight on the picture below (Photoshop's 通過).
 inline constexpr std::string_view kPassThrough = "pass_through";
+// How deep groups nest in what this build reads (a PSD's, a .pcraft's: deeper folders are not made, what they hold put in
+// the deepest one made, said).
+inline constexpr std::size_t kGroupDepthMax = 64;
 
 // Is the layer a folder drawn as a group?
 bool is_group(const Layer& layer);
@@ -38,10 +41,16 @@ void validate_groups(const Document& doc);
 // A pass-through group of none draws what it holds as a folder does.
 bool group_changes_look(const Layer& group);
 
+// How many groups that hold a picture while they are drawn (those that change the look, and a clipped one) are nested at
+// most on the page (0: none).
+std::size_t group_picture_depth(const std::vector<Layer>& layers);
+
 // For each layer, the position of the group it is drawn in (its nearest group up its folders; none: drawn on the page).
 std::vector<std::optional<std::size_t>> group_owners(const std::vector<Layer>& layers);
-// Is the layer drawn — itself and every group it is in shown?
+// Is the layer drawn — itself and every group it is in shown? (`owners`: group_owners of the layers, made once by a caller
+// that asks of many)
 bool shown_in_groups(const std::vector<Layer>& layers, std::size_t index);
+bool shown_in_groups(const std::vector<Layer>& layers, std::size_t index, const std::vector<std::optional<std::size_t>>& owners);
 // The positions of what a group holds (every layer drawn in it, in groups in it too), in the page's order.
 std::vector<std::size_t> group_contents(const std::vector<Layer>& layers, std::size_t group);
 

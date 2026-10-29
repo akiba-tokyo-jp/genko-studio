@@ -135,6 +135,8 @@ public:
     void mix_back(const ColorPicture& before, double opacity, const Image* mask = nullptr);
     // PC5 I-b: what the next layer clips to (`alpha`, "L", the canvas's size: a group's shape).
     void clip_to(const Image& alpha);
+    // PC5 I-b: what the next layer would clip to ("L", the canvas's size; all 255 when nothing is set).
+    Image clip_alpha() const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

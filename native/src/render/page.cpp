@@ -2295,24 +2295,36 @@ std::string crop_values(const std::string& values, const Box& box) {
 // --- groups@1 (PC5 I-b, core/groups.hpp): a folder drawn as Photoshop's group -----------------------------------------
 //
 // What a group holds is drawn between its begin and end (core::group_steps). A pass-through group (通過) draws it straight on
-// the picture below; its opacity and mask, when it has them, then mix the picture between before and after (PhotoCraft's
-// compose: a + (b − a) × opacity × mask). Any other blend draws it alone over nothing — an 8-bit picture over transparency
-// as a smart object's contents are, a precise or ink canvas of its own — then lays it as one layer: its mask, opacity, blend
-// and clipping. A layer clipped to a pass-through group clips to the group's shape (what it holds drawn alone, its mask on
-// it): exact for normal layers in it, close otherwise (PhotoCraft lays the difference the clipped layers make instead).
+// the picture below; its opacity, its mask and (clipped) the layer below's shape, when it has them, then mix the picture
+// between before and after (PhotoCraft's compose: a + (b − a) × opacity × mask). Any other blend draws it alone over nothing
+// — an 8-bit picture over transparency as a smart object's contents are, a precise or ink canvas of its own — then lays it
+// as one layer: its mask, opacity, blend and clipping. What it holds never clips to what is outside it (its lowest layer
+// clips to nothing). A layer clipped to a pass-through group clips to the group's shape (what it holds drawn alone, its mask
+// on it): exact for normal layers in it, close otherwise (PhotoCraft lays the difference the clipped layers make instead).
+// A group drawn alone or mixed holds a picture of the part drawn: past what kGroupsBudget holds at once (or
+// core::kGroupDepthMax deep), the drawing is refused, NotYetPorted("group_nesting").
+
+constexpr std::uint64_t kGroupsBudget = 1024ULL * 1024 * 1024;
+
+std::size_t groups_held(std::uint64_t bytes_a_pixel, const Box& area) {
+    const std::uint64_t one = std::max<std::uint64_t>(1, bytes_a_pixel * std::uint64_t(std::max(1, area.width())) * std::uint64_t(std::max(1, area.height())));
+    return static_cast<std::size_t>(std::clamp<std::uint64_t>(kGroupsBudget / one, 1, core::kGroupDepthMax));
+}
 
 // The 8-bit picture or the precise canvas of the page and the groups being drawn.
 class ColorGroups {
 public:
     using Shape = std::function<Image(const Layer&)>;
     ColorGroups(const Ctx& ctx, const Box& area, Image& rgba, std::optional<Image>& prev, bool& contents, ColorCanvas*& canvas, Shape shape)
-        : ctx_(ctx), area_(area), rgba_(rgba), prev_(prev), contents_(contents), canvas_(canvas), shape_(std::move(shape)) {}
+        : ctx_(ctx), area_(area), rgba_(rgba), prev_(prev), contents_(contents), canvas_(canvas), shape_(std::move(shape)),
+          held_(groups_held(canvas != nullptr ? 48 : 8, area)) {}
 
     void begin(const Layer& group) {
         Frame f;
         f.group = &group;
         f.mask = mask_shown(ctx_, group, area_, Resample::Bilinear);
         if (group.blend != core::kPassThrough) {
+            f.holds = hold();
             if (canvas_ != nullptr) {
                 if (!ColorCanvas::supports_blend(group.blend)) throw NotYetPorted("high_precision_blend:" + group.blend);
                 f.own = std::make_unique<ColorCanvas>(transparent(area_), canvas_->space());
@@ -2327,9 +2339,19 @@ public:
                 f.saved_contents = contents_;
                 contents_ = true;
             }
-        } else if (group.opacity < 1.0 || f.mask) {
-            if (canvas_ != nullptr) f.before_values = canvas_->picture();
-            else f.before = rgba_.copy();
+        } else {
+            // (clipped: by the layer below's shape — what it holds then mixed in by it, as by a mask)
+            std::optional<Image> below;
+            if (group.clip) below = canvas_ != nullptr ? canvas_->clip_alpha() : prev_;
+            if (below) f.mask = f.mask ? chops::multiply(*f.mask, *below) : *below;
+            if (group.opacity < 1.0 || f.mask) {
+                f.holds = hold();
+                if (canvas_ != nullptr) f.before_values = canvas_->picture();
+                else f.before = rgba_.copy();
+            }
+            // (what it holds clips to nothing outside it)
+            if (canvas_ != nullptr) canvas_->forget_clip();
+            else prev_.reset();
         }
         frames_.push_back(std::move(f));
     }
@@ -2337,6 +2359,7 @@ public:
     void end(bool clipped_next) {
         Frame f = std::move(frames_.back());
         frames_.pop_back();
+        if (f.holds) --holding_;
         const Layer& group = *f.group;
         const Image* mask = f.mask ? &*f.mask : nullptr;
         if (f.own) {
@@ -2372,6 +2395,10 @@ public:
     }
 
 private:
+    bool hold() {
+        if (++holding_ > held_) throw NotYetPorted("group_nesting");
+        return true;
+    }
     struct Frame {
         const Layer* group = nullptr;
         std::optional<Image> mask;
@@ -2383,6 +2410,7 @@ private:
         bool saved_contents = false;
         std::optional<Image> before;               // (a pass-through group's opacity or mask: the 8-bit picture before it)
         std::optional<ColorPicture> before_values;  // (… or the precise canvas's)
+        bool holds = false;                         // (a picture held: counted against what is held at once)
     };
     const Ctx& ctx_;
     Box area_;
@@ -2391,6 +2419,8 @@ private:
     bool& contents_;
     ColorCanvas*& canvas_;
     Shape shape_;
+    std::size_t held_;
+    std::size_t holding_ = 0;
     std::vector<Frame> frames_;
 };
 
@@ -2399,18 +2429,28 @@ class InkGroups {
 public:
     using Shape = std::function<Image(const Layer&)>;
     InkGroups(const Ctx& ctx, const Page& page, const Box& area, InkCanvas*& canvas, Shape shape)
-        : ctx_(ctx), page_(page), area_(area), canvas_(canvas), shape_(std::move(shape)) {}
+        : ctx_(ctx), page_(page), area_(area), canvas_(canvas), shape_(std::move(shape)),
+          held_(groups_held(8 * (std::uint64_t(canvas->channels()) + 2), area)) {}
 
     void begin(const Layer& group) {
         Frame f;
         f.group = &group;
         f.mask = mask_shown(ctx_, group, area_, Resample::Bilinear);
         if (group.blend != core::kPassThrough) {
+            f.holds = hold();
             f.own = std::make_unique<InkCanvas>(*page_.color, size_of(area_));
             f.saved = canvas_;
             canvas_ = f.own.get();
-        } else if (group.opacity < 1.0 || f.mask) {
-            f.before = canvas_->picture();
+        } else {
+            if (group.clip) {
+                const Image below = canvas_->clip_alpha();
+                f.mask = f.mask ? chops::multiply(*f.mask, below) : below;
+            }
+            if (group.opacity < 1.0 || f.mask) {
+                f.holds = hold();
+                f.before = canvas_->picture();
+            }
+            canvas_->forget_clip();  // (what it holds clips to nothing outside it)
         }
         frames_.push_back(std::move(f));
     }
@@ -2418,6 +2458,7 @@ public:
     void end(bool clipped_next) {
         Frame f = std::move(frames_.back());
         frames_.pop_back();
+        if (f.holds) --holding_;
         const Layer& group = *f.group;
         const Image* mask = f.mask ? &*f.mask : nullptr;
         if (f.own) {
@@ -2430,20 +2471,34 @@ public:
     }
 
 private:
+    bool hold() {
+        if (++holding_ > held_) throw NotYetPorted("group_nesting");
+        return true;
+    }
     struct Frame {
         const Layer* group = nullptr;
         std::optional<Image> mask;
         std::unique_ptr<InkCanvas> own;
         InkCanvas* saved = nullptr;
         std::optional<InkPicture> before;
+        bool holds = false;
     };
     const Ctx& ctx_;
     const Page& page_;
     Box area_;
     InkCanvas*& canvas_;
     Shape shape_;
+    std::size_t held_;
+    std::size_t holding_ = 0;
     std::vector<Frame> frames_;
 };
+
+// groups@1: a group's shape over the part drawn, made once in a drawing (the drawings of the shapes in it too): what a layer
+// clipped to a pass-through group clips to.
+struct GroupShapes {
+    std::map<std::string, Image> made;
+};
+thread_local GroupShapes* group_shapes = nullptr;
 
 RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, const core::Document* episode,
                     std::vector<std::string>& omitted) {
@@ -2580,13 +2635,26 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     };
     // a group's shape (what it holds drawn alone over nothing, its mask on it): what a layer clipped to a pass-through group
     // clips to
+    // (each made once in a drawing — the drawings of the shapes inside it reuse what this one made: GroupShapes)
     const auto group_shape = [&](const Layer& group) -> Image {
+        std::optional<GroupShapes> own;
+        if (group_shapes == nullptr) group_shapes = &own.emplace();
+        struct Done {
+            std::optional<GroupShapes>& own;
+            ~Done() {
+                if (own) group_shapes = nullptr;
+            }
+        } done{own};
+        const std::string key = page.id + "|" + group.id + "|" + std::to_string(dpi) + "|" + options.mode + "|" + std::to_string(area.x0) + "," +
+                                std::to_string(area.y0) + "," + std::to_string(area.x1) + "," + std::to_string(area.y1);
+        if (const auto made = group_shapes->made.find(key); made != group_shapes->made.end()) return made->second;
         Page alone = page;
         alone.layers.clear();
         for (const std::size_t i : core::group_contents(page.layers, static_cast<std::size_t>(&group - page.layers.data())))
             alone.layers.push_back(page.layers[i]);
         RenderOptions inside = options;
         inside.contents = true;
+        inside.shape_only = true;
         inside.region = RenderRegion{area.x0, area.y0, area.width(), area.height()};
         inside.inks = false;
         inside.precise = false;
@@ -2594,10 +2662,15 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         inside.onion = false;
         Image shape = render(alone, dpi, inside, episode, omitted).image.convert("RGBA").getchannel(3);
         if (const std::optional<Image> mask = mask_shown(ctx, group, area, Resample::Bilinear)) shape = chops::multiply(shape, *mask);
+        group_shapes->made.emplace(key, shape);
         return shape;
     };
     if (page.color) {  // color-mode@1: a CMYK or Lab page, composited in its inks (SPEC.md COLOR-02)
-        InkCanvas canvas(*page.color, rgba);
+        // (groups@1: a group's shape — shape_only — on a clear canvas, its alpha what is drawn)
+        std::optional<InkCanvas> on_paper, clear;
+        if (options.shape_only) clear.emplace(*page.color, size_of(area));
+        else on_paper.emplace(*page.color, rgba);
+        InkCanvas& canvas = options.shape_only ? *clear : *on_paper;
         InkCanvas* ic = &canvas;  // (groups@1, PC5 I-b: the canvas of the group being drawn, else the page's)
         InkGroups groups(ctx, page, area, ic, [&](const Layer& group) { return group_shape(group); });
         for (std::size_t s = 0; s < steps.size(); ++s) {
@@ -2608,16 +2681,24 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
                 groups.end(next_clips(s));
                 continue;
             }
-            if (const auto under = std::find_if(below.begin(), below.end(), [&](const auto& b) { return b.first == layer.id; });
-                under != below.end()) {
-                ic->draw_8bit([&](Image& picture) {
-                    text::draw_lines(text::PagePart{&picture, Point{area.x0, area.y0}, ctx.size}, under->second, dpi, font_path, !print,
-                                     &panels, ctx.stop, &unported);
-                });
-            }
+            const auto lines_under = [&](const Layer& above) {
+                if (const auto under = std::find_if(below.begin(), below.end(), [&](const auto& b) { return b.first == above.id; });
+                    under != below.end()) {
+                    ic->draw_8bit([&](Image& picture) {
+                        text::draw_lines(text::PagePart{&picture, Point{area.x0, area.y0}, ctx.size}, under->second, dpi, font_path, !print,
+                                         &panels, ctx.stop, &unported);
+                    });
+                }
+            };
+            lines_under(layer);
             if (step.kind == core::GroupStep::Kind::Begin) {
-                if (group_drawn(layer)) groups.begin(layer);
-                else s = step.end;  // (a hidden group: nothing in it)
+                if (group_drawn(layer)) {
+                    groups.begin(layer);
+                } else {  // (a hidden group: nothing in it — the lines set under its layers still drawn, in their order)
+                    for (std::size_t k = s + 1; k < step.end; ++k)
+                        if (steps[k].kind != core::GroupStep::Kind::End) lines_under(page.layers[steps[k].layer]);
+                    s = step.end;
+                }
                 continue;
             }
             if (layer.kind == LayerKind::Folder) continue;
@@ -2629,6 +2710,15 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
                 continue;
             }
             ink_layer(*ic, ctx, layer, area, panel);
+        }
+        if (options.shape_only) {  // (its alpha alone, in black)
+            const InkPicture drawn = canvas.picture();
+            std::string alpha(drawn.values.size() / (drawn.channels + 1), '\0');
+            for (std::size_t i = 0; i < alpha.size(); ++i)
+                alpha[i] = static_cast<char>(std::clamp<long>(std::lround(drawn.values[i * (drawn.channels + 1) + drawn.channels] * 255.0), 0, 255));
+            Image shape = transparent(area);
+            shape.putalpha(Image::frombytes("L", size_of(area), alpha));
+            return RenderResult{std::move(shape), {}, std::nullopt, std::nullopt};
         }
         if (core::py_truthy(page.effects)) canvas.draw_8bit([&](Image& picture) { picture = draw_effects(ctx, picture, area); });
         canvas.draw_8bit([&](Image& picture) { draw_frames(picture, area, page, ctx.size, dpi); });
@@ -2669,23 +2759,31 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
             groups.end(next_clips(s));
             continue;
         }
-        if (const auto under = std::find_if(below.begin(), below.end(), [&](const auto& b) { return b.first == layer.id; });
-            under != below.end()) {
-            // (drawn on the picture so far. A page in precise colour, which Python does not have, keeps that picture in
-            // its own canvas: the balloons are drawn as here on its 8-bit picture, and what they paint goes into it.)
-            const auto draw = [&](Image& picture) {
-                text::draw_lines(text::PagePart{&picture, Point{area.x0, area.y0}, ctx.size}, under->second, dpi, font_path, !print,
-                                 &panels, ctx.stop, &unported);
-            };
-            if (cv) {
-                cv->draw_8bit(draw);
-            } else {
-                draw(rgba);
+        const auto lines_under = [&](const Layer& above) {
+            if (const auto under = std::find_if(below.begin(), below.end(), [&](const auto& b) { return b.first == above.id; });
+                under != below.end()) {
+                // (drawn on the picture so far. A page in precise colour, which Python does not have, keeps that picture in
+                // its own canvas: the balloons are drawn as here on its 8-bit picture, and what they paint goes into it.)
+                const auto draw = [&](Image& picture) {
+                    text::draw_lines(text::PagePart{&picture, Point{area.x0, area.y0}, ctx.size}, under->second, dpi, font_path, !print,
+                                     &panels, ctx.stop, &unported);
+                };
+                if (cv) {
+                    cv->draw_8bit(draw);
+                } else {
+                    draw(rgba);
+                }
             }
-        }
+        };
+        lines_under(layer);
         if (step.kind == core::GroupStep::Kind::Begin) {
-            if (group_drawn(layer)) groups.begin(layer);
-            else s = step.end;  // (a hidden group: nothing in it)
+            if (group_drawn(layer)) {
+                groups.begin(layer);
+            } else {  // (a hidden group: nothing in it — the lines set under its layers still drawn, in their order)
+                for (std::size_t k = s + 1; k < step.end; ++k)
+                    if (steps[k].kind != core::GroupStep::Kind::End) lines_under(page.layers[steps[k].layer]);
+                s = step.end;
+            }
             continue;
         }
         if (layer.kind == LayerKind::Folder) continue;
@@ -3218,9 +3316,10 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
     if (std::any_of(page.layers.begin(), page.layers.end(), [](const Layer& l) { return l.role == LayerRole::Tone && l.visible; })) {
         Image tones_image = blank();
         const std::optional<Image> panel_mask = clip_mask(page, size, dpi, whole);
+        const std::vector<std::optional<std::size_t>> owners = core::group_owners(page.layers);
         for (std::size_t i = 0; i < page.layers.size(); ++i) {
             const Layer& layer = page.layers[i];
-            if (is_tone(layer) && core::shown_in_groups(page.layers, i)) {  // (groups@1: not in a hidden group)
+            if (is_tone(layer) && core::shown_in_groups(page.layers, i, owners)) {  // (groups@1: not in a hidden group)
                 tones_image = tones::draw_layer(std::move(tones_image), layer, tone_page(ctx), whole, panel_mask ? &*panel_mask : nullptr, true);
             }
         }
@@ -3370,6 +3469,7 @@ core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<c
         RenderOptions inside;
         inside.mode = "proof";
         inside.contents = true;
+        inside.shape_only = true;
         inside.onion = false;
         Image shape = render(alone, dpi, inside, episode, omitted).image.convert("RGBA").getchannel(3);
         if (const std::optional<Image> mask = mask_shown(ctx, group, area, Resample::Bilinear)) shape = chops::multiply(shape, *mask);
@@ -3402,9 +3502,16 @@ RenderResult drawn_page(const core::Page& page, int dpi, const RenderOptions& op
     // Keep every layer in high precision within a region; quantize only the final output pixels.
     // Reuse the established global-coordinate region renderer, not an RGBA8 layer intermediate.
     // (a CMYK or Lab page too: its canvas holds floats)
-    // (groups@1, PC5 I-b: a page of groups in 8 bits too — each group drawn alone holds a picture of what is drawn, in tiles
-    // one of a tile's size)
-    if((uses_color_precision(page,options.mode=="print") || page.color || core::has_groups(page.layers)) && !needs_whole_page(page)){
+    // (groups@1, PC5 I-b: a page of groups in 8 bits too when the pictures its groups hold while they are drawn would not fit
+    // at once — in tiles, one of a tile's size each)
+    const auto groups_tiled = [&] {
+        const std::size_t deep = core::group_picture_depth(page.layers);
+        if (deep == 0) return false;
+        const Size size{mm_to_px(page.spec.width_mm.value(), dpi), mm_to_px(page.spec.height_mm.value(), dpi)};
+        const Box area = area_of(options, size);
+        return std::uint64_t(deep) * 8 * std::uint64_t(std::max(1, area.width())) * std::uint64_t(std::max(1, area.height())) > kGroupsBudget;
+    };
+    if((uses_color_precision(page,options.mode=="print") || page.color || groups_tiled()) && !needs_whole_page(page)){
         const Size size{mm_to_px(page.spec.width_mm.value(),dpi),mm_to_px(page.spec.height_mm.value(),dpi)};
         if(size.width>0x7fffffff/4 || size.height>0x7fffffff/4)throw core::Error("image_too_large","the page is too large at this resolution");
         const Box area=area_of(options,size);

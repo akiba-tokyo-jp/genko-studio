@@ -15,6 +15,7 @@
 
 #include "core/channels.hpp"
 #include "core/error.hpp"
+#include "core/groups.hpp"
 #include "core/masks.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
@@ -391,6 +392,9 @@ public:
         note_keep(layer.id);  // (psd-keep@1, PC4 F-d)
         note_style(layer);  // (layer-styles@1, PC4 E6: a layer's own record)
         if (layer.section == "group") {
+            // (groups@1, PC5 I-b: a group's clipping; a pen layer's group as before)
+            section_clip_ = layer.settings && layer.clip && page_ != nullptr &&
+                            std::any_of(page_->layers.begin(), page_->layers.end(), [&](const core::Layer& l) { return l.id == layer.id && core::is_group(l); });
             section(layer.name, 1, blend_key(layer.settings ? layer.blend : std::string("normal")), layer.settings ? layer.opacity : 1.0,
                     layer.mask ? &*layer.mask : nullptr, vector_block(layer.vector_mask));
             return;
@@ -726,7 +730,7 @@ private:
         records_ += "8BIM";
         records_ += blend;
         put_u8(records_, static_cast<unsigned>(std::clamp<std::int64_t>(core::py_round_int(255 * opacity_given), 0, 255)));
-        put_u8(records_, 0);
+        put_u8(records_, type != 3 && std::exchange(section_clip_, false) ? 1u : 0u);  // (groups@1: a group clipped to the layer below)
         // (flags: visible; Photoshop's bits 3 and 4 — its pixels do not show; PC5 J-a: hidden 0x02, an open group's)
         put_u8(records_, 0x18u | (type != 3 && std::exchange(hidden_, false) ? 0x02u : 0u));
         put_u8(records_, 0);
@@ -909,6 +913,7 @@ private:
     std::string item_;                   // (PC5 J-a: the next record's layer, its production items: note_keep)
     bool group_coming_ = false;          // (… not a pen layer's parts below its group's record)
     bool hidden_ = false;                // (PC5 J-a: the next record's layer is hidden — its flags' bit 1)
+    bool section_clip_ = false;          // (groups@1, PC5 I-b: the next group's record is clipped)
     std::set<std::string> items_done_;   // (… once a layer)
     const core::Layer* keep_ = nullptr;  // (the next record's layer and what it keeps: note_keep)
     const core::Layer* style_ = nullptr;  // (the next record's layer and its style: note_style)

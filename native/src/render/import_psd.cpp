@@ -25,6 +25,7 @@
 #include <fstream>
 #endif
 
+#include "core/groups.hpp"
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/ids.hpp"
@@ -1063,8 +1064,27 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     Json filters_read = Json::array(), filters_shown = Json::array();
     Json raw_shown = Json::array();  // (PC4 F-e: smart objects of a camera RAW shown as Photoshop drew them)
     std::size_t filters_unsaid = 0;
+    // (groups@1, PC5 I-b: groups nested at most core::kGroupDepthMax deep — a folder deeper is not made, what it holds goes
+    // in the deepest group made, its name among the skipped; as psd.read_psd's, without the limit)
+    std::vector<std::size_t> depth(layers.size(), 0);
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+        std::size_t d = 0;
+        for (auto at = layers[i].parent; at && *at < layers.size() && d <= layers.size(); at = layers[*at].parent) ++d;
+        depth[i] = d;
+    }
+    const bool nesting_kept = !psd::python_view();
+    const auto kept_parent = [&](std::size_t i) {
+        auto at = layers[i].parent;
+        while (nesting_kept && at && *at < layers.size() && depth[*at] >= core::kGroupDepthMax) at = layers[*at].parent;
+        return at;
+    };
+    std::vector<std::string> deep_skipped;
     for (std::size_t i = 0; i < layers.size(); ++i) {
         const psd::Layer& item = layers[i];
+        if (nesting_kept && item.folder && depth[i] >= core::kGroupDepthMax) {
+            deep_skipped.push_back(item.name);
+            continue;
+        }
         core::Layer layer;
         layer.id = ids[i];
         layer.role = core::LayerRole::User;
@@ -1074,7 +1094,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
         layer.blend = item.blend;
         layer.clip = item.clip;
         layer.exportable = true;
-        layer.parent_id = item.parent ? Json(ids[*item.parent]) : parent;
+        layer.parent_id = kept_parent(i) ? Json(ids[*kept_parent(i)]) : parent;
         // its mask over the page, as the page holds a layer's (none when it has none)
         const auto mask_of = [&]() -> std::optional<core::Mask> {
             const std::optional<Image> mask = file.mask(item);
@@ -1351,6 +1371,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     Json skipped = Json::array();
     for (const std::string& name : merged_only ? file.python_skipped() : file.skipped()) skipped.push_back(name);
     for (const std::string& name : shapes_skipped) skipped.push_back(name);
+    for (const std::string& name : deep_skipped) skipped.push_back(name);  // (groups@1: nested past the limit)
     target.layers.insert(target.layers.begin() + static_cast<std::ptrdiff_t>(at), std::make_move_iterator(made.begin()),
                          std::make_move_iterator(made.end()));
     Json report = Json::object({{"layers", std::move(listed)}, {"skipped", std::move(skipped)}});

@@ -86,10 +86,29 @@ std::vector<std::optional<std::size_t>> group_owners(const std::vector<Layer>& l
 bool shown_in_groups(const std::vector<Layer>& layers, std::size_t index) {
     if (index >= layers.size() || !layers[index].visible) return false;
     if (!has_groups(layers)) return true;
-    const std::vector<std::optional<std::size_t>> owners = group_owners(layers);
+    return shown_in_groups(layers, index, group_owners(layers));
+}
+
+bool shown_in_groups(const std::vector<Layer>& layers, std::size_t index, const std::vector<std::optional<std::size_t>>& owners) {
+    if (index >= layers.size() || !layers[index].visible) return false;
+    if (owners.size() != layers.size()) return true;
     for (auto at = owners[index]; at; at = owners[*at])
         if (!layers[*at].visible) return false;
     return true;
+}
+
+std::size_t group_picture_depth(const std::vector<Layer>& layers) {
+    if (!has_groups(layers)) return 0;
+    const std::vector<std::optional<std::size_t>> owners = group_owners(layers);
+    const auto holds = [&](std::size_t i) { return group_changes_look(layers[i]) || (is_group(layers[i]) && layers[i].clip); };
+    std::size_t most = 0;
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+        std::size_t d = is_group(layers[i]) && holds(i) ? 1 : 0;
+        for (auto at = owners[i]; at; at = owners[*at])
+            if (holds(*at)) ++d;
+        most = std::max(most, d);
+    }
+    return most;
 }
 
 std::vector<std::size_t> group_contents(const std::vector<Layer>& layers, std::size_t group) {

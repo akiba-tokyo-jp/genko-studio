@@ -541,6 +541,16 @@ void InkCanvas::mix_back(const InkPicture& before, double opacity, const Image* 
     }
 }
 
+Image InkCanvas::clip_alpha() const {
+    const std::size_t count = impl_->px.size() / impl_->stride;
+    std::string out(count, static_cast<char>(255));
+    if (impl_->previous) {
+        for (std::size_t i = 0; i < count; ++i)
+            out[i] = static_cast<char>(std::clamp<long>(std::lround(impl_->px[i * impl_->stride + impl_->n + 1] * 255.0), 0, 255));
+    }
+    return Image::frombytes("L", impl_->size, out);
+}
+
 void InkCanvas::clip_to(const Image& alpha) {
     if (alpha.mode() != "L" || alpha.size() != impl_->size) throw core::Error("value", "the clipping alpha does not match the canvas");
     const unsigned n = impl_->n;

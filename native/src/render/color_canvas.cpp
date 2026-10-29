@@ -507,6 +507,14 @@ void ColorCanvas::mix_back(const ColorPicture& before, double opacity, const Ima
         }
     }
 }
+Image ColorCanvas::clip_alpha() const {
+    std::string out(impl_->pixels.size(), static_cast<char>(255));
+    if (impl_->previous) {
+        for (std::size_t i = 0; i < out.size(); ++i)
+            out[i] = static_cast<char>(std::clamp<long>(std::lround(impl_->pixels[i][4] * 255.0), 0, 255));
+    }
+    return Image::frombytes("L", impl_->size, out);
+}
 void ColorCanvas::clip_to(const Image& alpha) {
     if (alpha.mode() != "L" || alpha.size() != impl_->size) throw core::Error("value", "clipping alpha does not match");
     for (int y = 0; y < impl_->size.height; ++y) {

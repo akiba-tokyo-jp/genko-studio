@@ -863,9 +863,11 @@ void LayerPanel::frame_selected() {
 void LayerPanel::draw_as_group(bool on) {
     const auto [page, layer] = this->layer();
     if (layer == nullptr || loading_ || layer->kind != core::LayerKind::Folder || core::is_group(*layer) == on) return;
-    // (1 手: on, 通過 — what it holds drawn as before, now hidden with it and under its opacity and mask; off, as before)
-    window_->apply_ops(Json::array({Json{{"op", "set_layer"}, {"page", page->index.json()}, {"id", layer->id}, {"group", on},
-                                         {"blend", on ? "pass_through" : "normal"}}}));
+    // (1 手: on, 通過 when its blend is 通常 — what it holds drawn as before, now hidden with it and under its opacity and
+    // mask; a blend of its own, a PSD's read before, kept: what it holds drawn alone. Off, as before: its blend kept, 通過 通常)
+    Json op{{"op", "set_layer"}, {"page", page->index.json()}, {"id", layer->id}, {"group", on}};
+    if (on && (layer->blend.empty() || layer->blend == "normal")) op["blend"] = "pass_through";
+    window_->apply_ops(Json::array({op}));
 }
 
 void LayerPanel::set_selected(const Json& fields) {
