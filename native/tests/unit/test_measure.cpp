@@ -353,7 +353,7 @@ private slots:
         core::Document doc = book();
         doc = run(doc, op("add_count", {{"at_mm", {0.3, 0.4}}}));
         doc = run(doc, op("set_ruler_line", {{"start", {0, 0}}, {"end", {0.3, 0.4}}}));
-        QVERIFY(render::ops_registry().is_query("measure_info"));
+        QVERIFY(render::ops_registry().is_query(std::string_view("measure_info")));
         const auto applied = run_ops(doc, Json::array({op("measure_info")}));
         QVERIFY(applied.unchanged);
         QVERIFY(applied.journal_ops.empty());
