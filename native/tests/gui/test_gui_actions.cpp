@@ -401,7 +401,9 @@ private slots:
         // 南アジア言語用 Composer (act_type_composer_world), 右から左の段落 (act_type_rtl) — theirs (test_gui_type).
                 // and PC5 J-a's ファイル → 書き出し → レイヤーカンプからファイル… (act_comps_to_files; its ウィンドウ → レイヤーカンプ is the
         // frame's attribute made real) — test_gui_layer_comps.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{652});
+        // and the 1 of PC5 I-b (SPEC AUTO-01「グループ」) — レイヤー → 新規 → レイヤーからのフレーム… (act_layer_frame) —
+        // test_gui_layers.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{653});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

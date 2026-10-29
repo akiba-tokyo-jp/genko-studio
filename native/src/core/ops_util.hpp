@@ -168,6 +168,9 @@ void register_color_ops(OpRegistry& registry);
 // Register the ops of M3-A that draw nothing (move_layers, group_layers, set_paper, set_timelapse, store_area,
 // forget_area: core/ops_arrange.cpp). The ones that draw are render's (render/ops_registry.hpp).
 void register_arrange_ops(OpRegistry& registry);
+// group_layers ({page, ids, id?, name?, group?}: the layers put in a new folder where the topmost was; groups@1, PC5 I-b:
+// with group true, a group of 通過) — for the ops that group as they go (render/ops_groups' frame_from_layers).
+void group_layers_op(OpContext& c);
 
 // Image.open(BytesIO(bytes)).verify() for a picture an op is given as base64 (a line's style.picture and
 // style.fill_png): render's (render/raster_ops.hpp). Throws PyValueError with Pillow's words for what Python raises as

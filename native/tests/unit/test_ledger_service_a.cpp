@@ -1234,7 +1234,10 @@ private slots:
                                            "set_count_group", "set_ruler_line", "straighten_layer", "place_scale_marker",
                                            "add_video_layer", "video_insert_blank", "video_duplicate", "video_delete",
                                            "video_restore", "video_restore_all", "video_alter", "set_video_layer", "replace_footage",
-                                           "rasterize_video", "footage_to_layers"};
+                                           "rasterize_video", "footage_to_layers",
+
+                                           // (PC5 I-b: groups@1, レイヤーからのフレーム — SPEC AUTO-01)
+                                           "frame_from_layers"};
         for (const std::string& name : genko::render::ops_registry().names()) {
             if (listed.count(name) == 0 && own.count(name) == 0) missing += (missing.empty() ? "" : ", ") + name;
         }

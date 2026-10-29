@@ -267,6 +267,9 @@ void validate_color_document(const Document& doc) {
             if (layer.kind == LayerKind::Adjust && layer.adjust &&
                 layer.adjust->value("kind", Json()) == "exposure") (void)Exposure::parse(*layer.adjust);
             if (!color || !layer.visible) continue;
+            // (groups@1, PC5 I-b: a folder's blend is no layer's — a group's 通過 among them; render/page lays a group's
+            // other blends as its canvas does, a folder that is not a group's not at all)
+            if (layer.kind == LayerKind::Folder) continue;
             (void)blend_mode(Json(layer.blend));
             // (a correction layer's own blend is not looked at, as Python does not: the user's decision 2 of PC2 —
             // its native.blend is drawn on precise pixels too, render/page. PC2d: a layer in a folder, a tone layer and a

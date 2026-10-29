@@ -21630,9 +21630,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_groups.cpp",
+        "native/src/core/groups.cpp",
+        "native/src/render/page.cpp",
+        "native/src/app/layer_panel.cpp",
+        "native/src/app/main_window_materials.cpp",
+        "native/tests/unit/test_groups.cpp",
+        "native/tests/gui/test_gui_layers.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

@@ -137,10 +137,11 @@ double step_of(const std::string& depth) { return depth == "U8" ? 0.5 / 255 + 1e
 
 // Upstream's layers as Genko orders them: a group's children first, then the group (as a folder); each with whether its
 // groups show.
+// (groups@1, PC5 I-b, the user's decision 2: a group read as a group — what is in it keeps its own visibility)
 void flattened(const Json& layers, bool shown, std::vector<std::pair<const Json*, bool>>& out) {
     for (const Json& l : layers) {
-        const bool visible = shown && l["visible"].get<bool>();
-        if (l["kind"] == Json("group")) flattened(l["children"], visible, out);
+        const bool visible = l["visible"].get<bool>();
+        if (l["kind"] == Json("group")) flattened(l["children"], shown, out);
         out.emplace_back(&l, visible);
     }
 }
@@ -405,9 +406,10 @@ private slots:
                 QCOMPARE(l.title, u["name"].get<std::string>());
                 QVERIFY2(l.visible == kept[i].second, where.c_str());
                 const std::string kind = u["kind"].get<std::string>();
-                if (kind == "group") {
-                    QVERIFY2(l.kind == core::LayerKind::Folder, where.c_str());
-                    QCOMPARE(l.opacity, 1.0);
+                if (kind == "group") {  // (groups@1, PC5 I-b: a group with its settings)
+                    QVERIFY2(l.kind == core::LayerKind::Folder && l.group, where.c_str());
+                    QVERIFY2(std::abs(l.opacity - u["opacity"].get<double>()) < 1e-3, where.c_str());
+                    QVERIFY2(l.mask.has_value() == u["mask"].get<bool>(), where.c_str());
                     continue;
                 }
                 QVERIFY2(l.clip == u["clipped"].get<bool>(), where.c_str());
@@ -574,7 +576,7 @@ private slots:
         QVERIFY(page.layer_comps->comps[0].apply_visibility && !page.layer_comps->comps[0].apply_position);
         QVERIFY(!said(notes, "レイヤーカンプ"));
         for (const char* part : {"レイヤー効果", "ラベル", "文字レイヤーは画素", "リンクされたスマートオブジェクト", "注釈", "用紙の外",
-                                 "高度な合成のチャンネル", "フォルダーの不透明度", "filter.unknown.later"}) {
+                                 "高度な合成のチャンネル", "filter.unknown.later"}) {
             QVERIFY2(said(notes, part), qPrintable(QString::fromUtf8(part) + QStringLiteral("\n") + QString::fromStdString(joined(notes))));
         }
     }

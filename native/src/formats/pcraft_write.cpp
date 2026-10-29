@@ -16,6 +16,7 @@
 #include <thread>
 #include <utility>
 
+#include "core/groups.hpp"
 #include "core/adjust.hpp"
 #include "core/channels.hpp"
 #include "core/color_model.hpp"
@@ -1014,11 +1015,13 @@ std::vector<Json> grouped(Ctx& ctx, std::vector<Out> flat) {
             const core::Layer* f = find_layer(ctx.page, folder);
             Json content{{"kind", "group"}, {"children", std::move(children)}, {"expanded", true}, {"artboard", nullptr}};
             Json group = layer_json(ctx, f != nullptr ? title_of(*f) : std::string("フォルダー"), f, std::move(content), nullptr);
-            group["blend"] = "PassThrough";
-            group["opacity"] = 1.0;
-            group["clipped"] = false;
-            group["mask"] = nullptr;
-            group["vector_mask"] = nullptr;
+            if (f == nullptr || !f->group) {  // (a folder that is not a group draws as 通過 with nothing of its own; groups@1: a group's own)
+                group["blend"] = "PassThrough";
+                group["opacity"] = 1.0;
+                group["clipped"] = false;
+                group["mask"] = nullptr;
+                group["vector_mask"] = nullptr;
+            }
             out.push_back(std::move(group));
         }
         return out;
@@ -1038,6 +1041,7 @@ Json document_json(Ctx& ctx) {
     std::set<std::string> patterns;
     std::vector<Out> flat;
     std::size_t next = 0;  // (the page's layers written so far, page_layers' or hidden)
+    const std::vector<std::optional<std::size_t>> owners = core::group_owners(page.layers);  // (groups@1: made once)
     const auto hidden_until = [&](std::size_t index) {
         for (; next < index && next < page.layers.size(); ++next) {
             const core::Layer& l = page.layers[next];
@@ -1047,7 +1051,7 @@ Json document_json(Ctx& ctx) {
             const bool pen = l.kind == core::LayerKind::Strokes && l.role != core::LayerRole::Tone && (l.stroke_count() > 0 || !l.patches.empty()) &&
                              !render::shape_parts::any(l) && !(l.raster_png && !l.raster_png->empty()) && !l.color_raster && !l.ink_raster;
             // (and a smart object page_layers gives no picture of — its file not in the book —: written, and said)
-            const bool unseen = !l.visible || pen || l.kind == core::LayerKind::Smart || (l.kind == core::LayerKind::Fill && l.fill && core::pattern_of_fill(*l.fill) == nullptr);
+            const bool unseen = !core::shown_in_groups(page.layers, next, owners) || pen || l.kind == core::LayerKind::Smart || (l.kind == core::LayerKind::Fill && l.fill && core::pattern_of_fill(*l.fill) == nullptr);  // (groups@1: in a hidden group too)
             if (!unseen || l.kind == core::LayerKind::Folder || !l.exportable || l.role == core::LayerRole::Name || l.role == core::LayerRole::Draft) continue;
             if (auto made = layer_of(ctx, l, nullptr, patterns)) flat.push_back(Out{std::move(*made), folder_of(l)});
         }

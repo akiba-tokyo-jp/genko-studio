@@ -15,6 +15,8 @@
 #include <QPushButton>
 #include <QSlider>
 #include <QSpinBox>
+#include <QStandardItemModel>
+#include <QMenuBar>
 #include "gui_support.hpp"
 #include "app/adjust_forms.hpp"
 #include "app/canvas.hpp"
@@ -779,6 +781,64 @@ private slots:
         shown = 0;
         for (int row = 0; row < panel.list()->count(); ++row) shown += panel.list()->item(row)->isHidden() ? 0 : 1;
         QCOMPARE(shown, panel.list()->count());
+    }
+
+    // PC5 I-b (groups@1, the user's decision 2): a new folder is a group (通過); a folder of before is drawn as before and
+    // turned into a group in one step (グループとして描く); 通過 a group's blend only; レイヤーからのフレーム… in
+    // レイヤー → 新規.
+    void groupsAndFrames() {
+        Book book;
+        auto& panel = book.panel();
+        panel.add("folder", QStringLiteral("フォルダ"));
+        const core::Layer* made = nullptr;
+        for (const auto& l : book.page().layers) if (l.kind == core::LayerKind::Folder) made = &l;
+        QVERIFY(made != nullptr && made->group);
+        QCOMPARE(made->blend, std::string("pass_through"));
+        // a folder as a book of before has it
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "folder"}, {"id", "oldfolder"}, {"name", "前のフォルダ"}}})));
+        QVERIFY(!book.layer("oldfolder")->group);
+        panel.refresh();
+        QVERIFY(book.choose("oldfolder"));
+        auto* group = book.child<QCheckBox>("layer_group");
+        QVERIFY(group != nullptr);
+        QVERIFY(!group->isHidden());
+        QVERIFY(!group->isChecked());
+        const auto row = std::find(panel.ids().begin(), panel.ids().end(), std::string("oldfolder")) - panel.ids().begin();
+        QVERIFY(panel.list()->item(static_cast<int>(row))->text().contains(QStringLiteral("まとめるだけ")));
+        auto* blend = book.child<QComboBox>("layer_blend");
+        const int pass = blend->findData(QStringLiteral("pass_through"));
+        QVERIFY(pass >= 0);
+        auto* modes = qobject_cast<QStandardItemModel*>(blend->model());
+        QVERIFY(modes != nullptr && !modes->item(pass)->isEnabled());
+        group->click();
+        QVERIFY(book.layer("oldfolder")->group);
+        QCOMPARE(book.layer("oldfolder")->blend, std::string("pass_through"));
+        QVERIFY(book.choose("oldfolder"));
+        QVERIFY(qobject_cast<QStandardItemModel*>(blend->model())->item(pass)->isEnabled());
+        book.undo();
+        QVERIFY(!book.layer("oldfolder")->group);
+        QCOMPARE(book.layer("oldfolder")->blend, std::string("normal"));
+        // a paint layer: no グループとして描く
+        QVERIFY(book.choose(book.ink));
+        QVERIFY(group->isHidden());
+        // レイヤー → 新規 → レイヤーからのフレーム…: the chosen layer grouped and cut to its box
+        QAction* frame = book.window->action(QStringLiteral("act_layer_frame"));
+        QVERIFY(frame != nullptr);
+        QCOMPARE(frame->text(), QStringLiteral("レイヤーからのフレーム…"));
+        bool in_new = false;
+        for (QAction* top : book.window->menuBar()->actions())
+            if (top->text() == QStringLiteral("レイヤー") && top->menu() != nullptr)
+                for (QAction* a : top->menu()->actions())
+                    if (a->menu() != nullptr && a->text() == QStringLiteral("新規")) in_new = a->menu()->actions().contains(frame);
+        QVERIFY(in_new);
+        QVERIFY(book.choose(book.ink));
+        frame->trigger();
+        const core::Layer* ink = book.layer(book.ink);
+        QVERIFY(core::py_truthy(ink->parent_id));
+        const core::Layer* framed = book.layer(core::py_str(ink->parent_id));
+        QVERIFY(framed != nullptr && framed->group && framed->vector_mask.has_value());
+        book.undo();
+        QVERIFY(!core::py_truthy(book.layer(book.ink)->parent_id));
     }
 };
 
