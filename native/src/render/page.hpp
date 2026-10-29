@@ -219,6 +219,9 @@ struct PageLayer {
     // layer-styles@1 (PC4 E6, review P2-6): the page layer whose style goes with a picture given without its id — a placed
     // picture's, the ink layer's lines (a PSD writes the style with it: lfx2, iOpa, blending ranges); none: by `id`
     const core::Layer* styled = nullptr;
+    // (PC5 J-a) a hidden layer, given when page_layers is asked for them (`hidden_too`: a PSD of a page with layer comps
+    // writes them hidden, so that Photoshop's comps show them)
+    bool hidden = false;
 };
 
 // psd.page_layers(page, episode, dpi), bottom to top: the paper, the page's fills, each visible exported pixel layer
@@ -232,10 +235,12 @@ struct PageLayer {
 // change is in the merged picture only). A pen layer with shape parts (pen-shapes@1, PC3 C-b) is given in its place:
 // with `shapes` (a PSD) as a shape layer of its one part or as a group of its pictures, parts and lines
 // (render/psd_shapes' plan), else (and where a group would not show it the same) as one layer of its look. With `shapes`
-// (a PSD) a pattern fill layer (patterns@1, PC4 E3) is given too, as a layer of its look with its pattern fill.
+// (a PSD) a pattern fill layer (patterns@1, PC4 E3) is given too, as a layer of its look with its pattern fill. (PC5 J-a)
+// `hidden_too`: the hidden exported pixel layers too, in their places, each given `hidden` (a PSD of a page with layer
+// comps: Photoshop's comps show and hide them); a hidden correction layer and the hidden tones still not.
 void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each,
                  const std::function<void(const core::StoryLine&)>* line_layers = nullptr,
-                 const std::function<void(const core::Layer&)>* adjust_layers = nullptr, bool shapes = false);
+                 const std::function<void(const core::Layer&)>* adjust_layers = nullptr, bool shapes = false, bool hidden_too = false);
 
 // Pure black and white: grey above `threshold` is white; with `screen` the greys become a pattern (dot, line, cross or
 // noise; 書き出しでのトーン化).

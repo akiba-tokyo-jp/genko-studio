@@ -687,7 +687,10 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
         {"add_scene", QStringLiteral("3D の背景を置いています…")},        {"add_prim3d", QStringLiteral("3D を置いています…")},
         {"pose_figure", QStringLiteral("3D のポーズを変えています…")},    {"pose_mannequin", QStringLiteral("3D のポーズを変えています…")},
         {"import_pages", QStringLiteral("ページを取り込んでいます…")},       {"smart_place", QStringLiteral("スマートオブジェクトを置いています…")},
-        {"layer_style_to_layers", QStringLiteral("レイヤースタイルをレイヤーにしています…")}};  // (PC4 E6 review P3-6)
+        {"layer_style_to_layers", QStringLiteral("レイヤースタイルをレイヤーにしています…")},  // (PC4 E6 review P3-6)
+        // (PC5 J-a, the review's P3-7: each layer's place read)
+        {"new_layer_comp", QStringLiteral("レイヤーカンプを記録しています…")}, {"update_layer_comp", QStringLiteral("レイヤーカンプを記録しています…")},
+        {"apply_layer_comp", QStringLiteral("レイヤーカンプを適用しています…")}};
     struct Busy {
         bool on = false;
         ~Busy() {

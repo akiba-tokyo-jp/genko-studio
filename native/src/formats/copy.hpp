@@ -193,14 +193,16 @@ CopyEstimate estimate_copy(const core::Document& doc, std::size_t page, std::str
 // the page — or those chosen (their ids) — applied to a copy of the book (render/ops_layer_comps: what its options put
 // back; the book itself unchanged), the page written as one file each by write_copy with the options:
 // <prefix>_<NNNN>_<the comp's name>.<extension> in `folder` (NNNN its place in the page's list from 0000; a name's marks a
-// path or a file system takes — / \ : * ? " < > | — made "_"; the prefix none: the book's title). The files written before
-// one that fails stay. core::Error("value") for a page without comps, an id it has not, or none chosen.
+// path or a file system takes — / \ : * ? " < > | — made "_"; the prefix none: the book's title; the name, then the prefix,
+// cut by whole characters so that the file's name is at most 240 bytes). The files written before one that fails stay.
+// core::Error("value") for a page without comps, an id it has not, or none chosen.
 struct CompFiles {
     std::string extension = "png";   // one of copy_extensions()
     std::string prefix;              // "": the book's title (無題 when it has none)
     std::vector<std::int64_t> comps; // none: every comp
     CopyOptions options;
-    // (the coordinator's P3-8) each file's place before it is written: throws to write none (check_target)
+    // (the coordinator's P3-8) each file's place before it is written: throws to write it and those after it not (check_target;
+    // the files written before it stay)
     std::function<void(const std::filesystem::path&)> check;
 };
 std::vector<CopyResult> export_layer_comps(const core::Document& doc, std::size_t page, const std::filesystem::path& folder, const CompFiles& files);

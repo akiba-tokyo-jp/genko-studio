@@ -132,8 +132,13 @@ bool read(core::Page& page, std::string_view data, const psd_production::ReadCon
     if (const auto last = integer(top, "lastAppliedComp")) {
         if (std::any_of(comps.comps.begin(), comps.comps.end(), [&](const core::LayerComp& c) { return c.id == *last; })) comps.last_applied = *last;
     }
-    // each layer's states (its cmls): its place now and the offset
-    const auto scale = px_a_mm(page, context.width_px, context.height_px);
+    // each layer's states (its cmls): its place now and the offset (the file's pixels as its canvas lies on the page: the
+    // review's P3-3)
+    std::array<double, 2> scale = px_a_mm(page, context.width_px, context.height_px);
+    if (context.onto != nullptr && context.width_px > 0 && context.height_px > 0 && std::fabs((*context.onto)[0]) > 1e-12 &&
+        std::fabs((*context.onto)[3]) > 1e-12) {
+        scale = {context.width_px / std::fabs((*context.onto)[0]), context.height_px / std::fabs((*context.onto)[3])};
+    }
     std::vector<core::CompLayerState> last_state;
     for (const auto& [lyid, id] : context.layers) {
         const core::Layer* layer = layer_named(page, id);
@@ -240,11 +245,19 @@ void write_layers(const core::Page& page, const psd_production::WriteContext& co
     if (!page.layer_comps || page.layer_comps->comps.empty()) return;
     const core::LayerComps& comps = *page.layer_comps;
     const auto scale = px_a_mm(page, context.width_px, context.height_px);
+    // (the layers whose place a comp records: their place now — each drawn or read once, the others not)
+    std::set<std::string> placed;
+    const auto note = [&](const std::vector<core::CompLayerState>& states) {
+        for (const core::CompLayerState& s : states)
+            if (s.position) placed.insert(s.layer);
+    };
+    for (const core::LayerComp& c : comps.comps) note(c.layers);
+    if (comps.last_state) note(*comps.last_state);
     for (const core::Layer& layer : page.layers) {
-        const auto lyid = context.lyids.find(layer.id);
-        if (lyid == context.lyids.end()) continue;
+        const std::optional<std::int64_t> lyid = context.name_layer ? context.name_layer(layer.id) : std::nullopt;
+        if (!lyid) continue;
         std::optional<std::array<double, 2>> here;
-        if (context.doc != nullptr) here = layer_comps::position_of(*context.doc, page, layer);
+        if (context.doc != nullptr && placed.contains(layer.id)) here = layer_comps::position_of(*context.doc, page, layer);
         const auto setting = [&](std::int32_t id, const core::CompLayerState* state) {
             d::Writer s;
             if (state != nullptr && state->visible) s.boolean("enab", *state->visible);
@@ -270,10 +283,9 @@ void write_layers(const core::Page& page, const psd_production::WriteContext& co
         origin.number("Vrtc", 0.0);
         d::Writer cmls;
         cmls.object("origFXRefPoint", origin, "null");
-        cmls.integer("LyrI", static_cast<std::int32_t>(lyid->second));
+        cmls.integer("LyrI", static_cast<std::int32_t>(*lyid));
         cmls.objects("layerSettings", settings);
         out.items[layer.id].emplace_back("cmls", cmls.versioned("null"));
-        out.lyids[layer.id] = lyid->second;
     }
 }
 

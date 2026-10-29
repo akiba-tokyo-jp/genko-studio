@@ -17,6 +17,8 @@
 #include "render/layer_bounds.hpp"
 #include "render/layer_transform.hpp"
 #include "render/ops_layer_styles.hpp"
+#include "render/own_pixels.hpp"
+#include "render/page.hpp"
 
 namespace genko::render::layer_comps {
 
@@ -39,11 +41,66 @@ double r4(double v) { return core::py_round(v, 4); }
 
 }  // namespace
 
+Placing placing(const core::Document& doc, const core::Page& page, const core::Layer& layer) {
+    Placing out;
+    // (a folder's place is its layers'; a fill and a correction layer cover the page)
+    if (layer.kind == core::LayerKind::Folder || layer.kind == core::LayerKind::Fill || layer.kind == core::LayerKind::Adjust) return out;
+    std::optional<std::array<double, 4>> box;  // x0, y0, x1, y1 mm
+    const auto unite = [&box](double x0, double y0, double x1, double y1) {
+        if (!std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(x1) || !std::isfinite(y1)) return;
+        box = box ? std::array<double, 4>{std::min((*box)[0], x0), std::min((*box)[1], y0), std::max((*box)[2], x1), std::max((*box)[3], y1)}
+                  : std::array<double, 4>{x0, y0, x1, y1};
+    };
+    const double w = page.spec.width_mm.value(), h = page.spec.height_mm.value();
+    // its own pixels (8-bit, precise, inks): the box of those that show, on their own grid — not cut by the panels
+    if (w > 0 && h > 0) {
+        if (const std::optional<OwnPixels> own = OwnPixels::of(page, layer)) {
+            const double sx = own->width() / w, sy = own->height() / h;
+            out.grid = std::array<double, 2>{sx, sy};
+            if (const auto shown = own->shown()) unite(shown->x0 / sx, shown->y0 / sy, shown->x1 / sx, shown->y1 / sy);
+        }
+    }
+    // its pen lines and shape parts where they are (the paper's edge and the panels not cutting them)
+    if (layer.strokes) {
+        for (const core::StrokePtr& stroke : layer.strokes->items) {
+            const double r = stroke->width_mm / 2;
+            for (const core::PointF& p : stroke->points) unite(p.x - r, p.y - r, p.x + r, p.y + r);
+        }
+    }
+    if (layer.shapes) {
+        for (const core::vector::ShapePart& part : layer.shapes->items) {
+            const auto b = part.path.control_bounds();
+            if (!b) continue;
+            const double r = part.stroke ? part.stroke->width_mm / 2 : 0.0;
+            unite((*b)[0] - r, (*b)[1] - r, (*b)[2] + r, (*b)[3] + r);
+        }
+    }
+    // a placed picture where it lies
+    if (layer.kind == core::LayerKind::Placed && layer.placement_mm) {
+        const core::Rect& r = *layer.placement_mm;
+        unite(r.x.value(), r.y.value(), r.x.value() + r.width.value(), r.y.value() + r.height.value());
+    }
+    if (!box) {
+        // (anything else — a smart object, a type layer, a tone, a pen layer's patches —: what it shows on the paper, the
+        // panels not cutting it)
+        core::Layer shown = layer;
+        shown.visible = true;
+        shown.opacity = 1.0;
+        shown.panel_clip = false;
+        shown.mask.reset();
+        shown.vector_mask.reset();
+        const Image picture = layer_image(page, shown, layer_bounds::kDpi, &doc, true);
+        if (const auto b = picture.getbbox()) {
+            const auto g = layer_bounds::grid(page);
+            unite(b->x0 / g[0], b->y0 / g[1], b->x1 / g[0], b->y1 / g[1]);
+        }
+    }
+    if (box) out.at = std::array<double, 2>{r4((*box)[0]), r4((*box)[1])};
+    return out;
+}
+
 std::optional<std::array<double, 2>> position_of(const core::Document& doc, const core::Page& page, const core::Layer& layer) {
-    if (layer.kind == core::LayerKind::Folder) return std::nullopt;  // (a folder's place is its layers')
-    const auto box = layer_bounds::of_layer(doc, page, layer.id);
-    if (!box) return std::nullopt;
-    return std::array<double, 2>{r4((*box)[0]), r4((*box)[1])};
+    return placing(doc, page, layer).at;
 }
 
 std::vector<CompLayerState> capture(const core::Document& doc, const core::Page& page) {
@@ -79,11 +136,15 @@ void apply(core::Document& doc, std::size_t at, const std::vector<CompLayerState
         if (position && s.has_position && s.position) {
             const core::Page& page = doc.page(at);
             const core::Layer& layer = *layer_named(page, s.layer);
-            if (const auto now = position_of(doc, page, layer)) {
-                // (by whole working pixels, as the Move tool and Align move a layer)
-                const auto g = layer_bounds::grid(page);
-                const double dx = std::round(((*s.position)[0] - (*now)[0]) * g[0]) / g[0];
-                const double dy = std::round(((*s.position)[1] - (*now)[1]) * g[1]) / g[1];
+            const Placing now = placing(doc, page, layer);
+            if (now.at) {
+                // (a layer of its own pixels by whole pixels of its own grid — copied, never sampled again; lines, parts, a
+                // placed picture, a smart object exactly)
+                double dx = (*s.position)[0] - (*now.at)[0], dy = (*s.position)[1] - (*now.at)[1];
+                if (now.grid) {
+                    dx = std::round(dx * (*now.grid)[0]) / (*now.grid)[0];
+                    dy = std::round(dy * (*now.grid)[1]) / (*now.grid)[1];
+                }
                 if (std::fabs(dx) > 1e-9 || std::fabs(dy) > 1e-9) {
                     const core::Rect paper = page.paper_rect_mm();
                     const auto m = layer_transform::affine_map({1, 0, 0, 1, dx, dy}, {0, 0, paper.width.value(), paper.height.value()});
@@ -412,6 +473,9 @@ void delete_layer_comp(core::OpContext& c) {
     const std::int64_t id = lc::named(comps, core::get(c.op, "comp")).id;
     comps.comps.erase(comps.comps.begin() + static_cast<std::ptrdiff_t>(index_of(comps, id)));
     if (comps.last_applied == id) comps.last_applied.reset();
+    // (the last comp gone: its last document state with it — Photoshop shows none without comps —, the page's comps none:
+    // layer-comps@1 not named any more)
+    if (comps.comps.empty()) comps.last_state.reset();
     put(c.doc, at, std::move(comps));
     c.report = Json{{"deleted", id}};
 }

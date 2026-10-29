@@ -800,13 +800,25 @@ std::vector<CopyResult> export_layer_comps(const core::Document& doc, std::size_
     }
     std::string prefix = files.prefix.empty() ? (doc.title.empty() ? std::string("無題") : doc.title) : files.prefix;
     prefix = render::layer_comps::file_part(prefix);
+    // (a name cut by whole characters to at most `most` bytes: file systems take 255 bytes a name)
+    const auto cut = [](std::string text, std::size_t most) {
+        if (text.size() <= most) return text;
+        text.resize(most);
+        while (!text.empty() && (static_cast<unsigned char>(text.back()) & 0xC0) == 0x80) text.pop_back();
+        if (!text.empty() && (static_cast<unsigned char>(text.back()) & 0x80) != 0) text.pop_back();  // (a lead byte left alone)
+        return text;
+    };
+    constexpr std::size_t kNameMost = 240;
+    const std::size_t fixed = 1 + 4 + 1 + 1 + files.extension.size();  // (_NNNN_ and the dot and extension)
+    prefix = cut(prefix, kNameMost > fixed + 16 ? kNameMost - fixed - 16 : 1);
     std::vector<CopyResult> out;
     for (std::size_t i = 0; i < all.size(); ++i) {
         const core::LayerComp& comp = all[i];
         if (!files.comps.empty() && std::find(files.comps.begin(), files.comps.end(), comp.id) == files.comps.end()) continue;
         char number[32];
         std::snprintf(number, sizeof number, "%04zu", i);
-        const fs::path dest = folder / core::path_from_utf8(prefix + "_" + number + "_" + render::layer_comps::file_part(comp.name) + "." + files.extension);
+        const std::string part = cut(render::layer_comps::file_part(comp.name), kNameMost - fixed - prefix.size());
+        const fs::path dest = folder / core::path_from_utf8(prefix + "_" + number + "_" + part + "." + files.extension);
         if (files.check) files.check(dest);
         core::Document one = doc;  // (the comp applied to a copy: the book unchanged)
         try {

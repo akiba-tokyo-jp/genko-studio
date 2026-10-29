@@ -57,12 +57,19 @@ struct Taken {
 
 struct WriteContext {
     bool layers_written = true;                 // the file has the page's layers (false: a flat PSD, a bitmap, an indexed one)
-    std::map<std::string, std::int64_t> lyids;  // a layer's id → the lyid written for it
+    // a layer's id → the lyid it is written with when a row names it: its kept one (the first layer of it), else one after
+    // the largest kept (PC5 J-a). Written in the layer's record only when a row names the layer — name_layer (or
+    // LayerItems::lyids) —, and only for a layer the file writes a record of (a hidden layer of a page without comps, a
+    // folder have none): a row names only those it finds here and in the records' layers.
+    std::map<std::string, std::int64_t> lyids;
     double width_px = 0, height_px = 0;         // the file's canvas
     // The page's kept block's bytes (an image resource by its id, a global block by its key; none: not kept).
     std::function<std::optional<std::string>(int resource)> kept_resource;
     std::function<std::optional<std::string>(std::string_view global)> kept_global;
     const core::Document* doc = nullptr;  // (PC5 J-a) the book written
+    // (PC5 J-a, the review's P2-4) A row naming a layer (1050's layer-based slices, J-b): its lyid (none: the file has none
+    // for it), now written in its record. Set by write() for the rows.
+    std::function<std::optional<std::int64_t>(const std::string& layer)> name_layer;
 };
 
 // (PC5 J-a) The layers' metadata items (shmd) the rows write in the records: the keys whose kept items every record loses,
@@ -72,7 +79,7 @@ struct LayerItems {
     std::map<std::string, std::vector<std::pair<std::string, std::string>>> items;
     std::map<std::string, std::int64_t> lyids;
 
-    bool empty() const { return keys.empty() && items.empty(); }
+    bool empty() const { return keys.empty() && items.empty() && lyids.empty(); }
 };
 
 struct Written {

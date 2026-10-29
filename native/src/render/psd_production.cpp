@@ -91,8 +91,16 @@ Taken read(core::Page& page, const std::vector<std::pair<int, std::string_view>>
     return taken;
 }
 
-Written write(const core::Page& page, const WriteContext& context) {
+Written write(const core::Page& page, const WriteContext& given) {
     Written out;
+    // (the rows name layers through it: their lyids written in their records — PC5 J-a, the review's P2-4)
+    WriteContext context = given;
+    context.name_layer = [&out, &given](const std::string& layer) -> std::optional<std::int64_t> {
+        const auto found = given.lyids.find(layer);
+        if (found == given.lyids.end()) return std::nullopt;
+        out.layers.lyids[layer] = found->second;
+        return found->second;
+    };
     for (const Row& row : rows()) {
         const bool resource = row.resource >= 0;
         const auto handled = [&] {

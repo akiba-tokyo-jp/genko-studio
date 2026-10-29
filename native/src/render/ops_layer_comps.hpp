@@ -17,17 +17,19 @@
 // position and appearance kept under a name, and put back.
 //
 // What a comp records of each layer of the page (core::CompLayerState): whether it is shown; where it is — the top left of
-// its box (render/layer_bounds: what it shows drawn alone at the working 200 dpi, without its masks; mm) — none for a layer
-// that shows nothing, a fill or a correction layer and a folder (a folder's place is its layers'); its appearance — its
-// blend mode, opacity and layer style (the fill opacity in it). A comp's options choose which of the three applying puts
-// back. Applying moves a layer by the difference between its box now and the one recorded, by whole working pixels (as the
-// Move tool and Align do: through render/layer_transform's move_layer, each kind of layer as it moves — a locked or
-// position-locked one too, and alone: not its folder's or linked layers, which have their own places in the comp); a layer
-// the page no longer has is left out (Photoshop's warning triangle: `missing`). The lines of dialogue, the panels, the
-// effect lines and 3D are not layers: no comp holds them.
+// the box of what it holds (`placing` below: not cut by the panels, lines and parts not by the paper's edge; mm) — none
+// for a layer that shows nothing, a fill or a correction layer and a folder (a folder's place is its layers'); its
+// appearance — its blend mode, opacity and layer style (the fill opacity in it). A comp's options choose which of the three
+// applying puts back. Applying moves a layer by the difference between its place now and the one recorded — a layer of its
+// own pixels by whole pixels of its own grid (copied, never sampled again: going back and forth between comps leaves its
+// pixels as they were), the others exactly — through render/layer_transform's move_layer, each kind of layer as it moves (a
+// locked or position-locked one too, and alone: not its folder's or linked layers, which have their own places in the
+// comp); a layer the page no longer has is left out (Photoshop's warning triangle: `missing`). The lines of dialogue, the
+// panels, the effect lines and 3D are not layers: no comp holds them.
 //
 // The ops (render/ops_layer_comps.cpp; the C++ build's own: not in `genko schema` or the MCP tool list, applied through
-// `apply`). A comp is named by its id (an integer) or its name; none: the comp applied last, else the first.
+// `apply` — the window, `genko apply`, HTTP; not the MCP apply_ops: service::agent_op does not list them, as PC3's and PC4's
+// own ops). A comp is named by its id (an integer) or its name; none: the comp applied last, else the first.
 //   new_layer_comp {page, name?, comment?, visibility?, position?, appearance?} → {comp}        新規レイヤーカンプ
 //   update_layer_comp {page, comp? | "*", what?: all | visibility | position | appearance} → {updated}  レイヤーカンプを更新
 //   apply_layer_comp {page, comp? | "next" | "previous" | "last_state"} → {comp, missing}       適用・次・前・最後のドキュメントの状態
@@ -42,8 +44,16 @@ namespace genko::render::layer_comps {
 
 // What a comp records of each of the page's layers now (page order), all three.
 std::vector<core::CompLayerState> capture(const core::Document& doc, const core::Page& page);
-// A layer's comp position: the top left of its box (mm, to 4 decimals); none for a folder, a fill or a correction layer and
-// one that shows nothing.
+// A layer's comp position: the top left of the box of what it holds (mm, to 4 decimals) — its own pixels that show (8-bit,
+// precise, inks), its pen lines and shape parts, a placed picture's place, else what it shows on the paper (a smart object,
+// a type layer, a tone) —, never cut by the panels (panel_clip) and, for lines, parts and a placed picture, not by the
+// paper's edge; none for a folder, a fill or a correction layer and one that shows nothing. `grid`: a layer of its own
+// pixels' grid (pixels a mm across and down): applying moves it by whole pixels of it.
+struct Placing {
+    std::optional<std::array<double, 2>> at;
+    std::optional<std::array<double, 2>> grid;
+};
+Placing placing(const core::Document& doc, const core::Page& page, const core::Layer& layer);
 std::optional<std::array<double, 2>> position_of(const core::Document& doc, const core::Page& page, const core::Layer& layer);
 // The layers a comp records that the page no longer has (in its order).
 std::vector<std::string> missing(const core::Page& page, const std::vector<core::CompLayerState>& states);
