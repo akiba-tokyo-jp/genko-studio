@@ -54,7 +54,7 @@ void MainWindow::build_automate_actions() {
     make(QStringLiteral("act_script_events"), QStringLiteral("スクリプトイベントマネージャー…"), [this] { script_events_dialog(); }, {},
          QStringLiteral("起動・新規・開く・保存・閉じる・プリント・書き出しのときに流す手順を結び付けます"));
     make(QStringLiteral("act_script_browse"), QStringLiteral("参照…"), [this] { browse_script(); }, {},
-         QStringLiteral("手順のファイル（操作の JSON か 1 行 1 操作）を選んで、このページに流します"));
+         QStringLiteral("手順のファイル（操作の JSON か 1 行 1 操作）を選んで、開いている原稿に流します（genko script と同じ）"));
 }
 
 void MainWindow::build_automate_menus() {
@@ -421,21 +421,11 @@ void MainWindow::browse_script() {
     }
     if (!steps_allowed(steps, name)) return;  // (which step may not be one, said before anything runs)
     if (!ask::question(this, QStringLiteral("スクリプトを参照"),
-                       QStringLiteral("「%1」の %2 個の手順を、このページに流しますか？（元に戻すで戻せます）").arg(name).arg(steps.size()))) {
+                       QStringLiteral("「%1」の %2 個の手順を、開いている原稿に流しますか？（元に戻すで戻せます）").arg(name).arg(steps.size()))) {
         return;
     }
-    const core::Page* page = current_page();
-    if (page == nullptr) {
-        run_steps(steps, false, name);  // (says that no book is open)
-        return;
-    }
-    // (an op without its page goes to the page in front, as 実行 plays an action)
-    Json aimed = Json::array();
-    for (Json op : steps) {
-        if (op.is_object() && !op.contains("page") && op.value("op", std::string()) != "for_pages") op["page"] = page->index.json();
-        aimed.push_back(std::move(op));
-    }
-    run_steps(aimed, false, name);
+    // (the ops as written — as `genko script` applies the same file —; no book open: said)
+    run_steps(steps, false, name);
 }
 
 void MainWindow::raise_opened(service::script_events::Event event) {

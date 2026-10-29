@@ -371,7 +371,7 @@ private slots:
     // 参照…: a steps file run on the page in front (one Undo); one holding a gate refused before anything runs.
     void browseInTheWindow() {
         Book b;
-        write(b.root / "two.txt", "# メモ\nset_note {\"note\": \"one\"}\nset_note {\"page\": 2, \"note\": \"two\"}\n");
+        write(b.root / "two.txt", "# メモ\nset_note {\"page\": 1, \"note\": \"one\"}\nset_note {\"page\": 2, \"note\": \"two\"}\n");
         b.answers.responder->open_path = [&b](const QString&, const QString&) { return q(b.root / "two.txt"); };
         b.answers.responder->question = [](const QString&, const QString&) { return true; };
         const std::size_t done = b.window->session().history().done.size();
@@ -379,7 +379,7 @@ private slots:
         QCOMPARE(b.doc().page(0).note, std::string("one"));
         QCOMPARE(b.doc().page(1).note, std::string("two"));
         QCOMPARE(b.window->session().history().done.size(), done + 1);
-        write(b.root / "gate.txt", "set_note {\"note\": \"no\"}\nname_ok {\"page\": 1}\n");
+        write(b.root / "gate.txt", "set_note {\"page\": 1, \"note\": \"no\"}\nname_ok {\"page\": 1}\n");
         b.answers.responder->open_path = [&b](const QString&, const QString&) { return q(b.root / "gate.txt"); };
         b.act("act_script_browse")->trigger();
         QCOMPARE(b.doc().page(0).note, std::string("one"));
