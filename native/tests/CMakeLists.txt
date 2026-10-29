@@ -197,6 +197,10 @@ genko_test(test_align SOURCES unit/test_align.cpp DEPS genko_test_support genko_
 # option applied alone, the last document state, the comps managed and gone round, the layers gone, the refusals) on the
 # 8-bit, 16-bit and CMYK pages, a pen layer's lines and a style put back, locks and links, a copied page.
 genko_test(test_layer_comps SOURCES unit/test_layer_comps.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC5 I-d (variables@1, SPEC.md AUTO-01「変数とデータセット」): the variables' normal form and refusals, defined, given and
+# applied (visibility, a type layer's and a line's text) in one step, a picture's bytes kept out of the journal, a text file of
+# data sets (PhotoCraft's variables_cmds/tests.rs).
+genko_test(test_variables SOURCES unit/test_variables.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
 # PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame; and PC2a's tone kinds
@@ -547,6 +551,12 @@ genko_test(test_contract_align SOURCES contract/test_contract_align.cpp DEPS gen
 # .pcraft's layer_comps (upstream's reader with $GENKO_PCRAFT_CHECK).
 genko_test(test_contract_layer_comps SOURCES contract/test_contract_layer_comps.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC5 I-d (variables@1): a picture put in a paint layer on the 8-bit, 16-bit, 32-bit and CMYK pages (fit, fill, conform,
+# as_is × the nine places × clip), a smart object's contents replaced, the variables through the command line (apply, undo,
+# inspect --variables, export --format datasets: the files' names, the book unchanged), saved and read again (variables@1,
+# the pictures in assets/, a book without them as before), a .pcraft's variables written and read back.
+genko_test(test_contract_variables SOURCES contract/test_contract_variables.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 # PC3 C-e through the command line: every kind of page turned (inspect --pixel), undone and redone; a page of its own paper
@@ -706,6 +716,9 @@ if(GENKO_BUILD_APP)
   # PC5 J-a (layer-comps@1): ウィンドウ → レイヤーカンプ (the dock, its panel's rows, buttons and menu, the windows asked,
   # each one Undo) and ファイル → 書き出し → レイヤーカンプからファイル…
   genko_test(test_gui_layer_comps SOURCES gui/test_gui_layer_comps.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC5 I-d (variables@1): ページ → 変数 ▸ 定義…・データセット…, データセットを適用…, ファイル → 書き出し → データセットからファイル…,
+  # ファイル → 読み込み → 変数データセット… (their places, the windows asked, each one Undo)
+  genko_test(test_gui_variables SOURCES gui/test_gui_variables.cpp DEPS genko_app GUI TIMEOUT 600)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC2c (COLOR-04): レイヤー → 色調補正's local corrections and image calculations, 編集 → フェード (only right after).

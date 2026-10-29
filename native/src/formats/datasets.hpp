@@ -41,7 +41,8 @@ CsvRead read_data_sets_csv(std::string_view text, const core::Variables& variabl
 std::vector<std::vector<std::string>> csv_rows(std::string_view text, char delimiter);
 
 // ファイル → 書き出し → データセットからファイル… (file.export.dataSetsAsFiles): each data set — or those chosen — applied to a
-// copy of the book (apply_data_set as `actor`: the book itself unchanged), and the pages chosen written each as one file by
+// copy of the book (apply_data_set as `actor` on the copy, its page locks and strict_gates let go: the copy is never saved,
+// the book itself unchanged), and the pages chosen written each as one file by
 // write_copy: <naming>.<extension> in `folder` (naming's {name} the data set's name, {index} its place from 001, {document}
 // the book's title; a path's and a file system's marks made "_"; a page's file stem — p001 — added after "_" when more than
 // one page is written; a name met again given -2, -3 …). The files written before one that fails stay. core::Error("value")

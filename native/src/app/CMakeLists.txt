@@ -201,6 +201,9 @@ genko_library(genko_app
     # PC5 J-a (layer-comps@1: ウィンドウ → レイヤーカンプ, レイヤーカンプからファイル…)
     main_window_layer_comps.cpp
     layer_comps_panel.cpp
+    # PC5 I-d (変数とデータセット: イメージ → 変数, データセットを適用, データセットからファイル, 変数データセット)
+    main_window_variables.cpp
+    variables_dialog.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

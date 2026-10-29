@@ -206,12 +206,15 @@ std::vector<CopyResult> export_data_sets(const core::Document& doc, const fs::pa
     }
     const std::string title = render::layer_comps::file_part(doc.title.empty() ? std::string("無題") : doc.title);
     static const core::CommandBus bus(render::ops_registry());
+    core::Document free = doc;  // (a copy never saved: what locks and gates keep from changing is the book, not its files)
+    free.page_locks = Json::object();
+    free.strict_gates = false;
     std::vector<CopyResult> out;
     std::map<std::string, int> seen;
     for (std::size_t i = 0; i < variables.data_sets.size(); ++i) {
         const core::DataSet& set = variables.data_sets[i];
         if (!files.data_sets.empty() && std::find(files.data_sets.begin(), files.data_sets.end(), set.name) == files.data_sets.end()) continue;
-        char number[16];
+        char number[32];
         std::snprintf(number, sizeof number, "%03zu", i + 1);
         std::string stem = files.naming.empty() ? std::string("{name}") : files.naming;
         const auto put = [&stem](std::string_view key, const std::string& value) {
@@ -229,7 +232,7 @@ std::vector<CopyResult> export_data_sets(const core::Document& doc, const fs::pa
         if (const int n = ++seen[stem]; n > 1) stem += "-" + std::to_string(n);
         core::ApplyResult applied;
         try {
-            applied = bus.apply(doc, Json::array({Json{{"op", "apply_data_set"}, {"index", i}}}), files.actor);
+            applied = bus.apply(free, Json::array({Json{{"op", "apply_data_set"}, {"index", i}}}), files.actor);
         } catch (const core::ApplyError& error) {
             bad(error.what());
         }

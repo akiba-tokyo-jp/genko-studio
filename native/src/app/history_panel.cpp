@@ -126,6 +126,8 @@ const std::map<std::string, const char*>& names() {
         {"new_layer_comp", "新規レイヤーカンプ"}, {"update_layer_comp", "レイヤーカンプを更新"}, {"apply_layer_comp", "レイヤーカンプを適用"},
         {"set_layer_comp", "レイヤーカンプオプション"}, {"duplicate_layer_comp", "レイヤーカンプを複製"}, {"delete_layer_comp", "レイヤーカンプを削除"},
         {"clear_layer_comp_warnings", "レイヤーカンプの警告をクリア"},
+        // (PC5 I-d, variables@1: render/ops_variables)
+        {"set_variables", "変数を定義"}, {"set_data_sets", "データセットを変更"}, {"apply_data_set", "データセットを適用"},
     };
     return table;
 }

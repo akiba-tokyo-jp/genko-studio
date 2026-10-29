@@ -1218,6 +1218,43 @@ const std::vector<Rule>& rules() {
                          "文字の設定（文字・段落の属性、スタイル）の指定が正しくありません"));
         r.push_back(rule("(?:a run(?:'s| must) |the runs must |a paragraph must |the paragraphs must |a style's (?:id|name) |two (?:character|paragraph) styles ).*",
                          "文字の範囲・段落・スタイルの指定が正しくありません"));
+        // (variables@1, PC5 I-d — the C++ build's own: the variables and data sets, render/ops_variables, formats/datasets)
+        r.push_back(rule(R"(variable (\S+): (.*))", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("変数「%1」: %2").arg(m.captured(1), error(m.captured(2)));
+        }));
+        r.push_back(rule("no data set at index (\\S+)", "\\1 番目のデータセットはありません"));
+        r.push_back(rule("no data set (.*)", "「\\1」という名前のデータセットはありません"));
+        r.push_back(rule("name or index names the data set", "データセットは名前か番号で指定します"));
+        r.push_back(rule("the book has no variables: define them first.*", "原稿に変数がありません（先に イメージ → 変数 → 定義… で定義します）"));
+        r.push_back(rule("the book has no data sets", "原稿にデータセットがありません"));
+        r.push_back(rule("no data sets chosen", "書き出すデータセットが選ばれていません"));
+        r.push_back(rule("no page to write: the variables name no page of the book", "変数のあるページがないため、書き出すページがありません"));
+        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?no variable (.*))", "「\\1」という変数はありません"));
+        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?(\S+) \(visibility\) takes true or false)", "変数「\\1」（表示）の値は true か false です"));
+        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?(\S+) \(text\) takes text)", "変数「\\1」（テキストの置き換え）の値は文字です"));
+        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?(\S+) \(pixels\) takes a picture.*)", "変数「\\1」（ピクセルの置き換え）の値は画像です"));
+        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?the picture cannot be read.*)", "データセットの画像が読めません"));
+        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?the picture is larger than 256 MiB)", "データセットの画像が大きすぎます（256 MiB まで）"));
+        r.push_back(rule("the data sets' pictures are larger than 4 GiB together", "データセットの画像が、あわせて 4 GiB を越えます"));
+        r.push_back(rule(R"(defs\[\d+\]: layer (\S+) is not a type layer)", "テキストの置き換えにできるのは文字レイヤーか台詞だけです"));
+        r.push_back(rule(R"(defs\[\d+\]: layer (\S+) is not a paint layer or a smart object)", "ピクセルの置き換えにできるのはペイントのレイヤーかスマートオブジェクトだけです"));
+        r.push_back(rule(R"(defs\[\d+\]: no line (.*))", "その台詞は原稿にありません"));
+        r.push_back(rule(R"(defs\[\d+\]: a line takes a text variable only)", "台詞に使えるのはテキストの置き換えの変数だけです"));
+        r.push_back(rule("two variables are named (.*)", "「\\1」という名前の変数が 2 つあります（変数の名前は 1 つずつ）"));
+        r.push_back(rule("two data sets are named (.*)", "「\\1」という名前のデータセットが 2 つあります（データセットの名前は 1 つずつ）"));
+        r.push_back(rule(R"(def \d+'s name must be 1 to 255 characters|data set \d+'s name must be 1 to 255 characters)", "変数・データセットの名前は 1〜255 文字です"));
+        r.push_back(rule(R"(data set \d+ gives (.*) two values)", "1 つのデータセットに変数「\\1」の値が 2 つあります"));
+        r.push_back(rule(R"(at most (\d+) (?:variables|defs))", "変数は \\1 個までです"));
+        r.push_back(rule(R"(at most (\d+) data sets)", "データセットは \\1 個までです"));
+        r.push_back(rule(R"(a printed layer's pixels change only after name_ok on page (\S+) \(strict_gates\))",
+                         "\\1 ページのネームが承認されるまで、印刷するレイヤーの画素は変えられません"));
+        r.push_back(rule("the text file is not UTF-8.*", "テキストファイルが UTF-8 ではありません（CSV UTF-8 で保存します）"));
+        r.push_back(rule("the text file is larger than 64 MiB", "テキストファイルが大きすぎます（64 MiB まで）"));
+        r.push_back(rule("the text file holds no line of names", "テキストファイルに変数の名前の行がありません"));
+        r.push_back(rule(R"(the text file holds more than (\d+) data sets)", "データセットは \\1 個までです"));
+        r.push_back(rule("a quoted field is not closed", "テキストファイルの \" で囲んだ欄が閉じていません"));
+        r.push_back(rule(R"(row (\d+): the picture (.*) cannot be read)", "\\1 行目の画像「\\2」が読めません"));
+        r.push_back(rule(R"(row (\d+): the picture (.*) is larger than 256 MiB)", "\\1 行目の画像「\\2」が大きすぎます（256 MiB まで）"));
         // (groups@1, PC5 I-b — the C++ build's own: a folder drawn as a group, core/groups, render/ops_groups)
         r.push_back(rule("group makes a folder.*|group is set on a folder|.*the layer \\S+ is marked a group but is not a folder",
                          "グループとして描けるのはフォルダーだけです"));

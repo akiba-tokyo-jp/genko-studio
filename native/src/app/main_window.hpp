@@ -1724,6 +1724,23 @@ private:
     void build_layer_comps_dock();
     LayerCompsPanel* layer_comps_panel_ = nullptr;
     QDockWidget* layer_comps_dock_ = nullptr;
+    // --- PC5 I-d (variables@1): main_window_variables.cpp — ページ → 変数 ▸ 定義…・データセット…, データセットを適用…, ファイル
+    // → 書き出し → データセットからファイル…, ファイル → 読み込み → 変数データセット…; each change of the book an op through
+    // apply_ops --------------------------------------------------------------------------------------------------------
+public:
+    void define_variables();
+    void edit_data_sets();
+    void apply_data_set_dialog();
+    // データセットからファイル…: the window asked, then formats::export_data_sets off the window's thread.
+    void data_sets_to_files();
+    // 変数データセット…: the window asked, the text file read off the window's thread (formats::read_data_sets_csv), then
+    // set_data_sets.
+    void import_data_sets();
+
+private:
+    void build_variable_actions();
+    void build_variable_menus(QMenu* file, QMenu* pages);
+    bool variable_op(core::Json op);
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go
