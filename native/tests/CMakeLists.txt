@@ -626,6 +626,8 @@ genko_test(test_automate SOURCES unit/test_automate.cpp DEPS genko_test_support 
 # PC5 I-0: `genko script` as `genko apply` (the same reply, the journal's script name; the gates, undo and an agent's ops
 # refused), `genko batch` of a folder of pictures (the files コピーを保存 writes, again under the next free names, --json, a
 # picture never written in place) and of a book (--save: its pages changed, the journal's name).
+# PC5 I-e: `genko automate` (画像プロセッサー of a PNG, a 16-bit TIFF and a CMYK JPEG; 画像を合わせる; 条件付きモード変更; レンズ補正 as
+# the filter one by one) and `genko droplet` (made with its launchers, run by itself and by its launcher; an agent refused).
 genko_test(test_contract_automate SOURCES contract/test_contract_automate.cpp DEPS genko_test_support genko_service
            LABELS contract TIMEOUT 900)
 add_dependencies(test_contract_automate genko)
@@ -740,6 +742,10 @@ if(GENKO_BUILD_APP)
   # PC5 J-c (annotations@1): the 注釈ツール (a click, a drag, a double click; its options), ウィンドウ → 注釈 (the panel),
   # 表示 → 表示・非表示 → 注釈, ファイル → 読み込み → 注釈… — each change one Undo
   genko_test(test_gui_notes SOURCES gui/test_gui_notes.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC5 I-e: ファイル → 自動処理 ▸ (バッチ…・ドロップレットを作成…・条件付きモード変更…・画像を合わせる…・レンズ補正…) and スクリプト ▸
+  # (画像プロセッサー…・スクリプトイベントマネージャー…・参照…): their places, the windows asked, the script events raised by the
+  # person's save (never the automatic one) and not run once their script changed
+  genko_test(test_gui_automate SOURCES gui/test_gui_automate.cpp DEPS genko_app GUI TIMEOUT 900)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC2c (COLOR-04): レイヤー → 色調補正's local corrections and image calculations, 編集 → フェード (only right after).

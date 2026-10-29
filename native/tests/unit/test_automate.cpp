@@ -24,6 +24,7 @@
 #include "formats/copy.hpp"
 #include "formats/open_file.hpp"
 #include "render/codecs/codecs.hpp"
+#include "render/ops_registry.hpp"
 #include "service/actions.hpp"
 #include "service/automate.hpp"
 #include "service/script_events.hpp"
@@ -199,12 +200,194 @@ private slots:
         // no pseudo op: the bus's own result, as `genko apply` has it
         const Json plain = Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "a"}}});
         QCOMPARE(automate::run_steps(doc, plain, core::Actor("human:leaf")).applied, Json::array({"set_note"}));
-        // the one PC5 I-e fills in
-        const auto [code, message] = thrown([&] {
+        // (PC5 I-e: 条件付きモード変更 — what was refused with not_yet_ported until then — made set_color_mode)
+        const core::ApplyResult grey =
             automate::run_steps(doc, Json::array({Json{{"op", "conditional_mode_change"}, {"page", 1}, {"to", "gray"}}}), core::Actor("human:leaf"));
+        QCOMPARE(grey.applied, Json::array({"set_color_mode"}));
+        QCOMPARE(automate::page_mode(grey.doc.page(0)), std::string("gray"));
+    }
+
+    // PC5 I-e: 条件付きモード変更 (PhotoCraft's file_cmds.rs conditional_mode_change): the page into `to` when its mode is one
+    // of `from` (any: all; grayscale is gray), its depth kept; nothing when it is not, or is `to` already; the modes named
+    // as Photoshop's list (bitmap … multichannel).
+    void conditionalModeChange() {
+        const core::Document doc = picture(20, 10);
+        QCOMPARE(automate::page_mode(doc.page(0)), std::string("rgb"));
+        const auto change = [&doc](Json from, const char* to) {
+            Json op{{"op", "conditional_mode_change"}, {"page", 1}, {"to", to}};
+            if (!from.is_null()) op["from"] = std::move(from);
+            return automate::expand_pseudo(doc, op);
+        };
+        QCOMPARE(change(Json::array({"rgb", "cmyk"}), "gray"), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}}}));
+        QCOMPARE(change(Json::array({"Grayscale", "cmyk"}), "lab"), Json::array());  // (an RGB page: not one of them)
+        QCOMPARE(change(Json(), "rgb"), Json::array());                               // (any: but it is RGB already)
+        QCOMPARE(change(Json("any"), "cmyk")[0]["mode"], Json("cmyk"));
+        QCOMPARE(change(Json::array({"rgb"}), "grayscale")[0]["mode"], Json("gray"));
+        // its depth kept: a grey page of 16 bits into RGB of 16 bits
+        const core::ApplyResult grey16 = core::CommandBus(render::ops_registry())
+                                             .apply(doc, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}, {"depth", 16}}}),
+                                                    core::Actor("human:leaf"));
+        QCOMPARE(automate::page_mode(grey16.doc.page(0)), std::string("gray"));
+        const Json to_rgb = automate::expand_pseudo(grey16.doc, Json{{"op", "conditional_mode_change"}, {"page", 1}, {"from", Json::array({"gray"})}, {"to", "rgb"}});
+        QCOMPARE(to_rgb, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}}));
+        const core::ApplyResult made = automate::run_steps(grey16.doc, Json::array({Json{{"op", "conditional_mode_change"}, {"page", 1}, {"to", "rgb"}}}),
+                                                           core::Actor("human:leaf"));
+        QCOMPARE(automate::page_mode(made.doc.page(0)), std::string("rgb"));
+        QVERIFY(made.doc.page(0).rgb && made.doc.page(0).rgb->depth == 16);
+        for (const Json& wrong : {Json{{"op", "conditional_mode_change"}, {"page", 1}, {"to", "indexed"}},
+                                  Json{{"op", "conditional_mode_change"}, {"page", 1}, {"to", "rgb"}, {"from", Json::array({"sepia"})}},
+                                  Json{{"op", "conditional_mode_change"}, {"page", 1}, {"to", "rgb"}, {"from", 3}},
+                                  Json{{"op", "conditional_mode_change"}, {"page", 1}}, Json{{"op", "conditional_mode_change"}, {"to", "rgb"}}}) {
+            bool refused = false;
+            try {
+                automate::expand_pseudo(doc, wrong);
+            } catch (const core::OpError&) {
+                refused = true;
+            }
+            QVERIFY2(refused, wrong.dump().c_str());
+        }
+        // an agent: set_color_mode is not one of its ops, so the change it stands for is refused
+        const auto [code, message] = thrown([&] {
+            automate::run_steps(doc, Json::array({Json{{"op", "conditional_mode_change"}, {"page", 1}, {"to", "gray"}}}), core::Actor("ai:hermes"));
         });
-        QCOMPARE(code, std::string("not_yet_ported"));
-        QCOMPARE(message, std::string("ops[0] conditional_mode_change: conditional_mode_change is not in the C++ build yet"));
+        QCOMPARE(code, std::string("steps"));
+        QVERIFY2(message.find("set_color_mode is not an op an agent may run") != std::string::npos, message.c_str());
+    }
+
+    // PC5 I-e: 画像プロセッサー's outputs (a folder each format, Photoshop's names; JPEG's quality only) and its steps (sRGB:
+    // a mode convert_profile does not take made RGB first; サイズに合わせる never enlarged), レンズ補正's (flattened first
+    // when more than one layer shows, then the filter on the layer kept, the profile auto unless given).
+    void processorAndLensSteps() {
+        automate::ImageProcessor processor;
+        processor.formats = {"jpeg", "PSD", "tif"};
+        processor.quality = 5;
+        const fs::path out = fs::path("out");
+        const automate::Output output = automate::processor_output(processor, out);
+        QCOMPARE(output.folder, out / "JPEG");
+        QCOMPARE(output.format, std::string("jpg"));
+        QCOMPARE(output.quality, std::optional<int>(5));
+        QCOMPARE(output.also.size(), std::size_t(2));
+        QCOMPARE(output.also[0].folder, out / "PSD");
+        QCOMPARE(output.also[0].format, std::string("psd"));
+        QVERIFY(!output.also[0].quality);
+        QCOMPARE(output.also[1].folder, out / "TIFF");
+        for (const std::vector<std::string>& wrong : {std::vector<std::string>{}, {"jpg", "jpeg"}, {"gif"}}) {
+            automate::ImageProcessor bad;
+            bad.formats = wrong;
+            QCOMPARE(thrown([&] { automate::processor_output(bad, out); }).first, std::string("value"));
+        }
+        const core::Document doc = picture(40, 20);
+        QCOMPARE(automate::processor_steps(processor, doc), Json::array());
+        processor.to_srgb = true;
+        processor.width_px = 10;
+        const Json steps = automate::processor_steps(processor, doc);
+        QCOMPARE(steps.size(), std::size_t(3));
+        QCOMPARE(steps[0]["op"], Json("conditional_mode_change"));
+        QCOMPARE(steps[1], (Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "srgb"}}));
+        QCOMPARE(steps[2], (Json{{"op", "fit_image"}, {"page", 1}, {"dont_enlarge", true}, {"width_px", 10}}));
+        const core::ApplyResult ran = automate::run_steps(doc, steps, core::Actor("human:leaf"));
+        QCOMPARE(std::round(page_px(ran.doc, true)), 10.0);
+        QCOMPARE(std::round(page_px(ran.doc, false)), 5.0);
+        // レンズ補正: one layer — the filter on it; two showing — flattened first, the lowest kept
+        const Json lens = automate::lens_steps(Json{{"profile", "generic"}, {"focal_length", 24}}, doc);
+        QCOMPARE(lens.size(), std::size_t(1));
+        QCOMPARE(lens[0]["op"], Json("filter_raster"));
+        QCOMPARE(lens[0]["kind"], Json("lens_correction"));
+        QCOMPARE(lens[0]["id"], Json(doc.page(0).layers[0].id));
+        QCOMPARE(lens[0]["profile"], Json("generic"));
+        QCOMPARE(automate::lens_steps(Json::object(), doc)[0]["profile"], Json("auto"));
+        const core::ApplyResult two = core::CommandBus(render::ops_registry())
+                                          .apply(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "L2"}}}),
+                                                 core::Actor("human:leaf"));
+        const Json both = automate::lens_steps(Json::object(), two.doc);
+        QCOMPARE(both.size(), std::size_t(2));
+        QCOMPARE(both[0], (Json{{"op", "merge_visible"}, {"page", 1}, {"copy", false}, {"flatten", true}}));
+        QCOMPARE(both[1]["id"], Json(doc.page(0).layers[0].id));
+        QCOMPARE(thrown([&] { automate::lens_steps(Json{{"page", 2}}, doc); }).first, std::string("value"));
+        // the generic profile drawn on the picture through the runner's steps
+        const core::ApplyResult corrected = automate::run_steps(doc, lens, core::Actor("human:leaf"));
+        QCOMPARE(corrected.applied, Json::array({"filter_raster"}));
+    }
+
+    // PC5 I-e: a droplet — its file (written as it is read; what is not a droplet refused), its launchers (beside it, this
+    // OS's, one fixed line calling `genko droplet`, runnable; a file of that name not a launcher never written over), its
+    // output (given, its own, else droplet-output beside the first input); the runner's 連番 and 画像プロセッサー's Also.
+    void droplets() {
+        QTemporaryDir dir;
+        const fs::path root = path_of(dir.path());
+        automate::Droplet droplet;
+        droplet.name = "影";
+        droplet.steps = Json::array({Json{{"op", "set_note"}, {"note", "d"}}});
+        droplet.format = "jpg";
+        droplet.quality = 7;
+        droplet.suffix = "_d";
+        const fs::path written = automate::write_droplet(root / "影", droplet);
+        QCOMPARE(written, root / "影.genkodroplet");
+        const automate::Droplet back = automate::read_droplet(written);
+        QCOMPARE(automate::droplet_json(back), automate::droplet_json(droplet));
+        QCOMPARE(automate::droplet_json(droplet)["genkoDroplet"], Json(1));
+        for (const Json& wrong :
+             {Json{{"genkoDroplet", 2}, {"steps", Json::array()}}, Json{{"genkoDroplet", 1}}, Json{{"genkoDroplet", 1}, {"steps", Json::array()}, {"command", "rm"}},
+              Json{{"genkoDroplet", 1}, {"steps", Json::array()}, {"options", Json{{"exec", "x"}}}},
+              Json{{"genkoDroplet", 1}, {"steps", Json::array()}, {"options", Json{{"quality", 13}}}},
+              Json{{"genkoDroplet", 1}, {"steps", Json::array()}, {"options", Json{{"format", "exe"}}}}}) {
+            QVERIFY2(!thrown([&] { automate::droplet_from_json(wrong); }).first.empty(), wrong.dump().c_str());
+        }
+        QCOMPARE(thrown([&] { automate::droplet_from_json(Json{{"genkoDroplet", 1}, {"steps", Json::array({Json{{"x", 1}}})}}); }).first, std::string("steps"));
+        write(root / "big.genkodroplet", std::string(automate::kMaxStepsBytes + 1, ' '));
+        QCOMPARE(thrown([&] { automate::read_droplet(root / "big.genkodroplet"); }).first, std::string("value"));
+        // never inside a book's folder
+        fs::create_directories(root / "b.genko");
+        write(root / "b.genko" / "project.json", "{}");
+        QCOMPARE(thrown([&] { automate::write_droplet(root / "b.genko" / "x", droplet); }).first, std::string("refused_target"));
+        QCOMPARE(thrown([&] { automate::write_launchers(root / "b.genko" / "x.genkodroplet", "/bin/genko"); }).first, std::string("refused_target"));
+        // its launchers: one fixed line, quoted
+        const fs::path odd = root / "it's $x.genkodroplet";
+        QCOMPARE(automate::launcher_path(odd, automate::Launcher::Shell), root / "it's $x.sh");
+        QCOMPARE(automate::launcher_text(odd, "/opt/g e/genko", automate::Launcher::Shell),
+                 "#!/bin/sh\n# Genko droplet: runs the droplet on the files given (or dropped on it)\nexec '/opt/g e/genko' droplet '" +
+                     core::path_to_utf8(root) + "/it'\\''s $x.genkodroplet' \"$@\"\n");
+        const std::string desktop = automate::launcher_text(odd, "/opt/g e/genko", automate::Launcher::Desktop);
+        QVERIFY2(desktop.find("Exec=\"/opt/g e/genko\" droplet \"" + core::path_to_utf8(root) + "/it's \\\\$x.genkodroplet\" %F\n") != std::string::npos, desktop.c_str());
+        QCOMPARE(automate::launcher_text(fs::path("C:/d/50%.genkodroplet"), "C:/g/genko.exe", automate::Launcher::Cmd),
+                 std::string("@echo off\r\nrem Genko droplet: runs the droplet on the files dropped on it\r\n\"C:/g/genko.exe\" droplet \"C:/d/50%%.genkodroplet\" %*\r\n"));
+        const std::vector<fs::path> made = automate::write_launchers(written, "/opt/genko");
+        QCOMPARE(made.size(), automate::launchers_here().size());
+        for (const fs::path& launcher : made) {
+            QCOMPARE(launcher.parent_path(), root);
+            QVERIFY(storage::read_file(launcher).find("droplet") != std::string::npos);
+#ifndef _WIN32
+            QVERIFY((fs::status(launcher).permissions() & fs::perms::owner_exec) != fs::perms::none);
+#endif
+        }
+        QCOMPARE(automate::write_launchers(written, "/opt/genko").size(), made.size());  // (its own launchers written again)
+        write(made.front(), "#!/bin/sh\necho mine\n");                                   // (a file of the person's own)
+        QCOMPARE(thrown([&] { automate::write_launchers(written, "/opt/genko"); }).first, std::string("refused_target"));
+        QCOMPARE(storage::read_file(made.front()), std::string("#!/bin/sh\necho mine\n"));
+        // its output
+        const std::vector<automate::Input> inputs{automate::Input{root / "in" / "a.png", false}};
+        QCOMPARE(automate::droplet_output(droplet, inputs, std::nullopt).folder, root / "in" / "droplet-output");
+        droplet.output = root / "own";
+        QCOMPARE(automate::droplet_output(droplet, inputs, std::nullopt).folder, root / "own");
+        QCOMPARE(automate::droplet_output(droplet, inputs, root / "given").folder, root / "given");
+        const automate::Output o = automate::droplet_output(droplet, inputs, std::nullopt);
+        QCOMPARE(o.format, std::string("jpg"));
+        QCOMPARE(o.suffix, std::string("_d"));
+        // the runner: 連番 and Also (each page in each folder and format)
+        fs::create_directories(root / "in");
+        write(root / "in" / "a.png", png(8, 4));
+        write(root / "in" / "b.png", png(4, 8));
+        automate::Output numbered;
+        numbered.folder = root / "n";
+        numbered.serial = 1;
+        numbered.also.push_back(automate::Output::Also{root / "n2", "tif", std::nullopt});
+        const automate::Result result =
+            automate::run({automate::Input{root / "in" / "a.png", false}, automate::Input{root / "in" / "b.png", false}}, Json::array(), numbered, automate::Options{});
+        QVERIFY2(result.errors.empty(), result.json().dump().c_str());
+        QVERIFY(fs::exists(root / "n" / "a_001.png"));
+        QVERIFY(fs::exists(root / "n" / "b_002.png"));
+        QVERIFY(fs::exists(root / "n2" / "a_001.tif"));
+        QCOMPARE(result.files[1]["outputs"], Json::array({core::path_to_utf8(root / "n" / "b_002.png"), core::path_to_utf8(root / "n2" / "b_002.tif")}));
     }
 
     // The steps aimed at the pages: each page of a picture, a book's pages but the covers; an action played on each.

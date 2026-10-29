@@ -209,6 +209,8 @@ genko_library(genko_app
     main_window_notes.cpp
     notes_panel.cpp
     canvas_notes.cpp
+    # PC5 I-e (バッチ・ドロップレット・画像プロセッサー・画像を合わせる・条件付きモード変更・レンズ補正・スクリプトイベントマネージャー・参照)
+    automate_dialogs.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

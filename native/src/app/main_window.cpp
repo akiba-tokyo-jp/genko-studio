@@ -1165,6 +1165,8 @@ void MainWindow::add_document(std::shared_ptr<Session> session) {
 
 void MainWindow::open_project(const fs::path& path) {
     remember_project(path);
+    // (PC5 I-e: the script event raised once it is open — 新規ドキュメント for a book 新規… made, else ドキュメントを開く)
+    const service::script_events::Event event = std::exchange(opened_event_, std::nullopt).value_or(service::script_events::Event::OpenDocument);
     const auto [window, index] = documents::find(path);
     if (window == this) {
         switch_document(index);
@@ -1172,6 +1174,7 @@ void MainWindow::open_project(const fs::path& path) {
     }
     if (window != nullptr) {  // (another window has it: the two share it)
         add_document(window->documents()[static_cast<std::size_t>(index)].session);
+        raise_opened(event);
         return;
     }
     // read on a worker thread (a thick book takes a moment): the window keeps answering
@@ -1179,7 +1182,7 @@ void MainWindow::open_project(const fs::path& path) {
     using Read = std::pair<std::optional<Session::Opened>, QString>;
     auto* watcher = new QFutureWatcher<Read>(this);
     const fs::path where = path;
-    connect(watcher, &QFutureWatcher<Read>::finished, this, [this, watcher, where] {
+    connect(watcher, &QFutureWatcher<Read>::finished, this, [this, watcher, where, event] {
         Read read = watcher->result();
         watcher->deleteLater();
         flash_timer_.stop();
@@ -1209,6 +1212,7 @@ void MainWindow::open_project(const fs::path& path) {
             const std::shared_ptr<Session> added = opened;
             add_document(std::move(opened));
             if (session_ == added) color_policy_on_open(added);  // (カラー設定's policies: a page of another profile kept, converted or asked)
+            if (session_ == added) raise_opened(event);  // (PC5 I-e: スクリプトイベント)
         } catch (const std::exception& error) {
             ask::warning(this, QStringLiteral("Genko"),
                          QStringLiteral("原稿・復旧用コピーを開けませんでした:\n%1").arg(wording::error(QString::fromUtf8(error.what()))) + links_kept());
@@ -1302,6 +1306,7 @@ bool MainWindow::close_document(int index) {
     } else {
         doc_ = doc_tabs_->currentIndex();
     }
+    script_event(service::script_events::Event::CloseDocument);  // (PC5 I-e: after it, as Photoshop's — on the book now in front)
     return true;
 }
 
@@ -1377,9 +1382,11 @@ void MainWindow::new_book() {
     }
     if (ask::exec(&dialog) != QDialog::Accepted) return;
     if (dialog.created) {
+        opened_event_ = service::script_events::Event::NewDocument;  // (PC5 I-e: raised once it is open)
         open_project(*dialog.created);
     } else if (dialog.image) {  // (PC4 F-b: 画像 — a book of one page in memory, its .genko asked for when it is saved)
         add_picture_book(std::move(dialog.image->doc), dialog.image->notes);
+        script_event(service::script_events::Event::NewDocument);  // (PC5 I-e: スクリプトイベント)
     }
 }
 
@@ -1394,6 +1401,7 @@ void MainWindow::save() {
     if (session_->wait_saved(std::chrono::milliseconds(30000)) && !session_->unsaved()) {
         session_->mark_saved();  // (PC4 F-b: 復帰 comes back here)
         flash(QStringLiteral("保存しました: %1").arg(QDir::toNativeSeparators(qpath(*session_->path()))), 3000);
+        script_event(service::script_events::Event::SaveDocument);  // (PC5 I-e: the person's save — never the automatic one)
     } else {
         flash(QStringLiteral("保存できませんでした: %1").arg(failure_reason(session_->status())), 6000, true);
     }
@@ -1466,6 +1474,7 @@ bool MainWindow::save_as_and_wait(const QString&, std::shared_ptr<Session> origi
     watch();
     refresh_status();
     flash(QStringLiteral("保存しました: %1").arg(QDir::toNativeSeparators(target)), 3000);
+    script_event(service::script_events::Event::SaveDocument);  // (PC5 I-e: スクリプトイベント)
     return true;
 }
 

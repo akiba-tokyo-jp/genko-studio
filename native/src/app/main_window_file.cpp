@@ -365,6 +365,7 @@ void MainWindow::add_picture_book(core::Document doc, const std::vector<std::str
         for (const std::string& note : notes) said << QString::fromStdString(note);
         flash(said.join(QStringLiteral("。")), 8000);
     }
+    if (source && session_ == added) raise_opened(service::script_events::Event::OpenDocument);  // (PC5 I-e: a file opened)
 }
 
 // --- 閉じる (file.closeAll, file.closeOthers) ------------------------------------------------------------------------
@@ -507,6 +508,7 @@ bool MainWindow::save_copy_to(const QString& chosen) {
         QString words = QStringLiteral("コピーを保存しました（原稿はそのままです）: %1").arg(QDir::toNativeSeparators(path));
         flash(words, 6000);
         remember_file(fpath(path));
+        script_event(service::script_events::Event::Export);  // (PC5 I-e: スクリプトイベント — a picture's copy is an export)
         return true;
     } catch (const std::exception& error) {
         flash(QStringLiteral("コピーを保存できませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
