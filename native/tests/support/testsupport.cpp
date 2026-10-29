@@ -493,6 +493,9 @@ const std::vector<std::pair<std::string, std::string>>& words_of_2026_10_28() {
             {"glow (光彩拡散) radius", "glow (光彩, フィルター → 漫画) radius"},
             {R"("kind": "pen|paint|folder|fill|gradient|adjust?")",
              R"x("kind": "pen|paint|folder|fill|gradient|adjust? (paint on an RGB page of 16 or 32 bits: its pixels at the page's depth once painted)")x"},
+            // (the same hint in add_layer's refusals: "… ‖ add_layer takes {page: int, name: str?, kind: …, rgb: …}")
+            {"name: str?, kind: pen|paint|folder|fill|gradient|adjust?, rgb:",
+             "name: str?, kind: pen|paint|folder|fill|gradient|adjust? (paint on an RGB page of 16 or 32 bits: its pixels at the page's depth once painted), rgb:"},
         };
         std::vector<std::pair<std::string, std::string>> out;
         for (const auto& [python, cpp] : plain) {

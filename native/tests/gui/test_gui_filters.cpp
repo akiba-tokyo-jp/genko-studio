@@ -178,13 +178,14 @@ class TestGuiFilters : public QObject {
 private slots:
     void initTestCase() { (void)gui_test::config_folder(); }
 
-    // The menu bar: フィルター after レイヤー, its commands and submenus in Photoshop's order and words, their keys.
+    // The menu bar: フィルター after レイヤー and 書式 (PC5 G-0), its commands and submenus in Photoshop's order and words, their keys.
     void theMenu() {
         Book book;
         app::MainWindow* w = book.window.get();
         QStringList bar;
         for (QAction* a : w->menuBar()->actions()) bar << a->text();
-        QCOMPARE(bar.indexOf(QStringLiteral("フィルター")), bar.indexOf(QStringLiteral("レイヤー")) + 1);
+        QCOMPARE(bar.indexOf(QStringLiteral("書式")), bar.indexOf(QStringLiteral("レイヤー")) + 1);
+        QCOMPARE(bar.indexOf(QStringLiteral("フィルター")), bar.indexOf(QStringLiteral("書式")) + 1);
         QMenu* filter = book.menu("menu_filter");
         QVERIFY(filter != nullptr);
         QCOMPARE(words_of(filter),
