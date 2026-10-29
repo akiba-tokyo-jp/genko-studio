@@ -7,6 +7,7 @@
 // same pixels as the page without it, the same bytes written.
 
 #include <QtTest>
+#include <QElapsedTimer>
 
 #include <algorithm>
 #include <cmath>
@@ -14,9 +15,12 @@
 #include <string>
 #include <vector>
 
+#include "core/base64.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/groups.hpp"
+#include "formats/export.hpp"
+#include "formats/open_file.hpp"
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
@@ -83,6 +87,45 @@ core::Document grouped(const std::string& way, const Json& group, const std::str
     ops.push_back(Json{{"op", "move_layers"}, {"page", 1}, {"ids", Json::array({"child"})}, {"parent", "g"}});
     if (settings.size() > 3) ops.push_back(settings);
     return run(book(way), ops);
+}
+
+// a paint layer of a grey over the part [x0, x0 + w] × the page's height (mm) — on a 16-bit page its pixels precise, on a
+// CMYK page its inks
+Json paint_part(const std::string& id, int grey, double x0, double w, const std::string& blend = "normal") {
+    return Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", id}, {"blend", blend}},
+                        Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", id},
+                             {"area", Json{{"poly", Json::array({Json::array({x0, 0}), Json::array({x0 + w, 0}), Json::array({x0 + w, 80}),
+                                                                 Json::array({x0, 80})})}}},
+                             {"rgb", Json::array({grey, grey, grey})}}});
+}
+Json joined(std::initializer_list<Json> parts) {
+    Json out = Json::array();
+    for (const Json& part : parts) {
+        if (part.is_array()) {
+            for (const Json& op : part) out.push_back(op);
+        } else {
+            out.push_back(part);
+        }
+    }
+    return out;
+}
+Json folder(const std::string& id, const Json& more = Json::object()) {
+    Json op{{"op", "add_layer"}, {"page", 1}, {"kind", "folder"}, {"id", id}, {"group", true}};
+    op.update(more);
+    return op;
+}
+Json into(const std::string& id, const std::string& group) {
+    return Json{{"op", "move_layers"}, {"page", 1}, {"ids", Json::array({id})}, {"parent", group}};
+}
+std::size_t deepest(const std::vector<core::Layer>& layers) {
+    const auto owners = core::group_owners(layers);
+    std::size_t most = 0;
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+        std::size_t d = 0;
+        for (auto at = owners[i]; at; at = owners[*at]) ++d;
+        most = std::max(most, d);
+    }
+    return most;
 }
 
 const core::Layer& layer_of(const core::Document& doc, const std::string& id) {
@@ -312,6 +355,160 @@ private slots:
             options.region = render::RenderRegion{400, 400, 300, 300};  // (across the tiles' edge at 512)
             const render::Image part = render::render_page(doc.page(0), 600, options, &doc).image.convert("RGB");
             QVERIFY2(part.tobytes() == whole.crop(render::Box{400, 400, 700, 700}).tobytes(), way.c_str());
+        }
+    }
+    // (review P1-1) a page in precise colour — a 16-bit page with pixels painted — takes groups as before: ＋フォルダ,
+    // Ctrl+G and Frame from Layers (a 通過 group each), and paints on after them
+    void groupsOnAPreciseColourPage() {
+        core::Document doc = run(book("16"), paint_part("p", 100, 0, 30));
+        QVERIFY(layer_of(doc, "p").color_raster != nullptr);
+        QCOMPARE(refusal(doc, folder("g")), std::string());
+        QCOMPARE(refusal(doc, Json{{"op", "group_layers"}, {"page", 1}, {"ids", Json::array({"p"})}, {"id", "gg"}, {"group", true}}), std::string());
+        QCOMPARE(refusal(doc, Json{{"op", "frame_from_layers"}, {"page", 1}, {"ids", Json::array({"p"})}, {"id", "fr"}}), std::string());
+        doc = run(doc, Json{{"op", "frame_from_layers"}, {"page", 1}, {"ids", Json::array({"p"})}, {"id", "fr"}});
+        QCOMPARE(refusal(doc, paint_part("q", 30, 30, 20)), std::string());
+        QVERIFY(grey_at(doc, 15, 40) < 200);
+    }
+
+    // (review P1-1, P2-3) a 16-bit PSD of a 通過 group opens (open_file) and comes in (import_psd) as a group; a PSD of groups
+    // nested past core::kGroupDepthMax opens with them nested at most that deep, the deeper ones said skipped
+    void psdsOfGroupsOpen() {
+        const QTemporaryDir tmp;
+        const auto file = [&](const std::string& name) { return std::filesystem::path(tmp.path().toStdString()) / name; };
+        core::Document deep = run(book("16"), joined({paint_part("p", 100, 0, 30), folder("g"), into("p", "g")}));
+        (void)formats::export_page_psd(deep, deep.page(0), file("deep.psd"), 100);
+        const std::string bytes = test::read_bytes(QString::fromStdString(file("deep.psd").string()));
+        const formats::Opened opened = formats::open_file(bytes, "deep.psd");
+        bool group = false;
+        for (const core::Layer& l : opened.doc.page(0).layers) group = group || (l.group && l.blend == "pass_through");
+        QVERIFY(group);
+        QVERIFY(opened.doc.page(0).rgb && opened.doc.page(0).rgb->depth == 16);
+        const core::Document imported = run(book("16"), Json{{"op", "import_psd"}, {"page", 1}, {"psd", core::b64encode(bytes)}});
+        QVERIFY(std::any_of(imported.page(0).layers.begin(), imported.page(0).layers.end(), [](const core::Layer& l) { return l.group; }));
+        // nested 70 deep (通過: nothing held while drawn)
+        Json ops = joined({paint_part("p", 0, 0, 30)});
+        for (int k = 0; k < 70; ++k) ops.push_back(folder("n" + std::to_string(k), k == 0 ? Json::object() : Json{{"parent", "n" + std::to_string(k - 1)}}));
+        ops.push_back(into("p", "n69"));
+        const core::Document nested = run(book("8"), ops);
+        QCOMPARE(deepest(nested.page(0).layers), std::size_t(70));
+        (void)formats::export_page_psd(nested, nested.page(0), file("nested.psd"), 50);
+        const formats::Opened back = formats::open_file(test::read_bytes(QString::fromStdString(file("nested.psd").string())), "nested.psd");
+        QCOMPARE(deepest(back.doc.page(0).layers), core::kGroupDepthMax);
+        const auto painted = std::find_if(back.doc.page(0).layers.begin(), back.doc.page(0).layers.end(), [](const core::Layer& l) { return l.title == "p"; });
+        QVERIFY(painted != back.doc.page(0).layers.end());  // (what the deeper groups held: kept, in the deepest one made)
+    }
+
+    // (review P2-1) a layer clipped to a 通過 group without a mask clips to what the group holds — on a page of inks too
+    void clippedToWhatAGroupHolds() {
+        for (const std::string way : {"8", "16", "cmyk"}) {
+            const int white = grey_at(book(way), 90, 40);
+            core::Document doc = run(book(way), joined({folder("g"), paint_part("child", 0, 0, 30), into("child", "g"),
+                                                        Json{{"op", "add_layer"}, {"page", 1}, {"kind", "fill"}, {"id", "red"},
+                                                             {"rgb", Json::array({255, 0, 0})}, {"clip", true}}}));
+            const render::Image shown = drawn(doc);
+            QVERIFY2(shown.getpixel(15, 40)[0] > shown.getpixel(15, 40)[1] + 100, way.c_str());
+            QCOMPARE(shown.getpixel(90, 40)[0], white);
+            QCOMPARE(shown.getpixel(90, 40)[1], white);
+        }
+    }
+
+    // (review P2-2) the lines set under a layer in a hidden group (or a group not exported) are drawn as before
+    void linesUnderAHiddenGroup() {
+        core::Document doc = run(book("8"), joined({folder("g"), paint_part("child", 0, 0, 30), into("child", "g"),
+                                                    Json{{"op", "set_layer"}, {"page", 1}, {"id", "g"}, {"visible", false}}}));
+        core::Document with = doc;
+        with.add_line(with.page(0).index, "下の台詞", "", std::nullopt, "", core::Num(30), core::Num(30), core::Num(25), core::Num(16), "rounded")
+            .style["below_layer"] = "child";
+        QVERIFY(drawn(with).tobytes() != drawn(doc).tobytes());
+        core::Document shown = with;
+        shown.edit_page(0).layers.erase(std::remove_if(shown.edit_page(0).layers.begin(), shown.edit_page(0).layers.end(),
+                                                       [](const core::Layer& l) { return l.id == "g"; }),
+                                        shown.edit_page(0).layers.end());
+        for (core::Layer& l : shown.edit_page(0).layers) {
+            if (l.id == "child") l.visible = false;  // (as before groups: the layer hidden, the line drawn where it is)
+        }
+        QVERIFY(drawn(with).tobytes() == drawn(shown).tobytes());
+    }
+
+    // (review P2-3) nested 64 deep, each with a layer clipped to the group in it, drawn in time; past what is held at once,
+    // refused in words (group_nesting)
+    void deepGroups() {
+        Json ops = Json::array();
+        for (int k = 0; k < 64; ++k) ops.push_back(folder("n" + std::to_string(k), k == 0 ? Json::object() : Json{{"parent", "n" + std::to_string(k - 1)}}));
+        for (const Json& op : paint_part("p", 0, 0, 30)) ops.push_back(op);
+        ops.push_back(into("p", "n63"));
+        for (int k = 0; k < 63; ++k)
+            ops.push_back(Json{{"op", "add_layer"}, {"page", 1}, {"kind", "fill"}, {"id", "c" + std::to_string(k)}, {"parent", "n" + std::to_string(k)},
+                               {"rgb", Json::array({255, 0, 0})}, {"clip", true}});
+        const core::Document doc = run(book("8"), ops);
+        QElapsedTimer timer;
+        timer.start();
+        const render::Image shown = drawn(doc);
+        QVERIFY2(timer.elapsed() < 60000, std::to_string(timer.elapsed()).c_str());
+        QVERIFY(shown.getpixel(15, 40)[0] > shown.getpixel(15, 40)[1] + 100);
+        QCOMPARE(shown.getpixel(90, 40)[1], 255);
+        Json alone = Json::array();
+        for (int k = 0; k < 70; ++k)
+            alone.push_back(folder("a" + std::to_string(k), k == 0 ? Json{{"blend", "normal"}} : Json{{"blend", "normal"}, {"parent", "a" + std::to_string(k - 1)}}));
+        const core::Document too_deep = run(book("8"), alone);
+        try {
+            (void)drawn(too_deep);
+            QFAIL("drawn");
+        } catch (const core::Error& error) {
+            QCOMPARE(error.code(), std::string("not_yet_ported"));
+            QVERIFY2(std::string(error.what()).find("group_nesting") != std::string::npos, error.what());
+        }
+    }
+
+    // (review P2-5) 表示レイヤーを結合 and 画像を統合 through a group that changes the look: as the page draws it, the group
+    // taken off; on a page of inks too; on a page in precise colour refused in words
+    void mergingThroughGroups() {
+        for (const std::string way : {"8", "cmyk"}) {
+            const core::Document doc = grouped(way, Json{{"group", true}, {"blend", "normal"}, {"opacity", 0.5}}, "multiply", 0);
+            const int before = grey_at(doc);
+            for (const Json& merge : {Json{{"op", "merge_visible"}, {"page", 1}, {"copy", false}},
+                                      Json{{"op", "merge_visible"}, {"page", 1}, {"copy", false}, {"flatten", true}}}) {
+                const core::Document merged = run(doc, merge);
+                QVERIFY2(!core::has_groups(merged.page(0).layers), merge.dump().c_str());
+                QVERIFY2(std::abs(grey_at(merged) - before) <= 3, (way + " " + merge.dump() + ": " + std::to_string(grey_at(merged)) + " vs " +
+                                                                    std::to_string(before)).c_str());
+            }
+        }
+        const core::Document precise = run(book("16"), joined({paint_part("base", 128, 0, 60), folder("g", Json{{"blend", "normal"}}),
+                                                                paint_part("child", 0, 0, 30), into("child", "g"),
+                                                                Json{{"op", "set_layer"}, {"page", 1}, {"id", "g"}, {"opacity", 0.5}}}));
+        QVERIFY(refusal(precise, Json{{"op", "merge_visible"}, {"page", 1}, {"copy", false}}).find("precise colour") != std::string::npos);
+    }
+
+    // (review P3-3) グループとして描く on and off keeps the folder's own blend and the book's bytes
+    void theSwitchKeepsTheFolder() {
+        core::Document doc = run(book("8"), joined({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "folder"}, {"id", "f"}, {"blend", "multiply"}},
+                                                    fill("a", 90), into("a", "f")}));
+        const core::Document on = run(doc, Json{{"op", "set_layer"}, {"page", 1}, {"id", "f"}, {"group", true}});
+        QVERIFY(layer_of(on, "f").group);
+        QCOMPARE(layer_of(on, "f").blend, std::string("multiply"));
+        const core::Document off = run(on, Json{{"op", "set_layer"}, {"page", 1}, {"id", "f"}, {"group", false}});
+        QCOMPARE(layer_of(off, "f").blend, std::string("multiply"));
+        const QTemporaryDir tmp;
+        const std::filesystem::path a = std::filesystem::path(tmp.path().toStdString()) / "a.genko", b = std::filesystem::path(tmp.path().toStdString()) / "b.genko";
+        test::write_project(doc, a);
+        test::write_project(off, b);
+        const Json x = test::read_json(QString::fromStdString((a / "project.json").string())), y = test::read_json(QString::fromStdString((b / "project.json").string()));
+        QCOMPARE(x["pages"].dump(), y["pages"].dump());
+        QCOMPARE(x["features"], y["features"]);
+    }
+
+    // (review P3-1, P3-2) a 通過 group clipped to the layer below is cut by it; what a group holds clips to nothing outside it
+    void clippingOfPassThroughGroups() {
+        for (const std::string way : {"8", "16", "cmyk"}) {
+            const int white = grey_at(book(way), 90, 40);
+            const core::Document clipped = run(book(way), joined({paint_part("base", 128, 0, 30), folder("g", Json{{"clip", true}}),
+                                                                  fill("black", 0), into("black", "g")}));
+            QVERIFY2(grey_at(clipped, 15, 40) < 80, way.c_str());
+            QCOMPARE(grey_at(clipped, 90, 40), white);
+            core::Document lowest = run(book(way), joined({paint_part("base", 128, 0, 30), folder("g"), fill("black", 0), into("black", "g"),
+                                                          Json{{"op", "set_layer"}, {"page", 1}, {"id", "black"}, {"clip", true}}}));
+            QVERIFY2(grey_at(lowest, 90, 40) < 80, way.c_str());  // (not cut by the layer outside the group)
         }
     }
 };
