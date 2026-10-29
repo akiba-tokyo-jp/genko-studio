@@ -17,6 +17,7 @@
 #include "render/color_edit.hpp"
 #include "render/dab_ops.hpp"
 #include "render/ink_edit.hpp"
+#include "render/paint_fill.hpp"
 #include "render/ops_3d.hpp"
 #include "render/ops_adjust.hpp"
 #include "render/paper.hpp"
@@ -235,7 +236,10 @@ private:
 // than before, or all of a page whose mode it changed) are looked at; the rest keep their bytes. A bitmap or indexed
 // page's name and draft layers (kept as layers by the flatten, never printed) keep their pixels as they are: the page
 // shows them through its last map — the table's colours, two — as it shows the rest.
-void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& before) {
+// (PC5-0, the review's P1-1: a deep page's new 8-bit pixels made precise within the book's precise budget — past it, or
+// while the book's pages are still being read, they stay 8-bit, as before PC5-0, and paint_fill::kKeptAt8Bits is said in
+// `notes`)
+void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& before, std::vector<std::string>* notes = nullptr) {
     for (std::size_t p = 0; p < doc.pages.size(); ++p) {
         if (doc.is_deferred(p)) continue;
         const core::Page& seen = doc.page(p);
@@ -325,6 +329,11 @@ void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& befo
                 continue;
             }
             const int depth = page.rgb->depth;
+            const std::uint64_t made = 16 + static_cast<std::uint64_t>(picture.width()) * static_cast<std::uint64_t>(picture.height()) * 4 * (depth == 16 ? 2 : 4);
+            if (!paint_fill::precise_fits(doc, made)) {
+                paint_fill::note_once(notes, paint_fill::kKeptAt8Bits);
+                continue;
+            }
             const auto* q = reinterpret_cast<const unsigned char*>(bytes.data());
             layer.color_raster = std::make_shared<const std::string>(core::encode_color_pixels(
                 static_cast<std::uint32_t>(picture.width()), static_cast<std::uint32_t>(picture.height()), depth == 16 ? "u16" : "f32",
@@ -496,7 +505,7 @@ const core::OpRegistry& ops_registry() {
                 if (!target) {
                     op(c);
                     channels::follow_depth(c.doc);
-                    keep_page_modes(c.doc, before);
+                    keep_page_modes(c.doc, before, &c.notes);
                     return;
                 }
                 const std::size_t at = core::require_page(c.doc, c.op);
@@ -527,7 +536,7 @@ const core::OpRegistry& ops_registry() {
                 c.report = std::move(inner.report);
                 c.notes = std::move(inner.notes);
                 channels::follow_depth(c.doc);
-                keep_page_modes(c.doc, before);
+                keep_page_modes(c.doc, before, &c.notes);
             });
         }
         return r;

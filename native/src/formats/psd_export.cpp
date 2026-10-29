@@ -65,9 +65,10 @@ void put_u32(std::string& out, std::uint32_t v) {
     put_u16(out, v & 0xffff);
 }
 void put_i32(std::string& out, std::int32_t v) { put_u32(out, static_cast<std::uint32_t>(v)); }
-// color-model@1: a sample of `depth` bits, big-endian: 8 and 16 rounded from 0..1 (clamped), 32 a float as it is.
+// color-model@1: a sample of `depth` bits, big-endian: 8 and 16 rounded from 0..1 (clamped), 32 a float as it is (a
+// finite float: past its range its largest, PC5-0 — a linear value of a very large page value —, so it reads back).
 void put_sample(std::string& out, double v, int depth) {
-    if (depth == 32) put_u32(out, std::bit_cast<std::uint32_t>(static_cast<float>(v)));
+    if (depth == 32) put_u32(out, std::bit_cast<std::uint32_t>(static_cast<float>(render::finite_sample(v))));
     else if (depth == 16) put_u16(out, static_cast<std::uint32_t>(std::lround(std::clamp(v, 0.0, 1.0) * 65535.0)));
     else put_u8(out, static_cast<unsigned>(std::lround(std::clamp(v, 0.0, 1.0) * 255.0)));
 }

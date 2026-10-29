@@ -305,7 +305,7 @@ Json fill_with_pattern(core::OpContext& c, std::size_t at, std::size_t ti, const
     // (a paint layer with no pixels yet that a precise RGB page's precise pixels can hold: keep_page_modes' rule — no
     // effect, screen or colour, nothing drawn on it; cut at the panels or not since PC5-0 —, E4's
     // paint_fill::becomes_precise since the merge)
-    const bool to_precise = paint_fill::becomes_precise(page, layer);
+    const bool to_precise = paint_fill::becomes_precise(c.doc, at, layer, &c.notes);  // (PC5-0: within the book's budget)
     // (where a picture is laid, as a colour's fill lays one: a pen layer — whatever its lines and the page —, and a paint
     // layer of 8 bits on a page that is not of inks nor of the finest grid, or of a precise page it cannot be precise on)
     const bool picture = mode == "normal" && !keep &&

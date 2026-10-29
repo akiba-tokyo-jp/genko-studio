@@ -460,6 +460,55 @@ private slots:
         QVERIFY(fresh.color_raster == nullptr && fresh.patches.size() == 1);
     }
 
+    // PC5-0 (the coordinator's decision after Z0's review, P1-1): a new paint layer whose precise pixels would take the book
+    // past its precise budget (1 GiB: here one f32 layer of a page of 1042 mm square at the working 200 dpi is 1.08 GB) is
+    // painted at 8 bits as before PC5-0 — a fill (into its pixels: a blend; fill_area's plain colour lays a picture on any
+    // layer), a gradient, a pattern, a dab tool, a picture put on it —, never refused,
+    // and the op's warnings say so; within the budget a merge into an empty layer the panels cut makes it precise too.
+    void pastTheBudgetNewLayersStayAt8Bits() {
+        core::Document big = core::new_episode("大きな本", core::Num(1), 1, core::PageSpec::custom(1042, 1042, 1000, 1000, 1, 2, 2, 2, 2, 200, "color"));
+        big.edit_page(0).numero = false;
+        big = run(big, Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 32}});
+        QVERIFY(render::paint_fill::precise_layer_bytes(big.page(0)) > core::kColorRasterBookBytes);
+        big = run(big, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "fresh"}});
+        std::string tile;
+        for (int i = 0; i < 8 * 8; ++i) tile += (i % 3 == 0) ? std::string("\xff\x00\x00\xff", 4) : std::string("\x00\x00\xff\xff", 4);
+        const std::string tile_png = core::b64encode(render::write_png(render::Image::frombytes("RGBA", Size{8, 8}, tile)));
+        big = run(big, Json{{"op", "add_pattern"}, {"name", "市松"}, {"png", tile_png}, {"dpi", 100}, {"id", "pat"}});
+        const Json small_area{{"rect", Json::array({100, 100, 20, 20})}};
+        const std::vector<Json> ops{
+            Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "fresh"}, {"area", small_area}, {"rgb", Json::array({200, 40, 40})}, {"blend", "multiply"}},
+            Json{{"op", "gradient_fill"}, {"page", 1}, {"layer_id", "fresh"}, {"from", Json::array({100, 110})}, {"to", Json::array({120, 110})},
+                 {"stops", Json::parse("[[0, [0, 0, 0]], [1, [255, 255, 255]]]")}, {"area", small_area}},
+            Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "fresh"}, {"area", small_area}, {"pattern", Json{{"id", "pat"}}}},
+            Json{{"op", "mixer_brush"}, {"page", 1}, {"layer_id", "fresh"}, {"points", Json::parse("[[100, 100], [120, 100]]")}, {"width_mm", 2},
+                 {"rgb", Json::array({20, 200, 20})}},
+            Json{{"op", "put_raster"}, {"page", 1}, {"id", "fresh"}, {"png_base64", tile_png}},
+        };
+        for (const Json& op : ops) {
+            const core::ApplyResult done = run_ops(big, Json::array({op}));
+            const core::Layer& fresh = done.doc.page(0).layers[core::layer_by_id(done.doc.page(0), "fresh")];
+            QVERIFY2(fresh.color_raster == nullptr, op.dump().c_str());
+            if (op["op"] != Json("mixer_brush")) {  // (a dab tool on an empty layer changes nothing: nothing to say)
+                QVERIFY2((fresh.raster_png && !fresh.raster_png->empty()) || !fresh.patches.empty(), op.dump().c_str());
+                QVERIFY2(done.warnings.dump().find(render::paint_fill::kKeptAt8Bits) != std::string::npos, (op.dump() + " " + done.warnings.dump()).c_str());
+            }
+        }
+        // within the budget: a layer merged down into an empty paint layer the panels cut — the result precise
+        core::Document small = run(as_kind(paint_book(), "16"), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "fresh"}});
+        small = run(small, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "upper"}, {"after", "fresh"}});
+        {
+            core::Page& p = small.edit_page(0);
+            std::string bytes;
+            for (int i = 0; i < 40 * 40; ++i) bytes += std::string("\x10\x80\xF0\xFF", 4);
+            render::raster::save_raster(p, p.layers[core::layer_by_id(p, "upper")], render::Image::frombytes("RGBA", Size{40, 40}, bytes));
+        }
+        QVERIFY(small.page(0).layers[core::layer_by_id(small.page(0), "upper")].raster_png != nullptr);
+        const core::Document merged = run(small, Json{{"op", "merge_down"}, {"page", 1}, {"id", "upper"}});
+        const core::Layer& into = merged.page(0).layers[core::layer_by_id(merged.page(0), "fresh")];
+        QVERIFY(into.panel_clip && into.color_raster != nullptr);
+    }
+
     // a pen layer: a picture laid on it, as before (the new shapes and keys in it), a blend refused; the calls without the
     // new keys on an 8-bit paint layer: a picture, its pixels as they were
     void penLayersAndOldCalls() {

@@ -22,8 +22,10 @@
 #include <string>
 
 #include "core/base64.hpp"
+#include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/exposure.hpp"
 #include "core/ink.hpp"
 #include "core/model.hpp"
 #include "core/paths.hpp"
@@ -428,6 +430,75 @@ private slots:
         QVERIFY(!psd::parallelogram(out.corners));
     }
 
+    // PC5-0 (Z0's review P2-1): a smart object of a 32-bit sRGB page — its contents a page — written into the page's PSD
+    // (its contents a PSD of 32 bits: linear light) and read back with import_psd (the placed layer a smart object of that
+    // file, drawn from its deep picture), and its contents written as a PSD (リンクに変換…'s file) read as a smart object's
+    // file: the values it had, the dark ones too (1/2.2 lifted 0.02 to about 0.09)
+    void thirtyTwoBitContentsComeBack() {
+        const core::Actor actor("human:test");
+        const core::CommandBus bus(render::ops_registry());
+        const core::PageSpec spec = core::PageSpec::custom(40.64, 20.32, 40.64, 20.32, 0, 0, 0, 0, 0, 200, "color");  // (320 × 160 px)
+        core::Document doc = core::new_episode("中身", core::Num(1), 1, spec);
+        doc.edit_page(0).frames.clear();
+        doc.edit_page(0).numero = false;
+        doc.edit_page(0).layers.clear();
+        const std::array<double, 4> greys{0.02, 0.05, 0.2, 0.6};
+        core::Json pixels = core::Json::array();
+        for (const double g : greys)
+            for (int k = 0; k < 8; ++k) {  // (each 8 pixels wide: the middle of a stripe is its value)
+                for (int c = 0; c < 3; ++c) pixels.push_back(g);
+                pixels.push_back(1.0);
+            }
+        doc = bus.apply(doc, core::Json::array({core::Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 32}},
+                                                 core::Json{{"op", "put_color_raster"}, {"page", 1}, {"width", 32}, {"height", 1}, {"precision", "f32"}, {"pixels", pixels}}}),
+                        actor)
+                  .doc;
+        const std::string painted = doc.page(0).layers.back().id;
+        doc = bus.apply(doc, core::Json::array({core::Json{{"op", "smart_convert"}, {"page", 1}, {"ids", core::Json::array({painted})}, {"new_id", "so"}}}), actor).doc;
+        QVERIFY(doc.page(0).layers.back().kind == core::LayerKind::Smart);
+        render::RenderOptions options;
+        options.mode = "print";
+        options.precise = true;
+        const auto values_at_stripes = [&](const core::Document& d) {
+            const render::RenderResult made = render::render_page(d.page(0), 200, options, &d);  // (held: the view reads its bytes)
+            const core::ColorRasterView view(*made.precise);
+            std::vector<double> out;
+            for (std::size_t s = 0; s < greys.size(); ++s) out.push_back(view.pixel(std::size_t(view.height() / 2) * view.width() + (2 * s + 1) * view.width() / 8)[1]);
+            return out;
+        };
+        const std::vector<double> before = values_at_stripes(doc);
+        for (std::size_t s = 0; s < greys.size(); ++s) QVERIFY2(std::abs(before[s] - greys[s]) < 1e-4, qPrintable(QString::number(before[s])));
+        QTemporaryDir tmp;
+        const fs::path file = core::path_from_utf8(tmp.path().toStdString()) / "so.psd";
+        genko::formats::export_page_psd(doc, doc.page(0), file, 200);
+        const std::string bytes = genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(file)));
+        core::Document back = core::new_episode("読む", core::Num(1), 1, spec);
+        back.edit_page(0).frames.clear();
+        back.edit_page(0).numero = false;
+        back.edit_page(0).layers.clear();
+        back = bus.apply(back, core::Json::array({core::Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 32}},
+                                                   core::Json{{"op", "import_psd"}, {"page", 1}, {"psd", core::b64encode(bytes)}, {"fit", "paper"}, {"id", "back"}}}),
+                         actor)
+                   .doc;
+        bool smart = false;
+        for (const core::Layer& l : back.page(0).layers) smart = smart || l.kind == core::LayerKind::Smart;
+        QVERIFY(smart);
+        const std::vector<double> after = values_at_stripes(back);
+        for (std::size_t s = 0; s < greys.size(); ++s)
+            QVERIFY2(std::abs(after[s] - greys[s]) < 2e-3, qPrintable(QStringLiteral("stripe %1: %2 for %3").arg(s).arg(after[s]).arg(greys[s])));
+        // the contents written as a PSD (リンクに変換…): its deep picture the contents' values
+        const fs::path contents = core::path_from_utf8(tmp.path().toStdString()) / "contents.psd";
+        const core::SmartContents* held = core::smart::contents_of(doc, doc.page(0).layers.back());
+        QVERIFY(held != nullptr && held->page);
+        genko::formats::export_contents_psd(doc, *held->page, contents, 200);
+        const render::smart::DeepPicture deep = render::smart::deep_picture(genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(contents))));
+        QCOMPARE(deep.depth, 32);
+        for (std::size_t s = 0; s < greys.size(); ++s) {
+            const std::size_t at = (std::size_t(deep.height / 2) * deep.width + (2 * s + 1) * deep.width / 8) * deep.channels;
+            QVERIFY2(std::abs(deep.samples[at] - greys[s]) < 1e-4, qPrintable(QStringLiteral("contents stripe %1: %2").arg(s).arg(deep.samples[at])));
+        }
+    }
+
     // a PSD or PSB as a smart object's file: 16 and 32 bits kept, a PSB read, its picture as the 8-bit page reads it
     void aPsdFileKeepsItsBits() {
         // RGB of 16 bits, merged only: 3 × 2 of (0x1234, 0xabcd, 0xffff)
@@ -455,7 +526,8 @@ private slots:
             QCOMPARE(eight.mode(), std::string_view("RGB"));
             QCOMPARE(eight.getpixel(2, 1), (std::vector<double>{0x12, 0xab, 0xff}));
         }
-        // grey of 32 bits: linear light, encoded as the 8-bit picture encodes it, its values past 1 kept
+        // grey of 32 bits: linear light, encoded by the file's grey curve — none: sGray's, the sRGB curve (PC5-0, Z0's review
+        // P2-1: the inverse of the 32-bit PSD this build writes; before it 1/2.2) —, its values past 1 kept
         build::File grey;
         grey.width = 2;
         grey.height = 1;
@@ -472,8 +544,8 @@ private slots:
         const std::string bytes = build::bytes(grey);
         const render::smart::DeepPicture deep = render::smart::deep_picture(bytes);
         QCOMPARE(deep.mode, std::string("gray"));
-        QVERIFY(std::abs(deep.samples[0] - std::pow(0.25f, 1 / 2.2f)) < 1e-6);
-        QVERIFY(std::abs(deep.samples[1] - std::pow(2.0f, 1 / 2.2f)) < 1e-6);
+        QVERIFY(std::abs(deep.samples[0] - core::linear_to_srgb(0.25)) < 1e-6);
+        QVERIFY(std::abs(deep.samples[1] - core::linear_to_srgb(2.0)) < 1e-6);
         QCOMPARE(render::smart::look_at(bytes, "").mode, std::string("gray"));
         QCOMPARE(render::smart::look_at(bytes, "").depth, 32);
         // a suffix that is not its kind, and a PSD that cannot be read, refused

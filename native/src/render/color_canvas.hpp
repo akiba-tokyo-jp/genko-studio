@@ -46,6 +46,13 @@ private:
     struct Impl;
     std::shared_ptr<const Impl> impl_;
 };
+// PC5-0 (Z0's review P3-2): a 32-bit sample through a tone curve, kept a finite float — NaN 0 (as max(0, NaN) read it
+// before), past the float's range its largest — so what this build writes it reads back, and a file's NaN still reads.
+double finite_sample(double v);
+// PC5-0 (Z0's review P2-1): a 32-bit file's linear samples (colours then, `alpha`, the alpha: `channels` a pixel) encoded
+// by the tone curve of the file's own profile (`icc`: RGB's or grey's; none, or one that is not of their colours: the
+// sRGB curve), as a page of that profile holds them — the inverse of what this build writes in a 32-bit PSD.
+void encode_by_profile(std::vector<float>& samples, unsigned channels, bool alpha, const std::string& icc);
 // PC2d (document:color-depth-model): a layer's own picture over a part of the page in a canvas's space, before it is
 // composited — a precise layer's pixels with what is drawn on it (its lines, the pictures laid on it, its effects): per
 // pixel straight linear-light RGB (the space's primaries) and its alpha.

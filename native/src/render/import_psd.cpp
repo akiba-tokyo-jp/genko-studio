@@ -739,7 +739,7 @@ core::InkPixels deep_inks(const psd::File::DeepPart& part, const core::PageColor
     const unsigned colours = canvas.colours();
     const bool as_is = part.depth != 32;
     const GrayCurve curve = as_is ? GrayCurve() : GrayCurve(color);
-    const auto encoded = [&](float v) { return as_is ? static_cast<double>(v) : curve.encode(v); };
+    const auto encoded = [&](float v) { return as_is ? static_cast<double>(v) : finite_sample(curve.encode(v)); };
     const std::int64_t left = part.left + at.x, top = part.top + at.y;
     for (std::int64_t y = std::max<std::int64_t>(0, top); y < std::min(height, top + part.height); ++y) {
         for (std::int64_t x = std::max<std::int64_t>(0, left); x < std::min(width, left + part.width); ++x) {
@@ -759,7 +759,7 @@ std::string deep_color_raster(const psd::File::DeepPart& part, const core::Page&
     const auto w = static_cast<std::uint32_t>(std::max(1, size.width)), h = static_cast<std::uint32_t>(std::max(1, size.height));
     const bool as_is = part.depth != 32 || linear;
     const RgbSpace space = as_is ? RgbSpace() : RgbSpace::of(page);
-    const auto encoded = [&](unsigned c, float v) { return as_is ? static_cast<double>(v) : space.encode(c, v); };
+    const auto encoded = [&](unsigned c, float v) { return as_is ? static_cast<double>(v) : finite_sample(space.encode(c, v)); };
     return core::encode_color_pixels(w, h, depth == 16 ? "u16" : "f32", [&](std::size_t i) {
         const std::int64_t x = static_cast<std::int64_t>(i % w) - part.left - at.x, y = static_cast<std::int64_t>(i / w) - part.top - at.y;
         if (x < 0 || y < 0 || x >= part.width || y >= part.height) return std::array<double, 4>{0.0, 0.0, 0.0, 0.0};

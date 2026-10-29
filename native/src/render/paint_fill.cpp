@@ -70,6 +70,38 @@ bool becomes_precise(const core::Page& page, const core::Layer& layer) {
            !layer.color;
 }
 
+std::uint64_t precise_layer_bytes(const core::Page& page) {
+    const int dpi = raster::working_dpi(page);
+    const auto width = static_cast<std::uint64_t>(std::max(1, mm_to_px(page.spec.width_mm.value(), dpi)));
+    const auto height = static_cast<std::uint64_t>(std::max(1, mm_to_px(page.spec.height_mm.value(), dpi)));
+    const std::uint64_t sample = page.rgb && page.rgb->depth == 16 ? 2 : 4;
+    return 16 + width * height * 4 * sample;
+}
+
+bool precise_fits(const core::Document& doc, std::uint64_t more) {
+    if (!doc.deferred.empty()) return false;  // (the pages not read yet hold pixels not counted)
+    std::unordered_set<const std::string*> seen;
+    std::uint64_t held = 0;
+    for (const core::PagePtr& page : doc.pages) {
+        for (const core::Layer& layer : page->layers) {
+            if (layer.color_raster && seen.insert(layer.color_raster.get()).second) held += layer.color_raster->size();
+        }
+    }
+    return held <= core::kColorRasterBookBytes && more <= core::kColorRasterBookBytes - held;
+}
+
+void note_once(std::vector<std::string>* notes, const std::string& note) {
+    if (notes != nullptr && std::find(notes->begin(), notes->end(), note) == notes->end()) notes->push_back(note);
+}
+
+bool becomes_precise(const core::Document& doc, std::size_t at, const core::Layer& layer, std::vector<std::string>* notes) {
+    const core::Page& page = doc.page(at);
+    if (!becomes_precise(page, layer)) return false;
+    if (precise_fits(doc, precise_layer_bytes(page))) return true;
+    note_once(notes, kKeptAt8Bits);
+    return false;
+}
+
 float dither_noise(int x, int y) {
     std::uint32_t h = static_cast<std::uint32_t>(x) * 0x9E3779B1u ^ static_cast<std::uint32_t>(y) * 0x85EBCA77u;
     h ^= h >> 15;
@@ -113,7 +145,7 @@ Painted paint_layer(core::OpContext& c, std::size_t at, const std::string& layer
                  const LaidValues* values, const How& how) {
     if (!image_ops::is_blend(how.blend)) throw OpError("blend is not one of the blends (normal, multiply, screen, …)");
     core::Document& doc = c.doc;
-    if (const core::Page& seen = doc.page(at); becomes_precise(seen, seen.layers[core::layer_by_id(seen, layer_id)])) make_precise(doc, at, layer_id);
+    if (const core::Page& seen = doc.page(at); becomes_precise(doc, at, seen.layers[core::layer_by_id(seen, layer_id)], &c.notes)) make_precise(doc, at, layer_id);
     // the layer's kind (as image_ops::layer_pixels takes it): precise, ink (a CMYK, Lab, grey or multichannel page's paint
     // layer that holds no 8-bit picture) or 8-bit
     bool inks = false, paint_layer_kind = false;

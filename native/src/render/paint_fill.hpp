@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
+#include <unordered_set>
+#include <vector>
 
 #include "core/command_bus.hpp"
 #include "core/json.hpp"
@@ -76,6 +79,20 @@ void make_precise(core::Document& doc, std::size_t at, const std::string& layer_
 // at the page's depth). paint() gives it clear precise pixels at the page's working grid before it lays the colours, so
 // they stay finer than 8 bits.
 bool becomes_precise(const core::Page& page, const core::Layer& layer);
+
+// PC5-0 (the coordinator's decision after Z0's review, P1-1): the same within the book's precise budget — false (the layer
+// painted at 8 bits, as before PC5-0) when its precise pixels (make_precise's: the page's working grid) would take the
+// book past core::kColorRasterBookBytes, or while the book's pages are still being read (their pixels not counted yet);
+// then kKeptAt8Bits is said in `notes` (once). As import_psd keeps layers at 8 bits past the budget: never refused.
+bool becomes_precise(const core::Document& doc, std::size_t at, const core::Layer& layer, std::vector<std::string>* notes = nullptr);
+inline constexpr const char* kKeptAt8Bits =
+    "the layer is painted at 8 bits: the book's precise pixels would pass their budget (1 GiB), or its pages are still being read";
+// Whether `more` bytes of precise pixels fit the book's budget now (its pages all read: the allocations once, as
+// core::validate_color_document counts them); the bytes of a precise layer of the page's working grid at its depth.
+bool precise_fits(const core::Document& doc, std::uint64_t more);
+std::uint64_t precise_layer_bytes(const core::Page& page);
+// `note` added to `notes` unless it is there already (null: nothing).
+void note_once(std::vector<std::string>* notes, const std::string& note);
 
 // The dither's noise at a pixel: 0..1 from its place (PhotoCraft's dither_noise: a hash, no pattern to see).
 float dither_noise(int x, int y);
