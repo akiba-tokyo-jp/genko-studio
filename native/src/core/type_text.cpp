@@ -610,6 +610,50 @@ Edit edit_between(std::string_view before, std::string_view after) {
     return Edit{static_cast<std::int64_t>(p), static_cast<std::int64_t>(a.size() - s), static_cast<std::int64_t>(b.size() - s - p)};
 }
 
+std::vector<Edit> edits_between(std::string_view before, std::string_view after) {
+    const std::vector<std::u32string> a = graphemes(before), b = graphemes(after);
+    if (a == b) return {};
+    // (their common start and end first: only what lies between is compared)
+    std::size_t p = 0;
+    while (p < a.size() && p < b.size() && a[p] == b[p]) ++p;
+    std::size_t s = 0;
+    while (s < a.size() - p && s < b.size() - p && a[a.size() - 1 - s] == b[b.size() - 1 - s]) ++s;
+    const std::size_t n = a.size() - s - p, m = b.size() - s - p;
+    if (n == 0 || m == 0 || static_cast<std::int64_t>((n + 1) * (m + 1)) > ruby::kLcsCells) return {edit_between(before, after)};
+    std::vector<std::int32_t> table((n + 1) * (m + 1), 0);  // (the longest common subsequence of what follows each place)
+    const auto at = [&](std::size_t i, std::size_t j) -> std::int32_t& { return table[i * (m + 1) + j]; };
+    for (std::size_t i = n; i-- > 0;) {
+        for (std::size_t j = m; j-- > 0;) {
+            at(i, j) = a[p + i] == b[p + j] ? at(i + 1, j + 1) + 1 : std::max(at(i + 1, j), at(i, j + 1));
+        }
+    }
+    std::vector<Edit> out;
+    std::size_t i = 0, j = 0;
+    std::optional<Edit> open;
+    const auto close = [&] {
+        if (open) out.push_back(*open);
+        open.reset();
+    };
+    while (i < n || j < m) {
+        if (i < n && j < m && a[p + i] == b[p + j]) {
+            close();
+            ++i;
+            ++j;
+            continue;
+        }
+        if (!open) open = Edit{static_cast<std::int64_t>(p + i), static_cast<std::int64_t>(p + i), 0};
+        if (j < m && (i == n || at(i, j + 1) >= at(i + 1, j))) {
+            ++open->inserted;
+            ++j;
+        } else {
+            ++i;
+            open->end = static_cast<std::int64_t>(p + i);
+        }
+    }
+    close();
+    return out;
+}
+
 std::vector<Edit> edits_of(std::string_view before, const std::vector<ruby::Replacement>& replacements) {
     const std::u32string cps = ruby::code_points(before);
     const std::vector<std::size_t> b = ruby::bounds(cps);

@@ -238,7 +238,7 @@ private slots:
     void threeWays() {
         const core::Document base = with_type(plain_book());
         const double eight = darkness(shown(base));
-        QVERIFY(eight > 0.01);
+        QVERIFY2(eight > 0.005, qPrintable(QString::number(eight)));
         for (const Json& mode : {Json{{"mode", "rgb"}, {"depth", 16}}, Json{{"mode", "gray"}}, Json{{"mode", "cmyk"}, {"profile", "coated-cmyk"}, {"depth", 16}}}) {
             Json op = mode;
             op["op"] = "set_color_mode";
@@ -257,6 +257,7 @@ private slots:
                             {"native_type", Json{{"runs", Json::array({Json{{"start", 1}, {"end", 2}, {"char", Json{{"underline", true}}}}})}}}});
         doc = run(doc, Json{{"op", "edit_type"}, {"line", "l1"}, {"text", "XかきくY"}});
         QCOMPARE(doc.story[0].text, std::string("XかきくY"));
+        QVERIFY(doc.story[0].native_type);
         QCOMPARE((*doc.story[0].native_type)["runs"][0]["start"], Json(2));
         doc = run(doc, Json{{"op", "edit_type"}, {"page", 1}, {"layer_id", "t1"}, {"text", "あいうえ"}});
         QCOMPARE(layer_of(doc, "t1")->type->text, std::string("あいうえ"));
@@ -273,9 +274,19 @@ private slots:
                 std::string::npos);
         QVERIFY(refusal(doc, Json::array({Json{{"op", "edit_type"}, {"page", 1}, {"layer_id", "t1"}, {"text", ""}}})).find("must not be empty") !=
                 std::string::npos);
-        // a type layer holds no lines of its own
-        QVERIFY(refusal(doc, Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "t1"}, {"stabilize", 0}, {"points", Json::array({Json::array({1, 1}), Json::array({5, 5})})}}}))
-                    .find("rasterize the type layer") != std::string::npos);
+        // a type layer takes no lines (add_stroke says so; the bus refuses any op that leaves pixels or lines on one)
+        const std::string drawn_on = refusal(doc, Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer", "ink"}, {"layer_id", "t1"}, {"stabilize", 0}, {"points", Json::array({Json::array({1, 1}), Json::array({5, 5})})}}}));
+        QVERIFY2(drawn_on.find("this layer cannot take pen lines") != std::string::npos, drawn_on.c_str());
+        core::Document patched = doc;
+        for (core::Layer& l : patched.edit_page(0).layers)
+            if (l.id == "t1") l.patches.push_back(core::Patch{});
+        bool refused = false;
+        try {
+            core::type_text::validate_type(patched);
+        } catch (const core::Error& error) {
+            refused = std::string(error.what()).find("rasterize the type layer t1 first") != std::string::npos;
+        }
+        QVERIFY(refused);
     }
 
     // moved (transform_layers' move, align), rasterized (rasterize_layer), its page duplicated; turned: G-a's

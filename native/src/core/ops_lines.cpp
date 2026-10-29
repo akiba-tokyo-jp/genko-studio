@@ -733,7 +733,7 @@ void edit_line(OpContext& c, const PictureCheck& check) {
     if (has(op, "native_type")) {
         given_native_type(c.doc, line, op["native_type"]);
     } else if (line.native_type && line.text != before) {
-        line.native_type = optional_type(type_text::follow(*line.native_type, before, line.text, {type_text::edit_between(before, line.text)}));
+        line.native_type = optional_type(type_text::follow(*line.native_type, before, line.text, type_text::edits_between(before, line.text)));
     }
     change.review = std::max<std::int64_t>(0, ruby::review_count(line) - reviewed);
     report_ruby(c, change);  // (a line of Python's left as Python leaves it: nothing, as Python)

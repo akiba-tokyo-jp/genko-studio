@@ -128,6 +128,9 @@ struct Edit {
 };
 // The edit that made `after` of `before` (their common start and end, in graphemes).
 Edit edit_between(std::string_view before, std::string_view after);
+// The edits that made `after` of `before`: what a longest common subsequence of their graphemes leaves (left to right);
+// texts past ruby::kLcsCells compared, their common start and end alone (edit_between).
+std::vector<Edit> edits_between(std::string_view before, std::string_view after);
 // A native_type's runs and paragraphs through edits of its text (`before` → `after`; the edits left to right, none
 // overlapping, in the graphemes of `before`). Null when nothing is left in it.
 Json follow(const Json& native_type, std::string_view before, std::string_view after, const std::vector<Edit>& edits);

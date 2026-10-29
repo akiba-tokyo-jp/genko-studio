@@ -158,7 +158,7 @@ void edit_type(OpContext& c) {
             if (f.removed > 0) c.report = Json{{"ruby_removed", f.removed}};
         }
         if (record.native_type) {
-            const Json followed = core::type_text::follow(*record.native_type, before, text, {core::type_text::edit_between(before, text)});
+            const Json followed = core::type_text::follow(*record.native_type, before, text, core::type_text::edits_between(before, text));
             if (followed.is_null()) record.native_type.reset();
             else record.native_type = followed;
         }

@@ -195,6 +195,13 @@ private slots:
         QCOMPARE(after_edit("あいうえお", "あいお"), std::string("null"));  // (taken away)
         QCOMPARE(after_edit("あいうえお", "あいうお"), std::string(R"([{"start":2,"end":3,"char":{"underline":true}}])"));  // (its end cut)
         QCOMPARE(after_edit("あいうえお", "あXえお"), std::string(R"([{"start":2,"end":3,"char":{"underline":true}}])"));  // (its start replaced)
+        // edits at both ends (as edit_line's whole new text gives them): each found by the longest common subsequence
+        const std::vector<tt::Edit> both = tt::edits_between("あいうえお", "XあいうえおY");
+        QCOMPARE(both.size(), std::size_t{2});
+        QCOMPARE(tt::follow(n, "あいうえお", "XあいうえおY", both)["runs"].dump(), std::string(R"([{"start":3,"end":5,"char":{"underline":true}}])"));
+        QCOMPARE(tt::follow(n, "あいうえお", "XあいZうえおY", tt::edits_between("あいうえお", "XあいZうえおY"))["runs"].dump(),
+                 std::string(R"([{"start":4,"end":6,"char":{"underline":true}}])"));
+        QVERIFY(tt::edits_between("あい", "あい").empty());
         // graphemes, not code points: a letter with its variation selector is one
         QCOMPARE(after_edit("葛\U000E0100いうえお", "X葛\U000E0100いうえお"), std::string(R"([{"start":3,"end":5,"char":{"underline":true}}])"));
         // replace_text's matches, as code points
