@@ -278,6 +278,9 @@ std::vector<Pref> make_table() {
         memory("state.stroke.*", "stroke/*"),
         memory("state.subview.*", "subview/*"),
         memory("state.toolPresets.*", "tool_presets/*"),
+        // (PC5 G-c: 書式 → 初期設定の書式を保存's formatting; PC5 G-b: 書式 → 言語オプション ▸'s features shown)
+        memory("state.type.defaultStyles", "type/default_styles"),
+        memory("state.type.languageFeatures", "type/language_features"),
         memory("state.warp.*", "warp/*"),
         memory("state.workspaces.*", "workspaces/*"),
     };

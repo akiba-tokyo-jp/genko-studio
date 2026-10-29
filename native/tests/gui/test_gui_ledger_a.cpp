@@ -883,13 +883,15 @@ private slots:
         QVERIFY(edit.contains(QStringLiteral("すべてを選択")) && edit.contains(QStringLiteral("消去")));
         QVERIFY(texts(b.menu(QStringLiteral("レイヤー"))).contains(QStringLiteral("レイヤーマスク")));
         // (PC5 G-0: 書式 with the type commands this build has, as Photoshop names them; G-a: アンチエイリアス ▸, 方向 ▸, the
-        // conversions, ラスタライズ, 更新, Lorem ipsum and a line and a type layer each other's; G-b: OpenType ▸, 言語オプション ▸)
+        // conversions, ラスタライズ, 更新, Lorem ipsum and a line and a type layer each other's; G-b: OpenType ▸, 言語オプション ▸;
+        // G-c: 初期設定の書式を読み込み・初期設定の書式を保存)
         QCOMPARE(texts(b.menu(QStringLiteral("書式"))),
                  (QStringList{QStringLiteral("アンチエイリアス"), QStringLiteral("方向"), QStringLiteral("OpenType"), QString(), QStringLiteral("作業用パスを作成"),
                               QStringLiteral("シェイプに変換"), QStringLiteral("テキストレイヤーをラスタライズ"), QStringLiteral("ポイントテキストに変換"),
                               QStringLiteral("段落テキストに変換"), QString(), QStringLiteral("ワープテキスト…"), QString(), QStringLiteral("言語オプション"), QString(),
                               QStringLiteral("すべてのテキストレイヤーを更新"), QString(),
-                              QStringLiteral("Lorem Ipsum をペースト"), QString(), QStringLiteral("台詞をテキストレイヤーに"), QStringLiteral("テキストレイヤーを台詞に")}));
+                              QStringLiteral("Lorem Ipsum をペースト"), QString(), QStringLiteral("初期設定の書式を読み込み"), QStringLiteral("初期設定の書式を保存"),
+                              QString(), QStringLiteral("台詞をテキストレイヤーに"), QStringLiteral("テキストレイヤーを台詞に")}));
         QVERIFY(texts(submenu(b.menu(QStringLiteral("ページ")), QStringLiteral("台詞"))).contains(QStringLiteral("フキダシの形")));
         QMenu* tools = b.menu(QStringLiteral("ツール"));
         QVERIFY(texts(submenu(tools, QStringLiteral("定規"))).contains(QStringLiteral("直線定規")));

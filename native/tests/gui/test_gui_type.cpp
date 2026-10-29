@@ -22,7 +22,10 @@
 #include "app/inject.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
+#include "app/thumbs.hpp"
 #include "app/tool_settings.hpp"
+#include "core/type_styles.hpp"
 #include "core/type_text.hpp"
 #include "gui_support.hpp"
 #include "testsupport.hpp"
@@ -138,6 +141,7 @@ private slots:
                                            QStringLiteral("ポイントテキストに変換"), QStringLiteral("段落テキストに変換"), QStringLiteral("|"),
                                            QStringLiteral("ワープテキスト…"), QStringLiteral("|"), QStringLiteral("言語オプション"), QStringLiteral("|"),
                                            QStringLiteral("すべてのテキストレイヤーを更新"), QStringLiteral("|"), QStringLiteral("Lorem Ipsum をペースト"),
+                                           QStringLiteral("|"), QStringLiteral("初期設定の書式を読み込み"), QStringLiteral("初期設定の書式を保存"),  // (G-c)
                                            QStringLiteral("|"), QStringLiteral("台詞をテキストレイヤーに"), QStringLiteral("テキストレイヤーを台詞に")}));
         QCOMPARE(texts(s.menu_at(QStringLiteral("書式/アンチエイリアス"))),
                  QStringList({QStringLiteral("なし"), QStringLiteral("シャープ"), QStringLiteral("鮮明"), QStringLiteral("強く"), QStringLiteral("滑らかに"),
@@ -161,6 +165,7 @@ private slots:
         // nothing chosen: the commands that need a text are off
         s.window->refresh_type_commands();
         QVERIFY(!s.act("act_type_aa_none")->isEnabled() && !s.act("act_type_to_point")->isEnabled());
+        QVERIFY(!s.act("act_type_save_defaults")->isEnabled() && !s.act("act_type_load_defaults")->isEnabled());  // (G-c)
     }
 
     // a click a point text, a drag a box text; 横書き文字ツール across; the new layer the target, over the one chosen
@@ -343,6 +348,99 @@ private slots:
         QVERIFY(!s.layer("t1")->type->native_type->value("para", Json::object()).contains("composer"));
         s.window->type_language_features(QStringLiteral("default"));
         QVERIFY(!s.act("act_type_rtl")->isVisible() && !s.act("act_type_ot_palt")->isVisible());
+    }
+
+    // PC5 G-c: the styles through the window's type_style (as G-d's panels will call it: on the text chosen), their list read
+    // with no op; 書式 → 初期設定の書式を保存 (the chosen text's formatting kept in the machine's settings, not the book) and
+    // 初期設定の書式を読み込み (laid on the text chosen in one step, undone in one)
+    void stylesAndDefaults() {
+        Studio s;
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "ABC"}, {"wrap", "horizontal"},
+                                                      {"point", Json::array({30, 30})}, {"style", Json{{"size_mm", 6}}}, {"new_id", "t1"}}})));
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "xyz"}, {"wrap", "horizontal"},
+                                                      {"point", Json::array({30, 60})}, {"style", Json{{"size_mm", 4}}}, {"new_id", "t2"}}})));
+        s.window->set_target_layer("t1");
+        s.window->refresh_type_commands();
+        QVERIFY(s.act("act_type_save_defaults")->isEnabled());
+        QVERIFY(!s.act("act_type_load_defaults")->isEnabled());  // (nothing kept yet)
+        // a character style made from the text and applied to it
+        const std::optional<Json> made = s.window->type_style("character", "new", Json{{"apply", true}}, true);
+        QVERIFY(made.has_value());
+        QCOMPARE((*made)["id"], Json("cs-1"));
+        QCOMPARE(s.last()["layer_id"], Json("t1"));
+        QCOMPARE((*s.layer("t1")->type->native_type)["char_style"], Json("cs-1"));
+        const Json listed = core::type_styles::list(s.window->book(), core::type_styles::Kind::Character);
+        QCOMPARE(listed.size(), std::size_t{2});
+        QCOMPARE(listed[1]["texts"], Json(1));
+        QCOMPARE(listed[1]["char"]["size_mm"], Json(6));
+        // a question through the window: answered, the book and its history as they were
+        const std::size_t was = s.ops.size();
+        const std::optional<Json> asked = s.window->type_style("character", "list", Json::object(), true);
+        QVERIFY(asked.has_value() && (*asked)["current"]["character"] == Json("cs-1"));
+        QCOMPARE(s.ops.size(), was);
+        // refused (a style the book has not): said, nothing changed
+        QVERIFY(!s.window->type_style("character", "apply", Json{{"id", "cs-9"}}, true).has_value());
+        // 初期設定の書式を保存: in the settings, not in the book
+        s.act("act_type_save_defaults")->trigger();
+        QCOMPARE(s.ops.size(), was);
+        const std::optional<Json> kept = app::preferences::default_type_styles();
+        QVERIFY(kept.has_value());
+        QCOMPARE((*kept)["char"]["size_mm"], Json(6));
+        QVERIFY(s.act("act_type_load_defaults")->isEnabled());
+        // 初期設定の書式を読み込み on the other text: one change, its look the kept one; undone in one step
+        s.window->set_target_layer("t2");
+        s.window->refresh_type_commands();
+        s.act("act_type_load_defaults")->trigger();
+        QCOMPARE(s.ops.size(), was + 3);
+        const Json* styles = s.window->book().type_styles ? &*s.window->book().type_styles : nullptr;
+        QCOMPARE(core::type_styles::defaults_of(*s.layer("t2")->type, styles), *kept);
+        s.act("act_undo")->trigger();
+        QVERIFY(!s.layer("t2")->type->native_type || !s.layer("t2")->type->native_type->contains("char"));
+    }
+
+    // PC5 G-c review: in a smart object's contents' tab the book's styles are made and changed in the book (P1-1), the
+    // style applied to the contents' text; the window's own keys not taken from args (P3-10); a page's thumbnail key follows
+    // its type layers and the book's styles (P3-3)
+    void stylesInContents() {
+        Studio s;
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "ABC"}, {"wrap", "horizontal"},
+                                                      {"point", Json::array({30, 30})}, {"style", Json{{"size_mm", 6}}}, {"new_id", "t1"}}})));
+        const std::string print = app::page_fingerprint(s.window->book(), s.window->book().page(0));
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "type_style"}, {"kind", "character"}, {"action", "new"}, {"from_selection", false},
+                                                      {"attrs", Json{{"underline", true}}}}})));
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "type_style"}, {"kind", "character"}, {"action", "apply"}, {"id", "cs-1"}, {"page", 1}, {"layer_id", "t1"}}})));
+        const std::string styled = app::page_fingerprint(s.window->book(), s.window->book().page(0));
+        QVERIFY(styled != print);
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "type_style"}, {"kind", "character"}, {"action", "set"}, {"id", "cs-1"},
+                                                      {"attrs", Json{{"rgb", Json::array({200, 0, 0})}}}}})));
+        QVERIFY(app::page_fingerprint(s.window->book(), s.window->book().page(0)) != styled);
+        // (P3-10) a list whose args name another op and text: still the window's list of the text chosen
+        s.window->set_target_layer("t1");
+        const std::optional<Json> asked = s.window->type_style("character", "list", Json{{"op", "edit_type"}, {"layer_id", "nope"}, {"kind", "x"}}, true);
+        QVERIFY(asked.has_value());
+        QCOMPARE((*asked)["current"]["character"], Json("cs-1"));
+        // the contents' tab
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"t1"})}}})));
+        QCOMPARE(s.window->book().smart_contents.size(), std::size_t{1});
+        const std::string contents = s.window->book().smart_contents.begin()->first;
+        QVERIFY(s.window->open_contents_tab(contents, QStringLiteral("中身")));
+        QVERIFY(s.window->contents_tab().has_value());
+        s.window->set_target_layer("t1");
+        const std::optional<Json> made = s.window->type_style("character", "new", Json{{"name", "強調"}, {"apply", true}}, true);
+        QVERIFY(made.has_value());
+        QCOMPARE((*made)["id"], Json("cs-2"));
+        QVERIFY(core::type_styles::find(&*s.window->book().type_styles, core::type_styles::Kind::Character, "cs-2") != nullptr);
+        const auto inner = [&] {
+            for (const core::StoryLine* r : core::type_styles::texts(s.window->book()))
+                if (r->text == "ABC") return *r;
+            return core::StoryLine();
+        };
+        QCOMPARE(inner().native_type->value("char_style", Json()), Json("cs-2"));
+        // a style set and redefined from the contents' tab: the book's
+        QVERIFY(s.window->type_style("character", "set", Json{{"id", "cs-2"}, {"attrs", Json{{"strikethrough", true}}}}, false).has_value());
+        QCOMPARE((*core::type_styles::find(&*s.window->book().type_styles, core::type_styles::Kind::Character, "cs-2"))["char"]["strikethrough"], Json(true));
+        QVERIFY(s.window->type_style("character", "redefine", Json::object(), true).has_value());
+        core::type_text::validate_type(s.window->book());
     }
 
     // a line made a type layer and back (書式's last two); a click on the target path: a text along it

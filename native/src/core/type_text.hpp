@@ -108,6 +108,8 @@ bool type_styles_normal(const Json& value);
 // The text's paragraphs (split at "\n"): how many, and the grapheme where paragraph `index` begins.
 std::int64_t paragraph_count(std::string_view text);
 std::int64_t paragraph_start(std::string_view text, std::int64_t index);
+// PC5 G-c (review P2-4): where every paragraph begins (graphemes), the text split once — for a caller that asks of many.
+std::vector<std::int64_t> paragraph_starts_of(std::string_view text);
 
 // What a line's style says of the attributes (font, size_mm, tracking, rgb, scale_x, tcy, features, faux_bold from bold or
 // a weight of bold or heavy, faux_italic from italic; align and yakumono): {"char": {…}, "para": {…}}.

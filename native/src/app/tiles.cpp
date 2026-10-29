@@ -101,7 +101,8 @@ bool same_layer_look(const core::Layer& a, const core::Layer& b) {
            a.smart == b.smart &&  // (smart-objects@1: its matrix and settings)
            a.style == b.style &&  // (layer-styles@1, PC4 E6: its style)
            a.shapes == b.shapes && a.vector_mask == b.vector_mask &&  // (pen-shapes@1: its shape parts, a list made anew when changed; vector@1)
-           a.group == b.group && a.parent_id == b.parent_id;  // (groups@1, PC5 I-b: drawn as a group, or in one)
+           a.group == b.group && a.parent_id == b.parent_id &&  // (groups@1, PC5 I-b: drawn as a group, or in one)
+           a.type == b.type;  // (type@1, PC5 G-c: a type layer's record — an op that changes it makes a new one)
 }
 
 // smart-objects@1 (PC3 A1): the contents the page's smart objects show — and those inside them — are the same in both
@@ -133,7 +134,8 @@ bool same_line(const core::StoryLine& a, const core::StoryLine& b) {
     return tails && a.id == b.id && a.text == b.text && a.speaker == b.speaker && a.frame_id == b.frame_id && a.ruby == b.ruby &&
            same_num(a.x_mm, b.x_mm) && same_num(a.y_mm, b.y_mm) && same_num(a.w_mm, b.w_mm) && same_num(a.h_mm, b.h_mm) &&
            a.balloon == b.balloon && a.wrap == b.wrap && a.ruby_runs == b.ruby_runs && a.ruby_spans == b.ruby_spans && same_points(a.path, b.path) &&
-           a.emphasis_runs == b.emphasis_runs && a.style_runs == b.style_runs && a.style == b.style && a.tails == b.tails;
+           a.emphasis_runs == b.emphasis_runs && a.style_runs == b.style_runs && a.style == b.style && a.tails == b.tails &&
+           a.native_type == b.native_type;  // (type@1, PC5 G-c: its attributes, ranges and styles)
 }
 
 bool same_story(const core::Document& a, const core::Document& b, const core::Num& index) {
@@ -151,7 +153,8 @@ bool same_story(const core::Document& a, const core::Document& b, const core::Nu
 // mixed in (set_text_gamma).
 bool same_book_look(const core::Document& a, const core::Document& b) {
     return a.font_path == b.font_path && a.nombre == b.nombre && a.start_side == b.start_side && a.text_gamma == b.text_gamma &&
-           a.global_light == b.global_light;  // (layer-styles@1, PC4 E6: 包括光源)
+           a.global_light == b.global_light &&  // (layer-styles@1, PC4 E6: 包括光源)
+           a.type_styles == b.type_styles;      // (type@1, PC5 G-c: the styles its texts take)
 }
 
 // How many covers come before the page (by number): the nombre counts the pages from the first that is not one

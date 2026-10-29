@@ -19,6 +19,7 @@
 #include "core/vector.hpp"
 #include "core/json.hpp"
 #include "core/paths.hpp"
+#include "core/ruby.hpp"
 #include "core/strokes.hpp"
 #include "render/page.hpp"
 #include "storage/asset_store.hpp"
@@ -153,6 +154,15 @@ std::string page_fingerprint(const core::Document& doc, const core::Page& page) 
             h.add(strokes.blob_ref);  // (the hash of the very bytes of these lines)
         } else {
             h.add(storage::AssetStore::ref(core::strokes_blob(strokes)));
+        }
+        if (layer.type) {  // (type@1, PC5 G-c review P3-3: a type layer's record, and the book's styles it takes)
+            const core::StoryLine& r = *layer.type;
+            Json words = Json::array();
+            for (const auto& [word, style] : r.style_runs) words.push_back(Json::array({word, style}));
+            h.add(Json{{"type", Json::array({r.text, r.wrap, r.balloon, r.x_mm.json(), r.y_mm.json(), r.w_mm.json(), r.h_mm.json(), r.style,
+                                              r.native_type ? *r.native_type : Json(), words, Json(r.ruby_runs), Json(r.emphasis_runs),
+                                              r.ruby_spans ? core::ruby::to_json(*r.ruby_spans) : Json()})}});
+            if (doc.type_styles) h.add(Json{{"type_styles", *doc.type_styles}});
         }
         if (layer.shapes && !layer.shapes->items.empty()) {  // (pen-shapes@1, PC3 C-b: its shape parts)
             h.add(std::string_view("pen-shapes/1"));

@@ -1749,6 +1749,7 @@ private:
     // page) and the book as the canvas draws it then (its contents' page as its only page, made once a snapshot); the
     // commands a contents' tab cannot use, greyed while it is in front; the linked files' states and their watcher.
     std::optional<std::string> contents_;
+    bool to_book_ = false;  // (PC5 G-c review P1-1: ops of the book's own — its type styles — sent from a contents' tab)
     QString contents_title_;
     mutable std::shared_ptr<const core::Document> contents_view_;
     mutable std::shared_ptr<const core::Document> contents_view_of_;
@@ -1825,6 +1826,16 @@ public:
     void type_feature(const std::string& tag, bool on);
     void type_language_features(const QString& which);
     QString type_language_features() const;
+    // PC5 G-c (SPEC.md TEXT-02「文字スタイル・段落スタイル」): type_style {kind, action, …args} through apply_ops — on the text chosen
+    // (type_target, its line or page and layer_id laid in; `args` may give its range) when `on_text` — and what it reported
+    // (none: refused, said; or no text chosen). The 文字スタイル・段落スタイル panels (G-d) call it: new, duplicate, delete,
+    // rename, set (スタイルオプション), apply (Alt: clear_overrides), redefine, clear_override; what they show comes of
+    // core::type_styles::list and current (no op: a read-only book shows them too).
+    std::optional<core::Json> type_style(const std::string& kind, const std::string& what, const core::Json& args, bool on_text);
+    // 書式 → 初期設定の書式を保存 (the chosen text's formatting at its start, kept in the machine's settings) and 初期設定の書式を読み込み
+    // (laid on the chosen text's whole: its styles taken away, its own attributes cleared, then set_type — one step).
+    void save_default_type_styles();
+    void load_default_type_styles();
 
 private:
     void build_type_actions();
