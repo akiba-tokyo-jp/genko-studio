@@ -73,6 +73,10 @@ public:
     void remove();
     void duplicate();
     void merge_down();
+    // PC5 I-b (groups@1): レイヤーからのフレーム… (the chosen layers grouped, the group cut to the box of what it holds:
+    // frame_from_layers), and グループとして描く (a folder drawn as Photoshop's group — 通過 — or as before).
+    void frame_selected();
+    void draw_as_group(bool on);
     // 前面へ (1) and 背面へ (-1): the window's arrange_layers (PC3 C-d).
     void move(int delta);
     // These layers chosen in the list (the others not; the layer drawn on as it is): リンクしたレイヤーを選択, 自動選択.
@@ -150,6 +154,7 @@ private:
     QCheckBox* each_panel_ = nullptr;
     QCheckBox* draft_ = nullptr;
     QCheckBox* reference_ = nullptr;
+    QCheckBox* group_ = nullptr;  // (PC5 I-b: グループとして描く, a folder's)
     QComboBox* tint_ = nullptr;
     QPushButton* mask_button_ = nullptr;
     QPushButton* effect_button_ = nullptr;

@@ -233,7 +233,8 @@ std::string blend_key(const std::string& blend) {
         {"normal", "norm"},     {"multiply", "mul "},    {"screen", "scrn"},     {"add", "lddg"},         {"overlay", "over"},
         {"darken", "dark"},     {"lighten", "lite"},     {"color_burn", "idiv"}, {"color_dodge", "div "}, {"linear_burn", "lbrn"},
         {"soft_light", "sLit"}, {"hard_light", "hLit"},  {"difference", "diff"}, {"exclusion", "smud"},   {"subtract", "fsub"},
-        {"divide", "fdiv"},     {"hue", "hue "},         {"saturation", "sat "}, {"color", "colr"},       {"luminosity", "lum "}};
+        {"divide", "fdiv"},     {"hue", "hue "},         {"saturation", "sat "}, {"color", "colr"},       {"luminosity", "lum "},
+        {"pass_through", "pass"}};  // (groups@1, PC5 I-b: a group's 通過)
     const auto it = keys.find(blend.empty() ? std::string("normal") : blend);
     return it == keys.end() ? "norm" : it->second;
 }
@@ -1723,9 +1724,9 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
         PsdTextReport own;
         EditableLines lines(records, episode, static_cast<int>(dpi), size, core::py_int(page.index.json()), report != nullptr ? *report : own, &color);
         const std::function<void(const core::StoryLine&)> line_layers = [&](const core::StoryLine& line) { lines.add(line); };
-        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers, &adjust_layers, true);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers, &adjust_layers, true, true);
     } else {
-        render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true, true);
     }
     const unsigned n = core::colour_channels(color.space);
     std::string body = file_start(psb);
@@ -1796,9 +1797,9 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
         PsdTextReport own;
         EditableLines lines(records, episode, static_cast<int>(dpi), size, core::py_int(page.index.json()), report != nullptr ? *report : own);
         const std::function<void(const core::StoryLine&)> line_layers = [&](const core::StoryLine& line) { lines.add(line); };
-        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers, &adjust_layers, true);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers, &adjust_layers, true, true);
     } else {
-        render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true, true);
     }
     std::string body = file_start(psb);
     put_u16(body, 3 + static_cast<std::uint32_t>(page.channels.size()));
@@ -1980,9 +1981,9 @@ std::string page_psd_bytes(const core::Document& episode, const core::Page& page
         PsdTextReport own;
         EditableLines lines(records, episode, static_cast<int>(dpi), rgb.size(), core::py_int(page.index.json()), report != nullptr ? *report : own);
         const std::function<void(const core::StoryLine&)> line_layers = [&](const core::StoryLine& line) { lines.add(line); };
-        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers, &adjust_layers, true);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers, &adjust_layers, true, true);
     } else {
-        render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true, true);
     }
     std::string body = file_start(psb);
     put_u16(body, 3 + static_cast<std::uint32_t>(page.channels.size()));
@@ -2056,7 +2057,7 @@ std::string contents_psd_bytes(const core::Document& episode, const core::Page& 
         records.add(std::move(layer));
     };
     const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, rgb.size(), episode);
-    render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true);
+    render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true, true);
     std::string body = file_start(psb);
     put_u16(body, 3 + static_cast<std::uint32_t>(page.channels.size()));
     put_u32(body, static_cast<std::uint32_t>(rgb.height()));

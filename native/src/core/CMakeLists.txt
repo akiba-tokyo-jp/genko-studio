@@ -131,6 +131,8 @@ genko_library(genko_core
     layer_styles.cpp
     # PC5 G-0 (文字: type@1 の記録・属性の表・解決・範囲の追従)
     type_text.cpp
+    # PC5 I-b (グループ: groups@1 の印・確かめ・層の木)
+    groups.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"

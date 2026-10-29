@@ -243,6 +243,8 @@ genko_library(genko_render
     type_layer.cpp
     ops_type.cpp
     text/shaping.cpp
+    # PC5 I-b (グループとフレーム: レイヤーからのフレーム)
+    ops_groups.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

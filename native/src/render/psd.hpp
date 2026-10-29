@@ -69,7 +69,7 @@ struct Layer {
     bool folder = false;
     double opacity = 1.0;
     bool visible = true;
-    std::string blend = "normal";
+    std::string blend = "normal";  // (groups@1, PC5 I-b: a folder's 通過 "pass_through")
     bool clip = false;
     std::optional<std::size_t> parent;  // the index (in layers()) of the folder it is in
     std::string kind = "pixels";        // pixels | folder | text | adjust | smart | shape (pen-shapes@1, PC3 C-b)
@@ -272,6 +272,7 @@ public:
         bool clip = false;
         bool visible = true;
         std::string blend = "normal";
+        bool pass_through = false;  // (groups@1, PC5 I-b: a group's 通過 — its record's key or its section's)
         std::string name;
         std::uint32_t section = 0;
         std::string kind = "pixels";

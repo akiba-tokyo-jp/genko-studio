@@ -118,6 +118,8 @@ const std::map<std::string, const char*>& names() {
         {"background_eraser", "背景を消した"}, {"color_replacement", "色を置き換えた"},
         // (PC4 F-e: render/ops_camera_raw — a RAW smart object's development, an op of the book's)
         {"set_camera_raw", "Camera Raw で現像の設定を変えた"},
+        // (PC5 I-b, groups@1: render/ops_groups)
+        {"frame_from_layers", "レイヤーからフレームを作った"},
     };
     return table;
 }

@@ -1224,7 +1224,9 @@ private slots:
                                            "show_layer_effects", "layer_style_to_layers",
                                            // (PC5 G-0: type@1, the type ops — G-0's and the later groups' frames, SPEC TEXT-02)
                                            "add_type_layer", "edit_type", "type_info", "set_type", "type_style", "line_to_type_layer",
-                                           "type_layer_to_line", "replace_fonts"};
+                                           "type_layer_to_line", "replace_fonts",
+                                           // (PC5 I-b: groups@1, レイヤーからのフレーム — SPEC AUTO-01)
+                                           "frame_from_layers"};
         for (const std::string& name : genko::render::ops_registry().names()) {
             if (listed.count(name) == 0 && own.count(name) == 0) missing += (missing.empty() ? "" : ", ") + name;
         }

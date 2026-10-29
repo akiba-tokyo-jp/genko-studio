@@ -463,7 +463,8 @@ private slots:
             "set_layer_style", "add_layer_effect", "set_global_light", "scale_layer_style", "show_layer_effects",
             "layer_style_to_layers",  // (PC4 E6: layer-styles@1, SPEC.md COLOR-09)
             "add_type_layer", "edit_type", "type_info", "set_type", "type_style", "line_to_type_layer", "type_layer_to_line",
-            "replace_fonts"};  // (PC5 G-0: type@1, the type ops — G-0's and the later groups' frames, SPEC.md TEXT-02)
+            "replace_fonts",  // (PC5 G-0: type@1, the type ops — G-0's and the later groups' frames, SPEC.md TEXT-02)
+            "frame_from_layers"};  // (PC5 I-b: groups@1, レイヤーからのフレーム — SPEC.md AUTO-01)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);

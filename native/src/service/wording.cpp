@@ -1169,6 +1169,13 @@ const std::vector<Rule>& rules() {
                          "文字の設定（文字・段落の属性、スタイル）の指定が正しくありません"));
         r.push_back(rule("(?:a run(?:'s| must) |the runs must |a paragraph must |the paragraphs must |a style's (?:id|name) |two (?:character|paragraph) styles ).*",
                          "文字の範囲・段落・スタイルの指定が正しくありません"));
+        // (groups@1, PC5 I-b — the C++ build's own: a folder drawn as a group, core/groups, render/ops_groups)
+        r.push_back(rule("group makes a folder.*|group is set on a folder|.*the layer \\S+ is marked a group but is not a folder",
+                         "グループとして描けるのはフォルダーだけです"));
+        r.push_back(rule(".*(?:blend pass_through is a group's|the blend pass_through is a group's only).*", "描画モード「通過」はグループだけのものです"));
+        r.push_back(rule("the layers to merge are in different groups.*", "別々のグループのレイヤーは一緒に結合できません（グループの中で結合します）"));
+        r.push_back(rule("merging what shows through a group's opacity, blend or mask.*",
+                         "グループの不透明度・描画モード・マスクを通して見えるものは、まだ結合できません（先にグループの中を結合します）"));
         r.push_back(rule("the layers have nothing to draw", "選んだレイヤーには、描かれたものがありません"));
         r.push_back(rule("layer \\S+ has nothing to rasterize", "このレイヤーには、ラスタライズするものがありません（すでに画素のレイヤーです）"));
         r.push_back(rule("the transform squashes the smart object flat|the picture would be laid too small", "スマートオブジェクトが潰れてしまう変形はできません"));

@@ -129,6 +129,12 @@ public:
                 const std::function<void(std::vector<float>& pixels, const std::vector<float>& weight)>& run);
     // (after the last part) the next layer clips to the styled one
     void styled_done();
+    // PC5 I-b (groups@1): a pass-through group's opacity × mask (`mask`, "L", the canvas's size; none: 1) between the
+    // pixels before what it holds was drawn (`before`, picture()) and now — each pixel `before` + (now − before) × that,
+    // premultiplied by its alpha; what the next layer clips to is left.
+    void mix_back(const ColorPicture& before, double opacity, const Image* mask = nullptr);
+    // PC5 I-b: what the next layer clips to (`alpha`, "L", the canvas's size: a group's shape).
+    void clip_to(const Image& alpha);
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

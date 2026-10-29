@@ -1099,7 +1099,12 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
             return kept;
         };
         if (item.folder) {
+            // (groups@1, PC5 I-b, the user's decision 2: a group drawn as Photoshop draws it — its visibility, opacity, blend
+            // (通過 among them), mask and vector mask)
             layer.kind = core::LayerKind::Folder;
+            layer.group = true;
+            if (auto mask = mask_of()) layer.mask = std::move(*mask);
+            layer.vector_mask = vector_mask_of(item);
         } else if (item.kind == "shape") {
             // (pen-shapes@1, PC3 C-b: a shape layer as a new pen layer of one shape part — render/psd_shapes —, as the PSD
             // shows it: not cut by the panels; one whose fill this build cannot read, left out as before)

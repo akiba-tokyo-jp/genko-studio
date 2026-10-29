@@ -9,6 +9,7 @@
 #include <cmath>
 
 #include "core/areas.hpp"
+#include "core/groups.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
@@ -376,7 +377,7 @@ void set_vector_mask(OpContext& c) {
     Page& page = doc.edit_page(at);
     Layer& layer = page.layers[core::layer_by_id(page, id != nullptr ? core::py_str(*id) : std::string())];
     if (layer.locked) throw OpError("the layer is locked");
-    if (layer.kind == core::LayerKind::Folder) throw OpError("a folder cannot take a vector mask (mask the layers in it)");
+    if (layer.kind == core::LayerKind::Folder && !core::is_group(layer)) throw OpError("a folder cannot take a vector mask (mask the layers in it)");  // (groups@1: a group can)
     if (const Json* del = given(c.op, "delete"); del != nullptr && boolean(*del, "delete")) {
         if (!layer.vector_mask) throw OpError("the layer has no vector mask");
         layer.vector_mask.reset();

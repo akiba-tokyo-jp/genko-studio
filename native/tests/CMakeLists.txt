@@ -170,6 +170,8 @@ genko_test(test_grd SOURCES unit/test_grd.cpp DEPS genko_test_support genko_rend
 # (a page without styles drawn and written as before), the ops, Blend If and the fill, merges, PSD's lfx2 written and read
 # back, saved, opened and undone; the styles' library (upstream's built-in groups), .asl files and `genko styles`.
 genko_test(test_layer_styles SOURCES unit/test_layer_styles.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+# PC5 I-b (groups@1: グループとフレーム)
+genko_test(test_groups SOURCES unit/test_groups.cpp DEPS genko_test_support genko_render_ops genko_storage LABELS unit TIMEOUT 600)
 genko_test(test_style_presets SOURCES unit/test_style_presets.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 # PC5 G-0 (SPEC.md TEXT-02「文字」, type@1): the type record's tables and normal form, the order of resolution, the ranges through
 # edits, style_runs as ranges, a line's record as a type layer's; the HarfBuzz way in (the bundled faces' glyphs, across and down).

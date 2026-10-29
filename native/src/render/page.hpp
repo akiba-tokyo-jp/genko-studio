@@ -233,9 +233,12 @@ struct PageLayer {
 // with `shapes` (a PSD) as a shape layer of its one part or as a group of its pictures, parts and lines
 // (render/psd_shapes' plan), else (and where a group would not show it the same) as one layer of its look. With `shapes`
 // (a PSD) a pattern fill layer (patterns@1, PC4 E3) is given too, as a layer of its look with its pattern fill.
+// groups@1 (PC5 I-b): what a hidden group holds is not given; with `groups` (a PSD) each group shown is given as its end
+// (section "end", below what it holds) and itself (section "group", above it: its name, id and settings — its blend
+// pass_through Photoshop's 通過 —, mask and vector mask).
 void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each,
                  const std::function<void(const core::StoryLine&)>* line_layers = nullptr,
-                 const std::function<void(const core::Layer&)>* adjust_layers = nullptr, bool shapes = false);
+                 const std::function<void(const core::Layer&)>* adjust_layers = nullptr, bool shapes = false, bool groups = false);
 
 // Pure black and white: grey above `threshold` is white; with `screen` the greys become a pattern (dot, line, cross or
 // noise; 書き出しでのトーン化).

@@ -487,6 +487,34 @@ void ColorCanvas::blend(const ColorPicture& picture, double opacity, bool clip, 
     impl_->previous = true;
 }
 void ColorCanvas::forget_clip() { impl_->previous = false; }
+void ColorCanvas::mix_back(const ColorPicture& before, double opacity, const Image* mask) {
+    if (before.size != impl_->size || before.pixels.size() != impl_->pixels.size()) throw core::Error("value", "color canvas picture does not match");
+    if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "layer mask does not match");
+    for (int y = 0; y < impl_->size.height; ++y) {
+        const auto* shown = mask ? reinterpret_cast<const unsigned char*>(mask->raw()->image[y]) : nullptr;
+        for (int x = 0; x < impl_->size.width; ++x) {
+            const std::size_t i = std::size_t(y) * impl_->size.width + x;
+            const double k = std::clamp(opacity, 0.0, 1.0) * (shown ? shown[x] / 255.0 : 1.0);
+            if (k >= 1) continue;
+            auto& p = impl_->pixels[i];
+            const auto& b = before.pixels[i];
+            const double alpha = b[3] + (p[3] - b[3]) * k;
+            for (unsigned c = 0; c < 3; ++c) {
+                const double premultiplied = b[c] * b[3] + (p[c] * p[3] - b[c] * b[3]) * k;
+                p[c] = alpha > 0 ? premultiplied / alpha : 0.0;
+            }
+            p[3] = std::clamp(alpha, 0.0, 1.0);
+        }
+    }
+}
+void ColorCanvas::clip_to(const Image& alpha) {
+    if (alpha.mode() != "L" || alpha.size() != impl_->size) throw core::Error("value", "clipping alpha does not match");
+    for (int y = 0; y < impl_->size.height; ++y) {
+        const auto* a = reinterpret_cast<const unsigned char*>(alpha.raw()->image[y]);
+        for (int x = 0; x < impl_->size.width; ++x) impl_->pixels[std::size_t(y) * impl_->size.width + x][4] = a[x] / 255.0;
+    }
+    impl_->previous = true;
+}
 void ColorCanvas::correct(const core::ColorRasterView& changed, double opacity, bool clip, const Image* mask, std::string_view mode) {
     if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "correction mask does not match");
     if (!supports_blend(mode)) throw core::Error("not_yet_ported", "high-precision blend:" + std::string(mode));

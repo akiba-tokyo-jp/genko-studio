@@ -34,6 +34,7 @@
 #include "core/patterns.hpp"
 #include "core/layer_styles.hpp"
 #include "core/type_text.hpp"
+#include "core/groups.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 
@@ -85,7 +86,7 @@ constexpr std::array<std::string_view, 21> kLineKeys{"id", "page_index", "text",
                                                      "style", "tails",
                                                      // type@1 (PC5 G-0)
                                                      "native_type"};
-constexpr std::array<std::string_view, 52> kLayerKeys{
+constexpr std::array<std::string_view, 53> kLayerKeys{
     "id", "role", "kind", "visible", "exportable", "strokes", "raster_relpath", "fill_rgb", "lpi", "density",
     "region", "opacity", "material_id", "angle", "title", "blend", "clip", "lock_alpha", "locked", "panel_clip",
     "panel_each", "patches", "tone", "parent_id", "asset", "mask", "color", "reference", "fill", "adjust", "effect",
@@ -101,7 +102,9 @@ constexpr std::array<std::string_view, 52> kLayerKeys{
     // PC4 E6 (layer-styles@1)
     "style",
     // PC5 G-0 (type@1)
-    "type"};
+    "type",
+    // PC5 I-b (groups@1)
+    "group"};
 constexpr std::array<std::string_view, 5> kPlacedOnlyKeys{"frame_id", "placement_mm", "fit", "clip_to", "finish"};
 constexpr std::array<std::string_view, 5> kMaskKeys{"enabled", "asset",
                                                     // masks@1 (PC3)
@@ -1143,6 +1146,15 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
     layer.angle = to_float(data, "angle", 45.0, at);
     layer.title = to_str_or(data, "title", "");
     layer.blend = to_str_or(data, "blend", "normal");
+    // (groups@1, PC5 I-b: a folder drawn as a group — one on another layer, or a blend pass_through elsewhere, the book
+    // read-only: core::validate_groups below)
+    if (const Json* group = find(data, "group"); group != nullptr && !group->is_null()) {
+        if (group->is_boolean()) {
+            layer.group = group->get<bool>();
+        } else {
+            issue("broken_value", at_key(at, "group"), {}, "a layer's group must be true or false");
+        }
+    }
     layer.clip = to_bool(data, "clip", false);
     layer.lock_alpha = to_bool(data, "lock_alpha", false);
     layer.locked = to_bool(data, "locked", false);
@@ -1710,6 +1722,9 @@ core::Document Reader::migrate(const Json& payload) {
     // (PC5 G-0: type@1's records, type layers and type styles, each in its normal form)
     try { core::type_text::validate_type(doc); }
     catch (const core::Error& error) { issue("broken_value", "/story", {}, error.what()); }
+    // (groups@1, PC5 I-b: a group on a folder only, the blend pass_through a group's only)
+    try { core::validate_groups(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     return doc;
 }
 
@@ -1957,7 +1972,9 @@ bool is_known_feature(std::string_view feature) {
            // PC4 E6 (core/layer_styles.hpp)
            feature == core::kLayerStylesFeature ||
            // PC5 G-0 (core/type_text.hpp)
-           feature == core::kTypeFeature;
+           feature == core::kTypeFeature ||
+           // PC5 I-b (core/groups.hpp)
+           feature == core::kGroupsFeature;
 }
 
 int project_version(const Json& payload) {

@@ -77,6 +77,14 @@ public:
                 const std::function<void(std::vector<float>& values, const std::vector<float>& weight)>& run);
     void styled_done();
 
+    // PC5 I-b (groups@1): the canvas's values as a layer's picture (an isolated group drawn on a clear canvas, laid as one
+    // layer), and a pass-through group's opacity × mask ("L"; none: 1) between `before` (picture() before what the group
+    // holds was drawn) and now — premultiplied by the alpha; what the next layer clips to is left —, and what the next layer
+    // clips to set (`alpha`, "L": a group's shape).
+    InkPicture picture() const;
+    void mix_back(const InkPicture& before, double opacity, const Image* mask = nullptr);
+    void clip_to(const Image& alpha);
+
     // The page as the screen shows it ("RGB", sRGB).
     Image display() const;
     // The page's inks at a depth (opaque: alpha full).

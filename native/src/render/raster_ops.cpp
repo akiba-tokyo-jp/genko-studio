@@ -1,5 +1,6 @@
 #include "render/raster_ops.hpp"
 
+#include "core/groups.hpp"
 #include "core/layer_styles.hpp"
 #include "render/dab_ops.hpp"
 #include "render/ink.hpp"
@@ -962,7 +963,7 @@ void set_layer_mask(OpContext& c) {
     Page& page = doc.edit_page(at);
     Layer& layer = page.layers[core::layer_by_id(page, core::truthy_at(op, "id") ? core::py_str(op["id"]) : std::string())];
     if (layer.locked) throw OpError("the layer is locked");  // (Python masks it)
-    if (layer.kind == LayerKind::Folder) throw OpError("a folder cannot take a mask (mask the layers in it)");
+    if (layer.kind == LayerKind::Folder && !core::is_group(layer)) throw OpError("a folder cannot take a mask (mask the layers in it)");  // (groups@1: a group can)
     if (core::truthy_at(op, "delete")) {
         layer.mask.reset();
         return;
@@ -999,7 +1000,7 @@ void paint_mask(OpContext& c) {
     Page& page = doc.edit_page(at);
     Layer& layer = page.layers[core::layer_by_id(page, core::truthy_at(op, "id") ? core::py_str(op["id"]) : std::string())];
     if (layer.locked) throw OpError("the layer is locked");  // (Python masks it)
-    if (layer.kind == LayerKind::Folder) throw OpError("a folder cannot take a mask (mask the layers in it)");
+    if (layer.kind == LayerKind::Folder && !core::is_group(layer)) throw OpError("a folder cannot take a mask (mask the layers in it)");  // (groups@1: a group can)
     const Json* raw = core::get(op, "points");
     core::PenPoints points = core::parse_points(raw != nullptr && core::py_truthy(*raw) ? *raw : Json::array());
     if (points.empty()) throw OpError("points needs at least one [x_mm, y_mm] pair");
@@ -1317,6 +1318,21 @@ void after_merge(Page& page, const std::vector<std::size_t>& merged) {
     page.layers = std::move(kept);
 }
 
+// groups@1 (PC5 I-b): layers merged together are in one group (or none) — the merged layer stays where the first is —, and
+// what a merge of what shows composites is not drawn through a group that changes its look (its opacity, blend or mask:
+// merge the group's layers in it first)
+void check_merged_groups(const Page& page, const std::vector<std::size_t>& layers, bool shown) {
+    if (!core::has_groups(page.layers) || layers.empty()) return;
+    const std::vector<std::optional<std::size_t>> owners = core::group_owners(page.layers);
+    for (const std::size_t i : layers) {
+        if (!shown && owners[i] != owners[layers.front()]) throw OpError("the layers to merge are in different groups (merge them in their group)");
+        if (!shown) continue;
+        for (auto at = owners[i]; at; at = owners[*at])
+            if (core::group_changes_look(page.layers[*at]))
+                throw NotYetPorted("merging what shows through a group's opacity, blend or mask (merge the group's layers first)");
+    }
+}
+
 void merge_layers(OpContext& c) {
     Document& doc = c.doc;
     const Json& op = c.op;
@@ -1329,6 +1345,7 @@ void merge_layers(OpContext& c) {
     }
     if (layers.size() < 2) throw OpError("choose two or more layers to merge");
     check_mergeable(page, layers);
+    check_merged_groups(page, layers, false);  // (groups@1, PC5 I-b)
     if (has_precision(page, layers)) {
         auto bytes = composite_color_layers(doc, page, layers);
         into_color_pixels(page.layers[layers.front()], std::move(bytes));
@@ -1377,6 +1394,7 @@ void merge_visible(OpContext& c) {
             parents_visible(page, layer)) shown.push_back(i);
     }
     if (shown.empty()) throw OpError("no layer is showing");
+    check_merged_groups(page, shown, true);  // (groups@1, PC5 I-b)
     std::vector<std::size_t> removed=shown;
     if (flatten) {
         if (page_background(page,Size{1,1},false).tobytes()!=page_background(page,Size{1,1},true).tobytes())

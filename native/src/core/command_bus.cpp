@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/groups.hpp"
 #include "core/adjust.hpp"
 #include "core/adjust_kinds.hpp"
 #include "core/channels.hpp"
@@ -1215,6 +1216,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     validate_pattern_fills(work);   // (patterns@1, PC4 E3: no fill names a pattern the book does not keep)
                     validate_layer_styles(work);    // (layer-styles@1, PC4 E6: a style in its normal form, on a layer that takes one)
                     type_text::validate_type(work);  // (type@1, PC5 G-0: a record in its normal form; a type layer draws its text alone)
+                    validate_groups(work);  // (groups@1, PC5 I-b: a group on a folder only, pass_through a group's only)
                 } catch (const Error& error) {
                     if (error.code() == "not_yet_ported") throw;
                     throw OpError(error.what());
