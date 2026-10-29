@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 
 #include "core/model.hpp"
@@ -24,6 +25,11 @@ namespace type_layer {
 // The type layer's picture over `area` of the page as the 8-bit page draws it ("RGBA"); nothing when it holds no record
 // or none of it is there.
 std::optional<Image> picture_8bit(const detail::Ctx& ctx, const core::Layer& layer, const Box& area);
+// PC5 G-a: forget where the type layers' letters were found (書式 → すべてのテキストレイヤーを更新: a font file replaced
+// under the same name may set them wider).
+void forget_extents();
+// PC5 G-a (tests): the most pixels one upright piece of a turned type layer took since the last reset.
+std::int64_t largest_upright_pixels(bool reset = false);
 
 }  // namespace type_layer
 }  // namespace genko::render

@@ -54,6 +54,7 @@
 #include "app/navigator.hpp"
 #include "app/pages_panel.hpp"
 #include "app/paths_panel.hpp"
+#include "app/layer_comps_panel.hpp"
 #include "app/perf.hpp"
 #include "app/reply_box.hpp"
 #include "app/save_status.hpp"
@@ -570,6 +571,7 @@ void MainWindow::set_target_layer(const std::string& layer_id) {
     }
     if (layer_panel_ != nullptr) layer_panel_->show_target();  // (not built again: a Ctrl / Shift+click keeps the others)
     if (materials_ != nullptr) materials_->refresh();
+    refresh_type_frame();  // (PC5 G-a: a type layer chosen — its box on the canvas)
 }
 
 std::optional<core::Json> MainWindow::selection_area() const {
@@ -687,7 +689,10 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
         {"add_scene", QStringLiteral("3D の背景を置いています…")},        {"add_prim3d", QStringLiteral("3D を置いています…")},
         {"pose_figure", QStringLiteral("3D のポーズを変えています…")},    {"pose_mannequin", QStringLiteral("3D のポーズを変えています…")},
         {"import_pages", QStringLiteral("ページを取り込んでいます…")},       {"smart_place", QStringLiteral("スマートオブジェクトを置いています…")},
-        {"layer_style_to_layers", QStringLiteral("レイヤースタイルをレイヤーにしています…")}};  // (PC4 E6 review P3-6)
+        {"layer_style_to_layers", QStringLiteral("レイヤースタイルをレイヤーにしています…")},  // (PC4 E6 review P3-6)
+        // (PC5 J-a, the review's P3-7: each layer's place read)
+        {"new_layer_comp", QStringLiteral("レイヤーカンプを記録しています…")}, {"update_layer_comp", QStringLiteral("レイヤーカンプを記録しています…")},
+        {"apply_layer_comp", QStringLiteral("レイヤーカンプを適用しています…")}};
     struct Busy {
         bool on = false;
         ~Busy() {
@@ -819,6 +824,7 @@ void MainWindow::show_page() {
     channel_view_changed();  // (channels@1: this page's view on screen, its panel)
     quick_mask_follow();     // (masks@1: the page's Quick Mask, its menu item and the tools painting it)
     if (paths_panel_ != nullptr && paths_dock_ != nullptr && paths_dock_->isVisible()) paths_panel_->refresh();  // (vector@1, PC3 C-a)
+    if (layer_comps_panel_ != nullptr && layer_comps_dock_ != nullptr && layer_comps_dock_->isVisible()) layer_comps_panel_->refresh();  // (PC5 J-a)
     if (patterns_panel_ != nullptr && patterns_dock_ != nullptr && patterns_dock_->isVisible()) patterns_panel_->refresh();  // (PC4 E3)
     if (lines_later_) {
         lines_timer_.start();

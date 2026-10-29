@@ -74,13 +74,25 @@ struct PsdFrom {
     bool operator==(const PsdFrom&) const = default;
 };
 
+// (PC5 J-0, render/psd_production) A kept block the page's own was read from — a layer comps', slices', notes' or
+// measurement scale's —, and the fingerprint of what the page held right after: the kept bytes are written again while the
+// page's is the same, else the page's own (none: neither).
+struct PsdCopied {
+    int resource = -1;        // an image resource's id (a global block: -1)
+    std::string global;       // a global block's key (an image resource: "")
+    std::string fingerprint;  // (1..128 bytes)
+
+    bool operator==(const PsdCopied&) const = default;
+};
+
 struct PsdPageKeep {
     std::vector<PsdResource> resources;
     std::vector<PsdGlobal> globals;
     std::vector<std::int64_t> ids;  // (PC4 F-d) the lyids of the layers read with them (0..4294967295)
     std::optional<PsdFrom> from;
+    std::vector<PsdCopied> copied;  // (PC5 J-0: "copied": [[id | key, fingerprint], …], only while there is one)
 
-    bool empty() const { return resources.empty() && globals.empty() && ids.empty() && !from; }
+    bool empty() const { return resources.empty() && globals.empty() && ids.empty() && !from && copied.empty(); }
     bool operator==(const PsdPageKeep&) const = default;
 };
 

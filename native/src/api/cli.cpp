@@ -48,6 +48,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "formats/copy.hpp"
+#include "render/ops_layer_comps.hpp"
 #include "formats/export.hpp"
 #include "formats/exporting.hpp"
 #include "formats/open_file.hpp"
@@ -298,6 +299,7 @@ int inspect(const QStringList& args, bool ascii) {
     QString area_text, page_text;  // (PC3 B1, the C++ build's own: --page N --area '<area>'; PC3 C-a: --paths [--page N])
     bool paths = false;  // (vector@1, PC3 C-a, the C++ build's own: --paths [--page N], path.list / path.info / layer.vectorMask.info)
     QString at_text;  // (PC3 C-d, the C++ build's own: --at <page>:<x_mm>,<y_mm>, layer.pickAt — the layers showing there)
+    bool comps = false;  // (PC5 J-a, the C++ build's own: --comps [--page N], layerComp.list — the pages' layer comps)
     const auto value_of = [&](qsizetype& i, const char* name, QString& into) -> bool {
         const QString& arg = args[i];
         const QString flag = QString::fromLatin1(name);
@@ -321,6 +323,8 @@ int inspect(const QStringList& args, bool ascii) {
             file_info = true;
         } else if (arg == QLatin1String("--paths")) {
             paths = true;
+        } else if (arg == QLatin1String("--comps")) {
+            comps = true;
         } else if (arg == QLatin1String("--stroke")) {
             if (i + 1 >= args.size()) return usage("argument --stroke: expected one argument");
             stroke = args[++i];
@@ -373,7 +377,8 @@ int inspect(const QStringList& args, bool ascii) {
     }
     if (!profile.isEmpty() && !pixel.isEmpty()) return usage("argument --profile: not with --pixel");
     if (!area_text.isEmpty() && page_text.isEmpty()) return usage("argument --area, --page: --area <area> with --page <N>");
-    if (!page_text.isEmpty() && area_text.isEmpty() && !paths) return usage("argument --page: only with --area or --paths");
+    if (!page_text.isEmpty() && area_text.isEmpty() && !paths && !comps) return usage("argument --page: only with --area, --paths or --comps");
+    if (comps && (paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty())) return usage("argument --comps: not with --paths, --area, --pixel or --profile");
     if (paths && !area_text.isEmpty()) return usage("argument --paths: not with --area");
     std::optional<std::int64_t> page_number;
     if (!page_text.isEmpty()) {
@@ -425,6 +430,20 @@ int inspect(const QStringList& args, bool ascii) {
             return 0;
         }
         throw core::Error("key", "no page " + std::to_string(*at_page));
+    }
+    if (comps) {  // (PC5 J-a, layerComp.list: each page's layer comps — their options, the layers they record, the layers gone)
+        const core::Document& doc = loaded.document;
+        core::Json pages = core::Json::array();
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (page_number && doc.pages[i]->index != core::Num(*page_number)) continue;
+            if (doc.is_deferred(i)) continue;
+            core::Json one = render::layer_comps::listing(doc.page(i));
+            one["page"] = doc.pages[i]->index.json();
+            pages.push_back(std::move(one));
+        }
+        if (page_number && pages.empty()) throw core::Error("key", "no page " + std::to_string(*page_number));
+        print_json(core::Json{{"pages", std::move(pages)}}, ascii);
+        return 0;
     }
     if (paths) {  // (vector@1: the pages' paths, work paths, clipping paths and the layers' vector masks and shapes)
         print_json(render::path_info::book_paths(loaded.document, page_number), ascii);
@@ -794,6 +813,77 @@ int export_ai(const Arguments& a, bool ascii) {
     return 0;
 }
 
+// PC5 J-a (file.export.layerCompsToFiles, レイヤーカンプからファイル…, the C++ build's own): `genko export <book> <folder> --format
+// comps [--page N] [--comp-format png|jpg|psd|…] [--prefix P] [--comps ID,ID…] [--quality 0..12] [--json]` — page N's layer
+// comps (1 by default; every one, or those named), each applied to a copy of the book and written as one file in the
+// folder (formats::export_layer_comps); the paths one a line, or with --json {"ok": true, "count", "files"}.
+int export_comps(const Arguments& a, bool ascii) {
+    std::int64_t wanted = 1;
+    if (const auto value = a.value("--page")) {
+        const auto n = int_option(*value);
+        if (!n) return usage("genko export: argument --page: invalid int value: " + core::py_repr_str(value->toStdString()));
+        wanted = *n;
+    }
+    formats::CompFiles files;
+    if (const auto f = a.value("--comp-format")) {
+        files.extension = f->toLower().toStdString();
+        const auto exts = formats::copy_extensions();
+        if (std::find(exts.begin(), exts.end(), files.extension) == exts.end()) return usage("genko export: argument --comp-format: not a format this build writes: " + files.extension);
+    }
+    if (const auto prefix = a.value("--prefix")) files.prefix = prefix->toStdString();
+    if (const auto ids = a.value("--comps")) {
+        for (const QString& part : ids->split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+            const auto n = int_option(part.trimmed());
+            if (!n) return usage("genko export: argument --comps: the comps' ids, e.g. 1,3");
+            files.comps.push_back(*n);
+        }
+    }
+    if (const auto q = a.value("--quality")) {
+        bool ok = false;
+        const int v = q->toInt(&ok);
+        if (!ok || v < 0 || v > 12) return usage("genko export: argument --quality: an integer 0..12");
+        files.options.quality = v;
+    }
+    const fs::path src = path_arg(a.positional[0]);
+    const fs::path out = path_arg(a.positional[1]);
+    const auto loaded = storage::load_document(src);
+    const core::Document& doc = loaded.document;
+    std::optional<std::size_t> at;
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.pages[i]->index == core::Num(wanted) && !doc.is_deferred(i)) at = i;
+    }
+    if (!at) return usage("no page " + std::to_string(wanted), 1);
+    // (the coordinator's P3-8: never into the book or over a file it links)
+    const formats::WriteGuard guard = formats::write_guard(doc, src);
+    try {
+        formats::check_target(guard, out);
+    } catch (const core::Error& error) {
+        return usage(std::string("genko export: ") + error.what());
+    }
+    files.check = [guard](const fs::path& file) { formats::check_target(guard, file); };
+    fs::create_directories(out);
+    std::vector<formats::CopyResult> written;
+    try {
+        written = formats::export_layer_comps(doc, *at, out, files);
+    } catch (const core::Error& error) {
+        if (std::string_view(error.code()) == "refused_target") return usage(std::string("genko export: ") + error.what());
+        if (std::string_view(error.code()) == "value") return fail(error.what(), "export", ascii, 1);
+        throw;
+    }
+    core::Json listed = core::Json::array();
+    std::string lines;
+    for (const formats::CopyResult& r : written) {
+        listed.push_back(core::path_to_utf8(r.file));
+        lines += core::path_to_utf8(r.file) + "\n";
+    }
+    if (a.flag("--json")) {
+        print_json(core::Json{{"ok", true}, {"count", written.size()}, {"files", listed}}, ascii);
+    } else {
+        write_text(lines, stdout);
+    }
+    return 0;
+}
+
 // `genko export <book> <out> [--format F] [options]` (Python's export command, genko/__main__.py): the book written
 // out in one format; the paths of the files one a line, or with --json {"ok": true, "count", "files"}.
 int export_command(const QStringList& args, bool ascii) {
@@ -804,7 +894,9 @@ int export_command(const QStringList& args, bool ascii) {
                                           {"--psd-text", true},   {"--rasterize-unsupported", false}, {"--lut-size", true},
                                           {"--title", true},      {"--paths", true},
                                           // (PC4 F-c, --format layers: レイヤーからファイル…'s choices)
-                                          {"--layer-format", true}, {"--prefix", true}, {"--visible-only", true}, {"--quality", true}};
+                                          {"--layer-format", true}, {"--prefix", true}, {"--visible-only", true}, {"--quality", true},
+                                          // (PC5 J-a, --format comps: レイヤーカンプからファイル…'s choices)
+                                          {"--comp-format", true}, {"--comps", true}};
     Arguments a;
     if (auto error = parse_arguments(args, kOptions, 2, "src, out", a)) return usage("genko export: " + *error);
     // PC2a (file.export.colorLookupTables, the C++ build's own: not among Python's formats, whose choices it leaves as they
@@ -812,6 +904,9 @@ int export_command(const QStringList& args, bool ascii) {
     if (a.value("--format") == std::optional<QString>(QStringLiteral("cube"))) return export_cube(a, ascii);
     // vector@1 (PC3 C-a, file.export.pathsToIllustrator, the C++ build's own): a page's paths as an Illustrator file
     if (a.value("--format") == std::optional<QString>(QStringLiteral("ai"))) return export_ai(a, ascii);
+    // PC5 J-a (file.export.layerCompsToFiles, the C++ build's own): a page's layer comps, a file each
+    if (a.value("--format") == std::optional<QString>(QStringLiteral("comps"))) return export_comps(a, ascii);
+    if (a.value("--comp-format") || a.value("--comps")) return usage("genko export: argument --comp-format, --comps: only with --format comps");
     if (a.value("--paths")) return usage("genko export: argument --paths: only with --format ai");
     if (a.value("--lut-size") || a.value("--title")) return usage("genko export: argument --lut-size, --title: only with --format cube");
     // (PC4 F-c: レイヤーからファイル…'s choices, only with --format layers; none of them: the files as before)

@@ -17,6 +17,7 @@
 #include "core/pyops.hpp"
 #include "core/error.hpp"
 #include "core/file_info.hpp"
+#include "core/groups.hpp"
 #include "core/ids.hpp"
 #include "core/ink.hpp"
 #include "core/raw_develop.hpp"
@@ -458,6 +459,11 @@ Opened open_psd(std::string_view bytes, const std::string& file, const OpenOptio
             std::string names;
             for (const Json& n : report["skipped"]) names += (names.empty() ? "" : "、") + (n.is_string() ? n.get<std::string>() : std::string());
             notes.push_back("この版で読めないレイヤーは開きませんでした（" + names + "）");
+        }
+        if (report.contains("groups_as_folders")) {  // (groups@1, PC5 I-b: nested past core::kGroupDepthMax)
+            std::string names;
+            for (const Json& n : report["groups_as_folders"]) names += (names.empty() ? "" : "、") + (n.is_string() ? n.get<std::string>() : std::string());
+            notes.push_back("グループの入れ子が深すぎるため、" + std::to_string(core::kGroupDepthMax) + " 段より深いものはグループとして描かないフォルダーにしました（" + names + "）");
         }
         if (report.contains("psd_blocks_cut")) notes.push_back("PSD の塊の一部は、多すぎるか大きすぎるため保てませんでした");
         // (PC4 D7: Photoshop's smart filters — read as Genko's, or the smart objects left as Photoshop's picture: at most 8

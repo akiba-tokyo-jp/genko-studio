@@ -375,7 +375,8 @@ Json check_native_type(const Json& raw, std::string_view text) {
         if (!v->is_array() || v->size() != 6) bad("native_type transform must be [a, b, c, d, e, f]");
         Json m = Json::array();
         for (const Json& x : *v) m.push_back(num(number_of(x, "native_type transform", -1e6, 1e6)));
-        const double det = (*v)[0].get<double>() * (*v)[3].get<double>() - (*v)[1].get<double>() * (*v)[2].get<double>();
+        // (as kept — 4 decimals —: what the reader checks again; review P3-11)
+        const double det = m[0].get<double>() * m[3].get<double>() - m[1].get<double>() * m[2].get<double>();
         if (std::abs(det) < 1e-9) bad("native_type transform must not squash the text flat");
         out["transform"] = std::move(m);
     }
@@ -898,8 +899,27 @@ StoryLine line_of(const Layer& layer, const Num& page_index) {
     return out;
 }
 
+std::optional<std::array<double, 6>> transform_of(const StoryLine& record) {
+    if (!record.native_type || !record.native_type->is_object()) return std::nullopt;
+    const auto it = record.native_type->find("transform");
+    if (it == record.native_type->end() || !it->is_array() || it->size() != 6) return std::nullopt;
+    std::array<double, 6> t{};
+    for (std::size_t i = 0; i < 6; ++i) {
+        if (!(*it)[i].is_number()) return std::nullopt;
+        t[i] = (*it)[i].get<double>();
+    }
+    return t;
+}
+
 StoryLine moved(const StoryLine& record, double dx, double dy) {
     StoryLine out = record;
+    if (const std::optional<std::array<double, 6>> t = transform_of(record)) {
+        // (PC5 G-a: a record its matrix turns moves by its matrix — where its letters are set stays)
+        Json nt = *out.native_type;
+        nt["transform"] = Json::array({num((*t)[0]), num((*t)[1]), num((*t)[2]), num((*t)[3]), num((*t)[4] + dx), num((*t)[5] + dy)});
+        out.native_type = std::move(nt);
+        return out;
+    }
     const auto shift = [&](Num& v, double d) { v = Num(v.value() + d); };
     shift(out.x_mm, dx);
     shift(out.y_mm, dy);
@@ -933,6 +953,13 @@ StoryLine moved(const StoryLine& record, double dx, double dy) {
         anchor = Json::array({num(anchor[0].get<double>() + dx), num(anchor[1].get<double>() + dy)});
     }
     return out;
+}
+
+void move_anchor(StoryLine& record, double dx, double dy) {
+    if (!record.native_type || !record.native_type->is_object() || (dx == 0 && dy == 0)) return;
+    const auto it = record.native_type->find("anchor_mm");
+    if (it == record.native_type->end() || !it->is_array() || it->size() != 2 || !(*it)[0].is_number() || !(*it)[1].is_number()) return;
+    *it = Json::array({num((*it)[0].get<double>() + dx), num((*it)[1].get<double>() + dy)});
 }
 
 std::shared_ptr<const StoryLine> shared_record(StoryLine record) { return std::make_shared<const StoryLine>(std::move(record)); }
@@ -993,7 +1020,12 @@ void validate_type(const Document& doc) {
         }
         bad("the book's type_styles are not in their normal form");
     }
-    for (const StoryLine& line : doc.story) record_ok(line, "the line " + line.id);
+    for (const StoryLine& line : doc.story) {
+        record_ok(line, "the line " + line.id);
+        // (PC5 G-a: a line stays upright — turned, scaled or bent, it is a type layer's matrix)
+        if (line.native_type && line.native_type->is_object() && line.native_type->contains("transform"))
+            bad("the line " + line.id + " stays upright: its native_type holds no transform (a type layer's does)");
+    }
     for (const smart::WrittenPage& written : smart::written_pages(doc)) {
         for (const Layer& layer : written.page->layers) {
             if (!is_type_layer(layer)) {

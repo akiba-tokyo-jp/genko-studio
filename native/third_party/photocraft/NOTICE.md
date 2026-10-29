@@ -285,6 +285,8 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - 文字の土台（PC5 G-0）:
   - `crates/doc/src/text.rs`（52-197 行: `CharStyle`・`ParagraphStyle` の属性と既定、`TextAlign`・`TextDirection`）と `crates/engine/src/type_extra_cmds.rs`（106-123 行: アンチエイリアスの方法の名前）: 文字と段落の属性の名前と既定 → `native/src/core/type_text.cpp`（`kCharAttrs`・`kParaAttrs`・`char_defaults`・`para_defaults`。長さを mm にし、範囲を決め、Genko の書式の鍵 — 語ごとの倍率・太さの段・縦中横・約物の詰め・禁則 — を足した所は Genko のもの）。
   - `crates/doc/src/text_styles.rs`（182-236 行: `resolve_para`・`resolve_char`）: スタイルを解く順（基本段落 → 段落スタイル → 文字スタイル → 上書き）→ `native/src/core/type_text.cpp`（`resolve_para`・`resolve_chars`。上書きを違う所だけで持ち、台詞の書式と書記素の範囲・段落の番号で解く所は Genko のもの）。
+- 文字レイヤーと文字ツール（PC5 G-a）:
+  - `crates/text/src/render.rs`（180 行: アンチエイリアス なし は被覆 0.5 で 2 値）・`crates/engine/src/type_extra_cmds.rs`（106-123 行: なし だけ描き方が変わり、ほかは名前を持つ。137-192 行: ポイントテキスト ⇄ 段落テキストの変換。361-377 行: Lorem ipsum の文）・`crates/engine/src/type_cmds.rs`（308-350 行: 範囲の置き換え、373 行: 本文からのレイヤーの名前）: 決まり → `native/src/render/text/lettering.cpp`（`binarized`・置き方）・`native/src/render/ops_type.cpp`（`add_type_layer`・`edit_type`・`to_point`・`to_box`）・`native/src/app/main_window_type.cpp`（`paste_lorem`）。基準点・枠からの置き方（縦組み・揃え）、書記素の位置、ルビ・フキダシ、行列での描き方、和文の仮の文は Genko のもの。
 
 ## レイヤー・アートボード・自動処理（PC5 節 I）
 
@@ -292,6 +294,9 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/automate_cmds.rs`（48-112 行: `parse_script`・`parse_steps` — 手順の JSON と 1 行 1 コマンドの文、141-260 行: スクリプトイベントの表と `firing`）→ `native/src/service/automate.cpp`（`read_steps`。上流のコマンド id と引数を Genko の op の JSON に読み替え、行の番号を付けた誤り、断る op の確かめ、擬似 op、承認できない actor は MCP の op だけ、は Genko のもの）・`native/src/service/script_events.cpp`（イベントの名前。表を画面だけが書きハッシュで外の書き換えを止めること、スクリプトのファイルの sha256、MCP・HTTP・CLI では起こさないことは Genko のもの）。
   - `crates/engine/src/file_cmds.rs`（516-529 行: `fit_image`、589-651 行: バッチの入力と 1 ファイルずつの処理）→ `native/src/service/automate.cpp`（`fit_image` は `resize_pages` に直す擬似 op。入力の列挙・書き先・同じ名前の番号・エラーで続ける・中止は Genko のもの。画像は 1 ページの本として開き、書くのはコピーを保存の書き手）。
   - `crates/engine/src/automate_cmds/tests.rs` の試験の考え（手順の形・イベントの起こし方）→ `native/tests/unit/test_automate.cpp`。
+- グループとフレーム（PC5 I-b、groups@1）:
+  - `crates/compose/src/lib.rs`（511-560 行: グループの中を何も無い上に描く `render_content`、824-878 行: 通過のグループ — 前と後の間を不透明度 × マスクで混ぜる式）→ `native/src/render/page.cpp`（`ColorGroups`・`InkGroups`。8 bit・高精度・インキの 3 つの道への配線、帯ごとの描画、グループにクリップしたレイヤーをグループの形で切ることは Genko のもの）・`native/src/render/color_canvas.cpp`・`native/src/render/ink_canvas.cpp`（`mix_back`）。`crates/compose/src/tests.rs`（137-170 行: 通過と分離の違い・不透明度は 1 回・通過の不透明度の混ぜ）の試験の考え → `native/tests/unit/test_groups.cpp`。
+  - `crates/engine/src/frame_cmds.rs`（1-60 行: レイヤーからのフレーム — まとめて外接の長方形で切る）→ `native/src/render/ops_groups.cpp`（`frame_from_layers`。上流の画素のマスクの代わりにベクトルマスクにしたのは Genko のもの）。
 
 ## 表示・窓・環境設定（PC5 節 H）
 
@@ -302,3 +307,16 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/proof_sim.rs`（75-110 行: `HdrPreview` — 方法・露光量 −20〜20・ガンマ 0.1〜9.99 と 0・1 で何もしないこと、265-284 行: `preview_32` の引数と範囲）→ `native/src/render/hdr_preview.cpp`（0..1 に切る前の値に当てること、ハイライト圧縮の式、グレー・インキの道は Genko のもの）。
   - `crates/ui-egui/src/view_cmds.rs`（546-580 行: 200%・プリントサイズと `fit_layers` — 選んだレイヤーの範囲を 20 画素空けて画面に）→ `native/src/app/main_window_view.cpp`（`fit_layers`）・`native/src/app/canvas.cpp`（`fit_box`）。`crates/ui-egui/src/menu_catalog.rs`（642-701 行: 表示 の項目の名前と並び、スクリーンモードの 3 つ）→ `native/src/app/main_window_view.cpp`。
   - `crates/gpu/tests/parity.rs`（GPU と CPU が 1/255 以内という許し）の考え → `native/tests/gui/test_gui_canvas.cpp`（`theCardShowsWhatTheProcessorDraws`。Genko は表示の一致）。
+
+## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1、PC5 節 J）
+
+- 土台（PC5 J-0）: ページに持つ形（Genko はページの mm で持つ）。
+  - `crates/doc/src/comps.rs`（1-110 行: `CompLayerState`・`CompAppearance`・`LayerComp` の 3 つの旗）→ `native/src/core/layer_comps.{hpp,cpp}`
+  - `crates/doc/src/slices.rs`（1-160 行: `SliceOrigin`・`SliceKind`・`Slice`・`Slices`）→ `native/src/core/slices.{hpp,cpp}`
+  - `crates/doc/src/analysis.rs`（1-146 行: `MeasurementScale`・`CountGroup`・`Ruler`・`Measurement`・`Note`）→ `native/src/core/measure.{hpp,cpp}`・`native/src/core/annotations.{hpp,cpp}`
+  - `crates/doc/src/video.rs`（54-90 行: `Timeline` の作業範囲）→ `native/src/core/video.{hpp,cpp}`（ビデオの行の形は Genko のもの）
+- レイヤーカンプ（PC5 J-a）:
+  - `crates/doc/src/comps.rs`（66-107 行: `missing_layers`・`position_bounds`・`layer_position`・`capture_states`・`next_comp_id`）と `crates/engine/src/comps_cmds.rs`（70-100 行: `apply_comp`、102-410 行: `layerComp.*` の new・update・apply・next・previous・delete・duplicate・rename・setComment・setOptions・restoreLastDocumentState・updateWarnings・list、410-432 行: `comps_to_files` のファイル名）→ `native/src/render/ops_layer_comps.{hpp,cpp}`（op の名前と引数・位置を mm と作業の 200 dpi の外接で持つこと・層ごとに動かすこと・警告のクリアを op にすることは Genko のもの）・`native/src/formats/copy.cpp`（`export_layer_comps`）。`crates/engine/src/comps_cmds/tests.rs` の試験の考え → `native/tests/unit/test_layer_comps.cpp`。
+  - `crates/io/src/comps_map.rs`（124-310 行: `parse_cmls`・`comps_from_psd`・`write_comps_resource`・`write_cmls`・`set_cmls`）と `crates/psd/src/metadata.rs`（`parse_shmd`・`write_shmd`）→ `native/src/render/psd_comps.{hpp,cpp}`・`native/src/render/psd_production.cpp`（`shmd_items`・`shmd_bytes`・`layer_shmd`。読んだバイトのまま書くかを指紋で決めること・lyid を付けることは Genko のもの）。
+  - `crates/format/src/manifest.rs`（99-130 行: `LayerCompM`・`CompStateM`・`CompAppearanceM`）と `crates/format/src/convert.rs`（238-265 行: `comp_m`、324-345 行: `Loader::comp`）→ `native/src/render/pcraft_comps.{hpp,cpp}`。
+  - `crates/ui-egui/src/comps_ui.rs`（パネルの行と下のボタン）→ `native/src/app/layer_comps_panel.{hpp,cpp}`（Qt で作り直した）。

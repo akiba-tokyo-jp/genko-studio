@@ -197,6 +197,11 @@ genko_library(genko_app
     main_window_automate.cpp
     # PC5 G-0 (書式 メニュー)
     main_window_type.cpp
+    # PC5 J-0: the production's frames (解析 ▸, ビデオレイヤー ▸, its panels)
+    main_window_production.cpp
+    # PC5 J-a (layer-comps@1: ウィンドウ → レイヤーカンプ, レイヤーカンプからファイル…)
+    main_window_layer_comps.cpp
+    layer_comps_panel.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

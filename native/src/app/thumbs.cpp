@@ -15,6 +15,8 @@
 #include "app/config.hpp"
 #include "app/frame_tools.hpp"
 #include "core/channels.hpp"
+#include "core/groups.hpp"
+#include "core/vector.hpp"
 #include "core/json.hpp"
 #include "core/paths.hpp"
 #include "core/strokes.hpp"
@@ -89,6 +91,7 @@ std::string page_fingerprint(const core::Document& doc, const core::Page& page) 
         h.add(look);
         h.add_bytes(channel.raster, &channel.memo);
     }
+    const bool grouped = core::has_groups(page.layers);  // (groups@1)
     for (const core::Layer& layer : page.layers) {
         Json look = Json::object();
         look["id"] = layer.id;
@@ -113,6 +116,10 @@ std::string page_fingerprint(const core::Document& doc, const core::Page& page) 
         look["adjust"] = opt(layer.adjust);
         look["effect"] = opt(layer.effect);
         look["screen"] = opt(layer.screen);
+        // (groups@1, PC5 I-b: drawn as a group, or in one — said only on a page of groups, so a page of none keeps its key)
+        if (layer.group) look["group"] = true;
+        if (grouped) look["parent_id"] = layer.parent_id;
+        if (grouped && layer.vector_mask) look["vector_mask"] = core::vector::to_json(*layer.vector_mask);
         look["finish"] = opt(layer.finish);
         look["color"] = layer.color ? Json(*layer.color) : Json(nullptr);
         if (layer.fill_rgb) {

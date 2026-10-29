@@ -100,7 +100,8 @@ bool same_layer_look(const core::Layer& a, const core::Layer& b) {
            a.screen == b.screen && a.asset == b.asset && a.region.has_value() == b.region.has_value() && a.angle == b.angle &&
            a.smart == b.smart &&  // (smart-objects@1: its matrix and settings)
            a.style == b.style &&  // (layer-styles@1, PC4 E6: its style)
-           a.shapes == b.shapes && a.vector_mask == b.vector_mask;  // (pen-shapes@1: its shape parts, a list made anew when changed; vector@1)
+           a.shapes == b.shapes && a.vector_mask == b.vector_mask &&  // (pen-shapes@1: its shape parts, a list made anew when changed; vector@1)
+           a.group == b.group && a.parent_id == b.parent_id;  // (groups@1, PC5 I-b: drawn as a group, or in one)
 }
 
 // smart-objects@1 (PC3 A1): the contents the page's smart objects show — and those inside them — are the same in both

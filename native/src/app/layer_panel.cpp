@@ -17,6 +17,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSlider>
+#include <QStandardItemModel>
 #include <QStyle>
 #include <QStyledItemDelegate>
 #include <QVBoxLayout>
@@ -32,6 +33,7 @@
 #include "app/layer_dialogs.hpp"
 #include "app/main_window.hpp"
 #include "app/patterns_panel.hpp"
+#include "core/groups.hpp"
 #include "core/patterns.hpp"
 #include "app/preferences.hpp"
 #include "app/theme.hpp"
@@ -58,7 +60,7 @@ QString kind_name(core::LayerKind kind) {
     switch (kind) {
     case core::LayerKind::Strokes: return QStringLiteral("ペンのレイヤー");
     case core::LayerKind::Raster: return QStringLiteral("ペイントのレイヤー");
-    case core::LayerKind::Folder: return QStringLiteral("フォルダ");
+    case core::LayerKind::Folder: return QStringLiteral("フォルダ");  // (a group: kind_name's caller says グループ)
     case core::LayerKind::Placed: return QStringLiteral("画像");
     case core::LayerKind::Tone: return QStringLiteral("トーン");
     case core::LayerKind::Fill: return QStringLiteral("塗り");
@@ -182,6 +184,7 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     blend_ = new QComboBox;
     blend_->setObjectName(QStringLiteral("layer_blend"));
     for (const auto& [key, label] : blend_modes()) blend_->addItem(label, QString::fromStdString(key));
+    blend_->addItem(QStringLiteral("通過"), QStringLiteral("pass_through"));  // (PC5 I-b, groups@1: a group's only)
     connect(blend_, &QComboBox::activated, this, [this](int) {
         const auto [page, layer] = this->layer();
         const std::string blend = blend_->currentData().toString().toStdString();
@@ -210,6 +213,9 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
                       QStringLiteral("線を、描き始めたコマの枠で切ります（となりのコマにはみ出さない）。外すと、どのコマの中にも描けます"));
     draft_ = box(QStringLiteral("下描き（書き出さない）"), "layer_draft", [this](bool on) { set("exportable", !on); },
                  QStringLiteral("画面には見えますが、書き出し・印刷には出ません"));
+    group_ = box(QStringLiteral("グループとして描く"), "layer_group", [this](bool on) { draw_as_group(on); },
+                 QStringLiteral("フォルダーを Photoshop のグループとして描きます（隠すと中も隠れ、不透明度・描画モード・マスクが中にかかります）。"
+                                "外すと、前と同じに中のレイヤーをそのまま描きます"));
     reference_ = box(QStringLiteral("参照にする"), "layer_reference", [this](bool on) { set("reference", on); },
                      QStringLiteral("塗りつぶしの「見る範囲: 参照レイヤー」で、このレイヤーの線を見て塗ります。線画を参照にすれば、塗りは別のレイヤーに入れられます"));
     tint_ = new QComboBox;
@@ -387,7 +393,7 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     props->addRow(QStringLiteral("不透明度"), opacity_);
     props->addRow(QStringLiteral("合成"), blend_);
     dl->addLayout(props);
-    for (QCheckBox* b : {clip_, protect_, locked_, each_panel_, overhang_, draft_, reference_}) dl->addWidget(b);
+    for (QCheckBox* b : {clip_, protect_, locked_, each_panel_, overhang_, draft_, reference_, group_}) dl->addWidget(b);
     dl->addWidget(tint_);
     dl->addLayout(row({mask_button_, effect_button_}));
     auto* frow = new QHBoxLayout;
@@ -450,6 +456,8 @@ void LayerPanel::refresh() {
             QStringList marks;
             if (!layer.exportable && layer.role != core::LayerRole::Name && layer.role != core::LayerRole::Draft) marks << QStringLiteral("下描き");
             if (layer.reference) marks << QStringLiteral("参照");
+            // (PC5 I-b, groups@1: a folder that is not drawn as a group — what it holds drawn as it is)
+            if (layer.kind == core::LayerKind::Folder && !layer.group) marks << QStringLiteral("まとめるだけ");
             if (layer.mask) marks << (layer.mask->linked ? QStringLiteral("マスク（リンク）") : QStringLiteral("マスク"));  // (PC3 B2: masks@1)
             if (layer.shapes && !layer.shapes->items.empty()) marks << QStringLiteral("形 %1").arg(layer.shapes->items.size());  // (pen-shapes@1)
             if (layer.locked) marks << QStringLiteral("ロック");
@@ -483,8 +491,9 @@ void LayerPanel::refresh() {
             auto* item = new QListWidgetItem(indent + wording::layer_label(layer) + (marks.isEmpty() ? QString() : QStringLiteral("　· ") + marks.join(QStringLiteral(" · "))));
             item->setData(Qt::UserRole + 2, meta.join(QStringLiteral(" · ")));
             item->setData(Qt::UserRole + 3, indent + wording::layer_label(layer));  // (the name alone: the marks go right)
-            item->setToolTip(psd_effects ? kind_name(layer.kind) + QStringLiteral("\nPSD のレイヤー効果は Genko では描きません（PSD に書き戻すと Photoshop が描きます）")
-                                         : kind_name(layer.kind));
+            const QString kind = core::is_group(layer) ? QStringLiteral("グループ") : kind_name(layer.kind);  // (PC5 I-b)
+            item->setToolTip(psd_effects ? kind + QStringLiteral("\nPSD のレイヤー効果は Genko では描きません（PSD に書き戻すと Photoshop が描きます）")
+                                         : kind);
             // its picture, or (nothing drawn yet) a quiet mark of its kind; every row the same height
             const QIcon picture = thumbnail(*page, layer);
             item->setIcon(picture.isNull() ? kind_mark(layer.kind) : picture);
@@ -621,6 +630,13 @@ void LayerPanel::selected(bool from_list) {
     each_panel_->setEnabled(layer->panel_clip);
     draft_->setChecked(!layer->exportable);
     reference_->setChecked(layer->reference);
+    // (PC5 I-b, groups@1: a folder's グループとして描く; 通過 a group's blend only)
+    group_->setVisible(layer->kind == core::LayerKind::Folder);
+    group_->setChecked(core::is_group(*layer));
+    if (auto* modes = qobject_cast<QStandardItemModel*>(blend_->model())) {
+        const int pass = blend_->findData(QStringLiteral("pass_through"));
+        if (pass >= 0) modes->item(pass)->setEnabled(core::is_group(*layer));
+    }
     draft_->setEnabled(layer->role != core::LayerRole::Name && layer->role != core::LayerRole::Draft);  // (those never print)
     int tint = 0;
     if (layer->color && !layer->color->empty())
@@ -704,6 +720,7 @@ void LayerPanel::add(const std::string& kind, const QString& title) {
     if (page == nullptr) return;
     const std::string id = core::new_id();
     Json op{{"op", "add_layer"}, {"page", page->index.json()}, {"kind", kind}, {"name", title.toStdString()}, {"id", id}};
+    if (kind == "folder") op["group"] = true;  // (PC5 I-b, the user's decision 2: a new folder is drawn as a group, 通過)
     if (layer != nullptr) op["after"] = layer->id;  // just in front of the chosen layer
     if (window_->apply_ops(Json::array({op})) && kind != "folder") {
         window_->set_target_layer(id);
@@ -832,7 +849,25 @@ void LayerPanel::group_selected() {
     const auto ids = several(1);
     const core::Page* page = window_->current_page();
     if (ids && page != nullptr)
-        window_->apply_ops(Json::array({Json{{"op", "group_layers"}, {"page", page->index.json()}, {"ids", *ids}, {"id", core::new_id()}, {"name", "フォルダ"}}}));
+        window_->apply_ops(Json::array({Json{{"op", "group_layers"}, {"page", page->index.json()}, {"ids", *ids}, {"id", core::new_id()}, {"name", "フォルダ"},
+                                             {"group", true}}}));  // (PC5 I-b, the user's decision 2: a group, 通過)
+}
+
+void LayerPanel::frame_selected() {
+    const auto ids = several(1);
+    const core::Page* page = window_->current_page();
+    if (ids && page != nullptr)
+        window_->apply_ops(Json::array({Json{{"op", "frame_from_layers"}, {"page", page->index.json()}, {"ids", *ids}, {"id", core::new_id()}}}));
+}
+
+void LayerPanel::draw_as_group(bool on) {
+    const auto [page, layer] = this->layer();
+    if (layer == nullptr || loading_ || layer->kind != core::LayerKind::Folder || core::is_group(*layer) == on) return;
+    // (1 手: on, 通過 when its blend is 通常 — what it holds drawn as before, now hidden with it and under its opacity and
+    // mask; a blend of its own, a PSD's read before, kept: what it holds drawn alone. Off, as before: its blend kept, 通過 通常)
+    Json op{{"op", "set_layer"}, {"page", page->index.json()}, {"id", layer->id}, {"group", on}};
+    if (on && (layer->blend.empty() || layer->blend == "normal")) op["blend"] = "pass_through";
+    window_->apply_ops(Json::array({op}));
 }
 
 void LayerPanel::set_selected(const Json& fields) {
@@ -958,6 +993,10 @@ void LayerPanel::edit_special() {
     if (layer == nullptr) return;
     if (layer->kind == core::LayerKind::Smart) {  // (smart-objects@1: レイヤーの内容オプション… — its contents)
         window_->content_options();
+        return;
+    }
+    if (layer->kind == core::LayerKind::Type) {  // (PC5 G-a: its text typed over in place, as Photoshop's double click on the T)
+        window_->edit_type_layer_inline(layer->id);
         return;
     }
     const auto asked = window_->asking();  // (each dialog's answer applied only to the book it was asked about)

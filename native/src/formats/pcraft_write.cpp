@@ -16,6 +16,7 @@
 #include <thread>
 #include <utility>
 
+#include "core/groups.hpp"
 #include "core/adjust.hpp"
 #include "core/channels.hpp"
 #include "core/color_model.hpp"
@@ -40,6 +41,7 @@
 #include "render/ink_canvas.hpp"
 #include "render/page.hpp"
 #include "render/pcraft_manifest.hpp"
+#include "render/pcraft_production.hpp"
 #include "render/png.hpp"
 #include "render/shape_parts.hpp"
 #include "render/smart_filters.hpp"
@@ -242,6 +244,7 @@ struct Ctx {
     int depth = 0;
     render::RgbSpace space;                                         // (an RGB page's: its profile's, or sRGB)
     std::map<const core::SmartContents*, std::string> written;      // (contents written as a .pcraft inside: its blob, once)
+    std::map<std::string, std::string> layer_ids;                   // (PC5 J-a: a layer's id → its first layer's id in the document)
 
     void note(const std::string& text) {
         if (said.insert(text).second) notes.push_back(text);
@@ -728,6 +731,7 @@ Json layer_json(Ctx& ctx, const std::string& name, const core::Layer* layer, Jso
              {"fill_cache", nullptr},
              {"link_group", nullptr}};
     if (layer != nullptr) {
+        ctx.layer_ids.emplace(layer->id, out["id"].dump());  // (PC5 J-a: the layer comps' states name it so)
         if (layer->mask && layer->mask->png && !layer->mask->png->empty()) out["mask"] = mask_json(ctx, *layer->mask);
         if (layer->vector_mask) out["vector_mask"] = pc::vector_mask_json(*layer->vector_mask, ctx.px);
         if (layer->link) {
@@ -1011,11 +1015,13 @@ std::vector<Json> grouped(Ctx& ctx, std::vector<Out> flat) {
             const core::Layer* f = find_layer(ctx.page, folder);
             Json content{{"kind", "group"}, {"children", std::move(children)}, {"expanded", true}, {"artboard", nullptr}};
             Json group = layer_json(ctx, f != nullptr ? title_of(*f) : std::string("フォルダー"), f, std::move(content), nullptr);
-            group["blend"] = "PassThrough";
-            group["opacity"] = 1.0;
-            group["clipped"] = false;
-            group["mask"] = nullptr;
-            group["vector_mask"] = nullptr;
+            if (f == nullptr || !f->group) {  // (a folder that is not a group draws as 通過 with nothing of its own; groups@1: a group's own)
+                group["blend"] = "PassThrough";
+                group["opacity"] = 1.0;
+                group["clipped"] = false;
+                group["mask"] = nullptr;
+                group["vector_mask"] = nullptr;
+            }
             out.push_back(std::move(group));
         }
         return out;
@@ -1035,6 +1041,7 @@ Json document_json(Ctx& ctx) {
     std::set<std::string> patterns;
     std::vector<Out> flat;
     std::size_t next = 0;  // (the page's layers written so far, page_layers' or hidden)
+    const std::vector<std::optional<std::size_t>> owners = core::group_owners(page.layers);  // (groups@1: made once)
     const auto hidden_until = [&](std::size_t index) {
         for (; next < index && next < page.layers.size(); ++next) {
             const core::Layer& l = page.layers[next];
@@ -1044,7 +1051,7 @@ Json document_json(Ctx& ctx) {
             const bool pen = l.kind == core::LayerKind::Strokes && l.role != core::LayerRole::Tone && (l.stroke_count() > 0 || !l.patches.empty()) &&
                              !render::shape_parts::any(l) && !(l.raster_png && !l.raster_png->empty()) && !l.color_raster && !l.ink_raster;
             // (and a smart object page_layers gives no picture of — its file not in the book —: written, and said)
-            const bool unseen = !l.visible || pen || l.kind == core::LayerKind::Smart || (l.kind == core::LayerKind::Fill && l.fill && core::pattern_of_fill(*l.fill) == nullptr);
+            const bool unseen = !core::shown_in_groups(page.layers, next, owners) || pen || l.kind == core::LayerKind::Smart || (l.kind == core::LayerKind::Fill && l.fill && core::pattern_of_fill(*l.fill) == nullptr);  // (groups@1: in a hidden group too)
             if (!unseen || l.kind == core::LayerKind::Folder || !l.exportable || l.role == core::LayerRole::Name || l.role == core::LayerRole::Draft) continue;
             if (auto made = layer_of(ctx, l, nullptr, patterns)) flat.push_back(Out{std::move(*made), folder_of(l)});
         }
@@ -1261,6 +1268,17 @@ Json document_json(Ctx& ctx) {
             inks.push_back(Json{{"name", ink.name}, {"color", Json::array({ink.color[0] / 255.0, ink.color[1] / 255.0, ink.color[2] / 255.0})}, {"curve", std::move(curve)}});
         }
         doc["duotone"] = Json{{"inks", std::move(inks)}, {"psd_raw", nullptr}};
+    }
+    // PC5 節 J (render/pcraft_production): the page's layer comps, notes, slices, timeline and measuring — each by its group's
+    // row (none written until then)
+    {
+        render::pcraft_production::WriteContext production;
+        production.px = ctx.px;
+        production.layers = ctx.layer_ids;  // (PC5 J-a)
+        production.say = [&ctx](std::string note) {
+            if (ctx.said.insert(note).second) ctx.notes.push_back(std::move(note));
+        };
+        render::pcraft_production::write(ctx.page, doc, production);
     }
     return doc;
 }

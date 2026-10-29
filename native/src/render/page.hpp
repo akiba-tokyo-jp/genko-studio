@@ -86,6 +86,9 @@ struct RenderOptions {
     // balloons, the panels' borders, effect lines, the nombre, marks and guides — paints (RenderResult::drawn_over), on a
     // page of precise colour or inks. Not the tones (layers).
     bool drawn_over = false;
+    // groups@1 (PC5 I-b, render/page's own): with contents, only the alpha of what is drawn matters — a group's shape (on a
+    // page of inks, its layers on a clear canvas; the picture "RGBA", black, that alpha).
+    bool shape_only = false;
 };
 
 struct RenderResult {
@@ -230,6 +233,9 @@ struct PageLayer {
     // layer-styles@1 (PC4 E6, review P2-6): the page layer whose style goes with a picture given without its id — a placed
     // picture's, the ink layer's lines (a PSD writes the style with it: lfx2, iOpa, blending ranges); none: by `id`
     const core::Layer* styled = nullptr;
+    // (PC5 J-a) a hidden layer, given when page_layers is asked for them (`hidden_too`: a PSD of a page with layer comps
+    // writes them hidden, so that Photoshop's comps show them)
+    bool hidden = false;
 };
 
 // psd.page_layers(page, episode, dpi), bottom to top: the paper, the page's fills, each visible exported pixel layer
@@ -243,10 +249,17 @@ struct PageLayer {
 // change is in the merged picture only). A pen layer with shape parts (pen-shapes@1, PC3 C-b) is given in its place:
 // with `shapes` (a PSD) as a shape layer of its one part or as a group of its pictures, parts and lines
 // (render/psd_shapes' plan), else (and where a group would not show it the same) as one layer of its look. With `shapes`
-// (a PSD) a pattern fill layer (patterns@1, PC4 E3) is given too, as a layer of its look with its pattern fill.
+// (a PSD) a pattern fill layer (patterns@1, PC4 E3) is given too, as a layer of its look with its pattern fill. (PC5 J-a)
+// `hidden_too`: the hidden exported pixel layers too, in their places, each given `hidden` (a PSD of a page with layer
+// comps: Photoshop's comps show and hide them); a hidden correction layer and the hidden tones still not.
+// groups@1 (PC5 I-b): what a hidden group holds is not given (with `hidden_too`: given, by its own visibility); with
+// `groups` (a PSD) each group given is given as its end (section "end", below what it holds) and itself (section "group",
+// above it: its name, id, settings — its blend pass_through Photoshop's 通過 —, clipping, mask and vector mask; `hidden`
+// when it is).
 void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each,
                  const std::function<void(const core::StoryLine&)>* line_layers = nullptr,
-                 const std::function<void(const core::Layer&)>* adjust_layers = nullptr, bool shapes = false);
+                 const std::function<void(const core::Layer&)>* adjust_layers = nullptr, bool shapes = false, bool hidden_too = false,
+                 bool groups = false);
 
 // Pure black and white: grey above `threshold` is white; with `screen` the greys become a pattern (dot, line, cross or
 // noise; 書き出しでのトーン化).

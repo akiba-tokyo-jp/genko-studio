@@ -394,7 +394,18 @@ private slots:
         // tools' 画面にフィット and スクラブズーム (act_actual_pixels, act_200_percent, act_fit_layers, act_pixel_grid, act_pixel_art,
         // act_32bit_preview, act_hand_tool, act_screen_standard, act_screen_full_menu, act_screen_full, act_screen_next,
         // act_fill_screen, act_scrubby_zoom) — test_gui_view.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{608});
+        // and the 23 frames of PC5 J-0 (SPEC PROD-01) — ページ → 解析 ▸'s 7 (act_measure_*), レイヤー → ビデオレイヤー ▸'s 12
+        // (act_video_*), ウィンドウ's アクション・レイヤーカンプ・計測ログ・注釈 (act_panel_*) — theProductionFramesSayNotYet's.
+        // and the 17 of PC5 G-a (SPEC TEXT-02) — ツール → 横書き文字ツール (act_text_h), 書式 → アンチエイリアス ▸ 7 (act_type_aa_<method>),
+        // 方向 ▸ 横書き・縦書き (act_type_horizontal, act_type_vertical), テキストレイヤーをラスタライズ・ポイントテキストに変換・
+        // 段落テキストに変換・すべてのテキストレイヤーを更新・Lorem Ipsum をペースト (act_type_rasterize, act_type_to_point,
+        // act_type_to_box, act_type_update_all, act_type_lorem), 台詞をテキストレイヤーに・テキストレイヤーを台詞に
+        // (act_line_to_type_layer, act_type_layer_to_line) — theirs (test_gui_type).
+                // and PC5 J-a's ファイル → 書き出し → レイヤーカンプからファイル… (act_comps_to_files; its ウィンドウ → レイヤーカンプ is the
+        // frame's attribute made real) — test_gui_layer_comps.
+        // and the 1 of PC5 I-b (SPEC AUTO-01「グループ」) — レイヤー → 新規 → レイヤーからのフレーム… (act_layer_frame) —
+        // test_gui_layers.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{650});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -434,8 +445,9 @@ private slots:
         // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths); the crop tool (PC3 C-e, test_gui_page_size);
         // PC3 B4's four retouching tools (test_gui_retouch); PC3 C-b's five shape tools besides 長方形ツール (test_gui_shapes)
         // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask); PC4 E1's 鉛筆ツール (test_gui_brushes); PC4 E5's
-        // nine brushes that change pixels (test_gui_paint_tools); PC5 H-a's 手のひらツール (test_gui_view)
-        QCOMPARE(w->tools_group()->actions().size(), 54);
+        // nine brushes that change pixels (test_gui_paint_tools); PC5 H-a's 手のひらツール (test_gui_view); PC5 G-a's
+        // 横書き文字ツール (test_gui_type)
+        QCOMPARE(w->tools_group()->actions().size(), 55);
     }
 
     // PC4 F-0 (SPEC FILE-01; 節 F 5.1・5.2): ファイル in Photoshop's order and names — the book's export is 書き出し ▸
@@ -478,6 +490,7 @@ private slots:
         QCOMPARE(items(exports), (QStringList{QStringLiteral("PNG としてクイック書き出し"), QStringLiteral("書き出し形式…"), QStringLiteral("|"),
                                              QStringLiteral("書き出しの環境設定…"), QStringLiteral("|"), QStringLiteral("Web 用に保存（従来）…"), QStringLiteral("|"),
                                              QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("レイヤーからファイル…"),
+                                             QStringLiteral("レイヤーカンプからファイル…"),  // (PC5 J-a)
                                              QStringLiteral("パスを Illustrator へ…"), QStringLiteral("カラールックアップテーブル…")}));
         // (PC5 H-0: no key in the Photoshop key set — Ctrl+E is 下のレイヤーと結合; Ctrl+E in the Genko set, theKeySets)
         QVERIFY(studio.act("act_export")->shortcuts().isEmpty());
@@ -521,6 +534,102 @@ private slots:
         studio.answers->responder->save_path = where;
         QCOMPARE(studio.doc().revision, revision);
         QCOMPARE(w->documents().size(), books);
+    }
+
+    // PC5 J-0 (SPEC PROD-01; 節 J 5.1・5.3・4.2): the production's frames in Photoshop's places — ページ (イメージ) → 解析 ▸,
+    // レイヤー → ビデオレイヤー ▸ before ラスタライズ ▸, ウィンドウ's アクション・レイヤーカンプ・計測ログ・注釈 —, each saying it is
+    // not in this build yet and changing nothing; the canvas's extras drawn by their painters, shown and hidden by key and
+    // by the master switch.
+    void theProductionFramesSayNotYet() {
+        Studio studio;
+        MainWindow* w = studio.window.get();
+        const auto items = [](QMenu* menu) {
+            QStringList out;
+            for (QAction* a : menu->actions()) {
+                if (a->isSeparator()) out << QStringLiteral("|");
+                else if (a->menu() != nullptr) out << a->menu()->title() + QStringLiteral(" ▸");
+                else out << a->text();
+            }
+            return out;
+        };
+        QMenu* analysis = w->findChild<QMenu*>(QStringLiteral("menu_analysis"));
+        QVERIFY(analysis != nullptr);
+        QCOMPARE(items(analysis), (QStringList{QStringLiteral("計測スケールを設定 ▸"), QStringLiteral("データポイントを選択 ▸"), QStringLiteral("計測値を記録"),
+                                              QStringLiteral("|"), QStringLiteral("ものさしツール"), QStringLiteral("カウントツール"), QStringLiteral("|"),
+                                              QStringLiteral("目盛りマーカーを配置…")}));
+        QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_measure_scale"))), (QStringList{QStringLiteral("初期設定"), QStringLiteral("カスタム…")}));
+        QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_measure_points"))), (QStringList{QStringLiteral("カスタム…")}));
+        QMenu* video = w->findChild<QMenu*>(QStringLiteral("menu_video_layers"));
+        QVERIFY(video != nullptr);
+        QCOMPARE(items(video), (QStringList{QStringLiteral("ファイルから新規ビデオレイヤー…"), QStringLiteral("新規空白ビデオレイヤー"), QStringLiteral("|"),
+                                           QStringLiteral("空白フレームを挿入"), QStringLiteral("フレームを複製"), QStringLiteral("フレームを削除"), QStringLiteral("|"),
+                                           QStringLiteral("フッテージを置き換え…"), QStringLiteral("フッテージを解釈…"), QStringLiteral("|"),
+                                           QStringLiteral("変更されたビデオを表示"), QStringLiteral("フレームを復元"), QStringLiteral("すべてのフレームを復元"),
+                                           QStringLiteral("フレームを再読み込み"), QStringLiteral("|"), QStringLiteral("ラスタライズ")}));
+        QMenu* layers = nullptr;
+        QMenu* window_menu = nullptr;
+        for (QAction* top : w->menuBar()->actions()) {
+            if (top->menu() != nullptr && top->menu()->title() == QStringLiteral("レイヤー")) layers = top->menu();
+            if (top->menu() != nullptr && top->menu()->title() == QStringLiteral("ウィンドウ")) window_menu = top->menu();
+        }
+        QVERIFY(layers != nullptr && window_menu != nullptr);
+        const QStringList in_layers = items(layers);
+        QCOMPARE(in_layers.indexOf(QStringLiteral("ビデオレイヤー ▸")) + 1, in_layers.indexOf(QStringLiteral("ラスタライズ ▸")));
+        const QStringList in_window = items(window_menu);
+        for (const char* panel : {"アクション", "レイヤーカンプ", "計測ログ", "注釈", "タイムライン"}) {
+            QVERIFY2(in_window.contains(QString::fromUtf8(panel)), panel);
+        }
+        // (the smart object's ラスタライズ keeps its own name: the first of the words in the menus)
+        QCOMPARE(studio.act("act_smart_rasterize")->text(), QStringLiteral("ラスタライズ"));
+        const std::int64_t revision = studio.doc().revision;
+        for (const char* name : {"act_measure_scale_default", "act_measure_scale_custom", "act_measure_data_points", "act_measure_record",
+                                 "act_measure_ruler_tool", "act_measure_count_tool", "act_measure_scale_marker", "act_video_from_file", "act_video_blank",
+                                 "act_video_insert_blank", "act_video_duplicate", "act_video_delete", "act_video_replace", "act_video_interpret",
+                                 "act_video_show_altered", "act_video_restore", "act_video_restore_all", "act_video_reload", "act_video_rasterize",
+                                 "act_panel_actions", "act_panel_measurement_log", "act_panel_notes"}) {  // (PC5 J-a: レイヤーカンプ made real)
+            QAction* a = studio.act(name);
+            QVERIFY2(a != nullptr, name);
+            QVERIFY2(!a->statusTip().isEmpty(), name);
+            a->trigger();
+            QVERIFY2(w->last_notice().contains(QStringLiteral("この版ではまだ使えません")) && w->last_notice().contains(a->text()), qPrintable(w->last_notice()));
+        }
+        QCOMPARE(studio.doc().revision, revision);
+        // (P2-3: one command an attribute — a frame made real takes its place: make() lets the old one go —, and the keys'
+        // window, the search and the keys laid again find the command the menus hold)
+        std::map<QString, int> made;
+        for (QAction* a : w->findChildren<QAction*>()) {
+            const QString attribute = a->property("genko_attribute").toString();
+            if (!attribute.isEmpty()) ++made[attribute];
+        }
+        for (const auto& [attribute, count] : made) QVERIFY2(count == 1, qPrintable(attribute));
+        const std::vector<QAction*> listed = genko::app::preferences::commands(w);
+        for (const char* name : {"act_measure_record", "act_measure_scale_custom", "act_measure_data_points", "act_video_rasterize", "act_panel_notes",
+                                 "act_panel_layer_comps", "act_comps_to_files"}) {
+            QAction* own = studio.act(name);
+            QVERIFY2(std::find(listed.begin(), listed.end(), own) != listed.end(), name);
+        }
+        // the extras: a painter a key, over the page, shown and hidden
+        PageCanvas* canvas = w->canvas();
+        int drawn = 0;
+        canvas->add_extra({QStringLiteral("count"), [&drawn](QPainter&, const core::Page&, const PageCanvas::ExtraView& view) {
+                               if (view.per_mm > 0 && view.at.map(QPointF(10, 10)) != view.at.map(QPointF(20, 20)) && view.seen_mm.contains(QPointF(10, 10)))
+                                   ++drawn;
+                           }});
+        QCOMPARE(canvas->extra_keys(), std::vector<QString>{QStringLiteral("count")});
+        (void)canvas->grab();
+        QVERIFY(drawn > 0);
+        canvas->show_extra(QStringLiteral("count"), false);
+        QVERIFY(!canvas->extra_shown(QStringLiteral("count")));
+        drawn = 0;
+        (void)canvas->grab();
+        QCOMPARE(drawn, 0);
+        canvas->show_extra(QStringLiteral("count"), true);
+        canvas->extras_shown = false;
+        (void)canvas->grab();
+        QCOMPARE(drawn, 0);
+        canvas->extras_shown = true;
+        (void)canvas->grab();
+        QVERIFY(drawn > 0);
     }
 
     // No two commands share a key (Qt would take the key as ambiguous and do neither): PC1b's 色の校正 (Ctrl+Y in the Photoshop
@@ -907,7 +1016,9 @@ private slots:
                                                   {"mixer", "act_mixer_brush"}, {"bgeraser", "act_background_eraser"},
                                                   {"colorreplace", "act_color_replacement"},
                                                   // (PC5 H-a: 手のひらツール)
-                                                  {"hand", "act_hand_tool"}};
+                                                  {"hand", "act_hand_tool"},
+                                                  // (PC5 G-a: 横書き文字ツール)
+                                                  {"text_h", "act_text_h"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());

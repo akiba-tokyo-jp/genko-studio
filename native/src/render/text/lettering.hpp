@@ -158,6 +158,26 @@ SetLayout set_layout(const core::StoryLine& line, int dpi, const std::optional<s
 std::pair<Face, bool> line_face(const core::StoryLine& line, const std::optional<std::string>& font_path = std::nullopt);
 // Where paint_text puts the top left of a line's lettering on the page (px), for a lettering with this corner.
 Point lettering_at(const core::StoryLine& line, int dpi, double corner_x, double corner_y);
+// type@1 (PC5 G-a, SPEC.md TEXT-02): a record's shape (native_type.shape): "point" — ポイントテキスト, set at its size
+// unbroken but where its text breaks, its first row's baseline (down: its first column's middle, at its top) on its
+// anchor_mm, left, centred or right of it by its alignment (down: top, middle or foot) — or "box" — 段落テキスト, set at
+// its size broken at its box (x_mm…h_mm), from the box's top left (down: from its top right; across centred or right
+// by its alignment, down by its alignment), what runs past the box hidden —, or none: a line's own setting (in its
+// box, fitted to its balloon). Neither point nor box text shrinks or fits a balloon; their size is style.size_mm (the
+// lines' 5 mm without one). native_type.antialias "none" draws each pixel whole or not at all (a cover of half or
+// more); the others are drawn smooth (PSD keeps their name).
+std::string shape_of(const core::StoryLine& line);
+// Where the lettering of a line lies on the page (px): its picture's box as paint_text puts it, the box its letters
+// are drawn in (none: nothing drawn), the box a box text is cut to (none for others), whether its letters run past
+// that box (Photoshop's overflow mark), and its em (px).
+struct Placement {
+    Box picture;
+    std::optional<Box> letters;
+    std::optional<Box> clip;
+    bool overflow = false;
+    std::int64_t em = 0;
+};
+Placement placement(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path = std::nullopt, std::stop_token stop = {});
 
 // text_image(line, dpi, font_path): the lettering and its em.
 std::pair<Image, std::int64_t> text_image(const core::StoryLine& line, int dpi,

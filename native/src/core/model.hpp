@@ -18,6 +18,11 @@
 #include "core/ink.hpp"
 #include "core/json.hpp"
 #include "core/psd_keep.hpp"
+// PC5 節 J (layer-comps@1, slices@1, annotations@1, measure@1)
+#include "core/annotations.hpp"
+#include "core/layer_comps.hpp"
+#include "core/measure.hpp"
+#include "core/slices.hpp"
 #include "core/pynum.hpp"
 #include "core/vector.hpp"
 
@@ -247,6 +252,9 @@ struct Layer {
     // story has (its id, page, speaker, panel and reading order), drawn by the lines' typesetting as the layer's picture;
     // null on any other layer. Shared between copies and never changed once made (an op makes a new one).
     std::shared_ptr<const StoryLine> type;
+    // PC5 I-b (groups@1, core/groups.hpp): a folder drawn as Photoshop's group — what is in it hidden with it, its opacity,
+    // its blend (pass_through, 通過, a group's only), its mask and vector mask; false: a folder as before, an order of layers
+    bool group = false;
 
     std::size_t stroke_count() const { return strokes ? strokes->items.size() : 0; }
 };
@@ -384,6 +392,13 @@ struct Page {
     // PSD it was read from held that this build does not read — its image resources and global blocks
     std::optional<NativeSource> native_source;
     std::optional<PsdPageKeep> native_psd;
+    // PC5 節 J (SPEC.md PROD-01): its layer comps (layer-comps@1, core/layer_comps.hpp), slices (slices@1, core/slices.hpp),
+    // notes placed on it (annotations@1, core/annotations.hpp) and measuring (measure@1, core/measure.hpp) — none or empty:
+    // nothing written. (timeline@1 and video@1 are in its anim, `extra["anim"]`: core/video.hpp)
+    std::optional<LayerComps> layer_comps;
+    std::optional<Slices> slices;
+    std::vector<Annotation> annotations;
+    std::optional<Measure> measure;
 
     Rect paper_rect_mm() const;
     Rect trim_rect_mm() const;

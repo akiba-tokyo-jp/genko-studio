@@ -195,7 +195,7 @@ void PageCanvas::update_cursor(std::optional<QPointF> pos) {
                tool_ == QLatin1String("reshape") || tool_ == QLatin1String("ruler") || tool_ == QLatin1String("3d") ||
                tool_ == QLatin1String("effect") || tool_ == QLatin1String("stamp")) {
         setCursor(Qt::CrossCursor);
-    } else if (tool_ == QLatin1String("text")) {
+    } else if (is_text_tool(tool_)) {
         setCursor(Qt::IBeamCursor);
     } else if (tool_ == QLatin1String("frame") && pos && page() != nullptr) {
         const QPointF mm = mm_of(*pos);

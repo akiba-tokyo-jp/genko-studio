@@ -9,6 +9,7 @@
 #include <cmath>
 
 #include "core/areas.hpp"
+#include "core/groups.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
@@ -229,6 +230,21 @@ void text_to_path(OpContext& c) {
             if (layer.id == line_id && core::type_text::is_type_layer(layer) && layer.type) type_text = core::type_text::line_of(layer, doc.page(p).index);
         }
     }
+    // (PC5 G-a review P2-6: a type layer its matrix turns traced upright — set where none of it is off the paper — and the
+    // outline then mapped through its matrix, where the page shows it)
+    std::optional<std::array<double, 6>> turn;
+    double room_w = 0, room_h = 0;  // (the paper traced over, mm: the page's, or round the upright record)
+    if (type_text) {
+        if (const auto t = core::type_text::transform_of(*type_text)) {
+            type_text->native_type->erase("transform");
+            const double sx = 10 - type_text->x_mm.value(), sy = 10 - type_text->y_mm.value();
+            *type_text = core::type_text::moved(*type_text, sx, sy);
+            const auto& m = *t;
+            turn = std::array<double, 6>{m[0], m[1], m[2], m[3], m[4] - m[0] * sx - m[2] * sy, m[5] - m[1] * sx - m[3] * sy};
+            room_w = std::min(2000.0, type_text->w_mm.value() + 80);
+            room_h = std::min(2000.0, type_text->h_mm.value() + 80);
+        }
+    }
     const core::StoryLine& line = type_text ? *type_text : core::find_line(doc, line_id);
     std::optional<std::size_t> at;
     for (std::size_t k = 0; k < doc.pages.size(); ++k) {
@@ -251,13 +267,14 @@ void text_to_path(OpContext& c) {
     };
     // (where the letters are, from the page drawn at 100 dpi; then that part again, finely)
     constexpr int kFind = 100, kTrace = 600;
-    const Size find_size{static_cast<int>(text::px(page.spec.width_mm.value(), kFind)), static_cast<int>(text::px(page.spec.height_mm.value(), kFind))};
+    const double paper_w = turn ? room_w : page.spec.width_mm.value(), paper_h = turn ? room_h : page.spec.height_mm.value();
+    const Size find_size{static_cast<int>(text::px(paper_w, kFind)), static_cast<int>(text::px(paper_h, kFind))};
     limits::check_picture(find_size.width, find_size.height, "the page");
     Image found = Image::create("RGBA", find_size, Ink{0, 0, 0, 0});
     draw(found, Point{0, 0}, find_size, kFind);
     const std::optional<Box> box = found.getbbox();
     if (!box) throw OpError("the line " + line.id + " has no letters to trace");
-    const Size page_size{static_cast<int>(text::px(page.spec.width_mm.value(), kTrace)), static_cast<int>(text::px(page.spec.height_mm.value(), kTrace))};
+    const Size page_size{static_cast<int>(text::px(paper_w, kTrace)), static_cast<int>(text::px(paper_h, kTrace))};
     const double k = static_cast<double>(kTrace) / kFind;
     const int margin = kTrace / 10;  // (2.5 mm round what the coarse drawing found)
     const Box part{std::max(0, static_cast<int>(std::floor(box->x0 * k)) - margin), std::max(0, static_cast<int>(std::floor(box->y0 * k)) - margin),
@@ -266,7 +283,8 @@ void text_to_path(OpContext& c) {
     limits::check_picture(part.width(), part.height(), "the letters");
     Image fine = Image::create("RGBA", Size{part.width(), part.height()}, Ink{0, 0, 0, 0});
     draw(fine, Point{part.x0, part.y0}, page_size, kTrace);
-    const vec::Path path = traced(fine.getchannel(3), kTrace, part.x0, part.y0, 0.5);
+    vec::Path path = traced(fine.getchannel(3), kTrace, part.x0, part.y0, 0.5);
+    if (turn) path = path.transformed(vec::Affine{(*turn)[0], (*turn)[1], (*turn)[2], (*turn)[3], (*turn)[4], (*turn)[5]});
     if (path.subpaths.empty()) throw OpError("the line " + line.id + " has no letters to trace");
     Json notes = Json::array();
     const Json st = text::style_of(line);
@@ -376,7 +394,7 @@ void set_vector_mask(OpContext& c) {
     Page& page = doc.edit_page(at);
     Layer& layer = page.layers[core::layer_by_id(page, id != nullptr ? core::py_str(*id) : std::string())];
     if (layer.locked) throw OpError("the layer is locked");
-    if (layer.kind == core::LayerKind::Folder) throw OpError("a folder cannot take a vector mask (mask the layers in it)");
+    if (layer.kind == core::LayerKind::Folder && !core::is_group(layer)) throw OpError("a folder cannot take a vector mask (mask the layers in it)");  // (groups@1: a group can)
     if (const Json* del = given(c.op, "delete"); del != nullptr && boolean(*del, "delete")) {
         if (!layer.vector_mask) throw OpError("the layer has no vector mask");
         layer.vector_mask.reset();

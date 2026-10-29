@@ -265,7 +265,9 @@ private slots:
         for (QAction* a : w->findChild<QMenu*>(QStringLiteral("menu_export"))->actions()) exports << (a->isSeparator() ? QStringLiteral("|") : a->text());
         // (PC4 F-c: Photoshop's レイヤーからファイル… first in that group)
         QCOMPARE(exports.indexOf(QStringLiteral("レイヤーからファイル…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 2);
-        QCOMPARE(exports.indexOf(QStringLiteral("パスを Illustrator へ…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 3);
+        // (PC5 J-a: レイヤーカンプからファイル… after it, as Photoshop's)
+        QCOMPARE(exports.indexOf(QStringLiteral("レイヤーカンプからファイル…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 3);
+        QCOMPARE(exports.indexOf(QStringLiteral("パスを Illustrator へ…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 4);
         const QStringList edit = menu_items(w, QStringLiteral("編集"));
         QCOMPARE(edit.mid(0, 4), (QStringList{QStringLiteral("取り消し"), QStringLiteral("やり直し"), QStringLiteral("ヒストリー…"), QStringLiteral("|")}));
         const QStringList view = menu_items(w, QStringLiteral("表示"));

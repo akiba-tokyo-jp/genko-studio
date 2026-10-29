@@ -34,6 +34,13 @@
 #include "core/patterns.hpp"
 #include "core/layer_styles.hpp"
 #include "core/type_text.hpp"
+#include "core/groups.hpp"
+// PC5 J-0 (制作の補助)
+#include "core/annotations.hpp"
+#include "core/layer_comps.hpp"
+#include "core/measure.hpp"
+#include "core/slices.hpp"
+#include "core/video.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 
@@ -85,7 +92,7 @@ constexpr std::array<std::string_view, 21> kLineKeys{"id", "page_index", "text",
                                                      "style", "tails",
                                                      // type@1 (PC5 G-0)
                                                      "native_type"};
-constexpr std::array<std::string_view, 52> kLayerKeys{
+constexpr std::array<std::string_view, 53> kLayerKeys{
     "id", "role", "kind", "visible", "exportable", "strokes", "raster_relpath", "fill_rgb", "lpi", "density",
     "region", "opacity", "material_id", "angle", "title", "blend", "clip", "lock_alpha", "locked", "panel_clip",
     "panel_each", "patches", "tone", "parent_id", "asset", "mask", "color", "reference", "fill", "adjust", "effect",
@@ -101,7 +108,9 @@ constexpr std::array<std::string_view, 52> kLayerKeys{
     // PC4 E6 (layer-styles@1)
     "style",
     // PC5 G-0 (type@1)
-    "type"};
+    "type",
+    // PC5 I-b (groups@1)
+    "group"};
 constexpr std::array<std::string_view, 5> kPlacedOnlyKeys{"frame_id", "placement_mm", "fit", "clip_to", "finish"};
 constexpr std::array<std::string_view, 5> kMaskKeys{"enabled", "asset",
                                                     // masks@1 (PC3)
@@ -420,6 +429,8 @@ private:
     void read_layer_files(core::Layer& layer, const Json& data, const std::string& at);
     void read_page_files(core::Page& page, const std::string& at);
     void read_file_info(core::Document& doc);
+    // PC5 J-0 (layer-comps@1, slices@1, annotations@1, measure@1)
+    void read_page_production(core::Page& page, const std::string& at);
     void check_named(const std::string& ref, std::string_view suffix, const std::string& at, std::string_view noun);
     std::unordered_map<std::string, core::vector::ShapeListPtr> shape_blobs_;  // (shapes read in this load)
 };
@@ -1143,6 +1154,15 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
     layer.angle = to_float(data, "angle", 45.0, at);
     layer.title = to_str_or(data, "title", "");
     layer.blend = to_str_or(data, "blend", "normal");
+    // (groups@1, PC5 I-b: a folder drawn as a group — one on another layer, or a blend pass_through elsewhere, the book
+    // read-only: core::validate_groups below)
+    if (const Json* group = find(data, "group"); group != nullptr && !group->is_null()) {
+        if (group->is_boolean()) {
+            layer.group = group->get<bool>();
+        } else {
+            issue("broken_value", at_key(at, "group"), {}, "a layer's group must be true or false");
+        }
+    }
     layer.clip = to_bool(data, "clip", false);
     layer.lock_alpha = to_bool(data, "lock_alpha", false);
     layer.locked = to_bool(data, "locked", false);
@@ -1537,6 +1557,7 @@ core::Document Reader::migrate(const Json& payload) {
         read_channels(page, at);
         read_page_vectors(page, at);
         read_page_files(page, at);
+        read_page_production(page, at);  // (PC5 J-0)
         page_list.push_back(std::make_shared<core::Page>(std::move(page)));
         if (skip_assets_) deferred.push_back(page_list.back());
     }
@@ -1710,6 +1731,15 @@ core::Document Reader::migrate(const Json& payload) {
     // (PC5 G-0: type@1's records, type layers and type styles, each in its normal form)
     try { core::type_text::validate_type(doc); }
     catch (const core::Error& error) { issue("broken_value", "/story", {}, error.what()); }
+    // (groups@1, PC5 I-b: a group on a folder only, the blend pass_through a group's only)
+    try { core::validate_groups(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (PC5 J-0: timeline@1's work area, video@1's video rows, in a page's anim of a book that names them — kept as read)
+    try {
+        const auto named = [&](std::string_view f) { return std::find(doc.features.begin(), doc.features.end(), f) != doc.features.end(); };
+        core::validate_timeline(doc, named(core::kTimelineFeature), named(core::kVideoFeature));
+    }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     return doc;
 }
 
@@ -1764,6 +1794,36 @@ void Reader::read_page_files(core::Page& page, const std::string& at) {
             for (const core::PsdGlobal& g : page.native_psd->globals) check_named(g.ref, core::kPsdBlockSuffix, at_key(at, "native_psd"), "kept PSD block");
         }
     }
+}
+
+// PC5 J-0 (SPEC.md PROD-01): a page's layer comps, slices, notes and measuring, taken out of the keys written back as they
+// were read (one that cannot be read — a key, a type or a value this build does not know — is reported and kept so: the
+// book is read-only). An empty one is as none.
+void Reader::read_page_production(core::Page& page, const std::string& at) {
+    const auto take = [&](std::string_view key, const auto& read) {
+        const auto it = page.extra.find(std::string(key));
+        if (it == page.extra.end()) return;
+        try {
+            if (!it->is_null()) read(*it);
+        } catch (const core::Error& error) {
+            issue("broken_value", at_key(at, std::string(key)), {}, error.what());
+            return;
+        }
+        page.extra.erase(it);
+    };
+    take(core::kLayerCompsKey, [&](const Json& raw) {
+        core::LayerComps comps = core::layer_comps_from_json(raw);
+        if (!comps.empty()) page.layer_comps = std::move(comps);
+    });
+    take(core::kSlicesKey, [&](const Json& raw) {
+        core::Slices slices = core::slices_from_json(raw);
+        if (!slices.empty()) page.slices = std::move(slices);
+    });
+    take(core::kAnnotationsKey, [&](const Json& raw) { page.annotations = core::annotations_from_json(raw); });
+    take(core::kMeasureKey, [&](const Json& raw) {
+        core::Measure measure = core::measure_from_json(raw);
+        if (!measure.empty()) page.measure = std::move(measure);
+    });
 }
 
 // file-info@1 (PC4): the book's File Info, kept under "file_info" (taken out of the keys written back as they were read; one
@@ -1882,6 +1942,7 @@ core::Page Reader::read_contents_page(const Json& raw, const std::string& at, co
     read_channels(page, at);
     read_page_vectors(page, at);
     read_page_files(page, at);  // (PC4: file-info@1, psd-keep@1)
+    read_page_production(page, at);  // (PC5 J-0: layer-comps@1, slices@1, annotations@1, measure@1)
     return page;
 }
 
@@ -1957,7 +2018,12 @@ bool is_known_feature(std::string_view feature) {
            // PC4 E6 (core/layer_styles.hpp)
            feature == core::kLayerStylesFeature ||
            // PC5 G-0 (core/type_text.hpp)
-           feature == core::kTypeFeature;
+           feature == core::kTypeFeature ||
+           // PC5 I-b (core/groups.hpp)
+           feature == core::kGroupsFeature ||
+           // PC5 J-0 (core/layer_comps.hpp, core/slices.hpp, core/annotations.hpp, core/measure.hpp, core/video.hpp)
+           feature == core::kLayerCompsFeature || feature == core::kSlicesFeature || feature == core::kAnnotationsFeature ||
+           feature == core::kMeasureFeature || feature == core::kTimelineFeature || feature == core::kVideoFeature;
 }
 
 int project_version(const Json& payload) {

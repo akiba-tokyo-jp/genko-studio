@@ -353,6 +353,20 @@ QAction* MainWindow::make(const QString& attribute, const QString& title, std::f
     act->setProperty("genko_attribute", attribute);  // (the help names its menus and keys through it: help.cpp)
     connect(act, &QAction::triggered, this, [slot = std::move(slot)](bool) { slot(); });
     addAction(act);  // (its keys work wherever the window has the focus)
+    // (PC5 J-0: a command made again under an attribute — a frame a group made real — takes the old one's places in the
+    // menus and bars, and the old one goes: never two commands of one attribute for the keys, the search or the help)
+    if (const auto before = actions_.find(attribute); before != actions_.end() && before->second != nullptr && before->second != act) {
+        QAction* old = before->second;
+        for (QObject* holder : old->associatedObjects()) {
+            auto* widget = qobject_cast<QWidget*>(holder);
+            if (widget == nullptr || widget == this) continue;
+            widget->insertAction(old, act);
+            widget->removeAction(old);
+        }
+        removeAction(old);
+        old->setParent(nullptr);
+        old->deleteLater();
+    }
     actions_[attribute] = act;
     return act;
 }
@@ -472,6 +486,7 @@ void MainWindow::build_actions() {
     build_guide_actions();      // (定規, 3D and their commands: main_window_guides.cpp)
     build_material_actions();   // (効果線, 素材を置く, トーン, the view's extras, the layer commands: main_window_materials.cpp)
     build_line_actions();       // (テキスト, 台詞 and the book's lines, the 台詞 panel: main_window_lines.cpp)
+    build_type_actions();       // (PC5 G-a: 横書き文字ツール, 書式's commands, the text tools' type layers: main_window_type.cpp)
     build_output_actions();     // (書き出し, 印刷, 履歴, 入稿前の点検, スマホの画面, 目盛り: main_window_output.cpp)
     build_studio_actions();     // (チャットでの承認: main_window_studio.cpp)
     build_smart_actions();      // (smart-objects@1: スマートオブジェクト, 埋め込みを配置…, ラスタライズ: main_window_smart.cpp)
@@ -483,6 +498,7 @@ void MainWindow::build_actions() {
     build_pattern_actions();    // (PC4 E3: パターンを定義…, パターンのレイヤー…, パターンプレビュー: main_window_patterns.cpp)
     build_brush_preset_actions();  // (PC4 E2: ブラシを定義…, プリセット ▸: main_window_brush_presets.cpp)
     build_layer_style_actions();  // (PC4 E6: レイヤー → レイヤースタイル ▸: main_window_styles.cpp)
+    build_production_actions();   // (PC5 J-0: 解析 ▸, ビデオレイヤー ▸, the production's panels — frames: main_window_production.cpp)
     build_align_actions();      // (PC3 C-d: 重ね順・整列・分布・リンク・ロック, スナップ (with 定規's グリッドにスナップ), the move tool's: main_window_align.cpp)
     build_file_actions();       // (PC4 F-0: 節 F's new commands of ファイル, frames until F-b and F-c: main_window_file.cpp)
     build_filter_actions();     // (PC4 節 D: フィルター's commands, 前回のフィルター: filter_menu.cpp)
@@ -582,7 +598,7 @@ void MainWindow::build_actions() {
                                           {"picker", "act_picker"}, {"fill", "act_fill"}, {"lassofill", "act_lassofill"},
                                           {"gradient", "act_gradient"}, {"shape", "act_shape"}, {"blend", "act_blend"}, {"reshape", "act_reshape"},
                                           {"rect", "act_marquee"}, {"lasso", "act_lasso"}, {"wand", "act_wand"}, {"ruler", "act_ruler"},
-                                          {"text", "act_text"},
+                                          {"text", "act_text"}, {"text", "act_text_h"},
                                           {"3d", "act_3d"}, {"effect", "act_effect"}, {"stamp", "act_stamp"},
                                           {"move", "act_move"}, {"undo", "act_undo"}, {"redo", "act_redo"}, {"fit", "act_fit"},
                                           {"zoom_in", "act_zoom_in"}, {"zoom_out", "act_zoom_out"}, {"prev", "act_prev"}, {"next", "act_next"},
@@ -641,7 +657,7 @@ void MainWindow::build_menus() {
     view->addAction(action("act_tool_names"));
     QMenu* tools = bar->addMenu(QStringLiteral("ツール"));
     // (Python's order; the tools not ported yet join it as they come)
-    for (const char* name : {"act_select", "act_move", "act_pen", "act_eraser", "act_blend", "act_shape", "act_text", "act_frame"})
+    for (const char* name : {"act_select", "act_move", "act_pen", "act_eraser", "act_blend", "act_shape", "act_text", "act_text_h", "act_frame"})
         tools->addAction(action(name));
     tools->addSeparator();
     for (const char* name : {"act_picker", "act_fill", "act_lassofill", "act_fill_gaps", "act_gradient", "act_reshape", "act_vector", "act_liquify"})
@@ -674,6 +690,7 @@ void MainWindow::build_menus() {
     QMenu* layers = bar->addMenu(QStringLiteral("レイヤー"));
     for (const char* name : {"act_layer_pen", "act_layer_paint", "act_layer_folder"}) layers->addAction(action(name));
     QMenu* made = layers->addMenu(QStringLiteral("新規"));  // (PC3 B2: Photoshop's レイヤー → 新規)
+    made->addAction(action("act_layer_frame"));  // (PC5 I-b: レイヤーからのフレーム…, before Photoshop's 選択範囲をコピーしたレイヤー)
     for (const char* name : {"act_layer_via_copy", "act_layer_via_cut"}) made->addAction(action(name));
     layers->addSeparator();
     for (const char* name : {"act_layer_dup", "act_layer_merge", "act_layer_delete"}) layers->addAction(action(name));
@@ -754,6 +771,7 @@ void MainWindow::build_menus() {
     build_pattern_menus(edit, view);  // (PC4 E3: パターンを定義…, パターンプレビュー: app/main_window_patterns.cpp)
     build_brush_preset_menus(edit);  // (PC4 E2: ブラシを定義…, プリセット ▸: app/main_window_brush_presets.cpp)
     build_layer_style_menus(layers);  // (PC4 E6: レイヤースタイル ▸ before レイヤーマスク: app/main_window_styles.cpp)
+    build_production_menus(layers, pages);  // (PC5 J-0: ビデオレイヤー ▸ before ラスタライズ ▸, ページ → 解析 ▸: main_window_production.cpp)
     pages->addAction(action("act_book_preview"));
     pages->addAction(action("act_checks"));
     pages->addSeparator();
@@ -933,6 +951,7 @@ void MainWindow::build_docks() {
     build_guide_dock();   // (定規・3D, a tab when it is opened: main_window_guides.cpp)
     build_material_dock();  // (素材, トーン, 効果線: main_window_materials.cpp)
     build_output_docks();   // (履歴 and 点検, tabs when they are opened: main_window_output.cpp)
+    build_production_docks();  // (PC5 J-0: アクション, レイヤーカンプ, 計測ログ, 注釈 — frames: main_window_production.cpp)
     tabifyDockWidget(pages_dock_, library_dock_);  // (資料 last)
     view_menu_->addAction(library_dock_->toggleViewAction());
     library_dock_->hide();

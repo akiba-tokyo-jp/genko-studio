@@ -655,7 +655,11 @@ File File::read(std::string data, const Limits& limits, bool lab) {
             }
             const std::string_view sig = r.take(4);
             if (sig != "8BIM" && sig != "8B64") psd_error("broken PSD layer record");
-            rec.blend = blend_of(r.take(4));
+            {
+                const std::string_view key = r.take(4);
+                rec.blend = blend_of(key);
+                rec.pass_through = key == "pass";
+            }
             rec.opacity = static_cast<int>(r.u8());
             rec.clip = r.u8() == 1;
             rec.visible = (r.u8() & 2) == 0;
@@ -728,6 +732,7 @@ File File::read(std::string data, const Limits& limits, bool lab) {
                     rec.name = std::move(name);
                 } else if ((tag == "lsct" || tag == "lsdk") && body.size() >= 4) {
                     rec.section = be32(body);
+                    if (body.size() >= 12 && body.substr(4, 4) == "8BIM" && body.substr(8, 4) == "pass") rec.pass_through = true;
                 } else if (tag == "TySh") {
                     rec.kind = "text";
                     rec.tysh_at = static_cast<std::uint64_t>(body.data() - d.data());  // (PSD-01: read when asked)
@@ -869,9 +874,21 @@ File File::read(std::string data, const Limits& limits, bool lab) {
             folder.opacity = rec.opacity / 255.0;
             folder.visible = rec.visible;
             folder.blend = rec.blend;
+            folder.pass_through = rec.pass_through;  // (groups@1, PC5 I-b)
+            folder.group_clip = rec.clip;
             folder.folder = true;
             folder.kind = "folder";
             folder.record = n;  // (PC4 F-d: its blocks)
+            // (groups@1, PC5 I-b: a group's mask, as a layer's)
+            const ChannelRef* group_mask = rec.channel(-2);
+            folder.has_mask = mask_kept(rec, group_mask);
+            folder.mask_enabled = !rec.mask_disabled;
+            folder.mask_parameters = rec.mask_parameters;
+            folder.mask_unlinked = rec.mask_unlinked;
+            folder.mask_density = rec.mask_density;
+            folder.mask_feather = rec.mask_feather;
+            folder.vector_density = rec.vector_density;
+            folder.vector_feather = rec.vector_feather;
             std::vector<std::size_t> kids;
             if (!pending.empty()) {
                 kids = std::move(pending.back());
@@ -1030,7 +1047,7 @@ std::optional<TextLayer> File::text(const Layer& layer) const {
 }
 
 std::optional<std::string_view> File::vector_mask(const Layer& layer) const {
-    if (layer.folder || layer.record >= records_.size()) return std::nullopt;
+    if (layer.record >= records_.size()) return std::nullopt;  // (a folder's too: groups@1, PC5 I-b)
     const Record& rec = records_[layer.record];
     if (rec.vmsk_size == 0) return std::nullopt;
     return std::string_view(data_).substr(static_cast<std::size_t>(rec.vmsk_at), static_cast<std::size_t>(rec.vmsk_size));
