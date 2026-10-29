@@ -637,9 +637,10 @@ private slots:
     // render:GPU-CPU-parity (PC5 H-a, 節 H 4.3; the coordinator's 3 章: the processor composites, the card only shows): the
     // page on the graphics card is the page the processor draws — within 1/255 everywhere as it is, mirrored, zoomed into
     // its pixels and proofed. (The user's decision 2026-10-29:) turned, or zoomed off one tile pixel a screen pixel (fitted), the card's texture filter and the
-    // processor's painter resample the picture each their own way (both bilinear, their weights rounded otherwise): within
-    // 1/255 at all but the edges of sharp lines (at
-    // most 2 pixels in 1000 apart, never by more than 12/255, Mesa's llvmpipe), and the sheet's edges and soft shadow (the
+    // processor's painter resample the picture each their own way (both bilinear, their weights rounded otherwise — Qt's
+    // painter cuts the fraction off, Mesa rounds it: the edges of long sharp lines 2/255 apart all along): within 2/255 at
+    // all but the edges of sharp lines (the user's decision 2026-10-29, the second: at most 2 pixels in 1000 more than
+    // 2/255 apart, never by more than 12/255, Mesa's llvmpipe), and the sheet's edges and soft shadow (the
     // polygons around the page, smoothed by the card's 4 samples a pixel) are left out. Where OpenGL cannot be had (the
     // offscreen test screen), the card's surface gives up, the canvas draws by the processor again and says so
     // (gpuFailed) — the same pixels; never skipped. (QT_QPA_PLATFORM=xcb on Xvfb and Mesa checks the card's way.)
@@ -764,7 +765,7 @@ private slots:
                                 if (processor.rect().contains(x + dx, y + dy)) apart_here = std::min(apart_here, apart_from(processor.pixel(x + dx, y + dy)));
                     }
                     ++counted;
-                    if (apart_here > 1) ++off;
+                    if (apart_here > (resampled ? 2 : 1)) ++off;  // (resampled: past 2/255 — the user's decision 2026-10-29, the second)
                     if (apart_here > most) {
                         most = apart_here;
                         where = QPoint(x, y);
@@ -773,15 +774,16 @@ private slots:
             }
             const bool within = resampled ? most <= 12 && off * 1000 <= counted * 2 : most <= 1;
             if (!within) {
-                apart << QStringLiteral("%1: %2/255 at %3, %4 (%5 of %6 pixels past 1/255)")
+                apart << QStringLiteral("%1: %2/255 at %3, %4 (%5 of %6 pixels past %7/255)")
                              .arg(QString::fromLatin1(look.name))
                              .arg(most)
                              .arg(where.x())
                              .arg(where.y())
                              .arg(off)
-                             .arg(counted);
+                             .arg(counted)
+                             .arg(resampled ? 2 : 1);
             }
-            if (qEnvironmentVariableIsSet("HA_REPORT")) qInfo("%s: %d/255, %zu of %zu past 1/255", look.name, most, off, counted);
+            if (qEnvironmentVariableIsSet("HA_REPORT")) qInfo("%s: %d/255, %zu of %zu past %d/255", look.name, most, off, counted, resampled ? 2 : 1);
             QVERIFY(failed.isEmpty());
             QVERIFY(c->renderer().texture_bytes() > 0);  // (the tiles on the card counted)
         }
