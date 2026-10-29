@@ -959,6 +959,7 @@ void MainWindow::build_docks() {
     view_menu_->addAction(library_dock_->toggleViewAction());
     library_dock_->hide();
     agent_view(agent_book());
+    build_arrange_docks();  // (PC5 H-c: ツール's switch and 修飾キー in ウィンドウ — main_window_arrange.cpp)
     name_panels();  // (PC5 H-0: ナビゲーター, オプション, ヒストリー — main_window_arrange.cpp)
     setTabPosition(Qt::LeftDockWidgetArea, QTabWidget::North);
     setTabPosition(Qt::RightDockWidgetArea, QTabWidget::North);

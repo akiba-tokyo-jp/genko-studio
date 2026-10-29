@@ -318,6 +318,9 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/io/src/psd_import.rs`（363-376 行: `parse_guides`）・`crates/io/src/psd_export.rs`（470-484 行: `guides_resource`）→ `native/src/render/psd_guides.cpp`（リソース 1032 のバイトの並び）。
   - `crates/engine/src/prefs.rs`（52-147 行: `Unit` の `from_px`・`to_px`・`suffix`・`decimals`、`PointSize::per_inch`。497-567 行: `UnitsAndRulers`・`GuidesGridAndSlices` の項目と既定）→ `native/src/core/units.cpp`（mm を元に）・`native/src/core/prefs_table.cpp`・`native/src/app/preferences_units.cpp`。
   - `crates/ui-egui/src/rulers.rs`（38-48 行: `nice_step`、150-230 行: 定規の刻みと数、ガイドを離した所で動かす・消す）→ `native/src/app/canvas_scale.cpp`（`draw_scale_in_unit`・`guide_release`）・`native/src/app/canvas_guide_lines.cpp`。
+- 窓の区画と並べ方・パネル（PC5 H-c）:
+  - `crates/ui-egui/src/view_cmds.rs`（137-148 行: 並べ方の名前 `LAYOUTS`、583-630 行: `arrange` — 並べるとどの原稿も区画に合わせる・タブに統合・浮動・同じ表示にする、636-667 行: `cells` — 各並べ方の区画の位置、`tile` の ceil(√n) 列）→ `native/src/app/doc_area.cpp`（`DocArea::cells`・`capacity`。区画を仕切りで動かせること・16 までは Genko のもの）・`native/src/app/main_window_arrange.cpp`（`arrange`・`consolidate_all`・`float_all`・`match_views`。同じ回転で表示は Genko の表示の回転と反転を当てる）。`crates/ui-egui/src/canvas.rs`（612-630 行: 前の原稿のほかの区画は見るだけ、クリックで前に）の考え → `native/src/app/pane_view.cpp`。`crates/ui-egui/src/menu_catalog.rs`（702-724 行: アレンジ の項目と並び）→ `build_arrange_menus`。
+  - `crates/ui-egui/src/workspace_ui.rs`（119-127 行・295-310 行: Modifier Keys の Shift・Command・Alt を押したままにする）→ `native/src/app/main_window_arrange.cpp`（`build_arrange_docks`・`latch_key`。持ち替えの道具を持つことは Genko のもの）。
 
 ## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1、PC5 節 J）
 

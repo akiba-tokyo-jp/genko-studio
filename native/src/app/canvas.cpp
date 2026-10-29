@@ -139,7 +139,9 @@ void PageCanvas::show_frame(const QImage& picture) {
 
 void PageCanvas::request_tiles() {
     if (page() == nullptr || width() <= 0 || height() <= 0) return;
-    renderer_->want(base_dpi(), wanted_dpi(), seen_mm());
+    // (PC5 H-c, 節 H 4.5: a pane beside the one in front keeps the whole page's tiles only)
+    const int base = base_dpi();
+    renderer_->want(base, view_only_ ? base : wanted_dpi(), seen_mm());
 }
 
 bool PageCanvas::wait_rendered(int ms) {
@@ -394,6 +396,15 @@ void PageCanvas::center_on(double x_mm, double y_mm) {
     view_.pan = QPointF(width() / 2.0 - x_mm * view_.scale, height() / 2.0 - y_mm * view_.scale);
     view_.fitted = false;
     live_reset();
+    rerender_.start();
+    emit changed();
+    update();
+}
+
+void PageCanvas::pan_by(const QPointF& moved) {
+    if (moved.isNull()) return;
+    view_.pan += moved;
+    view_.fitted = false;
     rerender_.start();
     emit changed();
     update();

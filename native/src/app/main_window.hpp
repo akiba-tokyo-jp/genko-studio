@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <QAction>
 #include <QActionGroup>
 #include <QFileSystemWatcher>
@@ -109,6 +110,12 @@ class PageList;
 class SaveFailureBar;
 class SaveStatusLabel;
 class ImeEntry;
+class DocArea;    // (PC5 H-c)
+class PaneView;   // (PC5 H-c)
+class PageRenderer;
+
+// (PC5 H-c) A new tab's own number (the cell of ウィンドウ → アレンジ follows a tab by it, wherever the tab moves).
+std::uint64_t new_tab_id();
 
 // 色の校正・校正の設定・色域外警告 of one book in a window (SPEC COLOR-03 PC1b; PhotoCraft's ProofView): display only,
 // never the book's.
@@ -143,6 +150,8 @@ struct Document {
     // duplicated): its tab named by its title alone; one opened from a file and not changed since is closed without asking.
     bool picture = false;
     std::optional<std::filesystem::path> source;
+    // PC5 H-c: the tab's own number (its cell in the window's arrangement).
+    std::uint64_t tab = new_tab_id();
     QString title() const;
 };
 
@@ -490,6 +499,29 @@ public:
     QTabBar* doc_tabs() const { return doc_tabs_; }
     // (M6) The tool palette, the command bar under the menus and the quick-access panel (workspace.cpp).
     QToolBar* tool_palette() const { return palette_; }
+    // --- ウィンドウ → アレンジ (PC5 H-c, 節 H 5.3, the user's decision 7; main_window_arrange.cpp) ------------------------
+    // The middle of the window: the canvas alone (the tabs' way), or the books side by side in cells — the canvas in the
+    // cell in front, the others' pages in panes (PaneView, only looked at); a pane clicked brings its tab to the front.
+    DocArea* doc_area() const { return doc_area_; }
+    // An arrangement of DocArea::layouts() ("tabs": the canvas alone): the tab in front first, then the next ones in the
+    // tabs' order, each fitted to its cell (at most DocArea::kMostPanes; the rest by their tabs).
+    void arrange(const QString& layout);
+    // A pane's cell clicked: its tab to the front there (as its tab chosen: switch_document's way).
+    void activate_pane(int cell);
+    // ウィンドウを分離: the tab in front into a window of its own (moved: its page, view and layer with it); すべてのウィンドウを
+    // 分離 (cascade: 重ねて表示 — the windows 40 px apart, this one in front): every tab but the one in front so.
+    void float_in_window();
+    void float_all(bool cascade = false);
+    // すべてをタブに統合: every other window's tabs into this window's (a book open here already not twice), those windows
+    // closed (nothing asked: their books are open here), the tabs' way again.
+    void consolidate_all();
+    // 同じズーム倍率で表示・同じ位置に表示・同じ回転で表示・すべてを同じ表示にする: the view in front given to the window's panes and
+    // to the other windows' pages (the zoom by its %, the place by where it is on its page, the turn and the mirrors).
+    void match_views(bool zoom, bool location, bool rotation);
+    // 修飾キー (window.panel.modifierKeys): Shift, Ctrl and Alt kept down for the canvas's tools while their buttons are
+    // in (a touch screen, a pen without a keyboard).
+    Qt::KeyboardModifiers latched_keys() const { return latched_; }
+    void latch_key(Qt::KeyboardModifier key, bool on);
     // PC4 E-0 (paint_panels.cpp): the drawing tools' groups — Photoshop's ブラシ, 消しゴム, 塗り, ぼかし, 覆い焼き, スポイト —,
     // each its tools' ids (the first the palette's; a tool not made yet, its group's, is left out); a tool's group of the
     // tools made (none: it is in none).
@@ -761,6 +793,22 @@ private:
     void ask_32bit_preview();
     void build_arrange_actions();
     void build_arrange_menus(QMenu* arrange);
+    void build_arrange_docks();  // (PC5 H-c: ウィンドウ → ツール, 修飾キー)
+    // (PC5 H-c) the arrangement following the tab in front (show_document): its cell takes the canvas, or the cell in
+    // front shows it; tabs gone leave their cells. A pane given a tab; the panes' views kept in their tabs; the tabs'
+    // marks of their cells; a tab by its number (-1: gone).
+    void arrange_follow();
+    void fill_pane(PaneView* pane, std::uint64_t tab);
+    void keep_pane_views();
+    void mark_tabs();
+    int document_of(std::uint64_t tab) const;
+    // A tab of another window taken in as it was there (not brought to the front); a new window's first tab made so.
+    void take_document(const Document& doc);
+    void adopt_first(const Document& doc);
+    // The canvas's hand or zoom with Shift (or their すべてのウィンドウを… options): the same in the panes (and windows).
+    void hand_used(double factor, const QPointF& moved, bool every_window);
+    // 色の校正 and the 32 bit preview of a tab on a renderer (false: its proof profile could not be read — nothing proofed).
+    bool proof_renderer(PageRenderer& renderer, const ProofView& view);
     void build_edit_actions();
     void build_edit_menu_tail(QMenu* edit);
     // PC5 H-0: the panels by Photoshop's names (ナビゲーター, オプション, ヒストリー), their object names — the workspaces' keys —
@@ -1565,6 +1613,10 @@ private:
     double eraser_mm_ = 2.0;
 
     PageCanvas* canvas_ = nullptr;
+    DocArea* doc_area_ = nullptr;          // (PC5 H-c: the canvas, or the cells)
+    bool tabs_marked_ = false;             // (PC5 H-c: the tabs carry their cells' marks)
+    Qt::KeyboardModifiers latched_;        // (PC5 H-c: 修飾キー)
+    QDockWidget* modifier_dock_ = nullptr;
     CanvasOnly* canvas_only_ = nullptr;
     ScreenMode screen_mode_ = ScreenMode::Standard;  // (PC5 H-a: set_screen_mode)
     Qt::WindowStates screen_before_ = Qt::WindowNoState;

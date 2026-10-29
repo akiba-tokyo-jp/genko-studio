@@ -12,6 +12,7 @@
 #include <QStringList>
 #include <QThreadPool>
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -123,6 +124,8 @@ public:
     // back from it (their pictures copied, so the card lets their textures go; drawn again, they go to it again). None:
     // drawn by the processor, nothing counted.
     void set_texture_budget(std::optional<std::size_t> bytes);
+    // (PC5 H-c) The most threads that draw its tiles at once (a pane beside the one in front: one).
+    void set_threads(int count) { pool_.setMaxThreadCount(std::max(1, count)); }
     std::optional<std::size_t> texture_budget() const { return texture_budget_; }
     // The bytes of the tiles on the card now (0 without a budget), and how many were taken back since the budget was set.
     std::size_t texture_bytes() const { return texture_bytes_; }

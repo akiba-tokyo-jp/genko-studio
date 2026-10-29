@@ -857,6 +857,14 @@ if(GENKO_BUILD_APP)
   if(UNIX AND NOT APPLE)
     genko_xvfb_test(test_gui_canvas_gpu test_gui_canvas theCardShowsWhatTheProcessorDraws)
   endif()
+  # PC5 H-c (SPEC VIEW-01「窓の区画と並べ方」): ウィンドウ → アレンジ — the books in cells of one window (4 アップ, the panes, a pane
+  # clicked to the front, a tab in no cell, 16 at most), ウィンドウを分離 and すべてをタブに統合, 同じ…で表示, Shift in every pane,
+  # closing asked once, ツール and 修飾キー, and the one window, one pane way as before; on Xvfb (test_gui_arrange_gpu) the
+  # canvas on the graphics card moved to another cell
+  genko_test(test_gui_arrange SOURCES gui/test_gui_arrange.cpp DEPS genko_app GUI TIMEOUT 900)
+  if(UNIX AND NOT APPLE)
+    genko_xvfb_test(test_gui_arrange_gpu test_gui_arrange theCardFollowsTheFrontPane)
+  endif()
   # PC5 H-a: the tiles — 画素の段 laid nearest, ピクセルアートプレビュー, 32 bit プレビュー on the three ways, the tiles on the card
   genko_test(test_tiles SOURCES unit/test_tiles.cpp DEPS genko_app LABELS unit TIMEOUT 600)
   # saving and closing (AC-SAVE 2, 3, 4, 6, 8, 10): failures shown, the question before closing, recovery, retries
