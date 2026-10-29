@@ -27,7 +27,7 @@ public:
         auto* box = new QVBoxLayout(this);
         box->setContentsMargins(2, 2, 2, 2);
         box->setSpacing(0);
-        setMinimumSize(44, 44);
+        setMinimumSize(28, 28);
     }
     bool front = false;
 
@@ -194,10 +194,10 @@ void DocArea::arrange(const QString& layout, const std::vector<std::uint64_t>& t
     layout_ = layout;
     tabs_.assign(tabs.begin(), tabs.begin() + n);
     front_ = std::clamp(front, 0, n - 1);
-    canvas_->setMinimumSize(40, 40);  // (the cells share the room; the canvas alone again: its own least size)
-    const int slots = std::max(n, slots_of(layout, n));
+    canvas_->setMinimumSize(24, 24);  // (the cells share the room; the canvas alone again: its own least size)
+    const int room = std::max(n, slots_of(layout, n));
     std::vector<QWidget*> places;
-    for (int i = 0; i < slots; ++i) {
+    for (int i = 0; i < room; ++i) {
         if (i < n) {
             auto* frame = new Cell;
             cells_.push_back(frame);
@@ -240,6 +240,9 @@ void DocArea::arrange(const QString& layout, const std::vector<std::uint64_t>& t
             tree_ = down;
         }
     }
+    // (the middle asks the window for no more room than the canvas alone did: on a small screen the window stays within it —
+    // SPEC UX-02 —, the cells sharing what there is)
+    tree_->setMinimumSize(canvas_least_);
     root_->addWidget(tree_, 1);
     tree_->show();  // (now: its cells' sizes are there for the views the window gives them)
     contents_.assign(static_cast<std::size_t>(n), nullptr);

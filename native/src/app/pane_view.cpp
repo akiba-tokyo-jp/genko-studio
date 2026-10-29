@@ -14,7 +14,7 @@ namespace genko::app {
 PaneView::PaneView(QWidget* parent) : PageCanvas(parent) {
     setObjectName(QStringLiteral("paneView"));
     set_view_only(true);
-    setMinimumSize(40, 40);  // (six or sixteen of them share the middle of the window)
+    setMinimumSize(24, 24);  // (six or sixteen of them share the middle of the window)
     setFocusPolicy(Qt::ClickFocus);
     renderer().set_threads(1);  // (節 H 9: sixteen panes never sixteen pools of threads)
     show_guides = true;

@@ -451,7 +451,15 @@ private slots:
         desk.window->add_document(untitled);
         untitled->apply(Json::array({Json{{"op", "add_page"}, {"count", 1}}}));
         QVERIFY(untitled->unsaved());
+        // (to another tab: そのまま切り替える — the changes stay in their tab)
+        desk.answers->responder->exec = [](QDialog* dialog) {
+            if (auto* guard = qobject_cast<genko::app::CloseGuard*>(dialog)) guard->discard_button()->click();
+            return 0;
+        };
+        desk.answers->responder->question = [](const QString&, const QString&) { return true; };
         desk.window->switch_document(0);
+        QCOMPARE(desk.window->current_document(), 0);
+        desk.answers->responder->question = [](const QString&, const QString&) { return false; };
         desk.trigger("act_arrange_tile");
         QCOMPARE(desk.area()->tabs().size(), std::size_t{3});
         QCOMPARE(desk.area()->cell_of(desk.window->documents()[2].tab), 2);  // (in a pane)
@@ -481,6 +489,9 @@ private slots:
         QTest::mouseClick(pane, Qt::LeftButton, {}, pane->rect().center());
         QCOMPARE(cell_of_canvas(desk), 1);
         QCOMPARE(desk.window->current_document(), 1);
+        // (a view that is not resampled — one tile pixel a screen pixel, as test_gui_canvas's "as it is" —: held to 1/255)
+        c->actual_size();
+        c->center_on(105, 148);
         QVERIFY(c->wait_rendered(30000));
         QTest::qWait(250);
         QVERIFY(c->wait_rendered(30000));
@@ -531,14 +542,17 @@ private slots:
         QVERIFY(!w->tool_palette()->isVisible());
         tools->trigger();
         QVERIFY(w->tool_palette()->isVisible());
-        for (const char* panel : {"ヒストリー", "レイヤー", "ナビゲーター", "オプション"}) {
+        // (オプション: always there, as before — its switch shows that it is)
+        QAction* options = item(QStringLiteral("オプション"));
+        QVERIFY(options != nullptr && options->isChecked());
+        for (const char* panel : {"ヒストリー", "レイヤー", "ナビゲーター"}) {
             QAction* a = item(QString::fromUtf8(panel));
             QVERIFY2(a != nullptr, panel);
             const bool was = a->isChecked();
             a->trigger();
-            QCOMPARE(a->isChecked(), !was);
+            QVERIFY2(a->isChecked() == !was, panel);
             a->trigger();
-            QCOMPARE(a->isChecked(), was);
+            QVERIFY2(a->isChecked() == was, panel);
         }
         // 修飾キー
         QAction* keys = item(QStringLiteral("修飾キー"));
