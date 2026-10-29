@@ -4,6 +4,7 @@
 // PhotoCraft's view_cmds.rs arrange and cells, MIT), floated into windows of their own and taken back into tabs, their
 // views made the same; and ツール's switch and 修飾キー among the panels. H-d fills ワークスペース ▸ (fill_workspaces).
 
+#include <QDir>
 #include <QDockWidget>
 #include <QHBoxLayout>
 #include <QInputEvent>
@@ -19,11 +20,14 @@
 #include <cmath>
 
 #include "app/doc_area.hpp"
+#include "app/ask.hpp"
 #include "app/documents.hpp"
+#include "app/ime.hpp"
 #include "app/main_window.hpp"
 #include "app/pane_view.hpp"
 #include "app/session.hpp"
 #include "app/theme.hpp"
+#include "core/paths.hpp"
 #include "core/pyconv.hpp"
 
 namespace genko::app {
@@ -204,9 +208,10 @@ void MainWindow::build_arrange_docks() {
     modifier_dock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
     addDockWidget(Qt::LeftDockWidgetArea, modifier_dock_);
     modifier_dock_->hide();  // (for a touch screen or a pen alone: ウィンドウ brings it)
-    // (hidden: the keys kept down let go)
-    connect(modifier_dock_, &QDockWidget::visibilityChanged, this, [this, keys](bool shown) {
-        if (shown || modifier_dock_->isVisible()) return;
+    // (its switch turned off — ウィンドウ → 修飾キー —: the keys kept down let go; hidden behind another panel's tab or by
+    // 原稿だけを表示, they stay down — review P3-8)
+    connect(modifier_dock_->toggleViewAction(), &QAction::triggered, this, [keys](bool shown) {
+        if (shown) return;
         for (QToolButton* button : keys->findChildren<QToolButton*>()) button->setChecked(false);
     });
     view_menu_->addAction(modifier_dock_->toggleViewAction());
@@ -259,19 +264,7 @@ void MainWindow::fill_pane(PaneView* pane, std::uint64_t tab) {
     const int i = document_of(tab);
     if (pane == nullptr || i < 0) return;
     const Document& d = documents_[static_cast<std::size_t>(i)];
-    // (what the canvas in front shows over the page, the pane too: the guides, the grid, the extras)
-    pane->show_guides = canvas_->show_guides;
-    pane->show_frame_numbers = canvas_->show_frame_numbers;
-    pane->rulers_visible = canvas_->rulers_visible;
-    pane->grid_visible = canvas_->grid_visible;
-    pane->grid_mm = canvas_->grid_mm;
-    pane->extras_shown = canvas_->extras_shown;
-    pane->show_guide_lines = canvas_->show_guide_lines;
-    pane->show_canvas_guides = canvas_->show_canvas_guides;
-    pane->guide_colour = canvas_->guide_colour;
-    pane->grid_colour = canvas_->grid_colour;
-    pane->print_dpi = canvas_->print_dpi;
-    pane->binding = d.session->document().binding;
+    pane_look(pane);
     (void)proof_renderer(pane->renderer(), d.proof);  // (its own 色の校正 and 32 bit preview; a profile unread: none)
     pane->show_tab(
         tab, d.session,
@@ -298,6 +291,50 @@ void MainWindow::fill_pane(PaneView* pane, std::uint64_t tab) {
             return PaneView::Shown{book, index, !page.name_ok && agents ? "name" : "proof"};
         },
         d.view);
+}
+
+void MainWindow::pane_look(PaneView* pane) {
+    // (what the canvas in front shows over the page, the pane too: the guides, the grid, the extras and their switches)
+    pane->show_guides = canvas_->show_guides;
+    pane->show_frame_numbers = canvas_->show_frame_numbers;
+    pane->rulers_visible = canvas_->rulers_visible;
+    pane->grid_visible = canvas_->grid_visible;
+    pane->grid_mm = canvas_->grid_mm;
+    pane->extras_shown = canvas_->extras_shown;
+    pane->show_guide_lines = canvas_->show_guide_lines;
+    pane->show_canvas_guides = canvas_->show_canvas_guides;
+    pane->guide_colour = canvas_->guide_colour;
+    pane->grid_colour = canvas_->grid_colour;
+    pane->print_dpi = canvas_->print_dpi;
+    // (the production's extras — PC5 J-c 注釈, J-d1 カウント・ものさしツール's line — drawn by the pane's own painters, each
+    // shown as the canvas shows it; J-b's スライス adds its own here the same way: review P3-3)
+    using View = PageCanvas::ExtraView;
+    pane->add_extra({QStringLiteral("notes"), [pane](QPainter& painter, const core::Page& page, const View& view) { pane->paint_notes(painter, page, view); }});
+    pane->add_extra({QStringLiteral("count"), [pane](QPainter& painter, const core::Page& page, const View& view) { pane->paint_count(painter, page, view); }});
+    pane->add_extra({QStringLiteral("ruler"), [pane](QPainter& painter, const core::Page& page, const View& view) { pane->paint_ruler(painter, page, view); }});
+    for (const QString& key : pane->extra_keys()) pane->show_extra(key, canvas_->extra_shown(key));
+}
+
+void MainWindow::panes_follow() {
+    // (review P3-4: エクストラ, 表示・非表示 ▸, the grid, the guides' colours, the monitor's profile changed — every pane at once)
+    if (doc_area_ == nullptr) return;
+    for (PaneView* pane : doc_area_->panes()) {
+        pane_look(pane);
+        const int i = document_of(pane->tab());
+        if (i >= 0) (void)proof_renderer(pane->renderer(), documents_[static_cast<std::size_t>(i)].proof);
+        pane->update();
+    }
+}
+
+QString MainWindow::tab_tip(int index) const {
+    if (index < 0 || index >= static_cast<int>(documents_.size())) return {};
+    const Document& d = documents_[static_cast<std::size_t>(index)];
+    const auto path = d.session ? d.session->path() : std::nullopt;
+    QString tip = path ? QDir::toNativeSeparators(QString::fromStdString(core::path_to_utf8(*path))) : QStringLiteral("未保存");
+    // (PC5 H-c review P3-7: its cell besides its path)
+    const int cell = doc_area_ != nullptr && doc_area_->front() >= 0 ? doc_area_->cell_of(d.tab) : -1;
+    if (cell >= 0) tip += QStringLiteral("（区画 %1）").arg(cell + 1);
+    return tip;
 }
 
 void MainWindow::keep_pane_views() {
@@ -367,7 +404,7 @@ void MainWindow::mark_tabs() {
     for (int i = 0; i < doc_tabs_->count() && i < static_cast<int>(documents_.size()); ++i) {
         const int cell = cells ? doc_area_->cell_of(documents_[static_cast<std::size_t>(i)].tab) : -1;
         doc_tabs_->setTabIcon(i, cell >= 0 ? cell_mark(doc_area_->layout(), count, cell) : QIcon());
-        doc_tabs_->setTabToolTip(i, cell >= 0 ? QStringLiteral("区画 %1").arg(cell + 1) : QString());
+        doc_tabs_->setTabToolTip(i, tab_tip(i));
     }
 }
 
@@ -436,7 +473,13 @@ void MainWindow::adopt_first(const Document& doc) {
     show_document(0);
 }
 
+void MainWindow::finish_typing() {
+    // (review P3-12: words being typed go into their own book before its tab moves — a menu took the focus, not the page)
+    if (InlineEditor* typing = canvas_->editor()) typing->finish(true);
+}
+
 void MainWindow::float_in_window() {
+    finish_typing();
     if (documents_.size() < 2) {
         flash(QStringLiteral("原稿が 1 つなので、このウィンドウのままです"), 4000);
         return;
@@ -454,15 +497,23 @@ void MainWindow::float_in_window() {
 }
 
 void MainWindow::float_all(bool cascade) {
+    finish_typing();
     if (documents_.size() < 2) {
         flash(QStringLiteral("原稿が 1 つなので、このウィンドウのままです"), 4000);
         return;
     }
     store_document();
     const std::uint64_t front = documents_[static_cast<std::size_t>(doc_)].tab;
+    // (review P3-6: as many windows as cells at most — this one with them —; the rest stay in their tabs, said)
     std::vector<Document> going;
+    std::size_t left = 0;
     for (const Document& d : documents_) {
-        if (d.tab != front) going.push_back(d);
+        if (d.tab == front) continue;
+        if (static_cast<int>(going.size()) + 1 < DocArea::kMostPanes) {
+            going.push_back(d);
+        } else {
+            ++left;
+        }
     }
     std::vector<MainWindow*> made;
     int step = 0;
@@ -478,8 +529,10 @@ void MainWindow::float_all(bool cascade) {
     }
     // (their tabs here go: their books are open there — nothing asked)
     for (int i = static_cast<int>(documents_.size()) - 1; i >= 0; --i) {
-        if (documents_[static_cast<std::size_t>(i)].tab != front) close_document(i);
+        const std::uint64_t tab = documents_[static_cast<std::size_t>(i)].tab;
+        if (std::any_of(going.begin(), going.end(), [tab](const Document& d) { return d.tab == tab; })) close_document(i);
     }
+    if (left > 0) flash(QStringLiteral("ウィンドウは %1 までです。残りの %2 つの原稿はタブのままです").arg(DocArea::kMostPanes).arg(left), 5000);
     if (cascade) {
         // 重ねて表示: the windows one over another 40 px apart, this one first and on top
         for (MainWindow* window : made) window->raise();
@@ -489,6 +542,19 @@ void MainWindow::float_all(bool cascade) {
 }
 
 void MainWindow::consolidate_all() {
+    finish_typing();
+    // (review P3-9: what is half done in another window — a transform, the crop box, words being typed — is never let go
+    // without a word: finished there first, as Enter would, or nothing is taken in)
+    for (MainWindow* other : documents::windows()) {
+        if (other == this || !other->canvas_->half_done()) continue;
+        if (!ask::question(this, QStringLiteral("すべてをタブに統合"),
+                           QStringLiteral("「%1」のウィンドウに、確定していない作業（変形・切り抜きの枠・パス・文字の入力など）があります。"
+                                          "確定してからタブに統合しますか？（いいえ: 統合をやめます）")
+                               .arg(other->documents_[static_cast<std::size_t>(std::max(0, other->doc_))].title()))) {
+            return;
+        }
+        other->canvas_->finish_half_done();
+    }
     store_document();
     for (MainWindow* other : documents::windows()) {
         if (other == this) continue;

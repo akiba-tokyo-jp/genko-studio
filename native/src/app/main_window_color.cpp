@@ -302,11 +302,13 @@ void MainWindow::apply_proof_view() {
                   .arg(QFileInfo(profile).fileName()),
               6000, true);
         canvas_->update();
+        panes_follow();
         return;
     }
     show_proof_marks();
     refresh_gamut_count();
     canvas_->update();
+    panes_follow();  // (PC5 H-c review P3-4: the monitor's profile, カラー設定: the panes too)
 }
 
 void MainWindow::show_proof_marks() {

@@ -81,6 +81,7 @@ void even(QSplitter* s) {
 
 DocArea::DocArea(PageCanvas* front, QWidget* parent) : QWidget(parent), canvas_(front), canvas_least_(front->minimumSize()) {
     setObjectName(QStringLiteral("docArea"));
+    panes_pool_.setMaxThreadCount(kPaneThreads);
     root_ = new QVBoxLayout(this);
     root_->setContentsMargins(0, 0, 0, 0);
     root_->setSpacing(0);
@@ -255,6 +256,8 @@ void DocArea::arrange(const QString& layout, const std::vector<std::uint64_t>& t
                 spare_.pop_back();
             } else {
                 p = new PaneView;
+                p->renderer().share_pool(&panes_pool_, 1);
+                p->space_down = [canvas = canvas_] { return canvas->space_held(); };
                 connect(p, &PaneView::activated, this, [this, p] {
                     const auto it = std::find(contents_.begin(), contents_.end(), static_cast<QWidget*>(p));
                     if (it != contents_.end()) emit paneActivated(static_cast<int>(it - contents_.begin()));

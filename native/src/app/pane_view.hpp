@@ -14,8 +14,9 @@
 // A pane beside the one in front (PC5 H-c, 節 H 5.3, the user's decision 7: ウィンドウ → アレンジ's n-up and tiles): the page
 // of another tab of the window, only looked at — a PageCanvas made view-only. It takes no tool: a click (the mouse or the
 // pen) brings its tab to the front, into this cell (the window moves its canvas here); the wheel scrolls and zooms it
-// (Ctrl), the middle button drags it. It keeps the whole page's tiles only, drawn by one thread, and draws its book's
-// changes again once they stop coming (節 H 4.5: never while the person works in the pane in front).
+// (Ctrl), the middle button and Space+drag (Space held here, or on the canvas in front) drag it (節 H 5.3). It keeps the
+// whole page's tiles only, drawn on the panes' one pool (DocArea's), and draws its book's changes again once they stop
+// coming (節 H 4.5: never while the person works in the pane in front).
 
 namespace genko::app {
 
@@ -44,6 +45,8 @@ public:
     // How long after its book's last change it draws it again (ms).
     static constexpr int kLaterMs = 500;
     bool waiting() const { return later_.isActive(); }
+    // Whether Space is held on the canvas in front (the keys go there: Space+drag here pans this pane too).
+    std::function<bool()> space_down;
 
 signals:
     // A click on it: its tab to the front, here.
@@ -65,7 +68,8 @@ private:
     Source source_;
     QMetaObject::Connection follows_;
     QTimer later_;
-    bool middle_ = false;
+    bool middle_ = false;  // (dragging its view: the middle button, or Space with the left)
+    bool space_ = false;   // (Space held with the focus here)
 };
 
 }  // namespace genko::app

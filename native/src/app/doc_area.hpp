@@ -2,6 +2,7 @@
 
 #include <QRectF>
 #include <QStringList>
+#include <QThreadPool>
 #include <QWidget>
 
 #include <cstdint>
@@ -77,6 +78,10 @@ private:
     QString layout_ = QStringLiteral("tabs");
     int front_ = -1;
     QSize canvas_least_;               // (the canvas's own least size, given back in the tabs' way)
+    // (the panes' tiles drawn here, kPaneThreads at a time, one tile of each pane at once — review P3-5: fifteen panes never
+    // fifteen threads drawing at once beside the canvas's own)
+    static constexpr int kPaneThreads = 2;
+    QThreadPool panes_pool_;
 };
 
 }  // namespace genko::app

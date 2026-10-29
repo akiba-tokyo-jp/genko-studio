@@ -791,7 +791,8 @@ void PageRenderer::dispatch() {
             for (auto& [dpi, level] : levels_) mark(level, QRect(QPoint(0, 0), level.size), generation_);
         }
     }
-    const int most = pool_.maxThreadCount();
+    QThreadPool& runner = shared_pool_ != nullptr ? *shared_pool_ : pool_;  // (PC5 H-c: a pane's, the panes' pool)
+    const int most = shared_pool_ != nullptr ? shared_count_ : pool_.maxThreadCount();
     // the whole page first (the tiles in sight before the others), then the finer tiles in sight
     std::vector<Level*> order;
     if (auto it = levels_.find(base_dpi_); it != levels_.end()) order.push_back(&it->second);
@@ -832,7 +833,7 @@ void PageRenderer::dispatch() {
             const std::shared_ptr<OnionStore> onions = onions_;
             if (!wholes_) wholes_ = std::make_shared<WholeStore>();
             const std::shared_ptr<WholeStore> wholes = wholes_;
-            pool_.start([self, doc, page_index, page_id, generation, dpi, index, region, rough, mode, proof, gamut, monitor, dots, view, stop, frame,
+            runner.start([self, doc, page_index, page_id, generation, dpi, index, region, rough, mode, proof, gamut, monitor, dots, view, stop, frame,
                          onion, onions, hdr, wholes]() {
                 Result result;
                 result.page_id = page_id;

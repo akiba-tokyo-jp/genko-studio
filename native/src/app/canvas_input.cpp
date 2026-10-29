@@ -588,11 +588,7 @@ void PageCanvas::contextMenuEvent(QContextMenuEvent* event) {
 void PageCanvas::wheelEvent(QWheelEvent* event) {
     if (event->modifiers() & Qt::ControlModifier) {
         const int delta = event->angleDelta().y() != 0 ? event->angleDelta().y() : event->pixelDelta().y();
-        if (delta != 0) {
-            const double factor = 1.0 + std::max(-0.5, std::min(0.5, delta / 600.0));
-            zoom_by(factor, unturned(event->position()));
-            if (event->modifiers() & Qt::ShiftModifier) emit handUsed(factor, QPointF(), false);  // (PC5 H-c: Shift — every pane)
-        }
+        if (delta != 0) zoom_by(1.0 + std::max(-0.5, std::min(0.5, delta / 600.0)), unturned(event->position()));
         return;
     }
     const QPoint pixel = event->pixelDelta();
@@ -607,7 +603,6 @@ void PageCanvas::wheelEvent(QWheelEvent* event) {
     view_.fitted = false;
     rerender_.start();
     update();
-    if (event->modifiers() & Qt::ShiftModifier) emit handUsed(1.0, moved, false);  // (PC5 H-c: Shift — every pane)
 }
 
 bool PageCanvas::event(QEvent* e) {

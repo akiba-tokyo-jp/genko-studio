@@ -277,6 +277,155 @@ private slots:
         QCOMPARE(desk.canvas()->parentWidget(), static_cast<QWidget*>(area));
     }
 
+    // review P2-1: a book and its copy (the same page and layer ids) side by side — a transform, the crop box begun on the
+    // one in front are let go when the other comes to the front, and Enter there changes neither book.
+    void aCopyBesideLetsTheWorkGo() {
+        Desk desk;
+        desk.window->choose_tool(QStringLiteral("pen"));
+        const QPointF m = desk.canvas()->seen_mm().center();
+        inject::mouse_stroke(desk.canvas(), {m, m + QPointF(20, 6), m + QPointF(30, 20)});
+        desk.session->save_now();
+        QVERIFY(desk.session->wait_saved(10s));
+        const fs::path copy = path_of(desk.dir.filePath("copy.genko"));
+        fs::copy(desk.book, copy, fs::copy_options::recursive);
+        for (const auto& entry : fs::directory_iterator(copy))
+            if (entry.path().filename().string().find("lock") != std::string::npos) fs::remove_all(entry.path());
+        auto twin = Session::open(copy, quick(path_of(desk.dir.filePath("recovery"))));
+        desk.more.push_back(twin);
+        desk.window->add_document(twin);
+        desk.window->switch_document(0);
+        desk.trigger("act_arrange_2up_vertical");
+        PageCanvas* c = desk.canvas();
+        QCOMPARE(desk.window->current_page()->id, twin->document().pages[0]->id);  // (the same page id in both)
+        const auto ours = desk.session->document().revision;
+        const auto theirs = twin->document().revision;
+        desk.trigger("act_free_transform");
+        QVERIFY(c->transforming());
+        QVERIFY(c->half_done());
+        PaneView* pane = desk.area()->pane(1);
+        QTest::mouseClick(pane, Qt::LeftButton, {}, pane->rect().center());
+        QCOMPARE(desk.window->current_document(), 1);
+        QVERIFY(!c->transforming());
+        QTest::keyClick(c, Qt::Key_Return);
+        QTest::keyClick(c, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        QCOMPARE(twin->document().revision, theirs);
+        QCOMPARE(desk.session->document().revision, ours);
+        // the crop box drawn on the copy, the first book clicked: gone, nothing cropped
+        desk.window->action(QStringLiteral("act_crop_tool"))->trigger();
+        c->set_crop(PageCanvas::CropBox{QPointF(80, 100), QSizeF(60, 80), 0.0});
+        QVERIFY(c->crop().has_value());
+        pane = desk.area()->pane(0);
+        QTest::mouseClick(pane, Qt::LeftButton, {}, pane->rect().center());
+        QCOMPARE(desk.window->current_document(), 0);
+        QVERIFY(!c->crop().has_value());
+        QTest::keyClick(c, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        QCOMPARE(twin->document().revision, theirs);
+        QCOMPARE(desk.session->document().revision, ours);
+        // (its tooltip: the path and the cell; back in tabs: the path again for every tab — review P3-7)
+        QVERIFY(desk.window->doc_tabs()->tabToolTip(1).contains(QStringLiteral("copy.genko")));
+        QVERIFY(desk.window->doc_tabs()->tabToolTip(1).contains(QStringLiteral("区画 2")));
+        desk.trigger("act_arrange_consolidate");
+        QVERIFY(desk.window->doc_tabs()->tabToolTip(1).contains(QStringLiteral("copy.genko")));
+        QVERIFY(!desk.window->doc_tabs()->tabToolTip(1).contains(QStringLiteral("区画")));
+    }
+
+    // review P3-11: a pane takes no tool — a pen line, keys, a double click, the right button on it change no book —; Space
+    // held on the canvas in front with a drag on it moves its view (節 H 5.3, review P3-1); the switches of 表示 and the
+    // production's extras reach it (review P3-3, P3-4).
+    void aPaneOnlyLooks() {
+        Desk desk(2);
+        desk.window->switch_document(0);
+        desk.trigger("act_arrange_2up_vertical");
+        PaneView* pane = desk.area()->pane(1);
+        PageCanvas* c = desk.canvas();
+        const auto revision = [&desk] { return std::pair{desk.session->document().revision, desk.more[0]->document().revision}; };
+        const auto before = revision();
+        // Space on the canvas in front, a drag on the pane: its view moves, nothing comes to the front
+        c->setFocus();
+        QTest::keyPress(c, Qt::Key_Space);
+        QVERIFY(c->space_held());
+        const QPointF pan = pane->pan();
+        const QPoint at = pane->rect().center();
+        QTest::mousePress(pane, Qt::LeftButton, {}, at);
+        QMouseEvent move(QEvent::MouseMove, QPointF(at + QPoint(30, 10)), pane->mapToGlobal(QPointF(at + QPoint(30, 10))), Qt::NoButton, Qt::LeftButton,
+                         Qt::NoModifier);
+        QCoreApplication::sendEvent(pane, &move);
+        QTest::mouseRelease(pane, Qt::LeftButton, {}, at + QPoint(30, 10));
+        QTest::keyRelease(c, Qt::Key_Space);
+        QCOMPARE(desk.window->current_document(), 0);
+        QVERIFY(pane->pan() != pan);
+        // keys, a double click and the right button on the pane
+        pane->setFocus();
+        QTest::keyClick(pane, Qt::Key_Delete);
+        QTest::keyClick(pane, Qt::Key_A);
+        QTest::mouseDClick(pane, Qt::RightButton, {}, at);
+        QContextMenuEvent menu(QContextMenuEvent::Mouse, at, pane->mapToGlobal(at));
+        QCoreApplication::sendEvent(pane, &menu);
+        QCOMPARE(desk.window->current_document(), 0);
+        QCOMPARE(revision(), before);
+        // a pen line on it: its tab to the front, no line in either book
+        desk.window->choose_tool(QStringLiteral("pen"));
+        const QPointF m = pane->seen_mm().center();
+        inject::tablet_stroke(pane, {{m}, {m + QPointF(10, 2)}, {m + QPointF(20, 4)}});
+        QCoreApplication::processEvents();
+        QCOMPARE(desk.window->current_document(), 1);
+        QCOMPARE(ink_strokes(desk.session->document()), std::size_t{0});
+        QCOMPARE(ink_strokes(desk.more[0]->document()), std::size_t{0});
+        // the grid, エクストラ and the notes' switch: the pane too
+        pane = desk.area()->pane(0);
+        QVERIFY(!pane->grid_visible);
+        desk.trigger("act_grid");
+        QVERIFY(pane->grid_visible);
+        const auto keys = pane->extra_keys();
+        for (const char* key : {"notes", "count", "ruler"})
+            QVERIFY2(std::find(keys.begin(), keys.end(), QString::fromLatin1(key)) != keys.end(), key);
+        QCOMPARE(pane->extra_shown(QStringLiteral("notes")), c->extra_shown(QStringLiteral("notes")));
+        desk.trigger("act_show_notes");
+        QCOMPARE(pane->extra_shown(QStringLiteral("notes")), c->extra_shown(QStringLiteral("notes")));
+        desk.trigger("act_extras");
+        QCOMPARE(pane->extras_shown, c->extras_shown);
+        QVERIFY(!pane->extras_shown);
+    }
+
+    // review P3-9: すべてをタブに統合 with a transform half done in another window: asked; no — nothing taken in; yes — finished
+    // there, then taken in.
+    void consolidatingAsksAboutWorkHalfDone() {
+        Desk desk;
+        const std::size_t windows = genko::app::documents::windows().size();
+        desk.open(1);
+        desk.trigger("act_float_window");  // (本1 into a window of its own)
+        QCOMPARE(genko::app::documents::windows().size(), windows + 1);
+        MainWindow* other = nullptr;
+        for (MainWindow* w : genko::app::documents::windows())
+            if (w != desk.window.get()) other = w;
+        QVERIFY(other != nullptr);
+        other->choose_tool(QStringLiteral("pen"));
+        const QPointF n = other->canvas()->seen_mm().center();
+        inject::mouse_stroke(other->canvas(), {n, n + QPointF(15, 5)});
+        other->action(QStringLiteral("act_free_transform"))->trigger();
+        QVERIFY(other->canvas()->transforming());
+        int asked = 0;
+        desk.answers->responder->question = [&asked](const QString&, const QString&) {
+            ++asked;
+            return false;
+        };
+        desk.trigger("act_arrange_consolidate");
+        QCOMPARE(asked, 1);
+        QCOMPARE(genko::app::documents::windows().size(), windows + 1);  // (no: nothing taken in)
+        QVERIFY(other->canvas()->transforming());
+        desk.answers->responder->question = [&asked](const QString&, const QString&) {
+            ++asked;
+            return true;
+        };
+        desk.trigger("act_arrange_consolidate");
+        QCOMPARE(asked, 2);
+        QCOMPARE(genko::app::documents::windows().size(), windows);
+        QCOMPARE(desk.window->documents().size(), std::size_t{2});
+        desk.answers->responder->question = [](const QString&, const QString&) { return false; };
+    }
+
     // Sixteen cells at most (節 H 3 章): the seventeenth book by its tab, shown in the cell in front.
     void sixteenAtMost() {
         Desk desk(17);
@@ -407,17 +556,29 @@ private slots:
             QWheelEvent event(at, c->mapToGlobal(at), QPoint(), QPoint(0, 120), Qt::NoButton, keys, Qt::NoScrollPhase, false);
             QCoreApplication::sendEvent(c, &event);
         };
+        // (the wheel — Shift's across, Ctrl+Shift's zoom too — the front alone, as before: review P3-2)
         const QPointF pan = pane->pan();
         const double scale = pane->scale();
+        const QPointF front_pan = c->pan();
         wheel(Qt::NoModifier);
-        QCOMPARE(pane->pan(), pan);
         wheel(Qt::ShiftModifier);
-        QVERIFY(pane->pan() != pan);
-        QCOMPARE(pane->pan().x() - pan.x(), 40.0);  // (Shift's wheel across, as the front's)
+        QCOMPARE(c->pan().x() - front_pan.x(), 40.0);
         const double front = c->scale();
         wheel(Qt::ControlModifier | Qt::ShiftModifier);
-        QVERIFY(std::abs(pane->scale() / scale - c->scale() / front) < 1e-6);
         QVERIFY(c->scale() > front);
+        QCOMPARE(pane->pan(), pan);
+        QCOMPARE(pane->scale(), scale);
+        // the hand with Shift: every pane by as much; the zoom tool's click with Shift: every pane as much
+        desk.window->choose_tool(QStringLiteral("hand"));
+        const QPointF a = c->seen_mm().center();
+        inject::mouse_stroke(c, {a, a + QPointF(4, 0), a + QPointF(8, 0)}, Qt::ShiftModifier);
+        QVERIFY(pane->pan().x() != pan.x());
+        QVERIFY(std::abs(pane->pan().y() - pan.y()) < 1e-6);
+        const double zoomed = pane->scale();
+        desk.window->choose_tool(QStringLiteral("zoom"));
+        inject::click_mm(c, c->seen_mm().center(), Qt::ShiftModifier);
+        QTRY_VERIFY(!c->gliding());
+        QVERIFY(std::abs(pane->scale() / zoomed - 2.0) < 0.01);
         // ズームツール's すべてのウィンドウをズーム: a click zooms the pane and another window's page
         MainWindow* other = desk.window->new_window();
         const double there = other->canvas()->scale();
@@ -584,8 +745,12 @@ private slots:
         alt->click();
         QVERIFY(!c->tool_held());
         QCOMPARE(c->tool(), QStringLiteral("pen"));
-        // hidden: the keys let go
+        // hidden by another way (behind a tab, 原稿だけを表示): the keys stay down; its switch turned off: let go (review P3-8)
         alt->click();
+        dock->hide();
+        QCOMPARE(w->latched_keys(), Qt::KeyboardModifiers(Qt::AltModifier));
+        dock->show();
+        QVERIFY(keys->isChecked());
         keys->trigger();
         QVERIFY(!dock->isVisible());
         QCOMPARE(w->latched_keys(), Qt::KeyboardModifiers());

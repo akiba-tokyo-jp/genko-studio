@@ -913,7 +913,7 @@ void MainWindow::refresh_status() {
     setWindowTitle(QStringLiteral("%1 第%2話 — Genko Studio").arg(QString::fromStdString(b.title), QString::fromStdString(b.episode.repr())));
     if (doc_ < doc_tabs_->count()) {
         doc_tabs_->setTabText(doc_, documents_[static_cast<std::size_t>(doc_)].title());
-        doc_tabs_->setTabToolTip(doc_, session_->path() ? QDir::toNativeSeparators(qpath(*session_->path())) : QStringLiteral("未保存"));
+        doc_tabs_->setTabToolTip(doc_, tab_tip(doc_));  // (its path; PC5 H-c: its cell too)
     }
     save_label_->show_status(status);
     failure_bar_->show_status(status);
@@ -1090,6 +1090,9 @@ void MainWindow::store_document() {
 
 void MainWindow::show_document(int index) {
     const Document& doc = documents_[static_cast<std::size_t>(index)];
+    // (PC5 H-c review P2-1: another book — or another contents' tab — in front: what a tool left half done on the canvas is
+    // let go, whatever its page's id — a duplicate shares it —; never finished on this one)
+    if (session_ != doc.session || contents_ != doc.contents) canvas_->let_go();
     doc_ = index;
     arrange_follow();  // (PC5 H-c: the canvas to its tab's cell — before the view is given: the cell's size —, main_window_arrange.cpp)
     session_ = doc.session;

@@ -16,7 +16,6 @@ PaneView::PaneView(QWidget* parent) : PageCanvas(parent) {
     set_view_only(true);
     setMinimumSize(24, 24);  // (six or sixteen of them share the middle of the window)
     setFocusPolicy(Qt::ClickFocus);
-    renderer().set_threads(1);  // (節 H 9: sixteen panes never sixteen pools of threads)
     show_guides = true;
     later_.setSingleShot(true);
     later_.setInterval(kLaterMs);
@@ -58,6 +57,15 @@ void PaneView::mousePressEvent(QMouseEvent* event) {
         PageCanvas::mousePressEvent(event);
         return;
     }
+    if (event->button() == Qt::LeftButton && (space_ || (space_down && space_down()))) {
+        // (Space+drag: its view, as the canvas's hand — 節 H 5.3; the canvas pans on the middle button's way)
+        middle_ = true;
+        QMouseEvent pan(event->type(), event->position(), event->scenePosition(), event->globalPosition(), Qt::MiddleButton, Qt::MiddleButton,
+                        event->modifiers() & ~Qt::ShiftModifier, event->pointingDevice());
+        PageCanvas::mousePressEvent(&pan);
+        event->accept();
+        return;
+    }
     event->accept();
     if (event->button() == Qt::LeftButton) emit activated();
 }
@@ -68,9 +76,11 @@ void PaneView::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void PaneView::mouseReleaseEvent(QMouseEvent* event) {
-    if (middle_ && event->button() == Qt::MiddleButton) {
+    if (middle_ && (event->button() == Qt::MiddleButton || event->button() == Qt::LeftButton)) {
         middle_ = false;
-        PageCanvas::mouseReleaseEvent(event);
+        QMouseEvent pan(event->type(), event->position(), event->scenePosition(), event->globalPosition(), Qt::MiddleButton, Qt::NoButton,
+                        event->modifiers(), event->pointingDevice());
+        PageCanvas::mouseReleaseEvent(&pan);  // (the pan let go: the canvas's middle button's way)
     }
     event->accept();
 }
@@ -82,9 +92,23 @@ void PaneView::tabletEvent(QTabletEvent* event) {
     if (event->type() == QEvent::TabletPress && event->button() == Qt::LeftButton) emit activated();
 }
 
-void PaneView::keyPressEvent(QKeyEvent* event) { QWidget::keyPressEvent(event); }
+void PaneView::keyPressEvent(QKeyEvent* event) {
+    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {  // (Space alone: no tool's key here)
+        space_ = true;
+        event->accept();
+        return;
+    }
+    QWidget::keyPressEvent(event);
+}
 
-void PaneView::keyReleaseEvent(QKeyEvent* event) { QWidget::keyReleaseEvent(event); }
+void PaneView::keyReleaseEvent(QKeyEvent* event) {
+    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
+        space_ = false;
+        event->accept();
+        return;
+    }
+    QWidget::keyReleaseEvent(event);
+}
 
 void PaneView::contextMenuEvent(QContextMenuEvent* event) { event->accept(); }
 

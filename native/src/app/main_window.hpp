@@ -814,6 +814,19 @@ private:
     void hand_used(double factor, const QPointF& moved, bool every_window);
     // 色の校正 and the 32 bit preview of a tab on a renderer (false: its proof profile could not be read — nothing proofed).
     bool proof_renderer(PageRenderer& renderer, const ProofView& view);
+    // (PC5 H-c review) A pane shows over its page what the canvas in front shows (guides, grid, extras — the production's
+    // painters too); every pane again after a switch, a preference or the monitor changed; a tab's tooltip (its path and
+    // its cell); words being typed finished before a tab moves.
+    void pane_look(PaneView* pane);
+    void panes_follow();
+    QString tab_tip(int index) const;
+    void finish_typing();
+    // (review P2-1) The book a transform or the crop box was begun on: Enter there never lands on another book.
+    const Session* transform_book_ = nullptr;
+    std::optional<std::string> transform_contents_;
+    const Session* crop_book_ = nullptr;
+    std::optional<std::string> crop_contents_;
+    bool begun_here(const Session* book, const std::optional<std::string>& contents) const { return book == session_.get() && contents == contents_; }
     void build_edit_actions();
     void build_edit_menu_tail(QMenu* edit);
     // PC5 H-0: the panels by Photoshop's names (ナビゲーター, オプション, ヒストリー), their object names — the workspaces' keys —
