@@ -252,6 +252,9 @@ genko_library(genko_render
     psd_comps.cpp
     pcraft_production.cpp
     pcraft_comps.cpp
+    # PC5 I-d (変数とデータセット: variables@1's ops and their .pcraft key)
+    ops_variables.cpp
+    pcraft_variables.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

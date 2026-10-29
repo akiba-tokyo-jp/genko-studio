@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "core/groups.hpp"
+#include "core/variables.hpp"
 #include "core/adjust.hpp"
 #include "core/adjust_kinds.hpp"
 #include "core/channels.hpp"
@@ -277,7 +278,9 @@ bool not_per_page(std::string_view name) {
     return one_of(name, {"add_page", "delete_page", "duplicate_page", "import_pages", "reorder", "move_page",
                          "set_page_spec", "add_cover", "for_pages", "replace_text", "approve", "revoke",
                          "allow_chat_approval", "name_ok", "advance", "set_bible", "set_script", "define_brush",
-                         "set_brush", "split_channels", "merge_channels"});
+                         "set_brush", "split_channels", "merge_channels",
+                         // (variables@1, PC5 I-d: the book's variables and data sets)
+                         "set_variables", "set_data_sets", "apply_data_set"});
 }
 
 bool printed(const Layer& layer) { return layer.role != LayerRole::Name && layer.role != LayerRole::Draft; }
@@ -871,6 +874,21 @@ Json journal_op(const Json& op) {
         } else if (is_op(out, "set_adjustment") || (is_op(out, "filter_raster") && out.value("kind", Json()) == Json("color_lookup"))) {
             file_text(out);
         }
+        // (variables@1, PC5 I-d: a data set's picture given as its bytes — kept by the book as an asset)
+        if (is_op(out, "set_data_sets")) {
+            if (const auto sets = out.find("data_sets"); sets != out.end() && sets->is_array()) {
+                for (Json& set : *sets) {
+                    if (!set.is_object() || !set.contains("values") || !set["values"].is_array()) continue;
+                    for (Json& value : set["values"]) {
+                        if (!value.is_object() || !value.contains("value") || !value["value"].is_object()) continue;
+                        Json& picture = value["value"];
+                        if (const auto data = picture.find("data"); data != picture.end() && data->is_string()) {
+                            *data = "<" + std::to_string(code_points(data->get_ref<const std::string&>())) + " base64 chars>";
+                        }
+                    }
+                }
+            }
+        }
     }
     return out;
 }
@@ -1217,6 +1235,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     validate_layer_styles(work);    // (layer-styles@1, PC4 E6: a style in its normal form, on a layer that takes one)
                     type_text::validate_type(work);  // (type@1, PC5 G-0: a record in its normal form; a type layer draws its text alone)
                     validate_groups(work);  // (groups@1, PC5 I-b: a group on a folder only, pass_through a group's only)
+                    validate_variables(work);  // (variables@1, PC5 I-d: the book's variables in their normal form)
                 } catch (const Error& error) {
                     if (error.code() == "not_yet_ported") throw;
                     throw OpError(error.what());

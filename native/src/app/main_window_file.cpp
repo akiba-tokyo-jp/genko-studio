@@ -237,7 +237,9 @@ void MainWindow::open_path(const fs::path& path, std::optional<render::codecs::F
     watcher->setFuture(QtConcurrent::run([path, options]() -> Read {
         try {
             const std::string bytes = file_bytes(path);
-            return {formats::open_file(bytes, core::path_to_utf8(path.filename()), options), QString()};
+            formats::OpenOptions here = options;
+            here.folder = path.parent_path();  // (PC5 I-d: a .pcraft's data sets' pictures beside it)
+            return {formats::open_file(bytes, core::path_to_utf8(path.filename()), here), QString()};
         } catch (const std::exception& error) {
             return {std::nullopt, QString::fromUtf8(error.what())};
         }

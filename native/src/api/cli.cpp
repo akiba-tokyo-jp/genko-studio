@@ -1182,6 +1182,7 @@ int new_book_of(const Arguments& a, bool ascii) {
             options.raw = given;
         }
         const std::string file = pathlib_text(from->toStdString());
+        options.folder = storage::path_from_utf8(file).parent_path();  // (PC5 I-d: a .pcraft's data sets' pictures beside it)
         made = formats::open_file(storage::read_file(storage::path_from_utf8(file)), file, options);
         if (const auto title = a.value("--title")) made.doc.title = title->toStdString();
     } else {

@@ -140,6 +140,8 @@ genko_library(genko_core
     annotations.cpp
     measure.cpp
     video.cpp
+    # PC5 I-d (変数とデータセット: variables@1)
+    variables.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"

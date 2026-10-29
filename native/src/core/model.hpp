@@ -517,6 +517,8 @@ struct Document {
     // PC5 G-0 (type@1, core/type_text.hpp): its character styles, paragraph styles and Basic Paragraph
     // ({"character": […], "paragraph": […], "basic": {…}} in their normal form; none: none)
     std::optional<Json> type_styles;
+    // PC5 I-d (variables@1, core/variables.hpp): its variables and data sets in their normal form (none: none)
+    std::optional<Json> variables;
     // PC2a (adjustments@1): the 3D lookup tables its color_lookup corrections use (their "lut"), by their asset ref
     // (core/lut3d: GKLU bytes). Written as assets/<ab>/<64 hex>.gklut; only those a correction uses are written and read.
     std::map<std::string, Bytes> luts;
@@ -524,7 +526,8 @@ struct Document {
     // layer shows (on a page, or inside other contents) are written.
     std::map<std::string, std::shared_ptr<const SmartContents>> smart_contents;
     // smart-objects@1: the bytes of the files ops were given (their "data") that are not in assets/ yet, by their asset ref;
-    // the writer writes those its contents use (with their suffix), as it writes luts.
+    // the writer writes those its contents use (with their suffix), as it writes luts — and (variables@1, PC5 I-d) those
+    // the data sets' pictures name.
     std::map<std::string, Bytes> smart_files;
     // PC4 (file-info@1, core/file_info.hpp): its File Info (none: nothing said)
     std::optional<FileInfo> file_info;
