@@ -130,7 +130,7 @@ private slots:
     void theCommandsAndTheirKeys() {
         Window w;
         const std::vector<std::tuple<const char*, const char*, const char*, const char*>> commands{
-            {"act_image_size", "画像解像度…", "", "ページ"},
+            {"act_image_size", "画像解像度…", "Ctrl+Alt+I", "ページ"},  // (PC5 H-0: the Photoshop key set)
             {"act_canvas_size", "カンバスサイズ…", "Ctrl+Alt+C", "ページ"},
             {"act_rotate_180", "180°", "", "ページ/画像の回転"},
             {"act_rotate_90cw", "90°（時計回り）", "", "ページ/画像の回転"},

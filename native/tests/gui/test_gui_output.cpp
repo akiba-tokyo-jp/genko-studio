@@ -58,6 +58,7 @@
 #include "app/history_panel.hpp"
 #include "app/icons.hpp"
 #include "app/main_window.hpp"
+#include "app/workspace.hpp"
 #include "app/preferences.hpp"
 #include "app/print_dialog.hpp"
 #include "app/save_for_web_dialog.hpp"
@@ -248,8 +249,9 @@ private slots:
             QCOMPARE(a->statusTip(), QString::fromUtf8(e.tip));
             // (as Python's window has it: preferences.retip at its start — the name, its keys now in （）, what it does)
             const QString keys = a->shortcut().toString(QKeySequence::NativeText);
-            QCOMPARE(a->toolTip(), QString::fromUtf8(e.text) + (keys.isEmpty() ? QString() : QStringLiteral("（%1）").arg(keys)) + QStringLiteral("\n") +
-                                       QString::fromUtf8(e.tip));
+            // (its name: its place too when another command has the same words — PC5 H-0's 定規（表示）, the 定規 tool's words)
+            const QString called = genko::app::command_name(genko::app::command_names(w), a);
+            QCOMPARE(a->toolTip(), called + (keys.isEmpty() ? QString() : QStringLiteral("（%1）").arg(keys)) + QStringLiteral("\n") + QString::fromUtf8(e.tip));
             QCOMPARE(a->isCheckable(), e.checkable);
             QVERIFY2(menus_of(w, a) == QStringList{QString::fromUtf8(e.menu)}, e.name);
         }

@@ -130,7 +130,7 @@ private slots:
             {"act_adjust_vibrance", QString()},
             {"act_adjust_hue_saturation", QStringLiteral("Ctrl+U")},
             {"act_adjust_color_balance", QStringLiteral("Ctrl+B")},
-            {"act_adjust_black_white", QString()},
+            {"act_adjust_black_white", QStringLiteral("Ctrl+Alt+Shift+B")},  // (PC5 H-0: the Photoshop key set)
             {"act_adjust_photo_filter", QString()},
             {"act_adjust_channel_mixer", QString()},
             {"act_adjust_selective_color", QString()},

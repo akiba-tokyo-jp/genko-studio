@@ -745,8 +745,8 @@ private slots:
         QVERIFY(dialog.clash->text().contains(QStringLiteral("「E」")));
         QCOMPARE(book.act("act_pen")->shortcut().toString(), QStringLiteral("B"));
         QCOMPARE(dialog.result(), int(QDialog::Rejected));
-        // (a free key: F7 — P is ペンツール's since PC3 C-a, Photoshop's)
-        dialog.editor(QStringLiteral("ブラシツール"))->setKeySequence(QKeySequence(QStringLiteral("F7")));
+        // (a free key: F11 — P is ペンツール's since PC3 C-a, F7 the レイヤー panel's since PC5 H-0: Photoshop's)
+        dialog.editor(QStringLiteral("ブラシツール"))->setKeySequence(QKeySequence(QStringLiteral("F11")));
         // the pen tablet: a light hand gets a softer curve
         for (int i = 0; i < 60; ++i) dialog.pad->pressures.push_back(0.25 + 0.01 * (i % 10));
         dialog.measure();
@@ -758,8 +758,8 @@ private slots:
         dialog.save_after->setValue(5);
         dialog.save();
         QCOMPARE(dialog.result(), int(QDialog::Accepted));
-        QCOMPARE(book.act("act_pen")->shortcut().toString(), QStringLiteral("F7"));
-        QVERIFY(book.act("act_pen")->toolTip().startsWith(QStringLiteral("ブラシツール（F7）")));  // (the tooltip says the new key)
+        QCOMPARE(book.act("act_pen")->shortcut().toString(), QStringLiteral("F11"));
+        QVERIFY(book.act("act_pen")->toolTip().startsWith(QStringLiteral("ブラシツール（F11）")));  // (the tooltip says the new key)
         QCOMPARE(w->save_after(), 5000);
         // (never past the longest wait: a test book saves within 0.4 s, a person's within 10 s)
         QCOMPARE(w->session().idle(), std::min(std::chrono::milliseconds(5000), w->session().longest()));
@@ -772,7 +772,7 @@ private slots:
         // a new window keeps the key; the new-book dialog starts on B5
         {
             app::MainWindow other(app::Session::open(book.path, gui_test::quick(gui_test::path_of(book.tmp.path() + QStringLiteral("/recovery2")))));
-            QCOMPARE(other.action(QStringLiteral("act_pen"))->shortcut().toString(), QStringLiteral("F7"));
+            QCOMPARE(other.action(QStringLiteral("act_pen"))->shortcut().toString(), QStringLiteral("F11"));
             QCOMPARE(other.save_after(), 5000);
             other.close();
         }

@@ -595,11 +595,11 @@ private slots:
         QCOMPARE(studio.window->canvas()->frame_mode, QStringLiteral("poly"));
         studio.window->choose_tool(QStringLiteral("zoom"));
         QVERIFY(ts->page_for(QStringLiteral("zoom")) == nullptr);
-        // a page's command rows trigger their commands: 原寸 on the selection tool's page
+        // a page's command rows trigger their commands: プリントサイズ (原寸 before PC5 H-0) on the selection tool's page
         studio.window->choose_tool(QStringLiteral("select"));
         QPushButton* actual = nullptr;
         for (QPushButton* row : ts->current_page()->findChildren<QPushButton*>()) {
-            if (row->toolTip().contains(QStringLiteral("原寸")) || row->text().contains(QStringLiteral("原寸"))) actual = row;
+            if (row->toolTip().contains(QStringLiteral("プリントサイズ")) || row->text().contains(QStringLiteral("プリントサイズ"))) actual = row;
         }
         QVERIFY(actual != nullptr);
         studio.window->canvas()->fit_page();
