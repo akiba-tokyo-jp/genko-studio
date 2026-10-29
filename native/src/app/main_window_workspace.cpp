@@ -6,7 +6,9 @@
 // arrangement of the books (アレンジ ▸) is not a workspace's: Photoshop's workspaces keep the panels only.
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QDockWidget>
+#include <QLineEdit>
 #include <QMenu>
 #include <QSignalBlocker>
 #include <QTabBar>
@@ -254,11 +256,11 @@ void MainWindow::apply_lock(bool on) {
     for (QDockWidget* dock : findChildren<QDockWidget*>()) {
         const QVariant own = dock->property("genko_features");  // (the panel's own: given back when unlocked)
         if (on) {
-            if (!own.isValid()) dock->setProperty("genko_features", static_cast<int>(dock->features()));
-            const auto features = QDockWidget::DockWidgetFeatures(dock->property("genko_features").toInt());
+            if (!own.isValid()) dock->setProperty("genko_features", dock->features().toInt());
+            const auto features = QDockWidget::DockWidgetFeatures::fromInt(dock->property("genko_features").toInt());
             dock->setFeatures(features & ~(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable));
         } else if (own.isValid()) {
-            dock->setFeatures(QDockWidget::DockWidgetFeatures(own.toInt()));
+            dock->setFeatures(QDockWidget::DockWidgetFeatures::fromInt(own.toInt()));
             dock->setProperty("genko_features", QVariant());
         }
     }

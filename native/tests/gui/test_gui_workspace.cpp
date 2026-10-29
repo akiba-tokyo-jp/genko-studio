@@ -929,6 +929,7 @@ private slots:
             QVERIFY(other.dock(QStringLiteral("ブラシ"))->isVisible());
             QVERIFY(!other.dock(QStringLiteral("ページ"))->isVisible());
         }
+        app::ask::set_responder(b.answers.responder);  // (the other window's answers gone with it: this one's again)
         // 初期設定: the window's first panels
         b.act("act_workspace_essentials")->trigger();
         for (QDockWidget* d : w->findChildren<QDockWidget*>()) {
@@ -945,11 +946,11 @@ private slots:
     void aNewWorkspaceKeepsTheKeysMenusAndToolbar() {
         Book b;
         app::MainWindow* w = b.window.get();
-        app::settings()->setValue(QStringLiteral("shortcuts/移動ツール"), QStringLiteral("Ctrl+Alt+M"));
+        app::settings()->setValue(QStringLiteral("shortcuts/移動ツール"), QStringLiteral("Ctrl+Alt+Shift+F2"));
         app::menu_look::set_hidden({QStringLiteral("100%")});
         app::toolbar::keep({QStringLiteral("act_move"), QStringLiteral("act_pen")}, {QStringLiteral("act_3d")});
         app::preferences::apply_all(w);
-        QCOMPARE(b.act("act_move")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+M")));
+        QCOMPARE(b.act("act_move")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+Shift+F2")));
         QCOMPARE(w->tool_palette()->actions().front(), b.act("act_move"));
         const auto named = [](const QString& name, bool all) {
             return [name, all](QDialog* dialog) {
@@ -981,7 +982,7 @@ private slots:
         QCOMPARE(b.act("act_move")->shortcut(), QKeySequence(QStringLiteral("V")));
         w->choose_workspace(QStringLiteral("仕上げ用"));
         QCOMPARE(w->current_workspace(), QStringLiteral("仕上げ用"));
-        QCOMPARE(b.act("act_move")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+M")));
+        QCOMPARE(b.act("act_move")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+Shift+F2")));
         QCOMPARE(app::menu_look::hidden(), QStringList{QStringLiteral("100%")});
         QCOMPARE(w->tool_palette()->actions().front(), b.act("act_move"));
         QVERIFY(w->extra_tools() != nullptr && w->extra_tools()->menu()->actions().contains(b.act("act_3d")));
@@ -1012,6 +1013,7 @@ private slots:
             QVERIFY(!other.dock(QStringLiteral("レイヤー"))->features().testFlag(QDockWidget::DockWidgetMovable));
             QVERIFY(other.act("act_lock_workspace")->isChecked());
         }
+        app::ask::set_responder(b.answers.responder);  // (the other window's answers gone with it: this one's again)
         b.act("act_workspace_painting")->trigger();  // (a workspace chosen: its panels, still locked)
         QVERIFY(!layers->features().testFlag(QDockWidget::DockWidgetMovable));
         b.act("act_lock_workspace")->trigger();
@@ -1103,6 +1105,7 @@ private slots:
             Book other;  // (the next window: the same set)
             QCOMPARE(other.act("act_pen")->shortcut(), key("F11"));
         }
+        app::ask::set_responder(b.answers.responder);  // (the other window's answers gone with it: this one's again)
         {
             app::ShortcutsDialog again(w);
             QCOMPARE(again.key_set->currentData().toString(), QStringLiteral("own:私の組"));
@@ -1257,6 +1260,7 @@ private slots:
             Book other;
             QCOMPARE(tools(other.window.get()), tools(w));
         }
+        app::ask::set_responder(b.answers.responder);  // (the other window's answers gone with it: this one's again)
         // 初期設定に戻す
         {
             app::ToolbarDialog dialog(w);

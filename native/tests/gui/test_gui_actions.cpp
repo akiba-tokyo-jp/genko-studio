@@ -121,7 +121,7 @@ const std::vector<Expected>& expected() {
         {"act_color", "カラーピッカー（描画色）…", {}, "", false, "ツール"},  // (PC4 E-0, decision 2)
         {"act_split_h", "コマを横に割る（上下に分ける）", {}, "", false, "ページ/コマ"},
         {"act_split_v", "コマを縦に割る（左右に分ける）", {}, "", false, "ページ/コマ"},
-        {"act_merge", "コマを結合（割る前に戻す）", k({s("Ctrl+Shift+M")}), "", false, "ページ/コマ"},
+        {"act_merge", "コマを結合（割る前に戻す）", k({s("Ctrl+Alt+M")}), "", false, "ページ/コマ"},  // (the user's decision 13: Photoshop's set — Genko's Ctrl+Shift+M)
         {"act_delete_frame", "このコマを消す（ほかのコマはそのまま）", {}, "", false, "ページ/コマ"},
         {"act_frame_selection", "このコマを選択範囲にする", {}, "選んだコマの形を選択範囲にします（塗りつぶし・トーン・消去をコマの中だけに）", false, "ページ/コマ"},
         {"act_gutters", "コマ間隔の設定…", {}, "新しく割るときの上下・左右の間隔", false, "ページ/コマ"},
@@ -779,6 +779,15 @@ private slots:
         QCOMPARE(keys("act_hand_tool"), k({s("H")}));
         QCOMPARE(keys("act_screen_next"), k({s("F")}));
         QCOMPARE(dock("レイヤー")->toggleViewAction()->shortcuts(), k({s("F7")}));
+        // (PC5 H-d) メニュー… Ctrl+Alt+Shift+M; コマを結合 Ctrl+Alt+M — Photoshop's Shift+Ctrl+M left free for 計測値を記録 (the
+        // user's decision 13: J-d2), the key one no Photoshop key, no other command's
+        QCOMPARE(keys("act_menus"), k({s("Ctrl+Alt+Shift+M")}));
+        QCOMPARE(keys("act_merge"), k({s("Ctrl+Alt+M")}));
+        QVERIFY(!key_sets::photoshop_defaults().contains(QStringLiteral("Ctrl+Alt+M")));
+        QVERIFY(key_sets::photoshop_defaults().contains(QStringLiteral("Ctrl+Shift+M")));
+        for (QAction* a : w->findChildren<QAction*>()) {
+            QVERIFY2(!a->shortcuts().contains(s("Ctrl+Shift+M")), qPrintable(a->text()));
+        }
         for (const char* none : {"act_mirror", "act_actual", "act_guides", "act_history", "act_snap", "act_show_rulers", "act_export"}) {
             QVERIFY2(keys(none).isEmpty(), none);
         }
@@ -825,18 +834,20 @@ private slots:
         QCOMPARE(keys("act_export"), k({s("Ctrl+E")}));
         QCOMPARE(keys("act_prefs"), k({s("Ctrl+,")}));
         QCOMPARE(keys("act_channel_composite"), k({s("Ctrl+Alt+2")}));
+        QCOMPARE(keys("act_merge"), k({s("Ctrl+Shift+M")}));  // (Genko's as before: the user's decision 13)
+        QVERIFY(keys("act_menus").isEmpty());
         QVERIFY(dock("レイヤー")->toggleViewAction()->shortcuts().isEmpty());
         QCOMPARE(clashes(), QStringList());
         QCOMPARE(title("select"), QStringLiteral("選択（V）"));  // (Genko's: the title follows the set)
         QCOMPARE(title("frame"), QStringLiteral("コマ割り（F）"));
         QCOMPARE(title("shape"), QStringLiteral("シェイプツール（O・Shift+O）"));
         // a key the person chose stays over either set
-        genko::app::settings()->setValue(QStringLiteral("shortcuts/移動ツール"), QStringLiteral("Ctrl+Alt+M"));
+        genko::app::settings()->setValue(QStringLiteral("shortcuts/移動ツール"), QStringLiteral("Ctrl+Alt+Shift+F2"));
         genko::app::preferences::apply_all(w);
-        QCOMPARE(keys("act_move"), k({s("Ctrl+Alt+M")}));
+        QCOMPARE(keys("act_move"), k({s("Ctrl+Alt+Shift+F2")}));
         key_sets::set_current(QStringLiteral("photoshop"));
         genko::app::preferences::apply_all(w);
-        QCOMPARE(keys("act_move"), k({s("Ctrl+Alt+M")}));
+        QCOMPARE(keys("act_move"), k({s("Ctrl+Alt+Shift+F2")}));
         genko::app::settings()->remove(QStringLiteral("shortcuts/移動ツール"));
         genko::app::preferences::apply_all(w);
         QCOMPARE(keys("act_move"), k({s("V")}));

@@ -4,6 +4,7 @@
 
 #include <QAction>
 #include <QComboBox>
+#include <QScopedValueRollback>
 #include <QDialogButtonBox>
 #include <QFile>
 #include <QHBoxLayout>
@@ -22,6 +23,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <functional>
 #include <set>
 
 #include "app/ask.hpp"

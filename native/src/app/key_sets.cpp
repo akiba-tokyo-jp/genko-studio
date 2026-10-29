@@ -128,6 +128,9 @@ const std::vector<std::pair<QString, QList<QKeySequence>>>& photoshop_keys() {
         // ツール → トーン: トーンを貼る none (Ctrl+Shift+T is 再実行)
         {QStringLiteral("act_split_h"), {}},
         {QStringLiteral("act_split_v"), {}},
+        // (the user's decision 13, 2026-10-29 — PC5 H-d: Photoshop's Shift+Ctrl+M is 計測値を記録's, J-d2: コマを結合 takes a
+        // modifier more, as the Genko-only tools do — Ctrl+Alt+M, none of Photoshop's —, Ctrl+Shift+M left free)
+        {QStringLiteral("act_merge"), k({"Ctrl+Alt+M"})},
         {QStringLiteral("act_tone_here"), {}},
         // チャンネル: Ctrl+2 the composite, Ctrl+3… each channel
         {QStringLiteral("act_channel_composite"), k({"Ctrl+2"})},
@@ -158,7 +161,7 @@ const QStringList& photoshop_defaults() {
                                 "Ctrl+Alt+Shift+W", "Ctrl+Alt+Shift+S", "Ctrl+Alt+Shift+I", "Ctrl+P", "Ctrl+Alt+Shift+P", "Ctrl+Q", "Ctrl+Z",
                                 "Ctrl+Shift+Z", "Ctrl+Alt+Z", "Ctrl+Shift+F", "Ctrl+X", "Ctrl+C", "Ctrl+Shift+C", "Ctrl+V", "Ctrl+Shift+V",
                                 "Ctrl+Alt+Shift+V", "Ctrl+F", "Ctrl+Alt+Shift+C", "Ctrl+T", "Ctrl+Shift+T", "Ctrl+Shift+K", "Ctrl+Alt+Shift+K",
-                                "Ctrl+Alt+Shift+M", "Ctrl+K", "Ctrl+L", "Ctrl+M", "Ctrl+U", "Ctrl+B", "Ctrl+Alt+Shift+B", "Ctrl+I", "Ctrl+Shift+U",
+                                "Ctrl+Alt+Shift+M", "Ctrl+Shift+M", "Ctrl+K", "Ctrl+L", "Ctrl+M", "Ctrl+U", "Ctrl+B", "Ctrl+Alt+Shift+B", "Ctrl+I", "Ctrl+Shift+U",
                                 "Ctrl+Shift+L", "Ctrl+Alt+Shift+L", "Ctrl+Shift+B", "Ctrl+Alt+I", "Ctrl+Alt+C", "Ctrl+Shift+N", "Ctrl+J",
                                 "Ctrl+Shift+J", "Ctrl+Shift+'", "Ctrl+Alt+Shift+'", "Ctrl+G", "Ctrl+Shift+G", "Ctrl+Alt+G", "Ctrl+Shift+]", "Ctrl+]",
                                 "Ctrl+[", "Ctrl+Shift+[", "Ctrl+E", "Ctrl+Shift+E", "Ctrl+Alt+Shift+E", "Ctrl+A", "Ctrl+D", "Ctrl+Shift+D",

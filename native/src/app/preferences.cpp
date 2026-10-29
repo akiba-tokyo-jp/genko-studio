@@ -1064,13 +1064,13 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     keys_button->setObjectName(QStringLiteral("prefs_keyboard_shortcuts"));
     keys_button->setToolTip(QStringLiteral("コマンドのキーとキーの組（Photoshop・Genko）、メニューの項目を変えます（編集 → キーボードショートカット…）"));
     connect(keys_button, &QPushButton::clicked, this, [this] { window_->open_keyboard_shortcuts(); });
-    auto* note = new QWidget;
-    auto* note_row = new QHBoxLayout(note);
+    auto* keys_row = new QWidget;
+    auto* note_row = new QHBoxLayout(keys_row);
     note_row->setContentsMargins(0, 0, 0, 0);
     note_row->addWidget(keys_button);
     note_row->addStretch(1);
     look::frame(this, look::header(QStringLiteral("環境設定"), QStringLiteral("このパソコンでの Genko の使い心地です。原稿には残りません。")), body,
-                nullptr, look::footer(buttons, note));
+                nullptr, look::footer(buttons, keys_row));
     resize(820, 620);
     show_gamma();
 }
