@@ -440,8 +440,9 @@ private slots:
         // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths); the crop tool (PC3 C-e, test_gui_page_size);
         // PC3 B4's four retouching tools (test_gui_retouch); PC3 C-b's five shape tools besides 長方形ツール (test_gui_shapes)
         // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask); PC4 E1's 鉛筆ツール (test_gui_brushes); PC4 E5's
-        // nine brushes that change pixels (test_gui_paint_tools); PC5 G-a's 横書き文字ツール (test_gui_type)
-        QCOMPARE(w->tools_group()->actions().size(), 54);
+        // nine brushes that change pixels (test_gui_paint_tools); PC5 G-a's 横書き文字ツール (test_gui_type); PC5 J-c's 注釈ツール
+        // (test_gui_notes)
+        QCOMPARE(w->tools_group()->actions().size(), 55);
     }
 
     // PC4 F-0 (SPEC FILE-01; 節 F 5.1・5.2): ファイル in Photoshop's order and names — the book's export is 書き出し ▸
@@ -993,7 +994,9 @@ private slots:
                                                   {"mixer", "act_mixer_brush"}, {"bgeraser", "act_background_eraser"},
                                                   {"colorreplace", "act_color_replacement"},
                                                   // (PC5 G-a: 横書き文字ツール)
-                                                  {"text_h", "act_text_h"}};
+                                                  {"text_h", "act_text_h"},
+                                                  // (PC5 J-c: 注釈ツール)
+                                                  {"note", "act_note"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());
