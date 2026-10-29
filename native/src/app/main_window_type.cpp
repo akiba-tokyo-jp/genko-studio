@@ -136,12 +136,12 @@ void MainWindow::build_type_actions() {
                             QStringLiteral("選んだテキストレイヤー・台詞の文字に OpenType 機能（%1）を使う・使わない（書体にある機能だけ選べます）").arg(tag), true);
         act->setChecked(false);
     }
-    // 書式 → 言語オプション ▸: which features the menus show (Photoshop's 初期設定・東アジア言語・中東言語の機能), the paragraph's
+    // 書式 → 言語オプション ▸: which features the menus show (Photoshop's 初期設定・東アジア言語・中東言語および南アジア言語の機能), the paragraph's
     // composer (中東および南アジア言語用 Composer: words broken at spaces, no kinsoku) and — 中東言語 — its direction
     auto* languages = new QActionGroup(this);
     languages->setExclusive(true);
     for (const auto& [key, label] : std::initializer_list<std::pair<const char*, QString>>{
-             {"default", QStringLiteral("初期設定の機能")}, {"east_asian", QStringLiteral("東アジア言語の機能")}, {"middle_eastern", QStringLiteral("中東言語の機能")}}) {
+             {"default", QStringLiteral("初期設定の機能")}, {"east_asian", QStringLiteral("東アジア言語の機能")}, {"middle_eastern", QStringLiteral("中東言語および南アジア言語の機能")}}) {
         const QString which = QString::fromLatin1(key);
         languages->addAction(make(QStringLiteral("act_type_lang_") + which, label, [this, which] { type_language_features(which); }, {},
                                   QStringLiteral("書式のメニューに出す文字の機能を選びます（%1）").arg(label), true));
@@ -391,7 +391,7 @@ void MainWindow::type_language_features(const QString& which) {
     for (const char* key : {"default", "east_asian", "middle_eastern"}) {
         if (QAction* act = action(QStringLiteral("act_type_lang_") + QString::fromLatin1(key))) act->setChecked(chosen == QLatin1String(key));
     }
-    // (東アジア言語の機能: プロポーショナルメトリクス in OpenType ▸; 中東言語の機能: the paragraph's direction)
+    // (東アジア言語の機能: プロポーショナルメトリクス in OpenType ▸; 中東言語および南アジア言語の機能: the paragraph's direction)
     if (QAction* act = action("act_type_ot_palt")) act->setVisible(chosen == QLatin1String("east_asian"));
     if (QAction* act = action("act_type_rtl")) act->setVisible(chosen == QLatin1String("middle_eastern"));
 }

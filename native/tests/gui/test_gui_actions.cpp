@@ -397,7 +397,7 @@ private slots:
         // act_type_to_box, act_type_update_all, act_type_lorem), 台詞をテキストレイヤーに・テキストレイヤーを台詞に
         // (act_line_to_type_layer, act_type_layer_to_line) — theirs (test_gui_type).
         // and the 16 of PC5 G-b (SPEC TEXT-02) — 書式 → OpenType ▸ 11 (act_type_ot_<tag>: liga, calt, dlig, swsh, salt, titl, ornm,
-        // ordn, frac, onum and palt), 言語オプション ▸ 初期設定・東アジア言語・中東言語の機能 (act_type_lang_<which>), 中東および
+        // ordn, frac, onum and palt), 言語オプション ▸ 初期設定・東アジア言語・中東言語および南アジア言語の機能 (act_type_lang_<which>), 中東および
         // 南アジア言語用 Composer (act_type_composer_world), 右から左の段落 (act_type_rtl) — theirs (test_gui_type).
                 // and PC5 J-a's ファイル → 書き出し → レイヤーカンプからファイル… (act_comps_to_files; its ウィンドウ → レイヤーカンプ is the
         // frame's attribute made real) — test_gui_layer_comps.

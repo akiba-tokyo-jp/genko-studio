@@ -296,7 +296,7 @@ private slots:
                               QStringLiteral("デザインのバリエーション"), QStringLiteral("タイトル用字形"), QStringLiteral("飾り文字"), QStringLiteral("序数表記"),
                               QStringLiteral("分数字"), QStringLiteral("オールドスタイル"), QStringLiteral("|"), QStringLiteral("プロポーショナルメトリクス")}));
         QCOMPARE(texts(s.menu_at(QStringLiteral("書式/言語オプション"))),
-                 QStringList({QStringLiteral("初期設定の機能"), QStringLiteral("東アジア言語の機能"), QStringLiteral("中東言語の機能"), QStringLiteral("|"),
+                 QStringList({QStringLiteral("初期設定の機能"), QStringLiteral("東アジア言語の機能"), QStringLiteral("中東言語および南アジア言語の機能"), QStringLiteral("|"),
                               QStringLiteral("中東および南アジア言語用 Composer"), QStringLiteral("右から左の段落")}));
         // East Asian by default (as Photoshop's Japanese edition): プロポーショナルメトリクス shown, 右から左の段落 not
         QVERIFY(s.act("act_type_lang_east_asian")->isChecked());
