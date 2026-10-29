@@ -251,6 +251,25 @@ private slots:
         QCOMPARE(drawn(asked.doc).tobytes(), drawn(plain).tobytes());
     }
 
+    // review P2-2: a style deleted from a line (and [なし] on its whole): drawn as before, pixel for pixel
+    void deletedDrawnAsBefore() {
+        core::Document doc = plain_book();
+        doc = run(doc, Json{{"op", "add_line"}, {"page", 1}, {"id", "l0"}, {"text", "ABC abc"}, {"x_mm", 3}, {"y_mm", 5}, {"w_mm", 44}, {"h_mm", 12},
+                            {"balloon", "none"}, {"wrap", "horizontal"}, {"style", Json{{"size_mm", 6}}}});
+        doc = run(doc, Json{{"op", "type_style"}, {"kind", "character"}, {"action", "new"}, {"from_selection", false}, {"attrs", Json{{"underline", false}}}});
+        doc = run(doc, Json{{"op", "type_style"}, {"kind", "character"}, {"action", "apply"}, {"id", "cs-1"}, {"line", "l0"}});
+        const std::string before = drawn(doc).tobytes();
+        const core::Document gone = run(doc, Json{{"op", "type_style"}, {"kind", "character"}, {"action", "delete"}, {"id", "cs-1"}});
+        QCOMPARE(drawn(gone).tobytes(), before);
+        const core::Document none = run(doc, Json{{"op", "type_style"}, {"kind", "character"}, {"action", "apply"}, {"line", "l0"}});
+        QCOMPARE(drawn(none).tobytes(), before);
+        // review P2-3: the line's own colour redefined into the style, then the style's colour changed: the line follows
+        core::Document own = run(doc, Json{{"op", "set_type"}, {"line", "l0"}, {"rgb", Json::array({0, 0, 0})}});
+        own = run(own, Json{{"op", "type_style"}, {"kind", "character"}, {"action", "redefine"}, {"line", "l0"}});
+        own = run(own, Json{{"op", "type_style"}, {"kind", "character"}, {"action", "set"}, {"id", "cs-1"}, {"attrs", Json{{"rgb", Json::array({220, 0, 0})}}}});
+        QVERIFY(count(drawn(own), {2, 2, 48, 20}).red > 50);
+    }
+
     // the refusals in the window's words
     void refusalsInWords() {
         const core::Document doc = styled_book();
@@ -280,6 +299,7 @@ private slots:
             {with(Json{{"action", "rename"}, {"id", "cs-1"}}), QStringLiteral("新しい名前（name）")},
             {with(Json{{"action", "new"}, {"apply", 3}}), QStringLiteral("apply は true か false")},
             {with(Json{{"action", "list"}, {"range", Json::array({0, 1})}}), QStringLiteral("範囲（range）は")},
+            {with(Json{{"action", "new"}, {"name", "a\nb"}}), QStringLiteral("改行・制御文字")},
         };
         for (const auto& [op, expected] : cases) {
             const QString said = words(op);

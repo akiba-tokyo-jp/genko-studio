@@ -131,7 +131,9 @@ Json redefinition_at(const StoryLine& record, const Json* styles, Kind kind, std
 Range stretch_at(const StoryLine& record, const Json* styles, std::int64_t at);
 // The own attributes of `range` (character: its ranges' char; paragraph: the paragraphs' para) whose value is `values`'
 // taken away (再定義's: the style says them now).
-void drop_same(StoryLine& record, Kind kind, Range range, const Json& values);
+// The whole text's own of them too (review P2-3): over the whole text taken away; over part of it, laid on the rest first
+// (`styles`: the book's, to keep the rest's look).
+void drop_same(StoryLine& record, const Json* styles, Kind kind, Range range, const Json& values);
 
 // 初期設定の書式を保存: the text's look at its start — {"char": {…}, "para": {…}}, every attribute that has a value — for
 // the machine's settings (never the book's).

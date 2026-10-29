@@ -5,6 +5,8 @@
 
 #include "core/type_styles.hpp"
 
+#include <QString>
+
 #include <algorithm>
 #include <map>
 #include <utility>
@@ -272,7 +274,14 @@ std::string unique_name(const Json* styles, Kind kind, const std::string& base, 
 
 std::string checked_name(const Json* styles, Kind kind, const Json& name, std::string_view except) {
     if (!name.is_string()) throw OpError("the style's name must be a string");
-    const std::string trimmed = trimmed_name(name.get<std::string>());
+    // (review P3-8: one spelling of the same letters — NFC —, and no control characters: a line break in a panel's row or a
+    // PSD's style sheet name)
+    const QString normal = QString::fromStdString(name.get<std::string>()).normalized(QString::NormalizationForm_C);
+    for (const char32_t c : normal.toStdU32String()) {
+        if (c < 0x20 || (c >= 0x7F && c <= 0x9F) || c == 0x2028 || c == 0x2029)
+            throw OpError("the style's name must not hold a line break or a control character");
+    }
+    const std::string trimmed = trimmed_name(normal.toStdString());
     if (trimmed.empty() || ruby::count(trimmed) > kMaxStyleName) throw OpError("the style's name is 1 to 64 characters");
     if (trimmed == kNoneName || trimmed == kBasicName) throw OpError("the name " + trimmed + " is the panel's own: choose another name");
     if (styles != nullptr && styles->is_object()) {
@@ -394,26 +403,91 @@ void keep_look(StoryLine& record, const Json* styles, const Look& before, std::o
     set_native(record, nt);
 }
 
-std::vector<std::int64_t> paragraphs_of(std::string_view text, std::int64_t start, std::int64_t end) {
-    std::vector<std::int64_t> out;
-    const std::int64_t count = type_text::paragraph_count(text);
-    const std::int64_t n = ruby::count(text);
-    for (std::int64_t p = 0; p < count; ++p) {
-        const std::int64_t first = type_text::paragraph_start(text, p);
-        const std::int64_t last = p + 1 < count ? type_text::paragraph_start(text, p + 1) - 1 : n;  // (its line break's place)
-        if (first <= std::max(start, end - 1) && start <= last) out.push_back(p);
+namespace {
+
+// The text's paragraphs, split once (review P2-4: a text of thousands of paragraphs asked of each): where each begins, and
+// how many graphemes the text has.
+struct Paragraphs {
+    std::vector<std::int64_t> starts;
+    std::int64_t n = 0;
+    explicit Paragraphs(std::string_view text) : starts(type_text::paragraph_starts_of(text)), n(ruby::count(text)) {}
+    std::int64_t count() const { return static_cast<std::int64_t>(starts.size()); }
+    // the paragraph grapheme `at` is in
+    std::int64_t of(std::int64_t at) const {
+        return static_cast<std::int64_t>(std::upper_bound(starts.begin(), starts.end(), at) - starts.begin()) - 1;
     }
-    return out;
+    Range span(std::int64_t p) const {
+        return Range{starts[static_cast<std::size_t>(p)], p + 1 < count() ? starts[static_cast<std::size_t>(p + 1)] : n};
+    }
+    // those [start, end) touches (an empty range: the one it is in): a paragraph's line break counts as its own
+    std::vector<std::int64_t> touched(std::int64_t start, std::int64_t end) const {
+        const std::int64_t first = std::max<std::int64_t>(0, of(std::max<std::int64_t>(0, start) - 1) );
+        std::vector<std::int64_t> out;
+        for (std::int64_t p = first; p < count(); ++p) {
+            const std::int64_t s = starts[static_cast<std::size_t>(p)];
+            const std::int64_t last = p + 1 < count() ? starts[static_cast<std::size_t>(p + 1)] - 1 : n;  // (its line break's place)
+            if (s > std::max(start, end - 1)) break;
+            if (start <= last) out.push_back(p);
+        }
+        return out;
+    }
+};
+
+// The entry of paragraph `p` in native_type's paragraphs (in order of their index: halved), or none.
+const Json* entry_of(const Json& nt, std::int64_t p) {
+    const Json* ps = get(nt, "paragraphs");
+    if (ps == nullptr || !ps->is_array() || ps->empty()) return nullptr;
+    const auto at = std::lower_bound(ps->begin(), ps->end(), p, [](const Json& item, std::int64_t i) { return int_at(item, "index") < i; });
+    return at != ps->end() && int_at(*at, "index") == p ? &*at : nullptr;
 }
 
-Range paragraph_span(std::string_view text, std::int64_t p) {
-    const std::int64_t count = type_text::paragraph_count(text);
-    const std::int64_t first = type_text::paragraph_start(text, p);
-    return Range{first, p + 1 < count ? type_text::paragraph_start(text, p + 1) : ruby::count(text)};
+// The paragraph style of paragraph `p` (its own, else the whole text's, else Basic Paragraph).
+std::string paragraph_style_of(const StoryLine& record, std::int64_t p) {
+    if (record.native_type && record.native_type->is_object()) {
+        const Json& nt = *record.native_type;
+        if (const Json* item = entry_of(nt, p); item != nullptr && item->contains("style")) return (*item)["style"].get<std::string>();
+        if (const Json* whole = get(nt, "para_style"); whole != nullptr && whole->is_string()) return whole->get<std::string>();
+    }
+    return std::string(kBasic);
 }
+
+// Does the record's native_type set it by the OpenType typesetting (render::text::sets_opentype's own part)? A record that
+// was keeps it (review P2-2: a style taken away, the text set as before — never the typesetting of before).
+bool opentype_record(const StoryLine& record) {
+    if (!record.native_type || !record.native_type->is_object()) return false;
+    for (const char* key : {"shaping", "char", "para", "runs", "paragraphs", "char_style", "para_style"}) {
+        if (record.native_type->contains(key)) return true;
+    }
+    return false;
+}
+void keep_shaping(StoryLine& record, bool was) {
+    if (!was || (record.native_type && record.native_type->contains("shaping"))) return;
+    Json nt = native_of(record);
+    nt["shaping"] = "opentype";
+    set_native(record, nt);
+}
+
+}  // namespace
+
+std::vector<std::int64_t> paragraphs_of(std::string_view text, std::int64_t start, std::int64_t end) { return Paragraphs(text).touched(start, end); }
+
+Range paragraph_span(std::string_view text, std::int64_t p) { return Paragraphs(text).span(p); }
+
+namespace {
+void restyle_inner(StoryLine& record, const Json* styles, Kind kind, std::optional<Range> range, const std::optional<std::optional<std::string>>& set,
+                   bool clear);
+}  // namespace
 
 void restyle(StoryLine& record, const Json* styles, Kind kind, std::optional<Range> range, const std::optional<std::optional<std::string>>& set,
              bool clear) {
+    const bool was = opentype_record(record);
+    restyle_inner(record, styles, kind, range, set, clear);
+    keep_shaping(record, was);
+}
+
+namespace {
+void restyle_inner(StoryLine& record, const Json* styles, Kind kind, std::optional<Range> range, const std::optional<std::optional<std::string>>& set,
+                   bool clear) {
     const std::int64_t n = ruby::count(record.text);
     if (range && (range->start < 0 || range->end > n || range->end < range->start))
         throw OpError("range must lie in the text, its end not before its start (0.." + std::to_string(n) + " graphemes)");
@@ -450,14 +524,31 @@ void restyle(StoryLine& record, const Json* styles, Kind kind, std::optional<Ran
         }
         if (clear) nt.erase("char");
         set_native(record, nt);
-        keep_look(record, styles, before, clear ? std::optional<Range>(*range) : std::nullopt);
+        // (the look kept outside the range — review P3-5: inside, what the whole text's style said goes with it)
+        keep_look(record, styles, before, *range);
         nt = native_of(record);
+        // (applied without clearing: the whole text's own attributes still win over the new style there, as Photoshop keeps
+        // the overrides — the style's attributes the whole text says otherwise laid on the range as its own; review P3-5)
+        Json keep = Json::object();
+        if (id && !clear && nt.contains("char")) {
+            const Json says = own_of(find(styles, Kind::Character, *id), "char");
+            for (const auto& [key, value] : nt["char"].items()) {
+                if (says.contains(key)) keep[key] = value;
+            }
+        }
         nt["runs"] = lay_runs(nt.value("runs", Json::array()), range->start, range->end, [&](Json& run) {
             if (set) {
                 if (id) run["style"] = *id;
                 else run.erase("style");
             }
             if (clear) run.erase("char");
+            if (!keep.empty()) {
+                Json own = run.value("char", Json::object());
+                for (const auto& [key, value] : keep.items()) {
+                    if (!own.contains(key)) own[key] = value;
+                }
+                run["char"] = std::move(own);
+            }
         });
         if (nt["runs"].empty()) nt.erase("runs");
         set_native(record, nt);
@@ -535,6 +626,7 @@ void restyle(StoryLine& record, const Json* styles, Kind kind, std::optional<Ran
     }
     set_native(record, nt);
 }
+}  // namespace
 
 bool takes(const StoryLine& record, Kind kind, std::string_view id) {
     if (kind == Kind::Paragraph && id == kBasic) return true;
@@ -561,6 +653,7 @@ bool takes(const StoryLine& record, Kind kind, std::string_view id) {
 
 bool take_away(StoryLine& record, Kind kind, std::string_view id, const Json* before, const Json* after) {
     if (!takes(record, kind, id) || (kind == Kind::Paragraph && id == kBasic)) return false;
+    const bool was = opentype_record(record);
     const Look look = look_of(record, before);
     Json nt = native_of(record);
     const Json want(std::string{id});
@@ -581,15 +674,19 @@ bool take_away(StoryLine& record, Kind kind, std::string_view id, const Json* be
     }
     set_native(record, nt);
     keep_look(record, after, look);
+    keep_shaping(record, was);
     return true;
 }
 
 std::optional<std::string> character_style_at(const StoryLine& record, std::int64_t at) {
     if (!record.native_type || !record.native_type->is_object()) return std::nullopt;
     const Json& nt = *record.native_type;
-    if (const Json* runs = get(nt, "runs"); runs != nullptr && runs->is_array()) {
-        for (const Json& run : *runs) {
-            if (int_at(run, "start") <= at && at < int_at(run, "end") && run.contains("style")) return run["style"].get<std::string>();
+    if (const Json* runs = get(nt, "runs"); runs != nullptr && runs->is_array() && !runs->empty()) {
+        // (the runs in order, none overlapping: the last that starts at or before it — halved)
+        auto it = std::upper_bound(runs->begin(), runs->end(), at, [](std::int64_t g, const Json& run) { return g < int_at(run, "start"); });
+        if (it != runs->begin()) {
+            const Json& run = *std::prev(it);
+            if (at < int_at(run, "end") && run.contains("style")) return run["style"].get<std::string>();
         }
     }
     if (const Json* whole = get(nt, "char_style"); whole != nullptr && whole->is_string()) return whole->get<std::string>();
@@ -597,25 +694,15 @@ std::optional<std::string> character_style_at(const StoryLine& record, std::int6
 }
 
 std::string paragraph_style_at(const StoryLine& record, std::int64_t at) {
-    const std::vector<std::int64_t> ps = paragraphs_of(record.text, at, at);
-    const std::int64_t p = ps.empty() ? 0 : ps.front();
-    if (record.native_type && record.native_type->is_object()) {
-        const Json& nt = *record.native_type;
-        if (const Json* list = get(nt, "paragraphs"); list != nullptr && list->is_array()) {
-            for (const Json& item : *list) {
-                if (int_at(item, "index") == p && item.contains("style")) return item["style"].get<std::string>();
-            }
-        }
-        if (const Json* whole = get(nt, "para_style"); whole != nullptr && whole->is_string()) return whole->get<std::string>();
-    }
-    return std::string(kBasic);
+    return paragraph_style_of(record, std::max<std::int64_t>(0, Paragraphs(record.text).of(at)));
 }
 
 Json current(const StoryLine& record, const Json* styles, std::optional<Range> range) {
-    const std::int64_t n = ruby::count(record.text);
+    const Paragraphs paragraphs(record.text);
+    const std::int64_t n = paragraphs.n;
     std::int64_t s = range ? std::clamp<std::int64_t>(range->start, 0, n) : 0;
     std::int64_t e = range ? std::clamp<std::int64_t>(range->end, s, n) : n;
-    const std::vector<std::int64_t> touched = paragraphs_of(record.text, s, e);
+    const std::vector<std::int64_t> touched = paragraphs.touched(s, e);
     if (s == e && n > 0) {  // (an empty range: the letter at it — at the end, the one before it)
         if (s >= n) s = n - 1;
         e = s + 1;
@@ -656,7 +743,7 @@ Json current(const StoryLine& record, const Json* styles, std::optional<Range> r
     bool para_override = false;
     const StoryLine bare = without_own(record, Kind::Paragraph);
     for (const std::int64_t p : touched) {
-        paras.insert(paragraph_style_at(record, paragraph_span(record.text, p).start));
+        paras.insert(paragraph_style_of(record, p));
         if (type_text::resolve_para(record, styles, p) != type_text::resolve_para(bare, styles, p)) para_override = true;
     }
     out["paragraph"] = paras.size() == 1 ? Json(*paras.begin()) : Json(nullptr);
@@ -728,11 +815,54 @@ Json redefinition_at(const StoryLine& record, const Json* styles, Kind kind, std
     return out;
 }
 
-void drop_same(StoryLine& record, Kind kind, Range range, const Json& values) {
+void drop_same(StoryLine& record, const Json* styles, Kind kind, Range range, const Json& values) {
     if (!record.native_type || values.empty()) return;
+    const bool was = opentype_record(record);
+    const Paragraphs paragraphs(record.text);
     Json nt = *record.native_type;
+    // (review P2-3: the whole text's own too — over the whole text taken away; over part of it, laid on the rest first)
+    const char* whole_key = kind == Kind::Character ? "char" : "para";
+    Json same = Json::object();
+    if (const Json* own = get(nt, whole_key); own != nullptr && own->is_object()) {
+        for (const auto& [key, value] : values.items()) {
+            if (own->contains(key) && (*own)[key] == value) same[key] = value;
+        }
+    }
+    if (!same.empty()) {
+        if (kind == Kind::Character) {
+            const bool everything = range.start <= 0 && range.end >= paragraphs.n;
+            const Look before = look_of(record, styles);
+            for (const auto& [key, value] : same.items()) nt[whole_key].erase(key);
+            if (nt[whole_key].empty()) nt.erase(whole_key);
+            set_native(record, nt);
+            if (!everything) keep_look(record, styles, before, range);  // (the rest as it was: those values its ranges' own)
+            nt = native_of(record);
+        } else {
+            const std::vector<std::int64_t> touched = paragraphs.touched(range.start, range.end);
+            if (static_cast<std::int64_t>(touched.size()) < paragraphs.count()) {
+                auto entries = paragraph_entries(nt);
+                const std::set<std::int64_t> in(touched.begin(), touched.end());
+                for (std::int64_t p = 0; p < paragraphs.count(); ++p) {
+                    if (in.contains(p)) continue;
+                    Json& item = entry_at(entries, p);
+                    Json own = item.value("para", Json::object());
+                    for (const auto& [key, value] : same.items()) {
+                        if (!own.contains(key)) own[key] = value;
+                    }
+                    item["para"] = std::move(own);
+                }
+                put_paragraphs(nt, entries);
+            }
+            for (const auto& [key, value] : same.items()) nt[whole_key].erase(key);
+            if (nt[whole_key].empty()) nt.erase(whole_key);
+        }
+    }
     if (kind == Kind::Character) {
-        if (!nt.contains("runs")) return;
+        if (!nt.contains("runs")) {
+            set_native(record, nt);
+            keep_shaping(record, was);
+            return;
+        }
         Json runs = Json::array();
         for (Json run : nt["runs"]) {
             if (int_at(run, "end") <= range.start || int_at(run, "start") >= range.end || !run.contains("char")) {
@@ -753,7 +883,7 @@ void drop_same(StoryLine& record, Kind kind, Range range, const Json& values) {
         else nt["runs"] = std::move(runs);
     } else {
         auto entries = paragraph_entries(nt);
-        for (const std::int64_t p : paragraphs_of(record.text, range.start, range.end)) {
+        for (const std::int64_t p : paragraphs.touched(range.start, range.end)) {
             const auto it = entries.find(p);
             if (it == entries.end() || !it->second.contains("para")) continue;
             Json& own = it->second["para"];
@@ -764,6 +894,7 @@ void drop_same(StoryLine& record, Kind kind, Range range, const Json& values) {
         put_paragraphs(nt, entries);
     }
     set_native(record, nt);
+    keep_shaping(record, was);
 }
 
 Json defaults_of(const StoryLine& record, const Json* styles) {
@@ -809,7 +940,7 @@ Json list(const Document& doc, Kind kind) {
     const auto count = [&](std::string_view id) {
         return static_cast<std::int64_t>(std::count_if(all.begin(), all.end(), [&](const StoryLine* r) {
             // (Basic Paragraph: the texts whose paragraphs take no style of their own)
-            if (kind == Kind::Paragraph && id == kBasic) return r->native_type.has_value() && paragraph_style_at(*r, 0) == kBasic;
+            if (kind == Kind::Paragraph && id == kBasic) return r->native_type.has_value() && paragraph_style_of(*r, 0) == kBasic;
             return takes(*r, kind, id);
         }));
     };

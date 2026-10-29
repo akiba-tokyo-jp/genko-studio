@@ -1252,6 +1252,7 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("Basic Paragraph cannot be deleted or renamed", "[基本段落] は削除・名前の変更ができません"));
         r.push_back(rule("a character style has no paragraph attributes", "文字スタイルには段落の属性を入れられません"));
         r.push_back(rule("the style's name must be a string|the style's name is 1 to 64 characters", "スタイルの名前は 1〜64 文字です"));
+        r.push_back(rule("the style's name must not hold a line break or a control character", "スタイルの名前に改行・制御文字は使えません"));
         r.push_back(rule("the name (.*) is the panel's own: choose another name", "「\\1」はパネルが使う名前です（ほかの名前にします）"));
         r.push_back(rule("the book has a character style named (.*) already", "「\\1」という名前の文字スタイルはもうあります"));
         r.push_back(rule("the book has a paragraph style named (.*) already", "「\\1」という名前の段落スタイルはもうあります"));

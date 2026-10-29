@@ -438,6 +438,254 @@ private slots:
         const core::Document laid = run_ops(other, Json::array({clear, none, set})).doc;
         QCOMPARE(ts::defaults_of(record_of(laid, "t2"), styles_of(laid)), kept);
     }
+
+    // --- the review's (PC5 G-c review) -----------------------------------------------------------------------------------
+
+    // P1-1: a smart object's contents change no style of the book (refused, the book still whole); a style applied there
+    void insideContentsRefused() {
+        core::Document doc = typed("abc");
+        doc = run(doc, style_op("character", "new", Json{{"name", "W"}, {"from_selection", false}, {"attrs", Json{{"underline", true}}}}, false));
+        doc = run(doc, Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"t1"})}});
+        QCOMPARE(doc.smart_contents.size(), std::size_t{1});
+        const std::string contents = doc.smart_contents.begin()->first;
+        const auto inside = [&](Json op) {
+            op["contents"] = contents;
+            return op;
+        };
+        for (const Json& op : {style_op("character", "new", Json{{"apply", true}}), style_op("character", "new", Json::object(), false),
+                               style_op("character", "set", Json{{"id", "cs-1"}, {"attrs", Json{{"underline", false}}}}, false),
+                               style_op("character", "delete", Json{{"id", "cs-1"}}, false), style_op("character", "rename", Json{{"id", "cs-1"}, {"name", "x"}}, false),
+                               style_op("character", "duplicate", Json{{"id", "cs-1"}}, false), style_op("character", "redefine", Json{{"id", "cs-1"}}),
+                               style_op("paragraph", "set", Json{{"id", "basic"}, {"attrs", Json{{"align", "center"}}}}, false)}) {
+            const std::string why = refusal(doc, inside(op));
+            QVERIFY2(why.find("cannot be used inside smart object contents") != std::string::npos, (op.dump() + " → " + why).c_str());
+        }
+        // what changes the record alone: in the contents, the book whole (its texts name only the styles it keeps)
+        const core::Document applied = run(doc, inside(style_op("character", "apply", Json{{"id", "cs-1"}})));
+        core::type_text::validate_type(applied);
+        bool took = false;
+        for (const core::StoryLine* r : ts::texts(applied)) took = took || ts::takes(*r, ts::Kind::Character, "cs-1");
+        QVERIFY(took);
+        const Json asked = report(applied, inside(style_op("character", "list")));
+        QCOMPARE(asked["current"]["character"], Json("cs-1"));
+    }
+
+    // P2-1: a style of the book changed asks the locks of the pages whose texts take it (another's lock refuses)
+    void otherLocksAsked() {
+        core::Document doc = typed("abc");
+        doc = run(doc, style_op("character", "new", Json{{"name", "W"}, {"from_selection", false}, {"attrs", Json{{"underline", true}}}}, false));
+        doc = run(doc, style_op("character", "new", Json{{"name", "free"}, {"from_selection", false}}, false));
+        doc = run(doc, style_op("character", "apply", Json{{"id", "cs-1"}}));
+        doc = core::CommandBus(render::ops_registry()).apply(doc, Json::array({Json{{"op", "lock_page"}, {"page", 1}}}), core::Actor("human:bob")).doc;
+        for (const Json& op : {style_op("character", "set", Json{{"id", "cs-1"}, {"attrs", Json{{"underline", false}}}}, false),
+                               style_op("character", "delete", Json{{"id", "cs-1"}}, false),
+                               style_op("paragraph", "set", Json{{"id", "basic"}, {"attrs", Json{{"space_after_mm", 1}}}}, false)}) {
+            const std::string why = refusal(doc, op);
+            QVERIFY2(why.find("locked") != std::string::npos, (op.dump() + " → " + why).c_str());
+        }
+        // a style no text of a locked page takes: changed
+        QVERIFY(refusal(doc, style_op("character", "set", Json{{"id", "cs-2"}, {"attrs", Json{{"underline", true}}}}, false)).empty());
+        QVERIFY(refusal(doc, style_op("character", "rename", Json{{"id", "cs-1"}, {"name", "強調"}}, false)).empty());
+    }
+
+    // P2-2: a style taken away from a line set by the OpenType typesetting leaves it so (never the typesetting of before)
+    void deletedKeepsTheTypesetting() {
+        core::Document doc = plain_book();
+        doc = run(doc, Json{{"op", "add_line"}, {"page", 1}, {"id", "l0"}, {"text", "abc"}, {"x_mm", 5}, {"y_mm", 5}, {"w_mm", 30}, {"h_mm", 20}, {"wrap", "horizontal"}});
+        doc = run(doc, style_op("character", "new", Json{{"from_selection", false}}, false));
+        doc = run(doc, Json{{"op", "type_style"}, {"kind", "character"}, {"action", "apply"}, {"id", "cs-1"}, {"line", "l0"}});
+        const core::Document gone = run(doc, style_op("character", "delete", Json{{"id", "cs-1"}}, false));
+        QVERIFY(gone.story[0].native_type.has_value());
+        QCOMPARE((*gone.story[0].native_type)["shaping"], Json("opentype"));
+        // [なし] on the whole: the same
+        const core::Document none = run(doc, Json{{"op", "type_style"}, {"kind", "character"}, {"action", "apply"}, {"line", "l0"}});
+        QCOMPARE((*none.story[0].native_type)["shaping"], Json("opentype"));
+        // a line of before given a style and back: as a line of before is never touched by restyle's taking away
+        const core::Document plain = run(plain_book(), Json{{"op", "add_line"}, {"page", 1}, {"id", "l0"}, {"text", "abc"}, {"x_mm", 5}, {"y_mm", 5}});
+        QVERIFY(!plain.story[0].native_type.has_value());
+    }
+
+    // P2-3: redefined from a text whose whole says it: nothing of its own left, the style changed changes it
+    void redefinedLeavesNothing() {
+        core::Document doc = typed("abcdef");
+        doc = run(doc, style_op("character", "new", Json{{"from_selection", false}, {"attrs", Json{{"underline", true}}}}, false));
+        doc = run(doc, style_op("character", "apply", Json{{"id", "cs-1"}}));
+        doc = run(doc, Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"rgb", Json::array({255, 0, 0})}});
+        const std::string before = look(doc);
+        doc = run(doc, style_op("character", "redefine"));
+        QCOMPARE(look(doc), before);
+        QVERIFY(!record_of(doc).native_type->contains("char") || !(*record_of(doc).native_type)["char"].contains("rgb"));
+        doc = run(doc, style_op("character", "set", Json{{"id", "cs-1"}, {"attrs", Json{{"rgb", Json::array({0, 0, 255})}}}}, false));
+        QCOMPARE(chars_at(doc, 3)["rgb"], Json::array({0, 0, 255}));
+        // part of the text: the rest keeps the whole text's own, the stretch takes the style's
+        core::Document part = typed("abcdef");
+        part = run(part, style_op("character", "new", Json{{"from_selection", false}, {"attrs", Json{{"underline", true}}}}, false));
+        part = run(part, Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"rgb", Json::array({255, 0, 0})}});
+        part = run(part, Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"range", Json::array({0, 2})}, {"underline", true}});
+        part = run(part, style_op("character", "apply", Json{{"id", "cs-1"}, {"range", Json::array({0, 2})}}));
+        const std::string was = look(part);
+        part = run(part, style_op("character", "redefine", Json{{"range", Json::array({0, 2})}}));
+        QCOMPARE(look(part), was);
+        part = run(part, style_op("character", "set", Json{{"id", "cs-1"}, {"attrs", Json{{"rgb", Json::array({0, 0, 255})}}}}, false));
+        QCOMPARE(chars_at(part, 0)["rgb"], Json::array({0, 0, 255}));
+        QCOMPARE(chars_at(part, 4)["rgb"], Json::array({255, 0, 0}));
+        // a paragraph style redefined from a text whose whole says it, on one paragraph of two
+        core::Document paras = typed("a\nb");
+        paras = run(paras, style_op("paragraph", "new", Json{{"from_selection", false}, {"attrs", Json{{"space_after_mm", 1}}}}, false));
+        paras = run(paras, style_op("paragraph", "apply", Json{{"id", "ps-1"}, {"range", Json::array({0, 0})}}));
+        paras = run(paras, Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"end_indent_mm", 2}});
+        const std::string had = look(paras);
+        paras = run(paras, style_op("paragraph", "redefine", Json{{"range", Json::array({0, 0})}}));
+        QCOMPARE(look(paras), had);
+        QVERIFY(!record_of(paras).native_type->contains("para"));
+        paras = run(paras, style_op("paragraph", "set", Json{{"id", "ps-1"}, {"attrs", Json{{"end_indent_mm", 3}}}}, false));
+        QCOMPARE(para_of(paras, 0)["end_indent_mm"], Json(3));
+        QCOMPARE(para_of(paras, 1)["end_indent_mm"], Json(2));
+    }
+
+    // P2-4: a text of 2000 paragraphs and 100 000 letters: a style applied, its look asked, the styles listed — quickly
+    void longTexts() {
+        std::string text;
+        for (int p = 0; p < 2000; ++p) text += std::string(49, 'a') + "\n";
+        core::StoryLine record;
+        record.text = text;
+        record.style = Json::object();
+        Json styles = Json{{"paragraph", Json::array({Json{{"id", "ps-1"}, {"name", "P"}, {"para", Json{{"space_after_mm", 1}}}}})},
+                           {"character", Json::array({Json{{"id", "cs-1"}, {"name", "C"}, {"char", Json{{"underline", true}}}}})}};
+        QElapsedTimer clock;
+        clock.start();
+        ts::restyle(record, &styles, ts::Kind::Paragraph, std::nullopt, std::optional<std::string>("ps-1"), false);
+        ts::restyle(record, &styles, ts::Kind::Paragraph, ts::Range{50, 120}, std::optional<std::string>(), false);  // (two paragraphs Basic: laid on each)
+        ts::restyle(record, &styles, ts::Kind::Character, ts::Range{10, 90000}, std::optional<std::string>("cs-1"), false);
+        const qint64 applied = clock.elapsed();
+        clock.restart();
+        const Json now = ts::current(record, &styles, std::nullopt);
+        (void)ts::current(record, &styles, ts::Range{40, 60});
+        const qint64 asked = clock.elapsed();
+        QCOMPARE(now["paragraph_mixed"], Json(true));
+        QVERIFY2(applied < 3000, qPrintable(QString::number(applied)));
+        QVERIFY2(asked < 1000, qPrintable(QString::number(asked)));
+        // through the book: list (a question) of a text so long
+        core::Document doc = plain_book();
+        doc.type_styles = core::type_text::check_type_styles(styles);
+        core::StoryLine& line = doc.add_line(core::Num(1), text, "", std::nullopt, "", core::Num(5), core::Num(5), core::Num(40), core::Num(40), "none");
+        line.id = "long";
+        line.native_type = record.native_type;
+        clock.restart();
+        const core::ApplyResult listed = run_ops(doc, Json::array({Json{{"op", "type_style"}, {"kind", "paragraph"}, {"action", "list"}, {"line", "long"}}}));
+        QVERIFY2(clock.elapsed() < 2000, qPrintable(QString::number(clock.elapsed())));
+        QCOMPARE(listed.results[0]["current"]["paragraph_mixed"], Json(true));
+    }
+
+    // P2-5: a colour changed sets nothing anew: Basic Paragraph's colour on a book of 500 lines, quickly
+    void coloursSetNothingAnew() {
+        core::Document doc = plain_book();
+        Json ops = Json::array();
+        for (int i = 0; i < 500; ++i)
+            ops.push_back(Json{{"op", "add_line"}, {"page", 1}, {"id", "l" + std::to_string(i)}, {"text", "あいうえお"}, {"x_mm", 5}, {"y_mm", 5},
+                               {"native_type", Json{{"shaping", "opentype"}}}});
+        doc = run_ops(doc, ops).doc;
+        QElapsedTimer clock;
+        clock.start();
+        core::Document set;
+        const Json r = report(doc, style_op("paragraph", "set", Json{{"id", "basic"}, {"attrs", Json{{"rgb", Json::array({200, 0, 0})}}}}, false), &set);
+        QVERIFY2(clock.elapsed() < 1500, qPrintable(QString::number(clock.elapsed())));
+        QCOMPARE(r["texts"], Json(500));
+    }
+
+    // P3-2: a point text in a smart object's contents set again when its style grows (its box round its letters)
+    void contentsSetAnew() {
+        core::Document doc = typed("abc");
+        doc = run(doc, style_op("paragraph", "new", Json{{"from_selection", false}, {"attrs", Json{{"size_mm", 4}}}}, false));
+        doc = run(doc, style_op("paragraph", "apply", Json{{"id", "ps-1"}}));
+        doc = run(doc, Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"t1"})}});
+        const auto width = [](const core::Document& d) {
+            for (const core::StoryLine* r : ts::texts(d))
+                if (r->native_type && r->native_type->contains("anchor_mm")) return r->w_mm.value();
+            return 0.0;
+        };
+        const double w = width(doc);
+        const core::Document big = run(doc, style_op("paragraph", "set", Json{{"id", "ps-1"}, {"attrs", Json{{"size_mm", 10}}}}, false));
+        QVERIFY2(width(big) > 2 * w, qPrintable(QString::number(width(big))));
+    }
+
+    // P3-5: applied without clearing, the whole text's own still wins in the range; a whole style and a range's style both
+    // held (a PSD's, by hand): the new style's attributes win in the range
+    void overridesKept() {
+        core::Document doc = typed("abcdef");
+        doc = run(doc, style_op("character", "new", Json{{"from_selection", false}, {"attrs", Json{{"rgb", Json::array({0, 0, 255})}, {"underline", true}}}}, false));
+        doc = run(doc, Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"rgb", Json::array({255, 0, 0})}});
+        const core::Document a = run(doc, style_op("character", "apply", Json{{"id", "cs-1"}, {"range", Json::array({0, 2})}}));
+        QCOMPARE(chars_at(a, 0)["rgb"], Json::array({255, 0, 0}));
+        QCOMPARE(chars_at(a, 0)["underline"], Json(true));
+        const core::Document cleared = run(doc, style_op("character", "apply", Json{{"id", "cs-1"}, {"range", Json::array({0, 2})}, {"clear_overrides", true}}));
+        QCOMPARE(chars_at(cleared, 0)["rgb"], Json::array({0, 0, 255}));
+        QCOMPARE(chars_at(cleared, 4)["rgb"], Json::array({255, 0, 0}));
+        // a whole style W and a range's S both held; T applied over the range: T's size there
+        core::Document both = typed("abcdef");
+        for (const auto& [name, size] : {std::pair{"W", 5}, std::pair{"S", 6}, std::pair{"T", 7}})
+            both = run(both, style_op("character", "new", Json{{"name", name}, {"from_selection", false}, {"attrs", Json{{"size_mm", size}}}}, false));
+        both = run(both, Json{{"op", "edit_type"}, {"page", 1}, {"layer_id", "t1"}, {"text", "abcdef"}});
+        Json nt = *record_of(both).native_type;
+        nt["char_style"] = "cs-1";
+        nt["runs"] = Json::array({Json{{"start", 0}, {"end", 2}, {"style", "cs-2"}}});
+        for (core::Layer& l : both.edit_page(0).layers)
+            if (l.id == "t1") {
+                core::StoryLine r = *l.type;
+                r.native_type = core::type_text::check_native_type(nt, r.text);
+                l.type = core::type_text::shared_record(r);
+            }
+        const core::Document t = run(both, style_op("character", "apply", Json{{"id", "cs-3"}, {"range", Json::array({0, 2})}}));
+        QCOMPARE(chars_at(t, 0)["size_mm"], Json(7));
+        QCOMPARE(chars_at(t, 4)["size_mm"], Json(5));
+    }
+
+    // P3-7: list is a question: asked while the book's pages are still being read; a change is not
+    void askedWhileReading() {
+        core::Document doc = typed("abc");
+        doc = run(doc, Json{{"op", "add_page"}});
+        doc.deferred = {doc.pages.back()};
+        QVERIFY(refusal(doc, style_op("character", "list", Json::object(), false)).empty());
+        QVERIFY(refusal(doc, style_op("character", "list")).empty());  // (of a page read)
+        QVERIFY(refusal(doc, style_op("character", "new", Json::object(), false)).find("still being read") != std::string::npos);
+    }
+
+    // P3-8: names without control characters, one spelling (NFC)
+    void namesNormal() {
+        core::Document doc = typed("abc");
+        QVERIFY(refusal(doc, style_op("character", "new", Json{{"name", "a\nb"}}, false)).find("control character") != std::string::npos);
+        QVERIFY(refusal(doc, style_op("character", "new", Json{{"name", "a\tb"}}, false)).find("control character") != std::string::npos);
+        doc = run(doc, style_op("character", "new", Json{{"name", "か\xE3\x82\x99"}}, false));  // (か + the combining voiced mark)
+        QCOMPARE((*doc.type_styles)["character"][0]["name"], Json("が"));
+        QVERIFY(refusal(doc, style_op("character", "new", Json{{"name", "が"}}, false)).find("already") != std::string::npos);
+    }
+
+    // P3-11: an op a question by its arguments — asked alone, a dry run; asks false: a change; registered again by add: no question
+    void questionsByArguments() {
+        core::OpRegistry registry;
+        int ran = 0;
+        registry.add_query("probe", [&ran](core::OpContext& c) {
+            ++ran;
+            if (c.op.value("action", Json()) != Json("ask")) c.doc.title = "changed";
+            c.report = Json{{"ran", ran}};
+        }, [](const Json& op) { return op.value("action", Json()) == Json("ask"); });
+        QVERIFY(registry.is_query(Json{{"op", "probe"}, {"action", "ask"}}));
+        QVERIFY(!registry.is_query(Json{{"op", "probe"}, {"action", "do"}}));
+        QVERIFY(!registry.is_query(Json{{"op", "other"}}));
+        QVERIFY(!registry.is_query(Json(3)));
+        const core::Document doc = plain_book();
+        const core::CommandBus bus(registry);
+        const core::ApplyResult asked = bus.apply(doc, Json::array({Json{{"op", "probe"}, {"action", "ask"}}}), core::Actor("human:test"));
+        QVERIFY(asked.unchanged && asked.journal_ops.empty());
+        const core::ApplyResult done = bus.apply(doc, Json::array({Json{{"op", "probe"}, {"action", "do"}}}), core::Actor("human:test"));
+        QVERIFY(!done.unchanged);
+        QCOMPARE(done.journal_ops.size(), std::size_t{1});
+        QCOMPARE(done.doc.title, std::string("changed"));
+        registry.add("probe", [](core::OpContext&) {});
+        QVERIFY(!registry.is_query(Json{{"op", "probe"}, {"action", "ask"}}));
+        registry.add_query("probe", [](core::OpContext&) {});
+        QVERIFY(registry.is_query(Json{{"op", "probe"}}));
+    }
 };
 
 QTEST_GUILESS_MAIN(TestTypeStyles)

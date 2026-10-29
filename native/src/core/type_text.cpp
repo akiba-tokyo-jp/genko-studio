@@ -281,6 +281,17 @@ void merge_into(Json& into, const Json* from) {
     for (const auto& [key, value] : from->items()) into[key] = value;
 }
 
+// The paragraphs' entry of paragraph `index` (none: none) — the list in order of their index (the normal form), so halved
+// (PC5 G-c review P2-4: thousands of paragraphs resolved one by one).
+const Json* paragraph_item(const Json& nt, std::int64_t index) {
+    const Json* ps = get(nt, "paragraphs");
+    if (ps == nullptr || !ps->is_array() || ps->empty()) return nullptr;
+    const auto at = std::lower_bound(ps->begin(), ps->end(), index,
+                                     [](const Json& p, std::int64_t i) { return p.value("index", std::int64_t{-1}) < i; });
+    if (at != ps->end() && at->value("index", std::int64_t{-1}) == index) return &*at;
+    return nullptr;
+}
+
 const Json* style_named(const Json* styles, std::string_view kind, const Json* id) {
     if (styles == nullptr || id == nullptr || !id->is_string() || !styles->is_object()) return nullptr;
     const Json* list = get(*styles, kind);
@@ -332,6 +343,8 @@ Json check_char(const Json& raw, std::string_view where) { return check_attrs(ra
 Json check_para(const Json& raw, std::string_view where) { return check_attrs(raw, kParaAttrs, where); }
 
 std::int64_t paragraph_count(std::string_view text) { return static_cast<std::int64_t>(paragraph_starts(text).size()); }
+
+std::vector<std::int64_t> paragraph_starts_of(std::string_view text) { return paragraph_starts(text); }
 
 std::int64_t paragraph_start(std::string_view text, std::int64_t index) {
     const std::vector<std::int64_t> starts = paragraph_starts(text);
@@ -592,12 +605,7 @@ Json resolve_para(const StoryLine& record, const Json* styles, std::int64_t inde
     }
     if (!record.native_type) return out;
     const Json& nt = *record.native_type;
-    const Json* paragraph = nullptr;
-    if (const Json* ps = get(nt, "paragraphs"); ps != nullptr && ps->is_array()) {
-        for (const Json& p : *ps) {
-            if (p.value("index", Json()) == Json(index)) paragraph = &p;
-        }
-    }
+    const Json* paragraph = paragraph_item(nt, index);
     const Json* style_id = paragraph != nullptr && get(*paragraph, "style") != nullptr ? get(*paragraph, "style") : get(nt, "para_style");
     if (const Json* style = style_named(styles, "paragraph", style_id)) merge_into(out, get(*style, "para"));
     merge_into(out, get(nt, "para"));
@@ -622,12 +630,7 @@ std::vector<CharRun> resolve_chars(const StoryLine& record, const Json* styles) 
     std::vector<Json> paragraph_chars;
     for (std::size_t p = 0; p < starts.size(); ++p) {
         Json chars = base;
-        const Json* paragraph = nullptr;
-        if (const Json* ps = get(nt, "paragraphs"); ps != nullptr && ps->is_array()) {
-            for (const Json& item : *ps) {
-                if (item.value("index", Json()) == Json(static_cast<std::int64_t>(p))) paragraph = &item;
-            }
-        }
+        const Json* paragraph = paragraph_item(nt, static_cast<std::int64_t>(p));
         const Json* style_id = paragraph != nullptr && get(*paragraph, "style") != nullptr ? get(*paragraph, "style") : get(nt, "para_style");
         if (const Json* style = style_named(styles, "paragraph", style_id)) merge_into(chars, get(*style, "char"));
         if (const Json* style = style_named(styles, "character", get(nt, "char_style"))) merge_into(chars, get(*style, "char"));

@@ -1644,6 +1644,7 @@ private:
     // page) and the book as the canvas draws it then (its contents' page as its only page, made once a snapshot); the
     // commands a contents' tab cannot use, greyed while it is in front; the linked files' states and their watcher.
     std::optional<std::string> contents_;
+    bool to_book_ = false;  // (PC5 G-c review P1-1: ops of the book's own — its type styles — sent from a contents' tab)
     QString contents_title_;
     mutable std::shared_ptr<const core::Document> contents_view_;
     mutable std::shared_ptr<const core::Document> contents_view_of_;

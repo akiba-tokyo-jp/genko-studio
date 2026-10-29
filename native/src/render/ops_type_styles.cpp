@@ -8,6 +8,7 @@
 #include <array>
 #include <functional>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -119,14 +120,39 @@ void refit(StoryLine& record, const Document& doc) {
     measure(record, doc);
 }
 
-// Every text of the book (its lines and its pages' type layers) that takes the style, set again under the book's styles now
-// (the contents of smart objects are set where they are drawn). How many.
-std::int64_t refit_takers(Document& doc, ts::Kind kind, std::string_view id) {
+// The attributes whose change sets no letter elsewhere: a style changed in these alone is not set again (review P2-5).
+bool sets_nothing_anew(const std::set<std::string>& changed) {
+    static const std::set<std::string> kLooks{"rgb", "underline", "strikethrough"};
+    return std::all_of(changed.begin(), changed.end(), [](const std::string& key) { return kLooks.contains(key); });
+}
+
+// The attributes two styles' (or a style's and what is laid on it) differ in.
+std::set<std::string> differing_keys(const Json& before, const Json& after) {
+    std::set<std::string> out;
+    for (const char* part : {"char", "para"}) {
+        const Json a = before.is_object() ? before.value(part, Json::object()) : Json::object();
+        const Json b = after.is_object() ? after.value(part, Json::object()) : Json::object();
+        for (const auto& [key, value] : a.items()) {
+            if (!b.contains(key) || b[key] != value) out.insert(key);
+        }
+        for (const auto& [key, value] : b.items()) {
+            if (!a.contains(key)) out.insert(key);
+        }
+    }
+    return out;
+}
+
+// Every text of the book that takes the style — its lines, its pages' type layers and the type layers in the contents of
+// its smart objects (review P3-2) —, set again under the book's styles now when `measure` (a point text's box kept round
+// its letters, one too large refused); else only counted (review P2-5: a colour changed sets nothing anew). How many.
+std::int64_t refit_takers(Document& doc, ts::Kind kind, std::string_view id, bool measure) {
     std::int64_t count = 0;
     const auto touched = [&](const StoryLine& record) { return text::sets_opentype(record) && ts::takes(record, kind, id); };
+    const auto same_box = [](const StoryLine& a, const StoryLine& b) { return a.x_mm == b.x_mm && a.y_mm == b.y_mm && a.w_mm == b.w_mm && a.h_mm == b.h_mm; };
     for (StoryLine& line : doc.story) {
         if (!touched(line)) continue;
         ++count;
+        if (!measure) continue;
         StoryLine record = line;
         refit(record, doc);
         line.x_mm = record.x_mm;
@@ -134,18 +160,29 @@ std::int64_t refit_takers(Document& doc, ts::Kind kind, std::string_view id) {
         line.w_mm = record.w_mm;
         line.h_mm = record.h_mm;
     }
-    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
-        if (doc.is_deferred(i)) continue;
-        for (std::size_t j = 0; j < doc.page(i).layers.size(); ++j) {
-            const core::Layer& layer = doc.page(i).layers[j];
+    const auto on_page = [&](const core::Page& page, const std::function<core::Page&()>& edit) {
+        for (std::size_t j = 0; j < page.layers.size(); ++j) {
+            const core::Layer& layer = page.layers[j];
             if (!core::type_text::is_type_layer(layer) || !layer.type || !touched(*layer.type)) continue;
             ++count;
+            if (!measure) continue;
             StoryLine record = *layer.type;
             refit(record, doc);
-            if (record.x_mm == layer.type->x_mm && record.y_mm == layer.type->y_mm && record.w_mm == layer.type->w_mm && record.h_mm == layer.type->h_mm)
-                continue;
-            doc.edit_page(i).layers[j].type = core::type_text::shared_record(std::move(record));
+            if (same_box(record, *layer.type)) continue;
+            edit().layers[j].type = core::type_text::shared_record(std::move(record));
         }
+    };
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.is_deferred(i)) continue;
+        on_page(doc.page(i), [&]() -> core::Page& { return doc.edit_page(i); });
+    }
+    std::vector<std::string> contents;
+    for (const auto& [cid, sc] : doc.smart_contents) {
+        if (sc && sc->page) contents.push_back(cid);
+    }
+    for (const std::string& cid : contents) {
+        const std::shared_ptr<core::Page> held = doc.smart_contents.at(cid)->page;  // (kept while its copy is made)
+        on_page(*held, [&]() -> core::Page& { return doc.edit_contents_page(cid); });
     }
     return count;
 }
@@ -353,6 +390,7 @@ void type_style(core::OpContext& c) {
             name = ts::checked_name(before, kind, op["name"], id);
         }
         Json& style = style_in(styles, kind, id);
+        const Json was = style;
         const Json chars = laid(style.value("char", Json::object()), attrs.chars, replace, clear);
         if (chars.empty()) style.erase("char");
         else style["char"] = chars;
@@ -362,8 +400,9 @@ void type_style(core::OpContext& c) {
             else style["para"] = paras;
         }
         if (!name.empty()) style["name"] = name;
+        const bool measure = !sets_nothing_anew(differing_keys(was, style));
         keep_styles(doc, styles);
-        const std::int64_t count = refit_takers(doc, kind, id);
+        const std::int64_t count = refit_takers(doc, kind, id, measure);
         core::type_text::add_feature(doc);
         Json out = Json{{"id", id}, {"texts", count}};
         if (id != ts::kBasic) out["name"] = ts::find(styles_of(doc), kind, id)->value("name", std::string());
@@ -428,12 +467,12 @@ void type_style(core::OpContext& c) {
     const ts::Look applied = ts::look_of(text.record, now);
     if (kind == ts::Kind::Paragraph) {
         const std::vector<std::int64_t> ps = ts::paragraphs_of(text.record.text, at, at);
-        ts::drop_same(text.record, kind, ts::paragraph_span(text.record.text, ps.empty() ? 0 : ps.front()), over["para"]);
+        ts::drop_same(text.record, now, kind, ts::paragraph_span(text.record.text, ps.empty() ? 0 : ps.front()), over["para"]);
     }
-    ts::drop_same(text.record, ts::Kind::Character, stretch, over["char"]);
+    ts::drop_same(text.record, now, ts::Kind::Character, stretch, over["char"]);
     ts::keep_look(text.record, now, applied);  // (what it drops says nothing the style does not: the look stays)
     put(doc, text, std::move(text.record));
-    const std::int64_t count = refit_takers(doc, kind, id);
+    const std::int64_t count = refit_takers(doc, kind, id, !sets_nothing_anew(differing_keys(Json::object(), over)));
     core::type_text::add_feature(doc);
     c.report = Json{{"id", id}, {"texts", count}};
 }

@@ -26,6 +26,7 @@
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
 #include "core/studio.hpp"
+#include "core/type_styles.hpp"
 #include "core/type_text.hpp"
 
 namespace genko::core {
@@ -384,9 +385,15 @@ const OpRegistry& OpRegistry::builtin() {
     return registry;
 }
 
-void OpRegistry::add(std::string name, OpFunction function) { ops_[std::move(name)] = std::move(function); }
+void OpRegistry::add(std::string name, OpFunction function) {
+    // (PC5 G-c review P3-11: registered again as an op that changes the book, it is no question any more)
+    queries_.erase(name);
+    asks_.erase(name);
+    ops_[std::move(name)] = std::move(function);
+}
 
 void OpRegistry::add_query(std::string name, OpFunction function) {
+    asks_.erase(name);
     queries_.insert(name);
     ops_[std::move(name)] = std::move(function);
 }
@@ -394,6 +401,7 @@ void OpRegistry::add_query(std::string name, OpFunction function) {
 bool OpRegistry::is_query(std::string_view name) const { return queries_.find(name) != queries_.end(); }
 
 void OpRegistry::add_query(std::string name, OpFunction function, std::function<bool(const Json&)> asks) {
+    queries_.erase(name);
     asks_[name] = std::move(asks);
     ops_[std::move(name)] = std::move(function);
 }
@@ -443,6 +451,74 @@ std::size_t require_page(const Document& doc, const Json& op) {
 bool paper_on_every_page(const Json& op) {
     const Json* page = get(op, "page");
     return page == nullptr || page->is_null() || *page == Json("") || py_equals(*page, Json(0));
+}
+
+// PC5 G-c (review P2-1): the pages a type_style that changes a style of the book reaches — set, delete, redefine: the pages
+// of the texts that take it (lines, type layers, and the pages showing smart object contents with such a type layer; Basic
+// Paragraph: the texts of type@1). Their locks are asked, as set_text_gamma asks every page's.
+static std::vector<std::size_t> type_style_pages(const Document& doc, const Json& op) {
+    const std::string action = op.value("action", Json()).is_string() ? op["action"].get<std::string>() : std::string();
+    if (action != "set" && action != "delete" && action != "redefine") return {};
+    const Json* kind_value = get(op, "kind");
+    if (kind_value == nullptr || (*kind_value != Json("character") && *kind_value != Json("paragraph"))) return {};
+    const type_styles::Kind kind = *kind_value == Json("character") ? type_styles::Kind::Character : type_styles::Kind::Paragraph;
+    std::string id;
+    if (const Json* given = get(op, "id"); given != nullptr && given->is_string()) {
+        id = given->get<std::string>();
+    } else if (action == "redefine") {  // (no id: the style the text named takes at its range's start)
+        const StoryLine* record = nullptr;
+        if (const Json* line = get(op, "line"); line != nullptr && line->is_string()) {
+            for (const StoryLine& l : doc.story) {
+                if (l.id == line->get_ref<const std::string&>()) record = &l;
+            }
+        } else if (const Json* layer_id = get(op, "layer_id"); layer_id != nullptr && layer_id->is_string()) {
+            if (const auto index = op_page_index(doc, op)) {
+                if (const Page* page = first_page(doc, *index)) {
+                    for (const Layer& l : page->layers) {
+                        if (l.id == layer_id->get_ref<const std::string&>() && l.type) record = l.type.get();
+                    }
+                }
+            }
+        }
+        if (record == nullptr) return {};
+        std::int64_t at = 0;
+        if (const Json* range = get(op, "range"); range != nullptr && range->is_array() && !range->empty() && (*range)[0].is_number_integer())
+            at = (*range)[0].get<std::int64_t>();
+        if (kind == type_styles::Kind::Character) {
+            const auto found = type_styles::character_style_at(*record, at);
+            if (!found) return {};
+            id = *found;
+        } else {
+            id = type_styles::paragraph_style_at(*record, at);
+        }
+    } else {
+        return {};
+    }
+    const bool basic = kind == type_styles::Kind::Paragraph && id == type_styles::kBasic;
+    const auto reached = [&](const StoryLine& record, bool layer) {
+        if (!type_styles::takes(record, kind, id)) return false;
+        if (!basic) return true;
+        return layer || record.native_type.has_value() || (record.style.is_object() && record.style.contains("features"));
+    };
+    std::set<std::size_t> out;
+    for (const StoryLine& line : doc.story) {
+        if (!reached(line, false)) continue;
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (doc.pages[i]->index == line.page_index) out.insert(i);
+        }
+    }
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        for (const Layer& layer : doc.pages[i]->layers) {
+            if (layer.type && reached(*layer.type, true)) out.insert(i);
+        }
+    }
+    for (const auto& [contents, held] : doc.smart_contents) {
+        if (!held || !held->page) continue;
+        const bool used = std::any_of(held->page->layers.begin(), held->page->layers.end(), [&](const Layer& l) { return l.type && reached(*l.type, true); });
+        if (!used) continue;
+        for (const std::size_t at : smart::pages_using(doc, contents)) out.insert(at);
+    }
+    return {out.begin(), out.end()};
 }
 
 void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
@@ -504,6 +580,9 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
             for (const std::size_t at : smart::pages_using(doc, id->get<std::string>())) check_held(doc, doc.page(at), doc.page(at).index, actor);
         }
         return;
+    }
+    if (named && name == "type_style") {  // (PC5 G-c review P2-1: a style of the book changed — the pages of its texts asked)
+        for (const std::size_t at : type_style_pages(doc, op)) check_held(doc, doc.page(at), doc.page(at).index, actor);
     }
     // (Python takes a lock on a page the book does not have, and lets it go, without a word: refused here)
     const bool lock_op = named && (name == "lock_page" || name == "unlock_page");
@@ -1091,7 +1170,8 @@ std::optional<Json> apply_in_contents(const CommandBus& bus, Document& work, con
                            after.episode == work.episode && after.binding == work.binding && after.tickets == work.tickets &&
                            after.nombre == work.nombre && after.bible.plot == work.bible.plot && after.bible.characters == work.bible.characters &&
                            after.pages[0]->name_ok == page->name_ok && after.pages[0]->art_ok == page->art_ok &&
-                           after.pages[0]->stage == page->stage && smart::same_panels(after.pages[0]->frames, page->frames);
+                           after.pages[0]->stage == page->stage && smart::same_panels(after.pages[0]->frames, page->frames) &&
+                           after.type_styles == work.type_styles;  // (PC5 G-c review P1-1: the book's type styles are changed in the book)
     if (!same_book) throw ApplyError(prefix + "this op cannot be used inside smart object contents");
     work.luts = after.luts;
     work.papers = after.papers;
@@ -1185,7 +1265,17 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
     const bool asking = questions > 0 && questions == ops.size();
 
     read_as_touched_pages_does(ops);
-    refuse_unread_pages(doc, ops);
+    if (!asking) {
+        refuse_unread_pages(doc, ops);
+    } else if (!doc.deferred.empty()) {  // (PC5 G-c review P3-7: questions change no page — asked unless of a page not read yet)
+        for (const Json& op : ops) {
+            if (get(op, "page") == nullptr) continue;
+            try {
+                if (doc.is_deferred(require_page(doc, op))) throw ApplyError("the book's pages are still being read: try again in a moment", "page_not_loaded");
+            } catch (const OpError&) {  // (no such page: the op says so)
+            }
+        }
+    }
     Document work = doc;  // (the pages stay shared until an op changes one)
     std::vector<char> channels(ops.size(), 0);  // (channels@1: the ops whose "channel" named a channel or plate of their page)
     std::vector<std::string> notes;             // (PC4: what the ops said they did not use, OpContext::notes)
