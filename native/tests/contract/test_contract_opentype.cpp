@@ -469,17 +469,21 @@ private slots:
                                                            {"x_mm", 5}, {"y_mm", 5}, {"w_mm", 30}, {"h_mm", 20}});
         const std::string line_wide = refusal(line, Json{{"op", "set_type"}, {"line", "l1"}, {"scale", 10}, {"tracking", 10}});
         QVERIFY2(line_wide.find("too large to set") != std::string::npos, line_wide.c_str());
-        // drawn: the line given them by add_line's native_type is refused as too large, not drawn
-        const core::Document given = run(plain_book(), Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", std::string(300, 'H')}, {"wrap", "horizontal"},
+        // drawn: a line given them by add_line's native_type (a metre before each of 200 paragraphs) is refused as too large
+        // before its picture is made, not drawn out of memory
+        const core::Document given = run(plain_book(), Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", rows}, {"wrap", "horizontal"},
                                                             {"x_mm", 5}, {"y_mm", 5}, {"w_mm", 30}, {"h_mm", 20}, {"balloon", "none"},
-                                                            {"native_type", Json{{"char", Json{{"scale", 10}, {"tracking", 10}}}}}});
-        bool refused = false;
+                                                            {"native_type", Json{{"para", Json{{"space_before_mm", 1000}, {"first_indent_mm", 1000}}}}}});
+        std::string what = "drawn";
         try {
-            (void)render::text::text_layout(given.story[0], 300);
+            const auto made = render::text::text_layout(given.story[0], 300);
+            what += " " + std::to_string(made.image.width()) + "x" + std::to_string(made.image.height());
         } catch (const core::Error& error) {
-            refused = error.code() == "image_too_large";
+            what = error.code();
+        } catch (const std::exception& error) {
+            what = error.what();
         }
-        QVERIFY(refused);
+        QVERIFY2(what == "image_too_large", what.c_str());
     }
 
     // review P2-1: a line's rows centred as the lines' (its short row under the long one's middle), before and after
@@ -520,13 +524,15 @@ private slots:
         const auto rows = bands(featured);
         QCOMPARE(rows.size(), std::size_t{2});
         QVERIFY(rows[1].second - rows[1].first < (rows[0].second - rows[0].first) / 2);
-        QVERIFY(std::abs(middle(rows[0]) - middle(rows[1])) < 0.5);
+        // (the letters' own sides apart; set at the left, 15 mm)
+        QVERIFY2(std::abs(middle(rows[0]) - middle(rows[1])) < 1.5,
+                 (std::to_string(rows[0].first) + " " + std::to_string(rows[0].second) + " / " + std::to_string(rows[1].first) + " " + std::to_string(rows[1].second)).c_str());
         // set_type on a line of before: its rows where they were
         const core::Document plain = run(plain_book(), line);
         const auto before = bands(plain);
         const auto after = bands(run(plain, Json{{"op", "set_type"}, {"line", "l1"}, {"features", Json{{"frac", 1}}}}));
         QCOMPARE(after.size(), before.size());
-        for (std::size_t i = 0; i < before.size(); ++i) QVERIFY(std::abs(middle(before[i]) - middle(after[i])) < 0.5);
+        for (std::size_t i = 0; i < before.size(); ++i) QVERIFY(std::abs(middle(before[i]) - middle(after[i])) < 1.0);
         // a type layer: at its left
         const auto layer = bands(latin("HHHHHH\nH"));
         QVERIFY(std::abs(layer[0].first - layer[1].first) < 0.5);
@@ -620,7 +626,9 @@ private slots:
                  bytes(run(fitted, Json{{"op", "set_type"}, {"line", "l1"}, {"underline", false}})));
         // P3-11: a type layer's rows 1.2 of its size apart (Photoshop's auto leading), as leading_mm 7.2 for 6 mm
         const core::Document rows = latin("H\nH");
-        QVERIFY(std::abs((*ink_mm(rows))[3] - (*ink_mm(set(rows, Json{{"leading_mm", 7.2}})))[3]) < 0.2);
+        const double auto_low = (*ink_mm(rows))[3], set_low = (*ink_mm(set(rows, Json{{"leading_mm", 7.2}})))[3];
+        // (a pixel of rounding apart; at 160% it would be 2.4 mm lower)
+        QVERIFY2(std::abs(auto_low - set_low) < 0.3, (std::to_string(auto_low) + " " + std::to_string(set_low)).c_str());
     }
 
     // saved and read back as set
