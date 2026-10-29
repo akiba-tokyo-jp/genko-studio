@@ -21,7 +21,9 @@
 #include "render/brushes.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/anim.hpp"
+#include "render/color_canvas.hpp"
 #include "render/colour.hpp"
+#include "render/hdr_preview.hpp"
 #include "render/page.hpp"
 #include "render/proof.hpp"
 
@@ -288,6 +290,76 @@ void PageRenderer::set_anim(std::int64_t frame, bool onion) {
     ++generation_;
     for (auto& [dpi, level] : levels_) mark(level, QRect(QPoint(0, 0), level.size), generation_);
     dispatch();
+}
+
+void PageRenderer::set_hdr(const render::HdrPreview& preview) {
+    const render::HdrPreview next = preview.clamped();
+    if (next == hdr_) return;
+    hdr_ = next;
+    const core::Page* p = page();
+    if (p != nullptr && render::hdr_page(*p)) redraw_all();  // (another page shows as it is: nothing on screen changes)
+}
+
+int PageRenderer::pixel_dpi() const {
+    const core::Page* p = page();
+    if (p == nullptr) return 0;
+    const double dpi = p->spec.dpi.value();
+    return std::isfinite(dpi) && dpi >= 1 ? static_cast<int>(std::lround(dpi)) : 0;
+}
+
+void PageRenderer::set_pixel_art(bool on) {
+    if (on == pixel_art_) return;
+    pixel_art_ = on;
+    emit updated(QRectF());  // (the same tiles, laid otherwise)
+}
+
+void PageRenderer::set_texture_budget(std::optional<std::size_t> bytes) {
+    texture_budget_ = bytes;
+    on_card_.clear();
+    texture_bytes_ = 0;
+    textures_released_ = 0;
+}
+
+void PageRenderer::forget_on_card(int dpi, int index) {
+    const auto it = on_card_.find({dpi, index});
+    if (it == on_card_.end()) return;
+    texture_bytes_ -= std::min(texture_bytes_, it->second.bytes);
+    on_card_.erase(it);
+    // (its picture copied: the card lets the texture of the one it had go — Qt's texture cache drops a picture's texture
+    // when its data goes; a picture painted over in place would leave the old one there)
+    const auto level = levels_.find(dpi);
+    if (level == levels_.end() || index < 0 || index >= static_cast<int>(level->second.tiles.size())) return;
+    Tile& tile = level->second.tiles[static_cast<std::size_t>(index)];
+    if (!tile.image.isNull()) tile.image = tile.image.copy();
+    if (!tile.shown.isNull()) tile.shown = tile.shown.copy();
+}
+
+void PageRenderer::trim_textures() {
+    if (!texture_budget_) return;
+    // (the ones whose tile is gone — another page, a level let go —: their pictures went, and their textures with them)
+    for (auto it = on_card_.begin(); it != on_card_.end();) {
+        const auto level = levels_.find(it->first.first);
+        const bool gone = level == levels_.end() || it->first.second >= static_cast<int>(level->second.tiles.size()) ||
+                          level->second.tiles[static_cast<std::size_t>(it->first.second)].image.isNull();
+        if (gone) {
+            texture_bytes_ -= std::min(texture_bytes_, it->second.bytes);
+            it = on_card_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    // past the budget: the ones drawn longest ago first, never one of the frame just drawn
+    while (texture_bytes_ > *texture_budget_) {
+        auto oldest = on_card_.end();
+        for (auto it = on_card_.begin(); it != on_card_.end(); ++it) {
+            if (it->second.frame < card_frame_ && (oldest == on_card_.end() || it->second.frame < oldest->second.frame)) oldest = it;
+        }
+        if (oldest == on_card_.end()) break;
+        const auto [dpi, index] = oldest->first;
+        forget_on_card(dpi, index);
+        ++textures_released_;
+    }
+    ++card_frame_;
 }
 
 void PageRenderer::redraw_all() {
@@ -597,10 +669,11 @@ void PageRenderer::dispatch() {
             const std::stop_token stop = tile.stop->get_token();
             const std::int64_t frame = frame_;
             const bool onion = onion_;
+            const render::HdrPreview hdr = hdr_;
             if (!onions_) onions_ = std::make_shared<OnionStore>();
             const std::shared_ptr<OnionStore> onions = onions_;
             pool_.start([self, doc, page_index, page_id, generation, dpi, index, region, rough, mode, proof, gamut, monitor, dots, view, stop, frame,
-                         onion, onions]() {
+                         onion, onions, hdr]() {
                 Result result;
                 result.page_id = page_id;
                 result.dpi = dpi;
@@ -635,6 +708,9 @@ void PageRenderer::dispatch() {
                     const bool values = source.icc && (gamut || numbers) && !core::anim::is_animation(*raw);
                     options.inks = (cmyk_page && plates) || (values && raw->color);
                     options.precise = values && !raw->color;
+                    // (PC5 H-a: a 32-bit page shown through 32 bit プレビューオプション — its values or inks, before they are cut)
+                    const bool hdr_on = !hdr.identity() && render::hdr_page(*raw) && !core::anim::is_animation(*raw);
+                    if (hdr_on) (raw->color ? options.inks : options.precise) = true;
                     render::RenderResult drawn;
                     if (core::anim::is_animation(*raw)) {  // (the frame shown, with the frames around it faint)
                         options.at_frame = true;
@@ -666,6 +742,10 @@ void PageRenderer::dispatch() {
                         } else {
                             out_of_gamut = render::proof::Gamut::of(gamut->second)->mask(drawn.image, gamut->first.threshold, &outside);
                         }
+                    }
+                    if (hdr_on) {
+                        if (raw->color && drawn.inks) drawn.image = render::hdr_shown(drawn.image, *drawn.inks, *raw->color, hdr);
+                        else if (!raw->color && drawn.precise) drawn.image = render::hdr_shown(drawn.image, *drawn.precise, render::RgbSpace::of(*raw), hdr);
                     }
                     if (proof) {
                         if (cmyk_page && plates && drawn.inks) {
@@ -769,6 +849,7 @@ void PageRenderer::deliver(const Result& r) {
         tile.image = QImage(rect.size(), QImage::Format_RGB32);
         tile.image.fill(Qt::white);
     }
+    if (texture_budget_) forget_on_card(r.dpi, r.index);  // (painted over: its texture on the card is out of date)
     const QPoint at = r.region.topLeft() - rect.topLeft();
     {
         QPainter painter(&tile.image);
@@ -857,6 +938,8 @@ int PageRenderer::shown_dpi() const {
 
 void PageRenderer::paint(QPainter& painter, const QRectF& visible_mm) const {
     const QTransform to_screen = painter.transform();
+    const bool smooth = painter.testRenderHint(QPainter::SmoothPixmapTransform);
+    const int pixel = pixel_dpi();
     for (const auto& [dpi, l] : levels_) {
         const bool finer = dpi > base_dpi_ && base_dpi_ > 0;
         const double mm = 25.4 / dpi;
@@ -866,6 +949,10 @@ void PageRenderer::paint(QPainter& painter, const QRectF& visible_mm) const {
             t = QTransform::fromTranslate(std::round(t.dx()), std::round(t.dy()));
         }
         painter.setTransform(t);
+        // (PC5 H-a: the page's own pixels enlarged — 画素の段 — are laid as squares, nearest; ピクセルアートのプレビュー: every
+        // level so)
+        const bool enlarged = std::abs(t.determinant()) > 1.0 + 1e-9;
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, smooth && !pixel_art_ && !(enlarged && pixel > 0 && dpi >= pixel));
         const double px = dpi / 25.4;
         const QRect seen = QRectF(visible_mm.x() * px, visible_mm.y() * px, visible_mm.width() * px, visible_mm.height() * px)
                                .toAlignedRect()
@@ -876,9 +963,19 @@ void PageRenderer::paint(QPainter& painter, const QRectF& visible_mm) const {
             if (finer && (tile.valid < tile.changed || !tile.pending.isEmpty() || tile.rough)) continue;  // (only finished ones)
             const QRect rect = tile_rect(l, i);
             if (!rect.intersects(seen)) continue;
-            painter.drawImage(rect.topLeft(), tile.shown.isNull() ? tile.image : tile.shown);
+            const QImage& picture = tile.shown.isNull() ? tile.image : tile.shown;
+            painter.drawImage(rect.topLeft(), picture);
+            if (texture_budget_) {  // (on the card now: counted, with the frame it was drawn in)
+                auto [it, made] = on_card_.try_emplace({dpi, i});
+                if (made) {
+                    it->second.bytes = static_cast<std::size_t>(picture.sizeInBytes());
+                    texture_bytes_ += it->second.bytes;
+                }
+                it->second.frame = card_frame_;
+            }
         }
     }
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, smooth);
     painter.setTransform(to_screen);
 }
 

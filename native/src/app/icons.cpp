@@ -86,6 +86,26 @@ void draw(const QString& name, QPainter& p, const QColor& ink, const QColor& acc
         shade.setColorAt(1, QColor(255, 255, 255, 0));
         p.setBrush(shade);
         p.drawRect(QRectF(4, 8, 24, 16));
+    } else if (name == QLatin1String("hand")) {  // (PC5 H-a: 手のひらツール, an open hand)
+        QPainterPath palm;
+        palm.moveTo(9, 27);
+        palm.cubicTo(6, 23, 5, 19, 6, 16);
+        palm.lineTo(9, 16);
+        palm.lineTo(10, 7);
+        palm.lineTo(12.5, 7);
+        palm.lineTo(13, 15);
+        palm.lineTo(14, 5);
+        palm.lineTo(16.5, 5);
+        palm.lineTo(17, 15);
+        palm.lineTo(18.5, 6);
+        palm.lineTo(21, 6.5);
+        palm.lineTo(20.5, 16);
+        palm.lineTo(23, 10);
+        palm.lineTo(25.5, 11);
+        palm.lineTo(23, 22);
+        palm.cubicTo(22, 25, 20, 27, 18, 27);
+        palm.closeSubpath();
+        p.drawPath(palm);
     } else if (name == QLatin1String("zoom")) {
         p.drawEllipse(QRectF(4, 4, 18, 18));
         p.drawLine(QPointF(19, 19), QPointF(28, 28));

@@ -37,6 +37,7 @@ genko_library(genko_app
     canvas.cpp
     canvas_paint.cpp
     canvas_gpu.cpp
+    canvas_view.cpp
     canvas_input.cpp
     canvas_select.cpp
     thumbs.cpp

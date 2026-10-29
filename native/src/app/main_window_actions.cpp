@@ -810,6 +810,8 @@ void MainWindow::build_toolbars() {
     for (const char* name : {"act_marquee", "act_lasso", "act_wand", "act_reshape"}) palette_->addAction(action(name));
     palette_->addSeparator();
     for (const char* name : {"act_ruler", "act_3d", "act_effect"}) palette_->addAction(action(name));
+    palette_->addSeparator();
+    for (const char* name : {"act_hand_tool", "act_zoom_tool"}) palette_->addAction(action(name));  // (PC5 H-a: Photoshop's last)
     for (const auto& [name, label] : {std::pair{"act_marquee", "長方形選択"}, {"act_lasso", "なげなわ"}, {"act_reshape", "線の修正"}, {"act_3d", "3D"}})
         action(QString::fromLatin1(name))->setIconText(QString::fromUtf8(label));  // (the palette's names stay short; menus keep the full name)
     addToolBar(Qt::LeftToolBarArea, palette_);
@@ -1655,7 +1657,9 @@ void MainWindow::pick_colour() {
 }
 
 void MainWindow::ask_zoom() {
-    if (const auto value = ask::get_int(this, QStringLiteral("表示倍率"), QStringLiteral("倍率（%。100 で紙の大きさ）"), canvas_->zoom_percent(), 5, 6400)) {
+    // (PC5 H-a, the user's decision 11: in the page's pixels — 100 one page pixel a screen pixel, up to 3200 —; the paper's
+    // size is プリントサイズ)
+    if (const auto value = ask::get_int(this, QStringLiteral("表示倍率"), QStringLiteral("倍率（%。100 で画素等倍）"), canvas_->zoom_percent(), 1, 3200)) {
         const int percent = *value;
         canvas_->glide([this, percent] { canvas_->set_zoom_percent(percent); });
     }

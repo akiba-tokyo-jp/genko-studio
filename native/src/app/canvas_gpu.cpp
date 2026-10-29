@@ -16,6 +16,8 @@
 #include <QTimer>
 #include <QWindow>
 
+#include <algorithm>
+
 #include "app/canvas.hpp"
 #include "app/config.hpp"
 
@@ -48,7 +50,14 @@ protected:
         if (gave_up() && (type == QEvent::Show || type == QEvent::WindowChangeInternal || type == QEvent::ScreenChangeInternal)) {
             return QWidget::event(event);
         }
-        return QOpenGLWidget::event(event);
+        const bool handled = QOpenGLWidget::event(event);
+        // (PC5 H-a: a context that could not be made — no OpenGL here, a broken driver —: the canvas draws by the processor
+        // again, and says so; once, after this event)
+        if (gave_up() && !told_) {
+            told_ = true;
+            QMetaObject::invokeMethod(canvas_, [canvas = canvas_] { canvas->gpu_failed(); }, Qt::QueuedConnection);
+        }
+        return handled;
     }
 
     void resizeEvent(QResizeEvent* event) override {
@@ -56,8 +65,11 @@ protected:
     }
 
     void paintGL() override {
-        QPainter painter(this);
-        canvas_->paint_frame(painter);
+        {
+            QPainter painter(this);
+            canvas_->paint_frame(painter);
+        }
+        canvas_->renderer().trim_textures();  // (PC5 H-a: the tiles on the card kept within GPU の記憶)
     }
 
     void resizeGL(int, int) override {
@@ -81,6 +93,7 @@ private:
     PageCanvas* canvas_;
     QTimer settle_;
     bool watching_screen_ = false;
+    bool told_ = false;
 };
 
 // (the canvas's size followed by the surface)
@@ -105,9 +118,11 @@ void PageCanvas::use_gpu(bool on) {
     if (!on) {
         delete gpu_surface_;
         gpu_surface_ = nullptr;
+        renderer_->set_texture_budget(std::nullopt);
         QWidget::update();
         return;
     }
+    renderer_->set_texture_budget(gpu_budget_bytes());
     auto* surface = new GpuSurface(this);
     new FollowSize(this, surface);
     surface->setGeometry(rect());
@@ -115,6 +130,19 @@ void PageCanvas::use_gpu(bool on) {
     surface->setCursor(cursor());
     gpu_surface_ = surface;
     if (isVisible()) surface->show();
+}
+
+void PageCanvas::gpu_failed() {
+    if (gpu_surface_ == nullptr) return;
+    use_gpu(false);
+    emit gpuFailed(QStringLiteral("グラフィックボードで原稿を表示できないため、プロセッサーで表示します（環境設定 → パフォーマンス）"));
+}
+
+std::size_t PageCanvas::gpu_budget_bytes() {
+    // (環境設定 → パフォーマンス: GPU の記憶の上限, MB; PC5 H-a)
+    bool ok = false;
+    const int mb = settings()->value(QStringLiteral("ui/gpu_memory_mb"), 512).toInt(&ok);
+    return static_cast<std::size_t>(ok ? std::clamp(mb, 64, 65536) : 512) * 1024 * 1024;
 }
 
 void PageCanvas::update() {

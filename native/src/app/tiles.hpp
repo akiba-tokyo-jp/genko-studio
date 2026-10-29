@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "core/model.hpp"
+#include "render/hdr_preview.hpp"
 #include "render/proof.hpp"
 
 class QPainter;
@@ -107,6 +108,27 @@ public:
     // (オニオンスキン, and the light table). A page that is not an animation is drawn as it is.
     void set_anim(std::int64_t frame, bool onion);
     std::int64_t anim_frame() const { return frame_; }
+    // 32 bit プレビューオプション (PC5 H-a, render/hdr_preview): a 32-bit page shown through it (display only; another page
+    // as it is). Its tiles are drawn again when it changes.
+    void set_hdr(const render::HdrPreview& preview);
+    const render::HdrPreview& hdr() const { return hdr_; }
+    // 画素の段 (PC5 H-a): the page's own resolution (its paper's dpi) — the finest tiles there are; zoomed in past it, they
+    // are laid on the screen pixel by pixel (nearest: each page pixel a square, the pixel grid on their edges).
+    int pixel_dpi() const;
+    // ピクセルアートのプレビュー: every tile laid on the screen nearest, enlarged or not (never smoothed).
+    void set_pixel_art(bool on);
+    bool pixel_art() const { return pixel_art_; }
+    // GPU の記憶 (render:GPU-CPU-parity, PC5 H-a): while the page is drawn by the graphics card (a budget given), the tiles
+    // it has been given as textures are counted (their bytes) and, past the budget, the ones drawn longest ago are taken
+    // back from it (their pictures copied, so the card lets their textures go; drawn again, they go to it again). None:
+    // drawn by the processor, nothing counted.
+    void set_texture_budget(std::optional<std::size_t> bytes);
+    std::optional<std::size_t> texture_budget() const { return texture_budget_; }
+    // The bytes of the tiles on the card now (0 without a budget), and how many were taken back since the budget was set.
+    std::size_t texture_bytes() const { return texture_bytes_; }
+    std::size_t textures_released() const { return textures_released_; }
+    // (after a frame is drawn on the card: the ones past the budget let go)
+    void trim_textures();
 
     // What the view needs: the resolution of the whole page (base) and the one wanted (finer when zoomed in), and
     // the part of the page in sight (mm).
@@ -201,6 +223,19 @@ private:
     QStringList omitted_;
     std::int64_t frame_ = 1;
     bool onion_ = true;
+    render::HdrPreview hdr_;   // set_hdr
+    bool pixel_art_ = false;   // set_pixel_art
+    // (the tiles on the card: by their level and index, the frame each was drawn last and its bytes)
+    struct OnCard {
+        std::uint64_t frame = 0;
+        std::size_t bytes = 0;
+    };
+    std::optional<std::size_t> texture_budget_;
+    mutable std::map<std::pair<int, int>, OnCard> on_card_;
+    mutable std::size_t texture_bytes_ = 0;
+    mutable std::uint64_t card_frame_ = 0;
+    std::size_t textures_released_ = 0;
+    void forget_on_card(int dpi, int index);
     struct OnionStore;
     std::shared_ptr<OnionStore> onions_;  // (the onion skin of the frame shown, made once for all its tiles)
     QThreadPool pool_;

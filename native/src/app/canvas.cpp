@@ -290,17 +290,47 @@ QRectF PageCanvas::view_rect_mm() const {
     return QRectF(x0, 0.0, w, p->spec.height_mm.value());
 }
 
+namespace {
+
+// The page's own resolution (its paper's dpi; 0: no page, or none to speak of).
+int page_pixel_dpi(const core::Page* page) {
+    if (page == nullptr) return 0;
+    const double dpi = page->spec.dpi.value();
+    return std::isfinite(dpi) && dpi >= 1 ? static_cast<int>(std::lround(dpi)) : 0;
+}
+
+}  // namespace
+
 int PageCanvas::wanted_dpi() const {
     const double ratio = devicePixelRatioF() > 0 ? devicePixelRatioF() : 1.0;
     const double dpi = view_.scale * 25.4 * ratio;
-    return static_cast<int>(std::max(48.0, std::min<double>(PageRenderer::kDetailDpi, std::nearbyint(dpi / 24) * 24)));
+    const double step = std::max(48.0, std::nearbyint(dpi / 24) * 24);
+    // (PC5 H-a, 画素の段: as fine as the page's own pixels, which zoomed in further are laid enlarged; finer than the
+    // detail's 432 dpi on a page of a finer resolution)
+    const int pixel = page_pixel_dpi(page());
+    if (pixel > 0 && (step >= pixel || dpi >= pixel)) return pixel;
+    return static_cast<int>(std::min<double>(std::max(PageRenderer::kDetailDpi, pixel), step));
 }
+
+bool PageCanvas::pixel_step() const {
+    const int pixel = page_pixel_dpi(page());
+    const double ratio = devicePixelRatioF() > 0 ? devicePixelRatioF() : 1.0;
+    return pixel > 0 && view_.scale * 25.4 * ratio > pixel * (1.0 + 1e-9);
+}
+
+double PageCanvas::pixel_scale() const {
+    const double ratio = devicePixelRatioF() > 0 ? devicePixelRatioF() : 1.0;
+    const int pixel = page_pixel_dpi(page());
+    return (pixel > 0 ? pixel : 96) / 25.4 / ratio;  // (no page: as the paper at 96 dpi)
+}
+
+double PageCanvas::max_scale() const { return std::max(kMaxScale, kMaxPixelZoom * pixel_scale()); }
 
 void PageCanvas::fit_page() {
     if (page() == nullptr || width() <= 0 || height() <= 0) return;
     const QRectF r = view_rect_mm();
     const double margin = 16;
-    view_.scale = std::max(kMinScale, std::min(kMaxScale, std::min((width() - 2 * margin) / r.width(), (height() - 2 * margin) / r.height())));
+    view_.scale = std::max(kMinScale, std::min(max_scale(), std::min((width() - 2 * margin) / r.width(), (height() - 2 * margin) / r.height())));
     view_.pan = QPointF((width() - r.width() * view_.scale) / 2 - r.x() * view_.scale, (height() - r.height() * view_.scale) / 2 - r.y() * view_.scale);
     view_.fitted = true;
     after_zoom();
@@ -309,7 +339,7 @@ void PageCanvas::fit_page() {
 void PageCanvas::zoom_by(double factor, std::optional<QPointF> anchor) {
     const QPointF at = anchor.value_or(QPointF(width() / 2.0, height() / 2.0));
     const QPointF mm = mm_of(at);
-    view_.scale = std::max(kMinScale, std::min(kMaxScale, view_.scale * factor));
+    view_.scale = std::max(kMinScale, std::min(max_scale(), view_.scale * factor));
     view_.pan = QPointF(at.x() - mm.x() * view_.scale, at.y() - mm.y() * view_.scale);
     view_.fitted = false;
     after_zoom();
@@ -326,6 +356,18 @@ void PageCanvas::center_on(double x_mm, double y_mm) {
 
 void PageCanvas::actual_size() { zoom_by((96 / 25.4) / view_.scale); }
 
+void PageCanvas::actual_pixels(double percent) { zoom_by(percent / 100.0 * pixel_scale() / view_.scale); }
+
+void PageCanvas::fit_box(const QRectF& box_mm) {
+    if (page() == nullptr || width() <= 0 || height() <= 0 || !(box_mm.width() > 0) || !(box_mm.height() > 0)) return;
+    const double margin = 20;  // (PhotoCraft's fit_layers: 20 px around)
+    view_.scale = std::max(kMinScale, std::min(max_scale(), std::min((width() - 2 * margin) / box_mm.width(), (height() - 2 * margin) / box_mm.height())));
+    const QPointF c = box_mm.center();
+    view_.pan = QPointF(width() / 2.0 - c.x() * view_.scale, height() / 2.0 - c.y() * view_.scale);
+    view_.fitted = false;
+    after_zoom();
+}
+
 void PageCanvas::after_zoom() {
     live_reset();
     rerender_.start(160);
@@ -333,18 +375,21 @@ void PageCanvas::after_zoom() {
     update();
 }
 
-int PageCanvas::zoom_percent() const { return static_cast<int>(std::nearbyint(view_.scale / (96 / 25.4) * 100)); }
+// (PC5 H-a, the user's decision 11: the page's pixels, 100 % one a screen pixel; the paper's size is プリントサイズ)
+int PageCanvas::zoom_percent() const { return static_cast<int>(std::nearbyint(zoom_percent_exact())); }
+
+double PageCanvas::zoom_percent_exact() const { return view_.scale / pixel_scale() * 100; }
 
 void PageCanvas::set_zoom_percent(double percent) {
-    percent = std::max(1.0, percent);
-    zoom_by((percent / 100 * 96 / 25.4) / view_.scale);
+    percent = std::max(0.01, percent);
+    zoom_by(percent / 100 * pixel_scale() / view_.scale);
 }
 
 void PageCanvas::zoom_to_rect(double x0, double y0, double x1, double y1) {
     const double w = std::abs(x1 - x0);
     const double h = std::abs(y1 - y0);
     if (w < 0.5 || h < 0.5) return;
-    view_.scale = std::max(kMinScale, std::min(kMaxScale, std::min(width() / w, height() / h) * 0.95));
+    view_.scale = std::max(kMinScale, std::min(max_scale(), std::min(width() / w, height() / h) * 0.95));
     const double cx = (x0 + x1) / 2;
     const double cy = (y0 + y1) / 2;
     view_.pan = QPointF(width() / 2.0 - cx * view_.scale, height() / 2.0 - cy * view_.scale);
@@ -393,7 +438,7 @@ void PageCanvas::set_view_state(const ViewState& state) {
         fit_page();
         return;
     }
-    view_.scale = std::max(kMinScale, std::min(kMaxScale, state.scale));
+    view_.scale = std::max(kMinScale, std::min(max_scale(), state.scale));
     view_.pan = state.pan;
     view_.fitted = false;
     after_zoom();

@@ -161,6 +161,8 @@ std::vector<Pref> make_table() {
         boolean("export.convertToSrgb", "export/srgb", true, "sRGB に変換"),
         // performance (パフォーマンス)
         boolean("performance.useGpu", "ui/gpu_canvas", false, "原稿の表示にグラフィックボードを使う", Apply::NewWindow),
+        // (PC5 H-a, render:GPU-CPU-parity: the most the page's tiles take on the card)
+        integer("performance.gpuMemoryMb", "ui/gpu_memory_mb", 512, 64, 65536, "グラフィックボードの記憶の上限（MB）", Apply::NewWindow),
         // cursors (カーソル)
         choice("cursors.painting", "ui/cursor", "circle", {"circle", "circle_cross", "cross", "dot", "tip"}, "ペンのカーソル"),
         boolean("cursors.showOnlyCrosshairWhilePainting", "ui/cross_drawing", false, "描いている間は十字だけにする"),

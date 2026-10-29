@@ -43,6 +43,7 @@ const std::map<QString, std::pair<QString, QString>>& titles() {
                                                                             "「作り方」で長方形・折れ線・フリーハンドにすると、新しいコマを描ける")}},
         {QStringLiteral("picker"), {QStringLiteral("スポイトツール"), QStringLiteral("クリックした所の色を描画色にする")}},
         {QStringLiteral("zoom"), {QStringLiteral("ズームツール"), QStringLiteral("クリックで拡大、Alt＋クリックで縮小、ドラッグで囲んだ所を画面いっぱいに")}},
+        {QStringLiteral("hand"), {QStringLiteral("手のひらツール"), QStringLiteral("ドラッグで表示を動かす（ほかの道具でも Space を押しながら）")}},
         {QStringLiteral("fill"), {QStringLiteral("塗りつぶしツール"), QStringLiteral("線で囲まれた所をクリックで塗る。隙間は「隙間を閉じる」の幅まで閉じる")}},
         {QStringLiteral("lassofill"), {QStringLiteral("囲って塗る"), QStringLiteral("ドラッグで囲んだ所を塗る")}},
         {QStringLiteral("marquee"), {QStringLiteral("選択範囲ツール"), QStringLiteral("ドラッグで選ぶ。中をドラッグで移動、□で拡大縮小、○で回転（Shift で 15° 刻み）")}},

@@ -746,6 +746,13 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     gpu->setChecked(truthy(settings()->value(QStringLiteral("ui/gpu_canvas"), QStringLiteral("false"))));
     gpu->setToolTip(QStringLiteral("拡大・回転がなめらかになります（次に開いた窓から）。原稿が白いままになったら外してください。"
                                    "対応していないパソコンでは、入れていても使いません"));
+    gpu_memory = new QSpinBox;  // (PC5 H-a, render:GPU-CPU-parity)
+    gpu_memory->setObjectName(QStringLiteral("gpu_memory"));
+    gpu_memory->setRange(64, 65536);
+    gpu_memory->setSingleStep(64);
+    gpu_memory->setSuffix(QStringLiteral(" MB"));
+    gpu_memory->setValue(static_cast<int>(PageCanvas::gpu_budget_bytes() / (1024 * 1024)));
+    gpu_memory->setToolTip(QStringLiteral("グラフィックボードで表示するときに、原稿の絵を置いておく量の上限です。超えると、前に表示した所から外します（次に開いた窓から）"));
     motion = new QCheckBox(QStringLiteral("動きを減らす"));
     motion->setToolTip(QStringLiteral("メニューの開き方・拡大の寄り方・知らせの出方などの動きを止めます（決めていなければパソコンの設定に合わせます）"));
     motion->setChecked(reduce_motion());
@@ -790,7 +797,7 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
         {QStringLiteral("見た目"),
          {{QStringLiteral("画面の色"), theme}, {QStringLiteral("パネルの明るさ"), brightness}, {QStringLiteral("原稿のまわり"), surround},
           {QStringLiteral("画面の書体"), ui_font}, {QStringLiteral("画面の文字の大きさ"), font_pt}, {QString(), note}, {QString(), mono_icons},
-          {QString(), hints}, {QString(), gpu}}},
+          {QString(), hints}, {QString(), gpu}, {QStringLiteral("グラフィックボードの記憶の上限"), gpu_memory}}},
         {QStringLiteral("描く・操作"),
          {{QStringLiteral("ペンのカーソル"), cursor}, {QString(), cross_drawing}, {QStringLiteral("Alt を押している間"), alt_tool},
           {QStringLiteral("Ctrl を押している間"), ctrl_tool},
@@ -1127,6 +1134,7 @@ void PreferencesDialog::save() {
     store->setValue(QStringLiteral("ui/rest_minutes"), rest->currentData());
     store->setValue(QStringLiteral("ui/raise_requests"), requests->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     store->setValue(QStringLiteral("ui/gpu_canvas"), gpu->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
+    if (gpu_memory->value() != static_cast<int>(PageCanvas::gpu_budget_bytes() / (1024 * 1024))) store->setValue(QStringLiteral("ui/gpu_memory_mb"), gpu_memory->value());
     if (motion->isChecked() == system_reduces_motion()) {  // (as the computer is set: keep following it)
         store->remove(QStringLiteral("ui/reduce_motion"));
     } else {

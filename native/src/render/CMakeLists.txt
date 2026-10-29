@@ -48,6 +48,7 @@ genko_library(genko_render
     plugins.cpp
     colour.cpp
     proof.cpp
+    hdr_preview.cpp
     import_profile.cpp
     ink.cpp
     ink_canvas.cpp

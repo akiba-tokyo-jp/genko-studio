@@ -267,6 +267,7 @@ void MainWindow::apply_proof_view() {
     setup.simulate_paper = v.simulate_paper;
     QString profile = v.profile;
     PageRenderer& r = canvas_->renderer();
+    r.set_hdr(v.hdr);  // (PC5 H-a: 32 bit プレビューオプション, the tab's own)
     if (profile == QLatin1String("working")) {
         const cs::Working w = cs::working(cs::Space::Cmyk, cs::load());
         profile = w.spec == QLatin1String("export") ? QStringLiteral("export") : QString();
