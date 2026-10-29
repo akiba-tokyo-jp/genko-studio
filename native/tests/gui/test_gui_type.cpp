@@ -199,6 +199,14 @@ private slots:
         inject::click_mm(s.canvas(), QPointF(60, 250));
         QVERIFY(type_in(s, QStringLiteral("た")));
         QCOMPARE(s.last()["op"], Json("add_line"));
+        QCOMPARE(s.last()["wrap"], Json("vertical"));  // (テキスト: as 縦書き says)
+        // 横書き文字ツール: a line across, whatever 縦書き says (review P2-1)
+        QVERIFY(s.window->text_settings()->vertical->isChecked());
+        s.act("act_text_h")->trigger();
+        inject::click_mm(s.canvas(), QPointF(60, 150));
+        QVERIFY(type_in(s, QStringLiteral("ち")));
+        QCOMPARE(s.last()["op"], Json("add_line"));
+        QCOMPARE(s.last()["wrap"], Json("horizontal"));
     }
 
     // a type layer's text clicked with a text tool, or its row double-clicked: typed over (edit_type with the marks typed)
@@ -206,6 +214,7 @@ private slots:
         Studio s;
         QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "はじめ"}, {"wrap", "horizontal"},
                                                       {"box", Json::array({40, 40, 60, 20})}, {"style", Json{{"size_mm", 6}}}, {"new_id", "t1"}}})));
+        s.window->set_target_layer("t1");  // (making lines: only the type layer chosen is typed over — review P3-5)
         s.act("act_text")->trigger();
         inject::click_mm(s.canvas(), QPointF(45, 45));
         app::InlineEditor* editor = s.canvas()->editor();
@@ -233,7 +242,12 @@ private slots:
         emit list->itemDoubleClicked(row);
         QVERIFY(s.canvas()->editor() != nullptr);
         QCOMPARE(s.canvas()->editor()->toPlainText(), QStringLiteral("｜次《つぎ》"));
-        s.canvas()->editor()->finish(false);
+        // all its text taken away: the type layer goes (review P3-5)
+        s.canvas()->editor()->selectAll();
+        QTest::keyClick(s.canvas()->editor(), Qt::Key_Delete);
+        ctrl_enter(s.canvas()->editor());
+        QCOMPARE(s.last(), (Json{{"op", "delete_layer"}, {"page", 1}, {"id", "t1"}}));
+        QVERIFY(s.layer("t1") == nullptr);
     }
 
     // 書式's commands on the chosen type layer: アンチエイリアス (checked), 方向, the conversions, Lorem, ラスタライズ
@@ -259,8 +273,11 @@ private slots:
         s.act("act_type_lorem")->trigger();
         QCOMPARE(s.last()["insert"]["at"], Json(3));
         QVERIFY(s.layer("t1")->type->text.size() > 10);
+        // 書式 → 作業用パスを作成 on the type layer chosen (review P2-6)
+        s.act("act_line_work_path")->trigger();
+        QCOMPARE(s.last(), (Json{{"op", "text_to_path"}, {"page", 1}, {"id", "t1"}}));
         s.act("act_type_update_all")->trigger();  // (set again: nothing changes in the book)
-        QCOMPARE(s.last()["op"], Json("edit_type"));
+        QCOMPARE(s.last()["op"], Json("text_to_path"));
         s.act("act_type_rasterize")->trigger();
         QCOMPARE(s.last()["op"], Json("rasterize_lines"));
         QCOMPARE(s.layer("t1")->kind, core::LayerKind::Raster);

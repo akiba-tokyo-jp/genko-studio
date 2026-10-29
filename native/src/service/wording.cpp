@@ -1186,6 +1186,11 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("title names a type layer: a line has none", "名前はテキストレイヤーにだけ付けられます"));
         r.push_back(rule("the type layer is too large to turn at this resolution", "テキストレイヤーが大きすぎて、この解像度では回して描けません"));
         r.push_back(rule("page and layer_id name the type layer|line \\(a line's id\\) names the line", "台詞（line）かテキストレイヤー（page と layer_id）を指定します"));
+        // (PC5 G-a review)
+        r.push_back(rule(".* must lie within a metre of the page.*", "文字の位置と枠は、ページから 1 m の内（枠の幅と高さは 1 m まで）で指定します"));
+        r.push_back(rule("the text is too large to set.*", "文字が大きすぎて組めません（ポイントテキストの行が長すぎるか、段落テキストが枠から大きくはみ出しています）"));
+        r.push_back(rule("no panel \\S+ on the page", "そのページに無いコマです"));
+        r.push_back(rule("after names a line of the page", "読む順の位置（after）は、同じページの台詞を指定します"));
         r.push_back(rule("a type layer turned, scaled or bent is not in this build yet",
                          "テキストレイヤーの回転・拡大・縮小・ゆがみは、この版の Genko ではまだできません（移動はできます）"));
         r.push_back(rule(".* takes the style \\S+, which the book does not keep", "原稿に無い文字スタイル・段落スタイルを指定しています"));

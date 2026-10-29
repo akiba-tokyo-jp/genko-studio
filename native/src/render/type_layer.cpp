@@ -3,6 +3,7 @@
 #include "render/type_layer.hpp"
 
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <map>
 #include <memory>
@@ -104,7 +105,7 @@ std::optional<std::array<double, 4>> extent_mm(const detail::Ctx& ctx, const cor
     return extent;
 }
 
-thread_local std::int64_t largest_upright = 0;  // (tests: the most pixels one upright piece took on this thread)
+std::atomic<std::int64_t> largest_upright{0};  // (tests: the most pixels one upright piece took)
 
 // アンチエイリアス なし after the map: each pixel whole or none (the bicubic map made the edges soft again — review P3-4)
 void binarized(Image& image) {
@@ -189,7 +190,7 @@ std::optional<Image> turned(const detail::Ctx& ctx, const core::StoryLine& line,
             continue;
         }
         if (pixels > kMostPixels) throw core::Error("image_too_large", "the type layer is too large to turn at this resolution");
-        largest_upright = std::max(largest_upright, pixels);
+        for (std::int64_t was = largest_upright.load(); pixels > was && !largest_upright.compare_exchange_weak(was, pixels);) {}
         const Image drawn_piece = drawn(ctx, upright, Point{from.x0, from.y0}, Size{from.width(), from.height()}, paper, ctx.dpi);
         if (drawn_piece.getbbox()) {
             // (a pixel of the piece (u, v) → the page's px → mm → back through the matrix → the upright piece's px)
@@ -216,8 +217,8 @@ void forget_extents() {
 }
 
 std::int64_t largest_upright_pixels(bool reset) {
-    const std::int64_t out = largest_upright;
-    if (reset) largest_upright = 0;
+    const std::int64_t out = largest_upright.load();
+    if (reset) largest_upright.store(0);
     return out;
 }
 

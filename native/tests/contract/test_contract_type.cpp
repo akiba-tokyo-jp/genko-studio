@@ -30,6 +30,7 @@
 #include "render/ops_registry.hpp"
 #include "render/pcraft_read.hpp"
 #include "render/psd.hpp"
+#include "render/type_layer.hpp"
 #include "render/text/lettering.hpp"
 #include "render/page.hpp"
 #include "storage/fsutil.hpp"
@@ -741,6 +742,162 @@ private slots:
                  info["lines"].dump().c_str());
         QVERIFY(info["lines"][1]["from"][1].get<double>() > 24);
         QVERIFY(std::abs(info["size_mm"].get<double>() - 5) < 0.1);
+    }
+
+    // --- PC5 G-a review ------------------------------------------------------------------------------------------------------
+
+    // (P1-1) a turned type layer draws only what a part of the page takes: a 512 px tile at 600 dpi a small upright piece,
+    // the whole page in bands within the bound — and the part the same pixels as the whole cut there
+    void turnedInParts() {
+        core::Document doc = core::new_episode("文字", core::Num(1), 1, core::PageSpec::custom(210, 297, 40, 40, 1, 2, 2, 2, 2, 600, "color"));
+        doc.edit_page(0).frames.clear();
+        doc.edit_page(0).numero = false;
+        std::string text;
+        for (int i = 0; i < 400; ++i) text += "あいうえおかきくけこ";
+        doc = run(doc, Json{{"op", "add_type_layer"}, {"page", 1}, {"text", text}, {"box", Json::array({10, 10, 190, 277})}, {"style", Json{{"size_mm", 8}}},
+                            {"new_id", "big"}});
+        doc = run(doc, Json{{"op", "transform_layers"}, {"page", 1}, {"ids", Json::array({"big"})}, {"turn", "90cw"}});
+        render::RenderOptions options = render::proof_options();
+        options.region = render::RenderRegion{2000, 3000, 512, 512};
+        (void)render::type_layer::largest_upright_pixels(true);
+        const render::Image tile = render::render_page(doc.page(0), 600, options, &doc).image;
+        const std::int64_t piece = render::type_layer::largest_upright_pixels(true);
+        QVERIFY2(piece > 0 && piece < 600'000, qPrintable(QString::number(piece)));  // (about the tile's own, not the 4500 × 6500 px text)
+        options.region.reset();
+        const render::Image whole = render::render_page(doc.page(0), 600, options, &doc).image;
+        const std::int64_t most = render::type_layer::largest_upright_pixels(true);
+        QVERIFY2(most <= 20'000'000, qPrintable(QString::number(most)));
+        QVERIFY2(worst(tile.tobytes(), whole.crop(render::Box{2000, 3000, 2512, 3512}).tobytes()) <= 2, "the tile as the whole cut there");
+    }
+
+    // (P2-3) a balloon of a type layer set where the turned page no longer reaches: drawn whole
+    void balloonOffThePaper() {
+        core::Document doc = core::new_episode("文字", core::Num(1), 1, core::PageSpec::custom(100, 150, 40, 40, 1, 2, 2, 2, 2, 200, "color"));
+        doc.edit_page(0).frames.clear();
+        doc.edit_page(0).numero = false;
+        doc = run(doc, Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "あいう"}, {"x_mm", 10}, {"y_mm", 115}, {"w_mm", 40}, {"h_mm", 25}});
+        doc = run(doc, Json{{"op", "line_to_type_layer"}, {"line", "l1"}, {"new_id", "t1"}});
+        const double before = darkness(shown(doc));
+        const core::Document turned = run(doc, Json{{"op", "rotate_pages"}, {"page", 1}, {"turn", "90cw"}, {"text", "upright"}});
+        QVERIFY(core::type_text::transform_of(*layer_of(turned, "t1")->type).has_value());
+        const double after = darkness(shown(turned));
+        QVERIFY2(std::abs(after - before) < 0.08 * before, qPrintable(QString("%1 against %2").arg(after).arg(before)));
+    }
+
+    // (P2-4) places and sizes within bounds; a text too large to set refused
+    void bounds() {
+        const core::Document doc = plain_book();
+        QVERIFY(refusal(doc, Json::array({Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "a"}, {"box", Json::array({0, 0, 5000, 10})}}}))
+                    .find("within a metre") != std::string::npos);
+        QVERIFY(refusal(doc, Json::array({Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "a"}, {"point", Json::array({-3000, 0})}}}))
+                    .find("within a metre") != std::string::npos);
+        std::string longer;
+        for (int i = 0; i < 20000; ++i) longer += "H";
+        const std::string why = refusal(doc, Json::array({Json{{"op", "add_type_layer"}, {"page", 1}, {"text", longer}, {"point", Json::array({1, 10})}, {"wrap", "horizontal"}}}));
+        QVERIFY2(why.find("too large to set") != std::string::npos, why.c_str());
+    }
+
+    // (P2-5) a point or box text with no alignment is Photoshop's left: every row from the anchor's (the box's) left
+    void leftByDefault() {
+        const core::Document point = with_point(plain_book(), "horizontal", Json::array({8, 15}), "H\nHIHIH", 4);
+        const Json info = run_ops(point, Json::array({Json{{"op", "type_info"}, {"page", 1}, {"layer_id", "p1"}}})).results[0];
+        QVERIFY2(std::abs(info["lines"][0]["from"][0].get<double>() - 8) < 0.4 && std::abs(info["lines"][1]["from"][0].get<double>() - 8) < 0.4,
+                 info["lines"].dump().c_str());
+        const core::Document box = run(plain_book(), Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "HHHHHHHHHHH"}, {"wrap", "horizontal"},
+                                                          {"box", Json::array({5, 5, 20, 30})}, {"style", Json{{"size_mm", 4}}}, {"new_id", "b1"}});
+        const Json rows = run_ops(box, Json::array({Json{{"op", "type_info"}, {"page", 1}, {"layer_id", "b1"}}})).results[0]["lines"];
+        QVERIFY(rows.size() >= 2);
+        for (const Json& row : rows) QVERIFY2(std::abs(row["from"][0].get<double>() - 5) < 0.4, rows.dump().c_str());
+    }
+
+    // (P2-2) a line made point text: moved (move_line), its letters with it; turned (rotate_deg), still drawn
+    void pointLines() {
+        core::Document doc = run(plain_book(), Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "HIH"}, {"x_mm", 8}, {"y_mm", 8}, {"w_mm", 20},
+                                                    {"h_mm", 10}, {"balloon", "none"}, {"wrap", "horizontal"}, {"style", Json{{"size_mm", 5}}}});
+        doc = run(doc, Json{{"op", "edit_type"}, {"line", "l1"}, {"point", true}});
+        const auto was = ink_mm(doc);
+        const core::StoryLine& line = doc.story[0];
+        const core::Document moved = run(doc, Json{{"op", "move_line"}, {"id", "l1"}, {"x_mm", line.x_mm.value() + 6}, {"y_mm", line.y_mm.value() + 4}});
+        const auto now = ink_mm(moved);
+        QVERIFY2(std::abs((*now)[0] - (*was)[0] - 6) < 0.3 && std::abs((*now)[1] - (*was)[1] - 4) < 0.3, "moved with its box");
+        const core::Document leant = run(doc, Json{{"op", "edit_line"}, {"id", "l1"}, {"style", Json{{"rotate_deg", 30}}}});
+        const auto turned = ink_mm(leant);
+        QVERIFY(turned.has_value());
+        QVERIFY2(std::abs(((*turned)[0] + (*turned)[2]) / 2 - ((*was)[0] + (*was)[2]) / 2) < 2, "drawn where it was, turned");
+    }
+
+    // (P2-6) a turned type layer's work path where it is shown; ワープテキスト on a type layer (edit_type's warp)
+    void pathsAndWarp() {
+        const core::Document doc = with_point(plain_book(), "horizontal", Json::array({8, 20}), "HIH", 6);
+        const core::Document turned = run(doc, Json{{"op", "transform_layers"}, {"page", 1}, {"ids", Json::array({"p1"})}, {"turn", "90cw"}});
+        const auto ink = ink_mm(turned);
+        const core::Document path = run(turned, Json{{"op", "text_to_path"}, {"page", 1}, {"id", "p1"}});
+        const auto bounds = path.page(0).work_path->control_bounds();
+        QVERIFY(bounds.has_value());
+        QVERIFY2(std::abs((*bounds)[0] - (*ink)[0]) < 0.8 && std::abs((*bounds)[1] - (*ink)[1]) < 0.8 && std::abs((*bounds)[2] - (*ink)[2]) < 0.8,
+                 qPrintable(QString("%1 %2 %3 against %4 %5 %6").arg((*bounds)[0]).arg((*bounds)[1]).arg((*bounds)[2]).arg((*ink)[0]).arg((*ink)[1]).arg((*ink)[2])));
+        const Json arc{{"style", "arc"}, {"bend", 50}, {"h_distort", 0}, {"v_distort", 0}, {"vertical", false}};
+        const core::Document bent = run(doc, Json{{"op", "edit_type"}, {"page", 1}, {"layer_id", "p1"}, {"warp", arc}});
+        QVERIFY(layer_of(bent, "p1")->type->style.contains("native_warp"));
+        QVERIFY(proof_bytes(bent) != proof_bytes(doc));
+        const core::Document straight = run(bent, Json{{"op", "edit_type"}, {"page", 1}, {"layer_id", "p1"}, {"warp", nullptr}});
+        QCOMPARE(proof_bytes(straight), proof_bytes(doc));
+    }
+
+    // (P3-1, P3-2, P3-4) the position's lock; what a line leaves behind said, and given back; アンチエイリアス なし turned
+    void reviewSmall() {
+        core::Document doc = with_point(plain_book(), "horizontal", Json::array({8, 20}), "HIH", 6);
+        const core::Document held = run(doc, Json{{"op", "set_layer"}, {"page", 1}, {"id", "p1"}, {"lock_position", true}});
+        QVERIFY(refusal(held, Json::array({Json{{"op", "edit_type"}, {"page", 1}, {"layer_id", "p1"}, {"anchor", Json::array({9, 9})}}})).find("is locked") !=
+                std::string::npos);
+        (void)run(held, Json{{"op", "edit_type"}, {"page", 1}, {"layer_id", "p1"}, {"text", "HI"}});  // (its text is not its position)
+        // a line's speaker, panel and place in the reading order: in the report and a note; type_layer_to_line gives them back
+        core::Document lined = plain_book();
+        lined.edit_page(0).frames.clear();
+        lined = run(lined, Json{{"op", "add_line"}, {"page", 1}, {"id", "l0"}, {"text", "まえ"}, {"x_mm", 30}, {"y_mm", 30}});
+        lined = run(lined, Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "かき"}, {"speaker", "太郎"}, {"x_mm", 8}, {"y_mm", 8}});
+        lined = run(lined, Json{{"op", "add_line"}, {"page", 1}, {"id", "l2"}, {"text", "あと"}, {"x_mm", 30}, {"y_mm", 8}});
+        const core::ApplyResult made = run_ops(lined, Json::array({Json{{"op", "line_to_type_layer"}, {"line", "l1"}, {"new_id", "tl"}}}));
+        QCOMPARE(made.results[0]["dropped"]["speaker"], Json("太郎"));
+        QCOMPARE(made.results[0]["dropped"]["after"], Json("l0"));
+        const core::Document back = run(made.doc, Json{{"op", "type_layer_to_line"}, {"page", 1}, {"layer_id", "tl"}, {"new_id", "l1"}, {"speaker", "太郎"},
+                                                       {"after", "l0"}});
+        QCOMPARE(back.story.size(), std::size_t{3});
+        QCOMPARE(back.story[1].id, std::string("l1"));
+        QCOMPARE(back.story[1].speaker, std::string("太郎"));
+        // アンチエイリアス なし, turned: still each pixel the letters' or none
+        doc = run(doc, Json{{"op", "edit_type"}, {"page", 1}, {"layer_id", "p1"}, {"antialias", "none"}, {"transform", Json::array({0.866, 0.5, -0.5, 0.866, 15, -5})}});
+        const std::string bytes = render::render_page(doc.page(0), 200, render::proof_options(), &doc).image.convert("L").tobytes();
+        int middle = 0;
+        for (const char c : bytes) middle += static_cast<unsigned char>(c) > 40 && static_cast<unsigned char>(c) < 215 ? 1 : 0;
+        QVERIFY2(middle < 5, qPrintable(QString::number(middle)));
+    }
+
+    // (P3-15) a turned type layer through the other ways: a layered PSD, flattened, a 16-bit and a CMYK page, a smart object
+    void turnedElsewhere() {
+        const core::Document doc = run(with_type(plain_book()), Json{{"op", "transform_layers"}, {"page", 1}, {"ids", Json::array({"t1"})}, {"turn", "90cw"}});
+        const double dark = darkness(shown(doc));
+        QVERIFY(dark > 0.003);
+        QTemporaryDir scratch;
+        const fs::path psd = core::path_from_utf8(scratch.path().toStdString()) / "turned.psd";
+        formats::export_page_psd(doc, doc.page(0), psd, 200);
+        const render::psd::File file = render::psd::File::read(read_text(psd));
+        bool found = false;
+        for (const render::psd::Layer& layer : file.layers()) found = found || (layer.name == "あいう" && file.image(layer).getbbox().has_value());
+        QVERIFY(found);
+        const core::Document flat = run(doc, Json{{"op", "merge_visible"}, {"page", 1}, {"copy", false}, {"flatten", true}});
+        QVERIFY2(std::abs(darkness(shown(flat)) - dark) < 0.1 * dark, "flattened");
+        const core::Document smart = run(doc, Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"t1"})}});
+        QVERIFY2(worst(proof_bytes(smart), proof_bytes(doc)) <= 2, "a smart object");
+        for (const Json& mode : {Json{{"mode", "rgb"}, {"depth", 16}}, Json{{"mode", "cmyk"}, {"profile", "coated-cmyk"}, {"depth", 16}}}) {
+            Json op = mode;
+            op["op"] = "set_color_mode";
+            op["page"] = 1;
+            const core::Document deep =
+                run(with_type(run(plain_book(), op)), Json{{"op", "transform_layers"}, {"page", 1}, {"ids", Json::array({"t1"})}, {"turn", "90cw"}});
+            const double d = darkness(shown(deep));
+            QVERIFY2(std::abs(d - dark) < 0.15 * dark, qPrintable(QString::fromStdString(mode.dump()) + QStringLiteral(": %1 against %2").arg(d).arg(dark)));
+        }
     }
 };
 
