@@ -1236,6 +1236,9 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
     read_layer_vectors(layer, data, at);  // (PC3: vector@1's vector mask, transform@1's link and position lock)
     read_layer_files(layer, data, at);    // (PC4: psd-keep@1's kept blocks)
     check_keys(data, kLayerKeys, at, "layer");
+    if (layer.kind != core::LayerKind::Type && find(data, "type") != nullptr) {  // (type@1: a type layer's record only)
+        issue("unknown_key", at_key(at, "type"), {}, "a " + std::string(core::to_string(layer.kind)) + " layer's type is not written back");
+    }
     if (!placed && !smart) {
         for (const auto& key : kPlacedOnlyKeys) {
             if (find(data, key) != nullptr) {

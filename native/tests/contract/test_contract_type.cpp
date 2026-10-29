@@ -21,9 +21,13 @@
 #include "core/error.hpp"
 #include "core/paths.hpp"
 #include "core/type_text.hpp"
+#include "formats/export.hpp"
+#include "formats/pcraft_write.hpp"
 #include "render/image.hpp"
 #include "render/image_ops.hpp"
 #include "render/ops_registry.hpp"
+#include "render/pcraft_read.hpp"
+#include "render/psd.hpp"
 #include "render/page.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/lock.hpp"
@@ -144,15 +148,15 @@ private slots:
         QVERIFY(!core::type_text::uses_type(gone));
         QCOMPARE(proof_bytes(gone), drawn);
         std::string after = project_of(gone, scratch, "plain2.genko");
-        // (the revision and the book id are the book's own: the rest the same bytes)
+        // (the same bytes as never typed)
         QVERIFY(after.find("type@1") == std::string::npos);
-        QCOMPARE(after.size(), before.size());
+        QCOMPARE(after, before);
         // a line given native_type and then none again: as before
         const core::Document set = run(doc, Json{{"op", "edit_line"}, {"id", "l1"}, {"native_type", Json{{"antialias", "none"}}}});
         QVERIFY(has_feature(set) && set.story[0].native_type);
         const core::Document unset = run(set, Json{{"op", "edit_line"}, {"id", "l1"}, {"native_type", nullptr}});
         QVERIFY(!unset.story[0].native_type && !core::type_text::uses_type(unset));
-        QCOMPARE(project_of(unset, scratch, "plain3.genko").size(), before.size());
+        QCOMPARE(project_of(unset, scratch, "plain3.genko"), before);
     }
 
     // saved and read back as they were: the type layer's record and settings, the line's native_type, the styles
@@ -324,6 +328,107 @@ private slots:
         }
         QVERIFY(refusal(doc, Json::array({Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "a"}, {"point", Json::array({1, 1})}}})).starts_with("not_yet_ported"));
         QVERIFY(refusal(doc, Json::array({Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "a"}}})).find("box [x, y, w, h] (mm) is required") != std::string::npos);
+        QVERIFY(refusal(doc, Json::array({Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "a"}, {"box", kBox}, {"balloon", "foo"}}})).find("balloon must be one of") !=
+                std::string::npos);
+    }
+
+    // (review P1-1) the layered exports: the type layer a pixel layer of its name, its picture its letters — PSD and .pcraft
+    void layeredExports() {
+        const core::Document doc = with_type(plain_book());
+        QTemporaryDir scratch;
+        const fs::path psd = core::path_from_utf8(scratch.path().toStdString()) / "typed.psd";
+        formats::export_page_psd(doc, doc.page(0), psd, 200);
+        const render::psd::File file = render::psd::File::read(read_text(psd));
+        bool found = false;
+        for (const render::psd::Layer& layer : file.layers()) {
+            if (layer.name != "あいう") continue;
+            found = true;
+            QCOMPARE(layer.kind, std::string("pixels"));
+            QVERIFY(file.image(layer).getbbox().has_value());
+        }
+        QVERIFY(found);
+        std::vector<std::string> notes;
+        const render::pcraft::Read read = render::pcraft::read(formats::pcraft_bytes(doc, 0, formats::PcraftOptions{}, &notes), "typed");
+        bool kept = false;
+        for (const core::Layer& layer : read.doc.page(0).layers)
+            kept = kept || (layer.title == "あいう" && layer.raster_png && !layer.raster_png->empty());
+        QVERIFY(kept);
+    }
+
+    // (review P1-2, P2-1) flattened, merged down (into the type layer or onto it), converted: the letters in the pixels,
+    // no type layer left behind
+    void mergesAndConversions() {
+        const core::Document doc = with_type(plain_book());
+        const double dark = darkness(shown(doc));
+        const core::Document flat = run(doc, Json{{"op", "merge_visible"}, {"page", 1}, {"copy", false}, {"flatten", true}});
+        QVERIFY2(std::abs(darkness(shown(flat)) - dark) < 0.1 * dark, qPrintable(QString::number(darkness(shown(flat)))));
+        QVERIFY(!core::type_text::uses_type(flat));
+        const core::Document down = run(doc, Json{{"op", "merge_down"}, {"page", 1}, {"id", "t1"}});
+        QVERIFY(layer_of(down, "t1") == nullptr && !core::type_text::uses_type(down));
+        QVERIFY2(worst(proof_bytes(down), proof_bytes(doc)) <= 2, qPrintable(QString::number(worst(proof_bytes(down), proof_bytes(doc)))));
+        core::Document over = run(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"name", "上"}});
+        const std::string top = over.page(0).layers.back().id;
+        over = run(over, Json{{"op", "merge_down"}, {"page", 1}, {"id", top}});
+        QVERIFY(layer_of(over, "t1") != nullptr && layer_of(over, "t1")->kind == core::LayerKind::Raster && !layer_of(over, "t1")->type);
+        QVERIFY2(worst(proof_bytes(over), proof_bytes(doc)) <= 2, qPrintable(QString::number(worst(proof_bytes(over), proof_bytes(doc)))));
+        const core::Document paint = run(doc, Json{{"op", "convert_layer"}, {"page", 1}, {"id", "t1"}, {"to", "paint"}});
+        QVERIFY(layer_of(paint, "t1")->kind == core::LayerKind::Raster && !layer_of(paint, "t1")->type);
+        QVERIFY2(worst(proof_bytes(paint), proof_bytes(doc)) <= 2, qPrintable(QString::number(worst(proof_bytes(paint), proof_bytes(doc)))));
+    }
+
+    // (review P2-2, P2-3) one type layer a smart object (its contents a page with it: type@1 named); moved with its linked mask
+    void smartObjectAndMask() {
+        const core::Document doc = with_type(plain_book());
+        const core::Document smart = run(doc, Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"t1"})}});
+        QVERIFY(core::type_text::uses_type(smart));
+        QVERIFY2(worst(proof_bytes(smart), proof_bytes(doc)) <= 2, qPrintable(QString::number(worst(proof_bytes(smart), proof_bytes(doc)))));
+        const core::Document masked = run(doc, Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", "t1"}, {"linked", true},
+                                                    {"area", Json{{"rect", Json::array({8, 8, 15, 30})}}}});
+        const core::Document moved = run(masked, Json{{"op", "transform_layers"}, {"page", 1}, {"ids", Json::array({"t1"})}, {"move", Json::array({5, 0})}});
+        QVERIFY(layer_of(moved, "t1")->mask && layer_of(masked, "t1")->mask);
+        QVERIFY(*layer_of(moved, "t1")->mask->png != *layer_of(masked, "t1")->mask->png);  // (the mask went with the letters)
+    }
+
+    // (review P2-4) Canvas Size: the type layer moves with the page as the line does
+    void pageSize() {
+        core::Document doc = with_type(plain_book());
+        doc = run(doc, Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "かき"}, {"x_mm", 8}, {"y_mm", 8}, {"w_mm", 30}, {"h_mm", 30}});
+        const core::Document wide = run(doc, Json{{"op", "set_canvas_size"}, {"page", 1}, {"width_mm", 10}, {"relative", true}, {"anchor", "right"}});
+        QCOMPARE(layer_of(wide, "t1")->type->x_mm.value(), wide.story[0].x_mm.value());
+        QVERIFY(std::abs(layer_of(wide, "t1")->type->x_mm.value() - 18.0) < 1e-6);
+    }
+
+    // (review P1-3) the type ops that name a line look at its page's lock
+    void lockedPage() {
+        core::Document doc = run(plain_book(), Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "かき"}, {"x_mm", 8}, {"y_mm", 8}});
+        doc = core::CommandBus(render::ops_registry()).apply(doc, Json::array({Json{{"op", "lock_page"}, {"page", 1}, {"agent", "human:a"}}}), core::Actor("human:a")).doc;
+        try {
+            core::CommandBus(render::ops_registry()).apply(doc, Json::array({Json{{"op", "edit_type"}, {"line", "l1"}, {"text", "あ"}}}), core::Actor("ai:x"));
+            QFAIL("edit_type on a page another has locked");
+        } catch (const core::ApplyError& error) {
+            QVERIFY2(std::string(error.what()).find("locked") != std::string::npos, error.what());
+        }
+        // (its own page given or not: the line's page is the one looked at)
+        try {
+            core::CommandBus(render::ops_registry()).apply(doc, Json::array({Json{{"op", "edit_type"}, {"page", 2}, {"line", "l1"}, {"text", "あ"}}}), core::Actor("ai:x"));
+            QFAIL("edit_type with another page given");
+        } catch (const core::ApplyError& error) {
+            QVERIFY2(std::string(error.what()).find("locked") != std::string::npos, error.what());
+        }
+    }
+
+    // (review P2-8) type_info is a question: the book as it was, nothing to journal; never with ops that change the book
+    void questions() {
+        const core::Document doc = with_type(plain_book());
+        const core::ApplyResult asked = run_ops(doc, Json::array({Json{{"op", "type_info"}, {"page", 1}, {"layer_id", "t1"}}}));
+        QVERIFY(asked.unchanged);
+        QVERIFY(asked.journal_ops.empty());
+        QCOMPARE(asked.doc.revision, doc.revision);
+        QVERIFY(asked.doc.pages[0] == doc.pages[0]);  // (the same page: nothing copied)
+        QCOMPARE(asked.results.size(), std::size_t{1});
+        QVERIFY(!run_ops(doc, Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "x"}}})).unchanged);
+        const std::string mixed = refusal(doc, Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "x"}}, Json{{"op", "type_info"}, {"page", 1}, {"layer_id", "t1"}}}));
+        QVERIFY2(mixed.find("type_info is a question") != std::string::npos, mixed.c_str());
     }
 };
 

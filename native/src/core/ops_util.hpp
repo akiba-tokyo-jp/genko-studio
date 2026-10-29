@@ -181,6 +181,8 @@ void register_line_ops(OpRegistry& registry, PictureCheck check = {});
 // (type@1, PC5 G-0) A line's style as add_line takes it (ops._merge_style over nothing: OpError for a key or value it does not
 // take; a picture in it, without `check`, not_yet_ported): a type layer's record's.
 Json line_style(const Json& style, const PictureCheck& check = {});
+// (type@1, PC5 G-0) A balloon's kind as add_line takes it (balloons.SHAPES; OpError "balloon must be one of …").
+std::string line_balloon(const Json& kind);
 // What the book and page ops of M4 need beyond core (render::register_bookpage_ops gives them; without them the ops
 // refuse that part with not_yet_ported).
 struct BookPageHooks {

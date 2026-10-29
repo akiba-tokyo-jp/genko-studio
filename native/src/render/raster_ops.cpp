@@ -1059,6 +1059,7 @@ void into_pixels(const Page& page, Layer& target, const Image& picture) {
     target.opacity = 1.0;
     target.clip = false;
     target.native_psd.reset();  // (psd-keep@1, PC4 F-d: a PSD's effects and blocks are not the merged or converted layer's)
+    target.type.reset();        // (type@1, PC5 G-0: a type layer merged into, or converted: its text drawn in)
     raster::save_raster(page, target, picture);
 }
 
@@ -1111,7 +1112,8 @@ bool merge_draws(const Layer& l) {
     return l.color_raster || l.raster_png || l.stroke_count() || !l.patches.empty() || shape_parts::any(l) ||
            (l.kind == LayerKind::Fill && l.fill && core::py_truthy(*l.fill)) ||
            (l.kind == LayerKind::Adjust && l.adjust && core::py_truthy(*l.adjust)) ||
-           l.kind == LayerKind::Tone || l.kind == LayerKind::Placed || l.kind == LayerKind::Smart;
+           l.kind == LayerKind::Tone || l.kind == LayerKind::Placed || l.kind == LayerKind::Smart ||
+           l.kind == LayerKind::Type;  // (type@1, PC5 G-0: its text drawn)
 }
 bool merge_tail_clipped(const Page& page, const std::vector<std::size_t>& layers) {
     bool proof = true, print = merge_printed(page.layers[layers.front()]);
@@ -1140,6 +1142,7 @@ void into_color_pixels(Layer& target, std::pair<std::string, bool> pixels) {
     target.screen.reset(); target.color.reset(); target.tone.reset(); target.source.reset();
     target.blend = "normal"; target.opacity = 1; target.clip = pixels.second; target.panel_clip = false;
     target.native_psd.reset();  // (psd-keep@1, PC4 F-d: a PSD's effects and blocks are not the merged layer's)
+    target.type.reset();        // (type@1, PC5 G-0: its text drawn in)
     target.color_raster = pixels.first.empty() ? core::Bytes{} : std::make_shared<const std::string>(std::move(pixels.first));
 }
 std::pair<std::string, bool> composite_color_layers(const Document& doc, const Page& page,
@@ -1621,6 +1624,7 @@ void merge_down(OpContext& c) {
         into.style.reset();
         raster::save_raster(page, into, merged);
         page.layers[li].native_psd.reset();
+        page.layers[li].type.reset();  // (type@1, PC5 G-0: a type layer merged into: its text drawn in)
         page.layers.erase(page.layers.begin() + static_cast<std::ptrdiff_t>(ui));
         return;
     }
@@ -1673,6 +1677,7 @@ void merge_down(OpContext& c) {
         raster::save_raster(page, into, merged);
     }
     page.layers[li].native_psd.reset();  // (psd-keep@1, PC4 F-d: a PSD's effects and blocks are not the merged layer's)
+    page.layers[li].type.reset();  // (type@1, PC5 G-0: a type layer merged into: its text drawn in)
     page.layers.erase(page.layers.begin() + static_cast<std::ptrdiff_t>(ui));
 }
 

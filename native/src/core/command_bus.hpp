@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <set>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -75,6 +76,10 @@ public:
     void add(std::string name, OpFunction function);
     const OpFunction* find(std::string_view name) const;
     std::vector<std::string> names() const;
+    // (PC5 G-0) An op that only answers a question (type_info): it changes nothing, and a batch of such ops alone is applied
+    // as a dry run whoever asks (ApplyResult::unchanged: nothing saved, journalled or put in the history).
+    void add_query(std::string name, OpFunction function);
+    bool is_query(std::string_view name) const;
 
     // Without a resolver the bus refuses an area that needs one with not_yet_ported.
     void set_area_resolver(AreaResolver resolver);
@@ -82,6 +87,7 @@ public:
 
 private:
     std::map<std::string, OpFunction, std::less<>> ops_;
+    std::set<std::string, std::less<>> queries_;
     AreaResolver area_resolver_;
 };
 
@@ -92,6 +98,9 @@ struct ApplyResult {
     bool has_warnings = true;         // false for [{"op": "undo"}] (Python's reply has no "warnings" then)
     Json results = Json::array();     // what some ops report: {"index", "op", …} (the reply's "results" when any)
     Json journal_ops = Json::array(); // the ops as the journal records them (Python's _journal_op)
+    // (PC5 G-0) every op a question (OpRegistry::add_query): `doc` the book given, no journal ops — the caller saves nothing,
+    // journals nothing and puts nothing in the history, as for a dry run
+    bool unchanged = false;
 };
 
 class CommandBus {

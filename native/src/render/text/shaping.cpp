@@ -6,6 +6,7 @@
 
 #include <QByteArray>
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -31,11 +32,16 @@ struct Face {
 std::shared_ptr<const Face> face_of(const std::string& font, unsigned index) {
     static std::mutex mutex;
     static std::map<std::pair<std::string, unsigned>, std::shared_ptr<const Face>> cache;
-    const std::lock_guard<std::mutex> lock(mutex);
     const auto key = std::make_pair(font, index);
-    if (const auto it = cache.find(key); it != cache.end()) return it->second;
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        if (const auto it = cache.find(key); it != cache.end()) return it->second;
+    }
     auto made = std::make_shared<Face>();
-    made->bytes = font_bytes(font);
+    made->bytes = font_bytes(font);  // (read outside the lock)
+    const std::lock_guard<std::mutex> lock(mutex);
+    if (const auto it = cache.find(key); it != cache.end()) return it->second;
+    if (cache.size() >= 16) cache.clear();  // (a few faces kept: those in use stay held by their callers)
     made->blob = hb_blob_create(made->bytes->constData(), static_cast<unsigned>(made->bytes->size()), HB_MEMORY_MODE_READONLY, nullptr, nullptr);
     made->face = hb_face_create(made->blob, index);
     cache.emplace(key, made);
@@ -51,6 +57,7 @@ hb_tag_t tag_of(const std::string& tag) {
 
 std::vector<ShapedGlyph> shape(const ShapeRequest& request) {
     if (!(request.size_px > 0)) throw core::Error("value", "the size of a run to set must be above 0");
+    if (!(request.size_px <= 100000)) throw core::Error("value", "the size of a run to set must be at most 100000 px");
     const std::shared_ptr<const Face> face = face_of(request.font, request.face_index);
     hb_font_t* font = hb_font_create(face->face);
     const int scale = static_cast<int>(request.size_px * 64.0 + 0.5);  // (26.6 fixed point, as FreeType's)

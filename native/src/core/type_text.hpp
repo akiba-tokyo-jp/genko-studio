@@ -19,12 +19,15 @@
 //    "anchor_mm": [x, y],                            a point text's anchor
 //    "antialias": none | sharp | crisp | strong | smooth | windows | windowsLcd   (smooth, the default, not written)
 //    "shaping": "opentype",                          set by the OpenType typesetting (render/text/shaping)
-//    "transform": [a, b, c, d, e, f],                its matrix after typesetting (mm)
+//    "transform": [a, b, c, d, e, f],                its matrix after typesetting: x' = a·x + c·y + e, y' = b·x + d·y + f,
+//                                                    the page's mm to the page's mm (e, f absolute; a page's own map —
+//                                                    canvas size, turns — composed in front of it)
 //    "char_style": "cs-1", "para_style": "ps-1",     the styles the whole text takes (none: none, Basic Paragraph)
 //    "char": {…}, "para": {…},                       the whole text's own character and paragraph attributes
 //    "runs": [{"start", "end", "style"?, "char"?}],  ranges of graphemes [start, end), in order, none overlapping
 //    "paragraphs": [{"index", "style"?, "para"?}]}   paragraphs (the text split at its line breaks) by number
-// in its normal form: the keys in that order, a value given only when it is not the default, every attribute known and
+// in its normal form: the keys in that order, nothing empty and the default anti-alias not written (an attribute given is
+// kept as given, a default's value too: it can take back what a style says), every attribute known and
 // in its bounds (the tables char_attrs and para_attrs), the ranges inside the text. A type layer (core::LayerKind::Type)
 // holds such a record (Layer::type: a line's record without its id, page, speaker, panel and reading order) and is drawn
 // by the lines' typesetting as the layer's picture. The book's styles are Document::type_styles:
@@ -128,14 +131,19 @@ struct Edit {
 };
 // The edit that made `after` of `before` (their common start and end, in graphemes).
 Edit edit_between(std::string_view before, std::string_view after);
-// The edits that made `after` of `before`: what a longest common subsequence of their graphemes leaves (left to right);
-// texts past ruby::kLcsCells compared, their common start and end alone (edit_between).
+// The edits that made `after` of `before`: Myers' shortest edit script of their graphemes (left to right, O((n + m)·D)); texts
+// that differ in more than 2048 places, their common start and end alone (edit_between) — the ranges an edit so takes away
+// are said by the ops (removed_by).
 std::vector<Edit> edits_between(std::string_view before, std::string_view after);
 // A native_type's runs and paragraphs through edits of its text (`before` → `after`; the edits left to right, none
 // overlapping, in the graphemes of `before`). Null when nothing is left in it.
 Json follow(const Json& native_type, std::string_view before, std::string_view after, const std::vector<Edit>& edits);
-// replace_text's code point replacements as edits in graphemes.
-std::vector<Edit> edits_of(std::string_view before, const std::vector<ruby::Replacement>& replacements);
+// replace_text's code point replacements (left to right) as edits in graphemes: what each reaches of the text before, and
+// the graphemes its replacement makes counted in the text after (a mark it puts in joins the letter before it). Binary
+// searches: linear in the matches and the ranges, never their product.
+std::vector<Edit> edits_of(std::string_view before, std::string_view after, const std::vector<ruby::Replacement>& replacements);
+// How many ranges and paragraphs' settings `before` held that `after` (the same native_type followed) does not.
+std::int64_t removed_by(const Json& before, const Json& after);
 
 // A line's style_runs ([[words, {scale, bold, weight, rgb, tcy}]], found by their words) as ranges of the text: the runs
 // of native_type they become (each word found from where the last one was, as the lettering finds them; one not found

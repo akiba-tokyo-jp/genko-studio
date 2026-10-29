@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <map>
 #include <set>
 
 #include "core/error.hpp"
@@ -82,6 +83,7 @@ constexpr std::size_t kMaxTags = 64;
 constexpr std::size_t kMaxRuns = 4096;
 constexpr std::size_t kMaxStyles = 512;
 constexpr std::size_t kMaxStyleName = 64;
+constexpr std::int64_t kMaxEditSteps = 2048;  // (edits_between: the differences Myers' script reads, at most)
 
 // A number as the normal form keeps it: 4 decimals, a whole one as an integer.
 Json num(double v) {
@@ -228,27 +230,51 @@ std::vector<std::int64_t> paragraph_starts(std::string_view text) {
     return out;
 }
 
-std::int64_t map_start(std::int64_t a, const Edit& e) {
-    const std::int64_t delta = e.inserted - (e.end - e.start);
-    if (a < e.start) return a;
-    if (a >= e.end) return a + delta;
-    return e.start + e.inserted;
-}
+// Places of the text before through its edits (left to right, none overlapping), each found by a binary search: the edits
+// wholly before a place move it by their lengths' change (their running sum), the one around it decides the rest.
+//  - a range's start: an edit before it (an insertion just before it included) moves it; one around it takes it to the end
+//    of what the edit put in;
+//  - a range's end: an edit before it moves it (an insertion at it does not: one at a range's end is not in it); one around
+//    it takes it to the edit's start (what the edit put in is not the range's);
+//  - a paragraph's start: an edit before it moves it (an insertion at it does not); one around it takes it away (-1).
+class Places {
+public:
+    explicit Places(std::vector<Edit> edits) : edits_(std::move(edits)) {
+        std::sort(edits_.begin(), edits_.end(), [](const Edit& x, const Edit& y) { return x.start < y.start; });
+        sums_.assign(edits_.size() + 1, 0);
+        for (std::size_t i = 0; i < edits_.size(); ++i) sums_[i + 1] = sums_[i] + edits_[i].inserted - (edits_[i].end - edits_[i].start);
+    }
+    std::int64_t start(std::int64_t a) const {
+        const std::size_t i = before(a, [](const Edit& e, std::int64_t p) { return e.end <= p; });
+        if (i < edits_.size() && edits_[i].start <= a) return edits_[i].start + edits_[i].inserted + sums_[i];
+        return a + sums_[i];
+    }
+    std::int64_t end(std::int64_t b) const {
+        const std::size_t i = before(b, [](const Edit& e, std::int64_t p) { return e.end < p; });
+        if (i < edits_.size() && edits_[i].start < b) return edits_[i].start + sums_[i];
+        return b + sums_[i];
+    }
+    std::int64_t paragraph(std::int64_t p) const {
+        const std::size_t i = before(p, [](const Edit& e, std::int64_t q) { return q >= e.end && q > e.start; });
+        if (i < edits_.size() && edits_[i].start < p) return -1;
+        return p + sums_[i];
+    }
 
-std::int64_t map_end(std::int64_t b, const Edit& e) {
-    const std::int64_t delta = e.inserted - (e.end - e.start);
-    if (b <= e.start) return b;
-    if (e.start == e.end || b > e.end) return b + delta;
-    return e.start;
-}
-
-// A paragraph's start through an edit (an insertion there leaves it where it is); -1: taken away.
-std::int64_t map_paragraph(std::int64_t p, const Edit& e) {
-    const std::int64_t delta = e.inserted - (e.end - e.start);
-    if (p <= e.start) return p;
-    if (p >= e.end) return p + delta;
-    return -1;
-}
+private:
+    // How many edits (a prefix of them, in order) the test says lie wholly before the place.
+    template <class Test>
+    std::size_t before(std::int64_t place, Test test) const {
+        std::size_t lo = 0, hi = edits_.size();
+        while (lo < hi) {
+            const std::size_t mid = (lo + hi) / 2;
+            if (test(edits_[mid], place)) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+    std::vector<Edit> edits_;
+    std::vector<std::int64_t> sums_;
+};
 
 void merge_into(Json& into, const Json* from) {
     if (from == nullptr || !from->is_object()) return;
@@ -553,17 +579,19 @@ Json resolve_para(const StoryLine& record, const Json* styles, std::int64_t inde
 
 std::vector<CharRun> resolve_chars(const StoryLine& record, const Json* styles) {
     const std::int64_t n = ruby::count(record.text);
-    // the attributes every letter starts from, then each paragraph's, then the ranges'
+    // the attributes every letter starts from, then each paragraph's, then the ranges' — worked out once for each stretch
+    // between the paragraphs' and the ranges' edges (never a letter at a time)
     Json base = char_defaults();
     const Json own = from_style(record.style);
     merge_into(base, &own["char"]);
     if (styles != nullptr && styles->is_object()) {
         if (const Json* basic = get(*styles, "basic")) merge_into(base, get(*basic, "char"));
     }
+    if (n == 0) return {CharRun{0, 0, base}};  // (an empty text: what a letter typed there would take)
     const Json empty = Json::object();
     const Json& nt = record.native_type ? *record.native_type : empty;
-    std::vector<Json> at(static_cast<std::size_t>(n));
     const std::vector<std::int64_t> starts = paragraph_starts(record.text);
+    std::vector<Json> paragraph_chars;
     for (std::size_t p = 0; p < starts.size(); ++p) {
         Json chars = base;
         const Json* paragraph = nullptr;
@@ -576,28 +604,36 @@ std::vector<CharRun> resolve_chars(const StoryLine& record, const Json* styles) 
         if (const Json* style = style_named(styles, "paragraph", style_id)) merge_into(chars, get(*style, "char"));
         if (const Json* style = style_named(styles, "character", get(nt, "char_style"))) merge_into(chars, get(*style, "char"));
         merge_into(chars, get(nt, "char"));
-        const std::int64_t end = p + 1 < starts.size() ? starts[p + 1] : n;
-        for (std::int64_t i = starts[p]; i < end; ++i) at[static_cast<std::size_t>(i)] = chars;
+        paragraph_chars.push_back(std::move(chars));
     }
-    if (const Json* runs = get(nt, "runs"); runs != nullptr && runs->is_array()) {
-        for (const Json& run : *runs) {
-            const std::int64_t s = run.value("start", std::int64_t{0}), e = std::min<std::int64_t>(run.value("end", std::int64_t{0}), n);
-            const Json* style = style_named(styles, "character", get(run, "style"));
-            for (std::int64_t i = std::max<std::int64_t>(s, 0); i < e; ++i) {
-                if (style != nullptr) merge_into(at[static_cast<std::size_t>(i)], get(*style, "char"));
-                merge_into(at[static_cast<std::size_t>(i)], get(run, "char"));
-            }
-        }
+    std::vector<const Json*> runs;
+    if (const Json* given = get(nt, "runs"); given != nullptr && given->is_array())
+        for (const Json& run : *given) runs.push_back(&run);
+    std::vector<std::int64_t> edges(starts.begin(), starts.end());
+    edges.push_back(n);
+    for (const Json* run : runs) {
+        edges.push_back(std::clamp<std::int64_t>(run->value("start", std::int64_t{0}), 0, n));
+        edges.push_back(std::clamp<std::int64_t>(run->value("end", std::int64_t{0}), 0, n));
     }
+    std::sort(edges.begin(), edges.end());
+    edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
     std::vector<CharRun> out;
-    for (std::int64_t i = 0; i < n; ++i) {
-        if (!out.empty() && out.back().attrs == at[static_cast<std::size_t>(i)]) {
-            out.back().end = i + 1;
+    std::size_t r = 0;
+    for (std::size_t i = 0; i + 1 < edges.size(); ++i) {
+        const std::int64_t s = edges[i], e = edges[i + 1];
+        const std::size_t p = static_cast<std::size_t>(std::upper_bound(starts.begin(), starts.end(), s) - starts.begin()) - 1;
+        Json attrs = paragraph_chars[p];
+        while (r < runs.size() && runs[r]->value("end", std::int64_t{0}) <= s) ++r;
+        if (r < runs.size() && runs[r]->value("start", std::int64_t{0}) <= s) {
+            if (const Json* style = style_named(styles, "character", get(*runs[r], "style"))) merge_into(attrs, get(*style, "char"));
+            merge_into(attrs, get(*runs[r], "char"));
+        }
+        if (!out.empty() && out.back().attrs == attrs) {
+            out.back().end = e;
         } else {
-            out.push_back(CharRun{i, i + 1, at[static_cast<std::size_t>(i)]});
+            out.push_back(CharRun{s, e, std::move(attrs)});
         }
     }
-    if (out.empty()) out.push_back(CharRun{0, 0, base});  // (an empty text: what a letter typed there would take)
     return out;
 }
 
@@ -611,84 +647,155 @@ Edit edit_between(std::string_view before, std::string_view after) {
 }
 
 std::vector<Edit> edits_between(std::string_view before, std::string_view after) {
-    const std::vector<std::u32string> a = graphemes(before), b = graphemes(after);
-    if (a == b) return {};
-    // (their common start and end first: only what lies between is compared)
-    std::size_t p = 0;
-    while (p < a.size() && p < b.size() && a[p] == b[p]) ++p;
-    std::size_t s = 0;
-    while (s < a.size() - p && s < b.size() - p && a[a.size() - 1 - s] == b[b.size() - 1 - s]) ++s;
-    const std::size_t n = a.size() - s - p, m = b.size() - s - p;
-    if (n == 0 || m == 0 || static_cast<std::int64_t>((n + 1) * (m + 1)) > ruby::kLcsCells) return {edit_between(before, after)};
-    std::vector<std::int32_t> table((n + 1) * (m + 1), 0);  // (the longest common subsequence of what follows each place)
-    const auto at = [&](std::size_t i, std::size_t j) -> std::int32_t& { return table[i * (m + 1) + j]; };
-    for (std::size_t i = n; i-- > 0;) {
-        for (std::size_t j = m; j-- > 0;) {
-            at(i, j) = a[p + i] == b[p + j] ? at(i + 1, j + 1) + 1 : std::max(at(i + 1, j), at(i, j + 1));
-        }
-    }
-    std::vector<Edit> out;
-    std::size_t i = 0, j = 0;
-    std::optional<Edit> open;
-    const auto close = [&] {
-        if (open) out.push_back(*open);
-        open.reset();
+    const std::vector<std::u32string> ga = graphemes(before), gb = graphemes(after);
+    if (ga == gb) return {};
+    // (each grapheme as a number, the same for the same grapheme: compared as numbers)
+    std::map<std::u32string, std::int32_t> ids;
+    const auto numbered = [&](const std::vector<std::u32string>& g) {
+        std::vector<std::int32_t> out;
+        out.reserve(g.size());
+        for (const std::u32string& x : g) out.push_back(ids.emplace(x, static_cast<std::int32_t>(ids.size())).first->second);
+        return out;
     };
-    while (i < n || j < m) {
-        if (i < n && j < m && a[p + i] == b[p + j]) {
-            close();
-            ++i;
-            ++j;
-            continue;
+    const std::vector<std::int32_t> A = numbered(ga), B = numbered(gb);
+    const std::int64_t n = static_cast<std::int64_t>(A.size()), m = static_cast<std::int64_t>(B.size());
+    // Myers' shortest edit script (O((n + m)·D) time, the D bands of its furthest reaches kept to read the script back): up
+    // to kMaxEditSteps differences; past them their common start and end alone (edit_between)
+    const std::int64_t most = std::min<std::int64_t>(n + m, kMaxEditSteps);
+    std::vector<std::int64_t> v(static_cast<std::size_t>(2 * most + 3), 0);
+    const auto at = [&](std::int64_t k) -> std::int64_t& { return v[static_cast<std::size_t>(k + most + 1)]; };
+    std::vector<std::vector<std::int64_t>> bands;  // (band d: the reaches of diagonals −d, −d + 2, …, d)
+    std::int64_t found = -1;
+    for (std::int64_t d = 0; d <= most && found < 0; ++d) {
+        std::vector<std::int64_t> band;
+        band.reserve(static_cast<std::size_t>(d + 1));
+        for (std::int64_t k = -d; k <= d; k += 2) {
+            std::int64_t x = (k == -d || (k != d && at(k - 1) < at(k + 1))) ? at(k + 1) : at(k - 1) + 1;
+            std::int64_t y = x - k;
+            while (x < n && y < m && A[static_cast<std::size_t>(x)] == B[static_cast<std::size_t>(y)]) {
+                ++x;
+                ++y;
+            }
+            at(k) = x;
+            band.push_back(x);
+            if (x >= n && y >= m && found < 0) found = d;
         }
-        if (!open) open = Edit{static_cast<std::int64_t>(p + i), static_cast<std::int64_t>(p + i), 0};
-        if (j < m && (i == n || at(i, j + 1) >= at(i + 1, j))) {
-            ++open->inserted;
-            ++j;
+        bands.push_back(std::move(band));
+    }
+    if (found < 0) return {edit_between(before, after)};
+    // read the script back: each step a deletion of A[x] or an insertion of B[y] before A[x]
+    struct Step {
+        std::int64_t x;
+        bool insert;
+    };
+    std::vector<Step> steps;
+    std::int64_t x = n, y = m;
+    for (std::int64_t d = found; d > 0; --d) {
+        const std::vector<std::int64_t>& prev = bands[static_cast<std::size_t>(d - 1)];
+        const auto reach = [&](std::int64_t k) { return prev[static_cast<std::size_t>((k + d - 1) / 2)]; };
+        const std::int64_t k = x - y;
+        const bool down = k == -d || (k != d && reach(k - 1) < reach(k + 1));
+        const std::int64_t pk = down ? k + 1 : k - 1;
+        const std::int64_t px = reach(pk), py = px - pk;
+        steps.push_back(Step{px, down});
+        x = px;
+        y = py;
+    }
+    std::reverse(steps.begin(), steps.end());
+    std::vector<Edit> out;
+    for (const Step& s : steps) {
+        if (out.empty() || out.back().end != s.x) out.push_back(Edit{s.x, s.x, 0});
+        if (s.insert) {
+            ++out.back().inserted;
         } else {
-            ++i;
-            open->end = static_cast<std::int64_t>(p + i);
+            ++out.back().end;
         }
     }
-    close();
     return out;
 }
 
-std::vector<Edit> edits_of(std::string_view before, const std::vector<ruby::Replacement>& replacements) {
-    const std::u32string cps = ruby::code_points(before);
-    const std::vector<std::size_t> b = ruby::bounds(cps);
-    const auto floor_at = [&](std::size_t cp) {
-        std::int64_t i = 0;
-        while (static_cast<std::size_t>(i + 1) < b.size() && b[static_cast<std::size_t>(i + 1)] <= cp) ++i;
-        return std::min<std::int64_t>(i, static_cast<std::int64_t>(b.size()) - 1);
+std::vector<Edit> edits_of(std::string_view before, std::string_view after, const std::vector<ruby::Replacement>& replacements) {
+    const std::vector<std::size_t> b = ruby::bounds(ruby::code_points(before));
+    const std::vector<std::size_t> a = ruby::bounds(ruby::code_points(after));
+    // (where a code point lies among the graphemes: the grapheme it begins in, or the next edge)
+    const auto floor_in = [](const std::vector<std::size_t>& bounds, std::size_t cp) {
+        const auto it = std::upper_bound(bounds.begin(), bounds.end(), cp);
+        return static_cast<std::int64_t>(it == bounds.begin() ? 0 : (it - bounds.begin()) - 1);
     };
-    const auto ceil_at = [&](std::size_t cp) {
-        std::int64_t i = 0;
-        while (static_cast<std::size_t>(i) < b.size() && b[static_cast<std::size_t>(i)] < cp) ++i;
-        return std::min<std::int64_t>(i, static_cast<std::int64_t>(b.size()) - 1);
+    const auto ceil_in = [](const std::vector<std::size_t>& bounds, std::size_t cp) {
+        const auto it = std::lower_bound(bounds.begin(), bounds.end(), cp);
+        return static_cast<std::int64_t>(std::min<std::ptrdiff_t>(it - bounds.begin(), static_cast<std::ptrdiff_t>(bounds.size()) - 1));
     };
-    std::vector<Edit> out;
+    const auto edge = [](const std::vector<std::size_t>& bounds, std::size_t cp) { return std::binary_search(bounds.begin(), bounds.end(), cp); };
+    // Each match as code points of both texts, widened until both its ends are edges of graphemes in both (the text around
+    // it is the same in both: a mark it puts in joins the letter before it, one it takes away parts it), matches that then
+    // touch made one; then counted as graphemes.
+    struct Region {
+        std::size_t b0, b1, a0, a1;
+    };
+    std::vector<Region> regions;
+    std::int64_t shift = 0;  // (code points the replacements before this one added)
     for (const ruby::Replacement& r : replacements) {
-        const std::vector<std::size_t> wb = ruby::bounds(r.with);
-        out.push_back(Edit{floor_at(r.start), ceil_at(r.end), static_cast<std::int64_t>(wb.size()) - 1});
+        std::size_t back = 0, ahead = 0;
+        const std::size_t as = static_cast<std::size_t>(static_cast<std::int64_t>(r.start) + shift), ae = as + r.with.size();
+        for (bool moved = true; moved;) {
+            moved = false;
+            // (never past either text's start or end: a text that is not as the matches say is counted as it is)
+            if (back > std::min(r.start, as) || r.end + ahead > b.back() || ae + ahead > a.back()) {
+                back = std::min(back, std::min(r.start, as));
+                ahead = std::min(b.back() - std::min(b.back(), r.end), a.back() - std::min(a.back(), ae));
+                break;
+            }
+            const std::size_t b0 = r.start - back, a0 = as - back, b1 = r.end + ahead, a1 = ae + ahead;
+            if (!edge(b, b0) && b0 > 0) {
+                back += b0 - b[static_cast<std::size_t>(floor_in(b, b0))];
+                moved = true;
+            } else if (!edge(a, a0) && a0 > 0) {
+                back += a0 - a[static_cast<std::size_t>(floor_in(a, a0))];
+                moved = true;
+            } else if (!edge(b, b1)) {
+                ahead += b[static_cast<std::size_t>(ceil_in(b, b1))] - b1;
+                moved = true;
+            } else if (!edge(a, a1)) {
+                ahead += a[static_cast<std::size_t>(ceil_in(a, a1))] - a1;
+                moved = true;
+            }
+        }
+        const Region here{r.start - back, r.end + ahead, as - back, ae + ahead};
+        if (!regions.empty() && here.b0 < regions.back().b1) {
+            regions.back().b1 = std::max(regions.back().b1, here.b1);
+            regions.back().a1 = std::max(regions.back().a1, here.a1);
+        } else {
+            regions.push_back(here);
+        }
+        shift += static_cast<std::int64_t>(r.with.size()) - static_cast<std::int64_t>(r.end - r.start);
     }
-    return out;
+    std::vector<Edit> out;
+    for (const Region& g : regions) {
+        const std::int64_t start = ceil_in(b, g.b0), end = ceil_in(b, g.b1);
+        out.push_back(Edit{start, end, std::max<std::int64_t>(0, ceil_in(a, g.a1) - ceil_in(a, g.a0))});
+    }
+    // (edits that still share a grapheme are one)
+    std::vector<Edit> merged;
+    for (const Edit& e : out) {
+        if (!merged.empty() && e.start < merged.back().end) {
+            merged.back().end = std::max(merged.back().end, e.end);
+            merged.back().inserted += e.inserted;
+        } else {
+            merged.push_back(e);
+        }
+    }
+    return merged;
 }
 
 Json follow(const Json& native_type, std::string_view before, std::string_view after, const std::vector<Edit>& edits) {
     if (!native_type.is_object()) return native_type;
     Json out = native_type;
-    std::vector<Edit> order = edits;
-    std::sort(order.begin(), order.end(), [](const Edit& x, const Edit& y) { return x.start > y.start; });  // (right to left)
+    const Places places(edits);
     if (const Json* runs = get(native_type, "runs"); runs != nullptr && runs->is_array()) {
         Json kept = Json::array();
         for (Json run : *runs) {
-            std::int64_t s = run.value("start", std::int64_t{0}), e = run.value("end", std::int64_t{0});
-            for (const Edit& edit : order) {
-                const std::int64_t ns = map_start(s, edit), ne = map_end(e, edit);
-                s = ns;
-                e = ne;
-            }
+            const std::int64_t s = places.start(run.value("start", std::int64_t{0})), e = places.end(run.value("end", std::int64_t{0}));
             if (e <= s) continue;
             run["start"] = s;
             run["end"] = e;
@@ -704,12 +811,9 @@ Json follow(const Json& native_type, std::string_view before, std::string_view a
         for (Json p : *paragraphs) {
             const std::int64_t index = p.value("index", std::int64_t{-1});
             if (index < 0 || index >= static_cast<std::int64_t>(was.size())) continue;
-            std::int64_t at = was[static_cast<std::size_t>(index)];
-            for (const Edit& edit : order) {
-                if (at >= 0) at = map_paragraph(at, edit);
-            }
-            const auto found = std::find(now.begin(), now.end(), at);
-            if (at < 0 || found == now.end()) continue;  // (its line break taken away: joined to the one before it)
+            const std::int64_t at = places.paragraph(was[static_cast<std::size_t>(index)]);
+            const auto found = std::lower_bound(now.begin(), now.end(), at);
+            if (at < 0 || found == now.end() || *found != at) continue;  // (its line break taken away: joined to the one before it)
             const std::int64_t moved = found - now.begin();
             if (moved <= last) continue;
             last = moved;
@@ -721,6 +825,16 @@ Json follow(const Json& native_type, std::string_view before, std::string_view a
     }
     if (out.empty()) return nullptr;
     return out;
+}
+
+std::int64_t removed_by(const Json& before, const Json& after) {
+    const auto count = [](const Json& nt) {
+        std::int64_t n = 0;
+        for (const char* key : {"runs", "paragraphs"})
+            if (const Json* list = nt.is_object() ? get(nt, key) : nullptr; list != nullptr && list->is_array()) n += static_cast<std::int64_t>(list->size());
+        return n;
+    };
+    return std::max<std::int64_t>(0, count(before) - count(after));
 }
 
 Json runs_from_style_runs(const StoryLine& line) {

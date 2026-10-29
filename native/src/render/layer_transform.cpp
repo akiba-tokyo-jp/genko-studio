@@ -506,9 +506,9 @@ void move_layer_in(Document& doc, std::size_t at, const std::string& id, const M
         const auto& a = m.affine;
         if (!m.is_affine() || m.warp || m.filter || std::fabs(a[0] - 1) > 1e-12 || std::fabs(a[1]) > 1e-12 || std::fabs(a[2]) > 1e-12 ||
             std::fabs(a[3] - 1) > 1e-12)
-            core::not_yet_ported("type:transform (a type layer turned, scaled or bent)");
+            core::not_yet_ported("a type layer turned, scaled or bent is not in this build yet");
         if (layer.type) layer.type = core::type_text::shared_record(core::type_text::moved(*layer.type, a[4], a[5]));
-        return;
+        // (no lines, parts or pixels of its own: on to its linked masks, below)
     } else if (layer.kind == LayerKind::Placed && layer.placement_mm) {
         const auto& a = m.affine;
         if (!m.is_affine() || std::fabs(a[1]) > 1e-12 || std::fabs(a[2]) > 1e-12 || a[0] <= 0 || a[3] <= 0) {

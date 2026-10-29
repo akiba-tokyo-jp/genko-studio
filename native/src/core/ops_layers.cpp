@@ -439,7 +439,8 @@ void duplicate_layer(OpContext& c) {
         if (item.id == twin.id) throw OpError("layer " + twin.id + " exists");
     }
     // the copy is an ordinary layer (a book has one ink layer, one name layer…)
-    if (source.kind != LayerKind::Placed) twin.role = LayerRole::User;
+    // (type@1, PC5 G-0: a type layer's copy keeps the text role, as Photoshop's copy of a type layer is one)
+    if (source.kind != LayerKind::Placed && source.kind != LayerKind::Type) twin.role = LayerRole::User;
     std::string base = source.title;
     if (base.empty()) {
         static const std::pair<LayerRole, const char*> kTitles[] = {{LayerRole::Name, "ネーム"},

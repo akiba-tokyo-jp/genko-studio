@@ -729,6 +729,7 @@ core::ApplyResult Session::apply(const Json& ops, const std::vector<std::string>
     const core::CommandBus bus(*registry_);
     core::ScopedIdScript script(ids);
     core::ApplyResult result = bus.apply(*doc_, ops, core::Actor(actor_));
+    if (result.unchanged) return result;  // (PC5 G-0: questions alone — type_info —: no change, no history, nothing to save)
     return keep_applied(ops, std::move(result), script.taken());
 }
 
@@ -737,6 +738,7 @@ core::ApplyResult Session::apply_worked(const Json& ops, const DocPtr& base, cor
     if (saving_as_) throw core::ApplyError("別名保存中です。完了してから編集してください。", "save_as_busy");
     if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
     if (discarded_) throw core::ApplyError("the book was closed", "closed");
+    if (result.unchanged) return result;  // (PC5 G-0: questions alone)
     return keep_applied(ops, std::move(result), taken);
 }
 

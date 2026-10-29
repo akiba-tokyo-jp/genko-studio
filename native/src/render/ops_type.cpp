@@ -13,6 +13,7 @@
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
 #include "core/type_text.hpp"
+#include "render/raster_ops.hpp"
 #include "render/text/fonts.hpp"
 
 namespace genko::render {
@@ -95,12 +96,10 @@ void add_type_layer(OpContext& c) {
         if (*wrap != Json("vertical") && *wrap != Json("horizontal")) throw OpError("wrap must be vertical or horizontal");
         record.wrap = wrap->get<std::string>();
     }
-    if (const Json* balloon = given(c.op, "balloon")) {
-        if (!balloon->is_string()) throw OpError("balloon must be a balloon's kind");
-        record.balloon = balloon->get<std::string>();
-    }
+    if (const Json* balloon = given(c.op, "balloon")) record.balloon = core::line_balloon(*balloon);  // (as add_line checks it)
     Page& page = doc.edit_page(at);
-    if (const Json* style = given(c.op, "style")) record.style = core::line_style(*style);  // (a line's, as add_line takes it)
+    // (a line's, as add_line takes it: a picture in it checked as the drawing build checks one)
+    if (const Json* style = given(c.op, "style")) record.style = core::line_style(*style, [](const std::string& bytes) { verify_style_picture(bytes); });
     if (const Json* native = given(c.op, "native_type")) {
         try {
             const Json normal = core::type_text::check_native_type(*native, text);
@@ -159,6 +158,11 @@ void edit_type(OpContext& c) {
         }
         if (record.native_type) {
             const Json followed = core::type_text::follow(*record.native_type, before, text, core::type_text::edits_between(before, text));
+            if (const std::int64_t removed = core::type_text::removed_by(*record.native_type, followed); removed > 0) {
+                Json report = c.report ? *c.report : Json::object();
+                report["type_removed"] = removed;  // (ranges or paragraphs' settings the edit took away, said)
+                c.report = std::move(report);
+            }
             if (followed.is_null()) record.native_type.reset();
             else record.native_type = followed;
         }
@@ -224,7 +228,7 @@ core::OpFunction later(std::string name, std::string group) {
 void register_type_ops(core::OpRegistry& registry) {
     registry.add("add_type_layer", add_type_layer);
     registry.add("edit_type", edit_type);
-    registry.add("type_info", type_info);
+    registry.add_query("type_info", type_info);  // (a question: asked alone, applied as a dry run whoever asks)
     registry.add("set_type", later("set_type", "G-b"));
     registry.add("type_style", later("type_style", "G-c"));
     registry.add("line_to_type_layer", later("line_to_type_layer", "G-a"));

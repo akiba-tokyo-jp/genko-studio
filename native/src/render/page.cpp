@@ -2889,6 +2889,8 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
             const core::SmartContents* contents = core::smart::contents_of(episode, layer);
             if (contents != nullptr && contents->kind == "file") art.mode = "name";
             raster = smart::picture_8bit(art, layer, whole);
+        } else if (layer.kind == LayerKind::Type) {  // (type@1, PC5 G-0: its text as a pixel layer's, render/type_layer)
+            raster = type_layer::picture_8bit(ctx, layer, whole);
         } else if (layer.color_raster) {  // (a layer in precise colour, which Python does not have: its 8-bit picture)
             raster = color_raster_preview(core::ColorRasterView(*layer.color_raster), size, whole);
         } else if (layer.raster_png && !layer.raster_png->empty()) {

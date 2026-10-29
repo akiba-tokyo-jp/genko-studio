@@ -3,7 +3,8 @@
 #include "core/command_bus.hpp"
 
 // PC5 節 G (文字; type@1, SPEC.md TEXT-02, core/type_text.hpp): the ops of Photoshop's type — the C++ build's own (the
-// public list, `genko schema`, and the MCP tools stay as they are; MCP's apply takes them). G-0 registers all of them:
+// public list, `genko schema`, and the MCP tools stay as they are; MCP's apply does not take them yet: they are not among
+// service::agent_op's, the CLI's apply and the window's ops do). G-0 registers all of them:
 //   add_type_layer {page, text, box: [x, y, w, h] mm, wrap?: vertical | horizontal (vertical), style?, native_type?,
 //                   balloon? (none), title?, new_id?} → {layer_id}: a type layer on top of the page (G-0; point text, the
 //                   character and paragraph attributes, the styles, the anti-alias, size_pt and parent: G-a)

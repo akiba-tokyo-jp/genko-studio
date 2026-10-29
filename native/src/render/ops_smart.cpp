@@ -134,7 +134,7 @@ std::vector<std::size_t> chosen_layers(const Page& page, const Json& op) {
 bool draws(const Layer& l) {
     return l.raster_png || l.color_raster || l.ink_raster || l.stroke_count() > 0 || !l.patches.empty() || (l.fill && core::py_truthy(*l.fill)) ||
            (l.fill_rgb && !l.fill_rgb->empty()) || l.kind == LayerKind::Tone || (l.tone && core::py_truthy(*l.tone)) || l.kind == LayerKind::Placed ||
-           l.kind == LayerKind::Smart || shape_parts::any(l);
+           l.kind == LayerKind::Smart || shape_parts::any(l) || l.kind == LayerKind::Type;  // (type@1, PC5 G-0: its text)
 }
 
 // A smart object's page made of the page it is on: its paper, panels and colour mode (the layers come next).

@@ -7,6 +7,7 @@
 // a line's record as a type layer holds it, and the HarfBuzz way in (glyph ids and advances of the bundled faces, across and
 // down, a feature turned on).
 
+#include <QElapsedTimer>
 #include <QtTest>
 
 #include <functional>
@@ -206,7 +207,7 @@ private slots:
         QCOMPARE(after_edit("葛\U000E0100いうえお", "X葛\U000E0100いうえお"), std::string(R"([{"start":3,"end":5,"char":{"underline":true}}])"));
         // replace_text's matches, as code points
         const std::vector<genko::core::ruby::Replacement> edits{{0, 1, U"XYZ"}, {4, 5, U""}};
-        const Json r = tt::follow(n, "あいうえお", "XYZいうえ", tt::edits_of("あいうえお", edits));
+        const Json r = tt::follow(n, "あいうえお", "XYZいうえ", tt::edits_of("あいうえお", "XYZいうえ", edits));
         QCOMPARE(r["runs"].dump(), std::string(R"([{"start":4,"end":6,"char":{"underline":true}}])"));
         // paragraphs: a line break added before moves its number, one taken away joins it to the one before (its own gone)
         const Json p{{"paragraphs", Json::array({Json{{"index", 1}, {"para", Json{{"align", "center"}}}}})}};
@@ -215,6 +216,42 @@ private slots:
         QVERIFY(tt::follow(p, "あ\nい", "あい", {tt::edit_between("あ\nい", "あい")}).is_null());
         QCOMPARE(tt::follow(p, "あ\nい", "あ\nいう", {tt::edit_between("あ\nい", "あ\nいう")})["paragraphs"].dump(),
                  std::string(R"([{"index":1,"para":{"align":"center"}}])"));
+    }
+
+    // (review P2-5, P2-6, P3-11) a long text edited at both ends keeps the ranges between (Myers' script, no table of its
+    // square); many matches of replace_text followed in linear time; a combining mark a replacement puts in counted where it
+    // joins; past the script's bound the ranges an edit takes away are counted (removed_by)
+    void longTexts() {
+        std::string body;
+        for (int i = 0; i < 2500; ++i) body += "あ";
+        const Json n{{"runs", Json::array({Json{{"start", 100}, {"end", 200}, {"char", Json{{"underline", true}}}}})},
+                     {"paragraphs", Json::array()}};
+        const std::string after = "X" + body + "Y";
+        const Json f = tt::follow(n, body, after, tt::edits_between(body, after));
+        QCOMPARE(f["runs"].dump(), std::string(R"([{"start":101,"end":201,"char":{"underline":true}}])"));
+        // many matches: 20000 letters, 10000 replaced, 2000 ranges — in well under a second
+        std::string many, replaced;
+        Json runs = Json::array();
+        std::vector<genko::core::ruby::Replacement> reps;
+        for (int i = 0; i < 10000; ++i) {
+            many += "あ。";
+            replaced += "あ！？";
+            reps.push_back(genko::core::ruby::Replacement{static_cast<std::size_t>(2 * i + 1), static_cast<std::size_t>(2 * i + 2), U"！？"});
+        }
+        for (int i = 0; i < 2000; ++i) runs.push_back(Json{{"start", 10 * i}, {"end", 10 * i + 2}, {"char", Json{{"tcy", true}}}});
+        QElapsedTimer clock;
+        clock.start();
+        const Json m = tt::follow(Json{{"runs", runs}}, many, replaced, tt::edits_of(many, replaced, reps));
+        QVERIFY2(clock.elapsed() < 2000, qPrintable(QString::number(clock.elapsed())));
+        QCOMPARE(m["runs"].size(), std::size_t{2000});
+        QCOMPARE(m["runs"][1]["start"], Json(15));  // (letter 10 of the text before is letter 15 after: 5 more "？" before it)
+        // a combining mark put in after a letter joins it: one grapheme made of the letter, nothing new
+        const std::vector<genko::core::ruby::Replacement> mark{{1, 1, U"́"}};
+        const std::vector<tt::Edit> joined = tt::edits_of("eab", "éab", mark);
+        QCOMPARE(joined.size(), std::size_t{1});
+        QCOMPARE(tt::follow(Json{{"runs", Json::array({Json{{"start", 1}, {"end", 3}, {"char", Json{{"tcy", true}}}}})}}, "eab", "éab", joined)["runs"].dump(),
+                 std::string(R"([{"start":1,"end":3,"char":{"tcy":true}}])"));
+        QCOMPARE(tt::removed_by(n, Json()), std::int64_t{1});
     }
 
     // style_runs as ranges: found by their words from where the last one was, their scale, colour, weight and tcy

@@ -1127,6 +1127,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("layer \\S+ is not a type layer", "テキストレイヤーを選んでください"));
         r.push_back(rule("the type layer \\S+ holds no text", "このテキストレイヤーには文字がありません"));
         r.push_back(rule("text must not be empty", "文字が空です"));
+        r.push_back(rule("(\\S+) is a question: ask it alone.*", "問い合わせ（\\1）は、原稿を変える操作と一緒には使えません"));
+        r.push_back(rule("a \\S+ layer's type is not written back", "この層の type の鍵は保存されません"));
         r.push_back(rule(R"(box \[x, y, w, h\] \(mm\) is required)", "文字の枠（box）が要ります"));
         r.push_back(rule("the box's width and height must be above 0", "文字の枠の幅と高さは 0 より大きくします"));
         r.push_back(rule("line or layer_id names the text.*|line \\(a line's id\\) or page and layer_id.*",

@@ -732,11 +732,20 @@ void edit_line(OpContext& c, const PictureCheck& check) {
     // (type@1, PC5 G-0: Photoshop's type settings given, or their ranges followed through the new text)
     if (has(op, "native_type")) {
         given_native_type(c.doc, line, op["native_type"]);
-    } else if (line.native_type && line.text != before) {
-        line.native_type = optional_type(type_text::follow(*line.native_type, before, line.text, type_text::edits_between(before, line.text)));
+    }
+    std::int64_t type_removed = 0;
+    if (!has(op, "native_type") && line.native_type && line.text != before) {
+        const Json had = *line.native_type;
+        line.native_type = optional_type(type_text::follow(had, before, line.text, type_text::edits_between(before, line.text)));
+        type_removed = type_text::removed_by(had, line.native_type ? *line.native_type : Json());
     }
     change.review = std::max<std::int64_t>(0, ruby::review_count(line) - reviewed);
     report_ruby(c, change);  // (a line of Python's left as Python leaves it: nothing, as Python)
+    if (type_removed > 0) {  // (type@1: ranges or paragraphs' settings the edit took away, said — a line of type@1 only)
+        Json report = c.report ? *c.report : Json::object();
+        report["type_removed"] = type_removed;
+        c.report = std::move(report);
+    }
     require_kept(line, get(op, "frame_id"));
 }
 
@@ -908,7 +917,7 @@ void replace_text(OpContext& c) {
             });
             ruby::settle(c.doc, line);
             // (type@1, PC5 G-0: its ranges of type settings followed through the matches)
-            if (line.native_type) line.native_type = optional_type(type_text::follow(*line.native_type, before, text, type_text::edits_of(before, edits)));
+            if (line.native_type) line.native_type = optional_type(type_text::follow(*line.native_type, before, text, type_text::edits_of(before, text, edits)));
             // (a line of Python's left as Python leaves it says nothing, as Python; one whose ruby this build takes away
             // where Python would not — its base's word gone, the same word left elsewhere — says so)
             ruby_review += change.review;
@@ -947,6 +956,7 @@ StoryLine& find_line(Document& doc, const std::string& line_id) {
 }
 
 Json line_style(const Json& style, const PictureCheck& check) { return merge_style(Json::object(), style, check); }
+std::string line_balloon(const Json& kind) { return balloon_kind(kind); }
 
 void stamp_lettering(Document& doc, std::size_t at, const Json& op, const Json& material, const PictureCheck& check) {
     // (each value worked out in Python's order, so the first error is Python's)
