@@ -8,6 +8,9 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <memory>
+#include <optional>
 #include <set>
 
 #include "core/error.hpp"
@@ -58,47 +61,90 @@ std::string text(const Json& data, const char* key) {
     return it != data.end() && it->is_string() ? it->get<std::string>() : std::string();
 }
 
-// A picture named by a path beside the .pcraft: read when it is a relative path within that folder, a file of at most
-// 256 MiB this build reads as a picture (none otherwise).
-std::optional<core::PictureValue> picture_beside(const std::string& path, pcraft_production::ReadContext& context) {
-    if (!context.beside || path.empty() || context.book == nullptr) return std::nullopt;
-    const fs::path given = core::path_from_utf8(path);
-    if (given.is_absolute() || given.has_root_name() || given.has_root_directory()) return std::nullopt;
-    for (const fs::path& part : given) {
-        if (part == "..") return std::nullopt;
-    }
-    const fs::path file = *context.beside / given;
-    std::error_code ec;
-    if (!fs::is_regular_file(file, ec)) return std::nullopt;
-    const auto size = fs::file_size(file, ec);
-    if (ec || size == 0 || size > smart::kFileMaxBytes) return std::nullopt;
-    std::ifstream in(file, std::ios::binary);
-    std::string bytes(static_cast<std::size_t>(size), '\0');
-    if (!in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()))) return std::nullopt;
-    smart::FileInfo info;
-    try {
-        info = smart::look_at(bytes, "");
-    } catch (const NotYetPorted&) {
-        return std::nullopt;
-    } catch (const core::Error&) {
-        return std::nullopt;
-    }
-    core::PictureValue picture;
-    picture.asset = core::bytes_ref(bytes);
-    picture.suffix = info.suffix;
-    picture.name = core::path_to_utf8(given.filename());
-    if (picture.name.size() > 1024) picture.name.clear();
-    context.book->smart_files[picture.asset] = std::make_shared<const std::string>(std::move(bytes));
-    return picture;
+// The pictures named by paths beside the .pcraft: read when a path is relative and leads — its links followed — into that
+// folder, a file of at most 256 MiB this build reads as a picture (none otherwise); each file read once (by its resolved
+// place), all of them together within the book's 4 GiB (one past it not read: `over` counts them).
+bool holds(const Json& v) {
+    if (v.is_null()) return false;
+    if (v.is_array()) return !v.empty();
+    if (v.is_object()) return std::any_of(v.begin(), v.end(), [](const Json& item) { return holds(item); });
+    return true;
 }
+
+struct Beside {
+    std::map<fs::path, std::optional<core::PictureValue>> read;  // (a file's resolved place → what it was)
+    std::uint64_t total = 0;
+    std::size_t over = 0;
+    std::size_t reads = 0;
+
+    std::optional<core::PictureValue> picture(const std::string& path, pcraft_production::ReadContext& context) {
+        if (!context.beside || path.empty() || context.book == nullptr) return std::nullopt;
+        const fs::path given = core::path_from_utf8(path);
+        if (given.is_absolute() || given.has_root_name() || given.has_root_directory()) return std::nullopt;
+        for (const fs::path& part : given) {
+            if (part == "..") return std::nullopt;
+        }
+        std::error_code ec;
+        const fs::path folder = fs::canonical(*context.beside, ec);
+        if (ec) return std::nullopt;
+        const fs::path file = fs::canonical(*context.beside / given, ec);  // (its links followed)
+        if (ec) return std::nullopt;
+        const fs::path inside = file.lexically_relative(folder);
+        if (inside.empty() || inside.native().starts_with("..") || inside.is_absolute()) return std::nullopt;  // (out of the folder)
+        if (const auto known = read.find(file); known != read.end()) {
+            if (!known->second) return std::nullopt;
+            core::PictureValue again = *known->second;
+            again.name = core::path_to_utf8(given.filename());
+            if (again.name.size() > 1024) again.name.clear();
+            return again;
+        }
+        std::optional<core::PictureValue>& slot = read[file];
+        if (!fs::is_regular_file(file, ec)) return std::nullopt;
+        const auto size = fs::file_size(file, ec);
+        if (ec || size == 0 || size > smart::kFileMaxBytes) return std::nullopt;
+        if (total + size > core::kVariablePicturesMax) {
+            ++over;
+            read.erase(file);  // (said, not read)
+            return std::nullopt;
+        }
+        std::ifstream in(file, std::ios::binary);
+        std::string bytes(static_cast<std::size_t>(size), '\0');
+        if (!in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()))) return std::nullopt;
+        ++reads;
+        smart::FileInfo info;
+        try {
+            info = smart::look_at(bytes, "");
+        } catch (const NotYetPorted&) {
+            return std::nullopt;
+        } catch (const core::Error&) {
+            return std::nullopt;
+        }
+        core::PictureValue picture;
+        picture.asset = core::bytes_ref(bytes);
+        picture.suffix = info.suffix;
+        picture.name = core::path_to_utf8(given.filename());
+        if (picture.name.size() > 1024) picture.name.clear();
+        if (!context.book->smart_files.contains(picture.asset)) {
+            total += size;
+            context.book->smart_files[picture.asset] = std::make_shared<const std::string>(std::move(bytes));
+        }
+        slot = picture;
+        return picture;
+    }
+};
 
 }  // namespace
 
 void read(const Json& value, pcraft_production::ReadContext& context) {
-    if (context.book == nullptr || context.page == nullptr || !value.is_object()) {
+    if (context.book == nullptr || context.page == nullptr) {  // (a .pcraft inside a smart object: its page is the contents', no book's)
+        if (context.say && holds(value)) context.say("中の .pcraft の変数とデータセットは外しました");
+        return;
+    }
+    if (!value.is_object()) {
         if (context.say && !value.is_null()) context.say("変数とデータセットは読めない形のため外しました");
         return;
     }
+    Beside beside;
     const auto said = [&](const std::string& note) {
         if (context.say) context.say(note);
     };
@@ -171,7 +217,7 @@ void read(const Json& value, pcraft_production::ReadContext& context) {
             } else if (kind == "text" && payload.is_string() && def->type == "text" && payload.get_ref<const std::string&>().size() <= core::kVariableTextMax) {
                 one.value = payload.get<std::string>();
             } else if (kind == "pixels" && payload.is_string() && def->type == "pixels") {
-                const auto picture = picture_beside(payload.get<std::string>(), context);
+                const auto picture = beside.picture(payload.get<std::string>(), context);
                 if (!picture) {
                     ++unread_pictures;
                     continue;
@@ -199,7 +245,8 @@ void read(const Json& value, pcraft_production::ReadContext& context) {
         return;
     }
     if (dropped) said("変数とデータセットの一部は読めない形のため外しました");
-    if (unread_pictures > 0) said("データセットの画像のうち " + std::to_string(unread_pictures) + " 個は .pcraft の隣に読めるファイルが無いため外しました");
+    if (unread_pictures > beside.over) said("データセットの画像のうち " + std::to_string(unread_pictures - beside.over) + " 個は .pcraft の隣に読めるファイルが無いため外しました");
+    if (beside.over > 0) said("データセットの画像のうち " + std::to_string(beside.over) + " 個は合わせて 4 GiB を越えるため読まずに外しました");
 }
 
 std::optional<Json> write(const core::Page& page, pcraft_production::WriteContext& context) {

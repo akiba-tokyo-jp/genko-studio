@@ -24,7 +24,8 @@ namespace genko::formats {
 // variables' names (a first column headed by nothing or by DataSet / データセット names each data set), each line after it
 // one data set (named データセット N otherwise): a visibility's true (true, 1, yes, on, visible, 表示) or false (anything
 // else), a text's words as they are, a picture's file — a path, relative to the text file's folder — read here (at most
-// 256 MiB) and given as its bytes. An empty field gives the variable no value; a column of a name the book has no variable
+// 256 MiB) and given as its bytes — each file read once and each picture's bytes given once (the next naming it gives its asset
+// ref), all of them together within the book's 4 GiB, refused before a file past it is read. An empty field gives the variable no value; a column of a name the book has no variable
 // of is left out (said). The result: set_data_sets's data_sets, ready to be applied. core::Error("value") for a file that
 // is not one (not UTF-8, larger than 64 MiB, more than kDataSetsMax lines, two data sets of one name, a picture that cannot
 // be read).
@@ -35,6 +36,7 @@ struct CsvOptions {
 struct CsvRead {
     core::Json data_sets = core::Json::array();
     std::vector<std::string> notes;  // what was left out, in Japanese
+    std::size_t files_read = 0;      // (the pictures' files read: each once)
 };
 CsvRead read_data_sets_csv(std::string_view text, const core::Variables& variables, const CsvOptions& options);
 // The fields of a text file's lines (the parser read_data_sets_csv uses), each line a list of its fields.

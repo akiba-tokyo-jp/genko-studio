@@ -319,6 +319,13 @@ void run_op(OpContext& c, const Json& op, const std::string& variable) {
     static const core::CommandBus bus(ops_registry());
     try {
         core::ApplyResult result = bus.apply(c.doc, Json::array({op}), c.actor);
+        // (what the op said — "ops[0] <op>: …" among the book's warnings — said of the variable; the book's own warnings are the
+        // outer batch's, made again at its end)
+        for (const Json& warning : result.warnings) {
+            if (!warning.is_string()) continue;
+            const std::string& text = warning.get_ref<const std::string&>();
+            if (text.starts_with("ops[0] ")) c.notes.push_back("variable " + variable + ": " + text.substr(7));
+        }
         const std::int64_t revision = c.doc.revision;
         c.doc = std::move(result.doc);
         c.doc.revision = revision;
@@ -329,26 +336,119 @@ void run_op(OpContext& c, const Json& op, const std::string& variable) {
     }
 }
 
-// A paint layer's pixels at its kind as a picture's (the page's numbers kept: a precise page's floats, an ink page's inks).
-image_ops::Pixels picture_pixels(const std::string& bytes, const Page& page, const image_ops::Pixels& like) {
+// A picture as a paint layer of the page's kind takes it (the page's numbers kept: an 8-bit page's RGBA, a precise page's
+// floats, an ink page's inks), straight, its colours then its alpha; read one pixel at a time (`get`, its place kept within the
+// picture: past an edge, the edge's pixel) so that only the part of it that is placed is ever held as floats.
+struct Picture {
+    int width = 0, height = 0;
+    unsigned channels = 4;
+    bool hdr = false;
+    std::optional<Image> eight;                // (an 8-bit picture: its RGBA bytes)
+    std::optional<image_ops::Pixels> pixels;   // (an ink page's: its inks)
+    std::vector<float> values;                 // (a precise page's, or one made smaller: width × height × channels)
+
+    void get(int x, int y, float* out) const {
+        x = std::clamp(x, 0, width - 1);
+        y = std::clamp(y, 0, height - 1);
+        const std::size_t i = std::size_t(y) * std::size_t(width) + std::size_t(x);
+        if (eight) {
+            const auto* p = reinterpret_cast<const unsigned char*>(bytes.data()) + i * 4;
+            for (int k = 0; k < 4; ++k) out[k] = p[k] / 255.0f;
+        } else if (pixels) {
+            std::copy_n(pixels->at(i), channels, out);
+        } else {
+            std::copy_n(values.data() + i * channels, channels, out);
+        }
+    }
+    // (made smaller by whole factors: each pixel the mean of its block, its colours weighted by their alpha)
+    void reduce(int fx, int fy) {
+        if (fx <= 1 && fy <= 1) return;
+        if (eight) {
+            eight = eight->reduce(fx, fy);
+            width = eight->width();
+            height = eight->height();
+            bytes = eight->tobytes();
+            return;
+        }
+        const int w = std::max(1, (width + fx - 1) / fx), h = std::max(1, (height + fy - 1) / fy);
+        std::vector<float> out(std::size_t(w) * std::size_t(h) * channels, 0.0f);
+        std::vector<float> v(channels);
+        std::vector<double> sum(channels);
+        const unsigned a = channels - 1;
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                std::fill(sum.begin(), sum.end(), 0.0);
+                int n = 0;
+                for (int yy = y * fy; yy < std::min(height, (y + 1) * fy); ++yy) {
+                    for (int xx = x * fx; xx < std::min(width, (x + 1) * fx); ++xx) {
+                        get(xx, yy, v.data());
+                        for (unsigned k = 0; k < a; ++k) sum[k] += double(v[k]) * v[a];
+                        sum[a] += v[a];
+                        ++n;
+                    }
+                }
+                float* o = out.data() + (std::size_t(y) * std::size_t(w) + std::size_t(x)) * channels;
+                o[a] = n > 0 ? float(sum[a] / n) : 0.0f;
+                for (unsigned k = 0; k < a; ++k) o[k] = sum[a] > 0 ? float(sum[k] / sum[a]) : 0.0f;
+            }
+        }
+        pixels.reset();
+        values = std::move(out);
+        width = w;
+        height = h;
+    }
+    std::string bytes;  // (eight's bytes)
+};
+
+// The most pixels a picture of more than 8 bits (on a precise page) or an ink page's picture is taken in at (its floats held
+// whole while it is made smaller: some 16-20 bytes a pixel — 32 million pixels, at most about 1.3 GB at once).
+constexpr std::int64_t kDeepPictureMost = 32'000'000;
+
+Picture picture_of(const std::string& bytes, const Page& page, const image_ops::Pixels& like) {
+    Picture p;
+    const auto too_large = [](std::int64_t w, std::int64_t h) {
+        if (w * h > kDeepPictureMost) {
+            throw OpError("the picture is too large to put in at the page's depth (at most " + std::to_string(kDeepPictureMost / 1'000'000) +
+                          " million pixels)");
+        }
+    };
+    const auto take_eight = [&] {
+        p.eight = smart::eight_bit_picture(bytes).convert("RGBA");
+        p.width = p.eight->width();
+        p.height = p.eight->height();
+        p.bytes = p.eight->tobytes();
+        p.channels = 4;
+    };
     switch (like.kind()) {
         case image_ops::Pixels::Kind::Eight:
-            return image_ops::from_image(smart::eight_bit_picture(bytes).convert("RGBA"));
-        case image_ops::Pixels::Kind::Inks:
-            return image_ops::from_inks(smart::file_inks(bytes, *page.color, "keep"), *page.color);
+            take_eight();
+            return p;
+        case image_ops::Pixels::Kind::Inks: {
+            const core::InkPixels inks = smart::file_inks(bytes, *page.color, "keep");
+            too_large(inks.width, inks.height);
+            p.pixels = image_ops::from_inks(inks, *page.color);
+            p.width = static_cast<int>(p.pixels->width());
+            p.height = static_cast<int>(p.pixels->height());
+            p.channels = p.pixels->all();
+            return p;
+        }
         case image_ops::Pixels::Kind::Precise: {
-            const smart::DeepPicture deep = smart::deep_picture(bytes);
-            const std::vector<float> rgba = smart::srgb_floats(deep, std::nullopt, "relative", true);
-            image_ops::Pixels out(image_ops::Pixels::Kind::Precise, static_cast<std::uint32_t>(deep.width), static_cast<std::uint32_t>(deep.height), 3);
-            out.floating = like.floating;
-            for (std::size_t i = 0; i < out.size(); ++i) {
-                float* v = out.at(i);
-                for (int k = 0; k < 4; ++k) {
-                    const float x = rgba[i * 4 + std::size_t(k)];
-                    v[k] = std::isfinite(x) ? (like.floating && k < 3 ? std::max(x, 0.0f) : std::clamp(x, 0.0f, 1.0f)) : 0.0f;
-                }
+            p.hdr = like.floating;
+            if (smart::stored_depth(bytes) <= 8) {  // (8 bits a sample: its values as the 8-bit page reads them, 4 bytes a pixel)
+                take_eight();
+                return p;
             }
-            return out;
+            const smart::DeepPicture deep = smart::deep_picture(bytes);
+            too_large(deep.width, deep.height);
+            p.values = smart::srgb_floats(deep, std::nullopt, "relative", true);
+            for (std::size_t i = 0; i < p.values.size(); ++i) {
+                const float x = p.values[i];
+                p.values[i] = std::isfinite(x) ? (like.floating && i % 4 < 3 ? std::max(x, 0.0f) : std::clamp(x, 0.0f, 1.0f)) : 0.0f;
+            }
+            p.width = static_cast<int>(deep.width);
+            p.height = static_cast<int>(deep.height);
+            p.channels = 4;
+            return p;
         }
     }
     throw OpError("the layer's pixels are of no kind this build knows");
@@ -366,21 +466,33 @@ void replace_pixels(OpContext& c, std::size_t at, const core::VariableDef& def, 
     }
     image_ops::Pixels target = image_ops::layer_pixels(c, at, *def.layer);
     // (a paint layer of 8 bits on a precise page — an empty one —: the picture kept at the page's depth, as a new layer is made
-    // there; its old pixels are replaced whole)
-    const bool deepen = target.kind() == image_ops::Pixels::Kind::Eight && !page.color && page.rgb && page.rgb->depth > 8;
+    // there; its old pixels are replaced whole — unless the book's precise pixels would pass their budget: then at 8 bits, as a
+    // new layer is, Z0)
+    bool deepen = target.kind() == image_ops::Pixels::Kind::Eight && !page.color && page.rgb && page.rgb->depth > 8;
+    if (deepen) {
+        std::set<const std::string*> seen;
+        std::uint64_t held = 0;
+        for (const core::PagePtr& each : c.doc.pages) {
+            for (const Layer& l : each->layers) {
+                if (l.color_raster && seen.insert(l.color_raster.get()).second) held += l.color_raster->size();
+            }
+        }
+        const std::uint64_t made = std::uint64_t(target.width()) * target.height() * 4 * (page.rgb->depth == 32 ? 4 : 2);
+        if (held + made > core::kColorRasterBookBytes) deepen = false;
+    }
     if (deepen) {
         image_ops::Pixels deep(image_ops::Pixels::Kind::Precise, target.width(), target.height(), 3);
         deep.floating = page.rgb->depth == 32;
         target = std::move(deep);
     }
-    const image_ops::Pixels source = picture_pixels(bytes, page, target);
+    Picture source = picture_of(bytes, page, target);
     const double page_w = page.spec.width_mm.value();
     const double page_h = page.spec.height_mm.value();
     const double kx = target.width() / page_w;  // (the grid's pixels a mm)
     const double ky = target.height() / page_h;
     const double dpi = page.spec.dpi.value() > 0 ? page.spec.dpi.value() : 300.0;
-    const double iw = source.width() * 25.4 / dpi;  // (the picture's mm at the page's resolution)
-    const double ih = source.height() * 25.4 / dpi;
+    const double iw = source.width * 25.4 / dpi;  // (the picture's mm at the page's resolution)
+    const double ih = source.height * 25.4 / dpi;
     const auto [x0, y0, x1, y1] = def.box_mm;
     const double tw = x1 - x0;
     const double th = y1 - y0;
@@ -395,21 +507,13 @@ void replace_pixels(OpContext& c, std::size_t at, const core::VariableDef& def, 
     const double fy = a.starts_with("top") ? 0.0 : a.starts_with("bottom") ? 1.0 : 0.5;
     const double px = x0 + (tw - sw) * fx;  // (the picture's top left, mm)
     const double py = y0 + (th - sh) * fy;
-    // the picture's pixels → the grid's: scale and move — its edge pixels carried on past it (kPad), so the picture keeps a
-    // clean edge where it ends (no clear rim drawn into it), cut at its own box
-    constexpr int kPad = 4;
-    const resample::Plane flat = resample::from_pixels(source);
-    resample::Plane padded(flat.width + 2 * kPad, flat.height + 2 * kPad, flat.channels, true);
-    padded.hdr = flat.hdr;
-    for (int y = 0; y < padded.height; ++y) {
-        const int row = std::clamp(y - kPad, 0, flat.height - 1);
-        for (int x = 0; x < padded.width; ++x) {
-            std::copy_n(flat.at(std::clamp(x - kPad, 0, flat.width - 1), row), flat.channels, padded.at(x, y));
-        }
-    }
-    const double ax = sw * kx / source.width();
-    const double ay = sh * ky / source.height();
-    const resample::Homography h = resample::Homography::affine({ax, 0, 0, ay, px * kx - kPad * ax, py * ky - kPad * ay});
+    // (a picture put in at less than half its size made smaller first, by whole factors, to about twice what is placed: the
+    // resampling then reads no more of it than it needs)
+    const double placed_w = sw * kx, placed_h = sh * ky;  // (its size on the grid)
+    source.reduce(std::max(1, static_cast<int>(std::floor(source.width / std::max(1.0, 2.0 * placed_w)))),
+                  std::max(1, static_cast<int>(std::floor(source.height / std::max(1.0, 2.0 * placed_h)))));
+    const double ax = placed_w / source.width;  // (the grid's pixels a picture's pixel)
+    const double ay = placed_h / source.height;
     // the window of the grid it covers (the box with clip): the pixels whose centres it holds
     double wx0 = px * kx, wy0 = py * ky, wx1 = (px + sw) * kx, wy1 = (py + sh) * ky;
     if (def.clip) {
@@ -424,7 +528,23 @@ void replace_pixels(OpContext& c, std::size_t at, const core::VariableDef& def, 
     out.floating = target.floating;
     out.ink = target.ink;
     if (gx1 > gx0 && gy1 > gy0) {
-        const resample::Plane placed = resample::project(padded, h, gx1 - gx0, gy1 - gy0, resample::Interp::Bicubic, gx0, gy0);
+        // the part of the picture the window shows, and kPad of its pixels round it — its own edge carried on past it, so
+        // the picture keeps a clean edge where it ends (no clear rim drawn into it) — as floats: the only plane of it held
+        constexpr int kPad = 4;
+        const int bx0 = static_cast<int>(std::floor((gx0 - px * kx) / ax)) - kPad;
+        const int by0 = static_cast<int>(std::floor((gy0 - py * ky) / ay)) - kPad;
+        const int bx1 = static_cast<int>(std::ceil((gx1 - px * kx) / ax)) + kPad;
+        const int by1 = static_cast<int>(std::ceil((gy1 - py * ky) / ay)) + kPad;
+        const std::int64_t part = std::int64_t(bx1 - bx0) * std::int64_t(by1 - by0);
+        if (part > 4 * std::int64_t(target.width()) * std::int64_t(target.height()) + 1'000'000) {
+            throw OpError("variable " + def.name + ": the picture is too large to put in");  // (not reached: it is made smaller above)
+        }
+        resample::Plane region(bx1 - bx0, by1 - by0, static_cast<int>(source.channels), true);
+        region.hdr = source.hdr;
+        for (int y = 0; y < region.height; ++y)
+            for (int x = 0; x < region.width; ++x) source.get(bx0 + x, by0 + y, region.at(x, y));
+        const resample::Homography h = resample::Homography::affine({ax, 0, 0, ay, px * kx + bx0 * ax, py * ky + by0 * ay});
+        const resample::Plane placed = resample::project(region, h, gx1 - gx0, gy1 - gy0, resample::Interp::Bicubic, gx0, gy0);
         const std::size_t n = out.all();
         for (int y = 0; y < placed.height; ++y) {
             for (int x = 0; x < placed.width; ++x) {

@@ -141,7 +141,8 @@ private slots:
         QCOMPARE(out.mid(out.size() - 2), (QStringList{QStringLiteral("カラールックアップテーブル…"), QStringLiteral("データセットからファイル…")}));
         QMenu* imports = b.window->findChild<QMenu*>(QStringLiteral("menu_import"));
         QVERIFY(imports != nullptr);
-        QCOMPARE(items(imports).front(), QStringLiteral("変数データセット…"));
+        QCOMPARE(items(imports), (QStringList{QStringLiteral("変数データセット…"), QStringLiteral("注釈…")}));  // (one 読み込み ▸, Photoshop's order)
+        QCOMPARE(b.window->findChildren<QMenu*>(QStringLiteral("menu_import")).size(), qsizetype(1));
         const QStringList file = items(top_menu(b.window.get(), QStringLiteral("ファイル")));
         QCOMPARE(file.at(file.indexOf(QStringLiteral("PSD をレイヤーのまま読み込む…")) + 1), QStringLiteral("読み込み ▸"));
         for (const char* name : {"act_variables_define", "act_variables_data_sets", "act_apply_data_set", "act_data_sets_to_files", "act_import_data_sets"}) {

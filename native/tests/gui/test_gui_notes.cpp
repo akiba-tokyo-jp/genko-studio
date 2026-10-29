@@ -96,7 +96,8 @@ private slots:
         QMenu* imports = submenu(b.top(QStringLiteral("ファイル")), QStringLiteral("menu_import"));
         QVERIFY(imports != nullptr);
         QCOMPARE(imports->title(), QStringLiteral("読み込み"));
-        QCOMPARE(imports->actions().value(0), b.act("act_import_notes"));
+        // (PC5 I-d: 変数データセット… first, as Photoshop's: MainWindow::add_to_import_menu)
+        QCOMPARE(imports->actions(), (QList<QAction*>{b.act("act_import_data_sets"), b.act("act_import_notes")}));
         QCOMPARE(b.act("act_import_notes")->text(), QStringLiteral("注釈…"));
         QAction* toggle = b.act("act_panel_notes");
         const QList<QAction*> window_items = b.top(QStringLiteral("ウィンドウ"))->actions();

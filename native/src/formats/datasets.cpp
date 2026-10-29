@@ -14,6 +14,7 @@
 #include "core/command_bus.hpp"
 #include "core/covers.hpp"
 #include "core/error.hpp"
+#include "core/ink.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "render/ops_layer_comps.hpp"
@@ -47,19 +48,38 @@ bool shown(const std::string& cell) {
     return v == "true" || v == "1" || v == "yes" || v == "on" || v == "visible" || v == "表示";
 }
 
-// A picture's file: its bytes (at most 256 MiB), read from `folder` when its path is relative.
-std::string picture_file(const std::string& path, const fs::path& folder, std::size_t row) {
-    fs::path file = core::path_from_utf8(trimmed(path));
-    if (file.is_relative()) file = folder / file;
-    std::error_code ec;
-    const auto size = fs::is_regular_file(file, ec) ? fs::file_size(file, ec) : 0;
-    if (ec || size == 0) bad("row " + std::to_string(row) + ": the picture " + path + " cannot be read");
-    if (size > render::smart::kFileMaxBytes) bad("row " + std::to_string(row) + ": the picture " + path + " is larger than 256 MiB");
-    std::ifstream in(file, std::ios::binary);
-    std::string bytes(static_cast<std::size_t>(size), '\0');
-    if (!in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()))) bad("row " + std::to_string(row) + ": the picture " + path + " cannot be read");
-    return bytes;
-}
+// The pictures a text file names, each file read once (by its resolved place) and each picture's bytes given once (by their
+// sha256): the first naming it carries its bytes, the others its asset ref; all of them together within the book's 4 GiB,
+// refused before a file past it is read.
+struct Pictures {
+    std::map<fs::path, std::string> refs;  // (a file's resolved place → its asset ref)
+    std::set<std::string> given;           // (the refs whose bytes are given)
+    std::uint64_t total = 0;
+
+    Json value(const std::string& path, const fs::path& folder, std::size_t row) {
+        fs::path file = core::path_from_utf8(trimmed(path));
+        if (file.is_relative()) file = folder / file;
+        std::error_code ec;
+        fs::path key = fs::weakly_canonical(file, ec);
+        if (ec) key = file.lexically_normal();
+        const std::string name = core::path_to_utf8(file.filename());
+        if (const auto known = refs.find(key); known != refs.end()) return Json{{"asset", known->second}, {"name", name}};
+        const auto size = fs::is_regular_file(file, ec) ? fs::file_size(file, ec) : 0;
+        if (ec || size == 0) bad("row " + std::to_string(row) + ": the picture " + path + " cannot be read");
+        if (size > render::smart::kFileMaxBytes) bad("row " + std::to_string(row) + ": the picture " + path + " is larger than 256 MiB");
+        if (total + size > core::kVariablePicturesMax) bad("the data sets' pictures are larger than 4 GiB together");
+        std::ifstream in(file, std::ios::binary);
+        std::string bytes(static_cast<std::size_t>(size), '\0');
+        if (!in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()))) bad("row " + std::to_string(row) + ": the picture " + path + " cannot be read");
+        ++reads;
+        const std::string ref = core::bytes_ref(bytes);
+        refs.emplace(key, ref);
+        if (!given.insert(ref).second) return Json{{"asset", ref}, {"name", name}};  // (another file of the same bytes)
+        total += size;
+        return Json{{"data", core::b64encode(bytes)}, {"name", name}};
+    }
+    std::size_t reads = 0;
+};
 
 }  // namespace
 
@@ -144,6 +164,7 @@ CsvRead read_data_sets_csv(std::string_view text, const core::Variables& variabl
         out.notes.push_back("変数の無い列を外しました: " + listed);
     }
     std::set<std::string> names;
+    Pictures pictures;
     for (std::size_t r = 1; r < rows.size(); ++r) {
         const std::vector<std::string>& cells = rows[r];
         std::string name = named && !cells.empty() ? trimmed(cells.front()) : std::string();
@@ -162,13 +183,12 @@ CsvRead read_data_sets_csv(std::string_view text, const core::Variables& variabl
                 values.push_back(Json{{"variable", def->name}, {"value", cell}});
             } else {
                 if (trimmed(cell).empty()) continue;
-                const std::string bytes = picture_file(cell, options.folder, r + 1);
-                const std::string file = core::path_to_utf8(core::path_from_utf8(trimmed(cell)).filename());
-                values.push_back(Json{{"variable", def->name}, {"value", Json{{"data", core::b64encode(bytes)}, {"name", file}}}});
+                values.push_back(Json{{"variable", def->name}, {"value", pictures.value(cell, options.folder, r + 1)}});
             }
         }
         out.data_sets.push_back(Json{{"name", name}, {"values", std::move(values)}});
     }
+    out.files_read = pictures.reads;
     return out;
 }
 
@@ -210,7 +230,7 @@ std::vector<CopyResult> export_data_sets(const core::Document& doc, const fs::pa
     free.page_locks = Json::object();
     free.strict_gates = false;
     std::vector<CopyResult> out;
-    std::map<std::string, int> seen;
+    std::set<std::string> seen;
     for (std::size_t i = 0; i < variables.data_sets.size(); ++i) {
         const core::DataSet& set = variables.data_sets[i];
         if (!files.data_sets.empty() && std::find(files.data_sets.begin(), files.data_sets.end(), set.name) == files.data_sets.end()) continue;
@@ -224,12 +244,21 @@ std::vector<CopyResult> export_data_sets(const core::Document& doc, const fs::pa
         put("{index}", number);
         put("{document}", title);
         stem = render::layer_comps::file_part(stem);
-        if (stem.size() > 200) {  // (a file system takes 255 bytes a name: cut by whole characters)
-            stem.resize(200);
-            while (!stem.empty() && (static_cast<unsigned char>(stem.back()) & 0xC0) == 0x80) stem.pop_back();
-            if (!stem.empty() && (static_cast<unsigned char>(stem.back()) & 0x80) != 0) stem.pop_back();
+        if (stem.size() > 200) {  // (a file system takes 255 bytes a name: cut by whole characters — a last one cut short taken away)
+            std::size_t lead = 200;
+            while (lead > 0 && (static_cast<unsigned char>(stem[lead - 1]) & 0xC0) == 0x80) --lead;  // (the last character's lead byte)
+            if (lead > 0) {
+                const auto b = static_cast<unsigned char>(stem[lead - 1]);
+                const std::size_t length = b < 0x80 ? 1 : b >= 0xF0 ? 4 : b >= 0xE0 ? 3 : 2;
+                stem.resize(lead - 1 + length <= 200 ? 200 : lead - 1);
+            } else {
+                stem.resize(0);
+            }
         }
-        if (const int n = ++seen[stem]; n > 1) stem += "-" + std::to_string(n);
+        // (a name met again — the whole name, -N too: another data set may be named so — the next free number)
+        std::string named = stem;
+        for (int n = 2; !seen.insert(named).second; ++n) named = stem + "-" + std::to_string(n);
+        stem = named;
         core::ApplyResult applied;
         try {
             applied = bus.apply(free, Json::array({Json{{"op", "apply_data_set"}, {"index", i}}}), files.actor);
