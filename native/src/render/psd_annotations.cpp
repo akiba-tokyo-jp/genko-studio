@@ -5,12 +5,14 @@
 
 #include <algorithm>
 #include <exception>
+#include <initializer_list>
 #include <cmath>
 #include <cstdint>
 #include <set>
 
 #include "core/error.hpp"
 #include "core/ids.hpp"
+#include "core/measure.hpp"
 #include "core/pynum.hpp"
 #include "render/ops_annotations.hpp"
 #include "render/psd_descriptor.hpp"
@@ -422,6 +424,127 @@ std::optional<std::string> write(const core::Page& page, const psd_production::W
     }
     if (notes.empty()) return std::nullopt;
     return block(notes, kept ? std::string_view(*kept) : std::string_view());
+}
+
+// --- PC5 J-d1: the measurement scale (1074) and the count (1080) ---------------------------------------------------------
+
+namespace {
+
+namespace d = psd::descriptor;
+
+// The item of one of the keys, at the top or one object deep (PhotoCraft's `find`).
+const d::Value* scale_item(const d::Object& top, std::initializer_list<std::string_view> keys) {
+    for (const std::string_view key : keys)
+        if (const d::Value* v = top.get(key)) return v;
+    for (const auto& [key, value] : top.items) {
+        if (!value.object || (value.type != "Objc" && value.type != "GlbO")) continue;
+        for (const std::string_view k : keys)
+            if (const d::Value* v = value.object->get(k)) return v;
+    }
+    return nullptr;
+}
+
+// (the review's P2-1) The units' text with a surrogate without its pair made U+FFFD (as the notes' text: valid UTF-8).
+std::string units_text(std::u16string text) {
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const char16_t u = text[i];
+        if (u >= 0xD800 && u < 0xDC00 && i + 1 < text.size() && text[i + 1] >= 0xDC00 && text[i + 1] < 0xE000) {
+            ++i;
+        } else if (u >= 0xD800 && u < 0xE000) {
+            text[i] = 0xFFFD;
+        }
+    }
+    return psd::utf8_of(text);
+}
+
+// The file's pixels a page pixel (through the file's canvas on the page: its x side).
+double file_px_per_page_px(const core::Page& page, double file_px, double page_mm) {
+    if (!(file_px > 0) || !(page_mm > 0)) return 1.0;
+    return file_px / page_mm / core::page_px_per_mm(page);
+}
+
+}  // namespace
+
+std::optional<core::MeasurementScale> scale_of(std::string_view data) {
+    d::Object top;
+    try {
+        top = d::read_versioned(data);
+    } catch (const d::Broken&) {
+        return std::nullopt;
+    }
+    const d::Value* pixel = scale_item(top, {"pixelLength", "PxlL"});
+    const d::Value* logical = scale_item(top, {"logicalLength", "LglL"});
+    if (pixel == nullptr || logical == nullptr || !pixel->numeric() || !logical->numeric()) return std::nullopt;
+    core::MeasurementScale s;
+    s.pixel_length = *pixel->numeric();
+    s.logical_length = *logical->numeric();
+    s.units = "pixels";
+    if (const d::Value* units = scale_item(top, {"logicalUnits", "LglU"}); units != nullptr && units->type == "TEXT") s.units = units_text(units->text);
+    if (!std::isfinite(s.pixel_length) || !std::isfinite(s.logical_length) || !(s.pixel_length > 0) || !(s.logical_length > 0) ||
+        s.pixel_length > 1e9 || s.logical_length > 1e9 || s.units.empty() || s.units.size() > 256)
+        return std::nullopt;
+    return s;
+}
+
+std::string scale_block(const core::MeasurementScale& scale) {
+    d::Writer w;
+    w.number("pixelLength", scale.pixel_length);
+    w.number("logicalLength", scale.logical_length);
+    w.text("logicalUnits", psd::utf16(scale.units));
+    std::string out = w.versioned("null");
+    if (out.size() % 2 == 1) out.push_back('\0');
+    return out;
+}
+
+bool read_scale(core::Page& page, std::string_view data, const psd_production::ReadContext& context) {
+    // (the page's own scale, or an earlier PSD's blocks there: kept as it was)
+    if (context.page_had || (page.measure && page.measure->scale)) return false;
+    std::optional<core::MeasurementScale> s = scale_of(data);
+    if (!s || core::is_default(*s)) return false;
+    // (the file's pixels → the page's: through the file's canvas on the page, its x side)
+    if (context.onto != nullptr && context.width_px > 0) {
+        const double mm = std::hypot((*context.onto)[0], (*context.onto)[1]);
+        const double k = file_px_per_page_px(page, context.width_px, mm);
+        s->pixel_length = core::py_round(s->pixel_length / k, 6);
+        if (!(s->pixel_length > 0) || s->pixel_length > 1e9) return false;
+        if (core::is_default(*s)) return false;  // (1 pixels = 1 pixels on the page: none — the block kept as it was, no measure@1)
+    }
+    core::Measure m = page.measure.value_or(core::Measure{});
+    m.scale = s;
+    try {
+        core::check_measure(m);
+    } catch (const std::exception&) {
+        return false;
+    }
+    page.measure = std::move(m);
+    if (context.report != nullptr) (*context.report)["measurement_scale"] = core::describe(*s);
+    return true;
+}
+
+std::string scale_fingerprint(const core::Page& page, const core::Document* doc) {
+    (void)doc;
+    if (!page.measure || !page.measure->scale) return {};
+    // (the review's P3-4: the scale's values alone — not its words, which a later group may write otherwise)
+    const core::MeasurementScale& s = *page.measure->scale;
+    return psd_production::fingerprint_of(core::Json{{"pixel_length", s.pixel_length}, {"logical_length", s.logical_length}, {"units", s.units}});
+}
+
+std::optional<std::string> write_scale(const core::Page& page, const psd_production::WriteContext& context) {
+    if (!page.measure || !page.measure->scale) return std::nullopt;
+    core::MeasurementScale s = *page.measure->scale;
+    s.pixel_length = core::py_round(s.pixel_length * file_px_per_page_px(page, context.width_px, page.spec.width_mm.value()), 6);
+    if (!(s.pixel_length > 0)) return std::nullopt;
+    return scale_block(s);
+}
+
+bool counts_own(const core::Page& page) { return page.measure && core::count_total(*page.measure) > 0; }
+
+std::vector<std::string> export_notes(const core::Document& doc) {
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.is_deferred(i) || doc.pages[i] == nullptr || !counts_own(*doc.pages[i])) continue;
+        return {"カウントの印は PSD に書きません（Photoshop のカウントの形が公開されていないため。PSD から読んだカウントも、ページに印がある間は書きません）"};
+    }
+    return {};
 }
 
 }  // namespace genko::render::psd_annotations

@@ -6,6 +6,7 @@
 #include "core/annotations.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
+#include "render/pcraft_manifest.hpp"
 #include "render/pcraft_production.hpp"
 
 // PC5 J-c (annotations@1, SPEC.md PROD-01「注釈」, FILE-01「.pcraft」): a .pcraft's notes (the document's "notes": PhotoCraft
@@ -21,5 +22,8 @@ std::vector<core::Annotation> notes_of(const core::Json& value, double mm);
 
 void read(const core::Json& value, pcraft_production::ReadContext& context);
 std::optional<core::Json> write(const core::Page& page, pcraft_production::WriteContext& context);
+
+// (PC5 J-d1: the count groups' colours too) A document colour as RGB 0..255 (PhotoCraft's Color::to_rgb).
+std::array<int, 3> rgb_of_color(const pcraft::Color& color);
 
 }  // namespace genko::render::pcraft_annotations

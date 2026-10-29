@@ -265,6 +265,9 @@ genko_library(genko_render
     ops_annotations.cpp
     psd_annotations.cpp
     pcraft_annotations.cpp
+    # PC5 J-d1 (計測: measure@1 — the ops, a .pcraft's measurement; PSD's 1074 in psd_annotations.cpp)
+    ops_measure.cpp
+    pcraft_measure.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

@@ -617,7 +617,8 @@ private slots:
         QStringList items;
         for (QAction* a : shown->actions()) items << (a->isSeparator() ? QStringLiteral("|") : a->text());
         QCOMPARE(items, (QStringList{QStringLiteral("レイヤーエッジ"), QStringLiteral("選択範囲のエッジ"), QStringLiteral("ターゲットパス"), QStringLiteral("グリッド"),
-                                     QStringLiteral("ガイド"), QStringLiteral("カンバスガイド"), QStringLiteral("スマートガイド"), QStringLiteral("注釈"),
+                                     QStringLiteral("ガイド"), QStringLiteral("カンバスガイド"), QStringLiteral("カウント"),  // (PC5 J-d1)
+                                     QStringLiteral("スマートガイド"), QStringLiteral("注釈"),
                                      QStringLiteral("ピクセルグリッド"), QStringLiteral("ブラシプレビュー"), QStringLiteral("メッシュ"), QStringLiteral("編集ピン"), QStringLiteral("|"),
                                      QStringLiteral("すべて"), QStringLiteral("なし"), QStringLiteral("|"), QStringLiteral("エクストラオプションを表示…")}));
         PageCanvas* c = s.canvas();

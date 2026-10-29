@@ -12,13 +12,17 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <tuple>
 
 #include "core/json.hpp"
+#include "core/command_bus.hpp"
 #include "core/model.hpp"
 #include "core/paths.hpp"
 #include "formats/copy.hpp"
 #include "formats/open_file.hpp"
+#include "render/ops_registry.hpp"
 #include "service/actions.hpp"
+#include "service/automate.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/journal.hpp"
 #include "storage/lock.hpp"
@@ -286,6 +290,199 @@ private slots:
                                   env);
         QCOMPARE(code, 1);
         QCOMPARE(out["code"], Json("not_found"));
+    }
+
+    // PC5 I-e: `genko automate` — 画像プロセッサー (a folder of an 8-bit PNG, a 16-bit TIFF and a CMYK JPEG written in three
+    // formats, each into its folder; fitted, never enlarged; sRGB), 画像を合わせる (拡大しない), 条件付きモード変更 (only the
+    // modes listed), レンズ補正 (the same pixels as the filter on each picture one by one; a picture without the EXIF's focal
+    // length said and the next one taken) — and an agent refused what its ops cannot do.
+    void automateCommands() {
+        QTemporaryDir dir;
+        const fs::path root = path_of(dir.path());
+        fs::create_directories(root / "in");
+        for (const auto& [name, mode, depth] : {std::tuple<const char*, const char*, int>{"a.png", "rgb", 8}, {"b.tif", "rgb", 16}, {"c.jpg", "cmyk", 8}}) {
+            formats::NewImage image;
+            image.title = name;
+            image.width = 60;
+            image.height = 30;
+            image.mode = mode;
+            image.depth = depth;
+            image.background = "#336699";
+            formats::write_copy(formats::new_image(image).doc, 0, root / "in" / name);
+        }
+        const auto opened = [](const fs::path& file) { return formats::open_file(storage::read_file(file), core::path_to_utf8(file.filename())).doc; };
+        const auto px = [](const core::Document& doc) {
+            const core::PageSpec& s = doc.page(0).spec;
+            return std::pair<double, double>{std::round(s.width_mm.value() / 25.4 * s.dpi.value()), std::round(s.height_mm.value() / 25.4 * s.dpi.value())};
+        };
+        QCOMPARE(opened(root / "in" / "c.jpg").page(0).color.has_value(), true);  // (a CMYK picture: a page of inks)
+        auto [code, out] = cli({QStringLiteral("automate"), QStringLiteral("image-processor"), q(root / "in"), QStringLiteral("--out"), q(root / "out"),
+                                QStringLiteral("--formats"), QStringLiteral("jpg,psd,tif"), QStringLiteral("--width"), QStringLiteral("20"),
+                                QStringLiteral("--height"), QStringLiteral("20"), QStringLiteral("--srgb"), QStringLiteral("--json")});
+        QVERIFY2(code == 0, out.dump().c_str());
+        QCOMPARE(out["files"].size(), std::size_t(3));
+        for (const char* stem : {"a", "b", "c"}) {
+            for (const auto& [folder, ext] : {std::pair<const char*, const char*>{"JPEG", "jpg"}, {"PSD", "psd"}, {"TIFF", "tif"}}) {
+                const fs::path file = root / "out" / folder / (std::string(stem) + "." + ext);
+                QVERIFY2(fs::exists(file), core::path_to_utf8(file).c_str());
+                const core::Document doc = opened(file);
+                QCOMPARE(px(doc), (std::pair<double, double>{20.0, 10.0}));
+                QVERIFY2(!doc.page(0).color, core::path_to_utf8(file).c_str());  // (sRGB: an RGB page, no inks)
+            }
+        }
+        // never enlarged
+        std::tie(code, out) = cli({QStringLiteral("automate"), QStringLiteral("image-processor"), q(root / "in" / "a.png"), QStringLiteral("--out"),
+                                   q(root / "big"), QStringLiteral("--formats"), QStringLiteral("png"), QStringLiteral("--width"), QStringLiteral("600"),
+                                   QStringLiteral("--json")});
+        QCOMPARE(code, 0);
+        QCOMPARE(px(opened(root / "big" / "PNG" / "a.png")), (std::pair<double, double>{60.0, 30.0}));
+        // 画像を合わせる: 15 × 8 in a box of 15; --dont-enlarge leaves a smaller picture as it is
+        std::tie(code, out) = cli({QStringLiteral("automate"), QStringLiteral("fit"), q(root / "in" / "a.png"), QStringLiteral("--out"), q(root / "fit"),
+                                   QStringLiteral("--width"), QStringLiteral("15"), QStringLiteral("--height"), QStringLiteral("15"), QStringLiteral("--json")});
+        QCOMPARE(code, 0);
+        QCOMPARE(px(opened(root / "fit" / "a.png")), (std::pair<double, double>{15.0, 8.0}));
+        std::tie(code, out) = cli({QStringLiteral("automate"), QStringLiteral("fit"), q(root / "in" / "a.png"), QStringLiteral("--out"), q(root / "fit"),
+                                   QStringLiteral("--width"), QStringLiteral("600"), QStringLiteral("--height"), QStringLiteral("600"),
+                                   QStringLiteral("--dont-enlarge"), QStringLiteral("--suffix"), QStringLiteral("_same"), QStringLiteral("--json")});
+        QCOMPARE(code, 0);
+        QCOMPARE(px(opened(root / "fit" / "a_same.png")), (std::pair<double, double>{60.0, 30.0}));
+        // 条件付きモード変更: the CMYK picture made grey, the RGB ones left
+        std::tie(code, out) = cli({QStringLiteral("automate"), QStringLiteral("mode"), q(root / "in"), QStringLiteral("--out"), q(root / "mode"),
+                                   QStringLiteral("--from"), QStringLiteral("cmyk,lab"), QStringLiteral("--to"), QStringLiteral("gray"), QStringLiteral("--json")});
+        QVERIFY2(code == 0, out.dump().c_str());
+        QCOMPARE(service::automate::page_mode(opened(root / "mode" / "c.jpg").page(0)), std::string("gray"));
+        QCOMPARE(service::automate::page_mode(opened(root / "mode" / "a.png").page(0)), std::string("rgb"));
+        QCOMPARE(storage::read_file(root / "mode" / "a.png"), [&] {  // (as コピーを保存 writes the picture untouched)
+            formats::write_copy(opened(root / "in" / "a.png"), 0, root / "a_copy.png");
+            return storage::read_file(root / "a_copy.png");
+        }());
+        // レンズ補正: the filter of the batch, the filter on the picture by itself — the same file
+        const Json settings{{"profile", "generic"}, {"focal_length", 24}, {"edge", "black"}};
+        std::tie(code, out) = cli({QStringLiteral("automate"), QStringLiteral("lens"), q(root / "in" / "a.png"), QStringLiteral("--out"), q(root / "lens"),
+                                   QStringLiteral("--settings"), QString::fromStdString(settings.dump()), QStringLiteral("--json")});
+        QVERIFY2(code == 0, out.dump().c_str());
+        {
+            const core::Document doc = opened(root / "in" / "a.png");
+            Json op{{"op", "filter_raster"}, {"page", 1}, {"id", doc.page(0).layers[0].id}, {"kind", "lens_correction"}};
+            op.update(settings);
+            const core::Document by_hand = core::CommandBus(render::ops_registry()).apply(doc, Json::array({op}), core::Actor("human:test")).doc;
+            formats::write_copy(by_hand, 0, root / "lens_by_hand.png");
+            QCOMPARE(storage::read_file(root / "lens" / "a.png"), storage::read_file(root / "lens_by_hand.png"));
+            QVERIFY(storage::read_file(root / "lens" / "a.png") != storage::read_file(root / "a_copy.png"));
+        }
+        // the profile auto: no EXIF's focal length — each picture said, none stops the others
+        std::tie(code, out) = cli({QStringLiteral("automate"), QStringLiteral("lens"), q(root / "in"), QStringLiteral("--out"), q(root / "auto"),
+                                   QStringLiteral("--json")});
+        QCOMPARE(code, 1);
+        QCOMPARE(out["errors"].size(), std::size_t(3));
+        QVERIFY2(out["errors"][2]["error"].get<std::string>().find("focal length") != std::string::npos, out.dump().c_str());
+        // an agent: 画像を合わせる stands for resize_pages, not one of its ops
+        std::tie(code, out) = cli({QStringLiteral("automate"), QStringLiteral("fit"), q(root / "in" / "a.png"), QStringLiteral("--out"), q(root / "ai"),
+                                   QStringLiteral("--width"), QStringLiteral("10"), QStringLiteral("--agent"), QStringLiteral("ai:hermes"), QStringLiteral("--json")});
+        QCOMPARE(code, 1);
+        QCOMPARE(out["errors"][0]["code"], Json("steps"));
+        QVERIFY(!fs::exists(root / "ai" / "a.png"));
+        // the arguments: each kind its own options
+        for (const QStringList& wrong : {QStringList{QStringLiteral("automate"), QStringLiteral("nope"), q(root / "in")},
+                                         QStringList{QStringLiteral("automate"), QStringLiteral("fit"), q(root / "in"), QStringLiteral("--out"), q(root / "x")},
+                                         QStringList{QStringLiteral("automate"), QStringLiteral("fit"), q(root / "in"), QStringLiteral("--out"), q(root / "x"),
+                                                     QStringLiteral("--width"), QStringLiteral("5"), QStringLiteral("--to"), QStringLiteral("gray")},
+                                         QStringList{QStringLiteral("automate"), QStringLiteral("image-processor"), q(root / "in"), QStringLiteral("--save")},
+                                         QStringList{QStringLiteral("automate"), QStringLiteral("mode"), q(root / "in"), QStringLiteral("--dry-run")},
+                                         QStringList{QStringLiteral("automate"), QStringLiteral("lens"), q(root / "b.genko"), QStringLiteral("--save")}}) {
+            QVERIFY2(test::run_genko(wrong).exit_code == 2, wrong.join(QLatin1Char(' ')).toUtf8().constData());
+        }
+        QVERIFY(!fs::exists(root / "x"));
+        // the pseudo ops stay the steps' own: `genko apply` does not know them
+        write_book(root / "b.genko", 40, 20);
+        write(root / "fit.json", Json::array({Json{{"op", "fit_image"}, {"page", 1}, {"width_px", 10}}}).dump());
+        std::tie(code, out) = cli({QStringLiteral("apply"), q(root / "b.genko"), q(root / "fit.json")});
+        QCOMPARE(code, 1);
+    }
+
+    // PC5 I-e: ドロップレット — made by `genko droplet --create` (the file, its launchers beside it: one fixed line, runnable),
+    // run by `genko droplet` and by its launcher (the files given, written into droplet-output beside them); a gate never in
+    // one; an agent running it refused what its ops cannot do. Everything made inside the test's folder (removed after it).
+    void droplets() {
+        QTemporaryDir dir;
+        const fs::path root = path_of(dir.path());
+        fs::create_directories(root / "in");
+        fs::create_directories(root / "d");
+        for (const char* name : {"a.png", "b.png"}) {
+            formats::NewImage image;
+            image.title = name;
+            image.width = 40;
+            image.height = 20;
+            image.background = "#993366";
+            formats::write_copy(formats::new_image(image).doc, 0, root / "in" / name);
+        }
+        write(root / "fit.txt", "# 小さく\nfit_image {\"width_px\": 10, \"height_px\": 10}\n");
+        auto [code, out] = cli({QStringLiteral("droplet"), QStringLiteral("--create"), q(root / "d" / "小さく"), QStringLiteral("--steps"), q(root / "fit.txt"),
+                                QStringLiteral("--suffix"), QStringLiteral("_s"), QStringLiteral("--json")});
+        QVERIFY2(code == 0, out.dump().c_str());
+        const fs::path droplet = root / "d" / core::path_from_utf8("小さく.genkodroplet");
+        QCOMPARE(out["droplet"], Json(core::path_to_utf8(droplet)));
+        QVERIFY(fs::exists(droplet));
+        const Json kept = core::parse_python_json(storage::read_file(droplet));
+        QCOMPARE(kept["genkoDroplet"], Json(1));
+        QCOMPARE(kept["name"], Json("小さく"));
+        QCOMPARE(kept["steps"], Json::array({Json{{"op", "fit_image"}, {"width_px", 10}, {"height_px", 10}}}));
+        QCOMPARE(out["launchers"].size(), service::automate::launchers_here().size());
+#ifndef _WIN32
+        const fs::path shell = root / "d" / core::path_from_utf8("小さく.sh");
+        QCOMPARE(out["launchers"][0], Json(core::path_to_utf8(shell)));
+        QVERIFY((fs::status(shell).permissions() & fs::perms::owner_exec) != fs::perms::none);
+        const std::string text = storage::read_file(shell);
+        QVERIFY2(text.find(" droplet '" + core::path_to_utf8(droplet) + "' \"$@\"\n") != std::string::npos, text.c_str());
+        QVERIFY(text.find("--agent") == std::string::npos);
+        QVERIFY(fs::exists(root / "d" / core::path_from_utf8("小さく.desktop")));
+#endif
+        // run: droplet-output beside the files
+        std::tie(code, out) = cli({QStringLiteral("droplet"), q(droplet), q(root / "in" / "a.png"), QStringLiteral("--json")});
+        QVERIFY2(code == 0, out.dump().c_str());
+        const fs::path made = root / "in" / "droplet-output" / "a_s.png";
+        QCOMPARE(out["files"][0]["output"], Json(core::path_to_utf8(made)));
+        const core::PageSpec spec = formats::open_file(storage::read_file(made), "a_s.png").doc.page(0).spec;
+        QCOMPARE(std::round(spec.width_mm.value() / 25.4 * spec.dpi.value()), 10.0);
+        QCOMPARE(std::round(spec.height_mm.value() / 25.4 * spec.dpi.value()), 5.0);
+#ifndef _WIN32
+        // its launcher, as a file manager runs it with the files dropped
+        QProcess launcher;
+        launcher.start(QStringLiteral("/bin/sh"), {q(shell), q(root / "in" / "b.png")});
+        QVERIFY(launcher.waitForFinished(120000));
+        QCOMPARE(launcher.exitCode(), 0);
+        QVERIFY(fs::exists(root / "in" / "droplet-output" / "b_s.png"));
+#endif
+        // --out given; an agent: refused per file, nothing written
+        std::tie(code, out) = cli({QStringLiteral("droplet"), q(droplet), q(root / "in" / "a.png"), QStringLiteral("--out"), q(root / "o"), QStringLiteral("--json")});
+        QCOMPARE(code, 0);
+        QVERIFY(fs::exists(root / "o" / "a_s.png"));
+        std::tie(code, out) = cli({QStringLiteral("droplet"), q(droplet), q(root / "in" / "a.png"), QStringLiteral("--out"), q(root / "ai"),
+                                   QStringLiteral("--agent"), QStringLiteral("ai:hermes"), QStringLiteral("--json")});
+        QCOMPARE(code, 1);
+        QCOMPARE(out["errors"][0]["code"], Json("steps"));
+        QVERIFY(!fs::exists(root / "ai" / "a_s.png"));
+        // a gate is never a droplet's step: nothing made
+        write(root / "gate.txt", "approve {\"gate\": \"name\", \"page\": 1}\n");
+        std::tie(code, out) = cli({QStringLiteral("droplet"), QStringLiteral("--create"), q(root / "d" / "gate"), QStringLiteral("--steps"), q(root / "gate.txt")});
+        QCOMPARE(code, 1);
+        QCOMPARE(out["code"], Json("steps"));
+        QVERIFY(!fs::exists(root / "d" / "gate.genkodroplet"));
+        QVERIFY(!fs::exists(root / "d" / "gate.sh"));
+        // a droplet with a gate written by hand: refused when it runs
+        write(root / "d" / "hand.genkodroplet", Json{{"genkoDroplet", 1}, {"name", "h"}, {"steps", Json::array({Json{{"op", "lock_page"}, {"agent", "x"}}})}}.dump());
+        std::tie(code, out) = cli({QStringLiteral("droplet"), q(root / "d" / "hand.genkodroplet"), q(root / "in" / "a.png"), QStringLiteral("--out"), q(root / "h")});
+        QCOMPARE(code, 1);
+        QCOMPARE(out["code"], Json("steps"));
+        // --no-launcher; the arguments
+        std::tie(code, out) = cli({QStringLiteral("droplet"), QStringLiteral("--create"), q(root / "d" / "only"), QStringLiteral("--steps"), q(root / "fit.txt"),
+                                   QStringLiteral("--no-launcher"), QStringLiteral("--json")});
+        QCOMPARE(code, 0);
+        QCOMPARE(out["launchers"], Json::array());
+        QVERIFY(!fs::exists(root / "d" / "only.sh") && !fs::exists(root / "d" / "only.lnk"));
+        QCOMPARE(test::run_genko({QStringLiteral("droplet"), q(droplet)}).exit_code, 2);
+        QCOMPARE(test::run_genko({QStringLiteral("droplet"), q(droplet), q(root / "in"), QStringLiteral("--steps"), q(root / "fit.txt")}).exit_code, 2);
+        QCOMPARE(test::run_genko({QStringLiteral("droplet"), QStringLiteral("--create"), q(root / "d" / "x")}).exit_code, 2);
     }
 };
 

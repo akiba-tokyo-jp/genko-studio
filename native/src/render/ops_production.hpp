@@ -16,7 +16,8 @@
 //   J-b (render/ops_slices.cpp, slices@1): add_slice, set_slice, delete_slices, divide_slice, slices_from_guides
 //   J-c (render/ops_annotations.cpp, annotations@1): add_annotation, set_annotation, delete_annotations
 //   J-d1 (render/ops_measure.cpp, measure@1): set_measurement_scale, add_count, remove_count, move_count, clear_count,
-//       new_count_group, delete_count_group, set_count_group, set_ruler_line, straighten_layer; J-d2: place_scale_marker
+//       new_count_group, delete_count_group, set_count_group, set_ruler_line, straighten_layer — written (not frames any
+//       more; and the question measure_info); J-d2: place_scale_marker
 //   J-e2 (render/ops_video.cpp, video@1): add_video_layer, video_insert_blank, video_duplicate, video_delete,
 //       video_restore, video_restore_all, video_alter, set_video_layer, replace_footage, rasterize_video, footage_to_layers
 // (J-e1 widens set_animation — timeline@1 —, J-f filter_raster's plugin kinds: ops there are.)

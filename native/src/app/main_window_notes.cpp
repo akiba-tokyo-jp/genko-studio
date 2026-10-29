@@ -75,6 +75,7 @@ void MainWindow::build_note_actions() {
     shown->setChecked(settings()->value(QStringLiteral("view/show_notes"), true).toBool());
     connect(shown, &QAction::toggled, this, [this](bool on) {
         settings()->setValue(QStringLiteral("view/show_notes"), on);
+        share_view_switch(QStringLiteral("act_show_notes"), on);  // (PC5 J-d1 with H-b: every open window the same)
         canvas_->show_extra(QStringLiteral("notes"), on);
         canvas_->update();
     });

@@ -9,6 +9,7 @@
 #include "render/pcraft_annotations.hpp"
 #include "render/pcraft_comps.hpp"
 #include "render/pcraft_manifest.hpp"
+#include "render/pcraft_measure.hpp"
 #include "render/pcraft_variables.hpp"
 
 namespace genko::render::pcraft_production {
@@ -36,7 +37,7 @@ constexpr std::array<Row, 6> kRows{{
     {"slices", "スライス", holds_something, nullptr, nullptr},
     {"timeline", "タイムライン", holds_something, nullptr, nullptr},
     {"variables", "変数とデータセット", holds_something, pcraft_variables::read, pcraft_variables::write},  // (PC5 I-d)
-    {"measurement", "計測（カウント・ものさし）", measuring, nullptr, nullptr},
+    {"measurement", "計測（カウント・ものさし）", measuring, pcraft_measure::read, pcraft_measure::write},  // (PC5 J-d1)
 }};
 
 }  // namespace

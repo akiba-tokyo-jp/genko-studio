@@ -12,13 +12,12 @@ namespace genko::render {
 namespace {
 
 // (J-a's レイヤーカンプ — layer-comps@1 — are written: render/ops_layer_comps; J-c's 注釈 — annotations@1 —:
-// render/ops_annotations)
-constexpr std::array<std::string_view, 27> kNames{
+// render/ops_annotations; J-d1's 計測 — measure@1 —: render/ops_measure)
+constexpr std::array<std::string_view, 17> kNames{
     // J-b: スライス (slices@1)
     "add_slice", "set_slice", "delete_slices", "divide_slice", "slices_from_guides",
-    // J-d1: 計測スケール・カウント・ものさし・角度補正 (measure@1); J-d2: 目盛りマーカー
-    "set_measurement_scale", "add_count", "remove_count", "move_count", "clear_count", "new_count_group", "delete_count_group",
-    "set_count_group", "set_ruler_line", "straighten_layer", "place_scale_marker",
+    // J-d2: 目盛りマーカー
+    "place_scale_marker",
     // J-e2: ビデオレイヤー (video@1)
     "add_video_layer", "video_insert_blank", "video_duplicate", "video_delete", "video_restore", "video_restore_all", "video_alter",
     "set_video_layer", "replace_footage", "rasterize_video", "footage_to_layers"};

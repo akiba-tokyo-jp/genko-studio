@@ -40,6 +40,7 @@
 #include "render/ops_layer_comps.hpp"
 #include "render/ops_variables.hpp"
 #include "render/ops_annotations.hpp"
+#include "render/ops_measure.hpp"
 
 namespace genko::render {
 
@@ -443,6 +444,8 @@ void register_render_ops(core::OpRegistry& registry) {
     register_variable_ops(registry);
     // PC5 J-c (annotations@1: the notes, render/ops_annotations)
     register_annotation_ops(registry);
+    // PC5 J-d1 (measure@1: the measurement scale, the count marks, the ruler line, レイヤーの角度補正 — render/ops_measure)
+    register_measure_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {

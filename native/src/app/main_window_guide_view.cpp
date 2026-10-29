@@ -175,6 +175,10 @@ void MainWindow::build_guide_view_menus(QMenu* view) {
 void MainWindow::apply_extras() {
     canvas_->extras_shown = action("act_extras")->isChecked();
     for (const ShowItem& item : kShowItems) canvas_->*item.flag = action(QString::fromLatin1(item.attribute))->isChecked();
+    // (PC5 J-c・J-d1: the notes' and the count marks' extras, another window's switch shared — share_view_switch)
+    for (const auto& [attribute, key] : {std::pair{"act_show_notes", "notes"}, std::pair{"act_show_count", "count"}}) {
+        if (QAction* shown = action(QString::fromLatin1(attribute))) canvas_->show_extra(QString::fromLatin1(key), shown->isChecked());
+    }
     if (canvas_->show_layer_edges) (void)layer_snap_boxes();  // (the boxes asked for now: drawn when they come)
     canvas_->update();
 }

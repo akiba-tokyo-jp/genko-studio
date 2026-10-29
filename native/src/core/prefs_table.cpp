@@ -250,6 +250,9 @@ std::vector<Pref> make_table() {
         boolean("view.show.mesh", "view/show_mesh", true, "メッシュ", Apply::NewWindow),
         boolean("view.show.editPins", "view/show_edit_pins", true, "編集ピン", Apply::NewWindow),
         boolean("view.lockGuides", "guides/lock", false, "ガイドをロック", Apply::NewWindow),
+        // (PC5 J-c・J-d1: 表示 → 表示・非表示 ▸ 注釈・カウント)
+        boolean("view.show.notes", "view/show_notes", true, "注釈", Apply::NewWindow),
+        boolean("view.show.count", "view/show_count", true, "カウント", Apply::NewWindow),
         // state (what the tools and the windows remember)
         memory("state.3d.*", "3d/*"),
         memory("state.ai.*", "ai/*"),

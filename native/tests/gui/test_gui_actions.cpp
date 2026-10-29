@@ -420,6 +420,12 @@ private slots:
         // 新規ガイドレイアウトを作成… (act_lock_guides, act_clear_guides, act_clear_canvas_guides, act_new_guide,
         // act_new_guide_layout), 編集 → 環境設定 ▸ 単位・定規…・ガイド・グリッド・スライス… (act_prefs_unitsAndRulers,
         // act_prefs_guidesGridAndSlices) — test_gui_guides.
+        // and PC5 I-e's 8 — ファイル → 自動処理 → バッチ…・ドロップレットを作成…・条件付きモード変更…・画像を合わせる…・レンズ補正…
+        // (act_batch, act_create_droplet, act_conditional_mode_change, act_fit_image, act_lens_correction_batch), スクリプト →
+        // 画像プロセッサー…・スクリプトイベントマネージャー…・参照… (act_image_processor, act_script_events, act_script_browse) —
+        // test_gui_automate.
+        // and PC5 J-d1's 1 — 表示 → 表示・非表示 → カウント (act_show_count); its 計測スケールを設定 ▸ 初期設定・カスタム…, ものさしツール and
+        // カウントツール are the frames' attributes made real — test_gui_measure.
         // and the 20 of PC5 H-c (SPEC VIEW-01「窓の区画と並べ方」) — ウィンドウ → アレンジ ▸ すべてを左右に並べる・すべてを上下に並べる・
         // 2 アップ（縦）・2 アップ（横）・3 アップ（縦）・3 アップ（横）・3 アップ（スタック）・4 アップ・6 アップ (act_arrange_tile_vertical,
         // act_arrange_tile_horizontal, act_arrange_2up_vertical, act_arrange_2up_horizontal, act_arrange_3up_vertical,
@@ -428,7 +434,7 @@ private slots:
         // (act_float_window, act_float_all), 同じズーム倍率で表示・同じ位置に表示・同じ回転で表示・すべてを同じ表示にする
         // (act_match_zoom, act_match_location, act_match_rotation, act_match_all), and the hand's and zoom tool's
         // すべてのウィンドウをスクロール・すべてのウィンドウをズーム (act_scroll_all, act_zoom_all) — test_gui_arrange.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{711});  // (wip-pc's 674, H-b's 17 and H-c's 20)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{720});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1 and H-c's 20)
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -469,8 +475,9 @@ private slots:
         // PC3 B4's four retouching tools (test_gui_retouch); PC3 C-b's five shape tools besides 長方形ツール (test_gui_shapes)
         // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask); PC4 E1's 鉛筆ツール (test_gui_brushes); PC4 E5's
         // nine brushes that change pixels (test_gui_paint_tools); PC5 H-a's 手のひらツール (test_gui_view); PC5 G-a's
-        // 横書き文字ツール (test_gui_type); PC5 J-c's 注釈ツール (test_gui_notes)
-        QCOMPARE(w->tools_group()->actions().size(), 56);
+        // 横書き文字ツール (test_gui_type); PC5 J-c's 注釈ツール (test_gui_notes); PC5 J-d1's ものさしツール and カウントツール
+        // (test_gui_measure)
+        QCOMPARE(w->tools_group()->actions().size(), 58);
     }
 
     // PC4 F-0 (SPEC FILE-01; 節 F 5.1・5.2): ファイル in Photoshop's order and names — the book's export is 書き出し ▸
@@ -505,10 +512,15 @@ private slots:
                               QStringLiteral("プリント…"), QStringLiteral("|"), QStringLiteral("タイムラプスを記録する"), QStringLiteral("タイムラプスを書き出す…"),
                               QStringLiteral("|"), QStringLiteral("自動処理 ▸"), QStringLiteral("スクリプト ▸"), QStringLiteral("オートアクション ▸"),
                               QStringLiteral("|"), QStringLiteral("終了")}));  // (PC5 H-0: 環境設定 in 編集)
-        // (PC5 I-0, SPEC.md AUTO-01: 自動処理 ▸ is a frame, shown once a group puts a command in it)
+        // (PC5 I-0, SPEC.md AUTO-01: 自動処理 ▸ is a frame, shown once a group puts a command in it — PC5 I-e's)
         QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate")) != nullptr);
-        QVERIFY(!w->findChild<QMenu*>(QStringLiteral("menu_automate"))->menuAction()->isVisible());
-        QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_scripts"))), QStringList{QStringLiteral("すべてのマスクを統合")});
+        QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate"))->menuAction()->isVisible());
+        QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_automate"))),
+                 (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"), QStringLiteral("条件付きモード変更…"),
+                              QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…")}));
+        QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_scripts"))),
+                 (QStringList{QStringLiteral("画像プロセッサー…"), QStringLiteral("すべてのマスクを統合"), QStringLiteral("|"),
+                              QStringLiteral("スクリプトイベントマネージャー…"), QStringLiteral("|"), QStringLiteral("参照…")}));
         QMenu* exports = w->findChild<QMenu*>(QStringLiteral("menu_export"));
         QVERIFY(exports != nullptr);
         QCOMPARE(items(exports), (QStringList{QStringLiteral("PNG としてクイック書き出し"), QStringLiteral("書き出し形式…"), QStringLiteral("|"),
@@ -607,8 +619,8 @@ private slots:
         // (the smart object's ラスタライズ keeps its own name: the first of the words in the menus)
         QCOMPARE(studio.act("act_smart_rasterize")->text(), QStringLiteral("ラスタライズ"));
         const std::int64_t revision = studio.doc().revision;
-        for (const char* name : {"act_measure_scale_default", "act_measure_scale_custom", "act_measure_data_points", "act_measure_record",
-                                 "act_measure_ruler_tool", "act_measure_count_tool", "act_measure_scale_marker", "act_video_from_file", "act_video_blank",
+        // (PC5 J-d1: 計測スケールを設定 ▸ 初期設定・カスタム…, ものさしツール, カウントツール made real — test_gui_measure)
+        for (const char* name : {"act_measure_data_points", "act_measure_record", "act_measure_scale_marker", "act_video_from_file", "act_video_blank",
                                  "act_video_insert_blank", "act_video_duplicate", "act_video_delete", "act_video_replace", "act_video_interpret",
                                  "act_video_show_altered", "act_video_restore", "act_video_restore_all", "act_video_reload", "act_video_rasterize",
                                  "act_panel_actions", "act_panel_measurement_log"}) {  // (PC5 J-a: レイヤーカンプ made real; J-c: 注釈)
@@ -640,7 +652,8 @@ private slots:
                                if (view.per_mm > 0 && view.at.map(QPointF(10, 10)) != view.at.map(QPointF(20, 20)) && view.seen_mm.contains(QPointF(10, 10)))
                                    ++drawn;
                            }});
-        QCOMPARE(canvas->extra_keys(), (std::vector<QString>{QStringLiteral("notes"), QStringLiteral("count")}));  // (PC5 J-c's notes first)
+        // (PC5 J-c's notes first; J-d1's count — this test's painter in its place — and ruler)
+        QCOMPARE(canvas->extra_keys(), (std::vector<QString>{QStringLiteral("notes"), QStringLiteral("count"), QStringLiteral("ruler")}));
         (void)canvas->grab();
         QVERIFY(drawn > 0);
         canvas->show_extra(QStringLiteral("count"), false);
@@ -1057,7 +1070,9 @@ private slots:
                                                   // (PC5 G-a: 横書き文字ツール)
                                                   {"text_h", "act_text_h"},
                                                   // (PC5 J-c: 注釈ツール)
-                                                  {"note", "act_note"}};
+                                                  {"note", "act_note"},
+                                                  // (PC5 J-d1: ものさしツール, カウントツール — the frames' attributes made real)
+                                                  {"measure", "act_measure_ruler_tool"}, {"count", "act_measure_count_tool"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());

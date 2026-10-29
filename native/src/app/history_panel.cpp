@@ -132,6 +132,10 @@ const std::map<std::string, const char*>& names() {
         {"set_variables", "変数を定義"}, {"set_data_sets", "データセットを変更"}, {"apply_data_set", "データセットを適用"},
         // (PC5 J-c, annotations@1: render/ops_annotations)
         {"add_annotation", "注釈を追加"}, {"set_annotation", "注釈を編集"}, {"delete_annotations", "注釈を削除"},
+        // (PC5 J-d1, measure@1: render/ops_measure)
+        {"set_measurement_scale", "計測スケールを設定"}, {"add_count", "カウント"}, {"remove_count", "カウントを削除"}, {"move_count", "カウントを移動"},
+        {"clear_count", "カウントをクリア"}, {"new_count_group", "新規カウントグループ"}, {"delete_count_group", "カウントグループを削除"},
+        {"set_count_group", "カウントグループのオプション"}, {"set_ruler_line", "ものさし"}, {"straighten_layer", "レイヤーの角度補正"},
     };
     return table;
 }

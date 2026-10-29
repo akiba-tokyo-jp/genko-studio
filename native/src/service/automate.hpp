@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -56,12 +57,21 @@ inline constexpr int kMaxStepsDepth = 64;
 core::Json read_steps(std::string_view text);
 // read_steps of a file, refused unread when it is bigger than kMaxStepsBytes (core::Error "not_found" when it is not there).
 core::Json read_steps_file(const fs::path& file);
+// (PC5 I-e) a steps file's bytes as read_steps_file reads them: a regular file only (core::Error "value" for a FIFO, a
+// device …), at most kMaxStepsBytes — the script events and the windows read their files so too.
+std::string read_steps_bytes(const fs::path& file);
 
 // Pseudo ops: steps that are not ops (never in `genko apply` nor the ops' list), turned into ops by the runner on the book
 // as it is when their turn comes — fit_image {"page", "width_px", "height_px", "dont_enlarge"?, "resample"?} (画像を合わせる:
-// resize_pages to fit the box, its shape kept), conditional_mode_change {"page", "from": [modes], "to"}
-// (条件付きモード変更: set_color_mode when the page's mode is one of them; refused with not_yet_ported until PC5 I-e).
+// resize_pages to fit the box, its shape kept), conditional_mode_change {"page", "from"?: [modes] | "any", "to"}
+// (条件付きモード変更, PC5 I-e: set_color_mode to rgb, gray, cmyk or lab — its depth kept — when the page's mode, as
+// page_mode names it, is one of `from`; nothing when it is not, or is `to` already).
 bool pseudo_op(std::string_view name);
+// A page's colour mode as 条件付きモード変更 names it: bitmap, gray, duotone, indexed, rgb, cmyk, lab or multichannel.
+std::string page_mode(const core::Page& page);
+// The modes 条件付きモード変更 takes from (page_mode's), and into.
+const std::vector<std::string>& mode_names();
+const std::vector<std::string>& modes_into();
 std::vector<std::string> pseudo_op_names();
 // The ops one pseudo op stands for on `doc` now (maybe none: the page fits already). core::OpError with the op's words.
 core::Json expand_pseudo(const core::Document& doc, const core::Json& op);
@@ -134,6 +144,15 @@ struct Output {
     std::optional<int> quality;   // JPEG's 0..12
     std::string prefix;
     std::string suffix;
+    // (PC5 I-e バッチ's 連番) each input numbered from this, 3 digits after the suffix (_001, _002 …); 0: not numbered
+    int serial = 0;
+    // (PC5 I-e 画像プロセッサー) the same pages written again, each in its folder and format (Folder only)
+    struct Also {
+        fs::path folder;
+        std::string format;
+        std::optional<int> quality;
+    };
+    std::vector<Also> also;
 };
 
 // The file a page of an input is written as: <folder>/<prefix><stem>[_<page's file stem> for a book's page]<suffix>.<ext>,
@@ -158,6 +177,12 @@ struct Options {
     formats::OpenOptions open;   // how a picture is opened (the window's colour settings)
     std::string script;          // the journal's name for a change written to a book (SaveRequest::script)
     bool book_brushes = true;    // a book's own brushes made known before it is drawn (as `genko copy`; the app follows its own)
+    // (PC5 I-e) steps made for each input from its book as opened — 画像プロセッサー's and レンズ補正's own, each its page
+    // given —, run before `steps` as one change with them (checked as the steps are: the gates, an agent's ops only)
+    std::function<core::Json(const core::Document& doc, bool picture)> first;
+    // (PC5 I-e) the window's book as it is now, in place of the inputs' files (バッチ's ソース 開いている原稿; written
+    // into the folder only: Output::To::Folder or None) — its name the inputs' only item's path
+    std::shared_ptr<const core::Document> open_book;  // (held while it runs: the window may take another book meanwhile)
 };
 
 struct Result {
@@ -175,5 +200,77 @@ struct Result {
 // cannot run). Never written: a picture's own file, anything inside a book's folder — the output folder in a book, or a
 // book itself, is refused before it is made (core::Error "refused_target").
 Result run(const std::vector<Input>& inputs, const core::Json& steps, const Output& output, const Options& options);
+
+// --- PC5 I-e: 画像プロセッサー・レンズ補正 -------------------------------------------------------------------------------
+
+// 画像プロセッサー (file.scripts.imageProcessor; PhotoCraft's file_cmds.rs image_processor): each picture opened once and
+// written in each format chosen, each into its folder under `folder` (JPEG, PSD, TIFF, PNG — Photoshop's), after its
+// steps: sRGB に変換 (to_srgb: an indexed, bitmap, duotone or multichannel page made RGB, then convert_profile srgb),
+// サイズに合わせる (width_px, height_px: fit_image, never enlarged), then the action (Options' steps, `recorded`).
+struct ImageProcessor {
+    std::vector<std::string> formats;  // jpg, psd, tif, png (at least one, each once)
+    int quality = 8;                   // JPEG's 0..12
+    std::optional<int> width_px;
+    std::optional<int> height_px;
+    bool to_srgb = false;
+};
+// The folder a format goes into under the output folder (JPEG, PSD, TIFF, PNG).
+std::string processor_folder(std::string_view format);
+// The steps 画像プロセッサー runs before the action (Options::first's), on every page of `doc`.
+core::Json processor_steps(const ImageProcessor& processor, const core::Document& doc);
+// The runner's Output of 画像プロセッサー into `folder` (core::Error("value") for a format it does not write, none, twice).
+Output processor_output(const ImageProcessor& processor, const fs::path& folder);
+
+// レンズ補正 (file.automate.lensCorrection; PhotoCraft's lens_cmds.rs lens_batch): on each page (a picture's, a book's
+// but its covers) the page flattened first when more than one layer shows, then レンズ補正 (filter_raster's
+// lens_correction, PC4 D6) with these settings — the profile "auto" unless given: the focal length of the picture's EXIF
+// (a picture without one is said in `errors`, the others go on).
+core::Json lens_steps(const core::Json& settings, const core::Document& doc);
+
+// --- PC5 I-e: ドロップレット ----------------------------------------------------------------------------------------------
+
+// A droplet (file.automate.createDroplet, runDroplet; PhotoCraft's automate_cmds.rs create_droplet, run_droplet): a batch
+// kept in a file (.genkodroplet: {"genkoDroplet": 1, "name", "steps": […ops…], "recorded"?: true, "options"?: {"output"?,
+// "format"?, "quality"?, "prefix"?, "suffix"?}}), run by `genko droplet <droplet> <files…>` — ops only (no command, no
+// path but the folder it writes into), checked when it is made and again when it runs (service/automate's rules, as the
+// one who runs it: an unnamed caller is a person, legacy:unknown in an agent's book).
+inline constexpr std::string_view kDropletSuffix = ".genkodroplet";
+struct Droplet {
+    std::string name;
+    core::Json steps = core::Json::array();
+    bool recorded = false;  // an オートアクション's steps (played back on each page: aim_steps)
+    std::optional<fs::path> output;  // none: a folder droplet-output beside the first input
+    std::string format = "same";
+    std::optional<int> quality;
+    std::string prefix;
+    std::string suffix;
+};
+core::Json droplet_json(const Droplet& droplet);
+// A droplet's JSON read (StepsError for its steps; core::Error("value") for what is not a droplet).
+Droplet droplet_from_json(const core::Json& json);
+// read whole at most kMaxStepsBytes (core::Error "not_found" when it is not there)
+Droplet read_droplet(const fs::path& file);
+// The droplet written (its file named …genkodroplet, the suffix added when it is not); the path written. Never inside a
+// book's folder (core::Error "refused_target").
+fs::path write_droplet(const fs::path& file, const Droplet& droplet);
+
+// Its launchers (起動ファイル), beside the droplet the person chose and nowhere else: Linux and macOS <name>.sh (run with
+// the files as its arguments) and <name>.desktop (files dropped on it), both executable; Windows <name>.lnk — a shortcut
+// (MS-SHLLINK) of `genko` with the argument `droplet "<the droplet>"`: Explorer puts the files dropped on it after it, each
+// one argument, no cmd.exe reading them (PC5 I-e's review, P2-2: no .cmd). Each runs one fixed thing: `genko droplet "<the
+// droplet>" <the files>` — the program at `genko` —, no --agent. A path holding a control character (a line end …) is refused
+// for every kind (P2-1); a file there that is not a Genko launcher is never written over (core::Error "refused_target"); the
+// mode is set before the file takes its name.
+enum class Launcher { Shell, Desktop, Shortcut };
+std::vector<Launcher> launchers_here();  // this OS's
+fs::path launcher_path(const fs::path& droplet, Launcher kind);
+// The launcher's bytes (a shortcut's are binary).
+std::string launcher_text(const fs::path& droplet, const fs::path& genko, Launcher kind);
+// The program a launcher runs: the AppImage itself when Genko runs from one ($APPIMAGE), else `running` (the review's P3-3).
+fs::path launcher_program(const fs::path& running);
+std::vector<fs::path> write_launchers(const fs::path& droplet, const fs::path& genko);
+
+// The runner's Output of a droplet run on `inputs` (`out`, else its own folder, else droplet-output beside the first input).
+Output droplet_output(const Droplet& droplet, const std::vector<Input>& inputs, const std::optional<fs::path>& out);
 
 }  // namespace genko::service::automate

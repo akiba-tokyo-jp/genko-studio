@@ -51,7 +51,9 @@ const std::vector<std::string>& app_keys() {
         "units/ruler", "units/type", "units/column_width", "units/gutter", "units/print_resolution", "units/screen_resolution",
         "units/point_size", "guides/guide_color", "guides/guide_style", "guides/smart_color", "guides/grid_color", "guides/grid_style",
         "guides/grid_subdivisions", "guides/grid_unit", "guides/lock", "view/extras", "view/show_guides", "view/show_canvas_guides",
-        "view/show_smart_guides", "view/show_layer_edges", "view/show_mesh", "view/show_edit_pins", "guide_layouts/三段組"};
+        "view/show_smart_guides", "view/show_layer_edges", "view/show_mesh", "view/show_edit_pins", "guide_layouts/三段組",
+        // (PC5 J-c・J-d1: 表示・非表示 ▸ 注釈・カウント)
+        "view/show_notes", "view/show_count"};
     return all;
 }
 

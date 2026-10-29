@@ -590,6 +590,22 @@ public:
     void paint_notes(QPainter& painter, const core::Page& page, const ExtraView& view) const;
     QString chosen_note;
     std::optional<QString> note_at(const QPointF& widget) const;
+    // (PC5 J-d1, 計測 — measure@1, app/canvas_measure.cpp) The count marks' painter (the extra "count": each visible group's
+    // marks — a dot of its colour and size, its number beside it in its label size —, the same size at any zoom) and the
+    // ものさしツール's line (the extra "ruler", while the ものさしツール is in hand: the line, its ends, the protractor's
+    // arm and the angle between). The ものさしツール ("measure"): a drag draws a line (Shift: by 45°), a drag of an end
+    // moves it, of the line moves it whole, Alt+drag from an end draws the protractor's arm (rulerMoving while it goes,
+    // rulerDrawn when let go). The カウントツール ("count"): a click puts a mark of the active group (countRequested), Alt+
+    // click takes the mark there away (countRemoved), a drag moves one (countMoved). The line in hand (none: the page's).
+    void paint_count(QPainter& painter, const core::Page& page, const ExtraView& view) const;
+    void paint_ruler(QPainter& painter, const core::Page& page, const ExtraView& view) const;
+    std::optional<core::RulerLine> ruler_in_hand() const;
+    // A line the page could not take (the op refused: the page locked, the book read-only): this window's alone, drawn and
+    // read until another line is drawn, the page changes or 消去 (none: the page's).
+    std::optional<core::RulerLine> ruler_here;
+    std::string ruler_here_page;  // (the page it was drawn on: let go on another)
+    // The count mark under a point of the canvas (its group and index; none: no visible one within 6 screen pixels).
+    std::optional<std::pair<std::size_t, std::size_t>> count_at(const QPointF& widget) const;
 
     // --- PC5 H-b: ガイド・グリッド・エクストラ・単位 (canvas_guide_lines.cpp; SPEC.md VIEW-01) --------------------------------------
     // What エクストラ hides with the rest (shows: one's own switch and the master's): the guides, the grid, the layers' edges,
@@ -727,6 +743,13 @@ signals:
     void noteChosen(const QString& id);
     void noteMoved(const QString& id, double x_mm, double y_mm);
     void noteOpened(const QString& id);
+    // (PC5 J-d1) ものさしツール: the line as it is dragged (mm; `protractor`: its arm's end at `arm`), and as it is let go;
+    // カウントツール: a mark asked for here (mm), the mark of a group taken away, moved to (mm)
+    void rulerMoving(QPointF start, QPointF end, bool protractor, QPointF arm);
+    void rulerDrawn(QPointF start, QPointF end, bool protractor, QPointF arm);
+    void countRequested(double x_mm, double y_mm);
+    void countRemoved(int group, int index);
+    void countMoved(int group, int index, double x_mm, double y_mm);
     // the lines: the text tool clicked here (mm); a balloon's outline drawn by hand ([[x, y], …] mm); a line chosen (and
     // whether its panel opens); a line's box or tails changed ({x_mm, y_mm, w_mm, h_mm} | {tails}: move_line, or {style}:
     // edit_line); a double click on a balloon (type over it); a right click on one; a balloon dragged to (mm)
@@ -1163,6 +1186,29 @@ private:
     bool note_move(const QPointF& mm);
     bool note_release();
     bool note_double(const QPointF& widget);
+    // (PC5 J-d1: the ものさしツール's drag — which part: a new line, an end, the whole line, the protractor's arm — and the
+    // カウントツール's drag of a mark — app/canvas_measure.cpp)
+    struct MeasureDrag {
+        enum class Part { New, Start, End, Line, Arm };
+        Part part = Part::New;
+        core::RulerLine line;      // (as it is now)
+        core::RulerLine was;       // (as the press found it)
+        QPointF grabbed;           // (the press, mm)
+        bool moved = false;
+    };
+    std::optional<MeasureDrag> measure_drag_;
+    struct CountDrag {
+        std::size_t group = 0, index = 0;
+        QPointF grabbed, to;  // (mm)
+        bool moved = false;
+    };
+    std::optional<CountDrag> count_drag_;
+    bool measure_press(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool measure_move(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool measure_release();
+    bool count_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool count_move(const QPointF& mm);
+    bool count_release();
     std::vector<QString> extras_hidden_;
     void draw_extras(QPainter& painter) const;
     // (PC5 H-b: canvas_guide_lines.cpp) the guides, the layers' edges, the equal gaps of a moved box; a guide grabbed

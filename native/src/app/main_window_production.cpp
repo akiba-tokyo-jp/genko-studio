@@ -29,14 +29,11 @@ struct Frame {
     const char* tip;
 };
 
-// イメージ → 解析 ▸ (J-d1・J-d2), in Photoshop's order
+// イメージ → 解析 ▸ (J-d2), in Photoshop's order (J-d1's 計測スケールを設定 ▸ 初期設定・カスタム…, ものさしツール and カウント
+// ツール are made by main_window_measure.cpp)
 constexpr Frame kAnalysis[] = {
-    {"act_measure_scale_default", "初期設定", "計測スケールを 1 pixel = 1 pixel に戻します"},
-    {"act_measure_scale_custom", "カスタム…", "計測スケール（ピクセルの長さ・論理的な長さ・単位）を決めます"},
     {"act_measure_data_points", "カスタム…", "計測値を記録するときに出す項目を選びます"},
     {"act_measure_record", "計測値を記録", "選択範囲・ものさし・カウントの計測値を計測ログに記録します"},
-    {"act_measure_ruler_tool", "ものさしツール", "2 点の距離と角度を計ります"},
-    {"act_measure_count_tool", "カウントツール", "クリックした所に番号の印を付けて数えます"},
     {"act_measure_scale_marker", "目盛りマーカーを配置…", "計測スケールの目盛りをページに置きます"},
 };
 
@@ -74,6 +71,7 @@ void MainWindow::build_production_actions() {
     }
     build_layer_comp_actions();  // (PC5 J-a: レイヤーカンプ, レイヤーカンプからファイル…)
     build_note_actions();        // (PC5 J-c: 注釈ツール, 表示・非表示 → 注釈, 読み込み → 注釈…, ウィンドウ → 注釈)
+    build_measure_actions();     // (PC5 J-d1: 計測スケールを設定 ▸, ものさしツール, カウントツール, 表示・非表示 → カウント)
 }
 
 void MainWindow::build_production_menus(QMenu* layers, QMenu* pages) {
@@ -139,6 +137,7 @@ void MainWindow::build_production_docks() {
         if (std::string_view(frame.attribute) == "act_panel_actions") build_layer_comps_dock();  // (PC5 J-a: レイヤーカンプ)
     }
     build_notes_dock();  // (PC5 J-c: 注釈, the canvas's notes and the 注釈ツール's options)
+    build_measure_tools();  // (PC5 J-d1: the canvas's count marks and ruler line, the ものさしツール's and カウントツール's options)
 }
 
 void MainWindow::not_yet_command(const QString& name) { flash(QStringLiteral("「%1」は、この版ではまだ使えません").arg(name), 4000, true); }

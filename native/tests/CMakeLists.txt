@@ -213,6 +213,12 @@ genko_test(test_variables SOURCES unit/test_variables.cpp DEPS genko_test_suppor
 # delete, the refusals; an Anno block read and written again, a sound note kept, the dates) with Genko's actors (an agent
 # never changes a person's note), the JSON, a .pcraft's notes, the import's ops, MCP's apply_ops not taking the ops.
 genko_test(test_annotations SOURCES unit/test_annotations.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service LABELS unit)
+# PC5 J-d1 (measure@1, SPEC.md PROD-01「計測」): the measuring as PhotoCraft's tests check it (the scale set and its words, the
+# ruler's readout and the protractor, the inscribed rectangle, レイヤーの角度補正 of a layer and of the page cut — the same as
+# transform_layers' and crop_page's on the 8-bit, 16-bit and CMYK pages —, the count groups and marks, the info asked
+# without a change), the marks carried by the page size ops, PSD's 1074 and 1080, a .pcraft's measurement, MCP's apply_ops
+# not taking the ops.
+genko_test(test_measure SOURCES unit/test_measure.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service LABELS unit TIMEOUT 600)
 # PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame; and PC2a's tone kinds
@@ -580,6 +586,12 @@ genko_test(test_contract_variables SOURCES contract/test_contract_variables.cpp 
 # ファイル → 読み込み → 注釈…'s reading.
 genko_test(test_contract_annotations SOURCES contract/test_contract_annotations.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC5 J-d1 (measure@1): the measuring through the command line (apply, undo, inspect --measure, the question measure_info
+# saving nothing; the book as before once all is taken away), レイヤーの角度補正 through `genko apply` the same as the op
+# (8-bit and 16-bit pages), the PSD's 1074 as psd-tools reads it (written, read back, as read while unchanged, anew, gone)
+# and 1080 kept until the page has its own marks, a .pcraft's measurement (upstream's reader with $GENKO_PCRAFT_CHECK).
+genko_test(test_contract_measure SOURCES contract/test_contract_measure.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 # PC3 C-e through the command line: every kind of page turned (inspect --pixel), undone and redone; a page of its own paper
@@ -631,6 +643,8 @@ genko_test(test_automate SOURCES unit/test_automate.cpp DEPS genko_test_support 
 # PC5 I-0: `genko script` as `genko apply` (the same reply, the journal's script name; the gates, undo and an agent's ops
 # refused), `genko batch` of a folder of pictures (the files コピーを保存 writes, again under the next free names, --json, a
 # picture never written in place) and of a book (--save: its pages changed, the journal's name).
+# PC5 I-e: `genko automate` (画像プロセッサー of a PNG, a 16-bit TIFF and a CMYK JPEG; 画像を合わせる; 条件付きモード変更; レンズ補正 as
+# the filter one by one) and `genko droplet` (made with its launchers, run by itself and by its launcher; an agent refused).
 genko_test(test_contract_automate SOURCES contract/test_contract_automate.cpp DEPS genko_test_support genko_service
            LABELS contract TIMEOUT 900)
 add_dependencies(test_contract_automate genko)
@@ -745,6 +759,13 @@ if(GENKO_BUILD_APP)
   # PC5 J-c (annotations@1): the 注釈ツール (a click, a drag, a double click; its options), ウィンドウ → 注釈 (the panel),
   # 表示 → 表示・非表示 → 注釈, ファイル → 読み込み → 注釈… — each change one Undo
   genko_test(test_gui_notes SOURCES gui/test_gui_notes.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC5 J-d1 (measure@1): 計測スケールを設定 ▸, the ものさしツール (the line, its readout, the protractor, 消去, レイヤーの角度補正
+  # the same as the op), the カウントツール (marks put, moved, taken away; the groups and their options), 表示 → カウント.
+  genko_test(test_gui_measure SOURCES gui/test_gui_measure.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC5 I-e: ファイル → 自動処理 ▸ (バッチ…・ドロップレットを作成…・条件付きモード変更…・画像を合わせる…・レンズ補正…) and スクリプト ▸
+  # (画像プロセッサー…・スクリプトイベントマネージャー…・参照…): their places, the windows asked, the script events raised by the
+  # person's save (never the automatic one) and not run once their script changed
+  genko_test(test_gui_automate SOURCES gui/test_gui_automate.cpp DEPS genko_app GUI TIMEOUT 900)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC2c (COLOR-04): レイヤー → 色調補正's local corrections and image calculations, 編集 → フェード (only right after).
