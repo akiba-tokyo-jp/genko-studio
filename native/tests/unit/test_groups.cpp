@@ -98,6 +98,13 @@ Json paint_part(const std::string& id, int grey, double x0, double w, const std:
                                                                  Json::array({x0, 80})})}}},
                              {"rgb", Json::array({grey, grey, grey})}}});
 }
+// … laid as a blend into the layer's own values (fill_area's blend: paint_fill), so that on a 16-bit page the layer holds
+// precise pixels (color_raster) — multiply over nothing lays the grey as it is
+Json paint_precise(const std::string& id, int grey, double x0, double w) {
+    Json ops = paint_part(id, grey, x0, w);
+    ops[1]["blend"] = "multiply";
+    return ops;
+}
 Json joined(std::initializer_list<Json> parts) {
     Json out = Json::array();
     for (const Json& part : parts) {
@@ -360,13 +367,14 @@ private slots:
     // (review P1-1) a page in precise colour — a 16-bit page with pixels painted — takes groups as before: ＋フォルダ,
     // Ctrl+G and Frame from Layers (a 通過 group each), and paints on after them
     void groupsOnAPreciseColourPage() {
-        core::Document doc = run(book("16"), paint_part("p", 100, 0, 30));
+        core::Document doc = run(book("16"), paint_precise("p", 100, 0, 30));
         QVERIFY(layer_of(doc, "p").color_raster != nullptr);
         QCOMPARE(refusal(doc, folder("g")), std::string());
         QCOMPARE(refusal(doc, Json{{"op", "group_layers"}, {"page", 1}, {"ids", Json::array({"p"})}, {"id", "gg"}, {"group", true}}), std::string());
         QCOMPARE(refusal(doc, Json{{"op", "frame_from_layers"}, {"page", 1}, {"ids", Json::array({"p"})}, {"id", "fr"}}), std::string());
         doc = run(doc, Json{{"op", "frame_from_layers"}, {"page", 1}, {"ids", Json::array({"p"})}, {"id", "fr"}});
-        QCOMPARE(refusal(doc, paint_part("q", 30, 30, 20)), std::string());
+        doc = run(doc, paint_precise("q", 30, 30, 20));  // (painted on, precise, after the groups: not refused)
+        QVERIFY(layer_of(doc, "q").color_raster != nullptr);
         QVERIFY(grey_at(doc, 15, 40) < 200);
     }
 
@@ -375,7 +383,8 @@ private slots:
     void psdsOfGroupsOpen() {
         const QTemporaryDir tmp;
         const auto file = [&](const std::string& name) { return std::filesystem::path(tmp.path().toStdString()) / name; };
-        core::Document deep = run(book("16"), joined({paint_part("p", 100, 0, 30), folder("g"), into("p", "g")}));
+        core::Document deep = run(book("16"), joined({paint_precise("p", 100, 0, 30), folder("g"), into("p", "g")}));
+        QVERIFY(layer_of(deep, "p").color_raster != nullptr);
         (void)formats::export_page_psd(deep, deep.page(0), file("deep.psd"), 100);
         const std::string bytes = test::read_bytes(QString::fromStdString(file("deep.psd").string()));
         const formats::Opened opened = formats::open_file(bytes, "deep.psd");
@@ -386,16 +395,26 @@ private slots:
         const core::Document imported = run(book("16"), Json{{"op", "import_psd"}, {"page", 1}, {"psd", core::b64encode(bytes)}});
         QVERIFY(std::any_of(imported.page(0).layers.begin(), imported.page(0).layers.end(), [](const core::Layer& l) { return l.group; }));
         // nested 70 deep (通過: nothing held while drawn)
-        Json ops = joined({paint_part("p", 0, 0, 30)});
-        for (int k = 0; k < 70; ++k) ops.push_back(folder("n" + std::to_string(k), k == 0 ? Json::object() : Json{{"parent", "n" + std::to_string(k - 1)}}));
+        Json ops = joined({paint_precise("p", 0, 0, 30)});
+        for (int k = 0; k < 70; ++k)
+            ops.push_back(folder("n" + std::to_string(k), k == 0 ? Json{{"name", "n0"}} : Json{{"parent", "n" + std::to_string(k - 1)}, {"name", "n" + std::to_string(k)}}));
         ops.push_back(into("p", "n69"));
         const core::Document nested = run(book("8"), ops);
         QCOMPARE(deepest(nested.page(0).layers), std::size_t(70));
         (void)formats::export_page_psd(nested, nested.page(0), file("nested.psd"), 50);
         const formats::Opened back = formats::open_file(test::read_bytes(QString::fromStdString(file("nested.psd").string())), "nested.psd");
         QCOMPARE(deepest(back.doc.page(0).layers), core::kGroupDepthMax);
-        const auto painted = std::find_if(back.doc.page(0).layers.begin(), back.doc.page(0).layers.end(), [](const core::Layer& l) { return l.title == "p"; });
-        QVERIFY(painted != back.doc.page(0).layers.end());  // (what the deeper groups held: kept, in the deepest one made)
+        // (what the deeper groups held: kept, in the deepest one made — the only layer that deep; the folders not made said)
+        const auto owners = core::group_owners(back.doc.page(0).layers);
+        std::size_t kept = 0;
+        for (std::size_t i = 0; i < owners.size(); ++i) {
+            std::size_t d = 0;
+            for (auto at = owners[i]; at; at = owners[*at]) ++d;
+            if (d == core::kGroupDepthMax && back.doc.page(0).layers[i].kind != core::LayerKind::Folder) ++kept;
+        }
+        QCOMPARE(kept, std::size_t(1));
+        const std::string said = Json(back.notes).dump();
+        QVERIFY2(said.find("n64") != std::string::npos && said.find("n69") != std::string::npos, said.c_str());
     }
 
     // (review P2-1) a layer clipped to a 通過 group without a mask clips to what the group holds — on a page of inks too
@@ -474,8 +493,8 @@ private slots:
                                                                     std::to_string(before)).c_str());
             }
         }
-        const core::Document precise = run(book("16"), joined({paint_part("base", 128, 0, 60), folder("g", Json{{"blend", "normal"}}),
-                                                                paint_part("child", 0, 0, 30), into("child", "g"),
+        const core::Document precise = run(book("16"), joined({paint_precise("base", 128, 0, 60), folder("g", Json{{"blend", "normal"}}),
+                                                                paint_precise("child", 0, 0, 30), into("child", "g"),
                                                                 Json{{"op", "set_layer"}, {"page", 1}, {"id", "g"}, {"opacity", 0.5}}}));
         QVERIFY(refusal(precise, Json{{"op", "merge_visible"}, {"page", 1}, {"copy", false}}).find("precise colour") != std::string::npos);
     }
