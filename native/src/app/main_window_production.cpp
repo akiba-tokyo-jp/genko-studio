@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <iterator>
 #include <span>
+#include <string_view>
 
 #include "app/main_window.hpp"
 
@@ -55,10 +56,10 @@ constexpr Frame kVideo[] = {
     {"act_video_rasterize", "ラスタライズ", "今のフレームの見えをふつうのペイントレイヤーにします"},
 };
 
-// ウィンドウ's panels (J-g アクション, J-a レイヤーカンプ, J-d2 計測ログ, J-c 注釈; タイムライン is the dock's)
+// ウィンドウ's panels (J-g アクション, J-d2 計測ログ, J-c 注釈; タイムライン is the dock's; J-a's レイヤーカンプ is made by
+// main_window_layer_comps.cpp, after アクション)
 constexpr Frame kPanels[] = {
     {"act_panel_actions", "アクション", "記録した操作の手順を並べ、再生・記録します"},
-    {"act_panel_layer_comps", "レイヤーカンプ", "レイヤーの表示・位置・アピアランスの組を残して切り替えます"},
     {"act_panel_measurement_log", "計測ログ", "記録した計測値の表"},
     {"act_panel_notes", "注釈", "ページに置いた注釈の一覧"},
 };
@@ -72,6 +73,7 @@ void MainWindow::build_production_actions() {
             make(QString::fromLatin1(frame.attribute), title, [this, title] { not_yet_command(title); }, {}, QString::fromUtf8(frame.tip));
         }
     }
+    build_layer_comp_actions();  // (PC5 J-a: レイヤーカンプ, レイヤーカンプからファイル…)
 }
 
 void MainWindow::build_production_menus(QMenu* layers, QMenu* pages) {
@@ -118,11 +120,24 @@ void MainWindow::build_production_menus(QMenu* layers, QMenu* pages) {
     for (const char* name : {"act_measure_ruler_tool", "act_measure_count_tool"}) analysis->addAction(action(QString::fromLatin1(name)));
     analysis->addSeparator();
     analysis->addAction(action(QStringLiteral("act_measure_scale_marker")));
+    // (PC5 J-a) ファイル → 書き出し → レイヤーカンプからファイル…: after レイヤーからファイル…, as Photoshop's
+    if (export_menu_ != nullptr) {
+        const QList<QAction*> exports = export_menu_->actions();
+        const auto layers_files = std::find(exports.begin(), exports.end(), action(QStringLiteral("act_layers_to_files")));
+        if (layers_files != exports.end() && std::next(layers_files) != exports.end()) {
+            export_menu_->insertAction(*std::next(layers_files), action(QStringLiteral("act_comps_to_files")));
+        } else {
+            export_menu_->addAction(action(QStringLiteral("act_comps_to_files")));
+        }
+    }
 }
 
 void MainWindow::build_production_docks() {
     // (each group's dock in its frame's place: its toggleViewAction() into view_menu_ instead of the frame)
-    for (const Frame& frame : kPanels) view_menu_->addAction(action(QString::fromLatin1(frame.attribute)));
+    for (const Frame& frame : kPanels) {
+        view_menu_->addAction(action(QString::fromLatin1(frame.attribute)));
+        if (std::string_view(frame.attribute) == "act_panel_actions") build_layer_comps_dock();  // (PC5 J-a: レイヤーカンプ)
+    }
 }
 
 void MainWindow::not_yet_command(const QString& name) { flash(QStringLiteral("「%1」は、この版ではまだ使えません").arg(name), 4000, true); }

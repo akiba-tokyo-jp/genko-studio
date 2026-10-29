@@ -1801,8 +1801,8 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
     Records records(size, color);
     records.psb(psb);  // (PC4 F-d)
     records.masks_of(page);                    // (PC3 B2)
-    const render::psd_production::Written own = production_blocks(page, episode, true, dpi);  // (PC5 J-0: once a file; J-a: before the records)
-    records.production(own);  // (PC5 J-a: its layers' shmd items)
+    const render::psd_production::Written production = production_blocks(page, episode, true, dpi);  // (PC5 J-0: once a file; J-a: before the records)
+    records.production(production);  // (PC5 J-a: its layers' shmd items)
     records.patterns_of(episode);  // (patterns@1, PC4 E3)
     PlacedLayers placed(episode, dpi, depth);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
@@ -1838,9 +1838,9 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
     put_u32(body, 0);  // (no colour mode data)
     body += with_kept(with_channels(resources_with_icc(dpi, color.space != core::InkSpace::Lab && color.icc ? std::string_view(*color.icc) : std::string_view()),
                                     page, n),
-                      page, episode, own);  // (PC4 F-d: psd-keep@1)
+                      page, episode, production);  // (PC4 F-d: psd-keep@1)
     body += records.finish(with_kept_globals(placed.global(psb), render::pat::global_block(episode, core::patterns_on(page), color.depth), page, episode,
-                                             psb, own));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
+                                             psb, production));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
     // the merged picture: each colour plane (CMYK inverted); 8 bits RLE (every row's count first), 16 and 32 raw
     const unsigned all = merged.channels();
     const render::GrayCurve grey_curve = color.depth == 32 ? render::GrayCurve(color) : render::GrayCurve();
@@ -1887,8 +1887,8 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
     Records records(size, std::nullopt, RgbOut{depth, render::RgbSpace::of(page)});
     records.psb(psb);  // (PC4 F-d)
     records.masks_of(page);                                 // (PC3 B2)
-    const render::psd_production::Written own = production_blocks(page, episode, true, dpi);  // (PC5 J-0: once a file; J-a: before the records)
-    records.production(own);  // (PC5 J-a: its layers' shmd items)
+    const render::psd_production::Written production = production_blocks(page, episode, true, dpi);  // (PC5 J-0: once a file; J-a: before the records)
+    records.production(production);  // (PC5 J-a: its layers' shmd items)
     records.patterns_of(episode);  // (patterns@1, PC4 E3)
     PlacedLayers placed(episode, dpi, depth_of_contents);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
@@ -1910,9 +1910,9 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
     put_u16(body, static_cast<std::uint32_t>(depth));
     put_u16(body, 3);
     put_u32(body, 0);  // (no colour mode data)
-    body += with_kept(with_channels(resources_with_icc(dpi, detail::rgb_icc(mode)), page, 3), page, episode, own);  // (PC4 F-d: psd-keep@1)
+    body += with_kept(with_channels(resources_with_icc(dpi, detail::rgb_icc(mode)), page, 3), page, episode, production);  // (PC4 F-d: psd-keep@1)
     body += records.finish(with_kept_globals(placed.global(psb), render::pat::global_block(episode, core::patterns_on(page), depth), page, episode,
-                                             psb, own));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
+                                             psb, production));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
     // the merged picture: 8 bits RLE (every row's count first), 16 and 32 raw
     const std::size_t pixels = std::size_t(merged.width()) * merged.height();
     const render::RgbSpace space = render::RgbSpace::of(page);
@@ -2076,8 +2076,8 @@ std::string page_psd_bytes(const core::Document& episode, const core::Page& page
     Records records(rgb.size());
     records.psb(psb);  // (PC4 F-d)
     records.masks_of(page);                    // (PC3 B2)
-    const render::psd_production::Written own = production_blocks(page, episode, true, dpi);  // (PC5 J-0: once a file; J-a: before the records)
-    records.production(own);  // (PC5 J-a: its layers' shmd items)
+    const render::psd_production::Written production = production_blocks(page, episode, true, dpi);  // (PC5 J-0: once a file; J-a: before the records)
+    records.production(production);  // (PC5 J-a: its layers' shmd items)
     records.patterns_of(episode);  // (patterns@1, PC4 E3)
     PlacedLayers placed(episode, dpi, depth);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
@@ -2099,9 +2099,9 @@ std::string page_psd_bytes(const core::Document& episode, const core::Page& page
     put_u16(body, 8);
     put_u16(body, 3);
     put_u32(body, 0);  // (no colour mode data)
-    body += with_kept(with_channels(resources(dpi), page, 3), page, episode, own);  // (PC4 F-d: psd-keep@1)
+    body += with_kept(with_channels(resources(dpi), page, 3), page, episode, production);  // (PC4 F-d: psd-keep@1)
     body += records.finish(with_kept_globals(placed.global(psb), render::pat::global_block(episode, core::patterns_on(page), 8), page, episode,
-                                             psb, own));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
+                                             psb, production));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
     // the merged picture: RLE, every row's count of every channel first
     std::string counts, packed;
     for (const Image& channel : rgb.split()) packbits_rows(channel, counts, packed, psb);
@@ -2155,8 +2155,8 @@ std::string contents_psd_bytes(const core::Document& episode, const core::Page& 
     Records records(rgb.size());
     records.psb(psb);  // (PC4 F-d)
     records.masks_of(page);  // (PC3 B2)
-    const render::psd_production::Written own = production_blocks(page, episode, true, dpi);  // (PC5 J-0: once a file; J-a: before the records)
-    records.production(own);  // (PC5 J-a: its layers' shmd items)
+    const render::psd_production::Written production = production_blocks(page, episode, true, dpi);  // (PC5 J-0: once a file; J-a: before the records)
+    records.production(production);  // (PC5 J-a: its layers' shmd items)
     records.patterns_of(episode);  // (patterns@1, PC4 E3)
     PlacedLayers placed(episode, dpi, depth);
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
@@ -2174,9 +2174,9 @@ std::string contents_psd_bytes(const core::Document& episode, const core::Page& 
     put_u16(body, 8);
     put_u16(body, 3);
     put_u32(body, 0);
-    body += with_kept(with_channels(resources(dpi), page, 3), page, episode, own);  // (PC4 F-d: psd-keep@1)
+    body += with_kept(with_channels(resources(dpi), page, 3), page, episode, production);  // (PC4 F-d: psd-keep@1)
     body += records.finish(with_kept_globals(placed.global(psb), render::pat::global_block(episode, core::patterns_on(page), 8), page, episode,
-                                             psb, own));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
+                                             psb, production));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
     std::string counts, packed;
     for (const Image& channel : rgb.split()) packbits_rows(channel, counts, packed, psb);
     put_channels_rle(page, rgb.size(), counts, packed, psb);

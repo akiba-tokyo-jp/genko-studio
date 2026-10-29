@@ -700,6 +700,20 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(vanishing_point: no planes to paste or stamp on.*)", "消点の面をすべて消すときは、貼り付けもスタンプもできません"));
         r.push_back(rule(R"(vanishing_point: (\d+) dabs reached toward the horizon.*)",
                          "消点のスタンプの跡のうち \\1 個は、地平線に近く大きくなりすぎるため描きませんでした"));
+        // (PC5 J-a, layer-comps@1 — the C++ build's own: the layer comps, render/ops_layer_comps)
+        r.push_back(rule("the page has no layer comps", "このページにはレイヤーカンプがありません"));
+        r.push_back(rule(R"(no layer comp with id (\S+))", "ID \\1 のレイヤーカンプはありません"));
+        r.push_back(rule("no layer comp named (.*)", "「\\1」という名前のレイヤーカンプはありません"));
+        r.push_back(rule("comp is a layer comp's id or name", "レイヤーカンプは ID か名前で指定します"));
+        r.push_back(rule("what is all, visibility, position or appearance", "更新するものは all・visibility・position・appearance から選びます"));
+        r.push_back(rule("give name, comment, visibility, position or appearance", "変える項目（名前・コメント・適用先）を指定します"));
+        r.push_back(rule("name is 1 to 255 characters|name is the layer comp's name", "レイヤーカンプの名前は 1〜255 文字です"));
+        r.push_back(rule("comment is text|comment is at most 65536 bytes", "レイヤーカンプのコメントは 65536 バイトまでの文字です"));
+        r.push_back(rule("a page holds at most 256 layer comps", "レイヤーカンプは 1 ページに 256 個までです"));
+        r.push_back(rule("no layer comp has been applied over the page's own state", "最後のドキュメントの状態はまだありません（レイヤーカンプを適用すると残ります）"));
+        r.push_back(rule("no layer comp of the page names a layer it does not have", "警告のあるレイヤーカンプはありません"));
+        r.push_back(rule("(visibility|position|appearance) is true or false", "レイヤーカンプの適用先（\\1）は true か false です"));
+        r.push_back(rule(R"(the comp's layer style of (\S+) is not one: .*)", "レイヤーカンプに記録したレイヤー \\1 のレイヤースタイルが読めません"));
         // (PC5-0, Z0's review P1-1: a new layer of a 16- or 32-bit page painted at 8 bits for the book's precise budget)
         r.push_back(rule(R"(the layer is painted at 8 bits: the book's precise pixels would pass their budget.*)",
                          "本の高精度の画素の上限（1 GiB）を越えるか、本をまだ読み込み中のため、このレイヤーは 8 bit で塗りました"));

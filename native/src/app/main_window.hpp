@@ -66,6 +66,7 @@ class BrushPanel;
 class ChannelPanel;
 class CloneSourcePanel;
 class PathsPanel;
+class LayerCompsPanel;
 class PatternsPanel;
 class BrushesPanel;
 class BrushSettingsPanel;
@@ -1683,6 +1684,24 @@ private:
     void build_production_actions();
     void build_production_menus(QMenu* layers, QMenu* pages);
     void build_production_docks();
+    // --- PC5 J-a (layer-comps@1): main_window_layer_comps.cpp — ウィンドウ → レイヤーカンプ (its dock and panel) and ファイル →
+    // 書き出し → レイヤーカンプからファイル…; each change of the book an op through apply_ops --------------------------------
+public:
+    LayerCompsPanel* layer_comps_panel() const { return layer_comps_panel_; }
+    QDockWidget* layer_comps_dock() const { return layer_comps_dock_; }
+    // A layer comps' op on the page shown (its "page" put in), shown at once (a refusal said in the status line).
+    bool layer_comp_op(core::Json op);
+    // 新規レイヤーカンプ… (none) and レイヤーカンプオプション… (the comp's id): the window asked, then new_layer_comp or
+    // set_layer_comp.
+    void layer_comp_options(std::optional<std::int64_t> comp = std::nullopt);
+    // レイヤーカンプからファイル…: the window asked, then formats::export_layer_comps off the window's thread.
+    void layer_comps_to_files();
+
+private:
+    void build_layer_comp_actions();
+    void build_layer_comps_dock();
+    LayerCompsPanel* layer_comps_panel_ = nullptr;
+    QDockWidget* layer_comps_dock_ = nullptr;
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

@@ -133,6 +133,14 @@ std::vector<bool> page_bound(const Json& ops) {
             if (text_of(op, key)) bound = true;
         }
         if (in(kBoundOps, name)) bound = true;
+        // (PC5 J-a, layer-comps@1: a layer comp named by its id or name is one of the recorded page's — "next", "previous",
+        // "last_state", every comp ("*") and the comp applied last are any page's)
+        if (name.find("layer_comp") != std::string::npos) {
+            if (const auto comp = op.find("comp"); comp != op.end() && !comp->is_null()) {
+                const bool any = comp->is_string() && in({"next", "previous", "last_state", "*"}, comp->get<std::string>());
+                if (!any) bound = true;
+            }
+        }
         out.push_back(bound);
     }
     return out;

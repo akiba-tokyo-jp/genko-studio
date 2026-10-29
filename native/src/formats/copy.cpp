@@ -8,6 +8,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 #include "core/color_raster.hpp"
@@ -34,6 +35,7 @@
 #include "render/codecs/metadata.hpp"
 #include "render/codecs/resize.hpp"
 #include "render/op_limits.hpp"
+#include "render/ops_layer_comps.hpp"
 
 namespace genko::formats {
 
@@ -782,6 +784,40 @@ CopyEstimate estimate_copy(const core::Document& doc, std::size_t at, std::strin
         }
     }
     out.bytes = fixed + static_cast<std::uint64_t>(std::llround(double(bytes - fixed) * ratio));
+    return out;
+}
+
+std::vector<CopyResult> export_layer_comps(const core::Document& doc, std::size_t at, const fs::path& folder, const CompFiles& files) {
+    if (at >= doc.pages.size()) throw core::Error("value", "no such page");
+    if (doc.is_deferred(at)) throw core::Error("page_not_loaded", "the page is not read yet");
+    const core::Page& page = doc.page(at);
+    if (!page.layer_comps || page.layer_comps->comps.empty()) throw core::Error("value", "the page has no layer comps");
+    const std::vector<core::LayerComp>& all = page.layer_comps->comps;
+    for (const std::int64_t id : files.comps) {
+        if (std::none_of(all.begin(), all.end(), [&](const core::LayerComp& c) { return c.id == id; })) {
+            throw core::Error("value", "no layer comp with id " + std::to_string(id));
+        }
+    }
+    std::string prefix = files.prefix.empty() ? (doc.title.empty() ? std::string("無題") : doc.title) : files.prefix;
+    prefix = render::layer_comps::file_part(prefix);
+    std::vector<CopyResult> out;
+    for (std::size_t i = 0; i < all.size(); ++i) {
+        const core::LayerComp& comp = all[i];
+        if (!files.comps.empty() && std::find(files.comps.begin(), files.comps.end(), comp.id) == files.comps.end()) continue;
+        char number[16];
+        std::snprintf(number, sizeof number, "%04zu", i);
+        const fs::path dest = folder / core::path_from_utf8(prefix + "_" + number + "_" + render::layer_comps::file_part(comp.name) + "." + files.extension);
+        if (files.check) files.check(dest);
+        core::Document one = doc;  // (the comp applied to a copy: the book unchanged)
+        try {
+            render::layer_comps::apply(one, at, comp.layers, comp.apply_visibility, comp.apply_position, comp.apply_appearance);
+        } catch (const core::OpError& error) {
+            throw core::Error("value", error.what());
+        }
+        one.edit_page(at).layer_comps->last_applied = comp.id;
+        out.push_back(write_copy(one, at, dest, files.options));  // (one comp's picture and bytes at a time)
+    }
+    if (out.empty()) throw core::Error("value", "no layer comps chosen");
     return out;
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -185,5 +186,23 @@ struct CopyEstimate {
 };
 CopyEstimate estimate_copy(const core::Document& doc, std::size_t page, std::string_view extension, const CopyOptions& options = {},
                            std::optional<std::uint32_t> proxy = std::nullopt);
+
+// --- PC5 J-a ---
+
+// レイヤーカンプからファイル… (file.export.layerCompsToFiles; PhotoCraft's comps_cmds.rs comps_to_files, MIT): each layer comp of
+// the page — or those chosen (their ids) — applied to a copy of the book (render/ops_layer_comps: what its options put
+// back; the book itself unchanged), the page written as one file each by write_copy with the options:
+// <prefix>_<NNNN>_<the comp's name>.<extension> in `folder` (NNNN its place in the page's list from 0000; a name's marks a
+// path or a file system takes — / \ : * ? " < > | — made "_"; the prefix none: the book's title). The files written before
+// one that fails stay. core::Error("value") for a page without comps, an id it has not, or none chosen.
+struct CompFiles {
+    std::string extension = "png";   // one of copy_extensions()
+    std::string prefix;              // "": the book's title (無題 when it has none)
+    std::vector<std::int64_t> comps; // none: every comp
+    CopyOptions options;
+    // (the coordinator's P3-8) each file's place before it is written: throws to write none (check_target)
+    std::function<void(const std::filesystem::path&)> check;
+};
+std::vector<CopyResult> export_layer_comps(const core::Document& doc, std::size_t page, const std::filesystem::path& folder, const CompFiles& files);
 
 }  // namespace genko::formats
