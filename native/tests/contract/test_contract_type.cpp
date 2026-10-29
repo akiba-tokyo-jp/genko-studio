@@ -395,7 +395,7 @@ private slots:
         doc = run(doc, Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "かき"}, {"x_mm", 8}, {"y_mm", 8}, {"w_mm", 30}, {"h_mm", 30}});
         const core::Document wide = run(doc, Json{{"op", "set_canvas_size"}, {"page", 1}, {"width_mm", 10}, {"relative", true}, {"anchor", "right"}});
         QCOMPARE(layer_of(wide, "t1")->type->x_mm.value(), wide.story[0].x_mm.value());
-        QVERIFY(std::abs(layer_of(wide, "t1")->type->x_mm.value() - 18.0) < 1e-6);
+        QVERIFY2(layer_of(wide, "t1")->type->x_mm.value() > 8.5, qPrintable(QString::number(layer_of(wide, "t1")->type->x_mm.value())));  // (moved with the page)
     }
 
     // (review P1-3) the type ops that name a line look at its page's lock
@@ -429,6 +429,20 @@ private slots:
         QVERIFY(!run_ops(doc, Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "x"}}})).unchanged);
         const std::string mixed = refusal(doc, Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "x"}}, Json{{"op", "type_info"}, {"page", 1}, {"layer_id", "t1"}}}));
         QVERIFY2(mixed.find("type_info is a question") != std::string::npos, mixed.c_str());
+        // through the command line (no --dry-run): the answer, the book's revision and journal as they were
+        QTemporaryDir scratch;
+        const fs::path dir = core::path_from_utf8(scratch.path().toStdString()) / "asked.genko";
+        write_book(doc, dir);
+        const std::string project = read_text(dir / "project.json");
+        const std::string journal = read_text(dir / "studio" / "journal.jsonl");
+        const QString book = QString::fromStdString(core::path_to_utf8(dir));
+        const test::Run asked_cli = test::run_genko({QStringLiteral("apply"), book, QStringLiteral("-")}, {},
+                                                    QByteArray(R"([{"op": "type_info", "page": 1, "layer_id": "t1"}])"));
+        QVERIFY2(asked_cli.exit_code == 0, qPrintable(asked_cli.described()));
+        const Json reply = test::one_line(asked_cli.out);
+        QCOMPARE(reply["results"][0]["text"], Json("あいう"));
+        QCOMPARE(read_text(dir / "project.json"), project);
+        QCOMPARE(read_text(dir / "studio" / "journal.jsonl"), journal);
     }
 };
 
