@@ -16,6 +16,7 @@ class QGridLayout;
 class QLineEdit;
 class QListWidget;
 class QMainWindow;
+class QMenu;
 class QPushButton;
 class QToolBar;
 
@@ -45,8 +46,13 @@ std::unordered_map<const QAction*, QString> menu_places(QMainWindow* window);
 // the property "remade"), deleted then: not a command to keep in the quick access, the command bar or the keys, nor to
 // find.
 bool remade(const QAction* action);
-// The commands whose name, menu or explanation holds every word (in any order, any case).
+// The commands whose name, menu, explanation or old name (preferences::renamed) holds every word (in any order, any case).
 std::vector<QAction*> search(QMainWindow* window, const QString& words);
+// PC5 H-0: a menu laid out in an order — rows of a command's attribute ("act_fit"), a menu inside it by its title
+// ("▸校正の設定") and "|" for a line. A row naming nothing the menu holds is passed over (a later part's command not made
+// yet); what the menu holds that no row names stays after the rows, after a line, in its order. Lines are never doubled
+// nor at an end.
+void lay_out_menu(QMenu* menu, const QStringList& rows);
 
 // コマンドを探す (Ctrl+Shift+F): type part of a name, Enter does it.
 class CommandSearch : public QDialog {

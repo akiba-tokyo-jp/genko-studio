@@ -11,6 +11,7 @@
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/smart.hpp"
+#include "core/type_text.hpp"
 
 // The warps: PhotoCraft v0.2.0 crates/geom/src/warp.rs (1-620), MIT: native/third_party/photocraft/NOTICE.md.
 // The turns' maps: crates/engine/src/canvas_geom.rs (200-235).
@@ -242,6 +243,47 @@ void map_line(StoryLine& line, const Mapping& m) {
             if (const auto it = line.style.find(key); it != line.style.end() && it->is_number()) *it = round3(it->get<double>() * k);
         }
     }
+    // (type@1, PC5 G-0: its point text's anchor and matrix with the page; a scale, its lengths too — in their normal form)
+    if (line.native_type && line.native_type->is_object()) {
+        Json nt = *line.native_type;
+        if (const auto a = nt.find("anchor_mm"); a != nt.end() && a->is_array() && a->size() == 2) {
+            const XY p = m.apply(XY{(*a)[0].get<double>(), (*a)[1].get<double>()});
+            *a = Json::array({p.x, p.y});
+        }
+        if (const auto t = nt.find("transform"); t != nt.end() && t->is_array() && t->size() == 6) {
+            std::array<double, 6> v{};
+            for (std::size_t i = 0; i < 6; ++i) v[i] = (*t)[i].get<double>();
+            const auto& M = m.m;
+            *t = Json::array({M[0] * v[0] + M[2] * v[1], M[1] * v[0] + M[3] * v[1], M[0] * v[2] + M[2] * v[3], M[1] * v[2] + M[3] * v[3],
+                              M[0] * v[4] + M[2] * v[5] + M[4], M[1] * v[4] + M[3] * v[5] + M[5]});
+        }
+        if (std::fabs(k - 1.0) > 1e-12) {
+            const auto scale = [&](Json& attrs, std::initializer_list<const char*> keys) {
+                if (!attrs.is_object()) return;
+                for (const char* key : keys)
+                    if (const auto it = attrs.find(key); it != attrs.end() && it->is_number()) *it = it->get<double>() * k;
+            };
+            const auto chars = [&](Json& holder) {
+                if (holder.is_object() && holder.contains("char")) scale(holder["char"], {"size_mm", "leading_mm", "baseline_shift_mm"});
+            };
+            const auto paras = [&](Json& holder) {
+                if (holder.is_object() && holder.contains("para"))
+                    scale(holder["para"], {"first_indent_mm", "start_indent_mm", "end_indent_mm", "space_before_mm", "space_after_mm"});
+            };
+            chars(nt);
+            paras(nt);
+            if (nt.contains("runs") && nt["runs"].is_array())
+                for (Json& run : nt["runs"]) chars(run);
+            if (nt.contains("paragraphs") && nt["paragraphs"].is_array())
+                for (Json& p : nt["paragraphs"]) paras(p);
+        }
+        try {
+            const Json normal = type_text::check_native_type(nt, line.text);
+            line.native_type = normal.is_null() ? std::nullopt : std::optional<Json>(normal);
+        } catch (const Error&) {
+            // (a scale that takes a length past its bounds: the settings kept as they were)
+        }
+    }
 }
 
 void map_ruler(Json& ruler, const Mapping& m) {
@@ -461,6 +503,12 @@ void map_page(Document& doc, std::size_t at, const Mapping& m, const PixelHooks&
             }
             const Rect& r = *layer.placement_mm;
             layer.placement_mm = rect_of(map_box({r.x.value(), r.y.value(), r.width.value(), r.height.value()}, m));
+        }
+        // (type@1, PC5 G-0: a type layer's text mapped as a line's — upright, its box's centre where the map takes it)
+        if (layer.kind == LayerKind::Type && layer.type) {
+            StoryLine record = *layer.type;
+            map_line(record, m);
+            layer.type = type_text::shared_record(std::move(record));
         }
         // (smart-objects@1: its matrix after the map; its contents as they are)
         if (layer.kind == LayerKind::Smart) smart::transform_layer(layer, smart::Matrix{m.m[0], m.m[1], m.m[2], m.m[3], m.m[4], m.m[5]});

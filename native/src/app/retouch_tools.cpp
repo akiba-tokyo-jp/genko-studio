@@ -166,7 +166,7 @@ void MainWindow::build_retouch_actions() {
     tool("act_clone_stamp", QStringLiteral("コピースタンプツール"), QStringLiteral("clone"), {QKeySequence(QStringLiteral("S"))},
          QStringLiteral("Alt+クリックで決めたコピー元を、なぞった所にそのまま写します"));
     tool("act_history_brush", QStringLiteral("ヒストリーブラシツール"), QStringLiteral("historybrush"), {},
-         QStringLiteral("なぞった所を、履歴で選んだ状態（◆）の絵に塗り戻します"));
+         QStringLiteral("なぞった所を、ヒストリーで選んだ状態（◆）の絵に塗り戻します"));
     make("act_content_aware_fill", QStringLiteral("コンテンツに応じた塗りつぶし…"), [this] { content_aware_fill_dialog(); }, {},
          QStringLiteral("選択範囲を、まわりの絵から作って埋めます（描く先のペイントのレイヤー）"));
     connect(canvas_, &PageCanvas::cloneSourcePicked, this, &MainWindow::clone_source_picked);
@@ -256,7 +256,7 @@ void MainWindow::build_retouch_pages(ToolSettings* ts) {
         form->setRowVisible(blend, tool != QLatin1String("spotheal"));
         note->setText(clone ? QStringLiteral("Alt キーを押しながらクリックして、コピー元を決めます（コピーソース パネルで 5 つまで）。選択範囲があればその中だけ")
                       : tool == QLatin1String("historybrush")
-                          ? QStringLiteral("塗り戻す状態は、履歴 パネルの ◆ の行（右クリックで選ぶ。既定は（はじめ））")
+                          ? QStringLiteral("塗り戻す状態は、ヒストリー パネルの ◆ の行（右クリックで選ぶ。既定は（はじめ））")
                           : QStringLiteral("しみやごみの上をなぞると、まわりの絵から作って埋めます。選択範囲があればその中だけ"));
     };
     for (const char* tool : {"spotheal", "heal", "clone", "historybrush"}) {
@@ -421,7 +421,7 @@ std::optional<Json> MainWindow::history_brush_from(const core::Page& page, const
     const int row = history_brush_row.value_or(0);
     const std::optional<DocPtr> state = session_->state_at(static_cast<std::size_t>(std::max(row, 0)));
     if (!state || !*state) {
-        flash(QStringLiteral("履歴の ◆ の状態は、もう原稿に残っていません。履歴 パネルの右クリックで選び直します"), 6000, true);
+        flash(QStringLiteral("ヒストリーの ◆ の状態は、もう原稿に残っていません。ヒストリー パネルの右クリックで選び直します"), 6000, true);
         return std::nullopt;
     }
     const core::Document& was = **state;
@@ -438,7 +438,7 @@ std::optional<Json> MainWindow::history_brush_from(const core::Page& page, const
         }
     }
     if (old == nullptr) {
-        flash(QStringLiteral("履歴の ◆ の状態に、このレイヤーはありません（後で作ったレイヤーです）"), 5000);
+        flash(QStringLiteral("ヒストリーの ◆ の状態に、このレイヤーはありません（後で作ったレイヤーです）"), 5000);
         return std::nullopt;
     }
     using Kind = render::image_ops::Pixels::Kind;
@@ -460,7 +460,7 @@ std::optional<Json> MainWindow::history_brush_from(const core::Page& page, const
         } else {
             const render::image_ops::Pixels p = render::image_ops::shown_layer_pixels(was, *then, *old);
             if (p.kind() != kind) {
-                flash(QStringLiteral("履歴の ◆ の状態のこのレイヤーは、今と種類が違うので塗り戻せません"), 5000);
+                flash(QStringLiteral("ヒストリーの ◆ の状態のこのレイヤーは、今と種類が違うので塗り戻せません"), 5000);
                 return std::nullopt;
             }
             bytes = kind == Kind::Precise ? render::image_ops::to_precise(p)

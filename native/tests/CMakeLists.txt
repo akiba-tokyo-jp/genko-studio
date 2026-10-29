@@ -24,6 +24,7 @@ genko_test(test_buildinfo SOURCES unit/test_buildinfo.cpp DEPS genko_api LABELS 
 genko_test(test_http_server SOURCES unit/test_http_server.cpp DEPS genko_api Qt6::Network LABELS unit)
 genko_test(test_mcp_connection SOURCES unit/test_mcp_connection.cpp DEPS genko_api LABELS unit)
 genko_test(test_json SOURCES unit/test_json.cpp DEPS genko_test_support LABELS unit)
+genko_test(test_prefs_table SOURCES unit/test_prefs_table.cpp DEPS genko_test_support LABELS unit)  # (PC5 H-0: 環境設定の表)
 genko_test(test_pynum SOURCES unit/test_pynum.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_model SOURCES unit/test_model.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_strokes SOURCES unit/test_strokes.cpp DEPS genko_test_support LABELS unit)
@@ -170,6 +171,14 @@ genko_test(test_grd SOURCES unit/test_grd.cpp DEPS genko_test_support genko_rend
 # back, saved, opened and undone; the styles' library (upstream's built-in groups), .asl files and `genko styles`.
 genko_test(test_layer_styles SOURCES unit/test_layer_styles.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
 genko_test(test_style_presets SOURCES unit/test_style_presets.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC5 G-0 (SPEC.md TEXT-02「文字」, type@1): the type record's tables and normal form, the order of resolution, the ranges through
+# edits, style_runs as ranges, a line's record as a type layer's; the HarfBuzz way in (the bundled faces' glyphs, across and down).
+genko_test(test_type_text SOURCES unit/test_type_text.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC5 G-0: the type layer through the ops, the disk and the drawing — a book without type@1 as before, saved and read back,
+# read-only when broken, drawn as its line, the three ways alike, edit_type and type_info, moved, rasterized, duplicated, the
+# later groups' ops refused by name.
+genko_test(test_contract_type SOURCES contract/test_contract_type.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 600)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
 # PC3 C-e (SPEC.md COLOR-07「判型」): the page size ops on a book in memory — each thing on a page where the map takes it,
@@ -571,6 +580,16 @@ genko_test(test_contract_codecs SOURCES contract/test_contract_codecs.cpp DEPS g
 genko_test(test_contract_copy SOURCES contract/test_contract_copy.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS contract TIMEOUT 900)
 add_dependencies(test_contract_copy genko)
+# PC5 I-0 (SPEC.md AUTO-01: 自動処理の土台): the steps' three forms and their errors, the ops no step may be and an agent's
+# ops only, the pseudo ops, the steps aimed at the pages, the runner's inputs, outputs' names, errors, stop and cancel, a
+# picture through no steps as コピーを保存 writes it, the actions kept by service/actions, the script events' sealed table.
+genko_test(test_automate SOURCES unit/test_automate.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 600)
+# PC5 I-0: `genko script` as `genko apply` (the same reply, the journal's script name; the gates, undo and an agent's ops
+# refused), `genko batch` of a folder of pictures (the files コピーを保存 writes, again under the next free names, --json, a
+# picture never written in place) and of a book (--save: its pages changed, the journal's name).
+genko_test(test_contract_automate SOURCES contract/test_contract_automate.cpp DEPS genko_test_support genko_service
+           LABELS contract TIMEOUT 900)
+add_dependencies(test_contract_automate genko)
 # The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
 # across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a
 # warped line's pictures within ARCHITECTURE.md §9: Python's homography comes from numpy's SVD).

@@ -64,6 +64,7 @@ QString kind_name(core::LayerKind kind) {
     case core::LayerKind::Fill: return QStringLiteral("塗り");
     case core::LayerKind::Adjust: return QStringLiteral("色調補正");
     case core::LayerKind::Smart: return QStringLiteral("スマートオブジェクト");
+    case core::LayerKind::Type: return QStringLiteral("テキストレイヤー");  // (type@1, PC5 G-0)
     default: return {};
     }
 }
@@ -1098,7 +1099,8 @@ QIcon LayerPanel::kind_mark(core::LayerKind kind) {
         {core::LayerKind::Adjust, "kind_adjust"},   {core::LayerKind::Smart, "kind_smart"}};
     const theme::Tokens t = theme::tokens();
     const auto found = names.find(kind);
-    const QString key = QString::fromLatin1(found != names.end() ? found->second : "kind_other") + t.muted;
+    const bool type = kind == core::LayerKind::Type;  // (type@1, PC5 G-0: Photoshop's "T" in the picture's room)
+    const QString key = QString::fromLatin1(type ? "kind_type" : found != names.end() ? found->second : "kind_other") + t.muted;
     if (const auto kept = marks_.find(key); kept != marks_.end()) return kept->second;
     const QSize size = list_->iconSize();
     QPixmap pixmap(size);
@@ -1106,8 +1108,17 @@ QIcon LayerPanel::kind_mark(core::LayerKind kind) {
     const int side = std::min({18, size.width(), size.height()});  // (a small quiet mark in the picture's room)
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
-    painter.drawPixmap((size.width() - side) / 2, (size.height() - side) / 2,
-                       icons::icon(found != names.end() ? found->second : "kind_other", t.muted, t.muted).pixmap(side, side));
+    if (type) {
+        QFont font = painter.font();
+        font.setBold(true);
+        font.setPixelSize(std::max(8, std::min(size.width(), size.height()) * 2 / 3));
+        painter.setFont(font);
+        painter.setPen(QColor(t.muted));
+        painter.drawText(QRect(QPoint(0, 0), size), Qt::AlignCenter, QStringLiteral("T"));
+    } else {
+        painter.drawPixmap((size.width() - side) / 2, (size.height() - side) / 2,
+                           icons::icon(found != names.end() ? found->second : "kind_other", t.muted, t.muted).pixmap(side, side));
+    }
     painter.end();
     QIcon mark;
     mark.addPixmap(pixmap, QIcon::Normal);

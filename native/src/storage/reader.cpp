@@ -33,6 +33,7 @@
 #include "core/brush_dabs.hpp"
 #include "core/patterns.hpp"
 #include "core/layer_styles.hpp"
+#include "core/type_text.hpp"
 // PC5 J-0 (制作の補助)
 #include "core/annotations.hpp"
 #include "core/layer_comps.hpp"
@@ -52,7 +53,7 @@ using core::Point;
 
 namespace {
 
-constexpr std::array<std::string_view, 25> kTopKeys{
+constexpr std::array<std::string_view, 26> kTopKeys{
     "version", "revision", "title", "episode", "binding", "start_side", "strict_gates", "autosave",
     "font_path", "page_locks", "brush", "nombre", "spec", "bible", "tickets", "studio", "pages", "story",
     // v4
@@ -62,7 +63,9 @@ constexpr std::array<std::string_view, 25> kTopKeys{
     // patterns@1 (PC4)
     "patterns",
     // layer-styles@1 (PC4 E6)
-    "global_light"};
+    "global_light",
+    // type@1 (PC5 G-0)
+    "type_styles"};
 
 constexpr std::array<std::string_view, 21> kPageKeys{
     "id", "art_ok", "plan", "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
@@ -82,11 +85,13 @@ constexpr std::array<std::string_view, 4> kRectKeys{"x", "y", "width", "height"}
 constexpr std::array<std::string_view, 14> kFrameKeys{"id", "rect", "split_axis", "clip", "bleed", "border_mm",
                                                       "children", "panel", "poly", "split", "custom", "curves",
                                                       "line", "corner_mm"};
-constexpr std::array<std::string_view, 20> kLineKeys{"id", "page_index", "text", "speaker", "frame_id", "ruby",
+constexpr std::array<std::string_view, 21> kLineKeys{"id", "page_index", "text", "speaker", "frame_id", "ruby",
                                                      "x_mm", "y_mm", "w_mm", "h_mm", "balloon", "tail", "wrap",
                                                      "ruby_runs", "ruby_spans", "path", "emphasis_runs", "style_runs",
-                                                     "style", "tails"};
-constexpr std::array<std::string_view, 51> kLayerKeys{
+                                                     "style", "tails",
+                                                     // type@1 (PC5 G-0)
+                                                     "native_type"};
+constexpr std::array<std::string_view, 52> kLayerKeys{
     "id", "role", "kind", "visible", "exportable", "strokes", "raster_relpath", "fill_rgb", "lpi", "density",
     "region", "opacity", "material_id", "angle", "title", "blend", "clip", "lock_alpha", "locked", "panel_clip",
     "panel_each", "patches", "tone", "parent_id", "asset", "mask", "color", "reference", "fill", "adjust", "effect",
@@ -100,7 +105,9 @@ constexpr std::array<std::string_view, 51> kLayerKeys{
     // PC4 (psd-keep@1)
     "native_psd",
     // PC4 E6 (layer-styles@1)
-    "style"};
+    "style",
+    // PC5 G-0 (type@1)
+    "type"};
 constexpr std::array<std::string_view, 5> kPlacedOnlyKeys{"frame_id", "placement_mm", "fit", "clip_to", "finish"};
 constexpr std::array<std::string_view, 5> kMaskKeys{"enabled", "asset",
                                                     // masks@1 (PC3)
@@ -536,6 +543,9 @@ core::StoryLine Reader::read_line(const Json& data, const std::string& at) {
     }
     line.style = dict_or_empty(data, "style");
     for (const Json& tail : list_or_empty(data, "tails")) line.tails.push_back(core::py_dict(tail));
+    // (type@1, PC5 G-0: as the writer writes it; one that is not in its normal form, the book read-only:
+    // core::type_text::validate_type below)
+    if (const Json* native = find(data, "native_type"); native != nullptr && !native->is_null()) line.native_type = *native;
     check_keys(data, kLineKeys, at, "line");
     return line;
 }
@@ -1234,6 +1244,9 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
     read_layer_vectors(layer, data, at);  // (PC3: vector@1's vector mask, transform@1's link and position lock)
     read_layer_files(layer, data, at);    // (PC4: psd-keep@1's kept blocks)
     check_keys(data, kLayerKeys, at, "layer");
+    if (layer.kind != core::LayerKind::Type && find(data, "type") != nullptr) {  // (type@1: a type layer's record only)
+        issue("unknown_key", at_key(at, "type"), {}, "a " + std::string(core::to_string(layer.kind)) + " layer's type is not written back");
+    }
     if (!placed && !smart) {
         for (const auto& key : kPlacedOnlyKeys) {
             if (find(data, key) != nullptr) {
@@ -1259,6 +1272,25 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
             if (truthy_at(data, key)) {
                 issue("unknown_key", at_key(at, key), {}, "a smart object's " + std::string(key) + " is not written back");
             }
+        }
+        return layer;
+    }
+    if (layer.kind == core::LayerKind::Type) {  // (type@1, PC5 G-0: its record, read as a line's; no pixels or lines of its own)
+        const std::string here = at_key(at, "type");
+        const Json* record = find(data, "type");
+        if (record == nullptr || !record->is_object()) {
+            issue("broken_value", here, {}, "a type layer's type must be its record (an object)");
+        } else {
+            for (const char* key : {"id", "page_index", "speaker", "frame_id"}) {
+                if (find(*record, key) != nullptr) issue("unknown_key", at_key(here, key), {}, "a type layer's record has no " + std::string(key) + ": not written back");
+            }
+            Json as_line = *record;
+            as_line["id"] = layer.id;
+            as_line["page_index"] = 0;
+            layer.type = core::type_text::shared_record(core::type_text::record_of(read_line(as_line, here)));
+        }
+        for (const auto* key : {"strokes", "patches", "strokes_blob", "raster_relpath", "asset", "ink_raster", "color_raster", "shapes_blob"}) {
+            if (truthy_at(data, key)) issue("unknown_key", at_key(at, key), {}, "a type layer's " + std::string(key) + " is not written back");
         }
         return layer;
     }
@@ -1563,6 +1595,8 @@ core::Document Reader::migrate(const Json& payload) {
             issue("broken_value", "/global_light", {}, error.what());
         }
     }
+    // (type@1, PC5 G-0: the book's type styles, as the writer writes them: core::type_text::validate_type below)
+    if (const Json* styles = find(payload, "type_styles"); styles != nullptr && !styles->is_null()) doc.type_styles = *styles;
     doc.nombre = dict_or_empty(payload, "nombre");
     if (const Json* bible = find(payload, "bible"); bible && core::py_truthy(*bible)) {
         if (!bible->is_object()) format_error("/bible", "the bible must be an object, not " + core::py_repr(*bible));
@@ -1682,6 +1716,9 @@ core::Document Reader::migrate(const Json& payload) {
     // (PC4 E6: layer-styles@1's styles, each in its normal form on a layer that takes one)
     try { core::validate_layer_styles(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (PC5 G-0: type@1's records, type layers and type styles, each in its normal form)
+    try { core::type_text::validate_type(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/story", {}, error.what()); }
     // (PC5 J-0: timeline@1's work area and fps, video@1's video rows, in a page's anim — kept as read)
     try { core::validate_timeline(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
@@ -1962,6 +1999,8 @@ bool is_known_feature(std::string_view feature) {
            feature == core::kFiltersFeature || feature == core::kVanishingFeature ||
            // PC4 E6 (core/layer_styles.hpp)
            feature == core::kLayerStylesFeature ||
+           // PC5 G-0 (core/type_text.hpp)
+           feature == core::kTypeFeature ||
            // PC5 J-0 (core/layer_comps.hpp, core/slices.hpp, core/annotations.hpp, core/measure.hpp, core/video.hpp)
            feature == core::kLayerCompsFeature || feature == core::kSlicesFeature || feature == core::kAnnotationsFeature ||
            feature == core::kMeasureFeature || feature == core::kTimelineFeature || feature == core::kVideoFeature;

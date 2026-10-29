@@ -28,6 +28,7 @@
 // PC5 J-0 (制作の補助)
 #include "core/video.hpp"
 #include "core/patterns.hpp"
+#include "core/type_text.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/reader.hpp"
 
@@ -126,6 +127,8 @@ Json frame_json(const core::Frame& frame) {
     return out;
 }
 
+Json record_json(const core::StoryLine& record);  // (type@1, PC5 G-0: below)
+
 // io._layer_to_dict(layer, strokes=False) without "strokes" and "raster_relpath", then io._layer_to_v3.
 Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& space) {
     const bool placed = layer.kind == core::LayerKind::Placed;
@@ -213,6 +216,10 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
         out["smart"] = layer.smart ? *layer.smart : Json::object();
         return out;
     }
+    if (layer.kind == core::LayerKind::Type) {  // (type@1, PC5 G-0: its record; no pixels or lines of its own)
+        if (layer.type) out["type"] = record_json(*layer.type);
+        return out;
+    }
     if (layer.raster_png && !layer.raster_png->empty()) {
         out["asset"] = put_png(store, layer.raster_png, layer.raster_memo);
     }
@@ -280,6 +287,14 @@ Json line_json(const core::StoryLine& line) {
         for (const auto& tail : line.tails) tails.push_back(tail);
         out["tails"] = std::move(tails);
     }
+    if (line.native_type) out["native_type"] = *line.native_type;  // (type@1, PC5 G-0)
+    return out;
+}
+
+// type@1 (PC5 G-0): a type layer's record — a line's, without what only the story has.
+Json record_json(const core::StoryLine& record) {
+    Json out = line_json(record);
+    for (const char* key : {"id", "page_index", "speaker", "frame_id"}) out.erase(key);
     return out;
 }
 
@@ -563,6 +578,10 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
         std::erase(features, std::string(feature));
         if (used) features.emplace_back(feature);
     }
+    // PC5 G-0: type@1 (lines' native_type, type layers and the book's type styles), named while the book uses it
+    core::type_text::validate_type(doc);
+    std::erase(features, std::string(core::kTypeFeature));
+    if (core::type_text::uses_type(doc)) features.emplace_back(core::kTypeFeature);
     // PC5 J-0 (SPEC.md PROD-01): layer-comps@1, slices@1, annotations@1, measure@1 (a page's own keys) and timeline@1,
     // video@1 (in a page's anim), each named while the book uses it
     core::validate_layer_comps(doc);
@@ -615,6 +634,7 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
         out["patterns"] = std::move(patterns);
     }
     if (doc.global_light) out["global_light"] = core::global_light_json(*doc.global_light);  // (layer-styles@1, PC4 E6)
+    if (doc.type_styles) out["type_styles"] = *doc.type_styles;  // (type@1, PC5 G-0)
     out["spec"] = spec_to_json(doc.spec);
     if (Json color = color_json(store, doc.color, doc.rgb); !color.is_null() || doc.text_gamma) {
         // (the book's text_gamma, last, under its colour model: a default RGB one written for it)

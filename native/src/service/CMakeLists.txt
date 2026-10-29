@@ -65,6 +65,10 @@ genko_library(genko_service
     studio_output.cpp
     tool_table.cpp
     human_service.cpp
+    # PC5 I-0 (自動処理の土台: オートアクションの置き場, the steps and the runner, the script events' table)
+    actions.cpp
+    automate.cpp
+    script_events.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/studio_data.cpp"
   PUBLIC_DEPS genko_formats genko_render_ops genko_render genko_studio genko_storage genko_core Qt6::Core
   PRIVATE_DEPS Qt6::Network)

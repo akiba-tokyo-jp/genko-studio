@@ -12,6 +12,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QPushButton>
 #include <QSlider>
 #include <QSpinBox>
 #include "gui_support.hpp"
@@ -634,6 +635,31 @@ private slots:
         QCOMPARE(after.metadata("")["precision"], Json("u16"));
         QVERIFY(std::abs(after.pixel(3)[1] - 30000 / 65535.0) < 1e-9);  // (a flat plate stays flat to the 16 bits: 8 would round it)
         QVERIFY(after.pixel(3)[0] > 3000 / 65535.0 + 1e-3);              // (blurred: the rows below it are lighter)
+    }
+
+    // PC5-0 (the user's decision of 2026-10-28): ＋ペイント on an RGB page of 16 or 32 bits makes a layer of the page's depth —
+    // cut at the panels as before (add_layer's default), its first paint precise pixels (u16, f32) —; on an 8-bit page the
+    // paint is laid as before (a picture on the layer).
+    void newPaintLayerAtThePagesDepth() {
+        for (const int depth : {8, 16, 32}) {
+            Book book;
+            if (depth != 8) QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", depth}}})));
+            QVERIFY(book.choose(book.ink));
+            const auto before = book.order();
+            QTest::mouseClick(book.child<QPushButton>("layer_add_paint"), Qt::LeftButton);
+            const std::string paint = book.window->target_layer()->id;
+            QCOMPARE(book.order().size(), before.size() + 1);
+            QVERIFY(book.layer(paint)->kind == core::LayerKind::Raster && book.layer(paint)->panel_clip);
+            QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "gradient_fill"}, {"page", 1}, {"layer_id", paint}, {"from", Json::array({5, 20})},
+                                                             {"to", Json::array({35, 20})}, {"stops", Json::parse("[[0, [0, 0, 0]], [1, [255, 255, 255]]]")}}})));
+            const core::Layer& laid = *book.layer(paint);
+            if (depth == 8) {
+                QVERIFY(laid.color_raster == nullptr && laid.patches.size() == 1);
+                continue;
+            }
+            QVERIFY2(laid.color_raster != nullptr && laid.patches.empty(), qPrintable(QString::number(depth)));
+            QCOMPARE(core::ColorRasterView(*laid.color_raster).metadata("")["precision"], Json(depth == 16 ? "u16" : "f32"));
+        }
     }
 
     // PC3 B2 (the user's decision 5): レイヤー → レイヤーマスク by Photoshop's names — すべての領域を隠す (a new mask linked),

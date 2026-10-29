@@ -75,7 +75,7 @@ std::int64_t MainWindow::current_frame(const core::Page* page) const {
 
 void MainWindow::show_dock(const QString& title) {
     for (QDockWidget* dock : findChildren<QDockWidget*>()) {
-        if (dock->windowTitle() == title) {
+        if (dock->windowTitle() == title || dock->objectName() == title) {  // (PC5 H-0: or its name before Photoshop's)
             dock->show();
             dock->raise();
         }

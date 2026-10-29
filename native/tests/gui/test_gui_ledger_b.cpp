@@ -661,7 +661,7 @@ private slots:
         QVERIFY(!box->geometry().intersects(quick->geometry()));  // (nothing lies over the approval box)
     }
 
-    // test_nine_menus_and_the_tabs_whole_on_a_1366_screen: nine menus (ten since PC4's フィルター); the panels' row of tabs with レイヤー shows every
+    // test_nine_menus_and_the_tabs_whole_on_a_1366_screen: nine menus (ten since PC4's フィルター, eleven since PC5's 書式); the panels' row of tabs with レイヤー shows every
     // tab whole (none behind the scroll arrows) on a 1366 × 768 screen.
     void nineMenusAndTheTabsWholeOnA1366Screen() {
         core::Document doc = b4(2);
@@ -674,7 +674,11 @@ private slots:
         int menus = 0;
         for (QAction* a : w->menuBar()->actions())
             if (a->menu() != nullptr) ++menus;
-        QCOMPARE(menus, 10);  // (PC4 節 D, the user's decision 1: フィルター after レイヤー — the menu bar still whole at 1366)
+        // (PC4 節 D, the user's decision 1: フィルター after レイヤー; PC5 G-0: 書式 between them, design section G 5.1 — the menu bar still
+        // whole at 1366)
+        QCOMPARE(menus, 11);
+        const QRect last = w->menuBar()->actionGeometry(w->menuBar()->actions().last());
+        QVERIFY2(!last.isEmpty() && last.right() <= w->menuBar()->width(), qPrintable(QStringLiteral("%1 of %2").arg(last.right()).arg(w->menuBar()->width())));
         QTabBar* bar = nullptr;
         for (QTabBar* b : w->findChildren<QTabBar*>()) {
             if (!b->isVisible()) continue;
@@ -1150,7 +1154,7 @@ private slots:
         QVERIFY(windows != nullptr);
         QStringList texts;
         for (QAction* a : windows->actions()) texts << a->text();
-        QVERIFY(texts.contains(QStringLiteral("新しいウィンドウ（同じ原稿）")) && texts.contains(QStringLiteral("次の原稿")));
+        QVERIFY(texts.contains(QStringLiteral("アレンジ")) && texts.contains(QStringLiteral("次の原稿")));  // (PC5 H-0: アレンジ → 新規ウィンドウ)
         desk.window->resize(1024, 640);
         QCoreApplication::processEvents();
         QVERIFY(desk.window->doc_tabs()->isVisible());

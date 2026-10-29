@@ -46,6 +46,7 @@ genko_library(genko_core
     ids.cpp
     paths.cpp
     config_dir.cpp
+    prefs_table.cpp
     base64.cpp
     geometry.cpp
     model.cpp
@@ -128,6 +129,8 @@ genko_library(genko_core
     raw_develop.cpp
     # PC4 E6 (レイヤースタイル: layer-styles@1)
     layer_styles.cpp
+    # PC5 G-0 (文字: type@1 の記録・属性の表・解決・範囲の追従)
+    type_text.cpp
     # PC5 J-0 (制作の補助の土台: layer-comps@1, slices@1, annotations@1, measure@1, timeline@1, video@1)
     production_json.cpp
     layer_comps.cpp

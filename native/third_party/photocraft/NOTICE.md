@@ -280,6 +280,25 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - PSD のスマートフィルター・.pcraft の対応表（PC4 D7）:
   - `crates/engine/src/filters.rs`（41-134 行: `params_for` の鍵と既定、45-50 行の固定値の項目）・`crates/engine/src/filters_ext.rs`（70-371 行: `params_for` の鍵・選択の値・平らな設定のピン・光・パス）・`crates/engine/src/gallery_cmds.rs`（15-79 行: `colour`・`effect_from_json`・`effects_from_json`）・`crates/engine/src/lens_cmds.rs`（40-155 行・376-422 行: レンズ補正・広角補正・Camera Raw の鍵）・`crates/algo/src/params_ext.rs`（ピン・光・パスの serde の形）・`crates/engine/src/smart_cmds.rs`（290-305 行: 知らない command は描かない）・`crates/engine/src/filters.rs`（136-160 行: `apply_filter_to_surface` が描く command）・`crates/doc/src/lib.rs`（348 行: `SmartFilter`）: 上流の command id と設定を Genko の種類と設定に写す表 → `native/src/core/filter_upstream.cpp`（`from_upstream`・`to_upstream`・`upstream_filter`）。PSD の Photoshop のスマートフィルター（`filterFX`）の読みは上流に無く（`crates/io/src/psd_import.rs` 236 行）、この版のもの（`native/src/render/psd_filters.cpp`）。
 
+## 文字（PC5 節 G）
+
+- 文字の土台（PC5 G-0）:
+  - `crates/doc/src/text.rs`（52-197 行: `CharStyle`・`ParagraphStyle` の属性と既定、`TextAlign`・`TextDirection`）と `crates/engine/src/type_extra_cmds.rs`（106-123 行: アンチエイリアスの方法の名前）: 文字と段落の属性の名前と既定 → `native/src/core/type_text.cpp`（`kCharAttrs`・`kParaAttrs`・`char_defaults`・`para_defaults`。長さを mm にし、範囲を決め、Genko の書式の鍵 — 語ごとの倍率・太さの段・縦中横・約物の詰め・禁則 — を足した所は Genko のもの）。
+  - `crates/doc/src/text_styles.rs`（182-236 行: `resolve_para`・`resolve_char`）: スタイルを解く順（基本段落 → 段落スタイル → 文字スタイル → 上書き）→ `native/src/core/type_text.cpp`（`resolve_para`・`resolve_chars`。上書きを違う所だけで持ち、台詞の書式と書記素の範囲・段落の番号で解く所は Genko のもの）。
+
+## レイヤー・アートボード・自動処理（PC5 節 I）
+
+- 自動処理の土台（PC5 I-0）:
+  - `crates/engine/src/automate_cmds.rs`（48-112 行: `parse_script`・`parse_steps` — 手順の JSON と 1 行 1 コマンドの文、141-260 行: スクリプトイベントの表と `firing`）→ `native/src/service/automate.cpp`（`read_steps`。上流のコマンド id と引数を Genko の op の JSON に読み替え、行の番号を付けた誤り、断る op の確かめ、擬似 op、承認できない actor は MCP の op だけ、は Genko のもの）・`native/src/service/script_events.cpp`（イベントの名前。表を画面だけが書きハッシュで外の書き換えを止めること、スクリプトのファイルの sha256、MCP・HTTP・CLI では起こさないことは Genko のもの）。
+  - `crates/engine/src/file_cmds.rs`（516-529 行: `fit_image`、589-651 行: バッチの入力と 1 ファイルずつの処理）→ `native/src/service/automate.cpp`（`fit_image` は `resize_pages` に直す擬似 op。入力の列挙・書き先・同じ名前の番号・エラーで続ける・中止は Genko のもの。画像は 1 ページの本として開き、書くのはコピーを保存の書き手）。
+  - `crates/engine/src/automate_cmds/tests.rs` の試験の考え（手順の形・イベントの起こし方）→ `native/tests/unit/test_automate.cpp`。
+
+## 表示・窓・環境設定（PC5 節 H）
+
+- 表示・窓・環境設定の土台（PC5 H-0）:
+  - `crates/engine/src/prefs.rs`（150-730 行: 節の名前と順 `SECTIONS`・各節の項目の path の名前・既定・範囲）→ `native/src/core/prefs_table.cpp`（今の settings.ini の鍵に重ねる表）。`crates/engine/src/prefs/tests.rs`（9-100 行: 全部か無し・範囲の外・知らない path の試験の考え）→ `native/tests/unit/test_prefs_table.cpp`。
+  - `crates/ui-egui/src/menu_catalog.rs`（Photoshop のキーの表）→ `native/src/app/key_sets.cpp` の Photoshop の組（キーそのものは Photoshop の初期設定）。
+
 ## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1、PC5 節 J）
 
 - 土台（PC5 J-0）: ページに持つ形（Genko はページの mm で持つ）。

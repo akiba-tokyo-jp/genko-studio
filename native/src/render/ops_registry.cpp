@@ -17,6 +17,7 @@
 #include "render/color_edit.hpp"
 #include "render/dab_ops.hpp"
 #include "render/ink_edit.hpp"
+#include "render/paint_fill.hpp"
 #include "render/ops_3d.hpp"
 #include "render/ops_adjust.hpp"
 #include "render/paper.hpp"
@@ -33,6 +34,7 @@
 #include "render/ops_formats.hpp"
 #include "render/ops_paint_tools.hpp"
 #include "render/ops_layer_styles.hpp"
+#include "render/ops_type.hpp"
 #include "render/ops_production.hpp"
 
 namespace genko::render {
@@ -236,7 +238,10 @@ private:
 // than before, or all of a page whose mode it changed) are looked at; the rest keep their bytes. A bitmap or indexed
 // page's name and draft layers (kept as layers by the flatten, never printed) keep their pixels as they are: the page
 // shows them through its last map — the table's colours, two — as it shows the rest.
-void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& before) {
+// (PC5-0, the review's P1-1: a deep page's new 8-bit pixels made precise within the book's precise budget — past it, or
+// while the book's pages are still being read, they stay 8-bit, as before PC5-0, and paint_fill::kKeptAt8Bits is said in
+// `notes`)
+void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& before, std::vector<std::string>* notes = nullptr) {
     for (std::size_t p = 0; p < doc.pages.size(); ++p) {
         if (doc.is_deferred(p)) continue;
         const core::Page& seen = doc.page(p);
@@ -259,6 +264,17 @@ void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& befo
             }
             return true;
         };
+        // (PC5-0, the user's decision of 2026-10-28: a layer cut at the panels is made precise when it was an empty paint
+        // layer before the op — a new paint layer getting its first pixels —; one that had 8-bit pixels keeps them, and
+        // the layers an op makes itself (import_psd's, which may be 8-bit for the book's budget) are as before)
+        const auto was_empty = [&](const core::Layer& layer) {
+            if (was == nullptr) return false;
+            for (const core::Layer& old : was->layers) {
+                if (old.id == layer.id)
+                    return (old.raster_png == nullptr || old.raster_png->empty()) && old.color_raster == nullptr && old.ink_raster == nullptr;
+            }
+            return false;
+        };
         std::vector<std::size_t> todo;
         for (std::size_t i = 0; i < seen.layers.size(); ++i) {
             const core::Layer& layer = seen.layers[i];
@@ -267,7 +283,7 @@ void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& befo
             if ((bitmap || indexed) && (layer.role == core::LayerRole::Name || layer.role == core::LayerRole::Draft)) continue;
             // (deep: a paint layer a precise raster can hold — render/page's and set_color_mode's rule)
             if (deep && (layer.kind != core::LayerKind::Raster || layer.role == core::LayerRole::Tone || layer.stroke_count() || !layer.patches.empty() ||
-                         layer.panel_clip || layer.effect || layer.screen || layer.color)) {
+                         (layer.panel_clip && !was_empty(layer)) || layer.effect || layer.screen || layer.color)) {
                 continue;
             }
             todo.push_back(i);
@@ -315,6 +331,11 @@ void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& befo
                 continue;
             }
             const int depth = page.rgb->depth;
+            const std::uint64_t made = 16 + static_cast<std::uint64_t>(picture.width()) * static_cast<std::uint64_t>(picture.height()) * 4 * (depth == 16 ? 2 : 4);
+            if (!paint_fill::precise_fits(doc, made)) {
+                paint_fill::note_once(notes, paint_fill::kKeptAt8Bits);
+                continue;
+            }
             const auto* q = reinterpret_cast<const unsigned char*>(bytes.data());
             layer.color_raster = std::make_shared<const std::string>(core::encode_color_pixels(
                 static_cast<std::uint32_t>(picture.width()), static_cast<std::uint32_t>(picture.height()), depth == 16 ? "u16" : "f32",
@@ -404,6 +425,9 @@ void register_render_ops(core::OpRegistry& registry) {
     register_pattern_ops(registry);
     // PC4 E6 (layer-styles@1: a layer's style and the book's global light, render/ops_layer_styles)
     register_layer_style_ops(registry);
+    // PC5 節 G (文字; type@1: the type ops — G-0 writes add_type_layer, edit_type and type_info, the others frames until
+    // their groups: render/ops_type.hpp)
+    register_type_ops(registry);
     // PC5 節 J (制作の補助: カンプ・スライス・注釈・計測・ビデオ): the frames of its new ops (render/ops_production); each group's
     // register_* after it puts its ops in their places
     register_production_ops(registry);
@@ -489,7 +513,7 @@ const core::OpRegistry& ops_registry() {
                 if (!target) {
                     op(c);
                     channels::follow_depth(c.doc);
-                    keep_page_modes(c.doc, before);
+                    keep_page_modes(c.doc, before, &c.notes);
                     return;
                 }
                 const std::size_t at = core::require_page(c.doc, c.op);
@@ -520,7 +544,7 @@ const core::OpRegistry& ops_registry() {
                 c.report = std::move(inner.report);
                 c.notes = std::move(inner.notes);
                 channels::follow_depth(c.doc);
-                keep_page_modes(c.doc, before);
+                keep_page_modes(c.doc, before, &c.notes);
             });
         }
         return r;

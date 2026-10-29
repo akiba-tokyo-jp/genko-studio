@@ -12,6 +12,7 @@
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/type_text.hpp"
 #include "core/vector.hpp"
 #include "render/color_canvas.hpp"
 #include "render/image_ops.hpp"
@@ -220,7 +221,15 @@ void text_to_path(OpContext& c) {
     const std::string to = given(c.op, "to") != nullptr ? core::py_str(*given(c.op, "to")) : std::string("work");
     if (to != "work" && to != "shape") throw OpError("to is work or shape");
     const std::string line_id = id->get<std::string>();
-    const core::StoryLine& line = core::find_line(doc, line_id);
+    // (type@1, PC5 G-0: a type layer's text too — named by its id on its page — traced as its record is drawn)
+    std::optional<core::StoryLine> type_text;
+    if (std::none_of(doc.story.begin(), doc.story.end(), [&](const core::StoryLine& l) { return l.id == line_id; }) && given(c.op, "page") != nullptr) {
+        const std::size_t p = core::require_page(doc, c.op);
+        for (const core::Layer& layer : doc.page(p).layers) {
+            if (layer.id == line_id && core::type_text::is_type_layer(layer) && layer.type) type_text = core::type_text::line_of(layer, doc.page(p).index);
+        }
+    }
+    const core::StoryLine& line = type_text ? *type_text : core::find_line(doc, line_id);
     std::optional<std::size_t> at;
     for (std::size_t k = 0; k < doc.pages.size(); ++k) {
         if (doc.pages[k]->index == line.page_index) {

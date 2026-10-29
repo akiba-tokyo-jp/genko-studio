@@ -568,12 +568,12 @@ private slots:
         QCOMPARE(canvas->cursor().shape(), Qt::BlankCursor);
     }
 
-    // ツールの設定: each tool's name, hint and page; the panel tool's ways and the selection's settings go to the canvas.
+    // オプション (ツールの設定 before PC5 H-0): each tool's name — with its command's keys now, the Photoshop key set's —, hint and page; the panel tool's ways and the selection's settings go to the canvas.
     void eachToolsPage() {
         Studio studio;
         auto* ts = studio.window->tool_settings();
-        for (const auto& [tool, title] : {std::pair{"pen", "ブラシツール（B）"}, {"eraser", "消しゴムツール（E）"}, {"frame", "コマ割り（F）"}, {"select", "選択（V）"},
-                                          {"move", "移動ツール（Q）"}, {"zoom", "虫めがね（Z）"}, {"lasso", "選択範囲ツール（M・L・W）"}}) {
+        for (const auto& [tool, title] : {std::pair{"pen", "ブラシツール（B）"}, {"eraser", "消しゴムツール（E）"}, {"frame", "コマ割り（K）"}, {"select", "選択（Shift+N）"},
+                                          {"move", "移動ツール（V）"}, {"zoom", "ズームツール（Z）"}, {"lasso", "選択範囲ツール（M・L・W）"}}) {
             studio.window->choose_tool(QString::fromLatin1(tool));
             QCOMPARE(ts->title()->text(), QString::fromUtf8(title));
         }
@@ -595,11 +595,11 @@ private slots:
         QCOMPARE(studio.window->canvas()->frame_mode, QStringLiteral("poly"));
         studio.window->choose_tool(QStringLiteral("zoom"));
         QVERIFY(ts->page_for(QStringLiteral("zoom")) == nullptr);
-        // a page's command rows trigger their commands: 原寸 on the selection tool's page
+        // a page's command rows trigger their commands: プリントサイズ (原寸 before PC5 H-0) on the selection tool's page
         studio.window->choose_tool(QStringLiteral("select"));
         QPushButton* actual = nullptr;
         for (QPushButton* row : ts->current_page()->findChildren<QPushButton*>()) {
-            if (row->toolTip().contains(QStringLiteral("原寸")) || row->text().contains(QStringLiteral("原寸"))) actual = row;
+            if (row->toolTip().contains(QStringLiteral("プリントサイズ")) || row->text().contains(QStringLiteral("プリントサイズ"))) actual = row;
         }
         QVERIFY(actual != nullptr);
         studio.window->canvas()->fit_page();

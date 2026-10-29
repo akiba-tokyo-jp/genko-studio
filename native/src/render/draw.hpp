@@ -12,6 +12,8 @@
 
 #include "render/image.hpp"
 
+class QByteArray;  // (font_bytes, below)
+
 // Pillow's ImageDraw (PIL/ImageDraw.py and the draw methods of _imaging.c) over libImaging's Draw.c: the same
 // coordinates (each one truncated to an int as _imaging.c does), the same inks, the same Python-level joints of a
 // wide line (joint="curve"), so a shape covers the same pixels as in the Python baseline. Text (M4) goes through
@@ -176,5 +178,10 @@ private:
 // maintenance.doctor's check of the bundled font (render._DELA): the fonts are in the program's resources here, so whether
 // the one named ("sfx": Dela Gothic One) reads.
 bool bundled_font_present(const std::string& name);
+
+// PC5 G-0 (type@1, render/text/shaping): the bytes of a font as TrueTypeFonts opens it — a bundled font's by its name (read
+// once per process and shared), a font file's by its path (read now: NotYetPorted "default_font" or "large_font" as
+// TrueTypeFonts::truetype says).
+std::shared_ptr<const QByteArray> font_bytes(const std::string& font);
 
 }  // namespace genko::render

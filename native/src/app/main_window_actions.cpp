@@ -93,12 +93,13 @@ struct Stage {
 };
 
 const std::vector<Stage>& stages() {
-    // (comfort.STAGES: the panels each stage of the work uses most)
+    // (comfort.STAGES: the panels each stage of the work uses most, by their titles — PC5 H-0: Photoshop's オプション,
+    // ナビゲーター, ヒストリー)
     static const std::vector<Stage> list = {
-        {"name", "ネーム", {"ツールの設定", "クイックアクセス", "ページ", "台詞", "点検"}, {"台詞", "ページ"}},
-        {"ink", "作画", {"ツールの設定", "クイックアクセス", "全体図", "レイヤー", "カラー", "素材", "履歴"}, {"レイヤー", "素材"}},
-        {"finish", "仕上げ", {"ツールの設定", "クイックアクセス", "レイヤー", "素材", "定規・3D", "点検"}, {"レイヤー", "素材"}},
-        {"letter", "写植", {"ツールの設定", "ページ", "台詞", "点検"}, {"台詞", "ページ"}},
+        {"name", "ネーム", {"オプション", "クイックアクセス", "ページ", "台詞", "点検"}, {"台詞", "ページ"}},
+        {"ink", "作画", {"オプション", "クイックアクセス", "ナビゲーター", "レイヤー", "カラー", "素材", "ヒストリー"}, {"レイヤー", "素材"}},
+        {"finish", "仕上げ", {"オプション", "クイックアクセス", "レイヤー", "素材", "定規・3D", "点検"}, {"レイヤー", "素材"}},
+        {"letter", "写植", {"オプション", "ページ", "台詞", "点検"}, {"台詞", "ページ"}},
         {"review", "承認", {"承認箱", "コマの詳細", "資料", "ページ", "点検"}, {"承認箱", "ページ"}},
     };
     return list;
@@ -253,6 +254,8 @@ bool MainWindow::play_action(const QString& name) {
         flash(QStringLiteral("「%1」の手順は、どれも記録したページの決まった物を変えるもので、このページではできません").arg(name), 5000);
         return false;
     }
+    // (PC5 I-0: every way in has the same rule — an approval, a page lock or undo recorded before is refused, said)
+    if (!steps_allowed(ops, name, QStringLiteral("。ファイル → オートアクション → 管理 で、その手順を外してください"))) return false;
     if (!apply_ops(ops)) return false;
     const QString extra = skipped > 0 ? QStringLiteral("。%1 手はこのページではできないので飛ばしました").arg(skipped) : QString();
     flash(QStringLiteral("「%1」を実行しました（%2 手。元に戻すは 1 回で%3）").arg(name, QString::number(ops.size()), extra), 4000);
@@ -269,6 +272,7 @@ bool MainWindow::play_action_on_all(const QString& name) {
         flash(QStringLiteral("「%1」の手順は、どれも記録したページの決まった物を変えるもので、ほかのページではできません").arg(name), 5000);
         return false;
     }
+    if (!steps_allowed(steps, name, QStringLiteral("。ファイル → オートアクション → 管理 で、その手順を外してください"))) return false;  // (PC5 I-0)
     if (!ask::question(this, QStringLiteral("オートアクション"), QStringLiteral("「%1」を全ページ（表紙を除く）に実行しますか？（元に戻すは 1 回）").arg(name))) {
         return false;
     }
@@ -319,8 +323,9 @@ void MainWindow::show_help(const QString& what) {
     help_dialog_->show();
 }
 
-void MainWindow::open_preferences() {
+void MainWindow::open_preferences(const QString& pane) {
     preferences::PreferencesDialog dialog(this);
+    if (!pane.isEmpty()) dialog.show_pane(pane);  // (PC5 H-0: 編集 → 環境設定 ▸'s panes, キーボードショートカット…)
     ask::exec(&dialog);
 }
 
@@ -360,13 +365,13 @@ void MainWindow::build_actions() {
     make("act_save", QStringLiteral("保存"), [this] { save(); }, keys({std_key(Std::Save)}), QStringLiteral("変更は自動で保存されます。今すぐ書き込むときに使います"));
     make("act_save_as", QStringLiteral("別名で保存…"), [this] { save_as(); }, keys({std_key(Std::SaveAs)}));
     make("act_exposure", QStringLiteral("露光量の調整層…"), [this] { exposure_dialog(); });
-    make("act_undo", QStringLiteral("元に戻す"), [this] { undo(); }, keys({std_key(Std::Undo)}));
-    make("act_redo", QStringLiteral("やり直す"), [this] { redo(); }, keys({std_key(Std::Redo), QKeySequence(QStringLiteral("Ctrl+Y"))}));
-    make("act_fit", QStringLiteral("全体を表示"), [c] { c->glide([c] { c->fit_page(); }); }, keys({QKeySequence(QStringLiteral("Ctrl+0"))}));
-    make("act_zoom_in", QStringLiteral("拡大"), [c] { c->glide([c] { c->zoom_by(1.25); }); },
+    make("act_undo", QStringLiteral("取り消し"), [this] { undo(); }, keys({std_key(Std::Undo)}));
+    make("act_redo", QStringLiteral("やり直し"), [this] { redo(); }, keys({std_key(Std::Redo), QKeySequence(QStringLiteral("Ctrl+Y"))}));
+    make("act_fit", QStringLiteral("画面サイズに合わせる"), [c] { c->glide([c] { c->fit_page(); }); }, keys({QKeySequence(QStringLiteral("Ctrl+0"))}));
+    make("act_zoom_in", QStringLiteral("ズームイン"), [c] { c->glide([c] { c->zoom_by(1.25); }); },
          keys({std_key(Std::ZoomIn), QKeySequence(QStringLiteral("Ctrl+="))}));
-    make("act_zoom_out", QStringLiteral("縮小"), [c] { c->glide([c] { c->zoom_by(0.8); }); }, keys({std_key(Std::ZoomOut)}));
-    make("act_actual", QStringLiteral("原寸（紙の大きさ）"), [c] { c->glide([c] { c->actual_size(); }); }, keys({QKeySequence(QStringLiteral("Ctrl+1"))}));
+    make("act_zoom_out", QStringLiteral("ズームアウト"), [c] { c->glide([c] { c->zoom_by(0.8); }); }, keys({std_key(Std::ZoomOut)}));
+    make("act_actual", QStringLiteral("プリントサイズ"), [c] { c->glide([c] { c->actual_size(); }); }, keys({QKeySequence(QStringLiteral("Ctrl+1"))}));
     // (- and ^ as in CLIP STUDIO PAINT, too: Intel graphics drivers take Ctrl+Alt+arrows to turn the whole screen)
     make("act_turn_left", QStringLiteral("左に回す（15°）"), [c] { c->rotate_view(-15); },
          keys({QKeySequence(QStringLiteral("-")), QKeySequence(QStringLiteral("Ctrl+Alt+Left"))}),
@@ -374,10 +379,10 @@ void MainWindow::build_actions() {
     make("act_turn_right", QStringLiteral("右に回す（15°）"), [c] { c->rotate_view(15); },
          keys({QKeySequence(QStringLiteral("^")), QKeySequence(QStringLiteral("Ctrl+Alt+Right"))}), QStringLiteral("表示だけを回します（原稿は回りません）"));
     make("act_turn_reset", QStringLiteral("回転・反転を戻す"), [c] { c->reset_view(); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+0"))}));
-    make("act_zoom_tool", QStringLiteral("虫めがね"), [this] { choose_tool(QStringLiteral("zoom")); }, keys({QKeySequence(QStringLiteral("Z"))}),
+    make("act_zoom_tool", QStringLiteral("ズームツール"), [this] { choose_tool(QStringLiteral("zoom")); }, keys({QKeySequence(QStringLiteral("Z"))}),
          QStringLiteral("クリックで拡大、Alt＋クリックで縮小、ドラッグで囲んだ所を画面いっぱいに"), true);
     make("act_zoom_value", QStringLiteral("表示倍率を打ち込む…"), [this] { ask_zoom(); }, {}, QStringLiteral("倍率（%）を数で決めます。ステータスバーの倍率でも"));
-    QAction* mirror = make("act_mirror", QStringLiteral("左右反転して見る"), [] {}, keys({QKeySequence(QStringLiteral("H"))}),
+    QAction* mirror = make("act_mirror", QStringLiteral("水平方向に反転"), [] {}, keys({QKeySequence(QStringLiteral("H"))}),
                            QStringLiteral("表示だけを左右反転します（絵の歪みを見つける）。原稿は変わりません"), true);
     connect(mirror, &QAction::triggered, this, [c](bool on) { c->flip_view(on); });
     // (M6: workspace.cpp) コマンドを探す, the command bar and the quick access chosen, workspaces, the tools' names
@@ -385,9 +390,7 @@ void MainWindow::build_actions() {
     make("act_help_guide", QStringLiteral("はじめての使い方"), [this] { show_help(QStringLiteral("guide")); });
     make("act_help_faq", QStringLiteral("困ったとき（よくある質問）"), [this] { show_help(QStringLiteral("faq")); });
     make("act_about", QStringLiteral("Genko Studio について"), [this] { show_help(QStringLiteral("about")); });
-    make("act_prefs", QStringLiteral("環境設定…"), [this] { open_preferences(); }, keys({QKeySequence(QStringLiteral("Ctrl+,"))}),
-         QStringLiteral("ショートカット・ペンタブレット・文字の大きさ・新しい原稿の用紙・保存の間隔"));
-    make("act_find_command", QStringLiteral("コマンドを探す…"), [this] { find_command(); }, keys({QKeySequence(QStringLiteral("Ctrl+Shift+F"))}),
+    make("act_find_command", QStringLiteral("検索"), [this] { find_command(); }, keys({QKeySequence(QStringLiteral("Ctrl+Shift+F"))}),
          QStringLiteral("名前の一部を打つと、メニューのどこにあるかが分かり、そのまま実行できます"));
     make("act_edit_commandbar", QStringLiteral("コマンドバーを変える…"), [this] { edit_commandbar(this, commands_); }, {});
     make("act_edit_quick", QStringLiteral("クイックアクセスを変える…"), [this] { quick_access_->edit(); }, {});
@@ -484,6 +487,9 @@ void MainWindow::build_actions() {
     build_align_actions();      // (PC3 C-d: 重ね順・整列・分布・リンク・ロック, スナップ (with 定規's グリッドにスナップ), the move tool's: main_window_align.cpp)
     build_file_actions();       // (PC4 F-0: 節 F's new commands of ファイル, frames until F-b and F-c: main_window_file.cpp)
     build_filter_actions();     // (PC4 節 D: フィルター's commands, 前回のフィルター: filter_menu.cpp)
+    build_view_actions();       // (PC5 H-0: 表示's commands of 節 H — H-a, H-b: main_window_view.cpp)
+    build_arrange_actions();    // (PC5 H-0: ウィンドウ → アレンジ ▸ — H-c: main_window_arrange.cpp)
+    build_edit_actions();       // (PC5 H-0: 編集's 環境設定 ▸, キーボードショートカット… — H-d, H-e, H-f: main_window_edit.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("部分選択ツールで選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("カラーピッカー（描画色）…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
@@ -569,8 +575,6 @@ void MainWindow::build_actions() {
     // a book — with its question — on Windows and Linux too, where Ctrl+F4 comes first; SPEC SAVE-01, AC-SAVE 2)
     make("act_close", QStringLiteral("閉じる"), [this] { close_document(); }, QKeySequence::keyBindings(Std::Close),
          QStringLiteral("この原稿を閉じます（最後の原稿ならウィンドウも）"));
-    make("act_new_window", QStringLiteral("新しいウィンドウ（同じ原稿）"), [this] { new_window(); }, {},
-         QStringLiteral("この原稿をもう 1 つのウィンドウで開きます。拡大して描きながら、別の窓で全体を見る"));
     make("act_next_doc", QStringLiteral("次の原稿"), [this] { next_document(1); }, keys({QKeySequence(QStringLiteral("Ctrl+Tab"))}));
     make("act_prev_doc", QStringLiteral("前の原稿"), [this] { next_document(-1); }, keys({QKeySequence(QStringLiteral("Ctrl+Shift+Tab"))}));
     make("act_quit", QStringLiteral("終了"), [] { QApplication::closeAllWindows(); }, keys({std_key(Std::Quit)}));
@@ -702,6 +706,7 @@ void MainWindow::build_menus() {
     layers->addAction(action("act_plugin_settings"));
     build_adjust_menus(layers, edit);  // (PC2: レイヤー → 色調補正, app/main_window_adjust.cpp)
     build_smart_menus(layers, file);   // (PC3: スマートオブジェクト and the placing commands, app/main_window_smart.cpp)
+    build_type_menu(bar->addMenu(QStringLiteral("書式")));  // (PC5 G-0: Photoshop's 書式 after レイヤー, app/main_window_type.cpp)
     build_filter_menus(bar->addMenu(QStringLiteral("フィルター")));  // (PC4 節 D, after レイヤー: app/filter_menu.cpp)
     QMenu* pages = bar->addMenu(QStringLiteral("ページ"));
     for (const char* name : {"act_add_page", "act_dup_page", "act_del_page"}) pages->addAction(action(name));
@@ -756,7 +761,12 @@ void MainWindow::build_menus() {
     pages->addSeparator();
     pages->addAction(action("act_name_ok"));
     view_menu_ = bar->addMenu(QStringLiteral("ウィンドウ"));
-    view_menu_->addAction(action("act_new_window"));
+    // (PC5 H-0, 節 H 5.2: アレンジ ▸ and ワークスペース ▸ first, as Photoshop's)
+    build_arrange_menus(view_menu_->addMenu(QStringLiteral("アレンジ")));
+    workspace_menu_ = view_menu_->addMenu(QStringLiteral("ワークスペース"));
+    workspace_menu_->setProperty("remade", true);
+    connect(workspace_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_workspaces);
+    view_menu_->addSeparator();
     view_menu_->addAction(action("act_next_doc"));
     view_menu_->addAction(action("act_prev_doc"));
     // the books open in this window, the one in front checked (document.activate): one chosen comes to the front
@@ -765,9 +775,6 @@ void MainWindow::build_menus() {
     connect(books_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_books_menu);
     fill_books_menu();
     view_menu_->addSeparator();
-    workspace_menu_ = view_menu_->addMenu(QStringLiteral("ワークスペース"));
-    workspace_menu_->setProperty("remade", true);
-    connect(workspace_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_workspaces);
     view_menu_->addAction(action("act_edit_commandbar"));
     view_menu_->addAction(action("act_edit_quick"));
     view_menu_->addAction(action("act_hints"));
@@ -779,16 +786,16 @@ void MainWindow::build_menus() {
         act->setStatusTip(QStringLiteral("この段階でよく使うパネルだけを出します"));
         stage_actions_[key] = act;
     }
+    build_edit_menu_tail(edit);  // (PC5 H-0: 検索, キーボードショートカット…, 環境設定 ▸ — main_window_edit.cpp)
+    build_view_menus(view);      // (PC5 H-0: 表示 in Photoshop's order, every part's commands in it now — main_window_view.cpp)
     QMenu* help = bar->addMenu(QStringLiteral("ヘルプ"));
-    help->addAction(action("act_find_command"));
-    help->addSeparator();
     for (const char* name : {"act_help_guide", "act_help_keys", "act_help_faq", "act_next_steps"}) help->addAction(action(name));
     help->addSeparator();
     help->addAction(action("act_about"));
 }
 
 void MainWindow::build_toolbars() {
-    palette_ = new QToolBar(QStringLiteral("道具"));
+    palette_ = new QToolBar(QStringLiteral("ツール"));  // (PC5 H-0: Photoshop's name)
     palette_->setObjectName(QStringLiteral("tools"));
     palette_->setMovable(false);
     palette_->setOrientation(Qt::Vertical);
@@ -917,6 +924,7 @@ void MainWindow::build_docks() {
     view_menu_->addAction(library_dock_->toggleViewAction());
     library_dock_->hide();
     agent_view(agent_book());
+    name_panels();  // (PC5 H-0: ナビゲーター, オプション, ヒストリー — main_window_arrange.cpp)
     setTabPosition(Qt::LeftDockWidgetArea, QTabWidget::North);
     setTabPosition(Qt::RightDockWidgetArea, QTabWidget::North);
     // (Python's: the tabs name the panels — no second title above them; the room goes to the panel)
@@ -1206,7 +1214,7 @@ void MainWindow::gutter_settings() {
         form->addRow(QString::fromUtf8(label), spin);
         spins[QString::fromLatin1(key)] = spin;
     }
-    auto* note = new QLabel(QStringLiteral("これから割るコマに使います。今ある間隔は、コマ ツール（F）で間の白をドラッグして変えます。"));
+    auto* note = new QLabel(QStringLiteral("これから割るコマに使います。今ある間隔は、コマ割りツールで間の白をドラッグして変えます。"));
     note->setWordWrap(true);
     form->addRow(note);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);

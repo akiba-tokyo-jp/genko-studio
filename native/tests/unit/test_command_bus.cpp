@@ -463,6 +463,8 @@ private slots:
             "render_picture", "vanishing_point",  // (PC4 節 D's ops: D4 炎・額縁・木, D6 消点 — SPEC.md COLOR-08)
             "set_layer_style", "add_layer_effect", "set_global_light", "scale_layer_style", "show_layer_effects",
             "layer_style_to_layers",  // (PC4 E6: layer-styles@1, SPEC.md COLOR-09)
+            "add_type_layer", "edit_type", "type_info", "set_type", "type_style", "line_to_type_layer", "type_layer_to_line",
+            "replace_fonts",  // (PC5 G-0: type@1, the type ops — G-0's and the later groups' frames, SPEC.md TEXT-02)
             "new_layer_comp", "update_layer_comp", "apply_layer_comp", "set_layer_comp", "duplicate_layer_comp", "delete_layer_comp",
             "clear_layer_comp_warnings", "add_slice", "set_slice", "delete_slices", "divide_slice", "slices_from_guides",
             "add_annotation", "set_annotation", "delete_annotations", "set_measurement_scale", "add_count", "remove_count",

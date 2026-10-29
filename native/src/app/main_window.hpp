@@ -28,6 +28,7 @@
 #include "render/codecs/format.hpp"
 #include "render/image.hpp"
 #include "render/proof.hpp"
+#include "service/script_events.hpp"
 
 class QCheckBox;
 class QComboBox;
@@ -512,10 +513,11 @@ public:
     // The canvas's menu (a panel's commands when one is under the pointer), filled (tests).
     void fill_context_menu(QMenu& menu, const QString& frame_id);
     // --- 環境設定 and comfort (M6: preferences.cpp, comfort.cpp) ---------------------------------------------------
-    // Each command's own keys (by its words), as the window made them (preferences::name_commands).
+    // Each command's own keys (by its words), as the key set chosen gives them (preferences::name_commands after
+    // key_sets::apply).
     std::map<QString, QList<QKeySequence>> default_shortcuts;
-    // 環境設定… (the dialog, exec'ed).
-    void open_preferences();
+    // 環境設定 (the dialog, exec'ed) — at a pane of 編集 → 環境設定 ▸ (preferences::panes' id; keyboardShortcuts: the keys).
+    void open_preferences(const QString& pane = {});
     // ヘルプ: keys | guide | faq | about, shown (modeless); the one shown last (tests).
     void show_help(const QString& what);
     QDialog* help_dialog() const { return help_dialog_; }
@@ -555,6 +557,21 @@ public:
     // 管理（手順を見る・並べ替える・外す）… (shown, modeless; tests)
     QDialog* manage_actions();
     QMenu* actions_menu() const { return actions_menu_; }
+    // --- 自動処理・スクリプト (PC5 I-0, SPEC.md AUTO-01: app/main_window_automate.cpp) --------------------------------
+    // Steps (service/automate.hpp: a script's, or a recorded action's — `recorded` — played on the page in front) run on
+    // the book in front as the window's person, checked first (no gate op, no undo), the journal naming the changes
+    // `label`: a run of ops one change, a pseudo op made ops on the book as it is then (a change of its own). False:
+    // refused or failed (said in the status line), nothing more done.
+    bool run_steps(const core::Json& steps, bool recorded, const QString& label);
+    // Whether these ops may be steps for the window's person (service::automate::check_steps: no gate op, no undo — an
+    // オートアクション recorded before PC5 I-0 may hold an approval): when not, which op is said, and false.
+    bool steps_allowed(const core::Json& ops, const QString& label, const QString& hint = {});
+    // A script event raised by this window (I-e calls it where a book is made, opened, saved by the person, closed,
+    // printed or exported, and when the app starts): the steps bound to it run (service/script_events.hpp), unless steps
+    // of an event are running now; a table changed outside Genko is said once and runs nothing.
+    void script_event(service::script_events::Event event);
+    QMenu* automate_menu() const { return automate_menu_; }
+    QMenu* scripts_menu() const { return scripts_menu_; }
     // マスクを編集する (the layer panel's マスク menu): the pen and the eraser paint the mask of the layer drawn on.
     bool mask_edit = false;
     // 画像を読み込む…: a picture into the chosen panel (else over the whole page, out to the bleed), kept in the book as a
@@ -701,6 +718,18 @@ protected:
 private:
     void build_actions();
     void build_menus();
+    // PC5 H-0 (節 H): 表示 laid out in Photoshop's order (main_window_view.cpp — H-a, H-b make its commands), ウィンドウ →
+    // アレンジ ▸ (main_window_arrange.cpp — H-c), 編集's 検索・キーボードショートカット…・環境設定 ▸ (main_window_edit.cpp —
+    // H-d, H-e, H-f)
+    void build_view_actions();
+    void build_view_menus(QMenu* view);
+    void build_arrange_actions();
+    void build_arrange_menus(QMenu* arrange);
+    void build_edit_actions();
+    void build_edit_menu_tail(QMenu* edit);
+    // PC5 H-0: the panels by Photoshop's names (ナビゲーター, オプション, ヒストリー), their object names — the workspaces' keys —
+    // kept
+    void name_panels();
     void build_toolbars();
     void build_docks();
     QAction* make(const QString& attribute, const QString& title, std::function<void()> slot, const QList<QKeySequence>& keys = {},
@@ -726,6 +755,16 @@ private:
     void build_file_actions();
     void build_file_menu(QMenu* file);
     QMenu* export_menu_ = nullptr;  // ファイル → 書き出し
+    // PC5 I-0 (app/main_window_automate.cpp): the commands of ファイル → 自動処理 ▸ and スクリプト ▸ (the later groups' own —
+    // I-e バッチ…・ドロップレットを作成…・画像プロセッサー…・スクリプトイベントマネージャー…・参照…, I-a すべての空のレイヤーを削除・
+    // すべてのレイヤー効果を統合, I-f コンタクトシート II…, I-g Photomerge…・ファイルをスタックとして読み込み…・統計…, I-h HDR Pro に統合…・
+    // 写真の切り抜きと角度補正 — made in build_automate_actions and put in build_automate_menus); 自動処理 ▸ is shown once it
+    // holds one.
+    void build_automate_actions();
+    void build_automate_menus();
+    QMenu* automate_menu_ = nullptr;  // ファイル → 自動処理
+    QMenu* scripts_menu_ = nullptr;   // ファイル → スクリプト
+    bool script_events_told_ = false;  // (a table changed outside Genko: said once)
 
 public:
     // PC4 F-b (app/main_window_file.cpp; SPEC.md FILE-01, the user's decision 4): ファイル's entrances.
@@ -1627,6 +1666,13 @@ private:
     QDockWidget* styles_dock_ = nullptr;
     QMenu* layer_style_menu_ = nullptr;
 
+    // --- PC5 節 G (文字; type@1): the 書式 menu (app/main_window_type.cpp) ------------------------------------------------
+public:
+    QMenu* type_menu() const { return type_menu_; }
+
+private:
+    void build_type_menu(QMenu* menu);
+    QMenu* type_menu_ = nullptr;
     // --- PC5 節 J (制作の補助, SPEC.md PROD-01): main_window_production.cpp — the frames of イメージ → 解析 ▸, レイヤー →
     // ビデオレイヤー ▸ and ウィンドウ's panels (アクション・レイヤーカンプ・計測ログ・注釈), until their groups ------------------
 public:

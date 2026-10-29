@@ -66,11 +66,20 @@ void put_u32(std::string& out, std::uint32_t v) {
     put_u16(out, v & 0xffff);
 }
 void put_i32(std::string& out, std::int32_t v) { put_u32(out, static_cast<std::uint32_t>(v)); }
-// color-model@1: a sample of `depth` bits, big-endian: 8 and 16 rounded from 0..1 (clamped), 32 a float as it is.
+// color-model@1: a sample of `depth` bits, big-endian: 8 and 16 rounded from 0..1 (clamped), 32 a float as it is (a
+// finite float: past its range its largest, PC5-0 — a linear value of a very large page value —, so it reads back).
 void put_sample(std::string& out, double v, int depth) {
-    if (depth == 32) put_u32(out, std::bit_cast<std::uint32_t>(static_cast<float>(v)));
+    if (depth == 32) put_u32(out, std::bit_cast<std::uint32_t>(static_cast<float>(render::finite_sample(v))));
     else if (depth == 16) put_u16(out, static_cast<std::uint32_t>(std::lround(std::clamp(v, 0.0, 1.0) * 65535.0)));
     else put_u8(out, static_cast<unsigned>(std::lround(std::clamp(v, 0.0, 1.0) * 255.0)));
+}
+
+// PC5-0 (the user's decision of 2026-10-28, SPEC.md FILE-01「PSD の 32 bit」): Photoshop holds 32 bits a channel in
+// linear light (its profile's primaries, gamma 1.0), so a 32-bit PSD's colours are the page's values with the page's
+// tone curve taken off — an RGB page's profile's curves (sRGB's without one), a grey page's grayTRC (sGray's without
+// one) —, values past 0..1 by the same formula. The alpha, the masks and the extra channels are coverage: as they are.
+void linear_rgb(const render::RgbSpace& space, double* rgb, std::size_t count) {
+    for (std::size_t i = 0; i < count * 3; ++i) rgb[i] = space.decode(static_cast<unsigned>(i % 3), rgb[i]);
 }
 
 // color-model@1: the RGB page of a PSD whose layers are written at its depth (8, 16, 32) in its space (`space`: what is
@@ -239,7 +248,9 @@ public:
     // (`ink`: a CMYK, Lab or grey page's PSD — its layers in the page's inks; `rgb`: an RGB page of a colour model's —
     // its layers at its depth, in its space)
     explicit Records(render::Size size, std::optional<core::PageColor> ink = std::nullopt, std::optional<RgbOut> rgb = std::nullopt)
-        : size_(size), ink_(std::move(ink)), rgb_(std::move(rgb)) {}
+        : size_(size), ink_(std::move(ink)), rgb_(std::move(rgb)) {
+        if (ink_ && ink_->space == core::InkSpace::Gray && ink_->depth == 32) gray_ = render::GrayCurve(*ink_);
+    }
 
     // (PC3 A3) a smart object's picture written with the blocks of a placed layer (PlacedLayers::blocks)
     void placed(std::function<std::string(const core::Layer&)> blocks) { placed_ = std::move(blocks); }
@@ -479,6 +490,7 @@ private:
             for (unsigned c = 0; c < 3; ++c) rgb[i * 3 + c] = static_cast<unsigned char>(bytes[i * 4 + c]) / 255.0;
         }
         if (!page_values && !rgb_->space.is_srgb()) rgb_->space.from_srgb(rgb.data(), n);
+        if (depth == 32) linear_rgb(rgb_->space, rgb.data(), n);  // (PC5-0: Photoshop's 32 bits, linear light)
         const auto plane = [&](unsigned c) {
             std::string out;
             for (std::size_t i = 0; i < n; ++i) put_sample(out, c == 3 ? static_cast<unsigned char>(bytes[i * 4 + 3]) / 255.0 : rgb[i * 3 + c], depth);
@@ -530,8 +542,8 @@ private:
                 for (int x = box.x0; x < box.x1; ++x) {
                     double v = values[(std::size_t(y) * picture.width + x) * all + channel];
                     if (channel < n && space == core::InkSpace::Cmyk) v = 1.0 - v;
-                    if (depth == 32) {  // (color-model@1: a grey page's lightness as floats; its alpha 0..1)
-                        put_sample(bytes, channel < n ? v : std::clamp(v, 0.0, 1.0), 32);
+                    if (depth == 32) {  // (color-model@1: a grey page's lightness as floats, in linear light (PC5-0); its alpha 0..1)
+                        put_sample(bytes, channel < n ? gray_.decode(v) : std::clamp(v, 0.0, 1.0), 32);
                         continue;
                     }
                     const auto sample = static_cast<std::uint32_t>(std::lround(std::clamp(v, 0.0, 1.0) * most));
@@ -850,6 +862,7 @@ private:
     std::array<double, 2> paper_{0.0, 0.0};
     std::optional<core::PageColor> ink_;
     std::optional<RgbOut> rgb_;
+    render::GrayCurve gray_;  // (PC5-0: a 32-bit grey page's tone curve, its lightness written in linear light)
     std::function<std::string(const core::Layer&)> placed_;
     std::string records_;
     std::string data_;
@@ -1748,11 +1761,12 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
                                              psb));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
     // the merged picture: each colour plane (CMYK inverted); 8 bits RLE (every row's count first), 16 and 32 raw
     const unsigned all = merged.channels();
+    const render::GrayCurve grey_curve = color.depth == 32 ? render::GrayCurve(color) : render::GrayCurve();
     const auto plane = [&](unsigned c) {
         std::string bytes;
         for (std::size_t i = 0; i < merged.pixel_count(); ++i) {
-            if (color.depth == 32) {
-                put_sample(bytes, merged.floats[i * all + c], 32);
+            if (color.depth == 32) {  // (a grey page's: its lightness in linear light, PC5-0)
+                put_sample(bytes, grey_curve.decode(merged.floats[i * all + c]), 32);
                 continue;
             }
             std::uint32_t v = merged.samples[i * all + c];
@@ -1817,9 +1831,13 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
                                              psb));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
     // the merged picture: 8 bits RLE (every row's count first), 16 and 32 raw
     const std::size_t pixels = std::size_t(merged.width()) * merged.height();
+    const render::RgbSpace space = render::RgbSpace::of(page);
     const auto plane = [&](unsigned c) {
         std::string bytes;
-        for (std::size_t i = 0; i < pixels; ++i) put_sample(bytes, merged.pixel(i)[c], depth);
+        for (std::size_t i = 0; i < pixels; ++i) {
+            const double v = merged.pixel(i)[c];
+            put_sample(bytes, depth == 32 ? space.decode(c, v) : v, depth);  // (32 bits in linear light, PC5-0)
+        }
         return bytes;
     };
     if (depth == 8) {

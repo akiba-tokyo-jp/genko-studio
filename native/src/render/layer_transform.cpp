@@ -15,6 +15,7 @@
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
+#include "core/type_text.hpp"
 #include "render/fill_patches.hpp"
 #include "render/image_ops.hpp"
 #include "render/layer_bounds.hpp"
@@ -500,6 +501,14 @@ void move_layer_in(Document& doc, std::size_t at, const std::string& id, const M
             throw OpError("a smart object is bent by a warp, a perspective warp or a puppet warp");
         }
         move_filter_mask(doc, page, layer, m);
+    } else if (layer.kind == LayerKind::Type) {  // (type@1, PC5 G-0: its text moved; turned, scaled or bent: its matrix, G-a)
+        if (area) throw OpError("a type layer moves whole: transform it without a selection");
+        const auto& a = m.affine;
+        if (!m.is_affine() || m.warp || m.filter || std::fabs(a[0] - 1) > 1e-12 || std::fabs(a[1]) > 1e-12 || std::fabs(a[2]) > 1e-12 ||
+            std::fabs(a[3] - 1) > 1e-12)
+            core::not_yet_ported("a type layer turned, scaled or bent is not in this build yet");
+        if (layer.type) layer.type = core::type_text::shared_record(core::type_text::moved(*layer.type, a[4], a[5]));
+        // (no lines, parts or pixels of its own: on to its linked masks, below)
     } else if (layer.kind == LayerKind::Placed && layer.placement_mm) {
         const auto& a = m.affine;
         if (!m.is_affine() || std::fabs(a[1]) > 1e-12 || std::fabs(a[2]) > 1e-12 || a[0] <= 0 || a[3] <= 0) {

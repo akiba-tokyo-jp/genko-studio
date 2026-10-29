@@ -612,7 +612,7 @@ private slots:
         auto session=app::Session::open(path,gui_test::quick(gui_test::path_of(tmp.path()+"/recovery")));
         app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
         QCOMPARE(window.action("act_cmyk_proof")->text(),QStringLiteral("色の校正"));
-        QCOMPARE(window.action("act_cmyk_proof")->shortcuts(),QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Alt+Y"))});
+        QCOMPARE(window.action("act_cmyk_proof")->shortcuts(),QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Y"))});  // (PC5 H-0: Photoshop's)
         QCOMPARE(window.action("act_gamut_warning")->shortcuts(),QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Shift+Y"))});
         QCOMPARE(window.action("act_color_settings")->shortcuts(),QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Shift+K"))});
         QStringList kinds;
@@ -693,7 +693,7 @@ private slots:
         app::MainWindow window(session);window.resize(900,700);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
         window.activateWindow();  // (a shortcut reaches the active window only: on a real xcb screen too)
         QVERIFY(QTest::qWaitForWindowActive(&window));
-        QTest::keySequence(&window,QKeySequence(QStringLiteral("Ctrl+Alt+Y")));
+        QTest::keySequence(&window,QKeySequence(QStringLiteral("Ctrl+Y")));
         QVERIFY(window.canvas()->renderer().cmyk_proof());
         QVERIFY(window.action("act_proof_working_cmyk")->isChecked());
         QVERIFY(window.canvas()->wait_rendered(10000));

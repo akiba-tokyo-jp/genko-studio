@@ -505,7 +505,7 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     layout->addWidget(ruby_box);
     layout->addLayout(row);
     layout->addLayout(buttons);
-    auto* more = new QLabel(QStringLiteral("文字・フキダシの設定は左の「ツールの設定」に出ます"));
+    auto* more = new QLabel(QStringLiteral("文字・フキダシの設定は左の「オプション」に出ます"));
     more->setWordWrap(true);
     theme::hint(more);
     layout->addWidget(more);

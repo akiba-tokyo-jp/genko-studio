@@ -17,6 +17,7 @@
 #include "app/links.hpp"
 #include "app/main_window.hpp"
 #include "app/memory.hpp"
+#include "app/key_sets.hpp"
 #include "app/migration.hpp"
 #include "app/perf.hpp"
 #include "app/test_script.hpp"
@@ -84,6 +85,8 @@ int run_app(int argc, char** argv) {
     qRegisterMetaType<StrokeInput>();
     icons::init_resources();
     perf::event("app_start");
+    // (PC5 H-0: settings from before the Photoshop key set became the default — looked at before anything writes them)
+    const bool keys_from_before = key_sets::from_before_pc5();
     // (the first start: the Python app's settings offered once, before anything reads this app's own)
     migration::offer_on_first_start();
     if (const int pt = settings()->value(QStringLiteral("ui/font_pt"), 0).toInt(); pt > 0) {  // the letters' size chosen in 環境設定
@@ -113,6 +116,7 @@ int run_app(int argc, char** argv) {
     auto* window = new MainWindow;
     window->setAttribute(Qt::WA_DeleteOnClose);
     window->show();
+    if (keys_from_before) key_sets::tell_new_default(window);  // (once: the keys are Photoshop's now, Genko's a click away)
     window->open_path(*path);  // (PC4 F-b: a book's folder, or a file opened as a book of one page in memory)
     for (const QString& url : std::exchange(waiting, {})) window->open_link_when_ready(url);
     const int code = QApplication::exec();

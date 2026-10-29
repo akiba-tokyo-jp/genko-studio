@@ -1181,9 +1181,13 @@ private slots:
     // (SPEC COLOR-02: set_color_mode, set_inks, put_color_raster; COLOR-03: assign_profile, convert_profile, PC1b's
     // set_text_gamma and the channel ops of channels@1, PC1d's to_indexed, set_color_table, to_bitmap and set_duotone; COLOR-04:
     // PC2's set_adjustment, auto_adjust, hdr_toning, apply_image, calculations, trap and fade_layer; the public `genko schema`
-    // stays Python's).
+    // stays Python's). docs/ops.schema.json is Python's catalogue (the Python version's tests read it): this build's is
+    // that one with the words the user changed on 2026-10-28 (filter_raster's glow, add_layer's kind).
     void test_every_handled_op_is_in_the_catalog_and_docs() {
-        const Json docs = genko::test::read_json(genko::test::repo_root() + QStringLiteral("/docs/ops.schema.json"));
+        Json docs = genko::test::read_json(genko::test::repo_root() + QStringLiteral("/docs/ops.schema.json"));
+        const Json python = docs.at("ops");
+        genko::test::with_words_of_2026_10_28(docs);
+        QVERIFY(docs.at("ops") != python);
         std::string where;
         QVERIFY2(genko::test::same_content(docs.at("ops"), genko::core::ops_schema(), &where), where.c_str());
         std::set<std::string> listed;
@@ -1218,6 +1222,9 @@ private slots:
                                            // (PC4 E6: layer-styles@1, SPEC COLOR-09)
                                            "set_layer_style", "add_layer_effect", "set_global_light", "scale_layer_style",
                                            "show_layer_effects", "layer_style_to_layers",
+                                           // (PC5 G-0: type@1, the type ops — G-0's and the later groups' frames, SPEC TEXT-02)
+                                           "add_type_layer", "edit_type", "type_info", "set_type", "type_style", "line_to_type_layer",
+                                           "type_layer_to_line", "replace_fonts",
                                            // (PC5 J-0: 節 J's ops registered for its groups, SPEC PROD-01)
                                            "new_layer_comp", "update_layer_comp", "apply_layer_comp", "set_layer_comp",
                                            "duplicate_layer_comp", "delete_layer_comp", "clear_layer_comp_warnings", "add_slice",

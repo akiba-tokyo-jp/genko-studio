@@ -549,6 +549,7 @@ bool takes_layer_style(const Layer& layer) {
         case LayerKind::Fill:
         case LayerKind::Placed:
         case LayerKind::Smart:
+        case LayerKind::Type:  // (type@1, PC5 G-0: a type layer takes one as Photoshop's does)
             return true;
         default:
             return false;

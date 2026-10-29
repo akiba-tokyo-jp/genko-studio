@@ -79,12 +79,13 @@ void MainWindow::build_output_actions() {
          QStringLiteral("PDF・TIFF・PSD・縦読み・SNS 用などに書き出します"));
     make("act_print", QStringLiteral("プリント…"), [this] { print_book(); }, {QKeySequence(QStringLiteral("Ctrl+P"))},
          QStringLiteral("プリンターで紙に印刷します（仕上がりで切る・用紙全体）"));
-    make("act_history", QStringLiteral("履歴…"), [this] { show_dock(QStringLiteral("履歴")); }, {QKeySequence(QStringLiteral("Ctrl+H"))},
+    make("act_history", QStringLiteral("ヒストリー…"), [this] { show_dock(QStringLiteral("ヒストリー")); }, {QKeySequence(QStringLiteral("Ctrl+H"))},
          QStringLiteral("変更の一覧。クリックでその時点まで戻る・進む"));
     QAction* phone = make("act_phone", QStringLiteral("スマホの画面の範囲を表示"), [this] { toggle_phone(); }, {},
                           QStringLiteral("縦読みの原稿で、スマホ 1 画面に入る範囲と画面の切れ目"), true);
-    QAction* scale = make("act_scale", QStringLiteral("目盛りを表示"), [] {}, {QKeySequence(QStringLiteral("Ctrl+R"))},
-                          QStringLiteral("上と左に mm の目盛り。目盛りからドラッグするとガイド線を引けます"), true);
+    // (PC5 H-0, the user's decision 12: Photoshop's 定規 — Genko's 目盛り; the drawing rulers are 描画定規)
+    QAction* scale = make("act_scale", QStringLiteral("定規"), [] {}, {QKeySequence(QStringLiteral("Ctrl+R"))},
+                          QStringLiteral("上と左に mm の定規。定規からドラッグするとガイド線を引けます"), true);
     connect(scale, &QAction::triggered, this, [this](bool on) {
         canvas_->show_scale = on;
         canvas_->update();

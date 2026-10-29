@@ -50,6 +50,11 @@ genko_library(genko_app
     ime.cpp
     main_window.cpp
     main_window_actions.cpp
+    main_window_view.cpp
+    main_window_arrange.cpp
+    main_window_edit.cpp
+    key_sets.cpp
+    settings_watch.cpp
     main_window_select.cpp
     select_dialogs.cpp
     main_window_channels.cpp
@@ -187,6 +192,10 @@ genko_library(genko_app
     layer_style_dialog.cpp
     styles_panel.cpp
     main_window_styles.cpp
+    # PC5 I-0: ファイル → 自動処理 ▸・スクリプト ▸ (the frame), the steps run in the window, the script events it raises
+    main_window_automate.cpp
+    # PC5 G-0 (書式 メニュー)
+    main_window_type.cpp
     # PC5 J-0: the production's frames (解析 ▸, ビデオレイヤー ▸, its panels)
     main_window_production.cpp
     ${GENKO_APP_RESOURCES}

@@ -653,8 +653,8 @@ json.dump(out, open(sys.argv[1], "w"), ensure_ascii=False)
     }
 
     // The review's P2-1 and P2-2: on a 16-bit page a pen layer with precise lines stays a pen layer (the pattern a picture
-    // laid on it, its lines kept); a paint layer the panels cut, on a 16-bit page (a picture: not made precise) and a CMYK
-    // page (its inks), gets the pattern inside the panels only.
+    // laid on it, its lines kept); a paint layer the panels cut, on a 16-bit page (made precise: PC5-0, the user's decision
+    // of 2026-10-28) and a CMYK page (its inks), gets the pattern inside the panels only.
     void penLayersAndPanels() {
         core::Document book = on_page("rgb16");
         const Json across = Json::array({Json::array({2.0, 30.0}), Json::array({50.0, 30.0})});
@@ -691,7 +691,9 @@ json.dump(out, open(sys.argv[1], "w"), ensure_ascii=False)
             const core::Document done = run(framed, Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "paint1"}, {"area", Json{{"all", true}}},
                                                          {"pattern", Json{{"id", "pat-1"}}}});
             const core::Layer& paint = layer_of(done.page(0), "paint1");
-            if (m == "rgb16") QVERIFY2(!paint.color_raster && paint.patches.size() == 1, m.c_str());  // (a picture: a layer the panels cut is not made precise)
+            // (a layer the panels cut made precise too — the user's decision of 2026-10-28, before it a picture —, the pattern
+            // laid inside the panels)
+            if (m == "rgb16") QVERIFY2(paint.color_raster != nullptr && paint.patches.empty(), m.c_str());
             if (m == "cmyk") QVERIFY2(paint.ink_raster != nullptr, m.c_str());
             const render::Image seen = drawn(done);
             const auto margin = rgb_at(seen, 4, 4);  // (1 mm in: outside every panel)

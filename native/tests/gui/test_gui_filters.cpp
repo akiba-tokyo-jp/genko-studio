@@ -223,12 +223,12 @@ private slots:
         QCOMPARE(words_of(book.menu("menu_filter_plugins")), (QStringList{QStringLiteral("プラグインのフォルダーを開く"), QStringLiteral("プラグインの設定…")}));
         for (const char* key : {"menu_filter_pixelate", "menu_filter_video", "menu_filter_blur_gallery", "menu_filter_stylize", "menu_filter_distort", "menu_filter_other"})
             QVERIFY2(book.menu(key) != nullptr && !book.menu(key)->isEmpty(), key);
-        // the keys (Photoshop's; 前回のフィルター Ctrl+F — Ctrl+Alt+F is 台詞の検索・置換 —, no key for レンズ補正…)
-        QCOMPARE(book.act("act_filter_last")->shortcut(), QKeySequence(QStringLiteral("Ctrl+F")));
+        // the keys (Photoshop's — PC5 H-0's Photoshop key set: フィルターの再実行 Ctrl+Alt+F, レンズ補正… Ctrl+Shift+R; Ctrl+F and none in the Genko set)
+        QCOMPARE(book.act("act_filter_last")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+F")));  // (PC5 H-0: Photoshop's; Ctrl+F is 検索)
         QCOMPARE(book.act("act_filter_camera_raw")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+A")));
         QCOMPARE(book.act("act_filter_adaptive_wide_angle")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+Shift+A")));
         QCOMPARE(book.act("act_filter_vanishing_point")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+V")));
-        QVERIFY(book.act("act_filter_lens_correction")->shortcuts().isEmpty());
+        QCOMPARE(book.act("act_filter_lens_correction")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+R")));
         // ゆがみ… moved from 編集 (its id and key as they were); スマートフィルター用に変換 in both places
         QVERIFY(menus_of(w, book.act("act_liquify_filter")).contains(QStringLiteral("フィルター")));
         QVERIFY(!menus_of(w, book.act("act_liquify_filter")).contains(QStringLiteral("編集")));
