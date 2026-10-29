@@ -199,9 +199,15 @@ private slots:
         // the letters drawn whole: none cut at the box of before
         const double right = layer_record(big).x_mm.value() + layer_record(big).w_mm.value();
         QVERIFY(count(drawn(big), {4 + 2 * w, 0, right, 50}).dark > 0);
-        // one too large to set: refused
-        QVERIFY(refusal(doc, Json{{"op", "type_style"}, {"kind", "paragraph"}, {"action", "set"}, {"id", "ps-1"}, {"attrs", Json{{"size_mm", 1000}}}})
-                    .find("too large") != std::string::npos);
+        // a style that would set a text that takes it too large: refused (the texts measured as set_type measures)
+        std::string rows;
+        for (int i = 0; i < 200; ++i) rows += "a\n";
+        core::Document many = run(plain_book(), Json{{"op", "add_type_layer"}, {"page", 1}, {"text", rows}, {"point", Json::array({4, 12})}, {"new_id", "t1"}});
+        many = run(many, Json{{"op", "type_style"}, {"kind", "paragraph"}, {"action", "new"}, {"from_selection", false}});
+        many = run(many, Json{{"op", "type_style"}, {"kind", "paragraph"}, {"action", "apply"}, {"id", "ps-1"}, {"page", 1}, {"layer_id", "t1"}});
+        const std::string why = refusal(many, Json{{"op", "type_style"}, {"kind", "paragraph"}, {"action", "set"}, {"id", "ps-1"},
+                                                   {"attrs", Json{{"space_before_mm", 1000}, {"first_indent_mm", 1000}}}});
+        QVERIFY2(why.find("too large") != std::string::npos, why.c_str());
     }
 
     // a smart object's contents: their type layer drawn with the book's styles, a style changed changes it

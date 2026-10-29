@@ -95,6 +95,13 @@ std::map<std::int64_t, Json> paragraph_entries(const Json& nt) {
     }
     return out;
 }
+// The entry of paragraph `p` (made, an object, when there is none).
+Json& entry_at(std::map<std::int64_t, Json>& entries, std::int64_t p) {
+    Json& item = entries[p];
+    if (!item.is_object()) item = Json::object({{"index", p}});
+    return item;
+}
+
 void put_paragraphs(Json& nt, std::map<std::int64_t, Json>& entries) {
     Json list = Json::array();
     for (auto& [index, item] : entries) {
@@ -282,7 +289,7 @@ std::string checked_name(const Json* styles, Kind kind, const Json& name, std::s
 Attrs split_attrs(const Json& given) {
     Attrs out;
     if (given.is_null()) return out;
-    if (!given.is_object()) throw OpError("attrs must be {attribute: value}");
+    if (!given.is_object()) throw OpError("attrs gives the attributes as {attribute: value}");
     for (const auto& [key, value] : given.items()) {
         if (key == "size_pt") {
             if (given.contains("size_mm")) throw OpError("size_pt or size_mm sizes the text, not both");
@@ -309,9 +316,9 @@ Attrs split_attrs(const Json& given) {
         }
         try {
             const Json normal = character ? type_text::check_char(present) : type_text::check_para(present);
-            Json out = attrs;
-            for (const auto& [key, value] : normal.items()) out[key] = value;
-            return out;
+            Json laid = attrs;
+            for (const auto& [key, value] : normal.items()) laid[key] = value;
+            return laid;
         } catch (const Error& error) {
             throw OpError(error.what());
         }
@@ -341,7 +348,7 @@ void keep_look(StoryLine& record, const Json* styles, const Look& before, std::o
             const Json now = type_text::resolve_para(record, styles, index);
             const Json lay = differing(before.paras[p], now);
             if (lay.empty()) continue;
-            Json& item = entries[index];
+            Json& item = entry_at(entries, index);
             Json own = item.value("para", Json::object());
             for (const auto& [key, value] : lay.items()) own[key] = value;
             item["para"] = std::move(own);
@@ -487,22 +494,23 @@ void restyle(StoryLine& record, const Json* styles, Kind kind, std::optional<Ran
     // too when they are cleared somewhere — a paragraph's own come after the whole's, so the look stays)
     if (set && nt.contains("para_style")) {
         for (std::int64_t p = 0; p < count; ++p) {
-            Json& item = entries[p];
+            Json& item = entry_at(entries, p);
             if (!item.contains("style")) item["style"] = nt["para_style"];
         }
         nt.erase("para_style");
     }
     if (clear && nt.contains("para")) {
         for (std::int64_t p = 0; p < count; ++p) {
-            Json& item = entries[p];
+            Json& item = entry_at(entries, p);
             Json own = nt["para"];
-            for (const auto& [key, value] : item.value("para", Json::object()).items()) own[key] = value;
+            const Json mine = item.value("para", Json::object());
+            for (const auto& [key, value] : mine.items()) own[key] = value;
             item["para"] = std::move(own);
         }
         nt.erase("para");
     }
     for (const std::int64_t p : touched) {
-        Json& item = entries[p];
+        Json& item = entry_at(entries, p);
         if (set) {
             if (id) item["style"] = *id;
             else item.erase("style");
@@ -711,7 +719,8 @@ Json redefinition_at(const StoryLine& record, const Json* styles, Kind kind, std
         std::vector<const Json*> char_styles{find(styles, Kind::Character, nt.value("char_style", std::string()))};
         if (const std::optional<std::string> run_style = character_style_at(record, at)) char_styles.push_back(find(styles, Kind::Character, *run_style));
         for (const Json* style : char_styles) {
-            for (const auto& [key, value] : own_of(style, "char").items()) chars.erase(key);
+            const Json own = own_of(style, "char");
+            for (const auto& [key, value] : own.items()) chars.erase(key);
         }
     }
     out["char"] = std::move(chars);
@@ -763,7 +772,8 @@ Json defaults_of(const StoryLine& record, const Json* styles) {
     for (const auto& [key, value] : chars.front().attrs.items()) {
         if (!value.is_null()) out["char"][key] = value;
     }
-    for (const auto& [key, value] : type_text::resolve_para(record, styles, 0).items()) {
+    const Json para = type_text::resolve_para(record, styles, 0);
+    for (const auto& [key, value] : para.items()) {
         if (!value.is_null()) out["para"][key] = value;
     }
     return out;

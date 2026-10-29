@@ -40,6 +40,7 @@
 #include "render/smart_decode.hpp"
 #include "render/smart_filters.hpp"
 #include "render/stack.hpp"
+#include "render/text/opentype.hpp"
 #include "storage/asset_store.hpp"
 
 namespace genko::render::smart {
@@ -757,8 +758,20 @@ void left_out(const Ctx& ctx, const std::vector<std::string>& omitted) {
 }
 
 std::string contents_key(const Ctx& ctx, const core::SmartContents& contents, int dpi) {
-    return "contents " + identity(*ctx.episode, contents) + " " + std::to_string(dpi) + " " + ctx.mode + (ctx.finish ? " f" : "") + (ctx.rough ? " r" : "") +
-           (ctx.dots ? " d" : "") + (ctx.screen_dots ? " s" : "");
+    std::string key = "contents " + identity(*ctx.episode, contents) + " " + std::to_string(dpi) + " " + ctx.mode + (ctx.finish ? " f" : "") +
+                      (ctx.rough ? " r" : "") + (ctx.dots ? " d" : "") + (ctx.screen_dots ? " s" : "");
+    // (PC5 G-c: the book's type styles, which its contents' type layers take — a style changed draws them anew; a book with
+    // none keyed as before)
+    if (ctx.episode->type_styles && !ctx.episode->type_styles->is_null()) {
+        const core::Json* styles = &*ctx.episode->type_styles;
+        if (text::TypeStyles::current() == styles) {
+            key += " styles " + text::TypeStyles::digest();
+        } else {
+            const text::TypeStyles scope(styles);
+            key += " styles " + text::TypeStyles::digest();
+        }
+    }
+    return key;
 }
 
 // The contents' page drawn whole at `dpi` ("RGBA", over nothing), remembered.

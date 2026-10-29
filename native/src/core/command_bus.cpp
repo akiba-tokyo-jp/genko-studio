@@ -401,7 +401,7 @@ void OpRegistry::add_query(std::string name, OpFunction function, std::function<
 bool OpRegistry::is_query(const Json& op) const {
     const Json* name = op.is_object() ? get(op, "op") : nullptr;
     if (name == nullptr || !name->is_string()) return false;
-    if (is_query(name->get_ref<const std::string&>())) return true;
+    if (is_query(std::string_view(name->get_ref<const std::string&>()))) return true;
     const auto it = asks_.find(name->get_ref<const std::string&>());
     return it != asks_.end() && it->second && it->second(op);
 }

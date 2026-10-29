@@ -1262,7 +1262,7 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the chosen text takes no character style: name the style to redefine \\(id\\)",
                          "選んだ文字には文字スタイルがありません（再定義するスタイルを指定します）"));
         r.push_back(rule("an empty range takes a paragraph style only", "空の範囲には段落スタイルだけを適用できます"));
-        r.push_back(rule("attrs must be \\{attribute: value\\}", "スタイルの属性（attrs）は {属性: 値} で指定します"));
+        r.push_back(rule("attrs gives the attributes as \\{attribute: value\\}", "スタイルの属性（attrs）は {属性: 値} で指定します"));
         r.push_back(rule("clear is a list of attribute names", "消す属性（clear）は属性の名前の一覧で指定します"));
         r.push_back(rule("name gives the style its new name", "スタイルの新しい名前（name）を指定します"));
         r.push_back(rule("(replace|from_selection|apply|clear_overrides) is true or false", "\\1 は true か false です"));

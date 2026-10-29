@@ -402,7 +402,7 @@ private slots:
     void linesAndWords() {
         core::Document doc = plain_book();
         doc = run(doc, Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "大きな声"}, {"x_mm", 5}, {"y_mm", 5}, {"w_mm", 30}, {"h_mm", 30},
-                            {"style_runs", Json::array({Json::array({"大きな", Json{{"scale", 1.5}}}})}}});
+                            {"style_runs", Json::array({Json::array({"大きな", Json{{"scale", 1.5}}})})}});
         doc = run(doc, style_op("character", "new", Json{{"from_selection", false}, {"attrs", Json{{"rgb", Json::array({200, 0, 0})}}}}, false));
         Json op{{"op", "type_style"}, {"kind", "character"}, {"action", "apply"}, {"id", "cs-1"}, {"line", "l1"}};
         doc = run(doc, op);
