@@ -334,6 +334,90 @@ private slots:
     }
 
     // A copied page's comps name the copy's layers (duplicate_page gives them new ids).
+    // (the review's P2-1) A layer's place is what it holds, not what the panels or the paper's edge leave of it: a paint layer
+    // cut by its panel (panel_clip) and a pen line partly off the paper go back where they were.
+    void placesNotCutByPanelsOrPaper() {
+        auto doc = core::new_episode("カンプ", core::Num(1), 1, core::PageSpec::custom(kInch, kInch, 20, 20, 1, 2, 2, 2, 2, 200, "color"));
+        auto& p = doc.edit_page(0);
+        p.layers.clear();
+        QVERIFY(!p.frames.empty());  // (its basic frame: a panel inside the paper)
+        add_paint(doc, "a", block(0, 40, 30, 60));  // (from the paper's edge, across the panel's)
+        doc.edit_page(0).layers.back().panel_clip = true;
+        doc = run(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen"}, {"panel_each", false}});
+        doc = run(doc, Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "pen"},
+                            {"points", Json::array({Json::array({-5, 5}), Json::array({10, 6})})}, {"width_mm", 0.4}});
+        const auto x_of = [&](const core::Document& d, const char* id) { return (*lc::position_of(d, d.page(0), layer_of(d, id)))[0]; };
+        QCOMPARE(x_of(doc, "a"), 0.0);  // (not the panel's edge)
+        QVERIFY(std::fabs(x_of(doc, "pen") - (-5.2)) < 1e-6);  // (off the paper)
+        doc = run(doc, op("new_layer_comp", {{"name", "A"}}));
+        doc = run(doc, move("a", 5, 0));
+        doc = run(doc, Json{{"op", "transform_layers"}, {"page", 1}, {"ids", Json::array({"pen"})}, {"move", Json::array({-3, 0})}});
+        QVERIFY(std::fabs(x_of(doc, "a") - 5 * kPx) < 1e-6);
+        QVERIFY(std::fabs(x_of(doc, "pen") - (-8.2)) < 1e-6);
+        doc = run(doc, op("new_layer_comp", {{"name", "B"}}));
+        doc = run(doc, op("apply_layer_comp", {{"comp", "A"}}));
+        QCOMPARE(x_of(doc, "a"), 0.0);
+        QVERIFY(std::fabs(x_of(doc, "pen") - (-5.2)) < 1e-6);
+        QVERIFY(std::fabs(layer_of(doc, "pen").strokes->items[0]->points[0].x - (-5)) < 1e-9);
+        doc = run(doc, op("apply_layer_comp", {{"comp", "B"}}));
+        QVERIFY(std::fabs(x_of(doc, "a") - 5 * kPx) < 1e-6);
+        QVERIFY(std::fabs(x_of(doc, "pen") - (-8.2)) < 1e-6);
+    }
+
+    // (the review's P2-2) A layer of its own pixels moves by whole pixels of its own grid: on a 350 dpi precise page and a 600
+    // dpi CMYK page, going between two comps again and again leaves its pixels as they were.
+    void ownPixelsBackAndForth() {
+        struct Case {
+            int dpi;
+            const char* mode;
+        };
+        for (const Case c : {Case{350, "rgb"}, Case{600, "cmyk"}}) {
+            auto doc = core::new_episode("カンプ", core::Num(1), 1, core::PageSpec::custom(kInch, kInch, 20, 20, 1, 2, 2, 2, 2, c.dpi, "color"));
+            auto& p = doc.edit_page(0);
+            p.numero = false;
+            p.frames.clear();
+            p.layers.clear();
+            add_paint(doc, "a", block(40, 50, 80, 110));
+            Json mode{{"op", "set_color_mode"}, {"page", 1}, {"mode", c.mode}, {"depth", 16}};
+            if (std::string(c.mode) == "cmyk") mode["profile"] = "coated-cmyk";
+            doc = run(doc, mode);
+            const core::Layer& own = layer_of(doc, "a");
+            QVERIFY2(own.color_raster || own.ink_raster, c.mode);
+            const auto grid = lc::placing(doc, doc.page(0), own).grid;
+            QVERIFY(grid);
+            const auto pixels = [](const core::Document& d) {
+                const core::Layer& l = layer_of(d, "a");
+                return l.color_raster ? *l.color_raster : *l.ink_raster;
+            };
+            doc = run(doc, op("new_layer_comp", {{"name", "A"}}));
+            doc = run(doc, move("a", 7, 3));  // (7 working pixels: not whole pixels of a 350 or 600 dpi grid)
+            doc = run(doc, op("new_layer_comp", {{"name", "B"}}));
+            doc = run(doc, op("apply_layer_comp", {{"comp", "A"}}));
+            const std::string at_a = pixels(doc);
+            doc = run(doc, op("apply_layer_comp", {{"comp", "B"}}));
+            const std::string at_b = pixels(doc);
+            for (int i = 0; i < 3; ++i) {
+                doc = run(doc, op("apply_layer_comp", {{"comp", "A"}}));
+                QVERIFY2(pixels(doc) == at_a, c.mode);
+                doc = run(doc, op("apply_layer_comp", {{"comp", "B"}}));
+                QVERIFY2(pixels(doc) == at_b, c.mode);
+            }
+        }
+    }
+
+    // (the review's P3-2) The last comp deleted: no comps, no last document state — the page holds none (layer-comps@1 not
+    // named).
+    void lastCompDeleted() {
+        core::Document doc = book();
+        doc = run(doc, op("new_layer_comp"));
+        doc.edit_page(0).layer_comps->last_applied.reset();
+        doc = run(doc, op("apply_layer_comp"));
+        QVERIFY(comps(doc).last_state);
+        doc = run(doc, op("delete_layer_comp"));
+        QVERIFY(!doc.page(0).layer_comps);
+        QVERIFY(!core::uses_layer_comps(doc));
+    }
+
     void copiedPage() {
         core::Document doc = book();
         doc = run(doc, op("new_layer_comp"));

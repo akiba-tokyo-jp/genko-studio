@@ -54,7 +54,7 @@ Placing placing(const core::Document& doc, const core::Page& page, const core::L
     const double w = page.spec.width_mm.value(), h = page.spec.height_mm.value();
     // its own pixels (8-bit, precise, inks): the box of those that show, on their own grid — not cut by the panels
     if (w > 0 && h > 0) {
-        if (const std::optional<OwnPixels> own = OwnPixels::of(page, layer)) {
+        if (const std::optional<own_pixels::OwnPixels> own = own_pixels::OwnPixels::of(page, layer)) {
             const double sx = own->width() / w, sy = own->height() / h;
             out.grid = std::array<double, 2>{sx, sy};
             if (const auto shown = own->shown()) unite(shown->x0 / sx, shown->y0 / sy, shown->x1 / sx, shown->y1 / sy);

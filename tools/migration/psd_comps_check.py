@@ -49,7 +49,7 @@ def view(path: str) -> dict:
         out["comps"] = plain(resources[Resource.LAYER_COMPS].data)
     for layer in psd.descendants():
         blocks = layer._record.tagged_blocks
-        item = {"name": layer.name, "lyid": None, "cmls": None, "shmd": []}
+        item = {"name": layer.name, "visible": layer.visible, "lyid": None, "cmls": None, "shmd": []}
         if blocks is not None:
             if Tag.LAYER_ID in blocks:
                 item["lyid"] = int(blocks.get_data(Tag.LAYER_ID))

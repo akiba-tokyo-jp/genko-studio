@@ -2844,7 +2844,7 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
         if ((!layer.visible && !hidden_too) || !layer.exportable || guide_role(layer.role)) continue;
         if (layer.kind == LayerKind::Folder) continue;
         if (!layer.visible && (layer.kind == LayerKind::Adjust || is_tone(layer))) continue;  // (a hidden correction, a tone: not)
-        const std::function<void(PageLayer&&)>& emit = layer.visible ? each_shown : hidden_each;
+        const std::function<void(PageLayer&&)>& give_layer = layer.visible ? each_shown : hidden_each;
         if (adjust_layers != nullptr && layer.kind == LayerKind::Adjust) (*adjust_layers)(layer);  // (PC2: in its place)
         if (layer.kind == LayerKind::Placed) {  // its art before the monochrome finish (mode "name")
             auto art = placed_raster(layer, page, &episode, size, dpi, "name", true, ctx.dots, whole);
@@ -2861,14 +2861,14 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
                 out.name = core::py_strip(label + " " + (!layer.title.empty() ? layer.title : layer.id));
                 out.image = std::move(*art);
                 if (layer.style) out.styled = &layer;  // (layer-styles@1: its style with it, review P2-6)
-                emit(std::move(out));
+                give_layer(std::move(out));
             }
             continue;
         }
         // (pen-shapes@1, PC3 C-b: its parts, its lines; for a PSD a pen layer with a vector mask too — one layer of its
         // look with its mask, vector mask and settings, not among the ink's lines)
         if (layer.kind == LayerKind::Strokes && (shape_parts::any(layer) || (shapes && layer.vector_mask))) {
-            pen_shape_layers(ctx, layer, emit, shapes);
+            pen_shape_layers(ctx, layer, give_layer, shapes);
             continue;
         }
         if (shapes && layer.kind == LayerKind::Fill && layer.fill && core::pattern_of_fill(*layer.fill)) {
@@ -2887,7 +2887,7 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
             if (layer.mask && layer.mask->png && !layer.mask->png->empty() && layer.mask->enabled) out.mask = decoded(layer.mask->png, "L").resize(size);
             out.vector_mask = layer.vector_mask;
             out.pattern = core::pattern_of_fill(*layer.fill);
-            emit(std::move(out));
+            give_layer(std::move(out));
             continue;
         }
         std::optional<Image> raster;
@@ -2925,7 +2925,7 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
             out.mask = decoded(layer.mask->png, "L").resize(size);
         }
         out.vector_mask = layer.vector_mask;  // (vector@1, PC3 C-a)
-        emit(std::move(out));
+        give_layer(std::move(out));
     }
     // the pen lines of the ink layer (page.ink_strokes: its first), each as render._stroke draws it, 3 px wide
     const Layer* ink_layer = page.first_layer(LayerRole::Ink);

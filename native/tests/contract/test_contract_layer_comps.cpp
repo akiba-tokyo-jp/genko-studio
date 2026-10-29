@@ -23,6 +23,7 @@
 #include "core/json.hpp"
 #include "core/layer_comps.hpp"
 #include "core/paths.hpp"
+#include "formats/copy.hpp"
 #include "formats/export.hpp"
 #include "formats/open_file.hpp"
 #include "formats/pcraft_write.hpp"
@@ -339,6 +340,48 @@ private slots:
         (void)formats::export_page_psd(book(), book().page(0), fs::path(plain.toStdString()), 200);
         QVERIFY(!blocks_of(plain).contains("1065"));
         for (const Json& l : comps_view(plain)["layers"]) QVERIFY2(l["lyid"].is_null() && l["cmls"].is_null(), l.dump().c_str());
+    }
+
+    // (the review's P2-3, the coordinator's decision) A page with comps writes its hidden layers too, hidden — Photoshop's
+    // comps show them —; read back hidden, its comp showing it. A page without comps writes them not, as before.
+    void psdHiddenLayers() {
+        const core::Document doc = run(two_comps(), Json{{"op", "set_layer"}, {"page", 1}, {"id", "pic"}, {"visible", false}});
+        const QString file = path(QStringLiteral("hidden.psd"));
+        (void)formats::export_page_psd(doc, doc.page(0), fs::path(file.toStdString()), 200);
+        const Json view = comps_view(file);
+        Json pic;
+        for (const Json& l : view["layers"])
+            if (l["name"] == Json("pic")) pic = l;
+        QVERIFY2(!pic.is_null(), view.dump().c_str());
+        QCOMPARE(pic["visible"], Json(false));
+        QVERIFY(pic["cmls"].is_object());
+        formats::Opened opened = formats::open_file(genko::test::read_bytes(file), "hidden.psd");
+        const core::Document back = opened.doc;
+        QVERIFY(titled(back, "pic") != nullptr && !titled(back, "pic")->visible);
+        const core::Document shown = run(back, op("apply_layer_comp", {{"comp", "A"}}));
+        QVERIFY(titled(shown, "pic")->visible);
+        // (no comps: the hidden layer not written, as before)
+        core::Document plain = book();
+        plain = run(plain, Json{{"op", "set_layer"}, {"page", 1}, {"id", "pic"}, {"visible", false}});
+        const QString plain_file = path(QStringLiteral("hidden-plain.psd"));
+        (void)formats::export_page_psd(plain, plain.page(0), fs::path(plain_file.toStdString()), 200);
+        for (const Json& l : comps_view(plain_file)["layers"]) QVERIFY2(l["name"] != Json("pic"), l.dump().c_str());
+    }
+
+    // (the review's P3-6) A comp's long name: the file's name cut to at most 240 bytes by whole characters.
+    void longNames() {
+        core::Document doc = book();
+        std::string name;
+        for (int i = 0; i < 255; ++i) name += "あ";
+        doc = run(doc, op("new_layer_comp", {{"name", name}}));
+        formats::CompFiles files;
+        files.prefix = "p";
+        const auto written = formats::export_layer_comps(doc, 0, fs::path(path(QStringLiteral("long")).toStdString()), files);
+        QCOMPARE(written.size(), std::size_t(1));
+        const std::string file_name = core::path_to_utf8(written[0].file.filename());
+        QVERIFY2(file_name.size() <= 240, file_name.c_str());
+        QVERIFY(file_name.starts_with("p_0000_あ") && file_name.ends_with("あ.png"));
+        QVERIFY(QFileInfo::exists(QString::fromStdString(core::path_to_utf8(written[0].file))));
     }
 
     // .pcraft: written and read back (the comps, their states naming the layers read, the last applied); upstream's reader
