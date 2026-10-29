@@ -174,6 +174,35 @@ private slots:
         QCOMPARE(g.back().cluster, 0U);
     }
 
+    // a run shaped as a part of its paragraph (review P3-5: HarfBuzz sees the letters round it): its glyphs as the run's
+    // own where nothing round it changes them, its clusters counted from its first letter
+    void inContext() {
+        text::ShapeRequest r;
+        r.font = inter();
+        r.size_px = 100;
+        const std::u32string paragraph = U"xyz";
+        r.context = paragraph;
+        r.context_start = 1;
+        r.context_length = 2;
+        const auto part = text::shape(r);
+        QCOMPARE(ids(part), ids(shaped("yz", inter())));
+        QCOMPARE(part.size(), std::size_t{2});
+        QCOMPARE(part[0].cluster, 0U);
+        QCOMPARE(part[1].cluster, 1U);
+        text::ShapeRequest h;
+        h.font = hebrew();
+        h.size_px = 100;
+        h.direction = "rtl";
+        const std::u32string words = U"אבג";
+        h.context = words;
+        h.context_start = 1;
+        h.context_length = 2;
+        const auto right = text::shape(h);
+        QCOMPARE(right.size(), std::size_t{2});
+        QCOMPARE(right.front().cluster, 1U);
+        QCOMPARE(right.back().cluster, 0U);
+    }
+
     // a paragraph shaped run by run (a Latin and a Hebrew font), its row's glyphs placed left to right
     void paragraphAndRow() {
         std::vector<text::Look> looks(2);

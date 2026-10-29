@@ -14,8 +14,14 @@
 // - Down: the grid as before, a cell's glyph HarfBuzz's only where it chooses another (kana as before).
 // - type.fonts: the computer's fonts by family with their PostScript names and axes.
 // - Saved and read back as set.
+// - The review's (PC5 G-b review): a text set too large refused, never drawn out of memory (P1-1); a line's rows centred as
+//   before (P2-1); a word's 縦中横 kept by a range's set_type (P2-2); the book's styles in the memo's key (P2-3); Unicode's
+//   paragraph separators in a right-to-left text (P2-4); a text of 100 000 letters set in time, one longer refused (P2-5);
+//   a word's weight, the whole text's colour over Genko's words, a line's features one by one, a size against the line's,
+//   a type layer's auto leading (P3-1, P3-2, P3-4, P3-11, P3-12).
 
 #include <QCryptographicHash>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -35,6 +41,7 @@
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
+#include "render/text/bidi.hpp"
 #include "render/text/lettering.hpp"
 #include "render/text/opentype.hpp"
 #include "render/text/shaping.hpp"
@@ -156,10 +163,12 @@ void write_book(const core::Document& doc, const fs::path& dir) {
     storage::Saver(lock).save(doc, request);
 }
 
-// The lines of before, each alone on a page of its own: what their pages are drawn as is kept (plain_lines.json).
+// The lines of before, each alone on a page of its own (after `before`: the page made precise or of inks, the book's text
+// gamma): what their pages are drawn as is kept (plain_lines.json).
 struct Plain {
     const char* name;
     Json op;
+    Json before = Json::array();
 };
 std::vector<Plain> plain_lines() {
     const auto line = [](Json more) {
@@ -184,6 +193,16 @@ std::vector<Plain> plain_lines() {
         {"justified_ruby", line(Json{{"text", "均等に揃えた文で、ルビも振ります"}, {"wrap", "horizontal"}, {"balloon", "box"}, {"w_mm", 30},
                                      {"ruby_runs", Json::array({Json::array({"揃", "そろ"})})}, {"style", Json{{"align", "justify"}}}})},
         {"text_only", line(Json{{"text", "一行目\n二行目の文"}, {"wrap", "horizontal"}, {"balloon", "none"}})},
+        // (PC5 G-b review P3-14: a precise page, a page of inks, the book's text gamma, 傍点 and rubies across)
+        {"precise16", line(Json{{"text", "高い精度の頁、Hello"}, {"wrap", "horizontal"}, {"balloon", "box"}}),
+         Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}}})},
+        {"inks", line(Json{{"text", "インキの頁です"}, {"emphasis_runs", Json::array({"インキ"})}}),
+         Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}, {"depth", 16}}})},
+        {"text_gamma", line(Json{{"text", "文字のガンマ"}, {"wrap", "horizontal"}, {"style", Json{{"rgb", Json::array({200, 40, 40})}}}}),
+         Json::array({Json{{"op", "set_text_gamma"}, {"gamma", 1.45}}})},
+        {"across_emphasis", line(Json{{"text", "ここが大事なところ"}, {"wrap", "horizontal"}, {"emphasis_runs", Json::array({"大事"})}})},
+        {"across_ruby_spans", line(Json{{"text", "東京へ行こう"}, {"wrap", "horizontal"},
+                                        {"ruby_spans", Json::array({Json{{"start", 0}, {"end", 2}, {"ruby", "とうきょう"}}})}})},
     };
 }
 
@@ -205,7 +224,9 @@ private slots:
         if (record.isEmpty()) kept = test::read_json(path);
         Json made = Json::object();
         for (const Plain& p : plain_lines()) {
-            const core::Document doc = run(plain_book(50, 50), p.op);
+            Json ops = p.before;
+            ops.push_back(p.op);
+            const core::Document doc = run_ops(plain_book(50, 50), ops).doc;
             QVERIFY2(!render::text::sets_opentype(doc.story.at(0)), p.name);
             made[p.name] = sha(drawn(doc, 0, 150).tobytes());
             if (record.isEmpty()) QVERIFY2(kept.value(p.name, Json()) == made[p.name], p.name);
@@ -430,6 +451,176 @@ private slots:
             QCOMPARE(service::briefs::type_fonts(), families);
         }
         qunsetenv("GENKO_CONFIG_DIR");
+    }
+
+    // review P1-1: a text whose attributes would set it into too large a picture is refused by set_type (the picture's size
+    // judged before it is made), and drawn — a record given them some other way — refused, never out of memory
+    void tooLargeRefused() {
+        std::string rows;
+        for (int i = 0; i < 200; ++i) rows += "a\n";
+        const core::Document many = latin(rows);
+        const std::string far = refusal(many, Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"space_before_mm", 1000}, {"first_indent_mm", 1000}});
+        QVERIFY2(far.find("too large to set") != std::string::npos, far.c_str());
+        const core::Document long_row = latin(std::string(300, 'H'));
+        const std::string wide = refusal(long_row, Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"scale", 10}, {"tracking", 10}});
+        QVERIFY2(wide.find("too large to set") != std::string::npos, wide.c_str());
+        // a line in its balloon is measured too
+        const core::Document line = run(plain_book(), Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", std::string(300, 'H')}, {"wrap", "horizontal"},
+                                                           {"x_mm", 5}, {"y_mm", 5}, {"w_mm", 30}, {"h_mm", 20}});
+        const std::string line_wide = refusal(line, Json{{"op", "set_type"}, {"line", "l1"}, {"scale", 10}, {"tracking", 10}});
+        QVERIFY2(line_wide.find("too large to set") != std::string::npos, line_wide.c_str());
+        // drawn: the line given them by add_line's native_type is refused as too large, not drawn
+        const core::Document given = run(plain_book(), Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", std::string(300, 'H')}, {"wrap", "horizontal"},
+                                                            {"x_mm", 5}, {"y_mm", 5}, {"w_mm", 30}, {"h_mm", 20}, {"balloon", "none"},
+                                                            {"native_type", Json{{"char", Json{{"scale", 10}, {"tracking", 10}}}}}});
+        bool refused = false;
+        try {
+            (void)render::text::text_layout(given.story[0], 300);
+        } catch (const core::Error& error) {
+            refused = error.code() == "image_too_large";
+        }
+        QVERIFY(refused);
+    }
+
+    // review P2-1: a line's rows centred as the lines' (its short row under the long one's middle), before and after
+    // set_type alike; a type layer's at its left (Photoshop's)
+    void rowsCentred() {
+        const auto bands = [](const core::Document& doc) {  // (each row's ink: its left and right, mm)
+            const render::Image image = drawn(doc).convert("L");
+            const std::string px = image.tobytes();
+            std::vector<std::pair<double, double>> out;
+            bool inside = false;
+            for (int y = 0; y < image.height(); ++y) {
+                int x0 = image.width(), x1 = -1;
+                for (int x = 0; x < image.width(); ++x) {
+                    if (static_cast<unsigned char>(px[std::size_t(y) * image.width() + x]) < 128) {
+                        x0 = std::min(x0, x);
+                        x1 = std::max(x1, x + 1);
+                    }
+                }
+                if (x1 < 0) {
+                    inside = false;
+                    continue;
+                }
+                const double k = kInch / kDpi;
+                if (!inside) out.emplace_back(x0 * k, x1 * k);
+                out.back().first = std::min(out.back().first, x0 * k);
+                out.back().second = std::max(out.back().second, x1 * k);
+                inside = true;
+            }
+            return out;
+        };
+        const auto middle = [](const std::pair<double, double>& b) { return (b.first + b.second) / 2; };
+        const Json line{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "あいうえおか\nきく"}, {"wrap", "horizontal"}, {"balloon", "none"},
+                        {"x_mm", 5}, {"y_mm", 5}, {"w_mm", 40}, {"h_mm", 30}};
+        Json with_features = line;
+        with_features["style"] = Json{{"features", Json::array({"palt"})}};
+        const core::Document featured = run(plain_book(), with_features);
+        QVERIFY(render::text::sets_opentype(featured.story[0]));
+        const auto rows = bands(featured);
+        QCOMPARE(rows.size(), std::size_t{2});
+        QVERIFY(rows[1].second - rows[1].first < (rows[0].second - rows[0].first) / 2);
+        QVERIFY(std::abs(middle(rows[0]) - middle(rows[1])) < 0.5);
+        // set_type on a line of before: its rows where they were
+        const core::Document plain = run(plain_book(), line);
+        const auto before = bands(plain);
+        const auto after = bands(run(plain, Json{{"op", "set_type"}, {"line", "l1"}, {"features", Json{{"frac", 1}}}}));
+        QCOMPARE(after.size(), before.size());
+        for (std::size_t i = 0; i < before.size(); ++i) QVERIFY(std::abs(middle(before[i]) - middle(after[i])) < 0.5);
+        // a type layer: at its left
+        const auto layer = bands(latin("HHHHHH\nH"));
+        QVERIFY(std::abs(layer[0].first - layer[1].first) < 0.5);
+    }
+
+    // review P2-2: a word set 縦中横 (style_runs) stays so when a range is given attributes
+    void rangeKeepsTcy() {
+        const core::Document line = run(plain_book(), Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "12時に来て"}, {"balloon", "none"},
+                                                           {"x_mm", 20}, {"y_mm", 5}, {"w_mm", 15}, {"h_mm", 45},
+                                                           {"style_runs", Json::array({Json::array({"12", Json{{"tcy", true}}})})}});
+        const auto before = *ink_mm(line);
+        const core::Document ranged = run(line, Json{{"op", "set_type"}, {"line", "l1"}, {"range", Json::array({3, 5})}, {"rgb", Json::array({200, 0, 0})}});
+        QCOMPARE(ranged.story[0].style_runs.size(), std::size_t{1});
+        QCOMPARE(ranged.story[0].style_runs[0].second, (Json{{"tcy", true}}));
+        const auto after = *ink_mm(ranged);
+        QVERIFY2(std::abs((after[3] - after[1]) - (before[3] - before[1])) < 0.3, "the column as tall as before (12 in one cell)");
+        QVERIFY(ink_mm(ranged, true).has_value());
+    }
+
+    // review P2-3: a line across with features alone drawn again when the book's Basic Paragraph changes
+    void stylesKeyed() {
+        core::Document doc = run(plain_book(), Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "ABC"}, {"wrap", "horizontal"},
+                                                    {"balloon", "none"}, {"x_mm", 5}, {"y_mm", 5}, {"w_mm", 40}, {"h_mm", 20},
+                                                    {"style", Json{{"features", Json::array({"kern"})}, {"font", inter()}}}});
+        QVERIFY(!doc.story[0].native_type.has_value());
+        QVERIFY(!ink_mm(doc, true).has_value());
+        doc.type_styles = Json{{"basic", Json{{"char", Json{{"rgb", Json::array({220, 0, 0})}}}}}};
+        QVERIFY(ink_mm(doc, true).has_value());
+    }
+
+    // review P2-4: Unicode's paragraph separators (U+2029, a lone CR) in a right-to-left text: its paragraphs, drawn
+    void separatorsRightToLeft() {
+        const core::Document doc = latin("אב בג\rגא", Json{{"style", Json{{"size_mm", 6}, {"font", hebrew()}}}});
+        QVERIFY(ink_mm(doc).has_value());
+        QCOMPARE(render::text::set_layout(record_of(doc), kDpi, std::nullopt, render::text::LetterParts{}).set.rows.size(), std::size_t{3});
+        // SheenBidi given one: its runs cover the row, never a failure
+        const std::u32string text = U"אב ab\rcd";
+        const render::text::BidiParagraph paragraph(text, "auto");
+        std::size_t covered = 0;
+        for (const auto& r : paragraph.visual_runs(0, text.size())) covered += r.end - r.start;
+        QCOMPARE(covered, text.size());
+    }
+
+    // review P2-5: a text of 100 000 letters set in a box in time (its rows found by halving); one longer refused
+    void longText() {
+        std::string words;
+        while (words.size() < 100000) words += "word ";
+        words.resize(100000);
+        QElapsedTimer timer;
+        timer.start();
+        core::Document doc = latin(words, Json{{"point", nullptr}, {"box", Json::array({5, 5, 190, 190})}, {"style", Json{{"size_mm", 0.5}, {"font", inter()}}}});
+        doc = set(doc, Json{{"range", Json::array({0, 4})}, {"rgb", Json::array({200, 0, 0})}});
+        const qint64 took = timer.elapsed();
+        QVERIFY2(took < 60000, std::to_string(took).c_str());
+        const std::string longer = refusal(plain_book(), Json{{"op", "add_type_layer"}, {"page", 1}, {"text", std::string(100001, 'a')}, {"point", Json::array({5, 5})}});
+        QVERIFY2(longer.find("too long to set") != std::string::npos, longer.c_str());
+        const std::string grown = refusal(doc, Json{{"op", "edit_type"}, {"page", 1}, {"layer_id", "t1"}, {"insert", Json{{"at", 0}, {"text", "ab"}}}});
+        QVERIFY2(grown.find("too long to set") != std::string::npos, grown.c_str());
+    }
+
+    // review P3: a word's weight over the line's (P3-1), the whole text's colour over Genko's words (P3-2), a line's
+    // features one by one (P3-4), a size against the line's (P3-12), a type layer's auto leading 120% (P3-11)
+    void wordsAndSizes() {
+        // P3-1: a word set normal in a bold line is drawn normal (across and down)
+        for (const char* wrap : {"horizontal", "vertical"}) {
+            const Json line{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "ABCD"}, {"wrap", wrap}, {"balloon", "none"}, {"x_mm", 10},
+                            {"y_mm", 5}, {"w_mm", 30}, {"h_mm", 40}, {"style", Json{{"bold", true}, {"font", inter()}, {"size_mm", 6}}}};
+            const core::Document bold = run(plain_book(), line);
+            const core::Document whole = run(bold, Json{{"op", "set_type"}, {"line", "l1"}, {"range", Json::array({2, 3})}, {"underline", false}});
+            const core::Document thin = run(bold, Json{{"op", "set_type"}, {"line", "l1"}, {"range", Json::array({0, 2})}, {"faux_bold", "normal"}});
+            QVERIFY2(darkness(thin) < darkness(whole) * 0.97, wrap);
+        }
+        // P3-2: the whole text's colour over a word's own (Genko's words written as ranges first)
+        core::Document red = run(plain_book(), Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "ABCD"}, {"wrap", "horizontal"}, {"balloon", "none"},
+                                                    {"x_mm", 5}, {"y_mm", 5}, {"w_mm", 40}, {"h_mm", 20}, {"style", Json{{"font", inter()}}},
+                                                    {"style_runs", Json::array({Json::array({"AB", Json{{"rgb", Json::array({220, 0, 0})}}})})}});
+        QVERIFY(ink_mm(red, true).has_value());
+        red = run(red, Json{{"op", "set_type"}, {"line", "l1"}, {"rgb", Json::array({0, 0, 0})}});
+        QVERIFY(!ink_mm(red, true).has_value());
+        QVERIFY(red.story[0].style_runs.empty());
+        // P3-4: a line's features one by one — one that is no tag left out, Pillow's "-liga" off
+        core::StoryLine record;
+        record.text = "ab";
+        record.style = Json{{"features", Json::array({"-liga", "frac", "bad!"})}};
+        QCOMPARE(core::type_text::resolve_chars(record, nullptr).at(0).attrs["features"], (Json{{"frac", 1}, {"liga", 0}}));
+        // P3-12: a line in its balloon given 5 mm (the lines' size) is set as given nothing: its letters shrink with it
+        const Json balloon{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "あいうえおかきくけこさしすせそたちつてと"}, {"wrap", "horizontal"},
+                           {"balloon", "box"}, {"x_mm", 5}, {"y_mm", 5}, {"w_mm", 20}, {"h_mm", 20}};
+        const core::Document fitted = run(plain_book(), balloon);
+        QCOMPARE(bytes(run(fitted, Json{{"op", "set_type"}, {"line", "l1"}, {"size_mm", 5}})),
+                 bytes(run(fitted, Json{{"op", "set_type"}, {"line", "l1"}, {"underline", false}})));
+        // P3-11: a type layer's rows 1.2 of its size apart (Photoshop's auto leading), as leading_mm 7.2 for 6 mm
+        const core::Document rows = latin("H\nH");
+        QVERIFY(std::abs((*ink_mm(rows))[3] - (*ink_mm(set(rows, Json{{"leading_mm", 7.2}})))[3]) < 0.2);
     }
 
     // saved and read back as set

@@ -10,5 +10,10 @@
  "no_features": "22e0c727b90832b4b0b8a86b2a724688ebfc7bca397cc80c28544463406edfab",
  "down_features": "256ed047c34469dc49bd1cf7d20ba22415074d40b47d3b15dc47b256e70a0587",
  "justified_ruby": "63bc33337aeee9ef79f34c15b23ca7aaedc980c5ad72414d33c9c45fe8bfabd0",
- "text_only": "36524c821547b3d3be7d6daee7ade23fd25fa84cf1bca9dbb3ee1ef0cc8ce667"
+ "text_only": "36524c821547b3d3be7d6daee7ade23fd25fa84cf1bca9dbb3ee1ef0cc8ce667",
+ "precise16": "6dbf98d298a053adbca9417c48e6ece4af2a9ba270a1841e8701bfe37655c7cd",
+ "inks": "2d91075baadf21ab26631fa05d7277076f2fa657fbdf0454a0222714b7a6b488",
+ "text_gamma": "4d27780c3447155ab953a43e4061fa6d4566732c70dddf8020ff0d1e5b914696",
+ "across_emphasis": "9ad516d7680936cc6e5278bdb553a48686982bc6c2fe96a3182815a323c31c6a",
+ "across_ruby_spans": "a311d3e7f26e52ed84b78d7dd4f3fc5b0f8b2d8ad1841b0eb788a50d72013b03"
 }

@@ -4,6 +4,8 @@
   "url": "https://github.com/Tehreer/SheenBidi/tree/v2.9.0",
   "commit": "83f77108a2873600283f6da4b326a2dca7a3a7a6 (the tag v2.9.0, 2025-06-06)",
   "license": "Apache-2.0",
+  "notice": "none: the tag v2.9.0 holds no NOTICE file (looked for in the whole tree, 2026-10-29), so Apache-2.0 4(d) asks nothing more than the LICENSE beside it",
+  "packaged_how": "not from apt or vcpkg: the source pinned here and built the same on Linux and Windows (design 7.3, as BLAKE3; Ubuntu 24.04 has no package) — the brief asked for apt and vcpkg; the coordinator took this as it is",
   "changes": "unmodified source: the tag's Headers/SheenBidi and Source folders and its LICENSE, byte for byte (cloned from the tag, checked 2026-10-29); built as one unity file (Source/SheenBidi.c with SB_CONFIG_UNITY, as the project's own CMakeLists builds it by default) into a static library (CMakeLists.txt here); its tests, tools and build files are not taken",
   "used_by": "native/src/render/text/bidi.cpp: the bidirectional order of the rows set across by the OpenType typesetting (PC5 G-b, SPEC.md TEXT-02; the user's decision 9 of 2026-10-28)",
   "files": {
