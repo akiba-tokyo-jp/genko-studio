@@ -1064,27 +1064,18 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     Json filters_read = Json::array(), filters_shown = Json::array();
     Json raw_shown = Json::array();  // (PC4 F-e: smart objects of a camera RAW shown as Photoshop drew them)
     std::size_t filters_unsaid = 0;
-    // (groups@1, PC5 I-b: groups nested at most core::kGroupDepthMax deep — a folder deeper is not made, what it holds goes
-    // in the deepest group made, its name among the skipped; as psd.read_psd's, without the limit)
+    // (groups@1, PC5 I-b: groups nested at most core::kGroupDepthMax deep — a folder deeper is made a folder that is not a
+    // group (an order of layers, as psd.read_psd makes every folder: nothing held while drawn), its name said in the
+    // report's groups_as_folders)
     std::vector<std::size_t> depth(layers.size(), 0);
     for (std::size_t i = 0; i < layers.size(); ++i) {
         std::size_t d = 0;
         for (auto at = layers[i].parent; at && *at < layers.size() && d <= layers.size(); at = layers[*at].parent) ++d;
         depth[i] = d;
     }
-    const bool nesting_kept = !psd::python_view();
-    const auto kept_parent = [&](std::size_t i) {
-        auto at = layers[i].parent;
-        while (nesting_kept && at && *at < layers.size() && depth[*at] >= core::kGroupDepthMax) at = layers[*at].parent;
-        return at;
-    };
-    std::vector<std::string> deep_skipped;
+    std::vector<std::string> deep_folders;
     for (std::size_t i = 0; i < layers.size(); ++i) {
         const psd::Layer& item = layers[i];
-        if (nesting_kept && item.folder && depth[i] >= core::kGroupDepthMax) {
-            deep_skipped.push_back(item.name);
-            continue;
-        }
         core::Layer layer;
         layer.id = ids[i];
         layer.role = core::LayerRole::User;
@@ -1094,7 +1085,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
         layer.blend = item.blend;
         layer.clip = item.clip;
         layer.exportable = true;
-        layer.parent_id = kept_parent(i) ? Json(ids[*kept_parent(i)]) : parent;
+        layer.parent_id = item.parent ? Json(ids[*item.parent]) : parent;
         // its mask over the page, as the page holds a layer's (none when it has none)
         const auto mask_of = [&]() -> std::optional<core::Mask> {
             const std::optional<Image> mask = file.mask(item);
@@ -1122,6 +1113,9 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
         };
         if (item.folder && psd::python_view()) {
             layer.kind = core::LayerKind::Folder;  // (as psd.read_psd's: a folder, an order of layers only)
+        } else if (item.folder && depth[i] >= core::kGroupDepthMax) {
+            layer.kind = core::LayerKind::Folder;  // (groups@1: nested past the limit — an order of layers only, said)
+            deep_folders.push_back(item.name);
         } else if (item.folder) {
             // (groups@1, PC5 I-b, the user's decision 2: a group drawn as Photoshop draws it — its visibility, opacity, blend
             // (通過 among them), mask and vector mask)
@@ -1371,10 +1365,10 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     Json skipped = Json::array();
     for (const std::string& name : merged_only ? file.python_skipped() : file.skipped()) skipped.push_back(name);
     for (const std::string& name : shapes_skipped) skipped.push_back(name);
-    for (const std::string& name : deep_skipped) skipped.push_back(name);  // (groups@1: nested past the limit)
     target.layers.insert(target.layers.begin() + static_cast<std::ptrdiff_t>(at), std::make_move_iterator(made.begin()),
                          std::make_move_iterator(made.end()));
     Json report = Json::object({{"layers", std::move(listed)}, {"skipped", std::move(skipped)}});
+    if (!deep_folders.empty()) report["groups_as_folders"] = deep_folders;  // (groups@1: said only when there are)
     // (PC3 A3: the placed layers made smart objects, and those read as their pixels and why — said only when there are)
     if (!smart_objects.empty()) report["smart_objects"] = std::move(smart_objects);
     if (!placed_pixels.empty()) report["placed_as_pixels"] = std::move(placed_pixels);

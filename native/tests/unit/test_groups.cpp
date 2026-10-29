@@ -379,7 +379,8 @@ private slots:
     }
 
     // (review P1-1, P2-3) a 16-bit PSD of a 通過 group opens (open_file) and comes in (import_psd) as a group; a PSD of groups
-    // nested past core::kGroupDepthMax opens with them nested at most that deep, the deeper ones said skipped
+    // nested past core::kGroupDepthMax opens with them nested at most that deep, the deeper ones folders that are not groups,
+    // said
     void psdsOfGroupsOpen() {
         const QTemporaryDir tmp;
         const auto file = [&](const std::string& name) { return std::filesystem::path(tmp.path().toStdString()) / name; };
@@ -404,7 +405,8 @@ private slots:
         (void)formats::export_page_psd(nested, nested.page(0), file("nested.psd"), 50);
         const formats::Opened back = formats::open_file(test::read_bytes(QString::fromStdString(file("nested.psd").string())), "nested.psd");
         QCOMPARE(deepest(back.doc.page(0).layers), core::kGroupDepthMax);
-        // (what the deeper groups held: kept, in the deepest one made — the only layer that deep; the folders not made said)
+        // (what the deeper groups held: kept, in the deepest group — the only layer that deep —; the folders past it kept as
+        // folders that are not groups, said)
         const auto owners = core::group_owners(back.doc.page(0).layers);
         std::size_t kept = 0;
         for (std::size_t i = 0; i < owners.size(); ++i) {
@@ -413,6 +415,8 @@ private slots:
             if (d == core::kGroupDepthMax && back.doc.page(0).layers[i].kind != core::LayerKind::Folder) ++kept;
         }
         QCOMPARE(kept, std::size_t(1));
+        const auto deepest_folder = std::find_if(back.doc.page(0).layers.begin(), back.doc.page(0).layers.end(), [](const core::Layer& l) { return l.title == "n69"; });
+        QVERIFY(deepest_folder != back.doc.page(0).layers.end() && deepest_folder->kind == core::LayerKind::Folder && !deepest_folder->group);
         const std::string said = Json(back.notes).dump();
         QVERIFY2(said.find("n64") != std::string::npos && said.find("n69") != std::string::npos, said.c_str());
     }

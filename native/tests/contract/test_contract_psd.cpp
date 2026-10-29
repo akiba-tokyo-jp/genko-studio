@@ -193,6 +193,7 @@ Json as_python_folders(Json value) {
             value.erase("vector_mask");
             if (value.contains("clip")) value["clip"] = false;
         }
+        value.erase("groups_as_folders");  // (import_psd's word of groups nested past core::kGroupDepthMax)
         for (auto& [key, item] : value.items()) item = as_python_folders(std::move(item));
     }
     return value;
