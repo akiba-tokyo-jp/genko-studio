@@ -385,6 +385,21 @@ def _content(norm: Normal, result) -> dict:
     return {"content": blocks, "is_error": bool(result.is_error)}
 
 
+# The user's decisions of 2026-10-28 (PC5-0): the op catalogue's words the C++ build changed (filter_raster's glow,
+# add_layer's kind), put into Python's resource before it is hashed — as native/tests/support/testsupport's
+# with_words_of_2026_10_28 does to the records compared whole.
+_KIND_PY = '"kind": "pen|paint|folder|fill|gradient|adjust?"'
+_KIND_CPP = ('"kind": "pen|paint|folder|fill|gradient|adjust? (paint on an RGB page of 16 or 32 bits: its pixels at the page\'s depth '
+             'once painted)"')
+
+
+def _words_of_2026_10_28(text: str) -> str:
+    for python, cpp in (("glow (光彩拡散) radius", "glow (光彩, フィルター → 漫画) radius"), (_KIND_PY, _KIND_CPP)):
+        text = text.replace(python, cpp)
+        text = text.replace(json.dumps(python)[1:-1], json.dumps(cpp)[1:-1])  # (as json.dumps with ensure_ascii writes it)
+    return text
+
+
 async def _client_ops(job: dict, step: dict, norm: Normal) -> list:
     import anyio
     from mcp import Client
@@ -426,7 +441,9 @@ async def _client_ops(job: dict, step: dict, norm: Normal) -> list:
                         out.append({"resources": [r.model_dump(mode="json", exclude_none=True) for r in res.resources]})
                     elif kind == "read_resource":
                         res = await client.read_resource(op["uri"])
-                        out.append({"read": [{"uri": str(c.uri), "mime": c.mime_type, "sha256": hashlib.sha256(c.text.encode()).hexdigest()}
+                        py = job["server"]["kind"] == "py"
+                        out.append({"read": [{"uri": str(c.uri), "mime": c.mime_type,
+                                              "sha256": hashlib.sha256((_words_of_2026_10_28(c.text) if py else c.text).encode()).hexdigest()}
                                              for c in res.contents]})
                     elif kind == "ping":
                         await client.send_ping()

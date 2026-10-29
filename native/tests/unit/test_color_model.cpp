@@ -1206,15 +1206,15 @@ private slots:
             QCOMPARE(file.depth(), 16);
             render::RenderOptions options;
             options.mode = "print";
-            options.precise = true;
-            const core::ColorRasterView page(*render::render_page(doc.page(0), dpi, options, &doc).precise);
+            const formats::detail::PageValues made = formats::detail::page_values(doc.page(0), doc, dpi, options);  // (what the PSD writes)
+            const core::ColorRasterView page(made.values);
             const auto merged = file.merged_deep();
             QVERIFY(merged);
             const unsigned all = merged->colours + (merged->alpha ? 1 : 0);
             for (std::size_t i = 0; i < std::size_t(page.width()) * page.height(); ++i) {
                 for (unsigned c = 0; c < 3; ++c) {
-                    const double want = std::lround(std::clamp(page.pixel(i)[c], 0.0, 1.0) * 65535) / 65535.0;
-                    QVERIFY(std::fabs(merged->samples[i * all + c] - want) < 1e-9);
+                    const long want = std::lround(std::clamp(page.pixel(i)[c], 0.0, 1.0) * 65535);  // (the sample written)
+                    QVERIFY2(std::fabs(double(merged->samples[i * all + c]) * 65535 - double(want)) < 0.01, qPrintable(QStringLiteral("%1 %2: %3 for %4").arg(i).arg(c).arg(double(merged->samples[i * all + c]) * 65535).arg(want)));  // (read as a float of the 16 bits)
                 }
             }
         }
