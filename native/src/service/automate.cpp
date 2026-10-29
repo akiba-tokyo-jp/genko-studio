@@ -3,10 +3,14 @@
 
 #include "service/automate.hpp"
 
+#include <QByteArray>
 #include <QString>
+#include <QtGlobal>
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cstdint>
 #include <cmath>
 #include <set>
 #include <system_error>
@@ -283,12 +287,17 @@ Json read_steps(std::string_view text) {
     return steps;
 }
 
-Json read_steps_file(const fs::path& file) {
+std::string read_steps_bytes(const fs::path& file) {
     std::error_code ec;
+    const fs::file_status status = fs::status(file, ec);
+    // (a FIFO, a device: never read — its reading may not end; the review of PC5 I-e, P3-10)
+    if (fs::exists(status) && !fs::is_regular_file(status)) throw core::Error("value", "the file cannot be read (it is not a regular file)");
     const auto size = fs::file_size(file, ec);
     if (!ec && size > kMaxStepsBytes) throw StepsError("the steps are larger than 1 MiB");
-    return read_steps(storage::read_file_bounded(file, kMaxStepsBytes));
+    return storage::read_file_bounded(file, kMaxStepsBytes);
 }
+
+Json read_steps_file(const fs::path& file) { return read_steps(read_steps_bytes(file)); }
 
 bool pseudo_op(std::string_view name) { return find_pseudo(name) != nullptr; }
 
@@ -600,8 +609,13 @@ Json notes_json(const std::vector<std::string>& notes) {
 // Nothing is written inside a book's folder — the input's or any other —: refused before anything is made.
 void refuse_inside_book(const fs::path& place) {
     std::error_code ec;
-    const fs::path absolute = fs::absolute(place, ec);
-    for (fs::path p = ec ? place : absolute;; p = p.parent_path()) {
+    // (links and .. resolved first: a link to a folder in a book is inside it, /a/book/../x is not — the review's P3-1)
+    fs::path resolved = fs::absolute(place, ec);
+    if (ec) resolved = place;
+    std::error_code e3;
+    const fs::path canonical = fs::weakly_canonical(resolved, e3);
+    resolved = e3 ? resolved.lexically_normal() : canonical;
+    for (fs::path p = resolved;; p = p.parent_path()) {
         std::error_code e2;
         if (fs::is_regular_file(p / "project.json", e2)) {
             throw core::Error("refused_target", "cannot write inside the book's folder: " + core::path_to_utf8(p));
@@ -663,10 +677,10 @@ Result run(const std::vector<Input>& inputs, const Json& steps, const Output& ou
     }
     Result result;
     std::vector<fs::path> written;
+    Json outputs = Json::array();  // (the files of the input in hand written so far: said with its error too — the review's P3-7)
     // Each page of `doc` written to every target (never over the picture's own file, the book, its links: the guard).
     const auto write_pages = [&](const core::Document& doc, const Input& input, const formats::WriteGuard& guard, std::size_t number,
                                  Json& done) {
-        Json outputs = Json::array();
         std::vector<std::string> notes;
         for (Output target : targets) {
             if (target.serial > 0) target.suffix += "_" + serial_text(target.serial + static_cast<int>(number));
@@ -682,12 +696,10 @@ Result run(const std::vector<Input>& inputs, const Json& steps, const Output& ou
                 notes.insert(notes.end(), wrote.notes.begin(), wrote.notes.end());
             }
         }
-        // (a picture's one file: "output"; a book's pages, or a picture in more than one format: "outputs")
-        if (!input.book && outputs.size() == 1) {
-            done["output"] = outputs[0];
-        } else {
-            done["outputs"] = outputs;
-        }
+        // (a picture: "output", its first file, as `genko batch` has said since PC5 I-0 — and "outputs" too when it made more:
+        // more formats, pages a step added; a book's pages: "outputs")
+        if (!input.book && !outputs.empty()) done["output"] = outputs[0];
+        if (input.book || outputs.size() > 1) done["outputs"] = outputs;
         return notes;
     };
     // The steps on `doc` — Options::first's, then the steps aimed at its pages — as one change.
@@ -704,6 +716,7 @@ Result run(const std::vector<Input>& inputs, const Json& steps, const Output& ou
         }
         if (options.progress) options.progress(i, inputs.size(), input.path);
         const std::string where = core::path_to_utf8(input.path);
+        outputs = Json::array();
         try {
             Json done = Json::object();
             done["input"] = where;
@@ -770,9 +783,11 @@ Result run(const std::vector<Input>& inputs, const Json& steps, const Output& ou
             result.files.push_back(std::move(done));
         } catch (const core::Error& error) {
             result.errors.push_back(Json{{"input", where}, {"error", error.what()}, {"code", error.code()}});
+            if (!outputs.empty()) result.errors.back()["outputs"] = outputs;  // (written before it failed: kept)
             if (options.stop_on_error) break;
         } catch (const std::exception& error) {
             result.errors.push_back(Json{{"input", where}, {"error", error.what()}, {"code", "internal"}});
+            if (!outputs.empty()) result.errors.back()["outputs"] = outputs;
             if (options.stop_on_error) break;
         }
     }
@@ -965,16 +980,111 @@ std::string desktop_value(const std::string& text) {
     return out;
 }
 
-std::string cmd_quoted(const std::string& text) {
-    std::string out = "\"";
+// A path a launcher names: never one holding a control character (a line end would start a line of its own in a
+// .desktop file — the review of PC5 I-e, P2-1 —; refused for every kind alike).
+void refuse_control(const std::string& text) {
     for (const char c : text) {
-        if (c == '%') {
-            out += "%%";
-        } else {
-            out += c;
+        const auto u = static_cast<unsigned char>(c);
+        if (u < 0x20 || u == 0x7F) throw core::Error("refused_target", "the launcher's path holds a control character: " + text);
+    }
+}
+
+std::u16string utf16(const std::string& text) { return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size())).toStdU16String(); }
+
+void put_u16(std::string& out, std::uint16_t v) {
+    out += static_cast<char>(v & 0xFF);
+    out += static_cast<char>((v >> 8) & 0xFF);
+}
+
+void put_u32(std::string& out, std::uint32_t v) {
+    for (int i = 0; i < 4; ++i) out += static_cast<char>((v >> (8 * i)) & 0xFF);
+}
+
+void put_utf16(std::string& out, const std::u16string& text) {
+    for (const char16_t c : text) put_u16(out, static_cast<std::uint16_t>(c));
+}
+
+// A Windows shortcut (MS-SHLLINK: its header, a LinkInfo of a local path — ANSI and Unicode —, its description and its
+// arguments as StringData, the terminal block): `target` run with `arguments`. Explorer puts the files dropped on a
+// shortcut after its arguments, each one argument of the program: no cmd.exe reads them (the review of PC5 I-e, P2-2).
+std::string shell_link(const std::string& target, const std::string& arguments, const std::string& description) {
+    const std::u16string target16 = utf16(target), arguments16 = utf16(arguments), description16 = utf16(description);
+    if (arguments16.size() > 0xFFFF || description16.size() > 0xFFFF) throw core::Error("refused_target", "the launcher's path is too long");
+    std::string out;
+    // ShellLinkHeader
+    put_u32(out, 0x4C);
+    for (const unsigned char b : {0x01, 0x14, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}) out += static_cast<char>(b);
+    put_u32(out, 0x02 | 0x04 | 0x20 | 0x80);  // (HasLinkInfo, HasName, HasArguments, IsUnicode)
+    put_u32(out, 0);                          // (FileAttributes)
+    out.append(24, '\0');                     // (CreationTime, AccessTime, WriteTime)
+    put_u32(out, 0);                          // (FileSize)
+    put_u32(out, 0);                          // (IconIndex)
+    put_u32(out, 1);                          // (ShowCommand: SW_SHOWNORMAL)
+    put_u16(out, 0);                          // (HotKey)
+    out.append(10, '\0');                     // (Reserved1..3)
+    // LinkInfo: a VolumeID of a fixed drive, the local path in ANSI ('?' for what is not ASCII) and in Unicode
+    std::string ansi;
+    for (const char16_t c : target16) ansi += c < 0x80 ? static_cast<char>(c) : '?';
+    const std::uint32_t header = 0x24, volume = 17;
+    const std::uint32_t base = header + volume;
+    const std::uint32_t suffix = base + static_cast<std::uint32_t>(ansi.size()) + 1;
+    const std::uint32_t base16 = suffix + 1;
+    const std::uint32_t suffix16 = base16 + static_cast<std::uint32_t>(target16.size() + 1) * 2;
+    const std::uint32_t size = suffix16 + 2;
+    put_u32(out, size);
+    put_u32(out, header);
+    put_u32(out, 1);  // (VolumeIDAndLocalBasePath)
+    put_u32(out, header);
+    put_u32(out, base);
+    put_u32(out, 0);  // (no network share)
+    put_u32(out, suffix);
+    put_u32(out, base16);
+    put_u32(out, suffix16);
+    put_u32(out, volume);
+    put_u32(out, 3);     // (DRIVE_FIXED)
+    put_u32(out, 0);     // (its serial number: unknown)
+    put_u32(out, 0x10);  // (its label, empty, right after)
+    out += '\0';
+    out += ansi;
+    out += '\0';
+    out += '\0';  // (CommonPathSuffix: empty)
+    put_utf16(out, target16);
+    put_u16(out, 0);
+    put_u16(out, 0);  // (CommonPathSuffixUnicode: empty)
+    // StringData: NAME_STRING, COMMAND_LINE_ARGUMENTS
+    put_u16(out, static_cast<std::uint16_t>(description16.size()));
+    put_utf16(out, description16);
+    put_u16(out, static_cast<std::uint16_t>(arguments16.size()));
+    put_utf16(out, arguments16);
+    put_u32(out, 0);  // (TerminalBlock)
+    return out;
+}
+
+// Bytes written whole to `place` with the mode set before they take its name (a temporary file beside it, made runnable,
+// renamed over it: no moment where a link put there gets the mode — the review's P3-2).
+void write_runnable(const fs::path& place, const std::string& bytes, bool runnable) {
+    const fs::path temporary = place.parent_path() / core::path_from_utf8("." + core::path_to_utf8(place.filename()) + ".genko-" +
+                                                                         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    storage::write_atomic(temporary, bytes);
+    std::error_code ec;
+#ifndef _WIN32
+    if (runnable) {
+        fs::permissions(temporary, fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec | fs::perms::others_read | fs::perms::others_exec,
+                        fs::perm_options::replace, ec);
+        if (ec) {
+            fs::remove(temporary, ec);
+            throw core::Error("io", "the launcher cannot be made runnable: " + core::path_to_utf8(place));
         }
     }
-    return out + "\"";
+#else
+    (void)runnable;
+#endif
+    fs::rename(temporary, place, ec);
+    if (ec) {
+        std::error_code e2;
+        fs::remove(temporary, e2);
+        throw core::Error("io", "the launcher cannot be written: " + core::path_to_utf8(place));
+    }
 }
 
 }  // namespace
@@ -1039,7 +1149,12 @@ Droplet read_droplet(const fs::path& file) {
     std::error_code ec;
     const auto size = fs::file_size(file, ec);
     if (!ec && size > kMaxStepsBytes) throw core::Error("value", "the droplet is larger than 1 MiB");
-    const std::string text = storage::read_file_bounded(file, kMaxStepsBytes);
+    std::string text;
+    try {
+        text = read_steps_bytes(file);  // (a regular file only)
+    } catch (const StepsError&) {
+        throw core::Error("value", "the droplet is larger than 1 MiB");
+    }
     Json json;
     try {
         json = core::parse_python_json(text, nullptr, steps_json());
@@ -1048,6 +1163,8 @@ Droplet read_droplet(const fs::path& file) {
     }
     Droplet out = droplet_from_json(json);
     if (out.name.empty()) out.name = core::path_to_utf8(file.stem());
+    // (a folder written relative: from the droplet's own folder, not from wherever its launcher runs — the review's P3-4)
+    if (out.output && out.output->is_relative()) out.output = (fs::absolute(file, ec).parent_path() / *out.output).lexically_normal();
     return out;
 }
 
@@ -1064,7 +1181,7 @@ fs::path write_droplet(const fs::path& file, const Droplet& droplet) {
 
 std::vector<Launcher> launchers_here() {
 #ifdef _WIN32
-    return {Launcher::Cmd};
+    return {Launcher::Shortcut};
 #else
     return {Launcher::Shell, Launcher::Desktop};
 #endif
@@ -1073,14 +1190,27 @@ std::vector<Launcher> launchers_here() {
 fs::path launcher_path(const fs::path& droplet, Launcher kind) {
     fs::path base = droplet;
     if (lower(core::path_to_utf8(base.extension())) == kDropletSuffix) base.replace_extension();
-    const char* suffix = kind == Launcher::Shell ? ".sh" : kind == Launcher::Desktop ? ".desktop" : ".cmd";
+    const char* suffix = kind == Launcher::Shell ? ".sh" : kind == Launcher::Desktop ? ".desktop" : ".lnk";
     base += core::path_from_utf8(suffix);
     return base;
+}
+
+fs::path launcher_program(const fs::path& running) {
+    // (an AppImage runs from a mount that is gone once it ends: the AppImage itself — the review's P3-3)
+    const QByteArray image = qgetenv("APPIMAGE");
+    if (!image.isEmpty()) {
+        const fs::path file = core::path_from_utf8(image.toStdString());
+        std::error_code ec;
+        if (file.is_absolute() && fs::is_regular_file(file, ec)) return file;
+    }
+    return running;
 }
 
 std::string launcher_text(const fs::path& droplet, const fs::path& genko, Launcher kind) {
     const std::string target = core::path_to_utf8(droplet);
     const std::string program = core::path_to_utf8(genko);
+    refuse_control(target);
+    refuse_control(program);
     switch (kind) {
         case Launcher::Shell:
             return "#!/bin/sh\n# " + std::string(kLauncherMark) + ": runs the droplet on the files given (or dropped on it)\nexec " +
@@ -1090,12 +1220,24 @@ std::string launcher_text(const fs::path& droplet, const fs::path& genko, Launch
             return "[Desktop Entry]\nType=Application\nName=" + desktop_value(name) + "\nComment=" + std::string(kLauncherMark) +
                    ": drop files on it\nExec=" + desktop_quoted(program) + " droplet " + desktop_quoted(target) + " %F\nTerminal=false\n";
         }
-        case Launcher::Cmd:
-            return "@echo off\r\nrem " + std::string(kLauncherMark) + ": runs the droplet on the files dropped on it\r\n" + cmd_quoted(program) +
-                   " droplet " + cmd_quoted(target) + " %*\r\n";
+        case Launcher::Shortcut:
+            // (a path on Windows never holds a ": the droplet's one argument quoted as it is)
+            if (target.find('"') != std::string::npos) throw core::Error("refused_target", "the launcher's path holds a quotation mark: " + target);
+            return shell_link(program, "droplet \"" + target + "\"", std::string(kLauncherMark) + ": drop files on it");
     }
     return {};
 }
+
+namespace {
+
+bool is_launcher(const std::string& bytes) {
+    if (bytes.find(kLauncherMark) != std::string::npos) return true;
+    std::string wide;  // (a shortcut's description: UTF-16)
+    put_utf16(wide, utf16(std::string(kLauncherMark)));
+    return bytes.find(wide) != std::string::npos;
+}
+
+}  // namespace
 
 std::vector<fs::path> write_launchers(const fs::path& droplet, const fs::path& genko) {
     std::error_code ec;
@@ -1111,7 +1253,7 @@ std::vector<fs::path> write_launchers(const fs::path& droplet, const fs::path& g
             bool ours = fs::is_regular_file(status) && !fs::is_symlink(status);
             if (ours) {
                 try {
-                    ours = storage::read_file_bounded(place, 64 * 1024).find(kLauncherMark) != std::string::npos;
+                    ours = is_launcher(storage::read_file_bounded(place, 64 * 1024));
                 } catch (const std::exception&) {
                     ours = false;
                 }
@@ -1122,13 +1264,7 @@ std::vector<fs::path> write_launchers(const fs::path& droplet, const fs::path& g
     }
     std::vector<fs::path> out;
     for (const auto& [place, text] : made) {
-        storage::write_atomic(place, text);
-#ifndef _WIN32
-        fs::permissions(place,
-                        fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec | fs::perms::others_read | fs::perms::others_exec,
-                        fs::perm_options::replace, ec);
-        if (ec) throw core::Error("io", "the launcher cannot be made runnable: " + core::path_to_utf8(place));
-#endif
+        write_runnable(place, text, true);
         out.push_back(place);
     }
     return out;

@@ -607,6 +607,10 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(cannot write over a file that is not a droplet's launcher: (.*))",
                          "同じ名前の、ドロップレットの起動ファイルでないファイルがあるので書きません。別の名前か場所を選んでください: \\1"));
         r.push_back(rule(R"(the launcher cannot be made runnable: (.*))", "起動ファイルを実行できるようにできません: \\1"));
+        r.push_back(rule(R"(the launcher cannot be written: (.*))", "起動ファイルを書けません: \\1"));
+        r.push_back(rule(R"(the launcher's path holds a (control character|quotation mark): (.*))",
+                         "改行などの制御文字や引用符を含む場所・名前には、起動ファイルを作りません。別の場所か名前を選んでください: \\2"));
+        r.push_back(rule(R"(the launcher's path is too long)", "場所の名前が長すぎるので、起動ファイルを作れません"));
         r.push_back(rule(R"(no file to run the droplet on)", "ドロップレットで処理するファイルがありません"));
         r.push_back(rule(R"(the colour profile cannot be read \((.*)\))", "カラープロファイルを読み込めません"));
         r.push_back(rule(R"(the file cannot be read \(it is larger than 2 GiB\))", "ファイルが大きすぎて読み込めません（2 GiB まで）"));

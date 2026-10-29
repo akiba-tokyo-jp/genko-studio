@@ -263,6 +263,7 @@ void MainWindow::open_path(const fs::path& path, std::optional<render::codecs::F
         watcher->deleteLater();
         flash_timer_.stop();
         if (!read.first) {
+            start_pending_ = false;  // (PC5 I-e: the first book not opened — no アプリケーションを起動 later)
             ask::warning(this, QStringLiteral("Genko"), QStringLiteral("ファイルを開けませんでした:\n%1\n%2").arg(QDir::toNativeSeparators(qpath(path)), wording::error(read.second)));
             refresh_status();
             return;
@@ -294,6 +295,7 @@ void MainWindow::open_pcraft_folder(const fs::path& path) {
         watcher->deleteLater();
         flash_timer_.stop();
         if (!read.first) {
+            start_pending_ = false;  // (PC5 I-e: the first book not opened — no アプリケーションを起動 later)
             ask::warning(this, QStringLiteral("Genko"), QStringLiteral("ファイルを開けませんでした:\n%1\n%2").arg(QDir::toNativeSeparators(qpath(path)), wording::error(read.second)));
             refresh_status();
             return;
@@ -372,17 +374,31 @@ void MainWindow::add_picture_book(core::Document doc, const std::vector<std::str
 
 bool MainWindow::close_all() {
     // (each asked first as 閉じる asks; the last one closes into an untitled book, the window staying)
-    while (documents_.size() > 1) {
-        if (!close_document(static_cast<int>(documents_.size()) - 1)) return false;
+    // (PC5 I-e, the review's P2-4: ドキュメントを閉じる raised once, at the end, not once a book on the book left in front)
+    bool closed = false;
+    bool settled = true;
+    {
+        const service::script_events::Firing quiet;
+        while (settled && documents_.size() > 1) {
+            settled = close_document(static_cast<int>(documents_.size()) - 1);
+            closed = closed || settled;
+        }
+        if (settled) {
+            const std::shared_ptr<Session> last = documents_.front().session;
+            settled = documents::open_elsewhere(last.get(), this) || settle(0);
+        }
     }
-    const std::shared_ptr<Session> last = documents_.front().session;
-    if (!documents::open_elsewhere(last.get(), this) && !settle(0)) return false;
+    if (!settled) {  // (キャンセル: those closed said once)
+        if (closed) script_event(service::script_events::Event::CloseDocument);
+        return false;
+    }
     auto fresh = std::make_shared<Session>(core::new_episode("無題", core::Num(std::int64_t{1}), 8, core::PageSpec::a4_mono()), std::nullopt);
     documents_.front() = Document{fresh};
     doc_ = -1;
     show_document(0);
     canvas_->fit_page();
     flash(QStringLiteral("原稿をすべて閉じました"), 3000);
+    script_event(service::script_events::Event::CloseDocument);
     return true;
 }
 
@@ -390,11 +406,22 @@ bool MainWindow::close_others() {
     // (from the last tab down: closing one never moves the tabs still to be looked at; the kept book's tabs — its
     // contents' too — stay)
     const std::shared_ptr<Session> kept = session_;
-    for (int i = static_cast<int>(documents_.size()) - 1; i >= 0; --i) {
-        if (documents_[static_cast<std::size_t>(i)].session == kept) continue;
-        if (!close_document(i)) return false;
+    // (PC5 I-e, the review's P2-4: ドキュメントを閉じる raised once, at the end — not once a book on the book kept)
+    bool closed = false;
+    bool all = true;
+    {
+        const service::script_events::Firing quiet;
+        for (int i = static_cast<int>(documents_.size()) - 1; i >= 0; --i) {
+            if (documents_[static_cast<std::size_t>(i)].session == kept) continue;
+            if (!close_document(i)) {
+                all = false;
+                break;
+            }
+            closed = true;
+        }
     }
-    return true;
+    if (closed) script_event(service::script_events::Event::CloseDocument);
+    return all;
 }
 
 // --- 保存 (file.saveAs, file.saveACopy, file.revert) ----------------------------------------------------------------

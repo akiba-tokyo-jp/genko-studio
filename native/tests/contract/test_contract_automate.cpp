@@ -388,7 +388,8 @@ private slots:
                                          QStringList{QStringLiteral("automate"), QStringLiteral("fit"), q(root / "in"), QStringLiteral("--out"), q(root / "x"),
                                                      QStringLiteral("--width"), QStringLiteral("5"), QStringLiteral("--to"), QStringLiteral("gray")},
                                          QStringList{QStringLiteral("automate"), QStringLiteral("image-processor"), q(root / "in"), QStringLiteral("--save")},
-                                         QStringList{QStringLiteral("automate"), QStringLiteral("mode"), q(root / "in"), QStringLiteral("--dry-run")}}) {
+                                         QStringList{QStringLiteral("automate"), QStringLiteral("mode"), q(root / "in"), QStringLiteral("--dry-run")},
+                                         QStringList{QStringLiteral("automate"), QStringLiteral("lens"), q(root / "b.genko"), QStringLiteral("--save")}}) {
             QVERIFY2(test::run_genko(wrong).exit_code == 2, wrong.join(QLatin1Char(' ')).toUtf8().constData());
         }
         QVERIFY(!fs::exists(root / "x"));
@@ -478,7 +479,7 @@ private slots:
                                    QStringLiteral("--no-launcher"), QStringLiteral("--json")});
         QCOMPARE(code, 0);
         QCOMPARE(out["launchers"], Json::array());
-        QVERIFY(!fs::exists(root / "d" / "only.sh") && !fs::exists(root / "d" / "only.cmd"));
+        QVERIFY(!fs::exists(root / "d" / "only.sh") && !fs::exists(root / "d" / "only.lnk"));
         QCOMPARE(test::run_genko({QStringLiteral("droplet"), q(droplet)}).exit_code, 2);
         QCOMPARE(test::run_genko({QStringLiteral("droplet"), q(droplet), q(root / "in"), QStringLiteral("--steps"), q(root / "fit.txt")}).exit_code, 2);
         QCOMPARE(test::run_genko({QStringLiteral("droplet"), QStringLiteral("--create"), q(root / "d" / "x")}).exit_code, 2);

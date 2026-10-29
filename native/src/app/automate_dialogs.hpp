@@ -173,6 +173,8 @@ public:
 private:
     void fill();
     service::script_events::Table table_;
+    bool outside_ = false;          // (the table was changed outside Genko: never turned on by 追加)
+    std::size_t outside_rows_ = 0;  // (its bindings then, marked until removed)
 };
 
 }  // namespace genko::app

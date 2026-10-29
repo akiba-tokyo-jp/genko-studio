@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -56,6 +57,9 @@ inline constexpr int kMaxStepsDepth = 64;
 core::Json read_steps(std::string_view text);
 // read_steps of a file, refused unread when it is bigger than kMaxStepsBytes (core::Error "not_found" when it is not there).
 core::Json read_steps_file(const fs::path& file);
+// (PC5 I-e) a steps file's bytes as read_steps_file reads them: a regular file only (core::Error "value" for a FIFO, a
+// device …), at most kMaxStepsBytes — the script events and the windows read their files so too.
+std::string read_steps_bytes(const fs::path& file);
 
 // Pseudo ops: steps that are not ops (never in `genko apply` nor the ops' list), turned into ops by the runner on the book
 // as it is when their turn comes — fit_image {"page", "width_px", "height_px", "dont_enlarge"?, "resample"?} (画像を合わせる:
@@ -178,7 +182,7 @@ struct Options {
     std::function<core::Json(const core::Document& doc, bool picture)> first;
     // (PC5 I-e) the window's book as it is now, in place of the inputs' files (バッチ's ソース 開いている原稿; written
     // into the folder only: Output::To::Folder or None) — its name the inputs' only item's path
-    const core::Document* open_book = nullptr;
+    std::shared_ptr<const core::Document> open_book;  // (held while it runs: the window may take another book meanwhile)
 };
 
 struct Result {
@@ -251,13 +255,19 @@ Droplet read_droplet(const fs::path& file);
 fs::path write_droplet(const fs::path& file, const Droplet& droplet);
 
 // Its launchers (起動ファイル), beside the droplet the person chose and nowhere else: Linux and macOS <name>.sh (run with
-// the files as its arguments) and <name>.desktop (files dropped on it), both executable; Windows <name>.cmd (files dropped on
-// it in Explorer). Each holds one fixed line: `genko droplet "<the droplet>" <the files>` — the program at `genko` —, no
-// --agent. A file there that is not a Genko launcher is never written over (core::Error "refused_target").
-enum class Launcher { Shell, Desktop, Cmd };
+// the files as its arguments) and <name>.desktop (files dropped on it), both executable; Windows <name>.lnk — a shortcut
+// (MS-SHLLINK) of `genko` with the argument `droplet "<the droplet>"`: Explorer puts the files dropped on it after it, each
+// one argument, no cmd.exe reading them (PC5 I-e's review, P2-2: no .cmd). Each runs one fixed thing: `genko droplet "<the
+// droplet>" <the files>` — the program at `genko` —, no --agent. A path holding a control character (a line end …) is refused
+// for every kind (P2-1); a file there that is not a Genko launcher is never written over (core::Error "refused_target"); the
+// mode is set before the file takes its name.
+enum class Launcher { Shell, Desktop, Shortcut };
 std::vector<Launcher> launchers_here();  // this OS's
 fs::path launcher_path(const fs::path& droplet, Launcher kind);
+// The launcher's bytes (a shortcut's are binary).
 std::string launcher_text(const fs::path& droplet, const fs::path& genko, Launcher kind);
+// The program a launcher runs: the AppImage itself when Genko runs from one ($APPIMAGE), else `running` (the review's P3-3).
+fs::path launcher_program(const fs::path& running);
 std::vector<fs::path> write_launchers(const fs::path& droplet, const fs::path& genko);
 
 // The runner's Output of a droplet run on `inputs` (`out`, else its own folder, else droplet-output beside the first input).

@@ -255,12 +255,19 @@ void MainWindow::batch_dialog() {
             flash(QStringLiteral("原稿を開いていないので、バッチを流しませんでした"), 6000, true);
             return;
         }
+        // (the book as it is now, held while the batch runs; its pages all read first — as プリント and 書き出し: a page not
+        // read would come out blank — the review of PC5 I-e, P2-3)
+        const std::shared_ptr<const core::Document> shown = session_->snapshot();
+        if (!shown->deferred.empty()) {
+            flash(wording::error(QStringLiteral("the book's pages are still being read: try again in a moment")), 6000, true);
+            return;
+        }
         const bool picture = doc_ >= 0 && documents_[static_cast<std::size_t>(doc_)].picture;
         if (output.to != automate::Output::To::Folder) {
             // (なし: the steps in the window, every page — one change, undone at once —; 保存して閉じる: then saved)
             Json ops;
             try {
-                ops = automate::aim_steps(book(), chosen->steps, picture, chosen->recorded);
+                ops = automate::aim_steps(*shown, chosen->steps, picture, chosen->recorded);
             } catch (const std::exception& error) {
                 flash(QStringLiteral("%1: %2").arg(label, wording::error(QString::fromUtf8(error.what()))), 6000, true);
                 return;
@@ -280,7 +287,7 @@ void MainWindow::batch_dialog() {
         } else {
             input.path = core::path_from_utf8((book().title.empty() ? std::string("無題") : book().title) + (picture ? ".png" : ""));
         }
-        options.open_book = &book();
+        options.open_book = shown;
         run_automate(QStringLiteral("バッチ"), {input}, chosen->steps, output, options, Json::array());
         return;
     }
@@ -312,7 +319,7 @@ void MainWindow::create_droplet_dialog() {
         const fs::path written = automate::write_droplet(fs::absolute(place), droplet);
         QStringList made{QDir::toNativeSeparators(qpath(written))};
         if (dialog.launcher->isChecked()) {
-            const fs::path genko = fpath(QCoreApplication::applicationFilePath());
+            const fs::path genko = automate::launcher_program(fpath(QCoreApplication::applicationFilePath()));
             for (const fs::path& l : automate::write_launchers(written, genko)) made << QDir::toNativeSeparators(qpath(l));
         }
         flash(QStringLiteral("ドロップレットを作りました: %1").arg(made.join(QStringLiteral("、"))), 8000);

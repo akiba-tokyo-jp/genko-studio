@@ -1187,6 +1187,7 @@ void MainWindow::open_project(const fs::path& path) {
         watcher->deleteLater();
         flash_timer_.stop();
         if (!read.first) {
+            start_pending_ = false;  // (PC5 I-e: the first book not opened — no アプリケーションを起動 later)
             ask::warning(this, QStringLiteral("Genko"), QStringLiteral("原稿を開けませんでした:\n%1").arg(wording::error(read.second)) + links_kept());
             refresh_status();
             return;
@@ -1214,6 +1215,7 @@ void MainWindow::open_project(const fs::path& path) {
             if (session_ == added) color_policy_on_open(added);  // (カラー設定's policies: a page of another profile kept, converted or asked)
             if (session_ == added) raise_opened(event);  // (PC5 I-e: スクリプトイベント)
         } catch (const std::exception& error) {
+            start_pending_ = false;  // (PC5 I-e: the first book not opened — no アプリケーションを起動 later)
             ask::warning(this, QStringLiteral("Genko"),
                          QStringLiteral("原稿・復旧用コピーを開けませんでした:\n%1").arg(wording::error(QString::fromUtf8(error.what()))) + links_kept());
             refresh_status();
@@ -1294,7 +1296,10 @@ bool MainWindow::close_document(int index) {
     // (smart-objects@1: a book also in another tab here — its contents' tab, or the book's beside it — stays open there)
     const auto& closing = documents_[static_cast<std::size_t>(index)].session;
     const bool shared_here = std::count_if(documents_.begin(), documents_.end(), [&](const Document& d) { return d.session == closing; }) > 1;
-    if (!shared_here && !documents::open_elsewhere(closing.get(), this) && !settle(index)) return false;
+    {
+        const service::script_events::Firing closing_save;  // (a save to close: no ドキュメントを保存 — the review's P3-11)
+        if (!shared_here && !documents::open_elsewhere(closing.get(), this) && !settle(index)) return false;
+    }
     if (index != doc_) store_document();
     documents_.erase(documents_.begin() + index);
     doc_tabs_->blockSignals(true);
@@ -1347,6 +1352,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
             show_document(i);
         }
         bool discard = false;
+        const service::script_events::Firing closing_save;  // (a save to close: no ドキュメントを保存)
         if (!settle(i, QStringLiteral("閉じる"), &discard)) {
             event->ignore();
             return;

@@ -368,6 +368,25 @@ private slots:
         QVERIFY(events::load().table.bindings.empty());
     }
 
+    // ほかを閉じる: ドキュメントを閉じる raised once at the end — not once a book closed on the book kept (the review's P2-4).
+    void closeOthersRaisesOnce() {
+        Book b;
+        b.open_picture(40, 20);
+        b.open_picture(30, 20);
+        QVERIFY(!app::actions::store(QStringLiteral("閉"), Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"name", "閉"}, {"id", "c"}}})));
+        events::Table table;
+        table.enabled = true;
+        table.bindings.push_back({"closeDocument", "閉じた", std::nullopt, events::action_sha256(app::actions::load()["閉"]["ops"]), std::string("閉")});
+        QVERIFY(!events::save(table));
+        QCOMPARE(b.window->documents().size(), std::size_t(3));
+        QVERIFY(b.window->close_others());
+        QCOMPARE(b.window->documents().size(), std::size_t(1));
+        int marks = 0;
+        for (const core::Layer& l : b.doc().page(0).layers) marks += l.title == "閉" ? 1 : 0;
+        QCOMPARE(marks, 1);
+        app::actions::remove(QStringLiteral("閉"));
+    }
+
     // 参照…: a steps file run on the page in front (one Undo); one holding a gate refused before anything runs.
     void browseInTheWindow() {
         Book b;

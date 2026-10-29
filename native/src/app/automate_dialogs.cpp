@@ -203,7 +203,7 @@ BatchDialog::BatchDialog(QWidget* parent) : QDialog(parent) {
     auto* dest_layout = new QFormLayout(dest);
     destination = new QComboBox(dest);
     destination->addItem(QStringLiteral("なし"), QStringLiteral("none"));
-    destination->addItem(QStringLiteral("保存して閉じる（Genko の原稿だけ）"), QStringLiteral("save"));
+    destination->addItem(QStringLiteral("保存して閉じる（Genko の原稿だけ。開いている原稿は保存して、閉じません）"), QStringLiteral("save"));
     destination->addItem(QStringLiteral("フォルダー"), QStringLiteral("folder"));
     destination->setCurrentIndex(2);
     dest_layout->addRow(QStringLiteral("実行先"), destination);
@@ -534,7 +534,9 @@ ScriptEventsDialog::ScriptEventsDialog(QWidget* parent, events::Table table, con
     auto* layout = new QVBoxLayout(this);
     said = new QLabel(this);
     said->setWordWrap(true);
-    if (problem) said->setText(QString::fromStdString(*problem));
+    outside_ = problem.has_value();
+    outside_rows_ = outside_ ? table_.bindings.size() : 0;
+    if (problem) said->setText(QString::fromStdString(*problem) + QStringLiteral("（一覧の「確かめてください」の行は、Genko の外で足されたかもしれません。削除するか、確かめてから有効にしてください）"));
     layout->addWidget(said);
     enabled = new QCheckBox(QStringLiteral("スクリプト／アクションを実行するイベントを有効にする"), this);
     enabled->setChecked(table_.enabled);
@@ -583,11 +585,12 @@ ScriptEventsDialog::ScriptEventsDialog(QWidget* parent, events::Table table, con
 
 void ScriptEventsDialog::fill() {
     list->clear();
-    for (const events::Binding& b : table_.bindings) {
+    for (std::size_t i = 0; i < table_.bindings.size(); ++i) {
+        const events::Binding& b = table_.bindings[i];
         const auto e = events::event_of(b.event);
         const QString what = b.script ? QDir::toNativeSeparators(QString::fromStdString(*b.script))
                                       : QStringLiteral("アクション: %1").arg(QString::fromStdString(b.action.value_or(std::string())));
-        list->addItem(QStringLiteral("%1: %2").arg(e ? QString::fromStdString(events::label_of(*e)) : QString::fromStdString(b.event), what));
+        list->addItem(QStringLiteral("%1%2: %3").arg(i < outside_rows_ ? QStringLiteral("（確かめてください）") : QString(), e ? QString::fromStdString(events::label_of(*e)) : QString::fromStdString(b.event), what));
     }
 }
 
@@ -602,7 +605,7 @@ bool ScriptEventsDialog::add_chosen() {
                 return false;
             }
             const fs::path file = fs::absolute(fpath(QDir::fromNativeSeparators(text)));
-            const std::string bytes = storage::read_file_bounded(file, automate::kMaxStepsBytes);
+            const std::string bytes = automate::read_steps_bytes(file);  // (a regular file only)
             automate::read_steps(bytes);  // (a file that cannot be steps is not bound)
             binding.script = core::path_to_utf8(file);
             binding.sha256 = storage::sha256_hex(bytes);
@@ -628,7 +631,7 @@ bool ScriptEventsDialog::add_chosen() {
         return false;
     }
     table_.bindings.push_back(std::move(binding));
-    enabled->setChecked(true);  // (Photoshop's: adding one turns the events on)
+    if (!outside_) enabled->setChecked(true);  // (Photoshop's: adding one turns the events on — not a table changed outside Genko: the review's P3-9)
     said->clear();
     fill();
     return true;
@@ -637,11 +640,13 @@ bool ScriptEventsDialog::add_chosen() {
 void ScriptEventsDialog::remove_at(int row) {
     if (row < 0 || row >= static_cast<int>(table_.bindings.size())) return;
     table_.bindings.erase(table_.bindings.begin() + row);
+    if (static_cast<std::size_t>(row) < outside_rows_) --outside_rows_;
     fill();
 }
 
 void ScriptEventsDialog::remove_all() {
     table_.bindings.clear();
+    outside_rows_ = 0;
     fill();
 }
 

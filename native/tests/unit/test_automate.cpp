@@ -17,6 +17,10 @@
 #include <fstream>
 #include <string>
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/json.hpp"
@@ -349,8 +353,60 @@ private slots:
                      core::path_to_utf8(root) + "/it'\\''s $x.genkodroplet' \"$@\"\n");
         const std::string desktop = automate::launcher_text(odd, "/opt/g e/genko", automate::Launcher::Desktop);
         QVERIFY2(desktop.find("Exec=\"/opt/g e/genko\" droplet \"" + core::path_to_utf8(root) + "/it's \\\\$x.genkodroplet\" %F\n") != std::string::npos, desktop.c_str());
-        QCOMPARE(automate::launcher_text(fs::path("C:/d/50%.genkodroplet"), "C:/g/genko.exe", automate::Launcher::Cmd),
-                 std::string("@echo off\r\nrem Genko droplet: runs the droplet on the files dropped on it\r\n\"C:/g/genko.exe\" droplet \"C:/d/50%%.genkodroplet\" %*\r\n"));
+        // Windows: a shortcut (MS-SHLLINK) of genko.exe with the argument droplet "<the droplet>" — no .cmd, no cmd.exe reading
+        // the names dropped (the review's P2-2); read back as Windows reads it
+        {
+            const std::string link = automate::launcher_text(fs::path("C:/d/50% & 絵.genkodroplet"), "C:/g/genko.exe", automate::Launcher::Shortcut);
+            QCOMPARE(automate::launcher_path(fs::path("C:/d/x.genkodroplet"), automate::Launcher::Shortcut), fs::path("C:/d/x.lnk"));
+            const auto u32 = [&link](std::size_t at) {
+                return std::uint32_t(std::uint8_t(link[at])) | std::uint32_t(std::uint8_t(link[at + 1])) << 8 | std::uint32_t(std::uint8_t(link[at + 2])) << 16 |
+                       std::uint32_t(std::uint8_t(link[at + 3])) << 24;
+            };
+            const auto u16 = [&link](std::size_t at) { return std::uint16_t(std::uint8_t(link[at]) | std::uint8_t(link[at + 1]) << 8); };
+            const auto text16 = [&link, &u16](std::size_t at, std::size_t n) {
+                std::u16string out;
+                for (std::size_t i = 0; i < n; ++i) out += char16_t(u16(at + 2 * i));
+                return QString::fromStdU16String(out).toStdString();
+            };
+            QCOMPARE(u32(0), std::uint32_t(0x4C));
+            QCOMPARE(link.substr(4, 16), std::string("\x01\x14\x02\x00\x00\x00\x00\x00\xC0\x00\x00\x00\x00\x00\x00\x46", 16));
+            QCOMPARE(u32(20), std::uint32_t(0x02 | 0x04 | 0x20 | 0x80));  // (HasLinkInfo, HasName, HasArguments, IsUnicode)
+            const std::size_t info = 0x4C;
+            const std::uint32_t info_size = u32(info);
+            QCOMPARE(u32(info + 4), std::uint32_t(0x24));
+            QCOMPARE(u32(info + 8), std::uint32_t(1));
+            const std::size_t base16 = info + u32(info + 28);
+            std::size_t n = 0;
+            while (u16(base16 + 2 * n) != 0) ++n;
+            QCOMPARE(text16(base16, n), std::string("C:/g/genko.exe"));
+            std::size_t at = info + info_size;
+            const std::size_t name_n = u16(at);
+            QCOMPARE(text16(at + 2, name_n), std::string("Genko droplet: drop files on it"));
+            at += 2 + 2 * name_n;
+            const std::size_t args_n = u16(at);
+            QCOMPARE(text16(at + 2, args_n), std::string("droplet \"C:/d/50% & 絵.genkodroplet\""));
+            at += 2 + 2 * args_n;
+            QCOMPARE(u32(at), std::uint32_t(0));  // (TerminalBlock)
+            QCOMPARE(link.size(), at + 4);
+        }
+        // a control character in any path a launcher names — a line end that would start a line of its own: refused for
+        // every kind (the review's P2-1)
+        for (const automate::Launcher kind : {automate::Launcher::Shell, automate::Launcher::Desktop, automate::Launcher::Shortcut}) {
+            for (const char* bad : {"\n", "\r", "\t", "\x7f"}) {
+                const fs::path drop = root / core::path_from_utf8(std::string("x") + bad + "Exec=sh -c evil.genkodroplet");
+                QCOMPARE(thrown([&] { automate::launcher_text(drop, "/opt/genko", kind); }).first, std::string("refused_target"));
+                QCOMPARE(thrown([&] { automate::launcher_text(root / "x.genkodroplet", std::string("/opt/ge") + bad + "nko", kind); }).first,
+                         std::string("refused_target"));
+            }
+        }
+        QCOMPARE(thrown([&] { automate::write_launchers(root / "a\nb.genkodroplet", "/opt/genko"); }).first, std::string("refused_target"));
+        QVERIFY(!fs::exists(root / "a\nb.sh"));
+        // $APPIMAGE: the launcher runs the AppImage, not its passing mount (the review's P3-3)
+        QCOMPARE(automate::launcher_program("/tmp/.mount_x/usr/bin/genko"), fs::path("/tmp/.mount_x/usr/bin/genko"));
+        write(root / "Genko.AppImage", "x");
+        qputenv("APPIMAGE", core::path_to_utf8(root / "Genko.AppImage").c_str());
+        QCOMPARE(automate::launcher_program("/tmp/.mount_x/usr/bin/genko"), root / "Genko.AppImage");
+        qunsetenv("APPIMAGE");
         const std::vector<fs::path> made = automate::write_launchers(written, "/opt/genko");
         QCOMPARE(made.size(), automate::launchers_here().size());
         for (const fs::path& launcher : made) {
@@ -388,6 +444,44 @@ private slots:
         QVERIFY(fs::exists(root / "n" / "b_002.png"));
         QVERIFY(fs::exists(root / "n2" / "a_001.tif"));
         QCOMPARE(result.files[1]["outputs"], Json::array({core::path_to_utf8(root / "n" / "b_002.png"), core::path_to_utf8(root / "n2" / "b_002.tif")}));
+        QCOMPARE(result.files[1]["output"], Json(core::path_to_utf8(root / "n" / "b_002.png")));  // (a picture's "output" kept: P3-6)
+#ifndef _WIN32
+        // a format that cannot be written after one that was: the file written said with its error (the review's P3-7)
+        fs::create_directories(root / "shut");
+        fs::permissions(root / "shut", fs::perms::owner_read | fs::perms::owner_exec, fs::perm_options::replace);
+        const bool shut = [&] {
+            std::ofstream probe(root / "shut" / "probe");
+            return !probe.good();
+        }();
+        if (shut) {  // (the folder cannot be written in: this user's rights, as the tests run)
+            automate::Output half;
+            half.folder = root / "half";
+            half.also.push_back(automate::Output::Also{root / "shut", "tif", std::nullopt});
+            const automate::Result failed = automate::run({automate::Input{root / "in" / "a.png", false}}, Json::array(), half, automate::Options{});
+            QCOMPARE(failed.errors.size(), std::size_t(1));
+            QCOMPARE(failed.errors[0]["outputs"], Json::array({core::path_to_utf8(root / "half" / "a.png")}));
+        }
+        fs::permissions(root / "shut", fs::perms::owner_all, fs::perm_options::replace);
+        // a link at a launcher's place: never written over
+        const fs::path linked = root / "linked.genkodroplet";
+        automate::write_droplet(linked, droplet);
+        fs::create_symlink(root / "elsewhere.sh", root / "linked.sh");
+        QCOMPARE(thrown([&] { automate::write_launchers(linked, "/opt/genko"); }).first, std::string("refused_target"));
+        QVERIFY(!fs::exists(root / "elsewhere.sh"));
+        // inside a book through a link: refused; a .. that leaves it: not (the review's P3-1)
+        fs::create_directory_symlink(root / "b.genko", root / "into");
+        QCOMPARE(thrown([&] { automate::write_droplet(root / "into" / "x", droplet); }).first, std::string("refused_target"));
+        QVERIFY(thrown([&] { automate::write_droplet(root / "b.genko" / ".." / "out_of_it", droplet); }).first.empty());
+        // a steps file that is not a regular file (a FIFO): refused, never read (the review's P3-10)
+        const fs::path fifo = root / "steps.fifo";
+        if (::mkfifo(fifo.c_str(), 0600) == 0) {
+            QCOMPARE(thrown([&] { automate::read_steps_file(fifo); }).first, std::string("value"));
+            QCOMPARE(thrown([&] { automate::read_droplet(fifo); }).first, std::string("value"));
+        }
+#endif
+        // a droplet's folder written relative: from the droplet's own folder (the review's P3-4)
+        write(root / "rel.genkodroplet", Json{{"genkoDroplet", 1}, {"steps", Json::array()}, {"options", Json{{"output", "out/there"}}}}.dump());
+        QCOMPARE(*automate::read_droplet(root / "rel.genkodroplet").output, root / "out" / "there");
     }
 
     // The steps aimed at the pages: each page of a picture, a book's pages but the covers; an action played on each.

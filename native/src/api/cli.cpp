@@ -2806,9 +2806,11 @@ int print_run(const service::automate::Inputs& inputs, service::automate::Result
     } else {
         std::string lines;
         for (const Json& done : result.files) {
-            if (done.contains("output")) lines += done["output"].get<std::string>() + "\n";
+            // (every file once: "outputs" when there, else the picture's "output")
             if (done.contains("outputs")) {
                 for (const Json& o : done["outputs"]) lines += o.get<std::string>() + "\n";
+            } else if (done.contains("output")) {
+                lines += done["output"].get<std::string>() + "\n";
             }
         }
         write_text(lines, stdout);
@@ -2972,7 +2974,7 @@ int droplet_command(const QStringList& args, bool ascii) {
         const fs::path written = service::automate::write_droplet(place, droplet);
         Json launchers = Json::array();
         if (!a.flag("--no-launcher")) {
-            const fs::path genko = core::path_from_utf8(QCoreApplication::applicationFilePath().toStdString());
+            const fs::path genko = service::automate::launcher_program(core::path_from_utf8(QCoreApplication::applicationFilePath().toStdString()));
             for (const fs::path& l : service::automate::write_launchers(written, genko)) launchers.push_back(core::path_to_utf8(l));
         }
         if (a.flag("--json")) {
@@ -3048,6 +3050,8 @@ int automate_command(const QStringList& all, bool ascii) {
     if (kind == QLatin1String("image-processor") ? !a.value("--out") || ways != 1 : ways != 1) {
         return usage(where + (kind == QLatin1String("image-processor") ? "give --out <folder>" : "give --out <folder>, --save or --dry-run"));
     }
+    // (レンズ補正 flattens each page that shows more than one layer: never a book written so — the review's P3-14)
+    if (kind == QLatin1String("lens") && a.flag("--save")) return usage(where + "--save is not taken: it flattens the pages' layers (write into --out)");
     const auto px = [&](const char* option) -> std::optional<int> {
         const auto text = a.value(option);
         if (!text) return std::nullopt;
