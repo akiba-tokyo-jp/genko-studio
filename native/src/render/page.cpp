@@ -60,6 +60,7 @@
 #include "render/raster.hpp"
 #include "render/shape_parts.hpp"
 #include "render/smart.hpp"
+#include "render/text/opentype.hpp"
 #include "render/text/balloons.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
@@ -3153,6 +3154,7 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
     }
     // (color-model@1: the book's text_gamma, for the letters of the lines' layers — as render_page draws them)
     const text::TextGamma gamma(episode.text_gamma);
+    const text::TypeStyles type_styles(episode.type_styles ? &*episode.type_styles : nullptr);  // (PC5 G-b: the records' styles)
     Ctx ctx;
     ctx.page = &page;
     ctx.episode = &episode;
@@ -3540,6 +3542,7 @@ namespace {
 RenderResult drawn_page(const core::Page& page, int dpi, const RenderOptions& options, const core::Document* episode) {
     // (color-model@1: the book's text_gamma, for the letters of its lines drawn on this thread)
     const text::TextGamma gamma(episode != nullptr ? episode->text_gamma : std::nullopt);
+    const text::TypeStyles type_styles(episode != nullptr && episode->type_styles ? &*episode->type_styles : nullptr);
     std::vector<std::string> omitted;
     // Keep every layer in high precision within a region; quantize only the final output pixels.
     // Reuse the established global-coordinate region renderer, not an RGBA8 layer intermediate.
@@ -3709,6 +3712,7 @@ Alone composite_alone(const core::Page& page, std::vector<core::Layer> layers, i
 
 RenderResult render_contents(const core::Page& page, int dpi, const RenderOptions& options, const core::Document* episode) {
     const text::TextGamma gamma(episode != nullptr ? episode->text_gamma : std::nullopt);
+    const text::TypeStyles type_styles(episode != nullptr && episode->type_styles ? &*episode->type_styles : nullptr);
     RenderOptions asked = options;
     asked.contents = true;
     asked.onion = false;

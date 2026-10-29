@@ -1,0 +1,18 @@
+{
+  "purpose": "PC5 G-b (the OpenType typesetting): test fonts with what Genko's bundled Japanese fonts have not — Latin ligatures, fractions, stylistic sets and variable axes (Inter), and a right-to-left script (Noto Sans Hebrew). Used by the tests alone; never installed.",
+  "license": "OFL-1.1 (each font's licence beside it: OFL-Inter.txt, OFL-NotoSansHebrew.txt; neither declares a Reserved Font Name)",
+  "source": "github.com/google/fonts at 9862abc066c9b83bf84c3e8ed1fc2d8d48f9bbf0 (2026-10-28), fetched 2026-10-29",
+  "made_by": "hb_subset (HarfBuzz 8.3.0's libharfbuzz-subset) keeping every layout feature, the name table and the variations; no hinting; the code points listed below and every glyph their features reach",
+  "files": {
+    "inter-subset.ttf": {
+      "from": "ofl/inter/Inter[opsz,wght].ttf (sha256 29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031)",
+      "code_points": "U+0020..U+007E, U+00AA, U+00BA, U+00BD, U+2044",
+      "sha256": "04f37ec2f8f84c6b21bef2dc514044618d028da46d8aac341b73b6622f0513c4"
+    },
+    "noto-sans-hebrew-subset.ttf": {
+      "from": "ofl/notosanshebrew/NotoSansHebrew[wdth,wght].ttf (sha256 7ef36a2c3593758cdb622e1bdef4f84523e92fbc3ccc667438dd80ff54c2de88)",
+      "code_points": "U+0020..U+0040, U+05B0..U+05C7, U+05D0..U+05EA, U+200E, U+200F",
+      "sha256": "5655cf8d4b775038fd7b8615aa41afa2f7ae513537b31a5bd5905b9982a4b5f7"
+    }
+  }
+}

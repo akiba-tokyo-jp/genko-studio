@@ -19,6 +19,7 @@
 #include "render/not_yet_ported.hpp"
 #include "render/ops_smart_parts.hpp"
 #include "render/page_internal.hpp"
+#include "render/text/opentype.hpp"
 #include "render/text/balloons.hpp"
 #include "render/text/lettering.hpp"
 
@@ -48,6 +49,7 @@ Image drawn(const detail::Ctx& ctx, const core::StoryLine& line, Point origin, S
     // (PC5 G-a: the book's text gamma, as its lines are drawn — the picture drawn on black and on white in it, so its
     // cover is what that gamma makes of the letters' edges there: a dark text over a light page mixed as a line's)
     const text::TextGamma gamma(ctx.episode != nullptr ? ctx.episode->text_gamma : text::TextGamma::current());
+    const text::TypeStyles type_styles(ctx.episode != nullptr && ctx.episode->type_styles ? &*ctx.episode->type_styles : text::TypeStyles::current());
     return smart_ops::drawn_alone(size, [&](Image& on) {
         Image rgba = on.mode() == "RGBA" ? std::move(on) : on.convert("RGBA");
         text::draw_lines(text::PagePart{&rgba, origin, page}, lines, dpi, font_path, false, &panels, ctx.stop, &unported);

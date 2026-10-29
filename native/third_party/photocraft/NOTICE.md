@@ -287,6 +287,8 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/doc/src/text_styles.rs`（182-236 行: `resolve_para`・`resolve_char`）: スタイルを解く順（基本段落 → 段落スタイル → 文字スタイル → 上書き）→ `native/src/core/type_text.cpp`（`resolve_para`・`resolve_chars`。上書きを違う所だけで持ち、台詞の書式と書記素の範囲・段落の番号で解く所は Genko のもの）。
 - 文字レイヤーと文字ツール（PC5 G-a）:
   - `crates/text/src/render.rs`（180 行: アンチエイリアス なし は被覆 0.5 で 2 値）・`crates/engine/src/type_extra_cmds.rs`（106-123 行: なし だけ描き方が変わり、ほかは名前を持つ。137-192 行: ポイントテキスト ⇄ 段落テキストの変換。361-377 行: Lorem ipsum の文）・`crates/engine/src/type_cmds.rs`（308-350 行: 範囲の置き換え、373 行: 本文からのレイヤーの名前）: 決まり → `native/src/render/text/lettering.cpp`（`binarized`・置き方）・`native/src/render/ops_type.cpp`（`add_type_layer`・`edit_type`・`to_point`・`to_box`）・`native/src/app/main_window_type.cpp`（`paste_lorem`）。基準点・枠からの置き方（縦組み・揃え）、書記素の位置、ルビ・フキダシ、行列での描き方、和文の仮の文は Genko のもの。
+- 組版・OpenType・書体・右から左（PC5 G-b）:
+  - `crates/engine/src/type_cmds.rs`（86-260 行: `apply_char_props`・`apply_para_props` の属性の意味、552 行: setStyle の範囲が無ければ全体）・`crates/engine/src/type_extra_cmds.rs`（320-357 行: OpenType の切り替え — 状態は最初の字の設定、liga・dlig は専用の属性、ほかは features に入れる・外す）: 決まり → `native/src/render/ops_type_set.cpp`（`set_type`）・`native/src/app/main_window_type.cpp`（`type_feature`・`refresh_type_commands`）。書記素の範囲・段落の番号で持つこと、違う所だけの上書き、null で外すこと、前後関係に依存する字形を切るときに 0 を書くこと、組み方の印は Genko のもの。組版そのもの（HarfBuzz と SheenBidi による行・禁則・約物の詰め・ルビ・縦の升目の字形）は上流（parley）を移さず Genko が作った。
 
 ## レイヤー・アートボード・自動処理（PC5 節 I）
 
