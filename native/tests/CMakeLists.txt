@@ -820,6 +820,10 @@ if(GENKO_BUILD_APP)
   # the approval box's model and the AI dialog's Qt-free part against Python's (review_model.py, ai_link.py, links.py);
   # what `genko mcp` keeps in a book read by Python's readers; the reply drafts left alone by the Python version
   genko_test(test_contract_studio_gui SOURCES contract/test_contract_studio_gui.cpp DEPS genko_app genko_test_support LABELS contract TIMEOUT 1800)
+  # PC5 G-a (SPEC.md TEXT-02): the text tools' type layers — a click a point text, a drag a box text, a click on the path a
+  # text on it, the input method's words —, a type layer typed over (its text clicked, its row double-clicked), 書式's
+  # commands (アンチエイリアス, 方向, the conversions, ラスタライズ, 更新, Lorem ipsum, a line and a type layer each other's)
+  genko_test(test_gui_type SOURCES gui/test_gui_type.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
 endif()
 
 # `genko` alone starts the desktop app when it is built (test_app_e2e); without it, it is a usage error

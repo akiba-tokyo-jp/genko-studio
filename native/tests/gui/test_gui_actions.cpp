@@ -391,7 +391,12 @@ private slots:
         // (act_keyboard_shortcuts, act_prefs_<pane>; 一般… is act_prefs) — theKeySets and theMenusOfPC5 below.
         // and the 23 frames of PC5 J-0 (SPEC PROD-01) — ページ → 解析 ▸'s 7 (act_measure_*), レイヤー → ビデオレイヤー ▸'s 12
         // (act_video_*), ウィンドウ's アクション・レイヤーカンプ・計測ログ・注釈 (act_panel_*) — theProductionFramesSayNotYet's.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{618});
+                // and the 17 of PC5 G-a (SPEC TEXT-02) — ツール → 横書き文字ツール (act_text_h), 書式 → アンチエイリアス ▸ 7 (act_type_aa_<method>),
+        // 方向 ▸ 横書き・縦書き (act_type_horizontal, act_type_vertical), テキストレイヤーをラスタライズ・ポイントテキストに変換・
+        // 段落テキストに変換・すべてのテキストレイヤーを更新・Lorem Ipsum をペースト (act_type_rasterize, act_type_to_point,
+        // act_type_to_box, act_type_update_all, act_type_lorem), 台詞をテキストレイヤーに・テキストレイヤーを台詞に
+        // (act_line_to_type_layer, act_type_layer_to_line) — theirs (test_gui_type).
+        QCOMPARE(w->actions_by_name().size(), std::size_t{635});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -431,8 +436,8 @@ private slots:
         // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths); the crop tool (PC3 C-e, test_gui_page_size);
         // PC3 B4's four retouching tools (test_gui_retouch); PC3 C-b's five shape tools besides 長方形ツール (test_gui_shapes)
         // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask); PC4 E1's 鉛筆ツール (test_gui_brushes); PC4 E5's
-        // nine brushes that change pixels (test_gui_paint_tools)
-        QCOMPARE(w->tools_group()->actions().size(), 53);
+        // nine brushes that change pixels (test_gui_paint_tools); PC5 G-a's 横書き文字ツール (test_gui_type)
+        QCOMPARE(w->tools_group()->actions().size(), 54);
     }
 
     // PC4 F-0 (SPEC FILE-01; 節 F 5.1・5.2): ファイル in Photoshop's order and names — the book's export is 書き出し ▸
@@ -978,7 +983,9 @@ private slots:
                                                   {"blurtool", "act_blur_tool"}, {"sharpentool", "act_sharpen_tool"}, {"smudgetool", "act_smudge_tool"},
                                                   {"dodge", "act_dodge_tool"}, {"burn", "act_burn_tool"}, {"sponge", "act_sponge_tool"},
                                                   {"mixer", "act_mixer_brush"}, {"bgeraser", "act_background_eraser"},
-                                                  {"colorreplace", "act_color_replacement"}};
+                                                  {"colorreplace", "act_color_replacement"},
+                                                  // (PC5 G-a: 横書き文字ツール)
+                                                  {"text_h", "act_text_h"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());

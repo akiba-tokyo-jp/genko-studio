@@ -501,13 +501,27 @@ void move_layer_in(Document& doc, std::size_t at, const std::string& id, const M
             throw OpError("a smart object is bent by a warp, a perspective warp or a puppet warp");
         }
         move_filter_mask(doc, page, layer, m);
-    } else if (layer.kind == LayerKind::Type) {  // (type@1, PC5 G-0: its text moved; turned, scaled or bent: its matrix, G-a)
+    } else if (layer.kind == LayerKind::Type) {  // (type@1, PC5 G-0: its text moved; G-a: turned, scaled or slanted, its matrix)
         if (area) throw OpError("a type layer moves whole: transform it without a selection");
         const auto& a = m.affine;
-        if (!m.is_affine() || m.warp || m.filter || std::fabs(a[0] - 1) > 1e-12 || std::fabs(a[1]) > 1e-12 || std::fabs(a[2]) > 1e-12 ||
-            std::fabs(a[3] - 1) > 1e-12)
-            core::not_yet_ported("a type layer turned, scaled or bent is not in this build yet");
-        if (layer.type) layer.type = core::type_text::shared_record(core::type_text::moved(*layer.type, a[4], a[5]));
+        if (!m.is_affine() || m.warp || m.filter)
+            throw OpError("a type layer is bent by ワープテキスト (warp_text), or as a smart object: convert it to a smart object first");
+        const bool moved_only = std::fabs(a[0] - 1) <= 1e-12 && std::fabs(a[1]) <= 1e-12 && std::fabs(a[2]) <= 1e-12 && std::fabs(a[3] - 1) <= 1e-12;
+        if (layer.type && moved_only) {
+            layer.type = core::type_text::shared_record(core::type_text::moved(*layer.type, a[4], a[5]));
+        } else if (layer.type) {  // (its letters stay as set: the map goes in front of its matrix, as Photoshop keeps the text)
+            core::StoryLine record = *layer.type;
+            const std::array<double, 6> t = core::type_text::transform_of(record).value_or(std::array<double, 6>{1, 0, 0, 1, 0, 0});
+            Json nt = record.native_type ? *record.native_type : Json::object();
+            nt["transform"] = Json::array({a[0] * t[0] + a[2] * t[1], a[1] * t[0] + a[3] * t[1], a[0] * t[2] + a[2] * t[3], a[1] * t[2] + a[3] * t[3],
+                                           a[0] * t[4] + a[2] * t[5] + a[4], a[1] * t[4] + a[3] * t[5] + a[5]});
+            try {
+                record.native_type = core::type_text::check_native_type(nt, record.text);
+            } catch (const core::Error& error) {
+                throw OpError(error.what());
+            }
+            layer.type = core::type_text::shared_record(std::move(record));
+        }
         // (no lines, parts or pixels of its own: on to its linked masks, below)
     } else if (layer.kind == LayerKind::Placed && layer.placement_mm) {
         const auto& a = m.affine;

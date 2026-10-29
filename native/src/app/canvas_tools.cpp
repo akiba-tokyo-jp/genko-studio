@@ -59,7 +59,7 @@ bool PageCanvas::draws_line(const QString& tool) { return tool == QLatin1String(
 bool PageCanvas::tool_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers) {
     if (path_press(pos, mm, modifiers)) return true;  // (ペンツール・曲線ペンツール・パス選択ツール: canvas_pen.cpp)
     if (retouch_press(mm, modifiers)) return true;    // (PC3 B4: Alt+click sets the clone source, retouch_tools.cpp)
-    if (tool_ == QLatin1String("text")) return text_press(mm);  // (テキスト: canvas_lines.cpp)
+    if (is_text_tool(tool_)) return text_press(mm);  // (テキスト, 横書き文字ツール: canvas_lines.cpp)
     if (tool_ == QLatin1String("vector")) {
         vector_press(mm.x(), mm.y(), modifiers);
         return true;

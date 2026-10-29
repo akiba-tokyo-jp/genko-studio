@@ -283,6 +283,22 @@ private slots:
         QCOMPARE(moved.y_mm.value(), record.y_mm.value() - 2);
         QCOMPARE(genko::core::to_string(genko::core::LayerKind::Type), std::string_view("type"));
         QVERIFY(genko::core::layer_kind_from("type") == genko::core::LayerKind::Type);
+        // (PC5 G-a) a record its matrix turns: moved by its matrix, where it is set kept
+        QVERIFY(!tt::transform_of(record));
+        const StoryLine turned = line_of("あ", Json{{"shape", "box"}, {"transform", Json::array({0, 1, -1, 0, 30, 5})}});
+        const auto t = tt::transform_of(turned);
+        QVERIFY(t.has_value());
+        QCOMPARE((*t)[4], 30.0);
+        const StoryLine turned_moved = tt::moved(turned, 2, 3);
+        QCOMPARE(turned_moved.x_mm.value(), turned.x_mm.value());
+        QCOMPARE((*tt::transform_of(turned_moved))[4], 32.0);
+        QCOMPARE((*tt::transform_of(turned_moved))[5], 8.0);
+        // a line stays upright: a book whose line holds a matrix is refused (a type layer's may)
+        genko::core::Document doc;
+        StoryLine upright = turned;
+        upright.id = "l1";
+        doc.story.push_back(upright);
+        QVERIFY(refusal_of([&] { tt::validate_type(doc); }).find("stays upright") != std::string::npos);
     }
 
     // the HarfBuzz way in: the bundled faces' glyphs and advances, across and down; ids that name glyphs, a run's clusters

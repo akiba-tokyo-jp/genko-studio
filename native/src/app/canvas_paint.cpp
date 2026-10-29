@@ -195,6 +195,7 @@ void PageCanvas::paint_page(QPainter& painter) {
         painter.drawRect(QRectF(zoom_drag_->first, zoom_drag_->second).normalized());
     }
     draw_balloon_stroke(painter);  // (the balloon pen's outline)
+    draw_type(painter);            // (PC5 G-a: a box text dragged, the chosen type layer's box: canvas_lines.cpp)
     if (!stroke_.empty() && draws_line(tool_) && live_) {
         if (live_snapped_) {
             for (const auto& copy : live_copies_) draw_in_page_px(painter, copy->image(), copy->box(), copy->dpi());

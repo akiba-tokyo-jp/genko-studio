@@ -417,6 +417,12 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     for (const auto& line : doc.story) {
         if (core::ruby::uses_feature(line)) features.emplace_back(core::kRubyLayoutFeature);
     }
+    // (PC5 G-a review P3-3: a type layer's record holding its rubies by place says so too)
+    for (const core::smart::WrittenPage& written : core::smart::written_pages(doc)) {
+        for (const core::Layer& layer : written.page->layers) {
+            if (layer.type && core::ruby::uses_feature(*layer.type)) features.emplace_back(core::kRubyLayoutFeature);
+        }
+    }
     // PC2a (adjustments@1): the 3D lookup tables the book's color_lookup corrections use (only those) — on its pages and
     // (PC4 F-f review P1-3) on the pages of the smart objects' contents its pages show, which the reader reads too
     std::vector<std::string> lut_refs = core::lut3d::refs_of(doc);

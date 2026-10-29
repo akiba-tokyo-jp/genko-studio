@@ -709,11 +709,14 @@ bool MainWindow::selection_to_shape() {
 }
 
 bool MainWindow::line_to_shape() {
-    if (!canvas_->selected_line_id) {
-        flash(QStringLiteral("先に台詞を選びます（選択ツールで台詞をクリック）"), 3000);
+    // (PC5 G-a review P2-6: the chosen type layer's text too — 書式 → シェイプに変換; the shape on a new pen layer then)
+    const std::optional<Json> target = type_target(false);
+    if (!target) {
+        flash(QStringLiteral("先にテキストレイヤー（レイヤー パネル）か台詞（選択ツールでクリック）を選びます"), 3000);
         return false;
     }
-    Json op{{"op", "text_to_path"}, {"id", *canvas_->selected_line_id}, {"to", "shape"}};
+    Json op = target->contains("layer_id") ? Json{{"op", "text_to_path"}, {"page", (*target)["page"]}, {"id", (*target)["layer_id"]}, {"to", "shape"}}
+                                           : Json{{"op", "text_to_path"}, {"id", (*target)["line"]}, {"to", "shape"}};
     const core::Layer* layer = target_layer();
     if (layer != nullptr && layer->kind == core::LayerKind::Strokes && !layer->locked && !(shape_new_layer_ != nullptr && shape_new_layer_->isChecked()))
         op["layer_id"] = layer->id;

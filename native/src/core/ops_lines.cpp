@@ -784,8 +784,10 @@ void move_line(OpContext& c) {
     const Json* line_id = get(op, "id");
     if (line_id == nullptr || !py_truthy(*line_id)) throw OpError("id is required");
     StoryLine& line = find_line(c.doc, py_str(*line_id));
+    const double was_x = line.x_mm.value(), was_y = line.y_mm.value();
     if (has(op, "x_mm")) line.x_mm = Num(to_float(op["x_mm"]));
     if (has(op, "y_mm")) line.y_mm = Num(to_float(op["y_mm"]));
+    type_text::move_anchor(line, line.x_mm.value() - was_x, line.y_mm.value() - was_y);  // (type@1, PC5 G-a: a point text's anchor with it)
     if (has(op, "w_mm")) line.w_mm = Num(to_float(op["w_mm"]));
     if (has(op, "h_mm")) line.h_mm = Num(to_float(op["h_mm"]));
     if (has(op, "tail")) {

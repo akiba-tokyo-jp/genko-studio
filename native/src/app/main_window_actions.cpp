@@ -486,6 +486,7 @@ void MainWindow::build_actions() {
     build_guide_actions();      // (定規, 3D and their commands: main_window_guides.cpp)
     build_material_actions();   // (効果線, 素材を置く, トーン, the view's extras, the layer commands: main_window_materials.cpp)
     build_line_actions();       // (テキスト, 台詞 and the book's lines, the 台詞 panel: main_window_lines.cpp)
+    build_type_actions();       // (PC5 G-a: 横書き文字ツール, 書式's commands, the text tools' type layers: main_window_type.cpp)
     build_output_actions();     // (書き出し, 印刷, 履歴, 入稿前の点検, スマホの画面, 目盛り: main_window_output.cpp)
     build_studio_actions();     // (チャットでの承認: main_window_studio.cpp)
     build_smart_actions();      // (smart-objects@1: スマートオブジェクト, 埋め込みを配置…, ラスタライズ: main_window_smart.cpp)
@@ -597,7 +598,7 @@ void MainWindow::build_actions() {
                                           {"picker", "act_picker"}, {"fill", "act_fill"}, {"lassofill", "act_lassofill"},
                                           {"gradient", "act_gradient"}, {"shape", "act_shape"}, {"blend", "act_blend"}, {"reshape", "act_reshape"},
                                           {"rect", "act_marquee"}, {"lasso", "act_lasso"}, {"wand", "act_wand"}, {"ruler", "act_ruler"},
-                                          {"text", "act_text"},
+                                          {"text", "act_text"}, {"text", "act_text_h"},
                                           {"3d", "act_3d"}, {"effect", "act_effect"}, {"stamp", "act_stamp"},
                                           {"move", "act_move"}, {"undo", "act_undo"}, {"redo", "act_redo"}, {"fit", "act_fit"},
                                           {"zoom_in", "act_zoom_in"}, {"zoom_out", "act_zoom_out"}, {"prev", "act_prev"}, {"next", "act_next"},
@@ -656,7 +657,7 @@ void MainWindow::build_menus() {
     view->addAction(action("act_tool_names"));
     QMenu* tools = bar->addMenu(QStringLiteral("ツール"));
     // (Python's order; the tools not ported yet join it as they come)
-    for (const char* name : {"act_select", "act_move", "act_pen", "act_eraser", "act_blend", "act_shape", "act_text", "act_frame"})
+    for (const char* name : {"act_select", "act_move", "act_pen", "act_eraser", "act_blend", "act_shape", "act_text", "act_text_h", "act_frame"})
         tools->addAction(action(name));
     tools->addSeparator();
     for (const char* name : {"act_picker", "act_fill", "act_lassofill", "act_fill_gaps", "act_gradient", "act_reshape", "act_vector", "act_liquify"})

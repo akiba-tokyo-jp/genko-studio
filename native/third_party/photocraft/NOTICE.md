@@ -285,6 +285,8 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - 文字の土台（PC5 G-0）:
   - `crates/doc/src/text.rs`（52-197 行: `CharStyle`・`ParagraphStyle` の属性と既定、`TextAlign`・`TextDirection`）と `crates/engine/src/type_extra_cmds.rs`（106-123 行: アンチエイリアスの方法の名前）: 文字と段落の属性の名前と既定 → `native/src/core/type_text.cpp`（`kCharAttrs`・`kParaAttrs`・`char_defaults`・`para_defaults`。長さを mm にし、範囲を決め、Genko の書式の鍵 — 語ごとの倍率・太さの段・縦中横・約物の詰め・禁則 — を足した所は Genko のもの）。
   - `crates/doc/src/text_styles.rs`（182-236 行: `resolve_para`・`resolve_char`）: スタイルを解く順（基本段落 → 段落スタイル → 文字スタイル → 上書き）→ `native/src/core/type_text.cpp`（`resolve_para`・`resolve_chars`。上書きを違う所だけで持ち、台詞の書式と書記素の範囲・段落の番号で解く所は Genko のもの）。
+- 文字レイヤーと文字ツール（PC5 G-a）:
+  - `crates/text/src/render.rs`（180 行: アンチエイリアス なし は被覆 0.5 で 2 値）・`crates/engine/src/type_extra_cmds.rs`（106-123 行: なし だけ描き方が変わり、ほかは名前を持つ。137-192 行: ポイントテキスト ⇄ 段落テキストの変換。361-377 行: Lorem ipsum の文）・`crates/engine/src/type_cmds.rs`（308-350 行: 範囲の置き換え、373 行: 本文からのレイヤーの名前）: 決まり → `native/src/render/text/lettering.cpp`（`binarized`・置き方）・`native/src/render/ops_type.cpp`（`add_type_layer`・`edit_type`・`to_point`・`to_box`）・`native/src/app/main_window_type.cpp`（`paste_lorem`）。基準点・枠からの置き方（縦組み・揃え）、書記素の位置、ルビ・フキダシ、行列での描き方、和文の仮の文は Genko のもの。
 
 ## レイヤー・アートボード・自動処理（PC5 節 I）
 
