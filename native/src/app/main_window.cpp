@@ -352,7 +352,7 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     zoom_label_ = new QLabel;
     statusBar()->addPermanentWidget(zoom_label_);
     zoom_box_ = new QSpinBox;  // (表示倍率の直接入力)
-    zoom_box_->setRange(5, 6400);
+    zoom_box_->setRange(1, 3200);  // (PC5 H-a, the user's decision 11: the page's pixels, 100 % one a screen pixel)
     zoom_box_->setSuffix(QStringLiteral(" %"));
     zoom_box_->setToolTip(QStringLiteral("表示倍率。数を打ち込んで Enter"));
     zoom_box_->setKeyboardTracking(false);
@@ -649,6 +649,7 @@ void MainWindow::pen_changed() {
     }
     add_background(fields);  // (PC4 E2, review P2-4: the line drawn as it goes takes the 背景色 the brush moves to)
     canvas_->set_live_pen(fields, layer != nullptr && drawable(*layer) ? std::optional<std::string>(layer->id) : std::nullopt);
+    canvas_->grid_layer = layer != nullptr ? std::optional<std::string>(layer->id) : std::nullopt;  // (PC5 H-a: ピクセルグリッド's layer)
     canvas_->brush_width_mm = pen_.width_mm;
     canvas_->eraser_mm = eraser_mm_;
     canvas_->smoothing = QString::fromStdString(pen_.smoothing);

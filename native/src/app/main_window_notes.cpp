@@ -104,19 +104,8 @@ void MainWindow::build_notes_menus(QMenu* file, QMenu* view) {
     } else {
         file->addMenu(import_menu_);
     }
-    // 表示 → 表示・非表示 ▸ (節 H's place for the extras: made here when it is not yet — "menu_show", laid out by view_rows)
-    QMenu* shows = show_menu(view);
-    if (!view->actions().contains(shows->menuAction())) view->addMenu(shows);
-    shows->addAction(action(QStringLiteral("act_show_notes")));
-}
-
-QMenu* MainWindow::show_menu(QMenu* view) {
-    for (QAction* item : view->actions()) {
-        if (item->menu() != nullptr && item->menu()->objectName() == QLatin1String("menu_show")) return item->menu();
-    }
-    auto* menu = new QMenu(QStringLiteral("表示・非表示"), view);
-    menu->setObjectName(QStringLiteral("menu_show"));
-    return menu;
+    // 表示 → 表示・非表示 ▸ (節 H's: show_menu, main_window_view.cpp — its place among the items show_rows())
+    show_menu(view)->addAction(action(QStringLiteral("act_show_notes")));
 }
 
 void MainWindow::build_notes_dock() {

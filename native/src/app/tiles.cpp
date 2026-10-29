@@ -8,7 +8,10 @@
 #include <array>
 #include <cmath>
 #include <future>
+#include <atomic>
+#include <chrono>
 #include <mutex>
+#include <tuple>
 #include <set>
 #include <unordered_set>
 
@@ -21,7 +24,11 @@
 #include "render/brushes.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/anim.hpp"
+#include "render/color_canvas.hpp"
 #include "render/colour.hpp"
+#include "render/hdr_preview.hpp"
+#include "render/ink_canvas.hpp"
+#include "render/inspect.hpp"
 #include "render/page.hpp"
 #include "render/proof.hpp"
 
@@ -93,7 +100,8 @@ bool same_layer_look(const core::Layer& a, const core::Layer& b) {
            a.screen == b.screen && a.asset == b.asset && a.region.has_value() == b.region.has_value() && a.angle == b.angle &&
            a.smart == b.smart &&  // (smart-objects@1: its matrix and settings)
            a.style == b.style &&  // (layer-styles@1, PC4 E6: its style)
-           a.shapes == b.shapes && a.vector_mask == b.vector_mask;  // (pen-shapes@1: its shape parts, a list made anew when changed; vector@1)
+           a.shapes == b.shapes && a.vector_mask == b.vector_mask &&  // (pen-shapes@1: its shape parts, a list made anew when changed; vector@1)
+           a.group == b.group && a.parent_id == b.parent_id;  // (groups@1, PC5 I-b: drawn as a group, or in one)
 }
 
 // smart-objects@1 (PC3 A1): the contents the page's smart objects show — and those inside them — are the same in both
@@ -279,6 +287,153 @@ struct PageRenderer::OnionStore {
     }
 };
 
+// (PC5 H-a, review P2-3) A page drawn whole for any part of it (render::draws_whole_page: a correction that moves shapes):
+// drawn whole once a level — the first tile that needs it draws it, the others wait for it — and every tile cut from it.
+// Kept while the tiles are being drawn; let go when they are all drawn.
+struct PageRenderer::WholeStore {
+    using Value = std::shared_ptr<const render::RenderResult>;
+    struct Slot {
+        const core::Page* page = nullptr;
+        const core::Document* doc = nullptr;
+        int dpi = 0;
+        std::uint64_t generation = 0;
+        bool rough = false;
+        std::shared_future<Value> value;
+        std::uint64_t used = 0;
+    };
+    std::mutex mutex;
+    std::array<Slot, 2> kept;
+    std::uint64_t clock = 0;
+    std::atomic<std::size_t> drawn{0};
+
+    Value get(const core::Page* page, const core::Document* doc, int dpi, std::uint64_t generation, bool rough,
+              const std::function<render::RenderResult()>& make) {
+        std::promise<Value> made;
+        std::shared_future<Value> wait;
+        bool mine = false;
+        {
+            std::lock_guard lock(mutex);
+            Slot* slot = nullptr;
+            for (Slot& s : kept) {
+                if (!s.value.valid() || s.page != page || s.doc != doc || s.dpi != dpi || s.generation != generation || s.rough != rough) continue;
+                // (one cancelled — its first tile was stopped —: drawn again)
+                const bool given_up = s.value.wait_for(std::chrono::seconds(0)) == std::future_status::ready && s.value.get() == nullptr;
+                if (!given_up) slot = &s;
+            }
+            if (slot == nullptr) {
+                slot = &*std::min_element(kept.begin(), kept.end(), [](const Slot& a, const Slot& b) { return a.used < b.used; });
+                *slot = Slot{page, doc, dpi, generation, rough, made.get_future().share(), 0};
+                mine = true;
+            }
+            slot->used = ++clock;
+            wait = slot->value;
+        }
+        if (mine) {
+            try {
+                Value value = std::make_shared<const render::RenderResult>(make());
+                ++drawn;
+                made.set_value(std::move(value));
+            } catch (const render::Cancelled&) {
+                made.set_value(nullptr);
+            } catch (...) {
+                made.set_exception(std::current_exception());
+            }
+        }
+        return wait.get();
+    }
+    void release() {
+        std::lock_guard lock(mutex);
+        for (Slot& s : kept) s = Slot{};
+    }
+};
+
+namespace {
+
+// A part of a page drawn whole, as render_page draws a part of it: its picture, inks, values and marks cut there.
+render::RenderResult cut_part(const render::RenderResult& whole, const QRect& region) {
+    const render::Box box{region.x(), region.y(), region.x() + region.width(), region.y() + region.height()};
+    render::RenderResult out;
+    out.image = whole.image.crop(box);
+    out.omitted = whole.omitted;
+    if (whole.inks) out.inks = render::crop_inks(*whole.inks, box);
+    if (whole.precise && whole.precise->size() >= 16) {  // (GKCR: its rows of the part, in its own precision)
+        const std::string& from = *whole.precise;
+        const std::size_t sample = static_cast<unsigned char>(from[5]);
+        std::uint32_t full = 0;
+        for (int b = 0; b < 4; ++b) full |= static_cast<std::uint32_t>(static_cast<unsigned char>(from[8 + b])) << (8 * b);
+        std::string part = from.substr(0, 8);
+        for (const std::uint32_t v : {static_cast<std::uint32_t>(box.width()), static_cast<std::uint32_t>(box.height())})
+            for (int b = 0; b < 4; ++b) part += static_cast<char>(v >> (8 * b) & 0xff);
+        const std::size_t row = std::size_t(box.width()) * 4 * sample;
+        for (int y = box.y0; y < box.y1; ++y) part.append(from, 16 + (std::size_t(y) * full + std::size_t(box.x0)) * 4 * sample, row);
+        out.precise = std::move(part);
+    }
+    if (whole.drawn_over) {
+        std::vector<unsigned char> part(std::size_t(box.width()) * std::size_t(box.height()));
+        const auto full = static_cast<std::size_t>(whole.image.width());
+        for (int y = box.y0; y < box.y1; ++y)
+            std::copy_n(whole.drawn_over->data() + std::size_t(y) * full + std::size_t(box.x0), box.width(),
+                        part.data() + std::size_t(y - box.y0) * std::size_t(box.width()));
+        out.drawn_over = std::move(part);
+    }
+    return out;
+}
+
+}  // namespace
+
+std::size_t PageRenderer::wholes_drawn() const { return wholes_ ? wholes_->drawn.load() : 0; }
+
+void PageRenderer::set_fine_budget(std::size_t bytes) {
+    fine_budget_ = bytes;
+    trim_fine();
+}
+
+std::size_t PageRenderer::fine_bytes() const {
+    std::size_t bytes = 0;
+    for (const auto& [dpi, l] : levels_) {
+        if (dpi == base_dpi_) continue;
+        for (const Tile& tile : l.tiles) {
+            bytes += static_cast<std::size_t>(tile.image.sizeInBytes()) + static_cast<std::size_t>(tile.shown.sizeInBytes()) +
+                     static_cast<std::size_t>(tile.mask.sizeInBytes());
+        }
+    }
+    return bytes;
+}
+
+void PageRenderer::trim_fine() {
+    // (review P2-3: the finer levels keep the tiles in sight and those seen last, up to their budget; the whole page's
+    // level keeps all of its)
+    std::size_t bytes = fine_bytes();
+    if (bytes <= fine_budget_) return;
+    std::vector<std::tuple<std::uint64_t, int, int>> out_of_sight;  // (seen, level, index)
+    for (auto& [dpi, l] : levels_) {
+        if (dpi == base_dpi_) continue;
+        for (int i = 0; i < static_cast<int>(l.tiles.size()); ++i) {
+            const Tile& tile = l.tiles[static_cast<std::size_t>(i)];
+            if (tile.image.isNull() || tile.running || tile.seen >= want_clock_) continue;
+            out_of_sight.emplace_back(tile.seen, dpi, i);
+        }
+    }
+    std::sort(out_of_sight.begin(), out_of_sight.end());
+    for (const auto& [seen, dpi, i] : out_of_sight) {
+        if (bytes <= fine_budget_) break;
+        if (texture_budget_) forget_on_card(dpi, i);
+        Level& l = levels_.at(dpi);
+        Tile& tile = l.tiles[static_cast<std::size_t>(i)];
+        bytes -= std::min(bytes, static_cast<std::size_t>(tile.image.sizeInBytes()) + static_cast<std::size_t>(tile.shown.sizeInBytes()) +
+                                     static_cast<std::size_t>(tile.mask.sizeInBytes()));
+        tile.image = QImage();
+        tile.shown = QImage();
+        tile.mask = QImage();
+        tile.out = 0;
+        tile.valid = 0;
+        tile.rough = false;
+        tile.changed = generation_;
+        tile.pending = QRect(QPoint(0, 0), tile_rect(l, i).size());  // (drawn again when it is wanted)
+        ++fine_released_;
+    }
+}
+
 void PageRenderer::set_anim(std::int64_t frame, bool onion) {
     if (frame == frame_ && onion == onion_) return;
     frame_ = frame;
@@ -288,6 +443,76 @@ void PageRenderer::set_anim(std::int64_t frame, bool onion) {
     ++generation_;
     for (auto& [dpi, level] : levels_) mark(level, QRect(QPoint(0, 0), level.size), generation_);
     dispatch();
+}
+
+void PageRenderer::set_hdr(const render::HdrPreview& preview) {
+    const render::HdrPreview next = preview.clamped();
+    if (next == hdr_) return;
+    hdr_ = next;
+    const core::Page* p = page();
+    if (p != nullptr && render::hdr_page(*p)) redraw_all();  // (another page shows as it is: nothing on screen changes)
+}
+
+int PageRenderer::pixel_dpi() const {
+    const core::Page* p = page();
+    if (p == nullptr) return 0;
+    const double dpi = p->spec.dpi.value();
+    return std::isfinite(dpi) && dpi >= 1 ? static_cast<int>(std::lround(dpi)) : 0;
+}
+
+void PageRenderer::set_pixel_art(bool on) {
+    if (on == pixel_art_) return;
+    pixel_art_ = on;
+    emit updated(QRectF());  // (the same tiles, laid otherwise)
+}
+
+void PageRenderer::set_texture_budget(std::optional<std::size_t> bytes) {
+    texture_budget_ = bytes;
+    on_card_.clear();
+    texture_bytes_ = 0;
+    textures_released_ = 0;
+}
+
+void PageRenderer::forget_on_card(int dpi, int index) {
+    const auto it = on_card_.find({dpi, index});
+    if (it == on_card_.end()) return;
+    texture_bytes_ -= std::min(texture_bytes_, it->second.bytes);
+    on_card_.erase(it);
+    // (its picture copied: the card lets the texture of the one it had go — Qt's texture cache drops a picture's texture
+    // when its data goes; a picture painted over in place would leave the old one there)
+    const auto level = levels_.find(dpi);
+    if (level == levels_.end() || index < 0 || index >= static_cast<int>(level->second.tiles.size())) return;
+    Tile& tile = level->second.tiles[static_cast<std::size_t>(index)];
+    if (!tile.image.isNull()) tile.image = tile.image.copy();
+    if (!tile.shown.isNull()) tile.shown = tile.shown.copy();
+}
+
+void PageRenderer::trim_textures() {
+    if (!texture_budget_) return;
+    // (the ones whose tile is gone — another page, a level let go —: their pictures went, and their textures with them)
+    for (auto it = on_card_.begin(); it != on_card_.end();) {
+        const auto level = levels_.find(it->first.first);
+        const bool gone = level == levels_.end() || it->first.second >= static_cast<int>(level->second.tiles.size()) ||
+                          level->second.tiles[static_cast<std::size_t>(it->first.second)].image.isNull();
+        if (gone) {
+            texture_bytes_ -= std::min(texture_bytes_, it->second.bytes);
+            it = on_card_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    // past the budget: the ones drawn longest ago first, never one of the frame just drawn
+    while (texture_bytes_ > *texture_budget_) {
+        auto oldest = on_card_.end();
+        for (auto it = on_card_.begin(); it != on_card_.end(); ++it) {
+            if (it->second.frame < card_frame_ && (oldest == on_card_.end() || it->second.frame < oldest->second.frame)) oldest = it;
+        }
+        if (oldest == on_card_.end()) break;
+        const auto [dpi, index] = oldest->first;
+        forget_on_card(dpi, index);
+        ++textures_released_;
+    }
+    ++card_frame_;
 }
 
 void PageRenderer::redraw_all() {
@@ -534,6 +759,10 @@ void PageRenderer::want(int base_dpi, int wanted_dpi, const QRectF& visible_mm) 
     };
     in_sight(base);
     if (wanted_dpi > base_dpi) in_sight(level(wanted_dpi, false));
+    ++want_clock_;  // (PC5 H-a: the tiles wanted now, seen now)
+    for (auto& [dpi, l] : levels_) {
+        for (const int i : l.wanted) l.tiles[static_cast<std::size_t>(i)].seen = want_clock_;
+    }
     // levels no longer needed go once the base is whole again (the old one shows meanwhile)
     const bool base_ready = std::all_of(base.tiles.begin(), base.tiles.end(), [](const Tile& t) { return t.valid > 0; });
     for (auto it = levels_.begin(); it != levels_.end();) {
@@ -547,6 +776,7 @@ void PageRenderer::want(int base_dpi, int wanted_dpi, const QRectF& visible_mm) 
         }
         it = levels_.erase(it);
     }
+    trim_fine();
     dispatch();
 }
 
@@ -597,10 +827,13 @@ void PageRenderer::dispatch() {
             const std::stop_token stop = tile.stop->get_token();
             const std::int64_t frame = frame_;
             const bool onion = onion_;
+            const render::HdrPreview hdr = hdr_;
             if (!onions_) onions_ = std::make_shared<OnionStore>();
             const std::shared_ptr<OnionStore> onions = onions_;
+            if (!wholes_) wholes_ = std::make_shared<WholeStore>();
+            const std::shared_ptr<WholeStore> wholes = wholes_;
             pool_.start([self, doc, page_index, page_id, generation, dpi, index, region, rough, mode, proof, gamut, monitor, dots, view, stop, frame,
-                         onion, onions]() {
+                         onion, onions, hdr, wholes]() {
                 Result result;
                 result.page_id = page_id;
                 result.dpi = dpi;
@@ -635,6 +868,12 @@ void PageRenderer::dispatch() {
                     const bool values = source.icc && (gamut || numbers) && !core::anim::is_animation(*raw);
                     options.inks = (cmyk_page && plates) || (values && raw->color);
                     options.precise = values && !raw->color;
+                    // (PC5 H-a: a 32-bit page shown through 32 bit プレビューオプション — its values or inks, before they are cut)
+                    const bool hdr_on = !hdr.identity() && render::hdr_page(*raw) && !core::anim::is_animation(*raw);
+                    if (hdr_on) {
+                        (raw->color ? options.inks : options.precise) = true;
+                        options.drawn_over = true;  // (what is drawn over the page stays as drawn: review P3-4)
+                    }
                     render::RenderResult drawn;
                     if (core::anim::is_animation(*raw)) {  // (the frame shown, with the frames around it faint)
                         options.at_frame = true;
@@ -648,6 +887,13 @@ void PageRenderer::dispatch() {
                                 drawn.image = render::alpha_composite(drawn.image.convert("RGBA"), part).convert("RGB");
                             }
                         }
+                    } else if (render::draws_whole_page(*raw)) {  // (drawn whole once a level, each tile cut from it: P2-3)
+                        render::RenderOptions whole = options;
+                        whole.region.reset();
+                        const auto page = wholes->get(raw.get(), doc.get(), dpi, generation, rough,
+                                                      [&] { return render::render_page(*raw, dpi, whole, doc.get()); });
+                        if (!page) throw render::Cancelled();
+                        drawn = cut_part(*page, region);
                     } else {
                         drawn = render::render_page(*raw, dpi, options, doc.get());
                     }
@@ -666,6 +912,11 @@ void PageRenderer::dispatch() {
                         } else {
                             out_of_gamut = render::proof::Gamut::of(gamut->second)->mask(drawn.image, gamut->first.threshold, &outside);
                         }
+                    }
+                    if (hdr_on) {
+                        if (raw->color && drawn.inks) drawn.image = render::hdr_shown(drawn.image, *drawn.inks, *raw->color, hdr, drawn.drawn_over ? &*drawn.drawn_over : nullptr);
+                        else if (!raw->color && drawn.precise) drawn.image = render::hdr_shown(drawn.image, *drawn.precise, render::RgbSpace::of(*raw), hdr,
+                                                                                  drawn.drawn_over ? &*drawn.drawn_over : nullptr);
                     }
                     if (proof) {
                         if (cmyk_page && plates && drawn.inks) {
@@ -769,6 +1020,7 @@ void PageRenderer::deliver(const Result& r) {
         tile.image = QImage(rect.size(), QImage::Format_RGB32);
         tile.image.fill(Qt::white);
     }
+    if (texture_budget_) forget_on_card(r.dpi, r.index);  // (painted over: its texture on the card is out of date)
     const QPoint at = r.region.topLeft() - rect.topLeft();
     {
         QPainter painter(&tile.image);
@@ -817,6 +1069,8 @@ void PageRenderer::deliver(const Result& r) {
     dispatch();
     emit updated(in_mm(r.region));
     if (gamut_ && l.dpi == base_dpi_) emit gamutCounted();
+    trim_fine();
+    if (settled() && wholes_) wholes_->release();  // (every tile drawn: the whole pages they were cut from let go)
     if (settled()) emit settledChanged();
 }
 
@@ -857,15 +1111,22 @@ int PageRenderer::shown_dpi() const {
 
 void PageRenderer::paint(QPainter& painter, const QRectF& visible_mm) const {
     const QTransform to_screen = painter.transform();
+    const bool smooth = painter.testRenderHint(QPainter::SmoothPixmapTransform);
+    const int pixel = pixel_dpi();
     for (const auto& [dpi, l] : levels_) {
         const bool finer = dpi > base_dpi_ && base_dpi_ > 0;
         const double mm = 25.4 / dpi;
         // page pixels → the screen; exactly one to one at 100 % (no resampling of the page's pixels)
         QTransform t = QTransform::fromScale(mm, mm) * to_screen;
-        if (std::abs(t.m11() - 1.0) < 1e-9 && std::abs(t.m22() - 1.0) < 1e-9 && std::abs(t.m12()) < 1e-12 && std::abs(t.m21()) < 1e-12) {
-            t = QTransform::fromTranslate(std::round(t.dx()), std::round(t.dy()));
+        // (PC5 H-a: mirrored too — a mirrored view at 100 % lays the pixels on the screen's as they are, unresampled)
+        if (std::abs(std::abs(t.m11()) - 1.0) < 1e-9 && std::abs(std::abs(t.m22()) - 1.0) < 1e-9 && std::abs(t.m12()) < 1e-12 && std::abs(t.m21()) < 1e-12) {
+            t = QTransform(t.m11() < 0 ? -1 : 1, 0, 0, t.m22() < 0 ? -1 : 1, std::round(t.dx()), std::round(t.dy()));
         }
         painter.setTransform(t);
+        // (PC5 H-a: the page's own pixels enlarged — 画素の段 — are laid as squares, nearest; ピクセルアートのプレビュー: every
+        // level so)
+        const bool enlarged = std::abs(t.determinant()) > 1.0 + 1e-9;
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, smooth && !pixel_art_ && !(enlarged && pixel > 0 && dpi >= pixel));
         const double px = dpi / 25.4;
         const QRect seen = QRectF(visible_mm.x() * px, visible_mm.y() * px, visible_mm.width() * px, visible_mm.height() * px)
                                .toAlignedRect()
@@ -876,15 +1137,37 @@ void PageRenderer::paint(QPainter& painter, const QRectF& visible_mm) const {
             if (finer && (tile.valid < tile.changed || !tile.pending.isEmpty() || tile.rough)) continue;  // (only finished ones)
             const QRect rect = tile_rect(l, i);
             if (!rect.intersects(seen)) continue;
-            painter.drawImage(rect.topLeft(), tile.shown.isNull() ? tile.image : tile.shown);
+            const QImage& picture = tile.shown.isNull() ? tile.image : tile.shown;
+            painter.drawImage(rect.topLeft(), picture);
+            if (texture_budget_) {  // (on the card now: counted, with the frame it was drawn in)
+                auto [it, made] = on_card_.try_emplace({dpi, i});
+                if (made) {
+                    it->second.bytes = static_cast<std::size_t>(picture.sizeInBytes());
+                    texture_bytes_ += it->second.bytes;
+                }
+                it->second.frame = card_frame_;
+            }
         }
     }
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, smooth);
     painter.setTransform(to_screen);
 }
 
 std::optional<QColor> PageRenderer::pixel_at(double x_mm, double y_mm) const {
     const core::Page* p = page();
     if (p == nullptr || base_dpi_ == 0) return std::nullopt;
+    // (PC5 H-a review P3-3: what the view only shows — the proof, 32 bit プレビュー — is not the page's colour: the page as
+    // it is drawn there, as the status bar's values read it)
+    if (proof_on_ || (!hdr_.identity() && render::hdr_page(*p))) {
+        try {
+            const core::Json at = render::pixel_at(*p, doc_.get(), x_mm, y_mm, std::nullopt, base_dpi_);
+            const core::Json& srgb = at.at("srgb");
+            const auto c = [&srgb](int i) { return std::clamp(static_cast<int>(std::lround(srgb.at(i).get<double>())), 0, 255); };
+            return QColor(c(0), c(1), c(2));
+        } catch (const std::exception&) {  // (off the page)
+            return std::nullopt;
+        }
+    }
     const auto it = levels_.find(base_dpi_);
     if (it == levels_.end()) return std::nullopt;
     const Level& l = it->second;

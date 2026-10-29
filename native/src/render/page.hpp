@@ -82,6 +82,13 @@ struct RenderOptions {
     // smart-objects@1 (render/smart.hpp): a smart object's contents page — its layers alone over nothing ("RGBA"): no paper,
     // panels' borders, lines, nombres, effect lines, guides or marks (render_contents).
     bool contents = false;
+    // PC5 H-a (32 bit プレビュー, review P3-4): where what is drawn over the page's layers in 8 bits — the lines and
+    // balloons, the panels' borders, effect lines, the nombre, marks and guides — paints (RenderResult::drawn_over), on a
+    // page of precise colour or inks. Not the tones (layers).
+    bool drawn_over = false;
+    // groups@1 (PC5 I-b, render/page's own): with contents, only the alpha of what is drawn matters — a group's shape (on a
+    // page of inks, its layers on a clear canvas; the picture "RGBA", black, that alpha).
+    bool shape_only = false;
 };
 
 struct RenderResult {
@@ -89,7 +96,14 @@ struct RenderResult {
     std::vector<std::string> omitted;  // with skip_unported: what was left out (each once, in the order met)
     std::optional<core::InkPixels> inks;  // with RenderOptions::inks on a CMYK or Lab page: its inks (opaque)
     std::optional<std::string> precise;   // with RenderOptions::precise: GKCR f32 of the page's values (its profile's)
+    // with RenderOptions::drawn_over on a page of precise colour or inks: 255 where something was drawn over the page in 8
+    // bits, else 0 (the image's size, row by row)
+    std::optional<std::vector<unsigned char>> drawn_over = std::nullopt;
 };
+
+// PC5 H-a: the page is drawn whole even for a part of it (a correction that moves shapes: render_page with a region draws
+// the whole page and cuts the part) — the screen's tiles draw it once and cut every tile from it.
+bool draws_whole_page(const core::Page& page);
 
 // RenderOptions with mode "proof" (render_frame's default).
 RenderOptions proof_options();
@@ -238,9 +252,14 @@ struct PageLayer {
 // (a PSD) a pattern fill layer (patterns@1, PC4 E3) is given too, as a layer of its look with its pattern fill. (PC5 J-a)
 // `hidden_too`: the hidden exported pixel layers too, in their places, each given `hidden` (a PSD of a page with layer
 // comps: Photoshop's comps show and hide them); a hidden correction layer and the hidden tones still not.
+// groups@1 (PC5 I-b): what a hidden group holds is not given (with `hidden_too`: given, by its own visibility); with
+// `groups` (a PSD) each group given is given as its end (section "end", below what it holds) and itself (section "group",
+// above it: its name, id, settings — its blend pass_through Photoshop's 通過 —, clipping, mask and vector mask; `hidden`
+// when it is).
 void page_layers(const core::Page& page, const core::Document& episode, int dpi, const std::function<void(PageLayer&&)>& each,
                  const std::function<void(const core::StoryLine&)>* line_layers = nullptr,
-                 const std::function<void(const core::Layer&)>* adjust_layers = nullptr, bool shapes = false, bool hidden_too = false);
+                 const std::function<void(const core::Layer&)>* adjust_layers = nullptr, bool shapes = false, bool hidden_too = false,
+                 bool groups = false);
 
 // Pure black and white: grey above `threshold` is white; with `screen` the greys become a pattern (dot, line, cross or
 // noise; 書き出しでのトーン化).

@@ -209,6 +209,7 @@ void MainWindow::build_tool_settings() {
     build_crop_page(ts);     // (PC3 C-e, 切り抜きツール: main_window_page_size.cpp)
     build_guide_pages(ts);   // (定規・3D: main_window_guides.cpp)
     build_material_pages(ts);  // (効果線・素材を置く: main_window_materials.cpp)
+    build_view_pages(ts);      // (PC5 H-a: 手のひらツール・ズームツール: main_window_view.cpp)
 
     dock->setObjectName(QStringLiteral("ツールの設定"));
     dock->setTitleBarWidget(new QWidget);  // (the tool's own name heads the panel; no second title above it)

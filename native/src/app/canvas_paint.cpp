@@ -90,12 +90,19 @@ void PageCanvas::draw_in_page_px(QPainter& painter, const QImage& image, const Q
     const double mm = 25.4 / dpi;
     QTransform t = QTransform::fromScale(mm, mm) * QTransform(view_.scale, 0, 0, view_.scale, view_.pan.x(), view_.pan.y()) * view_transform();
     // (exactly one page pixel per screen pixel at 100 %, as the tiles are drawn)
-    if (std::abs(t.m11() - 1.0) < 1e-9 && std::abs(t.m22() - 1.0) < 1e-9 && std::abs(t.m12()) < 1e-12 && std::abs(t.m21()) < 1e-12) {
-        t = QTransform::fromTranslate(std::round(t.dx()), std::round(t.dy()));
+    if (std::abs(std::abs(t.m11()) - 1.0) < 1e-9 && std::abs(std::abs(t.m22()) - 1.0) < 1e-9 && std::abs(t.m12()) < 1e-12 && std::abs(t.m21()) < 1e-12) {
+        t = QTransform(t.m11() < 0 ? -1 : 1, 0, 0, t.m22() < 0 ? -1 : 1, std::round(t.dx()), std::round(t.dy()));  // (mirrored too: PC5 H-a)
     }
     const QTransform kept = painter.transform();
     painter.setTransform(t);
+    // (PC5 H-a: the page's own pixels enlarged — 画素の段 — and ピクセルアートのプレビュー: nearest, as the tiles are laid)
+    const bool smooth = painter.testRenderHint(QPainter::SmoothPixmapTransform);
+    const int pixel = renderer_->pixel_dpi();
+    if (renderer_->pixel_art() || (std::abs(t.determinant()) > 1.0 + 1e-9 && pixel > 0 && dpi >= pixel)) {
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+    }
     painter.drawImage(box.topLeft(), image);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, smooth);
     painter.setTransform(kept);
 }
 
@@ -155,6 +162,7 @@ void PageCanvas::paint_page(QPainter& painter) {
     // the lines committed a moment ago, exactly as their tiles will be, until the tiles are drawn
     for (const Overlay& overlay : overlays_) draw_in_page_px(painter, overlay.ink->image(), overlay.ink->box(), overlay.ink->dpi());
     if (committing_) draw_in_page_px(painter, committing_->image(), committing_->box(), committing_->dpi());
+    draw_pixel_grid(painter);  // (PC5 H-a: ピクセルグリッド, over the page's pixels and under the guides: canvas_view.cpp)
     painter.setRenderHint(QPainter::Antialiasing);
     if (show_guides) draw_guides(painter, page_rect);
     if (phone_view) draw_phone(painter);  // (the phone screens: canvas_scale.cpp)

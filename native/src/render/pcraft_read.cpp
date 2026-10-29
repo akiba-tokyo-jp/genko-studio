@@ -1026,9 +1026,8 @@ core::Layer base_layer(Ctx& ctx, const Json& m, const std::string& name, const J
     layer.lock_position = all || boolean(field(locks, "position", "locks"), "locks.position");
     if (const Json* group = optional_field(m, "link_group")) layer.link = "pcraft-" + std::to_string(whole(*group, "layer.link_group"));
     ctx.mask_frame.reset();
-    // (a group's mask is not a folder's: not made — read_layer says so)
-    const bool group = field(field(m, "content", "layer"), "kind", "layer.content") == Json("group");
-    if (const Json* mask = optional_field(m, "mask"); mask != nullptr && !group) layer.mask = mask_of(ctx, *mask, name, ctx.mask_frame);
+    // (groups@1, PC5 I-b: a group's mask as a layer's)
+    if (const Json* mask = optional_field(m, "mask"); mask != nullptr) layer.mask = mask_of(ctx, *mask, name, ctx.mask_frame);
     if (const Json* vm = optional_field(m, "vector_mask")) layer.vector_mask = vector_mask_from(*vm, ctx.mm);
     // (psd-keep@1: the PSD's blocks it carried that a PSD's reader keeps — PC4 F-d's rules: not those this build writes or
     // reads into the layer —, and its PSD layer id with them or when the page keeps what names layers by it)
@@ -1431,19 +1430,13 @@ void read_layer(Ctx& ctx, const Json& m, const Json& parent, bool hidden, std::v
     ctx.load.layer();
     core::Layer layer = base_layer(ctx, m, name, parent, hidden);
     if (kind == "group") {
+        // (groups@1, PC5 I-b, the user's decision 2: a group drawn as PhotoCraft draws it — its visibility, opacity, blend
+        // (通過 among them), mask, vector mask and clipping; what is in it keeps its own visibility)
         layer.kind = core::LayerKind::Folder;
-        if (layer.opacity < 1.0 || (layer.blend != "normal" && blend_from(m["blend"]) != "PassThrough") || optional_field(m, "mask") != nullptr ||
-            layer.vector_mask) {
-            ctx.notes.name("フォルダーの不透明度・描画モード・マスクは Genko のフォルダーに無いため外しました", name);
-        }
-        if (layer.clip) ctx.notes.name("フォルダーのクリッピングは Genko のフォルダーに無いため外しました", name);
-        if (optional_field(content, "artboard") != nullptr) ctx.notes.name("アートボードは PC5 で入るまで普通のフォルダーにしました", name);
-        layer.opacity = 1.0;
-        layer.blend = "normal";
-        layer.mask.reset();
-        layer.vector_mask.reset();
-        layer.clip = false;
-        const bool shut = !layer.visible;
+        layer.group = true;
+        if (blend_from(m["blend"]) == "PassThrough") layer.blend = "pass_through";
+        if (optional_field(content, "artboard") != nullptr) ctx.notes.name("アートボードは PC5 で入るまで普通のグループにしました", name);
+        const bool shut = hidden;
         if (ctx.groups >= kGroupsDeepMax) {
             ctx.notes.name("グループの入れ子が深すぎるため、中のレイヤーを外しました（" + std::to_string(kGroupsDeepMax) + " 段まで）", name);
         } else {

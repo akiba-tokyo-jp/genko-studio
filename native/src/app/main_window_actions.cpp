@@ -690,6 +690,7 @@ void MainWindow::build_menus() {
     QMenu* layers = bar->addMenu(QStringLiteral("レイヤー"));
     for (const char* name : {"act_layer_pen", "act_layer_paint", "act_layer_folder"}) layers->addAction(action(name));
     QMenu* made = layers->addMenu(QStringLiteral("新規"));  // (PC3 B2: Photoshop's レイヤー → 新規)
+    made->addAction(action("act_layer_frame"));  // (PC5 I-b: レイヤーからのフレーム…, before Photoshop's 選択範囲をコピーしたレイヤー)
     for (const char* name : {"act_layer_via_copy", "act_layer_via_cut"}) made->addAction(action(name));
     layers->addSeparator();
     for (const char* name : {"act_layer_dup", "act_layer_merge", "act_layer_delete"}) layers->addAction(action(name));
@@ -832,6 +833,22 @@ void MainWindow::build_toolbars() {
         action(QString::fromLatin1(name))->setIconText(QString::fromUtf8(label));  // (the palette's names stay short; menus keep the full name)
     addToolBar(Qt::LeftToolBarArea, palette_);
     attach_tool_groups(palette_);  // (PC4 E-0: a tool's group on a long press or a right click: paint_panels.cpp)
+    {
+        // (PC5 H-a review P3: 手のひらツール last, as Photoshop's, ズームツール in its group — one button, so the palette still
+        // fits a short window)
+        QAction* hand = action(QStringLiteral("act_hand_tool"));
+        palette_->addAction(hand);
+        if (auto* button = qobject_cast<QToolButton*>(palette_->widgetForAction(hand))) {
+            auto* menu = new QMenu(button);
+            menu->setObjectName(QStringLiteral("tool_group:") + hand->objectName());
+            menu->addAction(hand);
+            menu->addAction(action(QStringLiteral("act_zoom_tool")));
+            button->setMenu(menu);
+            button->setPopupMode(QToolButton::DelayedPopup);
+            button->setContextMenuPolicy(Qt::CustomContextMenu);
+            connect(button, &QToolButton::customContextMenuRequested, button, [button, menu](const QPoint& at) { menu->popup(button->mapToGlobal(at)); });
+        }
+    }
     {
         QAction* names = action(QStringLiteral("act_tool_names"));
         const QSignalBlocker quiet(names);
@@ -1674,7 +1691,9 @@ void MainWindow::pick_colour() {
 }
 
 void MainWindow::ask_zoom() {
-    if (const auto value = ask::get_int(this, QStringLiteral("表示倍率"), QStringLiteral("倍率（%。100 で紙の大きさ）"), canvas_->zoom_percent(), 5, 6400)) {
+    // (PC5 H-a, the user's decision 11: in the page's pixels — 100 one page pixel a screen pixel, up to 3200 —; the paper's
+    // size is プリントサイズ)
+    if (const auto value = ask::get_int(this, QStringLiteral("表示倍率"), QStringLiteral("倍率（%。100 で画素等倍）"), canvas_->zoom_percent(), 1, 3200)) {
         const int percent = *value;
         canvas_->glide([this, percent] { canvas_->set_zoom_percent(percent); });
     }

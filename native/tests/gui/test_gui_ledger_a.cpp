@@ -838,7 +838,7 @@ private slots:
         pen.stabilize = 7;
         w->pen() = pen;
         w->pen_changed();
-        c->set_zoom_percent(100);
+        c->actual_size();  // (プリントサイズ: the paper at 96 dpi, the 100 % before PC5 H-a — the user's decision 11)
         c->center_on(97, 150);
         std::vector<QPointF> path;
         for (int i = 0; i < 50; ++i) path.emplace_back(60 + i * 1.5, 150 + 6 * std::sin(i * 1.3));  // (a shaky hand)

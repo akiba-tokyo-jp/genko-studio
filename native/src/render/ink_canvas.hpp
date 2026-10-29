@@ -50,7 +50,8 @@ public:
     // What `draw` paints over the picture so far in 8 bits (balloons, panel borders, tones, …), laid over it as
     // painted: drawn on black and on white, each pixel's cover and colour, the colour as the page's ink. Not a layer: the
     // alpha a clipped layer clips to stays that of the layer before.
-    void draw_8bit(const std::function<void(Image&)>& draw);
+    // (PC5 H-a: `marks`, the canvas's size: 255 set where the drawing painted)
+    void draw_8bit(const std::function<void(Image&)>& draw, std::vector<unsigned char>* marks = nullptr);
     // A layer that sets nothing for the next to clip to (a tone layer: the 8-bit page forgets the alpha before).
     void forget_clip();
     // A correction layer (SPEC.md COLOR-02, 群C): the colours the page's inks mean through `change` and back by its
@@ -76,6 +77,15 @@ public:
     void styled(const Box& part, bool clip, const std::vector<float>& own,
                 const std::function<void(std::vector<float>& values, const std::vector<float>& weight)>& run);
     void styled_done();
+
+    // PC5 I-b (groups@1): the canvas's values as a layer's picture (an isolated group drawn on a clear canvas, laid as one
+    // layer), and a pass-through group's opacity × mask ("L"; none: 1) between `before` (picture() before what the group
+    // holds was drawn) and now — premultiplied by the alpha; what the next layer clips to is left —, and what the next layer
+    // clips to set (`alpha`, "L": a group's shape).
+    InkPicture picture() const;
+    void mix_back(const InkPicture& before, double opacity, const Image* mask = nullptr);
+    void clip_to(const Image& alpha);
+    Image clip_alpha() const;  // (what the next layer would clip to, "L"; all 255 when nothing is set)
 
     // The page as the screen shows it ("RGB", sRGB).
     Image display() const;

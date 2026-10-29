@@ -180,7 +180,27 @@ std::string skipped_but_adjusted(const Json& cpp, const Json& python) {
 // it differs only by correction layers made of adjustment layers (the user's decision 5): each import's layers
 // Python's view's with those among them (their titles, the layers kind adjust in `after`), its skipped layers the
 // view's without exactly those names; else what differs.
-std::string corrections_more(const Json& own, const Json& python_view, const genko::core::Document& after) {
+// (groups@1, PC5 I-b, the user's decision 2: this build reads a PSD's group as a group — its mark, its blend 通過, its mask,
+// vector mask and clipping —, which psd.read_psd reads as a folder of none: those taken off, the reply is Python's view's)
+Json as_python_folders(Json value) {
+    if (value.is_array()) {
+        for (Json& item : value) item = as_python_folders(std::move(item));
+    } else if (value.is_object()) {
+        if (value.value("kind", Json()) == Json("folder")) {  // (the reply's snapshot holds no mark: every folder)
+            value.erase("group");
+            if (value.value("blend", Json()) == Json("pass_through")) value["blend"] = "normal";
+            value.erase("mask");
+            value.erase("vector_mask");
+            if (value.contains("clip")) value["clip"] = false;
+        }
+        value.erase("groups_as_folders");  // (import_psd's word of groups nested past core::kGroupDepthMax)
+        for (auto& [key, item] : value.items()) item = as_python_folders(std::move(item));
+    }
+    return value;
+}
+
+std::string corrections_more(const Json& own_read, const Json& python_view, const genko::core::Document& after) {
+    const Json own = as_python_folders(own_read);
     if (genko::core::dump_python(own) == genko::core::dump_python(python_view)) return "same";
     if (!own.value("ok", false) || !python_view.value("ok", false) || !own.contains("results") || !python_view.contains("results") ||
         own["results"].size() != python_view["results"].size())
@@ -214,7 +234,9 @@ std::string corrections_more(const Json& own, const Json& python_view, const gen
         if (!why.empty()) return why;
         more += static_cast<int>(extra.size());
     }
-    return more > 0 ? std::string() : "the replies differ: " + genko::core::dump_python(own).substr(0, 600);
+    std::string where;
+    (void)genko::test::strict_equal(own, python_view, &where);
+    return more > 0 ? std::string() : "the replies differ (" + where.substr(0, 600) + "): " + genko::core::dump_python(own).substr(0, 300);
 }
 
 // The harness's psd_images record of `data` (Pillow's Image.open, then load()): what render::psd_image_size refuses
@@ -1898,6 +1920,164 @@ private slots:
                 QCOMPARE(static_cast<int>(static_cast<unsigned char>(block.data[0])), 128);
             }
             QCOMPARE(own, 1);
+        }
+    }
+
+    // PC5 I-b (groups@1, SPEC AUTO-01「グループ」): groups written to a PSD — a pass-through group with a multiply inside, an
+    // isolated one, one of 50 % and one masked to the left half — read by psd-tools as groups of those settings, whose
+    // composite is this build's page; opened again, the groups come back as groups and draw the same. A folder that is not
+    // a group is written as before (its layers, no group).
+    void groupsGoThroughAPsd() {
+        namespace core = genko::core;
+        const auto run = [](const core::Document& doc, const Json& ops) {
+            return core::CommandBus(genko::render::ops_registry()).apply(doc, ops, core::Actor("human:test")).doc;
+        };
+        const auto fresh = [&] {
+            core::Document doc = core::new_episode("gr", core::Num(1), 1, core::PageSpec::custom(40, 40, 30, 30, 1, 2, 2, 2, 2, 100, "color"),
+                                                   core::Binding::Right);
+            doc.edit_page(0).frames.clear();
+            return doc;
+        };
+        // (a paint layer of pixels over the whole page, grey: as a picture painted, which a PSD writes as its own layer)
+        const auto paint = [](const std::string& id, int grey, const std::string& blend) {
+            core::Layer layer;
+            layer.id = id;
+            layer.title = id;
+            layer.kind = core::LayerKind::Raster;
+            layer.blend = blend;
+            layer.panel_clip = false;
+            layer.raster_png = std::make_shared<const std::string>(
+                genko::render::write_png(genko::render::Image::create("RGBA", genko::render::Size{157, 157}, genko::render::Ink{grey, grey, grey, 255})));
+            return layer;
+        };
+        const auto book = [&](const Json& group, const std::string& child_blend, int child) {
+            core::Document doc = fresh();
+            doc.edit_page(0).layers.push_back(paint("base", 128, "normal"));
+            Json ops = Json::array();
+            Json folder{{"op", "add_layer"}, {"page", 1}, {"kind", "folder"}, {"id", "g"}, {"name", "g"}};
+            Json settings{{"op", "set_layer"}, {"page", 1}, {"id", "g"}};
+            for (const auto& [key, value] : group.items()) (key == "group" || key == "blend" ? folder : settings)[key] = value;
+            ops.push_back(folder);
+            if (settings.size() > 3) ops.push_back(settings);
+            doc = run(doc, ops);
+            core::Layer inside = paint("child", child, child_blend);
+            inside.parent_id = "g";
+            doc.edit_page(0).layers.push_back(std::move(inside));
+            return doc;
+        };
+        const Json left{{"poly", Json::array({Json::array({0, 0}), Json::array({20, 0}), Json::array({20, 40}), Json::array({0, 40})})}};
+        struct Case {
+            std::string name;
+            core::Document doc;
+            std::string blend;  // (psd-tools' name of the group's blend; "" no group)
+            int opacity;
+        };
+        std::vector<Case> cases;
+        cases.push_back({"pass", book(Json{{"group", true}}, "multiply", 128), "PASS_THROUGH", 255});
+        cases.push_back({"alone", book(Json{{"group", true}, {"blend", "normal"}}, "multiply", 128), "NORMAL", 255});
+        cases.push_back({"half", book(Json{{"group", true}, {"blend", "normal"}, {"opacity", 0.5}}, "normal", 0), "NORMAL", 128});
+        cases.push_back({"masked", run(book(Json{{"group", true}}, "normal", 0), Json::array({Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", "g"}, {"area", left}}})),
+                         "PASS_THROUGH", 255});
+        cases.push_back({"folder", book(Json::object(), "multiply", 128), "", 255});
+        QDir().mkpath(path(QStringLiteral("groups")));
+        QStringList files;
+        for (const Case& c : cases) {
+            files << path(QStringLiteral("groups/%1.psd").arg(QString::fromStdString(c.name)));
+            (void)genko::formats::export_page_psd(c.doc, c.doc.page(0), genko::storage::path_from_utf8(files.last().toStdString()), 100);
+        }
+        const QString out = path(QStringLiteral("groups/view.json"));
+        const auto ran = genko::test::run(genko::test::python_ref(),
+                                          QStringList{genko::test::repo_root() + QStringLiteral("/tools/migration/psd_groups_check.py"), out, QStringLiteral("39,78;118,78")} + files,
+                                          genko::test::python_env(path(QStringLiteral("pyenv"))));
+        QVERIFY2(ran.exit_code == 0, ran.err.right(2000).constData());
+        const Json view = genko::test::read_json(out);
+        genko::render::RenderOptions options;
+        options.mode = "print";
+        for (std::size_t i = 0; i < cases.size(); ++i) {
+            const Case& c = cases[i];
+            const Json& seen = view[files[static_cast<int>(i)].toStdString()];
+            QVERIFY2(!seen.contains("error"), seen.dump().c_str());
+            const Json* group = nullptr;
+            for (const Json& l : seen["layers"]) {
+                if (l["name"] == Json("g")) group = &l;
+                if (l["name"] == Json("child")) QCOMPARE(l["parent"], c.blend.empty() ? Json(nullptr) : Json("g"));
+            }
+            if (c.blend.empty()) {
+                QVERIFY2(group == nullptr, c.name.c_str());  // (a folder that is not a group: its layers only, as before)
+            } else {
+                QVERIFY2(group != nullptr && (*group)["kind"] == Json("group"), c.name.c_str());
+                QCOMPARE((*group)["blend"], Json(c.blend));
+                QCOMPARE((*group)["opacity"], Json(c.opacity));
+                QCOMPARE((*group)["mask"], Json(c.name == "masked"));
+            }
+            // psd-tools' composite is this build's page
+            const genko::render::Image drawn = genko::render::render_page(c.doc.page(0), 100, options, &c.doc).image.convert("RGB");
+            const std::array<std::array<int, 2>, 2> spots{{{39, 78}, {118, 78}}};
+            for (std::size_t k = 0; k < spots.size(); ++k) {
+                const int ours = drawn.getpixel(spots[k][0], spots[k][1])[0];
+                const int theirs = seen["pixels"][k][0].get<int>();
+                QVERIFY2(std::abs(ours - theirs) <= 3, (c.name + ": " + std::to_string(ours) + " vs psd-tools " + std::to_string(theirs)).c_str());
+            }
+            // opened again: a group again (a folder of before: none), drawn the same
+            const genko::formats::Opened opened = genko::formats::open_file(genko::test::read_bytes(files[static_cast<int>(i)]), c.name + ".psd");
+            const core::Layer* back = nullptr;
+            for (const core::Layer& l : opened.doc.page(0).layers)
+                if (l.title == "g") back = &l;
+            if (c.blend.empty()) {
+                QVERIFY(back == nullptr);
+                continue;
+            }
+            QVERIFY2(back != nullptr && back->group && back->kind == core::LayerKind::Folder, c.name.c_str());
+            QCOMPARE(back->blend, std::string(c.blend == "PASS_THROUGH" ? "pass_through" : "normal"));
+            QVERIFY(std::abs(back->opacity - c.opacity / 255.0) < 0.01);
+            QCOMPARE(back->mask.has_value(), c.name == "masked");
+            const genko::render::Image again = genko::render::render_page(opened.doc.page(0), 100, options, &opened.doc).image.convert("RGB");
+            for (const auto& spot : spots) {
+                const int ours = drawn.getpixel(spot[0], spot[1])[0];
+                const int read = again.getpixel(spot[0], spot[1])[0];
+                QVERIFY2(std::abs(ours - read) <= 3, (c.name + " opened: " + std::to_string(read) + " vs " + std::to_string(ours)).c_str());
+            }
+        }
+    }
+
+    // PC5 I-b (review P3-9): a PSD of groups made by psd-tools, not by this build — a multiply group and a hidden one
+    // (tools/migration/psd_groups_make.py) — opens with them as groups: the multiply group's blend, the hidden group
+    // hidden with what it holds kept in it; drawn as psd-tools composites it.
+    void groupsMadeByPsdTools() {
+        namespace core = genko::core;
+        QDir().mkpath(path(QStringLiteral("groups-made")));
+        const QString file = path(QStringLiteral("groups-made/made.psd")), out = path(QStringLiteral("groups-made/view.json"));
+        const auto env = genko::test::python_env(path(QStringLiteral("pyenv")));
+        auto ran = genko::test::run(genko::test::python_ref(), QStringList{genko::test::repo_root() + QStringLiteral("/tools/migration/psd_groups_make.py"), file}, env);
+        QVERIFY2(ran.exit_code == 0, ran.err.right(2000).constData());
+        ran = genko::test::run(genko::test::python_ref(),
+                               QStringList{genko::test::repo_root() + QStringLiteral("/tools/migration/psd_groups_check.py"), out, QStringLiteral("39,78;118,78"), file}, env);
+        QVERIFY2(ran.exit_code == 0, ran.err.right(2000).constData());
+        const Json seen = genko::test::read_json(out)[file.toStdString()];
+        QVERIFY2(!seen.contains("error"), seen.dump().c_str());
+        const genko::formats::Opened opened = genko::formats::open_file(genko::test::read_bytes(file), "made.psd");
+        const auto named = [&](const std::string& title) -> const core::Layer* {
+            for (const core::Layer& l : opened.doc.page(0).layers)
+                if (l.title == title) return &l;
+            return nullptr;
+        };
+        const core::Layer *mul = named("mul"), *hid = named("hid"), *dark = named("dark"), *black = named("black");
+        QVERIFY(mul != nullptr && hid != nullptr && dark != nullptr && black != nullptr);
+        QVERIFY(mul->group && mul->kind == core::LayerKind::Folder && mul->visible);
+        QCOMPARE(mul->blend, std::string("multiply"));
+        QVERIFY(hid->group && !hid->visible);
+        QCOMPARE(dark->parent_id, Json(mul->id));
+        QCOMPARE(black->parent_id, Json(hid->id));
+        QVERIFY(black->visible);  // (hidden by its group, not itself)
+        genko::render::RenderOptions options;
+        options.mode = "print";
+        const genko::render::Image drawn = genko::render::render_page(opened.doc.page(0), 100, options, &opened.doc).image.convert("RGB");
+        const int w = drawn.width(), h = drawn.height();
+        const std::array<std::array<int, 2>, 2> spots{{{w / 4, h / 2}, {w * 3 / 4, h / 2}}};
+        for (std::size_t k = 0; k < spots.size(); ++k) {
+            const int ours = drawn.getpixel(spots[k][0], spots[k][1])[0];
+            const int theirs = seen["pixels"][k][0].get<int>();
+            QVERIFY2(std::abs(ours - theirs) <= 3, (std::to_string(k) + ": " + std::to_string(ours) + " vs psd-tools " + std::to_string(theirs)).c_str());
         }
     }
 };

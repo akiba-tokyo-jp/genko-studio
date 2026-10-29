@@ -10,6 +10,7 @@
 #include <set>
 
 #include "core/error.hpp"
+#include "core/groups.hpp"
 #include "core/layer_styles.hpp"
 #include "core/ops_util.hpp"
 #include "core/pynum.hpp"
@@ -156,7 +157,8 @@ void apply(core::Document& doc, std::size_t at, const std::vector<CompLayerState
         core::Layer& layer = page.layers[core::layer_by_id(page, s.layer)];
         if (visibility && s.visible) layer.visible = *s.visible;
         if (appearance && s.appearance) {
-            layer.blend = core::blend_mode(Json(s.appearance->blend));
+            // (groups@1, PC5 I-b: a group's 通過 kept as it was recorded)
+            layer.blend = s.appearance->blend == core::kPassThrough && core::is_group(layer) ? std::string(core::kPassThrough) : core::blend_mode(Json(s.appearance->blend));
             layer.opacity = std::clamp(s.appearance->opacity, 0.0, 1.0);
             std::optional<Json> style;
             if (s.appearance->style && core::takes_layer_style(layer)) {

@@ -170,6 +170,8 @@ genko_test(test_grd SOURCES unit/test_grd.cpp DEPS genko_test_support genko_rend
 # (a page without styles drawn and written as before), the ops, Blend If and the fill, merges, PSD's lfx2 written and read
 # back, saved, opened and undone; the styles' library (upstream's built-in groups), .asl files and `genko styles`.
 genko_test(test_layer_styles SOURCES unit/test_layer_styles.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+# PC5 I-b (groups@1: グループとフレーム)
+genko_test(test_groups SOURCES unit/test_groups.cpp DEPS genko_test_support genko_render_ops genko_storage genko_formats LABELS unit TIMEOUT 600)
 genko_test(test_style_presets SOURCES unit/test_style_presets.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 # PC5 G-0 (SPEC.md TEXT-02「文字」, type@1): the type record's tables and normal form, the order of resolution, the ranges through
 # edits, style_runs as ranges, a line's record as a type layer's; the HarfBuzz way in (the bundled faces' glyphs, across and down).
@@ -807,6 +809,30 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_actions SOURCES gui/test_gui_actions.cpp DEPS genko_app GUI TIMEOUT 900)
   # the canvas's gestures: the panel tool (cuts, gutters, corners, drawn panels) and the view
   genko_test(test_gui_canvas SOURCES gui/test_gui_canvas.cpp DEPS genko_app GUI TIMEOUT 1200)
+  # PC5 H-a (SPEC VIEW-01): the zoom in the page's pixels (100%, 200%, プリントサイズ), a 600 dpi B4 zoomed to its pixels,
+  # レイヤーを画面サイズに合わせる, ピクセルグリッド, ピクセルアートプレビュー, 手のひらツール and ズームツール, スクリーンモード, 32 bit
+  # プレビューオプション…
+  genko_test(test_gui_view SOURCES gui/test_gui_view.cpp DEPS genko_app GUI TIMEOUT 900)
+  # PC5 H-a (review P2-2): render:GPU-CPU-parity — test_gui_canvas's theCardShowsWhatTheProcessorDraws again on Xvfb with
+  # Mesa's OpenGL (xcb), where the card's picture is compared with the processor's (offscreen has no OpenGL: there it checks
+  # the way back to the processor). Labels gui and gpu; in a validation plan only when asked for (validation_policy --gpu).
+  # No xvfb-run on the machine: the test fails saying so (never a skip).
+  function(genko_xvfb_test name target)
+    find_program(GENKO_XVFB_RUN xvfb-run)
+    if(GENKO_XVFB_RUN)
+      add_test(NAME ${name} COMMAND ${GENKO_XVFB_RUN} -a -s "-screen 0 1920x1200x24" $<TARGET_FILE:${target}> ${ARGN})
+    else()
+      add_test(NAME ${name} COMMAND ${CMAKE_COMMAND} -E echo "${name}: xvfb-run is not on this machine (apt install xvfb)")
+      set_tests_properties(${name} PROPERTIES FAIL_REGULAR_EXPRESSION "xvfb-run is not")
+    endif()
+    set_tests_properties(${name} PROPERTIES LABELS "gui;gpu" TIMEOUT 600
+                         ENVIRONMENT "QT_QPA_PLATFORM=xcb;LIBGL_ALWAYS_SOFTWARE=1;QTEST_FUNCTION_TIMEOUT=500000")
+  endfunction()
+  if(UNIX AND NOT APPLE)
+    genko_xvfb_test(test_gui_canvas_gpu test_gui_canvas theCardShowsWhatTheProcessorDraws)
+  endif()
+  # PC5 H-a: the tiles — 画素の段 laid nearest, ピクセルアートプレビュー, 32 bit プレビュー on the three ways, the tiles on the card
+  genko_test(test_tiles SOURCES unit/test_tiles.cpp DEPS genko_app LABELS unit TIMEOUT 600)
   # saving and closing (AC-SAVE 2, 3, 4, 6, 8, 10): failures shown, the question before closing, recovery, retries
   genko_test(test_gui_save SOURCES gui/test_gui_save.cpp DEPS genko_app GUI TIMEOUT 900)
   target_compile_definitions(test_gui_save PRIVATE GENKO_CLI="$<TARGET_FILE:genko>")

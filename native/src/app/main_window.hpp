@@ -123,6 +123,7 @@ struct ProofView {
     bool simulate_paper = false;
     bool on = false;      // 色の校正
     bool gamut = false;   // 色域外警告
+    render::HdrPreview hdr;  // (PC5 H-a) 32 bit プレビューオプション: a 32-bit page's look on the screen
 };
 
 // One open book in a window: its session and how the window last showed it.
@@ -534,6 +535,15 @@ public:
     void refresh_first_steps();
     // 原稿だけを表示 (Tab), the rest reminder, and the round menu last opened at the pen (null: none open).
     CanvasOnly* canvas_only() const { return canvas_only_; }
+    // スクリーンモード (PC5 H-a, view.screenMode.*): 標準スクリーンモード (the window as it was), メニュー付きフルスクリーンモード
+    // (the whole screen, menus and panels kept), フルスクリーンモード (the whole screen, the page alone: menus, status line and
+    // panels hidden — a side's panels come back at its edge, as 原稿だけを表示). F goes round them (Photoshop's keys).
+    enum class ScreenMode { Standard, FullWithMenu, Full };
+    void set_screen_mode(ScreenMode mode);
+    ScreenMode screen_mode() const { return screen_mode_; }
+    // レイヤーを画面サイズに合わせる (PC5 H-a): the view on the box of the layers chosen (else the layer drawn on; none
+    // showing anything: the page).
+    void fit_layers();
     RestReminder* rest() const { return rest_; }
     RadialMenu* radial() const;  // (out of line: RadialMenu is only declared here)
     // キーを押している間だけ持ち替え: the tool last chosen (its key), the one before and when (seconds); the key of the
@@ -727,6 +737,12 @@ private:
     // H-d, H-e, H-f)
     void build_view_actions();
     void build_view_menus(QMenu* view);
+    // 表示 → 表示・非表示 ▸ (objectName "menu_show"; its owner 節 H): found in 表示, or made and put there — the one way in
+    // for every part (H-b, J-b, J-c, J-d1: show_menu(view)->addAction(...)); laid out by H's show_rows() in build_view_menus
+    QMenu* show_menu(QMenu* view);
+    // PC5 H-a: 手のひらツール's and ズームツール's pages in オプション (main_window_view.cpp)
+    void build_view_pages(ToolSettings* ts);
+    void ask_32bit_preview();
     void build_arrange_actions();
     void build_arrange_menus(QMenu* arrange);
     void build_edit_actions();
@@ -1534,6 +1550,9 @@ private:
 
     PageCanvas* canvas_ = nullptr;
     CanvasOnly* canvas_only_ = nullptr;
+    ScreenMode screen_mode_ = ScreenMode::Standard;  // (PC5 H-a: set_screen_mode)
+    Qt::WindowStates screen_before_ = Qt::WindowNoState;
+    bool screen_hid_panels_ = false;
     RestReminder* rest_ = nullptr;
     QPointer<RadialMenu> radial_;
     std::optional<ToolSwitch> tool_switch_;
@@ -1742,8 +1761,6 @@ public:
     void clear_notes();
     // ファイル → 読み込み → 注釈…: the file asked (none given), its notes read off the window's thread, put on the page.
     void import_notes(const QString& path = {});
-    // 表示 → 表示・非表示 ▸ (節 H's: "menu_show" — found in `view`, else made, not yet in it).
-    QMenu* show_menu(QMenu* view);
 
 private:
     void build_note_actions();

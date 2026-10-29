@@ -25,6 +25,7 @@
 #include <fstream>
 #endif
 
+#include "core/groups.hpp"
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/ids.hpp"
@@ -1064,6 +1065,16 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     Json filters_read = Json::array(), filters_shown = Json::array();
     Json raw_shown = Json::array();  // (PC4 F-e: smart objects of a camera RAW shown as Photoshop drew them)
     std::size_t filters_unsaid = 0;
+    // (groups@1, PC5 I-b: groups nested at most core::kGroupDepthMax deep — a folder deeper is made a folder that is not a
+    // group (an order of layers, as psd.read_psd makes every folder: nothing held while drawn), its name said in the
+    // report's groups_as_folders)
+    std::vector<std::size_t> depth(layers.size(), 0);
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+        std::size_t d = 0;
+        for (auto at = layers[i].parent; at && *at < layers.size() && d <= layers.size(); at = layers[*at].parent) ++d;
+        depth[i] = d;
+    }
+    std::vector<std::string> deep_folders;
     for (std::size_t i = 0; i < layers.size(); ++i) {
         const psd::Layer& item = layers[i];
         core::Layer layer;
@@ -1101,8 +1112,20 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
             }
             return kept;
         };
-        if (item.folder) {
+        if (item.folder && psd::python_view()) {
+            layer.kind = core::LayerKind::Folder;  // (as psd.read_psd's: a folder, an order of layers only)
+        } else if (item.folder && depth[i] >= core::kGroupDepthMax) {
+            layer.kind = core::LayerKind::Folder;  // (groups@1: nested past the limit — an order of layers only, said)
+            deep_folders.push_back(item.name);
+        } else if (item.folder) {
+            // (groups@1, PC5 I-b, the user's decision 2: a group drawn as Photoshop draws it — its visibility, opacity, blend
+            // (通過 among them), mask and vector mask)
             layer.kind = core::LayerKind::Folder;
+            layer.group = true;
+            if (item.pass_through) layer.blend = "pass_through";
+            layer.clip = item.group_clip;
+            if (auto mask = mask_of()) layer.mask = std::move(*mask);
+            layer.vector_mask = vector_mask_of(item);
         } else if (item.kind == "shape") {
             // (pen-shapes@1, PC3 C-b: a shape layer as a new pen layer of one shape part — render/psd_shapes —, as the PSD
             // shows it: not cut by the panels; one whose fill this build cannot read, left out as before)
@@ -1346,6 +1369,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     target.layers.insert(target.layers.begin() + static_cast<std::ptrdiff_t>(at), std::make_move_iterator(made.begin()),
                          std::make_move_iterator(made.end()));
     Json report = Json::object({{"layers", std::move(listed)}, {"skipped", std::move(skipped)}});
+    if (!deep_folders.empty()) report["groups_as_folders"] = deep_folders;  // (groups@1: said only when there are)
     // (PC3 A3: the placed layers made smart objects, and those read as their pixels and why — said only when there are)
     if (!smart_objects.empty()) report["smart_objects"] = std::move(smart_objects);
     if (!placed_pixels.empty()) report["placed_as_pixels"] = std::move(placed_pixels);

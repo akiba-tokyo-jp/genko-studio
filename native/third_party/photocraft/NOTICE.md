@@ -294,12 +294,19 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/automate_cmds.rs`（48-112 行: `parse_script`・`parse_steps` — 手順の JSON と 1 行 1 コマンドの文、141-260 行: スクリプトイベントの表と `firing`）→ `native/src/service/automate.cpp`（`read_steps`。上流のコマンド id と引数を Genko の op の JSON に読み替え、行の番号を付けた誤り、断る op の確かめ、擬似 op、承認できない actor は MCP の op だけ、は Genko のもの）・`native/src/service/script_events.cpp`（イベントの名前。表を画面だけが書きハッシュで外の書き換えを止めること、スクリプトのファイルの sha256、MCP・HTTP・CLI では起こさないことは Genko のもの）。
   - `crates/engine/src/file_cmds.rs`（516-529 行: `fit_image`、589-651 行: バッチの入力と 1 ファイルずつの処理）→ `native/src/service/automate.cpp`（`fit_image` は `resize_pages` に直す擬似 op。入力の列挙・書き先・同じ名前の番号・エラーで続ける・中止は Genko のもの。画像は 1 ページの本として開き、書くのはコピーを保存の書き手）。
   - `crates/engine/src/automate_cmds/tests.rs` の試験の考え（手順の形・イベントの起こし方）→ `native/tests/unit/test_automate.cpp`。
+- グループとフレーム（PC5 I-b、groups@1）:
+  - `crates/compose/src/lib.rs`（511-560 行: グループの中を何も無い上に描く `render_content`、824-878 行: 通過のグループ — 前と後の間を不透明度 × マスクで混ぜる式）→ `native/src/render/page.cpp`（`ColorGroups`・`InkGroups`。8 bit・高精度・インキの 3 つの道への配線、帯ごとの描画、グループにクリップしたレイヤーをグループの形で切ることは Genko のもの）・`native/src/render/color_canvas.cpp`・`native/src/render/ink_canvas.cpp`（`mix_back`）。`crates/compose/src/tests.rs`（137-170 行: 通過と分離の違い・不透明度は 1 回・通過の不透明度の混ぜ）の試験の考え → `native/tests/unit/test_groups.cpp`。
+  - `crates/engine/src/frame_cmds.rs`（1-60 行: レイヤーからのフレーム — まとめて外接の長方形で切る）→ `native/src/render/ops_groups.cpp`（`frame_from_layers`。上流の画素のマスクの代わりにベクトルマスクにしたのは Genko のもの）。
 
 ## 表示・窓・環境設定（PC5 節 H）
 
 - 表示・窓・環境設定の土台（PC5 H-0）:
   - `crates/engine/src/prefs.rs`（150-730 行: 節の名前と順 `SECTIONS`・各節の項目の path の名前・既定・範囲）→ `native/src/core/prefs_table.cpp`（今の settings.ini の鍵に重ねる表）。`crates/engine/src/prefs/tests.rs`（9-100 行: 全部か無し・範囲の外・知らない path の試験の考え）→ `native/tests/unit/test_prefs_table.cpp`。
   - `crates/ui-egui/src/menu_catalog.rs`（Photoshop のキーの表）→ `native/src/app/key_sets.cpp` の Photoshop の組（キーそのものは Photoshop の初期設定）。
+- 表示と画素（PC5 H-a）:
+  - `crates/engine/src/proof_sim.rs`（75-110 行: `HdrPreview` — 方法・露光量 −20〜20・ガンマ 0.1〜9.99 と 0・1 で何もしないこと、265-284 行: `preview_32` の引数と範囲）→ `native/src/render/hdr_preview.cpp`（0..1 に切る前の値に当てること、ハイライト圧縮の式、グレー・インキの道は Genko のもの）。
+  - `crates/ui-egui/src/view_cmds.rs`（546-580 行: 200%・プリントサイズと `fit_layers` — 選んだレイヤーの範囲を 20 画素空けて画面に）→ `native/src/app/main_window_view.cpp`（`fit_layers`）・`native/src/app/canvas.cpp`（`fit_box`）。`crates/ui-egui/src/menu_catalog.rs`（642-701 行: 表示 の項目の名前と並び、スクリーンモードの 3 つ）→ `native/src/app/main_window_view.cpp`。
+  - `crates/gpu/tests/parity.rs`（GPU と CPU が 1/255 以内という許し）の考え → `native/tests/gui/test_gui_canvas.cpp`（`theCardShowsWhatTheProcessorDraws`。Genko は表示の一致）。
 
 ## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1、PC5 節 J）
 

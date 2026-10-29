@@ -28,6 +28,7 @@
 // PC5 J-0 (制作の補助)
 #include "core/video.hpp"
 #include "core/patterns.hpp"
+#include "core/groups.hpp"
 #include "core/type_text.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/reader.hpp"
@@ -199,6 +200,7 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
     if (layer.lock_position) out["lock_position"] = true;
     if (layer.native_psd) out["native_psd"] = core::to_json(*layer.native_psd);  // (psd-keep@1, PC4)
     if (layer.style) out["style"] = *layer.style;  // (layer-styles@1, PC4 E6)
+    if (layer.group) out["group"] = true;  // (groups@1, PC5 I-b)
     if (placed) {
         out["asset"] = opt_string(layer.asset);
         out["frame_id"] = opt_string(layer.frame_id);
@@ -588,6 +590,10 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     core::type_text::validate_type(doc);
     std::erase(features, std::string(core::kTypeFeature));
     if (core::type_text::uses_type(doc)) features.emplace_back(core::kTypeFeature);
+    // PC5 I-b: groups@1 (folders drawn as groups), named while the book uses it
+    core::validate_groups(doc);
+    std::erase(features, std::string(core::kGroupsFeature));
+    if (core::uses_groups(doc)) features.emplace_back(core::kGroupsFeature);
     // PC5 J-0 (SPEC.md PROD-01): layer-comps@1, slices@1, annotations@1, measure@1 (a page's own keys) and timeline@1,
     // video@1 (in a page's anim), each named while the book uses it
     core::validate_layer_comps(doc);

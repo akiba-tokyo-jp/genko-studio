@@ -471,7 +471,9 @@ private slots:
             "move_count", "clear_count", "new_count_group", "delete_count_group", "set_count_group", "set_ruler_line",
             "straighten_layer", "place_scale_marker", "add_video_layer", "video_insert_blank", "video_duplicate", "video_delete",
             "video_restore", "video_restore_all", "video_alter", "set_video_layer", "replace_footage", "rasterize_video",
-            "footage_to_layers"};  // (PC5 節 J's ops, frames until their groups: SPEC.md PROD-01)
+            "footage_to_layers",  // (PC5 節 J's ops, frames until their groups: SPEC.md PROD-01)
+
+            "frame_from_layers"};  // (PC5 I-b: groups@1, レイヤーからのフレーム — SPEC.md AUTO-01)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);
