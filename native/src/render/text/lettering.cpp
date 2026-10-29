@@ -1821,16 +1821,16 @@ void paint_text(Image& image, const core::StoryLine& line, int dpi, bool show_sp
                                                    static_cast<int>(core::py_round_int(cy + shape->corner_y))};
     const Box here{origin.x, origin.y, origin.x + image.width(), origin.y + image.height()};
     const auto reaches = [&here](const Box& b) { return b.x0 < here.x1 && here.x0 < b.x1 && b.y0 < here.y1 && here.y0 < b.y1; };
-    Box covered{at_page.x, at_page.y, at_page.x + shape->width, at_page.y + shape->height};
+    Box shown_box{at_page.x, at_page.y, at_page.x + shape->width, at_page.y + shape->height};
     const std::optional<Box> clip = clip_of(line, dpi);  // (a box text: what runs past its box is hidden)
-    if (clip) covered = Box{std::max(covered.x0, clip->x0), std::max(covered.y0, clip->y0), std::min(covered.x1, clip->x1), std::min(covered.y1, clip->y1)};
-    if (covered.width() > 0 && covered.height() > 0 && reaches(covered)) {
+    if (clip) shown_box = Box{std::max(shown_box.x0, clip->x0), std::max(shown_box.y0, clip->y0), std::min(shown_box.x1, clip->x1), std::min(shown_box.y1, clip->y1)};
+    if (shown_box.width() > 0 && shown_box.height() > 0 && reaches(shown_box)) {
         if (!layout) layout = layout_by_key(key, line, dpi, font_path, stop);
         std::optional<Image> cut;
         Point put = at_page;
-        if (clip && covered != Box{at_page.x, at_page.y, at_page.x + layout->image.width(), at_page.y + layout->image.height()}) {
-            cut = layout->image.crop(Box{covered.x0 - at_page.x, covered.y0 - at_page.y, covered.x1 - at_page.x, covered.y1 - at_page.y});
-            put = Point{covered.x0, covered.y0};
+        if (clip && shown_box != Box{at_page.x, at_page.y, at_page.x + layout->image.width(), at_page.y + layout->image.height()}) {
+            cut = layout->image.crop(Box{shown_box.x0 - at_page.x, shown_box.y0 - at_page.y, shown_box.x1 - at_page.x, shown_box.y1 - at_page.y});
+            put = Point{shown_box.x0, shown_box.y0};
         }
         const Image& letters = cut ? *cut : layout->image;
         if (const auto gamma = TextGamma::current()) paste_in_gamma(image, letters, Point{put.x - origin.x, put.y - origin.y}, *gamma);

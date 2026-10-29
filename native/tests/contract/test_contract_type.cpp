@@ -250,8 +250,8 @@ private slots:
             std::ofstream(dir / "project.json", std::ios::binary) << text;
             return storage::load_document(dir).document.read_only_reason;
         };
-        QVERIFY(!opened("\"balloon\": \"none\"", "\"balloon\": \"none\", \"native_type\": {\"antialias\": \"smooth\"}").empty());
-        QVERIFY(!opened("\"balloon\": \"none\"", "\"balloon\": \"none\", \"native_type\": {\"char_style\": \"cs-1\"}").empty());  // (a style not kept)
+        QVERIFY(!opened("\"shape\": \"box\"", "\"shape\": \"box\", \"antialias\": \"smooth\"").empty());  // (G-a: a box text — the default written)
+        QVERIFY(!opened("\"shape\": \"box\"", "\"shape\": \"box\", \"char_style\": \"cs-1\"").empty());  // (a style not kept)
         QVERIFY(!opened("\"type@1\"", "\"type@2\"").empty());  // (a version this build does not know)
         std::ofstream(dir / "project.json", std::ios::binary) << good;
         QVERIFY(storage::load_document(dir).document.read_only_reason.empty());
@@ -425,7 +425,7 @@ private slots:
         QVERIFY(core::type_text::uses_type(smart));
         QVERIFY2(worst(proof_bytes(smart), proof_bytes(doc)) <= 2, qPrintable(QString::number(worst(proof_bytes(smart), proof_bytes(doc)))));
         const core::Document masked = run(doc, Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", "t1"}, {"linked", true},
-                                                    {"area", Json{{"rect", Json::array({8, 8, 15, 30})}}}});
+                                                    {"area", Json{{"rect", Json::array({22, 8, 16, 30})}}}});  // (G-a: a box text down, its column at the box's right)
         const core::Document moved = run(masked, Json{{"op", "transform_layers"}, {"page", 1}, {"ids", Json::array({"t1"})}, {"move", Json::array({5, 0})}});
         QVERIFY(layer_of(moved, "t1")->mask && layer_of(masked, "t1")->mask);
         QVERIFY(*layer_of(moved, "t1")->mask->png != *layer_of(masked, "t1")->mask->png);  // (the mask went with the letters)

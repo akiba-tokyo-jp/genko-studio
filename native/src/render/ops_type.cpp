@@ -319,7 +319,7 @@ void take_marks(StoryLine& record, const Json& op, const Document& doc, const Nu
     }
     OpContext inner{scratch, add, actor};
     (*core::OpRegistry::builtin().find("add_line"))(inner);
-    const StoryLine& made = core::find_line(scratch, "_type_marks");
+    const StoryLine made = core::find_line(scratch, "_type_marks");
     record.ruby_runs = made.ruby_runs;
     record.ruby_spans = made.ruby_spans;
     record.emphasis_runs = made.emphasis_runs;
