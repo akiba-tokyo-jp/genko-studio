@@ -703,6 +703,11 @@ private slots:
             look.set();
             if (std::string_view(look.name) == "pixel art") QCOMPARE(c->wanted_dpi(), 96);  // (the tiles coarser than the screen)
             QVERIFY(c->wait_rendered(30000));
+            // (and once more after the zoom's own call for tiles, 160 ms on: else the tiles of the view before may still be
+            // the ones shown here or not, the lines' edges a part of a pixel apart — the same on the card and the processor,
+            // but not the same count of pixels past 1/255 from run to run)
+            QTest::qWait(250);
+            QVERIFY(c->wait_rendered(30000));
             c->use_gpu(false);
             const QImage processor = cpu();
             c->use_gpu(true);
