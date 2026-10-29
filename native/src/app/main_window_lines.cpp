@@ -21,6 +21,7 @@
 #include "app/ime.hpp"
 #include "app/lettering.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "app/story_editor.hpp"
 #include "app/story_panel.hpp"
 #include "app/tool_settings.hpp"
@@ -316,7 +317,10 @@ void MainWindow::on_line_selected(const std::string& line_id, bool open_panel) {
 
 const core::StoryLine* MainWindow::selected_line_or_say() {
     const core::StoryLine* line = canvas_->selected_line_id ? line_by_id(*canvas_->selected_line_id) : nullptr;
-    if (line == nullptr) flash(QStringLiteral("先に選択ツール（V）で台詞（フキダシ）をクリックして選びます"), 4000);
+    // (PC5 H-0: the select tool's keys now — none in the Photoshop key set unless chosen)
+    if (line == nullptr) {
+        flash(QStringLiteral("先に選択ツール%1で台詞（フキダシ）をクリックして選びます").arg(preferences::keys_in_words({action("act_select")})), 4000);
+    }
     return line;
 }
 

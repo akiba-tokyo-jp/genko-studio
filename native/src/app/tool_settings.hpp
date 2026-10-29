@@ -2,6 +2,7 @@
 
 #include <QWidget>
 
+#include <functional>
 #include <map>
 #include <string>
 #include <variant>
@@ -83,6 +84,8 @@ public:
     bool folded() const { return folded_; }
     QPushButton* fold_button() const { return fold_; }
     QWidget* stack() const { return stack_widget_; }
+    // PC5 H-0: a tool's keys as the title says them after its name ("（K）"; none: nothing) — the window's commands' keys now
+    std::function<QString(const QString& tool)> keys_of;
 
 private:
     QLabel* title_ = nullptr;

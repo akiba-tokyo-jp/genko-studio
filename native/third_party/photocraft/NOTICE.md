@@ -292,3 +292,9 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/automate_cmds.rs`（48-112 行: `parse_script`・`parse_steps` — 手順の JSON と 1 行 1 コマンドの文、141-260 行: スクリプトイベントの表と `firing`）→ `native/src/service/automate.cpp`（`read_steps`。上流のコマンド id と引数を Genko の op の JSON に読み替え、行の番号を付けた誤り、断る op の確かめ、擬似 op、承認できない actor は MCP の op だけ、は Genko のもの）・`native/src/service/script_events.cpp`（イベントの名前。表を画面だけが書きハッシュで外の書き換えを止めること、スクリプトのファイルの sha256、MCP・HTTP・CLI では起こさないことは Genko のもの）。
   - `crates/engine/src/file_cmds.rs`（516-529 行: `fit_image`、589-651 行: バッチの入力と 1 ファイルずつの処理）→ `native/src/service/automate.cpp`（`fit_image` は `resize_pages` に直す擬似 op。入力の列挙・書き先・同じ名前の番号・エラーで続ける・中止は Genko のもの。画像は 1 ページの本として開き、書くのはコピーを保存の書き手）。
   - `crates/engine/src/automate_cmds/tests.rs` の試験の考え（手順の形・イベントの起こし方）→ `native/tests/unit/test_automate.cpp`。
+
+## 表示・窓・環境設定（PC5 節 H）
+
+- 表示・窓・環境設定の土台（PC5 H-0）:
+  - `crates/engine/src/prefs.rs`（150-730 行: 節の名前と順 `SECTIONS`・各節の項目の path の名前・既定・範囲）→ `native/src/core/prefs_table.cpp`（今の settings.ini の鍵に重ねる表）。`crates/engine/src/prefs/tests.rs`（9-100 行: 全部か無し・範囲の外・知らない path の試験の考え）→ `native/tests/unit/test_prefs_table.cpp`。
+  - `crates/ui-egui/src/menu_catalog.rs`（Photoshop のキーの表）→ `native/src/app/key_sets.cpp` の Photoshop の組（キーそのものは Photoshop の初期設定）。

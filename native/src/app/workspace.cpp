@@ -29,13 +29,14 @@
 
 namespace genko::app {
 
-const QStringList kDefaultCommandBar{QStringLiteral("元に戻す"), QStringLiteral("やり直す"), QStringLiteral("|"),
-                                     QStringLiteral("全体を表示"), QStringLiteral("縮小"), QStringLiteral("拡大"), QStringLiteral("|"),
+// (PC5 H-0: Photoshop's names — 取り消し, やり直し, 画面サイズに合わせる, ズームアウト, ズームイン, 水平方向に反転)
+const QStringList kDefaultCommandBar{QStringLiteral("取り消し"), QStringLiteral("やり直し"), QStringLiteral("|"),
+                                     QStringLiteral("画面サイズに合わせる"), QStringLiteral("ズームアウト"), QStringLiteral("ズームイン"), QStringLiteral("|"),
                                      QStringLiteral("◀ 前のページ"), QStringLiteral("次のページ ▶"), QStringLiteral("|"),
                                      QStringLiteral("原稿を書き出す…")};  // (PC4 F-0: 書き出し…'s new name)
 const QStringList kDefaultQuick{QStringLiteral("ブラシツール"), QStringLiteral("消しゴムツール"), QStringLiteral("塗りつぶしツール"), QStringLiteral("テキスト"),
                                 QStringLiteral("コマ割り"), QStringLiteral("選択範囲・選んだコマにトーンを貼る"), QStringLiteral("集中線"),
-                                QStringLiteral("左右反転して見る")};
+                                QStringLiteral("水平方向に反転（表示）")};
 
 namespace {
 
@@ -167,6 +168,12 @@ std::map<QString, QAction*> by_text(QMainWindow* window) {
     // (a name kept before others had the same words — the words alone: the first of them in the menus, the one that had
     // them then, as the layer panel's 色調補正のレイヤー's before レイヤー → 色調補正)
     for (QAction* action : listed) out.emplace(action->text(), action);
+    // (PC5 H-0: words a command came to share by a rename are the one's that had them before — preferences::words_owner)
+    for (const auto& [words, attribute] : preferences::words_owner()) {
+        for (QAction* action : listed) {
+            if (action->text() == words && action->property("genko_attribute").toString() == attribute) out[words] = action;
+        }
+    }
     return out;
 }
 
@@ -195,15 +202,71 @@ std::vector<QAction*> search(QMainWindow* window, const QString& words) {
     std::vector<QAction*> out;
     const std::vector<QAction*> all = menu_commands(window);
     const auto known = menu_places(window);  // (the menus walked once: for the names and the places both)
-    for (QAction* action : commands(all, command_names(all, window, &known))) {
-        const QString text = (action->text() + QLatin1Char(' ') + place_of(known, action) + QLatin1Char(' ') + action->statusTip()).toLower();
+    // (PC5 H-0: a renamed command found by its old names too — 「コマンドを探す」 finds 検索)
+    std::map<QString, QString> before;
+    for (const auto& [now, old] : preferences::renamed()) before[now] += QLatin1Char(' ') + old;
+    const auto names = command_names(all, window, &known);
+    for (QAction* action : commands(all, names)) {
+        QString olds;
+        for (const QString& name : {command_name(names, action), action->text()}) {
+            if (const auto found = before.find(name); found != before.end()) olds += found->second;
+        }
+        const QString text =
+            (action->text() + QLatin1Char(' ') + place_of(known, action) + QLatin1Char(' ') + action->statusTip() + olds).toLower();
         if (std::all_of(parts.begin(), parts.end(), [&text](const QString& part) { return text.contains(part); })) out.push_back(action);
     }
     return out;
 }
 
+void lay_out_menu(QMenu* menu, const QStringList& rows) {
+    const QList<QAction*> before = menu->actions();
+    QSet<const QAction*> used;
+    const auto find = [&](const QString& row) -> QAction* {
+        for (QAction* item : before) {
+            if (item->isSeparator() || used.contains(item)) continue;
+            if (row.startsWith(QStringLiteral("▸"))) {
+                if (item->menu() != nullptr && item->menu()->title() == row.mid(1)) return item;
+            } else if (item->menu() == nullptr && item->property("genko_attribute").toString() == row) {
+                return item;
+            }
+        }
+        return nullptr;
+    };
+    std::vector<QAction*> order;  // (nullptr: a line)
+    for (const QString& row : rows) {
+        if (row == QLatin1String("|")) {
+            order.push_back(nullptr);
+        } else if (QAction* item = find(row)) {
+            order.push_back(item);
+            used.insert(item);
+        }
+    }
+    bool line = false;
+    for (QAction* item : before) {
+        if (item->isSeparator() || used.contains(item)) continue;
+        if (!line) order.push_back(nullptr);
+        line = true;
+        order.push_back(item);
+    }
+    for (QAction* item : before) {
+        menu->removeAction(item);
+        if (item->isSeparator() && item->parent() == menu) item->deleteLater();
+    }
+    bool last_line = true;  // (none at the start)
+    for (std::size_t i = 0; i < order.size(); ++i) {
+        if (order[i] == nullptr) {
+            const bool more = std::any_of(order.begin() + static_cast<std::ptrdiff_t>(i) + 1, order.end(), [](QAction* a) { return a != nullptr; });
+            if (!last_line && more) menu->addSeparator();
+            last_line = true;
+        } else {
+            menu->addAction(order[i]);
+            last_line = false;
+        }
+    }
+}
+
 CommandSearch::CommandSearch(QMainWindow* window) : QDialog(window), window_(window) {
-    setWindowTitle(QStringLiteral("コマンドを探す"));
+    setWindowTitle(QStringLiteral("検索"));  // (PC5 H-0: Photoshop's 編集 → 検索)
     setProperty("glass_wanted", true);  // (the system's frosted glass where there is one)
     resize(520, 420);
     query = new QLineEdit;

@@ -125,7 +125,7 @@ void MainWindow::build_selection_actions() {
          QStringLiteral("ドラッグで選ぶ。中をドラッグで移動、□で拡大縮小、○で回転（Shift で 15° 刻み・縦横比を保つ）"));
     tool("act_lasso", QStringLiteral("なげなわツール"), QStringLiteral("lasso"), {QKeySequence(QStringLiteral("L"))}, QStringLiteral("ドラッグで囲んで選びます"));
     tool("act_wand", QStringLiteral("自動選択ツール"), QStringLiteral("wand"), {QKeySequence(QStringLiteral("W"))},
-         QStringLiteral("クリックした所を選びます（基準はツールの設定: 線で囲まれた所・色の近さ）"));
+         QStringLiteral("クリックした所を選びます（基準はオプション: 線で囲まれた所・色の近さ）"));
     tool("act_sel_ellipse", QStringLiteral("楕円形選択ツール"), QStringLiteral("ellipse"), {}, QStringLiteral("ドラッグで楕円に選ぶ（Shift で足す、Alt で引く）"));
     tool("act_sel_polyline", QStringLiteral("多角形選択ツール"), QStringLiteral("polyline"), {}, QStringLiteral("クリックで角を置き、ダブルクリックか Enter で閉じる"));
     tool("act_sel_pen", QStringLiteral("選択ペン"), QStringLiteral("selpen"), {}, QStringLiteral("なぞった所を選択範囲に足す"));

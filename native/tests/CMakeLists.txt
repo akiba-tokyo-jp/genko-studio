@@ -24,6 +24,7 @@ genko_test(test_buildinfo SOURCES unit/test_buildinfo.cpp DEPS genko_api LABELS 
 genko_test(test_http_server SOURCES unit/test_http_server.cpp DEPS genko_api Qt6::Network LABELS unit)
 genko_test(test_mcp_connection SOURCES unit/test_mcp_connection.cpp DEPS genko_api LABELS unit)
 genko_test(test_json SOURCES unit/test_json.cpp DEPS genko_test_support LABELS unit)
+genko_test(test_prefs_table SOURCES unit/test_prefs_table.cpp DEPS genko_test_support LABELS unit)  # (PC5 H-0: 環境設定の表)
 genko_test(test_pynum SOURCES unit/test_pynum.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_model SOURCES unit/test_model.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_strokes SOURCES unit/test_strokes.cpp DEPS genko_test_support LABELS unit)

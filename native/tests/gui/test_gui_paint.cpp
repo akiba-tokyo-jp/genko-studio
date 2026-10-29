@@ -118,11 +118,12 @@ private slots:
             // (PC4 E-0, the user's decision 2: the drawing tools and the colours by Photoshop's names)
             // (PC4 E4: the スポイトツール's Alt+click, the 塗りつぶしツール's 基準 — their settings on their own pages)
             {"act_picker", "スポイトツール", "I", "クリックした所の色を描画色にします（Alt＋クリックで背景色）", true},
-            {"act_fill", "塗りつぶしツール", "G", "クリックした所を塗ります（基準は 線で囲まれた所・色の近さ。ツールの設定で）", true},
+            {"act_fill", "塗りつぶしツール", "Shift+Q",  // (PC5 H-0, the Photoshop key set: G is グラデーションツール's)
+             "クリックした所を塗ります（基準は 線で囲まれた所・色の近さ。オプションで）", true},
             {"act_lassofill", "囲って塗る", "Shift+G", "ドラッグで囲んだ所を塗ります", true},
-            {"act_gradient", "グラデーションツール", "U", "ドラッグの向きに色をなめらかに変えて塗る（選択範囲があればその中だけ）", true},
+            {"act_gradient", "グラデーションツール", "G", "ドラッグの向きに色をなめらかに変えて塗る（選択範囲があればその中だけ）", true},
             // (PC3 C-b, the user's decisions 5 and 7: the 図形 is the shape tools' 長方形ツール — test_gui_shapes)
-            {"act_shape", "長方形ツール", "O",
+            {"act_shape", "長方形ツール", "U",
              "ドラッグで長方形のシェイプを描きます（Shift で正方形、Alt で中心から。モードがピクセルなら直線・折れ線・曲線なども）", true},
             {"act_blend", "色混ぜ", "Shift+B", "ペイントのレイヤーの色をぼかす・指先でのばす・なじませる（Photoshop のぼかしツール・指先ツールは別の道具）", true},
             {"act_liquify", "前方ワープツール", "Shift+L", "なぞった所の絵と線を押し流す・縮める・ふくらませる・渦を巻く", true},
@@ -761,7 +762,8 @@ private slots:
     void linesEditedAsPythonsVectorTool() {
         Studio s;
         const std::vector<Expected> expected = {
-            {"act_reshape", "線の修正（つまむ）", "Y", "描いた線をつまんでドラッグすると、その辺りが滑らかに動きます", true},
+            {"act_reshape", "線の修正（つまむ）", "Shift+R",  // (PC5 H-0: Y is ヒストリーブラシツール's)
+             "描いた線をつまんでドラッグすると、その辺りが滑らかに動きます", true},
             // (PC3 C-b, the user's decision 5: 線の編集（制御点） by Photoshop's name)
             {"act_vector", "部分選択ツール", "Shift+Y", "ペンの線を選んで制御点を動かす（Alt+クリックで点を足す、Delete で消す、Shift+クリックで 2 本目）", true},
             {"act_vector_join", "選んだ 2 本の線をつなぐ", "", "", false},

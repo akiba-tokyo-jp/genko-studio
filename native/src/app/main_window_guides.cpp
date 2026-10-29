@@ -24,6 +24,7 @@
 #include "app/guide_panel.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "app/tool_settings.hpp"
 #include "service/wording.hpp"
 #include "core/base64.hpp"
@@ -116,8 +117,8 @@ void MainWindow::build_guide_actions() {
         make(QString::fromLatin1(attribute), title, [this] { guide_toggles(); }, key.isEmpty() ? QList<QKeySequence>{} : QList<QKeySequence>{QKeySequence(key)},
              tip, true);
     };
-    toggle("act_snap", QStringLiteral("定規にスナップ"), QStringLiteral("Ctrl+2"), QStringLiteral("ペンの線を定規に沿わせる（切ると自由に描ける）"));
-    toggle("act_show_rulers", QStringLiteral("定規を表示"), QStringLiteral("Ctrl+Shift+R"), QString());
+    toggle("act_snap", QStringLiteral("描画定規にスナップ"), QStringLiteral("Ctrl+2"), QStringLiteral("ペンの線を定規に沿わせる（切ると自由に描ける）"));
+    toggle("act_show_rulers", QStringLiteral("描画定規を表示"), QStringLiteral("Ctrl+Shift+R"), QString());
     toggle("act_grid", QStringLiteral("グリッドを表示"), QStringLiteral("Ctrl+'"), QString());
     toggle("act_grid_snap", QStringLiteral("グリッドにスナップ"), QString(), QStringLiteral("Shift で引く直線と定規の点がグリッドに吸い付く"));
     {
@@ -323,7 +324,12 @@ void MainWindow::place_ruler(const Json& ruler) {
         action("act_snap")->setChecked(true);
         guide_toggles();
     }
-    flash(QStringLiteral("定規を置きました。ブラシツール（B）で描くと沿います（Ctrl+2 で切り替え）"), 3500);
+    // (PC5 H-0: the keys now — 描画定規にスナップ has none in the Photoshop key set, where Ctrl+2 is the composite channel)
+    const QString snap = action("act_snap")->shortcut().toString(QKeySequence::NativeText);
+    flash(QStringLiteral("定規を置きました。ブラシツール%1で描くと沿います（%2 で切り替え）")
+              .arg(preferences::keys_in_words({action("act_pen")}),
+                   snap.isEmpty() ? QStringLiteral("ツール → 定規 → 描画定規にスナップ") : snap),
+          3500);
     if (guides_ != nullptr) guides_->refresh();
 }
 

@@ -116,18 +116,22 @@ private slots:
             seen.insert(a->text());
             QVERIFY(!a->text().startsWith(QStringLiteral("（")));
         }
-        QVERIFY(seen.contains(QStringLiteral("コマンドを探す…")));
+        QVERIFY(seen.contains(QStringLiteral("検索")));  // (PC5 H-0: Photoshop's name for コマンドを探す…)
         QVERIFY(seen.contains(QStringLiteral("選んだレイヤーをフォルダにまとめる")));  // (in レイヤー → まとめて)
         QCOMPARE(app::where(b.window.get(), b.act("act_mirror")), QStringLiteral("表示"));
-        QCOMPARE(app::where(b.window.get(), b.act("act_find_command")), QStringLiteral("ヘルプ"));
+        QCOMPARE(app::where(b.window.get(), b.act("act_find_command")), QStringLiteral("編集"));
         app::CommandSearch* search = b.window->find_command();
-        QCOMPARE(search->windowTitle(), QStringLiteral("コマンドを探す"));
+        QCOMPARE(search->windowTitle(), QStringLiteral("検索"));
         QVERIFY(search->query->hasFocus() || search->isVisible());
-        search->query->setText(QStringLiteral("反転 左右"));
+        // (PC5 H-0: by its old name too — 左右反転して見る is 表示 → 水平方向に反転; its key H in the Genko key set only)
+        search->query->setText(QStringLiteral("左右反転して見る"));
         QVERIFY(!search->found().empty());
         QCOMPARE(search->found().front(), b.act("act_mirror"));
-        QVERIFY(search->results->item(0)->text().startsWith(QStringLiteral("左右反転して見る　（表示）")));
-        QVERIFY(search->results->item(0)->text().endsWith(QStringLiteral("　H")));
+        QCOMPARE(search->results->item(0)->text(), QStringLiteral("水平方向に反転　（表示）"));
+        search->query->setText(QStringLiteral("履歴"));
+        QVERIFY(std::find(search->found().begin(), search->found().end(), b.act("act_history")) != search->found().end());
+        search->query->setText(QStringLiteral("ルックアップ 書き出す"));
+        QVERIFY(std::find(search->found().begin(), search->found().end(), b.act("act_export_lookup")) != search->found().end());
         // the words in any order, the explanation too
         search->query->setText(QStringLiteral("歪み 表示"));
         QVERIFY(std::find(search->found().begin(), search->found().end(), b.act("act_mirror")) != search->found().end());
@@ -141,7 +145,7 @@ private slots:
         const bool was = b.act("act_mirror")->isChecked();
         QTest::keyClick(search->query, Qt::Key_Return);
         QCOMPARE(b.act("act_mirror")->isChecked(), !was);
-        QCOMPARE(b.act("act_find_command")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+F")));
+        QCOMPARE(b.act("act_find_command")->shortcut(), QKeySequence(QStringLiteral("Ctrl+F")));  // (PC5 H-0: 検索, Photoshop's)
         // a command its menu has deleted while the finder was open (a menu that makes its items again as it opens): not
         // run, the list found again
         QMenu* view = b.menu(QStringLiteral("表示"));
@@ -195,8 +199,8 @@ private slots:
             return static_cast<int>(QDialog::Accepted);
         };
         b.act("act_edit_quick")->trigger();  // (表示 → クイックアクセスを変える…)
-        QCOMPARE(panel->names(), (QStringList{QStringLiteral("履歴…"), QStringLiteral("消しゴムツール")}));
-        QCOMPARE(app::settings()->value(QStringLiteral("ui/quick")).toString(), QStringLiteral("履歴…\t消しゴムツール"));
+        QCOMPARE(panel->names(), (QStringList{QStringLiteral("ヒストリー…"), QStringLiteral("消しゴムツール")}));  // (PC5 H-0: found by its old name)
+        QCOMPARE(app::settings()->value(QStringLiteral("ui/quick")).toString(), QStringLiteral("ヒストリー…\t消しゴムツール"));
         QCOMPARE(panel->buttons.size(), std::size_t{2});
         // はじめの並びに戻す
         b.on_dialog = [](QDialog* dialog) {
@@ -224,15 +228,15 @@ private slots:
             choose->all->setCurrentRow(0);
             choose->add->click();
             choose->line->click();
-            choose->filter->setText(QStringLiteral("元に戻す"));
+            choose->filter->setText(QStringLiteral("取り消し"));
             choose->all->setCurrentRow(0);
             choose->add->click();
             return static_cast<int>(QDialog::Accepted);
         };
         b.act("act_edit_commandbar")->trigger();
-        QCOMPARE(commands_on(), (QStringList{QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("元に戻す")}));
+        QCOMPARE(commands_on(), (QStringList{QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("取り消し")}));
         QCOMPARE(b.window->doc_tabs()->isVisibleTo(bar), true);
-        // ファイル → 環境設定… opens the preferences (asked before another window takes the answers)
+        // 編集 → 環境設定 → 一般… (PC5 H-0; ファイル → 環境設定… before) opens the preferences (asked before another window takes the answers)
         b.answers.asked.clear();
         b.act("act_prefs")->trigger();
         QVERIFY2(b.answers.asked == QStringList{QStringLiteral("genko::app::preferences::PreferencesDialog")}, qPrintable(b.answers.asked.join(QStringLiteral(" | "))));
@@ -243,7 +247,7 @@ private slots:
         for (QAction* a : other.window->command_bar()->actions()) {
             if (!a->property("keep").toBool()) on_other << (a->isSeparator() ? QStringLiteral("|") : a->text());
         }
-        QCOMPARE(on_other, (QStringList{QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("元に戻す")}));
+        QCOMPARE(on_other, (QStringList{QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("取り消し")}));
     }
 
     // Workspaces: the panels kept under a name (asked for), listed in ウィンドウ → ワークスペース, put back, deleted;
@@ -323,7 +327,7 @@ private slots:
         QCOMPARE(b.answers.asked.back(), QStringLiteral("genko::app::AiDialog"));
         QMenu* help = b.menu(QStringLiteral("ヘルプ"));
         QVERIFY(help != nullptr);
-        QVERIFY(texts(help).contains(QStringLiteral("コマンドを探す…")));
+        QVERIFY(texts(b.menu(QStringLiteral("編集"))).contains(QStringLiteral("検索")));  // (PC5 H-0: コマンドを探す… moved from ヘルプ)
         QMenu* layers = b.menu(QStringLiteral("レイヤー"));
         for (const QString& title : {QStringLiteral("塗り・グラデーション・色調補正のレイヤー"), QStringLiteral("まとめて（複数のレイヤー・表示レイヤー・変換）"),
                                      QStringLiteral("境界効果・表示色の印刷"), QStringLiteral("レイヤーマスク")}) {
@@ -374,10 +378,11 @@ private slots:
         QVERIFY(first != nullptr && first->isVisible());
         QStringList words;
         for (QPushButton* button : first->findChildren<QPushButton*>()) words << button->text();
-        QVERIFY(words.contains(QStringLiteral("コマを割る（F）")) && words.contains(QStringLiteral("ブラシで描く（B）")) &&
+        QVERIFY(words.contains(QStringLiteral("コマを割る（K）"))  // (PC5 H-0: the Photoshop key set)
+                && words.contains(QStringLiteral("ブラシで描く（B）")) &&
                 words.contains(QStringLiteral("台詞を入れる（T）")) && words.contains(QStringLiteral("AI に頼む…")));
         for (QPushButton* button : first->findChildren<QPushButton*>()) {
-            if (button->text() == QStringLiteral("コマを割る（F）")) button->click();
+            if (button->text() == QStringLiteral("コマを割る（K）")) button->click();
         }
         QCOMPARE(b.window->canvas()->tool(), QStringLiteral("frame"));
         QVERIFY(first->height() < 60);
@@ -509,7 +514,7 @@ private slots:
         Book b;
         app::settings()->setValue(QStringLiteral("ui/quick"), QStringLiteral("CMYK で見る（色校正）\tレイヤーを削除\t切り取り\t履歴…"));
         QCOMPARE(app::chosen(QStringLiteral("ui/quick"), app::kDefaultQuick),
-                 (QStringList{QStringLiteral("色の校正"), QStringLiteral("レイヤーを消す"), QStringLiteral("カット"), QStringLiteral("履歴…")}));
+                 (QStringList{QStringLiteral("色の校正"), QStringLiteral("レイヤーを消す"), QStringLiteral("カット"), QStringLiteral("ヒストリー…")}));
         app::settings()->remove(QStringLiteral("ui/quick"));
         QVERIFY(app::by_text(b.window.get()).count(QStringLiteral("色の校正")) == 1);
         QVERIFY(app::by_text(b.window.get()).count(QStringLiteral("カット")) == 1);
@@ -594,7 +599,8 @@ private slots:
             const QString old = QString::fromUtf8(before);
             const QString name = b.window->action(QString::fromLatin1(attribute))->text();
             QVERIFY2(name != old, attribute);
-            QVERIFY2(now.contains(name) && !now.contains(old), attribute);
+            // (PC5 H-0: 書き出し… is 編集 → 環境設定 → 書き出し…'s own name since — a reused name, read by its mark)
+            QVERIFY2(now.contains(name) && (!now.contains(old) || app::preferences::reused_name(old)), attribute);
             bool kept = false;
             for (auto [it, end] = app::preferences::renamed().equal_range(name); it != end; ++it) kept = kept || it->second == old;
             QVERIFY2(kept, attribute);
@@ -623,10 +629,11 @@ private slots:
             {"act_pen", "ペン", "ブラシツール", "B"},
             {"act_eraser", "消しゴム", "消しゴムツール", "E"},
             {"act_picker", "スポイト", "スポイトツール", "I"},
-            {"act_fill", "塗りつぶし", "塗りつぶしツール", "G"},
-            {"act_gradient", "グラデーション", "グラデーションツール", "U"},
+            {"act_fill", "塗りつぶし", "塗りつぶしツール", "Shift+Q"},  // (PC5 H-0: the Photoshop key set)
+            
+            {"act_gradient", "グラデーション", "グラデーションツール", "G"},
             {"act_swap_colour", "メインとサブの色を入れ替える", "描画色と背景色を入れ替え", "X"},
-            {"act_color", "ペンの色…", "カラーピッカー（描画色）…", "C"},
+            {"act_color", "ペンの色…", "カラーピッカー（描画色）…", ""},
             {"act_thicker", "太く（ペン・消しゴム）", "ブラシサイズを大きく", "]"},
             {"act_thinner", "細く（ペン・消しゴム）", "ブラシサイズを小さく", "["},
             {"act_vector_colour", "選んだ線をペンの色にする", "選んだ線を描画色にする", ""}};
@@ -681,6 +688,101 @@ private slots:
         QCOMPARE(b.window->action("act_layer_pen")->text(), QStringLiteral("新しいペンのレイヤー"));
     }
 
+    // PC5 H-0 (節 H 1.2, the user's decision 12: 表示, ウィンドウ and 編集 by Photoshop's names): each renamed command is read
+    // under its old name — the command bar's places, a key chosen under it, 検索 —, its id kept, the old names in no menu.
+    // 表示 → 定規 shares its words with the 定規 tool: what was kept under 「定規」 alone is still the tool's
+    // (preferences::words_owner); 書き出し… — 原稿を書き出す…'s old name — is 編集 → 環境設定 → 書き出し…'s own since: kept
+    // before (no mark) it is the book's export (reused_names).
+    void theRenamedViewCommandsAreFound() {
+        Book b;
+        const std::vector<std::pair<const char*, const char*>> renamed{
+            {"act_undo", "元に戻す"},        {"act_redo", "やり直す"},          {"act_fit", "全体を表示"},
+            {"act_zoom_in", "拡大"},         {"act_zoom_out", "縮小"},          {"act_actual", "原寸（紙の大きさ）"},
+            {"act_zoom_tool", "虫めがね"},   {"act_mirror", "左右反転して見る"}, {"act_scale", "目盛りを表示"},
+            {"act_show_rulers", "定規を表示"}, {"act_snap", "定規にスナップ"},   {"act_history", "履歴…"},
+            {"act_find_command", "コマンドを探す…"}, {"act_new_window", "新しいウィンドウ（同じ原稿）"}, {"act_prefs", "環境設定…"}};
+        const auto names = app::command_names(b.window.get());
+        QSet<QString> now;
+        for (const auto& [action, name] : names) now.insert(name);
+        QStringList bar;
+        for (const auto& [attribute, before] : renamed) {
+            QAction* act = b.act(attribute);
+            QVERIFY2(act != nullptr, attribute);
+            const QString name = app::command_name(names, act);
+            QVERIFY2(!now.contains(QString::fromUtf8(before)), before);
+            bool kept = false;
+            for (auto [it, end] = app::preferences::renamed().equal_range(name); it != end; ++it) kept = kept || it->second == QString::fromUtf8(before);
+            QVERIFY2(kept, qPrintable(name));
+            bar << QString::fromUtf8(before);
+        }
+        QCOMPARE(app::command_name(names, b.act("act_mirror")), QStringLiteral("水平方向に反転（表示）"));
+        QCOMPARE(app::command_name(names, b.act("act_scale")), QStringLiteral("定規（表示）"));
+        QCOMPARE(app::command_name(names, b.act("act_ruler")), QStringLiteral("定規（ツール）"));
+        // the command bar chosen under the old names
+        app::settings()->setValue(QStringLiteral("ui/commandbar"), bar.join(QLatin1Char('\t')));
+        const QStringList read = app::chosen(QStringLiteral("ui/commandbar"), app::kDefaultCommandBar);
+        app::settings()->remove(QStringLiteral("ui/commandbar"));
+        const auto by = app::by_text(b.window.get());
+        QCOMPARE(read.size(), static_cast<qsizetype>(renamed.size()));
+        for (std::size_t i = 0; i < renamed.size(); ++i) {
+            const auto found = by.find(read[static_cast<qsizetype>(i)]);
+            QVERIFY2(found != by.end() && found->second == b.act(renamed[i].first), renamed[i].first);
+        }
+        for (const QString& name : app::kDefaultCommandBar + app::kDefaultQuick) QVERIFY2(name == QLatin1String("|") || by.count(name), qPrintable(name));
+        // the panels' switches by their old titles
+        app::settings()->setValue(QStringLiteral("ui/quick"), QStringLiteral("全体図\tツールの設定\t履歴"));
+        QCOMPARE(app::chosen(QStringLiteral("ui/quick"), app::kDefaultQuick),
+                 (QStringList{QStringLiteral("ナビゲーター"), QStringLiteral("オプション"), QStringLiteral("ヒストリー")}));
+        app::settings()->remove(QStringLiteral("ui/quick"));
+        // keys chosen under the old names
+        app::settings()->setValue(QStringLiteral("shortcuts/左右反転して見る"), QStringLiteral("Ctrl+Alt+K"));
+        app::settings()->setValue(QStringLiteral("shortcuts/目盛りを表示"), QStringLiteral("Ctrl+Alt+J"));
+        app::settings()->setValue(QStringLiteral("shortcuts/全体図"), QStringLiteral("Ctrl+Alt+N"));
+        app::preferences::apply_shortcuts(b.window.get());
+        QCOMPARE(b.act("act_mirror")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+K")));
+        QCOMPARE(b.act("act_scale")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+J")));
+        QCOMPARE(b.dock(QStringLiteral("ナビゲーター"))->toggleViewAction()->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+N")));
+        QVERIFY(b.act("act_flip_h")->shortcut() != QKeySequence(QStringLiteral("Ctrl+Alt+K")));  // (編集 → 変形's, not the view's)
+        for (const char* key : {"shortcuts/左右反転して見る", "shortcuts/目盛りを表示", "shortcuts/全体図"}) app::settings()->remove(QString::fromUtf8(key));
+        // 「定規」 alone: the tool's (its key and its place in a list), not 表示 → 定規's
+        app::settings()->setValue(QStringLiteral("shortcuts/定規"), QStringLiteral("Ctrl+Alt+Shift+J"));
+        app::preferences::apply_shortcuts(b.window.get());
+        app::settings()->remove(QStringLiteral("shortcuts/定規"));
+        QCOMPARE(b.act("act_ruler")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+Shift+J")));
+        QCOMPARE(b.act("act_scale")->shortcut(), QKeySequence(QStringLiteral("Ctrl+R")));
+        QCOMPARE(app::by_text(b.window.get()).at(QStringLiteral("定規")), b.act("act_ruler"));
+        app::preferences::apply_shortcuts(b.window.get());
+        // 書き出し…: kept before (no mark) the book's export; kept since, 編集 → 環境設定 → 書き出し…
+        QVERIFY(app::preferences::reused_name(QStringLiteral("書き出し…")));
+        app::settings()->remove(QStringLiteral("names_current/ui/quick"));
+        app::settings()->setValue(QStringLiteral("ui/quick"), QStringLiteral("書き出し…"));
+        QCOMPARE(app::chosen(QStringLiteral("ui/quick"), app::kDefaultQuick), QStringList{QStringLiteral("原稿を書き出す…")});
+        app::keep(QStringLiteral("ui/quick"), {QStringLiteral("書き出し…")});
+        QCOMPARE(app::chosen(QStringLiteral("ui/quick"), app::kDefaultQuick), QStringList{QStringLiteral("書き出し…")});
+        QCOMPARE(app::by_text(b.window.get()).at(QStringLiteral("書き出し…")), b.act("act_prefs_export"));
+        app::settings()->remove(QStringLiteral("ui/quick"));
+        app::settings()->remove(QStringLiteral("names_current/ui/quick"));
+        // a key chosen under an old name, put back to the command's first (すべて最初のキーに戻す → 決める): the old name's
+        // key goes too — the next apply does not read it back (the review of PC5 H-0, P2-5)
+        app::settings()->setValue(QStringLiteral("shortcuts/元に戻す"), QStringLiteral("Ctrl+Alt+Shift+U"));
+        app::preferences::apply_all(b.window.get());
+        QCOMPARE(b.act("act_undo")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+Shift+U")));
+        {
+            app::preferences::PreferencesDialog dialog(b.window.get());
+            dialog.reset_keys();
+            dialog.save();
+        }
+        QVERIFY(!app::settings()->contains(QStringLiteral("shortcuts/元に戻す")));
+        app::preferences::apply_all(b.window.get());
+        QCOMPARE(b.act("act_undo")->shortcut(), QKeySequence(QKeySequence::Undo));
+        // 検索 finds a command by its old name
+        app::CommandSearch* search = b.window->find_command();
+        search->query->setText(QStringLiteral("全体を表示"));
+        QVERIFY(!search->found().empty());
+        QCOMPARE(search->found().front(), b.act("act_fit"));
+        search->close();
+    }
+
     // PC4 E4 (E-0's promise): グラデーション — the グラデーションツール's old name — is the グラデーション panel's own name since; a
     // list and the keys kept before the panel (no mark) read it as the tool, those kept since (marked when written) as the
     // panel: the two never taken for each other, nor one key given to both.
@@ -719,7 +821,7 @@ private slots:
         app::preferences::mark_names_current(QStringLiteral("shortcuts/グラデーション"));
         app::preferences::apply_shortcuts(b.window.get());
         QCOMPARE(panel->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+G")));
-        QCOMPARE(tool->shortcut(), QKeySequence(QStringLiteral("U")));
+        QCOMPARE(tool->shortcut(), QKeySequence(QStringLiteral("G")));
         // a key written there again by a build before E4: the tool's again
         store->setValue(QStringLiteral("shortcuts/グラデーション"), QStringLiteral("Ctrl+Alt+H"));
         app::preferences::apply_shortcuts(b.window.get());

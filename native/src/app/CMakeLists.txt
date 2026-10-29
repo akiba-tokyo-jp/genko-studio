@@ -50,6 +50,11 @@ genko_library(genko_app
     ime.cpp
     main_window.cpp
     main_window_actions.cpp
+    main_window_view.cpp
+    main_window_arrange.cpp
+    main_window_edit.cpp
+    key_sets.cpp
+    settings_watch.cpp
     main_window_select.cpp
     select_dialogs.cpp
     main_window_channels.cpp
