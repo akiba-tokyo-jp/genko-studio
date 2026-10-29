@@ -10,6 +10,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
+#include <QFile>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -28,12 +29,17 @@
 #include "gui_support.hpp"
 #include "render/image.hpp"
 #include "render/png.hpp"
-#include "testsupport.hpp"
 
 using namespace genko;
 using core::Json;
 
 namespace {
+
+void write_bytes(const QString& path, const std::string& bytes) {
+    QFile out(path);
+    QVERIFY(out.open(QIODevice::WriteOnly));
+    out.write(bytes.data(), static_cast<qint64>(bytes.size()));
+}
 
 std::string png_of(int w, int h, std::array<int, 4> rgba) {
     std::string bytes(std::size_t(w) * h * 4, '\0');
@@ -192,7 +198,7 @@ private slots:
         b.act("act_variables_define")->trigger();
         QCOMPARE(core::variables_of(b.doc()).defs.size(), std::size_t(3));
         const QString picture = b.tmp.path() + QStringLiteral("/blue.png");
-        genko::test::write_bytes(picture, png_of(4, 4, {0, 0, 255, 255}));
+        write_bytes(picture, png_of(4, 4, {0, 0, 255, 255}));
         b.answers.responder->exec = [&picture](QDialog* dialog) {
             auto* d = qobject_cast<app::DataSetsDialog*>(dialog);
             if (d == nullptr) return int(QDialog::Rejected);
@@ -243,7 +249,7 @@ private slots:
         Book b;
         b.define();
         const QString csv = b.tmp.path() + QStringLiteral("/sets.csv");
-        genko::test::write_bytes(csv, "データセット,show,words\n一,false,いち\n二,true,に\n");
+        write_bytes(csv, "データセット,show,words\n一,false,いち\n二,true,に\n");
         b.answers.responder->exec = [&csv](QDialog* dialog) {
             auto* d = qobject_cast<app::ImportDataSetsDialog*>(dialog);
             if (d == nullptr) return int(QDialog::Rejected);

@@ -291,7 +291,7 @@ private slots:
         QVERIFY2(exit == 0, undone.dump().c_str());
         now = storage::load_document(fs::path(book_path.toStdString())).document;
         QVERIFY(layer(now, "badge").visible);
-        QVERIFY(alpha_at(now, 5, 5) < 0.01 && alpha_at(now, 20, 20) > 0.99);
+        QVERIFY(!layer(now, "photo").patches.empty() && !layer(now, "photo").raster_png);  // (its fill as it was: not pixels yet)
         QCOMPARE(core::variables_of(now).active, std::optional<std::int64_t>());
         // a book naming variables@1 whose picture is gone: read-only
         const QString broken = path(QStringLiteral("broken.genko"));

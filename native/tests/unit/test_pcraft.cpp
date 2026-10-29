@@ -421,9 +421,9 @@ private slots:
         context.page = &page;
         context.say = [&said](std::string note) { said.push_back(std::move(note)); };
         pp::read(document, context);
-        // (PC5 J-a: レイヤーカンプ read — this one not of upstream's form: said so, in its place)
+        // (PC5 J-a: レイヤーカンプ read — this one not of upstream's form: said so, in its place; PC5 I-d: 変数とデータセット likewise)
         QCOMPARE(said, (std::vector<std::string>{"レイヤーカンプは読めない形のため外しました", "注釈は Genko に無いため外しました",
-                                                 "タイムラインは Genko に無いため外しました", "変数とデータセットは Genko に無いため外しました",
+                                                 "タイムラインは Genko に無いため外しました", "変数とデータセットは読めない形のため外しました",
                                                  "計測（カウント・ものさし）は Genko に無いため外しました"}));
         said.clear();
         pp::read(Json::parse(R"({"measurement": {"scale": {"pixel_length": 2}}})"), context);
