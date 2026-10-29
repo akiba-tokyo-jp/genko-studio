@@ -10,6 +10,7 @@
 
 #include <QFontMetricsF>
 #include <QPainter>
+#include <QPolygonF>
 
 #include <algorithm>
 #include <cmath>

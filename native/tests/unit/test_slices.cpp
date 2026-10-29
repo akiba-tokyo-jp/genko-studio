@@ -62,7 +62,7 @@ Json op(const char* name, Json more = Json::object()) {
 
 // A 12 × 9 mm page at 254 dpi (10 pixels a mm: 120 × 90, PhotoCraft's test canvas) without panels.
 core::Document book(double w = 12, double h = 9) {
-    auto doc = core::new_episode("スライス", core::Num(1), 1, core::PageSpec::custom(w, h, 1, 1, 1, 1, 1, 1, 1, 254, "color"));
+    auto doc = core::new_episode("スライス", core::Num(1), 1, core::PageSpec::custom(w, h, w - 2, h - 2, 1, 1, 1, 1, 1, 254, "color"));
     auto& p = doc.edit_page(0);
     p.numero = false;
     p.frames.clear();
@@ -186,7 +186,7 @@ private slots:
         QCOMPARE((*me)["rect_px"], Json::array({20, 10, 40, 20}));
         QCOMPARE((*me)["rect_mm"], Json::array({2.0, 1.0, 4.0, 2.0}));
         QCOMPARE((*me)["origin"], Json("user"));
-        QCOMPARE(std::count_if(info["slices"].begin(), info["slices"].end(), [](const Json& s) { return s["origin"] == Json("auto"); }), 4);
+        QCOMPARE(static_cast<int>(std::count_if(info["slices"].begin(), info["slices"].end(), [](const Json& s) { return s["origin"] == Json("auto"); })), 4);
         QCOMPARE(info["slices"][0]["name"], Json("p001_01"));  // (the page's file name as the base)
         const core::Document set = run(one, op("set_slice", {{"number", 3}, {"kind", "noImage"}, {"cell_text", "hi"}, {"background", "#FF0000"}}));
         QCOMPARE(set.page(0).slices->list[0].kind, std::string("noImage"));
@@ -288,8 +288,9 @@ private slots:
         const Json grown_at = (*by_id(listed(grown), id))["rect_px"];
         QCOMPARE(grown_at, Json::array({at[0].get<int>() - 2, at[1].get<int>() - 1, at[2].get<int>() + 6, at[3].get<int>() + 4}));
         // a drop shadow grows it too
-        core::Document styled = doc;
-        styled.edit_page(0).layers[0].style = Json::parse(R"({"effects": [{"kind": "drop_shadow", "enabled": true, "distance": 5, "size": 5}]})");
+        const core::Document styled = run(doc, op("set_layer_style", {{"id", "a"},
+                                                                      {"style", Json{{"effects", Json::array({Json{{"kind", "drop_shadow"}, {"blend", "normal"}, {"opacity", 1},
+                                                                                                                    {"distance_mm", 0.5}, {"size_mm", 0.5}}})}}}}));
         const Json grown_by_style = (*by_id(listed(styled), id))["rect_px"];
         QVERIFY2(grown_by_style[2].get<int>() > at[2].get<int>() && grown_by_style[3].get<int>() > at[3].get<int>(), grown_by_style.dump().c_str());
         // its rect given: a user slice where it is put

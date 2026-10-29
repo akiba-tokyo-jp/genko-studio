@@ -818,6 +818,14 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(kind is image, noImage or table)", "スライスの種類は image・noImage・table のどれかです"));
         r.push_back(rule(R"(background is "#rrggbb", "none" or null)", "スライスの背景は #rrggbb か \"none\" で指定します"));
         r.push_back(rule("none of the slices asked for is on the page", "指定したスライスがページにありません"));
+        r.push_back(rule(R"(the slice's (name|url|target|message|alt|cell_text|kind) is text)", "スライスの \\1 は文字で指定します"));
+        r.push_back(rule(R"(the slice's (name|url|target|message|alt|cell_text|kind) is at most (\d+) bytes)", "スライスの \\1 は \\2 バイトまでの文字です"));
+        r.push_back(rule(R"((cell_text_is_html|promote) is true or false)", "\\1 は true か false です"));
+        r.push_back(rule(R"(align is \[horizontal, vertical\].*|align is a whole number.*)", "スライスの揃え（align）は [横, 縦] の 0〜4 の整数で指定します"));
+        r.push_back(rule(R"(outsets is \[top, left, bottom, right\].*|outsets is a whole number.*)", "外側の広げ（outsets）は [上, 左, 下, 右] のページの画素の整数で指定します"));
+        r.push_back(rule(R"((rows|columns) is a whole number 1\.\.1000)", "\\1 は 1〜1000 の整数で指定します"));
+        r.push_back(rule(R"(slice is a slice's id)", "スライスは ID（整数）で指定します"));
+        r.push_back(rule(R"(number is a slice's number as shown.*)", "スライスの番号は 1 から数えて指定します"));
         // (PC5-0, Z0's review P1-1: a new layer of a 16- or 32-bit page painted at 8 bits for the book's precise budget)
         r.push_back(rule(R"(the layer is painted at 8 bits: the book's precise pixels would pass their budget.*)",
                          "本の高精度の画素の上限（1 GiB）を越えるか、本をまだ読み込み中のため、このレイヤーは 8 bit で塗りました"));

@@ -4,6 +4,7 @@
 #include "render/ops_slices.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <set>
 #include <string>
@@ -12,6 +13,7 @@
 #include "core/error.hpp"
 #include "core/measure.hpp"
 #include "core/production_json.hpp"
+#include "core/pyops.hpp"
 #include "core/pynum.hpp"
 #include "render/layer_bounds.hpp"
 #include "render/layer_styles.hpp"
@@ -41,9 +43,9 @@ const core::Layer* layer_of(const core::Page& page, const std::string& id) {
 }
 
 std::string text_given(const Json& value, const char* key, std::size_t most) {
-    if (!value.is_string()) throw OpError(std::string(key) + " is text");
+    if (!value.is_string()) throw OpError(std::string("the slice's ") + key + " is text");
     std::string out = value.get<std::string>();
-    if (out.size() > most) throw OpError(std::string(key) + " is at most " + std::to_string(most) + " bytes");
+    if (out.size() > most) throw OpError(std::string("the slice's ") + key + " is at most " + std::to_string(most) + " bytes");
     return out;
 }
 

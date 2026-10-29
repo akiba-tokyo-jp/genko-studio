@@ -24,7 +24,12 @@ namespace {
 
 std::string text_of(d::Bytes& b) { return psd::utf8_of(d::read_unicode(b)); }
 
-void put_text(std::string& out, std::string_view utf8) { d::put_unicode(out, psd::utf16(utf8)); }
+// (a unicode string without its closing 0, as PhotoCraft writes the resource's and psd-tools reads them)
+void put_text(std::string& out, std::string_view utf8) {
+    const std::u16string text = psd::utf16(utf8);
+    d::put_u32(out, static_cast<std::uint32_t>(text.size()));
+    for (const char16_t c : text) d::put_u16(out, c);
+}
 
 std::optional<double> number(const d::Object& o, std::string_view key) {
     const d::Value* v = o.get(key);
