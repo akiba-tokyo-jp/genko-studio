@@ -201,6 +201,10 @@ genko_library(genko_app
     # PC5 J-a (layer-comps@1: ウィンドウ → レイヤーカンプ, レイヤーカンプからファイル…)
     main_window_layer_comps.cpp
     layer_comps_panel.cpp
+    # PC5 J-c (annotations@1: 注釈ツール, ウィンドウ → 注釈, 表示・非表示 → 注釈, 読み込み → 注釈…)
+    main_window_notes.cpp
+    notes_panel.cpp
+    canvas_notes.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

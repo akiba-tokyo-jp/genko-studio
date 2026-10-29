@@ -28,7 +28,7 @@ const std::vector<MainWindow::ToolGroup>& MainWindow::paint_tool_groups() {
         // (Genko's 色混ぜ beside Photoshop's ぼかし・シャープ・指先, which change pixels: E5)
         {"ぼかし", {"act_blur_tool", "act_sharpen_tool", "act_smudge_tool", "act_blend"}},
         {"覆い焼き", {"act_dodge_tool", "act_burn_tool", "act_sponge_tool"}},
-        {"スポイト", {"act_picker"}},
+        {"スポイト", {"act_picker", "act_note"}},  // (PC5 J-c: 注釈ツール; J-d1's ものさし・カウント join it)
     };
     return groups;
 }

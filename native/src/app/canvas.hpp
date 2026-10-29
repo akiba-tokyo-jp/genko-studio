@@ -527,6 +527,14 @@ public:
     bool extra_shown(const QString& key) const;
     std::vector<QString> extra_keys() const;
     bool extras_shown = true;
+    // (PC5 J-c, 注釈 — annotations@1, app/canvas_notes.cpp) The notes' painter (the extra "notes": each note's mark in its
+    // colour where it lies, its box of text beside it while it is open — words upright and the same size at any zoom),
+    // the note the 注釈 panel shows (its mark drawn chosen), and the 注釈ツール ("note"): a click on a mark chooses it and
+    // a drag moves it (noteChosen, noteMoved), a double click opens or closes its box (noteOpened), a click elsewhere puts
+    // a new note there (noteRequested). A mark's place on the canvas (none: not in sight) and the note under a point of it.
+    void paint_notes(QPainter& painter, const core::Page& page, const ExtraView& view) const;
+    QString chosen_note;
+    std::optional<QString> note_at(const QPointF& widget) const;
 
 signals:
     void changed();
@@ -598,6 +606,11 @@ signals:
     void effectSelected(const QString& effect_id);
     void effectMoved(const QString& effect_id, const QPointF& centre);
     void stampRequested(double x_mm, double y_mm);
+    // (PC5 J-c) 注釈ツール: a new note asked for here (mm); a note chosen ("": none); one dragged to (mm); one double clicked
+    void noteRequested(double x_mm, double y_mm);
+    void noteChosen(const QString& id);
+    void noteMoved(const QString& id, double x_mm, double y_mm);
+    void noteOpened(const QString& id);
     // the lines: the text tool clicked here (mm); a balloon's outline drawn by hand ([[x, y], …] mm); a line chosen (and
     // whether its panel opens); a line's box or tails changed ({x_mm, y_mm, w_mm, h_mm} | {tails}: move_line, or {style}:
     // edit_line); a double click on a balloon (type over it); a right click on one; a balloon dragged to (mm)
@@ -1013,6 +1026,19 @@ private:
     std::optional<Warp> warp_;
     std::shared_ptr<CanvasWork> work_;  // (PC4 D4: set_work)
     std::vector<CanvasExtra> extras_;   // (PC5 J-0: add_extra, in the order added)
+    // (PC5 J-c: the 注釈ツール's drag of a mark — app/canvas_notes.cpp)
+    struct NoteDrag {
+        QString id;
+        QPointF grabbed;  // (the press, mm)
+        QPointF to;       // (where the pointer is, mm)
+        bool moved = false;
+    };
+    std::optional<NoteDrag> note_drag_;
+    bool note_asked_ = false;  // (the last press asked for a new note: its double click's second press opens nothing)
+    bool note_press(const QPointF& pos, const QPointF& mm);
+    bool note_move(const QPointF& mm);
+    bool note_release();
+    bool note_double(const QPointF& widget);
     std::vector<QString> extras_hidden_;
     void draw_extras(QPainter& painter) const;
     mutable std::optional<std::pair<std::string, QImage>> mask_picture_;  // (the area and the quick mask it shows)
