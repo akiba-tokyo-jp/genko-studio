@@ -32,6 +32,7 @@ namespace genko::formats {
 struct CsvOptions {
     char delimiter = 0;              // ',' or '\t'; 0: a tab when the first line has tabs and no commas, else a comma
     std::filesystem::path folder;    // where a picture's relative path is read from (the text file's folder)
+    std::uint64_t pictures_most = core::kVariablePicturesMax;  // (the pictures' bytes together: the book's 4 GiB; less in tests)
 };
 struct CsvRead {
     core::Json data_sets = core::Json::array();

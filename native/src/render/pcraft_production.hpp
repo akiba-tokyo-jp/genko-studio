@@ -31,6 +31,7 @@ struct ReadContext {
     // is looked for (the .pcraft's folder; none: such pictures left out, said)
     core::Document* book = nullptr;
     std::optional<std::filesystem::path> beside;
+    std::uint64_t pictures_most = 4ull << 30;  // (the pictures read beside it together: the book's 4 GiB; less in tests)
 };
 
 struct WriteContext {

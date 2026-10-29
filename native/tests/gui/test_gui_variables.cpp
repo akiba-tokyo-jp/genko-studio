@@ -25,9 +25,11 @@
 
 #include "app/main_window.hpp"
 #include "app/variables_dialog.hpp"
+#include "core/command_bus.hpp"
 #include "core/variables.hpp"
 #include "gui_support.hpp"
 #include "render/image.hpp"
+#include "render/ops_registry.hpp"
 #include "render/png.hpp"
 
 using namespace genko;
@@ -286,6 +288,64 @@ private slots:
         QVERIFY2(written.front().startsWith(QStringLiteral("001")), qPrintable(written.join(QStringLiteral(", "))));
         QCOMPARE(b.doc().story.front().text, before);
         QCOMPARE(core::variables_of(b.doc()).active, std::optional<std::int64_t>());
+    }
+
+    // The review's P1-1: a book whose variables cannot be read opens read only — the commands that change the book greyed (and
+    // refused, said, if reached), データセットからファイル… saying it cannot use them: no command throws out of the window.
+    void unreadableVariables() {
+        (void)gui_test::config_folder();
+        QTemporaryDir tmp;
+        const std::filesystem::path path = gui_test::path_of(tmp.path() + QStringLiteral("/broken.genko"));
+        core::Document doc = core::new_episode("t", core::Num(1), 1, core::PageSpec::b4_comic());
+        const core::CommandBus bus(render::ops_registry());
+        doc = bus.apply(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "photo"}, {"name", "photo"}},
+                                          Json{{"op", "set_variables"}, {"defs", Json::array({Json{{"name", "show"}, {"type", "visibility"}, {"page", 1}, {"layer", "photo"}}})}},
+                                          Json{{"op", "set_data_sets"}, {"data_sets", Json::array({Json{{"name", "A"}, {"values", Json::array({Json{{"variable", "show"}, {"value", false}}})}}})}}}),
+                        core::Actor("human:test"))
+                  .doc;
+        gui_test::write_book(path, doc);
+        const QString project = QString::fromStdString((path / "project.json").string());
+        QFile in(project);
+        QVERIFY(in.open(QIODevice::ReadOnly));
+        Json saved = Json::parse(in.readAll().toStdString());
+        in.close();
+        saved["variables"]["defs"][0]["unknown"] = 1;  // (a key this build does not know)
+        write_bytes(project, saved.dump());
+        gui_test::Answers answers;
+        answers.responder->exec = [](QDialog*) { return int(QDialog::Accepted); };
+        auto window = std::make_unique<app::MainWindow>(app::Session::open(path, gui_test::quick(gui_test::path_of(tmp.path() + QStringLiteral("/recovery")))));
+        window->show();
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        QVERIFY(!window->book().read_only_reason.empty());
+        for (const char* name : {"act_variables_define", "act_variables_data_sets", "act_apply_data_set", "act_import_data_sets"}) {
+            QAction* act = window->action(QString::fromLatin1(name));
+            QVERIFY2(act != nullptr && !act->isEnabled(), name);
+            act->setEnabled(true);  // (reached anyway — a key before the menu was greyed: refused, said)
+            act->trigger();
+            QVERIFY2(window->last_error().contains(QStringLiteral("読み取り専用")), qPrintable(window->last_error()));
+        }
+        QAction* out = window->action(QStringLiteral("act_data_sets_to_files"));
+        QVERIFY(out->isEnabled());
+        out->trigger();
+        QVERIFY2(window->last_error().contains(QStringLiteral("変数とデータセットを使えません")), qPrintable(window->last_error()));
+    }
+
+    // The review's P3-4: 定義… binds the layer of the page it was opened on, though another page holds a layer of that id.
+    void defineOnItsPage() {
+        Book b;
+        QVERIFY(b.apply(Json{{"op", "add_layer"}, {"page", 2}, {"kind", "paint"}, {"id", "photo"}, {"name", "photo on 2"}}));
+        b.answers.responder->exec = [&b](QDialog* dialog) {
+            auto* d = qobject_cast<app::VariablesDialog*>(dialog);
+            if (d == nullptr) return int(QDialog::Rejected);
+            b.choose_target(d, QStringLiteral("レイヤー: photo"));
+            b.choose(d->type, QStringLiteral("visibility"));
+            d->name->setText(QStringLiteral("p"));
+            return int(d->add_chosen() ? QDialog::Accepted : QDialog::Rejected);
+        };
+        b.act("act_variables_define")->trigger();
+        const core::Variables v = core::variables_of(b.doc());
+        QCOMPARE(v.defs.size(), std::size_t(1));
+        QCOMPARE(v.defs[0].page, b.doc().page(0).id);
     }
 };
 

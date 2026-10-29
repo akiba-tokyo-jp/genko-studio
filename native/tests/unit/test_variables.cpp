@@ -6,6 +6,7 @@
 // page, a picture given as bytes kept out of the journal, a picture's file read beside the text file.
 
 #include <QtTest>
+#include <QDir>
 #include <QTemporaryDir>
 
 #include <string>
@@ -13,6 +14,7 @@
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/ink.hpp"
 #include "core/variables.hpp"
 #include "formats/datasets.hpp"
 #include "render/image.hpp"
@@ -325,6 +327,50 @@ private slots:
         refused("DataSet,headline\nA,1\nA,2\n", "two data sets are named A");
         refused("headline\n\x93\xFA\x96\x7B\n", "not UTF-8");
         refused("", "no line of names");
+    }
+
+    // The review's P1-2: a picture many rows name read once and given once (the others its asset ref); another file of the
+    // same bytes given by its ref; the pictures together past the most refused before the next file is read.
+    void csvPicturesOnce() {
+        QTemporaryDir dir;
+        const core::Document base = book();
+        core::Document doc = run(base, Json{{"op", "set_variables"},
+                                            {"defs", Json::array({Json{{"name", "img"}, {"type", "pixels"}, {"page", 1}, {"layer", "photo"}}})}});
+        const core::Variables v = core::variables_of(doc);
+        const std::string blue = png_of(4, 4, {0, 0, 255, 255});
+        genko::test::write_bytes(dir.path() + QStringLiteral("/blue.png"), blue);
+        genko::test::write_bytes(dir.path() + QStringLiteral("/same.png"), blue);
+        QVERIFY(QDir(dir.path()).mkdir(QStringLiteral("sub")));
+        std::string text = "DataSet,img\n";
+        for (int i = 0; i < 1000; ++i) text += "r" + std::to_string(i) + "," + (i % 2 == 0 ? "blue.png" : "sub/../blue.png") + "\n";
+        text += "last,same.png\n";
+        formats::CsvOptions options;
+        options.folder = dir.path().toStdString();
+        const formats::CsvRead read = formats::read_data_sets_csv(text, v, options);
+        QCOMPARE(read.data_sets.size(), std::size_t(1001));
+        QCOMPARE(read.files_read, std::size_t(2));  // (blue.png once, whichever way it is named; same.png once)
+        std::size_t given = 0;
+        const std::string ref = core::bytes_ref(blue);
+        for (const Json& set : read.data_sets) {
+            const Json& value = set["values"][0]["value"];
+            if (value.contains("data")) ++given;
+            else QCOMPARE(value["asset"], Json(ref));
+        }
+        QCOMPARE(given, std::size_t(1));
+        QCOMPARE(read.data_sets[1000]["values"][0]["value"]["name"], Json("same.png"));
+        // the op takes them: the bytes given once, the refs naming them
+        doc = run(doc, Json{{"op", "set_data_sets"}, {"data_sets", read.data_sets}});
+        QCOMPARE(core::variables_of(doc).data_sets.size(), std::size_t(1001));
+        QCOMPARE(std::get<core::PictureValue>(core::variables_of(doc).data_sets[999].values[0].value).asset, ref);
+        // past the most: refused before the next file is read
+        genko::test::write_bytes(dir.path() + QStringLiteral("/red.png"), png_of(4, 4, {255, 0, 0, 255}));
+        options.pictures_most = blue.size() + 10;
+        try {
+            formats::read_data_sets_csv("DataSet,img\nA,blue.png\nB,blue.png\nC,red.png\n", v, options);
+            QFAIL("not refused");
+        } catch (const core::Error& error) {
+            QVERIFY2(std::string(error.what()).find("larger than 4 GiB together") != std::string::npos, error.what());
+        }
     }
 };
 

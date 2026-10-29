@@ -55,6 +55,7 @@ struct Pictures {
     std::map<fs::path, std::string> refs;  // (a file's resolved place → its asset ref)
     std::set<std::string> given;           // (the refs whose bytes are given)
     std::uint64_t total = 0;
+    std::uint64_t most = core::kVariablePicturesMax;
 
     Json value(const std::string& path, const fs::path& folder, std::size_t row) {
         fs::path file = core::path_from_utf8(trimmed(path));
@@ -67,7 +68,7 @@ struct Pictures {
         const auto size = fs::is_regular_file(file, ec) ? fs::file_size(file, ec) : 0;
         if (ec || size == 0) bad("row " + std::to_string(row) + ": the picture " + path + " cannot be read");
         if (size > render::smart::kFileMaxBytes) bad("row " + std::to_string(row) + ": the picture " + path + " is larger than 256 MiB");
-        if (total + size > core::kVariablePicturesMax) bad("the data sets' pictures are larger than 4 GiB together");
+        if (total + size > most) bad("the data sets' pictures are larger than 4 GiB together");
         std::ifstream in(file, std::ios::binary);
         std::string bytes(static_cast<std::size_t>(size), '\0');
         if (!in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()))) bad("row " + std::to_string(row) + ": the picture " + path + " cannot be read");
@@ -165,6 +166,7 @@ CsvRead read_data_sets_csv(std::string_view text, const core::Variables& variabl
     }
     std::set<std::string> names;
     Pictures pictures;
+    pictures.most = options.pictures_most;
     for (std::size_t r = 1; r < rows.size(); ++r) {
         const std::vector<std::string>& cells = rows[r];
         std::string name = named && !cells.empty() ? trimmed(cells.front()) : std::string();

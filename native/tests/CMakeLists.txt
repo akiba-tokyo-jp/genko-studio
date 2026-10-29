@@ -568,6 +568,7 @@ genko_test(test_contract_layer_comps SOURCES contract/test_contract_layer_comps.
 # inspect --variables, export --format datasets: the files' names, the book unchanged), saved and read again (variables@1,
 # the pictures in assets/, a book without them as before), a .pcraft's variables written and read back.
 genko_test(test_contract_variables SOURCES contract/test_contract_variables.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 # PC5 J-c (annotations@1): the notes through the command line (apply as a person and an agent, the agent refused on a
 # person's note, undo, inspect --annotations), the PSD's Anno as psd-tools reads it (read back, written as read while
 # unchanged, anew, gone; keep.psd's; a sound note kept), a .pcraft's notes (upstream's reader with $GENKO_PCRAFT_CHECK),

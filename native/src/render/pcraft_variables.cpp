@@ -102,7 +102,7 @@ struct Beside {
         if (!fs::is_regular_file(file, ec)) return std::nullopt;
         const auto size = fs::file_size(file, ec);
         if (ec || size == 0 || size > smart::kFileMaxBytes) return std::nullopt;
-        if (total + size > core::kVariablePicturesMax) {
+        if (total + size > context.pictures_most) {
             ++over;
             read.erase(file);  // (said, not read)
             return std::nullopt;

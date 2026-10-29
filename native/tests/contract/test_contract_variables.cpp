@@ -361,6 +361,125 @@ private slots:
         QVERIFY(alpha_at(applied, 29.8, 29.8) > 0.99);
         QVERIFY(alpha_at(applied, 20, 20) < 0.01);
     }
+
+    // The review's P2-2 and P3-1: a picture beside the .pcraft that several data sets name read once (one asset); one reached
+    // through a link — a folder or a file — that leads out of the folder left out; past the most, the rest not read (said).
+    void pcraftPictures() {
+        const fs::path root = fs::path(tmp_.path().toStdString()) / "links";
+        fs::create_directories(root / "beside");
+        fs::create_directories(root / "outside");
+        const std::string red = png_of(2, 2, {255, 0, 0, 255});
+        genko::test::write_bytes(QString::fromStdString((root / "beside" / "red.png").string()), red);
+        genko::test::write_bytes(QString::fromStdString((root / "beside" / "green.png").string()), png_of(2, 2, {0, 255, 0, 255}));
+        genko::test::write_bytes(QString::fromStdString((root / "outside" / "blue.png").string()), png_of(2, 2, {0, 0, 255, 255}));
+        fs::create_directory_symlink(root / "outside", root / "beside" / "pics");
+        fs::create_symlink(root / "outside" / "blue.png", root / "beside" / "link.png");
+        fs::create_symlink(root / "beside" / "red.png", root / "beside" / "inner.png");  // (a link within the folder: read)
+        const auto read_with = [&](std::uint64_t most, std::vector<std::string>& said) {
+            core::Document target = book();
+            render::pcraft_production::ReadContext context;
+            context.page = &target.edit_page(0);
+            context.book = &target;
+            context.beside = root / "beside";
+            context.pictures_most = most;
+            context.layers = {{"7", "photo"}};
+            context.say = [&said](std::string note) { said.push_back(std::move(note)); };
+            Json sets = Json::array();
+            for (const char* named : {"red.png", "./red.png", "inner.png", "pics/blue.png", "link.png", "green.png"}) {
+                sets.push_back(Json{{"name", named}, {"values", Json::array({Json{{"variable", "img"}, {"kind", "pixels"}, {"value", named}}})}});
+            }
+            render::pcraft_variables::read(Json{{"defs", Json::array({Json{{"name", "img"}, {"layer", 7}, {"kind", Json{{"type", "pixelReplacement"}}}}})},
+                                                {"data_sets", sets}},
+                                           context);
+            return target;
+        };
+        std::vector<std::string> said;
+        const core::Document target = read_with(4ull << 30, said);
+        const core::Variables read = core::variables_of(target);
+        QCOMPARE(read.data_sets.size(), std::size_t(6));
+        const std::string ref = core::bytes_ref(red);
+        for (std::size_t i : {0, 1, 2}) {
+            QCOMPARE(read.data_sets[i].values.size(), std::size_t(1));
+            QCOMPARE(std::get<core::PictureValue>(read.data_sets[i].values[0].value).asset, ref);
+        }
+        QCOMPARE(std::get<core::PictureValue>(read.data_sets[2].values[0].value).name, std::string("inner.png"));
+        QVERIFY(read.data_sets[3].values.empty() && read.data_sets[4].values.empty());  // (out of the folder through a link)
+        QCOMPARE(read.data_sets[5].values.size(), std::size_t(1));
+        QCOMPARE(target.smart_files.size(), std::size_t(2));
+        QVERIFY2(std::any_of(said.begin(), said.end(), [](const std::string& n) { return n.find("2 個は .pcraft の隣に") != std::string::npos; }), Json(said).dump().c_str());
+        // past the most: red read, green (another) not — said apart
+        said.clear();
+        const core::Document small = read_with(red.size() + 1, said);
+        QVERIFY(core::variables_of(small).data_sets[5].values.empty());
+        QCOMPARE(small.smart_files.size(), std::size_t(1));
+        QVERIFY2(std::any_of(said.begin(), said.end(), [](const std::string& n) { return n.find("1 個は合わせて 4 GiB") != std::string::npos; }), Json(said).dump().c_str());
+    }
+
+    // The review's P2-3: apply_data_set's own guards — a page another holds, strict_gates before the name is approved, a locked
+    // layer — refuse the whole op (a value applied before it undone: the book as it was, on disk too); the data sets written
+    // out leave the book as it was even then.
+    void guards() {
+        core::Document doc = book();
+        doc = run(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "badge"}, {"name", "badge"}});
+        doc = run(doc, Json{{"op", "set_variables"},
+                            {"defs", Json::array({Json{{"name", "show it"}, {"type", "visibility"}, {"page", 1}, {"layer", "badge"}},
+                                                  Json{{"name", "img"}, {"type", "pixels"}, {"page", 1}, {"layer", "photo"}}})}});
+        doc = run(doc, Json{{"op", "set_data_sets"},
+                            {"data_sets", Json::array({Json{{"name", "A"}, {"values", Json::array({Json{{"variable", "show it"}, {"value", false}},
+                                                                                                    Json{{"variable", "img"}, {"value", Json{{"data", core::b64encode(png_of(8, 4, {0, 0, 255, 255}))}}}}})}}})}});
+        const auto refusal = [](const core::Document& d) -> std::string {
+            try {
+                run_ops(d, Json::array({Json{{"op", "apply_data_set"}, {"name", "A"}}}));
+            } catch (const core::ApplyError& error) {
+                return error.what();
+            }
+            return {};
+        };
+        QVERIFY(refusal(doc).empty());
+        core::Document held = doc;
+        held.page_locks[held.page(0).id] = "human:other";
+        QVERIFY2(refusal(held).find("locked by") != std::string::npos, refusal(held).c_str());
+        core::Document gated = doc;
+        gated.strict_gates = true;
+        QVERIFY2(refusal(gated).find("strict_gates") != std::string::npos, refusal(gated).c_str());
+        const core::Document locked = run(doc, Json{{"op", "set_layer"}, {"page", 1}, {"id", "photo"}, {"locked", true}});
+        QVERIFY2(!refusal(locked).empty(), "a locked layer");
+        // on disk: refused after "show it" was applied — nothing of it kept
+        const QString book_path = path(QStringLiteral("guards.genko"));
+        genko::test::write_project(locked, fs::path(book_path.toStdString()));
+        const std::string before = genko::test::read_bytes(book_path + QStringLiteral("/project.json"));
+        const Json done = apply(book_path, QStringLiteral("g.json"), Json::array({Json{{"op", "apply_data_set"}, {"name", "A"}}}));
+        QVERIFY2(done.contains("failed"), done.dump().c_str());
+        QCOMPARE(genko::test::read_bytes(book_path + QStringLiteral("/project.json")), before);
+        QVERIFY(layer(storage::load_document(fs::path(book_path.toStdString())).document, "badge").visible);
+        // written out as files: the book as it was
+        int exit = -1;
+        const Json written = genko({QStringLiteral("export"), book_path, path(QStringLiteral("guards-out")), QStringLiteral("--format"), QStringLiteral("datasets"),
+                                    QStringLiteral("--json")},
+                                   &exit);
+        QVERIFY2(exit == 1 || exit == 0, written.dump().c_str());
+        QCOMPARE(genko::test::read_bytes(book_path + QStringLiteral("/project.json")), before);
+    }
+
+    // The review's P1-1: a book whose variables cannot be read opens read only; inspect --variables says so (an error, no crash),
+    // and a copy saved as .pcraft leaves them out (said).
+    void unreadableVariables() {
+        core::Document doc = book();
+        doc = run(doc, Json{{"op", "set_variables"}, {"defs", Json::array({Json{{"name", "img"}, {"type", "pixels"}, {"page", 1}, {"layer", "photo"}}})}});
+        const QString book_path = path(QStringLiteral("unreadable.genko"));
+        genko::test::write_project(doc, fs::path(book_path.toStdString()));
+        Json saved = project(book_path);
+        saved["variables"]["defs"][0]["unknown"] = 1;  // (a key this build does not know: written by a later one, or by hand)
+        genko::test::write_bytes(book_path + QStringLiteral("/project.json"), saved.dump());
+        const auto loaded = storage::load_document(fs::path(book_path.toStdString()));
+        QVERIFY(!loaded.document.read_only_reason.empty());
+        int exit = -1;
+        const Json said = genko({QStringLiteral("inspect"), book_path, QStringLiteral("--variables")}, &exit);
+        QVERIFY2(exit == 1, said.dump().c_str());  // (an error said, not a crash)
+        const formats::CopyResult copied = formats::write_copy(loaded.document, 0, fs::path(path(QStringLiteral("unreadable.pcraft")).toStdString()));
+        QVERIFY2(std::any_of(copied.notes.begin(), copied.notes.end(), [](const std::string& n) { return n.find("読めない形のため書きませんでした") != std::string::npos; }),
+                 Json(copied.notes).dump().c_str());
+    }
 };
 
 QTEST_GUILESS_MAIN(TestContractVariables)

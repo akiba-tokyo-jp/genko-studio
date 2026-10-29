@@ -343,7 +343,7 @@ struct Picture {
     int width = 0, height = 0;
     unsigned channels = 4;
     bool hdr = false;
-    std::optional<Image> eight;                // (an 8-bit picture: its RGBA bytes)
+    bool eight = false;                        // (an 8-bit picture: its RGBA bytes, `bytes`)
     std::optional<image_ops::Pixels> pixels;   // (an ink page's: its inks)
     std::vector<float> values;                 // (a precise page's, or one made smaller: width × height × channels)
 
@@ -364,10 +364,10 @@ struct Picture {
     void reduce(int fx, int fy) {
         if (fx <= 1 && fy <= 1) return;
         if (eight) {
-            eight = eight->reduce(fx, fy);
-            width = eight->width();
-            height = eight->height();
-            bytes = eight->tobytes();
+            Image smaller = Image::frombytes("RGBA", Size{width, height}, bytes).reduce(fx, fy);
+            width = smaller.width();
+            height = smaller.height();
+            bytes = smaller.tobytes();
             return;
         }
         const int w = std::max(1, (width + fx - 1) / fx), h = std::max(1, (height + fy - 1) / fy);
@@ -413,10 +413,13 @@ Picture picture_of(const std::string& bytes, const Page& page, const image_ops::
         }
     };
     const auto take_eight = [&] {
-        p.eight = smart::eight_bit_picture(bytes).convert("RGBA");
-        p.width = p.eight->width();
-        p.height = p.eight->height();
-        p.bytes = p.eight->tobytes();
+        {
+            const Image rgba = smart::eight_bit_picture(bytes).convert("RGBA");  // (only its bytes kept: 4 a pixel)
+            p.width = rgba.width();
+            p.height = rgba.height();
+            p.bytes = rgba.tobytes();
+        }
+        p.eight = true;
         p.channels = 4;
     };
     switch (like.kind()) {
@@ -507,11 +510,11 @@ void replace_pixels(OpContext& c, std::size_t at, const core::VariableDef& def, 
     const double fy = a.starts_with("top") ? 0.0 : a.starts_with("bottom") ? 1.0 : 0.5;
     const double px = x0 + (tw - sw) * fx;  // (the picture's top left, mm)
     const double py = y0 + (th - sh) * fy;
-    // (a picture put in at less than half its size made smaller first, by whole factors, to about twice what is placed: the
+    // (a picture put in at less than half its size made smaller first, by whole factors, to at most twice what is placed: the
     // resampling then reads no more of it than it needs)
     const double placed_w = sw * kx, placed_h = sh * ky;  // (its size on the grid)
-    source.reduce(std::max(1, static_cast<int>(std::floor(source.width / std::max(1.0, 2.0 * placed_w)))),
-                  std::max(1, static_cast<int>(std::floor(source.height / std::max(1.0, 2.0 * placed_h)))));
+    source.reduce(std::max(1, static_cast<int>(std::ceil(source.width / std::max(1.0, 2.0 * placed_w)))),
+                  std::max(1, static_cast<int>(std::ceil(source.height / std::max(1.0, 2.0 * placed_h)))));
     const double ax = placed_w / source.width;  // (the grid's pixels a picture's pixel)
     const double ay = placed_h / source.height;
     // the window of the grid it covers (the box with clip): the pixels whose centres it holds
@@ -528,27 +531,28 @@ void replace_pixels(OpContext& c, std::size_t at, const core::VariableDef& def, 
     out.floating = target.floating;
     out.ink = target.ink;
     if (gx1 > gx0 && gy1 > gy0) {
-        // the part of the picture the window shows, and kPad of its pixels round it — its own edge carried on past it, so
-        // the picture keeps a clean edge where it ends (no clear rim drawn into it) — as floats: the only plane of it held
+        // a band of the window's rows at a time: the part of the picture the band shows, and kPad of its pixels round it —
+        // its own edge carried on past it, so the picture keeps a clean edge where it ends (no clear rim drawn into it) — as
+        // floats, the only plane of it held (at most some 2 × the window's width × 2 × kBand + its pads of pixels)
         constexpr int kPad = 4;
-        const int bx0 = static_cast<int>(std::floor((gx0 - px * kx) / ax)) - kPad;
-        const int by0 = static_cast<int>(std::floor((gy0 - py * ky) / ay)) - kPad;
-        const int bx1 = static_cast<int>(std::ceil((gx1 - px * kx) / ax)) + kPad;
-        const int by1 = static_cast<int>(std::ceil((gy1 - py * ky) / ay)) + kPad;
-        const std::int64_t part = std::int64_t(bx1 - bx0) * std::int64_t(by1 - by0);
-        if (part > 4 * std::int64_t(target.width()) * std::int64_t(target.height()) + 1'000'000) {
-            throw OpError("variable " + def.name + ": the picture is too large to put in");  // (not reached: it is made smaller above)
-        }
-        resample::Plane region(bx1 - bx0, by1 - by0, static_cast<int>(source.channels), true);
-        region.hdr = source.hdr;
-        for (int y = 0; y < region.height; ++y)
-            for (int x = 0; x < region.width; ++x) source.get(bx0 + x, by0 + y, region.at(x, y));
-        const resample::Homography h = resample::Homography::affine({ax, 0, 0, ay, px * kx + bx0 * ax, py * ky + by0 * ay});
-        const resample::Plane placed = resample::project(region, h, gx1 - gx0, gy1 - gy0, resample::Interp::Bicubic, gx0, gy0);
+        constexpr int kBand = 256;
         const std::size_t n = out.all();
-        for (int y = 0; y < placed.height; ++y) {
-            for (int x = 0; x < placed.width; ++x) {
-                std::copy_n(placed.at(x, y), n, out.at(std::size_t(gy0 + y) * target.width() + std::size_t(gx0 + x)));
+        const int bx0 = static_cast<int>(std::floor((gx0 - px * kx) / ax)) - kPad;
+        const int bx1 = static_cast<int>(std::ceil((gx1 - px * kx) / ax)) + kPad;
+        for (int ga = gy0; ga < gy1; ga += kBand) {
+            const int gb = std::min(gy1, ga + kBand);
+            const int by0 = static_cast<int>(std::floor((ga - py * ky) / ay)) - kPad;
+            const int by1 = static_cast<int>(std::ceil((gb - py * ky) / ay)) + kPad;
+            resample::Plane region(bx1 - bx0, by1 - by0, static_cast<int>(source.channels), true);
+            region.hdr = source.hdr;
+            for (int y = 0; y < region.height; ++y)
+                for (int x = 0; x < region.width; ++x) source.get(bx0 + x, by0 + y, region.at(x, y));
+            const resample::Homography h = resample::Homography::affine({ax, 0, 0, ay, px * kx + bx0 * ax, py * ky + by0 * ay});
+            const resample::Plane placed = resample::project(region, h, gx1 - gx0, gb - ga, resample::Interp::Bicubic, gx0, ga);
+            for (int y = 0; y < placed.height; ++y) {
+                for (int x = 0; x < placed.width; ++x) {
+                    std::copy_n(placed.at(x, y), n, out.at(std::size_t(ga + y) * target.width() + std::size_t(gx0 + x)));
+                }
             }
         }
     }
