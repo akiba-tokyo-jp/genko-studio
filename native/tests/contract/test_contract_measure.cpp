@@ -52,8 +52,8 @@ core::Document book(bool bar = false) {
     auto& p = doc.edit_page(0);
     p.numero = false;
     p.frames.clear();
-    p.layers.clear();
     if (bar) {
+        p.layers.clear();
         const int w = 756, h = 567;  // (96 × 72 mm at the working 200 dpi)
         std::string bytes(std::size_t(w) * std::size_t(h) * 4, '\0');
         for (int y = h / 2 - 6; y < h / 2 + 6; ++y)
@@ -176,7 +176,7 @@ private slots:
         saved = project(book_path);
         QVERIFY(!names_measure(saved));
         QVERIFY(saved.dump().find("\"measure\"") == std::string::npos);
-        QCOMPARE(saved["pages"], Json::parse(before)["pages"]);
+        QVERIFY2(saved["pages"] == Json::parse(before)["pages"], (saved["pages"].dump() + "\n" + Json::parse(before)["pages"].dump()).c_str());
         const Json undone = genko({QStringLiteral("undo"), book_path, QStringLiteral("--as"), QStringLiteral("human:test")}, &exit);
         QVERIFY2(exit == 0, undone.dump().c_str());
         QVERIFY(names_measure(project(book_path)));
@@ -218,12 +218,13 @@ private slots:
     // PSD: 1074 as psd-tools reads it (the page's scale in the file's pixels); read back; written again as read while
     // unchanged, anew when changed, not when gone; 1080 kept until the page has its own marks.
     void psdScaleAndCount() {
-        // (the paper's mm at 200 dpi: 7.874016 pixels = 1 mm; the file at 200 dpi too)
+        // (the file at 200 dpi too: its 756 pixels across the 96 mm a hair more than the page's 755.9 — the length in the file's
+        // pixels as near)
         const core::Document doc = run(book(), op("set_measurement_scale", {{"pixel_length", 50}, {"logical_length", 2}, {"units", "cm"}}));
         const QString first = export_psd(doc, QStringLiteral("scale.psd"));
         Json view = measure_view(first);
         QVERIFY2(!view.contains("error") && view["scale"].is_object(), view.dump().c_str());
-        QCOMPARE(view["scale"]["pixelLength"], Json(50.0));
+        QVERIFY2(std::fabs(view["scale"]["pixelLength"].get<double>() - 50.0) < 0.01, view.dump().c_str());
         QCOMPARE(view["scale"]["logicalLength"], Json(2.0));
         QCOMPARE(view["scale"]["logicalUnits"], Json("cm"));
         QCOMPARE(view["scale_version"], Json(16));

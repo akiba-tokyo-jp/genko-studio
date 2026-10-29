@@ -17,9 +17,10 @@ from psd_tools.psd.image_resources import ImageResource
 
 
 def plain(value):
-    for attr in ("value",):
-        if hasattr(value, attr):
-            return getattr(value, attr)
+    if hasattr(value, "value"):
+        v = value.value
+        # (a unicode string Photoshop writes with its closing 0, as Genko does: psd-tools keeps the 0)
+        return v.rstrip("\0") if isinstance(v, str) else v
     return str(value)
 
 

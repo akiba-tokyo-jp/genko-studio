@@ -8,6 +8,7 @@
 
 #include <QtTest>
 
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 #include <string>
@@ -375,7 +376,7 @@ private slots:
         QCOMPARE(*measure(turned).ruler->protractor, (std::array<double, 2>{16, 1}));
         QCOMPARE(turned.page(0).annotations[0].at_mm, (std::array<double, 2>{13, 6}));
         // (a box on the working grid, 0.127 mm a pixel: moved by whole pixels)
-        core::Document cut = run(doc, op("crop_page", {{"rect", {1.27, 1.27, 19.05, 15.24}}}));
+        core::Document cut = run(doc, op("crop_page", {{"rect", {1.27, 1.27, 25.4, 15.24}}}));
         QCOMPARE(measure(cut).count_groups[0].points[0], (std::array<double, 2>{0.73, 1.73}));
         QCOMPARE(measure(cut).ruler->start, (std::array<double, 2>{-0.27, -0.27}));
         QCOMPARE(cut.page(0).annotations[0].at_mm, (std::array<double, 2>{4.73, 5.73}));
