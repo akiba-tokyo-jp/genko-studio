@@ -186,18 +186,25 @@ private slots:
     // and tiles at 432 dpi at most); its tiles there are its own pixels, at the page's resolution.
     void aB4At600DpiZoomsToItsPixels() {
         core::Document doc = core::new_episode("B4", core::Num(1), 1, core::PageSpec::b4_comic());
+        add_block(doc, "paint", 100, 150, 160, 220);  // (something to draw where the view is)
         View v(doc);
         PageCanvas* c = v.canvas();
         QVERIFY(c->max_scale() > PageCanvas::kMaxScale);
         QVERIFY(qFuzzyCompare(c->max_scale(), PageCanvas::kMaxPixelZoom * pixel_scale_of(c, 600)));
+        QElapsedTimer at_100;
+        at_100.start();
         c->actual_pixels(100);
         c->center_on(128, 182);
         QVERIFY(c->wait_rendered(60000));
+        qInfo("B4 600 dpi: the part in sight at 100%% drawn in %lld ms", static_cast<long long>(at_100.elapsed()));
         QCOMPARE(c->renderer().shown_dpi(), 600);
+        QElapsedTimer clock;  // (the time to draw the part in sight, shown — not judged: 画素の段's cost, 節 H 6 章 H-a 危険)
+        clock.start();
         c->actual_pixels(800);
         c->center_on(128, 182);
         QVERIFY(c->pixel_step());
         QVERIFY(c->wait_rendered(60000));
+        qInfo("B4 600 dpi: the part in sight at 800%% drawn in %lld ms", static_cast<long long>(clock.elapsed()));
         QCOMPARE(c->renderer().shown_dpi(), 600);  // (no finer: the page's pixels, laid 8 × 8)
         QCOMPARE(c->renderer().pixel_dpi(), 600);
         // half way (432 dpi before; the detail now up to the page's own)
