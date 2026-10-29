@@ -191,6 +191,10 @@ genko_test(test_transform SOURCES unit/test_transform.cpp DEPS genko_test_suppor
 # PC3 C-d (SPEC.md COLOR-07「移動・整列」): align and distribute by whole working pixels (PhotoCraft's layer_multi_cmds.rs
 # tests), the stacking order among siblings with folders, links, snapping's targets (snap.rs' tests).
 genko_test(test_align SOURCES unit/test_align.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC5 J-a (layer-comps@1, SPEC.md PROD-01「レイヤーカンプ」): the comps as PhotoCraft's tests check them (capture, each
+# option applied alone, the last document state, the comps managed and gone round, the layers gone, the refusals) on the
+# 8-bit, 16-bit and CMYK pages, a pen layer's lines and a style put back, locks and links, a copied page.
+genko_test(test_layer_comps SOURCES unit/test_layer_comps.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame; and PC2a's tone kinds

@@ -245,6 +245,7 @@ genko_library(genko_render
     text/shaping.cpp
     # PC5 J-0 (制作の補助の土台: the production's op frames, its PSD blocks and .pcraft keys)
     ops_production.cpp
+    ops_layer_comps.cpp
     psd_production.cpp
     pcraft_production.cpp
     ${GENKO_MATERIAL_RESOURCES}
