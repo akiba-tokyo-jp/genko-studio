@@ -123,7 +123,7 @@ render::RenderOptions proof() {
 render::Image drawn(const core::Document& doc, int dpi = 50) { return render::render_page(doc.page(0), dpi, proof(), &doc).image.convert("RGB"); }
 std::array<int, 3> rgb_at(const render::Image& image, int x, int y) {
     const auto p = image.getpixel(x, y);
-    return {p[0], p[1], p[2]};
+    return {static_cast<int>(p[0]), static_cast<int>(p[1]), static_cast<int>(p[2])};
 }
 bool near(const std::array<int, 3>& a, const std::array<int, 3>& b, int by = 3) {
     for (int c = 0; c < 3; ++c)
@@ -334,10 +334,15 @@ private slots:
         QVERIFY2(ran.exit_code == 0, ran.err.constData());
         const render::Image cli = render::read_png(genko::test::read_bytes(out)).convert("RGB");
         QVERIFY2(near(rgb_at(cli, 30, 40), {255, 0, 255}), shown(rgb_at(cli, 30, 40)).constData());
-        // merged in 8 bits as the page draws it: the copy of what shows the same
-        core::Document merged = run(eight, op("merge_visible", {{"copy", true}, {"id", "m"}}));
-        merged = run(merged, op("set_layer", {{"id", "blue"}, {"visible", false}}));
+        // merged in 8 bits as the page draws it: a copy of what shows over a white layer the same (over nothing, a channel
+        // left out is nothing's, as Photoshop's), the image flattened over the paper the same
+        core::Document over_white = run(book("8"), Json::array({fill("white", Json::array({255, 255, 255})), fill("blue", Json::array({0, 0, 255})),
+                                                                op("set_layer", {{"id", "blue"}, {"blend_channels", Json::array({false, true, true})}})}));
+        core::Document merged = run(over_white, op("merge_visible", {{"copy", true}, {"id", "m"}}));
+        merged = run(merged, Json::array({op("set_layer", {{"id", "blue"}, {"visible", false}}), op("set_layer", {{"id", "white"}, {"visible", false}})}));
         QVERIFY2(near(rgb_at(drawn(merged), 30, 40), {255, 0, 255}), shown(rgb_at(drawn(merged), 30, 40)).constData());
+        const core::Document flat = run(eight, op("merge_visible", {{"copy", false}, {"flatten", true}}));
+        QVERIFY2(near(rgb_at(drawn(flat), 30, 40), {255, 0, 255}), shown(rgb_at(drawn(flat), 30, 40)).constData());
         // precise: refused in words
         const core::Document two = run(deep, fill("under", Json::array({0, 0, 0})));
         const std::string why = refusal(two, op("merge_layers", {{"ids", Json::array({"under", "blue"})}}));

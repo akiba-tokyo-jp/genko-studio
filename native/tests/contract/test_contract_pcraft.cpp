@@ -541,6 +541,8 @@ private slots:
         QVERIFY(linked && linked->raster_png && !linked->smart);
         const core::Layer* effects = titled(page, "Effects");
         QVERIFY(effects && effects->opacity == 0.5);  // (its fill opacity: its effects left out)
+        // (PC5 I-a, blend-channels@1: its excluded R the layer's own now — not said)
+        QCOMPARE(effects->blend_channels, (std::vector<bool>{false, true, true}));
         // channels: an alpha (its colour, opacity and what it shows), a spot colour, the Quick Mask
         const core::Channel* alpha = core::find_channel(page, "Alpha 1");
         QVERIFY(alpha && alpha->kind == core::ChannelKind::Alpha);
@@ -580,8 +582,9 @@ private slots:
         QCOMPARE(page.annotations[0].author, std::string("A"));
         QCOMPARE(page.annotations[0].text, std::string("note"));
         QVERIFY(!said(notes, "注釈"));
+        QVERIFY(!said(notes, "高度な合成のチャンネル"));  // (PC5 I-a)
         for (const char* part : {"レイヤー効果", "ラベル", "文字レイヤーは画素", "リンクされたスマートオブジェクト", "用紙の外",
-                                 "高度な合成のチャンネル", "filter.unknown.later"}) {
+                                 "filter.unknown.later"}) {
             QVERIFY2(said(notes, part), qPrintable(QString::fromUtf8(part) + QStringLiteral("\n") + QString::fromStdString(joined(notes))));
         }
     }

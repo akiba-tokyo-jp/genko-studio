@@ -861,7 +861,10 @@ private slots:
                                                     Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "p"}},
                                                     Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "q"}}})));
         panel.refresh();
-        const auto at = [&](const std::string& id) { return std::find(book.order().begin(), book.order().end(), id) - book.order().begin(); };
+        const auto at = [&](const std::string& id) {
+            const std::vector<std::string> order = book.order();
+            return std::find(order.begin(), order.end(), id) - order.begin();
+        };
         // into the group: on the top of what it holds
         QVERIFY(panel.drop({"p"}, "g", Place::Into));
         QCOMPARE(book.layer("p")->parent_id, Json("g"));

@@ -1062,6 +1062,7 @@ void into_pixels(const Page& page, Layer& target, const Image& picture) {
     target.blend = "normal";
     target.opacity = 1.0;
     target.clip = false;
+    target.blend_channels.clear();  // (PC5 I-a, blend-channels@1: drawn in, as its blend)
     target.native_psd.reset();  // (psd-keep@1, PC4 F-d: a PSD's effects and blocks are not the merged or converted layer's)
     target.type.reset();        // (type@1, PC5 G-0: a type layer merged into, or converted: its text drawn in)
     raster::save_raster(page, target, picture);
@@ -1075,6 +1076,14 @@ Image composite_layers(const Document& doc, const Page& page, const std::vector<
     if (std::any_of(layers.begin(), layers.end(), [&](std::size_t i) { return core::leaves_channels_out(page.layers[i]); })) {
         Page alone = page;
         alone.layers.clear();
+        if (background != nullptr) {  // (画像を統合: over the paper, as the page shows it — a channel left out keeps the paper's)
+            Layer paper;
+            paper.id = "paper";
+            paper.kind = LayerKind::Raster;
+            paper.panel_clip = false;
+            raster::save_raster(page, paper, background->convert("RGBA"));
+            alone.layers.push_back(std::move(paper));
+        }
         for (const std::size_t i : layers) {
             const Layer& layer = page.layers[i];
             if (layer.kind == LayerKind::Folder || (background && !merge_draws(layer))) continue;
@@ -1086,8 +1095,7 @@ Image composite_layers(const Document& doc, const Page& page, const std::vector<
         options.finish = false;
         options.contents = true;
         options.onion = false;
-        Image picture = render_contents(alone, dpi, options, &doc).image.convert("RGBA");
-        return background != nullptr ? alpha_composite(background->convert("RGBA"), picture) : picture;
+        return render_contents(alone, dpi, options, &doc).image.convert("RGBA");
     }
     const Size size = page_px(page, dpi);
     Image out = background ? *background : Image::create("RGBA", size, Ink{0, 0, 0, 0});
@@ -1164,6 +1172,7 @@ void into_color_pixels(Layer& target, std::pair<std::string, bool> pixels) {
     target.fill.reset(); target.adjust.reset(); target.effect.reset(); target.fill_rgb.reset();
     target.screen.reset(); target.color.reset(); target.tone.reset(); target.source.reset();
     target.blend = "normal"; target.opacity = 1; target.clip = pixels.second; target.panel_clip = false;
+    target.blend_channels.clear();  // (PC5 I-a, blend-channels@1: drawn in, as its blend)
     target.native_psd.reset();  // (psd-keep@1, PC4 F-d: a PSD's effects and blocks are not the merged layer's)
     target.type.reset();        // (type@1, PC5 G-0: its text drawn in)
     target.color_raster = pixels.first.empty() ? core::Bytes{} : std::make_shared<const std::string>(std::move(pixels.first));
@@ -1826,10 +1835,12 @@ void convert_layer(OpContext& c) {
         const std::string blend = layer.blend;
         const double opacity = layer.opacity;
         const bool clip = layer.clip;
+        const std::vector<bool> channels = layer.blend_channels;  // (PC5 I-a: kept, as its blend)
         into_pixels(page, layer, picture);  // (the mask is drawn into the pixels)
         layer.blend = blend;
         layer.opacity = opacity;
         layer.clip = clip;
+        layer.blend_channels = channels;
         layer.asset.reset();
         return;
     }
