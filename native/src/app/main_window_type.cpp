@@ -25,6 +25,7 @@
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
 #include "core/type_text.hpp"
+#include "core/vector.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/text/lettering.hpp"
 

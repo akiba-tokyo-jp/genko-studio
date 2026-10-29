@@ -642,6 +642,16 @@ private slots:
         QCOMPARE(render::text::shape_of(*layer_of(again, "c1")->type), std::string("box"));
         const auto then = ink_mm(again);
         QVERIFY2(std::abs((*then)[0] - (*was)[0]) < 0.6 && std::abs((*then)[1] - (*was)[1]) < 0.6, "the box round its letters");
+        // a box that broke a row: a line break there (Photoshop's hard return), the rows as they were
+        const core::Document narrow = run(plain_book(), Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "HHHHHHHHHH"}, {"wrap", "horizontal"},
+                                                             {"box", Json::array({10, 10, 16, 30})}, {"style", Json{{"size_mm", 5}}}, {"new_id", "n1"}});
+        const auto rows = [](const core::Document& d) {
+            return run_ops(d, Json::array({Json{{"op", "type_info"}, {"page", 1}, {"layer_id", "n1"}}})).results[0]["lines"].size();
+        };
+        QVERIFY(rows(narrow) >= 2);
+        const core::Document hard = run(narrow, Json{{"op", "edit_type"}, {"page", 1}, {"layer_id", "n1"}, {"point", true}});
+        QVERIFY(layer_of(hard, "n1")->type->text.find('\n') != std::string::npos);
+        QCOMPARE(rows(hard), rows(narrow));
         // a line fitted to its box (no shape) keeps its size as it becomes point text
         const core::Document fitted = run(plain_book(), Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "あいう"}, {"x_mm", 8}, {"y_mm", 8},
                                                              {"w_mm", 10}, {"h_mm", 30}, {"balloon", "none"}});

@@ -150,6 +150,50 @@ void to_point(StoryLine& record, const Document& doc, const std::optional<std::a
     set_native(record, nt);
 }
 
+// ポイントテキストに変換 of a box text: its text with a line break where its box broke a row (Photoshop's hard return at
+// every soft break, as PhotoCraft's to_point), found by walking its rows as set over its text; none when there is no
+// such break or the rows are not its text letter for letter (a space a column dropped: left as it is).
+std::optional<std::string> with_breaks(const StoryLine& record, const Document& doc) {
+    if (text::shape_of(record) != "box") return std::nullopt;
+    std::vector<text::SetRow> rows;
+    try {
+        rows = text::set_layout(record, kMeasureDpi, font_of(doc), text::LetterParts{}).set.rows;
+    } catch (const NotYetPorted&) {
+        return std::nullopt;
+    }
+    const std::u32string source = text::u32(record.text);
+    std::u32string out;
+    std::size_t at = 0;
+    bool broke = false;
+    for (std::size_t r = 0; r < rows.size(); ++r) {
+        for (const text::SetChar& ch : rows[r].chars) {
+            for (const char32_t c : ch.text) {
+                if (at >= source.size() || source[at] != c) return std::nullopt;
+                out.push_back(c);
+                ++at;
+            }
+        }
+        if (r + 1 == rows.size()) break;
+        if (at < source.size() && source[at] == U'\r' && at + 1 < source.size() && source[at + 1] == U'\n') {
+            out += U"\r\n";
+            at += 2;
+        } else if (at < source.size() && source[at] == U'\n') {
+            out.push_back(U'\n');
+            ++at;
+        } else {
+            out.push_back(U'\n');  // (a soft break: a hard one now)
+            broke = true;
+        }
+    }
+    if (at != source.size() || !broke) return std::nullopt;
+    return text::utf8(out);
+}
+
+bool to_point_in_place(const Json& op) {
+    const Json* p = given(op, "point");
+    return p != nullptr && *p == Json(true);
+}
+
 // 段落テキストに変換: the text set in a box, broken there — the box round its letters now (a little more, so they break
 // where they did), or the box given.
 void to_box(StoryLine& record, const Document& doc, const std::optional<std::array<double, 4>>& box) {
@@ -432,7 +476,8 @@ void edit_type(OpContext& c) {
     if (t.line != nullptr) {
         if (given(c.op, "title") != nullptr) throw OpError("title names a type layer: a line has none");
         const std::string id = t.line->id;
-        const std::optional<std::string> text = new_text(t.line->text, c.op);
+        std::optional<std::string> text = new_text(t.line->text, c.op);
+        if (!text && to_point_in_place(c.op)) text = with_breaks(*t.line, doc);  // (a box text's soft breaks kept as hard ones)
         const Json* wrap = given(c.op, "wrap");
         if (text || wrap != nullptr || has_marks(c.op)) {  // (a line's text: edit_line's — its rubies and ranges followed, its report)
             const core::OpFunction* edit_line = core::OpRegistry::builtin().find("edit_line");
@@ -463,7 +508,9 @@ void edit_type(OpContext& c) {
     Layer& layer = page.layers[t.layer];
     StoryLine record = *layer.type;
     const std::string before = record.text;
-    if (const std::optional<std::string> text = new_text(before, c.op)) retext(record, *text, c.report);
+    std::optional<std::string> text = new_text(before, c.op);
+    if (!text && to_point_in_place(c.op)) text = with_breaks(record, doc);  // (a box text's soft breaks kept as hard ones)
+    if (text) retext(record, *text, c.report);
     if (const Json* wrap = given(c.op, "wrap")) record.wrap = wrap->get<std::string>();
     if (has_marks(c.op)) take_marks(record, c.op, doc, page.index, c.actor);  // (the marks typed: as add_line reads them)
     core::ruby::settle(doc, record);

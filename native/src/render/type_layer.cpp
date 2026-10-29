@@ -26,6 +26,7 @@ namespace {
 constexpr int kFindDpi = 50;           // (where the letters are: the page drawn this coarsely first)
 constexpr double kFindMarginMm = 3.0;  // (round what the coarse drawing found: what it may miss of thin marks and halos)
 constexpr std::int64_t kMostPixels = 120'000'000;  // (an upright picture to turn: op_limits' most pixels)
+constexpr double kReachMm = 60.0;  // (G-a: how far round its box its letters are looked for, off the page too)
 
 text::Panels panels_of(const core::Page& page) {
     text::Panels panels;
@@ -72,10 +73,17 @@ std::optional<std::array<double, 4>> extent_mm(const detail::Ctx& ctx, const cor
                 return it->second.extent;
         }
     }
-    const Size page{std::max(1, static_cast<int>(std::lround(w / 25.4 * kFindDpi))), std::max(1, static_cast<int>(std::lround(h / 25.4 * kFindDpi)))};
-    const Image coarse = drawn(ctx, line, Point{0, 0}, page, page, kFindDpi);
+    // (the page, and round the record's box: a type layer its matrix turns may be set off the page it is shown on — G-a)
+    const double x0 = std::min(0.0, line.x_mm.value() - kReachMm), y0 = std::min(0.0, line.y_mm.value() - kReachMm);
+    const double x1 = std::max(w, line.x_mm.value() + line.w_mm.value() + kReachMm), y1 = std::max(h, line.y_mm.value() + line.h_mm.value() + kReachMm);
+    const auto coarse_px = [](double mm) { return static_cast<int>(std::floor(mm / 25.4 * kFindDpi)); };
+    const Point origin{coarse_px(x0), coarse_px(y0)};
+    const Size page{std::max(1, coarse_px(x1) + 1), std::max(1, coarse_px(y1) + 1)};
+    const Size size{std::max(1, page.width - origin.x), std::max(1, page.height - origin.y)};
+    const Image coarse = drawn(ctx, line, origin, size, page, kFindDpi);
     std::optional<std::array<double, 4>> extent;
-    if (const std::optional<Box> b = coarse.getbbox()) {
+    if (std::optional<Box> b = coarse.getbbox()) {
+        *b = Box{b->x0 + origin.x, b->y0 + origin.y, b->x1 + origin.x, b->y1 + origin.y};
         const double k = 25.4 / kFindDpi;
         // (with its box: what the finer drawing sets there, whatever the coarse one made of it)
         extent = std::array<double, 4>{std::min(b->x0 * k, line.x_mm.value()) - kFindMarginMm, std::min(b->y0 * k, line.y_mm.value()) - kFindMarginMm,

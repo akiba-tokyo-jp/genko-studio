@@ -1227,7 +1227,7 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
     }
     if (!shape.empty()) {  // (type@1: from the point text's anchor, or the box text's top left)
         const double wide = image.width(), high = image.height();
-        const double room = grow != 0 ? static_cast<double>(grow + 1) : 0.0;  // (the halo's)
+        const double halo = grow != 0 ? static_cast<double>(grow + 1) : 0.0;  // (the halo's)
         const std::string align = core::py_str(core::py_or(at(st, "align"), Json(vertical ? "top" : "left")));
         if (shape == "box") {
             out.corner_x = vertical ? static_cast<double>(w) - wide  // (columns from its right)
@@ -1236,14 +1236,14 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
                                                : 0.0;
             out.corner_y = !vertical ? 0.0 : align == "center" ? (static_cast<double>(h) - high) / 2 : align == "bottom" ? static_cast<double>(h) - high : 0.0;
         } else {
-            const double set_wide = wide - 2 * room;  // (the letters as set, 長体・平体 after)
+            const double set_wide = wide - 2 * halo;  // (the letters as set, 長体・平体 after)
             const double fx = set_wide / static_cast<double>(std::max(1, set_width));
             if (vertical) {  // (the first column's middle on the anchor, its top there — or the text's middle or foot)
-                out.corner_x = first.empty() ? -wide / 2 : -(first.front().axis * fx + room);
-                out.corner_y = align == "center" ? -high / 2 : align == "bottom" ? -high : -(first.empty() ? 0.0 : first.front().start) - room;
+                out.corner_x = first.empty() ? -wide / 2 : -(first.front().axis * fx + halo);
+                out.corner_y = align == "center" ? -high / 2 : align == "bottom" ? -high : -(first.empty() ? 0.0 : first.front().start) - halo;
             } else {  // (the first row's baseline on the anchor; its left, middle or right there)
-                out.corner_x = align == "center" ? -wide / 2 : align == "right" ? -wide : -room;
-                out.corner_y = -((first.empty() ? static_cast<double>(em) : first.front().axis) + room);
+                out.corner_x = align == "center" ? -wide / 2 : align == "right" ? -wide : -halo;
+                out.corner_y = -((first.empty() ? static_cast<double>(em) : first.front().axis) + halo);
             }
         }
     }
@@ -1827,14 +1827,14 @@ void paint_text(Image& image, const core::StoryLine& line, int dpi, bool show_sp
     if (covered.width() > 0 && covered.height() > 0 && reaches(covered)) {
         if (!layout) layout = layout_by_key(key, line, dpi, font_path, stop);
         std::optional<Image> cut;
-        Point at = at_page;
+        Point put = at_page;
         if (clip && covered != Box{at_page.x, at_page.y, at_page.x + layout->image.width(), at_page.y + layout->image.height()}) {
             cut = layout->image.crop(Box{covered.x0 - at_page.x, covered.y0 - at_page.y, covered.x1 - at_page.x, covered.y1 - at_page.y});
-            at = Point{covered.x0, covered.y0};
+            put = Point{covered.x0, covered.y0};
         }
         const Image& letters = cut ? *cut : layout->image;
-        if (const auto gamma = TextGamma::current()) paste_in_gamma(image, letters, Point{at.x - origin.x, at.y - origin.y}, *gamma);
-        else image.paste(letters, Point{at.x - origin.x, at.y - origin.y}, &letters);
+        if (const auto gamma = TextGamma::current()) paste_in_gamma(image, letters, Point{put.x - origin.x, put.y - origin.y}, *gamma);
+        else image.paste(letters, Point{put.x - origin.x, put.y - origin.y}, &letters);
     }
     if (show_speaker && !line.speaker.empty() && kind != "none") {
         const std::int64_t size = std::max<std::int64_t>(8, floordiv(shape->em * 2, 3));
