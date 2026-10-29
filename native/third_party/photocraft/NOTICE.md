@@ -289,6 +289,9 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/text/src/render.rs`（180 行: アンチエイリアス なし は被覆 0.5 で 2 値）・`crates/engine/src/type_extra_cmds.rs`（106-123 行: なし だけ描き方が変わり、ほかは名前を持つ。137-192 行: ポイントテキスト ⇄ 段落テキストの変換。361-377 行: Lorem ipsum の文）・`crates/engine/src/type_cmds.rs`（308-350 行: 範囲の置き換え、373 行: 本文からのレイヤーの名前）: 決まり → `native/src/render/text/lettering.cpp`（`binarized`・置き方）・`native/src/render/ops_type.cpp`（`add_type_layer`・`edit_type`・`to_point`・`to_box`）・`native/src/app/main_window_type.cpp`（`paste_lorem`）。基準点・枠からの置き方（縦組み・揃え）、書記素の位置、ルビ・フキダシ、行列での描き方、和文の仮の文は Genko のもの。
 - 組版・OpenType・書体・右から左（PC5 G-b）:
   - `crates/engine/src/type_cmds.rs`（86-260 行: `apply_char_props`・`apply_para_props` の属性の意味、552 行: setStyle の範囲が無ければ全体）・`crates/engine/src/type_extra_cmds.rs`（320-357 行: OpenType の切り替え — 状態は最初の字の設定、liga・dlig は専用の属性、ほかは features に入れる・外す）: 決まり → `native/src/render/ops_type_set.cpp`（`set_type`）・`native/src/app/main_window_type.cpp`（`type_feature`・`refresh_type_commands`）。書記素の範囲・段落の番号で持つこと、違う所だけの上書き、null で外すこと、前後関係に依存する字形を切るときに 0 を書くこと、組み方の印は Genko のもの。組版そのもの（HarfBuzz と SheenBidi による行・禁則・約物の詰め・ルビ・縦の升目の字形）は上流（parley）を移さず Genko が作った。
+- 文字スタイル・段落スタイル（PC5 G-c）:
+  - `crates/engine/src/type_styles_cmds.rs`（403-659 行: 一覧・新規（文字の書式から作る、作って適用）・複製・削除（文字は見え方を保ち上書きとして持ち直す）・名前の変更・スタイルオプション（replace・clear）・適用（Alt で上書きの消去）・再定義（範囲の始めの書式から、段落スタイルでは文字スタイルが決める属性を除く）・上書きを消去、351-387 行: 今のスタイルと上書きの印）と `crates/doc/src/text_styles.rs`（70-72 行: 基本段落と「なし」、169-178 行: 番号つきの名前、209-219 行: 上書きはスタイルとの差）: 決まり → `native/src/core/type_styles.cpp`・`native/src/render/ops_type_styles.cpp`（`type_style`）。違う所だけを持つ記録で 1 字に 1 つの文字スタイルを保つ置き直しと、見え方を値まで保つ `keep_look`、書記素の範囲・段落の番号、上書きを見え方で決めること、名前の決まり（パネルの名前・64 字・複製の名前）、台詞の語ごとの書式の扱いは Genko のもの。
+  - `crates/engine/src/type_extra_cmds.rs`（465-485 行: 初期設定の書式の保存・読み込み — 選んだ文字の始めの書式を覚え、文字全体に当てる）: 決まり → `native/src/core/type_styles.cpp`（`defaults_of`・`checked_defaults`）・`native/src/app/main_window_type.cpp`（`save_default_type_styles`・`load_default_type_styles`）・`native/src/app/preferences.cpp`。機械の設定に覚えること、スタイルを外してから `set_type` で当てる 1 手は Genko のもの。
 
 ## レイヤー・アートボード・自動処理（PC5 節 I）
 
@@ -323,6 +326,9 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/io/src/psd_import.rs`（363-376 行: `parse_guides`）・`crates/io/src/psd_export.rs`（470-484 行: `guides_resource`）→ `native/src/render/psd_guides.cpp`（リソース 1032 のバイトの並び）。
   - `crates/engine/src/prefs.rs`（52-147 行: `Unit` の `from_px`・`to_px`・`suffix`・`decimals`、`PointSize::per_inch`。497-567 行: `UnitsAndRulers`・`GuidesGridAndSlices` の項目と既定）→ `native/src/core/units.cpp`（mm を元に）・`native/src/core/prefs_table.cpp`・`native/src/app/preferences_units.cpp`。
   - `crates/ui-egui/src/rulers.rs`（38-48 行: `nice_step`、150-230 行: 定規の刻みと数、ガイドを離した所で動かす・消す）→ `native/src/app/canvas_scale.cpp`（`draw_scale_in_unit`・`guide_release`）・`native/src/app/canvas_guide_lines.cpp`。
+- 窓の区画と並べ方・パネル（PC5 H-c）:
+  - `crates/ui-egui/src/view_cmds.rs`（137-148 行: 並べ方の名前 `LAYOUTS`、583-630 行: `arrange` — 並べるとどの原稿も区画に合わせる・タブに統合・浮動・同じ表示にする、636-667 行: `cells` — 各並べ方の区画の位置、`tile` の ceil(√n) 列）→ `native/src/app/doc_area.cpp`（`DocArea::cells`・`capacity`。区画を仕切りで動かせること・16 までは Genko のもの）・`native/src/app/main_window_arrange.cpp`（`arrange`・`consolidate_all`・`float_all`・`match_views`。同じ回転で表示は Genko の表示の回転と反転を当てる）。`crates/ui-egui/src/canvas.rs`（612-630 行: 前の原稿のほかの区画は見るだけ、クリックで前に）の考え → `native/src/app/pane_view.cpp`。`crates/ui-egui/src/menu_catalog.rs`（702-724 行: アレンジ の項目と並び）→ `build_arrange_menus`。
+  - `crates/ui-egui/src/workspace_ui.rs`（119-127 行・295-310 行: Modifier Keys の Shift・Command・Alt を押したままにする）→ `native/src/app/main_window_arrange.cpp`（`build_arrange_docks`・`latch_key`。持ち替えの道具を持つことは Genko のもの）。
 
 ## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1、PC5 節 J）
 

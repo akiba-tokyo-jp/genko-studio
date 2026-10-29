@@ -26,6 +26,7 @@
 #include "core/placement.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/type_text.hpp"
 #include "render/color_canvas.hpp"
 #include "render/imaging.hpp"
 #include "render/ink.hpp"
@@ -40,6 +41,7 @@
 #include "render/smart_decode.hpp"
 #include "render/smart_filters.hpp"
 #include "render/stack.hpp"
+#include "render/text/opentype.hpp"
 #include "storage/asset_store.hpp"
 
 namespace genko::render::smart {
@@ -756,9 +758,41 @@ void left_out(const Ctx& ctx, const std::vector<std::string>& omitted) {
     for (const std::string& element : omitted) detail::skip_unported(ctx, element);
 }
 
+// Do the contents (or contents inside them) hold a type layer? (PC5 G-c review P3-1: only theirs take the book's styles)
+bool holds_type(const core::Document& doc, const core::SmartContents& contents) {
+    std::set<const core::Page*> seen;
+    std::vector<const core::Page*> todo;
+    if (contents.page) todo.push_back(contents.page.get());
+    while (!todo.empty()) {
+        const core::Page* page = todo.back();
+        todo.pop_back();
+        if (page == nullptr || !seen.insert(page).second) continue;
+        for (const core::Layer& layer : page->layers) {
+            if (core::type_text::is_type_layer(layer)) return true;
+        }
+        for (const std::string& id : core::smart::shown_on(*page)) {
+            const auto it = doc.smart_contents.find(id);
+            if (it != doc.smart_contents.end() && it->second && it->second->page) todo.push_back(it->second->page.get());
+        }
+    }
+    return false;
+}
+
 std::string contents_key(const Ctx& ctx, const core::SmartContents& contents, int dpi) {
-    return "contents " + identity(*ctx.episode, contents) + " " + std::to_string(dpi) + " " + ctx.mode + (ctx.finish ? " f" : "") + (ctx.rough ? " r" : "") +
-           (ctx.dots ? " d" : "") + (ctx.screen_dots ? " s" : "");
+    std::string key = "contents " + identity(*ctx.episode, contents) + " " + std::to_string(dpi) + " " + ctx.mode + (ctx.finish ? " f" : "") +
+                      (ctx.rough ? " r" : "") + (ctx.dots ? " d" : "") + (ctx.screen_dots ? " s" : "");
+    // (PC5 G-c: the book's type styles, which its contents' type layers take — a style changed draws them anew; a book with
+    // none, and contents with no type layer, keyed as before)
+    if (ctx.episode->type_styles && !ctx.episode->type_styles->is_null() && holds_type(*ctx.episode, contents)) {
+        const core::Json* styles = &*ctx.episode->type_styles;
+        if (text::TypeStyles::current() == styles) {
+            key += " styles " + text::TypeStyles::digest();
+        } else {
+            const text::TypeStyles scope(styles);
+            key += " styles " + text::TypeStyles::digest();
+        }
+    }
+    return key;
 }
 
 // The contents' page drawn whole at `dpi` ("RGBA", over nothing), remembered.

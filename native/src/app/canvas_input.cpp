@@ -331,7 +331,10 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
             scrub_ = pos;
             if (std::abs(pos.x() - zoom_drag_->first.x()) > 3 || scrubbed_) {
                 scrubbed_ = true;
-                if (dx != 0.0) zoom_by(std::exp(dx / 120.0), zoom_drag_->first);
+                if (dx != 0.0) {
+                    zoom_by(std::exp(dx / 120.0), zoom_drag_->first);
+                    if (zoom_all || (event->modifiers() & Qt::ShiftModifier)) emit handUsed(std::exp(dx / 120.0), QPointF(), zoom_all);  // (PC5 H-c)
+                }
             }
             return;
         }
@@ -350,6 +353,9 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
         view_.fitted = false;
         rerender_.start();
         update();
+        // (PC5 H-c: the hand with Shift — every pane —, or 手のひらツール's すべてのウィンドウをスクロール — every window)
+        const bool every = scroll_all && tool_ == QLatin1String("hand") && !space_;
+        if (every || (event->modifiers() & Qt::ShiftModifier)) emit handUsed(1.0, delta, every);
         return;
     }
     if (transform_move(mm_of(pos), event->modifiers())) return;
@@ -444,6 +450,7 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
             update();
             return;
         }
+        const double before = view_.scale;
         if (std::abs(end.x() - start.x()) > 6 && std::abs(end.y() - start.y()) > 6) {
             const QPointF a = mm_of(start);
             const QPointF b = mm_of(end);
@@ -452,6 +459,8 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
             const bool out = zoom_out_;
             glide([this, out, start] { zoom_by(out ? 0.5 : 2.0, start); });
         }
+        // (PC5 H-c: the zoom tool with Shift — every pane —, or its すべてのウィンドウをズーム — every window)
+        if ((zoom_all || (event->modifiers() & Qt::ShiftModifier)) && before > 0) emit handUsed(view_.scale / before, QPointF(), zoom_all);
         update();
         return;
     }

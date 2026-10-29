@@ -80,6 +80,10 @@ public:
     // as a dry run whoever asks (ApplyResult::unchanged: nothing saved, journalled or put in the history).
     void add_query(std::string name, OpFunction function);
     bool is_query(std::string_view name) const;
+    // (PC5 G-c) An op that is a question when `asks` says so of it (type_style's list) and changes the book otherwise.
+    void add_query(std::string name, OpFunction function, std::function<bool(const Json&)> asks);
+    // Is this op (an object with its "op") a question?
+    bool is_query(const Json& op) const;
 
     // Without a resolver the bus refuses an area that needs one with not_yet_ported.
     void set_area_resolver(AreaResolver resolver);
@@ -88,6 +92,7 @@ public:
 private:
     std::map<std::string, OpFunction, std::less<>> ops_;
     std::set<std::string, std::less<>> queries_;
+    std::map<std::string, std::function<bool(const Json&)>, std::less<>> asks_;  // (PC5 G-c: ops a question by their arguments)
     AreaResolver area_resolver_;
 };
 

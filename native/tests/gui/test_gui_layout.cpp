@@ -43,6 +43,7 @@
 #include <QTextBrowser>
 
 #include <fstream>
+#include <tuple>
 #include <memory>
 
 #include "app/ai_dialog.hpp"
@@ -54,6 +55,7 @@
 #include "app/style_picker.hpp"
 #include "app/check_panel.hpp"
 #include "app/dialogs.hpp"
+#include "app/doc_area.hpp"
 #include "app/export_dialog.hpp"
 #include "app/fit_preview.hpp"
 #include "app/help.hpp"
@@ -277,6 +279,28 @@ int probe(int argc, char** argv) {
             seen.push_back(Seen{QStringLiteral("print field"), field, false});
         out << look_at(QStringLiteral("print"), &printing, printing.sizeHint(), seen).dump() << "\n";
     }
+    // PC5 H-c (ウィンドウ → アレンジ): the books in 4 and 6 cells of the window — each cell, the canvas in front and the panes
+    // beside it, with room in the window on every screen, the bars and panels as ever
+    for (const auto& [name, attribute, books] : {std::tuple{"main-4up", "act_arrange_4up", 4}, {"main-6up", "act_arrange_6up", 6}}) {
+        app::MainWindow window(app::Session::open(book, quick(path_of(dir.filePath("recovery")))));
+        for (int i = 1; i < books; ++i) {
+            const fs::path other = path_of(dir.filePath(QStringLiteral("並べる%1.genko").arg(i)));
+            if (!fs::exists(other)) make_book(other, 2);
+            window.add_document(app::Session::open(other, quick(path_of(dir.filePath("recovery")))));
+        }
+        window.switch_document(0);
+        window.show();
+        QCoreApplication::processEvents();
+        window.action(QString::fromLatin1(attribute))->trigger();
+        std::vector<Seen> seen = {{QStringLiteral("canvas"), window.canvas(), false}, {QStringLiteral("status"), window.statusBar(), true}};
+        for (int i = 0; i < books; ++i) {
+            QWidget* cell = window.doc_area()->cell(i);
+            if (cell == nullptr) return 2;  // (a cell missing: the test reads the report short)
+            seen.push_back(Seen{QStringLiteral("cell %1").arg(i + 1), cell, false});
+        }
+        for (const Seen& more : bars_and_panels(&window)) seen.push_back(more);
+        out << look_at(QString::fromLatin1(name), &window, QSize(1280, 800), seen).dump() << "\n";
+    }
     {
         // the window with 履歴 and 点検 opened (hidden at first, as Python's occasional panels)
         app::MainWindow window(app::Session::open(book, quick(path_of(dir.filePath("recovery")))));
@@ -466,7 +490,7 @@ private slots:
                 }
             }
         }
-        QCOMPARE(windows, 19);
+        QCOMPARE(windows, 21);  // (PC5 H-c: main-4up, main-6up)
     }
 
     // 試験 5: a long Japanese path, cut to fit, all of it one click away, copied whole

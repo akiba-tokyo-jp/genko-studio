@@ -182,9 +182,11 @@ void MainWindow::apply_extras() {
     }
     if (canvas_->show_layer_edges) (void)layer_snap_boxes();  // (the boxes asked for now: drawn when they come)
     canvas_->update();
+    panes_follow();  // (PC5 H-c review P3-4: the panes beside it the same)
 }
 
 void MainWindow::share_view_switch(const QString& attribute, bool on) {
+    panes_follow();  // (PC5 H-c review P3-4: this window's panes — the production's switches come this way)
     // (this computer's: every open window the same at once — the review's P3-5; their own handlers not run again)
     for (MainWindow* other : documents::windows()) {
         if (other == this) continue;
@@ -219,6 +221,7 @@ void MainWindow::apply_guide_prefs() {
     c->gutter_pt = view_units::gutter_pt();
     c->print_dpi = view_units::screen_dpi();
     c->update();
+    panes_follow();  // (PC5 H-c review P3-4)
 }
 
 void MainWindow::clear_guides(bool every_page) {

@@ -426,10 +426,20 @@ private slots:
         // test_gui_automate.
         // and PC5 J-d1's 1 — 表示 → 表示・非表示 → カウント (act_show_count); its 計測スケールを設定 ▸ 初期設定・カスタム…, ものさしツール and
         // カウントツール are the frames' attributes made real — test_gui_measure.
+        // and PC5 G-c's 2 — 書式 → 初期設定の書式を読み込み・初期設定の書式を保存 (act_type_load_defaults, act_type_save_defaults) —
+        // test_gui_type.
+        // and the 20 of PC5 H-c (SPEC VIEW-01「窓の区画と並べ方」) — ウィンドウ → アレンジ ▸ すべてを左右に並べる・すべてを上下に並べる・
+        // 2 アップ（縦）・2 アップ（横）・3 アップ（縦）・3 アップ（横）・3 アップ（スタック）・4 アップ・6 アップ (act_arrange_tile_vertical,
+        // act_arrange_tile_horizontal, act_arrange_2up_vertical, act_arrange_2up_horizontal, act_arrange_3up_vertical,
+        // act_arrange_3up_horizontal, act_arrange_3up_stacked, act_arrange_4up, act_arrange_6up), すべてをタブに統合・重ねて表示・
+        // 並べて表示 (act_arrange_consolidate, act_arrange_cascade, act_arrange_tile), ウィンドウを分離・すべてのウィンドウを分離
+        // (act_float_window, act_float_all), 同じズーム倍率で表示・同じ位置に表示・同じ回転で表示・すべてを同じ表示にする
+        // (act_match_zoom, act_match_location, act_match_rotation, act_match_all), and the hand's and zoom tool's
+        // すべてのウィンドウをスクロール・すべてのウィンドウをズーム (act_scroll_all, act_zoom_all) — test_gui_arrange.
         // and PC5 J-b's 7 — スライスツール・スライス選択ツール (act_slice_tool, act_slice_select_tool), 表示 → 表示・非表示 → スライス
         // (act_show_slices), スナップ先 → スライス (act_snap_slices), スライスをロック・スライスを消去 (act_lock_slices, act_clear_slices),
         // レイヤー → 新規レイヤーベースのスライス (act_layer_slice) — test_gui_slices.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{707});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1 and J-b's 7)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{729});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20 and J-b's 7)
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -948,7 +958,15 @@ private slots:
         QCOMPARE(window.mid(0, 4), (QStringList{QStringLiteral("アレンジ ▸"), QStringLiteral("ワークスペース ▸"), QStringLiteral("|"), QStringLiteral("原稿だけを表示")}));
         QMenu* arrange = w->findChild<QMenu*>(QStringLiteral("menu_arrange"));
         QVERIFY(arrange != nullptr);
-        QCOMPARE(items(arrange), QStringList{QStringLiteral("新規ウィンドウ")});
+        // (PC5 H-c: Photoshop's アレンジ ▸ — the cells, the tabs and windows, the views made the same, 新規ウィンドウ last)
+        QCOMPARE(items(arrange),
+                 (QStringList{QStringLiteral("すべてを左右に並べる"), QStringLiteral("すべてを上下に並べる"), QStringLiteral("2 アップ（縦）"),
+                              QStringLiteral("2 アップ（横）"), QStringLiteral("3 アップ（縦）"), QStringLiteral("3 アップ（横）"), QStringLiteral("3 アップ（スタック）"),
+                              QStringLiteral("4 アップ"), QStringLiteral("6 アップ"), QStringLiteral("|"), QStringLiteral("すべてをタブに統合"),
+                              QStringLiteral("重ねて表示"), QStringLiteral("並べて表示"), QStringLiteral("|"), QStringLiteral("ウィンドウを分離"),
+                              QStringLiteral("すべてのウィンドウを分離"), QStringLiteral("|"), QStringLiteral("同じズーム倍率で表示"), QStringLiteral("同じ位置に表示"),
+                              QStringLiteral("同じ回転で表示"), QStringLiteral("すべてを同じ表示にする"), QStringLiteral("|"), QStringLiteral("新規ウィンドウ")}));
+        for (const char* panel : {"ツール", "修飾キー"}) QVERIFY2(window.contains(QString::fromUtf8(panel)), panel);
         for (const char* panel : {"ナビゲーター", "オプション", "ヒストリー"}) QVERIFY2(window.contains(QString::fromUtf8(panel)), panel);
         for (const auto& [object, title] : {std::pair{"全体図", "ナビゲーター"}, {"ツールの設定", "オプション"}, {"履歴", "ヒストリー"}}) {
             const auto docks = w->findChildren<QDockWidget*>(QString::fromUtf8(object));  // (the workspaces' keys kept)

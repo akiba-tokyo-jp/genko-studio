@@ -64,6 +64,7 @@ struct Kept {
     double w = 0, h = 0;
     std::string font;
     std::string page;
+    std::string styles;  // (PC5 G-c: the book's type styles' digest — a style changed sets the texts that take it anew)
     std::optional<std::array<double, 4>> extent;
 };
 std::mutex mutex;
@@ -73,10 +74,22 @@ std::optional<std::array<double, 4>> extent_mm(const detail::Ctx& ctx, const cor
     const double w = ctx.page->spec.width_mm.value(), h = ctx.page->spec.height_mm.value();
     const std::string font = ctx.episode != nullptr ? ctx.episode->font_path : std::string();
     const std::string page_id = ctx.page->id;
+    // (PC5 G-c: a record the OpenType typesetting sets reads the book's styles: their digest, as the lettering's memo key)
+    std::string styles;
+    const core::Json* book_styles = ctx.episode != nullptr && ctx.episode->type_styles ? &*ctx.episode->type_styles : text::TypeStyles::current();
+    if (book_styles != nullptr && !book_styles->is_null() && text::sets_opentype(line)) {
+        if (book_styles == text::TypeStyles::current()) {
+            styles = text::TypeStyles::digest();
+        } else {
+            const text::TypeStyles scope(book_styles);
+            styles = text::TypeStyles::digest();
+        }
+    }
     {
         const std::lock_guard<std::mutex> lock(mutex);
         if (const auto it = kept.find(layer.type.get()); it != kept.end()) {
-            if (it->second.record.lock() == layer.type && it->second.w == w && it->second.h == h && it->second.font == font && it->second.page == page_id)
+            if (it->second.record.lock() == layer.type && it->second.w == w && it->second.h == h && it->second.font == font && it->second.page == page_id &&
+                it->second.styles == styles)
                 return it->second.extent;
         }
     }
@@ -104,7 +117,7 @@ std::optional<std::array<double, 4>> extent_mm(const detail::Ctx& ctx, const cor
         std::erase_if(kept, [](const auto& item) { return item.second.record.expired(); });
         if (kept.size() > 512) kept.clear();
     }
-    kept[layer.type.get()] = Kept{layer.type, w, h, font, page_id, extent};
+    kept[layer.type.get()] = Kept{layer.type, w, h, font, page_id, styles, extent};
     return extent;
 }
 

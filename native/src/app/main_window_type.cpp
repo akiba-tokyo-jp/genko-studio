@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <set>
 
 #include "app/canvas.hpp"
 #include "app/config.hpp"
@@ -22,16 +23,20 @@
 #include "app/layer_panel.hpp"
 #include "app/lettering.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "app/tool_settings.hpp"
 #include "core/ids.hpp"
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
+#include "core/type_styles.hpp"
 #include "core/type_text.hpp"
 #include "core/vector.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/text/lettering.hpp"
 #include "render/text/shaping.hpp"
 #include "render/type_layer.hpp"
+#include "render/text/opentype.hpp"
+#include "service/wording.hpp"
 
 namespace genko::app {
 
@@ -151,6 +156,11 @@ void MainWindow::build_type_actions() {
          QStringLiteral("選んだテキストの段落を、語の切れ目（空白）で折り返し、禁則・約物の詰めをしない組み方にします（右から左の文字・南アジアの文字向け）"), true);
     make("act_type_rtl", QStringLiteral("右から左の段落"), [this] { type_set(Json{{"direction", action("act_type_rtl")->isChecked() ? "rtl" : "auto"}}); }, {},
          QStringLiteral("選んだテキストの段落を右から左に組みます（オフ: 最初の文字の向きに従う）"), true);
+    // PC5 G-c: 書式 → 初期設定の書式を読み込み・初期設定の書式を保存 (the formatting kept in the machine's settings, not the book)
+    make("act_type_load_defaults", QStringLiteral("初期設定の書式を読み込み"), [this] { load_default_type_styles(); }, {},
+         QStringLiteral("「初期設定の書式を保存」で覚えた書式（文字と段落の属性）を、選んだテキストレイヤー・台詞の文字全体に当てます（文字スタイル・段落スタイルは外れます）"));
+    make("act_type_save_defaults", QStringLiteral("初期設定の書式を保存"), [this] { save_default_type_styles(); }, {},
+         QStringLiteral("選んだテキストレイヤー・台詞の始めの文字の書式（文字と段落の属性）を、このパソコンの設定に覚えます（原稿には入りません）"));
     // (Genko's own: a line and a type layer each other's — 書式's last)
     make("act_line_to_type_layer", QStringLiteral("台詞をテキストレイヤーに"), [this] { line_to_type_layer(); }, {},
          QStringLiteral("選んだ台詞をテキストレイヤーにします（話者・読む順は外れ、レイヤーの並びの中＝コマ枠の下に描かれます）"));
@@ -201,6 +211,8 @@ void MainWindow::build_type_menu(QMenu* menu) {
     menu->addAction(action("act_type_update_all"));
     menu->addSeparator();
     menu->addAction(action("act_type_lorem"));
+    menu->addSeparator();
+    for (const char* name : {"act_type_load_defaults", "act_type_save_defaults"}) menu->addAction(action(name));  // (PC5 G-c)
     menu->addSeparator();
     for (const char* name : {"act_line_to_type_layer", "act_type_layer_to_line"}) menu->addAction(action(name));
 }
@@ -338,6 +350,173 @@ void MainWindow::refresh_type_commands() {
     action("act_type_composer_world")->setChecked(record != nullptr && para.value("composer", Json()) == Json("world"));
     action("act_type_rtl")->setEnabled(record != nullptr && record->wrap != "vertical");  // (down: Japanese alone)
     action("act_type_rtl")->setChecked(record != nullptr && para.value("direction", Json()) == Json("rtl"));
+    // PC5 G-c: 初期設定の書式 — kept from a text, laid on one
+    action("act_type_save_defaults")->setEnabled(record != nullptr);
+    action("act_type_load_defaults")->setEnabled(record != nullptr && preferences::default_type_styles().has_value());
+}
+
+// --- PC5 G-c: the styles (type_style) and the default formatting ----------------------------------------------------------
+
+std::optional<Json> MainWindow::type_style(const std::string& kind, const std::string& what, const Json& args, bool on_text) {
+    // (review P3-10: what names the op and its text is the window's — args give the rest)
+    static const std::set<std::string> kReserved{"op", "kind", "action", "line", "page", "layer_id", "contents"};
+    Json extra = Json::object();
+    if (args.is_object()) {
+        for (const auto& [key, value] : args.items()) {
+            if (!kReserved.contains(key)) extra[key] = value;
+        }
+    }
+    std::optional<Json> target;
+    if (on_text) {
+        target = type_target(true);
+        if (!target) return std::nullopt;
+    }
+    // one type_style through apply_ops — on the book itself when `to_book` (a contents' tab sends the book's styles there) —
+    // and what it reported
+    const auto run = [this](Json op, bool to_book) -> std::optional<Json> {
+        const bool was = to_book_;
+        to_book_ = to_book;
+        const bool done = apply_ops(Json::array({op}));
+        to_book_ = was;
+        if (!done) return std::nullopt;
+        for (const Json& result : last_results_) {
+            if (result.is_object() && result.value("op", Json()) == Json("type_style")) {
+                Json out = result;
+                out.erase("index");
+                out.erase("op");
+                return out;
+            }
+        }
+        return Json::object();
+    };
+    const auto with = [&](Json op, bool text) {
+        op["op"] = "type_style";
+        op["kind"] = kind;
+        if (text && target) {
+            for (const auto& [key, value] : target->items()) op[key] = value;
+        }
+        return op;
+    };
+    const bool book_level = what == "new" || what == "duplicate" || what == "delete" || what == "rename" || what == "set" || what == "redefine";
+    std::optional<Json> out;
+    if (!contents_ || !book_level) {
+        Json op = extra;
+        op["action"] = what;
+        out = run(with(std::move(op), on_text), false);
+    } else {
+        // (review P1-1: in a contents' tab the book's styles are changed in the book — the contents' text read here, then
+        // the style applied to it in the contents)
+        const core::type_styles::Kind k = kind == "character" ? core::type_styles::Kind::Character : core::type_styles::Kind::Paragraph;
+        const core::Json* styles = book().type_styles ? &*book().type_styles : nullptr;
+        const core::StoryLine* record = target ? type_record(*target) : nullptr;
+        const std::int64_t at = extra.contains("range") && extra["range"].is_array() && !extra["range"].empty() && extra["range"][0].is_number_integer()
+                                    ? extra["range"][0].get<std::int64_t>()
+                                    : 0;
+        if (what == "new") {
+            Json op = extra;
+            op["action"] = "new";
+            const bool apply = op.value("apply", Json(false)) == Json(true);
+            const bool from_text = record != nullptr && op.value("from_selection", Json(true)) != Json(false);
+            Json attrs = Json::object();
+            if (from_text) {
+                const Json f = core::type_styles::formatting_at(*record, styles, k, at);
+                for (const char* part : {"char", "para"}) {
+                    for (const auto& [key, value] : f[part].items()) attrs[key] = value;
+                }
+            }
+            if (op.contains("attrs") && op["attrs"].is_object()) {
+                for (const auto& [key, value] : op["attrs"].items()) attrs[key] = value;
+            }
+            op["attrs"] = attrs;
+            op["from_selection"] = false;
+            for (const char* key : {"apply", "clear_overrides", "range"}) op.erase(key);
+            out = run(with(std::move(op), false), true);
+            if (out && apply && record != nullptr) {
+                Json put{{"action", "apply"}, {"id", (*out)["id"]}};
+                for (const char* key : {"range", "clear_overrides"}) {
+                    if (extra.contains(key)) put[key] = extra[key];
+                }
+                (void)run(with(std::move(put), true), false);
+            }
+        } else if (what == "redefine") {
+            if (record == nullptr) {
+                flash(QStringLiteral("先にテキストレイヤーを選びます"), 4000);
+                return std::nullopt;
+            }
+            std::string id;
+            if (extra.contains("id") && extra["id"].is_string()) {
+                id = extra["id"].get<std::string>();
+            } else if (k == core::type_styles::Kind::Character) {
+                const std::optional<std::string> found = core::type_styles::character_style_at(*record, at);
+                if (!found) {
+                    flash(wording::error(std::string("the chosen text takes no character style: name the style to redefine (id)")), 6000, true);
+                    return std::nullopt;
+                }
+                id = *found;
+            } else {
+                id = core::type_styles::paragraph_style_at(*record, at);
+            }
+            Json over;
+            try {
+                over = core::type_styles::redefinition_at(*record, styles, k, id, at);
+            } catch (const std::exception& error) {
+                flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
+                return std::nullopt;
+            }
+            Json attrs = Json::object();
+            for (const char* part : {"char", "para"}) {
+                for (const auto& [key, value] : over[part].items()) attrs[key] = value;
+            }
+            out = run(with(Json{{"action", "set"}, {"id", id}, {"attrs", attrs}}, false), true);
+            if (out) {
+                const core::type_styles::Range stretch = core::type_styles::stretch_at(*record, styles, at);
+                Json put{{"action", "apply"}};
+                if (id != core::type_styles::kBasic) put["id"] = id;
+                if (k == core::type_styles::Kind::Paragraph) put["range"] = Json::array({at, at});
+                else if (stretch.end > stretch.start) put["range"] = Json::array({stretch.start, stretch.end});
+                (void)run(with(std::move(put), true), false);
+                (*out)["texts"] = (*out).value("texts", Json(0));
+            }
+        } else {
+            Json op = extra;
+            op["action"] = what;
+            out = run(with(std::move(op), false), true);
+        }
+    }
+    refresh_type_commands();
+    refresh_type_frame();
+    return out;
+}
+
+void MainWindow::save_default_type_styles() {
+    const std::optional<Json> target = type_target(true);
+    const core::StoryLine* record = target ? type_record(*target) : nullptr;
+    if (record == nullptr) return;
+    const Json* styles = book().type_styles ? &*book().type_styles : nullptr;
+    preferences::set_default_type_styles(core::type_styles::defaults_of(*record, styles));
+    refresh_type_commands();
+    flash(QStringLiteral("初期設定の書式を保存しました（このパソコンの設定。原稿には入りません）"), 4000);
+}
+
+void MainWindow::load_default_type_styles() {
+    const std::optional<Json> target = type_target(true);
+    if (!target) return;
+    const std::optional<Json> kept = preferences::default_type_styles();
+    if (!kept) {
+        flash(QStringLiteral("先に「初期設定の書式を保存」で書式を覚えます"), 4000);
+        return;
+    }
+    // (one step: the styles taken away and the text's own attributes cleared — 基本段落 and なし —, then the formatting laid on
+    // the whole text, as Photoshop's is: the text looks as the one it was kept from)
+    Json clear{{"op", "type_style"}, {"kind", "paragraph"}, {"action", "apply"}, {"clear_overrides", true}};
+    Json none{{"op", "type_style"}, {"kind", "character"}, {"action", "apply"}};
+    Json set{{"op", "set_type"}, {"char", (*kept)["char"]}, {"para", (*kept)["para"]}};
+    for (Json* op : {&clear, &none, &set}) {
+        for (const auto& [key, value] : target->items()) (*op)[key] = value;
+    }
+    apply_ops(Json::array({clear, none, set}));
+    refresh_type_commands();
+    refresh_type_frame();
 }
 
 void MainWindow::type_set(const Json& attrs) {
@@ -536,8 +715,12 @@ void MainWindow::refresh_type_frame() {
     frame.box_text = render::text::shape_of(record) == "box";
     if (frame.box_text) {
         try {
+            // (PC5 G-c review P3-4: set with the book's styles, as the page draws it)
+            const render::text::TypeStyles styles(book().type_styles ? &*book().type_styles : nullptr);
             frame.overflow = render::text::placement(core::type_text::line_of(*layer, page->index), kFrameDpi, std::optional<std::string>(book().font_path)).overflow;
         } catch (const render::NotYetPorted&) {
+            frame.overflow = false;
+        } catch (const core::Error&) {  // (a text too large to set: no mark — the page leaves it out and says so)
             frame.overflow = false;
         }
     }

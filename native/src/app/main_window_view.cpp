@@ -195,7 +195,9 @@ QMenu* MainWindow::show_menu(QMenu* view) {
 
 void MainWindow::build_view_pages(ToolSettings* ts) {
     // 手のひらツール and ズームツール (PC5 H-a): Photoshop's buttons 100%・画面サイズ・画面にフィット; the zoom tool's ways
-    ts->add({QStringLiteral("hand")}, action_page({QStringLiteral("表示"), action("act_actual_pixels"), action("act_fit"), action("act_fill_screen")}));
+    // (PC5 H-c: すべてのウィンドウをスクロール, すべてのウィンドウをズーム — main_window_arrange.cpp)
+    ts->add({QStringLiteral("hand")}, action_page({action("act_scroll_all"), QStringLiteral("表示"), action("act_actual_pixels"), action("act_fit"),
+                                                   action("act_fill_screen")}));
     auto* mode = new QComboBox;
     mode->setObjectName(QStringLiteral("zoom_mode"));
     mode->addItem(QStringLiteral("ズームイン"), false);
@@ -205,7 +207,7 @@ void MainWindow::build_view_pages(ToolSettings* ts) {
     QAction* scrub = make("act_scrubby_zoom", QStringLiteral("スクラブズーム"), [] {}, {},
                           QStringLiteral("ドラッグで左右に動かすと、押した所を中心に縮小・拡大します（切ると、囲んだ所を画面いっぱいに）"), true);
     connect(scrub, &QAction::toggled, this, [this](bool on) { canvas_->scrubby_zoom = on; });
-    ts->add({QStringLiteral("zoom")}, action_page({QStringLiteral("ズーム"), static_cast<QWidget*>(mode), scrub, QStringLiteral("表示"),
+    ts->add({QStringLiteral("zoom")}, action_page({QStringLiteral("ズーム"), static_cast<QWidget*>(mode), scrub, action("act_zoom_all"), QStringLiteral("表示"),
                                                    action("act_actual_pixels"), action("act_fit"), action("act_fill_screen")}));
 }
 
