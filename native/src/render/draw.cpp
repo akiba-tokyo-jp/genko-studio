@@ -14,6 +14,7 @@
 #include <QFileInfo>
 #include <QResource>
 #include <map>
+#include <tuple>
 #include <mutex>
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -22,6 +23,8 @@
 #include FT_MODULE_H
 #include FT_SYSTEM_H
 #include FT_BITMAP_H
+#include FT_MULTIPLE_MASTERS_H
+#include FT_TRUETYPE_TABLES_H
 
 #include "render/page.hpp"
 
@@ -526,6 +529,168 @@ std::pair<Image, Point> TrueTypeFont::getmask2(std::u32string_view text, int str
 
 namespace {
 
+// PC5 G-b: one glyph's coverage cut out of FreeType's bitmap (8-bit), its top left from the origin's pixel (y down).
+struct GlyphBits {
+    std::vector<unsigned char> cover;
+    int width = 0;
+    int rows = 0;
+    int left = 0;
+    int top = 0;
+};
+
+}  // namespace
+
+std::pair<Image, Point> TrueTypeFont::glyph_mask(std::span<const GlyphPlace> glyphs, int stroke_width, const GlyphShape& shape,
+                                                 float start_x, float start_y) const {
+    if (glyphs.size() > 1000000) throw core::PyValueError("too many glyphs");
+    FT_Face face = face_;
+    FT_Stroker raw_stroker = nullptr;
+    if (stroke_width != 0) {
+        check_text(FT_Stroker_New(library_, &raw_stroker));
+        FT_Stroker_Set(raw_stroker, static_cast<FT_Fixed>(stroke_width) * 64, FT_STROKER_LINECAP_ROUND, FT_STROKER_LINEJOIN_ROUND, 0);
+    }
+    std::unique_ptr<std::remove_pointer_t<FT_Stroker>, decltype(&FT_Stroker_Done)> stroker(raw_stroker, FT_Stroker_Done);
+    // (the glyphs' outlines scaled and leant about their own origin, moved by the fraction of their pen's pixel)
+    FT_Matrix matrix{static_cast<FT_Fixed>(std::lround(shape.scale_x * 65536.0)), static_cast<FT_Fixed>(std::lround(shape.lean * shape.scale_y * 65536.0)), 0,
+                     static_cast<FT_Fixed>(std::lround(shape.scale_y * 65536.0))};
+    struct Reset {
+        FT_Face face;
+        ~Reset() { FT_Set_Transform(face, nullptr, nullptr); }
+    } reset{face};
+    const auto glyph_delete = [](FT_Glyph p) { FT_Done_Glyph(p); };
+    FT_Bitmap converted;
+    FT_Bitmap_Init(&converted);
+    const auto converted_done = [&](FT_Bitmap* b) { FT_Bitmap_Done(library_, b); };
+    std::unique_ptr<FT_Bitmap, decltype(converted_done)> converted_hold(&converted, converted_done);
+    std::vector<GlyphBits> bits;
+    bits.reserve(glyphs.size());
+    std::int64_t total = 0;
+    for (const GlyphPlace& g : glyphs) {
+        if (stop_.stop_requested()) throw Cancelled();
+        const double px = static_cast<double>(start_x) + g.x;
+        const double py = static_cast<double>(start_y) + g.y;
+        if (!std::isfinite(px) || !std::isfinite(py) || std::fabs(px) > 1048576.0 || std::fabs(py) > 1048576.0) throw core::Error("value", "text bounds exceeded");
+        const double whole_x = std::floor(px), whole_y = std::floor(py);
+        FT_Vector delta{static_cast<FT_Pos>(std::lround((px - whole_x) * 64.0)), static_cast<FT_Pos>(-std::lround((py - whole_y) * 64.0))};
+        FT_Set_Transform(face, shape.plain() ? nullptr : &matrix, &delta);
+        check_text(FT_Load_Glyph(face, g.id, stroke_width != 0 || !shape.plain() ? FT_LOAD_NO_BITMAP : FT_LOAD_DEFAULT));
+        const FT_GlyphSlot slot = face->glyph;
+        std::unique_ptr<std::remove_pointer_t<FT_Glyph>, decltype(glyph_delete)> held(nullptr, glyph_delete);
+        FT_Bitmap bitmap{};
+        int left = 0, top = 0;
+        if (stroker) {
+            FT_Glyph raw = nullptr;
+            check_text(FT_Get_Glyph(slot, &raw));
+            FT_Error error = FT_Glyph_StrokeBorder(&raw, stroker.get(), 0, 1);
+            if (!error) {
+                FT_Vector origin{0, 0};
+                error = FT_Glyph_To_Bitmap(&raw, FT_RENDER_MODE_NORMAL, &origin, 1);
+            }
+            held.reset(raw);
+            check_text(error);
+            const auto bitmap_glyph = reinterpret_cast<FT_BitmapGlyph>(raw);
+            bitmap = bitmap_glyph->bitmap;
+            left = bitmap_glyph->left;
+            top = bitmap_glyph->top;
+        } else {
+            if (slot->format != FT_GLYPH_FORMAT_BITMAP) check_text(FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL));
+            bitmap = slot->bitmap;
+            left = slot->bitmap_left;
+            top = slot->bitmap_top;
+        }
+        GlyphBits out;
+        out.left = static_cast<int>(whole_x) + left;
+        out.top = static_cast<int>(whole_y) - top;
+        if (bitmap.buffer != nullptr && bitmap.width > 0 && bitmap.rows > 0) {
+            unsigned int scale = 1;
+            switch (bitmap.pixel_mode) {
+                case FT_PIXEL_MODE_MONO: scale = 255; break;
+                case FT_PIXEL_MODE_GRAY2: scale = 255 / 3; break;
+                case FT_PIXEL_MODE_GRAY4: scale = 255 / 15; break;
+                case FT_PIXEL_MODE_GRAY: break;
+                default: throw core::Error("value", "unsupported bitmap pixel mode");
+            }
+            if (bitmap.pixel_mode != FT_PIXEL_MODE_GRAY) {
+                check_text(FT_Bitmap_Convert(library_, &bitmap, &converted, 1));
+                bitmap = converted;
+            }
+            out.width = static_cast<int>(bitmap.width);
+            out.rows = static_cast<int>(bitmap.rows);
+            total += static_cast<std::int64_t>(out.width) * out.rows;
+            if (total > 512LL * 1024 * 1024) throw core::Error("value", "text bounds exceeded");
+            out.cover.resize(static_cast<std::size_t>(out.width) * static_cast<std::size_t>(out.rows));
+            const unsigned char* source = bitmap.buffer;
+            for (int row = 0; row < out.rows; ++row, source += bitmap.pitch) {
+                for (int k = 0; k < out.width; ++k)
+                    out.cover[static_cast<std::size_t>(row) * static_cast<std::size_t>(out.width) + static_cast<std::size_t>(k)] =
+                        static_cast<unsigned char>(std::min(255U, source[k] * scale));
+            }
+        }
+        bits.push_back(std::move(out));
+    }
+    int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    bool any = false;
+    for (const GlyphBits& b : bits) {
+        if (b.cover.empty()) continue;
+        if (!any) {
+            x0 = b.left, y0 = b.top, x1 = b.left + b.width, y1 = b.top + b.rows;
+            any = true;
+        } else {
+            x0 = std::min(x0, b.left), y0 = std::min(y0, b.top), x1 = std::max(x1, b.left + b.width), y1 = std::max(y1, b.top + b.rows);
+        }
+    }
+    if (!any) return {Image::create("L", {0, 0}, 0), Point{0, 0}};
+    if (static_cast<std::int64_t>(x1) - x0 > 1048576 || static_cast<std::int64_t>(y1) - y0 > 65536) throw core::Error("value", "text bounds exceeded");
+    Image mask = Image::create("L", {x1 - x0, y1 - y0}, 0);
+    Imaging im = mask.raw();
+    for (const GlyphBits& b : bits) {
+        for (int row = 0; row < b.rows; ++row) {
+            unsigned char* line = reinterpret_cast<unsigned char*>(im->image8[b.top - y0 + row]);
+            for (int k = 0; k < b.width; ++k) {
+                const unsigned int src_alpha = b.cover[static_cast<std::size_t>(row) * static_cast<std::size_t>(b.width) + static_cast<std::size_t>(k)];
+                unsigned char& target = line[b.left - x0 + k];
+                if (src_alpha == 0) continue;
+                if (target > 0) {  // (laid over as font_render lays its glyphs: MULDIV255, CLIP8)
+                    const unsigned int tmp = target * (255 - src_alpha) + 128;
+                    const unsigned int v = src_alpha + (((tmp >> 8) + tmp) >> 8);
+                    target = static_cast<unsigned char>(v > 255 ? 255 : v);
+                } else {
+                    target = static_cast<unsigned char>(src_alpha);
+                }
+            }
+        }
+    }
+    return {std::move(mask), Point{x0, y0}};
+}
+
+std::uint32_t TrueTypeFont::glyph_index(char32_t ch) const { return FT_Get_Char_Index(face_, static_cast<FT_ULong>(ch)); }
+
+FontLines TrueTypeFont::lines() const {
+    FontLines out;
+    const double em = static_cast<double>(size_);
+    const double units = face_->units_per_EM > 0 ? static_cast<double>(face_->units_per_EM) : 1000.0;
+    if (FT_IS_SCALABLE(face_) && face_->underline_thickness > 0) {
+        out.underline = -static_cast<double>(face_->underline_position) * em / units;
+        out.underline_thickness = static_cast<double>(face_->underline_thickness) * em / units;
+    } else {
+        out.underline = em * 0.1;
+        out.underline_thickness = em * 0.05;
+    }
+    const auto* os2 = static_cast<const TT_OS2*>(FT_Get_Sfnt_Table(face_, FT_SFNT_OS2));
+    if (os2 != nullptr && os2->version != 0xFFFF && os2->yStrikeoutSize > 0) {
+        out.strikeout = static_cast<double>(os2->yStrikeoutPosition) * em / units;
+        out.strikeout_thickness = static_cast<double>(os2->yStrikeoutSize) * em / units;
+    } else {
+        out.strikeout = em * 0.3;
+        out.strikeout_thickness = out.underline_thickness;
+    }
+    out.underline_thickness = std::max(1.0, out.underline_thickness);
+    out.strikeout_thickness = std::max(1.0, out.strikeout_thickness);
+    return out;
+}
+
+namespace {
+
 // The name TrueTypeFonts keeps Pillow's own default font under (not a file anyone names: load_default()).
 constexpr std::string_view kPillowDefaultKey = ":/genko/text/pillow_default";
 
@@ -545,6 +710,11 @@ std::shared_ptr<const QByteArray> bundled_bytes(const std::string& name) {
 }
 
 }  // namespace
+
+const std::string& pillow_default_font() {
+    static const std::string key(kPillowDefaultKey);
+    return key;
+}
 
 bool bundled_font_present(const std::string& name) {
     try {
@@ -584,9 +754,11 @@ struct TrueTypeFonts::State {
     FT_MemoryRec_ memory_rec{};
     FT_Library library = nullptr;
     std::map<std::pair<std::string, int>, std::unique_ptr<TrueTypeFont>> fonts;
+    std::map<std::tuple<std::string, int, std::string>, std::unique_ptr<TrueTypeFont>> varied;  // (PC5 G-b: by their axes too)
 
     ~State() {
         fonts.clear();
+        varied.clear();
         if (library != nullptr) (void)FT_Done_Library(library);
     }
 
@@ -675,6 +847,49 @@ const TrueTypeFont& TrueTypeFonts::truetype(const std::string& font, int size) {
     return *s.fonts.emplace(key, std::move(opened)).first->second;
 }
 
+const TrueTypeFont& TrueTypeFonts::truetype(const std::string& font, int size, const std::vector<std::pair<std::string, float>>& axes) {
+    if (axes.empty()) return truetype(font, size);
+    State& s = *state_;
+    std::string named;
+    for (const auto& [tag, value] : axes) named += tag + "=" + std::to_string(value) + ";";
+    const auto key = std::make_tuple(font, size, named);
+    if (const auto it = s.varied.find(key); it != s.varied.end()) return *it->second;
+    (void)truetype(font, size);  // (its checks, and the file's bytes read once)
+    const State::File& file = s.file(font);
+    FT_Face face = nullptr;
+    if (FT_New_Memory_Face(s.library, reinterpret_cast<const FT_Byte*>(file.bytes->constData()), static_cast<FT_Long>(file.bytes->size()), 0, &face)) {
+        if (genko_imaging_error_kind() != 0 || s.memory.second) detail::throw_imaging_error();
+        throw NotYetPorted("default_font");
+    }
+    auto opened = std::unique_ptr<TrueTypeFont>(new TrueTypeFont(face, s.library, size, s.stop));
+    FT_Size_RequestRec request{};
+    request.type = FT_SIZE_REQUEST_TYPE_NOMINAL;
+    request.width = static_cast<FT_Long>(size) * 64;
+    request.height = request.width;
+    if (FT_Request_Size(face, &request)) {
+        if (genko_imaging_error_kind() != 0 || s.memory.second) detail::throw_imaging_error();
+        throw NotYetPorted("default_font");
+    }
+    // (the axes the font has, each clamped to its range; a font with none drawn as it is)
+    FT_MM_Var* mm = nullptr;
+    if (FT_HAS_MULTIPLE_MASTERS(face) && FT_Get_MM_Var(face, &mm) == 0 && mm != nullptr) {
+        std::vector<FT_Fixed> coords(mm->num_axis);
+        for (FT_UInt i = 0; i < mm->num_axis; ++i) {
+            const FT_Var_Axis& axis = mm->axis[i];
+            double value = static_cast<double>(axis.def) / 65536.0;
+            for (const auto& [tag, v] : axes) {
+                if (tag.size() == 4 && FT_MAKE_TAG(tag[0], tag[1], tag[2], tag[3]) == axis.tag) value = v;
+            }
+            value = std::clamp(value, static_cast<double>(axis.minimum) / 65536.0, static_cast<double>(axis.maximum) / 65536.0);
+            coords[i] = static_cast<FT_Fixed>(std::lround(value * 65536.0));
+        }
+        (void)FT_Set_Var_Design_Coordinates(face, mm->num_axis, coords.data());
+        (void)FT_Done_MM_Var(s.library, mm);
+    }
+    if (s.memory.second) detail::throw_imaging_error();
+    return *s.varied.emplace(key, std::move(opened)).first->second;
+}
+
 // --- Draw::text --------------------------------------------------------------------------------------------------
 
 void Draw::text(PointD xy, std::u32string_view text, const TrueTypeFont& font, const std::optional<Ink>& fill,
@@ -753,6 +968,36 @@ void Draw::text(PointD xy, std::u32string_view text, const TrueTypeFont& font, c
         } else {
             draw_text(ink, 0);
         }
+    }
+}
+
+void Draw::glyphs(PointD origin, std::span<const GlyphPlace> glyphs, const TrueTypeFont& font, const std::optional<Ink>& fill,
+                  const GlyphShape& shape, int stroke_width, const std::optional<Ink>& stroke_fill) {
+    Target& t = *target_;
+    const ModeID mode = t.im->mode;
+    if (mode == IMAGING_MODE_1 || mode == IMAGING_MODE_P || mode == IMAGING_MODE_I || mode == IMAGING_MODE_F) {
+        throw NotYetPorted("text_mono_mask");
+    }
+    const INT32 ink = t.ink_of(fill);
+    const std::optional<INT32> stroke_ink =
+        stroke_width != 0 ? std::optional<INT32>(stroke_fill ? detail::ink_for(*stroke_fill, t.im) : ink) : std::nullopt;
+    const auto draw_glyphs = [&](INT32 colour, int width) {
+        // (as text(): the whole pixel of the origin, its fraction handed to the font)
+        double whole_x = 0.0;
+        double whole_y = 0.0;
+        const double fraction_x = std::modf(origin.x, &whole_x);
+        const double fraction_y = std::modf(origin.y, &whole_y);
+        auto [mask, offset] = font.glyph_mask(glyphs, width, shape, static_cast<float>(fraction_x), static_cast<float>(fraction_y));
+        if (mask.width() == 0 || mask.height() == 0) return;
+        const int x = c_int(whole_x) + offset.x;
+        const int y = c_int(whole_y) + offset.y;
+        detail::check_status(ImagingFill2(t.im, &colour, mask.raw(), x, y, x + mask.width(), y + mask.height()));
+    };
+    if (stroke_ink) {
+        draw_glyphs(*stroke_ink, stroke_width);
+        if (ink != *stroke_ink) draw_glyphs(ink, 0);
+    } else {
+        draw_glyphs(ink, 0);
     }
 }
 

@@ -1207,6 +1207,13 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("after names a line of the page", "読む順の位置（after）は、同じページの台詞を指定します"));
         r.push_back(rule("a type layer turned, scaled or bent is not in this build yet",
                          "テキストレイヤーの回転・拡大・縮小・ゆがみは、この版の Genko ではまだできません（移動はできます）"));
+        // (PC5 G-b: set_type — the character and paragraph attributes on the whole text or a range)
+        r.push_back(rule("unknown attribute \\S+ \\(a character or paragraph attribute of TEXT-02\\)", "文字・段落の属性の名前が正しくありません"));
+        r.push_back(rule("set_type sets a character or paragraph attribute.*", "変える文字・段落の属性を指定します"));
+        r.push_back(rule(R"(range is \[start, end\] \(graphemes\))", "範囲は [始まり, 終わり]（文字の数）で指定します"));
+        r.push_back(rule(R"(range must lie in the text.*\(0\.\.(\d+) graphemes\))", "範囲が本文の外か、終わりが始まりより前です（0〜\\1 文字）"));
+        r.push_back(rule("an empty range takes paragraph attributes only", "空の範囲には段落の属性だけを指定できます"));
+        r.push_back(rule("size_pt or size_mm sizes the text, not both", "文字の大きさは pt か mm のどちらかで指定します"));
         r.push_back(rule(".* takes the style \\S+, which the book does not keep", "原稿に無い文字スタイル・段落スタイルを指定しています"));
         r.push_back(rule("(?:unknown )?(?:native_type|char|para|run char|paragraph para|type_styles)\\b.*",
                          "文字の設定（文字・段落の属性、スタイル）の指定が正しくありません"));

@@ -260,10 +260,11 @@ private slots:
 
     // drawn as the line of its record is drawn (its own picture: within its rounding), among the layers
     void drawnAsItsLine() {
-        // (G-a: add_type_layer's box makes a box text — 段落テキスト —, the line holding the same record)
+        // (G-a: add_type_layer's box makes a box text — 段落テキスト —, the line holding the same record; G-b: a type layer
+        // is set by the OpenType typesetting from the first, native_type.shaping)
         const core::Document as_line = run(plain_book(), Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "あいう"}, {"x_mm", 8}, {"y_mm", 8},
                                                               {"w_mm", 30}, {"h_mm", 30}, {"balloon", "none"}, {"style", Json{{"size_mm", 8}}},
-                                                              {"native_type", Json{{"shape", "box"}}}});
+                                                              {"native_type", Json{{"shape", "box"}, {"shaping", "opentype"}}}});
         const core::Document as_layer = with_type(plain_book());
         const std::string line_px = proof_bytes(as_line), layer_px = proof_bytes(as_layer);
         QVERIFY(line_px != proof_bytes(plain_book()));
@@ -375,7 +376,7 @@ private slots:
     // the later groups' ops: known by name, refused as not yet in this build
     void laterOpsRefused() {
         const core::Document doc = with_type(plain_book());
-        for (const char* name : {"set_type", "type_style", "replace_fonts"}) {  // (G-a wrote line_to_type_layer, type_layer_to_line)
+        for (const char* name : {"type_style", "replace_fonts"}) {  // (G-a wrote line_to_type_layer, type_layer_to_line; G-b set_type)
             const std::string why = refusal(doc, Json::array({Json{{"op", name}, {"page", 1}, {"layer_id", "t1"}}}));
             QVERIFY2(why.starts_with("not_yet_ported") && why.find(std::string(name) + " is not in the C++ build yet") != std::string::npos, why.c_str());
         }

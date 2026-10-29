@@ -14,8 +14,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 
 #include "app/canvas.hpp"
+#include "app/config.hpp"
 #include "app/ime.hpp"
 #include "app/layer_panel.hpp"
 #include "app/lettering.hpp"
@@ -28,6 +30,7 @@
 #include "core/vector.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/text/lettering.hpp"
+#include "render/text/shaping.hpp"
 #include "render/type_layer.hpp"
 
 namespace genko::app {
@@ -44,6 +47,22 @@ const char* kLorem =
     "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. "
     "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.";
 const char* kDummy = "ここに文章が入ります。文字の大きさや行の送り、字の並びを確かめるための仮の文です。あとで本当の文に置き換えます。";
+
+// PC5 G-b: 書式 → OpenType ▸ in Photoshop's order (its Japanese names), and — 東アジア言語の機能 — プロポーショナルメトリクス.
+const std::vector<std::pair<QString, QString>>& opentype_names() {
+    static const std::vector<std::pair<QString, QString>> names{
+        {QStringLiteral("liga"), QStringLiteral("標準合字")},          {QStringLiteral("calt"), QStringLiteral("前後関係に依存する字形")},
+        {QStringLiteral("dlig"), QStringLiteral("任意の合字")},        {QStringLiteral("swsh"), QStringLiteral("スワッシュ字形")},
+        {QStringLiteral("salt"), QStringLiteral("デザインのバリエーション")}, {QStringLiteral("titl"), QStringLiteral("タイトル用字形")},
+        {QStringLiteral("ornm"), QStringLiteral("飾り文字")},          {QStringLiteral("ordn"), QStringLiteral("序数表記")},
+        {QStringLiteral("frac"), QStringLiteral("分数字")},            {QStringLiteral("onum"), QStringLiteral("オールドスタイル")},
+        {QStringLiteral("palt"), QStringLiteral("プロポーショナルメトリクス")}};
+    return names;
+}
+
+// The settings' key of 言語オプション ▸ (default, east_asian or middle_eastern; Genko's default: East Asian, as Photoshop's
+// Japanese edition).
+const QString kLanguageFeatures = QStringLiteral("type/language_features");
 
 // The first subpath of a path as the points a text on a path follows (each curve sampled), or none.
 std::vector<QPointF> path_points(const core::vector::Path& path) {
@@ -109,6 +128,29 @@ void MainWindow::build_type_actions() {
          QStringLiteral("組んだ文字の覚えを捨てて、テキストレイヤーと台詞を組み直して描き直します（書体を入れ替えた後など）"));
     make("act_type_lorem", QStringLiteral("Lorem Ipsum をペースト"), [this] { paste_lorem(); }, {},
          QStringLiteral("仮の文を入れます（横書きは Lorem ipsum、縦書きは和文の仮の文）。打っている途中なら、その場所に入れます"));
+    // PC5 G-b: 書式 → OpenType ▸ (the chosen text's OpenType features, the whole of it; one its font has not is grey)
+    for (const auto& [tag, label] : opentype_names()) {
+        const std::string feature = tag.toStdString();
+        const QString id = QStringLiteral("act_type_ot_") + tag;
+        QAction* act = make(id, label, [this, feature, id] { type_feature(feature, action(id)->isChecked()); }, {},
+                            QStringLiteral("選んだテキストレイヤー・台詞の文字に OpenType 機能（%1）を使う・使わない（書体にある機能だけ選べます）").arg(tag), true);
+        act->setChecked(false);
+    }
+    // 書式 → 言語オプション ▸: which features the menus show (Photoshop's 初期設定・東アジア言語・中東言語の機能), the paragraph's
+    // composer (中東および南アジア言語用 Composer: words broken at spaces, no kinsoku) and — 中東言語 — its direction
+    auto* languages = new QActionGroup(this);
+    languages->setExclusive(true);
+    for (const auto& [key, label] : std::initializer_list<std::pair<const char*, QString>>{
+             {"default", QStringLiteral("初期設定の機能")}, {"east_asian", QStringLiteral("東アジア言語の機能")}, {"middle_eastern", QStringLiteral("中東言語の機能")}}) {
+        const QString which = QString::fromLatin1(key);
+        languages->addAction(make(QStringLiteral("act_type_lang_") + which, label, [this, which] { type_language_features(which); }, {},
+                                  QStringLiteral("書式のメニューに出す文字の機能を選びます（%1）").arg(label), true));
+    }
+    make("act_type_composer_world", QStringLiteral("中東および南アジア言語用 Composer"),
+         [this] { type_set(Json{{"composer", action("act_type_composer_world")->isChecked() ? "world" : "japanese"}}); }, {},
+         QStringLiteral("選んだテキストの段落を、語の切れ目（空白）で折り返し、禁則・約物の詰めをしない組み方にします（右から左の文字・南アジアの文字向け）"), true);
+    make("act_type_rtl", QStringLiteral("右から左の段落"), [this] { type_set(Json{{"direction", action("act_type_rtl")->isChecked() ? "rtl" : "auto"}}); }, {},
+         QStringLiteral("選んだテキストの段落を右から左に組みます（オフ: 最初の文字の向きに従う）"), true);
     // (Genko's own: a line and a type layer each other's — 書式's last)
     make("act_line_to_type_layer", QStringLiteral("台詞をテキストレイヤーに"), [this] { line_to_type_layer(); }, {},
          QStringLiteral("選んだ台詞をテキストレイヤーにします（話者・読む順は外れ、レイヤーの並びの中＝コマ枠の下に描かれます）"));
@@ -135,6 +177,12 @@ void MainWindow::build_type_menu(QMenu* menu) {
     QMenu* ways = menu->addMenu(QStringLiteral("方向"));
     ways->setObjectName(QStringLiteral("menu_type_direction"));
     for (const char* name : {"act_type_horizontal", "act_type_vertical"}) ways->addAction(action(name));
+    QMenu* opentype = menu->addMenu(QStringLiteral("OpenType"));  // (PC5 G-b)
+    opentype->setObjectName(QStringLiteral("menu_type_opentype"));
+    for (const auto& [tag, label] : opentype_names()) {
+        if (tag == QLatin1String("palt")) opentype->addSeparator();  // (東アジア言語の機能)
+        opentype->addAction(action(QStringLiteral("act_type_ot_") + tag));
+    }
     connect(menu, &QMenu::aboutToShow, this, [this] { refresh_type_commands(); });
     menu->addSeparator();
     for (const char* name : {"act_line_work_path", "act_line_to_shape", "act_type_rasterize", "act_type_to_point", "act_type_to_box"}) {
@@ -142,6 +190,13 @@ void MainWindow::build_type_menu(QMenu* menu) {
     }
     menu->addSeparator();
     if (QAction* act = action("act_warp_text")) menu->addAction(act);
+    menu->addSeparator();
+    QMenu* languages = menu->addMenu(QStringLiteral("言語オプション"));  // (PC5 G-b)
+    languages->setObjectName(QStringLiteral("menu_type_language"));
+    for (const char* name : {"act_type_lang_default", "act_type_lang_east_asian", "act_type_lang_middle_eastern"}) languages->addAction(action(name));
+    languages->addSeparator();
+    for (const char* name : {"act_type_composer_world", "act_type_rtl"}) languages->addAction(action(name));
+    type_language_features(type_language_features());  // (the menus as the settings say)
     menu->addSeparator();
     menu->addAction(action("act_type_update_all"));
     menu->addSeparator();
@@ -244,6 +299,97 @@ void MainWindow::refresh_type_commands() {
     action("act_type_to_point")->setEnabled(loose && shape != "point");
     action("act_type_to_box")->setEnabled(loose && shape != "box");
     if (canvas_->editor() != nullptr) action("act_type_lorem")->setEnabled(true);
+    // PC5 G-b: OpenType ▸ — what the whole text's first letters take, the features its font has; 言語オプション ▸
+    Json chars = Json::object(), para = Json::object();
+    std::vector<std::string> has;
+    if (record != nullptr) {
+        const Json* styles = book().type_styles ? &*book().type_styles : nullptr;
+        try {
+            chars = core::type_text::resolve_chars(*record, styles).front().attrs;
+            para = core::type_text::resolve_para(*record, styles, 0);
+        } catch (const std::exception&) {
+        }
+        static std::map<std::string, std::vector<std::string>> known;  // (a font's features, read once)
+        const std::string font = render::text::line_face(*record, std::optional<std::string>(book().font_path)).first.other;
+        auto it = known.find(font);
+        if (it == known.end()) {
+            std::vector<std::string> tags;
+            try {
+                tags = render::text::font_info(font).features;
+            } catch (const std::exception&) {
+            }
+            it = known.emplace(font, std::move(tags)).first;
+        }
+        has = it->second;
+    }
+    const Json features = chars.value("features", Json::object());
+    for (const auto& [tag, label] : opentype_names()) {
+        QAction* act = action(QStringLiteral("act_type_ot_") + tag);
+        const std::string t = tag.toStdString();
+        const Json value = features.is_object() ? features.value(t, Json()) : Json();
+        bool on = value.is_number_integer() && value.get<std::int64_t>() > 0;
+        if (t == "liga") on = chars.value("ligatures", Json(true)) != Json(false) && value != Json(0);
+        if (t == "calt") on = value != Json(0);
+        if (t == "palt") on = chars.value("proportional", Json(false)) == Json(true);
+        act->setEnabled(record != nullptr && std::binary_search(has.begin(), has.end(), t));
+        act->setChecked(record != nullptr && act->isEnabled() && on);
+    }
+    action("act_type_composer_world")->setEnabled(record != nullptr);
+    action("act_type_composer_world")->setChecked(record != nullptr && para.value("composer", Json()) == Json("world"));
+    action("act_type_rtl")->setEnabled(record != nullptr && record->wrap != "vertical");  // (down: Japanese alone)
+    action("act_type_rtl")->setChecked(record != nullptr && para.value("direction", Json()) == Json("rtl"));
+}
+
+void MainWindow::type_set(const Json& attrs) {
+    const std::optional<Json> target = type_target(true);
+    if (!target) {
+        refresh_type_commands();
+        return;
+    }
+    Json op{{"op", "set_type"}};
+    for (const auto& [key, value] : target->items()) op[key] = value;
+    for (const auto& [key, value] : attrs.items()) op[key] = value;
+    apply_ops(Json::array({op}));
+    refresh_type_commands();
+}
+
+void MainWindow::type_feature(const std::string& tag, bool on) {
+    const std::optional<Json> target = type_target(true);
+    const core::StoryLine* record = target ? type_record(*target) : nullptr;
+    if (record == nullptr) {
+        refresh_type_commands();
+        return;
+    }
+    if (tag == "liga") return type_set(Json{{"ligatures", on}});
+    if (tag == "palt") return type_set(Json{{"proportional", on}});
+    // (the whole text's features as they are, this one on or off: calt is on unless turned off, the others off unless on)
+    Json features = Json::object();
+    try {
+        const Json* styles = book().type_styles ? &*book().type_styles : nullptr;
+        features = core::type_text::resolve_chars(*record, styles).front().attrs.value("features", Json::object());
+    } catch (const std::exception&) {
+    }
+    if (!features.is_object()) features = Json::object();
+    if (tag == "calt") features[tag] = on ? 1 : 0;
+    else if (on) features[tag] = 1;
+    else features.erase(tag);
+    type_set(Json{{"features", features}});
+}
+
+QString MainWindow::type_language_features() const {
+    const QString which = settings()->value(kLanguageFeatures, QStringLiteral("east_asian")).toString();
+    return which == QLatin1String("default") || which == QLatin1String("middle_eastern") ? which : QStringLiteral("east_asian");
+}
+
+void MainWindow::type_language_features(const QString& which) {
+    const QString chosen = which == QLatin1String("default") || which == QLatin1String("middle_eastern") ? which : QStringLiteral("east_asian");
+    if (chosen != type_language_features()) settings()->setValue(kLanguageFeatures, chosen);
+    for (const char* key : {"default", "east_asian", "middle_eastern"}) {
+        if (QAction* act = action(QStringLiteral("act_type_lang_") + QString::fromLatin1(key))) act->setChecked(chosen == QLatin1String(key));
+    }
+    // (東アジア言語の機能: プロポーショナルメトリクス in OpenType ▸; 中東言語の機能: the paragraph's direction)
+    if (QAction* act = action("act_type_ot_palt")) act->setVisible(chosen == QLatin1String("east_asian"));
+    if (QAction* act = action("act_type_rtl")) act->setVisible(chosen == QLatin1String("middle_eastern"));
 }
 
 // --- the canvas: type layers made and typed over --------------------------------------------------------------------------

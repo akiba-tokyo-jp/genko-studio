@@ -243,6 +243,10 @@ genko_library(genko_render
     type_layer.cpp
     ops_type.cpp
     text/shaping.cpp
+    # PC5 G-b (組版・OpenType・書体・右から左: the OpenType typesetting's rows, SheenBidi's order, set_type)
+    text/bidi.cpp
+    text/opentype.cpp
+    ops_type_set.cpp
     # PC5 J-0 (制作の補助の土台: the production's op frames, its PSD blocks and .pcraft keys)
     ops_production.cpp
     ops_layer_comps.cpp
@@ -254,7 +258,7 @@ genko_library(genko_render
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core
   PRIVATE_DEPS genko_storage pillow_imaging PNG::PNG JPEG::JPEG ZLIB::ZLIB TIFF::TIFF Freetype::Freetype ${GENKO_WEBP} ${GENKO_LCMS2}
-               ${GENKO_OPENEXR} ${GENKO_AVIF} ${GENKO_ZSTD} genko_blake3 ${GENKO_LIBRAW} ${GENKO_HARFBUZZ})
+               ${GENKO_OPENEXR} ${GENKO_AVIF} ${GENKO_ZSTD} genko_blake3 ${GENKO_LIBRAW} ${GENKO_HARFBUZZ} genko_sheenbidi)
 # (sin, cos, atan2, hypot, pow, log go through core/pymath.cpp, which calls libm exactly as CPython does)
 # (numpy's float32 hypotf, atan2f: called in libm as numpy calls them; sinf, cosf, powf: glibc's, libm_float.cpp, with
 # std::fma where glibc's FMA build fuses. MSVC: /fp:precise, with which these have no intrinsic forms)

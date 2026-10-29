@@ -40,6 +40,7 @@ set(_packages
   "fonts~Bundled fonts (Dela Gothic One, Reggae One, Yomogi, Zen Kaku Gothic New, Zen Maru Gothic, Zen Old Mincho, IBM Plex Sans JP)~=NOASSERTION~OFL-1.1~built-in"
   "lucide~Lucide icons~=NOASSERTION~ISC~built-in"
   "blake3~BLAKE3 (its C implementation: the .pcraft's hashes)~blake3~CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception~built-in"
+  "sheenbidi~SheenBidi (the bidirectional order of right-to-left text set across)~sheenbidi~Apache-2.0~built-in"
   "libraw~LibRaw (camera RAW: a shared library of its own)~libraw~LGPL-2.1-only OR CDDL-1.0~bundled:(^lib/libraw_r\\.so|(^|/)raw_r\\.dll$)")
 if(CMAKE_HOST_WIN32)
   list(APPEND _packages

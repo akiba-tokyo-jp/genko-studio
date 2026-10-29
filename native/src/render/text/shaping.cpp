@@ -3,6 +3,7 @@
 #include "render/text/shaping.hpp"
 
 #include <hb.h>
+#include <hb-ot.h>
 
 #include <QByteArray>
 
@@ -72,6 +73,9 @@ std::vector<ShapedGlyph> shape(const ShapeRequest& request) {
     else if (request.direction == "rtl") hb_buffer_set_direction(buffer, HB_DIRECTION_RTL);
     else if (request.direction == "ttb") hb_buffer_set_direction(buffer, HB_DIRECTION_TTB);
     if (!request.language.empty()) hb_buffer_set_language(buffer, hb_language_from_string(request.language.c_str(), -1));
+    if (request.script.size() == 4 && request.script != "Zyyy" && request.script != "Zinh" && request.script != "Zzzz") {
+        hb_buffer_set_script(buffer, hb_script_from_iso15924_tag(HB_TAG(request.script[0], request.script[1], request.script[2], request.script[3])));
+    }
     hb_buffer_guess_segment_properties(buffer);
     std::vector<hb_feature_t> features;
     for (const auto& [tag, value] : request.features) features.push_back(hb_feature_t{tag_of(tag), value, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END});
@@ -105,5 +109,64 @@ std::vector<ShapedGlyph> shape(const ShapeRequest& request) {
 }
 
 std::string harfbuzz_version() { return hb_version_string(); }
+
+namespace {
+
+// A name of the font (its English one where it has one), "" for none.
+std::string name_of(hb_face_t* face, hb_ot_name_id_t id) {
+    for (const hb_language_t language : {hb_language_from_string("en", -1), HB_LANGUAGE_INVALID}) {
+        const unsigned length = hb_ot_name_get_utf8(face, id, language, nullptr, nullptr);
+        if (length == 0 || length > 4096) continue;
+        std::string out(length + 1, '\0');
+        unsigned size = length + 1;
+        hb_ot_name_get_utf8(face, id, language, &size, out.data());
+        out.resize(size);
+        if (!out.empty()) return out;
+    }
+    return {};
+}
+
+std::string tag_name(hb_tag_t tag) {
+    char text[5] = {};
+    hb_tag_to_string(tag, text);
+    return std::string(text, 4);
+}
+
+}  // namespace
+
+FontInfo font_info(const std::string& font, unsigned face_index) {
+    const std::shared_ptr<const Face> held = face_of(font, face_index);
+    hb_face_t* face = held->face;
+    FontInfo out;
+    out.family = name_of(face, HB_OT_NAME_ID_TYPOGRAPHIC_FAMILY);
+    if (out.family.empty()) out.family = name_of(face, HB_OT_NAME_ID_FONT_FAMILY);
+    out.style = name_of(face, HB_OT_NAME_ID_TYPOGRAPHIC_SUBFAMILY);
+    if (out.style.empty()) out.style = name_of(face, HB_OT_NAME_ID_FONT_SUBFAMILY);
+    out.postscript = name_of(face, HB_OT_NAME_ID_POSTSCRIPT_NAME);
+    out.faces = std::max(1U, hb_face_count(held->blob));
+    const unsigned axes = hb_ot_var_get_axis_count(face);
+    std::vector<hb_ot_var_axis_info_t> infos(axes);
+    unsigned got = axes;
+    if (axes > 0) hb_ot_var_get_axis_infos(face, 0, &got, infos.data());
+    for (unsigned i = 0; i < got; ++i) {
+        FontAxis axis;
+        axis.tag = tag_name(infos[i].tag);
+        axis.name = name_of(face, infos[i].name_id);
+        axis.min = infos[i].min_value;
+        axis.value = infos[i].default_value;
+        axis.max = infos[i].max_value;
+        out.axes.push_back(std::move(axis));
+    }
+    for (const hb_tag_t table : {HB_OT_TAG_GSUB, HB_OT_TAG_GPOS}) {
+        const unsigned count = hb_ot_layout_table_get_feature_tags(face, table, 0, nullptr, nullptr);
+        std::vector<hb_tag_t> tags(count);
+        unsigned n = count;
+        if (count > 0) hb_ot_layout_table_get_feature_tags(face, table, 0, &n, tags.data());
+        for (unsigned i = 0; i < n; ++i) out.features.push_back(tag_name(tags[i]));
+    }
+    std::sort(out.features.begin(), out.features.end());
+    out.features.erase(std::unique(out.features.begin(), out.features.end()), out.features.end());
+    return out;
+}
 
 }  // namespace genko::render::text

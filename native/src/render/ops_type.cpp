@@ -19,6 +19,7 @@
 #include "render/raster_ops.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
+#include "render/text/opentype.hpp"
 
 namespace genko::render {
 
@@ -94,6 +95,7 @@ std::optional<std::string> font_of(const Document& doc) { return std::optional<s
 // open yet: the ops leave the box as it is, as the page leaves such a text out).
 std::optional<text::Placement> placed(const StoryLine& record, const Document& doc) {
     try {
+        const text::TypeStyles styles(doc.type_styles ? &*doc.type_styles : nullptr);  // (PC5 G-b: the book's styles)
         return text::placement(record, kMeasureDpi, font_of(doc));
     } catch (const NotYetPorted&) {
         return std::nullopt;
@@ -167,6 +169,7 @@ std::optional<std::string> with_breaks(const StoryLine& record, const Document& 
     if (text::shape_of(record) != "box") return std::nullopt;
     std::vector<text::SetRow> rows;
     try {
+        const text::TypeStyles styles(doc.type_styles ? &*doc.type_styles : nullptr);
         rows = text::set_layout(record, kMeasureDpi, font_of(doc), text::LetterParts{}).set.rows;
     } catch (const NotYetPorted&) {
         return std::nullopt;
@@ -427,6 +430,9 @@ void add_type_layer(OpContext& c) {
         if (const Json* v = given(c.op, key)) nt[key] = *v;
     }
     if (const Json* aa = given(c.op, "antialias")) nt["antialias"] = antialias_of(*aa);
+    // (PC5 G-b, design G 4.1: a type layer is set by the OpenType typesetting from the first — native_type.shaping null
+    // given: as a line of before)
+    if (!nt.contains("shaping")) nt["shaping"] = "opentype";
     if (point != nullptr) {
         const std::array<double, 2> p = point_at(*point, "point");
         without_balloon(record);
@@ -566,6 +572,7 @@ Json mm_json(double v) { return Json(core::py_round(v, 2)); }
 void set_info(Json& out, const StoryLine& record, const Document& doc) {
     const std::optional<std::array<double, 6>> t = core::type_text::transform_of(record);
     try {
+        const text::TypeStyles styles(doc.type_styles ? &*doc.type_styles : nullptr);
         const text::Placement p = text::placement(record, kMeasureDpi, font_of(doc));
         out["size_mm"] = mm_json(static_cast<double>(p.em) * kPxMm);
         if (p.letters) {
@@ -777,11 +784,24 @@ core::OpFunction later(std::string name, std::string group) {
 
 }  // namespace
 
+namespace type_ops {
+
+TypeTarget target(core::Document& doc, const core::Json& op, bool edit) {
+    const Target t = target_of(doc, op, edit);
+    return TypeTarget{t.line, t.page, t.layer};
+}
+
+void set_native_type(core::StoryLine& record, const core::Json& raw) { set_native(record, raw); }
+
+void fit_point_text(core::StoryLine& record, const core::Document& doc) { fit_point(record, doc); }
+
+}  // namespace type_ops
+
 void register_type_ops(core::OpRegistry& registry) {
     registry.add("add_type_layer", add_type_layer);
     registry.add("edit_type", edit_type);
     registry.add_query("type_info", type_info);  // (a question: asked alone, applied as a dry run whoever asks)
-    registry.add("set_type", later("set_type", "G-b"));
+    registry.add("set_type", type_ops::set_type);  // (PC5 G-b: render/ops_type_set.cpp)
     registry.add("type_style", later("type_style", "G-c"));
     registry.add("line_to_type_layer", line_to_type_layer);
     registry.add("type_layer_to_line", type_layer_to_line);

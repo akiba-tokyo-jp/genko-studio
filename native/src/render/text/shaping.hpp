@@ -42,6 +42,7 @@ struct ShapeRequest {
     std::string language;
     std::vector<std::pair<std::string, std::uint32_t>> features;
     std::vector<std::pair<std::string, float>> variations;
+    std::string script;  // (PC5 G-b: an ISO 15924 tag, "Arab", …; "" from the text — render/text/bidi's scripts_of)
 };
 
 // The glyphs of the run, in the order they are drawn. core::Error("value") for a size that is not above 0 or a tag that is
@@ -50,5 +51,26 @@ std::vector<ShapedGlyph> shape(const ShapeRequest& request);
 
 // HarfBuzz's version ("8.3.0").
 std::string harfbuzz_version();
+
+// PC5 G-b (type.fonts, the 書式 → OpenType ▸ menu): what a font is and has — its family and style (the typographic ones
+// where it names them, else its own), its PostScript name, its variable axes (tag, name, least, default and most) and the
+// OpenType features its GSUB and GPOS tables hold (their tags, sorted, each once), and how many faces its file holds (a
+// collection: more than 1). core::Error / render::NotYetPorted as shape() for a font that cannot be read.
+struct FontAxis {
+    std::string tag;
+    std::string name;
+    double min = 0;
+    double value = 0;
+    double max = 0;
+};
+struct FontInfo {
+    std::string family;
+    std::string style;
+    std::string postscript;
+    std::vector<FontAxis> axes;
+    std::vector<std::string> features;
+    unsigned faces = 1;
+};
+FontInfo font_info(const std::string& font, unsigned face_index = 0);
 
 }  // namespace genko::render::text

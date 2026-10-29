@@ -1691,6 +1691,13 @@ public:
     // The chosen line as a type layer, the target type layer as a line (line_to_type_layer, type_layer_to_line).
     void line_to_type_layer();
     void type_layer_to_line();
+    // PC5 G-b: set_type with these attributes on the whole of the text chosen (type_target) — 書式 → OpenType ▸ (an OpenType
+    // feature on or off; the font's own features alone can be chosen), 言語オプション ▸ (which features the menus show:
+    // 初期設定・東アジア言語・中東言語, kept in the settings; the paragraph's composer and, 中東言語, its direction).
+    void type_set(const core::Json& attrs);
+    void type_feature(const std::string& tag, bool on);
+    void type_language_features(const QString& which);
+    QString type_language_features() const;
 
 private:
     void build_type_actions();

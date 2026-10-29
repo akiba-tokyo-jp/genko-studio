@@ -62,7 +62,10 @@ Json materials_list();
 // fonts.system_fonts(): [{name, style, path}] of the computer's fonts that can draw Japanese (the config folder's
 // fonts.json once looked for).
 Json system_fonts();
-// _fonts_list()
+// PC5 G-b (type.fonts): every font of the computer (Japanese or not) by family — [{family, styles: [{style, postscript, path,
+// japanese, axes?: [{tag, name, min, default, max}], faces?}]}] — looked for once (the config folder's type_fonts.json).
+Json type_fonts();
+// _fonts_list(): bundled, system (the fonts that draw Japanese) and, PC5 G-b, families (type_fonts)
 Json fonts_list();
 // _brushes_list(episode)
 Json brushes_list(const core::Document& doc);
