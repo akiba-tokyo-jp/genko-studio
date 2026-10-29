@@ -385,12 +385,9 @@ const OpRegistry& OpRegistry::builtin() {
     return registry;
 }
 
-void OpRegistry::add(std::string name, OpFunction function) {
-    // (PC5 G-c review P3-11: registered again as an op that changes the book, it is no question any more)
-    queries_.erase(name);
-    asks_.erase(name);
-    ops_[std::move(name)] = std::move(function);
-}
+// (PC5 G-c review P3-11: an op's function given again — render::ops_registry wraps every op so — keeps it a question when it
+// is one; add_query and its asks say which)
+void OpRegistry::add(std::string name, OpFunction function) { ops_[std::move(name)] = std::move(function); }
 
 void OpRegistry::add_query(std::string name, OpFunction function) {
     asks_.erase(name);

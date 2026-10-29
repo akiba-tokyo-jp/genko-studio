@@ -681,10 +681,17 @@ private slots:
         QVERIFY(!done.unchanged);
         QCOMPARE(done.journal_ops.size(), std::size_t{1});
         QCOMPARE(done.doc.title, std::string("changed"));
+        // (its function given again — render::ops_registry wraps each op —: still a question by its arguments)
         registry.add("probe", [](core::OpContext&) {});
-        QVERIFY(!registry.is_query(Json{{"op", "probe"}, {"action", "ask"}}));
+        QVERIFY(registry.is_query(Json{{"op", "probe"}, {"action", "ask"}}));
+        QVERIFY(!registry.is_query(Json{{"op", "probe"}, {"action", "do"}}));
+        // made a question by its name: whatever its arguments
         registry.add_query("probe", [](core::OpContext&) {});
-        QVERIFY(registry.is_query(Json{{"op", "probe"}}));
+        QVERIFY(registry.is_query(Json{{"op", "probe"}, {"action", "do"}}));
+        // the built registry (wrapped): type_style's list a question, its other actions not
+        QVERIFY(render::ops_registry().is_query(Json{{"op", "type_style"}, {"action", "list"}}));
+        QVERIFY(!render::ops_registry().is_query(Json{{"op", "type_style"}, {"action", "set"}}));
+        QVERIFY(render::ops_registry().is_query(Json{{"op", "type_info"}}));
     }
 };
 
