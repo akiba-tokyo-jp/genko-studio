@@ -55,6 +55,7 @@
 #include "core/model.hpp"
 #include "core/prefs_table.hpp"
 #include "core/pynum.hpp"
+#include "core/type_styles.hpp"
 
 namespace genko::app::preferences {
 
@@ -118,6 +119,24 @@ bool brush_preview() { return pref("view.brushPreview").get<bool>(); }
 void set_brush_preview(bool on) { settings()->setValue(QStringLiteral("ui/brush_preview"), on ? QStringLiteral("true") : QStringLiteral("false")); }
 
 bool cross_while_drawing() { return pref("cursors.showOnlyCrosshairWhilePainting").get<bool>(); }
+
+std::optional<core::Json> default_type_styles() {
+    const QByteArray kept = settings()->value(QStringLiteral("type/default_styles")).toString().toUtf8();
+    if (kept.isEmpty()) return std::nullopt;
+    try {
+        const core::Json formatting = core::type_styles::checked_defaults(core::Json::parse(kept.toStdString()));
+        if (formatting.is_null()) return std::nullopt;
+        return formatting;
+    } catch (const std::exception&) {  // (written by hand, or by another build: as if none were kept)
+        return std::nullopt;
+    }
+}
+
+void set_default_type_styles(const core::Json& formatting) {
+    const core::Json checked = core::type_styles::checked_defaults(formatting);
+    if (checked.is_null()) return;
+    settings()->setValue(QStringLiteral("type/default_styles"), QString::fromStdString(checked.dump()));
+}
 
 QString pen_button() { return QString::fromStdString(pref("tablet.penButton").get<std::string>()); }
 

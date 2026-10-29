@@ -814,7 +814,7 @@ void register_type_ops(core::OpRegistry& registry) {
     registry.add("edit_type", edit_type);
     registry.add_query("type_info", type_info);  // (a question: asked alone, applied as a dry run whoever asks)
     registry.add("set_type", type_ops::set_type);  // (PC5 G-b: render/ops_type_set.cpp)
-    registry.add("type_style", later("type_style", "G-c"));
+    registry.add_query("type_style", type_ops::type_style, type_ops::type_style_asks);  // (PC5 G-c: render/ops_type_styles.cpp; its list a question)
     registry.add("line_to_type_layer", line_to_type_layer);
     registry.add("type_layer_to_line", type_layer_to_line);
     registry.add("replace_fonts", later("replace_fonts", "G-d"));

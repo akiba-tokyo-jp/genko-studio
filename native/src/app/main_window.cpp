@@ -46,6 +46,7 @@
 #include "app/config.hpp"
 #include "app/preferences.hpp"
 #include "app/dialogs.hpp"
+#include "app/doc_area.hpp"
 #include "app/documents.hpp"
 #include "app/ime.hpp"
 #include "app/inputs.hpp"
@@ -143,6 +144,11 @@ bool open_elsewhere(const Session* session, const MainWindow* but) {
 }
 
 }  // namespace documents
+
+std::uint64_t new_tab_id() {
+    static std::uint64_t next = 0;
+    return ++next;
+}
 
 QString Document::title() const {
     if (contents) return QStringLiteral("%1の中身").arg(contents_title.isEmpty() ? QStringLiteral("スマートオブジェクト") : contents_title);  // (PC3 A1)
@@ -338,7 +344,11 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     column->addWidget(unported_);
     column->addWidget(read_only_);
     column->addWidget(failure_bar_);
-    column->addWidget(canvas_, 1);
+    // (PC5 H-c: the canvas alone in the middle — the tabs' way, as before — or the cells of ウィンドウ → アレンジ around it)
+    doc_area_ = new DocArea(canvas_);
+    connect(doc_area_, &DocArea::paneActivated, this, &MainWindow::activate_pane);
+    connect(canvas_, &PageCanvas::handUsed, this, &MainWindow::hand_used);
+    column->addWidget(doc_area_, 1);
     setCentralWidget(central);
     ime_ = new ImeEntry(canvas_);  // (the entrance for typed words; the text tool types in its InlineEditor, ime.hpp)
     ime_->hide();
@@ -903,7 +913,7 @@ void MainWindow::refresh_status() {
     setWindowTitle(QStringLiteral("%1 第%2話 — Genko Studio").arg(QString::fromStdString(b.title), QString::fromStdString(b.episode.repr())));
     if (doc_ < doc_tabs_->count()) {
         doc_tabs_->setTabText(doc_, documents_[static_cast<std::size_t>(doc_)].title());
-        doc_tabs_->setTabToolTip(doc_, session_->path() ? QDir::toNativeSeparators(qpath(*session_->path())) : QStringLiteral("未保存"));
+        doc_tabs_->setTabToolTip(doc_, tab_tip(doc_));  // (its path; PC5 H-c: its cell too)
     }
     save_label_->show_status(status);
     failure_bar_->show_status(status);
@@ -1075,11 +1085,16 @@ void MainWindow::store_document() {
     doc.page_index = page_index_;
     doc.view = canvas_->view_state();
     doc.target_layer = target_layer_id_;
+    keep_pane_views();  // (PC5 H-c: the panes' views too, each in its tab)
 }
 
 void MainWindow::show_document(int index) {
     const Document& doc = documents_[static_cast<std::size_t>(index)];
+    // (PC5 H-c review P2-1: another book — or another contents' tab — in front: what a tool left half done on the canvas is
+    // let go, whatever its page's id — a duplicate shares it —; never finished on this one)
+    if (session_ != doc.session || contents_ != doc.contents) canvas_->let_go();
     doc_ = index;
+    arrange_follow();  // (PC5 H-c: the canvas to its tab's cell — before the view is given: the cell's size —, main_window_arrange.cpp)
     session_ = doc.session;
     page_index_ = doc.page_index;
     target_layer_id_ = doc.target_layer;
@@ -1311,6 +1326,7 @@ bool MainWindow::close_document(int index) {
         show_document(std::min(index, static_cast<int>(documents_.size()) - 1));
     } else {
         doc_ = doc_tabs_->currentIndex();
+        arrange_follow();  // (PC5 H-c: its cell gone)
     }
     script_event(service::script_events::Event::CloseDocument);  // (PC5 I-e: after it, as Photoshop's — on the book now in front)
     return true;
@@ -1617,7 +1633,7 @@ void MainWindow::refresh_first_steps() {
     const bool empty = !first_steps_closed_ && !lines && !drawn && !panels;
     if (empty && first_steps_ == nullptr) {
         first_steps_ = first_steps_bar();
-        column_->insertWidget(column_->indexOf(canvas_), first_steps_);
+        column_->insertWidget(column_->indexOf(doc_area_), first_steps_);
     }
     if (first_steps_ != nullptr) first_steps_->setVisible(empty);
     for (QPushButton* button : first_buttons_) {  // (the keys as they are now: 環境設定 may have changed them)
@@ -1628,7 +1644,7 @@ void MainWindow::refresh_first_steps() {
     const bool next = panels && wanted != nullptr && wanted->isChecked() && !(first_steps_ != nullptr && first_steps_->isVisible());
     if (next && next_steps_ == nullptr) {
         next_steps_ = next_steps_bar();
-        column_->insertWidget(column_->indexOf(canvas_), next_steps_);
+        column_->insertWidget(column_->indexOf(doc_area_), next_steps_);
     }
     if (next_steps_ == nullptr) return;
     const bool saved = session_->path().has_value() && session_->status().kind == SaveKind::Saved;

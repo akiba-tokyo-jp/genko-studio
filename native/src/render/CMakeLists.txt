@@ -268,6 +268,8 @@ genko_library(genko_render
     # PC5 J-d1 (計測: measure@1 — the ops, a .pcraft's measurement; PSD's 1074 in psd_annotations.cpp)
     ops_measure.cpp
     pcraft_measure.cpp
+    # PC5 G-c (文字スタイル・段落スタイル: type_style)
+    ops_type_styles.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

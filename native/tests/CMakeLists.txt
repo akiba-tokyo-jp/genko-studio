@@ -189,6 +189,14 @@ genko_test(test_shaping SOURCES unit/test_shaping.cpp DEPS genko_test_support ge
 # alignment, indents, leading), right-to-left text set across, the cells chosen down, saved and read back.
 genko_test(test_contract_opentype SOURCES contract/test_contract_opentype.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service
            LABELS contract TIMEOUT 600)
+# PC5 G-c (SPEC.md TEXT-02「文字スタイル・段落スタイル」): the book's character and paragraph styles through type_style — a style's
+# life (made, applied, overridden, changed, cleared, renamed, duplicated, deleted with the looks kept), from the text and
+# redefined, Basic Paragraph, one style a letter, list a question, names, a smart object's contents, the default formatting.
+genko_test(test_type_styles SOURCES unit/test_type_styles.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC5 G-c: the styles drawn — a style changed sets the lines and type layers that take it anew (the page's pixels, a point
+# text's box), Basic Paragraph too; saved and read back; a book without styles as before; the window's words for the refusals.
+genko_test(test_contract_type_styles SOURCES contract/test_contract_type_styles.cpp DEPS genko_test_support genko_render_ops genko_formats
+           genko_service LABELS contract TIMEOUT 600)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
 # PC3 C-e (SPEC.md COLOR-07「判型」): the page size ops on a book in memory — each thing on a page where the map takes it,
@@ -884,6 +892,14 @@ if(GENKO_BUILD_APP)
   endfunction()
   if(UNIX AND NOT APPLE)
     genko_xvfb_test(test_gui_canvas_gpu test_gui_canvas theCardShowsWhatTheProcessorDraws)
+  endif()
+  # PC5 H-c (SPEC VIEW-01「窓の区画と並べ方」): ウィンドウ → アレンジ — the books in cells of one window (4 アップ, the panes, a pane
+  # clicked to the front, a tab in no cell, 16 at most), ウィンドウを分離 and すべてをタブに統合, 同じ…で表示, Shift in every pane,
+  # closing asked once, ツール and 修飾キー, and the one window, one pane way as before; on Xvfb (test_gui_arrange_gpu) the
+  # canvas on the graphics card moved to another cell
+  genko_test(test_gui_arrange SOURCES gui/test_gui_arrange.cpp DEPS genko_app GUI TIMEOUT 900)
+  if(UNIX AND NOT APPLE)
+    genko_xvfb_test(test_gui_arrange_gpu test_gui_arrange theCardFollowsTheFrontPane)
   endif()
   # PC5 H-a: the tiles — 画素の段 laid nearest, ピクセルアートプレビュー, 32 bit プレビュー on the three ways, the tiles on the card
   genko_test(test_tiles SOURCES unit/test_tiles.cpp DEPS genko_app LABELS unit TIMEOUT 600)

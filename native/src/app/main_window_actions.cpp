@@ -430,9 +430,10 @@ void MainWindow::build_actions() {
     QAction* guides = make("act_guides", QStringLiteral("仕上がり線・基本枠を表示"), [] {}, keys({QKeySequence(QStringLiteral("Ctrl+;"))}),
                            QStringLiteral("断ち切り（裁ち落とし）・仕上がり線・基本枠"), true);
     guides->setChecked(true);
-    connect(guides, &QAction::triggered, this, [c, guides](bool) {
+    connect(guides, &QAction::triggered, this, [this, c, guides](bool) {
         c->show_guides = guides->isChecked();
         c->update();
+        panes_follow();  // (PC5 H-c review P3-4)
     });
     // 色の校正 (view.proofColors; Python's 「CMYK で見る（色校正）」, its id kept): the page as 校正の設定 shows it — the
     // working CMYK unless another is chosen there (書き出しの CMYK: Python's own). Ctrl+Y is やり直す: Ctrl+Alt+Y.
@@ -555,6 +556,7 @@ void MainWindow::build_actions() {
         canvas_->show_frame_numbers = on;
         canvas_->binding = book().binding;
         canvas_->update();
+        panes_follow();  // (PC5 H-c review P3-4)
     });
     make("act_template", QStringLiteral("テンプレートでコマを割る…"), [this] { templates_dialog(); }, {},
          QStringLiteral("今のページのコマと台詞を作り直します"));
@@ -963,6 +965,7 @@ void MainWindow::build_docks() {
     view_menu_->addAction(library_dock_->toggleViewAction());
     library_dock_->hide();
     agent_view(agent_book());
+    build_arrange_docks();  // (PC5 H-c: ツール's switch and 修飾キー in ウィンドウ — main_window_arrange.cpp)
     name_panels();  // (PC5 H-0: ナビゲーター, オプション, ヒストリー — main_window_arrange.cpp)
     setTabPosition(Qt::LeftDockWidgetArea, QTabWidget::North);
     setTabPosition(Qt::RightDockWidgetArea, QTabWidget::North);

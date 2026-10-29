@@ -828,7 +828,7 @@ std::shared_ptr<const core::Document> MainWindow::shown_book() const {
 }
 
 Json MainWindow::with_contents_target(const Json& ops) const {
-    if (!contents_ || !ops.is_array()) return ops;
+    if (!contents_ || to_book_ || !ops.is_array()) return ops;
     Json out = ops;
     for (Json& op : out) {
         if (op.is_object() && !op.contains("contents")) op["contents"] = *contents_;

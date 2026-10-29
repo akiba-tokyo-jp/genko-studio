@@ -41,7 +41,7 @@ const std::vector<std::string>& app_keys() {
         "picker/size", "raw/auto_tone", "raw/depth", "raw/remembered/IMG_0001.CR2", "raw/remembered_order", "raw/resolution",
         "raw/sharpen", "raw/smart_object", "raw/space", "save/after_ms", "shapes/mode", "shapes/pen_mode", "shortcuts/ブラシツール",
         "shortcuts/水平方向に反転（表示）", "shortcuts_unread/グラデーション", "snap/guides", "snap/grid", "stroke/location",
-        "stroke/width_mm", "subview/images", "tablet/button", "tablet/gamma", "tool_presets/current_only", "ui/brightness",
+        "stroke/width_mm", "subview/images", "tablet/button", "tablet/gamma", "tool_presets/current_only", "type/default_styles", "type/language_features", "ui/brightness",
         "ui/brush_preview", "ui/commandbar", "ui/cross_drawing", "ui/cursor", "ui/font_pt", "ui/gpu_canvas", "ui/gpu_memory_mb", "ui/hints", "ui/key_set", "ui/key_set_told",
         "ui/layer_details", "ui/mono_icons", "ui/next_steps", "ui/phone_view", "ui/quick", "ui/radial", "ui/raise_requests",
         "ui/reduce_motion", "ui/rest_minutes", "ui/stage", "ui/surround", "ui/theme", "ui/tool_names", "ui/ui_font", "ui/workspace",

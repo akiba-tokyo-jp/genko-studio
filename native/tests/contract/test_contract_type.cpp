@@ -376,7 +376,7 @@ private slots:
     // the later groups' ops: known by name, refused as not yet in this build
     void laterOpsRefused() {
         const core::Document doc = with_type(plain_book());
-        for (const char* name : {"type_style", "replace_fonts"}) {  // (G-a wrote line_to_type_layer, type_layer_to_line; G-b set_type)
+        for (const char* name : {"replace_fonts"}) {  // (G-a wrote line_to_type_layer, type_layer_to_line; G-b set_type; G-c type_style)
             const std::string why = refusal(doc, Json::array({Json{{"op", name}, {"page", 1}, {"layer_id", "t1"}}}));
             QVERIFY2(why.starts_with("not_yet_ported") && why.find(std::string(name) + " is not in the C++ build yet") != std::string::npos, why.c_str());
         }

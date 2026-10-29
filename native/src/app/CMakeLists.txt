@@ -57,6 +57,8 @@ genko_library(genko_app
     view_units.cpp
     preferences_units.cpp
     main_window_arrange.cpp
+    doc_area.cpp
+    pane_view.cpp
     main_window_edit.cpp
     key_sets.cpp
     settings_watch.cpp

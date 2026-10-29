@@ -12,6 +12,7 @@
 #include "app/ask.hpp"
 #include "app/comfort.hpp"
 #include "app/config.hpp"
+#include "app/ime.hpp"
 #include "app/perf.hpp"
 #include "app/theme.hpp"
 #include "core/frames.hpp"
@@ -116,6 +117,45 @@ void PageCanvas::set_page(DocPtr doc, std::size_t index) {
     }
 }
 
+void PageCanvas::let_go() {
+    stroke_.clear();
+    live_.reset();
+    overlays_.clear();
+    frame_drag_.reset();
+    frame_poly_.clear();
+    line_drag_.reset();
+    handle_drag_.reset();
+    balloon_stroke_.clear();
+    pen_knots_.clear();
+    pen_handle_.reset();
+    shape_pts_.clear();
+    poly_points_.clear();
+    cancel_ruler();
+    if (warping()) cancel_warp();
+    if (crop_) set_crop(std::nullopt);
+    cancel_transform();
+    update();
+}
+
+bool PageCanvas::half_done() const {
+    return transforming() || warping() || crop_.has_value() || !pen_knots_.empty() || !shape_pts_.empty() || !poly_points_.empty() ||
+           editor() != nullptr;
+}
+
+void PageCanvas::finish_half_done() {
+    if (InlineEditor* typing = editor()) typing->finish(true);
+    if (transforming()) finish_transform();
+    if (warping()) finish_warp();
+    if (crop_) {  // (as Enter on it: crop_key)
+        const CropBox box = *crop_;
+        set_crop(std::nullopt);
+        emit cropRequested(box.rect(), box.angle);
+    }
+    if (!pen_knots_.empty()) finish_pen(false);
+    if (!shape_pts_.empty()) finish_shape(false);
+    if (!poly_points_.empty()) finish_points();
+}
+
 void PageCanvas::clear_page() {
     doc_.reset();
     index_ = 0;
@@ -139,7 +179,9 @@ void PageCanvas::show_frame(const QImage& picture) {
 
 void PageCanvas::request_tiles() {
     if (page() == nullptr || width() <= 0 || height() <= 0) return;
-    renderer_->want(base_dpi(), wanted_dpi(), seen_mm());
+    // (PC5 H-c, 節 H 4.5: a pane beside the one in front keeps the whole page's tiles only)
+    const int base = base_dpi();
+    renderer_->want(base, view_only_ ? base : wanted_dpi(), seen_mm());
 }
 
 bool PageCanvas::wait_rendered(int ms) {
@@ -394,6 +436,15 @@ void PageCanvas::center_on(double x_mm, double y_mm) {
     view_.pan = QPointF(width() / 2.0 - x_mm * view_.scale, height() / 2.0 - y_mm * view_.scale);
     view_.fitted = false;
     live_reset();
+    rerender_.start();
+    emit changed();
+    update();
+}
+
+void PageCanvas::pan_by(const QPointF& moved) {
+    if (moved.isNull()) return;
+    view_.pan += moved;
+    view_.fitted = false;
     rerender_.start();
     emit changed();
     update();

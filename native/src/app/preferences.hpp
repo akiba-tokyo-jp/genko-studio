@@ -16,6 +16,8 @@
 #include <utility>
 #include <vector>
 
+#include "core/json.hpp"
+
 class QAction;
 class QCheckBox;
 class QComboBox;
@@ -72,6 +74,11 @@ QString pen_button();
 bool brush_preview();
 void set_brush_preview(bool on);
 bool cross_while_drawing();
+// PC5 G-c (type.saveDefaultTypeStyles, type.loadDefaultTypeStyles; SPEC.md TEXT-02): 書式 → 初期設定の書式を保存 keeps the chosen
+// text's formatting ({"char", "para"}: core::type_styles::defaults_of) in the machine's settings ("type/default_styles" —
+// never in the book); 初期設定の書式を読み込み lays it on a text. None when nothing is kept, or what is kept is not in its form.
+std::optional<core::Json> default_type_styles();
+void set_default_type_styles(const core::Json& formatting);
 // The pressure curve that turns the person's usual pressing (the median) into the middle width. Throws
 // std::invalid_argument("もう少し長く試し描きします") with too few presses.
 double gamma_for(const std::vector<double>& pressures);

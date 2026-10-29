@@ -32860,9 +32860,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -32888,9 +32893,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -32916,9 +32926,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -32944,9 +32959,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -32972,9 +32992,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33000,9 +33025,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33028,9 +33058,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33056,9 +33091,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33084,9 +33124,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33854,9 +33899,15 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/app/main_window_type.cpp",
+        "native/src/app/preferences.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/gui/test_gui_type.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34729,9 +34780,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34757,9 +34813,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34785,9 +34846,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34813,9 +34879,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34841,9 +34912,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34869,9 +34945,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34897,9 +34978,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34925,9 +35011,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34953,9 +35044,14 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/render/ops_type_styles.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/contract/test_contract_type_styles.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -35215,9 +35311,15 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/type_styles.cpp",
+        "native/src/app/main_window_type.cpp",
+        "native/src/app/preferences.cpp",
+        "native/tests/unit/test_type_styles.cpp",
+        "native/tests/gui/test_gui_type.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38656,9 +38758,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38694,9 +38803,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38732,9 +38848,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38770,9 +38893,16 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38808,9 +38938,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/tests/gui/test_gui_layout.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38841,9 +38979,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38874,9 +39019,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38907,9 +39059,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38940,9 +39099,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38973,9 +39139,16 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39011,9 +39184,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/tests/gui/test_gui_layout.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39044,9 +39225,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/tests/gui/test_gui_layout.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39077,9 +39266,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/tests/gui/test_gui_layout.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39110,9 +39307,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/tests/gui/test_gui_layout.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39143,9 +39348,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/tests/gui/test_gui_layout.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39176,9 +39389,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/tests/gui/test_gui_layout.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39209,9 +39430,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/tests/gui/test_gui_layout.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39242,9 +39471,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/tests/gui/test_gui_layout.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39275,9 +39512,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/src/app/doc_area.cpp",
+        "native/src/app/pane_view.cpp",
+        "native/src/app/main_window.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/tests/gui/test_gui_layout.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39770,9 +40015,15 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_actions.cpp",
+        "native/src/app/main_window_arrange.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/src/app/main_window_output.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39885,9 +40136,14 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_actions.cpp",
+        "native/src/app/main_window_arrange.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39956,9 +40212,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_arrange.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -39988,9 +40248,14 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_actions.cpp",
+        "native/src/app/main_window_arrange.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40062,9 +40327,15 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_actions.cpp",
+        "native/src/app/main_window_arrange.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/src/app/main_window_brushes.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -40486,9 +40757,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_actions.cpp",
+        "native/src/app/main_window_arrange.cpp",
+        "native/tests/gui/test_gui_arrange.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

@@ -256,9 +256,7 @@ void MainWindow::choose_proof(const QString& id) {
     apply_proof_view();
 }
 
-void MainWindow::apply_proof_view() {
-    if (documents_.empty() || canvas_ == nullptr) return;
-    const ProofView& v = proof_view();
+bool MainWindow::proof_renderer(PageRenderer& r, const ProofView& v) {
     render::proof::Setup setup;
     setup.kind = v.kind;
     setup.plate = v.plate;
@@ -266,7 +264,6 @@ void MainWindow::apply_proof_view() {
     setup.bpc = v.bpc;
     setup.simulate_paper = v.simulate_paper;
     QString profile = v.profile;
-    PageRenderer& r = canvas_->renderer();
     r.set_hdr(v.hdr);  // (PC5 H-a: 32 bit プレビューオプション, the tab's own)
     if (profile == QLatin1String("working")) {
         const cs::Working w = cs::working(cs::Space::Cmyk, cs::load());
@@ -276,19 +273,9 @@ void MainWindow::apply_proof_view() {
         const core::BuiltinProfile* b = core::builtin_profile(profile.toStdString());
         setup.icc = b != nullptr ? builtin_bytes(*b) : read_profile_file(profile);
         if (!setup.icc && (v.on || v.gamut)) {
-            // (カスタム…'s file gone or unreadable: not silently another proof — both off, said; the tiles as they were)
-            ProofView& now = documents_[static_cast<std::size_t>(doc_)].proof;
-            now.on = false;
-            now.gamut = false;
             r.set_proof(false);
             r.set_gamut(std::nullopt);
-            show_proof_marks();
-            refresh_gamut_count();
-            flash(QStringLiteral("校正のプロファイル「%1」が読めないため、色の校正と色域外警告を切りました（表示 → 校正の設定 → カスタム… で選び直せます）")
-                      .arg(QFileInfo(profile).fileName()),
-                  6000, true);
-            canvas_->update();
-            return;
+            return false;
         }
     }
     if (profile == QLatin1String("export")) setup.export_icc = cs::export_icc();
@@ -296,9 +283,32 @@ void MainWindow::apply_proof_view() {
     r.set_proof(v.on);
     r.set_gamut(v.gamut ? std::optional<GamutLook>(gamut_look()) : std::nullopt);
     r.set_monitor(display_color::current());
+    return true;
+}
+
+void MainWindow::apply_proof_view() {
+    if (documents_.empty() || canvas_ == nullptr) return;
+    const ProofView& v = proof_view();
+    // (PC5 H-c: the renderer's part is proof_renderer, a pane's tab's too — fill_pane)
+    if (!proof_renderer(canvas_->renderer(), v)) {
+        // (カスタム…'s file gone or unreadable: not silently another proof — both off, said; the tiles as they were)
+        const QString profile = v.profile;
+        ProofView& now = documents_[static_cast<std::size_t>(doc_)].proof;
+        now.on = false;
+        now.gamut = false;
+        show_proof_marks();
+        refresh_gamut_count();
+        flash(QStringLiteral("校正のプロファイル「%1」が読めないため、色の校正と色域外警告を切りました（表示 → 校正の設定 → カスタム… で選び直せます）")
+                  .arg(QFileInfo(profile).fileName()),
+              6000, true);
+        canvas_->update();
+        panes_follow();
+        return;
+    }
     show_proof_marks();
     refresh_gamut_count();
     canvas_->update();
+    panes_follow();  // (PC5 H-c review P3-4: the monitor's profile, カラー設定: the panes too)
 }
 
 void MainWindow::show_proof_marks() {
