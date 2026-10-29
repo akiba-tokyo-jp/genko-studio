@@ -6,11 +6,13 @@
 
 #include <algorithm>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
+#include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
 #include "core/type_text.hpp"

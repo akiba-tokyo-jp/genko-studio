@@ -343,10 +343,10 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
             }
             const std::vector<ShapedGlyph> glyphs = shape(request);
             if (glyphs.size() != 1 || glyphs.front().glyph == 0) return std::nullopt;
-            const TrueTypeFont& drawn = fonts.truetype(path, size, request.variations);
+            const TrueTypeFont& drawn_font = fonts.truetype(path, size, request.variations);
             // (the glyph the letter has anyway, no axes, no variation selector: set as before — its vertical form, its turn)
-            if (request.variations.empty() && !has_vs(cell) && glyphs.front().glyph == drawn.glyph_index(cell.front())) return std::nullopt;
-            return glyph_by_id(glyphs.front().glyph, cell, drawn, size, rgb, bold);
+            if (request.variations.empty() && !has_vs(cell) && glyphs.front().glyph == drawn_font.glyph_index(cell.front())) return std::nullopt;
+            return glyph_by_id(glyphs.front().glyph, cell, drawn_font, size, rgb, bold);
         };
     }
     if (by_place) {
@@ -602,8 +602,12 @@ OpenTypeRows opentype_rows(const OpenTypeIn& q) {
                     spans.emplace_back(row_start, at_);
                     row_start = at_;
                     width = 0.0;
-                    for (std::size_t k = row_start; k < i; ++k) width += shaped.advance[k];
                     breakable.reset();
+                    for (std::size_t k = row_start; k < i; ++k) {
+                        width += shaped.advance[k];
+                        if (k > row_start && breaks_before(k)) breakable = k;
+                    }
+                    if (i > row_start && breaks_before(i)) breakable = i;
                 }
                 width += w;
             }

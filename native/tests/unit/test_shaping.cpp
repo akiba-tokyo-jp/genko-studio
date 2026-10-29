@@ -70,20 +70,21 @@ class TestShaping : public QObject {
     Q_OBJECT
 
 private slots:
-    // 標準合字 (liga): "office" set with its ligature (fewer glyphs, its clusters kept) and without it (a glyph a letter)
+    // 前後関係に依存する字形 (calt, on by default): Inter's "->" set as one arrow (its cluster the first letter's), and as
+    // its two letters when turned off; 任意の合字 (dlig) another glyph for "f"
     void ligatures() {
-        const auto on = shaped("office", inter());
-        const auto off = shaped("office", inter(), {{"liga", 0}});
-        QCOMPARE(off.size(), std::size_t{6});
-        QVERIFY2(on.size() < off.size(), std::to_string(on.size()).c_str());
-        QCOMPARE(on.front().cluster, 0U);
-        QCOMPARE(on.back().cluster, 5U);  // ("e", the last letter)
+        const auto on = shaped("a->b", inter());
+        const auto off = shaped("a->b", inter(), {{"calt", 0}});
+        QCOMPARE(off.size(), std::size_t{4});
+        QCOMPARE(on.size(), std::size_t{3});
+        QCOMPARE(on[1].cluster, 1U);
+        QCOMPARE(on[2].cluster, 3U);
+        QVERIFY(ids(shaped("fi", inter(), {{"dlig", 1}})) != ids(shaped("fi", inter())));
     }
 
     // 分数字・序数表記・デザインのバリエーション・前後関係に依存する字形: each changes the glyphs only where it is on
     void features() {
         QVERIFY(ids(shaped("1/2", inter(), {{"frac", 1}})) != ids(shaped("1/2", inter())));
-        QVERIFY(ids(shaped("2nd", inter(), {{"ordn", 1}})) != ids(shaped("2nd", inter())));
         QVERIFY(ids(shaped("a", inter(), {{"salt", 1}})) != ids(shaped("a", inter())) ||
                 ids(shaped("a", inter(), {{"ss01", 1}})) != ids(shaped("a", inter())));
         QCOMPARE(ids(shaped("xyz", inter(), {{"frac", 1}})), ids(shaped("xyz", inter())));  // (nothing to make a fraction of)
@@ -114,7 +115,7 @@ private slots:
             }
         }
         QVERIFY(weight);
-        for (const char* tag : {"liga", "frac", "calt", "kern", "ordn"}) QVERIFY2(std::binary_search(info.features.begin(), info.features.end(), std::string(tag)), tag);
+        for (const char* tag : {"calt", "dlig", "frac", "kern", "salt", "ss01"}) QVERIFY2(std::binary_search(info.features.begin(), info.features.end(), std::string(tag)), tag);
         QVERIFY(std::is_sorted(info.features.begin(), info.features.end()));
         QCOMPARE(info.faces, 1U);
         // a bundled font: its names, no axes
@@ -183,7 +184,7 @@ private slots:
         const std::u32string words = U"ab אב";
         const std::vector<std::size_t> look_of{0, 0, 0, 1, 1};
         const text::ShapedParagraph p = text::shape_paragraph(words, looks, look_of, "ltr");
-        QCOMPARE(p.runs.size(), std::size_t{3});  // ("ab", " " — another script's —, "אב": each its own run)
+        QCOMPARE(p.runs.size(), std::size_t{2});  // ("ab " — the space its neighbours' script, Inter's look —, "אב")
         for (bool s : p.starts) QVERIFY(s);
         const text::RowGlyphs row = text::row_glyphs(p, 0, words.size());
         QCOMPARE(row.glyphs.size(), std::size_t{5});
@@ -221,8 +222,8 @@ private slots:
             }
             return out;
         };
-        const auto lig = face.glyph_mask(place(shaped("fi", inter())));
-        const auto apart = face.glyph_mask(place(shaped("fi", inter(), {{"liga", 0}})));
+        const auto lig = face.glyph_mask(place(shaped("->", inter())));
+        const auto apart = face.glyph_mask(place(shaped("->", inter(), {{"calt", 0}})));
         QVERIFY(lig.first.width() > 0 && apart.first.width() > 0);
         QVERIFY(lig.first.tobytes() != apart.first.tobytes() || lig.first.size() != apart.first.size());
         const genko::render::TrueTypeFont& heavy = fonts.truetype(inter(), 60, {{"wght", 900}});

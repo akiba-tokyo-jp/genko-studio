@@ -1334,16 +1334,18 @@ private slots:
     }
 
     void lettersThisBuildCannotDrawAreLeftOutAndSaid() {
-        // A line whose letters this build cannot draw — OpenType features across (Pillow without raqm, the BASIC layout
-        // the reference is held to, raises KeyError) — does not stop the page on the canvas: its letters are left out,
-        // the band says what in words, and the rest is drawn as render_page draws the book with skip_unported.
+        // A line whose letters this build cannot draw — letters filled with a picture of a format it does not read yet (PC5
+        // G-b: OpenType features across, once left out so, are drawn now) — does not stop the page on the canvas: its
+        // letters are left out, the band says what in words, and the rest is drawn as render_page draws the book with
+        // skip_unported.
         Studio s;
         const std::string id = s.put(Json{{"op", "add_line"}, {"text", "ABC漢字"}, {"wrap", "horizontal"}, {"balloon", "box"}, {"x_mm", 40.0},
-                                          {"y_mm", 50.0}, {"w_mm", 40.0}, {"h_mm", 20.0}, {"style", Json{{"features", Json::array({"jp78"})}}}});
+                                          {"y_mm", 50.0}, {"w_mm", 40.0}, {"h_mm", 20.0},
+                                          {"style", Json{{"fill_png", "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiA="}}}});
         QVERIFY(!id.empty());
         QVERIFY(drawn_as_book(s));
         QTRY_VERIFY(s.window->unported_band()->isVisible());
-        QVERIFY2(s.window->unported_band()->text().contains(QStringLiteral("（横書きの文字の字形の指定（OpenType 機能））")),
+        QVERIFY2(s.window->unported_band()->text().contains(QStringLiteral("この版では読めない形式の画像")),
                  qPrintable(s.window->unported_band()->text()));
         QVERIFY(ink_in(shown(s), QRectF(40.0, 50.0, 40.0, 20.0), s.canvas()->base_dpi()) > 0);  // (the box drawn)
     }

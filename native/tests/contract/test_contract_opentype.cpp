@@ -133,7 +133,7 @@ core::Document set(const core::Document& doc, const Json& attrs, const std::stri
     return run(doc, op);
 }
 
-const core::StoryLine& record_of(const core::Document& doc, const std::string& id = "t1") {
+core::StoryLine record_of(const core::Document& doc, const std::string& id = "t1") {
     for (const core::Layer& l : doc.page(0).layers)
         if (l.id == id) return *l.type;
     throw std::runtime_error("no layer " + id);
@@ -251,7 +251,8 @@ private slots:
         core::Document doc = latin("office 1/2");
         const std::string plain = bytes(doc);
         doc = set(doc, Json{{"features", Json{{"frac", 1}}}});
-        const core::StoryLine* r = &record_of(doc);
+        const core::StoryLine kept_record = record_of(doc);
+        const core::StoryLine* r = &kept_record;
         QCOMPARE((*r->native_type)["char"]["features"], (Json{{"frac", 1}}));
         QCOMPARE((*r->native_type)["shaping"], Json("opentype"));
         QVERIFY(bytes(doc) != plain);
@@ -344,7 +345,8 @@ private slots:
         const auto right = *ink_mm(set(boxed, Json{{"align", "right"}}));
         QVERIFY(right[2] > 44 && left[0] < 6);
         // a word kept whole: a box too narrow for two words breaks between them
-        const core::StoryLine& two = record_of(latin("Hello there", Json{{"point", nullptr}, {"box", Json::array({5, 5, 22, 30})}}));
+        const core::Document hello = latin("Hello there", Json{{"point", nullptr}, {"box", Json::array({5, 5, 22, 30})}});
+        const core::StoryLine two = record_of(hello);
         const auto rows_set = render::text::set_layout(two, kDpi, std::nullopt, render::text::LetterParts{}).set.rows;
         QCOMPARE(rows_set.size(), std::size_t{2});
         QCOMPARE(rows_set[0].chars.size(), std::size_t{6});  // ("Hello " — its space at the row's end)

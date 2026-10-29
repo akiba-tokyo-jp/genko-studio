@@ -738,7 +738,8 @@ private slots:
                     .find("parent must be a folder") != std::string::npos);
         // a box in a balloon: a line's setting in it (no shape)
         const core::Document spoken = run(plain_book(), Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "a"}, {"box", kBox}, {"balloon", "speech"}, {"new_id", "s1"}});
-        QVERIFY(!layer_of(spoken, "s1")->type->native_type);
+        // (G-b: a type layer is set by the OpenType typesetting from the first — its native_type holds that mark alone)
+        QCOMPARE(*layer_of(spoken, "s1")->type->native_type, (Json{{"shaping", "opentype"}}));
     }
 
     // type_info as set: its rows on the page (across: each row's baseline from its left to its right) and its size

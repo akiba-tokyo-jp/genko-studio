@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
 #include "core/type_text.hpp"
@@ -66,16 +67,10 @@ Resolved resolve(const core::StoryLine& line, std::u32string_view text, const st
         if (cp == std::u32string::npos || cp > source.size()) cp = last;
         last = cp;
         const auto g = static_cast<std::int64_t>(std::upper_bound(bounds.begin(), bounds.end(), cp) - bounds.begin()) - 1;
-        const core::type_text::CharRun* run = &runs.front();
-        for (const auto& r : runs) {
-            if (r.start <= g && g < r.end) {
-                run = &r;
-                break;
-            }
-            if (r.start > g) break;
-            run = &r;
-        }
-        out.chars.push_back(run->attrs);
+        // (the run the grapheme is in: the last that starts at or before it — the runs cover the text in order)
+        auto it = std::upper_bound(runs.begin(), runs.end(), g, [](std::int64_t at, const core::type_text::CharRun& r) { return at < r.start; });
+        const core::type_text::CharRun& run = it == runs.begin() ? runs.front() : *(it - 1);
+        out.chars.push_back(run.attrs);
         out.para_of.push_back(para_at[std::min(cp, source.size())]);
     }
     return out;

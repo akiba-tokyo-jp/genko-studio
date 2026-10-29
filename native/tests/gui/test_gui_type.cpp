@@ -25,6 +25,7 @@
 #include "app/tool_settings.hpp"
 #include "core/type_text.hpp"
 #include "gui_support.hpp"
+#include "testsupport.hpp"
 #include "render/text/lettering.hpp"
 
 using namespace genko;
@@ -131,9 +132,11 @@ private slots:
         Studio s;
         QMenu* type = s.menu_at(QStringLiteral("書式"));
         QVERIFY(type != nullptr);
-        QCOMPARE(texts(type), QStringList({QStringLiteral("アンチエイリアス"), QStringLiteral("方向"), QStringLiteral("|"), QStringLiteral("作業用パスを作成"),
-                                           QStringLiteral("シェイプに変換"), QStringLiteral("テキストレイヤーをラスタライズ"), QStringLiteral("ポイントテキストに変換"),
-                                           QStringLiteral("段落テキストに変換"), QStringLiteral("|"), QStringLiteral("ワープテキスト…"), QStringLiteral("|"),
+        // (G-b: OpenType ▸ after 方向 ▸, 言語オプション ▸ after ワープテキスト…)
+        QCOMPARE(texts(type), QStringList({QStringLiteral("アンチエイリアス"), QStringLiteral("方向"), QStringLiteral("OpenType"), QStringLiteral("|"),
+                                           QStringLiteral("作業用パスを作成"), QStringLiteral("シェイプに変換"), QStringLiteral("テキストレイヤーをラスタライズ"),
+                                           QStringLiteral("ポイントテキストに変換"), QStringLiteral("段落テキストに変換"), QStringLiteral("|"),
+                                           QStringLiteral("ワープテキスト…"), QStringLiteral("|"), QStringLiteral("言語オプション"), QStringLiteral("|"),
                                            QStringLiteral("すべてのテキストレイヤーを更新"), QStringLiteral("|"), QStringLiteral("Lorem Ipsum をペースト"),
                                            QStringLiteral("|"), QStringLiteral("台詞をテキストレイヤーに"), QStringLiteral("テキストレイヤーを台詞に")}));
         QCOMPARE(texts(s.menu_at(QStringLiteral("書式/アンチエイリアス"))),
@@ -282,6 +285,63 @@ private slots:
         QCOMPARE(s.last()["op"], Json("rasterize_lines"));
         QCOMPARE(s.layer("t1")->kind, core::LayerKind::Raster);
         QVERIFY(!s.canvas()->type_frame.has_value());
+    }
+
+    // PC5 G-b: 書式 → OpenType ▸ (the chosen text's features, those its font has) and 言語オプション ▸ (which features the menus
+    // show, kept in the settings; the paragraph's composer and direction) — each a set_type on the whole text
+    void openTypeAndLanguages() {
+        Studio s;
+        QCOMPARE(texts(s.menu_at(QStringLiteral("書式/OpenType"))),
+                 QStringList({QStringLiteral("標準合字"), QStringLiteral("前後関係に依存する字形"), QStringLiteral("任意の合字"), QStringLiteral("スワッシュ字形"),
+                              QStringLiteral("デザインのバリエーション"), QStringLiteral("タイトル用字形"), QStringLiteral("飾り文字"), QStringLiteral("序数表記"),
+                              QStringLiteral("分数字"), QStringLiteral("オールドスタイル"), QStringLiteral("|"), QStringLiteral("プロポーショナルメトリクス")}));
+        QCOMPARE(texts(s.menu_at(QStringLiteral("書式/言語オプション"))),
+                 QStringList({QStringLiteral("初期設定の機能"), QStringLiteral("東アジア言語の機能"), QStringLiteral("中東言語の機能"), QStringLiteral("|"),
+                              QStringLiteral("中東および南アジア言語用 Composer"), QStringLiteral("右から左の段落")}));
+        // East Asian by default (as Photoshop's Japanese edition): プロポーショナルメトリクス shown, 右から左の段落 not
+        QVERIFY(s.act("act_type_lang_east_asian")->isChecked());
+        QVERIFY(s.act("act_type_ot_palt")->isVisible() && !s.act("act_type_rtl")->isVisible());
+        // nothing chosen: off
+        s.window->refresh_type_commands();
+        QVERIFY(!s.act("act_type_ot_liga")->isEnabled() && !s.act("act_type_composer_world")->isEnabled());
+        const std::string inter = genko::test::test_data(QStringLiteral("type/inter-subset.ttf")).toStdString();
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "office 1/2"}, {"wrap", "horizontal"},
+                                                      {"point", Json::array({30, 30})}, {"style", Json{{"size_mm", 6}, {"font", inter}}}, {"new_id", "t1"}}})));
+        s.window->set_target_layer("t1");
+        s.window->refresh_type_commands();
+        // the font's features: on where they are by default (calt), the others off; one it has not (Inter: liga, ornm): grey
+        QVERIFY(!s.act("act_type_ot_liga")->isEnabled() && !s.act("act_type_ot_ornm")->isEnabled());
+        QVERIFY(s.act("act_type_ot_calt")->isEnabled() && s.act("act_type_ot_calt")->isChecked());
+        QVERIFY(s.act("act_type_ot_frac")->isEnabled() && !s.act("act_type_ot_frac")->isChecked());
+        s.act("act_type_ot_frac")->trigger();
+        QCOMPARE(s.last(), (Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"features", Json{{"frac", 1}}}}));
+        QVERIFY(s.act("act_type_ot_frac")->isChecked());
+        s.act("act_type_ot_dlig")->trigger();
+        QCOMPARE(s.last(), (Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"features", Json{{"dlig", 1}, {"frac", 1}}}}));
+        s.act("act_type_ot_dlig")->trigger();
+        s.act("act_type_ot_calt")->trigger();  // (on by default: turned off as 0, frac kept)
+        QCOMPARE(s.last()["features"], (Json{{"calt", 0}, {"frac", 1}}));
+        QVERIFY(!s.act("act_type_ot_calt")->isChecked());
+        s.act("act_type_ot_frac")->trigger();
+        QCOMPARE(s.last()["features"], (Json{{"calt", 0}}));
+        QCOMPARE((*s.layer("t1")->type->native_type)["shaping"], Json("opentype"));
+        // 言語オプション: 中東言語 — 右から左の段落 shown, プロポーショナルメトリクス not; kept in the settings
+        s.act("act_type_lang_middle_eastern")->trigger();
+        QVERIFY(s.act("act_type_rtl")->isVisible() && !s.act("act_type_ot_palt")->isVisible());
+        QCOMPARE(s.window->type_language_features(), QStringLiteral("middle_eastern"));
+        s.window->refresh_type_commands();
+        s.act("act_type_rtl")->trigger();
+        QCOMPARE(s.last(), (Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"direction", "rtl"}}));
+        s.act("act_type_composer_world")->trigger();
+        QCOMPARE(s.last()["composer"], Json("world"));
+        QCOMPARE((*s.layer("t1")->type->native_type)["para"], (Json{{"direction", "rtl"}, {"composer", "world"}}));
+        s.window->refresh_type_commands();
+        QVERIFY(s.act("act_type_rtl")->isChecked() && s.act("act_type_composer_world")->isChecked());
+        // undone in one step
+        s.window->undo();
+        QVERIFY(!s.layer("t1")->type->native_type->value("para", Json::object()).contains("composer"));
+        s.window->type_language_features(QStringLiteral("default"));
+        QVERIFY(!s.act("act_type_rtl")->isVisible() && !s.act("act_type_ot_palt")->isVisible());
     }
 
     // a line made a type layer and back (書式's last two); a click on the target path: a text along it

@@ -46,6 +46,7 @@ struct GlyphShape {
     double scale_y = 1.0;
     double lean = 0.0;
     bool plain() const { return scale_x == 1.0 && scale_y == 1.0 && lean == 0.0; }
+    bool operator==(const GlyphShape&) const = default;
 };
 // A font's lines (px at its size): the underline's place below the baseline and its thickness, the strikeout's above it
 // and its thickness (the font's post and OS/2 tables; a share of the em where it has none).
