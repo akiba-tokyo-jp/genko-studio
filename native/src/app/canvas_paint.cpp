@@ -90,8 +90,8 @@ void PageCanvas::draw_in_page_px(QPainter& painter, const QImage& image, const Q
     const double mm = 25.4 / dpi;
     QTransform t = QTransform::fromScale(mm, mm) * QTransform(view_.scale, 0, 0, view_.scale, view_.pan.x(), view_.pan.y()) * view_transform();
     // (exactly one page pixel per screen pixel at 100 %, as the tiles are drawn)
-    if (std::abs(t.m11() - 1.0) < 1e-9 && std::abs(t.m22() - 1.0) < 1e-9 && std::abs(t.m12()) < 1e-12 && std::abs(t.m21()) < 1e-12) {
-        t = QTransform::fromTranslate(std::round(t.dx()), std::round(t.dy()));
+    if (std::abs(std::abs(t.m11()) - 1.0) < 1e-9 && std::abs(std::abs(t.m22()) - 1.0) < 1e-9 && std::abs(t.m12()) < 1e-12 && std::abs(t.m21()) < 1e-12) {
+        t = QTransform(t.m11() < 0 ? -1 : 1, 0, 0, t.m22() < 0 ? -1 : 1, std::round(t.dx()), std::round(t.dy()));  // (mirrored too: PC5 H-a)
     }
     const QTransform kept = painter.transform();
     painter.setTransform(t);

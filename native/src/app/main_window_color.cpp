@@ -242,10 +242,10 @@ void MainWindow::choose_proof(const QString& id) {
     }
     ProofView& v = documents_[static_cast<std::size_t>(doc_)].proof;
     if (id == QLatin1String("export")) {
-        v = ProofView{QStringLiteral("export"), Kind::Profile, 3, QStringLiteral("relative"), true, false, true, v.gamut};
+        v = ProofView{QStringLiteral("export"), Kind::Profile, 3, QStringLiteral("relative"), true, false, true, v.gamut, v.hdr};
     } else if (const auto kind = render::proof::kind_from_id(id.toStdString())) {
         if (kind->first == Kind::Profile) {  // (作業用 CMYK: its own defaults, as upstream's Proof Setup gives them)
-            v = ProofView{QStringLiteral("working"), Kind::Profile, 3, QStringLiteral("relative"), true, false, true, v.gamut};
+            v = ProofView{QStringLiteral("working"), Kind::Profile, 3, QStringLiteral("relative"), true, false, true, v.gamut, v.hdr};
         } else {
             if (kind->first == Kind::Plate || kind->first == Kind::CmyPlate) v.profile = QStringLiteral("working");  // (plates: the working CMYK's)
             v.kind = kind->first;

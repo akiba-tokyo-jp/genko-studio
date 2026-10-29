@@ -10,6 +10,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDoubleSpinBox>
+#include <QLabel>
 #include <QMenuBar>
 #include <QSpinBox>
 #include <QStatusBar>

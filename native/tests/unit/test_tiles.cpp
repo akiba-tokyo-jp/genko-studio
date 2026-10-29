@@ -12,6 +12,7 @@
 #include <set>
 
 #include "app/tiles.hpp"
+#include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/exposure.hpp"
 #include "core/model.hpp"
@@ -28,7 +29,12 @@ using core::Json;
 namespace {
 
 core::Document run_ops(const core::Document& doc, const Json& ops) {
-    return core::CommandBus(render::ops_registry()).apply(doc, ops, core::Actor("human:test")).doc;
+    try {
+        return core::CommandBus(render::ops_registry()).apply(doc, ops, core::Actor("human:test")).doc;
+    } catch (const core::ApplyError& error) {  // (said, the test failing on it)
+        qWarning("%s: %s", error.code().c_str(), error.what());
+        throw;
+    }
 }
 
 core::Document small_book(double w = 60, double h = 80, int dpi = 150, const char* expression = "color") {
@@ -206,23 +212,33 @@ private slots:
         renderer.set_hdr(darker);
         QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 30000);
         const QImage shown = renderer.compose(72);
+        // (the page's values there, as render_page gives them: the 2 pixels stretched over the page)
+        render::RenderOptions values_options;
+        values_options.mode = "proof";
+        values_options.skip_unported = true;
+        values_options.precise = true;
+        const render::RenderResult values = render::render_page(doc.page(0), 72, values_options, &doc);
+        QVERIFY(values.precise.has_value());
+        const core::ColorRasterView view(*values.precise);
+        const auto value = [&view](const QPoint& p) { return view.pixel(std::size_t(p.y()) * view.width() + std::size_t(p.x()))[0]; };
+        QVERIFY(value(left) > 1.4);
         const render::RgbSpace srgb;
-        const int back = byte(srgb.encode(0, srgb.decode(0, 1.5) * 0.25));
+        const int back = byte(srgb.encode(0, srgb.decode(0, value(left)) * 0.25));
         QVERIFY2(back < 250, qPrintable(QString::number(back)));
         QCOMPARE(qRed(shown.pixel(left)), back);  // (what was past white, back under it)
-        QCOMPARE(qRed(shown.pixel(right)), byte(srgb.encode(0, srgb.decode(0, 0.25) * 0.25)));
+        QCOMPARE(qRed(shown.pixel(right)), byte(srgb.encode(0, srgb.decode(0, value(right)) * 0.25)));
         render::HdrPreview compress;
         compress.highlight_compression = true;
         renderer.set_hdr(compress);
         QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 30000);
-        const double l = srgb.decode(0, 1.5);
+        const double l = srgb.decode(0, value(left));
         QCOMPARE(qRed(renderer.compose(72).pixel(left)), byte(srgb.encode(0, l / (1 + l))));
         // back to 0 and 1: as before
         renderer.set_hdr(render::HdrPreview{});
         QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 30000);
         QCOMPARE(renderer.compose(72), plain);
         // the 32-bit CMYK page: its inks shown through the preview
-        core::Document cmyk = run_ops(small_book(), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"depth", 32}}}));
+        core::Document cmyk = run_ops(small_book(), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}, {"depth", 32}}}));
         QVERIFY(cmyk.page(0).color && render::hdr_page(cmyk.page(0)));
         const auto inked = std::make_shared<const core::Document>(cmyk);
         app::PageRenderer inks;
@@ -238,26 +254,35 @@ private slots:
     // The grey and the CMYK ways of render/hdr_preview on their inks alone: a grey's lightness past white (any value at
     // 32 bits) back under it through its tone curve; a pixel drawn over the page (not what its inks show) left as drawn.
     void inksThroughThePreview() {
-        core::PageColor grey;
-        grey.space = core::InkSpace::Gray;
-        grey.depth = 32;
+        // (a grey page's colour as set_color_mode makes it: its profile held)
+        const core::Document grey_book = run_ops(small_book(), Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}, {"depth", 32}}}));
+        QVERIFY(grey_book.page(0).color && grey_book.page(0).color->space == core::InkSpace::Gray);
+        const core::PageColor grey = *grey_book.page(0).color;
         core::InkPixels pixels;
         pixels.space = core::InkSpace::Gray;
         pixels.depth = 32;
         pixels.width = 3;
         pixels.height = 1;
-        pixels.floats = {1.6f, 1.0f, 0.5f, 1.0f, 0.5f, 1.0f};  // (lightness, alpha)
+        pixels.floats = {1.6f, 1.0f, 1.0f, 1.0f, 0.5f, 1.0f};  // (lightness, alpha: past white, white, a grey drawn over)
         render::HdrPreview p;
-        p.exposure = -1;
+        p.exposure = -2;
         // (the page as shown: its lightness cut; the third pixel drawn over in red)
         const std::string plain_bytes = std::string{char(255), char(255), char(255), char(255), char(255), char(255), char(255), char(0), char(0)};
         const render::Image drawn = render::Image::frombytes("RGB", render::Size{3, 1}, plain_bytes);
         const render::Image shown = render::hdr_shown(drawn, pixels, grey, p);
         const std::string out = shown.tobytes();
-        const render::GrayCurve curve;
-        QCOMPARE(int(static_cast<unsigned char>(out[0])), byte(curve.encode(curve.decode(1.6) * 0.5)));
-        QVERIFY(static_cast<unsigned char>(out[0]) < 255);
-        QCOMPARE(int(static_cast<unsigned char>(out[3])), byte(curve.encode(curve.decode(1.0) * 0.5)));
+        // (the lightness through the page's tone curve, shown as the page shows a lightness: its ink 1 − L to the screen)
+        const render::GrayCurve curve(grey);
+        const auto shown_of = [&grey](double light) {
+            const double ink = 1.0 - std::clamp(light, 0.0, 1.0);
+            float srgb[3];
+            render::ink::to_srgb(grey, &ink, srgb, 1);
+            return byte(srgb[0]);
+        };
+        QCOMPARE(int(static_cast<unsigned char>(out[0])), shown_of(curve.encode(curve.decode(1.6) * 0.25)));
+        QVERIFY(static_cast<unsigned char>(out[0]) < 250);
+        QCOMPARE(int(static_cast<unsigned char>(out[3])), shown_of(curve.encode(curve.decode(1.0) * 0.25)));
+        QVERIFY(static_cast<unsigned char>(out[3]) < static_cast<unsigned char>(out[0]));
         QCOMPARE(int(static_cast<unsigned char>(out[6])), 255);  // (drawn over: as drawn)
         QCOMPARE(int(static_cast<unsigned char>(out[7])), 0);
         QCOMPARE(render::hdr_shown(drawn, pixels, grey, render::HdrPreview{}).tobytes(), plain_bytes);  // (0 and 1: nothing)

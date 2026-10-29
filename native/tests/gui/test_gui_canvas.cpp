@@ -635,10 +635,14 @@ private slots:
     }
 
     // render:GPU-CPU-parity (PC5 H-a, 節 H 4.3; the coordinator's 3 章: the processor composites, the card only shows): the
-    // page on the graphics card is the page the processor draws, within 1/255 — as it is, turned, mirrored, zoomed into its
-    // pixels and proofed. Where OpenGL cannot be had (the offscreen test screen), the card's surface gives up, the canvas
-    // draws by the processor again and says so (gpuFailed) — the same pixels; never skipped. (With QT_QPA_PLATFORM=xcb on
-    // Xvfb and Mesa, the card's way is the one checked.)
+    // page on the graphics card is the page the processor draws — within 1/255 everywhere as it is, mirrored, zoomed into
+    // its pixels and proofed. Turned, or zoomed off one tile pixel a screen pixel (fitted), the card's texture filter and the
+    // processor's painter resample the picture each their own way (both bilinear, their weights rounded otherwise): within
+    // 1/255 at all but the edges of sharp lines (at
+    // most 2 pixels in 1000 apart, never by more than 12/255, Mesa's llvmpipe), and the sheet's edges and soft shadow (the
+    // polygons around the page, smoothed by the card's 4 samples a pixel) are left out. Where OpenGL cannot be had (the
+    // offscreen test screen), the card's surface gives up, the canvas draws by the processor again and says so
+    // (gpuFailed) — the same pixels; never skipped. (QT_QPA_PLATFORM=xcb on Xvfb and Mesa checks the card's way.)
     void theCardShowsWhatTheProcessorDraws() {
         Desk desk;
         PageCanvas* c = desk.canvas();
@@ -648,6 +652,7 @@ private slots:
         QVERIFY(c->wait_rendered(30000));
         const auto cpu = [c] { return c->grab().toImage().convertToFormat(QImage::Format_RGB32); };
         QStringList failed;
+        QStringList apart;  // (the views where the card's picture is further from the processor's than allowed)
         QObject::connect(c, &PageCanvas::gpuFailed, c, [&failed](const QString& message) { failed << message; });
         // each view: the processor's picture, then the card's
         struct Look {
@@ -656,10 +661,20 @@ private slots:
         };
         const std::vector<Look> looks{
             {"as it is", [] {}},
-            {"turned", [c] { c->set_rotation(30); }},
             {"mirrored", [c] { c->flip_view(true); }},
             {"its pixels", [c] { c->actual_pixels(800); }},
             {"proofed", [c] { c->renderer().set_proof(true); }},
+            {"turned", [c] {
+                 c->renderer().set_proof(false);
+                 c->actual_size();
+                 c->center_on(105, 148);
+                 c->set_rotation(30);
+             }},
+            {"turned and mirrored", [c] { c->flip_view(false); }},
+            {"fitted", [c] {
+                 c->reset_view();
+                 c->fit_page();
+             }},
         };
         for (const Look& look : looks) {
             look.set();
@@ -682,17 +697,53 @@ private slots:
             auto* surface = qobject_cast<QOpenGLWidget*>(c->gpu_surface());
             const QImage shown = surface->grabFramebuffer().convertToFormat(QImage::Format_RGB32).scaled(processor.size());
             QCOMPARE(shown.size(), processor.size());
+            const bool resampled = c->rotation() != 0.0 || std::string_view(look.name) == "fitted";  // (bilinear: turned, or zoomed off the pixels)
+            // (turned: the pixels within 12 of the sheet's edges — its edge and its shadow, 1.6 to 9.6 screen pixels out —
+            // are not the page's)
+            const double w = c->page()->spec.width_mm.value(), h = c->page()->spec.height_mm.value();
+            const std::array<QPointF, 4> sheet{c->to_widget(QPointF(0, 0)), c->to_widget(QPointF(w, 0)), c->to_widget(QPointF(w, h)),
+                                               c->to_widget(QPointF(0, h))};
+            const auto on_edge = [&sheet](double x, double y) {
+                for (std::size_t i = 0; i < sheet.size(); ++i) {
+                    const QPointF a = sheet[i], d = sheet[(i + 1) % sheet.size()] - sheet[i];
+                    const double length = d.x() * d.x() + d.y() * d.y();
+                    if (length <= 0) continue;
+                    const double t = std::clamp(((x - a.x()) * d.x() + (y - a.y()) * d.y()) / length, 0.0, 1.0);
+                    if (std::hypot(x - (a.x() + t * d.x()), y - (a.y() + t * d.y())) < 12.0) return true;
+                }
+                return false;
+            };
             int most = 0;
+            QPoint where;
+            std::size_t counted = 0, off = 0;
             for (int y = 0; y < shown.height(); ++y) {
                 for (int x = 0; x < shown.width(); ++x) {
+                    if (resampled && on_edge(x + 0.5, y + 0.5)) continue;
                     const QRgb a = shown.pixel(x, y), b = processor.pixel(x, y);
-                    most = std::max({most, std::abs(qRed(a) - qRed(b)), std::abs(qGreen(a) - qGreen(b)), std::abs(qBlue(a) - qBlue(b))});
+                    const int apart_here = std::max({std::abs(qRed(a) - qRed(b)), std::abs(qGreen(a) - qGreen(b)), std::abs(qBlue(a) - qBlue(b))});
+                    ++counted;
+                    if (apart_here > 1) ++off;
+                    if (apart_here > most) {
+                        most = apart_here;
+                        where = QPoint(x, y);
+                    }
                 }
             }
-            QVERIFY2(most <= 1, qPrintable(QStringLiteral("%1: %2/255").arg(QString::fromLatin1(look.name)).arg(most)));
+            const bool within = resampled ? most <= 12 && off * 1000 <= counted * 2 : most <= 1;
+            if (!within) {
+                apart << QStringLiteral("%1: %2/255 at %3, %4 (%5 of %6 pixels past 1/255)")
+                             .arg(QString::fromLatin1(look.name))
+                             .arg(most)
+                             .arg(where.x())
+                             .arg(where.y())
+                             .arg(off)
+                             .arg(counted);
+            }
+            if (qEnvironmentVariableIsSet("HA_REPORT")) qInfo("%s: %d/255, %zu of %zu past 1/255", look.name, most, off, counted);
             QVERIFY(failed.isEmpty());
             QVERIFY(c->renderer().texture_bytes() > 0);  // (the tiles on the card counted)
         }
+        QVERIFY2(apart.isEmpty(), qPrintable(apart.join(QStringLiteral("; "))));
         c->use_gpu(false);
         QVERIFY(!c->renderer().texture_budget());
     }

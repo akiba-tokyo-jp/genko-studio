@@ -945,8 +945,9 @@ void PageRenderer::paint(QPainter& painter, const QRectF& visible_mm) const {
         const double mm = 25.4 / dpi;
         // page pixels → the screen; exactly one to one at 100 % (no resampling of the page's pixels)
         QTransform t = QTransform::fromScale(mm, mm) * to_screen;
-        if (std::abs(t.m11() - 1.0) < 1e-9 && std::abs(t.m22() - 1.0) < 1e-9 && std::abs(t.m12()) < 1e-12 && std::abs(t.m21()) < 1e-12) {
-            t = QTransform::fromTranslate(std::round(t.dx()), std::round(t.dy()));
+        // (PC5 H-a: mirrored too — a mirrored view at 100 % lays the pixels on the screen's as they are, unresampled)
+        if (std::abs(std::abs(t.m11()) - 1.0) < 1e-9 && std::abs(std::abs(t.m22()) - 1.0) < 1e-9 && std::abs(t.m12()) < 1e-12 && std::abs(t.m21()) < 1e-12) {
+            t = QTransform(t.m11() < 0 ? -1 : 1, 0, 0, t.m22() < 0 ? -1 : 1, std::round(t.dx()), std::round(t.dy()));
         }
         painter.setTransform(t);
         // (PC5 H-a: the page's own pixels enlarged — 画素の段 — are laid as squares, nearest; ピクセルアートのプレビュー: every
