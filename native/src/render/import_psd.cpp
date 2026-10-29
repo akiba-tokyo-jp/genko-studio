@@ -1421,6 +1421,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
             context.merged_only = merged_only;
             context.page_had = page_had;
             context.report = &report;
+            context.doc = &doc;  // (PC5 J-a: its layers' kept blocks — their cmls —, what they show)
             production = psd_production::read(doc.edit_page(index), copied_resources, copied_globals, context);
         }
     }

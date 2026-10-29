@@ -348,6 +348,7 @@ struct Ctx {
     std::set<std::string> filter_notes;                   // (PC4 D7: the notes naming a smart filter, at most kFilterNotesMax)
     std::map<std::string, std::string> nested;            // (a blob of a smart object's file → its contents' id: read once)
     std::map<std::string, std::string> unread;            // (… or why it could not be: tried once)
+    std::map<std::string, std::string> layer_ids;         // (PC5 J-a: a document layer's id → the layer made of it)
 
     core::Page& page() { return doc.edit_page(0); }
 };
@@ -1004,6 +1005,9 @@ core::Layer base_layer(Ctx& ctx, const Json& m, const std::string& name, const J
     layer.panel_clip = false;
     layer.parent_id = parent;
     layer.visible = boolean(field(m, "visible", "layer"), "layer.visible") && !hidden;
+    if (const Json* id = optional_field(m, "id"); id != nullptr && (id->is_number_unsigned() || id->is_number_integer())) {
+        ctx.layer_ids.emplace(id->dump(), layer.id);  // (PC5 J-a: the layer comps' states name it so)
+    }
     double opacity = std::clamp(number(field(m, "opacity", "layer"), "layer.opacity"), 0.0, 1.0);
     const double fill = std::clamp(number(field(m, "fill_opacity", "layer"), "layer.fill_opacity"), 0.0, 1.0);
     if (fill < 1.0) opacity *= fill;  // (its effects, which the fill opacity spares, are left out)
@@ -1980,6 +1984,7 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
         production.page = &ctx.page();
         production.mm = ctx.mm;
         production.say = [&ctx](std::string note) { ctx.notes.add(std::move(note)); };
+        production.layers = ctx.layer_ids;  // (PC5 J-a)
         pcraft_production::read(d, production);
     }
     if (const Json* styles = optional_field(d, "text_styles")) {  // (the basic paragraph style every document has: nothing to say)

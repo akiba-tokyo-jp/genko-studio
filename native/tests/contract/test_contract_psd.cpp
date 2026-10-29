@@ -1042,7 +1042,9 @@ private slots:
                  if (!page.layer_comps || page.layer_comps->empty() || context.lyids.empty()) return std::nullopt;
                  return "own " + page.layer_comps->comps[0].name;
              },
-             [](const core::Page& page) { return page.layer_comps && !page.layer_comps->empty() ? pp::fingerprint_of(core::to_json(*page.layer_comps)) : std::string(); },
+             [](const core::Page& page, const core::Document*) {
+                 return page.layer_comps && !page.layer_comps->empty() ? pp::fingerprint_of(core::to_json(*page.layer_comps)) : std::string();
+             },
              nullptr},
             {-1, "Anno", "J-c", false,
              [](core::Page& page, std::string_view, const pp::ReadContext&) {
@@ -1058,7 +1060,7 @@ private slots:
                  lent = context.kept_global && context.kept_global("Anno").has_value();  // (its sound notes there)
                  return "own " + page.annotations[0].text;
              },
-             [](const core::Page& page) { return page.annotations.empty() ? std::string() : pp::fingerprint_of(core::to_json(page.annotations)); },
+             [](const core::Page& page, const core::Document*) { return page.annotations.empty() ? std::string() : pp::fingerprint_of(core::to_json(page.annotations)); },
              [](const core::Page&) {
                  ++asked;
                  return false;

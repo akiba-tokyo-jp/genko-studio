@@ -247,7 +247,9 @@ genko_library(genko_render
     ops_production.cpp
     ops_layer_comps.cpp
     psd_production.cpp
+    psd_comps.cpp
     pcraft_production.cpp
+    pcraft_comps.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core
