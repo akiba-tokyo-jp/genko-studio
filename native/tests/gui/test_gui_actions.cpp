@@ -39,6 +39,7 @@
 #include "app/tool_settings.hpp"
 #include "app/key_sets.hpp"
 #include "app/settings_watch.hpp"
+#include "app/shortcuts_dialog.hpp"
 #include "app/workspace.hpp"
 #include "core/frames.hpp"
 #include "core/paths.hpp"
@@ -436,7 +437,12 @@ private slots:
         // (act_float_window, act_float_all), 同じズーム倍率で表示・同じ位置に表示・同じ回転で表示・すべてを同じ表示にする
         // (act_match_zoom, act_match_location, act_match_rotation, act_match_all), and the hand's and zoom tool's
         // すべてのウィンドウをスクロール・すべてのウィンドウをズーム (act_scroll_all, act_zoom_all) — test_gui_arrange.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{722});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2 and H-c's 20)
+        // and the 12 of PC5 H-d (SPEC VIEW-01「ワークスペース」「キーボードショートカットとメニュー」「ツールバー」) — 編集 → メニュー…・
+        // ツールバー… (act_menus, act_toolbar), 環境設定 ▸ ワークスペース… (act_prefs_workspace), ウィンドウ → ワークスペース ▸ 初期設定・
+        // グラフィックと Web・モーション・ペイント・写真・ピクセルアート (act_workspace_essentials, act_workspace_graphic_and_web,
+        // act_workspace_motion, act_workspace_painting, act_workspace_photography, act_workspace_pixel_art)・ワークスペースをリセット・
+        // ワークスペースを削除…・ワークスペースをロック (act_workspace_reset, act_delete_workspace, act_lock_workspace) — test_gui_workspace.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{734});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20 and H-d's 12)
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -834,9 +840,10 @@ private slots:
         genko::app::settings()->remove(QStringLiteral("shortcuts/移動ツール"));
         genko::app::preferences::apply_all(w);
         QCOMPARE(keys("act_move"), k({s("V")}));
-        // 環境設定 → ショートカット's キーの組: the keys shown follow the set chosen (the person's own stay), kept by 決める
+        // キーボードショートカット…'s キーの組 (PC5 H-d: its own window, 環境設定 → ショートカット before): the keys shown follow the set
+        // chosen (the person's own stay), kept by 決める
         {
-            genko::app::preferences::PreferencesDialog dialog(w);
+            genko::app::ShortcutsDialog dialog(w);
             QCOMPARE(dialog.key_set->currentData().toString(), QStringLiteral("photoshop"));
             QCOMPARE(dialog.editor(QStringLiteral("移動ツール"))->keySequence(), s("V"));
             dialog.editor(QStringLiteral("選択"))->setKeySequence(s("Ctrl+Alt+N"));
@@ -970,11 +977,15 @@ private slots:
         }
         QCOMPARE(w->tool_palette()->windowTitle(), QStringLiteral("ツール"));
         const QStringList edit = items(menu(QStringLiteral("編集")));
-        QCOMPARE(edit.mid(edit.size() - 5),
-                 (QStringList{QStringLiteral("|"), QStringLiteral("検索"), QStringLiteral("|"), QStringLiteral("キーボードショートカット…"), QStringLiteral("環境設定 ▸")}));
+        // (PC5 H-d: メニュー… and ツールバー… after キーボードショートカット…)
+        QCOMPARE(edit.mid(edit.size() - 7),
+                 (QStringList{QStringLiteral("|"), QStringLiteral("検索"), QStringLiteral("|"), QStringLiteral("キーボードショートカット…"), QStringLiteral("メニュー…"),
+                              QStringLiteral("ツールバー…"), QStringLiteral("環境設定 ▸")}));
         QMenu* panes = w->findChild<QMenu*>(QStringLiteral("menu_preferences"));
         QVERIFY(panes != nullptr);
-        QCOMPARE(items(panes), (QStringList{QStringLiteral("一般…"), QStringLiteral("インターフェイス…"), QStringLiteral("ツール…"), QStringLiteral("ファイル管理…"),
+        QCOMPARE(items(panes), (QStringList{QStringLiteral("一般…"), QStringLiteral("インターフェイス…"),
+                                           QStringLiteral("ワークスペース…"),  // (PC5 H-d)
+                                           QStringLiteral("ツール…"), QStringLiteral("ファイル管理…"),
                                            QStringLiteral("書き出し…"), QStringLiteral("パフォーマンス…"), QStringLiteral("カーソル…"), QStringLiteral("透明部分・色域…"),
                                            QStringLiteral("単位・定規…"), QStringLiteral("ガイド・グリッド・スライス…"),  // (PC5 H-b)
                                            QStringLiteral("Camera Raw…"), QStringLiteral("ペンタブレット…"), QStringLiteral("長い時間の作業…")}));
@@ -993,11 +1004,21 @@ private slots:
                                                                                           {"act_prefs_transparencyAndGamut", "透明部分・色域"},
                                                                                           {"act_prefs_rawDefaults", "Camera Raw"},
                                                                                           {"act_prefs_tablet", "ペンタブレット"},
-                                                                                          {"act_keyboard_shortcuts", "ショートカット"}}) {
+                                                                                          {"act_prefs_workspace", "ワークスペース"}}) {
             page.clear();
             studio.trigger(pane);
             QCOMPARE(page, QString::fromUtf8(title));
         }
+        // (PC5 H-d: キーボードショートカット… and メニュー… open their own window at their tab — 環境設定's page no more)
+        int tab = -1;
+        studio.answers->responder->exec = [&tab](QDialog* dialog) {
+            if (auto* keys = qobject_cast<genko::app::ShortcutsDialog*>(dialog)) tab = keys->tabs->currentIndex();
+            return int(QDialog::Rejected);
+        };
+        studio.trigger("act_keyboard_shortcuts");
+        QCOMPARE(tab, 0);
+        studio.trigger("act_menus");
+        QCOMPARE(tab, 1);
         studio.answers->responder->exec = shown;
     }
 
@@ -1131,10 +1152,10 @@ private slots:
             QAction* a = w->stage_actions().at(key);
             QCOMPARE(a->text(), label + QStringLiteral("の並び"));
             QCOMPARE(a->statusTip(), QStringLiteral("この段階でよく使うパネルだけを出します"));
-            QVERIFY(menus_of(w, a).contains(QStringLiteral("ウィンドウ/作業の段階")));
+            QVERIFY(menus_of(w, a).contains(QStringLiteral("ウィンドウ/ワークスペース/作業の段階")));  // (PC5 H-d: in ワークスペース ▸, 節 H 5.2)
             a->trigger();
             QCOMPARE(genko::app::settings()->value(QStringLiteral("ui/stage")).toString(), key);
-            QCOMPARE(w->last_notice(), QStringLiteral("「%1」の並びにしました（ウィンドウ → 作業の段階）").arg(label));
+            QCOMPARE(w->last_notice(), QStringLiteral("「%1」の並びにしました（ウィンドウ → ワークスペース → 作業の段階）").arg(label));
             for (QDockWidget* dock : w->findChildren<QDockWidget*>()) {
                 if (dock->windowTitle() == QLatin1String("全体図")) QCOMPARE(dock->isVisible(), navigator);
                 if (dock->windowTitle() == QLatin1String("ページ")) QCOMPARE(dock->isVisible(), pages);

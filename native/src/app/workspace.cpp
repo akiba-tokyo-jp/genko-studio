@@ -1,8 +1,12 @@
 #include "app/workspace.hpp"
 
 #include <QAction>
+#include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QGridLayout>
+#include <QHBoxLayout>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -526,10 +530,57 @@ QStringList workspaces() {
     return names;
 }
 
-void save_workspace(QMainWindow* window, const QString& name) {
+namespace {
+
+// (a settings group's every key and value: the keys under shortcuts/, the colours under menus/colors/)
+QJsonObject group_of(const QString& group) {
     auto store = settings();
-    store->setValue(QStringLiteral("workspaces/%1/state").arg(name), QString::fromLatin1(window->saveState().toBase64()));
-    store->setValue(QStringLiteral("workspaces/%1/geometry").arg(name), QString::fromLatin1(window->saveGeometry().toBase64()));
+    QJsonObject out;
+    store->beginGroup(group);
+    for (const QString& key : store->allKeys()) out[key] = store->value(key).toString();
+    store->endGroup();
+    return out;
+}
+
+void put_group(const QString& group, const QJsonObject& values) {
+    auto store = settings();
+    store->remove(group);
+    for (auto it = values.begin(); it != values.end(); ++it) store->setValue(group + QLatin1Char('/') + it.key(), it.value().toString());
+}
+
+void put_value(const QString& key, const QJsonValue& value) {
+    if (value.toString().isEmpty()) {
+        settings()->remove(key);
+    } else {
+        settings()->setValue(key, value.toString());
+    }
+}
+
+QString json_text(const QJsonObject& object) { return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact)); }
+
+QJsonObject json_of(const QString& text) { return QJsonDocument::fromJson(text.toUtf8()).object(); }
+
+}  // namespace
+
+void save_workspace(QMainWindow* window, const QString& name, bool keys, bool menus, bool toolbar) {
+    auto store = settings();
+    const QString at = QStringLiteral("workspaces/%1").arg(name);
+    store->remove(at);  // (kept again whole: what was not chosen this time not left from before)
+    store->setValue(at + QStringLiteral("/state"), QString::fromLatin1(window->saveState().toBase64()));
+    store->setValue(at + QStringLiteral("/geometry"), QString::fromLatin1(window->saveGeometry().toBase64()));
+    if (keys) {
+        store->setValue(at + QStringLiteral("/keys"), json_text({{QStringLiteral("set"), store->value(QStringLiteral("ui/key_set")).toString()},
+                                                                 {QStringLiteral("own"), store->value(QStringLiteral("ui/key_set_own")).toString()},
+                                                                 {QStringLiteral("keys"), group_of(QStringLiteral("shortcuts"))}}));
+    }
+    if (menus) {
+        store->setValue(at + QStringLiteral("/menus"), json_text({{QStringLiteral("hidden"), store->value(QStringLiteral("menus/hidden")).toString()},
+                                                                  {QStringLiteral("colors"), group_of(QStringLiteral("menus/colors"))}}));
+    }
+    if (toolbar) {
+        store->setValue(at + QStringLiteral("/toolbar"), json_text({{QStringLiteral("order"), store->value(QStringLiteral("toolbar/order")).toString()},
+                                                                    {QStringLiteral("hidden"), store->value(QStringLiteral("toolbar/hidden")).toString()}}));
+    }
 }
 
 bool load_workspace(QMainWindow* window, const QString& name) {
@@ -542,7 +593,109 @@ bool load_workspace(QMainWindow* window, const QString& name) {
     return ok;
 }
 
-void delete_workspace(const QString& name) { settings()->remove(QStringLiteral("workspaces/%1").arg(name)); }
+bool load_workspace_extras(const QString& name) {
+    auto store = settings();
+    const QString at = QStringLiteral("workspaces/%1").arg(name);
+    bool any = false;
+    if (const QString kept = store->value(at + QStringLiteral("/keys")).toString(); !kept.isEmpty()) {
+        const QJsonObject keys = json_of(kept);
+        put_group(QStringLiteral("shortcuts"), keys.value(QStringLiteral("keys")).toObject());
+        put_value(QStringLiteral("ui/key_set"), keys.value(QStringLiteral("set")));
+        put_value(QStringLiteral("ui/key_set_own"), keys.value(QStringLiteral("own")));
+        any = true;
+    }
+    if (const QString kept = store->value(at + QStringLiteral("/menus")).toString(); !kept.isEmpty()) {
+        const QJsonObject menus = json_of(kept);
+        put_value(QStringLiteral("menus/hidden"), menus.value(QStringLiteral("hidden")));
+        put_group(QStringLiteral("menus/colors"), menus.value(QStringLiteral("colors")).toObject());
+        any = true;
+    }
+    if (const QString kept = store->value(at + QStringLiteral("/toolbar")).toString(); !kept.isEmpty()) {
+        const QJsonObject bar = json_of(kept);
+        put_value(QStringLiteral("toolbar/order"), bar.value(QStringLiteral("order")));
+        put_value(QStringLiteral("toolbar/hidden"), bar.value(QStringLiteral("hidden")));
+        any = true;
+    }
+    return any;
+}
+
+void delete_workspace(const QString& name) {
+    settings()->remove(QStringLiteral("workspaces/%1").arg(name));
+    settings()->remove(QStringLiteral("workspace_changes/%1").arg(name));
+}
+
+const std::vector<Preset>& presets() {
+    // (Photoshop's workspaces, its menu's order, and the panels each brings — Genko's panels by their titles: オプション
+    // the tool's, ナビゲーター, ヒストリー; 文字・段落 when 節 G makes them)
+    static const std::vector<Preset> all{
+        {QStringLiteral("essentials"), QStringLiteral("初期設定"), {}, {}},
+        {QStringLiteral("graphicAndWeb"), QStringLiteral("グラフィックと Web"),
+         {QStringLiteral("オプション"), QStringLiteral("ナビゲーター"), QStringLiteral("レイヤー"), QStringLiteral("台詞"), QStringLiteral("文字"),
+          QStringLiteral("段落"), QStringLiteral("シェイプ"), QStringLiteral("パス"), QStringLiteral("スタイル"), QStringLiteral("カラー")},
+         {QStringLiteral("レイヤー"), QStringLiteral("台詞")}},
+        {QStringLiteral("motion"), QStringLiteral("モーション"),
+         {QStringLiteral("オプション"), QStringLiteral("ナビゲーター"), QStringLiteral("レイヤー"), QStringLiteral("カラー"), QStringLiteral("タイムライン")},
+         {QStringLiteral("レイヤー")}},
+        {QStringLiteral("painting"), QStringLiteral("ペイント"),
+         {QStringLiteral("オプション"), QStringLiteral("ナビゲーター"), QStringLiteral("カラー"), QStringLiteral("ブラシ"), QStringLiteral("ブラシ設定"),
+          QStringLiteral("ツールプリセット"), QStringLiteral("レイヤー")},
+         {QStringLiteral("ブラシ"), QStringLiteral("レイヤー")}},
+        {QStringLiteral("photography"), QStringLiteral("写真"),
+         {QStringLiteral("オプション"), QStringLiteral("ナビゲーター"), QStringLiteral("ヒストグラム"), QStringLiteral("情報"), QStringLiteral("色調補正"),
+          QStringLiteral("属性"), QStringLiteral("レイヤー"), QStringLiteral("チャンネル"), QStringLiteral("パス"), QStringLiteral("ヒストリー")},
+         {QStringLiteral("ヒストグラム"), QStringLiteral("色調補正"), QStringLiteral("レイヤー")}},
+        {QStringLiteral("pixelArt"), QStringLiteral("ピクセルアート"),
+         {QStringLiteral("オプション"), QStringLiteral("ナビゲーター"), QStringLiteral("カラー"), QStringLiteral("レイヤー"), QStringLiteral("ヒストリー")},
+         {QStringLiteral("レイヤー")}},
+    };
+    return all;
+}
+
+const Preset* preset(const QString& label) {
+    for (const Preset& one : presets()) {
+        if (one.label == label) return &one;
+    }
+    return nullptr;
+}
+
+bool reserved_workspace(const QString& name) {
+    const QString trimmed = name.trimmed();
+    for (const Preset& one : presets()) {
+        if (trimmed == one.label || trimmed.compare(one.id, Qt::CaseInsensitive) == 0) return true;
+    }
+    // (Photoshop's English names too)
+    for (const char* english : {"Essentials", "Graphic and Web", "Motion", "Painting", "Photography", "Pixel Art"}) {
+        if (trimmed.compare(QString::fromLatin1(english), Qt::CaseInsensitive) == 0) return true;
+    }
+    return false;
+}
+
+NewWorkspaceDialog::NewWorkspaceDialog(QWidget* parent) : QDialog(parent) {
+    setWindowTitle(QStringLiteral("新規ワークスペース"));
+    setObjectName(QStringLiteral("newWorkspaceDialog"));
+    name = new QLineEdit;
+    name->setObjectName(QStringLiteral("workspace_name"));
+    name->setPlaceholderText(QStringLiteral("例: ペン入れ、写植"));
+    keys = new QCheckBox(QStringLiteral("キーボードショートカット"));
+    menus = new QCheckBox(QStringLiteral("メニュー"));
+    toolbar = new QCheckBox(QStringLiteral("ツールバー"));
+    auto* form = new QVBoxLayout;
+    auto* name_row = new QHBoxLayout;
+    name_row->addWidget(new QLabel(QStringLiteral("名前")));
+    name_row->addWidget(name, 1);
+    form->addLayout(name_row);
+    auto* note = new QLabel(QStringLiteral("取り込み: パネルの位置はいつも残ります。ほかに残すもの:"));
+    note->setWordWrap(true);
+    form->addWidget(note);
+    for (QCheckBox* box : {keys, menus, toolbar}) form->addWidget(box);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("保存"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("やめる"));
+    connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    form->addWidget(buttons);
+    setLayout(form);
+}
 
 // --- the cursor and the keys held ----------------------------------------------------------------------------------
 

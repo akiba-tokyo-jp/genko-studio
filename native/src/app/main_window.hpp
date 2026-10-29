@@ -540,9 +540,10 @@ public:
     CommandSearch* find_command();
     // 道具の名前を表示: icons alone, or icons with their names (kept in the settings unless `save` is off).
     void show_tool_names(bool on, bool save = true);
-    // 今の配置をワークスペースとして残す…: asked for a name when none is given; false when nothing was kept.
+    // 新規ワークスペース… (PC5 H-d; 今の配置をワークスペースとして残す… before): a name given, the panels kept under it; none, the
+    // dialog (new_workspace). False when nothing was kept.
     bool save_workspace(std::optional<QString> name = std::nullopt);
-    // はじめの配置に戻す: the panels as the window first showed them.
+    // 初期設定 (はじめの配置に戻す before): the panels as the window first showed them.
     void default_layout();
     // Over a book with nothing in it yet, the first steps (Python's first_steps bar: it goes with the first panel, line or
     // stroke, or with its ×); after the first panels, what comes next (I11: 描く・台詞・保存・書き出し, each marked when
@@ -1945,6 +1946,43 @@ private:
     // ビデオフレームからレイヤー…, 注釈…). main_window_file.cpp.
     QMenu* import_menu(QMenu* file);
     void add_to_import_menu(QMenu* file, QAction* command);
+    // --- PC5 H-d: main_window_workspace.cpp — ウィンドウ → ワークスペース ▸ (Photoshop's workspaces and the person's own, the
+    // one in use checked; ワークスペースをリセット, 新規ワークスペース…, ワークスペースを削除…, ワークスペースをロック; キーボードショートカット…;
+    // 作業の段階 ▸), 編集 → キーボードショートカット…・メニュー…・ツールバー… (app/shortcuts_dialog, app/toolbar_dialog), the palette
+    // in the person's order and 環境設定 → ワークスペース's (SPEC VIEW-01「ワークスペース」「キーボードショートカットとメニュー」
+    // 「ツールバー」) ----------------------------------------------------------------------------------------------------
+public:
+    // The workspace in use (ui/workspace: a built-in one's words or a kept one's name; 初期設定 when none or gone).
+    QString current_workspace() const;
+    // A workspace chosen: the one left kept as it is now (環境設定 → ワークスペース → ワークスペースの変更を記憶), this one's panels as
+    // they were left (or as it was kept), its keys, menus and toolbar when kept with it.
+    void choose_workspace(const QString& name);
+    // ワークスペースをリセット: the one in use as it was kept (Photoshop's 「…」をリセット).
+    void reset_workspace();
+    // 新規ワークスペース… (the dialog exec'ed): false when nothing was kept — refused for a built-in workspace's name.
+    bool new_workspace();
+    // ワークスペースを削除… (asked which): the one in use is refused.
+    bool delete_workspace_dialog();
+    // ワークスペースをロック: the panels cannot be moved nor taken out of the window (every window; ui/workspace_locked).
+    void lock_workspace(bool on);
+    // 編集 → キーボードショートカット… (tab 0) and メニュー… (tab 1), ツールバー… — exec'ed.
+    void open_keyboard_shortcuts(int tab = 0);
+    void open_toolbar_dialog();
+    // The palette laid out again in the person's order (ツールバー…), each button with its tool group; 余分なツール last.
+    void fill_palette();
+    QAction* extra_tools() const { return extra_tools_; }
+    // 環境設定's ワークスペース and ツールバー… applied to this window (preferences::apply_all).
+    void apply_workspace_prefs();
+    QMenu* workspace_menu() const { return workspace_menu_; }
+
+private:
+    void build_workspace_actions();
+    void lay_out_workspace(const QString& name, bool as_left);
+    void apply_lock(bool on);
+    void restore_workspace_at_start();
+    QString palette_laid_;  // (the order and the tools away the palette was last laid out with)
+    QAction* extra_tools_ = nullptr;
+    QMenu* stage_menu_ = nullptr;  // (作業の段階 ▸, in ワークスペース ▸ — Genko's own)
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

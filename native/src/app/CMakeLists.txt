@@ -62,6 +62,10 @@ genko_library(genko_app
     main_window_edit.cpp
     key_sets.cpp
     settings_watch.cpp
+    main_window_workspace.cpp
+    shortcuts_dialog.cpp
+    toolbar_dialog.cpp
+    menu_look.cpp
     main_window_select.cpp
     select_dialogs.cpp
     main_window_channels.cpp

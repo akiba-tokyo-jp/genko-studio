@@ -43,6 +43,9 @@ public:
     // the watch does every 120 ms).
     const QString& peek() const { return peek_; }
     void watch_at(const QPoint& pos);
+    // PC5 H-d: 環境設定 → ワークスペース → 隠れたパネルを自動的に表示 (Photoshop's; on unless turned off): the sides' panels at the
+    // window's edge.
+    bool auto_show = true;
 
 private:
     std::vector<QWidget*> pieces() const;

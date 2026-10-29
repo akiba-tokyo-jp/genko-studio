@@ -34,7 +34,8 @@ class QTabWidget;
 
 // 環境設定 (Python's genko/app/preferences.py): the person's own ways of working, kept in the app's settings (not in
 // the book).
-// - Shortcuts: any command's keys can be changed; two commands on the same keys are refused.
+// - Shortcuts: any command's keys can be changed; two commands on the same keys are refused (PC5 H-d: in キーボードショートカット…'s
+//   own window, app/shortcuts_dialog — the commands' names and keys, applied to every window, stay here).
 // - The pen tablet: a scribble pad measures how hard the person presses and sets the pressure curve to match; the
 //   pen's side button can be the eyedropper, the hand (move the view) or the right click.
 // - The screen and the work: the letters, the colours, the pointer, the keys held, the round menu, the rest reminder,
@@ -127,6 +128,10 @@ struct Clash {
     QString second;
 };
 std::vector<Clash> conflicts(const std::vector<std::pair<QString, QStringList>>& mapping);
+// PC5 H-d (キーボードショートカット…'s 決める): each command's key chosen (by its name) kept — none kept where it is the set's first
+// (set_keys: the keys each command has in the set chosen; the keys read under its old names gone too), else
+// shortcuts/<name>.
+void keep_keys(MainWindow* window, const std::vector<std::pair<QString, QStringList>>& keys, const std::map<QString, QList<QKeySequence>>& set_keys);
 // Everything the preferences change, applied to an open window.
 void apply_all(MainWindow* window);
 // (PC5 H-b: app/preferences_units.cpp) 単位・定規 and ガイド・グリッド・スライス: their pages for the dialog (their fields named
@@ -178,17 +183,15 @@ public:
     // the pages, chosen at the side (as the main window's panels), not by tabs across the top
     QTabWidget* tabs = nullptr;
     QListWidget* pages_list = nullptr;
-    // ショートカット
-    QTableWidget* table = nullptr;
-    std::vector<std::pair<QString, QKeySequenceEdit*>> editors;  // (the command's words, its keys) in order
-    QKeySequenceEdit* editor(const QString& command) const;
-    QLabel* clash = nullptr;
-    // キーの組 (PC5 H-0, the user's decision 8: key_sets), and each command's keys in the set chosen (by its name)
-    QComboBox* key_set = nullptr;
-    std::map<QString, QList<QKeySequence>> set_keys;
-    void choose_key_set();
-    // The page of a pane (panes(); keyboardShortcuts: ショートカット) in front.
+    // (PC5 H-d: the keys — and the key sets — are キーボードショートカット…'s window, app/shortcuts_dialog; opened from here too)
+    QPushButton* keys_button = nullptr;
+    // The page of a pane (panes()) in front.
     void show_pane(const QString& id);
+    // ワークスペース (PC5 H-d, edit.preferences.workspace)
+    QCheckBox* workspace_remember = nullptr;
+    QCheckBox* auto_show_panels = nullptr;
+    QCheckBox* large_tabs = nullptr;
+    QCheckBox* workspace_locked = nullptr;
     // ペンタブレット
     PressurePad* pad = nullptr;
     QLabel* gamma_note = nullptr;
@@ -247,9 +250,7 @@ public:
 
     void measure();
     void forget_gamma();
-    void reset_keys();
-    std::vector<std::pair<QString, QStringList>> mapping() const;
-    // 決める: kept and applied, the dialog accepted — or, with two commands on one key, the clash said and nothing kept.
+    // 決める: kept and applied (every window), the dialog accepted.
     void save();
 
 private:

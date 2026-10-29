@@ -2,6 +2,8 @@
 
 #include <QAction>
 #include <QDockWidget>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMainWindow>
 #include <QMenu>
 #include <QPushButton>
@@ -98,6 +100,8 @@ const std::vector<std::pair<QString, QList<QKeySequence>>>& photoshop_keys() {
         {QStringLiteral("act_transform_again"), k({"Ctrl+Shift+T"})},
         {QStringLiteral("act_prefs"), k({"Ctrl+K", "Ctrl+,"})},
         {QStringLiteral("act_keyboard_shortcuts"), k({"Ctrl+Alt+Shift+K"})},
+        // (PC5 H-d) メニュー… Ctrl+Alt+Shift+M
+        {QStringLiteral("act_menus"), k({"Ctrl+Alt+Shift+M"})},
         // ファイル: 原稿を書き出す… none (Ctrl+E is レイヤーを結合), 画像を読み込む… none (Ctrl+Shift+I is 選択範囲を反転)
         {QStringLiteral("act_export"), {}},
         {QStringLiteral("act_import"), {}},
@@ -216,12 +220,118 @@ void tell_new_default(MainWindow* window) {
 }
 
 void apply(QMainWindow* window, const QString& set) {
+    const bool own = set.startsWith(QStringLiteral("own:"));
+    const QString base = own ? own_base(set.mid(4)) : set;
+    std::map<QString, QList<QKeySequence>> over;
+    std::map<const QAction*, QString> names;
+    if (own) {
+        over = own_keys(set.mid(4));
+        names = command_names(window);
+    }
     for (QAction* action : window->findChildren<QAction*>()) {
         if (action->text().isEmpty() || action->isSeparator() || action->menu() != nullptr || remade(action)) continue;
         if (!action->property(kGenkoKeys).isValid()) action->setProperty(kGenkoKeys, QVariant::fromValue(action->shortcuts()));
-        const QList<QKeySequence> keys = keys_of(action, set);
+        QList<QKeySequence> keys = keys_of(action, base);
+        if (own && action->objectName().startsWith(QStringLiteral("cmd:"))) {
+            if (const auto found = over.find(command_name(names, action)); found != over.end()) keys = found->second;
+        }
         if (keys != action->shortcuts()) action->setShortcuts(keys);
     }
+}
+
+// --- the person's own sets (PC5 H-d) --------------------------------------------------------------------------------------
+
+namespace {
+
+const QString kOwn = QStringLiteral("key_sets");
+
+}  // namespace
+
+QStringList own_sets() {
+    auto store = settings();
+    store->beginGroup(kOwn);
+    QStringList names = store->childGroups();
+    store->endGroup();
+    names.sort();
+    return names;
+}
+
+bool reserved(const QString& name) {
+    const QString trimmed = name.trimmed();
+    for (const Set& one : sets()) {
+        if (trimmed.compare(one.id, Qt::CaseInsensitive) == 0 || trimmed == one.label) return true;
+    }
+    // (the words people call them by: Photoshop, Photoshop の初期設定, Genko)
+    for (const char* words : {"Photoshop", "Photoshop の初期設定", "Photoshop 初期設定", "Genko"}) {
+        if (trimmed.compare(QString::fromUtf8(words), Qt::CaseInsensitive) == 0) return true;
+    }
+    return false;
+}
+
+QString own_base(const QString& name) {
+    const QString base = settings()->value(QStringLiteral("%1/%2/base").arg(kOwn, name)).toString();
+    return std::any_of(sets().begin(), sets().end(), [&base](const Set& s) { return s.id == base; }) ? base : sets().front().id;
+}
+
+std::map<QString, QList<QKeySequence>> own_keys(const QString& name) {
+    std::map<QString, QList<QKeySequence>> out;
+    const QJsonObject keys = QJsonDocument::fromJson(settings()->value(QStringLiteral("%1/%2/keys").arg(kOwn, name)).toString().toUtf8()).object();
+    for (auto it = keys.begin(); it != keys.end(); ++it) {
+        QList<QKeySequence> list;
+        for (const QString& one : it.value().toString().split(QLatin1Char('|'), Qt::SkipEmptyParts)) list << QKeySequence(one);
+        out[it.key()] = list;
+    }
+    return out;
+}
+
+void save_own(const QString& name, const QString& base, const std::map<QString, QList<QKeySequence>>& keys) {
+    QJsonObject out;
+    for (const auto& [command, list] : keys) {
+        QStringList words;
+        for (const QKeySequence& key : list) words << key.toString(QKeySequence::PortableText);
+        out[command] = words.join(QLatin1Char('|'));
+    }
+    auto store = settings();
+    store->setValue(QStringLiteral("%1/%2/base").arg(kOwn, name), base);
+    store->setValue(QStringLiteral("%1/%2/keys").arg(kOwn, name), QString::fromUtf8(QJsonDocument(out).toJson(QJsonDocument::Compact)));
+}
+
+void delete_own(const QString& name) {
+    auto store = settings();
+    store->remove(QStringLiteral("%1/%2").arg(kOwn, name));
+    if (store->value(QStringLiteral("ui/key_set_own")).toString() == name) store->remove(QStringLiteral("ui/key_set_own"));
+}
+
+QString current_own() {
+    const QString name = settings()->value(QStringLiteral("ui/key_set_own")).toString();
+    return !name.isEmpty() && own_sets().contains(name) ? name : QString();
+}
+
+QString chosen() {
+    const QString own = current_own();
+    return own.isEmpty() ? current() : QStringLiteral("own:") + own;
+}
+
+std::map<QString, QList<QKeySequence>> keys_by_name(QMainWindow* window, const QString& set) {
+    const bool own = set.startsWith(QStringLiteral("own:"));
+    const QString base = own ? own_base(set.mid(4)) : set;
+    const auto over = own ? own_keys(set.mid(4)) : std::map<QString, QList<QKeySequence>>{};
+    const auto names = command_names(window);
+    std::map<QString, QList<QKeySequence>> out;
+    for (QAction* action : preferences::commands(window)) {
+        const QString name = command_name(names, action);
+        const auto found = over.find(name);
+        out[name] = found != over.end() ? found->second : keys_of(action, base);
+    }
+    return out;
+}
+
+QString label(const QString& set) {
+    if (set.startsWith(QStringLiteral("own:"))) return set.mid(4);
+    for (const Set& one : sets()) {
+        if (one.id == set) return one.label;
+    }
+    return set;
 }
 
 }  // namespace genko::app::key_sets

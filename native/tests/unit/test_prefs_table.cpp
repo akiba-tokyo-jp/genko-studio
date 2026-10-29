@@ -53,7 +53,12 @@ const std::vector<std::string>& app_keys() {
         "guides/grid_subdivisions", "guides/grid_unit", "guides/lock", "view/extras", "view/show_guides", "view/show_canvas_guides",
         "view/show_smart_guides", "view/show_layer_edges", "view/show_mesh", "view/show_edit_pins", "guide_layouts/三段組",
         // (PC5 J-c・J-d1: 表示・非表示 ▸ 注釈・カウント)
-        "view/show_notes", "view/show_count"};
+        "view/show_notes", "view/show_count",
+        // (PC5 H-d: ワークスペース — the lock and its pane —, the person's own key sets, メニュー…, ツールバー…, a workspace kept
+        // with its keys, menus and toolbar, a workspace as it was left)
+        "ui/workspace_locked", "ui/workspace_remember", "ui/auto_show_panels", "ui/large_tabs", "ui/key_set_own", "key_sets/私の組/base",
+        "key_sets/私の組/keys", "menus/hidden", "menus/colors/検索", "menus/colors/HSB/HSL", "toolbar/order", "toolbar/hidden",
+        "workspaces/ペン入れ/keys", "workspaces/ペン入れ/menus", "workspaces/ペン入れ/toolbar", "workspace_changes/写真"};
     return all;
 }
 
@@ -293,6 +298,36 @@ private slots:
         QVERIFY(!s->contains(QStringLiteral("names_current/shortcuts/ブラシツール")));
         QCOMPARE(q(prefs::mark_of("shortcuts/書き出し…").value_or("")), QStringLiteral("names_current/shortcuts/書き出し…"));
         QVERIFY(!prefs::mark_of("ui/theme"));
+    }
+
+    // PC5 H-d: メニュー…'s colours one of Photoshop's (a command's name with "/" in it the rest of the path), the toolbar's order
+    // and the workspace's switches as the app writes them; the person's own key sets and a workspace as it was left are the
+    // app's memories (never set nor reset).
+    void theMenusTheToolbarAndTheWorkspace() {
+        auto s = fresh("hd.ini");
+        QVERIFY(!prefs::set(*s, Json{{"menus.colors.検索", "pink"}}).ok);
+        prefs::Outcome out = prefs::set(*s, Json{{"menus.colors.検索", "red"},
+                                                 {"menus.colors.HSB/HSL", "violet"},
+                                                 {"menus.hidden", "ピクセルグリッド	検索"},
+                                                 {"toolbar.order", "act_move	|	act_pen"},
+                                                 {"toolbar.hidden", "act_3d"},
+                                                 {"workspace.locked", true},
+                                                 {"workspace.largeTabs", true},
+                                                 {"keyboardShortcuts.ownSet", "私の組"}});
+        QVERIFY2(out.ok, out.message.c_str());
+        QCOMPARE(s->value(QStringLiteral("menus/colors/検索")).toString(), QStringLiteral("red"));
+        QCOMPARE(s->value(QStringLiteral("menus/colors/HSB/HSL")).toString(), QStringLiteral("violet"));
+        QCOMPARE(s->value(QStringLiteral("ui/workspace_locked")).toString(), QStringLiteral("true"));
+        QCOMPARE(s->value(QStringLiteral("toolbar/order")).toString(), QStringLiteral("act_move	|	act_pen"));
+        QCOMPARE(prefs::value(*s, "workspace.rememberWorkspaceChanges"), Json(true));  // (on unless turned off)
+        QCOMPARE(prefs::value(*s, "workspace.autoShowHiddenPanels"), Json(true));
+        QCOMPARE(prefs::get(*s, "menus").values["menus.colors.HSB/HSL"], Json("violet"));
+        for (const char* path : {"state.keySets.私の組.base", "state.workspaceChanges.写真"}) {
+            QVERIFY2(!prefs::set(*s, Json{{path, "x"}}).ok, path);
+        }
+        QVERIFY(prefs::reset(*s, "menus").ok);
+        QVERIFY(!s->contains(QStringLiteral("menus/colors/検索")) && !s->contains(QStringLiteral("menus/hidden")));
+        QCOMPARE(s->value(QStringLiteral("toolbar/hidden")).toString(), QStringLiteral("act_3d"));
     }
 };
 

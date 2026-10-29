@@ -55,6 +55,22 @@ bool from_before_pc5();
 void tell_new_default(MainWindow* window);
 
 // Every command of the window with the set's keys (the person's own laid over them after: preferences::apply_shortcuts).
+// `set`: a built-in set's id, or "own:<name>" — the person's own set (PC5 H-d).
 void apply(QMainWindow* window, const QString& set);
+
+// PC5 H-d (キーボードショートカット…'s 組を保存・組を削除, Photoshop's): the person's own sets, each a built-in set and the keys laid
+// over it by command name (key_sets/<name>/base, key_sets/<name>/keys: {"<name>": "Ctrl+X|Ctrl+Y" — "" none}), kept on this
+// computer. The set in use: ui/key_set the built-in one, ui/key_set_own the person's own over it (none: the built-in).
+QStringList own_sets();
+bool reserved(const QString& name);  // (a built-in set's id or words: never an own set's name)
+QString own_base(const QString& name);
+std::map<QString, QList<QKeySequence>> own_keys(const QString& name);
+void save_own(const QString& name, const QString& base, const std::map<QString, QList<QKeySequence>>& keys);
+void delete_own(const QString& name);
+QString current_own();  // (none: no own set in use, or it is gone)
+QString chosen();       // ("own:<name>" or current())
+// The keys of each command in a set (by its name, as preferences::commands names them).
+std::map<QString, QList<QKeySequence>> keys_by_name(QMainWindow* window, const QString& set);
+QString label(const QString& set);  // (the words of a set)
 
 }  // namespace genko::app::key_sets
