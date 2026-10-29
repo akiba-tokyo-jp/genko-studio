@@ -20,7 +20,8 @@
 //                   on the page, and whether a box text runs past its box. Changes nothing (a question).
 //   line_to_type_layer {line, keep?, title?, above?, new_id?} → {layer_id}; type_layer_to_line {page, layer_id, keep?,
 //                   new_id?} → {id}: a line and a type layer each other's (G-a)
-//   set_type, type_style, replace_fonts: registered; not_yet_ported until G-b, G-c and G-d write them.
+//   set_type (G-b, render/ops_type_set.cpp): below (type_ops::set_type).
+//   type_style, replace_fonts: registered; not_yet_ported until G-c and G-d write them.
 // A type layer turned, scaled or slanted (transform_layers, the page's turns and mirrors) keeps its text: the map goes
 // into its matrix (native_type.transform); moved, its record moves (render/layer_transform, core/page_geometry).
 

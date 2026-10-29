@@ -1,6 +1,6 @@
 // PC5 G-b (SPEC.md TEXT-02「OpenType の組み方」「右から左」, render/text/shaping, bidi, opentype; render/draw's glyphs by id):
 // HarfBuzz's glyphs and advances with the test fonts (native/tests/data/type: Inter, OFL — ligatures, fractions, stylistic
-// alternates, ordinals, kerning and the weight axis; Noto Sans Hebrew, OFL — a right-to-left script): a feature turned on
+// alternates, contextual alternates, kerning and the weight axis; Noto Sans Hebrew, OFL — a right-to-left script): a feature turned on
 // and off, an axis set, a font's names, axes and features; SheenBidi's levels, a row's runs in the order they are drawn and
 // the letters' scripts; a paragraph shaped run by run and a row's glyphs placed (a right-to-left run's letters right to
 // left, a justified row's room, tracking); and the glyphs drawn by their ids (a ligature's ink, an axis's weight, a stroke).
