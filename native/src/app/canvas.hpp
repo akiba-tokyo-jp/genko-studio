@@ -29,6 +29,7 @@
 #include "core/guide_layout.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
+#include "core/slice_layout.hpp"
 #include "core/snap.hpp"
 #include "core/units.hpp"
 #include "render/dabs/dynamics.hpp"
@@ -597,6 +598,33 @@ public:
     std::string ruler_here_page;  // (the page it was drawn on: let go on another)
     // The count mark under a point of the canvas (its group and index; none: no visible one within 6 screen pixels).
     std::optional<std::pair<std::size_t, std::size_t>> count_at(const QPointF& widget) const;
+    // (PC5 J-b, スライス — slices@1, app/canvas_slices.cpp) The slices' painter (the extra "slices": each slice's outline in
+    // slice_colour and its number in a badge — show_slice_numbers —, the auto ones dotted while a slice tool is in hand,
+    // the chosen one orange with its handles) and the two tools: the スライスツール ("slice": a drag draws a user slice —
+    // sliceDrawn —, Shift square, slice_style 1 縦横比を固定 · 2 固定サイズ, a click chooses the slice there) and the スライス
+    // 選択ツール ("slice_select": a click chooses — sliceChosen —, a drag moves the chosen one, a handle sizes a user slice —
+    // sliceMoved —, a double click asks its options — sliceOptionsAsked). lock_slices (スライスをロック): no gesture changes
+    // them (slicesLocked). The page's slices now come from the window (slice_view: made again when the page changes).
+    struct SliceView {
+        std::vector<core::ResolvedSlice> slices;
+        core::SliceGrid grid;
+        std::vector<std::int64_t> order;  // the stored slices' ids in the list's order (a later one on top)
+    };
+    std::function<const SliceView*()> slice_view;
+    void paint_slices(QPainter& painter, const core::Page& page, const ExtraView& view) const;
+    std::optional<int> chosen_slice;  // its number as shown
+    bool lock_slices = false;
+    bool show_slice_numbers = true;
+    bool hide_auto_slices = false;
+    bool snap_slices = true;  // (表示 → スナップ先 → スライス: their edges)
+    QColor slice_colour = QColor(0x38, 0xb5, 0xff);
+    int slice_style = 0;  // 0 標準, 1 縦横比を固定 (slice_style_w : slice_style_h), 2 固定サイズ (the page's pixels)
+    double slice_style_w = 1, slice_style_h = 1;
+    static bool is_slice_tool(const QString& tool);
+    // The slice under a point of the canvas (a stored one before an auto one, the later on top; none: off the page).
+    std::optional<core::ResolvedSlice> slice_at(const QPointF& widget) const;
+    std::optional<core::ResolvedSlice> chosen_slice_now() const;
+    QRectF slice_mm(const core::ResolvedSlice& slice) const;  // (its rect, mm)
 
     // --- PC5 H-b: ガイド・グリッド・エクストラ・単位 (canvas_guide_lines.cpp; SPEC.md VIEW-01) --------------------------------------
     // What エクストラ hides with the rest (shows: one's own switch and the master's): the guides, the grid, the layers' edges,
@@ -738,6 +766,13 @@ signals:
     void countRequested(double x_mm, double y_mm);
     void countRemoved(int group, int index);
     void countMoved(int group, int index, double x_mm, double y_mm);
+    // (PC5 J-b) スライスツール: a slice drawn (mm); スライス選択ツール: the slice of a number chosen (0: none), moved or sized
+    // to (mm), its options asked; a gesture refused while the slices are locked
+    void sliceDrawn(QRectF mm);
+    void sliceChosen(int number);
+    void sliceMoved(int number, QRectF mm);
+    void sliceOptionsAsked(int number);
+    void slicesLocked();
     // the lines: the text tool clicked here (mm); a balloon's outline drawn by hand ([[x, y], …] mm); a line chosen (and
     // whether its panel opens); a line's box or tails changed ({x_mm, y_mm, w_mm, h_mm} | {tails}: move_line, or {style}:
     // edit_line); a double click on a balloon (type over it); a right click on one; a balloon dragged to (mm)
@@ -1195,6 +1230,24 @@ private:
     bool count_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
     bool count_move(const QPointF& mm);
     bool count_release();
+    // (PC5 J-b: a slice tool's drag — a new slice, the chosen one moved, one of its handles — app/canvas_slices.cpp)
+    struct SliceDrag {
+        enum class Part { New, Move, Handle };
+        Part part = Part::New;
+        int handle = -1;   // (0..3 the corners from the top left, 4..7 the sides' middles from the top)
+        int number = 0;    // (the slice moved or sized)
+        QPointF grabbed;   // (the press, mm)
+        QRectF was, now;   // (mm)
+        bool moved = false;
+    };
+    std::optional<SliceDrag> slice_drag_;
+    int snap_slice_moving_ = 0;  // (the slice being moved: its edges no snap target)
+    bool slice_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool slice_move(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool slice_release();
+    bool slice_double(const QPointF& widget);
+    QRectF slice_drawn(const QPointF& from, const QPointF& to, Qt::KeyboardModifiers modifiers) const;
+    void draw_slice_drag(QPainter& painter) const;
     std::vector<QString> extras_hidden_;
     void draw_extras(QPainter& painter) const;
     // (PC5 H-b: canvas_guide_lines.cpp) the guides, the layers' edges, the equal gaps of a moved box; a guide grabbed

@@ -219,6 +219,12 @@ genko_test(test_annotations SOURCES unit/test_annotations.cpp DEPS genko_test_su
 # without a change), the marks carried by the page size ops, PSD's 1074 and 1080, a .pcraft's measurement, MCP's apply_ops
 # not taking the ops.
 genko_test(test_measure SOURCES unit/test_measure.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service LABELS unit TIMEOUT 600)
+# PC5 J-b (slices@1, SPEC.md PROD-01「スライス」): the slices as PhotoCraft's tests check them (the auto slices and the
+# numbering, user slices and their options, promote and divide, the slices from the guides and clearing them, a layer-based
+# slice following its layer and its effects and going with it), each edge rounded alone (neighbours share it), the page size
+# ops and a duplicated page carrying them, PSD's 1050 (versions 6 and 7) onto a page and back, a .pcraft's slices, MCP's
+# apply_ops not taking the ops.
+genko_test(test_slices SOURCES unit/test_slices.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service LABELS unit TIMEOUT 600)
 # PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame; and PC2a's tone kinds

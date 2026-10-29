@@ -68,6 +68,9 @@ const QStringList& view_rows() {
         QStringLiteral("act_clear_canvas_guides"), QStringLiteral("act_new_guide"), QStringLiteral("act_new_guide_layout"),
         QStringLiteral("act_guides_from_shape"),
         QStringLiteral("|"),
+        // スライスをロック・スライスを消去 (PC5 J-b)
+        QStringLiteral("act_lock_slices"), QStringLiteral("act_clear_slices"),
+        QStringLiteral("|"),
         // Genko's own
         QStringLiteral("act_view_flip_v"), QStringLiteral("act_turn_left"), QStringLiteral("act_turn_right"), QStringLiteral("act_turn_reset"),
         QStringLiteral("act_zoom_value"), QStringLiteral("act_zoom_tool"), QStringLiteral("act_hand_tool"),

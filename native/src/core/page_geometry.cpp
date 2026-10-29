@@ -590,6 +590,20 @@ void map_page(Document& doc, std::size_t at, const Mapping& m, const PixelHooks&
     } catch (const Error&) {
         throw OpError("the page's count marks, ruler line or notes would lie past 1000 m from the page");
     }
+    // (PC5 J-b, slices@1: each slice's rect the box of its corners through the map — upright still, a quarter turn its
+    // sides swapped —; a layer-based one is made again from its layer, its rect kept as the last one seen. Past 1000 m from
+    // the page: refused, as the marks above)
+    if (page.slices) {
+        for (Slice& s : page.slices->list) {
+            const std::array<double, 4> b = map_box(s.rect_mm, m);
+            s.rect_mm = {py_round(b[0], 4), py_round(b[1], 4), py_round(b[2], 4), py_round(b[3], 4)};
+        }
+        try {
+            check_slices(*page.slices);
+        } catch (const Error&) {
+            throw OpError("the page's slices would lie past 1000 m from the page");
+        }
+    }
     if (page.effects.is_array())
         for (Json& effect : page.effects) map_effect(effect, m);
     if (page.prims.is_array())

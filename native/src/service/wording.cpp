@@ -792,6 +792,32 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"((trim|bleed_mm|margins) is only for crop: true)", "\\1 は、ページを回して切り抜くとき（crop: true）だけ指定します"));
         r.push_back(rule(R"(the page's count marks, ruler line or notes would lie past 1000 m from the page)",
                          "カウントの印・ものさしの線・注釈が、ページから 1000 m より遠くへ出てしまうため、できません"));
+        // (PC5 J-b, slices@1 — the C++ build's own: the slices, render/ops_slices; Web 用に保存 by slices)
+        r.push_back(rule("the page's slices would lie past 1000 m from the page", "スライスが、ページから 1000 m より遠くへ出てしまうため、できません"));
+        r.push_back(rule(R"((rect_mm|rect_px) is \[x, y, width, height\].*)", "スライスの範囲（\\1）は [x, y, 幅, 高さ] で、幅と高さは 0 より大きくします"));
+        r.push_back(rule(R"((rect_mm|rect_px) lies past 1000 m from the page)", "スライスの範囲が、ページから 1000 m より遠くにあります"));
+        r.push_back(rule("give rect_mm or rect_px, not both", "スライスの範囲は rect_mm か rect_px のどちらかで指定します"));
+        r.push_back(rule(R"(give rect_mm or rect_px \(or layer, for a layer-based slice\))", "スライスの範囲（rect_mm か rect_px）か、レイヤーベースのスライスのレイヤー（layer）を指定します"));
+        r.push_back(rule("a layer-based slice follows its layer: give layer or a rect, not both", "レイヤーベースのスライスはレイヤーに付いていくため、範囲と一緒には指定しません"));
+        r.push_back(rule("the slice lies outside the page", "スライスがページの外にあります"));
+        r.push_back(rule("a fill or adjustment layer has no bounds to slice", "塗りつぶしレイヤー・調整レイヤーには範囲が無いため、レイヤーベースのスライスにできません"));
+        r.push_back(rule("the layer has a layer-based slice already", "このレイヤーにはもうレイヤーベースのスライスがあります"));
+        r.push_back(rule("the layer is empty: no layer-based slice can be made of it", "レイヤーが空のため、レイヤーベースのスライスを作れません"));
+        r.push_back(rule("outsets are a layer-based slice's", "外側の広げ（outsets）は、レイヤーベースのスライスだけのものです"));
+        r.push_back(rule(R"(a page holds at most (\d+) slices)", "スライスは 1 ページに \\1 個までです"));
+        r.push_back(rule(R"(no slice (\d+) on the page)", "このページに ID \\1 のスライスはありません"));
+        r.push_back(rule(R"(no slice number (\d+) on the page)", "このページに番号 \\1 のスライスはありません"));
+        r.push_back(rule(R"(slice number (\d+) is an auto slice)", "番号 \\1 は自動スライスです"));
+        r.push_back(rule(R"(give slice \(its id\) or number \(as shown\))", "スライスを ID（slice）か番号（number）で指定します"));
+        r.push_back(rule(R"(slices is a list of the slices' ids, or "all")", "削除するスライスは ID の一覧か \"all\" で指定します"));
+        r.push_back(rule("the page has no user or layer-based slices", "このページにはユーザー定義スライスもレイヤーベースのスライスもありません"));
+        r.push_back(rule(R"(give rows \(slices down\) or columns \(slices across\) above 1)", "分割する数（縦に並ぶ数 rows か横に並ぶ数 columns）を 2 以上で指定します"));
+        r.push_back(rule("the slice is too small to divide that many times", "スライスが小さすぎて、その数には分割できません"));
+        r.push_back(rule("the slice's layer shows nothing to divide", "スライスのレイヤーに描かれたものが無いため、分割できません"));
+        r.push_back(rule("the page has no guides inside its paper", "このページの用紙の中にガイドがありません"));
+        r.push_back(rule(R"(kind is image, noImage or table)", "スライスの種類は image・noImage・table のどれかです"));
+        r.push_back(rule(R"(background is "#rrggbb", "none" or null)", "スライスの背景は #rrggbb か \"none\" で指定します"));
+        r.push_back(rule("none of the slices asked for is on the page", "指定したスライスがページにありません"));
         // (PC5-0, Z0's review P1-1: a new layer of a 16- or 32-bit page painted at 8 bits for the book's precise budget)
         r.push_back(rule(R"(the layer is painted at 8 bits: the book's precise pixels would pass their budget.*)",
                          "本の高精度の画素の上限（1 GiB）を越えるか、本をまだ読み込み中のため、このレイヤーは 8 bit で塗りました"));

@@ -3,6 +3,7 @@
 
 #include "core/slices.hpp"
 
+#include <cmath>
 #include <set>
 
 #include "core/error.hpp"
@@ -105,6 +106,11 @@ void check_slices(const Slices& slices) {
         if ((s.origin == "layer") != s.layer.has_value()) pj::wrong(where, "has a slice whose layer does not go with its origin (a layer-based one names its layer)");
         if (s.kind != "image" && s.kind != "noImage" && s.kind != "table") pj::wrong(where, "has a slice of the kind " + s.kind + " (image, noImage, table)");
         if (s.background && !colour_text(*s.background)) pj::wrong(where, "has a slice whose background is not #rrggbb");
+        // (PC5 J-b: the reader's bounds — a place within 1000 m of the page, a size not negative — for what the ops make)
+        for (std::size_t k = 0; k < 4; ++k) {
+            const double v = s.rect_mm[k];
+            if (!std::isfinite(v) || std::fabs(v) > pj::kCoordinateMaxMm || (k >= 2 && v < 0)) pj::wrong(where, "has a slice whose rect_mm is out of range");
+        }
     }
 }
 

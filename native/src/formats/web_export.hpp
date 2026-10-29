@@ -3,10 +3,12 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "core/json.hpp"
@@ -29,7 +31,7 @@
 // edges over the matte; Web Snap moving palette entries near the web-safe cube onto it. Without a file, only the size of
 // what it would write (the dialog's estimate: its picture at most `proxy` long, scaled back by the pixels). The file is
 // written as it is made, beside its place, then moved in (render/codecs/web's writers hand their bytes to a sink): a
-// picture past the codecs' limits is refused before it is drawn. Slices and their HTML table are PC5's.
+// picture past the codecs' limits is refused before it is drawn. Slices and their HTML table: PC5 J-b (save_slices_for_web).
 
 namespace genko::formats {
 
@@ -144,6 +146,39 @@ struct WebResult {
 WebResult save_for_web(const core::Document& doc, std::size_t page, const WebSettings& settings, const WebSize& size = {},
                        const std::optional<std::filesystem::path>& dest = std::nullopt, const std::optional<std::string>& layer = std::nullopt,
                        std::optional<std::uint32_t> proxy = std::nullopt);
+
+// --- (PC5 J-b) Web 用に保存 by the page's slices, and their HTML table ---
+
+// Which slices and how (PhotoCraft's "slices": all | user, "numbers", "html", "imagesFolder").
+struct WebSliceOptions {
+    bool user_only = false;            // the user and layer-based slices only (the auto ones left out)
+    std::vector<int> numbers;          // (given: the slices of these numbers only)
+    bool html = false;                 // the HTML table too (<base>.html), a spacer GIF fixing its cells
+    std::string images = "images";     // the slices' folder in `folder` ("": beside the HTML)
+    // Each file asked before anything is written (the window's and the command's write_guard: never the book, a file it links
+    // or a picture a book was opened from) — core::Error("refused_target", …) to refuse.
+    std::function<void(const std::filesystem::path&)> check;
+};
+struct WebSlicesResult {
+    std::vector<std::filesystem::path> files;   // the slices' pictures (and the spacer)
+    std::optional<std::filesystem::path> html;
+    std::uint64_t bytes = 0;                    // the slices' pictures'
+    std::size_t slices = 0;                     // the slices chosen
+    std::uint32_t width = 0, height = 0;        // the picture's
+    std::vector<std::string> notes;
+};
+// Web 用に保存 by slices: the page drawn once at the size (web_picture), each slice chosen cut from it at its edges in those
+// pixels (core/slice_layout: each edge its mm rounded alone — neighbours share it) and optimised as the settings say, named
+// after the slice (<name>.<ext>: its own name or <base>_NN), in `folder`/images; a no-image slice writes no picture (its cell
+// text in the HTML). The HTML: a table of one column a distinct x edge and one row a y edge, each slice a cell spanning its
+// columns and rows (a slice under an earlier one passed over), an image linked to its URL and target with its alt, PhotoCraft's
+// html_table. All the files written together when all are made (none of them when one fails).
+WebSlicesResult save_slices_for_web(const core::Document& doc, std::size_t page, const WebSettings& settings, const WebSize& size,
+                                    const std::filesystem::path& folder, const WebSliceOptions& options);
+// The HTML table alone (cells: a slice's box in the picture's pixels, its <td>'s attributes and its body) — tests.
+std::string web_slices_html(const std::string& title, std::uint32_t width, std::uint32_t height,
+                            const std::vector<std::tuple<std::array<std::int64_t, 4>, std::string, std::string>>& cells,
+                            const std::optional<std::string>& spacer);
 
 // --- 書き出しの環境設定 and クイック書き出し ---
 

@@ -44,6 +44,17 @@ core::snap::Targets PageCanvas::snap_targets() const {
         }
     }
     if (grid_snap && grid_mm > 0) t.grid = grid_mm;
+    // (PC5 J-b, スナップ先 → スライス: the user and layer-based slices' edges — not the one being moved —, as guides)
+    if (snap_slices && slice_view) {
+        if (const SliceView* v = slice_view()) {
+            for (const core::ResolvedSlice& r : v->slices) {
+                if (r.origin == "auto" || r.number == snap_slice_moving_) continue;
+                const QRectF b = slice_mm(r);
+                for (const double x : {b.left(), b.right()}) t.x.push_back(core::snap::Target{x, Kind::Guide, {b.top(), b.bottom()}});
+                for (const double y : {b.top(), b.bottom()}) t.y.push_back(core::snap::Target{y, Kind::Guide, {b.left(), b.right()}});
+            }
+        }
+    }
     if (snap_layers && snap_boxes) {
         for (const auto& [id, box] : snap_boxes()) {
             if (std::find(snap_moving.begin(), snap_moving.end(), id) != snap_moving.end()) continue;
