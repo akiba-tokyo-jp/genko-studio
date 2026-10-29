@@ -254,7 +254,13 @@ std::optional<Json> write(const core::Page& page, pcraft_production::WriteContex
     const auto said = [&](const std::string& note) {
         if (context.say) context.say(note);
     };
-    const core::Variables variables = core::variables_of(*context.book);
+    core::Variables variables;
+    try {
+        variables = core::variables_of(*context.book);
+    } catch (const core::Error&) {  // (a book read only for its variables: the rest written, they said)
+        said("変数とデータセットは読めない形のため書きませんでした");
+        return std::nullopt;
+    }
     Json defs = Json::array();
     std::set<std::string> written;
     bool left_defs = false;

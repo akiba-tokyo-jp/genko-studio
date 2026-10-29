@@ -1978,8 +1978,10 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
         production.mm = ctx.mm;
         production.say = [&ctx](std::string note) { ctx.notes.add(std::move(note)); };
         production.layers = ctx.layer_ids;  // (PC5 J-a)
-        production.book = &ctx.doc;  // (PC5 I-d: the variables, the book's)
-        if (ctx.load.limits().depth == 0) production.beside = ctx.load.limits().beside;
+        if (ctx.load.limits().depth == 0) {  // (PC5 I-d: the variables, the book's — a .pcraft inside a smart object's left out, said)
+            production.book = &ctx.doc;
+            production.beside = ctx.load.limits().beside;
+        }
         pcraft_production::read(d, production);
     }
     if (const Json* styles = optional_field(d, "text_styles")) {  // (the basic paragraph style every document has: nothing to say)

@@ -39,15 +39,30 @@ fs::path fpath(const QString& path) { return core::path_from_utf8(path.toStdStri
 }  // namespace
 
 void MainWindow::build_variable_actions() {
-    make(QStringLiteral("act_variables_define"), QStringLiteral("定義…"), [this] { define_variables(); }, {},
+    // (the review's P1-1: a book whose variables cannot be read — written by hand, by another build — said, not thrown out of
+    // the event loop; each command again on a book read only, in case a key reached it before the menu was greyed)
+    const auto guarded = [this](void (MainWindow::*what)(), bool changes) {
+        return [this, what, changes] {
+            if (changes && !session_->read_only_reason().empty()) {
+                flash(QStringLiteral("この原稿は読み取り専用で開いています（変更はできません）"), 5000, true);
+                return;
+            }
+            try {
+                (this->*what)();
+            } catch (const std::exception& error) {
+                flash(QStringLiteral("変数とデータセットを使えません: %1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
+            }
+        };
+    };
+    make(QStringLiteral("act_variables_define"), QStringLiteral("定義…"), guarded(&MainWindow::define_variables, true), {},
          QStringLiteral("レイヤー・台詞に変数（表示・テキストの置き換え・ピクセルの置き換え）を定義します"));
-    make(QStringLiteral("act_variables_data_sets"), QStringLiteral("データセット…"), [this] { edit_data_sets(); }, {},
+    make(QStringLiteral("act_variables_data_sets"), QStringLiteral("データセット…"), guarded(&MainWindow::edit_data_sets, true), {},
          QStringLiteral("変数の値の組（データセット）を作り、直します"));
-    make(QStringLiteral("act_apply_data_set"), QStringLiteral("データセットを適用…"), [this] { apply_data_set_dialog(); }, {},
+    make(QStringLiteral("act_apply_data_set"), QStringLiteral("データセットを適用…"), guarded(&MainWindow::apply_data_set_dialog, true), {},
          QStringLiteral("データセットの値で、レイヤーの表示・文字・画像を置き換えます（取り消せます）"));
-    make(QStringLiteral("act_data_sets_to_files"), QStringLiteral("データセットからファイル…"), [this] { data_sets_to_files(); }, {},
+    make(QStringLiteral("act_data_sets_to_files"), QStringLiteral("データセットからファイル…"), guarded(&MainWindow::data_sets_to_files, false), {},
          QStringLiteral("データセットを 1 つずつ適用した画像を、1 枚ずつ書き出します（原稿はそのまま）"));
-    make(QStringLiteral("act_import_data_sets"), QStringLiteral("変数データセット…"), [this] { import_data_sets(); }, {},
+    make(QStringLiteral("act_import_data_sets"), QStringLiteral("変数データセット…"), guarded(&MainWindow::import_data_sets, true), {},
          QStringLiteral("テキストファイル（CSV）からデータセットを読み込みます"));
 }
 

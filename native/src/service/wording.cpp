@@ -1237,8 +1237,9 @@ const std::vector<Rule>& rules() {
                          "文字の設定（文字・段落の属性、スタイル）の指定が正しくありません"));
         r.push_back(rule("(?:a run(?:'s| must) |the runs must |a paragraph must |the paragraphs must |a style's (?:id|name) |two (?:character|paragraph) styles ).*",
                          "文字の範囲・段落・スタイルの指定が正しくありません"));
-        // (variables@1, PC5 I-d — the C++ build's own: the variables and data sets, render/ops_variables, formats/datasets)
-        r.push_back(rule(R"(variable (\S+): (.*))", [](const QRegularExpressionMatch& m) {
+        // (variables@1, PC5 I-d — the C++ build's own: the variables and data sets, render/ops_variables, formats/datasets; a
+        // variable's name may hold spaces — the review's P3-3 — so a name is taken as (.+?), not (\S+))
+        r.push_back(rule(R"(variable (.+?): (.*))", [](const QRegularExpressionMatch& m) {
             return QStringLiteral("変数「%1」: %2").arg(m.captured(1), error(m.captured(2)));
         }));
         r.push_back(rule("no data set at index (\\S+)", "\\1 番目のデータセットはありません"));
@@ -1249,9 +1250,9 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("no data sets chosen", "書き出すデータセットが選ばれていません"));
         r.push_back(rule("no page to write: the variables name no page of the book", "変数のあるページがないため、書き出すページがありません"));
         r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?no variable (.*))", "「\\1」という変数はありません"));
-        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?(\S+) \(visibility\) takes true or false)", "変数「\\1」（表示）の値は true か false です"));
-        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?(\S+) \(text\) takes text)", "変数「\\1」（テキストの置き換え）の値は文字です"));
-        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?(\S+) \(pixels\) takes a picture.*)", "変数「\\1」（ピクセルの置き換え）の値は画像です"));
+        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?(.+?) \(visibility\) takes true or false)", "変数「\\1」（表示）の値は true か false です"));
+        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?(.+?) \(text\) takes text)", "変数「\\1」（テキストの置き換え）の値は文字です"));
+        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?(.+?) \(pixels\) takes a picture.*)", "変数「\\1」（ピクセルの置き換え）の値は画像です"));
         r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?the picture cannot be read.*)", "データセットの画像が読めません"));
         r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?the picture is larger than 256 MiB)", "データセットの画像が大きすぎます（256 MiB まで）"));
         r.push_back(rule("the data sets' pictures are larger than 4 GiB together", "データセットの画像が、あわせて 4 GiB を越えます"));

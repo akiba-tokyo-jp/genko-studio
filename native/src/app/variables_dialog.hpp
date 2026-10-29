@@ -53,6 +53,7 @@ public:
 private:
     void fill_table();
     const core::Document& doc_;
+    const core::Page& page_;        // (the page the window was opened on: its layers the targets — the review's P3-4)
     std::vector<core::Json> defs_;  // (set_variables's form, the page's number for a layer)
 };
 

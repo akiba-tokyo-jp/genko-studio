@@ -98,7 +98,7 @@ QString variable_align_name(const std::string& align) {
 
 // --- 変数の定義… ---------------------------------------------------------------------------------------------------------
 
-VariablesDialog::VariablesDialog(QWidget* parent, const core::Document& doc, const core::Page& page) : QDialog(parent), doc_(doc) {
+VariablesDialog::VariablesDialog(QWidget* parent, const core::Document& doc, const core::Page& page) : QDialog(parent), doc_(doc), page_(page) {
     setObjectName(QStringLiteral("variablesDialog"));
     setWindowTitle(QStringLiteral("変数"));
     for (const core::VariableDef& def : core::variables_of(doc).defs) {
@@ -243,10 +243,8 @@ bool VariablesDialog::add_chosen() {
     }
     if (where.contains("layer")) {
         const core::Layer* layer = nullptr;
-        for (const auto& page : doc_.pages) {
-            for (const core::Layer& l : page->layers) {
-                if (l.id == where["layer"].get<std::string>()) layer = &l;
-            }
+        for (const core::Layer& l : page_.layers) {  // (a layer of the window's page: ids are a page's own)
+            if (l.id == where["layer"].get<std::string>()) layer = &l;
         }
         const bool fits = layer != nullptr && (t == "visibility" || (t == "text" && core::type_text::is_type_layer(*layer)) ||
                                                (t == "pixels" && (layer->kind == core::LayerKind::Raster || layer->kind == core::LayerKind::Smart)));
@@ -271,11 +269,7 @@ bool VariablesDialog::add_chosen() {
     if (where.contains("line")) {
         def["line"] = where["line"];
     } else {
-        for (const auto& page : doc_.pages) {
-            for (const core::Layer& l : page->layers) {
-                if (l.id == where["layer"].get<std::string>()) def["page"] = page->index.json();
-            }
-        }
+        def["page"] = page_.index.json();
         def["layer"] = where["layer"];
     }
     if (t == "pixels") {
@@ -285,7 +279,9 @@ bool VariablesDialog::add_chosen() {
     }
     const auto same = std::find_if(defs_.begin(), defs_.end(), [&](const Json& d) { return d["name"] == chosen; });
     if (same != defs_.end()) {
-        if (t == "pixels" && same->contains("box_mm") && same->value("layer", Json()) == def.value("layer", Json())) def["box_mm"] = (*same)["box_mm"];
+        if (t == "pixels" && same->contains("box_mm") && same->value("page", Json()) == def.value("page", Json()) &&
+            same->value("layer", Json()) == def.value("layer", Json()))
+            def["box_mm"] = (*same)["box_mm"];
         *same = def;
     } else {
         defs_.push_back(def);

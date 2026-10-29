@@ -693,7 +693,9 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
         {"layer_style_to_layers", QStringLiteral("レイヤースタイルをレイヤーにしています…")},  // (PC4 E6 review P3-6)
         // (PC5 J-a, the review's P3-7: each layer's place read)
         {"new_layer_comp", QStringLiteral("レイヤーカンプを記録しています…")}, {"update_layer_comp", QStringLiteral("レイヤーカンプを記録しています…")},
-        {"apply_layer_comp", QStringLiteral("レイヤーカンプを適用しています…")}};
+        {"apply_layer_comp", QStringLiteral("レイヤーカンプを適用しています…")},
+        // (PC5 I-d, the review's P2-1: pictures put in, a data set's pictures checked)
+        {"apply_data_set", QStringLiteral("データセットを適用しています…")}, {"set_data_sets", QStringLiteral("データセットを確かめています…")}};
     struct Busy {
         bool on = false;
         ~Busy() {
@@ -994,6 +996,10 @@ void MainWindow::refresh_zoom() {
 void MainWindow::refresh_actions() {
     show_color_mode();
     if (auto* exposure = action("act_exposure")) exposure->setEnabled(current_page() && session_->read_only_reason().empty());
+    // (PC5 I-d, the review's P1-1: the variables' commands change the book — none on a book read only)
+    for (const char* name : {"act_variables_define", "act_variables_data_sets", "act_apply_data_set", "act_import_data_sets"}) {
+        if (QAction* act = action(QString::fromLatin1(name))) act->setEnabled(current_page() != nullptr && session_->read_only_reason().empty());
+    }
     if (QAction* name_ok = action(QStringLiteral("act_name_ok"))) name_ok->setVisible(agent_book());  // (stages are for books made with agents)
     contents_tab_follow();  // (smart-objects@1: what a contents' tab cannot use, greyed)
 }
