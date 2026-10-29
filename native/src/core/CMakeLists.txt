@@ -143,6 +143,8 @@ genko_library(genko_core
     video.cpp
     # PC5 I-d (変数とデータセット: variables@1)
     variables.cpp
+    # PC5 I-a (レイヤーの基本の残り: layer-locks@1, blend-channels@1)
+    layer_basics.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"

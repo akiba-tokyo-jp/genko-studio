@@ -2,6 +2,7 @@
 // first, adding, moving, copying, taking away, each layer's settings, several at once, masks and effects, fill and
 // correction layers, a filter with its result on the page while its numbers change; every change an op (Undo, saved).
 #include <QtTest>
+#include <tuple>
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -291,10 +292,10 @@ private slots:
         const int a = row_of(third), b = row_of(pen);
         QCOMPARE(panel.selected_ids().size(), static_cast<std::size_t>(std::abs(a - b) + 1));
         pick({ink, pen});
-        book.menu_action(panel.many_menu(), QStringLiteral("選んだレイヤーを隠す"))->trigger();
+        book.menu_action(panel.many_menu(), QStringLiteral("レイヤーを非表示"))->trigger();
         QVERIFY(!book.layer(ink)->visible && !book.layer(pen)->visible);
         pick({ink, pen});
-        book.menu_action(panel.many_menu(), QStringLiteral("選んだレイヤーを見せる"))->trigger();
+        book.menu_action(panel.many_menu(), QStringLiteral("レイヤーを表示"))->trigger();
         QVERIFY(book.layer(ink)->visible && book.layer(pen)->visible);
         pick({ink, pen});
         book.menu_action(panel.many_menu(), QStringLiteral("選んだレイヤーをロック"))->trigger();
@@ -304,7 +305,7 @@ private slots:
         QVERIFY(!book.layer(ink)->locked && !book.layer(pen)->locked);
 
         pick({ink, pen});
-        book.menu_action(panel.many_menu(), QStringLiteral("選んだレイヤーをフォルダにまとめる"))->trigger();
+        book.menu_action(panel.many_menu(), QStringLiteral("レイヤーをグループ化"))->trigger();
         QVERIFY(core::py_truthy(book.layer(ink)->parent_id) && book.layer(ink)->parent_id == book.layer(pen)->parent_id);
         book.undo();
         QVERIFY(!core::py_truthy(book.layer(ink)->parent_id));
@@ -839,6 +840,193 @@ private slots:
         QVERIFY(framed != nullptr && framed->group && framed->vector_mask.has_value());
         book.undo();
         QVERIFY(!core::py_truthy(book.layer(book.ink)->parent_id));
+    }
+
+    // PC5 I-a: a drag in the list — where on a row it drops (fixed here: a folder's top quarter above, bottom quarter below,
+    // between into; another row's halves) — and the layers moved there in one step (a group with what it holds).
+    void dragsDropAboveIntoOrBelow() {
+        using Place = app::LayerPanel::DropPlace;
+        QCOMPARE(app::LayerPanel::drop_place(true, 0, 40), Place::Above);
+        QCOMPARE(app::LayerPanel::drop_place(true, 9, 40), Place::Above);
+        QCOMPARE(app::LayerPanel::drop_place(true, 10, 40), Place::Into);
+        QCOMPARE(app::LayerPanel::drop_place(true, 29, 40), Place::Into);
+        QCOMPARE(app::LayerPanel::drop_place(true, 30, 40), Place::Below);
+        QCOMPARE(app::LayerPanel::drop_place(false, 19, 40), Place::Above);
+        QCOMPARE(app::LayerPanel::drop_place(false, 20, 40), Place::Below);
+        Book book;
+        auto& panel = book.panel();
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "folder"}, {"id", "g"}, {"group", true}},
+                                                    Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "a"}},
+                                                    Json{{"op", "move_layers"}, {"page", 1}, {"ids", Json::array({"a"})}, {"parent", "g"}},
+                                                    Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "p"}},
+                                                    Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "q"}}})));
+        panel.refresh();
+        const auto at = [&](const std::string& id) { return std::find(book.order().begin(), book.order().end(), id) - book.order().begin(); };
+        // into the group: on the top of what it holds
+        QVERIFY(panel.drop({"p"}, "g", Place::Into));
+        QCOMPARE(book.layer("p")->parent_id, Json("g"));
+        QVERIFY(at("p") > at("a") && at("p") < at("g"));
+        // below the group: behind it and what it holds, out of it
+        QVERIFY(panel.drop({"q"}, "g", Place::Below));
+        QCOMPARE(book.layer("q")->parent_id, Json(nullptr));
+        QVERIFY(at("q") < at("a"));
+        // above a layer in the group: in the group, in front of it
+        QVERIFY(panel.drop({"q"}, "a", Place::Above));
+        QCOMPARE(book.layer("q")->parent_id, Json("g"));
+        QCOMPARE(at("q"), at("a") + 1);
+        // the group moved with what it holds, over the ink
+        QVERIFY(panel.drop({"g"}, book.ink, Place::Below));
+        QVERIFY(at("g") < at(book.ink) && at("a") < at("g") && at("q") < at("g") && at("p") < at("g"));
+        QCOMPARE(book.layer("a")->parent_id, Json("g"));
+        // into itself: nothing
+        QVERIFY(!panel.drop({"g"}, "a", Place::Into));
+        book.undo();
+        QVERIFY(at("g") > at(book.ink));
+    }
+
+    // PC5 I-a (layer.select): the panel's choice changed in one place — replace, add, toggle, a range from the layer drawn on.
+    void selectIdsModes() {
+        Book book;
+        auto& panel = book.panel();
+        panel.add("paint", QStringLiteral("一"));
+        const std::string one = book.window->target_layer()->id;
+        panel.add("paint", QStringLiteral("二"));
+        const std::string two = book.window->target_layer()->id;
+        panel.add("paint", QStringLiteral("三"));
+        const std::string three = book.window->target_layer()->id;
+        using Mode = app::LayerPanel::SelectMode;
+        const auto chosen = [&] {
+            std::vector<std::string> ids = panel.selected_ids();
+            std::sort(ids.begin(), ids.end());
+            return ids;
+        };
+        const auto sorted = [](std::vector<std::string> ids) {
+            std::sort(ids.begin(), ids.end());
+            return ids;
+        };
+        panel.select_ids({one});
+        QCOMPARE(chosen(), sorted({one}));
+        panel.select_ids({two}, Mode::Add);
+        QCOMPARE(chosen(), sorted({one, two}));
+        panel.select_ids({one, three}, Mode::Toggle);
+        QCOMPARE(chosen(), sorted({two, three}));
+        QVERIFY(book.choose(three));
+        panel.select_ids({one}, Mode::Range);
+        QCOMPARE(chosen(), sorted({one, two, three}));
+        QCOMPARE(book.window->target_layer()->id, three);  // (the layer drawn on as it is)
+    }
+
+    // PC5 I-a: レイヤー's commands by Photoshop's names and keys, in their menus; several deleted (a group with what it holds),
+    // 非表示レイヤーを削除, レイヤーを複製… (its window), グループ解除, クリッピングマスク, 背景からレイヤーへ…, レイヤーからの
+    // グループ…, すべてをロック, the channels in レイヤースタイル, ファイル → スクリプト's two.
+    void layerBasicsOfPhotoshop() {
+        Book book;
+        gui_test::Answers answers;
+        auto& panel = book.panel();
+        const auto act = [&](const char* name) { return book.window->action(QString::fromLatin1(name)); };
+        for (const auto& [name, words, key] : std::initializer_list<std::tuple<const char*, const char*, const char*>>{
+                 {"act_layer_paint", "レイヤー…", ""}, {"act_layer_folder", "グループ…", ""}, {"act_layer_dup", "レイヤーを複製…", ""},
+                 {"act_layer_from_background", "背景からレイヤーへ…", ""}, {"act_layer_group_from_layers", "レイヤーからのグループ…", ""},
+                 {"act_layer_ungroup", "レイヤーのグループ解除", "Ctrl+Shift+G"}, {"act_layer_delete_hidden", "非表示レイヤーを削除", ""},
+                 {"act_clip_create", "クリッピングマスクを作成", "Ctrl+Alt+G"}, {"act_clip_release", "クリッピングマスクを解除", ""},
+                 {"act_layer_merge_layers", "レイヤーを結合…", ""}, {"act_layer_merge_visible", "表示レイヤーを結合したレイヤーを作成", ""},
+                 {"act_layer_flatten", "画像を統合…", ""}, {"act_delete_empty_layers", "すべての空のレイヤーを削除", ""},
+                 {"act_bake_layer_effects", "すべてのレイヤー効果を統合", ""}}) {
+            QAction* a = act(name);
+            QVERIFY2(a != nullptr, name);
+            QCOMPARE(a->text(), QString::fromUtf8(words));
+            QCOMPARE(a->shortcut(), QKeySequence(QString::fromLatin1(key)));
+        }
+        QVERIFY(book.menu_action(panel.many_menu(), QStringLiteral("レイヤーをグループ化")) != nullptr);
+        QVERIFY(book.window->scripts_menu()->actions().contains(act("act_delete_empty_layers")));
+        QVERIFY(book.window->scripts_menu()->actions().contains(act("act_bake_layer_effects")));
+        // several deleted at once, a group with what it holds
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "folder"}, {"id", "g"}, {"group", true}},
+                                                    Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "a"}},
+                                                    Json{{"op", "move_layers"}, {"page", 1}, {"ids", Json::array({"a"})}, {"parent", "g"}},
+                                                    Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "p"}},
+                                                    Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "h"}},
+                                                    Json{{"op", "set_layer"}, {"page", 1}, {"id", "h"}, {"visible", false}}})));
+        panel.refresh();
+        answers.responder->question = [](const QString&, const QString&) { return true; };
+        QVERIFY(book.choose("p"));
+        panel.select_ids({"g", "p"});
+        panel.remove();
+        QVERIFY(book.layer("g") == nullptr && book.layer("a") == nullptr && book.layer("p") == nullptr);
+        book.undo();
+        QVERIFY(book.layer("a") != nullptr);
+        act("act_layer_delete_hidden")->trigger();
+        QVERIFY(book.layer("h") == nullptr);
+        // レイヤーを複製…: its window answered — a group with what it holds, named
+        answers.responder->exec = [](QDialog* dialog) {
+            if (auto* name = dialog->findChild<QLineEdit*>(QStringLiteral("duplicate_name"))) name->setText(QStringLiteral("写し"));
+            return int(QDialog::Accepted);
+        };
+        panel.refresh();
+        QVERIFY(book.choose("g"));
+        const std::size_t count = book.order().size();
+        act("act_layer_dup")->trigger();
+        QCOMPARE(book.order().size(), count + 2);
+        const core::Layer* copy = book.window->target_layer();
+        QVERIFY(copy != nullptr && copy->id != "g" && copy->kind == core::LayerKind::Folder);
+        QCOMPARE(copy->title, std::string("写し"));
+        // グループ解除 (Ctrl+Shift+G): what it held out, one step
+        QVERIFY(book.choose("g"));
+        act("act_layer_ungroup")->trigger();
+        QVERIFY(book.layer("g") == nullptr);
+        QCOMPARE(book.layer("a")->parent_id, Json(nullptr));
+        book.undo();
+        QVERIFY(book.layer("g") != nullptr);
+        // クリッピングマスクを作成 (again: 解除), クリッピングマスクを解除
+        QVERIFY(book.choose("a"));
+        act("act_clip_create")->trigger();
+        QVERIFY(book.layer("a")->clip);
+        act("act_clip_create")->trigger();
+        QVERIFY(!book.layer("a")->clip);
+        act("act_clip_create")->trigger();
+        act("act_clip_release")->trigger();
+        QVERIFY(!book.layer("a")->clip);
+        // 背景からレイヤーへ…: its name asked; the core layer said
+        answers.responder->get_text = [](const QString&, const QString&, const QString& text) { return std::optional<QString>(text); };
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", "a"}, {"lock_alpha", true}, {"lock_position", true}}})));
+        QVERIFY(book.choose("a"));
+        act("act_layer_from_background")->trigger();
+        QVERIFY(!book.layer("a")->lock_alpha && !book.layer("a")->lock_position);
+        QCOMPARE(book.layer("a")->title, std::string("レイヤー 0"));
+        // レイヤーからのグループ…: named
+        QVERIFY(book.choose("a"));
+        answers.responder->get_text = [](const QString&, const QString&, const QString&) { return std::optional<QString>(QStringLiteral("中")); };
+        act("act_layer_group_from_layers")->trigger();
+        const core::Layer* holder = book.layer(core::py_str(book.layer("a")->parent_id));
+        QVERIFY(holder != nullptr && holder->group);
+        QCOMPARE(holder->title, std::string("中"));
+        // すべてをロック (the panel's box): a change of its look refused, said
+        QVERIFY(book.choose("a"));
+        book.child<QCheckBox>("layer_lock_all")->click();
+        QVERIFY(book.layer("a")->lock_all);
+        QVERIFY(!book.window->apply_ops(Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", "a"}, {"opacity", 0.5}}})));
+        QCOMPARE(book.layer("a")->opacity, 1.0);
+        // レイヤーをロック…: すべて and the auto-nesting lock
+        answers.responder->exec = [](QDialog* dialog) {
+            if (auto* box = dialog->findChild<QCheckBox*>(QStringLiteral("lock_all")); box != nullptr && box->isChecked()) box->click();
+            if (auto* nest = dialog->findChild<QCheckBox*>(QStringLiteral("lock_nest"))) nest->setChecked(true);
+            return int(QDialog::Accepted);
+        };
+        QVERIFY(book.choose("a"));
+        panel.select_ids({"a"});
+        act("act_lock_layers")->trigger();
+        QVERIFY(!book.layer("a")->lock_all && book.layer("a")->lock_nest);
+        // the channels in レイヤースタイル: R left out
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "a"},
+                                                         {"area", Json{{"poly", Json::array({Json::array({5, 5}), Json::array({20, 5}), Json::array({20, 20}), Json::array({5, 20})})}}},
+                                                         {"rgb", Json::array({0, 0, 255})}}})));
+        answers.responder->exec = [](QDialog* dialog) {
+            if (auto* r = dialog->findChild<QCheckBox*>(QStringLiteral("style_channel_0"))) r->setChecked(false);
+            return int(QDialog::Accepted);
+        };
+        QVERIFY(book.choose("a"));
+        QVERIFY(book.window->edit_layer_style(""));
+        QCOMPARE(book.layer("a")->blend_channels, (std::vector<bool>{false, true, true}));
     }
 };
 

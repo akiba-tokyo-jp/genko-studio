@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "core/groups.hpp"
+#include "core/layer_basics.hpp"
 #include "core/variables.hpp"
 #include "core/adjust.hpp"
 #include "core/adjust_kinds.hpp"
@@ -448,6 +449,24 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
         for (const auto& each : doc.pages) check_held(doc, *each, each->index, actor);
         return;
     }
+    if (named && (name == "delete_layers" || name == "bake_layer_styles")) {  // (PC5 I-a: "page": "all" — every page asked)
+        const Json* page = get(op, "page");
+        if (page != nullptr && page->is_string() && page->get_ref<const std::string&>() == "all") {
+            for (const auto& each : doc.pages) check_held(doc, *each, each->index, actor);
+            return;
+        }
+    }
+    if (named && name == "duplicate_layers") {  // (PC5 I-a: the page it copies onto is asked too, then its own)
+        const Json* to = get(op, "to_page");
+        if (to != nullptr && to->is_number_integer()) {
+            for (const auto& each : doc.pages) {
+                if (each->index == Num(to->get<std::int64_t>())) {
+                    check_held(doc, *each, each->index, actor);
+                    break;
+                }
+            }
+        }
+    }
     if (named && name == "duplicate_channel") {  // (channels@1: the page it copies onto is asked too, then its own)
         const Json* to = get(op, "to_page");
         if (to != nullptr && to->is_number_integer()) {
@@ -543,6 +562,30 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
             throw OpError("page " + page.index.repr() +
                           ": the name is approved; a person must revoke it before the layout changes (strict_gates)");
         }
+    }
+    // (PC5 I-a: deleting, copying, ungrouping or baking printed layers is drawing on the page — named ids, or every layer)
+    if (named && one_of(name, {"delete_layers", "duplicate_layers", "ungroup_layers", "bake_layer_styles"})) {
+        const Json* page_value = get(op_in, "page");
+        const bool all_pages = page_value != nullptr && page_value->is_string() && page_value->get_ref<const std::string&>() == "all";
+        std::vector<const Page*> pages;
+        if (all_pages) {
+            for (const auto& each : doc.pages) pages.push_back(each.get());
+        } else {
+            pages.push_back(&page_of(op_in));
+        }
+        const Json* ids = get(op_in, "ids");
+        const Json* id = get(op_in, "id");
+        for (const Page* page : pages) {
+            if (page->name_ok) continue;
+            const bool touched = std::any_of(page->layers.begin(), page->layers.end(), [&](const Layer& l) {
+                if (!printed(l)) return false;
+                if (ids != nullptr && ids->is_array()) return std::any_of(ids->begin(), ids->end(), [&](const Json& v) { return json_equals_string(v, l.id); });
+                if (id != nullptr && name != "bake_layer_styles") return json_equals_string(*id, l.id) || json_equals_string(l.parent_id, py_str(*id));
+                return true;
+            });
+            if (touched) throw OpError(name + " on a printed layer needs name_ok on page " + page->index.repr() + " (strict_gates)");
+        }
+        return;
     }
     if (named && name == "advance" && json_equals_string(op_in.value("to", Json(nullptr)), "finish")) {
         const Page& page = page_of(op_in);
@@ -1220,8 +1263,12 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     if (schema_of(seen) != nullptr && !is_op(seen, "undo")) not_yet_ported(name_text + " is not in the C++ build yet");
                     throw OpError("unknown op: " + name_text);
                 }
+                // (layer-locks@1, PC5 I-a: the layers locked with すべてをロック before the op — kept as they were after it)
+                const std::vector<LockedLayer> locked = locked_layers(work);
                 OpContext context{work, *current, actor};
                 (*function)(context);
+                check_locked_layers(locked, work, name_text);
+                settle_blend_channels(work);  // (blend-channels@1: a page whose mode changed blends every channel again)
                 validate_color_document(work);
                 try {
                     validate_ink_document(work);  // (color-mode@1: what an op leaves on a CMYK or Lab page)
@@ -1236,6 +1283,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     type_text::validate_type(work);  // (type@1, PC5 G-0: a record in its normal form; a type layer draws its text alone)
                     validate_groups(work);  // (groups@1, PC5 I-b: a group on a folder only, pass_through a group's only)
                     validate_variables(work);  // (variables@1, PC5 I-d: the book's variables in their normal form)
+                    validate_layer_basics(work);  // (blend-channels@1, PC5 I-a: a flag for each colour channel of the page)
                 } catch (const Error& error) {
                     if (error.code() == "not_yet_ported") throw;
                     throw OpError(error.what());

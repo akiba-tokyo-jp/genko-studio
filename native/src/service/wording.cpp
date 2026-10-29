@@ -1341,6 +1341,20 @@ const std::vector<Rule>& rules() {
                          "グループとして描けるのはフォルダーだけです"));
         r.push_back(rule(".*(?:blend pass_through is a group's|the blend pass_through is a group's only).*", "描画モード「通過」はグループだけのものです"));
         r.push_back(rule("the layers to merge are in different groups.*", "別々のグループのレイヤーは一緒に結合できません（グループの中で結合します）"));
+        // (PC5 I-a — the C++ build's own: the layers' basics, core/ops_layers, core/layer_basics, render/ops_layer_styles)
+        r.push_back(rule("the layer \\S+ is locked \\(lock_all\\): it cannot be deleted", "すべてをロックしたレイヤーは削除できません（レイヤー パネルでロックを外します）"));
+        r.push_back(rule("the layer \\S+ is locked \\(lock_all\\)", "すべてをロックしたレイヤーは、描く・動かす・見た目を変えることができません（レイヤー パネルでロックを外します）"));
+        r.push_back(rule("delete_layers needs ids, hidden or empty", "消すレイヤー（選んだもの・非表示・空）を指定します"));
+        r.push_back(rule("ids name the layers of one page.*", "レイヤーを選んで消す・統合するのは 1 ページずつです"));
+        r.push_back(rule("the page to copy onto has another paper size or colour mode.*",
+                         "複製先のページは用紙の大きさか色モードが違います（コピーしてペーストします）"));
+        r.push_back(rule("new_ids is \\{layer id: the id of its copy\\}", "複製のレイヤーの名前（id）が正しくありません"));
+        r.push_back(rule("the layer \\S+ is not a group or folder", "グループを選びます（グループ解除はグループのものです）"));
+        r.push_back(rule("blend_channels: this page's colour mode.*", "このページの色モード（モノクロ 2 階調・インデックス・ダブルトーン・マルチチャンネル）では、チャンネルを外せません"));
+        r.push_back(rule("blend_channels is \\d+ flags.*", "チャンネルの指定がページの色のチャンネルの数と合いません"));
+        r.push_back(rule("blend_channels is a layer's, not a folder's", "チャンネルの指定はレイヤーのものです（グループには付けられません）"));
+        r.push_back(rule("not yet ported: high-precision merge of a layer that leaves colour channels out.*",
+                         "高精度のページでは、チャンネルを外したレイヤーの結合はまだできません（混合オプションのチャンネルを全部入れると結合できます）"));
         r.push_back(rule("the layers have nothing to draw", "選んだレイヤーには、描かれたものがありません"));
         r.push_back(rule("layer \\S+ has nothing to rasterize", "このレイヤーには、ラスタライズするものがありません（すでに画素のレイヤーです）"));
         r.push_back(rule("the transform squashes the smart object flat|the picture would be laid too small", "スマートオブジェクトが潰れてしまう変形はできません"));

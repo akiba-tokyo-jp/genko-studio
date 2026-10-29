@@ -117,7 +117,7 @@ private slots:
             QVERIFY(!a->text().startsWith(QStringLiteral("（")));
         }
         QVERIFY(seen.contains(QStringLiteral("検索")));  // (PC5 H-0: Photoshop's name for コマンドを探す…)
-        QVERIFY(seen.contains(QStringLiteral("選んだレイヤーをフォルダにまとめる")));  // (in レイヤー → まとめて)
+        QVERIFY(seen.contains(QStringLiteral("レイヤーをグループ化")));  // (in レイヤー → まとめて)
         QCOMPARE(app::where(b.window.get(), b.act("act_mirror")), QStringLiteral("表示"));
         QCOMPARE(app::where(b.window.get(), b.act("act_find_command")), QStringLiteral("編集"));
         app::CommandSearch* search = b.window->find_command();
@@ -334,7 +334,7 @@ private slots:
             QMenu* sub = submenu(layers, title);
             QVERIFY2(sub != nullptr && !sub->actions().isEmpty(), qPrintable(title));
         }
-        QVERIFY(texts(submenu(layers, QStringLiteral("まとめて（複数のレイヤー・表示レイヤー・変換）"))).contains(QStringLiteral("選んだレイヤーをフォルダにまとめる")));
+        QVERIFY(texts(submenu(layers, QStringLiteral("まとめて（複数のレイヤー・表示レイヤー・変換）"))).contains(QStringLiteral("レイヤーをグループ化")));
         // Ctrl+G from the window: the layer chosen goes into a folder of its own
         const auto folders = [&b] {
             int n = 0;

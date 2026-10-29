@@ -114,6 +114,9 @@ const std::vector<std::pair<QString, QList<QKeySequence>>>& photoshop_keys() {
         {QStringLiteral("act_layer_merge"), k({"Ctrl+E"})},
         {QStringLiteral("act_layer_quick_export_png"), k({"Ctrl+Shift+'"})},
         {QStringLiteral("act_layer_export_as"), k({"Ctrl+Alt+Shift+'"})},
+        // (PC5 I-a) クリッピングマスクを作成 Ctrl+Alt+G, レイヤーのグループ解除 Ctrl+Shift+G (Genko's set the same: free there)
+        {QStringLiteral("act_clip_create"), k({"Ctrl+Alt+G"})},
+        {QStringLiteral("act_layer_ungroup"), k({"Ctrl+Shift+G"})},
         // 選択範囲: 選択範囲を反転 Ctrl+Shift+I
         {QStringLiteral("act_sel_invert"), k({"Ctrl+Shift+I"})},
         // フィルター: フィルターの再実行 Ctrl+Alt+F, レンズ補正… Ctrl+Shift+R; 台詞の検索・置換… none

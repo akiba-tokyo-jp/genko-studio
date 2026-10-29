@@ -441,17 +441,26 @@ void MainWindow::lock_layers_dialog() {
     auto* position = new QCheckBox(QStringLiteral("位置"));
     position->setObjectName(QStringLiteral("lock_position"));
     position->setToolTip(QStringLiteral("移動・変形・整列で動かないようにします"));
+    // (PC5 I-a, layer-locks@1: Photoshop's アートボードの内外への自動ネストを防ぐ — kept for PSD and .pcraft: Genko's artboards are
+    // pages — and すべて its own lock: the others shown on and not to be changed while it is on)
+    auto* nest = new QCheckBox(QStringLiteral("アートボードの内外への自動ネストを防ぐ"));
+    nest->setObjectName(QStringLiteral("lock_nest"));
+    nest->setToolTip(QStringLiteral("Photoshop で開いたときのための設定です（Genko のアートボードはページなので、ここでは何も変わりません）"));
+    every->setToolTip(QStringLiteral("描く・動かす・不透明度や描画モードを変える・削除をできなくします（表示・名前・重ね順は変えられます）"));
     alpha->setChecked(all([](const core::Layer* l) { return l->lock_alpha; }));
     pixels->setChecked(all([](const core::Layer* l) { return l->locked; }));
     position->setChecked(all([](const core::Layer* l) { return l->lock_position; }));
-    every->setChecked(alpha->isChecked() && pixels->isChecked() && position->isChecked());
+    nest->setChecked(all([](const core::Layer* l) { return l->lock_nest; }));
+    every->setChecked(all([](const core::Layer* l) { return l->lock_all; }));
+    const auto shown = [=] {
+        for (QCheckBox* box : {alpha, pixels, position, nest}) box->setEnabled(!every->isChecked());
+    };
     connect(every, &QCheckBox::clicked, &dialog, [=](bool on) {
         for (QCheckBox* box : {alpha, pixels, position}) box->setChecked(on);
+        shown();
     });
-    for (QCheckBox* box : {alpha, pixels, position}) {
-        connect(box, &QCheckBox::toggled, &dialog, [=] { every->setChecked(alpha->isChecked() && pixels->isChecked() && position->isChecked()); });
-    }
-    for (QCheckBox* box : {every, alpha, pixels, position}) layout->addWidget(box);
+    shown();
+    for (QCheckBox* box : {every, alpha, pixels, position, nest}) layout->addWidget(box);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -461,7 +470,8 @@ void MainWindow::lock_layers_dialog() {
     Json list = Json::array();
     for (const std::string& id : ids) list.push_back(id);
     apply_ops(Json::array({Json{{"op", "set_layers"}, {"page", page->index.json()}, {"ids", list}, {"lock_alpha", alpha->isChecked()},
-                                {"locked", pixels->isChecked()}, {"lock_position", position->isChecked()}}}));
+                                {"locked", pixels->isChecked()}, {"lock_position", position->isChecked()}, {"lock_nest", nest->isChecked()},
+                                {"lock_all", every->isChecked()}}}));
 }
 
 // --- the move tool ------------------------------------------------------------------------------------------------------

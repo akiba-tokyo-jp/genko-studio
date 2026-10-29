@@ -255,6 +255,14 @@ struct Layer {
     // PC5 I-b (groups@1, core/groups.hpp): a folder drawn as Photoshop's group — what is in it hidden with it, its opacity,
     // its blend (pass_through, 通過, a group's only), its mask and vector mask; false: a folder as before, an order of layers
     bool group = false;
+    // PC5 I-a (layer-locks@1, core/layer_basics.hpp): すべてをロック — nothing drawn on it, moved, its look (opacity, blend,
+    // style, mask…) changed or deleted, whatever its other locks — and アートボードの内外への自動ネストを防ぐ (kept for PSD and
+    // .pcraft: Genko's artboards are pages, PC5 I-c)
+    bool lock_all = false;
+    bool lock_nest = false;
+    // PC5 I-a (blend-channels@1): 混合オプション → チャンネル — for each colour channel of its page (RGB, CMYK, Lab, grey) whether
+    // it blends; one left out keeps what is under the layer there. Empty: every channel blends (as every layer before it).
+    std::vector<bool> blend_channels;
 
     std::size_t stroke_count() const { return strokes ? strokes->items.size() : 0; }
 };

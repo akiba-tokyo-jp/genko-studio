@@ -23,6 +23,7 @@
 #include "core/filter_kinds.hpp"
 #include "core/ids.hpp"
 #include "core/ink.hpp"
+#include "core/layer_basics.hpp"
 #include "core/lut3d.hpp"
 #include "core/masks.hpp"
 #include "core/ops_util.hpp"
@@ -987,8 +988,12 @@ void note_extras(Ctx& ctx, const Json& m, const std::string& name) {
     if (const Json* blend_if = optional_field(m, "blend_if"); blend_if != nullptr && !(blend_if->is_object() && blend_if->value("ranges", Json::array()).empty())) {
         ctx.notes.name("ブレンド条件（Blend If）は Genko に無いため外しました", name);
     }
-    if (const Json* excluded = optional_field(m, "excluded_channels"); excluded != nullptr && *excluded != Json(0)) {
-        ctx.notes.name("高度な合成のチャンネルの指定は Genko に無いため外しました", name);
+    // (PC5 I-a, blend-channels@1: a group's, or on a page whose mode has no channels to leave out — base_layer reads the rest)
+    const Json& content = field(m, "content", "layer");
+    const bool group = content.is_object() && content.value("kind", Json()) == Json("group");
+    if (const Json* excluded = optional_field(m, "excluded_channels"); excluded != nullptr && *excluded != Json(0) &&
+                                                                        (group || core::blend_channel_count(ctx.doc.page(0)) == 0)) {
+        ctx.notes.name("高度な合成のチャンネルの指定は、グループ・このページの色モードでは使えないため外しました", name);
     }
     if (const Json* label = optional_field(m, "label"); label != nullptr && *label != Json("None")) ctx.notes.name("レイヤーのラベルの色は外しました", name);
     if (optional_field(m, "video") != nullptr) ctx.notes.name("ビデオレイヤーのコマはタイムライン（PC5）が入るまで読めないため外しました", name);
@@ -1024,6 +1029,20 @@ core::Layer base_layer(Ctx& ctx, const Json& m, const std::string& name, const J
     layer.lock_alpha = all || boolean(field(locks, "transparency", "locks"), "locks.transparency");
     layer.locked = all || boolean(field(locks, "pixels", "locks"), "locks.pixels");
     layer.lock_position = all || boolean(field(locks, "position", "locks"), "locks.position");
+    // (PC5 I-a, layer-locks@1: すべてをロック and the artboards' auto-nesting lock its own; blend-channels@1: the colour
+    // channels it leaves out, bit i the page's channel i — a group's are not: note_extras)
+    layer.lock_all = all;
+    if (const Json* nest = optional_field(locks, "artboard")) layer.lock_nest = boolean(*nest, "locks.artboard");
+    if (const Json* excluded = optional_field(m, "excluded_channels"); excluded != nullptr && *excluded != Json(0)) {
+        const std::int64_t bits = whole(*excluded, "layer.excluded_channels");
+        const unsigned count = core::blend_channel_count(ctx.doc.page(0));
+        const Json& content = field(m, "content", "layer");
+        if (count != 0 && !(content.is_object() && content.value("kind", Json()) == Json("group"))) {
+            std::vector<bool> on(count, true);
+            for (unsigned c = 0; c < count; ++c) on[c] = (bits & (std::int64_t(1) << c)) == 0;
+            if (std::any_of(on.begin(), on.end(), [](bool v) { return !v; })) layer.blend_channels = std::move(on);
+        }
+    }
     if (const Json* group = optional_field(m, "link_group")) layer.link = "pcraft-" + std::to_string(whole(*group, "layer.link_group"));
     ctx.mask_frame.reset();
     // (groups@1, PC5 I-b: a group's mask as a layer's)

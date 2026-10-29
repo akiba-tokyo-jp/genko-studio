@@ -728,7 +728,7 @@ private slots:
         choose({"red", "blue"});
         const auto chosen = panel->selected_ids();
         QCOMPARE(std::set<std::string>(chosen.begin(), chosen.end()), (std::set<std::string>{"red", "blue"}));
-        QAction* group = titled(panel->many_menu(), QStringLiteral("選んだレイヤーをフォルダにまとめる"));
+        QAction* group = titled(panel->many_menu(), QStringLiteral("レイヤーをグループ化"));
         QVERIFY(group != nullptr);
         group->trigger();
         panel->refresh();

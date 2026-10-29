@@ -592,6 +592,13 @@ genko_test(test_contract_annotations SOURCES contract/test_contract_annotations.
 # and 1080 kept until the page has its own marks, a .pcraft's measurement (upstream's reader with $GENKO_PCRAFT_CHECK).
 genko_test(test_contract_measure SOURCES contract/test_contract_measure.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC5 I-a (SPEC.md AUTO-01「レイヤーの基本」): delete_layers (several, a group with what it holds, the core layers and すべてを
+# ロック kept, hidden, empty, every page; what named them let go or kept; written and read again), duplicate_layers (a group,
+# another page), ungroup_layers, すべてをロック (layer-locks@1), the channels left out (blend-channels@1) on the three ways and
+# through `genko render`, bake_layer_styles, PSD's lspf and brst as psd-tools reads them, a .pcraft's, a book without them
+# as before.
+genko_test(test_contract_layers SOURCES contract/test_contract_layers.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 # PC3 C-e through the command line: every kind of page turned (inspect --pixel), undone and redone; a page of its own paper

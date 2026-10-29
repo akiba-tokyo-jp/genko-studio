@@ -45,6 +45,9 @@ public:
     std::string blend() const { return blend_; }
     double opacity() const { return opacity_; }
     std::array<double, 2> light() const { return light_; }
+    // PC5 I-a (blend-channels@1): 混合オプション → チャンネル — the layer's channels as set (empty: every one blends).
+    std::vector<bool> channels() const;
+    void set_channel(std::size_t channel, bool on);
 
     // (tests and the window) the list's rows, a row chosen (its settings shown), an effect's settings as they are now
     // (the book's form; a pattern {"choice", …}) and changed.
@@ -75,6 +78,7 @@ private:
     core::Json fill_ = 1.0;
     core::Json blend_if_ = core::Json::array();
     bool shown_ = true;
+    std::vector<bool> channels_;  // (PC5 I-a: one for each colour channel of the page; none: its mode has none to leave out)
     std::string blend_ = "normal";
     double opacity_ = 1.0;
     std::array<double, 2> light_{120.0, 30.0};

@@ -1869,6 +1869,27 @@ private:
     // ビデオフレームからレイヤー…, 注釈…). main_window_file.cpp.
     QMenu* import_menu(QMenu* file);
     void add_to_import_menu(QMenu* file, QAction* command);
+    // --- PC5 I-a (SPEC.md AUTO-01「レイヤーの基本」): main_window_layers.cpp — レイヤー → 新規 → 背景からレイヤーへ…・レイヤーからの
+    // グループ…, レイヤーを複製…, 非表示レイヤーを削除, クリッピングマスクを作成・解除, レイヤーのグループ解除, ファイル → スクリプト →
+    // すべての空のレイヤーを削除・すべてのレイヤー効果を統合; each change of the book an op through apply_ops ------------------
+public:
+    // レイヤーを複製…: the window (its name — one layer —, and 保存先: a page of the book of the same paper and mode), then
+    // duplicate_layers (a group or folder with what it holds).
+    void duplicate_layer_dialog();
+    // レイヤーからのグループ…: the name asked, then the layers chosen in a group (group_layers, 通過).
+    void group_from_layers();
+    // 背景からレイヤーへ…: the opened picture's 背景 (or a flattened one) an ordinary layer — its name asked (レイヤー 0), its
+    // transparency, position and すべて locks off (set_layer). A core layer (漫画の背景) is not Photoshop's 背景: said.
+    void layer_from_background();
+    // クリッピングマスクを作成 (Alt+Ctrl+G: again on a clipped layer, 解除) and クリッピングマスクを解除: the layers chosen.
+    void clipping_mask(std::optional<bool> on);
+    // すべての空のレイヤーを削除 (every page: delete_layers empty) and すべてのレイヤー効果を統合 (bake_layer_styles), asked first.
+    void delete_empty_layers();
+    void bake_all_layer_effects();
+
+private:
+    void build_layer_basic_actions();
+    void build_layer_basic_menus(QMenu* layers);
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

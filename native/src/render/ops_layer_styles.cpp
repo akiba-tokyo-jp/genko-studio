@@ -303,6 +303,119 @@ void layer_style_to_layers(core::OpContext& c) {
     c.report = Json{{"ids", std::move(ids)}};
 }
 
+// PC5 I-a: does the layer have what すべてのレイヤー効果を統合 draws in — its style's effects shown, its fill opacity, or a
+// Genko 境界効果 (フチ・水彩境界)?
+bool has_effects_to_bake(const core::Layer& layer) {
+    const bool styled = layer.style && layer.style->is_object() &&
+                        (core::style_shows_effects(*layer.style) || core::style_fill_opacity(*layer.style) < 1.0);
+    return styled || (layer.effect && core::py_truthy(*layer.effect));
+}
+
+// bake_layer_styles {"page": n | "all", "ids"?} (ファイル → スクリプト → すべてのレイヤー効果を統合, after PhotoCraft v0.2.0's
+// file_cmds.rs flatten_all_effects, MIT): each layer with effects drawn alone as it shows — its style's effects and fill
+// opacity, its 境界効果, its mask and vector mask — into its pixels (an 8-bit page's at the paint layers' grid, a page in
+// precise colour's values, a page of inks' inks), at full opacity, in the normal blend and not clipped: its opacity, blend,
+// clipping and Blend If stay its own. A folder, a correction layer, a tone layer and a locked one are left (report
+// "skipped").
+void bake_layer_styles(core::OpContext& c) {
+    core::Document& doc = c.doc;
+    std::vector<std::size_t> pages;
+    if (const Json* page = core::get(c.op, "page"); page != nullptr && page->is_string() && page->get_ref<const std::string&>() == "all") {
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) pages.push_back(i);
+    } else {
+        pages.push_back(core::require_page(doc, c.op));
+    }
+    const Json* given = core::get(c.op, "ids");
+    if (given != nullptr && !given->is_null() && pages.size() != 1) throw OpError("ids name the layers of one page (every page: no ids)");
+    Json baked = Json::array();
+    Json skipped = Json::array();
+    for (const std::size_t at : pages) {
+        std::vector<std::size_t> layers;
+        if (given != nullptr && !given->is_null()) {
+            layers = named_layers(doc.page(at), c.op);
+        } else {
+            for (std::size_t i = 0; i < doc.page(at).layers.size(); ++i)
+                if (has_effects_to_bake(doc.page(at).layers[i])) layers.push_back(i);
+        }
+        for (const std::size_t i : layers) {
+            const core::Page& page = doc.page(at);
+            const core::Layer source = page.layers[i];
+            const Json where{{"page", page.index.json()}, {"id", source.id}};
+            const auto skip = [&](const char* why) {
+                Json item = where;
+                item["why"] = why;
+                skipped.push_back(std::move(item));
+            };
+            if (!has_effects_to_bake(source)) {
+                skip("no_effects");
+                continue;
+            }
+            if (!core::takes_layer_style(source)) {
+                skip("kind");  // (a folder, a correction or a tone layer: no pixels to draw them into)
+                continue;
+            }
+            if (source.locked || source.lock_all) {
+                skip("locked");
+                continue;
+            }
+            Json rest = source.style ? *source.style : Json::object();  // (what stays the layer's: its Blend If)
+            core::Layer alone = source;
+            alone.visible = true;
+            alone.opacity = 1.0;
+            alone.blend = "normal";
+            alone.clip = false;
+            alone.blend_channels.clear();
+            if (alone.style) {
+                Json drawn = *alone.style;
+                drawn.erase("blend_if");
+                alone.style = drawn;
+            }
+            const Alone picture = composite_alone(page, {alone}, raster::working_dpi(page), &doc);
+            core::Layer& layer = doc.edit_page(at).layers[i];
+            layer.kind = core::LayerKind::Raster;
+            layer.strokes = core::empty_strokes();
+            layer.patches.clear();
+            layer.shapes = core::vector::empty_shapes();
+            layer.mask.reset();
+            layer.vector_mask.reset();
+            layer.fill.reset();
+            layer.fill_rgb.reset();
+            layer.effect.reset();
+            layer.tone.reset();
+            layer.smart.reset();
+            layer.type.reset();
+            layer.asset.reset();
+            layer.placement_mm.reset();
+            layer.frame_id.reset();
+            layer.fit = "cover";
+            layer.clip_to = "frame";
+            layer.finish.reset();
+            layer.source.reset();
+            layer.native_psd.reset();  // (psd-keep@1: drawn in, a PSD's effects and blocks are not its own any more)
+            layer.raster_png = nullptr;
+            layer.raster_relpath.reset();
+            layer.raster_memo = {};
+            layer.color_raster = nullptr;
+            layer.ink_raster = nullptr;
+            layer.ink_memo = {};
+            Json kept = Json::object();
+            if (rest.is_object() && rest.contains("blend_if")) kept["blend_if"] = rest["blend_if"];
+            layer.style = kept.empty() ? std::nullopt : std::optional<Json>(spec_of(kept));
+            if (picture.inks) {
+                layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(*picture.inks));
+            } else if (picture.precise) {
+                layer.color_raster = std::make_shared<const std::string>(*picture.precise);
+                if (std::find(doc.features.begin(), doc.features.end(), core::kColorRasterFeature) == doc.features.end())
+                    doc.features.emplace_back(core::kColorRasterFeature);
+            } else {
+                raster::save_raster(doc.page(at), layer, picture.image);
+            }
+            baked.push_back(where);
+        }
+    }
+    c.report = Json{{"baked", std::move(baked)}, {"skipped", std::move(skipped)}};
+}
+
 }  // namespace
 
 Json style_with_patterns(core::Document& doc, const Json& style) {
@@ -334,6 +447,7 @@ void register_layer_style_ops(core::OpRegistry& registry) {
     registry.add("scale_layer_style", scale_layer_style);
     registry.add("show_layer_effects", show_layer_effects);
     registry.add("layer_style_to_layers", layer_style_to_layers);
+    registry.add("bake_layer_styles", bake_layer_styles);  // (PC5 I-a: すべてのレイヤー効果を統合)
 }
 
 }  // namespace genko::render

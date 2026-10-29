@@ -500,6 +500,7 @@ void MainWindow::build_actions() {
     build_layer_style_actions();  // (PC4 E6: レイヤー → レイヤースタイル ▸: main_window_styles.cpp)
     build_production_actions();   // (PC5 J-0: 解析 ▸, ビデオレイヤー ▸, the production's panels — frames: main_window_production.cpp)
     build_variable_actions();     // (PC5 I-d: 変数 ▸, データセットを適用…, データセットからファイル…, 変数データセット…: main_window_variables.cpp)
+    build_layer_basic_actions();  // (PC5 I-a: 背景からレイヤーへ…, レイヤーからのグループ…, グループ解除, クリッピングマスク, 非表示レイヤーを削除: main_window_layers.cpp)
     build_align_actions();      // (PC3 C-d: 重ね順・整列・分布・リンク・ロック, スナップ (with 定規's グリッドにスナップ), the move tool's: main_window_align.cpp)
     build_file_actions();       // (PC4 F-0: 節 F's new commands of ファイル, frames until F-b and F-c: main_window_file.cpp)
     build_filter_actions();     // (PC4 節 D: フィルター's commands, 前回のフィルター: filter_menu.cpp)
@@ -512,9 +513,10 @@ void MainWindow::build_actions() {
     // (one chosen in a list, then merged with the one under it: named apart from Python's 下のレイヤーと結合, which
     // merges the panel's chosen layer at once — a command's name says one thing)
     make("act_layer_merge_down", QStringLiteral("レイヤーを選んで下と結合…"), [this] { layer_operation("merge_down"); });
-    make("act_layer_merge_layers", QStringLiteral("選んだレイヤーを結合…"), [this] { layer_operation("merge_layers"); });
-    make("act_layer_merge_visible", QStringLiteral("表示レイヤーの結合コピーを作る"), [this] { layer_operation("merge_visible"); });
-    make("act_layer_flatten", QStringLiteral("画像をフラット化…"), [this] { layer_operation("flatten"); });
+    // (PC5 I-a: Photoshop's names — their ids kept, preferences::renamed())
+    make("act_layer_merge_layers", QStringLiteral("レイヤーを結合…"), [this] { layer_operation("merge_layers"); });
+    make("act_layer_merge_visible", QStringLiteral("表示レイヤーを結合したレイヤーを作成"), [this] { layer_operation("merge_visible"); });
+    make("act_layer_flatten", QStringLiteral("画像を統合…"), [this] { layer_operation("flatten"); });
     make("act_layer_convert_paint", QStringLiteral("ペイントレイヤーに変換"), [this] { layer_operation("convert_layer"); });
     make("act_layer_convert_pen", QStringLiteral("ペンレイヤーに変換…"), [this] { layer_operation("convert_pen"); });
     // panels
@@ -774,6 +776,7 @@ void MainWindow::build_menus() {
     build_layer_style_menus(layers);  // (PC4 E6: レイヤースタイル ▸ before レイヤーマスク: app/main_window_styles.cpp)
     build_production_menus(layers, pages);  // (PC5 J-0: ビデオレイヤー ▸ before ラスタライズ ▸, ページ → 解析 ▸: main_window_production.cpp)
     build_variable_menus(file, pages);  // (PC5 I-d: ページ → 変数 ▸・データセットを適用…, 書き出し ▸・読み込み ▸ の項目: main_window_variables.cpp)
+    build_layer_basic_menus(layers);  // (PC5 I-a: 新規 ▸ の 背景からレイヤーへ…・レイヤーからのグループ…, 非表示レイヤーを削除, クリッピングマスク, グループ解除: main_window_layers.cpp)
     build_notes_menus(file, view);  // (PC5 J-c: ファイル → 読み込み ▸ 注釈…, 表示 → 表示・非表示 ▸ 注釈: main_window_notes.cpp)
     build_measure_menus(view);  // (PC5 J-d1: 表示 → 表示・非表示 ▸ カウント: main_window_measure.cpp)
     pages->addAction(action("act_book_preview"));
@@ -1025,7 +1028,7 @@ const core::Layer* MainWindow::paint_layer() {
     const core::Layer* layer = target_layer();
     if (page == nullptr || layer == nullptr) return nullptr;
     if (!drawable(*layer)) {
-        const QString why = layer->locked ? QStringLiteral("ロックされています") : QStringLiteral("ペンかペイントのレイヤーではありません");
+        const QString why = layer->locked || layer->lock_all ? QStringLiteral("ロックされています") : QStringLiteral("ペンかペイントのレイヤーではありません");
         flash(QStringLiteral("「%1」には描けません（%2）。レイヤー パネルで選び直します").arg(wording::layer_label(*layer), why), 4000);
         return nullptr;
     }
@@ -1339,10 +1342,10 @@ void MainWindow::layer_operation(const std::string& operation) {
     if (operation == "merge_visible") {
         op["copy"] = true;
     } else if (operation == "flatten") {
-        QMessageBox confirm(QMessageBox::Warning,QStringLiteral("画像をフラット化"),
+        QMessageBox confirm(QMessageBox::Warning,QStringLiteral("画像を統合"),
             QStringLiteral("用紙色を背景に、表示中の作画を1つの不透明レイヤーへ結合します。\n非表示の作画レイヤーは破棄します（ネーム・下描き・コマ枠は保持）。\n操作は取り消せます。続けますか？"),QMessageBox::Yes|QMessageBox::No,this);
         confirm.setObjectName(QStringLiteral("flatten_layer_confirm"));confirm.setDefaultButton(QMessageBox::No);
-        confirm.button(QMessageBox::Yes)->setText(QStringLiteral("フラット化"));confirm.button(QMessageBox::No)->setText(QStringLiteral("取消"));
+        confirm.button(QMessageBox::Yes)->setText(QStringLiteral("統合"));confirm.button(QMessageBox::No)->setText(QStringLiteral("取消"));
         if (confirm.exec()!=QMessageBox::Yes) return;
         op["op"]="merge_visible";op["copy"]=false;op["flatten"]=true;
     } else {

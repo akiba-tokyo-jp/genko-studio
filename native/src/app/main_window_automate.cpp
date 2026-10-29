@@ -67,6 +67,9 @@ void MainWindow::build_automate_menus() {
     // スクリプト ▸: 画像プロセッサー… first, then すべてのマスクを統合 (PC3 B2) / スクリプトイベントマネージャー… / 参照…
     const QList<QAction*> scripts = scripts_menu_->actions();
     scripts_menu_->insertAction(scripts.isEmpty() ? nullptr : scripts.front(), action(QStringLiteral("act_image_processor")));
+    // (PC5 I-a: すべての空のレイヤーを削除・すべてのレイヤー効果を統合 after it, before すべてのマスクを統合 — main_window_layers.cpp)
+    for (const char* name : {"act_delete_empty_layers", "act_bake_layer_effects"})
+        scripts_menu_->insertAction(scripts.isEmpty() ? nullptr : scripts.front(), action(QString::fromLatin1(name)));
     scripts_menu_->addSeparator();
     scripts_menu_->addAction(action(QStringLiteral("act_script_events")));
     scripts_menu_->addSeparator();

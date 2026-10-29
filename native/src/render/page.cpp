@@ -28,6 +28,7 @@
 #include "core/filters.hpp"
 #include "core/frames.hpp"
 #include "core/groups.hpp"
+#include "core/layer_basics.hpp"
 #include "core/patterns.hpp"
 #include "core/pyconv.hpp"
 #include "core/placement.hpp"
@@ -2293,6 +2294,55 @@ std::string crop_values(const std::string& values, const Box& box) {
     });
 }
 
+// --- blend-channels@1 (PC5 I-a, core/layer_basics.hpp): a layer that leaves colour channels out --------------------------
+//
+// Made just before a layer is drawn (the picture so far, on the canvas it is drawn on: the 8-bit picture, the precise
+// canvas or the inks), it puts the channels the layer leaves out back to what they were when the layer's step ends —
+// whichever way it ends —: what is under the layer is kept there (Photoshop's 混合オプション → チャンネル). Its alpha, and
+// what the next layer clips to, are the layer's as drawn. A layer that leaves none out costs nothing.
+class KeptChannels {
+public:
+    KeptChannels(const Layer& layer, Image& rgba, ColorCanvas* canvas) : on_(layer.blend_channels), rgba_(&rgba), canvas_(canvas) {
+        if (!core::leaves_channels_out(layer)) return;
+        if (canvas_ != nullptr) colour_.emplace(canvas_->picture());
+        else before_.emplace(rgba.copy());
+    }
+    explicit KeptChannels(const Layer& layer, InkCanvas* canvas) : on_(layer.blend_channels), ink_(canvas) {
+        if (core::leaves_channels_out(layer) && ink_ != nullptr) inks_.emplace(ink_->picture());
+    }
+    KeptChannels(const KeptChannels&) = delete;
+    KeptChannels& operator=(const KeptChannels&) = delete;
+    ~KeptChannels() {
+        try {
+            if (colour_ && on_.size() == 3) canvas_->keep_channels(*colour_, on_);
+            if (inks_) ink_->keep_channels(*inks_, on_);
+            if (before_) keep_8bit();
+        } catch (const std::exception&) {  // (a canvas of another size: drawn as it is)
+        }
+    }
+
+private:
+    void keep_8bit() {
+        Image& now = *rgba_;
+        if (now.size() != before_->size() || now.mode() != before_->mode() || (now.mode() != "RGBA" && now.mode() != "RGB")) return;
+        for (int y = 0; y < now.height(); ++y) {
+            auto* row = reinterpret_cast<unsigned char*>(now.raw()->image[y]);
+            const auto* was = reinterpret_cast<const unsigned char*>(before_->raw()->image[y]);
+            for (int x = 0; x < now.width(); ++x)
+                for (unsigned c = 0; c < 3 && c < on_.size(); ++c)
+                    if (!on_[c]) row[x * 4 + c] = was[x * 4 + c];
+        }
+    }
+
+    std::vector<bool> on_;
+    Image* rgba_ = nullptr;
+    ColorCanvas* canvas_ = nullptr;
+    InkCanvas* ink_ = nullptr;
+    std::optional<Image> before_;
+    std::optional<ColorPicture> colour_;
+    std::optional<InkPicture> inks_;
+};
+
 // --- groups@1 (PC5 I-b, core/groups.hpp): a folder drawn as Photoshop's group -----------------------------------------
 //
 // What a group holds is drawn between its begin and end (core::group_steps). A pass-through group (通過) draws it straight on
@@ -2718,6 +2768,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
             if (!layer.visible) continue;
             if (print && !layer.exportable) continue;
             if (guide_role(layer.role) && print) continue;
+            const KeptChannels kept(layer, ic);  // (blend-channels@1, PC5 I-a)
             if (shape_correction(layer)) {  // (PC2d: on the page's inks so far)
                 ink_shape_correction(*ic, ctx, layer, area);
                 continue;
@@ -2814,6 +2865,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         if (!layer.visible) continue;
         if (print && !layer.exportable) continue;
         if (guide_role(layer.role) && print) continue;
+        const KeptChannels kept(layer, rgba, cv);  // (blend-channels@1, PC5 I-a)
         if (styled_here(layer)) {  // (PC4 E6, layer-styles@1: the layer with its style, render/layer_styles)
             if (cv && !ColorCanvas::supports_blend(layer.blend)) throw NotYetPorted("high_precision_blend:" + layer.blend);
             const Json* from = layer.source ? get(*layer.source, "kind") : nullptr;
@@ -3499,6 +3551,7 @@ core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<c
     if (!core::has_groups(layers)) {
         for (const Layer& layer : layers) {
             if (layer.kind == LayerKind::Folder) continue;
+            const KeptChannels kept(layer, &canvas);  // (blend-channels@1, PC5 I-a)
             ink_layer(canvas, ctx, layer, area, panel_mask ? &*panel_mask : nullptr);
         }
         return canvas.ink_pixels(page.color->depth, true);
@@ -3532,6 +3585,7 @@ core::InkPixels composite_ink_layers(const core::Page& page, const std::vector<c
             continue;
         }
         if (layer.kind == LayerKind::Folder) continue;
+        const KeptChannels kept(layer, ic);  // (blend-channels@1, PC5 I-a)
         ink_layer(*ic, ctx, layer, area, panel_mask ? &*panel_mask : nullptr);
     }
     return canvas.ink_pixels(page.color->depth, true);

@@ -246,6 +246,16 @@ std::string blend_key(const std::string& blend) {
 // A tagged block of a layer record (below).
 std::string tagged(std::string_view key, std::string payload);
 
+// A layer's locks as PSD's lspf: bit 0 transparency, 1 the pixels, 2 the position — all three, or (PC5 I-a, layer-locks@1)
+// すべてをロック, as Photoshop's "lock all", bit 31 — and 4 the artboards' auto-nesting.
+std::uint32_t own_locks(const core::Layer& own) {
+    std::uint32_t locks = own.lock_all || (own.lock_alpha && own.locked && own.lock_position)
+                              ? 0x80000000u
+                              : (own.lock_alpha ? 1u : 0u) | (own.locked ? 2u : 0u) | (own.lock_position ? 4u : 0u);
+    if (own.lock_nest) locks |= 0x10u;
+    return locks;
+}
+
 class Records {
 public:
     // (`ink`: a CMYK, Lab or grey page's PSD — its layers in the page's inks; `rgb`: an RGB page of a colour model's —
@@ -318,6 +328,36 @@ public:
             if (own.style) style_ = &own;
             return;
         }
+    }
+    // PC5 I-a: the next record is of the page's layer `id` — its すべてをロック and auto-nesting lock (layer-locks@1) and the
+    // channels it leaves out (blend-channels@1) go with it, once a layer
+    void note_basics(const render::PageLayer& layer) {
+        basics_ = nullptr;
+        if (page_ == nullptr || layer.id.empty()) return;
+        for (const core::Layer& own : page_->layers) {
+            if (own.id != layer.id) continue;
+            if ((own.lock_all || own.lock_nest || !own.blend_channels.empty()) && basics_done_.insert(own.id).second) basics_ = &own;
+            return;
+        }
+    }
+    // Its locks as lspf (bit 0 transparency, 1 the pixels, 2 the position, 4 the auto-nesting, 31 すべて) for a layer that keeps
+    // none of a PSD (one that keeps a PSD's: kept_blocks), and its channels left out as brst (their indices, Photoshop's
+    // チャンネルの合成制限 — PhotoCraft v0.2.0's io/src/blocks.rs, MIT).
+    std::string basics_blocks() const {
+        if (basics_ == nullptr) return {};
+        std::string out;
+        if (!basics_->native_psd && (basics_->lock_all || basics_->lock_nest)) {
+            std::string value;
+            put_u32(value, own_locks(*basics_));
+            out += tagged("lspf", value);
+        }
+        if (!basics_->blend_channels.empty()) {
+            std::string value;
+            for (std::size_t c = 0; c < basics_->blend_channels.size(); ++c)
+                if (!basics_->blend_channels[c]) put_u32(value, static_cast<std::uint32_t>(c));
+            if (!value.empty()) out += tagged("brst", value);
+        }
+        return out;
     }
     std::string style_blocks() const {
         if (style_ == nullptr) return {};
@@ -392,18 +432,20 @@ public:
         note_mask(layer);  // (PC3 B2: its mask's masks@1 settings — a pen layer's group's too)
         note_keep(layer.id);  // (psd-keep@1, PC4 F-d)
         note_style(layer);  // (layer-styles@1, PC4 E6: a layer's own record)
+        note_basics(layer);  // (PC5 I-a: its locks and channels)
         if (layer.section == "group") {
             // (groups@1, PC5 I-b: a group's clipping; a pen layer's group as before)
             section_clip_ = layer.settings && layer.clip && page_ != nullptr &&
                             std::any_of(page_->layers.begin(), page_->layers.end(), [&](const core::Layer& l) { return l.id == layer.id && core::is_group(l); });
             section(layer.name, 1, blend_key(layer.settings ? layer.blend : std::string("normal")), layer.settings ? layer.opacity : 1.0,
-                    layer.mask ? &*layer.mask : nullptr, vector_block(layer.vector_mask));
+                    layer.mask ? &*layer.mask : nullptr, vector_block(layer.vector_mask) + basics_blocks());
             return;
         }
         if (layer.shape != nullptr) flags_ = 0x18;  // (bits 3 and 4: its pixel data is not what it shows)
         const std::string blocks = vector_block(layer.vector_mask) + placed_blocks(layer) + (layer.shape != nullptr ? shape_blocks(*layer.shape) : std::string()) +
                                    pattern_blocks(layer) +  // (patterns@1, PC4 E3)
-                                   style_blocks();          // (layer-styles@1, PC4 E6)
+                                   style_blocks() +         // (layer-styles@1, PC4 E6)
+                                   basics_blocks();         // (PC5 I-a: layer-locks@1, blend-channels@1)
         const Image rgba = layer.image.mode() == "RGBA" ? std::move(layer.image) : layer.image.convert("RGBA");
         if (ink_) {  // (its colours by the page's rules)
             add_inks(layer.name, render::ink_picture(rgba, *ink_).values, ink_->space, ink_->depth, layer.settings ? layer.opacity : 1.0,
@@ -851,9 +893,7 @@ private:
             put_u32(id, static_cast<std::uint32_t>(*keep.id));
             out += render::psd_keep::tagged_block("8BIM", "lyid", id, psb_, false);
         }
-        std::uint32_t locks = own.lock_alpha && own.locked && own.lock_position
-                                  ? 0x80000000u
-                                  : (own.lock_alpha ? 1u : 0u) | (own.locked ? 2u : 0u) | (own.lock_position ? 4u : 0u);
+        std::uint32_t locks = own_locks(own);
         for (const auto& [key, ref] : keep.blocks) {
             if (key != "lspf") continue;
             const core::Bytes bytes = kept_file(ref);
@@ -861,8 +901,10 @@ private:
             std::uint32_t read = 0;
             for (std::size_t k = 0; k < 4; ++k) read = (read << 8) | static_cast<unsigned char>((*bytes)[k]);
             const bool all = (read & 0x80000000u) != 0;
+            // (PC5 I-a: the auto-nesting lock, bit 4, and すべて as the layer has them — a book of before, without them, as read)
             const bool same = (all || (read & 1u) != 0) == own.lock_alpha && (all || (read & 2u) != 0) == own.locked &&
-                              (all || (read & 4u) != 0) == own.lock_position;
+                              (all || (read & 4u) != 0) == own.lock_position && (!own.lock_nest || (read & 0x10u) != 0) &&
+                              (!own.lock_all || all);
             locks = same ? read : (read & ~0x80000007u) | locks;
         }
         if (locks != 0 && !theirs.contains("lspf")) {
@@ -918,6 +960,8 @@ private:
     std::set<std::string> items_done_;   // (… once a layer)
     const core::Layer* keep_ = nullptr;  // (the next record's layer and what it keeps: note_keep)
     const core::Layer* style_ = nullptr;  // (the next record's layer and its style: note_style)
+    const core::Layer* basics_ = nullptr;  // (PC5 I-a: the next record's layer and its locks and channels: note_basics)
+    std::set<std::string> basics_done_;
     std::set<std::string> kept_layers_;  // (the layers whose kept blocks are written)
     std::set<std::int64_t> used_ids_;    // (the layer ids written)
 

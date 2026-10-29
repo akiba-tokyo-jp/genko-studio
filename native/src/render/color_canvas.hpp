@@ -134,6 +134,9 @@ public:
     // pixels before what it holds was drawn (`before`, picture()) and now — each pixel `before` + (now − before) × that,
     // premultiplied by its alpha; what the next layer clips to is left.
     void mix_back(const ColorPicture& before, double opacity, const Image* mask = nullptr);
+    // PC5 I-a (blend-channels@1): the colour channels a layer leaves out (`on`: R, G, B, false for one left out) back to their
+    // values in `before` (picture() before the layer was drawn); its alpha and what the next layer clips to as drawn.
+    void keep_channels(const ColorPicture& before, const std::vector<bool>& on);
     // PC5 I-b: what the next layer clips to (`alpha`, "L", the canvas's size: a group's shape).
     void clip_to(const Image& alpha);
     // PC5 I-b: what the next layer would clip to ("L", the canvas's size; all 255 when nothing is set).

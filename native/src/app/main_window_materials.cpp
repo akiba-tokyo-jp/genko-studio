@@ -118,14 +118,16 @@ void MainWindow::build_material_actions() {
         };
     };
     make("act_layer_pen", QStringLiteral("新しいペンのレイヤー"), layers([](LayerPanel& p) { p.add("pen", QStringLiteral("ペン")); }), key("Ctrl+Shift+N"));
-    make("act_layer_paint", QStringLiteral("新しいペイントのレイヤー"), layers([](LayerPanel& p) { p.add("paint", QStringLiteral("ペイント")); }));
-    make("act_layer_folder", QStringLiteral("新しいフォルダ"), layers([](LayerPanel& p) { p.add("folder", QStringLiteral("フォルダ")); }));
+    // (PC5 I-a: Photoshop's レイヤー… and グループ… — their ids kept, preferences::renamed())
+    make("act_layer_paint", QStringLiteral("レイヤー…"), layers([](LayerPanel& p) { p.add("paint", QStringLiteral("ペイント")); }));
+    make("act_layer_folder", QStringLiteral("グループ…"), layers([](LayerPanel& p) { p.add("folder", QStringLiteral("グループ")); }));
     // (PC5 I-b, groups@1: Photoshop's レイヤー → 新規 → レイヤーからのフレーム…, frame_from_layers)
     make("act_layer_frame", QStringLiteral("レイヤーからのフレーム…"), layers([](LayerPanel& p) { p.frame_selected(); }), {},
          QStringLiteral("選んだレイヤーをグループにまとめ、中身の外接の長方形で切り抜きます（ベクトルマスク）"));
     // (PC3 B2, the user's decision 5: Ctrl+J is Photoshop's 選択範囲をコピーしたレイヤー's — without a selection it duplicates
     // the layer as this did —, main_window_clipboard.cpp)
-    make("act_layer_dup", QStringLiteral("レイヤーを複製"), layers([](LayerPanel& p) { p.duplicate(); }));
+    // (PC5 I-a: Photoshop's window — its name and 保存先; a group with what it holds: main_window_layers.cpp)
+    make("act_layer_dup", QStringLiteral("レイヤーを複製…"), [this] { duplicate_layer_dialog(); });
     make("act_layer_merge", QStringLiteral("下のレイヤーと結合"), layers([](LayerPanel& p) { p.merge_down(); }), key("Ctrl+Shift+E"));
     make("act_layer_delete", QStringLiteral("レイヤーを消す"), layers([](LayerPanel& p) { p.remove(); }));
     make("act_layer_up", QStringLiteral("前面へ"), layers([](LayerPanel& p) { p.move(1); }), key("Ctrl+]"));

@@ -507,6 +507,13 @@ void ColorCanvas::mix_back(const ColorPicture& before, double opacity, const Ima
         }
     }
 }
+void ColorCanvas::keep_channels(const ColorPicture& before, const std::vector<bool>& on) {
+    if (before.size != impl_->size || before.pixels.size() != impl_->pixels.size() || on.size() != 3) throw core::Error("value", "color canvas picture does not match");
+    for (std::size_t i = 0; i < impl_->pixels.size(); ++i) {
+        for (unsigned c = 0; c < 3; ++c)
+            if (!on[c]) impl_->pixels[i][c] = before.pixels[i][c];
+    }
+}
 Image ColorCanvas::clip_alpha() const {
     std::string out(impl_->pixels.size(), static_cast<char>(255));
     if (impl_->previous) {

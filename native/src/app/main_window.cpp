@@ -544,7 +544,7 @@ bool MainWindow::agent_book() const { return book().strict_gates || core::py_tru
 
 bool MainWindow::drawable(const core::Layer& layer) {
     return (layer.kind == core::LayerKind::Strokes || layer.kind == core::LayerKind::Raster || layer.kind == core::LayerKind::Tone) &&
-           !layer.locked;
+           !layer.locked && !layer.lock_all;  // (PC5 I-a: すべてをロック)
 }
 
 const core::Layer* MainWindow::target_layer() const {

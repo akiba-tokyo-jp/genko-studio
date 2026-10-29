@@ -210,6 +210,8 @@ genko_library(genko_app
     # PC5 I-d (変数とデータセット: イメージ → 変数, データセットを適用, データセットからファイル, 変数データセット)
     main_window_variables.cpp
     variables_dialog.cpp
+    # PC5 I-a (レイヤーの基本の残り: 背景からレイヤーへ, レイヤーからのグループ, 複製, 削除, クリッピングマスク, グループ解除, スクリプト)
+    main_window_layers.cpp
     # PC5 J-c (annotations@1: 注釈ツール, ウィンドウ → 注釈, 表示・非表示 → 注釈, 読み込み → 注釈…)
     main_window_notes.cpp
     notes_panel.cpp

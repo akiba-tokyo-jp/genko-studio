@@ -79,8 +79,23 @@ public:
     void draw_as_group(bool on);
     // 前面へ (1) and 背面へ (-1): the window's arrange_layers (PC3 C-d).
     void move(int delta);
-    // These layers chosen in the list (the others not; the layer drawn on as it is): リンクしたレイヤーを選択, 自動選択.
-    void select_ids(const std::vector<std::string>& ids);
+    // PC5 I-a (layer.select): the one place the list's choice of layers is changed — these layers chosen (Replace: they only;
+    // Add: they too; Toggle: each the other way; Range: every row from the layer drawn on to the last of them, as Shift+クリック),
+    // the layer drawn on as it is. リンクしたレイヤーを選択, 自動選択, すべてのレイヤー, レイヤーの選択を解除, レイヤーを検索 and (PC5
+    // J-g) the control channel's tools choose through it.
+    enum class SelectMode { Replace, Add, Toggle, Range };
+    void select_ids(const std::vector<std::string>& ids, SelectMode mode = SelectMode::Replace);
+    // PC5 I-a (layer.moveTo): a drag in the list — the rows dragged dropped on a row: above it (in front), into it (a group
+    // or folder: on the top of what it holds) or below it (behind; a folder with what it holds). Where on the row
+    // (`y` from its top, of `height`) says which: a folder's top quarter above, its bottom quarter below, between into; any
+    // other row's top half above, the rest below.
+    enum class DropPlace { Above, Into, Below };
+    static DropPlace drop_place(bool folder, int y, int height);
+    // The layers dropped (move_layers: one step; a core layer or a lock refused as the op refuses it).
+    bool drop(const std::vector<std::string>& ids, const std::string& onto, DropPlace place);
+    // PC5 I-a: レイヤーのグループ解除 (the group or folder drawn on), 削除 → 非表示レイヤー.
+    void ungroup();
+    void delete_hidden();
     void set(const std::string& key, const core::Json& value);
     void mask(const core::Json& change);
     // PC3 B2 (app/layer_panel_masks.cpp): レイヤーマスク's own — 選択範囲をマスク (a mask hiding the selection), 透明部分から,
@@ -120,6 +135,8 @@ private:
     void visibility(QListWidgetItem* item);
     void search(const QString& text);
     std::optional<std::vector<std::string>> several(std::size_t least = 2);
+    bool eventFilter(QObject* watched, QEvent* event) override;  // (PC5 I-a: the list's drags)
+    std::vector<std::string> shown_ids() const;  // (the layers' rows the list shows: not hidden by a search or レイヤーを分離)
     void set_selected(const core::Json& fields);
     void merge_selected();
     void group_selected();
@@ -155,6 +172,7 @@ private:
     QCheckBox* draft_ = nullptr;
     QCheckBox* reference_ = nullptr;
     QCheckBox* group_ = nullptr;  // (PC5 I-b: グループとして描く, a folder's)
+    QCheckBox* lock_all_ = nullptr;  // (PC5 I-a: すべてをロック)
     QComboBox* tint_ = nullptr;
     QPushButton* mask_button_ = nullptr;
     QPushButton* effect_button_ = nullptr;

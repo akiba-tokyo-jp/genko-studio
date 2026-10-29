@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <optional>
 #include <set>
 #include <utility>
@@ -13,6 +14,7 @@
 #include "core/filters.hpp"
 #include "core/groups.hpp"
 #include "core/ids.hpp"
+#include "core/layer_basics.hpp"
 #include "core/lut3d.hpp"
 #include "core/patterns.hpp"
 #include "core/ops_util.hpp"
@@ -275,6 +277,21 @@ std::string layer_blend(const Json& value, const Layer& layer) {
     return blend_mode(value);
 }
 
+// blend-channels@1 (PC5 I-a): a layer's channels from an op — a flag for each colour channel of its page (RGB, CMYK, Lab,
+// grey), every one on (or null, or []) being none.
+std::vector<bool> channel_flags(const Page& page, const Json& value) {
+    if (value.is_null() || (value.is_array() && value.empty())) return {};
+    const unsigned count = blend_channel_count(page);
+    if (count == 0) throw OpError("blend_channels: this page's colour mode (bitmap, indexed, duotone, multichannel) has no channels to leave out");
+    if (!value.is_array() || value.size() != count || !std::all_of(value.begin(), value.end(), [](const Json& v) { return v.is_boolean(); })) {
+        throw OpError("blend_channels is " + std::to_string(count) + " flags, one for each colour channel of the page (true: it blends)");
+    }
+    std::vector<bool> out;
+    for (const Json& v : value) out.push_back(v.get<bool>());
+    if (std::all_of(out.begin(), out.end(), [](bool on) { return on; })) out.clear();
+    return out;
+}
+
 // set_layer on the book (also each layer of set_layers).
 void set_layer_with(Document& doc, const Json& op) {
     const std::size_t at = require_page(doc, op);
@@ -308,6 +325,17 @@ void set_layer_with(Document& doc, const Json& op) {
     if (has(op, "lock_alpha")) layer.lock_alpha = py_truthy(op["lock_alpha"]);
     if (has(op, "locked")) layer.locked = py_truthy(op["locked"]);
     if (has(op, "lock_position")) layer.lock_position = py_truthy(op["lock_position"]);  // (transform@1, PC3 C-d: 位置をロック)
+    // (layer-locks@1, PC5 I-a: すべてをロック, and the artboards' auto-nesting lock — kept for PSD and .pcraft)
+    if (has(op, "lock_all")) layer.lock_all = py_truthy(op["lock_all"]);
+    if (has(op, "lock_nest")) layer.lock_nest = py_truthy(op["lock_nest"]);
+    if (has(op, "blend_channels")) {  // (blend-channels@1, PC5 I-a: a layer's — a folder's are not drawn here)
+        layer.blend_channels = channel_flags(page, op["blend_channels"]);
+        if (!layer.blend_channels.empty() && layer.kind == LayerKind::Folder) throw OpError("blend_channels is a layer's, not a folder's");
+        if (layer.native_psd) {  // (a PSD's brst kept from before: the layer's own channels written now)
+            std::erase_if(layer.native_psd->blocks, [](const auto& block) { return block.first == "brst"; });
+            if (layer.native_psd->empty()) layer.native_psd.reset();
+        }
+    }
     if (has(op, "panel_clip")) layer.panel_clip = py_truthy(op["panel_clip"]);
     if (has(op, "panel_each")) layer.panel_each = py_truthy(op["panel_each"]);
     if (has(op, "title")) layer.title = py_truthy(op["title"]) ? py_str(op["title"]) : "";
@@ -447,18 +475,11 @@ void delete_layer(OpContext& c) {
     std::erase_if(doc.edit_page(at).layers, [&](const Layer& l) { return l.id == layer_id; });
 }
 
-void duplicate_layer(OpContext& c) {
-    Document& doc = c.doc;
-    const std::size_t at = require_page(doc, c.op);
-    Page& page = doc.edit_page(at);
-    const std::size_t source_at = layer_by_id(page, truthy_at(c.op, "id") ? py_str(c.op["id"]) : std::string());
-    const Layer& source = page.layers[source_at];
-    if (source.kind == LayerKind::Folder) throw OpError("a folder cannot be duplicated");
+// A layer's copy (duplicate_layer's, duplicate_layers'): its own id, an ordinary layer (a book has one ink layer, one name
+// layer…), its lines, shape parts and patches with new ids; `titled`: named "<name> のコピー".
+Layer layer_copy(const Layer& source, std::string id, bool titled) {
     Layer twin = source;
-    twin.id = truthy_at(c.op, "new_id") ? py_str(c.op["new_id"]) : new_id();
-    for (const Layer& item : page.layers) {
-        if (item.id == twin.id) throw OpError("layer " + twin.id + " exists");
-    }
+    twin.id = std::move(id);
     // the copy is an ordinary layer (a book has one ink layer, one name layer…)
     // (type@1, PC5 G-0: a type layer's copy keeps the text role, as Photoshop's copy of a type layer is one)
     if (source.kind != LayerKind::Placed && source.kind != LayerKind::Type) twin.role = LayerRole::User;
@@ -474,7 +495,7 @@ void duplicate_layer(OpContext& c) {
             if (role == source.role) base = title;
         }
     }
-    twin.title = base + " のコピー";
+    twin.title = titled ? base + " のコピー" : base;
     std::vector<StrokePtr> strokes;
     for (const StrokePtr& stroke : source.strokes->items) {
         Stroke fresh = *stroke;
@@ -488,15 +509,30 @@ void duplicate_layer(OpContext& c) {
         twin.shapes = vector::make_shapes(std::move(parts));
     }
     for (Patch& patch : twin.patches) {
-        const std::string id = new_id();
+        const std::string fresh = new_id();
         if (patch.attrs.contains("id")) {
-            patch.attrs["id"] = id;
+            patch.attrs["id"] = fresh;
         } else if (patch.asset) {
-            patch.after_asset["id"] = id;  // (Python's dict has "asset" by now: the new key comes after it)
+            patch.after_asset["id"] = fresh;  // (Python's dict has "asset" by now: the new key comes after it)
         } else {
-            patch.attrs["id"] = id;
+            patch.attrs["id"] = fresh;
         }
     }
+    return twin;
+}
+
+void duplicate_layer(OpContext& c) {
+    Document& doc = c.doc;
+    const std::size_t at = require_page(doc, c.op);
+    Page& page = doc.edit_page(at);
+    const std::size_t source_at = layer_by_id(page, truthy_at(c.op, "id") ? py_str(c.op["id"]) : std::string());
+    const Layer& source = page.layers[source_at];
+    if (source.kind == LayerKind::Folder) throw OpError("a folder cannot be duplicated");
+    std::string id = truthy_at(c.op, "new_id") ? py_str(c.op["new_id"]) : new_id();
+    for (const Layer& item : page.layers) {
+        if (item.id == id) throw OpError("layer " + id + " exists");
+    }
+    Layer twin = layer_copy(source, std::move(id), true);
     page.layers.insert(page.layers.begin() + static_cast<std::ptrdiff_t>(source_at) + 1, std::move(twin));
 }
 
@@ -533,6 +569,9 @@ void set_layers(OpContext& c) {
         if (has(op, key)) fields[key] = op[key];
     }
     if (has(op, "lock_position")) fields["lock_position"] = op["lock_position"];  // (transform@1, PC3 C-d: レイヤーをロック…)
+    for (const char* key : {"lock_all", "lock_nest"}) {  // (layer-locks@1, PC5 I-a: レイヤーをロック…'s すべて and 自動ネスト)
+        if (has(op, key)) fields[key] = op[key];
+    }
     if (fields.empty()) {
         std::string names;
         for (const char* key : kSettable) names += (names.empty() ? "" : ", ") + std::string(key);
@@ -584,6 +623,186 @@ void reorder_layers(OpContext& c) {
     page.layers = std::move(layers);
 }
 
+// --- PC5 I-a: several layers, a folder with what it holds -------------------------------------------------------------
+
+// The pages an op of I-a works on: its "page" (a page's number), or every page ("all").
+std::vector<std::size_t> pages_named(const Document& doc, const Json& op) {
+    if (const Json* page = get(op, "page"); page != nullptr && page->is_string() && page->get_ref<const std::string&>() == "all") {
+        std::vector<std::size_t> out;
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) out.push_back(i);
+        return out;
+    }
+    return {require_page(doc, op)};
+}
+
+// An op's "ids": the layers it names (at least one), each a str.
+std::vector<std::string> named_ids(const Json& op) {
+    const Json* given = get(op, "ids");
+    if (given == nullptr || !given->is_array() || given->empty()) throw OpError("ids is the list of layer ids");
+    std::vector<std::string> out;
+    for (const Json& id : *given) {
+        if (!id.is_string()) throw OpError("ids is the list of layer ids");
+        if (std::find(out.begin(), out.end(), id.get<std::string>()) == out.end()) out.push_back(id.get<std::string>());
+    }
+    return out;
+}
+
+// The positions of the layers named (each found on the page: OpError "no layer <id>"), a folder with what it holds.
+std::vector<bool> with_contents(const std::vector<Layer>& layers, const std::vector<std::string>& ids) {
+    std::vector<bool> chosen(layers.size(), false);
+    for (const std::string& id : ids) {
+        const auto found = std::find_if(layers.begin(), layers.end(), [&](const Layer& l) { return l.id == id; });
+        if (found == layers.end()) throw OpError("no layer " + id);
+        chosen[static_cast<std::size_t>(found - layers.begin())] = true;
+    }
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+        if (!chosen[i] || layers[i].kind != LayerKind::Folder) continue;
+        for (const std::size_t k : folder_contents(layers, i)) chosen[k] = true;
+    }
+    return chosen;
+}
+
+// delete_layers {"page": n | "all", "ids"?, "hidden"?, "empty"?} (レイヤー → 削除 ▸ レイヤー・非表示レイヤー, ファイル → スクリプト →
+// すべての空のレイヤーを削除): the layers named, hidden or holding nothing — a folder with what it holds —, but the core layers
+// (ネーム, ペン入れ, 背景, 仕上げ) and those locked with すべてをロック, which are kept and said (report "kept"). A layer kept
+// in a folder deleted goes up to the folder over it that stays. What named the layers deleted lets go (forget_layers).
+void delete_layers(OpContext& c) {
+    Document& doc = c.doc;
+    const Json& op = c.op;
+    const bool hidden = truthy_at(op, "hidden");
+    const bool empty = truthy_at(op, "empty");
+    const Json* given = get(op, "ids");
+    const bool named = given != nullptr && !given->is_null();
+    if (!named && !hidden && !empty) throw OpError("delete_layers needs ids, hidden or empty");
+    const std::vector<std::size_t> pages = pages_named(doc, op);
+    if (named && pages.size() != 1) throw OpError("ids name the layers of one page (every page: hidden or empty)");
+    const std::vector<std::string> ids = named ? named_ids(op) : std::vector<std::string>{};
+    Json deleted = Json::array();
+    Json kept = Json::array();
+    for (const std::size_t at : pages) {
+        const Page& view = doc.page(at);
+        const std::vector<Layer>& layers = view.layers;
+        std::vector<bool> chosen = named ? with_contents(layers, ids) : std::vector<bool>(layers.size(), false);
+        for (std::size_t i = 0; i < layers.size(); ++i) {
+            if ((hidden && !layers[i].visible) || (empty && empty_layer(layers, i))) chosen[i] = true;
+        }
+        for (std::size_t i = 0; i < layers.size(); ++i) {  // (a hidden or empty folder: with what it holds)
+            if (!chosen[i] || layers[i].kind != LayerKind::Folder) continue;
+            for (const std::size_t k : folder_contents(layers, i)) chosen[k] = true;
+        }
+        std::set<std::string> gone;
+        for (std::size_t i = 0; i < layers.size(); ++i) {
+            if (!chosen[i]) continue;
+            if (core_layer(layers[i]) || layers[i].lock_all) {
+                kept.push_back(Json{{"page", view.index.json()}, {"id", layers[i].id}, {"why", core_layer(layers[i]) ? "core" : "lock_all"}});
+                continue;
+            }
+            gone.insert(layers[i].id);
+        }
+        if (gone.empty()) continue;
+        // (a layer kept in a folder deleted: in the folder over it that stays, or none)
+        std::map<std::string, Json> parent_of;
+        for (const Layer& layer : layers) parent_of[layer.id] = layer.parent_id;
+        const auto staying = [&](Json parent) {
+            std::set<std::string> seen;
+            while (parent.is_string() && gone.contains(parent.get<std::string>()) && seen.insert(parent.get<std::string>()).second) {
+                parent = parent_of[parent.get<std::string>()];
+            }
+            return parent;
+        };
+        for (const Layer& layer : layers) {
+            if (gone.contains(layer.id)) deleted.push_back(Json{{"page", view.index.json()}, {"id", layer.id}});
+        }
+        Page& page = doc.edit_page(at);  // (`view` may be this page: nothing of it read after)
+        std::erase_if(page.layers, [&](const Layer& l) { return gone.contains(l.id); });
+        for (Layer& layer : page.layers) {
+            if (layer.parent_id.is_string() && gone.contains(layer.parent_id.get<std::string>())) layer.parent_id = staying(layer.parent_id);
+        }
+        forget_layers(doc, at, gone);
+    }
+    c.report = Json{{"deleted", std::move(deleted)}, {"kept", std::move(kept)}};
+}
+
+// duplicate_layers {"page", "ids", "to_page"?, "new_ids"?: {old id: new id}} (レイヤー → レイヤーを複製…): the layers named — a
+// folder with what it holds, in their folders as they were — copied with new ids, just over the topmost of them, or on
+// the top of another page of the book of the same paper and colour mode (to_page; Photoshop's 保存先 is a document: Genko's
+// pages are the book's — another book takes a paste). The copies of those not in a folder copied are named "… のコピー".
+void duplicate_layers(OpContext& c) {
+    Document& doc = c.doc;
+    const Json& op = c.op;
+    const std::size_t at = require_page(doc, op);
+    const std::vector<std::string> ids = named_ids(op);
+    const Page& from = doc.page(at);
+    const std::vector<bool> chosen = with_contents(from.layers, ids);
+    std::size_t to = at;
+    if (const Json* other = get(op, "to_page"); other != nullptr && !other->is_null()) {
+        to = require_page(doc, Json{{"page", *other}});
+        const Page& target = doc.page(to);
+        const bool same_paper = target.spec.width_mm == from.spec.width_mm && target.spec.height_mm == from.spec.height_mm;
+        if (!same_paper || !(target.color == from.color) || !(target.rgb == from.rgb)) {
+            throw OpError("the page to copy onto has another paper size or colour mode (copy the layers and paste them there)");
+        }
+    }
+    const Json* asked = get(op, "new_ids");
+    if (asked != nullptr && !asked->is_null() && !asked->is_object()) throw OpError("new_ids is {layer id: the id of its copy}");
+    std::set<std::string> taken;
+    for (const Layer& layer : doc.page(to).layers) taken.insert(layer.id);
+    std::map<std::string, std::string> renamed;
+    std::vector<Layer> copies;
+    std::size_t top = 0;
+    for (std::size_t i = 0; i < from.layers.size(); ++i) {
+        if (!chosen[i]) continue;
+        top = i;
+        const Layer& source = from.layers[i];
+        std::string id = new_id();
+        if (asked != nullptr && asked->is_object() && asked->contains(source.id)) {
+            const Json& want = (*asked)[source.id];
+            if (!want.is_string() || want.get_ref<const std::string&>().empty()) throw OpError("new_ids is {layer id: the id of its copy}");
+            id = want.get<std::string>();
+        }
+        if (!taken.insert(id).second) throw OpError("layer " + id + " exists");
+        renamed[source.id] = id;
+        const bool inside = source.parent_id.is_string() && std::any_of(from.layers.begin(), from.layers.end(), [&](const Layer& l) {
+            return l.id == source.parent_id.get_ref<const std::string&>() && chosen[static_cast<std::size_t>(&l - from.layers.data())];
+        });
+        Layer copy = layer_copy(source, id, !inside);
+        if (!inside && to != at) copy.parent_id = nullptr;  // (on another page: in none of its folders)
+        copies.push_back(std::move(copy));
+    }
+    for (Layer& copy : copies) {
+        if (!copy.parent_id.is_string()) continue;
+        if (const auto inside = renamed.find(copy.parent_id.get<std::string>()); inside != renamed.end()) copy.parent_id = inside->second;
+    }
+    Json made = Json::array();
+    for (const Layer& copy : copies) made.push_back(copy.id);
+    Page& page = doc.edit_page(to);
+    const std::size_t place = to == at ? top + 1 : page.layers.size();
+    page.layers.insert(page.layers.begin() + static_cast<std::ptrdiff_t>(place), std::make_move_iterator(copies.begin()),
+                       std::make_move_iterator(copies.end()));
+    c.report = Json{{"ids", std::move(made)}};
+}
+
+// ungroup_layers {"page", "id"} (レイヤー → レイヤーのグループ解除): what the folder holds comes out where it is — in the
+// folder over it — and the folder goes, in one step. Its opacity, blend and masks go with it (Photoshop's).
+void ungroup_layers(OpContext& c) {
+    Document& doc = c.doc;
+    const std::size_t at = require_page(doc, c.op);
+    const std::size_t i = layer_by_id(doc.page(at), truthy_at(c.op, "id") ? py_str(c.op["id"]) : std::string());
+    const Layer folder = doc.page(at).layers[i];
+    if (folder.kind != LayerKind::Folder) throw OpError("the layer " + folder.id + " is not a group or folder");
+    Page& page = doc.edit_page(at);
+    Json out = Json::array();
+    for (Layer& layer : page.layers) {
+        if (layer.parent_id.is_string() && layer.parent_id.get_ref<const std::string&>() == folder.id) {
+            layer.parent_id = folder.parent_id;
+            out.push_back(layer.id);
+        }
+    }
+    page.layers.erase(page.layers.begin() + static_cast<std::ptrdiff_t>(i));
+    forget_layers(doc, at, {folder.id});
+    c.report = Json{{"ids", std::move(out)}};
+}
+
 }  // namespace
 
 void register_layer_ops(OpRegistry& registry) {
@@ -593,6 +812,10 @@ void register_layer_ops(OpRegistry& registry) {
     registry.add("set_layer", set_layer);
     registry.add("set_layers", set_layers);
     registry.add("reorder_layers", reorder_layers);
+    // PC5 I-a (SPEC.md AUTO-01「レイヤーの基本」)
+    registry.add("delete_layers", delete_layers);
+    registry.add("duplicate_layers", duplicate_layers);
+    registry.add("ungroup_layers", ungroup_layers);
 }
 
 }  // namespace genko::core
