@@ -101,7 +101,9 @@ namespace {
 const QStringList& studio_docks() {
     static const QStringList titles = {QStringLiteral("承認箱"), QStringLiteral("レイヤー"), QStringLiteral("台詞"), QStringLiteral("ページ"),
                                        QStringLiteral("カラー"), QStringLiteral("コマの詳細"), QStringLiteral("ヒストリー"), QStringLiteral("素材"),
-                                       QStringLiteral("定規・3D"), QStringLiteral("点検"), QStringLiteral("資料")};
+                                       QStringLiteral("定規・3D"), QStringLiteral("点検"), QStringLiteral("資料"),
+                                       // (PC5 J-a: ウィンドウ → レイヤーカンプ is a command, its dock's own switch beside it)
+                                       QStringLiteral("レイヤーカンプ")};
     return titles;
 }
 

@@ -79,7 +79,8 @@ LayerCompsPanel::LayerCompsPanel(MainWindow* window) : QWidget(window), window_(
     item(QStringLiteral("レイヤーカンプオプション…"), [this] { options_of_chosen(); });
     item(QStringLiteral("レイヤーカンプの警告をクリア"), [this] { clear_warnings(); });
     menu_->addSeparator();
-    item(QStringLiteral("レイヤーカンプからファイル…"), [this] { window_->layer_comps_to_files(); });
+    // (the window's command itself: ファイル → 書き出し's)
+    if (QAction* files = window_->action(QStringLiteral("act_comps_to_files"))) menu_->addAction(files);
     auto* more = new QToolButton;
     more->setText(QStringLiteral("≡"));
     more->setToolTip(QStringLiteral("レイヤーカンプ パネルのメニュー"));
