@@ -33226,9 +33226,14 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/service/briefs.cpp",
+        "native/src/render/text/shaping.cpp",
+        "native/tests/contract/test_contract_opentype.cpp",
+        "native/tests/unit/test_shaping.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33345,9 +33350,12 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_type.cpp",
+        "native/tests/gui/test_gui_type.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33378,9 +33386,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_type.cpp",
+        "native/src/render/text/lettering.cpp",
+        "native/tests/gui/test_gui_type.cpp",
+        "native/tests/contract/test_contract_opentype.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33416,9 +33429,15 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_type.cpp",
+        "native/src/render/text/lettering.cpp",
+        "native/src/render/text/bidi.cpp",
+        "native/tests/gui/test_gui_type.cpp",
+        "native/tests/contract/test_contract_opentype.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33449,9 +33468,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_type.cpp",
+        "native/src/render/text/bidi.cpp",
+        "native/third_party/sheenbidi/PROVENANCE.json",
+        "native/tests/gui/test_gui_type.cpp",
+        "native/tests/contract/test_contract_opentype.cpp",
+        "native/tests/unit/test_shaping.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33537,9 +33563,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_type.cpp",
+        "native/src/render/ops_type_set.cpp",
+        "native/src/render/text/opentype.cpp",
+        "native/src/render/text/lettering.cpp",
+        "native/src/render/text/shaping.cpp",
+        "native/src/render/draw.cpp",
+        "native/tests/gui/test_gui_type.cpp",
+        "native/tests/contract/test_contract_opentype.cpp",
+        "native/tests/unit/test_shaping.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33580,9 +33616,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_type.cpp",
+        "native/src/render/ops_type_set.cpp",
+        "native/src/render/text/opentype.cpp",
+        "native/src/render/text/lettering.cpp",
+        "native/src/render/text/shaping.cpp",
+        "native/src/render/draw.cpp",
+        "native/tests/gui/test_gui_type.cpp",
+        "native/tests/contract/test_contract_opentype.cpp",
+        "native/tests/unit/test_shaping.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33623,9 +33669,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_type.cpp",
+        "native/src/render/ops_type_set.cpp",
+        "native/src/render/text/opentype.cpp",
+        "native/src/render/text/lettering.cpp",
+        "native/src/render/text/shaping.cpp",
+        "native/src/render/draw.cpp",
+        "native/tests/gui/test_gui_type.cpp",
+        "native/tests/contract/test_contract_opentype.cpp",
+        "native/tests/unit/test_shaping.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33666,9 +33722,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_type.cpp",
+        "native/src/render/ops_type_set.cpp",
+        "native/src/render/text/opentype.cpp",
+        "native/src/render/text/lettering.cpp",
+        "native/src/render/text/shaping.cpp",
+        "native/src/render/draw.cpp",
+        "native/tests/gui/test_gui_type.cpp",
+        "native/tests/contract/test_contract_opentype.cpp",
+        "native/tests/unit/test_shaping.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33709,9 +33775,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_type.cpp",
+        "native/src/render/ops_type_set.cpp",
+        "native/src/render/text/opentype.cpp",
+        "native/src/render/text/lettering.cpp",
+        "native/src/render/text/shaping.cpp",
+        "native/src/render/draw.cpp",
+        "native/tests/gui/test_gui_type.cpp",
+        "native/tests/contract/test_contract_opentype.cpp",
+        "native/tests/unit/test_shaping.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33752,9 +33828,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_type.cpp",
+        "native/src/render/ops_type_set.cpp",
+        "native/src/render/text/opentype.cpp",
+        "native/src/render/text/lettering.cpp",
+        "native/src/render/text/shaping.cpp",
+        "native/src/render/draw.cpp",
+        "native/tests/gui/test_gui_type.cpp",
+        "native/tests/contract/test_contract_opentype.cpp",
+        "native/tests/unit/test_shaping.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33795,9 +33881,19 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_type.cpp",
+        "native/src/render/ops_type_set.cpp",
+        "native/src/render/text/opentype.cpp",
+        "native/src/render/text/lettering.cpp",
+        "native/src/render/text/shaping.cpp",
+        "native/src/render/draw.cpp",
+        "native/tests/gui/test_gui_type.cpp",
+        "native/tests/contract/test_contract_opentype.cpp",
+        "native/tests/unit/test_shaping.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33846,9 +33942,19 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_type.cpp",
+        "native/src/render/ops_type_set.cpp",
+        "native/src/render/text/opentype.cpp",
+        "native/src/render/text/lettering.cpp",
+        "native/src/render/text/shaping.cpp",
+        "native/src/render/draw.cpp",
+        "native/tests/gui/test_gui_type.cpp",
+        "native/tests/contract/test_contract_opentype.cpp",
+        "native/tests/unit/test_shaping.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33897,9 +34003,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_type.cpp",
+        "native/src/render/ops_type_set.cpp",
+        "native/src/render/text/opentype.cpp",
+        "native/src/render/text/lettering.cpp",
+        "native/src/render/text/shaping.cpp",
+        "native/src/render/draw.cpp",
+        "native/tests/gui/test_gui_type.cpp",
+        "native/tests/contract/test_contract_opentype.cpp",
+        "native/tests/unit/test_shaping.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -33940,9 +34056,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_type.cpp",
+        "native/src/render/ops_type_set.cpp",
+        "native/src/render/text/opentype.cpp",
+        "native/src/render/text/lettering.cpp",
+        "native/src/render/text/shaping.cpp",
+        "native/src/render/draw.cpp",
+        "native/tests/gui/test_gui_type.cpp",
+        "native/tests/contract/test_contract_opentype.cpp",
+        "native/tests/unit/test_shaping.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -34784,9 +34910,17 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 G-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_type_set.cpp",
+        "native/src/render/text/opentype.cpp",
+        "native/src/render/text/lettering.cpp",
+        "native/src/render/text/tategaki.cpp",
+        "native/src/render/draw.cpp",
+        "native/tests/contract/test_contract_opentype.cpp",
+        "native/tests/unit/test_shaping.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

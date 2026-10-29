@@ -148,8 +148,9 @@ std::int64_t removed_by(const Json& before, const Json& after);
 
 // A line's style_runs ([[words, {scale, bold, weight, rgb, tcy}]], found by their words) as ranges of the text: the runs
 // of native_type they become (each word found from where the last one was, as the lettering finds them; one not found
-// left out). For when a range of the line is first given attributes of its own.
-Json runs_from_style_runs(const StoryLine& line);
+// left out). For when a range of the line is first given attributes of its own. `taken`: the places in style_runs of the
+// words found (and so written as ranges).
+Json runs_from_style_runs(const StoryLine& line, std::vector<std::size_t>* taken = nullptr);
 
 // A line's record as a type layer holds it (its id, page, speaker, panel and reading order taken away; the rest kept).
 StoryLine record_of(const StoryLine& line);

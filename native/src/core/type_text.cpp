@@ -529,14 +529,17 @@ bool type_styles_normal(const Json& value) {
 Json from_style(const Json& style) {
     Json chars = Json::object(), para = Json::object();
     if (!style.is_object()) return Json::object({{"char", chars}, {"para", para}});
+    const auto take_value = [&](Json& into, std::string_view as, const Json& v) {
+        const Attr* attr = into.is_object() && &into == &chars ? char_attr(as) : para_attr(as);
+        try {
+            into[std::string(as)] = check_value(*attr, v, std::string(as));
+        } catch (const Error&) {  // (a style's value past the attribute's bounds: the style alone draws it)
+        }
+    };
     const auto take = [&](std::string_view key, Json& into, std::string_view as) {
         const Json* v = get(style, key);
         if (v == nullptr || v->is_null()) return;
-        const Attr* attr = into.is_object() && &into == &chars ? char_attr(as) : para_attr(as);
-        try {
-            into[std::string(as)] = check_value(*attr, *v, std::string(as));
-        } catch (const Error&) {  // (a style's value past the attribute's bounds: the style alone draws it)
-        }
+        take_value(into, as, *v);
     };
     take("font", chars, "font");
     take("size_mm", chars, "size_mm");
@@ -544,7 +547,31 @@ Json from_style(const Json& style) {
     take("rgb", chars, "rgb");
     take("scale_x", chars, "scale_x");
     take("tcy", chars, "tcy");
-    take("features", chars, "features");
+    // (a line's features, tag by tag: one that is not a tag of 4 letters left out, not all of them — Pillow's "-liga" and
+    // "+liga" read as off and on; review P3-4)
+    if (const Json* f = get(style, "features"); f != nullptr && (f->is_array() || f->is_object())) {
+        Json own = Json::object();
+        const auto keep = [&](std::string tag, std::int64_t value) {
+            if (tag.size() == 5 && (tag[0] == '-' || tag[0] == '+')) {
+                value = tag[0] == '-' ? 0 : value;
+                tag.erase(0, 1);
+            }
+            if (tag.size() == 4 && std::all_of(tag.begin(), tag.end(), [](char c) { return tag_char(c, true); }) && value >= 0 && value <= 65535 &&
+                own.size() < kMaxTags)
+                own[tag] = value;
+        };
+        if (f->is_array()) {
+            for (const Json& t : *f) {
+                if (t.is_string()) keep(t.get<std::string>(), 1);
+            }
+        } else {
+            for (const auto& [tag, value] : f->items()) {
+                if (value.is_number_integer()) keep(tag, value.get<std::int64_t>());
+                else if (value.is_boolean()) keep(tag, value.get<bool>() ? 1 : 0);
+            }
+        }
+        if (!own.empty()) take_value(chars, "features", own);
+    }
     if (const Json* w = get(style, "weight"); w != nullptr && w->is_string() && (*w == "bold" || *w == "heavy")) {
         chars["faux_bold"] = *w;
     } else if (const Json* b = get(style, "bold"); b != nullptr && b->is_boolean() && b->get<bool>()) {
@@ -838,25 +865,27 @@ std::int64_t removed_by(const Json& before, const Json& after) {
     return std::max<std::int64_t>(0, count(before) - count(after));
 }
 
-Json runs_from_style_runs(const StoryLine& line) {
+Json runs_from_style_runs(const StoryLine& line, std::vector<std::size_t>* taken) {
     const std::u32string text = ruby::code_points(line.text);
     const std::vector<std::size_t> b = ruby::bounds(text);
-    const auto grapheme_at = [&](std::size_t cp, bool up) {
-        for (std::size_t i = 0; i < b.size(); ++i) {
-            if (b[i] == cp) return static_cast<std::int64_t>(i);
-            if (b[i] > cp) return static_cast<std::int64_t>(up ? i : i - 1);
-        }
-        return static_cast<std::int64_t>(b.size() - 1);
+    const auto grapheme_at = [&](std::size_t cp, bool up) {  // (by halving: a run of 4096 words over a long text)
+        const auto it = std::lower_bound(b.begin(), b.end(), cp);
+        if (it == b.end()) return static_cast<std::int64_t>(b.size() - 1);
+        const auto i = static_cast<std::int64_t>(it - b.begin());
+        return *it == cp || up ? i : i - 1;
     };
+    std::size_t index = 0;
     Json runs = Json::array();
     std::size_t pos = 0;
     std::int64_t last = 0;
     for (const auto& [run_words, run_style] : line.style_runs) {
+        const std::size_t this_one = index++;
         if (run_words.empty()) continue;
         const std::u32string words = ruby::code_points(run_words);
         const std::size_t at = text.find(words, pos);
         if (at == std::u32string::npos) continue;
         pos = at + words.size();
+        if (taken != nullptr) taken->push_back(this_one);
         if (!run_style.is_object()) continue;
         Json chars = Json::object();
         const auto put = [&](std::string_view key, std::string_view as) {
@@ -868,6 +897,8 @@ Json runs_from_style_runs(const StoryLine& line) {
             }
         };
         put("scale", "scale");
+        // (a word's scale as the lettering draws Genko's words: within 0.3..3 — a range's own reaches 0.1..10; review P3-1)
+        if (chars.contains("scale")) chars["scale"] = num(std::clamp(chars["scale"].get<double>(), 0.3, 3.0));
         put("rgb", "rgb");
         put("tcy", "tcy");
         if (const Json* w = get(run_style, "weight"); w != nullptr && w->is_string() && (*w == "bold" || *w == "heavy" || *w == "normal")) {

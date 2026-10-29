@@ -162,6 +162,29 @@ const TrueTypeFont& Fonts::truetype(const std::string& path, std::int64_t size) 
     }
 }
 
+const TrueTypeFont& Fonts::truetype(const std::string& path, std::int64_t size, const std::vector<std::pair<std::string, float>>& axes) {
+    if (axes.empty()) return truetype(path, size);
+    try {
+        return fonts_.truetype(path, static_cast<int>(std::clamp<std::int64_t>(size, 6, 0x10000)), axes);
+    } catch (const NotYetPorted& e) {
+        if (e.element() != "default_font") throw;
+        return fonts_.load_default();
+    }
+}
+
+std::string Fonts::readable(const std::string& path) {
+    if (const auto it = readable_.find(path); it != readable_.end()) return it->second;
+    std::string out = path;
+    try {
+        (void)fonts_.truetype(path, 32);
+    } catch (const NotYetPorted& e) {
+        if (e.element() != "default_font") throw;
+        out = pillow_default_font();
+    }
+    readable_.emplace(path, out);
+    return out;
+}
+
 bool Fonts::has_glyph(const std::string& path, std::u32string_view ch) {
     const auto key = std::make_pair(path, std::u32string(ch));
     if (const auto it = glyphs_.find(key); it != glyphs_.end()) return it->second;

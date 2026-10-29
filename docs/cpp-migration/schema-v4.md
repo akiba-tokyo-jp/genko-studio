@@ -482,7 +482,8 @@ Photoshop の文字（テキストレイヤー・文字と段落の属性・ス�
 - **本の `"type_styles"`**（`global_light` の後）: `{"character"?: [{"id": "cs-N", "name", "char"?}], "paragraph"?: [{"id": "ps-N", "name", "para"?, "char"?}], "basic"?: {"para"?, "char"?}}`。id は種類の接頭と 1 からの番号、名前は 1〜64 字で種類の中で一つ、各 512 まで。空なら書かない。
 - 書き手は、`native_type` を持つ台詞、テキストレイヤー（書くページとスマートオブジェクトの中身のページ）、`type_styles` のどれかがあれば `features` に `type@1` を加え、無くなれば外す。持たない原稿は今と同じバイトで書き、同じ画素で描く。
 - **読み手の検査**: 正規形でない `native_type`・`type_styles`、本文の外の範囲、本に無いスタイルの参照、記録の無いテキストレイヤー、画素や線を持つテキストレイヤーの本は、読み取り専用で開く（読んだまま書き戻すので失われない）。記録に台詞だけの鍵があれば知らない鍵として知らせる。type@1 を知らない読み手（PC4 までの C++ 版）は、未知の拡張として読み取り専用で開く。
-- op（C++ 版だけ）: `add_type_layer`・`edit_type`・`type_info`（G-0）、`set_type`・`type_style`・`line_to_type_layer`・`type_layer_to_line`・`replace_fonts`（名前だけ登録、後の群）。`add_line`・`edit_line` は `native_type` を受ける。TEXT-02 の「文字」。
+- op（C++ 版だけ）: `add_type_layer`・`edit_type`・`type_info`（G-0）、`line_to_type_layer`・`type_layer_to_line`（G-a）、`set_type`（G-b）、`type_style`・`replace_fonts`（名前だけ登録、後の群）。`add_line`・`edit_line` は `native_type` を受ける。TEXT-02 の「文字」。
+- **組み方**（PC5 G-b）: `shaping` が `"opentype"` の記録、自分の `char`・`para`・`runs`・`paragraphs`・`char_style`・`para_style` を持つ記録、書式の `features` を持つ横書きの台詞は OpenType の組み方（HarfBuzz、横組みは SheenBidi の双方向の並べ替え）で組む（TEXT-02 の「G-b」）。`add_type_layer` は `shaping: "opentype"` を付けて作り、`set_type` も付ける。ほかの記録（`native_type` の無い台詞、形・アンチエイリアス・行列だけの記録）は今の組み方。形は変わらない（鍵・値は G-0 のまま）。
 
 ## グループ（groups@1。SPEC AUTO-01、PC5 I-b）
 

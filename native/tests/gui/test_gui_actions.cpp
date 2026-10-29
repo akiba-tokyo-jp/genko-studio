@@ -401,13 +401,16 @@ private slots:
         // 段落テキストに変換・すべてのテキストレイヤーを更新・Lorem Ipsum をペースト (act_type_rasterize, act_type_to_point,
         // act_type_to_box, act_type_update_all, act_type_lorem), 台詞をテキストレイヤーに・テキストレイヤーを台詞に
         // (act_line_to_type_layer, act_type_layer_to_line) — theirs (test_gui_type).
-                // and PC5 J-a's ファイル → 書き出し → レイヤーカンプからファイル… (act_comps_to_files; its ウィンドウ → レイヤーカンプ is the
+        // and the 16 of PC5 G-b (SPEC TEXT-02) — 書式 → OpenType ▸ 11 (act_type_ot_<tag>: liga, calt, dlig, swsh, salt, titl, ornm,
+        // ordn, frac, onum and palt), 言語オプション ▸ 初期設定・東アジア言語・中東言語および南アジア言語の機能 (act_type_lang_<which>), 中東および
+        // 南アジア言語用 Composer (act_type_composer_world), 右から左の段落 (act_type_rtl) — theirs (test_gui_type).
+        // and PC5 J-a's ファイル → 書き出し → レイヤーカンプからファイル… (act_comps_to_files; its ウィンドウ → レイヤーカンプ is the
         // frame's attribute made real) — test_gui_layer_comps.
         // and the 1 of PC5 I-b (SPEC AUTO-01「グループ」) — レイヤー → 新規 → レイヤーからのフレーム… (act_layer_frame) —
         // test_gui_layers.
         // and PC5 J-c's 3 — ツール → 注釈ツール (act_note), 表示 → 表示・非表示 → 注釈 (act_show_notes), ファイル → 読み込み →
         // 注釈… (act_import_notes); its ウィンドウ → 注釈 is the frame's attribute made real — test_gui_notes.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{653});
+        QCOMPARE(w->actions_by_name().size(), std::size_t{669});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

@@ -74,6 +74,11 @@ else()
 endif()
 add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../third_party/blake3" "${CMAKE_CURRENT_BINARY_DIR}/third_party/blake3")
 
+# PC5 G-b (right-to-left text set across, the user's decision 9): SheenBidi (Apache-2.0), the Unicode bidirectional
+# algorithm — its C source kept in native/third_party/sheenbidi and built there as a static library on both systems (no
+# Ubuntu 24.04 package has it; vcpkg's port is the same source, so both systems build this one).
+add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../third_party/sheenbidi" "${CMAKE_CURRENT_BINARY_DIR}/third_party/sheenbidi")
+
 # PC4 F-e (camera RAW): LibRaw 0.22 (LGPL-2.1-only or CDDL-1.0), always a shared library of its own beside the program
 # (never linked statically: native/package/LIBRAW-LGPL-ja.md). Linux: libraw.org's source built by
 # tools/ci/build_libraw.sh into a prefix of its own (GENKO_LIBRAW_ROOT, or the environment's), found through its

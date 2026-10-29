@@ -448,8 +448,9 @@ private slots:
     void lettering_it_cannot_draw_is_left_out() {
         // What a line's letters need that this build cannot draw stops the page (NotYetPorted, by name) or, with
         // skip_unported, is left out and reported — that line's letters: the page, the other lines and the balloons are
-        // drawn, and parts of the page are the same as the whole page cut. (1) OpenType features on letters across:
-        // Pillow without raqm (the BASIC layout the reference is held to) raises KeyError, which text_layout keeps; (2)
+        // drawn, and parts of the page are the same as the whole page cut. (1) letters filled with a picture this build
+        // cannot read yet (PC5 G-b: OpenType features across, once left out so — "text_features" —, are set by HarfBuzz
+        // now: the user's and the coordinator's decision for G); (2)
         // a font file that cannot be read (33 MB of nothing), the book's, for a balloon's letters and for a line not
         // placed (its label): drawn with Pillow's own default font, as genko.fonts.truetype falls back — nothing left out
         // (M7).
@@ -461,16 +462,19 @@ private slots:
         {
             genko::core::StoryLine& featured = doc.add_line(index, "ABC漢字", "", std::nullopt, "", Num(20), Num(50), Num(40), Num(20), "box");
             featured.wrap = "horizontal";
-            featured.style["features"] = Json::array({"jp78"});
-            QVERIFY_THROWS_EXCEPTION(genko::core::PyUncaught, render::text::text_layout(featured, 150));
+            genko::core::StoryLine across = featured;
+            across.style["features"] = Json::array({"jp78"});
+            QVERIFY(render::text::text_layout(across, 150).image.getbbox().has_value());  // (G-b: drawn)
+            featured.style["fill_png"] = std::string(kUnreadPicture);
+            QVERIFY_THROWS_EXCEPTION(render::NotYetPorted, render::text::text_layout(featured, 150));
         }
         for (const char* mode : {"print", "proof"}) {
             render::RenderOptions options;
             options.mode = mode;
-            QCOMPARE(unported_element(*doc.pages[0], doc, options), std::string("text_features"));
+            QCOMPARE(unported_element(*doc.pages[0], doc, options), std::string("image_format"));
             options.skip_unported = true;
             const render::RenderResult r = render::render_page(*doc.pages[0], 150, options, &doc);
-            QCOMPARE(r.omitted, std::vector<std::string>{"text_features"});
+            QCOMPARE(r.omitted, std::vector<std::string>{"image_format"});
             // (the box drawn, its letters not; the other line drawn)
             QVERIFY(r.image.tobytes() != render::render_page(*plain.pages[0], 150, options, &plain).image.tobytes());
             QVERIFY(r.image.tobytes() != render::render_page(*base.pages[0], 150, options, &base).image.tobytes());

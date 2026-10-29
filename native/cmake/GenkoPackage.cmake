@@ -96,6 +96,9 @@ install(FILES "${GENKO_SOURCE_ROOT}/third_party/optimized-routines/LICENSE-MIT" 
 install(FILES "${GENKO_SOURCE_ROOT}/third_party/blake3/LICENSE_CC0" "${GENKO_SOURCE_ROOT}/third_party/blake3/LICENSE_A2"
               "${GENKO_SOURCE_ROOT}/third_party/blake3/LICENSE_A2LLVM" "${GENKO_SOURCE_ROOT}/third_party/blake3/PROVENANCE.json"
         DESTINATION "${_genko_doc}/licenses/blake3")
+# (PC5 G-b: SheenBidi's C source, built into the program: its licence and where it came from)
+install(FILES "${GENKO_SOURCE_ROOT}/third_party/sheenbidi/LICENSE" "${GENKO_SOURCE_ROOT}/third_party/sheenbidi/PROVENANCE.json"
+        DESTINATION "${_genko_doc}/licenses/sheenbidi")
 if(UNIX AND NOT APPLE)
   install(PROGRAMS "${GENKO_SOURCE_ROOT}/package/linux/install.sh" "${GENKO_SOURCE_ROOT}/package/linux/uninstall.sh" DESTINATION ".")
   # (a template for install.sh, which writes the menu item with the folder it put Genko in: not itself a menu item)

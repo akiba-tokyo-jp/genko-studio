@@ -26,6 +26,7 @@
 #include "render/selection.hpp"
 #include "render/text/balloons.hpp"
 #include "render/text/lettering.hpp"
+#include "render/text/opentype.hpp"
 
 namespace genko::render {
 
@@ -259,6 +260,7 @@ void text_to_path(OpContext& c) {
     }
     const Page& page = doc.page(*at);
     const std::optional<std::string> font_path = doc.font_path.empty() ? std::nullopt : std::optional<std::string>(doc.font_path);
+    const text::TypeStyles type_styles(doc.type_styles ? &*doc.type_styles : nullptr);  // (PC5 G-b review P3-9: the book's styles)
     text::LetterParts parts;
     parts.balloon = false;
     parts.halo = false;
