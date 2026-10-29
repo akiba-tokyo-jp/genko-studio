@@ -33,6 +33,7 @@
 #include "render/ops_formats.hpp"
 #include "render/ops_paint_tools.hpp"
 #include "render/ops_layer_styles.hpp"
+#include "render/ops_type.hpp"
 
 namespace genko::render {
 
@@ -403,6 +404,9 @@ void register_render_ops(core::OpRegistry& registry) {
     register_pattern_ops(registry);
     // PC4 E6 (layer-styles@1: a layer's style and the book's global light, render/ops_layer_styles)
     register_layer_style_ops(registry);
+    // PC5 節 G (文字; type@1: the type ops — G-0 writes add_type_layer, edit_type and type_info, the others frames until
+    // their groups: render/ops_type.hpp)
+    register_type_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {

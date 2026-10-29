@@ -1652,6 +1652,14 @@ private:
     StylesPanel* styles_panel_ = nullptr;
     QDockWidget* styles_dock_ = nullptr;
     QMenu* layer_style_menu_ = nullptr;
+
+    // --- PC5 節 G (文字; type@1): the 書式 menu (app/main_window_type.cpp) ------------------------------------------------
+public:
+    QMenu* type_menu() const { return type_menu_; }
+
+private:
+    void build_type_menu(QMenu* menu);
+    QMenu* type_menu_ = nullptr;
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

@@ -869,15 +869,17 @@ private slots:
         Book b(doc, QSize(1280, 800), QStringLiteral("b.genko"), [](const fs::path& path) { app::remember_project(path); });
         QStringList titles;
         for (QAction* top : b.w()->menuBar()->actions()) titles << top->text();
-        // (PC4 節 D, the user's decision 1: フィルター after レイヤー)
+        // (PC4 節 D, the user's decision 1: フィルター after レイヤー; PC5 G-0: Photoshop's 書式 between them, design section G 5.1)
         QCOMPARE(titles, (QStringList{QStringLiteral("ファイル"), QStringLiteral("編集"), QStringLiteral("表示"), QStringLiteral("ツール"), QStringLiteral("選択範囲"),
-                                      QStringLiteral("レイヤー"), QStringLiteral("フィルター"), QStringLiteral("ページ"), QStringLiteral("ウィンドウ"),
+                                      QStringLiteral("レイヤー"), QStringLiteral("書式"), QStringLiteral("フィルター"), QStringLiteral("ページ"), QStringLiteral("ウィンドウ"),
                                       QStringLiteral("ヘルプ")}));
         const QStringList file = texts(b.menu(QStringLiteral("ファイル")));
         QVERIFY(file.contains(QStringLiteral("最近使用したファイルを開く")) && file.contains(QStringLiteral("閉じる")) && file.contains(QStringLiteral("終了")));
         const QStringList edit = texts(b.menu(QStringLiteral("編集")));
         QVERIFY(edit.contains(QStringLiteral("すべてを選択")) && edit.contains(QStringLiteral("消去")));
         QVERIFY(texts(b.menu(QStringLiteral("レイヤー"))).contains(QStringLiteral("レイヤーマスク")));
+        // (PC5 G-0: 書式 with the type commands this build has, as Photoshop names them)
+        QCOMPARE(texts(b.menu(QStringLiteral("書式"))), (QStringList{QStringLiteral("作業用パスを作成"), QStringLiteral("シェイプに変換"), QString(), QStringLiteral("ワープテキスト…")}));
         QVERIFY(texts(submenu(b.menu(QStringLiteral("ページ")), QStringLiteral("台詞"))).contains(QStringLiteral("フキダシの形")));
         QMenu* tools = b.menu(QStringLiteral("ツール"));
         QVERIFY(texts(submenu(tools, QStringLiteral("定規"))).contains(QStringLiteral("直線定規")));

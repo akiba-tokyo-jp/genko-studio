@@ -24,6 +24,7 @@
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
 #include "core/studio.hpp"
+#include "core/type_text.hpp"
 
 namespace genko::core {
 
@@ -114,6 +115,7 @@ std::string usage(const Json& op, bool channel = false) {
 bool native_key(std::string_view op, std::string_view key) {
     return (op == "merge_visible" && key == "flatten") || (op == "convert_layer" && key == "preserve_precision") ||
            (op == "define_brush" && key == "paper") || ((op == "add_line" || op == "edit_line") && key == "ruby_spans") ||
+           ((op == "add_line" || op == "edit_line") && key == "native_type") ||  // (type@1, PC5 G-0)
            (op == "add_stroke" && key == "color_rgb") || dab_key(op, key) || fill_key(op, key) ||
            key == "contents" ||  // (smart-objects@1: any op on a smart object's page)
            // PC3 (masks@1): set_layer_mask's linked, density and feather_mm; a pixel op's layer_mask (its layer's mask
@@ -200,6 +202,16 @@ const Page* first_page(const Document& doc, const Num& index) {
 
 // Python's _op_page_index: the page an op is about (its "page", or the page of the line a line op names).
 std::optional<Num> op_page_index(const Document& doc, const Json& op) {
+    // (type@1, PC5 節 G: the type ops that name a line by its "line" are about that line's page, whatever "page" says)
+    static const std::set<std::string, std::less<>> kTypeLineOps{"edit_type", "type_info", "set_type", "type_style", "line_to_type_layer"};
+    if (const Json* name = get(op, "op"); name != nullptr && name->is_string() && kTypeLineOps.contains(name->get_ref<const std::string&>())) {
+        if (const Json* line_id = get(op, "line"); line_id != nullptr && !line_id->is_null()) {
+            for (const StoryLine& line : doc.story) {
+                if (line_id->is_string() && line.id == line_id->get_ref<const std::string&>()) return line.page_index;
+            }
+            return std::nullopt;
+        }
+    }
     if (const Json* page = get(op, "page")) {
         try {
             return Num(py_int(*page));
@@ -369,6 +381,13 @@ const OpRegistry& OpRegistry::builtin() {
 }
 
 void OpRegistry::add(std::string name, OpFunction function) { ops_[std::move(name)] = std::move(function); }
+
+void OpRegistry::add_query(std::string name, OpFunction function) {
+    queries_.insert(name);
+    ops_[std::move(name)] = std::move(function);
+}
+
+bool OpRegistry::is_query(std::string_view name) const { return queries_.find(name) != queries_.end(); }
 
 void OpRegistry::set_area_resolver(AreaResolver resolver) { area_resolver_ = std::move(resolver); }
 
@@ -1121,6 +1140,21 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
         ops = std::move(expanded);
     }
 
+    // (PC5 G-0: questions — OpRegistry::add_query — asked alone, as a dry run: never with ops that change the book)
+    const auto question = [&](const Json& op) {
+        const Json* name = op.is_object() ? get(op, "op") : nullptr;
+        return name != nullptr && name->is_string() && registry_.is_query(name->get_ref<const std::string&>());
+    };
+    const auto questions = static_cast<std::size_t>(std::count_if(ops.begin(), ops.end(), question));
+    if (questions > 0 && questions < ops.size()) {
+        for (std::size_t i = 0; i < ops.size(); ++i) {
+            if (!question(ops[i])) continue;
+            const std::string name = ops[i]["op"].get<std::string>();
+            throw ApplyError("ops[" + std::to_string(i) + "] " + name + ": " + name + " is a question: ask it alone, not with ops that change the book");
+        }
+    }
+    const bool asking = questions > 0 && questions == ops.size();
+
     read_as_touched_pages_does(ops);
     refuse_unread_pages(doc, ops);
     Document work = doc;  // (the pages stay shared until an op changes one)
@@ -1180,6 +1214,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     vector::validate_vector(work);  // (PC3: vector@1, pen-shapes@1, transform@1, page-spec@1)
                     validate_pattern_fills(work);   // (patterns@1, PC4 E3: no fill names a pattern the book does not keep)
                     validate_layer_styles(work);    // (layer-styles@1, PC4 E6: a style in its normal form, on a layer that takes one)
+                    type_text::validate_type(work);  // (type@1, PC5 G-0: a record in its normal form; a type layer draws its text alone)
                 } catch (const Error& error) {
                     if (error.code() == "not_yet_ported") throw;
                     throw OpError(error.what());
@@ -1223,6 +1258,11 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
     for (auto& warning : validate_document(work)) result.warnings.push_back(std::move(warning));
     for (auto& warning : unknown_key_warnings(ops, channels)) result.warnings.push_back(std::move(warning));
     for (std::string& note : notes) result.warnings.push_back(std::move(note));
+    if (asking) {  // (questions: the book as it was given, nothing to journal)
+        result.unchanged = true;
+        result.doc = doc;
+        return result;
+    }
     for (const Json& op : ops) result.journal_ops.push_back(journal_op(op));
     result.doc = std::move(work);
     return result;
