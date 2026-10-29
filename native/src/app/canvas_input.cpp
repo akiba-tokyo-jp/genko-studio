@@ -546,6 +546,7 @@ void PageCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
         finish_curve();
         return;
     }
+    if (tool_ == QLatin1String("note") && note_double(event->position())) return;  // (PC5 J-c: a note's box opened or closed)
     if (tool_ == QLatin1String("frame") && !frame_poly_.empty()) {
         if (frame_poly_.size() > 1 && frame_poly_.back() == frame_poly_[frame_poly_.size() - 2]) {
             frame_poly_.pop_back();  // (the double click's second press added the same corner again)

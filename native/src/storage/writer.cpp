@@ -30,6 +30,7 @@
 #include "core/patterns.hpp"
 #include "core/groups.hpp"
 #include "core/type_text.hpp"
+#include "core/variables.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/reader.hpp"
 
@@ -610,6 +611,14 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
         std::erase(features, std::string(feature));
         if (used) features.emplace_back(feature);
     }
+    // PC5 I-d: variables@1 (the book's variables and data sets, and the pictures their values name — those only the book in
+    // memory holds), named while the book has them
+    core::validate_variables(doc);
+    for (const auto& [ref, suffix] : core::variable_pictures(doc)) {
+        if (const auto held = doc.smart_files.find(ref); held != doc.smart_files.end() && held->second) store.put_known(ref, *held->second, suffix);
+    }
+    std::erase(features, std::string(core::kVariablesFeature));
+    if (core::uses_variables(doc)) features.emplace_back(core::kVariablesFeature);
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 
@@ -646,6 +655,7 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     }
     if (doc.global_light) out["global_light"] = core::global_light_json(*doc.global_light);  // (layer-styles@1, PC4 E6)
     if (doc.type_styles) out["type_styles"] = *doc.type_styles;  // (type@1, PC5 G-0)
+    if (doc.variables) out["variables"] = *doc.variables;  // (variables@1, PC5 I-d)
     out["spec"] = spec_to_json(doc.spec);
     if (Json color = color_json(store, doc.color, doc.rgb); !color.is_null() || doc.text_gamma) {
         // (the book's text_gamma, last, under its colour model: a default RGB one written for it)

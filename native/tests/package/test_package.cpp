@@ -272,7 +272,9 @@ private slots:
             // (PC4 F-f: the .pcraft's compression and hashes)
             {"zstd", QStringLiteral("| Zstandard")}, {"blake3", QStringLiteral("| BLAKE3")},
             // (PC4 F-e: camera RAW — LibRaw, and the JasPer inside its Windows DLL)
-            {"libraw", QStringLiteral("| LibRaw")}, {"jasper", QStringLiteral("| JasPer")}};
+            {"libraw", QStringLiteral("| LibRaw")}, {"jasper", QStringLiteral("| JasPer")},
+            // (PC5 G-b: right-to-left text set across)
+            {"sheenbidi", QStringLiteral("| SheenBidi")}};
         std::set<std::string> listed;
         std::map<std::string, std::string> relation;
         for (const Json& r : sbom["relationships"]) {

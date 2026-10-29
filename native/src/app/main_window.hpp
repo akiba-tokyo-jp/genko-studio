@@ -43,6 +43,8 @@ class QMenu;
 class QDockWidget;
 class QPushButton;
 class QVBoxLayout;
+class QLineEdit;    // (PC5 J-c)
+class QToolButton;  // (PC5 J-c)
 
 // The main window (Python's genko/app/main.py MainWindow): the page in the middle, the tools on the left, the
 // commands and the open books' tabs above, the navigator and the page list beside it, and in the status bar the page,
@@ -67,6 +69,7 @@ class ChannelPanel;
 class CloneSourcePanel;
 class PathsPanel;
 class LayerCompsPanel;
+class NotesPanel;
 class PatternsPanel;
 class BrushesPanel;
 class BrushSettingsPanel;
@@ -1726,6 +1729,13 @@ public:
     // The chosen line as a type layer, the target type layer as a line (line_to_type_layer, type_layer_to_line).
     void line_to_type_layer();
     void type_layer_to_line();
+    // PC5 G-b: set_type with these attributes on the whole of the text chosen (type_target) — 書式 → OpenType ▸ (an OpenType
+    // feature on or off; the font's own features alone can be chosen), 言語オプション ▸ (which features the menus show:
+    // 初期設定・東アジア言語・中東言語, kept in the settings; the paragraph's composer and, 中東言語, its direction).
+    void type_set(const core::Json& attrs);
+    void type_feature(const std::string& tag, bool on);
+    void type_language_features(const QString& which);
+    QString type_language_features() const;
 
 private:
     void build_type_actions();
@@ -1759,6 +1769,54 @@ private:
     void build_layer_comps_dock();
     LayerCompsPanel* layer_comps_panel_ = nullptr;
     QDockWidget* layer_comps_dock_ = nullptr;
+    // --- PC5 I-d (variables@1): main_window_variables.cpp — ページ → 変数 ▸ 定義…・データセット…, データセットを適用…, ファイル
+    // → 書き出し → データセットからファイル…, ファイル → 読み込み → 変数データセット…; each change of the book an op through
+    // apply_ops --------------------------------------------------------------------------------------------------------
+public:
+    void define_variables();
+    void edit_data_sets();
+    void apply_data_set_dialog();
+    // データセットからファイル…: the window asked, then formats::export_data_sets off the window's thread.
+    void data_sets_to_files();
+    // 変数データセット…: the window asked, the text file read off the window's thread (formats::read_data_sets_csv), then
+    // set_data_sets.
+    void import_data_sets();
+
+private:
+    void build_variable_actions();
+    void build_variable_menus(QMenu* file, QMenu* pages);
+    bool variable_op(core::Json op);
+    // --- PC5 J-c (annotations@1): main_window_notes.cpp — the 注釈ツール and its options, ウィンドウ → 注釈 (its dock and
+    // panel), 表示 → 表示・非表示 → 注釈, ファイル → 読み込み → 注釈…; each change of the book an op through apply_ops -------
+public:
+    NotesPanel* notes_panel() const { return notes_panel_; }
+    QDockWidget* notes_dock() const { return notes_dock_; }
+    // A notes' op on the page shown (its "page" put in), shown at once (a refusal said in the status line).
+    bool note_op(core::Json op);
+    // The note the canvas draws chosen and the 注釈 panel shows ("": none).
+    void choose_note(const QString& id);
+    // The 注釈ツール's click: a new note there (the options' author and colour), shown in the 注釈 panel to type its text.
+    void add_note_at(double x_mm, double y_mm);
+    // すべてを消去 (the options'): every note of the page deleted (one Undo).
+    void clear_notes();
+    // ファイル → 読み込み → 注釈…: the file asked (none given), its notes read off the window's thread, put on the page.
+    void import_notes(const QString& path = {});
+
+private:
+    void build_note_actions();
+    void build_notes_menus(QMenu* file, QMenu* view);
+    void build_notes_dock();
+    void refresh_notes();
+    NotesPanel* notes_panel_ = nullptr;
+    QDockWidget* notes_dock_ = nullptr;
+    QLineEdit* note_author_ = nullptr;
+    QToolButton* note_colour_ = nullptr;
+    QMenu* import_menu_ = nullptr;  // ファイル → 読み込み (import_menu)
+    // ファイル → 読み込み ▸ (Photoshop's; PC5 I-d・J-c, later J-e2): found, or made after PSD をレイヤーのまま読み込む… when it is
+    // not yet ("menu_import": one, whichever group asks first); and a command put in it in Photoshop's order (変数データセット…,
+    // ビデオフレームからレイヤー…, 注釈…). main_window_file.cpp.
+    QMenu* import_menu(QMenu* file);
+    void add_to_import_menu(QMenu* file, QAction* command);
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

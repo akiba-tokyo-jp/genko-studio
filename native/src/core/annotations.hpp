@@ -13,9 +13,10 @@
 // 注釈ツール and 注釈 panel; the page's メモ — `note` — and the tickets are other things, kept as they are). The page's
 // `annotations`:
 //   [{"id": "an_" + 12 hex digits, "at_mm": [x, y], "popup_mm": [x, y, w, h] | null, "text": str, "author": str,
-//     "color": [r, g, b], "open": bool, "modified": "YYYY-MM-DDThh:mm:ssZ", "actor": "human:…" | "ai:…" | "genko"}]
+//     "color": [r, g, b], "open": bool, "modified": "YYYY-MM-DDThh:mm:ssZ" | "", "actor": "human:…" | "ai:…" | "genko"}]
 // at most kAnnotationsMax, each text at most kAnnotationTextMax bytes. `actor` is who wrote it (the op's actor): an agent
-// (ai:) never changes or deletes a person's note (J-c's ops). After PhotoCraft v0.2.0's doc/src/analysis.rs Note (MIT).
+// (ai:) never changes or deletes a person's note (J-c's ops). `modified` is "" when it is not known (a PSD's note with no
+// date, or one this build cannot read). After PhotoCraft v0.2.0's doc/src/analysis.rs Note (MIT).
 // The book names annotations@1 while a page has one. PC5 J-0 is the frame; the ops, the tool, the panel and PSD's Anno
 // are J-c's (render/ops_annotations, app/notes_panel, render/psd_production).
 
@@ -37,7 +38,7 @@ struct Annotation {
     std::string author;
     std::array<int, 3> color = kAnnotationColor;
     bool open = false;
-    std::string modified;  // YYYY-MM-DDThh:mm:ssZ
+    std::string modified;  // YYYY-MM-DDThh:mm:ssZ ("": not known)
     std::string actor = "genko";
 
     bool operator==(const Annotation&) const = default;
@@ -49,6 +50,11 @@ std::vector<Annotation> annotations_from_json(const Json& value);
 void check_annotations(const std::vector<Annotation>& annotations);
 // Is it an annotation's id ("an_" and 12 lowercase hex digits)?
 bool annotation_id(std::string_view id);
+// Is it a time as `modified` holds one (YYYY-MM-DDThh:mm:ssZ)?
+bool annotation_time(std::string_view text);
+// (PC5 J-c) Was the note written by a person (its actor one who can approve: human:…, "genko")? Then an agent (ai:) does
+// not change or delete it.
+bool annotation_by_person(std::string_view actor);
 
 bool uses_annotations(const Document& doc);
 void validate_annotations(const Document& doc);

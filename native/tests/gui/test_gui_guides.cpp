@@ -104,7 +104,7 @@ bool close_to(const Json& v, double want, double within = 0.05) { return v.is_nu
 void fresh_view_settings() {
     const auto store = genko::app::settings();
     for (const char* key : {"view/extras", "view/show_guides", "view/show_canvas_guides", "view/show_smart_guides", "view/show_layer_edges",
-                            "view/show_mesh", "view/show_edit_pins", "guides/lock", "guides/grid", "guides/grid_mm", "units", "guide_layouts"})
+                            "view/show_mesh", "view/show_edit_pins", "view/show_notes", "guides/lock", "guides/grid", "guides/grid_mm", "units", "guide_layouts"})
         store->remove(QString::fromLatin1(key));
 }
 
@@ -617,8 +617,8 @@ private slots:
         QStringList items;
         for (QAction* a : shown->actions()) items << (a->isSeparator() ? QStringLiteral("|") : a->text());
         QCOMPARE(items, (QStringList{QStringLiteral("レイヤーエッジ"), QStringLiteral("選択範囲のエッジ"), QStringLiteral("ターゲットパス"), QStringLiteral("グリッド"),
-                                     QStringLiteral("ガイド"), QStringLiteral("カンバスガイド"), QStringLiteral("スマートガイド"), QStringLiteral("ピクセルグリッド"),
-                                     QStringLiteral("ブラシプレビュー"), QStringLiteral("メッシュ"), QStringLiteral("編集ピン"), QStringLiteral("|"),
+                                     QStringLiteral("ガイド"), QStringLiteral("カンバスガイド"), QStringLiteral("スマートガイド"), QStringLiteral("注釈"),
+                                     QStringLiteral("ピクセルグリッド"), QStringLiteral("ブラシプレビュー"), QStringLiteral("メッシュ"), QStringLiteral("編集ピン"), QStringLiteral("|"),
                                      QStringLiteral("すべて"), QStringLiteral("なし"), QStringLiteral("|"), QStringLiteral("エクストラオプションを表示…")}));
         PageCanvas* c = s.canvas();
         const bool brush = c->brush_preview;
@@ -626,6 +626,7 @@ private slots:
         for (bool on : {c->show_layer_edges, c->show_selection_edges, c->show_target_path, c->grid_visible, c->show_guide_lines, c->show_canvas_guides,
                         c->show_smart_guides, c->show_pixel_grid, c->show_mesh, c->show_edit_pins})
             QVERIFY(!on);
+        QVERIFY(!s.window->action("act_show_notes")->isChecked());  // (PC5 J-c's 注釈: なし and すべて take it with the rest)
         QCOMPARE(c->brush_preview, brush);  // (not one of them)
         s.trigger("act_extras");
         QVERIFY(!c->extras_shown);
@@ -635,6 +636,7 @@ private slots:
         for (bool on : {c->show_layer_edges, c->show_selection_edges, c->show_target_path, c->grid_visible, c->show_guide_lines, c->show_canvas_guides,
                         c->show_smart_guides, c->show_pixel_grid, c->show_mesh, c->show_edit_pins, c->extras_shown})
             QVERIFY(on);
+        QVERIFY(s.window->action("act_show_notes")->isChecked());
         // エクストラオプションを表示…: エクストラ and the items chosen together
         s.answers.responder->exec = [](QDialog* dialog) {
             if (dialog->objectName() != QLatin1String("extras_options")) return 0;

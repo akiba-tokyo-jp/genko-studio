@@ -4,8 +4,12 @@
 #include <QtGlobal>
 
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <mutex>
+#include <set>
 #include <sstream>
 
 #if !defined(_WIN32)
@@ -24,9 +28,11 @@
 #include "render/draw.hpp"
 #include "render/materials.hpp"
 #include "render/text/fonts.hpp"
+#include "render/text/shaping.hpp"
 #include "service/blocking.hpp"
 #include "service/lint.hpp"
 #include "service/stylecat.hpp"
+#include "storage/fsutil.hpp"
 
 namespace genko::service {
 
@@ -533,6 +539,150 @@ Json system_fonts() {
     return found;
 }
 
+namespace {
+
+// The font files of the computer's font folders (.ttf, .otf, .ttc), in the order of their names, and their signature:
+// each one's path, size and time written — a font put in, taken away or replaced changes it (review P3-6).
+struct FontFiles {
+    std::vector<fs::path> paths;
+    std::string signature;
+};
+FontFiles font_files() {
+    FontFiles out;
+    for (const fs::path& folder : font_dirs()) {
+        std::vector<fs::path> paths;
+        std::error_code ec;
+        for (fs::recursive_directory_iterator it(folder, fs::directory_options::skip_permission_denied, ec), end; it != end && !ec;
+             it.increment(ec)) {
+            const std::string suffix = lower_ascii(it->path().extension().string());
+            if (suffix == ".ttf" || suffix == ".otf" || suffix == ".ttc") paths.push_back(it->path());
+        }
+        std::sort(paths.begin(), paths.end(), [](const fs::path& a, const fs::path& b) { return parts_of(a) < parts_of(b); });
+        out.paths.insert(out.paths.end(), paths.begin(), paths.end());
+    }
+    std::uint64_t hash = 1469598103934665603ULL;  // (FNV-1a over the files' paths, sizes and times)
+    const auto mix = [&](std::string_view bytes) {
+        for (const char c : bytes) {
+            hash ^= static_cast<unsigned char>(c);
+            hash *= 1099511628211ULL;
+        }
+    };
+    for (const fs::path& path : out.paths) {
+        std::error_code size_ec, time_ec;
+        const auto size = fs::file_size(path, size_ec);
+        const auto when = fs::last_write_time(path, time_ec);
+        mix(core::path_to_utf8(path));
+        mix("|" + std::to_string(size_ec ? 0 : size) + "|" + std::to_string(time_ec ? 0 : when.time_since_epoch().count()) + "\n");
+    }
+    char hex[17] = {};
+    std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(hash));
+    out.signature = std::to_string(out.paths.size()) + ":" + hex;
+    return out;
+}
+
+// A list of families as type_fonts keeps it: [{family: str, styles: [{path: str, …}]}] (anything else: looked for again).
+bool families_shape(const Json& v) {
+    if (!v.is_array()) return false;
+    for (const Json& family : v) {
+        if (!family.is_object() || !py_get(family, "family").is_string() || !py_get(family, "styles").is_array()) return false;
+        for (const Json& face : family["styles"]) {
+            if (!face.is_object() || !py_get(face, "path").is_string()) return false;
+        }
+    }
+    return true;
+}
+
+}  // namespace
+
+Json type_fonts() {
+    const fs::path cache = core::poses::config_dir() / "type_fonts.json";
+    const FontFiles files = font_files();
+    const std::string key = core::path_to_utf8(cache) + "\n" + files.signature;
+    // (the list made in this run, while the fonts and the config folder are the same: a config folder that cannot be
+    // written is not looked through again and again — review P3-6)
+    static std::mutex memo_mutex;
+    static std::string memo_signature;
+    static Json memo;
+    {
+        const std::lock_guard<std::mutex> lock(memo_mutex);
+        if (!memo_signature.empty() && memo_signature == key) return memo;
+    }
+    try {
+        std::ifstream in(cache, std::ios::binary);
+        if (in) {
+            std::ostringstream text;
+            text << in.rdbuf();
+            core::ParseOptions options;
+            options.universal_newlines = true;
+            const Json kept = core::parse_python_json(text.str(), nullptr, options);
+            // (the list kept with the fonts' signature, in its shape: else looked for again)
+            if (kept.is_object() && py_get(kept, "signature") == Json(files.signature) && families_shape(py_get(kept, "families"))) {
+                const std::lock_guard<std::mutex> lock(memo_mutex);
+                memo_signature = key;
+                memo = kept["families"];
+                return memo;
+            }
+        }
+    } catch (const core::Error&) {  // (not read: looked for again)
+    }
+    std::set<std::string> japanese;
+    try {
+        for (const Json& f : core::iterate(system_fonts())) {
+            if (py_get(f, "path").is_string()) japanese.insert(py_get(f, "path").get<std::string>());
+        }
+    } catch (const std::exception&) {
+    }
+    std::map<std::string, Json> families;  // (by family, in the order of their names)
+    for (const fs::path& path : files.paths) {
+        const std::string file = core::path_to_utf8(path);
+        // (each face of a collection — a .ttc's second and later too, with its index: review P3-8 — read for the list
+        // alone, not kept with the faces shaping holds: review P3-7)
+        unsigned faces = 1;
+        for (unsigned index = 0; index < faces && index < 64; ++index) {
+            try {
+                const render::text::FontInfo info = render::text::font_info(file, index, false);
+                if (index == 0) faces = info.faces;
+                if (info.family.empty() || core::utf8_error(info.family) || core::utf8_error(info.style) || core::utf8_error(info.postscript)) continue;
+                Json face = Json::object({{"style", info.style.empty() ? Json() : Json(info.style)},
+                                          {"postscript", info.postscript.empty() ? Json() : Json(info.postscript)},
+                                          {"path", file},
+                                          {"japanese", japanese.contains(file)}});
+                if (!info.axes.empty()) {
+                    Json axes = Json::array();
+                    for (const render::text::FontAxis& a : info.axes) {
+                        axes.push_back(Json::object({{"tag", a.tag}, {"name", core::utf8_error(a.name) ? Json() : Json(a.name)}, {"min", a.min},
+                                                     {"default", a.value}, {"max", a.max}}));
+                    }
+                    face["axes"] = std::move(axes);
+                }
+                if (info.faces > 1) {
+                    face["faces"] = info.faces;
+                    face["index"] = index;
+                }
+                Json& family = families[info.family];
+                if (family.is_null()) family = Json::object({{"family", info.family}, {"styles", Json::array()}});
+                family["styles"].push_back(std::move(face));
+            } catch (const std::exception&) {
+                if (index == 0) break;
+            }
+        }
+    }
+    Json found = Json::array();
+    for (auto& [name, family] : families) found.push_back(std::move(family));
+    try {  // (written whole or not at all: a temporary file renamed over the last — review P3-6)
+        fs::create_directories(cache.parent_path());
+        core::DumpOptions options;
+        options.indent = 1;
+        options.item_separator = ",";
+        storage::write_atomic(cache, core::dump(Json::object({{"signature", files.signature}, {"families", found}}), options));
+    } catch (const std::exception&) {
+    }
+    const std::lock_guard<std::mutex> lock(memo_mutex);
+    memo_signature = key;
+    memo = found;
+    return found;
+}
+
 Json fonts_list() {
     Json bundled = Json::array();
     for (const auto& [key, label] : lint::bundled_fonts()) bundled.push_back(Json::object({{"key", key}, {"label", label}}));
@@ -544,8 +694,15 @@ Json fonts_list() {
     } catch (const std::exception&) {  // (an unreadable fonts folder is not the agent's problem)
         system = Json::array();
     }
+    Json families = Json::array();  // (PC5 G-b, type.fonts: every font of the computer by family — what the 文字 panel lists)
+    try {
+        families = type_fonts();
+    } catch (const std::exception&) {
+        families = Json::array();
+    }
     return Json::object({{"bundled", std::move(bundled)},
                          {"system", std::move(system)},
+                         {"families", std::move(families)},
                          {"note", "style.font takes a bundled key or a system font's path; style.weight normal|bold|heavy thickens any face"}});
 }
 

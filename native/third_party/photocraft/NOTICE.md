@@ -287,6 +287,8 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/doc/src/text_styles.rs`（182-236 行: `resolve_para`・`resolve_char`）: スタイルを解く順（基本段落 → 段落スタイル → 文字スタイル → 上書き）→ `native/src/core/type_text.cpp`（`resolve_para`・`resolve_chars`。上書きを違う所だけで持ち、台詞の書式と書記素の範囲・段落の番号で解く所は Genko のもの）。
 - 文字レイヤーと文字ツール（PC5 G-a）:
   - `crates/text/src/render.rs`（180 行: アンチエイリアス なし は被覆 0.5 で 2 値）・`crates/engine/src/type_extra_cmds.rs`（106-123 行: なし だけ描き方が変わり、ほかは名前を持つ。137-192 行: ポイントテキスト ⇄ 段落テキストの変換。361-377 行: Lorem ipsum の文）・`crates/engine/src/type_cmds.rs`（308-350 行: 範囲の置き換え、373 行: 本文からのレイヤーの名前）: 決まり → `native/src/render/text/lettering.cpp`（`binarized`・置き方）・`native/src/render/ops_type.cpp`（`add_type_layer`・`edit_type`・`to_point`・`to_box`）・`native/src/app/main_window_type.cpp`（`paste_lorem`）。基準点・枠からの置き方（縦組み・揃え）、書記素の位置、ルビ・フキダシ、行列での描き方、和文の仮の文は Genko のもの。
+- 組版・OpenType・書体・右から左（PC5 G-b）:
+  - `crates/engine/src/type_cmds.rs`（86-260 行: `apply_char_props`・`apply_para_props` の属性の意味、552 行: setStyle の範囲が無ければ全体）・`crates/engine/src/type_extra_cmds.rs`（320-357 行: OpenType の切り替え — 状態は最初の字の設定、liga・dlig は専用の属性、ほかは features に入れる・外す）: 決まり → `native/src/render/ops_type_set.cpp`（`set_type`）・`native/src/app/main_window_type.cpp`（`type_feature`・`refresh_type_commands`）。書記素の範囲・段落の番号で持つこと、違う所だけの上書き、null で外すこと、前後関係に依存する字形を切るときに 0 を書くこと、組み方の印は Genko のもの。組版そのもの（HarfBuzz と SheenBidi による行・禁則・約物の詰め・ルビ・縦の升目の字形）は上流（parley）を移さず Genko が作った。
 
 ## レイヤー・アートボード・自動処理（PC5 節 I）
 
@@ -297,6 +299,10 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - グループとフレーム（PC5 I-b、groups@1）:
   - `crates/compose/src/lib.rs`（511-560 行: グループの中を何も無い上に描く `render_content`、824-878 行: 通過のグループ — 前と後の間を不透明度 × マスクで混ぜる式）→ `native/src/render/page.cpp`（`ColorGroups`・`InkGroups`。8 bit・高精度・インキの 3 つの道への配線、帯ごとの描画、グループにクリップしたレイヤーをグループの形で切ることは Genko のもの）・`native/src/render/color_canvas.cpp`・`native/src/render/ink_canvas.cpp`（`mix_back`）。`crates/compose/src/tests.rs`（137-170 行: 通過と分離の違い・不透明度は 1 回・通過の不透明度の混ぜ）の試験の考え → `native/tests/unit/test_groups.cpp`。
   - `crates/engine/src/frame_cmds.rs`（1-60 行: レイヤーからのフレーム — まとめて外接の長方形で切る）→ `native/src/render/ops_groups.cpp`（`frame_from_layers`。上流の画素のマスクの代わりにベクトルマスクにしたのは Genko のもの）。
+- 変数とデータセット（PC5 I-d、variables@1）:
+  - `crates/doc/src/variables.rs`（`Variables`・`VariableDef`・`VarKind`・`PixelMethod`・`PixelAlign`・`DataSet`・`DataValue`）→ `native/src/core/variables.{hpp,cpp}`（本に持つ正規形・台詞を名指す定義・置く箱・画像の値を本の素材にすること・上限は Genko のもの）。
+  - `crates/engine/src/variables_cmds.rs`（26-125 行: 定義・データセットの読み、155-262 行: `apply_to_doc`・`replace_pixels` — 方法と 9 つの配置とクリップ、270-352 行: `import_data_sets`・`split_csv`、354-395 行: `export_as_files` の名前の形）→ `native/src/render/ops_variables.{hpp,cpp}`（op の名前と引数、各変更を Genko の op の決まりで通すこと、8 bit・高精度・インキの層の格子への配線、置く箱を定義のときに決めることは Genko のもの）・`native/src/formats/datasets.{hpp,cpp}`（引用の中の改行・タブの自動・名前の列の見出しの日本語・画像のファイルを素材にすることは Genko のもの）。`crates/engine/src/variables_cmds/tests.rs` の試験の考え → `native/tests/unit/test_variables.cpp`・`native/tests/contract/test_contract_variables.cpp`。
+  - `crates/format/src/manifest.rs`（`variables`）→ `native/src/render/pcraft_variables.{hpp,cpp}`。
 
 ## 表示・窓・環境設定（PC5 節 H）
 
@@ -325,3 +331,7 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/io/src/comps_map.rs`（124-310 行: `parse_cmls`・`comps_from_psd`・`write_comps_resource`・`write_cmls`・`set_cmls`）と `crates/psd/src/metadata.rs`（`parse_shmd`・`write_shmd`）→ `native/src/render/psd_comps.{hpp,cpp}`・`native/src/render/psd_production.cpp`（`shmd_items`・`shmd_bytes`・`layer_shmd`。読んだバイトのまま書くかを指紋で決めること・lyid を付けることは Genko のもの）。
   - `crates/format/src/manifest.rs`（99-130 行: `LayerCompM`・`CompStateM`・`CompAppearanceM`）と `crates/format/src/convert.rs`（238-265 行: `comp_m`、324-345 行: `Loader::comp`）→ `native/src/render/pcraft_comps.{hpp,cpp}`。
   - `crates/ui-egui/src/comps_ui.rs`（パネルの行と下のボタン）→ `native/src/app/layer_comps_panel.{hpp,cpp}`（Qt で作り直した）。
+- 注釈（PC5 J-c）:
+  - `crates/engine/src/notes_cmds.rs`（55-150 行: `notes.add`・`notes.set`（印と一緒に枠を動かす、本文・作成者を変えたときだけ日時を変える）・`notes.delete`、160-190 行: `import_notes_from`（紙の外の印を中へ寄せる））→ `native/src/render/ops_annotations.{hpp,cpp}`・`native/src/formats/notes_import.{hpp,cpp}`（op の名前と引数・mm で持つこと・書いた人を持ちエージェントが人の注釈を変えないこと・読み込みを op の並びにすることは Genko のもの）。試験の考え（同じファイルの tests）→ `native/tests/unit/test_annotations.cpp`。
+  - `crates/io/src/annotations_map.rs`（1-205 行: `Anno` の読み書き `parse_entries`・`write_note`・`write_anno`、色の空間 `color_from`、本文の UTF-16 と CR、音声の注釈を元のバイトのまま書き戻すこと）→ `native/src/render/psd_annotations.{hpp,cpp}`（PDF の日付を UTC に直すこと・読んだバイトのまま書くかを指紋で決めることは Genko のもの）。
+  - `crates/doc/src/analysis.rs`（94-125 行: `Note` の形と既定）と `crates/format/src/manifest.rs`（`notes`）→ `native/src/render/pcraft_annotations.{hpp,cpp}`。

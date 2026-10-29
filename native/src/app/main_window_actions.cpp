@@ -499,6 +499,7 @@ void MainWindow::build_actions() {
     build_brush_preset_actions();  // (PC4 E2: ブラシを定義…, プリセット ▸: main_window_brush_presets.cpp)
     build_layer_style_actions();  // (PC4 E6: レイヤー → レイヤースタイル ▸: main_window_styles.cpp)
     build_production_actions();   // (PC5 J-0: 解析 ▸, ビデオレイヤー ▸, the production's panels — frames: main_window_production.cpp)
+    build_variable_actions();     // (PC5 I-d: 変数 ▸, データセットを適用…, データセットからファイル…, 変数データセット…: main_window_variables.cpp)
     build_align_actions();      // (PC3 C-d: 重ね順・整列・分布・リンク・ロック, スナップ (with 定規's グリッドにスナップ), the move tool's: main_window_align.cpp)
     build_file_actions();       // (PC4 F-0: 節 F's new commands of ファイル, frames until F-b and F-c: main_window_file.cpp)
     build_filter_actions();     // (PC4 節 D: フィルター's commands, 前回のフィルター: filter_menu.cpp)
@@ -772,6 +773,8 @@ void MainWindow::build_menus() {
     build_brush_preset_menus(edit);  // (PC4 E2: ブラシを定義…, プリセット ▸: app/main_window_brush_presets.cpp)
     build_layer_style_menus(layers);  // (PC4 E6: レイヤースタイル ▸ before レイヤーマスク: app/main_window_styles.cpp)
     build_production_menus(layers, pages);  // (PC5 J-0: ビデオレイヤー ▸ before ラスタライズ ▸, ページ → 解析 ▸: main_window_production.cpp)
+    build_variable_menus(file, pages);  // (PC5 I-d: ページ → 変数 ▸・データセットを適用…, 書き出し ▸・読み込み ▸ の項目: main_window_variables.cpp)
+    build_notes_menus(file, view);  // (PC5 J-c: ファイル → 読み込み ▸ 注釈…, 表示 → 表示・非表示 ▸ 注釈: main_window_notes.cpp)
     pages->addAction(action("act_book_preview"));
     pages->addAction(action("act_checks"));
     pages->addSeparator();

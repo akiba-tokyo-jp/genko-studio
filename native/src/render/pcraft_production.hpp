@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <map>
@@ -26,6 +27,11 @@ struct ReadContext {
     std::map<std::string, std::string> layers;          // a document layer's id → the layer made of it
     std::function<void(std::string)> say;               // a note of the reading
     const core::Json* document = nullptr;               // (PC5 J-a) the whole document (a row's keys beside its own)
+    // (PC5 I-d) the book being made (its variables are the book's), and where a picture a data set names by a relative path
+    // is looked for (the .pcraft's folder; none: such pictures left out, said)
+    core::Document* book = nullptr;
+    std::optional<std::filesystem::path> beside;
+    std::uint64_t pictures_most = 4ull << 30;  // (the pictures read beside it together: the book's 4 GiB; less in tests)
 };
 
 struct WriteContext {
@@ -33,6 +39,7 @@ struct WriteContext {
     std::map<std::string, std::string> layers;          // a layer's id → its id in the document
     std::function<void(std::string)> say;               // a note of the writing
     core::Json* document = nullptr;                     // (PC5 J-a) the whole document (a row's keys beside its own)
+    const core::Document* book = nullptr;               // (PC5 I-d) the book the page is written from
 };
 
 struct Row {

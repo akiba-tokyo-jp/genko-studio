@@ -11,6 +11,7 @@
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "render/ops_variables.hpp"
 #include "render/plugins.hpp"
 #include "service/book.hpp"
 #include "service/briefs.hpp"
@@ -525,6 +526,9 @@ ToolResult StudioService::inspect(const Json& a) {
         return ToolResult(true, Json::object({{"script", script ? *script : Json()}}));
     }
     if (core::py_equals(target, Json("studio"))) return ToolResult(true, Json::object({{"studio", doc.studio}}));
+    // (PC5 I-d, variables.list: the book's variables and data sets, as genko inspect --variables shows them; reading only —
+    // their ops are not an agent's: the tool's words and the unknown target's list are the contract's, left as they are)
+    if (core::py_equals(target, Json("variables"))) return ToolResult(true, Json::object({{"variables", render::variables_listing(doc)}}));
     if (core::py_equals(target, Json("snapshot"))) {
         Json snap = storage::snapshot(doc);
         if (!page.is_null()) {  // (that page alone: the rest of the book is not sent again)

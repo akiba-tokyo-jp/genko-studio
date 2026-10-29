@@ -27,5 +27,9 @@ genko_library(genko_formats
     pcraft_write.cpp
     # PC4 F-c (書き出し: Web 用に保存・書き出しの環境設定・クイック書き出し)
     web_export.cpp
+    # PC5 I-d (変数とデータセット: a text file of data sets, data sets as files)
+    datasets.cpp
+    # PC5 J-c (注釈: ファイル → 読み込み → 注釈…)
+    notes_import.cpp
   PUBLIC_DEPS genko_render genko_core Qt6::Core
   PRIVATE_DEPS genko_storage ZLIB::ZLIB JPEG::JPEG TIFF::TIFF ${GENKO_LCMS2})

@@ -32,6 +32,7 @@
 #include "core/psd_keep.hpp"
 #include "core/brush_dabs.hpp"
 #include "core/patterns.hpp"
+#include "core/variables.hpp"
 #include "core/layer_styles.hpp"
 #include "core/type_text.hpp"
 #include "core/groups.hpp"
@@ -54,7 +55,7 @@ using core::Point;
 
 namespace {
 
-constexpr std::array<std::string_view, 26> kTopKeys{
+constexpr std::array<std::string_view, 27> kTopKeys{
     "version", "revision", "title", "episode", "binding", "start_side", "strict_gates", "autosave",
     "font_path", "page_locks", "brush", "nombre", "spec", "bible", "tickets", "studio", "pages", "story",
     // v4
@@ -66,7 +67,9 @@ constexpr std::array<std::string_view, 26> kTopKeys{
     // layer-styles@1 (PC4 E6)
     "global_light",
     // type@1 (PC5 G-0)
-    "type_styles"};
+    "type_styles",
+    // variables@1 (PC5 I-d)
+    "variables"};
 
 constexpr std::array<std::string_view, 21> kPageKeys{
     "id", "art_ok", "plan", "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
@@ -1609,6 +1612,8 @@ core::Document Reader::migrate(const Json& payload) {
     }
     // (type@1, PC5 G-0: the book's type styles, as the writer writes them: core::type_text::validate_type below)
     if (const Json* styles = find(payload, "type_styles"); styles != nullptr && !styles->is_null()) doc.type_styles = *styles;
+    // (variables@1, PC5 I-d: the book's variables, as the writer writes them: core::validate_variables below)
+    if (const Json* variables = find(payload, "variables"); variables != nullptr && !variables->is_null()) doc.variables = *variables;
     doc.nombre = dict_or_empty(payload, "nombre");
     if (const Json* bible = find(payload, "bible"); bible && core::py_truthy(*bible)) {
         if (!bible->is_object()) format_error("/bible", "the bible must be an object, not " + core::py_repr(*bible));
@@ -1734,6 +1739,14 @@ core::Document Reader::migrate(const Json& payload) {
     // (groups@1, PC5 I-b: a group on a folder only, the blend pass_through a group's only)
     try { core::validate_groups(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (variables@1, PC5 I-d: the variables in their normal form; the pictures their values name in the book's folder)
+    try {
+        core::validate_variables(doc);
+        if (doc.variables) doc.variables = core::variables_to_json(core::variables_from_json(*doc.variables));  // (its keys in their order)
+        for (const auto& [ref, suffix] : core::variable_pictures(doc)) check_named(ref, suffix, "/variables", "picture of a data set");
+    } catch (const core::Error& error) {
+        issue("broken_value", "/variables", {}, error.what());
+    }
     // (PC5 J-0: timeline@1's work area, video@1's video rows, in a page's anim of a book that names them — kept as read)
     try {
         const auto named = [&](std::string_view f) { return std::find(doc.features.begin(), doc.features.end(), f) != doc.features.end(); };
@@ -2023,7 +2036,9 @@ bool is_known_feature(std::string_view feature) {
            feature == core::kGroupsFeature ||
            // PC5 J-0 (core/layer_comps.hpp, core/slices.hpp, core/annotations.hpp, core/measure.hpp, core/video.hpp)
            feature == core::kLayerCompsFeature || feature == core::kSlicesFeature || feature == core::kAnnotationsFeature ||
-           feature == core::kMeasureFeature || feature == core::kTimelineFeature || feature == core::kVideoFeature;
+           feature == core::kMeasureFeature || feature == core::kTimelineFeature || feature == core::kVideoFeature ||
+           // PC5 I-d (core/variables.hpp)
+           feature == core::kVariablesFeature;
 }
 
 int project_version(const Json& payload) {

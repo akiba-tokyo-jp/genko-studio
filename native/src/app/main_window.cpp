@@ -55,6 +55,7 @@
 #include "app/pages_panel.hpp"
 #include "app/paths_panel.hpp"
 #include "app/layer_comps_panel.hpp"
+#include "app/notes_panel.hpp"
 #include "app/perf.hpp"
 #include "app/reply_box.hpp"
 #include "app/save_status.hpp"
@@ -692,7 +693,9 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
         {"layer_style_to_layers", QStringLiteral("レイヤースタイルをレイヤーにしています…")},  // (PC4 E6 review P3-6)
         // (PC5 J-a, the review's P3-7: each layer's place read)
         {"new_layer_comp", QStringLiteral("レイヤーカンプを記録しています…")}, {"update_layer_comp", QStringLiteral("レイヤーカンプを記録しています…")},
-        {"apply_layer_comp", QStringLiteral("レイヤーカンプを適用しています…")}};
+        {"apply_layer_comp", QStringLiteral("レイヤーカンプを適用しています…")},
+        // (PC5 I-d, the review's P2-1: pictures put in, a data set's pictures checked)
+        {"apply_data_set", QStringLiteral("データセットを適用しています…")}, {"set_data_sets", QStringLiteral("データセットを確かめています…")}};
     struct Busy {
         bool on = false;
         ~Busy() {
@@ -825,6 +828,7 @@ void MainWindow::show_page() {
     quick_mask_follow();     // (masks@1: the page's Quick Mask, its menu item and the tools painting it)
     if (paths_panel_ != nullptr && paths_dock_ != nullptr && paths_dock_->isVisible()) paths_panel_->refresh();  // (vector@1, PC3 C-a)
     if (layer_comps_panel_ != nullptr && layer_comps_dock_ != nullptr && layer_comps_dock_->isVisible()) layer_comps_panel_->refresh();  // (PC5 J-a)
+    if (notes_panel_ != nullptr) refresh_notes();  // (PC5 J-c: the chosen note while the page has it)
     if (patterns_panel_ != nullptr && patterns_dock_ != nullptr && patterns_dock_->isVisible()) patterns_panel_->refresh();  // (PC4 E3)
     if (lines_later_) {
         lines_timer_.start();
@@ -851,6 +855,7 @@ void MainWindow::select_page(int row) {
     }
     if (row != page_index_) {
         perf::event("page_switch", {{"row", row}});
+        if (notes_panel_ != nullptr) notes_panel_->commit_text();  // (PC5 J-c: the note's text typed, on its own page)
         session_->save_now();  // a page switch writes what was done on the last page (on the worker)
         canvas_->set_selection(std::nullopt);
         canvas_->highlight_box.reset();  // (a problem shown by the checks stays on its page)
@@ -991,6 +996,10 @@ void MainWindow::refresh_zoom() {
 void MainWindow::refresh_actions() {
     show_color_mode();
     if (auto* exposure = action("act_exposure")) exposure->setEnabled(current_page() && session_->read_only_reason().empty());
+    // (PC5 I-d, the review's P1-1: the variables' commands change the book — none on a book read only)
+    for (const char* name : {"act_variables_define", "act_variables_data_sets", "act_apply_data_set", "act_import_data_sets"}) {
+        if (QAction* act = action(QString::fromLatin1(name))) act->setEnabled(current_page() != nullptr && session_->read_only_reason().empty());
+    }
     if (QAction* name_ok = action(QStringLiteral("act_name_ok"))) name_ok->setVisible(agent_book());  // (stages are for books made with agents)
     contents_tab_follow();  // (smart-objects@1: what a contents' tab cannot use, greyed)
 }

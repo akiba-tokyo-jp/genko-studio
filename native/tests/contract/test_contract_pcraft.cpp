@@ -575,7 +575,12 @@ private slots:
         QVERIFY(page.layer_comps && page.layer_comps->comps.size() == 1 && page.layer_comps->comps[0].name == "Comp");
         QVERIFY(page.layer_comps->comps[0].apply_visibility && !page.layer_comps->comps[0].apply_position);
         QVERIFY(!said(notes, "レイヤーカンプ"));
-        for (const char* part : {"レイヤー効果", "ラベル", "文字レイヤーは画素", "リンクされたスマートオブジェクト", "注釈", "用紙の外",
+        // (PC5 J-c: its note is the page's now — not said)
+        QCOMPARE(page.annotations.size(), std::size_t(1));
+        QCOMPARE(page.annotations[0].author, std::string("A"));
+        QCOMPARE(page.annotations[0].text, std::string("note"));
+        QVERIFY(!said(notes, "注釈"));
+        for (const char* part : {"レイヤー効果", "ラベル", "文字レイヤーは画素", "リンクされたスマートオブジェクト", "用紙の外",
                                  "高度な合成のチャンネル", "filter.unknown.later"}) {
             QVERIFY2(said(notes, part), qPrintable(QString::fromUtf8(part) + QStringLiteral("\n") + QString::fromStdString(joined(notes))));
         }

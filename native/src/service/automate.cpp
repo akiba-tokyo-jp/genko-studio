@@ -583,8 +583,9 @@ Result run(const std::vector<Input>& inputs, const Json& steps, const Output& ou
                 if (output.to == Output::To::Book) {
                     throw core::Error("refused_target", "a picture's own file is never written: write the batch into a folder");
                 }
-                const formats::Opened opened =
-                    formats::open_file(storage::read_file(input.path), core::path_to_utf8(input.path.filename()), options.open);
+                formats::OpenOptions open = options.open;
+                open.folder = input.path.parent_path();  // (PC5 I-d: a .pcraft's data sets' pictures beside it)
+                const formats::Opened opened = formats::open_file(storage::read_file(input.path), core::path_to_utf8(input.path.filename()), open);
                 const core::ApplyResult ran = run_steps(opened.doc, aim_steps(opened.doc, steps, true, options.recorded), options.actor);
                 std::vector<std::string> notes = opened.notes;
                 if (output.to == Output::To::Folder) {

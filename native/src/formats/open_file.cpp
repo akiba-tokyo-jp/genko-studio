@@ -219,7 +219,11 @@ Opened pcraft_book(render::pcraft::Read read, const std::string& file) {
 Opened open_folder(const std::filesystem::path& folder, const OpenOptions&) {
     std::string name = core::utf8_replaced(core::path_to_utf8(folder.filename()));
     if (name.empty()) name = core::utf8_replaced(core::path_to_utf8(folder.parent_path().filename()));
-    return pcraft_book(render::pcraft::read_folder(folder, stem_of(name)), name);
+    render::pcraft::ReadLimits limits;
+    std::filesystem::path here = folder;
+    if (here.filename().empty()) here = here.parent_path();
+    limits.beside = here.parent_path();  // (PC5 I-d: its data sets' pictures, beside it)
+    return pcraft_book(render::pcraft::read_folder(folder, stem_of(name), limits), name);
 }
 
 Opened picture_book(CodecImage picture, std::string_view title, const OpenOptions& options) {
@@ -717,7 +721,9 @@ Opened open_file(std::string_view bytes, std::string_view name, const OpenOption
     // (a .pcraft by what it holds — a zip whose first file is manifest.json —, or a zip named so; a picture named .pcraft is
     // opened as the picture it is)
     if (render::pcraft::is_pcraft(bytes) || (suffix == ".pcraft" && bytes.starts_with(std::string_view("PK", 2)))) {
-        return pcraft_book(render::pcraft::read(bytes, stem_of(file)), file);
+        render::pcraft::ReadLimits limits;
+        limits.beside = options.folder;  // (PC5 I-d: its data sets' pictures)
+        return pcraft_book(render::pcraft::read(bytes, stem_of(file), limits), file);
     }
     const auto format = options.as ? options.as : render::codecs::detect(bytes);
     if (!format) throw core::Error("unidentified_image", "the file is not a picture of a format this build knows");

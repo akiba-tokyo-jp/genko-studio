@@ -1275,6 +1275,7 @@ Json document_json(Ctx& ctx) {
         render::pcraft_production::WriteContext production;
         production.px = ctx.px;
         production.layers = ctx.layer_ids;  // (PC5 J-a)
+        production.book = &ctx.doc;  // (PC5 I-d: the variables, the book's)
         production.say = [&ctx](std::string note) {
             if (ctx.said.insert(note).second) ctx.notes.push_back(std::move(note));
         };

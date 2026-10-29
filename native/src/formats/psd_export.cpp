@@ -49,6 +49,7 @@
 #include "render/text/balloons.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
+#include "render/text/opentype.hpp"
 #include "storage/asset_store.hpp"
 
 namespace genko::formats {
@@ -1153,10 +1154,11 @@ public:
     EditableLines(Records& records, const core::Document& episode, int dpi, render::Size size, std::int64_t page, PsdTextReport& report,
                   const core::PageColor* ink = nullptr)
         : records_(records), dpi_(dpi), size_(size), page_(page), report_(report), font_path_(episode.font_path), text_gamma_(episode.text_gamma),
-          ink_(ink) {}
+          type_styles_(episode.type_styles ? &*episode.type_styles : nullptr), ink_(ink) {}
 
     void add(const core::StoryLine& line) {
         const render::text::TextGamma gamma(text_gamma_);  // (color-model@1: the letters drawn as pictures in the book's gamma)
+        const render::text::TypeStyles type_styles(type_styles_);  // (PC5 G-b review P3-9: the book's type styles)
         const std::string words = detail::words_of(line.text, 24);
         std::vector<std::string> features = detail::line_features(line, dpi_, font_path_);
         if (!features.empty()) {  // (asked to: as the image way draws it)
@@ -1470,6 +1472,7 @@ private:
     PsdTextReport& report_;
     std::optional<std::string> font_path_;
     std::optional<double> text_gamma_;  // (the book's)
+    const core::Json* type_styles_ = nullptr;  // (the book's type styles: the episode outlives the lines)
     const core::PageColor* ink_;  // (a CMYK or Lab page's: its colours)
     render::text::Fonts fonts_;
 };

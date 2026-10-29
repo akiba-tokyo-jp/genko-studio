@@ -11,6 +11,8 @@
 #include <set>
 #include <tuple>
 
+#include <QChar>
+
 #include "core/base64.hpp"
 #include "core/error.hpp"
 #include "core/pyconv.hpp"
@@ -18,14 +20,17 @@
 #include "core/pyops.hpp"
 #include "core/page_geometry.hpp"
 #include "core/ruby.hpp"
+#include "core/type_text.hpp"
 #include "render/draw.hpp"
 #include "render/imaging.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/op_limits.hpp"
+#include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/resample.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/memo.hpp"
+#include "render/text/opentype.hpp"
 
 namespace genko::render::text {
 
@@ -223,7 +228,8 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
                     const Rgb& fill, int dpi, std::vector<RubyNote>* notes, std::vector<RubyDrawn>* drawn,
                     const LetterParts* parts = nullptr, std::vector<SetRow>* cells = nullptr) {
     const bool by_place = line.ruby_spans.has_value();
-    SetText set = by_place ? set_text_mapped(fonts, line, st, face) : SetText{set_text(fonts, line, st, face), {}};
+    const bool opentype = sets_opentype(line);  // (PC5 G-b: each cell's glyph as HarfBuzz chooses it, the grid as before)
+    SetText set = by_place || opentype ? set_text_mapped(fonts, line, st, face) : SetText{set_text(fonts, line, st, face), {}};
     std::u32string text = std::move(set.text);
     std::vector<std::size_t> from = std::move(set.from);
     const double tracking = float_or(at(st, "tracking"), 0);
@@ -255,7 +261,7 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
                 }
                 joined += cols[i];
                 for (std::size_t k = 0; k < cols[i].size(); ++k, ++next) {
-                    joined_from.push_back(by_place && next < from.size() && text[next] == cols[i][k] ? from[next] : std::u32string::npos);
+                    joined_from.push_back((by_place || opentype) && next < from.size() && text[next] == cols[i][k] ? from[next] : std::u32string::npos);
                 }
             }
             text = std::move(joined);
@@ -280,6 +286,73 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
     args.bold = line_weight(st);
     args.ruby_scale = float_or(at(st, "ruby_scale"), 0.5);
     args.mono_ruby = core::py_truthy(at(st, "mono_ruby"));
+    // PC5 G-b: a record set by the OpenType typesetting — each letter's size, faux bold and colour as its attributes say,
+    // and each one-letter cell's glyph as HarfBuzz chooses it down (vert, vrt2 and the record's features: jp78 …)
+    std::vector<Json> attrs;  // (each letter of the text without its line breaks: its attributes)
+    if (opentype) {
+        std::u32string letters;
+        std::vector<std::size_t> letters_from;
+        for (std::size_t i = 0; i < args.text.size(); ++i) {
+            if (args.text[i] == U'\n') continue;
+            letters.push_back(args.text[i]);
+            letters_from.push_back(i < from.size() ? from[i] : std::u32string::npos);
+        }
+        attrs = resolve(line, letters, letters_from, TypeStyles::current()).chars;
+        // (a letter's size_mm against the line's own size — its style's, else the lines' 5 mm — as across: review P3-12)
+        const double base_mm = float_or(at(st, "size_mm"), kCapMm);
+        const std::vector<Json> words = char_styles(letters, line.style_runs, Json());
+        for (std::size_t k = 0; k < attrs.size(); ++k) {
+            const Json& a = attrs[k];
+            const Json& size_mm = at(a, "size_mm");
+            const Json& own_scale = at(a, "scale");
+            const double word = k < words.size() && words[k].is_object() && words[k].contains("scale") ? core::to_float(words[k]["scale"]) : 1.0;
+            const double scale = (own_scale.is_number() ? own_scale.get<double>() : 1.0) * (size_mm.is_number() && base_mm > 0 ? size_mm.get<double>() / base_mm : 1.0) * word;
+            Json look = Json::object();
+            if (std::fabs(scale - 1.0) > 1e-9) look["scale"] = scale;
+            const Json& faux = at(a, "faux_bold");
+            const int level = faux == Json("heavy") ? 2 : faux == Json("bold") ? 1 : 0;
+            // (the weight: a word's own where Genko's words say it, else the record's resolved one — which holds the line's:
+            // a letter set normal in a bold line drawn normal, as across; review P3-1)
+            const bool word_bold = k < words.size() && words[k].is_object() && words[k].contains("bold");
+            if (!word_bold && level != args.bold) look["bold"] = level;
+            if (at(a, "rgb").is_array() && !(k < words.size() && core::py_truthy(at(words[k], "rgb")))) look["rgb"] = at(a, "rgb");
+            args.looks.push_back(std::move(look));
+        }
+        const Json line_font = at(st, "font");
+        args.opentype_cell = [&fonts, &face, &attrs, line_font](std::size_t letter, std::u32string_view cell, std::int64_t size, const Rgb& rgb,
+                                                                 int bold) -> std::optional<Image> {
+            if (letter >= attrs.size() || cell.empty()) return std::nullopt;
+            const Json& a = attrs[letter];
+            Face f = face;
+            if (const Json& font = at(a, "font"); font.is_string() && font != line_font) f = face_of(font, kDefaultDialogue);
+            const std::string path = fonts.readable(fonts.path_for(f, cell.substr(0, 1)));
+            std::map<std::string, std::uint32_t> features{{"vert", 1}, {"vrt2", 1}};
+            if (at(a, "proportional") == Json(true)) features["vpal"] = 1;
+            if (const Json& own = at(a, "features"); own.is_object()) {
+                for (const auto& [tag, value] : own.items()) {
+                    if (tag.size() == 4 && value.is_number_integer()) features[tag] = static_cast<std::uint32_t>(value.get<std::int64_t>());
+                }
+            }
+            ShapeRequest request;
+            request.text = utf8(cell);
+            request.font = path;
+            request.size_px = static_cast<double>(std::max<std::int64_t>(1, size));
+            request.direction = "ttb";
+            if (const Json& language = at(a, "language"); language.is_string()) request.language = language.get<std::string>();
+            for (const auto& [tag, value] : features) request.features.emplace_back(tag, value);
+            if (const Json& axes = at(a, "variations"); axes.is_object()) {
+                for (const auto& [tag, value] : axes.items()) {
+                    if (value.is_number()) request.variations.emplace_back(tag, value.get<float>());
+                }
+            }
+            const std::vector<ShapedGlyph> glyphs = shape(request);
+            if (glyphs.size() != 1 || glyphs.front().glyph == 0) return std::nullopt;
+            const TrueTypeFont& drawn_font = fonts.truetype(path, size, request.variations);
+            // (the glyph the letter has anyway, no axes, no variation selector: set as before — its vertical form, its turn)
+            if (request.variations.empty() && !has_vs(cell) && glyphs.front().glyph == drawn_font.glyph_index(cell.front())) return std::nullopt;
+            return glyph_by_id(glyphs.front().glyph, cell, drawn_font, size, rgb, bold);
+        };
+    }
     if (by_place) {
         args.placed = placed_of(line, args.mono_ruby);
         args.origins = std::move(from);
@@ -293,6 +366,466 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
     return compose(fonts, face, args);
 }
 
+// --- PC5 G-b: the OpenType typesetting's rows (SPEC.md TEXT-02「OpenType の組み方」) -----------------------------------------
+
+// What horizontal_text hands the OpenType rows: the record, its style, face, em and room, the text as set (and each letter's
+// place in the record's text), Genko's words set larger, bolder or in a colour (style_runs, letter by letter), the letters
+// carrying 傍点, the lanes above the rows (傍点 and rubies), whether the letters are drawn and where each is set (PSD-01).
+struct OpenTypeIn {
+    Fonts& fonts;
+    const core::StoryLine& line;
+    const Json& st;
+    const Face& face;
+    std::int64_t em;
+    double inner_w;
+    const Rgb& fill;
+    int dpi;
+    const std::u32string& text;
+    const std::vector<std::size_t>& from;
+    const std::vector<Json>& styles;
+    const std::set<std::size_t>& marked;
+    std::int64_t mark_h;
+    std::int64_t lane;
+    std::int64_t above;
+    bool draw_text;
+    std::vector<SetRow>* cells;
+};
+// The rows' picture, and where each letter of the text is (left, right, its row's top) and its box (the rubies' lane).
+struct OpenTypeRows {
+    Image image;
+    std::map<std::size_t, std::tuple<double, double, std::int64_t>> xs;
+    std::map<std::size_t, BoxF> set_in;
+};
+
+// 禁則処理: the letters a row may not begin with, and those it may not end with — Genko's (the lines' rule), 弱い, 強い.
+constexpr std::u32string_view kWeakStart = U"、。，．）」』】〕〉》］｝!?！？";
+constexpr std::u32string_view kWeakEnd = U"（「『【〔〈《［｛";
+constexpr std::u32string_view kStrongStart = U"ゝゞヽヾ々〻・：；゛゜ヵヶ‐゠–〜～";
+constexpr std::u32string_view kStrongEnd = U"｛〘〖«";
+
+// A letter set close to its neighbours, never broken from them by a row (CJK and full-width letters break anywhere).
+bool loose_letter(char32_t c) {
+    return (c >= 0x2E80 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF) || (c >= 0xFE30 && c <= 0xFE4F) || (c >= 0xFF00 && c <= 0xFFEF) ||
+           (c >= 0x20000 && c <= 0x3FFFF);
+}
+
+const Json& attr(const Json& attrs, const char* key) { return at(attrs, key); }
+double attr_num(const Json& attrs, const char* key, double fallback) {
+    const Json& v = at(attrs, key);
+    return v.is_number() ? v.get<double>() : fallback;
+}
+
+OpenTypeRows opentype_rows(const OpenTypeIn& q) {
+    OpenTypeRows result;
+    const std::u32string& text = q.text;
+    const Resolved resolved = resolve(q.line, text, q.from, TypeStyles::current());
+    const bool native = q.line.native_type.has_value();
+    const double px_mm = static_cast<double>(q.dpi) / 25.4;
+    // (the line's own 長体・平体 and lean are drawn after its letters, as before: each letter's are against them)
+    const double line_scale_x = float_or(at(q.st, "scale_x"), 1.0);
+    const bool leant_after = float_or(at(q.st, "skew_deg"), 0) != 0.0 || core::py_truthy(at(q.st, "italic"));
+    // (a letter's size_mm against the line's own size — its style's, else the lines' 5 mm —: a line fitted to its balloon
+    // shrinks all its letters alike, review P3-12)
+    const double base_mm = float_or(at(q.st, "size_mm"), kCapMm);
+    const Json& line_font = at(q.st, "font");
+    // each letter's look
+    std::vector<Look> looks;
+    std::map<std::string, std::size_t> look_index;  // (a look's key → its place: found in log time, review P2-5)
+    std::vector<std::size_t> look_of(text.size(), 0);
+    std::map<std::string, std::vector<std::string>> font_features;  // (font → its OpenType features)
+    const auto has_feature = [&](const std::string& font, const std::string& tag) {
+        auto it = font_features.find(font);
+        if (it == font_features.end()) {
+            std::vector<std::string> tags;
+            try {
+                tags = font_info(font).features;
+            } catch (const std::exception&) {
+            }
+            it = font_features.emplace(font, std::move(tags)).first;
+        }
+        return std::binary_search(it->second.begin(), it->second.end(), tag);
+    };
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const Json& a = resolved.chars[i];
+        Face f = q.face;
+        if (const Json& font = attr(a, "font"); font.is_string() && font != line_font) f = face_of(font, kDefaultDialogue);
+        const std::u32string one(1, text[i] == U'\n' ? U' ' : text[i]);
+        Look look;
+        look.font = q.fonts.readable(q.fonts.path_for(f, one));
+        const Json* run_scale = q.styles[i].is_object() && q.styles[i].contains("scale") ? &q.styles[i]["scale"] : nullptr;
+        const double word_scale = run_scale != nullptr ? core::to_float(*run_scale) : 1.0;
+        const double size_ratio = attr(a, "size_mm").is_number() && base_mm > 0 ? attr(a, "size_mm").get<double>() / base_mm : 1.0;
+        const double scale = core::py_max(0.1, core::py_min(10.0, attr_num(a, "scale", 1.0) * size_ratio)) * core::py_max(0.3, core::py_min(3.0, word_scale));
+        look.size = std::max<std::int64_t>(4, core::py_round_int(static_cast<double>(q.em) * scale));
+        std::map<std::string, std::uint32_t> features;
+        if (attr(a, "ligatures") == Json(false)) features["liga"] = features["clig"] = 0;
+        if (attr(a, "discretionary_ligatures") == Json(true)) features["dlig"] = 1;
+        if (attr(a, "kerning") == Json("none")) features["kern"] = 0;
+        if (attr(a, "proportional") == Json(true)) features["palt"] = 1;
+        if (const Json& own = attr(a, "features"); own.is_object()) {
+            for (const auto& [tag, value] : own.items()) {
+                if (tag.size() == 4 && value.is_number_integer()) features[tag] = static_cast<std::uint32_t>(value.get<std::int64_t>());
+            }
+        }
+        const Json& caps = attr(a, "caps");
+        if (caps == Json("all")) {
+            look.all_caps = true;
+        } else if (caps == Json("small")) {  // (the font's own small capitals, else capitals at 0.7 of the size)
+            if (has_feature(look.font, "smcp")) {
+                features["smcp"] = 1;
+            } else if (QChar::isLower(static_cast<char32_t>(text[i]))) {
+                look.all_caps = true;
+                look.size = std::max<std::int64_t>(4, core::py_round_int(static_cast<double>(look.size) * 0.7));
+            }
+        }
+        for (const auto& [tag, value] : features) look.features.emplace_back(tag, value);
+        if (const Json& axes = attr(a, "variations"); axes.is_object()) {
+            for (const auto& [tag, value] : axes.items()) {
+                if (value.is_number()) look.variations.emplace_back(tag, value.get<float>());
+            }
+        }
+        if (const Json& language = attr(a, "language"); language.is_string()) look.language = language.get<std::string>();
+        look.tracking = static_cast<double>(look.size) * attr_num(a, "tracking", 0.0);
+        look.shape.scale_x = attr_num(a, "scale_x", 1.0) / (line_scale_x > 0 ? line_scale_x : 1.0);
+        look.shape.scale_y = attr_num(a, "scale_y", 1.0);
+        if (attr(a, "faux_italic") == Json(true) && !leant_after) look.shape.lean = std::tan(12.0 * core::kPi / 180.0);
+        look.shift = attr_num(a, "baseline_shift_mm", 0.0) * px_mm;
+        const Json& word_rgb = at(q.styles[i], "rgb");
+        look.rgb = core::py_truthy(word_rgb) ? rgb_tuple(word_rgb) : attr(a, "rgb").is_array() ? rgb_tuple(attr(a, "rgb")) : q.fill;
+        // (faux bold: the word's own where Genko's words say it — style_runs —, else the record's resolved attribute, which
+        // holds the line's weight: a word set normal in a bold line stays normal, review P3-1)
+        const int faux = attr(a, "faux_bold") == Json("heavy") ? 2 : attr(a, "faux_bold") == Json("bold") ? 1 : 0;
+        const bool word_bold = q.styles[i].is_object() && q.styles[i].contains("bold");
+        look.bold = bold_px(look.size, word_bold ? weight_level(q.styles[i]["bold"]) : faux);
+        look.underline = attr(a, "underline") == Json(true);
+        look.strikethrough = attr(a, "strikethrough") == Json(true);
+        std::string key = look.font + '|' + std::to_string(look.size) + '|' + look.language + '|' + std::to_string(look.tracking) + '|' +
+                          std::to_string(look.shape.scale_x) + ',' + std::to_string(look.shape.scale_y) + ',' + std::to_string(look.shape.lean) + '|' +
+                          std::to_string(look.shift) + '|' + std::to_string(look.bold) + (look.underline ? "u" : "") + (look.strikethrough ? "s" : "") +
+                          (look.all_caps ? "A" : "") + (look.small_caps ? "c" : "");
+        for (const std::int64_t c : look.rgb) key += ',' + std::to_string(c);
+        for (const auto& [tag, value] : look.features) key += '|' + tag + '=' + std::to_string(value);
+        for (const auto& [tag, value] : look.variations) key += '|' + tag + ':' + std::to_string(value);
+        const auto [it, fresh] = look_index.emplace(std::move(key), looks.size());
+        look_of[i] = it->second;
+        if (fresh) looks.push_back(std::move(look));
+    }
+    if (looks.empty()) {  // (an empty text: a row of the line's size)
+        Look look;
+        look.font = q.fonts.readable(q.fonts.path_for(q.face, U" "));
+        look.size = q.em;
+        look.rgb = q.fill;
+        looks.push_back(std::move(look));
+    }
+    const auto ascent_of = [&](std::size_t l) {
+        return q.fonts.truetype(looks[l].font, looks[l].size, looks[l].variations).getmetrics();
+    };
+    const double leading_add = native ? float_or(at(q.line.style, "leading"), 0) : float_or(at(q.st, "leading"), 0);
+    struct Row {
+        std::size_t para = 0;     // (which shaped paragraph)
+        std::size_t start = 0;    // (letters of the paragraph [start, end), drawn [start, drawn))
+        std::size_t end = 0;
+        std::size_t drawn = 0;
+        bool first = false;       // (its paragraph's first row, and its last)
+        bool last = false;
+        RowGlyphs glyphs;
+        std::int64_t tallest = 0;
+        std::size_t tallest_look = 0;
+        std::int64_t height = 0;
+        std::int64_t gap_before = 0;  // (段落前のアキ, or the paragraph before's 段落後のアキ)
+        double lead = 0.0;            // (its indent at its left, and at its right)
+        double trail = 0.0;
+        std::string align;
+        bool justified = false;
+    };
+    struct Para {
+        std::size_t offset = 0;  // (its first letter's place in the text)
+        ShapedParagraph shaped;
+        std::u32string text;
+    };
+    std::vector<Para> paras;
+    std::vector<Row> rows;
+    // (a line's alignment as the lines' own setting reads it — left, right and justify kept, anything else, its default
+    // "top" included, centred —; a point or box text's is its own or left: layout_of; review P2-1)
+    std::string line_align = core::py_str(core::py_or(at(q.st, "align"), Json("center")));
+    if (line_align != "left" && line_align != "right" && line_align != "start" && !line_align.starts_with("justify")) line_align = "center";
+    std::int64_t pending_after = 0;
+    // (a paragraph ends at a line break, and where Unicode ends one — U+2029, a lone CR, NEL, U+001C..U+001E —: SheenBidi
+    // is never handed a separator inside a paragraph; review P2-4)
+    const auto ends_paragraph = [&](std::size_t i) {
+        const char32_t c = text[i];
+        return c == U'\n' || c == U'\u2029' || c == U'\u0085' || (c >= 0x1C && c <= 0x1E) || (c == U'\r' && (i + 1 >= text.size() || text[i + 1] != U'\n'));
+    };
+    for (std::size_t ps = 0;;) {
+        if (q.fonts.stop().stop_requested()) throw Cancelled();
+        std::size_t pe = ps;
+        while (pe < text.size() && !ends_paragraph(pe)) ++pe;
+        if (pe >= text.size()) pe = std::u32string::npos;
+        const bool last_para = pe == std::u32string::npos;
+        if (last_para) pe = text.size();
+        const std::size_t probe = ps < text.size() ? ps : (ps > 0 ? ps - 1 : 0);
+        const Json& pa = resolved.paras[std::min(resolved.para_of.empty() ? 0 : resolved.para_of[std::min(probe, resolved.para_of.size() - 1)],
+                                                  resolved.paras.size() - 1)];
+        const bool world = attr(pa, "composer") == Json("world");
+        const std::string kinsoku = world ? "none" : core::py_str(core::py_or(attr(pa, "kinsoku"), Json("genko")));
+        const bool yakumono = !world && attr(pa, "yakumono") != Json(false);
+        const std::string direction = core::py_str(core::py_or(attr(pa, "direction"), Json("auto")));
+        Para para;
+        para.offset = ps;
+        para.text = text.substr(ps, pe - ps);
+        std::vector<std::size_t> plooks(look_of.begin() + static_cast<std::ptrdiff_t>(ps), look_of.begin() + static_cast<std::ptrdiff_t>(pe));
+        para.shaped = shape_paragraph(para.text, looks, plooks, direction);
+        ShapedParagraph& shaped = para.shaped;
+        const std::u32string& pt = para.text;
+        const std::size_t n = pt.size();
+        if (yakumono) {  // 約物の詰め: a closing mark before another mark, or any mark before an opening one, keeps half its width
+            for (std::size_t i = 0; i + 1 < n; ++i) {
+                if (!shaped.starts[i]) continue;
+                const char32_t ch = pt[i], after = pt[i + 1];
+                if ((in(kClosing, ch) && (in(kClosing, after) || in(kOpening, after))) || (in(kOpening, ch) && in(kOpening, after))) {
+                    const double half = static_cast<double>(looks[plooks[i]].size) * 0.5;
+                    shaped.tracking[i] -= half;
+                    shaped.advance[i] -= half;
+                }
+            }
+        }
+        const bool rtl = shaped.bidi.rtl();
+        const double first_indent = attr_num(pa, "first_indent_mm", 0.0) * px_mm;
+        const double start_indent = attr_num(pa, "start_indent_mm", 0.0) * px_mm;
+        const double end_indent = attr_num(pa, "end_indent_mm", 0.0) * px_mm;
+        // the alignment: the paragraph's own (its style's, its native attributes'), else the line's — at a right-to-left
+        // paragraph's start (its right) where the record names none (a point or box text's left)
+        std::string align = attr(pa, "align").is_string() ? attr(pa, "align").get<std::string>() : line_align;
+        if (align == "start") align = rtl ? "right" : "left";
+        if (!attr(pa, "align").is_string() && rtl && align == "left") align = "right";
+        const auto starts_forbidden = [&](char32_t c) {
+            if (kinsoku == "none") return false;
+            if (kinsoku == "weak") return in(kWeakStart, c);
+            return in(kLineStart, c) || (kinsoku == "strong" && in(kStrongStart, c));
+        };
+        const auto ends_forbidden = [&](char32_t c) {
+            if (kinsoku == "none") return false;
+            if (kinsoku == "weak") return in(kWeakEnd, c);
+            return in(kLineEnd, c) || (kinsoku == "strong" && in(kStrongEnd, c));
+        };
+        // where a row may break: before a cluster, after a space or beside a CJK letter, never before a space (it hangs)
+        // nor where kinsoku says
+        const auto breaks_before = [&](std::size_t i) {
+            if (i == 0 || i >= n || !shaped.starts[i] || py_isspace(pt[i])) return false;
+            const char32_t before = pt[i - 1], here = pt[i];
+            if (!(py_isspace(before) || loose_letter(before) || loose_letter(here))) return false;
+            return !starts_forbidden(here) && !ends_forbidden(before);
+        };
+        std::vector<std::pair<std::size_t, std::size_t>> spans;  // (the rows, letters of the paragraph)
+        {
+            std::size_t row_start = 0;
+            double width = 0.0;
+            std::optional<std::size_t> breakable;
+            const auto room = [&](bool first) { return q.inner_w - start_indent - end_indent - (first ? first_indent : 0.0); };
+            for (std::size_t i = 0; i < n; ++i) {
+                if (!shaped.starts[i]) continue;
+                if (i > row_start && breaks_before(i)) breakable = i;
+                const double w = shaped.advance[i];
+                if (i > row_start && !py_isspace(pt[i]) && width + w > room(spans.empty())) {
+                    const std::size_t at_ = breakable && *breakable > row_start ? *breakable : i;
+                    spans.emplace_back(row_start, at_);
+                    row_start = at_;
+                    width = 0.0;
+                    breakable.reset();
+                    for (std::size_t k = row_start; k < i; ++k) {
+                        width += shaped.advance[k];
+                        if (k > row_start && breaks_before(k)) breakable = k;
+                    }
+                    if (i > row_start && breaks_before(i)) breakable = i;
+                }
+                width += w;
+            }
+            spans.emplace_back(row_start, n);
+        }
+        for (std::size_t r = 0; r < spans.size(); ++r) {
+            if ((r & 63) == 63 && q.fonts.stop().stop_requested()) throw Cancelled();  // (a long paragraph's rows: review P2-5)
+            Row row;
+            row.para = paras.size();
+            row.start = spans[r].first;
+            row.end = spans[r].second;
+            row.drawn = row.end;
+            while (row.drawn > row.start && py_isspace(pt[row.drawn - 1])) --row.drawn;
+            row.first = r == 0;
+            row.last = r + 1 == spans.size();
+            row.glyphs = row_glyphs(shaped, row.start, row.drawn);
+            row.tallest = 0;
+            double leading_px = -1.0;
+            for (std::size_t i = row.start; i < row.end; ++i) {
+                const std::size_t l = plooks[i];
+                if (looks[l].size > row.tallest) {
+                    row.tallest = looks[l].size;
+                    row.tallest_look = l;
+                }
+                const Json& lead = attr(resolved.chars[ps + i], "leading_mm");
+                if (lead.is_number()) leading_px = std::max(leading_px, lead.get<double>() * px_mm);
+            }
+            if (row.tallest == 0) {  // (an empty row: its paragraph's look)
+                row.tallest_look = n > 0 ? plooks[0] : (ps < look_of.size() ? look_of[ps] : (ps > 0 ? look_of[ps - 1] : 0));
+                row.tallest = looks[row.tallest_look].size;
+            }
+            const double factor = (native ? attr_num(pa, "auto_leading", 1.2) : 1.15) + leading_add;
+            row.height = (leading_px >= 0 ? core::py_round_int(leading_px) : core::py_round_int(static_cast<double>(row.tallest) * factor)) + q.above;
+            if (r == 0) {
+                row.gap_before = pending_after + (ps > 0 ? core::py_round_int(attr_num(pa, "space_before_mm", 0.0) * px_mm) : 0);
+            }
+            const double first = r == 0 ? first_indent : 0.0;
+            row.lead = std::max(0.0, rtl ? end_indent : start_indent + first);
+            row.trail = std::max(0.0, rtl ? start_indent + first : end_indent);
+            row.align = align;
+            if (align == "justify_all" || (align.starts_with("justify") && !row.last)) {
+                row.justified = true;
+            } else if (align.starts_with("justify")) {  // (a justified paragraph's last row)
+                row.align = align == "justify_center" ? "center" : align == "justify_right" ? "right" : rtl ? "right" : "left";
+            }
+            rows.push_back(std::move(row));
+        }
+        pending_after = last_para ? 0 : core::py_round_int(attr_num(pa, "space_after_mm", 0.0) * px_mm);
+        paras.push_back(std::move(para));
+        if (last_para) break;
+        ps = pe + 1;
+    }
+    // the picture: as wide as its widest row with its indents (a justified box text: its box), as tall as its rows
+    double full = 0.0;
+    bool justified = false;
+    for (const Row& row : rows) {
+        full = std::max(full, row.lead + row.glyphs.width + row.trail);
+        justified = justified || row.justified;
+    }
+    // (a box text: as wide as its box, each row aligned in it — a right-to-left paragraph at its right; a justified row
+    // spread over it)
+    if ((justified || shape_of(q.line) == "box") && q.inner_w < kUnbroken / 2) full = std::max(full, q.inner_w);
+    const std::int64_t out_w = std::max<std::int64_t>(1, static_cast<std::int64_t>(core::py_ceil(full)));
+    // each row's top and baseline (characters share the row's baseline area, as a line's rows: the tallest letter's ascent
+    // from its top); the picture holds every letter's ascent and descent — rows closer than their letters (leading below
+    // the size) overlap, the first one's letters above its top kept by moving all down
+    std::vector<std::int64_t> tops;
+    std::vector<double> baselines;
+    std::int64_t total = 0;
+    double low = 0.0, high = 0.0;
+    for (const Row& row : rows) {
+        total += row.gap_before;
+        tops.push_back(total);
+        const double base_y = static_cast<double>(total + q.above) + static_cast<double>(row.height - q.above - row.tallest) / 2;
+        const double baseline = base_y + static_cast<double>(ascent_of(row.tallest_look).first);
+        baselines.push_back(baseline);
+        const std::vector<std::size_t>& plooks = paras[row.para].shaped.look_of;
+        for (std::size_t i = row.start; i < row.drawn; ++i) {
+            const Look& look = looks[plooks[i]];
+            const auto [ascent, descent] = ascent_of(plooks[i]);
+            low = std::min(low, baseline - look.shift - static_cast<double>(ascent) * std::max(1.0, look.shape.scale_y));
+            high = std::max(high, baseline - look.shift + static_cast<double>(descent) * std::max(1.0, look.shape.scale_y));
+        }
+        total += row.height;
+    }
+    const auto drop = static_cast<std::int64_t>(std::ceil(std::max(0.0, -low)));
+    total = std::max<std::int64_t>(total, static_cast<std::int64_t>(std::ceil(high))) + drop;
+    // (its size judged before it is made — at 600 dpi, whatever the resolution asked, as layout_of judges a text: what an op
+    // lets in is drawn at any resolution up to it; review P1-1)
+    {
+        const double at600 = 600.0 / static_cast<double>(q.dpi);
+        const double wide = static_cast<double>(out_w) * std::max(1.0, at600), high600 = static_cast<double>(total) * std::max(1.0, at600);
+        if (!std::isfinite(wide) || !std::isfinite(high600) || wide > static_cast<double>(limits::kSide) || high600 > static_cast<double>(limits::kSide) ||
+            wide * high600 > static_cast<double>(limits::kPixels))
+            throw core::Error("image_too_large", "the text is too large to set at this resolution");
+    }
+    result.image = blank(out_w, std::max<std::int64_t>(1, total));
+    Image& out = result.image;
+    const std::string mark_kind = core::py_str(core::py_or(at(q.st, "emphasis_mark"), Json("sesame")));
+    for (std::size_t r = 0; r < rows.size(); ++r) {
+        Row& row = rows[r];
+        const std::int64_t top = tops[r] + drop;
+        const Para& para = paras[row.para];
+        const double room = static_cast<double>(out_w) - row.lead - row.trail;
+        double x0 = row.lead;
+        if (row.justified) {
+            std::size_t clusters = 0;
+            for (std::size_t i = row.start; i < row.drawn; ++i) clusters += para.shaped.starts[i] ? 1 : 0;
+            if (clusters > 1 && room > row.glyphs.width) row.glyphs = row_glyphs(para.shaped, row.start, row.drawn, (room - row.glyphs.width) / static_cast<double>(clusters - 1));
+        } else if (row.align == "center") {
+            x0 += (room - row.glyphs.width) / 2;
+        } else if (row.align == "right") {
+            x0 += room - row.glyphs.width;
+        }
+        const double baseline = baselines[r] + static_cast<double>(drop);
+        SetRow* set_row = nullptr;
+        if (q.cells != nullptr) {
+            q.cells->emplace_back();
+            set_row = &q.cells->back();
+            set_row->axis = baseline;
+            set_row->start = x0;
+            set_row->end = x0 + row.glyphs.width;
+        }
+        if (q.draw_text) {
+            Draw draw(out);
+            std::size_t k = 0;
+            const std::vector<RowGlyph>& glyphs = row.glyphs.glyphs;
+            while (k < glyphs.size()) {
+                std::size_t e = k;
+                while (e < glyphs.size() && glyphs[e].look == glyphs[k].look) ++e;
+                const Look& look = looks[glyphs[k].look];
+                std::vector<GlyphPlace> places;
+                for (std::size_t g = k; g < e; ++g) places.push_back(glyphs[g].place);
+                const Ink ink = Ink::with_alpha(look.rgb, 255);
+                draw.glyphs(PointD{x0, baseline - look.shift}, places, q.fonts.truetype(look.font, look.size, look.variations), ink, look.shape,
+                            look.bold, look.bold != 0 ? std::optional<Ink>(ink) : std::nullopt);
+                k = e;
+            }
+        }
+        const std::vector<std::size_t>& plooks = para.shaped.look_of;
+        for (std::size_t i = row.start; i < row.end; ++i) {
+            const std::size_t at_text = para.offset + i;
+            const bool drawn = i < row.drawn;
+            const std::pair<double, double> span = drawn ? row.glyphs.span[i - row.start] : std::pair<double, double>{row.glyphs.width, row.glyphs.width};
+            const double left = x0 + span.first, right = x0 + span.second;
+            result.xs[at_text] = {left, right, top};
+            const Look& look = looks[plooks[i]];
+            const auto [ascent, descent] = q.fonts.truetype(look.font, look.size, look.variations).getmetrics();
+            const double y = baseline - look.shift - static_cast<double>(ascent);
+            result.set_in[at_text] = BoxF{left - look.bold, y - look.bold, right + look.bold, y + ascent + descent + look.bold};
+            if (set_row != nullptr) {
+                if (is_vs(para.text[i]) && !set_row->chars.empty()) {
+                    set_row->chars.back().text.push_back(para.text[i]);
+                } else {
+                    SetChar ch;
+                    ch.text = std::u32string(1, para.text[i]);
+                    ch.size = look.size;
+                    ch.weight = look.bold == 0 ? 0 : look.bold >= bold_px(look.size, 2) ? 2 : 1;
+                    ch.rgb = look.rgb;
+                    ch.font = look.font;
+                    ch.box = BoxF{left, y, right, y + ascent + descent};
+                    set_row->chars.push_back(std::move(ch));
+                }
+            }
+            if (!q.draw_text || !drawn) continue;
+            if (look.underline || look.strikethrough) {  // (下線・取り消し線: the font's own lines, under or through its cluster)
+                const FontLines lines = q.fonts.truetype(look.font, look.size, look.variations).lines();
+                Draw draw(out);
+                const Ink ink = Ink::with_alpha(look.rgb, 255);
+                if (look.underline) {
+                    const double uy = baseline - look.shift + lines.underline - lines.underline_thickness / 2;
+                    draw.rectangle(BoxF{left, uy, std::max(left, right - 1), uy + std::max(1.0, lines.underline_thickness) - 1}, ink);
+                }
+                if (look.strikethrough) {
+                    const double sy = baseline - look.shift - lines.strikeout - lines.strikeout_thickness / 2;
+                    draw.rectangle(BoxF{left, sy, std::max(left, right - 1), sy + std::max(1.0, lines.strikeout_thickness) - 1}, ink);
+                }
+            }
+            if (q.marked.contains(at_text)) {
+                draw_mark(out, (left + right) / 2,
+                          static_cast<double>(top + q.lane) + static_cast<double>(q.mark_h) / 2 +
+                              static_cast<double>(std::max<std::int64_t>(1, floordiv(q.em, 16))),
+                          static_cast<double>(q.mark_h), mark_kind, look.rgb, false);
+            }
+        }
+    }
+    return result;
+}
+
 // _horizontal(line, st, face, em, inner_w, fill): rows left to right with kinsoku, centred (or aligned by
 // style.align: left / center / right / justify). Ruby sits above its words and 傍点 just above the characters (the
 // ruby above them); part of a line can be larger, smaller, bolder or in another colour (style_runs), which makes its
@@ -304,7 +837,8 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
     const bool draw_ruby = drawing == nullptr || drawing->ruby;
     std::vector<SetRow> set_rows;  // (PSD-01: where each character is set, row by row)
     const bool by_place = line.ruby_spans.has_value();
-    const SetText set = by_place ? set_text_mapped(fonts, line, st, face) : SetText{set_text(fonts, line, st, face), {}};
+    const bool opentype = sets_opentype(line);  // (PC5 G-b: the rows set by HarfBuzz — each letter's place in the record kept)
+    const SetText set = by_place || opentype ? set_text_mapped(fonts, line, st, face) : SetText{set_text(fonts, line, st, face), {}};
     const std::u32string& text = set.text;
     const double tracking = float_or(at(st, "tracking"), 0);
     std::u32string flat;
@@ -312,7 +846,8 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
         if (c != U'\n') flat.push_back(c);
     }
     const int weight = line_weight(st);
-    const std::vector<Json> styles_flat = char_styles(flat, line.style_runs, weight ? Json{{"bold", weight}} : Json());
+    // (the OpenType rows take the line's weight from the record's resolved attributes: the words' own alone here)
+    const std::vector<Json> styles_flat = char_styles(flat, line.style_runs, weight && !opentype ? Json{{"bold", weight}} : Json());
     std::vector<Json> styles;  // (styles per character of the text, "\n" included)
     std::size_t k = 0;
     for (const char32_t c : text) styles.push_back(c == U'\n' ? Json::object() : styles_flat[k++]);
@@ -405,144 +940,156 @@ Image horizontal_text(Fonts& fonts, const core::StoryLine& line, const Json& st,
         }
         return width;
     };
-    std::vector<std::vector<std::size_t>> rows;  // the characters' places in the text, row by row
-    std::size_t index = 0;
-    for (std::size_t start = 0;;) {
-        std::size_t end = text.find(U'\n', start);
-        const bool last = end == std::u32string::npos;
-        if (last) end = text.size();
-        std::vector<std::size_t> row;
-        double width = 0.0;
-        for (std::size_t p = start; p < end; ++p) {
-            const char32_t ch = text[p];
-            const double w = advance(index);
-            if (!row.empty() && width + w > inner_w && !in(kLineStart, ch)) {
-                if (in(kLineEnd, text[row.back()]) && row.size() > 1) {
-                    const std::size_t carried = row.back();
-                    row.pop_back();
-                    rows.push_back(row);
-                    row = {carried};
-                    width = advance(carried);
-                } else {
-                    rows.push_back(row);
-                    row.clear();
-                    width = 0.0;
-                }
-            }
-            row.push_back(index);
-            ++index;
-            width += w;
-        }
-        rows.push_back(row);
-        ++index;  // the "\n"
-        if (last) break;
-        start = end + 1;
-    }
     const std::int64_t above = std::max<std::int64_t>(0, mark_h + lane);
-    const double leading = float_or(at(st, "leading"), 0);
-    const auto tallest_of = [&](const std::vector<std::size_t>& row) {
-        std::int64_t tallest = 0;
-        for (const std::size_t i : row) tallest = std::max(tallest, size_of(i));
-        return row.empty() ? em : tallest;
-    };
-    std::vector<std::int64_t> heights;
-    std::vector<double> widths;
-    for (const auto& row : rows) {
-        heights.push_back(core::py_round_int(static_cast<double>(tallest_of(row)) * (1.15 + leading)) + above);
-        std::vector<double> parts;
-        for (const std::size_t i : row) parts.push_back(advance(i));
-        widths.push_back(core::py_float_sum(parts));
-    }
-    double widest = widths.front();
-    for (const double w : widths) widest = core::py_max(widest, w);
-    auto out_w = std::max<std::int64_t>(1, static_cast<std::int64_t>(core::py_ceil(widest)));
-    std::int64_t total = 0;
-    for (const std::int64_t h : heights) total += h;
-    Image out = blank(out_w, std::max<std::int64_t>(1, total));
-    const Json& align_value = at(st, "align");
-    const std::string align = align_value == Json("left") || align_value == Json("right") ? align_value.get<std::string>() : "center";
-    const bool justify = align_value == Json("justify");  // 均等揃え: each row (but the last) spread over the whole width
-    const std::string mark_kind = core::py_str(core::py_or(at(st, "emphasis_mark"), Json("sesame")));
     std::map<std::size_t, std::tuple<double, double, std::int64_t>> xs;  // place in text → (left, right, row top)
     std::map<std::size_t, BoxF> set_in;  // (asked where the rubies were set: place in text → the box its letter was set in)
-    std::int64_t top = 0;
-    for (std::size_t r = 0; r < rows.size(); ++r) {
-        const auto& row = rows[r];
-        double x = align == "left" || justify ? 0.0 : (static_cast<double>(out_w) - widths[r]) / (align == "center" ? 2 : 1);
-        SetRow* set_row = nullptr;
-        bool baseline_set = false;
-        if (cells != nullptr) {
-            set_rows.emplace_back();
-            set_row = &set_rows.back();
-            set_row->start = set_row->end = x;
-        }
-        const double spread = justify && row.size() > 1 && r < rows.size() - 1
-                                  ? (static_cast<double>(out_w) - widths[r]) / static_cast<double>(row.size() - 1)
-                                  : 0.0;
-        const std::int64_t tallest = tallest_of(row);
-        // characters share the row's baseline area
-        const double base_y = static_cast<double>(top + above) + static_cast<double>(heights[r] - above - tallest) / 2;
-        for (const std::size_t i : row) {
-            const std::int64_t size = size_of(i);
-            const Json& rgb_value = at(styles[i], "rgb");
-            const Rgb rgb = core::py_truthy(rgb_value) ? rgb_tuple(rgb_value) : fill;
-            const int thick = bold_px(size, at(styles[i], "bold"));
-            if (is_vs(text[i])) {
-                xs[i] = {x, x, top};
-                if (set_row != nullptr && !set_row->chars.empty()) set_row->chars.back().text.push_back(text[i]);
-                continue;
-            }
-            std::u32string letter(1, text[i]);
-            for (std::size_t j = i + 1; j < std::min(text.size(), i + 3); ++j) {
-                if (is_vs(text[j])) {
-                    letter.push_back(text[j]);
-                    break;
+    Image out;
+    std::int64_t out_w = 0;
+    if (opentype) {  // (PC5 G-b: the rows set by HarfBuzz — attributes, bidirectional order, indents, alignment)
+        OpenTypeRows made = opentype_rows(OpenTypeIn{fonts, line, st, face, em, inner_w, fill, dpi, text, set.from, styles, marked, mark_h,
+                                                     lane, above, draw_text, cells != nullptr ? &set_rows : nullptr});
+        out = std::move(made.image);
+        out_w = out.width();
+        xs = std::move(made.xs);
+        set_in = std::move(made.set_in);
+    } else {
+        std::vector<std::vector<std::size_t>> rows;  // the characters' places in the text, row by row
+        std::size_t index = 0;
+        for (std::size_t start = 0;;) {
+            std::size_t end = text.find(U'\n', start);
+            const bool last = end == std::u32string::npos;
+            if (last) end = text.size();
+            std::vector<std::size_t> row;
+            double width = 0.0;
+            for (std::size_t p = start; p < end; ++p) {
+                const char32_t ch = text[p];
+                const double w = advance(index);
+                if (!row.empty() && width + w > inner_w && !in(kLineStart, ch)) {
+                    if (in(kLineEnd, text[row.back()]) && row.size() > 1) {
+                        const std::size_t carried = row.back();
+                        row.pop_back();
+                        rows.push_back(row);
+                        row = {carried};
+                        width = advance(carried);
+                    } else {
+                        rows.push_back(row);
+                        row.clear();
+                        width = 0.0;
+                    }
                 }
+                row.push_back(index);
+                ++index;
+                width += w;
             }
-            if (features) {
-                throw core::PyUncaught("KeyError", "setting text direction, language or font features is not supported without libraqm");
-            }
-            if (draw_text) {
-                Draw draw(out);
-                const Ink ink = Ink::with_alpha(rgb, 255);
-                draw.text(PointD{x, base_y + static_cast<double>(tallest - size)}, letter, fonts.font(face, size, std::u32string(1, text[i])),
-                          ink, {}, thick, thick != 0 ? std::optional<Ink>(ink) : std::nullopt);
-            }
-            const double w = advance(i) - static_cast<double>(em) * tracking;
-            if (set_row != nullptr) {  // (its advance, the font's ascent and descent from where it is drawn)
-                const std::u32string one(1, text[i]);
-                const auto [ascent, descent] = fonts.font(face, size, one).getmetrics();
-                const double y = base_y + static_cast<double>(tallest - size);
-                SetChar ch;
-                ch.text = one;
-                ch.size = size;
-                ch.weight = weight_level(at(styles[i], "bold"));
-                ch.rgb = rgb;
-                ch.font = fonts.path_for(face, one);
-                ch.box = BoxF{x, y, x + w, y + ascent + descent};
-                if (size == tallest && !baseline_set) {  // (the row's baseline: its first tallest letter's)
-                    set_row->axis = y + ascent;
-                    baseline_set = true;
-                }
-                set_row->chars.push_back(std::move(ch));
-                set_row->end = x + w;
-            }
-            if (drawn_at != nullptr) {  // (its advance, the font's ascent and descent from where it is drawn; a bold one's stroke)
-                const auto [ascent, descent] = fonts.font(face, size, std::u32string(1, text[i])).getmetrics();
-                const double y = base_y + static_cast<double>(tallest - size);
-                set_in[i] = BoxF{x - thick, y - thick, x + w + thick, y + ascent + descent + thick};
-            }
-            if (marked.contains(i) && draw_text) {
-                draw_mark(out, x + w / 2,
-                          static_cast<double>(top + lane) + static_cast<double>(mark_h) / 2 +
-                              static_cast<double>(std::max<std::int64_t>(1, floordiv(em, 16))),
-                          static_cast<double>(mark_h), mark_kind, rgb, false);
-            }
-            xs[i] = {x, x + w, top};
-            x += advance(i) + spread;
+            rows.push_back(row);
+            ++index;  // the "\n"
+            if (last) break;
+            start = end + 1;
         }
-        if (set_row != nullptr && !baseline_set) set_row->axis = base_y + fonts.font(face, tallest).getmetrics().first;  // (an empty row)
-        top += heights[r];
+        const double leading = float_or(at(st, "leading"), 0);
+        const auto tallest_of = [&](const std::vector<std::size_t>& row) {
+            std::int64_t tallest = 0;
+            for (const std::size_t i : row) tallest = std::max(tallest, size_of(i));
+            return row.empty() ? em : tallest;
+        };
+        std::vector<std::int64_t> heights;
+        std::vector<double> widths;
+        for (const auto& row : rows) {
+            heights.push_back(core::py_round_int(static_cast<double>(tallest_of(row)) * (1.15 + leading)) + above);
+            std::vector<double> parts;
+            for (const std::size_t i : row) parts.push_back(advance(i));
+            widths.push_back(core::py_float_sum(parts));
+        }
+        double widest = widths.front();
+        for (const double w : widths) widest = core::py_max(widest, w);
+        out_w = std::max<std::int64_t>(1, static_cast<std::int64_t>(core::py_ceil(widest)));
+        std::int64_t total = 0;
+        for (const std::int64_t h : heights) total += h;
+        out = blank(out_w, std::max<std::int64_t>(1, total));
+        const Json& align_value = at(st, "align");
+        const std::string align = align_value == Json("left") || align_value == Json("right") ? align_value.get<std::string>() : "center";
+        const bool justify = align_value == Json("justify");  // 均等揃え: each row (but the last) spread over the whole width
+        const std::string mark_kind = core::py_str(core::py_or(at(st, "emphasis_mark"), Json("sesame")));
+        std::int64_t top = 0;
+        for (std::size_t r = 0; r < rows.size(); ++r) {
+            const auto& row = rows[r];
+            double x = align == "left" || justify ? 0.0 : (static_cast<double>(out_w) - widths[r]) / (align == "center" ? 2 : 1);
+            SetRow* set_row = nullptr;
+            bool baseline_set = false;
+            if (cells != nullptr) {
+                set_rows.emplace_back();
+                set_row = &set_rows.back();
+                set_row->start = set_row->end = x;
+            }
+            const double spread = justify && row.size() > 1 && r < rows.size() - 1
+                                      ? (static_cast<double>(out_w) - widths[r]) / static_cast<double>(row.size() - 1)
+                                      : 0.0;
+            const std::int64_t tallest = tallest_of(row);
+            // characters share the row's baseline area
+            const double base_y = static_cast<double>(top + above) + static_cast<double>(heights[r] - above - tallest) / 2;
+            for (const std::size_t i : row) {
+                const std::int64_t size = size_of(i);
+                const Json& rgb_value = at(styles[i], "rgb");
+                const Rgb rgb = core::py_truthy(rgb_value) ? rgb_tuple(rgb_value) : fill;
+                const int thick = bold_px(size, at(styles[i], "bold"));
+                if (is_vs(text[i])) {
+                    xs[i] = {x, x, top};
+                    if (set_row != nullptr && !set_row->chars.empty()) set_row->chars.back().text.push_back(text[i]);
+                    continue;
+                }
+                std::u32string letter(1, text[i]);
+                for (std::size_t j = i + 1; j < std::min(text.size(), i + 3); ++j) {
+                    if (is_vs(text[j])) {
+                        letter.push_back(text[j]);
+                        break;
+                    }
+                }
+                if (features) {
+                    throw core::PyUncaught("KeyError", "setting text direction, language or font features is not supported without libraqm");
+                }
+                if (draw_text) {
+                    Draw draw(out);
+                    const Ink ink = Ink::with_alpha(rgb, 255);
+                    draw.text(PointD{x, base_y + static_cast<double>(tallest - size)}, letter, fonts.font(face, size, std::u32string(1, text[i])),
+                              ink, {}, thick, thick != 0 ? std::optional<Ink>(ink) : std::nullopt);
+                }
+                const double w = advance(i) - static_cast<double>(em) * tracking;
+                if (set_row != nullptr) {  // (its advance, the font's ascent and descent from where it is drawn)
+                    const std::u32string one(1, text[i]);
+                    const auto [ascent, descent] = fonts.font(face, size, one).getmetrics();
+                    const double y = base_y + static_cast<double>(tallest - size);
+                    SetChar ch;
+                    ch.text = one;
+                    ch.size = size;
+                    ch.weight = weight_level(at(styles[i], "bold"));
+                    ch.rgb = rgb;
+                    ch.font = fonts.path_for(face, one);
+                    ch.box = BoxF{x, y, x + w, y + ascent + descent};
+                    if (size == tallest && !baseline_set) {  // (the row's baseline: its first tallest letter's)
+                        set_row->axis = y + ascent;
+                        baseline_set = true;
+                    }
+                    set_row->chars.push_back(std::move(ch));
+                    set_row->end = x + w;
+                }
+                if (drawn_at != nullptr) {  // (its advance, the font's ascent and descent from where it is drawn; a bold one's stroke)
+                    const auto [ascent, descent] = fonts.font(face, size, std::u32string(1, text[i])).getmetrics();
+                    const double y = base_y + static_cast<double>(tallest - size);
+                    set_in[i] = BoxF{x - thick, y - thick, x + w + thick, y + ascent + descent + thick};
+                }
+                if (marked.contains(i) && draw_text) {
+                    draw_mark(out, x + w / 2,
+                              static_cast<double>(top + lane) + static_cast<double>(mark_h) / 2 +
+                                  static_cast<double>(std::max<std::int64_t>(1, floordiv(em, 16))),
+                              static_cast<double>(mark_h), mark_kind, rgb, false);
+                }
+                xs[i] = {x, x + w, top};
+                x += advance(i) + spread;
+            }
+            if (set_row != nullptr && !baseline_set) set_row->axis = base_y + fonts.font(face, tallest).getmetrics().first;  // (an empty row)
+            top += heights[r];
+        }
+
     }
     struct Drawn {
         std::int64_t row;
@@ -1076,8 +1623,35 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
                 longest = std::max(longest, ++run);
             }
         }
-        const double step = static_cast<double>(em) * 1.2 * (1 + std::max(0.0, float_or(at(st, "tracking"), 0)));
-        const double rows = static_cast<double>(em) * 1.6 * (1 + std::max(0.0, float_or(at(st, "leading"), 0)));
+        double step = static_cast<double>(em) * 1.2 * (1 + std::max(0.0, float_or(at(st, "tracking"), 0)));
+        double rows = static_cast<double>(em) * 1.6 * (1 + std::max(0.0, float_or(at(st, "leading"), 0)));
+        double extra_along = 0, extra_across = 0;  // (PC5 G-b review P1-1: indents, the space between paragraphs, shifts)
+        if (sets_opentype(line)) {  // (the record's attributes at their largest: its letters' size, tracking and leading)
+            const double px_mm = static_cast<double>(dpi) / 25.4;
+            const double base_mm = float_or(at(st, "size_mm"), kCapMm);
+            double scale = 1.0, tracking = 0.0, leading = 0.0, shift = 0.0;
+            for (const core::type_text::CharRun& char_run : core::type_text::resolve_chars(line, TypeStyles::current())) {
+                const Json& a = char_run.attrs;
+                const double size_ratio = at(a, "size_mm").is_number() && base_mm > 0 ? at(a, "size_mm").get<double>() / base_mm : 1.0;
+                const double s = (at(a, "scale").is_number() ? at(a, "scale").get<double>() : 1.0) * size_ratio *
+                                 std::max(at(a, "scale_x").is_number() ? at(a, "scale_x").get<double>() : 1.0, at(a, "scale_y").is_number() ? at(a, "scale_y").get<double>() : 1.0);
+                scale = std::max(scale, s);
+                if (at(a, "tracking").is_number()) tracking = std::max(tracking, at(a, "tracking").get<double>());
+                if (at(a, "leading_mm").is_number()) leading = std::max(leading, at(a, "leading_mm").get<double>() * px_mm);
+                if (at(a, "baseline_shift_mm").is_number()) shift = std::max(shift, std::abs(at(a, "baseline_shift_mm").get<double>()) * px_mm);
+            }
+            const std::int64_t count = core::type_text::paragraph_count(line.text);
+            for (std::int64_t p = 0; p < count; ++p) {
+                const Json pa = core::type_text::resolve_para(line, TypeStyles::current(), p);
+                const auto mm = [&](const char* key) { return at(pa, key).is_number() ? std::abs(at(pa, key).get<double>()) * px_mm : 0.0; };
+                extra_along = std::max(extra_along, mm("first_indent_mm") + mm("start_indent_mm") + mm("end_indent_mm"));
+                extra_across += mm("space_before_mm") + mm("space_after_mm");
+            }
+            scale = std::min(scale, 30.0);  // (the attributes' own bounds: scale 10 and a word's 3)
+            step = static_cast<double>(em) * scale * 1.2 * (1 + std::max(0.0, tracking));
+            rows = std::max(rows * scale, leading);
+            extra_across += 2 * shift;
+        }
         double along = 0, across = 0;  // (along the rows or columns, and across them)
         if (shape == "point") {
             along = step * static_cast<double>(longest) + static_cast<double>(em);
@@ -1086,6 +1660,8 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
             along = static_cast<double>(vertical ? h : w);
             across = rows * (static_cast<double>(paragraphs) + step * static_cast<double>(text.size()) / std::max(1.0, along)) + static_cast<double>(em);
         }
+        along += extra_along;
+        across += extra_across;
         // (judged as at 600 dpi, whatever the resolution asked: what an op lets in is drawn at any resolution up to it)
         const double at600 = 600.0 / static_cast<double>(dpi);
         along *= at600;
@@ -1419,6 +1995,10 @@ std::optional<std::string> layout_key(const core::StoryLine& line, int dpi, cons
                             Json(line.ruby_runs), Json(line.emphasis_runs), style_runs, dpi, font_path ? Json(*font_path) : Json()});
     if (line.ruby_spans) key.push_back(core::ruby::to_json(*line.ruby_spans));  // (ruby-layout@1: the rubies by place)
     if (line.native_type) key.push_back(Json::array({"native_type", *line.native_type}));  // (type@1: its shape, anti-alias, …)
+    // (PC5 G-b: a record set by the OpenType typesetting reads the book's type styles — Basic Paragraph, the styles it takes —,
+    // a line across with features alone too; their digest, made once where they are set: review P2-3, P3-10)
+    if (TypeStyles::current() != nullptr && !TypeStyles::current()->is_null() && sets_opentype(line))
+        key.push_back(Json::array({"type_styles", TypeStyles::digest()}));
     return detail::memo_key(key);
 }
 

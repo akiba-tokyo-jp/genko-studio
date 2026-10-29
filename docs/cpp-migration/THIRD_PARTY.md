@@ -16,7 +16,7 @@
 | libjpeg-turbo | 2.1.5 / 3.x | IJG AND BSD-3-Clause AND Zlib | JPEG | Windows: 静的。Linux: コンピューターのもの |
 | libtiff | 4.5.1 / 4.7.x | libtiff | TIFF の書き出し（CMYK、1bit）と読み込み（M6: Pillow と同じモード・画素） | Windows: 静的。Linux: コンピューターのもの |
 | FreeType | 2.14.3（署名検証済みの固定archive＋メモリ予算接続override、ソースは両OS共通） | FTL（BSD 型） | 字形。参照Pillowと同じrasterizerで画素互換を保つ | 静的。`native/third_party/freetype/`に原archive・SHA256・来歴・ライセンス |
-| HarfBuzz | 8.3.0 / 10.x | MIT | 字形の配置（縦書きの字形置換・OpenType 機能。PC5 G-0 から描画の render/text/shaping が使う） | Windows: 静的。Linux: コンピューターのもの |
+| HarfBuzz | 8.3.0 / 10.x | MIT | 字形の配置（縦書きの字形置換・OpenType 機能。PC5 G-0 から描画の render/text/shaping が使い、G-b の OpenType の組み方が文字の字形と送りを決める） | Windows: 静的。Linux: コンピューターのもの |
 | libwebp（libwebp・libwebpdemux・libwebpmux） | 1.3.2 / 1.5.x | BSD-3-Clause | WebP の書き出し（タイムラプス・アニメーション）と読み込み（M6: Pillow と同じ画素。アニメーションは最初のコマ） | Windows: 静的。Linux: コンピューターのもの |
 | Little CMS 2 | 2.14 / 2.16 | MIT | 色変換（CMYK、ICC） | Windows: 静的。Linux: コンピューターのもの |
 | OpenEXR（Imath を含む） | 3.1.5（Imath 3.1.9、Ubuntu 24.04）/ 3.4.15（Imath 3.2.3、vcpkg。依存 libdeflate（MIT）・openjph（BSD-2-Clause）） | BSD-3-Clause | OpenEXR の読み書き（PC4 F-a） | Windows: 静的。Linux: コンピューターのもの |
@@ -27,6 +27,7 @@
 | libyuv | なし / 1916（vcpkg、libavif の依存） | BSD-3-Clause（と Google の特許の許諾） | AVIF の YUV と RGB の変換（Windows、PC4 F-a） | Windows: 静的（libavif の中）。ライセンス文は `licenses/windows/libyuv.copyright`。Linux はコンピューターの libavif が読み込む |
 | Zstandard（zstd） | 1.5.5（Ubuntu 24.04）/ 1.5.7（vcpkg） | BSD-3-Clause OR GPL-2.0-only（BSD-3-Clause で利用） | .pcraft のタイルと blob の圧縮・展開（PC4 F-f。展開は上限を確かめてから） | Windows: 静的。ライセンス文は `licenses/windows/zstd.copyright`。Linux: コンピューターのもの |
 | BLAKE3（C の実装: `blake3.c`・`blake3_dispatch.c`・`blake3_portable.c`・SSE2・SSE4.1・AVX2・AVX-512・NEON の各ファイル） | 1.8.7（crates.io の blake3 1.8.7 の `c/`、crate の sha256 6d9e454f…。各ファイルの sha256 は `PROVENANCE.json`） | CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception（CC0-1.0 で利用） | .pcraft のタイルと blob の名前のハッシュ（PC4 F-f） | 静的。`native/third_party/blake3/` にライセンス文（`LICENSE_CC0`・`LICENSE_A2`・`LICENSE_A2LLVM`）と来歴、配布物の `licenses/blake3/` |
+| SheenBidi（C の実装: `Source/SheenBidi.c` の 1 つにまとめて作る） | 2.9.0（GitHub の Tehreer/SheenBidi のタグ v2.9.0、コミット 83f77108。各ファイルの sha256 は `PROVENANCE.json`。Ubuntu 24.04 にパッケージが無く、vcpkg の port も同じ源なので、両方の OS で同じ源から作る。設計 7.3 どおりで、指示書の「apt・vcpkg に入れる」との違いは調整役が受け入れた。上流のタグに NOTICE ファイルは無い（Apache-2.0 4(d) で同梱する物はライセンス文だけ。2026-10-29 に木全体で確かめた）） | Apache-2.0 | 右から左の文字を横組みにするときの双方向の並べ替え（UAX #9）と用字系の区切り（PC5 G-b、利用者の決定 9） | 静的。`native/third_party/sheenbidi/` にライセンス文（`LICENSE`）と来歴、配布物の `licenses/sheenbidi/` |
 | LibRaw | 0.22.2（両 OS。Linux は libraw.org の公式の配布 `LibRaw-0.22.2.tar.gz`（sha256 de86b035655accff8d4010f1a221fdf50d353cb7b1422ba26f14a0db92612cfa）を `tools/ci/build_libraw.sh` で組んだもの: 共有ライブラリ、OpenMP・JasPer・Little CMS なし、JPEG と zlib はコンピューターのもの。Windows は vcpkg の libraw 0.22.2、機能 dng-lossy、依存 JasPer・Little CMS・zlib を中に持つ DLL） | LGPL-2.1-only OR CDDL-1.0（LGPL-2.1-only で利用。中の DCB・FBDD・X3F は BSD-3-Clause） | カメラ RAW の読み込みと現像（PC4 F-e: 開く…・スマートオブジェクトの中身 camera-raw@1） | 動的リンク（静的に組み込まない）。Linux: `lib/libraw_r.so.25` を同梱、Windows: `bin\raw_r.dll`（vcpkg の三つ組の上書き `native/cmake/triplets`）。ライセンス文（`licenses/libraw/` の COPYRIGHT・LICENSE.LGPL・LICENSE.CDDL）、ソースの入手先、差し替え方法（`LIBRAW-LGPL-ja.md`）を同梱 |
 | JasPer | なし / 4.2.9（vcpkg、LibRaw の依存） | JasPer-2.0 | LibRaw の JPEG 2000（Windows） | Windows: LibRaw の DLL の中（静的）。ライセンス文は `licenses/windows/jasper.copyright`（上流の 4.2.9 の `LICENSE.txt`、sha256 4ad1bb42aff888c4403d792e6e2c5f1716d6c279fea70b296333c9d577d30b81）。Linux の LibRaw は JasPer なしで組む |
 | Pillow の `libImaging`（C 実装のみ） | 12.3.0（sdist sha256 3b8182a7…7cce） | MIT-CMU（HPND） | 継承描画の画素処理（線・合成・変換・フィルター）。現行版と同じ画素を出すため | 静的。`native/third_party/pillow/`、ライセンス文と変更記録を同梱 |
@@ -55,6 +56,7 @@
 | 名前 | 出典 | ライセンス | 置き場所 |
 |---|---|---|---|
 | PhotoCraft Coated CMYK（合成 ICC プロファイル、sha256 f7ba9320…a54cc） | PhotoCraft v0.2.0 `crates/cms/profiles/photocraft-coated-cmyk.icc`（pin ad86321） | CC0-1.0 | `native/tests/data/colour/`（CMYK 変換・色校正の契約試験） |
+| 試験用の欧文フォント（Inter の一部、Noto Sans Hebrew の一部） | google/fonts（コミット 9862abc0）の `ofl/inter/Inter[opsz,wght].ttf`・`ofl/notosanshebrew/NotoSansHebrew[wdth,wght].ttf` を HarfBuzz の hb_subset で一部の字に絞ったもの（来歴は `PROVENANCE.json`） | SIL OFL 1.1（OFL-1.1。ライセンス文は同じ所） | `native/tests/data/type/`（PC5 G-b: test_shaping・test_contract_opentype。合字・分数・可変軸・右から左） |
 | .pcraft の固定の資産（RGB 8・16・32 bit、グレー、CMYK、Lab、インデックス、補正の 16 種、層の 7 種と SO・マスク・チャンネル・パス・ガイド） | Genko が `tools/migration/pcraft_fixtures`（開発用の Rust の道具）で PhotoCraft v0.2.0（pin ad86321）の `crates/format` の書き手により作ったもの（来歴は `MANIFEST.json`） | Genko のもの（道具が使う PhotoCraft のクレートは MIT） | `native/tests/data/pcraft/`（test_pcraft・test_contract_pcraft） |
 
 ## 使わないもの

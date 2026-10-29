@@ -401,10 +401,18 @@ private slots:
         // 段落テキストに変換・すべてのテキストレイヤーを更新・Lorem Ipsum をペースト (act_type_rasterize, act_type_to_point,
         // act_type_to_box, act_type_update_all, act_type_lorem), 台詞をテキストレイヤーに・テキストレイヤーを台詞に
         // (act_line_to_type_layer, act_type_layer_to_line) — theirs (test_gui_type).
-                // and PC5 J-a's ファイル → 書き出し → レイヤーカンプからファイル… (act_comps_to_files; its ウィンドウ → レイヤーカンプ is the
+        // and the 16 of PC5 G-b (SPEC TEXT-02) — 書式 → OpenType ▸ 11 (act_type_ot_<tag>: liga, calt, dlig, swsh, salt, titl, ornm,
+        // ordn, frac, onum and palt), 言語オプション ▸ 初期設定・東アジア言語・中東言語および南アジア言語の機能 (act_type_lang_<which>), 中東および
+        // 南アジア言語用 Composer (act_type_composer_world), 右から左の段落 (act_type_rtl) — theirs (test_gui_type).
+        // and PC5 J-a's ファイル → 書き出し → レイヤーカンプからファイル… (act_comps_to_files; its ウィンドウ → レイヤーカンプ is the
         // frame's attribute made real) — test_gui_layer_comps.
         // and the 1 of PC5 I-b (SPEC AUTO-01「グループ」) — レイヤー → 新規 → レイヤーからのフレーム… (act_layer_frame) —
         // test_gui_layers.
+        // and the 5 of PC5 I-d (SPEC AUTO-01「変数とデータセット」) — ページ → 変数 ▸ 定義…・データセット…, データセットを適用…,
+        // ファイル → 書き出し → データセットからファイル…, ファイル → 読み込み → 変数データセット… (act_variables_define,
+        // act_variables_data_sets, act_apply_data_set, act_data_sets_to_files, act_import_data_sets) — test_gui_variables.
+        // and PC5 J-c's 3 — ツール → 注釈ツール (act_note), 表示 → 表示・非表示 → 注釈 (act_show_notes), ファイル → 読み込み →
+        // 注釈… (act_import_notes); its ウィンドウ → 注釈 is the frame's attribute made real — test_gui_notes.
         // and the 17 of PC5 H-b (SPEC VIEW-01「ガイド・グリッド・エクストラ」) — 表示 → エクストラ (act_extras), 表示・非表示 ▸'s
         // レイヤーエッジ・ガイド・カンバスガイド・スマートガイド・メッシュ・編集ピン・すべて・なし・エクストラオプションを表示…
         // (act_show_layer_edges, act_show_guides, act_show_canvas_guides, act_show_smart_guides, act_show_mesh, act_show_edit_pins,
@@ -412,7 +420,7 @@ private slots:
         // 新規ガイドレイアウトを作成… (act_lock_guides, act_clear_guides, act_clear_canvas_guides, act_new_guide,
         // act_new_guide_layout), 編集 → 環境設定 ▸ 単位・定規…・ガイド・グリッド・スライス… (act_prefs_unitsAndRulers,
         // act_prefs_guidesGridAndSlices) — test_gui_guides.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{667});
+        QCOMPARE(w->actions_by_name().size(), std::size_t{691});  // (wip-pc's 674 and H-b's 17)
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -453,8 +461,8 @@ private slots:
         // PC3 B4's four retouching tools (test_gui_retouch); PC3 C-b's five shape tools besides 長方形ツール (test_gui_shapes)
         // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask); PC4 E1's 鉛筆ツール (test_gui_brushes); PC4 E5's
         // nine brushes that change pixels (test_gui_paint_tools); PC5 H-a's 手のひらツール (test_gui_view); PC5 G-a's
-        // 横書き文字ツール (test_gui_type)
-        QCOMPARE(w->tools_group()->actions().size(), 55);
+        // 横書き文字ツール (test_gui_type); PC5 J-c's 注釈ツール (test_gui_notes)
+        QCOMPARE(w->tools_group()->actions().size(), 56);
     }
 
     // PC4 F-0 (SPEC FILE-01; 節 F 5.1・5.2): ファイル in Photoshop's order and names — the book's export is 書き出し ▸
@@ -484,7 +492,8 @@ private slots:
                               QStringLiteral("復帰"), QStringLiteral("|"), QStringLiteral("書き出し ▸"), QStringLiteral("|"), QStringLiteral("埋め込みを配置…"),
                               QStringLiteral("リンクを配置…"), QStringLiteral("パッケージ…"), QStringLiteral("|"), QStringLiteral("画像を読み込む…"),
                               QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"), QStringLiteral("ほかの原稿のページを取り込む…"),
-                              QStringLiteral("PSD をレイヤーのまま読み込む…"), QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|"),
+                              QStringLiteral("PSD をレイヤーのまま読み込む…"), QStringLiteral("読み込み ▸"),  // (PC5 I-d・J-c: 読み込み ▸ 変数データセット…・注釈…)
+                              QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|"),
                               QStringLiteral("プリント…"), QStringLiteral("|"), QStringLiteral("タイムラプスを記録する"), QStringLiteral("タイムラプスを書き出す…"),
                               QStringLiteral("|"), QStringLiteral("自動処理 ▸"), QStringLiteral("スクリプト ▸"), QStringLiteral("オートアクション ▸"),
                               QStringLiteral("|"), QStringLiteral("終了")}));  // (PC5 H-0: 環境設定 in 編集)
@@ -498,7 +507,8 @@ private slots:
                                              QStringLiteral("書き出しの環境設定…"), QStringLiteral("|"), QStringLiteral("Web 用に保存（従来）…"), QStringLiteral("|"),
                                              QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("レイヤーからファイル…"),
                                              QStringLiteral("レイヤーカンプからファイル…"),  // (PC5 J-a)
-                                             QStringLiteral("パスを Illustrator へ…"), QStringLiteral("カラールックアップテーブル…")}));
+                                             QStringLiteral("パスを Illustrator へ…"), QStringLiteral("カラールックアップテーブル…"),
+                                             QStringLiteral("データセットからファイル…")}));  // (PC5 I-d)
         // (PC5 H-0: no key in the Photoshop key set — Ctrl+E is 下のレイヤーと結合; Ctrl+E in the Genko set, theKeySets)
         QVERIFY(studio.act("act_export")->shortcuts().isEmpty());
         QCOMPARE(studio.act("act_print")->text(), QStringLiteral("プリント…"));
@@ -593,7 +603,7 @@ private slots:
                                  "act_measure_ruler_tool", "act_measure_count_tool", "act_measure_scale_marker", "act_video_from_file", "act_video_blank",
                                  "act_video_insert_blank", "act_video_duplicate", "act_video_delete", "act_video_replace", "act_video_interpret",
                                  "act_video_show_altered", "act_video_restore", "act_video_restore_all", "act_video_reload", "act_video_rasterize",
-                                 "act_panel_actions", "act_panel_measurement_log", "act_panel_notes"}) {  // (PC5 J-a: レイヤーカンプ made real)
+                                 "act_panel_actions", "act_panel_measurement_log"}) {  // (PC5 J-a: レイヤーカンプ made real; J-c: 注釈)
             QAction* a = studio.act(name);
             QVERIFY2(a != nullptr, name);
             QVERIFY2(!a->statusTip().isEmpty(), name);
@@ -622,7 +632,7 @@ private slots:
                                if (view.per_mm > 0 && view.at.map(QPointF(10, 10)) != view.at.map(QPointF(20, 20)) && view.seen_mm.contains(QPointF(10, 10)))
                                    ++drawn;
                            }});
-        QCOMPARE(canvas->extra_keys(), std::vector<QString>{QStringLiteral("count")});
+        QCOMPARE(canvas->extra_keys(), (std::vector<QString>{QStringLiteral("notes"), QStringLiteral("count")}));  // (PC5 J-c's notes first)
         (void)canvas->grab();
         QVERIFY(drawn > 0);
         canvas->show_extra(QStringLiteral("count"), false);
@@ -1029,7 +1039,9 @@ private slots:
                                                   // (PC5 H-a: 手のひらツール)
                                                   {"hand", "act_hand_tool"},
                                                   // (PC5 G-a: 横書き文字ツール)
-                                                  {"text_h", "act_text_h"}};
+                                                  {"text_h", "act_text_h"},
+                                                  // (PC5 J-c: 注釈ツール)
+                                                  {"note", "act_note"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());

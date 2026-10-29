@@ -56,12 +56,11 @@ constexpr Frame kVideo[] = {
     {"act_video_rasterize", "ラスタライズ", "今のフレームの見えをふつうのペイントレイヤーにします"},
 };
 
-// ウィンドウ's panels (J-g アクション, J-d2 計測ログ, J-c 注釈; タイムライン is the dock's; J-a's レイヤーカンプ is made by
-// main_window_layer_comps.cpp, after アクション)
+// ウィンドウ's panels (J-g アクション, J-d2 計測ログ; タイムライン is the dock's; J-a's レイヤーカンプ is made by
+// main_window_layer_comps.cpp, after アクション; J-c's 注釈 by main_window_notes.cpp, after 計測ログ)
 constexpr Frame kPanels[] = {
     {"act_panel_actions", "アクション", "記録した操作の手順を並べ、再生・記録します"},
     {"act_panel_measurement_log", "計測ログ", "記録した計測値の表"},
-    {"act_panel_notes", "注釈", "ページに置いた注釈の一覧"},
 };
 
 }  // namespace
@@ -74,6 +73,7 @@ void MainWindow::build_production_actions() {
         }
     }
     build_layer_comp_actions();  // (PC5 J-a: レイヤーカンプ, レイヤーカンプからファイル…)
+    build_note_actions();        // (PC5 J-c: 注釈ツール, 表示・非表示 → 注釈, 読み込み → 注釈…, ウィンドウ → 注釈)
 }
 
 void MainWindow::build_production_menus(QMenu* layers, QMenu* pages) {
@@ -138,6 +138,7 @@ void MainWindow::build_production_docks() {
         view_menu_->addAction(action(QString::fromLatin1(frame.attribute)));
         if (std::string_view(frame.attribute) == "act_panel_actions") build_layer_comps_dock();  // (PC5 J-a: レイヤーカンプ)
     }
+    build_notes_dock();  // (PC5 J-c: 注釈, the canvas's notes and the 注釈ツール's options)
 }
 
 void MainWindow::not_yet_command(const QString& name) { flash(QStringLiteral("「%1」は、この版ではまだ使えません").arg(name), 4000, true); }

@@ -1782,6 +1782,7 @@ private slots:
         const core::SmartContents* contents = core::smart::contents_of(read, *so);
         QVERIFY(contents != nullptr && contents->page);
         QVERIFY(contents->page->native_psd);
+        QCOMPARE(contents->page->annotations.size(), std::size_t(1));  // (PC5 J-c: keep.psd's note, its page's with the Anno it marks)
         const QString inner = path(QStringLiteral("so-inner.psd"));
         (void)genko::formats::export_page_psd(read, *contents->page, genko::storage::path_from_utf8(inner.toStdString()), 150);
         const std::string inner_bytes = genko::test::read_bytes(inner);

@@ -57,6 +57,7 @@ bool PageCanvas::is_stroke_tool(const QString& tool) {
 bool PageCanvas::draws_line(const QString& tool) { return tool == QLatin1String("pen") || tool == QLatin1String("pencil"); }
 
 bool PageCanvas::tool_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers) {
+    if (tool_ == QLatin1String("note")) return note_press(pos, mm);  // (PC5 J-c, 注釈ツール: canvas_notes.cpp)
     if (path_press(pos, mm, modifiers)) return true;  // (ペンツール・曲線ペンツール・パス選択ツール: canvas_pen.cpp)
     if (retouch_press(mm, modifiers)) return true;    // (PC3 B4: Alt+click sets the clone source, retouch_tools.cpp)
     if (is_text_tool(tool_)) return text_press(mm);  // (テキスト, 横書き文字ツール: canvas_lines.cpp)
@@ -123,6 +124,7 @@ bool PageCanvas::tool_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardM
 }
 
 bool PageCanvas::tool_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, bool pressed) {
+    if (pressed && note_move(mm)) return true;  // (PC5 J-c: a note's mark dragged)
     if (pressed && path_move(mm, modifiers)) return true;  // (the path tools: canvas_pen.cpp)
     if (line_move(mm, modifiers)) return true;  // (a balloon or one of its handles dragged: canvas_lines.cpp)
     if (text_move(mm, pressed)) return true;
@@ -147,6 +149,7 @@ bool PageCanvas::tool_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, b
 }
 
 bool PageCanvas::tool_release() {
+    if (note_release()) return true;  // (PC5 J-c)
     if (path_release()) return true;  // (the path tools: canvas_pen.cpp)
     if (text_release()) return true;
     if (line_release()) return true;

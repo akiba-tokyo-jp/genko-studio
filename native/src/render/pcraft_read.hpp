@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -52,6 +53,9 @@ struct ReadLimits {
     std::uint64_t max_kept_bytes = 2ull << 30;            // what the book keeps: layers' pixels, masks, channels, files
     std::uint64_t max_contents = 1000;                    // contents pages made of the .pcraft files inside
     int depth = 0;                                        // (a .pcraft inside a smart object of one: how deep)
+    // (PC5 I-d) the folder a data set's picture named by a relative path is read from (the .pcraft's own folder: what
+    // PhotoCraft's paths name beside it; none — and in a .pcraft inside — such pictures are left out, said)
+    std::optional<std::filesystem::path> beside;
 };
 
 struct Read {

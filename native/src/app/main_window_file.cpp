@@ -104,6 +104,42 @@ void MainWindow::build_file_actions() {
     setAcceptDrops(true);
 }
 
+QMenu* MainWindow::import_menu(QMenu* file) {
+    if (import_menu_ != nullptr) return import_menu_;
+    for (QAction* item : file->actions()) {
+        if (item->menu() != nullptr && item->menu()->objectName() == QLatin1String("menu_import")) import_menu_ = item->menu();
+    }
+    if (import_menu_ != nullptr) return import_menu_;
+    import_menu_ = new QMenu(QStringLiteral("読み込み"), file);
+    import_menu_->setObjectName(QStringLiteral("menu_import"));
+    const QList<QAction*> items = file->actions();
+    const auto psd = std::find(items.begin(), items.end(), action(QStringLiteral("act_import_psd")));
+    if (psd != items.end() && std::next(psd) != items.end()) {
+        file->insertMenu(*std::next(psd), import_menu_);
+    } else {
+        file->addMenu(import_menu_);
+    }
+    return import_menu_;
+}
+
+void MainWindow::add_to_import_menu(QMenu* file, QAction* command) {
+    // (Photoshop's order of 読み込み ▸; a command not listed goes last)
+    static const QStringList kOrder{QStringLiteral("act_import_data_sets"), QStringLiteral("act_video_frames_to_layers"),
+                                    QStringLiteral("act_import_notes")};
+    QMenu* menu = import_menu(file);
+    const auto rank = [](const QAction* a) {
+        const qsizetype at = kOrder.indexOf(a->property("genko_attribute").toString());
+        return at < 0 ? kOrder.size() : at;
+    };
+    for (QAction* item : menu->actions()) {
+        if (rank(item) > rank(command)) {
+            menu->insertAction(item, command);
+            return;
+        }
+    }
+    menu->addAction(command);
+}
+
 void MainWindow::build_file_menu(QMenu* file) {
     for (const char* name : {"act_new", "act_open", "act_open_as"}) file->addAction(action(name));
     recent_menu_ = file->addMenu(QStringLiteral("最近使用したファイルを開く"));
@@ -237,7 +273,9 @@ void MainWindow::open_path(const fs::path& path, std::optional<render::codecs::F
     watcher->setFuture(QtConcurrent::run([path, options]() -> Read {
         try {
             const std::string bytes = file_bytes(path);
-            return {formats::open_file(bytes, core::path_to_utf8(path.filename()), options), QString()};
+            formats::OpenOptions here = options;
+            here.folder = path.parent_path();  // (PC5 I-d: a .pcraft's data sets' pictures beside it)
+            return {formats::open_file(bytes, core::path_to_utf8(path.filename()), here), QString()};
         } catch (const std::exception& error) {
             return {std::nullopt, QString::fromUtf8(error.what())};
         }

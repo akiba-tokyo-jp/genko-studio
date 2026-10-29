@@ -77,6 +77,7 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `measure@1` | PC5 J-0（J-d が使う） | ページの `measure`（計測スケール・カウント・ものさしの線）。PROD-01、この文書の「制作の補助」 |
 | `timeline@1` | PC5 J-0（J-e1 が使う） | ページの `anim` の作業範囲 `work` と、1〜60 の外の `fps`（0.5〜1・60〜120）。PROD-01、この文書の「制作の補助」 |
 | `video@1` | PC5 J-0（J-e2 が使う） | ページの `anim` の行の `video`（ビデオレイヤー: 素材のコマと描き替え）。PROD-01、この文書の「制作の補助」 |
+| `variables@1` | PC5 I-d | 本の `variables`（変数とデータセット。値の画像は本の素材）。SPEC AUTO-01「変数とデータセット」、この文書の「変数とデータセット」 |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -482,7 +483,8 @@ Photoshop の文字（テキストレイヤー・文字と段落の属性・ス�
 - **本の `"type_styles"`**（`global_light` の後）: `{"character"?: [{"id": "cs-N", "name", "char"?}], "paragraph"?: [{"id": "ps-N", "name", "para"?, "char"?}], "basic"?: {"para"?, "char"?}}`。id は種類の接頭と 1 からの番号、名前は 1〜64 字で種類の中で一つ、各 512 まで。空なら書かない。
 - 書き手は、`native_type` を持つ台詞、テキストレイヤー（書くページとスマートオブジェクトの中身のページ）、`type_styles` のどれかがあれば `features` に `type@1` を加え、無くなれば外す。持たない原稿は今と同じバイトで書き、同じ画素で描く。
 - **読み手の検査**: 正規形でない `native_type`・`type_styles`、本文の外の範囲、本に無いスタイルの参照、記録の無いテキストレイヤー、画素や線を持つテキストレイヤーの本は、読み取り専用で開く（読んだまま書き戻すので失われない）。記録に台詞だけの鍵があれば知らない鍵として知らせる。type@1 を知らない読み手（PC4 までの C++ 版）は、未知の拡張として読み取り専用で開く。
-- op（C++ 版だけ）: `add_type_layer`・`edit_type`・`type_info`（G-0）、`set_type`・`type_style`・`line_to_type_layer`・`type_layer_to_line`・`replace_fonts`（名前だけ登録、後の群）。`add_line`・`edit_line` は `native_type` を受ける。TEXT-02 の「文字」。
+- op（C++ 版だけ）: `add_type_layer`・`edit_type`・`type_info`（G-0）、`line_to_type_layer`・`type_layer_to_line`（G-a）、`set_type`（G-b）、`type_style`・`replace_fonts`（名前だけ登録、後の群）。`add_line`・`edit_line` は `native_type` を受ける。TEXT-02 の「文字」。
+- **組み方**（PC5 G-b）: `shaping` が `"opentype"` の記録、自分の `char`・`para`・`runs`・`paragraphs`・`char_style`・`para_style` を持つ記録、書式の `features` を持つ横書きの台詞は OpenType の組み方（HarfBuzz、横組みは SheenBidi の双方向の並べ替え）で組む（TEXT-02 の「G-b」）。`add_type_layer` は `shaping: "opentype"` を付けて作り、`set_type` も付ける。ほかの記録（`native_type` の無い台詞、形・アンチエイリアス・行列だけの記録）は今の組み方。形は変わらない（鍵・値は G-0 のまま）。
 
 ## グループ（groups@1。SPEC AUTO-01、PC5 I-b）
 
@@ -497,19 +499,31 @@ Photoshop の文字（テキストレイヤー・文字と段落の属性・ス�
 - **アンチエイリアス**（G-a）: `none` は文字の覆いを 128 以上なら全部、それ未満なら無しにして描く（縁のぼけが無い）。ほかの方法は `smooth` と同じに描き、名前だけを持つ（PSD に書く: G-e）。
 - **行列**（G-a）: `transform` はテキストレイヤーだけが持つ（台詞は立てたまま。持つ台詞の本は読み取り専用）。記録を上のとおり組んだ文字を、この行列でページの上に写して描く（ページの mm からページの mm、e・f はページの絶対の位置）。テキストレイヤーの回転・拡大・縮小・ゆがみ（`transform_layers` の matrix・turn・quad の平行四辺形）、ページの回転・反転では、写す前の置き方（枠・基準点）はそのままで、変形を行列の前から掛ける。行列を持つテキストレイヤーの移動は行列の e・f を動かす。行列の無いテキストレイヤーの移動・ページの大きさの変更（倍率・カンバス）は今のとおり枠と基準点を動かす。
 
+## 変数とデータセット（variables@1。SPEC AUTO-01、PC5 I-d）
+
+本の変数とデータセット（Photoshop の イメージ → 変数）。
+
+- **本の `"variables"`**（本の鍵の `type_styles` の後）: `{"defs": [...], "data_sets": [...], "active"?: n}`。変数もデータセットも無い本は持たない（空の `variables` は書かない）。
+  - `defs` の各項目（1000 まで、名前は本の中で 1 つ・1〜255 文字）: `{"name", "type": "visibility" | "text" | "pixels", "page": ページの id, "layer": 層の id}`、またはテキストだけ `{"name", "type": "text", "line": 台詞の id}`。`pixels` は続けて必ず `"method": "fit" | "fill" | "as_is" | "conform"`、`"align": "top_left" | "top_center" | "top_right" | "center_left" | "center" | "center_right" | "bottom_left" | "bottom_center" | "bottom_right"`、`"clip": bool`、`"box_mm": [x0, y0, x1, y1]`（ページの mm、小数 4 桁、x0 < x1・y0 < y1、各 ±100,000 mm まで）を持ち、ほかの種類は持たない。対象の層・台詞が無くなっても項目は残る。
+  - `data_sets` の各項目（10,000 まで、名前は 1 つ・1〜255 文字）: `{"name", "values": [{"variable": 変数の名前, "value": …}]}`。1 つのデータセットに 1 つの変数の値は 1 つ。値は `true`・`false`（表示）、文字（テキスト、64 KiB まで）、画像 `{"asset": "sha256:…", "suffix": ".png" など（スマートオブジェクトのファイルの拡張子）, "name"?: 元のファイルの名前}`。画像は `assets/<ab>/<64 桁><suffix>` に元のファイルのバイトのまま（パスは持たない）。変数が無くなった値・種類の合わない値も残る（適用で飛ばす）。
+  - `active`: 最後に適用したデータセットの番号（0 から）。無ければ書かない。
+- 書き手は `variables` を持つ本の `features` に `variables@1` を加え、無くなれば外す。持たない原稿は今と同じバイトで書く。値の画像のうち本のフォルダーにまだ無いもの（新しく渡された画像）を `assets/` に書く。
+- **読み手の検査**: 上の形でない `variables`（知らない鍵・範囲の外・重なる名前・書き手の形（正規形）と違うもの）、値の画像が `assets/` に無い本は、読み取り専用で開く。variables@1 を知らない読み手（PC5 I-d より前の C++ 版）は、未知の拡張として読み取り専用で開く。
+- op（`set_variables`・`set_data_sets`・`apply_data_set`）は本の op。journal の `set_data_sets` は画像のバイトを `"<N base64 chars>"` にして残す。
+
 ## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1。PROD-01、PC5 節 J）
 
 Photoshop の文書 1 つは Genko のページ 1 枚なので、レイヤーカンプ・スライス・注釈・計測はページの鍵に、タイムラインの作業範囲とビデオレイヤーはページのアニメ（`anim`）の中に持つ。C++ 版だけ。PC5 J-0 が形と検査を作り、中身（op・画面・PSD と .pcraft の写し）は J-a〜J-e2 が書く。座標はページの mm。
 
 - **ページの `"layer_comps"`**（layer-comps@1）: `{"comps": [カンプ…], "last_applied": id | null, "last_state": {"layers": [層の状態…]} | null}`。カンプは `{"id": 1..2147483647, "name": 1〜255 文字, "comment": 文字, "apply": {"visibility", "position", "appearance": bool}, "layers": [層の状態…]}`、1 ページ 256 個まで、id は重ならない。層の状態は `{"layer": 層の id, "visible"?: bool, "position"?: [x, y] | null, "appearance"?: {"blend": 文字, "opacity": 0..1, "style": レイヤースタイル | null}}`（無い鍵は記録していない。`position` の null は外接の無い層）。`last_applied` はページのカンプを名指す。`last_state` は最後のドキュメントの状態（最初にカンプを当てる直前）。（PC5 J-a）`position` は層が持つ物の外接の左上（自分の画素はその格子で、線・形・配置画像はその形・置き場所で紙の外も。コマの切り抜き・マスクで切らない。PROD-01）。層の状態は、カンプを作ったときのページの層の順。カンプが名指す層をページが持たなくても読める（消えた層: 適用で飛ばす）。PSD から読んだカンプの状態は `appearance` を持たず、`cmls` に `Ofst` の無い層は `position` を持たない。ページの `native_psd` の `copied` に 1065 の印があるとき、その指紋はカンプと、カンプが位置を記録した層の今の位置から作る。
 - **ページの `"slices"`**（slices@1）: `{"group": 文字, "next_id": 1.., "list": [スライス…]}`。スライスは `{"id": 1..（next_id より小さく、重ならない）, "origin": "user" | "layer", "layer"?: 層の id（layer のときだけ・必ず）, "name", "rect_mm": [x, y, w, h], "kind": "image" | "noImage" | "table", "url", "target", "message", "alt", "cell_text": 文字, "cell_text_is_html": bool, "align": [0..4, 0..4], "background": "#rrggbb" | null, "outsets": [上, 左, 下, 右]（ページの画素）}`、4096 個まで。自動スライスは持たない（毎回つくる）。スライスを全部消しても番号（`next_id`・`group`）は残して書く（次のスライスの番号を 1 からにしない）。
-- **ページの `"annotations"`**（annotations@1）: `[{"id": "an_" + 16 進 12 桁, "at_mm": [x, y], "popup_mm": [x, y, w, h] | null, "text": 文字（64 KB まで）, "author": 文字, "color": [r, g, b], "open": bool, "modified": "YYYY-MM-DDThh:mm:ssZ", "actor": "human:…" | "ai:…" | "genko"}]`、1000 個まで、id は重ならない。ページのメモ（`note`）とは別。
+- **ページの `"annotations"`**（annotations@1）: `[{"id": "an_" + 16 進 12 桁, "at_mm": [x, y], "popup_mm": [x, y, w, h] | null, "text": 文字（64 KB まで）, "author": 文字, "color": [r, g, b], "open": bool, "modified": "YYYY-MM-DDThh:mm:ssZ", "actor": "human:…" | "ai:…" | "genko"}]`、1000 個まで、id は重ならない。ページのメモ（`note`）とは別。（PC5 J-c）`modified` は日時の分からないもの（日時の無い PSD の注釈など）では空の文字。`at_mm` は印の左上、`popup_mm` の null は既定の枠（印の右下 6 mm に 60 × 36 mm）。`actor` は書いた人で、人のもの（`human:…`・`genko`）はエージェント（`ai:…`）の op では変わらない（PROD-01「注釈」）。ページの `native_psd` の `copied` に `Anno` の印があるとき、その指紋は注釈の JSON（この形）から作る。
 - **ページの `"measure"`**（measure@1）: `{"scale": {"pixel_length": >0, "logical_length": >0, "units": 文字} | null, "count_groups": [{"name", "color": [r, g, b], "marker_size": 1..10, "label_size": 8..72, "visible": bool, "points": [[x, y]…]（1 万まで）}]（256 まで）, "active_group": 0..（グループの番号。無ければ 0）, "ruler": {"start": [x, y], "end": [x, y], "protractor": [x, y] | null} | null}`。`scale` の null は 1 pixel = 1 pixel（Photoshop の初期設定）、`pixel_length` はページの解像度の画素。全部が既定のページは `measure` を書かない。計測ログは原稿に持たない。
 - **アニメの作業範囲と fps**（timeline@1）: ページの `anim` に `"work": [始め, 終わり]`（フレームは 1 から、両端を含む、1 ≤ 始め ≤ 終わり ≤ 3000）、`"fps"` に 0.5 以上 1 未満か 60 を超え 120 以下の数（今の `set_animation` が受ける 1〜60 の数は小数でも今のまま。0.5〜120 の外の値は前のアニメが持ちうる値として今のまま読み、拡張を付けない）。形の違う `work`（2 つの整数でない）も前のアニメの値として保ち、拡張を付けない。
 - **ビデオの行**（video@1）: アニメの行（`tracks` の 1 つ）の `"video"`: `{"footage": 素材 | null, "frames": [[素材のコマの番号 | null, 描き替えたセルの id | null]…]（タイムラインの 1 フレームに 1 つ、3000 まで）, "show_altered": bool, "placement_mm": [x, y, w, h], "fit": "contain" | "cover" | "stretch"}`。素材は `{"kind": "sequence" | "animation" | "image", "name", "frames": ["sha256:…"…]（素材のコマ: 原稿の素材ファイル、1〜3000）, "fps": >0, "size_px": [w, h], "depth": 8 | 16, "alpha": "straight" | "premultiplied" | "ignore", "par": >0, "source"?: {"path", "bytes", "sha256"}}`。動画ファイル（MP4・MOV・WebM）は読まないので、素材は連番（sequence）・動く画像（animation: GIF・APNG・WebP）・1 枚の画像（image）だけ（利用者の決定 4）。
 - 書き手は、それぞれを持つページがあるときだけ `features` にその拡張を加え（無くなれば外す）、空のもの（カンプ・スライス・注釈が無い、計測が全部既定）は書かない。持たない原稿は `features` も保存のバイトも今のまま。
 - **読み手の検査**: 形が上と違う（知らない鍵・型・範囲の外・重なる id・名指す物が無い）ページの本は、読み取り専用で開く（その値は読んだまま保つので失われない）。`anim` の `work`・`video` は、本が timeline@1・video@1 を名乗るときだけ見る（名乗らない本の値は前のアニメの値: 開ける。fps は名乗っても見ない）。これらの拡張を知らない読み手（PC5 J-0 より前の C++ 版）は、未知の拡張として読み取り専用で開く（作業範囲を無視して書き出したり、ビデオの行を空のフォルダーとして描いたりしないため）。
-- PSD・.pcraft: レイヤーカンプ（PSD のリソース 1065 と層の cmls）・スライス（1050）・注釈（全体の塊 Anno）・計測スケール（1074）は、その群が写すまで psd-keep@1 の塊のまま保ち、写した後も保って `copied` の印を付ける（ページの `native_psd`）。.pcraft の `layer_comps`・`slices`・`notes`・`measurement`・`timeline` は、その群が読むまで外して notes で言う（PROD-01）。
+- PSD・.pcraft: レイヤーカンプ（PSD のリソース 1065 と層の cmls。J-a）・スライス（1050）・注釈（全体の塊 Anno。J-c）・計測スケール（1074）は、その群が写すまで psd-keep@1 の塊のまま保ち、写した後も保って `copied` の印を付ける（ページの `native_psd`）。.pcraft の `layer_comps`・`slices`・`notes`・`measurement`・`timeline` は、その群が読むまで外して notes で言う（PROD-01）。
 
 ## 表示（ガイド。VIEW-01、PC5 節 H）
 

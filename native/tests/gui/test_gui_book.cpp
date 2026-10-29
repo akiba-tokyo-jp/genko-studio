@@ -437,9 +437,10 @@ private slots:
         const QStringList in_file = menu_texts(file);
         const int scanner = static_cast<int>(in_file.indexOf(QStringLiteral("スキャナーから取り込む…")));
         QVERIFY(scanner > 0);
-        QCOMPARE(in_file.mid(scanner - 1, 7), QStringList({QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"),
+        // (PC5 J-c: Photoshop's 読み込み ▸ — 注釈… — after them)
+        QCOMPARE(in_file.mid(scanner - 1, 8), QStringList({QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"),
                                                            QStringLiteral("ほかの原稿のページを取り込む…"), QStringLiteral("PSD をレイヤーのまま読み込む…"),
-                                                           QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|")}));
+                                                           QStringLiteral("読み込み"), QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|")}));
     }
 
     // 次のページと見開きにする／解除: with the next page when they face each other; else, when the page before faces it,
