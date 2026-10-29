@@ -391,7 +391,9 @@ private slots:
         // (act_keyboard_shortcuts, act_prefs_<pane>; 一般… is act_prefs) — theKeySets and theMenusOfPC5 below.
         // and the 23 frames of PC5 J-0 (SPEC PROD-01) — ページ → 解析 ▸'s 7 (act_measure_*), レイヤー → ビデオレイヤー ▸'s 12
         // (act_video_*), ウィンドウ's アクション・レイヤーカンプ・計測ログ・注釈 (act_panel_*) — theProductionFramesSayNotYet's.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{618});
+        // and PC5 J-a's ファイル → 書き出し → レイヤーカンプからファイル… (act_comps_to_files; its ウィンドウ → レイヤーカンプ is the
+        // frame's attribute made real) — test_gui_layer_comps.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{619});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -475,6 +477,7 @@ private slots:
         QCOMPARE(items(exports), (QStringList{QStringLiteral("PNG としてクイック書き出し"), QStringLiteral("書き出し形式…"), QStringLiteral("|"),
                                              QStringLiteral("書き出しの環境設定…"), QStringLiteral("|"), QStringLiteral("Web 用に保存（従来）…"), QStringLiteral("|"),
                                              QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("レイヤーからファイル…"),
+                                             QStringLiteral("レイヤーカンプからファイル…"),  // (PC5 J-a)
                                              QStringLiteral("パスを Illustrator へ…"), QStringLiteral("カラールックアップテーブル…")}));
         // (PC5 H-0: no key in the Photoshop key set — Ctrl+E is 下のレイヤーと結合; Ctrl+E in the Genko set, theKeySets)
         QVERIFY(studio.act("act_export")->shortcuts().isEmpty());
@@ -570,7 +573,7 @@ private slots:
                                  "act_measure_ruler_tool", "act_measure_count_tool", "act_measure_scale_marker", "act_video_from_file", "act_video_blank",
                                  "act_video_insert_blank", "act_video_duplicate", "act_video_delete", "act_video_replace", "act_video_interpret",
                                  "act_video_show_altered", "act_video_restore", "act_video_restore_all", "act_video_reload", "act_video_rasterize",
-                                 "act_panel_actions", "act_panel_layer_comps", "act_panel_measurement_log", "act_panel_notes"}) {
+                                 "act_panel_actions", "act_panel_measurement_log", "act_panel_notes"}) {  // (PC5 J-a: レイヤーカンプ made real)
             QAction* a = studio.act(name);
             QVERIFY2(a != nullptr, name);
             QVERIFY2(!a->statusTip().isEmpty(), name);
@@ -587,7 +590,8 @@ private slots:
         }
         for (const auto& [attribute, count] : made) QVERIFY2(count == 1, qPrintable(attribute));
         const std::vector<QAction*> listed = genko::app::preferences::commands(w);
-        for (const char* name : {"act_measure_record", "act_measure_scale_custom", "act_measure_data_points", "act_video_rasterize", "act_panel_notes"}) {
+        for (const char* name : {"act_measure_record", "act_measure_scale_custom", "act_measure_data_points", "act_video_rasterize", "act_panel_notes",
+                                 "act_panel_layer_comps", "act_comps_to_files"}) {
             QAction* own = studio.act(name);
             QVERIFY2(std::find(listed.begin(), listed.end(), own) != listed.end(), name);
         }

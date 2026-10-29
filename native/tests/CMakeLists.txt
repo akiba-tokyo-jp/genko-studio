@@ -540,6 +540,11 @@ genko_test(test_contract_transform SOURCES contract/test_contract_transform.cpp 
 # undone, `genko inspect --at`.
 genko_test(test_contract_align SOURCES contract/test_contract_align.cpp DEPS genko_test_support genko_render_ops
            LABELS contract TIMEOUT 900)
+# PC5 J-a (layer-comps@1): the comps through the command line (apply, undo, inspect --comps, export --format comps), the
+# PSD's 1065 and the layers' cmls as psd-tools reads them (read back, written as read while unchanged, anew, gone), a
+# .pcraft's layer_comps (upstream's reader with $GENKO_PCRAFT_CHECK).
+genko_test(test_contract_layer_comps SOURCES contract/test_contract_layer_comps.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 # PC3 C-e through the command line: every kind of page turned (inspect --pixel), undone and redone; a page of its own paper
@@ -696,6 +701,9 @@ if(GENKO_BUILD_APP)
   # PC3 C-d: レイヤー → 重ね順・整列・分布・リンク・ロック…, 表示 → スナップ・スナップ先 (the words, keys and places), the move
   # tool's drag (by whole working pixels, the linked layers along), 自動選択 (Ctrl+click), snapping (a guide, Ctrl off)
   genko_test(test_gui_align SOURCES gui/test_gui_align.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC5 J-a (layer-comps@1): ウィンドウ → レイヤーカンプ (the dock, its panel's rows, buttons and menu, the windows asked,
+  # each one Undo) and ファイル → 書き出し → レイヤーカンプからファイル…
+  genko_test(test_gui_layer_comps SOURCES gui/test_gui_layer_comps.cpp DEPS genko_app GUI TIMEOUT 600)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC2c (COLOR-04): レイヤー → 色調補正's local corrections and image calculations, 編集 → フェード (only right after).

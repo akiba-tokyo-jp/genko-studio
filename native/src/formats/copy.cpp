@@ -804,7 +804,7 @@ std::vector<CopyResult> export_layer_comps(const core::Document& doc, std::size_
     for (std::size_t i = 0; i < all.size(); ++i) {
         const core::LayerComp& comp = all[i];
         if (!files.comps.empty() && std::find(files.comps.begin(), files.comps.end(), comp.id) == files.comps.end()) continue;
-        char number[16];
+        char number[32];
         std::snprintf(number, sizeof number, "%04zu", i);
         const fs::path dest = folder / core::path_from_utf8(prefix + "_" + number + "_" + render::layer_comps::file_part(comp.name) + "." + files.extension);
         if (files.check) files.check(dest);
