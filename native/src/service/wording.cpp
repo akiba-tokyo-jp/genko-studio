@@ -739,6 +739,34 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the file has no notes", "このファイルには注釈がありません"));
         r.push_back(rule(R"(notes are read from a PSD, a PSB or a \.pcraft)", "注釈は PSD・PSB・.pcraft のファイルから読み込みます"));
         r.push_back(rule("the PSD's notes cannot be read|notes: .*", "ファイルの注釈が読めない形です"));
+        // (PC5 J-d1, measure@1 — the C++ build's own: the measurement scale, the count, the ruler line, render/ops_measure)
+        r.push_back(rule(R"((at_mm|to|start|end|protractor) is a place \[x, y\] \(mm\) on the page)", "位置（\\1）は、ページの上の [x, y]（mm）で指定します"));
+        r.push_back(rule(R"(give both start and end: places \[x, y\] \(mm\) on the page)", "ものさしの線は、始点（start）と終点（end）の両方を指定します"));
+        r.push_back(rule(R"(give start and end \(\[x, y\] mm\), protractor, or clear: true)", "ものさしの線の始点と終点（start・end）、分度器（protractor）か clear: true を指定します"));
+        r.push_back(rule("clear takes nothing else", "ものさしの線を消すとき（clear）は、ほかの項目を指定しません"));
+        r.push_back(rule(R"(the page has no ruler line.*)", "このページにはものさしの線がありません（先にものさしツールで線を引きます）"));
+        r.push_back(rule(R"(color is the count group's colour: .*)", "カウントグループの色は [r, g, b]（0〜255）か #rrggbb で指定します"));
+        r.push_back(rule("name is the count group's name|a count group's name is 1 to 1024 bytes", "カウントグループの名前は 1〜1024 バイトの文字です"));
+        r.push_back(rule("the page has no count group", "このページにはカウントグループがありません"));
+        r.push_back(rule(R"(no count group (\d+) on the page)", "このページにカウントグループ \\1 はありません"));
+        r.push_back(rule(R"(no count mark (\d+) in count group (\d+))", "カウントグループ \\2 に番号 \\1 の印はありません"));
+        r.push_back(rule("no count mark there", "そこにはカウントの印がありません"));
+        r.push_back(rule(R"(give index \(and group\) or at_mm)", "カウントの印を、番号（index・group）か位置（at_mm）で指定します"));
+        r.push_back(rule(R"(a count group holds at most (\d+) marks)", "カウントグループの印は \\1 個までです"));
+        r.push_back(rule(R"(a page holds at most (\d+) count groups)", "カウントグループは 1 ページに \\1 個までです"));
+        r.push_back(rule(R"(group is an index \(0 the first\) or "all")", "カウントグループは番号（0 から）か \"all\" で指定します"));
+        r.push_back(rule(R"((group|index) is an index \(0 the first\))", "\\1 は 0 から数える番号で指定します"));
+        r.push_back(rule("give group, name, color, marker_size, label_size, visible or active",
+                         "変える項目（グループ・名前・色・マーカーのサイズ・ラベルのサイズ・表示・使うグループ）を指定します"));
+        r.push_back(rule(R"((marker_size|label_size) is a whole number (\d+)\.\.(\d+))", "\\1 は \\2〜\\3 の整数で指定します"));
+        r.push_back(rule(R"((pixel_length|logical_length|radius_mm) must be a number greater than 0)", "\\1 は 0 より大きい数で指定します"));
+        r.push_back(rule("preset is custom, default or paper_mm", "計測スケールのプリセットは custom・default・paper_mm のどれかです"));
+        r.push_back(rule(R"(give pixel_length, logical_length and units, or a preset.*)", "計測スケールの長さと単位か、プリセットを指定します"));
+        r.push_back(rule("the (default|paper_mm) preset takes no lengths", "プリセット \\1 には長さを指定しません"));
+        r.push_back(rule(R"(units is the logical units' name.*|units must not be empty|units is at most 256 bytes)", "計測スケールの単位は 1〜256 バイトの文字です"));
+        r.push_back(rule(R"(give ids \(the layers to turn\) or crop: true.*)", "角度補正するレイヤー（ids）か、ページを回して切り抜く（crop: true）のどちらかを指定します"));
+        r.push_back(rule(R"(ids is \[layer id, …\])", "角度補正するレイヤーは ID の一覧で指定します"));
+        r.push_back(rule(R"((trim|bleed_mm|margins) is only for crop: true)", "\\1 は、ページを回して切り抜くとき（crop: true）だけ指定します"));
         // (PC5-0, Z0's review P1-1: a new layer of a 16- or 32-bit page painted at 8 bits for the book's precise budget)
         r.push_back(rule(R"(the layer is painted at 8 bits: the book's precise pixels would pass their budget.*)",
                          "本の高精度の画素の上限（1 GiB）を越えるか、本をまだ読み込み中のため、このレイヤーは 8 bit で塗りました"));

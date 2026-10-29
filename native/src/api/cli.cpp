@@ -50,6 +50,7 @@
 #include "formats/copy.hpp"
 #include "formats/datasets.hpp"
 #include "render/ops_annotations.hpp"
+#include "render/ops_measure.hpp"
 #include "render/ops_layer_comps.hpp"
 #include "render/ops_variables.hpp"
 #include "formats/export.hpp"
@@ -305,6 +306,7 @@ int inspect(const QStringList& args, bool ascii) {
     bool comps = false;  // (PC5 J-a, the C++ build's own: --comps [--page N], layerComp.list — the pages' layer comps)
     bool variables = false;  // (PC5 I-d, variables.list: --variables — the book's variables and data sets)
     bool notes = false;  // (PC5 J-c, the C++ build's own: --annotations [--page N], notes.list — the pages' notes)
+    bool measuring = false;  // (PC5 J-d1, the C++ build's own: --measure [--page N], image.analysis.info — the pages' measuring)
     const auto value_of = [&](qsizetype& i, const char* name, QString& into) -> bool {
         const QString& arg = args[i];
         const QString flag = QString::fromLatin1(name);
@@ -334,6 +336,8 @@ int inspect(const QStringList& args, bool ascii) {
             variables = true;
         } else if (arg == QLatin1String("--annotations")) {
             notes = true;
+        } else if (arg == QLatin1String("--measure")) {
+            measuring = true;
         } else if (arg == QLatin1String("--stroke")) {
             if (i + 1 >= args.size()) return usage("argument --stroke: expected one argument");
             stroke = args[++i];
@@ -386,7 +390,10 @@ int inspect(const QStringList& args, bool ascii) {
     }
     if (!profile.isEmpty() && !pixel.isEmpty()) return usage("argument --profile: not with --pixel");
     if (!area_text.isEmpty() && page_text.isEmpty()) return usage("argument --area, --page: --area <area> with --page <N>");
-    if (!page_text.isEmpty() && area_text.isEmpty() && !paths && !comps && !notes) return usage("argument --page: only with --area, --paths, --comps or --annotations");
+    if (!page_text.isEmpty() && area_text.isEmpty() && !paths && !comps && !notes && !measuring)
+        return usage("argument --page: only with --area, --paths, --comps, --annotations or --measure");
+    if (measuring && (notes || comps || variables || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty()))
+        return usage("argument --measure: not with --annotations, --comps, --variables, --paths, --area, --pixel or --profile");
     if (notes && (comps || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty()))
         return usage("argument --annotations: not with --comps, --paths, --area, --pixel or --profile");
     if (comps && (paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty())) return usage("argument --comps: not with --paths, --area, --pixel or --profile");
@@ -457,6 +464,18 @@ int inspect(const QStringList& args, bool ascii) {
             core::Json one = render::layer_comps::listing(doc.page(i));
             one["page"] = doc.pages[i]->index.json();
             pages.push_back(std::move(one));
+        }
+        if (page_number && pages.empty()) throw core::Error("key", "no page " + std::to_string(*page_number));
+        print_json(core::Json{{"pages", std::move(pages)}}, ascii);
+        return 0;
+    }
+    if (measuring) {  // (PC5 J-d1, image.analysis.info: each page's measurement scale, ruler line and its readout, count groups, notes)
+        const core::Document& doc = loaded.document;
+        core::Json pages = core::Json::array();
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (page_number && doc.pages[i]->index != core::Num(*page_number)) continue;
+            if (doc.is_deferred(i)) continue;
+            pages.push_back(render::measure::listing(doc.page(i)));
         }
         if (page_number && pages.empty()) throw core::Error("key", "no page " + std::to_string(*page_number));
         print_json(core::Json{{"pages", std::move(pages)}}, ascii);

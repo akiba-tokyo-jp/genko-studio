@@ -1239,7 +1239,9 @@ private slots:
                                            // (PC5 I-b: groups@1, レイヤーからのフレーム — SPEC AUTO-01)
                                            "frame_from_layers",
                                            // (PC5 I-d: variables@1, 変数とデータセット — SPEC AUTO-01)
-                                           "set_variables", "set_data_sets", "apply_data_set"};
+                                           "set_variables", "set_data_sets", "apply_data_set",
+                                           // (PC5 J-d1: measure@1's question, image.analysis.info — SPEC PROD-01)
+                                           "measure_info"};
         for (const std::string& name : genko::render::ops_registry().names()) {
             if (listed.count(name) == 0 && own.count(name) == 0) missing += (missing.empty() ? "" : ", ") + name;
         }

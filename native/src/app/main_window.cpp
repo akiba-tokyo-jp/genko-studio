@@ -829,6 +829,7 @@ void MainWindow::show_page() {
     if (paths_panel_ != nullptr && paths_dock_ != nullptr && paths_dock_->isVisible()) paths_panel_->refresh();  // (vector@1, PC3 C-a)
     if (layer_comps_panel_ != nullptr && layer_comps_dock_ != nullptr && layer_comps_dock_->isVisible()) layer_comps_panel_->refresh();  // (PC5 J-a)
     if (notes_panel_ != nullptr) refresh_notes();  // (PC5 J-c: the chosen note while the page has it)
+    if (count_groups_ != nullptr) refresh_measure();  // (PC5 J-d1: the ものさしツール's readout, the count groups)
     if (patterns_panel_ != nullptr && patterns_dock_ != nullptr && patterns_dock_->isVisible()) patterns_panel_->refresh();  // (PC4 E3)
     if (lines_later_) {
         lines_timer_.start();

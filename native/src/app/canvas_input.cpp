@@ -620,6 +620,8 @@ void PageCanvas::hold_modifier(const QString& key, bool down) {
         tool.clear();  // (the path tools' own: Alt breaks a handle, puts a corner, copies)
     }
     if (is_clone_tool(base) && key == QLatin1String("alt")) tool.clear();  // (PC3 B4: Alt+click sets the clone source)
+    // (PC5 J-d1: the ものさしツール's Alt draws the protractor's arm, the カウントツール's takes a mark away)
+    if ((base == QLatin1String("measure") || base == QLatin1String("count")) && key == QLatin1String("alt")) tool.clear();
     if (base == QLatin1String("move") && key == QLatin1String("ctrl")) tool.clear();  // (PC3 C-d: Ctrl+click picks the layer there)
     if (const auto own_tool = tool_modifiers.find(base); own_tool != tool_modifiers.end()) {
         // (this tool's own setting wins; Shift switches only when a tool says so)

@@ -413,7 +413,9 @@ private slots:
         // act_variables_data_sets, act_apply_data_set, act_data_sets_to_files, act_import_data_sets) — test_gui_variables.
         // and PC5 J-c's 3 — ツール → 注釈ツール (act_note), 表示 → 表示・非表示 → 注釈 (act_show_notes), ファイル → 読み込み →
         // 注釈… (act_import_notes); its ウィンドウ → 注釈 is the frame's attribute made real — test_gui_notes.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{674});  // (wip-pc's 669 and I-d's 5)
+        // and PC5 J-d1's 1 — 表示 → 表示・非表示 → カウント (act_show_count); its 計測スケールを設定 ▸ 初期設定・カスタム…, ものさしツール and
+        // カウントツール are the frames' attributes made real — test_gui_measure.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{675});  // (wip-pc's 669, I-d's 5 and J-d1's 1)
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -592,8 +594,8 @@ private slots:
         // (the smart object's ラスタライズ keeps its own name: the first of the words in the menus)
         QCOMPARE(studio.act("act_smart_rasterize")->text(), QStringLiteral("ラスタライズ"));
         const std::int64_t revision = studio.doc().revision;
-        for (const char* name : {"act_measure_scale_default", "act_measure_scale_custom", "act_measure_data_points", "act_measure_record",
-                                 "act_measure_ruler_tool", "act_measure_count_tool", "act_measure_scale_marker", "act_video_from_file", "act_video_blank",
+        // (PC5 J-d1: 計測スケールを設定 ▸ 初期設定・カスタム…, ものさしツール, カウントツール made real — test_gui_measure)
+        for (const char* name : {"act_measure_data_points", "act_measure_record", "act_measure_scale_marker", "act_video_from_file", "act_video_blank",
                                  "act_video_insert_blank", "act_video_duplicate", "act_video_delete", "act_video_replace", "act_video_interpret",
                                  "act_video_show_altered", "act_video_restore", "act_video_restore_all", "act_video_reload", "act_video_rasterize",
                                  "act_panel_actions", "act_panel_measurement_log"}) {  // (PC5 J-a: レイヤーカンプ made real; J-c: 注釈)
@@ -625,7 +627,8 @@ private slots:
                                if (view.per_mm > 0 && view.at.map(QPointF(10, 10)) != view.at.map(QPointF(20, 20)) && view.seen_mm.contains(QPointF(10, 10)))
                                    ++drawn;
                            }});
-        QCOMPARE(canvas->extra_keys(), (std::vector<QString>{QStringLiteral("notes"), QStringLiteral("count")}));  // (PC5 J-c's notes first)
+        // (PC5 J-c's notes first; J-d1's count — this test's painter in its place — and ruler)
+        QCOMPARE(canvas->extra_keys(), (std::vector<QString>{QStringLiteral("notes"), QStringLiteral("count"), QStringLiteral("ruler")}));
         (void)canvas->grab();
         QVERIFY(drawn > 0);
         canvas->show_extra(QStringLiteral("count"), false);
@@ -1030,7 +1033,9 @@ private slots:
                                                   // (PC5 G-a: 横書き文字ツール)
                                                   {"text_h", "act_text_h"},
                                                   // (PC5 J-c: 注釈ツール)
-                                                  {"note", "act_note"}};
+                                                  {"note", "act_note"},
+                                                  // (PC5 J-d1: ものさしツール, カウントツール — the frames' attributes made real)
+                                                  {"measure", "act_measure_ruler_tool"}, {"count", "act_measure_count_tool"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());

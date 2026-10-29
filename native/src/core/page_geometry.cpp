@@ -558,6 +558,30 @@ void map_page(Document& doc, std::size_t at, const Mapping& m, const PixelHooks&
     if (page.rulers.is_array())
         for (Json& ruler : page.rulers) map_ruler(ruler, m);
     if (page.ruler && page.ruler->is_object()) move_points_at(*page.ruler, "points", m);
+    // (PC5 J-d1: the count marks and the ものさし's line where the map takes them — measure@1 —, and the notes' marks with
+    // their boxes along — annotations@1, upright: J-c's; the scale counts the page's pixels, as it was)
+    const auto mapped = [&m](const std::array<double, 2>& p) {
+        const XY q = m.apply(XY{p[0], p[1]});
+        return std::array<double, 2>{py_round(q.x, 4), py_round(q.y, 4)};
+    };
+    if (page.measure) {
+        for (CountGroup& g : page.measure->count_groups)
+            for (auto& p : g.points) p = mapped(p);
+        if (page.measure->ruler) {
+            RulerLine& r = *page.measure->ruler;
+            r.start = mapped(r.start);
+            r.end = mapped(r.end);
+            if (r.protractor) r.protractor = mapped(*r.protractor);
+        }
+    }
+    for (Annotation& note : page.annotations) {
+        const std::array<double, 2> was = note.at_mm;
+        note.at_mm = mapped(was);
+        if (note.popup_mm) {
+            (*note.popup_mm)[0] = py_round((*note.popup_mm)[0] + note.at_mm[0] - was[0], 4);
+            (*note.popup_mm)[1] = py_round((*note.popup_mm)[1] + note.at_mm[1] - was[1], 4);
+        }
+    }
     if (page.effects.is_array())
         for (Json& effect : page.effects) map_effect(effect, m);
     if (page.prims.is_array())

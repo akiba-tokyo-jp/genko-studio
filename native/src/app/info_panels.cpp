@@ -253,11 +253,14 @@ InfoPanel::InfoPanel(MainWindow* window) : window_(window) {
     values_ = label("infoValues");
     proof_ = label("infoProof");
     selection_ = label("infoSelection");
+    ruler_ = label("infoRuler");
     form->addRow(QStringLiteral("位置"), place_);
     form->addRow(QStringLiteral("画面の色"), screen_);
     form->addRow(QStringLiteral("ページの値"), values_);
     form->addRow(QStringLiteral("校正の値"), proof_);
     form->addRow(QStringLiteral("選択範囲"), selection_);
+    form->addRow(QStringLiteral("ものさし"), ruler_);
+    ruler_->setToolTip(QStringLiteral("ものさしツールの線: 角度（A）・長さ（L1・分度器の L2）・幅（W）・高さ（H）・始点（X・Y）"));
     place_->setToolTip(QStringLiteral("ポインターの位置（mm と、原稿の解像度の画素）"));
     values_->setToolTip(QStringLiteral("ページの色モードの値（genko inspect --pixel・ステータスバーと同じ）"));
     proof_->setToolTip(QStringLiteral("色の校正のプロファイルでの値（CMYK はインキの %）"));
@@ -306,6 +309,21 @@ void InfoPanel::show_at(std::optional<QPointF> mm) {
     } catch (const std::exception&) {
         proof_->setText(QStringLiteral("—"));
     }
+}
+
+void InfoPanel::show_ruler(const std::optional<core::Json>& r) {
+    if (!r) {
+        ruler_->setText(QStringLiteral("—"));
+        return;
+    }
+    const auto num = [&](const char* key) { return r->at(key).get<double>(); };
+    QString text = QStringLiteral("A %1°  L1 %2 mm（%3 px）").arg(num("angle"), 0, 'f', 1).arg(num("l1_mm"), 0, 'f', 2).arg(num("l1"), 0, 'f', 0);
+    if (r->at("protractor").get<bool>()) text += QStringLiteral("  L2 %1 mm（%2 px）").arg(num("l2_mm"), 0, 'f', 2).arg(num("l2"), 0, 'f', 0);
+    text += QStringLiteral("\nW %1  H %2 mm  X %3  Y %4 mm").arg(num("w_mm"), 0, 'f', 2).arg(num("h_mm"), 0, 'f', 2).arg(num("x_mm"), 0, 'f', 2).arg(num("y_mm"), 0, 'f', 2);
+    if (r->at("units").get<std::string>() != "pixels") {
+        text += QStringLiteral("\n計測スケールで %1 %2").arg(num("length"), 0, 'f', 2).arg(QString::fromStdString(r->at("units").get<std::string>()));
+    }
+    ruler_->setText(text);
 }
 
 void InfoPanel::show_selection() {

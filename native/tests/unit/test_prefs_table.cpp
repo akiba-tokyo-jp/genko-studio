@@ -45,7 +45,7 @@ const std::vector<std::string>& app_keys() {
         "ui/brush_preview", "ui/commandbar", "ui/cross_drawing", "ui/cursor", "ui/font_pt", "ui/gpu_canvas", "ui/gpu_memory_mb", "ui/hints", "ui/key_set", "ui/key_set_told",
         "ui/layer_details", "ui/mono_icons", "ui/next_steps", "ui/phone_view", "ui/quick", "ui/radial", "ui/raise_requests",
         "ui/reduce_motion", "ui/rest_minutes", "ui/stage", "ui/surround", "ui/theme", "ui/tool_names", "ui/ui_font", "ui/workspace",
-        "view/checker_colors", "view/checker_dark", "view/checker_light", "view/checker_size", "view/gamut_color", "view/gamut_opacity",
+        "view/show_count", "view/show_notes", "view/checker_colors", "view/checker_dark", "view/checker_light", "view/checker_size", "view/gamut_color", "view/gamut_opacity",
         "warp/mesh", "workspaces/ペン入れ", "workspaces/ペン入れ/geometry", "workspaces/ペン入れ/state"};
     return all;
 }

@@ -223,6 +223,9 @@ std::vector<Pref> make_table() {
         boolean("view.grid", "guides/grid", false, "グリッドを表示", Apply::NewWindow),
         boolean("view.snapToGrid", "guides/grid_snap", false, "グリッドにスナップ", Apply::NewWindow),
         boolean("view.snapTo.*", "snap/*", true, "スナップ先", Apply::NewWindow),
+        // (PC5 J-c・J-d1: 表示 → 表示・非表示 ▸ 注釈・カウント)
+        boolean("view.show.notes", "view/show_notes", true, "注釈を表示", Apply::NewWindow),
+        boolean("view.show.count", "view/show_count", true, "カウントを表示", Apply::NewWindow),
         // state (what the tools and the windows remember)
         memory("state.3d.*", "3d/*"),
         memory("state.ai.*", "ai/*"),

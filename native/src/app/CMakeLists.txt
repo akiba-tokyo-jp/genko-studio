@@ -209,6 +209,9 @@ genko_library(genko_app
     main_window_notes.cpp
     notes_panel.cpp
     canvas_notes.cpp
+    # PC5 J-d1 (計測: the count marks and the ものさしツール on the canvas, the window's commands)
+    canvas_measure.cpp
+    main_window_measure.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

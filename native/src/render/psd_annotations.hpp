@@ -66,4 +66,26 @@ bool read(core::Page& page, std::string_view data, const psd_production::ReadCon
 std::optional<std::string> write(const core::Page& page, const psd_production::WriteContext& context);
 std::string fingerprint(const core::Page& page, const core::Document* doc);
 
+// --- PC5 J-d1 (measure@1, SPEC.md PROD-01「計測」): the measurement scale — image resource 1074, a versioned descriptor
+// (version 16) of pixelLength, logicalLength (doubles) and logicalUnits (text): Photoshop's scripting names, as PhotoCraft
+// v0.2.0's annotations_map.rs:279-330 reads them (its four-character ids PxlL, LglL, LglU too, and one object deep) — and
+// the count, resource 1080 (its form not public): kept as it was while the page has no count marks of its own, not written
+// once it has (they would say otherwise; PhotoCraft's). The scale's pixel_length is the file's pixels in the file and the
+// page's in the book (each through the file's canvas on the page). Read when the page has no scale yet and keeps no earlier
+// PSD's blocks; a scale of 1 pixels = 1 pixels is none (the block kept as it was); written while the page has one — the
+// block's own bytes while it is the one read (psd_production's mark).
+
+inline constexpr int kScaleResource = 1074;
+inline constexpr int kCountResource = 1080;
+
+// The scale a 1074 holds (none: not one this build reads).
+std::optional<core::MeasurementScale> scale_of(std::string_view data);
+// A 1074 of the scale (even length).
+std::string scale_block(const core::MeasurementScale& scale);
+bool read_scale(core::Page& page, std::string_view data, const psd_production::ReadContext& context);
+std::optional<std::string> write_scale(const core::Page& page, const psd_production::WriteContext& context);
+std::string scale_fingerprint(const core::Page& page, const core::Document* doc);
+// 1080's row: the kept count not written while the page has its own marks.
+bool counts_own(const core::Page& page);
+
 }  // namespace genko::render::psd_annotations

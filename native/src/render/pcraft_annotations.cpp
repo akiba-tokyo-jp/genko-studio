@@ -123,6 +123,8 @@ void read(const Json& value, pcraft_production::ReadContext& context) {
     context.page->annotations = std::move(notes);
 }
 
+std::array<int, 3> rgb_of_color(const pcraft::Color& color) { return rgb_of(color); }
+
 std::optional<Json> write(const core::Page& page, pcraft_production::WriteContext& context) {
     if (page.annotations.empty()) return std::nullopt;
     const auto px = [&](double mm) { return core::py_round(mm * context.px, 3); };
