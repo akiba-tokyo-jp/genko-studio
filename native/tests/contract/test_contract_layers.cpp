@@ -316,6 +316,9 @@ private slots:
         }
         const core::Document open = run(doc, op("set_layer", {{"id", "p"}, {"lock_all", false}}));
         QVERIFY(refusal(open, op("set_layer", {{"id", "p"}, {"opacity", 0.5}})).empty());
+        // (one of the three locks taken off — as a client knowing only them unlocks a PSD's layer locked all — takes すべて off)
+        QVERIFY(!find(run(doc, op("set_layer", {{"id", "p"}, {"locked", false}})), "p")->lock_all);
+        QVERIFY(find(run(doc, op("set_layer", {{"id", "p"}, {"locked", true}})), "p")->lock_all);
         // set_layers' レイヤーをロック… too, and lock_nest kept
         const core::Document both = run(doc, op("set_layers", {{"ids", Json::array({"q"})}, {"lock_all", true}, {"lock_nest", true}}));
         QVERIFY(find(both, "q")->lock_all && find(both, "q")->lock_nest);

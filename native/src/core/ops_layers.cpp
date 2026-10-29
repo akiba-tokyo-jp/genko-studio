@@ -326,7 +326,11 @@ void set_layer_with(Document& doc, const Json& op) {
     if (has(op, "locked")) layer.locked = py_truthy(op["locked"]);
     if (has(op, "lock_position")) layer.lock_position = py_truthy(op["lock_position"]);  // (transform@1, PC3 C-d: 位置をロック)
     // (layer-locks@1, PC5 I-a: すべてをロック, and the artboards' auto-nesting lock — kept for PSD and .pcraft)
-    if (has(op, "lock_all")) layer.lock_all = py_truthy(op["lock_all"]);
+    if (has(op, "lock_all")) {
+        layer.lock_all = py_truthy(op["lock_all"]);
+    } else if ((has(op, "locked") && !layer.locked) || (has(op, "lock_alpha") && !layer.lock_alpha) || (has(op, "lock_position") && !layer.lock_position)) {
+        layer.lock_all = false;  // (one of the three locks taken off: すべて no longer holds — as a client knowing only the three unlocks)
+    }
     if (has(op, "lock_nest")) layer.lock_nest = py_truthy(op["lock_nest"]);
     if (has(op, "blend_channels")) {  // (blend-channels@1, PC5 I-a: a layer's — a folder's are not drawn here)
         layer.blend_channels = channel_flags(page, op["blend_channels"]);

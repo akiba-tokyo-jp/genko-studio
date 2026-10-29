@@ -503,7 +503,7 @@ Photoshop の文字（テキストレイヤー・文字と段落の属性・ス�
 
 ## ロックとチャンネル（layer-locks@1・blend-channels@1。SPEC AUTO-01、PC5 I-a）
 
-- **層の `"lock_all": true`**（層の鍵の `group` の後）: すべてをロック。`locked`・`lock_alpha`・`lock_position` とは別に持つ（どれもそのまま）。`false` は書かない。
+- **層の `"lock_all": true`**（層の鍵の `group` の後）: すべてをロック。`locked`・`lock_alpha`・`lock_position` とは別に持つ（どれもそのまま。`set_layer` でその 3 つのどれかを `false` にすると、`lock_all` を言わないかぎり外れる）。`false` は書かない。
 - **層の `"lock_nest": true`**（`lock_all` の後）: アートボードの内外への自動ネストを防ぐ（PSD・.pcraft との往復のため。描画にも op にも効かない）。`false` は書かない。
 - **層の `"blend_channels"`**（`lock_nest` の後）: `[bool, …]`。ページの色のチャンネルの数（RGB（8 bit・高精度）3、CMYK 4、Lab 3、グレー 1）だけ持ち、`false` のチャンネルはその層を描くとき下の値のまま。少なくとも 1 つは `false`（全部 `true` は書かない）。フォルダー（グループ）と、モノクロ 2 階調・インデックス・ダブルトーン・マルチチャンネルのページの層は持てない。
 - 書き手は、書くページとスマートオブジェクトの中身のページのどれかの層が `lock_all` か `lock_nest` を持てば `features` に `layer-locks@1` を、`blend_channels` を持てば `blend-channels@1` を加え、無くなれば外す。持たない原稿は今と同じバイトで書き、同じ画素で描く。
