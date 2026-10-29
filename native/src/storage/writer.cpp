@@ -587,8 +587,7 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     core::validate_layer_comps(doc);
     core::validate_slices(doc);
     core::validate_annotations(doc);
-    core::validate_measure(doc);
-    core::validate_timeline(doc);
+    core::validate_measure(doc);  // (timeline@1, video@1: named only for a work area, an fps, a video row of their shapes)
     const std::pair<std::string_view, bool> pc5j[] = {{core::kLayerCompsFeature, core::uses_layer_comps(doc)},
                                                       {core::kSlicesFeature, core::uses_slices(doc)},
                                                       {core::kAnnotationsFeature, core::uses_annotations(doc)},

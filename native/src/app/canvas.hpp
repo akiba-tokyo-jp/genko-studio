@@ -4,8 +4,10 @@
 #include <QImage>
 #include <QPointF>
 #include <QPointer>
+#include <QRectF>
 #include <QRegion>
 #include <QTimer>
+#include <QTransform>
 #include <QVector>
 #include <QWidget>
 
@@ -485,13 +487,21 @@ public:
 
     // (PC5 J-0, SPEC.md PROD-01「エクストラ」) What the production draws over the page it shows — the slices (J-b), the notes
     // (J-c), the count marks and the ruler tool's line (J-d1) —: one painter a key (the 表示 → 表示・非表示 ▸ item that shows
-    // it: "slices", "notes", "count", "ruler"), each given the page, where a place of it (mm) is drawn (`at`) and the
-    // screen's pixels a mm (lines and words the same size at any zoom: drawn in the screen's pixels). Drawn after the
-    // selection, before the tools' handles; not on the pictures written or printed. `extras_shown` is エクストラ's master
-    // switch (節 H's H-b: it hides them all), show_extra one's own.
+    // it: "slices", "notes", "count", "ruler"), each given the page and the view (ExtraView): lines and words the same size at
+    // any zoom (drawn in the screen's pixels). Drawn after the selection, before the tools' handles; not on the pictures
+    // written or printed. `extras_shown` is エクストラ's master switch (節 H's H-b: it hides them all), show_extra one's own.
+    // The painter turns and flips with the view (as the guides do: a word drawn on it is mirrored while the view is flipped —
+    // a painter drawing words draws them at `at`'s point with the painter's turn undone, if they must read). Each canvas of
+    // the app has its own painters (a new window's canvas too: the group adds them where the canvas is made).
+    struct ExtraView {
+        QTransform at;       // a place of the page (mm) → where the painter draws it
+        double per_mm = 1;   // the screen's pixels a mm
+        QRectF seen_mm;      // the part of the page in sight (mm): draw only what meets it (256 groups × 10000 marks)
+        QRegion painting;    // the part of the canvas painted again (the canvas's own pixels; empty: all of it)
+    };
     struct CanvasExtra {
         QString key;
-        std::function<void(QPainter& painter, const core::Page& page, const std::function<QPointF(QPointF)>& at, double per_mm)> paint;
+        std::function<void(QPainter& painter, const core::Page& page, const ExtraView& view)> paint;
     };
     void add_extra(CanvasExtra extra);  // (a key added again: its painter in place of the one before)
     void show_extra(const QString& key, bool shown);

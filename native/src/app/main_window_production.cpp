@@ -1,9 +1,13 @@
 // The production's commands (PC5 節 J, SPEC.md PROD-01「制作の補助」): the frames J-0 puts in Photoshop's places — ページ
 // (Photoshop's イメージ) → 解析 ▸, レイヤー → ビデオレイヤー ▸, ウィンドウ's panels アクション・レイヤーカンプ・計測ログ・注釈 —,
 // each saying it is not in this build yet until its group writes it (J-a レイヤーカンプ, J-c 注釈, J-d1/J-d2 計測,
-// J-e2 ビデオレイヤー, J-g アクション). A group replaces a frame by making the command again under the same attribute
-// (make(): the later action the menus hold, its name and keys the same) — or, for a panel, by its dock's own toggle in
-// build_production_docks.
+// J-e2 ビデオレイヤー, J-g アクション). A group makes a frame real by taking its rows out of the tables below and making
+// the command in its own build_* under the same attribute (its menus here keep taking it by action()); a panel's row goes
+// for its dock's own toggle in build_production_docks. (make() puts a command made again under an attribute in the old
+// one's places and lets the old one go, so a row left behind never answers in its place — whichever is made first.)
+// Keys: none here. 計測値を記録 is Photoshop's Shift+Ctrl+M, which is コマを結合（割る前に戻す）'s (act_merge) in both key sets
+// (H-0's key_sets): J-d2 gives it only in the Photoshop set and only with act_merge's key there moved (a decision to ask);
+// アクション's Alt+F9 is free in both.
 
 #include <QAction>
 #include <QMenu>

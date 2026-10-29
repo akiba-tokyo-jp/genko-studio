@@ -290,10 +290,15 @@ std::vector<QString> PageCanvas::extra_keys() const {
 void PageCanvas::draw_extras(QPainter& painter) const {
     const core::Page* p = page();
     if (!extras_shown || p == nullptr || extras_.empty()) return;
+    ExtraView view;
+    view.at = QTransform(view_.scale, 0, 0, view_.scale, view_.pan.x(), view_.pan.y());  // (pt: page mm → the unturned view)
+    view.per_mm = view_.scale;
+    view.seen_mm = seen_mm();
+    view.painting = painting_;
     for (const CanvasExtra& e : extras_) {
         if (!e.paint || !extra_shown(e.key)) continue;
         painter.save();
-        e.paint(painter, *p, [this](QPointF mm) { return pt(mm.x(), mm.y()); }, view_.scale);
+        e.paint(painter, *p, view);
         painter.restore();
     }
 }

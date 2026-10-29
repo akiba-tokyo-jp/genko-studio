@@ -1973,8 +1973,8 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
     }
     ctx.page().native_source = std::move(source);
 
-    // PC5 節 J (render/pcraft_production): the layer comps, notes, slices, timeline and measuring onto the page — each by its
-    // group's row; one not read yet left out and said
+    // PC5 節 J (render/pcraft_production): the layer comps, notes, slices, timeline, variables (節 I) and measuring onto the
+    // page — each by its group's row; one not read yet left out and said, in the order PC4 F-f said them
     {
         pcraft_production::ReadContext production;
         production.page = &ctx.page();
@@ -1982,8 +1982,6 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
         production.say = [&ctx](std::string note) { ctx.notes.add(std::move(note)); };
         pcraft_production::read(d, production);
     }
-    // what Genko has no place for yet (PC5's), said
-    if (const Json* variables = optional_field(d, "variables"); variables != nullptr && !empty_value(*variables)) ctx.notes.add("変数とデータセットは Genko に無いため外しました");
     if (const Json* styles = optional_field(d, "text_styles")) {  // (the basic paragraph style every document has: nothing to say)
         const Json* character = optional_field(*styles, "character");
         const Json* paragraph = optional_field(*styles, "paragraph");

@@ -73,6 +73,7 @@
 #include "render/psd.hpp"
 #include "render/psd_adjust.hpp"
 #include "render/psd_image.hpp"
+#include "render/psd_production.hpp"
 #include "render/smart_decode.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
@@ -1015,6 +1016,119 @@ private slots:
     // and read back keeps them (its assets, psd-keep@1), and writes the same file; the effects said (the report, the
     // notes); a layer deleted drops the comps and slices that name it, a merge drops what the merged layer kept, a
     // duplicate keeps it (its layer id written once).
+    // PC5 J-0 (render/psd_production): the PSD's blocks the production copies, through a table the test sets (J-a's 1065 and
+    // J-c's Anno stood in for). keep.psd's 1065 and Anno read onto the page are kept marked copied with what the page held;
+    // written while the page's are as read, the file's own bytes come back (and the kept bytes are lent to the writer: Anno's
+    // sound notes); changed, the page's own; gone, neither. A file without layers (an indexed page's flat PSD) has no 1065
+    // (it names layers). The table is asked once a file. A book saved keeps the marks.
+    void copiedBlocksComeBackOrAnew() {
+        namespace core = genko::core;
+        namespace pp = genko::render::psd_production;
+        static int asked = 0;
+        static bool lent = false;
+        static const pp::Row rows[] = {
+            {1065, {}, "J-a", true,
+             [](core::Page& page, std::string_view data, const pp::ReadContext& context) {
+                 if (context.layers.empty()) return false;  // (its layers: the lyids read)
+                 core::LayerComps comps;
+                 core::LayerComp comp;
+                 comp.id = 1;
+                 comp.name = "read " + std::to_string(data.size());
+                 comps.comps.push_back(comp);
+                 page.layer_comps = comps;
+                 return true;
+             },
+             [](const core::Page& page, const pp::WriteContext& context) -> std::optional<std::string> {
+                 if (!page.layer_comps || page.layer_comps->empty() || context.lyids.empty()) return std::nullopt;
+                 return "own " + page.layer_comps->comps[0].name;
+             },
+             [](const core::Page& page) { return page.layer_comps && !page.layer_comps->empty() ? pp::fingerprint_of(core::to_json(*page.layer_comps)) : std::string(); },
+             nullptr},
+            {-1, "Anno", "J-c", false,
+             [](core::Page& page, std::string_view, const pp::ReadContext&) {
+                 core::Annotation note;
+                 note.id = "an_000000000001";
+                 note.text = "read";
+                 note.modified = "2026-10-29T00:00:00Z";
+                 page.annotations.push_back(note);
+                 return true;
+             },
+             [](const core::Page& page, const pp::WriteContext& context) -> std::optional<std::string> {
+                 if (page.annotations.empty()) return std::nullopt;
+                 lent = context.kept_global && context.kept_global("Anno").has_value();  // (its sound notes there)
+                 return "own " + page.annotations[0].text;
+             },
+             [](const core::Page& page) { return page.annotations.empty() ? std::string() : pp::fingerprint_of(core::to_json(page.annotations)); },
+             [](const core::Page&) {
+                 ++asked;
+                 return false;
+             }},
+        };
+        const pp::TableForTest table(rows);
+        const std::string source = keep_file("keep.psd");
+        const psd::File src = psd::File::read(source);
+        std::map<unsigned, std::string> src_resources;
+        for (const auto& r : src.resources()) src_resources[r.id] = std::string(r.data);
+        std::map<std::string, std::string> src_globals;
+        for (const auto& g : src.global_blocks()) src_globals[g.key] = std::string(g.data);
+        genko::formats::Opened opened = genko::formats::open_file(source, "keep.psd");
+        core::Document& doc = opened.doc;
+        {
+            const core::Page& page = doc.page(0);
+            QVERIFY(page.layer_comps && page.layer_comps->comps[0].name == "read " + std::to_string(src_resources[1065].size()));
+            QCOMPARE(page.annotations.size(), std::size_t(1));
+            QVERIFY(page.native_psd);
+            QCOMPARE(page.native_psd->copied.size(), std::size_t(2));  // (1065 and Anno, still kept)
+            QVERIFY(std::any_of(page.native_psd->resources.begin(), page.native_psd->resources.end(), [](const core::PsdResource& r) { return r.id == 1065; }));
+        }
+        QDir().mkpath(path(QStringLiteral("copied")));
+        const auto written = [&](const core::Document& book, const char* name) {
+            const QString at = path(QStringLiteral("copied/%1.psd").arg(QString::fromLatin1(name)));
+            asked = 0;
+            (void)genko::formats::export_page_psd(book, book.page(0), genko::storage::path_from_utf8(at.toStdString()), 150);
+            QCOMPARE(asked, 1);  // (the table asked once a file)
+            const psd::File out = psd::File::read(genko::test::read_bytes(at));
+            std::map<std::string, std::string> blocks;
+            for (const auto& r : out.resources()) blocks[std::to_string(r.id)] = std::string(r.data);
+            for (const auto& g : out.global_blocks()) blocks[g.key] = std::string(g.data);
+            return blocks;
+        };
+        // as read: the file's own bytes
+        auto blocks = written(doc, "same");
+        QVERIFY(blocks["1065"] == src_resources[1065]);
+        QVERIFY(blocks["Anno"] == src_globals["Anno"]);
+        // changed: the page's own (the kept bytes lent to the writer)
+        core::Document changed = doc;
+        changed.edit_page(0).layer_comps->comps[0].name = "renamed";
+        changed.edit_page(0).annotations[0].text = "edited";
+        lent = false;
+        blocks = written(changed, "changed");
+        QCOMPARE(blocks["1065"], std::string("own renamed"));
+        QCOMPARE(blocks["Anno"], std::string("own edited"));
+        QVERIFY(lent);
+        // gone: neither
+        core::Document gone = doc;
+        gone.edit_page(0).layer_comps.reset();
+        gone.edit_page(0).annotations.clear();
+        blocks = written(gone, "gone");
+        QVERIFY(!blocks.contains("1065") && !blocks.contains("Anno"));
+        QVERIFY(blocks.contains("1050") && blocks.contains("Patt"));  // (the others kept as before)
+        // a file without layers: no 1065
+        const core::Document indexed =
+            genko::core::CommandBus(genko::render::ops_registry()).apply(doc, Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"colors", 8}}}), core::Actor()).doc;
+        QVERIFY(indexed.page(0).rgb && indexed.page(0).rgb->table);
+        blocks = written(indexed, "flat");
+        QVERIFY(!blocks.contains("1065"));
+        // saved and read back: the marks kept
+        const QString book = path(QStringLiteral("copied/book.genko"));
+        genko::test::write_project(doc, genko::storage::path_from_utf8(book.toStdString()));
+        const auto loaded = genko::storage::load_document(genko::storage::path_from_utf8(book.toStdString()));
+        QVERIFY2(loaded.document.read_only_reason.empty(), loaded.document.read_only_reason.c_str());
+        QCOMPARE(loaded.document.page(0).native_psd->copied, doc.page(0).native_psd->copied);
+        blocks = written(loaded.document, "loaded");
+        QVERIFY(blocks["1065"] == src_resources[1065]);
+    }
+
     void keptBlocksComeBack() {
         namespace core = genko::core;
         namespace fs = std::filesystem;

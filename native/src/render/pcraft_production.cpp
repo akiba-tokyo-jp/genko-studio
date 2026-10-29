@@ -25,12 +25,14 @@ bool measuring(const core::Json& v) {
     return (counts != nullptr && holds_something(*counts)) || pcraft::optional_field(v, "ruler") != nullptr;
 }
 
-// (each group puts its reader and writer here: J-a layer_comps, J-b slices, J-c notes, J-d1 measurement, J-e1 timeline)
-constexpr std::array<Row, 5> kRows{{
+// (each group puts its reader and writer here: J-a layer_comps, J-b slices, J-c notes, J-d1 measurement, J-e1 timeline;
+// 節 I's variables — I-d — among them, where PC4 F-f's notes said it: the notes in the order they had)
+constexpr std::array<Row, 6> kRows{{
     {"layer_comps", "レイヤーカンプ", holds_something, nullptr, nullptr},
     {"notes", "注釈", holds_something, nullptr, nullptr},
     {"slices", "スライス", holds_something, nullptr, nullptr},
     {"timeline", "タイムライン", holds_something, nullptr, nullptr},
+    {"variables", "変数とデータセット", holds_something, nullptr, nullptr},
     {"measurement", "計測（カウント・ものさし）", measuring, nullptr, nullptr},
 }};
 

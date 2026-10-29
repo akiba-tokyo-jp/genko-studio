@@ -578,11 +578,25 @@ private slots:
             QVERIFY2(w->last_notice().contains(QStringLiteral("この版ではまだ使えません")) && w->last_notice().contains(a->text()), qPrintable(w->last_notice()));
         }
         QCOMPARE(studio.doc().revision, revision);
+        // (P2-3: one command an attribute — a frame made real takes its place: make() lets the old one go —, and the keys'
+        // window, the search and the keys laid again find the command the menus hold)
+        std::map<QString, int> made;
+        for (QAction* a : w->findChildren<QAction*>()) {
+            const QString attribute = a->property("genko_attribute").toString();
+            if (!attribute.isEmpty()) ++made[attribute];
+        }
+        for (const auto& [attribute, count] : made) QVERIFY2(count == 1, qPrintable(attribute));
+        const std::vector<QAction*> listed = genko::app::preferences::commands(w);
+        for (const char* name : {"act_measure_record", "act_measure_scale_custom", "act_measure_data_points", "act_video_rasterize", "act_panel_notes"}) {
+            QAction* own = studio.act(name);
+            QVERIFY2(std::find(listed.begin(), listed.end(), own) != listed.end(), name);
+        }
         // the extras: a painter a key, over the page, shown and hidden
         PageCanvas* canvas = w->canvas();
         int drawn = 0;
-        canvas->add_extra({QStringLiteral("count"), [&drawn](QPainter&, const core::Page&, const std::function<QPointF(QPointF)>& at, double per_mm) {
-                               if (per_mm > 0 && at(QPointF(10, 10)) != at(QPointF(20, 20))) ++drawn;
+        canvas->add_extra({QStringLiteral("count"), [&drawn](QPainter&, const core::Page&, const PageCanvas::ExtraView& view) {
+                               if (view.per_mm > 0 && view.at.map(QPointF(10, 10)) != view.at.map(QPointF(20, 20)) && view.seen_mm.contains(QPointF(10, 10)))
+                                   ++drawn;
                            }});
         QCOMPARE(canvas->extra_keys(), std::vector<QString>{QStringLiteral("count")});
         (void)canvas->grab();

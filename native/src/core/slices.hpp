@@ -54,7 +54,8 @@ struct Slices {
     std::int64_t next_id = 1;
     std::vector<Slice> list;
 
-    bool empty() const { return list.empty(); }
+    // (none at all: every slice deleted keeps the numbering — next_id, group — the page had, written with the page)
+    bool empty() const { return list.empty() && next_id == 1 && group.empty(); }
     bool operator==(const Slices&) const = default;
 };
 

@@ -1719,8 +1719,11 @@ core::Document Reader::migrate(const Json& payload) {
     // (PC5 G-0: type@1's records, type layers and type styles, each in its normal form)
     try { core::type_text::validate_type(doc); }
     catch (const core::Error& error) { issue("broken_value", "/story", {}, error.what()); }
-    // (PC5 J-0: timeline@1's work area and fps, video@1's video rows, in a page's anim — kept as read)
-    try { core::validate_timeline(doc); }
+    // (PC5 J-0: timeline@1's work area, video@1's video rows, in a page's anim of a book that names them — kept as read)
+    try {
+        const auto named = [&](std::string_view f) { return std::find(doc.features.begin(), doc.features.end(), f) != doc.features.end(); };
+        core::validate_timeline(doc, named(core::kTimelineFeature), named(core::kVideoFeature));
+    }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     return doc;
 }

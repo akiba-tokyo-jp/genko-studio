@@ -57,14 +57,21 @@ void check_footage(const Json& footage, const std::string& where) {
 bool timeline_fps(const Json& fps) {
     if (!fps.is_number() || fps.is_boolean()) return false;
     const double v = fps.get<double>();
-    if (!std::isfinite(v) || v <= 0) return false;  // (what the anims before it may hold: read as they are, fps or 12)
-    return v != std::floor(v) || v > 60;
+    // (1..60 — whole or not: set_animation takes any number there — and what no op makes, past 0.5..120: the anims before it)
+    return std::isfinite(v) && ((v >= kTimelineFpsMin && v < 1) || (v > 60 && v <= kTimelineFpsMax));
+}
+
+bool timeline_work(const Json& work) {
+    if (!work.is_array() || work.size() != 2) return false;
+    const auto frame = [](const Json& v) { return v.is_number_integer() && !v.is_number_unsigned() ? v.get<std::int64_t>() : std::int64_t{0}; };
+    const std::int64_t first = frame(work[0]), last = frame(work[1]);
+    return first >= 1 && first <= last && last <= anim::kMaxFrames;
 }
 
 bool page_uses_timeline(const Page& page) {
     const Json* spec = anim::spec(page);
     if (spec == nullptr) return false;
-    if (spec->contains("work")) return true;
+    if (const auto work = spec->find("work"); work != spec->end() && timeline_work(*work)) return true;
     const auto fps = spec->find("fps");
     return fps != spec->end() && timeline_fps(*fps);
 }
@@ -75,23 +82,27 @@ bool page_uses_video(const Page& page) {
     const auto tracks = spec->find("tracks");
     if (tracks == spec->end() || !tracks->is_array()) return false;
     for (const Json& track : *tracks) {
-        if (track.is_object() && track.contains("video")) return true;
+        if (!track.is_object() || !track.contains("video")) continue;
+        try {
+            check_video(track.at("video"));
+            return true;
+        } catch (const Error&) {  // (not a video row: what an anim before it may hold, kept as it is)
+        }
     }
     return false;
 }
 
-void check_timeline(const Json& anim) {
+void check_timeline(const Json& anim, bool video) {
     if (!anim.is_object()) return;
-    if (const auto fps = anim.find("fps"); fps != anim.end() && timeline_fps(*fps)) {
-        (void)pj::number(*fps, "anim.fps", kTimelineFpsMin, kTimelineFpsMax);
-    }
+    // (its fps is not looked at: any value an anim before it held — a hand-written 240.5, a 0 — is read as anim reads it, and
+    // only 0.5..1 and 60..120 name timeline@1)
     if (const auto work = anim.find("work"); work != anim.end()) {
         if (!work->is_array() || work->size() != 2) pj::wrong("anim.work", "must be [first, last] (frames from 1)");
         const std::int64_t first = pj::integer((*work)[0], "anim.work", 1, anim::kMaxFrames);
         const std::int64_t last = pj::integer((*work)[1], "anim.work", 1, anim::kMaxFrames);
         if (first > last) pj::wrong("anim.work", "must have its first frame at or before its last");
     }
-    if (const auto tracks = anim.find("tracks"); tracks != anim.end() && tracks->is_array()) {
+    if (const auto tracks = anim.find("tracks"); video && tracks != anim.end() && tracks->is_array()) {
         for (const Json& track : *tracks) {
             if (track.is_object() && track.contains("video")) check_video(track.at("video"));
         }
@@ -132,9 +143,16 @@ bool uses_video(const Document& doc) {
     return false;
 }
 
-void validate_timeline(const Document& doc) {
-    const auto check = [](const Page& page) {
-        if (const Json* spec = anim::spec(page); spec != nullptr && (page_uses_timeline(page) || page_uses_video(page))) check_timeline(*spec);
+void validate_timeline(const Document& doc, bool timeline, bool video) {
+    if (!timeline && !video) return;
+    const auto check = [&](const Page& page) {
+        const Json* spec = anim::spec(page);
+        if (spec == nullptr) return;
+        if (timeline) {
+            check_timeline(*spec, video);
+        } else {
+            check_timeline(Json{{"tracks", spec->contains("tracks") ? spec->at("tracks") : Json::array()}}, true);
+        }
     };
     for (const PagePtr& page : doc.pages)
         if (page) check(*page);

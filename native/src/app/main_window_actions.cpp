@@ -353,6 +353,20 @@ QAction* MainWindow::make(const QString& attribute, const QString& title, std::f
     act->setProperty("genko_attribute", attribute);  // (the help names its menus and keys through it: help.cpp)
     connect(act, &QAction::triggered, this, [slot = std::move(slot)](bool) { slot(); });
     addAction(act);  // (its keys work wherever the window has the focus)
+    // (PC5 J-0: a command made again under an attribute — a frame a group made real — takes the old one's places in the
+    // menus and bars, and the old one goes: never two commands of one attribute for the keys, the search or the help)
+    if (const auto before = actions_.find(attribute); before != actions_.end() && before->second != nullptr && before->second != act) {
+        QAction* old = before->second;
+        for (QObject* holder : old->associatedObjects()) {
+            auto* widget = qobject_cast<QWidget*>(holder);
+            if (widget == nullptr || widget == this) continue;
+            widget->insertAction(old, act);
+            widget->removeAction(old);
+        }
+        removeAction(old);
+        old->setParent(nullptr);
+        old->deleteLater();
+    }
     actions_[attribute] = act;
     return act;
 }

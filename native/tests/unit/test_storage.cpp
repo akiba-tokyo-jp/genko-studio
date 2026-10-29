@@ -18,6 +18,8 @@
 #include "core/error.hpp"
 #include "core/ids.hpp"
 #include "core/model.hpp"
+#include "core/actor.hpp"
+#include "core/command_bus.hpp"
 #include "core/video.hpp"
 #include "core/strokes.hpp"
 #include "storage/asset_store.hpp"
@@ -694,11 +696,49 @@ private slots:
         QVERIFY(!back.extra.contains("layer_comps") && !back.extra.contains("measure"));
         genko::test::write_project(read.document, out);
         QCOMPARE(genko::storage::read_file(out / "project.json"), text);
-        // the fps of the anims before it (a whole number of 1..60, or what Python's held) names nothing
-        for (const Json& fps : {Json(12), Json(60), Json(12.0), Json(0), Json("12")}) {
+        // the fps of the anims before it names nothing: any number of 1..60 (set_animation takes 8.5 as it is), and what no op
+        // makes but a book may hold (a 0, a 240.5, a word); only 0.5..1 and 60..120 do. A "work" or a "video" of another shape
+        // is an anim's before them too: kept, naming nothing.
+        for (const Json& fps : {Json(12), Json(60), Json(12.0), Json(8.5), Json(59.94), Json(1), Json(0), Json(0.3), Json(240.5), Json("12")}) {
             core::Page plain = doc.page(0);
             plain.extra["anim"] = Json{{"fps", fps}, {"frames", 24}, {"tracks", Json::array()}};
             QVERIFY2(!core::page_uses_timeline(plain), core::dump_python(fps).c_str());
+        }
+        for (const Json& fps : {Json(0.5), Json(0.75), Json(60.5), Json(120)}) {
+            core::Page fast = doc.page(0);
+            fast.extra["anim"] = Json{{"fps", fps}, {"frames", 24}, {"tracks", Json::array()}};
+            QVERIFY2(core::page_uses_timeline(fast), core::dump_python(fps).c_str());
+        }
+        {
+            core::Page odd = doc.page(0);
+            odd.extra["anim"] = Json{{"fps", 12}, {"work", "all"}, {"tracks", Json::array({Json{{"folder", "l1"}, {"cels", Json::array()}, {"video", 1}}})}};
+            QVERIFY(!core::page_uses_timeline(odd) && !core::page_uses_video(odd));
+        }
+        // set_animation's fps 8.5 (the op as it is, "8.5" given as words too): the book written as before — no feature, the
+        // same bytes again — and an anim of the shapes before them (a hand-written 240.5, a "work" of words) opened as before
+        for (const Json& given : {Json(8.5), Json("8.5")}) {
+            const core::Document animated =
+                core::CommandBus().apply(base.document, Json::array({Json{{"op", "set_animation"}, {"page", 1}, {"fps", given}, {"frames", 24}}}), core::Actor()).doc;
+            QCOMPARE(animated.page(0).extra["anim"]["fps"].get<double>(), 8.5);
+            const fs::path at = to_path(tmp.path()) / "fps85.genko";
+            genko::test::write_project(animated, at);
+            const std::string bytes = genko::storage::read_file(at / "project.json");
+            const auto back = genko::storage::load_document(at);
+            QVERIFY2(back.document.read_only_reason.empty(), back.document.read_only_reason.c_str());
+            QVERIFY(back.document.features.empty());
+            genko::test::write_project(back.document, at);
+            QCOMPARE(genko::storage::read_file(at / "project.json"), bytes);
+        }
+        {
+            Json old = payload;
+            old["pages"][0]["anim"] = Json{{"fps", 240.5}, {"frames", 24}, {"work", "all"}, {"tracks", Json::array()}};
+            const fs::path at = make_book(tmp, "old_anim", old);
+            const auto opened = genko::storage::load_document(at);
+            QVERIFY2(opened.document.read_only_reason.empty(), opened.document.read_only_reason.c_str());
+            genko::test::write_project(opened.document, at);
+            const Json again = genko::core::parse_python_json(genko::storage::read_file(at / "project.json"));
+            QVERIFY(names_none(again["features"].get<std::vector<std::string>>()));
+            QCOMPARE(again["pages"][0]["anim"], old["pages"][0]["anim"]);
         }
         // values this build does not know: read-only, kept as read
         const auto broken = [&](const std::string& name, const std::function<void(Json&)>& twist, const std::string& pointer) {
@@ -718,12 +758,26 @@ private slots:
         broken("measure_group", [](Json& p) { p["measure"]["active_group"] = 3; }, "/pages/0/measure");
         broken("measure_marker", [](Json& p) { p["measure"]["count_groups"][0]["marker_size"] = 11; }, "/pages/0/measure");
         broken("work", [](Json& p) { p["anim"]["work"] = Json::array({12, 2}); }, "/pages");
-        broken("fps", [](Json& p) { p["anim"]["fps"] = 240.5; }, "/pages");
+        broken("work_words", [](Json& p) { p["anim"]["work"] = "all"; }, "/pages");
         broken("video_fit", [](Json& p) { p["anim"]["tracks"][0]["video"]["fit"] = "fill"; }, "/pages");
         broken("video_movie", [](Json& p) {  // (the user's decision 4: no video file)
             p["anim"]["tracks"][0]["video"]["footage"] = Json{{"kind", "movie"}, {"name", "a.mp4"}, {"frames", Json::array({"sha256:" + std::string(64, 'a')})},
                                                               {"fps", 30}, {"size_px", Json::array({4, 4})}, {"depth", 8}, {"alpha", "ignore"}, {"par", 1}};
         }, "/pages");
+        {  // (a book that names timeline@1 with an fps of the anims before it: read as it is)
+            Json fps = written;
+            fps["pages"][0]["anim"]["fps"] = 240.5;
+            const auto result = genko::storage::load_document(make_book(tmp, "fps_named", fps));
+            QVERIFY2(result.document.read_only_reason.empty(), result.document.read_only_reason.c_str());
+        }
+        {  // (slices@1: every slice deleted, its numbering kept — the next one is not numbered from 1 again)
+            core::Document cleared = doc;
+            cleared.edit_page(0).slices->list.clear();
+            const fs::path at = to_path(tmp.path()) / "cleared.genko";
+            genko::test::write_project(cleared, at);
+            const auto back = genko::storage::load_document(at);
+            QVERIFY(back.document.page(0).slices && back.document.page(0).slices->next_id == 3 && back.document.page(0).slices->group == "p001");
+        }
         {
             Json bad = written;
             bad["pages"][0]["layer_comps"]["comps"][0]["later"] = 1;
