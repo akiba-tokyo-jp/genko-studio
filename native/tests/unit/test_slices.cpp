@@ -303,7 +303,7 @@ private slots:
         QCOMPARE((*by_id(listed(promoted), id))["rect_px"], moved_at);
         // the layer deleted: its slice too, whichever op took it
         const core::Document gone = run(doc, op("delete_layer", {{"id", "a"}}));
-        QVERIFY(!gone.page(0).slices);
+        QVERIFY(gone.page(0).slices && gone.page(0).slices->list.empty());  // (the numbering kept: J-0's P3-2)
         // a fill or an adjustment layer: none
         core::Document filled = book();
         core::Layer fill;

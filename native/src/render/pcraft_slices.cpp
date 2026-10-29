@@ -50,7 +50,8 @@ std::string text(const Json& object, const char* key) {
 }  // namespace
 
 void read(const Json& value, pcraft_production::ReadContext& context) {
-    if (context.page == nullptr || value.is_null()) return;
+    // (none, or an empty list — serde reads the struct from a sequence too: its defaults —: no slices, nothing said)
+    if (context.page == nullptr || value.is_null() || (value.is_array() && value.empty())) return;
     core::Slices out;
     try {
         out.group = text(value, "groupName");

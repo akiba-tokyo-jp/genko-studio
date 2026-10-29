@@ -1318,11 +1318,16 @@ private slots:
         const core::Document deleted = applied(Json::array({Json{{"op", "delete_layer"}, {"page", 1}, {"id", plain->id}}}));
         const std::set<unsigned> left = resource_ids(deleted, QStringLiteral("deleted.psd"));
         // (PC5 J-a: the layer comps are the page's — read from 1065 —, kept when a layer is deleted: 1065 written still)
-        QVERIFY(left.contains(1065) && !left.contains(1050) && left.contains(1037) && left.contains(1054));
+        // (PC5 J-b: the slices are the page's too — read from 1050: keep.psd's one layer-based slice names 効果, still there —,
+        // so 1050 is written still; the layer it names deleted takes its slice, and 1050, with it)
+        QVERIFY(left.contains(1065) && left.contains(1050) && left.contains(1037) && left.contains(1054));
         // (Blend If is locked, lock all: unlocked first — 効果 too)
         const auto unlocked = [](const std::string& id) {
             return Json{{"op", "set_layer"}, {"page", 1}, {"id", id}, {"locked", false}, {"lock_alpha", false}, {"lock_position", false}};
         };
+        // (PC5 J-b: the layer its slice names deleted — 効果 —: the slice gone with it, no 1050)
+        QVERIFY(!resource_ids(applied(Json::array({unlocked(effects->id), Json{{"op", "delete_layer"}, {"page", 1}, {"id", effects->id}}})), QStringLiteral("no-slice.psd"))
+                     .contains(1050));
         const core::Document merged =
             applied(Json::array({unlocked(blend_if->id), unlocked(effects->id), Json{{"op", "merge_down"}, {"page", 1}, {"id", blend_if->id}}}));
         const core::Layer* into = layer_named(merged.page(0), "効果");
