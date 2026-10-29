@@ -565,8 +565,14 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(step ([0-9.]+): (\S+) cannot be a step .*)", "手順 \\1: \\2 は手順に入れられません（承認とページのロックは、人が画面でします）"));
         r.push_back(rule(R"(step ([0-9.]+): undo is not a step.*)", "手順 \\1: 元に戻すは手順に入れられません（手順の変更はまとめて元に戻せます）"));
         r.push_back(rule(R"(step ([0-9.]+): (\S+) is not an op an agent may run.*)", "手順 \\1: \\2 は AI が流せない操作です（MCP の apply_ops が受ける操作だけ）"));
-        r.push_back(rule(R"(step ([0-9.]+): not an op.*)", "手順 \\1 が操作の形ではありません（{\"op\": 操作の名前, …引数} で書きます）"));
-        r.push_back(rule(R"(line (\d+): (.*))", [](const QRegularExpressionMatch& m) {
+        r.push_back(rule(R"(step ([0-9.]+): (\S+) is a pseudo op and cannot be inside for_pages)",
+                         "手順 \\1: \\2 は手順の中だけの操作なので、for_pages の中には置けません（手順の上の段に置いてください）"));
+        r.push_back(rule(R"(the action was changed after it was bound: (.*))",
+                         "オートアクション「\\1」は結び付けた後で変わりました。スクリプトイベントマネージャーで選び直してください"));
+        r.push_back(rule(R"(the script's name is longer than (\d+) characters)", "スクリプトの名前が長すぎます（\\1 文字まで）"));
+        r.push_back(rule(R"(more than (\d+) files and folders to look through: choose fewer)", "見るファイルとフォルダーが多すぎます（\\1 個まで）"));
+        r.push_back(rule(R"(step ([0-9.]+): not an op.*)","手順 \\1 が操作の形ではありません（{\"op\": 操作の名前, …引数} で書きます）"));
+        r.push_back(rule(R"(steps, line (\d+): (.*))", [](const QRegularExpressionMatch& m) {
             return QStringLiteral("手順の %1 行目が読めません（%2）").arg(m.captured(1), reason(m.captured(2)));
         }));
         r.push_back(rule("the steps are larger than 1 MiB", "手順のファイルが大きすぎます（1 MiB まで）"));

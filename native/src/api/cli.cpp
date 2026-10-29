@@ -175,9 +175,10 @@ bool negative_number(const QString& text) {
     return ok && text.startsWith(QLatin1Char('-'));
 }
 
-// The error message, or nothing when the arguments are right.
+// The error message, or nothing when the arguments are right. `more`: `positionals` or more of them (PC5 I-0: `genko
+// batch <inputs…>`).
 std::optional<std::string> parse_arguments(const QStringList& args, std::span<const Option> options,
-                                           std::size_t positionals, const char* names, Arguments& out) {
+                                           std::size_t positionals, const char* names, Arguments& out, bool more = false) {
     for (qsizetype i = 0; i < args.size(); ++i) {
         const QString& arg = args[i];
         if (!arg.startsWith(QLatin1String("--")) || arg.size() == 2) {
@@ -220,7 +221,7 @@ std::optional<std::string> parse_arguments(const QStringList& args, std::span<co
         out.values[match->name] = args[++i];
     }
     if (out.positional.size() < positionals) return std::string("the following arguments are required: ") + names;
-    if (out.positional.size() > positionals) return "unrecognized arguments: " + out.positional[positionals].toStdString();
+    if (!more && out.positional.size() > positionals) return "unrecognized arguments: " + out.positional[positionals].toStdString();
     return std::nullopt;
 }
 
@@ -253,28 +254,13 @@ core::ParseOptions text_file() {
     return options;
 }
 
-// A v1–v3 book is never written: found before anything is touched (no project.lock is made in it).
-void refuse_legacy(const fs::path& dir) {
-    const int version = storage::project_version(core::parse_python_json(storage::read_file(dir / "project.json"), nullptr, text_file()));
-    if (version < 4) throw storage::NeedsMigration(dir, version);
-}
+// A v1–v3 book is never written: found before anything is touched (no project.lock is made in it). (PC5 I-0: shared with
+// `genko batch --save`, service/automate.hpp)
+void refuse_legacy(const fs::path& dir) { service::automate::refuse_legacy(dir); }
 
 // Python's _is_studio_project: an agent's book (strict gates, studio state, or M0 sidecars) does not trust an unnamed
-// caller as a person.
-bool is_studio_project(const fs::path& dir) {
-    std::error_code ec;
-    if (fs::is_directory(dir / "studio" / "drafts", ec)) return true;
-    try {
-        const Json payload = core::parse_python_json(storage::read_file(dir / "project.json"), nullptr, text_file());
-        const auto truthy = [&payload](const char* key) {
-            const auto it = payload.find(key);
-            return it != payload.end() && core::py_truthy(*it);
-        };
-        return payload.is_object() && (truthy("strict_gates") || truthy("studio"));
-    } catch (const core::Error&) {
-        return false;
-    }
-}
+// caller as a person. (PC5 I-0: shared with `genko batch`, service/automate.hpp studio_book)
+bool is_studio_project(const fs::path& dir) { return service::automate::studio_book(dir); }
 
 // --- commands ----------------------------------------------------------------------------------------------------
 
@@ -2594,6 +2580,11 @@ int script_command(const QStringList& args, bool ascii) {
     const Json steps = source == QLatin1String("-") ? service::automate::read_steps(read_stdin()) : service::automate::read_steps_file(path_arg(source));
     std::string name = a.value("--name").value_or(QString()).trimmed().toStdString();
     if (name.empty()) name = source == QLatin1String("-") ? std::string("script") : core::path_to_utf8(path_arg(source).stem());
+    try {
+        service::automate::check_script_name(name);
+    } catch (const core::Error& error) {
+        return usage(std::string("genko script: argument --name: ") + error.what());
+    }
     const fs::path dir = path_arg(a.positional[0]);
     const std::string agent =
         a.value("--agent").value_or(QString()).isEmpty()
@@ -2613,10 +2604,7 @@ int batch_command(const QStringList& args, bool ascii) {
                                           {"--suffix", true},  {"--recurse", false}, {"--stop-on-error", false}, {"--agent", true},
                                           {"--json", false},   {"--name", true}};
     Arguments a;
-    if (auto error = parse_arguments(args, kOptions, static_cast<std::size_t>(args.size()), "inputs", a)) {
-        if (a.positional.empty() || error->rfind("the following arguments are required", 0) != 0) return usage("genko batch: " + *error);
-    }
-    if (a.positional.empty()) return usage("genko batch: the following arguments are required: inputs");
+    if (auto error = parse_arguments(args, kOptions, 1, "inputs", a, true)) return usage("genko batch: " + *error);
     if (a.value("--steps").has_value() == a.value("--action").has_value()) return usage("genko batch: give --steps <file> or --action <name>");
     const int ways = (a.value("--out") ? 1 : 0) + (a.flag("--save") ? 1 : 0) + (a.flag("--dry-run") ? 1 : 0);
     if (ways != 1) return usage("genko batch: give --out <folder>, --save or --dry-run");
@@ -2645,7 +2633,8 @@ int batch_command(const QStringList& args, bool ascii) {
     output.suffix = a.value("--suffix").value_or(QString()).toStdString();
 
     service::automate::Options options;
-    options.actor = core::Actor(a.value("--agent").value_or(QString()).isEmpty() ? std::string(core::kLegacyActor) : a.value("--agent")->toStdString());
+    options.unnamed = a.value("--agent").value_or(QString()).isEmpty();  // (an agent's book: legacy:unknown, as `genko apply`)
+    options.actor = core::Actor(options.unnamed ? std::string(core::kLegacyActor) : a.value("--agent")->toStdString());
     options.stop_on_error = a.flag("--stop-on-error");
     Json steps;
     std::string name;
@@ -2661,6 +2650,11 @@ int batch_command(const QStringList& args, bool ascii) {
         options.recorded = true;
     }
     options.script = a.value("--name").value_or(QString()).trimmed().isEmpty() ? name : a.value("--name")->trimmed().toStdString();
+    try {
+        service::automate::check_script_name(options.script);
+    } catch (const core::Error& error) {
+        return usage(std::string("genko batch: argument --name: ") + error.what());
+    }
     std::vector<fs::path> given;
     for (const QString& p : a.positional) given.push_back(path_arg(p));
     service::automate::InputOptions listing;

@@ -14,6 +14,7 @@
 #include <string>
 
 #include "core/json.hpp"
+#include "core/model.hpp"
 #include "core/paths.hpp"
 #include "formats/copy.hpp"
 #include "formats/open_file.hpp"
@@ -138,7 +139,7 @@ private slots:
         write(root / "bad.txt", "set_note {\"page\": 1}\nset_note {\n");
         std::tie(code, out) = cli({QStringLiteral("script"), q(root / "b.genko"), q(root / "bad.txt")});
         QCOMPARE(code, 1);
-        QVERIFY2(out["error"].get<std::string>().rfind("line 2: ", 0) == 0, out.dump().c_str());
+        QVERIFY2(out["error"].get<std::string>().rfind("steps, line 2: ", 0) == 0, out.dump().c_str());
     }
 
     void batchOfPictures() {
@@ -203,6 +204,56 @@ private slots:
                                   QStringLiteral("--quality"), QStringLiteral("13")})
                      .exit_code,
                  2);
+    }
+
+    // An agent's book (strict_gates, its name approved): an unnamed `genko batch --save` is legacy:unknown there, refused
+    // as `genko apply` refuses the same steps; a person named goes through.
+    void batchInAnAgentsBookAsApply() {
+        QTemporaryDir dir;
+        const fs::path root = path_of(dir.path());
+        core::Document doc = core::new_episode("t", core::Num(1), 1, core::PageSpec::b4_comic());
+        doc.strict_gates = true;
+        doc.pages[0]->name_ok = true;
+        const std::string frame = doc.pages[0]->leaf_frames()[0]->id;
+        {
+            storage::ProjectLock lock(root / "s.genko", "human:test");
+            lock.try_acquire();
+            storage::SaveRequest request;
+            request.actor = "human:test";
+            request.ops = Json::array();
+            storage::Saver(lock).save(doc, request);
+        }
+        const Json split{{"op", "split_frame"}, {"frame_id", frame}, {"axis", "horizontal"}, {"ratio", 0.5}, {"gutter_mm", 2}};
+        Json on_page = split;
+        on_page["page"] = 1;
+        write(root / "ops.json", Json::array({on_page}).dump());
+        write(root / "split.json", Json::array({split}).dump());
+        const std::int64_t revision = storage::load_document(root / "s.genko").document.revision;
+        auto [code, out] = cli({QStringLiteral("apply"), q(root / "s.genko"), q(root / "ops.json")});
+        QCOMPARE(code, 1);
+        QVERIFY2(out["error"].get<std::string>().find("the name is approved") != std::string::npos, out.dump().c_str());
+        std::tie(code, out) = cli({QStringLiteral("batch"), q(root / "s.genko"), QStringLiteral("--save"), QStringLiteral("--steps"), q(root / "split.json"),
+                                   QStringLiteral("--json")});
+        QCOMPARE(code, 1);
+        QVERIFY2(out["errors"][0]["error"].get<std::string>().find("the name is approved") != std::string::npos, out.dump().c_str());
+        QCOMPARE(storage::load_document(root / "s.genko").document.revision, revision);
+        // a person named: as `genko apply --agent human:…`
+        std::tie(code, out) = cli({QStringLiteral("batch"), q(root / "s.genko"), QStringLiteral("--save"), QStringLiteral("--steps"), q(root / "split.json"),
+                                   QStringLiteral("--agent"), QStringLiteral("human:leaf"), QStringLiteral("--json")});
+        QCOMPARE(code, 0);
+        QCOMPARE(storage::load_document(root / "s.genko").document.revision, revision + 1);
+        // an agent's ops only for legacy:unknown (resize_pages is not one)
+        write(root / "resize.txt", "resize_pages {\"width_px\": 100}\n");
+        std::tie(code, out) = cli({QStringLiteral("batch"), q(root / "s.genko"), QStringLiteral("--save"), QStringLiteral("--steps"), q(root / "resize.txt"),
+                                   QStringLiteral("--json")});
+        QCOMPARE(code, 1);
+        QCOMPARE(out["errors"][0]["code"], Json("steps"));
+        // the output folder inside the book: refused, not made
+        std::tie(code, out) = cli({QStringLiteral("batch"), q(root / "s.genko"), QStringLiteral("--out"), q(root / "s.genko" / "out"), QStringLiteral("--steps"),
+                                   q(root / "resize.txt")});
+        QCOMPARE(code, 1);
+        QCOMPARE(out["code"], Json("refused_target"));
+        QVERIFY(!fs::exists(root / "s.genko" / "out"));
     }
 
     void batchOfBooks() {

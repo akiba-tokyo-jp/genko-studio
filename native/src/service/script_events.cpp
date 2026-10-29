@@ -126,7 +126,8 @@ Table from_json(const Json& json) {
         b.sha256 = text_at(item, "sha256");
         b.action = text_at(item, "action");
         if (b.script.has_value() == b.action.has_value()) throw core::Error("value", "a binding runs a script or an action");
-        if (b.script && !b.sha256) throw core::Error("value", "a binding's script is bound with its sha256");
+        if (!b.sha256) throw core::Error("value", "a binding's script or action is bound with its sha256");
+        automate::check_script_name(b.name);
         table.bindings.push_back(std::move(b));
     }
     return table;
@@ -175,6 +176,8 @@ std::optional<std::string> save(const Table& table) {
     return std::nullopt;
 }
 
+std::string action_sha256(const Json& ops) { return storage::sha256_hex(ops.dump()); }
+
 std::vector<Binding> bound_to(const Table& table, Event event) {
     std::vector<Binding> out;
     if (!table.enabled) return out;
@@ -200,6 +203,9 @@ Steps steps_of(const Binding& binding, Event event) {
     const Json all = actions::load();
     const auto found = all.find(binding.action.value_or(std::string()));
     if (found == all.end()) throw core::Error("not_found", "no action " + binding.action.value_or(std::string()));
+    if (!binding.sha256 || action_sha256((*found)["ops"]) != *binding.sha256) {
+        throw core::Error("script_changed", "the action was changed after it was bound: " + binding.action.value_or(std::string()));
+    }
     out.steps = (*found)["ops"];
     out.recorded = true;
     return out;

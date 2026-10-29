@@ -562,6 +562,9 @@ public:
     // `label`: a run of ops one change, a pseudo op made ops on the book as it is then (a change of its own). False:
     // refused or failed (said in the status line), nothing more done.
     bool run_steps(const core::Json& steps, bool recorded, const QString& label);
+    // Whether these ops may be steps for the window's person (service::automate::check_steps: no gate op, no undo — an
+    // オートアクション recorded before PC5 I-0 may hold an approval): when not, which op is said, and false.
+    bool steps_allowed(const core::Json& ops, const QString& label, const QString& hint = {});
     // A script event raised by this window (I-e calls it where a book is made, opened, saved by the person, closed,
     // printed or exported, and when the app starts): the steps bound to it run (service/script_events.hpp), unless steps
     // of an event are running now; a table changed outside Genko is said once and runs nothing.

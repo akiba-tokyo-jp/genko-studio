@@ -107,10 +107,10 @@ private slots:
         QCOMPARE(automate::read_steps(""), Json::array());
         QCOMPARE(automate::read_steps("# only a note\n"), Json::array());
         // the line or the step said
-        QCOMPARE(thrown([] { automate::read_steps("set_note {\"page\": 1}\nset_note {\"page\": \n"); }).second.substr(0, 8), std::string("line 2: "));
-        QCOMPARE(thrown([] { automate::read_steps("set_note [1]"); }).second, std::string("line 1: the arguments are one JSON object {…}"));
-        QCOMPARE(thrown([] { automate::read_steps("\n\nSet-Note {}"); }).second.substr(0, 8), std::string("line 3: "));
-        QCOMPARE(thrown([] { automate::read_steps("set_note {\"op\": \"approve\"}"); }).second, std::string("line 1: the op is named twice"));
+        QCOMPARE(thrown([] { automate::read_steps("set_note {\"page\": 1}\nset_note {\"page\": \n"); }).second.substr(0, 15), std::string("steps, line 2: "));
+        QCOMPARE(thrown([] { automate::read_steps("set_note [1]"); }).second, std::string("steps, line 1: the arguments are one JSON object {…}"));
+        QCOMPARE(thrown([] { automate::read_steps("\n\nSet-Note {}"); }).second.substr(0, 15), std::string("steps, line 3: "));
+        QCOMPARE(thrown([] { automate::read_steps("set_note {\"op\": \"approve\"}"); }).second, std::string("steps, line 1: the op is named twice"));
         QCOMPARE(thrown([] { automate::read_steps("[{\"op\": \"set_note\"}, {\"page\": 1}]"); }).second.substr(0, 8), std::string("step 2: "));
         QCOMPARE(thrown([] { automate::read_steps("{\"ops\": []}"); }).first, std::string("steps"));
         QCOMPARE(thrown([] { automate::read_steps("[{\"op\": \"set_note\", \"x\": NaN}]"); }).first, std::string("steps"));
@@ -135,6 +135,13 @@ private slots:
             QCOMPARE(service::actions::recordable(steps).size(), std::size_t(1));  // (never recorded either)
         }
         QVERIFY(thrown([&] { automate::check_steps(Json::array({Json{{"op", "undo"}}}), person); }).second.rfind("step 1: undo is not a step", 0) == 0);
+        // a pseudo op is made ops on the steps' own level only: inside for_pages it is refused when checked
+        const Json repeated = Json::array({Json{{"op", "for_pages"}, {"ops", Json::array({Json{{"op", "fit_image"}, {"width_px", 5}}})}}});
+        QCOMPARE(thrown([&] { automate::check_steps(repeated, person); }).second,
+                 std::string("step 1.1: fit_image is a pseudo op and cannot be inside for_pages"));
+        // the journal's name of a script: 200 characters at most
+        automate::check_script_name(QString(200, QChar(0x3042)).toStdString());
+        QCOMPARE(thrown([] { automate::check_script_name(QString(201, QChar(0x3042)).toStdString()); }).first, std::string("value"));
         // an agent: apply_ops' ops only (resize_pages is not one), for_pages' too
         const Json mine = Json::array({Json{{"op", "add_layer"}, {"page", 1}}, Json{{"op", "resize_pages"}, {"page", 1}, {"width_px", 10}}});
         automate::check_steps(mine, person);
@@ -334,6 +341,60 @@ private slots:
         QCOMPARE(thrown([&] { automate::run(inputs.items, Json::array(), out, options); }).second, std::string("the quality is 0 to 12"));
     }
 
+    // The books and folders guarded: an agent's book known (an unnamed caller is legacy:unknown there), a v1–v3 book
+    // refused before its lock, an output folder in a book refused before it is made, links to folders never entered (a loop
+    // of links ends), the files and folders looked through counted.
+    void booksAndFoldersGuarded() {
+        QTemporaryDir dir;
+        const fs::path root = path_of(dir.path());
+        fs::create_directories(root / "plain.genko");
+        write(root / "plain.genko" / "project.json", "{\"version\": 4}");
+        fs::create_directories(root / "gated.genko");
+        write(root / "gated.genko" / "project.json", "{\"version\": 4, \"strict_gates\": true}");
+        fs::create_directories(root / "drafts.genko" / "studio" / "drafts");
+        write(root / "drafts.genko" / "project.json", "{\"version\": 4}");
+        QVERIFY(!automate::studio_book(root / "plain.genko"));
+        QVERIFY(automate::studio_book(root / "gated.genko"));
+        QVERIFY(automate::studio_book(root / "drafts.genko"));
+        // a v3 book written in place: refused, its folder as it was (no project.lock)
+        fs::create_directories(root / "old.genko");
+        write(root / "old.genko" / "project.json", "{\"version\": 3, \"title\": \"x\"}");
+        QCOMPARE(thrown([&] { automate::refuse_legacy(root / "old.genko"); }).first, std::string("needs_migration"));
+        automate::Output in_place;
+        in_place.to = automate::Output::To::Book;
+        automate::Options options;
+        options.actor = core::Actor("human:leaf");
+        automate::Result result = automate::run({automate::Input{root / "old.genko", true}}, Json::array(), in_place, options);
+        QCOMPARE(result.errors[0]["code"], Json("needs_migration"));
+        std::size_t files = 0;
+        for (const auto& e : fs::directory_iterator(root / "old.genko")) files += e.path().filename() == "project.json" ? 0 : 1;
+        QCOMPARE(files, std::size_t(0));
+        // an output folder in a book (the input's or another): refused before anything is made
+        for (const fs::path& inside : {root / "plain.genko" / "out", root / "gated.genko" / "assets" / "x" / "y", root / "plain.genko"}) {
+            automate::Output out;
+            out.folder = inside;
+            QCOMPARE(thrown([&] { automate::run({}, Json::array(), out, options); }).first, std::string("refused_target"));
+        }
+        QVERIFY(!fs::exists(root / "plain.genko" / "out"));
+        QVERIFY(!fs::exists(root / "gated.genko" / "assets"));
+        // links to folders: never entered (a loop ends), a picture there taken once
+        fs::create_directories(root / "in" / "sub");
+        write(root / "in" / "sub" / "a.png", "x");
+        std::error_code ec;
+        fs::create_directory_symlink(root / "in", root / "in" / "loop1", ec);
+        fs::create_directory_symlink(root / "in", root / "in" / "sub" / "loop2", ec);
+        automate::InputOptions deep;
+        deep.recurse = true;
+        if (!ec) {  // (where links cannot be made — Windows without the right —, only this check is left out)
+            const automate::Inputs got = automate::list_inputs({root / "in"}, deep);
+            QCOMPARE(got.items.size(), std::size_t(1));
+            QCOMPARE(got.items[0].path, root / "in" / "sub" / "a.png");
+        }
+        // the files and folders looked through are counted
+        deep.scan_limit = 1;
+        QCOMPARE(thrown([&] { automate::list_inputs({root / "in"}, deep); }).first, std::string("value"));
+    }
+
     // オートアクション kept by service/actions: actions.json in the settings folder, as before.
     void actionsKeptInTheSettingsFolder() {
         QCOMPARE(service::actions::path(), path_of(config_.path()) / "actions.json");
@@ -358,7 +419,8 @@ private slots:
         events::Table table;
         table.enabled = true;
         table.bindings.push_back({"saveDocument", "メモ", core::path_to_utf8(script), storage::sha256_hex(storage::read_file(script)), std::nullopt});
-        table.bindings.push_back({"everything", "影", std::nullopt, std::nullopt, std::string("影")});
+        const Json shade = Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}}});
+        table.bindings.push_back({"everything", "影", std::nullopt, events::action_sha256(shade), std::string("影")});
         QVERIFY(!events::save(table));
         events::Loaded loaded = events::load();
         QVERIFY(!loaded.problem);
@@ -371,6 +433,20 @@ private slots:
         QCOMPARE(steps.label, std::string("メモ（ドキュメントを保存）"));
         QVERIFY(!steps.recorded);
         QCOMPARE(thrown([&] { events::steps_of(loaded.table.bindings[1], events::Event::Print); }).first, std::string("not_found"));  // (no such action)
+        // an action: run as bound; changed since (in the window or outside), not run
+        QVERIFY(!service::actions::store("影", shade));
+        const events::Steps played = events::steps_of(loaded.table.bindings[1], events::Event::Print);
+        QVERIFY(played.recorded);
+        QCOMPARE(played.steps, shade);
+        QVERIFY(!service::actions::store("影", Json::array({Json{{"op", "resize_pages"}, {"page", 1}, {"width_px", 9}}})));
+        QCOMPARE(thrown([&] { events::steps_of(loaded.table.bindings[1], events::Event::Print); }).first, std::string("script_changed"));
+        QVERIFY(!service::actions::remove("影"));
+        // an action bound without its sha256, a name too long: not a table
+        QCOMPARE(thrown([] { events::from_json(Json{{"bindings", Json::array({Json{{"event", "print"}, {"action", "影"}}})}}); }).first, std::string("value"));
+        QCOMPARE(thrown([] {
+                     events::from_json(Json{{"bindings", Json::array({Json{{"event", "print"}, {"action", "影"}, {"sha256", "x"}, {"name", std::string(201, 'a')}}})}});
+                 }).first,
+                 std::string("value"));
         // the script changed since it was bound: not run
         write(script, "set_note {\"page\": 1, \"note\": \"other\"}\n");
         QCOMPARE(thrown([&] { events::steps_of(loaded.table.bindings[0], events::Event::SaveDocument); }).first, std::string("script_changed"));

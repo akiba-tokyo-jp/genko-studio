@@ -253,6 +253,8 @@ bool MainWindow::play_action(const QString& name) {
         flash(QStringLiteral("「%1」の手順は、どれも記録したページの決まった物を変えるもので、このページではできません").arg(name), 5000);
         return false;
     }
+    // (PC5 I-0: every way in has the same rule — an approval, a page lock or undo recorded before is refused, said)
+    if (!steps_allowed(ops, name, QStringLiteral("。ファイル → オートアクション → 管理 で、その手順を外してください"))) return false;
     if (!apply_ops(ops)) return false;
     const QString extra = skipped > 0 ? QStringLiteral("。%1 手はこのページではできないので飛ばしました").arg(skipped) : QString();
     flash(QStringLiteral("「%1」を実行しました（%2 手。元に戻すは 1 回で%3）").arg(name, QString::number(ops.size()), extra), 4000);
@@ -269,6 +271,7 @@ bool MainWindow::play_action_on_all(const QString& name) {
         flash(QStringLiteral("「%1」の手順は、どれも記録したページの決まった物を変えるもので、ほかのページではできません").arg(name), 5000);
         return false;
     }
+    if (!steps_allowed(steps, name, QStringLiteral("。ファイル → オートアクション → 管理 で、その手順を外してください"))) return false;  // (PC5 I-0)
     if (!ask::question(this, QStringLiteral("オートアクション"), QStringLiteral("「%1」を全ページ（表紙を除く）に実行しますか？（元に戻すは 1 回）").arg(name))) {
         return false;
     }

@@ -187,6 +187,22 @@ private slots:
                               QStringLiteral("承認")));
         QCOMPARE(w->session().history().done.size(), steps);  // (refused before anything ran)
         QVERIFY(w->status_label()->text().contains(QStringLiteral("手順に入れられません")));
+        // an オートアクション recorded before (an approval in it): 実行 and 全ページに実行 refuse it, saying which op
+        QVERIFY(!app::actions::store(QStringLiteral("古い"), Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "old"}},
+                                                                       Json{{"op", "approve"}, {"gate", "name"}, {"page", 1}}})));
+        QVERIFY(!w->play_action(QStringLiteral("古い")));
+        QVERIFY(w->status_label()->text().contains(QStringLiteral("approve は手順に入れられません")));
+        QVERIFY(w->status_label()->text().contains(QStringLiteral("管理")));
+        QVERIFY(!w->play_action_on_all(QStringLiteral("古い")));
+        QCOMPARE(w->session().history().done.size(), steps);
+        QVERIFY(book.page(0).note != "old");
+        app::actions::remove(QStringLiteral("古い"));
+        // a recording takes in no step a script runs
+        w->start_recording();
+        QVERIFY(w->run_steps(Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "x"}}}), false, QStringLiteral("記録の外")));
+        QVERIFY(w->recording().has_value());
+        QVERIFY(w->recording()->empty());
+        w->drop_recording();
         QVERIFY(w->run_steps(Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "スクリプト"}}}), false, QStringLiteral("メモ")));
         QCOMPARE(book.page(0).note, std::string("スクリプト"));
         w->session().save_now();
@@ -197,7 +213,7 @@ private slots:
         namespace events = service::script_events;
         events::Table table;
         table.enabled = true;
-        table.bindings.push_back({"saveDocument", "影を足す", std::nullopt, std::nullopt, std::string("影")});
+        table.bindings.push_back({"saveDocument", "影を足す", std::nullopt, events::action_sha256(app::actions::load()["影"]["ops"]), std::string("影")});
         QVERIFY(!events::save(table));
         const auto shades = [&book] {
             int n = 0;

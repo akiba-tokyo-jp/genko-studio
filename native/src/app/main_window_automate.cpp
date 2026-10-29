@@ -25,9 +25,22 @@ void MainWindow::build_automate_menus() {
     automate_menu_->menuAction()->setVisible(!automate_menu_->actions().isEmpty());  // (shown once it holds one)
 }
 
+bool MainWindow::steps_allowed(const Json& ops, const QString& label, const QString& hint) {
+    try {
+        service::automate::check_steps(ops, core::Actor(session_->actor()));
+    } catch (const core::Error& error) {
+        flash(QStringLiteral("「%1」: %2%3").arg(label, wording::error(std::string(error.what())), hint), 8000, true);
+        return false;
+    }
+    return true;
+}
+
 bool MainWindow::run_steps(const Json& steps, bool recorded, const QString& label) {
     const core::Page* page = current_page();
-    if (page == nullptr) return false;
+    if (page == nullptr) {
+        flash(QStringLiteral("原稿を開いていないので、「%1」を流しませんでした").arg(label), 6000, true);
+        return false;
+    }
     Json ops = steps;
     if (recorded) {  // (an オートアクション: on the page in front, its layer drawn on and its chosen panel, as 実行 plays it)
         const core::Layer* layer = target_layer();
@@ -36,17 +49,19 @@ bool MainWindow::run_steps(const Json& steps, bool recorded, const QString& labe
                               frame != nullptr ? std::optional<std::string>(frame->id) : std::nullopt);
     }
     const core::Actor actor(session_->actor());
-    try {
-        service::automate::check_steps(ops, actor);
-    } catch (const core::Error& error) {
-        flash(QStringLiteral("「%1」: %2").arg(label, wording::error(std::string(error.what()))), 6000, true);
-        return false;
-    }
-    // (the journal names each change by the steps; set back whatever happens)
+    if (!steps_allowed(ops, label)) return false;
+    // (the journal names each change by the steps; an オートアクション being recorded does not take them in; both set
+    // back whatever happens)
     struct Named {
         Session& session;
-        ~Named() { session.set_script({}); }
-    } named{*session_};
+        std::optional<Json>& recording;
+        std::optional<Json> kept;
+        ~Named() {
+            session.set_script({});
+            recording = std::move(kept);
+        }
+    } named{*session_, recording_, std::move(recording_)};
+    recording_.reset();
     session_->set_script(label.toStdString());
     Json pending = Json::array();
     const auto flush = [&]() {

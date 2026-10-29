@@ -3,6 +3,8 @@
 
 #include "service/automate.hpp"
 
+#include <QString>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -154,6 +156,9 @@ void check_list(const Json& steps, const core::Actor& actor, const std::string& 
         if (actions::gate_op(name)) {
             throw StepsError("step " + where + ": " + name + " cannot be a step (approvals and page locks are made by a person, not by a script)");
         }
+        if (!at.empty() && pseudo_op(name)) {  // (only the steps' own level is turned into ops: for_pages repeats ops)
+            throw StepsError("step " + where + ": " + name + " is a pseudo op and cannot be inside for_pages");
+        }
         if (!actor.can_approve() && !pseudo_op(name) && !agent_op(name)) {
             throw StepsError("step " + where + ": " + name + " is not an op an agent may run (" + actor.name() + ": the ops apply_ops takes)");
         }
@@ -205,7 +210,7 @@ Json read_steps(std::string_view text) {
                 if (end == text.size()) break;
                 continue;
             }
-            const std::string where = "line " + std::to_string(n) + ": ";
+            const std::string where = "steps, line " + std::to_string(n) + ": ";
             std::size_t space = 0;
             while (space < line.size() && !std::isspace(static_cast<unsigned char>(line[space]))) ++space;
             const std::string name(line.substr(0, space));
@@ -350,6 +355,45 @@ Json aim_steps(const core::Document& doc, const Json& steps, bool picture, bool 
     }
 }
 
+void check_script_name(const std::string& name) {
+    const QString text = QString::fromStdString(name);
+    if (text.size() > static_cast<qsizetype>(kMaxScriptName)) {
+        throw core::Error("value", "the script's name is longer than " + std::to_string(kMaxScriptName) + " characters");
+    }
+}
+
+// --- the books --------------------------------------------------------------------------------------------------------
+
+namespace {
+
+core::ParseOptions text_file() {
+    core::ParseOptions options;
+    options.universal_newlines = true;
+    return options;
+}
+
+}  // namespace
+
+bool studio_book(const fs::path& dir) {
+    std::error_code ec;
+    if (fs::is_directory(dir / "studio" / "drafts", ec)) return true;
+    try {
+        const Json payload = core::parse_python_json(storage::read_file(dir / "project.json"), nullptr, text_file());
+        const auto truthy = [&payload](const char* key) {
+            const auto it = payload.find(key);
+            return it != payload.end() && core::py_truthy(*it);
+        };
+        return payload.is_object() && (truthy("strict_gates") || truthy("studio"));
+    } catch (const core::Error&) {
+        return false;
+    }
+}
+
+void refuse_legacy(const fs::path& dir) {
+    const int version = storage::project_version(core::parse_python_json(storage::read_file(dir / "project.json"), nullptr, text_file()));
+    if (version < 4) throw storage::NeedsMigration(dir, version);
+}
+
 // --- the inputs -------------------------------------------------------------------------------------------------------
 
 const std::vector<std::string>& input_extensions() {
@@ -387,6 +431,12 @@ Inputs list_inputs(const std::vector<fs::path>& given, const InputOptions& optio
             throw core::Error("value", "more than " + std::to_string(options.limit) + " files to take: choose fewer");
         }
     };
+    std::size_t looked = 0;  // (the files and folders looked at: a folder of many folders ends too)
+    const auto look = [&looked, &options] {
+        if (++looked > options.scan_limit) {
+            throw core::Error("value", "more than " + std::to_string(options.scan_limit) + " files and folders to look through: choose fewer");
+        }
+    };
     for (const fs::path& path : given) {
         std::error_code ec;
         if (is_book_folder(path)) {
@@ -398,6 +448,7 @@ Inputs list_inputs(const std::vector<fs::path>& given, const InputOptions& optio
                 folders.erase(folders.begin());
                 std::vector<fs::path> entries;
                 for (fs::directory_iterator it(folder, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end; it.increment(ec)) {
+                    look();
                     entries.push_back(it->path());
                 }
                 if (ec) out.skipped.push_back(Json{{"path", core::path_to_utf8(folder)}, {"reason", "the folder cannot be read"}});
@@ -406,6 +457,8 @@ Inputs list_inputs(const std::vector<fs::path>& given, const InputOptions& optio
                 for (const fs::path& entry : entries) {
                     if (hidden(entry)) continue;
                     std::error_code e2;
+                    // (a link to a folder is never entered nor taken: no folder twice, a loop of links ends)
+                    if (fs::is_symlink(fs::symlink_status(entry, e2)) && fs::is_directory(entry, e2)) continue;
                     if (is_book_folder(entry)) {
                         add(Input{entry, true});  // (a book is a document of the folder, as a picture is)
                     } else if (fs::is_directory(entry, e2)) {
@@ -497,6 +550,15 @@ Result run(const std::vector<Input>& inputs, const Json& steps, const Output& ou
             if (std::find(exts.begin(), exts.end(), ext) == exts.end()) throw core::Error("value", "not a format this build writes: ." + ext);
         }
         std::error_code ec;
+        // (never inside a book's folder — the input's or any other —: refused before the folder is made)
+        const fs::path absolute = fs::absolute(output.folder, ec);
+        for (fs::path p = ec ? output.folder : absolute;; p = p.parent_path()) {
+            std::error_code e2;
+            if (fs::is_regular_file(p / "project.json", e2)) {
+                throw core::Error("refused_target", "cannot write inside the book's folder: " + core::path_to_utf8(p));
+            }
+            if (p == p.parent_path() || p.empty()) break;
+        }
         fs::create_directories(output.folder, ec);
         if (ec || !fs::is_directory(output.folder, ec)) {
             throw core::Error("io", "the folder cannot be made: " + core::path_to_utf8(output.folder));
@@ -535,15 +597,17 @@ Result run(const std::vector<Input>& inputs, const Json& steps, const Output& ou
                 }
                 if (!notes.empty()) done["notes"] = notes_json(notes);
             } else if (output.to == Output::To::Book) {
-                storage::ProjectLock lock(input.path, options.actor.name());
+                refuse_legacy(input.path);  // (a v1–v3 book: before its lock or its journal is touched)
+                const core::Actor actor = options.unnamed && studio_book(input.path) ? core::Actor("legacy:unknown") : options.actor;
+                storage::ProjectLock lock(input.path, actor.name());
                 lock.try_acquire();
                 storage::journal::repair(input.path);
                 const storage::LoadResult loaded = storage::load_document(input.path);
                 if (loaded.report.source_version < 4) throw storage::NeedsMigration(input.path, loaded.report.source_version);
                 if (options.book_brushes) render::brushes::register_book(loaded.document);
-                const core::ApplyResult ran = run_steps(loaded.document, aim_steps(loaded.document, steps, false, options.recorded), options.actor);
+                const core::ApplyResult ran = run_steps(loaded.document, aim_steps(loaded.document, steps, false, options.recorded), actor);
                 storage::SaveRequest request;
-                request.actor = options.actor.name();
+                request.actor = actor.name();
                 request.base_revision = loaded.document.revision;
                 request.ops = ran.journal_ops;
                 request.script = options.script;
@@ -560,9 +624,10 @@ Result run(const std::vector<Input>& inputs, const Json& steps, const Output& ou
                 lock.release();
                 done["revision"] = saved.revision;
             } else {
+                const core::Actor actor = options.unnamed && studio_book(input.path) ? core::Actor("legacy:unknown") : options.actor;
                 const storage::LoadResult loaded = storage::load_document(input.path);
                 if (options.book_brushes) render::brushes::register_book(loaded.document);
-                const core::ApplyResult ran = run_steps(loaded.document, aim_steps(loaded.document, steps, false, options.recorded), options.actor);
+                const core::ApplyResult ran = run_steps(loaded.document, aim_steps(loaded.document, steps, false, options.recorded), actor);
                 if (output.to == Output::To::Folder) {
                     const std::string ext = output_extension(output, input);
                     const formats::WriteGuard guard = formats::write_guard(ran.doc, input.path);

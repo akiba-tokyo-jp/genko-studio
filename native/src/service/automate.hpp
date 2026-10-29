@@ -83,6 +83,18 @@ core::ApplyResult run_steps(const core::Document& doc, const core::Json& steps, 
 // the page bound steps left out, new ids for what it makes, `layer_id` the layer drawn on — for a picture its top layer).
 core::Json aim_steps(const core::Document& doc, const core::Json& steps, bool picture, bool recorded);
 
+// The journal's name of a script, a batch, a script event: at most this many characters (core::Error("value") past it).
+inline constexpr std::size_t kMaxScriptName = 200;
+void check_script_name(const std::string& name);
+
+// --- the books --------------------------------------------------------------------------------------------------------
+
+// An agent's book (Python's _is_studio_project: strict gates, the studio's state, or its drafts folder): an unnamed caller
+// of the command line is not trusted there as a person (`genko apply`, `genko script`, `genko batch` alike: legacy:unknown).
+bool studio_book(const fs::path& dir);
+// A v1–v3 book is never written: storage::NeedsMigration before anything in it is touched (no project.lock made).
+void refuse_legacy(const fs::path& dir);
+
 // --- the inputs -------------------------------------------------------------------------------------------------------
 
 struct Input {
@@ -94,6 +106,7 @@ struct InputOptions {
     std::vector<std::string> extensions;  // lower case, no dot; empty: every file this build opens (input_extensions())
     bool recurse = false;                 // the folders inside a folder given too (a book's folder is a book, never entered)
     std::size_t limit = 10000;            // more inputs than this: core::Error("value") before anything is run
+    std::size_t scan_limit = 100000;      // more files and folders looked at than this: core::Error("value") (a folder of folders)
 };
 
 struct Inputs {
@@ -105,7 +118,8 @@ struct Inputs {
 // the camera RAW files.
 const std::vector<std::string>& input_extensions();
 // The inputs of these paths in order: a file as it is given (any extension), a book's folder, a folder's books and files
-// whose extension is listed (sorted by name; hidden ones left out; the folders inside it with `recurse`).
+// whose extension is listed (sorted by name; hidden ones left out; the folders inside it with `recurse` — never a link to
+// a folder, so no folder is entered twice and a loop of links ends).
 Inputs list_inputs(const std::vector<fs::path>& given, const InputOptions& options = {});
 
 // --- the outputs ------------------------------------------------------------------------------------------------------
@@ -134,6 +148,9 @@ std::string output_extension(const Output& output, const Input& input);
 
 struct Options {
     core::Actor actor;
+    // The command line's caller gave no --agent: in an agent's book (studio_book) the steps run as legacy:unknown — the
+    // gates of strict_gates and the agent's ops only —, as `genko apply` runs them there.
+    bool unnamed = false;
     bool recorded = false;       // the steps are a recorded action (aim_steps)
     bool stop_on_error = false;  // else a file that fails is said in `errors` and the next one taken (Photoshop's バッチ)
     std::function<bool()> cancelled;  // asked before each file: true stops (the files done stay)
@@ -153,9 +170,10 @@ struct Result {
 };
 
 // Each input in turn (one book held at a time): opened (a picture as a book of one page — formats::open_file —, a book
-// read; with Output::To::Book under its lock, its journal settled first), the steps aimed at it and run (run_steps), then
-// written (Output). The steps are checked first (check_steps: nothing is opened when they cannot run). Never written: a
-// picture's own file, a book's folder by Folder (formats::write_guard).
+// read; with Output::To::Book a v1–v3 book refused first, then under its lock, its journal settled), the steps aimed at it
+// and run (run_steps), then written (Output). The steps are checked first (check_steps: nothing is opened when they
+// cannot run). Never written: a picture's own file, anything inside a book's folder — the output folder in a book, or a
+// book itself, is refused before it is made (core::Error "refused_target").
 Result run(const std::vector<Input>& inputs, const core::Json& steps, const Output& output, const Options& options);
 
 }  // namespace genko::service::automate
