@@ -22,8 +22,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <map>
 #include <set>
+#include <tuple>
 
 #include "app/ask.hpp"
 #include "app/config.hpp"
@@ -466,8 +468,8 @@ void CharacterPanel::refresh() {
     QString data = font.is_string() ? qs(font.get<std::string>()) : (s.record != nullptr && s.record->balloon == "sfx" ? QStringLiteral("sfx") : QStringLiteral("antique"));
     const int face = static_cast<int>(num(at(c, "face_index"), 0));
     style->clear();
-    if (const FontFace* f = font.is_string() ? face_of_path(data, face) : nullptr) {
-        if (!fonts_read_) fill_fonts();
+    // (the computer's fonts are read when the list is first opened: until then a font file shows by its name)
+    if (const FontFace* f = font.is_string() && fonts_read_ ? face_of_path(data, face) : nullptr) {
         data = QStringLiteral("family:") + f->family;
         for (const FontFace& other : system_faces()) {
             if (other.family != f->family) continue;

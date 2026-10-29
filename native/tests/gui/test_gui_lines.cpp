@@ -267,7 +267,7 @@ private slots:
         QCOMPARE(s.window->tool_actions().at(QStringLiteral("text")), text);
         QVERIFY(s.window->tools_group()->actions().contains(text));
         QVERIFY(!text->icon().isNull());
-        QCOMPARE(text->toolTip(), QStringLiteral("テキスト（T）\nクリックした所に台詞を入力します（縦書き）"));
+        QCOMPARE(text->toolTip(), QStringLiteral("縦書き文字ツール（T）\nクリックした所に台詞を入力します（縦書き）"));
         QToolBar* palette = s.window->findChild<QToolBar*>(QStringLiteral("tools"));
         QVERIFY(palette != nullptr);
         const auto tools = palette->actions();

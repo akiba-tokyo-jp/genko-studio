@@ -284,6 +284,7 @@ const std::multimap<QString, QString>& renamed() {
                                                      // (PC5 G-d, 節 G 5.4: the text tool and 検索と置換… by Photoshop's names —
                                                      // テキスト is ラスタライズ ▸'s now: a reused name)
                                                      {QStringLiteral("縦書き文字ツール"), QStringLiteral("テキスト")},
+                                                     {QStringLiteral("テキスト"), QStringLiteral("テキスト（レイヤー → ラスタライズ）")},
                                                      {QStringLiteral("検索と置換…"), QStringLiteral("台詞の検索・置換…")}};
     return all;
 }

@@ -1328,7 +1328,6 @@ const std::vector<Rule>& rules() {
         // (PC5 G-d: replace_fonts — the missing fonts replaced)
         r.push_back(rule("unknown key (\\S+) for replace_fonts", "書体の置き換えに知らない鍵（\\1）があります"));
         r.push_back(rule("map must be \\{font: the font it becomes\\}", "置き換え（map）は {見つからない書体: 置き換える書体} で指定します"));
-        r.push_back(rule("all must be true or false", "all は true か false です"));
         r.push_back(rule("unknown key (\\S+) for the font (.*) is to become", "「\\2」を置き換える書体に知らない鍵（\\1）があります"));
         r.push_back(rule("map: the font (.*) is not on this computer", "置き換える書体「\\1」が、このパソコンにありません"));
         r.push_back(rule("map: face_index must be a whole number 0..255", "書体の面の番号（face_index）は 0〜255 の整数です"));

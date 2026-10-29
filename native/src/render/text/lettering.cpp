@@ -1909,7 +1909,12 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
     if (!shape.empty()) {  // (type@1: from the point text's anchor, or the box text's top left)
         const double wide = image.width(), high = image.height();
         const double halo = grow != 0 ? static_cast<double>(grow + 1) : 0.0;  // (the halo's)
-        const std::string align = core::py_str(core::py_or(at(st, "align"), Json(vertical ? "top" : "left")));
+        std::string align = core::py_str(core::py_or(at(st, "align"), Json(vertical ? "top" : "left")));
+        if (vertical && sets_opentype(line)) {  // (PC5 G-d: down, the paragraph's own alignment places the column in its box)
+            double spacing = 0, gap = 0;
+            bool across = false;
+            down_attributes(line, 1, 1, spacing, gap, across, align);
+        }
         if (shape == "box") {
             out.corner_x = vertical ? static_cast<double>(w) - wide  // (columns from its right)
                            : align == "center" ? (static_cast<double>(w) - wide) / 2

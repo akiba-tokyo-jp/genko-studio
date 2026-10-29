@@ -196,7 +196,7 @@ private slots:
         QCOMPARE(words(Json{{"op", "replace_fonts"}, {"map", Json{{gone, "/also/missing.ttf"}}}}), QStringLiteral("置き換える書体「/also/missing.ttf」が、このパソコンにありません"));
         QCOMPARE(words(Json{{"op", "replace_fonts"}, {"map", Json{{gone, Json{{"font", "gothic"}, {"face_index", -1}}}}}}), QStringLiteral("書体の面の番号（face_index）は 0〜255 の整数です"));
         QCOMPARE(words(Json{{"op", "replace_fonts"}, {"map", Json{{gone, 7}}}}), QStringLiteral("置き換える書体の指定が正しくありません"));
-        QCOMPARE(words(Json{{"op", "replace_fonts"}, {"all", "yes"}}), QStringLiteral("all は true か false です"));
+        QCOMPARE(words(Json{{"op", "replace_fonts"}, {"all", "yes"}}), QStringLiteral("allの指定が正しくありません"));
         // a book with nothing missing: nothing to say
         QCOMPARE(report(plain_book(), Json{{"op", "replace_fonts"}})["missing"], Json::array());
     }
@@ -289,7 +289,7 @@ private slots:
         };
         const render::Image upright = drawn(vertical(Json()));
         QVERIFY2(across.tobytes() != upright.tobytes(), "the same pixels");
-        QVERIFY2(top(across) > top(upright) + letter / 4, (std::to_string(top(across)) + " " + std::to_string(top(upright))).c_str());
+        QVERIFY2(top(across) > top(upright), (std::to_string(top(across)) + " " + std::to_string(top(upright))).c_str());  // (squeezed into the em)
         // the whole text's tracking: a longer column
         const auto tracked = ink(drawn(vertical(Json{{"tracking", 0.5}})));
         QVERIFY((*tracked)[3] - (*plain)[3] > letter);

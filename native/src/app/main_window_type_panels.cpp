@@ -4,6 +4,7 @@
 // (検索と置換… is 台詞の検索・置換… — act_replace — renamed and moved to 編集) — and what the panels ask of the window: the
 // range chosen in the editor typing over a text, their changes as ops, a glyph put in, the fonts used last.
 
+#include <QActionGroup>
 #include <QDockWidget>
 #include <QMenu>
 #include <QScrollArea>
