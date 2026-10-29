@@ -41857,7 +41857,7 @@
       "label_ja": "GPU/CPU描画と資源代替",
       "kind": "cross_cutting",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
+      "implementation_status": "実装済み（PC5 H-a、未統合。一致の許しは利用者の決定 2026-10-29: 再標本しない表示は 1/255、回転・画面に合わせた倍率は 1/255 を超える画素 2‰ まで・差 12/255 まで）",
       "acceptance_status": "未実施",
       "evidence": [
         "native/src/app/canvas_gpu.cpp",
@@ -41866,7 +41866,8 @@
         "native/src/core/prefs_table.cpp",
         "native/tests/gui/test_gui_canvas.cpp",
         "native/tests/unit/test_tiles.cpp",
-        "native/tests/gui/test_gui_look.cpp"
+        "native/tests/gui/test_gui_look.cpp",
+        "native/tests/CMakeLists.txt"
       ],
       "pc0": {
         "date": "2026-10-16",

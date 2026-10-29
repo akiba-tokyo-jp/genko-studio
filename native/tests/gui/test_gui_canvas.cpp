@@ -636,7 +636,7 @@ private slots:
 
     // render:GPU-CPU-parity (PC5 H-a, 節 H 4.3; the coordinator's 3 章: the processor composites, the card only shows): the
     // page on the graphics card is the page the processor draws — within 1/255 everywhere as it is, mirrored, zoomed into
-    // its pixels and proofed. Turned, or zoomed off one tile pixel a screen pixel (fitted), the card's texture filter and the
+    // its pixels and proofed. (The user's decision 2026-10-29:) turned, or zoomed off one tile pixel a screen pixel (fitted), the card's texture filter and the
     // processor's painter resample the picture each their own way (both bilinear, their weights rounded otherwise): within
     // 1/255 at all but the edges of sharp lines (at
     // most 2 pixels in 1000 apart, never by more than 12/255, Mesa's llvmpipe), and the sheet's edges and soft shadow (the
