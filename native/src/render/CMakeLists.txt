@@ -254,6 +254,7 @@ genko_library(genko_render
     ops_production.cpp
     ops_layer_comps.cpp
     psd_production.cpp
+    psd_guides.cpp
     psd_comps.cpp
     pcraft_production.cpp
     pcraft_comps.cpp
@@ -264,6 +265,9 @@ genko_library(genko_render
     ops_annotations.cpp
     psd_annotations.cpp
     pcraft_annotations.cpp
+    # PC5 J-d1 (計測: measure@1 — the ops, a .pcraft's measurement; PSD's 1074 in psd_annotations.cpp)
+    ops_measure.cpp
+    pcraft_measure.cpp
     # PC5 G-c (文字スタイル・段落スタイル: type_style)
     ops_type_styles.cpp
     ${GENKO_MATERIAL_RESOURCES}

@@ -84,7 +84,7 @@ bool PageCanvas::crop_move(const QPointF& pointer, Qt::KeyboardModifiers modifie
         const QPointF grip = corners(d.was)[std::size_t(d.corner)];
         mm = snap_point(grip + (pointer - d.start), modifiers) - grip + d.start;
     } else {
-        snap_lines_.clear();
+        forget_snap();
     }
     if (d.kind == QLatin1String("move")) {
         box.centre = d.was.centre + (mm - d.start);

@@ -306,6 +306,11 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/doc/src/variables.rs`（`Variables`・`VariableDef`・`VarKind`・`PixelMethod`・`PixelAlign`・`DataSet`・`DataValue`）→ `native/src/core/variables.{hpp,cpp}`（本に持つ正規形・台詞を名指す定義・置く箱・画像の値を本の素材にすること・上限は Genko のもの）。
   - `crates/engine/src/variables_cmds.rs`（26-125 行: 定義・データセットの読み、155-262 行: `apply_to_doc`・`replace_pixels` — 方法と 9 つの配置とクリップ、270-352 行: `import_data_sets`・`split_csv`、354-395 行: `export_as_files` の名前の形）→ `native/src/render/ops_variables.{hpp,cpp}`（op の名前と引数、各変更を Genko の op の決まりで通すこと、8 bit・高精度・インキの層の格子への配線、置く箱を定義のときに決めることは Genko のもの）・`native/src/formats/datasets.{hpp,cpp}`（引用の中の改行・タブの自動・名前の列の見出しの日本語・画像のファイルを素材にすることは Genko のもの）。`crates/engine/src/variables_cmds/tests.rs` の試験の考え → `native/tests/unit/test_variables.cpp`・`native/tests/contract/test_contract_variables.cpp`。
   - `crates/format/src/manifest.rs`（`variables`）→ `native/src/render/pcraft_variables.{hpp,cpp}`。
+- バッチ・ドロップレット・スクリプト・スクリプトイベント・画像プロセッサーほか（PC5 I-e）:
+  - `crates/engine/src/automate_cmds.rs`（264-325 行: `create_droplet`・`write_shim`・`run_droplet` — ドロップレットのファイル、隣の起動ファイル、書き先の既定 `droplet-output`）→ `native/src/service/automate.cpp`（`.genkodroplet` の形・知らないキーを断ること・作るときと流すときの手順の確かめ・Linux の .sh と .desktop、Windows の .lnk（MS-SHLLINK の書き手）・制御文字を含むパスを断ること・Genko の起動ファイルでないものを上書きしないこと・`--agent` を書かないことは Genko のもの）。
+  - `crates/engine/src/file_cmds.rs`（531-568 行: `conditional_mode_change`、653-680 行: `image_processor`）→ `native/src/service/automate.cpp`（`conditional_mode_change` は `set_color_mode` に直す擬似 op で深さを保つこと、画像プロセッサーの形式の組と形式ごとのフォルダー（Photoshop の）、sRGB に変換の前に特別なモードを RGB にすることは Genko のもの）。
+  - `crates/engine/src/lens_cmds.rs`（354-374 行: `lens_batch` — 2 枚以上なら統合してからレンズ補正、プロファイルの既定 auto）→ `native/src/service/automate.cpp`（`lens_steps`。見えているレイヤーで数えること、統合で残るレイヤーにかけることは Genko のもの）。
+  - `crates/engine/src/automate_cmds.rs`（141-260 行: スクリプトイベントの名前と起こす所）→ `native/src/app/main_window.cpp`・`main_window_file.cpp`・`main_window_export.cpp`・`main_window_output.cpp`（人の保存だけ・バッチの間は起こさないことは Genko のもの）。窓は `native/src/app/automate_dialogs.cpp`（Qt。欄の名前は Photoshop）。
 
 ## 表示・窓・環境設定（PC5 節 H）
 
@@ -316,6 +321,11 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/proof_sim.rs`（75-110 行: `HdrPreview` — 方法・露光量 −20〜20・ガンマ 0.1〜9.99 と 0・1 で何もしないこと、265-284 行: `preview_32` の引数と範囲）→ `native/src/render/hdr_preview.cpp`（0..1 に切る前の値に当てること、ハイライト圧縮の式、グレー・インキの道は Genko のもの）。
   - `crates/ui-egui/src/view_cmds.rs`（546-580 行: 200%・プリントサイズと `fit_layers` — 選んだレイヤーの範囲を 20 画素空けて画面に）→ `native/src/app/main_window_view.cpp`（`fit_layers`）・`native/src/app/canvas.cpp`（`fit_box`）。`crates/ui-egui/src/menu_catalog.rs`（642-701 行: 表示 の項目の名前と並び、スクリーンモードの 3 つ）→ `native/src/app/main_window_view.cpp`。
   - `crates/gpu/tests/parity.rs`（GPU と CPU が 1/255 以内という許し）の考え → `native/tests/gui/test_gui_canvas.cpp`（`theCardShowsWhatTheProcessorDraws`。Genko は表示の一致）。
+- ガイド・グリッド・エクストラ・単位（PC5 H-b）:
+  - `crates/engine/src/file_cmds.rs`（886-960 行: `push_unique`・`layout_lines`・`new_guide_layout` — 列・行・溝・マージン・中央揃え・既存を消す）→ `native/src/core/ops_rulers.cpp`（`guide_layout`・op `add_guide_layout`。mm と Genko の基準 用紙・仕上がり線・基本枠）。`crates/engine/src/file_cmds/tests.rs`（325-348 行: `guide_layouts` の値）→ `native/tests/contract/test_contract_guides.cpp`。
+  - `crates/io/src/psd_import.rs`（363-376 行: `parse_guides`）・`crates/io/src/psd_export.rs`（470-484 行: `guides_resource`）→ `native/src/render/psd_guides.cpp`（リソース 1032 のバイトの並び）。
+  - `crates/engine/src/prefs.rs`（52-147 行: `Unit` の `from_px`・`to_px`・`suffix`・`decimals`、`PointSize::per_inch`。497-567 行: `UnitsAndRulers`・`GuidesGridAndSlices` の項目と既定）→ `native/src/core/units.cpp`（mm を元に）・`native/src/core/prefs_table.cpp`・`native/src/app/preferences_units.cpp`。
+  - `crates/ui-egui/src/rulers.rs`（38-48 行: `nice_step`、150-230 行: 定規の刻みと数、ガイドを離した所で動かす・消す）→ `native/src/app/canvas_scale.cpp`（`draw_scale_in_unit`・`guide_release`）・`native/src/app/canvas_guide_lines.cpp`。
 
 ## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1、PC5 節 J）
 
@@ -333,3 +343,7 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/notes_cmds.rs`（55-150 行: `notes.add`・`notes.set`（印と一緒に枠を動かす、本文・作成者を変えたときだけ日時を変える）・`notes.delete`、160-190 行: `import_notes_from`（紙の外の印を中へ寄せる））→ `native/src/render/ops_annotations.{hpp,cpp}`・`native/src/formats/notes_import.{hpp,cpp}`（op の名前と引数・mm で持つこと・書いた人を持ちエージェントが人の注釈を変えないこと・読み込みを op の並びにすることは Genko のもの）。試験の考え（同じファイルの tests）→ `native/tests/unit/test_annotations.cpp`。
   - `crates/io/src/annotations_map.rs`（1-205 行: `Anno` の読み書き `parse_entries`・`write_note`・`write_anno`、色の空間 `color_from`、本文の UTF-16 と CR、音声の注釈を元のバイトのまま書き戻すこと）→ `native/src/render/psd_annotations.{hpp,cpp}`（PDF の日付を UTC に直すこと・読んだバイトのまま書くかを指紋で決めることは Genko のもの）。
   - `crates/doc/src/analysis.rs`（94-125 行: `Note` の形と既定）と `crates/format/src/manifest.rs`（`notes`）→ `native/src/render/pcraft_annotations.{hpp,cpp}`。
+- 計測（PC5 J-d1）:
+  - `crates/doc/src/analysis.rs`（8-90 行: `MeasurementScale` の `factor`・`describe`・`is_default`、`CountGroup` の既定、`count_total`）と `crates/engine/src/analysis_cmds.rs`（221-262 行: `set_scale`・`scale_json`、555-577 行: `ruler_info`（角度は上が正、分度器は 2 本の腕の間の角）、619-630 行: `inscribed`、632-668 行: `straighten`（近い軸へ寝かせ、層はキャンバスの中心のまわりに回し、切り抜きはキャンバスを回して内接の長方形で切る。終わると線を消す）、670-850 行: `count_*`（新しいグループの色の順、`nearest` の 6 画素、グループだけを名指すと使うグループにする）、1085-1100 行: `analysis_info`）→ `native/src/core/measure.{hpp,cpp}`・`native/src/render/ops_measure.{hpp,cpp}`（op の名前と引数・mm で持つこと・ページの画素で数えること・用紙の mm のプリセット・範囲の外の大きさを断ること・ものさしも 1 手の op にすること・切り抜きを `crop_page` の 1 手にすることは Genko のもの）。試験の考え（同じファイルの tests.rs・analysis.rs の tests）→ `native/tests/unit/test_measure.cpp`。
+  - `crates/io/src/annotations_map.rs`（279-345 行: リソース 1074 の `scale_from_resource`・`write_scale_resource`・`keep_raw_scale`、1080 は印があれば書かない `keep_resource`）→ `native/src/render/psd_annotations.{hpp,cpp}`（ファイルの画素とページの画素の換算・指紋で読んだバイトのまま書くかを決めることは Genko のもの）。
+  - `crates/format/src/manifest.rs`（`measurement`）→ `native/src/render/pcraft_measure.{hpp,cpp}`。

@@ -124,6 +124,8 @@ const std::map<std::string, const char*>& names() {
         {"set_camera_raw", "Camera Raw で現像の設定を変えた"},
         // (PC5 I-b, groups@1: render/ops_groups)
         {"frame_from_layers", "レイヤーからフレームを作った"},
+        // (PC5 H-b: core/ops_rulers)
+        {"add_guide_layout", "ガイドレイアウトを作った"},
         // (PC5 J-a, layer-comps@1: render/ops_layer_comps)
         {"new_layer_comp", "新規レイヤーカンプ"}, {"update_layer_comp", "レイヤーカンプを更新"}, {"apply_layer_comp", "レイヤーカンプを適用"},
         {"set_layer_comp", "レイヤーカンプオプション"}, {"duplicate_layer_comp", "レイヤーカンプを複製"}, {"delete_layer_comp", "レイヤーカンプを削除"},
@@ -132,6 +134,10 @@ const std::map<std::string, const char*>& names() {
         {"set_variables", "変数を定義"}, {"set_data_sets", "データセットを変更"}, {"apply_data_set", "データセットを適用"},
         // (PC5 J-c, annotations@1: render/ops_annotations)
         {"add_annotation", "注釈を追加"}, {"set_annotation", "注釈を編集"}, {"delete_annotations", "注釈を削除"},
+        // (PC5 J-d1, measure@1: render/ops_measure)
+        {"set_measurement_scale", "計測スケールを設定"}, {"add_count", "カウント"}, {"remove_count", "カウントを削除"}, {"move_count", "カウントを移動"},
+        {"clear_count", "カウントをクリア"}, {"new_count_group", "新規カウントグループ"}, {"delete_count_group", "カウントグループを削除"},
+        {"set_count_group", "カウントグループのオプション"}, {"set_ruler_line", "ものさし"}, {"straighten_layer", "レイヤーの角度補正"},
     };
     return table;
 }
@@ -145,6 +151,20 @@ QString describe(const Json& ops) {
             // NAMES.get(str(op.get("op")), "原稿を変えた")
             const Json* kind = op.is_object() && op.contains("op") ? &op["op"] : nullptr;
             const std::string key = kind != nullptr ? core::py_str(*kind) : std::string("None");
+            // (PC5 H-b: a guide's own words — the ruler ops naming one by its kind, or moving one by its place)
+            const bool guide = op.is_object() && op.value("kind", Json()) == Json("guide");
+            if (key == "add_ruler" && guide) {
+                named << QStringLiteral("ガイドを置いた");
+                continue;
+            }
+            if (key == "delete_ruler" && guide) {
+                named << QStringLiteral("ガイドを消した");
+                continue;
+            }
+            if (key == "edit_ruler" && op.is_object() && (op.contains("at") || op.contains("axis")) && !op.contains("points")) {
+                named << QStringLiteral("ガイドを動かした");
+                continue;
+            }
             const auto it = names().find(key);
             named << (it != names().end() ? QString::fromUtf8(it->second) : QStringLiteral("原稿を変えた"));
         }

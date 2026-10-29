@@ -424,19 +424,26 @@ private slots:
         context.say = [&said](std::string note) { said.push_back(std::move(note)); };
         pp::read(document, context);
         // (PC5 J-a: レイヤーカンプ read — this one not of upstream's form: said so, in its place; PC5 J-c: 注釈 read — the
-        // page's note now, nothing said; PC5 I-d: 変数とデータセット read — not of upstream's form: said so)
+        // page's note now, nothing said; PC5 I-d: 変数とデータセット read — not of upstream's form: said so; PC5 J-d1: 計測 read —
+        // the page's count mark now, its fields' defaults filled as upstream's serde reads them, nothing said)
         QCOMPARE(said, (std::vector<std::string>{"レイヤーカンプは読めない形のため外しました", "タイムラインは Genko に無いため外しました",
-                                                 "変数とデータセットは読めない形のため外しました", "計測（カウント・ものさし）は Genko に無いため外しました"}));
+                                                 "変数とデータセットは読めない形のため外しました"}));
         QCOMPARE(page.annotations.size(), std::size_t(1));
         QCOMPARE(page.annotations[0].text, std::string("a"));
+        QVERIFY(page.measure && page.measure->count_groups.size() == 1);
+        QCOMPARE(page.measure->count_groups[0].points.size(), std::size_t(1));
         said.clear();
         pp::read(Json::parse(R"({"measurement": {"scale": {"pixel_length": 2}}})"), context);
         QVERIFY(said.empty());
         Json out = Json::object();
         pp::WriteContext writing;
         pp::write(page, out, writing);
-        QCOMPARE(out.size(), std::size_t(1));  // (PC5 J-c: the page's note written back; nothing else)
+        // (PC5 J-c: the page's note written back; PC5 J-d1: its measuring too — the second document's, its scale alone, in
+        // place of the first's —; nothing else)
+        QCOMPARE(out.size(), std::size_t(2));
         QCOMPARE(out["notes"][0]["text"], Json("a"));
+        QVERIFY(out["measurement"]["count_groups"].empty());
+        QCOMPARE(out["measurement"]["scale"]["units"], Json("pixels"));
     }
 };
 

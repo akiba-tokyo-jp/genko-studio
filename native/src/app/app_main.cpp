@@ -117,6 +117,7 @@ int run_app(int argc, char** argv) {
     window->setAttribute(Qt::WA_DeleteOnClose);
     window->show();
     if (keys_from_before) key_sets::tell_new_default(window);  // (once: the keys are Photoshop's now, Genko's a click away)
+    window->raise_at_start();  // (PC5 I-e: スクリプトイベント アプリケーションを起動, once the book is open)
     window->open_path(*path);  // (PC4 F-b: a book's folder, or a file opened as a book of one page in memory)
     for (const QString& url : std::exchange(waiting, {})) window->open_link_when_ready(url);
     const int code = QApplication::exec();

@@ -399,7 +399,7 @@ void PageCanvas::center_on(double x_mm, double y_mm) {
     update();
 }
 
-void PageCanvas::actual_size() { zoom_by((96 / 25.4) / view_.scale); }
+void PageCanvas::actual_size() { zoom_by((std::max(1.0, print_dpi) / 25.4) / view_.scale); }
 
 void PageCanvas::actual_pixels(double percent) { zoom_by(percent / 100.0 * pixel_scale() / view_.scale); }
 

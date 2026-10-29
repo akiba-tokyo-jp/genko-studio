@@ -28,6 +28,7 @@
 #include "render/codecs/format.hpp"
 #include "render/image.hpp"
 #include "render/proof.hpp"
+#include "service/automate.hpp"
 #include "service/script_events.hpp"
 
 class QCheckBox;
@@ -65,6 +66,7 @@ struct WriteGuard;
 namespace genko::app {
 
 class BrushPanel;
+class SourceChoice;  // (PC5 I-e: app/automate_dialogs.hpp)
 class ChannelPanel;
 class CloneSourcePanel;
 class PathsPanel;
@@ -544,6 +546,15 @@ public:
     // レイヤーを画面サイズに合わせる (PC5 H-a): the view on the box of the layers chosen (else the layer drawn on; none
     // showing anything: the page).
     void fit_layers();
+    // PC5 H-b (main_window_guide_view.cpp): 環境設定 → 単位・定規 and ガイド・グリッド・スライス on the canvas (its unit, the guides'
+    // and the grid's colours and styles, プリントサイズ's screen resolution — preferences::apply_all calls it); ガイドを消去 (every
+    // page: every_page) and カンバスガイドを消去 (the page in front); 新規ガイド… (a guide's id: that guide moved),
+    // 新規ガイドレイアウトを作成…, エクストラオプションを表示….
+    void apply_guide_prefs();
+    void clear_guides(bool every_page);
+    void ask_new_guide(const QString& moved = {});
+    void ask_guide_layout();
+    void ask_extras_options();
     RestReminder* rest() const { return rest_; }
     RadialMenu* radial() const;  // (out of line: RadialMenu is only declared here)
     // キーを押している間だけ持ち替え: the tool last chosen (its key), the one before and when (seconds); the key of the
@@ -584,6 +595,9 @@ public:
     // printed or exported, and when the app starts): the steps bound to it run (service/script_events.hpp), unless steps
     // of an event are running now; a table changed outside Genko is said once and runs nothing.
     void script_event(service::script_events::Event event);
+    // PC5 I-e: アプリケーションを起動's event, raised once the book the app starts with is open (on it, before that book's
+    // ドキュメントを開く) — app/app_main.cpp.
+    void raise_at_start() { start_pending_ = true; }
     QMenu* automate_menu() const { return automate_menu_; }
     QMenu* scripts_menu() const { return scripts_menu_; }
     // マスクを編集する (the layer panel's マスク menu): the pen and the eraser paint the mask of the layer drawn on.
@@ -742,6 +756,13 @@ private:
     QMenu* show_menu(QMenu* view);
     // PC5 H-a: 手のひらツール's and ズームツール's pages in オプション (main_window_view.cpp)
     void build_view_pages(ToolSettings* ts);
+    // PC5 H-b (main_window_guide_view.cpp): エクストラ, 表示・非表示 ▸'s own (and ターゲットパス・選択範囲のエッジ・グリッド・
+    // ブラシプレビュー moved in), すべて・なし・エクストラオプションを表示…, ガイドをロック・ガイドを消去・カンバスガイドを消去・
+    // 新規ガイド…・新規ガイドレイアウトを作成…; apply_extras: the canvas's switches as the commands say (kept for the next window)
+    void build_guide_view_actions();
+    void build_guide_view_menus(QMenu* view);
+    void apply_extras();
+    void share_view_switch(const QString& attribute, bool on);  // (the other open windows the same)
     void ask_32bit_preview();
     void build_arrange_actions();
     void build_arrange_menus(QMenu* arrange);
@@ -782,9 +803,28 @@ private:
     // holds one.
     void build_automate_actions();
     void build_automate_menus();
+    // PC5 I-e (app/main_window_automate.cpp, app/automate_dialogs.hpp): the windows of 自動処理 ▸ and スクリプト ▸, and the
+    // runner they call — the files one by one through service::automate::run, the window's person the actor, a progress
+    // window that stops between files, what was done said (the errors listed) — and the inputs a SourceChoice names.
+    void batch_dialog();
+    void create_droplet_dialog();
+    void image_processor_dialog();
+    void fit_image_dialog();
+    void mode_change_dialog();
+    void lens_batch_dialog();
+    void script_events_dialog();
+    void browse_script();
+    std::optional<service::automate::Inputs> inputs_of(const SourceChoice& source);
+    bool run_automate(const QString& title, const std::vector<service::automate::Input>& inputs, const core::Json& steps,
+                      const service::automate::Output& output, service::automate::Options options, const core::Json& skipped);
     QMenu* automate_menu_ = nullptr;  // ファイル → 自動処理
     QMenu* scripts_menu_ = nullptr;   // ファイル → スクリプト
     bool script_events_told_ = false;  // (a table changed outside Genko: said once)
+    // (PC5 I-e) the event open_project raises once the book is open (新規… sets 新規ドキュメント; none: ドキュメントを開く)
+    std::optional<service::script_events::Event> opened_event_;
+    bool start_pending_ = false;  // (raise_at_start)
+    // A book opened in this window: アプリケーションを起動 first when it is the app's first, then `event`.
+    void raise_opened(service::script_events::Event event);
 
 public:
     // PC4 F-b (app/main_window_file.cpp; SPEC.md FILE-01, the user's decision 4): ファイル's entrances.
@@ -1802,6 +1842,34 @@ private:
     void build_notes_menus(QMenu* file, QMenu* view);
     void build_notes_dock();
     void refresh_notes();
+    // --- PC5 J-d1 (measure@1): main_window_measure.cpp — イメージ → 解析 → 計測スケールを設定 ▸ (初期設定・カスタム…), the
+    // ものさしツール and the カウントツール (in the スポイト group; their options), 表示 → 表示・非表示 → カウント; each change of
+    // the book an op through apply_ops --------------------------------------------------------------------------------
+public:
+    // A measuring op on the page shown (its "page" put in), shown at once (a refusal said in the status line).
+    bool measure_op(core::Json op);
+    // 計測スケールを設定 → カスタム…: the window asked (ピクセルの長さ・論理的な長さ・論理的な単位, or the paper's mm), then
+    // set_measurement_scale.
+    void measurement_scale_dialog();
+    // レイヤーの角度補正 (the ものさしツール's options): the layers in hand turned so the line lies level or upright; `crop`
+    // (Alt): the page turned and cut to the rectangle inside it.
+    void straighten_by_ruler(bool crop);
+    // The ものさしツール's readout of a line (none: the page's, or none) in the options and the 情報 panel.
+    void show_ruler_readout(const std::optional<core::RulerLine>& line = std::nullopt);
+    QLabel* ruler_readout() const { return ruler_readout_; }
+    QComboBox* count_groups() const { return count_groups_; }
+
+private:
+    void build_measure_actions();
+    void build_measure_menus(QMenu* view);
+    void build_measure_tools();
+    void refresh_measure();
+    QLabel* ruler_readout_ = nullptr;
+    QComboBox* count_groups_ = nullptr;
+    QToolButton* count_colour_ = nullptr;
+    QSpinBox* count_marker_ = nullptr;
+    QSpinBox* count_label_ = nullptr;
+    QCheckBox* count_visible_ = nullptr;
     NotesPanel* notes_panel_ = nullptr;
     QDockWidget* notes_dock_ = nullptr;
     QLineEdit* note_author_ = nullptr;

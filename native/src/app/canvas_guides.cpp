@@ -147,23 +147,30 @@ bool PageCanvas::near_point(const QPointF& pos, const QPointF& mm, double px) co
 
 void PageCanvas::draw_grid(QPainter& painter) const {
     const core::Page* p = page();
-    if (!grid_visible || p == nullptr || grid_mm <= 0) return;
+    if (!shows(grid_visible) || p == nullptr || grid_mm <= 0) return;  // (PC5 H-b: エクストラ too)
     const double width = p->spec.width_mm.value(), height = p->spec.height_mm.value();
+    // (PC5 H-b, 環境設定 → ガイド・グリッド・スライス: its colour and style, a thick line every `grid_subdivisions` — 5 as before)
+    const double every = std::max(1, grid_subdivisions);
     double step = grid_mm;
-    if (step * view_.scale < 4) step *= 5;  // (too dense to see: every fifth line only)
-    const auto major = [this](double v) {  // (Python's float %: the sign of the divisor)
-        double m = std::fmod(v / grid_mm, 5.0);
-        if (m != 0 && m < 0) m += 5.0;
+    if (step * view_.scale < 4) step *= every;  // (too dense to see: the thick lines only)
+    const auto major = [this, every](double v) {  // (Python's float %: the sign of the divisor)
+        double m = std::fmod(v / grid_mm, every);
+        if (m != 0 && m < 0) m += every;
         return std::abs(m) < 1e-6;
+    };
+    const auto line = [this](bool thick) {
+        QColor c = grid_colour;
+        c.setAlpha(thick ? 90 : 45);
+        return QPen(c, 1, grid_style);
     };
     for (int k = 0; k <= static_cast<int>(width / step); ++k) {
         const double x = k * step;
-        painter.setPen(QPen(QColor(80, 140, 220, major(x) ? 90 : 45), 1));
+        painter.setPen(line(major(x)));
         painter.drawLine(pt(x, 0), pt(x, height));
     }
     for (int k = 0; k <= static_cast<int>(height / step); ++k) {
         const double y = k * step;
-        painter.setPen(QPen(QColor(80, 140, 220, major(y) ? 90 : 45), 1));
+        painter.setPen(line(major(y)));
         painter.drawLine(pt(0, y), pt(width, y));
     }
 }

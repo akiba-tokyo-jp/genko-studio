@@ -52,6 +52,10 @@ genko_library(genko_app
     main_window.cpp
     main_window_actions.cpp
     main_window_view.cpp
+    main_window_guide_view.cpp
+    guide_dialogs.cpp
+    view_units.cpp
+    preferences_units.cpp
     main_window_arrange.cpp
     main_window_edit.cpp
     key_sets.cpp
@@ -76,6 +80,7 @@ genko_library(genko_app
     history_panel.cpp
     check_panel.cpp
     canvas_scale.cpp
+    canvas_guide_lines.cpp
     canvas_tools.cpp
     canvas_vector.cpp
     canvas_guides.cpp
@@ -209,6 +214,11 @@ genko_library(genko_app
     main_window_notes.cpp
     notes_panel.cpp
     canvas_notes.cpp
+    # PC5 I-e (バッチ・ドロップレット・画像プロセッサー・画像を合わせる・条件付きモード変更・レンズ補正・スクリプトイベントマネージャー・参照)
+    automate_dialogs.cpp
+    # PC5 J-d1 (計測: the count marks and the ものさしツール on the canvas, the window's commands)
+    canvas_measure.cpp
+    main_window_measure.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

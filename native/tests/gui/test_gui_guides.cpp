@@ -15,12 +15,19 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QSlider>
+#include <QRadioButton>
 #include <QSpinBox>
+#include <QTabWidget>
+#include <tuple>
 #include <fstream>
 #include "gui_support.hpp"
 #include "app/canvas.hpp"
 #include "app/config.hpp"
+#include "app/guide_dialogs.hpp"
 #include "app/guide_panel.hpp"
+#include "app/info_panels.hpp"
+#include "app/page_size_dialogs.hpp"
+#include "app/preferences.hpp"
 #include "app/inject.hpp"
 #include "app/main_window.hpp"
 #include "core/json.hpp"
@@ -31,6 +38,7 @@
 #include "core/prim3d.hpp"
 using namespace genko;
 using core::Json;
+using app::PageCanvas;
 namespace inject = genko::app::inject;
 
 namespace {
@@ -92,6 +100,14 @@ struct Studio {
 
 bool close_to(const Json& v, double want, double within = 0.05) { return v.is_number() && std::abs(v.get<double>() - want) <= within; }
 
+// (PC5 H-b: the view's switches, the guides' lock and the units this computer keeps, as a new person has them)
+void fresh_view_settings() {
+    const auto store = genko::app::settings();
+    for (const char* key : {"view/extras", "view/show_guides", "view/show_canvas_guides", "view/show_smart_guides", "view/show_layer_edges",
+                            "view/show_mesh", "view/show_edit_pins", "view/show_notes", "guides/lock", "guides/grid", "guides/grid_mm", "units", "guide_layouts"})
+        store->remove(QString::fromLatin1(key));
+}
+
 }  // namespace
 
 class TestGuiGuides : public QObject {
@@ -121,7 +137,8 @@ private slots:
              "ペンの線を定規に沿わせる（切ると自由に描ける）", true, "ツール/定規"},
             {"act_show_rulers", "描画定規を表示", "",  // (Ctrl+Shift+R: レンズ補正…)
              "", true, "ツール/定規"},
-            {"act_grid", "グリッドを表示", "Ctrl+'", "", true, "ツール/定規"},
+            // (PC5 H-b: Photoshop's 表示 → 表示・非表示 ▸ グリッド — and in ツール → 定規 as before)
+            {"act_grid", "グリッド", "Ctrl+'", "", true, "ツール/定規"},
             {"act_grid_snap", "グリッドにスナップ", "", "Shift で引く直線と定規の点がグリッドに吸い付く", true, "ツール/定規"},
             {"act_grid_mm", "グリッドの間隔…", "", "", false, "ツール/定規"},
             {"act_del_ruler", "選んだ定規を消す", "", "", false, "ツール/定規"},
@@ -482,6 +499,456 @@ private slots:
         QCOMPARE(s.last()["op"], Json("delete_ruler"));
         panel->refresh();
         QVERIFY(!panel->ruler_hint->isHidden());
+    }
+
+    // --- PC5 H-b: ガイド・グリッド・エクストラ・単位 (SPEC.md VIEW-01) ------------------------------------------------------
+
+    // A guide placed is drawn across the view (Photoshop's cyan); エクストラ and 表示・非表示 ▸ ガイド hide it.
+    void guidesDrawnAndHidden() {
+        fresh_view_settings();
+        Studio s;
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_ruler"}, {"page", 1}, {"kind", "guide"}, {"axis", "v"}, {"at", 50}}})));
+        const int x = static_cast<int>(std::lround(s.canvas()->to_widget(QPointF(50, 100)).x()));
+        const auto column = [&] {
+            const QImage image = s.canvas()->grab().toImage();
+            QVector<QRgb> out;
+            for (int y = image.height() / 4; y < image.height() * 3 / 4; y += 7)
+                for (int dx = -1; dx <= 1; ++dx) out << image.pixel(x + dx, y);
+            return out;
+        };
+        const auto cyan = [](const QVector<QRgb>& pixels) {
+            return std::count_if(pixels.begin(), pixels.end(), [](QRgb p) { return qRed(p) < 200 && qGreen(p) > 200 && qBlue(p) > 200; });
+        };
+        const QVector<QRgb> shown = column();
+        QVERIFY2(cyan(shown) > 20, QByteArray::number(static_cast<int>(cyan(shown))));
+        s.trigger("act_extras");  // (off)
+        QVERIFY(!s.canvas()->extras_shown);
+        const QVector<QRgb> hidden = column();
+        QCOMPARE(cyan(hidden), qsizetype(0));
+        s.trigger("act_extras");
+        QVERIFY(cyan(column()) > 20);
+        s.trigger("act_show_guides");  // (ガイド off: hidden as by エクストラ)
+        QCOMPARE(cyan(column()), qsizetype(0));
+        s.trigger("act_show_guides");
+        s.trigger("act_show_canvas_guides");
+        QCOMPARE(cyan(column()), qsizetype(0));
+        s.trigger("act_show_canvas_guides");
+        QVERIFY(cyan(column()) > 20);
+        // (Photoshop's keys: エクストラ Ctrl+H, ガイド Ctrl+;, ガイドをロック Ctrl+Alt+;)
+        QCOMPARE(s.window->action("act_extras")->shortcut(), QKeySequence(QStringLiteral("Ctrl+H")));
+        QCOMPARE(s.window->action("act_show_guides")->shortcut(), QKeySequence(QStringLiteral("Ctrl+;")));
+        QCOMPARE(s.window->action("act_lock_guides")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+;")));
+    }
+
+    // The move tool drags a guide (other tools with Ctrl; the ruler tool never); Alt+click turns it; let go off the view it
+    // goes; double-clicked, 新規ガイド… moves it; locked, none moves.
+    void guidesMovedTurnedTakenAwayAndLocked() {
+        fresh_view_settings();
+        Studio s;
+        PageCanvas* c = s.canvas();
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_ruler"}, {"page", 1}, {"kind", "guide"}, {"axis", "v"}, {"at", 50}}})));
+        const std::string id = s.page().rulers[0]["id"].get<std::string>();
+        const auto at = [&] { return s.page().rulers[0]["at"].get<double>(); };
+        s.window->choose_tool(QStringLiteral("move"));
+        inject::mouse_stroke(c, {QPointF(50, 100), QPointF(60, 100), QPointF(70, 100)});
+        QCOMPARE(s.last()["op"], Json("edit_ruler"));
+        QCOMPARE(s.last()["id"], Json(id));
+        QVERIFY(close_to(s.last()["at"], 70, 0.3));
+        // (the brush draws without Ctrl; with it, it drags the guide)
+        s.window->choose_tool(QStringLiteral("pen"));
+        inject::mouse_stroke(c, {QPointF(at(), 100), QPointF(at() + 10, 100)}, Qt::ControlModifier);
+        QCOMPARE(s.last()["op"], Json("edit_ruler"));
+        QVERIFY(close_to(s.page().rulers[0]["at"], 80, 0.3));
+        // (Alt+click with the move tool: a guide across through the point clicked)
+        s.window->choose_tool(QStringLiteral("move"));
+        inject::click_mm(c, QPointF(at(), 120), Qt::AltModifier);
+        QCOMPARE(s.page().rulers[0]["axis"], Json("h"));
+        QVERIFY(close_to(s.page().rulers[0]["at"], 120, 0.3));
+        // (the ruler tool places a ruler there, never grabs the guide)
+        s.titled(QStringLiteral("直線定規"))->trigger();
+        inject::mouse_stroke(c, {QPointF(30, 120), QPointF(90, 120)});
+        QCOMPARE(s.last()["op"], Json("add_ruler"));
+        QVERIFY(close_to(s.page().rulers[0]["at"], 120, 0.3));
+        // locked: not grabbed
+        s.window->choose_tool(QStringLiteral("move"));
+        s.trigger("act_lock_guides");
+        QVERIFY(c->lock_guides);
+        QVERIFY(!c->guide_at(c->to_widget(QPointF(70, 120))));
+        inject::mouse_stroke(c, {QPointF(70, 120), QPointF(70, 140)});
+        QVERIFY(close_to(s.page().rulers[0]["at"], 120, 0.3));
+        s.trigger("act_lock_guides");
+        // double-clicked: 新規ガイド… with its way and place, moved
+        s.answers.responder->exec = [](QDialog* dialog) {
+            auto* d = qobject_cast<app::NewGuideDialog*>(dialog);
+            if (d == nullptr) return 0;
+            if (!d->across->isChecked() || std::abs(d->at_mm() - 120) > 0.3) return 0;
+            d->position->setValue(30);
+            return int(QDialog::Accepted);
+        };
+        const QPointF on = c->to_widget(QPointF(70, 120));
+        QMouseEvent twice(QEvent::MouseButtonDblClick, on, c->mapToGlobal(on), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(c, &twice);
+        QCOMPARE(s.last()["op"], Json("edit_ruler"));
+        QVERIFY(close_to(s.page().rulers[0]["at"], 30, 0.01));
+        // dragged out of the view: taken away
+        const QPointF from = c->to_widget(QPointF(70, 30));
+        const QPointF off(-20, from.y());
+        for (const auto& [type, where, button, buttons] :
+             {std::tuple{QEvent::MouseButtonPress, from, Qt::LeftButton, Qt::MouseButtons(Qt::LeftButton)},
+              std::tuple{QEvent::MouseMove, from + QPointF(0, 30), Qt::NoButton, Qt::MouseButtons(Qt::LeftButton)},
+              std::tuple{QEvent::MouseMove, off, Qt::NoButton, Qt::MouseButtons(Qt::LeftButton)},
+              std::tuple{QEvent::MouseButtonRelease, off, Qt::LeftButton, Qt::MouseButtons(Qt::NoButton)}}) {
+            QMouseEvent event(type, where, c->mapToGlobal(where), button, buttons, Qt::NoModifier);
+            QCoreApplication::sendEvent(c, &event);
+        }
+        QVERIFY2(s.last()["op"] == Json("delete_ruler"), (s.last().dump() + " " + s.page().rulers.dump()).c_str());
+        QCOMPARE(s.last()["id"], Json(id));
+        for (const Json& r : s.page().rulers) QVERIFY(r.value("kind", std::string()) != "guide");
+        genko::app::settings()->remove(QStringLiteral("guides/lock"));
+    }
+
+    // 表示・非表示 ▸ in Photoshop's order; すべて・なし; an item turned on turns エクストラ on; エクストラオプションを表示…; kept for
+    // the next window.
+    void theShowMenuAndExtras() {
+        fresh_view_settings();
+        Studio s;
+        QMenu* shown = s.window->findChild<QMenu*>(QStringLiteral("menu_show"));
+        QVERIFY(shown != nullptr);
+        QStringList items;
+        for (QAction* a : shown->actions()) items << (a->isSeparator() ? QStringLiteral("|") : a->text());
+        QCOMPARE(items, (QStringList{QStringLiteral("レイヤーエッジ"), QStringLiteral("選択範囲のエッジ"), QStringLiteral("ターゲットパス"), QStringLiteral("グリッド"),
+                                     QStringLiteral("ガイド"), QStringLiteral("カンバスガイド"), QStringLiteral("カウント"),  // (PC5 J-d1)
+                                     QStringLiteral("スマートガイド"), QStringLiteral("注釈"),
+                                     QStringLiteral("ピクセルグリッド"), QStringLiteral("ブラシプレビュー"), QStringLiteral("メッシュ"), QStringLiteral("編集ピン"), QStringLiteral("|"),
+                                     QStringLiteral("すべて"), QStringLiteral("なし"), QStringLiteral("|"), QStringLiteral("エクストラオプションを表示…")}));
+        PageCanvas* c = s.canvas();
+        const bool brush = c->brush_preview;
+        s.trigger("act_show_none");
+        for (bool on : {c->show_layer_edges, c->show_selection_edges, c->show_target_path, c->grid_visible, c->show_guide_lines, c->show_canvas_guides,
+                        c->show_smart_guides, c->show_pixel_grid, c->show_mesh, c->show_edit_pins})
+            QVERIFY(!on);
+        QVERIFY(!s.window->action("act_show_notes")->isChecked());  // (PC5 J-c's 注釈: なし and すべて take it with the rest)
+        QCOMPARE(c->brush_preview, brush);  // (not one of them)
+        s.trigger("act_extras");
+        QVERIFY(!c->extras_shown);
+        s.trigger("act_show_guides");  // (an item turned on: エクストラ too, as Photoshop's)
+        QVERIFY(c->show_guide_lines && c->extras_shown);
+        s.trigger("act_show_all");
+        for (bool on : {c->show_layer_edges, c->show_selection_edges, c->show_target_path, c->grid_visible, c->show_guide_lines, c->show_canvas_guides,
+                        c->show_smart_guides, c->show_pixel_grid, c->show_mesh, c->show_edit_pins, c->extras_shown})
+            QVERIFY(on);
+        QVERIFY(s.window->action("act_show_notes")->isChecked());
+        // エクストラオプションを表示…: エクストラ and the items chosen together
+        s.answers.responder->exec = [](QDialog* dialog) {
+            if (dialog->objectName() != QLatin1String("extras_options")) return 0;
+            dialog->findChild<QCheckBox*>(QStringLiteral("extras_on"))->setChecked(false);
+            dialog->findChild<QCheckBox*>(QStringLiteral("extras_act_show_layer_edges"))->setChecked(false);
+            dialog->findChild<QCheckBox*>(QStringLiteral("extras_act_grid"))->setChecked(false);
+            return int(QDialog::Accepted);
+        };
+        s.trigger("act_extras_options");
+        QVERIFY(!c->extras_shown && !c->show_layer_edges && !c->grid_visible && c->show_guide_lines);
+        // kept: a new window of the book shows the same
+        {
+            app::MainWindow other(s.session);
+            QVERIFY(!other.action("act_extras")->isChecked() && !other.canvas()->extras_shown);
+            QVERIFY(!other.action("act_show_layer_edges")->isChecked());
+            QVERIFY(other.action("act_show_guides")->isChecked());
+        }
+        s.trigger("act_show_all");
+        for (const char* key : {"view/extras", "view/show_guides", "view/show_canvas_guides", "view/show_smart_guides", "view/show_layer_edges",
+                                "view/show_mesh", "view/show_edit_pins", "guides/grid"})
+            genko::app::settings()->remove(QString::fromLatin1(key));
+        // (メッシュ and 編集ピン: the warps' grid and pins hidden — or shown — with エクストラ)
+        s.trigger("act_show_mesh");
+        QVERIFY(!c->shows(c->show_mesh) && c->shows(c->show_edit_pins));
+        s.trigger("act_show_mesh");
+        genko::app::settings()->remove(QStringLiteral("view/show_mesh"));
+    }
+
+    // 新規ガイド… and 新規ガイドレイアウトを作成… (its preview on the page while it is open, its presets), in the ruler's unit;
+    // ガイドを消去 and カンバスガイドを消去 the guides alone.
+    void guideWindowsAndClearing() {
+        fresh_view_settings();
+        Studio s;
+        s.answers.responder->exec = [](QDialog* dialog) {
+            auto* d = qobject_cast<app::NewGuideDialog*>(dialog);
+            if (d == nullptr) return 0;
+            d->upright->setChecked(true);
+            d->position->setValue(42);
+            return int(QDialog::Accepted);
+        };
+        s.trigger("act_new_guide");
+        QCOMPARE(s.last()["op"], Json("add_ruler"));
+        QCOMPARE(s.last()["kind"], Json("guide"));
+        QCOMPARE(s.last()["axis"], Json("v"));
+        QVERIFY(close_to(s.last()["at"], 42, 0.001));
+        // in pixels (the page's 72 dpi): 72 px is an inch
+        genko::app::settings()->setValue(QStringLiteral("units/ruler"), QStringLiteral("px"));
+        app::preferences::apply_all(s.window.get());
+        QCOMPARE(s.canvas()->ruler_unit, core::units::Unit::Px);
+        QString suffix;
+        s.answers.responder->exec = [&suffix](QDialog* dialog) {
+            auto* d = qobject_cast<app::NewGuideDialog*>(dialog);
+            if (d == nullptr) return 0;
+            suffix = d->position->suffix();
+            d->across->setChecked(true);
+            d->position->setValue(72);
+            return int(QDialog::Accepted);
+        };
+        s.trigger("act_new_guide");
+        QCOMPARE(suffix, QStringLiteral(" px"));
+        QCOMPARE(s.last()["axis"], Json("h"));
+        QVERIFY(close_to(s.last()["at"], 25.4, 0.01));
+        genko::app::settings()->remove(QStringLiteral("units/ruler"));
+        app::preferences::apply_all(s.window.get());
+        // the layout: its preview shown while it is open, gone after; the op; a preset kept
+        bool previewed = false;
+        s.answers.responder->exec = [&s, &previewed](QDialog* dialog) {
+            auto* d = qobject_cast<app::GuideLayoutDialog*>(dialog);
+            if (d == nullptr) return 0;
+            d->columns->setValue(2);
+            d->gutter->setValue(0);
+            d->margin_on->setChecked(true);
+            d->top->setValue(10);
+            d->left->setValue(10);
+            d->bottom->setValue(10);
+            d->right->setValue(10);
+            d->clear->setChecked(true);
+            previewed = s.canvas()->guide_preview.has_value() && !s.canvas()->guide_preview->down.empty();
+            d->save_preset(QStringLiteral("二段"));
+            return int(QDialog::Accepted);
+        };
+        s.trigger("act_new_guide_layout");
+        QVERIFY(previewed);
+        QVERIFY(!s.canvas()->guide_preview);
+        QCOMPARE(s.last()["op"], Json("add_guide_layout"));
+        QCOMPARE(s.last()["margin_mm"], Json::array({10.0, 10.0, 10.0, 10.0}));
+        QCOMPARE(s.last()["columns"]["count"], Json(2));
+        std::vector<double> down;
+        for (const Json& r : s.page().rulers)
+            if (r.value("axis", std::string()) == "v") down.push_back(r["at"].get<double>());
+        QCOMPARE(down, (std::vector<double>{10, 150, 80}));  // (the 160 mm paper: margins 10, the columns' middle 80)
+        QVERIFY(genko::app::settings()->contains(QStringLiteral("guide_layouts/二段")));
+        genko::app::settings()->remove(QStringLiteral("guide_layouts"));
+        // clearing: the guides alone, the drawing rulers left
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_ruler"}, {"page", 1}, {"kind", "line"},
+                                                      {"points", Json::array({Json::array({1, 1}), Json::array({9, 9})})}}})));
+        s.trigger("act_clear_canvas_guides");
+        QCOMPARE(s.last()["op"], Json("delete_ruler"));
+        QCOMPARE(s.last()["kind"], Json("guide"));
+        QCOMPARE(s.page().rulers.size(), std::size_t(1));
+        const std::size_t before = s.ops.size();
+        s.trigger("act_clear_guides");  // (none left: said, nothing done)
+        QCOMPARE(s.ops.size(), before);
+        QCOMPARE(s.window->last_notice(), QStringLiteral("この原稿にガイドはありません"));
+    }
+
+    // 単位・定規: the scales, 情報, 画像解像度… and カンバスサイズ… in the unit; プリントサイズ at the screen's resolution.
+    void unitsInTheScaleInfoAndSizes() {
+        fresh_view_settings();
+        Studio s;
+        PageCanvas* c = s.canvas();
+        c->show_scale = true;
+        const auto strip = [c] { return c->grab().toImage().copy(0, 0, c->width(), PageCanvas::kScalePx); };
+        const QImage mm = strip();
+        genko::app::settings()->setValue(QStringLiteral("units/ruler"), QStringLiteral("in"));
+        genko::app::settings()->setValue(QStringLiteral("units/screen_resolution"), 72);
+        app::preferences::apply_all(s.window.get());
+        QCOMPARE(c->ruler_unit, core::units::Unit::In);
+        QVERIFY(strip() != mm);
+        QCOMPARE(c->length_words(25.4, true), QStringLiteral("1.00 in"));
+        s.window->info_panel()->show_at(QPointF(25.4, 50.8));
+        QCOMPARE(s.window->findChild<QLabel*>(QStringLiteral("infoPlace"))->text(), QStringLiteral("X 1.00 in（72 px）  Y 2.00 in（144 px）"));
+        app::ImageSizeDialog image(s.window.get(), s.page());
+        QCOMPARE(image.unit->currentData().toString(), QStringLiteral("in"));
+        image.width->setValue(2);
+        QCOMPARE(image.op()["width_mm"], Json(50.8));
+        app::CanvasSizeDialog canvas_size(s.window.get(), s.page());
+        QCOMPARE(canvas_size.unit->currentData().toString(), QStringLiteral("in"));
+        canvas_size.width->setValue(3);
+        QCOMPARE(canvas_size.op()["width_mm"], Json(76.2));
+        s.trigger("act_actual");  // (プリントサイズ: 72 dpi now)
+        QVERIFY(std::abs(c->scale() - 72 / 25.4) < 1e-6);
+        // the grid's spacing asked in the unit, kept in mm
+        s.answers.responder->get_double = [](const QString&, const QString& label, double, double, double, int) {
+            return label.contains(QStringLiteral("in")) ? std::optional<double>(0.5) : std::optional<double>();
+        };
+        s.trigger("act_grid_mm");
+        QVERIFY(std::abs(c->grid_mm - 12.7) < 1e-9);
+        for (const char* key : {"units/ruler", "units/screen_resolution", "guides/grid_mm", "guides/grid"})
+            genko::app::settings()->remove(QString::fromLatin1(key));
+        app::preferences::apply_all(s.window.get());
+        QCOMPARE(c->ruler_unit, core::units::Unit::Mm);
+        s.window->info_panel()->show_at(QPointF(25.4, 50.8));
+        QCOMPARE(s.window->findChild<QLabel*>(QStringLiteral("infoPlace"))->text(), QStringLiteral("X 25.4 mm（72 px）  Y 50.8 mm（144 px）"));
+    }
+
+    // 環境設定 → 単位・定規 and ガイド・グリッド・スライス: in 編集 → 環境設定 ▸, kept, on the canvas.
+    void preferencePages() {
+        fresh_view_settings();
+        Studio s;
+        QMenu* panes = s.window->findChild<QMenu*>(QStringLiteral("menu_preferences"));
+        QStringList names;
+        for (QAction* a : panes->actions()) names << a->text();
+        QVERIFY(names.contains(QStringLiteral("単位・定規…")) && names.contains(QStringLiteral("ガイド・グリッド・スライス…")));
+        app::preferences::PreferencesDialog dialog(s.window.get());
+        dialog.show_pane(QStringLiteral("guidesGridAndSlices"));
+        QCOMPARE(dialog.tabs->tabText(dialog.tabs->currentIndex()), QStringLiteral("ガイド・グリッド・スライス"));
+        auto* ruler = dialog.units_page->findChild<QComboBox*>(QStringLiteral("prefs_ruler_unit"));
+        ruler->setCurrentIndex(ruler->findData(QStringLiteral("cm")));
+        auto* style = dialog.guides_page->findChild<QComboBox*>(QStringLiteral("prefs_guide_style"));
+        style->setCurrentIndex(style->findData(QStringLiteral("dots")));
+        auto* unit = dialog.guides_page->findChild<QComboBox*>(QStringLiteral("prefs_grid_unit"));
+        unit->setCurrentIndex(unit->findData(QStringLiteral("cm")));
+        dialog.guides_page->findChild<QDoubleSpinBox*>(QStringLiteral("prefs_grid_every"))->setValue(3);
+        dialog.guides_page->findChild<QSpinBox*>(QStringLiteral("prefs_grid_subdivisions"))->setValue(6);
+        dialog.save();
+        const auto store = genko::app::settings();
+        QCOMPARE(store->value(QStringLiteral("units/ruler")).toString(), QStringLiteral("cm"));
+        QCOMPARE(store->value(QStringLiteral("guides/guide_style")).toString(), QStringLiteral("dots"));
+        QCOMPARE(store->value(QStringLiteral("guides/grid_subdivisions")).toInt(), 6);
+        QVERIFY(std::abs(store->value(QStringLiteral("guides/grid_mm")).toDouble() - 5.0) < 1e-9);  // (30 mm in 6)
+        QCOMPARE(s.canvas()->ruler_unit, core::units::Unit::Cm);
+        QCOMPARE(s.canvas()->guide_style, Qt::DotLine);
+        QCOMPARE(s.canvas()->grid_subdivisions, 6);
+        QVERIFY(std::abs(s.canvas()->grid_mm - 5.0) < 1e-9);
+        for (const char* key : {"units", "guides/guide_color", "guides/guide_style", "guides/smart_color", "guides/grid_color", "guides/grid_style",
+                                "guides/grid_unit", "guides/grid_subdivisions", "guides/grid_mm"})
+            store->remove(QString::fromLatin1(key));
+        app::preferences::apply_all(s.window.get());
+    }
+
+    // (the review's P3-6) 決める alone — the grid's unit inch, its lines not a whole number of inches — keeps grid_mm as it was.
+    void preferencesKeepTheGridAsItWas() {
+        fresh_view_settings();
+        const auto store = genko::app::settings();
+        store->setValue(QStringLiteral("guides/grid_mm"), 5);
+        store->setValue(QStringLiteral("guides/grid_unit"), QStringLiteral("in"));
+        Studio s;
+        {
+            app::preferences::PreferencesDialog dialog(s.window.get());
+            dialog.save();
+        }
+        QCOMPARE(store->value(QStringLiteral("guides/grid_mm")).toDouble(), 5.0);
+        {
+            app::preferences::PreferencesDialog dialog(s.window.get());
+            dialog.guides_page->findChild<QSpinBox*>(QStringLiteral("prefs_grid_subdivisions"))->setValue(10);  // (25 mm in 10)
+            dialog.save();
+        }
+        QVERIFY(std::abs(store->value(QStringLiteral("guides/grid_mm")).toDouble() - 2.5) < 1e-6);
+        QVERIFY(std::abs(s.canvas()->grid_mm - 2.5) < 1e-6);
+        for (const char* key : {"units", "guides/guide_color", "guides/guide_style", "guides/smart_color", "guides/grid_color", "guides/grid_style",
+                                "guides/grid_unit", "guides/grid_subdivisions", "guides/grid_mm"})
+            store->remove(QString::fromLatin1(key));
+    }
+
+    // (the review's P2-1 and P2-2) Ctrl grabs a guide only where it means nothing else: the shape tool with Ctrl draws, not
+    // snapping, and leaves the guide; the pen grabs as the mouse does (its event left to come as the mouse). The move tool's
+    // box's □ on a guide comes first. Over a guide a press would grab, the pointer says which way it goes.
+    void guidesAndTheToolsOwnKeys() {
+        fresh_view_settings();
+        Studio s;
+        PageCanvas* c = s.canvas();
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_ruler"}, {"page", 1}, {"kind", "guide"}, {"axis", "h"}, {"at", 30}}})));
+        const auto at = [&] { return s.page().rulers[0]["at"].get<double>(); };
+        // the shape tool with Ctrl: a shape, the guide where it was
+        s.window->choose_tool(QStringLiteral("shape"));
+        inject::mouse_stroke(c, {QPointF(40, 30), QPointF(60, 50), QPointF(80, 70)}, Qt::ControlModifier);
+        QVERIFY2(s.last()["op"] != Json("edit_ruler"), s.last().dump().c_str());
+        QCOMPARE(at(), 30.0);
+        QVERIFY(!c->grabbable_guide(c->to_widget(QPointF(40, 30)), Qt::ControlModifier));
+        for (const char* tool : {"crop", "pathpen", "curvepen", "pathselect", "ruler", "hand", "zoom"}) {
+            s.window->choose_tool(QString::fromLatin1(tool));
+            QVERIFY2(!c->grabbable_guide(c->to_widget(QPointF(40, 30)), Qt::ControlModifier), tool);
+        }
+        // the brush: the mouse and the pen alike — with Ctrl over the guide, the pen's press is left to come as the mouse
+        s.window->choose_tool(QStringLiteral("pen"));
+        QVERIFY(c->grabbable_guide(c->to_widget(QPointF(40, 30)), Qt::ControlModifier));
+        const QPointingDevice stylus(QStringLiteral("test pen"), 9001, QInputDevice::DeviceType::Stylus, QPointingDevice::PointerType::Pen,
+                                     QInputDevice::Capability::Position | QInputDevice::Capability::Pressure, 1, 3);
+        const auto pen = [&](QEvent::Type type, const QPointF& mm, Qt::KeyboardModifiers keys) {
+            const QPointF w = c->to_widget(mm);
+            QTabletEvent event(type, &stylus, w, c->mapToGlobal(w), 0.5, 0, 0, 0, 0, 0, keys, type == QEvent::TabletMove ? Qt::NoButton : Qt::LeftButton,
+                               type == QEvent::TabletRelease ? Qt::NoButton : Qt::LeftButton);
+            event.setAccepted(true);
+            QCoreApplication::sendEvent(c, &event);
+            return event.isAccepted();
+        };
+        QVERIFY(!pen(QEvent::TabletPress, QPointF(40, 30), Qt::ControlModifier));
+        // (without Ctrl it draws)
+        const std::size_t before = s.ops.size();
+        QVERIFY(pen(QEvent::TabletPress, QPointF(40, 80), Qt::NoModifier));
+        QVERIFY(pen(QEvent::TabletMove, QPointF(60, 90), Qt::NoModifier));
+        QVERIFY(pen(QEvent::TabletRelease, QPointF(60, 90), Qt::NoModifier));
+        QVERIFY(gui_test::wait_for([&] { return s.ops.size() > before; }));
+        QCOMPARE(s.last()["op"], Json("add_stroke"));
+        QCOMPARE(at(), 30.0);
+        // the move tool: the box's □ on the guide first (自由変形 from it), the guide grabbed beside it
+        s.window->choose_tool(QStringLiteral("move"));
+        c->show_move_box = true;
+        c->moving_box = [] { return std::optional<std::array<double, 4>>(std::array<double, 4>{20, 30, 60, 80}); };
+        QSignalSpy grabbed(c, &PageCanvas::moveBoxGrabbed);
+        QVERIFY(!c->grabbable_guide(c->to_widget(QPointF(40, 30)), Qt::NoModifier));  // (the top's middle □)
+        const QPointF handle = c->to_widget(QPointF(40, 30));
+        QMouseEvent press(QEvent::MouseButtonPress, handle, c->mapToGlobal(handle), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(c, &press);
+        QMouseEvent release(QEvent::MouseButtonRelease, handle, c->mapToGlobal(handle), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(c, &release);
+        QCOMPARE(grabbed.count(), 1);
+        QCOMPARE(at(), 30.0);
+        QTest::keyClick(c, Qt::Key_Escape);
+        QVERIFY(c->grabbable_guide(c->to_widget(QPointF(100, 30)), Qt::NoModifier));  // (away from the □)
+        // the pointer over a guide across: ⇕
+        const QPointF over = c->to_widget(QPointF(100, 30));
+        QMouseEvent hover(QEvent::MouseMove, over, c->mapToGlobal(over), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(c, &hover);
+        QCOMPARE(c->cursor().shape(), Qt::SplitVCursor);
+        c->show_move_box = false;
+    }
+
+    // スマートガイド: a moved box's gaps equal to both neighbours', while the drag lasts (not with it off); レイヤーエッジ: the
+    // chosen layer's box.
+    void smartGuidesAndLayerEdges() {
+        fresh_view_settings();
+        Studio s;
+        PageCanvas* c = s.canvas();
+        s.window->choose_tool(QStringLiteral("move"));
+        c->snap_boxes = [] {
+            return std::vector<std::pair<std::string, std::array<double, 4>>>{{"a", {10, 100, 20, 110}}, {"b", {40, 100, 50, 110}}};
+        };
+        c->moving_box = [] { return std::optional<std::array<double, 4>>(std::array<double, 4>{24, 100, 34, 110}); };
+        const auto drag = [c](bool check) {
+            const QPointF a = c->to_widget(QPointF(30, 105)), b = c->to_widget(QPointF(31, 105));
+            QMouseEvent press(QEvent::MouseButtonPress, a, c->mapToGlobal(a), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(c, &press);
+            QMouseEvent move(QEvent::MouseMove, b, c->mapToGlobal(b), Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(c, &move);
+            const std::vector<PageCanvas::Spacing> seen = c->spacing();
+            if (check) (void)c->grab();  // (drawn: its words in the unit)
+            QMouseEvent release(QEvent::MouseButtonRelease, b, c->mapToGlobal(b), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(c, &release);
+            return seen;
+        };
+        const auto seen = drag(true);
+        QCOMPARE(seen.size(), std::size_t(2));
+        QVERIFY(std::abs(seen[0].from - 20) < 0.3 && std::abs(seen[0].to - 25) < 0.3);
+        QVERIFY(std::abs(seen[1].from - 35) < 0.3 && std::abs(seen[1].to - 40) < 0.3);
+        QVERIFY(c->spacing().empty());  // (let go: gone)
+        s.trigger("act_show_smart_guides");
+        QVERIFY(drag(false).empty());
+        s.trigger("act_show_smart_guides");
+        genko::app::settings()->remove(QStringLiteral("view/show_smart_guides"));
+        // レイヤーエッジ: the layer drawn on's box once it is drawn
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", s.window->target_layer()->id},
+                                                      {"points", Json::array({Json::array({30, 40}), Json::array({60, 70})})}, {"width_mm", 1}}})));
+        s.trigger("act_show_layer_edges");
+        QVERIFY(c->show_layer_edges && c->layer_edges);
+        QVERIFY(gui_test::wait_for([c] { return c->layer_edges().size() == 1; }));
+        const auto box = c->layer_edges().front();
+        QVERIFY(box[0] < 30.5 && box[0] > 28 && box[2] > 59.5 && box[2] < 62);
+        s.trigger("act_show_layer_edges");
+        genko::app::settings()->remove(QStringLiteral("view/show_layer_edges"));
     }
 };
 

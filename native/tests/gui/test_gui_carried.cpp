@@ -241,9 +241,9 @@ private slots:
         std::filesystem::remove(events::path());
         std::filesystem::remove(events::seal_path());
         app::actions::remove(QStringLiteral("影"));
-        // ファイル → 自動処理 ▸ (hidden while empty) and スクリプト ▸
+        // ファイル → 自動処理 ▸ (hidden while empty — shown since PC5 I-e put its commands in it) and スクリプト ▸
         QVERIFY(w->automate_menu() != nullptr && w->scripts_menu() != nullptr);
-        QVERIFY(!w->automate_menu()->menuAction()->isVisible());
+        QVERIFY(w->automate_menu()->menuAction()->isVisible());
         QVERIFY(w->scripts_menu()->actions().contains(book.act("act_flatten_masks")));
     }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QElapsedTimer>
 #include <QImage>
 #include <QPointF>
@@ -25,9 +26,11 @@
 #include "app/pen.hpp"
 #include "app/tiles.hpp"
 #include "core/geometry.hpp"
+#include "core/guide_layout.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
 #include "core/snap.hpp"
+#include "core/units.hpp"
 #include "render/dabs/dynamics.hpp"
 
 class QKeyEvent;
@@ -420,8 +423,10 @@ public:
     bool flipped_vertical() const { return view_.flipped_v; }
     void fit_page();
     void zoom_by(double factor, std::optional<QPointF> anchor = std::nullopt);
-    // プリントサイズ: the paper as large as it is (at 96 dpi, the screen Photoshop's print size assumes on Windows).
+    // プリントサイズ: the paper as large as it is (at 96 dpi, the screen Photoshop's print size assumes on Windows — PC5 H-b:
+    // 環境設定 → 単位・定規 → 画面の解像度, print_dpi).
     void actual_size();
+    double print_dpi = 96;
     // PC5 H-a (the user's decision 11): the zoom in the page's pixels — 100 % one page pixel a screen pixel (the screen's
     // own pixels: devicePixelRatio counted), 200 % two. The scale (screen px a mm) of 100 %.
     double pixel_scale() const;
@@ -576,6 +581,75 @@ public:
     void paint_notes(QPainter& painter, const core::Page& page, const ExtraView& view) const;
     QString chosen_note;
     std::optional<QString> note_at(const QPointF& widget) const;
+    // (PC5 J-d1, 計測 — measure@1, app/canvas_measure.cpp) The count marks' painter (the extra "count": each visible group's
+    // marks — a dot of its colour and size, its number beside it in its label size —, the same size at any zoom) and the
+    // ものさしツール's line (the extra "ruler", while the ものさしツール is in hand: the line, its ends, the protractor's
+    // arm and the angle between). The ものさしツール ("measure"): a drag draws a line (Shift: by 45°), a drag of an end
+    // moves it, of the line moves it whole, Alt+drag from an end draws the protractor's arm (rulerMoving while it goes,
+    // rulerDrawn when let go). The カウントツール ("count"): a click puts a mark of the active group (countRequested), Alt+
+    // click takes the mark there away (countRemoved), a drag moves one (countMoved). The line in hand (none: the page's).
+    void paint_count(QPainter& painter, const core::Page& page, const ExtraView& view) const;
+    void paint_ruler(QPainter& painter, const core::Page& page, const ExtraView& view) const;
+    std::optional<core::RulerLine> ruler_in_hand() const;
+    // A line the page could not take (the op refused: the page locked, the book read-only): this window's alone, drawn and
+    // read until another line is drawn, the page changes or 消去 (none: the page's).
+    std::optional<core::RulerLine> ruler_here;
+    std::string ruler_here_page;  // (the page it was drawn on: let go on another)
+    // The count mark under a point of the canvas (its group and index; none: no visible one within 6 screen pixels).
+    std::optional<std::pair<std::size_t, std::size_t>> count_at(const QPointF& widget) const;
+
+    // --- PC5 H-b: ガイド・グリッド・エクストラ・単位 (canvas_guide_lines.cpp; SPEC.md VIEW-01) --------------------------------------
+    // What エクストラ hides with the rest (shows: one's own switch and the master's): the guides, the grid, the layers' edges,
+    // the selection's edges, the target path, the smart guides, the warps' mesh and pins, the pixel grid, the production's.
+    bool shows(bool own) const { return own && extras_shown; }
+    // The guides (the page's rulers of kind "guide") drawn across the view — 表示 → 表示・非表示 ▸ ガイド (show_guide_lines)
+    // and カンバスガイド (show_canvas_guides: the page's own; an artboard's come with 節 I) — in 環境設定 → ガイド・グリッド・
+    // スライス's colour and style. The move tool grabs one (the other tools while Ctrl is held; the ruler tool never) and
+    // drags it (rulerEdited {at}); let go on a scale or out of the view it is taken away (guideRemoved); Alt+click turns it
+    // about where it was clicked ({axis, at}); a double click asks where it goes (guideAsked). ガイドをロック: none is
+    // grabbed (nor one fixed). Snapping to them is the snap's (canvas_snap.cpp), as before.
+    bool show_guide_lines = true;
+    bool show_canvas_guides = true;
+    bool lock_guides = false;
+    QColor guide_colour = QColor(0x4a, 0xff, 0xff);
+    Qt::PenStyle guide_style = Qt::SolidLine;  // lines | dashed lines | dots
+    // The grid's colour and style, and its thick lines every `grid_subdivisions` of grid_mm (環境設定: グリッド線・分割数).
+    QColor grid_colour = QColor(80, 140, 220);
+    Qt::PenStyle grid_style = Qt::SolidLine;
+    int grid_subdivisions = 5;
+    // スマートガイド: the lines a drag lined up with layer to layer and with the paper's middle (magenta), and the gaps a
+    // moved box has equal to its neighbours on both sides said in the ruler's unit.
+    bool show_smart_guides = true;
+    QColor smart_colour = QColor(0xe6, 0x49, 0x80);
+    struct Spacing {  // a gap equal on both sides of a moved box: along x (vertical false) or along y, from … to, at `across`
+        bool vertical = false;
+        double from = 0, to = 0, across = 0;
+    };
+    const std::vector<Spacing>& spacing() const { return spacing_; }  // (while a drag lasts)
+    // レイヤーエッジ: the chosen layers' boxes (x0, y0, x1, y1 mm, the window's) drawn as thin lines.
+    bool show_layer_edges = false;
+    std::function<std::vector<std::array<double, 4>>()> layer_edges;
+    // メッシュ・編集ピン: the warps' grid and the puppet's box (mesh), their anchors, handles and pins (edit pins) — hidden,
+    // the warp goes on as it was.
+    bool show_mesh = true;
+    bool show_edit_pins = true;
+    // 単位・定規 (core/units.hpp): the scales and the words of a length in the ruler's unit (the page's pixels, its sides).
+    core::units::Unit ruler_unit = core::units::Unit::Mm;
+    double points_per_inch = 72;
+    double column_pt = 180;
+    double gutter_pt = 12;
+    core::units::Basis unit_basis(bool across) const;  // (across: a length along the page's width)
+    QString length_words(double mm, bool across) const;
+    // The guide under a point of the widget that a press would grab (none: none, locked, hidden), and the one being dragged.
+    std::optional<std::string> guide_at(const QPointF& widget) const;
+    // (the review's P2-1 and P2-2) The guide a press here with these keys grabs — its id and whether it is across — with the
+    // tool in hand: the move tool (unless the press is on its box's □: the □ first), another tool with Ctrl held unless Ctrl
+    // means something of its own there (the ruler, the hand, the zoom; the crop, the shape and the path tools — Ctrl: no
+    // snapping —). None: not one. The pen grabs as the mouse does.
+    std::optional<std::pair<std::string, bool>> grabbable_guide(const QPointF& widget, Qt::KeyboardModifiers modifiers) const;
+    std::optional<std::string> dragged_guide() const;
+    // 新規ガイドレイアウトを作成…'s preview: the guides it would add, drawn faintly while its window is open (none: none).
+    std::optional<core::GuideLayout> guide_preview;
 
 signals:
     void changed();
@@ -640,6 +714,9 @@ signals:
     // (the part, where to: pose_mannequin / pose_figure)
     void rulerPlaced(const genko::core::Json& ruler);
     void rulerEdited(const QString& ruler_id, const genko::core::Json& change);
+    // (PC5 H-b) a guide dragged off the view or onto a scale (delete_ruler), a guide double-clicked (新規ガイド… to move it)
+    void guideRemoved(const QString& ruler_id);
+    void guideAsked(const QString& ruler_id);
     void primSelected(const QString& prim_id);
     void primEdited(const QString& prim_id, const genko::core::Json& change);
     void primPosed(const QString& prim_id, const QString& handle, const genko::core::Json& to);
@@ -654,6 +731,13 @@ signals:
     void noteChosen(const QString& id);
     void noteMoved(const QString& id, double x_mm, double y_mm);
     void noteOpened(const QString& id);
+    // (PC5 J-d1) ものさしツール: the line as it is dragged (mm; `protractor`: its arm's end at `arm`), and as it is let go;
+    // カウントツール: a mark asked for here (mm), the mark of a group taken away, moved to (mm)
+    void rulerMoving(QPointF start, QPointF end, bool protractor, QPointF arm);
+    void rulerDrawn(QPointF start, QPointF end, bool protractor, QPointF arm);
+    void countRequested(double x_mm, double y_mm);
+    void countRemoved(int group, int index);
+    void countMoved(int group, int index, double x_mm, double y_mm);
     // the lines: the text tool clicked here (mm); a balloon's outline drawn by hand ([[x, y], …] mm); a line chosen (and
     // whether its panel opens); a line's box or tails changed ({x_mm, y_mm, w_mm, h_mm} | {tails}: move_line, or {style}:
     // edit_line); a double click on a balloon (type over it); a right click on one; a balloon dragged to (mm)
@@ -818,6 +902,7 @@ private:
     bool guide_release(const QPointF& widget);
     void draw_guide_drag(QPainter& painter) const;
     void draw_scale(QPainter& painter) const;
+    void draw_scale_in_unit(QPainter& painter) const;  // (PC5 H-b: the scales in a unit other than mm)
     void draw_phone(QPainter& painter) const;
     void draw_highlight(QPainter& painter) const;
 
@@ -955,6 +1040,8 @@ private:
     struct GuideDrag {  // a guide line pulled from a scale: its axis (h | v) and where it is (mm; none: not yet moved)
         QString axis;
         std::optional<double> at;
+        std::optional<std::string> id;  // (PC5 H-b: a guide placed, grabbed — its ruler's id)
+        bool turn = false;              // (Alt held as it was grabbed: a click turns it)
     };
     std::optional<GuideDrag> guide_drag_;
     bool zoom_out_ = false;
@@ -1085,8 +1172,39 @@ private:
     bool note_move(const QPointF& mm);
     bool note_release();
     bool note_double(const QPointF& widget);
+    // (PC5 J-d1: the ものさしツール's drag — which part: a new line, an end, the whole line, the protractor's arm — and the
+    // カウントツール's drag of a mark — app/canvas_measure.cpp)
+    struct MeasureDrag {
+        enum class Part { New, Start, End, Line, Arm };
+        Part part = Part::New;
+        core::RulerLine line;      // (as it is now)
+        core::RulerLine was;       // (as the press found it)
+        QPointF grabbed;           // (the press, mm)
+        bool moved = false;
+    };
+    std::optional<MeasureDrag> measure_drag_;
+    struct CountDrag {
+        std::size_t group = 0, index = 0;
+        QPointF grabbed, to;  // (mm)
+        bool moved = false;
+    };
+    std::optional<CountDrag> count_drag_;
+    bool measure_press(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool measure_move(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool measure_release();
+    bool count_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool count_move(const QPointF& mm);
+    bool count_release();
     std::vector<QString> extras_hidden_;
     void draw_extras(QPainter& painter) const;
+    // (PC5 H-b: canvas_guide_lines.cpp) the guides, the layers' edges, the equal gaps of a moved box; a guide grabbed
+    bool guide_grab(const QPointF& widget, Qt::KeyboardModifiers modifiers);
+    void draw_guide_lines(QPainter& painter) const;
+    void draw_layer_edges(QPainter& painter) const;
+    void draw_spacing(QPainter& painter) const;
+    std::vector<Spacing> spacing_;
+    void find_spacing(const std::array<double, 4>& box);
+    void forget_snap();
     mutable std::optional<std::pair<std::string, QImage>> mask_picture_;  // (the area and the quick mask it shows)
 
     // gliding between views

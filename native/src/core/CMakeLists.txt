@@ -82,6 +82,7 @@ genko_library(genko_core
     adjust_tone.cpp
     adjust_color.cpp
     rulers.cpp
+    units.cpp
     command_bus.cpp
     ops_util.cpp
     ops_book.cpp
