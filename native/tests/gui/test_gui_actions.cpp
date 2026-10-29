@@ -420,9 +420,13 @@ private slots:
         // 新規ガイドレイアウトを作成… (act_lock_guides, act_clear_guides, act_clear_canvas_guides, act_new_guide,
         // act_new_guide_layout), 編集 → 環境設定 ▸ 単位・定規…・ガイド・グリッド・スライス… (act_prefs_unitsAndRulers,
         // act_prefs_guidesGridAndSlices) — test_gui_guides.
+        // and PC5 I-e's 8 — ファイル → 自動処理 → バッチ…・ドロップレットを作成…・条件付きモード変更…・画像を合わせる…・レンズ補正…
+        // (act_batch, act_create_droplet, act_conditional_mode_change, act_fit_image, act_lens_correction_batch), スクリプト →
+        // 画像プロセッサー…・スクリプトイベントマネージャー…・参照… (act_image_processor, act_script_events, act_script_browse) —
+        // test_gui_automate.
         // and PC5 J-d1's 1 — 表示 → 表示・非表示 → カウント (act_show_count); its 計測スケールを設定 ▸ 初期設定・カスタム…, ものさしツール and
         // カウントツール are the frames' attributes made real — test_gui_measure.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{692});  // (wip-pc's 674, H-b's 17 and J-d1's 1)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{700});  // (wip-pc's 674, H-b's 17, I-e's 8 and J-d1's 1)
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -500,10 +504,15 @@ private slots:
                               QStringLiteral("プリント…"), QStringLiteral("|"), QStringLiteral("タイムラプスを記録する"), QStringLiteral("タイムラプスを書き出す…"),
                               QStringLiteral("|"), QStringLiteral("自動処理 ▸"), QStringLiteral("スクリプト ▸"), QStringLiteral("オートアクション ▸"),
                               QStringLiteral("|"), QStringLiteral("終了")}));  // (PC5 H-0: 環境設定 in 編集)
-        // (PC5 I-0, SPEC.md AUTO-01: 自動処理 ▸ is a frame, shown once a group puts a command in it)
+        // (PC5 I-0, SPEC.md AUTO-01: 自動処理 ▸ is a frame, shown once a group puts a command in it — PC5 I-e's)
         QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate")) != nullptr);
-        QVERIFY(!w->findChild<QMenu*>(QStringLiteral("menu_automate"))->menuAction()->isVisible());
-        QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_scripts"))), QStringList{QStringLiteral("すべてのマスクを統合")});
+        QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate"))->menuAction()->isVisible());
+        QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_automate"))),
+                 (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"), QStringLiteral("条件付きモード変更…"),
+                              QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…")}));
+        QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_scripts"))),
+                 (QStringList{QStringLiteral("画像プロセッサー…"), QStringLiteral("すべてのマスクを統合"), QStringLiteral("|"),
+                              QStringLiteral("スクリプトイベントマネージャー…"), QStringLiteral("|"), QStringLiteral("参照…")}));
         QMenu* exports = w->findChild<QMenu*>(QStringLiteral("menu_export"));
         QVERIFY(exports != nullptr);
         QCOMPARE(items(exports), (QStringList{QStringLiteral("PNG としてクイック書き出し"), QStringLiteral("書き出し形式…"), QStringLiteral("|"),

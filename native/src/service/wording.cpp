@@ -589,6 +589,29 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("a picture's own file is never written: write the batch into a folder", "元の画像には書きません。書き出すフォルダーを選んでください"));
         r.push_back(rule(R"(more than (\d+) files to take: choose fewer)", "ファイルが多すぎます（\\1 個まで）"));
         r.push_back(rule(R"(no action (.*))", "オートアクション \\1 がありません"));
+        // (PC5 I-e: 条件付きモード変更・画像プロセッサー・レンズ補正・ドロップレット — service/automate)
+        r.push_back(rule(R"(conditional_mode_change takes .*)", "条件付きモード変更には、ページと変換後のモードを指定します"));
+        r.push_back(rule(R"(conditional_mode_change: to is .*)", "条件付きモード変更の変換後のモードは、RGB・グレースケール・CMYK・Lab です"));
+        r.push_back(rule(R"(conditional_mode_change: from is .*)",
+                         "条件付きモード変更の変換元のモードは、モノクロ 2 階調・グレースケール・ダブルトーン・インデックスカラー・RGB・CMYK・Lab・マルチチャンネルの中から選びます"));
+        r.push_back(rule(R"(the folder to write into is not given)", "書き出すフォルダーを選んでください"));
+        r.push_back(rule(R"(the folder cannot be made: (.*))", "フォルダーを作れません: \\1"));
+        r.push_back(rule(R"(not a format this build writes: \.(.*))", "この形式（.\\1）には書き出せません"));
+        r.push_back(rule(R"(the image processor writes .*)", "画像プロセッサーで保存する形式は JPEG・PSD・TIFF・PNG です（それぞれ 1 回まで、1 つ以上）"));
+        r.push_back(rule(R"(the image processor's width and height are .*)", "サイズに合わせるの幅と高さは 1〜100000 pixel です"));
+        r.push_back(rule(R"(the lens correction's settings are .*)", "レンズ補正の設定が正しくありません"));
+        r.push_back(rule(R"(not a Genko droplet.*)", "Genko のドロップレット（.genkodroplet）ではありません"));
+        r.push_back(rule(R"(a droplet (holds|has|'s) .*)", "ドロップレットの中身が正しくありません（名前・手順・設定だけを持ちます）"));
+        r.push_back(rule(R"(the droplet is larger than 1 MiB)", "ドロップレットが大きすぎます（1 MiB まで）"));
+        r.push_back(rule(R"(cannot write over a link: (.*))", "リンクの上には書きません。別の名前か場所を選んでください: \\1"));
+        r.push_back(rule(R"(cannot write over a file that is not a droplet's launcher: (.*))",
+                         "同じ名前の、ドロップレットの起動ファイルでないファイルがあるので書きません。別の名前か場所を選んでください: \\1"));
+        r.push_back(rule(R"(the launcher cannot be made runnable: (.*))", "起動ファイルを実行できるようにできません: \\1"));
+        r.push_back(rule(R"(the launcher cannot be written: (.*))", "起動ファイルを書けません: \\1"));
+        r.push_back(rule(R"(the launcher's path holds a (control character|quotation mark): (.*))",
+                         "改行などの制御文字や引用符を含む場所・名前には、起動ファイルを作りません。別の場所か名前を選んでください: \\2"));
+        r.push_back(rule(R"(the launcher's path is too long)", "場所の名前が長すぎるので、起動ファイルを作れません"));
+        r.push_back(rule(R"(no file to run the droplet on)", "ドロップレットで処理するファイルがありません"));
         r.push_back(rule(R"(the colour profile cannot be read \((.*)\))", "カラープロファイルを読み込めません"));
         r.push_back(rule(R"(the file cannot be read \(it is larger than 2 GiB\))", "ファイルが大きすぎて読み込めません（2 GiB まで）"));
         // (this build's own: put_raster reads only a regular file — not a device or a pipe, whose reading may not end)

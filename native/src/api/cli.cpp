@@ -2814,6 +2814,30 @@ int script_command(const QStringList& args, bool ascii) {
     return apply_to(dir, steps, agent, a.flag("--dry-run"), expect, txn, &name, ascii);
 }
 
+// What a batch did (`genko batch`, and PC5 I-e's `genko droplet`, `genko automate`): {"ok", "files", "errors", "skipped"} with
+// --json, else the files written one a line and the errors on stderr; exit 1 when a file failed.
+int print_run(const service::automate::Inputs& inputs, service::automate::Result result, bool json, bool ascii) {
+    Json skipped = inputs.skipped;
+    for (const Json& s : result.skipped) skipped.push_back(s);
+    result.skipped = std::move(skipped);
+    if (json) {
+        print_json(result.json(), ascii);
+    } else {
+        std::string lines;
+        for (const Json& done : result.files) {
+            // (every file once: "outputs" when there, else the picture's "output")
+            if (done.contains("outputs")) {
+                for (const Json& o : done["outputs"]) lines += o.get<std::string>() + "\n";
+            } else if (done.contains("output")) {
+                lines += done["output"].get<std::string>() + "\n";
+            }
+        }
+        write_text(lines, stdout);
+        for (const Json& e : result.errors) write_text(e["input"].get<std::string>() + ": " + e["error"].get<std::string>() + "\n", stderr);
+    }
+    return result.errors.empty() ? 0 : 1;
+}
+
 // `genko batch <inputs…>` (PC5 I-0, SPEC.md AUTO-01: ファイル → 自動処理 → バッチ…'s command line; PC5 I-e its window): each
 // picture (opened as a book of one page) or .genko book in turn through the steps (--steps <file>: a script's; --action
 // <name>: an オートアクション, played back on each page), then written — --out <folder>: each page a file (コピーを保存, the
@@ -2882,23 +2906,274 @@ int batch_command(const QStringList& args, bool ascii) {
     listing.recurse = a.flag("--recurse");
     const service::automate::Inputs inputs = service::automate::list_inputs(given, listing);
     service::automate::Result result = service::automate::run(inputs.items, steps, output, options);
-    Json skipped = inputs.skipped;
-    for (const Json& s : result.skipped) skipped.push_back(s);
-    result.skipped = std::move(skipped);
-    if (a.flag("--json")) {
-        print_json(result.json(), ascii);
-    } else {
-        std::string lines;
-        for (const Json& done : result.files) {
-            if (done.contains("output")) lines += done["output"].get<std::string>() + "\n";
-            if (done.contains("outputs")) {
-                for (const Json& o : done["outputs"]) lines += o.get<std::string>() + "\n";
+    return print_run(inputs, std::move(result), a.flag("--json"), ascii);
+}
+
+// --- PC5 I-e: ドロップレット・画像プロセッサー・画像を合わせる・条件付きモード変更・レンズ補正 -----------------------------------
+
+// The steps of --steps <file> or --action <name> (an オートアクション: recorded), and the name they go by; none of them:
+// no steps. core::Error "not_found" for an action not there.
+std::pair<Json, std::string> steps_option(const Arguments& a, bool* recorded) {
+    *recorded = false;
+    if (const auto file = a.value("--steps")) return {service::automate::read_steps_file(path_arg(*file)), core::path_to_utf8(path_arg(*file).stem())};
+    if (const auto action = a.value("--action")) {
+        const std::string name = action->toStdString();
+        const Json saved = service::actions::load();
+        const auto found = saved.find(name);
+        if (found == saved.end()) throw core::Error("not_found", "no action " + core::py_repr_str(name));
+        *recorded = true;
+        return {(*found)["ops"], name};
+    }
+    return {Json::array(), std::string()};
+}
+
+// --format's text as batch_command checks it (same, or an extension this build writes); none: not one.
+std::optional<std::string> format_option(const QString& text) {
+    std::string f = text.trimmed().toLower().toStdString();
+    if (!f.empty() && f[0] == '.') f.erase(0, 1);
+    const auto exts = formats::copy_extensions();
+    const std::string ext = f == "jpeg" ? "jpg" : f == "tiff" ? "tif" : f;
+    if (f != "same" && std::find(exts.begin(), exts.end(), ext) == exts.end()) return std::nullopt;
+    return f;
+}
+
+std::optional<int> quality_option(const QString& text) {
+    bool ok = false;
+    const int v = text.trimmed().toInt(&ok);
+    if (!ok || v < 0 || v > 12) return std::nullopt;
+    return v;
+}
+
+// `genko droplet <droplet> <inputs…>` (PC5 I-e, SPEC.md AUTO-01: file.automate.runDroplet — what a droplet's launcher calls):
+// the droplet's steps through each picture or book as `genko batch` takes them, written into --out, else the droplet's
+// folder, else droplet-output beside the first input; unnamed, as the person running it (legacy:unknown in an agent's book),
+// or --agent. `genko droplet --create <path> (--steps <file> | --action <name>)` (file.automate.createDroplet): the droplet
+// written there (.genkodroplet) with its launchers beside it (--no-launcher: none). {"ok", …} with --json.
+int droplet_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--create", true},  {"--steps", true},   {"--action", true},  {"--name", true},
+                                          {"--out", true},     {"--format", true},  {"--quality", true}, {"--prefix", true},
+                                          {"--suffix", true},  {"--no-launcher", false}, {"--recurse", false}, {"--stop-on-error", false},
+                                          {"--agent", true},   {"--json", false}};
+    Arguments a;
+    const bool create = std::any_of(args.begin(), args.end(), [](const QString& arg) { return arg.startsWith(QLatin1String("--create")); });
+    if (auto error = parse_arguments(args, kOptions, create ? 0 : 2, "droplet, inputs", a, !create)) return usage("genko droplet: " + *error);
+    if (create) {
+        for (const char* other : {"--recurse", "--stop-on-error", "--agent"}) {
+            if (a.flag(other) || a.value(other)) return usage(std::string("genko droplet --create: ") + other + " is for running a droplet");
+        }
+        if (a.value("--steps").has_value() == a.value("--action").has_value()) return usage("genko droplet --create: give --steps <file> or --action <name>");
+        service::automate::Droplet droplet;
+        std::string name;
+        std::tie(droplet.steps, name) = steps_option(a, &droplet.recorded);
+        const fs::path place = path_arg(*a.value("--create"));
+        droplet.name = a.value("--name").value_or(QString()).trimmed().toStdString();
+        if (droplet.name.empty()) {
+            fs::path stem = place.filename();
+            if (stem.extension() == ".genkodroplet") stem.replace_extension();
+            droplet.name = core::path_to_utf8(stem);
+        }
+        try {
+            service::automate::check_script_name(droplet.name);
+        } catch (const core::Error& error) {
+            return usage(std::string("genko droplet: argument --name: ") + error.what());
+        }
+        if (const auto out = a.value("--out")) droplet.output = fs::absolute(path_arg(*out));
+        if (const auto format = a.value("--format")) {
+            const auto f = format_option(*format);
+            if (!f) return usage("genko droplet: not a format this build writes: ." + format->toStdString());
+            droplet.format = *f;
+        }
+        if (const auto q = a.value("--quality")) {
+            droplet.quality = quality_option(*q);
+            if (!droplet.quality) return usage("genko droplet: argument --quality: 0..12");
+        }
+        droplet.prefix = a.value("--prefix").value_or(QString()).toStdString();
+        droplet.suffix = a.value("--suffix").value_or(QString()).toStdString();
+        service::automate::check_steps(droplet.steps, core::Actor(std::string(core::kLegacyActor)));  // (as the person who will run it)
+        const fs::path written = service::automate::write_droplet(place, droplet);
+        Json launchers = Json::array();
+        if (!a.flag("--no-launcher")) {
+            const fs::path genko = service::automate::launcher_program(core::path_from_utf8(QCoreApplication::applicationFilePath().toStdString()));
+            for (const fs::path& l : service::automate::write_launchers(written, genko)) launchers.push_back(core::path_to_utf8(l));
+        }
+        if (a.flag("--json")) {
+            print_json(Json{{"ok", true}, {"droplet", core::path_to_utf8(written)}, {"launchers", launchers}, {"steps", droplet.steps.size()}}, ascii);
+        } else {
+            std::string lines = core::path_to_utf8(written) + "\n";
+            for (const Json& l : launchers) lines += l.get<std::string>() + "\n";
+            write_text(lines, stdout);
+        }
+        return 0;
+    }
+    for (const char* other : {"--steps", "--action", "--name", "--format", "--quality", "--prefix", "--suffix"}) {
+        if (a.value(other)) return usage(std::string("genko droplet: ") + other + " is the droplet's own (made with --create)");
+    }
+    if (a.flag("--no-launcher")) return usage("genko droplet: --no-launcher is for --create");
+    const fs::path file = path_arg(a.positional[0]);
+    const service::automate::Droplet droplet = service::automate::read_droplet(file);
+    std::vector<fs::path> given;
+    for (std::size_t i = 1; i < a.positional.size(); ++i) given.push_back(path_arg(a.positional[i]));
+    service::automate::InputOptions listing;
+    listing.recurse = a.flag("--recurse");
+    const service::automate::Inputs inputs = service::automate::list_inputs(given, listing);
+    const std::optional<fs::path> out = a.value("--out") ? std::optional<fs::path>(path_arg(*a.value("--out"))) : std::nullopt;
+    const service::automate::Output output = service::automate::droplet_output(droplet, inputs.items, out);
+    service::automate::Options options;
+    options.unnamed = a.value("--agent").value_or(QString()).isEmpty();
+    options.actor = core::Actor(options.unnamed ? std::string(core::kLegacyActor) : a.value("--agent")->toStdString());
+    options.stop_on_error = a.flag("--stop-on-error");
+    options.recorded = droplet.recorded;
+    options.script = droplet.name;
+    service::automate::Result result = service::automate::run(inputs.items, droplet.steps, output, options);
+    return print_run(inputs, std::move(result), a.flag("--json"), ascii);
+}
+
+// `genko automate <kind> <inputs…>` (PC5 I-e, SPEC.md AUTO-01: ファイル → 自動処理 ▸・スクリプト ▸'s command line): each
+// picture or book as `genko batch` takes them (--out <folder> | --save | --dry-run; --format, --quality, --prefix, --suffix,
+// --recurse, --stop-on-error, --agent, --name, --json) through
+//   - image-processor (画像プロセッサー; --out only): --formats jpg,psd,tif,png (jpg), --quality (8), --width, --height (fit,
+//     never enlarged), --srgb, and an action (--steps | --action) after them;
+//   - fit (画像を合わせる): --width, --height, --dont-enlarge, --resample;
+//   - mode (条件付きモード変更): --to rgb|gray|cmyk|lab, --from <modes,…> | any (any);
+//   - lens (レンズ補正): --settings <JSON of the filter's settings> (the profile auto unless given).
+int automate_command(const QStringList& all, bool ascii) {
+    static const std::map<QString, std::string> kKinds = {{QStringLiteral("image-processor"), "画像プロセッサー"},
+                                                          {QStringLiteral("fit"), "画像を合わせる"},
+                                                          {QStringLiteral("mode"), "条件付きモード変更"},
+                                                          {QStringLiteral("lens"), "レンズ補正"}};
+    if (all.isEmpty() || !kKinds.contains(all.front())) return usage("genko automate: image-processor, fit, mode or lens");
+    const QString kind = all.front();
+    static constexpr Option kOptions[] = {{"--out", true},     {"--save", false},          {"--dry-run", false},      {"--format", true},
+                                          {"--formats", true}, {"--quality", true},        {"--prefix", true},        {"--suffix", true},
+                                          {"--recurse", false}, {"--stop-on-error", false}, {"--agent", true},        {"--json", false},
+                                          {"--name", true},    {"--width", true},          {"--height", true},        {"--dont-enlarge", false},
+                                          {"--resample", true}, {"--to", true},            {"--from", true},          {"--settings", true},
+                                          {"--srgb", false},   {"--steps", true},          {"--action", true}};
+    Arguments a;
+    if (auto error = parse_arguments(all.mid(1), kOptions, 1, "inputs", a, true)) return usage("genko automate " + kind.toStdString() + ": " + *error);
+    const std::string where = "genko automate " + kind.toStdString() + ": ";
+    // (each kind its own options)
+    static const std::map<QString, std::vector<const char*>> kOwn = {
+        {QStringLiteral("image-processor"), {"--formats", "--width", "--height", "--srgb", "--steps", "--action"}},
+        {QStringLiteral("fit"), {"--width", "--height", "--dont-enlarge", "--resample", "--format"}},
+        {QStringLiteral("mode"), {"--to", "--from", "--format"}},
+        {QStringLiteral("lens"), {"--settings", "--format"}}};
+    for (const char* option : {"--formats", "--width", "--height", "--srgb", "--steps", "--action", "--dont-enlarge", "--resample", "--to",
+                               "--from", "--settings", "--format"}) {
+        const auto& own = kOwn.at(kind);
+        if ((a.flag(option) || a.value(option)) && std::find_if(own.begin(), own.end(), [option](const char* o) { return std::string_view(o) == option; }) == own.end()) {
+            return usage(where + option + " is not one of its options");
+        }
+    }
+    const int ways = (a.value("--out") ? 1 : 0) + (a.flag("--save") ? 1 : 0) + (a.flag("--dry-run") ? 1 : 0);
+    if (kind == QLatin1String("image-processor") ? !a.value("--out") || ways != 1 : ways != 1) {
+        return usage(where + (kind == QLatin1String("image-processor") ? "give --out <folder>" : "give --out <folder>, --save or --dry-run"));
+    }
+    // (レンズ補正 flattens each page that shows more than one layer: never a book written so — the review's P3-14)
+    if (kind == QLatin1String("lens") && a.flag("--save")) return usage(where + "--save is not taken: it flattens the pages' layers (write into --out)");
+    const auto px = [&](const char* option) -> std::optional<int> {
+        const auto text = a.value(option);
+        if (!text) return std::nullopt;
+        bool ok = false;
+        const int v = text->trimmed().toInt(&ok);
+        if (!ok || v < 1 || v > 100000) throw core::Error("usage", std::string(option) + ": 1..100000 px");
+        return v;
+    };
+    service::automate::Options options;
+    options.unnamed = a.value("--agent").value_or(QString()).isEmpty();
+    options.actor = core::Actor(options.unnamed ? std::string(core::kLegacyActor) : a.value("--agent")->toStdString());
+    options.stop_on_error = a.flag("--stop-on-error");
+    service::automate::Output output;
+    Json steps = Json::array();
+    std::string name = kKinds.at(kind);
+    try {
+        if (kind == QLatin1String("image-processor")) {
+            if (a.value("--steps") && a.value("--action")) return usage(where + "give --steps <file> or --action <name>, not both");
+            service::automate::ImageProcessor processor;
+            processor.formats.clear();
+            for (const QString& f : a.value("--formats").value_or(QStringLiteral("jpg")).split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+                processor.formats.push_back(f.trimmed().toStdString());
+            }
+            if (const auto q = a.value("--quality")) {
+                const auto v = quality_option(*q);
+                if (!v) return usage(where + "argument --quality: 0..12");
+                processor.quality = *v;
+            }
+            processor.width_px = px("--width");
+            processor.height_px = px("--height");
+            processor.to_srgb = a.flag("--srgb");
+            std::string action;
+            std::tie(steps, action) = steps_option(a, &options.recorded);
+            output = service::automate::processor_output(processor, path_arg(*a.value("--out")));
+            options.first = [processor](const core::Document& doc, bool) { return service::automate::processor_steps(processor, doc); };
+        } else {
+            if (const auto out = a.value("--out")) {
+                output.to = service::automate::Output::To::Folder;
+                output.folder = path_arg(*out);
+            } else {
+                output.to = a.flag("--save") ? service::automate::Output::To::Book : service::automate::Output::To::None;
+            }
+            if (const auto format = a.value("--format")) {
+                const auto f = format_option(*format);
+                if (!f) return usage(where + "not a format this build writes: ." + format->toStdString());
+                output.format = *f;
+            }
+            if (const auto q = a.value("--quality")) {
+                output.quality = quality_option(*q);
+                if (!output.quality) return usage(where + "argument --quality: 0..12");
+            }
+            if (kind == QLatin1String("fit")) {
+                if (!a.value("--width") && !a.value("--height")) return usage(where + "give --width and --height (px)");
+                Json fit{{"op", "fit_image"}};
+                if (const auto w = px("--width")) fit["width_px"] = *w;
+                if (const auto h = px("--height")) fit["height_px"] = *h;
+                if (a.flag("--dont-enlarge")) fit["dont_enlarge"] = true;
+                if (const auto r = a.value("--resample")) fit["resample"] = r->toStdString();
+                steps.push_back(std::move(fit));
+            } else if (kind == QLatin1String("mode")) {
+                if (!a.value("--to")) return usage(where + "give --to rgb, gray, cmyk or lab");
+                Json mode{{"op", "conditional_mode_change"}, {"to", a.value("--to")->trimmed().toLower().toStdString()}};
+                const QString from = a.value("--from").value_or(QStringLiteral("any")).trimmed().toLower();
+                if (from == QLatin1String("any")) {
+                    mode["from"] = "any";
+                } else {
+                    Json list = Json::array();
+                    for (const QString& m : from.split(QLatin1Char(','), Qt::SkipEmptyParts)) list.push_back(m.trimmed().toStdString());
+                    mode["from"] = list;
+                }
+                steps.push_back(std::move(mode));
+            } else {
+                Json settings = Json::object();
+                if (const auto text = a.value("--settings")) {
+                    try {
+                        settings = core::parse_python_json(text->toStdString());
+                    } catch (const core::Error& error) {
+                        return usage(where + "argument --settings: not JSON (" + error.what() + ")");
+                    }
+                    if (!settings.is_object()) return usage(where + "argument --settings: a JSON object of the filter's settings");
+                }
+                options.first = [settings](const core::Document& doc, bool) { return service::automate::lens_steps(settings, doc); };
             }
         }
-        write_text(lines, stdout);
-        for (const Json& e : result.errors) write_text(e["input"].get<std::string>() + ": " + e["error"].get<std::string>() + "\n", stderr);
+    } catch (const core::Error& error) {
+        if (error.code() == "usage") return usage(where + error.what());
+        throw;
     }
-    return result.errors.empty() ? 0 : 1;
+    output.prefix = a.value("--prefix").value_or(QString()).toStdString();
+    output.suffix = a.value("--suffix").value_or(QString()).toStdString();
+    options.script = a.value("--name").value_or(QString()).trimmed().isEmpty() ? name : a.value("--name")->trimmed().toStdString();
+    try {
+        service::automate::check_script_name(options.script);
+    } catch (const core::Error& error) {
+        return usage(where + "argument --name: " + error.what());
+    }
+    std::vector<fs::path> given;
+    for (const QString& p : a.positional) given.push_back(path_arg(p));
+    service::automate::InputOptions listing;
+    listing.recurse = a.flag("--recurse");
+    const service::automate::Inputs inputs = service::automate::list_inputs(given, listing);
+    service::automate::Result result = service::automate::run(inputs.items, steps, output, options);
+    return print_run(inputs, std::move(result), a.flag("--json"), ascii);
 }
 
 }  // namespace
@@ -2949,6 +3224,8 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("styles")) return styles_command(args, ascii);  // (PC4 E6: style.presets.*)
         if (command == QLatin1String("script")) return script_command(args, ascii);  // (PC5 I-0: 自動処理の土台)
         if (command == QLatin1String("batch")) return batch_command(args, ascii);    // (PC5 I-0: 自動処理の土台)
+        if (command == QLatin1String("droplet")) return droplet_command(args, ascii);    // (PC5 I-e: ドロップレット)
+        if (command == QLatin1String("automate")) return automate_command(args, ascii);  // (PC5 I-e: 画像プロセッサーほか)
         if (command == QLatin1String("studio")) return studio_command(args, ascii);
         if (command == QLatin1String("mcp")) return mcp_command(args);
         if (command == QLatin1String("serve")) return serve_command(args);

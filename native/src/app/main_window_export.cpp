@@ -132,6 +132,7 @@ bool MainWindow::quick_export(const std::optional<std::string>& layer) {
         QString words = QStringLiteral("書き出しました（%1）: %2").arg(human_bytes(written.bytes), QDir::toNativeSeparators(qpath(dest)));
         if (!written.notes.empty()) words += QStringLiteral("。") + notes_text(written.notes);
         flash(words, 6000);
+        script_event(service::script_events::Event::Export);  // (PC5 I-e: スクリプトイベント)
         return true;
     } catch (const std::exception& error) {
         flash(QStringLiteral("書き出せませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
@@ -184,6 +185,7 @@ void MainWindow::export_as(const std::optional<std::string>& layer) {
             QString words = QStringLiteral("%1 ページを書き出しました: %2").arg(written.size()).arg(QDir::toNativeSeparators(folder));
             if (!notes.empty()) words += QStringLiteral("。") + notes_text(notes);
             flash(words, 6000);
+            script_event(service::script_events::Event::Export);  // (PC5 I-e: スクリプトイベント)
             return;
         }
         std::string name = doc->title.empty() ? std::string("無題") : doc->title;
@@ -205,6 +207,7 @@ void MainWindow::export_as(const std::optional<std::string>& layer) {
                             .arg(QDir::toNativeSeparators(qpath(dest)));
         if (!written.notes.empty()) words += QStringLiteral("。") + notes_text(written.notes);
         flash(words, 6000);
+        script_event(service::script_events::Event::Export);  // (PC5 I-e: スクリプトイベント)
     } catch (const std::exception& error) {
         flash(QStringLiteral("書き出せませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
     }
@@ -239,6 +242,7 @@ void MainWindow::save_for_web() {
                             .arg(QDir::toNativeSeparators(qpath(dest)));
         if (!written.notes.empty()) words += QStringLiteral("。") + notes_text(written.notes);
         flash(words, 6000);
+        script_event(service::script_events::Event::Export);  // (PC5 I-e: スクリプトイベント)
     } catch (const std::exception& error) {
         flash(QStringLiteral("Web 用に保存できませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
     }

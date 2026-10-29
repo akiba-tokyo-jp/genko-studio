@@ -193,7 +193,7 @@ Steps steps_of(const Binding& binding, Event event) {
     out.label = (binding.name.empty() ? binding.script.value_or(binding.action.value_or(std::string())) : binding.name) + "（" + label_of(event) + "）";
     if (binding.script) {
         const fs::path file = core::path_from_utf8(*binding.script);
-        const std::string bytes = storage::read_file_bounded(file, automate::kMaxStepsBytes);
+        const std::string bytes = automate::read_steps_bytes(file);  // (a regular file only)
         if (!binding.sha256 || storage::sha256_hex(bytes) != *binding.sha256) {
             throw core::Error("script_changed", "the script was changed after it was bound: " + *binding.script);
         }

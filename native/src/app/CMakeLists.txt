@@ -214,6 +214,8 @@ genko_library(genko_app
     main_window_notes.cpp
     notes_panel.cpp
     canvas_notes.cpp
+    # PC5 I-e (バッチ・ドロップレット・画像プロセッサー・画像を合わせる・条件付きモード変更・レンズ補正・スクリプトイベントマネージャー・参照)
+    automate_dialogs.cpp
     # PC5 J-d1 (計測: the count marks and the ものさしツール on the canvas, the window's commands)
     canvas_measure.cpp
     main_window_measure.cpp

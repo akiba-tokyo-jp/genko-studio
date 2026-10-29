@@ -198,17 +198,18 @@ void MainWindow::export_book() {
         if (session->wait_saved(std::chrono::seconds(30)) && !session->unsaved()) return QString();
         return QStringLiteral("原稿を保存できていないため、正式な書き出しをしていません: %1").arg(failure_reason(session->status()));
     };
-    ask::exec(&dialog);
+    const bool exported = ask::exec(&dialog) == QDialog::Accepted;  // (accepted: files written)
     if (dialog.fix_requested) run_checks();
     session_->check_outside();  // (an official export may have recorded an approval: Python's sync)
     reload_pages();
+    if (exported) script_event(service::script_events::Event::Export);  // (PC5 I-e: スクリプトイベント)
 }
 
 void MainWindow::print_book() {
     if (!read_whole(*this)) return;
     session_->save_now();  // (Python's commit_now)
     PrintDialog dialog(this);
-    ask::exec(&dialog);
+    if (ask::exec(&dialog) == QDialog::Accepted) script_event(service::script_events::Event::Print);  // (PC5 I-e: printed)
 }
 
 void MainWindow::toggle_phone() {

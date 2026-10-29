@@ -70,6 +70,7 @@ void MainWindow::open_raw_file(const fs::path& path, bool window) {
         flash_timer_.stop();
         refresh_status();
         if (!read.bytes) {
+            start_pending_ = false;  // (PC5 I-e: the first book not opened — no アプリケーションを起動 later)
             ask::warning(this, QStringLiteral("Genko"), QStringLiteral("ファイルを開けませんでした:\n%1\n%2").arg(QDir::toNativeSeparators(qpath_of(path)), wording::error(read.error)));
             return;
         }
@@ -108,6 +109,7 @@ void MainWindow::open_raw_file(const fs::path& path, bool window) {
             developing->deleteLater();
             flash_timer_.stop();
             if (!made.first) {
+                start_pending_ = false;  // (PC5 I-e: the first book not opened — no アプリケーションを起動 later)
                 ask::warning(this, QStringLiteral("Genko"), QStringLiteral("ファイルを開けませんでした:\n%1\n%2").arg(QDir::toNativeSeparators(qpath_of(path)), wording::error(made.second)));
                 refresh_status();
                 return;
