@@ -38,6 +38,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
+#include "render/color_canvas.hpp"
 #include "render/fill.hpp"
 #include "render/import_profile.hpp"
 #include "render/op_limits.hpp"
@@ -725,42 +726,75 @@ bool linear_page(const core::Page& page) {
     return linear != nullptr && linear->bytes && *linear->bytes == *page.rgb->icc;
 }
 
-// A 32-bit file's sample as the page holds it (Photoshop's 32 bits are linear light): as it is on a page of linear light,
-// else encoded by 1/2.2 as this build reads 32 bits everywhere (render/psd's 8-bit picture, smart_decode's deep picture),
-// its values past 1 kept.
-float encoded(float v, bool as_is) { return as_is ? v : static_cast<float>(std::pow(std::max(0.0f, v), 1.0 / 2.2)); }
+// A 32-bit file's samples are linear light (Photoshop's 32 bits): taken in at the file's depth they are encoded by the
+// page's own tone curve (PC5-0, the user's decision of 2026-10-28: the inverse of what this build writes, render's
+// RgbSpace and GrayCurve) — as they are on a page of linear light —, values past 0..1 by the same formula.
 
 // A part of the file (a layer's box, or the merged picture) on the page layer (`size` pixels, the file's canvas at `at`),
-// as a page of inks of the page's depth holds it: each sample as it is (a 32-bit grey file's encoded), clear around it.
+// as a page of inks of the page's depth holds it: each sample as it is (a 32-bit grey file's encoded by the page's
+// curve), clear around it.
 core::InkPixels deep_inks(const psd::File::DeepPart& part, const core::PageColor& color, Size size, Point at) {
     const std::int64_t width = std::max(1, size.width), height = std::max(1, size.height);
     core::InkPixels canvas = core::blank_ink_pixels(color.space, color.depth, static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height));
     const unsigned colours = canvas.colours();
     const bool as_is = part.depth != 32;
+    const GrayCurve curve = as_is ? GrayCurve() : GrayCurve(color);
+    const auto encoded = [&](float v) { return as_is ? static_cast<double>(v) : finite_sample(curve.encode(v)); };
     const std::int64_t left = part.left + at.x, top = part.top + at.y;
     for (std::int64_t y = std::max<std::int64_t>(0, top); y < std::min(height, top + part.height); ++y) {
         for (std::int64_t x = std::max<std::int64_t>(0, left); x < std::min(width, left + part.width); ++x) {
             const std::size_t from = static_cast<std::size_t>((y - top) * part.width + (x - left));
             const std::size_t to = static_cast<std::size_t>(y * width + x);
-            for (unsigned c = 0; c < colours && c < part.colours; ++c) canvas.set(to, c, encoded(part.value(c, from), as_is));
+            for (unsigned c = 0; c < colours && c < part.colours; ++c) canvas.set(to, c, encoded(part.value(c, from)));
             canvas.set(to, colours, std::clamp(part.value(part.colours, from), 0.0f, 1.0f));
         }
     }
     return canvas;
 }
 
-// The same as a colour raster of the page's depth (u16 or f32: the values as they are — a 32-bit file's encoded unless
-// the page is linear —, past 1 kept at 32 bits).
-std::string deep_color_raster(const psd::File::DeepPart& part, int depth, Size size, Point at, bool linear) {
+// The same as a colour raster of the page's depth (u16 or f32: the values as they are — a 32-bit file's encoded by the
+// page's curves unless the page is linear —, past 0..1 kept at 32 bits).
+std::string deep_color_raster(const psd::File::DeepPart& part, const core::Page& page, Size size, Point at, bool linear) {
+    const int depth = page.rgb->depth;
     const auto w = static_cast<std::uint32_t>(std::max(1, size.width)), h = static_cast<std::uint32_t>(std::max(1, size.height));
     const bool as_is = part.depth != 32 || linear;
+    const RgbSpace space = as_is ? RgbSpace() : RgbSpace::of(page);
+    const auto encoded = [&](unsigned c, float v) { return as_is ? static_cast<double>(v) : finite_sample(space.encode(c, v)); };
     return core::encode_color_pixels(w, h, depth == 16 ? "u16" : "f32", [&](std::size_t i) {
         const std::int64_t x = static_cast<std::int64_t>(i % w) - part.left - at.x, y = static_cast<std::int64_t>(i / w) - part.top - at.y;
         if (x < 0 || y < 0 || x >= part.width || y >= part.height) return std::array<double, 4>{0.0, 0.0, 0.0, 0.0};
         const auto k = static_cast<std::size_t>(y * part.width + x);
-        return std::array<double, 4>{encoded(part.value(0, k), as_is), encoded(part.value(1, k), as_is), encoded(part.value(2, k), as_is),
+        return std::array<double, 4>{encoded(0, part.value(0, k)), encoded(1, part.value(1, k)), encoded(2, part.value(2, k)),
                                      std::clamp(static_cast<double>(part.value(3, k)), 0.0, 1.0)};
     });
+}
+
+// PC5-0 (Z0's review P2-1): a 32-bit RGB or grey file's pixel layer as 8 bits over the whole canvas ("RGBA", as
+// File::image gives it) — its linear colours encoded by the tone curve of the file's profile (encode_by_profile: the
+// inverse of the 32-bit PSD this build writes; Python's view reads them by 1/2.2), its transparency as it is —; nothing
+// for another file (or one whose layer is not read so).
+std::optional<Image> eight_bits_of_32(const psd::File& file, const psd::Layer& item) {
+    if (psd::python_view() || file.depth() != 32 || (file.mode() != 3 && file.mode() != 1)) return std::nullopt;
+    const std::optional<psd::File::DeepPart> part = file.layer_deep(item);
+    if (!part || (part->colours != 3 && part->colours != 1)) return std::nullopt;
+    const unsigned colours = part->colours, all = colours + 1;
+    const std::size_t n = static_cast<std::size_t>(std::max<std::int64_t>(0, part->width)) * static_cast<std::size_t>(std::max<std::int64_t>(0, part->height));
+    std::vector<float> samples(n * all);
+    for (std::size_t i = 0; i < n; ++i)
+        for (unsigned c = 0; c < all; ++c) samples[i * all + c] = part->value(c, i);
+    encode_by_profile(samples, all, true, file.icc());
+    const auto byte = [](float v) { return static_cast<unsigned char>(std::lround(std::clamp(std::isnan(v) ? 0.0f : v, 0.0f, 1.0f) * 255.0f)); };
+    const std::int64_t width = std::max<std::int64_t>(1, file.width()), height = std::max<std::int64_t>(1, file.height());
+    std::string rgba(static_cast<std::size_t>(width * height) * 4, '\0');
+    for (std::int64_t y = std::max<std::int64_t>(0, part->top); y < std::min(height, part->top + part->height); ++y) {
+        for (std::int64_t x = std::max<std::int64_t>(0, part->left); x < std::min(width, part->left + part->width); ++x) {
+            const std::size_t from = static_cast<std::size_t>((y - part->top) * part->width + (x - part->left)) * all;
+            char* to = rgba.data() + static_cast<std::size_t>(y * width + x) * 4;
+            for (unsigned c = 0; c < 3; ++c) to[c] = static_cast<char>(byte(samples[from + (colours == 1 ? 0 : c)]));
+            to[3] = static_cast<char>(byte(samples[from + colours]));
+        }
+    }
+    return Image::frombytes("RGBA", Size{static_cast<int>(width), static_cast<int>(height)}, rgba);
 }
 
 // The bytes of the precise colour rasters the book holds (each allocation once, as core::validate_color_document counts).
@@ -1149,7 +1183,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
                          : core::blank_ink_pixels(mode->space, mode->depth, static_cast<std::uint32_t>(page_px.width), static_cast<std::uint32_t>(page_px.height))));
             } else if (deep == DeepWay::Rgb && item.kind != "smart") {
                 layer.color_raster = std::make_shared<const std::string>(
-                    part ? deep_color_raster(*part, page.rgb->depth, page_px, paste_corner(where), linear_page(page))
+                    part ? deep_color_raster(*part, page, page_px, paste_corner(where), linear_page(page))
                          : core::encode_color_pixels(static_cast<std::uint32_t>(page_px.width), static_cast<std::uint32_t>(page_px.height),
                                                      page.rgb->depth == 16 ? "u16" : "f32", [](std::size_t) { return std::array<double, 4>{0, 0, 0, 0}; }));
                 if (std::find(doc.features.begin(), doc.features.end(), core::kColorRasterFeature) == doc.features.end())
@@ -1166,9 +1200,14 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
             } else {
                 // (onto a clear layer: the pixels as they are)
                 Image canvas = Image::create("RGBA", page_px, Ink{0, 0, 0, 0});
+                // (PC5-0, Z0's review P2-1: a 32-bit file's layer by its profile's curve — a placed layer's picture too —)
+                const auto eight = [&] {
+                    if (std::optional<Image> by_curve = eight_bits_of_32(file, item)) return std::move(*by_curve);
+                    return file.image(item);
+                };
                 const Image picture = way.converting ? import_profile::taken(numbers_of(merged ? *merged : file.image(item)), way, page)
                                                      : merged ? *merged
-                                                              : file.image(item);
+                                                              : eight();
                 canvas.paste(same_size ? picture : picture.resize(shown, Resample::Lanczos), paste_corner(where));
                 layer.raster_png = fills::png_bytes(canvas);
                 layer.raster_relpath = raster::page_folder(page) + "/user-" + layer.id + ".png";

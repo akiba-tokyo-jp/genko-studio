@@ -1339,7 +1339,7 @@ void render_picture(core::OpContext& c) {
     }
     // (an RGB page of 16 or 32 bits: an empty paint layer of its precision; the named one ready — locked refused, not a
     // paint layer refused, precise pen lines made precise paint —, its pixels read once below)
-    if (paint_fill::becomes_precise(doc.page(at), doc.page(at).layers[core::layer_by_id(doc.page(at), id)])) paint_fill::make_precise(doc, at, id);
+    if (paint_fill::becomes_precise(doc, at, doc.page(at).layers[core::layer_by_id(doc.page(at), id)], &c.notes)) paint_fill::make_precise(doc, at, id);
     image_ops::ready_paint_layer(c, at, id);
     core::Page& page = doc.edit_page(at);
     core::Layer& layer = page.layers[core::layer_by_id(page, id)];

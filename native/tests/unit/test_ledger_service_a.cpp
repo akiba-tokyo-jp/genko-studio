@@ -1181,9 +1181,13 @@ private slots:
     // (SPEC COLOR-02: set_color_mode, set_inks, put_color_raster; COLOR-03: assign_profile, convert_profile, PC1b's
     // set_text_gamma and the channel ops of channels@1, PC1d's to_indexed, set_color_table, to_bitmap and set_duotone; COLOR-04:
     // PC2's set_adjustment, auto_adjust, hdr_toning, apply_image, calculations, trap and fade_layer; the public `genko schema`
-    // stays Python's).
+    // stays Python's). docs/ops.schema.json is Python's catalogue (the Python version's tests read it): this build's is
+    // that one with the words the user changed on 2026-10-28 (filter_raster's glow, add_layer's kind).
     void test_every_handled_op_is_in_the_catalog_and_docs() {
-        const Json docs = genko::test::read_json(genko::test::repo_root() + QStringLiteral("/docs/ops.schema.json"));
+        Json docs = genko::test::read_json(genko::test::repo_root() + QStringLiteral("/docs/ops.schema.json"));
+        const Json python = docs.at("ops");
+        genko::test::with_words_of_2026_10_28(docs);
+        QVERIFY(docs.at("ops") != python);
         std::string where;
         QVERIFY2(genko::test::same_content(docs.at("ops"), genko::core::ops_schema(), &where), where.c_str());
         std::set<std::string> listed;

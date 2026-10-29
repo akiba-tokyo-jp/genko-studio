@@ -274,9 +274,11 @@ Image fill_reference(const Document& doc, const Page& page, std::size_t target, 
 // those values can do (a blend); an 8-bit layer's fill without it keeps the picture it always laid (the same bytes; a
 // gradient with the new keys a picture at the layer's grid: its lines stay lines, the coordinator's decision after the
 // review) — a channel's or a mask's lent to the op too (an 8-bit picture on any page) —, a pen or tone layer's too.
-bool precise_or_inks(const Page& page, const Layer& layer) {
+// (PC5-0: an empty one made precise within the book's budget — past it painted at 8 bits as before, said in `notes`)
+bool precise_or_inks(const Document& doc, std::size_t at, const Layer& layer, std::vector<std::string>* notes) {
+    const Page& page = doc.page(at);
     return layer.color_raster != nullptr || layer.ink_raster != nullptr || (page.color.has_value() && layer.raster_png == nullptr) ||
-           paint_fill::becomes_precise(page, layer);
+           paint_fill::becomes_precise(doc, at, layer, notes);
 }
 
 // The op's blend: none for normal or none given; OpError for what is not one of the blends.
@@ -379,7 +381,7 @@ void fill(OpContext& c) {
     const std::optional<std::string> blend = blend_given(op);
     const Json* precise = core::get(op, "color_rgb");
     if (precise != nullptr && precise->is_null()) precise = nullptr;
-    if (page.layers[ti].kind == LayerKind::Raster && (blend || precise_or_inks(page, page.layers[ti]))) {
+    if (page.layers[ti].kind == LayerKind::Raster && (blend || precise_or_inks(doc, at, page.layers[ti], &c.notes))) {
         std::array<double, 3> colour{};
         if (precise != nullptr && !page.color && page.rgb && page.rgb->depth != 8) {
             colour = colour_of(*precise, doc, "color_rgb");
@@ -732,7 +734,7 @@ void gradient_fill_new(OpContext& c, std::size_t at, std::size_t ti, const std::
     const Layer& target = page.layers[ti];
     // (the coordinator's decision after E4's review: an 8-bit paint layer in the 通常 mode keeps its lines as lines — the
     // user's decision 3, and the gradient tool's way before E4 —, the gradient a picture laid on it below)
-    if (target.kind == LayerKind::Raster && (blend || precise_or_inks(page, target))) {
+    if (target.kind == LayerKind::Raster && (blend || precise_or_inks(doc, at, target, &c.notes))) {
         std::optional<paint_fill::Coverage> coverage;
         if (core::truthy_at(op, "area")) {
             coverage = paint_fill::Coverage{};
@@ -830,7 +832,7 @@ void gradient_fill(OpContext& c) {
     if (from.size() != 2 || to.size() != 2) throw OpError(message);
     if (core::py_hypot(to[0] - from[0], to[1] - from[1]) < 0.5) throw OpError("the gradient needs a longer drag");
     // (PC4 E4: the keys of this build, or a precise or ink paint layer — render/paint_fill and new_gradient)
-    if (new_gradient_keys(op) || (page.layers[ti].kind == LayerKind::Raster && precise_or_inks(page, page.layers[ti]))) {
+    if (new_gradient_keys(op) || (page.layers[ti].kind == LayerKind::Raster && precise_or_inks(doc, at, page.layers[ti], &c.notes))) {
         gradient_fill_new(c, at, ti, from, to);
         return;
     }
@@ -3165,7 +3167,7 @@ bool paints_layer_values(std::string_view name, const core::Json& op, const core
         // (a pen or tone layer, an 8-bit paint layer in the 通常 mode: a picture laid on it, lent as before)
         if (page.layers[ti].kind != LayerKind::Raster) return false;
         const Json* blend = core::get(op, "blend");
-        return precise_or_inks(page, page.layers[ti]) || (blend != nullptr && !blend->is_null() && *blend != Json("normal"));
+        return precise_or_inks(doc, at, page.layers[ti], nullptr) || (blend != nullptr && !blend->is_null() && *blend != Json("normal"));
     } catch (const std::exception&) {
         return false;  // (the op says what is wrong)
     }

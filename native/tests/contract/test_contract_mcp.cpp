@@ -12,7 +12,8 @@
 // outside the root and links out of it; a book made, changed as an agent and as a person, drawn and written out;
 // uploads). Both records must be the same once normalised (paths, random ids, times; the revision, which this build
 // counts on through an Undo, and the replies after an Undo went through, compared with their objects' keys sorted: a
-// state this build restores is canonical JSON, schema-v4.md), the pictures within the drawing tolerance of
+// state this build restores is canonical JSON, schema-v4.md; the op catalogue's words the user changed on 2026-10-28
+// put into Python's: testsupport's with_words_of_2026_10_28), the pictures within the drawing tolerance of
 // ARCHITECTURE.md §9 (mean absolute difference ≤ 2/255, 99% of pixels within 32/255), Python's text laid out with
 // Pillow's BASIC layout as render_harness holds the reference. Skipped without a Python that has the mcp extra
 // ($GENKO_MCP_PYTHON), as the other contract tests are without the reference Python.
@@ -142,6 +143,8 @@ private slots:
             (*ours[i])["file"] = "<compared>";
             (*theirs[i])["file"] = "<compared>";
         }
+        // (the user's decisions of 2026-10-28: the catalogue's words this build changed, in Python's replies)
+        genko::test::with_words_of_2026_10_28(records[1]);
         std::string where;
         QVERIFY2(genko::test::strict_equal(records[0], records[1], &where), where.c_str());
     }

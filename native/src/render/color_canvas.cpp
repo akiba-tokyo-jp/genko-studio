@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <unordered_map>
 #include <mutex>
@@ -114,6 +115,85 @@ RgbSpace::RgbSpace(const core::RgbMode& mode) {
 }
 
 RgbSpace RgbSpace::of(const core::Page& page) { return page.rgb ? RgbSpace(*page.rgb) : RgbSpace(); }
+
+struct GrayCurve::Impl {
+    cmsToneCurve* curve = nullptr;     // (encoded → linear)
+    cmsToneCurve* reversed = nullptr;  // (linear → encoded)
+    std::optional<Parametric> exact;   // (the same in double precision, when it is parametric)
+    ~Impl() {
+        if (curve != nullptr) cmsFreeToneCurve(curve);
+        if (reversed != nullptr) cmsFreeToneCurve(reversed);
+    }
+};
+
+GrayCurve::GrayCurve(const core::PageColor& color) {
+    if (!color.icc) return;  // (sGray: the sRGB curve)
+    cmsHPROFILE profile = cmsOpenProfileFromMem(color.icc->data(), static_cast<cmsUInt32Number>(color.icc->size()));
+    if (profile == nullptr) throw core::Error("value", "the page's grey profile cannot be read");
+    const auto* curve = static_cast<const cmsToneCurve*>(cmsReadTag(profile, cmsSigGrayTRCTag));
+    if (curve == nullptr) {
+        cmsCloseProfile(profile);
+        throw core::Error("value", "the page's grey profile has no tone curve");
+    }
+    auto impl = std::make_shared<Impl>();
+    impl->curve = cmsDupToneCurve(curve);
+    impl->reversed = cmsReverseToneCurve(curve);
+    if (Parametric exact(curve); exact.type != 0) impl->exact = exact;
+    cmsCloseProfile(profile);
+    if (impl->curve == nullptr || impl->reversed == nullptr) throw core::Error("value", "the page's grey profile cannot be used");
+    impl_ = std::move(impl);
+}
+
+double finite_sample(double v) {
+    if (std::isnan(v)) return 0.0;
+    constexpr double most = std::numeric_limits<float>::max();
+    return std::clamp(v, -most, most);
+}
+
+void encode_by_profile(std::vector<float>& samples, unsigned channels, bool alpha, const std::string& icc) {
+    const unsigned colours = alpha ? channels - 1 : channels;
+    std::optional<RgbSpace> rgb;
+    std::optional<GrayCurve> grey;
+    if (colours == 3 && !icc.empty()) {
+        try {
+            core::RgbMode mode;
+            mode.icc = std::make_shared<const std::string>(icc);
+            mode.profile = core::bytes_ref(icc);
+            rgb.emplace(mode);
+        } catch (const core::Error&) {  // (not a matrix-shaper RGB profile: the sRGB curve)
+        }
+    }
+    if (colours == 1 && !icc.empty()) {
+        try {
+            core::PageColor color;
+            color.space = core::InkSpace::Gray;
+            color.icc = std::make_shared<const std::string>(icc);
+            grey.emplace(color);
+        } catch (const core::Error&) {  // (no grey tone curve: sGray's)
+        }
+    }
+    const RgbSpace srgb;
+    const GrayCurve sgray;
+    for (std::size_t i = 0; i < samples.size(); ++i) {
+        const auto c = static_cast<unsigned>(i % channels);
+        if (c >= colours) continue;
+        const double v = samples[i];
+        const double out = colours == 1 ? (grey ? grey->encode(v) : sgray.encode(v)) : (rgb ? rgb->encode(c, v) : srgb.encode(c % 3, v));
+        samples[i] = static_cast<float>(finite_sample(out));
+    }
+}
+
+double GrayCurve::decode(double encoded) const {
+    if (!impl_) return core::srgb_to_linear(encoded);
+    if (impl_->exact) return impl_->exact->linear(encoded);
+    return cmsEvalToneCurveFloat(impl_->curve, static_cast<cmsFloat32Number>(encoded));
+}
+
+double GrayCurve::encode(double linear) const {
+    if (!impl_) return core::linear_to_srgb(linear);
+    if (impl_->exact) return impl_->exact->encoded(linear);
+    return cmsEvalToneCurveFloat(impl_->reversed, static_cast<cmsFloat32Number>(linear));
+}
 
 double RgbSpace::decode(unsigned channel, double encoded) const {
     if (!impl_) return core::srgb_to_linear(encoded);

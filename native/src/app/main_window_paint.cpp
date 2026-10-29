@@ -323,8 +323,7 @@ void MainWindow::build_gradient_page(ToolSettings* ts) {
     form->addRow(gradient_transparency_);
     form->addRow(hint(QStringLiteral("線は線のまま、その下に塗ります（8 bit のペイントのレイヤーとペンのレイヤーには絵として置き、高精度・インキのレイヤーは画素に）。"
                                      "モードを通常のほかにすると、ペイントのレイヤーの線は画素になります。描画色・背景色の分岐点は今の色で塗ります。"
-                                     "16・32 bit のページでも、コマで切るレイヤー（新しいペイントのレイヤーの既定）は 8 bit の値で塗ります"
-                                     "（高精度にするには、レイヤーの「コマの外にもはみ出す」を入れる）")));
+                                     "16・32 bit の RGB のページでは、まだ何も描いていないペイントのレイヤーはページと同じ深さ（高精度）で塗ります。")));
     fill_gradient_presets();
     ts->add({QStringLiteral("gradient")}, page);
 }

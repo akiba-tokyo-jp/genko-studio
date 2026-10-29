@@ -700,6 +700,9 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(vanishing_point: no planes to paste or stamp on.*)", "消点の面をすべて消すときは、貼り付けもスタンプもできません"));
         r.push_back(rule(R"(vanishing_point: (\d+) dabs reached toward the horizon.*)",
                          "消点のスタンプの跡のうち \\1 個は、地平線に近く大きくなりすぎるため描きませんでした"));
+        // (PC5-0, Z0's review P1-1: a new layer of a 16- or 32-bit page painted at 8 bits for the book's precise budget)
+        r.push_back(rule(R"(the layer is painted at 8 bits: the book's precise pixels would pass their budget.*)",
+                         "本の高精度の画素の上限（1 GiB）を越えるか、本をまだ読み込み中のため、このレイヤーは 8 bit で塗りました"));
         r.push_back(rule(R"(vanishing_point needs the paint layer it lays on.*)", "消点で描くペイントのレイヤーを選ぶか、新しいレイヤーにします"));
         r.push_back(rule(R"(vanishing_point has no setting '(.*)'.*)", "消点に「\\1」という設定はありません"));
         r.push_back(rule(R"(vanishing_point has no kind.*)", "消点の種類の指定が違います"));
