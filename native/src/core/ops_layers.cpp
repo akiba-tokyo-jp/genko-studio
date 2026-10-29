@@ -675,7 +675,8 @@ void delete_layers(OpContext& c) {
     const bool named = given != nullptr && !given->is_null();
     if (!named && !hidden && !empty) throw OpError("delete_layers needs ids, hidden or empty");
     const std::vector<std::size_t> pages = pages_named(doc, op);
-    if (named && pages.size() != 1) throw OpError("ids name the layers of one page (every page: hidden or empty)");
+    const Json* page_given = get(op, "page");
+    if (named && page_given != nullptr && page_given->is_string()) throw OpError("ids name the layers of one page (every page: hidden or empty)");
     const std::vector<std::string> ids = named ? named_ids(op) : std::vector<std::string>{};
     Json deleted = Json::array();
     Json kept = Json::array();

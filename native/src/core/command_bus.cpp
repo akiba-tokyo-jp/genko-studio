@@ -132,7 +132,10 @@ bool native_key(std::string_view op, std::string_view key) {
            // PC3 C-c (SPEC COLOR-07): Filter › Liquify's strokes and its field's spacing
            (op == "liquify" && (key == "strokes" || key == "mesh_mm")) ||
            // PC4 E3 (patterns@1): a pattern fill — fill_area's and fill's pattern, add_layer's of kind fill
-           pattern_key(op, key);
+           pattern_key(op, key) ||
+           // PC5 I-a (layer-locks@1, blend-channels@1): set_layer's and set_layers' locks, set_layer's channels
+           ((op == "set_layer" || op == "set_layers") && (key == "lock_all" || key == "lock_nest")) ||
+           (op == "set_layer" && key == "blend_channels");
 }
 
 // PC2 (SPEC COLOR-04): the settings of this build's own an op of Python's reads by what else it was given —

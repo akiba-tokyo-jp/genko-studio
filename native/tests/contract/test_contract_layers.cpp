@@ -33,6 +33,7 @@
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/psd.hpp"
+#include "render/raster.hpp"
 #include "storage/reader.hpp"
 #include "testsupport.hpp"
 
@@ -86,6 +87,27 @@ Json drawn_in(const std::string& id, double x0, double y0, double x1, double y1,
                             {"area", Json{{"poly", Json::array({Json::array({x0, y0}), Json::array({x1, y0}), Json::array({x1, y1}), Json::array({x0, y1})})}}},
                             {"rgb", rgb}});
 }
+// A paint layer of pixels — a block of `rgb` over the part [x0, x1] × [y0, y1] of the page's working pixels.
+void add_pixels(core::Document& doc, const std::string& id, const std::string& title, int x0, int y0, int x1, int y1, std::array<int, 3> rgb) {
+    core::Page& page = doc.edit_page(0);
+    const render::Size size{render::mm_to_px(page.spec.width_mm.value(), 200), render::mm_to_px(page.spec.height_mm.value(), 200)};
+    std::string bytes(std::size_t(size.width) * std::size_t(size.height) * 4, '\0');
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            const std::size_t i = (std::size_t(y) * std::size_t(size.width) + std::size_t(x)) * 4;
+            for (int c = 0; c < 3; ++c) bytes[i + std::size_t(c)] = static_cast<char>(rgb[std::size_t(c)]);
+            bytes[i + 3] = static_cast<char>(255);
+        }
+    }
+    core::Layer layer;
+    layer.id = id;
+    layer.title = title;
+    layer.kind = core::LayerKind::Raster;
+    layer.panel_clip = false;
+    render::raster::save_raster(page, layer, render::Image::frombytes("RGBA", size, bytes));
+    page.layers.push_back(std::move(layer));
+}
+
 Json folder(const std::string& id, const Json& more = Json::object()) {
     Json out = op("add_layer", {{"kind", "folder"}, {"id", id}, {"group", true}});
     out.update(more);
@@ -167,7 +189,7 @@ private slots:
         doc.edit_page(0).extra["anim"] = Json{{"tracks", Json::array({Json{{"folder", "g"}, {"cels", Json::array({Json::array({0, "b"})})}}})},
                                              {"light_table", Json::array({"b", "p"})}};
         doc = run(doc, Json{{"op", "set_variables"},
-                            {"defs", Json::array({Json{{"name", "v"}, {"type", "visibility"}, {"page", doc.page(0).id}, {"layer", "a"}}})}});
+                            {"defs", Json::array({Json{{"name", "v"}, {"type", "visibility"}, {"page", 1}, {"layer", "a"}}})}});
         const core::ApplyResult done = run_ops(doc, op("delete_layers", {{"ids", Json::array({"g", "p", ink})}}));
         const core::Document& after = done.doc;
         for (const char* gone : {"g", "a", "b", "p"}) QVERIFY2(find(after, gone) == nullptr, gone);
@@ -344,7 +366,10 @@ private slots:
         const core::Document flat = run(eight, op("merge_visible", {{"copy", false}, {"flatten", true}}));
         QVERIFY2(near(rgb_at(drawn(flat), 30, 40), {255, 0, 255}), shown(rgb_at(drawn(flat), 30, 40)).constData());
         // precise: refused in words
-        const core::Document two = run(deep, fill("under", Json::array({0, 0, 0})));
+        Json precise = Json::array({paint("under"), drawn_in("under", 0, 0, 60, 80, Json::array({90, 90, 90}))});
+        precise[1]["blend"] = "multiply";
+        const core::Document two = run(deep, precise);
+        QVERIFY(find(two, "under")->color_raster != nullptr);
         const std::string why = refusal(two, op("merge_layers", {{"ids", Json::array({"under", "blue"})}}));
         QVERIFY2(why.find("leaves colour channels out") != std::string::npos, why.c_str());
         // the op's checks: a flag a channel, a page whose mode has them, a layer's (not a folder's); all on is none
@@ -361,17 +386,25 @@ private slots:
         for (const std::string way : {"8", "16", "cmyk"}) {
             const Json style{{"effects", Json::array({Json{{"kind", "stroke"}, {"enabled", true}, {"blend", "normal"}, {"opacity", 1}, {"size_mm", 2},
                                                            {"position", "outside"}, {"rgb", Json::array({255, 0, 0})}}})}};
-            core::Document doc = run(book(way), Json::array({paint("p"), drawn_in("p", 20, 20, 40, 60, Json::array({0, 0, 255})),
+            // (a page of 16 bits draws in its linear light once it holds precise pixels: given some first, away from the
+            // points looked at, as the bake gives it its own)
+            core::Document base = book(way == "16" ? "8" : way);
+            if (way == "16") {
+                add_pixels(base, "dot", "dot", 400, 600, 410, 610, {0, 0, 0});
+                base = run(base, Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}});
+                QVERIFY(find(base, "dot")->color_raster != nullptr);
+            }
+            core::Document doc = run(base, Json::array({paint("p"), drawn_in("p", 20, 20, 40, 60, Json::array({0, 0, 255})),
                                                              op("set_layer_style", {{"id", "p"}, {"style", style}}),
                                                              op("set_layer", {{"id", "p"}, {"opacity", 0.8}})}));
-            const render::Image before = drawn(doc);
+            const render::Image before = drawn(doc, 200);
             const core::ApplyResult baked = run_ops(doc, Json{{"op", "bake_layer_styles"}, {"page", "all"}});
             const core::Layer* p = find(baked.doc, "p");
             QVERIFY2(!p->style, way.c_str());
             QCOMPARE(p->opacity, 0.8);
             QCOMPARE(baked.results.back()["baked"].size(), std::size_t(1));
-            const render::Image after = drawn(baked.doc);
-            for (const auto& [x, y] : {std::array<int, 2>{30, 40}, {21, 40}, {38, 80}, {58, 40}, {5, 5}}) {
+            const render::Image after = drawn(baked.doc, 200);
+            for (const auto& [x, y] : {std::array<int, 2>{120, 160}, {84, 160}, {152, 320}, {232, 160}, {20, 20}}) {
                 QVERIFY2(near(rgb_at(after, x, y), rgb_at(before, x, y), 6),
                          (way + " " + std::to_string(x) + "," + std::to_string(y) + ": " + shown(rgb_at(after, x, y)).toStdString() + " / " +
                           shown(rgb_at(before, x, y)).toStdString())
@@ -388,10 +421,11 @@ private slots:
     // PSD: すべてをロック (bit 31), the auto-nesting lock (bit 4) and the channels left out (brst) as psd-tools reads them, read
     // back as the layers'.
     void psdLocksAndChannels() {
-        core::Document doc = run(book(), Json::array({paint("p"), drawn_in("p", 5, 5, 20, 20, Json::array({0, 0, 0})), op("set_layer", {{"id", "p"}, {"name", "P"}}),
-                                                      op("set_layer", {{"id", "p"}, {"lock_all", true}, {"lock_nest", true}}), paint("c"),
-                                                      drawn_in("c", 30, 30, 50, 50, Json::array({0, 0, 255})), op("set_layer", {{"id", "c"}, {"name", "C"}}),
-                                                      op("set_layer", {{"id", "c"}, {"blend_channels", Json::array({false, true, false})}})}));
+        core::Document doc = book();
+        add_pixels(doc, "p", "P", 40, 40, 160, 160, {0, 0, 0});
+        add_pixels(doc, "c", "C", 200, 200, 400, 400, {0, 0, 255});
+        doc = run(doc, Json::array({op("set_layer", {{"id", "p"}, {"lock_all", true}, {"lock_nest", true}}),
+                                    op("set_layer", {{"id", "c"}, {"blend_channels", Json::array({false, true, false})}})}));
         const QString file = path(QStringLiteral("basics.psd"));
         (void)formats::export_page_psd(doc, doc.page(0), fs::path(file.toStdString()), 100);
         const Json view = psd_view(file);
@@ -429,16 +463,18 @@ private slots:
         }
         // a page without them: no lspf, no brst written
         const QString plain = path(QStringLiteral("plain.psd"));
-        const core::Document none = run(book(), Json::array({paint("p"), drawn_in("p", 5, 5, 20, 20, Json::array({0, 0, 0}))}));
+        core::Document none = book();
+        add_pixels(none, "p", "P", 40, 40, 160, 160, {0, 0, 0});
         (void)formats::export_page_psd(none, none.page(0), fs::path(plain.toStdString()), 100);
         for (const Json& l : psd_view(plain)["layers"]) QVERIFY2(l["lspf"].is_null() && l["brst"].is_null(), l.dump().c_str());
     }
 
     // .pcraft: the locks (all, artboard) and the excluded channels written and read back.
     void pcraftLocksAndChannels() {
-        const core::Document doc = run(book(), Json::array({paint("p"), drawn_in("p", 5, 5, 20, 20, Json::array({0, 0, 0})),
-                                                            op("set_layer", {{"id", "p"}, {"lock_all", true}, {"lock_nest", true}}),
-                                                            op("set_layer", {{"id", "p"}, {"blend_channels", Json::array({true, false, true})}})}));
+        core::Document doc = book();
+        add_pixels(doc, "p", "P", 40, 40, 160, 160, {0, 0, 0});
+        doc = run(doc, Json::array({op("set_layer", {{"id", "p"}, {"blend_channels", Json::array({true, false, true})}}),
+                                    op("set_layer", {{"id", "p"}, {"lock_all", true}, {"lock_nest", true}})}));
         std::vector<std::string> notes;
         const std::string bytes = formats::pcraft_bytes(doc, 0, {}, &notes);
         const formats::Opened opened = formats::open_file(bytes, "basics.pcraft");
@@ -462,8 +498,8 @@ private slots:
         for (const char* absent : {"layer-locks@1", "blend-channels@1", "\"lock_all\"", "\"lock_nest\"", "\"blend_channels\""})
             QVERIFY2(text.find(absent) == std::string::npos, absent);
         QCOMPARE(genko::test::read_bytes(QString::fromStdString((two / "project.json").string())), text);
-        const core::Document with = run(plain, Json::array({op("set_layer", {{"id", "a"}, {"lock_all", true}}),
-                                                            op("set_layer", {{"id", "a"}, {"blend_channels", Json::array({false, true, true})}})}));
+        const core::Document with = run(plain, Json::array({op("set_layer", {{"id", "a"}, {"blend_channels", Json::array({false, true, true})}}),
+                                                            op("set_layer", {{"id", "a"}, {"lock_all", true}})}));
         const fs::path three = fs::path(path(QStringLiteral("with.genko")).toStdString());
         genko::test::write_project(with, three);
         Json project = genko::test::read_json(QString::fromStdString((three / "project.json").string()));
