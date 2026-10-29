@@ -55,6 +55,7 @@
 #include "app/pages_panel.hpp"
 #include "app/paths_panel.hpp"
 #include "app/layer_comps_panel.hpp"
+#include "app/notes_panel.hpp"
 #include "app/perf.hpp"
 #include "app/reply_box.hpp"
 #include "app/save_status.hpp"
