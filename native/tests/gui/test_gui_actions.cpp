@@ -429,8 +429,8 @@ private slots:
         // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths); the crop tool (PC3 C-e, test_gui_page_size);
         // PC3 B4's four retouching tools (test_gui_retouch); PC3 C-b's five shape tools besides 長方形ツール (test_gui_shapes)
         // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask); PC4 E1's 鉛筆ツール (test_gui_brushes); PC4 E5's
-        // nine brushes that change pixels (test_gui_paint_tools)
-        QCOMPARE(w->tools_group()->actions().size(), 53);
+        // nine brushes that change pixels (test_gui_paint_tools); PC5 H-a's 手のひらツール (test_gui_view)
+        QCOMPARE(w->tools_group()->actions().size(), 54);
     }
 
     // PC4 F-0 (SPEC FILE-01; 節 F 5.1・5.2): ファイル in Photoshop's order and names — the book's export is 書き出し ▸
@@ -614,6 +614,10 @@ private slots:
         QCOMPARE(keys("act_keyboard_shortcuts"), k({s("Ctrl+Alt+Shift+K")}));
         QCOMPARE(keys("act_channel_composite"), k({s("Ctrl+2")}));
         QCOMPARE(keys("act_scale"), k({s("Ctrl+R")}));  // (定規: Photoshop's the same)
+        // (PC5 H-a) 100% Ctrl+1, 手のひらツール H, スクリーンモード F
+        QCOMPARE(keys("act_actual_pixels"), k({s("Ctrl+1")}));
+        QCOMPARE(keys("act_hand_tool"), k({s("H")}));
+        QCOMPARE(keys("act_screen_next"), k({s("F")}));
         QCOMPARE(dock("レイヤー")->toggleViewAction()->shortcuts(), k({s("F7")}));
         for (const char* none : {"act_mirror", "act_actual", "act_guides", "act_history", "act_snap", "act_show_rulers", "act_export"}) {
             QVERIFY2(keys(none).isEmpty(), none);
@@ -651,6 +655,7 @@ private slots:
         QCOMPARE(keys("act_frame"), k({s("F")}));
         QCOMPARE(keys("act_mirror"), k({s("H")}));
         QCOMPARE(keys("act_actual"), k({s("Ctrl+1")}));
+        for (const char* none : {"act_actual_pixels", "act_hand_tool", "act_screen_next"}) QVERIFY2(keys(none).isEmpty(), none);  // (PC5 H-a)
         QCOMPARE(keys("act_guides"), k({s("Ctrl+;")}));
         QCOMPARE(keys("act_history"), k({s("Ctrl+H")}));
         QCOMPARE(keys("act_cmyk_proof"), k({s("Ctrl+Alt+Y")}));
@@ -764,15 +769,26 @@ private slots:
         };
         QCOMPARE(items(menu(QStringLiteral("表示"))),
                  (QStringList{QStringLiteral("校正の設定 ▸"), QStringLiteral("色の校正"), QStringLiteral("色域外警告"), QStringLiteral("|"),
-                              QStringLiteral("ズームイン"), QStringLiteral("ズームアウト"), QStringLiteral("画面サイズに合わせる"), QStringLiteral("プリントサイズ"),
-                              QStringLiteral("|"), QStringLiteral("水平方向に反転"), QStringLiteral("パターンプレビュー"), QStringLiteral("|"),
+                              // (PC5 H-a: 32 bit プレビューオプション…, レイヤーを画面サイズに合わせる, 100%, 200%, ピクセルアートプレビュー,
+                              // スクリーンモード ▸, 表示・非表示 ▸ (ピクセルグリッド; H-b fills the rest), 手のひらツール)
+                              QStringLiteral("32 bit プレビューオプション…"), QStringLiteral("|"),
+                              QStringLiteral("ズームイン"), QStringLiteral("ズームアウト"), QStringLiteral("画面サイズに合わせる"),
+                              QStringLiteral("レイヤーを画面サイズに合わせる"), QStringLiteral("100%"), QStringLiteral("200%"), QStringLiteral("プリントサイズ"),
+                              QStringLiteral("|"), QStringLiteral("水平方向に反転"), QStringLiteral("パターンプレビュー"), QStringLiteral("ピクセルアートプレビュー"),
+                              QStringLiteral("|"), QStringLiteral("スクリーンモード ▸"), QStringLiteral("|"), QStringLiteral("表示・非表示 ▸"),
                               QStringLiteral("ターゲットパス"), QStringLiteral("ブラシプレビュー"), QStringLiteral("|"), QStringLiteral("定規"), QStringLiteral("|"),
                               QStringLiteral("スナップ"), QStringLiteral("スナップ先 ▸"), QStringLiteral("|"), QStringLiteral("シェイプから新規ガイドを作成"),
                               QStringLiteral("|"), QStringLiteral("上下反転して見る"), QStringLiteral("左に回す（15°）"), QStringLiteral("右に回す（15°）"),
-                              QStringLiteral("回転・反転を戻す"), QStringLiteral("表示倍率を打ち込む…"), QStringLiteral("ズームツール"), QStringLiteral("|"),
+                              QStringLiteral("回転・反転を戻す"), QStringLiteral("表示倍率を打ち込む…"), QStringLiteral("ズームツール"), QStringLiteral("手のひらツール"),
+                              QStringLiteral("|"),
                               QStringLiteral("ページを並べて見る"), QStringLiteral("◀ 前のページ"), QStringLiteral("次のページ ▶"), QStringLiteral("|"),
                               QStringLiteral("仕上がり線・基本枠を表示"), QStringLiteral("スマホの画面の範囲を表示"), QStringLiteral("選択範囲の境界線"),
                               QStringLiteral("前のページを透かす（オニオンスキン）"), QStringLiteral("網点を画面で見る"), QStringLiteral("|"), QStringLiteral("道具の名前を表示")}));
+        // (PC5 H-a: Photoshop's three screen modes and F going round them; 表示・非表示 ▸ with ピクセルグリッド, H-b's after)
+        QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_screen_mode"))),
+                 (QStringList{QStringLiteral("標準スクリーンモード"), QStringLiteral("メニュー付きフルスクリーンモード"), QStringLiteral("フルスクリーンモード"),
+                              QStringLiteral("|"), QStringLiteral("次のスクリーンモード")}));
+        QVERIFY(items(w->findChild<QMenu*>(QStringLiteral("menu_show"))).contains(QStringLiteral("ピクセルグリッド")));
         const QStringList window = items(menu(QStringLiteral("ウィンドウ")));
         QCOMPARE(window.mid(0, 4), (QStringList{QStringLiteral("アレンジ ▸"), QStringLiteral("ワークスペース ▸"), QStringLiteral("|"), QStringLiteral("原稿だけを表示")}));
         QMenu* arrange = w->findChild<QMenu*>(QStringLiteral("menu_arrange"));
@@ -881,7 +897,9 @@ private slots:
                                                   {"blurtool", "act_blur_tool"}, {"sharpentool", "act_sharpen_tool"}, {"smudgetool", "act_smudge_tool"},
                                                   {"dodge", "act_dodge_tool"}, {"burn", "act_burn_tool"}, {"sponge", "act_sponge_tool"},
                                                   {"mixer", "act_mixer_brush"}, {"bgeraser", "act_background_eraser"},
-                                                  {"colorreplace", "act_color_replacement"}};
+                                                  {"colorreplace", "act_color_replacement"},
+                                                  // (PC5 H-a: 手のひらツール)
+                                                  {"hand", "act_hand_tool"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());
@@ -982,13 +1000,18 @@ private slots:
         QVERIFY(!c->fitted());
         studio.trigger("act_zoom_out");
         QVERIFY(qFuzzyCompare(c->scale(), fitted * 1.25 * 0.8));
+        // (PC5 H-a, the user's decision 11: プリントサイズ is the paper at 96 dpi; the % is the page's pixels — 100% one a
+        // screen pixel)
         studio.trigger("act_actual");
+        QVERIFY(qFuzzyCompare(c->scale(), 96 / 25.4));
+        studio.trigger("act_actual_pixels");
         QCOMPARE(c->zoom_percent(), 100);
+        QVERIFY(qFuzzyCompare(c->scale(), c->page()->spec.dpi.value() / 25.4 / c->devicePixelRatioF()));
         studio.trigger("act_fit");
         QVERIFY(c->fitted());
         QVERIFY(qFuzzyCompare(c->scale(), fitted));
         studio.answers->responder->get_int = [](const QString&, const QString& label, int, int lo, int hi) {
-            return label == QStringLiteral("倍率（%。100 で紙の大きさ）") && lo == 5 && hi == 6400 ? std::optional<int>(250) : std::nullopt;
+            return label == QStringLiteral("倍率（%。100 で画素等倍）") && lo == 1 && hi == 3200 ? std::optional<int>(250) : std::nullopt;
         };
         studio.trigger("act_zoom_value");
         QCOMPARE(c->zoom_percent(), 250);

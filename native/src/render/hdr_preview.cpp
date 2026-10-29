@@ -117,22 +117,24 @@ Image hdr_shown(const Image& drawn, const core::InkPixels& inks, const core::Pag
     const bool grey = color.space == core::InkSpace::Gray && !color.bitmap;
     const GrayCurve curve = grey ? GrayCurve(color) : GrayCurve();
     std::vector<unsigned char> plain(w * h * 3), shown(w * h * 3);
-    std::vector<double> values(w * n), changed(w * n);
+    std::vector<double> values(w * n), changed(w * n), lights(w), changed_lights(w);
     std::vector<float> a(w * 3), b(w * 3);
     for (std::size_t y = 0; y < h; ++y) {
         for (std::size_t x = 0; x < w; ++x) {
             const std::size_t i = y * w + x;
             for (unsigned c = 0; c < n; ++c) values[x * n + c] = from_canvas(color.space, c, inks.value(i, c));
-            if (grey) {  // (its lightness, any value: through its tone curve; cut to 0..1 as the screen shows it)
-                const double v = values[x * n];
-                values[x * n] = cut(v);
-                changed[x * n] = cut(curve.encode(hdr_grey(preview, curve.decode(v))));
+            if (grey) {  // (its lightness — the canvas's value, any value: through its tone curve; cut to 0..1 as shown)
+                const double light = inks.value(i, 0);
+                lights[x] = cut(light);
+                changed_lights[x] = cut(curve.encode(hdr_grey(preview, curve.decode(light))));
+                values[x * n] = from_canvas(color.space, 0, lights[x]);
+                changed[x * n] = from_canvas(color.space, 0, changed_lights[x]);
             }
         }
         if (grey && !color.duotone.empty()) {  // (a duotone page: its grey printed in its inks)
             for (std::size_t x = 0; x < w; ++x) {
-                const std::array<double, 3> was = core::duotone_print(color.duotone, values[x * n]);
-                const std::array<double, 3> now = core::duotone_print(color.duotone, changed[x * n]);
+                const std::array<double, 3> was = core::duotone_print(color.duotone, lights[x]);
+                const std::array<double, 3> now = core::duotone_print(color.duotone, changed_lights[x]);
                 for (unsigned c = 0; c < 3; ++c) {
                     a[x * 3 + c] = static_cast<float>(was[c]);
                     b[x * 3 + c] = static_cast<float>(now[c]);

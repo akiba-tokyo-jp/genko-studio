@@ -782,6 +782,12 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_actions SOURCES gui/test_gui_actions.cpp DEPS genko_app GUI TIMEOUT 900)
   # the canvas's gestures: the panel tool (cuts, gutters, corners, drawn panels) and the view
   genko_test(test_gui_canvas SOURCES gui/test_gui_canvas.cpp DEPS genko_app GUI TIMEOUT 1200)
+  # PC5 H-a (SPEC VIEW-01): the zoom in the page's pixels (100%, 200%, プリントサイズ), a 600 dpi B4 zoomed to its pixels,
+  # レイヤーを画面サイズに合わせる, ピクセルグリッド, ピクセルアートプレビュー, 手のひらツール and ズームツール, スクリーンモード, 32 bit
+  # プレビューオプション…
+  genko_test(test_gui_view SOURCES gui/test_gui_view.cpp DEPS genko_app GUI TIMEOUT 900)
+  # PC5 H-a: the tiles — 画素の段 laid nearest, ピクセルアートプレビュー, 32 bit プレビュー on the three ways, the tiles on the card
+  genko_test(test_tiles SOURCES unit/test_tiles.cpp DEPS genko_app LABELS unit TIMEOUT 600)
   # saving and closing (AC-SAVE 2, 3, 4, 6, 8, 10): failures shown, the question before closing, recovery, retries
   genko_test(test_gui_save SOURCES gui/test_gui_save.cpp DEPS genko_app GUI TIMEOUT 900)
   target_compile_definitions(test_gui_save PRIVATE GENKO_CLI="$<TARGET_FILE:genko>")

@@ -54,7 +54,7 @@ struct Desk {
         window = std::make_unique<MainWindow>(session);
         window->resize(1200, 900);
         window->show();
-        canvas()->set_zoom_percent(100);
+        canvas()->actual_size();  // (プリントサイズ: the paper at 96 dpi, the 100 % before PC5 H-a — the user's decision 11)
         canvas()->center_on(105, 148);
         window->choose_tool(QStringLiteral("pen"));
         QObject::connect(canvas(), &PageCanvas::strokeCommitted, window.get(), [this](const StrokeInput& s) { lines.push_back(s); });

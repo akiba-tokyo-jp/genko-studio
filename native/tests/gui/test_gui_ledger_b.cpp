@@ -810,7 +810,7 @@ private slots:
         app::MainWindow* w = desk.window.get();
         app::PageCanvas* canvas = desk.canvas();
         w->choose_tool(QStringLiteral("rect"));
-        canvas->set_zoom_percent(100);  // (the handles apart on the screen)
+        canvas->actual_size();  // (the handles apart on the screen: プリントサイズ, the 100 % before PC5 H-a)
         canvas->center_on(70, 70);
         const std::vector<QPointF> square{QPointF(50, 50), QPointF(90, 50), QPointF(90, 90), QPointF(50, 90)};
         canvas->set_selection(Json{{"poly", Json::array({Json::array({50, 50}), Json::array({90, 50}), Json::array({90, 90}), Json::array({50, 90})})}}, square);
@@ -1244,7 +1244,7 @@ private slots:
         const auto hand = core::mannequin::skeleton(figure).point("r_hand");
         const QPointF from(hand[0], hand[1]);
         const QPointF target(hand[0] - 25, hand[1] - 30);
-        canvas->set_zoom_percent(100);  // (the joints apart on the screen)
+        canvas->actual_size();  // (the joints apart on the screen: プリントサイズ, the 100 % before PC5 H-a)
         canvas->center_on((from.x() + target.x()) / 2, (from.y() + target.y()) / 2);
         inject::mouse_stroke(canvas, {from, (from + target) / 2, target});
         const auto moved = core::mannequin::skeleton(desk.page().prims[0]);

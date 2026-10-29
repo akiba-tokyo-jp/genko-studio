@@ -5,7 +5,10 @@
 
 #include <QtTest>
 
+#include <QOpenGLWidget>
 #include <QWheelEvent>
+
+#include <functional>
 
 #include <memory>
 
@@ -629,6 +632,69 @@ private slots:
         QVERIFY(std::abs(back.x() - mm.x()) < 1e-6 && std::abs(back.y() - mm.y()) < 1e-6);
         QCOMPARE(desk.page().id, before);
         QVERIFY(desk.ops.empty());
+    }
+
+    // render:GPU-CPU-parity (PC5 H-a, 節 H 4.3; the coordinator's 3 章: the processor composites, the card only shows): the
+    // page on the graphics card is the page the processor draws, within 1/255 — as it is, turned, mirrored, zoomed into its
+    // pixels and proofed. Where OpenGL cannot be had (the offscreen test screen), the card's surface gives up, the canvas
+    // draws by the processor again and says so (gpuFailed) — the same pixels; never skipped. (With QT_QPA_PLATFORM=xcb on
+    // Xvfb and Mesa, the card's way is the one checked.)
+    void theCardShowsWhatTheProcessorDraws() {
+        Desk desk;
+        PageCanvas* c = desk.canvas();
+        c->show_guides = false;
+        c->actual_size();
+        c->center_on(105, 148);
+        QVERIFY(c->wait_rendered(30000));
+        const auto cpu = [c] { return c->grab().toImage().convertToFormat(QImage::Format_RGB32); };
+        QStringList failed;
+        QObject::connect(c, &PageCanvas::gpuFailed, c, [&failed](const QString& message) { failed << message; });
+        // each view: the processor's picture, then the card's
+        struct Look {
+            const char* name;
+            std::function<void()> set;
+        };
+        const std::vector<Look> looks{
+            {"as it is", [] {}},
+            {"turned", [c] { c->set_rotation(30); }},
+            {"mirrored", [c] { c->flip_view(true); }},
+            {"its pixels", [c] { c->actual_pixels(800); }},
+            {"proofed", [c] { c->renderer().set_proof(true); }},
+        };
+        for (const Look& look : looks) {
+            look.set();
+            QVERIFY(c->wait_rendered(30000));
+            c->use_gpu(false);
+            const QImage processor = cpu();
+            c->use_gpu(true);
+            QVERIFY(c->renderer().texture_budget().has_value());
+            // (the card's context made — or given up, and the canvas back on the processor)
+            QTRY_VERIFY_WITH_TIMEOUT(!c->gpu() || qobject_cast<QOpenGLWidget*>(c->gpu_surface())->isValid(), 5000);
+            if (!c->gpu()) {
+                // (no OpenGL here: given up, drawn by the processor again, said once)
+                QVERIFY(!c->renderer().texture_budget());
+                QCOMPARE(failed.size(), 1);
+                QVERIFY(failed.front().contains(QStringLiteral("プロセッサー")));
+                QCOMPARE(cpu(), processor);
+                failed.clear();
+                continue;
+            }
+            auto* surface = qobject_cast<QOpenGLWidget*>(c->gpu_surface());
+            const QImage shown = surface->grabFramebuffer().convertToFormat(QImage::Format_RGB32).scaled(processor.size());
+            QCOMPARE(shown.size(), processor.size());
+            int most = 0;
+            for (int y = 0; y < shown.height(); ++y) {
+                for (int x = 0; x < shown.width(); ++x) {
+                    const QRgb a = shown.pixel(x, y), b = processor.pixel(x, y);
+                    most = std::max({most, std::abs(qRed(a) - qRed(b)), std::abs(qGreen(a) - qGreen(b)), std::abs(qBlue(a) - qBlue(b))});
+                }
+            }
+            QVERIFY2(most <= 1, qPrintable(QStringLiteral("%1: %2/255").arg(QString::fromLatin1(look.name)).arg(most)));
+            QVERIFY(failed.isEmpty());
+            QVERIFY(c->renderer().texture_bytes() > 0);  // (the tiles on the card counted)
+        }
+        c->use_gpu(false);
+        QVERIFY(!c->renderer().texture_budget());
     }
 };
 
