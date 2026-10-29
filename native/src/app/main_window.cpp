@@ -71,6 +71,7 @@
 #include "core/command_bus.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
+#include "core/layer_basics.hpp"
 #include "formats/copy.hpp"
 #include "render/brushes.hpp"
 #include "render/dabs/lines.hpp"
@@ -552,9 +553,13 @@ const core::Page* MainWindow::current_page() const {
 
 bool MainWindow::agent_book() const { return book().strict_gates || core::py_truthy(book().studio); }
 
-bool MainWindow::drawable(const core::Layer& layer) {
+bool MainWindow::drawable(const core::Layer& layer, const core::Page* page) {
+    bool all = layer.lock_all;  // (PC5 I-a: すべてをロック — its own, or a folder's it is in)
+    if (page != nullptr && !page->layers.empty() && &layer >= page->layers.data() && &layer < page->layers.data() + page->layers.size()) {
+        all = core::locked_all(page->layers, static_cast<std::size_t>(&layer - page->layers.data()));
+    }
     return (layer.kind == core::LayerKind::Strokes || layer.kind == core::LayerKind::Raster || layer.kind == core::LayerKind::Tone) &&
-           !layer.locked && !layer.lock_all;  // (PC5 I-a: すべてをロック)
+           !layer.locked && !all;
 }
 
 const core::Layer* MainWindow::target_layer() const {
@@ -658,7 +663,7 @@ void MainWindow::pen_changed() {
         tool_settings_->set_badge(badge);
     }
     add_background(fields);  // (PC4 E2, review P2-4: the line drawn as it goes takes the 背景色 the brush moves to)
-    canvas_->set_live_pen(fields, layer != nullptr && drawable(*layer) ? std::optional<std::string>(layer->id) : std::nullopt);
+    canvas_->set_live_pen(fields, layer != nullptr && drawable(*layer, current_page()) ? std::optional<std::string>(layer->id) : std::nullopt);
     canvas_->grid_layer = layer != nullptr ? std::optional<std::string>(layer->id) : std::nullopt;  // (PC5 H-a: ピクセルグリッド's layer)
     canvas_->brush_width_mm = pen_.width_mm;
     canvas_->eraser_mm = eraser_mm_;
@@ -705,7 +710,9 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
         {"new_layer_comp", QStringLiteral("レイヤーカンプを記録しています…")}, {"update_layer_comp", QStringLiteral("レイヤーカンプを記録しています…")},
         {"apply_layer_comp", QStringLiteral("レイヤーカンプを適用しています…")},
         // (PC5 I-d, the review's P2-1: pictures put in, a data set's pictures checked)
-        {"apply_data_set", QStringLiteral("データセットを適用しています…")}, {"set_data_sets", QStringLiteral("データセットを確かめています…")}};
+        {"apply_data_set", QStringLiteral("データセットを適用しています…")}, {"set_data_sets", QStringLiteral("データセットを確かめています…")},
+        // (PC5 I-a, the review's P3-8: すべてのレイヤー効果を統合, すべての空のレイヤーを削除 — every page)
+        {"bake_layer_styles", QStringLiteral("レイヤー効果を統合しています…")}, {"delete_layers", QStringLiteral("レイヤーを削除しています…")}};
     struct Busy {
         bool on = false;
         ~Busy() {

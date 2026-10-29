@@ -1030,8 +1030,9 @@ const core::Layer* MainWindow::paint_layer() {
     const core::Page* page = current_page();
     const core::Layer* layer = target_layer();
     if (page == nullptr || layer == nullptr) return nullptr;
-    if (!drawable(*layer)) {
-        const QString why = layer->locked || layer->lock_all ? QStringLiteral("ロックされています") : QStringLiteral("ペンかペイントのレイヤーではありません");
+    if (!drawable(*layer, page)) {
+        const bool kind = layer->kind == core::LayerKind::Strokes || layer->kind == core::LayerKind::Raster || layer->kind == core::LayerKind::Tone;
+        const QString why = kind ? QStringLiteral("ロックされています") : QStringLiteral("ペンかペイントのレイヤーではありません");
         flash(QStringLiteral("「%1」には描けません（%2）。レイヤー パネルで選び直します").arg(wording::layer_label(*layer), why), 4000);
         return nullptr;
     }

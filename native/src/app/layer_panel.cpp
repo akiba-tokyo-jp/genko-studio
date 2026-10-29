@@ -274,7 +274,7 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
                                   QStringLiteral("Ctrl・Shift+クリックで選んだレイヤーをまとめて扱う。表示レイヤーの結合・変換・下描きの一括など"),
                                   QStringLiteral("layer_many"));
     many_ = new QMenu(several_button);
-    many_->addAction(QStringLiteral("選んだレイヤーを結合"), this, [this] { merge_selected(); });
+    many_->addAction(QStringLiteral("レイヤーを結合"), this, [this] { merge_selected(); });
     QAction* group = many_->addAction(QStringLiteral("レイヤーをグループ化"), this, [this] { group_selected(); });
     group->setShortcut(QKeySequence(QStringLiteral("Ctrl+G")));
     many_->addAction(QStringLiteral("レイヤーを表示"), this, [this] { set_selected(Json{{"visible", true}}); });
@@ -637,6 +637,11 @@ void LayerPanel::selected(bool from_list) {
     protect_->setChecked(layer->lock_alpha);
     locked_->setChecked(layer->locked);
     lock_all_->setChecked(layer->lock_all);
+    {  // (PC5 I-a: while すべてをロック holds — its own or its folder's — the other locks are not pressed, as Photoshop's)
+        const bool all = core::locked_all(page->layers, static_cast<std::size_t>(layer - page->layers.data()));
+        protect_->setEnabled(!all);
+        locked_->setEnabled(!all);
+    }
     overhang_->setChecked(!layer->panel_clip);
     each_panel_->setChecked(layer->panel_each);
     each_panel_->setEnabled(layer->panel_clip);
@@ -662,7 +667,7 @@ void LayerPanel::selected(bool from_list) {
     color_prints_->setChecked(layer->color_prints);
     effect_button_->setText(layer->effect && core::py_truthy(*layer->effect) ? QStringLiteral("効果 ✓ ▾") : QStringLiteral("効果 ▾"));
     loading_ = false;
-    const bool drawable = MainWindow::drawable(*layer);
+    const bool drawable = MainWindow::drawable(*layer, page);
     const bool prints = layer->exportable && layer->role != core::LayerRole::Name && layer->role != core::LayerRole::Draft;
     const QString note = prints ? QString() : QStringLiteral(" <span style='color:#c0392b'>（印刷されません）</span>");
     target_->setText(drawable ? QStringLiteral("描く先: <b>%1</b>%2").arg(wording::layer_label(*layer).toHtmlEscaped(), note)

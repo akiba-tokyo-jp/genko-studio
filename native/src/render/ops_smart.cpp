@@ -21,6 +21,7 @@
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
 #include "core/strokes.hpp"
+#include "core/layer_basics.hpp"
 #include "render/color_canvas.hpp"
 #include "render/imaging.hpp"
 #include "render/ink.hpp"
@@ -962,8 +963,9 @@ void rasterize_layer(OpContext& c) {
     std::vector<std::string> done;
     if (core::truthy_at(c.op, "all")) {
         std::vector<std::string> ids;
-        for (const Layer& layer : doc.page(at).layers) {
-            if (rasterizable(layer, kinds) && !layer.locked) ids.push_back(layer.id);
+        const std::vector<Layer>& layers = doc.page(at).layers;
+        for (std::size_t i = 0; i < layers.size(); ++i) {  // (PC5 I-a: those locked with すべてをロック skipped as those locked)
+            if (rasterizable(layers[i], kinds) && !layers[i].locked && !core::locked_all(layers, i)) ids.push_back(layers[i].id);
         }
         for (const std::string& id : ids) {
             rasterize(doc, at, core::layer_by_id(doc.page(at), id));

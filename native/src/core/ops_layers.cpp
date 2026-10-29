@@ -698,7 +698,7 @@ void delete_layers(OpContext& c) {
         std::set<std::string> gone;
         for (std::size_t i = 0; i < layers.size(); ++i) {
             if (!chosen[i]) continue;
-            if (core_layer(layers[i]) || layers[i].lock_all) {
+            if (core_layer(layers[i]) || locked_all(layers, i)) {  // (review P2-2: in a folder locked so, kept too)
                 kept.push_back(Json{{"page", view.index.json()}, {"id", layers[i].id}, {"why", core_layer(layers[i]) ? "core" : "lock_all"}});
                 continue;
             }

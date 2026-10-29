@@ -44,6 +44,7 @@
 #endif
 
 #include "core/areas.hpp"
+#include "core/color_raster.hpp"
 #include "core/base64.hpp"
 #include "core/config_dir.hpp"
 #include "core/filters.hpp"
@@ -1044,6 +1045,8 @@ void check_mergeable(const Page& page, const std::vector<std::size_t>& layers) {
             throw OpError("placed images and tones cannot be merged");
         }
         if (layer.locked) throw OpError("the layer is locked");
+        // (PC5 I-a review P2-1: すべてをロック — its own, or its folder's — as locked)
+        if (core::locked_all(page.layers, i)) throw OpError("the layer " + layer.id + " is locked (lock_all)");
     }
 }
 
@@ -1177,6 +1180,50 @@ void into_color_pixels(Layer& target, std::pair<std::string, bool> pixels) {
     target.type.reset();        // (type@1, PC5 G-0: its text drawn in)
     target.color_raster = pixels.first.empty() ? core::Bytes{} : std::make_shared<const std::string>(std::move(pixels.first));
 }
+// (blend-channels@1, PC5 I-a review P3-2: layers one of which leaves colour channels out, merged in precise colour as the page
+// draws them — render_contents' precise way, ColorCanvas::keep_channels —, over nothing or, flattened, over the paper. Its
+// first layer clipped to what is under the merge is not ported: the clipping kept so needs the layers under it)
+std::pair<std::string, bool> channels_kept_merge(const Document& doc, const Page& page, const std::vector<std::size_t>& layers, bool flatten,
+                                                 int dpi, Size size) {
+    Page alone = page;
+    alone.layers.clear();
+    if (flatten) {
+        Layer paper;
+        paper.id = "paper";
+        paper.kind = LayerKind::Raster;
+        paper.panel_clip = false;
+        raster::save_raster(page, paper, page_background(page, size, false).convert("RGBA"));
+        alone.layers.push_back(std::move(paper));
+    }
+    bool first = true;
+    for (const std::size_t i : layers) {
+        const Layer& layer = page.layers[i];
+        if (layer.kind == LayerKind::Folder || (flatten && !merge_draws(layer))) continue;
+        if (first && layer.clip && !flatten) throw NotYetPorted("high-precision merge of a clipped layer that leaves colour channels out (blend-channels@1)");
+        first = false;
+        alone.layers.push_back(layer);
+        alone.layers.back().parent_id = nullptr;
+    }
+    if (first) return {"", false};
+    RenderOptions options;
+    options.mode = "proof";
+    options.finish = false;
+    options.contents = true;
+    options.onion = false;
+    options.precise = true;
+    const RenderResult drawn = render_contents(alone, dpi, options, &doc);
+    if (drawn.precise && !drawn.precise->empty()) return {*drawn.precise, false};
+    // (nothing precise among them, on a page drawn in precise colour for its other layers: their 8-bit picture's values)
+    const Image rgba = drawn.image.convert("RGBA");
+    const std::string bytes = rgba.tobytes();
+    return {core::encode_color_pixels(static_cast<std::uint32_t>(size.width), static_cast<std::uint32_t>(size.height), "u16",
+                                      [&bytes](std::size_t i) {
+                                          const auto at = [&](std::size_t c) { return static_cast<unsigned char>(bytes[i * 4 + c]) / 255.0; };
+                                          return std::array<double, 4>{at(0), at(1), at(2), at(3)};
+                                      }),
+            false};
+}
+
 std::pair<std::string, bool> composite_color_layers(const Document& doc, const Page& page,
                                    const std::vector<std::size_t>& layers, bool flatten = false) {
     // (at the finest grid of the page's pixel layers, 200 to 600 dpi — its masks' and selections' —: a picture opened at
@@ -1194,7 +1241,6 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
         throw NotYetPorted("high-precision merge has different proof/print compositing");
     for (const auto i : layers) {
         const Layer& l = page.layers[i];
-        if (core::leaves_channels_out(l)) throw NotYetPorted("high-precision merge of a layer that leaves colour channels out (blend-channels@1)");
         if (l.role == LayerRole::Name || l.role == LayerRole::Draft ||
             merge_printed(l) != printed || l.visible != first.visible)
             throw NotYetPorted("high-precision merge with mixed display/print participation");
@@ -1207,6 +1253,8 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
         if (!std::binary_search(layers.begin(), layers.end(), i) && page.layers[i].visible &&
             page.layers[i].kind != LayerKind::Folder && merge_draws(page.layers[i]))
             throw NotYetPorted("high-precision merge spans an unselected visible layer");
+    if (std::any_of(layers.begin(), layers.end(), [&](std::size_t i) { return core::leaves_channels_out(page.layers[i]); }))
+        return channels_kept_merge(doc, page, layers, flatten, dpi, size);
     // (color-model@1: an RGB page of a profile merges in its space, its paint layers' pixels as its values)
     ColorCanvas out(flatten ? page_background(page,size,false) : Image::create("RGBA",size,Ink{0,0,0,0}), RgbSpace::of(page));
     const Box all{0, 0, size.width, size.height};

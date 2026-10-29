@@ -1033,13 +1033,21 @@ core::Layer base_layer(Ctx& ctx, const Json& m, const std::string& name, const J
     // channels it leaves out, bit i the page's channel i — a group's are not: note_extras)
     layer.lock_all = all;
     if (const Json* nest = optional_field(locks, "artboard")) layer.lock_nest = boolean(*nest, "locks.artboard");
+    // (the review's P3-7: a value not a whole number of bits — a file that opened before I-a with it — is left out and
+    // said, not refused; bits past the page's channels too)
     if (const Json* excluded = optional_field(m, "excluded_channels"); excluded != nullptr && *excluded != Json(0)) {
-        const std::int64_t bits = whole(*excluded, "layer.excluded_channels");
         const unsigned count = core::blend_channel_count(ctx.doc.page(0));
         const Json& content = field(m, "content", "layer");
-        if (count != 0 && !(content.is_object() && content.value("kind", Json()) == Json("group"))) {
+        const bool group = content.is_object() && content.value("kind", Json()) == Json("group");
+        const bool bits_given = excluded->is_number_integer() &&
+                                (excluded->is_number_unsigned() ? excluded->get<std::uint64_t>() < (std::uint64_t(1) << 62) : excluded->get<std::int64_t>() > 0);
+        if (!bits_given) {
+            ctx.notes.name("高度な合成のチャンネルの指定が読めないため外しました", name);
+        } else if (count != 0 && !group) {  // (a group's, a page of no channels: note_extras says so)
+            const std::int64_t bits = excluded->get<std::int64_t>();
             std::vector<bool> on(count, true);
             for (unsigned c = 0; c < count; ++c) on[c] = (bits & (std::int64_t(1) << c)) == 0;
+            if (count < 63 && (bits >> count) != 0) ctx.notes.name("このページの色モードに無いチャンネルの指定は外しました", name);
             if (std::any_of(on.begin(), on.end(), [](bool v) { return !v; })) layer.blend_channels = std::move(on);
         }
     }

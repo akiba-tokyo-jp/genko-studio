@@ -522,6 +522,18 @@ static std::vector<std::size_t> type_style_pages(const Document& doc, const Json
     return {out.begin(), out.end()};
 }
 
+// The page duplicate_layers or duplicate_channel copies onto (its to_page as the op reads it: require_page), or none — none
+// given, "new" (a new page), or one the book does not have.
+static std::optional<std::size_t> page_copied_onto(const Document& doc, const Json& op) {
+    const Json* to = get(op, "to_page");
+    if (to == nullptr || to->is_null() || *to == Json("new")) return std::nullopt;
+    try {
+        return require_page(doc, Json{{"page", *to}});
+    } catch (const OpError&) {
+        return std::nullopt;
+    }
+}
+
 void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
     const Json* name_value = get(op, "op");
     const std::string name = name_value != nullptr && name_value->is_string() ? name_value->get<std::string>() : "";
@@ -545,27 +557,10 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
             return;
         }
     }
-    if (named && name == "duplicate_layers") {  // (PC5 I-a: the page it copies onto is asked too, then its own)
-        const Json* to = get(op, "to_page");
-        if (to != nullptr && to->is_number_integer()) {
-            for (const auto& each : doc.pages) {
-                if (each->index == Num(to->get<std::int64_t>())) {
-                    check_held(doc, *each, each->index, actor);
-                    break;
-                }
-            }
-        }
-    }
-    if (named && name == "duplicate_channel") {  // (channels@1: the page it copies onto is asked too, then its own)
-        const Json* to = get(op, "to_page");
-        if (to != nullptr && to->is_number_integer()) {
-            for (const auto& each : doc.pages) {
-                if (each->index == Num(to->get<std::int64_t>())) {
-                    check_held(doc, *each, each->index, actor);
-                    break;
-                }
-            }
-        }
+    if (named && (name == "duplicate_layers" || name == "duplicate_channel")) {
+        // (PC5 I-a, channels@1: the page it copies onto is asked too — found as the op finds it (2, 2.0, "2"…: the review's
+        // P2-4) —, then its own; a page the book does not have is the op's to refuse)
+        if (const std::optional<std::size_t> to = page_copied_onto(doc, op)) check_held(doc, doc.page(*to), doc.page(*to).index, actor);
     }
     if (named && name == "merge_channels") {  // (channels@1: every page it takes is asked)
         const Json* pages = get(op, "pages");
@@ -667,15 +662,30 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
         }
         const Json* ids = get(op_in, "ids");
         const Json* id = get(op_in, "id");
-        for (const Page* page : pages) {
-            if (page->name_ok) continue;
-            const bool touched = std::any_of(page->layers.begin(), page->layers.end(), [&](const Layer& l) {
-                if (!printed(l)) return false;
-                if (ids != nullptr && ids->is_array()) return std::any_of(ids->begin(), ids->end(), [&](const Json& v) { return json_equals_string(v, l.id); });
-                if (id != nullptr && name != "bake_layer_styles") return json_equals_string(*id, l.id) || json_equals_string(l.parent_id, py_str(*id));
+        const bool hidden = truthy_at(op_in, "hidden");
+        const bool empty = truthy_at(op_in, "empty");
+        // (the review's P3-6: the layers the op takes — those named, or those hidden, empty or with effects — not every one)
+        const auto taken = [&](const std::vector<Layer>& layers, std::size_t i) {
+            const Layer& l = layers[i];
+            if (ids != nullptr && ids->is_array() &&
+                std::any_of(ids->begin(), ids->end(), [&](const Json& v) { return json_equals_string(v, l.id) || json_equals_string(v, py_str(l.parent_id)); }))
                 return true;
-            });
-            if (touched) throw OpError(name + " on a printed layer needs name_ok on page " + page->index.repr() + " (strict_gates)");
+            if (id != nullptr && name != "bake_layer_styles") return json_equals_string(*id, l.id) || json_equals_string(l.parent_id, py_str(*id));
+            if (name == "delete_layers") return (hidden && !l.visible) || (empty && empty_layer(layers, i));
+            if (name == "bake_layer_styles" && (ids == nullptr || !ids->is_array()))
+                return l.style && l.style->is_object() && l.style->contains("effects") && !(*l.style)["effects"].empty();
+            return false;
+        };
+        const Page* onto = nullptr;  // (duplicate_layers' page copied onto: its name approved too — the review's P2-4)
+        if (name == "duplicate_layers") {
+            if (const std::optional<std::size_t> to = page_copied_onto(doc, op_in)) onto = &doc.page(*to);
+        }
+        for (const Page* page : pages) {
+            bool touched = false;
+            for (std::size_t i = 0; i < page->layers.size() && !touched; ++i) touched = printed(page->layers[i]) && taken(page->layers, i);
+            if (!touched) continue;
+            if (!page->name_ok) throw OpError(name + " on a printed layer needs name_ok on page " + page->index.repr() + " (strict_gates)");
+            if (onto != nullptr && !onto->name_ok) throw OpError(name + " of a printed layer onto page " + onto->index.repr() + " needs name_ok there (strict_gates)");
         }
         return;
     }
@@ -1367,7 +1377,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                 const std::vector<LockedLayer> locked = locked_layers(work);
                 OpContext context{work, *current, actor};
                 (*function)(context);
-                check_locked_layers(locked, work, name_text);
+                check_locked_layers(locked, work, *current);
                 settle_blend_channels(work);  // (blend-channels@1: a page whose mode changed blends every channel again)
                 validate_color_document(work);
                 try {

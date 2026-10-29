@@ -48,8 +48,14 @@ struct LockedLayer {
     std::string page;  // (the page's id)
     Layer layer;
 };
+// (a layer in a folder locked so is locked so too, every level down: locked_all)
 std::vector<LockedLayer> locked_layers(const Document& doc);
-void check_locked_layers(const std::vector<LockedLayer>& before, const Document& after, std::string_view op);
+// `op` the op as given: one that works on whole pages is let through (page_op in layer_basics.cpp: image size, canvas size,
+// mode, flatten, a layer comp applied, a text style of the book…); only set_layer and set_layers take a lock off.
+void check_locked_layers(const std::vector<LockedLayer>& before, const Document& after, const Json& op);
+// Is the layer locked with すべてをロック — itself, or a folder it is in (every level up)? Each op that goes over every layer
+// of a page skips these as it skips those locked with locked; drawing on one, deleting one is refused.
+bool locked_all(const std::vector<Layer>& layers, std::size_t index);
 // Is the layer's look (what it holds, where it is, its opacity, blend, style, mask…) the same — what すべてをロック keeps?
 bool same_locked_look(const Layer& a, const Layer& b);
 
@@ -61,7 +67,8 @@ bool empty_layer(const std::vector<Layer>& layers, std::size_t index);
 // What a folder holds, every level down (positions, in the page's order; a folder chain that comes back on itself is cut).
 std::vector<std::size_t> folder_contents(const std::vector<Layer>& layers, std::size_t folder);
 // What on the book names the page's layers `gone` (deleted): a line set under one (its style's below_layer) and a ruler
-// kept to one (layer_id) let go, an animation's cel of one emptied and its light table without it. Layer comps and
+// kept to one (layer_id) let go, an animation's cel of one emptied and its light table without it, the track of an
+// animation folder deleted gone, a selection kept from one (the page's saved_areas) gone. Layer comps and
 // variables keep naming them (they say so when applied: layer-comps@1, variables@1); notes and the measuring name no
 // layer.
 void forget_layers(Document& doc, std::size_t page, const std::set<std::string>& gone);

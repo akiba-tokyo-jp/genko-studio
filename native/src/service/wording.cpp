@@ -1380,8 +1380,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("blend_channels: this page's colour mode.*", "このページの色モード（モノクロ 2 階調・インデックス・ダブルトーン・マルチチャンネル）では、チャンネルを外せません"));
         r.push_back(rule("blend_channels is \\d+ flags.*", "チャンネルの指定がページの色のチャンネルの数と合いません"));
         r.push_back(rule("blend_channels is a layer's, not a folder's", "チャンネルの指定はレイヤーのものです（グループには付けられません）"));
-        r.push_back(rule("not yet ported: high-precision merge of a layer that leaves colour channels out.*",
-                         "高精度のページでは、チャンネルを外したレイヤーの結合はまだできません（混合オプションのチャンネルを全部入れると結合できます）"));
+        r.push_back(rule("not yet ported: high-precision merge of a clipped layer that leaves colour channels out.*",
+                         "高精度のページでは、下のレイヤーへクリップしたままチャンネルを外したレイヤーを結合することはまだできません（クリップを外すか、チャンネルを全部入れると結合できます）"));
         r.push_back(rule("the layers have nothing to draw", "選んだレイヤーには、描かれたものがありません"));
         r.push_back(rule("layer \\S+ has nothing to rasterize", "このレイヤーには、ラスタライズするものがありません（すでに画素のレイヤーです）"));
         r.push_back(rule("the transform squashes the smart object flat|the picture would be laid too small", "スマートオブジェクトが潰れてしまう変形はできません"));

@@ -278,7 +278,7 @@ private slots:
         // one only: a word, nothing done
         pick({ink});
         const auto count = book.order().size();
-        book.menu_action(panel.many_menu(), QStringLiteral("選んだレイヤーを結合"))->trigger();
+        book.menu_action(panel.many_menu(), QStringLiteral("レイヤーを結合"))->trigger();
         QCOMPARE(book.order().size(), count);
 
         pick({ink, pen});
@@ -311,7 +311,7 @@ private slots:
         QVERIFY(!core::py_truthy(book.layer(ink)->parent_id));
 
         pick({ink, pen});
-        book.menu_action(panel.many_menu(), QStringLiteral("選んだレイヤーを結合"))->trigger();
+        book.menu_action(panel.many_menu(), QStringLiteral("レイヤーを結合"))->trigger();
         QCOMPARE(book.order().size(), count - 1);
         QVERIFY(book.layer(pen) == nullptr);
         QCOMPARE(book.layer(ink)->stroke_count(), std::size_t(0));  // (drawn as they show, into the lowest: pixels)
@@ -1009,6 +1009,15 @@ private slots:
         QVERIFY(book.layer("a")->lock_all);
         QVERIFY(!book.window->apply_ops(Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", "a"}, {"opacity", 0.5}}})));
         QCOMPARE(book.layer("a")->opacity, 1.0);
+        // (the review's P3-4: while it holds, the other locks' boxes are not pressed — nor for a layer of a folder locked so)
+        QVERIFY(!book.child<QCheckBox>("layer_lock_alpha")->isEnabled() && !book.child<QCheckBox>("layer_locked")->isEnabled());
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", "a"}, {"lock_all", false}},
+                                                    Json{{"op", "set_layer"}, {"page", 1}, {"id", core::py_str(book.layer("a")->parent_id)}, {"lock_all", true}}})));
+        QVERIFY(book.choose("a"));
+        QVERIFY(!book.child<QCheckBox>("layer_lock_alpha")->isEnabled() && !book.child<QCheckBox>("layer_locked")->isEnabled());
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", core::py_str(book.layer("a")->parent_id)}, {"lock_all", false}},
+                                                    Json{{"op", "set_layer"}, {"page", 1}, {"id", "a"}, {"lock_all", true}}})));
+        QVERIFY(book.choose("a"));
         // レイヤーをロック…: すべて and the auto-nesting lock
         answers.responder->exec = [](QDialog* dialog) {
             if (auto* box = dialog->findChild<QCheckBox*>(QStringLiteral("lock_all")); box != nullptr && box->isChecked()) box->click();

@@ -738,7 +738,7 @@ private slots:
         QVERIFY(folder != nullptr);
         QCOMPARE(layer_with_id(desk.page(), "red")->parent_id, Json(folder->id));
         choose({"red", "blue"});
-        QAction* merge = titled(panel->many_menu(), QStringLiteral("選んだレイヤーを結合"));
+        QAction* merge = titled(panel->many_menu(), QStringLiteral("レイヤーを結合"));
         QVERIFY(merge != nullptr);
         merge->trigger();
         QVERIFY(layer_with_id(desk.page(), "blue") == nullptr);

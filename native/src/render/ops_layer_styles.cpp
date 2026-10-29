@@ -17,10 +17,12 @@
 #include "core/psd_keep.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/layer_basics.hpp"
 #include "render/layer_styles.hpp"
 #include "render/ops_patterns.hpp"
 #include "render/page.hpp"
 #include "render/raster.hpp"
+#include "render/smart.hpp"
 
 namespace genko::render {
 
@@ -216,8 +218,8 @@ void show_layer_effects(core::OpContext& c) {
     if (c.op.contains("ids") || c.op.contains("id")) {
         layers = named_layers(doc.page(at), c.op);
     } else {
-        for (std::size_t i = 0; i < doc.page(at).layers.size(); ++i)
-            if (doc.page(at).layers[i].style) layers.push_back(i);
+        for (std::size_t i = 0; i < doc.page(at).layers.size(); ++i)  // (PC5 I-a: those locked with すべてをロック skipped)
+            if (doc.page(at).layers[i].style && !core::locked_all(doc.page(at).layers, i)) layers.push_back(i);
     }
     core::Page& page = doc.edit_page(at);
     Json ids = Json::array();
@@ -330,6 +332,11 @@ void bake_layer_styles(core::OpContext& c) {
     Json baked = Json::array();
     Json skipped = Json::array();
     for (const std::size_t at : pages) {
+        // (the review's P2-3: the page drawn as before the op — a page of 16 or 32 bits drawn in 8 bits while it holds no
+        // precise pixels takes the layers baked as 8-bit pixels, so that it is not drawn in its linear light after: as a
+        // merge does (has_precision). Z0's "a new layer at the page's depth" is for the layers made, not those converted.)
+        const bool precise_before = uses_color_precision(doc.page(at), false) || uses_color_precision(doc.page(at), true) ||
+                                    smart::needs_precision(doc.page(at), &doc, false);
         std::vector<std::size_t> layers;
         if (given != nullptr && !given->is_null()) {
             layers = named_layers(doc.page(at), c.op);
@@ -354,7 +361,7 @@ void bake_layer_styles(core::OpContext& c) {
                 skip("kind");  // (a folder, a correction or a tone layer: no pixels to draw them into)
                 continue;
             }
-            if (source.locked || source.lock_all) {
+            if (source.locked || core::locked_all(page.layers, i)) {
                 skip("locked");
                 continue;
             }
@@ -403,7 +410,7 @@ void bake_layer_styles(core::OpContext& c) {
             layer.style = kept.empty() ? std::nullopt : std::optional<Json>(spec_of(kept));
             if (picture.inks) {
                 layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(*picture.inks));
-            } else if (picture.precise) {
+            } else if (picture.precise && precise_before) {
                 layer.color_raster = std::make_shared<const std::string>(*picture.precise);
                 if (std::find(doc.features.begin(), doc.features.end(), core::kColorRasterFeature) == doc.features.end())
                     doc.features.emplace_back(core::kColorRasterFeature);

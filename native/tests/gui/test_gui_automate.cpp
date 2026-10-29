@@ -137,7 +137,9 @@ private slots:
         QVERIFY(b.window->automate_menu()->menuAction()->isVisible());
         QCOMPARE(items(b.window->automate_menu()), (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"),
                                                              QStringLiteral("条件付きモード変更…"), QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…")}));
-        QCOMPARE(items(b.window->scripts_menu()), (QStringList{QStringLiteral("画像プロセッサー…"), QStringLiteral("すべてのマスクを統合"), QStringLiteral("|"),
+        // (PC5 I-a: すべての空のレイヤーを削除・すべてのレイヤー効果を統合 after 画像プロセッサー… — test_gui_layers)
+        QCOMPARE(items(b.window->scripts_menu()), (QStringList{QStringLiteral("画像プロセッサー…"), QStringLiteral("すべての空のレイヤーを削除"),
+                                                            QStringLiteral("すべてのレイヤー効果を統合"), QStringLiteral("すべてのマスクを統合"), QStringLiteral("|"),
                                                             QStringLiteral("スクリプトイベントマネージャー…"), QStringLiteral("|"), QStringLiteral("参照…")}));
         for (const char* name : {"act_batch", "act_create_droplet", "act_conditional_mode_change", "act_fit_image", "act_lens_correction_batch",
                                  "act_image_processor", "act_script_events", "act_script_browse"}) {

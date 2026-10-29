@@ -38,6 +38,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/stylecat.hpp"
+#include "core/layer_basics.hpp"
 
 namespace genko::core {
 
@@ -1671,7 +1672,10 @@ void set_finish(OpContext& c) {
     Page& page = c.doc.edit_page(studio_page(c.doc, c.op));
     const std::string frame_id = leaf(page, op_get(c.op, "frame_id")).id;
     const Json finish = op_get(c.op, "finish");
-    for (Layer& layer : page.layers) {
+    const std::vector<Layer> before = page.layers;
+    for (std::size_t i = 0; i < page.layers.size(); ++i) {
+        Layer& layer = page.layers[i];
+        if (locked_all(before, i)) continue;  // (PC5 I-a: a picture locked with すべてをロック keeps its finish)
         // (smart-objects@1: a picture's smart object in the panel is finished as its placed art)
         if ((layer.kind == LayerKind::Placed || layer.kind == LayerKind::Smart) && layer.frame_id == frame_id) {
             layer.finish = finish.is_null() ? std::nullopt : std::optional<Json>(finish);

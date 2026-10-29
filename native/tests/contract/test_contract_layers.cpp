@@ -24,6 +24,7 @@
 #include "core/json.hpp"
 #include "core/layer_basics.hpp"
 #include "core/paths.hpp"
+#include "core/strokes.hpp"
 #include "core/variables.hpp"
 #include "formats/export.hpp"
 #include "formats/open_file.hpp"
@@ -34,6 +35,7 @@
 #include "render/png.hpp"
 #include "render/psd.hpp"
 #include "render/raster.hpp"
+#include "render/zip.hpp"
 #include "storage/reader.hpp"
 #include "testsupport.hpp"
 
@@ -186,8 +188,13 @@ private slots:
             if (line.id == "l1") line.style["below_layer"] = "a";
         doc.edit_page(0).rulers = Json::array({Json{{"id", "r1"}, {"kind", "parallel"}, {"points", Json::array({Json::array({0, 0}), Json::array({10, 0})})},
                                                     {"layer_id", "a"}}});
-        doc.edit_page(0).extra["anim"] = Json{{"tracks", Json::array({Json{{"folder", "g"}, {"cels", Json::array({Json::array({0, "b"})})}}})},
+        doc.edit_page(0).extra["anim"] = Json{{"tracks", Json::array({Json{{"folder", "g"}, {"cels", Json::array({Json::array({0, "b"})})}},
+                                                                       Json{{"folder", "kept"}, {"cels", Json::array({Json::array({0, "a"})})}}})},
                                              {"light_table", Json::array({"b", "p"})}};
+        // a selection kept from a (in a union too), one from a layer kept
+        doc.edit_page(0).extra["saved_areas"] = Json{{"from_a", Json{{"layer", "a"}}},
+                                                     {"both", Json{{"union", Json::array({Json{{"layer", ink}}, Json{{"layer", "b"}}})}}},
+                                                     {"kept", Json{{"layer", ink}}}};
         doc = run(doc, Json{{"op", "set_variables"},
                             {"defs", Json::array({Json{{"name", "v"}, {"type", "visibility"}, {"page", 1}, {"layer", "a"}}})}});
         const core::ApplyResult done = run_ops(doc, op("delete_layers", {{"ids", Json::array({"g", "p", ink})}}));
@@ -202,7 +209,11 @@ private slots:
         for (const core::StoryLine& line : after.story)
             if (line.id == "l1") QVERIFY2(!line.style.contains("below_layer"), line.style.dump().c_str());
         QCOMPARE(after.page(0).rulers[0]["layer_id"], Json(nullptr));
+        // (the track of the folder g deleted goes; the other's cel of a emptied — the review's P3-3)
+        QCOMPARE(after.page(0).extra["anim"]["tracks"].size(), std::size_t(1));
+        QCOMPARE(after.page(0).extra["anim"]["tracks"][0]["folder"], Json("kept"));
         QCOMPARE(after.page(0).extra["anim"]["tracks"][0]["cels"][0][1], Json(nullptr));
+        QCOMPARE(after.page(0).extra["saved_areas"], (Json{{"kept", Json{{"layer", ink}}}}));
         QCOMPARE(after.page(0).extra["anim"]["light_table"], Json::array());
         // (the comps and the variables keep naming them: they say so when applied — layer-comps@1, variables@1)
         QVERIFY(after.page(0).layer_comps && !after.page(0).layer_comps->comps.empty());
@@ -222,6 +233,13 @@ private slots:
         QVERIFY(find(kept.doc, "inner") == nullptr);
         QCOMPARE(find(kept.doc, "x")->parent_id, Json("outer"));
         QCOMPARE(kept.results.back()["kept"][0]["why"], Json("lock_all"));
+        // (the review's P2-2: a folder locked so — itself and what it holds kept, said)
+        const core::Document locked_folder = run(nested, Json::array({op("set_layer", {{"id", "x"}, {"lock_all", false}}), paint("y"),
+                                                                       into({"y"}, "inner"), op("set_layer", {{"id", "inner"}, {"lock_all", true}})}));
+        const core::ApplyResult whole = run_ops(locked_folder, op("delete_layers", {{"ids", Json::array({"inner"})}}));
+        for (const char* stays : {"inner", "x", "y"}) QVERIFY2(find(whole.doc, stays) != nullptr, stays);
+        QCOMPARE(whole.results.back()["kept"].size(), std::size_t(3));
+        QCOMPARE(whole.results.back()["deleted"].size(), std::size_t(0));
         // refusals: nothing named; ids on every page; a layer the page does not have
         QVERIFY(refusal(doc, op("delete_layers")).find("needs ids, hidden or empty") != std::string::npos);
         QVERIFY(refusal(doc, Json{{"op", "delete_layers"}, {"page", "all"}, {"ids", Json::array({"a"})}}).find("one page") != std::string::npos);
@@ -276,6 +294,27 @@ private slots:
         QCOMPARE(find(there, "g3", 1)->parent_id, Json(nullptr));
         QCOMPARE(position(there, "g3", 1), there.page(1).layers.size() - 1);
         QCOMPARE(there.page(0).layers.size(), doc.page(0).layers.size());
+        // (the review's P2-4) the page copied onto locked by another — its number written 2, 2.0 or "2" —: refused; in a book
+        // of strict gates, onto a page whose name is not approved: refused, the page copied from approved or not
+        core::Document held = doc;
+        held.page_locks[held.page(1).id] = "ai:other";
+        for (const Json& to : {Json(2), Json(2.0), Json("2")}) {
+            const std::string why = refusal(held, op("duplicate_layers", {{"ids", Json::array({"a"})}, {"to_page", to}}));
+            QVERIFY2(why.find("locked by ai:other") != std::string::npos, (to.dump() + " → " + why).c_str());
+        }
+        core::Document strict = doc;
+        strict.strict_gates = true;
+        strict.edit_page(0).name_ok = true;
+        const std::string onto = refusal(strict, op("duplicate_layers", {{"ids", Json::array({"a"})}, {"to_page", "2"}}));
+        QVERIFY2(onto.find("name_ok") != std::string::npos, onto.c_str());
+        strict.edit_page(1).name_ok = true;
+        QVERIFY(refusal(strict, op("duplicate_layers", {{"ids", Json::array({"a"})}, {"to_page", "2"}})).empty());
+        // (the review's P3-6: deleting the empty layers of a page whose name is not approved — none printed taken: let)
+        core::Document strict_empty = run(doc, paint("e"));
+        strict_empty.strict_gates = true;
+        QVERIFY(refusal(strict_empty, op("delete_layers", {{"hidden", true}})).empty());
+        const std::string empty_why = refusal(strict_empty, op("delete_layers", {{"empty", true}}));
+        QVERIFY2(empty_why.find("name_ok") != std::string::npos, empty_why.c_str());  // (e is empty and printed)
         // another mode: refused
         const core::Document other = run(doc, Json{{"op", "set_color_mode"}, {"page", 2}, {"mode", "rgb"}, {"depth", 16}});
         QVERIFY(refusal(other, op("duplicate_layers", {{"ids", Json::array({"g"})}, {"to_page", 2}})).find("another paper size or colour mode") !=
@@ -324,6 +363,84 @@ private slots:
         QVERIFY(find(both, "q")->lock_all && find(both, "q")->lock_nest);
     }
 
+    // The review's P2-1, P2-2 and P2-5: a core layer locked so not merged away (the image flattened, its layers merged: as
+    // locked); a folder locked so locks what it holds (drawn on, changed, taken out of it, deleted with it: refused); the ops
+    // that go over every layer skip those locked so; the ops on whole pages — flatten, HDR toning, a text style of the book —
+    // as Photoshop's.
+    void lockAllAcrossOps() {
+        core::Document doc = run(book(), Json::array({paint("p"), drawn_in("p", 5, 5, 20, 20, Json::array({0, 0, 0})), paint("q"),
+                                                      drawn_in("q", 30, 30, 40, 40, Json::array({0, 0, 255}))}));
+        const std::string ink = core_of(doc, core::LayerRole::Ink)->id;
+        const core::Document inked = run(doc, Json::array({drawn_in(ink, 10, 50, 20, 60, Json::array({0, 0, 0})), op("set_layer", {{"id", ink}, {"lock_all", true}})}));
+        // a merge — the image flattened, layers merged, merged down — of a layer locked so: refused, its pixels and lock kept
+        for (const Json& merge : {op("merge_visible", {{"copy", false}, {"flatten", true}}), op("merge_layers", {{"ids", Json::array({ink, "q"})}})}) {
+            const std::string why = refusal(inked, merge);
+            QVERIFY2(why.find("lock_all") != std::string::npos, (merge.dump() + " → " + why).c_str());
+        }
+        const core::Document p_locked = run(doc, op("set_layer", {{"id", "p"}, {"lock_all", true}}));
+        QVERIFY(refusal(p_locked, op("merge_down", {{"id", "q"}})).find("lock_all") != std::string::npos);
+        // a layer made anew under its id by another op than set_layer: as it was locked (the bus' look compared)
+        {
+            core::Document again = p_locked;
+            const std::vector<core::LockedLayer> before = core::locked_layers(again);
+            core::Layer fresh;
+            fresh.id = "p";
+            fresh.kind = core::LayerKind::Raster;
+            for (core::Layer& l : again.edit_page(0).layers)
+                if (l.id == "p") l = fresh;
+            bool refused = false;
+            try {
+                core::check_locked_layers(before, again, op("merge_visible", {{"flatten", true}}));
+            } catch (const core::OpError&) {
+                refused = true;
+            }
+            QVERIFY(refused);
+            bool let = true;
+            try {
+                core::check_locked_layers(before, again, op("set_layer", {{"id", "p"}, {"lock_all", false}}));
+            } catch (const core::OpError&) {
+                let = false;
+            }
+            QVERIFY(let);
+        }
+        // a folder locked so: what it holds locked too
+        core::Document folded = run(doc, Json::array({folder("g"), into({"p"}, "g"), op("set_layer", {{"id", "g"}, {"lock_all", true}})}));
+        QVERIFY(core::locked_all(folded.page(0).layers, position(folded, "p")));
+        QVERIFY(!core::locked_all(folded.page(0).layers, position(folded, "q")));
+        for (const Json& change : {drawn_in("p", 30, 30, 40, 40, Json::array({0, 0, 0})), op("set_layer", {{"id", "p"}, {"opacity", 0.5}}),
+                                   op("move_layers", {{"ids", Json::array({"p"})}, {"parent", nullptr}}), op("delete_layer", {{"id", "p"}}),
+                                   op("ungroup_layers", {{"id", "g"}})}) {
+            const std::string why = refusal(folded, change);
+            QVERIFY2(why.find("lock_all") != std::string::npos, (change.dump() + " → " + why).c_str());
+        }
+        QVERIFY(refusal(folded, op("set_layer", {{"id", "p"}, {"visible", false}})).empty());
+        const core::Document opened = run(folded, op("set_layer", {{"id", "g"}, {"lock_all", false}}));
+        QVERIFY(refusal(opened, op("set_layer", {{"id", "p"}, {"opacity", 0.5}})).empty());
+        // the ops that go over every layer: those locked so skipped as those locked
+        const Json style{{"effects", Json::array({Json{{"kind", "stroke"}, {"enabled", true}, {"blend", "normal"}, {"opacity", 1}, {"size_mm", 1},
+                                                       {"position", "outside"}, {"rgb", Json::array({255, 0, 0})}}})}};
+        const core::Document styled = run(doc, Json::array({op("set_layer_style", {{"id", "p"}, {"style", style}}), op("set_layer_style", {{"id", "q"}, {"style", style}}),
+                                                            op("set_layer", {{"id", "p"}, {"lock_all", true}})}));
+        const core::ApplyResult hidden = run_ops(styled, op("show_layer_effects", {{"show", false}}));
+        QCOMPARE(hidden.results.back()["ids"], Json::array({"q"}));
+        const core::Document smart = run(doc, Json::array({fill("f", Json::array({0, 255, 0})), fill("f2", Json::array({0, 0, 255})),
+                                                           op("set_layer", {{"id", "f"}, {"lock_all", true}})}));
+        const core::Document rasterized = run(smart, op("rasterize_layer", {{"all", true}}));
+        QVERIFY(find(rasterized, "f")->kind == core::LayerKind::Fill);
+        QVERIFY(find(rasterized, "f2")->kind != core::LayerKind::Fill);
+        // the page ops: a page flattened (HDR toning) refuses a layer locked so as one locked (the merge's own check, as
+        // before for locked); one that does not merge — the page's size — works on it (the bus lets it through)
+        const std::string hdr = refusal(p_locked, op("hdr_toning", {{"strength", 1.5}}));
+        QVERIFY2(hdr.find("lock_all") != std::string::npos, hdr.c_str());
+        const std::string hdr_locked = refusal(run(doc, op("set_layer", {{"id", "p"}, {"locked", true}})), op("hdr_toning", {{"strength", 1.5}}));
+        QVERIFY2(hdr_locked.find("is locked") != std::string::npos, hdr_locked.c_str());
+        QVERIFY(refusal(p_locked, op("resize_pages", {{"width_px", 300}, {"height_px", 400}, {"resample", "nearest"}})).empty());
+        const core::Document ruled = run(p_locked, op("set_ruler_line", {{"start", {10, 40}}, {"end", {50, 36}}}));
+        QVERIFY2(refusal(ruled, op("straighten_layer", {{"crop", true}, {"trim", "fit"}})).empty(), refusal(ruled, op("straighten_layer", {{"crop", true}, {"trim", "fit"}})).c_str());
+        const std::string turned = refusal(ruled, op("straighten_layer", {{"ids", Json::array({"p"})}}));  // (the layer itself turned: refused)
+        QVERIFY2(turned.find("lock_all") != std::string::npos, turned.c_str());
+    }
+
     // The channels a layer leaves out: what is under it kept there — 8 bits, precise colour, inks; whole, a part, the command
     // line; merged (8 bits), precise merges refused in words.
     void channelsLeftOut() {
@@ -368,13 +485,32 @@ private slots:
         QVERIFY2(near(rgb_at(drawn(merged), 30, 40), {255, 0, 255}), shown(rgb_at(drawn(merged), 30, 40)).constData());
         const core::Document flat = run(eight, op("merge_visible", {{"copy", false}, {"flatten", true}}));
         QVERIFY2(near(rgb_at(drawn(flat), 30, 40), {255, 0, 255}), shown(rgb_at(drawn(flat), 30, 40)).constData());
-        // precise: refused in words
-        Json precise = Json::array({paint("under"), drawn_in("under", 0, 0, 60, 80, Json::array({90, 90, 90}))});
-        precise[1]["blend"] = "multiply";
-        const core::Document two = run(deep, precise);
-        QVERIFY(find(two, "under")->color_raster != nullptr);
-        const std::string why = refusal(two, op("merge_layers", {{"ids", Json::array({"under", "blue"})}}));
-        QVERIFY2(why.find("leaves colour channels out") != std::string::npos, why.c_str());
+        // precise (the review's P3-2): merged as the page draws them, in its values — a copy of what shows over a white layer,
+        // the image flattened, the layers merged; a clipped first layer refused in words
+        core::Document deep_white = book("8");
+        add_pixels(deep_white, "dot", "dot", 400, 600, 410, 610, {0, 0, 0});  // (precise pixels under the rest, away from the points)
+        deep_white = run(deep_white, Json::array({fill("white", Json::array({255, 255, 255})), Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}},
+                                                  fill("blue", Json::array({0, 0, 255})),
+                                                  op("set_layer", {{"id", "blue"}, {"blend_channels", Json::array({false, true, true})}})}));
+        QVERIFY(find(deep_white, "dot")->color_raster != nullptr);
+        const std::array<int, 3> shows = rgb_at(drawn(deep_white), 30, 40);
+        QVERIFY2(near(shows, {255, 0, 255}), shown(shows).constData());
+        core::Document deep_copy = run(deep_white, op("merge_visible", {{"copy", true}, {"id", "m"}}));
+        QVERIFY(find(deep_copy, "m")->color_raster != nullptr);
+        deep_copy = run(deep_copy, Json::array({op("set_layer", {{"id", "blue"}, {"visible", false}}), op("set_layer", {{"id", "white"}, {"visible", false}}),
+                                                op("set_layer", {{"id", "dot"}, {"visible", false}})}));
+        QVERIFY2(near(rgb_at(drawn(deep_copy), 30, 40), shows), shown(rgb_at(drawn(deep_copy), 30, 40)).constData());
+        const core::Document deep_flat = run(deep, op("merge_visible", {{"copy", false}, {"flatten", true}}));
+        QVERIFY2(near(rgb_at(drawn(deep_flat), 30, 40), {0, 255, 255}), shown(rgb_at(drawn(deep_flat), 30, 40)).constData());
+        const core::Document deep_merged = run(deep_white, op("merge_layers", {{"ids", Json::array({"white", "blue"})}}));
+        QVERIFY2(near(rgb_at(drawn(deep_merged), 30, 40), shows), shown(rgb_at(drawn(deep_merged), 30, 40)).constData());
+        const core::Document clipped = run(deep_white, op("set_layer", {{"id", "blue"}, {"clip", true}}));
+        const std::string why = refusal(clipped, op("merge_down", {{"id", "blue"}}));
+        QVERIFY2(why.empty(), why.c_str());  // (merged down: the lower its own, the upper clipped to it — not clipped to what is under)
+        const core::Document lowest_clipped = run(deep_white, Json::array({op("set_layer", {{"id", "white"}, {"clip", true}}),
+                                                                           op("set_layer", {{"id", "white"}, {"blend_channels", Json::array({true, false, true})}})}));
+        const std::string clip_why = refusal(lowest_clipped, op("merge_layers", {{"ids", Json::array({"white", "blue"})}}));
+        QVERIFY2(clip_why.find("clipped layer that leaves colour channels out") != std::string::npos, clip_why.c_str());
         // the op's checks: a flag a channel, a page whose mode has them, a layer's (not a folder's); all on is none
         QVERIFY(refusal(eight, op("set_layer", {{"id", "blue"}, {"blend_channels", Json::array({true, false})}})).find("3 flags") != std::string::npos);
         const core::Document folded = run(eight, folder("f"));
@@ -386,13 +522,13 @@ private slots:
 
     // bake_layer_styles: the layer with its style drawn into its pixels — the page looks the same; its opacity and blend kept.
     void bakingLayerStyles() {
-        for (const std::string way : {"8", "16", "cmyk"}) {
+        for (const std::string way : {"8", "16", "16-precise", "cmyk"}) {
             const Json style{{"effects", Json::array({Json{{"kind", "stroke"}, {"enabled", true}, {"blend", "normal"}, {"opacity", 1}, {"size_mm", 2},
                                                            {"position", "outside"}, {"rgb", Json::array({255, 0, 0})}}})}};
-            // (a page of 16 bits draws in its linear light once it holds precise pixels: given some first, away from the
-            // points looked at, as the bake gives it its own)
-            core::Document base = book(way == "16" ? "8" : way);
-            if (way == "16") {
+            // (the review's P2-3: a page of 16 bits holding no precise pixels is drawn in 8 bits — the layer baked into 8-bit
+            // pixels, so that it is still; one holding some, in its linear light — baked into precise pixels)
+            core::Document base = book(way == "16-precise" ? "8" : way);
+            if (way == "16-precise") {
                 add_pixels(base, "dot", "dot", 400, 600, 410, 610, {0, 0, 0});
                 base = run(base, Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 16}});
                 QVERIFY(find(base, "dot")->color_raster != nullptr);
@@ -404,6 +540,8 @@ private slots:
             const core::ApplyResult baked = run_ops(doc, Json{{"op", "bake_layer_styles"}, {"page", "all"}});
             const core::Layer* p = find(baked.doc, "p");
             QVERIFY2(!p->style, way.c_str());
+            if (way == "16") QVERIFY(p->color_raster == nullptr && p->raster_png != nullptr);
+            if (way == "16-precise") QVERIFY(p->color_raster != nullptr);
             QCOMPARE(p->opacity, 0.8);
             QCOMPARE(baked.results.back()["baked"].size(), std::size_t(1));
             const render::Image after = drawn(baked.doc, 200);
@@ -487,6 +625,31 @@ private slots:
         QVERIFY(p != nullptr);
         QVERIFY(p->lock_nest);
         QCOMPARE(p->blend_channels, (std::vector<bool>{true, false, true}));
+        // (the review's P3-7) a value not bits, or bits past the page's channels: opened, left out and said
+        const auto with_excluded = [&bytes](const Json& value) {
+            const render::zip::NamedReader reader(bytes);
+            Json manifest = Json::parse(reader.read("manifest.json", 1u << 26));
+            for (Json& layer : manifest["document"]["layers"])
+                if (layer.contains("excluded_channels") && layer["excluded_channels"] != Json(0)) layer["excluded_channels"] = value;
+            std::string out;
+            render::zip::StoreWriter writer([&out](std::string_view b) { out.append(b); });
+            writer.add("manifest.json", manifest.dump());
+            for (const std::string& name : reader.names())
+                if (name != "manifest.json") writer.add(name, reader.read(name, ~0ull));
+            writer.finish();
+            return out;
+        };
+        for (const Json& broken : {Json("R"), Json(-2), Json(2.5)}) {
+            const formats::Opened read = formats::open_file(with_excluded(broken), "broken.pcraft");
+            const bool said = std::any_of(read.notes.begin(), read.notes.end(), [](const std::string& n) { return n.find("チャンネルの指定が読めない") != std::string::npos; });
+            QVERIFY2(said, broken.dump().c_str());
+            for (const core::Layer& l : read.doc.page(0).layers) QVERIFY(l.blend_channels.empty());
+        }
+        const formats::Opened past = formats::open_file(with_excluded(Json(2 | 16)), "past.pcraft");
+        QVERIFY(std::any_of(past.notes.begin(), past.notes.end(), [](const std::string& n) { return n.find("無いチャンネルの指定") != std::string::npos; }));
+        bool green_out = false;
+        for (const core::Layer& l : past.doc.page(0).layers) green_out = green_out || l.blend_channels == std::vector<bool>{true, false, true};
+        QVERIFY(green_out);
     }
 
     // A book without them as before: no feature, no key, written twice the same; with them named, read back; a broken value

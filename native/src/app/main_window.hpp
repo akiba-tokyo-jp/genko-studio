@@ -185,7 +185,8 @@ public:
     const core::Layer* target_layer() const;
     void set_target_layer(const std::string& layer_id);
     // A pen, paint or tone layer, not locked.
-    static bool drawable(const core::Layer& layer);
+    // (PC5 I-a: `page` the page the layer is on — a folder locked with すべてをロック locks it too)
+    static bool drawable(const core::Layer& layer, const core::Page* page = nullptr);
     // The selection as an op's area ({"poly": …} or {"mask": …}), or none.
     std::optional<core::Json> selection_area() const;
     // 自動選択ツール's 色の近さ: how different a colour may be and still be the same (許容値, 0..255); only the touching
