@@ -464,7 +464,8 @@ private slots:
     // past its precise budget (1 GiB: here one f32 layer of a page of 1042 mm square at the working 200 dpi is 1.08 GB) is
     // painted at 8 bits as before PC5-0 — a fill (into its pixels: a blend; fill_area's plain colour lays a picture on any
     // layer), a gradient, a pattern, a dab tool, a picture put on it —, never refused,
-    // and the op's warnings say so; within the budget a merge into an empty layer the panels cut makes it precise too.
+    // and the op's warnings say so; within the budget a small picture put on it is precise, and a merge into an empty
+    // layer is composited precise as before.
     void pastTheBudgetNewLayersStayAt8Bits() {
         core::Document big = core::new_episode("大きな本", core::Num(1), 1, core::PageSpec::custom(1042, 1042, 1000, 1000, 1, 2, 2, 2, 2, 200, "color"));
         big.edit_page(0).numero = false;
@@ -483,7 +484,9 @@ private slots:
             Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "fresh"}, {"area", small_area}, {"pattern", Json{{"id", "pat"}}}},
             Json{{"op", "mixer_brush"}, {"page", 1}, {"layer_id", "fresh"}, {"points", Json::parse("[[100, 100], [120, 100]]")}, {"width_mm", 2},
                  {"rgb", Json::array({20, 200, 20})}},
-            Json{{"op", "put_raster"}, {"page", 1}, {"id", "fresh"}, {"png_base64", tile_png}},
+            // (a picture of the page's working grid: its precise pixels would pass the budget too; a small one fits, below)
+            Json{{"op", "put_raster"}, {"page", 1}, {"id", "fresh"},
+                 {"png_base64", core::b64encode(render::write_png(render::Image::create("RGBA", Size{8205, 8205}, render::Ink{30, 60, 90, 255})))}},
         };
         for (const Json& op : ops) {
             const core::ApplyResult done = run_ops(big, Json::array({op}));
@@ -494,7 +497,12 @@ private slots:
                 QVERIFY2(done.warnings.dump().find(render::paint_fill::kKeptAt8Bits) != std::string::npos, (op.dump() + " " + done.warnings.dump()).c_str());
             }
         }
-        // within the budget: a layer merged down into an empty paint layer the panels cut — the result precise
+        // within the budget: a small picture put on it (precise at its own grid), a layer merged down into an empty paint
+        // layer the panels cut — the result precise
+        {
+            const core::Document put = run(big, Json{{"op", "put_raster"}, {"page", 1}, {"id", "fresh"}, {"png_base64", tile_png}});
+            QVERIFY(put.page(0).layers[core::layer_by_id(put.page(0), "fresh")].color_raster != nullptr);
+        }
         core::Document small = run(as_kind(paint_book(), "16"), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "fresh"}});
         small = run(small, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "upper"}, {"after", "fresh"}});
         {
@@ -505,8 +513,10 @@ private slots:
         }
         QVERIFY(small.page(0).layers[core::layer_by_id(small.page(0), "upper")].raster_png != nullptr);
         const core::Document merged = run(small, Json{{"op", "merge_down"}, {"page", 1}, {"id", "upper"}});
+        // (a merge on a page of 16 or 32 bits composites in precise colour, as since PC2d — not by becomes_precise or
+        // keep_page_modes: the result precise and let out of the panels, its budget the book's check after the op —)
         const core::Layer& into = merged.page(0).layers[core::layer_by_id(merged.page(0), "fresh")];
-        QVERIFY(into.panel_clip && into.color_raster != nullptr);
+        QVERIFY(into.color_raster != nullptr && !into.panel_clip);
     }
 
     // a pen layer: a picture laid on it, as before (the new shapes and keys in it), a blend refused; the calls without the

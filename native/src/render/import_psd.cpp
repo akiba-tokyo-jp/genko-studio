@@ -769,6 +769,34 @@ std::string deep_color_raster(const psd::File::DeepPart& part, const core::Page&
     });
 }
 
+// PC5-0 (Z0's review P2-1): a 32-bit RGB or grey file's pixel layer as 8 bits over the whole canvas ("RGBA", as
+// File::image gives it) — its linear colours encoded by the tone curve of the file's profile (encode_by_profile: the
+// inverse of the 32-bit PSD this build writes; Python's view reads them by 1/2.2), its transparency as it is —; nothing
+// for another file (or one whose layer is not read so).
+std::optional<Image> eight_bits_of_32(const psd::File& file, const psd::Layer& item) {
+    if (psd::python_view() || file.depth() != 32 || (file.mode() != 3 && file.mode() != 1)) return std::nullopt;
+    const std::optional<psd::File::DeepPart> part = file.layer_deep(item);
+    if (!part || (part->colours != 3 && part->colours != 1)) return std::nullopt;
+    const unsigned colours = part->colours, all = colours + 1;
+    const std::size_t n = static_cast<std::size_t>(std::max<std::int64_t>(0, part->width)) * static_cast<std::size_t>(std::max<std::int64_t>(0, part->height));
+    std::vector<float> samples(n * all);
+    for (std::size_t i = 0; i < n; ++i)
+        for (unsigned c = 0; c < all; ++c) samples[i * all + c] = part->value(c, i);
+    encode_by_profile(samples, all, true, file.icc());
+    const auto byte = [](float v) { return static_cast<unsigned char>(std::lround(std::clamp(std::isnan(v) ? 0.0f : v, 0.0f, 1.0f) * 255.0f)); };
+    const std::int64_t width = std::max<std::int64_t>(1, file.width()), height = std::max<std::int64_t>(1, file.height());
+    std::string rgba(static_cast<std::size_t>(width * height) * 4, '\0');
+    for (std::int64_t y = std::max<std::int64_t>(0, part->top); y < std::min(height, part->top + part->height); ++y) {
+        for (std::int64_t x = std::max<std::int64_t>(0, part->left); x < std::min(width, part->left + part->width); ++x) {
+            const std::size_t from = static_cast<std::size_t>((y - part->top) * part->width + (x - part->left)) * all;
+            char* to = rgba.data() + static_cast<std::size_t>(y * width + x) * 4;
+            for (unsigned c = 0; c < 3; ++c) to[c] = static_cast<char>(byte(samples[from + (colours == 1 ? 0 : c)]));
+            to[3] = static_cast<char>(byte(samples[from + colours]));
+        }
+    }
+    return Image::frombytes("RGBA", Size{static_cast<int>(width), static_cast<int>(height)}, rgba);
+}
+
 // The bytes of the precise colour rasters the book holds (each allocation once, as core::validate_color_document counts).
 std::uint64_t book_color_bytes(const core::Document& doc) {
     std::uint64_t bytes = 0;
@@ -1172,9 +1200,14 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
             } else {
                 // (onto a clear layer: the pixels as they are)
                 Image canvas = Image::create("RGBA", page_px, Ink{0, 0, 0, 0});
+                // (PC5-0, Z0's review P2-1: a 32-bit file's layer by its profile's curve — a placed layer's picture too —)
+                const auto eight = [&] {
+                    if (std::optional<Image> by_curve = eight_bits_of_32(file, item)) return std::move(*by_curve);
+                    return file.image(item);
+                };
                 const Image picture = way.converting ? import_profile::taken(numbers_of(merged ? *merged : file.image(item)), way, page)
                                                      : merged ? *merged
-                                                              : file.image(item);
+                                                              : eight();
                 canvas.paste(same_size ? picture : picture.resize(shown, Resample::Lanczos), paste_corner(where));
                 layer.raster_png = fills::png_bytes(canvas);
                 layer.raster_relpath = raster::page_folder(page) + "/user-" + layer.id + ".png";

@@ -1685,9 +1685,9 @@ private slots:
     }
 
     // P2-2: a 32-bit file onto a page of another depth comes in as before F-d (onto a 16-bit page at 8 bits, its values past
-    // 1 no refusal; onto the 8-bit page encoded by 1/2.2 as before); onto a 32-bit page in sRGB its linear values encoded
-    // by the page's curve, sRGB's (the user's decision of 2026-10-28: the inverse of the 32-bit PSD this build writes,
-    // before it 1/2.2); onto a page of linear light as they are.
+    // 1 no refusal); onto a 32-bit page in sRGB its linear values encoded by the page's curve, sRGB's, and onto the 8-bit
+    // page by the file's (none: sRGB's) and rounded — the user's decision of 2026-10-28 and Z0's review P2-1: the inverse
+    // of the 32-bit PSD this build writes, before it 1/2.2 (Python's view still so) —; onto a page of linear light as they are.
     void thirtyTwoBitFilesComeInAsBefore() {
         namespace core = genko::core;
         const genko::core::CommandBus bus(genko::render::ops_registry());
@@ -1729,7 +1729,7 @@ private slots:
                     const double v = below["values"][std::to_string(ch)][static_cast<std::size_t>(y * 8 + x)].get<double>();
                     const double want = genko::core::linear_to_srgb(v);
                     QVERIFY2(std::fabs(px[static_cast<std::size_t>(ch)] - want) < 1e-5, (std::to_string(px[static_cast<std::size_t>(ch)]) + " for " + std::to_string(want)).c_str());
-                    const double in_8_bits = std::pow(std::max(0.0, v), 1 / 2.2);
+                    const double in_8_bits = genko::core::linear_to_srgb(v);  // (the 8-bit page's too: Z0's review P2-1)
                     QVERIFY(std::fabs(std::min(1.0, in_8_bits) * 255 - shown[static_cast<std::size_t>(ch)]) <= 1.0);
                 }
             }

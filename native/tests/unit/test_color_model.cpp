@@ -1196,6 +1196,20 @@ private slots:
             }
             QVERIFY(curve.decode(1.5) > 1.5 && std::fabs(curve.encode(curve.decode(1.5)) - 1.5) < 1e-9);  // (an HDR lightness by the same formula, both ways)
         }
+        // a page value whose linear light is past the float's range (1e17: about 1e40): written as the float's largest, and
+        // the PSD read back by this build (Z0's review P3-2)
+        {
+            core::Document doc = run_ops(small_book(), Json::array({raster_op(std::vector<std::array<double, 3>>(1, std::array<double, 3>{1e17, 0.5, 0.5})), Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 32}}}))
+                                     .doc;
+            const std::string bytes = one_psd(doc, "huge");
+            const auto merged = render::psd::File::read(bytes).merged_deep();
+            QVERIFY(merged);
+            float most = 0;
+            for (const float v : merged->samples) most = std::max(most, v);
+            QCOMPARE(most, std::numeric_limits<float>::max());
+            const core::Document back = import_back(doc, bytes);
+            QVERIFY(titled(back, "back-").color_raster != nullptr);
+        }
         // 16 bits: the page's values as they are (rounded), not made linear
         {
             core::Document doc = run_ops(small_book(), Json::array({raster_op({stripes[0], stripes[1], stripes[2]}),

@@ -18,6 +18,7 @@
 #include <cstring>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <string>
 
@@ -548,6 +549,20 @@ private slots:
         QVERIFY(std::abs(deep.samples[1] - core::linear_to_srgb(2.0)) < 1e-6);
         QCOMPARE(render::smart::look_at(bytes, "").mode, std::string("gray"));
         QCOMPARE(render::smart::look_at(bytes, "").depth, 32);
+        {  // (a NaN read as 0, as before; a value past the float's range after the curve kept finite)
+            build::File odd = grey;
+            const float nan = std::numeric_limits<float>::quiet_NaN(), huge = std::numeric_limits<float>::max();
+            std::uint32_t n = 0, h = 0;
+            std::memcpy(&n, &nan, 4);
+            std::memcpy(&h, &huge, 4);
+            std::string odd_plane;
+            build::u32(odd_plane, n);
+            build::u32(odd_plane, h);
+            odd.merged = {odd_plane};
+            const render::smart::DeepPicture read = render::smart::deep_picture(build::bytes(odd));
+            QCOMPARE(read.samples[0], 0.0f);
+            QVERIFY(std::isfinite(read.samples[1]) && read.samples[1] > 1.0f);
+        }
         // a suffix that is not its kind, and a PSD that cannot be read, refused
         QVERIFY_THROWS_EXCEPTION(core::Error, render::smart::look_at(bytes, ".png"));
         QVERIFY_THROWS_EXCEPTION(core::Error, render::smart::look_at(bytes.substr(0, 30), ""));
