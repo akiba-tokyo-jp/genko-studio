@@ -253,9 +253,9 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
     if (page() == nullptr || event->button() != Qt::LeftButton) return;
     if (work_ && work_->press && work_->press(mm_of(pos), event->modifiers())) return;  // (PC4 D4: the work over the page first)
     if (guide_press(event->position())) return;  // (a guide line pulled from a scale: canvas_scale.cpp)
-    if (guide_grab(event->position(), event->modifiers())) return;  // (PC5 H-b: a guide placed — canvas_guide_lines.cpp)
     const QPointF mm = mm_of(pos);
     if (transform_press(pos, mm, event->modifiers())) return;  // (自由変形 and the warps' box: canvas_transform.cpp)
+    if (guide_grab(event->position(), event->modifiers())) return;  // (PC5 H-b: a guide placed, not while transforming — canvas_guide_lines.cpp)
     press_pos_ = pos;
     forget_snap();
     snap_moving.clear();  // (the move tool's are given again as its drag starts)
