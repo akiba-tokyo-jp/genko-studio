@@ -400,7 +400,10 @@ private slots:
         // frame's attribute made real) — test_gui_layer_comps.
         // and the 1 of PC5 I-b (SPEC AUTO-01「グループ」) — レイヤー → 新規 → レイヤーからのフレーム… (act_layer_frame) —
         // test_gui_layers.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{637});
+        // and the 5 of PC5 I-d (SPEC AUTO-01「変数とデータセット」) — ページ → 変数 ▸ 定義…・データセット…, データセットを適用…,
+        // ファイル → 書き出し → データセットからファイル…, ファイル → 読み込み → 変数データセット… (act_variables_define,
+        // act_variables_data_sets, act_apply_data_set, act_data_sets_to_files, act_import_data_sets) — test_gui_variables.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{642});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -471,7 +474,8 @@ private slots:
                               QStringLiteral("復帰"), QStringLiteral("|"), QStringLiteral("書き出し ▸"), QStringLiteral("|"), QStringLiteral("埋め込みを配置…"),
                               QStringLiteral("リンクを配置…"), QStringLiteral("パッケージ…"), QStringLiteral("|"), QStringLiteral("画像を読み込む…"),
                               QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"), QStringLiteral("ほかの原稿のページを取り込む…"),
-                              QStringLiteral("PSD をレイヤーのまま読み込む…"), QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|"),
+                              QStringLiteral("PSD をレイヤーのまま読み込む…"), QStringLiteral("読み込み ▸"),  // (PC5 I-d: 読み込み ▸ 変数データセット…)
+                              QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|"),
                               QStringLiteral("プリント…"), QStringLiteral("|"), QStringLiteral("タイムラプスを記録する"), QStringLiteral("タイムラプスを書き出す…"),
                               QStringLiteral("|"), QStringLiteral("自動処理 ▸"), QStringLiteral("スクリプト ▸"), QStringLiteral("オートアクション ▸"),
                               QStringLiteral("|"), QStringLiteral("終了")}));  // (PC5 H-0: 環境設定 in 編集)
@@ -485,7 +489,8 @@ private slots:
                                              QStringLiteral("書き出しの環境設定…"), QStringLiteral("|"), QStringLiteral("Web 用に保存（従来）…"), QStringLiteral("|"),
                                              QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("レイヤーからファイル…"),
                                              QStringLiteral("レイヤーカンプからファイル…"),  // (PC5 J-a)
-                                             QStringLiteral("パスを Illustrator へ…"), QStringLiteral("カラールックアップテーブル…")}));
+                                             QStringLiteral("パスを Illustrator へ…"), QStringLiteral("カラールックアップテーブル…"),
+                                             QStringLiteral("データセットからファイル…")}));  // (PC5 I-d)
         // (PC5 H-0: no key in the Photoshop key set — Ctrl+E is 下のレイヤーと結合; Ctrl+E in the Genko set, theKeySets)
         QVERIFY(studio.act("act_export")->shortcuts().isEmpty());
         QCOMPARE(studio.act("act_print")->text(), QStringLiteral("プリント…"));

@@ -297,6 +297,10 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - グループとフレーム（PC5 I-b、groups@1）:
   - `crates/compose/src/lib.rs`（511-560 行: グループの中を何も無い上に描く `render_content`、824-878 行: 通過のグループ — 前と後の間を不透明度 × マスクで混ぜる式）→ `native/src/render/page.cpp`（`ColorGroups`・`InkGroups`。8 bit・高精度・インキの 3 つの道への配線、帯ごとの描画、グループにクリップしたレイヤーをグループの形で切ることは Genko のもの）・`native/src/render/color_canvas.cpp`・`native/src/render/ink_canvas.cpp`（`mix_back`）。`crates/compose/src/tests.rs`（137-170 行: 通過と分離の違い・不透明度は 1 回・通過の不透明度の混ぜ）の試験の考え → `native/tests/unit/test_groups.cpp`。
   - `crates/engine/src/frame_cmds.rs`（1-60 行: レイヤーからのフレーム — まとめて外接の長方形で切る）→ `native/src/render/ops_groups.cpp`（`frame_from_layers`。上流の画素のマスクの代わりにベクトルマスクにしたのは Genko のもの）。
+- 変数とデータセット（PC5 I-d、variables@1）:
+  - `crates/doc/src/variables.rs`（`Variables`・`VariableDef`・`VarKind`・`PixelMethod`・`PixelAlign`・`DataSet`・`DataValue`）→ `native/src/core/variables.{hpp,cpp}`（本に持つ正規形・台詞を名指す定義・置く箱・画像の値を本の素材にすること・上限は Genko のもの）。
+  - `crates/engine/src/variables_cmds.rs`（26-125 行: 定義・データセットの読み、155-262 行: `apply_to_doc`・`replace_pixels` — 方法と 9 つの配置とクリップ、270-352 行: `import_data_sets`・`split_csv`、354-395 行: `export_as_files` の名前の形）→ `native/src/render/ops_variables.{hpp,cpp}`（op の名前と引数、各変更を Genko の op の決まりで通すこと、8 bit・高精度・インキの層の格子への配線、置く箱を定義のときに決めることは Genko のもの）・`native/src/formats/datasets.{hpp,cpp}`（引用の中の改行・タブの自動・名前の列の見出しの日本語・画像のファイルを素材にすることは Genko のもの）。`crates/engine/src/variables_cmds/tests.rs` の試験の考え → `native/tests/unit/test_variables.cpp`・`native/tests/contract/test_contract_variables.cpp`。
+  - `crates/format/src/manifest.rs`（`variables`）→ `native/src/render/pcraft_variables.{hpp,cpp}`。
 
 ## 表示・窓・環境設定（PC5 節 H）
 

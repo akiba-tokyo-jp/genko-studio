@@ -143,6 +143,11 @@ private slots:
             QVERIFY2(alpha_at(doc, 29, 29) > 0.99, way.c_str());   // (conform: the whole box)
             QCOMPARE(core::variables_of(doc).active, std::optional<std::int64_t>(0));
         }
+        // an empty paint layer of a 16-bit page: the picture kept at the page's depth
+        core::Document deep = run(book("16"), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "blank"}});
+        deep = replaced(deep, "conform", "center", false, "blank");
+        QVERIFY(layer(deep, "blank").color_raster != nullptr && layer(deep, "blank").raster_png == nullptr);
+        QVERIFY(alpha_at(deep, 1, 1, "blank") > 0.99);
     }
 
     // PhotoCraft's methods and places: an 8 × 4 picture (2.032 × 1.016 mm at 100 dpi) in the 20 mm box 10..30.

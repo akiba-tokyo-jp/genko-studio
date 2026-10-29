@@ -10,6 +10,7 @@
 #include <set>
 
 #include "core/base64.hpp"
+#include "core/color_raster.hpp"
 #include "core/error.hpp"
 #include "core/ink.hpp"
 #include "core/ops_util.hpp"
@@ -363,7 +364,15 @@ void replace_pixels(OpContext& c, std::size_t at, const core::VariableDef& def, 
     if (c.doc.strict_gates && layer.role != core::LayerRole::Name && layer.role != core::LayerRole::Draft && layer.exportable && !page.name_ok) {
         throw OpError("variable " + def.name + ": a printed layer's pixels change only after name_ok on page " + page.index.repr() + " (strict_gates)");
     }
-    const image_ops::Pixels target = image_ops::layer_pixels(c, at, *def.layer);
+    image_ops::Pixels target = image_ops::layer_pixels(c, at, *def.layer);
+    // (a paint layer of 8 bits on a precise page — an empty one —: the picture kept at the page's depth, as a new layer is made
+    // there; its old pixels are replaced whole)
+    const bool deepen = target.kind() == image_ops::Pixels::Kind::Eight && !page.color && page.rgb && page.rgb->depth > 8;
+    if (deepen) {
+        image_ops::Pixels deep(image_ops::Pixels::Kind::Precise, target.width(), target.height(), 3);
+        deep.floating = page.rgb->depth == 32;
+        target = std::move(deep);
+    }
     const image_ops::Pixels source = picture_pixels(bytes, page, target);
     const double page_w = page.spec.width_mm.value();
     const double page_h = page.spec.height_mm.value();
@@ -412,6 +421,16 @@ void replace_pixels(OpContext& c, std::size_t at, const core::VariableDef& def, 
         }
     }
     image_ops::put_layer_pixels(c.doc, at, *def.layer, out);
+    if (deepen) {
+        core::Page& edited = c.doc.edit_page(at);
+        core::Layer& made = edited.layers[core::layer_by_id(edited, *def.layer)];
+        made.raster_png = nullptr;  // (its pixels the precise ones now)
+        made.raster_memo = {};
+        made.raster_relpath.reset();
+        if (std::find(c.doc.features.begin(), c.doc.features.end(), core::kColorRasterFeature) == c.doc.features.end()) {
+            c.doc.features.emplace_back(core::kColorRasterFeature);
+        }
+    }
 }
 
 void apply_data_set_op(OpContext& c) {
