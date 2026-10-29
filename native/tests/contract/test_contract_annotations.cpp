@@ -20,6 +20,7 @@
 #include <string>
 
 #include "core/annotations.hpp"
+#include "core/base64.hpp"
 #include "core/command_bus.hpp"
 #include "core/json.hpp"
 #include "formats/export.hpp"
@@ -28,6 +29,7 @@
 #include "formats/pcraft_write.hpp"
 #include "render/ops_registry.hpp"
 #include "render/psd.hpp"
+#include "storage/reader.hpp"
 #include "testsupport.hpp"
 
 using namespace genko;
@@ -264,6 +266,64 @@ private slots:
     }
 
     // .pcraft: written and read back; upstream's reader reads it.
+    // (the review's P1-1) A book of before J-c — its page keeping a PSD's Anno (a text note and a sound note) it never read,
+    // no notes of its own —: written to a PSD, Anno as it was; a note added, the page's note first and then every note of
+    // the kept block as it was (its text note not lost). The same for a block this build did not read (the page held notes).
+    void keptBlocksNotRead() {
+        const QString made = path(QStringLiteral("before.psd"));
+        QVERIFY(!notes_tool({QStringLiteral("make"), made}).contains("error"));
+        formats::Opened opened = formats::open_file(genko::test::read_bytes(made), "before.psd");
+        core::Document before = opened.doc;
+        auto& p = before.edit_page(0);
+        p.annotations.clear();  // (as the C++ build before J-c kept it: the block, no notes, no mark)
+        p.native_psd->copied.clear();
+        QCOMPARE(anno_of(export_psd(before, QStringLiteral("before-again.psd"))), anno_of(made));
+        const core::Document added = run(before, op("add_annotation", {{"at_mm", Json::array({1, 1})}, {"text", "足した"}}));
+        const Json view = notes_view(export_psd(added, QStringLiteral("before-added.psd")));
+        QVERIFY2(view["notes"].is_array() && view["notes"].size() == 3, view.dump().c_str());
+        QCOMPARE(view["notes"][0]["text"], Json("足した"));
+        const Json was = notes_view(made);
+        QCOMPARE(view["notes"][1]["data"], was["notes"][0]["data"]);  // (the file's text note, as it was)
+        QCOMPARE(view["notes"][1]["text"], Json("音声の前\n2 行目"));
+        QCOMPARE(view["notes"][2]["kind"], Json("sndM"));
+        QCOMPARE(view["notes"][2]["data"], was["notes"][1]["data"]);
+    }
+
+    // (the review's P1-2, P2-1) A PSD whose note lies far past its canvas, and one whose text has a surrogate without its
+    // pair: opened, saved, opened again — not read-only, the note inside the paper, U+FFFD in its text.
+    void oddFilesOpenAndSave() {
+        for (const char* kind : {"far", "odd"}) {
+            const QString made = path(QStringLiteral("%1.psd").arg(QString::fromLatin1(kind)));
+            QVERIFY(!notes_tool({QStringLiteral("make-%1").arg(QString::fromLatin1(kind)), made}).contains("error"));
+            formats::Opened opened = formats::open_file(genko::test::read_bytes(made), std::string(kind) + ".psd");
+            const core::Page& page = opened.doc.page(0);
+            QCOMPARE(page.annotations.size(), std::size_t(1));
+            const core::Annotation& a = page.annotations[0];
+            QVERIFY(a.at_mm[0] >= 0 && a.at_mm[0] <= page.spec.width_mm.value() && a.at_mm[1] >= 0 && a.at_mm[1] <= page.spec.height_mm.value());
+            if (std::string(kind) == "odd") QCOMPARE(a.text, std::string("a\xEF\xBF\xBD" "b"));
+            const QString book = path(QStringLiteral("%1.genko").arg(QString::fromLatin1(kind)));
+            genko::test::write_project(opened.doc, fs::path(book.toStdString()));
+            const auto loaded = genko::storage::load_document(fs::path(book.toStdString()));
+            QVERIFY2(loaded.document.read_only_reason.empty(), loaded.document.read_only_reason.c_str());
+            QCOMPARE(loaded.document.page(0).annotations.size(), std::size_t(1));
+        }
+    }
+
+    // (the review's P2-3) A PSD's notes brought in by an agent's import_psd are the agent's (★, it may change them); by a
+    // person's, the person's.
+    void importedByAnAgent() {
+        const QString made = path(QStringLiteral("agent.psd"));
+        QVERIFY(!notes_tool({QStringLiteral("make"), made}).contains("error"));
+        const Json import{{"op", "import_psd"}, {"page", 1}, {"psd", core::b64encode(genko::test::read_bytes(made))}, {"fit", "paper"}};
+        const core::Document by_agent = run(book(), import, "ai:claude");
+        QCOMPARE(by_agent.page(0).annotations.size(), std::size_t(1));
+        QCOMPARE(by_agent.page(0).annotations[0].actor, std::string("ai:claude"));
+        const core::Document changed = run(by_agent, op("set_annotation", {{"id", by_agent.page(0).annotations[0].id}, {"text", "AI が直した"}}), "ai:claude");
+        QCOMPARE(changed.page(0).annotations[0].text, std::string("AI が直した"));
+        const core::Document by_person = run(book(), import, "human:ann");
+        QCOMPARE(by_person.page(0).annotations[0].actor, std::string("human:ann"));
+    }
+
     void pcraftNotes() {
         const core::Document doc = noted();
         std::vector<std::string> notes;

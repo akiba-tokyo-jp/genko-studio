@@ -6,6 +6,7 @@
 
 #include <QtTest>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 
@@ -194,6 +195,15 @@ private slots:
         QVERIFY(!refusal(doc, op("set_annotation", {{"id", agent}, {"text", "y"}}), "ai:claude").empty());
         doc = run(doc, op("delete_annotations", {{"ids", Json::array({person, agent})}}), "human:ann");
         QCOMPARE(doc.page(0).annotations.size(), std::size_t(1));
+        // (the review's P3-1: a person who moves an agent's note makes it the person's — no agent puts it back)
+        doc = run(doc, op("add_annotation", {{"at_mm", Json::array({7, 7})}}), "ai:claude");
+        const std::string moved = doc.page(0).annotations.back().id;
+        doc = run(doc, op("set_annotation", {{"id", moved}, {"at_mm", Json::array({8, 8})}}), "human:ann");
+        QCOMPARE(doc.page(0).annotations.back().actor, std::string("human:ann"));
+        QVERIFY(!refusal(doc, op("set_annotation", {{"id", moved}, {"at_mm", Json::array({7, 7})}}), "ai:claude").empty());
+        // (the review's P3-9: all: false beside ids is as none)
+        doc = run(doc, op("delete_annotations", {{"ids", Json::array({moved})}, {"all", false}}), "human:ann");
+        QVERIFY(std::none_of(doc.page(0).annotations.begin(), doc.page(0).annotations.end(), [&](const core::Annotation& a) { return a.id == moved; }));
         // (another name of a caller that cannot approve: an agent's note)
         QCOMPARE(render::annotations::writer_of(core::Actor("legacy:unknown")), std::string("ai:legacy:unknown"));
         QCOMPARE(render::annotations::writer_of(core::Actor("human")), std::string("genko"));
@@ -243,10 +253,10 @@ private slots:
         QCOMPARE(n.popup_px, (std::array<double, 4>{8, 2, 60, 40}));
         QCOMPARE(n.modified, std::string("2021-05-21T22:10:29Z"));  // (+01:00)
         QVERIFY(!(*notes)[1].is_text);
-        QCOMPARE((*notes)[1].raw, sound_note());
+        QCOMPARE(raw.substr((*notes)[1].at, (*notes)[1].length), sound_note());  // (where it is: its bytes not copied)
         // written again: the sound note's bytes as they were; the text note as PhotoCraft writes one (its name "", its
         // date with Z, its icon 16 × 20)
-        const std::string again = pa::block(*notes);
+        const std::string again = pa::block(*notes, raw);
         const auto back = pa::parse(again);
         QVERIFY(back);
         QCOMPARE((*back)[0].text, n.text);
@@ -254,7 +264,11 @@ private slots:
         QCOMPARE((*back)[0].modified, n.modified);
         QCOMPARE((*back)[0].popup_px, n.popup_px);
         QVERIFY(again.ends_with(sound_note()));
-        QCOMPARE(pa::block(*back), again);  // (stable)
+        QCOMPARE(pa::block(*back, again), again);  // (stable)
+        // (a text note as read: its bytes, not written anew)
+        std::vector<pa::FileNote> as_read = *notes;
+        as_read[0].as_read = true;
+        QCOMPARE(pa::block(as_read, raw), raw);
         // dates
         QCOMPARE(pa::utc_of_pdf_date("D:20211231233000-02'30'"), std::string("2022-01-01T02:00:00Z"));
         QCOMPARE(pa::utc_of_pdf_date("D:20200101000000Z"), std::string("2020-01-01T00:00:00Z"));
@@ -265,6 +279,22 @@ private slots:
         QCOMPARE(pa::pdf_date_of(""), std::string());
         // a block cut short: none
         QVERIFY(!pa::parse(raw.substr(0, raw.size() - 3)));
+        // (the review's P2-2: more than 4096 notes of any kind — the block kept as it is, not read)
+        std::vector<std::string> many(4097, sound_note());
+        QVERIFY(!pa::parse(anno(many)));
+        many.pop_back();
+        QVERIFY(pa::parse(anno(many)) && pa::parse(anno(many))->size() == 4096);
+        // (the review's P2-1: a surrogate without its pair is U+FFFD, and the notes can be written)
+        const std::string text = std::string("\xFE\xFF", 2) + u16('a') + u16(0xD800) + u16('b') + u16(0xDC00);
+        std::string odd = std::string("txtA") + '\x00' + '\x00' + u16(1);
+        for (int k = 0; k < 8; ++k) odd += u32(0);
+        odd += u16(0) + u16(0) + u16(0) + u16(0) + u16(0) + std::string(2, '\0') + std::string(2, '\0') + std::string(2, '\0');
+        odd += u32(static_cast<unsigned>(text.size() + 12)) + "txtC" + u32(static_cast<unsigned>(text.size())) + text;
+        const auto odd_notes = pa::parse(anno({u32(static_cast<unsigned>(odd.size() + 4)) + odd}));
+        QVERIFY(odd_notes);
+        QCOMPARE((*odd_notes)[0].text, std::string("a\xEF\xBF\xBD" "b\xEF\xBF\xBD"));
+        const auto odd_page = pa::notes_of(*odd_notes, {1, 0, 0, 1, 0, 0}, {});
+        QVERIFY(!core::to_json(odd_page).dump().empty());
         QVERIFY(!pa::parse(std::string("\x00\x02\x00\x01\x00\x00\x00\x09", 8)));
         // the page's notes from the file's (mm a pixel 0.5)
         const auto made = pa::notes_of(*notes, {0.5, 0, 0, 0.5, 0, 0}, {});
@@ -308,6 +338,55 @@ private slots:
         QCOMPARE(again[0].at_mm, notes[0].at_mm);
         QCOMPARE(again[0].text, notes[0].text);
         QCOMPARE(again[0].color, notes[0].color);
+    }
+
+    // (the review's P1-2) What a file brings is what the book's reader takes: a note far past the page pulled inside the
+    // paper (its box past a page's places the default), an author cut to 1024 bytes by whole characters; the checks the
+    // writer and the reader share refuse the rest. (P2-3) A note read while an op's actor reads is that actor's.
+    void filesNotesAreTheBooks() {
+        core::Annotation far;
+        far.id = "an_0123456789ab";
+        far.at_mm = {1.27e7, -5};
+        far.popup_mm = std::array<double, 4>{1.3e7, 0, 3e7, 10};
+        far.modified = "";
+        std::string author;
+        for (int i = 0; i < 400; ++i) author += "あ";  // (1200 bytes)
+        far.author = author;
+        bool refused = false;
+        try {
+            core::check_annotations({far});
+        } catch (const core::Error&) {
+            refused = true;
+        }
+        QVERIFY(refused);
+        render::annotations::pull_inside(far, 100, 80);
+        QCOMPARE(far.at_mm, (std::array<double, 2>{96, 0}));
+        QVERIFY(!far.popup_mm);
+        QCOMPARE(far.author.size(), std::size_t(1023));  // (341 whole characters)
+        core::check_annotations({far});
+        QCOMPARE(core::annotations_from_json(core::to_json(std::vector<core::Annotation>{far}))[0], far);
+        // a .pcraft's: far and a long author, read onto a page — inside it
+        const Json value = Json::array({Json{{"text", "遠い"}, {"author", author}, {"position", Json::array({1e9, 5})}, {"popup", Json::array({0, 0, 1e300, 1e300})}}});
+        core::Page page;
+        page.spec = core::PageSpec::custom(100, 80, 20, 20, 1, 2, 2, 2, 2, 200, "color");
+        render::pcraft_production::ReadContext ctx;
+        ctx.page = &page;
+        ctx.mm = 25.4 / 72;
+        std::vector<std::string> said;
+        ctx.say = [&said](std::string s) { said.push_back(std::move(s)); };
+        render::pcraft_annotations::read(value, ctx);
+        QVERIFY2(said.empty(), said.empty() ? "" : said[0].c_str());
+        QCOMPARE(page.annotations.size(), std::size_t(1));
+        QCOMPARE(page.annotations[0].at_mm[0], 96.0);
+        QVERIFY(!page.annotations[0].popup_mm);
+        core::check_annotations(page.annotations);
+        QCOMPARE(page.annotations[0].actor, std::string("genko"));
+        // (read while an agent's op reads: the agent's)
+        {
+            const render::annotations::ReadingActor reader(core::Actor("ai:claude"));
+            QCOMPARE(render::pcraft_annotations::notes_of(value, 1.0)[0].actor, std::string("ai:claude"));
+        }
+        QCOMPARE(render::pcraft_annotations::notes_of(value, 1.0)[0].actor, std::string("genko"));
     }
 
     // ファイル → 読み込み → 注釈…'s ops: each mark inside the paper, its box along; the page's room.

@@ -5,6 +5,8 @@ note, whose bytes Genko keeps).
 
     <reference python> tools/migration/psd_notes_check.py view OUT.json FILE
     <reference python> tools/migration/psd_notes_check.py make OUT.psd
+    <reference python> tools/migration/psd_notes_check.py make-far OUT.psd    (the text note's icon and box far past the canvas)
+    <reference python> tools/migration/psd_notes_check.py make-odd OUT.psd    (its text a surrogate without its pair)
 """
 
 import json
@@ -21,7 +23,7 @@ from psd_tools.psd.tagged_blocks import Annotation, Annotations, TaggedBlock
 
 def text_of(data: bytes) -> str:
     if data[:2] == b"\xfe\xff":
-        text = data[2:].decode("utf-16-be")
+        text = data[2:].decode("utf-16-be", errors="replace")
     else:
         text = data.decode("latin-1")
     return text.rstrip("\x00").replace("\r\n", "\n").replace("\r", "\n")
@@ -54,13 +56,17 @@ def view(path: str) -> dict:
     return out
 
 
-def make(path: str) -> None:
+def make(path: str, variant: str = "") -> None:
     psd = PSDImage.new("RGB", (40, 30), color=(255, 255, 255), depth=8)
     psd.append(PixelLayer.frompil(Image.new("RGB", (10, 8), (200, 40, 40)), psd, "layer", top=4, left=6))
     text = "﻿音声の前\r2 行目".encode("utf-16-be")
+    if variant == "odd":
+        text = "﻿a".encode("utf-16-be") + b"\xd8\x00" + "b".encode("utf-16-be")
+    icon = [4, 6, 24, 22] if variant != "far" else [50, 100000000, 70, 100000016]
+    popup = [10, 30, 100, 200] if variant != "far" else [-2000000000, 100000000, 2000000000, 100000300]
     notes = Annotations(items=[
-        Annotation(kind=b"txtA", is_open=1, flags=28, optional_blocks=1, icon_location=[4, 6, 24, 22],
-                   popup_location=[10, 30, 100, 200], color=Color(ColorSpaceID.RGB, [65535, 0, 0, 0]), author="tester", name="",
+        Annotation(kind=b"txtA", is_open=1, flags=28, optional_blocks=1, icon_location=icon,
+                   popup_location=popup, color=Color(ColorSpaceID.RGB, [65535, 0, 0, 0]), author="tester", name="",
                    mod_date="D:20240102030405Z", marker=b"txtC", data=text),
         Annotation(kind=b"sndM", is_open=0, flags=0, optional_blocks=1, icon_location=[20, 20, 40, 36],
                    popup_location=[0, 0, 0, 0], color=Color(ColorSpaceID.RGB, [0, 0, 65535, 0]), author="voice", name="",
@@ -77,8 +83,8 @@ def make(path: str) -> None:
 
 def main() -> int:
     mode, out_path = sys.argv[1], sys.argv[2]
-    if mode == "make":
-        make(out_path)
+    if mode.startswith("make"):
+        make(out_path, mode[5:])
         return 0
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(view(sys.argv[3]), f, ensure_ascii=False)
