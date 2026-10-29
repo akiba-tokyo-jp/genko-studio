@@ -1237,7 +1237,9 @@ private slots:
                                            "rasterize_video", "footage_to_layers",
 
                                            // (PC5 I-b: groups@1, レイヤーからのフレーム — SPEC AUTO-01)
-                                           "frame_from_layers"};
+                                           "frame_from_layers",
+                                           // (PC5 H-b: 新規ガイドレイアウトを作成 — SPEC VIEW-01)
+                                           "add_guide_layout"};
         for (const std::string& name : genko::render::ops_registry().names()) {
             if (listed.count(name) == 0 && own.count(name) == 0) missing += (missing.empty() ? "" : ", ") + name;
         }

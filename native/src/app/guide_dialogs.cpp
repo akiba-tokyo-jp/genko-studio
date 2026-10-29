@@ -231,7 +231,8 @@ Json GuideLayoutDialog::fields() const {
 
 Json GuideLayoutDialog::op() const {
     Json op{{"op", "add_guide_layout"}, {"page", page_.index.json()}};
-    for (const auto& [key, value] : fields().items()) op[key] = value;
+    const Json chosen = fields();  // (held: a temporary's items() would outlive it)
+    for (const auto& [key, value] : chosen.items()) op[key] = value;
     return op;
 }
 

@@ -32,7 +32,7 @@ std::optional<QString> PageCanvas::scale_hit(const QPointF& widget) const {
 bool PageCanvas::guide_press(const QPointF& widget) {
     const auto axis = scale_hit(widget);
     if (!axis) return false;
-    guide_drag_ = GuideDrag{*axis, std::nullopt};
+    guide_drag_ = GuideDrag{*axis, std::nullopt, std::nullopt, false};
     return true;
 }
 
@@ -57,12 +57,12 @@ bool PageCanvas::guide_release(const QPointF& widget) {
         const bool moved = drag.at && was && std::abs(*drag.at - *was) > 1e-9;
         const bool off = scale_hit(widget).has_value() || !QRectF(rect()).contains(widget);
         const QString id = QString::fromStdString(*drag.id);
-        if (!moved && drag.turn) {  // (Alt+click: turned about the point clicked)
+        if (off) {
+            emit guideRemoved(id);  // (let go on a scale or out of the view: taken away)
+        } else if (!moved && drag.turn) {  // (Alt+click: turned about the point clicked)
             const QPointF mm = to_mm(widget);
             const bool across = drag.axis != QLatin1String("h");
             emit rulerEdited(id, Json{{"axis", across ? "h" : "v"}, {"at", core::py_round(across ? mm.y() : mm.x(), 2)}});
-        } else if (moved && off) {
-            emit guideRemoved(id);  // (let go on a scale or out of the view: taken away)
         } else if (moved) {
             emit rulerEdited(id, Json{{"at", *drag.at}});
         }

@@ -274,9 +274,10 @@ private slots:
         const int guides = view.indexOf(QStringLiteral("仕上がり線・基本枠を表示"));
         // (PC5 H-0, 節 H 5.1: 表示 in Photoshop's order — 定規 (目盛りを表示 before), ブラシプレビュー and パターンプレビュー in their
         // places, test_gui_actions' theMenusOfPC5 —, Genko's own after a line)
-        QCOMPARE(view.mid(guides, 4), (QStringList{QStringLiteral("仕上がり線・基本枠を表示"), QStringLiteral("スマホの画面の範囲を表示"),
-                                                   QStringLiteral("選択範囲の境界線"), QStringLiteral("前のページを透かす（オニオンスキン）")}));
-        QVERIFY(view.indexOf(QStringLiteral("定規")) < guides && view.indexOf(QStringLiteral("ブラシプレビュー")) < view.indexOf(QStringLiteral("定規")));
+        // (PC5 H-b: 選択範囲の境界線 and ブラシプレビュー in 表示・非表示 ▸ — 選択範囲のエッジ —, before 定規)
+        QCOMPARE(view.mid(guides, 3), (QStringList{QStringLiteral("仕上がり線・基本枠を表示"), QStringLiteral("スマホの画面の範囲を表示"),
+                                                   QStringLiteral("前のページを透かす（オニオンスキン）")}));
+        QVERIFY(view.indexOf(QStringLiteral("定規")) < guides && view.indexOf(QStringLiteral("表示・非表示")) >= 0 && view.indexOf(QStringLiteral("表示・非表示")) < view.indexOf(QStringLiteral("定規")));
         const QStringList pages = menu_items(w, QStringLiteral("ページ"));
         // (Python's row: 台詞の検索・置換…, 本の形でプレビュー… (M6), 入稿前の点検)
         QCOMPARE(pages.indexOf(QStringLiteral("本の形でプレビュー…")), pages.indexOf(QStringLiteral("台詞の検索・置換…")) + 1);
@@ -1142,7 +1143,8 @@ private slots:
         op.erase("id");
         QCOMPARE(qs(op.dump()), qs(Json{{"op", "add_ruler"}, {"page", page_no}, {"kind", "guide"}, {"axis", "h"},
                                         {"at", core::py_round(c->to_mm(across).y(), 2)}}.dump()));
-        QCOMPARE(s.window->last_notice(), QStringLiteral("ガイド線を引きました。近くで描き始めた線が沿います（定規 → 選んだ定規を消す で消す）"));
+        // (PC5 H-b: a guide drawn now, moved with the move tool, taken away dragged off)
+        QCOMPARE(s.window->last_notice(), QStringLiteral("ガイドを引きました。移動ツールでドラッグして動かし、定規の上かキャンバスの外へ出すと消えます"));
         const QPointF down = c->to_widget(QPointF(30.5, 100.0));
         pull(QPointF(8, down.y()), down, down);
         QCOMPARE(s.ops.size(), std::size_t{2});

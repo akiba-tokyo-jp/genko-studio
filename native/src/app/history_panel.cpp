@@ -122,6 +122,8 @@ const std::map<std::string, const char*>& names() {
         {"set_camera_raw", "Camera Raw で現像の設定を変えた"},
         // (PC5 I-b, groups@1: render/ops_groups)
         {"frame_from_layers", "レイヤーからフレームを作った"},
+        // (PC5 H-b: core/ops_rulers)
+        {"add_guide_layout", "ガイドレイアウトを作った"},
         // (PC5 J-a, layer-comps@1: render/ops_layer_comps)
         {"new_layer_comp", "新規レイヤーカンプ"}, {"update_layer_comp", "レイヤーカンプを更新"}, {"apply_layer_comp", "レイヤーカンプを適用"},
         {"set_layer_comp", "レイヤーカンプオプション"}, {"duplicate_layer_comp", "レイヤーカンプを複製"}, {"delete_layer_comp", "レイヤーカンプを削除"},

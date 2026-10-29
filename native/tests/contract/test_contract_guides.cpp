@@ -50,7 +50,7 @@ struct Outcome {
     Json results = Json::array();
 };
 
-Outcome apply(const core::Document& doc, const Json& ops) {
+Outcome applied(const core::Document& doc, const Json& ops) {
     try {
         core::ApplyResult r = core::CommandBus(render::ops_registry()).apply(doc, ops, core::Actor("human:test"));
         return Outcome{true, {}, std::move(r.doc), std::move(r.results)};
@@ -60,7 +60,7 @@ Outcome apply(const core::Document& doc, const Json& ops) {
 }
 
 core::Document run(const core::Document& doc, const Json& op) {
-    Outcome r = apply(doc, Json::array({op}));
+    Outcome r = applied(doc, Json::array({op}));
     if (!r.ok) throw std::runtime_error(r.error);
     return std::move(r.doc);
 }
@@ -129,7 +129,7 @@ private slots:
     // PhotoCraft's own test (file_cmds/tests.rs guide_layouts) on a page of the same size in mm.
     void layoutAsUpstream() {
         core::Document doc = book();
-        Outcome r = apply(doc, Json::array({layout({{"columns", {{"count", 2}, {"gutter_mm", 10}}}, {"margin_mm", Json::array({5, 10, 5, 10})}})}));
+        Outcome r = applied(doc, Json::array({layout({{"columns", {{"count", 2}, {"gutter_mm", 10}}}, {"margin_mm", Json::array({5, 10, 5, 10})}})}));
         QVERIFY2(r.ok, r.error.c_str());
         doc = r.doc;
         QCOMPARE(guides(doc, 0, "v"), (std::vector<double>{10, 90, 45, 55}));
@@ -141,7 +141,7 @@ private slots:
         doc = run(doc, layout({{"columns", {{"count", 2}, {"width_mm", 20}, {"gutter_mm", 10}}}, {"center_columns", true}, {"clear", true}}));
         QCOMPARE(guides(doc, 0, "v"), (std::vector<double>{25, 45, 55, 75}));
         // (nothing to lay out: refused, the page as it was)
-        const Outcome none = apply(doc, Json::array({layout(Json::object())}));
+        const Outcome none = applied(doc, Json::array({layout(Json::object())}));
         QVERIFY(!none.ok);
         QVERIFY2(none.error.find("give columns, rows or a margin_mm") != std::string::npos, none.error.c_str());
     }
@@ -151,12 +151,12 @@ private slots:
         // (the guides already there are not put twice; the drawing rulers stay with clear)
         doc = run(doc, Json{{"op", "add_ruler"}, {"page", 1}, {"kind", "guide"}, {"axis", "v"}, {"at", 50}});
         doc = run(doc, Json{{"op", "add_ruler"}, {"page", 1}, {"kind", "line"}, {"points", Json::array({Json::array({1, 1}), Json::array({9, 9})})}});
-        Outcome r = apply(doc, Json::array({layout({{"columns", {{"count", 2}}}})}));
+        Outcome r = applied(doc, Json::array({layout({{"columns", {{"count", 2}}}})}));
         QVERIFY2(r.ok, r.error.c_str());
         QCOMPARE(guides(r.doc, 0, "v"), (std::vector<double>{50, 0, 100}));
         QCOMPARE(r.results.at(0).value("vertical", -1), 2);
         QCOMPARE(r.results.at(0)["rulers"].size(), std::size_t(2));
-        r = apply(r.doc, Json::array({layout({{"rows", {{"count", 1}}}, {"clear", true}})}));
+        r = applied(r.doc, Json::array({layout({{"rows", {{"count", 1}}}, {"clear", true}})}));
         QCOMPARE(kinds(r.doc, 0, "line"), std::size_t(1));
         QCOMPARE(guides(r.doc, 0, "h"), (std::vector<double>{0, 50}));
         // laid on the finished size and on the 基本枠: within their boxes
@@ -173,7 +173,7 @@ private slots:
         for (const Json& bad : {layout({{"columns", {{"count", -1}}}}), layout({{"columns", {{"count", 2}, {"width_mm", 0}}}}),
                                 layout({{"margin_mm", Json::array({1, 2})}}), layout({{"rows", {{"count", 1}}}, {"from", "sky"}}),
                                 layout({{"rows", {{"count", 1}}}, {"clear", "yes"}}), layout({{"columns", 3}})}) {
-            QVERIFY2(!apply(book(), Json::array({bad})).ok, bad.dump().c_str());
+            QVERIFY2(!applied(book(), Json::array({bad})).ok, bad.dump().c_str());
         }
         // (the dialog's preview asks the same function)
         const core::GuideLayout preview = core::guide_layout(book().page(0), layout({{"columns", {{"count", 2}, {"gutter_mm", 10}}}}));
@@ -196,7 +196,7 @@ private slots:
             QCOMPARE(kinds(every, p, "guide"), std::size_t(0));
             QCOMPARE(kinds(every, p, "line"), std::size_t(1));
         }
-        QVERIFY(!apply(doc, Json::array({Json{{"op", "delete_ruler"}, {"page", 1}, {"kind", "cloud"}}})).ok);
+        QVERIFY(!applied(doc, Json::array({Json{{"op", "delete_ruler"}, {"page", 1}, {"kind", "cloud"}}})).ok);
         const core::Document all = run(doc, Json{{"op", "delete_ruler"}, {"page", 1}});  // (as before: every ruler)
         QVERIFY(all.page(0).rulers.empty());
     }
@@ -233,11 +233,24 @@ private slots:
         const Json view = guides_view(file);
         QVERIFY2(!view.contains("error") && view["guides"].is_object(), view.dump().c_str());
         QCOMPARE(view["guides"]["version"], Json(1));
-        // (200 dpi: 25.4 mm is 200 px — 6400 in 1/32 —, 12.7 mm 100 px, −1.27 mm −10 px; upright first)
-        QCOMPARE(view["guides"]["items"], Json::parse("[[6400, 0], [3200, 1], [-320, 1]]"));
+        // (the file's canvas is the page's whole pixels at 200 dpi — 100 mm: 787 px, 50 mm: 394 px —; a guide's place is in
+        // 1/32 of them, rounded: 25.4 mm 6397, 12.7 mm 3202, −1.27 mm −320; upright first)
+        const double w_px = static_cast<double>(std::lround(100 / 25.4 * 200)), h_px = static_cast<double>(std::lround(50 / 25.4 * 200));
+        const Json want = Json::array({Json::array({std::lround(25.4 / 100 * w_px * 32), 0}), Json::array({std::lround(12.7 / 50 * h_px * 32), 1}),
+                                       Json::array({std::lround(-1.27 / 50 * h_px * 32), 1})});
+        QCOMPARE(want, Json::parse("[[6397, 0], [3202, 1], [-320, 1]]"));
+        QVERIFY2(view["guides"]["items"] == want, view.dump().c_str());
+        const auto near = [](const std::vector<double>& got, const std::vector<double>& wanted) {
+            if (got.size() != wanted.size()) return false;
+            for (std::size_t i = 0; i < got.size(); ++i)
+                if (std::abs(got[i] - wanted[i]) > 0.01) return false;  // (within the file's 1/32 px)
+            return true;
+        };
         formats::Opened opened = formats::open_file(genko::test::read_bytes(file), "guides.psd");
-        QCOMPARE(guides(opened.doc, 0, "v"), (std::vector<double>{25.4}));
-        QCOMPARE(guides(opened.doc, 0, "h"), (std::vector<double>{12.7, -1.27}));
+        // (opened, the page is the file's pixels at its 200 dpi: each guide where its 1/32 px is)
+        const auto mm_of = [](std::int64_t place) { return static_cast<double>(place) / 32.0 / 200.0 * 25.4; };
+        QVERIFY2(near(guides(opened.doc, 0, "v"), {mm_of(6397)}), Json(guides(opened.doc, 0, "v")).dump().c_str());
+        QVERIFY2(near(guides(opened.doc, 0, "h"), {mm_of(3202), mm_of(-320)}), Json(guides(opened.doc, 0, "h")).dump().c_str());
         // (written again from the book read: the same guides)
         const QString again = path(QStringLiteral("again.psd"));
         (void)formats::export_page_psd(opened.doc, opened.doc.page(0), fs::path(again.toStdString()), 200);
@@ -262,12 +275,6 @@ private slots:
         QVERIFY(psd_tools_adds(without, theirs, Json::parse("[[3200, 0], [-640, 1], [1600, 1]]")));
         formats::Opened read = formats::open_file(genko::test::read_bytes(theirs), "theirs.psd");
         const double mm_per_px = read.doc.page(0).spec.width_mm.value() / std::round(read.doc.page(0).spec.width_mm.value() / 25.4 * 200);
-        const auto near = [](const std::vector<double>& got, const std::vector<double>& want) {
-            if (got.size() != want.size()) return false;
-            for (std::size_t i = 0; i < got.size(); ++i)
-                if (std::abs(got[i] - want[i]) > 0.002) return false;
-            return true;
-        };
         QVERIFY2(near(guides(read.doc, 0, "v"), {100 * mm_per_px}), Json(guides(read.doc, 0, "v")).dump().c_str());
         QVERIFY2(near(guides(read.doc, 0, "h"), {-20 * mm_per_px, 50 * mm_per_px}), Json(guides(read.doc, 0, "h")).dump().c_str());
     }
