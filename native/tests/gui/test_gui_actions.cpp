@@ -413,7 +413,7 @@ private slots:
         // act_variables_data_sets, act_apply_data_set, act_data_sets_to_files, act_import_data_sets) — test_gui_variables.
         // and PC5 J-c's 3 — ツール → 注釈ツール (act_note), 表示 → 表示・非表示 → 注釈 (act_show_notes), ファイル → 読み込み →
         // 注釈… (act_import_notes); its ウィンドウ → 注釈 is the frame's attribute made real — test_gui_notes.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{674});  // (wip-pc's 669 and I-d's 5)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{676});  // (wip-pc's 669, I-d's 5 and G-c's 2)
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

@@ -22,10 +22,12 @@
 #include "app/layer_panel.hpp"
 #include "app/lettering.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "app/tool_settings.hpp"
 #include "core/ids.hpp"
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
+#include "core/type_styles.hpp"
 #include "core/type_text.hpp"
 #include "core/vector.hpp"
 #include "render/not_yet_ported.hpp"
@@ -151,6 +153,11 @@ void MainWindow::build_type_actions() {
          QStringLiteral("選んだテキストの段落を、語の切れ目（空白）で折り返し、禁則・約物の詰めをしない組み方にします（右から左の文字・南アジアの文字向け）"), true);
     make("act_type_rtl", QStringLiteral("右から左の段落"), [this] { type_set(Json{{"direction", action("act_type_rtl")->isChecked() ? "rtl" : "auto"}}); }, {},
          QStringLiteral("選んだテキストの段落を右から左に組みます（オフ: 最初の文字の向きに従う）"), true);
+    // PC5 G-c: 書式 → 初期設定の書式を読み込み・初期設定の書式を保存 (the formatting kept in the machine's settings, not the book)
+    make("act_type_load_defaults", QStringLiteral("初期設定の書式を読み込み"), [this] { load_default_type_styles(); }, {},
+         QStringLiteral("「初期設定の書式を保存」で覚えた書式（文字と段落の属性）を、選んだテキストレイヤー・台詞の文字全体に当てます（文字スタイル・段落スタイルは外れます）"));
+    make("act_type_save_defaults", QStringLiteral("初期設定の書式を保存"), [this] { save_default_type_styles(); }, {},
+         QStringLiteral("選んだテキストレイヤー・台詞の始めの文字の書式（文字と段落の属性）を、このパソコンの設定に覚えます（原稿には入りません）"));
     // (Genko's own: a line and a type layer each other's — 書式's last)
     make("act_line_to_type_layer", QStringLiteral("台詞をテキストレイヤーに"), [this] { line_to_type_layer(); }, {},
          QStringLiteral("選んだ台詞をテキストレイヤーにします（話者・読む順は外れ、レイヤーの並びの中＝コマ枠の下に描かれます）"));
@@ -201,6 +208,8 @@ void MainWindow::build_type_menu(QMenu* menu) {
     menu->addAction(action("act_type_update_all"));
     menu->addSeparator();
     menu->addAction(action("act_type_lorem"));
+    menu->addSeparator();
+    for (const char* name : {"act_type_load_defaults", "act_type_save_defaults"}) menu->addAction(action(name));  // (PC5 G-c)
     menu->addSeparator();
     for (const char* name : {"act_line_to_type_layer", "act_type_layer_to_line"}) menu->addAction(action(name));
 }
@@ -338,6 +347,64 @@ void MainWindow::refresh_type_commands() {
     action("act_type_composer_world")->setChecked(record != nullptr && para.value("composer", Json()) == Json("world"));
     action("act_type_rtl")->setEnabled(record != nullptr && record->wrap != "vertical");  // (down: Japanese alone)
     action("act_type_rtl")->setChecked(record != nullptr && para.value("direction", Json()) == Json("rtl"));
+    // PC5 G-c: 初期設定の書式 — kept from a text, laid on one
+    action("act_type_save_defaults")->setEnabled(record != nullptr);
+    action("act_type_load_defaults")->setEnabled(record != nullptr && preferences::default_type_styles().has_value());
+}
+
+// --- PC5 G-c: the styles (type_style) and the default formatting ----------------------------------------------------------
+
+std::optional<Json> MainWindow::type_style(const std::string& kind, const std::string& what, const Json& args, bool on_text) {
+    Json op{{"op", "type_style"}, {"kind", kind}, {"action", what}};
+    if (on_text) {
+        const std::optional<Json> target = type_target(true);
+        if (!target) return std::nullopt;
+        for (const auto& [key, value] : target->items()) op[key] = value;
+    }
+    for (const auto& [key, value] : args.items()) op[key] = value;
+    if (!apply_ops(Json::array({op}))) return std::nullopt;
+    refresh_type_commands();
+    refresh_type_frame();
+    for (const Json& result : last_results_) {
+        if (result.is_object() && result.value("op", Json()) == Json("type_style")) {
+            Json out = result;
+            out.erase("index");
+            out.erase("op");
+            return out;
+        }
+    }
+    return Json::object();
+}
+
+void MainWindow::save_default_type_styles() {
+    const std::optional<Json> target = type_target(true);
+    const core::StoryLine* record = target ? type_record(*target) : nullptr;
+    if (record == nullptr) return;
+    const Json* styles = book().type_styles ? &*book().type_styles : nullptr;
+    preferences::set_default_type_styles(core::type_styles::defaults_of(*record, styles));
+    refresh_type_commands();
+    flash(QStringLiteral("初期設定の書式を保存しました（このパソコンの設定。原稿には入りません）"), 4000);
+}
+
+void MainWindow::load_default_type_styles() {
+    const std::optional<Json> target = type_target(true);
+    if (!target) return;
+    const std::optional<Json> kept = preferences::default_type_styles();
+    if (!kept) {
+        flash(QStringLiteral("先に「初期設定の書式を保存」で書式を覚えます"), 4000);
+        return;
+    }
+    // (one step: the styles taken away and the text's own attributes cleared — 基本段落 and なし —, then the formatting laid on
+    // the whole text, as Photoshop's is: the text looks as the one it was kept from)
+    Json clear{{"op", "type_style"}, {"kind", "paragraph"}, {"action", "apply"}, {"clear_overrides", true}};
+    Json none{{"op", "type_style"}, {"kind", "character"}, {"action", "apply"}};
+    Json set{{"op", "set_type"}, {"char", (*kept)["char"]}, {"para", (*kept)["para"]}};
+    for (Json* op : {&clear, &none, &set}) {
+        for (const auto& [key, value] : target->items()) (*op)[key] = value;
+    }
+    apply_ops(Json::array({clear, none, set}));
+    refresh_type_commands();
+    refresh_type_frame();
 }
 
 void MainWindow::type_set(const Json& attrs) {

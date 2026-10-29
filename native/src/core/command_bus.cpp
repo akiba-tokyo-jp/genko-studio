@@ -393,6 +393,19 @@ void OpRegistry::add_query(std::string name, OpFunction function) {
 
 bool OpRegistry::is_query(std::string_view name) const { return queries_.find(name) != queries_.end(); }
 
+void OpRegistry::add_query(std::string name, OpFunction function, std::function<bool(const Json&)> asks) {
+    asks_[name] = std::move(asks);
+    ops_[std::move(name)] = std::move(function);
+}
+
+bool OpRegistry::is_query(const Json& op) const {
+    const Json* name = op.is_object() ? get(op, "op") : nullptr;
+    if (name == nullptr || !name->is_string()) return false;
+    if (is_query(name->get_ref<const std::string&>())) return true;
+    const auto it = asks_.find(name->get_ref<const std::string&>());
+    return it != asks_.end() && it->second && it->second(op);
+}
+
 void OpRegistry::set_area_resolver(AreaResolver resolver) { area_resolver_ = std::move(resolver); }
 
 const OpFunction* OpRegistry::find(std::string_view name) const {
@@ -1160,10 +1173,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
     }
 
     // (PC5 G-0: questions — OpRegistry::add_query — asked alone, as a dry run: never with ops that change the book)
-    const auto question = [&](const Json& op) {
-        const Json* name = op.is_object() ? get(op, "op") : nullptr;
-        return name != nullptr && name->is_string() && registry_.is_query(name->get_ref<const std::string&>());
-    };
+    const auto question = [&](const Json& op) { return registry_.is_query(op); };  // (PC5 G-c: by its arguments too)
     const auto questions = static_cast<std::size_t>(std::count_if(ops.begin(), ops.end(), question));
     if (questions > 0 && questions < ops.size()) {
         for (std::size_t i = 0; i < ops.size(); ++i) {

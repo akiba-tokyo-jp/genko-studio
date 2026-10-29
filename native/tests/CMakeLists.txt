@@ -189,6 +189,14 @@ genko_test(test_shaping SOURCES unit/test_shaping.cpp DEPS genko_test_support ge
 # alignment, indents, leading), right-to-left text set across, the cells chosen down, saved and read back.
 genko_test(test_contract_opentype SOURCES contract/test_contract_opentype.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service
            LABELS contract TIMEOUT 600)
+# PC5 G-c (SPEC.md TEXT-02「文字スタイル・段落スタイル」): the book's character and paragraph styles through type_style — a style's
+# life (made, applied, overridden, changed, cleared, renamed, duplicated, deleted with the looks kept), from the text and
+# redefined, Basic Paragraph, one style a letter, list a question, names, a smart object's contents, the default formatting.
+genko_test(test_type_styles SOURCES unit/test_type_styles.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC5 G-c: the styles drawn — a style changed sets the lines and type layers that take it anew (the page's pixels, a point
+# text's box), Basic Paragraph too; saved and read back; a book without styles as before; the window's words for the refusals.
+genko_test(test_contract_type_styles SOURCES contract/test_contract_type_styles.cpp DEPS genko_test_support genko_render_ops genko_formats
+           genko_service LABELS contract TIMEOUT 600)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
 # PC3 C-e (SPEC.md COLOR-07「判型」): the page size ops on a book in memory — each thing on a page where the map takes it,

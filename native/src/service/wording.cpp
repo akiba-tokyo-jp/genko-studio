@@ -1241,6 +1241,32 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("an empty range takes paragraph attributes only", "空の範囲には段落の属性だけを指定できます"));
         r.push_back(rule("size_pt or size_mm sizes the text, not both", "文字の大きさは pt か mm のどちらかで指定します"));
         r.push_back(rule(".* takes the style \\S+, which the book does not keep", "原稿に無い文字スタイル・段落スタイルを指定しています"));
+        // (PC5 G-c: type_style — the character and paragraph styles)
+        r.push_back(rule("unknown key (\\S+) for type_style", "スタイルの操作に知らない鍵（\\1）があります"));
+        r.push_back(rule("kind is character or paragraph", "スタイルの種類（kind）は character（文字）か paragraph（段落）です"));
+        r.push_back(rule("action is new, duplicate, delete, rename, set, apply, redefine, clear_override or list",
+                         "スタイルの操作（action）は new・duplicate・delete・rename・set・apply・redefine・clear_override・list のどれかです"));
+        r.push_back(rule("id names the style", "スタイル（id）を指定します"));
+        r.push_back(rule("no character style (\\S+)", "文字スタイル（\\1）は原稿にありません"));
+        r.push_back(rule("no paragraph style (\\S+)", "段落スタイル（\\1）は原稿にありません"));
+        r.push_back(rule("Basic Paragraph cannot be deleted or renamed", "[基本段落] は削除・名前の変更ができません"));
+        r.push_back(rule("a character style has no paragraph attributes", "文字スタイルには段落の属性を入れられません"));
+        r.push_back(rule("the style's name must be a string|the style's name is 1 to 64 characters", "スタイルの名前は 1〜64 文字です"));
+        r.push_back(rule("the name (.*) is the panel's own: choose another name", "「\\1」はパネルが使う名前です（ほかの名前にします）"));
+        r.push_back(rule("the book has a character style named (.*) already", "「\\1」という名前の文字スタイルはもうあります"));
+        r.push_back(rule("the book has a paragraph style named (.*) already", "「\\1」という名前の段落スタイルはもうあります"));
+        r.push_back(rule("range is a range of the text named \\(line, or page and layer_id\\)",
+                         "範囲（range）は、台詞かテキストレイヤーを指定したときに使います"));
+        r.push_back(rule("type_style \\S+(?: with apply)? names the text: line, or page and layer_id",
+                         "スタイルを適用・再定義・上書きを消去する文字（台詞の line か、テキストレイヤーの page と layer_id）を指定します"));
+        r.push_back(rule("the chosen text takes no character style: name the style to redefine \\(id\\)",
+                         "選んだ文字には文字スタイルがありません（再定義するスタイルを指定します）"));
+        r.push_back(rule("an empty range takes a paragraph style only", "空の範囲には段落スタイルだけを適用できます"));
+        r.push_back(rule("attrs must be \\{attribute: value\\}", "スタイルの属性（attrs）は {属性: 値} で指定します"));
+        r.push_back(rule("clear is a list of attribute names", "消す属性（clear）は属性の名前の一覧で指定します"));
+        r.push_back(rule("name gives the style its new name", "スタイルの新しい名前（name）を指定します"));
+        r.push_back(rule("(replace|from_selection|apply|clear_overrides) is true or false", "\\1 は true か false です"));
+        r.push_back(rule("a book keeps 512 (?:character|paragraph) styles at most", "文字スタイル・段落スタイルは、それぞれ 512 個までです"));
         r.push_back(rule("(?:unknown )?(?:native_type|char|para|run char|paragraph para|type_styles)\\b.*",
                          "文字の設定（文字・段落の属性、スタイル）の指定が正しくありません"));
         r.push_back(rule("(?:a run(?:'s| must) |the runs must |a paragraph must |the paragraphs must |a style's (?:id|name) |two (?:character|paragraph) styles ).*",

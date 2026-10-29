@@ -107,11 +107,13 @@ Json runs_with(const Json& runs, std::int64_t start, std::int64_t end, const Jso
     return joined;
 }
 
+}  // namespace
+
 // Genko's words set larger, bolder or in a colour (style_runs) written as ranges, the first time a character attribute is
 // set (on a range or the whole: the whole's then takes the words' own away as a range's, review P3-2): the lettering reads
 // the ranges from then on. A word found keeps its place in style_runs with its 縦中横 alone (the lettering's 縦中横 is
 // chosen word by word — review P2-2 —, each word found from where the one before it was); a word not found in the text is
-// kept whole (it takes effect where the text comes to hold it, as before).
+// kept whole (it takes effect where the text comes to hold it, as before). (PC5 G-c: type_style's 上書きを消去 too.)
 void words_to_runs(StoryLine& record, Json& nt) {
     if (nt.contains("runs") || record.style_runs.empty()) return;
     std::vector<std::size_t> taken;
@@ -134,6 +136,8 @@ void words_to_runs(StoryLine& record, Json& nt) {
     }
     if (!keeps) record.style_runs.clear();
 }
+
+namespace {
 
 // The paragraphs a range of graphemes [start, end) touches (an empty range: the one it is in).
 std::vector<std::int64_t> paragraphs_of(const std::string& text, std::int64_t start, std::int64_t end) {
