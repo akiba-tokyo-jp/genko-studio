@@ -11,6 +11,7 @@
 #include "core/adjust.hpp"
 #include "core/adjust_kinds.hpp"
 #include "core/filters.hpp"
+#include "core/groups.hpp"
 #include "core/ids.hpp"
 #include "core/lut3d.hpp"
 #include "core/patterns.hpp"
@@ -265,6 +266,15 @@ void check_parent(const Page& page, const std::string& parent_id, const std::str
     }
 }
 
+// A layer's blend from an op: a mode of blend_mode's, or (groups@1, PC5 I-b) pass_through on a group.
+std::string layer_blend(const Json& value, const Layer& layer) {
+    if (value.is_string() && value.get_ref<const std::string&>() == kPassThrough) {
+        if (!is_group(layer)) throw OpError("blend pass_through is a group's (a folder with group: true)");
+        return std::string(kPassThrough);
+    }
+    return blend_mode(value);
+}
+
 // set_layer on the book (also each layer of set_layers).
 void set_layer_with(Document& doc, const Json& op) {
     const std::size_t at = require_page(doc, op);
@@ -287,7 +297,13 @@ void set_layer_with(Document& doc, const Json& op) {
     if (has(op, "exportable") && layer.role != LayerRole::Name && layer.role != LayerRole::Draft) {
         layer.exportable = py_truthy(op["exportable"]);
     }
-    if (has(op, "blend")) layer.blend = blend_mode(op["blend"]);
+    if (has(op, "group")) {  // (groups@1, PC5 I-b: グループとして描く — a folder only; off, its blend no longer 通過)
+        const bool on = py_truthy(op["group"]);
+        if (on && layer.kind != LayerKind::Folder) throw OpError("group is set on a folder");
+        layer.group = on;
+        if (!on && layer.blend == kPassThrough) layer.blend = "normal";
+    }
+    if (has(op, "blend")) layer.blend = layer_blend(op["blend"], layer);
     if (has(op, "clip")) layer.clip = py_truthy(op["clip"]);
     if (has(op, "lock_alpha")) layer.lock_alpha = py_truthy(op["lock_alpha"]);
     if (has(op, "locked")) layer.locked = py_truthy(op["locked"]);
@@ -368,7 +384,12 @@ void add_layer(OpContext& c) {
     layer.role = LayerRole::User;
     layer.kind = kind->second;
     layer.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("layer");
-    layer.blend = blend_mode(truthy_at(op, "blend") ? op["blend"] : Json("normal"));
+    // (groups@1, PC5 I-b: a folder drawn as Photoshop's group, 通過 unless a blend is given)
+    if (truthy_at(op, "group")) {
+        if (layer.kind != LayerKind::Folder) throw OpError("group makes a folder (kind: folder)");
+        layer.group = true;
+    }
+    layer.blend = truthy_at(op, "blend") ? layer_blend(op["blend"], layer) : layer.group ? std::string(kPassThrough) : std::string("normal");
     layer.clip = truthy_at(op, "clip");
     layer.lock_alpha = truthy_at(op, "lock_alpha");
     layer.parent_id = truthy_at(op, "parent") ? Json(py_str(op["parent"])) : Json(nullptr);

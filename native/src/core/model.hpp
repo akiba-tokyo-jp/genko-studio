@@ -252,6 +252,9 @@ struct Layer {
     // story has (its id, page, speaker, panel and reading order), drawn by the lines' typesetting as the layer's picture;
     // null on any other layer. Shared between copies and never changed once made (an op makes a new one).
     std::shared_ptr<const StoryLine> type;
+    // PC5 I-b (groups@1, core/groups.hpp): a folder drawn as Photoshop's group — what is in it hidden with it, its opacity,
+    // its blend (pass_through, 通過, a group's only), its mask and vector mask; false: a folder as before, an order of layers
+    bool group = false;
 
     std::size_t stroke_count() const { return strokes ? strokes->items.size() : 0; }
 };

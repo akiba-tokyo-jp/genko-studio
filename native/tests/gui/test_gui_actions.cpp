@@ -398,7 +398,9 @@ private slots:
         // (act_line_to_type_layer, act_type_layer_to_line) — theirs (test_gui_type).
                 // and PC5 J-a's ファイル → 書き出し → レイヤーカンプからファイル… (act_comps_to_files; its ウィンドウ → レイヤーカンプ is the
         // frame's attribute made real) — test_gui_layer_comps.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{636});
+        // and the 1 of PC5 I-b (SPEC AUTO-01「グループ」) — レイヤー → 新規 → レイヤーからのフレーム… (act_layer_frame) —
+        // test_gui_layers.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{637});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

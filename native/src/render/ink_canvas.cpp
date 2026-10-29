@@ -509,6 +509,58 @@ void InkCanvas::correct(const InkPicture& changed, double opacity, bool clip, co
 
 void InkCanvas::forget_clip() { impl_->previous = false; }
 
+InkPicture InkCanvas::picture() const {
+    const unsigned n = impl_->n;
+    const std::size_t count = impl_->px.size() / impl_->stride;
+    InkPicture out{impl_->size, n, {}};
+    out.values.resize(count * (n + 1));
+    for (std::size_t i = 0; i < count; ++i)
+        for (unsigned c = 0; c <= n; ++c) out.values[i * (n + 1) + c] = impl_->px[i * impl_->stride + c];
+    return out;
+}
+
+void InkCanvas::mix_back(const InkPicture& before, double opacity, const Image* mask) {
+    if (before.size != impl_->size || before.channels != impl_->n) throw core::Error("value", "the ink picture does not match the canvas");
+    if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "the layer mask does not match the canvas");
+    const unsigned n = impl_->n;
+    for (int y = 0; y < impl_->size.height; ++y) {
+        const auto* shown = mask ? reinterpret_cast<const unsigned char*>(mask->raw()->image[y]) : nullptr;
+        for (int x = 0; x < impl_->size.width; ++x) {
+            const std::size_t i = std::size_t(y) * impl_->size.width + x;
+            const double k = std::clamp(opacity, 0.0, 1.0) * (shown ? shown[x] / 255.0 : 1.0);
+            if (k >= 1) continue;
+            double* p = impl_->px.data() + i * impl_->stride;
+            const double* b = before.values.data() + i * (n + 1);
+            const double alpha = b[n] + (p[n] - b[n]) * k;
+            for (unsigned c = 0; c < n; ++c) {
+                const double premultiplied = b[c] * b[n] + (p[c] * p[n] - b[c] * b[n]) * k;
+                p[c] = alpha > 0 ? premultiplied / alpha : 0.0;
+            }
+            p[n] = std::clamp(alpha, 0.0, 1.0);
+        }
+    }
+}
+
+Image InkCanvas::clip_alpha() const {
+    const std::size_t count = impl_->px.size() / impl_->stride;
+    std::string out(count, static_cast<char>(255));
+    if (impl_->previous) {
+        for (std::size_t i = 0; i < count; ++i)
+            out[i] = static_cast<char>(std::clamp<long>(std::lround(impl_->px[i * impl_->stride + impl_->n + 1] * 255.0), 0, 255));
+    }
+    return Image::frombytes("L", impl_->size, out);
+}
+
+void InkCanvas::clip_to(const Image& alpha) {
+    if (alpha.mode() != "L" || alpha.size() != impl_->size) throw core::Error("value", "the clipping alpha does not match the canvas");
+    const unsigned n = impl_->n;
+    for (int y = 0; y < impl_->size.height; ++y) {
+        const auto* a = reinterpret_cast<const unsigned char*>(alpha.raw()->image[y]);
+        for (int x = 0; x < impl_->size.width; ++x) impl_->px[(std::size_t(y) * impl_->size.width + x) * impl_->stride + n + 1] = a[x] / 255.0;
+    }
+    impl_->previous = true;
+}
+
 // color-model@1 (PC1d): a bitmap page's lightness as it prints, 0 or 1 at 50% (per pixel: a part of the page drawn the
 // same as the whole).
 double bitmap_value(double lightness) { return lightness >= 0.5 ? 1.0 : 0.0; }

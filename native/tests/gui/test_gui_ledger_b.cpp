@@ -799,8 +799,9 @@ private slots:
         QVERIFY(blend != nullptr);
         QStringList blends;
         for (int i = 0; i < blend->count(); ++i) blends << blend->itemData(i).toString();
-        QCOMPARE(blends.size(), 20);
+        QCOMPARE(blends.size(), 21);  // (and PC5 I-b's 通過, a group's only: test_gui_layers)
         QVERIFY(blends.contains(QStringLiteral("color_dodge")));
+        QCOMPARE(blends.last(), QStringLiteral("pass_through"));
     }
 
     // test_skew_handles_and_the_resampling_choice: the selection's diamond on its top side slants it (the top slides, the

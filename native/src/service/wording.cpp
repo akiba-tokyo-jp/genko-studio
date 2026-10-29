@@ -188,6 +188,12 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the pattern nests too deeply \(groups and look-arounds at most (\d+) levels.*)",
                          "正規表現のかっこの入れ子が深すぎます（\\1 段まで）"));
         r.push_back(rule("gradient_fill needs from and to.*", "グラデーションは、始めと終わりの点で指定します"));
+        // (groups@1, PC5 I-b: what this build does not do yet with groups — before the general words below)
+        r.push_back(rule("not yet ported: group_nesting",
+                         "グループの入れ子が深く、一度に描けません（不透明度・描画モード・マスクのあるグループの入れ子を減らすか、解像度を下げてください）"));
+        r.push_back(rule("not yet ported: merging what shows through groups on a page in precise colour.*",
+                         "高精度のページでは、グループを通して見えるレイヤーの結合・画像の統合はまだできません"
+                         "（そのグループの「グループとして描く」を外すと結合できます。見え方は変わります）"));
         // what this build does not do yet (render::NotYetPorted, the studio's official export)
         r.push_back(rule("not yet ported: (.*)", [](const QRegularExpressionMatch& m) {
             return QStringLiteral("この版の Genko では、まだ扱えないもの（%1）があるため、できませんでした（原稿は変わりません）").arg(unported_element(m.captured(1)));
@@ -1212,6 +1218,11 @@ const std::vector<Rule>& rules() {
                          "文字の設定（文字・段落の属性、スタイル）の指定が正しくありません"));
         r.push_back(rule("(?:a run(?:'s| must) |the runs must |a paragraph must |the paragraphs must |a style's (?:id|name) |two (?:character|paragraph) styles ).*",
                          "文字の範囲・段落・スタイルの指定が正しくありません"));
+        // (groups@1, PC5 I-b — the C++ build's own: a folder drawn as a group, core/groups, render/ops_groups)
+        r.push_back(rule("group makes a folder.*|group is set on a folder|.*the layer \\S+ is marked a group but is not a folder",
+                         "グループとして描けるのはフォルダーだけです"));
+        r.push_back(rule(".*(?:blend pass_through is a group's|the blend pass_through is a group's only).*", "描画モード「通過」はグループだけのものです"));
+        r.push_back(rule("the layers to merge are in different groups.*", "別々のグループのレイヤーは一緒に結合できません（グループの中で結合します）"));
         r.push_back(rule("the layers have nothing to draw", "選んだレイヤーには、描かれたものがありません"));
         r.push_back(rule("layer \\S+ has nothing to rasterize", "このレイヤーには、ラスタライズするものがありません（すでに画素のレイヤーです）"));
         r.push_back(rule("the transform squashes the smart object flat|the picture would be laid too small", "スマートオブジェクトが潰れてしまう変形はできません"));

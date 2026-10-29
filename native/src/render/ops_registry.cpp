@@ -34,6 +34,7 @@
 #include "render/ops_formats.hpp"
 #include "render/ops_paint_tools.hpp"
 #include "render/ops_layer_styles.hpp"
+#include "render/ops_groups.hpp"
 #include "render/ops_type.hpp"
 #include "render/ops_production.hpp"
 #include "render/ops_layer_comps.hpp"
@@ -429,6 +430,8 @@ void register_render_ops(core::OpRegistry& registry) {
     // PC5 節 G (文字; type@1: the type ops — G-0 writes add_type_layer, edit_type and type_info, the others frames until
     // their groups: render/ops_type.hpp)
     register_type_ops(registry);
+    // PC5 I-b (groups@1: Frame from Layers, render/ops_groups)
+    register_group_ops(registry);
     // PC5 節 J (制作の補助: カンプ・スライス・注釈・計測・ビデオ): the frames of its new ops (render/ops_production); each group's
     // register_* after it puts its ops in their places
     register_production_ops(registry);
