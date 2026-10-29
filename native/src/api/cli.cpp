@@ -48,6 +48,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "formats/copy.hpp"
+#include "render/ops_annotations.hpp"
 #include "render/ops_layer_comps.hpp"
 #include "formats/export.hpp"
 #include "formats/exporting.hpp"
@@ -300,6 +301,7 @@ int inspect(const QStringList& args, bool ascii) {
     bool paths = false;  // (vector@1, PC3 C-a, the C++ build's own: --paths [--page N], path.list / path.info / layer.vectorMask.info)
     QString at_text;  // (PC3 C-d, the C++ build's own: --at <page>:<x_mm>,<y_mm>, layer.pickAt — the layers showing there)
     bool comps = false;  // (PC5 J-a, the C++ build's own: --comps [--page N], layerComp.list — the pages' layer comps)
+    bool notes = false;  // (PC5 J-c, the C++ build's own: --annotations [--page N], notes.list — the pages' notes)
     const auto value_of = [&](qsizetype& i, const char* name, QString& into) -> bool {
         const QString& arg = args[i];
         const QString flag = QString::fromLatin1(name);
@@ -325,6 +327,8 @@ int inspect(const QStringList& args, bool ascii) {
             paths = true;
         } else if (arg == QLatin1String("--comps")) {
             comps = true;
+        } else if (arg == QLatin1String("--annotations")) {
+            notes = true;
         } else if (arg == QLatin1String("--stroke")) {
             if (i + 1 >= args.size()) return usage("argument --stroke: expected one argument");
             stroke = args[++i];
@@ -377,7 +381,9 @@ int inspect(const QStringList& args, bool ascii) {
     }
     if (!profile.isEmpty() && !pixel.isEmpty()) return usage("argument --profile: not with --pixel");
     if (!area_text.isEmpty() && page_text.isEmpty()) return usage("argument --area, --page: --area <area> with --page <N>");
-    if (!page_text.isEmpty() && area_text.isEmpty() && !paths && !comps) return usage("argument --page: only with --area, --paths or --comps");
+    if (!page_text.isEmpty() && area_text.isEmpty() && !paths && !comps && !notes) return usage("argument --page: only with --area, --paths, --comps or --annotations");
+    if (notes && (comps || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty()))
+        return usage("argument --annotations: not with --comps, --paths, --area, --pixel or --profile");
     if (comps && (paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty())) return usage("argument --comps: not with --paths, --area, --pixel or --profile");
     if (paths && !area_text.isEmpty()) return usage("argument --paths: not with --area");
     std::optional<std::int64_t> page_number;
@@ -438,6 +444,20 @@ int inspect(const QStringList& args, bool ascii) {
             if (page_number && doc.pages[i]->index != core::Num(*page_number)) continue;
             if (doc.is_deferred(i)) continue;
             core::Json one = render::layer_comps::listing(doc.page(i));
+            one["page"] = doc.pages[i]->index.json();
+            pages.push_back(std::move(one));
+        }
+        if (page_number && pages.empty()) throw core::Error("key", "no page " + std::to_string(*page_number));
+        print_json(core::Json{{"pages", std::move(pages)}}, ascii);
+        return 0;
+    }
+    if (notes) {  // (PC5 J-c, notes.list: each page's notes — where, their text, author, colour, box, date and who wrote them)
+        const core::Document& doc = loaded.document;
+        core::Json pages = core::Json::array();
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (page_number && doc.pages[i]->index != core::Num(*page_number)) continue;
+            if (doc.is_deferred(i)) continue;
+            core::Json one = render::annotations::listing(doc.page(i));
             one["page"] = doc.pages[i]->index.json();
             pages.push_back(std::move(one));
         }

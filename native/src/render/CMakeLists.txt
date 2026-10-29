@@ -250,6 +250,10 @@ genko_library(genko_render
     psd_comps.cpp
     pcraft_production.cpp
     pcraft_comps.cpp
+    # PC5 J-c (注釈: annotations@1 — the ops, PSD's Anno, a .pcraft's notes)
+    ops_annotations.cpp
+    psd_annotations.cpp
+    pcraft_annotations.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

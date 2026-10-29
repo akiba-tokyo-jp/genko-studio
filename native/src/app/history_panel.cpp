@@ -124,6 +124,8 @@ const std::map<std::string, const char*>& names() {
         {"new_layer_comp", "新規レイヤーカンプ"}, {"update_layer_comp", "レイヤーカンプを更新"}, {"apply_layer_comp", "レイヤーカンプを適用"},
         {"set_layer_comp", "レイヤーカンプオプション"}, {"duplicate_layer_comp", "レイヤーカンプを複製"}, {"delete_layer_comp", "レイヤーカンプを削除"},
         {"clear_layer_comp_warnings", "レイヤーカンプの警告をクリア"},
+        // (PC5 J-c, annotations@1: render/ops_annotations)
+        {"add_annotation", "注釈を追加"}, {"set_annotation", "注釈を編集"}, {"delete_annotations", "注釈を削除"},
     };
     return table;
 }

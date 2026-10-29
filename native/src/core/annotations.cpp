@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <set>
 
+#include "core/actor.hpp"
 #include "core/error.hpp"
 #include "core/model.hpp"
 #include "core/production_json.hpp"
@@ -37,6 +38,10 @@ bool actor_text(std::string_view s) {
 }
 
 }  // namespace
+
+bool annotation_time(std::string_view text) { return utc_time(text); }
+
+bool annotation_by_person(std::string_view actor) { return core::can_approve(actor); }
 
 bool annotation_id(std::string_view id) { return id.size() == 15 && id.starts_with("an_") && std::all_of(id.begin() + 3, id.end(), hex); }
 
@@ -90,7 +95,7 @@ void check_annotations(const std::vector<Annotation>& annotations) {
         if (!annotation_id(a.id)) pj::wrong(where, "has a note whose id is not an_ and 12 hex digits");
         if (!ids.insert(a.id).second) pj::wrong(where, "has two notes of the id " + a.id);
         if (a.text.size() > kAnnotationTextMax) pj::wrong(where, "has a note longer than " + std::to_string(kAnnotationTextMax) + " bytes");
-        if (!utc_time(a.modified)) pj::wrong(where, "has a note whose modified is not YYYY-MM-DDThh:mm:ssZ");
+        if (!a.modified.empty() && !utc_time(a.modified)) pj::wrong(where, "has a note whose modified is not YYYY-MM-DDThh:mm:ssZ");
         if (!actor_text(a.actor)) pj::wrong(where, "has a note whose actor is not human:…, ai:… or genko");
     }
 }

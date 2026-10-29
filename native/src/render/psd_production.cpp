@@ -1,4 +1,5 @@
-// PC5 J-0: the PSD's blocks the production copies (render/psd_production.hpp) — the table (J-a's row: render/psd_comps), the
+// PC5 J-0: the PSD's blocks the production copies (render/psd_production.hpp) — the table (J-a's row: render/psd_comps; J-c's:
+// render/psd_annotations), the
 // layers' metadata blocks (PC5 J-a).
 
 #include "render/psd_production.hpp"
@@ -10,6 +11,7 @@
 #include <set>
 
 #include "core/studio.hpp"
+#include "render/psd_annotations.hpp"
 #include "render/psd_comps.hpp"
 
 namespace genko::render::psd_production {
@@ -19,8 +21,10 @@ namespace {
 // (each group adds its row here — J-a: 1065 and its layers' cmls; J-b: {1050, …, true, …}; J-c: {-1, "Anno", "J-c", false,
 // …} (its writer puts back the sound notes of WriteContext::kept_global("Anno")); J-d1: {1074, …} and {1080, "", "J-d1",
 // false, nullptr, nullptr, nullptr, supersedes})
-constexpr std::array<Row, 1> kRows{{
+constexpr std::array<Row, 2> kRows{{
     {psd_comps::kResource, "", "J-a", true, psd_comps::read, psd_comps::write, psd_comps::fingerprint, nullptr, "cmls", psd_comps::write_layers},
+    // (PC5 J-c: the notes, Anno; its sound notes kept in the kept bytes and written back after the page's)
+    {-1, psd_annotations::kKey, "J-c", false, psd_annotations::read, psd_annotations::write, psd_annotations::fingerprint, nullptr, "", nullptr},
 }};
 
 std::span<const Row>& table() {
