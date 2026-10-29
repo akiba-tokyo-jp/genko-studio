@@ -1024,7 +1024,7 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
         if (align.is_string() && align.get_ref<const std::string&>().starts_with("justify")) st["align"] = line.wrap == "vertical" ? "top" : "left";
     }
     // (a point or box text with no alignment: Photoshop's left — top, down —, not a line's centre: review P2-5)
-    if (!shape.empty() && !core::py_truthy(at(st, "align"))) st["align"] = line.wrap == "vertical" ? "top" : "left";
+    if (!shape.empty() && !(line.style.is_object() && core::py_truthy(at(line.style, "align")))) st["align"] = line.wrap == "vertical" ? "top" : "left";
     const std::string kind = kind_of(line);
     Fonts fonts(std::move(stop));
     const Json& font_value = at(st, "font");
@@ -1086,6 +1086,10 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
             along = static_cast<double>(vertical ? h : w);
             across = rows * (static_cast<double>(paragraphs) + step * static_cast<double>(text.size()) / std::max(1.0, along)) + static_cast<double>(em);
         }
+        // (judged as at 600 dpi, whatever the resolution asked: what an op lets in is drawn at any resolution up to it)
+        const double at600 = 600.0 / static_cast<double>(dpi);
+        along *= at600;
+        across *= at600;
         if (along * across > static_cast<double>(limits::kPixels) || along > static_cast<double>(limits::kSide) || across > static_cast<double>(limits::kSide))
             throw core::Error("image_too_large", "the text is too large to set at this resolution");
     }

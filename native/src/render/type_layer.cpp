@@ -15,6 +15,7 @@
 #include "core/error.hpp"
 #include "core/pyops.hpp"
 #include "core/type_text.hpp"
+#include "render/imaging.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/ops_smart_parts.hpp"
 #include "render/page_internal.hpp"

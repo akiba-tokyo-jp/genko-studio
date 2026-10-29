@@ -753,7 +753,7 @@ private slots:
         doc.edit_page(0).frames.clear();
         doc.edit_page(0).numero = false;
         std::string text;
-        for (int i = 0; i < 400; ++i) text += "あいうえおかきくけこ";
+        for (int i = 0; i < 60; ++i) text += "あいうえおかきくけこ";  // (about the box's fill: 34 a column, 23 columns)
         doc = run(doc, Json{{"op", "add_type_layer"}, {"page", 1}, {"text", text}, {"box", Json::array({10, 10, 190, 277})}, {"style", Json{{"size_mm", 8}}},
                             {"new_id", "big"}});
         doc = run(doc, Json{{"op", "transform_layers"}, {"page", 1}, {"ids", Json::array({"big"})}, {"turn", "90cw"}});
