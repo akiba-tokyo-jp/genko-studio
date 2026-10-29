@@ -66,6 +66,7 @@ class BrushPanel;
 class ChannelPanel;
 class CloneSourcePanel;
 class PathsPanel;
+class LayerCompsPanel;
 class PatternsPanel;
 class BrushesPanel;
 class BrushSettingsPanel;
@@ -1669,10 +1670,60 @@ private:
     // --- PC5 節 G (文字; type@1): the 書式 menu (app/main_window_type.cpp) ------------------------------------------------
 public:
     QMenu* type_menu() const { return type_menu_; }
+    // PC5 G-a: what 書式's commands act on — the target layer when it is a type layer, else the chosen line ({page,
+    // layer_id} or {line}); none (and, `say`, said) when neither — and its record.
+    std::optional<core::Json> type_target(bool say = false);
+    const core::StoryLine* type_record(const core::Json& target) const;
+    // edit_type with these changes on the text chosen (type_target).
+    void type_command(const core::Json& change);
+    // A type layer made where a text tool clicked (a point text), dragged (a box text: `box`) or on the target path (a text
+    // on it): typed in the editor there, then add_type_layer — over the target layer, made the target.
+    void type_new_layer(double x_mm, double y_mm, std::optional<QRectF> box);
+    // A type layer's text typed over in place (edit_type: its text and the marks typed).
+    void edit_type_layer_inline(const std::string& layer_id);
+    // The chosen type layer's box on the canvas (and whether a box text runs past it), after a change or a new target.
+    void refresh_type_frame();
+    // 書式 → 方向 ▸, すべてのテキストレイヤーを更新, Lorem Ipsum をペースト; the menu's checks and what can be done.
+    void type_direction(bool vertical);
+    void update_all_type();
+    void paste_lorem();
+    void refresh_type_commands();
+    // The chosen line as a type layer, the target type layer as a line (line_to_type_layer, type_layer_to_line).
+    void line_to_type_layer();
+    void type_layer_to_line();
 
 private:
+    void build_type_actions();
     void build_type_menu(QMenu* menu);
     QMenu* type_menu_ = nullptr;
+    // --- PC5 節 J (制作の補助, SPEC.md PROD-01): main_window_production.cpp — the frames of イメージ → 解析 ▸, レイヤー →
+    // ビデオレイヤー ▸ and ウィンドウ's panels (アクション・レイヤーカンプ・計測ログ・注釈), until their groups ------------------
+public:
+    // "「<name>」は、この版ではまだ使えません" (a frame's command chosen).
+    void not_yet_command(const QString& name);
+
+private:
+    void build_production_actions();
+    void build_production_menus(QMenu* layers, QMenu* pages);
+    void build_production_docks();
+    // --- PC5 J-a (layer-comps@1): main_window_layer_comps.cpp — ウィンドウ → レイヤーカンプ (its dock and panel) and ファイル →
+    // 書き出し → レイヤーカンプからファイル…; each change of the book an op through apply_ops --------------------------------
+public:
+    LayerCompsPanel* layer_comps_panel() const { return layer_comps_panel_; }
+    QDockWidget* layer_comps_dock() const { return layer_comps_dock_; }
+    // A layer comps' op on the page shown (its "page" put in), shown at once (a refusal said in the status line).
+    bool layer_comp_op(core::Json op);
+    // 新規レイヤーカンプ… (none) and レイヤーカンプオプション… (the comp's id): the window asked, then new_layer_comp or
+    // set_layer_comp.
+    void layer_comp_options(std::optional<std::int64_t> comp = std::nullopt);
+    // レイヤーカンプからファイル…: the window asked, then formats::export_layer_comps off the window's thread.
+    void layer_comps_to_files();
+
+private:
+    void build_layer_comp_actions();
+    void build_layer_comps_dock();
+    LayerCompsPanel* layer_comps_panel_ = nullptr;
+    QDockWidget* layer_comps_dock_ = nullptr;
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

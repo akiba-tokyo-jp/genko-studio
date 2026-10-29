@@ -164,7 +164,10 @@ void MainWindow::panel_for_tool(const QString& tool) {
                                         QStringLiteral("lassofill"), QStringLiteral("vector"), QStringLiteral("blend"),
                                         QStringLiteral("liquify"), QStringLiteral("gradient"), QStringLiteral("shape"),
                                         QStringLiteral("pencil")};  // (PC4 E1)
-    QDockWidget* want = tool == QLatin1String("text")                              ? lines_dock_
+    // (PC5 G-a: 横書き文字ツール sets across whatever the option says; the type layers' frame drawn with the text tools)
+    if (text_settings_ != nullptr) text_settings_->vertical->setEnabled(tool != QLatin1String("text_h"));
+    if (PageCanvas::is_text_tool(tool) || tool == QLatin1String("move")) refresh_type_frame();
+    QDockWidget* want = PageCanvas::is_text_tool(tool)                              ? lines_dock_
                         : drawing.contains(tool) || PageCanvas::is_pixel_tool(tool) ? layers  // (PC4 E5: the brushes that change pixels)
                                                                                     : nullptr;
     QDockWidget* other = want == lines_dock_ ? layers : lines_dock_;
@@ -177,6 +180,7 @@ void MainWindow::refresh_lines() {
     if (story_ == nullptr) return;
     story_->refresh();
     story_->select(canvas_->selected_line_id);  // (the chosen line's settings beside the tool stay current)
+    refresh_type_frame();                       // (PC5 G-a: the chosen type layer's box after an edit)
 }
 
 // --- the lines typed on the page ------------------------------------------------------------------------------------
@@ -199,7 +203,8 @@ void MainWindow::type_new_line(double x_mm, double y_mm) {
     if (page == nullptr) return;
     const auto origin = session_;
     const std::string page_id = page->id;
-    canvas_->open_editor(x_mm, y_mm, QString(), [this, origin, page_id, x_mm, y_mm](std::optional<QString> typed) {
+    const QString tool = canvas_->tool();  // (PC5 G-a review P2-1: 横書き文字ツール types across)
+    canvas_->open_editor(x_mm, y_mm, QString(), [this, origin, page_id, x_mm, y_mm, tool](std::optional<QString> typed) {
         if (!typed || typed->isEmpty() || closed_) return;
         // (the book as it is now: the page may have gone while the words were typed)
         const core::Page* target = nullptr;
@@ -212,7 +217,7 @@ void MainWindow::type_new_line(double x_mm, double y_mm) {
         }
         const lettering::Marks marks = lettering::parse_marks(*typed);
         const core::Frame* frame = target->frame_at(Num(x_mm), Num(y_mm));
-        const TextToolSettings::LineFields fields = text_settings_->line_fields();
+        const TextToolSettings::LineFields fields = text_settings_->line_fields(tool);
         const Json box = lettering::place_at(x_mm, y_mm, marks.text, fields.balloon, fields.vertical, frame);
         Json op{{"op", "add_line"}, {"page", target->index.json()}, {"text", marks.text}, {"balloon", fields.balloon}};
         for (const auto& [key, value] : box.items()) op[key] = value;
@@ -297,6 +302,13 @@ void MainWindow::edit_line_inline(const std::string& line_id) {
                                      {"emphasis_runs", marks.emphasis_runs},
                                      {"style_runs", marks.style_runs}}});
         lettering::put_ruby(ops[0], marks, current, true);  // (TEXT-01: by place when Python's runs would not say where)
+        if (!render::text::shape_of(*current).empty()) {  // (PC5 G-a: a point or box text keeps its anchor or box — edit_type sets it)
+            ops[0]["op"] = "edit_type";
+            ops[0]["line"] = ops[0]["id"];
+            ops[0].erase("id");
+            apply_ops(ops);
+            return;
+        }
         const Json size = lettering::refit(*current, frame_by_id(current->frame_id), marks.text, current->balloon, current->wrap == "vertical");
         // keep the balloon's centre where it was
         const double cx = (current->x_mm + current->w_mm / Num(2)).value();
@@ -337,6 +349,10 @@ void MainWindow::toggle_selected_wrap() {
     const core::StoryLine* line = selected_line_or_say();
     if (line == nullptr) return;
     const bool vertical = line->wrap != "vertical";
+    if (!render::text::shape_of(*line).empty()) {  // (PC5 G-a: a point or box text turned where it is set — no refit)
+        apply_ops(Json::array({Json{{"op", "edit_type"}, {"line", line->id}, {"wrap", vertical ? "vertical" : "horizontal"}}}));
+        return;
+    }
     Json move{{"op", "move_line"}, {"id", line->id}};
     const Json size = lettering::refit(*line, frame_by_id(line->frame_id), line->text, line->balloon, vertical);
     for (const auto& [key, value] : size.items()) move[key] = value;

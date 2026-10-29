@@ -55,6 +55,7 @@
 #include "render/psd_paths.hpp"
 #include "render/psd_shapes.hpp"
 #include "render/psd_effects.hpp"
+#include "render/psd_production.hpp"
 #include "core/layer_styles.hpp"
 #include "render/raster.hpp"
 #include "render/not_yet_ported.hpp"
@@ -962,6 +963,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     Keeping kept_so_far;                  // (what is kept, and whether any was left out)
     bool ranges_kept = false;             // (a layer keeps its blending ranges: its page says the mode they are of)
     std::vector<std::int64_t> kept_ids;  // (the layer ids of the layers made, which the page's comps and slices name)
+    std::map<std::int64_t, std::string> lyid_layers;  // (PC5 J-0: … and the layers made of them, render/psd_production)
     // (vector@1, PC3 C-a: a path of the file — fractions of its canvas — on the page as its picture is placed, mm)
     const double mm_x = page.spec.width_mm.value() / static_cast<double>(where.page_w);
     const double mm_y = page.spec.height_mm.value() / static_cast<double>(where.page_h);
@@ -1319,7 +1321,10 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
                 if (core::style_shows_effects(*layer.style) || !(*layer.style)["effects"].empty()) effect = false;
             }
             if (effect) effects.push_back(layer.id);
-            if (layer.native_psd && layer.native_psd->id) kept_ids.push_back(*layer.native_psd->id);
+            if (layer.native_psd && layer.native_psd->id) {
+                kept_ids.push_back(*layer.native_psd->id);
+                lyid_layers.emplace(*layer.native_psd->id, layer.id);
+            }
             ranges_kept = ranges_kept || (layer.native_psd && !layer.native_psd->ranges.empty());
             if (const auto locks = file.protection(item); locks && *locks != 0) take_locks(layer, *locks);
         }
@@ -1404,6 +1409,31 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     }
     if (!paths.empty()) report["paths"] = std::move(paths);
     if (op.contains("embedded_profile")) report["embedded_profile"] = import_profile::report(way);
+    // (PC5 J-0, render/psd_production: the file's layer comps, slices, notes and measurement scale read onto the page by
+    // their groups — those read kept with the rest below, marked copied with what the page held of them)
+    psd_production::Taken production;
+    if (keeping) {
+        std::vector<std::pair<int, std::string_view>> copied_resources;
+        for (const psd::File::ImageResource& r : file_resources) {
+            if (psd_production::copies_resource(static_cast<int>(r.id))) copied_resources.emplace_back(static_cast<int>(r.id), r.data);
+        }
+        std::vector<std::pair<std::string, std::string_view>> copied_globals;
+        for (const psd::File::TaggedBlock& g : file_globals) {
+            if (psd_production::copies_global(g.key)) copied_globals.emplace_back(g.key, g.data);
+        }
+        if (!copied_resources.empty() || !copied_globals.empty()) {
+            psd_production::ReadContext context;
+            context.onto = &onto;
+            context.layers = lyid_layers;
+            context.width_px = static_cast<double>(file.width());
+            context.height_px = static_cast<double>(file.height());
+            context.merged_only = merged_only;
+            context.page_had = page_had;
+            context.report = &report;
+            context.doc = &doc;  // (PC5 J-a: its layers' kept blocks — their cmls —, what they show)
+            production = psd_production::read(doc.edit_page(index), copied_resources, copied_globals, context);
+        }
+    }
     // (psd-keep@1, PC4 F-d: the page's own — the patterns a fill took left out of its pattern blocks —, the ids of the
     // layers read with them; the layers keeping effects; what was not kept)
     if (page_keeps) {
@@ -1416,6 +1446,11 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
         const bool named_gone = merged_only ? !file_ids.empty()
                                             : std::any_of(file_ids.begin(), file_ids.end(), [&](std::int64_t id) { return !made_ids.contains(id); });
         core::PsdPageKeep keep = page_keep(doc, file, taken, named_gone, kept_so_far);
+        for (const core::PsdCopied& c : production.copied) {  // (PC5 J-0: the marks of the blocks kept — not one left out)
+            const bool held = c.resource >= 0 ? std::any_of(keep.resources.begin(), keep.resources.end(), [&](const core::PsdResource& r) { return r.id == c.resource; })
+                                              : std::any_of(keep.globals.begin(), keep.globals.end(), [&](const core::PsdGlobal& g) { return g.key == c.global; });
+            if (held) keep.copied.push_back(c);
+        }
         if (!keep.resources.empty() || !keep.globals.empty() || ranges_kept) {
             if (names_layers && !named_gone) keep.ids = kept_ids;
             keep.from = core::PsdFrom{file.psb() ? 2 : 1, file.mode(), file.depth()};

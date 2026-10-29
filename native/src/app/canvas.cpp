@@ -261,6 +261,48 @@ void PageCanvas::set_work(std::shared_ptr<CanvasWork> work) {
     update();
 }
 
+// --- PC5 J-0: the production's extras (slices, notes, count marks, the ruler line) -----------------------------------
+
+void PageCanvas::add_extra(CanvasExtra extra) {
+    const auto same = std::find_if(extras_.begin(), extras_.end(), [&](const CanvasExtra& e) { return e.key == extra.key; });
+    if (same != extras_.end()) {
+        *same = std::move(extra);
+    } else {
+        extras_.push_back(std::move(extra));
+    }
+    update();
+}
+
+void PageCanvas::show_extra(const QString& key, bool shown) {
+    std::erase(extras_hidden_, key);
+    if (!shown) extras_hidden_.push_back(key);
+    update();
+}
+
+bool PageCanvas::extra_shown(const QString& key) const { return std::find(extras_hidden_.begin(), extras_hidden_.end(), key) == extras_hidden_.end(); }
+
+std::vector<QString> PageCanvas::extra_keys() const {
+    std::vector<QString> out;
+    for (const CanvasExtra& e : extras_) out.push_back(e.key);
+    return out;
+}
+
+void PageCanvas::draw_extras(QPainter& painter) const {
+    const core::Page* p = page();
+    if (!extras_shown || p == nullptr || extras_.empty()) return;
+    ExtraView view;
+    view.at = QTransform(view_.scale, 0, 0, view_.scale, view_.pan.x(), view_.pan.y());  // (pt: page mm → the unturned view)
+    view.per_mm = view_.scale;
+    view.seen_mm = seen_mm();
+    view.painting = painting_;
+    for (const CanvasExtra& e : extras_) {
+        if (!e.paint || !extra_shown(e.key)) continue;
+        painter.save();
+        e.paint(painter, *p, view);
+        painter.restore();
+    }
+}
+
 QRectF PageCanvas::seen_mm() const {
     const QPointF corners[] = {to_mm(QPointF(0, 0)), to_mm(QPointF(width(), 0)), to_mm(QPointF(0, height())),
                                to_mm(QPointF(width(), height()))};

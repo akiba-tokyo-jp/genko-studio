@@ -218,6 +218,22 @@ void map_frame(Frame& frame, const Mapping& m) {
 }
 
 void map_line(StoryLine& line, const Mapping& m) {
+    // (type@1, PC5 G-a: a type layer's record its matrix turns goes with the page by its matrix, the map in front of it —
+    // where its letters are set, and their lengths, stay)
+    if (const auto t = type_text::transform_of(line)) {
+        const auto& M = m.m;
+        const std::array<double, 6>& v = *t;
+        Json nt = *line.native_type;
+        nt["transform"] = Json::array({M[0] * v[0] + M[2] * v[1], M[1] * v[0] + M[3] * v[1], M[0] * v[2] + M[2] * v[3], M[1] * v[2] + M[3] * v[3],
+                                       M[0] * v[4] + M[2] * v[5] + M[4], M[1] * v[4] + M[3] * v[5] + M[5]});
+        try {
+            const Json normal = type_text::check_native_type(nt, line.text);
+            line.native_type = normal.is_null() ? std::nullopt : std::optional<Json>(normal);
+        } catch (const Error&) {
+            // (a map that takes it past its bounds: as it was)
+        }
+        return;
+    }
     const double k = m.scale();
     double w = line.w_mm.value() * k, h = line.h_mm.value() * k;
     if (m.swaps_axes()) std::swap(w, h);
@@ -504,10 +520,21 @@ void map_page(Document& doc, std::size_t at, const Mapping& m, const PixelHooks&
             const Rect& r = *layer.placement_mm;
             layer.placement_mm = rect_of(map_box({r.x.value(), r.y.value(), r.width.value(), r.height.value()}, m));
         }
-        // (type@1, PC5 G-0: a type layer's text mapped as a line's — upright, its box's centre where the map takes it)
+        // (type@1, PC5 G-0: a type layer's text mapped as a line's — upright, its box's centre where the map takes it; G-a:
+        // turned or mirrored with the page, by its matrix, as Photoshop turns a type layer)
         if (layer.kind == LayerKind::Type && layer.type) {
             StoryLine record = *layer.type;
-            map_line(record, m);
+            if (!upright(m) && !type_text::transform_of(record)) {
+                Json nt = record.native_type ? *record.native_type : Json::object();
+                nt["transform"] = Json::array({m.m[0], m.m[1], m.m[2], m.m[3], m.m[4], m.m[5]});
+                try {
+                    record.native_type = type_text::check_native_type(nt, record.text);
+                } catch (const Error&) {
+                    map_line(record, m);  // (a map past its bounds: upright, as a line)
+                }
+            } else {
+                map_line(record, m);
+            }
             layer.type = type_text::shared_record(std::move(record));
         }
         // (smart-objects@1: its matrix after the map; its contents as they are)

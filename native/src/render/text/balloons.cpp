@@ -18,6 +18,7 @@
 #include "core/pyops.hpp"
 #include "core/pyrandom.hpp"
 #include "core/ruby.hpp"
+#include "core/type_text.hpp"
 #include "render/draw.hpp"
 #include "render/npcompat.hpp"
 #include "render/page.hpp"
@@ -680,6 +681,7 @@ core::StoryLine upright_twin(const core::StoryLine& ln, const TurnedSheet& sheet
     }
     twin.x_mm = core::Num(ln.x_mm.value() - left);
     twin.y_mm = core::Num(ln.y_mm.value() - top);
+    core::type_text::move_anchor(twin, -left, -top);  // (PC5 G-a review P2-2: a point text's anchor on the sheet too)
     if (ln.path && !ln.path->empty()) {
         std::vector<core::Point> moved;
         for (const core::Point& p : *ln.path) moved.push_back(core::Point{core::Num(p.x.value() - left), core::Num(p.y.value() - top)});

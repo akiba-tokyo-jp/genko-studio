@@ -112,6 +112,8 @@ const std::map<std::string, const char*>& names() {
         {"set_file_info", "ファイル情報を変えた"}, {"revert", "復帰"},
         // (PC5 G-0, type@1: render/ops_type)
         {"add_type_layer", "テキストレイヤーを作った"}, {"edit_type", "文字を直した"},
+        // (PC5 G-a)
+        {"line_to_type_layer", "台詞をテキストレイヤーにした"}, {"type_layer_to_line", "テキストレイヤーを台詞にした"},
         // (PC4 E5: render/ops_paint_tools)
         {"dodge", "覆い焼きした"}, {"burn", "焼き込んだ"}, {"sponge", "スポンジで直した"}, {"blur_brush", "ぼかした"},
         {"sharpen_brush", "シャープにした"}, {"smudge_brush", "指先でのばした"}, {"mixer_brush", "混合ブラシで描いた"},
@@ -120,6 +122,10 @@ const std::map<std::string, const char*>& names() {
         {"set_camera_raw", "Camera Raw で現像の設定を変えた"},
         // (PC5 I-b, groups@1: render/ops_groups)
         {"frame_from_layers", "レイヤーからフレームを作った"},
+        // (PC5 J-a, layer-comps@1: render/ops_layer_comps)
+        {"new_layer_comp", "新規レイヤーカンプ"}, {"update_layer_comp", "レイヤーカンプを更新"}, {"apply_layer_comp", "レイヤーカンプを適用"},
+        {"set_layer_comp", "レイヤーカンプオプション"}, {"duplicate_layer_comp", "レイヤーカンプを複製"}, {"delete_layer_comp", "レイヤーカンプを削除"},
+        {"clear_layer_comp_warnings", "レイヤーカンプの警告をクリア"},
     };
     return table;
 }

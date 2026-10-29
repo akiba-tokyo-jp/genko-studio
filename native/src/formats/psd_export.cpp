@@ -43,6 +43,7 @@
 #include "core/patterns.hpp"
 #include "render/psd_effects.hpp"
 #include "render/psd_text.hpp"
+#include "render/psd_production.hpp"
 #include "render/smart.hpp"
 #include "render/text/balloons.hpp"
 #include "render/text/fonts.hpp"
@@ -282,6 +283,8 @@ public:
     // once a layer (a layer of none: written as before)
     void note_keep(const std::string& id) {
         keep_ = nullptr;
+        item_.clear();
+        if (!id.empty() && !group_coming_ && items_done_.insert(id).second) item_ = id;  // (PC5 J-a: its production items, once a layer)
         if (page_ == nullptr || id.empty()) return;
         for (const core::Layer& own : page_->layers) {
             if (own.id != id) continue;
@@ -291,6 +294,11 @@ public:
     }
     // patterns@1 (PC4 E3): the book whose patterns its pattern fills name (their names, unique ids and dpi)
     void patterns_of(const core::Document& book) { book_ = &book; }
+    // (PC5 J-a, render/psd_production) the page's own production of the file: its layers' metadata items (a layer comps'
+    // cmls) in the records — in place of the kept shmd's items of their keys — with a lyid for a layer that has none kept
+    void production(const render::psd_production::Written& own) { production_ = &own; }
+    // (PC5 J-a) the next record is of a hidden layer (a page with layer comps writes them: Photoshop's comps show them)
+    void note_hidden(bool hidden) { hidden_ = hidden; }
     // layer-styles@1 (PC4 E6): the next record is of the page's layer `id` — its style goes with it: its effects as an lfx2
     // block (unless it keeps the effects of the PSD it was read from, unchanged since: those written back as they were),
     // its fill opacity as iOpa, its Blend If as the record's blending ranges
@@ -374,8 +382,11 @@ public:
         // above them —, its parts as shape layers: their pixels Photoshop's to draw again)
         if (layer.section == "end") {
             group_end();
+            group_coming_ = true;  // (PC5 J-a: its production items on the group's record, not its first part's)
             return;
         }
+        if (layer.section == "group") group_coming_ = false;
+        note_hidden(layer.hidden);  // (PC5 J-a: a hidden layer of a page with comps)
         note_mask(layer);  // (PC3 B2: its mask's masks@1 settings — a pen layer's group's too)
         note_keep(layer.id);  // (psd-keep@1, PC4 F-d)
         note_style(layer);  // (layer-styles@1, PC4 E6: a layer's own record)
@@ -656,7 +667,7 @@ private:
         records_ += "8BIM" + blend;
         put_u8(records_, opacity);
         put_u8(records_, clip ? 1 : 0);
-        put_u8(records_, flags_);  // (flags: visible; a shape layer's, pen-shapes@1: 0x18)
+        put_u8(records_, flags_ | (std::exchange(hidden_, false) ? 0x02u : 0u));  // (flags: visible; a shape layer's, pen-shapes@1: 0x18; PC5 J-a: hidden 0x02)
         flags_ = 0;
         put_u8(records_, 0);
         std::string extra = mask_data;
@@ -674,7 +685,9 @@ private:
         put_u32(extra, u32_of(ranges.size()));
         extra += ranges;
         extra += pascal(name) + unicode_name(name) + blocks;
-        if (keep != nullptr) extra += kept_blocks(*keep, blocks);
+        const std::string item = std::exchange(item_, std::string());  // (PC5 J-a)
+        if (keep != nullptr) extra += kept_blocks(*keep, blocks, item);
+        extra += production_items(item, keep, blocks);
         put_u32(records_, u32_of(extra.size()));
         records_ += extra;
         for (const auto& [id, packed] : channels) data_ += packed;
@@ -714,7 +727,8 @@ private:
         records_ += blend;
         put_u8(records_, static_cast<unsigned>(std::clamp<std::int64_t>(core::py_round_int(255 * opacity_given), 0, 255)));
         put_u8(records_, 0);
-        put_u8(records_, 0x18);  // (flags: visible; Photoshop's bits 3 and 4 — its pixels do not show)
+        // (flags: visible; Photoshop's bits 3 and 4 — its pixels do not show; PC5 J-a: hidden 0x02, an open group's)
+        put_u8(records_, 0x18u | (type != 3 && std::exchange(hidden_, false) ? 0x02u : 0u));
         put_u8(records_, 0);
         std::string extra = mask_data_of(mask_plane.has_value());  // (a pen layer's mask settings and vector mask's too)
         const core::Layer* keep = type == 3 ? nullptr : std::exchange(keep_, nullptr);  // (psd-keep@1, PC4 F-d: a group's own)
@@ -731,7 +745,9 @@ private:
         extra += "8BIMlsct";
         put_u32(extra, static_cast<std::uint32_t>(divider.size()));
         extra += divider;
-        if (keep != nullptr) extra += kept_blocks(*keep, blocks + "8BIMlsct");
+        const std::string item = type == 3 ? std::string() : std::exchange(item_, std::string());  // (PC5 J-a)
+        if (keep != nullptr) extra += kept_blocks(*keep, blocks + "8BIMlsct", item);
+        extra += production_items(item, keep, blocks + "8BIMlsct");
         put_u32(records_, u32_of(extra.size()));
         records_ += extra;
         for (int i = 0; i <= colours; ++i) put_u16(data_, 0);  // (each channel raw, with nothing)
@@ -814,13 +830,18 @@ private:
     // read) and the blocks it keeps, as they were read: none of a key this writer wrote in the record (`written`: its own
     // is the one now), and none of the blocks whose insides a PSB holds otherwise (its long keys') into a file of the other
     // version than the page's PSD was.
-    std::string kept_blocks(const core::Layer& own, std::string_view written) {
+    // (`item`: the record's layer when it carries the page's production items — its kept shmd then written by
+    // production_items, with them; its lyid too when the rows named the layer: one table of the record's id, the review's
+    // P3-1)
+    std::string kept_blocks(const core::Layer& own, std::string_view written, const std::string& item = {}) {
         const core::PsdLayerKeep& keep = *own.native_psd;
+        const bool own_shmd = !item.empty() && production_ != nullptr && !production_->layers.keys.empty();
+        const bool named = !item.empty() && production_ != nullptr && production_->layers.lyids.contains(item);
         const std::set<std::string> theirs = keys_of(written);
         const core::PsdFrom* from = page_from();
         const bool same_version = from != nullptr && (from->version == 2) == psb_;
         std::string out;
-        if (keep.id && !theirs.contains("lyid") && used_ids_.insert(*keep.id).second) {
+        if (keep.id && !named && !theirs.contains("lyid") && used_ids_.insert(*keep.id).second) {
             std::string id;
             put_u32(id, static_cast<std::uint32_t>(*keep.id));
             out += render::psd_keep::tagged_block("8BIM", "lyid", id, psb_, false);
@@ -846,13 +867,49 @@ private:
         }
         for (const auto& [key, ref] : keep.blocks) {
             if (key == "lspf" || key == "lyid" || theirs.contains(key)) continue;
+            if (key == "shmd" && own_shmd) continue;  // (PC5 J-a: with the page's items, below)
             if (core::psb_long_key(key) && !same_version) continue;
             if (const core::Bytes bytes = kept_file(ref)) out += render::psd_keep::tagged_block("8BIM", key, *bytes, psb_, false);
         }
         return out;
     }
 
+    // (PC5 J-a, render/psd_production) the record's layer's production items: its metadata block (shmd) — its kept one's
+    // items of the keys the page writes taken out, the layer's own put in — and its lyid when a row named the layer
+    // (LayerItems::lyids: its kept one, or one given — kept_blocks writes no other then)
+    std::string production_items(const std::string& id, const core::Layer* keep, std::string_view written) {
+        (void)keep;
+        if (production_ == nullptr || id.empty() || production_->layers.empty()) return {};
+        const render::psd_production::LayerItems& items = production_->layers;
+        std::string out;
+        if (const auto lyid = items.lyids.find(id); lyid != items.lyids.end() && !keys_of(written).contains("lyid")) {
+            if (used_ids_.insert(lyid->second).second) {
+                std::string value;
+                put_u32(value, static_cast<std::uint32_t>(lyid->second));
+                out += render::psd_keep::tagged_block("8BIM", "lyid", value, psb_, false);
+            }
+        }
+        if (items.keys.empty()) return out;
+        std::optional<std::string> kept_shmd;
+        if (keep != nullptr) {
+            for (const auto& [key, ref] : keep->native_psd->blocks) {
+                if (key != "shmd") continue;
+                if (const core::Bytes bytes = kept_file(ref)) kept_shmd = *bytes;
+                break;
+            }
+        }
+        if (const auto shmd = render::psd_production::layer_shmd(*production_, id, kept_shmd)) {
+            out += render::psd_keep::tagged_block("8BIM", "shmd", *shmd, psb_, false);
+        }
+        return out;
+    }
+
     bool psb_ = false;
+    const render::psd_production::Written* production_ = nullptr;  // (PC5 J-a)
+    std::string item_;                   // (PC5 J-a: the next record's layer, its production items: note_keep)
+    bool group_coming_ = false;          // (… not a pen layer's parts below its group's record)
+    bool hidden_ = false;                // (PC5 J-a: the next record's layer is hidden — its flags' bit 1)
+    std::set<std::string> items_done_;   // (… once a layer)
     const core::Layer* keep_ = nullptr;  // (the next record's layer and what it keeps: note_keep)
     const core::Layer* style_ = nullptr;  // (the next record's layer and its style: note_style)
     std::set<std::string> kept_layers_;  // (the layers whose kept blocks are written)
@@ -1582,6 +1639,10 @@ void put_section_length(std::string& out, std::uint64_t n, bool psb) {
     put_u32(out, psb ? static_cast<std::uint32_t>(n & 0xffffffffu) : u32_of(n));
 }
 
+// (PC5 J-a) A page with layer comps has its hidden layers written too (hidden): Photoshop's comps show and hide them. A page
+// without is written as before.
+bool hidden_layers_too(const core::Page& page) { return page.layer_comps && !page.layer_comps->comps.empty(); }
+
 // A layer comps' or slices' resource is written back only while every layer read with it is on the page (its lyid kept).
 bool kept_layers_there(const core::Page& page) {
     std::set<std::int64_t> here;
@@ -1611,13 +1672,58 @@ std::string latin1_bytes(const std::string& text) {
     return out;
 }
 
+// (PC5 J-0, render/psd_production) The page's own production blocks for one file — `layers`: the file has the page's layers
+// (their lyids those its layers kept from a PSD — the first layer of an id, as the records write them —; PC5 J-a: each other
+// layer one after the largest of them, written when the rows' layer items name it) —, once a file for with_kept,
+// with_kept_globals and the records; the kept blocks' bytes lent to the rows (the file's own bytes written again while the
+// page's is as read). None while the table is empty.
+render::psd_production::Written production_blocks(const core::Page& page, const core::Document& doc, bool layers, std::int64_t dpi) {
+    if (render::psd_production::rows().empty()) return {};
+    render::psd_production::WriteContext context;
+    context.layers_written = layers;
+    context.doc = &doc;  // (PC5 J-a)
+    if (layers) {
+        std::set<std::int64_t> taken;
+        std::int64_t next = 0;
+        for (const core::Layer& layer : page.layers) {
+            if (layer.native_psd && layer.native_psd->id) next = std::max(next, *layer.native_psd->id);
+        }
+        for (const core::Layer& layer : page.layers) {
+            if (layer.native_psd && layer.native_psd->id && taken.insert(*layer.native_psd->id).second) {
+                context.lyids.emplace(layer.id, *layer.native_psd->id);
+            } else if (next < 0xffffffffLL) {
+                context.lyids.emplace(layer.id, ++next);
+            }
+        }
+    }
+    context.width_px = static_cast<double>(render::mm_to_px(page.spec.width_mm.value(), static_cast<int>(dpi)));
+    context.height_px = static_cast<double>(render::mm_to_px(page.spec.height_mm.value(), static_cast<int>(dpi)));
+    context.kept_resource = [&](int id) -> std::optional<std::string> {
+        for (const core::PsdResource& r : page.native_psd ? page.native_psd->resources : std::vector<core::PsdResource>{}) {
+            if (r.id != id) continue;
+            if (const core::Bytes data = kept_psd_file(doc, r.ref)) return *data;
+        }
+        return std::nullopt;
+    };
+    context.kept_global = [&](std::string_view key) -> std::optional<std::string> {
+        for (const core::PsdGlobal& g : page.native_psd ? page.native_psd->globals : std::vector<core::PsdGlobal>{}) {
+            if (g.key != key) continue;
+            if (const core::Bytes data = kept_psd_file(doc, g.ref)) return *data;
+        }
+        return std::nullopt;
+    };
+    return render::psd_production::write(page, context);
+}
+
 // The page's resources (`sized_resources`: their length and blocks) and after them the image resources the page keeps
 // from its PSD — layer comps and slices while their layers are there —, their length again.
-std::string with_kept(const std::string& sized_resources, const core::Page& page, const core::Document& doc) {
+std::string with_kept(const std::string& sized_resources, const core::Page& page, const core::Document& doc, const render::psd_production::Written& own) {
     // (layer-styles@1, PC4 E6: a page with a layer's style says the book's global light — 1037 its angle, 1049 its
     // altitude —, in place of the ones its PSD had)
     const bool styled = std::any_of(page.layers.begin(), page.layers.end(), [](const core::Layer& l) { return l.style.has_value(); });
-    if (!styled && (!page.native_psd || page.native_psd->resources.empty())) return sized_resources;
+    // (PC5 J-0, render/psd_production: the page's own layer comps, slices and measurement scale — `own` — in place of the
+    // kept ones of the ids it handles)
+    if (!styled && own.resources.empty() && (!page.native_psd || page.native_psd->resources.empty())) return sized_resources;
     const bool layers_there = kept_layers_there(page);
     std::string blocks = sized_resources.substr(4);
     if (styled) {
@@ -1625,8 +1731,10 @@ std::string with_kept(const std::string& sized_resources, const core::Page& page
         blocks += image_resource(1037, render::psd_effects::light_resource(light[0]));
         blocks += image_resource(1049, render::psd_effects::light_resource(light[1]));
     }
+    for (const auto& [id, data] : own.resources) blocks += image_resource(static_cast<unsigned>(id), data);
     for (const core::PsdResource& r : page.native_psd ? page.native_psd->resources : std::vector<core::PsdResource>{}) {
         if (styled && (r.id == 1037 || r.id == 1049)) continue;
+        if (own.handled_resources.contains(r.id)) continue;
         if (core::psd_resource_names_layers(r.id) && !layers_there) continue;
         const core::Bytes data = kept_psd_file(doc, r.ref);
         if (!data) continue;
@@ -1651,12 +1759,17 @@ std::string with_kept(const std::string& sized_resources, const core::Page& page
 // global_block, "8BIM", its key, its 4-byte length and its payload, or none) — and after them those the page keeps from
 // its PSD; a kept pattern block of the key of the one made is one block with it: the made one's patterns, then the kept
 // ones it does not have.
-std::string with_kept_globals(const std::string& linked, std::string patterns, const core::Page& page, const core::Document& doc, bool psb) {
-    if (!page.native_psd || page.native_psd->globals.empty()) return linked + patterns;
+std::string with_kept_globals(const std::string& linked, std::string patterns, const core::Page& page, const core::Document& doc, bool psb,
+                              const render::psd_production::Written& own) {
+    // (PC5 J-0, render/psd_production: the page's own notes — Anno — `own`, in place of the kept blocks of the keys it handles)
+    std::string made;
+    for (const auto& [key, data] : own.globals) made += render::psd_keep::tagged_block("8BIM", key, data, psb, true);
+    if (!page.native_psd || page.native_psd->globals.empty()) return linked + patterns + made;
     // (a PSB's long keys' blocks hold other insides in a PSD: written only into a file of the version they were read from)
     const bool same_version = page.native_psd->from && (page.native_psd->from->version == 2) == psb;
-    std::string kept;
+    std::string kept = std::move(made);
     for (const core::PsdGlobal& g : page.native_psd->globals) {
+        if (own.handled_globals.contains(g.key)) continue;
         if (core::psb_long_key(g.key) && !same_version) continue;
         const core::Bytes data = kept_psd_file(doc, g.ref);
         if (!data) continue;
@@ -1703,6 +1816,8 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
     Records records(size, color);
     records.psb(psb);  // (PC4 F-d)
     records.masks_of(page);                    // (PC3 B2)
+    const render::psd_production::Written production = production_blocks(page, episode, true, dpi);  // (PC5 J-0: once a file; J-a: before the records)
+    records.production(production);  // (PC5 J-a: its layers' shmd items)
     records.patterns_of(episode);  // (patterns@1, PC4 E3)
     PlacedLayers placed(episode, dpi, depth);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
@@ -1713,6 +1828,7 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
             return;
         }
         records.note_mask(layer);  // (PC3 B2: its mask's masks@1 settings)
+        records.note_hidden(layer.hidden);  // (PC5 J-a)
         records.note_keep(layer.id);  // (psd-keep@1, PC4 F-d)
         const std::vector<double> values = layer.inks ? *layer.inks : render::ink_picture(layer.image, color).values;
         records.add_inks(layer.name, values, color.space, color.depth, layer.settings ? layer.opacity : 1.0,
@@ -1724,9 +1840,9 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
         PsdTextReport own;
         EditableLines lines(records, episode, static_cast<int>(dpi), size, core::py_int(page.index.json()), report != nullptr ? *report : own, &color);
         const std::function<void(const core::StoryLine&)> line_layers = [&](const core::StoryLine& line) { lines.add(line); };
-        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers, &adjust_layers, true, true);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers, &adjust_layers, true, hidden_layers_too(page), true);
     } else {
-        render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true, true);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true, hidden_layers_too(page), true);
     }
     const unsigned n = core::colour_channels(color.space);
     std::string body = file_start(psb);
@@ -1738,9 +1854,9 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
     put_u32(body, 0);  // (no colour mode data)
     body += with_kept(with_channels(resources_with_icc(dpi, color.space != core::InkSpace::Lab && color.icc ? std::string_view(*color.icc) : std::string_view()),
                                     page, n),
-                      page, episode);  // (PC4 F-d: psd-keep@1)
+                      page, episode, production);  // (PC4 F-d: psd-keep@1)
     body += records.finish(with_kept_globals(placed.global(psb), render::pat::global_block(episode, core::patterns_on(page), color.depth), page, episode,
-                                             psb));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
+                                             psb, production));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
     // the merged picture: each colour plane (CMYK inverted); 8 bits RLE (every row's count first), 16 and 32 raw
     const unsigned all = merged.channels();
     const render::GrayCurve grey_curve = color.depth == 32 ? render::GrayCurve(color) : render::GrayCurve();
@@ -1787,6 +1903,8 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
     Records records(size, std::nullopt, RgbOut{depth, render::RgbSpace::of(page)});
     records.psb(psb);  // (PC4 F-d)
     records.masks_of(page);                                 // (PC3 B2)
+    const render::psd_production::Written production = production_blocks(page, episode, true, dpi);  // (PC5 J-0: once a file; J-a: before the records)
+    records.production(production);  // (PC5 J-a: its layers' shmd items)
     records.patterns_of(episode);  // (patterns@1, PC4 E3)
     PlacedLayers placed(episode, dpi, depth_of_contents);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
@@ -1797,9 +1915,9 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
         PsdTextReport own;
         EditableLines lines(records, episode, static_cast<int>(dpi), size, core::py_int(page.index.json()), report != nullptr ? *report : own);
         const std::function<void(const core::StoryLine&)> line_layers = [&](const core::StoryLine& line) { lines.add(line); };
-        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers, &adjust_layers, true, true);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers, &adjust_layers, true, hidden_layers_too(page), true);
     } else {
-        render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true, true);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true, hidden_layers_too(page), true);
     }
     std::string body = file_start(psb);
     put_u16(body, 3 + static_cast<std::uint32_t>(page.channels.size()));
@@ -1808,9 +1926,9 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
     put_u16(body, static_cast<std::uint32_t>(depth));
     put_u16(body, 3);
     put_u32(body, 0);  // (no colour mode data)
-    body += with_kept(with_channels(resources_with_icc(dpi, detail::rgb_icc(mode)), page, 3), page, episode);  // (PC4 F-d: psd-keep@1)
+    body += with_kept(with_channels(resources_with_icc(dpi, detail::rgb_icc(mode)), page, 3), page, episode, production);  // (PC4 F-d: psd-keep@1)
     body += records.finish(with_kept_globals(placed.global(psb), render::pat::global_block(episode, core::patterns_on(page), depth), page, episode,
-                                             psb));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
+                                             psb, production));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
     // the merged picture: 8 bits RLE (every row's count first), 16 and 32 raw
     const std::size_t pixels = std::size_t(merged.width()) * merged.height();
     const render::RgbSpace space = render::RgbSpace::of(page);
@@ -1860,7 +1978,8 @@ std::string page_psd_flat(const core::Document& episode, const core::Page& page,
         put_u16(body, 1);
         put_u16(body, 0);
         put_u32(body, 0);  // (no colour mode data)
-        body += with_kept(with_paths(resources(dpi), page), page, episode);  // (PC4 F-d: psd-keep@1)
+        const render::psd_production::Written own = production_blocks(page, episode, false, dpi);  // (PC5 J-0: once a file)
+        body += with_kept(with_paths(resources(dpi), page), page, episode, own);  // (PC4 F-d: psd-keep@1)
         put_section_length(body, 0, psb);  // (no layers)
         put_u16(body, 0);  // (raw)
         const std::size_t row = (std::size_t(merged.width) + 7) / 8;
@@ -1893,7 +2012,8 @@ std::string page_psd_flat(const core::Document& episode, const core::Page& page,
         }
         std::string sized;
         put_u32(sized, u32_of(blocks.size()));
-        body += with_kept(sized + blocks, page, episode);  // (PC4 F-d: psd-keep@1)
+        const render::psd_production::Written own = production_blocks(page, episode, false, dpi);  // (PC5 J-0: once a file)
+        body += with_kept(sized + blocks, page, episode, own);  // (PC4 F-d: psd-keep@1)
         put_section_length(body, 0, psb);  // (no layers)
         const std::string rgb = (made.image.mode() == "RGB" ? made.image : made.image.convert("RGB")).tobytes();
         std::string indices(std::size_t(size.width) * size.height, '\0');
@@ -1933,7 +2053,8 @@ std::string page_psd_flat(const core::Document& episode, const core::Page& page,
             plates.push_back(std::move(ink));
         }
         named.channels.insert(named.channels.begin(), plates.begin(), plates.end());
-        body += with_kept(with_channels(resources(dpi), named, 0), page, episode);  // (PC4 F-d: psd-keep@1)
+        const render::psd_production::Written own = production_blocks(page, episode, false, dpi);  // (PC5 J-0: once a file)
+        body += with_kept(with_channels(resources(dpi), named, 0), page, episode, own);  // (PC4 F-d: psd-keep@1)
         put_section_length(body, 0, psb);  // (no layers)
         const auto plane = [&](unsigned c) {
             std::string bytes;
@@ -1971,6 +2092,8 @@ std::string page_psd_bytes(const core::Document& episode, const core::Page& page
     Records records(rgb.size());
     records.psb(psb);  // (PC4 F-d)
     records.masks_of(page);                    // (PC3 B2)
+    const render::psd_production::Written production = production_blocks(page, episode, true, dpi);  // (PC5 J-0: once a file; J-a: before the records)
+    records.production(production);  // (PC5 J-a: its layers' shmd items)
     records.patterns_of(episode);  // (patterns@1, PC4 E3)
     PlacedLayers placed(episode, dpi, depth);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
@@ -1981,9 +2104,9 @@ std::string page_psd_bytes(const core::Document& episode, const core::Page& page
         PsdTextReport own;
         EditableLines lines(records, episode, static_cast<int>(dpi), rgb.size(), core::py_int(page.index.json()), report != nullptr ? *report : own);
         const std::function<void(const core::StoryLine&)> line_layers = [&](const core::StoryLine& line) { lines.add(line); };
-        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers, &adjust_layers, true, true);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, &line_layers, &adjust_layers, true, hidden_layers_too(page), true);
     } else {
-        render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true, true);
+        render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true, hidden_layers_too(page), true);
     }
     std::string body = file_start(psb);
     put_u16(body, 3 + static_cast<std::uint32_t>(page.channels.size()));
@@ -1992,9 +2115,9 @@ std::string page_psd_bytes(const core::Document& episode, const core::Page& page
     put_u16(body, 8);
     put_u16(body, 3);
     put_u32(body, 0);  // (no colour mode data)
-    body += with_kept(with_channels(resources(dpi), page, 3), page, episode);  // (PC4 F-d: psd-keep@1)
+    body += with_kept(with_channels(resources(dpi), page, 3), page, episode, production);  // (PC4 F-d: psd-keep@1)
     body += records.finish(with_kept_globals(placed.global(psb), render::pat::global_block(episode, core::patterns_on(page), 8), page, episode,
-                                             psb));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
+                                             psb, production));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
     // the merged picture: RLE, every row's count of every channel first
     std::string counts, packed;
     for (const Image& channel : rgb.split()) packbits_rows(channel, counts, packed, psb);
@@ -2048,6 +2171,8 @@ std::string contents_psd_bytes(const core::Document& episode, const core::Page& 
     Records records(rgb.size());
     records.psb(psb);  // (PC4 F-d)
     records.masks_of(page);  // (PC3 B2)
+    const render::psd_production::Written production = production_blocks(page, episode, true, dpi);  // (PC5 J-0: once a file; J-a: before the records)
+    records.production(production);  // (PC5 J-a: its layers' shmd items)
     records.patterns_of(episode);  // (patterns@1, PC4 E3)
     PlacedLayers placed(episode, dpi, depth);
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
@@ -2057,7 +2182,7 @@ std::string contents_psd_bytes(const core::Document& episode, const core::Page& 
         records.add(std::move(layer));
     };
     const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, rgb.size(), episode);
-    render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true, true);
+    render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true, hidden_layers_too(page), true);
     std::string body = file_start(psb);
     put_u16(body, 3 + static_cast<std::uint32_t>(page.channels.size()));
     put_u32(body, static_cast<std::uint32_t>(rgb.height()));
@@ -2065,9 +2190,9 @@ std::string contents_psd_bytes(const core::Document& episode, const core::Page& 
     put_u16(body, 8);
     put_u16(body, 3);
     put_u32(body, 0);
-    body += with_kept(with_channels(resources(dpi), page, 3), page, episode);  // (PC4 F-d: psd-keep@1)
+    body += with_kept(with_channels(resources(dpi), page, 3), page, episode, production);  // (PC4 F-d: psd-keep@1)
     body += records.finish(with_kept_globals(placed.global(psb), render::pat::global_block(episode, core::patterns_on(page), 8), page, episode,
-                                             psb));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
+                                             psb, production));  // (PC4 E3: Patt; PC4 F-d: psd-keep@1)
     std::string counts, packed;
     for (const Image& channel : rgb.split()) packbits_rows(channel, counts, packed, psb);
     put_channels_rle(page, rgb.size(), counts, packed, psb);

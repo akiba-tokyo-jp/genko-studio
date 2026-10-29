@@ -41,6 +41,7 @@
 #include "render/ink_canvas.hpp"
 #include "render/page.hpp"
 #include "render/pcraft_manifest.hpp"
+#include "render/pcraft_production.hpp"
 #include "render/png.hpp"
 #include "render/shape_parts.hpp"
 #include "render/smart_filters.hpp"
@@ -243,6 +244,7 @@ struct Ctx {
     int depth = 0;
     render::RgbSpace space;                                         // (an RGB page's: its profile's, or sRGB)
     std::map<const core::SmartContents*, std::string> written;      // (contents written as a .pcraft inside: its blob, once)
+    std::map<std::string, std::string> layer_ids;                   // (PC5 J-a: a layer's id → its first layer's id in the document)
 
     void note(const std::string& text) {
         if (said.insert(text).second) notes.push_back(text);
@@ -729,6 +731,7 @@ Json layer_json(Ctx& ctx, const std::string& name, const core::Layer* layer, Jso
              {"fill_cache", nullptr},
              {"link_group", nullptr}};
     if (layer != nullptr) {
+        ctx.layer_ids.emplace(layer->id, out["id"].dump());  // (PC5 J-a: the layer comps' states name it so)
         if (layer->mask && layer->mask->png && !layer->mask->png->empty()) out["mask"] = mask_json(ctx, *layer->mask);
         if (layer->vector_mask) out["vector_mask"] = pc::vector_mask_json(*layer->vector_mask, ctx.px);
         if (layer->link) {
@@ -1264,6 +1267,17 @@ Json document_json(Ctx& ctx) {
             inks.push_back(Json{{"name", ink.name}, {"color", Json::array({ink.color[0] / 255.0, ink.color[1] / 255.0, ink.color[2] / 255.0})}, {"curve", std::move(curve)}});
         }
         doc["duotone"] = Json{{"inks", std::move(inks)}, {"psd_raw", nullptr}};
+    }
+    // PC5 節 J (render/pcraft_production): the page's layer comps, notes, slices, timeline and measuring — each by its group's
+    // row (none written until then)
+    {
+        render::pcraft_production::WriteContext production;
+        production.px = ctx.px;
+        production.layers = ctx.layer_ids;  // (PC5 J-a)
+        production.say = [&ctx](std::string note) {
+            if (ctx.said.insert(note).second) ctx.notes.push_back(std::move(note));
+        };
+        render::pcraft_production::write(ctx.page, doc, production);
     }
     return doc;
 }

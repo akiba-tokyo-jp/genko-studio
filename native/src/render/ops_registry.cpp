@@ -36,6 +36,8 @@
 #include "render/ops_layer_styles.hpp"
 #include "render/ops_groups.hpp"
 #include "render/ops_type.hpp"
+#include "render/ops_production.hpp"
+#include "render/ops_layer_comps.hpp"
 
 namespace genko::render {
 
@@ -430,6 +432,11 @@ void register_render_ops(core::OpRegistry& registry) {
     register_type_ops(registry);
     // PC5 I-b (groups@1: Frame from Layers, render/ops_groups)
     register_group_ops(registry);
+    // PC5 節 J (制作の補助: カンプ・スライス・注釈・計測・ビデオ): the frames of its new ops (render/ops_production); each group's
+    // register_* after it puts its ops in their places
+    register_production_ops(registry);
+    // PC5 J-a (layer-comps@1: the layer comps, render/ops_layer_comps)
+    register_layer_comp_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {

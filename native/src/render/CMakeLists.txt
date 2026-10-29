@@ -245,6 +245,13 @@ genko_library(genko_render
     text/shaping.cpp
     # PC5 I-b (グループとフレーム: レイヤーからのフレーム)
     ops_groups.cpp
+    # PC5 J-0 (制作の補助の土台: the production's op frames, its PSD blocks and .pcraft keys)
+    ops_production.cpp
+    ops_layer_comps.cpp
+    psd_production.cpp
+    psd_comps.cpp
+    pcraft_production.cpp
+    pcraft_comps.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

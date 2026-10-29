@@ -37,6 +37,7 @@
 #include "render/not_yet_ported.hpp"
 #include "render/ops_smart_parts.hpp"
 #include "render/pcraft_manifest.hpp"
+#include "render/pcraft_production.hpp"
 #include "render/png.hpp"
 #include "render/proof.hpp"
 #include "render/raw.hpp"
@@ -347,6 +348,7 @@ struct Ctx {
     std::set<std::string> filter_notes;                   // (PC4 D7: the notes naming a smart filter, at most kFilterNotesMax)
     std::map<std::string, std::string> nested;            // (a blob of a smart object's file → its contents' id: read once)
     std::map<std::string, std::string> unread;            // (… or why it could not be: tried once)
+    std::map<std::string, std::string> layer_ids;         // (PC5 J-a: a document layer's id → the layer made of it)
 
     core::Page& page() { return doc.edit_page(0); }
 };
@@ -1003,6 +1005,9 @@ core::Layer base_layer(Ctx& ctx, const Json& m, const std::string& name, const J
     layer.panel_clip = false;
     layer.parent_id = parent;
     layer.visible = boolean(field(m, "visible", "layer"), "layer.visible") && !hidden;
+    if (const Json* id = optional_field(m, "id"); id != nullptr && (id->is_number_unsigned() || id->is_number_integer())) {
+        ctx.layer_ids.emplace(id->dump(), layer.id);  // (PC5 J-a: the layer comps' states name it so)
+    }
     double opacity = std::clamp(number(field(m, "opacity", "layer"), "layer.opacity"), 0.0, 1.0);
     const double fill = std::clamp(number(field(m, "fill_opacity", "layer"), "layer.fill_opacity"), 0.0, 1.0);
     if (fill < 1.0) opacity *= fill;  // (its effects, which the fill opacity spares, are left out)
@@ -1965,19 +1970,15 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
     }
     ctx.page().native_source = std::move(source);
 
-    // what Genko has no place for yet (PC5's), said
-    const auto said_of = [&](const char* key, const char* what) {
-        if (const Json* v = optional_field(d, key); v != nullptr && !empty_value(*v)) ctx.notes.add(std::string(what) + "は Genko に無いため外しました");
-    };
-    said_of("layer_comps", "レイヤーカンプ");
-    said_of("notes", "注釈");
-    said_of("slices", "スライス");
-    said_of("timeline", "タイムライン");
-    if (const Json* variables = optional_field(d, "variables"); variables != nullptr && !empty_value(*variables)) ctx.notes.add("変数とデータセットは Genko に無いため外しました");
-    if (const Json* measurement = optional_field(d, "measurement")) {  // (its scale alone, as every document has one: nothing to say)
-        const Json* counts = optional_field(*measurement, "count_groups");
-        const Json* ruler = optional_field(*measurement, "ruler");
-        if ((counts != nullptr && !empty_value(*counts)) || ruler != nullptr) ctx.notes.add("計測（カウント・ものさし）は Genko に無いため外しました");
+    // PC5 節 J (render/pcraft_production): the layer comps, notes, slices, timeline, variables (節 I) and measuring onto the
+    // page — each by its group's row; one not read yet left out and said, in the order PC4 F-f said them
+    {
+        pcraft_production::ReadContext production;
+        production.page = &ctx.page();
+        production.mm = ctx.mm;
+        production.say = [&ctx](std::string note) { ctx.notes.add(std::move(note)); };
+        production.layers = ctx.layer_ids;  // (PC5 J-a)
+        pcraft_production::read(d, production);
     }
     if (const Json* styles = optional_field(d, "text_styles")) {  // (the basic paragraph style every document has: nothing to say)
         const Json* character = optional_field(*styles, "character");

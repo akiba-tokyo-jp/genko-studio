@@ -193,6 +193,10 @@ genko_test(test_transform SOURCES unit/test_transform.cpp DEPS genko_test_suppor
 # PC3 C-d (SPEC.md COLOR-07「移動・整列」): align and distribute by whole working pixels (PhotoCraft's layer_multi_cmds.rs
 # tests), the stacking order among siblings with folders, links, snapping's targets (snap.rs' tests).
 genko_test(test_align SOURCES unit/test_align.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC5 J-a (layer-comps@1, SPEC.md PROD-01「レイヤーカンプ」): the comps as PhotoCraft's tests check them (capture, each
+# option applied alone, the last document state, the comps managed and gone round, the layers gone, the refusals) on the
+# 8-bit, 16-bit and CMYK pages, a pen layer's lines and a style put back, locks and links, a copied page.
+genko_test(test_layer_comps SOURCES unit/test_layer_comps.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame; and PC2a's tone kinds
@@ -538,6 +542,11 @@ genko_test(test_contract_transform SOURCES contract/test_contract_transform.cpp 
 # undone, `genko inspect --at`.
 genko_test(test_contract_align SOURCES contract/test_contract_align.cpp DEPS genko_test_support genko_render_ops
            LABELS contract TIMEOUT 900)
+# PC5 J-a (layer-comps@1): the comps through the command line (apply, undo, inspect --comps, export --format comps), the
+# PSD's 1065 and the layers' cmls as psd-tools reads them (read back, written as read while unchanged, anew, gone), a
+# .pcraft's layer_comps (upstream's reader with $GENKO_PCRAFT_CHECK).
+genko_test(test_contract_layer_comps SOURCES contract/test_contract_layer_comps.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 # PC3 C-e through the command line: every kind of page turned (inspect --pixel), undone and redone; a page of its own paper
@@ -694,6 +703,9 @@ if(GENKO_BUILD_APP)
   # PC3 C-d: レイヤー → 重ね順・整列・分布・リンク・ロック…, 表示 → スナップ・スナップ先 (the words, keys and places), the move
   # tool's drag (by whole working pixels, the linked layers along), 自動選択 (Ctrl+click), snapping (a guide, Ctrl off)
   genko_test(test_gui_align SOURCES gui/test_gui_align.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC5 J-a (layer-comps@1): ウィンドウ → レイヤーカンプ (the dock, its panel's rows, buttons and menu, the windows asked,
+  # each one Undo) and ファイル → 書き出し → レイヤーカンプからファイル…
+  genko_test(test_gui_layer_comps SOURCES gui/test_gui_layer_comps.cpp DEPS genko_app GUI TIMEOUT 600)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC2c (COLOR-04): レイヤー → 色調補正's local corrections and image calculations, 編集 → フェード (only right after).
@@ -822,6 +834,10 @@ if(GENKO_BUILD_APP)
   # the approval box's model and the AI dialog's Qt-free part against Python's (review_model.py, ai_link.py, links.py);
   # what `genko mcp` keeps in a book read by Python's readers; the reply drafts left alone by the Python version
   genko_test(test_contract_studio_gui SOURCES contract/test_contract_studio_gui.cpp DEPS genko_app genko_test_support LABELS contract TIMEOUT 1800)
+  # PC5 G-a (SPEC.md TEXT-02): the text tools' type layers — a click a point text, a drag a box text, a click on the path a
+  # text on it, the input method's words —, a type layer typed over (its text clicked, its row double-clicked), 書式's
+  # commands (アンチエイリアス, 方向, the conversions, ラスタライズ, 更新, Lorem ipsum, a line and a type layer each other's)
+  genko_test(test_gui_type SOURCES gui/test_gui_type.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
 endif()
 
 # `genko` alone starts the desktop app when it is built (test_app_e2e); without it, it is a usage error

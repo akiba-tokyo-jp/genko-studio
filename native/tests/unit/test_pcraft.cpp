@@ -22,6 +22,7 @@
 #include "core/json.hpp"
 #include "render/blake3.hpp"
 #include "render/pcraft_manifest.hpp"
+#include "render/pcraft_production.hpp"
 #include "render/pcraft_read.hpp"
 #include "render/zip.hpp"
 #include "render/zstd.hpp"
@@ -404,6 +405,33 @@ private slots:
             for (const char c : bytes.substr(0, 300)) text.push_back(static_cast<char>(0x20 + (static_cast<unsigned char>(c) % 0x5f)));
             QVERIFY(code_of([&] { (void)pc::read(bundle_text(text), "x"); }) != "other");
         }
+    }
+
+    // PC5 J-0 (render/pcraft_production): a document's keys Genko has no place for yet said as PC4 F-f said them — in its
+    // order (レイヤーカンプ・注釈・スライス・タイムライン・変数とデータセット・計測), only those that hold something (a scale alone,
+    // every document's, not), nothing written.
+    void productionKeysSaidInTheirOrder() {
+        namespace pp = genko::render::pcraft_production;
+        const Json document = Json::parse(R"({"measurement": {"scale": {"pixel_length": 1}, "count_groups": [{"points": [[1, 2]]}]},
+            "variables": {"name": {"kind": "text"}}, "timeline": {"fps": 12}, "slices": [], "notes": [{"text": "a"}],
+            "layer_comps": [{"name": "c"}]})");
+        std::vector<std::string> said;
+        genko::core::Page page;
+        pp::ReadContext context;
+        context.page = &page;
+        context.say = [&said](std::string note) { said.push_back(std::move(note)); };
+        pp::read(document, context);
+        // (PC5 J-a: レイヤーカンプ read — this one not of upstream's form: said so, in its place)
+        QCOMPARE(said, (std::vector<std::string>{"レイヤーカンプは読めない形のため外しました", "注釈は Genko に無いため外しました",
+                                                 "タイムラインは Genko に無いため外しました", "変数とデータセットは Genko に無いため外しました",
+                                                 "計測（カウント・ものさし）は Genko に無いため外しました"}));
+        said.clear();
+        pp::read(Json::parse(R"({"measurement": {"scale": {"pixel_length": 2}}})"), context);
+        QVERIFY(said.empty());
+        Json out = Json::object();
+        pp::WriteContext writing;
+        pp::write(page, out, writing);
+        QVERIFY(out.empty());
     }
 };
 

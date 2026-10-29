@@ -285,6 +285,8 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - 文字の土台（PC5 G-0）:
   - `crates/doc/src/text.rs`（52-197 行: `CharStyle`・`ParagraphStyle` の属性と既定、`TextAlign`・`TextDirection`）と `crates/engine/src/type_extra_cmds.rs`（106-123 行: アンチエイリアスの方法の名前）: 文字と段落の属性の名前と既定 → `native/src/core/type_text.cpp`（`kCharAttrs`・`kParaAttrs`・`char_defaults`・`para_defaults`。長さを mm にし、範囲を決め、Genko の書式の鍵 — 語ごとの倍率・太さの段・縦中横・約物の詰め・禁則 — を足した所は Genko のもの）。
   - `crates/doc/src/text_styles.rs`（182-236 行: `resolve_para`・`resolve_char`）: スタイルを解く順（基本段落 → 段落スタイル → 文字スタイル → 上書き）→ `native/src/core/type_text.cpp`（`resolve_para`・`resolve_chars`。上書きを違う所だけで持ち、台詞の書式と書記素の範囲・段落の番号で解く所は Genko のもの）。
+- 文字レイヤーと文字ツール（PC5 G-a）:
+  - `crates/text/src/render.rs`（180 行: アンチエイリアス なし は被覆 0.5 で 2 値）・`crates/engine/src/type_extra_cmds.rs`（106-123 行: なし だけ描き方が変わり、ほかは名前を持つ。137-192 行: ポイントテキスト ⇄ 段落テキストの変換。361-377 行: Lorem ipsum の文）・`crates/engine/src/type_cmds.rs`（308-350 行: 範囲の置き換え、373 行: 本文からのレイヤーの名前）: 決まり → `native/src/render/text/lettering.cpp`（`binarized`・置き方）・`native/src/render/ops_type.cpp`（`add_type_layer`・`edit_type`・`to_point`・`to_box`）・`native/src/app/main_window_type.cpp`（`paste_lorem`）。基準点・枠からの置き方（縦組み・揃え）、書記素の位置、ルビ・フキダシ、行列での描き方、和文の仮の文は Genko のもの。
 
 ## レイヤー・アートボード・自動処理（PC5 節 I）
 
@@ -301,3 +303,16 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - 表示・窓・環境設定の土台（PC5 H-0）:
   - `crates/engine/src/prefs.rs`（150-730 行: 節の名前と順 `SECTIONS`・各節の項目の path の名前・既定・範囲）→ `native/src/core/prefs_table.cpp`（今の settings.ini の鍵に重ねる表）。`crates/engine/src/prefs/tests.rs`（9-100 行: 全部か無し・範囲の外・知らない path の試験の考え）→ `native/tests/unit/test_prefs_table.cpp`。
   - `crates/ui-egui/src/menu_catalog.rs`（Photoshop のキーの表）→ `native/src/app/key_sets.cpp` の Photoshop の組（キーそのものは Photoshop の初期設定）。
+
+## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1、PC5 節 J）
+
+- 土台（PC5 J-0）: ページに持つ形（Genko はページの mm で持つ）。
+  - `crates/doc/src/comps.rs`（1-110 行: `CompLayerState`・`CompAppearance`・`LayerComp` の 3 つの旗）→ `native/src/core/layer_comps.{hpp,cpp}`
+  - `crates/doc/src/slices.rs`（1-160 行: `SliceOrigin`・`SliceKind`・`Slice`・`Slices`）→ `native/src/core/slices.{hpp,cpp}`
+  - `crates/doc/src/analysis.rs`（1-146 行: `MeasurementScale`・`CountGroup`・`Ruler`・`Measurement`・`Note`）→ `native/src/core/measure.{hpp,cpp}`・`native/src/core/annotations.{hpp,cpp}`
+  - `crates/doc/src/video.rs`（54-90 行: `Timeline` の作業範囲）→ `native/src/core/video.{hpp,cpp}`（ビデオの行の形は Genko のもの）
+- レイヤーカンプ（PC5 J-a）:
+  - `crates/doc/src/comps.rs`（66-107 行: `missing_layers`・`position_bounds`・`layer_position`・`capture_states`・`next_comp_id`）と `crates/engine/src/comps_cmds.rs`（70-100 行: `apply_comp`、102-410 行: `layerComp.*` の new・update・apply・next・previous・delete・duplicate・rename・setComment・setOptions・restoreLastDocumentState・updateWarnings・list、410-432 行: `comps_to_files` のファイル名）→ `native/src/render/ops_layer_comps.{hpp,cpp}`（op の名前と引数・位置を mm と作業の 200 dpi の外接で持つこと・層ごとに動かすこと・警告のクリアを op にすることは Genko のもの）・`native/src/formats/copy.cpp`（`export_layer_comps`）。`crates/engine/src/comps_cmds/tests.rs` の試験の考え → `native/tests/unit/test_layer_comps.cpp`。
+  - `crates/io/src/comps_map.rs`（124-310 行: `parse_cmls`・`comps_from_psd`・`write_comps_resource`・`write_cmls`・`set_cmls`）と `crates/psd/src/metadata.rs`（`parse_shmd`・`write_shmd`）→ `native/src/render/psd_comps.{hpp,cpp}`・`native/src/render/psd_production.cpp`（`shmd_items`・`shmd_bytes`・`layer_shmd`。読んだバイトのまま書くかを指紋で決めること・lyid を付けることは Genko のもの）。
+  - `crates/format/src/manifest.rs`（99-130 行: `LayerCompM`・`CompStateM`・`CompAppearanceM`）と `crates/format/src/convert.rs`（238-265 行: `comp_m`、324-345 行: `Loader::comp`）→ `native/src/render/pcraft_comps.{hpp,cpp}`。
+  - `crates/ui-egui/src/comps_ui.rs`（パネルの行と下のボタン）→ `native/src/app/layer_comps_panel.{hpp,cpp}`（Qt で作り直した）。

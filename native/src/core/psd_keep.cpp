@@ -82,6 +82,11 @@ Json to_json(const PsdPageKeep& keep) {
         out["ids"] = std::move(ids);
     }
     if (keep.from) out["from"] = Json{{"version", keep.from->version}, {"mode", keep.from->mode}, {"depth", keep.from->depth}};
+    if (!keep.copied.empty()) {  // (PC5 J-0)
+        Json copied = Json::array();
+        for (const PsdCopied& c : keep.copied) copied.push_back(Json::array({c.resource >= 0 ? Json(c.resource) : Json(c.global), c.fingerprint}));
+        out["copied"] = std::move(copied);
+    }
     return out;
 }
 
@@ -103,7 +108,7 @@ PsdLayerKeep psd_layer_keep_from_json(const Json& value) {
 PsdPageKeep psd_page_keep_from_json(const Json& value) {
     const std::string what = "a page's native_psd";
     if (!value.is_object()) refuse(what + " is an object");
-    only_keys(value, {"resources", "globals", "ids", "from"}, what);
+    only_keys(value, {"resources", "globals", "ids", "from", "copied"}, what);
     PsdPageKeep keep;
     for (const Json& item : list_of(value, "resources", what)) {
         if (!item.is_array() || item.size() != 3) refuse(what + "'s resources are [id, name, asset]");
@@ -125,6 +130,17 @@ PsdPageKeep psd_page_keep_from_json(const Json& value) {
             return static_cast<int>(std::clamp<std::int64_t>(whole(*v, what + "'s from " + key), -1, 1000));
         };
         keep.from = PsdFrom{number("version"), number("mode"), number("depth")};
+    }
+    for (const Json& item : list_of(value, "copied", what)) {  // (PC5 J-0)
+        if (!item.is_array() || item.size() != 2 || !(item[0].is_number_integer() || item[0].is_string())) refuse(what + "'s copied are [id | key, fingerprint]");
+        PsdCopied c;
+        if (item[0].is_string()) {
+            c.global = text(item[0], what + "'s copied key");
+        } else {
+            c.resource = static_cast<int>(std::clamp<std::int64_t>(whole(item[0], what + "'s copied id"), -1, 65536));
+        }
+        c.fingerprint = text(item[1], what + "'s copied fingerprint");
+        keep.copied.push_back(std::move(c));
     }
     check_psd_keep(keep);
     return keep;
@@ -163,6 +179,15 @@ void check_psd_keep(const PsdPageKeep& keep) {
         if (keep.from->mode < 0 || keep.from->mode > 9) refuse(what + "'s from mode is Photoshop's colour mode (0..9)");
         if (keep.from->depth != 1 && keep.from->depth != 8 && keep.from->depth != 16 && keep.from->depth != 32)
             refuse(what + "'s from depth is 1, 8, 16 or 32");
+    }
+    for (const PsdCopied& c : keep.copied) {  // (PC5 J-0: a kept block's, once)
+        const bool kept = c.resource >= 0 ? std::any_of(keep.resources.begin(), keep.resources.end(), [&](const PsdResource& r) { return r.id == c.resource; })
+                                          : std::any_of(keep.globals.begin(), keep.globals.end(), [&](const PsdGlobal& g) { return g.key == c.global; });
+        if (!kept) refuse(what + "'s copied names a block it keeps");
+        if (c.fingerprint.empty() || c.fingerprint.size() > 128) refuse(what + "'s copied fingerprint is 1..128 bytes");
+        if (std::count(keep.copied.begin(), keep.copied.end(), c) > 1 ||
+            std::count_if(keep.copied.begin(), keep.copied.end(), [&](const PsdCopied& o) { return o.resource == c.resource && o.global == c.global; }) > 1)
+            refuse(what + "'s copied names a block once");
     }
 }
 

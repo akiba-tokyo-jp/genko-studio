@@ -571,7 +571,11 @@ private slots:
         QCOMPARE(page.native_psd->globals[0].key, std::string("Anno"));
         // what Genko has no place for: said, never silently
         const std::vector<std::string>& notes = opened.notes;
-        for (const char* part : {"レイヤー効果", "ラベル", "文字レイヤーは画素", "リンクされたスマートオブジェクト", "レイヤーカンプ", "注釈", "用紙の外",
+        // (PC5 J-a: its layer comps are the page's now — not said)
+        QVERIFY(page.layer_comps && page.layer_comps->comps.size() == 1 && page.layer_comps->comps[0].name == "Comp");
+        QVERIFY(page.layer_comps->comps[0].apply_visibility && !page.layer_comps->comps[0].apply_position);
+        QVERIFY(!said(notes, "レイヤーカンプ"));
+        for (const char* part : {"レイヤー効果", "ラベル", "文字レイヤーは画素", "リンクされたスマートオブジェクト", "注釈", "用紙の外",
                                  "高度な合成のチャンネル", "filter.unknown.later"}) {
             QVERIFY2(said(notes, part), qPrintable(QString::fromUtf8(part) + QStringLiteral("\n") + QString::fromStdString(joined(notes))));
         }

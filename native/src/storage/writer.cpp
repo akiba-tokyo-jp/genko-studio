@@ -25,6 +25,8 @@
 #include "core/version.hpp"
 #include "core/brush_dabs.hpp"
 #include "core/layer_styles.hpp"
+// PC5 J-0 (制作の補助)
+#include "core/video.hpp"
 #include "core/patterns.hpp"
 #include "core/groups.hpp"
 #include "core/type_text.hpp"
@@ -346,6 +348,12 @@ Json page_json(const core::Page& page, AssetStore& store) {
     // (PC4: file-info@1's source file, psd-keep@1's kept resources and blocks — none: nothing written)
     if (page.native_source) out["native_source"] = core::to_json(*page.native_source);
     if (page.native_psd) out["native_psd"] = core::to_json(*page.native_psd);
+    // (PC5 J-0: layer-comps@1's comps, slices@1's slices, annotations@1's notes, measure@1's measuring — none or empty:
+    // nothing written)
+    if (page.layer_comps && !page.layer_comps->empty()) out[std::string(core::kLayerCompsKey)] = core::to_json(*page.layer_comps);
+    if (page.slices && !page.slices->empty()) out[std::string(core::kSlicesKey)] = core::to_json(*page.slices);
+    if (!page.annotations.empty()) out[std::string(core::kAnnotationsKey)] = core::to_json(page.annotations);
+    if (page.measure && !page.measure->empty()) out[std::string(core::kMeasureKey)] = core::to_json(*page.measure);
     for (const auto& [key, value] : page.extra.items()) {
         if (!is_known_page_key(key)) out[key] = value;
     }
@@ -410,6 +418,12 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     }
     for (const auto& line : doc.story) {
         if (core::ruby::uses_feature(line)) features.emplace_back(core::kRubyLayoutFeature);
+    }
+    // (PC5 G-a review P3-3: a type layer's record holding its rubies by place says so too)
+    for (const core::smart::WrittenPage& written : core::smart::written_pages(doc)) {
+        for (const core::Layer& layer : written.page->layers) {
+            if (layer.type && core::ruby::uses_feature(*layer.type)) features.emplace_back(core::kRubyLayoutFeature);
+        }
     }
     // PC2a (adjustments@1): the 3D lookup tables the book's color_lookup corrections use (only those) — on its pages and
     // (PC4 F-f review P1-3) on the pages of the smart objects' contents its pages show, which the reader reads too
@@ -580,6 +594,22 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     core::validate_groups(doc);
     std::erase(features, std::string(core::kGroupsFeature));
     if (core::uses_groups(doc)) features.emplace_back(core::kGroupsFeature);
+    // PC5 J-0 (SPEC.md PROD-01): layer-comps@1, slices@1, annotations@1, measure@1 (a page's own keys) and timeline@1,
+    // video@1 (in a page's anim), each named while the book uses it
+    core::validate_layer_comps(doc);
+    core::validate_slices(doc);
+    core::validate_annotations(doc);
+    core::validate_measure(doc);  // (timeline@1, video@1: named only for a work area, an fps, a video row of their shapes)
+    const std::pair<std::string_view, bool> pc5j[] = {{core::kLayerCompsFeature, core::uses_layer_comps(doc)},
+                                                      {core::kSlicesFeature, core::uses_slices(doc)},
+                                                      {core::kAnnotationsFeature, core::uses_annotations(doc)},
+                                                      {core::kMeasureFeature, core::uses_measure(doc)},
+                                                      {core::kTimelineFeature, core::uses_timeline(doc)},
+                                                      {core::kVideoFeature, core::uses_video(doc)}};
+    for (const auto& [feature, used] : pc5j) {
+        std::erase(features, std::string(feature));
+        if (used) features.emplace_back(feature);
+    }
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 
