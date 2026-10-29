@@ -524,3 +524,9 @@ Photoshop の文書 1 つは Genko のページ 1 枚なので、レイヤーカ
 - 書き手は、それぞれを持つページがあるときだけ `features` にその拡張を加え（無くなれば外す）、空のもの（カンプ・スライス・注釈が無い、計測が全部既定）は書かない。持たない原稿は `features` も保存のバイトも今のまま。
 - **読み手の検査**: 形が上と違う（知らない鍵・型・範囲の外・重なる id・名指す物が無い）ページの本は、読み取り専用で開く（その値は読んだまま保つので失われない）。`anim` の `work`・`video` は、本が timeline@1・video@1 を名乗るときだけ見る（名乗らない本の値は前のアニメの値: 開ける。fps は名乗っても見ない）。これらの拡張を知らない読み手（PC5 J-0 より前の C++ 版）は、未知の拡張として読み取り専用で開く（作業範囲を無視して書き出したり、ビデオの行を空のフォルダーとして描いたりしないため）。
 - PSD・.pcraft: レイヤーカンプ（PSD のリソース 1065 と層の cmls。J-a）・スライス（1050）・注釈（全体の塊 Anno。J-c）・計測スケール（1074）は、その群が写すまで psd-keep@1 の塊のまま保ち、写した後も保って `copied` の印を付ける（ページの `native_psd`）。.pcraft の `layer_comps`・`slices`・`notes`・`measurement`・`timeline` は、その群が読むまで外して notes で言う（PROD-01）。
+
+## 表示（ガイド。VIEW-01、PC5 節 H）
+
+- **新しい拡張・キーは無い**: ガイドは今までのページの `rulers` の定規 `{"id", "kind": "guide", "axis": "h" | "v", "at": mm, "points": [], "active", "visible"}`（`h` は横のガイドで `at` は上からの mm、`v` は縦で左からの mm）のまま。ガイドのロック・エクストラ・表示・非表示 ▸ の切り替え・単位・ガイドとグリッドの色は機械の設定（settings.ini）で、原稿に書かない。
+- **op**（H-b、C++ 版だけ）: `delete_ruler` の `"kind"`（`id` が無いとき、その種類の定規だけを消す。`for_pages` で全ページ）。新しい `add_guide_layout`（`{"page", "columns"?: {"count", "width_mm"?, "gutter_mm"?}, "rows"?: {"count", "height_mm"?, "gutter_mm"?}, "margin_mm"?: 数 | [上, 左, 下, 右], "center_columns"?, "clear"?, "from"?: "paper" | "trim" | "frame"}` → 上の形のガイドの定規。結果 `{"rulers", "vertical", "horizontal"}`）。中身と断りは SPEC VIEW-01。
+- **PSD**: リソース 1032（グリッドとガイド）をガイドの定規として読み書きする（SPEC VIEW-01「PSD のガイド」）。psd-keep@1 は前から 1032 を保たない。

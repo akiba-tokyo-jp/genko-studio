@@ -72,10 +72,13 @@ struct Book {
     std::unique_ptr<app::MainWindow> window;
     gui_test::Answers answers;
 
-    Book() {
+    // (`held`: the page held by an agent — the person's ops on it refused)
+    explicit Book(bool held = false) {
         (void)gui_test::config_folder();
         path = gui_test::path_of(tmp.path() + QStringLiteral("/b.genko"));
-        gui_test::write_book(path, made_book());
+        core::Document doc = made_book();
+        if (held) doc.page_locks[doc.pages[0]->id] = "ai:claude";
+        gui_test::write_book(path, doc);
         window = std::make_unique<app::MainWindow>(app::Session::open(path, gui_test::quick(gui_test::path_of(tmp.path() + QStringLiteral("/recovery")))));
         window->resize(1280, 800);
         window->show();
@@ -171,7 +174,8 @@ private slots:
         };
         b.act("act_measure_scale_custom")->trigger();
         QCOMPARE(b.measure().scale->units, std::string("mm"));
-        QVERIFY(std::fabs(b.measure().scale->pixel_length - 300 / 25.4) < 1e-3);
+        // (the review's P3-6: sent as the preset — the page's pixels a mm as the op has them)
+        QCOMPARE(b.measure().scale->pixel_length, std::round(300 / 25.4 * 1e6) / 1e6);
         b.act("act_measure_scale_default")->trigger();
         QVERIFY(!b.page().measure);
         b.act("act_undo")->trigger();
@@ -211,8 +215,9 @@ private slots:
         QVERIFY(b.measure().ruler);
     }
 
-    // レイヤーの角度補正: the layer in hand turned the same as the op through `apply` on the book as it was (the line cleared,
-    // one Undo); without a line said; with Alt, the page turned and cut to the rectangle inside it.
+    // レイヤーの角度補正 (Photoshop's: it crops by default, Alt not — the coordinator's decision): a click turns the page and
+    // cuts it to the rectangle inside, the same as the op through `apply` on the book as it was (the line cleared, one Undo);
+    // without a line said; with Alt, the layer in hand turned alone.
     void straightening() {
         Book b;
         b.window->set_target_layer("a");
@@ -221,7 +226,18 @@ private slots:
         b.act("act_measure_ruler_tool")->trigger();
         b.drag(QPointF(20, 50), QPointF(90, 44));
         const core::Document before = b.window->book();
+        // the click: the page turned and cut
         b.find<QPushButton>("ruler_straighten")->click();
+        QVERIFY2(!b.page().measure, qPrintable(b.window->last_notice()));
+        QVERIFY(b.page().spec.width_mm.value() < 120 && b.page().spec.height_mm.value() < 90);
+        const core::Document cut = applied(before, Json{{"op", "straighten_layer"}, {"page", 1}, {"crop", true}});
+        QCOMPARE(b.page().spec.width_mm.value(), cut.page(0).spec.width_mm.value());
+        QVERIFY(*b.page().layers[0].raster_png == *cut.page(0).layers[0].raster_png);
+        b.act("act_undo")->trigger();
+        QCOMPARE(b.page().spec.width_mm.value(), 120.0);
+        QVERIFY(b.measure().ruler);
+        // Alt: the layer in hand alone (the paper as it was)
+        b.window->straighten_by_ruler(false);
         QVERIFY2(!b.page().measure, qPrintable(b.window->last_notice()));
         const core::Document by_op = applied(before, Json{{"op", "straighten_layer"}, {"page", 1}, {"ids", Json::array({"a"})}});
         QVERIFY(b.page().layers[0].raster_png && by_op.page(0).layers[0].raster_png);
@@ -231,14 +247,21 @@ private slots:
         b.act("act_undo")->trigger();
         QVERIFY(b.measure().ruler);
         QVERIFY(*b.page().layers[0].raster_png == *before.page(0).layers[0].raster_png);
-        // Alt: the page turned and cut
-        b.window->straighten_by_ruler(true);
-        QVERIFY(b.page().spec.width_mm.value() < 120 && b.page().spec.height_mm.value() < 90);
-        const core::Document cut = applied(before, Json{{"op", "straighten_layer"}, {"page", 1}, {"crop", true}});
-        QCOMPARE(b.page().spec.width_mm.value(), cut.page(0).spec.width_mm.value());
-        QVERIFY(*b.page().layers[0].raster_png == *cut.page(0).layers[0].raster_png);
-        b.act("act_undo")->trigger();
-        QCOMPARE(b.page().spec.width_mm.value(), 120.0);
+    }
+
+    // (the coordinator's decision after the review's P3-1) A page the op cannot change (an agent holds it): the line drawn
+    // stays in this window alone, its readout shown, the book untouched; 消去 lets it go; another page lets it go.
+    void aLineOnAPageThatCannotChange() {
+        Book b(true);
+        b.act("act_measure_ruler_tool")->trigger();
+        b.drag(QPointF(20, 60), QPointF(80, 60));
+        QVERIFY(!b.page().measure);
+        QVERIFY(b.canvas()->ruler_here);
+        QVERIFY2(b.window->ruler_readout()->text().contains(QStringLiteral("L1 60.")), qPrintable(b.window->ruler_readout()->text()));
+        QVERIFY(b.canvas()->ruler_in_hand());
+        b.find<QPushButton>("ruler_clear")->click();
+        QVERIFY(!b.canvas()->ruler_here);
+        QCOMPARE(b.window->ruler_readout()->text(), QStringLiteral("—"));
     }
 
     // The カウントツール: clicks put marks (one Undo each), a drag moves one, Alt+click takes one away; the options: a new group

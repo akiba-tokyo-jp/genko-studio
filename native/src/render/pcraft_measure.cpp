@@ -10,6 +10,7 @@
 #include "core/error.hpp"
 #include "core/production_json.hpp"
 #include "core/pynum.hpp"
+#include "render/ops_annotations.hpp"
 #include "render/pcraft_annotations.hpp"
 #include "render/pcraft_manifest.hpp"
 
@@ -73,7 +74,7 @@ std::optional<core::Measure> measure_of(const Json& value, double mm, double pag
             group.color = {255, 0, 0};  // (PhotoCraft's default: red)
             if (const Json* v = field(g, "name")) {
                 if (!v->is_string()) bad("a count group's name is not text");
-                if (!v->get<std::string>().empty()) group.name = v->get<std::string>().substr(0, 1024);
+                if (!v->get<std::string>().empty()) group.name = annotations::cut_utf8(v->get<std::string>(), 1024);  // (by whole characters)
             }
             if (const Json* v = field(g, "color")) {
                 try {

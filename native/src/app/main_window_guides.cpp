@@ -16,6 +16,7 @@
 #include <QScrollArea>
 #include <QSettings>
 
+#include <algorithm>
 #include <cmath>
 
 #include "app/ask.hpp"
@@ -26,6 +27,7 @@
 #include "app/main_window.hpp"
 #include "app/preferences.hpp"
 #include "app/tool_settings.hpp"
+#include "app/view_units.hpp"
 #include "service/wording.hpp"
 #include "core/base64.hpp"
 #include "core/frames.hpp"
@@ -119,7 +121,8 @@ void MainWindow::build_guide_actions() {
     };
     toggle("act_snap", QStringLiteral("描画定規にスナップ"), QStringLiteral("Ctrl+2"), QStringLiteral("ペンの線を定規に沿わせる（切ると自由に描ける）"));
     toggle("act_show_rulers", QStringLiteral("描画定規を表示"), QStringLiteral("Ctrl+Shift+R"), QString());
-    toggle("act_grid", QStringLiteral("グリッドを表示"), QStringLiteral("Ctrl+'"), QString());
+    // (PC5 H-b: Photoshop's 表示 → 表示・非表示 ▸ グリッド — and here in 定規 as before)
+    toggle("act_grid", QStringLiteral("グリッド"), QStringLiteral("Ctrl+'"), QString());
     toggle("act_grid_snap", QStringLiteral("グリッドにスナップ"), QString(), QStringLiteral("Shift で引く直線と定規の点がグリッドに吸い付く"));
     {
         const auto store = settings();
@@ -277,7 +280,19 @@ void MainWindow::guide_toggles() {
 }
 
 void MainWindow::grid_spacing() {
-    const auto value = ask::get_double(this, QStringLiteral("グリッドの間隔"), QStringLiteral("間隔（mm）"), canvas_->grid_mm, 0.5, 100, 1);
+    // (PC5 H-b: in 環境設定 → 単位・定規's unit — the page's pixels and its width's percent for this page —, kept in mm)
+    const core::units::Unit unit = view_units::ruler();
+    const core::units::Basis basis = view_units::basis(current_page(), true);
+    std::optional<double> value;
+    if (unit == core::units::Unit::Mm) {
+        value = ask::get_double(this, QStringLiteral("グリッドの間隔"), QStringLiteral("間隔（mm）"), canvas_->grid_mm, 0.5, 100, 1);
+    } else {
+        const auto in_unit = [&](double mm) { return core::units::from_mm(mm, unit, basis); };
+        const auto asked = ask::get_double(this, QStringLiteral("グリッドの間隔"),
+                                           QStringLiteral("間隔（%1）").arg(QString::fromStdString(core::units::suffix_of(unit))), in_unit(canvas_->grid_mm),
+                                           in_unit(0.5), in_unit(100), std::max(2, core::units::decimals_of(unit)));
+        if (asked) value = std::clamp(std::round(core::units::to_mm(*asked, unit, basis) * 1000.0) / 1000.0, 0.5, 100.0);
+    }
     if (!value) return;
     canvas_->grid_mm = *value;
     settings()->setValue(QStringLiteral("guides/grid_mm"), *value);
@@ -316,7 +331,8 @@ void MainWindow::place_ruler(const Json& ruler) {
     for (const auto& [key, value] : ruler.items()) op[key] = value;
     if (!apply_ops(Json::array({op}))) return;
     if (ruler.value("kind", std::string()) == "guide") {
-        flash(QStringLiteral("ガイド線を引きました。近くで描き始めた線が沿います（定規 → 選んだ定規を消す で消す）"), 3500);
+        // (PC5 H-b: a guide is drawn now, moved with the move tool and taken away dragged off the page's view)
+        flash(QStringLiteral("ガイドを引きました。移動ツールでドラッグして動かし、定規の上かキャンバスの外へ出すと消えます"), 3500);
         return;
     }
     canvas_->selected_ruler_id = id;

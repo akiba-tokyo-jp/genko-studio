@@ -350,7 +350,8 @@ void straighten_layer(core::OpContext& c) {
     if (!page.measure || !page.measure->ruler) throw OpError("the page has no ruler line (draw one with the ruler tool: set_ruler_line)");
     const Json* ids = given(c.op, "ids");
     const Json* crop_flag = given(c.op, "crop");
-    const bool crop = crop_flag != nullptr ? flag(*crop_flag, "crop") : ids == nullptr;
+    // (the review's P3-2: no default that turns and cuts the page — ids or crop: true, said)
+    const bool crop = crop_flag != nullptr && flag(*crop_flag, "crop");
     if (ids != nullptr && crop) throw OpError("give ids (the layers to turn) or crop: true (the page turned and cut), not both");
     if (ids == nullptr && !crop) throw OpError("give ids (the layers to turn) or crop: true (the page turned and cut)");
     if (ids != nullptr && (!ids->is_array() || ids->empty() || !std::all_of(ids->begin(), ids->end(), [](const Json& v) { return v.is_string(); })))

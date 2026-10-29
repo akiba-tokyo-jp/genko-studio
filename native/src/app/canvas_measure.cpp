@@ -46,6 +46,7 @@ double to_segment(const QPointF& p, const QPointF& a, const QPointF& b) {
 
 std::optional<core::RulerLine> PageCanvas::ruler_in_hand() const {
     if (measure_drag_ && measure_drag_->moved) return measure_drag_->line;
+    if (ruler_here) return ruler_here;
     const core::Page* p = page();
     if (p == nullptr || !p->measure || !p->measure->ruler) return std::nullopt;
     return *p->measure->ruler;

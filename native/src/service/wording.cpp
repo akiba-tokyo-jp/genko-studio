@@ -767,6 +767,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(give ids \(the layers to turn\) or crop: true.*)", "角度補正するレイヤー（ids）か、ページを回して切り抜く（crop: true）のどちらかを指定します"));
         r.push_back(rule(R"(ids is \[layer id, …\])", "角度補正するレイヤーは ID の一覧で指定します"));
         r.push_back(rule(R"((trim|bleed_mm|margins) is only for crop: true)", "\\1 は、ページを回して切り抜くとき（crop: true）だけ指定します"));
+        r.push_back(rule(R"(the page's count marks, ruler line or notes would lie past 1000 m from the page)",
+                         "カウントの印・ものさしの線・注釈が、ページから 1000 m より遠くへ出てしまうため、できません"));
         // (PC5-0, Z0's review P1-1: a new layer of a 16- or 32-bit page painted at 8 bits for the book's precise budget)
         r.push_back(rule(R"(the layer is painted at 8 bits: the book's precise pixels would pass their budget.*)",
                          "本の高精度の画素の上限（1 GiB）を越えるか、本をまだ読み込み中のため、このレイヤーは 8 bit で塗りました"));

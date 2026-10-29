@@ -26,6 +26,7 @@
 #include "render/pcraft_measure.hpp"
 #include "render/pcraft_production.hpp"
 #include "render/psd_annotations.hpp"
+#include "render/psd_descriptor.hpp"
 #include "render/raster.hpp"
 #include "service/studio_service.hpp"
 
@@ -286,6 +287,8 @@ private slots:
         // the refusals
         QVERIFY(refusal(doc, op("straighten_layer", {{"ids", {"a"}}, {"crop", true}})).find("not both") != std::string::npos);
         QVERIFY(refusal(doc, op("straighten_layer", {{"crop", false}})).find("give ids") != std::string::npos);
+        // (the review's P3-2: no default that turns and cuts the page)
+        QVERIFY(refusal(doc, op("straighten_layer")).find("give ids") != std::string::npos);
         QVERIFY(refusal(doc, op("straighten_layer", {{"ids", {"a"}}, {"trim", "fit"}})).find("trim is only for crop: true") != std::string::npos);
     }
 
@@ -382,6 +385,32 @@ private slots:
         QCOMPARE(cut.page(0).annotations[0].at_mm, (std::array<double, 2>{4.73, 5.73}));
     }
 
+    // (the review's P2-2) A mark, a line or a note the page size ops would take past 1000 m from the page: the op refused (a
+    // book written is read); the writer's check sees the places the reader takes.
+    void farPlacesRefused() {
+        core::Document doc = book();
+        doc = run(doc, op("add_count", {{"at_mm", {900000, 1}}}));
+        QVERIFY(refusal(doc, op("resize_pages", {{"width_mm", 60}})).find("would lie past 1000 m from the page") != std::string::npos);
+        QVERIFY(run(doc, op("resize_pages", {{"width_mm", 33}})).page(0).measure);  // (still inside: done)
+        core::Document lined = run(book(), op("set_ruler_line", {{"start", {0, 0}}, {"end", {-900000, 0}}}));
+        QVERIFY(refusal(lined, op("resize_pages", {{"width_mm", 60}})).find("would lie past 1000 m") != std::string::npos);
+        core::Document noted = run(book(), op("add_annotation", {{"at_mm", {900000, 1}}}));
+        QVERIFY(refusal(noted, op("resize_pages", {{"width_mm", 60}})).find("would lie past 1000 m") != std::string::npos);
+        core::Measure far;
+        far.count_groups.push_back(core::new_count_group(0));
+        far.count_groups[0].points.push_back({1.5e6, 0});
+        bool refused = false;
+        try {
+            core::check_measure(far);
+        } catch (const core::Error&) {
+            refused = true;
+        }
+        QVERIFY(refused);
+        // (a page with neither: the page size ops as before — nothing made)
+        const core::Document turned = run(book(), op("rotate_pages", {{"turn", "90cw"}}));
+        QVERIFY(!turned.page(0).measure && turned.page(0).annotations.empty());
+    }
+
     // MCP's apply_ops does not take them (the C++ build's own, as J-a's and J-c's); none is a frame any more but 目盛り
     // マーカー (J-d2).
     void notTheAgents() {
@@ -426,10 +455,31 @@ private slots:
         core::Page bare = book().page(0);
         QVERIFY(!pa::read_scale(bare, pa::scale_block(core::MeasurementScale{}), context));
         QVERIFY(!pa::write_scale(bare, writing));
+        // (the review's P3-5) 2 pixels = 1 pixels on a page where a file pixel is half the page's: 1 = 1 — none, kept as it was
+        core::Page halves = book().page(0);
+        QVERIFY(!pa::read_scale(halves, pa::scale_block(core::MeasurementScale{2, 1, "pixels"}), context));
+        QVERIFY(!halves.measure);
+        // (the review's P3-4) the fingerprint: the scale's values alone
+        QCOMPARE(pa::scale_fingerprint(page, nullptr),
+                 render::psd_production::fingerprint_of(Json{{"pixel_length", 75.0}, {"logical_length", 2.0}, {"units", "mm"}}));
+        // (the review's P2-1) units of a surrogate without its pair: U+FFFD, the book writes it
+        render::psd::descriptor::Writer odd;
+        odd.number("pixelLength", 10);
+        odd.number("logicalLength", 1);
+        odd.text("logicalUnits", std::u16string{u'c', static_cast<char16_t>(0xD800), u'm'});
+        const auto read_odd = pa::scale_of(odd.versioned("null"));
+        QVERIFY(read_odd);
+        QCOMPARE(read_odd->units, std::string("c\xEF\xBF\xBDm"));
+        core::Page odd_page = book().page(0);
+        QVERIFY(pa::read_scale(odd_page, odd.versioned("null"), context));
+        QVERIFY(!pa::scale_fingerprint(odd_page, nullptr).empty());
         // 1080
         QVERIFY(!pa::counts_own(bare));
         core::Document counted = run(book(), op("add_count", {{"at_mm", {1, 1}}}));
         QVERIFY(pa::counts_own(counted.page(0)));
+        // (the review's P3-10) the export says so
+        QCOMPARE(pa::export_notes(counted).size(), std::size_t(1));
+        QVERIFY(pa::export_notes(book()).empty());
         QVERIFY(render::psd_production::copies_resource(1074));
         QVERIFY(!render::psd_production::copies_resource(1080));
     }
@@ -478,6 +528,13 @@ private slots:
         QCOMPARE((*written)["active_count_group"], Json(1));
         QCOMPARE((*written)["ruler"]["protractor"], Json(nullptr));
         QCOMPARE(*pm::measure_of(*written, 0.1, 10), *doc.page(0).measure);
+        // (the review's P2-3) a name past 1024 bytes cut by whole characters (342 kana: 1026 bytes)
+        std::string long_name;
+        for (int i = 0; i < 342; ++i) long_name += "あ";
+        const auto named = pm::measure_of(Json{{"count_groups", Json::array({Json{{"name", long_name}, {"points", Json::array({Json::array({1, 1})})}}})}}, 0.1, 10);
+        QVERIFY(named);
+        QCOMPARE(named->count_groups[0].name.size(), std::size_t(1023));
+        (void)core::dump(core::to_json(*named), core::DumpOptions{});  // (valid UTF-8: written)
         // not of the shape: said, left out
         core::Document other = book();
         context.page = &other.edit_page(0);

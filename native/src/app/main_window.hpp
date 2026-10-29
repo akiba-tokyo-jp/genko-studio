@@ -544,6 +544,15 @@ public:
     // レイヤーを画面サイズに合わせる (PC5 H-a): the view on the box of the layers chosen (else the layer drawn on; none
     // showing anything: the page).
     void fit_layers();
+    // PC5 H-b (main_window_guide_view.cpp): 環境設定 → 単位・定規 and ガイド・グリッド・スライス on the canvas (its unit, the guides'
+    // and the grid's colours and styles, プリントサイズ's screen resolution — preferences::apply_all calls it); ガイドを消去 (every
+    // page: every_page) and カンバスガイドを消去 (the page in front); 新規ガイド… (a guide's id: that guide moved),
+    // 新規ガイドレイアウトを作成…, エクストラオプションを表示….
+    void apply_guide_prefs();
+    void clear_guides(bool every_page);
+    void ask_new_guide(const QString& moved = {});
+    void ask_guide_layout();
+    void ask_extras_options();
     RestReminder* rest() const { return rest_; }
     RadialMenu* radial() const;  // (out of line: RadialMenu is only declared here)
     // キーを押している間だけ持ち替え: the tool last chosen (its key), the one before and when (seconds); the key of the
@@ -742,6 +751,13 @@ private:
     QMenu* show_menu(QMenu* view);
     // PC5 H-a: 手のひらツール's and ズームツール's pages in オプション (main_window_view.cpp)
     void build_view_pages(ToolSettings* ts);
+    // PC5 H-b (main_window_guide_view.cpp): エクストラ, 表示・非表示 ▸'s own (and ターゲットパス・選択範囲のエッジ・グリッド・
+    // ブラシプレビュー moved in), すべて・なし・エクストラオプションを表示…, ガイドをロック・ガイドを消去・カンバスガイドを消去・
+    // 新規ガイド…・新規ガイドレイアウトを作成…; apply_extras: the canvas's switches as the commands say (kept for the next window)
+    void build_guide_view_actions();
+    void build_guide_view_menus(QMenu* view);
+    void apply_extras();
+    void share_view_switch(const QString& attribute, bool on);  // (the other open windows the same)
     void ask_32bit_preview();
     void build_arrange_actions();
     void build_arrange_menus(QMenu* arrange);

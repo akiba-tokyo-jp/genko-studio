@@ -87,5 +87,8 @@ std::optional<std::string> write_scale(const core::Page& page, const psd_product
 std::string scale_fingerprint(const core::Page& page, const core::Document* doc);
 // 1080's row: the kept count not written while the page has its own marks.
 bool counts_own(const core::Page& page);
+// (the review's P3-10) What a PSD written of the book says of its count marks: none written (Photoshop's form is not public;
+// a PSD's own count not written either while the page has marks of its own).
+std::vector<std::string> export_notes(const core::Document& doc);
 
 }  // namespace genko::render::psd_annotations

@@ -52,6 +52,10 @@ genko_library(genko_app
     main_window.cpp
     main_window_actions.cpp
     main_window_view.cpp
+    main_window_guide_view.cpp
+    guide_dialogs.cpp
+    view_units.cpp
+    preferences_units.cpp
     main_window_arrange.cpp
     main_window_edit.cpp
     key_sets.cpp
@@ -76,6 +80,7 @@ genko_library(genko_app
     history_panel.cpp
     check_panel.cpp
     canvas_scale.cpp
+    canvas_guide_lines.cpp
     canvas_tools.cpp
     canvas_vector.cpp
     canvas_guides.cpp

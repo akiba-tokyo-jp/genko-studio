@@ -3,6 +3,7 @@
 
 #include "core/measure.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -99,7 +100,15 @@ void check_measure(const Measure& measure) {
     if (measure.count_groups.empty() ? measure.active_group != 0 : measure.active_group >= measure.count_groups.size()) {
         pj::wrong(where + ".active_group", "names no count group of the page");
     }
+    // (the review's P2-2: the places the reader takes — pj::point_mm's —, so a book written is read)
+    const auto far = [](const std::array<double, 2>& p) {
+        return !std::isfinite(p[0]) || !std::isfinite(p[1]) || std::fabs(p[0]) > pj::kCoordinateMaxMm || std::fabs(p[1]) > pj::kCoordinateMaxMm;
+    };
+    if (measure.ruler && (far(measure.ruler->start) || far(measure.ruler->end) || (measure.ruler->protractor && far(*measure.ruler->protractor)))) {
+        pj::wrong(where + ".ruler", "lies past 1000 m from the page");
+    }
     for (const CountGroup& g : measure.count_groups) {
+        if (std::any_of(g.points.begin(), g.points.end(), far)) pj::wrong(where, "has a count mark past 1000 m from the page");
         if (g.points.size() > kCountPointsMax) pj::wrong(where, "has a count group of more than " + std::to_string(kCountPointsMax) + " marks");
         if (g.marker_size < 1 || g.marker_size > 10 || g.label_size < 8 || g.label_size > 72) pj::wrong(where, "has a count group whose sizes are out of range");
     }

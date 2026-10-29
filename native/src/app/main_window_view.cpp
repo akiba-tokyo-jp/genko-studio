@@ -53,8 +53,8 @@ const QStringList& view_rows() {
         // スクリーンモード ▸ (H-a)
         QStringLiteral("▸スクリーンモード"),
         QStringLiteral("|"),
-        // エクストラ・表示・非表示 ▸ (H-b: ターゲットパス, ブラシプレビュー and the rest go in it there)
-        QStringLiteral("act_extras"), QStringLiteral("▸表示・非表示"), QStringLiteral("act_show_target_path"), QStringLiteral("act_brush_preview"),
+        // エクストラ・表示・非表示 ▸ (H-b: ターゲットパス, ブラシプレビュー, 選択範囲のエッジ and グリッド in it)
+        QStringLiteral("act_extras"), QStringLiteral("▸表示・非表示"),
         QStringLiteral("|"),
         // 定規 (the user's decision 12: Genko's 目盛り)
         QStringLiteral("act_scale"),
@@ -74,7 +74,7 @@ const QStringList& view_rows() {
         QStringLiteral("|"),
         QStringLiteral("act_overview"), QStringLiteral("act_prev"), QStringLiteral("act_next"),
         QStringLiteral("|"),
-        QStringLiteral("act_guides"), QStringLiteral("act_phone"), QStringLiteral("act_sel_edges"), QStringLiteral("act_onion"),
+        QStringLiteral("act_guides"), QStringLiteral("act_phone"), QStringLiteral("act_onion"),
         QStringLiteral("act_screen_dots"),
         QStringLiteral("|"),
         QStringLiteral("act_tool_names")};
@@ -83,12 +83,12 @@ const QStringList& view_rows() {
 
 // 表示 → 表示・非表示 ▸ in Photoshop's order (節 H 4.4, 5.1; the owner 節 H). Each part puts its command in with
 // show_menu(view)->addAction(...) under the attribute named here — a row not made yet is passed over, a command not named
-// here goes after a line. (H-b: レイヤーエッジ…メッシュ・編集ピン, すべて・なし, エクストラオプション…; J-d1: カウント; J-b: スライス;
-// J-c: 注釈; H-a: ピクセルグリッド)
+// here goes after a line. (H-b: レイヤーエッジ…メッシュ・編集ピン, すべて・なし, エクストラオプション… — 選択範囲のエッジ is PC3's
+// act_sel_edges, グリッド 定規's act_grid —; J-d1: カウント; J-b: スライス; J-c: 注釈; H-a: ピクセルグリッド)
 const QStringList& show_rows() {
     static const QStringList rows{
-        QStringLiteral("act_show_layer_edges"), QStringLiteral("act_show_selection_edges"), QStringLiteral("act_show_target_path"),
-        QStringLiteral("act_show_grid"), QStringLiteral("act_show_guides"), QStringLiteral("act_show_canvas_guides"),
+        QStringLiteral("act_show_layer_edges"), QStringLiteral("act_sel_edges"), QStringLiteral("act_show_target_path"),
+        QStringLiteral("act_grid"), QStringLiteral("act_show_guides"), QStringLiteral("act_show_canvas_guides"),
         QStringLiteral("act_show_artboard_guides"), QStringLiteral("act_show_artboard_names"), QStringLiteral("act_show_count"),
         QStringLiteral("act_show_smart_guides"), QStringLiteral("act_show_slices"), QStringLiteral("act_show_notes"),
         QStringLiteral("act_pixel_grid"), QStringLiteral("act_brush_preview"), QStringLiteral("act_show_mesh"),
@@ -160,6 +160,7 @@ void MainWindow::build_view_actions() {
     }, {}, QStringLiteral("標準 → メニュー付きフルスクリーン → フルスクリーン → 標準の順に切り替えます"));
     // (render:GPU-CPU-parity: the card could not draw the page — the processor draws it now, and the person is told)
     connect(canvas_, &PageCanvas::gpuFailed, this, [this](const QString& message) { flash(message, 6000, true); });
+    build_guide_view_actions();  // (PC5 H-b: main_window_guide_view.cpp)
 }
 
 void MainWindow::build_view_menus(QMenu* view) {
@@ -172,6 +173,7 @@ void MainWindow::build_view_menus(QMenu* view) {
     screens->addSeparator();
     screens->addAction(action(QStringLiteral("act_screen_next")));
     show_menu(view)->addAction(action(QStringLiteral("act_pixel_grid")));
+    build_guide_view_menus(view);  // (PC5 H-b: エクストラ, 表示・非表示 ▸'s, the guides' — main_window_guide_view.cpp)
     // (after every part has put its commands in 表示 and in 表示・非表示 ▸: laid out once)
     lay_out_menu(show_menu(view), show_rows());
     lay_out_menu(view, view_rows());

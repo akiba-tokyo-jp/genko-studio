@@ -174,8 +174,26 @@ std::vector<Pref> make_table() {
         colour("transparencyAndGamut.customDark", "view/checker_dark", "#cccccc", "カスタムの色（暗い方）"),
         colour("transparencyAndGamut.gamutWarningColor", "view/gamut_color", "#808080", "色域外警告の色"),
         integer("transparencyAndGamut.gamutWarningOpacity", "view/gamut_opacity", 100, 1, 100, "色域外警告の不透明度（%）"),
-        // guidesGridAndSlices (ガイド・グリッド・スライス)
-        number("guidesGridAndSlices.gridlineEvery", "guides/grid_mm", "5", 0.5, 100, "グリッドの間隔（mm）", Apply::NewWindow),
+        // unitsAndRulers (単位・定規 — PC5 H-b: the ruler's unit is 定規's, the guides', the grid's, 情報's and the size windows';
+        // 文字 the type's (節 G); a column and its gutter (points) are 画像解像度's and カンバスサイズ's 列)
+        choice("unitsAndRulers.rulers", "units/ruler", "mm", {"px", "in", "cm", "mm", "pt", "pica", "percent"}, "定規の単位"),
+        choice("unitsAndRulers.typeUnits", "units/type", "pt", {"pt", "px", "mm"}, "文字の単位"),
+        number("unitsAndRulers.columnWidth", "units/column_width", "180", 1, 10000, "段組の幅（pt）"),
+        number("unitsAndRulers.gutter", "units/gutter", "12", 0, 10000, "段組の間隔（pt）"),
+        number("unitsAndRulers.printResolution", "units/print_resolution", "300", 1, 10000, "新規の印刷の解像度（ppi）"),
+        number("unitsAndRulers.screenResolution", "units/screen_resolution", "96", 1, 10000, "画面の解像度（ppi。プリントサイズ）"),
+        choice("unitsAndRulers.pointSize", "units/point_size", "postscript", {"postscript", "traditional"}, "ポイント/パイカの単位"),
+        // guidesGridAndSlices (ガイド・グリッド・スライス — PC5 H-b; slices' two are 節 J's)
+        colour("guidesGridAndSlices.guideColor", "guides/guide_color", "#4affff", "ガイドの色"),
+        choice("guidesGridAndSlices.guideStyle", "guides/guide_style", "lines", {"lines", "dashedLines", "dots"}, "ガイドの線種"),
+        colour("guidesGridAndSlices.smartGuideColor", "guides/smart_color", "#e64980", "スマートガイドの色"),
+        colour("guidesGridAndSlices.gridColor", "guides/grid_color", "#508cdc", "グリッドの色"),
+        choice("guidesGridAndSlices.gridStyle", "guides/grid_style", "lines", {"lines", "dashedLines", "dots"}, "グリッドの線種"),
+        // (the thin lines' step, what snaps — Genko's own path: Photoshop's グリッド線 is the thick lines' step in gridUnit, which
+        // the screen shows as this × subdivisions; the review's P2-3, the coordinator's decision: not a path of its own here)
+        number("guidesGridAndSlices.gridSpacingMm", "guides/grid_mm", "5", 0.5, 100, "グリッドの細い線の間隔（mm。グリッド線 ÷ 分割数）"),
+        integer("guidesGridAndSlices.subdivisions", "guides/grid_subdivisions", 5, 1, 100, "分割数（太い線の間の細い線の数）"),
+        choice("guidesGridAndSlices.gridUnit", "guides/grid_unit", "mm", {"mm", "cm", "in", "pt", "pica"}, "グリッド線の単位"),
         // rawDefaults (Camera Raw)
         choice("rawDefaults.colorSpace", "raw/space", "adobe-rgb-compat", {"prophoto-compat", "adobe-rgb-compat", "srgb", "display-p3"}, "色空間"),
         choice("rawDefaults.bitDepth", "raw/depth", "16", {"8", "16"}, "ビット数"),
@@ -223,9 +241,18 @@ std::vector<Pref> make_table() {
         boolean("view.grid", "guides/grid", false, "グリッドを表示", Apply::NewWindow),
         boolean("view.snapToGrid", "guides/grid_snap", false, "グリッドにスナップ", Apply::NewWindow),
         boolean("view.snapTo.*", "snap/*", true, "スナップ先", Apply::NewWindow),
+        // (PC5 H-b: エクストラ and 表示・非表示 ▸'s own switches, ガイドをロック — this computer's, never the book's)
+        boolean("view.extras", "view/extras", true, "エクストラ", Apply::NewWindow),
+        boolean("view.show.guides", "view/show_guides", true, "ガイド", Apply::NewWindow),
+        boolean("view.show.canvasGuides", "view/show_canvas_guides", true, "カンバスガイド", Apply::NewWindow),
+        boolean("view.show.smartGuides", "view/show_smart_guides", true, "スマートガイド", Apply::NewWindow),
+        boolean("view.show.layerEdges", "view/show_layer_edges", false, "レイヤーエッジ", Apply::NewWindow),
+        boolean("view.show.mesh", "view/show_mesh", true, "メッシュ", Apply::NewWindow),
+        boolean("view.show.editPins", "view/show_edit_pins", true, "編集ピン", Apply::NewWindow),
+        boolean("view.lockGuides", "guides/lock", false, "ガイドをロック", Apply::NewWindow),
         // (PC5 J-c・J-d1: 表示 → 表示・非表示 ▸ 注釈・カウント)
-        boolean("view.show.notes", "view/show_notes", true, "注釈を表示", Apply::NewWindow),
-        boolean("view.show.count", "view/show_count", true, "カウントを表示", Apply::NewWindow),
+        boolean("view.show.notes", "view/show_notes", true, "注釈", Apply::NewWindow),
+        boolean("view.show.count", "view/show_count", true, "カウント", Apply::NewWindow),
         // state (what the tools and the windows remember)
         memory("state.3d.*", "3d/*"),
         memory("state.ai.*", "ai/*"),
@@ -236,6 +263,7 @@ std::vector<Pref> make_table() {
         memory("state.fill.*", "fill/*"),
         memory("state.gradient.*", "gradient/*"),
         memory("state.gutter.*", "gutter_*"),
+        memory("state.guideLayouts.*", "guide_layouts/*"),  // (PC5 H-b: 新規ガイドレイアウトを作成…'s presets)
         memory("state.layerDetails", "ui/layer_details"),
         memory("state.keySetTold", "ui/key_set_told"),  // (PC5 H-0: the change of the default key set said once)
         memory("state.migration.*", "migration/*"),

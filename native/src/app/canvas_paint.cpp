@@ -167,7 +167,9 @@ void PageCanvas::paint_page(QPainter& painter) {
     if (show_guides) draw_guides(painter, page_rect);
     if (phone_view) draw_phone(painter);  // (the phone screens: canvas_scale.cpp)
     draw_grid(painter);    // (canvas_guides.cpp)
+    draw_guide_lines(painter);  // (PC5 H-b: the guides placed — canvas_guide_lines.cpp)
     draw_rulers(painter);
+    draw_layer_edges(painter);  // (PC5 H-b: レイヤーエッジ)
     draw_selection(painter);
     draw_lines(painter);  // (the balloons' boxes and the chosen one's handles: canvas_lines.cpp)
     draw_extras(painter);  // (PC5 J-0: the slices, notes, count marks and the ruler line — エクストラ: canvas.cpp)
@@ -189,6 +191,7 @@ void PageCanvas::paint_page(QPainter& painter) {
     draw_tools(painter);      // (the area being filled, the gradient's drag, the figure being drawn: canvas_tools.cpp)
     draw_move_box(painter);   // (the move tool's バウンディングボックス: canvas_snap.cpp)
     draw_snap(painter);       // (what a drag snapped to: canvas_snap.cpp)
+    draw_spacing(painter);    // (PC5 H-b: the equal gaps of a moved box, スマートガイド)
     draw_prims(painter);    // (the 3D tool's handles: canvas_guides.cpp)
     draw_effect_handles(painter);  // (the effect tool's centres: canvas_effects.cpp)
     if (work_ && work_->paint) {   // (PC4 D4: a piece of work over the page — ぼかしギャラリー's pins)

@@ -28,7 +28,8 @@
 //       (a group named alone is made active, as PhotoCraft's)                                  カウントグループのオプション
 //   set_ruler_line {page, start: [x, y], end: [x, y], protractor?: [x, y] | null} | {page, protractor: [x, y] | null}
 //       | {page, clear: true} → {ruler, info}                                                     ものさしツール
-//   straighten_layer {page, ids: [layer id…], interp?} | {page, crop: true, interp?, trim?, bleed_mm?, margins?}
+//   straighten_layer {page, ids: [layer id…], interp?} | {page, crop: true, interp?, trim?, bleed_mm?, margins?} (one of the two
+//       given: refused without)
 //       → {angle, cropped, …}  (the line laid level or upright, whichever is nearer — core::straighten_turn —: the layers
 //       turned about the page's middle by transform_layers, or the page turned and cut to the largest upright rectangle
 //       inside it by crop_page — one op, the same functions as theirs on the three ways —; the line cleared after, as

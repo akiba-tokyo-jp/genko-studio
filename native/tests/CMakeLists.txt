@@ -569,6 +569,11 @@ genko_test(test_contract_align SOURCES contract/test_contract_align.cpp DEPS gen
 # .pcraft's layer_comps (upstream's reader with $GENKO_PCRAFT_CHECK).
 genko_test(test_contract_layer_comps SOURCES contract/test_contract_layer_comps.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC5 H-b (SPEC.md VIEW-01「ガイド」): add_guide_layout (upstream's own test's values, its ways and refusals), delete_ruler's
+# kind (for_pages too), the layout through the command line and one undo, the PSD's 1032 as psd-tools reads it (none
+# without guides: the file as before), read back here, psd-tools' guides read here; core/units' lengths.
+genko_test(test_contract_guides SOURCES contract/test_contract_guides.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 # PC5 I-d (variables@1): a picture put in a paint layer on the 8-bit, 16-bit, 32-bit and CMYK pages (fit, fill, conform,
 # as_is × the nine places × clip), a smart object's contents replaced, the variables through the command line (apply, undo,
 # inspect --variables, export --format datasets: the files' names, the book unchanged), saved and read again (variables@1,

@@ -391,7 +391,7 @@ int inspect(const QStringList& args, bool ascii) {
     if (!profile.isEmpty() && !pixel.isEmpty()) return usage("argument --profile: not with --pixel");
     if (!area_text.isEmpty() && page_text.isEmpty()) return usage("argument --area, --page: --area <area> with --page <N>");
     if (!page_text.isEmpty() && area_text.isEmpty() && !paths && !comps && !notes && !measuring)
-        return usage("argument --page: only with --area, --paths, --comps, --annotations or --measure");
+        return usage("argument --page: only with --area, --paths, --comps or --annotations");  // (and --measure: the words as before)
     if (measuring && (notes || comps || variables || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty()))
         return usage("argument --measure: not with --annotations, --comps, --variables, --paths, --area, --pixel or --profile");
     if (notes && (comps || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty()))

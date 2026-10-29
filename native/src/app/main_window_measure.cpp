@@ -26,6 +26,7 @@
 #include <QVBoxLayout>
 
 #include <cmath>
+#include <memory>
 
 #include "app/ask.hpp"
 #include "app/canvas.hpp"
@@ -88,6 +89,7 @@ void MainWindow::build_measure_actions() {
     shown->setChecked(settings()->value(QStringLiteral("view/show_count"), true).toBool());
     connect(shown, &QAction::toggled, this, [this](bool on) {
         settings()->setValue(QStringLiteral("view/show_count"), on);
+        share_view_switch(QStringLiteral("act_show_count"), on);  // (H-b's: every open window the same)
         canvas_->show_extra(QStringLiteral("count"), on);
         canvas_->update();
     });
@@ -112,7 +114,18 @@ void MainWindow::build_measure_tools() {
     connect(canvas_, &PageCanvas::rulerDrawn, this, [this](QPointF start, QPointF end, bool protractor, QPointF arm) {
         Json op{{"op", "set_ruler_line"}, {"start", point_json(start)}, {"end", point_json(end)}};
         op["protractor"] = protractor ? point_json(arm) : Json(nullptr);
-        measure_op(std::move(op));
+        // (the coordinator's decision after the review's P3-1: measuring never needs the book — a line the op cannot put on
+        // the page (it is locked, the book read-only) stays in this window, its readout shown)
+        const core::RulerLine line = line_of(start, end, protractor, arm);
+        if (measure_op(std::move(op))) {
+            canvas_->ruler_here.reset();
+        } else if (const core::Page* page = current_page()) {
+            canvas_->ruler_here = line;
+            canvas_->ruler_here_page = page->id;
+            canvas_->update();
+            show_ruler_readout(line);
+            flash(QStringLiteral("このページは変えられないため、ものさしの線はこの窓の中だけに引きました（計った値は出します）"), 5000);
+        }
     });
     connect(canvas_, &PageCanvas::countRequested, this, [this](double x, double y) {
         measure_op(Json{{"op", "add_count"}, {"at_mm", point_json(QPointF(x, y))}});
@@ -137,13 +150,19 @@ void MainWindow::build_measure_tools() {
         layout->addWidget(ruler_readout_);
         auto* straighten = new QPushButton(QStringLiteral("レイヤーの角度補正"));
         straighten->setObjectName(QStringLiteral("ruler_straighten"));
-        straighten->setToolTip(QStringLiteral("線が水平か垂直になるように、選んだレイヤーを回します。Alt＋クリックで、ページを回して切り抜きます"));
-        connect(straighten, &QPushButton::clicked, this, [this] { straighten_by_ruler((QApplication::keyboardModifiers() & Qt::AltModifier) != 0); });
+        straighten->setToolTip(QStringLiteral("線が水平か垂直になるように、ページを回して切り抜きます。Alt＋クリックで、切り抜かずに選んだレイヤーだけを回します"));
+        connect(straighten, &QPushButton::clicked, this, [this] { straighten_by_ruler((QApplication::keyboardModifiers() & Qt::AltModifier) == 0); });
         layout->addWidget(straighten);
         auto* clear = new QPushButton(QStringLiteral("消去"));
         clear->setObjectName(QStringLiteral("ruler_clear"));
         clear->setToolTip(QStringLiteral("ものさしの線を消します"));
         connect(clear, &QPushButton::clicked, this, [this] {
+            if (canvas_->ruler_here) {  // (this window's line: gone, the book untouched)
+                canvas_->ruler_here.reset();
+                canvas_->update();
+                show_ruler_readout();
+                return;
+            }
             const core::Page* p = current_page();
             if (p == nullptr || !p->measure || !p->measure->ruler) return;
             measure_op(Json{{"op", "set_ruler_line"}, {"clear", true}});
@@ -259,6 +278,7 @@ bool MainWindow::measure_op(Json op) {
 }
 
 void MainWindow::refresh_measure() {
+    if (canvas_->ruler_here && (current_page() == nullptr || current_page()->id != canvas_->ruler_here_page)) canvas_->ruler_here.reset();
     show_ruler_readout();
     if (count_groups_ == nullptr) return;
     const core::Page* page = current_page();
@@ -282,6 +302,7 @@ void MainWindow::refresh_measure() {
 void MainWindow::show_ruler_readout(const std::optional<core::RulerLine>& given) {
     const core::Page* page = current_page();
     std::optional<core::RulerLine> line = given;
+    if (!line) line = canvas_->ruler_here;  // (a line the book could not take: this window's)
     if (!line && page != nullptr && page->measure) line = page->measure->ruler;
     std::optional<Json> readout;
     if (line && page != nullptr) {
@@ -310,7 +331,9 @@ void MainWindow::straighten_by_ruler(bool crop) {
     const core::Page* page = current_page();
     if (page == nullptr) return;
     if (!page->measure || !page->measure->ruler) {
-        flash(QStringLiteral("先にものさしツールで、水平か垂直にしたい線に沿ってドラッグします"), 4000);
+        flash(canvas_->ruler_here ? QStringLiteral("このページは変えられないため、角度補正できません（線はこの窓の中だけのものです）")
+                                  : QStringLiteral("先にものさしツールで、水平か垂直にしたい線に沿ってドラッグします"),
+              4000);
         return;
     }
     if (crop) {
@@ -320,7 +343,7 @@ void MainWindow::straighten_by_ruler(bool crop) {
     }
     const std::vector<std::string> ids = transform_targets();
     if (ids.empty()) {
-        flash(QStringLiteral("先に角度補正するレイヤーを選びます（Alt＋クリックで、ページを回して切り抜きます）"), 4000);
+        flash(QStringLiteral("先に角度補正するレイヤーを選びます（Alt＋クリックで、選んだレイヤーだけを回します）"), 4000);
         return;
     }
     Json list = Json::array();
@@ -341,12 +364,12 @@ void MainWindow::measurement_scale_dialog() {
     auto* pixels = new QDoubleSpinBox;
     pixels->setObjectName(QStringLiteral("scale_pixel_length"));
     pixels->setRange(0.001, 1e9);
-    pixels->setDecimals(4);
+    pixels->setDecimals(6);
     pixels->setValue(now.pixel_length);
     auto* logical = new QDoubleSpinBox;
     logical->setObjectName(QStringLiteral("scale_logical_length"));
     logical->setRange(0.0001, 1e9);
-    logical->setDecimals(4);
+    logical->setDecimals(6);
     logical->setValue(now.logical_length);
     auto* units = new QLineEdit(QString::fromStdString(now.units));
     units->setObjectName(QStringLiteral("scale_units"));
@@ -356,7 +379,9 @@ void MainWindow::measurement_scale_dialog() {
     auto* by_paper = new QPushButton(QStringLiteral("用紙の mm にする"));
     by_paper->setObjectName(QStringLiteral("scale_paper_mm"));
     by_paper->setToolTip(QStringLiteral("ページの解像度（%1 dpi）で 1 mm になる画素の数を 1 mm にします").arg(std::round(paper * 25.4)));
+    auto paper_pressed = std::make_shared<bool>(false);
     connect(by_paper, &QPushButton::clicked, &dialog, [=] {
+        *paper_pressed = true;
         pixels->setValue(paper);
         logical->setValue(1.0);
         units->setText(QStringLiteral("mm"));
@@ -375,10 +400,15 @@ void MainWindow::measurement_scale_dialog() {
         flash(QStringLiteral("論理的な単位を入れます"), 3000, true);
         return;
     }
-    if (measure_op(Json{{"op", "set_measurement_scale"},
-                        {"pixel_length", pixels->value()},
-                        {"logical_length", logical->value()},
-                        {"units", units->text().trimmed().toStdString()}})) {
+    // (the review's P3-6: 用紙の mm pressed and left as it put them — the preset, the page's pixels a mm as the op has them)
+    const bool by_preset = *paper_pressed && std::fabs(pixels->value() - pixels->valueFromText(pixels->textFromValue(paper))) < 1e-9 &&
+                           logical->value() == 1.0 && units->text().trimmed() == QStringLiteral("mm");
+    Json op = by_preset ? Json{{"op", "set_measurement_scale"}, {"preset", "paper_mm"}}
+                        : Json{{"op", "set_measurement_scale"},
+                               {"pixel_length", pixels->value()},
+                               {"logical_length", logical->value()},
+                               {"units", units->text().trimmed().toStdString()}};
+    if (measure_op(std::move(op))) {
         flash(QStringLiteral("計測スケールを決めました"), 3000);
     }
 }

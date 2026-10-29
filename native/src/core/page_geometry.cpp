@@ -582,6 +582,14 @@ void map_page(Document& doc, std::size_t at, const Mapping& m, const PixelHooks&
             (*note.popup_mm)[1] = py_round((*note.popup_mm)[1] + note.at_mm[1] - was[1], 4);
         }
     }
+    // (the review's P2-2: a mark, a line or a note the map takes past the places a book holds — 1000 m from the page — would
+    // be written and never read: the op is refused, as J-c's notes are kept inside)
+    try {
+        if (page.measure) check_measure(*page.measure);
+        check_annotations(page.annotations);
+    } catch (const Error&) {
+        throw OpError("the page's count marks, ruler line or notes would lie past 1000 m from the page");
+    }
     if (page.effects.is_array())
         for (Json& effect : page.effects) map_effect(effect, m);
     if (page.prims.is_array())
