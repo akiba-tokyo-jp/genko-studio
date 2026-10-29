@@ -253,10 +253,11 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
     if (page() == nullptr || event->button() != Qt::LeftButton) return;
     if (work_ && work_->press && work_->press(mm_of(pos), event->modifiers())) return;  // (PC4 D4: the work over the page first)
     if (guide_press(event->position())) return;  // (a guide line pulled from a scale: canvas_scale.cpp)
+    if (guide_grab(event->position(), event->modifiers())) return;  // (PC5 H-b: a guide placed — canvas_guide_lines.cpp)
     const QPointF mm = mm_of(pos);
     if (transform_press(pos, mm, event->modifiers())) return;  // (自由変形 and the warps' box: canvas_transform.cpp)
     press_pos_ = pos;
-    snap_lines_.clear();
+    forget_snap();
     snap_moving.clear();  // (the move tool's are given again as its drag starts)
     if (tool_ == QLatin1String("move")) {
         if (move_box_handle(pos)) {  // (PC3 C-d: バウンディングボックス's □ — 自由変形 from here: canvas_snap.cpp)
@@ -426,8 +427,8 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
     if (!panning_ && event->button() == Qt::LeftButton && work_ && work_->release && work_->release(to_mm(event->position()), event->modifiers()))
         return;  // (PC4 D4)
     if (guide_release(event->position())) return;
-    if (!snap_lines_.empty()) {  // (PC3 C-d: what a drag snapped to shows while it lasts)
-        snap_lines_.clear();
+    if (!snap_lines_.empty() || !spacing_.empty()) {  // (PC3 C-d: what a drag snapped to shows while it lasts)
+        forget_snap();
         update();
     }
     move_snap_box_.reset();
@@ -513,6 +514,14 @@ void PageCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
     if (event->button() == Qt::MiddleButton) {
         fit_page();
         return;
+    }
+    // (PC5 H-b: a guide double-clicked where a press would grab it — 新規ガイド… asks where it goes)
+    if (event->button() == Qt::LeftButton && !work_ && tool_ != QLatin1String("ruler") && tool_ != QLatin1String("hand") &&
+        tool_ != QLatin1String("zoom") && (tool_ == QLatin1String("move") || (event->modifiers() & Qt::ControlModifier))) {
+        if (const auto id = guide_at(event->position())) {
+            emit guideAsked(QString::fromStdString(*id));
+            return;
+        }
     }
     if (work_ && event->button() == Qt::LeftButton) {  // (PC4 D4: the second press of a double click is the work's press too)
         mousePressEvent(event);

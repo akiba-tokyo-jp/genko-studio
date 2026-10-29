@@ -11,6 +11,7 @@
 
 #include "core/studio.hpp"
 #include "render/psd_comps.hpp"
+#include "render/psd_guides.hpp"
 
 namespace genko::render::psd_production {
 
@@ -19,8 +20,11 @@ namespace {
 // (each group adds its row here — J-a: 1065 and its layers' cmls; J-b: {1050, …, true, …}; J-c: {-1, "Anno", "J-c", false,
 // …} (its writer puts back the sound notes of WriteContext::kept_global("Anno")); J-d1: {1074, …} and {1080, "", "J-d1",
 // false, nullptr, nullptr, nullptr, supersedes})
-constexpr std::array<Row, 1> kRows{{
+constexpr std::array<Row, 2> kRows{{
     {psd_comps::kResource, "", "J-a", true, psd_comps::read, psd_comps::write, psd_comps::fingerprint, nullptr, "cmls", psd_comps::write_layers},
+    // (PC5 H-b: the guides — 1032 is never kept (psd-keep@1 leaves the grid and guides out), so no fingerprint: the page's
+    // own always, none when it has none)
+    {psd_guides::kResource, "", "H-b", false, psd_guides::read, psd_guides::write, nullptr, nullptr, "", nullptr},
 }};
 
 std::span<const Row>& table() {

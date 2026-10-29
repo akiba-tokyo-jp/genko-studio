@@ -250,6 +250,7 @@ genko_library(genko_render
     ops_production.cpp
     ops_layer_comps.cpp
     psd_production.cpp
+    psd_guides.cpp
     psd_comps.cpp
     pcraft_production.cpp
     pcraft_comps.cpp

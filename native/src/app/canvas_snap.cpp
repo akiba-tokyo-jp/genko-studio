@@ -15,7 +15,6 @@ namespace genko::app {
 
 namespace {
 
-const QColor kSmart(QStringLiteral("#e64980"));    // (smart guides: Photoshop's magenta)
 const QColor kSnapped(QStringLiteral("#15aabf"));  // (a guide, the grid, the paper's edge)
 const QColor kMoveBox(QStringLiteral("#1c7ed6"));
 
@@ -55,7 +54,7 @@ core::snap::Targets PageCanvas::snap_targets() const {
 }
 
 QPointF PageCanvas::snap_point(const QPointF& mm, Qt::KeyboardModifiers modifiers) {
-    snap_lines_.clear();
+    forget_snap();
     if (modifiers & Qt::ControlModifier) return mm;  // (Ctrl held: as it is)
     const core::snap::Targets t = snap_targets();
     if (t.empty()) return mm;
@@ -65,12 +64,13 @@ QPointF PageCanvas::snap_point(const QPointF& mm, Qt::KeyboardModifiers modifier
 }
 
 QPointF PageCanvas::snap_box(const std::array<double, 4>& box, Qt::KeyboardModifiers modifiers) {
-    snap_lines_.clear();
+    forget_snap();
     if (modifiers & Qt::ControlModifier) return QPointF(0, 0);
     const core::snap::Targets t = snap_targets();
     if (t.empty()) return QPointF(0, 0);
     const auto [d, lines] = t.box(box, snap_reach());
     snap_lines_ = lines;
+    find_spacing({box[0] + d[0], box[1] + d[1], box[2] + d[0], box[3] + d[1]});  // (PC5 H-b: the equal gaps, スマートガイド)
     return QPointF(d[0], d[1]);
 }
 
@@ -79,7 +79,10 @@ void PageCanvas::draw_snap(QPainter& painter) const {
     painter.save();
     painter.setBrush(Qt::NoBrush);
     for (const core::snap::Line& l : snap_lines_) {
-        painter.setPen(QPen(core::snap::is_smart(l.kind) ? kSmart : kSnapped, 1));
+        // (PC5 H-b: スマートガイド hidden — or エクストラ —, the layer-to-layer lines are not drawn; the snap is as it was)
+        const bool smart = core::snap::is_smart(l.kind);
+        if (smart && !shows(show_smart_guides)) continue;
+        painter.setPen(QPen(smart ? smart_colour : kSnapped, 1));
         if (l.vertical) {
             painter.drawLine(pt(l.pos, l.from), pt(l.pos, l.to));
         } else {

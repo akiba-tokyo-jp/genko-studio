@@ -76,6 +76,7 @@ genko_library(genko_app
     history_panel.cpp
     check_panel.cpp
     canvas_scale.cpp
+    canvas_guide_lines.cpp
     canvas_tools.cpp
     canvas_vector.cpp
     canvas_guides.cpp

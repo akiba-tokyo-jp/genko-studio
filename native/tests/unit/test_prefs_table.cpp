@@ -46,7 +46,12 @@ const std::vector<std::string>& app_keys() {
         "ui/layer_details", "ui/mono_icons", "ui/next_steps", "ui/phone_view", "ui/quick", "ui/radial", "ui/raise_requests",
         "ui/reduce_motion", "ui/rest_minutes", "ui/stage", "ui/surround", "ui/theme", "ui/tool_names", "ui/ui_font", "ui/workspace",
         "view/checker_colors", "view/checker_dark", "view/checker_light", "view/checker_size", "view/gamut_color", "view/gamut_opacity",
-        "warp/mesh", "workspaces/ペン入れ", "workspaces/ペン入れ/geometry", "workspaces/ペン入れ/state"};
+        "warp/mesh", "workspaces/ペン入れ", "workspaces/ペン入れ/geometry", "workspaces/ペン入れ/state",
+        // (PC5 H-b: 単位・定規, ガイド・グリッド・スライス, エクストラ and 表示・非表示 ▸, ガイドをロック, the guide layouts' presets)
+        "units/ruler", "units/type", "units/column_width", "units/gutter", "units/print_resolution", "units/screen_resolution",
+        "units/point_size", "guides/guide_color", "guides/guide_style", "guides/smart_color", "guides/grid_color", "guides/grid_style",
+        "guides/grid_subdivisions", "guides/grid_unit", "guides/lock", "view/extras", "view/show_guides", "view/show_canvas_guides",
+        "view/show_smart_guides", "view/show_layer_edges", "view/show_mesh", "view/show_edit_pins", "guide_layouts/三段組"};
     return all;
 }
 

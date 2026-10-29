@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QElapsedTimer>
 #include <QImage>
 #include <QPointF>
@@ -28,6 +29,7 @@
 #include "core/json.hpp"
 #include "core/model.hpp"
 #include "core/snap.hpp"
+#include "core/units.hpp"
 #include "render/dabs/dynamics.hpp"
 
 class QKeyEvent;
@@ -420,8 +422,10 @@ public:
     bool flipped_vertical() const { return view_.flipped_v; }
     void fit_page();
     void zoom_by(double factor, std::optional<QPointF> anchor = std::nullopt);
-    // プリントサイズ: the paper as large as it is (at 96 dpi, the screen Photoshop's print size assumes on Windows).
+    // プリントサイズ: the paper as large as it is (at 96 dpi, the screen Photoshop's print size assumes on Windows — PC5 H-b:
+    // 環境設定 → 単位・定規 → 画面の解像度, print_dpi).
     void actual_size();
+    double print_dpi = 96;
     // PC5 H-a (the user's decision 11): the zoom in the page's pixels — 100 % one page pixel a screen pixel (the screen's
     // own pixels: devicePixelRatio counted), 200 % two. The scale (screen px a mm) of 100 %.
     double pixel_scale() const;
@@ -569,6 +573,47 @@ public:
     std::vector<QString> extra_keys() const;
     bool extras_shown = true;
 
+    // --- PC5 H-b: ガイド・グリッド・エクストラ・単位 (canvas_guide_lines.cpp; SPEC.md VIEW-01) --------------------------------------
+    // What エクストラ hides with the rest (shows: one's own switch and the master's): the guides, the grid, the layers' edges,
+    // the selection's edges, the target path, the smart guides, the warps' mesh and pins, the pixel grid, the production's.
+    bool shows(bool own) const { return own && extras_shown; }
+    // The guides (the page's rulers of kind "guide") drawn across the view — 表示 → 表示・非表示 ▸ ガイド (show_guide_lines)
+    // and カンバスガイド (show_canvas_guides: the page's own; an artboard's come with 節 I) — in 環境設定 → ガイド・グリッド・
+    // スライス's colour and style. The move tool grabs one (the other tools while Ctrl is held; the ruler tool never) and
+    // drags it (rulerEdited {at}); let go on a scale or out of the view it is taken away (guideRemoved); Alt+click turns it
+    // about where it was clicked ({axis, at}); a double click asks where it goes (guideAsked). ガイドをロック: none is
+    // grabbed (nor one fixed). Snapping to them is the snap's (canvas_snap.cpp), as before.
+    bool show_guide_lines = true;
+    bool show_canvas_guides = true;
+    bool lock_guides = false;
+    QColor guide_colour = QColor(0x4a, 0xff, 0xff);
+    Qt::PenStyle guide_style = Qt::SolidLine;  // lines | dashed lines | dots
+    // The grid's colour and style, and its thick lines every `grid_subdivisions` of grid_mm (環境設定: グリッド線・分割数).
+    QColor grid_colour = QColor(80, 140, 220);
+    Qt::PenStyle grid_style = Qt::SolidLine;
+    int grid_subdivisions = 5;
+    // スマートガイド: the lines a drag lined up with layer to layer and with the paper's middle (magenta), and the gaps a
+    // moved box has equal to its neighbours on both sides said in the ruler's unit.
+    bool show_smart_guides = true;
+    QColor smart_colour = QColor(0xe6, 0x49, 0x80);
+    // レイヤーエッジ: the chosen layers' boxes (x0, y0, x1, y1 mm, the window's) drawn as thin lines.
+    bool show_layer_edges = false;
+    std::function<std::vector<std::array<double, 4>>()> layer_edges;
+    // メッシュ・編集ピン: the warps' grid and the puppet's box (mesh), their anchors, handles and pins (edit pins) — hidden,
+    // the warp goes on as it was.
+    bool show_mesh = true;
+    bool show_edit_pins = true;
+    // 単位・定規 (core/units.hpp): the scales and the words of a length in the ruler's unit (the page's pixels, its sides).
+    core::units::Unit ruler_unit = core::units::Unit::Mm;
+    double points_per_inch = 72;
+    double column_pt = 180;
+    double gutter_pt = 12;
+    core::units::Basis unit_basis(bool across) const;  // (across: a length along the page's width)
+    QString length_words(double mm, bool across) const;
+    // The guide under a point of the widget that a press would grab (none: none, locked, hidden), and the one being dragged.
+    std::optional<std::string> guide_at(const QPointF& widget) const;
+    std::optional<std::string> dragged_guide() const;
+
 signals:
     void changed();
     void zoomChanged(double scale);
@@ -632,6 +677,9 @@ signals:
     // (the part, where to: pose_mannequin / pose_figure)
     void rulerPlaced(const genko::core::Json& ruler);
     void rulerEdited(const QString& ruler_id, const genko::core::Json& change);
+    // (PC5 H-b) a guide dragged off the view or onto a scale (delete_ruler), a guide double-clicked (新規ガイド… to move it)
+    void guideRemoved(const QString& ruler_id);
+    void guideAsked(const QString& ruler_id);
     void primSelected(const QString& prim_id);
     void primEdited(const QString& prim_id, const genko::core::Json& change);
     void primPosed(const QString& prim_id, const QString& handle, const genko::core::Json& to);
@@ -805,6 +853,7 @@ private:
     bool guide_release(const QPointF& widget);
     void draw_guide_drag(QPainter& painter) const;
     void draw_scale(QPainter& painter) const;
+    void draw_scale_in_unit(QPainter& painter) const;  // (PC5 H-b: the scales in a unit other than mm)
     void draw_phone(QPainter& painter) const;
     void draw_highlight(QPainter& painter) const;
 
@@ -942,6 +991,8 @@ private:
     struct GuideDrag {  // a guide line pulled from a scale: its axis (h | v) and where it is (mm; none: not yet moved)
         QString axis;
         std::optional<double> at;
+        std::optional<std::string> id;  // (PC5 H-b: a guide placed, grabbed — its ruler's id)
+        bool turn = false;              // (Alt held as it was grabbed: a click turns it)
     };
     std::optional<GuideDrag> guide_drag_;
     bool zoom_out_ = false;
@@ -1061,6 +1112,18 @@ private:
     std::vector<CanvasExtra> extras_;   // (PC5 J-0: add_extra, in the order added)
     std::vector<QString> extras_hidden_;
     void draw_extras(QPainter& painter) const;
+    // (PC5 H-b: canvas_guide_lines.cpp) the guides, the layers' edges, the equal gaps of a moved box; a guide grabbed
+    bool guide_grab(const QPointF& widget, Qt::KeyboardModifiers modifiers);
+    void draw_guide_lines(QPainter& painter) const;
+    void draw_layer_edges(QPainter& painter) const;
+    void draw_spacing(QPainter& painter) const;
+    struct Spacing {  // a gap equal on both sides of a moved box: along x (vertical false) or y, from … to at `across`
+        bool vertical = false;
+        double from = 0, to = 0, across = 0;
+    };
+    std::vector<Spacing> spacing_;
+    void find_spacing(const std::array<double, 4>& box);
+    void forget_snap();
     mutable std::optional<std::pair<std::string, QImage>> mask_picture_;  // (the area and the quick mask it shows)
 
     // gliding between views
