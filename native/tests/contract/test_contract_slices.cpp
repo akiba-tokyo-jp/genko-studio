@@ -17,8 +17,11 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
+#include <set>
 #include <string>
 
 #include "core/command_bus.hpp"
@@ -346,6 +349,96 @@ private slots:
         QVERIFY(one["files"][0].get<std::string>().find("images/p001.png") != std::string::npos);
     }
 
+    // (PC5 J-b review P2-3, P3-2, P3-4, P3-13) Web 用に保存 by slices over one another and of the same names: the later in the
+    // list on top, the one under it cut into the parts that show (said); the HTML's table with no hole and no cell twice
+    // (each row's cells, their colspans and the rowspans from above, fill its columns); the pictures and the cells tile the
+    // page; the files' names one each whatever their case, a device of Windows not a name; a link only of http, https,
+    // mailto or a relative one (the others left out, said); the alt's and the target's quotes escaped.
+    void overlapsNamesAndLinks() {
+        const QString book_path = path(QStringLiteral("overlaps.genko"));
+        core::Document doc = book(true);
+        const auto add = [&](Json rect, const char* name, const char* url, Json more = Json::object()) {
+            Json o = op("add_slice", {{"rect_px", rect}, {"name", name}, {"url", url}});
+            for (auto& [k, v] : more.items()) o[k] = v;
+            doc = run(doc, o);
+        };
+        add({0, 0, 200, 200}, "a", "javascript:alert(1)");
+        add({100, 100, 200, 200}, "a", "mailto:x@example.org", {{"alt", "say \"hi\" <b>"}, {"target", "_\"top"}});
+        add({300, 0, 40, 40}, "a-2", " JavaScript:alert(2)");
+        add({350, 0, 40, 40}, "CON", "data:text/html,x");
+        add({400, 0, 40, 40}, "Logo", "../x.html");
+        add({300, 100, 40, 40}, "logo", "https://example.org/?q=a:b");
+        genko::test::write_project(doc, fs::path(book_path.toStdString()));
+        const QString out = path(QStringLiteral("overlaps-out"));
+        int exit = -1;
+        const Json done = genko({QStringLiteral("export"), book_path, out, QStringLiteral("--format"), QStringLiteral("slices"), QStringLiteral("--html"),
+                                 QStringLiteral("--web"), QStringLiteral("{\"format\": \"png24\"}"), QStringLiteral("--json")},
+                                &exit);
+        QVERIFY2(exit == 0, done.dump().c_str());
+        // (one name each, whatever its case; CON not a name)
+        std::set<std::string> names;
+        std::int64_t covered = 0;
+        for (const Json& f : done["files"]) {
+            const fs::path file(f.get<std::string>());
+            std::string low = file.filename().string();
+            std::transform(low.begin(), low.end(), low.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            QVERIFY2(names.insert(low).second, low.c_str());
+            QVERIFY2(fs::exists(file), file.string().c_str());
+            if (low == "spacer.gif") continue;
+            const auto [w, h] = png_size(genko::test::read_bytes(QString::fromStdString(file.string())));
+            covered += std::int64_t(w) * h;
+        }
+        QCOMPARE(covered, std::int64_t(480) * 360);
+        QVERIFY(names.contains("con_.png") && !names.contains("con.png"));
+        QVERIFY(names.contains("logo.png") && names.contains("logo-2.png"));
+        QVERIFY(names.contains("a-2.png"));
+        QVERIFY(names.contains("a_1.png"));  // (the slice under the other, in parts)
+        const std::string notes = done.value("notes", Json::array()).dump();
+        QVERIFY2(notes.find("つに分けて書き出しました") != std::string::npos, notes.c_str());
+        QVERIFY2(notes.find("HTML にリンクを書きませんでした") != std::string::npos, notes.c_str());
+        // the links: only the safe ones
+        const std::string html = genko::test::read_bytes(QString::fromStdString(done["html"].get<std::string>()));
+        std::string lower = html;
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        QVERIFY(lower.find("javascript:") == std::string::npos);
+        QVERIFY(lower.find("data:") == std::string::npos);
+        QVERIFY(html.find("href=\"mailto:x@example.org\" target=\"_&quot;top\"") != std::string::npos);
+        QVERIFY(html.find("alt=\"say &quot;hi&quot; &lt;b&gt;\"") != std::string::npos);
+        QVERIFY(html.find("href=\"../x.html\"") != std::string::npos);
+        QVERIFY(html.find("href=\"https://example.org/?q=a:b\"") != std::string::npos);
+        // the table: every row filled, no cell twice (HTML's own placing of the colspans and rowspans)
+        std::vector<std::vector<int>> grid;
+        std::size_t columns = 0;
+        std::size_t row = 0;
+        for (std::size_t tr = html.find("<tr>"); tr != std::string::npos; tr = html.find("<tr>", tr + 4), ++row) {
+            const std::size_t end = html.find("</tr>", tr);
+            if (grid.size() <= row) grid.resize(row + 1);
+            std::size_t col = 0;
+            for (std::size_t td = html.find("<td", tr); td != std::string::npos && td < end; td = html.find("<td", td + 3)) {
+                const std::size_t close = html.find('>', td);
+                const std::string tag = html.substr(td, close - td);
+                const auto span = [&](const char* key) {
+                    const std::size_t at = tag.find(key);
+                    return at == std::string::npos ? 1 : std::stoi(tag.substr(at + std::strlen(key)));
+                };
+                const int cs = span("colspan=\""), rs = span("rowspan=\"");
+                while (col < grid[row].size() && grid[row][col] != 0) ++col;
+                for (int j = 0; j < rs; ++j) {
+                    if (grid.size() <= row + j) grid.resize(row + j + 1);
+                    auto& line = grid[row + j];
+                    if (line.size() < col + cs) line.resize(col + cs, 0);
+                    for (int i = 0; i < cs; ++i) ++line[col + i];
+                }
+                col += cs;
+            }
+            columns = std::max(columns, grid[row].size());
+        }
+        QVERIFY(row > 2 && columns > 2);
+        for (std::size_t j = 0; j < row; ++j) {
+            QCOMPARE(grid[j].size(), columns);
+            for (const int n : grid[j]) QCOMPARE(n, 1);
+        }
+    }
     // .pcraft: written and read back; upstream's reader reads it.
     void pcraftSlices() {
         core::Document doc = book(true);

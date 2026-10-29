@@ -2,11 +2,14 @@
 
 #include "formats/web_export.hpp"
 
+#include <QString>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <limits>
 #include <map>
+#include <set>
 #include <tuple>
 
 #include "core/covers.hpp"
@@ -768,18 +771,59 @@ std::string web_slices_html(const std::string& title, std::uint32_t width, std::
     return s;
 }
 
-WebSlicesResult save_slices_for_web(const core::Document& doc, std::size_t page, const WebSettings& st, const WebSize& size, const fs::path& folder,
-                                    const WebSliceOptions& options) {
-    WebPicture picture = web_picture(doc, page, st, size);
-    std::optional<std::string> icc = picture.icc;
-    if (st.embed_icc && !icc) icc = srgb_icc_once();
-    const std::optional<std::string> xmp = st.format == WebFormat::Jpeg || st.format == WebFormat::Png24 ? web_xmp(doc, st.metadata) : std::nullopt;
+namespace {
+
+// A name Windows keeps for a device (CON, PRN, AUX, NUL, COM1–9, LPT1–9, any case): never a file's.
+bool windows_device(std::string_view name) {
+    std::string low;
+    for (const char c : name) low += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (low == "con" || low == "prn" || low == "aux" || low == "nul") return true;
+    return low.size() == 4 && (low.starts_with("com") || low.starts_with("lpt")) && low[3] >= '1' && low[3] <= '9';
+}
+
+// (PC5 J-b review P3-4) A link the HTML may carry: http, https, mailto or one without a scheme (relative); javascript:,
+// data:, vbscript: and any other scheme not — the spaces and controls a browser drops before its scheme dropped first.
+bool safe_link(std::string_view url) {
+    std::string plain;
+    for (const char c : url)
+        if (static_cast<unsigned char>(c) > 0x20 && c != 0x7f) plain += c;
+    const std::size_t colon = plain.find(':');
+    if (colon == std::string::npos) return true;
+    const std::size_t stop = plain.find_first_of("/?#");
+    if (stop != std::string::npos && stop < colon) return true;  // (a path with a colon in it)
+    std::string scheme = plain.substr(0, colon);
+    for (char& c : scheme) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return scheme == "http" || scheme == "https" || scheme == "mailto";
+}
+
+// What Web 用に保存 by slices writes: each chosen slice's parts (a slice under another cut to what shows — review P2-3 —,
+// none when nothing of it shows), the file of each (none: a no-image slice), the spacer and the HTML.
+struct SlicePart {
+    const core::ResolvedSlice* slice = nullptr;
+    core::SliceBox box;
+    fs::path file;    // (none: a no-image slice)
+    std::string rel;  // (its src in the HTML)
+};
+struct SlicePlan {
+    std::vector<core::ResolvedSlice> all;
+    std::vector<SlicePart> parts;
+    std::size_t chosen = 0;
+    bool table = false;
+    std::string spacer_rel;
+    fs::path html_path;
+    std::string base;
+    std::vector<std::string> notes;
+};
+
+SlicePlan plan_slices(const core::Document& doc, std::size_t page, std::uint32_t width, std::uint32_t height, const fs::path& folder,
+                      const WebSliceOptions& options, const std::string& ext) {
     const core::Page& p = doc.page(page);
+    SlicePlan plan;
     // (the picture's pixels a mm: the paper drawn at its size — each slice's edges its mm in them, rounded alone)
-    const core::SliceGrid grid = core::slice_grid(p.spec.width_mm.value(), p.spec.height_mm.value(), picture.rgba.width, picture.rgba.height);
-    const std::vector<core::ResolvedSlice> all = render::slices::resolve(doc, p, grid);
+    const core::SliceGrid grid = core::slice_grid(p.spec.width_mm.value(), p.spec.height_mm.value(), width, height);
+    plan.all = render::slices::resolve(doc, p, grid);
     std::vector<const core::ResolvedSlice*> chosen;
-    for (const core::ResolvedSlice& r : all) {
+    for (const core::ResolvedSlice& r : plan.all) {
         if (!options.numbers.empty()) {
             if (std::find(options.numbers.begin(), options.numbers.end(), r.number) == options.numbers.end()) continue;
         } else if (options.user_only && r.origin == "auto") {
@@ -788,40 +832,109 @@ WebSlicesResult save_slices_for_web(const core::Document& doc, std::size_t page,
         chosen.push_back(&r);
     }
     if (chosen.empty()) throw core::Error("value", "none of the slices asked for is on the page");
-    const std::string ext(web_extension(st.format));
+    plan.chosen = chosen.size();
+    // (the stored slices in the list's order — a later one on top —, each cut to what of it shows)
+    std::map<std::int64_t, const core::ResolvedSlice*> by_id;
+    for (const core::ResolvedSlice& r : plan.all)
+        if (r.id) by_id[*r.id] = &r;
+    std::vector<const core::ResolvedSlice*> stacked;
+    std::vector<core::SliceBox> boxes;
+    if (p.slices) {
+        for (const core::Slice& s : p.slices->list) {
+            const auto found = by_id.find(s.id);
+            if (found == by_id.end()) continue;
+            stacked.push_back(found->second);
+            boxes.push_back(found->second->box);
+        }
+    }
+    const std::vector<std::vector<core::SliceBox>> shown = core::owned_pieces(boxes, grid.canvas);
+    std::map<const core::ResolvedSlice*, std::vector<core::SliceBox>> pieces;
+    for (std::size_t i = 0; i < stacked.size(); ++i) pieces[stacked[i]] = shown[i];
     const std::string base = render::slices::base_name(p);
+    plan.base = base;
+    // (each file's name its own — review P3-2: one name once whatever its case, as macOS and Windows take them; never a
+    // device of Windows —, a second of a name -2, -3 …)
+    std::set<std::string> used;
+    const auto unique = [&](std::string name) {
+        if (windows_device(name)) name += "_";
+        std::string candidate = name;
+        for (int n = 2; !used.insert(QString::fromStdString(candidate).toCaseFolded().toStdString()).second; ++n) candidate = name + "-" + std::to_string(n);
+        return candidate;
+    };
+    const auto file_of = [&](const std::string& name) {
+        const std::string rel = options.images.empty() ? name + "." + ext : options.images + "/" + name + "." + ext;
+        return std::pair{folder / core::path_from_utf8(rel), rel};
+    };
+    // (the spacer's and the HTML's names first: no slice takes them)
+    plan.table = options.html && chosen.size() > 1;
+    if (plan.table) (void)used.insert("spacer");
+    for (const core::ResolvedSlice* r : chosen) {
+        std::vector<core::SliceBox> cut{r->box.intersect(grid.canvas)};
+        if (const auto found = pieces.find(r); found != pieces.end()) cut = found->second;
+        std::erase_if(cut, [](const core::SliceBox& b) { return b.empty(); });
+        if (cut.empty()) {
+            plan.notes.push_back("スライス " + std::to_string(r->number) + " は上のスライスに隠れているため、書き出しませんでした");
+            continue;
+        }
+        if (cut.size() > 1) plan.notes.push_back("スライス " + std::to_string(r->number) + " は上のスライスと重なるため、" + std::to_string(cut.size()) + " つに分けて書き出しました");
+        const std::string name = core::slice_file_name(r->name, "slice");
+        for (std::size_t k = 0; k < cut.size(); ++k) {
+            SlicePart part{r, cut[k], fs::path(), std::string()};
+            if (r->kind != "noImage") {
+                const auto [file, rel] = file_of(unique(cut.size() == 1 ? name : name + "_" + std::to_string(k + 1)));
+                part.file = file;
+                part.rel = rel;
+            }
+            plan.parts.push_back(std::move(part));
+        }
+    }
+    plan.spacer_rel = options.images.empty() ? std::string("spacer.gif") : options.images + "/spacer.gif";
+    plan.html_path = folder / core::path_from_utf8(base + ".html");
+    return plan;
+}
+
+std::vector<fs::path> plan_files(const SlicePlan& plan, const fs::path& folder, const WebSliceOptions& options) {
+    std::vector<fs::path> out;
+    for (const SlicePart& part : plan.parts)
+        if (!part.file.empty()) out.push_back(part.file);
+    if (plan.table) out.push_back(folder / core::path_from_utf8(plan.spacer_rel));
+    if (options.html) out.push_back(plan.html_path);
+    return out;
+}
+
+}  // namespace
+
+std::vector<fs::path> web_slice_files(const core::Document& doc, std::size_t page, const WebSettings& st, const WebSize& size, const fs::path& folder,
+                                      const WebSliceOptions& options) {
+    CopyOptions copy;
+    if (size.percent) copy.scale = *size.percent;
+    copy.width = size.width;
+    copy.height = size.height;
+    copy.resample = size.resample;
+    copy.metadata = Metadata::None;
+    const CopySize full = copy_size(doc, page, copy);
+    const SlicePlan plan = plan_slices(doc, page, full.width, full.height, folder, options, std::string(web_extension(st.format)));
+    return plan_files(plan, folder, options);
+}
+
+WebSlicesResult save_slices_for_web(const core::Document& doc, std::size_t page, const WebSettings& st, const WebSize& size, const fs::path& folder,
+                                    const WebSliceOptions& options) {
+    WebPicture picture = web_picture(doc, page, st, size);
+    std::optional<std::string> icc = picture.icc;
+    if (st.embed_icc && !icc) icc = srgb_icc_once();
+    const std::optional<std::string> xmp = st.format == WebFormat::Jpeg || st.format == WebFormat::Png24 ? web_xmp(doc, st.metadata) : std::nullopt;
+    const core::Page& p = doc.page(page);
+    const SlicePlan plan = plan_slices(doc, page, picture.rgba.width, picture.rgba.height, folder, options, std::string(web_extension(st.format)));
     WebSlicesResult out;
     out.notes = std::move(picture.notes);
-    out.slices = chosen.size();
+    out.notes.insert(out.notes.end(), plan.notes.begin(), plan.notes.end());
+    out.slices = plan.chosen;
     out.width = picture.rgba.width;
     out.height = picture.rgba.height;
     // (every place asked before anything is made)
-    struct Place {
-        const core::ResolvedSlice* slice;
-        fs::path file;    // (none: a no-image slice)
-        std::string rel;  // (its src in the HTML)
-    };
-    std::vector<Place> places;
-    std::map<std::string, int> names;  // (two slices of one name: <name>-2, -3 …)
-    for (const core::ResolvedSlice* r : chosen) {
-        if (r->kind == "noImage") {
-            places.push_back(Place{r, fs::path(), std::string()});
-            continue;
-        }
-        std::string name = core::slice_file_name(r->name, "slice");
-        if (const int n = ++names[name]; n > 1) name += "-" + std::to_string(n);
-        const std::string rel = options.images.empty() ? name + "." + ext : options.images + "/" + name + "." + ext;
-        places.push_back(Place{r, folder / core::path_from_utf8(rel), rel});
-    }
-    const bool table = options.html && chosen.size() > 1;
-    const std::string spacer_rel = options.images.empty() ? std::string("spacer.gif") : options.images + "/spacer.gif";
-    const fs::path html_path = folder / core::path_from_utf8(base + ".html");
     if (options.check) {
         options.check(folder);
-        for (const Place& place : places)
-            if (!place.file.empty()) options.check(place.file);
-        if (table) options.check(folder / core::path_from_utf8(spacer_rel));
-        if (options.html) options.check(html_path);
+        for (const fs::path& file : plan_files(plan, folder, options)) options.check(file);
     }
     detail::make_dirs(folder);
     if (!options.images.empty()) detail::make_dirs(folder / core::path_from_utf8(options.images));
@@ -829,14 +942,13 @@ WebSlicesResult save_slices_for_web(const core::Document& doc, std::size_t page,
     std::vector<std::tuple<std::array<std::int64_t, 4>, std::string, std::string>> cells;
     const core::Slices none;
     const core::Slices& stored = p.slices ? *p.slices : none;
-    for (const Place& one : places) {
-        const core::ResolvedSlice* r = one.slice;
-        const fs::path& place = one.file;
-        const core::SliceBox box = r->box.intersect(grid.canvas);
-        if (box.empty()) continue;
+    std::set<int> unsafe;  // (the slices whose link was not written)
+    for (const SlicePart& part : plan.parts) {
+        const core::ResolvedSlice* r = part.slice;
+        const core::SliceBox& box = part.box;
         const core::Slice* s = r->id ? core::find_slice(stored, *r->id) : nullptr;
         const std::array<std::int64_t, 4> edges{box.x0, box.y0, box.x1, box.y1};
-        if (place.empty()) {  // (no image: its cell text, its background)
+        if (part.file.empty()) {  // (no image: its cell text, its background)
             std::string text = s != nullptr ? (s->cell_text_is_html ? s->cell_text : html_escape(s->cell_text)) : std::string();
             std::string attrs;
             if (s != nullptr && s->background) {
@@ -847,39 +959,45 @@ WebSlicesResult save_slices_for_web(const core::Document& doc, std::size_t page,
             cells.emplace_back(edges, attrs, std::move(text));
             continue;
         }
-        detail::PartFile part(place);
-        const render::codecs::web::Sink sink = [&part](std::string_view bytes) { part.write(bytes); };
+        detail::PartFile file(part.file);
+        const render::codecs::web::Sink sink = [&file](std::string_view bytes) { file.write(bytes); };
         const Optimized o = optimize(cut(picture.rgba, box), st, icc, xmp, picture.dpi, false, &sink, picture.exif);
-        part.close();
-        output.put(std::move(part));
+        file.close();
+        output.put(std::move(file));
         out.bytes += o.bytes;
-        out.files.push_back(place);
+        out.files.push_back(part.file);
         const std::string alt = s != nullptr ? html_escape(s->alt) : std::string();
-        const std::string img = "\n\t\t\t<img src=\"" + html_escape(one.rel) + "\" width=\"" + std::to_string(box.width()) + "\" height=\"" +
+        const std::string img = "\n\t\t\t<img src=\"" + html_escape(part.rel) + "\" width=\"" + std::to_string(box.width()) + "\" height=\"" +
                                 std::to_string(box.height()) + "\" alt=\"" + alt + "\">";
         std::string body = img;
         if (s != nullptr && !s->url.empty()) {
-            const std::string target = s->target.empty() ? std::string() : " target=\"" + html_escape(s->target) + "\"";
-            body = "\n\t\t\t<a href=\"" + html_escape(s->url) + "\"" + target + ">" + img + "</a>";
+            if (safe_link(s->url)) {
+                const std::string target = s->target.empty() ? std::string() : " target=\"" + html_escape(s->target) + "\"";
+                body = "\n\t\t\t<a href=\"" + html_escape(s->url) + "\"" + target + ">" + img + "</a>";
+            } else if (options.html) {
+                unsafe.insert(r->number);
+            }
         }
         cells.emplace_back(edges, std::string(), std::move(body));
     }
+    for (const int number : unsafe)
+        out.notes.push_back("スライス " + std::to_string(number) + " の URL は http・https・mailto でも相対でもないため、HTML にリンクを書きませんでした");
     if (options.html) {
         std::optional<std::string> spacer;
-        if (table) {
-            spacer = spacer_rel;
-            const fs::path spacer_path = folder / core::path_from_utf8(spacer_rel);
-            detail::PartFile part(spacer_path);
-            const render::codecs::web::Sink sink = [&part](std::string_view bytes) { part.write(bytes); };
+        if (plan.table) {
+            spacer = plan.spacer_rel;
+            const fs::path spacer_path = folder / core::path_from_utf8(plan.spacer_rel);
+            detail::PartFile file(spacer_path);
+            const render::codecs::web::Sink sink = [&file](std::string_view bytes) { file.write(bytes); };
             const std::array<std::uint8_t, 1> index{0};
             const std::array<Rgb8, 1> palette{Rgb8{std::uint8_t(0), std::uint8_t(0), std::uint8_t(0)}};
             render::codecs::web::write_gif_indexed(1, 1, index, palette, std::uint8_t(0), false, sink);
-            part.close();
-            output.put(std::move(part));
+            file.close();
+            output.put(std::move(file));
             out.files.push_back(spacer_path);
         }
-        output.put(html_path, web_slices_html(base, picture.rgba.width, picture.rgba.height, cells, spacer));
-        out.html = html_path;
+        output.put(plan.html_path, web_slices_html(plan.base, picture.rgba.width, picture.rgba.height, cells, spacer));
+        out.html = plan.html_path;
     }
     output.commit();
     return out;

@@ -308,20 +308,25 @@ std::optional<std::string> write(const core::Page& page, const psd_production::W
     if (!(context.width_px > 0) || !(context.height_px > 0)) return std::nullopt;
     const core::SliceGrid grid = core::slice_grid(page.spec.width_mm.value(), page.spec.height_mm.value(), std::llround(context.width_px),
                                                   std::llround(context.height_px));
-    // (where each lies now: a layer-based one where its layer puts it — the book's —, else where it was seen last)
-    std::vector<std::pair<std::int64_t, std::array<double, 4>>> rects;
+    // (where each lies now: a layer-based one where its layer puts it — the book's; none when it shows nothing, left out as
+    // the list and the canvas leave it, review P3-6 —, else where it was seen last)
+    std::vector<std::optional<std::array<double, 4>>> rects;
     for (const core::Slice& s : page.slices->list) {
-        std::optional<std::array<double, 4>> r;
-        if (s.origin == "layer" && context.doc != nullptr) r = slices::layer_rect_mm(*context.doc, page, s);
-        rects.emplace_back(s.id, r.value_or(s.rect_mm));
+        if (s.origin == "layer" && context.doc != nullptr) {
+            rects.push_back(slices::layer_rect_mm(*context.doc, page, s));
+        } else {
+            rects.emplace_back(s.rect_mm);
+        }
     }
     FileSlices file;
     file.bounds = {0, 0, static_cast<std::int32_t>(grid.canvas.y1), static_cast<std::int32_t>(grid.canvas.x1)};
-    file.group = slices::base_name(page);
+    // (the group's name as it was read — review P3-5 —, else the made base)
+    file.group = !page.slices->group.empty() ? page.slices->group : slices::base_name(page);
     std::vector<core::SliceBox> taken;
     for (std::size_t i = 0; i < page.slices->list.size(); ++i) {
         const core::Slice& s = page.slices->list[i];
-        const core::SliceBox box = core::slice_box(rects[i].second, grid);
+        if (!rects[i]) continue;
+        const core::SliceBox box = core::slice_box(*rects[i], grid);
         FileSlice f;
         f.id = s.id;
         f.origin = 2;

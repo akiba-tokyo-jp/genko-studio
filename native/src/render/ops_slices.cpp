@@ -13,10 +13,15 @@
 #include "core/error.hpp"
 #include "core/measure.hpp"
 #include "core/production_json.hpp"
+#include "core/psd_keep.hpp"
+#include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/pynum.hpp"
 #include "render/layer_bounds.hpp"
 #include "render/layer_styles.hpp"
+#include "render/psd_production.hpp"
+#include "render/psd_slices.hpp"
+#include "storage/asset_store.hpp"
 
 namespace genko::render::slices {
 
@@ -146,7 +151,14 @@ Slices& slices_of(core::Document& doc, std::size_t at) {
 void settle(core::Document& doc, std::size_t at) {
     core::Page& page = doc.edit_page(at);
     if (!page.slices) return;
-    core::check_slices(*page.slices);
+    // (PC5 J-b review P2-1: the ids run out at 2147483647 — the reader's bound —: refused, never a book that will not open)
+    if (page.slices->next_id > core::kSliceIdMax || std::any_of(page.slices->list.begin(), page.slices->list.end(), [](const Slice& s) { return s.id >= core::kSliceIdMax; }))
+        throw OpError("the page has used every slice id (at most " + std::to_string(core::kSliceIdMax - 1) + ")");
+    try {
+        core::check_slices(*page.slices);
+    } catch (const core::Error& error) {
+        throw OpError(std::string("the page's slices would not be read back: ") + error.what());
+    }
     if (page.slices->empty()) page.slices.reset();
 }
 
@@ -155,9 +167,63 @@ const Slices& seen(const core::Page& page) {
     return page.slices ? *page.slices : none;
 }
 
+// A block the book keeps of a PSD (in memory or among its assets; none: not there) — formats' kept_psd_file.
+std::optional<std::string> kept_bytes(const core::Document& doc, const std::string& ref) {
+    if (ref.empty()) return std::nullopt;
+    if (const auto held = doc.native_files.find(ref); held != doc.native_files.end() && held->second) return *held->second;
+    if (!doc.asset_dir || !storage::AssetStore::is_ref(ref)) return std::nullopt;
+    return storage::AssetStore(*doc.asset_dir).get_bytes(ref, core::kPsdBlockSuffix, storage::kAssetMaxBytes);
+}
+
+// (PC5 J-b review P3-1) A page a PSD made before J-b keeps the file's 1050 as it was — unmarked: its slices never read, so
+// never shown — and writes it back while the page has none of its own. Before the first slice is made on it, the kept ones
+// are read onto it as its own (the file's canvas the page's, as the PSD opened as a page has it; marked with their
+// fingerprint, as a PSD read now is): Photoshop's slices are never put out of the file unseen. How many were read (0: none
+// kept, or none this build reads — kept as it was then).
+std::size_t adopt_kept(core::Document& doc, std::size_t at) {
+    const core::Page& page = doc.page(at);
+    if ((page.slices && !page.slices->list.empty()) || !page.native_psd) return 0;
+    const core::PsdPageKeep& keep = *page.native_psd;
+    if (std::any_of(keep.copied.begin(), keep.copied.end(), [](const core::PsdCopied& m) { return m.resource == psd_slices::kResource; })) return 0;
+    const auto kept = std::find_if(keep.resources.begin(), keep.resources.end(), [](const core::PsdResource& r) { return r.id == psd_slices::kResource; });
+    if (kept == keep.resources.end()) return 0;
+    const std::optional<std::string> data = kept_bytes(doc, kept->ref);
+    if (!data) return 0;
+    const std::optional<psd_slices::FileSlices> file = psd_slices::parse(*data);
+    if (!file) return 0;
+    const double width_px = static_cast<double>(file->bounds[3]) - file->bounds[1], height_px = static_cast<double>(file->bounds[2]) - file->bounds[0];
+    if (!(width_px > 0) || !(height_px > 0)) return 0;
+    const core::vector::Affine onto{page.spec.width_mm.value(), 0.0, 0.0, page.spec.height_mm.value(), 0.0, 0.0};
+    psd_production::ReadContext context;
+    context.onto = &onto;
+    context.width_px = width_px;
+    context.height_px = height_px;
+    context.doc = &doc;
+    context.opened = true;
+    for (const core::Layer& l : page.layers)
+        if (l.native_psd && l.native_psd->id) context.layers.emplace(*l.native_psd->id, l.id);
+    const std::int64_t was_next = page.slices ? page.slices->next_id : 1;
+    core::Page& edit = doc.edit_page(at);
+    if (!psd_slices::read(edit, *data, context)) return 0;
+    edit.slices->next_id = std::max(edit.slices->next_id, was_next);  // (the page's numbering kept: an id never used twice)
+    core::PsdCopied mark;
+    mark.resource = psd_slices::kResource;
+    mark.fingerprint = psd_slices::fingerprint(edit, &doc);
+    if (!mark.fingerprint.empty()) edit.native_psd->copied.push_back(std::move(mark));
+    return edit.slices->list.size();
+}
+
+void say_adopted(core::OpContext& c, std::size_t adopted, bool replaced) {
+    if (adopted == 0) return;
+    c.notes.push_back(replaced ? "the page's " + std::to_string(adopted) + " slices kept from its PSD are replaced by the ones made from the guides"
+                               : "the page's " + std::to_string(adopted) + " slices kept from its PSD were read as its own slices first");
+}
+
 // The slice an op names: its id (`slice`) or its number as shown (`number`); an auto slice's number made a user slice
 // (`promote`) — its id then.
-std::int64_t named(core::Document& doc, std::size_t at, const Json& op, bool promote) {
+std::int64_t named(core::OpContext& c, std::size_t at, bool promote) {
+    core::Document& doc = c.doc;
+    const Json& op = c.op;
     const core::Page& page = doc.page(at);
     if (const Json* id = given(op, "slice")) {
         if (!id->is_number_integer()) throw OpError("slice is a slice's id");
@@ -173,11 +239,13 @@ std::int64_t named(core::Document& doc, std::size_t at, const Json& op, bool pro
     if (it == all.end()) throw OpError("no slice number " + std::to_string(number->get<std::int64_t>()) + " on the page");
     if (it->id) return *it->id;
     if (!promote) throw OpError("slice number " + std::to_string(it->number) + " is an auto slice");
+    const std::array<double, 4> rect = core::slice_rect_mm(it->box, grid);  // (where it was shown: before the kept ones are read)
+    say_adopted(c, adopt_kept(doc, at), false);
     Slices& list = slices_of(doc, at);
     if (list.list.size() >= core::kSlicesMax) throw OpError("a page holds at most " + std::to_string(core::kSlicesMax) + " slices");
     Slice s;
     s.id = core::fresh_slice_id(list);
-    s.rect_mm = core::slice_rect_mm(it->box, grid);
+    s.rect_mm = rect;
     list.list.push_back(s);
     list.next_id = s.id + 1;
     return s.id;
@@ -197,6 +265,8 @@ std::optional<core::ResolvedSlice> resolved_of(const core::Document& doc, const 
 
 void add_slice(core::OpContext& c) {
     const std::size_t at = core::require_page(c.doc, c.op);
+    (void)rect_given(c.doc.page(at), c.op);  // (a rect not given right: refused before anything is read)
+    say_adopted(c, adopt_kept(c.doc, at), false);
     const core::Page& page = c.doc.page(at);
     const Slices& before = seen(page);
     if (before.list.size() >= core::kSlicesMax) throw OpError("a page holds at most " + std::to_string(core::kSlicesMax) + " slices");
@@ -237,7 +307,7 @@ void add_slice(core::OpContext& c) {
 
 void set_slice(core::OpContext& c) {
     const std::size_t at = core::require_page(c.doc, c.op);
-    const std::int64_t id = named(c.doc, at, c.op, true);
+    const std::int64_t id = named(c, at, true);
     const core::Page& page = c.doc.page(at);
     const std::optional<std::array<double, 4>> rect = rect_given(page, c.op);
     bool promote = false;
@@ -303,7 +373,7 @@ void divide_slice(core::OpContext& c) {
     if (const Json* v = given(c.op, "rows")) rows = whole(*v, "rows", 1, kDivideMost);
     if (const Json* v = given(c.op, "columns")) columns = whole(*v, "columns", 1, kDivideMost);
     if (rows == 1 && columns == 1) throw OpError("give rows (slices down) or columns (slices across) above 1");
-    const std::int64_t id = named(c.doc, at, c.op, true);
+    const std::int64_t id = named(c, at, true);
     const core::Page& page = c.doc.page(at);
     const Slice source = *core::find_slice(seen(page), id);
     std::array<double, 4> rect = source.rect_mm;
@@ -361,6 +431,7 @@ void slices_from_guides(core::OpContext& c) {
     std::erase_if(cells, [&](const std::array<double, 4>& r) { return core::slice_box(r, grid).empty(); });
     if (cells.empty()) throw OpError("the page has no guides inside its paper");
     if (cells.size() > core::kSlicesMax) throw OpError("a page holds at most " + std::to_string(core::kSlicesMax) + " slices");
+    say_adopted(c, adopt_kept(c.doc, at), true);  // (the kept ones replaced too — said, and never written back after)
     Slices& list = slices_of(c.doc, at);
     std::int64_t next = core::fresh_slice_id(list);
     list.list.clear();  // (Photoshop's: every slice replaced)
@@ -488,7 +559,62 @@ Json listing(const core::Document& doc, const core::Page& page) {
                 {"slices", std::move(list)}};
 }
 
-void follow_layers(core::Document& doc, const std::vector<core::PagePtr>& before) {
+namespace {
+
+std::set<std::string, std::less<>>& followed() {
+    static std::set<std::string, std::less<>> names;
+    return names;
+}
+
+// (PC5 J-b review P3-9) The layer a merge or a smart object took a gone layer into (none: not one of those, or not found):
+// merge_down's — the layer below it among its folder's —, merge_layers' and merge_visible's — the first of the merged ones
+// in the page's order, which keeps its id —, smart_convert's — the smart object made of it, the page's one new layer.
+std::optional<std::string> merged_into(std::string_view name, const Json& op, const core::Page& was, const core::Page& now, const std::string& gone) {
+    const auto there = [&](const std::string& id) { return layer_of(now, id) != nullptr; };
+    const core::Layer* left = layer_of(was, gone);
+    if (left == nullptr) return std::nullopt;
+    if (name == "merge_down") {
+        if (!op.contains("id") || core::py_str(op["id"]) != gone) return std::nullopt;
+        const core::Layer* below = nullptr;
+        for (const core::Layer& l : was.layers) {
+            if (l.id == gone) break;
+            if (l.parent_id == left->parent_id && l.kind != core::LayerKind::Folder) below = &l;
+        }
+        if (below != nullptr && there(below->id)) return below->id;
+        return std::nullopt;
+    }
+    if (name == "merge_layers") {
+        std::set<std::string> ids;
+        if (const Json* given = core::get(op, "ids"); given != nullptr && given->is_array())
+            for (const Json& v : *given) ids.insert(core::py_str(v));
+        if (!ids.contains(gone)) return std::nullopt;
+        for (const core::Layer& l : was.layers)
+            if (ids.contains(l.id) && l.kind != core::LayerKind::Folder && there(l.id)) return l.id;
+        return std::nullopt;
+    }
+    if (name == "merge_visible") {
+        if (!left->visible) return std::nullopt;
+        for (const core::Layer& l : was.layers)
+            if (l.visible && l.kind != core::LayerKind::Folder && l.role != core::LayerRole::Name && l.role != core::LayerRole::Draft && there(l.id)) return l.id;
+        return std::nullopt;
+    }
+    if (name == "smart_convert") {
+        std::optional<std::string> made;
+        for (const core::Layer& l : now.layers) {
+            if (layer_of(was, l.id) != nullptr) continue;
+            if (made || l.kind != core::LayerKind::Smart) return std::nullopt;
+            made = l.id;
+        }
+        return made;
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
+void follow_layers(core::Document& doc, const std::vector<core::PagePtr>& before, const Json& op) {
+    const std::string name = op.is_object() && op.contains("op") && op["op"].is_string() ? op["op"].get<std::string>() : std::string();
+    const bool same_pages = before.size() == doc.pages.size();
     for (std::size_t p = 0; p < doc.pages.size(); ++p) {
         if (doc.is_deferred(p)) continue;
         const core::Page& page = doc.page(p);
@@ -497,11 +623,36 @@ void follow_layers(core::Document& doc, const std::vector<core::PagePtr>& before
         const bool gone = std::any_of(page.slices->list.begin(), page.slices->list.end(),
                                       [&](const Slice& s) { return s.layer && layer_of(page, *s.layer) == nullptr; });
         if (!gone) continue;
+        const core::Page* was = same_pages && before[p] ? before[p].get() : nullptr;
         core::Page& edit = doc.edit_page(p);
-        std::erase_if(edit.slices->list, [&](const Slice& s) { return s.layer && layer_of(edit, *s.layer) == nullptr; });
+        std::set<std::string> following;  // (a layer has one layer-based slice at most)
+        for (const Slice& s : edit.slices->list)
+            if (s.layer && layer_of(edit, *s.layer) != nullptr) following.insert(*s.layer);
+        std::vector<Slice> kept;
+        for (Slice& s : edit.slices->list) {
+            if (!s.layer || layer_of(edit, *s.layer) != nullptr) {
+                kept.push_back(std::move(s));
+                continue;
+            }
+            const std::optional<std::string> into = was != nullptr ? merged_into(name, op, *was, edit, *s.layer) : std::nullopt;
+            if (!into) continue;  // (its layer deleted: the slice with it, as Photoshop's)
+            if (following.insert(*into).second) {
+                s.layer = *into;  // (the merged layer's, or the smart object's: following it now)
+            } else {  // (that layer follows one already: this one a user slice where it was seen last, its options kept)
+                s.origin = "user";
+                s.layer.reset();
+                s.outsets = {};
+            }
+            kept.push_back(std::move(s));
+        }
+        edit.slices->list = std::move(kept);
         if (edit.slices->empty()) edit.slices.reset();
     }
 }
+
+void mark_followed(std::string_view op) { followed().emplace(op); }
+
+bool follows_layers(std::string_view op) { return followed().find(op) != followed().end(); }
 
 }  // namespace genko::render::slices
 

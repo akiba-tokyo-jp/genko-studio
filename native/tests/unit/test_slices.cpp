@@ -10,11 +10,16 @@
 
 #include <QtTest>
 
+#include <QElapsedTimer>
+
 #include <algorithm>
 #include <cmath>
+#include <optional>
+#include <random>
 #include <string>
 
 #include "core/command_bus.hpp"
+#include "core/error.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
 #include "core/production_json.hpp"
@@ -565,6 +570,231 @@ private slots:
         QVERIFY(!other.page(0).slices);
     }
 
+
+    // (PC5 J-b review P2-1) What the ops, a .pcraft and a PSD put on a page keeps the reader's bounds: check_slices has them
+    // all; a .pcraft's too long a name none, too long a text or ids past 2147483647 unreadable (said); the ids running out:
+    // the op refused.
+    void readerBoundsAreTheWritersBounds() {
+        const auto refused = [](const core::Slices& s) {
+            try {
+                core::check_slices(s);
+            } catch (const core::Error&) {
+                return true;
+            }
+            return false;
+        };
+        core::Slices s;
+        s.next_id = 2;
+        s.list.push_back(core::Slice{});
+        QVERIFY(!refused(s));
+        core::Slices bad = s;
+        bad.list[0].name = std::string(1025, 'x');
+        QVERIFY(refused(bad));
+        bad = s;
+        bad.group = std::string(1025, 'x');
+        QVERIFY(refused(bad));
+        bad = s;
+        bad.list[0].url = std::string(core::kSliceTextMax + 1, 'x');
+        QVERIFY(refused(bad));
+        bad = s;
+        bad.next_id = core::kSliceIdMax + 1;
+        QVERIFY(refused(bad));
+        bad = s;
+        bad.list[0].align = {0, 5};
+        QVERIFY(refused(bad));
+        // a .pcraft's
+        const auto read = [](const Json& value, std::vector<std::string>& said) {
+            core::Document doc = book();
+            render::pcraft_production::ReadContext context;
+            context.page = &doc.edit_page(0);
+            context.mm = 0.1;
+            context.say = [&](std::string s2) { said.push_back(std::move(s2)); };
+            render::pcraft_slices::read(value, context);
+            return doc;
+        };
+        const auto item = [](std::int64_t id, Json more = Json::object()) {
+            Json out{{"id", id}, {"origin", "user"}, {"rect", Json{{"x0", 0}, {"y0", 0}, {"x1", 10}, {"y1", 10}}}};
+            for (auto& [k, v] : more.items()) out[k] = v;
+            return out;
+        };
+        std::vector<std::string> said;
+        core::Document named = read(Json{{"groupName", std::string(2000, 'g')}, {"list", Json::array({item(1, {{"name", std::string(2000, 'n')}})})}}, said);
+        QVERIFY(said.empty());
+        QVERIFY(named.page(0).slices && named.page(0).slices->list[0].name.empty() && named.page(0).slices->group.empty());
+        (void)core::slices_from_json(core::to_json(*named.page(0).slices));  // (read back as it is saved)
+        core::Document texts = read(Json{{"list", Json::array({item(1, {{"url", std::string(core::kSliceTextMax + 1, 'u')}})})}}, said);
+        QCOMPARE(said.size(), std::size_t(1));
+        QVERIFY(!texts.page(0).slices);
+        said.clear();
+        core::Document far = read(Json{{"list", Json::array({item(core::kSliceIdMax), item(5)})}}, said);
+        QVERIFY(said.empty());
+        const core::Slices& ids = *far.page(0).slices;
+        QVERIFY(ids.next_id <= core::kSliceIdMax);
+        for (const core::Slice& one : ids.list) QVERIFY(one.id < core::kSliceIdMax);
+        const core::Slices again = core::slices_from_json(core::to_json(ids));
+        QCOMPARE(again, ids);
+        // the ids run out: refused
+        core::Document full = book();
+        core::Slices last;
+        last.next_id = core::kSliceIdMax - 1;
+        full.edit_page(0).slices = last;
+        full = run(full, op("add_slice", {{"rect_mm", {1, 1, 2, 2}}}));
+        QCOMPARE(full.page(0).slices->list[0].id, core::kSliceIdMax - 1);
+        QVERIFY(refusal(full, op("add_slice", {{"rect_mm", {4, 4, 2, 2}}})).find("used every slice id") != std::string::npos);
+        QVERIFY(refusal(full, op("set_slice", {{"number", 2}, {"promote", true}})).find("used every slice id") != std::string::npos);
+    }
+
+    // (PC5 J-b review P2-2) The auto slices of 4096 slices whose edges line up with none — a PSD made so — come quickly
+    // (the covered cells painted by their indices), and the same as cutting the canvas cell by cell (the way before).
+    void autoSlicesAreQuick() {
+        const core::SliceBox canvas{0, 0, 8192, 8192};
+        std::vector<std::pair<std::int64_t, core::SliceBox>> stored;
+        std::vector<core::SliceBox> taken;
+        for (std::int64_t k = 0; k < 4096; ++k) {
+            stored.emplace_back(k + 1, core::SliceBox{2 * k, 2 * k, 2 * k + 1, 2 * k + 1});
+            taken.push_back(stored.back().second);
+        }
+        core::Slices list;
+        for (const auto& [id, box] : stored) {
+            core::Slice one;
+            one.id = id;
+            list.list.push_back(one);
+        }
+        list.next_id = 4097;
+        QElapsedTimer clock;
+        clock.start();
+        const auto all = core::resolve_slices(list, stored, canvas, "p001");
+        const qint64 ms = clock.elapsed();
+        qInfo("4096 slices resolved in %lld ms (%zu in all)", static_cast<long long>(ms), all.size());
+        QVERIFY2(ms < 3000, qPrintable(QString::number(ms)));
+        std::int64_t covered = 0;
+        for (const core::ResolvedSlice& r : all) covered += r.box.width() * r.box.height();
+        QCOMPARE(covered, std::int64_t(8192) * 8192);
+        // (the way before: each cell asked of every slice, its runs joined down — the same boxes in the same order)
+        const auto before = [](const core::SliceBox& c, const std::vector<core::SliceBox>& boxes) {
+            std::vector<std::int64_t> xs{c.x0, c.x1}, ys{c.y0, c.y1};
+            for (const auto& b : boxes) {
+                xs.insert(xs.end(), {b.x0, b.x1});
+                ys.insert(ys.end(), {b.y0, b.y1});
+            }
+            std::sort(xs.begin(), xs.end());
+            xs.erase(std::unique(xs.begin(), xs.end()), xs.end());
+            std::sort(ys.begin(), ys.end());
+            ys.erase(std::unique(ys.begin(), ys.end()), ys.end());
+            const auto covered_at = [&](std::int64_t x, std::int64_t y) {
+                return std::any_of(boxes.begin(), boxes.end(), [&](const core::SliceBox& r) { return x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1; });
+            };
+            std::vector<core::SliceBox> runs, out;
+            for (std::size_t j = 0; j + 1 < ys.size(); ++j) {
+                std::optional<std::int64_t> start;
+                for (std::size_t i = 0; i + 1 < xs.size(); ++i) {
+                    const bool free = !covered_at(xs[i], ys[j]);
+                    if (free && !start) start = xs[i];
+                    if (!free && start) {
+                        runs.push_back(core::SliceBox{*start, ys[j], xs[i], ys[j + 1]});
+                        start.reset();
+                    }
+                }
+                if (start) runs.push_back(core::SliceBox{*start, ys[j], xs.back(), ys[j + 1]});
+            }
+            for (const auto& r : runs) {
+                const auto prev = std::find_if(out.begin(), out.end(), [&](const core::SliceBox& p) { return p.x0 == r.x0 && p.x1 == r.x1 && p.y1 == r.y0; });
+                if (prev != out.end()) {
+                    prev->y1 = r.y1;
+                } else {
+                    out.push_back(r);
+                }
+            }
+            return out;
+        };
+        std::mt19937 random(1050);
+        for (int round = 0; round < 40; ++round) {
+            const core::SliceBox c{0, 0, 200, 150};
+            std::vector<core::SliceBox> boxes;
+            const int n = 1 + static_cast<int>(random() % 12);
+            for (int i = 0; i < n; ++i) {
+                const std::int64_t x = random() % 200, y = random() % 150;
+                boxes.push_back(core::SliceBox{x, y, std::min<std::int64_t>(200, x + 1 + random() % 80), std::min<std::int64_t>(150, y + 1 + random() % 60)});
+            }
+            QCOMPARE(core::auto_slices(c, boxes), before(c, boxes));
+        }
+    }
+
+    // (PC5 J-b review P2-3) Slices over one another: the later in the list on top, whole; the one under it cut to what of it
+    // shows (no gap, no overlap); one wholly under another: nothing of it.
+    void overlappingPartsOwnedByTheTop() {
+        const core::SliceBox canvas{0, 0, 200, 200};
+        const core::SliceBox a{0, 0, 100, 100}, b{50, 50, 150, 150}, lone{160, 0, 190, 20};
+        const auto inside = [](const core::SliceBox& in, const core::SliceBox& of) { return in.x0 >= of.x0 && in.y0 >= of.y0 && in.x1 <= of.x1 && in.y1 <= of.y1; };
+        auto parts = core::owned_pieces({a, b, lone}, canvas);
+        QCOMPARE(parts[1], std::vector<core::SliceBox>{b});
+        QCOMPARE(parts[2], std::vector<core::SliceBox>{lone});
+        QCOMPARE(area(parts[0]), std::int64_t(100 * 100 - 50 * 50));
+        for (const auto& p : parts[0]) {
+            QVERIFY(inside(p, a));
+            QVERIFY(p.intersect(b).empty());
+        }
+        parts = core::owned_pieces({b, a}, canvas);
+        QCOMPARE(parts[1], std::vector<core::SliceBox>{a});
+        QCOMPARE(area(parts[0]), std::int64_t(100 * 100 - 50 * 50));
+        parts = core::owned_pieces({core::SliceBox{10, 10, 20, 20}, core::SliceBox{0, 0, 50, 50}}, canvas);
+        QVERIFY(parts[0].empty());
+        QCOMPARE(parts[1].size(), std::size_t(1));
+    }
+
+    // (PC5 J-b review P3-10) Every op of the registry that is not a question is wrapped by follow_layers — an op added after
+    // the wrapping (render/ops_registry.cpp: it is last) is caught here.
+    void everyOpFollowsTheLayers() {
+        const core::OpRegistry& registry = render::ops_registry();
+        std::size_t asked = 0;
+        for (const std::string& name : registry.names()) {
+            if (registry.is_query(std::string_view(name))) continue;
+            ++asked;
+            QVERIFY2(render::slices::follows_layers(name), name.c_str());
+        }
+        QVERIFY(asked > 100);
+        QVERIFY(render::slices::follows_layers("type_style"));  // (a question only by its arguments: wrapped, G-c's)
+    }
+
+    // (PC5 J-b review P3-9) A merge moves a layer-based slice onto the layer it went into — one there already: a user slice
+    // where it was —; a smart object made of the layer takes it; deleting the layer takes it away.
+    void mergeKeepsTheLayerBasedSlice() {
+        core::Document doc = book();
+        add_block(doc);
+        add_block(doc);
+        doc.edit_page(0).layers[1].id = "b";
+        doc = run(doc, op("add_slice", {{"layer", "b"}, {"url", "https://example.org/"}}));
+        const core::Document down = run(doc, op("merge_down", {{"id", "b"}}));
+        QCOMPARE(down.page(0).slices->list.size(), std::size_t(1));
+        QCOMPARE(*down.page(0).slices->list[0].layer, std::string("a"));
+        QCOMPARE(down.page(0).slices->list[0].url, std::string("https://example.org/"));
+        core::Document both = run(doc, op("add_slice", {{"layer", "a"}}));
+        const core::Document merged = run(both, op("merge_layers", {{"ids", {"a", "b"}}}));
+        const core::Slices& kept = *merged.page(0).slices;
+        QCOMPARE(kept.list.size(), std::size_t(2));
+        QCOMPARE(std::count_if(kept.list.begin(), kept.list.end(), [](const core::Slice& s) { return s.layer == std::optional<std::string>("a"); }), std::ptrdiff_t(1));
+        QCOMPARE(std::count_if(kept.list.begin(), kept.list.end(), [](const core::Slice& s) { return s.origin == "user"; }), std::ptrdiff_t(1));
+        const core::Document smart = run(doc, op("smart_convert", {{"id", "b"}}));
+        const core::Slices& made = *smart.page(0).slices;
+        QCOMPARE(made.list.size(), std::size_t(1));
+        QVERIFY(made.list[0].layer && *made.list[0].layer != "b");
+        QVERIFY(std::any_of(smart.page(0).layers.begin(), smart.page(0).layers.end(),
+                            [&](const core::Layer& l) { return l.id == *made.list[0].layer && l.kind == core::LayerKind::Smart; }));
+        const core::Document deleted = run(doc, op("delete_layer", {{"id", "b"}}));
+        QVERIFY(!deleted.page(0).slices || deleted.page(0).slices->list.empty());
+    }
+
+    // (PC5 J-b review P3-8) The page turned: a layer-based slice's outsets onto the sides they face now; resampled: scaled.
+    void outsetsTurnWithThePage() {
+        core::Document doc = book();
+        add_block(doc);
+        doc = run(doc, op("add_slice", {{"layer", "a"}, {"outsets", {1, 2, 3, 4}}}));
+        const core::Document turned = run(doc, op("rotate_pages", {{"turn", "90cw"}}));
+        // (clockwise: the left onto the top, the top onto the right, the right onto the bottom, the bottom onto the left)
+        QCOMPARE(turned.page(0).slices->list[0].outsets, (std::array<int, 4>{2, 3, 4, 1}));
+        const core::Document flipped = run(doc, op("rotate_pages", {{"turn", "flip_h"}}));
+        QCOMPARE(flipped.page(0).slices->list[0].outsets, (std::array<int, 4>{1, 4, 3, 2}));
+    }
     // MCP's apply_ops does not take them (the C++ build's own, as J-a's, J-c's, J-d1's); none is a frame any more.
     void notTheAgents() {
         for (const char* name : {"add_slice", "set_slice", "delete_slices", "divide_slice", "slices_from_guides", "slices_info"}) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -45,6 +46,13 @@ std::array<double, 4> slice_rect_mm(const SliceBox& box, const SliceGrid& grid);
 // The rectangles that tile `canvas` minus `taken` (PhotoCraft's auto_slices: the canvas cut along every slice's edges, the
 // free cells joined into runs along each band, then runs of the same columns joined down).
 std::vector<SliceBox> auto_slices(const SliceBox& canvas, const std::vector<SliceBox>& taken);
+
+// (PC5 J-b review P2-3) The parts of the stored slices that show (`boxes` in the list's order, a later one on top, as
+// Photoshop draws and writes them): each slice's box cut to the canvas — whole when no other one lies over or under it —,
+// else the cells (cut along the overlapping slices' edges) it is the top one of, joined into boxes as the auto slices are
+// (none: under the others). Refused (core::Error "value") past kOwnedCellsMost cells of overlapping slices.
+inline constexpr std::size_t kOwnedCellsMost = std::size_t(1) << 22;
+std::vector<std::vector<SliceBox>> owned_pieces(const std::vector<SliceBox>& boxes, const SliceBox& canvas);
 
 // A slice as shown, listed and written: the user and layer-based ones and the auto ones, numbered as Photoshop numbers them
 // (top to bottom, then left to right, from 1).

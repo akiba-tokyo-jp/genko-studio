@@ -7,8 +7,10 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <iterator>
 
+#include "core/error.hpp"
 #include "core/pynum.hpp"
 
 namespace genko::core {
@@ -48,6 +50,60 @@ std::array<double, 4> slice_rect_mm(const SliceBox& b, const SliceGrid& g) {
     return {r4(x0), r4(y0), r4(x1 - x0), r4(y1 - y0)};
 }
 
+namespace {
+
+// The distinct edges (sorted) and where a value lies among them.
+std::size_t index_of(const std::vector<std::int64_t>& edges, std::int64_t v) {
+    return static_cast<std::size_t>(std::lower_bound(edges.begin(), edges.end(), v) - edges.begin());
+}
+
+// A box's cells among the edges: columns [c0, c1), rows [r0, r1).
+struct Span {
+    std::size_t c0 = 0, c1 = 0, r0 = 0, r1 = 0;
+};
+
+// Runs of the cells along each band whose owner `owner_at(row, column)` is the same (none: -1, left out), each joined to
+// the run of the band above of the same columns and owner (PhotoCraft's "runs of the same columns joined down"): the
+// boxes in the order they began (by band, then across), each with its owner.
+template <class OwnerAt>
+std::vector<std::pair<std::int64_t, SliceBox>> runs_joined(const std::vector<std::int64_t>& xs, const std::vector<std::int64_t>& ys, OwnerAt&& owner_at,
+                                                           const std::function<void(std::size_t)>& band) {
+    std::vector<std::pair<std::int64_t, SliceBox>> out;
+    // (the runs of the band above: their first column, last column + 1, owner and box in `out` — in order across)
+    struct Open {
+        std::size_t c0, c1;
+        std::int64_t owner;
+        std::size_t at;
+    };
+    std::vector<Open> above, here;
+    const std::size_t nx = xs.size() - 1;
+    for (std::size_t j = 0; j + 1 < ys.size(); ++j) {
+        band(j);
+        here.clear();
+        std::size_t k = 0;  // (the run above looked at: both lists go across)
+        for (std::size_t i = 0; i < nx;) {
+            const std::int64_t owner = owner_at(j, i);
+            std::size_t e = i + 1;
+            while (e < nx && owner_at(j, e) == owner) ++e;
+            if (owner >= 0) {
+                while (k < above.size() && above[k].c0 < i) ++k;
+                if (k < above.size() && above[k].c0 == i && above[k].c1 == e && above[k].owner == owner) {
+                    out[above[k].at].second.y1 = ys[j + 1];
+                    here.push_back(Open{i, e, owner, above[k].at});
+                } else {
+                    out.emplace_back(owner, SliceBox{xs[i], ys[j], xs[e], ys[j + 1]});
+                    here.push_back(Open{i, e, owner, out.size() - 1});
+                }
+            }
+            i = e;
+        }
+        std::swap(above, here);
+    }
+    return out;
+}
+
+}  // namespace
+
 std::vector<SliceBox> auto_slices(const SliceBox& canvas, const std::vector<SliceBox>& taken) {
     if (canvas.empty()) return {};
     std::vector<std::int64_t> xs{canvas.x0, canvas.x1}, ys{canvas.y0, canvas.y1};
@@ -65,33 +121,98 @@ std::vector<SliceBox> auto_slices(const SliceBox& canvas, const std::vector<Slic
     xs.erase(std::unique(xs.begin(), xs.end()), xs.end());
     std::sort(ys.begin(), ys.end());
     ys.erase(std::unique(ys.begin(), ys.end()), ys.end());
-    const auto covered = [&](std::int64_t x, std::int64_t y) {
-        return std::any_of(inside.begin(), inside.end(), [&](const SliceBox& r) { return x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1; });
+    // (PC5 J-b review P2-2: the covered cells painted by their indices, a band at a time — each slice counted into the
+    // columns it covers when its first band comes and out after its last —: the cells and the slices' columns once each,
+    // never a cell against every slice)
+    std::vector<Span> spans;
+    spans.reserve(inside.size());
+    for (const SliceBox& r : inside) spans.push_back(Span{index_of(xs, r.x0), index_of(xs, r.x1), index_of(ys, r.y0), index_of(ys, r.y1)});
+    std::vector<std::size_t> by_start(spans.size()), by_end(spans.size());
+    for (std::size_t i = 0; i < spans.size(); ++i) by_start[i] = by_end[i] = i;
+    std::sort(by_start.begin(), by_start.end(), [&](std::size_t a, std::size_t b) { return spans[a].r0 < spans[b].r0; });
+    std::sort(by_end.begin(), by_end.end(), [&](std::size_t a, std::size_t b) { return spans[a].r1 < spans[b].r1; });
+    std::vector<std::int32_t> count(xs.size() - 1, 0);
+    std::size_t started = 0, ended = 0;
+    const auto band = [&](std::size_t j) {
+        for (; ended < by_end.size() && spans[by_end[ended]].r1 <= j; ++ended)
+            for (std::size_t c = spans[by_end[ended]].c0; c < spans[by_end[ended]].c1; ++c) --count[c];
+        for (; started < by_start.size() && spans[by_start[started]].r0 <= j; ++started)
+            for (std::size_t c = spans[by_start[started]].c0; c < spans[by_start[started]].c1; ++c) ++count[c];
     };
-    // (horizontal runs along each band)
-    std::vector<SliceBox> runs;
-    for (std::size_t j = 0; j + 1 < ys.size(); ++j) {
-        std::optional<std::int64_t> start;
-        for (std::size_t i = 0; i + 1 < xs.size(); ++i) {
-            const bool free = !covered(xs[i], ys[j]);
-            if (free && !start) start = xs[i];
-            if (!free && start) {
-                runs.push_back(SliceBox{*start, ys[j], xs[i], ys[j + 1]});
-                start.reset();
+    const auto free_at = [&](std::size_t, std::size_t i) -> std::int64_t { return count[i] == 0 ? 0 : -1; };
+    std::vector<SliceBox> out;
+    for (auto& [owner, box] : runs_joined(xs, ys, free_at, band)) out.push_back(box);
+    return out;
+}
+
+std::vector<std::vector<SliceBox>> owned_pieces(const std::vector<SliceBox>& boxes, const SliceBox& canvas) {
+    std::vector<std::vector<SliceBox>> out(boxes.size());
+    std::vector<SliceBox> clipped(boxes.size());
+    for (std::size_t i = 0; i < boxes.size(); ++i) clipped[i] = boxes[i].intersect(canvas);
+    // (the ones over or under another: only they are cut — every other one is whole)
+    std::vector<std::size_t> order(boxes.size());
+    for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) { return clipped[a].x0 < clipped[b].x0; });
+    std::vector<char> overlaps(boxes.size(), 0);
+    for (std::size_t a = 0; a < order.size(); ++a) {
+        const SliceBox& p = clipped[order[a]];
+        if (p.empty()) continue;
+        for (std::size_t b = a + 1; b < order.size() && clipped[order[b]].x0 < p.x1; ++b) {
+            const SliceBox& q = clipped[order[b]];
+            if (q.empty() || q.y0 >= p.y1 || p.y0 >= q.y1 || q.x1 <= p.x0) continue;
+            overlaps[order[a]] = overlaps[order[b]] = 1;
+        }
+    }
+    std::vector<std::size_t> cut;
+    for (std::size_t i = 0; i < boxes.size(); ++i) {
+        if (clipped[i].empty()) continue;
+        if (overlaps[i]) {
+            cut.push_back(i);
+        } else {
+            out[i].push_back(clipped[i]);
+        }
+    }
+    if (cut.empty()) return out;
+    std::vector<std::int64_t> xs, ys;
+    for (const std::size_t i : cut) {
+        xs.insert(xs.end(), {clipped[i].x0, clipped[i].x1});
+        ys.insert(ys.end(), {clipped[i].y0, clipped[i].y1});
+    }
+    std::sort(xs.begin(), xs.end());
+    xs.erase(std::unique(xs.begin(), xs.end()), xs.end());
+    std::sort(ys.begin(), ys.end());
+    ys.erase(std::unique(ys.begin(), ys.end()), ys.end());
+    const std::size_t nx = xs.size() - 1, ny = ys.size() - 1;
+    if (nx * ny > kOwnedCellsMost) throw Error("value", "the slices overlap in too many places to be cut into cells");
+    // (each cell its top slice's — the later in the list, as Photoshop draws and writes them —: painted from the top down,
+    // a cell once, the painted ones of a row passed over by their next unpainted one)
+    std::vector<std::int32_t> owner(nx * ny, -1);
+    std::vector<std::uint32_t> next(ny * (nx + 1));
+    for (std::size_t j = 0; j < ny; ++j)
+        for (std::size_t i = 0; i <= nx; ++i) next[j * (nx + 1) + i] = static_cast<std::uint32_t>(i);
+    const auto find = [&](std::size_t j, std::size_t i) {
+        std::uint32_t* row = next.data() + j * (nx + 1);
+        std::size_t root = i;
+        while (row[root] != root) root = row[root];
+        while (row[i] != root) {
+            const std::size_t up = row[i];
+            row[i] = static_cast<std::uint32_t>(root);
+            i = up;
+        }
+        return root;
+    };
+    for (auto it = cut.rbegin(); it != cut.rend(); ++it) {
+        const SliceBox& b = clipped[*it];
+        const Span s{index_of(xs, b.x0), index_of(xs, b.x1), index_of(ys, b.y0), index_of(ys, b.y1)};
+        for (std::size_t j = s.r0; j < s.r1; ++j) {
+            for (std::size_t i = find(j, s.c0); i < s.c1; i = find(j, i + 1)) {
+                owner[j * nx + i] = static_cast<std::int32_t>(*it);
+                next[j * (nx + 1) + i] = static_cast<std::uint32_t>(i + 1);
             }
         }
-        if (start) runs.push_back(SliceBox{*start, ys[j], xs.back(), ys[j + 1]});
     }
-    // (runs of the same columns joined down)
-    std::vector<SliceBox> out;
-    for (const SliceBox& r : runs) {
-        const auto prev = std::find_if(out.begin(), out.end(), [&](const SliceBox& p) { return p.x0 == r.x0 && p.x1 == r.x1 && p.y1 == r.y0; });
-        if (prev != out.end()) {
-            prev->y1 = r.y1;
-        } else {
-            out.push_back(r);
-        }
-    }
+    const auto owner_at = [&](std::size_t j, std::size_t i) -> std::int64_t { return owner[j * nx + i]; };
+    for (auto& [who, box] : runs_joined(xs, ys, owner_at, [](std::size_t) {})) out[static_cast<std::size_t>(who)].push_back(box);
     return out;
 }
 

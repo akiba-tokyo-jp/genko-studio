@@ -38,6 +38,7 @@
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
 #include "render/raster.hpp"
+#include "testsupport.hpp"
 
 using namespace genko;
 using core::Json;
@@ -376,6 +377,24 @@ private slots:
         QVERIFY(QFileInfo::exists(out + QStringLiteral("/p001.html")));
         QVERIFY(QFileInfo::exists(out + QStringLiteral("/images/spacer.gif")));
         QVERIFY2(b.window->last_notice().contains(QStringLiteral("スライスを")), qPrintable(b.window->last_notice()));
+        // (PC5 J-b review P3-3: files of those names there — asked once before anything is written; no: as they were)
+        const QString hero = out + QStringLiteral("/images/hero.png");
+        genko::test::write_bytes(hero, "old");
+        int questions = 0;
+        b.answers.responder->question = [&questions](const QString&, const QString& text) {
+            ++questions;
+            return !text.contains(QStringLiteral("置き換えますか")) ? true : false;
+        };
+        b.act("act_save_for_web")->trigger();
+        QCOMPARE(questions, 1);
+        QCOMPARE(genko::test::read_bytes(hero), std::string("old"));
+        b.answers.responder->question = [&questions](const QString&, const QString&) {
+            ++questions;
+            return true;
+        };
+        b.act("act_save_for_web")->trigger();
+        QCOMPARE(questions, 2);
+        QVERIFY(genko::test::read_bytes(hero) != std::string("old"));
     }
 };
 

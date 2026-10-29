@@ -7,6 +7,7 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/frames.hpp"
+#include "core/measure.hpp"
 #include "core/pyops.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
@@ -594,9 +595,33 @@ void map_page(Document& doc, std::size_t at, const Mapping& m, const PixelHooks&
     // sides swapped —; a layer-based one is made again from its layer, its rect kept as the last one seen. Past 1000 m from
     // the page: refused, as the marks above)
     if (page.slices) {
+        // (review P3-8: a layer-based slice's outsets — top, left, bottom, right in the page's pixels — turned with the page
+        // onto the sides they face now, and scaled as a length of the page is, in the pixels the page has after)
+        const double was_px = page_px_per_mm(before), now_px = page_px_per_mm(after);
+        const double k = was_px > 0 && now_px > 0 ? m.scale() * now_px / was_px : 1.0;
+        constexpr std::array<std::array<double, 2>, 4> kSides{{{0, -1}, {-1, 0}, {0, 1}, {1, 0}}};  // (top, left, bottom, right)
+        std::array<std::size_t, 4> onto{0, 1, 2, 3};
+        for (std::size_t i = 0; i < 4; ++i) {
+            const XY v = m.linear(XY{kSides[i][0], kSides[i][1]});
+            double best = -1e300;
+            for (std::size_t j = 0; j < 4; ++j) {
+                const double dot = v.x * kSides[j][0] + v.y * kSides[j][1];
+                if (dot > best) {
+                    best = dot;
+                    onto[i] = j;
+                }
+            }
+        }
         for (Slice& s : page.slices->list) {
             const std::array<double, 4> b = map_box(s.rect_mm, m);
             s.rect_mm = {py_round(b[0], 4), py_round(b[1], 4), py_round(b[2], 4), py_round(b[3], 4)};
+            if (s.outsets == std::array<int, 4>{}) continue;
+            std::array<int, 4> turned{};
+            for (std::size_t i = 0; i < 4; ++i) {
+                const double v = std::isfinite(k) ? std::round(s.outsets[i] * k) : 0.0;
+                turned[onto[i]] = static_cast<int>(std::clamp(v, double(-kSliceOutsetMax), double(kSliceOutsetMax)));
+            }
+            s.outsets = turned;
         }
         try {
             check_slices(*page.slices);

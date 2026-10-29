@@ -826,6 +826,14 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"((rows|columns) is a whole number 1\.\.1000)", "\\1 は 1〜1000 の整数で指定します"));
         r.push_back(rule(R"(slice is a slice's id)", "スライスは ID（整数）で指定します"));
         r.push_back(rule(R"(number is a slice's number as shown.*)", "スライスの番号は 1 から数えて指定します"));
+        // (PC5 J-b review: the ids' bound, the kept PSD slices read first, the overlapping slices written)
+        r.push_back(rule(R"(the page has used every slice id \(at most (\d+)\))", "このページのスライスの ID を使い切りました（\\1 まで）"));
+        r.push_back(rule(R"(the page's slices would not be read back: .*)", "スライスが読み直せない形になるため、できません"));
+        r.push_back(rule(R"(the page's (\d+) slices kept from its PSD were read as its own slices first)",
+                         "このページが PSD から持っていたスライス \\1 個を、先にこのページのスライスとして読み込みました"));
+        r.push_back(rule(R"(the page's (\d+) slices kept from its PSD are replaced by the ones made from the guides)",
+                         "このページが PSD から持っていたスライス \\1 個は、ガイドから作ったスライスに置き換わりました"));
+        r.push_back(rule("the slices overlap in too many places to be cut into cells", "スライスの重なりが多すぎて、書き出す形に分けられません"));
         // (PC5-0, Z0's review P1-1: a new layer of a 16- or 32-bit page painted at 8 bits for the book's precise budget)
         r.push_back(rule(R"(the layer is painted at 8 bits: the book's precise pixels would pass their budget.*)",
                          "本の高精度の画素の上限（1 GiB）を越えるか、本をまだ読み込み中のため、このレイヤーは 8 bit で塗りました"));

@@ -565,15 +565,18 @@ const core::OpRegistry& ops_registry() {
                 keep_page_modes(c.doc, before, &c.notes);
             });
         }
-        // (PC5 J-b, slices@1: a layer gone takes its layer-based slices with it, whichever op took it — Photoshop's)
+        // (PC5 J-b, slices@1: a layer gone takes its layer-based slices with it, whichever op took it — Photoshop's —, a merge
+        // or a smart object's moves them onto the layer it went into. LAST: an op added after this is not wrapped —
+        // test_slices' everyOpFollowsTheLayers asks each op of the registry, slices::follows_layers)
         for (const std::string& name : r.names()) {
-            if (r.is_query(name)) continue;
+            if (r.is_query(std::string_view(name))) continue;
             const core::OpFunction inner = *r.find(name);
             r.add(name, [inner](core::OpContext& c) {
                 const std::vector<core::PagePtr> before = c.doc.pages;
                 inner(c);
-                slices::follow_layers(c.doc, before);
+                slices::follow_layers(c.doc, before, c.op);
             });
+            slices::mark_followed(name);
         }
         return r;
     }();

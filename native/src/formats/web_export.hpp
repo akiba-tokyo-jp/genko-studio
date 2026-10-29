@@ -171,10 +171,18 @@ struct WebSlicesResult {
 // pixels (core/slice_layout: each edge its mm rounded alone — neighbours share it) and optimised as the settings say, named
 // after the slice (<name>.<ext>: its own name or <base>_NN), in `folder`/images; a no-image slice writes no picture (its cell
 // text in the HTML). The HTML: a table of one column a distinct x edge and one row a y edge, each slice a cell spanning its
-// columns and rows (a slice under an earlier one passed over), an image linked to its URL and target with its alt, PhotoCraft's
+// columns and rows (the parts below: never over one another), an image linked to its URL and target with its alt, PhotoCraft's
 // html_table. All the files written together when all are made (none of them when one fails).
+// (PC5 J-b review P2-3, P3-2, P3-4) Slices over one another: each written as what of it shows — the later in the page's list
+// on top, as Photoshop writes them —, cut into boxes when it shows in parts (<name>_1, _2 …), none when nothing does (said);
+// the files' names one each whatever their case, never a device of Windows (CON, NUL, COM1 …: <name>_); a link written only
+// when it is http, https, mailto or relative (else left out and said).
 WebSlicesResult save_slices_for_web(const core::Document& doc, std::size_t page, const WebSettings& settings, const WebSize& size,
                                     const std::filesystem::path& folder, const WebSliceOptions& options);
+// The files save_slices_for_web would write there (the slices' pictures, the spacer, the HTML), nothing drawn or written —
+// the window asks before it writes over files of those names (PC5 J-b review P3-3, PC4 F-c's rule).
+std::vector<std::filesystem::path> web_slice_files(const core::Document& doc, std::size_t page, const WebSettings& settings, const WebSize& size,
+                                                   const std::filesystem::path& folder, const WebSliceOptions& options);
 // The HTML table alone (cells: a slice's box in the picture's pixels, its <td>'s attributes and its body) — tests.
 std::string web_slices_html(const std::string& title, std::uint32_t width, std::uint32_t height,
                             const std::vector<std::tuple<std::array<std::int64_t, 4>, std::string, std::string>>& cells,

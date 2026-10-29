@@ -1944,6 +1944,9 @@ private:
     void refresh_slices();
     bool slices_unlocked();  // (スライスをロック: false, said)
     std::optional<std::int64_t> chosen_slice_id(bool promote);
+    // (PC5 J-b, H-c's pane: pane_look) A pane beside the canvas shows its own page's slices as the canvas shows its: their
+    // colour and numbers, each made again when its book or page changes.
+    void slices_in_pane(PageCanvas* pane);
     PageCanvas::SliceView slice_view_;
     const core::Page* slice_view_page_ = nullptr;
     std::shared_ptr<const void> slice_view_keep_;  // (the book the view was made of, so its page is not another's)

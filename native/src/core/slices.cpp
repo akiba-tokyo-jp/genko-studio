@@ -98,8 +98,21 @@ Slices slices_from_json(const Json& value) {
 void check_slices(const Slices& slices) {
     const std::string where = "slices";
     if (slices.list.size() > kSlicesMax) pj::wrong(where, "holds more than " + std::to_string(kSlicesMax) + " slices");
+    // (PC5 J-b review P2-1: every bound the reader — slices_from_json — has, so what an op, a .pcraft or a PSD puts on the page
+    // is always read back)
+    if (slices.group.size() > 1024) pj::wrong(where + ".group", "is longer than 1024 bytes");
+    if (slices.next_id < 1 || slices.next_id > kSliceIdMax) pj::wrong(where + ".next_id", "must be 1.." + std::to_string(kSliceIdMax));
     std::set<std::int64_t> ids;
     for (const Slice& s : slices.list) {
+        if (s.id < 1 || s.id > kSliceIdMax) pj::wrong(where, "has a slice whose id is out of range");
+        if (s.layer && s.layer->size() > 256) pj::wrong(where, "has a slice whose layer is longer than 256 bytes");
+        if (s.name.size() > 1024) pj::wrong(where, "has a slice whose name is longer than 1024 bytes");
+        for (const std::string* t : {&s.url, &s.target, &s.message, &s.alt, &s.cell_text})
+            if (t->size() > kSliceTextMax) pj::wrong(where, "has a slice whose text is longer than " + std::to_string(kSliceTextMax) + " bytes");
+        for (const int a : s.align)
+            if (a < 0 || a > 4) pj::wrong(where, "has a slice whose align is out of range (0..4)");
+        for (const int o : s.outsets)
+            if (o < -kSliceOutsetMax || o > kSliceOutsetMax) pj::wrong(where, "has a slice whose outsets are out of range");
         if (!ids.insert(s.id).second) pj::wrong(where, "has two slices of the id " + std::to_string(s.id));
         if (s.id >= slices.next_id) pj::wrong(where + ".next_id", "must be past every slice's id");
         if (s.origin != "user" && s.origin != "layer") pj::wrong(where, "has a slice of the origin " + s.origin + " (user, layer)");

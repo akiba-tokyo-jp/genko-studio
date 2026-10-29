@@ -31637,7 +31637,8 @@
         "native/tests/contract/test_contract_slices.cpp",
         "native/src/app/main_window_slices.cpp",
         "native/src/app/canvas_slices.cpp",
-        "native/tests/gui/test_gui_slices.cpp"
+        "native/tests/gui/test_gui_slices.cpp",
+        "native/tests/contract/test_contract_psd.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -38126,7 +38127,9 @@
         "native/src/app/main_window_slices.cpp",
         "native/src/app/canvas_slices.cpp",
         "native/tests/gui/test_gui_slices.cpp",
-        "native/src/app/main_window_guide_view.cpp"
+        "native/src/app/main_window_guide_view.cpp",
+        "native/src/app/main_window_arrange.cpp",
+        "native/tests/gui/test_gui_arrange.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",

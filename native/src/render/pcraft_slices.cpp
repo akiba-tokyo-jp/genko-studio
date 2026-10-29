@@ -55,7 +55,7 @@ void read(const Json& value, pcraft_production::ReadContext& context) {
     core::Slices out;
     try {
         out.group = text(value, "groupName");
-        if (out.group.size() > 1024) throw Bad{};
+        if (out.group.size() > 1024) out.group.clear();  // (PC5 J-b review P2-1: too long a name none, as the PSD's)
         const Json* list = field(value, "list");
         if (list != nullptr) {
             if (!list->is_array() || list->size() > core::kSlicesMax) throw Bad{};
@@ -75,6 +75,7 @@ void read(const Json& value, pcraft_production::ReadContext& context) {
                     }
                 }
                 s.name = text(item, "name");
+                if (s.name.size() > 1024) s.name.clear();  // (review P2-1: as the PSD's reader — the made name then)
                 const std::string kind = text(item, "kind");
                 s.kind = kind == "noImage" || kind == "table" ? kind : std::string("image");
                 s.url = text(item, "url");
@@ -82,6 +83,9 @@ void read(const Json& value, pcraft_production::ReadContext& context) {
                 s.message = text(item, "message");
                 s.alt = text(item, "alt");
                 s.cell_text = text(item, "cellText");
+                // (review P2-1: a text past the reader's bound — the slices unreadable: left out and said, as a PSD's are kept out)
+                for (const std::string* t : {&s.url, &s.target, &s.message, &s.alt, &s.cell_text})
+                    if (t->size() > core::kSliceTextMax) throw Bad{};
                 if (const Json* v = field(item, "cellTextIsHtml")) {
                     if (!v->is_boolean()) throw Bad{};
                     s.cell_text_is_html = v->get<bool>();
@@ -113,10 +117,11 @@ void read(const Json& value, pcraft_production::ReadContext& context) {
             // (an id of 0, out of range or twice: one after the largest)
             std::vector<core::Slice*> fresh;
             for (core::Slice& s : out.list) {
-                if (s.id < 1 || s.id > core::kSliceIdMax || !ids.insert(s.id).second) fresh.push_back(&s);
+                if (s.id < 1 || s.id >= core::kSliceIdMax || !ids.insert(s.id).second) fresh.push_back(&s);
             }
             std::int64_t next = ids.empty() ? 1 : *ids.rbegin() + 1;
             for (core::Slice* s : fresh) s->id = next++;
+            if (next > core::kSliceIdMax) throw Bad{};  // (review P2-1: ids past the reader's: unreadable, said)
             out.next_id = next;
         }
         if (out.list.empty()) return;  // (a group's name alone: nothing to keep)

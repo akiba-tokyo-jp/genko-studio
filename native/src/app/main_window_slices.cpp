@@ -118,19 +118,50 @@ void MainWindow::build_slice_menus(QMenu* view, QMenu* layers) {
     }
 }
 
+namespace {
+
+PageCanvas::SliceView made_slice_view(const core::Document& doc, const core::Page& page) {
+    PageCanvas::SliceView v;
+    v.grid = render::slices::page_grid(page);
+    try {
+        v.slices = render::slices::resolve(doc, page, v.grid);
+    } catch (const std::exception&) {
+        v.slices.clear();
+    }
+    if (page.slices)
+        for (const core::Slice& s : page.slices->list) v.order.push_back(s.id);
+    return v;
+}
+
+}  // namespace
+
+void MainWindow::slices_in_pane(PageCanvas* pane) {
+    pane->slice_colour = canvas_->slice_colour;
+    pane->show_slice_numbers = canvas_->show_slice_numbers;
+    struct Made {
+        DocPtr doc;  // (the book it was made of: its page never another's)
+        const core::Page* page = nullptr;
+        PageCanvas::SliceView view;
+    };
+    auto made = std::make_shared<Made>();
+    pane->slice_view = [pane, made]() -> const PageCanvas::SliceView* {
+        const DocPtr& doc = pane->doc();
+        const core::Page* page = pane->page();
+        if (!doc || page == nullptr) return nullptr;
+        if (made->doc != doc || made->page != page) {
+            made->view = made_slice_view(*doc, *page);
+            made->doc = doc;
+            made->page = page;
+        }
+        return &made->view;
+    };
+}
+
 const PageCanvas::SliceView* MainWindow::slice_view() {
     const core::Page* page = current_page();
     if (page == nullptr) return nullptr;
     if (page != slice_view_page_ || !slice_view_made_) {
-        PageCanvas::SliceView v;
-        v.grid = render::slices::page_grid(*page);
-        try {
-            v.slices = render::slices::resolve(book(), *page, v.grid);
-        } catch (const std::exception&) {
-            v.slices.clear();
-        }
-        if (page->slices)
-            for (const core::Slice& s : page->slices->list) v.order.push_back(s.id);
+        PageCanvas::SliceView v = made_slice_view(book(), *page);
         slice_view_ = std::move(v);
         slice_view_page_ = page;
         slice_view_keep_ = book().pages.empty() ? nullptr : std::shared_ptr<const void>(session_->snapshot());

@@ -786,7 +786,7 @@ if(GENKO_BUILD_APP)
   # PC5 J-b (slices@1): the スライスツール (a drag, Shift, a click; ガイドからスライスを作成), the スライス選択ツール (chosen, moved,
   # sized, promoted, divided, deleted, スライスオプション), 新規レイヤーベースのスライス, 表示 → スライス・スライスをロック・スライスを
   # 消去・スナップ先 → スライス, 環境設定 → ガイド・グリッド・スライス's two, Web 用に保存 by slices — each change one Undo.
-  genko_test(test_gui_slices SOURCES gui/test_gui_slices.cpp DEPS genko_app GUI TIMEOUT 600)
+  genko_test(test_gui_slices SOURCES gui/test_gui_slices.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   # PC5 I-e: ファイル → 自動処理 ▸ (バッチ…・ドロップレットを作成…・条件付きモード変更…・画像を合わせる…・レンズ補正…) and スクリプト ▸
   # (画像プロセッサー…・スクリプトイベントマネージャー…・参照…): their places, the windows asked, the script events raised by the
   # person's save (never the automatic one) and not run once their script changed

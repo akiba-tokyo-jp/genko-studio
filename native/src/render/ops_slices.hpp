@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -61,8 +62,13 @@ core::Json slice_json(const core::Page& page, const core::ResolvedSlice& r, cons
 // slices_info's answer (and `genko inspect --slices`).
 core::Json listing(const core::Document& doc, const core::Page& page);
 // After an op: the layer-based slices whose layer is gone taken away, on the pages it changed (`before`: the book's pages
-// before it).
-void follow_layers(core::Document& doc, const std::vector<core::PagePtr>& before);
+// before it). (PC5 J-b review P3-9) `op` merge_down, merge_layers, merge_visible or smart_convert: a slice follows the
+// layer it went into instead (a user slice where it was seen last when that layer follows another already).
+void follow_layers(core::Document& doc, const std::vector<core::PagePtr>& before, const core::Json& op = core::Json());
+// (PC5 J-b review P3-10) render::ops_registry() wraps every op that is not a question with follow_layers, last, and marks it
+// here: an op added after that wrapping is not marked (test_slices asks every op of the registry).
+void mark_followed(std::string_view op);
+bool follows_layers(std::string_view op);
 
 }  // namespace genko::render::slices
 
