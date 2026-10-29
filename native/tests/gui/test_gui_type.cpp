@@ -338,7 +338,7 @@ private slots:
         s.window->refresh_type_commands();
         QVERIFY(s.act("act_type_rtl")->isChecked() && s.act("act_type_composer_world")->isChecked());
         // undone in one step
-        s.window->undo();
+        s.act("act_undo")->trigger();
         QVERIFY(!s.layer("t1")->type->native_type->value("para", Json::object()).contains("composer"));
         s.window->type_language_features(QStringLiteral("default"));
         QVERIFY(!s.act("act_type_rtl")->isVisible() && !s.act("act_type_ot_palt")->isVisible());

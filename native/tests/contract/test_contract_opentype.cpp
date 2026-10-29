@@ -228,13 +228,13 @@ private slots:
         const render::RenderResult r = render::render_page(doc.page(0), kDpi, options, &doc);
         QVERIFY(r.omitted.empty());
         QVERIFY(render::text::text_layout(doc.story[0], kDpi).image.getbbox().has_value());
-        // its features are HarfBuzz's: fractions with the Inter test font
-        Json frac = line;
-        frac["text"] = "1/2";
-        frac["style"] = Json{{"features", Json::array({"frac"})}, {"font", inter()}, {"size_mm", 8}};
-        Json liga = frac;
-        liga["style"]["features"] = Json::array({"liga"});
-        QVERIFY(bytes(run(base, frac)) != bytes(run(base, liga)));
+        // its features are HarfBuzz's: Inter's stylistic alternate a (salt; the tags a line's style takes, ops.FEATURES)
+        Json alternate = line;
+        alternate["text"] = "aaa";
+        alternate["style"] = Json{{"features", Json::array({"salt"})}, {"font", inter()}, {"size_mm", 8}};
+        Json kerned = alternate;
+        kerned["style"]["features"] = Json::array({"kern"});
+        QVERIFY(bytes(run(base, alternate)) != bytes(run(base, kerned)));
         // down: as without them (the coordinator's decision: down is set as before until the 文字 panel touches it)
         Json down = line;
         down["wrap"] = "vertical";

@@ -666,16 +666,40 @@ OpenTypeRows opentype_rows(const OpenTypeIn& q) {
         full = std::max(full, row.lead + row.glyphs.width + row.trail);
         justified = justified || row.justified;
     }
-    if (justified && q.inner_w < kUnbroken / 2) full = std::max(full, q.inner_w);
+    // (a box text: as wide as its box, each row aligned in it — a right-to-left paragraph at its right; a justified row
+    // spread over it)
+    if ((justified || shape_of(q.line) == "box") && q.inner_w < kUnbroken / 2) full = std::max(full, q.inner_w);
     const std::int64_t out_w = std::max<std::int64_t>(1, static_cast<std::int64_t>(core::py_ceil(full)));
+    // each row's top and baseline (characters share the row's baseline area, as a line's rows: the tallest letter's ascent
+    // from its top); the picture holds every letter's ascent and descent — rows closer than their letters (leading below
+    // the size) overlap, the first one's letters above its top kept by moving all down
+    std::vector<std::int64_t> tops;
+    std::vector<double> baselines;
     std::int64_t total = 0;
-    for (const Row& row : rows) total += row.gap_before + row.height;
+    double low = 0.0, high = 0.0;
+    for (const Row& row : rows) {
+        total += row.gap_before;
+        tops.push_back(total);
+        const double base_y = static_cast<double>(total + q.above) + static_cast<double>(row.height - q.above - row.tallest) / 2;
+        const double baseline = base_y + static_cast<double>(ascent_of(row.tallest_look).first);
+        baselines.push_back(baseline);
+        const std::vector<std::size_t>& plooks = paras[row.para].shaped.look_of;
+        for (std::size_t i = row.start; i < row.drawn; ++i) {
+            const Look& look = looks[plooks[i]];
+            const auto [ascent, descent] = ascent_of(plooks[i]);
+            low = std::min(low, baseline - look.shift - static_cast<double>(ascent) * std::max(1.0, look.shape.scale_y));
+            high = std::max(high, baseline - look.shift + static_cast<double>(descent) * std::max(1.0, look.shape.scale_y));
+        }
+        total += row.height;
+    }
+    const auto drop = static_cast<std::int64_t>(std::ceil(std::max(0.0, -low)));
+    total = std::max<std::int64_t>(total, static_cast<std::int64_t>(std::ceil(high))) + drop;
     result.image = blank(out_w, std::max<std::int64_t>(1, total));
     Image& out = result.image;
     const std::string mark_kind = core::py_str(core::py_or(at(q.st, "emphasis_mark"), Json("sesame")));
-    std::int64_t top = 0;
-    for (Row& row : rows) {
-        top += row.gap_before;
+    for (std::size_t r = 0; r < rows.size(); ++r) {
+        Row& row = rows[r];
+        const std::int64_t top = tops[r] + drop;
         const Para& para = paras[row.para];
         const double room = static_cast<double>(out_w) - row.lead - row.trail;
         double x0 = row.lead;
@@ -688,11 +712,7 @@ OpenTypeRows opentype_rows(const OpenTypeIn& q) {
         } else if (row.align == "right") {
             x0 += room - row.glyphs.width;
         }
-        const auto [tall_ascent, tall_descent] = ascent_of(row.tallest_look);
-        (void)tall_descent;
-        // (characters share the row's baseline area, as a line's rows: the tallest letter's ascent from its top)
-        const double base_y = static_cast<double>(top + q.above) + static_cast<double>(row.height - q.above - row.tallest) / 2;
-        const double baseline = base_y + static_cast<double>(tall_ascent);
+        const double baseline = baselines[r] + static_cast<double>(drop);
         SetRow* set_row = nullptr;
         if (q.cells != nullptr) {
             q.cells->emplace_back();
@@ -763,7 +783,6 @@ OpenTypeRows opentype_rows(const OpenTypeIn& q) {
                           static_cast<double>(q.mark_h), mark_kind, look.rgb, false);
             }
         }
-        top += row.height;
     }
     return result;
 }
