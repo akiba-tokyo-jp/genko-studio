@@ -31,6 +31,7 @@
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
 #include "render/png.hpp"
+#include "service/wording.hpp"
 
 using namespace genko;
 using core::Json;
@@ -328,6 +329,14 @@ private slots:
         QVERIFY(out->isEnabled());
         out->trigger();
         QVERIFY2(window->last_error().contains(QStringLiteral("変数とデータセットを使えません")), qPrintable(window->last_error()));
+    }
+
+    // The review's P3-3: the words for a variable's name with spaces (the window's own names, 変数 1) said in Japanese.
+    void wordsForNamesWithSpaces() {
+        QCOMPARE(wording::error(std::string("variable 変数 1: a printed layer's pixels change only after name_ok on page 2 (strict_gates)")),
+                 QStringLiteral("変数「変数 1」: 2 ページのネームが承認されるまで、印刷するレイヤーの画素は変えられません"));
+        QCOMPARE(wording::error(std::string("data_sets[0].values[1]: show it (visibility) takes true or false")),
+                 QStringLiteral("変数「show it」（表示）の値は true か false です"));
     }
 
     // The review's P3-4: 定義… binds the layer of the page it was opened on, though another page holds a layer of that id.

@@ -236,7 +236,10 @@ void read(const Json& value, pcraft_production::ReadContext& context) {
     if (const auto active = value.find("active"); active != value.end() && active->is_number_integer() && active->get<std::int64_t>() >= 0 && static_cast<std::uint64_t>(active->get<std::int64_t>()) < variables.data_sets.size()) {
         variables.active = active->get<std::int64_t>();
     }
-    if (variables.empty()) return;
+    if (variables.empty()) {  // (something held, none of it upstream's form: said)
+        if (holds(value)) said("変数とデータセットは読めない形のため外しました");
+        return;
+    }
     try {
         (void)core::variables_from_json(core::variables_to_json(variables));
         core::set_variables(*context.book, std::move(variables));
