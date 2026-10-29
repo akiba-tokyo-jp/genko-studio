@@ -748,7 +748,7 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
                                    "対応していないパソコンでは、入れていても使いません"));
     gpu_memory = new QSpinBox;  // (PC5 H-a, render:GPU-CPU-parity)
     gpu_memory->setObjectName(QStringLiteral("gpu_memory"));
-    gpu_memory->setRange(64, 65536);
+    gpu_memory->setRange(64, 1024);  // (Qt's own texture cache keeps 1 GiB at most: review P3-1)
     gpu_memory->setSingleStep(64);
     gpu_memory->setSuffix(QStringLiteral(" MB"));
     gpu_memory->setValue(static_cast<int>(PageCanvas::gpu_budget_bytes() / (1024 * 1024)));

@@ -82,6 +82,10 @@ struct RenderOptions {
     // smart-objects@1 (render/smart.hpp): a smart object's contents page — its layers alone over nothing ("RGBA"): no paper,
     // panels' borders, lines, nombres, effect lines, guides or marks (render_contents).
     bool contents = false;
+    // PC5 H-a (32 bit プレビュー, review P3-4): where what is drawn over the page's layers in 8 bits — the lines and
+    // balloons, the panels' borders, effect lines, the nombre, marks and guides — paints (RenderResult::drawn_over), on a
+    // page of precise colour or inks. Not the tones (layers).
+    bool drawn_over = false;
 };
 
 struct RenderResult {
@@ -89,7 +93,14 @@ struct RenderResult {
     std::vector<std::string> omitted;  // with skip_unported: what was left out (each once, in the order met)
     std::optional<core::InkPixels> inks;  // with RenderOptions::inks on a CMYK or Lab page: its inks (opaque)
     std::optional<std::string> precise;   // with RenderOptions::precise: GKCR f32 of the page's values (its profile's)
+    // with RenderOptions::drawn_over on a page of precise colour or inks: 255 where something was drawn over the page in 8
+    // bits, else 0 (the image's size, row by row)
+    std::optional<std::vector<unsigned char>> drawn_over = std::nullopt;
 };
+
+// PC5 H-a: the page is drawn whole even for a part of it (a correction that moves shapes: render_page with a region draws
+// the whole page and cuts the part) — the screen's tiles draw it once and cut every tile from it.
+bool draws_whole_page(const core::Page& page);
 
 // RenderOptions with mode "proof" (render_frame's default).
 RenderOptions proof_options();

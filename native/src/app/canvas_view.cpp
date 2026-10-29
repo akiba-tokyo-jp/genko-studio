@@ -38,8 +38,9 @@ QSizeF PageCanvas::pixel_grid_cell_mm() const {
     if (const core::Layer* layer = layer_of(*p, grid_layer)) {
         try {
             if (layer->color_raster) {
-                const core::ColorRasterView view(*layer->color_raster);
-                return across(view.width(), view.height());
+                // (its head alone: a 32-bit raster's view would check every float, on every paint — review P2-5)
+                const auto [cols, rows] = core::color_raster_size(*layer->color_raster);
+                return across(cols, rows);
             }
             if (layer->ink_raster) {
                 const core::InkRasterHeader head = core::ink_raster_header(*layer->ink_raster);

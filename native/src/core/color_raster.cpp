@@ -53,6 +53,12 @@ ColorRasterView::ColorRasterView(std::string_view bytes) : bytes_(bytes) {
         }
     }
 }
+std::array<std::uint32_t, 2> color_raster_size(std::string_view bytes) {
+    if (bytes.size() < 16 || bytes.substr(0, 4) != "GKCR" || static_cast<unsigned char>(bytes[4]) != 1 || (bytes[5] != 2 && bytes[5] != 4)) invalid();
+    const std::uint32_t w = le(bytes, 8, 4), h = le(bytes, 12, 4);
+    if (bytes.size() != 16 + pixels(w, h) * 4 * static_cast<unsigned char>(bytes[5])) invalid();
+    return {w, h};
+}
 std::array<double, 4> ColorRasterView::pixel(std::size_t i) const {
     if (i >= std::size_t(width_)*height_) invalid();
     std::array<double, 4> out{};

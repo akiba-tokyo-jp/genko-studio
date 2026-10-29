@@ -129,6 +129,15 @@ public:
     std::size_t textures_released() const { return textures_released_; }
     // (after a frame is drawn on the card: the ones past the budget let go)
     void trim_textures();
+    // The finer levels' pictures kept (review P2-3): past this many bytes, the tiles out of sight the longest are let go
+    // (drawn again when they are wanted). The bytes of the finer levels' pictures now, and how many were let go.
+    static constexpr std::size_t kFineBytes = std::size_t(256) * 1024 * 1024;
+    void set_fine_budget(std::size_t bytes);
+    std::size_t fine_bytes() const;
+    std::size_t fine_released() const { return fine_released_; }
+    // A page drawn whole for any part of it (render::draws_whole_page): how many times it was drawn whole (each level
+    // once while the page and its look stay the same — review P2-3; tests).
+    std::size_t wholes_drawn() const;
 
     // What the view needs: the resolution of the whole page (base) and the one wanted (finer when zoomed in), and
     // the part of the page in sight (mm).
@@ -177,6 +186,7 @@ private:
         QRect pending;                // what is to be drawn again (tile coordinates); empty: nothing
         bool rough = false;           // its pixels are the rough first look
         bool want_rough = false;
+        std::uint64_t seen = 0;       // (PC5 H-a: the last time it was wanted — the finer levels' tiles let go oldest first)
         bool running = false;
         std::shared_ptr<std::stop_source> stop;
     };
@@ -236,6 +246,12 @@ private:
     mutable std::uint64_t card_frame_ = 0;
     std::size_t textures_released_ = 0;
     void forget_on_card(int dpi, int index);
+    void trim_fine();
+    std::size_t fine_budget_ = kFineBytes;
+    std::size_t fine_released_ = 0;
+    std::uint64_t want_clock_ = 0;
+    struct WholeStore;
+    std::shared_ptr<WholeStore> wholes_;  // (the whole page drawn once a level, its tiles cut from it)
     struct OnionStore;
     std::shared_ptr<OnionStore> onions_;  // (the onion skin of the frame shown, made once for all its tiles)
     QThreadPool pool_;

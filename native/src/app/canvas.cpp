@@ -309,7 +309,10 @@ int PageCanvas::wanted_dpi() const {
     // detail's 432 dpi on a page of a finer resolution)
     const int pixel = page_pixel_dpi(page());
     if (pixel > 0 && (step >= pixel || dpi >= pixel)) return pixel;
-    return static_cast<int>(std::min<double>(std::max(PageRenderer::kDetailDpi, pixel), step));
+    // (review P2-3, P3-7: past the detail's 432 dpi, the page's own pixels once they are at most 1.4 times finer than the
+    // screen — one level for all those zooms, laid a little smaller —; else the detail at most, as before)
+    if (pixel > 0 && step > PageRenderer::kDetailDpi && pixel <= dpi * 1.4) return pixel;
+    return static_cast<int>(std::min<double>(PageRenderer::kDetailDpi, step));
 }
 
 bool PageCanvas::pixel_step() const {

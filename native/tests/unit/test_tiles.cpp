@@ -288,6 +288,92 @@ private slots:
         QCOMPARE(render::hdr_shown(drawn, pixels, grey, render::HdrPreview{}).tobytes(), plain_bytes);  // (0 and 1: nothing)
     }
 
+    // (review P3-4) 32 bit プレビュー leaves what is drawn over the page as drawn — a white balloon on a white page stays
+    // white while the page round it darkens — by render_page's marks (RenderOptions::drawn_over), not by its colours.
+    void whatIsDrawnOverStaysAsDrawn() {
+        const core::Document doc = run_ops(small_book(), Json::array({Json{{"op", "put_color_raster"}, {"page", 1}, {"width", 1}, {"height", 1},
+                                                                            {"precision", "f32"}, {"pixels", Json::array({1.0, 1.0, 1.0, 1.0})}},
+                                                                       Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 32}},
+                                                                       Json{{"op", "add_line"}, {"page", 1}, {"text", "台詞"}, {"x_mm", 30}, {"y_mm", 40}}}));
+        render::RenderOptions options;
+        options.mode = "proof";
+        options.skip_unported = true;
+        options.precise = true;
+        options.drawn_over = true;
+        const render::RenderResult marked = render::render_page(doc.page(0), 72, options, &doc);
+        QVERIFY(marked.drawn_over.has_value());
+        QCOMPARE(marked.drawn_over->size(), std::size_t(marked.image.width()) * std::size_t(marked.image.height()));
+        const auto shared = std::make_shared<const core::Document>(doc);
+        app::PageRenderer renderer;
+        const QImage plain = composed(renderer, shared, 72);
+        render::HdrPreview darker;
+        darker.exposure = -2;
+        renderer.set_hdr(darker);
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 30000);
+        const QImage shown = renderer.compose(72);
+        int kept_white = 0, darkened = 0;
+        for (int y = 0; y < shown.height(); ++y) {
+            for (int x = 0; x < shown.width(); ++x) {
+                const bool over = (*marked.drawn_over)[std::size_t(y) * shown.width() + x] != 0;
+                if (over && qRed(plain.pixel(x, y)) == 255 && qRed(shown.pixel(x, y)) == 255) ++kept_white;
+                if (!over && qRed(plain.pixel(x, y)) == 255 && qRed(shown.pixel(x, y)) < 200) ++darkened;
+                if (over) QCOMPARE(shown.pixel(x, y), plain.pixel(x, y));  // (drawn over: as drawn)
+            }
+        }
+        QVERIFY2(kept_white > 50, qPrintable(QString::number(kept_white)));  // (the balloon's white inside)
+        QVERIFY(darkened > 1000);  // (the page's white round it)
+    }
+
+    // (review P2-3) The finer levels keep at most their budget: zoomed in and moved across a large page, the tiles out of
+    // sight the longest are let go — the ones in sight stay drawn and current —, drawn again when they come back.
+    void theFinerTilesKeepToTheirBudget() {
+        core::Document doc = small_book(400, 400, 150, "mono");
+        add_checks(doc);
+        const auto shared = std::make_shared<const core::Document>(doc);
+        app::PageRenderer renderer;
+        renderer.show(shared, 0);
+        const std::size_t tile = std::size_t(512) * 512 * 4;
+        renderer.set_fine_budget(3 * tile);
+        for (int step = 0; step < 6; ++step) {  // (a 40 mm view at 150 dpi moved across: about one tile and its neighbours)
+            const QRectF seen(step * 60.0, step * 60.0, 40, 40);
+            renderer.want(72, 150, seen);
+            QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 30000);
+            QVERIFY(renderer.current(150, seen));
+            QVERIFY2(renderer.fine_bytes() <= 3 * tile + 4 * tile, qPrintable(QString::number(renderer.fine_bytes())));  // (the wanted ones kept)
+        }
+        QVERIFY(renderer.fine_released() > 0);
+        // back where it began: drawn again, the same pixels as the page
+        renderer.want(72, 150, QRectF(0, 0, 40, 40));
+        QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 30000);
+        QVERIFY(renderer.current(150, QRectF(0, 0, 40, 40)));
+        QCOMPARE(app::PageRenderer::kFineBytes, std::size_t(256) * 1024 * 1024);
+    }
+
+    // (review P2-3) A page with a correction that moves shapes is drawn whole for any part of it: the screen's tiles draw it
+    // once a level and cut each from it — the same pixels as render_page's parts.
+    void aWholePageIsDrawnOnceALevel() {
+        core::Document doc = small_book(120, 120, 150, "mono");  // (709 px a side: 4 tiles at 150 dpi)
+        add_checks(doc);
+        core::Layer blur;
+        blur.id = "adj";
+        blur.role = core::LayerRole::User;
+        blur.kind = core::LayerKind::Adjust;
+        blur.adjust = Json{{"kind", "blur"}, {"radius", 2}};
+        doc.edit_page(0).layers.push_back(std::move(blur));
+        QVERIFY(render::draws_whole_page(doc.page(0)));
+        const auto shared = std::make_shared<const core::Document>(doc);
+        app::PageRenderer renderer;
+        const QImage tiles = composed(renderer, shared, 150);
+        QCOMPARE(renderer.wholes_drawn(), std::size_t{1});  // (4 tiles, one page drawn)
+        render::RenderOptions options;
+        options.mode = "proof";
+        options.skip_unported = true;
+        const render::Image page = render::render_page(shared->page(0), 150, options, shared.get()).image;
+        const std::string bytes = page.tobytes();
+        QCOMPARE(tiles, QImage(reinterpret_cast<const uchar*>(bytes.data()), page.width(), page.height(), page.width() * 3, QImage::Format_RGB888)
+                            .convertToFormat(QImage::Format_RGB32));
+    }
+
     // GPU の記憶: with a budget the tiles drawn are counted as on the card; past the budget, after a frame, the ones drawn
     // longest ago are let go (their pictures copied — the same pixels — so the card drops their textures), never the frame's
     // own; no budget, nothing counted.

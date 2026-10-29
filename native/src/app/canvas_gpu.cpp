@@ -142,7 +142,7 @@ std::size_t PageCanvas::gpu_budget_bytes() {
     // (環境設定 → パフォーマンス: GPU の記憶の上限, MB; PC5 H-a)
     bool ok = false;
     const int mb = settings()->value(QStringLiteral("ui/gpu_memory_mb"), 512).toInt(&ok);
-    return static_cast<std::size_t>(ok ? std::clamp(mb, 64, 65536) : 512) * 1024 * 1024;
+    return static_cast<std::size_t>(ok ? std::clamp(mb, 64, 1024) : 512) * 1024 * 1024;
 }
 
 void PageCanvas::update() {

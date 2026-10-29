@@ -11,6 +11,7 @@
 #include <QDialog>
 #include <QDoubleSpinBox>
 #include <QLabel>
+#include <QMenu>
 #include <QMenuBar>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -24,6 +25,7 @@
 #include "app/icons.hpp"
 #include "app/inject.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
 #include "core/command_bus.hpp"
@@ -292,6 +294,10 @@ private slots:
         QAction* hand = v.act("act_hand_tool");
         QVERIFY(v.window->tools_group()->actions().contains(hand));
         QCOMPARE(hand->shortcut(), QKeySequence(QStringLiteral("H")));
+        // (review P3: on the palette, last — ズームツール in its group, one button)
+        QCOMPARE(v.window->tool_palette()->actions().back(), hand);
+        auto* group = v.window->tool_palette()->findChild<QMenu*>(QStringLiteral("tool_group:") + hand->objectName());
+        QVERIFY(group != nullptr && group->actions().contains(v.act("act_zoom_tool")));
         hand->trigger();
         QCOMPARE(c->tool(), QStringLiteral("hand"));
         QCOMPARE(v.window->tool_settings()->title()->text(), QStringLiteral("手のひらツール（H）"));
@@ -412,6 +418,26 @@ private slots:
         v.trigger("act_screen_standard");
         QVERIFY(w->canvas_only()->on());
         w->canvas_only()->leave();
+        // (review P2-6) Esc takes a full screen back to 標準, in Genko's key set too (no key for the modes there), and the
+        // notice says so by the keys as they are — over the page, the status line being hidden
+        genko::app::settings()->setValue(QStringLiteral("ui/key_set"), QStringLiteral("genko"));
+        genko::app::preferences::apply_all(w);
+        QVERIFY(v.act("act_screen_next")->shortcut().isEmpty());
+        v.trigger("act_screen_full");
+        QCOMPARE(w->screen_mode(), MainWindow::ScreenMode::Full);
+        QVERIFY(w->last_notice().contains(QStringLiteral("Esc で標準スクリーンモードに戻ります")));
+        QVERIFY(!w->last_notice().contains(QStringLiteral("次のスクリーンモード")));
+        QVERIFY(v.canvas()->findChild<QLabel*>(QStringLiteral("screen_mode_notice")) != nullptr);
+        v.canvas()->setFocus();
+        QTest::keyClick(v.canvas(), Qt::Key_Escape);
+        QCOMPARE(w->screen_mode(), MainWindow::ScreenMode::Standard);
+        QVERIFY(w->menuBar()->isVisible());
+        genko::app::settings()->remove(QStringLiteral("ui/key_set"));
+        genko::app::preferences::apply_all(w);
+        v.trigger("act_screen_full_menu");
+        QVERIFY(w->last_notice().contains(QStringLiteral("（F で次のスクリーンモード）")));
+        QTest::keyClick(v.canvas(), Qt::Key_Escape);
+        QCOMPARE(w->screen_mode(), MainWindow::ScreenMode::Standard);
     }
 
     // The view's commands change only the view: the book on disk keeps its revision and its bytes, nothing is sent as an
@@ -468,6 +494,10 @@ private slots:
         QVERIFY(c->wait_rendered(30000));
         const QImage darker = c->renderer().compose(c->renderer().shown_dpi());
         QVERIFY(darker != plain);
+        // (review P3-3) スポイト picks the page's colour, not the preview's: the left, past white, still white to it
+        const auto picked = c->renderer().pixel_at(15, 40);
+        QVERIFY(picked.has_value());
+        QVERIFY2(picked->red() >= 250, qPrintable(QString::number(picked->red())));
         QCOMPARE(v.window->session().document().page(0).layers.back().color_raster, raster);  // (the book as it was)
         QCOMPARE(v.window->session().document().page(0).rgb->depth, 32);
         // ハイライト圧縮: exposure and gamma not taken

@@ -579,7 +579,7 @@ void ColorCanvas::adjust(const core::AdjustFunction& adjustment, double opacity,
         }
     }
 }
-void ColorCanvas::draw_8bit(const std::function<void(Image&)>& draw) {
+void ColorCanvas::draw_8bit(const std::function<void(Image&)>& draw, std::vector<unsigned char>* marks) {
     const Image before = image();
     Image drawn = before;
     draw(drawn);
@@ -605,6 +605,8 @@ void ColorCanvas::draw_8bit(const std::function<void(Image&)>& draw) {
         for (int x = 0; x < impl_->size.width; ++x) {
             const auto* d = now + x*4;
             if (std::equal(d, d+4, was + x*4) && std::equal(probe_now + x*4, probe_now + x*4 + 4, probe_was + x*4)) continue;
+            if (marks != nullptr && marks->size() == std::size_t(impl_->size.width) * impl_->size.height)
+                (*marks)[std::size_t(y)*impl_->size.width+x] = 255;  // (PC5 H-a: painted here)
             if (!converted) {  // (the row's colours, once a pixel of it is painted)
                 in.row(now, static_cast<std::size_t>(impl_->size.width), line);
                 converted = true;

@@ -13,6 +13,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QStatusBar>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -228,9 +229,21 @@ void MainWindow::set_screen_mode(ScreenMode mode) {
     }
     check();
     if (mode != ScreenMode::Standard) {
-        flash(QStringLiteral("%1（次のスクリーンモードで切り替え、表示 → スクリーンモード → 標準スクリーンモード で戻ります）")
-                  .arg(mode == ScreenMode::Full ? QStringLiteral("フルスクリーンモード") : QStringLiteral("メニュー付きフルスクリーンモード")),
-              4000);
+        // (how to come back, by the keys as they are now — review P2-6: the menus may be hidden; also over the page, the
+        // status line being hidden in フルスクリーンモード)
+        const QString next = action(QStringLiteral("act_screen_next"))->shortcut().toString(QKeySequence::NativeText);
+        const QString told = QStringLiteral("%1。Esc で標準スクリーンモードに戻ります%2")
+                                 .arg(mode == ScreenMode::Full ? QStringLiteral("フルスクリーンモード") : QStringLiteral("メニュー付きフルスクリーンモード"),
+                                      next.isEmpty() ? QString() : QStringLiteral("（%1 で次のスクリーンモード）").arg(next));
+        flash(told, 4000);
+        auto* over = new QLabel(told, canvas_);
+        over->setObjectName(QStringLiteral("screen_mode_notice"));
+        over->setStyleSheet(QStringLiteral("QLabel { background: rgba(0, 0, 0, 170); color: white; padding: 8px 14px; border-radius: 6px; }"));
+        over->adjustSize();
+        over->move(std::max(0, (canvas_->width() - over->width()) / 2), 24);
+        over->show();
+        over->raise();
+        QTimer::singleShot(3500, over, &QObject::deleteLater);
     }
 }
 

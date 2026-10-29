@@ -50,7 +50,8 @@ public:
     // What `draw` paints over the picture so far in 8 bits (balloons, panel borders, tones, …), laid over it as
     // painted: drawn on black and on white, each pixel's cover and colour, the colour as the page's ink. Not a layer: the
     // alpha a clipped layer clips to stays that of the layer before.
-    void draw_8bit(const std::function<void(Image&)>& draw);
+    // (PC5 H-a: `marks`, the canvas's size: 255 set where the drawing painted)
+    void draw_8bit(const std::function<void(Image&)>& draw, std::vector<unsigned char>* marks = nullptr);
     // A layer that sets nothing for the next to clip to (a tone layer: the 8-bit page forgets the alpha before).
     void forget_clip();
     // A correction layer (SPEC.md COLOR-02, 群C): the colours the page's inks mean through `change` and back by its

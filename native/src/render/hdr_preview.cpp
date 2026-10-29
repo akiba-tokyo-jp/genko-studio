@@ -25,12 +25,15 @@ bool near(const unsigned char* a, const unsigned char* b) {
     return std::abs(a[0] - b[0]) <= 1 && std::abs(a[1] - b[1]) <= 1 && std::abs(a[2] - b[2]) <= 1;
 }
 
-// The tile with each pixel whose plain look (`plain`, 3 bytes a pixel) is the drawn one's shown as `shown`.
-Image laid(const Image& drawn, const std::vector<unsigned char>& plain, const std::vector<unsigned char>& shown) {
+// The tile with each pixel of the page shown as `shown` (3 bytes a pixel): those `drawn_over` marks (render_page's) are
+// drawn over it and stay as drawn; without the marks, the pixels whose plain look (`plain`) is not the drawn one's.
+Image laid(const Image& drawn, const std::vector<unsigned char>& plain, const std::vector<unsigned char>& shown,
+           const std::vector<unsigned char>* drawn_over) {
     std::string bytes = drawn.convert("RGB").tobytes();
+    const bool marked = drawn_over != nullptr && drawn_over->size() * 3 == bytes.size();
     for (std::size_t i = 0; i + 2 < bytes.size() && i + 2 < plain.size(); i += 3) {
         auto* now = reinterpret_cast<unsigned char*>(bytes.data() + i);
-        if (!near(now, plain.data() + i)) continue;  // (drawn over the page: as it is)
+        if (marked ? (*drawn_over)[i / 3] != 0 : !near(now, plain.data() + i)) continue;  // (drawn over the page: as it is)
         now[0] = shown[i];
         now[1] = shown[i + 1];
         now[2] = shown[i + 2];
@@ -77,7 +80,8 @@ bool hdr_page(const core::Page& page) {
     return page.rgb && page.rgb->depth == 32;
 }
 
-Image hdr_shown(const Image& drawn, const std::string& precise, const RgbSpace& space, const HdrPreview& preview) {
+Image hdr_shown(const Image& drawn, const std::string& precise, const RgbSpace& space, const HdrPreview& preview,
+                const std::vector<unsigned char>* drawn_over) {
     if (preview.identity()) return drawn;
     const core::ColorRasterView view(precise);
     const auto w = static_cast<std::size_t>(view.width());
@@ -105,10 +109,11 @@ Image hdr_shown(const Image& drawn, const std::string& precise, const RgbSpace& 
             shown[y * w * 3 + k] = byte(b[k]);
         }
     }
-    return laid(drawn, plain, shown);
+    return laid(drawn, plain, shown, drawn_over);
 }
 
-Image hdr_shown(const Image& drawn, const core::InkPixels& inks, const core::PageColor& color, const HdrPreview& preview) {
+Image hdr_shown(const Image& drawn, const core::InkPixels& inks, const core::PageColor& color, const HdrPreview& preview,
+                const std::vector<unsigned char>* drawn_over) {
     if (preview.identity()) return drawn;
     const auto w = static_cast<std::size_t>(inks.width);
     const auto h = static_cast<std::size_t>(inks.height);
@@ -158,7 +163,7 @@ Image hdr_shown(const Image& drawn, const core::InkPixels& inks, const core::Pag
             shown[y * w * 3 + k] = byte(b[k]);
         }
     }
-    return laid(drawn, plain, shown);
+    return laid(drawn, plain, shown, drawn_over);
 }
 
 }  // namespace genko::render

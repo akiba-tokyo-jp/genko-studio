@@ -815,6 +815,22 @@ void MainWindow::build_toolbars() {
     addToolBar(Qt::LeftToolBarArea, palette_);
     attach_tool_groups(palette_);  // (PC4 E-0: a tool's group on a long press or a right click: paint_panels.cpp)
     {
+        // (PC5 H-a review P3: 手のひらツール last, as Photoshop's, ズームツール in its group — one button, so the palette still
+        // fits a short window)
+        QAction* hand = action(QStringLiteral("act_hand_tool"));
+        palette_->addAction(hand);
+        if (auto* button = qobject_cast<QToolButton*>(palette_->widgetForAction(hand))) {
+            auto* menu = new QMenu(button);
+            menu->setObjectName(QStringLiteral("tool_group:") + hand->objectName());
+            menu->addAction(hand);
+            menu->addAction(action(QStringLiteral("act_zoom_tool")));
+            button->setMenu(menu);
+            button->setPopupMode(QToolButton::DelayedPopup);
+            button->setContextMenuPolicy(Qt::CustomContextMenu);
+            connect(button, &QToolButton::customContextMenuRequested, button, [button, menu](const QPoint& at) { menu->popup(button->mapToGlobal(at)); });
+        }
+    }
+    {
         QAction* names = action(QStringLiteral("act_tool_names"));
         const QSignalBlocker quiet(names);
         names->setChecked(settings()->value(QStringLiteral("ui/tool_names"), QStringLiteral("0")).toString() == QLatin1String("1"));

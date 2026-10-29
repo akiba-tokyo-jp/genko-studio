@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "core/ink.hpp"
 #include "core/model.hpp"
@@ -47,9 +48,11 @@ bool hdr_page(const core::Page& page);
 // f32 values, the page's profile's: RenderOptions::precise). Each pixel the values show as `drawn` shows it (within one
 // step: the values are the page under what is drawn over it) is shown through the preview; any other (what is drawn over
 // the page and not in its values) as drawn.
-Image hdr_shown(const Image& drawn, const std::string& precise, const RgbSpace& space, const HdrPreview& preview);
+Image hdr_shown(const Image& drawn, const std::string& precise, const RgbSpace& space, const HdrPreview& preview,
+                const std::vector<unsigned char>* drawn_over = nullptr);
 // The same for a 32-bit CMYK, Lab, grey or multichannel page from its inks (RenderOptions::inks): a grey page's lightness
 // (any value) through its tone curve, the other spaces' colours as the screen shows them (their inks never pass 0..1).
-Image hdr_shown(const Image& drawn, const core::InkPixels& inks, const core::PageColor& color, const HdrPreview& preview);
+Image hdr_shown(const Image& drawn, const core::InkPixels& inks, const core::PageColor& color, const HdrPreview& preview,
+                const std::vector<unsigned char>* drawn_over = nullptr);
 
 }  // namespace genko::render
