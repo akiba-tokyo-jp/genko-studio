@@ -886,7 +886,9 @@ private slots:
                                                   {"blurtool", "act_blur_tool"}, {"sharpentool", "act_sharpen_tool"}, {"smudgetool", "act_smudge_tool"},
                                                   {"dodge", "act_dodge_tool"}, {"burn", "act_burn_tool"}, {"sponge", "act_sponge_tool"},
                                                   {"mixer", "act_mixer_brush"}, {"bgeraser", "act_background_eraser"},
-                                                  {"colorreplace", "act_color_replacement"}};
+                                                  {"colorreplace", "act_color_replacement"},
+                                                  // (PC5 G-a: 横書き文字ツール)
+                                                  {"text_h", "act_text_h"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());

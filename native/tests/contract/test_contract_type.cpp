@@ -507,7 +507,7 @@ private slots:
         const core::Document longer = with_point(plain_book(), "horizontal", Json::array({5, 20}), "HHHHHHHHHHHHHHHHHHHH");
         QVERIFY2((*ink_mm(longer))[3] - (*ink_mm(longer))[1] < 6, "one row");
         // down: its first column's middle on the anchor, its top there
-        const core::Document down = with_point(plain_book(), "vertical", Json::array({30, 10}), "一二");
+        const core::Document down = with_point(plain_book(), "vertical", Json::array({30, 10}), "国口");
         const auto col = ink_mm(down);
         QVERIFY2(std::abs(((*col)[0] + (*col)[2]) / 2 - 30) < 0.8 && std::abs((*col)[1] - 10) < 1.2,
                  qPrintable(QString("%1 %2").arg(((*col)[0] + (*col)[2]) / 2).arg((*col)[1])));
@@ -587,8 +587,8 @@ private slots:
         QVERIFY(refusal(lined, Json::array({Json{{"op", "edit_type"}, {"line", "l1"}, {"transform", Json::array({0, 1, -1, 0, 0, 0})}}})).find("a line stays upright") !=
                 std::string::npos);
         // a scale and a slant
-        const core::Document bigger = run(doc, Json{{"op", "transform_layers"}, {"page", 1}, {"ids", Json::array({"p1"})}, {"matrix", Json::array({2, 0, 0, 2, 0, 0})}});
-        QVERIFY2((*ink_mm(bigger))[2] - (*ink_mm(bigger))[0] > 1.8 * w, "scaled");
+        const core::Document bigger = run(doc, Json{{"op", "transform_layers"}, {"page", 1}, {"ids", Json::array({"p1"})}, {"matrix", Json::array({1.5, 0, 0, 1.5, -5, -10})}});
+        QVERIFY2((*ink_mm(bigger))[2] - (*ink_mm(bigger))[0] > 1.4 * w, "scaled");
     }
 
     // edit_type's replace and insert in graphemes (TEXT-01): an emoji of several code points (ZWJ) one, a CRLF one; the
