@@ -375,7 +375,9 @@ private slots:
         // act_layer_style_paste, act_layer_style_clear), 包括光源… (act_global_light), レイヤーを作成 (act_layer_style_layers),
         // すべての効果を隠す・表示 (act_layer_style_hide_all, act_layer_style_show_all), 効果を拡大・縮小… (act_layer_style_scale)
         // — theirs (test_gui_styles).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{584});
+        // and the 23 frames of PC5 J-0 (SPEC PROD-01) — ページ → 解析 ▸'s 7 (act_measure_*), レイヤー → ビデオレイヤー ▸'s 12
+        // (act_video_*), ウィンドウ's アクション・レイヤーカンプ・計測ログ・注釈 (act_panel_*) — theProductionFramesSayNotYet's.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{607});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

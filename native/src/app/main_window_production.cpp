@@ -8,6 +8,10 @@
 #include <QAction>
 #include <QMenu>
 
+#include <algorithm>
+#include <iterator>
+#include <span>
+
 #include "app/main_window.hpp"
 
 namespace genko::app {
@@ -58,15 +62,11 @@ constexpr Frame kPanels[] = {
 }  // namespace
 
 void MainWindow::build_production_actions() {
-    for (const auto* list : {&kAnalysis, &kVideo}) {
-        for (const Frame& frame : *list) {
+    for (const std::span<const Frame> list : {std::span<const Frame>(kAnalysis), std::span<const Frame>(kVideo), std::span<const Frame>(kPanels)}) {
+        for (const Frame& frame : list) {
             const QString title = QString::fromUtf8(frame.title);
             make(QString::fromLatin1(frame.attribute), title, [this, title] { not_yet_command(title); }, {}, QString::fromUtf8(frame.tip));
         }
-    }
-    for (const Frame& frame : kPanels) {
-        const QString title = QString::fromUtf8(frame.title);
-        make(QString::fromLatin1(frame.attribute), title, [this, title] { not_yet_command(title); }, {}, QString::fromUtf8(frame.tip));
     }
 }
 
@@ -92,9 +92,17 @@ void MainWindow::build_production_menus(QMenu* layers, QMenu* pages) {
     } else {
         layers->addMenu(video);
     }
-    // ページ (Photoshop's イメージ) → 解析 ▸
-    QMenu* analysis = pages->addMenu(QStringLiteral("解析"));
+    // ページ (Photoshop's イメージ) → 解析 ▸: after 複製… (Photoshop's 画像操作… · 演算… · 変数 · トラッピング go between, 解析 the
+    // last of them), before 台詞's commands
+    auto* analysis = new QMenu(QStringLiteral("解析"), pages);
     analysis->setObjectName(QStringLiteral("menu_analysis"));
+    const QList<QAction*> in_pages = pages->actions();
+    const auto duplicate = std::find(in_pages.begin(), in_pages.end(), action(QStringLiteral("act_duplicate_image")));
+    if (duplicate != in_pages.end() && std::next(duplicate) != in_pages.end()) {
+        pages->insertMenu(*std::next(duplicate), analysis);
+    } else {
+        pages->addMenu(analysis);
+    }
     QMenu* scale = analysis->addMenu(QStringLiteral("計測スケールを設定"));
     scale->setObjectName(QStringLiteral("menu_measure_scale"));
     for (const char* name : {"act_measure_scale_default", "act_measure_scale_custom"}) scale->addAction(action(QString::fromLatin1(name)));
