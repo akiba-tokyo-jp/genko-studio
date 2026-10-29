@@ -25,6 +25,11 @@ namespace genko::app {
 
 namespace {
 
+bool truthy_setting(const QString& key) {
+    const QString chosen = settings()->value(key, QStringLiteral("false")).toString().toLower();
+    return chosen == QLatin1String("1") || chosen == QLatin1String("true") || chosen == QLatin1String("yes");
+}
+
 class GpuSurface : public QOpenGLWidget {
 public:
     explicit GpuSurface(PageCanvas* canvas) : QOpenGLWidget(canvas), canvas_(canvas) {
@@ -135,7 +140,10 @@ void PageCanvas::use_gpu(bool on) {
 void PageCanvas::gpu_failed() {
     if (gpu_surface_ == nullptr) return;
     use_gpu(false);
-    emit gpuFailed(QStringLiteral("グラフィックボードで原稿を表示できないため、プロセッサーで表示します（環境設定 → パフォーマンス）"));
+    // (review P3-2: not asked again at every window — the choice turned off, said so)
+    if (truthy_setting(QStringLiteral("ui/gpu_canvas"))) settings()->setValue(QStringLiteral("ui/gpu_canvas"), QStringLiteral("false"));
+    emit gpuFailed(QStringLiteral("グラフィックボードで原稿を表示できないため、プロセッサーで表示します（環境設定 → パフォーマンス の"
+                                  "「原稿の表示にグラフィックボードを使う」を切りました）"));
 }
 
 std::size_t PageCanvas::gpu_budget_bytes() {

@@ -786,6 +786,24 @@ if(GENKO_BUILD_APP)
   # レイヤーを画面サイズに合わせる, ピクセルグリッド, ピクセルアートプレビュー, 手のひらツール and ズームツール, スクリーンモード, 32 bit
   # プレビューオプション…
   genko_test(test_gui_view SOURCES gui/test_gui_view.cpp DEPS genko_app GUI TIMEOUT 900)
+  # PC5 H-a (review P2-2): render:GPU-CPU-parity — test_gui_canvas's theCardShowsWhatTheProcessorDraws again on Xvfb with
+  # Mesa's OpenGL (xcb), where the card's picture is compared with the processor's (offscreen has no OpenGL: there it checks
+  # the way back to the processor). Labels gui and gpu; in a validation plan only when asked for (validation_policy --gpu).
+  # No xvfb-run on the machine: the test fails saying so (never a skip).
+  function(genko_xvfb_test name target)
+    find_program(GENKO_XVFB_RUN xvfb-run)
+    if(GENKO_XVFB_RUN)
+      add_test(NAME ${name} COMMAND ${GENKO_XVFB_RUN} -a -s "-screen 0 1920x1200x24" $<TARGET_FILE:${target}> ${ARGN})
+    else()
+      add_test(NAME ${name} COMMAND ${CMAKE_COMMAND} -E echo "${name}: xvfb-run is not on this machine (apt install xvfb)")
+      set_tests_properties(${name} PROPERTIES FAIL_REGULAR_EXPRESSION "xvfb-run is not")
+    endif()
+    set_tests_properties(${name} PROPERTIES LABELS "gui;gpu" TIMEOUT 600
+                         ENVIRONMENT "QT_QPA_PLATFORM=xcb;LIBGL_ALWAYS_SOFTWARE=1;QTEST_FUNCTION_TIMEOUT=500000")
+  endfunction()
+  if(UNIX AND NOT APPLE)
+    genko_xvfb_test(test_gui_canvas_gpu test_gui_canvas theCardShowsWhatTheProcessorDraws)
+  endif()
   # PC5 H-a: the tiles — 画素の段 laid nearest, ピクセルアートプレビュー, 32 bit プレビュー on the three ways, the tiles on the card
   genko_test(test_tiles SOURCES unit/test_tiles.cpp DEPS genko_app LABELS unit TIMEOUT 600)
   # saving and closing (AC-SAVE 2, 3, 4, 6, 8, 10): failures shown, the question before closing, recovery, retries
