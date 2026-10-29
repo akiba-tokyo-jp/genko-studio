@@ -18,7 +18,7 @@
 //                   type; a picture given as its bytes (a picture this build reads, 256 MiB at most) or as the book's asset —
 //                   kept by the book (never a path); all the pictures together 4 GiB at most.
 //   apply_data_set {name | index}
-//                 → {applied, index, skipped: [{variable, reason}]}. Its values in their order: a layer shown or hidden
+//                 → {applied, data_set: its index, skipped: [{variable, reason}]}. Its values in their order: a layer shown or hidden
 //                   (set_layer), a line's or a type layer's text (edit_line, edit_type: its ranges followed — type@1), a
 //                   smart object's contents replaced (smart_replace: its transform kept), a paint layer's pixels replaced by
 //                   the picture put in the def's box by its method and align (clip: cut to the box) on the layer's own grid at

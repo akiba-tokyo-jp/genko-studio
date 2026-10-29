@@ -132,7 +132,7 @@ private slots:
     void pixelsOnEveryKind() {
         for (const std::string way : {"8", "16", "32", "cmyk"}) {
             const core::Document doc = replaced(book(way), "conform");
-            const core::Layer& l = layer(doc, "photo");
+            const core::Layer l = layer(doc, "photo");
             if (way == "8") QVERIFY(l.raster_png && !l.color_raster && !l.ink_raster);
             if (way == "16" || way == "32") QVERIFY2(l.color_raster != nullptr, way.c_str());
             if (way == "cmyk") QVERIFY2(l.ink_raster != nullptr, way.c_str());

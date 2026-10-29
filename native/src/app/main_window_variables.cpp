@@ -19,6 +19,7 @@
 #include "app/off_ui.hpp"
 #include "app/session.hpp"
 #include "app/variables_dialog.hpp"
+#include "core/error.hpp"
 #include "core/paths.hpp"
 #include "core/variables.hpp"
 #include "formats/copy.hpp"

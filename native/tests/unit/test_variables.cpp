@@ -202,6 +202,7 @@ private slots:
         const core::ApplyResult applied = run_ops(doc, Json::array({Json{{"op", "apply_data_set"}, {"name", "A"}}}));
         QCOMPARE(applied.results.size(), std::size_t(1));
         QCOMPARE(applied.results[0]["applied"], Json("A"));
+        QCOMPARE(applied.results[0]["data_set"], Json(0));
         QCOMPARE(applied.results[0]["skipped"], Json::array());
         const core::Document& after = applied.doc;
         QVERIFY(!layer(after, "badge").visible);

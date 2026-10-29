@@ -504,7 +504,7 @@ void apply_data_set_op(OpContext& c) {
     variables = core::variables_of(c.doc);  // (the ops left them as they were; read again for the active one)
     variables.active = static_cast<std::int64_t>(index);
     core::set_variables(c.doc, variables);
-    c.report = Json{{"applied", set.name}, {"index", index}, {"skipped", std::move(skipped)}};
+    c.report = Json{{"applied", set.name}, {"data_set", index}, {"skipped", std::move(skipped)}};  // ("index" is the batch's: the op's place)
 }
 
 }  // namespace
