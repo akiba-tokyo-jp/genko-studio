@@ -3,6 +3,7 @@
 
 #include <QContextMenuEvent>
 #include <QGestureEvent>
+#include <QGuiApplication>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QNativeGestureEvent>
@@ -181,6 +182,9 @@ void PageCanvas::update_cursor(std::optional<QPointF> pos) {
         setCursor(Qt::ClosedHandCursor);
     } else if (space_ || tool_ == QLatin1String("hand")) {  // (PC5 H-a: 手のひらツール)
         setCursor(Qt::OpenHandCursor);
+    } else if (const auto guide = pos && page() != nullptr ? grabbable_guide(view_transform().map(*pos), QGuiApplication::keyboardModifiers())
+                                                           : std::nullopt) {
+        setCursor(guide->second ? Qt::SplitVCursor : Qt::SplitHCursor);  // (PC5 H-b: a guide a press would grab)
     } else if (is_drawing_tool(tool_)) {
         // the brush's circle is drawn on the page (paint_page); the pointer itself as chosen in 環境設定 (PC4 E1: the cross
         // alone without the brush preview, and while drawing when so chosen)
@@ -255,8 +259,9 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
     if (guide_press(event->position())) return;  // (a guide line pulled from a scale: canvas_scale.cpp)
     const QPointF mm = mm_of(pos);
     if (transform_press(pos, mm, event->modifiers())) return;  // (自由変形 and the warps' box: canvas_transform.cpp)
+    if (guide_grab(event->position(), event->modifiers())) return;  // (PC5 H-b: a guide placed, not while transforming — canvas_guide_lines.cpp)
     press_pos_ = pos;
-    snap_lines_.clear();
+    forget_snap();
     snap_moving.clear();  // (the move tool's are given again as its drag starts)
     if (tool_ == QLatin1String("move")) {
         if (move_box_handle(pos)) {  // (PC3 C-d: バウンディングボックス's □ — 自由変形 from here: canvas_snap.cpp)
@@ -426,8 +431,8 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
     if (!panning_ && event->button() == Qt::LeftButton && work_ && work_->release && work_->release(to_mm(event->position()), event->modifiers()))
         return;  // (PC4 D4)
     if (guide_release(event->position())) return;
-    if (!snap_lines_.empty()) {  // (PC3 C-d: what a drag snapped to shows while it lasts)
-        snap_lines_.clear();
+    if (!snap_lines_.empty() || !spacing_.empty()) {  // (PC3 C-d: what a drag snapped to shows while it lasts)
+        forget_snap();
         update();
     }
     move_snap_box_.reset();
@@ -513,6 +518,13 @@ void PageCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
     if (event->button() == Qt::MiddleButton) {
         fit_page();
         return;
+    }
+    // (PC5 H-b: a guide double-clicked where a press would grab it — 新規ガイド… asks where it goes)
+    if (event->button() == Qt::LeftButton && !work_) {
+        if (const auto guide = grabbable_guide(event->position(), event->modifiers())) {
+            emit guideAsked(QString::fromStdString(guide->first));
+            return;
+        }
     }
     if (work_ && event->button() == Qt::LeftButton) {  // (PC4 D4: the second press of a double click is the work's press too)
         mousePressEvent(event);
@@ -784,6 +796,13 @@ void PageCanvas::tabletEvent(QTabletEvent* event) {
             if (work_->release) work_->release(mm, event->modifiers());
         }
         event->accept();  // (no mouse made of it: the work had it once)
+        return;
+    }
+    // (PC5 H-b, the review's P2-1: a guide the mouse would grab here, the pen grabs too — the event left to come as the mouse —,
+    // and its drag goes on so)
+    if (page() != nullptr && is_drawing_tool(tool_) && !space_ &&
+        (guide_drag_ || (type == QEvent::TabletPress && event->button() == Qt::LeftButton && grabbable_guide(event->position(), event->modifiers())))) {
+        event->ignore();
         return;
     }
     const bool eraser_end = event->pointerType() == QPointingDevice::PointerType::Eraser;

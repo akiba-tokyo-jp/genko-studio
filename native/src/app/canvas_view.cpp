@@ -72,7 +72,7 @@ int PageCanvas::pixel_grid_dpi() const {
 }
 
 bool PageCanvas::pixel_grid_shown() const {
-    if (!show_pixel_grid || page() == nullptr) return false;
+    if (!shows(show_pixel_grid) || page() == nullptr) return false;  // (PC5 H-b: エクストラ too)
     const QSizeF cell = pixel_grid_cell_mm();
     const double ratio = devicePixelRatioF() > 0 ? devicePixelRatioF() : 1.0;
     return cell.width() > 0 && std::min(cell.width(), cell.height()) * view_.scale * ratio >= kPixelGridPx;

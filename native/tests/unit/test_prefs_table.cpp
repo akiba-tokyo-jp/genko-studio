@@ -46,7 +46,12 @@ const std::vector<std::string>& app_keys() {
         "ui/layer_details", "ui/mono_icons", "ui/next_steps", "ui/phone_view", "ui/quick", "ui/radial", "ui/raise_requests",
         "ui/reduce_motion", "ui/rest_minutes", "ui/stage", "ui/surround", "ui/theme", "ui/tool_names", "ui/ui_font", "ui/workspace",
         "view/checker_colors", "view/checker_dark", "view/checker_light", "view/checker_size", "view/gamut_color", "view/gamut_opacity",
-        "warp/mesh", "workspaces/ペン入れ", "workspaces/ペン入れ/geometry", "workspaces/ペン入れ/state"};
+        "warp/mesh", "workspaces/ペン入れ", "workspaces/ペン入れ/geometry", "workspaces/ペン入れ/state",
+        // (PC5 H-b: 単位・定規, ガイド・グリッド・スライス, エクストラ and 表示・非表示 ▸, ガイドをロック, the guide layouts' presets)
+        "units/ruler", "units/type", "units/column_width", "units/gutter", "units/print_resolution", "units/screen_resolution",
+        "units/point_size", "guides/guide_color", "guides/guide_style", "guides/smart_color", "guides/grid_color", "guides/grid_style",
+        "guides/grid_subdivisions", "guides/grid_unit", "guides/lock", "view/extras", "view/show_guides", "view/show_canvas_guides",
+        "view/show_smart_guides", "view/show_layer_edges", "view/show_mesh", "view/show_edit_pins", "guide_layouts/三段組"};
     return all;
 }
 
@@ -78,7 +83,10 @@ private slots:
         QCOMPARE(q(prefs::by_key("keys/alt_tool")->path), QStringLiteral("tools.altTool"));
         QCOMPARE(q(prefs::by_key("keys/pen/alt")->path), QStringLiteral("tools.modifiers.*.*"));
         QCOMPARE(q(prefs::path_of("keys/pen/alt").value()), QStringLiteral("tools.modifiers.pen.alt"));
-        QCOMPARE(q(prefs::by_key("guides/grid_mm")->path), QStringLiteral("guidesGridAndSlices.gridlineEvery"));
+        // (PC5 H-b, the review's P2-3: Genko's own name — upstream's gridlineEvery is the thick lines' step, not this)
+        QCOMPARE(q(prefs::by_key("guides/grid_mm")->path), QStringLiteral("guidesGridAndSlices.gridSpacingMm"));
+        QVERIFY(prefs::by_path("guidesGridAndSlices.gridlineEvery") == nullptr);
+        QCOMPARE(prefs::by_key("guides/grid_mm")->apply, prefs::Apply::Live);
         // (a command's name with dots or slashes in it: the rest of the path)
         QCOMPARE(q(prefs::key_of("shortcuts.ブラシサイズを大きく 1.5 倍").value()), QStringLiteral("shortcuts/ブラシサイズを大きく 1.5 倍"));
         QCOMPARE(q(prefs::path_of("shortcuts/HSB/HSL").value()), QStringLiteral("shortcuts.HSB/HSL"));

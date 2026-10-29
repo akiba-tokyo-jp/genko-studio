@@ -152,7 +152,8 @@ void MainWindow::build_selection_actions() {
          QStringLiteral("枠のつまみで選択範囲の形だけを動かす・拡大縮小・回転する（中身は動かない）。Enter で終わる"));
     make("act_sel_load", QStringLiteral("選択範囲を読み込む…"), [this] { load_selection_dialog(); }, {},
          QStringLiteral("チャンネル・色の版・透明部分・マスクから選択範囲を作る（反転・追加・削除・共通範囲も）"));
-    QAction* edges = make("act_sel_edges", QStringLiteral("選択範囲の境界線"), [] {}, {}, QStringLiteral("選択範囲の点線を表示する・隠す"), true);
+    // (PC5 H-b: Photoshop's 表示 → 表示・非表示 ▸ 選択範囲のエッジ)
+    QAction* edges = make("act_sel_edges", QStringLiteral("選択範囲のエッジ"), [] {}, {}, QStringLiteral("選択範囲の点線を表示する・隠す"), true);
     edges->setChecked(true);
     connect(edges, &QAction::toggled, this, [this](bool on) {
         canvas_->show_selection_edges = on;

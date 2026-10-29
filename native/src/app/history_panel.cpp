@@ -122,6 +122,8 @@ const std::map<std::string, const char*>& names() {
         {"set_camera_raw", "Camera Raw で現像の設定を変えた"},
         // (PC5 I-b, groups@1: render/ops_groups)
         {"frame_from_layers", "レイヤーからフレームを作った"},
+        // (PC5 H-b: core/ops_rulers)
+        {"add_guide_layout", "ガイドレイアウトを作った"},
         // (PC5 J-a, layer-comps@1: render/ops_layer_comps)
         {"new_layer_comp", "新規レイヤーカンプ"}, {"update_layer_comp", "レイヤーカンプを更新"}, {"apply_layer_comp", "レイヤーカンプを適用"},
         {"set_layer_comp", "レイヤーカンプオプション"}, {"duplicate_layer_comp", "レイヤーカンプを複製"}, {"delete_layer_comp", "レイヤーカンプを削除"},
@@ -143,6 +145,20 @@ QString describe(const Json& ops) {
             // NAMES.get(str(op.get("op")), "原稿を変えた")
             const Json* kind = op.is_object() && op.contains("op") ? &op["op"] : nullptr;
             const std::string key = kind != nullptr ? core::py_str(*kind) : std::string("None");
+            // (PC5 H-b: a guide's own words — the ruler ops naming one by its kind, or moving one by its place)
+            const bool guide = op.is_object() && op.value("kind", Json()) == Json("guide");
+            if (key == "add_ruler" && guide) {
+                named << QStringLiteral("ガイドを置いた");
+                continue;
+            }
+            if (key == "delete_ruler" && guide) {
+                named << QStringLiteral("ガイドを消した");
+                continue;
+            }
+            if (key == "edit_ruler" && op.is_object() && (op.contains("at") || op.contains("axis")) && !op.contains("points")) {
+                named << QStringLiteral("ガイドを動かした");
+                continue;
+            }
             const auto it = names().find(key);
             named << (it != names().end() ? QString::fromUtf8(it->second) : QStringLiteral("原稿を変えた"));
         }

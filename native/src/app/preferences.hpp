@@ -122,6 +122,10 @@ struct Clash {
 std::vector<Clash> conflicts(const std::vector<std::pair<QString, QStringList>>& mapping);
 // Everything the preferences change, applied to an open window.
 void apply_all(MainWindow* window);
+// (PC5 H-b: app/preferences_units.cpp) 単位・定規 and ガイド・グリッド・スライス: their pages for the dialog (their fields named
+// prefs_ruler_unit, prefs_grid_every …), and what 決める keeps of them.
+std::pair<QWidget*, QWidget*> unit_pages(QWidget* parent);
+void save_unit_pages(QWidget* units, QWidget* guides);
 
 // 透明部分・色域 (PhotoCraft v0.2.0's prefs.rs TransparencyAndGamut, MIT; SPEC COLOR-03 PC1b): the checker shown under
 // what is transparent (the layers' small pictures) — its square's side in pixels (0: none, white) and its two colours —
@@ -230,6 +234,9 @@ public:
     QPushButton* gamut_button = nullptr;
     QSpinBox* gamut_percent = nullptr;
     void show_checker();
+    // 単位・定規, ガイド・グリッド・スライス (PC5 H-b: unit_pages)
+    QWidget* units_page = nullptr;
+    QWidget* guides_page = nullptr;
 
     void measure();
     void forget_gamma();
