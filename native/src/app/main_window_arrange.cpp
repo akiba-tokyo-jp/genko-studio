@@ -312,7 +312,12 @@ void MainWindow::pane_look(PaneView* pane) {
     pane->add_extra({QStringLiteral("notes"), [pane](QPainter& painter, const core::Page& page, const View& view) { pane->paint_notes(painter, page, view); }});
     pane->add_extra({QStringLiteral("count"), [pane](QPainter& painter, const core::Page& page, const View& view) { pane->paint_count(painter, page, view); }});
     pane->add_extra({QStringLiteral("ruler"), [pane](QPainter& painter, const core::Page& page, const View& view) { pane->paint_ruler(painter, page, view); }});
-    for (const QString& key : pane->extra_keys()) pane->show_extra(key, canvas_->extra_shown(key));
+    // (each by its switch — 表示 → 表示・非表示 ▸ act_show_<key>, already turned when the window's own handler is still to come
+    // — else as the canvas shows it)
+    for (const QString& key : pane->extra_keys()) {
+        const QAction* shown = action(QStringLiteral("act_show_") + key);
+        pane->show_extra(key, shown != nullptr && shown->isCheckable() ? shown->isChecked() : canvas_->extra_shown(key));
+    }
 }
 
 void MainWindow::panes_follow() {

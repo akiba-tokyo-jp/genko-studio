@@ -185,6 +185,7 @@ void MainWindow::apply_extras() {
 }
 
 void MainWindow::share_view_switch(const QString& attribute, bool on) {
+    panes_follow();  // (PC5 H-c review P3-4: this window's panes — the production's switches come this way)
     // (this computer's: every open window the same at once — the review's P3-5; their own handlers not run again)
     for (MainWindow* other : documents::windows()) {
         if (other == this) continue;
