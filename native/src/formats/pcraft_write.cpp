@@ -1047,7 +1047,7 @@ Json document_json(Ctx& ctx) {
             const bool pen = l.kind == core::LayerKind::Strokes && l.role != core::LayerRole::Tone && (l.stroke_count() > 0 || !l.patches.empty()) &&
                              !render::shape_parts::any(l) && !(l.raster_png && !l.raster_png->empty()) && !l.color_raster && !l.ink_raster;
             // (and a smart object page_layers gives no picture of — its file not in the book —: written, and said)
-            const bool unseen = !core::shown_in_groups(page.layers, next) || pen ||  // (groups@1: in a hidden group too) l.kind == core::LayerKind::Smart || (l.kind == core::LayerKind::Fill && l.fill && core::pattern_of_fill(*l.fill) == nullptr);
+            const bool unseen = !core::shown_in_groups(page.layers, next) || pen || l.kind == core::LayerKind::Smart || (l.kind == core::LayerKind::Fill && l.fill && core::pattern_of_fill(*l.fill) == nullptr);  // (groups@1: in a hidden group too)
             if (!unseen || l.kind == core::LayerKind::Folder || !l.exportable || l.role == core::LayerRole::Name || l.role == core::LayerRole::Draft) continue;
             if (auto made = layer_of(ctx, l, nullptr, patterns)) flat.push_back(Out{std::move(*made), folder_of(l)});
         }

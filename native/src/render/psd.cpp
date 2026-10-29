@@ -873,8 +873,9 @@ File File::read(std::string data, const Limits& limits, bool lab) {
             folder.name = rec.name.empty() ? std::string("フォルダー") : rec.name;
             folder.opacity = rec.opacity / 255.0;
             folder.visible = rec.visible;
-            folder.blend = rec.pass_through ? std::string("pass_through") : rec.blend;  // (groups@1, PC5 I-b)
-            folder.clip = rec.clip;
+            folder.blend = rec.blend;
+            folder.pass_through = rec.pass_through;  // (groups@1, PC5 I-b)
+            folder.group_clip = rec.clip;
             folder.folder = true;
             folder.kind = "folder";
             folder.record = n;  // (PC4 F-d: its blocks)

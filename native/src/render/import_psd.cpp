@@ -1103,6 +1103,8 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
             // (通過 among them), mask and vector mask)
             layer.kind = core::LayerKind::Folder;
             layer.group = true;
+            if (item.pass_through) layer.blend = "pass_through";
+            layer.clip = item.group_clip;
             if (auto mask = mask_of()) layer.mask = std::move(*mask);
             layer.vector_mask = vector_mask_of(item);
         } else if (item.kind == "shape") {
