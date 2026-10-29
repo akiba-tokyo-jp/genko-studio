@@ -277,7 +277,7 @@ private slots:
         b.open_picture(80, 40);
         QCOMPARE(px(b.doc().page(0)), (std::pair<double, double>{80.0, 40.0}));
         b.answer<app::FitImageDialog>([](app::FitImageDialog* d) {
-            QCOMPARE(d->width->value(), 80);
+            if (d->width->value() != 80) return false;  // (the page's own size first)
             d->width->setValue(20);
             d->height->setValue(20);
             return true;
@@ -314,7 +314,7 @@ private slots:
         b.answer<app::LensBatchDialog>([&b](app::LensBatchDialog* d) {
             d->source.folder->setText(q(b.root / "in"));
             d->folder->setText(q(b.root / "out"));
-            QCOMPARE(d->settings()["profile"], Json("auto"));
+            if (d->settings()["profile"] != Json("auto")) return false;
             return !d->problem();
         });
         b.act("act_lens_correction_batch")->trigger();

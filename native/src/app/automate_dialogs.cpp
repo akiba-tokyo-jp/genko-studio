@@ -36,7 +36,6 @@ namespace events = service::script_events;
 
 namespace {
 
-QString qpath(const fs::path& path) { return QString::fromStdString(core::path_to_utf8(path)); }
 fs::path fpath(const QString& path) { return core::path_from_utf8(path.toStdString()); }
 
 const QString kStepsFilter = QStringLiteral("手順 (*.json *.txt *.genkoscript);;すべてのファイル (*)");
@@ -555,7 +554,8 @@ ScriptEventsDialog::ScriptEventsDialog(QWidget* parent, events::Table table, con
     QWidget* script_row = path_row(this, script, QStringLiteral("スクリプト（手順のファイル）"), false, kStepsFilter);
     form->addRow(QStringLiteral("スクリプト"), script_row);
     action = new QComboBox(this);
-    for (const auto& [name, item] : service::actions::load().items()) action->addItem(QString::fromStdString(name));
+    const Json saved = service::actions::load();
+    for (const auto& [name, item] : saved.items()) action->addItem(QString::fromStdString(name));
     form->addRow(QStringLiteral("アクション"), action);
     const auto shown = [this, script_row] {
         const bool file = kind->currentData().toString() == QLatin1String("script");
