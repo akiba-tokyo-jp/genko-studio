@@ -1082,11 +1082,10 @@ private slots:
             QVERIFY(std::any_of(page.native_psd->resources.begin(), page.native_psd->resources.end(), [](const core::PsdResource& r) { return r.id == 1065; }));
         }
         QDir().mkpath(path(QStringLiteral("copied")));
-        const auto written = [&](const core::Document& book, const char* name) {
+        const auto written = [&](const core::Document& book, const char* name) -> std::map<std::string, std::string> {
             const QString at = path(QStringLiteral("copied/%1.psd").arg(QString::fromLatin1(name)));
             asked = 0;
             (void)genko::formats::export_page_psd(book, book.page(0), genko::storage::path_from_utf8(at.toStdString()), 150);
-            QCOMPARE(asked, 1);  // (the table asked once a file)
             const psd::File out = psd::File::read(genko::test::read_bytes(at));
             std::map<std::string, std::string> blocks;
             for (const auto& r : out.resources()) blocks[std::to_string(r.id)] = std::string(r.data);
@@ -1095,6 +1094,7 @@ private slots:
         };
         // as read: the file's own bytes
         auto blocks = written(doc, "same");
+        QCOMPARE(asked, 1);  // (the table asked once a file)
         QVERIFY(blocks["1065"] == src_resources[1065]);
         QVERIFY(blocks["Anno"] == src_globals["Anno"]);
         // changed: the page's own (the kept bytes lent to the writer)
@@ -1103,6 +1103,7 @@ private slots:
         changed.edit_page(0).annotations[0].text = "edited";
         lent = false;
         blocks = written(changed, "changed");
+        QCOMPARE(asked, 1);  // (the table asked once a file)
         QCOMPARE(blocks["1065"], std::string("own renamed"));
         QCOMPARE(blocks["Anno"], std::string("own edited"));
         QVERIFY(lent);
@@ -1111,13 +1112,17 @@ private slots:
         gone.edit_page(0).layer_comps.reset();
         gone.edit_page(0).annotations.clear();
         blocks = written(gone, "gone");
+        QCOMPARE(asked, 1);  // (the table asked once a file)
         QVERIFY(!blocks.contains("1065") && !blocks.contains("Anno"));
         QVERIFY(blocks.contains("1050") && blocks.contains("Patt"));  // (the others kept as before)
-        // a file without layers: no 1065
+        // a file without layers: no 1065 (an indexed page's — its layers let go first: keep.psd's do not all merge)
+        core::Document bare = doc;
+        bare.edit_page(0).layers.clear();
         const core::Document indexed =
-            genko::core::CommandBus(genko::render::ops_registry()).apply(doc, Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"colors", 8}}}), core::Actor()).doc;
+            genko::core::CommandBus(genko::render::ops_registry()).apply(bare, Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"colors", 8}}}), core::Actor()).doc;
         QVERIFY(indexed.page(0).rgb && indexed.page(0).rgb->table);
         blocks = written(indexed, "flat");
+        QCOMPARE(asked, 1);  // (the table asked once a file)
         QVERIFY(!blocks.contains("1065"));
         // saved and read back: the marks kept
         const QString book = path(QStringLiteral("copied/book.genko"));
@@ -1126,6 +1131,7 @@ private slots:
         QVERIFY2(loaded.document.read_only_reason.empty(), loaded.document.read_only_reason.c_str());
         QCOMPARE(loaded.document.page(0).native_psd->copied, doc.page(0).native_psd->copied);
         blocks = written(loaded.document, "loaded");
+        QCOMPARE(asked, 1);  // (the table asked once a file)
         QVERIFY(blocks["1065"] == src_resources[1065]);
     }
 

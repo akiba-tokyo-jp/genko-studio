@@ -723,10 +723,10 @@ private slots:
             const fs::path at = to_path(tmp.path()) / "fps85.genko";
             genko::test::write_project(animated, at);
             const std::string bytes = genko::storage::read_file(at / "project.json");
-            const auto back = genko::storage::load_document(at);
-            QVERIFY2(back.document.read_only_reason.empty(), back.document.read_only_reason.c_str());
-            QVERIFY(back.document.features.empty());
-            genko::test::write_project(back.document, at);
+            const auto fps_back = genko::storage::load_document(at);
+            QVERIFY2(fps_back.document.read_only_reason.empty(), fps_back.document.read_only_reason.c_str());
+            QVERIFY(fps_back.document.features.empty());
+            genko::test::write_project(fps_back.document, at);
             QCOMPARE(genko::storage::read_file(at / "project.json"), bytes);
         }
         {
@@ -775,8 +775,8 @@ private slots:
             cleared.edit_page(0).slices->list.clear();
             const fs::path at = to_path(tmp.path()) / "cleared.genko";
             genko::test::write_project(cleared, at);
-            const auto back = genko::storage::load_document(at);
-            QVERIFY(back.document.page(0).slices && back.document.page(0).slices->next_id == 3 && back.document.page(0).slices->group == "p001");
+            const auto kept_back = genko::storage::load_document(at);
+            QVERIFY(kept_back.document.page(0).slices && kept_back.document.page(0).slices->next_id == 3 && kept_back.document.page(0).slices->group == "p001");
         }
         {
             Json bad = written;
