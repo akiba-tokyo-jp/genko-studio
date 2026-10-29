@@ -83,7 +83,10 @@ private slots:
         QCOMPARE(q(prefs::by_key("keys/alt_tool")->path), QStringLiteral("tools.altTool"));
         QCOMPARE(q(prefs::by_key("keys/pen/alt")->path), QStringLiteral("tools.modifiers.*.*"));
         QCOMPARE(q(prefs::path_of("keys/pen/alt").value()), QStringLiteral("tools.modifiers.pen.alt"));
-        QCOMPARE(q(prefs::by_key("guides/grid_mm")->path), QStringLiteral("guidesGridAndSlices.gridlineEvery"));
+        // (PC5 H-b, the review's P2-3: Genko's own name — upstream's gridlineEvery is the thick lines' step, not this)
+        QCOMPARE(q(prefs::by_key("guides/grid_mm")->path), QStringLiteral("guidesGridAndSlices.gridSpacingMm"));
+        QVERIFY(prefs::by_path("guidesGridAndSlices.gridlineEvery") == nullptr);
+        QCOMPARE(prefs::by_key("guides/grid_mm")->apply, prefs::Apply::Live);
         // (a command's name with dots or slashes in it: the rest of the path)
         QCOMPARE(q(prefs::key_of("shortcuts.ブラシサイズを大きく 1.5 倍").value()), QStringLiteral("shortcuts/ブラシサイズを大きく 1.5 倍"));
         QCOMPARE(q(prefs::path_of("shortcuts/HSB/HSL").value()), QStringLiteral("shortcuts.HSB/HSL"));

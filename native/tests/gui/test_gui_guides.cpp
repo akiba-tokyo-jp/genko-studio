@@ -816,6 +816,94 @@ private slots:
         app::preferences::apply_all(s.window.get());
     }
 
+    // (the review's P3-6) 決める alone — the grid's unit inch, its lines not a whole number of inches — keeps grid_mm as it was.
+    void preferencesKeepTheGridAsItWas() {
+        fresh_view_settings();
+        const auto store = genko::app::settings();
+        store->setValue(QStringLiteral("guides/grid_mm"), 5);
+        store->setValue(QStringLiteral("guides/grid_unit"), QStringLiteral("in"));
+        Studio s;
+        {
+            app::preferences::PreferencesDialog dialog(s.window.get());
+            dialog.save();
+        }
+        QCOMPARE(store->value(QStringLiteral("guides/grid_mm")).toDouble(), 5.0);
+        {
+            app::preferences::PreferencesDialog dialog(s.window.get());
+            dialog.guides_page->findChild<QSpinBox*>(QStringLiteral("prefs_grid_subdivisions"))->setValue(10);  // (25 mm in 10)
+            dialog.save();
+        }
+        QVERIFY(std::abs(store->value(QStringLiteral("guides/grid_mm")).toDouble() - 2.5) < 1e-6);
+        QVERIFY(std::abs(s.canvas()->grid_mm - 2.5) < 1e-6);
+        for (const char* key : {"units", "guides/guide_color", "guides/guide_style", "guides/smart_color", "guides/grid_color", "guides/grid_style",
+                                "guides/grid_unit", "guides/grid_subdivisions", "guides/grid_mm"})
+            store->remove(QString::fromLatin1(key));
+    }
+
+    // (the review's P2-1 and P2-2) Ctrl grabs a guide only where it means nothing else: the shape tool with Ctrl draws, not
+    // snapping, and leaves the guide; the pen grabs as the mouse does (its event left to come as the mouse). The move tool's
+    // box's □ on a guide comes first. Over a guide a press would grab, the pointer says which way it goes.
+    void guidesAndTheToolsOwnKeys() {
+        fresh_view_settings();
+        Studio s;
+        PageCanvas* c = s.canvas();
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_ruler"}, {"page", 1}, {"kind", "guide"}, {"axis", "h"}, {"at", 30}}})));
+        const auto at = [&] { return s.page().rulers[0]["at"].get<double>(); };
+        // the shape tool with Ctrl: a shape, the guide where it was
+        s.window->choose_tool(QStringLiteral("shape"));
+        inject::mouse_stroke(c, {QPointF(40, 30), QPointF(60, 50), QPointF(80, 70)}, Qt::ControlModifier);
+        QVERIFY2(s.last()["op"] != Json("edit_ruler"), s.last().dump().c_str());
+        QCOMPARE(at(), 30.0);
+        QVERIFY(!c->grabbable_guide(c->to_widget(QPointF(40, 30)), Qt::ControlModifier));
+        for (const char* tool : {"crop", "pathpen", "curvepen", "pathselect", "ruler", "hand", "zoom"}) {
+            s.window->choose_tool(QString::fromLatin1(tool));
+            QVERIFY2(!c->grabbable_guide(c->to_widget(QPointF(40, 30)), Qt::ControlModifier), tool);
+        }
+        // the brush: the mouse and the pen alike — with Ctrl over the guide, the pen's press is left to come as the mouse
+        s.window->choose_tool(QStringLiteral("pen"));
+        QVERIFY(c->grabbable_guide(c->to_widget(QPointF(40, 30)), Qt::ControlModifier));
+        const QPointingDevice stylus(QStringLiteral("test pen"), 9001, QInputDevice::DeviceType::Stylus, QPointingDevice::PointerType::Pen,
+                                     QInputDevice::Capability::Position | QInputDevice::Capability::Pressure, 1, 3);
+        const auto pen = [&](QEvent::Type type, const QPointF& mm, Qt::KeyboardModifiers keys) {
+            const QPointF w = c->to_widget(mm);
+            QTabletEvent event(type, &stylus, w, c->mapToGlobal(w), 0.5, 0, 0, 0, 0, 0, keys, type == QEvent::TabletMove ? Qt::NoButton : Qt::LeftButton,
+                               type == QEvent::TabletRelease ? Qt::NoButton : Qt::LeftButton);
+            event.setAccepted(true);
+            QCoreApplication::sendEvent(c, &event);
+            return event.isAccepted();
+        };
+        QVERIFY(!pen(QEvent::TabletPress, QPointF(40, 30), Qt::ControlModifier));
+        // (without Ctrl it draws)
+        const std::size_t before = s.ops.size();
+        QVERIFY(pen(QEvent::TabletPress, QPointF(40, 80), Qt::NoModifier));
+        QVERIFY(pen(QEvent::TabletMove, QPointF(60, 90), Qt::NoModifier));
+        QVERIFY(pen(QEvent::TabletRelease, QPointF(60, 90), Qt::NoModifier));
+        QVERIFY(gui_test::wait_for([&] { return s.ops.size() > before; }));
+        QCOMPARE(s.last()["op"], Json("add_stroke"));
+        QCOMPARE(at(), 30.0);
+        // the move tool: the box's □ on the guide first (自由変形 from it), the guide grabbed beside it
+        s.window->choose_tool(QStringLiteral("move"));
+        c->show_move_box = true;
+        c->moving_box = [] { return std::optional<std::array<double, 4>>(std::array<double, 4>{20, 30, 60, 80}); };
+        QSignalSpy grabbed(c, &PageCanvas::moveBoxGrabbed);
+        QVERIFY(!c->grabbable_guide(c->to_widget(QPointF(40, 30)), Qt::NoModifier));  // (the top's middle □)
+        const QPointF handle = c->to_widget(QPointF(40, 30));
+        QMouseEvent press(QEvent::MouseButtonPress, handle, c->mapToGlobal(handle), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(c, &press);
+        QMouseEvent release(QEvent::MouseButtonRelease, handle, c->mapToGlobal(handle), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(c, &release);
+        QCOMPARE(grabbed.count(), 1);
+        QCOMPARE(at(), 30.0);
+        QTest::keyClick(c, Qt::Key_Escape);
+        QVERIFY(c->grabbable_guide(c->to_widget(QPointF(100, 30)), Qt::NoModifier));  // (away from the □)
+        // the pointer over a guide across: ⇕
+        const QPointF over = c->to_widget(QPointF(100, 30));
+        QMouseEvent hover(QEvent::MouseMove, over, c->mapToGlobal(over), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(c, &hover);
+        QCOMPARE(c->cursor().shape(), Qt::SplitVCursor);
+        c->show_move_box = false;
+    }
+
     // スマートガイド: a moved box's gaps equal to both neighbours', while the drag lasts (not with it off); レイヤーエッジ: the
     // chosen layer's box.
     void smartGuidesAndLayerEdges() {

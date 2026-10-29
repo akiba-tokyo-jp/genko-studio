@@ -135,12 +135,13 @@ std::pair<QWidget*, QWidget*> unit_pages(QWidget* parent) {
         auto* unit = choices(QStringLiteral("prefs_grid_unit"), {{"mm", "mm"}, {"cm", "cm"}, {"inch", "in"}, {"pt", "pt"}, {"pica", "pica"}},
                              text_of("guidesGridAndSlices.gridUnit"));
         const int parts = pref("guidesGridAndSlices.subdivisions").get<int>();
-        const double every_mm = pref("guidesGridAndSlices.gridlineEvery").get<double>() * parts;
+        const double every_mm = pref("guidesGridAndSlices.gridSpacingMm").get<double>() * parts;
         auto* every = new QDoubleSpinBox;
         every->setObjectName(QStringLiteral("prefs_grid_every"));
         every->setDecimals(3);
         every->setRange(0.001, 100000);
         every->setValue(core::units::from_mm(every_mm, grid_unit(unit), no_page()));
+        every->setProperty("was_mm", every_mm);  // (the review's P3-6: 決める alone keeps grid_mm as it is)
         // (the number kept as a length when the unit is changed)
         unit->setProperty("was", unit->currentData());
         QObject::connect(unit, &QComboBox::currentIndexChanged, guides, [unit, every] {
@@ -196,12 +197,20 @@ void save_unit_pages(QWidget* units, QWidget* guides) {
         store->setValue(QStringLiteral("guides/guide_style"), guides->findChild<QComboBox*>(QStringLiteral("prefs_guide_style"))->currentData());
         store->setValue(QStringLiteral("guides/grid_style"), guides->findChild<QComboBox*>(QStringLiteral("prefs_grid_style"))->currentData());
         const auto* unit = guides->findChild<QComboBox*>(QStringLiteral("prefs_grid_unit"));
-        const int parts = guides->findChild<QSpinBox*>(QStringLiteral("prefs_grid_subdivisions"))->value();
-        const double every_mm = core::units::to_mm(guides->findChild<QDoubleSpinBox*>(QStringLiteral("prefs_grid_every"))->value(), grid_unit(unit), no_page());
+        auto* subdivisions = guides->findChild<QSpinBox*>(QStringLiteral("prefs_grid_subdivisions"));
+        const int parts = subdivisions->value();
+        const auto* every = guides->findChild<QDoubleSpinBox*>(QStringLiteral("prefs_grid_every"));
+        const double every_mm = core::units::to_mm(every->value(), grid_unit(unit), no_page());
+        const double was_mm = every->property("was_mm").toDouble();
+        const int was_parts = pref("guidesGridAndSlices.subdivisions").get<int>();
         store->setValue(QStringLiteral("guides/grid_unit"), unit->currentData());
         store->setValue(QStringLiteral("guides/grid_subdivisions"), parts);
-        // (the thin lines' step — what snaps — within the table's range)
-        store->setValue(QStringLiteral("guides/grid_mm"), std::clamp(std::round(every_mm / std::max(1, parts) * 1000.0) / 1000.0, 0.5, 100.0));
+        // (the thin lines' step — what snaps —, written only when the thick lines' step or the subdivisions changed: a unit
+        // changed alone, or 決める alone, rounds it in no unit — the review's P3-6; within the table's range 0.5 … 100 mm)
+        const bool every_changed = std::abs(every_mm - was_mm) > 1e-3 * std::max(1.0, was_mm);
+        const double thick_mm = every_changed ? every_mm : was_mm;  // (not edited: the length as it was, not as the unit rounds it)
+        if (every_changed || parts != was_parts)
+            store->setValue(QStringLiteral("guides/grid_mm"), std::clamp(std::round(thick_mm / std::max(1, parts) * 10000.0) / 10000.0, 0.5, 100.0));
     }
 }
 

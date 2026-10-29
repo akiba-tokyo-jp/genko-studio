@@ -83,15 +83,31 @@ std::optional<std::string> PageCanvas::guide_at(const QPointF& widget) const {
 
 std::optional<std::string> PageCanvas::dragged_guide() const { return guide_drag_ ? guide_drag_->id : std::nullopt; }
 
-bool PageCanvas::guide_grab(const QPointF& widget, Qt::KeyboardModifiers modifiers) {
-    // (移動ツール, or another tool with Ctrl held, as Photoshop's; the ruler tool's own points, the hand and the zoom never)
-    if (tool_ == QLatin1String("ruler") || tool_ == QLatin1String("hand") || tool_ == QLatin1String("zoom")) return false;
-    if (tool_ != QLatin1String("move") && !(modifiers & Qt::ControlModifier)) return false;
+std::optional<std::pair<std::string, bool>> PageCanvas::grabbable_guide(const QPointF& widget, Qt::KeyboardModifiers modifiers) const {
+    // (移動ツール, or another tool with Ctrl held, as Photoshop's — but not where Ctrl means something of its own: the ruler
+    // tool's points, the hand, the zoom, and the tools whose Ctrl turns the snapping off; the move tool's □ come first)
+    static const QStringList ctrl_own{QStringLiteral("ruler"), QStringLiteral("hand"),    QStringLiteral("zoom"),    QStringLiteral("crop"),
+                                      QStringLiteral("shape"), QStringLiteral("pathpen"), QStringLiteral("curvepen"), QStringLiteral("pathselect")};
+    if (tool_ == QLatin1String("move")) {
+        if (move_box_handle(unturned(widget))) return std::nullopt;
+    } else if (!(modifiers & Qt::ControlModifier) || ctrl_own.contains(tool_)) {
+        return std::nullopt;
+    }
     const auto id = guide_at(widget);
-    if (!id) return false;
+    if (!id) return std::nullopt;
     for (const core::Json& r : page_rulers()) {
         const auto g = guide_of(r, true);
-        if (!g || g->id != *id) continue;
+        if (g && g->id == *id) return std::make_pair(g->id, g->across);
+    }
+    return std::nullopt;
+}
+
+bool PageCanvas::guide_grab(const QPointF& widget, Qt::KeyboardModifiers modifiers) {
+    const auto grabbed = grabbable_guide(widget, modifiers);
+    if (!grabbed) return false;
+    for (const core::Json& r : page_rulers()) {
+        const auto g = guide_of(r, true);
+        if (!g || g->id != grabbed->first) continue;
         guide_drag_ = GuideDrag{g->across ? QStringLiteral("h") : QStringLiteral("v"), g->at, g->id, (modifiers & Qt::AltModifier) != 0};
         update();
         return true;

@@ -13,11 +13,12 @@
 // guides, then each guide: its place in 1/32 of the file's pixel (a signed 32-bit number) and its way (0 an upright guide —
 // its x —, 1 a guide across — its y).
 //
-// Read (render/psd_production's row 1032, render/import_psd): the file's guides become the page's guide rulers (kind guide,
-// axis "v" or "h", at mm) where the file's picture is placed, those the page has already (within 0.01 mm) left out; not
-// onto a page that keeps an earlier PSD's blocks. Psd-keep@1 never kept 1032 (the grid and guides): nothing else changes.
-// Written (formats/psd_export): the page's guide rulers (mm → the file's pixels × 32, rounded) — none on the page: no 1032
-// (the file as before, byte for byte).
+// Read (render/psd_production's row 1032, render/import_psd): when the file is opened as a page of its own, its guides
+// (version 1; up to 4096; none more than the canvas's size off it) become the page's guide rulers (kind guide, axis "v" or
+// "h", at mm), those the page has already (within 0.01 mm) left out. A PSD read onto a page (import_psd) brings none, as
+// Photoshop's 配置. Psd-keep@1 never kept 1032 (the grid and guides): nothing else changes.
+// Written (formats/psd_export): the page's guide rulers (mm at the picture's resolution → pixels × 32, rounded) — none on
+// the page: no 1032 (the file as before, byte for byte).
 
 namespace genko::render::psd_guides {
 

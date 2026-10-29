@@ -618,6 +618,11 @@ public:
     QString length_words(double mm, bool across) const;
     // The guide under a point of the widget that a press would grab (none: none, locked, hidden), and the one being dragged.
     std::optional<std::string> guide_at(const QPointF& widget) const;
+    // (the review's P2-1 and P2-2) The guide a press here with these keys grabs — its id and whether it is across — with the
+    // tool in hand: the move tool (unless the press is on its box's □: the □ first), another tool with Ctrl held unless Ctrl
+    // means something of its own there (the ruler, the hand, the zoom; the crop, the shape and the path tools — Ctrl: no
+    // snapping —). None: not one. The pen grabs as the mouse does.
+    std::optional<std::pair<std::string, bool>> grabbable_guide(const QPointF& widget, Qt::KeyboardModifiers modifiers) const;
     std::optional<std::string> dragged_guide() const;
     // 新規ガイドレイアウトを作成…'s preview: the guides it would add, drawn faintly while its window is open (none: none).
     std::optional<core::GuideLayout> guide_preview;

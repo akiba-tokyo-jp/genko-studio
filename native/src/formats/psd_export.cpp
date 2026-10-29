@@ -1701,6 +1701,7 @@ render::psd_production::Written production_blocks(const core::Page& page, const 
             }
         }
     }
+    context.dpi = static_cast<double>(dpi);  // (PC5 H-b: the guides at the picture's pixels)
     context.width_px = static_cast<double>(render::mm_to_px(page.spec.width_mm.value(), static_cast<int>(dpi)));
     context.height_px = static_cast<double>(render::mm_to_px(page.spec.height_mm.value(), static_cast<int>(dpi)));
     context.kept_resource = [&](int id) -> std::optional<std::string> {

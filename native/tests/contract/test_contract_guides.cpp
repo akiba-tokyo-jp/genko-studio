@@ -12,8 +12,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <string>
+#include <tuple>
 
 #include "core/command_bus.hpp"
 #include "core/guide_layout.hpp"
@@ -23,6 +25,7 @@
 #include "formats/open_file.hpp"
 #include "render/ops_registry.hpp"
 #include "render/psd.hpp"
+#include "render/psd_guides.hpp"
 #include "render/psd_production.hpp"
 #include "testsupport.hpp"
 
@@ -233,24 +236,27 @@ private slots:
         const Json view = guides_view(file);
         QVERIFY2(!view.contains("error") && view["guides"].is_object(), view.dump().c_str());
         QCOMPARE(view["guides"]["version"], Json(1));
-        // (the file's canvas is the page's whole pixels at 200 dpi — 100 mm: 787 px, 50 mm: 394 px —; a guide's place is in
-        // 1/32 of them, rounded: 25.4 mm 6397, 12.7 mm 3202, −1.27 mm −320; upright first)
-        const double w_px = static_cast<double>(std::lround(100 / 25.4 * 200)), h_px = static_cast<double>(std::lround(50 / 25.4 * 200));
-        const Json want = Json::array({Json::array({std::lround(25.4 / 100 * w_px * 32), 0}), Json::array({std::lround(12.7 / 50 * h_px * 32), 1}),
-                                       Json::array({std::lround(-1.27 / 50 * h_px * 32), 1})});
-        QCOMPARE(want, Json::parse("[[6397, 0], [3202, 1], [-320, 1]]"));
-        QVERIFY2(view["guides"]["items"] == want, view.dump().c_str());
+        // (the review's P3-1: at the picture's pixels — mm at 200 dpi —, in 1/32 of them: 25.4 mm 6400, 12.7 mm 3200, −1.27 mm
+        // −320; upright first)
+        QVERIFY2(view["guides"]["items"] == Json::parse("[[6400, 0], [3200, 1], [-320, 1]]"), view.dump().c_str());
         const auto near = [](const std::vector<double>& got, const std::vector<double>& wanted) {
             if (got.size() != wanted.size()) return false;
             for (std::size_t i = 0; i < got.size(); ++i)
-                if (std::abs(got[i] - wanted[i]) > 0.01) return false;  // (within the file's 1/32 px)
+                if (std::abs(got[i] - wanted[i]) > 0.002) return false;
             return true;
         };
         formats::Opened opened = formats::open_file(genko::test::read_bytes(file), "guides.psd");
-        // (opened, the page is the file's pixels at its 200 dpi: each guide where its 1/32 px is)
-        const auto mm_of = [](std::int64_t place) { return static_cast<double>(place) / 32.0 / 200.0 * 25.4; };
-        QVERIFY2(near(guides(opened.doc, 0, "v"), {mm_of(6397)}), Json(guides(opened.doc, 0, "v")).dump().c_str());
-        QVERIFY2(near(guides(opened.doc, 0, "h"), {mm_of(3202), mm_of(-320)}), Json(guides(opened.doc, 0, "h")).dump().c_str());
+        QVERIFY2(near(guides(opened.doc, 0, "v"), {25.4}), Json(guides(opened.doc, 0, "v")).dump().c_str());
+        QVERIFY2(near(guides(opened.doc, 0, "h"), {12.7, -1.27}), Json(guides(opened.doc, 0, "h")).dump().c_str());
+        // (a PSD read onto a page — import_psd — brings none, as Photoshop's 配置: the page's rulers as they were)
+        {
+            core::Document onto = book();
+            const std::size_t before = onto.page(0).rulers.size();
+            const Json op{{"op", "import_psd"}, {"page", 1}, {"path", file.toStdString()}};
+            const Outcome done = applied(onto, Json::array({op}));
+            QVERIFY2(done.ok, done.error.c_str());
+            QCOMPARE(done.doc.page(0).rulers.size(), before);
+        }
         // (written again from the book read: the same guides)
         const QString again = path(QStringLiteral("again.psd"));
         (void)formats::export_page_psd(opened.doc, opened.doc.page(0), fs::path(again.toStdString()), 200);
@@ -277,6 +283,72 @@ private slots:
         const double mm_per_px = read.doc.page(0).spec.width_mm.value() / std::round(read.doc.page(0).spec.width_mm.value() / 25.4 * 200);
         QVERIFY2(near(guides(read.doc, 0, "v"), {100 * mm_per_px}), Json(guides(read.doc, 0, "v")).dump().c_str());
         QVERIFY2(near(guides(read.doc, 0, "h"), {-20 * mm_per_px, 50 * mm_per_px}), Json(guides(read.doc, 0, "h")).dump().c_str());
+    }
+
+    // (the review's P3-3) A 1032 broken or hostile: a count past its data, past 4096, a version not 1, places past the int32's
+    // ends — read without falling over: what is there and on (or near) the canvas, the rest left out.
+    void hostileGuides() {
+        const auto u32 = [](std::string& out, std::uint32_t v) {
+            for (int k = 3; k >= 0; --k) out += static_cast<char>((v >> (8 * k)) & 0xff);
+        };
+        const auto block = [&](std::uint32_t version, std::uint32_t count, const std::vector<std::pair<std::int32_t, int>>& items) {
+            std::string out;
+            u32(out, version);
+            u32(out, 576);
+            u32(out, 576);
+            u32(out, count);
+            for (const auto& [place, way] : items) {
+                u32(out, static_cast<std::uint32_t>(place));
+                out += static_cast<char>(way);
+            }
+            return out;
+        };
+        const core::vector::Affine onto{100, 0, 0, 50, 0, 0};  // (a 100 × 50 px canvas on a 100 × 50 mm page)
+        render::psd_production::ReadContext context;
+        context.onto = &onto;
+        context.width_px = 100;
+        context.height_px = 50;
+        context.opened = true;
+        const auto read = [&](const std::string& data) {
+            core::Page page = book().page(0);
+            const bool taken = render::psd_guides::read(page, data, context);
+            std::vector<double> v, h;
+            for (const Json& r : page.rulers) (r.value("axis", std::string()) == "v" ? v : h).push_back(r["at"].get<double>());
+            return std::tuple{taken, v, h};
+        };
+        // (a count of 1000000 and two guides' data: the two)
+        {
+            const auto [taken, v, h] = read(block(1, 1000000, {{320, 0}, {640, 1}}));
+            QVERIFY(taken);
+            QCOMPARE(v, (std::vector<double>{10}));
+            QCOMPARE(h, (std::vector<double>{20}));
+        }
+        // (5000 in the data: 4096 read at most — each its own place)
+        {
+            std::vector<std::pair<std::int32_t, int>> many;
+            for (int i = 0; i < 5000; ++i) many.emplace_back(i, 0);
+            const auto [taken, v, h] = read(block(1, 5000, many));
+            QVERIFY(taken);
+            QVERIFY(v.size() <= 4096 && v.size() > 100);
+            QVERIFY(h.empty());
+        }
+        // (the int32's ends and far off the canvas: left out; just past an edge: kept)
+        {
+            const auto [taken, v, h] = read(block(1, 4, {{INT32_MAX, 0}, {INT32_MIN, 1}, {-100 * 32, 0}, {120 * 32, 0}}));
+            QVERIFY(taken);
+            QCOMPARE(v, (std::vector<double>{-100, 120}));
+            QVERIFY(h.empty());
+        }
+        {
+            const auto [taken, v, h] = read(block(1, 1, {{201 * 32, 0}}));
+            QVERIFY(taken && v.empty());
+        }
+        // (a version not 1, data shorter than its head: not read)
+        QVERIFY(!std::get<0>(read(block(2, 1, {{320, 0}}))));
+        QVERIFY(!std::get<0>(read(std::string("\0\0\0\1\0\0", 6))));
+        // (onto a page — not opened —: none)
+        context.opened = false;
+        QVERIFY(!std::get<0>(read(block(1, 1, {{320, 0}}))));
     }
 
     // 単位・定規 (core/units): a length in mm in each unit and back.

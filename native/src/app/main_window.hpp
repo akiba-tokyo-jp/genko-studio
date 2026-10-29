@@ -754,6 +754,7 @@ private:
     void build_guide_view_actions();
     void build_guide_view_menus(QMenu* view);
     void apply_extras();
+    void share_view_switch(const QString& attribute, bool on);  // (the other open windows the same)
     void ask_32bit_preview();
     void build_arrange_actions();
     void build_arrange_menus(QMenu* arrange);

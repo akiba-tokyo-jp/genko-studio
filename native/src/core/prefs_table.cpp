@@ -189,7 +189,9 @@ std::vector<Pref> make_table() {
         colour("guidesGridAndSlices.smartGuideColor", "guides/smart_color", "#e64980", "スマートガイドの色"),
         colour("guidesGridAndSlices.gridColor", "guides/grid_color", "#508cdc", "グリッドの色"),
         choice("guidesGridAndSlices.gridStyle", "guides/grid_style", "lines", {"lines", "dashedLines", "dots"}, "グリッドの線種"),
-        number("guidesGridAndSlices.gridlineEvery", "guides/grid_mm", "5", 0.5, 100, "グリッドの細い線の間隔（mm）", Apply::NewWindow),
+        // (the thin lines' step, what snaps — Genko's own path: Photoshop's グリッド線 is the thick lines' step in gridUnit, which
+        // the screen shows as this × subdivisions; the review's P2-3, the coordinator's decision: not a path of its own here)
+        number("guidesGridAndSlices.gridSpacingMm", "guides/grid_mm", "5", 0.5, 100, "グリッドの細い線の間隔（mm。グリッド線 ÷ 分割数）"),
         integer("guidesGridAndSlices.subdivisions", "guides/grid_subdivisions", 5, 1, 100, "分割数（太い線の間の細い線の数）"),
         choice("guidesGridAndSlices.gridUnit", "guides/grid_unit", "mm", {"mm", "cm", "in", "pt", "pica"}, "グリッド線の単位"),
         // rawDefaults (Camera Raw)

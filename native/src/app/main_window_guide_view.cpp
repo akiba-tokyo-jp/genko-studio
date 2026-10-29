@@ -18,6 +18,7 @@
 
 #include "app/ask.hpp"
 #include "app/config.hpp"
+#include "app/documents.hpp"
 #include "app/guide_dialogs.hpp"
 #include "app/main_window.hpp"
 #include "app/view_units.hpp"
@@ -83,14 +84,17 @@ void MainWindow::build_guide_view_actions() {
     connect(extras, &QAction::toggled, this, [this](bool on) {
         settings()->setValue(QStringLiteral("view/extras"), words(on));
         apply_extras();
+        share_view_switch(QStringLiteral("act_extras"), on);
     });
     for (const ShowItem& item : kShowItems) {
         QAction* act = make(QString::fromLatin1(item.attribute), QString::fromUtf8(item.title), [] {}, {}, QString::fromUtf8(item.tip), true);
         act->setChecked(truthy(store->value(QString::fromLatin1(item.key)), item.fallback));
         const QString key = QString::fromLatin1(item.key);
-        connect(act, &QAction::toggled, this, [this, key](bool on) {
+        const QString attribute = QString::fromLatin1(item.attribute);
+        connect(act, &QAction::toggled, this, [this, key, attribute](bool on) {
             settings()->setValue(key, words(on));
             apply_extras();
+            share_view_switch(attribute, on);
         });
     }
     make("act_show_all", QStringLiteral("すべて"), [this] {
@@ -113,6 +117,7 @@ void MainWindow::build_guide_view_actions() {
         settings()->setValue(QStringLiteral("guides/lock"), words(on));
         canvas_->lock_guides = on;
         canvas_->update();
+        share_view_switch(QStringLiteral("act_lock_guides"), on);
     });
     make("act_clear_guides", QStringLiteral("ガイドを消去"), [this] { clear_guides(true); }, {},
          QStringLiteral("原稿のすべてのページのガイドを消します（描画定規はそのまま）"));
@@ -125,7 +130,8 @@ void MainWindow::build_guide_view_actions() {
     // worker — none until they come)
     connect(canvas_, &PageCanvas::guideRemoved, this, [this](const QString& id) {
         if (const core::Page* page = current_page()) {
-            apply_ops(Json::array({Json{{"op", "delete_ruler"}, {"page", page->index.json()}, {"id", id.toStdString()}}}));
+            // (its kind too: the history says ガイド — the id decides what is taken away)
+            apply_ops(Json::array({Json{{"op", "delete_ruler"}, {"page", page->index.json()}, {"id", id.toStdString()}, {"kind", "guide"}}}));
         }
     });
     connect(canvas_, &PageCanvas::guideAsked, this, [this](const QString& id) { ask_new_guide(id); });
@@ -173,6 +179,21 @@ void MainWindow::apply_extras() {
     canvas_->update();
 }
 
+void MainWindow::share_view_switch(const QString& attribute, bool on) {
+    // (this computer's: every open window the same at once — the review's P3-5; their own handlers not run again)
+    for (MainWindow* other : documents::windows()) {
+        if (other == this) continue;
+        QAction* act = other->action(attribute);
+        if (act == nullptr || act->isChecked() == on) continue;
+        {
+            const QSignalBlocker quiet(act);
+            act->setChecked(on);
+        }
+        other->canvas_->lock_guides = other->action("act_lock_guides")->isChecked();
+        other->apply_extras();
+    }
+}
+
 void MainWindow::apply_guide_prefs() {
     const auto store = settings();
     const auto pref = [&store](const char* path) { return core::prefs::value(*store, path); };
@@ -183,7 +204,7 @@ void MainWindow::apply_guide_prefs() {
     c->grid_colour = QColor(QString::fromStdString(pref("guidesGridAndSlices.gridColor").get<std::string>()));
     c->grid_style = pen_style(pref("guidesGridAndSlices.gridStyle").get<std::string>());
     c->grid_subdivisions = pref("guidesGridAndSlices.subdivisions").get<int>();
-    if (store->contains(QStringLiteral("guides/grid_mm"))) c->grid_mm = pref("guidesGridAndSlices.gridlineEvery").get<double>();
+    if (store->contains(QStringLiteral("guides/grid_mm"))) c->grid_mm = pref("guidesGridAndSlices.gridSpacingMm").get<double>();
     c->ruler_unit = view_units::ruler();
     c->points_per_inch = view_units::points_per_inch();
     c->column_pt = view_units::column_pt();

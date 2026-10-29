@@ -260,6 +260,11 @@ void GuideLayoutDialog::changed() {
 
 void GuideLayoutDialog::put(const Json& settings) {
     putting_ = true;
+    // (put back however it ends — a preset of the wrong kinds throws midway: the review's P3-7)
+    struct Done {
+        GuideLayoutDialog* dialog;
+        ~Done() { dialog->putting_ = false; }
+    } done{this};
     const auto set = [this](QDoubleSpinBox* box, const core::units::Basis& basis, double mm) { view_units::set_unit(box, unit_, basis, mm, kMaxMm); };
     const Json* c = settings.contains("columns") && settings["columns"].is_object() ? &settings["columns"] : nullptr;
     columns_on->setChecked(c != nullptr);
@@ -309,7 +314,10 @@ void GuideLayoutDialog::fill_presets(const QString& chosen) {
     remove->setEnabled(preset->currentIndex() > 0);
 }
 
-void GuideLayoutDialog::save_preset(const QString& name) {
+void GuideLayoutDialog::save_preset(const QString& given) {
+    // (a "/" would make a group of the settings, never listed: the full-width one in its place)
+    QString name = given;
+    name.replace(QLatin1Char('/'), QStringLiteral("／")).replace(QLatin1Char('\\'), QStringLiteral("＼"));
     settings()->setValue(QStringLiteral("guide_layouts/") + name, QString::fromStdString(fields().dump()));
     fill_presets(name);
 }

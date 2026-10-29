@@ -45,6 +45,7 @@ struct ReadContext {
     bool page_had = false;                       // the page keeps an earlier PSD's blocks (this file's are not kept)
     core::Json* report = nullptr;                // the import's report (a group says what it read)
     const core::Document* doc = nullptr;         // (PC5 J-a) the book being read into (its kept blocks: native_files)
+    bool opened = false;                         // (PC5 H-b) the file opened as a page of its own (not read onto a page)
 };
 
 struct Taken {
@@ -63,6 +64,7 @@ struct WriteContext {
     // folder have none): a row names only those it finds here and in the records' layers.
     std::map<std::string, std::int64_t> lyids;
     double width_px = 0, height_px = 0;         // the file's canvas
+    double dpi = 0;                             // (PC5 H-b) the resolution the page's picture is drawn at (0: not known)
     // The page's kept block's bytes (an image resource by its id, a global block by its key; none: not kept).
     std::function<std::optional<std::string>(int resource)> kept_resource;
     std::function<std::optional<std::string>(std::string_view global)> kept_global;

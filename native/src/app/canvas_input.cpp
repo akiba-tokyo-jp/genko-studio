@@ -3,6 +3,7 @@
 
 #include <QContextMenuEvent>
 #include <QGestureEvent>
+#include <QGuiApplication>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QNativeGestureEvent>
@@ -181,6 +182,9 @@ void PageCanvas::update_cursor(std::optional<QPointF> pos) {
         setCursor(Qt::ClosedHandCursor);
     } else if (space_ || tool_ == QLatin1String("hand")) {  // (PC5 H-a: 手のひらツール)
         setCursor(Qt::OpenHandCursor);
+    } else if (const auto guide = pos && page() != nullptr ? grabbable_guide(view_transform().map(*pos), QGuiApplication::keyboardModifiers())
+                                                           : std::nullopt) {
+        setCursor(guide->second ? Qt::SplitVCursor : Qt::SplitHCursor);  // (PC5 H-b: a guide a press would grab)
     } else if (is_drawing_tool(tool_)) {
         // the brush's circle is drawn on the page (paint_page); the pointer itself as chosen in 環境設定 (PC4 E1: the cross
         // alone without the brush preview, and while drawing when so chosen)
@@ -516,10 +520,9 @@ void PageCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
         return;
     }
     // (PC5 H-b: a guide double-clicked where a press would grab it — 新規ガイド… asks where it goes)
-    if (event->button() == Qt::LeftButton && !work_ && tool_ != QLatin1String("ruler") && tool_ != QLatin1String("hand") &&
-        tool_ != QLatin1String("zoom") && (tool_ == QLatin1String("move") || (event->modifiers() & Qt::ControlModifier))) {
-        if (const auto id = guide_at(event->position())) {
-            emit guideAsked(QString::fromStdString(*id));
+    if (event->button() == Qt::LeftButton && !work_) {
+        if (const auto guide = grabbable_guide(event->position(), event->modifiers())) {
+            emit guideAsked(QString::fromStdString(guide->first));
             return;
         }
     }
@@ -792,6 +795,13 @@ void PageCanvas::tabletEvent(QTabletEvent* event) {
             if (work_->release) work_->release(mm, event->modifiers());
         }
         event->accept();  // (no mouse made of it: the work had it once)
+        return;
+    }
+    // (PC5 H-b, the review's P2-1: a guide the mouse would grab here, the pen grabs too — the event left to come as the mouse —,
+    // and its drag goes on so)
+    if (page() != nullptr && is_drawing_tool(tool_) && !space_ &&
+        (guide_drag_ || (type == QEvent::TabletPress && event->button() == Qt::LeftButton && grabbable_guide(event->position(), event->modifiers())))) {
+        event->ignore();
         return;
     }
     const bool eraser_end = event->pointerType() == QPointingDevice::PointerType::Eraser;
