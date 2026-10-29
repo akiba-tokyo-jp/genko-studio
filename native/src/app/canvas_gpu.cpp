@@ -17,6 +17,7 @@
 #include <QWindow>
 
 #include <algorithm>
+#include <cmath>
 
 #include "app/canvas.hpp"
 #include "app/config.hpp"
@@ -78,6 +79,13 @@ protected:
     }
 
     void resizeGL(int, int) override {
+        // (review P3-2: the widget's own frame buffers — 4 samples of colour and of depth and stencil, and the one they
+        // are resolved to — come out of GPU の記憶 too; the tiles keep at least a quarter of it)
+        const double ratio = devicePixelRatioF();
+        const auto pixels = static_cast<std::size_t>(std::ceil(width() * ratio)) * static_cast<std::size_t>(std::ceil(height() * ratio));
+        const std::size_t budget = PageCanvas::gpu_budget_bytes();
+        const std::size_t frames = pixels * 4 * (2 * static_cast<std::size_t>(std::max(1, format().samples())) + 1);
+        canvas_->renderer().set_texture_budget(std::max(budget / 4, budget > frames ? budget - frames : std::size_t{0}));
         update();
         if (!watching_screen_) {
             if (QWindow* window = canvas_->window()->windowHandle()) {
