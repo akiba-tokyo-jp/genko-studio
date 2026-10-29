@@ -106,12 +106,17 @@ ShapedParagraph shape_paragraph(std::u32string_view text, const std::vector<Look
         run.level = levels[start];
         const Look& look = looks[run.look];
         run.scale_x = look.shape.scale_x;
-        std::u32string part(text.substr(start, i - start));
+        // (the run shaped in its paragraph: HarfBuzz sees the letters around it — an Arabic word changing colour or size
+        // mid-word stays joined, review P3-5; all caps: the paragraph with the run's letters in capitals)
+        std::u32string capitals;
         if (look.all_caps) {
-            for (char32_t& c : part) c = static_cast<char32_t>(QChar::toUpper(static_cast<char32_t>(c)));
+            capitals.assign(text);
+            for (std::size_t k = start; k < i; ++k) capitals[k] = static_cast<char32_t>(QChar::toUpper(static_cast<char32_t>(capitals[k])));
         }
         ShapeRequest request;
-        request.text = utf8(part);
+        request.context = look.all_caps ? std::u32string_view(capitals) : text;
+        request.context_start = start;
+        request.context_length = i - start;
         request.font = look.font;
         request.size_px = static_cast<double>(look.size);
         request.direction = (run.level & 1) != 0 ? "rtl" : "ltr";
@@ -120,6 +125,10 @@ ShapedParagraph shape_paragraph(std::u32string_view text, const std::vector<Look
         request.variations = look.variations;
         request.script = scripts[start];
         run.glyphs = shape(request);
+        const bool rtl = (run.level & 1) != 0;
+        for (std::size_t k = 1; k < run.glyphs.size() && run.monotone; ++k) {
+            run.monotone = rtl ? run.glyphs[k].cluster <= run.glyphs[k - 1].cluster : run.glyphs[k].cluster >= run.glyphs[k - 1].cluster;
+        }
         for (ShapedGlyph& g : run.glyphs) {
             g.cluster += static_cast<std::uint32_t>(start);
             const std::size_t c = std::min<std::size_t>(g.cluster, text.size() - 1);
@@ -137,6 +146,25 @@ ShapedParagraph shape_paragraph(std::u32string_view text, const std::vector<Look
     return out;
 }
 
+namespace {
+
+// The glyphs of a run whose clusters are in [from, to): their first and their end in its glyphs — found by halving where
+// the clusters are monotone, else the run's all (each told by its cluster).
+std::pair<std::size_t, std::size_t> glyphs_between(const ShapedRun& run, std::size_t from, std::size_t to) {
+    const std::vector<ShapedGlyph>& g = run.glyphs;
+    if (!run.monotone) return {0, g.size()};
+    if ((run.level & 1) == 0) {
+        const auto b = std::partition_point(g.begin(), g.end(), [&](const ShapedGlyph& x) { return x.cluster < from; });
+        const auto e = std::partition_point(b, g.end(), [&](const ShapedGlyph& x) { return x.cluster < to; });
+        return {static_cast<std::size_t>(b - g.begin()), static_cast<std::size_t>(e - g.begin())};
+    }
+    const auto b = std::partition_point(g.begin(), g.end(), [&](const ShapedGlyph& x) { return x.cluster >= to; });
+    const auto e = std::partition_point(b, g.end(), [&](const ShapedGlyph& x) { return x.cluster >= from; });
+    return {static_cast<std::size_t>(b - g.begin()), static_cast<std::size_t>(e - g.begin())};
+}
+
+}  // namespace
+
 RowGlyphs row_glyphs(const ShapedParagraph& paragraph, std::size_t start, std::size_t end, double extra) {
     RowGlyphs out;
     end = std::min(end, paragraph.advance.size());
@@ -145,14 +173,18 @@ RowGlyphs row_glyphs(const ShapedParagraph& paragraph, std::size_t start, std::s
     std::vector<bool> seen(end - start, false);
     double x = 0.0;
     for (const BidiParagraph::Run& visual : paragraph.bidi.visual_runs(start, end)) {
+        // (the runs over the visual run: the paragraph's runs are in its order, end to end — found by halving, review P2-5)
         std::vector<const ShapedRun*> runs;
-        for (const ShapedRun& r : paragraph.runs) {
-            if (r.end > visual.start && r.start < visual.end) runs.push_back(&r);
+        const auto first = std::partition_point(paragraph.runs.begin(), paragraph.runs.end(), [&](const ShapedRun& r) { return r.end <= visual.start; });
+        for (auto r = first; r != paragraph.runs.end() && r->start < visual.end; ++r) {
+            if (r->end > visual.start) runs.push_back(&*r);
         }
         if ((visual.level & 1) != 0) std::reverse(runs.begin(), runs.end());
         for (const ShapedRun* r : runs) {
             std::optional<std::size_t> current;
-            for (const ShapedGlyph& g : r->glyphs) {
+            const auto [from, to] = glyphs_between(*r, visual.start, visual.end);
+            for (std::size_t k = from; k < to; ++k) {
+                const ShapedGlyph& g = r->glyphs[k];
                 if (g.cluster < visual.start || g.cluster >= visual.end) continue;
                 if (current && *current != g.cluster) {  // (a cluster done: its tracking, and a justified row's share)
                     x += paragraph.tracking[*current] + extra;

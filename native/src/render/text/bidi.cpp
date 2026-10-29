@@ -23,6 +23,12 @@ struct BidiParagraph::State {
 BidiParagraph::BidiParagraph(std::u32string text, std::string_view direction) : state_(std::make_unique<State>()) {
     State& s = *state_;
     s.text = std::move(text);
+    // (a paragraph separator of Unicode's — U+2029, CR, NEL, U+001C..U+001E: class B — would end SheenBidi's paragraph
+    // early; the typesetting splits its paragraphs at them, and any left — a CR before a line break — is read as a space,
+    // which the rule L1 sets at the paragraph's level as it would the separator: review P2-4)
+    for (char32_t& c : s.text) {
+        if (c == U'\r' || c == U'\u2029' || c == U'\u0085' || (c >= 0x1C && c <= 0x1E) || c == U'\n') c = U' ';
+    }
     levels_.assign(s.text.size(), 0);
     if (s.text.empty()) {
         base_ = direction == "rtl" ? 1 : 0;
@@ -61,7 +67,10 @@ std::vector<BidiParagraph::Run> BidiParagraph::visual_runs(std::size_t start, st
         return out;
     }
     SBLineRef line = SBParagraphCreateLine(s.paragraph, static_cast<SBUInteger>(start), static_cast<SBUInteger>(end - start));
-    if (line == nullptr) throw core::Error("memory", "the bidirectional order could not be found");
+    if (line == nullptr) {  // (a row SheenBidi does not hold: one run at the paragraph's level, never a failure)
+        out.push_back(Run{start, end, base_});
+        return out;
+    }
     const SBUInteger count = SBLineGetRunCount(line);
     const SBRun* runs = SBLineGetRunsPtr(line);
     for (SBUInteger i = 0; i < count; ++i) {

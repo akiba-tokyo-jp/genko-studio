@@ -107,6 +107,34 @@ Json runs_with(const Json& runs, std::int64_t start, std::int64_t end, const Jso
     return joined;
 }
 
+// Genko's words set larger, bolder or in a colour (style_runs) written as ranges, the first time a character attribute is
+// set (on a range or the whole: the whole's then takes the words' own away as a range's, review P3-2): the lettering reads
+// the ranges from then on. A word found keeps its place in style_runs with its 縦中横 alone (the lettering's 縦中横 is
+// chosen word by word — review P2-2 —, each word found from where the one before it was); a word not found in the text is
+// kept whole (it takes effect where the text comes to hold it, as before).
+void words_to_runs(StoryLine& record, Json& nt) {
+    if (nt.contains("runs") || record.style_runs.empty()) return;
+    std::vector<std::size_t> taken;
+    nt["runs"] = core::type_text::runs_from_style_runs(record, &taken);
+    std::vector<bool> found(record.style_runs.size(), false);
+    for (const std::size_t i : taken) found[i] = true;
+    bool keeps = false;
+    for (std::size_t i = 0; i < record.style_runs.size(); ++i) {
+        Json& style = record.style_runs[i].second;
+        if (!found[i]) {
+            keeps = true;
+            continue;
+        }
+        Json left = Json::object();
+        if (style.is_object() && style.contains("tcy") && !style["tcy"].is_null()) {
+            left["tcy"] = style["tcy"];
+            keeps = true;
+        }
+        style = std::move(left);
+    }
+    if (!keeps) record.style_runs.clear();
+}
+
 // The paragraphs a range of graphemes [start, end) touches (an empty range: the one it is in).
 std::vector<std::int64_t> paragraphs_of(const std::string& text, std::int64_t start, std::int64_t end) {
     std::vector<std::int64_t> out;
@@ -151,6 +179,7 @@ void set_type(core::OpContext& c) {
     check(chars, true);
     check(paras, false);
     StoryLine record = t.line != nullptr ? *t.line : *doc.page(t.page).layers[t.layer].type;
+    bounded_text(record.text);  // (a text the OpenType typesetting sets: kMaxTypeText at most, review P2-5)
     const std::int64_t n = core::ruby::count(record.text);
     std::optional<std::pair<std::int64_t, std::int64_t>> range;
     if (const Json* r = core::get(c.op, "range"); r != nullptr && !r->is_null()) {
@@ -162,6 +191,7 @@ void set_type(core::OpContext& c) {
         range = std::make_pair(s, e);
     }
     Json nt = record.native_type ? *record.native_type : Json::object();
+    if (!chars.empty()) words_to_runs(record, nt);
     if (!range || (range->first == 0 && range->second == n)) {  // (the whole text: its own, every range's and paragraph's own of these taken away)
         if (!chars.empty()) {
             Json own = nt.value("char", Json::object());
@@ -185,12 +215,6 @@ void set_type(core::OpContext& c) {
         }
     } else {
         if (!chars.empty()) {
-            // (Genko's words set larger, bolder or in a colour — style_runs — become ranges the first time a range is set:
-            // the lettering then reads the ranges alone)
-            if (!nt.contains("runs") && !record.style_runs.empty()) {
-                nt["runs"] = core::type_text::runs_from_style_runs(record);
-                record.style_runs.clear();
-            }
             nt["runs"] = runs_with(nt.value("runs", Json::array()), range->first, range->second, chars);
         }
         if (!paras.empty()) {
@@ -213,6 +237,7 @@ void set_type(core::OpContext& c) {
     nt["shaping"] = "opentype";
     set_native_type(record, nt);
     fit_point_text(record, doc);
+    measure(record, doc);  // (a line in its balloon too: one too large to set is refused, review P1-1)
     if (t.line != nullptr) {
         t.line->native_type = record.native_type;
         t.line->style_runs = record.style_runs;

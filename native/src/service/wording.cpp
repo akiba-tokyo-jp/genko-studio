@@ -1216,6 +1216,7 @@ const std::vector<Rule>& rules() {
         // (PC5 G-b: set_type — the character and paragraph attributes on the whole text or a range)
         r.push_back(rule("unknown attribute \\S+ \\(a character or paragraph attribute of TEXT-02\\)", "文字・段落の属性の名前が正しくありません"));
         r.push_back(rule("set_type sets a character or paragraph attribute.*", "変える文字・段落の属性を指定します"));
+        r.push_back(rule(R"(the text is too long to set \((\d+) letters at most\))", "文字が長すぎて組めません（\\1 文字まで）"));
         r.push_back(rule(R"(range is \[start, end\] \(graphemes\))", "範囲は [始まり, 終わり]（文字の数）で指定します"));
         r.push_back(rule(R"(range must lie in the text.*\(0\.\.(\d+) graphemes\))", "範囲が本文の外か、終わりが始まりより前です（0〜\\1 文字）"));
         r.push_back(rule("an empty range takes paragraph attributes only", "空の範囲には段落の属性だけを指定できます"));

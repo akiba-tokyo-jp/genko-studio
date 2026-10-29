@@ -298,8 +298,8 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
             letters_from.push_back(i < from.size() ? from[i] : std::u32string::npos);
         }
         attrs = resolve(line, letters, letters_from, TypeStyles::current()).chars;
-        const double px_mm = static_cast<double>(dpi) / 25.4;
-        const double base_mm = float_or(at(st, "size_mm"), static_cast<double>(em) / px_mm);
+        // (a letter's size_mm against the line's own size — its style's, else the lines' 5 mm — as across: review P3-12)
+        const double base_mm = float_or(at(st, "size_mm"), kCapMm);
         const std::vector<Json> words = char_styles(letters, line.style_runs, Json());
         for (std::size_t k = 0; k < attrs.size(); ++k) {
             const Json& a = attrs[k];
@@ -311,8 +311,10 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
             if (std::fabs(scale - 1.0) > 1e-9) look["scale"] = scale;
             const Json& faux = at(a, "faux_bold");
             const int level = faux == Json("heavy") ? 2 : faux == Json("bold") ? 1 : 0;
-            const int word_level = k < words.size() ? weight_level(at(words[k], "bold")) : 0;
-            if (level > word_level && level > args.bold) look["bold"] = level;
+            // (the weight: a word's own where Genko's words say it, else the record's resolved one — which holds the line's:
+            // a letter set normal in a bold line drawn normal, as across; review P3-1)
+            const bool word_bold = k < words.size() && words[k].is_object() && words[k].contains("bold");
+            if (!word_bold && level != args.bold) look["bold"] = level;
             if (at(a, "rgb").is_array() && !(k < words.size() && core::py_truthy(at(words[k], "rgb")))) look["rgb"] = at(a, "rgb");
             args.looks.push_back(std::move(look));
         }
@@ -641,6 +643,7 @@ OpenTypeRows opentype_rows(const OpenTypeIn& q) {
             spans.emplace_back(row_start, n);
         }
         for (std::size_t r = 0; r < spans.size(); ++r) {
+            if ((r & 63) == 63 && q.fonts.stop().stop_requested()) throw Cancelled();  // (a long paragraph's rows: review P2-5)
             Row row;
             row.para = paras.size();
             row.start = spans[r].first;

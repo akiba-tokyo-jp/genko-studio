@@ -67,7 +67,15 @@ std::vector<ShapedGlyph> shape(const ShapeRequest& request) {
     for (const auto& [tag, value] : request.variations) axes.push_back(hb_variation_t{tag_of(tag), value});
     if (!axes.empty()) hb_font_set_variations(font, axes.data(), static_cast<unsigned>(axes.size()));
     hb_buffer_t* buffer = hb_buffer_create();
-    hb_buffer_add_utf8(buffer, request.text.data(), static_cast<int>(request.text.size()), 0, -1);
+    const bool in_context = !request.context.empty();
+    const std::size_t item_start = in_context ? std::min(request.context_start, request.context.size()) : 0;
+    if (in_context) {
+        const std::size_t length = std::min(request.context_length, request.context.size() - item_start);
+        hb_buffer_add_utf32(buffer, reinterpret_cast<const std::uint32_t*>(request.context.data()), static_cast<int>(request.context.size()),
+                            static_cast<unsigned>(item_start), static_cast<int>(length));
+    } else {
+        hb_buffer_add_utf8(buffer, request.text.data(), static_cast<int>(request.text.size()), 0, -1);
+    }
     hb_buffer_set_cluster_level(buffer, HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS);
     if (request.direction == "ltr") hb_buffer_set_direction(buffer, HB_DIRECTION_LTR);
     else if (request.direction == "rtl") hb_buffer_set_direction(buffer, HB_DIRECTION_RTL);
@@ -83,20 +91,21 @@ std::vector<ShapedGlyph> shape(const ShapeRequest& request) {
     unsigned count = 0;
     const hb_glyph_info_t* info = hb_buffer_get_glyph_infos(buffer, &count);
     const hb_glyph_position_t* pos = hb_buffer_get_glyph_positions(buffer, &count);
-    // (clusters are byte offsets of the UTF-8 text: told as code points)
-    std::vector<std::uint32_t> code_point_at(request.text.size() + 1, 0);
+    // (clusters are byte offsets of the UTF-8 text: told as code points; of a context, its code points: from the run's first)
+    std::vector<std::uint32_t> code_point_at(in_context ? 0 : request.text.size() + 1, 0);
     std::uint32_t n = 0;
-    for (std::size_t i = 0; i < request.text.size(); ++i) {
+    for (std::size_t i = 0; !in_context && i < request.text.size(); ++i) {
         const bool lead = (static_cast<unsigned char>(request.text[i]) & 0xC0) != 0x80;
         code_point_at[i] = lead ? n++ : (n > 0 ? n - 1 : 0);
     }
-    code_point_at[request.text.size()] = n;
+    if (!in_context) code_point_at[request.text.size()] = n;
     std::vector<ShapedGlyph> out;
     out.reserve(count);
     for (unsigned i = 0; i < count; ++i) {
         ShapedGlyph g;
         g.glyph = info[i].codepoint;
-        g.cluster = code_point_at[std::min<std::size_t>(info[i].cluster, request.text.size())];
+        g.cluster = in_context ? static_cast<std::uint32_t>(info[i].cluster - std::min<std::size_t>(info[i].cluster, item_start))
+                               : code_point_at[std::min<std::size_t>(info[i].cluster, request.text.size())];
         g.x_advance = pos[i].x_advance / 64.0;
         g.y_advance = pos[i].y_advance / 64.0;
         g.x_offset = pos[i].x_offset / 64.0;

@@ -42,11 +42,19 @@ const Json* given(const Json& op, std::string_view key) {
     return v == nullptr || v->is_null() ? nullptr : v;
 }
 
-// A text an op gives (a str, not empty).
+// A type layer's text, or a line's set by the OpenType typesetting, at most kMaxTypeText graphemes (review P2-5: a pasted
+// book is refused, not set row by row on the window's thread). OpError past it.
+std::string bounded(std::string text) {
+    if (text.size() > type_ops::kMaxTypeText && core::ruby::count(text) > static_cast<std::int64_t>(type_ops::kMaxTypeText))
+        throw OpError("the text is too long to set (" + std::to_string(type_ops::kMaxTypeText) + " letters at most)");
+    return text;
+}
+
+// A text an op gives (a str, not empty, not too long).
 std::string text_at(const Json& value, std::string_view what) {
     if (!value.is_string()) throw OpError(std::string(what) + " must be a string");
     if (value.get_ref<const std::string&>().empty()) throw OpError("text must not be empty");
-    return value.get<std::string>();
+    return bounded(value.get<std::string>());
 }
 
 double round2(double v) { return core::py_round(v, 2); }
@@ -284,14 +292,14 @@ std::optional<std::string> new_text(const std::string& before, const Json& op) {
         if (!words.is_string()) throw OpError("replace text must be a string");
         std::string out = core::ruby::slice(before, 0, start) + words.get<std::string>() + core::ruby::slice(before, end, n);
         if (out.empty()) throw OpError("text must not be empty");
-        return out;
+        return bounded(std::move(out));
     }
     if (insert != nullptr) {
         if (!insert->is_object()) throw OpError("insert is {at, text}");
         const std::int64_t at = place(core::get_or(*insert, "at", Json()), "insert at");
         const Json words = core::get_or(*insert, "text", Json());
         if (!words.is_string() || words.get_ref<const std::string&>().empty()) throw OpError("insert text must be a string, not empty");
-        return core::ruby::slice(before, 0, at) + words.get<std::string>() + core::ruby::slice(before, at, n);
+        return bounded(core::ruby::slice(before, 0, at) + words.get<std::string>() + core::ruby::slice(before, at, n));
     }
     return std::nullopt;
 }
@@ -794,6 +802,10 @@ TypeTarget target(core::Document& doc, const core::Json& op, bool edit) {
 void set_native_type(core::StoryLine& record, const core::Json& raw) { set_native(record, raw); }
 
 void fit_point_text(core::StoryLine& record, const core::Document& doc) { fit_point(record, doc); }
+void bounded_text(const std::string& text) { (void)bounded(text); }
+void measure(const core::StoryLine& record, const core::Document& doc) {
+    if (text::shape_of(record).empty()) (void)placed(record, doc);
+}
 
 }  // namespace type_ops
 

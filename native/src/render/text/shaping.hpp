@@ -43,6 +43,12 @@ struct ShapeRequest {
     std::vector<std::pair<std::string, std::uint32_t>> features;
     std::vector<std::pair<std::string, float>> variations;
     std::string script;  // (PC5 G-b: an ISO 15924 tag, "Arab", …; "" from the text — render/text/bidi's scripts_of)
+    // (PC5 G-b: the run as a part of its paragraph — `context` the paragraph's letters, the run its [context_start,
+    // context_start + context_length) —: HarfBuzz sees the letters around it, an Arabic word's joining across a change of
+    // its colour or size kept; `text` is then not read, and the glyphs' clusters count from the run's first letter)
+    std::u32string_view context;
+    std::size_t context_start = 0;
+    std::size_t context_length = 0;
 };
 
 // The glyphs of the run, in the order they are drawn. core::Error("value") for a size that is not above 0 or a tag that is

@@ -89,6 +89,8 @@ struct ShapedRun {
     std::uint8_t level = 0;
     double scale_x = 1.0;  // (its look's width: its glyphs' advances and offsets scaled so)
     std::vector<ShapedGlyph> glyphs;  // (in the order they are drawn; clusters: letters of the paragraph)
+    bool monotone = true;  // (its glyphs' clusters rise — fall, right to left — as HarfBuzz's monotone clusters promise:
+                           // a row's glyphs are found by halving; review P2-5)
 };
 struct ShapedParagraph {
     std::vector<ShapedRun> runs;

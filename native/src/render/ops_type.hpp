@@ -44,6 +44,13 @@ TypeTarget target(core::Document& doc, const core::Json& op, bool edit);
 void set_native_type(core::StoryLine& record, const core::Json& raw);
 // A point text's box kept round its letters as set now (nothing for other records).
 void fit_point_text(core::StoryLine& record, const core::Document& doc);
+// A type layer's text, or a line's set by the OpenType typesetting: at most this many graphemes (review P2-5) —
+// bounded_text's core::OpError past it.
+inline constexpr std::size_t kMaxTypeText = 100000;
+void bounded_text(const std::string& text);
+// A record without a shape (a line in its balloon) set as it is at 300 dpi — fit_point_text sets a point or box text —, or
+// core::OpError where its picture would be too large (review P1-1).
+void measure(const core::StoryLine& record, const core::Document& doc);
 // set_type {line | page + layer_id, range? [start, end] (graphemes), char? {…}, para? {…}, any character or paragraph
 // attribute by its name (core::type_text's tables), size_pt?} → {}: the attributes given (null: the record's own taken
 // away) on the whole text — every range's own of them taken away, as Photoshop sets what is chosen — or on the range (its
