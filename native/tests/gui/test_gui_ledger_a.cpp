@@ -878,6 +878,8 @@ private slots:
         const QStringList edit = texts(b.menu(QStringLiteral("編集")));
         QVERIFY(edit.contains(QStringLiteral("すべてを選択")) && edit.contains(QStringLiteral("消去")));
         QVERIFY(texts(b.menu(QStringLiteral("レイヤー"))).contains(QStringLiteral("レイヤーマスク")));
+        // (PC5 G-0: 書式 with the type commands this build has, as Photoshop names them)
+        QCOMPARE(texts(b.menu(QStringLiteral("書式"))), (QStringList{QStringLiteral("作業用パスを作成"), QStringLiteral("シェイプに変換"), QString(), QStringLiteral("ワープテキスト…")}));
         QVERIFY(texts(submenu(b.menu(QStringLiteral("ページ")), QStringLiteral("台詞"))).contains(QStringLiteral("フキダシの形")));
         QMenu* tools = b.menu(QStringLiteral("ツール"));
         QVERIFY(texts(submenu(tools, QStringLiteral("定規"))).contains(QStringLiteral("直線定規")));
