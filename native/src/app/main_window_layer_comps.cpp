@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QDockWidget>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPlainTextEdit>
 #include <QSignalBlocker>
 #include <QCheckBox>

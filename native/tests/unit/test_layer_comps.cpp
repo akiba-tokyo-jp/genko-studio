@@ -273,6 +273,8 @@ private slots:
         QCOMPARE(comps(doc).last_applied, std::optional<std::int64_t>(3));
         // one property updated: One's visibility follows the page again, its places as recorded
         doc = run(doc, move("a", 1, 0));
+        QVERIFY(layer_of(doc, "b").visible);  // (Three — One's copy — shows it)
+        doc = run(doc, Json{{"op", "set_layer"}, {"page", 1}, {"id", "b"}, {"visible", false}});
         doc = run(doc, op("update_layer_comp", {{"comp", 1}, {"what", "visibility"}}));
         const auto& one = comps(doc).comps[0];
         for (const auto& s : one.layers) {

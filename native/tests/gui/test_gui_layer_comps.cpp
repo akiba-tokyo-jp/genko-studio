@@ -12,6 +12,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QMenuBar>
 #include <QPlainTextEdit>
 #include <QTemporaryDir>
 #include <QToolButton>
@@ -171,7 +172,7 @@ private slots:
             return int(QDialog::Accepted);
         };
         b.menu_item(QStringLiteral("新規レイヤーカンプ…"))->trigger();
-        QCOMPARE(offered, QStringLiteral("レイヤーカンプ 2"));
+        QCOMPARE(offered, QStringLiteral("レイヤーカンプ 1"));  // (the first free: 1 was renamed 表紙)
         QCOMPARE(b.comps(), std::size_t(4));
         // a layer gone: ⚠; the warnings cleared
         QVERIFY(b.apply(Json{{"op", "delete_layer"}, {"page", 1}, {"id", "pen"}}));

@@ -90,22 +90,10 @@ core::Document book() {
     return doc;
 }
 
-const core::Layer& layer_of(const core::Document& doc, std::string_view id) {
-    for (const core::Layer& layer : doc.page(0).layers)
-        if (layer.id == id) return layer;
-    throw std::runtime_error("no layer " + std::string(id));
-}
-
 const core::Layer* titled(const core::Document& doc, std::string_view title) {
     for (const core::Layer& layer : doc.page(0).layers)
         if (layer.title == title) return &layer;
     return nullptr;
-}
-
-std::array<long, 2> at(const core::Document& doc, const std::string& id) {
-    const auto box = lb::of_layer(doc, doc.page(0), id);
-    if (!box) return {-1, -1};
-    return {std::lround((*box)[0] / kPx), std::lround((*box)[1] / kPx)};
 }
 
 Json move(const std::string& id, double dx_px, double dy_px) {
@@ -125,6 +113,8 @@ core::Document two_comps() {
     doc = run(doc, move("pic", 10, 0));
     doc = run(doc, Json{{"op", "set_layer"}, {"page", 1}, {"id", "pic"}, {"visible", false}});
     doc = run(doc, op("new_layer_comp", {{"name", "B"}, {"appearance", false}}));
+    // (shown again, as the PSD writes the layers shown: B still records it hidden)
+    doc = run(doc, Json{{"op", "set_layer"}, {"page", 1}, {"id", "pic"}, {"visible", true}});
     return doc;
 }
 
@@ -306,7 +296,7 @@ private slots:
         // (applying A there: shown, back 10 px to the left)
         const auto pic_at = [&](const core::Document& d) {
             const auto box = lb::of_layer(d, d.page(0), titled(d, "pic")->id);
-            return std::lround((*box)[0] / lb::grid(d.page(0))[0]);
+            return std::lround((*box)[0] * lb::grid(d.page(0))[0]);
         };
         const long now_x = pic_at(back);
         const core::Document applied = run(back, op("apply_layer_comp", {{"comp", "A"}}));
@@ -333,7 +323,7 @@ private slots:
         for (const Json& l : comps_view(moved_psd)["layers"])
             if (l["name"] == Json("pic")) QCOMPARE(l["cmls"]["layerSettings"][0]["Ofst"]["Hrzn"], Json(-15));
         // a layer they name deleted: the comps kept, 1065 written
-        const core::Document deleted = run(back, Json{{"op", "delete_layer"}, {"page", 1}, {"id", titled(back, "pen")->id}});
+        const core::Document deleted = run(back, Json{{"op", "delete_layer"}, {"page", 1}, {"id", titled(back, "pic")->id}});
         const QString deleted_psd = path(QStringLiteral("deleted.psd"));
         (void)formats::export_page_psd(deleted, deleted.page(0), fs::path(deleted_psd.toStdString()), 200);
         QVERIFY(blocks_of(deleted_psd).contains("1065"));
