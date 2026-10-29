@@ -185,7 +185,7 @@ Json as_python_folders(Json value) {
     if (value.is_array()) {
         for (Json& item : value) item = as_python_folders(std::move(item));
     } else if (value.is_object()) {
-        if (value.value("kind", Json()) == Json("folder") && value.value("group", Json()) == Json(true)) {
+        if (value.value("kind", Json()) == Json("folder")) {  // (the reply's snapshot holds no mark: every folder)
             value.erase("group");
             if (value.value("blend", Json()) == Json("pass_through")) value["blend"] = "normal";
             value.erase("mask");
@@ -232,7 +232,9 @@ std::string corrections_more(const Json& own_read, const Json& python_view, cons
         if (!why.empty()) return why;
         more += static_cast<int>(extra.size());
     }
-    return more > 0 ? std::string() : "the replies differ: " + genko::core::dump_python(own).substr(0, 600);
+    std::string where;
+    (void)genko::test::strict_equal(own, python_view, &where);
+    return more > 0 ? std::string() : "the replies differ (" + where.substr(0, 600) + "): " + genko::core::dump_python(own).substr(0, 300);
 }
 
 // The harness's psd_images record of `data` (Pillow's Image.open, then load()): what render::psd_image_size refuses

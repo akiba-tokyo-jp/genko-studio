@@ -389,7 +389,9 @@ private slots:
         // — theirs (test_gui_styles).
         // and the 11 of PC5 H-0 (SPEC VIEW-01) — 編集 → キーボードショートカット… and 環境設定 ▸'s panes with a page
         // (act_keyboard_shortcuts, act_prefs_<pane>; 一般… is act_prefs) — theKeySets and theMenusOfPC5 below.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{595});
+        // and the 1 of PC5 I-b (SPEC AUTO-01「グループ」) — レイヤー → 新規 → レイヤーからのフレーム… (act_layer_frame) —
+        // test_gui_layers.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{596});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
