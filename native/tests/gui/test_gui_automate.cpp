@@ -371,8 +371,12 @@ private slots:
     // ほかを閉じる: ドキュメントを閉じる raised once at the end — not once a book closed on the book kept (the review's P2-4).
     void closeOthersRaisesOnce() {
         Book b;
-        b.open_picture(40, 20);
-        b.open_picture(30, 20);
+        // (pictures opened from files, unchanged: closed without asking)
+        for (const char* name : {"a.png", "b.png"}) {
+            picture(b.root / name, 40, 20);
+            b.window->add_picture_book(formats::open_file(storage::read_file(b.root / name), name).doc, {}, b.root / name);
+            for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        }
         QVERIFY(!app::actions::store(QStringLiteral("閉"), Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"name", "閉"}, {"id", "c"}}})));
         events::Table table;
         table.enabled = true;
