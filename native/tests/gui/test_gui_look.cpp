@@ -228,9 +228,9 @@ private slots:
         QCoreApplication::processEvents();
         for (QDockWidget* d : shown) QVERIFY(d->isVisible());
         QVERIFY(!book.window->canvas_only()->on());
-        // (at the top of the window menu)
+        // (in the window menu after アレンジ ▸ and ワークスペース ▸ and a line — PC5 H-0, 節 H 5.2: Photoshop's first)
         for (QAction* top : book.window->menuBar()->actions()) {
-            if (top->text() == QStringLiteral("ウィンドウ")) QCOMPARE(top->menu()->actions().front(), only);
+            if (top->text() == QStringLiteral("ウィンドウ")) QCOMPARE(top->menu()->actions().value(3), only);
         }
     }
 
