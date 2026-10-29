@@ -46,6 +46,7 @@
 #include "render/text/balloons.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
+#include "render/text/opentype.hpp"
 #include "render/tones.hpp"
 #include "render/vector_masks.hpp"
 #include "storage/asset_store.hpp"
@@ -1124,6 +1125,7 @@ void rasterize_lines(OpContext& c) {
     core::Bytes inks;
     {
         const text::TextGamma gamma(doc.text_gamma);
+        const text::TypeStyles type_styles(doc.type_styles ? &*doc.type_styles : nullptr);  // (PC5 G-b review P3-9: the book's styles)
         if (page.color) {  // (a page of inks: taken in as it takes in the lines it draws, by its rules)
             InkCanvas canvas(*page.color, size);
             canvas.draw_8bit(draw);

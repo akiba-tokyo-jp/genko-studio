@@ -30,10 +30,23 @@ struct Face {
     }
 };
 
-std::shared_ptr<const Face> face_of(const std::string& font, unsigned index) {
+// `keep`: kept among the few faces read last (shaping reads a face again and again); else read for this caller alone — a
+// list of every font read once (review P3-7: their bytes not held after it).
+std::shared_ptr<const Face> face_of(const std::string& font, unsigned index, bool keep = true) {
     static std::mutex mutex;
     static std::map<std::pair<std::string, unsigned>, std::shared_ptr<const Face>> cache;
     const auto key = std::make_pair(font, index);
+    if (!keep) {
+        {
+            const std::lock_guard<std::mutex> lock(mutex);
+            if (const auto it = cache.find(key); it != cache.end()) return it->second;
+        }
+        auto made = std::make_shared<Face>();
+        made->bytes = font_bytes(font);
+        made->blob = hb_blob_create(made->bytes->constData(), static_cast<unsigned>(made->bytes->size()), HB_MEMORY_MODE_READONLY, nullptr, nullptr);
+        made->face = hb_face_create(made->blob, index);
+        return made;
+    }
     {
         const std::lock_guard<std::mutex> lock(mutex);
         if (const auto it = cache.find(key); it != cache.end()) return it->second;
@@ -143,8 +156,8 @@ std::string tag_name(hb_tag_t tag) {
 
 }  // namespace
 
-FontInfo font_info(const std::string& font, unsigned face_index) {
-    const std::shared_ptr<const Face> held = face_of(font, face_index);
+FontInfo font_info(const std::string& font, unsigned face_index, bool keep) {
+    const std::shared_ptr<const Face> held = face_of(font, face_index, keep);
     hb_face_t* face = held->face;
     FontInfo out;
     out.family = name_of(face, HB_OT_NAME_ID_TYPOGRAPHIC_FAMILY);

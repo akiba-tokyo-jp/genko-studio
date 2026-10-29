@@ -77,6 +77,7 @@ struct FontInfo {
     std::vector<std::string> features;
     unsigned faces = 1;
 };
-FontInfo font_info(const std::string& font, unsigned face_index = 0);
+// `keep` false: the font read for this call alone, not kept with those shaping reads (a list of every font: review P3-7).
+FontInfo font_info(const std::string& font, unsigned face_index = 0, bool keep = true);
 
 }  // namespace genko::render::text

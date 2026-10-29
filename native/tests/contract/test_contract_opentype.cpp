@@ -408,8 +408,27 @@ private slots:
             QVERIFY(first["styles"][0].contains("japanese"));
         }
         QVERIFY(QFile::exists(config.filePath(QStringLiteral("type_fonts.json"))));  // (looked for once)
+        {  // (kept with the fonts' signature: looked for again when they change — review P3-6)
+            QFile kept(config.filePath(QStringLiteral("type_fonts.json")));
+            QVERIFY(kept.open(QIODevice::ReadOnly));
+            const Json saved = Json::parse(kept.readAll().toStdString());
+            QVERIFY(saved["signature"].is_string());
+            QCOMPARE(saved["families"], families);
+        }
         const Json listed = service::briefs::fonts_list();
         QVERIFY(listed.contains("bundled") && listed.contains("system") && listed.contains("families"));
+        // a list kept in another shape (an object, a number): looked for again, never handed out
+        QTemporaryDir broken;
+        for (const char* text : {"{}", "7", "[1, 2]"}) {
+            QFile bad(broken.filePath(QStringLiteral("type_fonts.json")));
+            QVERIFY(bad.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            bad.write(text);
+            bad.close();
+            qputenv("GENKO_CONFIG_DIR", broken.path().toUtf8());
+            QCOMPARE(service::briefs::type_fonts(), families);
+            qputenv("GENKO_CONFIG_DIR", config.path().toUtf8());  // (another folder between: the run's list not reused)
+            QCOMPARE(service::briefs::type_fonts(), families);
+        }
         qunsetenv("GENKO_CONFIG_DIR");
     }
 
