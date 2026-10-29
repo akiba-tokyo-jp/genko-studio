@@ -1162,6 +1162,30 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("line or layer_id names the text.*|line \\(a line's id\\) or page and layer_id.*",
                          "台詞（line）かテキストレイヤー（page と layer_id）を一つ指定します"));
         r.push_back(rule("a type layer moves whole: transform it without a selection", "テキストレイヤーは選択範囲なしで変形します"));
+        // (PC5 G-a: point and box text, the edits in graphemes, a line and a type layer each other's)
+        r.push_back(rule(R"(point \[x, y\] or box \[x, y, w, h\] \(mm\) is required)", "文字を置く点（point）か枠（box）が要ります"));
+        r.push_back(rule("point or box shapes the text, not both", "ポイントテキスト（point）と段落テキスト（box）は、どちらか一つを指定します"));
+        r.push_back(rule(R"(\S+ \[x, y\] \(mm\) places a point text)", "点は [x, y]（mm）で指定します"));
+        r.push_back(rule(R"(\S+ \[x, y, w, h\] \(mm\) places a box text)", "枠は [x, y, w, h]（mm）で指定します"));
+        r.push_back(rule("a text in a balloon is set in it.*", "フキダシに入った文字は、ポイントテキスト・段落テキストにできません（先にフキダシを「なし」にします）"));
+        r.push_back(rule("text, replace or insert edits the text, one of them", "文字の直し方（text・replace・insert）は一つだけ指定します"));
+        r.push_back(rule(R"(.* must be within the text \(0\.\.(\d+) graphemes\))", "文字の位置が本文の外です（0〜\\1 文字）"));
+        r.push_back(rule(R"(.* must be a whole number \(graphemes\))", "文字の位置は整数（文字の数）で指定します"));
+        r.push_back(rule("replace end must not be before its start", "置き換える範囲の終わりが始まりより前です"));
+        r.push_back(rule(R"((?:replace is \{start, end, text\}|insert is \{at, text\}|replace text must be a string|insert text must be a string, not empty))",
+                         "文字の置き換え・挿入の指定が正しくありません"));
+        r.push_back(rule("anchor moves a point text's anchor.*", "基準点を動かせるのはポイントテキストだけです"));
+        r.push_back(rule("antialias must be one of .*", "アンチエイリアスは なし・シャープ・鮮明・強く・滑らかに・Windows LCD・Windows のどれかです"));
+        r.push_back(rule("(?:a line stays upright.*|the line \\S+ stays upright.*)", "台詞は回転・拡大・ゆがみができません（テキストレイヤーにしてから変形します）"));
+        r.push_back(rule("a type layer turned, scaled or slanted stays a type layer.*", "回転・拡大・ゆがみをかけたテキストレイヤーは台詞にできません（先に変形を外します）"));
+        r.push_back(rule("a type layer is bent by .*", "テキストレイヤーはワープテキストで曲げます（ほかの曲げ方はスマートオブジェクトにしてから）"));
+        r.push_back(rule("size_pt or style.size_mm sizes the text, not both", "文字の大きさは pt か mm のどちらかで指定します"));
+        r.push_back(rule("size_pt must be above 0 and at most 1296", "文字の大きさは 0 より大きく 1296 pt までです"));
+        r.push_back(rule("parent must be a folder of the page", "入れる先は、このページのフォルダーを指定します"));
+        r.push_back(rule("edit_type changes .*", "直す中身（文字・形・向き・アンチエイリアス・変形・名前）を指定します"));
+        r.push_back(rule("title names a type layer: a line has none", "名前はテキストレイヤーにだけ付けられます"));
+        r.push_back(rule("the type layer is too large to turn at this resolution", "テキストレイヤーが大きすぎて、この解像度では回して描けません"));
+        r.push_back(rule("page and layer_id name the type layer|line \\(a line's id\\) names the line", "台詞（line）かテキストレイヤー（page と layer_id）を指定します"));
         r.push_back(rule("a type layer turned, scaled or bent is not in this build yet",
                          "テキストレイヤーの回転・拡大・縮小・ゆがみは、この版の Genko ではまだできません（移動はできます）"));
         r.push_back(rule(".* takes the style \\S+, which the book does not keep", "原稿に無い文字スタイル・段落スタイルを指定しています"));

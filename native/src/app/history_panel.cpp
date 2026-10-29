@@ -112,6 +112,8 @@ const std::map<std::string, const char*>& names() {
         {"set_file_info", "ファイル情報を変えた"}, {"revert", "復帰"},
         // (PC5 G-0, type@1: render/ops_type)
         {"add_type_layer", "テキストレイヤーを作った"}, {"edit_type", "文字を直した"},
+        // (PC5 G-a)
+        {"line_to_type_layer", "台詞をテキストレイヤーにした"}, {"type_layer_to_line", "テキストレイヤーを台詞にした"},
         // (PC4 E5: render/ops_paint_tools)
         {"dodge", "覆い焼きした"}, {"burn", "焼き込んだ"}, {"sponge", "スポンジで直した"}, {"blur_brush", "ぼかした"},
         {"sharpen_brush", "シャープにした"}, {"smudge_brush", "指先でのばした"}, {"mixer_brush", "混合ブラシで描いた"},

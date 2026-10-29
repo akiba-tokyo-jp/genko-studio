@@ -362,6 +362,24 @@ public:
     std::optional<std::string> selected_line_id;
     // The text tool draws a balloon's outline by hand (フキダシを手で描く) instead of placing a line where clicked.
     bool balloon_pen = false;
+    // PC5 G-a (type@1): the text tools — テキスト ("text": down or across as its options say) and 横書き文字ツール
+    // ("text_h": across). What they make (the window's, from its options): lines, or type layers — a click a point text
+    // (typePointRequested), a drag a box text (typeBoxRequested). A click on a type layer's text, with either, types over
+    // it (typeLayerClicked).
+    static bool is_text_tool(const QString& tool);
+    bool type_layers = false;
+    // The type layer chosen (the window's target layer, when it is one): its box (mm; a point text's round its letters),
+    // its matrix (none: upright), whether a box text's letters run past its box (Photoshop's ⊞ at its foot) — drawn with
+    // the text tools and the move tool.
+    struct TypeFrame {
+        QRectF box;
+        std::optional<std::array<double, 6>> transform;
+        bool box_text = false;
+        bool overflow = false;
+    };
+    std::optional<TypeFrame> type_frame;
+    // The topmost type layer shown on the page whose text is at this point (mm), or none.
+    std::optional<std::string> hit_type_layer(double x_mm, double y_mm) const;
     // The page's lines (Python's canvas.lines: the book's story for the page shown).
     std::vector<const core::StoryLine*> lines() const;
     // Type a line at this point of the page (Python's open_editor): on_done(the words, or nothing) when finished. An
@@ -563,6 +581,11 @@ signals:
     void lineEditRequested(const QString& line_id);
     void lineContextMenu(const QString& line_id, const QPoint& global);
     void textMoved(const QString& line_id, double x_mm, double y_mm);
+    // PC5 G-a: a text tool making type layers clicked here (a point text) or dragged over this box (a box text, mm); a
+    // type layer's text clicked with a text tool
+    void typePointRequested(double x_mm, double y_mm);
+    void typeBoxRequested(const QRectF& box_mm);
+    void typeLayerClicked(const QString& layer_id);
     // the paths: a subpath drawn with a pen ({"closed", "knots"} in mm: a set_path's subpath); the target path changed by
     // the path selection tool (its whole path)
     void pathDrawn(const genko::core::Json& subpath);
@@ -779,6 +802,8 @@ private:
     bool text_press(const QPointF& mm);
     bool text_move(const QPointF& mm, bool pressed);
     bool text_release();
+    void draw_type(QPainter& painter) const;  // (PC5 G-a: the box dragged for a box text, the chosen type layer's frame)
+    std::optional<std::pair<QPointF, QPointF>> type_drag_;  // (PC5 G-a: where the drag began and is now, mm)
     // 線の編集 and 線の修正 (canvas_vector.cpp)
     std::vector<core::StrokePtr> vector_strokes() const;
     core::StrokePtr vector_hit(double x, double y) const;

@@ -16,6 +16,7 @@
 #include "app/theme.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "core/type_text.hpp"
 
 namespace genko::app {
 
@@ -228,6 +229,39 @@ void PageCanvas::draw_balloon_stroke(QPainter& painter) const {
     painter.restore();
 }
 
+void PageCanvas::draw_type(QPainter& painter) const {
+    painter.save();
+    if (type_drag_) {  // (the box text's box as it is dragged)
+        painter.setPen(QPen(theme::accent(), 1.5, Qt::DashLine));
+        painter.setBrush(Qt::NoBrush);
+        const QPointF a = pt(type_drag_->first.x(), type_drag_->first.y()), b = pt(type_drag_->second.x(), type_drag_->second.y());
+        painter.drawRect(QRectF(a, b).normalized());
+    }
+    if (type_frame && (is_text_tool(tool_) || tool_ == QLatin1String("move"))) {  // (the chosen type layer's box, through its matrix)
+        const QRectF& b = type_frame->box;
+        std::array<QPointF, 4> corners{b.topLeft(), b.topRight(), b.bottomRight(), b.bottomLeft()};
+        if (type_frame->transform) {
+            const auto& m = *type_frame->transform;
+            for (QPointF& c : corners) c = QPointF(m[0] * c.x() + m[2] * c.y() + m[4], m[1] * c.x() + m[3] * c.y() + m[5]);
+        }
+        QPolygonF outline;
+        for (const QPointF& c : corners) outline << pt(c.x(), c.y());
+        painter.setPen(QPen(theme::accent(), 1, type_frame->box_text ? Qt::SolidLine : Qt::DotLine));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawPolygon(outline);
+        if (type_frame->overflow) {  // (Photoshop's overflow mark: a boxed + at the box's foot)
+            const QPointF at = outline[2];
+            const QRectF mark(at.x() - 9, at.y() - 9, 9, 9);
+            painter.setBrush(Qt::white);
+            painter.setPen(QPen(QColor(200, 30, 30), 1.2));
+            painter.drawRect(mark);
+            painter.drawLine(QPointF(mark.center().x(), mark.top() + 2), QPointF(mark.center().x(), mark.bottom() - 2));
+            painter.drawLine(QPointF(mark.left() + 2, mark.center().y()), QPointF(mark.right() - 2, mark.center().y()));
+        }
+    }
+    painter.restore();
+}
+
 // --- the select tool: choosing, moving, resizing, turning, the tails ---------------------------------------------------
 
 bool PageCanvas::line_press(const QPointF& pos, const QPointF& mm) {
@@ -343,8 +377,40 @@ bool PageCanvas::line_context_menu(const QPointF& mm, const QPoint& global) {
 
 // --- the text tool -------------------------------------------------------------------------------------------------
 
+bool PageCanvas::is_text_tool(const QString& tool) { return tool == QLatin1String("text") || tool == QLatin1String("text_h"); }
+
+std::optional<std::string> PageCanvas::hit_type_layer(double x_mm, double y_mm) const {
+    const core::Page* p = page();
+    if (p == nullptr) return std::nullopt;
+    for (auto it = p->layers.rbegin(); it != p->layers.rend(); ++it) {
+        if (it->kind != core::LayerKind::Type || !it->type || !it->visible) continue;
+        const core::StoryLine& record = *it->type;
+        double x = x_mm, y = y_mm;
+        if (const auto t = core::type_text::transform_of(record)) {  // (where the point is before its matrix)
+            const auto& m = *t;
+            const double det = m[0] * m[3] - m[1] * m[2];
+            if (std::fabs(det) < 1e-12) continue;
+            const double dx = x_mm - m[4], dy = y_mm - m[5];
+            x = (m[3] * dx - m[2] * dy) / det;
+            y = (-m[1] * dx + m[0] * dy) / det;
+        }
+        if (record.x_mm.value() <= x && x <= (record.x_mm + record.w_mm).value() && record.y_mm.value() <= y && y <= (record.y_mm + record.h_mm).value())
+            return it->id;
+    }
+    return std::nullopt;
+}
+
 bool PageCanvas::text_press(const QPointF& mm) {
-    if (balloon_pen) {
+    if (const auto layer = hit_type_layer(mm.x(), mm.y())) {  // (PC5 G-a: a type layer's text typed over, as Photoshop's)
+        emit typeLayerClicked(QString::fromStdString(*layer));
+        return true;
+    }
+    if (type_layers) {  // (PC5 G-a: a click a point text, a drag a box text — on release)
+        type_drag_ = std::pair{mm, mm};
+        update();
+        return true;
+    }
+    if (balloon_pen && tool_ == QLatin1String("text")) {
         balloon_stroke_ = {mm};  // the outline of a balloon, drawn by hand
         update();
         return true;
@@ -354,6 +420,11 @@ bool PageCanvas::text_press(const QPointF& mm) {
 }
 
 bool PageCanvas::text_move(const QPointF& mm, bool pressed) {
+    if (type_drag_ && pressed) {
+        type_drag_->second = mm;
+        update();
+        return true;
+    }
     if (balloon_stroke_.empty() || !pressed) return false;
     balloon_stroke_.push_back(mm);
     update();
@@ -361,6 +432,18 @@ bool PageCanvas::text_move(const QPointF& mm, bool pressed) {
 }
 
 bool PageCanvas::text_release() {
+    if (type_drag_) {
+        const auto [from, to] = *type_drag_;
+        type_drag_.reset();
+        const QRectF box = QRectF(from, to).normalized();
+        if (box.width() > 2 && box.height() > 2) {  // (a drag: the box of a box text)
+            emit typeBoxRequested(QRectF(r2(box.x()), r2(box.y()), r2(box.width()), r2(box.height())));
+        } else {
+            emit typePointRequested(r2(from.x()), r2(from.y()));
+        }
+        update();
+        return true;
+    }
     if (balloon_stroke_.empty() || tool_ != QLatin1String("text")) return false;
     std::vector<QPointF> stroke;
     std::swap(stroke, balloon_stroke_);

@@ -201,7 +201,7 @@ void MainWindow::build_tool_settings() {
     build_selection_pages(ts);  // (the selection tools and マジック消しゴムツール: main_window_select.cpp)
     build_retouch_pages(ts);    // (PC3 B4: the retouching tools: retouch_tools.cpp)
     build_paint_tool_pages(ts);  // (PC4 E5: the brushes that change pixels: paint_tools.cpp)
-    ts->add({QStringLiteral("text")}, text_settings_);  // (the text tool: main_window_lines.cpp)
+    ts->add({QStringLiteral("text"), QStringLiteral("text_h")}, text_settings_);  // (the text tools: main_window_lines.cpp, PC5 G-a main_window_type.cpp)
     ts->add({QStringLiteral("select")}, line_select_page());  // (the chosen line's lettering, then the view)
     build_move_page(ts);  // (PC3 C-d: 自動選択, バウンディングボックスを表示, スナップ, 整列・分布: main_window_align.cpp)
     build_paint_pages(ts);  // (図形・色混ぜ・ゆがみ・グラデーション: main_window_paint.cpp)

@@ -261,6 +261,27 @@ void retext(StoryLine& record, const std::string& text, std::optional<Json>& rep
     }
 }
 
+// The marks a text is typed with (ruby_runs, ruby_spans, emphasis_runs, style_runs: add_line's, as the window's typing
+// gives them), read as add_line reads them — on a copy of the book — into the record (its text set already).
+constexpr std::array<const char*, 4> kMarks{"ruby_runs", "ruby_spans", "emphasis_runs", "style_runs"};
+bool has_marks(const Json& op) {
+    return std::any_of(kMarks.begin(), kMarks.end(), [&](const char* key) { return core::has(op, key); });
+}
+void take_marks(StoryLine& record, const Json& op, const Document& doc, const Num& page_index, const core::Actor& actor) {
+    Document scratch = doc;
+    Json add{{"op", "add_line"}, {"page", page_index.json()}, {"id", "_type_marks"}, {"text", record.text}, {"balloon", "none"}, {"wrap", record.wrap}};
+    for (const char* key : kMarks) {
+        if (core::has(op, key)) add[key] = op[key];
+    }
+    OpContext inner{scratch, add, actor};
+    (*core::OpRegistry::builtin().find("add_line"))(inner);
+    const StoryLine& made = core::find_line(scratch, "_type_marks");
+    record.ruby_runs = made.ruby_runs;
+    record.ruby_spans = made.ruby_spans;
+    record.emphasis_runs = made.emphasis_runs;
+    record.style_runs = made.style_runs;
+}
+
 std::string antialias_of(const Json& v) {
     const auto methods = core::type_text::antialias_methods();
     if (!v.is_string() || std::find(methods.begin(), methods.end(), v.get_ref<const std::string&>()) == methods.end()) {
@@ -327,6 +348,7 @@ void add_type_layer(OpContext& c) {
         record.wrap = wrap->get<std::string>();
     }
     if (const Json* balloon = given(c.op, "balloon")) record.balloon = core::line_balloon(*balloon);  // (as add_line checks it)
+    if (has_marks(c.op)) take_marks(record, c.op, doc, doc.page(at).index, c.actor);  // (rubies, emphasis, parts larger or bolder)
     // (a line's, as add_line takes it: a picture in it checked as the drawing build checks one)
     if (const Json* style = given(c.op, "style")) record.style = core::line_style(*style, [](const std::string& bytes) { verify_style_picture(bytes); });
     if (const Json* pt = given(c.op, "size_pt")) {  // (Photoshop's size: points, the record's mm)
@@ -403,7 +425,7 @@ void edit_type(OpContext& c) {
     Document& doc = c.doc;
     const Target t = target_of(doc, c.op, true);
     static constexpr std::array<const char*, 10> kChanges{"text", "replace", "insert", "point", "box", "anchor", "wrap", "antialias", "transform", "title"};
-    if (std::none_of(kChanges.begin(), kChanges.end(), [&](const char* key) { return core::has(c.op, key); }))
+    if (std::none_of(kChanges.begin(), kChanges.end(), [&](const char* key) { return core::has(c.op, key); }) && !has_marks(c.op))
         throw OpError("edit_type changes text, replace, insert, point, box, anchor, wrap, antialias, transform or title");
     if (const Json* wrap = given(c.op, "wrap"); wrap != nullptr && *wrap != Json("vertical") && *wrap != Json("horizontal"))
         throw OpError("wrap must be vertical or horizontal");
@@ -412,11 +434,14 @@ void edit_type(OpContext& c) {
         const std::string id = t.line->id;
         const std::optional<std::string> text = new_text(t.line->text, c.op);
         const Json* wrap = given(c.op, "wrap");
-        if (text || wrap != nullptr) {  // (a line's text: edit_line's — its rubies and ranges followed, its report)
+        if (text || wrap != nullptr || has_marks(c.op)) {  // (a line's text: edit_line's — its rubies and ranges followed, its report)
             const core::OpFunction* edit_line = core::OpRegistry::builtin().find("edit_line");
             Json op{{"op", "edit_line"}, {"id", id}};
             if (text) op["text"] = *text;
             if (wrap != nullptr) op["wrap"] = *wrap;
+            for (const char* key : kMarks) {
+                if (core::has(c.op, key)) op[key] = c.op[key];
+            }
             OpContext inner{c.doc, op, c.actor};
             (*edit_line)(inner);
             c.report = inner.report;
@@ -440,6 +465,7 @@ void edit_type(OpContext& c) {
     const std::string before = record.text;
     if (const std::optional<std::string> text = new_text(before, c.op)) retext(record, *text, c.report);
     if (const Json* wrap = given(c.op, "wrap")) record.wrap = wrap->get<std::string>();
+    if (has_marks(c.op)) take_marks(record, c.op, doc, page.index, c.actor);  // (the marks typed: as add_line reads them)
     core::ruby::settle(doc, record);
     reshape(record, c.op, doc, true);
     fit_point(record, doc);

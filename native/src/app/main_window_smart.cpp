@@ -561,6 +561,15 @@ void MainWindow::smart_stack(const std::string& mode) {
 }
 
 void MainWindow::rasterize_type() {
+    // (PC5 G-a: テキストレイヤーをラスタライズ — the target layer when it is a type layer, as rasterize_lines takes one)
+    if (const core::Layer* layer = target_layer(); layer != nullptr && layer->kind == core::LayerKind::Type && current_page() != nullptr) {
+        const std::string id = layer->id;
+        if (!apply_ops(Json::array({Json{{"op", "rasterize_lines"}, {"page", current_page()->index.json()}, {"layer_id", id}}}))) return;
+        set_target_layer(id);
+        if (layer_panel_ != nullptr) layer_panel_->refresh();
+        flash(QStringLiteral("テキストレイヤーを画素のレイヤーにしました（元に戻すで戻ります）"), 5000);
+        return;
+    }
     const core::StoryLine* line = selected_line_or_say();
     if (line == nullptr) return;
     const std::string id = core::new_id();
@@ -795,6 +804,7 @@ constexpr const char* kNotInContents[] = {
     // lines
     "act_text", "act_story_editor", "act_replace", "act_line_type", "act_balloon_pen", "act_line_edit", "act_line_delete", "act_line_wrap",
     "act_rasterize_type",
+    "act_text_h", "act_line_to_type_layer", "act_type_layer_to_line",  // (PC5 G-a: the text tools and a line made a type layer and back)
     // the studio
     "act_ai", "act_style", "act_chat_approval",
     // the book's own files

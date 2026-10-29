@@ -960,6 +960,10 @@ void LayerPanel::edit_special() {
         window_->content_options();
         return;
     }
+    if (layer->kind == core::LayerKind::Type) {  // (PC5 G-a: its text typed over in place, as Photoshop's double click on the T)
+        window_->edit_type_layer_inline(layer->id);
+        return;
+    }
     const auto asked = window_->asking();  // (each dialog's answer applied only to the book it was asked about)
     if (layer->kind == core::LayerKind::Adjust && layer->adjust && layer->adjust->is_object()) {
         const std::string kind = layer->adjust->value("kind", std::string("levels"));

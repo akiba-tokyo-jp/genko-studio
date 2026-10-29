@@ -570,6 +570,7 @@ void MainWindow::set_target_layer(const std::string& layer_id) {
     }
     if (layer_panel_ != nullptr) layer_panel_->show_target();  // (not built again: a Ctrl / Shift+click keeps the others)
     if (materials_ != nullptr) materials_->refresh();
+    refresh_type_frame();  // (PC5 G-a: a type layer chosen — its box on the canvas)
 }
 
 std::optional<core::Json> MainWindow::selection_area() const {

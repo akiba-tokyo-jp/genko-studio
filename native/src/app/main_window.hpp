@@ -1669,8 +1669,30 @@ private:
     // --- PC5 節 G (文字; type@1): the 書式 menu (app/main_window_type.cpp) ------------------------------------------------
 public:
     QMenu* type_menu() const { return type_menu_; }
+    // PC5 G-a: what 書式's commands act on — the target layer when it is a type layer, else the chosen line ({page,
+    // layer_id} or {line}); none (and, `say`, said) when neither — and its record.
+    std::optional<core::Json> type_target(bool say = false);
+    const core::StoryLine* type_record(const core::Json& target) const;
+    // edit_type with these changes on the text chosen (type_target).
+    void type_command(const core::Json& change);
+    // A type layer made where a text tool clicked (a point text), dragged (a box text: `box`) or on the target path (a text
+    // on it): typed in the editor there, then add_type_layer — over the target layer, made the target.
+    void type_new_layer(double x_mm, double y_mm, std::optional<QRectF> box);
+    // A type layer's text typed over in place (edit_type: its text and the marks typed).
+    void edit_type_layer_inline(const std::string& layer_id);
+    // The chosen type layer's box on the canvas (and whether a box text runs past it), after a change or a new target.
+    void refresh_type_frame();
+    // 書式 → 方向 ▸, すべてのテキストレイヤーを更新, Lorem ipsum をペースト; the menu's checks and what can be done.
+    void type_direction(bool vertical);
+    void update_all_type();
+    void paste_lorem();
+    void refresh_type_commands();
+    // The chosen line as a type layer, the target type layer as a line (line_to_type_layer, type_layer_to_line).
+    void line_to_type_layer();
+    void type_layer_to_line();
 
 private:
+    void build_type_actions();
     void build_type_menu(QMenu* menu);
     QMenu* type_menu_ = nullptr;
 };

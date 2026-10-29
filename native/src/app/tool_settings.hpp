@@ -41,20 +41,29 @@ QWidget* action_page(const std::vector<PageItem>& items);
 // only as wide as their words — instead of pushing the panel past the edge where the rest is cut off.
 void fit_narrow(QWidget* root);
 
+// PC5 G-a (type@1): the anti-alias methods by Photoshop's names (書式 → アンチエイリアス ▸), in its order: {key, name}.
+const std::vector<std::pair<QString, QString>>& antialias_names();
+
 // How a new line typed with the text tool starts (Python's TextToolSettings): its balloon, direction, face and size,
-// and whether the balloon is drawn by hand.
+// and whether the balloon is drawn by hand. PC5 G-a: what the text tools make (作るもの: 台詞 — lines, the default — or
+// テキストレイヤー) and a type layer's anti-alias.
 class TextToolSettings : public QWidget {
     Q_OBJECT
 public:
     explicit TextToolSettings(QWidget* parent = nullptr);
-    // line_fields(): {balloon, vertical, style: {font?, size_mm?}}
+    // line_fields(): {balloon, vertical, style: {font?, size_mm?}}; and (PC5 G-a) whether type layers are made, and their
+    // anti-alias
     struct LineFields {
         std::string balloon;
         bool vertical = true;
         core::Json style = core::Json::object();
+        bool type_layer = false;
+        std::string antialias = "smooth";
     };
     LineFields line_fields() const;
 
+    QComboBox* make = nullptr;
+    QComboBox* antialias = nullptr;
     QComboBox* balloon = nullptr;
     QCheckBox* vertical = nullptr;
     QCheckBox* draw_balloon = nullptr;

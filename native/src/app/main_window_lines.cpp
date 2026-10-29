@@ -164,7 +164,10 @@ void MainWindow::panel_for_tool(const QString& tool) {
                                         QStringLiteral("lassofill"), QStringLiteral("vector"), QStringLiteral("blend"),
                                         QStringLiteral("liquify"), QStringLiteral("gradient"), QStringLiteral("shape"),
                                         QStringLiteral("pencil")};  // (PC4 E1)
-    QDockWidget* want = tool == QLatin1String("text")                              ? lines_dock_
+    // (PC5 G-a: 横書き文字ツール sets across whatever the option says; the type layers' frame drawn with the text tools)
+    if (text_settings_ != nullptr) text_settings_->vertical->setEnabled(tool != QLatin1String("text_h"));
+    if (PageCanvas::is_text_tool(tool) || tool == QLatin1String("move")) refresh_type_frame();
+    QDockWidget* want = PageCanvas::is_text_tool(tool)                              ? lines_dock_
                         : drawing.contains(tool) || PageCanvas::is_pixel_tool(tool) ? layers  // (PC4 E5: the brushes that change pixels)
                                                                                     : nullptr;
     QDockWidget* other = want == lines_dock_ ? layers : lines_dock_;
@@ -177,6 +180,7 @@ void MainWindow::refresh_lines() {
     if (story_ == nullptr) return;
     story_->refresh();
     story_->select(canvas_->selected_line_id);  // (the chosen line's settings beside the tool stay current)
+    refresh_type_frame();                       // (PC5 G-a: the chosen type layer's box after an edit)
 }
 
 // --- the lines typed on the page ------------------------------------------------------------------------------------

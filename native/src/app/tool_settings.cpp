@@ -39,6 +39,9 @@ const std::map<QString, std::pair<QString, QString>>& titles() {
         // (PC4 E1: brushes@1)
         {QStringLiteral("pencil"), {QStringLiteral("鉛筆ツール"), QStringLiteral("縁のくっきりした線で描く。Shift で直線。「自動消去」で、描画色の所から描き始めると背景色で描く")}},
         {QStringLiteral("text"), {QStringLiteral("テキスト"), QStringLiteral("台詞を入れたい所をクリックして打つ（Ctrl+Enter で決定）")}},
+        // (PC5 G-a)
+        {QStringLiteral("text_h"), {QStringLiteral("横書き文字ツール"),
+                                    QStringLiteral("横書きの文字を入れる。テキストレイヤーなら、クリックでポイントテキスト、ドラッグで段落テキスト（Ctrl+Enter で決定）")}},
         {QStringLiteral("frame"), {QStringLiteral("コマ割り"), QStringLiteral("コマの中をドラッグで割る（ほぼ水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで動かす・角をドラッグで形を変える。"
                                                                             "「作り方」で長方形・折れ線・フリーハンドにすると、新しいコマを描ける")}},
         {QStringLiteral("picker"), {QStringLiteral("スポイトツール"), QStringLiteral("クリックした所の色を描画色にする")}},
@@ -215,9 +218,22 @@ TextToolSettings::TextToolSettings(QWidget* parent) : QWidget(parent) {
     size->setSingleStep(0.5);
     size->setSuffix(QStringLiteral(" mm"));
     size->setSpecialValueText(QStringLiteral("自動（フキダシに合わせる）"));
+    // (PC5 G-a, type@1: what the text tools make — lines, as before, or type layers — and a type layer's anti-alias)
+    make = new QComboBox;
+    make->setObjectName(QStringLiteral("text_make"));
+    make->addItem(QStringLiteral("台詞"), QStringLiteral("line"));
+    make->addItem(QStringLiteral("テキストレイヤー"), QStringLiteral("type"));
+    make->setToolTip(QStringLiteral("台詞はフキダシに入り、すべてのレイヤーの上に出ます。テキストレイヤーは層として重なり（コマ枠の下）、"
+                                    "クリックでポイントテキスト、ドラッグで段落テキストになります"));
+    antialias = new QComboBox;
+    antialias->setObjectName(QStringLiteral("text_antialias"));
+    for (const auto& [key, label] : antialias_names()) antialias->addItem(label, key);
+    antialias->setCurrentIndex(antialias->findData(QStringLiteral("smooth")));
     auto* form = new QFormLayout(this);
     form->setRowWrapPolicy(QFormLayout::WrapAllRows);
     form->setContentsMargins(0, 0, 0, 0);
+    form->addRow(QStringLiteral("作るもの"), make);
+    form->addRow(QStringLiteral("アンチエイリアス"), antialias);
     form->addRow(QStringLiteral("フキダシ"), balloon);
     form->addRow(QString(), vertical);
     form->addRow(QString(), draw_balloon);
@@ -236,7 +252,18 @@ TextToolSettings::LineFields TextToolSettings::line_fields() const {
     if (size->value() > 0) fields.style["size_mm"] = size->value();
     fields.balloon = balloon->currentData().toString().toStdString();
     fields.vertical = vertical->isChecked();
+    fields.type_layer = make->currentData().toString() == QLatin1String("type");
+    fields.antialias = antialias->currentData().toString().toStdString();
     return fields;
+}
+
+const std::vector<std::pair<QString, QString>>& antialias_names() {
+    static const std::vector<std::pair<QString, QString>> all{
+        {QStringLiteral("none"), QStringLiteral("なし")},          {QStringLiteral("sharp"), QStringLiteral("シャープ")},
+        {QStringLiteral("crisp"), QStringLiteral("鮮明")},         {QStringLiteral("strong"), QStringLiteral("強く")},
+        {QStringLiteral("smooth"), QStringLiteral("滑らかに")},    {QStringLiteral("windowsLcd"), QStringLiteral("Windows LCD")},
+        {QStringLiteral("windows"), QStringLiteral("Windows")}};
+    return all;
 }
 
 ToolSettings::ToolSettings(QWidget* parent) : QWidget(parent) {
