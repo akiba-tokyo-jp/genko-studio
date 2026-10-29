@@ -339,7 +339,7 @@ private slots:
             renderer.want(72, 150, seen);
             QTRY_VERIFY_WITH_TIMEOUT(renderer.settled(), 30000);
             QVERIFY(renderer.current(150, seen));
-            QVERIFY2(renderer.fine_bytes() <= 3 * tile + 4 * tile, qPrintable(QString::number(renderer.fine_bytes())));  // (the wanted ones kept)
+            QVERIFY2(renderer.fine_bytes() <= 3 * tile + 9 * tile, qPrintable(QString::number(renderer.fine_bytes())));  // (the wanted ones — at most 3 × 3 round the view — kept)
         }
         QVERIFY(renderer.fine_released() > 0);
         // back where it began: drawn again, the same pixels as the page

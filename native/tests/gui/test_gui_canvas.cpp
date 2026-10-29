@@ -610,7 +610,7 @@ private slots:
         // a pinch: spread to zoom about the fingers
         const double before_pinch = c->scale();
         c->pinch(1.5, 0.0, at, QPointF());
-        QVERIFY(std::abs(c->scale() / before_pinch - 1.5) < 1e-6 || c->scale() == PageCanvas::kMaxScale);
+        QVERIFY(std::abs(c->scale() / before_pinch - 1.5) < 1e-6 || c->scale() == c->max_scale());
         // Space + drag: the page moves with the pointer
         c->setFocus();
         QTest::keyPress(c, Qt::Key_Space);
@@ -675,6 +675,24 @@ private slots:
                  c->reset_view();
                  c->fit_page();
              }},
+            // (review P3-6) the gamut warning's mark over the tiles; the finer level (288 dpi, one tile pixel a screen
+            // pixel); the pixel art preview (fitted: laid nearest, made smaller); the page's pixels turned (nearest, turned)
+            {"gamut", [c] {
+                 c->actual_pixels(48);
+                 c->center_on(105, 148);
+                 c->renderer().set_gamut(genko::app::GamutLook{});
+             }},
+            {"finer level", [c] { c->renderer().set_gamut(std::nullopt); }},
+            {"pixel art", [c] {
+                 c->fit_page();
+                 c->set_pixel_art(true);
+             }},
+            {"its pixels turned", [c] {
+                 c->set_pixel_art(false);
+                 c->actual_pixels(800);
+                 c->center_on(105, 148);
+                 c->set_rotation(30);
+             }},
         };
         for (const Look& look : looks) {
             look.set();
@@ -697,8 +715,10 @@ private slots:
             auto* surface = qobject_cast<QOpenGLWidget*>(c->gpu_surface());
             const QImage shown = surface->grabFramebuffer().convertToFormat(QImage::Format_RGB32).scaled(processor.size());
             QCOMPARE(shown.size(), processor.size());
-            const bool resampled = c->rotation() != 0.0 || std::string_view(look.name) == "fitted";  // (bilinear: turned, or zoomed off the pixels)
-            // (turned: the pixels within 12 of the sheet's edges — its edge and its shadow, 1.6 to 9.6 screen pixels out —
+            // (resampled: turned, or zoomed off one tile pixel a screen pixel — bilinear, or nearest made smaller or turned)
+            const bool nearest = std::string_view(look.name) == "pixel art";
+            const bool resampled = c->rotation() != 0.0 || std::string_view(look.name) == "fitted" || nearest;
+            // (resampled: the pixels within 14 of the sheet's edges — its edge and its shadow, 1.6 to 12.6 screen pixels out —
             // are not the page's)
             const double w = c->page()->spec.width_mm.value(), h = c->page()->spec.height_mm.value();
             const std::array<QPointF, 4> sheet{c->to_widget(QPointF(0, 0)), c->to_widget(QPointF(w, 0)), c->to_widget(QPointF(w, h)),
@@ -709,7 +729,7 @@ private slots:
                     const double length = d.x() * d.x() + d.y() * d.y();
                     if (length <= 0) continue;
                     const double t = std::clamp(((x - a.x()) * d.x() + (y - a.y()) * d.y()) / length, 0.0, 1.0);
-                    if (std::hypot(x - (a.x() + t * d.x()), y - (a.y() + t * d.y())) < 12.0) return true;
+                    if (std::hypot(x - (a.x() + t * d.x()), y - (a.y() + t * d.y())) < 14.0) return true;
                 }
                 return false;
             };
@@ -719,8 +739,18 @@ private slots:
             for (int y = 0; y < shown.height(); ++y) {
                 for (int x = 0; x < shown.width(); ++x) {
                     if (resampled && on_edge(x + 0.5, y + 0.5)) continue;
-                    const QRgb a = shown.pixel(x, y), b = processor.pixel(x, y);
-                    const int apart_here = std::max({std::abs(qRed(a) - qRed(b)), std::abs(qGreen(a) - qGreen(b)), std::abs(qBlue(a) - qBlue(b))});
+                    const QRgb a = shown.pixel(x, y);
+                    const auto apart_from = [&a](QRgb b) {
+                        return std::max({std::abs(qRed(a) - qRed(b)), std::abs(qGreen(a) - qGreen(b)), std::abs(qBlue(a) - qBlue(b))});
+                    };
+                    int apart_here = apart_from(processor.pixel(x, y));
+                    // (nearest made smaller — ピクセルアートプレビュー —: where a screen pixel falls half way, the card and the
+                    // processor may each take the page pixel on either side: the card's is one of the processor's next to it)
+                    if (nearest && apart_here > 1) {
+                        for (int dy = -1; dy <= 1; ++dy)
+                            for (int dx = -1; dx <= 1; ++dx)
+                                if (processor.rect().contains(x + dx, y + dy)) apart_here = std::min(apart_here, apart_from(processor.pixel(x + dx, y + dy)));
+                    }
                     ++counted;
                     if (apart_here > 1) ++off;
                     if (apart_here > most) {

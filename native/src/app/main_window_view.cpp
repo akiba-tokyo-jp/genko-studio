@@ -254,6 +254,18 @@ void MainWindow::ask_32bit_preview() {
         return;
     }
     const render::HdrPreview before = documents_[static_cast<std::size_t>(doc_)].proof.hdr;
+    // (PC5 H-a review P3-10: the window turns a loop of its own — the book it was opened for is found again by its session,
+    // and left alone when it was closed meanwhile; the canvas follows only while that book is the one shown)
+    const std::weak_ptr<Session> opened_for = documents_[static_cast<std::size_t>(doc_)].session;
+    const auto set_preview = [this, opened_for](const render::HdrPreview& preview) {
+        const auto session = opened_for.lock();
+        for (std::size_t i = 0; session && i < documents_.size(); ++i) {
+            if (documents_[i].session != session) continue;
+            documents_[i].proof.hdr = preview;
+            if (static_cast<int>(i) == doc_) canvas_->renderer().set_hdr(preview);
+            return;
+        }
+    };
     QDialog dialog(this);
     dialog.setObjectName(QStringLiteral("hdr_preview"));
     dialog.setWindowTitle(QStringLiteral("32 bit プレビューオプション"));
@@ -295,12 +307,11 @@ void MainWindow::ask_32bit_preview() {
         out.gamma = gamma->value();
         return out.clamped();
     };
-    const auto follow = [this, chosen, exposure, gamma, method] {
+    const auto follow = [set_preview, chosen, exposure, gamma, method] {
         const bool compress = method->currentData().toBool();
         exposure->setEnabled(!compress);  // (as Photoshop's window: the highlights compressed take neither)
         gamma->setEnabled(!compress);
-        documents_[static_cast<std::size_t>(doc_)].proof.hdr = chosen();
-        canvas_->renderer().set_hdr(chosen());
+        set_preview(chosen());
     };
     connect(method, &QComboBox::currentIndexChanged, &dialog, [follow](int) { follow(); });
     connect(exposure, &QDoubleSpinBox::valueChanged, &dialog, [follow](double) { follow(); });
@@ -311,8 +322,7 @@ void MainWindow::ask_32bit_preview() {
         follow();
         return;
     }
-    documents_[static_cast<std::size_t>(doc_)].proof.hdr = before;
-    canvas_->renderer().set_hdr(before);
+    set_preview(before);
 }
 
 
