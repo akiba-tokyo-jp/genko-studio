@@ -179,7 +179,26 @@ std::string skipped_but_adjusted(const Json& cpp, const Json& python) {
 // it differs only by correction layers made of adjustment layers (the user's decision 5): each import's layers
 // Python's view's with those among them (their titles, the layers kind adjust in `after`), its skipped layers the
 // view's without exactly those names; else what differs.
-std::string corrections_more(const Json& own, const Json& python_view, const genko::core::Document& after) {
+// (groups@1, PC5 I-b, the user's decision 2: this build reads a PSD's group as a group — its mark, its blend 通過, its mask,
+// vector mask and clipping —, which psd.read_psd reads as a folder of none: those taken off, the reply is Python's view's)
+Json as_python_folders(Json value) {
+    if (value.is_array()) {
+        for (Json& item : value) item = as_python_folders(std::move(item));
+    } else if (value.is_object()) {
+        if (value.value("kind", Json()) == Json("folder") && value.value("group", Json()) == Json(true)) {
+            value.erase("group");
+            if (value.value("blend", Json()) == Json("pass_through")) value["blend"] = "normal";
+            value.erase("mask");
+            value.erase("vector_mask");
+            if (value.contains("clip")) value["clip"] = false;
+        }
+        for (auto& [key, item] : value.items()) item = as_python_folders(std::move(item));
+    }
+    return value;
+}
+
+std::string corrections_more(const Json& own_read, const Json& python_view, const genko::core::Document& after) {
+    const Json own = as_python_folders(own_read);
     if (genko::core::dump_python(own) == genko::core::dump_python(python_view)) return "same";
     if (!own.value("ok", false) || !python_view.value("ok", false) || !own.contains("results") || !python_view.contains("results") ||
         own["results"].size() != python_view["results"].size())
@@ -1791,20 +1810,32 @@ private slots:
             doc.edit_page(0).frames.clear();
             return doc;
         };
-        const auto paint = [](const std::string& id, int grey, const std::string& blend, double x0, double w) {
-            return Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", id}, {"name", id}, {"blend", blend}},
-                                Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", id}, {"area", Json{{"rect", Json::array({x0, 0, w, 40})}}},
-                                     {"rgb", Json::array({grey, grey, grey})}}});
+        // (a paint layer of pixels over the whole page, grey: as a picture painted, which a PSD writes as its own layer)
+        const auto paint = [](const std::string& id, int grey, const std::string& blend) {
+            core::Layer layer;
+            layer.id = id;
+            layer.title = id;
+            layer.kind = core::LayerKind::Raster;
+            layer.blend = blend;
+            layer.panel_clip = false;
+            layer.raster_png = std::make_shared<const std::string>(
+                genko::render::write_png(genko::render::Image::create("RGBA", genko::render::Size{157, 157}, genko::render::Ink{grey, grey, grey, 255})));
+            return layer;
         };
         const auto book = [&](const Json& group, const std::string& child_blend, int child) {
+            core::Document doc = fresh();
+            doc.edit_page(0).layers.push_back(paint("base", 128, "normal"));
             Json ops = Json::array();
-            for (const Json& op : paint("base", 128, "normal", 0, 40)) ops.push_back(op);
             Json folder{{"op", "add_layer"}, {"page", 1}, {"kind", "folder"}, {"id", "g"}, {"name", "g"}};
-            folder.update(group);
+            Json settings{{"op", "set_layer"}, {"page", 1}, {"id", "g"}};
+            for (const auto& [key, value] : group.items()) (key == "group" || key == "blend" ? folder : settings)[key] = value;
             ops.push_back(folder);
-            for (const Json& op : paint("child", child, child_blend, 0, 40)) ops.push_back(op);
-            ops.push_back(Json{{"op", "move_layers"}, {"page", 1}, {"ids", Json::array({"child"})}, {"parent", "g"}});
-            return run(fresh(), ops);
+            if (settings.size() > 3) ops.push_back(settings);
+            doc = run(doc, ops);
+            core::Layer inside = paint("child", child, child_blend);
+            inside.parent_id = "g";
+            doc.edit_page(0).layers.push_back(std::move(inside));
+            return doc;
         };
         const Json left{{"poly", Json::array({Json::array({0, 0}), Json::array({20, 0}), Json::array({20, 40}), Json::array({0, 40})})}};
         struct Case {
@@ -1828,7 +1859,7 @@ private slots:
         }
         const QString out = path(QStringLiteral("groups/view.json"));
         const auto ran = genko::test::run(genko::test::python_ref(),
-                                          {genko::test::repo_root() + QStringLiteral("/tools/migration/psd_groups_check.py"), out, QStringLiteral("39,78;118,78")} + files,
+                                          QStringList{genko::test::repo_root() + QStringLiteral("/tools/migration/psd_groups_check.py"), out, QStringLiteral("39,78;118,78")} + files,
                                           genko::test::python_env(path(QStringLiteral("pyenv"))));
         QVERIFY2(ran.exit_code == 0, ran.err.right(2000).constData());
         const Json view = genko::test::read_json(out);

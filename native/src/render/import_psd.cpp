@@ -1098,7 +1098,9 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
             }
             return kept;
         };
-        if (item.folder) {
+        if (item.folder && psd::python_view()) {
+            layer.kind = core::LayerKind::Folder;  // (as psd.read_psd's: a folder, an order of layers only)
+        } else if (item.folder) {
             // (groups@1, PC5 I-b, the user's decision 2: a group drawn as Photoshop draws it — its visibility, opacity, blend
             // (通過 among them), mask and vector mask)
             layer.kind = core::LayerKind::Folder;
