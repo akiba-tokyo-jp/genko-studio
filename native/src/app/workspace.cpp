@@ -34,7 +34,7 @@ const QStringList kDefaultCommandBar{QStringLiteral("取り消し"), QStringLite
                                      QStringLiteral("画面サイズに合わせる"), QStringLiteral("ズームアウト"), QStringLiteral("ズームイン"), QStringLiteral("|"),
                                      QStringLiteral("◀ 前のページ"), QStringLiteral("次のページ ▶"), QStringLiteral("|"),
                                      QStringLiteral("原稿を書き出す…")};  // (PC4 F-0: 書き出し…'s new name)
-const QStringList kDefaultQuick{QStringLiteral("ブラシツール"), QStringLiteral("消しゴムツール"), QStringLiteral("塗りつぶしツール"), QStringLiteral("テキスト"),
+const QStringList kDefaultQuick{QStringLiteral("ブラシツール"), QStringLiteral("消しゴムツール"), QStringLiteral("塗りつぶしツール"), QStringLiteral("縦書き文字ツール"),
                                 QStringLiteral("コマ割り"), QStringLiteral("選択範囲・選んだコマにトーンを貼る"), QStringLiteral("集中線"),
                                 QStringLiteral("水平方向に反転（表示）")};
 
@@ -584,7 +584,7 @@ QString modifier_tool(const QString& key) {
 const Choices& keyed_tools() {
     static const Choices all{{QStringLiteral("ブラシツール"), QStringLiteral("pen")},  {QStringLiteral("消しゴムツール"), QStringLiteral("eraser")},
                              {QStringLiteral("塗りつぶしツール"), QStringLiteral("fill")},    {QStringLiteral("選択範囲"), QStringLiteral("marquee")},
-                             {QStringLiteral("選択"), QStringLiteral("select")},        {QStringLiteral("テキスト"), QStringLiteral("text")},
+                             {QStringLiteral("選択"), QStringLiteral("select")},        {QStringLiteral("縦書き文字ツール"), QStringLiteral("text")},
                              {QStringLiteral("ベクター線の直し"), QStringLiteral("vector")}, {QStringLiteral("色混ぜ"), QStringLiteral("blend")},
                              {QStringLiteral("グラデーションツール"), QStringLiteral("gradient")}, {QStringLiteral("コマ"), QStringLiteral("frame")}};
     return all;

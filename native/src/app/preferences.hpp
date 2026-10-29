@@ -133,6 +133,9 @@ void apply_all(MainWindow* window);
 // prefs_ruler_unit, prefs_grid_every …), and what 決める keeps of them.
 std::pair<QWidget*, QWidget*> unit_pages(QWidget* parent);
 void save_unit_pages(QWidget* units, QWidget* guides);
+// 環境設定 → テキスト (PC5 G-d, app/preferences_type.cpp): its page, and what 決める keeps of it.
+QWidget* type_page(QWidget* parent);
+void save_type_page(QWidget* page);
 
 // 透明部分・色域 (PhotoCraft v0.2.0's prefs.rs TransparencyAndGamut, MIT; SPEC COLOR-03 PC1b): the checker shown under
 // what is transparent (the layers' small pictures) — its square's side in pixels (0: none, white) and its two colours —
@@ -244,6 +247,7 @@ public:
     // 単位・定規, ガイド・グリッド・スライス (PC5 H-b: unit_pages)
     QWidget* units_page = nullptr;
     QWidget* guides_page = nullptr;
+    QWidget* type_page = nullptr;  // (テキスト, PC5 G-d)
 
     void measure();
     void forget_gamma();

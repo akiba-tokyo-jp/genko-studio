@@ -28,6 +28,9 @@ void MainWindow::build_edit_actions() {
 void MainWindow::build_edit_menu_tail(QMenu* edit) {
     edit->addSeparator();
     edit->addAction(action("act_find_command"));  // (検索)
+    // (PC5 G-d: Photoshop's スペルチェック… and 検索と置換… after 検索)
+    edit->addAction(action("act_spelling"));
+    edit->addAction(action("act_replace"));
     edit->addSeparator();
     edit->addAction(action("act_keyboard_shortcuts"));
     QMenu* panes = edit->addMenu(QStringLiteral("環境設定"));

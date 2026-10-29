@@ -118,51 +118,6 @@ QPushButton* iconic(const QString& text, const char* icon, const QString& tip) {
     return button;
 }
 
-// fonts.system_fonts(): [{name, style, path}] of the computer's fonts that can draw Japanese, kept in the config
-// folder (fonts.json) once looked for.
-Json system_fonts() {
-    const auto cache = config_dir() / "fonts.json";
-    try {
-        std::ifstream in(cache, std::ios::binary);
-        if (in) {
-            const Json found = Json::parse(in);
-            if (found.is_array()) return found;
-        }
-    } catch (const std::exception&) {  // (not read: looked for again)
-    }
-    QStringList dirs;
-#if defined(Q_OS_WIN)
-    dirs << qEnvironmentVariable("WINDIR", QStringLiteral("C:\\Windows")) + QStringLiteral("/Fonts")
-         << qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/Microsoft/Windows/Fonts");
-#elif defined(Q_OS_MACOS)
-    dirs << QStringLiteral("/System/Library/Fonts") << QStringLiteral("/Library/Fonts") << QDir::homePath() + QStringLiteral("/Library/Fonts");
-#else
-    dirs << QStringLiteral("/usr/share/fonts") << QStringLiteral("/usr/local/share/fonts") << QDir::homePath() + QStringLiteral("/.fonts")
-         << QDir::homePath() + QStringLiteral("/.local/share/fonts");
-#endif
-    Json found = Json::array();
-    for (const QString& folder : dirs) {
-        if (!QFileInfo(folder).isDir()) continue;
-        QStringList paths;
-        QDirIterator it(folder, QDir::Files, QDirIterator::Subdirectories);
-        while (it.hasNext()) paths << it.next();
-        std::sort(paths.begin(), paths.end());
-        for (const QString& path : paths) {
-            const QString suffix = QFileInfo(path).suffix().toLower();
-            if (suffix != QLatin1String("ttf") && suffix != QLatin1String("otf") && suffix != QLatin1String("ttc")) continue;
-            const QRawFont font(path, 24);
-            if (!font.isValid() || !font.supportsCharacter(QChar(0x3042)) || !font.supportsCharacter(QChar(0x6F22))) continue;
-            found.push_back(Json{{"name", font.familyName().toStdString()}, {"style", font.styleName().toStdString()}, {"path", path.toStdString()}});
-        }
-    }
-    try {
-        std::filesystem::create_directories(cache.parent_path());
-        std::ofstream(cache, std::ios::binary) << found.dump(1);
-    } catch (const std::exception&) {
-    }
-    return found;
-}
-
 }  // namespace
 
 StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
@@ -210,12 +165,8 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     delete_button = iconic(QStringLiteral("消す"), "delete", QStringLiteral("選んだ台詞を消す"));
     delete_button->setObjectName(QStringLiteral("story_delete"));
     connect(delete_button, &QPushButton::clicked, this, [this] { carry_on("remove", [this] { remove(); }); });
-    // lettering style of the selected line (applied at once)
-    font = new QComboBox;
-    font->setObjectName(QStringLiteral("story_font"));
-    for (const auto& [key, label] : lettering::bundled_fonts()) font->addItem(label, key);
-    font->addItem(QStringLiteral("パソコンの書体を選ぶ…"), QStringLiteral("__pick__"));
-    connect(font, &QComboBox::activated, this, [this](int) { carry_on("font_changed", [this] { font_changed(); }); });
+    // lettering style of the selected line (applied at once) — PC5 G-d (8-5 (a)): its face, size, tracking, rows' room,
+    // alignment, colour, weight, slant, width, 縦中横 and 約物の詰め are the 文字 and 段落 panels' now (app/type_panels)
     const auto spin = [this](double lo, double hi, double step, const QString& suffix, const QString& special = {}) {
         auto* box = new QDoubleSpinBox;
         box->setRange(lo, hi);
@@ -237,35 +188,24 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
         connect(box, &QCheckBox::clicked, this, [this](bool) { carry_on("style_changed", [this] { style_changed(); }); });
         return box;
     };
-    size = spin(0, 40, 0.5, QStringLiteral(" mm"), QStringLiteral("自動"));
-    tracking = spin(-0.3, 1.0, 0.05, QStringLiteral(" 字"));
-    leading = spin(-0.3, 2.0, 0.05, QStringLiteral(" 字"));
     outline = spin(0, 5, 0.1, QStringLiteral(" mm"), QStringLiteral("なし"));
     border = spin(0, 3, 0.05, QStringLiteral(" mm"));
-    align = choice({{"上", "top"}, {"中央", "center"}, {"下", "bottom"}, {"左", "left"}, {"右", "right"}, {"均等（列・行いっぱいに）", "justify"}});
     fill = choice({{"白", "white"}, {"塗らない（透明）", "none"}});
-    tcy = check(QStringLiteral("数字と !? を縦中横にする"));
     rotate = spin(-180, 180, 5, QStringLiteral("°"));
     rotate->setDecimals(0);
     rotate->setToolTip(QStringLiteral("フキダシごと回します（選択ツールで、フキダシの上の○をドラッグしても回せます）"));
     skew = spin(-60, 60, 5, QStringLiteral("°"));
     skew->setDecimals(0);
     skew->setToolTip(QStringLiteral("文字を傾けます（描き文字・効果音に）"));
-    scale_x = spin(0.3, 3, 0.05, QString());
-    scale_x->setToolTip(QStringLiteral("長体・平体: 1 より小さいと細長い字（長体）、大きいと平たい字（平体）"));
     gradient = new QPushButton(QStringLiteral("文字のグラデーション…"));
     gradient->setToolTip(QStringLiteral("文字を上から下へ 2 色で塗り分けます（もう一度押すと外す）"));
     connect(gradient, &QPushButton::clicked, this, [this] { carry_on("pick_gradient", [this] { pick_gradient(); }); });
-    yakumono = check(QStringLiteral("約物を詰める（」「 などを半分に）"));
     arc = spin(-1, 1, 0.1, QString());
     arc->setToolTip(QStringLiteral("文字を弓なりに曲げます（1 で真ん中が大きく持ち上がる。マイナスで逆向き）"));
     latin = choice({{"4 文字以上は寝かせる", "rotate"}, {"1 文字ずつ立てる", "upright"}});
     latin->setToolTip(QStringLiteral("縦書きの中の半角の英数字の組み方"));
     mark = choice({{"ゴマ（﹅）", "sesame"}, {"黒丸（・）", "dot"}});
     mark->setToolTip(QStringLiteral("《《強調》》と書いた所に付く傍点の形"));
-    weight = choice({{"標準", "normal"}, {"太", "bold"}, {"極太", "heavy"}});
-    weight->setToolTip(QStringLiteral("文字の太さ。書体に太い字がないときは、字の線を太らせて作ります"));
-    italic = check(QStringLiteral("斜体"));
     outline_colour = new QPushButton(QStringLiteral("フチの色…"));
     outline_colour->setToolTip(QStringLiteral("白フチの色（黒フチなど）"));
     connect(outline_colour, &QPushButton::clicked, this, [this] { carry_on("pick_outline_colour", [this] { pick_outline_colour(); }); });
@@ -279,8 +219,6 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     connect(spikes, &QSpinBox::editingFinished, this, [this] { carry_on("style_changed", [this] { style_changed(); }); });
     spike_depth = spin(0.05, 0.6, 0.05, QString());
     spike_depth->setToolTip(QStringLiteral("叫びのフキダシのトゲの長さ（大きいほど鋭い）"));
-    color = new QPushButton(QStringLiteral("文字の色…"));
-    connect(color, &QPushButton::clicked, this, [this] { carry_on("pick_color", [this] { pick_color(); }); });
     line_colour = new QPushButton(QStringLiteral("フキダシの線の色…"));
     connect(line_colour, &QPushButton::clicked, this, [this] {
         carry_on("pick_style_colour", [this] { pick_style_colour("line_rgb", QStringLiteral("フキダシの線の色"), QColor(20, 20, 20)); });
@@ -384,11 +322,10 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     connect(reset, &QPushButton::clicked, this, [this] { carry_on("reset_style", [this] { reset_style(); }); });
     // the names the tests and the screen readers use
     for (const auto& [widget, name] : std::initializer_list<std::pair<QWidget*, const char*>>{
-             {font, "font"}, {size, "size"}, {tracking, "tracking"}, {leading, "leading"}, {outline, "outline"}, {border, "border"},
-             {align, "align"}, {fill, "fill"}, {tcy, "tcy"}, {rotate, "rotate"}, {skew, "skew"}, {scale_x, "scale_x"},
-             {gradient, "gradient"}, {yakumono, "yakumono"}, {arc, "arc"}, {latin, "latin"}, {mark, "mark"}, {weight, "weight"},
-             {italic, "italic"}, {outline_colour, "outline_colour"}, {wobble, "wobble"}, {double_line, "double"}, {spikes, "spikes"},
-             {spike_depth, "spike_depth"}, {color, "color"}, {line_colour, "line_colour"}, {fill_colour, "fill_colour"},
+             {outline, "outline"}, {border, "border"}, {fill, "fill"}, {rotate, "rotate"}, {skew, "skew"},
+             {gradient, "gradient"}, {arc, "arc"}, {latin, "latin"}, {mark, "mark"},
+             {outline_colour, "outline_colour"}, {wobble, "wobble"}, {double_line, "double"}, {spikes, "spikes"},
+             {spike_depth, "spike_depth"}, {line_colour, "line_colour"}, {fill_colour, "fill_colour"},
              {fill_cover, "fill_cover"}, {text_dx, "text_dx"}, {text_dy, "text_dy"}, {tail_width, "tail_width"},
              {path_curve, "path_curve"}, {ruby_scale, "ruby_scale"}, {mono_ruby, "mono_ruby"}, {layer_order, "layer_order"},
              {reset, "reset"}, {ruby_font, "ruby_font"}, {ruby_ratio, "ruby_ratio"}, {ruby_align, "ruby_align"}, {ruby_gap, "ruby_gap"},
@@ -411,23 +348,13 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     buttons->addWidget(add_button, 1);
     buttons->addWidget(apply_button, 1);
     auto* form = new QFormLayout;
-    form->addRow(QStringLiteral("書体"), font);
-    form->addRow(QStringLiteral("文字の大きさ"), size);
-    form->addRow(QStringLiteral("字間"), tracking);
-    form->addRow(QStringLiteral("行間"), leading);
-    form->addRow(QStringLiteral("揃え"), align);
     form->addRow(QStringLiteral("白フチ"), outline);
     form->addRow(QStringLiteral("フキダシの線"), border);
     form->addRow(QStringLiteral("フキダシの中"), fill);
     form->addRow(QString(), line_colour);  // (the balloon's colours beside its line and inside, not at the bottom)
     form->addRow(QString(), fill_colour);
-    form->addRow(QString(), tcy);
     form->addRow(QStringLiteral("欧文"), latin);
     form->addRow(QStringLiteral("傍点"), mark);
-    auto* faces = new QHBoxLayout;
-    faces->addWidget(weight);
-    faces->addWidget(italic);
-    form->addRow(QStringLiteral("太さ"), faces);
     form->addRow(QString(), outline_colour);
     form->addRow(QStringLiteral("線の揺れ"), wobble);
     form->addRow(QString(), double_line);
@@ -436,9 +363,6 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     form->addRow(QStringLiteral("回転"), rotate);
     form->addRow(QStringLiteral("傾き"), skew);
     form->addRow(QStringLiteral("弓なり"), arc);
-    form->addRow(QStringLiteral("長体・平体"), scale_x);
-    form->addRow(QString(), yakumono);
-    form->addRow(QString(), color);
     form->addRow(QString(), gradient);
     form->addRow(QStringLiteral("中の塗りの濃さ"), fill_cover);
     auto* shift = new QHBoxLayout;
@@ -616,31 +540,15 @@ void StoryPanel::show_picked() {
     const auto f = [&st, &read](const char* key, double fallback) {
         return read([&] { return core::py_truthy(st[key]) ? core::to_float(st[key]) : fallback; }, fallback);
     };
-    const QString face = core::py_truthy(st["font"]) ? qs(core::py_str(st["font"])) : (l->balloon == "sfx" ? QStringLiteral("sfx") : QStringLiteral("antique"));
-    int index = font->findData(face);
-    if (index < 0) {
-        font->insertItem(font->count() - 1, QFileInfo(face).completeBaseName(), face);
-        index = font->findData(face);
-    }
-    font->setCurrentIndex(index);
-    size->setValue(f("size_mm", 0));
-    tracking->setValue(f("tracking", 0));
-    leading->setValue(f("leading", 0));
     outline->setValue(f("outline_mm", 0));
     border->setValue(read([&] { return st["border_mm"].is_null() ? 0.35 : core::to_float(st["border_mm"]); }, 0.35));
-    align->setCurrentIndex(std::max(0, align->findData(qs(core::py_str(st["align"])))));
     fill->setCurrentIndex(std::max(0, fill->findData(qs(core::py_str(st["fill"])))));
-    tcy->setChecked(core::py_truthy(st["tcy"]));
     rotate->setValue(f("rotate_deg", 0));
     skew->setValue(f("skew_deg", 0));
     arc->setValue(f("arc", 0));
-    scale_x->setValue(f("scale_x", 1.0));
-    yakumono->setChecked(core::py_truthy(st["yakumono"]));
     gradient->setText(core::py_truthy(st["gradient"]) ? QStringLiteral("文字のグラデーションを外す") : QStringLiteral("文字のグラデーション…"));
     latin->setCurrentIndex(std::max(0, latin->findData(qs(core::py_str(st["latin"])))));
     mark->setCurrentIndex(std::max(0, mark->findData(qs(core::py_str(st["emphasis_mark"])))));
-    weight->setCurrentIndex(read([&] { return render::text::line_weight(st); }, 0));
-    italic->setChecked(core::py_truthy(st["italic"]));
     wobble->setValue(f("wobble", 0));
     double_line->setChecked(core::py_truthy(st["double"]));
     spikes->setValue(read([&] { return core::py_truthy(st["spikes"]) ? static_cast<int>(std::clamp<std::int64_t>(core::py_int(st["spikes"]), 0, 80)) : 0; }, 0));
@@ -682,28 +590,18 @@ void StoryPanel::style_changed() {
     const auto on_or_none = [](bool on) { return on ? Json(true) : Json(); };
     const auto data = [](QComboBox* box) { return Json(box->currentData().toString().toStdString()); };
     Json change = Json::object();
-    change["size_mm"] = or_none(size->value());
-    change["tracking"] = tracking->value();
-    change["leading"] = leading->value();
     change["outline_mm"] = or_none(outline->value());
     change["border_mm"] = border->value();
-    change["align"] = data(align);
     change["fill"] = data(fill);
-    change["tcy"] = tcy->isChecked();
     change["rotate_deg"] = or_none(rotate->value());
     change["skew_deg"] = or_none(skew->value());
     change["arc"] = or_none(arc->value());
     change["latin"] = data(latin);
     change["emphasis_mark"] = data(mark);
-    change["weight"] = weight->currentIndex() != 0 ? data(weight) : Json();
-    change["bold"] = nullptr;
-    change["italic"] = on_or_none(italic->isChecked());
     change["wobble"] = or_none(wobble->value());
     change["double"] = on_or_none(double_line->isChecked());
     change["spikes"] = spikes->value() != 0 ? Json(spikes->value()) : Json();
     change["spike_depth"] = std::abs(spike_depth->value() - 0.2) > 1e-6 ? Json(spike_depth->value()) : Json();
-    change["scale_x"] = std::abs(scale_x->value() - 1) > 1e-3 ? Json(scale_x->value()) : Json();
-    change["yakumono"] = yakumono->isChecked() ? Json() : Json(false);
     change["fill_opacity"] = fill_cover->value() < 100 ? Json(fill_cover->value() / 100.0) : Json();
     change["text_dx_mm"] = or_none(text_dx->value());
     change["text_dy_mm"] = or_none(text_dy->value());
@@ -878,42 +776,6 @@ void StoryPanel::set_tail_width() {
     window_->apply_ops(Json::array({Json{{"op", "move_line"}, {"id", l->id}, {"tails", tails}}}));
 }
 
-void StoryPanel::font_changed() {
-    if (loading_) return;
-    QString key = font->currentData().toString();
-    if (key == QLatin1String("__pick__")) {
-        const auto picked_font = pick_system_font();
-        if (!picked_font) {
-            picked();
-            return;
-        }
-        key = qs(*picked_font);
-    }
-    style(Json{{"font", key.toStdString()}});
-    picked();
-}
-
-std::optional<std::string> StoryPanel::pick_system_font() {
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    Json found;
-    try {
-        found = system_fonts();
-    } catch (...) {
-        QApplication::restoreOverrideCursor();
-        throw;
-    }
-    QApplication::restoreOverrideCursor();
-    if (found.empty()) {
-        window_->flash(QStringLiteral("日本語を表示できる書体が、このパソコンに見つかりませんでした"), 6000);
-        return std::nullopt;
-    }
-    QStringList names;
-    for (const Json& item : found) names << QStringLiteral("%1 %2").arg(qs(core::py_str(item["name"])), qs(core::py_str(item["style"])));
-    const auto name = ask::get_item(this, QStringLiteral("パソコンの書体"), QStringLiteral("書体"), names, 0, false);
-    if (!name || !names.contains(*name)) return std::nullopt;
-    return core::py_str(found[static_cast<std::size_t>(names.indexOf(*name))]["path"]);
-}
-
 void StoryPanel::pick_gradient() {
     const core::StoryLine* l = line();
     if (l == nullptr) return;
@@ -929,10 +791,6 @@ void StoryPanel::pick_gradient() {
                                      {"rgb_to", Json::array({bottom->red(), bottom->green(), bottom->blue()})},
                                      {"angle", 90}}}});
     }
-}
-
-void StoryPanel::pick_color() {
-    pick_style_colour("rgb", QStringLiteral("文字の色"), QColor(10, 10, 10));
 }
 
 void StoryPanel::pick_outline_colour() {

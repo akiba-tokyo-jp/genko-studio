@@ -5,7 +5,9 @@
 // tools' type layers — a click a point text, a drag a box text, a click on the target path a text on it, a click on a
 // type layer's text typing over it —, and the chosen type layer's box on the canvas. The later groups add theirs in
 // Photoshop's order: パネル ▸, OpenType ▸ (G-b, G-d), フォントプレビューのサイズ ▸, 言語オプション ▸, the fonts' commands and
-// 初期設定の書式 (G-d).
+// 初期設定の書式 (G-d). PC5 G-d: パネル ▸ (the 文字・段落・文字スタイル・段落スタイル・字形 panels: main_window_type_panels.cpp),
+// フォントプレビューのサイズ ▸, すべての見つからないフォントを置換・見つからないフォントを解決…; Shift+T (横書き文字ツール) turns the
+// type tools round as Photoshop's: chosen while it is in hand, the vertical one.
 
 #include <QActionGroup>
 #include <QComboBox>
@@ -26,6 +28,7 @@
 #include "app/preferences.hpp"
 #include "app/tool_settings.hpp"
 #include "core/ids.hpp"
+#include "core/prefs_table.hpp"
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
 #include "core/type_styles.hpp"
@@ -101,7 +104,9 @@ double distance_to(const std::vector<QPointF>& points, const QPointF& p) {
 
 void MainWindow::build_type_actions() {
     // 横書き文字ツール (Photoshop's; テキスト — act_text — sets down or across as its options say)
-    make("act_text_h", QStringLiteral("横書き文字ツール"), [this] { choose_tool(QStringLiteral("text_h")); }, {QKeySequence(QStringLiteral("Shift+T"))},
+    make("act_text_h", QStringLiteral("横書き文字ツール"),
+         [this] { choose_tool(canvas_->tool() == QLatin1String("text_h") ? QStringLiteral("text") : QStringLiteral("text_h")); },  // (PC5 G-d: round)
+         {QKeySequence(QStringLiteral("Shift+T"))},
          QStringLiteral("クリックした所に横書きの文字を入れます（テキストレイヤーならドラッグで段落テキスト）"), true);
     QAction* across = action("act_text_h");
     tools_->addAction(across);
@@ -174,11 +179,17 @@ void MainWindow::build_type_actions() {
         set_target_layer(id.toStdString());
         edit_type_layer_inline(id.toStdString());
     });
+    build_type_panel_actions();  // (PC5 G-d: the panels, フォントプレビューのサイズ ▸, the fonts' commands, スペルチェック…)
 }
 
 void MainWindow::build_type_menu(QMenu* menu) {
     type_menu_ = menu;
     menu->setObjectName(QStringLiteral("menu_type"));
+    QMenu* panels = menu->addMenu(QStringLiteral("パネル"));  // (PC5 G-d)
+    panels->setObjectName(QStringLiteral("menu_type_panels"));
+    for (const char* name : {"act_type_panel_character", "act_type_panel_paragraph", "act_type_panel_glyphs", "act_type_panel_character_styles",
+                             "act_type_panel_paragraph_styles"})
+        panels->addAction(action(name));
     // (Photoshop's 書式: アンチエイリアス ▸, 方向 ▸; 作業用パスを作成, シェイプに変換, テキストレイヤーをラスタライズ, the conversions;
     // ワープテキスト…; すべてのテキストレイヤーを更新; Lorem Ipsum をペースト)
     QMenu* methods = menu->addMenu(QStringLiteral("アンチエイリアス"));
@@ -201,6 +212,9 @@ void MainWindow::build_type_menu(QMenu* menu) {
     menu->addSeparator();
     if (QAction* act = action("act_warp_text")) menu->addAction(act);
     menu->addSeparator();
+    QMenu* previews = menu->addMenu(QStringLiteral("フォントプレビューのサイズ"));  // (PC5 G-d)
+    previews->setObjectName(QStringLiteral("menu_type_font_preview"));
+    for (const char* size : {"off", "small", "medium", "large", "extraLarge", "huge"}) previews->addAction(action(QStringLiteral("act_type_preview_") + QString::fromLatin1(size)));
     QMenu* languages = menu->addMenu(QStringLiteral("言語オプション"));  // (PC5 G-b)
     languages->setObjectName(QStringLiteral("menu_type_language"));
     for (const char* name : {"act_type_lang_default", "act_type_lang_east_asian", "act_type_lang_middle_eastern"}) languages->addAction(action(name));
@@ -209,6 +223,7 @@ void MainWindow::build_type_menu(QMenu* menu) {
     type_language_features(type_language_features());  // (the menus as the settings say)
     menu->addSeparator();
     menu->addAction(action("act_type_update_all"));
+    for (const char* name : {"act_type_replace_missing", "act_type_resolve_missing"}) menu->addAction(action(name));  // (PC5 G-d)
     menu->addSeparator();
     menu->addAction(action("act_type_lorem"));
     menu->addSeparator();
@@ -593,7 +608,11 @@ void MainWindow::type_new_layer(double x_mm, double y_mm, std::optional<QRectF> 
             if (along.size() < 2 || distance_to(along, QPointF(x_mm, y_mm)) > reach) along.clear();
         }
     }
-    canvas_->open_editor(x_mm, y_mm, QString(), [this, origin, page_id, x_mm, y_mm, box, fields, vertical, along](std::optional<QString> typed) {
+    // (PC5 G-d, 環境設定 → テキスト's プレースホルダーテキスト: the new layer's text starts as Lorem Ipsum, chosen — typing replaces it)
+    const auto store = settings();
+    const bool placeholder = core::prefs::value(*store, "type.fillNewTypeLayersWithPlaceholder") == Json(true);
+    InlineEditor* editor = canvas_->open_editor(x_mm, y_mm, placeholder ? QString::fromUtf8(vertical ? kDummy : kLorem) : QString(),
+                                                [this, origin, page_id, x_mm, y_mm, box, fields, vertical, along](std::optional<QString> typed) {
         if (!typed || typed->isEmpty() || closed_) return;
         const core::Page* target = nullptr;
         for (const auto& p : book().pages) {
@@ -635,8 +654,10 @@ void MainWindow::type_new_layer(double x_mm, double y_mm, std::optional<QRectF> 
             set_target_layer(id);
             if (layer_panel_ != nullptr) layer_panel_->refresh();
             refresh_type_frame();
+            if (const core::Layer* made = target_layer(); made != nullptr && made->type) note_missing_glyphs(*made->type);  // (PC5 G-d)
         }
     });
+    if (placeholder && editor != nullptr) editor->selectAll();
 }
 
 void MainWindow::edit_type_layer_inline(const std::string& layer_id) {
@@ -692,7 +713,9 @@ void MainWindow::edit_type_layer_inline(const std::string& layer_id) {
                 {"emphasis_runs", marks.emphasis_runs},
                 {"style_runs", marks.style_runs}};
         lettering::put_ruby(op, marks, &current, true);  // (TEXT-01: by place when the runs would not say where)
-        apply_ops(Json::array({op}));
+        core::StoryLine typed_record = current;  // (PC5 G-d: what is typed, in its font — said where the font has not a letter)
+        typed_record.text = marks.text;
+        if (apply_ops(Json::array({op}))) note_missing_glyphs(typed_record);
         refresh_type_frame();
     });
 }
@@ -705,6 +728,7 @@ void MainWindow::refresh_type_frame() {
             canvas_->type_frame.reset();
             canvas_->update();
         }
+        refresh_type_panels();  // (PC5 G-d: a line chosen, or nothing)
         return;
     }
     const core::StoryLine& record = *layer->type;
@@ -726,6 +750,7 @@ void MainWindow::refresh_type_frame() {
     }
     canvas_->type_frame = frame;
     canvas_->update();
+    refresh_type_panels();  // (PC5 G-d)
 }
 
 // --- 書式's other commands -------------------------------------------------------------------------------------------------

@@ -98,9 +98,16 @@ public:
 
     // 探す: the lines holding the words listed; how many places.
     int search();
-    // 全部置き換える: one replace_text op.
+    // すべて置換: one replace_text op (すべてのレイヤー off: the chosen text alone, one edit_type).
     void replace_all();
     void go(QListWidgetItem* item);
+    // PC5 G-d (edit.findAndReplaceText, Photoshop's 検索と置換…): 次を検索 — the next place (前方へ検索: the one before) in
+    // the book's texts in order (each page's lines in reading order, then its type layers from the top; すべてのレイヤー off:
+    // the chosen text alone), from where the last was found, round to the start; the page shown, the line or type layer
+    // chosen. False when there is none. 置換 — the place found (still as found) replaced (edit_type); 置換して次を検索.
+    bool find_next();
+    bool replace_one();
+    void replace_and_find();
 
     QLineEdit* find = nullptr;
     QLineEdit* replace = nullptr;
@@ -108,9 +115,34 @@ public:
     QCheckBox* speakers = nullptr;
     QListWidget* results = nullptr;
     QLabel* count = nullptr;
+    // PC5 G-d: 大文字と小文字を区別 (on: as before), 単語単位, 前方へ検索, すべてのレイヤー
+    QCheckBox* case_sensitive = nullptr;
+    QCheckBox* whole_word = nullptr;
+    QCheckBox* backward = nullptr;
+    QCheckBox* all_layers = nullptr;
+    QLabel* found = nullptr;
 
 private:
+    // The texts searched, in order: what names each for edit_type ({line} or {page, layer_id}), its page's row, its text.
+    struct Spot {
+        core::Json target;
+        int page_row = 0;
+        std::string text;
+    };
+    std::vector<Spot> spots() const;
+    // Where the words stand in a text (code points), as the options say (core::Error as the pattern's).
+    std::vector<std::pair<std::int64_t, std::int64_t>> places(const std::string& text) const;
+    std::string replacement(const std::string& matched) const;
+
     MainWindow* window_ = nullptr;
+    // (the place found last: its text's target and words, code points)
+    struct Found {
+        core::Json target;
+        std::string text;
+        std::int64_t start = 0;
+        std::int64_t end = 0;
+    };
+    std::optional<Found> last_;
 };
 
 }  // namespace genko::app

@@ -57,6 +57,7 @@
 #include "app/pages_panel.hpp"
 #include "app/review_model.hpp"
 #include "app/story_panel.hpp"
+#include "app/type_panels.hpp"
 #include "app/studio_widgets.hpp"
 #include "app/theme.hpp"
 #include "core/actor.hpp"
@@ -869,17 +870,22 @@ private slots:
     }
 
     // test_the_lettering_fields: 長体・平体 (scale_x) and the punctuation's spacing (yakumono) of the lettering, each an
-    // edit of the line's style (yakumono alone: test_gui_lines).
+    // edit of the line's style (yakumono alone: test_gui_lines) — PC5 G-d (8-5 (a)): the 文字 panel's 水平比率 and the 段落
+    // panel's 約物を詰める.
     void theLetteringFields() {
         Desk desk(two_panels_book());
         app::StoryPanel* panel = desk.window->story();
         panel->refresh();
         panel->select(std::string("l"));
-        panel->scale_x->setValue(0.7);
-        emit panel->scale_x->editingFinished();
+        desk.window->action("act_panel_character")->trigger();
+        desk.window->action("act_panel_paragraph")->trigger();
+        app::CharacterPanel* chars = desk.window->character_panel();
+        QTRY_VERIFY(chars->isEnabled());
+        chars->scale_x->setValue(70);
         QCOMPARE(story_line(desk.window->book(), "l")->style.value("scale_x", Json()), Json(0.7));
-        panel->yakumono->setChecked(false);
-        emit panel->yakumono->clicked(false);
+        app::ParagraphPanel* paragraph = desk.window->paragraph_panel();
+        paragraph->yakumono->setChecked(false);
+        emit paragraph->yakumono->clicked(false);
         QCOMPARE(story_line(desk.window->book(), "l")->style.value("yakumono", Json()), Json(false));
     }
 

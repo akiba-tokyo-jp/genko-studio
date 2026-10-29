@@ -87,6 +87,8 @@
 #include "render/timelapse.hpp"
 #include "service/actions.hpp"
 #include "service/automate.hpp"
+#include "service/spell.hpp"
+#include "core/prefs_table.hpp"
 #include "storage/doctor.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/gc.hpp"
@@ -1622,6 +1624,54 @@ int migrate(const QStringList& args, bool ascii) {
     } catch (const storage::ConvertError& error) {
         return fail(error.what(), error.code(), ascii, 1, &error.report());
     }
+    return 0;
+}
+
+// PC5 G-d (edit.checkSpelling, SPEC.md TEXT-02「スペルチェック」): `genko spell <dir> [--page N] [--json] [--sfx]
+// [--no-spelling] [--no-notation]` — the book's lines and type layers checked against the English dictionary and this
+// computer's user dictionary and notation table (環境設定 → テキスト's: read here, never by an op). One finding a line —
+// its page, its line or type layer, its graphemes, the word and what to write instead — or, --json, the findings as
+// JSON. Nothing is changed (edit_type and replace_text change them).
+int spell_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--page", true}, {"--json", false}, {"--sfx", false}, {"--no-spelling", false}, {"--no-notation", false}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 1, "src", a)) return usage("genko spell: " + *error);
+    const fs::path dir = path_arg(a.positional[0]);
+    refuse_legacy(dir);
+    service::spell::Options options;
+    if (const auto page = a.value("--page")) {
+        const auto n = py_int_arg(*page);
+        if (!n) return usage("genko spell: argument --page: the page is a number");
+        options.page = core::Num(*n);
+    }
+    options.sfx = a.flag("--sfx");
+    options.spelling = !a.flag("--no-spelling");
+    options.notation = !a.flag("--no-notation");
+    {
+        const auto settings = core::prefs::store();
+        const Json words = core::prefs::value(*settings, "type.userDictionary");
+        options.user = service::spell::user_words(words.is_string() ? words.get<std::string>() : std::string());
+        const Json table = core::prefs::value(*settings, "type.notations");
+        options.notations = service::spell::notations_of(table.is_string() ? Json::parse(table.get<std::string>(), nullptr, false) : Json());
+    }
+    const storage::LoadResult loaded = storage::load_document(dir);
+    const std::vector<service::spell::Finding> findings = service::spell::check(loaded.document, options);
+    if (a.flag("--json")) {
+        Json out = service::spell::to_json(findings);
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    std::string text;
+    for (const service::spell::Finding& f : findings) {
+        std::string where = "page " + f.page.repr() + (f.line.empty() ? "  layer " + f.layer_id : "  line " + f.line);
+        std::string instead;
+        for (const std::string& s : f.suggestions) instead += (instead.empty() ? "" : ", ") + s;
+        text += where + "  " + std::to_string(f.start) + "-" + std::to_string(f.end) + "  " + (f.kind == "notation" ? "表記" : "綴り") + "  " +
+                f.word + (instead.empty() ? std::string() : " → " + instead) + "\n";
+    }
+    text += std::to_string(findings.size()) + (findings.size() == 1 ? " finding\n" : " findings\n");
+    write_text(text, stdout);
     return 0;
 }
 
@@ -3214,6 +3264,7 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("export")) return export_command(args, ascii);
         if (command == QLatin1String("copy")) return copy_command(args, ascii);  // (PC4 F-c: コピーを保存・書き出し形式・Web 用に保存)
         if (command == QLatin1String("smart")) return smart_command(args, ascii);      // (smart-objects@1, PC3 A1)
+        if (command == QLatin1String("spell")) return spell_command(args, ascii);      // (PC5 G-d: スペルチェック)
         if (command == QLatin1String("package")) return package_command(args, ascii);  // (smart-objects@1, PC3 A1)
         if (command == QLatin1String("shapes")) return shapes_command(args, ascii);    // (pen-shapes@1, PC3 C-b)
         if (command == QLatin1String("brushes")) return brushes_command(args, ascii);  // (brushes@1, PC4 E1: brush.get)

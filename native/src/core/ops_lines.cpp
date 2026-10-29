@@ -849,23 +849,38 @@ bool found_in(const Json& words, const std::string& text) {
     return text.find(words.get_ref<const std::string&>()) != std::string::npos;
 }
 
+// re.escape(text) as Python 3.12 escapes: its special characters with a backslash.
+std::string re_escaped(const std::string& text) {
+    static constexpr std::string_view kSpecial = "()[]{}?*+-|^$\\.&~# \t\n\r\v\f";
+    std::string out;
+    for (const char ch : text) {
+        if (kSpecial.find(ch) != std::string_view::npos) out.push_back('\\');
+        out.push_back(ch);
+    }
+    return out;
+}
+
 // bookops.replace_text (一括置換): every line's words (and speakers, if asked) with `find` swapped for `replace` — the
 // words as they are, or a pattern of re's own syntax ("regex", core/pyre: Python 3.12's re); `pages` limits it; how many
 // and where go back in the op's report. Beyond Python (SPEC COMP-01a): a pattern whose search takes more than
 // kRegexSteps steps over the book, or whose groups nest more than 200 deep, is refused (Python searches on for hours,
-// or stops with RecursionError).
+// or stops with RecursionError). PC5 G-d (検索と置換…): whole_word, and a type@1 book's type layers as its lines (each
+// found reported with its page and layer_id).
 void replace_text(OpContext& c) {
     const Json& op = c.op;
     const std::string find = py_str(py_or(op_value(op, "find"), Json("")));
     if (find.empty()) throw OpError("find is the words to look for");
     const std::string replace = py_str(py_or(op_value(op, "replace"), Json("")));
     const bool ignore_case = !py_truthy(get_or(op, "case", Json(true)));
+    // PC5 G-d (検索と置換…'s 単語単位): the words found only where no letter, digit or _ stands right before or after them
+    const bool whole_word = truthy_at(op, "whole_word");
     // re.compile(find if op.get("regex") else re.escape(find), flags): re.error is the op's error, the others go through
     std::optional<PyPattern> regex;
     std::optional<PyLiteralPattern> literal;
-    if (truthy_at(op, "regex")) {
+    if (truthy_at(op, "regex") || whole_word) {
+        const std::string body = truthy_at(op, "regex") ? find : re_escaped(find);
         try {
-            regex.emplace(find, ignore_case ? PyPattern::kIgnoreCase : 0);
+            regex.emplace(whole_word ? "(?<!\\w)(?:" + body + ")(?!\\w)" : body, ignore_case ? PyPattern::kIgnoreCase : 0);
         } catch (const PyUncaught& error) {
             if (error.type() == "re.error") throw OpError(std::string("the pattern cannot be read: ") + error.what());
             throw;
@@ -892,15 +907,15 @@ void replace_text(OpContext& c) {
     std::int64_t ruby_review = 0;
     std::int64_t ruby_removed = 0;
     Json where = Json::array();
-    for (StoryLine& line : c.doc.story) {
-        if (!pages.empty() && std::none_of(pages.begin(), pages.end(), [&](std::int64_t p) { return line.page_index == Num(p); })) {
-            continue;
-        }
+    // one text's words replaced (a line's, or — PC5 G-d — a type layer's record): how many, its rubies, ranges and marks
+    // following them
+    const auto replace_in = [&](StoryLine& line, Json place) -> std::int64_t {
         std::vector<PyReMatch> matches;
         auto [text, n] = subn(line.text, &matches);
         if (n > 0) {
-            where.push_back(Json::object({{"line", line.id}, {"page", line.page_index.json()}, {"count", n},
-                                          {"text", first_characters(text, 40)}}));
+            place["count"] = n;
+            place["text"] = first_characters(text, 40);
+            where.push_back(std::move(place));
             const std::string before = line.text;
             line.text = text;
             count += n;
@@ -927,6 +942,13 @@ void replace_text(OpContext& c) {
             std::erase_if(line.emphasis_runs, [&](const std::string& words) { return text.find(words) == std::string::npos; });
             std::erase_if(line.style_runs, [&](const auto& run) { return text.find(run.first) == std::string::npos; });
         }
+        return n;
+    };
+    for (StoryLine& line : c.doc.story) {
+        if (!pages.empty() && std::none_of(pages.begin(), pages.end(), [&](std::int64_t p) { return line.page_index == Num(p); })) {
+            continue;
+        }
+        replace_in(line, Json::object({{"line", line.id}, {"page", line.page_index.json()}}));
         if (truthy_at(op, "speakers")) {
             auto [speaker, m] = subn(line.speaker, nullptr);
             if (m > 0) {
@@ -934,6 +956,20 @@ void replace_text(OpContext& c) {
                 line.speaker = speaker;
                 count += m;
             }
+        }
+    }
+    // PC5 G-d (type@1): the pages' type layers too — a book of before has none, so its result is as before; a locked one is
+    // left as it is
+    for (std::size_t i = 0; i < c.doc.pages.size(); ++i) {
+        if (c.doc.is_deferred(i)) continue;
+        const Page& page = c.doc.page(i);
+        if (!pages.empty() && std::none_of(pages.begin(), pages.end(), [&](std::int64_t p) { return page.index == Num(p); })) continue;
+        for (std::size_t j = 0; j < page.layers.size(); ++j) {
+            const Layer& layer = page.layers[j];
+            if (!type_text::is_type_layer(layer) || !layer.type || layer.locked) continue;
+            StoryLine record = *layer.type;
+            if (replace_in(record, Json::object({{"page", page.index.json()}, {"layer_id", layer.id}})) == 0) continue;
+            c.doc.edit_page(i).layers[j].type = type_text::shared_record(std::move(record));
         }
     }
     if (count == 0 && truthy_at(op, "must_find")) throw OpError("nothing matched");

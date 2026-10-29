@@ -41,6 +41,7 @@ set(_packages
   "lucide~Lucide icons~=NOASSERTION~ISC~built-in"
   "blake3~BLAKE3 (its C implementation: the .pcraft's hashes)~blake3~CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception~built-in"
   "sheenbidi~SheenBidi (the bidirectional order of right-to-left text set across)~sheenbidi~Apache-2.0~built-in"
+  "scowl~SCOWL word list, size 50, en_US (the English dictionary of the spelling check)~=2020.12.07~LicenseRef-SCOWL~built-in"
   "libraw~LibRaw (camera RAW: a shared library of its own)~libraw~LGPL-2.1-only OR CDDL-1.0~bundled:(^lib/libraw_r\\.so|(^|/)raw_r\\.dll$)")
 if(CMAKE_HOST_WIN32)
   list(APPEND _packages

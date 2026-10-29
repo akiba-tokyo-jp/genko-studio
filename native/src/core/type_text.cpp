@@ -36,11 +36,12 @@ constexpr std::array<std::string_view, 2> kShapes{"point", "box"};
 
 constexpr double kMaxMm = 1000.0;  // a length (a page is at most 1 m: the paper's bound)
 
-const std::array<Attr, 25> kCharAttrs{{
+const std::array<Attr, 26> kCharAttrs{{
     {"font", AttrKind::Name, 0, 4096},
     {"family", AttrKind::Name, 0, 256},
     {"font_style", AttrKind::Name, 0, 256},
     {"postscript", AttrKind::Name, 0, 256},
+    {"face_index", AttrKind::Number, 0, 255},  // (PC5 G-d: the face of a font collection — .ttc — `font` names; a whole number)
     {"size_mm", AttrKind::Number, 0.1, kMaxMm},
     {"scale", AttrKind::Number, 0.1, 10},  // (the size against the line's: Genko's style_runs' scale)
     {"rgb", AttrKind::Rgb},
@@ -112,7 +113,9 @@ std::string joined(std::span<const std::string_view> names) {
 // One attribute's value in its normal form.
 Json check_value(const Attr& attr, const Json& v, const std::string& what) {
     switch (attr.kind) {
-        case AttrKind::Number: return num(number_of(v, what, attr.lo, attr.hi));
+        case AttrKind::Number:
+            if (attr.name == "face_index" && !v.is_number_integer()) bad(what + " must be a whole number");
+            return num(number_of(v, what, attr.lo, attr.hi));
         case AttrKind::Leading:
             if (v == Json("auto")) return v;
             return num(number_of(v, what, attr.lo, attr.hi));
@@ -322,7 +325,7 @@ const Attr* para_attr(std::string_view name) {
 }
 
 const Json& char_defaults() {
-    static const Json defaults = Json::parse(R"({"font": null, "family": null, "font_style": null, "postscript": null,
+    static const Json defaults = Json::parse(R"({"font": null, "family": null, "font_style": null, "postscript": null, "face_index": 0,
         "size_mm": null, "scale": 1, "rgb": null, "tracking": 0, "leading_mm": "auto", "baseline_shift_mm": 0, "scale_x": 1,
         "scale_y": 1, "faux_bold": "normal", "faux_italic": false, "underline": false, "strikethrough": false, "caps": "normal",
         "kerning": "metrics", "ligatures": true, "discretionary_ligatures": false, "features": {}, "variations": {},

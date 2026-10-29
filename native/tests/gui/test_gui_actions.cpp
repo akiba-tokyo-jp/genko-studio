@@ -428,7 +428,11 @@ private slots:
         // カウントツール are the frames' attributes made real — test_gui_measure.
         // and PC5 G-c's 2 — 書式 → 初期設定の書式を読み込み・初期設定の書式を保存 (act_type_load_defaults, act_type_save_defaults) —
         // test_gui_type.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{702});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1 and G-c's 2)
+        // and PC5 G-d's 20 (SPEC TEXT-02) — ウィンドウ → 文字・段落・文字スタイル・段落スタイル・字形 (act_panel_<panel>), 書式 → パネル ▸
+        // 5 (act_type_panel_<panel>), フォントプレビューのサイズ ▸ 6 (act_type_preview_<size>), すべての見つからないフォントを置換・見つからない
+        // フォントを解決… (act_type_replace_missing, act_type_resolve_missing), 編集 → スペルチェック… (act_spelling) and 環境設定 → テキスト…
+        // (act_prefs_type: its page made) — test_gui_type_panels.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{722});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2 and G-d's 20)
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -954,13 +958,16 @@ private slots:
         }
         QCOMPARE(w->tool_palette()->windowTitle(), QStringLiteral("ツール"));
         const QStringList edit = items(menu(QStringLiteral("編集")));
-        QCOMPARE(edit.mid(edit.size() - 5),
-                 (QStringList{QStringLiteral("|"), QStringLiteral("検索"), QStringLiteral("|"), QStringLiteral("キーボードショートカット…"), QStringLiteral("環境設定 ▸")}));
+        // (PC5 G-d: Photoshop's スペルチェック… and 検索と置換… after 検索)
+        QCOMPARE(edit.mid(edit.size() - 7),
+                 (QStringList{QStringLiteral("|"), QStringLiteral("検索"), QStringLiteral("スペルチェック…"), QStringLiteral("検索と置換…"), QStringLiteral("|"),
+                              QStringLiteral("キーボードショートカット…"), QStringLiteral("環境設定 ▸")}));
         QMenu* panes = w->findChild<QMenu*>(QStringLiteral("menu_preferences"));
         QVERIFY(panes != nullptr);
         QCOMPARE(items(panes), (QStringList{QStringLiteral("一般…"), QStringLiteral("インターフェイス…"), QStringLiteral("ツール…"), QStringLiteral("ファイル管理…"),
                                            QStringLiteral("書き出し…"), QStringLiteral("パフォーマンス…"), QStringLiteral("カーソル…"), QStringLiteral("透明部分・色域…"),
                                            QStringLiteral("単位・定規…"), QStringLiteral("ガイド・グリッド・スライス…"),  // (PC5 H-b)
+                                           QStringLiteral("テキスト…"),  // (PC5 G-d)
                                            QStringLiteral("Camera Raw…"), QStringLiteral("ペンタブレット…"), QStringLiteral("長い時間の作業…")}));
         QVERIFY(!items(menu(QStringLiteral("ファイル"))).contains(QStringLiteral("環境設定…")));
         QVERIFY(!items(menu(QStringLiteral("ヘルプ"))).contains(QStringLiteral("検索")));

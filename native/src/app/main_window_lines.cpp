@@ -64,7 +64,8 @@ std::optional<std::string> added_line(const core::Document& book, const std::vec
 // --- the commands ----------------------------------------------------------------------------------------------------
 
 void MainWindow::build_line_actions() {
-    make("act_text", QStringLiteral("テキスト"), [this] { choose_tool(QStringLiteral("text")); }, {QKeySequence(QStringLiteral("T"))},
+    // (PC5 G-d, 節 G 5.4: Photoshop's 縦書き文字ツール — テキスト before, preferences::renamed())
+    make("act_text", QStringLiteral("縦書き文字ツール"), [this] { choose_tool(QStringLiteral("text")); }, {QKeySequence(QStringLiteral("T"))},
          QStringLiteral("クリックした所に台詞を入力します（縦書き）"), true);
     QAction* text = action("act_text");
     tools_->addAction(text);
@@ -72,8 +73,9 @@ void MainWindow::build_line_actions() {
     tool_actions_[QStringLiteral("text")] = text;
     make("act_story_editor", QStringLiteral("ストーリーエディター…"), [this] { open_story_editor(); }, {QKeySequence(QStringLiteral("Ctrl+Shift+L"))},
          QStringLiteral("全ページの台詞をまとめて直す・台本を流し込む"));
-    make("act_replace", QStringLiteral("台詞の検索・置換…"), [this] { replace_dialog(); }, {QKeySequence(QStringLiteral("Ctrl+Alt+F"))},
-         QStringLiteral("全ページの台詞から言葉を探して置き換えます"));
+    // (PC5 G-d, 節 G 5.4: Photoshop's 編集 → 検索と置換… — 台詞の検索・置換… in ページ before, preferences::renamed())
+    make("act_replace", QStringLiteral("検索と置換…"), [this] { replace_dialog(); }, {QKeySequence(QStringLiteral("Ctrl+Alt+F"))},
+         QStringLiteral("台詞とテキストレイヤーの文字を探して、次へ・1 か所ずつ・すべてを置き換えます"));
     make("act_line_type", QStringLiteral("台詞を入れる（テキストの道具）"), [this] { choose_tool(QStringLiteral("text")); });
     QAction* pen = make("act_balloon_pen", QStringLiteral("フキダシを手で描く"), [] {}, {}, QStringLiteral("ドラッグで囲んだ形のフキダシに台詞を入れます"), true);
     connect(pen, &QAction::triggered, this, [this](bool on) {
@@ -127,7 +129,7 @@ void MainWindow::build_line_menus(QMenu* pages) {
     lines->addAction(action("act_line_delete"));
     pages->addSeparator();
     pages->addAction(action("act_story_editor"));
-    pages->addAction(action("act_replace"));
+    // (PC5 G-d: 検索と置換… is 編集's — build_edit_menu_tail)
 }
 
 void MainWindow::build_line_dock() {
@@ -325,6 +327,7 @@ void MainWindow::on_line_selected(const std::string& line_id, bool open_panel) {
     story_->refresh();
     story_->select(line_id);
     if (open_panel) show_dock(QStringLiteral("台詞"));
+    refresh_type_panels();  // (PC5 G-d: the 文字・段落 panels follow the line chosen)
 }
 
 const core::StoryLine* MainWindow::selected_line_or_say() {

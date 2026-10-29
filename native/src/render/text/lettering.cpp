@@ -99,6 +99,13 @@ const Json& at(const Json& st, const char* key) {
     const auto it = st.find(key);
     return it == st.end() ? none : *it;
 }
+// PC5 G-d: a face of a font collection (.ttc) — the character attribute face_index — as the fonts open it (render::face_font):
+// a face of one font file (not the bundled fonts' composite of two); face 0 as it is.
+Face collection_face(Face f, const Json& index) {
+    if (!index.is_number_integer() || index.get<std::int64_t>() <= 0 || f.composite()) return f;
+    f.kana = f.other = face_font(f.other, static_cast<unsigned>(index.get<std::int64_t>()));
+    return f;
+}
 // float(value or fallback)
 double float_or(const Json& value, double fallback) { return core::py_truthy(value) ? core::to_float(value) : fallback; }
 std::string kind_of(const core::StoryLine& line) { return line.balloon.empty() ? std::string("speech") : line.balloon; }
@@ -223,6 +230,66 @@ Rgb fill_of(const Json& st) { return core::py_truthy(at(st, "rgb")) ? rgb_tuple(
 
 std::size_t cell_count(std::u32string_view text, bool tcy, bool latin) { return cells(text, tcy, latin).size(); }
 
+// PC5 G-d (SPEC.md TEXT-02「縦組みの属性」): a record set by the OpenType typesetting, down — the whole text's own attributes
+// (its character and paragraph attributes and styles over its line's style, its ranges' left out) in place of the line's
+// style's: tracking (of the em), leading_mm (the columns' pitch: the gap after the em), 縦中横 of two or three digits (tcy)
+// and the alignment (left and start top, right bottom, center and justify_center centred, justify and justify_all spread). A
+// range's tracking, leading and alignment are not drawn down (the grid is Genko's); a range's 縦中横 is: tcy_spans_of.
+void down_attributes(const core::StoryLine& line, std::int64_t em, int dpi, double& tracking, double& leading, bool& tcy, std::string& align) {
+    if (!line.native_type || !line.native_type->is_object()) return;
+    core::StoryLine whole = line;
+    Json nt = *line.native_type;
+    nt.erase("runs");
+    whole.native_type = nt;
+    Json chars, para;
+    try {
+        chars = core::type_text::resolve_chars(whole, TypeStyles::current()).front().attrs;
+        para = core::type_text::resolve_para(whole, TypeStyles::current(), 0);
+    } catch (const std::exception&) {
+        return;
+    }
+    if (const Json& t = at(chars, "tracking"); t.is_number()) tracking = t.get<double>();
+    if (const Json& l = at(chars, "leading_mm"); l.is_number() && em > 0 && dpi > 0) {
+        const double pitch = l.get<double>() * static_cast<double>(dpi) / 25.4;
+        leading = std::max(0.0, pitch - static_cast<double>(em)) / static_cast<double>(em);
+    }
+    // (縦中横 of digits: the whole text's own when it says — the attribute's default, on, is not the line's, off)
+    if (nt.contains("char") && nt["char"].is_object() && nt["char"].contains("tcy") && nt["char"]["tcy"].is_boolean()) tcy = nt["char"]["tcy"].get<bool>();
+    if (const Json& a = at(para, "align"); a.is_string()) {
+        const std::string& v = a.get_ref<const std::string&>();
+        align = v == "center" || v == "justify_center" ? "center" : v == "right" || v == "bottom" || v == "justify_right" ? "bottom"
+              : v == "justify_all" || v == "justify" ? "justify" : "top";
+    }
+}
+
+// PC5 G-d: the record's ranges whose own character attributes ask for 縦中横 (tcy true) as code points of the text as set
+// (`from`: each code point's place in the record's text, npos: a line break put in), cut at its line breaks.
+std::vector<std::pair<std::size_t, std::size_t>> tcy_spans_of(const core::StoryLine& line, std::u32string_view set, const std::vector<std::size_t>& from) {
+    std::vector<std::pair<std::size_t, std::size_t>> out;
+    if (!line.native_type || !line.native_type->is_object() || !line.native_type->contains("runs")) return out;
+    const Json& runs = (*line.native_type)["runs"];
+    if (!runs.is_array()) return out;
+    const std::vector<std::size_t> b = core::ruby::bounds(u32(line.text));
+    const auto graphemes = static_cast<std::int64_t>(b.size()) - 1;
+    for (const Json& run : runs) {
+        if (!run.is_object() || !run.contains("char") || at(run["char"], "tcy") != Json(true)) continue;
+        const std::int64_t s = run.value("start", std::int64_t{0}), e = run.value("end", std::int64_t{0});
+        if (s < 0 || e > graphemes || e <= s) continue;
+        const std::size_t cs = b[static_cast<std::size_t>(s)], ce = b[static_cast<std::size_t>(e)];
+        std::optional<std::size_t> open;
+        for (std::size_t i = 0; i <= set.size(); ++i) {
+            const bool in = i < set.size() && i < from.size() && from[i] != std::u32string::npos && from[i] >= cs && from[i] < ce && set[i] != U'\n';
+            if (in && !open) open = i;
+            if (!in && open) {
+                out.emplace_back(*open, i);
+                open.reset();
+            }
+        }
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
 // _vertical(line, st, face, em, inner_h, fill)
 Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, const Face& face, std::int64_t em, double inner_h,
                     const Rgb& fill, int dpi, std::vector<RubyNote>* notes, std::vector<RubyDrawn>* drawn,
@@ -232,10 +299,12 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
     SetText set = by_place || opentype ? set_text_mapped(fonts, line, st, face) : SetText{set_text(fonts, line, st, face), {}};
     std::u32string text = std::move(set.text);
     std::vector<std::size_t> from = std::move(set.from);
-    const double tracking = float_or(at(st, "tracking"), 0);
-    const double leading = float_or(at(st, "leading"), 0);
+    double tracking = float_or(at(st, "tracking"), 0);
+    double leading = float_or(at(st, "leading"), 0);
     const bool latin = at(st, "latin") != Json("upright");
-    const bool tcy = core::py_truthy(at(st, "tcy"));
+    bool tcy = core::py_truthy(at(st, "tcy"));
+    std::string align = core::py_str(core::py_or(at(st, "align"), Json("top")));
+    if (opentype) down_attributes(line, em, dpi, tracking, leading, tcy, align);  // (PC5 G-d: the whole text's own, down)
     const double step = static_cast<double>(em) * (1 + tracking);
     const double column = inner_h;
     if (text.find(U'\n') == std::u32string::npos && em > 0) {
@@ -278,7 +347,7 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
     args.tracking = tracking;
     args.leading = leading;
     args.tcy = tcy;
-    args.align = core::py_str(core::py_or(at(st, "align"), Json("top")));
+    args.align = align;
     args.latin = latin;
     args.emphasis_runs = emphasis_of(fonts, line, face);
     args.emphasis_mark = core::py_str(core::py_or(at(st, "emphasis_mark"), Json("sesame")));
@@ -298,6 +367,7 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
             letters_from.push_back(i < from.size() ? from[i] : std::u32string::npos);
         }
         attrs = resolve(line, letters, letters_from, TypeStyles::current()).chars;
+        args.tcy_spans = tcy_spans_of(line, args.text, from);  // (PC5 G-d: the ranges' own 縦中横)
         // (a letter's size_mm against the line's own size — its style's, else the lines' 5 mm — as across: review P3-12)
         const double base_mm = float_or(at(st, "size_mm"), kCapMm);
         const std::vector<Json> words = char_styles(letters, line.style_runs, Json());
@@ -325,6 +395,7 @@ Image vertical_text(Fonts& fonts, const core::StoryLine& line, const Json& st, c
             const Json& a = attrs[letter];
             Face f = face;
             if (const Json& font = at(a, "font"); font.is_string() && font != line_font) f = face_of(font, kDefaultDialogue);
+            f = collection_face(f, at(a, "face_index"));
             const std::string path = fonts.readable(fonts.path_for(f, cell.substr(0, 1)));
             std::map<std::string, std::uint32_t> features{{"vert", 1}, {"vrt2", 1}};
             if (at(a, "proportional") == Json(true)) features["vpal"] = 1;
@@ -410,6 +481,7 @@ bool loose_letter(char32_t c) {
 }
 
 const Json& attr(const Json& attrs, const char* key) { return at(attrs, key); }
+
 double attr_num(const Json& attrs, const char* key, double fallback) {
     const Json& v = at(attrs, key);
     return v.is_number() ? v.get<double>() : fallback;
@@ -449,6 +521,7 @@ OpenTypeRows opentype_rows(const OpenTypeIn& q) {
         const Json& a = resolved.chars[i];
         Face f = q.face;
         if (const Json& font = attr(a, "font"); font.is_string() && font != line_font) f = face_of(font, kDefaultDialogue);
+        f = collection_face(f, attr(a, "face_index"));
         const std::u32string one(1, text[i] == U'\n' ? U' ' : text[i]);
         Look look;
         look.font = q.fonts.readable(q.fonts.path_for(f, one));

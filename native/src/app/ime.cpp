@@ -5,6 +5,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QPainter>
+#include <QTextCursor>
 
 #include <algorithm>
 
@@ -138,7 +139,17 @@ void InlineEditor::finish(bool keep) {
 
 void InlineEditor::keyPressEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Escape) {
-        finish(false);
+        finish(esc_commits && preedit_.isEmpty());
+        return;
+    }
+    // (スマート引用符: ' and " as ‘’ and “” — opening after a space, a line's start or an opening bracket, else closing)
+    if (smart_quotes && preedit_.isEmpty() && (event->text() == QLatin1String("'") || event->text() == QLatin1String("\""))) {
+        const QTextCursor cursor = textCursor();
+        const QString before = toPlainText().left(cursor.selectionStart());
+        const QChar last = before.isEmpty() ? QChar(u' ') : before.back();
+        const bool opening = last.isSpace() || QStringLiteral("([{「『（〔").contains(last);
+        const bool single = event->text() == QLatin1String("'");
+        insertPlainText(single ? (opening ? QStringLiteral("\u2018") : QStringLiteral("\u2019")) : (opening ? QStringLiteral("\u201C") : QStringLiteral("\u201D")));
         return;
     }
     if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) && (event->modifiers() & Qt::ControlModifier) && preedit_.isEmpty()) {

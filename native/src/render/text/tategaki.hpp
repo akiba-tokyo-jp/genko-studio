@@ -60,6 +60,8 @@ std::pair<std::u32string, std::vector<std::size_t>> without_periods_mapped(std::
 
 // mark_tcy(text, style_runs), mono_runs(ruby_runs), char_styles(text, style_runs, base) (base: a dict or null)
 std::u32string mark_tcy(std::u32string_view text, const StyleRuns& style_runs);
+// PC5 G-d: the text with each of `spans` (code points [start, end), in order, none across a line break) marked for 縦中横.
+std::u32string mark_spans(std::u32string_view text, const std::vector<std::pair<std::size_t, std::size_t>>& spans);
 std::vector<core::Json> mono_runs(const std::vector<core::Json>& ruby_runs);
 std::vector<core::Json> char_styles(std::u32string_view text, const StyleRuns& style_runs, const core::Json& base);
 
@@ -191,6 +193,9 @@ struct ComposeArgs {
     // cell drawn as before. The grid, kinsoku, 縦中横, rubies and 傍点 stay Genko's.
     std::vector<core::Json> looks;
     std::function<std::optional<Image>(std::size_t letter, std::u32string_view cell, std::int64_t size, const Rgb& rgb, int bold)> opentype_cell;
+    // PC5 G-d: the ranges of the text (code points [start, end), none across a line break, in order) a record's own 縦中横
+    // (its ranges' character attribute tcy) sets in one cell each, as style_runs' words set so.
+    std::vector<std::pair<std::size_t, std::size_t>> tcy_spans;
 };
 Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args);
 
