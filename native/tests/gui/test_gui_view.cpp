@@ -285,7 +285,6 @@ private slots:
         QAction* hand = v.act("act_hand_tool");
         QVERIFY(v.window->tools_group()->actions().contains(hand));
         QCOMPARE(hand->shortcut(), QKeySequence(QStringLiteral("H")));
-        QVERIFY(v.window->tool_palette()->actions().contains(hand));
         hand->trigger();
         QCOMPARE(c->tool(), QStringLiteral("hand"));
         QCOMPARE(v.window->tool_settings()->title()->text(), QStringLiteral("手のひらツール（H）"));

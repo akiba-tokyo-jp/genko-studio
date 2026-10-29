@@ -389,7 +389,12 @@ private slots:
         // — theirs (test_gui_styles).
         // and the 11 of PC5 H-0 (SPEC VIEW-01) — 編集 → キーボードショートカット… and 環境設定 ▸'s panes with a page
         // (act_keyboard_shortcuts, act_prefs_<pane>; 一般… is act_prefs) — theKeySets and theMenusOfPC5 below.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{595});
+        // and the 13 of PC5 H-a (SPEC VIEW-01) — 表示 → 100%・200%・レイヤーを画面サイズに合わせる・ピクセルグリッド・ピクセルアート
+        // プレビュー・32 bit プレビューオプション…・手のひらツール, スクリーンモード ▸'s three and 次のスクリーンモード, the hand and zoom
+        // tools' 画面にフィット and スクラブズーム (act_actual_pixels, act_200_percent, act_fit_layers, act_pixel_grid, act_pixel_art,
+        // act_32bit_preview, act_hand_tool, act_screen_standard, act_screen_full_menu, act_screen_full, act_screen_next,
+        // act_fill_screen, act_scrubby_zoom) — test_gui_view.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{608});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

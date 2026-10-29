@@ -594,7 +594,9 @@ private slots:
         emit frame->activated(frame->currentIndex());
         QCOMPARE(studio.window->canvas()->frame_mode, QStringLiteral("poly"));
         studio.window->choose_tool(QStringLiteral("zoom"));
-        QVERIFY(ts->page_for(QStringLiteral("zoom")) == nullptr);
+        // (PC5 H-a: ズームツール's options — its ways and 100%・画面サイズ・画面にフィット: test_gui_view)
+        QVERIFY(ts->page_for(QStringLiteral("zoom")) != nullptr);
+        QVERIFY(ts->page_for(QStringLiteral("zoom"))->findChild<QComboBox*>(QStringLiteral("zoom_mode")) != nullptr);
         // a page's command rows trigger their commands: プリントサイズ (原寸 before PC5 H-0) on the selection tool's page
         studio.window->choose_tool(QStringLiteral("select"));
         QPushButton* actual = nullptr;
