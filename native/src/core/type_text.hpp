@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -156,6 +157,9 @@ StoryLine record_of(const StoryLine& line);
 StoryLine line_of(const Layer& layer, const Num& page_index);
 // The record moved by (dx, dy) mm: its box, point text's anchor, tails and hand-drawn balloon.
 StoryLine moved(const StoryLine& record, double dx, double dy);
+// PC5 G-a: the record's matrix (native_type.transform: x' = a·x + c·y + e, y' = b·x + d·y + f, the page's mm), none
+// when it has none.
+std::optional<std::array<double, 6>> transform_of(const StoryLine& record);
 // The record shared as Layer::type holds it.
 std::shared_ptr<const StoryLine> shared_record(StoryLine record);
 

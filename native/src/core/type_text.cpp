@@ -898,8 +898,27 @@ StoryLine line_of(const Layer& layer, const Num& page_index) {
     return out;
 }
 
+std::optional<std::array<double, 6>> transform_of(const StoryLine& record) {
+    if (!record.native_type || !record.native_type->is_object()) return std::nullopt;
+    const auto it = record.native_type->find("transform");
+    if (it == record.native_type->end() || !it->is_array() || it->size() != 6) return std::nullopt;
+    std::array<double, 6> t{};
+    for (std::size_t i = 0; i < 6; ++i) {
+        if (!(*it)[i].is_number()) return std::nullopt;
+        t[i] = (*it)[i].get<double>();
+    }
+    return t;
+}
+
 StoryLine moved(const StoryLine& record, double dx, double dy) {
     StoryLine out = record;
+    if (const std::optional<std::array<double, 6>> t = transform_of(record)) {
+        // (PC5 G-a: a record its matrix turns moves by its matrix — where its letters are set stays)
+        Json nt = *out.native_type;
+        nt["transform"] = Json::array({num((*t)[0]), num((*t)[1]), num((*t)[2]), num((*t)[3]), num((*t)[4] + dx), num((*t)[5] + dy)});
+        out.native_type = std::move(nt);
+        return out;
+    }
     const auto shift = [&](Num& v, double d) { v = Num(v.value() + d); };
     shift(out.x_mm, dx);
     shift(out.y_mm, dy);
@@ -993,7 +1012,12 @@ void validate_type(const Document& doc) {
         }
         bad("the book's type_styles are not in their normal form");
     }
-    for (const StoryLine& line : doc.story) record_ok(line, "the line " + line.id);
+    for (const StoryLine& line : doc.story) {
+        record_ok(line, "the line " + line.id);
+        // (PC5 G-a: a line stays upright — turned, scaled or bent, it is a type layer's matrix)
+        if (line.native_type && line.native_type->is_object() && line.native_type->contains("transform"))
+            bad("the line " + line.id + " stays upright: its native_type holds no transform (a type layer's does)");
+    }
     for (const smart::WrittenPage& written : smart::written_pages(doc)) {
         for (const Layer& layer : written.page->layers) {
             if (!is_type_layer(layer)) {

@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/error.hpp"
 #include "core/type_text.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/ops_smart_parts.hpp"
@@ -24,6 +25,7 @@ namespace {
 
 constexpr int kFindDpi = 50;           // (where the letters are: the page drawn this coarsely first)
 constexpr double kFindMarginMm = 3.0;  // (round what the coarse drawing found: what it may miss of thin marks and halos)
+constexpr std::int64_t kMostPixels = 120'000'000;  // (an upright picture to turn: op_limits' most pixels)
 
 text::Panels panels_of(const core::Page& page) {
     text::Panels panels;
@@ -38,7 +40,9 @@ Image drawn(const detail::Ctx& ctx, const core::StoryLine& line, Point origin, S
     const text::Panels panels = panels_of(*ctx.page);
     const std::optional<std::string> font_path = ctx.episode != nullptr ? std::optional<std::string>(ctx.episode->font_path) : std::nullopt;
     const text::Unported unported = [&ctx](const NotYetPorted& e) { detail::skip_unported(ctx, e.element()); };
-    const text::TextGamma plain(std::nullopt);  // (the layer's own picture: no page under it to mix with)
+    // (PC5 G-a: the book's text gamma, as its lines are drawn — the picture drawn on black and on white in it, so its
+    // cover is what that gamma makes of the letters' edges there: a dark text over a light page mixed as a line's)
+    const text::TextGamma gamma(ctx.episode != nullptr ? ctx.episode->text_gamma : text::TextGamma::current());
     return smart_ops::drawn_alone(size, [&](Image& on) {
         Image rgba = on.mode() == "RGBA" ? std::move(on) : on.convert("RGBA");
         text::draw_lines(text::PagePart{&rgba, origin, page}, lines, dpi, font_path, false, &panels, ctx.stop, &unported);
@@ -87,6 +91,43 @@ std::optional<std::array<double, 4>> extent_mm(const detail::Ctx& ctx, const cor
     return extent;
 }
 
+// PC5 G-a: a type layer turned, scaled or bent by its matrix (native_type.transform, the page's mm to the page's mm):
+// its letters drawn upright over their extent, then mapped through it (bicubic, its colours premultiplied) to where
+// the matrix puts them; the part of `area` they reach.
+std::optional<Image> turned(const detail::Ctx& ctx, const core::StoryLine& line, const std::array<double, 6>& t, const std::array<double, 4>& extent,
+                            const Box& area) {
+    const double k = ctx.dpi / 25.4;
+    const double det = t[0] * t[3] - t[1] * t[2];
+    if (!(std::fabs(det) > 1e-12)) return std::nullopt;
+    const Box from{static_cast<int>(std::floor(extent[0] * k)), static_cast<int>(std::floor(extent[1] * k)), static_cast<int>(std::ceil(extent[2] * k)),
+                   static_cast<int>(std::ceil(extent[3] * k))};
+    double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
+    for (const auto& [x, y] : {std::pair{extent[0], extent[1]}, {extent[2], extent[1]}, {extent[0], extent[3]}, {extent[2], extent[3]}}) {
+        const double u = (t[0] * x + t[2] * y + t[4]) * k, v = (t[1] * x + t[3] * y + t[5]) * k;
+        x0 = std::min(x0, u);
+        y0 = std::min(y0, v);
+        x1 = std::max(x1, u);
+        y1 = std::max(y1, v);
+    }
+    const Box reach{std::max(area.x0, static_cast<int>(std::floor(std::max(x0, -1e9)))), std::max(area.y0, static_cast<int>(std::floor(std::max(y0, -1e9)))),
+                    std::min(area.x1, static_cast<int>(std::ceil(std::min(x1, 1e9)))), std::min(area.y1, static_cast<int>(std::ceil(std::min(y1, 1e9))))};
+    if (reach.width() <= 0 || reach.height() <= 0 || from.width() <= 0 || from.height() <= 0) return std::nullopt;
+    if (static_cast<std::int64_t>(from.width()) * from.height() > kMostPixels)
+        throw core::Error("image_too_large", "the type layer is too large to turn at this resolution");
+    const Image upright = drawn(ctx, line, Point{from.x0, from.y0}, Size{from.width(), from.height()}, ctx.size, ctx.dpi);
+    if (!upright.getbbox()) return std::nullopt;
+    // (a pixel of `reach` (u, v) → the page's px → mm → back through the matrix → the upright picture's px)
+    const double ex = reach.x0 - t[4] * k, ey = reach.y0 - t[5] * k;
+    const double data[6] = {t[3] / det, -t[2] / det, (t[3] * ex - t[2] * ey) / det - from.x0,
+                            -t[1] / det, t[0] / det, (-t[1] * ex + t[0] * ey) / det - from.y0};
+    const Image part = upright.transform(Size{reach.width(), reach.height()}, TransformMethod::Affine, data, Resample::Bicubic);
+    if (!part.getbbox()) return std::nullopt;
+    if (reach == area) return part;
+    Image picture = Image::create("RGBA", Size{area.width(), area.height()}, Ink{0, 0, 0, 0});
+    picture.paste(part, Point{reach.x0 - area.x0, reach.y0 - area.y0});
+    return picture;
+}
+
 }  // namespace
 
 std::optional<Image> picture_8bit(const detail::Ctx& ctx, const core::Layer& layer, const Box& area) {
@@ -97,6 +138,7 @@ std::optional<Image> picture_8bit(const detail::Ctx& ctx, const core::Layer& lay
     const std::optional<std::array<double, 4>> extent = extent_mm(ctx, layer, line);
     if (!extent) return std::nullopt;
     const double px = ctx.dpi / 25.4;
+    if (const std::optional<std::array<double, 6>> t = core::type_text::transform_of(line)) return turned(ctx, line, *t, *extent, area);
     const Box reach{std::max(area.x0, static_cast<int>(std::floor((*extent)[0] * px))), std::max(area.y0, static_cast<int>(std::floor((*extent)[1] * px))),
                     std::min(area.x1, static_cast<int>(std::ceil((*extent)[2] * px))), std::min(area.y1, static_cast<int>(std::ceil((*extent)[3] * px)))};
     if (reach.width() <= 0 || reach.height() <= 0) return std::nullopt;

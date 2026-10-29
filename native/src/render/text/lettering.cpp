@@ -37,6 +37,7 @@ constexpr double kCapMm = 5.0;                  // CAP_MM
 constexpr double kSfxCapMm = 12.0;              // SFX_CAP_MM
 constexpr double kFitPad = 0.15;                // FIT_PAD
 constexpr double kHandPower = 2.6;              // HAND_POWER
+constexpr double kUnbroken = 1.0e6;             // (type@1: a point text's room, px — never broken there)
 const Rgb kText{10, 10, 10};                    // TEXT
 
 // OPENING, CLOSING, LINE_START, LINE_END (the rows across)
@@ -99,6 +100,25 @@ double mm_or(const core::Num& value, double fallback) { return value.truthy() ? 
 
 Image blank(std::int64_t w, std::int64_t h) {
     return Image::create("RGBA", {static_cast<int>(w), static_cast<int>(h)}, Ink{0, 0, 0, 0});
+}
+
+// type@1 (PC5 G-a): a page length (mm) as a pixel's place at dpi, rounded (px() keeps a size at least 1)
+std::int64_t place_px(double mm, int dpi) { return core::py_round_int(mm / 25.4 * dpi); }
+
+// type@1 (PC5 G-a, render/text/lettering.hpp shape_of): what of native_type places the letters
+const Json* native_key(const core::StoryLine& line, const char* key) {
+    if (!line.native_type || !line.native_type->is_object()) return nullptr;
+    const auto it = line.native_type->find(key);
+    return it == line.native_type->end() ? nullptr : &*it;
+}
+
+// アンチエイリアス なし (PhotoCraft's text render: a cover of half or more is whole, the rest none)
+void binarized(Image& image) {
+    if (image.mode() != "RGBA") return;
+    for (int y = 0; y < image.height(); ++y) {
+        auto* row = reinterpret_cast<unsigned char*>(image.raw()->image[y]);
+        for (int x = 0; x < image.width(); ++x) row[x * 4 + 3] = row[x * 4 + 3] >= 128 ? 255 : 0;
+    }
 }
 
 // The size of the max filter outlined() grows a halo with: grow · 2 + 1, at most 61 (Python's _outlined), so the halo
@@ -993,8 +1013,15 @@ std::array<double, 6> then(const std::array<double, 6>& p, const std::array<doub
 Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path, std::stop_token stop,
                  std::vector<RubyNote>* notes, SetRubies* rubies, const LetterParts* parts, SetLetters* set_out) {
     // The lettering, its em, and where its top left sits from the box's middle (px). In an ellipse the letters are
-    // fitted to the outline by their own shape, and sit where they fit best.
-    const Json st = style_of(line);
+    // fitted to the outline by their own shape, and sit where they fit best. type@1 (PC5 G-a): a point text is set
+    // unbroken at its size from its anchor, a box text broken at its box at its size — neither shrunk nor fitted to a
+    // balloon — and their corner is from the anchor, or the box's top left.
+    const std::string shape = shape_of(line);
+    Json st = style_of(line);
+    if (shape == "point") {  // (a point text is not justified: Photoshop's 均等配置 is a box text's)
+        const Json& align = at(st, "align");
+        if (align.is_string() && align.get_ref<const std::string&>().starts_with("justify")) st["align"] = line.wrap == "vertical" ? "top" : "left";
+    }
     const std::string kind = kind_of(line);
     Fonts fonts(std::move(stop));
     const Json& font_value = at(st, "font");
@@ -1007,7 +1034,10 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
     const bool tcy = core::py_truthy(at(st, "tcy"));
     std::int64_t em = 0;
     bool fixed = false;
-    if (core::py_truthy(at(st, "size_mm"))) {
+    if (!shape.empty()) {  // (type@1: its size, or the lines' default)
+        em = px(float_or(at(st, "size_mm"), kCapMm), dpi);
+        fixed = true;
+    } else if (core::py_truthy(at(st, "size_mm"))) {
         em = px(core::to_float(at(st, "size_mm")), dpi);
         fixed = true;
     } else if (kind == "sfx") {
@@ -1031,10 +1061,12 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
     } else {
         em = std::max<std::int64_t>(8, px(kCapMm, dpi));
     }
-    const bool hug = one_of(kind, kHugged);
+    const bool hug = shape.empty() && one_of(kind, kHugged);
     const double keep = hug ? hug_keep(kind, st) : 1.0;
     const double power = hug_power(kind, st);
     const auto room = [&](std::int64_t size) -> std::pair<double, double> {
+        if (shape == "point") return {kUnbroken, kUnbroken};  // (type@1: broken only where its text breaks)
+        if (shape == "box") return {static_cast<double>(w), static_cast<double>(h)};
         const double pad = kind == "none" || kind == "sfx" ? 0.0 : static_cast<double>(std::max<std::int64_t>(2, floordiv(size, 4)));
         if (hug) {  // (the columns may run the ellipse's height; whether they fit is judged by their shape below)
             const double margin = static_cast<double>(2 * size) * kFitPad;
@@ -1045,12 +1077,17 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
     auto [inner_w, inner_h] = room(em);
     const double scale_x = core::py_max(0.3, core::py_min(3.0, float_or(at(st, "scale_x"), 1.0)));
     Image image;
+    std::vector<SetRow> first;  // (type@1, a point text: its rows as set, for where its first one sits)
+    int set_width = 1;          // (and the width they were set in, before 長体・平体)
     for (int attempt = 0; attempt < 12; ++attempt) {
         if (notes != nullptr) notes->clear();  // (what the lettering kept says)
         if (rubies != nullptr) rubies->drawn.clear();
+        first.clear();
         std::vector<RubyDrawn>* drawn = rubies != nullptr ? &rubies->drawn : nullptr;
-        image = vertical ? vertical_text(fonts, line, st, face, em, inner_h, fill, dpi, notes, drawn)
-                         : horizontal_text(fonts, line, st, face, em, inner_w, fill, dpi, notes, drawn);
+        std::vector<SetRow>* rows_of = shape == "point" ? &first : nullptr;
+        image = vertical ? vertical_text(fonts, line, st, face, em, inner_h, fill, dpi, notes, drawn, nullptr, rows_of)
+                         : horizontal_text(fonts, line, st, face, em, inner_w, fill, dpi, notes, drawn, nullptr, rows_of);
+        set_width = image.width();
         if (std::fabs(scale_x - 1) > 1e-3) {  // 長体 (< 1) or 平体 (> 1): the letters narrower or wider than tall
             const int set_w = image.width();
             image = image.resize({static_cast<int>(std::max<std::int64_t>(1, core::py_round_int(image.width() * scale_x))), image.height()},
@@ -1188,7 +1225,30 @@ Layout layout_of(const core::StoryLine& line, int dpi, const std::optional<std::
             out.corner_y = fit.dy - static_cast<double>(y0 + y1) / 2;
         }
     }
+    if (!shape.empty()) {  // (type@1: from the point text's anchor, or the box text's top left)
+        const double wide = image.width(), high = image.height();
+        const double room = grow != 0 ? static_cast<double>(grow + 1) : 0.0;  // (the halo's)
+        const std::string align = core::py_str(core::py_or(at(st, "align"), Json(vertical ? "top" : "left")));
+        if (shape == "box") {
+            out.corner_x = vertical ? static_cast<double>(w) - wide  // (columns from its right)
+                           : align == "center" ? (static_cast<double>(w) - wide) / 2
+                           : align == "right"  ? static_cast<double>(w) - wide
+                                               : 0.0;
+            out.corner_y = !vertical ? 0.0 : align == "center" ? (static_cast<double>(h) - high) / 2 : align == "bottom" ? static_cast<double>(h) - high : 0.0;
+        } else {
+            const double set_wide = wide - 2 * room;  // (the letters as set, 長体・平体 after)
+            const double fx = set_wide / static_cast<double>(std::max(1, set_width));
+            if (vertical) {  // (the first column's middle on the anchor, its top there — or the text's middle or foot)
+                out.corner_x = first.empty() ? -wide / 2 : -(first.front().axis * fx + room);
+                out.corner_y = align == "center" ? -high / 2 : align == "bottom" ? -high : -(first.empty() ? 0.0 : first.front().start) - room;
+            } else {  // (the first row's baseline on the anchor; its left, middle or right there)
+                out.corner_x = align == "center" ? -wide / 2 : align == "right" ? -wide : -room;
+                out.corner_y = -((first.empty() ? static_cast<double>(em) : first.front().axis) + room);
+            }
+        }
+    }
     out.image = part ? std::move(*part) : std::move(image);  // (the parts asked for, where the whole puts them)
+    if (const Json* aa = native_key(line, "antialias"); aa != nullptr && *aa == Json("none")) binarized(out.image);
     out.em = em;
     return out;
 }
@@ -1215,15 +1275,67 @@ std::pair<Face, bool> line_face(const core::StoryLine& line, const std::optional
     return {face_of(spec, kind == "sfx" ? kDefaultSfx : kDefaultDialogue), missing};
 }
 
+std::string shape_of(const core::StoryLine& line) {
+    const Json* shape = native_key(line, "shape");
+    return shape != nullptr && shape->is_string() ? shape->get<std::string>() : std::string();
+}
+
+namespace {
+
+// type@1 (PC5 G-a): where a point text's anchor, or a box text's top left, lies on the page (px; the words moved by
+// text_dx_mm and text_dy_mm as a line's)
+PointD shape_origin(const core::StoryLine& line, const Json& st, int dpi, std::string_view shape) {
+    double x = line.x_mm.value(), y = line.y_mm.value();
+    if (shape == "point") {
+        const Json* anchor = native_key(line, "anchor_mm");
+        if (anchor != nullptr && anchor->is_array() && anchor->size() == 2 && (*anchor)[0].is_number() && (*anchor)[1].is_number()) {
+            x = (*anchor)[0].get<double>();
+            y = (*anchor)[1].get<double>();
+        }
+    }
+    x += float_or(at(st, "text_dx_mm"), 0);
+    y += float_or(at(st, "text_dy_mm"), 0);
+    return PointD{static_cast<double>(place_px(x, dpi)), static_cast<double>(place_px(y, dpi))};
+}
+
+// type@1 (PC5 G-a): the box a box text is cut to (px), none for any other
+std::optional<Box> clip_of(const core::StoryLine& line, int dpi) {
+    if (shape_of(line) != "box") return std::nullopt;
+    const double x = line.x_mm.value(), y = line.y_mm.value();
+    return Box{static_cast<int>(place_px(x, dpi)), static_cast<int>(place_px(y, dpi)), static_cast<int>(place_px(x + line.w_mm.value(), dpi)),
+               static_cast<int>(place_px(y + line.h_mm.value(), dpi))};
+}
+
+}  // namespace
+
 Point lettering_at(const core::StoryLine& line, int dpi, double corner_x, double corner_y) {
     // (as paint_text puts it)
     const Json st = style_of(line);
+    if (const std::string shape = shape_of(line); !shape.empty()) {
+        const PointD o = shape_origin(line, st, dpi, shape);
+        return Point{static_cast<int>(core::py_round_int(o.x + corner_x)), static_cast<int>(core::py_round_int(o.y + corner_y))};
+    }
     const std::int64_t x = px(line.x_mm.value() + float_or(at(st, "text_dx_mm"), 0), dpi);
     const std::int64_t y = px(line.y_mm.value() + float_or(at(st, "text_dy_mm"), 0), dpi);
     if (kind_of(line) == "none") return Point{static_cast<int>(x), static_cast<int>(y)};
     const double cx = static_cast<double>(x) + static_cast<double>(px(mm_or(line.w_mm, 40), dpi)) / 2;
     const double cy = static_cast<double>(y) + static_cast<double>(px(mm_or(line.h_mm, 20), dpi)) / 2;
     return Point{static_cast<int>(core::py_round_int(cx + corner_x)), static_cast<int>(core::py_round_int(cy + corner_y))};
+}
+
+Placement placement(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path, std::stop_token stop) {
+    const std::shared_ptr<const Layout> layout = remembered_layout(line, dpi, font_path, std::move(stop));
+    Placement out;
+    const Point at = lettering_at(line, dpi, layout->corner_x, layout->corner_y);
+    out.picture = Box{at.x, at.y, at.x + layout->image.width(), at.y + layout->image.height()};
+    out.em = layout->em;
+    if (const std::optional<Box> inked = layout->image.getbbox()) out.letters = Box{at.x + inked->x0, at.y + inked->y0, at.x + inked->x1, at.y + inked->y1};
+    out.clip = clip_of(line, dpi);
+    if (out.clip && out.letters) {  // (what runs past the box: letters drawn there, not only the picture's clear margin)
+        const Box& drawn = *out.letters;
+        out.overflow = drawn.x0 < out.clip->x0 || drawn.y0 < out.clip->y0 || drawn.x1 > out.clip->x1 || drawn.y1 > out.clip->y1;
+    }
+    return out;
 }
 
 std::pair<Image, std::int64_t> text_image(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path,
@@ -1274,6 +1386,7 @@ std::optional<std::string> layout_key(const core::StoryLine& line, int dpi, cons
     Json key = Json::array({line.text, line.balloon, line.wrap, line.w_mm.json(), line.h_mm.json(), detail::keyed_style(line.style),
                             Json(line.ruby_runs), Json(line.emphasis_runs), style_runs, dpi, font_path ? Json(*font_path) : Json()});
     if (line.ruby_spans) key.push_back(core::ruby::to_json(*line.ruby_spans));  // (ruby-layout@1: the rubies by place)
+    if (line.native_type) key.push_back(Json::array({"native_type", *line.native_type}));  // (type@1: its shape, anti-alias, …)
     return detail::memo_key(key);
 }
 
@@ -1700,16 +1813,28 @@ void paint_text(Image& image, const core::StoryLine& line, int dpi, bool show_sp
     const double cx = static_cast<double>(x) + static_cast<double>(w) / 2;
     const double cy = static_cast<double>(y) + static_cast<double>(h) / 2;
     const std::string kind = kind_of(line);
+    const bool shaped = !shape_of(line).empty();  // (type@1, PC5 G-a: a point or box text, placed by lettering_at)
     // (a part of the page: every place below is a whole pixel, so moving it by the part's corner is exact)
-    const Point at_page = kind == "none" ? Point{static_cast<int>(x), static_cast<int>(y)}  // text only: from the box's corner
-                                         : Point{static_cast<int>(core::py_round_int(cx + shape->corner_x)),
-                                                 static_cast<int>(core::py_round_int(cy + shape->corner_y))};
+    const Point at_page = shaped           ? lettering_at(line, dpi, shape->corner_x, shape->corner_y)
+                          : kind == "none" ? Point{static_cast<int>(x), static_cast<int>(y)}  // text only: from the box's corner
+                                           : Point{static_cast<int>(core::py_round_int(cx + shape->corner_x)),
+                                                   static_cast<int>(core::py_round_int(cy + shape->corner_y))};
     const Box here{origin.x, origin.y, origin.x + image.width(), origin.y + image.height()};
     const auto reaches = [&here](const Box& b) { return b.x0 < here.x1 && here.x0 < b.x1 && b.y0 < here.y1 && here.y0 < b.y1; };
-    if (reaches(Box{at_page.x, at_page.y, at_page.x + shape->width, at_page.y + shape->height})) {
+    Box covered{at_page.x, at_page.y, at_page.x + shape->width, at_page.y + shape->height};
+    const std::optional<Box> clip = clip_of(line, dpi);  // (a box text: what runs past its box is hidden)
+    if (clip) covered = Box{std::max(covered.x0, clip->x0), std::max(covered.y0, clip->y0), std::min(covered.x1, clip->x1), std::min(covered.y1, clip->y1)};
+    if (covered.width() > 0 && covered.height() > 0 && reaches(covered)) {
         if (!layout) layout = layout_by_key(key, line, dpi, font_path, stop);
-        if (const auto gamma = TextGamma::current()) paste_in_gamma(image, layout->image, Point{at_page.x - origin.x, at_page.y - origin.y}, *gamma);
-        else image.paste(layout->image, Point{at_page.x - origin.x, at_page.y - origin.y}, &layout->image);
+        std::optional<Image> cut;
+        Point at = at_page;
+        if (clip && covered != Box{at_page.x, at_page.y, at_page.x + layout->image.width(), at_page.y + layout->image.height()}) {
+            cut = layout->image.crop(Box{covered.x0 - at_page.x, covered.y0 - at_page.y, covered.x1 - at_page.x, covered.y1 - at_page.y});
+            at = Point{covered.x0, covered.y0};
+        }
+        const Image& letters = cut ? *cut : layout->image;
+        if (const auto gamma = TextGamma::current()) paste_in_gamma(image, letters, Point{at.x - origin.x, at.y - origin.y}, *gamma);
+        else image.paste(letters, Point{at.x - origin.x, at.y - origin.y}, &letters);
     }
     if (show_speaker && !line.speaker.empty() && kind != "none") {
         const std::int64_t size = std::max<std::int64_t>(8, floordiv(shape->em * 2, 3));
