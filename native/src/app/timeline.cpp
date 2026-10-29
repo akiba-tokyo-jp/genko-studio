@@ -58,11 +58,12 @@ QString title_of(const core::Page& page, const Json& id) {
 
 TimelinePanel::TimelinePanel(MainWindow* window) : window_(window) {
     setObjectName(QStringLiteral("timeline"));
-    onion = new QCheckBox(QStringLiteral("前後を透かす"));
+    onion = new QCheckBox(QStringLiteral("オニオンスキン"));  // (PC5 J-0, 節 J 1.2: Photoshop's name)
     onion->setToolTip(QStringLiteral("オニオンスキン: 前のフレームを赤、次を青で薄く出します"));
     onion->setChecked(true);
     connect(onion, &QCheckBox::toggled, this, [this](bool) { set_frame(frame, false); });
-    start = new QPushButton(QStringLiteral("このページをアニメーションにする"));
+    start = new QPushButton(QStringLiteral("ビデオタイムラインを作成"));  // (PC5 J-0: Photoshop's name)
+    start->setToolTip(QStringLiteral("このページをアニメーション（ビデオタイムライン）にします"));
     connect(start, &QPushButton::clicked, this, [this] { start_animation(); });
     play_button = new QPushButton(QStringLiteral("▶ 再生"));
     play_button->setCheckable(true);
@@ -110,7 +111,7 @@ TimelinePanel::TimelinePanel(MainWindow* window) : window_(window) {
     camera = new QPushButton(QStringLiteral("カメラ"));
     camera->setToolTip(QStringLiteral("カメラワーク: 今見えている範囲を、このフレームのカメラにします（フレームの間は動きます）"));
     connect(camera, &QPushButton::clicked, this, [this] { camera_here(); });
-    export_button = new QPushButton(QStringLiteral("書き出し…"));
+    export_button = new QPushButton(QStringLiteral("ビデオをレンダリング…"));  // (PC5 J-0: Photoshop's name)
     connect(export_button, &QPushButton::clicked, this, [this] { export_animation(); });
     timer = new QTimer(this);
     connect(timer, &QTimer::timeout, this, [this] { tick(); });
@@ -440,7 +441,7 @@ void TimelinePanel::export_animation() {
     std::snprintf(name, sizeof(name), "p%03lld_animation.gif", static_cast<long long>(core::py_int(p->index.json())));
     QString chosen;
     const QString target = ask::save_path_filtered(
-        this, QStringLiteral("アニメーションを書き出す"), folder + QLatin1Char('/') + QString::fromLatin1(name),
+        this, QStringLiteral("ビデオをレンダリング"), folder + QLatin1Char('/') + QString::fromLatin1(name),
         QStringLiteral("GIF (*.gif);;WebP (*.webp);;PNG（APNG） (*.png);;MP4 (*.mp4);;連番 PNG（フォルダー） (*)"), &chosen);
     if (target.isEmpty()) return;
     const QString suffix = QFileInfo(target).suffix();

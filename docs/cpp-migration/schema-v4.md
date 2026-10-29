@@ -69,6 +69,12 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `filters@1` | PC4（D0） | スマートフィルターがフィルター メニューの種類（`blur_gaussian` など、PC4 の種類）を持つか、フィルターのファイル（置き換えの地図）を持つこと。COLOR-08（末尾の「フィルター」） |
 | `vanishing-point@1` | PC4（D6） | ページの `vanishing`（消点の面）。COLOR-08（末尾の「消点の面」） |
 | `layer-styles@1` | PC4 E6 | 層の `style`（レイヤースタイル: 効果・塗りの不透明度・ブレンド条件）と本の `global_light`（包括光源）。COLOR-09（「レイヤースタイル」）、この文書の「レイヤースタイル」 |
+| `layer-comps@1` | PC5 J-0（J-a が使う） | ページの `layer_comps`（レイヤーカンプ）。PROD-01、この文書の「制作の補助」 |
+| `slices@1` | PC5 J-0（J-b が使う） | ページの `slices`（スライス）。PROD-01、この文書の「制作の補助」 |
+| `annotations@1` | PC5 J-0（J-c が使う） | ページの `annotations`（注釈）。PROD-01、この文書の「制作の補助」 |
+| `measure@1` | PC5 J-0（J-d が使う） | ページの `measure`（計測スケール・カウント・ものさしの線）。PROD-01、この文書の「制作の補助」 |
+| `timeline@1` | PC5 J-0（J-e1 が使う） | ページの `anim` の作業範囲 `work` と、1〜60 の整数でない `fps`（0.5〜120）。PROD-01、この文書の「制作の補助」 |
+| `video@1` | PC5 J-0（J-e2 が使う） | ページの `anim` の行の `video`（ビデオレイヤー: 素材のコマと描き替え）。PROD-01、この文書の「制作の補助」 |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -458,3 +464,17 @@ Photoshop のレイヤー効果と混合オプションの一部（塗りの不�
 - 書き手は面を持つページがあるときだけ `features` に `vanishing-point@1` を加える（無くなれば外す）。面は op `vanishing_point` が `keep_planes`（既定）のときに置き、`"planes": []` で消す（消点の窓で面を全部消して OK）。どの面も消えた本は、面を持ったことのない本と同じ `features`・ページのバイトで書く。元に戻すで戻る。
 - **読み手の検査**: 面の形が上と違う（凸でない・有限でない・`from` が前の面でない・知らない鍵）ページの本は、読み取り専用で開く（絵を後で読むページも、読むときに見る）（`a page's vanishing point planes: …`。面は読んだまま書き戻すので失われない）。vanishing-point@1 を知らない読み手（PC4 D6 より前の C++ 版）は、未知の拡張として読み取り専用で開く。
 - PSD には書かない（上流も持たない。Photoshop の形を確かめられない）。面を持たない原稿は、`features` も保存のバイトも今のまま。
+
+## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1。PROD-01、PC5 節 J）
+
+Photoshop の文書 1 つは Genko のページ 1 枚なので、レイヤーカンプ・スライス・注釈・計測はページの鍵に、タイムラインの作業範囲とビデオレイヤーはページのアニメ（`anim`）の中に持つ。C++ 版だけ。PC5 J-0 が形と検査を作り、中身（op・画面・PSD と .pcraft の写し）は J-a〜J-e2 が書く。座標はページの mm。
+
+- **ページの `"layer_comps"`**（layer-comps@1）: `{"comps": [カンプ…], "last_applied": id | null, "last_state": {"layers": [層の状態…]} | null}`。カンプは `{"id": 1..2147483647, "name": 1〜255 文字, "comment": 文字, "apply": {"visibility", "position", "appearance": bool}, "layers": [層の状態…]}`、1 ページ 256 個まで、id は重ならない。層の状態は `{"layer": 層の id, "visible"?: bool, "position"?: [x, y] | null, "appearance"?: {"blend": 文字, "opacity": 0..1, "style": レイヤースタイル | null}}`（無い鍵は記録していない。`position` の null は外接の無い層）。`last_applied` はページのカンプを名指す。`last_state` は最後のドキュメントの状態（最初にカンプを当てる直前）。
+- **ページの `"slices"`**（slices@1）: `{"group": 文字, "next_id": 1.., "list": [スライス…]}`。スライスは `{"id": 1..（next_id より小さく、重ならない）, "origin": "user" | "layer", "layer"?: 層の id（layer のときだけ・必ず）, "name", "rect_mm": [x, y, w, h], "kind": "image" | "noImage" | "table", "url", "target", "message", "alt", "cell_text": 文字, "cell_text_is_html": bool, "align": [0..4, 0..4], "background": "#rrggbb" | null, "outsets": [上, 左, 下, 右]（ページの画素）}`、4096 個まで。自動スライスは持たない（毎回つくる）。
+- **ページの `"annotations"`**（annotations@1）: `[{"id": "an_" + 16 進 12 桁, "at_mm": [x, y], "popup_mm": [x, y, w, h] | null, "text": 文字（64 KB まで）, "author": 文字, "color": [r, g, b], "open": bool, "modified": "YYYY-MM-DDThh:mm:ssZ", "actor": "human:…" | "ai:…" | "genko"}]`、1000 個まで、id は重ならない。ページのメモ（`note`）とは別。
+- **ページの `"measure"`**（measure@1）: `{"scale": {"pixel_length": >0, "logical_length": >0, "units": 文字} | null, "count_groups": [{"name", "color": [r, g, b], "marker_size": 1..10, "label_size": 8..72, "visible": bool, "points": [[x, y]…]（1 万まで）}]（256 まで）, "active_group": 0..（グループの番号。無ければ 0）, "ruler": {"start": [x, y], "end": [x, y], "protractor": [x, y] | null} | null}`。`scale` の null は 1 pixel = 1 pixel（Photoshop の初期設定）、`pixel_length` はページの解像度の画素。全部が既定のページは `measure` を書かない。計測ログは原稿に持たない。
+- **アニメの作業範囲と fps**（timeline@1）: ページの `anim` に `"work": [始め, 終わり]`（フレームは 1 から、両端を含む、1 ≤ 始め ≤ 終わり ≤ 3000）、`"fps"` に 0.5〜120 の小数か 60 を超える数（1〜60 の整数と、それより前のアニメが持つ値は今のまま）。
+- **ビデオの行**（video@1）: アニメの行（`tracks` の 1 つ）の `"video"`: `{"footage": 素材 | null, "frames": [[素材のコマの番号 | null, 描き替えたセルの id | null]…]（タイムラインの 1 フレームに 1 つ、3000 まで）, "show_altered": bool, "placement_mm": [x, y, w, h], "fit": "contain" | "cover" | "stretch"}`。素材は `{"kind": "sequence" | "animation" | "image", "name", "frames": ["sha256:…"…]（素材のコマ: 原稿の素材ファイル、1〜3000）, "fps": >0, "size_px": [w, h], "depth": 8 | 16, "alpha": "straight" | "premultiplied" | "ignore", "par": >0, "source"?: {"path", "bytes", "sha256"}}`。動画ファイル（MP4・MOV・WebM）は読まないので、素材は連番（sequence）・動く画像（animation: GIF・APNG・WebP）・1 枚の画像（image）だけ（利用者の決定 4）。
+- 書き手は、それぞれを持つページがあるときだけ `features` にその拡張を加え（無くなれば外す）、空のもの（カンプ・スライス・注釈が無い、計測が全部既定）は書かない。持たない原稿は `features` も保存のバイトも今のまま。
+- **読み手の検査**: 形が上と違う（知らない鍵・型・範囲の外・重なる id・名指す物が無い）ページの本は、読み取り専用で開く（その値は読んだまま保つので失われない）。これらの拡張を知らない読み手（PC5 J-0 より前の C++ 版）は、未知の拡張として読み取り専用で開く（作業範囲を無視して書き出したり、ビデオの行を空のフォルダーとして描いたりしないため）。
+- PSD・.pcraft: レイヤーカンプ（PSD のリソース 1065 と層の cmls）・スライス（1050）・注釈（全体の塊 Anno）・計測スケール（1074）は、その群が写すまで psd-keep@1 の塊のまま保つ。.pcraft の `layer_comps`・`slices`・`notes`・`measurement`・`timeline` は、その群が読むまで外して notes で言う（PROD-01）。

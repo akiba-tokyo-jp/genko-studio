@@ -128,6 +128,13 @@ genko_library(genko_core
     raw_develop.cpp
     # PC4 E6 (レイヤースタイル: layer-styles@1)
     layer_styles.cpp
+    # PC5 J-0 (制作の補助の土台: layer-comps@1, slices@1, annotations@1, measure@1, timeline@1, video@1)
+    production_json.cpp
+    layer_comps.cpp
+    slices.cpp
+    annotations.cpp
+    measure.cpp
+    video.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"

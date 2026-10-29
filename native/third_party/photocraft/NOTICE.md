@@ -279,3 +279,11 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/ui-egui/src/camera_raw_ui.rs`（1-454 行: 窓の左のプレビューと右の 6 つの欄 — 基本補正・トーンカーブ・ディテール・カラーミキサー・カラーグレーディング・効果 — の並び、補正前の表示）→ `native/src/app/camera_raw_window.cpp`（Qt の窓、言葉は Adobe Camera Raw の日本語版。プレビューは op と同じ核で裏のスレッドに）。
 - PSD のスマートフィルター・.pcraft の対応表（PC4 D7）:
   - `crates/engine/src/filters.rs`（41-134 行: `params_for` の鍵と既定、45-50 行の固定値の項目）・`crates/engine/src/filters_ext.rs`（70-371 行: `params_for` の鍵・選択の値・平らな設定のピン・光・パス）・`crates/engine/src/gallery_cmds.rs`（15-79 行: `colour`・`effect_from_json`・`effects_from_json`）・`crates/engine/src/lens_cmds.rs`（40-155 行・376-422 行: レンズ補正・広角補正・Camera Raw の鍵）・`crates/algo/src/params_ext.rs`（ピン・光・パスの serde の形）・`crates/engine/src/smart_cmds.rs`（290-305 行: 知らない command は描かない）・`crates/engine/src/filters.rs`（136-160 行: `apply_filter_to_surface` が描く command）・`crates/doc/src/lib.rs`（348 行: `SmartFilter`）: 上流の command id と設定を Genko の種類と設定に写す表 → `native/src/core/filter_upstream.cpp`（`from_upstream`・`to_upstream`・`upstream_filter`）。PSD の Photoshop のスマートフィルター（`filterFX`）の読みは上流に無く（`crates/io/src/psd_import.rs` 236 行）、この版のもの（`native/src/render/psd_filters.cpp`）。
+
+## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1、PC5 節 J）
+
+- 土台（PC5 J-0）: ページに持つ形（Genko はページの mm で持つ）。
+  - `crates/doc/src/comps.rs`（1-110 行: `CompLayerState`・`CompAppearance`・`LayerComp` の 3 つの旗）→ `native/src/core/layer_comps.{hpp,cpp}`
+  - `crates/doc/src/slices.rs`（1-160 行: `SliceOrigin`・`SliceKind`・`Slice`・`Slices`）→ `native/src/core/slices.{hpp,cpp}`
+  - `crates/doc/src/analysis.rs`（1-146 行: `MeasurementScale`・`CountGroup`・`Ruler`・`Measurement`・`Note`）→ `native/src/core/measure.{hpp,cpp}`・`native/src/core/annotations.{hpp,cpp}`
+  - `crates/doc/src/video.rs`（54-90 行: `Timeline` の作業範囲）→ `native/src/core/video.{hpp,cpp}`（ビデオの行の形は Genko のもの）

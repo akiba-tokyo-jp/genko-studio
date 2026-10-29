@@ -1626,6 +1626,17 @@ private:
     StylesPanel* styles_panel_ = nullptr;
     QDockWidget* styles_dock_ = nullptr;
     QMenu* layer_style_menu_ = nullptr;
+
+    // --- PC5 節 J (制作の補助, SPEC.md PROD-01): main_window_production.cpp — the frames of イメージ → 解析 ▸, レイヤー →
+    // ビデオレイヤー ▸ and ウィンドウ's panels (アクション・レイヤーカンプ・計測ログ・注釈), until their groups ------------------
+public:
+    // "「<name>」は、この版ではまだ使えません" (a frame's command chosen).
+    void not_yet_command(const QString& name);
+
+private:
+    void build_production_actions();
+    void build_production_menus(QMenu* layers, QMenu* pages);
+    void build_production_docks();
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

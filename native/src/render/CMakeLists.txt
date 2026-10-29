@@ -239,6 +239,10 @@ genko_library(genko_render
     # PC4 F-e (カメラ RAW: LibRaw の包み・現像の設定と色・埋め込みプレビュー、RAW のスマートオブジェクトの op)
     raw.cpp
     ops_camera_raw.cpp
+    # PC5 J-0 (制作の補助の土台: the production's op frames, its PSD blocks and .pcraft keys)
+    ops_production.cpp
+    psd_production.cpp
+    pcraft_production.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

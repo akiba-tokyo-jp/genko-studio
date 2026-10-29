@@ -483,6 +483,22 @@ public:
     bool has_work() const { return work_ != nullptr; }
     bool work_remove() { return work_ && work_->remove && work_->remove(); }
 
+    // (PC5 J-0, SPEC.md PROD-01「エクストラ」) What the production draws over the page it shows — the slices (J-b), the notes
+    // (J-c), the count marks and the ruler tool's line (J-d1) —: one painter a key (the 表示 → 表示・非表示 ▸ item that shows
+    // it: "slices", "notes", "count", "ruler"), each given the page, where a place of it (mm) is drawn (`at`) and the
+    // screen's pixels a mm (lines and words the same size at any zoom: drawn in the screen's pixels). Drawn after the
+    // selection, before the tools' handles; not on the pictures written or printed. `extras_shown` is エクストラ's master
+    // switch (節 H's H-b: it hides them all), show_extra one's own.
+    struct CanvasExtra {
+        QString key;
+        std::function<void(QPainter& painter, const core::Page& page, const std::function<QPointF(QPointF)>& at, double per_mm)> paint;
+    };
+    void add_extra(CanvasExtra extra);  // (a key added again: its painter in place of the one before)
+    void show_extra(const QString& key, bool shown);
+    bool extra_shown(const QString& key) const;
+    std::vector<QString> extra_keys() const;
+    bool extras_shown = true;
+
 signals:
     void changed();
     void zoomChanged(double scale);
@@ -960,6 +976,9 @@ private:
     };
     std::optional<Warp> warp_;
     std::shared_ptr<CanvasWork> work_;  // (PC4 D4: set_work)
+    std::vector<CanvasExtra> extras_;   // (PC5 J-0: add_extra, in the order added)
+    std::vector<QString> extras_hidden_;
+    void draw_extras(QPainter& painter) const;
     mutable std::optional<std::pair<std::string, QImage>> mask_picture_;  // (the area and the quick mask it shows)
 
     // gliding between views

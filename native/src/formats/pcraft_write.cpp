@@ -40,6 +40,7 @@
 #include "render/ink_canvas.hpp"
 #include "render/page.hpp"
 #include "render/pcraft_manifest.hpp"
+#include "render/pcraft_production.hpp"
 #include "render/png.hpp"
 #include "render/shape_parts.hpp"
 #include "render/smart_filters.hpp"
@@ -1261,6 +1262,16 @@ Json document_json(Ctx& ctx) {
             inks.push_back(Json{{"name", ink.name}, {"color", Json::array({ink.color[0] / 255.0, ink.color[1] / 255.0, ink.color[2] / 255.0})}, {"curve", std::move(curve)}});
         }
         doc["duotone"] = Json{{"inks", std::move(inks)}, {"psd_raw", nullptr}};
+    }
+    // PC5 節 J (render/pcraft_production): the page's layer comps, notes, slices, timeline and measuring — each by its group's
+    // row (none written until then)
+    {
+        render::pcraft_production::WriteContext production;
+        production.px = ctx.px;
+        production.say = [&ctx](std::string note) {
+            if (ctx.said.insert(note).second) ctx.notes.push_back(std::move(note));
+        };
+        render::pcraft_production::write(ctx.page, doc, production);
     }
     return doc;
 }

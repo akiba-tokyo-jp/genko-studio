@@ -187,6 +187,8 @@ genko_library(genko_app
     layer_style_dialog.cpp
     styles_panel.cpp
     main_window_styles.cpp
+    # PC5 J-0: the production's frames (解析 ▸, ビデオレイヤー ▸, its panels)
+    main_window_production.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

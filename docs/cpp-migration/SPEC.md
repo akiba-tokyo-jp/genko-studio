@@ -974,6 +974,29 @@ Pythonは利用者が旧プラグインを有効にした場合だけ必要。�
 
 ネイティブの拡張（C++ 版だけ。2026-10-11 の利用者の判断で公開契約に加える。形式・RPC・断りは `docs/PLUGIN_NATIVE.md`）: 設定フォルダーの `plugins/<キー>/plugin.json`（プロトコル 1: `{"protocol": 1, "name": 文字, "executable": フォルダーの中の相対パス, "args"?: 文字のリスト, "params"?: PARAMS と同じ形}`）と、そのフォルダーの中のプログラムを、Python なしで画像フィルター `plugin:<キー>` にする。RPC は M3③の別プロセスの画像フィルター RPC と同じ（標準入力に 1 行の JSON `{"protocol": 1, "width", "height", "params"}` と RGBA の画素、標準出力に 1 行の JSON `{"ok": true, "width", "height"}` と同じ大きさの RGBA の画素、断りは `{"ok": false, "error"}`）。旧 Python プラグインと同じ規則に従う: 既定無効。一覧・名前・設定は plugin.json とプログラムのバイトを読むだけで何も起動しない。明示選択・同意（問いに動かすプログラムと引数を示す）の後だけ起動し、同意は plugin.json とプログラムの中身（sha256）に結び付け、変わったら選び直し。起動のたびに plugin.json とプログラムを読み直して選んだときと照らし、照らしたのと同じバイトを設定のフォルダーの中の本人だけが入れる一時フォルダー（`plugin-runs/run-…`。システムの一時フォルダーは noexec のことがあるので使わない）へ書き出して実行権を付け、その写しをシェルを通さず plugin.json の `args` だけで起動する（作業フォルダーもそこ。終わったら消す）。環境変数は旧ランナーと同じ短い一覧と `GENKO_PLUGIN_PROTOCOL=1`・`GENKO_PLUGIN_HOME`（元のプラグインのフォルダー）だけ。ハッシュが覆うのは plugin.json と本体だけで、同じフォルダーのほかのファイルは覆わない。写しを動かすので、本体の隣のライブラリは `$ORIGIN` などでは見つからない（`GENKO_PLUGIN_HOME` から探す）。時間（800 万画素ごとに 120 秒）と書き戻す量（画素のバイト数＋64 KB）の上限、落ちた・遅い・あふれた・起動できない・違う大きさの絵は日本語で知らせる。止めるとき、POSIX ではプラグインが始めたプロセスもまとめて止める（プロセスグループ。Windows ではプラグインのプロセスだけ）。標準エラーは最後の 64 KB を持つ。別プロセスはクラッシュ隔離であって安全な OS サンドボックスではない。同じキーの `<キー>.py` があるときは Python のプラグインを使う。
 
+### PROD-01 制作の補助（レイヤーカンプ・スライス・注釈・計測・タイムライン・ビデオレイヤー。C++ 版。PhotoCraft の取り込み PC5 節 J。利用者の決定 2026-10-28）
+
+上流 PhotoCraft の制作の補助（レイヤーカンプ・スライス・注釈・カウント・ものさし・計測スケール・計測ログ・タイムライン・ビデオレイヤー）を、Photoshop の名前と振る舞いで取り込む。形式は schema-v4.md の「制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1）」。工程は PC5 J-0（土台。この節の骨組み）と J-a〜J-g（各群が書き足す）。プラグイン（WASM）と制御チャンネルは J-f・J-g が COMP-04・API の節に書く。
+
+- **Photoshop の文書は Genko のページ**: カンプ・スライス・注釈・カウント・計測スケール・ものさしの線・タイムラインは、どれもページに持つ（Genko のアニメが今もページごとなのと同じ）。計測ログだけは上流・Photoshop と同じく、アプリの作業の間だけのもの（原稿に持たない）。
+- **原稿**: ページの `layer_comps`・`slices`・`annotations`・`measure`、ページのアニメ（`anim`）の中の作業範囲 `work`・1〜60 の整数でない fps・ビデオの行 `video`。それぞれ使っている間だけ拡張の名前を書く（空のものは書かない）。新しい機能を使わない原稿は今と同じバイトで、拡張も増えない。知らないキー・型・範囲の外の値は読めないもの（原稿は読み取り専用で開き、その値は読んだまま保つ）。拡張を知らない前の版は、その原稿を読み取り専用で開く。
+- **動画ファイルは読まない**（利用者の決定 4）: MP4・MOV・WebM は読まない。ビデオレイヤーの素材は連番の画像・動く画像（GIF・APNG・WebP）・1 枚の画像で、読み込むと原稿の素材になる。MP4 の書き出しは今のまま（パソコンの ffmpeg）。
+- **操作（op）**: 新しい op は原稿を変えるものだけで、取り消し・やり直し・journal は普通の op と同じ。名前に `frame` を使わない（Genko の op の frame はコマ。タイムラインのフレームは `at` で渡す）。`genko schema` と MCP の道具表には出さない（`apply` から通る）。J-0 は名前の枠だけを登録し、中身の無い op は `not_yet_ported`（op の名前つき）で断って原稿を変えない。
+
+  | 群 | op |
+  |---|---|
+  | J-a レイヤーカンプ | `new_layer_comp`・`update_layer_comp`・`apply_layer_comp`・`set_layer_comp`・`duplicate_layer_comp`・`delete_layer_comp`・`clear_layer_comp_warnings` |
+  | J-b スライス | `add_slice`・`set_slice`・`delete_slices`・`divide_slice`・`slices_from_guides` |
+  | J-c 注釈 | `add_annotation`・`set_annotation`・`delete_annotations`（エージェント `ai:` は人の注釈を変えない・消さない） |
+  | J-d 計測 | `set_measurement_scale`・`add_count`・`remove_count`・`move_count`・`clear_count`・`new_count_group`・`delete_count_group`・`set_count_group`・`set_ruler_line`・`straighten_layer`・`place_scale_marker` |
+  | J-e2 ビデオレイヤー | `add_video_layer`・`video_insert_blank`・`video_duplicate`・`video_delete`・`video_restore`・`video_restore_all`・`video_alter`・`set_video_layer`・`replace_footage`・`rasterize_video`・`footage_to_layers` |
+
+  タイムラインの作業範囲と小数の fps は J-e1 が `set_animation` に足す（今の範囲の値は今と同じ結果）。
+- **画面の重ね描き（エクストラ）**: スライス・注釈・カウントの印・ものさしの線は、キャンバスの上に画面の画素で描く（線の太さ・文字の大きさは倍率に依らない）。書き出し・印刷には出ない。表示 → 表示・非表示 ▸ の項目ごとに出し入れでき、エクストラ（節 H）でまとめて隠れる。
+- **メニュー**（Photoshop の場所と名前。J-0 は枠で、選ぶと「この版ではまだ使えません」と言う）: ページ（Photoshop のイメージ）→ **解析** ▸（計測スケールを設定 ▸ 初期設定・カスタム…／データポイントを選択 ▸ カスタム…／計測値を記録／ものさしツール・カウントツール／目盛りマーカーを配置…）、レイヤー → **ビデオレイヤー** ▸（ファイルから新規ビデオレイヤー…・新規空白ビデオレイヤー／空白フレームを挿入・フレームを複製・フレームを削除／フッテージを置き換え…・フッテージを解釈…／変更されたビデオを表示・フレームを復元・すべてのフレームを復元・フレームを再読み込み／ラスタライズ。ラスタライズ ▸ の前）、ウィンドウ → **アクション**・**レイヤーカンプ**・**計測ログ**・**注釈**（タイムラインは今のパネル）。
+- **名前**: タイムラインのパネルの「前後を透かす」は「オニオンスキン」、「このページをアニメーションにする」は「ビデオタイムラインを作成」、「書き出し…」は「ビデオをレンダリング…」（Photoshop の名前。どれもパネルのボタンで、コマンドの名前・キーは変わらない）。
+- **PSD・.pcraft**: PSD のレイヤーカンプ（リソース 1065 と層の cmls）・スライス（1050）・注釈（全体の塊 Anno）・計測スケール（1074）は、その群が写すまでは今と同じく塊のまま保って書き戻す（psd-keep@1）。写した物は保つ塊から外し、ページの物から書く（同じ番号・キーの保った塊は書かない）。.pcraft の `layer_comps`・`slices`・`notes`・`measurement`・`timeline` も、その群が読むまでは今と同じく外して notes で言う。
+
 ## 6. 追加する制作改善
 
 ### BRUSH-01 紙質画像

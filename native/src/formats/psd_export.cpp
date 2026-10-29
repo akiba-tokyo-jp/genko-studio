@@ -43,6 +43,7 @@
 #include "core/patterns.hpp"
 #include "render/psd_effects.hpp"
 #include "render/psd_text.hpp"
+#include "render/psd_production.hpp"
 #include "render/smart.hpp"
 #include "render/text/balloons.hpp"
 #include "render/text/fonts.hpp"
@@ -1603,7 +1604,10 @@ std::string with_kept(const std::string& sized_resources, const core::Page& page
     // (layer-styles@1, PC4 E6: a page with a layer's style says the book's global light — 1037 its angle, 1049 its
     // altitude —, in place of the ones its PSD had)
     const bool styled = std::any_of(page.layers.begin(), page.layers.end(), [](const core::Layer& l) { return l.style.has_value(); });
-    if (!styled && (!page.native_psd || page.native_psd->resources.empty())) return sized_resources;
+    // (PC5 J-0, render/psd_production: the page's own layer comps, slices and measurement scale — in place of a kept one
+    // of the same id)
+    const render::psd_production::Written own = render::psd_production::write(page, render::psd_production::WriteContext{});
+    if (!styled && own.resources.empty() && (!page.native_psd || page.native_psd->resources.empty())) return sized_resources;
     const bool layers_there = kept_layers_there(page);
     std::string blocks = sized_resources.substr(4);
     if (styled) {
@@ -1611,8 +1615,14 @@ std::string with_kept(const std::string& sized_resources, const core::Page& page
         blocks += image_resource(1037, render::psd_effects::light_resource(light[0]));
         blocks += image_resource(1049, render::psd_effects::light_resource(light[1]));
     }
+    std::set<int> own_ids;
+    for (const auto& [id, data] : own.resources) {
+        blocks += image_resource(static_cast<unsigned>(id), data);
+        own_ids.insert(id);
+    }
     for (const core::PsdResource& r : page.native_psd ? page.native_psd->resources : std::vector<core::PsdResource>{}) {
         if (styled && (r.id == 1037 || r.id == 1049)) continue;
+        if (own_ids.contains(r.id)) continue;
         if (core::psd_resource_names_layers(r.id) && !layers_there) continue;
         const core::Bytes data = kept_psd_file(doc, r.ref);
         if (!data) continue;
@@ -1638,11 +1648,20 @@ std::string with_kept(const std::string& sized_resources, const core::Page& page
 // its PSD; a kept pattern block of the key of the one made is one block with it: the made one's patterns, then the kept
 // ones it does not have.
 std::string with_kept_globals(const std::string& linked, std::string patterns, const core::Page& page, const core::Document& doc, bool psb) {
-    if (!page.native_psd || page.native_psd->globals.empty()) return linked + patterns;
+    // (PC5 J-0, render/psd_production: the page's own notes — Anno —, in place of a kept block of the same key)
+    const render::psd_production::Written own = render::psd_production::write(page, render::psd_production::WriteContext{});
+    std::string made;
+    std::set<std::string> own_keys;
+    for (const auto& [key, data] : own.globals) {
+        made += render::psd_keep::tagged_block("8BIM", key, data, psb, true);
+        own_keys.insert(key);
+    }
+    if (!page.native_psd || page.native_psd->globals.empty()) return linked + patterns + made;
     // (a PSB's long keys' blocks hold other insides in a PSD: written only into a file of the version they were read from)
     const bool same_version = page.native_psd->from && (page.native_psd->from->version == 2) == psb;
-    std::string kept;
+    std::string kept = std::move(made);
     for (const core::PsdGlobal& g : page.native_psd->globals) {
+        if (own_keys.contains(g.key)) continue;
         if (core::psb_long_key(g.key) && !same_version) continue;
         const core::Bytes data = kept_psd_file(doc, g.ref);
         if (!data) continue;

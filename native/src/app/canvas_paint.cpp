@@ -162,6 +162,7 @@ void PageCanvas::paint_page(QPainter& painter) {
     draw_rulers(painter);
     draw_selection(painter);
     draw_lines(painter);  // (the balloons' boxes and the chosen one's handles: canvas_lines.cpp)
+    draw_extras(painter);  // (PC5 J-0: the slices, notes, count marks and the ruler line — エクストラ: canvas.cpp)
     if (tool_drag_ && tool_ == QLatin1String("move") && !move_image_.isNull()) {
         // the layer being moved: its picture following the pen
         const QPointF d = tool_drag_->second - tool_drag_->first;

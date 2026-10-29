@@ -37,6 +37,7 @@
 #include "render/not_yet_ported.hpp"
 #include "render/ops_smart_parts.hpp"
 #include "render/pcraft_manifest.hpp"
+#include "render/pcraft_production.hpp"
 #include "render/png.hpp"
 #include "render/proof.hpp"
 #include "render/raw.hpp"
@@ -1972,20 +1973,17 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
     }
     ctx.page().native_source = std::move(source);
 
-    // what Genko has no place for yet (PC5's), said
-    const auto said_of = [&](const char* key, const char* what) {
-        if (const Json* v = optional_field(d, key); v != nullptr && !empty_value(*v)) ctx.notes.add(std::string(what) + "は Genko に無いため外しました");
-    };
-    said_of("layer_comps", "レイヤーカンプ");
-    said_of("notes", "注釈");
-    said_of("slices", "スライス");
-    said_of("timeline", "タイムライン");
-    if (const Json* variables = optional_field(d, "variables"); variables != nullptr && !empty_value(*variables)) ctx.notes.add("変数とデータセットは Genko に無いため外しました");
-    if (const Json* measurement = optional_field(d, "measurement")) {  // (its scale alone, as every document has one: nothing to say)
-        const Json* counts = optional_field(*measurement, "count_groups");
-        const Json* ruler = optional_field(*measurement, "ruler");
-        if ((counts != nullptr && !empty_value(*counts)) || ruler != nullptr) ctx.notes.add("計測（カウント・ものさし）は Genko に無いため外しました");
+    // PC5 節 J (render/pcraft_production): the layer comps, notes, slices, timeline and measuring onto the page — each by its
+    // group's row; one not read yet left out and said
+    {
+        pcraft_production::ReadContext production;
+        production.page = &ctx.page();
+        production.mm = ctx.mm;
+        production.say = [&ctx](std::string note) { ctx.notes.add(std::move(note)); };
+        pcraft_production::read(d, production);
     }
+    // what Genko has no place for yet (PC5's), said
+    if (const Json* variables = optional_field(d, "variables"); variables != nullptr && !empty_value(*variables)) ctx.notes.add("変数とデータセットは Genko に無いため外しました");
     if (const Json* styles = optional_field(d, "text_styles")) {  // (the basic paragraph style every document has: nothing to say)
         const Json* character = optional_field(*styles, "character");
         const Json* paragraph = optional_field(*styles, "paragraph");

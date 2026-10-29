@@ -480,6 +480,7 @@ void MainWindow::build_actions() {
     build_pattern_actions();    // (PC4 E3: パターンを定義…, パターンのレイヤー…, パターンプレビュー: main_window_patterns.cpp)
     build_brush_preset_actions();  // (PC4 E2: ブラシを定義…, プリセット ▸: main_window_brush_presets.cpp)
     build_layer_style_actions();  // (PC4 E6: レイヤー → レイヤースタイル ▸: main_window_styles.cpp)
+    build_production_actions();   // (PC5 J-0: 解析 ▸, ビデオレイヤー ▸, the production's panels — frames: main_window_production.cpp)
     build_align_actions();      // (PC3 C-d: 重ね順・整列・分布・リンク・ロック, スナップ (with 定規's グリッドにスナップ), the move tool's: main_window_align.cpp)
     build_file_actions();       // (PC4 F-0: 節 F's new commands of ファイル, frames until F-b and F-c: main_window_file.cpp)
     build_filter_actions();     // (PC4 節 D: フィルター's commands, 前回のフィルター: filter_menu.cpp)
@@ -749,6 +750,7 @@ void MainWindow::build_menus() {
     build_pattern_menus(edit, view);  // (PC4 E3: パターンを定義…, パターンプレビュー: app/main_window_patterns.cpp)
     build_brush_preset_menus(edit);  // (PC4 E2: ブラシを定義…, プリセット ▸: app/main_window_brush_presets.cpp)
     build_layer_style_menus(layers);  // (PC4 E6: レイヤースタイル ▸ before レイヤーマスク: app/main_window_styles.cpp)
+    build_production_menus(layers, pages);  // (PC5 J-0: ビデオレイヤー ▸ before ラスタライズ ▸, ページ → 解析 ▸: main_window_production.cpp)
     pages->addAction(action("act_book_preview"));
     pages->addAction(action("act_checks"));
     pages->addSeparator();
@@ -910,6 +912,7 @@ void MainWindow::build_docks() {
     build_guide_dock();   // (定規・3D, a tab when it is opened: main_window_guides.cpp)
     build_material_dock();  // (素材, トーン, 効果線: main_window_materials.cpp)
     build_output_docks();   // (履歴 and 点検, tabs when they are opened: main_window_output.cpp)
+    build_production_docks();  // (PC5 J-0: アクション, レイヤーカンプ, 計測ログ, 注釈 — frames: main_window_production.cpp)
     tabifyDockWidget(pages_dock_, library_dock_);  // (資料 last)
     view_menu_->addAction(library_dock_->toggleViewAction());
     library_dock_->hide();

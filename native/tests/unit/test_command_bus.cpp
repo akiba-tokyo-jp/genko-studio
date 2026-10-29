@@ -18,6 +18,7 @@
 #include "core/error.hpp"
 #include "core/model.hpp"
 #include "render/image.hpp"
+#include "render/ops_production.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
@@ -461,7 +462,14 @@ private slots:
             "color_replacement", "add_pattern", "rename_pattern", "delete_pattern",  // (PC4 節 E's ops, frames until their groups: SPEC.md COLOR-09)
             "render_picture", "vanishing_point",  // (PC4 節 D's ops: D4 炎・額縁・木, D6 消点 — SPEC.md COLOR-08)
             "set_layer_style", "add_layer_effect", "set_global_light", "scale_layer_style", "show_layer_effects",
-            "layer_style_to_layers"};  // (PC4 E6: layer-styles@1, SPEC.md COLOR-09)
+            "layer_style_to_layers",  // (PC4 E6: layer-styles@1, SPEC.md COLOR-09)
+            "new_layer_comp", "update_layer_comp", "apply_layer_comp", "set_layer_comp", "duplicate_layer_comp", "delete_layer_comp",
+            "clear_layer_comp_warnings", "add_slice", "set_slice", "delete_slices", "divide_slice", "slices_from_guides",
+            "add_annotation", "set_annotation", "delete_annotations", "set_measurement_scale", "add_count", "remove_count",
+            "move_count", "clear_count", "new_count_group", "delete_count_group", "set_count_group", "set_ruler_line",
+            "straighten_layer", "place_scale_marker", "add_video_layer", "video_insert_blank", "video_duplicate", "video_delete",
+            "video_restore", "video_restore_all", "video_alter", "set_video_layer", "replace_footage", "rasterize_video",
+            "footage_to_layers"};  // (PC5 節 J's ops, frames until their groups: SPEC.md PROD-01)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);
@@ -469,6 +477,16 @@ private slots:
         QVERIFY(all.area_resolver());
         QVERIFY(!core_ops.area_resolver());
         QVERIFY(all.find("erase") != core_ops.find("erase"));
+        // (PC5 J-0: 節 J's frames refuse, naming the op, and leave the book as it was)
+        for (const std::string_view name : genko::render::production_op_names()) {
+            try {
+                bus().apply(book(), Json::array({Json{{"op", std::string(name)}, {"page", 1}}}), Actor());
+                QFAIL("a frame did something");
+            } catch (const ApplyError& error) {
+                QCOMPARE(error.code(), std::string("not_yet_ported"));
+                QVERIFY2(std::string(error.what()).find(std::string(name)) != std::string::npos, error.what());
+            }
+        }
         QVERIFY(all.find("erase_raster") != core_ops.find("erase_raster"));
         // the bus without a registry has core's
         QCOMPARE(error_of(book(), ops(R"([{"op": "add_tone", "page": 1}])")).substr(0, 7), std::string("(applie"));

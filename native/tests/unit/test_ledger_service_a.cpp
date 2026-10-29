@@ -1217,7 +1217,17 @@ private slots:
                                            "render_picture", "vanishing_point",
                                            // (PC4 E6: layer-styles@1, SPEC COLOR-09)
                                            "set_layer_style", "add_layer_effect", "set_global_light", "scale_layer_style",
-                                           "show_layer_effects", "layer_style_to_layers"};
+                                           "show_layer_effects", "layer_style_to_layers",
+                                           // (PC5 J-0: 節 J's ops registered for its groups, SPEC PROD-01)
+                                           "new_layer_comp", "update_layer_comp", "apply_layer_comp", "set_layer_comp",
+                                           "duplicate_layer_comp", "delete_layer_comp", "clear_layer_comp_warnings", "add_slice",
+                                           "set_slice", "delete_slices", "divide_slice", "slices_from_guides", "add_annotation",
+                                           "set_annotation", "delete_annotations", "set_measurement_scale", "add_count",
+                                           "remove_count", "move_count", "clear_count", "new_count_group", "delete_count_group",
+                                           "set_count_group", "set_ruler_line", "straighten_layer", "place_scale_marker",
+                                           "add_video_layer", "video_insert_blank", "video_duplicate", "video_delete",
+                                           "video_restore", "video_restore_all", "video_alter", "set_video_layer", "replace_footage",
+                                           "rasterize_video", "footage_to_layers"};
         for (const std::string& name : genko::render::ops_registry().names()) {
             if (listed.count(name) == 0 && own.count(name) == 0) missing += (missing.empty() ? "" : ", ") + name;
         }

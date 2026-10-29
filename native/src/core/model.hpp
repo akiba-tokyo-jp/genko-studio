@@ -18,6 +18,11 @@
 #include "core/ink.hpp"
 #include "core/json.hpp"
 #include "core/psd_keep.hpp"
+// PC5 節 J (layer-comps@1, slices@1, annotations@1, measure@1)
+#include "core/annotations.hpp"
+#include "core/layer_comps.hpp"
+#include "core/measure.hpp"
+#include "core/slices.hpp"
 #include "core/pynum.hpp"
 #include "core/vector.hpp"
 
@@ -373,6 +378,13 @@ struct Page {
     // PSD it was read from held that this build does not read — its image resources and global blocks
     std::optional<NativeSource> native_source;
     std::optional<PsdPageKeep> native_psd;
+    // PC5 節 J (SPEC.md PROD-01): its layer comps (layer-comps@1, core/layer_comps.hpp), slices (slices@1, core/slices.hpp),
+    // notes placed on it (annotations@1, core/annotations.hpp) and measuring (measure@1, core/measure.hpp) — none or empty:
+    // nothing written. (timeline@1 and video@1 are in its anim, `extra["anim"]`: core/video.hpp)
+    std::optional<LayerComps> layer_comps;
+    std::optional<Slices> slices;
+    std::vector<Annotation> annotations;
+    std::optional<Measure> measure;
 
     Rect paper_rect_mm() const;
     Rect trim_rect_mm() const;

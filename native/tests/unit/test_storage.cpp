@@ -8,7 +8,9 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -16,6 +18,7 @@
 #include "core/error.hpp"
 #include "core/ids.hpp"
 #include "core/model.hpp"
+#include "core/video.hpp"
 #include "core/strokes.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
@@ -557,6 +560,177 @@ private slots:
         QVERIFY(loaded.document.story[0].x_mm.same(genko::core::Num(0.0)));  // and read back as a float (float())
         QCOMPARE(loaded.document.page(0).leaf_frames().size(), std::size_t{2});
         QCOMPARE(payload["binding"].get<std::string>(), std::string("left"));
+    }
+
+    // PC5 J-0 (SPEC.md PROD-01): the production's six extensions. A page's layer comps, slices, notes and measuring, and the
+    // work area, a fractional fps and a video row in its anim, written with their features and read back the same (the
+    // same bytes written again); empty ones written as none, naming nothing; a value this build does not know (a key,
+    // a type, a range) opens the book read-only, kept as read; the old book's bytes as before, naming none of them.
+    void productionExtensions() {
+        namespace core = genko::core;
+        const std::vector<std::string> six{"layer-comps@1", "slices@1", "annotations@1", "measure@1", "timeline@1", "video@1"};
+        for (const std::string& feature : six) QVERIFY(genko::storage::is_known_feature(feature));
+        const auto names_none = [&](const std::vector<std::string>& features) {
+            return std::none_of(six.begin(), six.end(), [&](const std::string& f) { return std::find(features.begin(), features.end(), f) != features.end(); });
+        };
+        QTemporaryDir tmp;
+        // the old book: none of them, its bytes as before (written twice the same)
+        {
+            const auto old = genko::storage::load_document(to_path(genko::test::test_data("legacy/book-v3.genko")));
+            const fs::path out = to_path(tmp.path()) / "old.genko";
+            genko::test::write_project(old.document, out);
+            const std::string text = genko::storage::read_file(out / "project.json");
+            const auto again = genko::storage::load_document(out);
+            QVERIFY(names_none(again.document.features));
+            for (const char* key : {"layer_comps", "slices", "annotations", "measure"}) QVERIFY(text.find(std::string("\"") + key + "\"") == std::string::npos);
+            genko::test::write_project(again.document, out);
+            QCOMPARE(genko::storage::read_file(out / "project.json"), text);
+        }
+        Json payload = minimal_book(4);
+        payload["book_id"] = core::new_book_id();
+        payload["pages"][0]["id"] = "pg_000000000001";
+        const auto base = genko::storage::load_document(make_book(tmp, "base", payload));
+        QVERIFY2(base.document.read_only_reason.empty(), base.document.read_only_reason.c_str());
+        // empty ones: none written, no feature
+        core::Document empty = base.document;
+        {
+            core::Page& page = empty.edit_page(0);
+            page.layer_comps = core::LayerComps{};
+            page.slices = core::Slices{};
+            page.measure = core::Measure{};
+            const fs::path out = to_path(tmp.path()) / "empty.genko";
+            genko::test::write_project(empty, out);
+            const Json written = genko::core::parse_python_json(genko::storage::read_file(out / "project.json"));
+            QVERIFY(names_none(written["features"].get<std::vector<std::string>>()));
+            for (const char* key : {"layer_comps", "slices", "annotations", "measure"}) QVERIFY(!written["pages"][0].contains(key));
+        }
+        // each of them
+        core::Document doc = base.document;
+        {
+            core::Page& page = doc.edit_page(0);
+            core::LayerComps comps;
+            core::LayerComp comp;
+            comp.id = 7;
+            comp.name = "台詞なし";
+            comp.comment = "メモ";
+            comp.apply_appearance = false;
+            core::CompLayerState state;
+            state.layer = "l1";
+            state.visible = false;
+            state.has_position = true;
+            state.position = std::array<double, 2>{1.5, 2.25};
+            state.appearance = core::CompAppearance{"multiply", 0.5, std::nullopt};
+            comp.layers.push_back(state);
+            core::CompLayerState bare;
+            bare.layer = "l2";
+            bare.has_position = true;  // (recorded: no bounds)
+            comp.layers.push_back(bare);
+            comps.comps.push_back(comp);
+            comps.last_applied = 7;
+            comps.last_state = std::vector<core::CompLayerState>{state};
+            page.layer_comps = comps;
+            core::Slices slices;
+            slices.group = "p001";
+            slices.next_id = 3;
+            core::Slice slice;
+            slice.id = 2;
+            slice.name = "header";
+            slice.rect_mm = {0, 0, 100, 20.5};
+            slice.url = "https://example.com/";
+            slice.align = {1, 2};
+            slice.background = "#ff8800";
+            slices.list.push_back(slice);
+            core::Slice by_layer = slice;
+            by_layer.id = 1;
+            by_layer.origin = "layer";
+            by_layer.layer = "l1";
+            by_layer.kind = "noImage";
+            by_layer.background.reset();
+            by_layer.outsets = {1, 2, 3, 4};
+            slices.list.push_back(by_layer);
+            page.slices = slices;
+            core::Annotation note;
+            note.id = "an_0123456789ab";
+            note.at_mm = {10, 20};
+            note.popup_mm = std::array<double, 4>{10, 20, 50, 30};
+            note.text = "ここを直す\n2 行目";
+            note.author = "編集";
+            note.open = true;
+            note.modified = "2026-10-29T01:02:03Z";
+            note.actor = "human:test";
+            page.annotations.push_back(note);
+            core::Measure measure;
+            measure.scale = core::MeasurementScale{600 / 25.4, 1, "mm"};
+            core::CountGroup group;
+            group.name = "コマ";
+            group.points = {{1, 2}, {3, 4}};
+            measure.count_groups.push_back(group);
+            measure.ruler = core::RulerLine{{0, 0}, {10, 0}, std::array<double, 2>{0, 10}};
+            page.measure = measure;
+            page.extra["anim"] = Json{{"fps", 12.5}, {"frames", 24}, {"loop", true}, {"work", Json::array({2, 12})},
+                                      {"tracks", Json::array({Json{{"folder", "l1"}, {"cels", Json::array()},
+                                                                   {"video", Json{{"footage", nullptr},
+                                                                                  {"frames", Json::array({Json::array({nullptr, nullptr})})},
+                                                                                  {"show_altered", true},
+                                                                                  {"placement_mm", Json::array({0, 0, 210, 297})},
+                                                                                  {"fit", "contain"}}}}})}};
+        }
+        const fs::path out = to_path(tmp.path()) / "made.genko";
+        genko::test::write_project(doc, out);
+        const std::string text = genko::storage::read_file(out / "project.json");
+        const Json written = genko::core::parse_python_json(text);
+        for (const std::string& feature : six) {
+            const auto list = written["features"].get<std::vector<std::string>>();
+            QVERIFY2(std::find(list.begin(), list.end(), feature) != list.end(), feature.c_str());
+        }
+        const auto read = genko::storage::load_document(out);
+        QVERIFY2(read.document.read_only_reason.empty(), read.document.read_only_reason.c_str());
+        const core::Page& back = read.document.page(0);
+        QVERIFY(back.layer_comps && *back.layer_comps == *doc.page(0).layer_comps);
+        QVERIFY(back.slices && *back.slices == *doc.page(0).slices);
+        QVERIFY(back.annotations == doc.page(0).annotations);
+        QVERIFY(back.measure && *back.measure == *doc.page(0).measure);
+        QVERIFY(core::page_uses_timeline(back) && core::page_uses_video(back));
+        QVERIFY(!back.extra.contains("layer_comps") && !back.extra.contains("measure"));
+        genko::test::write_project(read.document, out);
+        QCOMPARE(genko::storage::read_file(out / "project.json"), text);
+        // the fps of the anims before it (a whole number of 1..60, or what Python's held) names nothing
+        for (const Json& fps : {Json(12), Json(60), Json(12.0), Json(0), Json("12")}) {
+            core::Page plain = doc.page(0);
+            plain.extra["anim"] = Json{{"fps", fps}, {"frames", 24}, {"tracks", Json::array()}};
+            QVERIFY2(!core::page_uses_timeline(plain), core::dump_python(fps).c_str());
+        }
+        // values this build does not know: read-only, kept as read
+        const auto broken = [&](const std::string& name, const std::function<void(Json&)>& twist, const std::string& pointer) {
+            Json bad = written;
+            twist(bad["pages"][0]);
+            const auto result = genko::storage::load_document(make_book(tmp, name, bad));
+            QVERIFY2(!result.document.read_only_reason.empty(), name.c_str());
+            QVERIFY2(has_issue(result, "broken_value", pointer), name.c_str());
+        };
+        broken("comp_key", [](Json& p) { p["layer_comps"]["comps"][0]["later"] = 1; }, "/pages/0/layer_comps");
+        broken("comp_last", [](Json& p) { p["layer_comps"]["last_applied"] = 99; }, "/pages/0/layer_comps");
+        broken("comp_twice", [](Json& p) { p["layer_comps"]["comps"].push_back(p["layer_comps"]["comps"][0]); }, "/pages/0/layer_comps");
+        broken("slice_kind", [](Json& p) { p["slices"]["list"][0]["kind"] = "movie"; }, "/pages/0/slices");
+        broken("slice_next", [](Json& p) { p["slices"]["next_id"] = 2; }, "/pages/0/slices");
+        broken("note_id", [](Json& p) { p["annotations"][0]["id"] = "n1"; }, "/pages/0/annotations");
+        broken("note_actor", [](Json& p) { p["annotations"][0]["actor"] = "robot"; }, "/pages/0/annotations");
+        broken("measure_group", [](Json& p) { p["measure"]["active_group"] = 3; }, "/pages/0/measure");
+        broken("measure_marker", [](Json& p) { p["measure"]["count_groups"][0]["marker_size"] = 11; }, "/pages/0/measure");
+        broken("work", [](Json& p) { p["anim"]["work"] = Json::array({12, 2}); }, "/pages");
+        broken("fps", [](Json& p) { p["anim"]["fps"] = 240.5; }, "/pages");
+        broken("video_fit", [](Json& p) { p["anim"]["tracks"][0]["video"]["fit"] = "fill"; }, "/pages");
+        broken("video_movie", [](Json& p) {  // (the user's decision 4: no video file)
+            p["anim"]["tracks"][0]["video"]["footage"] = Json{{"kind", "movie"}, {"name", "a.mp4"}, {"frames", Json::array({"sha256:" + std::string(64, 'a')})},
+                                                              {"fps", 30}, {"size_px", Json::array({4, 4})}, {"depth", 8}, {"alpha", "ignore"}, {"par", 1}};
+        }, "/pages");
+        {
+            Json bad = written;
+            bad["pages"][0]["layer_comps"]["comps"][0]["later"] = 1;
+            const auto result = genko::storage::load_document(make_book(tmp, "kept", bad));
+            QVERIFY(!result.document.page(0).layer_comps);
+            QVERIFY(result.document.page(0).extra.contains("layer_comps"));  // (kept as read: never written without it)
+        }
     }
 
     void projectJsonFromCopiedLegacyBookInPlace() {
