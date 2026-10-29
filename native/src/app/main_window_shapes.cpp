@@ -62,8 +62,8 @@ const std::vector<ShapeTool>& shape_tools() {
         {"act_shape_ellipse", "楕円形ツール", "shape_ellipse", "ellipse", "楕円形", "ドラッグで楕円のシェイプを描きます（Shift で正円、Alt で中心から）"},
         {"act_shape_triangle", "三角形ツール", "shape_triangle", "triangle", "三角形", "ドラッグで三角形のシェイプを描きます（Shift で縦横が同じ、Alt で中心から）"},
         {"act_shape_polygon", "多角形ツール", "shape_polygon", "polygon", "多角形",
-         "ドラッグで多角形・星形のシェイプを描きます（辺の数と星の比率はツールの設定で。Alt で中心から）"},
-        {"act_shape_line", "ラインツール", "shape_line", "line", "ライン", "ドラッグで直線のシェイプを描きます（Shift で 45° 刻み、太さはツールの設定で）"},
+         "ドラッグで多角形・星形のシェイプを描きます（辺の数と星の比率はオプションで。Alt で中心から）"},
+        {"act_shape_line", "ラインツール", "shape_line", "line", "ライン", "ドラッグで直線のシェイプを描きます（Shift で 45° 刻み、太さはオプションで）"},
         {"act_shape_custom", "カスタムシェイプツール", "shape_custom", "custom", "シェイプ",
          "シェイプ パネルで選んだ形をドラッグで描きます（Shift で縦横比を保つ、Alt で中心から）"},
     };

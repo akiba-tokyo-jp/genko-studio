@@ -24,6 +24,7 @@
 #include "app/guide_panel.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "app/tool_settings.hpp"
 #include "service/wording.hpp"
 #include "core/base64.hpp"
@@ -323,7 +324,12 @@ void MainWindow::place_ruler(const Json& ruler) {
         action("act_snap")->setChecked(true);
         guide_toggles();
     }
-    flash(QStringLiteral("定規を置きました。ブラシツール（B）で描くと沿います（Ctrl+2 で切り替え）"), 3500);
+    // (PC5 H-0: the keys now — 描画定規にスナップ has none in the Photoshop key set, where Ctrl+2 is the composite channel)
+    const QString snap = action("act_snap")->shortcut().toString(QKeySequence::NativeText);
+    flash(QStringLiteral("定規を置きました。ブラシツール%1で描くと沿います（%2 で切り替え）")
+              .arg(preferences::keys_in_words({action("act_pen")}),
+                   snap.isEmpty() ? QStringLiteral("ツール → 定規 → 描画定規にスナップ") : snap),
+          3500);
     if (guides_ != nullptr) guides_->refresh();
 }
 

@@ -27,6 +27,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
+#include <vector>
 
 #include "app/ask.hpp"
 #include "app/brush_panel.hpp"
@@ -35,6 +37,7 @@
 #include "app/fields.hpp"
 #include "app/main_window.hpp"
 #include "app/material_tabs.hpp"
+#include "app/preferences.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
 #include "service/wording.hpp"
@@ -78,6 +81,18 @@ void MainWindow::build_tool_settings() {
 
     tool_settings_ = new ToolSettings;
     ToolSettings* ts = tool_settings_;
+    // (PC5 H-0: the title's keys are the tool's command's own now — the key set chosen, the person's own)
+    ts->keys_of = [this](const QString& tool) {
+        static const std::map<QString, std::vector<const char*>> groups{{QStringLiteral("marquee"), {"act_marquee", "act_lasso", "act_wand"}},
+                                                                        {QStringLiteral("shape"), {"act_shape", "act_next_shape_tool"}}};
+        std::vector<const QAction*> commands;
+        if (const auto group = groups.find(tool); group != groups.end()) {
+            for (const char* name : group->second) commands.push_back(action(QString::fromLatin1(name)));
+        } else if (const auto own = tool_actions_.find(tool); own != tool_actions_.end()) {
+            commands.push_back(own->second);
+        }
+        return preferences::keys_in_words(commands);
+    };
     // (the panel in its scroll area and its dock first, its pages added after: a widget that changes parent has the app's
     // style sheet given again to everything under it, so each page is styled once as it is added — not twice more with
     // all the others, as the whole panel goes into the scroll area and the dock; it opens the window quicker). Nothing

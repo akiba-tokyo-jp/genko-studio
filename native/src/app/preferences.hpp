@@ -107,6 +107,9 @@ const std::vector<Pane>& panes();
 bool names_current(const QString& key);
 void mark_names_current(const QString& key);
 void apply_shortcuts(MainWindow* window);
+// PC5 H-0: a command's keys as the screen's words say them — "（K）", several "（O・Shift+O）" — from its keys now (the key
+// set chosen, the person's own), or nothing when it has none: never a key written in the words, which a key set changes.
+QString keys_in_words(const std::vector<const QAction*>& actions);
 // Every command's tooltip says its name, its keys as they are now, and what it does (written again when the keys
 // change, so a changed key never shows the old one).
 void retip(MainWindow* window);

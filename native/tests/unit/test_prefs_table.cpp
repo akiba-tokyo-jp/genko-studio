@@ -42,7 +42,7 @@ const std::vector<std::string>& app_keys() {
         "raw/sharpen", "raw/smart_object", "raw/space", "save/after_ms", "shapes/mode", "shapes/pen_mode", "shortcuts/ブラシツール",
         "shortcuts/水平方向に反転（表示）", "shortcuts_unread/グラデーション", "snap/guides", "snap/grid", "stroke/location",
         "stroke/width_mm", "subview/images", "tablet/button", "tablet/gamma", "tool_presets/current_only", "ui/brightness",
-        "ui/brush_preview", "ui/commandbar", "ui/cross_drawing", "ui/cursor", "ui/font_pt", "ui/gpu_canvas", "ui/hints", "ui/key_set",
+        "ui/brush_preview", "ui/commandbar", "ui/cross_drawing", "ui/cursor", "ui/font_pt", "ui/gpu_canvas", "ui/hints", "ui/key_set", "ui/key_set_told",
         "ui/layer_details", "ui/mono_icons", "ui/next_steps", "ui/phone_view", "ui/quick", "ui/radial", "ui/raise_requests",
         "ui/reduce_motion", "ui/rest_minutes", "ui/stage", "ui/surround", "ui/theme", "ui/tool_names", "ui/ui_font", "ui/workspace",
         "view/checker_colors", "view/checker_dark", "view/checker_light", "view/checker_size", "view/gamut_color", "view/gamut_opacity",
@@ -256,6 +256,33 @@ private slots:
         QVERIFY(!s->contains(QStringLiteral("shortcuts/ブラシツール")));
         QCOMPARE(s->value(QStringLiteral("brush/kind")).toString(), QStringLiteral("gpen"));  // (the app's memory kept)
         QVERIFY(!prefs::reset(*s, "nope").ok);
+        // the app's memories by their names: refused, kept (the workspaces kept, migration/done)
+        s->setValue(QStringLiteral("workspaces/ペン入れ"), QStringLiteral("1"));
+        s->setValue(QStringLiteral("migration/done"), QStringLiteral("yes"));
+        for (const char* path : {"state", "state.brush.kind", "state.workspaces.ペン入れ", "state.migration.done"}) {
+            const prefs::Outcome refused = prefs::reset(*s, path);
+            QVERIFY2(!refused.ok && refused.code == "bad_value", path);
+        }
+        QCOMPARE(s->value(QStringLiteral("brush/kind")).toString(), QStringLiteral("gpen"));
+        QCOMPARE(s->value(QStringLiteral("workspaces/ペン入れ")).toString(), QStringLiteral("1"));
+        QCOMPARE(s->value(QStringLiteral("migration/done")).toString(), QStringLiteral("yes"));
+    }
+
+    // set writes a list or a key that may hold a reused name (グラデーション, 書き出し…) with the mark the app reads it by:
+    // the new command's (app/preferences' names_current); other keys without.
+    void setMarksReusedNames() {
+        auto s = fresh("marks.ini");
+        QVERIFY(prefs::set(*s, Json{{"shortcuts.グラデーション", "Ctrl+Alt+G"},
+                                    {"shortcuts.ブラシツール", "Ctrl+Alt+B"},
+                                    {"workspace.quickAccess", "グラデーション	書き出し…"},
+                                    {"workspace.commandBar", "取り消し"}})
+                    .ok);
+        QCOMPARE(s->value(QStringLiteral("names_current/shortcuts/グラデーション")).toString(), QStringLiteral("Ctrl+Alt+G"));
+        QCOMPARE(s->value(QStringLiteral("names_current/ui/quick")).toString(), QStringLiteral("グラデーション	書き出し…"));
+        QCOMPARE(s->value(QStringLiteral("names_current/ui/commandbar")).toString(), QStringLiteral("取り消し"));
+        QVERIFY(!s->contains(QStringLiteral("names_current/shortcuts/ブラシツール")));
+        QCOMPARE(q(prefs::mark_of("shortcuts/書き出し…").value_or("")), QStringLiteral("names_current/shortcuts/書き出し…"));
+        QVERIFY(!prefs::mark_of("ui/theme"));
     }
 };
 

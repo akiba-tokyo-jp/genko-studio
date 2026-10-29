@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <system_error>
 
+#include "app/settings_watch.hpp"
 #include "core/config_dir.hpp"
 #include "core/paths.hpp"
 
@@ -28,8 +29,27 @@ fs::path ensure(const fs::path& dir) {
 
 fs::path config_dir() { return core::config_dir(); }
 
+namespace {
+
+// The app's own store: when it goes, having changed the file, the watch of settings.ini knows the app wrote it (PC5 H-0:
+// app/settings_watch — what the app writes it has applied itself).
+class OwnSettings : public QSettings {
+public:
+    explicit OwnSettings(const QString& file) : QSettings(file, QSettings::IniFormat), file_(file), before_(settings_stamp(file)) {}
+    ~OwnSettings() override {
+        sync();
+        if (const SettingsStamp after = settings_stamp(file_); after != before_) settings_written(after);
+    }
+
+private:
+    QString file_;
+    SettingsStamp before_;
+};
+
+}  // namespace
+
 std::unique_ptr<QSettings> settings() {
-    return std::make_unique<QSettings>(QString::fromStdString(core::path_to_utf8(config_dir() / "settings.ini")), QSettings::IniFormat);
+    return std::make_unique<OwnSettings>(QString::fromStdString(core::path_to_utf8(config_dir() / "settings.ini")));
 }
 
 std::unique_ptr<QSettings> legacy_settings() {

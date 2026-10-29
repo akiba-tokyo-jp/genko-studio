@@ -121,7 +121,7 @@ private slots:
         QCOMPARE(app::where(b.window.get(), b.act("act_mirror")), QStringLiteral("表示"));
         QCOMPARE(app::where(b.window.get(), b.act("act_find_command")), QStringLiteral("編集"));
         app::CommandSearch* search = b.window->find_command();
-        QCOMPARE(search->windowTitle(), QStringLiteral("コマンドを探す"));
+        QCOMPARE(search->windowTitle(), QStringLiteral("検索"));
         QVERIFY(search->query->hasFocus() || search->isVisible());
         // (PC5 H-0: by its old name too — 左右反転して見る is 表示 → 水平方向に反転; its key H in the Genko key set only)
         search->query->setText(QStringLiteral("左右反転して見る"));
@@ -629,7 +629,7 @@ private slots:
             {"act_pen", "ペン", "ブラシツール", "B"},
             {"act_eraser", "消しゴム", "消しゴムツール", "E"},
             {"act_picker", "スポイト", "スポイトツール", "I"},
-            {"act_fill", "塗りつぶし", "塗りつぶしツール", ""},  // (PC5 H-0: the Photoshop key set)
+            {"act_fill", "塗りつぶし", "塗りつぶしツール", "Shift+Q"},  // (PC5 H-0: the Photoshop key set)
             
             {"act_gradient", "グラデーション", "グラデーションツール", "G"},
             {"act_swap_colour", "メインとサブの色を入れ替える", "描画色と背景色を入れ替え", "X"},
@@ -762,6 +762,19 @@ private slots:
         QCOMPARE(app::by_text(b.window.get()).at(QStringLiteral("書き出し…")), b.act("act_prefs_export"));
         app::settings()->remove(QStringLiteral("ui/quick"));
         app::settings()->remove(QStringLiteral("names_current/ui/quick"));
+        // a key chosen under an old name, put back to the command's first (すべて最初のキーに戻す → 決める): the old name's
+        // key goes too — the next apply does not read it back (the review of PC5 H-0, P2-5)
+        app::settings()->setValue(QStringLiteral("shortcuts/元に戻す"), QStringLiteral("Ctrl+Alt+Shift+U"));
+        app::preferences::apply_all(b.window.get());
+        QCOMPARE(b.act("act_undo")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+Shift+U")));
+        {
+            app::preferences::PreferencesDialog dialog(b.window.get());
+            dialog.reset_keys();
+            dialog.save();
+        }
+        QVERIFY(!app::settings()->contains(QStringLiteral("shortcuts/元に戻す")));
+        app::preferences::apply_all(b.window.get());
+        QCOMPARE(b.act("act_undo")->shortcut(), QKeySequence(QKeySequence::Undo));
         // 検索 finds a command by its old name
         app::CommandSearch* search = b.window->find_command();
         search->query->setText(QStringLiteral("全体を表示"));

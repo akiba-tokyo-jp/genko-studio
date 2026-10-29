@@ -16,6 +16,7 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
+#include <QPushButton>
 #include <QSettings>
 
 #include <map>
@@ -35,10 +36,12 @@
 #include "app/preferences.hpp"
 #include "app/templates.hpp"
 #include "app/theme.hpp"
+#include "app/tool_settings.hpp"
 #include "app/key_sets.hpp"
 #include "app/settings_watch.hpp"
 #include "app/workspace.hpp"
 #include "core/frames.hpp"
+#include "core/paths.hpp"
 #include "gui_support.hpp"
 #include "render/ops_registry.hpp"
 
@@ -105,7 +108,7 @@ const std::vector<Expected>& expected() {
         // (Ctrl+Y is やり直す); it shows what 校正の設定 chooses, the working CMYK unless another: the user's decision
         // (working CMYK coated-cmyk), Python's own conversion kept there as 書き出しの CMYK)
         {"act_cmyk_proof", "色の校正", k({s("Ctrl+Y")}), "印刷したときの色など、校正の設定で選んだ見え方で表示します（表示だけ。原稿は変わりません）", true, "表示"},
-        {"act_select", "選択", {}, "コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす", true, "ツール"},
+        {"act_select", "選択", k({s("Shift+N")}), "コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす", true, "ツール"},
         {"act_pen", "ブラシツール", k({s("B")}), "レイヤー パネルで選んだレイヤーに描きます", true, "ツール"},
         {"act_eraser", "消しゴムツール", k({s("E")}), "ペンの線は触れた所で切れます", true, "ツール"},
         {"act_frame", "コマ割り", k({s("K")}),
@@ -548,6 +551,11 @@ private slots:
             QVERIFY(w->action(QStringLiteral("act_gamut_warning"))->shortcuts().isEmpty());
             QVERIFY2(w->last_notice().contains(QStringLiteral("色域外警告")) && w->last_notice().contains(QStringLiteral("ページを並べて見る")),
                      qPrintable(w->last_notice()));
+            // (said once: the keys applied again — the same key taken off again — not said again; PC5 H-0)
+            w->flash(QStringLiteral("ほかの知らせ"), 3000);
+            genko::app::preferences::apply_all(w);
+            QCOMPARE(w->last_notice(), QStringLiteral("ほかの知らせ"));
+            QVERIFY(w->action(QStringLiteral("act_gamut_warning"))->shortcuts().isEmpty());
             genko::app::settings()->remove(QStringLiteral("shortcuts/ページを並べて見る"));
             genko::app::preferences::apply_all(w);
             QCOMPARE(w->action(QStringLiteral("act_gamut_warning"))->shortcuts(), QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Shift+Y"))});
@@ -603,9 +611,33 @@ private slots:
         QCOMPARE(keys("act_channel_composite"), k({s("Ctrl+2")}));
         QCOMPARE(keys("act_scale"), k({s("Ctrl+R")}));  // (定規: Photoshop's the same)
         QCOMPARE(dock("レイヤー")->toggleViewAction()->shortcuts(), k({s("F7")}));
-        for (const char* none : {"act_select", "act_mirror", "act_actual", "act_guides", "act_history", "act_snap", "act_show_rulers", "act_export"}) {
+        for (const char* none : {"act_mirror", "act_actual", "act_guides", "act_history", "act_snap", "act_show_rulers", "act_export"}) {
             QVERIFY2(keys(none).isEmpty(), none);
         }
+        // the Genko-only tools whose letter Photoshop gives another: a key Photoshop leaves free (the user's decision
+        // 2026-10-29) — 選択 Shift+N, 効果線 Shift+K, 3D 操作 Shift+D, 線の修正 Shift+R, 塗りつぶし Shift+Q
+        QCOMPARE(keys("act_select"), k({s("Shift+N")}));
+        QCOMPARE(keys("act_effect"), k({s("Shift+K")}));
+        QCOMPARE(keys("act_3d"), k({s("Shift+D")}));
+        QCOMPARE(keys("act_reshape"), k({s("Shift+R")}));
+        QCOMPARE(keys("act_fill"), k({s("Shift+Q")}));
+        for (const QString& tool : key_sets::genko_tools()) {
+            const QList<QKeySequence> own = w->action(tool)->shortcuts();
+            QVERIFY2(!own.isEmpty(), qPrintable(tool));
+            for (const QKeySequence& key : own) {
+                QVERIFY2(!key_sets::photoshop_defaults().contains(key.toString(QKeySequence::PortableText)), qPrintable(tool + QStringLiteral(" ") + key.toString()));
+            }
+        }
+        QVERIFY(key_sets::photoshop_defaults().contains(QStringLiteral("Shift+B")) && key_sets::photoshop_defaults().contains(QStringLiteral("V")));
+        // the keys the words say are the commands' own now (the オプション panel's title, a notice): Photoshop's here
+        const auto title = [w](const char* tool) {
+            w->choose_tool(QString::fromLatin1(tool));
+            return w->tool_settings()->title()->text();
+        };
+        QCOMPARE(title("select"), QStringLiteral("選択（Shift+N）"));
+        QCOMPARE(title("frame"), QStringLiteral("コマ割り（K）"));
+        QCOMPARE(title("move"), QStringLiteral("移動ツール（V）"));
+        QCOMPARE(title("shape"), QStringLiteral("シェイプツール（U・Shift+U）"));
         // Genko's set: the keys before PC5 back
         genko::app::settings()->setValue(QStringLiteral("ui/key_set"), QStringLiteral("genko"));
         genko::app::preferences::apply_all(w);
@@ -626,6 +658,9 @@ private slots:
         QCOMPARE(keys("act_channel_composite"), k({s("Ctrl+Alt+2")}));
         QVERIFY(dock("レイヤー")->toggleViewAction()->shortcuts().isEmpty());
         QCOMPARE(clashes(), QStringList());
+        QCOMPARE(title("select"), QStringLiteral("選択（V）"));  // (Genko's: the title follows the set)
+        QCOMPARE(title("frame"), QStringLiteral("コマ割り（F）"));
+        QCOMPARE(title("shape"), QStringLiteral("シェイプツール（O・Shift+O）"));
         // a key the person chose stays over either set
         genko::app::settings()->setValue(QStringLiteral("shortcuts/移動ツール"), QStringLiteral("Ctrl+Alt+M"));
         genko::app::preferences::apply_all(w);
@@ -657,16 +692,53 @@ private slots:
         genko::app::preferences::apply_all(w);
         QCOMPARE(keys("act_move"), k({s("V")}));
         // a preference written by another program (genko prefs set — H-e): the watch of settings.ini applies it to the
-        // windows open; a write of the app's memories only is not one
+        // windows open; a write of the app's memories only is not one, nor the app's own write of a preference (what it
+        // writes it has applied itself — the export's settings, ブラシプレビュー)
+        const QString file = QString::fromStdString(genko::core::path_to_utf8(genko::app::config_dir() / "settings.ini"));
+        const auto other = [&file](const char* key, const QString& value) {
+            QSettings program(file, QSettings::IniFormat);  // (not the app's own settings(): another program)
+            if (value.isNull()) program.remove(QString::fromLatin1(key));
+            else program.setValue(QString::fromLatin1(key), value);
+        };
         (void)genko::app::settings_changed_now();
-        genko::app::settings()->setValue(QStringLiteral("ui/key_set"), QStringLiteral("genko"));
+        other("ui/key_set", QStringLiteral("genko"));
         QVERIFY(genko::app::settings_changed_now());
         QCOMPARE(keys("act_move"), k({s("Q")}));
-        genko::app::settings()->setValue(QStringLiteral("brush/kind"), QStringLiteral("gpen"));
+        other("brush/kind", QStringLiteral("gpen"));
         QVERIFY(!genko::app::settings_changed_now());
-        genko::app::settings()->remove(QStringLiteral("ui/key_set"));
+        genko::app::settings()->setValue(QStringLiteral("ui/brush_preview"), QStringLiteral("false"));
+        genko::app::settings()->setValue(QStringLiteral("export/jpeg_quality"), 70);
+        QVERIFY(!genko::app::settings_changed_now());
+        genko::app::settings()->remove(QStringLiteral("ui/brush_preview"));
+        genko::app::settings()->remove(QStringLiteral("export/jpeg_quality"));
+        QVERIFY(!genko::app::settings_changed_now());
+        other("ui/key_set", QString());
         QVERIFY(genko::app::settings_changed_now());
         QCOMPARE(keys("act_move"), k({s("V")}));
+        // a person whose settings are from before the Photoshop set became the default: told once on the app's start, and
+        // the Genko set a click away (the coordinator's decision with the user's decision 8); a new person never told
+        genko::app::settings()->remove(QStringLiteral("ui/key_set_told"));
+        QVERIFY(!genko::app::settings()->allKeys().isEmpty());
+        QVERIFY(key_sets::from_before_pc5());
+        QVERIFY(!key_sets::from_before_pc5());  // (once)
+        key_sets::tell_new_default(w);
+        QVERIFY2(w->last_notice().contains(QStringLiteral("Photoshop")) && w->last_notice().contains(QStringLiteral("Genko の組に戻す")), qPrintable(w->last_notice()));
+        auto* back = w->findChild<QPushButton*>(QStringLiteral("key_set_back"));
+        QVERIFY(back != nullptr && back->text() == QStringLiteral("Genko の組に戻す"));
+        back->click();
+        QCOMPARE(key_sets::current(), QStringLiteral("genko"));
+        QCOMPARE(keys("act_move"), k({s("Q")}));
+        QVERIFY(!back->isVisible());  // (gone)
+        genko::app::settings()->remove(QStringLiteral("ui/key_set"));
+        genko::app::preferences::apply_all(w);
+        QCOMPARE(keys("act_move"), k({s("V")}));
+        {
+            // (chosen already: not told)
+            genko::app::settings()->remove(QStringLiteral("ui/key_set_told"));
+            genko::app::settings()->setValue(QStringLiteral("ui/key_set"), QStringLiteral("photoshop"));
+            QVERIFY(!key_sets::from_before_pc5());
+            genko::app::settings()->remove(QStringLiteral("ui/key_set"));
+        }
     }
 
     // PC5 H-0 (節 H 5.1・5.2・5.4, SPEC VIEW-01): 表示 in Photoshop's order with Genko's own after a line; ウィンドウ → アレンジ ▸
@@ -698,7 +770,7 @@ private slots:
                               QStringLiteral("仕上がり線・基本枠を表示"), QStringLiteral("スマホの画面の範囲を表示"), QStringLiteral("選択範囲の境界線"),
                               QStringLiteral("前のページを透かす（オニオンスキン）"), QStringLiteral("網点を画面で見る"), QStringLiteral("|"), QStringLiteral("道具の名前を表示")}));
         const QStringList window = items(menu(QStringLiteral("ウィンドウ")));
-        QCOMPARE(window.mid(0, 4), (QStringList{QStringLiteral("原稿だけを表示"), QStringLiteral("アレンジ ▸"), QStringLiteral("ワークスペース ▸"), QStringLiteral("|")}));
+        QCOMPARE(window.mid(0, 4), (QStringList{QStringLiteral("アレンジ ▸"), QStringLiteral("ワークスペース ▸"), QStringLiteral("|"), QStringLiteral("原稿だけを表示")}));
         QMenu* arrange = w->findChild<QMenu*>(QStringLiteral("menu_arrange"));
         QVERIFY(arrange != nullptr);
         QCOMPARE(items(arrange), QStringList{QStringLiteral("新規ウィンドウ")});

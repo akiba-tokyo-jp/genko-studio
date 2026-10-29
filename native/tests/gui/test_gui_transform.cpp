@@ -415,7 +415,7 @@ private slots:
         studio.trigger("act_warp_text");
         QCOMPARE(opened, 0);
         QCOMPARE(studio.ops.size(), std::size_t(2));
-        QCOMPARE(studio.window->last_notice(), QStringLiteral("先に選択ツール（V）で台詞（フキダシ）をクリックして選びます"));
+        QCOMPARE(studio.window->last_notice(), QStringLiteral("先に選択ツール（Shift+N）で台詞（フキダシ）をクリックして選びます"));
     }
 };
 

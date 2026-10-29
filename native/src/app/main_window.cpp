@@ -374,15 +374,15 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     known_requests_ = request_ids();
     studio_follow(true);
     refresh_ai();
-    // comfort (comfort.cpp): 原稿だけを表示 — Tab on the page only (elsewhere Tab moves between fields) — at the top of
-    // the window menu, and the rest reminder
+    // comfort (comfort.cpp): 原稿だけを表示 — Tab on the page only (elsewhere Tab moves between fields) — in the window
+    // menu after アレンジ ▸ and ワークスペース ▸ (PC5 H-0), and the rest reminder
     canvas_only_ = new CanvasOnly(this);
     QAction* only = make("act_canvas_only", QStringLiteral("原稿だけを表示"), [this] { canvas_only_->toggle(); }, {QKeySequence(Qt::Key_Tab)},
                          QStringLiteral("パネルとバーを隠して原稿だけにします（Tab で戻る）。左右の端にカーソルを寄せるとその側のパネルが出ます"));
     removeAction(only);
     only->setShortcutContext(Qt::WidgetWithChildrenShortcut);
     canvas_->addAction(only);
-    view_menu_->insertAction(view_menu_->actions().isEmpty() ? nullptr : view_menu_->actions().front(), only);
+    view_menu_->insertAction(action("act_next_doc"), only);  // (PC5 H-0, 節 H 5.2: after アレンジ ▸ and ワークスペース ▸, Photoshop's first)
     rest_ = new RestReminder(this);
     // the person's own keys and ways (環境設定): every command named by its words, its keys as chosen
     preferences::name_commands(this);

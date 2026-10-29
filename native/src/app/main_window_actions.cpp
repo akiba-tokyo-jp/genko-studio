@@ -1207,7 +1207,7 @@ void MainWindow::gutter_settings() {
         form->addRow(QString::fromUtf8(label), spin);
         spins[QString::fromLatin1(key)] = spin;
     }
-    auto* note = new QLabel(QStringLiteral("これから割るコマに使います。今ある間隔は、コマ ツール（F）で間の白をドラッグして変えます。"));
+    auto* note = new QLabel(QStringLiteral("これから割るコマに使います。今ある間隔は、コマ割りツールで間の白をドラッグして変えます。"));
     note->setWordWrap(true);
     form->addRow(note);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);

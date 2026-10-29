@@ -232,6 +232,7 @@ std::vector<Pref> make_table() {
         memory("state.gradient.*", "gradient/*"),
         memory("state.gutter.*", "gutter_*"),
         memory("state.layerDetails", "ui/layer_details"),
+        memory("state.keySetTold", "ui/key_set_told"),  // (PC5 H-0: the change of the default key set said once)
         memory("state.migration.*", "migration/*"),
         memory("state.move.*", "move/*"),
         memory("state.namesCurrent.*", "names_current/*"),
@@ -582,6 +583,21 @@ QVariant encode(const Pref& p, const Json& value) {
     }
 }
 
+const std::vector<std::string>& reused_names() {
+    static const std::vector<std::string> all{"グラデーション", "書き出し…"};
+    return all;
+}
+
+std::optional<std::string> mark_of(std::string_view key) {
+    if (key == "ui/quick" || key == "ui/commandbar") return "names_current/" + std::string(key);
+    if (key.substr(0, 10) == "shortcuts/") {
+        const std::string name(key.substr(10));
+        const auto& reused = reused_names();
+        if (std::find(reused.begin(), reused.end(), name) != reused.end()) return "names_current/" + std::string(key);
+    }
+    return std::nullopt;
+}
+
 std::unique_ptr<QSettings> store() {
     return std::make_unique<QSettings>(QString::fromStdString(path_to_utf8(config_dir() / "settings.ini")), QSettings::IniFormat);
 }
@@ -620,7 +636,11 @@ Outcome set(QSettings& settings, const Json& values) {
         writes.emplace_back(*key_of(path), encode(*p, value));
         out.values[path] = value;
     }
-    for (const auto& [key, stored] : writes) settings.setValue(QString::fromStdString(key), stored);
+    for (const auto& [key, stored] : writes) {
+        settings.setValue(QString::fromStdString(key), stored);
+        // (a list or a key that may hold a reused name: read as this build's names — the mark the app writes too)
+        if (const auto mark = mark_of(key)) settings.setValue(QString::fromStdString(*mark), stored);
+    }
     settings.sync();
     if (settings.status() != QSettings::NoError) return refused("config_unwritable", "", "環境設定のファイルに書き込めません");
     return out;
@@ -629,6 +649,12 @@ Outcome set(QSettings& settings, const Json& values) {
 Outcome reset(QSettings& settings, std::string_view path) {
     const auto entries = named(settings, path);
     if (!entries) return unknown(path);
+    // (the app's memories — the workspaces kept, the tools' settings, migration/done — are not preferences: never reset
+    // from here, as set never writes them)
+    const auto memory = [](const Pref* p) { return p->kind == Kind::Data; };
+    if (section_of(path) == "state" || std::any_of(entries->begin(), entries->end(), [&](const Named& n) { return memory(n.pref); })) {
+        return refused("bad_value", std::string(path), "「" + std::string(path) + "」はアプリが覚えている値で、ここからは戻せません");
+    }
     Outcome out;
     for (const Named& n : *entries) {
         settings.remove(QString::fromStdString(n.key));

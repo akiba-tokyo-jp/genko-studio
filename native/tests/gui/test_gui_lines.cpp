@@ -514,7 +514,7 @@ private slots:
         s.ops.clear();
         // nothing chosen: the commands say how
         s.trigger("act_line_edit");
-        QCOMPARE(s.window->last_notice(), QStringLiteral("先に選択ツール（V）で台詞（フキダシ）をクリックして選びます"));
+        QCOMPARE(s.window->last_notice(), QStringLiteral("先に選択ツール（Shift+N）で台詞（フキダシ）をクリックして選びます"));
         QVERIFY(s.canvas()->editor() == nullptr);
         s.trigger("act_line_delete");
         s.trigger("act_line_wrap");

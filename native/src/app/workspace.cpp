@@ -266,7 +266,7 @@ void lay_out_menu(QMenu* menu, const QStringList& rows) {
 }
 
 CommandSearch::CommandSearch(QMainWindow* window) : QDialog(window), window_(window) {
-    setWindowTitle(QStringLiteral("コマンドを探す"));
+    setWindowTitle(QStringLiteral("検索"));  // (PC5 H-0: Photoshop's 編集 → 検索)
     setProperty("glass_wanted", true);  // (the system's frosted glass where there is one)
     resize(520, 420);
     query = new QLineEdit;

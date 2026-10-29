@@ -118,7 +118,7 @@ private slots:
             // (PC4 E-0, the user's decision 2: the drawing tools and the colours by Photoshop's names)
             // (PC4 E4: the スポイトツール's Alt+click, the 塗りつぶしツール's 基準 — their settings on their own pages)
             {"act_picker", "スポイトツール", "I", "クリックした所の色を描画色にします（Alt＋クリックで背景色）", true},
-            {"act_fill", "塗りつぶしツール", "",  // (PC5 H-0, the Photoshop key set: G is グラデーションツール's)
+            {"act_fill", "塗りつぶしツール", "Shift+Q",  // (PC5 H-0, the Photoshop key set: G is グラデーションツール's)
              "クリックした所を塗ります（基準は 線で囲まれた所・色の近さ。オプションで）", true},
             {"act_lassofill", "囲って塗る", "Shift+G", "ドラッグで囲んだ所を塗ります", true},
             {"act_gradient", "グラデーションツール", "G", "ドラッグの向きに色をなめらかに変えて塗る（選択範囲があればその中だけ）", true},
@@ -762,7 +762,7 @@ private slots:
     void linesEditedAsPythonsVectorTool() {
         Studio s;
         const std::vector<Expected> expected = {
-            {"act_reshape", "線の修正（つまむ）", "",  // (PC5 H-0: Y is ヒストリーブラシツール's)
+            {"act_reshape", "線の修正（つまむ）", "Shift+R",  // (PC5 H-0: Y is ヒストリーブラシツール's)
              "描いた線をつまんでドラッグすると、その辺りが滑らかに動きます", true},
             // (PC3 C-b, the user's decision 5: 線の編集（制御点） by Photoshop's name)
             {"act_vector", "部分選択ツール", "Shift+Y", "ペンの線を選んで制御点を動かす（Alt+クリックで点を足す、Delete で消す、Shift+クリックで 2 本目）", true},

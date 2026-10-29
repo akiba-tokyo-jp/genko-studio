@@ -96,8 +96,18 @@ Outcome get(QSettings& settings, std::string_view path = {});
 // Every path to its value, checked first: all of them written, or none (a value refused, a path unknown — a section's
 // object sets its keys).
 Outcome set(QSettings& settings, const Json& values);
-// A path, a section or everything (but the app's memories) back to its value when the file has none.
+// A path, a section or everything back to its value when the file has none — the app's memories (section state) left
+// alone: "" never touches them, naming them is refused (bad_value).
 Outcome reset(QSettings& settings, std::string_view path = {});
+
+// Old names of commands a later command took for its own ("グラデーション": the tool's before PC4 E-0, the panel's since E4;
+// "書き出し…": 原稿を書き出す…'s before PC4 F-0, 編集 → 環境設定 → 書き出し…'s since PC5 H-0). A list of commands or a key
+// kept under one is the new command's only when marked as written by a build that knows them: names_current/<key> holding
+// the same value (app/preferences' names_current). set writes the mark with such a key — ui/quick, ui/commandbar,
+// shortcuts/<one of these>.
+const std::vector<std::string>& reused_names();
+// The mark set() writes with a key ("names_current/ui/quick"), or none.
+std::optional<std::string> mark_of(std::string_view key);
 
 // One value read through the table (the app's getters): `path` must be in it.
 Json value(QSettings& settings, std::string_view path);

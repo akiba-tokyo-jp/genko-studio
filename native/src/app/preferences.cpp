@@ -49,6 +49,7 @@
 #include "app/look.hpp"
 #include "app/main_window.hpp"
 #include "app/theme.hpp"
+#include "app/tool_settings.hpp"
 #include "app/workspace.hpp"
 #include "core/model.hpp"
 #include "core/prefs_table.hpp"
@@ -260,8 +261,13 @@ const std::multimap<QString, QString>& renamed() {
 }
 
 const std::vector<QString>& reused_names() {
-    // (PC5 H-0: 書き出し… — 原稿を書き出す…'s before PC4 F-0 — is 編集 → 環境設定 → 書き出し…'s own name since)
-    static const std::vector<QString> all{QStringLiteral("グラデーション"), QStringLiteral("書き出し…")};
+    // (PC5 H-0: 書き出し… — 原稿を書き出す…'s before PC4 F-0 — is 編集 → 環境設定 → 書き出し…'s own name since; the list is
+    // core/prefs_table's, whose set() marks a key it writes)
+    static const std::vector<QString> all = [] {
+        std::vector<QString> out;
+        for (const std::string& name : core::prefs::reused_names()) out.push_back(QString::fromStdString(name));
+        return out;
+    }();
     return all;
 }
 
@@ -312,6 +318,29 @@ void mark_names_current(const QString& key) {
     const auto store = settings();
     store->setValue(QStringLiteral("names_current/") + key, store->value(key).toString());
 }
+
+namespace {
+
+// The old keys a command's keys are read under when it has none under its name (apply_shortcuts' order): its old names'
+// (renamed(), a reused one only while not marked as the new command's) and its words alone when another command came to
+// share them.
+QStringList old_keys(MainWindow* window, QAction* action, const std::map<const QAction*, QString>& names, const std::map<QString, QAction*>& first) {
+    const auto current = [](const QString& name) { return names_current(QStringLiteral("shortcuts/") + name); };
+    const QString name = command_name(names, action);
+    const auto words = first.find(action->text());
+    const bool first_of_words = name != action->text() && words != first.end() && words->second == action;
+    QStringList out;
+    for (const QString& now : first_of_words ? QStringList{name, action->text()} : QStringList{name}) {
+        for (auto [old, end] = renamed().equal_range(now); old != end; ++old) {
+            if (!(reused_name(old->second) && current(old->second))) out << QStringLiteral("shortcuts/%1").arg(old->second);
+        }
+    }
+    if (first_of_words) out << QStringLiteral("shortcuts/%1").arg(action->text());
+    (void)window;
+    return out;
+}
+
+}  // namespace
 
 void apply_shortcuts(MainWindow* window) {
     const auto store = settings();
@@ -375,7 +404,20 @@ void apply_shortcuts(MainWindow* window) {
         if (keys != action->shortcuts()) action->setShortcuts(keys);
     }
     retip(window);
-    if (!taken.isEmpty()) window->flash(taken.join(QLatin1Char('\n')) + QStringLiteral("（編集 → キーボードショートカット… で変えられます）"), 8000);
+    // (said once for the window: the same keys taken off again — each time the keys are applied — are not said again)
+    const QString said = taken.join(QLatin1Char('\n'));
+    if (!taken.isEmpty() && window->property("genko_keys_taken").toString() != said) {
+        window->flash(said + QStringLiteral("（編集 → キーボードショートカット… で変えられます）"), 8000);
+    }
+    window->setProperty("genko_keys_taken", said);
+}
+
+QString keys_in_words(const std::vector<const QAction*>& actions) {
+    QStringList keys;
+    for (const QAction* action : actions) {
+        if (action != nullptr && !action->shortcut().isEmpty()) keys << action->shortcut().toString(QKeySequence::NativeText);
+    }
+    return keys.isEmpty() ? QString() : QStringLiteral("（%1）").arg(keys.join(QStringLiteral("・")));
 }
 
 void retip(MainWindow* window) {
@@ -486,6 +528,7 @@ void apply_all(MainWindow* window) {
     key_sets::apply(window, key_sets::current());
     name_commands(window);
     apply_shortcuts(window);
+    if (ToolSettings* ts = window->tool_settings(); ts != nullptr && !ts->tool().isEmpty()) ts->show_tool(ts->tool());  // (its keys in its title)
     window->set_save_after(save_after_ms());
     PageCanvas* canvas = window->canvas();
     canvas->pen_button = pen_button();
@@ -1046,9 +1089,11 @@ void PreferencesDialog::save() {
         return;
     }
     const auto store = settings();
-    key_sets::set_current(key_set->currentData().toString());  // (PC5 H-0: the set's keys are each command's own from now)
+    // (PC5 H-0: the set's keys are each command's own from now — written only when chosen: the default stays the default)
+    if (key_set->currentData().toString() != key_sets::current()) key_sets::set_current(key_set->currentData().toString());
     std::map<QString, QStringList> chosen(keys.begin(), keys.end());
     const auto names = command_names(window_);
+    const auto first = by_text(window_);
     for (QAction* action : preferences::commands(window_)) {
         const QString name = command_name(names, action);
         const QStringList now = chosen[name];
@@ -1058,6 +1103,8 @@ void PreferencesDialog::save() {
         const QString key = QStringLiteral("shortcuts/%1").arg(name);
         if (now == first_default) {
             store->remove(key);
+            // (PC5 H-0: and the keys read under its old names — else the next apply_shortcuts reads them back)
+            for (const QString& old : old_keys(window_, action, names, first)) store->remove(old);
             action->setShortcuts(defaults);
         } else {
             store->setValue(key, now.join(QLatin1Char('|')));

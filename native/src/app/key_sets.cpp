@@ -4,11 +4,17 @@
 #include <QDockWidget>
 #include <QMainWindow>
 #include <QMenu>
+#include <QPushButton>
+#include <QStatusBar>
+#include <QTimer>
 #include <QVariant>
 
 #include <algorithm>
 
 #include "app/config.hpp"
+#include "app/documents.hpp"
+#include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "app/workspace.hpp"
 
 namespace genko::app::key_sets {
@@ -44,23 +50,25 @@ const std::vector<std::pair<QString, QList<QKeySequence>>>& photoshop_keys() {
     static const std::vector<std::pair<QString, QList<QKeySequence>>> all{
         // ツール: Photoshop's letters — 移動 V, クイックマスク Q, 切り抜き C, スポット修復ブラシ J, ヒストリーブラシ Y, グラデーション G,
         // 長方形 U (Shift+U the next shape), 覆い焼き O; Genko's コマ割り takes K (Photoshop's フレームツール). The Genko tools
-        // whose letter Photoshop gives another have none (選択 V, 効果線 K, 3D 操作 J, 線の修正 Y, 塗りつぶし G, カラーピッカー C)
+        // whose letter Photoshop gives another take a Shift+letter Photoshop leaves free (the user's decision 2026-10-29:
+        // photoshop_free_for_genko): 選択 Shift+N, 効果線 Shift+K, 3D 操作 Shift+D, 線の修正 Shift+R, 塗りつぶし Shift+Q;
+        // カラーピッカー（描画色）…, a command, none (Photoshop's has none)
         {QStringLiteral("act_move"), k({"V"})},
-        {QStringLiteral("act_select"), {}},
+        {QStringLiteral("act_select"), k({"Shift+N"})},
         {QStringLiteral("act_quick_mask"), k({"Q"})},
         {QStringLiteral("act_crop_tool"), k({"C"})},
         {QStringLiteral("act_color"), {}},
         {QStringLiteral("act_spot_healing"), k({"J"})},
-        {QStringLiteral("act_3d"), {}},
+        {QStringLiteral("act_3d"), k({"Shift+D"})},
         {QStringLiteral("act_history_brush"), k({"Y"})},
-        {QStringLiteral("act_reshape"), {}},
+        {QStringLiteral("act_reshape"), k({"Shift+R"})},
         {QStringLiteral("act_gradient"), k({"G"})},
-        {QStringLiteral("act_fill"), {}},
+        {QStringLiteral("act_fill"), k({"Shift+Q"})},
         {QStringLiteral("act_shape"), k({"U"})},
         {QStringLiteral("act_next_shape_tool"), k({"Shift+U"})},
         {QStringLiteral("act_dodge_tool"), k({"O"})},
         {QStringLiteral("act_frame"), k({"K"})},
-        {QStringLiteral("act_effect"), {}},
+        {QStringLiteral("act_effect"), k({"Shift+K"})},
         // 表示: 水平方向に反転 has none (H is 手のひらツール's — H-a); プリントサイズ none (Ctrl+1 is 100% — H-a); 仕上がり線・基本枠を表示
         // none (Ctrl+; is ガイド — H-b); 色の校正 Ctrl+Y; ターゲットパス Ctrl+Shift+H; the drawing rulers' switches none (Ctrl+Shift+R
         // is レンズ補正…, Ctrl+2 the composite channel)
@@ -124,6 +132,41 @@ const std::vector<std::pair<QString, QList<QKeySequence>>>& photoshop_keys() {
     return all;
 }
 
+const QStringList& photoshop_defaults() {
+    // (Photoshop 2025 for Windows: the tools' letters, the Shift+letter that goes round a tool's group, F's screen modes,
+    // and the menu commands' keys — PhotoCraft v0.2.0's menu_catalog.rs, MIT, and Photoshop's own list)
+    static const QStringList all = [] {
+        QStringList out;
+        for (const char c : QByteArrayLiteral("ABCDEFGHIJKLMOPQRSTUVWXYZ")) out << QString(QLatin1Char(c));  // (N is free)
+        for (const char c : QByteArrayLiteral("ABCEFGIJLMOPSTUVWY")) out << QStringLiteral("Shift+%1").arg(QLatin1Char(c));
+        out << QStringLiteral("[") << QStringLiteral("]") << QStringLiteral("Shift+[") << QStringLiteral("Shift+]") << QStringLiteral("Tab")
+            << QStringLiteral("Shift+Tab") << QStringLiteral("F1") << QStringLiteral("F5") << QStringLiteral("F6") << QStringLiteral("F7")
+            << QStringLiteral("F8") << QStringLiteral("Alt+F9") << QStringLiteral("F12") << QStringLiteral("Shift+F5") << QStringLiteral("Shift+F6");
+        for (const char* key : {"Ctrl+N", "Ctrl+O", "Ctrl+Alt+Shift+O", "Ctrl+W", "Ctrl+Alt+W", "Ctrl+Alt+P", "Ctrl+S", "Ctrl+Shift+S", "Ctrl+Alt+S",
+                                "Ctrl+Alt+Shift+W", "Ctrl+Alt+Shift+S", "Ctrl+Alt+Shift+I", "Ctrl+P", "Ctrl+Alt+Shift+P", "Ctrl+Q", "Ctrl+Z",
+                                "Ctrl+Shift+Z", "Ctrl+Alt+Z", "Ctrl+Shift+F", "Ctrl+X", "Ctrl+C", "Ctrl+Shift+C", "Ctrl+V", "Ctrl+Shift+V",
+                                "Ctrl+Alt+Shift+V", "Ctrl+F", "Ctrl+Alt+Shift+C", "Ctrl+T", "Ctrl+Shift+T", "Ctrl+Shift+K", "Ctrl+Alt+Shift+K",
+                                "Ctrl+Alt+Shift+M", "Ctrl+K", "Ctrl+L", "Ctrl+M", "Ctrl+U", "Ctrl+B", "Ctrl+Alt+Shift+B", "Ctrl+I", "Ctrl+Shift+U",
+                                "Ctrl+Shift+L", "Ctrl+Alt+Shift+L", "Ctrl+Shift+B", "Ctrl+Alt+I", "Ctrl+Alt+C", "Ctrl+Shift+N", "Ctrl+J",
+                                "Ctrl+Shift+J", "Ctrl+Shift+'", "Ctrl+Alt+Shift+'", "Ctrl+G", "Ctrl+Shift+G", "Ctrl+Alt+G", "Ctrl+Shift+]", "Ctrl+]",
+                                "Ctrl+[", "Ctrl+Shift+[", "Ctrl+E", "Ctrl+Shift+E", "Ctrl+Alt+Shift+E", "Ctrl+A", "Ctrl+D", "Ctrl+Shift+D",
+                                "Ctrl+Shift+I", "Ctrl+Alt+A", "Ctrl+Alt+Shift+F", "Ctrl+Alt+R", "Ctrl+Alt+F", "Ctrl+Shift+A", "Ctrl+Alt+Shift+A",
+                                "Ctrl+Shift+R", "Ctrl+Shift+X", "Ctrl+Alt+V", "Ctrl+Y", "Ctrl+Shift+Y", "Ctrl++", "Ctrl+=", "Ctrl+-", "Ctrl+0",
+                                "Ctrl+1", "Ctrl+Alt+0", "Ctrl+H", "Ctrl+Shift+H", "Ctrl+'", "Ctrl+;", "Ctrl+R", "Ctrl+Shift+;", "Ctrl+Alt+;",
+                                "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5", "Ctrl+6", "Ctrl+7", "Ctrl+8", "Ctrl+9", "Ctrl+Alt+2"}) {
+            out << QString::fromLatin1(key);
+        }
+        return out;
+    }();
+    return all;
+}
+
+const std::vector<QString>& genko_tools() {
+    static const std::vector<QString> all{QStringLiteral("act_select"), QStringLiteral("act_effect"), QStringLiteral("act_3d"), QStringLiteral("act_reshape"),
+                                          QStringLiteral("act_fill")};
+    return all;
+}
+
 QList<QKeySequence> keys_of(const QAction* action, const QString& set) {
     const QVariant kept = action->property(kGenkoKeys);
     const QList<QKeySequence> genko = kept.isValid() ? kept.value<QList<QKeySequence>>() : action->shortcuts();
@@ -137,6 +180,31 @@ QList<QKeySequence> keys_of(const QAction* action, const QString& set) {
         if (row == name) return keys;
     }
     return genko;
+}
+
+bool from_before_pc5() {
+    const auto store = settings();
+    const QString told = QStringLiteral("ui/key_set_told");
+    const bool before = !store->allKeys().isEmpty() && !store->contains(QStringLiteral("ui/key_set")) && !store->contains(told);
+    if (!store->contains(told)) store->setValue(told, QStringLiteral("1"));  // (once: a new person, too, is never told later)
+    return before;
+}
+
+void tell_new_default(MainWindow* window) {
+    window->flash(QStringLiteral("キーを Photoshop と同じ組にしました。前の Genko のキーは、下の「Genko の組に戻す」か 編集 → キーボードショートカット… の「キーの組」で戻せます"),
+                  20000);
+    auto* back = new QPushButton(QStringLiteral("Genko の組に戻す"));
+    back->setObjectName(QStringLiteral("key_set_back"));
+    back->setToolTip(QStringLiteral("PC5 より前の Genko のキー（V で選択、F でコマ割り、H で左右反転 など）に戻します"));
+    window->statusBar()->addPermanentWidget(back);
+    QObject::connect(back, &QPushButton::clicked, window, [window, back] {
+        set_current(QStringLiteral("genko"));
+        for (MainWindow* open : documents::windows()) preferences::apply_all(open);
+        window->flash(QStringLiteral("前の Genko のキーに戻しました（編集 → キーボードショートカット… で選び直せます）"), 6000);
+        back->hide();
+        back->deleteLater();
+    });
+    QTimer::singleShot(5 * 60 * 1000, back, &QObject::deleteLater);  // (not for ever: the menu's way stays)
 }
 
 void apply(QMainWindow* window, const QString& set) {

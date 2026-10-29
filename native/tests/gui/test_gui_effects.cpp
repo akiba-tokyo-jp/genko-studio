@@ -153,7 +153,7 @@ private slots:
     void commandsAsPythonsWindowHasThem() {
         Studio s;
         const std::vector<Expected> expected{
-            {"act_effect", "効果線", "",  // (PC5 H-0: K is コマ割り's in the Photoshop key set)
+            {"act_effect", "効果線", "Shift+K",  // (PC5 H-0: K is コマ割り's in the Photoshop key set; the user's decision 2026-10-29)
              "コマの中をクリックすると、選んだ効果線（集中線など）が入る。中心の＋をドラッグで動かす", true, "ツール"},
             {"act_stamp", "素材を置く", "", "素材パネルで選んだ素材を、クリックした所に置く", true, "ツール"},
             {"act_tone_here", "選択範囲・選んだコマにトーンを貼る", "", "素材パネルで選んだトーン（なければ網点 60 線 30%）を貼ります", false, "ツール/トーン・効果線"},
