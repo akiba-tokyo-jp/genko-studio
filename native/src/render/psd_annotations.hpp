@@ -23,8 +23,11 @@
 // whenever the block is written anew (WriteContext::kept_global). The date is a PDF date ("D:YYYYMMDDhhmmss" and the zone)
 // read as UTC (the page's `modified`; "" when it is none) and written "D:YYYYMMDDhhmmssZ".
 // Reading: the page's notes when it has none yet and keeps no earlier PSD's blocks; placed through the file's canvas on the
-// page (ReadContext::onto), their author "genko" (a person's: the file's). Writing: while the page's notes are as read, the
-// block's own bytes (psd_production's mark); else the page's notes in the file's pixels and the kept sound notes.
+// page (ReadContext::onto) and pulled inside the paper, written by the reader (annotations::ReadingActor: the op's actor —
+// an agent's import its own —, else "genko", a person's: the file's). Writing: while the page's notes are as read, the
+// block's own bytes (psd_production's mark); else the page's notes in the file's pixels and, after them, of the kept block
+// the sound notes (a block read: its text notes are the page's) or every note as it was (a block not read — the review's
+// P1-1: a book of before J-c, a block this build could not read —; none of the page's: the kept block as it is).
 
 namespace genko::render::psd_annotations {
 
@@ -33,7 +36,10 @@ inline constexpr std::string_view kKey = "Anno";
 // One note of a block as the file holds it (the file's pixels), or a note of another kind kept as its bytes.
 struct FileNote {
     bool is_text = true;                 // (a text note, txtA; else another kind kept as its bytes)
-    std::string raw;                     // (not a text note: its bytes, its length first)
+    // (the review's P2-2) where it is in the block it was read from — its length first — and whether block() writes those
+    // bytes (a note of another kind always; a text note when it is the kept block's, not the page's)
+    std::size_t at = 0, length = 0;
+    bool as_read = false;
     bool open = false;
     std::array<double, 2> at_px{};       // the icon's top left (x, y)
     std::array<double, 4> popup_px{};    // the box: left, top, right, bottom (all 0: none)
@@ -43,10 +49,12 @@ struct FileNote {
     std::string text;                    // (UTF-8, lines ending in \n)
 };
 
-// The block's notes (none: not one this build reads).
+inline constexpr std::size_t kEntriesMax = 4096;  // (notes of every kind a block holds that this build reads; more: kept as it is)
+
+// The block's notes (none: not one this build reads — broken, or more than kEntriesMax).
 std::optional<std::vector<FileNote>> parse(std::string_view data);
-// A block of these notes.
-std::string block(const std::vector<FileNote>& notes);
+// A block of these notes (a note of another kind, or one `as_read`, its bytes in `source` — the block it was read from).
+std::string block(const std::vector<FileNote>& notes, std::string_view source = {});
 // "D:YYYYMMDDhhmmss…" → YYYY-MM-DDThh:mm:ssZ ("" for one it cannot read), and back.
 std::string utc_of_pdf_date(std::string_view pdf);
 std::string pdf_date_of(std::string_view utc);

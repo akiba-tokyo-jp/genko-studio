@@ -52,6 +52,7 @@ private:
     QLabel* count_ = nullptr;
     QString chosen_;
     std::string shown_text_;  // (the chosen note's text as the book has it: an edit is committed when it differs)
+    std::string shown_page_;  // (the page whose note it is: an edit is put on that page only — the review's P3-3)
     bool loading_ = false;
 };
 

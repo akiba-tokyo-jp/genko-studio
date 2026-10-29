@@ -21,7 +21,7 @@
 //                   modified?: "YYYY-MM-DDThh:mm:ssZ" | ""} → {annotation: id}                          注釈を追加
 //   set_annotation {page, id, text?, author?, color?, open?, at_mm?, popup_mm?: [x, y, w, h] | null} → {annotation, changed}
 //                   (moving it moves its box along; a change of its text, author or colour is its new `modified`, and the
-//                   note becomes the writer's)                                                       注釈を編集・移動
+//                   note becomes the writer's; a person's change of any kind makes it the person's)  注釈を編集・移動
 //   delete_annotations {page, ids: [id…]} | {page, all: true} → {deleted}                               注釈を削除・すべてを消去
 // An agent (an actor that cannot approve: ai:…) never changes or deletes a note a person wrote (human:…, the unnamed
 // "genko"): the op is refused, naming the note — as a person's regions are a person's (core/ops_studio). A person changes
@@ -42,6 +42,25 @@ std::string now();
 core::Json listing(const core::Page& page);
 // The default box of a note's text beside its mark (mm): a note without its own (`popup_mm` null).
 std::array<double, 4> popup_of(const core::Annotation& note);
+// (the review's P1-2) A note read from a file made one the book holds: its mark pulled inside the paper (`w` × `h` mm; its
+// box along), its box dropped (the default) when it lies past what a page's places hold, its author cut to 1024 bytes.
+void pull_inside(core::Annotation& note, double w_mm, double h_mm);
+// UTF-8 cut to at most `most` bytes, by whole characters.
+std::string cut_utf8(const std::string& text, std::size_t most);
+// (the review's P2-3) Who writes the notes a file brings while one lives on this thread: an op reading a PSD or a .pcraft
+// onto a page (import_psd, smart_to_page, smart_place) its actor's writer — an agent's import its own notes —; none: the
+// person who opens a file ("genko").
+class ReadingActor {
+public:
+    explicit ReadingActor(const core::Actor& actor);
+    ~ReadingActor();
+    ReadingActor(const ReadingActor&) = delete;
+    ReadingActor& operator=(const ReadingActor&) = delete;
+    static std::string now();
+
+private:
+    std::string previous_;
+};
 
 }  // namespace genko::render::annotations
 

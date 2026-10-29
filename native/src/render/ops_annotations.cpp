@@ -165,6 +165,8 @@ void set_annotation(core::OpContext& c) {
         note.modified = now();  // (opening, closing and moving it do not: PhotoCraft's)
         note.actor = writer_of(c.actor);
     }
+    // (the review's P3-1: what a person changed — moved, opened or closed too — is the person's: no agent puts it back)
+    if (changed && c.actor.can_approve()) note.actor = writer_of(c.actor);
     const std::string out = note.id;
     if (changed) c.doc.edit_page(at).annotations[i] = std::move(note);
     c.report = Json{{"annotation", out}, {"changed", changed}};
@@ -175,6 +177,7 @@ void delete_annotations(core::OpContext& c) {
     const core::Page& page = c.doc.page(at);
     const Json* ids = given(c.op, "ids");
     const Json* all = given(c.op, "all");
+    if (all != nullptr && all->is_boolean() && !all->get<bool>() && ids != nullptr) all = nullptr;  // (all: false — as none)
     std::set<std::string> gone;
     if (all != nullptr && ids == nullptr) {
         if (!all->is_boolean() || !all->get<bool>()) throw OpError("give ids (the notes' ids) or all: true");
@@ -238,6 +241,39 @@ Json listing(const core::Page& page) {
     Json list = core::to_json(page.annotations);
     for (std::size_t i = 0; i < list.size(); ++i) list[i]["by_person"] = core::annotation_by_person(page.annotations[i].actor);
     return Json{{"annotations", std::move(list)}};
+}
+
+namespace {
+
+thread_local std::string reading_actor = "genko";
+
+}  // namespace
+
+ReadingActor::ReadingActor(const core::Actor& actor) : previous_(reading_actor) { reading_actor = writer_of(actor); }
+ReadingActor::~ReadingActor() { reading_actor = previous_; }
+std::string ReadingActor::now() { return reading_actor; }
+
+std::string cut_utf8(const std::string& text, std::size_t most) {
+    if (text.size() <= most) return text;
+    std::size_t end = most;
+    while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80) --end;  // (not inside a character)
+    return text.substr(0, end);
+}
+
+void pull_inside(Annotation& note, double w_mm, double h_mm) {
+    const double big = core::production::kCoordinateMaxMm;
+    const auto finite = [](double v) { return std::isfinite(v) ? v : 0.0; };
+    const std::array<double, 2> was{finite(note.at_mm[0]), finite(note.at_mm[1])};
+    const double w = std::isfinite(w_mm) && w_mm > 0 ? w_mm : 0.0, h = std::isfinite(h_mm) && h_mm > 0 ? h_mm : 0.0;
+    note.at_mm = {r4(std::clamp(was[0], 0.0, std::max(0.0, w - 4.0))), r4(std::clamp(was[1], 0.0, std::max(0.0, h - 5.0)))};
+    if (note.popup_mm) {
+        std::array<double, 4>& b = *note.popup_mm;
+        b[0] = r4(finite(b[0]) + note.at_mm[0] - was[0]);
+        b[1] = r4(finite(b[1]) + note.at_mm[1] - was[1]);
+        const bool held = std::all_of(b.begin(), b.end(), [&](double v) { return std::isfinite(v) && std::fabs(v) <= big; }) && b[2] >= 0 && b[3] >= 0;
+        if (!held) note.popup_mm.reset();
+    }
+    note.author = cut_utf8(note.author, 1024);
 }
 
 std::array<double, 4> popup_of(const Annotation& note) {

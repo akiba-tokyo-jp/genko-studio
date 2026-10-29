@@ -73,7 +73,8 @@ void PageCanvas::paint_notes(QPainter& painter, const core::Page& page, const Ex
             painter.drawRect(b);
             painter.setFont(font);
             const QFontMetricsF metrics(font);
-            QString head = QString::fromStdString(note.author);
+            // (an agent's note says so — its author is any name it wrote: the review's P3-2)
+            QString head = (core::annotation_by_person(note.actor) ? QString() : QStringLiteral("★ ")) + QString::fromStdString(note.author);
             if (!note.modified.empty()) {
                 const QString when = QDateTime::fromString(QString::fromStdString(note.modified), Qt::ISODate).toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm"));
                 head = head.isEmpty() ? when : head + QStringLiteral("  ") + when;

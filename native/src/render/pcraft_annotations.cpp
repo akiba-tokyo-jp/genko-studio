@@ -10,6 +10,7 @@
 
 #include "core/error.hpp"
 #include "core/ids.hpp"
+#include "core/production_json.hpp"
 #include "core/pynum.hpp"
 #include "render/image_ops.hpp"
 #include "render/ops_annotations.hpp"
@@ -71,7 +72,7 @@ std::vector<core::Annotation> notes_of(const Json& value, double mm) {
         do {
             a.id = "an_" + core::new_id();
         } while (!ids.insert(a.id).second);
-        a.author = text(n, "author");
+        a.author = annotations::cut_utf8(text(n, "author"), 1024);
         a.text = text(n, "text");
         if (const Json* c = pcraft::optional_field(n, "color")) {
             try {
@@ -99,7 +100,9 @@ std::vector<core::Annotation> notes_of(const Json& value, double mm) {
             a.open = o->get<bool>();
         }
         a.modified = psd_annotations::utc_of_pdf_date(text(n, "modified"));
-        a.actor = "genko";  // (a person's: the file's)
+        a.actor = annotations::ReadingActor::now();  // (the reader: the op's actor, else a person's — the file's)
+        // (the review's P1-2: places the book's reader takes; the page's paper pulls it in further — read())
+        annotations::pull_inside(a, core::production::kCoordinateMaxMm, core::production::kCoordinateMaxMm);
         out.push_back(std::move(a));
     }
     core::check_annotations(out);
@@ -116,6 +119,7 @@ void read(const Json& value, pcraft_production::ReadContext& context) {
         return;
     }
     if (notes.empty()) return;
+    for (core::Annotation& a : notes) annotations::pull_inside(a, context.page->spec.width_mm.value(), context.page->spec.height_mm.value());
     context.page->annotations = std::move(notes);
 }
 

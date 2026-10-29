@@ -1,6 +1,6 @@
 #pragma once
 
-#include <string_view>
+#include <string>
 #include <vector>
 
 #include "core/annotations.hpp"
@@ -16,7 +16,7 @@ namespace genko::formats {
 // The file's notes (bytes of a PSD, a PSB or a .pcraft zip), placed in mm by the file's resolution from its top left;
 // their author, text, colour, box, open and date the file's. core::Error("format", …) for a file of another kind or one
 // that cannot be read, core::Error("value", "the file has no notes") for one without notes.
-std::vector<core::Annotation> read_annotations(std::string_view bytes);
+std::vector<core::Annotation> read_annotations(std::string bytes);
 // add_annotation ops putting them on the page (its number): each note's mark pulled inside the paper where it lies
 // beyond it (its box along), as Photoshop does when the sizes differ. core::Error("value", "a page holds at most 1000
 // notes") when the page has no room for them all.

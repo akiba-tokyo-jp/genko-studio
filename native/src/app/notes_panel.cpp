@@ -122,13 +122,18 @@ void NotesPanel::show_chosen() {
         text_->setPlainText(QString());
         text_->setEnabled(false);
         shown_text_.clear();
+        shown_page_.clear();
     } else {
         QString head = QString::fromStdString(note->author);
         if (head.isEmpty()) head = QStringLiteral("（作成者なし）");
         if (const QString when = when_of(*note); !when.isEmpty()) head += QStringLiteral("　") + when;
         head_->setText(head);
+        // (the text being typed kept while the book's is still the one it was typed over — the review's P3-3)
+        const bool typing = text_->hasFocus() && shown_page_ == page->id && note->text == shown_text_ &&
+                            text_->toPlainText().toStdString() != shown_text_;
         shown_text_ = note->text;
-        text_->setPlainText(QString::fromStdString(note->text));
+        shown_page_ = page->id;
+        if (!typing) text_->setPlainText(QString::fromStdString(note->text));
         text_->setEnabled(true);
     }
     const int n = page != nullptr ? static_cast<int>(page->annotations.size()) : 0;
@@ -169,7 +174,9 @@ void NotesPanel::remove_chosen() {
 
 void NotesPanel::commit_text() {
     if (chosen_.isEmpty() || !text_->isEnabled()) return;
-    if (note_of(window_->current_page(), chosen_) == nullptr) return;  // (another page shown now: its note is not here)
+    const core::Page* page = window_->current_page();
+    // (another page shown now — its note is not there, or another note of the same id (a copied page) —: not put)
+    if (page == nullptr || page->id != shown_page_ || note_of(page, chosen_) == nullptr) return;
     const std::string now = text_->toPlainText().toStdString();
     if (now == shown_text_) return;
     shown_text_ = now;

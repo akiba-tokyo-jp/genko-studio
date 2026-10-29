@@ -56,6 +56,7 @@
 #include "render/psd_shapes.hpp"
 #include "render/psd_effects.hpp"
 #include "render/psd_production.hpp"
+#include "render/ops_annotations.hpp"
 #include "core/layer_styles.hpp"
 #include "render/raster.hpp"
 #include "render/not_yet_ported.hpp"
@@ -1495,6 +1496,7 @@ void import_psd(core::OpContext& c) {
     } else {
         throw OpError("import_psd needs path or psd (base64)");
     }
+    const annotations::ReadingActor reader(c.actor);  // (PC5 J-c, the review's P2-3: the file's notes the op's actor's)
     c.report = import_data(doc, op, std::move(data), false);
 }
 

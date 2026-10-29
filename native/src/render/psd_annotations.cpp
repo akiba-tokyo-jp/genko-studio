@@ -4,6 +4,7 @@
 #include "render/psd_annotations.hpp"
 
 #include <algorithm>
+#include <exception>
 #include <cmath>
 #include <cstdint>
 #include <set>
@@ -116,6 +117,14 @@ std::string text_of(std::string_view data) {
         std::u16string units;
         for (std::size_t i = 2; i + 1 < data.size(); i += 2)
             units += static_cast<char16_t>((static_cast<unsigned char>(data[i]) << 8) | static_cast<unsigned char>(data[i + 1]));
+        for (std::size_t i = 0; i < units.size(); ++i) {  // (the review's P2-1: a surrogate without its pair: U+FFFD)
+            const char16_t u = units[i];
+            if (u >= 0xD800 && u < 0xDC00 && i + 1 < units.size() && units[i + 1] >= 0xDC00 && units[i + 1] < 0xE000) {
+                ++i;
+            } else if (u >= 0xD800 && u < 0xE000) {
+                units[i] = 0xFFFD;
+            }
+        }
         out = psd::utf8_of(units);
     } else {
         for (const char c : data) {
@@ -232,7 +241,7 @@ std::optional<std::vector<FileNote>> parse(std::string_view data) {
     r.u16();
     r.u16();
     const std::uint32_t count = r.u32();
-    if (!r.ok || count > (data.size() - 8) / 4) return std::nullopt;
+    if (!r.ok || count > (data.size() - 8) / 4 || count > kEntriesMax) return std::nullopt;
     std::vector<FileNote> out;
     for (std::uint32_t i = 0; i < count; ++i) {
         const std::size_t start = r.p;
@@ -240,9 +249,10 @@ std::optional<std::vector<FileNote>> parse(std::string_view data) {
         if (!r.ok || length < 8 || length > data.size() - start) return std::nullopt;
         const std::size_t end = start + length;
         FileNote note;
+        note.at = start;
+        note.length = length;
         if (r.take(4) != "txtA") {
             note.is_text = false;
-            note.raw = std::string(data.substr(start, length));
             out.push_back(std::move(note));
             r.p = end;
             continue;
@@ -276,14 +286,17 @@ std::optional<std::vector<FileNote>> parse(std::string_view data) {
     return out;
 }
 
-std::string block(const std::vector<FileNote>& notes) {
+std::string block(const std::vector<FileNote>& notes, std::string_view source) {
     std::string out;
     put16(out, 2);
     put16(out, 1);
-    put32(out, static_cast<std::uint32_t>(notes.size()));
+    std::uint32_t count = 0;
+    std::string items;
     for (const FileNote& n : notes) {
-        if (!n.is_text) {
-            out += n.raw;
+        if (!n.is_text || n.as_read) {
+            if (n.at > source.size() || n.length > source.size() - n.at) continue;  // (not of this source)
+            items += source.substr(n.at, n.length);
+            ++count;
             continue;
         }
         std::string b = "txtA";
@@ -305,10 +318,12 @@ std::string block(const std::vector<FileNote>& notes) {
         b += "txtC";
         put32(b, static_cast<std::uint32_t>(text.size()));
         b += text;
-        put32(out, static_cast<std::uint32_t>(b.size() + 4));
-        out += b;
+        put32(items, static_cast<std::uint32_t>(b.size() + 4));
+        items += b;
+        ++count;
     }
-    return out;
+    put32(out, count);
+    return out + items;
 }
 
 std::vector<core::Annotation> notes_of(const std::vector<FileNote>& notes, const std::array<double, 6>& px_to_mm, const std::vector<core::Annotation>& taken) {
@@ -332,11 +347,11 @@ std::vector<core::Annotation> notes_of(const std::vector<FileNote>& notes, const
                                                core::py_round(std::fabs(p1[1] - p0[1]), 4)};
         }
         a.text = n.text;
-        a.author = n.author.substr(0, 1024);
+        a.author = annotations::cut_utf8(n.author, 1024);
         a.color = n.color;
         a.open = n.open;
         a.modified = n.modified;
-        a.actor = "genko";  // (a person's: the file's)
+        a.actor = annotations::ReadingActor::now();  // (the reader: the op's actor, else a person's — the file's)
         out.push_back(std::move(a));
     }
     return out;
@@ -353,9 +368,13 @@ bool read(core::Page& page, std::string_view data, const psd_production::ReadCon
                                          onto[3] / context.height_px, onto[4], onto[5]};
     std::vector<core::Annotation> made = notes_of(*notes, px_to_mm, {});
     if (made.empty() || made.size() > core::kAnnotationsMax) return false;
+    // (the review's P1-2: as the book's reader takes them — pulled inside the paper; P2-1: one that cannot be written is
+    // not read, the block kept as it is)
+    for (core::Annotation& a : made) annotations::pull_inside(a, page.spec.width_mm.value(), page.spec.height_mm.value());
     try {
         core::check_annotations(made);
-    } catch (const core::Error&) {
+        (void)psd_production::fingerprint_of(core::to_json(made));
+    } catch (const std::exception&) {
         return false;
     }
     if (context.report != nullptr) (*context.report)["annotations"] = made.size();
@@ -385,17 +404,24 @@ std::optional<std::string> write(const core::Page& page, const psd_production::W
         n.text = a.text;
         notes.push_back(std::move(n));
     }
-    // (the kept block's sound notes, after the page's: PhotoCraft's)
-    if (context.kept_global) {
-        if (const std::optional<std::string> kept = context.kept_global(kKey)) {
-            if (const auto entries = parse(*kept)) {
-                for (const FileNote& e : *entries)
-                    if (!e.is_text) notes.push_back(e);
+    // (the kept block after the page's notes: of a block read onto the page — marked —, its sound notes (PhotoCraft's);
+    // of one not read (the review's P1-1), every note as it was — and none of the page's: the kept block as it is)
+    const bool read_onto = page.native_psd && std::any_of(page.native_psd->copied.begin(), page.native_psd->copied.end(),
+                                                          [](const core::PsdCopied& c) { return c.resource < 0 && c.global == kKey; });
+    if (!read_onto && notes.empty()) return std::nullopt;
+    std::optional<std::string> kept;
+    if (context.kept_global) kept = context.kept_global(kKey);
+    if (kept) {
+        if (auto entries = parse(*kept)) {
+            for (FileNote& e : *entries) {
+                if (e.is_text && read_onto) continue;
+                e.as_read = true;
+                notes.push_back(std::move(e));
             }
         }
     }
     if (notes.empty()) return std::nullopt;
-    return block(notes);
+    return block(notes, kept ? std::string_view(*kept) : std::string_view());
 }
 
 }  // namespace genko::render::psd_annotations

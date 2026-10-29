@@ -851,6 +851,7 @@ void MainWindow::select_page(int row) {
     }
     if (row != page_index_) {
         perf::event("page_switch", {{"row", row}});
+        if (notes_panel_ != nullptr) notes_panel_->commit_text();  // (PC5 J-c: the note's text typed, on its own page)
         session_->save_now();  // a page switch writes what was done on the last page (on the worker)
         canvas_->set_selection(std::nullopt);
         canvas_->highlight_box.reset();  // (a problem shown by the checks stays on its page)

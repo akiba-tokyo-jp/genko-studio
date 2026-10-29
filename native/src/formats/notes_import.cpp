@@ -6,7 +6,9 @@
 #include <cmath>
 
 #include "core/error.hpp"
+#include "core/production_json.hpp"
 #include "core/pynum.hpp"
+#include "render/ops_annotations.hpp"
 #include "render/pcraft_annotations.hpp"
 #include "render/pcraft_manifest.hpp"
 #include "render/pcraft_read.hpp"
@@ -17,12 +19,12 @@ namespace genko::formats {
 
 using core::Json;
 
-std::vector<core::Annotation> read_annotations(std::string_view bytes) {
+std::vector<core::Annotation> read_annotations(std::string bytes) {
     std::vector<core::Annotation> out;
     if (bytes.substr(0, 4) == "8BPS") {
         const render::psd::File file = [&] {
             try {
-                return render::psd::File::read(std::string(bytes), render::psd::default_limits(), true);
+                return render::psd::File::read(std::move(bytes), render::psd::default_limits(), true);  // (review P3-5: not copied)
             } catch (const core::Error& error) {
                 throw core::Error("format", std::string("the PSD cannot be read (") + error.what() + ")");
             }
@@ -33,6 +35,7 @@ std::vector<core::Annotation> read_annotations(std::string_view bytes) {
             const auto notes = render::psd_annotations::parse(block.data);
             if (!notes) throw core::Error("format", "the PSD's notes cannot be read");
             out = render::psd_annotations::notes_of(*notes, {mm, 0, 0, mm, 0, 0}, {});
+            for (core::Annotation& a : out) render::annotations::pull_inside(a, core::production::kCoordinateMaxMm, core::production::kCoordinateMaxMm);
             break;
         }
     } else if (render::pcraft::is_pcraft(bytes)) {
@@ -59,16 +62,13 @@ Json annotation_ops(const std::vector<core::Annotation>& notes, const core::Page
     if (page.annotations.size() + notes.size() > core::kAnnotationsMax) throw core::Error("value", "a page holds at most 1000 notes");
     const double w = page.spec.width_mm.value(), h = page.spec.height_mm.value();
     Json ops = Json::array();
-    for (const core::Annotation& a : notes) {
-        // (the mark inside the paper — its icon some 4 × 5 mm —, its box along)
-        const double x = std::clamp(a.at_mm[0], 0.0, std::max(0.0, w - 4.0)), y = std::clamp(a.at_mm[1], 0.0, std::max(0.0, h - 5.0));
-        Json op{{"op", "add_annotation"}, {"page", page.index.json()}, {"at_mm", Json::array({core::py_round(x, 4), core::py_round(y, 4)})},
+    for (core::Annotation a : notes) {
+        // (the mark inside the paper — its icon some 4 × 5 mm —, its box along; a box past a page's places the default)
+        render::annotations::pull_inside(a, w, h);
+        Json op{{"op", "add_annotation"}, {"page", page.index.json()}, {"at_mm", Json::array({a.at_mm[0], a.at_mm[1]})},
                 {"text", a.text}, {"author", a.author}, {"color", Json::array({a.color[0], a.color[1], a.color[2]})}, {"open", a.open},
                 {"modified", a.modified}};
-        if (a.popup_mm) {
-            const auto& b = *a.popup_mm;
-            op["popup_mm"] = Json::array({core::py_round(b[0] + x - a.at_mm[0], 4), core::py_round(b[1] + y - a.at_mm[1], 4), b[2], b[3]});
-        }
+        if (a.popup_mm) op["popup_mm"] = Json::array({(*a.popup_mm)[0], (*a.popup_mm)[1], (*a.popup_mm)[2], (*a.popup_mm)[3]});
         ops.push_back(std::move(op));
     }
     return ops;

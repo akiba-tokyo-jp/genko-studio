@@ -269,8 +269,8 @@ void MainWindow::import_notes(const QString& given) {
     std::vector<core::Annotation> notes;
     try {
         notes = off_ui([file] {
-            const std::string bytes = storage::read_file_bounded(file, std::size_t{4} << 30);
-            return formats::read_annotations(bytes);
+            std::string bytes = storage::read_file_bounded(file, std::size_t{4} << 30);
+            return formats::read_annotations(std::move(bytes));
         });
     } catch (const std::exception& error) {
         flash(QStringLiteral("注釈を読み込めませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
