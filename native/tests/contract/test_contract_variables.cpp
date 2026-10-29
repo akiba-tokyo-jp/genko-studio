@@ -304,7 +304,10 @@ private slots:
     // it read as the book's, one outside the folder or not there left out (said).
     void pcraft() {
         core::Document doc = book();
-        doc = run(doc, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "badge"}, {"name", "badge"}});
+        // (layers of their own pixels: a .pcraft writes Genko's drawn elements — a fill_area's patches — into pixels of its own)
+        doc = run(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "badge"}, {"name", "badge"}},
+                                    Json{{"op", "put_raster"}, {"page", 1}, {"id", "badge"}, {"png_base64", core::b64encode(png_of(8, 8, {255, 0, 0, 255}))}},
+                                    Json{{"op", "put_raster"}, {"page", 1}, {"id", "photo"}, {"png_base64", core::b64encode(png_of(8, 8, {0, 255, 0, 255}))}}}));
         doc = run(doc, Json{{"op", "set_variables"},
                             {"defs", Json::array({Json{{"name", "show"}, {"type", "visibility"}, {"page", 1}, {"layer", "badge"}},
                                                   Json{{"name", "img"}, {"type", "pixels"}, {"page", 1}, {"layer", "photo"}, {"method", "fill"}, {"align", "top_left"}}})}});

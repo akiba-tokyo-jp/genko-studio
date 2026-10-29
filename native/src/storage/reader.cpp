@@ -1742,6 +1742,7 @@ core::Document Reader::migrate(const Json& payload) {
     // (variables@1, PC5 I-d: the variables in their normal form; the pictures their values name in the book's folder)
     try {
         core::validate_variables(doc);
+        if (doc.variables) doc.variables = core::variables_to_json(core::variables_from_json(*doc.variables));  // (its keys in their order)
         for (const auto& [ref, suffix] : core::variable_pictures(doc)) check_named(ref, suffix, "/variables", "picture of a data set");
     } catch (const core::Error& error) {
         issue("broken_value", "/variables", {}, error.what());

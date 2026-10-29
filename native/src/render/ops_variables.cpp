@@ -395,24 +395,36 @@ void replace_pixels(OpContext& c, std::size_t at, const core::VariableDef& def, 
     const double fy = a.starts_with("top") ? 0.0 : a.starts_with("bottom") ? 1.0 : 0.5;
     const double px = x0 + (tw - sw) * fx;  // (the picture's top left, mm)
     const double py = y0 + (th - sh) * fy;
-    // the picture's pixels → the grid's: scale and move
+    // the picture's pixels → the grid's: scale and move — its edge pixels carried on past it (kPad), so the picture keeps a
+    // clean edge where it ends (no clear rim drawn into it), cut at its own box
+    constexpr int kPad = 4;
+    const resample::Plane flat = resample::from_pixels(source);
+    resample::Plane padded(flat.width + 2 * kPad, flat.height + 2 * kPad, flat.channels, true);
+    padded.hdr = flat.hdr;
+    for (int y = 0; y < padded.height; ++y) {
+        const int row = std::clamp(y - kPad, 0, flat.height - 1);
+        for (int x = 0; x < padded.width; ++x) {
+            std::copy_n(flat.at(std::clamp(x - kPad, 0, flat.width - 1), row), flat.channels, padded.at(x, y));
+        }
+    }
     const double ax = sw * kx / source.width();
     const double ay = sh * ky / source.height();
-    const resample::Homography h = resample::Homography::affine({ax, 0, 0, ay, px * kx, py * ky});
-    // the window of the grid it covers (the box with clip)
+    const resample::Homography h = resample::Homography::affine({ax, 0, 0, ay, px * kx - kPad * ax, py * ky - kPad * ay});
+    // the window of the grid it covers (the box with clip): the pixels whose centres it holds
     double wx0 = px * kx, wy0 = py * ky, wx1 = (px + sw) * kx, wy1 = (py + sh) * ky;
     if (def.clip) {
         wx0 = std::max(wx0, x0 * kx), wy0 = std::max(wy0, y0 * ky), wx1 = std::min(wx1, x1 * kx), wy1 = std::min(wy1, y1 * ky);
     }
-    const int gx0 = std::clamp(static_cast<int>(std::floor(wx0 + 1e-6)), 0, static_cast<int>(target.width()));
-    const int gy0 = std::clamp(static_cast<int>(std::floor(wy0 + 1e-6)), 0, static_cast<int>(target.height()));
-    const int gx1 = std::clamp(static_cast<int>(std::ceil(wx1 - 1e-6)), 0, static_cast<int>(target.width()));
-    const int gy1 = std::clamp(static_cast<int>(std::ceil(wy1 - 1e-6)), 0, static_cast<int>(target.height()));
+    const auto edge = [](double v, std::uint32_t most) { return static_cast<int>(std::clamp<double>(std::round(v), 0.0, static_cast<double>(most))); };
+    const int gx0 = edge(wx0, target.width());
+    const int gy0 = edge(wy0, target.height());
+    const int gx1 = edge(wx1, target.width());
+    const int gy1 = edge(wy1, target.height());
     image_ops::Pixels out(target.kind(), target.width(), target.height(), target.colours());
     out.floating = target.floating;
     out.ink = target.ink;
     if (gx1 > gx0 && gy1 > gy0) {
-        const resample::Plane placed = resample::project(resample::from_pixels(source), h, gx1 - gx0, gy1 - gy0, resample::Interp::Bicubic, gx0, gy0);
+        const resample::Plane placed = resample::project(padded, h, gx1 - gx0, gy1 - gy0, resample::Interp::Bicubic, gx0, gy0);
         const std::size_t n = out.all();
         for (int y = 0; y < placed.height; ++y) {
             for (int x = 0; x < placed.width; ++x) {

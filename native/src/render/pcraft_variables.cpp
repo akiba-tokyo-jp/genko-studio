@@ -117,11 +117,11 @@ void read(const Json& value, pcraft_production::ReadContext& context) {
         const std::string type = text(kind, "type");
         def.type = type == "visibility" ? "visibility" : type == "textReplacement" ? "text" : type == "pixelReplacement" ? "pixels" : "";
         const Json* layer = d.contains("layer") ? &d["layer"] : nullptr;
-        if (def.name.empty() || def.type.empty() || layer == nullptr || !layer->is_number_unsigned() || names.contains(def.name)) {
+        if (def.name.empty() || def.type.empty() || layer == nullptr || !(layer->is_number_integer() && layer->get<std::int64_t>() >= 0) || names.contains(def.name)) {
             dropped = true;
             continue;
         }
-        const std::string raw = std::to_string(layer->get<std::uint64_t>());
+        const std::string raw = std::to_string(layer->get<std::int64_t>());
         const auto made = context.layers.find(raw);
         def.page = context.page->id;
         def.layer = made != context.layers.end() ? made->second : "pcraft-" + raw;  // (a layer gone before it was saved)
@@ -187,8 +187,8 @@ void read(const Json& value, pcraft_production::ReadContext& context) {
         set_names.insert(name);
         variables.data_sets.push_back(std::move(set));
     }
-    if (const auto active = value.find("active"); active != value.end() && active->is_number_unsigned() && active->get<std::uint64_t>() < variables.data_sets.size()) {
-        variables.active = static_cast<std::int64_t>(active->get<std::uint64_t>());
+    if (const auto active = value.find("active"); active != value.end() && active->is_number_integer() && active->get<std::int64_t>() >= 0 && static_cast<std::uint64_t>(active->get<std::int64_t>()) < variables.data_sets.size()) {
+        variables.active = active->get<std::int64_t>();
     }
     if (variables.empty()) return;
     try {

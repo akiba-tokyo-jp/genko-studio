@@ -136,8 +136,15 @@ private slots:
         // a book of none: no `variables`, no feature
         core::Document doc = book();
         QVERIFY(!core::uses_variables(doc));
+        // (a state restored from its canonical JSON: its keys sorted — the same variables)
+        doc.variables = Json::parse(core::dump_canonical(stored));
+        core::validate_variables(doc);
+        doc.variables->erase("active");
+        doc.variables->operator[]("active") = 0;
+        core::validate_variables(doc);
+        QVERIFY(core::uses_variables(doc));
         core::set_variables(doc, core::Variables{});
-        QVERIFY(!doc.variables.has_value());
+        QVERIFY(!doc.variables.has_value() && !core::uses_variables(doc));
     }
 
     // set_variables: each def's target as its type takes it; the listing.
@@ -180,7 +187,8 @@ private slots:
     // set_data_sets and apply_data_set: visibility and text in one step, undone by the history (upstream's
     // define_apply_visibility_and_text); its refusals (bad_params_are_errors).
     void applyVisibilityAndText() {
-        core::Document doc = run(book(), Json{{"op", "set_variables"}, {"defs", defs(book())}});
+        const core::Document base = book();
+        core::Document doc = run(base, Json{{"op", "set_variables"}, {"defs", defs(base)}});
         QVERIFY(refusal(doc, Json{{"op", "set_data_sets"}, {"data_sets", Json::array({Json{{"name", "A"}, {"values", Json::array({Json{{"variable", "nope"}, {"value", true}}})}}})}})
                     .find("no variable nope") != std::string::npos);
         QVERIFY(refusal(doc, Json{{"op", "set_data_sets"}, {"data_sets", Json::array({Json{{"name", "A"}, {"values", Json::array({Json{{"variable", "showBadge"}, {"value", "yes"}}})}}})}})
@@ -275,10 +283,10 @@ private slots:
     // variable left out (said), a picture read beside it.
     void csvImport() {
         QTemporaryDir dir;
-        core::Document doc = run(book(), Json{{"op", "set_variables"}, {"defs", defs(book())}});
-        Json all = defs(book());
+        const core::Document base = book();
+        Json all = defs(base);
         all.push_back(Json{{"name", "img"}, {"type", "pixels"}, {"page", 1}, {"layer", "photo"}});
-        doc = run(book(), Json{{"op", "set_variables"}, {"defs", all}});
+        core::Document doc = run(base, Json{{"op", "set_variables"}, {"defs", all}});
         const core::Variables v = core::variables_of(doc);
         genko::test::write_bytes(dir.path() + QStringLiteral("/blue.png"), png_of(4, 4, {0, 0, 255, 255}));
         formats::CsvOptions options;

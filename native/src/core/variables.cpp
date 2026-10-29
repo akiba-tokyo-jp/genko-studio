@@ -268,7 +268,8 @@ void validate_variables(const Document& doc) {
     if (!uses_variables(doc)) return;
     const Variables variables = variables_from_json(*doc.variables);
     if (variables.empty()) bad("a book without defs or data sets has no variables");
-    if (variables_to_json(variables) != *doc.variables) bad("the variables are not in their normal form");
+    // (its keys in any order: a state restored from its canonical JSON has them sorted — the reader puts them back in order)
+    if (dump_canonical(variables_to_json(variables)) != dump_canonical(*doc.variables)) bad("the variables are not in their normal form");
 }
 
 std::vector<std::pair<std::string, std::string>> variable_pictures(const Document& doc) {
