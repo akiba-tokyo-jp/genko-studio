@@ -153,7 +153,10 @@ void MainWindow::build_type_menu(QMenu* menu) {
 void MainWindow::line_to_type_layer() {
     const core::StoryLine* line = selected_line_or_say();
     if (line == nullptr) return;
-    const std::string id = core::new_id();
+    // (the line's own id when the page has no layer of it: the balloon's pen follows its id)
+    std::string id = line->id;
+    if (const core::Page* page = current_page(); page == nullptr || std::any_of(page->layers.begin(), page->layers.end(), [&](const core::Layer& l) { return l.id == id; }))
+        id = core::new_id();
     if (!apply_ops(Json::array({Json{{"op", "line_to_type_layer"}, {"line", line->id}, {"new_id", id}}}))) return;
     canvas_->selected_line_id.reset();
     set_target_layer(id);
@@ -168,7 +171,9 @@ void MainWindow::type_layer_to_line() {
         flash(QStringLiteral("先にテキストレイヤーを選びます（レイヤー パネル）"), 4000);
         return;
     }
-    const std::string id = core::new_id();
+    // (the layer's id when no line has it: the balloon's pen follows its id)
+    std::string id = layer->id;
+    if (const auto& story = book().story; std::any_of(story.begin(), story.end(), [&](const core::StoryLine& l) { return l.id == id; })) id = core::new_id();
     if (!apply_ops(Json::array({Json{{"op", "type_layer_to_line"}, {"page", page->index.json()}, {"layer_id", layer->id}, {"new_id", id}}}))) return;
     canvas_->selected_line_id = id;
     on_line_selected(id, false);

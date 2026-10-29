@@ -294,10 +294,12 @@ private slots:
         QCOMPARE(s.last()["op"], Json("line_to_type_layer"));
         QVERIFY(s.window->book().story.empty());
         const std::string id = s.last()["new_id"].get<std::string>();
+        QCOMPARE(id, std::string("l1"));  // (the line's id: the balloon's pen follows it)
         QCOMPARE(s.window->target_layer()->id, id);
         s.act("act_type_layer_to_line")->trigger();
         QCOMPARE(s.last()["op"], Json("type_layer_to_line"));
         QCOMPARE(s.window->book().story.size(), std::size_t{1});
+        QCOMPARE(s.window->book().story[0].id, std::string("l1"));
         QVERIFY(s.layer(id) == nullptr);
         // the target path (the work path of a type layer's letters, the layer gone): a click on it, a text along it
         QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "ロ"}, {"point", Json::array({100, 100})},

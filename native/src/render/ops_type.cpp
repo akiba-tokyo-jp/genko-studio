@@ -681,7 +681,9 @@ void line_to_type_layer(OpContext& c) {
     if (record.style.is_object()) record.style.erase("below_layer");  // (its place among the layers is the layer's own)
     Page& page = doc.edit_page(at);
     Layer layer;
-    layer.id = core::truthy_at(c.op, "new_id") ? core::py_str(c.op["new_id"]) : core::new_id();
+    // (no new_id: the line's own id when the page has no layer of it — a balloon's pen follows its id, so the picture stays)
+    const bool free = std::none_of(page.layers.begin(), page.layers.end(), [&](const Layer& l) { return l.id == id; });
+    layer.id = core::truthy_at(c.op, "new_id") ? core::py_str(c.op["new_id"]) : free ? id : core::new_id();
     for (const Layer& l : page.layers) {
         if (l.id == layer.id) throw OpError("layer " + layer.id + " exists");
     }
@@ -726,6 +728,8 @@ void type_layer_to_line(OpContext& c) {
     const std::string layer_id = layer.id;
     const Num index = doc.page(t.page).index;
     std::string id = core::truthy_at(c.op, "new_id") ? core::py_str(c.op["new_id"]) : std::string();
+    // (no new_id: the layer's id when no line has it — the balloon's pen follows its id)
+    if (id.empty() && std::none_of(doc.story.begin(), doc.story.end(), [&](const StoryLine& l) { return l.id == layer_id; })) id = layer_id;
     if (!id.empty()) {
         for (const StoryLine& l : doc.story) {
             if (l.id == id) throw OpError("line " + id + " already exists");

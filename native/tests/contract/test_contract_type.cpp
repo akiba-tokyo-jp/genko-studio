@@ -277,13 +277,16 @@ private slots:
         options.region = render::RenderRegion{100, 90, 150, 120};
         const render::Image part = render::render_page(as_layer.page(0), 200, options, &as_layer).image;
         QCOMPARE(part.tobytes(), whole.crop(render::Box{100, 90, 250, 210}).tobytes());
-        // (review P3-15) a line in a balloon made a type layer keeps no shape: the same picture as the line (the same id: the
-        // balloon's pen follows its id)
+        // (review P3-15) a line in a balloon made a type layer keeps no shape: the same picture as the line (the layer
+        // takes the line's id when given none: the balloon's pen follows its id), and back again the same
         const core::Document spoken = run(plain_book(), Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "あいう"}, {"x_mm", 10}, {"y_mm", 8},
                                                               {"w_mm", 25}, {"h_mm", 30}, {"style", Json{{"size_mm", 5}}}});
-        const core::Document layered = run(spoken, Json{{"op", "line_to_type_layer"}, {"line", "l1"}, {"new_id", "l1"}});
+        const core::Document layered = run(spoken, Json{{"op", "line_to_type_layer"}, {"line", "l1"}});  // (its id the line's)
         QVERIFY(!layer_of(layered, "l1")->type->native_type || !layer_of(layered, "l1")->type->native_type->contains("shape"));
         QVERIFY2(worst(proof_bytes(spoken), proof_bytes(layered)) <= 2, qPrintable(QString::number(worst(proof_bytes(spoken), proof_bytes(layered)))));
+        const core::Document again = run(layered, Json{{"op", "type_layer_to_line"}, {"page", 1}, {"layer_id", "l1"}});
+        QCOMPARE(again.story.at(0).id, std::string("l1"));
+        QVERIFY(worst(proof_bytes(spoken), proof_bytes(again)) <= 2);
     }
 
     // the three ways alike: an 8-bit, a 16-bit, a grey and a CMYK page show its letters as dark
