@@ -36,6 +36,7 @@
 #include "app/templates.hpp"
 #include "app/theme.hpp"
 #include "app/key_sets.hpp"
+#include "app/settings_watch.hpp"
 #include "app/workspace.hpp"
 #include "core/frames.hpp"
 #include "gui_support.hpp"
@@ -654,6 +655,17 @@ private slots:
         // (the next window as it was left, then the default again)
         genko::app::settings()->remove(QStringLiteral("ui/key_set"));
         genko::app::preferences::apply_all(w);
+        QCOMPARE(keys("act_move"), k({s("V")}));
+        // a preference written by another program (genko prefs set — H-e): the watch of settings.ini applies it to the
+        // windows open; a write of the app's memories only is not one
+        (void)genko::app::settings_changed_now();
+        genko::app::settings()->setValue(QStringLiteral("ui/key_set"), QStringLiteral("genko"));
+        QVERIFY(genko::app::settings_changed_now());
+        QCOMPARE(keys("act_move"), k({s("Q")}));
+        genko::app::settings()->setValue(QStringLiteral("brush/kind"), QStringLiteral("gpen"));
+        QVERIFY(!genko::app::settings_changed_now());
+        genko::app::settings()->remove(QStringLiteral("ui/key_set"));
+        QVERIFY(genko::app::settings_changed_now());
         QCOMPARE(keys("act_move"), k({s("V")}));
     }
 
