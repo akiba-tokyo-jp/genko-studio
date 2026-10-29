@@ -373,7 +373,11 @@ void MainWindow::type_feature(const std::string& tag, bool on) {
     if (tag == "calt") features[tag] = on ? 1 : 0;
     else if (on) features[tag] = 1;
     else features.erase(tag);
-    type_set(Json{{"features", features}});
+    std::map<std::string, Json> sorted;  // (the tags in order, as the record keeps them)
+    for (const auto& [key, value] : features.items()) sorted[key] = value;
+    Json ordered = Json::object();
+    for (auto& [key, value] : sorted) ordered[key] = std::move(value);
+    type_set(Json{{"features", ordered}});
 }
 
 QString MainWindow::type_language_features() const {

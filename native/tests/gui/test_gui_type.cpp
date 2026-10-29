@@ -316,8 +316,9 @@ private slots:
         s.act("act_type_ot_frac")->trigger();
         QCOMPARE(s.last(), (Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"features", Json{{"frac", 1}}}}));
         QVERIFY(s.act("act_type_ot_frac")->isChecked());
+        QVERIFY(s.act("act_type_ot_dlig")->isEnabled());
         s.act("act_type_ot_dlig")->trigger();
-        QCOMPARE(s.last(), (Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"features", Json{{"dlig", 1}, {"frac", 1}}}}));
+        QVERIFY2(s.last() == (Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"features", Json{{"dlig", 1}, {"frac", 1}}}}), s.last().dump().c_str());
         s.act("act_type_ot_dlig")->trigger();
         s.act("act_type_ot_calt")->trigger();  // (on by default: turned off as 0, frac kept)
         QCOMPARE(s.last()["features"], (Json{{"calt", 0}, {"frac", 1}}));
