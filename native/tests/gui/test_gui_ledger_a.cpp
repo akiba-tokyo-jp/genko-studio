@@ -103,7 +103,9 @@ const QStringList& studio_docks() {
                                        QStringLiteral("カラー"), QStringLiteral("コマの詳細"), QStringLiteral("ヒストリー"), QStringLiteral("素材"),
                                        QStringLiteral("定規・3D"), QStringLiteral("点検"), QStringLiteral("資料"),
                                        // (PC5 J-a: ウィンドウ → レイヤーカンプ is a command, its dock's own switch beside it)
-                                       QStringLiteral("レイヤーカンプ")};
+                                       QStringLiteral("レイヤーカンプ"),
+                                       // (PC5 J-c: ウィンドウ → 注釈 so)
+                                       QStringLiteral("注釈")};
     return titles;
 }
 
@@ -836,7 +838,7 @@ private slots:
         pen.stabilize = 7;
         w->pen() = pen;
         w->pen_changed();
-        c->set_zoom_percent(100);
+        c->actual_size();  // (プリントサイズ: the paper at 96 dpi, the 100 % before PC5 H-a — the user's decision 11)
         c->center_on(97, 150);
         std::vector<QPointF> path;
         for (int i = 0; i < 50; ++i) path.emplace_back(60 + i * 1.5, 150 + 6 * std::sin(i * 1.3));  // (a shaky hand)

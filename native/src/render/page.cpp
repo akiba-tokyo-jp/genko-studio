@@ -2517,9 +2517,16 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         RenderOptions whole = options;
         whole.region.reset();
         RenderResult out = render(page_in, dpi, whole, episode, omitted);
-        out.image = out.image.crop(box);
         if (out.inks) out.inks = crop_inks(*out.inks, box);
         if (out.precise) out.precise = crop_values(*out.precise, box);
+        if (out.drawn_over) {  // (PC5 H-a: the part's marks)
+            const int full = out.image.width();
+            std::vector<unsigned char> part(static_cast<std::size_t>(box.width()) * box.height());
+            for (int r = 0; r < box.height(); ++r)
+                std::copy_n(out.drawn_over->data() + std::size_t(box.y0 + r) * full + box.x0, box.width(), part.data() + std::size_t(r) * box.width());
+            out.drawn_over = std::move(part);
+        }
+        out.image = out.image.crop(box);
         return out;
     }
     Ctx ctx;
@@ -2567,6 +2574,11 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
     std::optional<ColorCanvas> precision;
     if (uses_color_precision(page, print) || smart::needs_precision(page, episode, print))  // (smart-objects@1: a deep picture)
         precision.emplace(rgba, RgbSpace::of(page));  // (color-model@1: an RGB page of a profile, in its space)
+    // (PC5 H-a: where what is drawn over the layers in 8 bits paints, asked for on a page of precise colour or inks)
+    std::optional<std::vector<unsigned char>> over_marks;
+    if (options.drawn_over && !options.contents && (precision || page.color))
+        over_marks.emplace(static_cast<std::size_t>(rgba.width()) * static_cast<std::size_t>(rgba.height()), 0);
+    std::vector<unsigned char>* const mark = over_marks ? &*over_marks : nullptr;
     std::optional<Image> prev_alpha;
     const std::optional<Image> panel_mask = clip_mask(page, ctx.size, dpi, area);
     const Image* panel = panel_mask ? &*panel_mask : nullptr;
@@ -2687,7 +2699,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
                     ic->draw_8bit([&](Image& picture) {
                         text::draw_lines(text::PagePart{&picture, Point{area.x0, area.y0}, ctx.size}, under->second, dpi, font_path, !print,
                                          &panels, ctx.stop, &unported);
-                    });
+                    }, mark);
                 }
             };
             lines_under(layer);
@@ -2718,32 +2730,43 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
                 alpha[i] = static_cast<char>(std::clamp<long>(std::lround(drawn.values[i * (drawn.channels + 1) + drawn.channels] * 255.0), 0, 255));
             Image shape = transparent(area);
             shape.putalpha(Image::frombytes("L", size_of(area), alpha));
-            return RenderResult{std::move(shape), {}, std::nullopt, std::nullopt};
+            return RenderResult{std::move(shape), {}, std::nullopt, std::nullopt, std::nullopt};
         }
-        if (core::py_truthy(page.effects)) canvas.draw_8bit([&](Image& picture) { picture = draw_effects(ctx, picture, area); });
-        canvas.draw_8bit([&](Image& picture) { draw_frames(picture, area, page, ctx.size, dpi); });
+        if (core::py_truthy(page.effects)) canvas.draw_8bit([&](Image& picture) { picture = draw_effects(ctx, picture, area); }, mark);
+        canvas.draw_8bit([&](Image& picture) { draw_frames(picture, area, page, ctx.size, dpi); }, mark);
         if (!lines.empty()) {
-            canvas.draw_8bit([&](Image& picture) { draw_story(picture, area, ctx, lines, drawn_below, panels, font_path, unported); });
+            canvas.draw_8bit([&](Image& picture) { draw_story(picture, area, ctx, lines, drawn_below, panels, font_path, unported); }, mark);
         }
         if (print || mode == "proof") {
             const Image shown = canvas.display();
-            canvas.draw_8bit([&](Image& picture) { draw_nombre(picture, area, ctx, &shown); });
+            canvas.draw_8bit([&](Image& picture) { draw_nombre(picture, area, ctx, &shown); }, mark);
         }
         if (options.crop_marks && print) {
             canvas.draw_8bit([&](Image& picture) {
                 PageCanvas marks(picture, area, ctx.size);
                 draw_crop_marks(marks.draw(), page, dpi);
                 marks.commit();
-            });
+            }, mark);
         }
-        RenderResult out{canvas.display(), {}, std::nullopt, std::nullopt};
+        RenderResult out{canvas.display(), {}, std::nullopt, std::nullopt, std::nullopt};
         if (options.inks) out.inks = canvas.ink_pixels(page.color->depth);
         // (what is never printed, over the page as shown)
+        const std::optional<Image> before_guides = mark != nullptr ? std::optional<Image>(out.image.copy()) : std::nullopt;
         if (!print && core::py_truthy(page.prims)) draw_prims(out.image, area, ctx);
         if (truthy_json(page.ruler) && name_or_proof) draw_ruler(out.image, area, ctx);
         if (name_or_proof && get(page.extra, "cover") != nullptr && core::py_truthy(*get(page.extra, "cover"))) {
             const std::string binding(episode != nullptr ? core::to_string(episode->binding) : std::string_view("right"));
             draw_folds(out.image, area, ctx.size, page, dpi, binding, ctx.stop);
+        }
+        if (before_guides) {  // (PC5 H-a: the guides drawn over the page as shown, where they changed it)
+            for (int y = 0; y < out.image.height(); ++y) {
+                const auto* was = reinterpret_cast<const unsigned char*>(before_guides->raw()->image[y]);
+                const auto* now = reinterpret_cast<const unsigned char*>(out.image.raw()->image[y]);
+                for (int x = 0; x < out.image.width(); ++x) {
+                    if (!std::equal(was + x * 4, was + x * 4 + 3, now + x * 4)) (*mark)[std::size_t(y) * out.image.width() + x] = 255;
+                }
+            }
+            out.drawn_over = std::move(over_marks);
         }
         onion(out.image);
         return out;
@@ -2769,7 +2792,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
                                      &panels, ctx.stop, &unported);
                 };
                 if (cv) {
-                    cv->draw_8bit(draw);
+                    cv->draw_8bit(draw, mark);
                 } else {
                     draw(rgba);
                 }
@@ -2947,28 +2970,45 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         precise = precision->color_raster("f32");
         layers_shown = image.copy();
     }
-    if (options.contents) return RenderResult{std::move(image), {}, std::nullopt, std::move(precise)};  // (smart-objects@1: its layers alone)
+    if (options.contents) return RenderResult{std::move(image), {}, std::nullopt, std::move(precise), std::nullopt};  // (smart-objects@1: its layers alone)
 
-    if (core::py_truthy(page.effects)) image = draw_effects(ctx, image, area);  // effect lines (M3-B)
-    if (!print && core::py_truthy(page.prims)) draw_prims(image, area, ctx);  // 3D guides, never printed (M3-C)
-    if (truthy_json(page.ruler) && name_or_proof) draw_ruler(image, area, ctx);
-    draw_frames(image, area, page, ctx.size, dpi);
-    // where a jacket or a band folds, and what each part is (in name and proof; covers.draw_folds)
-    if (name_or_proof && get(page.extra, "cover") != nullptr && core::py_truthy(*get(page.extra, "cover"))) {
-        const std::string binding(episode != nullptr ? core::to_string(episode->binding) : std::string_view("right"));
-        draw_folds(image, area, ctx.size, page, dpi, binding, ctx.stop);
-    }
-    // lines: placed ones in balloons, the others as labels
-    if (!lines.empty()) draw_story(image, area, ctx, lines, drawn_below, panels, font_path, unported);
-    if (print || mode == "proof") draw_nombre(image, area, ctx);
-    if (options.crop_marks && print) {
-        PageCanvas canvas(image, area, ctx.size);
-        draw_crop_marks(canvas.draw(), page, dpi);
-        canvas.commit();
+    const auto drawn_over = [&](Image& picture) {
+        if (core::py_truthy(page.effects)) picture = draw_effects(ctx, picture, area);  // effect lines (M3-B)
+        if (!print && core::py_truthy(page.prims)) draw_prims(picture, area, ctx);  // 3D guides, never printed (M3-C)
+        if (truthy_json(page.ruler) && name_or_proof) draw_ruler(picture, area, ctx);
+        draw_frames(picture, area, page, ctx.size, dpi);
+        // where a jacket or a band folds, and what each part is (in name and proof; covers.draw_folds)
+        if (name_or_proof && get(page.extra, "cover") != nullptr && core::py_truthy(*get(page.extra, "cover"))) {
+            const std::string binding(episode != nullptr ? core::to_string(episode->binding) : std::string_view("right"));
+            draw_folds(picture, area, ctx.size, page, dpi, binding, ctx.stop);
+        }
+        // lines: placed ones in balloons, the others as labels
+        if (!lines.empty()) draw_story(picture, area, ctx, lines, drawn_below, panels, font_path, unported);
+        if (print || mode == "proof") draw_nombre(picture, area, ctx);
+        if (options.crop_marks && print) {
+            PageCanvas canvas(picture, area, ctx.size);
+            draw_crop_marks(canvas.draw(), page, dpi);
+            canvas.commit();
+        }
+    };
+    drawn_over(image);
+    if (mark != nullptr) {  // (PC5 H-a: where that paints — drawn again on black and on white, a pixel either changes)
+        for (const int ground : {0, 255}) {
+            Image probe = Image::create("RGB", image.size(), Ink{ground, ground, ground});
+            drawn_over(probe);
+            const Image shown = probe.mode() == "RGB" ? probe : probe.convert("RGB");
+            for (int y = 0; y < shown.height(); ++y) {
+                const auto* row = reinterpret_cast<const unsigned char*>(shown.raw()->image[y]);
+                for (int x = 0; x < shown.width(); ++x) {
+                    const unsigned char* p = row + x * 4;
+                    if (p[0] != ground || p[1] != ground || p[2] != ground) (*mark)[std::size_t(y) * shown.width() + x] = 255;
+                }
+            }
+        }
     }
     onion(image);
     if (precise) precise = with_drawn_over(*precise, *layers_shown, image, RgbSpace::of(page));
-    return RenderResult{std::move(image), {}, std::nullopt, std::move(precise)};
+    return RenderResult{std::move(image), {}, std::nullopt, std::move(precise), std::move(over_marks)};
 }
 
 // The first `count` characters of UTF-8 text (Python's text[:count]).
@@ -3408,6 +3448,8 @@ Box rect_px(const core::Rect& rect, int dpi) {
     return Box{x, y, x + w, y + h};
 }
 
+bool draws_whole_page(const core::Page& page) { return needs_whole_page(page); }
+
 bool uses_color_precision(const core::Page& page, bool print) {
     if (page.color) return false;  // (a CMYK, Lab or grey page has its own canvas)
     if (page.rgb && !page.rgb->profile.empty()) return true;  // (color-model@1: an RGB page of a profile, in its space)
@@ -3525,7 +3567,8 @@ RenderResult drawn_page(const core::Page& page, int dpi, const RenderOptions& op
                               std::to_string(core::kColorRasterMaxPixels)+" pixels)");
         if(pixels>1024LL*1024){
             if(options.stop.stop_requested())throw Cancelled();
-            RenderResult out{Image::create_blank("RGB",size_of(area)),{},std::nullopt,std::nullopt};
+            RenderResult out{Image::create_blank("RGB",size_of(area)),{},std::nullopt,std::nullopt,std::nullopt};
+            if(options.drawn_over)out.drawn_over.emplace(static_cast<std::size_t>(pixels),0);  // (PC5 H-a)
             if(options.inks && page.color){  // (each tile's inks laid in)
                 out.inks=core::blank_ink_pixels(page.color->space,page.color->depth,static_cast<std::uint32_t>(area.width()),
                                                 static_cast<std::uint32_t>(area.height()),page.color->planes());
@@ -3546,6 +3589,12 @@ RenderResult drawn_page(const core::Page& page, int dpi, const RenderOptions& op
                     const auto piece=render(page,dpi,part,episode,omitted);
                     out.image.paste(piece.image,Point{x-area.x0,y-area.y0});
                     if(out.inks && piece.inks)paste_inks(*out.inks,*piece.inks,Point{x-area.x0,y-area.y0});
+                    if(out.drawn_over && piece.drawn_over){  // (PC5 H-a: each tile's marks laid in)
+                        const int w=piece.image.width();
+                        for(int r=0;r<piece.image.height();++r)
+                            std::copy_n(piece.drawn_over->data()+std::size_t(r)*w,w,
+                                        out.drawn_over->data()+(std::size_t(y-area.y0+r)*std::size_t(area.width())+std::size_t(x-area.x0)));
+                    }
                     if(values){
                         if(!piece.precise)throw core::Error("value","the page's values were not drawn");
                         const core::ColorRasterView tile_values(*piece.precise);

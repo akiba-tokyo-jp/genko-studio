@@ -16,12 +16,20 @@
 #include <QTimer>
 #include <QWindow>
 
+#include <algorithm>
+#include <cmath>
+
 #include "app/canvas.hpp"
 #include "app/config.hpp"
 
 namespace genko::app {
 
 namespace {
+
+bool truthy_setting(const QString& key) {
+    const QString chosen = settings()->value(key, QStringLiteral("false")).toString().toLower();
+    return chosen == QLatin1String("1") || chosen == QLatin1String("true") || chosen == QLatin1String("yes");
+}
 
 class GpuSurface : public QOpenGLWidget {
 public:
@@ -48,7 +56,14 @@ protected:
         if (gave_up() && (type == QEvent::Show || type == QEvent::WindowChangeInternal || type == QEvent::ScreenChangeInternal)) {
             return QWidget::event(event);
         }
-        return QOpenGLWidget::event(event);
+        const bool handled = QOpenGLWidget::event(event);
+        // (PC5 H-a: a context that could not be made — no OpenGL here, a broken driver —: the canvas draws by the processor
+        // again, and says so; once, after this event)
+        if (gave_up() && !told_) {
+            told_ = true;
+            QMetaObject::invokeMethod(canvas_, [canvas = canvas_] { canvas->gpu_failed(); }, Qt::QueuedConnection);
+        }
+        return handled;
     }
 
     void resizeEvent(QResizeEvent* event) override {
@@ -56,11 +71,21 @@ protected:
     }
 
     void paintGL() override {
-        QPainter painter(this);
-        canvas_->paint_frame(painter);
+        {
+            QPainter painter(this);
+            canvas_->paint_frame(painter);
+        }
+        canvas_->renderer().trim_textures();  // (PC5 H-a: the tiles on the card kept within GPU の記憶)
     }
 
     void resizeGL(int, int) override {
+        // (review P3-2: the widget's own frame buffers — 4 samples of colour and of depth and stencil, and the one they
+        // are resolved to — come out of GPU の記憶 too; the tiles keep at least a quarter of it)
+        const double ratio = devicePixelRatioF();
+        const auto pixels = static_cast<std::size_t>(std::ceil(width() * ratio)) * static_cast<std::size_t>(std::ceil(height() * ratio));
+        const std::size_t budget = PageCanvas::gpu_budget_bytes();
+        const std::size_t frames = pixels * 4 * (2 * static_cast<std::size_t>(std::max(1, format().samples())) + 1);
+        canvas_->renderer().set_texture_budget(std::max(budget / 4, budget > frames ? budget - frames : std::size_t{0}));
         update();
         if (!watching_screen_) {
             if (QWindow* window = canvas_->window()->windowHandle()) {
@@ -81,6 +106,7 @@ private:
     PageCanvas* canvas_;
     QTimer settle_;
     bool watching_screen_ = false;
+    bool told_ = false;
 };
 
 // (the canvas's size followed by the surface)
@@ -105,9 +131,11 @@ void PageCanvas::use_gpu(bool on) {
     if (!on) {
         delete gpu_surface_;
         gpu_surface_ = nullptr;
+        renderer_->set_texture_budget(std::nullopt);
         QWidget::update();
         return;
     }
+    renderer_->set_texture_budget(gpu_budget_bytes());
     auto* surface = new GpuSurface(this);
     new FollowSize(this, surface);
     surface->setGeometry(rect());
@@ -115,6 +143,22 @@ void PageCanvas::use_gpu(bool on) {
     surface->setCursor(cursor());
     gpu_surface_ = surface;
     if (isVisible()) surface->show();
+}
+
+void PageCanvas::gpu_failed() {
+    if (gpu_surface_ == nullptr) return;
+    use_gpu(false);
+    // (review P3-2: not asked again at every window — the choice turned off, said so)
+    if (truthy_setting(QStringLiteral("ui/gpu_canvas"))) settings()->setValue(QStringLiteral("ui/gpu_canvas"), QStringLiteral("false"));
+    emit gpuFailed(QStringLiteral("グラフィックボードで原稿を表示できないため、プロセッサーで表示します（環境設定 → パフォーマンス の"
+                                  "「原稿の表示にグラフィックボードを使う」を切りました）"));
+}
+
+std::size_t PageCanvas::gpu_budget_bytes() {
+    // (環境設定 → パフォーマンス: GPU の記憶の上限, MB; PC5 H-a)
+    bool ok = false;
+    const int mb = settings()->value(QStringLiteral("ui/gpu_memory_mb"), 512).toInt(&ok);
+    return static_cast<std::size_t>(ok ? std::clamp(mb, 64, 1024) : 512) * 1024 * 1024;
 }
 
 void PageCanvas::update() {

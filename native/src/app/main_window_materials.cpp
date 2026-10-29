@@ -196,6 +196,12 @@ void MainWindow::keyPressEvent(QKeyEvent* event) {
             event->accept();
             return;
         }
+        // (PC5 H-a, 節 H 5 章: an Esc nothing else used takes a full screen mode back to 標準スクリーンモード)
+        if (screen_mode_ != ScreenMode::Standard) {
+            set_screen_mode(ScreenMode::Standard);
+            event->accept();
+            return;
+        }
     }
     QMainWindow::keyPressEvent(event);
 }

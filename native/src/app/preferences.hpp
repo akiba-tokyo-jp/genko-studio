@@ -197,6 +197,7 @@ public:
     QComboBox* rest = nullptr;
     QCheckBox* requests = nullptr;
     QCheckBox* gpu = nullptr;
+    QSpinBox* gpu_memory = nullptr;  // (PC5 H-a: グラフィックボードの記憶の上限, MB)
     QCheckBox* motion = nullptr;
     QComboBox* cursor = nullptr;
     QCheckBox* cross_drawing = nullptr;  // (PC4 E1: 描いている間は十字だけ)

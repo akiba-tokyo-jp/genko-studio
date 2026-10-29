@@ -46,6 +46,7 @@
 #include "render/text/balloons.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
+#include "render/ops_annotations.hpp"
 #include "render/tones.hpp"
 #include "render/vector_masks.hpp"
 #include "storage/asset_store.hpp"
@@ -447,6 +448,7 @@ void place_pcraft(OpContext& c, std::size_t at, const std::string& bytes, const 
     std::vector<std::string> notes;
     std::string contents_id;
     try {
+        const annotations::ReadingActor reader(c.actor);  // (PC5 J-c: its notes the op's actor's)
         contents_id = pcraft::place_as_contents(doc, bytes, name.empty() ? std::string("contents.pcraft") : name, notes);
     } catch (const NotYetPorted&) {
         throw;

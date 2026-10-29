@@ -78,6 +78,8 @@ GitHub Actionsはリポジトリ側で無効とし、検証のために再有効
 python3 tools/ci/validation_policy.py --base <基点SHA> --phase development --output build/validation-plan.json
 ```
 
+GPU と CPU の表示の一致（render:GPU-CPU-parity、PC5 H-a）を Xvfb と Mesa の OpenGL で比べる試験 `test_gui_canvas_gpu`（`genko_xvfb_test`、ラベル gui・gpu、Linux だけ）は、計画に `--gpu` を付けたときだけ入る（アプリの試験を流す Linux の構成に）。機械に xvfb-run と Mesa が要る。xvfb-run が無ければ SKIP ではなく失敗する。CI（native.yml）はまだ `--gpu` を付けない。offscreen の `test_gui_canvas` は、OpenGL の無い所で CPU に戻る道を毎回確かめる。一致の許し（利用者の決定 2026-10-29）: 再標本しない表示は全画素 1/255 以内。回転と画面に合わせた倍率は、2/255 を超える画素が 2‰ まで、差は 12/255 まで（用紙の縁と影の 14 画素は比べない）。
+
 Python参照の契約試験は、参照Pythonを環境変数で渡して実行する: `GENKO_PYREF`（Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9）と、MCP・HTTPの契約（`test_contract_mcp`）用の `GENKO_MCP_PYTHON`（`tools/migration/mcp_reference_requirements.txt` のvenv。作り方はARCHITECTURE.md §9）。未設定だと契約試験はSKIPになり、auditが不合格にする。
 
 対応するCMake presetをconfigureし、JSONにある構成だけ実行する:

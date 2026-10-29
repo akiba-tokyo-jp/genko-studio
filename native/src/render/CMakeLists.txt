@@ -48,6 +48,7 @@ genko_library(genko_render
     plugins.cpp
     colour.cpp
     proof.cpp
+    hdr_preview.cpp
     import_profile.cpp
     ink.cpp
     ink_canvas.cpp
@@ -255,6 +256,10 @@ genko_library(genko_render
     # PC5 I-d (変数とデータセット: variables@1's ops and their .pcraft key)
     ops_variables.cpp
     pcraft_variables.cpp
+    # PC5 J-c (注釈: annotations@1 — the ops, PSD's Anno, a .pcraft's notes)
+    ops_annotations.cpp
+    psd_annotations.cpp
+    pcraft_annotations.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

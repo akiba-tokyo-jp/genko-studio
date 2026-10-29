@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 
+#include "render/pcraft_annotations.hpp"
 #include "render/pcraft_comps.hpp"
 #include "render/pcraft_manifest.hpp"
 #include "render/pcraft_variables.hpp"
@@ -31,7 +32,7 @@ bool measuring(const core::Json& v) {
 // 節 I's variables — I-d — among them, where PC4 F-f's notes said it: the notes in the order they had)
 constexpr std::array<Row, 6> kRows{{
     {"layer_comps", "レイヤーカンプ", holds_something, pcraft_comps::read, pcraft_comps::write},
-    {"notes", "注釈", holds_something, nullptr, nullptr},
+    {"notes", "注釈", holds_something, pcraft_annotations::read, pcraft_annotations::write},  // (PC5 J-c)
     {"slices", "スライス", holds_something, nullptr, nullptr},
     {"timeline", "タイムライン", holds_something, nullptr, nullptr},
     {"variables", "変数とデータセット", holds_something, pcraft_variables::read, pcraft_variables::write},  // (PC5 I-d)

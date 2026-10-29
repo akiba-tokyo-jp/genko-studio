@@ -307,6 +307,10 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - 表示・窓・環境設定の土台（PC5 H-0）:
   - `crates/engine/src/prefs.rs`（150-730 行: 節の名前と順 `SECTIONS`・各節の項目の path の名前・既定・範囲）→ `native/src/core/prefs_table.cpp`（今の settings.ini の鍵に重ねる表）。`crates/engine/src/prefs/tests.rs`（9-100 行: 全部か無し・範囲の外・知らない path の試験の考え）→ `native/tests/unit/test_prefs_table.cpp`。
   - `crates/ui-egui/src/menu_catalog.rs`（Photoshop のキーの表）→ `native/src/app/key_sets.cpp` の Photoshop の組（キーそのものは Photoshop の初期設定）。
+- 表示と画素（PC5 H-a）:
+  - `crates/engine/src/proof_sim.rs`（75-110 行: `HdrPreview` — 方法・露光量 −20〜20・ガンマ 0.1〜9.99 と 0・1 で何もしないこと、265-284 行: `preview_32` の引数と範囲）→ `native/src/render/hdr_preview.cpp`（0..1 に切る前の値に当てること、ハイライト圧縮の式、グレー・インキの道は Genko のもの）。
+  - `crates/ui-egui/src/view_cmds.rs`（546-580 行: 200%・プリントサイズと `fit_layers` — 選んだレイヤーの範囲を 20 画素空けて画面に）→ `native/src/app/main_window_view.cpp`（`fit_layers`）・`native/src/app/canvas.cpp`（`fit_box`）。`crates/ui-egui/src/menu_catalog.rs`（642-701 行: 表示 の項目の名前と並び、スクリーンモードの 3 つ）→ `native/src/app/main_window_view.cpp`。
+  - `crates/gpu/tests/parity.rs`（GPU と CPU が 1/255 以内という許し）の考え → `native/tests/gui/test_gui_canvas.cpp`（`theCardShowsWhatTheProcessorDraws`。Genko は表示の一致）。
 
 ## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1、PC5 節 J）
 
@@ -320,3 +324,7 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/io/src/comps_map.rs`（124-310 行: `parse_cmls`・`comps_from_psd`・`write_comps_resource`・`write_cmls`・`set_cmls`）と `crates/psd/src/metadata.rs`（`parse_shmd`・`write_shmd`）→ `native/src/render/psd_comps.{hpp,cpp}`・`native/src/render/psd_production.cpp`（`shmd_items`・`shmd_bytes`・`layer_shmd`。読んだバイトのまま書くかを指紋で決めること・lyid を付けることは Genko のもの）。
   - `crates/format/src/manifest.rs`（99-130 行: `LayerCompM`・`CompStateM`・`CompAppearanceM`）と `crates/format/src/convert.rs`（238-265 行: `comp_m`、324-345 行: `Loader::comp`）→ `native/src/render/pcraft_comps.{hpp,cpp}`。
   - `crates/ui-egui/src/comps_ui.rs`（パネルの行と下のボタン）→ `native/src/app/layer_comps_panel.{hpp,cpp}`（Qt で作り直した）。
+- 注釈（PC5 J-c）:
+  - `crates/engine/src/notes_cmds.rs`（55-150 行: `notes.add`・`notes.set`（印と一緒に枠を動かす、本文・作成者を変えたときだけ日時を変える）・`notes.delete`、160-190 行: `import_notes_from`（紙の外の印を中へ寄せる））→ `native/src/render/ops_annotations.{hpp,cpp}`・`native/src/formats/notes_import.{hpp,cpp}`（op の名前と引数・mm で持つこと・書いた人を持ちエージェントが人の注釈を変えないこと・読み込みを op の並びにすることは Genko のもの）。試験の考え（同じファイルの tests）→ `native/tests/unit/test_annotations.cpp`。
+  - `crates/io/src/annotations_map.rs`（1-205 行: `Anno` の読み書き `parse_entries`・`write_note`・`write_anno`、色の空間 `color_from`、本文の UTF-16 と CR、音声の注釈を元のバイトのまま書き戻すこと）→ `native/src/render/psd_annotations.{hpp,cpp}`（PDF の日付を UTC に直すこと・読んだバイトのまま書くかを指紋で決めることは Genko のもの）。
+  - `crates/doc/src/analysis.rs`（94-125 行: `Note` の形と既定）と `crates/format/src/manifest.rs`（`notes`）→ `native/src/render/pcraft_annotations.{hpp,cpp}`。

@@ -37,6 +37,7 @@ genko_library(genko_app
     canvas.cpp
     canvas_paint.cpp
     canvas_gpu.cpp
+    canvas_view.cpp
     canvas_input.cpp
     canvas_select.cpp
     thumbs.cpp
@@ -204,6 +205,10 @@ genko_library(genko_app
     # PC5 I-d (変数とデータセット: イメージ → 変数, データセットを適用, データセットからファイル, 変数データセット)
     main_window_variables.cpp
     variables_dialog.cpp
+    # PC5 J-c (annotations@1: 注釈ツール, ウィンドウ → 注釈, 表示・非表示 → 注釈, 読み込み → 注釈…)
+    main_window_notes.cpp
+    notes_panel.cpp
+    canvas_notes.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

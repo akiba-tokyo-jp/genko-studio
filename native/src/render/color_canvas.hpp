@@ -108,7 +108,8 @@ public:
     // A pixel is painted where the drawing changes it on that picture or on one whose colour samples all lie half the
     // range away (so a balloon over a precise colour that rounds to its own colour still covers it). What is drawn so
     // is not a layer: the alpha a clipped layer clips to stays that of the layer before.
-    void draw_8bit(const std::function<void(Image&)>& draw);
+    // (PC5 H-a: `marks`, the canvas's size: 255 set where the drawing painted)
+    void draw_8bit(const std::function<void(Image&)>& draw, std::vector<unsigned char>* marks = nullptr);
     // The picture as the screen shows it (sRGB).
     Image image() const;
     Size size() const;

@@ -242,10 +242,10 @@ void MainWindow::choose_proof(const QString& id) {
     }
     ProofView& v = documents_[static_cast<std::size_t>(doc_)].proof;
     if (id == QLatin1String("export")) {
-        v = ProofView{QStringLiteral("export"), Kind::Profile, 3, QStringLiteral("relative"), true, false, true, v.gamut};
+        v = ProofView{QStringLiteral("export"), Kind::Profile, 3, QStringLiteral("relative"), true, false, true, v.gamut, v.hdr};
     } else if (const auto kind = render::proof::kind_from_id(id.toStdString())) {
         if (kind->first == Kind::Profile) {  // (作業用 CMYK: its own defaults, as upstream's Proof Setup gives them)
-            v = ProofView{QStringLiteral("working"), Kind::Profile, 3, QStringLiteral("relative"), true, false, true, v.gamut};
+            v = ProofView{QStringLiteral("working"), Kind::Profile, 3, QStringLiteral("relative"), true, false, true, v.gamut, v.hdr};
         } else {
             if (kind->first == Kind::Plate || kind->first == Kind::CmyPlate) v.profile = QStringLiteral("working");  // (plates: the working CMYK's)
             v.kind = kind->first;
@@ -267,6 +267,7 @@ void MainWindow::apply_proof_view() {
     setup.simulate_paper = v.simulate_paper;
     QString profile = v.profile;
     PageRenderer& r = canvas_->renderer();
+    r.set_hdr(v.hdr);  // (PC5 H-a: 32 bit プレビューオプション, the tab's own)
     if (profile == QLatin1String("working")) {
         const cs::Working w = cs::working(cs::Space::Cmyk, cs::load());
         profile = w.spec == QLatin1String("export") ? QStringLiteral("export") : QString();

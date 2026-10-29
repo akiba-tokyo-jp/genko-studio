@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include "app/canvas.hpp"
 #include "app/pen.hpp"
@@ -178,7 +179,7 @@ void PageCanvas::finish_stroke() {
 void PageCanvas::update_cursor(std::optional<QPointF> pos) {
     if (panning_) {
         setCursor(Qt::ClosedHandCursor);
-    } else if (space_) {
+    } else if (space_ || tool_ == QLatin1String("hand")) {  // (PC5 H-a: 手のひらツール)
         setCursor(Qt::OpenHandCursor);
     } else if (is_drawing_tool(tool_)) {
         // the brush's circle is drawn on the page (paint_page); the pointer itself as chosen in 環境設定 (PC4 E1: the cross
@@ -245,8 +246,8 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
         turning_ = std::make_pair(angle, view_.rotation);  // Shift+Space: turn the view
         return;
     }
-    if (event->button() == Qt::MiddleButton || (event->button() == Qt::LeftButton && space_)) {
-        start_pan(pos);
+    if (event->button() == Qt::MiddleButton || (event->button() == Qt::LeftButton && (space_ || tool_ == QLatin1String("hand")))) {
+        start_pan(pos);  // (PC5 H-a: 手のひらツール drags the view as Space does)
         return;
     }
     if (page() == nullptr || event->button() != Qt::LeftButton) return;
@@ -277,9 +278,12 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
         update();
         return;
     }
-    if (tool_ == QLatin1String("zoom")) {  // 虫めがね: a click zooms in (Alt: out), a drag zooms into the area
+    if (tool_ == QLatin1String("zoom")) {  // ズームツール: a click zooms in (Alt: out), a drag zooms into the area
         zoom_drag_ = std::make_pair(pos, pos);
-        zoom_out_ = (event->modifiers() & Qt::AltModifier) != 0;
+        // (PC5 H-a, its options: ズームアウト turns the click about, Alt still the other way; スクラブズーム drags the zoom)
+        zoom_out_ = ((event->modifiers() & Qt::AltModifier) != 0) != zoom_out_mode;
+        scrub_ = pos;
+        scrubbed_ = false;
         return;
     }
     if (tool_ == QLatin1String("select")) {
@@ -317,6 +321,15 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
     const QPointF pos = unturned(event->position());
     if (!panning_ && work_ && work_->move && (event->buttons() & Qt::LeftButton) && work_->move(mm_of(pos), event->modifiers())) return;  // (PC4 D4)
     if (zoom_drag_) {
+        if (scrubby_zoom && scrub_) {  // (スクラブズーム: right zooms in, left out, about the point pressed)
+            const double dx = pos.x() - scrub_->x();
+            scrub_ = pos;
+            if (std::abs(pos.x() - zoom_drag_->first.x()) > 3 || scrubbed_) {
+                scrubbed_ = true;
+                if (dx != 0.0) zoom_by(std::exp(dx / 120.0), zoom_drag_->first);
+            }
+            return;
+        }
         zoom_drag_->second = pos;
         update();
         return;
@@ -421,6 +434,11 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
     if (zoom_drag_) {
         const auto [start, end] = *zoom_drag_;
         zoom_drag_.reset();
+        scrub_.reset();
+        if (std::exchange(scrubbed_, false)) {  // (スクラブズーム: zoomed as it was dragged)
+            update();
+            return;
+        }
         if (std::abs(end.x() - start.x()) > 6 && std::abs(end.y() - start.y()) > 6) {
             const QPointF a = mm_of(start);
             const QPointF b = mm_of(end);
@@ -516,6 +534,7 @@ void PageCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
         finish_curve();
         return;
     }
+    if (tool_ == QLatin1String("note") && note_double(event->position())) return;  // (PC5 J-c: a note's box opened or closed)
     if (tool_ == QLatin1String("frame") && !frame_poly_.empty()) {
         if (frame_poly_.size() > 1 && frame_poly_.back() == frame_poly_[frame_poly_.size() - 2]) {
             frame_poly_.pop_back();  // (the double click's second press added the same corner again)

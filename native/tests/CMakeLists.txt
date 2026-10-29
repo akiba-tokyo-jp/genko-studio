@@ -201,6 +201,10 @@ genko_test(test_layer_comps SOURCES unit/test_layer_comps.cpp DEPS genko_test_su
 # applied (visibility, a type layer's and a line's text) in one step, a picture's bytes kept out of the journal, a text file of
 # data sets (PhotoCraft's variables_cmds/tests.rs).
 genko_test(test_variables SOURCES unit/test_variables.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+# PC5 J-c (annotations@1, SPEC.md PROD-01「注釈」): the notes as PhotoCraft's tests check them (add, edit, move with its box,
+# delete, the refusals; an Anno block read and written again, a sound note kept, the dates) with Genko's actors (an agent
+# never changes a person's note), the JSON, a .pcraft's notes, the import's ops, MCP's apply_ops not taking the ops.
+genko_test(test_annotations SOURCES unit/test_annotations.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service LABELS unit)
 # PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame; and PC2a's tone kinds
@@ -556,6 +560,11 @@ genko_test(test_contract_layer_comps SOURCES contract/test_contract_layer_comps.
 # inspect --variables, export --format datasets: the files' names, the book unchanged), saved and read again (variables@1,
 # the pictures in assets/, a book without them as before), a .pcraft's variables written and read back.
 genko_test(test_contract_variables SOURCES contract/test_contract_variables.cpp DEPS genko_test_support genko_render_ops genko_formats
+# PC5 J-c (annotations@1): the notes through the command line (apply as a person and an agent, the agent refused on a
+# person's note, undo, inspect --annotations), the PSD's Anno as psd-tools reads it (read back, written as read while
+# unchanged, anew, gone; keep.psd's; a sound note kept), a .pcraft's notes (upstream's reader with $GENKO_PCRAFT_CHECK),
+# ファイル → 読み込み → 注釈…'s reading.
+genko_test(test_contract_annotations SOURCES contract/test_contract_annotations.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
@@ -719,6 +728,9 @@ if(GENKO_BUILD_APP)
   # PC5 I-d (variables@1): ページ → 変数 ▸ 定義…・データセット…, データセットを適用…, ファイル → 書き出し → データセットからファイル…,
   # ファイル → 読み込み → 変数データセット… (their places, the windows asked, each one Undo)
   genko_test(test_gui_variables SOURCES gui/test_gui_variables.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC5 J-c (annotations@1): the 注釈ツール (a click, a drag, a double click; its options), ウィンドウ → 注釈 (the panel),
+  # 表示 → 表示・非表示 → 注釈, ファイル → 読み込み → 注釈… — each change one Undo
+  genko_test(test_gui_notes SOURCES gui/test_gui_notes.cpp DEPS genko_app GUI TIMEOUT 600)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC2c (COLOR-04): レイヤー → 色調補正's local corrections and image calculations, 編集 → フェード (only right after).
@@ -809,6 +821,30 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_actions SOURCES gui/test_gui_actions.cpp DEPS genko_app GUI TIMEOUT 900)
   # the canvas's gestures: the panel tool (cuts, gutters, corners, drawn panels) and the view
   genko_test(test_gui_canvas SOURCES gui/test_gui_canvas.cpp DEPS genko_app GUI TIMEOUT 1200)
+  # PC5 H-a (SPEC VIEW-01): the zoom in the page's pixels (100%, 200%, プリントサイズ), a 600 dpi B4 zoomed to its pixels,
+  # レイヤーを画面サイズに合わせる, ピクセルグリッド, ピクセルアートプレビュー, 手のひらツール and ズームツール, スクリーンモード, 32 bit
+  # プレビューオプション…
+  genko_test(test_gui_view SOURCES gui/test_gui_view.cpp DEPS genko_app GUI TIMEOUT 900)
+  # PC5 H-a (review P2-2): render:GPU-CPU-parity — test_gui_canvas's theCardShowsWhatTheProcessorDraws again on Xvfb with
+  # Mesa's OpenGL (xcb), where the card's picture is compared with the processor's (offscreen has no OpenGL: there it checks
+  # the way back to the processor). Labels gui and gpu; in a validation plan only when asked for (validation_policy --gpu).
+  # No xvfb-run on the machine: the test fails saying so (never a skip).
+  function(genko_xvfb_test name target)
+    find_program(GENKO_XVFB_RUN xvfb-run)
+    if(GENKO_XVFB_RUN)
+      add_test(NAME ${name} COMMAND ${GENKO_XVFB_RUN} -a -s "-screen 0 1920x1200x24" $<TARGET_FILE:${target}> ${ARGN})
+    else()
+      add_test(NAME ${name} COMMAND ${CMAKE_COMMAND} -E echo "${name}: xvfb-run is not on this machine (apt install xvfb)")
+      set_tests_properties(${name} PROPERTIES FAIL_REGULAR_EXPRESSION "xvfb-run is not")
+    endif()
+    set_tests_properties(${name} PROPERTIES LABELS "gui;gpu" TIMEOUT 600
+                         ENVIRONMENT "QT_QPA_PLATFORM=xcb;LIBGL_ALWAYS_SOFTWARE=1;QTEST_FUNCTION_TIMEOUT=500000")
+  endfunction()
+  if(UNIX AND NOT APPLE)
+    genko_xvfb_test(test_gui_canvas_gpu test_gui_canvas theCardShowsWhatTheProcessorDraws)
+  endif()
+  # PC5 H-a: the tiles — 画素の段 laid nearest, ピクセルアートプレビュー, 32 bit プレビュー on the three ways, the tiles on the card
+  genko_test(test_tiles SOURCES unit/test_tiles.cpp DEPS genko_app LABELS unit TIMEOUT 600)
   # saving and closing (AC-SAVE 2, 3, 4, 6, 8, 10): failures shown, the question before closing, recovery, retries
   genko_test(test_gui_save SOURCES gui/test_gui_save.cpp DEPS genko_app GUI TIMEOUT 900)
   target_compile_definitions(test_gui_save PRIVATE GENKO_CLI="$<TARGET_FILE:genko>")

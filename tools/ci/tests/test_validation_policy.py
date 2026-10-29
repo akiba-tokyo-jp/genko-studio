@@ -15,6 +15,19 @@ class PolicyTests(unittest.TestCase):
     def plan(self, paths, phase='development'):
         return policy.make_plan(paths, phase, ROOT)
 
+    def test_the_cards_way_on_xvfb_only_when_asked(self):
+        # (PC5 H-a review P2-2: test_gui_canvas_gpu — GPU と CPU の一致 on Xvfb and Mesa — registered, never in the CI's plan
+        # unless asked for, then on Linux with the app's tests and never on Windows)
+        inv = policy.inventory(ROOT)
+        self.assertIn('test_gui_canvas_gpu', inv['gpu'])
+        self.assertNotIn('test_gui_canvas_gpu', inv['normal'] | inv['contract'])
+        for phase in ('development', 'integration', 'milestone'):
+            for row in self.plan(['native/src/app/canvas_gpu.cpp'], phase)['matrix']['include']:
+                self.assertNotIn('test_gui_canvas_gpu', row['tests'])
+        asked = policy.make_plan(['native/src/app/canvas_gpu.cpp'], 'integration', ROOT, gpu=True)
+        for row in asked['matrix']['include']:
+            self.assertEqual('test_gui_canvas_gpu' in row['tests'], row['preset'].startswith('linux'), row['preset'])
+
     def test_docs_do_not_start_native_builds(self):
         p = self.plan(['docs/cpp-migration/PLAN.md'], 'integration')
         self.assertEqual(p['matrix']['include'], [])

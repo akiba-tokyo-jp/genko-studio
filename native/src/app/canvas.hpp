@@ -83,7 +83,10 @@ class PageCanvas : public QWidget {
 
 public:
     static constexpr double kMinScale = 0.3;
+    // The most the view zooms in on any page (screen px a mm); on a page of a finer resolution, as far as its pixels at
+    // kMaxPixelZoom times (PC5 H-a, 画素の段: Photoshop's 3200 %) — max_scale().
     static constexpr double kMaxScale = 12.0;
+    static constexpr double kMaxPixelZoom = 32.0;
     static constexpr int kHandlePx = 7;
 
     explicit PageCanvas(QWidget* parent = nullptr);
@@ -417,15 +420,28 @@ public:
     bool flipped_vertical() const { return view_.flipped_v; }
     void fit_page();
     void zoom_by(double factor, std::optional<QPointF> anchor = std::nullopt);
+    // プリントサイズ: the paper as large as it is (at 96 dpi, the screen Photoshop's print size assumes on Windows).
     void actual_size();
+    // PC5 H-a (the user's decision 11): the zoom in the page's pixels — 100 % one page pixel a screen pixel (the screen's
+    // own pixels: devicePixelRatio counted), 200 % two. The scale (screen px a mm) of 100 %.
+    double pixel_scale() const;
+    // 100%, 200%: the page's pixels at that zoom about the middle of the view.
+    void actual_pixels(double percent = 100.0);
+    // The most the view zooms in here (kMaxScale, or the page's pixels at kMaxPixelZoom times).
+    double max_scale() const;
+    // レイヤーを画面サイズに合わせる (and the hand and zoom tools' 画面にフィット): the view zoomed and centred on a box of the
+    // page (mm), with a margin.
+    void fit_box(const QRectF& box_mm);
     void center_on(double x_mm, double y_mm);
     void rotate_view(double degrees);
     void set_rotation(double degrees);
     void flip_view(std::optional<bool> on = std::nullopt);
     void flip_view_vertical(std::optional<bool> on = std::nullopt);
     void reset_view();
+    // The zoom in the page's pixels (decision 11), rounded, and as it is.
     void set_zoom_percent(double percent);
     int zoom_percent() const;
+    double zoom_percent_exact() const;
     void zoom_to_rect(double x0, double y0, double x1, double y1);
     // Change the view at once and draw the way there over a moment (unless motion is reduced).
     void glide(const std::function<void()>& change);
@@ -436,8 +452,28 @@ public:
     QPointF to_widget(const QPointF& mm) const;
     // The part of the page in sight (mm).
     QRectF seen_mm() const;
-    // The resolution that matches the zoom (one page pixel per screen pixel, up to the detail), and the whole page's.
+    // The resolution that matches the zoom (one tile pixel per screen pixel), and the whole page's. Up to the page's own
+    // (画素の段, PC5 H-a): zoomed in past it, the tiles are the page's pixels, laid enlarged.
     int wanted_dpi() const;
+    // Zoomed in past the page's own pixels (画素の段): they show as squares.
+    bool pixel_step() const;
+    // ピクセルグリッド (view.show.pixelGrid, PC5 H-a): the grid of the layer drawn on (grid_layer: a paint or precise layer's
+    // pixels, a pen or vector layer's — or none — the page's resolution) drawn over the page once a cell of it is
+    // kPixelGridPx screen pixels or more (Photoshop's 500 % and up), turning with the view.
+    bool show_pixel_grid = false;
+    std::optional<std::string> grid_layer;
+    static constexpr double kPixelGridPx = 5.0;
+    int pixel_grid_dpi() const;
+    // (a cell of it, mm across and down)
+    QSizeF pixel_grid_cell_mm() const;
+    bool pixel_grid_shown() const;
+    // ピクセルアートのプレビュー (view.pixelArtPreview): the page's tiles laid nearest, never smoothed.
+    void set_pixel_art(bool on);
+    bool pixel_art() const;
+    // ズームツール's options (PC5 H-a): ズームアウト (a click zooms out, Alt in) and スクラブズーム (dragging left and right
+    // zooms out and in about the point pressed, instead of a box).
+    bool zoom_out_mode = false;
+    bool scrubby_zoom = false;
     int base_dpi() const { return std::min(wanted_dpi(), PageRenderer::kBaseDpi); }
     // A two-finger gesture: spread to zoom about the fingers, twist to turn the view, slide to move.
     void pinch(double factor, double turn_deg, const QPointF& centre, const QPointF& moved);
@@ -470,6 +506,11 @@ public:
     // canvas keeps the events, the cursor and the focus). Off: drawn by the processor again.
     void use_gpu(bool on);
     bool gpu() const { return gpu_surface_ != nullptr; }
+    // (PC5 H-a) the card could not draw (its context not made, or lost): the canvas draws by the processor again and
+    // says so (gpuFailed)
+    void gpu_failed();
+    // GPU の記憶 (環境設定 ui/gpu_memory_mb, MB): the most the page's tiles take on the card (PageRenderer's texture budget).
+    static std::size_t gpu_budget_bytes();
     QWidget* gpu_surface() const { return gpu_surface_; }
     // (every repaint asked of the canvas reaches the surface too)
     void update();
@@ -527,6 +568,14 @@ public:
     bool extra_shown(const QString& key) const;
     std::vector<QString> extra_keys() const;
     bool extras_shown = true;
+    // (PC5 J-c, 注釈 — annotations@1, app/canvas_notes.cpp) The notes' painter (the extra "notes": each note's mark in its
+    // colour where it lies, its box of text beside it while it is open — words upright and the same size at any zoom),
+    // the note the 注釈 panel shows (its mark drawn chosen), and the 注釈ツール ("note"): a click on a mark chooses it and
+    // a drag moves it (noteChosen, noteMoved), a double click opens or closes its box (noteOpened), a click elsewhere puts
+    // a new note there (noteRequested). A mark's place on the canvas (none: not in sight) and the note under a point of it.
+    void paint_notes(QPainter& painter, const core::Page& page, const ExtraView& view) const;
+    QString chosen_note;
+    std::optional<QString> note_at(const QPointF& widget) const;
 
 signals:
     void changed();
@@ -548,6 +597,8 @@ signals:
     void toolHeld(const QString& tool);
     void omittedChanged(const QStringList& elements);
     void renderFailed(const QString& message);
+    // PC5 H-a: the graphics card stopped drawing the page (the canvas draws it by the processor now)
+    void gpuFailed(const QString& message);
     // the pointer over the page with no button down (mm): the status bar's values there (color-model@1)
     void pointerOver(double x_mm, double y_mm);
     // the selection: a new area and how it joins (replace | add | subtract | intersect); the selection pen's line
@@ -598,6 +649,11 @@ signals:
     void effectSelected(const QString& effect_id);
     void effectMoved(const QString& effect_id, const QPointF& centre);
     void stampRequested(double x_mm, double y_mm);
+    // (PC5 J-c) 注釈ツール: a new note asked for here (mm); a note chosen ("": none); one dragged to (mm); one double clicked
+    void noteRequested(double x_mm, double y_mm);
+    void noteChosen(const QString& id);
+    void noteMoved(const QString& id, double x_mm, double y_mm);
+    void noteOpened(const QString& id);
     // the lines: the text tool clicked here (mm); a balloon's outline drawn by hand ([[x, y], …] mm); a line chosen (and
     // whether its panel opens); a line's box or tails changed ({x_mm, y_mm, w_mm, h_mm} | {tails}: move_line, or {style}:
     // edit_line); a double click on a balloon (type over it); a right click on one; a balloon dragged to (mm)
@@ -791,6 +847,7 @@ private:
     bool snapped_preview_applies() const;  // (for the line being drawn)
     bool near_point(const QPointF& pos, const QPointF& mm, double px = 8) const;
     void draw_grid(QPainter& painter) const;
+    void draw_pixel_grid(QPainter& painter) const;  // (PC5 H-a: canvas_view.cpp)
     void line_across(QPainter& painter, const QPointF& a, const QPointF& d, double length = 2000.0) const;
     void draw_one_ruler(QPainter& painter, const core::Json& ruler, bool selected) const;
     void draw_rulers(QPainter& painter) const;
@@ -901,6 +958,8 @@ private:
     };
     std::optional<GuideDrag> guide_drag_;
     bool zoom_out_ = false;
+    std::optional<QPointF> scrub_;  // (スクラブズーム: the point last dragged to)
+    bool scrubbed_ = false;
     std::optional<std::pair<QPointF, QPointF>> tool_drag_;  // the layer-move tool (mm)
     // the path tools (canvas_pen.cpp): the pen's anchors so far (the curvature pen's: its anchors, a corner not smooth),
     // the anchor whose handles a drag pulls; a subpath or one of its points dragged with the path selection tool
@@ -1013,6 +1072,19 @@ private:
     std::optional<Warp> warp_;
     std::shared_ptr<CanvasWork> work_;  // (PC4 D4: set_work)
     std::vector<CanvasExtra> extras_;   // (PC5 J-0: add_extra, in the order added)
+    // (PC5 J-c: the 注釈ツール's drag of a mark — app/canvas_notes.cpp)
+    struct NoteDrag {
+        QString id;
+        QPointF grabbed;  // (the press, mm)
+        QPointF to;       // (where the pointer is, mm)
+        bool moved = false;
+    };
+    std::optional<NoteDrag> note_drag_;
+    bool note_asked_ = false;  // (the last press asked for a new note: its double click's second press opens nothing)
+    bool note_press(const QPointF& pos, const QPointF& mm);
+    bool note_move(const QPointF& mm);
+    bool note_release();
+    bool note_double(const QPointF& widget);
     std::vector<QString> extras_hidden_;
     void draw_extras(QPainter& painter) const;
     mutable std::optional<std::pair<std::string, QImage>> mask_picture_;  // (the area and the quick mask it shows)

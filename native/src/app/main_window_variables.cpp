@@ -74,29 +74,8 @@ void MainWindow::build_variable_menus(QMenu* file, QMenu* pages) {
     }
     // ファイル → 書き出し → データセットからファイル…: after カラールックアップテーブル… (Photoshop's order)
     if (export_menu_ != nullptr) export_menu_->addAction(action(QStringLiteral("act_data_sets_to_files")));
-    // ファイル → 読み込み ▸ 変数データセット… (Photoshop's first of 読み込み): the submenu found ("menu_import", after PSD をレイヤーの
-    // まま読み込む…), or made there when it is not yet
-    QMenu* imports = nullptr;
-    for (QAction* item : file->actions()) {
-        if (item->menu() != nullptr && item->menu()->objectName() == QLatin1String("menu_import")) imports = item->menu();
-    }
-    if (imports == nullptr) {
-        imports = new QMenu(QStringLiteral("読み込み"), file);
-        imports->setObjectName(QStringLiteral("menu_import"));
-        const QList<QAction*> items = file->actions();
-        const auto psd = std::find(items.begin(), items.end(), action(QStringLiteral("act_import_psd")));
-        if (psd != items.end() && std::next(psd) != items.end()) {
-            file->insertMenu(*std::next(psd), imports);
-        } else {
-            file->addMenu(imports);
-        }
-    }
-    const QList<QAction*> imported = imports->actions();
-    if (imported.isEmpty()) {
-        imports->addAction(action(QStringLiteral("act_import_data_sets")));
-    } else {
-        imports->insertAction(imported.front(), action(QStringLiteral("act_import_data_sets")));
-    }
+    // ファイル → 読み込み ▸ 変数データセット… (Photoshop's first of 読み込み: import_menu, main_window_file.cpp)
+    add_to_import_menu(file, action(QStringLiteral("act_import_data_sets")));
 }
 
 bool MainWindow::variable_op(Json op) { return apply_ops(Json::array({std::move(op)})); }

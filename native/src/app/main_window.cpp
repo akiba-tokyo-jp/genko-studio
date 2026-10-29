@@ -55,6 +55,7 @@
 #include "app/pages_panel.hpp"
 #include "app/paths_panel.hpp"
 #include "app/layer_comps_panel.hpp"
+#include "app/notes_panel.hpp"
 #include "app/perf.hpp"
 #include "app/reply_box.hpp"
 #include "app/save_status.hpp"
@@ -351,7 +352,7 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     zoom_label_ = new QLabel;
     statusBar()->addPermanentWidget(zoom_label_);
     zoom_box_ = new QSpinBox;  // (表示倍率の直接入力)
-    zoom_box_->setRange(5, 6400);
+    zoom_box_->setRange(1, 3200);  // (PC5 H-a, the user's decision 11: the page's pixels, 100 % one a screen pixel)
     zoom_box_->setSuffix(QStringLiteral(" %"));
     zoom_box_->setToolTip(QStringLiteral("表示倍率。数を打ち込んで Enter"));
     zoom_box_->setKeyboardTracking(false);
@@ -648,6 +649,7 @@ void MainWindow::pen_changed() {
     }
     add_background(fields);  // (PC4 E2, review P2-4: the line drawn as it goes takes the 背景色 the brush moves to)
     canvas_->set_live_pen(fields, layer != nullptr && drawable(*layer) ? std::optional<std::string>(layer->id) : std::nullopt);
+    canvas_->grid_layer = layer != nullptr ? std::optional<std::string>(layer->id) : std::nullopt;  // (PC5 H-a: ピクセルグリッド's layer)
     canvas_->brush_width_mm = pen_.width_mm;
     canvas_->eraser_mm = eraser_mm_;
     canvas_->smoothing = QString::fromStdString(pen_.smoothing);
@@ -824,6 +826,7 @@ void MainWindow::show_page() {
     quick_mask_follow();     // (masks@1: the page's Quick Mask, its menu item and the tools painting it)
     if (paths_panel_ != nullptr && paths_dock_ != nullptr && paths_dock_->isVisible()) paths_panel_->refresh();  // (vector@1, PC3 C-a)
     if (layer_comps_panel_ != nullptr && layer_comps_dock_ != nullptr && layer_comps_dock_->isVisible()) layer_comps_panel_->refresh();  // (PC5 J-a)
+    if (notes_panel_ != nullptr) refresh_notes();  // (PC5 J-c: the chosen note while the page has it)
     if (patterns_panel_ != nullptr && patterns_dock_ != nullptr && patterns_dock_->isVisible()) patterns_panel_->refresh();  // (PC4 E3)
     if (lines_later_) {
         lines_timer_.start();
@@ -850,6 +853,7 @@ void MainWindow::select_page(int row) {
     }
     if (row != page_index_) {
         perf::event("page_switch", {{"row", row}});
+        if (notes_panel_ != nullptr) notes_panel_->commit_text();  // (PC5 J-c: the note's text typed, on its own page)
         session_->save_now();  // a page switch writes what was done on the last page (on the worker)
         canvas_->set_selection(std::nullopt);
         canvas_->highlight_box.reset();  // (a problem shown by the checks stays on its page)

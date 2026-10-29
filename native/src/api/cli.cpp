@@ -49,6 +49,7 @@
 #include "core/pyops.hpp"
 #include "formats/copy.hpp"
 #include "formats/datasets.hpp"
+#include "render/ops_annotations.hpp"
 #include "render/ops_layer_comps.hpp"
 #include "render/ops_variables.hpp"
 #include "formats/export.hpp"
@@ -303,6 +304,7 @@ int inspect(const QStringList& args, bool ascii) {
     QString at_text;  // (PC3 C-d, the C++ build's own: --at <page>:<x_mm>,<y_mm>, layer.pickAt — the layers showing there)
     bool comps = false;  // (PC5 J-a, the C++ build's own: --comps [--page N], layerComp.list — the pages' layer comps)
     bool variables = false;  // (PC5 I-d, variables.list: --variables — the book's variables and data sets)
+    bool notes = false;  // (PC5 J-c, the C++ build's own: --annotations [--page N], notes.list — the pages' notes)
     const auto value_of = [&](qsizetype& i, const char* name, QString& into) -> bool {
         const QString& arg = args[i];
         const QString flag = QString::fromLatin1(name);
@@ -330,6 +332,8 @@ int inspect(const QStringList& args, bool ascii) {
             comps = true;
         } else if (arg == QLatin1String("--variables")) {
             variables = true;
+        } else if (arg == QLatin1String("--annotations")) {
+            notes = true;
         } else if (arg == QLatin1String("--stroke")) {
             if (i + 1 >= args.size()) return usage("argument --stroke: expected one argument");
             stroke = args[++i];
@@ -382,11 +386,13 @@ int inspect(const QStringList& args, bool ascii) {
     }
     if (!profile.isEmpty() && !pixel.isEmpty()) return usage("argument --profile: not with --pixel");
     if (!area_text.isEmpty() && page_text.isEmpty()) return usage("argument --area, --page: --area <area> with --page <N>");
-    if (!page_text.isEmpty() && area_text.isEmpty() && !paths && !comps) return usage("argument --page: only with --area, --paths or --comps");
+    if (!page_text.isEmpty() && area_text.isEmpty() && !paths && !comps && !notes) return usage("argument --page: only with --area, --paths, --comps or --annotations");
+    if (notes && (comps || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty()))
+        return usage("argument --annotations: not with --comps, --paths, --area, --pixel or --profile");
     if (comps && (paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty())) return usage("argument --comps: not with --paths, --area, --pixel or --profile");
     if (paths && !area_text.isEmpty()) return usage("argument --paths: not with --area");
-    if (variables && (comps || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty() || !page_text.isEmpty() || !at_text.isEmpty()))
-        return usage("argument --variables: not with --comps, --paths, --area, --pixel, --profile, --page or --at");
+    if (variables && (notes || comps || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty() || !page_text.isEmpty() || !at_text.isEmpty()))
+        return usage("argument --variables: not with --annotations, --comps, --paths, --area, --pixel, --profile, --page or --at");
     std::optional<std::int64_t> page_number;
     if (!page_text.isEmpty()) {
         bool ok = false;
@@ -449,6 +455,20 @@ int inspect(const QStringList& args, bool ascii) {
             if (page_number && doc.pages[i]->index != core::Num(*page_number)) continue;
             if (doc.is_deferred(i)) continue;
             core::Json one = render::layer_comps::listing(doc.page(i));
+            one["page"] = doc.pages[i]->index.json();
+            pages.push_back(std::move(one));
+        }
+        if (page_number && pages.empty()) throw core::Error("key", "no page " + std::to_string(*page_number));
+        print_json(core::Json{{"pages", std::move(pages)}}, ascii);
+        return 0;
+    }
+    if (notes) {  // (PC5 J-c, notes.list: each page's notes — where, their text, author, colour, box, date and who wrote them)
+        const core::Document& doc = loaded.document;
+        core::Json pages = core::Json::array();
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (page_number && doc.pages[i]->index != core::Num(*page_number)) continue;
+            if (doc.is_deferred(i)) continue;
+            core::Json one = render::annotations::listing(doc.page(i));
             one["page"] = doc.pages[i]->index.json();
             pages.push_back(std::move(one));
         }

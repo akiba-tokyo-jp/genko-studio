@@ -720,6 +720,25 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("no layer comp of the page names a layer it does not have", "警告のあるレイヤーカンプはありません"));
         r.push_back(rule("(visibility|position|appearance) is true or false", "レイヤーカンプの適用先（\\1）は true か false です"));
         r.push_back(rule(R"(the comp's layer style of (\S+) is not one: .*)", "レイヤーカンプに記録したレイヤー \\1 のレイヤースタイルが読めません"));
+        // (PC5 J-c, annotations@1 — the C++ build's own: the notes, render/ops_annotations and formats/notes_import)
+        r.push_back(rule(R"(at_mm is \[x, y\] \(mm\))", "注釈の位置（at_mm）は [x, y]（mm）で指定します"));
+        r.push_back(rule(R"(popup_mm is \[x, y, w, h\] \(mm\) or null)", "注釈の本文の枠（popup_mm）は [x, y, 幅, 高さ]（mm）か null で指定します"));
+        r.push_back(rule("text is the note's text|a note's text is at most 65536 bytes", "注釈の本文は 65536 バイトまでの文字です"));
+        r.push_back(rule("author is the note's author's name|author is at most 1024 bytes", "注釈の作成者は 1024 バイトまでの文字です"));
+        r.push_back(rule("open is true or false", "注釈を開くか（open）は true か false です"));
+        r.push_back(rule(R"(color is \[r, g, b\] \(0\.\.255\) or #rrggbb)", "注釈の色は [r, g, b]（0〜255）か #rrggbb で指定します"));
+        r.push_back(rule(R"(modified is YYYY-MM-DDThh:mm:ssZ or "")", "注釈の更新日時は YYYY-MM-DDThh:mm:ssZ か空の文字です"));
+        r.push_back(rule("id is the note's id", "注釈は ID で指定します"));
+        r.push_back(rule(R"(no note (\S+) on the page)", "このページに注釈 \\1 はありません"));
+        r.push_back(rule("a page holds at most 1000 notes", "注釈は 1 ページに 1000 個までです"));
+        r.push_back(rule("give text, author, color, open, at_mm or popup_mm", "変える項目（本文・作成者・色・開閉・位置・枠）を指定します"));
+        r.push_back(rule(R"(give ids \(the notes' ids\) or all: true)", "消す注釈を ID の一覧（ids）か all: true で指定します"));
+        r.push_back(rule("the page has no notes", "このページには注釈がありません"));
+        r.push_back(rule(R"(a person wrote the note (\S+); only a person can change it)", "注釈 \\1 は人が書いたものです。変えられるのは人だけです"));
+        r.push_back(rule(R"(a person wrote the note (\S+); only a person can delete it)", "注釈 \\1 は人が書いたものです。削除できるのは人だけです"));
+        r.push_back(rule("the file has no notes", "このファイルには注釈がありません"));
+        r.push_back(rule(R"(notes are read from a PSD, a PSB or a \.pcraft)", "注釈は PSD・PSB・.pcraft のファイルから読み込みます"));
+        r.push_back(rule("the PSD's notes cannot be read|notes: .*", "ファイルの注釈が読めない形です"));
         // (PC5-0, Z0's review P1-1: a new layer of a 16- or 32-bit page painted at 8 bits for the book's precise budget)
         r.push_back(rule(R"(the layer is painted at 8 bits: the book's precise pixels would pass their budget.*)",
                          "本の高精度の画素の上限（1 GiB）を越えるか、本をまだ読み込み中のため、このレイヤーは 8 bit で塗りました"));

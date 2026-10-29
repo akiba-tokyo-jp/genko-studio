@@ -43,6 +43,8 @@ class QMenu;
 class QDockWidget;
 class QPushButton;
 class QVBoxLayout;
+class QLineEdit;    // (PC5 J-c)
+class QToolButton;  // (PC5 J-c)
 
 // The main window (Python's genko/app/main.py MainWindow): the page in the middle, the tools on the left, the
 // commands and the open books' tabs above, the navigator and the page list beside it, and in the status bar the page,
@@ -67,6 +69,7 @@ class ChannelPanel;
 class CloneSourcePanel;
 class PathsPanel;
 class LayerCompsPanel;
+class NotesPanel;
 class PatternsPanel;
 class BrushesPanel;
 class BrushSettingsPanel;
@@ -120,6 +123,7 @@ struct ProofView {
     bool simulate_paper = false;
     bool on = false;      // 色の校正
     bool gamut = false;   // 色域外警告
+    render::HdrPreview hdr;  // (PC5 H-a) 32 bit プレビューオプション: a 32-bit page's look on the screen
 };
 
 // One open book in a window: its session and how the window last showed it.
@@ -531,6 +535,15 @@ public:
     void refresh_first_steps();
     // 原稿だけを表示 (Tab), the rest reminder, and the round menu last opened at the pen (null: none open).
     CanvasOnly* canvas_only() const { return canvas_only_; }
+    // スクリーンモード (PC5 H-a, view.screenMode.*): 標準スクリーンモード (the window as it was), メニュー付きフルスクリーンモード
+    // (the whole screen, menus and panels kept), フルスクリーンモード (the whole screen, the page alone: menus, status line and
+    // panels hidden — a side's panels come back at its edge, as 原稿だけを表示). F goes round them (Photoshop's keys).
+    enum class ScreenMode { Standard, FullWithMenu, Full };
+    void set_screen_mode(ScreenMode mode);
+    ScreenMode screen_mode() const { return screen_mode_; }
+    // レイヤーを画面サイズに合わせる (PC5 H-a): the view on the box of the layers chosen (else the layer drawn on; none
+    // showing anything: the page).
+    void fit_layers();
     RestReminder* rest() const { return rest_; }
     RadialMenu* radial() const;  // (out of line: RadialMenu is only declared here)
     // キーを押している間だけ持ち替え: the tool last chosen (its key), the one before and when (seconds); the key of the
@@ -724,6 +737,12 @@ private:
     // H-d, H-e, H-f)
     void build_view_actions();
     void build_view_menus(QMenu* view);
+    // 表示 → 表示・非表示 ▸ (objectName "menu_show"; its owner 節 H): found in 表示, or made and put there — the one way in
+    // for every part (H-b, J-b, J-c, J-d1: show_menu(view)->addAction(...)); laid out by H's show_rows() in build_view_menus
+    QMenu* show_menu(QMenu* view);
+    // PC5 H-a: 手のひらツール's and ズームツール's pages in オプション (main_window_view.cpp)
+    void build_view_pages(ToolSettings* ts);
+    void ask_32bit_preview();
     void build_arrange_actions();
     void build_arrange_menus(QMenu* arrange);
     void build_edit_actions();
@@ -1531,6 +1550,9 @@ private:
 
     PageCanvas* canvas_ = nullptr;
     CanvasOnly* canvas_only_ = nullptr;
+    ScreenMode screen_mode_ = ScreenMode::Standard;  // (PC5 H-a: set_screen_mode)
+    Qt::WindowStates screen_before_ = Qt::WindowNoState;
+    bool screen_hid_panels_ = false;
     RestReminder* rest_ = nullptr;
     QPointer<RadialMenu> radial_;
     std::optional<ToolSwitch> tool_switch_;
@@ -1741,6 +1763,37 @@ private:
     void build_variable_actions();
     void build_variable_menus(QMenu* file, QMenu* pages);
     bool variable_op(core::Json op);
+    // --- PC5 J-c (annotations@1): main_window_notes.cpp — the 注釈ツール and its options, ウィンドウ → 注釈 (its dock and
+    // panel), 表示 → 表示・非表示 → 注釈, ファイル → 読み込み → 注釈…; each change of the book an op through apply_ops -------
+public:
+    NotesPanel* notes_panel() const { return notes_panel_; }
+    QDockWidget* notes_dock() const { return notes_dock_; }
+    // A notes' op on the page shown (its "page" put in), shown at once (a refusal said in the status line).
+    bool note_op(core::Json op);
+    // The note the canvas draws chosen and the 注釈 panel shows ("": none).
+    void choose_note(const QString& id);
+    // The 注釈ツール's click: a new note there (the options' author and colour), shown in the 注釈 panel to type its text.
+    void add_note_at(double x_mm, double y_mm);
+    // すべてを消去 (the options'): every note of the page deleted (one Undo).
+    void clear_notes();
+    // ファイル → 読み込み → 注釈…: the file asked (none given), its notes read off the window's thread, put on the page.
+    void import_notes(const QString& path = {});
+
+private:
+    void build_note_actions();
+    void build_notes_menus(QMenu* file, QMenu* view);
+    void build_notes_dock();
+    void refresh_notes();
+    NotesPanel* notes_panel_ = nullptr;
+    QDockWidget* notes_dock_ = nullptr;
+    QLineEdit* note_author_ = nullptr;
+    QToolButton* note_colour_ = nullptr;
+    QMenu* import_menu_ = nullptr;  // ファイル → 読み込み (import_menu)
+    // ファイル → 読み込み ▸ (Photoshop's; PC5 I-d・J-c, later J-e2): found, or made after PSD をレイヤーのまま読み込む… when it is
+    // not yet ("menu_import": one, whichever group asks first); and a command put in it in Photoshop's order (変数データセット…,
+    // ビデオフレームからレイヤー…, 注釈…). main_window_file.cpp.
+    QMenu* import_menu(QMenu* file);
+    void add_to_import_menu(QMenu* file, QAction* command);
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go
