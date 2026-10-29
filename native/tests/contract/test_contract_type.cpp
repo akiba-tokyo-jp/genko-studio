@@ -277,6 +277,13 @@ private slots:
         options.region = render::RenderRegion{100, 90, 150, 120};
         const render::Image part = render::render_page(as_layer.page(0), 200, options, &as_layer).image;
         QCOMPARE(part.tobytes(), whole.crop(render::Box{100, 90, 250, 210}).tobytes());
+        // (review P3-15) a line in a balloon made a type layer keeps no shape: the same picture as the line (the same id: the
+        // balloon's pen follows its id)
+        const core::Document spoken = run(plain_book(), Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "あいう"}, {"x_mm", 10}, {"y_mm", 8},
+                                                              {"w_mm", 25}, {"h_mm", 30}, {"style", Json{{"size_mm", 5}}}});
+        const core::Document layered = run(spoken, Json{{"op", "line_to_type_layer"}, {"line", "l1"}, {"new_id", "l1"}});
+        QVERIFY(!layer_of(layered, "l1")->type->native_type || !layer_of(layered, "l1")->type->native_type->contains("shape"));
+        QVERIFY2(worst(proof_bytes(spoken), proof_bytes(layered)) <= 2, qPrintable(QString::number(worst(proof_bytes(spoken), proof_bytes(layered)))));
     }
 
     // the three ways alike: an 8-bit, a 16-bit, a grey and a CMYK page show its letters as dark
@@ -885,6 +892,12 @@ private slots:
         bool found = false;
         for (const render::psd::Layer& layer : file.layers()) found = found || (layer.name == "あいう" && file.image(layer).getbbox().has_value());
         QVERIFY(found);
+        std::vector<std::string> notes;
+        const render::pcraft::Read read = render::pcraft::read(formats::pcraft_bytes(doc, 0, formats::PcraftOptions{}, &notes), "turned");
+        bool kept = false;
+        for (const core::Layer& layer : read.doc.page(0).layers)
+            kept = kept || (layer.title == "あいう" && layer.raster_png && !layer.raster_png->empty());
+        QVERIFY(kept);
         const core::Document flat = run(doc, Json{{"op", "merge_visible"}, {"page", 1}, {"copy", false}, {"flatten", true}});
         QVERIFY2(std::abs(darkness(shown(flat)) - dark) < 0.1 * dark, "flattened");
         const core::Document smart = run(doc, Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"t1"})}});
