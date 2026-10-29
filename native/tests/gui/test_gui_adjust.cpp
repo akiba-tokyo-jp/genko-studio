@@ -175,9 +175,11 @@ private slots:
         QVERIFY(exports != nullptr);
         QStringList items;
         for (QAction* a : exports->actions()) items << (a->isSeparator() ? QStringLiteral("|") : a->property("genko_attribute").toString());
-        // (after 原稿を書き出す…, PC4 F-c's レイヤーからファイル… and PC3 C-a's パスを Illustrator へ…: test_gui_output)
-        QCOMPARE(items.mid(items.size() - 5), (QStringList{QStringLiteral("act_export"), QStringLiteral("|"), QStringLiteral("act_layers_to_files"),
-                                                           QStringLiteral("act_export_paths_ai"), QStringLiteral("act_export_lookup")}));
+        // (after 原稿を書き出す…, PC4 F-c's レイヤーからファイル…, PC5 J-a's レイヤーカンプからファイル… and PC3 C-a's パスを Illustrator へ…:
+        // test_gui_output)
+        QCOMPARE(items.mid(items.size() - 6), (QStringList{QStringLiteral("act_export"), QStringLiteral("|"), QStringLiteral("act_layers_to_files"),
+                                                           QStringLiteral("act_comps_to_files"), QStringLiteral("act_export_paths_ai"),
+                                                           QStringLiteral("act_export_lookup")}));
         QCOMPARE(book.window->action(QStringLiteral("act_export_lookup"))->text(), QStringLiteral("カラールックアップテーブル…"));
         // the panels in ウィンドウ
         QVERIFY(book.window->findChild<QDockWidget*>(QStringLiteral("色調補正")) != nullptr);
