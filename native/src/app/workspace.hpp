@@ -162,7 +162,11 @@ QStringList workspaces();
 // (PC5 H-d, window.workspace.newWorkspace — Photoshop's 新規ワークスペース: the keys, the menus and the toolbar kept with the
 // panels when chosen — workspaces/<name>/keys, menus, toolbar —, laid again when it is chosen)
 void save_workspace(QMainWindow* window, const QString& name, bool keys = false, bool menus = false, bool toolbar = false);
-bool load_workspace(QMainWindow* window, const QString& name);
+// (geometry: the window's size and place kept with it too — false for a window opening: its own)
+bool load_workspace(QMainWindow* window, const QString& name, bool geometry = true);
+// (the review of PC5 H-d, P2-2) Workspaces a person kept before H-d under a built-in one's name (写真, ペイント, 初期設定…) moved
+// to 「<名前>（自分）」 — their layouts (workspaces/, workspace_changes/) and ui/workspace with them; (old, new) each.
+std::vector<std::pair<QString, QString>> move_reserved_workspaces();
 // The keys, menus and toolbar kept with a workspace put back as this computer's (true when it had any: every window to be
 // applied again).
 bool load_workspace_extras(const QString& name);

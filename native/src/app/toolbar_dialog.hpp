@@ -25,6 +25,9 @@ const QStringList& default_order();
 // The order kept (a tool made since, not in it, after the rest in its default place) and the tools moved away.
 QStringList order();
 QStringList hidden();
+// The tools among 余分なツール as Genko makes it (PC5 J-b's スライスツール・スライス選択ツール): listed in ツールバー…, no "…" button for
+// them alone.
+const QStringList& default_hidden();
 void keep(const QStringList& order, const QStringList& hidden);
 }  // namespace toolbar
 

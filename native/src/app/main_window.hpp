@@ -2001,10 +2001,16 @@ public:
     // 環境設定's ワークスペース and ツールバー… applied to this window (preferences::apply_all).
     void apply_workspace_prefs();
     QMenu* workspace_menu() const { return workspace_menu_; }
+    // (a file written from a dialog of its own — キーボードショートカット…'s 概要…: never over a book open or its folder; said)
+    bool refuses_to_write(const std::filesystem::path& path) { return writes_over_a_source(path); }
 
 private:
     void build_workspace_actions();
-    void lay_out_workspace(const QString& name, bool as_left);
+    // (geometry: the window's size too — when chosen, never for a window opening: P2-3 of the review)
+    void lay_out_workspace(const QString& name, bool as_left, bool geometry = true);
+    void lay_out_panels(const QString& name, bool as_left, bool geometry);
+    // (P2-1 of the review) the approval's panels — 承認箱・コマの詳細・資料 — kept as they are over a layout restored
+    void keeping_approval_docks(const std::function<void()>& lay_out);
     void apply_lock(bool on);
     void restore_workspace_at_start();
     QString palette_laid_;  // (the order and the tools away the palette was last laid out with)

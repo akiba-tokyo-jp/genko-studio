@@ -6,12 +6,14 @@
 // arrangement of the books (アレンジ ▸) is not a workspace's: Photoshop's workspaces keep the panels only.
 
 #include <QApplication>
+#include <QChildEvent>
 #include <QCheckBox>
 #include <QDockWidget>
 #include <QLineEdit>
 #include <QMenu>
 #include <QSignalBlocker>
 #include <QTabBar>
+#include <QPointer>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -58,9 +60,35 @@ bool approval_panel(const QDockWidget* dock) {
     return false;
 }
 
+// ワークスペースをロック over a panel made later (a panel a part makes as it is first wanted): locked as it comes into the
+// window (the review's P3-8).
+class LockWatch : public QObject {
+public:
+    explicit LockWatch(MainWindow* window) : QObject(window), window_(window) {}
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        // (any child: a panel is not yet one while it is being made — after its maker has given it its own features, once for
+        // many children)
+        if (watched == window_ && event->type() == QEvent::ChildAdded && !due_ && locked()) {
+            due_ = true;
+            QTimer::singleShot(0, window_, [this] {
+                due_ = false;
+                if (locked()) window_->apply_workspace_prefs();
+            });
+        }
+        return false;
+    }
+
+private:
+    MainWindow* window_;
+    bool due_ = false;
+};
+
 }  // namespace
 
 void MainWindow::build_workspace_actions() {
+    installEventFilter(new LockWatch(this));
     for (const Preset& one : presets()) {
         const QString label = one.label;
         make(attribute_of(one), label, [this, label] { choose_workspace(label); }, {},
@@ -120,7 +148,38 @@ QString MainWindow::current_workspace() const {
     return presets().front().label;  // (初期設定)
 }
 
-void MainWindow::lay_out_workspace(const QString& name, bool as_left) {
+void MainWindow::keeping_approval_docks(const std::function<void()>& lay_out) {
+    // (restoreState puts every panel back as it was kept — the approval's too, which follow the book: the box shown while
+    // something waits for the person, the agent's panels in an agent's book. Kept as they are: shown or not, floating or
+    // where they were)
+    struct Kept {
+        QPointer<QDockWidget> dock;
+        bool hidden;
+        bool floating;
+        QRect at;
+        Qt::DockWidgetArea area;
+    };
+    std::vector<Kept> kept;
+    for (QDockWidget* dock : findChildren<QDockWidget*>(QString(), Qt::FindDirectChildrenOnly)) {
+        if (approval_panel(dock)) kept.push_back({dock, dock->isHidden(), dock->isFloating(), dock->geometry(), dockWidgetArea(dock)});
+    }
+    lay_out();
+    for (const Kept& was : kept) {
+        if (!was.dock) continue;
+        if (was.dock->isFloating() != was.floating) {
+            was.dock->setFloating(was.floating);
+            if (was.floating) was.dock->setGeometry(was.at);
+        }
+        if (!was.floating && was.area != Qt::NoDockWidgetArea && dockWidgetArea(was.dock) != was.area) addDockWidget(was.area, was.dock);
+        if (was.dock->isHidden() != was.hidden) was.dock->setVisible(!was.hidden);
+    }
+}
+
+void MainWindow::lay_out_workspace(const QString& name, bool as_left, bool geometry) {
+    keeping_approval_docks([this, &name, as_left, geometry] { lay_out_panels(name, as_left, geometry); });
+}
+
+void MainWindow::lay_out_panels(const QString& name, bool as_left, bool geometry) {
     const QString left = settings()->value(kChanges + QLatin1Char('/') + name).toString();
     if (as_left && !left.isEmpty() && restoreState(QByteArray::fromBase64(left.toLatin1()))) return;
     if (const Preset* one = preset(name)) {
@@ -145,7 +204,7 @@ void MainWindow::lay_out_workspace(const QString& name, bool as_left) {
         }
         return;
     }
-    load_workspace(this, name);
+    load_workspace(this, name, geometry);
 }
 
 void MainWindow::choose_workspace(const QString& name) {
@@ -271,9 +330,18 @@ void MainWindow::apply_lock(bool on) {
 }
 
 void MainWindow::restore_workspace_at_start() {
-    // (the workspace in use when Genko was last used, as Photoshop's: the window's own first layout is 初期設定)
+    // (the review's P2-2: a workspace a person kept before PC5 H-d under a built-in one's name — 写真, ペイント… — moved once to
+    // 「<名前>（自分）」, its layouts with it, said)
+    for (const auto& [old, now] : move_reserved_workspaces()) {
+        flash(QStringLiteral("前に残したワークスペース「%1」は Genko にあるワークスペースと同じ名前なので、「%2」に名前を変えました（ウィンドウ → ワークスペース）")
+                  .arg(old, now),
+              12000);
+    }
+    // (the workspace in use when Genko was last used, as Photoshop's: its panels — the window's size as it opens, never the
+    // kept one's: the review's P2-3, H-c's floating windows and 新規ウィンドウ keep theirs; the window's own first layout is
+    // 初期設定)
     const QString now = current_workspace();
-    if (now != presets().front().label) lay_out_workspace(now, remember_changes());
+    if (now != presets().front().label) lay_out_workspace(now, remember_changes(), false);
 }
 
 void MainWindow::open_keyboard_shortcuts(int tab) {
@@ -330,10 +398,26 @@ void MainWindow::fill_palette() {
     for (const QString& entry : away) {
         if (action(entry) != nullptr) extra << entry;
     }
-    if (!extra.isEmpty()) {
+    // (the button only when the person moved a tool away: the ones away as Genko makes it — J-b's slices — never make the
+    // palette longer)
+    const bool moved = std::any_of(extra.begin(), extra.end(), [](const QString& entry) { return !toolbar::default_hidden().contains(entry); });
+    if (moved) {
         auto* menu = new QMenu(this);
         menu->setObjectName(QStringLiteral("extra_tools_menu"));
-        for (const QString& entry : extra) menu->addAction(action(entry));
+        for (const QString& entry : extra) {
+            // (a tool with a group goes with its group — スポイト's ものさし・注釈・カウント, 手のひらツール's ズームツール: the
+            // review's P3-6)
+            QAction* tool = action(entry);
+            std::vector<QAction*> group = tool_group_of(tool);
+            if (tool == hand) group = {hand, action(QStringLiteral("act_zoom_tool"))};
+            if (group.size() < 2) {
+                menu->addAction(tool);
+                continue;
+            }
+            QMenu* sub = menu->addMenu(tool->icon(), QString(tool->text()).remove(QLatin1Char('&')));
+            sub->setObjectName(QStringLiteral("tool_group:") + tool->objectName());
+            for (QAction* member : group) sub->addAction(member);
+        }
         extra_tools_ = new QAction(QStringLiteral("…"), this);
         extra_tools_->setObjectName(QStringLiteral("extra_tools"));  // (not a command: never named nor given keys)
         extra_tools_->setToolTip(QStringLiteral("余分なツール（編集 → ツールバー… で並べ替え）"));

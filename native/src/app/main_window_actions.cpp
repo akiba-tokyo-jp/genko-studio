@@ -1839,7 +1839,9 @@ void MainWindow::show_tool_names(bool on, bool save) {
 }
 
 void MainWindow::default_layout() {
-    if (!default_state_.isEmpty()) restoreState(default_state_);
+    keeping_approval_docks([this] {
+        if (!default_state_.isEmpty()) restoreState(default_state_);
+    });  // (PC5 H-d: the approval's panels as they are)
 }
 
 void MainWindow::make_launcher() {

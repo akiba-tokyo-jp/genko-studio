@@ -790,6 +790,8 @@ private slots:
         QVERIFY(key_sets::photoshop_defaults().contains(QStringLiteral("Ctrl+Shift+M")));
         for (QAction* a : w->findChildren<QAction*>()) {
             QVERIFY2(!a->shortcuts().contains(s("Ctrl+Shift+M")), qPrintable(a->text()));
+            // (Ctrl+Alt+M コマを結合's alone — no later part's: J-b's slices, I-a's — the review of H-d)
+            if (a != w->action("act_merge")) QVERIFY2(!a->shortcuts().contains(s("Ctrl+Alt+M")), qPrintable(a->text()));
         }
         for (const char* none : {"act_mirror", "act_actual", "act_guides", "act_history", "act_snap", "act_show_rulers", "act_export"}) {
             QVERIFY2(keys(none).isEmpty(), none);

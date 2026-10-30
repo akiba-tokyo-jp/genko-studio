@@ -106,6 +106,8 @@ private:
         QKeySequence before;
     };
     std::optional<Pending> pending_;
+    std::map<QString, QKeySequence> taken_;  // (a key taken from a command: its set's other keys stay)
+    QStringList deleted_;                    // (own sets deleted, by 決める)
     bool quiet_ = false;  // (keys put by the dialog itself: not a person's change)
     std::map<QString, std::vector<QTreeWidgetItem*>> menu_rows_;  // (a command's rows in the メニュー tab)
     std::map<QString, bool> hidden_;

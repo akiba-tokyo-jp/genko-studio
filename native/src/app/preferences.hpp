@@ -92,6 +92,9 @@ std::vector<QAction*> commands(QMainWindow* window);
 void name_commands(MainWindow* window);
 // (new name: old name, one or more) a command renamed later keeps the keys and places chosen under an old name
 const std::multimap<QString, QString>& renamed();
+// PC5 H-d: a command's old names (renamed()), for what is kept by its name — the person's own key sets, メニュー…'s hidden
+// and coloured items — read under an old name too.
+QStringList old_names(const QString& name);
 // PC4 E4: the old names a later command took for its own (グラデーション: the グラデーションツール's before PC4 E-0, the
 // グラデーション panel's since E4). A list of commands or the keys kept by a build that knows the new command (marked when
 // it writes them: names_current) mean the new command by such a name; kept before, the renamed one.

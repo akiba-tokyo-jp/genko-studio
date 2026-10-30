@@ -39,14 +39,26 @@ const QStringList& default_order() {
                                  QStringLiteral("act_blend"),   QStringLiteral("act_shape"),    QStringLiteral("act_fill"),    QStringLiteral("act_lassofill"),
                                  QStringLiteral("act_gradient"), QStringLiteral("act_picker"),  QStringLiteral("|"),           QStringLiteral("act_text"),
                                  QStringLiteral("act_frame"),   QStringLiteral("|"),            QStringLiteral("act_marquee"), QStringLiteral("act_lasso"),
-                                 QStringLiteral("act_wand"),    QStringLiteral("act_reshape"),
-                                 // (PC5 J-b: スライスツール・スライス選択ツール — Photoshop's 切り抜き group, its menu on each)
-                                 QStringLiteral("act_slice_tool"), QStringLiteral("act_slice_select_tool"), QStringLiteral("|"),           QStringLiteral("act_ruler"),
+                                 QStringLiteral("act_wand"),    QStringLiteral("act_reshape"),  QStringLiteral("|"),           QStringLiteral("act_ruler"),
                                  QStringLiteral("act_3d"),      QStringLiteral("act_effect"),   QStringLiteral("act_hand_tool")};
     return all;
 }
 
-QStringList hidden() { return split(settings()->value(kHidden).toString()); }
+const QStringList& default_hidden() {
+    // (PC5 J-b: スライスツール・スライス選択ツール — Photoshop's 切り抜き group — among 余分なツール until the person puts them on the
+    // palette: a button more would not fit a short window, test_gui_workspace thePaletteFitsAShortWindow…)
+    static const QStringList all{QStringLiteral("act_slice_tool"), QStringLiteral("act_slice_select_tool")};
+    return all;
+}
+
+QStringList hidden() {
+    QStringList out = split(settings()->value(kHidden).toString());
+    const QStringList on_bar = split(settings()->value(kOrder).toString());
+    for (const QString& tool : default_hidden()) {  // (a tool away by default, unless the person put it on the palette)
+        if (!out.contains(tool) && !on_bar.contains(tool)) out << tool;
+    }
+    return out;
+}
 
 QStringList order() {
     QStringList out = split(settings()->value(kOrder).toString());
@@ -60,7 +72,7 @@ QStringList order() {
 
 void keep(const QStringList& order, const QStringList& hidden) {
     auto store = settings();
-    if (order == default_order() && hidden.isEmpty()) {  // (as Genko makes it: nothing kept)
+    if (order == default_order() && (hidden.isEmpty() || hidden == default_hidden())) {  // (as Genko makes it: nothing kept)
         store->remove(kOrder);
         store->remove(kHidden);
         return;
@@ -207,7 +219,7 @@ void ToolbarDialog::add_line() {
     shown->insertItem(shown->currentRow() < 0 ? shown->count() : shown->currentRow() + 1, item);
 }
 
-void ToolbarDialog::restore_defaults() { fill(toolbar::default_order(), {}); }
+void ToolbarDialog::restore_defaults() { fill(toolbar::default_order(), toolbar::default_hidden()); }
 
 void ToolbarDialog::save() {
     toolbar::keep(order(), hidden());

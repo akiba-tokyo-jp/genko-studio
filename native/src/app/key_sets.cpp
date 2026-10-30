@@ -222,6 +222,19 @@ void tell_new_default(MainWindow* window) {
     QTimer::singleShot(5 * 60 * 1000, back, &QObject::deleteLater);  // (not for ever: the menu's way stays)
 }
 
+namespace {
+
+// An own set's keys of a command: under its name, or an old name of it (renamed() — the review of PC5 H-d, P3-10).
+const QList<QKeySequence>* own_keys_of(const std::map<QString, QList<QKeySequence>>& over, const QString& name) {
+    if (const auto found = over.find(name); found != over.end()) return &found->second;
+    for (const QString& old : preferences::old_names(name)) {
+        if (const auto found = over.find(old); found != over.end()) return &found->second;
+    }
+    return nullptr;
+}
+
+}  // namespace
+
 void apply(QMainWindow* window, const QString& set) {
     const bool own = set.startsWith(QStringLiteral("own:"));
     const QString base = own ? own_base(set.mid(4)) : set;
@@ -236,7 +249,7 @@ void apply(QMainWindow* window, const QString& set) {
         if (!action->property(kGenkoKeys).isValid()) action->setProperty(kGenkoKeys, QVariant::fromValue(action->shortcuts()));
         QList<QKeySequence> keys = keys_of(action, base);
         if (own && action->objectName().startsWith(QStringLiteral("cmd:"))) {
-            if (const auto found = over.find(command_name(names, action)); found != over.end()) keys = found->second;
+            if (const QList<QKeySequence>* found = own_keys_of(over, command_name(names, action))) keys = *found;
         }
         if (keys != action->shortcuts()) action->setShortcuts(keys);
     }
@@ -323,8 +336,8 @@ std::map<QString, QList<QKeySequence>> keys_by_name(QMainWindow* window, const Q
     std::map<QString, QList<QKeySequence>> out;
     for (QAction* action : preferences::commands(window)) {
         const QString name = command_name(names, action);
-        const auto found = over.find(name);
-        out[name] = found != over.end() ? found->second : keys_of(action, base);
+        const QList<QKeySequence>* found = own_keys_of(over, name);
+        out[name] = found != nullptr ? *found : keys_of(action, base);
     }
     return out;
 }

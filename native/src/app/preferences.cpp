@@ -287,6 +287,14 @@ const std::multimap<QString, QString>& renamed() {
     return all;
 }
 
+QStringList old_names(const QString& name) {
+    QStringList out;
+    for (auto [old, end] = renamed().equal_range(name); old != end; ++old) {
+        if (!reused_name(old->second)) out << old->second;  // (a reused name is a later command's own: never read as this one's)
+    }
+    return out;
+}
+
 const std::vector<QString>& reused_names() {
     // (PC5 H-0: 書き出し… — 原稿を書き出す…'s before PC4 F-0 — is 編集 → 環境設定 → 書き出し…'s own name since; the list is
     // core/prefs_table's, whose set() marks a key it writes)

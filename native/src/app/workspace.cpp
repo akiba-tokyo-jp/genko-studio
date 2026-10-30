@@ -558,7 +558,14 @@ void put_value(const QString& key, const QJsonValue& value) {
 
 QString json_text(const QJsonObject& object) { return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact)); }
 
-QJsonObject json_of(const QString& text) { return QJsonDocument::fromJson(text.toUtf8()).object(); }
+// (none when the text is not a JSON object — broken, or written by hand: never taken for "nothing kept", which would empty
+// the keys: the review's P3-5)
+std::optional<QJsonObject> json_of(const QString& text) {
+    QJsonParseError error{};
+    const QJsonDocument document = QJsonDocument::fromJson(text.toUtf8(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) return std::nullopt;
+    return document.object();
+}
 
 }  // namespace
 
@@ -583,11 +590,11 @@ void save_workspace(QMainWindow* window, const QString& name, bool keys, bool me
     }
 }
 
-bool load_workspace(QMainWindow* window, const QString& name) {
+bool load_workspace(QMainWindow* window, const QString& name, bool geometry) {
     auto store = settings();
     const QString state = store->value(QStringLiteral("workspaces/%1/state").arg(name)).toString();
     if (state.isEmpty()) return false;
-    window->restoreGeometry(QByteArray::fromBase64(store->value(QStringLiteral("workspaces/%1/geometry").arg(name)).toString().toLatin1()));
+    if (geometry) window->restoreGeometry(QByteArray::fromBase64(store->value(QStringLiteral("workspaces/%1/geometry").arg(name)).toString().toLatin1()));
     const bool ok = window->restoreState(QByteArray::fromBase64(state.toLatin1()));
     store->setValue(QStringLiteral("ui/workspace"), name);
     return ok;
@@ -597,26 +604,50 @@ bool load_workspace_extras(const QString& name) {
     auto store = settings();
     const QString at = QStringLiteral("workspaces/%1").arg(name);
     bool any = false;
-    if (const QString kept = store->value(at + QStringLiteral("/keys")).toString(); !kept.isEmpty()) {
-        const QJsonObject keys = json_of(kept);
-        put_group(QStringLiteral("shortcuts"), keys.value(QStringLiteral("keys")).toObject());
-        put_value(QStringLiteral("ui/key_set"), keys.value(QStringLiteral("set")));
-        put_value(QStringLiteral("ui/key_set_own"), keys.value(QStringLiteral("own")));
+    if (const auto keys = json_of(store->value(at + QStringLiteral("/keys")).toString());
+        keys && keys->value(QStringLiteral("keys")).isObject()) {
+        put_group(QStringLiteral("shortcuts"), keys->value(QStringLiteral("keys")).toObject());
+        put_value(QStringLiteral("ui/key_set"), keys->value(QStringLiteral("set")));
+        put_value(QStringLiteral("ui/key_set_own"), keys->value(QStringLiteral("own")));
         any = true;
     }
-    if (const QString kept = store->value(at + QStringLiteral("/menus")).toString(); !kept.isEmpty()) {
-        const QJsonObject menus = json_of(kept);
-        put_value(QStringLiteral("menus/hidden"), menus.value(QStringLiteral("hidden")));
-        put_group(QStringLiteral("menus/colors"), menus.value(QStringLiteral("colors")).toObject());
+    if (const auto menus = json_of(store->value(at + QStringLiteral("/menus")).toString());
+        menus && menus->value(QStringLiteral("colors")).isObject()) {
+        put_value(QStringLiteral("menus/hidden"), menus->value(QStringLiteral("hidden")));
+        put_group(QStringLiteral("menus/colors"), menus->value(QStringLiteral("colors")).toObject());
         any = true;
     }
-    if (const QString kept = store->value(at + QStringLiteral("/toolbar")).toString(); !kept.isEmpty()) {
-        const QJsonObject bar = json_of(kept);
-        put_value(QStringLiteral("toolbar/order"), bar.value(QStringLiteral("order")));
-        put_value(QStringLiteral("toolbar/hidden"), bar.value(QStringLiteral("hidden")));
+    if (const auto bar = json_of(store->value(at + QStringLiteral("/toolbar")).toString())) {
+        put_value(QStringLiteral("toolbar/order"), bar->value(QStringLiteral("order")));
+        put_value(QStringLiteral("toolbar/hidden"), bar->value(QStringLiteral("hidden")));
         any = true;
     }
     return any;
+}
+
+std::vector<std::pair<QString, QString>> move_reserved_workspaces() {
+    std::vector<std::pair<QString, QString>> out;
+    auto store = settings();
+    for (const QString& name : workspaces()) {
+        if (!reserved_workspace(name)) continue;
+        QString to = QStringLiteral("%1（自分）").arg(name);
+        for (int n = 2; workspaces().contains(to) || reserved_workspace(to); ++n) to = QStringLiteral("%1（自分 %2）").arg(name).arg(n);
+        const QString from = QStringLiteral("workspaces/") + name;
+        store->beginGroup(from);
+        std::vector<std::pair<QString, QVariant>> values;
+        for (const QString& key : store->allKeys()) values.emplace_back(key, store->value(key));
+        store->endGroup();
+        for (const auto& [key, value] : values) store->setValue(QStringLiteral("workspaces/%1/%2").arg(to, key), value);
+        store->remove(from);
+        const QString left = QStringLiteral("workspace_changes/") + name;
+        if (store->contains(left)) {
+            store->setValue(QStringLiteral("workspace_changes/") + to, store->value(left));
+            store->remove(left);
+        }
+        if (store->value(QStringLiteral("ui/workspace")).toString() == name) store->setValue(QStringLiteral("ui/workspace"), to);
+        out.emplace_back(name, to);
+    }
+    return out;
 }
 
 void delete_workspace(const QString& name) {

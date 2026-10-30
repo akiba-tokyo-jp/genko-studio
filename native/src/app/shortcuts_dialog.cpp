@@ -36,6 +36,7 @@
 #include "app/preferences.hpp"
 #include "app/theme.hpp"
 #include "app/workspace.hpp"
+#include "core/paths.hpp"
 
 namespace genko::app {
 
@@ -287,6 +288,7 @@ void ShortcutsDialog::key_changed(const QString& name, QKeySequenceEdit* edit) {
         }
     }
     shown_[name] = key;
+    taken_.erase(name);
 }
 
 void ShortcutsDialog::take_from_previous() {
@@ -301,6 +303,8 @@ void ShortcutsDialog::take_from_previous() {
     }
     shown_[was.other] = QKeySequence();
     shown_[was.name] = mine->keySequence();
+    taken_[was.other] = mine->keySequence();  // (only this key taken: the other's other keys stay — the review's P3-2)
+    taken_.erase(was.name);
     pending_.reset();
     take_button->hide();
     keep_button->hide();
@@ -336,6 +340,7 @@ void ShortcutsDialog::reset_keys() {
         edit->setKeySequence(found != set_keys.end() && !found->second.isEmpty() ? found->second.front() : QKeySequence());
         shown_[name] = edit->keySequence();
     }
+    taken_.clear();
     pending_.reset();
     take_button->hide();
     keep_button->hide();
@@ -378,6 +383,11 @@ bool ShortcutsDialog::save_set(std::optional<QString> name) {
         clash->setText(QStringLiteral("組の名前に「/」「\\」は使えません。"));
         return false;
     }
+    if (const auto clashes = preferences::conflicts(mapping()); !clashes.empty()) {
+        const preferences::Clash& first = clashes.front();
+        clash->setText(QStringLiteral("「%1」が「%2」と「%3」の両方に付いています。どちらかを変えてから保存します。").arg(first.keys, first.first, first.second));
+        return false;
+    }
     if (key_sets::own_sets().contains(kept) &&
         !ask::question(this, QStringLiteral("組を保存"), QStringLiteral("「%1」はもうあります。今のキーで置き換えますか？").arg(kept))) {
         return false;
@@ -391,16 +401,23 @@ bool ShortcutsDialog::save_set(std::optional<QString> name) {
         const auto in_set = set_keys.find(command);
         const QList<QKeySequence> set_list = in_set != set_keys.end() ? in_set->second : QList<QKeySequence>();
         // (the key shown is the set's first: the set's whole list — Ctrl+K and Ctrl+, — else the one shown)
-        const QList<QKeySequence> now = (set_list.isEmpty() ? edit->keySequence().isEmpty() : edit->keySequence() == set_list.front())
-                                            ? set_list
-                                            : (edit->keySequence().isEmpty() ? QList<QKeySequence>() : QList<QKeySequence>{edit->keySequence()});
+        QList<QKeySequence> now = (set_list.isEmpty() ? edit->keySequence().isEmpty() : edit->keySequence() == set_list.front())
+                                      ? set_list
+                                      : (edit->keySequence().isEmpty() ? QList<QKeySequence>() : QList<QKeySequence>{edit->keySequence()});
+        if (const auto taken = taken_.find(command); edit->keySequence().isEmpty() && taken != taken_.end()) {
+            now = set_list;  // (a key taken from it: its set's others stay)
+            now.removeAll(taken->second);
+        }
         const auto in_base = base_keys.find(command);
         if (in_base == base_keys.end() || in_base->second != now) over[command] = now;
     }
     key_sets::save_own(kept, base, over);
+    deleted_.removeAll(kept);
     const QString id = QStringLiteral("own:") + kept;
     if (key_set->findData(id) < 0) {
-        if (key_sets::own_sets().size() == 1) key_set->insertSeparator(key_set->count());
+        bool any_own = false;
+        for (int i = 0; i < key_set->count(); ++i) any_own = any_own || key_set->itemData(i).toString().startsWith(QStringLiteral("own:"));
+        if (!any_own) key_set->insertSeparator(key_set->count());
         key_set->addItem(kept, id);
     }
     {
@@ -422,11 +439,13 @@ bool ShortcutsDialog::delete_set() {
     const QString name = chosen.mid(4);
     if (!ask::question(this, QStringLiteral("組を削除"), QStringLiteral("キーの組「%1」を削除しますか？").arg(name))) return false;
     const QString base = key_sets::own_base(name);
-    key_sets::delete_own(name);
+    deleted_ << name;  // (deleted by 決める: やめる keeps it)
     const int at = key_set->findData(chosen);
     key_set->setCurrentIndex(std::max(0, key_set->findData(base)));  // (the keys shown: the built-in set's, as the set chosen)
     key_set->removeItem(at);
-    if (key_sets::own_sets().isEmpty()) {
+    bool any_own = false;
+    for (int i = 0; i < key_set->count(); ++i) any_own = any_own || key_set->itemData(i).toString().startsWith(QStringLiteral("own:"));
+    if (!any_own) {
         for (int i = key_set->count() - 1; i >= 0; --i) {
             if (key_set->itemData(i).isNull() && key_set->itemText(i).isEmpty()) key_set->removeItem(i);  // (the line)
         }
@@ -466,6 +485,7 @@ bool ShortcutsDialog::write_summary(const QString& path) {
     QString where = path;
     if (where.isEmpty()) where = ask::save_path(this, QStringLiteral("キーボードショートカットの概要"), QStringLiteral("キーボードショートカット.html"), QStringLiteral("HTML (*.html)"));
     if (where.isEmpty()) return false;
+    if (window_->refuses_to_write(core::path_from_utf8(where.toStdString()))) return false;  // (said by the window)
     QSaveFile file(where);
     if (!file.open(QIODevice::WriteOnly) || file.write(summary_html().toUtf8()) < 0 || !file.commit()) {
         clash->setText(QStringLiteral("概要を書き出せませんでした: %1").arg(where));
@@ -478,7 +498,16 @@ bool ShortcutsDialog::write_summary(const QString& path) {
 std::vector<std::pair<QString, QStringList>> ShortcutsDialog::mapping() const {
     std::vector<std::pair<QString, QStringList>> out;
     for (const auto& [name, edit] : editors) {
-        out.emplace_back(name, edit->keySequence().isEmpty() ? QStringList() : QStringList{edit->keySequence().toString()});
+        QStringList keys;
+        if (!edit->keySequence().isEmpty()) keys << edit->keySequence().toString();
+        if (const auto taken = taken_.find(name); keys.isEmpty() && taken != taken_.end()) {
+            if (const auto in_set = set_keys.find(name); in_set != set_keys.end()) {
+                for (const QKeySequence& key : in_set->second) {
+                    if (key != taken->second) keys << key.toString();
+                }
+            }
+        }
+        out.emplace_back(name, keys);
     }
     return out;
 }
@@ -521,10 +550,14 @@ void ShortcutsDialog::fill_menus() {
             auto* row = new QTreeWidgetItem(parent, {QString(item->text()).remove(QLatin1Char('&'))});
             row->setData(0, kName, name);
             row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsUserCheckable);
-            hidden_[name] = hid.contains(name);
+            // (kept under its name, or an old one of it: renamed() — the review's P3-10)
+            const QStringList names_of = QStringList{name} + preferences::old_names(name);
+            hidden_[name] = std::any_of(names_of.begin(), names_of.end(), [&hid](const QString& one) { return hid.contains(one); });
             row->setCheckState(1, hidden_[name] ? Qt::Unchecked : Qt::Checked);
-            const auto colour = colours.find(name);
-            colours_[name] = colour != colours.end() ? colour->second : QStringLiteral("none");
+            colours_[name] = QStringLiteral("none");
+            for (auto one = names_of.rbegin(); one != names_of.rend(); ++one) {
+                if (const auto colour = colours.find(*one); colour != colours.end()) colours_[name] = colour->second;
+            }
             row->setText(2, colour_label(colours_[name]));
             row->setIcon(2, swatch(menu_look::colour(colours_[name])));
             menu_rows_[name].push_back(row);
@@ -626,9 +659,22 @@ void ShortcutsDialog::save() {
         settings()->remove(QStringLiteral("ui/key_set_own"));
     }
     preferences::keep_keys(window_, keys, set_keys);
-    // the menus' items
+    for (const QString& gone : deleted_) key_sets::delete_own(gone);  // (組を削除: kept now)
+    // the menus' items — the ones the tree does not show (a command this window has not now) kept as they were (the
+    // review's P3-3); the tree's under their names now (an old name read: renamed())
+    std::set<QString> shown;
+    for (const auto& [name, rows] : menu_rows_) {
+        shown.insert(name);
+        for (const QString& old : preferences::old_names(name)) shown.insert(old);
+    }
     QStringList hid;
     std::map<QString, QString> colours;
+    for (const QString& name : menu_look::hidden()) {
+        if (!shown.contains(name)) hid << name;
+    }
+    for (const auto& [name, id] : menu_look::coloured()) {
+        if (!shown.contains(name)) colours[name] = id;
+    }
     for (const auto& [name, rows] : menu_rows_) {
         if (is_hidden(name)) hid << name;
         if (colour_of(name) != QLatin1String("none")) colours[name] = colour_of(name);

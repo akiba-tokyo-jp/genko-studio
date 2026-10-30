@@ -17,6 +17,7 @@
 
 #include "app/config.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "app/workspace.hpp"
 
 namespace genko::app::menu_look {
@@ -259,8 +260,14 @@ void apply(MainWindow* window) {
         const auto names = command_names(window);
         for (QAction* action : commands(window)) {
             const QString name = command_name(names, action);
-            if (hid.contains(name)) look->hidden.insert(action);
-            if (const auto found = colour_of.find(name); found != colour_of.end()) look->colours[action] = colour(found->second);
+            // (kept under its name, or an old name of it: renamed() — the review's P3-10)
+            const QStringList kept_as = QStringList{name} + preferences::old_names(name);
+            for (const QString& one : kept_as) {
+                if (hid.contains(one)) look->hidden.insert(action);
+            }
+            for (auto one = kept_as.rbegin(); one != kept_as.rend(); ++one) {
+                if (const auto found = colour_of.find(*one); found != colour_of.end()) look->colours[action] = colour(found->second);
+            }
         }
     }
     for (QAction* top : window->menuBar()->actions()) look->watch(top->menu());
