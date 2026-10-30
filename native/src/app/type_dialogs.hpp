@@ -2,6 +2,7 @@
 
 #include <QDialog>
 
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -65,14 +66,17 @@ private:
     std::vector<service::spell::Finding> findings_;
     std::size_t at_ = 0;
     std::set<std::string> ignored_;  // (すべて無視, lowercase, for this check)
+    std::map<std::string, std::vector<std::string>> suggested_;  // (kind and word → the suggestions shown, made once)
 };
 
 // 表記の表…: the notation table (this computer's settings, type/notations) — 誤 → 正, a row each.
 class NotationDialog : public QDialog {
     Q_OBJECT
 public:
-    explicit NotationDialog(QWidget* parent);
-    // The rows, saved (OK) to the settings.
+    // (`rows`: the table to show — 環境設定's own while it is open —; none: the settings')
+    explicit NotationDialog(QWidget* parent, const std::optional<std::vector<service::spell::Notation>>& rows = std::nullopt);
+    // The rows as the table has them now (checked as the settings take them); saved (OK) to the settings.
+    std::vector<service::spell::Notation> rows() const;
     void save();
     QTableWidget* table = nullptr;
 };

@@ -944,17 +944,19 @@ void replace_text(OpContext& c) {
         }
         return n;
     };
+    std::vector<Num> changed;  // (the pages of the lines changed: their locks asked below)
     for (StoryLine& line : c.doc.story) {
         if (!pages.empty() && std::none_of(pages.begin(), pages.end(), [&](std::int64_t p) { return line.page_index == Num(p); })) {
             continue;
         }
-        replace_in(line, Json::object({{"line", line.id}, {"page", line.page_index.json()}}));
+        if (replace_in(line, Json::object({{"line", line.id}, {"page", line.page_index.json()}})) > 0) changed.push_back(line.page_index);
         if (truthy_at(op, "speakers")) {
             auto [speaker, m] = subn(line.speaker, nullptr);
             if (m > 0) {
                 where.push_back(Json::object({{"line", line.id}, {"page", line.page_index.json()}, {"count", m}, {"speaker", speaker}}));
                 line.speaker = speaker;
                 count += m;
+                changed.push_back(line.page_index);
             }
         }
     }
@@ -970,7 +972,13 @@ void replace_text(OpContext& c) {
             StoryLine record = *layer.type;
             if (replace_in(record, Json::object({{"page", page.index.json()}, {"layer_id", layer.id}})) == 0) continue;
             c.doc.edit_page(i).layers[j].type = type_text::shared_record(std::move(record));
+            changed.push_back(page.index);
         }
+    }
+    // PC5 G-d (review P2-2): a page another has locked is not changed — its lines' words nor its type layers' — the op
+    // refused, as an edit_line or edit_type there is (Python asks no page's lock here)
+    for (std::size_t i = 0; i < c.doc.pages.size(); ++i) {
+        if (std::any_of(changed.begin(), changed.end(), [&](const Num& p) { return c.doc.pages[i]->index == p; })) check_page_held(c.doc, i, c.actor);
     }
     if (count == 0 && truthy_at(op, "must_find")) throw OpError("nothing matched");
     c.report = Json::object({{"replaced", count}, {"where", py_slice(where, 0, 200)}});

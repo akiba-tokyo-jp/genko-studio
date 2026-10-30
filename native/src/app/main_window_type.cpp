@@ -10,6 +10,7 @@
 // type tools round as Photoshop's: chosen while it is in hand, the vertical one.
 
 #include <QActionGroup>
+#include <QEvent>
 #include <QComboBox>
 #include <QCheckBox>
 #include <QMenu>
@@ -47,6 +48,20 @@ using core::Json;
 using core::Num;
 
 namespace {
+
+// PC5 G-d (review P3-7): whether an action was triggered by its key (Shift+T turns the type tools round; the palette's button
+// only chooses its tool).
+class ByKey : public QObject {
+public:
+    using QObject::QObject;
+    bool marked = false;
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (event->type() == QEvent::Shortcut) marked = true;
+        return QObject::eventFilter(watched, event);
+    }
+};
 
 constexpr int kFrameDpi = 150;  // (the chosen type layer's box on the canvas: where its letters are, measured this finely)
 
@@ -104,11 +119,18 @@ double distance_to(const std::vector<QPointF>& points, const QPointF& p) {
 
 void MainWindow::build_type_actions() {
     // 横書き文字ツール (Photoshop's; テキスト — act_text — sets down or across as its options say)
+    auto* by_key = new ByKey(this);
     make("act_text_h", QStringLiteral("横書き文字ツール"),
-         [this] { choose_tool(canvas_->tool() == QLatin1String("text_h") ? QStringLiteral("text") : QStringLiteral("text_h")); },  // (PC5 G-d: round)
+         [this, by_key] {
+             // (PC5 G-d: its key again while it is held turns to 縦書き文字ツール — Photoshop's Shift+T —; its button chooses it)
+             const bool round = by_key->marked && canvas_->tool() == QLatin1String("text_h");
+             by_key->marked = false;
+             choose_tool(round ? QStringLiteral("text") : QStringLiteral("text_h"));
+         },
          {QKeySequence(QStringLiteral("Shift+T"))},
          QStringLiteral("クリックした所に横書きの文字を入れます（テキストレイヤーならドラッグで段落テキスト）"), true);
     QAction* across = action("act_text_h");
+    across->installEventFilter(by_key);
     tools_->addAction(across);
     across->setAutoRepeat(false);
     tool_actions_[QStringLiteral("text_h")] = across;

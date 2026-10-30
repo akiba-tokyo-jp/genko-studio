@@ -297,7 +297,7 @@ private slots:
         QVERIFY(!dock->features().testFlag(QDockWidget::DockWidgetClosable));
         QVERIFY(s.window->tabifiedDockWidgets(dock).contains(s.window->findChild<QDockWidget*>(QStringLiteral("ページ"))));
         QVERIFY(s.panel().empty_note->isVisible() || !dock->isVisible());
-        QCOMPARE(s.panel().empty_note->text(), QStringLiteral("このページにはまだ台詞がありません。\nテキストの道具（T）で、置きたい所をクリックします"));
+        QCOMPARE(s.panel().empty_note->text(), QStringLiteral("このページにはまだ台詞がありません。\n縦書き文字ツール（T）で、置きたい所をクリックします"));
         // ツールの設定: the text tool's page (TextToolSettings), and the select tool's with the chosen line's lettering
         auto* settings = s.window->text_settings();
         QCOMPARE(s.window->tool_settings()->page_for(QStringLiteral("text")), static_cast<QWidget*>(settings));
@@ -756,6 +756,7 @@ private slots:
         QCOMPARE(chars.line_leading->value(), 0.4);
         QVERIFY(chars.tcy->isChecked());
         chars.size->setValue(6.5);
+        emit chars.size->editingFinished();  // (review P2-5: sent once its editing ends)
         QCOMPARE(s.last().dump(), (Json{{"op", "edit_line"}, {"id", "P1"}, {"style", Json{{"size_mm", 6.5}}}}).dump());
         QVERIFY(drawn_as_book(s));
         // (the panel follows an edit, as Python's side panels)
@@ -1199,6 +1200,7 @@ private slots:
         QCOMPARE(offered, (QList<QColor>{QColor(10, 10, 10)}));
         const std::size_t count = s.ops.size();
         chars.size->setValue(5.0);
+        emit chars.size->editingFinished();  // (review P2-5: sent once its editing ends)
         QCOMPARE(s.ops.size(), count + 1);
         QCOMPARE(s.last()["style"]["size_mm"], Json(5.0));
         // written by hand: what is not a number shows as the field's default, the rest as it is
@@ -1217,6 +1219,7 @@ private slots:
         QCOMPARE(offered, (QList<QColor>{QColor(10, 10, 10), QColor(0, 0, 1)}));
         const std::size_t edits = s.ops.size();
         chars.tracking->setValue(500);
+        emit chars.tracking->editingFinished();  // (review P2-5: sent once its editing ends)
         QCOMPARE(s.ops.size(), edits + 1);
         QCOMPARE(s.last()["id"], Json("HAND"));
         QCOMPARE(s.last()["style"]["tracking"], Json(0.5));

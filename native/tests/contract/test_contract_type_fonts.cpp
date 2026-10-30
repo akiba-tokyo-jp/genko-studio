@@ -263,6 +263,54 @@ private slots:
         QCOMPARE(report(doc, Json{{"op", "replace_text"}, {"find", "cat"}, {"replace", "dog"}, {"pages", Json::array({2})}})["replaced"], Json(0));
     }
 
+    // The review's (PC5 G-d): whole_word not warned of as unknown (P2-1); a page another has locked not changed by
+    // replace_text — its lines nor its type layers — nor replace_fonts (P2-2); a face past a font's refused (P3-6); a face
+    // given the line's font by an earlier replacement taken back with it (P3-5 a)
+    void reviewFixes() {
+        core::Document doc = plain_book();
+        doc = run(doc, Json{{"op", "add_line"}, {"page", 1}, {"id", "l1"}, {"text", "cat category"}, {"x_mm", 5}, {"y_mm", 5}, {"style", Json{{"font", "/gone/A.ttf"}}}});
+        doc = run(doc, Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "a cat"}, {"point", Json::array({4, 40})}, {"wrap", "horizontal"}, {"new_id", "t1"},
+                            {"char", Json{{"font", "/gone/B.ttf"}}}});
+        // P2-1
+        const core::ApplyResult said = run_ops(doc, Json::array({Json{{"op", "replace_text"}, {"find", "cat"}, {"replace", "dog"}, {"whole_word", true}}}));
+        for (const Json& w : said.warnings) QVERIFY2(w.get<std::string>().find("whole_word") == std::string::npos, w.dump().c_str());
+        // P2-2: locked by another
+        core::Document locked = core::CommandBus(render::ops_registry()).apply(doc, Json::array({Json{{"op", "lock_page"}, {"page", 1}}}), core::Actor("ai:other")).doc;
+        const auto by_me = [&](const Json& op) -> std::string {
+            try {
+                (void)core::CommandBus(render::ops_registry()).apply(locked, Json::array({op}), core::Actor("human:test"));
+            } catch (const core::ApplyError& error) {
+                return error.what();
+            }
+            return {};
+        };
+        for (const Json& op : {Json{{"op", "replace_text"}, {"find", "cat"}, {"replace", "dog"}},                  // (the line and the layer)
+                               Json{{"op", "replace_text"}, {"find", "a cat"}, {"replace", "dog"}},                // (the type layer alone)
+                               Json{{"op", "replace_fonts"}, {"all", true}},
+                               Json{{"op", "replace_fonts"}, {"map", Json{{"/gone/B.ttf", "gothic"}}}}}) {
+            const std::string why = by_me(op);
+            QVERIFY2(why.find("page 1 locked by ai:other") != std::string::npos, (op.dump() + " → " + why).c_str());
+        }
+        QVERIFY(by_me(Json{{"op", "replace_text"}, {"find", "nothing here"}, {"replace", "x"}}).empty());  // (nothing changed: nothing asked)
+        QVERIFY(by_me(Json{{"op", "replace_fonts"}}).empty());                                              // (a question)
+        QVERIFY(by_me(Json{{"op", "replace_fonts"}, {"map", Json{{"/gone/C.ttf", "gothic"}}}}).empty());   // (no text names it)
+        // (the one who locked it may)
+        QCOMPARE(core::CommandBus(render::ops_registry()).apply(locked, Json::array({Json{{"op", "replace_fonts"}, {"all", true}}}), core::Actor("ai:other")).applied.size(), std::size_t{1});
+        // P3-6: a face the font file does not hold
+        const std::string one = font("inter-subset.ttf");
+        const std::string past = refusal(doc, Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"char", Json{{"font", one}, {"face_index", 2}}}});
+        QVERIFY2(past.find("face_index 2 is past the faces of " + one + " (it holds 1)") != std::string::npos, past.c_str());
+        QCOMPARE(wording::error(QString::fromStdString(past)), QStringLiteral("書体「%1」の面は 1 個です（面の番号 2 はありません）").arg(QString::fromStdString(one)));
+        QVERIFY(!refusal(doc, Json{{"op", "replace_fonts"}, {"map", Json{{"/gone/B.ttf", Json{{"font", one}, {"face_index", 1}}}}}}).empty());
+        QVERIFY(refusal(doc, Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"char", Json{{"font", one}, {"face_index", 0}}}}).empty());
+        // P3-5 a: the line's font given a face before (its whole text's face_index), then replaced by a font of one face
+        doc = run(doc, Json{{"op", "set_type"}, {"line", "l1"}, {"face_index", 1}});
+        QCOMPARE((*doc.story[0].native_type)["char"]["face_index"], Json(1));
+        doc = run(doc, Json{{"op", "replace_fonts"}, {"map", Json{{"/gone/A.ttf", one}}}});
+        QCOMPARE(doc.story[0].style["font"], Json(one));
+        QVERIFY(!(*doc.story[0].native_type)["char"].contains("face_index"));
+    }
+
     void downAttributes() {
         const auto vertical = [](const Json& extra) {
             core::Document doc = run(plain_book(), Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "1234時です"}, {"point", Json::array({30, 5})}, {"wrap", "vertical"},

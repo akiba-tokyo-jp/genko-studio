@@ -4,6 +4,7 @@
 
 #include "app/type_panels.hpp"
 
+#include <QAbstractListModel>
 #include <QApplication>
 #include <QCheckBox>
 #include <QDoubleSpinBox>
@@ -13,17 +14,22 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QListView>
 #include <QListWidget>
 #include <QMenu>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QStandardItemModel>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QtConcurrent>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <set>
 #include <tuple>
 
@@ -126,31 +132,67 @@ struct FontFace {
     int index = 0;
     QString postscript;
 };
-const std::vector<FontFace>& system_faces(std::map<QString, QString>* japanese = nullptr) {
-    static std::vector<FontFace> faces;
-    static std::map<QString, QString> names;  // (family → its Japanese name)
-    static bool read = false;
-    if (!read) {
-        read = true;
-        try {
-            for (const Json& family : service::briefs::type_fonts()) {
-                const QString name = qs(family.value("family", std::string()));
-                if (family.contains("family_ja") && family["family_ja"].is_string()) names[name] = qs(family["family_ja"].get<std::string>());
-                for (const Json& face : family.value("styles", Json::array())) {
-                    FontFace f;
-                    f.family = name;
-                    f.style = face.value("style", Json()).is_string() ? qs(face["style"].get<std::string>()) : QStringLiteral("Regular");
-                    f.path = qs(face.value("path", std::string()));
-                    f.index = face.value("index", Json(0)).is_number_integer() ? face.value("index", Json(0)).get<int>() : 0;
-                    f.postscript = face.value("postscript", Json()).is_string() ? qs(face["postscript"].get<std::string>()) : QString();
-                    faces.push_back(std::move(f));
-                }
+struct SystemFonts {
+    std::vector<FontFace> faces;
+    std::map<QString, QString> japanese;  // (family → its Japanese name)
+};
+SystemFonts read_system_fonts() {
+    SystemFonts out;
+    try {
+        for (const Json& family : service::briefs::type_fonts()) {
+            const QString name = qs(family.value("family", std::string()));
+            if (family.contains("family_ja") && family["family_ja"].is_string()) out.japanese[name] = qs(family["family_ja"].get<std::string>());
+            for (const Json& face : family.value("styles", Json::array())) {
+                FontFace f;
+                f.family = name;
+                f.style = face.value("style", Json()).is_string() ? qs(face["style"].get<std::string>()) : QStringLiteral("Regular");
+                f.path = qs(face.value("path", std::string()));
+                f.index = face.value("index", Json(0)).is_number_integer() ? face.value("index", Json(0)).get<int>() : 0;
+                f.postscript = face.value("postscript", Json()).is_string() ? qs(face["postscript"].get<std::string>()) : QString();
+                out.faces.push_back(std::move(f));
             }
-        } catch (const std::exception&) {
+        }
+    } catch (const std::exception&) {
+    }
+    return out;
+}
+// (review P2-6: read once a run — the font list's first reading off the window's thread, briefs::type_fonts being made
+// again when the computer's fonts changed; a caller that needs them now waits for it)
+std::optional<SystemFonts>& system_fonts_read() {
+    static std::optional<SystemFonts> read;
+    return read;
+}
+QFutureWatcher<SystemFonts>*& system_fonts_reading() {
+    static QFutureWatcher<SystemFonts>* watcher = nullptr;
+    return watcher;
+}
+const std::vector<FontFace>& system_faces(std::map<QString, QString>* japanese = nullptr) {
+    std::optional<SystemFonts>& read = system_fonts_read();
+    if (!read) {
+        if (QFutureWatcher<SystemFonts>* reading = system_fonts_reading()) {
+            reading->waitForFinished();
+            read = reading->result();
+        } else {
+            read = read_system_fonts();
         }
     }
-    if (japanese != nullptr) *japanese = names;
-    return faces;
+    if (japanese != nullptr) *japanese = read->japanese;
+    return read->faces;
+}
+// Read them in the background, `done` (in `context`'s thread) when they are.
+void read_system_faces_later(QObject* context, const std::function<void()>& done) {
+    if (system_fonts_read()) return;
+    if (system_fonts_reading() == nullptr) {
+        auto* watcher = new QFutureWatcher<SystemFonts>(qApp);
+        system_fonts_reading() = watcher;
+        QObject::connect(watcher, &QFutureWatcher<SystemFonts>::finished, qApp, [watcher] {
+            if (!system_fonts_read()) system_fonts_read() = watcher->result();
+        });
+        watcher->setFuture(QtConcurrent::run(read_system_fonts));
+    }
+    QObject::connect(system_fonts_reading(), &QFutureWatcher<SystemFonts>::finished, context, [done] {
+        if (system_fonts_read()) done();
+    }, Qt::QueuedConnection);
 }
 
 // The family a font file (and face) is in, as the list knows it.
@@ -171,22 +213,117 @@ int preview_px(const QString& size) {
     return 0;
 }
 
-// A Qt family that draws a font file (added to the application once), or "" when it cannot.
+// A Qt family that draws a font (a bundled one added to the application once; a file of the computer's — the 字形 panel's —
+// added while it is the one shown, the one before let go: review P2-6), or "" when it cannot.
 QString qt_family(const QString& font) {
-    static std::map<QString, QString> added;
-    if (const auto it = added.find(font); it != added.end()) return it->second;
+    static std::map<QString, QString> bundled;
+    static QString file;
+    static int file_id = -1;
+    static QString file_family;
+    const bool own = font.indexOf(QLatin1Char('/')) < 0 && font.indexOf(QLatin1Char('\\')) < 0;
+    if (own) {
+        if (const auto it = bundled.find(font); it != bundled.end()) return it->second;
+    } else if (font == file) {
+        return file_family;
+    }
     QString family;
+    int id = -1;
     try {
         const auto bytes = render::font_bytes(font.toStdString());
-        const int id = QFontDatabase::addApplicationFontFromData(*bytes);
+        id = QFontDatabase::addApplicationFontFromData(*bytes);
         if (id >= 0) {
             const QStringList families = QFontDatabase::applicationFontFamilies(id);
             if (!families.isEmpty()) family = families.front();
         }
     } catch (const std::exception&) {
     }
-    added.emplace(font, family);
+    if (own) {
+        bundled.emplace(font, family);
+    } else {
+        if (file_id >= 0) QFontDatabase::removeApplicationFont(file_id);
+        file = font;
+        file_id = id;
+        file_family = family;
+    }
     return family;
+}
+
+// The 字形 panel's characters: a list the view asks of as it draws (the rows it shows), none made ahead (review P3-3).
+class GlyphModel : public QAbstractListModel {
+public:
+    using QAbstractListModel::QAbstractListModel;
+    void set(std::vector<char32_t> codes, const QFont& font) {
+        beginResetModel();
+        codes_ = std::move(codes);
+        font_ = font;
+        endResetModel();
+    }
+    int rowCount(const QModelIndex& parent = QModelIndex()) const override { return parent.isValid() ? 0 : static_cast<int>(codes_.size()); }
+    QVariant data(const QModelIndex& index, int role) const override {
+        if (!index.isValid() || index.row() < 0 || static_cast<std::size_t>(index.row()) >= codes_.size()) return {};
+        const char32_t c = codes_[static_cast<std::size_t>(index.row())];
+        switch (role) {
+        case Qt::DisplayRole:
+        case Qt::UserRole:
+            return QString::fromUcs4(&c, 1);
+        case Qt::FontRole:
+            return font_;
+        case Qt::TextAlignmentRole:
+            return QVariant::fromValue(Qt::Alignment(Qt::AlignCenter));
+        case Qt::ToolTipRole:
+            return QStringLiteral("U+%1").arg(static_cast<std::uint32_t>(c), 4, 16, QLatin1Char('0')).toUpper();
+        default:
+            return {};
+        }
+    }
+
+private:
+    std::vector<char32_t> codes_;
+    QFont font_;
+};
+
+// A font's characters (its cmap), the last few kept: the panel shown again over a text in one of them reads none again.
+std::shared_ptr<const std::vector<char32_t>> charmap_of(const QString& font, int face) {
+    static std::vector<std::pair<QString, std::shared_ptr<const std::vector<char32_t>>>> kept;  // (the last first)
+    const QString key = font + QLatin1Char('\x1f') + QString::number(face);
+    for (std::size_t i = 0; i < kept.size(); ++i) {
+        if (kept[i].first != key) continue;
+        if (i > 0) std::rotate(kept.begin(), kept.begin() + static_cast<std::ptrdiff_t>(i), kept.begin() + static_cast<std::ptrdiff_t>(i) + 1);
+        return kept.front().second;
+    }
+    std::vector<char32_t> mapped;
+    try {
+        mapped = render::text::charmap(font.toStdString(), static_cast<unsigned>(face));
+    } catch (const std::exception&) {
+    }
+    kept.insert(kept.begin(), {key, std::make_shared<const std::vector<char32_t>>(std::move(mapped))});
+    if (kept.size() > 6) kept.pop_back();
+    return kept.front().second;
+}
+
+// review P2-5: a number field's change sent once — its editing finished (Enter, leaving it), or the arrows or the wheel
+// resting a moment —, not each step.
+template <typename Box>
+void settle(QObject* owner, Box* box, const std::function<bool()>& loading, const std::function<void()>& send) {
+    auto* timer = new QTimer(box);
+    timer->setSingleShot(true);
+    timer->setInterval(400);
+    auto pending = std::make_shared<bool>(false);
+    const auto flush = [pending, send] {
+        if (!*pending) return;
+        *pending = false;
+        send();
+    };
+    QObject::connect(box, &Box::valueChanged, owner, [pending, timer, loading] {
+        if (loading()) return;
+        *pending = true;
+        timer->start();
+    });
+    QObject::connect(timer, &QTimer::timeout, owner, flush);
+    QObject::connect(box, &QAbstractSpinBox::editingFinished, owner, [timer, flush] {
+        timer->stop();
+        flush();
+    });
 }
 
 }  // namespace
@@ -309,38 +446,32 @@ CharacterPanel::CharacterPanel(MainWindow* window) : window_(window) {
     proportional->setObjectName(QStringLiteral("type_proportional"));
 
     // changes: each field its attribute (and, a line of before on its whole, its style's key)
-    connect(size, &QDoubleSpinBox::valueChanged, this, [this](double v) {
-        if (loading_) return;
+    // (the number fields: once their editing ends or their arrows rest — settle)
+    const auto loading = [this] { return loading_; };
+    settle(this, size, loading, [this] {
+        const double v = size->value();
         const Lengths l = lengths(window_);
         const double mm = core::units::to_mm(v, l.unit, l.basis);
         set(Json{{"size_mm", v > 0 ? Json(mm) : Json()}}, Json{{"size_mm", v > 0 ? Json(mm) : Json()}});
     });
-    connect(leading, &QDoubleSpinBox::valueChanged, this, [this](double v) {
-        if (loading_) return;
+    settle(this, leading, loading, [this] {
+        const double v = leading->value();
         const Lengths l = lengths(window_);
         set(Json{{"leading_mm", v > 0 ? Json(core::units::to_mm(v, l.unit, l.basis)) : Json("auto")}});
     });
-    connect(baseline, &QDoubleSpinBox::valueChanged, this, [this](double v) {
-        if (loading_) return;
+    settle(this, baseline, loading, [this] {
         const Lengths l = lengths(window_);
-        set(Json{{"baseline_shift_mm", core::units::to_mm(v, l.unit, l.basis)}});
+        set(Json{{"baseline_shift_mm", core::units::to_mm(baseline->value(), l.unit, l.basis)}});
     });
-    connect(line_leading, &QDoubleSpinBox::valueChanged, this, [this](double v) {
-        if (loading_) return;
+    settle(this, line_leading, loading, [this] {
         const std::optional<Json> target = window_->type_target(true);
         const core::StoryLine* record = target ? window_->type_record(*target) : nullptr;
-        if (record != nullptr) window_->type_style_key(Json{{"leading", v}});
+        if (record != nullptr) window_->type_style_key(Json{{"leading", line_leading->value()}});
     });
     connect(kerning, &QComboBox::activated, this, [this](int) { set(Json{{"kerning", kerning->currentData().toString().toStdString()}}); });
-    connect(tracking, &QSpinBox::valueChanged, this, [this](int v) {
-        if (!loading_) set(Json{{"tracking", v / 1000.0}}, Json{{"tracking", v / 1000.0}});
-    });
-    connect(scale_y, &QSpinBox::valueChanged, this, [this](int v) {
-        if (!loading_) set(Json{{"scale_y", v / 100.0}});
-    });
-    connect(scale_x, &QSpinBox::valueChanged, this, [this](int v) {
-        if (!loading_) set(Json{{"scale_x", v / 100.0}}, Json{{"scale_x", v / 100.0}});
-    });
+    settle(this, tracking, loading, [this] { set(Json{{"tracking", tracking->value() / 1000.0}}, Json{{"tracking", tracking->value() / 1000.0}}); });
+    settle(this, scale_y, loading, [this] { set(Json{{"scale_y", scale_y->value() / 100.0}}); });
+    settle(this, scale_x, loading, [this] { set(Json{{"scale_x", scale_x->value() / 100.0}}, Json{{"scale_x", scale_x->value() / 100.0}}); });
     connect(weight, &QComboBox::activated, this, [this](int) {
         const QString w = weight->currentData().toString();
         set(Json{{"faux_bold", w.toStdString()}}, Json{{"weight", w == QLatin1String("normal") ? Json() : Json(w.toStdString())}, {"bold", nullptr}});
@@ -402,21 +533,33 @@ void CharacterPanel::fill_fonts() {
     const QString chosen = family->currentData().toString();
     const QSignalBlocker quiet(family);
     std::map<QString, QString> japanese;
-    const std::vector<FontFace>& faces = system_faces(&japanese);
+    // (the computer's fonts not read yet: read in the background, the list made again when they are — review P2-6)
+    const bool ready = system_fonts_read().has_value();
+    if (!ready && !waiting_fonts_) {
+        waiting_fonts_ = true;
+        read_system_faces_later(this, [this] {
+            waiting_fonts_ = false;
+            const bool open = family->view() != nullptr && family->view()->isVisible();
+            fill_fonts();
+            if (open) family->showPopup();
+        });
+    }
+    static const std::vector<FontFace> kNone;
+    const std::vector<FontFace>& faces = ready ? system_faces(&japanese) : kNone;
     const auto store = settings();
     const bool english = core::prefs::value(*store, "type.showFontNamesInEnglish") == Json(true);
     const int px = preview_px(window_->font_preview());
     family->clear();
+    // (each shown in its face: a bundled one's added to the application; the computer's by its family's name, which the
+    // system draws for the rows it shows — no file read here: review P2-6)
     const auto add = [&](const QString& label, const QString& data, const QString& font_file) {
         family->addItem(label, data);
-        if (px > 0 && !font_file.isEmpty()) {
-            const QString qt = qt_family(font_file);
-            if (!qt.isEmpty()) {
-                QFont f(qt);
-                f.setPixelSize(px);
-                family->setItemData(family->count() - 1, f, Qt::FontRole);
-            }
-        }
+        if (px <= 0 || font_file.isEmpty()) return;
+        const QString qt = data.startsWith(QLatin1String("family:")) ? data.mid(7) : qt_family(font_file);
+        if (qt.isEmpty()) return;
+        QFont f(qt);
+        f.setPixelSize(px);
+        family->setItemData(family->count() - 1, f, Qt::FontRole);
     };
     // (the fonts used last, as many as 環境設定 → テキスト says)
     const int recent = static_cast<int>(num(core::prefs::value(*store, "type.recentFonts"), 10));
@@ -439,7 +582,11 @@ void CharacterPanel::fill_fonts() {
         if (!seen.insert(f.family).second) continue;
         add(english || !japanese.contains(f.family) ? f.family : japanese[f.family], QStringLiteral("family:") + f.family, f.path);
     }
-    fonts_read_ = true;
+    if (!ready) {
+        family->addItem(QStringLiteral("パソコンの書体を読んでいます…"));
+        if (auto* model = qobject_cast<QStandardItemModel*>(family->model())) model->item(family->count() - 1)->setEnabled(false);
+    }
+    fonts_read_ = ready;
     const int again = family->findData(chosen);
     if (again >= 0) family->setCurrentIndex(again);
 }
@@ -465,11 +612,15 @@ void CharacterPanel::refresh() {
     const Json& c = s.chars;
     // (the font: a bundled key or a file — the family it is in, as the list knows it)
     const Json& font = at(c, "font");
-    QString data = font.is_string() ? qs(font.get<std::string>()) : (s.record != nullptr && s.record->balloon == "sfx" ? QStringLiteral("sfx") : QStringLiteral("antique"));
+    // (none of its own: what it is drawn in — a sound effect's face, else the book's font (書体), else アンチック: review P2-4)
+    const std::string& book_font = window_->book().font_path;
+    const bool sfx = s.record != nullptr && s.record->balloon == "sfx";
+    QString data = font.is_string() ? qs(font.get<std::string>()) : sfx ? QStringLiteral("sfx") : !book_font.empty() ? qs(book_font) : QStringLiteral("antique");
+    const bool named = font.is_string() || (!sfx && !book_font.empty());
     const int face = static_cast<int>(num(at(c, "face_index"), 0));
     style->clear();
     // (the computer's fonts are read when the list is first opened: until then a font file shows by its name)
-    if (const FontFace* f = font.is_string() && fonts_read_ ? face_of_path(data, face) : nullptr) {
+    if (const FontFace* f = named && fonts_read_ ? face_of_path(data, face) : nullptr) {
         data = QStringLiteral("family:") + f->family;
         for (const FontFace& other : system_faces()) {
             if (other.family != f->family) continue;
@@ -585,7 +736,7 @@ void CharacterPanel::family_chosen() {
         return;
     }
     set(Json{{"font", data.toStdString()}, {"face_index", nullptr}, {"family", nullptr}, {"font_style", nullptr}, {"postscript", nullptr}},
-        Json{{"font", data == QLatin1String("antique") ? Json() : Json(data.toStdString())}});
+        Json{{"font", data.toStdString()}});  // (アンチック written as before: a sound effect's or the book's font is not it — review P2-4)
 }
 
 void CharacterPanel::style_chosen() {
@@ -643,11 +794,9 @@ ParagraphPanel::ParagraphPanel(MainWindow* window) : window_(window) {
              {space_after, "space_after_mm"}}) {
         const std::string key = attr;
         QDoubleSpinBox* b = box;
-        connect(b, &QDoubleSpinBox::valueChanged, this, [this, key, b](double v) {
-            if (loading_) return;
+        settle(this, b, [this] { return loading_; }, [this, key, b] {
             const Lengths l = lengths(window_);
-            (void)b;
-            set(Json{{key, core::py_round(core::units::to_mm(v, l.unit, l.basis), 4)}});
+            set(Json{{key, core::py_round(core::units::to_mm(b->value(), l.unit, l.basis), 4)}});
         });
     }
     kinsoku = new QComboBox;
@@ -978,8 +1127,6 @@ bool in_category(char32_t c, std::string_view category) {
     return true;
 }
 
-QString text_of(char32_t c) { return QString::fromUcs4(&c, 1); }
-
 }  // namespace
 
 GlyphsPanel::GlyphsPanel(MainWindow* window) : window_(window) {
@@ -1010,14 +1157,26 @@ GlyphsPanel::GlyphsPanel(MainWindow* window) : window_(window) {
     recent->setMaximumHeight(40);
     recent->setFlow(QListView::LeftToRight);
     recent->setWrapping(false);
-    glyphs = grid(QStringLiteral("glyphs_grid"));
+    glyphs = new QListView;  // (the characters: a model the view asks for the rows it shows — review P3-3)
+    glyphs->setObjectName(QStringLiteral("glyphs_grid"));
+    glyphs->setViewMode(QListView::IconMode);
+    glyphs->setResizeMode(QListView::Adjust);
+    glyphs->setMovement(QListView::Static);
+    glyphs->setGridSize(QSize(34, 34));
+    glyphs->setUniformItemSizes(true);
+    glyphs->setLayoutMode(QListView::Batched);
+    glyphs->setFocusPolicy(Qt::NoFocus);
+    glyph_model_ = new GlyphModel(this);
+    glyphs->setModel(glyph_model_);
     variants = grid(QStringLiteral("glyphs_variants"));
     variants->setMaximumHeight(40);
     variants->setToolTip(QStringLiteral("異体字（選んだ字の、書体が持つ異体字セレクター付きの字形）"));
-    for (QListWidget* g : {recent, glyphs, variants}) {
+    for (QListWidget* g : {recent, variants}) {
         connect(g, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) { insert(item->data(Qt::UserRole).toString()); });
     }
-    connect(glyphs, &QListWidget::currentItemChanged, this, [this](QListWidgetItem* item) { chosen(item); });
+    connect(glyphs, &QListView::doubleClicked, this, [this](const QModelIndex& index) { insert(index.data(Qt::UserRole).toString()); });
+    connect(glyphs->selectionModel(), &QItemSelectionModel::currentChanged, this,
+            [this](const QModelIndex& index) { chosen(index.isValid() ? index.data(Qt::UserRole).toString() : QString()); });
     auto* top = new QHBoxLayout;
     top->addWidget(font, 1);
     top->addWidget(category, 1);
@@ -1051,7 +1210,7 @@ void GlyphsPanel::refresh() {
         if (chosen_font == QLatin1String("antique")) chosen_font = QStringLiteral("mincho");  // (アンチック: its kana's 明朝)
         face = static_cast<int>(num(at(s.chars, "face_index"), 0));
     }
-    if (chosen_font != font_ || face != face_ || glyphs->count() == 0) show_font(chosen_font, face);
+    if (chosen_font != font_ || face != face_ || glyph_model_->rowCount() == 0) show_font(chosen_font, face);
 }
 
 void GlyphsPanel::show_font(const QString& file, int face_index) {
@@ -1063,38 +1222,28 @@ void GlyphsPanel::show_font(const QString& file, int face_index) {
         at_font = font->count() - 1;
     }
     font->setCurrentIndex(at_font);
-    mapped_.clear();
-    try {
-        mapped_ = render::text::charmap(file.toStdString(), static_cast<unsigned>(face_index));
-    } catch (const std::exception&) {
-    }
+    mapped_ = charmap_of(file, face_index);
     family_ = qt_family(file);
     fill();
 }
 
 void GlyphsPanel::fill() {
-    glyphs->clear();
     variants->clear();
     const std::string which = category->currentData().toString().toStdString();
     QFont shown_in = family_.isEmpty() ? QFont() : QFont(family_);
     shown_in.setPixelSize(20);
-    int n = 0;
-    for (const char32_t c : mapped_) {
-        if (!in_category(c, which)) continue;
-        auto* item = new QListWidgetItem(text_of(c));
-        item->setData(Qt::UserRole, text_of(c));
-        item->setFont(shown_in);
-        item->setTextAlignment(Qt::AlignCenter);
-        item->setToolTip(QStringLiteral("U+%1").arg(static_cast<std::uint32_t>(c), 4, 16, QLatin1Char('0')).toUpper());
-        glyphs->addItem(item);
-        if (++n >= 30000) break;  // (a huge font: the first thirty thousand)
+    std::vector<char32_t> codes;
+    if (mapped_ != nullptr) {
+        for (const char32_t c : *mapped_) {
+            if (in_category(c, which)) codes.push_back(c);
+        }
     }
+    static_cast<GlyphModel*>(glyph_model_)->set(std::move(codes), shown_in);
 }
 
-void GlyphsPanel::chosen(QListWidgetItem* item) {
+void GlyphsPanel::chosen(const QString& text) {
     variants->clear();
-    if (item == nullptr) return;
-    const QString text = item->data(Qt::UserRole).toString();
+    if (text.isEmpty()) return;
     const QList<uint> ucs = text.toUcs4();
     if (ucs.size() != 1) return;
     std::vector<char32_t> selectors;

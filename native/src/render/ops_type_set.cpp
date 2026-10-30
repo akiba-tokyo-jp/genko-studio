@@ -240,6 +240,7 @@ void set_type(core::OpContext& c) {
     }
     nt["shaping"] = "opentype";
     set_native_type(record, nt);
+    if (chars.contains("face_index")) check_faces(record);  // (review P3-6: a face the font file holds)
     fit_point_text(record, doc);
     measure(record, doc);  // (a line in its balloon too: one too large to set is refused, review P1-1)
     if (t.line != nullptr) {

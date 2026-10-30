@@ -176,7 +176,6 @@ void MainWindow::type_attrs(const Json& attrs, const Json& style) {
     apply_ops(Json::array({op}));
     refresh_type_commands();
     refresh_type_frame();
-    refresh_type_panels();
 }
 
 void MainWindow::type_style_key(const Json& style) {
@@ -228,7 +227,6 @@ void MainWindow::insert_glyph(const QString& glyph) {
         type_selection_ = TypeSelection{now->text, at, at};
     }
     refresh_type_frame();
-    refresh_type_panels();
 }
 
 void MainWindow::remember_font(const QString& data) {

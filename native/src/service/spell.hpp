@@ -78,7 +78,7 @@ struct Options {
     bool spelling = true;
     bool notation = true;
     bool sfx = false;                // (a line in a sound-effect balloon — 描き文字 — read too)
-    std::size_t suggestions = 5;
+    std::size_t suggestions = 5;     // (0: none made — the window makes the shown place's alone, suggestions_for)
     std::optional<core::Num> page;   // (one page; none: the whole book)
     std::size_t most = 5000;         // (findings at most)
 };
@@ -95,6 +95,8 @@ struct Finding {
     std::vector<std::string> suggestions;
 };
 std::vector<Finding> check(const core::Document& doc, const Options& options);
+// A finding's suggestions: its own, or — a misspelling checked with none made — the dictionary's, up to `max`.
+std::vector<std::string> suggestions_for(const Finding& finding, std::size_t max = 5);
 // {"findings": [{kind, line|page+layer_id, page, start, end, word, suggestions}], "count"}
 core::Json to_json(const std::vector<Finding>& findings);
 

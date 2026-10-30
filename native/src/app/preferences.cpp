@@ -282,9 +282,11 @@ const std::multimap<QString, QString>& renamed() {
                                                      {QStringLiteral("選択範囲のエッジ"), QStringLiteral("選択範囲の境界線")},
                                                      {QStringLiteral("グリッド（表示 → 表示・非表示）"), QStringLiteral("グリッドを表示")},
                                                      // (PC5 G-d, 節 G 5.4: the text tool and 検索と置換… by Photoshop's names —
-                                                     // テキスト is ラスタライズ ▸'s now: a reused name)
+                                                     // the tool was テキスト, and テキスト（ツール） beside ラスタライズ ▸'s
+                                                     // テキスト since PC3 A4; that one keeps its name by its place — genko_placed —,
+                                                     // so テキスト is no reused name: the tool's, words_owner — review P2-3)
                                                      {QStringLiteral("縦書き文字ツール"), QStringLiteral("テキスト")},
-                                                     {QStringLiteral("テキスト"), QStringLiteral("テキスト（レイヤー → ラスタライズ）")},
+                                                     {QStringLiteral("縦書き文字ツール"), QStringLiteral("テキスト（ツール）")},
                                                      {QStringLiteral("検索と置換…"), QStringLiteral("台詞の検索・置換…")}};
     return all;
 }
@@ -306,7 +308,10 @@ const std::map<QString, QString>& words_owner() {
                                                 {QStringLiteral("ガイド"), QStringLiteral("act_snap_guides")},
                                                 {QStringLiteral("グリッド"), QStringLiteral("act_snap_grid")},
                                                 {QStringLiteral("すべて"), QStringLiteral("act_snap_all")},
-                                                {QStringLiteral("なし"), QStringLiteral("act_snap_none")}};
+                                                {QStringLiteral("なし"), QStringLiteral("act_snap_none")},
+                                                // (PC5 G-d: テキスト — the text tool's words before it was 縦書き文字ツール —
+                                                // stays its, not ラスタライズ ▸ テキスト's — review P2-3)
+                                                {QStringLiteral("テキスト"), QStringLiteral("act_text")}};
     return all;
 }
 

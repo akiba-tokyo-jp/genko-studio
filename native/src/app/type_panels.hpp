@@ -3,15 +3,18 @@
 #include <QComboBox>
 #include <QWidget>
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "core/json.hpp"
 
+class QAbstractListModel;
 class QCheckBox;
 class QDoubleSpinBox;
 class QLabel;
+class QListView;
 class QListWidget;
 class QListWidgetItem;
 class QPushButton;
@@ -91,6 +94,7 @@ private:
     MainWindow* window_;
     bool loading_ = false;
     bool fonts_read_ = false;
+    bool waiting_fonts_ = false;  // (the computer's fonts being read for the list: review P2-6)
 };
 
 // 段落 panel: 揃え (Photoshop's seven), 左／右／1 行目のインデント, 段落前／後のアキ, 禁則処理, 文字組み (Genko's 約物の詰め),
@@ -174,18 +178,19 @@ public:
     QComboBox* font = nullptr;
     QComboBox* category = nullptr;
     QListWidget* recent = nullptr;
-    QListWidget* glyphs = nullptr;
+    QListView* glyphs = nullptr;  // (its model the font's characters of the category, made as they are shown)
     QListWidget* variants = nullptr;
 
 private:
-    void chosen(QListWidgetItem* item);
+    void chosen(const QString& glyph);
     void fill();
 
     MainWindow* window_;
     QString font_;
     int face_ = 0;
     QString family_;  // (the Qt family the glyphs are shown in)
-    std::vector<char32_t> mapped_;
+    std::shared_ptr<const std::vector<char32_t>> mapped_;  // (the font's characters, kept a while: charmap_of)
+    QAbstractListModel* glyph_model_ = nullptr;
 };
 
 }  // namespace genko::app

@@ -13,6 +13,7 @@
 #include <QDoubleSpinBox>
 #include <QInputMethodEvent>
 #include <QLineEdit>
+#include <QListView>
 #include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
@@ -135,10 +136,13 @@ private slots:
         // the renamed: 縦書き文字ツール (T), 編集 → 検索と置換…; Shift+T turns the type tools round
         QCOMPARE(s.act("act_text")->text(), QStringLiteral("縦書き文字ツール"));
         QCOMPARE(s.act("act_replace")->text(), QStringLiteral("検索と置換…"));
-        QVERIFY(app::preferences::renamed().count(QStringLiteral("縦書き文字ツール")) == 1);
+        QVERIFY(app::preferences::renamed().count(QStringLiteral("縦書き文字ツール")) == 2);  // (テキスト, テキスト（ツール）)
         s.act("act_text_h")->trigger();
         QCOMPARE(s.window->canvas()->tool(), QStringLiteral("text_h"));
-        s.act("act_text_h")->trigger();
+        s.act("act_text_h")->trigger();  // (its button again: the same tool — review P3-7)
+        QCOMPARE(s.window->canvas()->tool(), QStringLiteral("text_h"));
+        QShortcutEvent by_key(QKeySequence(QStringLiteral("Shift+T")), nullptr);  // (its key: round)
+        QCoreApplication::sendEvent(s.act("act_text_h"), &by_key);
         QCOMPARE(s.window->canvas()->tool(), QStringLiteral("text"));
         // フォントプレビューのサイズ ▸: one checked, kept in 環境設定 → テキスト
         QVERIFY(s.act("act_type_preview_medium")->isChecked());
@@ -158,7 +162,16 @@ private slots:
         QCOMPARE(chars.size->value(), 5.0);
         // the whole: set_type
         chars.tracking->setValue(100);
+        emit chars.tracking->editingFinished();  // (review P2-5: sent once its editing ends)
         QCOMPARE(s.last(), (Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"tracking", 0.1}}));
+        // (review P2-5) the arrows stepped three times: one op, when they rest (or the editing ends)
+        const std::size_t before = s.ops.size();
+        for (const int v : {110, 120, 130}) chars.tracking->setValue(v);
+        QCOMPARE(s.ops.size(), before);
+        QTRY_COMPARE(s.ops.size(), before + 1);
+        QCOMPARE(s.last()["tracking"], Json(0.13));
+        emit chars.tracking->editingFinished();  // (nothing more to send)
+        QCOMPARE(s.ops.size(), before + 1);
         // typing over it: the letters chosen — "cd" — are the range
         s.window->edit_type_layer_inline("t1");
         app::InlineEditor* editor = s.window->canvas()->editor();
@@ -190,6 +203,26 @@ private slots:
         QCOMPARE(s.last(), (Json{{"op", "edit_type"}, {"page", 1}, {"layer_id", "t1"}, {"antialias", "none"}}));
     }
 
+    // (review P2-4) アンチック chosen for a line drawn in another face — a sound effect's, the book's font —: written, as the
+    // 台詞 panel wrote it; the panel shows what the line is drawn in
+    void antiqueIsWritten() {
+        Studio s;
+        QVERIFY(s.apply(Json{{"op", "set_meta"}, {"font_path", "/fonts/Book.ttf"}}));
+        QVERIFY(s.apply(Json{{"op", "add_line"}, {"page", 1}, {"id", "L1"}, {"text", "台詞"}, {"x_mm", 30}, {"y_mm", 30}}));
+        QVERIFY(s.apply(Json{{"op", "add_line"}, {"page", 1}, {"id", "L2"}, {"text", "ドン"}, {"x_mm", 30}, {"y_mm", 60}, {"balloon", "sfx"}}));
+        s.act("act_panel_character")->trigger();
+        app::CharacterPanel& chars = *s.window->character_panel();
+        for (const char* id : {"L1", "L2"}) {
+            s.window->on_line_selected(id, false);
+            QTRY_VERIFY(chars.isEnabled());
+            chars.refresh();
+            QCOMPARE(chars.family->currentData().toString(), std::string(id) == "L1" ? QStringLiteral("/fonts/Book.ttf") : QStringLiteral("sfx"));
+            chars.family->setCurrentIndex(chars.family->findData(QStringLiteral("antique")));
+            emit chars.family->activated(chars.family->currentIndex());
+            QCOMPARE(s.last(), (Json{{"op", "edit_line"}, {"id", id}, {"style", Json{{"font", "antique"}}}}));
+        }
+    }
+
     // 段落 panel: alignment, indents, kinsoku, on the whole (a type layer: set_type)
     void paragraphPanel() {
         Studio s;
@@ -206,6 +239,7 @@ private slots:
         QCOMPARE(s.last(), (Json{{"op", "set_type"}, {"page", 1}, {"layer_id", "t1"}, {"align", "center"}}));
         QTRY_VERIFY(center->isChecked());
         paragraph.first_indent->setValue(3);
+        emit paragraph.first_indent->editingFinished();
         QCOMPARE(s.last()["first_indent_mm"], Json(3));
         paragraph.kinsoku->setCurrentIndex(paragraph.kinsoku->findData(QStringLiteral("strong")));
         emit paragraph.kinsoku->activated(paragraph.kinsoku->currentIndex());
@@ -244,11 +278,11 @@ private slots:
         s.typed("ab");
         s.act("act_panel_glyphs")->trigger();
         app::GlyphsPanel& glyphs = *s.window->glyphs_panel();
-        QTRY_VERIFY(glyphs.glyphs->count() > 50);
+        QTRY_VERIFY(glyphs.glyphs->model()->rowCount() > 50);
         glyphs.category->setCurrentIndex(glyphs.category->findData(QStringLiteral("hiragana")));
         emit glyphs.category->activated(glyphs.category->currentIndex());
-        QVERIFY(glyphs.glyphs->count() > 50);
-        QCOMPARE(glyphs.glyphs->item(0)->data(Qt::UserRole).toString().toUcs4().front() >= 0x3040U, true);
+        QVERIFY(glyphs.glyphs->model()->rowCount() > 50);
+        QCOMPARE(glyphs.glyphs->model()->index(0, 0).data(Qt::UserRole).toString().toUcs4().front() >= 0x3040U, true);
         // typed: at the caret
         s.window->edit_type_layer_inline("t1");
         app::InlineEditor* editor = s.window->canvas()->editor();
@@ -313,6 +347,26 @@ private slots:
         QCOMPARE(s.last()["whole_word"], Json(true));
         QCOMPARE(s.record().text, std::string("a cow"));
         QCOMPARE(s.window->book().story[0].text, std::string("dog and category"));
+    }
+
+    // (review P3-1) a pattern that looks before its words: 置換 and すべてを置換 (the chosen text alone) replace as
+    // replace_text does — over the whole text, not the words cut out
+    void replaceLooksAround() {
+        Studio s;
+        s.typed("xcat ycat xcat");
+        s.responder->exec = [&](QDialog* dialog) {
+            auto* d = qobject_cast<app::ReplaceDialog*>(dialog);
+            if (d == nullptr) return 0;
+            d->regex->setChecked(true);
+            d->find->setText(QStringLiteral("(?<=x)cat"));
+            d->replace->setText(QStringLiteral("dog"));
+            d->all_layers->setChecked(false);
+            if (!d->find_next() || !d->replace_one()) return 0;
+            d->replace_all();
+            return 0;
+        };
+        s.act("act_replace")->trigger();
+        QCOMPARE(s.record().text, std::string("xdog ycat xdog"));
     }
 
     // スペルチェック…: a misspelt word and its suggestion changed (edit_type at its place), all of a word, the dictionary,
@@ -390,7 +444,23 @@ private slots:
         QVERIFY(esc != nullptr && quotes != nullptr && !esc->isChecked());
         esc->setChecked(true);
         quotes->setChecked(true);
+        // (review P3-8) 表記の表… kept with the page until 決める: やめる leaves the settings as they were
+        auto* notes = page->findChild<QPushButton*>(QStringLiteral("prefs_type_notations"));
+        QVERIFY(notes != nullptr);
+        s.responder->exec = [](QDialog* d) {
+            auto* n = qobject_cast<app::NotationDialog*>(d);
+            if (n == nullptr) return 0;
+            const int row = n->table->rowCount();
+            n->table->insertRow(row);
+            n->table->setItem(row, 0, new QTableWidgetItem(QStringLiteral("出来る")));
+            n->table->setItem(row, 1, new QTableWidgetItem(QStringLiteral("できる")));
+            return static_cast<int>(QDialog::Accepted);
+        };
+        const QString before = app::settings()->value(QStringLiteral("type/notations")).toString();
+        notes->click();
+        QCOMPARE(app::settings()->value(QStringLiteral("type/notations")).toString(), before);
         dialog.save();
+        QVERIFY(app::settings()->value(QStringLiteral("type/notations")).toString().contains(QStringLiteral("出来る")));
         QCOMPARE(app::settings()->value(QStringLiteral("type/esc_commits")).toString(), QStringLiteral("true"));
         s.typed("ab");
         s.window->edit_type_layer_inline("t1");

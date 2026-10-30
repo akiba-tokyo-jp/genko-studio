@@ -271,19 +271,30 @@ std::vector<std::pair<std::size_t, std::size_t>> tcy_spans_of(const core::StoryL
     if (!runs.is_array()) return out;
     const std::vector<std::size_t> b = core::ruby::bounds(u32(line.text));
     const auto graphemes = static_cast<std::int64_t>(b.size()) - 1;
+    // (the places of the set text that come of the record's, in order — `from` rises through them —: each run's start found
+    // by halving and its letters walked to its end, not the whole text a run: review P3-4)
+    std::vector<std::size_t> placed;
+    const std::size_t n = std::min(set.size(), from.size());
+    for (std::size_t i = 0; i < n; ++i) {
+        if (from[i] != std::u32string::npos) placed.push_back(i);
+    }
     for (const Json& run : runs) {
         if (!run.is_object() || !run.contains("char") || at(run["char"], "tcy") != Json(true)) continue;
         const std::int64_t s = run.value("start", std::int64_t{0}), e = run.value("end", std::int64_t{0});
         if (s < 0 || e > graphemes || e <= s) continue;
         const std::size_t cs = b[static_cast<std::size_t>(s)], ce = b[static_cast<std::size_t>(e)];
+        const auto first = std::lower_bound(placed.begin(), placed.end(), cs, [&](std::size_t i, std::size_t value) { return from[i] < value; });
+        if (first == placed.end()) continue;
         std::optional<std::size_t> open;
-        for (std::size_t i = 0; i <= set.size(); ++i) {
-            const bool in = i < set.size() && i < from.size() && from[i] != std::u32string::npos && from[i] >= cs && from[i] < ce && set[i] != U'\n';
+        for (std::size_t i = *first; i <= n; ++i) {
+            const bool known = i < n && from[i] != std::u32string::npos;
+            const bool in = known && from[i] >= cs && from[i] < ce && set[i] != U'\n';
             if (in && !open) open = i;
             if (!in && open) {
                 out.emplace_back(*open, i);
                 open.reset();
             }
+            if (i == n || (known && from[i] >= ce)) break;
         }
     }
     std::sort(out.begin(), out.end());

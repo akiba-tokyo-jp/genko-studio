@@ -372,6 +372,15 @@ void check_text(const std::string& text, const Options& options, Finding base, s
         Finding finding;
     };
     std::vector<Hit> hits;
+    // (the room left in the findings: the first places of the text, by where they start, kept — the rest let go as they come,
+    // so a one-letter notation over a long text makes no more than this)
+    const std::size_t room = options.most - out.size();
+    const auto order = [](const Hit& a, const Hit& b) { return std::tie(a.start, a.end) < std::tie(b.start, b.end); };
+    const auto trim = [&] {
+        if (hits.size() <= 2 * room) return;
+        std::stable_sort(hits.begin(), hits.end(), order);
+        hits.erase(hits.begin() + static_cast<std::ptrdiff_t>(room), hits.end());
+    };
     if (options.spelling) {
         const Dictionary& dictionary = Dictionary::english();
         std::set<std::string> accepted = options.user;
@@ -382,10 +391,13 @@ void check_text(const std::string& text, const Options& options, Finding base, s
             Finding f = base;
             f.kind = "spelling";
             f.word = word;
-            auto known = suggested.find(word);  // (a word said again: its suggestions once)
-            if (known == suggested.end()) known = suggested.emplace(word, dictionary.suggest(word, options.suggestions)).first;
-            f.suggestions = known->second;
+            if (options.suggestions > 0) {  // (none asked — the window's —: made for the place shown alone, suggestions_for)
+                auto known = suggested.find(word);  // (a word said again: its suggestions once)
+                if (known == suggested.end()) known = suggested.emplace(word, dictionary.suggest(word, options.suggestions)).first;
+                f.suggestions = known->second;
+            }
             hits.push_back(Hit{a, b, std::move(f)});
+            if (hits.size() >= room) break;  // (the words come in order: the first ones enough)
         }
     }
     if (options.notation) {
@@ -393,8 +405,8 @@ void check_text(const std::string& text, const Options& options, Finding base, s
             const std::u32string from = u32(n.from), to = u32(n.to);
             // (where `from` stands inside what it should become — 「出来」 → 「出来る」 — it is already right there)
             const std::size_t inside = to.find(from);
-            std::size_t at = 0;
-            while ((at = cps.find(from, at)) != std::u32string::npos) {
+            std::size_t at = 0, seen = 0;
+            while (seen < room && (at = cps.find(from, at)) != std::u32string::npos) {  // (in order: its first ones enough)
                 const bool settled = inside != std::u32string::npos && at >= inside && cps.compare(at - inside, to.size(), to) == 0;
                 if (!settled) {
                     Finding f = base;
@@ -402,12 +414,14 @@ void check_text(const std::string& text, const Options& options, Finding base, s
                     f.word = n.from;
                     f.suggestions = {n.to};
                     hits.push_back(Hit{at, at + from.size(), std::move(f)});
+                    ++seen;
+                    trim();
                 }
                 at += std::max<std::size_t>(1, from.size());
             }
         }
     }
-    std::stable_sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) { return std::tie(a.start, a.end) < std::tie(b.start, b.end); });
+    std::stable_sort(hits.begin(), hits.end(), order);
     for (Hit& h : hits) {
         h.finding.start = graphemes.at(h.start);
         h.finding.end = graphemes.end_at(h.end);
@@ -431,7 +445,7 @@ std::vector<Finding> check(const core::Document& doc, const Options& options) {
             check_text(line->text, options, base, out, suggested);
         }
         for (auto it = page->layers.rbegin(); it != page->layers.rend(); ++it) {
-            if (!core::type_text::is_type_layer(*it) || it->locked) continue;
+            if (!core::type_text::is_type_layer(*it) || !it->type || it->locked) continue;  // (a layer with no record: a broken book)
             Finding base;
             base.layer_id = it->id;
             base.page = page->index;
@@ -440,6 +454,12 @@ std::vector<Finding> check(const core::Document& doc, const Options& options) {
         if (out.size() >= options.most) break;
     }
     return out;
+}
+
+std::vector<std::string> suggestions_for(const Finding& finding, std::size_t max) {
+    if (finding.kind != "spelling") return finding.suggestions;
+    if (!finding.suggestions.empty()) return finding.suggestions;
+    return Dictionary::english().suggest(finding.word, max);
 }
 
 Json to_json(const std::vector<Finding>& findings) {

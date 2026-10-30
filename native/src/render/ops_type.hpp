@@ -87,6 +87,12 @@ bool type_style_asks(const core::Json& op);
 //                 are left as they are; a locked type layer is left as it is.
 void replace_fonts(core::OpContext& c);
 bool replace_fonts_asks(const core::Json& op);
+// PC5 G-d (review P3-6): a face of a font file past those it holds is refused ("face_index N is past the faces of F (it
+// holds M)"); a bundled font, a font not on this computer or face 0 says nothing. set_type and replace_fonts ask it.
+void check_face(const std::string& font, std::int64_t face_index);
+// The faces a record's character attributes name (the whole text's and its ranges', each with the font it is a face of:
+// its own, the whole text's, or the line's) — each checked.
+void check_faces(const core::StoryLine& record);
 
 }  // namespace type_ops
 

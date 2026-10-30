@@ -526,8 +526,10 @@ private slots:
     void theRenamedCommandsAreAllFound() {
         Book b;
         QSet<QString> now;
+        QSet<QString> names_now;  // (the commands' names alone)
         for (const auto& [action, name] : app::command_names(b.window.get())) {
             now.insert(name);
+            names_now.insert(name);
             now.insert(action->text());  // (words two commands share are told apart by their places there: decision 8)
         }
         // (a new name may also be a command that holds keys though no menu has it — a tool's settings' button, as PC4
@@ -540,7 +542,11 @@ private slots:
             QVERIFY2(alive.contains(name), qPrintable(name));
             // (PC4 E4: an old name a later command took for its own — the グラデーション panel's — is read by the mark of
             // the list or the key it is in: preferences::reused_names(), theGradientPanelsNameIsApart)
-            QVERIFY2(!now.contains(before) || app::preferences::reused_name(before), qPrintable(before));
+            // (PC5 G-d: or words another command has that stay the renamed one's — words_owner: テキスト, the text tool's, beside
+            // ラスタライズ → テキスト, whose name keeps its place)
+            QVERIFY2(!now.contains(before) || app::preferences::reused_name(before) ||
+                         (app::preferences::words_owner().contains(before) && !names_now.contains(before)),
+                     qPrintable(before));
             if (name == QStringLiteral("長方形選択ツール") || name == QStringLiteral("カット") || name == QStringLiteral("移動ツール") ||
                 name == QStringLiteral("自由な形に") || name == QStringLiteral("前面へ"))
                 ++pc3;

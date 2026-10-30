@@ -14,13 +14,16 @@
 #include <string>
 #include <vector>
 
+#include "core/command_bus.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/smart.hpp"
 #include "core/type_text.hpp"
 #include "render/ops_type.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
 #include "render/text/opentype.hpp"
+#include "render/text/shaping.hpp"
 
 namespace genko::render::type_ops {
 
@@ -97,6 +100,7 @@ bool replace_in(Json& chars, const std::function<std::optional<Becomes>(const st
 // The record with its missing fonts replaced — true when it changed.
 bool replace_record(StoryLine& record, const std::function<std::optional<Becomes>(const std::string&)>& pick) {
     bool changed = false;
+    bool style_replaced = false;
     std::int64_t face_for_style = 0;
     if (record.style.is_object() && record.style.contains("font") && record.style["font"].is_string()) {
         if (const auto to = pick(record.style["font"].get<std::string>())) {
@@ -104,6 +108,7 @@ bool replace_record(StoryLine& record, const std::function<std::optional<Becomes
             else record.style.erase("font");
             face_for_style = to->font ? to->face_index : 0;
             changed = true;
+            style_replaced = true;
         }
     }
     if (record.native_type && record.native_type->is_object()) {
@@ -125,6 +130,13 @@ bool replace_record(StoryLine& record, const std::function<std::optional<Becomes
         if (!nt.contains("char") || !nt["char"].is_object()) nt["char"] = Json::object();
         if (!nt["char"].contains("font")) nt["char"]["face_index"] = face_for_style;
         set_native_type(record, nt);
+    } else if (style_replaced && record.native_type && record.native_type->is_object()) {
+        // (review P3-5 a: face 0 now — a face an earlier replacement gave the line's font taken back with it)
+        Json nt = *record.native_type;
+        if (nt.contains("char") && nt["char"].is_object() && !nt["char"].contains("font") && nt["char"].contains("face_index")) {
+            nt["char"].erase("face_index");
+            set_native_type(record, nt);
+        }
     }
     if (record.ruby_spans) for (core::RubySpan& span : *record.ruby_spans) {
         if (!span.font) continue;
@@ -165,20 +177,26 @@ Becomes becomes_of(const Json& value, const std::string& from) {
     }
     if (b.font && (b.font->empty() || b.font->size() > 4096)) throw OpError("map: the font " + from + " is to become must be a name of 1..4096 characters");
     if (b.font && !text::face_exists(*b.font)) throw OpError("map: the font " + *b.font + " is not on this computer");
+    if (b.font) check_face(*b.font, b.face_index);  // (review P3-6)
     return b;
 }
 
 // Every record of the book (lines; the pages' and the contents' type layers but the locked ones), each given to `visit`,
-// which may change it.
-void each_record(Document& doc, const std::function<bool(StoryLine&)>& visit) {
+// which may change it; the pages (rows) of what changed — a line's page, a type layer's, the pages showing changed
+// contents — into `rows`.
+void each_record(Document& doc, const std::function<bool(StoryLine&)>& visit, std::set<std::size_t>& rows) {
     for (StoryLine& line : doc.story) {
         StoryLine record = line;
         if (visit(record)) {
             fit_point_text(record, doc);
             line = std::move(record);
+            for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+                if (doc.pages[i]->index == line.page_index) rows.insert(i);
+            }
         }
     }
     const auto on_page = [&](const core::Page& page, const std::function<core::Page&()>& edit) {
+        bool any = false;
         for (std::size_t j = 0; j < page.layers.size(); ++j) {
             const core::Layer& layer = page.layers[j];
             if (!core::type_text::is_type_layer(layer) || !layer.type || layer.locked) continue;
@@ -186,11 +204,13 @@ void each_record(Document& doc, const std::function<bool(StoryLine&)>& visit) {
             if (!visit(record)) continue;
             fit_point_text(record, doc);
             edit().layers[j].type = core::type_text::shared_record(std::move(record));
+            any = true;
         }
+        return any;
     };
     for (std::size_t i = 0; i < doc.pages.size(); ++i) {
         if (doc.is_deferred(i)) continue;
-        on_page(doc.page(i), [&]() -> core::Page& { return doc.edit_page(i); });
+        if (on_page(doc.page(i), [&]() -> core::Page& { return doc.edit_page(i); })) rows.insert(i);
     }
     std::vector<std::string> contents;
     for (const auto& [cid, sc] : doc.smart_contents) {
@@ -198,7 +218,9 @@ void each_record(Document& doc, const std::function<bool(StoryLine&)>& visit) {
     }
     for (const std::string& cid : contents) {
         const std::shared_ptr<core::Page> held = doc.smart_contents.at(cid)->page;
-        on_page(*held, [&]() -> core::Page& { return doc.edit_contents_page(cid); });
+        if (on_page(*held, [&]() -> core::Page& { return doc.edit_contents_page(cid); })) {
+            for (const std::size_t at : core::smart::pages_using(doc, cid)) rows.insert(at);
+        }
     }
 }
 
@@ -208,7 +230,8 @@ std::map<std::string, Seen> missing_fonts(const Document& doc) {
     for (const StoryLine& line : doc.story) look_at(line, seen);
     const auto on_page = [&](const core::Page& page) {
         for (const core::Layer& layer : page.layers) {
-            if (core::type_text::is_type_layer(layer) && layer.type) look_at(*layer.type, seen);
+            // (a locked one is left as it is, so not listed either: review P3-5 c)
+            if (core::type_text::is_type_layer(layer) && layer.type && !layer.locked) look_at(*layer.type, seen);
         }
     };
     for (std::size_t i = 0; i < doc.pages.size(); ++i) {
@@ -236,6 +259,37 @@ std::map<std::string, Seen> missing_fonts(const Document& doc) {
 }
 
 }  // namespace
+
+void check_face(const std::string& font, std::int64_t face_index) {
+    if (face_index <= 0 || font.find_first_of("/\\") == std::string::npos) return;  // (face 0, or a bundled font's key)
+    unsigned faces = 1;
+    try {
+        faces = text::font_info(font, 0, false).faces;
+    } catch (const std::exception&) {
+        return;  // (not on this computer, or unreadable: its face is the drawing's to say)
+    }
+    if (face_index >= static_cast<std::int64_t>(faces))
+        throw OpError("face_index " + std::to_string(face_index) + " is past the faces of " + font + " (it holds " + std::to_string(faces) + ")");
+}
+
+void check_faces(const StoryLine& record) {
+    if (!record.native_type || !record.native_type->is_object()) return;
+    const Json& nt = *record.native_type;
+    const auto font_of = [](const Json& chars) { return chars.is_object() && chars.contains("font") && chars["font"].is_string() ? chars["font"].get<std::string>() : std::string(); };
+    std::string whole = nt.contains("char") ? font_of(nt["char"]) : std::string();
+    if (whole.empty() && record.style.is_object() && record.style.contains("font") && record.style["font"].is_string()) whole = record.style["font"].get<std::string>();
+    const auto check_one = [&](const Json& chars) {
+        if (!chars.is_object() || !chars.contains("face_index") || !chars["face_index"].is_number_integer()) return;
+        const std::string own = font_of(chars);
+        check_face(own.empty() ? whole : own, chars["face_index"].get<std::int64_t>());
+    };
+    if (nt.contains("char")) check_one(nt["char"]);
+    if (nt.contains("runs") && nt["runs"].is_array()) {
+        for (const Json& run : nt["runs"]) {
+            if (run.is_object() && run.contains("char")) check_one(run["char"]);
+        }
+    }
+}
 
 bool replace_fonts_asks(const Json& op) { return !op.contains("map") && !core::py_truthy(core::get_or(op, "all", Json(false))); }
 
@@ -288,6 +342,7 @@ void replace_fonts(core::OpContext& c) {
     }
     std::int64_t replaced = 0;
     const text::TypeStyles drawn(c.doc.type_styles ? &*c.doc.type_styles : nullptr);  // (a point text's box measured under them)
+    std::set<std::size_t> rows;
     each_record(c.doc, [&](StoryLine& record) {
         if (replace_record(record, pick)) {
             ++replaced;
@@ -295,7 +350,23 @@ void replace_fonts(core::OpContext& c) {
         }
         // (a text that takes a style whose font changed: its point text's box set again)
         return styles_changed && text::sets_opentype(record) && text::shape_of(record) == "point";
-    });
+    }, rows);
+    if (styles_changed) {  // (a style's font changed: the pages of the texts typeset by the styles — each could take it)
+        for (std::size_t i = 0; i < c.doc.pages.size(); ++i) {
+            if (c.doc.is_deferred(i)) continue;
+            for (const core::Layer& layer : c.doc.page(i).layers) {
+                if (core::type_text::is_type_layer(layer) && layer.type && !layer.locked) rows.insert(i);
+            }
+        }
+        for (const StoryLine& line : c.doc.story) {
+            if (!line.native_type) continue;
+            for (std::size_t i = 0; i < c.doc.pages.size(); ++i) {
+                if (c.doc.pages[i]->index == line.page_index) rows.insert(i);
+            }
+        }
+    }
+    // (review P2-2: a page another has locked is not changed — the op refused, as set_type on it is)
+    for (const std::size_t at : rows) core::check_page_held(c.doc, at, c.actor);
     Json names = Json::array();
     for (const auto& [font, s] : seen) names.push_back(font);
     c.report = Json{{"missing", names}, {"replaced", replaced}, {"styles", styles_changed}};

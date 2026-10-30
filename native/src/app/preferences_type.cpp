@@ -10,6 +10,7 @@
 #include <QLabel>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSet>
 #include <QSpinBox>
 #include <QWidget>
 
@@ -21,6 +22,7 @@
 #include "app/theme.hpp"
 #include "app/type_dialogs.hpp"
 #include "core/prefs_table.hpp"
+#include "service/spell.hpp"
 
 namespace genko::app::preferences {
 
@@ -69,9 +71,14 @@ QWidget* type_page(QWidget* parent) {
     auto* table = new QPushButton(QStringLiteral("表記の表…"), page);
     table->setObjectName(QStringLiteral("prefs_type_notations"));
     table->setToolTip(QStringLiteral("表記の点検で直すよう知らせる書き方（例: 出来る → できる）"));
-    QObject::connect(table, &QPushButton::clicked, page, [page] {
-        NotationDialog dialog(page);
-        if (ask::exec(&dialog) == QDialog::Accepted) dialog.save();
+    // (its rows kept with the page until 決める writes them — やめる leaves the settings as they were: review P3-8)
+    QObject::connect(table, &QPushButton::clicked, page, [page, table] {
+        std::optional<std::vector<service::spell::Notation>> staged;
+        if (table->property("genko_notations").isValid())
+            staged = service::spell::notations_of(core::Json::parse(table->property("genko_notations").toString().toStdString(), nullptr, false));
+        NotationDialog dialog(page, staged);
+        if (ask::exec(&dialog) == QDialog::Accepted)
+            table->setProperty("genko_notations", QString::fromStdString(service::spell::notations_json(dialog.rows()).dump()));
     });
     rows->addRow(QStringLiteral("表記の点検"), table);
     auto* hint = new QLabel(QStringLiteral("文字の単位は「単位・定規」で決めます。ユーザー辞書と表記の表は、このパソコンのスペルチェック（編集 → スペルチェック…、genko spell）が使います。"), page);
@@ -96,12 +103,18 @@ void save_type_page(QWidget* page) {
     if (auto* box = page->findChild<QSpinBox*>(QStringLiteral("prefs_type_recent_fonts"))) store->setValue(QStringLiteral("type/recent_fonts"), box->value());
     if (auto* words = page->findChild<QPlainTextEdit*>(QStringLiteral("prefs_type_user_dictionary"))) {
         QStringList kept;
+        QSet<QString> seen;  // (each once, whatever its case: by its lowercase — review P3-8)
         for (const QString& w : words->toPlainText().split(QLatin1Char('\n'))) {
             const QString t = w.trimmed();
-            if (!t.isEmpty() && !kept.contains(t, Qt::CaseInsensitive)) kept << t;
+            if (!t.isEmpty() && !seen.contains(t.toLower())) {
+                seen.insert(t.toLower());
+                kept << t;
+            }
         }
         store->setValue(QStringLiteral("type/user_dictionary"), kept.join(QLatin1Char('\t')));
     }
+    if (auto* table = page->findChild<QPushButton*>(QStringLiteral("prefs_type_notations")); table != nullptr && table->property("genko_notations").isValid())
+        store->setValue(QStringLiteral("type/notations"), table->property("genko_notations").toString());
 }
 
 }  // namespace genko::app::preferences

@@ -125,7 +125,7 @@ StoryPanel::StoryPanel(MainWindow* window) : window_(window) {
     list = new QListWidget;
     list->setObjectName(QStringLiteral("storyList"));
     connect(list, &QListWidget::currentRowChanged, this, [this](int) { picked(); });  // (picked carries on by itself)
-    empty_note = new QLabel(QStringLiteral("このページにはまだ台詞がありません。\nテキストの道具（T）で、置きたい所をクリックします"), list->viewport());
+    empty_note = new QLabel(QStringLiteral("このページにはまだ台詞がありません。\n縦書き文字ツール（T）で、置きたい所をクリックします"), list->viewport());
     empty_note->setWordWrap(true);
     empty_note->setAlignment(Qt::AlignCenter);
     theme::role(empty_note, "empty");

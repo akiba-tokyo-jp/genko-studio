@@ -124,7 +124,8 @@ std::map<const QAction*, QString> command_names(const std::vector<QAction*>& all
     std::optional<std::unordered_map<const QAction*, QString>> walked;
     for (const QAction* action : all) {
         QString place;
-        if (count[action->text()] > 1) {
+        // (one that keeps its place in its name though its words are its alone now — PC5 G-d: ラスタライズ ▸ テキスト)
+        if (count[action->text()] > 1 || action->property("genko_placed").toBool()) {
             if (known == nullptr) known = &walked.emplace(menu_places(window));
             place = place_of(*known, action);
         }
@@ -168,10 +169,11 @@ std::map<QString, QAction*> by_text(QMainWindow* window) {
     // (a name kept before others had the same words — the words alone: the first of them in the menus, the one that had
     // them then, as the layer panel's 色調補正のレイヤー's before レイヤー → 色調補正)
     for (QAction* action : listed) out.emplace(action->text(), action);
-    // (PC5 H-0: words a command came to share by a rename are the one's that had them before — preferences::words_owner)
+    // (PC5 H-0: words a command came to share by a rename are the one's that had them before — preferences::words_owner;
+    // PC5 G-d: whatever its words are now, as the text tool's テキスト)
     for (const auto& [words, attribute] : preferences::words_owner()) {
         for (QAction* action : listed) {
-            if (action->text() == words && action->property("genko_attribute").toString() == attribute) out[words] = action;
+            if (action->property("genko_attribute").toString() == attribute) out[words] = action;
         }
     }
     return out;

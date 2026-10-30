@@ -152,6 +152,7 @@ void SpellingDialog::check() {
     options.ignore = ignored_;
     options.notations = notation_table();
     options.sfx = sfx->isChecked();
+    options.suggestions = 0;  // (the place shown's alone, as it is shown: show_current — P2-7)
     if (!all_layers->isChecked()) {
         if (const core::Page* page = window_->current_page()) options.page = page->index;
     }
@@ -181,9 +182,13 @@ void SpellingDialog::show_current() {
     }
     word->setText(qs(f->word));
     add_button->setEnabled(f->kind == "spelling");
-    for (const std::string& s : f->suggestions) suggestions->addItem(qs(s));
-    change_to->setText(f->suggestions.empty() ? qs(f->word) : qs(f->suggestions.front()));
-    if (!f->suggestions.empty()) suggestions->setCurrentRow(0);
+    // (a misspelling's suggestions made now, once a word for the window)
+    auto known = suggested_.find(f->kind + "\n" + f->word);
+    if (known == suggested_.end()) known = suggested_.emplace(f->kind + "\n" + f->word, service::spell::suggestions_for(*f)).first;
+    const std::vector<std::string>& offered = known->second;
+    for (const std::string& s : offered) suggestions->addItem(qs(s));
+    change_to->setText(offered.empty() ? qs(f->word) : qs(offered.front()));
+    if (!offered.empty()) suggestions->setCurrentRow(0);
     where->setText(QStringLiteral("%1 ページの%2（%3〜%4 字目）%5")
                        .arg(qs(f->page.repr()), f->line.empty() ? QStringLiteral("テキストレイヤー") : QStringLiteral("台詞"))
                        .arg(f->start + 1)
@@ -316,14 +321,14 @@ void SpellingDialog::add_to_dictionary() {
 
 // --- 表記の表 --------------------------------------------------------------------------------------------------------------
 
-NotationDialog::NotationDialog(QWidget* parent) : QDialog(parent) {
+NotationDialog::NotationDialog(QWidget* parent, const std::optional<std::vector<service::spell::Notation>>& given) : QDialog(parent) {
     setObjectName(QStringLiteral("notation_dialog"));
     setWindowTitle(QStringLiteral("表記の表"));
     resize(420, 360);
     table = new QTableWidget(0, 2);
     table->setHorizontalHeaderLabels({QStringLiteral("この書き方を"), QStringLiteral("こう直す")});
     table->horizontalHeader()->setStretchLastSection(true);
-    for (const service::spell::Notation& n : notation_table()) {
+    for (const service::spell::Notation& n : given ? *given : notation_table()) {
         const int row = table->rowCount();
         table->insertRow(row);
         table->setItem(row, 0, new QTableWidgetItem(qs(n.from)));
@@ -354,7 +359,7 @@ NotationDialog::NotationDialog(QWidget* parent) : QDialog(parent) {
     layout->addWidget(box);
 }
 
-void NotationDialog::save() {
+std::vector<service::spell::Notation> NotationDialog::rows() const {
     Json raw = Json::array();
     for (int row = 0; row < table->rowCount(); ++row) {
         const QTableWidgetItem* a = table->item(row, 0);
@@ -362,8 +367,11 @@ void NotationDialog::save() {
         if (a == nullptr || a->text().isEmpty()) continue;
         raw.push_back(Json{{"from", a->text().toStdString()}, {"to", b != nullptr ? b->text().toStdString() : std::string()}});
     }
-    const auto table_now = service::spell::notations_of(raw);
-    settings()->setValue(QStringLiteral("type/notations"), QString::fromStdString(service::spell::notations_json(table_now).dump()));
+    return service::spell::notations_of(raw);
+}
+
+void NotationDialog::save() {
+    settings()->setValue(QStringLiteral("type/notations"), QString::fromStdString(service::spell::notations_json(rows()).dump()));
 }
 
 // --- 見つからないフォントを解決 -------------------------------------------------------------------------------------------

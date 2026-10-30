@@ -635,8 +635,7 @@ QVariant encode(const Pref& p, const Json& value) {
 }
 
 const std::vector<std::string>& reused_names() {
-    // (PC5 G-d: テキスト — the text tool's before G-d, ラスタライズ ▸'s own since)
-    static const std::vector<std::string> all{"グラデーション", "書き出し…", "テキスト"};
+    static const std::vector<std::string> all{"グラデーション", "書き出し…"};
     return all;
 }
 

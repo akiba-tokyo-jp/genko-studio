@@ -6,6 +6,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/json.hpp"
@@ -132,7 +133,11 @@ private:
     std::vector<Spot> spots() const;
     // Where the words stand in a text (code points), as the options say (core::Error as the pattern's).
     std::vector<std::pair<std::int64_t, std::int64_t>> places(const std::string& text) const;
-    std::string replacement(const std::string& matched) const;
+    // What replace_text puts for the match at [start, end) (code points) of `text`: its template read as re.sub reads it,
+    // over the whole text — a pattern that looks before or after its words finds them as it would (review P3-1).
+    std::string replacement(const std::string& text, std::int64_t start, std::int64_t end) const;
+    // The whole text with every match replaced (re.subn), and how many.
+    std::pair<std::string, std::int64_t> replaced(const std::string& text) const;
 
     MainWindow* window_ = nullptr;
     // (the place found last: its text's target and words, code points)

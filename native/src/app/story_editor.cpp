@@ -661,29 +661,20 @@ void ReplaceDialog::replace_all() {
         const std::optional<Json> target = window_->type_target(true);
         const core::StoryLine* record = target ? window_->type_record(*target) : nullptr;
         if (record == nullptr || find->text().isEmpty()) return;
-        std::vector<std::pair<std::int64_t, std::int64_t>> at;
+        std::pair<std::string, std::int64_t> out;
         try {
-            at = places(record->text);
+            out = replaced(record->text);  // (re.subn over the whole text, as replace_text: review P3-1)
         } catch (const std::exception& error) {
             found->setText(QStringLiteral("探せませんでした（%1）").arg(QString::fromUtf8(error.what())));
             return;
         }
-        if (at.empty()) {
-            found->setText(QStringLiteral("見つかりません"));
+        if (out.second == 0 || out.first == record->text) {
+            found->setText(out.second == 0 ? QStringLiteral("見つかりません") : QStringLiteral("置き換えても同じです"));
             return;
         }
-        const std::u32string cps = core::ruby::code_points(record->text);
-        std::u32string out;
-        std::int64_t from = 0;
-        for (const auto& [s, e] : at) {
-            out += cps.substr(static_cast<std::size_t>(from), static_cast<std::size_t>(s - from));
-            out += core::ruby::code_points(replacement(core::ruby::to_utf8(std::u32string_view(cps).substr(static_cast<std::size_t>(s), static_cast<std::size_t>(e - s)))));
-            from = e;
-        }
-        out += cps.substr(static_cast<std::size_t>(from));
-        Json op{{"op", "edit_type"}, {"text", core::ruby::to_utf8(out)}};
+        Json op{{"op", "edit_type"}, {"text", out.first}};
         for (const auto& [key, value] : target->items()) op[key] = value;
-        if (window_->apply_ops(Json::array({op}))) window_->flash(QStringLiteral("%1 か所を置き換えました（元に戻すは 1 回）").arg(at.size()), 4000);
+        if (window_->apply_ops(Json::array({op}))) window_->flash(QStringLiteral("%1 か所を置き換えました（元に戻すは 1 回）").arg(out.second), 4000);
         last_.reset();
         return;
     }
@@ -738,13 +729,26 @@ std::vector<std::pair<std::int64_t, std::int64_t>> ReplaceDialog::places(const s
     return out;
 }
 
-std::string ReplaceDialog::replacement(const std::string& matched) const {
-    // (the words found as replace_text replaces them: its template read as re.sub reads it)
+std::string ReplaceDialog::replacement(const std::string& text, std::int64_t start, std::int64_t end) const {
+    // (the words found as replace_text replaces them: its template read as re.sub reads it, the match in its text)
     const std::string words = utf8(find->text());
     const std::string body = regex->isChecked() ? words : escaped(words);
     const core::PyPattern pattern(whole_word->isChecked() ? "(?<!\\w)(?:" + body + ")(?!\\w)" : body, case_sensitive->isChecked() ? 0 : core::PyPattern::kIgnoreCase);
     core::PyReBudget budget;
-    return pattern.subn(utf8(replace->text()), matched, nullptr, budget).first;
+    std::vector<core::PyReMatch> matches;
+    (void)pattern.subn(utf8(replace->text()), text, &matches, budget);
+    for (const core::PyReMatch& m : matches) {
+        if (static_cast<std::int64_t>(m.start) == start && static_cast<std::int64_t>(m.end) == end) return core::ruby::to_utf8(m.with);
+    }
+    throw core::Error("not_found", "the words found are not where they were");
+}
+
+std::pair<std::string, std::int64_t> ReplaceDialog::replaced(const std::string& text) const {
+    const std::string words = utf8(find->text());
+    const std::string body = regex->isChecked() ? words : escaped(words);
+    const core::PyPattern pattern(whole_word->isChecked() ? "(?<!\\w)(?:" + body + ")(?!\\w)" : body, case_sensitive->isChecked() ? 0 : core::PyPattern::kIgnoreCase);
+    core::PyReBudget budget;
+    return pattern.subn(utf8(replace->text()), text, nullptr, budget);
 }
 
 bool ReplaceDialog::find_next() {
@@ -813,10 +817,9 @@ bool ReplaceDialog::replace_one() {
         return false;
     }
     const std::u32string cps = core::ruby::code_points(it->text);
-    const std::string matched = core::ruby::to_utf8(std::u32string_view(cps).substr(static_cast<std::size_t>(last_->start), static_cast<std::size_t>(last_->end - last_->start)));
     std::string with;
     try {
-        with = replacement(matched);
+        with = replacement(it->text, last_->start, last_->end);
     } catch (const std::exception& error) {
         found->setText(QStringLiteral("置き換えられませんでした（%1）").arg(QString::fromUtf8(error.what())));
         return false;

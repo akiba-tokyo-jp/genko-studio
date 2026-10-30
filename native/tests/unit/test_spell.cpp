@@ -13,6 +13,7 @@
 #include "core/command_bus.hpp"
 #include "core/model.hpp"
 #include "core/ruby.hpp"
+#include "core/type_text.hpp"
 #include "render/ops_registry.hpp"
 #include "service/spell.hpp"
 #include "testsupport.hpp"
@@ -177,6 +178,49 @@ private slots:
         const auto found = sp::check(doc, options);
         QVERIFY2(clock.elapsed() < 10000, std::to_string(clock.elapsed()).c_str());
         QVERIFY(found.size() >= 400);
+    }
+
+    // (review P1-1) a type layer with no record — a broken book, opened read-only —: passed over, never read
+    void aTypeLayerWithNoRecord() {
+        core::Document doc = book();
+        core::Layer broken;
+        broken.id = "t_broken";
+        broken.role = core::LayerRole::User;
+        broken.kind = core::LayerKind::Type;
+        doc.edit_page(1).layers.push_back(broken);
+        QVERIFY(core::type_text::is_type_layer(doc.page(1).layers.back()) && !doc.page(1).layers.back().type);
+        const auto found = sp::check(doc, sp::Options{});
+        QVERIFY(std::none_of(found.begin(), found.end(), [](const sp::Finding& f) { return f.layer_id == "t_broken"; }));
+        QVERIFY(std::any_of(found.begin(), found.end(), [](const sp::Finding& f) { return f.layer_id == "t1"; }));
+    }
+
+    // (review P2-7) none asked: no suggestions made in the check — the window makes the shown place's (suggestions_for);
+    // (P3-9) a one-letter notation over a long text: no more places made than the findings take
+    void suggestionsWhenShownAndTheRoom() {
+        sp::Options options;
+        options.suggestions = 0;
+        options.notation = false;
+        const auto found = sp::check(book(), options);
+        QVERIFY(!found.empty());
+        for (const sp::Finding& f : found) QVERIFY(f.suggestions.empty());
+        const auto teh = std::find_if(found.begin(), found.end(), [](const sp::Finding& f) { return f.word == "Teh"; });
+        QVERIFY(teh != found.end());
+        QVERIFY(sp::suggestions_for(*teh).front() == "The");
+        core::Document doc = book();
+        std::string kana;
+        for (int i = 0; i < 20000; ++i) kana += "の";
+        doc.story[0].text = kana;
+        sp::Options few;
+        few.spelling = false;
+        few.most = 50;
+        for (int i = 0; i < 40; ++i) few.notations.push_back(sp::Notation{"の", "ノ"});
+        QElapsedTimer clock;
+        clock.start();
+        const auto places = sp::check(doc, few);
+        QCOMPARE(places.size(), std::size_t{50});
+        QCOMPARE(places.front().start, std::int64_t{0});
+        QCOMPARE(places.back().start, std::int64_t{1});  // (each of the 40 rows found at 0 first, then at 1: the first 50 by place)
+        QVERIFY2(clock.elapsed() < 5000, std::to_string(clock.elapsed()).c_str());
     }
 };
 
