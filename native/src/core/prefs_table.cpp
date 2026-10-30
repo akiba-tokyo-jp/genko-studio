@@ -194,6 +194,9 @@ std::vector<Pref> make_table() {
         number("guidesGridAndSlices.gridSpacingMm", "guides/grid_mm", "5", 0.5, 100, "グリッドの細い線の間隔（mm。グリッド線 ÷ 分割数）"),
         integer("guidesGridAndSlices.subdivisions", "guides/grid_subdivisions", 5, 1, 100, "分割数（太い線の間の細い線の数）"),
         choice("guidesGridAndSlices.gridUnit", "guides/grid_unit", "mm", {"mm", "cm", "in", "pt", "pica"}, "グリッド線の単位"),
+        // (PC5 J-b: the slices' two — their lines' colour and their numbers shown)
+        colour("guidesGridAndSlices.sliceColor", "guides/slice_color", "#38b5ff", "スライスの線の色"),
+        boolean("guidesGridAndSlices.showSliceNumbers", "guides/slice_numbers", true, "スライス番号を表示"),
         // rawDefaults (Camera Raw)
         choice("rawDefaults.colorSpace", "raw/space", "adobe-rgb-compat", {"prophoto-compat", "adobe-rgb-compat", "srgb", "display-p3"}, "色空間"),
         choice("rawDefaults.bitDepth", "raw/depth", "16", {"8", "16"}, "ビット数"),
@@ -253,6 +256,8 @@ std::vector<Pref> make_table() {
         // (PC5 J-c・J-d1: 表示 → 表示・非表示 ▸ 注釈・カウント)
         boolean("view.show.notes", "view/show_notes", true, "注釈", Apply::NewWindow),
         boolean("view.show.count", "view/show_count", true, "カウント", Apply::NewWindow),
+        // (PC5 J-b: 表示 → 表示・非表示 ▸ スライス)
+        boolean("view.show.slices", "view/show_slices", true, "スライス", Apply::NewWindow),
         // state (what the tools and the windows remember)
         memory("state.3d.*", "3d/*"),
         memory("state.ai.*", "ai/*"),

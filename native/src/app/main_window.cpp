@@ -847,6 +847,7 @@ void MainWindow::show_page() {
     if (layer_comps_panel_ != nullptr && layer_comps_dock_ != nullptr && layer_comps_dock_->isVisible()) layer_comps_panel_->refresh();  // (PC5 J-a)
     if (notes_panel_ != nullptr) refresh_notes();  // (PC5 J-c: the chosen note while the page has it)
     if (count_groups_ != nullptr) refresh_measure();  // (PC5 J-d1: the ものさしツール's readout, the count groups)
+    if (canvas_->slice_view) refresh_slices();  // (PC5 J-b: the page's slices made again, the chosen one while it is there)
     if (patterns_panel_ != nullptr && patterns_dock_ != nullptr && patterns_dock_->isVisible()) patterns_panel_->refresh();  // (PC4 E3)
     if (lines_later_) {
         lines_timer_.start();

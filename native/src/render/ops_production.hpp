@@ -13,7 +13,8 @@
 //
 //   J-a (render/ops_layer_comps.cpp, layer-comps@1): new_layer_comp, update_layer_comp, apply_layer_comp, set_layer_comp,
 //       duplicate_layer_comp, delete_layer_comp, clear_layer_comp_warnings — written (not frames any more)
-//   J-b (render/ops_slices.cpp, slices@1): add_slice, set_slice, delete_slices, divide_slice, slices_from_guides
+//   J-b (render/ops_slices.cpp, slices@1): add_slice, set_slice, delete_slices, divide_slice, slices_from_guides — written (not
+//       frames any more; and the question slices_info)
 //   J-c (render/ops_annotations.cpp, annotations@1): add_annotation, set_annotation, delete_annotations
 //   J-d1 (render/ops_measure.cpp, measure@1): set_measurement_scale, add_count, remove_count, move_count, clear_count,
 //       new_count_group, delete_count_group, set_count_group, set_ruler_line, straighten_layer — written (not frames any

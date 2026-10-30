@@ -379,11 +379,17 @@ private slots:
         desk.trigger("act_grid");
         QVERIFY(pane->grid_visible);
         const auto keys = pane->extra_keys();
-        for (const char* key : {"notes", "count", "ruler"})
+        for (const char* key : {"notes", "count", "ruler", "slices"})  // (PC5 J-b: スライス, H-c's homework)
             QVERIFY2(std::find(keys.begin(), keys.end(), QString::fromLatin1(key)) != keys.end(), key);
         QCOMPARE(pane->extra_shown(QStringLiteral("notes")), c->extra_shown(QStringLiteral("notes")));
         desk.trigger("act_show_notes");
         QCOMPARE(pane->extra_shown(QStringLiteral("notes")), c->extra_shown(QStringLiteral("notes")));
+        // (PC5 J-b: its own page's slices, by 表示・非表示 ▸ スライス as the canvas)
+        QVERIFY(pane->slice_view && pane->slice_view() != nullptr);
+        QCOMPARE(pane->extra_shown(QStringLiteral("slices")), c->extra_shown(QStringLiteral("slices")));
+        desk.trigger("act_show_slices");
+        QCOMPARE(pane->extra_shown(QStringLiteral("slices")), c->extra_shown(QStringLiteral("slices")));
+        desk.trigger("act_show_slices");
         desk.trigger("act_extras");
         QCOMPARE(pane->extras_shown, c->extras_shown);
         QVERIFY(!pane->extras_shown);

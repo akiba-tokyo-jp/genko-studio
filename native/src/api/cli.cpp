@@ -51,6 +51,7 @@
 #include "formats/datasets.hpp"
 #include "render/ops_annotations.hpp"
 #include "render/ops_measure.hpp"
+#include "render/ops_slices.hpp"
 #include "render/ops_layer_comps.hpp"
 #include "render/ops_variables.hpp"
 #include "formats/export.hpp"
@@ -307,6 +308,7 @@ int inspect(const QStringList& args, bool ascii) {
     bool variables = false;  // (PC5 I-d, variables.list: --variables — the book's variables and data sets)
     bool notes = false;  // (PC5 J-c, the C++ build's own: --annotations [--page N], notes.list — the pages' notes)
     bool measuring = false;  // (PC5 J-d1, the C++ build's own: --measure [--page N], image.analysis.info — the pages' measuring)
+    bool slicing = false;  // (PC5 J-b, the C++ build's own: --slices [--page N], slice.list — the pages' slices, the auto ones too)
     const auto value_of = [&](qsizetype& i, const char* name, QString& into) -> bool {
         const QString& arg = args[i];
         const QString flag = QString::fromLatin1(name);
@@ -338,6 +340,8 @@ int inspect(const QStringList& args, bool ascii) {
             notes = true;
         } else if (arg == QLatin1String("--measure")) {
             measuring = true;
+        } else if (arg == QLatin1String("--slices")) {
+            slicing = true;
         } else if (arg == QLatin1String("--stroke")) {
             if (i + 1 >= args.size()) return usage("argument --stroke: expected one argument");
             stroke = args[++i];
@@ -390,8 +394,10 @@ int inspect(const QStringList& args, bool ascii) {
     }
     if (!profile.isEmpty() && !pixel.isEmpty()) return usage("argument --profile: not with --pixel");
     if (!area_text.isEmpty() && page_text.isEmpty()) return usage("argument --area, --page: --area <area> with --page <N>");
-    if (!page_text.isEmpty() && area_text.isEmpty() && !paths && !comps && !notes && !measuring)
+    if (!page_text.isEmpty() && area_text.isEmpty() && !paths && !comps && !notes && !measuring && !slicing)
         return usage("argument --page: only with --area, --paths, --comps or --annotations");  // (and --measure: the words as before)
+    if (slicing && (measuring || notes || comps || variables || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty()))
+        return usage("argument --slices: not with --measure, --annotations, --comps, --variables, --paths, --area, --pixel or --profile");
     if (measuring && (notes || comps || variables || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty()))
         return usage("argument --measure: not with --annotations, --comps, --variables, --paths, --area, --pixel or --profile");
     if (notes && (comps || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty()))
@@ -464,6 +470,18 @@ int inspect(const QStringList& args, bool ascii) {
             core::Json one = render::layer_comps::listing(doc.page(i));
             one["page"] = doc.pages[i]->index.json();
             pages.push_back(std::move(one));
+        }
+        if (page_number && pages.empty()) throw core::Error("key", "no page " + std::to_string(*page_number));
+        print_json(core::Json{{"pages", std::move(pages)}}, ascii);
+        return 0;
+    }
+    if (slicing) {  // (PC5 J-b, slice.list: each page's slices — the user, layer-based and auto ones, numbered, their options)
+        const core::Document& doc = loaded.document;
+        core::Json pages = core::Json::array();
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (page_number && doc.pages[i]->index != core::Num(*page_number)) continue;
+            if (doc.is_deferred(i)) continue;
+            pages.push_back(render::slices::listing(doc, doc.page(i)));
         }
         if (page_number && pages.empty()) throw core::Error("key", "no page " + std::to_string(*page_number));
         print_json(core::Json{{"pages", std::move(pages)}}, ascii);
@@ -934,6 +952,88 @@ int export_comps(const Arguments& a, bool ascii) {
     return 0;
 }
 
+// PC5 J-b (file.export.saveForWebLegacy by slices, the C++ build's own): `genko export <book> <folder> --format slices [--page N]
+// [--web '<Save for Web's settings, PhotoCraft's parameters>'] [--slices all|user] [--numbers N,N…] [--html] [--images NAME]
+// [--json]` — page N's slices (1 by default; the auto ones too, or only the user and layer-based ones, or those numbered) each
+// optimised as Web 用に保存 writes it, in the folder's images/ (formats::save_slices_for_web), and with --html the HTML table
+// of them (<base>.html); the paths one a line, or with --json {"ok": true, "count", "files", "html", "bytes", "slices"}.
+int export_slices(const Arguments& a, bool ascii) {
+    std::int64_t wanted = 1;
+    if (const auto value = a.value("--page")) {
+        const auto n = int_option(*value);
+        if (!n) return usage("genko export: argument --page: invalid int value: " + core::py_repr_str(value->toStdString()));
+        wanted = *n;
+    }
+    formats::WebSettings settings;
+    formats::WebSize size;
+    if (const auto text = a.value("--web")) {
+        try {
+            const Json params = core::parse_python_json(text->toStdString());
+            settings = formats::web_settings_from_json(params);
+            size = formats::web_size_from_json(params);
+        } catch (const core::Error& error) {
+            return usage(std::string("genko export: argument --web: ") + error.what());
+        } catch (const std::exception&) {
+            return usage("genko export: argument --web: Save for Web's settings as JSON, e.g. '{\"preset\": \"PNG-24\"}'");
+        }
+    }
+    formats::WebSliceOptions options;
+    options.html = a.flag("--html");
+    if (const auto which = a.value("--slices")) {
+        if (*which != QLatin1String("all") && *which != QLatin1String("user")) return usage("genko export: argument --slices: all or user");
+        options.user_only = *which == QLatin1String("user");
+    }
+    if (const auto numbers = a.value("--numbers")) {
+        for (const QString& part : numbers->split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+            const auto n = int_option(part.trimmed());
+            if (!n || *n < 1 || *n > 1000000) return usage("genko export: argument --numbers: the slices' numbers as shown, e.g. 1,3");
+            options.numbers.push_back(static_cast<int>(*n));
+        }
+        if (options.numbers.empty()) return usage("genko export: argument --numbers: the slices' numbers as shown, e.g. 1,3");
+    }
+    if (const auto images = a.value("--images")) {
+        options.images = images->toStdString();
+        if (options.images.find("..") != std::string::npos || options.images.find('/') != std::string::npos || options.images.find('\\') != std::string::npos)
+            return usage("genko export: argument --images: a folder's name in the folder given (\"\": beside the HTML)");
+    }
+    const fs::path src = path_arg(a.positional[0]);
+    const fs::path out = path_arg(a.positional[1]);
+    const auto loaded = storage::load_document(src);
+    const core::Document& doc = loaded.document;
+    std::optional<std::size_t> at;
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.pages[i]->index == core::Num(wanted) && !doc.is_deferred(i)) at = i;
+    }
+    if (!at) return usage("no page " + std::to_string(wanted), 1);
+    // (the coordinator's P3-8, F-c's write_guard: never into the book or over a file it links — every file asked first)
+    const formats::WriteGuard guard = formats::write_guard(doc, src);
+    options.check = [guard](const fs::path& file) { formats::check_target(guard, file); };
+    formats::WebSlicesResult written;
+    try {
+        written = formats::save_slices_for_web(doc, *at, settings, size, out, options);
+    } catch (const core::Error& error) {
+        if (std::string_view(error.code()) == "refused_target") return usage(std::string("genko export: ") + error.what());
+        if (std::string_view(error.code()) == "value" || std::string_view(error.code()) == "image_too_large") return fail(error.what(), "export", ascii, 1);
+        throw;
+    }
+    core::Json listed = core::Json::array();
+    std::string lines;
+    for (const fs::path& f : written.files) {
+        listed.push_back(core::path_to_utf8(f));
+        lines += core::path_to_utf8(f) + "\n";
+    }
+    if (written.html) lines += core::path_to_utf8(*written.html) + "\n";
+    if (a.flag("--json")) {
+        core::Json json{{"ok", true}, {"count", written.files.size()}, {"files", listed}, {"html", written.html ? core::Json(core::path_to_utf8(*written.html)) : core::Json(nullptr)},
+                        {"bytes", static_cast<std::int64_t>(written.bytes)}, {"slices", written.slices}, {"width", written.width}, {"height", written.height}};
+        if (!written.notes.empty()) json["notes"] = written.notes;
+        print_json(json, ascii);
+    } else {
+        write_text(lines, stdout);
+    }
+    return 0;
+}
+
 // PC5 I-d (file.export.dataSetsAsFiles, データセットからファイル…): `genko export <book> <folder> --format datasets [--page N]
 // [--dataset-format png|jpg|psd|…] [--datasets NAME,NAME…] [--naming "{name}|{index}|{document}"] [--quality 0..12] [--json]` —
 // each data set (or those named) applied to a copy of the book and its pages (page N; none: the pages its variables are on) written a file each in the folder (formats::export_data_sets);
@@ -1017,7 +1117,9 @@ int export_command(const QStringList& args, bool ascii) {
                                           // (PC5 J-a, --format comps: レイヤーカンプからファイル…'s choices)
                                           {"--comp-format", true}, {"--comps", true},
                                           // (PC5 I-d, --format datasets: データセットからファイル…'s choices)
-                                          {"--dataset-format", true}, {"--datasets", true}, {"--naming", true}};
+                                          {"--dataset-format", true}, {"--datasets", true}, {"--naming", true},
+                                          // (PC5 J-b, --format slices: Web 用に保存 by slices)
+                                          {"--web", true}, {"--slices", true}, {"--numbers", true}, {"--html", false}, {"--images", true}};
     Arguments a;
     if (auto error = parse_arguments(args, kOptions, 2, "src, out", a)) return usage("genko export: " + *error);
     // PC2a (file.export.colorLookupTables, the C++ build's own: not among Python's formats, whose choices it leaves as they
@@ -1028,6 +1130,10 @@ int export_command(const QStringList& args, bool ascii) {
     // PC5 J-a (file.export.layerCompsToFiles, the C++ build's own): a page's layer comps, a file each
     if (a.value("--format") == std::optional<QString>(QStringLiteral("comps"))) return export_comps(a, ascii);
     if (a.value("--comp-format") || a.value("--comps")) return usage("genko export: argument --comp-format, --comps: only with --format comps");
+    // PC5 J-b (file.export.saveForWebLegacy by slices): a page's slices, a file each, and their HTML
+    if (a.value("--format") == std::optional<QString>(QStringLiteral("slices"))) return export_slices(a, ascii);
+    if (a.value("--web") || a.value("--slices") || a.value("--numbers") || a.flag("--html") || a.value("--images"))
+        return usage("genko export: argument --web, --slices, --numbers, --html, --images: only with --format slices");
     // PC5 I-d (file.export.dataSetsAsFiles): the book's data sets, a file each
     if (a.value("--format") == std::optional<QString>(QStringLiteral("datasets"))) return export_datasets(a, ascii);
     if (a.value("--dataset-format") || a.value("--datasets") || a.value("--naming"))

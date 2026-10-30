@@ -233,6 +233,34 @@ SaveForWebDialog::SaveForWebDialog(QWidget* parent, std::shared_ptr<const core::
     rows->addRow(look::section(QStringLiteral("画像サイズ")));
     rows->addRow(QStringLiteral("パーセント"), percent);
     rows->addRow(QStringLiteral("画質（再サンプル）"), resample);
+    // (PC5 J-b: by the page's slices — a file each in a folder's images/, and their HTML table)
+    by_slices = new QCheckBox(QStringLiteral("スライスごとに書き出す"));
+    by_slices->setObjectName(QStringLiteral("web_by_slices"));
+    which_slices = new QComboBox;
+    which_slices->setObjectName(QStringLiteral("web_which_slices"));
+    which_slices->addItem(QStringLiteral("すべてのスライス"), QStringLiteral("all"));
+    which_slices->addItem(QStringLiteral("すべてのユーザー定義スライス"), QStringLiteral("user"));
+    with_html = new QCheckBox(QStringLiteral("HTML も書き出す"));
+    with_html->setObjectName(QStringLiteral("web_with_html"));
+    with_html->setChecked(true);
+    {
+        const core::Page& p = doc_->page(page_);
+        const bool any = p.slices && !p.slices->list.empty();
+        by_slices->setChecked(any);
+        by_slices->setEnabled(any);
+        by_slices->setToolTip(any ? QStringLiteral("スライスごとの画像をフォルダーの images に書き、HTML の表でつなぎます")
+                                  : QStringLiteral("このページにはスライスがありません（スライスツールで作ります）"));
+    }
+    const auto slices_shown = [this] {
+        which_slices->setEnabled(by_slices->isChecked());
+        with_html->setEnabled(by_slices->isChecked());
+    };
+    connect(by_slices, &QCheckBox::toggled, this, slices_shown);
+    slices_shown();
+    rows->addRow(look::section(QStringLiteral("スライス")));
+    rows->addRow(QString(), by_slices);
+    rows->addRow(QStringLiteral("書き出すスライス"), which_slices);
+    rows->addRow(QString(), with_html);
     look::quiet_labels(rows);
     auto* left = new QVBoxLayout;
     left->addWidget(views, 1);
@@ -306,6 +334,14 @@ formats::WebSize SaveForWebDialog::size() const {
 }
 
 QString SaveForWebDialog::extension() const { return QString::fromLatin1(formats::web_extension(settings().format).data()); }
+
+std::optional<formats::WebSliceOptions> SaveForWebDialog::slice_options() const {
+    if (by_slices == nullptr || !by_slices->isEnabled() || !by_slices->isChecked()) return std::nullopt;
+    formats::WebSliceOptions out;
+    out.user_only = which_slices->currentData().toString() == QLatin1String("user");
+    out.html = with_html->isChecked();
+    return out;
+}
 
 void SaveForWebDialog::preset_chosen() {
     const QString name = preset->currentData().toString();

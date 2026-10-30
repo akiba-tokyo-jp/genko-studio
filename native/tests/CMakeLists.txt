@@ -227,6 +227,12 @@ genko_test(test_annotations SOURCES unit/test_annotations.cpp DEPS genko_test_su
 # without a change), the marks carried by the page size ops, PSD's 1074 and 1080, a .pcraft's measurement, MCP's apply_ops
 # not taking the ops.
 genko_test(test_measure SOURCES unit/test_measure.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service LABELS unit TIMEOUT 600)
+# PC5 J-b (slices@1, SPEC.md PROD-01「スライス」): the slices as PhotoCraft's tests check them (the auto slices and the
+# numbering, user slices and their options, promote and divide, the slices from the guides and clearing them, a layer-based
+# slice following its layer and its effects and going with it), each edge rounded alone (neighbours share it), the page size
+# ops and a duplicated page carrying them, PSD's 1050 (versions 6 and 7) onto a page and back, a .pcraft's slices, MCP's
+# apply_ops not taking the ops.
+genko_test(test_slices SOURCES unit/test_slices.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service LABELS unit TIMEOUT 600)
 # PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame; and PC2a's tone kinds
@@ -607,6 +613,13 @@ genko_test(test_contract_measure SOURCES contract/test_contract_measure.cpp DEPS
 # as before.
 genko_test(test_contract_layers SOURCES contract/test_contract_layers.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC5 J-b (slices@1): the slices through the command line (apply, undo, inspect --slices, the question slices_info saving
+# nothing; a layer-based slice following its layer and going with it; slicesFromGuides, divide, clear), the PSD's 1050 as
+# psd-tools reads it (written, read back, as read while unchanged, anew, gone; a file psd-tools made), Web 用に保存 by
+# slices (genko export --format slices: the pictures and the HTML table, the user slices, scaled, the write guard), a
+# .pcraft's slices (upstream's reader with $GENKO_PCRAFT_CHECK).
+genko_test(test_contract_slices SOURCES contract/test_contract_slices.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 # PC3 C-e through the command line: every kind of page turned (inspect --pixel), undone and redone; a page of its own paper
@@ -777,6 +790,10 @@ if(GENKO_BUILD_APP)
   # PC5 J-d1 (measure@1): 計測スケールを設定 ▸, the ものさしツール (the line, its readout, the protractor, 消去, レイヤーの角度補正
   # the same as the op), the カウントツール (marks put, moved, taken away; the groups and their options), 表示 → カウント.
   genko_test(test_gui_measure SOURCES gui/test_gui_measure.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC5 J-b (slices@1): the スライスツール (a drag, Shift, a click; ガイドからスライスを作成), the スライス選択ツール (chosen, moved,
+  # sized, promoted, divided, deleted, スライスオプション), 新規レイヤーベースのスライス, 表示 → スライス・スライスをロック・スライスを
+  # 消去・スナップ先 → スライス, 環境設定 → ガイド・グリッド・スライス's two, Web 用に保存 by slices — each change one Undo.
+  genko_test(test_gui_slices SOURCES gui/test_gui_slices.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   # PC5 I-e: ファイル → 自動処理 ▸ (バッチ…・ドロップレットを作成…・条件付きモード変更…・画像を合わせる…・レンズ補正…) and スクリプト ▸
   # (画像プロセッサー…・スクリプトイベントマネージャー…・参照…): their places, the windows asked, the script events raised by the
   # person's save (never the automatic one) and not run once their script changed

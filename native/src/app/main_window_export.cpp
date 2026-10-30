@@ -224,6 +224,42 @@ void MainWindow::save_for_web() {
     if (!at) return;
     SaveForWebDialog dialog(this, doc, *at);
     if (ask::exec(&dialog) != QDialog::Accepted) return;
+    // (PC5 J-b: by the page's slices — a folder asked, a file each in its images/ and their HTML, the write guard asked of each)
+    if (std::optional<formats::WebSliceOptions> by = dialog.slice_options()) {
+        try {
+            const formats::WebSettings settings = dialog.settings();
+            const formats::WebSize size = dialog.size();
+            const QString folder = ask::existing_dir(this, QStringLiteral("Web 用に保存（スライスの書き出し先のフォルダー）"));
+            if (folder.isEmpty()) return;
+            const fs::path where = fpath(folder);
+            if (writes_over_a_source(where)) return;
+            by->check = [guard = export_guard()](const fs::path& file) { formats::check_target(guard, file); };
+            // (PC5 J-b review P3-3, PC4 F-c's rule: files of those names there — asked once, before anything is written)
+            int there = 0;
+            for (const fs::path& file : formats::web_slice_files(*doc, *at, settings, size, where, *by)) {
+                std::error_code ec;
+                if (fs::exists(file, ec)) ++there;
+            }
+            if (there > 0 && !ask::question(this, QStringLiteral("Web 用に保存"),
+                                            QStringLiteral("書き出し先に同じ名前のファイルが %1 個あります。置き換えますか？\n%2")
+                                                .arg(there)
+                                                .arg(QDir::toNativeSeparators(folder)))) {
+                return;
+            }
+            const formats::WebSlicesResult written =
+                off_ui([doc, page = *at, settings, size, where, options = *by] { return formats::save_slices_for_web(*doc, page, settings, size, where, options); });
+            QString words = QStringLiteral("スライスを %1 個、Web 用に保存しました（%2）: %3")
+                                .arg(written.slices)
+                                .arg(human_bytes(written.bytes))
+                                .arg(QDir::toNativeSeparators(qpath(where)));
+            if (!written.notes.empty()) words += QStringLiteral("。") + notes_text(written.notes);
+            flash(words, 6000);
+            script_event(service::script_events::Event::Export);  // (PC5 I-e: スクリプトイベント)
+        } catch (const std::exception& error) {
+            flash(QStringLiteral("Web 用に保存できませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
+        }
+        return;
+    }
     try {
         const formats::WebSettings settings = dialog.settings();
         const formats::WebSize size = dialog.size();

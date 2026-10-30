@@ -476,7 +476,8 @@ private slots:
             "frame_from_layers",  // (PC5 I-b: groups@1, レイヤーからのフレーム — SPEC.md AUTO-01)
             "set_variables", "set_data_sets", "apply_data_set",  // (PC5 I-d: variables@1, 変数とデータセット — SPEC.md AUTO-01)
             "measure_info",  // (PC5 J-d1: measure@1's question, image.analysis.info — SPEC.md PROD-01)
-            "bake_layer_styles"};  // (PC5 I-a: すべてのレイヤー効果を統合 — SPEC.md AUTO-01; delete_layers, duplicate_layers, ungroup_layers are core's)
+            "bake_layer_styles",  // (PC5 I-a: すべてのレイヤー効果を統合 — SPEC.md AUTO-01; delete_layers, duplicate_layers, ungroup_layers are core's)
+            "slices_info"};  // (PC5 J-b: slices@1's question, slice.list — SPEC.md PROD-01)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);
