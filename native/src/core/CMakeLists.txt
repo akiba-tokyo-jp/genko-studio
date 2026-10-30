@@ -143,6 +143,8 @@ genko_library(genko_core
     video.cpp
     # PC5 I-d (変数とデータセット: variables@1)
     variables.cpp
+    # PC5 J-b (スライス: slices@1 の画素の位置・自動スライス・番号・分割・ガイドから)
+    slice_layout.cpp
     # PC5 G-c (文字スタイル・段落スタイル: type@1 の本のスタイルと適用・再定義・削除・上書きの消去)
     type_styles.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"

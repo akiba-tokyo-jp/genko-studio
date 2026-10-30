@@ -53,7 +53,9 @@ const std::vector<std::string>& app_keys() {
         "guides/grid_subdivisions", "guides/grid_unit", "guides/lock", "view/extras", "view/show_guides", "view/show_canvas_guides",
         "view/show_smart_guides", "view/show_layer_edges", "view/show_mesh", "view/show_edit_pins", "guide_layouts/三段組",
         // (PC5 J-c・J-d1: 表示・非表示 ▸ 注釈・カウント)
-        "view/show_notes", "view/show_count"};
+        "view/show_notes", "view/show_count",
+        // (PC5 J-b: ガイド・グリッド・スライス's slices, 表示・非表示 ▸ スライス, スナップ先 ▸ スライス)
+        "guides/slice_color", "guides/slice_numbers", "view/show_slices", "snap/slices"};
     return all;
 }
 

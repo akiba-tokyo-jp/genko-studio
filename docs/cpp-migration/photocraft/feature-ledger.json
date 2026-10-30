@@ -3264,14 +3264,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "一部実装（PC5 H-b、未統合: ガイド・スマートガイド・グリッドの面。スライスの 2 項目は節 J のスライス J-b が同じ面に足す）",
+      "implementation_status": "実装済み（PC5 H-b・J-b、未統合）",
       "acceptance_status": "未実施",
       "evidence": [
         "native/src/app/preferences_units.cpp",
         "native/src/core/prefs_table.cpp",
         "native/src/app/main_window_guide_view.cpp",
         "native/src/app/canvas_guides.cpp",
+        "native/src/app/canvas_slices.cpp",
         "native/tests/gui/test_gui_guides.cpp",
+        "native/tests/gui/test_gui_slices.cpp",
         "native/tests/unit/test_prefs_table.cpp"
       ],
       "pc0": {
@@ -23371,9 +23373,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_slices.cpp",
+        "native/src/core/slice_layout.cpp",
+        "native/src/core/slices.cpp",
+        "native/tests/unit/test_slices.cpp",
+        "native/tests/contract/test_contract_slices.cpp",
+        "native/src/app/main_window_slices.cpp",
+        "native/src/app/canvas_slices.cpp",
+        "native/tests/gui/test_gui_slices.cpp",
+        "native/src/render/ops_registry.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31469,9 +31481,18 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_slices.cpp",
+        "native/src/core/slice_layout.cpp",
+        "native/src/core/slices.cpp",
+        "native/tests/unit/test_slices.cpp",
+        "native/tests/contract/test_contract_slices.cpp",
+        "native/src/app/main_window_slices.cpp",
+        "native/src/app/canvas_slices.cpp",
+        "native/tests/gui/test_gui_slices.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31497,9 +31518,18 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_slices.cpp",
+        "native/src/core/slice_layout.cpp",
+        "native/src/core/slices.cpp",
+        "native/tests/unit/test_slices.cpp",
+        "native/tests/contract/test_contract_slices.cpp",
+        "native/src/app/main_window_slices.cpp",
+        "native/src/app/canvas_slices.cpp",
+        "native/tests/gui/test_gui_slices.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31525,9 +31555,18 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_slices.cpp",
+        "native/src/core/slice_layout.cpp",
+        "native/src/core/slices.cpp",
+        "native/tests/unit/test_slices.cpp",
+        "native/tests/contract/test_contract_slices.cpp",
+        "native/src/app/main_window_slices.cpp",
+        "native/src/app/canvas_slices.cpp",
+        "native/tests/gui/test_gui_slices.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31553,9 +31592,16 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_slices.cpp",
+        "native/src/core/slice_layout.cpp",
+        "native/src/core/slices.cpp",
+        "native/tests/unit/test_slices.cpp",
+        "native/tests/contract/test_contract_slices.cpp",
+        "native/src/api/cli.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31581,9 +31627,19 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_slices.cpp",
+        "native/src/core/slice_layout.cpp",
+        "native/src/core/slices.cpp",
+        "native/tests/unit/test_slices.cpp",
+        "native/tests/contract/test_contract_slices.cpp",
+        "native/src/app/main_window_slices.cpp",
+        "native/src/app/canvas_slices.cpp",
+        "native/tests/gui/test_gui_slices.cpp",
+        "native/tests/contract/test_contract_psd.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31609,9 +31665,18 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_slices.cpp",
+        "native/src/core/slice_layout.cpp",
+        "native/src/core/slices.cpp",
+        "native/tests/unit/test_slices.cpp",
+        "native/tests/contract/test_contract_slices.cpp",
+        "native/src/app/main_window_slices.cpp",
+        "native/src/app/canvas_slices.cpp",
+        "native/tests/gui/test_gui_slices.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -31637,9 +31702,18 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_slices.cpp",
+        "native/src/core/slice_layout.cpp",
+        "native/src/core/slices.cpp",
+        "native/tests/unit/test_slices.cpp",
+        "native/tests/contract/test_contract_slices.cpp",
+        "native/src/app/main_window_slices.cpp",
+        "native/src/app/canvas_slices.cpp",
+        "native/tests/gui/test_gui_slices.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -35624,9 +35698,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/ops_slices.cpp",
+        "native/src/core/slice_layout.cpp",
+        "native/src/core/slices.cpp",
+        "native/tests/unit/test_slices.cpp",
+        "native/tests/contract/test_contract_slices.cpp",
+        "native/src/app/main_window_slices.cpp",
+        "native/src/app/canvas_slices.cpp",
+        "native/tests/gui/test_gui_slices.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -35998,9 +36081,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_slices.cpp",
+        "native/src/app/canvas_slices.cpp",
+        "native/tests/gui/test_gui_slices.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38034,9 +38121,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_slices.cpp",
+        "native/src/app/canvas_slices.cpp",
+        "native/tests/gui/test_gui_slices.cpp",
+        "native/src/app/main_window_guide_view.cpp",
+        "native/src/app/main_window_arrange.cpp",
+        "native/tests/gui/test_gui_arrange.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -38421,9 +38515,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_align.cpp",
+        "native/src/app/canvas_snap.cpp",
+        "native/tests/gui/test_gui_slices.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -42198,9 +42296,13 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_slices.cpp",
+        "native/src/app/canvas_slices.cpp",
+        "native/tests/gui/test_gui_slices.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -42218,9 +42320,13 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-b、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_slices.cpp",
+        "native/src/app/canvas_slices.cpp",
+        "native/tests/gui/test_gui_slices.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

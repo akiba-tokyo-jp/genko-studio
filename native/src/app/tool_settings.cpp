@@ -51,6 +51,10 @@ const std::map<QString, std::pair<QString, QString>>& titles() {
         {QStringLiteral("measure"), {QStringLiteral("ものさしツール"),
                                      QStringLiteral("ドラッグで 2 点の距離と角度を計る（Shift で 45° 刻み）。端をドラッグで動かす、Alt＋端からドラッグで分度器")}},
         {QStringLiteral("count"), {QStringLiteral("カウントツール"), QStringLiteral("クリックした所に番号の印を付ける。Alt＋クリックで外す、ドラッグで動かす")}},
+        // (PC5 J-b)
+        {QStringLiteral("slice"), {QStringLiteral("スライスツール"), QStringLiteral("ドラッグで Web 用に保存のスライスを作る（Shift で正方形）。クリックでそこのスライスを選ぶ")}},
+        {QStringLiteral("slice_select"), {QStringLiteral("スライス選択ツール"),
+                                          QStringLiteral("クリックでスライスを選び、ドラッグで動かす・□で大きさを変える。ダブルクリックでスライスオプション")}},
         {QStringLiteral("zoom"), {QStringLiteral("ズームツール"), QStringLiteral("クリックで拡大、Alt＋クリックで縮小、ドラッグで囲んだ所を画面いっぱいに")}},
         {QStringLiteral("hand"), {QStringLiteral("手のひらツール"), QStringLiteral("ドラッグで表示を動かす（ほかの道具でも Space を押しながら）")}},
         {QStringLiteral("fill"), {QStringLiteral("塗りつぶしツール"), QStringLiteral("線で囲まれた所をクリックで塗る。隙間は「隙間を閉じる」の幅まで閉じる")}},

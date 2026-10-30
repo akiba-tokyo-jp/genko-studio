@@ -1924,7 +1924,34 @@ public:
     QLabel* ruler_readout() const { return ruler_readout_; }
     QComboBox* count_groups() const { return count_groups_; }
 
+    // --- PC5 J-b (slices@1): main_window_slices.cpp — the スライスツール and the スライス選択ツール (the 切り抜き group; their
+    // options), レイヤー → 新規レイヤーベースのスライス, 表示 → 表示・非表示 → スライス, スライスをロック, スライスを消去 (and スナップ
+    // 先 → スライス: main_window_align.cpp); each change of the book an op through apply_ops --------------------------------
+    // A slices op on the page shown (its "page" put in), shown at once (a refusal said in the status line).
+    bool slice_op(core::Json op);
+    // スライスオプション… / スライスを分割…: the chosen slice's (the スライス選択ツール's), the window asked, then set_slice /
+    // divide_slice (an auto slice made a user slice in the same step).
+    void slice_options_dialog();
+    void divide_slice_dialog();
+    // The page shown's slices now (made again when the page changes; none: no page).
+    const PageCanvas::SliceView* slice_view();
+    QLabel* slice_chosen_label() const { return slice_chosen_label_; }
+
 private:
+    void build_slice_actions();
+    void build_slice_menus(QMenu* view, QMenu* layers);
+    void build_slice_tools();
+    void refresh_slices();
+    bool slices_unlocked();  // (スライスをロック: false, said)
+    std::optional<std::int64_t> chosen_slice_id(bool promote);
+    // (PC5 J-b, H-c's pane: pane_look) A pane beside the canvas shows its own page's slices as the canvas shows its: their
+    // colour and numbers, each made again when its book or page changes.
+    void slices_in_pane(PageCanvas* pane);
+    PageCanvas::SliceView slice_view_;
+    const core::Page* slice_view_page_ = nullptr;
+    std::shared_ptr<const void> slice_view_keep_;  // (the book the view was made of, so its page is not another's)
+    bool slice_view_made_ = false;
+    QLabel* slice_chosen_label_ = nullptr;
     void build_measure_actions();
     void build_measure_menus(QMenu* view);
     void build_measure_tools();

@@ -669,6 +669,8 @@ void MainWindow::build_menus() {
     build_tool_groups(tools);  // (the selection's tools, the retouching's: main_window_select.cpp)
     build_paint_tool_groups(tools);  // (PC4 E-0: the drawing tools' groups' tools the menu has not: paint_panels.cpp)
     tools->addAction(action("act_crop_tool"));  // (PC3 C-e)
+    // (PC5 J-b: スライスツール・スライス選択ツール beside it — the 切り抜き group; moved here from the groups' place)
+    for (const char* name : {"act_slice_tool", "act_slice_select_tool"}) tools->addAction(action(name));
     for (const char* name : {"act_ruler", "act_3d", "act_effect", "act_stamp"}) tools->addAction(action(name));
     tools->addSeparator();
     for (const char* name : {"act_thicker", "act_thinner"}) tools->addAction(action(name));
@@ -778,6 +780,7 @@ void MainWindow::build_menus() {
     build_variable_menus(file, pages);  // (PC5 I-d: ページ → 変数 ▸・データセットを適用…, 書き出し ▸・読み込み ▸ の項目: main_window_variables.cpp)
     build_notes_menus(file, view);  // (PC5 J-c: ファイル → 読み込み ▸ 注釈…, 表示 → 表示・非表示 ▸ 注釈: main_window_notes.cpp)
     build_measure_menus(view);  // (PC5 J-d1: 表示 → 表示・非表示 ▸ カウント: main_window_measure.cpp)
+    build_slice_menus(view, layers);  // (PC5 J-b: 表示・非表示 ▸ スライス, スライスをロック・消去, レイヤー → 新規レイヤーベースのスライス: main_window_slices.cpp)
     pages->addAction(action("act_book_preview"));
     pages->addAction(action("act_checks"));
     pages->addSeparator();

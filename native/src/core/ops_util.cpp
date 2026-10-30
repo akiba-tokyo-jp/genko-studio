@@ -340,6 +340,13 @@ void remap_layer_refs(Page& page, const std::vector<StoryLine*>& lines, const Fr
         for (LayerComp& comp : page.layer_comps->comps) states(comp.layers);
         if (page.layer_comps->last_state) states(*page.layer_comps->last_state);
     }
+    // (PC5 J-b, slices@1: a layer-based slice follows the copy's layer)
+    if (page.slices) {
+        for (Slice& s : page.slices->list) {
+            if (!s.layer) continue;
+            if (const std::string* to = layers.get(*s.layer)) s.layer = *to;
+        }
+    }
 }
 
 }  // namespace genko::core
