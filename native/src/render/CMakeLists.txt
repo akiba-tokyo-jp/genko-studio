@@ -268,6 +268,10 @@ genko_library(genko_render
     # PC5 J-d1 (計測: measure@1 — the ops, a .pcraft's measurement; PSD's 1074 in psd_annotations.cpp)
     ops_measure.cpp
     pcraft_measure.cpp
+    # PC5 J-b (スライス: slices@1 — the ops, PSD's 1050, a .pcraft's slices)
+    ops_slices.cpp
+    psd_slices.cpp
+    pcraft_slices.cpp
     # PC5 G-c (文字スタイル・段落スタイル: type_style)
     ops_type_styles.cpp
     ${GENKO_MATERIAL_RESOURCES}

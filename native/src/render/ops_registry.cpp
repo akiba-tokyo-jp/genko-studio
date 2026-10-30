@@ -41,6 +41,7 @@
 #include "render/ops_variables.hpp"
 #include "render/ops_annotations.hpp"
 #include "render/ops_measure.hpp"
+#include "render/ops_slices.hpp"
 
 namespace genko::render {
 
@@ -446,6 +447,8 @@ void register_render_ops(core::OpRegistry& registry) {
     register_annotation_ops(registry);
     // PC5 J-d1 (measure@1: the measurement scale, the count marks, the ruler line, レイヤーの角度補正 — render/ops_measure)
     register_measure_ops(registry);
+    // PC5 J-b (slices@1: the slices, render/ops_slices)
+    register_slice_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {
@@ -561,6 +564,19 @@ const core::OpRegistry& ops_registry() {
                 channels::follow_depth(c.doc);
                 keep_page_modes(c.doc, before, &c.notes);
             });
+        }
+        // (PC5 J-b, slices@1: a layer gone takes its layer-based slices with it, whichever op took it — Photoshop's —, a merge
+        // or a smart object's moves them onto the layer it went into. LAST: an op added after this is not wrapped —
+        // test_slices' everyOpFollowsTheLayers asks each op of the registry, slices::follows_layers)
+        for (const std::string& name : r.names()) {
+            if (r.is_query(std::string_view(name))) continue;
+            const core::OpFunction inner = *r.find(name);
+            r.add(name, [inner](core::OpContext& c) {
+                const std::vector<core::PagePtr> before = c.doc.pages;
+                inner(c);
+                slices::follow_layers(c.doc, before, c.op);
+            });
+            slices::mark_followed(name);
         }
         return r;
     }();

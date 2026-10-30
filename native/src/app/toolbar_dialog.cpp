@@ -39,7 +39,9 @@ const QStringList& default_order() {
                                  QStringLiteral("act_blend"),   QStringLiteral("act_shape"),    QStringLiteral("act_fill"),    QStringLiteral("act_lassofill"),
                                  QStringLiteral("act_gradient"), QStringLiteral("act_picker"),  QStringLiteral("|"),           QStringLiteral("act_text"),
                                  QStringLiteral("act_frame"),   QStringLiteral("|"),            QStringLiteral("act_marquee"), QStringLiteral("act_lasso"),
-                                 QStringLiteral("act_wand"),    QStringLiteral("act_reshape"),  QStringLiteral("|"),           QStringLiteral("act_ruler"),
+                                 QStringLiteral("act_wand"),    QStringLiteral("act_reshape"),
+                                 // (PC5 J-b: スライスツール・スライス選択ツール — Photoshop's 切り抜き group, its menu on each)
+                                 QStringLiteral("act_slice_tool"), QStringLiteral("act_slice_select_tool"), QStringLiteral("|"),           QStringLiteral("act_ruler"),
                                  QStringLiteral("act_3d"),      QStringLiteral("act_effect"),   QStringLiteral("act_hand_tool")};
     return all;
 }

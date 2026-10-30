@@ -12,10 +12,8 @@ namespace genko::render {
 namespace {
 
 // (J-a's レイヤーカンプ — layer-comps@1 — are written: render/ops_layer_comps; J-c's 注釈 — annotations@1 —:
-// render/ops_annotations; J-d1's 計測 — measure@1 —: render/ops_measure)
-constexpr std::array<std::string_view, 17> kNames{
-    // J-b: スライス (slices@1)
-    "add_slice", "set_slice", "delete_slices", "divide_slice", "slices_from_guides",
+// render/ops_annotations; J-d1's 計測 — measure@1 —: render/ops_measure; J-b's スライス — slices@1 —: render/ops_slices)
+constexpr std::array<std::string_view, 12> kNames{
     // J-d2: 目盛りマーカー
     "place_scale_marker",
     // J-e2: ビデオレイヤー (video@1)

@@ -138,6 +138,9 @@ const std::map<std::string, const char*>& names() {
         {"set_measurement_scale", "計測スケールを設定"}, {"add_count", "カウント"}, {"remove_count", "カウントを削除"}, {"move_count", "カウントを移動"},
         {"clear_count", "カウントをクリア"}, {"new_count_group", "新規カウントグループ"}, {"delete_count_group", "カウントグループを削除"},
         {"set_count_group", "カウントグループのオプション"}, {"set_ruler_line", "ものさし"}, {"straighten_layer", "レイヤーの角度補正"},
+        // (PC5 J-b, slices@1: render/ops_slices)
+        {"add_slice", "スライス"}, {"set_slice", "スライスオプション"}, {"delete_slices", "スライスを削除"}, {"divide_slice", "スライスを分割"},
+        {"slices_from_guides", "ガイドからスライスを作成"},
     };
     return table;
 }

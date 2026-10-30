@@ -126,9 +126,11 @@ void MainWindow::build_align_actions() {
         guide_toggles();
     }, {}, QStringLiteral("グリッドに吸い付けます（定規 → グリッドにスナップ と同じ）"), true);
     make("act_snap_layers", QStringLiteral("レイヤー"), [this] { snap_toggles(); }, {}, QStringLiteral("ほかのレイヤーの端と中央に吸い付けます"), true);
+    // (PC5 J-b: スライス — the user and layer-based slices' edges)
+    make("act_snap_slices", QStringLiteral("スライス"), [this] { snap_toggles(); }, {}, QStringLiteral("スライスの端に吸い付けます"), true);
     make("act_snap_bounds", QStringLiteral("ドキュメントの境界"), [this] { snap_toggles(); }, {}, QStringLiteral("用紙の端と中央に吸い付けます"), true);
     const auto every = [this](bool on) {
-        for (const char* name : {"act_snap_guides", "act_snap_layers", "act_snap_bounds", "act_snap_grid", "act_grid_snap"}) {
+        for (const char* name : {"act_snap_guides", "act_snap_layers", "act_snap_slices", "act_snap_bounds", "act_snap_grid", "act_grid_snap"}) {
             QAction* act = action(QString::fromLatin1(name));
             const QSignalBlocker quiet(act);
             act->setChecked(on);
@@ -140,7 +142,7 @@ void MainWindow::build_align_actions() {
     make("act_snap_none", QStringLiteral("なし"), [every] { every(false); }, {}, QStringLiteral("スナップ先をすべて切ります"));
     {
         const auto store = settings();
-        for (const auto& [name, key] : {std::pair{"act_snap_on", "on"}, {"act_snap_guides", "guides"}, {"act_snap_layers", "layers"}, {"act_snap_bounds", "bounds"}}) {
+        for (const auto& [name, key] : {std::pair{"act_snap_on", "on"}, {"act_snap_guides", "guides"}, {"act_snap_layers", "layers"}, {"act_snap_slices", "slices"}, {"act_snap_bounds", "bounds"}}) {
             QAction* act = action(QString::fromLatin1(name));
             const QSignalBlocker quiet(act);
             act->setChecked(store->value(QStringLiteral("snap/%1").arg(QString::fromLatin1(key)), QStringLiteral("true")).toString().toLower() == QLatin1String("true"));
@@ -201,7 +203,7 @@ void MainWindow::build_align_menus(QMenu* layers, QMenu* view) {
     view->addSeparator();
     view->addAction(action("act_snap_on"));
     QMenu* to = view->addMenu(QStringLiteral("スナップ先"));
-    for (const char* name : {"act_snap_guides", "act_snap_grid", "act_snap_layers", "act_snap_bounds"}) to->addAction(action(QString::fromLatin1(name)));
+    for (const char* name : {"act_snap_guides", "act_snap_grid", "act_snap_layers", "act_snap_slices", "act_snap_bounds"}) to->addAction(action(QString::fromLatin1(name)));
     to->addSeparator();
     for (const char* name : {"act_snap_all", "act_snap_none"}) to->addAction(action(QString::fromLatin1(name)));
 }
@@ -236,8 +238,9 @@ void MainWindow::snap_toggles() {
     canvas_->snap_guides = action(QStringLiteral("act_snap_guides"))->isChecked();
     canvas_->snap_layers = action(QStringLiteral("act_snap_layers"))->isChecked();
     canvas_->snap_bounds = action(QStringLiteral("act_snap_bounds"))->isChecked();
+    canvas_->snap_slices = action(QStringLiteral("act_snap_slices"))->isChecked();  // (PC5 J-b)
     const auto store = settings();
-    for (const auto& [name, key] : {std::pair{"act_snap_on", "on"}, {"act_snap_guides", "guides"}, {"act_snap_layers", "layers"}, {"act_snap_bounds", "bounds"}})
+    for (const auto& [name, key] : {std::pair{"act_snap_on", "on"}, {"act_snap_guides", "guides"}, {"act_snap_layers", "layers"}, {"act_snap_slices", "slices"}, {"act_snap_bounds", "bounds"}})
         store->setValue(QStringLiteral("snap/%1").arg(QString::fromLatin1(key)), action(QString::fromLatin1(name))->isChecked());
     canvas_->update();
 }

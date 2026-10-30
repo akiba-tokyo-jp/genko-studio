@@ -141,6 +141,13 @@ std::vector<bool> page_bound(const Json& ops) {
                 if (!any) bound = true;
             }
         }
+        // (PC5 J-b, slices@1: a slice named by its id or number, the slices listed, a layer-based slice's layer — the recorded
+        // page's; a slice drawn, every slice ("all") and the slices from the guides are any page's)
+        if (in({"add_slice", "set_slice", "delete_slices", "divide_slice"}, name)) {
+            for (const char* key : {"slice", "number", "layer"})
+                if (const auto it = op.find(key); it != op.end() && !it->is_null()) bound = true;
+            if (const auto it = op.find("slices"); it != op.end() && it->is_array()) bound = true;
+        }
         out.push_back(bound);
     }
     return out;

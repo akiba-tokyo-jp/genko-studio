@@ -312,6 +312,9 @@ void MainWindow::pane_look(PaneView* pane) {
     pane->add_extra({QStringLiteral("notes"), [pane](QPainter& painter, const core::Page& page, const View& view) { pane->paint_notes(painter, page, view); }});
     pane->add_extra({QStringLiteral("count"), [pane](QPainter& painter, const core::Page& page, const View& view) { pane->paint_count(painter, page, view); }});
     pane->add_extra({QStringLiteral("ruler"), [pane](QPainter& painter, const core::Page& page, const View& view) { pane->paint_ruler(painter, page, view); }});
+    // (PC5 J-b: スライス — its page's own, as the canvas draws them; shown by act_show_slices as the others are)
+    slices_in_pane(pane);
+    pane->add_extra({QStringLiteral("slices"), [pane](QPainter& painter, const core::Page& page, const View& view) { pane->paint_slices(painter, page, view); }});
     // (each by its switch — 表示 → 表示・非表示 ▸ act_show_<key>, already turned when the window's own handler is still to come
     // — else as the canvas shows it)
     for (const QString& key : pane->extra_keys()) {

@@ -189,6 +189,7 @@ void PageCanvas::paint_page(QPainter& painter) {
     draw_crop(painter);       // (the crop tool's box: canvas_crop.cpp)
     draw_transform(painter);  // (自由変形 and the warps' box: canvas_transform.cpp)
     draw_tools(painter);      // (the area being filled, the gradient's drag, the figure being drawn: canvas_tools.cpp)
+    draw_slice_drag(painter);  // (PC5 J-b: the slice being drawn, moved or sized: canvas_slices.cpp)
     draw_move_box(painter);   // (the move tool's バウンディングボックス: canvas_snap.cpp)
     draw_snap(painter);       // (what a drag snapped to: canvas_snap.cpp)
     draw_spacing(painter);    // (PC5 H-b: the equal gaps of a moved box, スマートガイド)
