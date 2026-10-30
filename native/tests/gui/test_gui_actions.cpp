@@ -445,7 +445,11 @@ private slots:
         // and PC5 J-b's 7 — スライスツール・スライス選択ツール (act_slice_tool, act_slice_select_tool), 表示 → 表示・非表示 → スライス
         // (act_show_slices), スナップ先 → スライス (act_snap_slices), スライスをロック・スライスを消去 (act_lock_slices, act_clear_slices),
         // レイヤー → 新規レイヤーベースのスライス (act_layer_slice) — test_gui_slices.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{741});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7 and H-d's 12)
+        // and the 8 of PC5 I-a (SPEC AUTO-01「レイヤーの基本」) — レイヤー → 新規 → 背景からレイヤーへ…・レイヤーからのグループ…
+        // (act_layer_from_background, act_layer_group_from_layers), レイヤーのグループ解除 (act_layer_ungroup), 非表示レイヤーを削除
+        // (act_layer_delete_hidden), クリッピングマスクを作成・解除 (act_clip_create, act_clip_release), ファイル → スクリプト →
+        // すべての空のレイヤーを削除・すべてのレイヤー効果を統合 (act_delete_empty_layers, act_bake_layer_effects) — test_gui_layers.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{749});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8 and H-d's 12)
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -530,7 +534,8 @@ private slots:
                  (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"), QStringLiteral("条件付きモード変更…"),
                               QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…")}));
         QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_scripts"))),
-                 (QStringList{QStringLiteral("画像プロセッサー…"), QStringLiteral("すべてのマスクを統合"), QStringLiteral("|"),
+                 (QStringList{QStringLiteral("画像プロセッサー…"), QStringLiteral("すべての空のレイヤーを削除"), QStringLiteral("すべてのレイヤー効果を統合"),  // (PC5 I-a)
+                              QStringLiteral("すべてのマスクを統合"), QStringLiteral("|"),
                               QStringLiteral("スクリプトイベントマネージャー…"), QStringLiteral("|"), QStringLiteral("参照…")}));
         QMenu* exports = w->findChild<QMenu*>(QStringLiteral("menu_export"));
         QVERIFY(exports != nullptr);

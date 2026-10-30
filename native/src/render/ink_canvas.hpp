@@ -84,6 +84,9 @@ public:
     // clips to set (`alpha`, "L": a group's shape).
     InkPicture picture() const;
     void mix_back(const InkPicture& before, double opacity, const Image* mask = nullptr);
+    // PC5 I-a (blend-channels@1): the colour channels a layer leaves out (`on`, one flag a channel: false) back to their values
+    // in `before` (picture() before the layer was drawn); its alpha and what the next layer clips to as drawn.
+    void keep_channels(const InkPicture& before, const std::vector<bool>& on);
     void clip_to(const Image& alpha);
     Image clip_alpha() const;  // (what the next layer would clip to, "L"; all 255 when nothing is set)
 

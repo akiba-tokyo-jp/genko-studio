@@ -708,7 +708,8 @@ Json no_effects() { return Json{{"enabled", true}, {"items", Json::array()}, {"p
 
 Json locks_of(const core::Layer* layer) {
     return Json{{"transparency", layer != nullptr && layer->lock_alpha}, {"pixels", layer != nullptr && layer->locked},
-                {"position", layer != nullptr && layer->lock_position}, {"artboard", false}, {"all", false}};
+                {"position", layer != nullptr && layer->lock_position}, {"artboard", layer != nullptr && layer->lock_nest},
+                {"all", layer != nullptr && layer->lock_all}};  // (PC5 I-a, layer-locks@1)
 }
 
 // A layer's common settings (its content given): from the Genko layer when there is one, else plain.
@@ -732,6 +733,11 @@ Json layer_json(Ctx& ctx, const std::string& name, const core::Layer* layer, Jso
              {"link_group", nullptr}};
     if (layer != nullptr) {
         ctx.layer_ids.emplace(layer->id, out["id"].dump());  // (PC5 J-a: the layer comps' states name it so)
+        // (PC5 I-a, blend-channels@1: the colour channels it leaves out, bit i the page's channel i)
+        std::uint64_t excluded = 0;
+        for (std::size_t c = 0; c < layer->blend_channels.size(); ++c)
+            if (!layer->blend_channels[c]) excluded |= std::uint64_t(1) << c;
+        if (excluded != 0) out["excluded_channels"] = excluded;
         if (layer->mask && layer->mask->png && !layer->mask->png->empty()) out["mask"] = mask_json(ctx, *layer->mask);
         if (layer->vector_mask) out["vector_mask"] = pc::vector_mask_json(*layer->vector_mask, ctx.px);
         if (layer->link) {

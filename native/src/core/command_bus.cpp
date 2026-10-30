@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "core/groups.hpp"
+#include "core/layer_basics.hpp"
 #include "core/variables.hpp"
 #include "core/adjust.hpp"
 #include "core/adjust_kinds.hpp"
@@ -132,7 +133,10 @@ bool native_key(std::string_view op, std::string_view key) {
            // PC3 C-c (SPEC COLOR-07): Filter › Liquify's strokes and its field's spacing
            (op == "liquify" && (key == "strokes" || key == "mesh_mm")) ||
            // PC4 E3 (patterns@1): a pattern fill — fill_area's and fill's pattern, add_layer's of kind fill
-           pattern_key(op, key);
+           pattern_key(op, key) ||
+           // PC5 I-a (layer-locks@1, blend-channels@1): set_layer's and set_layers' locks, set_layer's channels
+           ((op == "set_layer" || op == "set_layers") && (key == "lock_all" || key == "lock_nest")) ||
+           (op == "set_layer" && key == "blend_channels");
 }
 
 // PC2 (SPEC COLOR-04): the settings of this build's own an op of Python's reads by what else it was given —
@@ -518,6 +522,18 @@ static std::vector<std::size_t> type_style_pages(const Document& doc, const Json
     return {out.begin(), out.end()};
 }
 
+// The page duplicate_layers or duplicate_channel copies onto (its to_page as the op reads it: require_page), or none — none
+// given, "new" (a new page), or one the book does not have.
+static std::optional<std::size_t> page_copied_onto(const Document& doc, const Json& op) {
+    const Json* to = get(op, "to_page");
+    if (to == nullptr || to->is_null() || *to == Json("new")) return std::nullopt;
+    try {
+        return require_page(doc, Json{{"page", *to}});
+    } catch (const OpError&) {
+        return std::nullopt;
+    }
+}
+
 void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
     const Json* name_value = get(op, "op");
     const std::string name = name_value != nullptr && name_value->is_string() ? name_value->get<std::string>() : "";
@@ -534,16 +550,17 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
         for (const auto& each : doc.pages) check_held(doc, *each, each->index, actor);
         return;
     }
-    if (named && name == "duplicate_channel") {  // (channels@1: the page it copies onto is asked too, then its own)
-        const Json* to = get(op, "to_page");
-        if (to != nullptr && to->is_number_integer()) {
-            for (const auto& each : doc.pages) {
-                if (each->index == Num(to->get<std::int64_t>())) {
-                    check_held(doc, *each, each->index, actor);
-                    break;
-                }
-            }
+    if (named && (name == "delete_layers" || name == "bake_layer_styles")) {  // (PC5 I-a: "page": "all" — every page asked)
+        const Json* page = get(op, "page");
+        if (page != nullptr && page->is_string() && page->get_ref<const std::string&>() == "all") {
+            for (const auto& each : doc.pages) check_held(doc, *each, each->index, actor);
+            return;
         }
+    }
+    if (named && (name == "duplicate_layers" || name == "duplicate_channel")) {
+        // (PC5 I-a, channels@1: the page it copies onto is asked too — found as the op finds it (2, 2.0, "2"…: the review's
+        // P2-4) —, then its own; a page the book does not have is the op's to refuse)
+        if (const std::optional<std::size_t> to = page_copied_onto(doc, op)) check_held(doc, doc.page(*to), doc.page(*to).index, actor);
     }
     if (named && name == "merge_channels") {  // (channels@1: every page it takes is asked)
         const Json* pages = get(op, "pages");
@@ -632,6 +649,45 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
             throw OpError("page " + page.index.repr() +
                           ": the name is approved; a person must revoke it before the layout changes (strict_gates)");
         }
+    }
+    // (PC5 I-a: deleting, copying, ungrouping or baking printed layers is drawing on the page — named ids, or every layer)
+    if (named && one_of(name, {"delete_layers", "duplicate_layers", "ungroup_layers", "bake_layer_styles"})) {
+        const Json* page_value = get(op_in, "page");
+        const bool all_pages = page_value != nullptr && page_value->is_string() && page_value->get_ref<const std::string&>() == "all";
+        std::vector<const Page*> pages;
+        if (all_pages) {
+            for (const auto& each : doc.pages) pages.push_back(each.get());
+        } else {
+            pages.push_back(&page_of(op_in));
+        }
+        const Json* ids = get(op_in, "ids");
+        const Json* id = get(op_in, "id");
+        const bool hidden = truthy_at(op_in, "hidden");
+        const bool empty = truthy_at(op_in, "empty");
+        // (the review's P3-6: the layers the op takes — those named, or those hidden, empty or with effects — not every one)
+        const auto taken = [&](const std::vector<Layer>& layers, std::size_t i) {
+            const Layer& l = layers[i];
+            if (ids != nullptr && ids->is_array() &&
+                std::any_of(ids->begin(), ids->end(), [&](const Json& v) { return json_equals_string(v, l.id) || json_equals_string(v, py_str(l.parent_id)); }))
+                return true;
+            if (id != nullptr && name != "bake_layer_styles") return json_equals_string(*id, l.id) || json_equals_string(l.parent_id, py_str(*id));
+            if (name == "delete_layers") return (hidden && !l.visible) || (empty && empty_layer(layers, i));
+            if (name == "bake_layer_styles" && (ids == nullptr || !ids->is_array()))
+                return l.style && l.style->is_object() && l.style->contains("effects") && !(*l.style)["effects"].empty();
+            return false;
+        };
+        const Page* onto = nullptr;  // (duplicate_layers' page copied onto: its name approved too — the review's P2-4)
+        if (name == "duplicate_layers") {
+            if (const std::optional<std::size_t> to = page_copied_onto(doc, op_in)) onto = &doc.page(*to);
+        }
+        for (const Page* page : pages) {
+            bool touched = false;
+            for (std::size_t i = 0; i < page->layers.size() && !touched; ++i) touched = printed(page->layers[i]) && taken(page->layers, i);
+            if (!touched) continue;
+            if (!page->name_ok) throw OpError(name + " on a printed layer needs name_ok on page " + page->index.repr() + " (strict_gates)");
+            if (onto != nullptr && !onto->name_ok) throw OpError(name + " of a printed layer onto page " + onto->index.repr() + " needs name_ok there (strict_gates)");
+        }
+        return;
     }
     if (named && name == "advance" && json_equals_string(op_in.value("to", Json(nullptr)), "finish")) {
         const Page& page = page_of(op_in);
@@ -1317,8 +1373,12 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     if (schema_of(seen) != nullptr && !is_op(seen, "undo")) not_yet_ported(name_text + " is not in the C++ build yet");
                     throw OpError("unknown op: " + name_text);
                 }
+                // (layer-locks@1, PC5 I-a: the layers locked with すべてをロック before the op — kept as they were after it)
+                const std::vector<LockedLayer> locked = locked_layers(work);
                 OpContext context{work, *current, actor};
                 (*function)(context);
+                check_locked_layers(locked, work, *current);
+                settle_blend_channels(work);  // (blend-channels@1: a page whose mode changed blends every channel again)
                 validate_color_document(work);
                 try {
                     validate_ink_document(work);  // (color-mode@1: what an op leaves on a CMYK or Lab page)
@@ -1333,6 +1393,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     type_text::validate_type(work);  // (type@1, PC5 G-0: a record in its normal form; a type layer draws its text alone)
                     validate_groups(work);  // (groups@1, PC5 I-b: a group on a folder only, pass_through a group's only)
                     validate_variables(work);  // (variables@1, PC5 I-d: the book's variables in their normal form)
+                    validate_layer_basics(work);  // (blend-channels@1, PC5 I-a: a flag for each colour channel of the page)
                 } catch (const Error& error) {
                     if (error.code() == "not_yet_ported") throw;
                     throw OpError(error.what());
