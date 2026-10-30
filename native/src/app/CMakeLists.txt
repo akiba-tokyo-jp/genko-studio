@@ -58,6 +58,8 @@ genko_library(genko_app
     preferences_units.cpp
     preferences_type.cpp
     main_window_arrange.cpp
+    doc_area.cpp
+    pane_view.cpp
     main_window_edit.cpp
     key_sets.cpp
     settings_watch.cpp
@@ -214,6 +216,8 @@ genko_library(genko_app
     # PC5 I-d (変数とデータセット: イメージ → 変数, データセットを適用, データセットからファイル, 変数データセット)
     main_window_variables.cpp
     variables_dialog.cpp
+    # PC5 I-a (レイヤーの基本の残り: 背景からレイヤーへ, レイヤーからのグループ, 複製, 削除, クリッピングマスク, グループ解除, スクリプト)
+    main_window_layers.cpp
     # PC5 J-c (annotations@1: 注釈ツール, ウィンドウ → 注釈, 表示・非表示 → 注釈, 読み込み → 注釈…)
     main_window_notes.cpp
     notes_panel.cpp
@@ -223,6 +227,9 @@ genko_library(genko_app
     # PC5 J-d1 (計測: the count marks and the ものさしツール on the canvas, the window's commands)
     canvas_measure.cpp
     main_window_measure.cpp
+    # PC5 J-b (スライス: the slices on the canvas, the スライスツール・スライス選択ツール, the window's commands)
+    canvas_slices.cpp
+    main_window_slices.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

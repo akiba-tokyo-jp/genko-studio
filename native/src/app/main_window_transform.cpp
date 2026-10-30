@@ -315,6 +315,8 @@ void MainWindow::start_layer_transform(const QString& mode, const std::vector<st
     }
     transform_ids_ = ids;
     transform_box_ = *box;
+    transform_book_ = session_.get();  // (PC5 H-c review P2-1: Enter lands on this book only)
+    transform_contents_ = contents_;
     try {  // (PC3 C-d: what the box moves is not snapped to)
         canvas_->snap_moving = lt::layers_moved(*page, ids);
     } catch (const std::exception&) {
@@ -341,6 +343,11 @@ void MainWindow::transform_previewed(const Json& spec) {
 void MainWindow::transform_committed(const Json& spec) {
     hide_transform_bar();
     preview_ops(std::nullopt);
+    if (!begun_here(transform_book_, transform_contents_)) {  // (PC5 H-c review P2-1: begun on another book — never put on this one)
+        refilter_.reset();
+        flash(QStringLiteral("変形を始めた原稿が前にないため、変形を取りやめました"), 4000);
+        return;
+    }
     const Json op = transform_op(spec);
     const std::optional<Json> area = transform_area_;
     if (refilter_) {  // (PC3 A5: a smart filter set again — not one for 再実行)

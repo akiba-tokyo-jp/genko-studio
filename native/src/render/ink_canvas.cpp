@@ -543,6 +543,18 @@ void InkCanvas::mix_back(const InkPicture& before, double opacity, const Image* 
     }
 }
 
+void InkCanvas::keep_channels(const InkPicture& before, const std::vector<bool>& on) {
+    if (before.size != impl_->size || before.channels != impl_->n || on.size() != impl_->n) throw core::Error("value", "the ink picture does not match the canvas");
+    const unsigned n = impl_->n;
+    const std::size_t count = impl_->px.size() / impl_->stride;
+    for (std::size_t i = 0; i < count; ++i) {
+        double* p = impl_->px.data() + i * impl_->stride;
+        const double* b = before.values.data() + i * (n + 1);
+        for (unsigned c = 0; c < n; ++c)
+            if (!on[c]) p[c] = b[c];
+    }
+}
+
 Image InkCanvas::clip_alpha() const {
     const std::size_t count = impl_->px.size() / impl_->stride;
     std::string out(count, static_cast<char>(255));

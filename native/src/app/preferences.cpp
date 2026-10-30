@@ -287,7 +287,17 @@ const std::multimap<QString, QString>& renamed() {
                                                      // so テキスト is no reused name: the tool's, words_owner — review P2-3)
                                                      {QStringLiteral("縦書き文字ツール"), QStringLiteral("テキスト")},
                                                      {QStringLiteral("縦書き文字ツール"), QStringLiteral("テキスト（ツール）")},
-                                                     {QStringLiteral("検索と置換…"), QStringLiteral("台詞の検索・置換…")}};
+                                                     {QStringLiteral("検索と置換…"), QStringLiteral("台詞の検索・置換…")},
+                                                     // (PC5 I-a, 節 I 1.2: レイヤー's commands by Photoshop's names)
+                                                     {QStringLiteral("レイヤー…"), QStringLiteral("新しいペイントのレイヤー")},
+                                                     {QStringLiteral("グループ…"), QStringLiteral("新しいフォルダ")},
+                                                     {QStringLiteral("レイヤーを複製…"), QStringLiteral("レイヤーを複製")},
+                                                     {QStringLiteral("レイヤーをグループ化"), QStringLiteral("選んだレイヤーをフォルダにまとめる")},
+                                                     {QStringLiteral("レイヤーを表示"), QStringLiteral("選んだレイヤーを見せる")},
+                                                     {QStringLiteral("レイヤーを非表示"), QStringLiteral("選んだレイヤーを隠す")},
+                                                     {QStringLiteral("レイヤーを結合…"), QStringLiteral("選んだレイヤーを結合…")},
+                                                     {QStringLiteral("表示レイヤーを結合したレイヤーを作成"), QStringLiteral("表示レイヤーの結合コピーを作る")},
+                                                     {QStringLiteral("画像を統合…"), QStringLiteral("画像をフラット化…")}};
     return all;
 }
 

@@ -77,6 +77,7 @@ bool MainWindow::edit_layer_style(const std::string& kind) {
     const std::string id = layer->id;
     const std::string blend = layer->blend;
     const double opacity = layer->opacity;
+    const std::vector<bool> channels_before = layer->blend_channels;
     const std::array<double, 2> light = core::global_light(book());
     LayerStyleDialog dialog(asked.snapshot, *page, *layer, kind, this);
     if (ask::exec(&dialog) != QDialog::Accepted || !still(asked)) return false;
@@ -86,6 +87,12 @@ bool MainWindow::edit_layer_style(const std::string& kind) {
     if (dialog.blend() != blend) op["blend"] = dialog.blend();
     ops.push_back(std::move(op));
     if (std::abs(dialog.opacity() - opacity) > 1e-9) ops.push_back(Json{{"op", "set_layer"}, {"page", index}, {"id", id}, {"opacity", dialog.opacity()}});
+    // (PC5 I-a, blend-channels@1: its channels, when they changed)
+    if (const std::vector<bool> channels = dialog.channels(); channels != channels_before) {
+        Json flags = Json::array();
+        for (const bool on : channels) flags.push_back(on);
+        ops.push_back(Json{{"op", "set_layer"}, {"page", index}, {"id", id}, {"blend_channels", flags}});
+    }
     return apply_ops(ops);
 }
 

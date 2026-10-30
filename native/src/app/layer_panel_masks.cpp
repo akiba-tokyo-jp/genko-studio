@@ -49,21 +49,24 @@ void LayerPanel::apply_mask() {
     selected(false);
 }
 
+// (PC5 I-a: through select_ids, the panel's one place of its choice)
+std::vector<std::string> LayerPanel::shown_ids() const {
+    std::vector<std::string> out;
+    for (int row = 0; row < list_->count() && row < static_cast<int>(ids_.size()); ++row) {
+        const QListWidgetItem* item = list_->item(row);
+        if (item != nullptr && !item->isHidden() && row_kind(row) == kLayerRow) out.push_back(ids_[static_cast<std::size_t>(row)]);
+    }
+    return out;
+}
+
 void LayerPanel::select_all_layers() {
     if (list_->count() == 0) return;
-    loading_ = true;
-    for (int row = 0; row < list_->count(); ++row) {
-        QListWidgetItem* item = list_->item(row);
-        if (item != nullptr && !item->isHidden() && row_kind(row) == kLayerRow) item->setSelected(true);
-    }
-    loading_ = false;
+    select_ids(shown_ids(), SelectMode::Add);
 }
 
 void LayerPanel::deselect_layers() {
-    loading_ = true;
-    list_->clearSelection();
-    if (QListWidgetItem* current = list_->currentItem()) current->setSelected(true);  // (the layer drawn on stays chosen)
-    loading_ = false;
+    const int row = list_->currentRow();  // (the layer drawn on stays chosen)
+    select_ids(row >= 0 && row < static_cast<int>(ids_.size()) ? std::vector<std::string>{ids_[static_cast<std::size_t>(row)]} : std::vector<std::string>{});
 }
 
 void LayerPanel::find_layers() {
@@ -76,15 +79,14 @@ void LayerPanel::find_layers() {
 void LayerPanel::choose_found() {
     if (search_->text().trimmed().isEmpty()) return;
     std::optional<int> first;
-    loading_ = true;
-    list_->clearSelection();
-    for (int row = 0; row < list_->count(); ++row) {
-        QListWidgetItem* item = list_->item(row);
-        if (item == nullptr || item->isHidden() || row_kind(row) != kLayerRow) continue;
-        item->setSelected(true);
-        if (!first) first = row;
+    const std::vector<std::string> found = shown_ids();
+    select_ids(found);
+    for (int row = 0; row < list_->count() && !found.empty(); ++row) {
+        if (row_kind(row) == kLayerRow && !list_->item(row)->isHidden()) {
+            first = row;
+            break;
+        }
     }
-    loading_ = false;
     if (!first) {
         window_->flash(QStringLiteral("その名前のレイヤーはありません"), 3000);
         return;

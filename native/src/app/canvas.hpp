@@ -29,6 +29,7 @@
 #include "core/guide_layout.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
+#include "core/slice_layout.hpp"
 #include "core/snap.hpp"
 #include "core/units.hpp"
 #include "render/dabs/dynamics.hpp"
@@ -452,6 +453,25 @@ public:
     void glide(const std::function<void()>& change);
     ViewState view_state() const { return view_; }
     void set_view_state(const ViewState& state);
+    // The view moved by this much on the screen (unturned: as a drag of the hand moves it).
+    void pan_by(const QPointF& moved);
+    // ウィンドウ → アレンジ (PC5 H-c): the hand and the zoom tool used here with Shift held (a drag, a click — not the wheel:
+    // Shift+wheel scrolls across here alone, as before) — or, from their options, すべてのウィンドウを
+    // スクロール (the hand tool) and すべてのウィンドウをズーム (the zoom tool) — do the same in the window's other panes, and with
+    // the options in the other windows too (handUsed). A view-only canvas (a pane beside the one in front, app/pane_view)
+    // takes no tool and keeps only the whole page's tiles (節 H 4.5).
+    bool zoom_all = false;
+    bool scroll_all = false;
+    bool view_only() const { return view_only_; }
+    // (PC5 H-c review P3-1) Space held here now (a pane beside this canvas pans with it, as the canvas does).
+    bool space_held() const { return space_; }
+    // (PC5 H-c review P2-1) What a tool left half done — a transform's or warp's box, the crop box, the pen's anchors, a
+    // figure's or a polygon selection's corners, a ruler being placed, a line being drawn — let go (another book comes to
+    // the front: never finished on it); half_done: any of them, or words being typed, here now; finish_half_done: each
+    // finished as Enter finishes it (its signal to the window, on the book it was begun on).
+    void let_go();
+    bool half_done() const;
+    void finish_half_done();
     // A point on the widget as page mm (through the view's turn and mirror), and back.
     QPointF to_mm(const QPointF& widget) const;
     QPointF to_widget(const QPointF& mm) const;
@@ -597,6 +617,33 @@ public:
     std::string ruler_here_page;  // (the page it was drawn on: let go on another)
     // The count mark under a point of the canvas (its group and index; none: no visible one within 6 screen pixels).
     std::optional<std::pair<std::size_t, std::size_t>> count_at(const QPointF& widget) const;
+    // (PC5 J-b, スライス — slices@1, app/canvas_slices.cpp) The slices' painter (the extra "slices": each slice's outline in
+    // slice_colour and its number in a badge — show_slice_numbers —, the auto ones dotted while a slice tool is in hand,
+    // the chosen one orange with its handles) and the two tools: the スライスツール ("slice": a drag draws a user slice —
+    // sliceDrawn —, Shift square, slice_style 1 縦横比を固定 · 2 固定サイズ, a click chooses the slice there) and the スライス
+    // 選択ツール ("slice_select": a click chooses — sliceChosen —, a drag moves the chosen one, a handle sizes a user slice —
+    // sliceMoved —, a double click asks its options — sliceOptionsAsked). lock_slices (スライスをロック): no gesture changes
+    // them (slicesLocked). The page's slices now come from the window (slice_view: made again when the page changes).
+    struct SliceView {
+        std::vector<core::ResolvedSlice> slices;
+        core::SliceGrid grid;
+        std::vector<std::int64_t> order;  // the stored slices' ids in the list's order (a later one on top)
+    };
+    std::function<const SliceView*()> slice_view;
+    void paint_slices(QPainter& painter, const core::Page& page, const ExtraView& view) const;
+    std::optional<int> chosen_slice;  // its number as shown
+    bool lock_slices = false;
+    bool show_slice_numbers = true;
+    bool hide_auto_slices = false;
+    bool snap_slices = true;  // (表示 → スナップ先 → スライス: their edges)
+    QColor slice_colour = QColor(0x38, 0xb5, 0xff);
+    int slice_style = 0;  // 0 標準, 1 縦横比を固定 (slice_style_w : slice_style_h), 2 固定サイズ (the page's pixels)
+    double slice_style_w = 1, slice_style_h = 1;
+    static bool is_slice_tool(const QString& tool);
+    // The slice under a point of the canvas (a stored one before an auto one, the later on top; none: off the page).
+    std::optional<core::ResolvedSlice> slice_at(const QPointF& widget) const;
+    std::optional<core::ResolvedSlice> chosen_slice_now() const;
+    QRectF slice_mm(const core::ResolvedSlice& slice) const;  // (its rect, mm)
 
     // --- PC5 H-b: ガイド・グリッド・エクストラ・単位 (canvas_guide_lines.cpp; SPEC.md VIEW-01) --------------------------------------
     // What エクストラ hides with the rest (shows: one's own switch and the master's): the guides, the grid, the layers' edges,
@@ -673,6 +720,9 @@ signals:
     void renderFailed(const QString& message);
     // PC5 H-a: the graphics card stopped drawing the page (the canvas draws it by the processor now)
     void gpuFailed(const QString& message);
+    // PC5 H-c: the view zoomed (factor) or moved (on the screen, unturned) by the hand or the zoom tool with Shift held, or by
+    // their すべてのウィンドウを… options (every_window): the window does the same in its other panes (and other windows).
+    void handUsed(double factor, const QPointF& moved, bool every_window);
     // the pointer over the page with no button down (mm): the status bar's values there (color-model@1)
     void pointerOver(double x_mm, double y_mm);
     // the selection: a new area and how it joins (replace | add | subtract | intersect); the selection pen's line
@@ -738,6 +788,13 @@ signals:
     void countRequested(double x_mm, double y_mm);
     void countRemoved(int group, int index);
     void countMoved(int group, int index, double x_mm, double y_mm);
+    // (PC5 J-b) スライスツール: a slice drawn (mm); スライス選択ツール: the slice of a number chosen (0: none), moved or sized
+    // to (mm), its options asked; a gesture refused while the slices are locked
+    void sliceDrawn(QRectF mm);
+    void sliceChosen(int number);
+    void sliceMoved(int number, QRectF mm);
+    void sliceOptionsAsked(int number);
+    void slicesLocked();
     // the lines: the text tool clicked here (mm); a balloon's outline drawn by hand ([[x, y], …] mm); a line chosen (and
     // whether its panel opens); a line's box or tails changed ({x_mm, y_mm, w_mm, h_mm} | {tails}: move_line, or {style}:
     // edit_line); a double click on a balloon (type over it); a right click on one; a balloon dragged to (mm)
@@ -777,6 +834,8 @@ protected:
     void leaveEvent(QEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
     bool event(QEvent* event) override;
+    // (PC5 H-c: a pane's canvas — app/pane_view)
+    void set_view_only(bool on) { view_only_ = on; }
 
 private:
     struct FrameDrag {
@@ -1197,6 +1256,24 @@ private:
     bool count_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
     bool count_move(const QPointF& mm);
     bool count_release();
+    // (PC5 J-b: a slice tool's drag — a new slice, the chosen one moved, one of its handles — app/canvas_slices.cpp)
+    struct SliceDrag {
+        enum class Part { New, Move, Handle };
+        Part part = Part::New;
+        int handle = -1;   // (0..3 the corners from the top left, 4..7 the sides' middles from the top)
+        int number = 0;    // (the slice moved or sized)
+        QPointF grabbed;   // (the press, mm)
+        QRectF was, now;   // (mm)
+        bool moved = false;
+    };
+    std::optional<SliceDrag> slice_drag_;
+    int snap_slice_moving_ = 0;  // (the slice being moved: its edges no snap target)
+    bool slice_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool slice_move(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool slice_release();
+    bool slice_double(const QPointF& widget);
+    QRectF slice_drawn(const QPointF& from, const QPointF& to, Qt::KeyboardModifiers modifiers) const;
+    void draw_slice_drag(QPainter& painter) const;
     std::vector<QString> extras_hidden_;
     void draw_extras(QPainter& painter) const;
     // (PC5 H-b: canvas_guide_lines.cpp) the guides, the layers' edges, the equal gaps of a moved box; a guide grabbed
@@ -1216,6 +1293,7 @@ private:
     QTimer rerender_;
 
     QWidget* gpu_surface_ = nullptr;  // use_gpu
+    bool view_only_ = false;          // set_view_only (PC5 H-c)
 };
 
 // Whether motion should be reduced (環境設定 ui/reduce_motion; with no choice, as the system says).

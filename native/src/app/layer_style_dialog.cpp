@@ -28,6 +28,7 @@
 #include "app/layer_dialogs.hpp"
 #include "app/patterns_panel.hpp"
 #include "core/ink.hpp"
+#include "core/layer_basics.hpp"
 #include "core/layer_styles.hpp"
 #include "core/patterns.hpp"
 #include "render/gradient_presets.hpp"
@@ -160,6 +161,8 @@ LayerStyleDialog::LayerStyleDialog(std::shared_ptr<const core::Document> book, c
     if (style.contains("fill_opacity")) fill_ = style["fill_opacity"];
     if (style.contains("blend_if")) blend_if_ = style["blend_if"];
     shown_ = !(style.contains("enabled") && style["enabled"] == Json(false));
+    channels_.assign(core::blend_channel_count(page), true);  // (PC5 I-a, blend-channels@1)
+    if (layer.blend_channels.size() == channels_.size()) channels_ = layer.blend_channels;
     for (const std::string_view kind : core::kEffectKinds) {
         bool any = false;
         for (const Json& e : style.value("effects", Json::array())) {
@@ -386,6 +389,23 @@ void LayerStyleDialog::build_blending(QFormLayout* form) {
         changed();
     });
     form->addRow(QStringLiteral("塗りの不透明度"), fill);
+    // (PC5 I-a, blend-channels@1: 高度な合成 → チャンネル — the page's colour channels, one left out keeping what is under the layer)
+    if (!channels_.empty()) {
+        std::vector<QString> names{QStringLiteral("R"), QStringLiteral("G"), QStringLiteral("B")};
+        if (page_space_ == "cmyk") names = {QStringLiteral("C"), QStringLiteral("M"), QStringLiteral("Y"), QStringLiteral("K")};
+        if (page_space_ == "lab") names = {QStringLiteral("L"), QStringLiteral("a"), QStringLiteral("b")};
+        if (page_space_ == "gray") names = {QStringLiteral("グレー")};
+        auto* row = new QHBoxLayout;
+        for (std::size_t c = 0; c < channels_.size() && c < names.size(); ++c) {
+            auto* box = new QCheckBox(names[c]);
+            box->setObjectName(QStringLiteral("style_channel_%1").arg(c));
+            box->setChecked(channels_[c]);
+            connect(box, &QCheckBox::toggled, this, [this, c](bool on) { channels_[c] = on; });
+            row->addWidget(box);
+        }
+        row->addStretch(1);
+        form->addRow(QStringLiteral("チャンネル"), row);
+    }
     auto* shown = new QCheckBox(QStringLiteral("効果を表示"));
     shown->setObjectName(QStringLiteral("style_shown"));
     shown->setChecked(shown_);
@@ -738,6 +758,15 @@ Json LayerStyleDialog::style() const {
     if (!blend_if_.empty()) out["blend_if"] = blend_if_;
     if (!shown_) out["enabled"] = false;
     return out;
+}
+
+std::vector<bool> LayerStyleDialog::channels() const {
+    if (std::all_of(channels_.begin(), channels_.end(), [](bool on) { return on; })) return {};
+    return channels_;
+}
+
+void LayerStyleDialog::set_channel(std::size_t channel, bool on) {
+    if (channel < channels_.size()) channels_[channel] = on;
 }
 
 void LayerStyleDialog::preview() {

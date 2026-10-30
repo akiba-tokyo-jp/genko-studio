@@ -72,6 +72,7 @@ void MainWindow::build_production_actions() {
     build_layer_comp_actions();  // (PC5 J-a: レイヤーカンプ, レイヤーカンプからファイル…)
     build_note_actions();        // (PC5 J-c: 注釈ツール, 表示・非表示 → 注釈, 読み込み → 注釈…, ウィンドウ → 注釈)
     build_measure_actions();     // (PC5 J-d1: 計測スケールを設定 ▸, ものさしツール, カウントツール, 表示・非表示 → カウント)
+    build_slice_actions();       // (PC5 J-b: スライスツール, スライス選択ツール, 表示・非表示 → スライス, スライスをロック・消去, 新規レイヤーベースのスライス)
 }
 
 void MainWindow::build_production_menus(QMenu* layers, QMenu* pages) {
@@ -138,6 +139,7 @@ void MainWindow::build_production_docks() {
     }
     build_notes_dock();  // (PC5 J-c: 注釈, the canvas's notes and the 注釈ツール's options)
     build_measure_tools();  // (PC5 J-d1: the canvas's count marks and ruler line, the ものさしツール's and カウントツール's options)
+    build_slice_tools();  // (PC5 J-b: the canvas's slices, the スライスツール's and スライス選択ツール's options)
 }
 
 void MainWindow::not_yet_command(const QString& name) { flash(QStringLiteral("「%1」は、この版ではまだ使えません").arg(name), 4000, true); }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <QAction>
 #include <QActionGroup>
 #include <QFileSystemWatcher>
@@ -116,6 +117,12 @@ class PageList;
 class SaveFailureBar;
 class SaveStatusLabel;
 class ImeEntry;
+class DocArea;    // (PC5 H-c)
+class PaneView;   // (PC5 H-c)
+class PageRenderer;
+
+// (PC5 H-c) A new tab's own number (the cell of ウィンドウ → アレンジ follows a tab by it, wherever the tab moves).
+std::uint64_t new_tab_id();
 
 // 色の校正・校正の設定・色域外警告 of one book in a window (SPEC COLOR-03 PC1b; PhotoCraft's ProofView): display only,
 // never the book's.
@@ -150,6 +157,8 @@ struct Document {
     // duplicated): its tab named by its title alone; one opened from a file and not changed since is closed without asking.
     bool picture = false;
     std::optional<std::filesystem::path> source;
+    // PC5 H-c: the tab's own number (its cell in the window's arrangement).
+    std::uint64_t tab = new_tab_id();
     QString title() const;
 };
 
@@ -181,7 +190,8 @@ public:
     const core::Layer* target_layer() const;
     void set_target_layer(const std::string& layer_id);
     // A pen, paint or tone layer, not locked.
-    static bool drawable(const core::Layer& layer);
+    // (PC5 I-a: `page` the page the layer is on — a folder locked with すべてをロック locks it too)
+    static bool drawable(const core::Layer& layer, const core::Page* page = nullptr);
     // The selection as an op's area ({"poly": …} or {"mask": …}), or none.
     std::optional<core::Json> selection_area() const;
     // 自動選択ツール's 色の近さ: how different a colour may be and still be the same (許容値, 0..255); only the touching
@@ -497,6 +507,29 @@ public:
     QTabBar* doc_tabs() const { return doc_tabs_; }
     // (M6) The tool palette, the command bar under the menus and the quick-access panel (workspace.cpp).
     QToolBar* tool_palette() const { return palette_; }
+    // --- ウィンドウ → アレンジ (PC5 H-c, 節 H 5.3, the user's decision 7; main_window_arrange.cpp) ------------------------
+    // The middle of the window: the canvas alone (the tabs' way), or the books side by side in cells — the canvas in the
+    // cell in front, the others' pages in panes (PaneView, only looked at); a pane clicked brings its tab to the front.
+    DocArea* doc_area() const { return doc_area_; }
+    // An arrangement of DocArea::layouts() ("tabs": the canvas alone): the tab in front first, then the next ones in the
+    // tabs' order, each fitted to its cell (at most DocArea::kMostPanes; the rest by their tabs).
+    void arrange(const QString& layout);
+    // A pane's cell clicked: its tab to the front there (as its tab chosen: switch_document's way).
+    void activate_pane(int cell);
+    // ウィンドウを分離: the tab in front into a window of its own (moved: its page, view and layer with it); すべてのウィンドウを
+    // 分離 (cascade: 重ねて表示 — the windows 40 px apart, this one in front): every tab but the one in front so.
+    void float_in_window();
+    void float_all(bool cascade = false);
+    // すべてをタブに統合: every other window's tabs into this window's (a book open here already not twice), those windows
+    // closed (nothing asked: their books are open here), the tabs' way again.
+    void consolidate_all();
+    // 同じズーム倍率で表示・同じ位置に表示・同じ回転で表示・すべてを同じ表示にする: the view in front given to the window's panes and
+    // to the other windows' pages (the zoom by its %, the place by where it is on its page, the turn and the mirrors).
+    void match_views(bool zoom, bool location, bool rotation);
+    // 修飾キー (window.panel.modifierKeys): Shift, Ctrl and Alt kept down for the canvas's tools while their buttons are
+    // in (a touch screen, a pen without a keyboard).
+    Qt::KeyboardModifiers latched_keys() const { return latched_; }
+    void latch_key(Qt::KeyboardModifier key, bool on);
     // PC4 E-0 (paint_panels.cpp): the drawing tools' groups — Photoshop's ブラシ, 消しゴム, 塗り, ぼかし, 覆い焼き, スポイト —,
     // each its tools' ids (the first the palette's; a tool not made yet, its group's, is left out); a tool's group of the
     // tools made (none: it is in none).
@@ -771,6 +804,35 @@ private:
     void ask_32bit_preview();
     void build_arrange_actions();
     void build_arrange_menus(QMenu* arrange);
+    void build_arrange_docks();  // (PC5 H-c: ウィンドウ → ツール, 修飾キー)
+    // (PC5 H-c) the arrangement following the tab in front (show_document): its cell takes the canvas, or the cell in
+    // front shows it; tabs gone leave their cells. A pane given a tab; the panes' views kept in their tabs; the tabs'
+    // marks of their cells; a tab by its number (-1: gone).
+    void arrange_follow();
+    void fill_pane(PaneView* pane, std::uint64_t tab);
+    void keep_pane_views();
+    void mark_tabs();
+    int document_of(std::uint64_t tab) const;
+    // A tab of another window taken in as it was there (not brought to the front); a new window's first tab made so.
+    void take_document(const Document& doc);
+    void adopt_first(const Document& doc);
+    // The canvas's hand or zoom with Shift (or their すべてのウィンドウを… options): the same in the panes (and windows).
+    void hand_used(double factor, const QPointF& moved, bool every_window);
+    // 色の校正 and the 32 bit preview of a tab on a renderer (false: its proof profile could not be read — nothing proofed).
+    bool proof_renderer(PageRenderer& renderer, const ProofView& view);
+    // (PC5 H-c review) A pane shows over its page what the canvas in front shows (guides, grid, extras — the production's
+    // painters too); every pane again after a switch, a preference or the monitor changed; a tab's tooltip (its path and
+    // its cell); words being typed finished before a tab moves.
+    void pane_look(PaneView* pane);
+    void panes_follow();
+    QString tab_tip(int index) const;
+    void finish_typing();
+    // (review P2-1) The book a transform or the crop box was begun on: Enter there never lands on another book.
+    const Session* transform_book_ = nullptr;
+    std::optional<std::string> transform_contents_;
+    const Session* crop_book_ = nullptr;
+    std::optional<std::string> crop_contents_;
+    bool begun_here(const Session* book, const std::optional<std::string>& contents) const { return book == session_.get() && contents == contents_; }
     void build_edit_actions();
     void build_edit_menu_tail(QMenu* edit);
     // PC5 H-0: the panels by Photoshop's names (ナビゲーター, オプション, ヒストリー), their object names — the workspaces' keys —
@@ -1594,6 +1656,10 @@ private:
     double eraser_mm_ = 2.0;
 
     PageCanvas* canvas_ = nullptr;
+    DocArea* doc_area_ = nullptr;          // (PC5 H-c: the canvas, or the cells)
+    bool tabs_marked_ = false;             // (PC5 H-c: the tabs carry their cells' marks)
+    Qt::KeyboardModifiers latched_;        // (PC5 H-c: 修飾キー)
+    QDockWidget* modifier_dock_ = nullptr;
     CanvasOnly* canvas_only_ = nullptr;
     ScreenMode screen_mode_ = ScreenMode::Standard;  // (PC5 H-a: set_screen_mode)
     Qt::WindowStates screen_before_ = Qt::WindowNoState;
@@ -1914,7 +1980,34 @@ public:
     QLabel* ruler_readout() const { return ruler_readout_; }
     QComboBox* count_groups() const { return count_groups_; }
 
+    // --- PC5 J-b (slices@1): main_window_slices.cpp — the スライスツール and the スライス選択ツール (the 切り抜き group; their
+    // options), レイヤー → 新規レイヤーベースのスライス, 表示 → 表示・非表示 → スライス, スライスをロック, スライスを消去 (and スナップ
+    // 先 → スライス: main_window_align.cpp); each change of the book an op through apply_ops --------------------------------
+    // A slices op on the page shown (its "page" put in), shown at once (a refusal said in the status line).
+    bool slice_op(core::Json op);
+    // スライスオプション… / スライスを分割…: the chosen slice's (the スライス選択ツール's), the window asked, then set_slice /
+    // divide_slice (an auto slice made a user slice in the same step).
+    void slice_options_dialog();
+    void divide_slice_dialog();
+    // The page shown's slices now (made again when the page changes; none: no page).
+    const PageCanvas::SliceView* slice_view();
+    QLabel* slice_chosen_label() const { return slice_chosen_label_; }
+
 private:
+    void build_slice_actions();
+    void build_slice_menus(QMenu* view, QMenu* layers);
+    void build_slice_tools();
+    void refresh_slices();
+    bool slices_unlocked();  // (スライスをロック: false, said)
+    std::optional<std::int64_t> chosen_slice_id(bool promote);
+    // (PC5 J-b, H-c's pane: pane_look) A pane beside the canvas shows its own page's slices as the canvas shows its: their
+    // colour and numbers, each made again when its book or page changes.
+    void slices_in_pane(PageCanvas* pane);
+    PageCanvas::SliceView slice_view_;
+    const core::Page* slice_view_page_ = nullptr;
+    std::shared_ptr<const void> slice_view_keep_;  // (the book the view was made of, so its page is not another's)
+    bool slice_view_made_ = false;
+    QLabel* slice_chosen_label_ = nullptr;
     void build_measure_actions();
     void build_measure_menus(QMenu* view);
     void build_measure_tools();
@@ -1935,6 +2028,27 @@ private:
     // ビデオフレームからレイヤー…, 注釈…). main_window_file.cpp.
     QMenu* import_menu(QMenu* file);
     void add_to_import_menu(QMenu* file, QAction* command);
+    // --- PC5 I-a (SPEC.md AUTO-01「レイヤーの基本」): main_window_layers.cpp — レイヤー → 新規 → 背景からレイヤーへ…・レイヤーからの
+    // グループ…, レイヤーを複製…, 非表示レイヤーを削除, クリッピングマスクを作成・解除, レイヤーのグループ解除, ファイル → スクリプト →
+    // すべての空のレイヤーを削除・すべてのレイヤー効果を統合; each change of the book an op through apply_ops ------------------
+public:
+    // レイヤーを複製…: the window (its name — one layer —, and 保存先: a page of the book of the same paper and mode), then
+    // duplicate_layers (a group or folder with what it holds).
+    void duplicate_layer_dialog();
+    // レイヤーからのグループ…: the name asked, then the layers chosen in a group (group_layers, 通過).
+    void group_from_layers();
+    // 背景からレイヤーへ…: the opened picture's 背景 (or a flattened one) an ordinary layer — its name asked (レイヤー 0), its
+    // transparency, position and すべて locks off (set_layer). A core layer (漫画の背景) is not Photoshop's 背景: said.
+    void layer_from_background();
+    // クリッピングマスクを作成 (Alt+Ctrl+G: again on a clipped layer, 解除) and クリッピングマスクを解除: the layers chosen.
+    void clipping_mask(std::optional<bool> on);
+    // すべての空のレイヤーを削除 (every page: delete_layers empty) and すべてのレイヤー効果を統合 (bake_layer_styles), asked first.
+    void delete_empty_layers();
+    void bake_all_layer_effects();
+
+private:
+    void build_layer_basic_actions();
+    void build_layer_basic_menus(QMenu* layers);
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

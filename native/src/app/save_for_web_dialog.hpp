@@ -30,7 +30,7 @@ class QFutureWatcher;
 // (4 アップ: two more with fewer colours or a lower quality) —, on the right the preset and the settings (formats::WebSettings),
 // the picture's size (formats::WebSize), under the pictures each one's estimated size. Everything is made on a worker from
 // the page drawn at most 1024 px long (the window never waits), the file at its whole size only when it is written.
-// Slices and their HTML are PC5's.
+// (PC5 J-b) スライス: by the page's slices — a file each in a folder's images/ and their HTML table (formats::save_slices_for_web).
 
 namespace genko::app {
 
@@ -70,6 +70,12 @@ public:
     QDoubleSpinBox* percent = nullptr;
     QComboBox* resample = nullptr;
     QLabel* estimate = nullptr;  // the optimised file's size, under the panes
+    // (PC5 J-b) スライスごとに書き出す (the page has slices: on), すべてのスライス | すべてのユーザー定義スライス, HTML も書き出す
+    QCheckBox* by_slices = nullptr;
+    QComboBox* which_slices = nullptr;
+    QCheckBox* with_html = nullptr;
+    // The slices' choices (none: the page as one file).
+    std::optional<formats::WebSliceOptions> slice_options() const;
     QDialogButtonBox* buttons = nullptr;
 
 private:

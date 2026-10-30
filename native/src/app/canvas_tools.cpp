@@ -60,6 +60,7 @@ bool PageCanvas::tool_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardM
     if (tool_ == QLatin1String("note")) return note_press(pos, mm);  // (PC5 J-c, 注釈ツール: canvas_notes.cpp)
     if (tool_ == QLatin1String("measure")) return measure_press(mm, modifiers);       // (PC5 J-d1, ものさしツール: canvas_measure.cpp)
     if (tool_ == QLatin1String("count")) return count_press(pos, mm, modifiers);      // (PC5 J-d1, カウントツール)
+    if (is_slice_tool(tool_)) return slice_press(pos, mm, modifiers);  // (PC5 J-b, スライスツール・スライス選択ツール: canvas_slices.cpp)
     if (path_press(pos, mm, modifiers)) return true;  // (ペンツール・曲線ペンツール・パス選択ツール: canvas_pen.cpp)
     if (retouch_press(mm, modifiers)) return true;    // (PC3 B4: Alt+click sets the clone source, retouch_tools.cpp)
     if (is_text_tool(tool_)) return text_press(mm);  // (テキスト, 横書き文字ツール: canvas_lines.cpp)
@@ -129,6 +130,7 @@ bool PageCanvas::tool_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, b
     if (pressed && note_move(mm)) return true;  // (PC5 J-c: a note's mark dragged)
     if (pressed && measure_move(mm, modifiers)) return true;  // (PC5 J-d1: the ものさしツール's line drawn or moved)
     if (pressed && count_move(mm)) return true;  // (PC5 J-d1: a count mark dragged)
+    if (pressed && slice_move(mm, modifiers)) return true;  // (PC5 J-b: a slice drawn, moved or sized)
     if (pressed && path_move(mm, modifiers)) return true;  // (the path tools: canvas_pen.cpp)
     if (line_move(mm, modifiers)) return true;  // (a balloon or one of its handles dragged: canvas_lines.cpp)
     if (text_move(mm, pressed)) return true;
@@ -155,6 +157,7 @@ bool PageCanvas::tool_move(const QPointF& mm, Qt::KeyboardModifiers modifiers, b
 bool PageCanvas::tool_release() {
     if (note_release()) return true;  // (PC5 J-c)
     if (measure_release() || count_release()) return true;  // (PC5 J-d1)
+    if (slice_release()) return true;  // (PC5 J-b)
     if (path_release()) return true;  // (the path tools: canvas_pen.cpp)
     if (text_release()) return true;
     if (line_release()) return true;

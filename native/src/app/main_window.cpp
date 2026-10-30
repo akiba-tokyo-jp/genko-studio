@@ -46,6 +46,7 @@
 #include "app/config.hpp"
 #include "app/preferences.hpp"
 #include "app/dialogs.hpp"
+#include "app/doc_area.hpp"
 #include "app/documents.hpp"
 #include "app/ime.hpp"
 #include "app/inputs.hpp"
@@ -70,6 +71,7 @@
 #include "core/command_bus.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
+#include "core/layer_basics.hpp"
 #include "formats/copy.hpp"
 #include "render/brushes.hpp"
 #include "render/dabs/lines.hpp"
@@ -143,6 +145,11 @@ bool open_elsewhere(const Session* session, const MainWindow* but) {
 }
 
 }  // namespace documents
+
+std::uint64_t new_tab_id() {
+    static std::uint64_t next = 0;
+    return ++next;
+}
 
 QString Document::title() const {
     if (contents) return QStringLiteral("%1の中身").arg(contents_title.isEmpty() ? QStringLiteral("スマートオブジェクト") : contents_title);  // (PC3 A1)
@@ -338,7 +345,11 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     column->addWidget(unported_);
     column->addWidget(read_only_);
     column->addWidget(failure_bar_);
-    column->addWidget(canvas_, 1);
+    // (PC5 H-c: the canvas alone in the middle — the tabs' way, as before — or the cells of ウィンドウ → アレンジ around it)
+    doc_area_ = new DocArea(canvas_);
+    connect(doc_area_, &DocArea::paneActivated, this, &MainWindow::activate_pane);
+    connect(canvas_, &PageCanvas::handUsed, this, &MainWindow::hand_used);
+    column->addWidget(doc_area_, 1);
     setCentralWidget(central);
     ime_ = new ImeEntry(canvas_);  // (the entrance for typed words; the text tool types in its InlineEditor, ime.hpp)
     ime_->hide();
@@ -542,9 +553,13 @@ const core::Page* MainWindow::current_page() const {
 
 bool MainWindow::agent_book() const { return book().strict_gates || core::py_truthy(book().studio); }
 
-bool MainWindow::drawable(const core::Layer& layer) {
+bool MainWindow::drawable(const core::Layer& layer, const core::Page* page) {
+    bool all = layer.lock_all;  // (PC5 I-a: すべてをロック — its own, or a folder's it is in)
+    if (page != nullptr && !page->layers.empty() && &layer >= page->layers.data() && &layer < page->layers.data() + page->layers.size()) {
+        all = core::locked_all(page->layers, static_cast<std::size_t>(&layer - page->layers.data()));
+    }
     return (layer.kind == core::LayerKind::Strokes || layer.kind == core::LayerKind::Raster || layer.kind == core::LayerKind::Tone) &&
-           !layer.locked;
+           !layer.locked && !all;
 }
 
 const core::Layer* MainWindow::target_layer() const {
@@ -648,7 +663,7 @@ void MainWindow::pen_changed() {
         tool_settings_->set_badge(badge);
     }
     add_background(fields);  // (PC4 E2, review P2-4: the line drawn as it goes takes the 背景色 the brush moves to)
-    canvas_->set_live_pen(fields, layer != nullptr && drawable(*layer) ? std::optional<std::string>(layer->id) : std::nullopt);
+    canvas_->set_live_pen(fields, layer != nullptr && drawable(*layer, current_page()) ? std::optional<std::string>(layer->id) : std::nullopt);
     canvas_->grid_layer = layer != nullptr ? std::optional<std::string>(layer->id) : std::nullopt;  // (PC5 H-a: ピクセルグリッド's layer)
     canvas_->brush_width_mm = pen_.width_mm;
     canvas_->eraser_mm = eraser_mm_;
@@ -695,7 +710,9 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
         {"new_layer_comp", QStringLiteral("レイヤーカンプを記録しています…")}, {"update_layer_comp", QStringLiteral("レイヤーカンプを記録しています…")},
         {"apply_layer_comp", QStringLiteral("レイヤーカンプを適用しています…")},
         // (PC5 I-d, the review's P2-1: pictures put in, a data set's pictures checked)
-        {"apply_data_set", QStringLiteral("データセットを適用しています…")}, {"set_data_sets", QStringLiteral("データセットを確かめています…")}};
+        {"apply_data_set", QStringLiteral("データセットを適用しています…")}, {"set_data_sets", QStringLiteral("データセットを確かめています…")},
+        // (PC5 I-a, the review's P3-8: すべてのレイヤー効果を統合, すべての空のレイヤーを削除 — every page)
+        {"bake_layer_styles", QStringLiteral("レイヤー効果を統合しています…")}, {"delete_layers", QStringLiteral("レイヤーを削除しています…")}};
     struct Busy {
         bool on = false;
         ~Busy() {
@@ -831,6 +848,7 @@ void MainWindow::show_page() {
     if (notes_panel_ != nullptr) refresh_notes();  // (PC5 J-c: the chosen note while the page has it)
     if (character_panel_ != nullptr) refresh_type_panels();  // (PC5 G-d: the type panels shown, as the book is now)
     if (count_groups_ != nullptr) refresh_measure();  // (PC5 J-d1: the ものさしツール's readout, the count groups)
+    if (canvas_->slice_view) refresh_slices();  // (PC5 J-b: the page's slices made again, the chosen one while it is there)
     if (patterns_panel_ != nullptr && patterns_dock_ != nullptr && patterns_dock_->isVisible()) patterns_panel_->refresh();  // (PC4 E3)
     if (lines_later_) {
         lines_timer_.start();
@@ -904,7 +922,7 @@ void MainWindow::refresh_status() {
     setWindowTitle(QStringLiteral("%1 第%2話 — Genko Studio").arg(QString::fromStdString(b.title), QString::fromStdString(b.episode.repr())));
     if (doc_ < doc_tabs_->count()) {
         doc_tabs_->setTabText(doc_, documents_[static_cast<std::size_t>(doc_)].title());
-        doc_tabs_->setTabToolTip(doc_, session_->path() ? QDir::toNativeSeparators(qpath(*session_->path())) : QStringLiteral("未保存"));
+        doc_tabs_->setTabToolTip(doc_, tab_tip(doc_));  // (its path; PC5 H-c: its cell too)
     }
     save_label_->show_status(status);
     failure_bar_->show_status(status);
@@ -1076,11 +1094,16 @@ void MainWindow::store_document() {
     doc.page_index = page_index_;
     doc.view = canvas_->view_state();
     doc.target_layer = target_layer_id_;
+    keep_pane_views();  // (PC5 H-c: the panes' views too, each in its tab)
 }
 
 void MainWindow::show_document(int index) {
     const Document& doc = documents_[static_cast<std::size_t>(index)];
+    // (PC5 H-c review P2-1: another book — or another contents' tab — in front: what a tool left half done on the canvas is
+    // let go, whatever its page's id — a duplicate shares it —; never finished on this one)
+    if (session_ != doc.session || contents_ != doc.contents) canvas_->let_go();
     doc_ = index;
+    arrange_follow();  // (PC5 H-c: the canvas to its tab's cell — before the view is given: the cell's size —, main_window_arrange.cpp)
     session_ = doc.session;
     page_index_ = doc.page_index;
     target_layer_id_ = doc.target_layer;
@@ -1312,6 +1335,7 @@ bool MainWindow::close_document(int index) {
         show_document(std::min(index, static_cast<int>(documents_.size()) - 1));
     } else {
         doc_ = doc_tabs_->currentIndex();
+        arrange_follow();  // (PC5 H-c: its cell gone)
     }
     script_event(service::script_events::Event::CloseDocument);  // (PC5 I-e: after it, as Photoshop's — on the book now in front)
     return true;
@@ -1618,7 +1642,7 @@ void MainWindow::refresh_first_steps() {
     const bool empty = !first_steps_closed_ && !lines && !drawn && !panels;
     if (empty && first_steps_ == nullptr) {
         first_steps_ = first_steps_bar();
-        column_->insertWidget(column_->indexOf(canvas_), first_steps_);
+        column_->insertWidget(column_->indexOf(doc_area_), first_steps_);
     }
     if (first_steps_ != nullptr) first_steps_->setVisible(empty);
     for (QPushButton* button : first_buttons_) {  // (the keys as they are now: 環境設定 may have changed them)
@@ -1629,7 +1653,7 @@ void MainWindow::refresh_first_steps() {
     const bool next = panels && wanted != nullptr && wanted->isChecked() && !(first_steps_ != nullptr && first_steps_->isVisible());
     if (next && next_steps_ == nullptr) {
         next_steps_ = next_steps_bar();
-        column_->insertWidget(column_->indexOf(canvas_), next_steps_);
+        column_->insertWidget(column_->indexOf(doc_area_), next_steps_);
     }
     if (next_steps_ == nullptr) return;
     const bool saved = session_->path().has_value() && session_->status().kind == SaveKind::Saved;

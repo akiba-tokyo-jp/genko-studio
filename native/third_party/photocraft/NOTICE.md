@@ -321,6 +321,11 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/lens_cmds.rs`（354-374 行: `lens_batch` — 2 枚以上なら統合してからレンズ補正、プロファイルの既定 auto）→ `native/src/service/automate.cpp`（`lens_steps`。見えているレイヤーで数えること、統合で残るレイヤーにかけることは Genko のもの）。
   - `crates/engine/src/automate_cmds.rs`（141-260 行: スクリプトイベントの名前と起こす所）→ `native/src/app/main_window.cpp`・`main_window_file.cpp`・`main_window_export.cpp`・`main_window_output.cpp`（人の保存だけ・バッチの間は起こさないことは Genko のもの）。窓は `native/src/app/automate_dialogs.cpp`（Qt。欄の名前は Photoshop）。
 
+- レイヤーの基本の残り（PC5 I-a、layer-locks@1・blend-channels@1）:
+  - `crates/engine/src/extra_cmds.rs`（403-428 行: `is_empty_layer`・`ungroup`、591 行: `layer_from_background`、655-675 行: 非表示レイヤーを削除・すべての空のレイヤーを削除・グループ解除の仕様）→ `native/src/core/layer_basics.cpp`（`empty_layer`・`folder_contents`・`forget_layers`）・`native/src/core/ops_layers.cpp`（`delete_layers`・`duplicate_layers`・`ungroup_layers`。芯の層と すべてをロック を残して言うこと、全ページ、指し先を外すこと、別のページへの複製、画素のファイルを持つ層を空としないことは Genko のもの）・`native/src/app/main_window_layers.cpp`。
+  - `crates/engine/src/file_cmds.rs`（716-765 行: `bake` と `flatten_all_effects` — 不透明度・描画モード・クリップを外して効果ごと描き、層の設定に残す）→ `native/src/render/ops_layer_styles.cpp`（`bake_layer_styles`。Genko の境界効果も描き込むこと、8 bit・高精度・インキの道、ブレンド条件を残すことは Genko のもの）。
+  - `crates/io/src/blocks.rs`（10-58 行: `parse_brst`・`brst_data`・`locks_from_lspf`・`lspf_from_locks`）→ `native/src/render/import_psd.cpp`（`take_locks`・`take_channels`）・`native/src/formats/psd_export.cpp`（`own_locks`・`basics_blocks`）。`crates/compose/src/lib.rs`（661-690 行: `channel_weights`・`restore_channels` — 外したチャンネルは下の値のまま）→ `native/src/render/page.cpp`（`KeptChannels`。CMYK・Lab・グレーのページ（上流は RGB とグレーだけ）、高精度・インキの道への配線は Genko のもの）・`native/src/render/color_canvas.cpp`・`native/src/render/ink_canvas.cpp`（`keep_channels`）。`crates/format/src/manifest.rs` の `excluded_channels`・`Locks` → `native/src/render/pcraft_read.cpp`・`native/src/formats/pcraft_write.cpp`。
+
 ## 表示・窓・環境設定（PC5 節 H）
 
 - 表示・窓・環境設定の土台（PC5 H-0）:
@@ -335,6 +340,9 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/io/src/psd_import.rs`（363-376 行: `parse_guides`）・`crates/io/src/psd_export.rs`（470-484 行: `guides_resource`）→ `native/src/render/psd_guides.cpp`（リソース 1032 のバイトの並び）。
   - `crates/engine/src/prefs.rs`（52-147 行: `Unit` の `from_px`・`to_px`・`suffix`・`decimals`、`PointSize::per_inch`。497-567 行: `UnitsAndRulers`・`GuidesGridAndSlices` の項目と既定）→ `native/src/core/units.cpp`（mm を元に）・`native/src/core/prefs_table.cpp`・`native/src/app/preferences_units.cpp`。
   - `crates/ui-egui/src/rulers.rs`（38-48 行: `nice_step`、150-230 行: 定規の刻みと数、ガイドを離した所で動かす・消す）→ `native/src/app/canvas_scale.cpp`（`draw_scale_in_unit`・`guide_release`）・`native/src/app/canvas_guide_lines.cpp`。
+- 窓の区画と並べ方・パネル（PC5 H-c）:
+  - `crates/ui-egui/src/view_cmds.rs`（137-148 行: 並べ方の名前 `LAYOUTS`、583-630 行: `arrange` — 並べるとどの原稿も区画に合わせる・タブに統合・浮動・同じ表示にする、636-667 行: `cells` — 各並べ方の区画の位置、`tile` の ceil(√n) 列）→ `native/src/app/doc_area.cpp`（`DocArea::cells`・`capacity`。区画を仕切りで動かせること・16 までは Genko のもの）・`native/src/app/main_window_arrange.cpp`（`arrange`・`consolidate_all`・`float_all`・`match_views`。同じ回転で表示は Genko の表示の回転と反転を当てる）。`crates/ui-egui/src/canvas.rs`（612-630 行: 前の原稿のほかの区画は見るだけ、クリックで前に）の考え → `native/src/app/pane_view.cpp`。`crates/ui-egui/src/menu_catalog.rs`（702-724 行: アレンジ の項目と並び）→ `build_arrange_menus`。
+  - `crates/ui-egui/src/workspace_ui.rs`（119-127 行・295-310 行: Modifier Keys の Shift・Command・Alt を押したままにする）→ `native/src/app/main_window_arrange.cpp`（`build_arrange_docks`・`latch_key`。持ち替えの道具を持つことは Genko のもの）。
 
 ## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1、PC5 節 J）
 
@@ -356,3 +364,9 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/doc/src/analysis.rs`（8-90 行: `MeasurementScale` の `factor`・`describe`・`is_default`、`CountGroup` の既定、`count_total`）と `crates/engine/src/analysis_cmds.rs`（221-262 行: `set_scale`・`scale_json`、555-577 行: `ruler_info`（角度は上が正、分度器は 2 本の腕の間の角）、619-630 行: `inscribed`、632-668 行: `straighten`（近い軸へ寝かせ、層はキャンバスの中心のまわりに回し、切り抜きはキャンバスを回して内接の長方形で切る。終わると線を消す）、670-850 行: `count_*`（新しいグループの色の順、`nearest` の 6 画素、グループだけを名指すと使うグループにする）、1085-1100 行: `analysis_info`）→ `native/src/core/measure.{hpp,cpp}`・`native/src/render/ops_measure.{hpp,cpp}`（op の名前と引数・mm で持つこと・ページの画素で数えること・用紙の mm のプリセット・範囲の外の大きさを断ること・ものさしも 1 手の op にすること・切り抜きを `crop_page` の 1 手にすることは Genko のもの）。試験の考え（同じファイルの tests.rs・analysis.rs の tests）→ `native/tests/unit/test_measure.cpp`。
   - `crates/io/src/annotations_map.rs`（279-345 行: リソース 1074 の `scale_from_resource`・`write_scale_resource`・`keep_raw_scale`、1080 は印があれば書かない `keep_resource`）→ `native/src/render/psd_annotations.{hpp,cpp}`（ファイルの画素とページの画素の換算・指紋で読んだバイトのまま書くかを決めることは Genko のもの）。
   - `crates/format/src/manifest.rs`（`measurement`）→ `native/src/render/pcraft_measure.{hpp,cpp}`。
+- スライス（PC5 J-b）:
+  - `crates/doc/src/slices.rs`（160-280 行: `auto_slices`（切れ目の格子・横の連なり・同じ列の縦のつなぎ）、`resolve`（上から左からの番号・`<base>_NN` の名前・1 つだけなら基の名前）、`base_name`）→ `native/src/core/slice_layout.{hpp,cpp}`（mm で持ち端を 1 つずつ丸めて画素にすること・基の名前をページのファイル名にすることは Genko のもの）。試験の考え（同じファイルの tests）→ `native/tests/unit/test_slices.cpp`。
+  - `crates/engine/src/slice_cmds.rs`（30-200 行: `layer_bounds`（効果の広がり）・`refresh`（レイヤーベースのスライスが層に付いていき、層が消えると消える）・`apply_options`・`target`（番号で名指した自動スライスを昇格）、200-505 行: `slice.new`・`slice.fromGuides`・`slice.set`・`slice.promote`・`slice.delete`・`slice.divide`・`slice.list`・`layer.newLayerBasedSlice`・`view.clearSlices`）→ `native/src/render/ops_slices.{hpp,cpp}`（op の名前と引数・mm で持つこと・範囲を見るたびに作ること・スライスをロックを窓のものにすること・分割を mm で割ることは Genko のもの）。試験の考え（`slice_cmds/tests.rs`）→ `native/tests/unit/test_slices.cpp`。
+  - `crates/psd/src/slices.rs`（版 6 の読み書きと後ろの記述子の外側の広げ、版 7・8 の記述子）と `crates/io/src/slices_map.rs`（自動スライスを捨てて読む、lyid の層を名指す、層の無いレイヤーベースのスライスをユーザー定義にする、自動スライスも書く）→ `native/src/render/psd_slices.{hpp,cpp}`（ファイルの絵を置いた所の mm に直すこと・指紋で読んだバイトのまま書くかを決めることは Genko のもの）。
+  - `crates/engine/src/web_cmds.rs`（626-707 行: `slice_file`・`html_escape`・`html_table`、709-797 行: スライスごとの書き出しと spacer.gif）→ `native/src/formats/web_export.cpp`（`save_slices_for_web`・`web_slices_html`。1 回描いて切り出すこと・書き先の守り・まとめて置くことは Genko のもの）。
+  - `crates/ui-egui/src/slice_ui.rs`（道具の押す・動かす・離す、枠と番号の描き方、オプションの並び）→ `native/src/app/canvas_slices.cpp`・`native/src/app/main_window_slices.cpp`（Qt で作り直した。つまみで大きさを変えること・スタイル・スナップは Genko のもの）。

@@ -104,7 +104,7 @@ bool close_to(const Json& v, double want, double within = 0.05) { return v.is_nu
 void fresh_view_settings() {
     const auto store = genko::app::settings();
     for (const char* key : {"view/extras", "view/show_guides", "view/show_canvas_guides", "view/show_smart_guides", "view/show_layer_edges",
-                            "view/show_mesh", "view/show_edit_pins", "view/show_notes", "guides/lock", "guides/grid", "guides/grid_mm", "units", "guide_layouts"})
+                            "view/show_mesh", "view/show_edit_pins", "view/show_notes", "view/show_slices", "guides/lock", "guides/grid", "guides/grid_mm", "units", "guide_layouts"})
         store->remove(QString::fromLatin1(key));
 }
 
@@ -618,7 +618,7 @@ private slots:
         for (QAction* a : shown->actions()) items << (a->isSeparator() ? QStringLiteral("|") : a->text());
         QCOMPARE(items, (QStringList{QStringLiteral("レイヤーエッジ"), QStringLiteral("選択範囲のエッジ"), QStringLiteral("ターゲットパス"), QStringLiteral("グリッド"),
                                      QStringLiteral("ガイド"), QStringLiteral("カンバスガイド"), QStringLiteral("カウント"),  // (PC5 J-d1)
-                                     QStringLiteral("スマートガイド"), QStringLiteral("注釈"),
+                                     QStringLiteral("スマートガイド"), QStringLiteral("スライス"), QStringLiteral("注釈"),  // (PC5 J-b: スライス)
                                      QStringLiteral("ピクセルグリッド"), QStringLiteral("ブラシプレビュー"), QStringLiteral("メッシュ"), QStringLiteral("編集ピン"), QStringLiteral("|"),
                                      QStringLiteral("すべて"), QStringLiteral("なし"), QStringLiteral("|"), QStringLiteral("エクストラオプションを表示…")}));
         PageCanvas* c = s.canvas();

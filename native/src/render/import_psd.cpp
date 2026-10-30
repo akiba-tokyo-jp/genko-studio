@@ -26,6 +26,7 @@
 #endif
 
 #include "core/groups.hpp"
+#include "core/layer_basics.hpp"
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/ids.hpp"
@@ -702,6 +703,34 @@ void take_locks(core::Layer& layer, std::uint32_t locks) {
     layer.lock_alpha = all || (locks & 1u) != 0;
     layer.locked = all || (locks & 2u) != 0;
     layer.lock_position = all || (locks & 4u) != 0;
+    // (PC5 I-a, layer-locks@1: すべてをロック as its own, and the artboards' auto-nesting lock, bit 4)
+    layer.lock_all = all;
+    layer.lock_nest = (locks & 0x10u) != 0;
+}
+
+// PC5 I-a (blend-channels@1): the colour channels a record leaves out (brst: their indices — PhotoCraft v0.2.0's
+// io/src/blocks.rs parse_brst, MIT) as the layer's own on a page of the file's mode (RGB, CMYK, Lab, grey); whether they
+// were taken (on a page of another mode they are not: said).
+bool take_channels(core::Layer& layer, const psd::File& file, const psd::Layer& item, const core::Page& page) {
+    std::optional<std::string_view> data;
+    for (const psd::File::TaggedBlock& b : file.blocks(item))
+        if (b.key == "brst") data = b.data;
+    if (!data) return false;
+    const unsigned count = core::blend_channel_count(page);
+    const int mode = file.mode();
+    const bool same_mode = count != 0 && ((!page.color && mode == 3) || (page.color && ((page.color->space == core::InkSpace::Cmyk && mode == 4) ||
+                                                                                      (page.color->space == core::InkSpace::Lab && mode == 9) ||
+                                                                                      (page.color->space == core::InkSpace::Gray && mode == 1))));
+    if (!same_mode || item.folder) return false;
+    std::vector<bool> on(count, true);
+    for (std::size_t k = 0; k + 4 <= data->size(); k += 4) {
+        std::uint32_t c = 0;
+        for (std::size_t b = 0; b < 4; ++b) c = (c << 8) | static_cast<unsigned char>((*data)[k + b]);
+        if (c < count) on[c] = false;
+    }
+    if (std::all_of(on.begin(), on.end(), [](bool v) { return v; })) return false;
+    layer.blend_channels = std::move(on);
+    return true;
 }
 
 // The way a layer's pixels come in at their depth (the user's decision 3: the layers at the file's depth): a page in
@@ -1342,6 +1371,23 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
             }
             ranges_kept = ranges_kept || (layer.native_psd && !layer.native_psd->ranges.empty());
             if (const auto locks = file.protection(item); locks && *locks != 0) take_locks(layer, *locks);
+            // (PC5 I-a: the auto-nesting lock its own now — the kept lspf without it: the layer's lock_nest says it)
+            if (layer.lock_nest && layer.native_psd) {
+                for (auto& [key, ref] : layer.native_psd->blocks) {
+                    if (key != "lspf") continue;
+                    for (const psd::File::TaggedBlock& b : file.blocks(item)) {
+                        if (b.key != "lspf" || b.data.size() < 4) continue;
+                        std::string bits(b.data);
+                        bits[3] = static_cast<char>(static_cast<unsigned char>(bits[3]) & ~0x10u);
+                        ref = kept(doc, bits);
+                    }
+                }
+            }
+            // (PC5 I-a: its channels left out, its own now — the block not kept besides)
+            if (take_channels(layer, file, item, page) && layer.native_psd) {
+                std::erase_if(layer.native_psd->blocks, [](const auto& block) { return block.first == "brst"; });
+                if (layer.native_psd->empty()) layer.native_psd.reset();
+            }
         }
         made.push_back(std::move(layer));
     }

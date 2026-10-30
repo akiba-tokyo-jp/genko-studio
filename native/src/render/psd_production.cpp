@@ -14,6 +14,7 @@
 #include "render/psd_annotations.hpp"
 #include "render/psd_comps.hpp"
 #include "render/psd_guides.hpp"
+#include "render/psd_slices.hpp"
 
 namespace genko::render::psd_production {
 
@@ -22,7 +23,7 @@ namespace {
 // (each group adds its row here — J-a: 1065 and its layers' cmls; J-b: {1050, …, true, …}; J-c: {-1, "Anno", "J-c", false,
 // …} (its writer puts back the sound notes of WriteContext::kept_global("Anno")); J-d1: {1074, …} and {1080, "", "J-d1",
 // false, nullptr, nullptr, nullptr, supersedes})
-constexpr std::array<Row, 5> kRows{{
+constexpr std::array<Row, 6> kRows{{
     {psd_comps::kResource, "", "J-a", true, psd_comps::read, psd_comps::write, psd_comps::fingerprint, nullptr, "cmls", psd_comps::write_layers},
     // (PC5 J-c: the notes, Anno; its sound notes kept in the kept bytes and written back after the page's)
     {-1, psd_annotations::kKey, "J-c", false, psd_annotations::read, psd_annotations::write, psd_annotations::fingerprint, nullptr, "", nullptr},
@@ -33,6 +34,8 @@ constexpr std::array<Row, 5> kRows{{
     {psd_annotations::kScaleResource, "", "J-d1", false, psd_annotations::read_scale, psd_annotations::write_scale, psd_annotations::scale_fingerprint,
      nullptr, "", nullptr},
     {psd_annotations::kCountResource, "", "J-d1", false, nullptr, nullptr, nullptr, psd_annotations::counts_own, "", nullptr},
+    // (PC5 J-b: the slices, 1050 — its layer-based slices name their layers' lyids: never into a file without layers)
+    {psd_slices::kResource, "", "J-b", true, psd_slices::read, psd_slices::write, psd_slices::fingerprint, nullptr, "", nullptr},
 }};
 
 std::span<const Row>& table() {

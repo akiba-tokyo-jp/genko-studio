@@ -277,6 +277,7 @@ void MainWindow::guide_toggles() {
     for (const auto& [name, key] : {std::pair{"act_snap", "snap"}, {"act_show_rulers", "show"}, {"act_grid", "grid"}, {"act_grid_snap", "grid_snap"}})
         store->setValue(QStringLiteral("guides/%1").arg(QString::fromLatin1(key)), action(QString::fromLatin1(name))->isChecked());
     canvas_->update();
+    panes_follow();  // (PC5 H-c review P3-4)
 }
 
 void MainWindow::grid_spacing() {
@@ -296,6 +297,7 @@ void MainWindow::grid_spacing() {
     if (!value) return;
     canvas_->grid_mm = *value;
     settings()->setValue(QStringLiteral("guides/grid_mm"), *value);
+    panes_follow();  // (PC5 H-c review P3-4)
     if (!action("act_grid")->isChecked()) {
         action("act_grid")->setChecked(true);
         guide_toggles();

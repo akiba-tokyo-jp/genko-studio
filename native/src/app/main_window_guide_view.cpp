@@ -176,14 +176,17 @@ void MainWindow::apply_extras() {
     canvas_->extras_shown = action("act_extras")->isChecked();
     for (const ShowItem& item : kShowItems) canvas_->*item.flag = action(QString::fromLatin1(item.attribute))->isChecked();
     // (PC5 J-c・J-d1: the notes' and the count marks' extras, another window's switch shared — share_view_switch)
-    for (const auto& [attribute, key] : {std::pair{"act_show_notes", "notes"}, std::pair{"act_show_count", "count"}}) {
+    // (PC5 J-b: the slices' too)
+    for (const auto& [attribute, key] : {std::pair{"act_show_notes", "notes"}, std::pair{"act_show_count", "count"}, std::pair{"act_show_slices", "slices"}}) {
         if (QAction* shown = action(QString::fromLatin1(attribute))) canvas_->show_extra(QString::fromLatin1(key), shown->isChecked());
     }
     if (canvas_->show_layer_edges) (void)layer_snap_boxes();  // (the boxes asked for now: drawn when they come)
     canvas_->update();
+    panes_follow();  // (PC5 H-c review P3-4: the panes beside it the same)
 }
 
 void MainWindow::share_view_switch(const QString& attribute, bool on) {
+    panes_follow();  // (PC5 H-c review P3-4: this window's panes — the production's switches come this way)
     // (this computer's: every open window the same at once — the review's P3-5; their own handlers not run again)
     for (MainWindow* other : documents::windows()) {
         if (other == this) continue;
@@ -208,6 +211,9 @@ void MainWindow::apply_guide_prefs() {
     c->grid_colour = QColor(QString::fromStdString(pref("guidesGridAndSlices.gridColor").get<std::string>()));
     c->grid_style = pen_style(pref("guidesGridAndSlices.gridStyle").get<std::string>());
     c->grid_subdivisions = pref("guidesGridAndSlices.subdivisions").get<int>();
+    // (PC5 J-b: スライス's line colour and numbers)
+    c->slice_colour = QColor(QString::fromStdString(pref("guidesGridAndSlices.sliceColor").get<std::string>()));
+    c->show_slice_numbers = pref("guidesGridAndSlices.showSliceNumbers").get<bool>();
     if (store->contains(QStringLiteral("guides/grid_mm"))) c->grid_mm = pref("guidesGridAndSlices.gridSpacingMm").get<double>();
     c->ruler_unit = view_units::ruler();
     c->points_per_inch = view_units::points_per_inch();
@@ -215,6 +221,7 @@ void MainWindow::apply_guide_prefs() {
     c->gutter_pt = view_units::gutter_pt();
     c->print_dpi = view_units::screen_dpi();
     c->update();
+    panes_follow();  // (PC5 H-c review P3-4)
 }
 
 void MainWindow::clear_guides(bool every_page) {

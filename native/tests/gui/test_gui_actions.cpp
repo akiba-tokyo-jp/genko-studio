@@ -428,11 +428,27 @@ private slots:
         // カウントツール are the frames' attributes made real — test_gui_measure.
         // and PC5 G-c's 2 — 書式 → 初期設定の書式を読み込み・初期設定の書式を保存 (act_type_load_defaults, act_type_save_defaults) —
         // test_gui_type.
+        // and the 20 of PC5 H-c (SPEC VIEW-01「窓の区画と並べ方」) — ウィンドウ → アレンジ ▸ すべてを左右に並べる・すべてを上下に並べる・
+        // 2 アップ（縦）・2 アップ（横）・3 アップ（縦）・3 アップ（横）・3 アップ（スタック）・4 アップ・6 アップ (act_arrange_tile_vertical,
+        // act_arrange_tile_horizontal, act_arrange_2up_vertical, act_arrange_2up_horizontal, act_arrange_3up_vertical,
+        // act_arrange_3up_horizontal, act_arrange_3up_stacked, act_arrange_4up, act_arrange_6up), すべてをタブに統合・重ねて表示・
+        // 並べて表示 (act_arrange_consolidate, act_arrange_cascade, act_arrange_tile), ウィンドウを分離・すべてのウィンドウを分離
+        // (act_float_window, act_float_all), 同じズーム倍率で表示・同じ位置に表示・同じ回転で表示・すべてを同じ表示にする
+        // (act_match_zoom, act_match_location, act_match_rotation, act_match_all), and the hand's and zoom tool's
+        // すべてのウィンドウをスクロール・すべてのウィンドウをズーム (act_scroll_all, act_zoom_all) — test_gui_arrange.
+        // and PC5 J-b's 7 — スライスツール・スライス選択ツール (act_slice_tool, act_slice_select_tool), 表示 → 表示・非表示 → スライス
+        // (act_show_slices), スナップ先 → スライス (act_snap_slices), スライスをロック・スライスを消去 (act_lock_slices, act_clear_slices),
+        // レイヤー → 新規レイヤーベースのスライス (act_layer_slice) — test_gui_slices.
+        // and the 8 of PC5 I-a (SPEC AUTO-01「レイヤーの基本」) — レイヤー → 新規 → 背景からレイヤーへ…・レイヤーからのグループ…
+        // (act_layer_from_background, act_layer_group_from_layers), レイヤーのグループ解除 (act_layer_ungroup), 非表示レイヤーを削除
+        // (act_layer_delete_hidden), クリッピングマスクを作成・解除 (act_clip_create, act_clip_release), ファイル → スクリプト →
+        // すべての空のレイヤーを削除・すべてのレイヤー効果を統合 (act_delete_empty_layers, act_bake_layer_effects) — test_gui_layers.
         // and PC5 G-d's 20 (SPEC TEXT-02) — ウィンドウ → 文字・段落・文字スタイル・段落スタイル・字形 (act_panel_<panel>), 書式 → パネル ▸
         // 5 (act_type_panel_<panel>), フォントプレビューのサイズ ▸ 6 (act_type_preview_<size>), すべての見つからないフォントを置換・見つからない
         // フォントを解決… (act_type_replace_missing, act_type_resolve_missing), 編集 → スペルチェック… (act_spelling) and 環境設定 → テキスト…
         // (act_prefs_type: its page made) — test_gui_type_panels.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{722});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2 and G-d's 20)
+        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8 and G-d's 20)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{757});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -475,7 +491,7 @@ private slots:
         // nine brushes that change pixels (test_gui_paint_tools); PC5 H-a's 手のひらツール (test_gui_view); PC5 G-a's
         // 横書き文字ツール (test_gui_type); PC5 J-c's 注釈ツール (test_gui_notes); PC5 J-d1's ものさしツール and カウントツール
         // (test_gui_measure)
-        QCOMPARE(w->tools_group()->actions().size(), 58);
+        QCOMPARE(w->tools_group()->actions().size(), 60);  // (PC5 J-b: スライスツール, スライス選択ツール)
     }
 
     // PC4 F-0 (SPEC FILE-01; 節 F 5.1・5.2): ファイル in Photoshop's order and names — the book's export is 書き出し ▸
@@ -517,7 +533,8 @@ private slots:
                  (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"), QStringLiteral("条件付きモード変更…"),
                               QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…")}));
         QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_scripts"))),
-                 (QStringList{QStringLiteral("画像プロセッサー…"), QStringLiteral("すべてのマスクを統合"), QStringLiteral("|"),
+                 (QStringList{QStringLiteral("画像プロセッサー…"), QStringLiteral("すべての空のレイヤーを削除"), QStringLiteral("すべてのレイヤー効果を統合"),  // (PC5 I-a)
+                              QStringLiteral("すべてのマスクを統合"), QStringLiteral("|"),
                               QStringLiteral("スクリプトイベントマネージャー…"), QStringLiteral("|"), QStringLiteral("参照…")}));
         QMenu* exports = w->findChild<QMenu*>(QStringLiteral("menu_export"));
         QVERIFY(exports != nullptr);
@@ -650,8 +667,8 @@ private slots:
                                if (view.per_mm > 0 && view.at.map(QPointF(10, 10)) != view.at.map(QPointF(20, 20)) && view.seen_mm.contains(QPointF(10, 10)))
                                    ++drawn;
                            }});
-        // (PC5 J-c's notes first; J-d1's count — this test's painter in its place — and ruler)
-        QCOMPARE(canvas->extra_keys(), (std::vector<QString>{QStringLiteral("notes"), QStringLiteral("count"), QStringLiteral("ruler")}));
+        // (PC5 J-c's notes first; J-d1's count — this test's painter in its place — and ruler; J-b's slices)
+        QCOMPARE(canvas->extra_keys(), (std::vector<QString>{QStringLiteral("notes"), QStringLiteral("count"), QStringLiteral("ruler"), QStringLiteral("slices")}));
         (void)canvas->grab();
         QVERIFY(drawn > 0);
         canvas->show_extra(QStringLiteral("count"), false);
@@ -931,6 +948,8 @@ private slots:
                               QStringLiteral("スナップ"), QStringLiteral("スナップ先 ▸"), QStringLiteral("|"), QStringLiteral("ガイドをロック"), QStringLiteral("ガイドを消去"),
                               QStringLiteral("カンバスガイドを消去"), QStringLiteral("新規ガイド…"), QStringLiteral("新規ガイドレイアウトを作成…"),
                               QStringLiteral("シェイプから新規ガイドを作成"),
+                              // (PC5 J-b: スライスをロック・スライスを消去)
+                              QStringLiteral("|"), QStringLiteral("スライスをロック"), QStringLiteral("スライスを消去"),
                               QStringLiteral("|"), QStringLiteral("上下反転して見る"), QStringLiteral("左に回す（15°）"), QStringLiteral("右に回す（15°）"),
                               QStringLiteral("回転・反転を戻す"), QStringLiteral("表示倍率を打ち込む…"), QStringLiteral("ズームツール"), QStringLiteral("手のひらツール"),
                               QStringLiteral("|"),
@@ -949,7 +968,15 @@ private slots:
         QCOMPARE(window.mid(0, 4), (QStringList{QStringLiteral("アレンジ ▸"), QStringLiteral("ワークスペース ▸"), QStringLiteral("|"), QStringLiteral("原稿だけを表示")}));
         QMenu* arrange = w->findChild<QMenu*>(QStringLiteral("menu_arrange"));
         QVERIFY(arrange != nullptr);
-        QCOMPARE(items(arrange), QStringList{QStringLiteral("新規ウィンドウ")});
+        // (PC5 H-c: Photoshop's アレンジ ▸ — the cells, the tabs and windows, the views made the same, 新規ウィンドウ last)
+        QCOMPARE(items(arrange),
+                 (QStringList{QStringLiteral("すべてを左右に並べる"), QStringLiteral("すべてを上下に並べる"), QStringLiteral("2 アップ（縦）"),
+                              QStringLiteral("2 アップ（横）"), QStringLiteral("3 アップ（縦）"), QStringLiteral("3 アップ（横）"), QStringLiteral("3 アップ（スタック）"),
+                              QStringLiteral("4 アップ"), QStringLiteral("6 アップ"), QStringLiteral("|"), QStringLiteral("すべてをタブに統合"),
+                              QStringLiteral("重ねて表示"), QStringLiteral("並べて表示"), QStringLiteral("|"), QStringLiteral("ウィンドウを分離"),
+                              QStringLiteral("すべてのウィンドウを分離"), QStringLiteral("|"), QStringLiteral("同じズーム倍率で表示"), QStringLiteral("同じ位置に表示"),
+                              QStringLiteral("同じ回転で表示"), QStringLiteral("すべてを同じ表示にする"), QStringLiteral("|"), QStringLiteral("新規ウィンドウ")}));
+        for (const char* panel : {"ツール", "修飾キー"}) QVERIFY2(window.contains(QString::fromUtf8(panel)), panel);
         for (const char* panel : {"ナビゲーター", "オプション", "ヒストリー"}) QVERIFY2(window.contains(QString::fromUtf8(panel)), panel);
         for (const auto& [object, title] : {std::pair{"全体図", "ナビゲーター"}, {"ツールの設定", "オプション"}, {"履歴", "ヒストリー"}}) {
             const auto docks = w->findChildren<QDockWidget*>(QString::fromUtf8(object));  // (the workspaces' keys kept)
@@ -1065,7 +1092,9 @@ private slots:
                                                   // (PC5 J-c: 注釈ツール)
                                                   {"note", "act_note"},
                                                   // (PC5 J-d1: ものさしツール, カウントツール — the frames' attributes made real)
-                                                  {"measure", "act_measure_ruler_tool"}, {"count", "act_measure_count_tool"}};
+                                                  {"measure", "act_measure_ruler_tool"}, {"count", "act_measure_count_tool"},
+                                                  // (PC5 J-b: スライスツール, スライス選択ツール)
+                                                  {"slice", "act_slice_tool"}, {"slice_select", "act_slice_select_tool"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());

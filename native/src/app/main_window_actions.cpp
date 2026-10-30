@@ -430,9 +430,10 @@ void MainWindow::build_actions() {
     QAction* guides = make("act_guides", QStringLiteral("仕上がり線・基本枠を表示"), [] {}, keys({QKeySequence(QStringLiteral("Ctrl+;"))}),
                            QStringLiteral("断ち切り（裁ち落とし）・仕上がり線・基本枠"), true);
     guides->setChecked(true);
-    connect(guides, &QAction::triggered, this, [c, guides](bool) {
+    connect(guides, &QAction::triggered, this, [this, c, guides](bool) {
         c->show_guides = guides->isChecked();
         c->update();
+        panes_follow();  // (PC5 H-c review P3-4)
     });
     // 色の校正 (view.proofColors; Python's 「CMYK で見る（色校正）」, its id kept): the page as 校正の設定 shows it — the
     // working CMYK unless another is chosen there (書き出しの CMYK: Python's own). Ctrl+Y is やり直す: Ctrl+Alt+Y.
@@ -500,6 +501,7 @@ void MainWindow::build_actions() {
     build_layer_style_actions();  // (PC4 E6: レイヤー → レイヤースタイル ▸: main_window_styles.cpp)
     build_production_actions();   // (PC5 J-0: 解析 ▸, ビデオレイヤー ▸, the production's panels — frames: main_window_production.cpp)
     build_variable_actions();     // (PC5 I-d: 変数 ▸, データセットを適用…, データセットからファイル…, 変数データセット…: main_window_variables.cpp)
+    build_layer_basic_actions();  // (PC5 I-a: 背景からレイヤーへ…, レイヤーからのグループ…, グループ解除, クリッピングマスク, 非表示レイヤーを削除: main_window_layers.cpp)
     build_align_actions();      // (PC3 C-d: 重ね順・整列・分布・リンク・ロック, スナップ (with 定規's グリッドにスナップ), the move tool's: main_window_align.cpp)
     build_file_actions();       // (PC4 F-0: 節 F's new commands of ファイル, frames until F-b and F-c: main_window_file.cpp)
     build_filter_actions();     // (PC4 節 D: フィルター's commands, 前回のフィルター: filter_menu.cpp)
@@ -512,9 +514,10 @@ void MainWindow::build_actions() {
     // (one chosen in a list, then merged with the one under it: named apart from Python's 下のレイヤーと結合, which
     // merges the panel's chosen layer at once — a command's name says one thing)
     make("act_layer_merge_down", QStringLiteral("レイヤーを選んで下と結合…"), [this] { layer_operation("merge_down"); });
-    make("act_layer_merge_layers", QStringLiteral("選んだレイヤーを結合…"), [this] { layer_operation("merge_layers"); });
-    make("act_layer_merge_visible", QStringLiteral("表示レイヤーの結合コピーを作る"), [this] { layer_operation("merge_visible"); });
-    make("act_layer_flatten", QStringLiteral("画像をフラット化…"), [this] { layer_operation("flatten"); });
+    // (PC5 I-a: Photoshop's names — their ids kept, preferences::renamed())
+    make("act_layer_merge_layers", QStringLiteral("レイヤーを結合…"), [this] { layer_operation("merge_layers"); });
+    make("act_layer_merge_visible", QStringLiteral("表示レイヤーを結合したレイヤーを作成"), [this] { layer_operation("merge_visible"); });
+    make("act_layer_flatten", QStringLiteral("画像を統合…"), [this] { layer_operation("flatten"); });
     make("act_layer_convert_paint", QStringLiteral("ペイントレイヤーに変換"), [this] { layer_operation("convert_layer"); });
     make("act_layer_convert_pen", QStringLiteral("ペンレイヤーに変換…"), [this] { layer_operation("convert_pen"); });
     // panels
@@ -553,6 +556,7 @@ void MainWindow::build_actions() {
         canvas_->show_frame_numbers = on;
         canvas_->binding = book().binding;
         canvas_->update();
+        panes_follow();  // (PC5 H-c review P3-4)
     });
     make("act_template", QStringLiteral("テンプレートでコマを割る…"), [this] { templates_dialog(); }, {},
          QStringLiteral("今のページのコマと台詞を作り直します"));
@@ -667,6 +671,8 @@ void MainWindow::build_menus() {
     build_tool_groups(tools);  // (the selection's tools, the retouching's: main_window_select.cpp)
     build_paint_tool_groups(tools);  // (PC4 E-0: the drawing tools' groups' tools the menu has not: paint_panels.cpp)
     tools->addAction(action("act_crop_tool"));  // (PC3 C-e)
+    // (PC5 J-b: スライスツール・スライス選択ツール beside it — the 切り抜き group; moved here from the groups' place)
+    for (const char* name : {"act_slice_tool", "act_slice_select_tool"}) tools->addAction(action(name));
     for (const char* name : {"act_ruler", "act_3d", "act_effect", "act_stamp"}) tools->addAction(action(name));
     tools->addSeparator();
     for (const char* name : {"act_thicker", "act_thinner"}) tools->addAction(action(name));
@@ -774,8 +780,10 @@ void MainWindow::build_menus() {
     build_layer_style_menus(layers);  // (PC4 E6: レイヤースタイル ▸ before レイヤーマスク: app/main_window_styles.cpp)
     build_production_menus(layers, pages);  // (PC5 J-0: ビデオレイヤー ▸ before ラスタライズ ▸, ページ → 解析 ▸: main_window_production.cpp)
     build_variable_menus(file, pages);  // (PC5 I-d: ページ → 変数 ▸・データセットを適用…, 書き出し ▸・読み込み ▸ の項目: main_window_variables.cpp)
+    build_layer_basic_menus(layers);  // (PC5 I-a: 新規 ▸ の 背景からレイヤーへ…・レイヤーからのグループ…, 非表示レイヤーを削除, クリッピングマスク, グループ解除: main_window_layers.cpp)
     build_notes_menus(file, view);  // (PC5 J-c: ファイル → 読み込み ▸ 注釈…, 表示 → 表示・非表示 ▸ 注釈: main_window_notes.cpp)
     build_measure_menus(view);  // (PC5 J-d1: 表示 → 表示・非表示 ▸ カウント: main_window_measure.cpp)
+    build_slice_menus(view, layers);  // (PC5 J-b: 表示・非表示 ▸ スライス, スライスをロック・消去, レイヤー → 新規レイヤーベースのスライス: main_window_slices.cpp)
     pages->addAction(action("act_book_preview"));
     pages->addAction(action("act_checks"));
     pages->addSeparator();
@@ -961,6 +969,7 @@ void MainWindow::build_docks() {
     view_menu_->addAction(library_dock_->toggleViewAction());
     library_dock_->hide();
     agent_view(agent_book());
+    build_arrange_docks();  // (PC5 H-c: ツール's switch and 修飾キー in ウィンドウ — main_window_arrange.cpp)
     name_panels();  // (PC5 H-0: ナビゲーター, オプション, ヒストリー — main_window_arrange.cpp)
     setTabPosition(Qt::LeftDockWidgetArea, QTabWidget::North);
     setTabPosition(Qt::RightDockWidgetArea, QTabWidget::North);
@@ -1025,8 +1034,9 @@ const core::Layer* MainWindow::paint_layer() {
     const core::Page* page = current_page();
     const core::Layer* layer = target_layer();
     if (page == nullptr || layer == nullptr) return nullptr;
-    if (!drawable(*layer)) {
-        const QString why = layer->locked ? QStringLiteral("ロックされています") : QStringLiteral("ペンかペイントのレイヤーではありません");
+    if (!drawable(*layer, page)) {
+        const bool kind = layer->kind == core::LayerKind::Strokes || layer->kind == core::LayerKind::Raster || layer->kind == core::LayerKind::Tone;
+        const QString why = kind ? QStringLiteral("ロックされています") : QStringLiteral("ペンかペイントのレイヤーではありません");
         flash(QStringLiteral("「%1」には描けません（%2）。レイヤー パネルで選び直します").arg(wording::layer_label(*layer), why), 4000);
         return nullptr;
     }
@@ -1340,10 +1350,10 @@ void MainWindow::layer_operation(const std::string& operation) {
     if (operation == "merge_visible") {
         op["copy"] = true;
     } else if (operation == "flatten") {
-        QMessageBox confirm(QMessageBox::Warning,QStringLiteral("画像をフラット化"),
+        QMessageBox confirm(QMessageBox::Warning,QStringLiteral("画像を統合"),
             QStringLiteral("用紙色を背景に、表示中の作画を1つの不透明レイヤーへ結合します。\n非表示の作画レイヤーは破棄します（ネーム・下描き・コマ枠は保持）。\n操作は取り消せます。続けますか？"),QMessageBox::Yes|QMessageBox::No,this);
         confirm.setObjectName(QStringLiteral("flatten_layer_confirm"));confirm.setDefaultButton(QMessageBox::No);
-        confirm.button(QMessageBox::Yes)->setText(QStringLiteral("フラット化"));confirm.button(QMessageBox::No)->setText(QStringLiteral("取消"));
+        confirm.button(QMessageBox::Yes)->setText(QStringLiteral("統合"));confirm.button(QMessageBox::No)->setText(QStringLiteral("取消"));
         if (confirm.exec()!=QMessageBox::Yes) return;
         op["op"]="merge_visible";op["copy"]=false;op["flatten"]=true;
     } else {

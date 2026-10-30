@@ -1,6 +1,7 @@
 #include "render/raster_ops.hpp"
 
 #include "core/groups.hpp"
+#include "core/layer_basics.hpp"
 #include "core/layer_styles.hpp"
 #include "render/dab_ops.hpp"
 #include "render/ink.hpp"
@@ -43,6 +44,7 @@
 #endif
 
 #include "core/areas.hpp"
+#include "core/color_raster.hpp"
 #include "core/base64.hpp"
 #include "core/config_dir.hpp"
 #include "core/filters.hpp"
@@ -1043,6 +1045,8 @@ void check_mergeable(const Page& page, const std::vector<std::size_t>& layers) {
             throw OpError("placed images and tones cannot be merged");
         }
         if (layer.locked) throw OpError("the layer is locked");
+        // (PC5 I-a review P2-1: すべてをロック — its own, or its folder's — as locked)
+        if (core::locked_all(page.layers, i)) throw OpError("the layer " + layer.id + " is locked (lock_all)");
     }
 }
 
@@ -1061,6 +1065,7 @@ void into_pixels(const Page& page, Layer& target, const Image& picture) {
     target.blend = "normal";
     target.opacity = 1.0;
     target.clip = false;
+    target.blend_channels.clear();  // (PC5 I-a, blend-channels@1: drawn in, as its blend)
     target.native_psd.reset();  // (psd-keep@1, PC4 F-d: a PSD's effects and blocks are not the merged or converted layer's)
     target.type.reset();        // (type@1, PC5 G-0: a type layer merged into, or converted: its text drawn in)
     raster::save_raster(page, target, picture);
@@ -1069,6 +1074,32 @@ void into_pixels(const Page& page, Layer& target, const Image& picture) {
 // layerops._composite: the layers drawn over each other as they show (blend, opacity, clip), over transparency
 bool merge_draws(const Layer& layer);
 Image composite_layers(const Document& doc, const Page& page, const std::vector<std::size_t>& layers, int dpi, const Image* background = nullptr) {
+    // (blend-channels@1, PC5 I-a: a layer that leaves colour channels out — the layers drawn as the page draws them, over
+    // nothing, render_contents)
+    if (std::any_of(layers.begin(), layers.end(), [&](std::size_t i) { return core::leaves_channels_out(page.layers[i]); })) {
+        Page alone = page;
+        alone.layers.clear();
+        if (background != nullptr) {  // (画像を統合: over the paper, as the page shows it — a channel left out keeps the paper's)
+            Layer paper;
+            paper.id = "paper";
+            paper.kind = LayerKind::Raster;
+            paper.panel_clip = false;
+            raster::save_raster(page, paper, background->convert("RGBA"));
+            alone.layers.push_back(std::move(paper));
+        }
+        for (const std::size_t i : layers) {
+            const Layer& layer = page.layers[i];
+            if (layer.kind == LayerKind::Folder || (background && !merge_draws(layer))) continue;
+            alone.layers.push_back(layer);
+            alone.layers.back().parent_id = nullptr;
+        }
+        RenderOptions options;
+        options.mode = "proof";
+        options.finish = false;
+        options.contents = true;
+        options.onion = false;
+        return render_contents(alone, dpi, options, &doc).image.convert("RGBA");
+    }
     const Size size = page_px(page, dpi);
     Image out = background ? *background : Image::create("RGBA", size, Ink{0, 0, 0, 0});
     std::optional<Image> prev;
@@ -1144,10 +1175,55 @@ void into_color_pixels(Layer& target, std::pair<std::string, bool> pixels) {
     target.fill.reset(); target.adjust.reset(); target.effect.reset(); target.fill_rgb.reset();
     target.screen.reset(); target.color.reset(); target.tone.reset(); target.source.reset();
     target.blend = "normal"; target.opacity = 1; target.clip = pixels.second; target.panel_clip = false;
+    target.blend_channels.clear();  // (PC5 I-a, blend-channels@1: drawn in, as its blend)
     target.native_psd.reset();  // (psd-keep@1, PC4 F-d: a PSD's effects and blocks are not the merged layer's)
     target.type.reset();        // (type@1, PC5 G-0: its text drawn in)
     target.color_raster = pixels.first.empty() ? core::Bytes{} : std::make_shared<const std::string>(std::move(pixels.first));
 }
+// (blend-channels@1, PC5 I-a review P3-2: layers one of which leaves colour channels out, merged in precise colour as the page
+// draws them — render_contents' precise way, ColorCanvas::keep_channels —, over nothing or, flattened, over the paper. Its
+// first layer clipped to what is under the merge is not ported: the clipping kept so needs the layers under it)
+std::pair<std::string, bool> channels_kept_merge(const Document& doc, const Page& page, const std::vector<std::size_t>& layers, bool flatten,
+                                                 int dpi, Size size) {
+    Page alone = page;
+    alone.layers.clear();
+    if (flatten) {
+        Layer paper;
+        paper.id = "paper";
+        paper.kind = LayerKind::Raster;
+        paper.panel_clip = false;
+        raster::save_raster(page, paper, page_background(page, size, false).convert("RGBA"));
+        alone.layers.push_back(std::move(paper));
+    }
+    bool first = true;
+    for (const std::size_t i : layers) {
+        const Layer& layer = page.layers[i];
+        if (layer.kind == LayerKind::Folder || (flatten && !merge_draws(layer))) continue;
+        if (first && layer.clip && !flatten) throw NotYetPorted("high-precision merge of a clipped layer that leaves colour channels out (blend-channels@1)");
+        first = false;
+        alone.layers.push_back(layer);
+        alone.layers.back().parent_id = nullptr;
+    }
+    if (first) return {"", false};
+    RenderOptions options;
+    options.mode = "proof";
+    options.finish = false;
+    options.contents = true;
+    options.onion = false;
+    options.precise = true;
+    const RenderResult drawn = render_contents(alone, dpi, options, &doc);
+    if (drawn.precise && !drawn.precise->empty()) return {*drawn.precise, false};
+    // (nothing precise among them, on a page drawn in precise colour for its other layers: their 8-bit picture's values)
+    const Image rgba = drawn.image.convert("RGBA");
+    const std::string bytes = rgba.tobytes();
+    return {core::encode_color_pixels(static_cast<std::uint32_t>(size.width), static_cast<std::uint32_t>(size.height), "u16",
+                                      [&bytes](std::size_t i) {
+                                          const auto at = [&](std::size_t c) { return static_cast<unsigned char>(bytes[i * 4 + c]) / 255.0; };
+                                          return std::array<double, 4>{at(0), at(1), at(2), at(3)};
+                                      }),
+            false};
+}
+
 std::pair<std::string, bool> composite_color_layers(const Document& doc, const Page& page,
                                    const std::vector<std::size_t>& layers, bool flatten = false) {
     // (at the finest grid of the page's pixel layers, 200 to 600 dpi — its masks' and selections' —: a picture opened at
@@ -1177,6 +1253,8 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
         if (!std::binary_search(layers.begin(), layers.end(), i) && page.layers[i].visible &&
             page.layers[i].kind != LayerKind::Folder && merge_draws(page.layers[i]))
             throw NotYetPorted("high-precision merge spans an unselected visible layer");
+    if (std::any_of(layers.begin(), layers.end(), [&](std::size_t i) { return core::leaves_channels_out(page.layers[i]); }))
+        return channels_kept_merge(doc, page, layers, flatten, dpi, size);
     // (color-model@1: an RGB page of a profile merges in its space, its paint layers' pixels as its values)
     ColorCanvas out(flatten ? page_background(page,size,false) : Image::create("RGBA",size,Ink{0,0,0,0}), RgbSpace::of(page));
     const Box all{0, 0, size.width, size.height};
@@ -1650,7 +1728,8 @@ void merge_down(OpContext& c) {
         if (item.locked) throw OpError("the layer is locked");
     }
     // (PC4 E6, layer-styles@1: a layer with a style is merged with its style drawn in — the merged layer has none)
-    const bool styled = core::has_layer_style(page.layers[ui]) || core::has_layer_style(page.layers[li]);
+    // (blend-channels@1, PC5 I-a: an upper layer that leaves colour channels out is merged as the page draws it, as a styled one)
+    const bool styled = core::has_layer_style(page.layers[ui]) || core::has_layer_style(page.layers[li]) || core::leaves_channels_out(page.layers[ui]);
     if (has_precision(page, {li, ui})) {
         auto bytes = composite_color_layers(doc, page, {li, ui});
         into_color_pixels(page.layers[li], std::move(bytes));
@@ -1664,6 +1743,7 @@ void merge_down(OpContext& c) {
         ground.opacity = 1.0;
         ground.blend = "normal";
         ground.clip = false;
+        ground.blend_channels.clear();  // (PC5 I-a: its channels stay the layer's, as its blend)
         alone.layers = {ground, page.layers[ui]};
         const Image merged = composite_layers(doc, alone, {0, 1}, raster::working_dpi(page));
         Layer& into = page.layers[li];
@@ -1803,10 +1883,12 @@ void convert_layer(OpContext& c) {
         const std::string blend = layer.blend;
         const double opacity = layer.opacity;
         const bool clip = layer.clip;
+        const std::vector<bool> channels = layer.blend_channels;  // (PC5 I-a: kept, as its blend)
         into_pixels(page, layer, picture);  // (the mask is drawn into the pixels)
         layer.blend = blend;
         layer.opacity = opacity;
         layer.clip = clip;
+        layer.blend_channels = channels;
         layer.asset.reset();
         return;
     }

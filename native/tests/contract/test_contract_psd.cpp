@@ -74,6 +74,7 @@
 #include "render/psd_adjust.hpp"
 #include "render/psd_image.hpp"
 #include "render/psd_production.hpp"
+#include "render/psd_slices.hpp"
 #include "render/smart_decode.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
@@ -1318,11 +1319,16 @@ private slots:
         const core::Document deleted = applied(Json::array({Json{{"op", "delete_layer"}, {"page", 1}, {"id", plain->id}}}));
         const std::set<unsigned> left = resource_ids(deleted, QStringLiteral("deleted.psd"));
         // (PC5 J-a: the layer comps are the page's — read from 1065 —, kept when a layer is deleted: 1065 written still)
-        QVERIFY(left.contains(1065) && !left.contains(1050) && left.contains(1037) && left.contains(1054));
+        // (PC5 J-b: the slices are the page's too — read from 1050: keep.psd's one layer-based slice names 効果, still there —,
+        // so 1050 is written still; the layer it names deleted takes its slice, and 1050, with it)
+        QVERIFY(left.contains(1065) && left.contains(1050) && left.contains(1037) && left.contains(1054));
         // (Blend If is locked, lock all: unlocked first — 効果 too)
         const auto unlocked = [](const std::string& id) {
             return Json{{"op", "set_layer"}, {"page", 1}, {"id", id}, {"locked", false}, {"lock_alpha", false}, {"lock_position", false}};
         };
+        // (PC5 J-b: the layer its slice names deleted — 効果 —: the slice gone with it, no 1050)
+        QVERIFY(!resource_ids(applied(Json::array({unlocked(effects->id), Json{{"op", "delete_layer"}, {"page", 1}, {"id", effects->id}}})), QStringLiteral("no-slice.psd"))
+                     .contains(1050));
         const core::Document merged =
             applied(Json::array({unlocked(blend_if->id), unlocked(effects->id), Json{{"op", "merge_down"}, {"page", 1}, {"id", blend_if->id}}}));
         const core::Layer* into = layer_named(merged.page(0), "効果");
@@ -1350,6 +1356,68 @@ private slots:
             QVERIFY(!viewed.doc.page(0).native_psd);
             for (const core::Layer& l : viewed.doc.page(0).layers) QVERIFY(!l.native_psd && !l.lock_position);
         }
+    }
+
+    // (PC5 J-b review P2-4, P3-1) A book of the time before J-b — keep.psd opened while 1050 was kept as it was (no slices
+    // read, the block unmarked) and saved — opened with the real table: saved again, project.json's bytes the same and no
+    // slices@1; to a PSD, the kept 1050 the file's own bytes. A slice made on it reads the kept ones first (said), the page's
+    // 1050 written then; every slice deleted after: no 1050 (the kept one never back).
+    void bookBeforeSlicesKeepsItsBlock() {
+        namespace core = genko::core;
+        namespace pp = genko::render::psd_production;
+        const std::string source = keep_file("keep.psd");
+        std::string kept;
+        for (const auto& r : psd::File::read(source).resources())
+            if (r.id == 1050) kept = std::string(r.data);
+        QVERIFY(!kept.empty());
+        QDir().mkpath(path(QStringLiteral("before-jb")));
+        const QString old_book = path(QStringLiteral("before-jb/old.genko"));
+        {
+            std::vector<pp::Row> before_jb;  // (the table as it was: no row of 1050)
+            for (const pp::Row& r : pp::rows())
+                if (r.resource != 1050) before_jb.push_back(r);
+            const pp::TableForTest table(before_jb);
+            genko::formats::Opened opened = genko::formats::open_file(source, "keep.psd");
+            const core::Page& page = opened.doc.page(0);
+            QVERIFY(!page.slices);
+            QVERIFY(page.native_psd);
+            QVERIFY(std::none_of(page.native_psd->copied.begin(), page.native_psd->copied.end(), [](const core::PsdCopied& c) { return c.resource == 1050; }));
+            QVERIFY(std::any_of(page.native_psd->resources.begin(), page.native_psd->resources.end(), [](const core::PsdResource& r) { return r.id == 1050; }));
+            genko::test::write_project(opened.doc, genko::storage::path_from_utf8(old_book.toStdString()));
+        }
+        const std::string old_json = genko::test::read_bytes(old_book + QStringLiteral("/project.json"));
+        core::Document doc = genko::storage::load_document(genko::storage::path_from_utf8(old_book.toStdString())).document;
+        QVERIFY(!doc.page(0).slices);
+        const QString again = path(QStringLiteral("before-jb/again.genko"));
+        genko::test::write_project(doc, genko::storage::path_from_utf8(again.toStdString()));
+        const std::string again_json = genko::test::read_bytes(again + QStringLiteral("/project.json"));
+        QVERIFY(again_json == old_json);
+        const Json features = Json::parse(again_json).value("features", Json::array());
+        QVERIFY(std::find(features.begin(), features.end(), Json("slices@1")) == features.end());
+        const auto resource_1050 = [&](const core::Document& book, const char* name) {
+            const QString at = path(QStringLiteral("before-jb/%1.psd").arg(QString::fromLatin1(name)));
+            (void)genko::formats::export_page_psd(book, book.page(0), genko::storage::path_from_utf8(at.toStdString()), 150);
+            for (const auto& r : psd::File::read(genko::test::read_bytes(at)).resources())
+                if (r.id == 1050) return std::string(r.data);
+            return std::string();
+        };
+        QVERIFY(resource_1050(doc, "same") == kept);
+        // a slice made on it: Photoshop's read first, said
+        const core::CommandBus bus(genko::render::ops_registry());
+        const auto added = bus.apply(doc, Json::array({Json{{"op", "add_slice"}, {"page", 1}, {"rect_px", {0, 0, 4, 4}}, {"name", "new"}}}), core::Actor("human:test"));
+        QVERIFY2(added.warnings.dump().find("slices kept from its PSD were read as its own slices first") != std::string::npos, added.warnings.dump().c_str());
+        const core::Page& now = added.doc.page(0);
+        QVERIFY(now.slices && now.slices->list.size() >= 2);
+        QCOMPARE(now.slices->list.back().name, std::string("new"));
+        const std::string mine = resource_1050(added.doc, "added");
+        QVERIFY(!mine.empty() && mine != kept);
+        const auto parsed = genko::render::psd_slices::parse(mine);
+        QVERIFY(parsed && std::any_of(parsed->slices.begin(), parsed->slices.end(), [](const genko::render::psd_slices::FileSlice& f) { return f.name == "new"; }));
+        QCOMPARE(std::count_if(parsed->slices.begin(), parsed->slices.end(), [](const genko::render::psd_slices::FileSlice& f) { return f.origin != 0; }),
+                 std::ptrdiff_t(now.slices->list.size()));
+        // every slice deleted: none (the kept one is not written back)
+        const auto gone = bus.apply(added.doc, Json::array({Json{{"op", "delete_slices"}, {"page", 1}, {"slices", "all"}}}), core::Actor("human:test"));
+        QVERIFY(resource_1050(gone.doc, "gone").empty());
     }
 
     // The layers at their depth (the user's decision 3): psd-tools' files of 16 and 32 bits (RGB, CMYK, Lab, grey; and

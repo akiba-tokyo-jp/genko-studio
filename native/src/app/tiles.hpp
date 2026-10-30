@@ -12,6 +12,7 @@
 #include <QStringList>
 #include <QThreadPool>
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -123,6 +124,13 @@ public:
     // back from it (their pictures copied, so the card lets their textures go; drawn again, they go to it again). None:
     // drawn by the processor, nothing counted.
     void set_texture_budget(std::optional<std::size_t> bytes);
+    // (PC5 H-c) Its tiles drawn on another pool (the panes beside the one in front share one, review P3-5: they wait their
+    // turn there instead of all drawing at once), `count` of them at a time; its own pool stays unused. The pool outlives
+    // the tiles it was given (their results find this renderer gone, as with its own).
+    void share_pool(QThreadPool* pool, int count) {
+        shared_pool_ = pool;
+        shared_count_ = std::max(1, count);
+    }
     std::optional<std::size_t> texture_budget() const { return texture_budget_; }
     // The bytes of the tiles on the card now (0 without a budget), and how many were taken back since the budget was set.
     std::size_t texture_bytes() const { return texture_bytes_; }
@@ -255,6 +263,8 @@ private:
     struct OnionStore;
     std::shared_ptr<OnionStore> onions_;  // (the onion skin of the frame shown, made once for all its tiles)
     QThreadPool pool_;
+    QThreadPool* shared_pool_ = nullptr;  // share_pool (PC5 H-c)
+    int shared_count_ = 1;
     std::shared_ptr<PageRenderer*> self_;  // (results find the renderer through this; nulled when it goes)
 };
 

@@ -124,6 +124,9 @@ const std::map<std::string, const char*>& names() {
         {"set_camera_raw", "Camera Raw で現像の設定を変えた"},
         // (PC5 I-b, groups@1: render/ops_groups)
         {"frame_from_layers", "レイヤーからフレームを作った"},
+        // (PC5 I-a: core/ops_layers, render/ops_layer_styles)
+        {"delete_layers", "レイヤーを削除した"}, {"duplicate_layers", "レイヤーを複製した"}, {"ungroup_layers", "グループを解除した"},
+        {"bake_layer_styles", "レイヤー効果を統合した"},
         // (PC5 H-b: core/ops_rulers)
         {"add_guide_layout", "ガイドレイアウトを作った"},
         // (PC5 J-a, layer-comps@1: render/ops_layer_comps)
@@ -138,6 +141,9 @@ const std::map<std::string, const char*>& names() {
         {"set_measurement_scale", "計測スケールを設定"}, {"add_count", "カウント"}, {"remove_count", "カウントを削除"}, {"move_count", "カウントを移動"},
         {"clear_count", "カウントをクリア"}, {"new_count_group", "新規カウントグループ"}, {"delete_count_group", "カウントグループを削除"},
         {"set_count_group", "カウントグループのオプション"}, {"set_ruler_line", "ものさし"}, {"straighten_layer", "レイヤーの角度補正"},
+        // (PC5 J-b, slices@1: render/ops_slices)
+        {"add_slice", "スライス"}, {"set_slice", "スライスオプション"}, {"delete_slices", "スライスを削除"}, {"divide_slice", "スライスを分割"},
+        {"slices_from_guides", "ガイドからスライスを作成"},
     };
     return table;
 }

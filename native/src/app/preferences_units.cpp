@@ -1,7 +1,8 @@
 // 環境設定 → 単位・定規 and ガイド・グリッド・スライス (PC5 H-b, edit.preferences.unitsAndRulers and guidesGridAndSlices; SPEC.md
 // VIEW-01; PhotoCraft v0.2.0's prefs.rs UnitsAndRulers and GuidesGridAndSlices, MIT): their pages in the dialog and what
-// 決める keeps (core/prefs_table's keys units/… and guides/…). The slices' two fields join the second page with 節 J.
+// 決める keeps (core/prefs_table's keys units/… and guides/…). The slices' two fields (PC5 J-b: ラインのカラー, スライス番号を表示).
 
+#include <QCheckBox>
 #include <QColor>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -169,6 +170,14 @@ std::pair<QWidget*, QWidget*> unit_pages(QWidget* parent) {
         rows->addRow(QStringLiteral("線の種類"), grid_style);
         rows->addRow(QStringLiteral("グリッド線"), every_row);
         rows->addRow(QStringLiteral("分割数"), subdivisions);
+        // (PC5 J-b: スライス — its lines' colour, its numbers shown)
+        auto* slice_colour = colour_button(guides, QStringLiteral("prefs_slice_color"), "guidesGridAndSlices.sliceColor");
+        auto* slice_numbers = new QCheckBox(QStringLiteral("スライス番号を表示"));
+        slice_numbers->setObjectName(QStringLiteral("prefs_slice_numbers"));
+        slice_numbers->setChecked(pref("guidesGridAndSlices.showSliceNumbers").get<bool>());
+        rows->addRow(look::section(QStringLiteral("スライス")));
+        rows->addRow(QStringLiteral("ラインのカラー"), slice_colour);
+        rows->addRow(QString(), slice_numbers);
         auto* hint = new QLabel(QStringLiteral("グリッド線は太い線の間隔、分割数はその間を割る数です（細い線にスナップします）。"));
         hint->setWordWrap(true);
         theme::role(hint, "hint");
@@ -191,11 +200,12 @@ void save_unit_pages(QWidget* units, QWidget* guides) {
     }
     if (guides != nullptr) {
         for (const auto& [name, key] : {std::pair{"prefs_guide_color", "guides/guide_color"}, {"prefs_smart_color", "guides/smart_color"},
-                                        {"prefs_grid_color", "guides/grid_color"}}) {
+                                        {"prefs_grid_color", "guides/grid_color"}, {"prefs_slice_color", "guides/slice_color"}}) {
             store->setValue(QString::fromLatin1(key), guides->findChild<QPushButton*>(QString::fromLatin1(name))->property("colour").value<QColor>().name());
         }
         store->setValue(QStringLiteral("guides/guide_style"), guides->findChild<QComboBox*>(QStringLiteral("prefs_guide_style"))->currentData());
         store->setValue(QStringLiteral("guides/grid_style"), guides->findChild<QComboBox*>(QStringLiteral("prefs_grid_style"))->currentData());
+        store->setValue(QStringLiteral("guides/slice_numbers"), guides->findChild<QCheckBox*>(QStringLiteral("prefs_slice_numbers"))->isChecked());
         const auto* unit = guides->findChild<QComboBox*>(QStringLiteral("prefs_grid_unit"));
         auto* subdivisions = guides->findChild<QSpinBox*>(QStringLiteral("prefs_grid_subdivisions"));
         const int parts = subdivisions->value();
