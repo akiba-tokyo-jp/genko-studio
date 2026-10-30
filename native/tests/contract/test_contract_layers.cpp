@@ -240,6 +240,21 @@ private slots:
         for (const char* stays : {"inner", "x", "y"}) QVERIFY2(find(whole.doc, stays) != nullptr, stays);
         QCOMPARE(whole.results.back()["kept"].size(), std::size_t(3));
         QCOMPARE(whole.results.back()["deleted"].size(), std::size_t(0));
+        // (PC5 J-b, slices@1: a layer-based slice goes with its layer — delete_layers, ungroup_layers wrapped by follow_layers;
+        // one of a layer kept stays)
+        core::Document sliced = run(book(), Json::array({paint("s1"), drawn_in("s1", 5, 5, 20, 20, Json::array({0, 0, 0})), paint("s2"),
+                                                         drawn_in("s2", 30, 30, 40, 40, Json::array({0, 0, 0})), op("add_slice", {{"layer", "s1"}}),
+                                                         op("add_slice", {{"layer", "s2"}})}));
+        QVERIFY(sliced.page(0).slices && sliced.page(0).slices->list.size() >= 2);
+        const core::Document unsliced = run(sliced, op("delete_layers", {{"ids", Json::array({"s1"})}}));
+        bool s1_slice = false, s2_slice = false;
+        if (unsliced.page(0).slices) {
+            for (const auto& s : unsliced.page(0).slices->list) {
+                s1_slice = s1_slice || s.layer == std::optional<std::string>("s1");
+                s2_slice = s2_slice || s.layer == std::optional<std::string>("s2");
+            }
+        }
+        QVERIFY(!s1_slice && s2_slice);
         // refusals: nothing named; ids on every page; a layer the page does not have
         QVERIFY(refusal(doc, op("delete_layers")).find("needs ids, hidden or empty") != std::string::npos);
         QVERIFY(refusal(doc, Json{{"op", "delete_layers"}, {"page", "all"}, {"ids", Json::array({"a"})}}).find("one page") != std::string::npos);
