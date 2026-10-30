@@ -41,8 +41,12 @@
 #include "render/png.hpp"
 #include "render/psd.hpp"
 #include "render/psd_text.hpp"
+#include "render/psd_type.hpp"
 #include "render/text/lettering.hpp"
+#include "core/type_text.hpp"
 #include "testsupport.hpp"
+
+#include <bit>
 
 using genko::core::Actor;
 using genko::core::CommandBus;
@@ -54,6 +58,11 @@ namespace psd = genko::render::psd;
 namespace {
 
 constexpr int kDpi = 150;
+
+// (PC5 G-e) A book of one page, A5 at 300 dpi.
+Document a_book() {
+    return genko::core::new_episode("文字", genko::core::Num(1), 1, genko::core::PageSpec::custom(148, 210, 40, 40, 1, 2, 2, 2, 2, 300, "color"));
+}
 
 const CommandBus& bus() {
     static const CommandBus b(genko::render::ops_registry());
@@ -1119,6 +1128,211 @@ private slots:
         payload += "long";
         u32(0);
         QVERIFY_THROWS_EXCEPTION(genko::core::Error, psd::read_tysh(payload));
+    }
+
+    // PC5 G-e: the keys a type layer's text writes past PSD-01's — BaselineShift, FontCaps, Underline, Strikethrough,
+    // AutoKerning, Ligatures, DLigatures, AutoLeading, the OpenType switches, a run's named sheet (Parent), a paragraph's
+    // indents, spaces, auto leading, hyphenation and named sheet, the anti-alias (AntA and AntiAlias) and the named sheets
+    // of the ResourceDict — written and read back the same; a run that gives a key not its own takes the normal sheet's.
+    void newKeysReadBack() {
+        psd::TextLayer layer;
+        layer.text = u"Abc\r下線";
+        psd::TextStyle a;
+        a.font = kGothic;
+        a.size = 30;
+        a.baseline_shift = 4.5;
+        a.caps = 2;
+        a.underline = true;
+        a.strikethrough = true;
+        a.auto_kerning = false;
+        a.ligatures = false;
+        a.dligatures = true;
+        a.auto_leading = true;
+        a.opentype = 0b10000101;  // (ContextualLigatures, OldStyle, Fractions)
+        a.sheet = 1;
+        psd::TextStyle b;
+        b.font = kMincho;
+        b.size = 12.25;
+        b.fill = {1, 2, 3};
+        const std::size_t n = layer.text.size() + 1;
+        layer.runs = {{3, a}, {n - 3, b}};
+        psd::ParagraphRun p1;
+        p1.length = 4;
+        p1.justification = 5;
+        p1.first_indent = 12;
+        p1.start_indent = -3.5;
+        p1.end_indent = 7;
+        p1.space_before = 2;
+        p1.space_after = 9.75;
+        p1.auto_leading = 1.75;
+        p1.hyphenate = true;
+        p1.sheet = 0;
+        psd::ParagraphRun p2;
+        p2.length = n - 4;
+        layer.paragraphs = {p1, p2};
+        layer.antialias = "Anno";
+        layer.engine_antialias = 0;
+        layer.char_sheets = {psd::NamedSheet{u"強調", Json{{"Font", kMincho}, {"FontSize", 24.5}, {"Underline", true}, {"FillColor", Json::array({10, 20, 30})}}, 0},
+                             psd::NamedSheet{u"小さく", Json{{"FontSize", 8.0}, {"FontCaps", 1}}, 0}};
+        layer.para_sheets = {psd::NamedSheet{u"見出し", Json{{"Justification", 2}, {"SpaceAfter", 6.0}}, 2}};
+        const psd::TextLayer back = psd::read_tysh(psd::tysh(layer));
+        QVERIFY(back.runs == layer.runs);
+        QVERIFY(back.paragraphs == layer.paragraphs);
+        QCOMPARE(back.antialias, std::string("Anno"));
+        QCOMPARE(back.engine_antialias, 0);
+        QCOMPARE(back.char_sheets.size(), std::size_t{2});
+        QVERIFY(back.char_sheets[0].name == u"強調");
+        QCOMPARE(back.char_sheets[0].data, layer.char_sheets[0].data);
+        QCOMPARE(back.char_sheets[1].data, layer.char_sheets[1].data);
+        QCOMPARE(back.para_sheets.size(), std::size_t{1});
+        QVERIFY(back.para_sheets[0].name == u"見出し");
+        QCOMPARE(back.para_sheets[0].data, layer.para_sheets[0].data);
+        QCOMPARE(back.para_sheets[0].default_sheet, 2);
+        // (PSD-01's line: none of the new keys but what it wrote before — its bytes the book's, psd_book_hashes.hpp)
+        psd::TextLayer line;
+        line.text = u"台詞";
+        line.runs = {{3, b}};
+        line.paragraphs = {{3, 0}};
+        const std::string bytes = psd::tysh(line);
+        for (const char* key : {"Parent", "ContextualLigatures", "Fractions", "強調"}) QVERIFY2(bytes.find(key) == std::string::npos, key);
+        QVERIFY(bytes.find("antiAliasSharp") != std::string::npos);
+        QVERIFY(psd::read_tysh(bytes).runs == line.runs);
+    }
+
+    // PC5 G-e: hostile EngineData — nested past 64, larger than what reading it may take, lone UTF-16 halves, runs past the
+    // text — is refused or read within bounds, never followed until the stack or the memory runs out.
+    void hostileEngineData() {
+        const auto tysh_of = [](const std::string& engine) {
+            genko::render::psd::descriptor::Writer text;
+            text.text("Txt ", u"abc");
+            text.enumerated("Ornt", "Ornt", "Hrzn");
+            text.raw("EngineData", engine);
+            genko::render::psd::descriptor::Writer warp;
+            warp.enumerated("warpStyle", "warpStyle", "warpNone");
+            std::string out;
+            const auto u16 = [&](unsigned v) { out += static_cast<char>(v >> 8); out += static_cast<char>(v & 0xff); };
+            const auto u32 = [&](std::uint32_t v) { u16(v >> 16); u16(v & 0xffff); };
+            u16(1);
+            for (int i = 0; i < 6; ++i) {
+                const double v = i == 0 || i == 3 ? 1.0 : 0.0;
+                const auto bits = std::bit_cast<std::uint64_t>(v);
+                for (int s = 56; s >= 0; s -= 8) out += static_cast<char>((bits >> s) & 0xff);
+            }
+            u16(50);
+            u32(16);
+            out += text.structure("TxLr");
+            u16(1);
+            u32(16);
+            out += warp.structure("warp");
+            out.append(16, '\0');
+            return out;
+        };
+        const std::string runs = "/EngineDict << /StyleRun << /RunArray [ << /StyleSheet << /StyleSheetData << /FontSize 20.0 >> >> >> ] /RunLengthArray [ 99 ] >> >>";
+        // (nested 70 deep: refused)
+        std::string deep = "<< /EngineDict << /StyleRun << /RunArray [ << /StyleSheet << /StyleSheetData << /X ";
+        for (int i = 0; i < 70; ++i) deep += "[ ";
+        for (int i = 0; i < 70; ++i) deep += "] ";
+        deep += ">> >> >> ] /RunLengthArray [ 3 ] >> >> >>";
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, psd::read_tysh(tysh_of(deep)));
+        // (a text of a megabyte within a budget of 64 KiB: refused; within the file's: read)
+        const std::string large = "<< /EngineDict << /Editor << /Text (\xfe\xff" + std::string(1 << 20, 'a') +
+                                  ") >> /StyleRun << /RunArray [ << /StyleSheet << /StyleSheetData << /FontSize 20.0 >> >> >> ] /RunLengthArray [ 3 ] >> >> >>";
+        std::size_t small = 64 * 1024;
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, psd::read_tysh(tysh_of(large), small));
+        std::size_t budget = genko::render::psd::descriptor::kUnpackedBudget;
+        QCOMPARE(psd::read_tysh(tysh_of(large), budget).engine_text.size(), std::size_t{1} << 19);
+        QVERIFY(budget < genko::render::psd::descriptor::kUnpackedBudget - (std::size_t{1} << 20));
+        // (lone halves of UTF-16 and runs past the text: the type layer's text with U+FFFD, its runs within it)
+        psd::TextLayer odd = psd::read_tysh(tysh_of("<< " + runs + " >>"));
+        odd.text = std::u16string{u'a', static_cast<char16_t>(0xd800), u'b', static_cast<char16_t>(0xdc00)};
+        Document doc = a_book();
+        genko::render::psd_type::Sheets sheets;
+        const auto read = genko::render::psd_type::read_text(odd, genko::render::psd_type::Frame{}, doc, sheets);
+        QVERIFY2(read.record.has_value(), read.why.c_str());
+        QCOMPARE(read.record->text, std::string("a\xef\xbf\xbd" "b\xef\xbf\xbd"));
+        QVERIFY(Json::parse(read.record->native_type->dump()).is_object());
+    }
+
+    // PC5 G-e: a type layer's record as a text layer and back (render/psd_type: text_of, read_text) — a point text across,
+    // turned, its letters' own attributes, a range of its own, two paragraphs, its anti-alias; the book's styles its named
+    // sheets, taken into another book by their names.
+    void typeRecordRoundTrip() {
+        Document doc = a_book();
+        doc.type_styles = genko::core::type_text::check_type_styles(Json::parse(R"({
+            "character": [{"id": "cs-1", "name": "強調", "char": {"underline": true, "rgb": [200, 0, 0]}}],
+            "paragraph": [{"id": "ps-1", "name": "見出し", "para": {"align": "center"}}]})"));
+        genko::core::StoryLine record;
+        record.text = "Hello\n二行目の本文";
+        record.wrap = "horizontal";
+        record.balloon = "none";
+        record.style = Json::object();
+        record.native_type = genko::core::type_text::check_native_type(Json::parse(R"({
+            "shape": "point", "anchor_mm": [30, 40], "antialias": "none", "shaping": "opentype",
+            "transform": [0.8660254, 0.5, -0.5, 0.8660254, 24.019, -9.6410],
+            "char": {"size_mm": 6, "rgb": [10, 20, 30], "tracking": 0.05, "features": {"frac": 1}},
+            "para": {"first_indent_mm": 2, "space_after_mm": 1.5},
+            "runs": [{"start": 0, "end": 5, "style": "cs-1", "char": {"size_mm": 8}}],
+            "paragraphs": [{"index": 1, "style": "ps-1"}]})"), record.text);
+        record.x_mm = genko::core::Num(30);
+        record.y_mm = genko::core::Num(35);
+        record.w_mm = genko::core::Num(40);
+        record.h_mm = genko::core::Num(12);
+        const double k = 300 / 25.4;
+        const auto named = [](const std::string& font) { return std::string("PS-") + std::filesystem::path(font).stem().string(); };
+        const std::optional<psd::TextLayer> text = genko::render::psd_type::text_of(record, doc, k, named);
+        QVERIFY(text.has_value());
+        QCOMPARE(text->antialias, std::string("Anno"));
+        QCOMPARE(text->char_sheets.size(), std::size_t{1});
+        QCOMPARE(text->paragraphs.size(), std::size_t{2});
+        QCOMPARE(text->paragraphs[1].justification, 2);
+        QVERIFY(text->runs.front().style.sheet == 0);
+        QVERIFY(std::abs(text->runs.front().style.size - 8 * k) < 1e-6);
+        const psd::TextLayer back = psd::read_tysh(psd::tysh(*text));
+        Document other = a_book();
+        genko::render::psd_type::Sheets sheets;
+        genko::render::psd_type::Frame frame;
+        frame.mm_x = frame.mm_y = 1 / k;
+        const auto read = genko::render::psd_type::read_text(back, frame, other, sheets);
+        QVERIFY2(read.record.has_value(), read.why.c_str());
+        const Json& nt = *read.record->native_type;
+        QCOMPARE(read.record->text, record.text);
+        QCOMPARE(nt["shape"], Json("point"));
+        QCOMPARE(nt["antialias"], Json("none"));
+        QVERIFY(std::abs(nt["anchor_mm"][0].get<double>() - 30) < 1e-3 && std::abs(nt["anchor_mm"][1].get<double>() - 40) < 1e-3);
+        for (std::size_t i = 0; i < 6; ++i)
+            QVERIFY2(std::abs(nt["transform"][i].get<double>() - (*record.native_type)["transform"][i].get<double>()) < 1e-3, nt.dump().c_str());
+        QCOMPARE(nt["char"]["rgb"], Json::array({10, 20, 30}));
+        QCOMPARE(nt["char"]["features"], Json{{"frac", 1}});
+        QVERIFY(std::abs(nt["char"]["size_mm"].get<double>() - 6) < 1e-3);
+        QVERIFY(std::abs(nt["char"]["tracking"].get<double>() - 0.05) < 1e-6);
+        QVERIFY(std::abs(nt["para"]["first_indent_mm"].get<double>() - 2) < 1e-3);
+        // (the range: its style the other book's of that name, its own size; its look the style's — not its own)
+        QCOMPARE(nt["runs"].size(), std::size_t{1});
+        const Json& run = nt["runs"][0];
+        QCOMPARE(run["start"], Json(0));
+        QCOMPARE(run["end"], Json(5));
+        const std::string cs = run["style"].get<std::string>();
+        QVERIFY(std::abs(run["char"]["size_mm"].get<double>() - 8) < 1e-3);
+        QVERIFY(!run["char"].contains("underline"));
+        QCOMPARE(nt["paragraphs"][0]["index"], Json(1));
+        const std::string ps = nt["paragraphs"][0]["style"].get<std::string>();
+        const Json& styles = *other.type_styles;
+        QCOMPARE(styles["character"][0]["id"], Json(cs));
+        QCOMPARE(styles["character"][0]["name"], Json("強調"));
+        QCOMPARE(styles["character"][0]["char"]["underline"], Json(true));
+        QCOMPARE(styles["paragraph"][0]["id"], Json(ps));
+        QCOMPARE(styles["paragraph"][0]["para"]["align"], Json("center"));
+        // (read again from the same file: the same styles, not new ones)
+        genko::render::psd_type::Sheets again;
+        (void)genko::render::psd_type::read_text(back, frame, other, again);
+        QCOMPARE(other.type_styles->at("character").size(), std::size_t{1});
+        // (a name a book cannot take: made one it can)
+        psd::TextLayer bad = back;
+        bad.char_sheets[0].name = u"[なし]\n";
+        Document third = a_book();
+        genko::render::psd_type::Sheets fresh;
+        QVERIFY(genko::render::psd_type::read_text(bad, frame, third, fresh).record.has_value());
+        QCOMPARE(third.type_styles->at("character")[0]["name"], Json("文字スタイル 1"));
     }
 
     // The support table goes out with the docs (docs/PSD_TEXT_SUPPORT.md): every feature this build cannot keep as text,

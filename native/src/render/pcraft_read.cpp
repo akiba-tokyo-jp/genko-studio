@@ -45,6 +45,10 @@
 #include "render/smart_decode.hpp"
 #include "render/zip.hpp"
 #include "render/zstd.hpp"
+#include "core/type_text.hpp"
+#include "render/ops_type.hpp"
+#include "render/psd_text.hpp"
+#include "render/psd_type.hpp"
 
 namespace genko::render::pcraft {
 
@@ -349,6 +353,12 @@ struct Ctx {
     std::map<std::string, std::string> nested;            // (a blob of a smart object's file → its contents' id: read once)
     std::map<std::string, std::string> unread;            // (… or why it could not be: tried once)
     std::map<std::string, std::string> layer_ids;         // (PC5 J-a: a document layer's id → the layer made of it)
+    // (PC5 G-e: the document's text styles, its text layers read as type layers — their styles the book's —, the fonts not
+    // found by their PostScript names)
+    const Json* text_styles = nullptr;
+    psd_type::Sheets type_sheets;
+    bool typed = false;
+    std::vector<std::string> fonts_missing;
 
     core::Page& page() { return doc.edit_page(0); }
 };
@@ -1095,6 +1105,38 @@ std::string filter_note(Ctx& ctx, std::string named, std::string plain) {
     return named;
 }
 
+// PC5 G-e (type@1, design G 2.9): a text layer as a type layer (render/psd_type), when Genko's text holds it — false
+// (with why, said) for its pixels.
+bool as_type(Ctx& ctx, core::Layer& layer, const Json& content, const std::string& name) {
+    try {
+        const std::optional<psd::TextLayer> text = psd_type::from_pcraft(content, ctx.text_styles);
+        if (!text) return false;
+        psd_type::Frame frame;
+        frame.mm_x = ctx.mm;
+        frame.mm_y = ctx.mm;
+        psd_type::Read read = psd_type::read_text(*text, frame, ctx.doc, ctx.type_sheets);
+        for (const std::string& font : read.missing_fonts) {
+            if (std::find(ctx.fonts_missing.begin(), ctx.fonts_missing.end(), font) == ctx.fonts_missing.end()) ctx.fonts_missing.push_back(font);
+        }
+        for (const std::string& note : read.notes) ctx.notes.name(note, name);
+        if (!read.record) {
+            ctx.notes.name("文字レイヤーは画素にしました（" + read.why + "）", name);
+            return false;
+        }
+        type_ops::fit_point_text(*read.record, ctx.doc);
+        layer.kind = core::LayerKind::Type;
+        layer.role = core::LayerRole::Text;
+        layer.panel_clip = false;
+        layer.type = core::type_text::shared_record(std::move(*read.record));
+        ctx.typed = true;
+        return true;
+    } catch (const core::Error& error) {
+        if (error.code() == "image_too_large") throw;
+        ctx.notes.name(std::string("文字レイヤーは画素にしました（文字として読めません: ") + error.what() + "）", name);
+        return false;
+    }
+}
+
 bool as_pixels(Ctx& ctx, core::Layer& layer, const Json* cache, const std::string& name) {
     if (cache == nullptr) return false;
     layer.kind = core::LayerKind::Raster;
@@ -1484,11 +1526,11 @@ void read_layer(Ctx& ctx, const Json& m, const Json& parent, bool hidden, std::v
         layer.fill = std::move(fill);
         layer.opacity = std::round(layer.opacity * alpha * 1000.0) / 1000.0;
     } else if (kind == "text") {
-        if (!as_pixels(ctx, layer, optional_field(content, "cache"), name)) {
+        if (as_type(ctx, layer, content, name)) {  // (PC5 G-e: a type layer)
+        } else if (!as_pixels(ctx, layer, optional_field(content, "cache"), name)) {
             ctx.notes.name("文字レイヤーは画素を持たないため外しました（文字として読めません）", name);
             return;
         }
-        ctx.notes.name("文字レイヤーは画素にしました（文字として編集はできません）", name);
     } else if (kind == "shape") {
         std::optional<core::vector::ShapePart> part;
         try {
@@ -1732,6 +1774,7 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
         }
     }
     std::vector<core::Layer> layers;
+    ctx.text_styles = optional_field(d, "text_styles");  // (PC5 G-e: what its text layers' styles are)
     read_layers(ctx, field(d, "layers", "document"), Json(nullptr), false, layers);
     ctx.page().layers = std::move(layers);
 
@@ -1984,13 +2027,31 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
         }
         pcraft_production::read(d, production);
     }
-    if (const Json* styles = optional_field(d, "text_styles")) {  // (the basic paragraph style every document has: nothing to say)
+    // (PC5 G-e: its character and paragraph styles the book's — those no text layer took too —; the basic paragraph style
+    // every document has not read: Genko's Basic Paragraph stays the book's)
+    if (const Json* styles = optional_field(d, "text_styles")) {
         const Json* character = optional_field(*styles, "character");
         const Json* paragraph = optional_field(*styles, "paragraph");
-        if ((character != nullptr && !empty_value(*character)) || (paragraph != nullptr && !empty_value(*paragraph)) || optional_field(*styles, "psd_raw") != nullptr) {
-            ctx.notes.add("文字スタイル・段落スタイルは Genko に無いため外しました");
+        if ((character != nullptr && !empty_value(*character)) || (paragraph != nullptr && !empty_value(*paragraph))) {
+            try {
+                if (const std::optional<psd::TextLayer> sheets = psd_type::from_pcraft(Json{{"text", ""}}, styles)) {
+                    psd_type::Frame frame;
+                    frame.mm_x = frame.mm_y = ctx.mm;
+                    psd_type::take_sheets(*sheets, frame, ctx.doc, ctx.type_sheets);
+                }
+            } catch (const core::Error&) {
+                ctx.notes.add("文字スタイル・段落スタイルが読めないため外しました");
+            }
+            if (ctx.type_sheets.full) ctx.notes.add("文字スタイル・段落スタイルが 512 を超えるため、残りは読みませんでした");
         }
+        if (optional_field(*styles, "psd_raw") != nullptr) ctx.notes.add("文字スタイルの PSD の元の設定は Genko に無いため外しました");
     }
+    if (!ctx.fonts_missing.empty()) {
+        std::string listed;
+        for (std::size_t i = 0; i < ctx.fonts_missing.size() && i < 10; ++i) listed += (listed.empty() ? "" : "、") + ctx.fonts_missing[i];
+        ctx.notes.add("同梱の書体に無い書体は、名前を残して既定の書体で描きます（" + listed + (ctx.fonts_missing.size() > 10 ? "、…" : "") + "）");
+    }
+    if (ctx.typed || !ctx.type_sheets.added.empty()) core::type_text::add_feature(ctx.doc);
 
     // the book as a book must be (what an op leaves is checked so too)
     try {

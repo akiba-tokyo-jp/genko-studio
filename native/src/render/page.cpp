@@ -3299,6 +3299,7 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
         PageLayer out;
         out.id = layer.id;
         if (layer.kind == LayerKind::Smart) out.smart = &layer;
+        if (layer.kind == LayerKind::Type) out.type = &layer;  // (PC5 G-e: a PSD's text layer)
         out.inks = std::move(own_inks);
         // (color-model@1: on an RGB page of a profile a paint layer's pixels are the page's values)
         out.page_values = (core::profiled_rgb(page) && layer.color_raster) || core::holds_page_values(page, layer);

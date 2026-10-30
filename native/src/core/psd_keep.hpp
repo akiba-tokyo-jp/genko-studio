@@ -45,10 +45,21 @@ struct PsdLayerKeep {
     std::vector<std::pair<std::string, std::string>> blocks;  // its key (4 characters) and the block's bytes
     std::string ranges;                                       // the blending ranges' bytes, "" when every one is the default
     std::optional<std::int64_t> id;                           // the lyid it had
+    // (PC5 G-e, type@1: a type layer read from a text layer) the fingerprint of its record as read (render/psd_type's
+    // fingerprint: "sha256:…"; "" none) — its kept TySh block written back while the record, the dpi and the page's pixels
+    // are the same, else its text written anew. JSON "text"; kept with its TySh block, never on another kind of layer
+    // (written_keep).
+    std::string text;
 
-    bool empty() const { return blocks.empty() && ranges.empty() && !id; }
+    bool empty() const { return blocks.empty() && ranges.empty() && !id && text.empty(); }
     bool operator==(const PsdLayerKeep&) const = default;
 };
+
+// (PC5 G-e) A text layer's block (TySh, tySh): kept only by a type layer read from it.
+bool psd_text_key(std::string_view key);
+// (PC5 G-e) What a layer's native_psd is written as: a layer that is not a type layer (one rasterized, merged, …) keeps no
+// text layer's block or fingerprint (none at all when nothing else is left).
+std::optional<PsdLayerKeep> written_keep(const Layer& layer);
 
 struct PsdResource {
     int id = 0;        // 0..65535

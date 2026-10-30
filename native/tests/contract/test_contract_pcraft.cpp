@@ -424,7 +424,8 @@ private slots:
                 if (kind == "raster") QVERIFY2(l.kind == core::LayerKind::Raster, where.c_str());
                 if (kind == "adjustment") QVERIFY2(l.kind == core::LayerKind::Adjust && l.adjust, where.c_str());
                 if (kind == "fill") QVERIFY2(l.kind == core::LayerKind::Fill && l.fill, where.c_str());
-                if (kind == "text") QVERIFY2(l.kind == core::LayerKind::Raster, where.c_str());  // (its picture)
+                // (PC5 G-e, the coordinator's decision for G: a text layer read as a type layer — its text upstream's)
+                if (kind == "text") QVERIFY2(l.kind == core::LayerKind::Type && l.type && l.type->text == u["text"].get<std::string>(), where.c_str());
                 if (kind == "shape") QVERIFY2(l.kind == core::LayerKind::Strokes || l.kind == core::LayerKind::Raster, where.c_str());
                 if (kind == "smart") QVERIFY2(l.kind == (u["source"].contains("linked") ? core::LayerKind::Raster : core::LayerKind::Smart), where.c_str());
                 // its pixels where upstream read them (a layer Genko holds as pixels)
@@ -516,9 +517,10 @@ private slots:
         QCOMPARE(doc.patterns.size(), std::size_t(1));
         QCOMPARE(doc.patterns[0].name, std::string("Checks"));
         QCOMPARE((*pattern->fill)["pattern"]["id"].get<std::string>(), doc.patterns[0].id);
-        // the text as its pixels, the shape as a pen part
+        // the text as a type layer (PC5 G-e, the coordinator's decision for G: before, its pixels), the shape as a pen part
         const core::Layer* type = titled(page, "Type");
-        QVERIFY(type && type->raster_png);
+        QVERIFY(type && type->kind == core::LayerKind::Type && type->type && type->type->text == "Hello" && !type->raster_png);
+        QVERIFY(std::find(doc.features.begin(), doc.features.end(), "type@1") != doc.features.end());
         const core::Layer* shape = titled(page, "Shape");
         QVERIFY(shape && shape->kind == core::LayerKind::Strokes && shape->shapes->items.size() == 1);
         // the smart objects: an embedded picture with its filter, a .pcraft's page, a linked one as its pixels
@@ -580,10 +582,11 @@ private slots:
         QCOMPARE(page.annotations[0].author, std::string("A"));
         QCOMPARE(page.annotations[0].text, std::string("note"));
         QVERIFY(!said(notes, "注釈"));
-        for (const char* part : {"レイヤー効果", "ラベル", "文字レイヤーは画素", "リンクされたスマートオブジェクト", "用紙の外",
+        for (const char* part : {"レイヤー効果", "ラベル", "リンクされたスマートオブジェクト", "用紙の外",
                                  "高度な合成のチャンネル", "filter.unknown.later"}) {
             QVERIFY2(said(notes, part), qPrintable(QString::fromUtf8(part) + QStringLiteral("\n") + QString::fromStdString(joined(notes))));
         }
+        QVERIFY2(!said(notes, "文字レイヤーは画素"), joined(notes).c_str());  // (PC5 G-e: a type layer)
     }
 
     // PC4 D7: .pcraft's smart filters through the table (core::from_upstream, to_upstream) both ways — the fixture's Gaussian
@@ -1199,17 +1202,24 @@ private slots:
         m["document"]["metadata"]["psd_resources"].push_back(Json::array({1046, "", lnsr}));  // (an indexed page's count)
         const formats::Opened opened = formats::open_file(bundle(m, bytes), "kept.pcraft");
         const core::Page& page = opened.doc.page(0);
-        QVERIFY(!titled(page, "Type")->native_psd);  // (made pixels: what it kept of its text left out)
+        // (PC5 G-e, the coordinator's decision for G: its text a type layer now — what it kept of its text left out, its other
+        // blocks kept)
+        const core::Layer* type = titled(page, "Type");
+        QVERIFY(type->kind == core::LayerKind::Type && type->native_psd);
+        for (const auto& [key, ref] : type->native_psd->blocks) QVERIFY(key != "TySh");
+        QVERIFY(type->native_psd->text.empty());
         for (const auto& [key, ref] : titled(page, "Paint")->native_psd->blocks) QVERIFY(key != "TySh");
         std::set<int> ids;
         for (const core::PsdResource& r : page.native_psd->resources) ids.insert(r.id);
         QCOMPARE(ids, (std::set<int>{1037}));
-        // (its PSD: no TySh on a layer, one clipping path resource at most)
+        // (its PSD: no TySh on a layer but the type layer's own — written anew, not the kept bytes —, one clipping path
+        // resource at most)
         const fs::path psd = at("kept.psd");
         formats::export_page_psd(opened.doc, page, psd);
         const render::psd::File file = render::psd::File::read(genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(psd))));
         for (const auto& layer : file.layers()) {
-            for (const auto& block : file.blocks(layer)) QVERIFY(block.key != "TySh");
+            for (const auto& block : file.blocks(layer)) QVERIFY(block.key != "TySh" || layer.name == "Type");
+            if (layer.name == "Type") QVERIFY(file.text(layer) && file.text(layer)->text == u"Hello");
         }
         int clipping = 0, counts = 0;
         for (const auto& r : file.resources()) {
@@ -1247,6 +1257,89 @@ private slots:
         std::size_t files = 0;
         for (const auto& entry : fs::directory_iterator(folder)) files += entry.is_regular_file();
         QCOMPARE(files, std::size_t(1));
+    }
+
+    // PC5 G-e (type@1, design G 2.9): type layers as upstream's text layers and back — a point text across with a style on
+    // a range, a box text down, its anti-alias and matrix; the book's styles upstream's TextStyles —; one set in its
+    // balloon its pixels, said. With $GENKO_PCRAFT_CHECK, upstream's reader reads them as text layers of that text.
+    void typeLayersBothWays() {
+        const core::Document book = run(small_book(), Json::parse(R"([
+            {"op": "type_style", "kind": "character", "action": "new", "name": "強調", "attrs": {"underline": true, "rgb": [200, 0, 0]}},
+            {"op": "type_style", "kind": "paragraph", "action": "new", "name": "見出し", "attrs": {"align": "center"}},
+            {"op": "add_type_layer", "page": 1, "text": "Hi 1/2\nふたつめ", "point": [5, 10], "wrap": "horizontal", "new_id": "t1", "title": "横",
+             "antialias": "crisp", "char": {"size_mm": 4, "features": {"frac": 1, "ss01": 1}, "language": "en"}},
+            {"op": "type_style", "kind": "character", "action": "apply", "id": "cs-1", "page": 1, "layer_id": "t1", "range": [0, 2]},
+            {"op": "type_style", "kind": "paragraph", "action": "apply", "id": "ps-1", "page": 1, "layer_id": "t1", "range": [7, 8]},
+            {"op": "add_type_layer", "page": 1, "text": "縦の文字", "box": [20, 5, 10, 25], "wrap": "vertical", "new_id": "t2", "title": "縦"},
+            {"op": "add_type_layer", "page": 1, "text": "フキダシ", "box": [5, 20, 15, 15], "wrap": "vertical", "balloon": "speech", "new_id": "t3",
+             "title": "フキダシ付き"}])"));
+        std::vector<std::string> notes;
+        const std::string bytes = formats::pcraft_bytes(book, 0, formats::PcraftOptions{}, &notes);
+        QVERIFY2(said(notes, "フキダシに入れたテキストレイヤーは画素"), joined(notes).c_str());
+        const Json m = manifest_of(bytes);
+        const Json* across = nullptr;
+        for (const Json& l : m["document"]["layers"]) {
+            if (l["name"] == Json("横")) across = &l;
+            if (l["name"] == Json("フキダシ付き")) QCOMPARE(l["content"]["kind"], Json("raster"));
+        }
+        QVERIFY(across != nullptr);
+        const Json& c = (*across)["content"];
+        QCOMPARE(c["kind"], Json("text"));
+        QCOMPARE(c["text"], Json("Hi 1/2\nふたつめ"));
+        QCOMPARE(c["antialias"], Json("Crisp"));
+        QCOMPARE(c["orientation"], Json("Horizontal"));
+        QCOMPARE(c["runs"][0]["len"], Json(2));
+        QCOMPARE(c["runs"][0]["style"]["style_sheet"], Json(1));
+        QCOMPARE(c["runs"][0]["style"]["underline"], Json(true));
+        QVERIFY(std::abs(c["runs"][0]["style"]["size_pt"].get<double>() - 4 / 25.4 * 72) < 1e-6);
+        QCOMPARE(c["runs"][0]["style"]["language"], Json("en"));
+        QCOMPARE(c["paragraphs"][1]["style"]["style_sheet"], Json(1));
+        QCOMPARE(c["paragraphs"][1]["style"]["align"], Json("Center"));
+        QVERIFY(c["cache"].is_object());
+        QCOMPARE(m["document"]["text_styles"]["character"][0]["name"], Json("強調"));
+        QCOMPARE(m["document"]["text_styles"]["character"][0]["attrs"]["underline"], Json(true));
+        QCOMPARE(m["document"]["text_styles"]["paragraph"][0]["para_attrs"]["align"], Json("Center"));
+        // (read back: type layers, their text and attributes, the styles the book's)
+        const formats::Opened opened = formats::open_file(bytes, "type.pcraft");
+        const core::Page& page = opened.doc.page(0);
+        const core::Layer* t1 = titled(page, "横");
+        QVERIFY(t1 && t1->kind == core::LayerKind::Type && t1->type);
+        QCOMPARE(t1->type->text, std::string("Hi 1/2\nふたつめ"));
+        const Json& nt = *t1->type->native_type;
+        QCOMPARE(nt["shape"], Json("point"));
+        QCOMPARE(nt["antialias"], Json("crisp"));
+        QCOMPARE(nt["char"]["features"], Json({{"frac", 1}, {"ss01", 1}}));
+        QCOMPARE(nt["char"]["language"], Json("en"));
+        QVERIFY(std::abs(nt["anchor_mm"][0].get<double>() - 5) < 0.01 && std::abs(nt["anchor_mm"][1].get<double>() - 10) < 0.01);
+        QCOMPARE(nt["runs"][0]["style"], (*opened.doc.type_styles)["character"][0]["id"]);
+        QCOMPARE((*opened.doc.type_styles)["character"][0]["name"], Json("強調"));
+        QCOMPARE((*opened.doc.type_styles)["paragraph"][0]["para"]["align"], Json("center"));
+        const core::Layer* t2 = titled(page, "縦");
+        QVERIFY(t2 && t2->kind == core::LayerKind::Type && t2->type->wrap == "vertical");
+        QCOMPARE((*t2->type->native_type)["shape"], Json("box"));
+        QVERIFY(std::abs(t2->type->w_mm.value() - 10) < 0.01 && std::abs(t2->type->h_mm.value() - 25) < 0.01);
+        QVERIFY(std::find(opened.doc.features.begin(), opened.doc.features.end(), "type@1") != opened.doc.features.end());
+        // (upstream's reader: text layers of that text)
+        const QString tool = qEnvironmentVariable("GENKO_PCRAFT_CHECK");
+        if (tool.isEmpty()) return;
+        const fs::path written = at("type_layers.pcraft");
+        genko::test::write_bytes(QString::fromStdString(core::path_to_utf8(written)), bytes);
+        QProcess process;
+        process.start(tool, QStringList{QStringLiteral("check"), QString::fromStdString(core::path_to_utf8(written))});
+        QVERIFY(process.waitForFinished(600000));
+        const QByteArray out = process.readAllStandardOutput();
+        QVERIFY2(process.exitCode() == 0, out.constData());
+        const Json v = Json::parse(out.trimmed().toStdString());
+        QVERIFY2(v["ok"].get<bool>(), out.constData());
+        int texts = 0;
+        std::vector<std::pair<const Json*, bool>> flat;
+        flattened(v["layers"], true, flat);
+        for (const auto& [l, shown] : flat) {
+            if ((*l)["kind"] != Json("text")) continue;
+            ++texts;
+            QVERIFY2((*l)["name"] == Json("横") ? (*l)["text"] == Json("Hi 1/2\nふたつめ") : (*l)["text"] == Json("縦の文字"), l->dump().c_str());
+        }
+        QCOMPARE(texts, 2);
     }
 
     // (with $GENKO_PCRAFT_CHECK, the tool built: upstream's reader reads what this build wrote — every fixture read and

@@ -48,6 +48,11 @@
 #include "render/zip.hpp"
 #include "render/zstd.hpp"
 #include "storage/asset_store.hpp"
+#include "core/type_text.hpp"
+#include "formats/psd_text_detail.hpp"
+#include "render/psd_type.hpp"
+#include "render/text/fonts.hpp"
+#include "render/text/shaping.hpp"
 
 namespace genko::formats {
 
@@ -784,6 +789,42 @@ std::size_t index_of(const core::Page& page, const std::string& id) {
 
 std::string title_of(const core::Layer& layer) { return !layer.title.empty() ? layer.title : std::string(core::to_string(layer.role)) + " " + layer.id.substr(0, 6); }
 
+// PC5 G-e (type@1, design G 2.9): a type layer as upstream's text layer (render/psd_type::to_pcraft) — a point or box text
+// of nothing a text layer cannot hold, its picture the cache —; another (rubies, 傍点, a balloon, the letters' effects, set
+// in its balloon) none: its pixels, said.
+std::optional<Json> type_content(Ctx& ctx, const core::Layer& layer, const render::PageLayer* shown, const std::string& name) {
+    if (!layer.type || shown == nullptr) return std::nullopt;
+    const core::StoryLine twin = core::type_text::line_of(layer, ctx.page.index);
+    std::optional<render::psd::TextLayer> text;
+    std::map<std::string, std::pair<std::string, std::string>> families;  // (a PostScript name → its family and style)
+    if (detail::line_features(twin).empty() && detail::type_layer_plain(twin)) {
+        render::text::Fonts fonts;
+        const auto font_name = [&](const std::string& path) {
+            const std::string ps = detail::font_name(fonts, path);
+            if (!families.contains(ps)) {
+                try {
+                    const render::text::FontInfo info = render::text::font_info(path, 0, false);
+                    families[ps] = {info.family, info.style};
+                } catch (const std::exception&) {
+                    families[ps] = {};
+                }
+            }
+            return ps;
+        };
+        text = render::psd_type::text_of(*layer.type, ctx.doc, ctx.px, font_name);
+    }
+    if (!text) {
+        ctx.note("ルビ・傍点・フキダシ・文字の効果のあるテキストレイヤー、フキダシに入れたテキストレイヤーは画素にしました（「" + name + "」）");
+        return std::nullopt;
+    }
+    Json content = render::psd_type::to_pcraft(*text, ctx.dpi, [&](const std::string& ps) {
+        const auto it = families.find(ps);
+        return it == families.end() ? std::pair<std::string, std::string>{} : it->second;
+    });
+    content["cache"] = picture_surface(ctx, shown->image, shown->inks, shown->page_values);
+    return content;
+}
+
 // A layer of the page (the picture page_layers drew of it, when it did) as an upstream layer.
 std::optional<Json> layer_of(Ctx& ctx, const core::Layer& layer, const render::PageLayer* shown, std::set<std::string>& patterns) {
     const std::string name = title_of(layer);
@@ -809,6 +850,9 @@ std::optional<Json> layer_of(Ctx& ctx, const core::Layer& layer, const render::P
     }
     if (layer.kind == core::LayerKind::Smart) {
         if (auto content = smart_content(ctx, layer, shown, name)) return layer_json(ctx, name, &layer, std::move(*content), nullptr);
+    }
+    if (layer.kind == core::LayerKind::Type) {  // (PC5 G-e: upstream's text layer, its picture the cache)
+        if (auto content = type_content(ctx, layer, shown, name)) return layer_json(ctx, name, &layer, std::move(*content), nullptr);
     }
     if (shown != nullptr && shown->shape != nullptr) {
         const core::vector::ShapePart& part = *shown->shape;
@@ -1269,6 +1313,8 @@ Json document_json(Ctx& ctx) {
         }
         doc["duotone"] = Json{{"inks", std::move(inks)}, {"psd_raw", nullptr}};
     }
+    // (PC5 G-e: the book's character and paragraph styles, upstream's TextStyles — a book of none: not written, as before)
+    if (ctx.doc.type_styles && !ctx.doc.type_styles->is_null()) doc["text_styles"] = render::psd_type::pcraft_text_styles(ctx.doc);
     // PC5 節 J (render/pcraft_production): the page's layer comps, notes, slices, timeline and measuring — each by its group's
     // row (none written until then)
     {

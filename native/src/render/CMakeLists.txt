@@ -274,6 +274,8 @@ genko_library(genko_render
     pcraft_slices.cpp
     # PC5 G-c (文字スタイル・段落スタイル: type_style)
     ops_type_styles.cpp
+    # PC5 G-e (PSD・.pcraft の文字: Photoshop's text layer and the type layer each other's)
+    psd_type.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core
