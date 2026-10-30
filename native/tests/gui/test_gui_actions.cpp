@@ -443,7 +443,7 @@ private slots:
         // (act_layer_from_background, act_layer_group_from_layers), レイヤーのグループ解除 (act_layer_ungroup), 非表示レイヤーを削除
         // (act_layer_delete_hidden), クリッピングマスクを作成・解除 (act_clip_create, act_clip_release), ファイル → スクリプト →
         // すべての空のレイヤーを削除・すべてのレイヤー効果を統合 (act_delete_empty_layers, act_bake_layer_effects) — test_gui_layers.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{737});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7 and I-a's 8)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{747});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8 and I-c's 10)
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -535,7 +535,9 @@ private slots:
         QVERIFY(exports != nullptr);
         QCOMPARE(items(exports), (QStringList{QStringLiteral("PNG としてクイック書き出し"), QStringLiteral("書き出し形式…"), QStringLiteral("|"),
                                              QStringLiteral("書き出しの環境設定…"), QStringLiteral("|"), QStringLiteral("Web 用に保存（従来）…"), QStringLiteral("|"),
-                                             QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("レイヤーからファイル…"),
+                                             QStringLiteral("原稿を書き出す…"), QStringLiteral("|"),
+                                             QStringLiteral("アートボードからファイル…"), QStringLiteral("アートボードから PDF…"),  // (PC5 I-c)
+                                             QStringLiteral("レイヤーからファイル…"),
                                              QStringLiteral("レイヤーカンプからファイル…"),  // (PC5 J-a)
                                              QStringLiteral("パスを Illustrator へ…"), QStringLiteral("カラールックアップテーブル…"),
                                              QStringLiteral("データセットからファイル…")}));  // (PC5 I-d)

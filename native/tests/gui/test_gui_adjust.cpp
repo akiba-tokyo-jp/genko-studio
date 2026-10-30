@@ -177,7 +177,9 @@ private slots:
         for (QAction* a : exports->actions()) items << (a->isSeparator() ? QStringLiteral("|") : a->property("genko_attribute").toString());
         // (after 原稿を書き出す…, PC4 F-c's レイヤーからファイル…, PC5 J-a's レイヤーカンプからファイル… and PC3 C-a's パスを Illustrator へ…:
         // test_gui_output; PC5 I-d's データセットからファイル… last)
-        QCOMPARE(items.mid(items.size() - 7), (QStringList{QStringLiteral("act_export"), QStringLiteral("|"), QStringLiteral("act_layers_to_files"),
+        // (PC5 I-c: アートボードからファイル…・PDF… first after the line, as Photoshop's)
+        QCOMPARE(items.mid(items.size() - 9), (QStringList{QStringLiteral("act_export"), QStringLiteral("|"), QStringLiteral("act_artboards_to_files"),
+                                                           QStringLiteral("act_artboards_to_pdf"), QStringLiteral("act_layers_to_files"),
                                                            QStringLiteral("act_comps_to_files"), QStringLiteral("act_export_paths_ai"),
                                                            QStringLiteral("act_export_lookup"), QStringLiteral("act_data_sets_to_files")}));
         QCOMPARE(book.window->action(QStringLiteral("act_export_lookup"))->text(), QStringLiteral("カラールックアップテーブル…"));

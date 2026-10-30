@@ -657,6 +657,11 @@ public:
     // grabbed (nor one fixed). Snapping to them is the snap's (canvas_snap.cpp), as before.
     bool show_guide_lines = true;
     bool show_canvas_guides = true;
+    // (PC5 I-c, artboards@1) アートボードガイド: an artboard page's guides — its own switch in place of カンバスガイド's
+    // (page_guides_shown) —, and アートボード名: an artboard's name drawn over its top left (draw_artboard_name)
+    bool show_artboard_guides = true;
+    bool show_artboard_names = true;
+    bool page_guides_shown() const;
     bool lock_guides = false;
     QColor guide_colour = QColor(0x4a, 0xff, 0xff);
     Qt::PenStyle guide_style = Qt::SolidLine;  // lines | dashed lines | dots
@@ -1277,6 +1282,7 @@ private:
     // (PC5 H-b: canvas_guide_lines.cpp) the guides, the layers' edges, the equal gaps of a moved box; a guide grabbed
     bool guide_grab(const QPointF& widget, Qt::KeyboardModifiers modifiers);
     void draw_guide_lines(QPainter& painter) const;
+    void draw_artboard_name(QPainter& painter) const;  // (PC5 I-c: canvas_guide_lines.cpp)
     void draw_layer_edges(QPainter& painter) const;
     void draw_spacing(QPainter& painter) const;
     std::vector<Spacing> spacing_;

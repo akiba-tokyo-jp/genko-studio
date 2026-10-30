@@ -274,6 +274,9 @@ genko_library(genko_render
     pcraft_slices.cpp
     # PC5 G-c (文字スタイル・段落スタイル: type_style)
     ops_type_styles.cpp
+    # PC5 I-c (アートボード: artboards@1 — the ops, PSD's artb)
+    ops_artboards.cpp
+    psd_artboards.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

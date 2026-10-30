@@ -30,6 +30,7 @@
 #include "core/patterns.hpp"
 #include "core/groups.hpp"
 #include "core/layer_basics.hpp"
+#include "core/artboards.hpp"
 #include "core/type_text.hpp"
 #include "core/variables.hpp"
 #include "storage/fsutil.hpp"
@@ -364,6 +365,8 @@ Json page_json(const core::Page& page, AssetStore& store) {
     if (page.slices && !page.slices->empty()) out[std::string(core::kSlicesKey)] = core::to_json(*page.slices);
     if (!page.annotations.empty()) out[std::string(core::kAnnotationsKey)] = core::to_json(page.annotations);
     if (page.measure && !page.measure->empty()) out[std::string(core::kMeasureKey)] = core::to_json(*page.measure);
+    // (PC5 I-c: artboards@1's mark — none: nothing written)
+    if (page.artboard) out[std::string(core::kArtboardKey)] = core::to_json(*page.artboard);
     for (const auto& [key, value] : page.extra.items()) {
         if (!is_known_page_key(key)) out[key] = value;
     }
@@ -637,6 +640,10 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
         std::erase(features, std::string(feature));
         if (used) features.emplace_back(feature);
     }
+    // PC5 I-c: artboards@1 (a page's artboard mark), named while a page is an artboard
+    core::validate_artboards(doc);
+    std::erase(features, std::string(core::kArtboardsFeature));
+    if (core::uses_artboards(doc)) features.emplace_back(core::kArtboardsFeature);
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 

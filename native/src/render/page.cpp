@@ -3517,7 +3517,13 @@ Image page_background(const core::Page& page, Size size, bool name_or_proof) {
     // Keep the established fill order and integer/channel semantics unchanged.
     std::vector<std::int64_t> paper{255, 255, 255};
     const Json* paper_json = get(page.extra, "paper_rgb");
-    if (paper_json != nullptr && core::py_truthy(*paper_json)) paper = first3(core::int_tuple(*paper_json));
+    // (artboards@1, PC5 I-c: an artboard's black or custom background under its layers — the 8-bit, precise and ink ways all
+    // start from this picture; a paper colour given — trim_page's white and black — before it)
+    if (paper_json != nullptr && core::py_truthy(*paper_json)) {
+        paper = first3(core::int_tuple(*paper_json));
+    } else if (const auto under = core::artboard_underlay(page)) {
+        paper = {(*under)[0], (*under)[1], (*under)[2]};
+    }
     Image rgba = Image::create("RGBA", size, Ink::with_alpha(paper, 255));
     std::vector<LayerRole> fill_roles{LayerRole::Bg, LayerRole::Ink, LayerRole::Finish};
     if (name_or_proof) fill_roles = {LayerRole::Bg, LayerRole::Name, LayerRole::Ink, LayerRole::Finish};
