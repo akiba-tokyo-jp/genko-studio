@@ -784,7 +784,8 @@ private slots:
         chars.color->click();
         QCOMPARE(s.last()["style"], Json({{"rgb", Json::array({200, 100, 50})}}));
         panel.outline_colour->click();
-        QCOMPARE(s.last()["style"].dump(), (Json{{"outline_rgb", Json::array({200, 100, 50})}, {"outline_mm", 0.6}}).dump());
+        // (the line's own 白フチ, 0.5 above, kept: 0.6 only where it has none)
+        QCOMPARE(s.last()["style"].dump(), (Json{{"outline_rgb", Json::array({200, 100, 50})}, {"outline_mm", 0.5}}).dump());
         panel.gradient->click();
         QCOMPARE(s.last()["style"]["gradient"].dump(),
                  (Json{{"rgb_from", Json::array({200, 100, 50})}, {"rgb_to", Json::array({200, 100, 50})}, {"angle", 90}}).dump());

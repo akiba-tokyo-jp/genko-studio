@@ -141,7 +141,7 @@ const std::vector<FontFace>& system_faces(std::map<QString, QString>* japanese =
                     f.family = name;
                     f.style = face.value("style", Json()).is_string() ? qs(face["style"].get<std::string>()) : QStringLiteral("Regular");
                     f.path = qs(face.value("path", std::string()));
-                    f.index = face.value("index", Json(0)).is_number_integer() ? face["index"].get<int>() : 0;
+                    f.index = face.value("index", Json(0)).is_number_integer() ? face.value("index", Json(0)).get<int>() : 0;
                     f.postscript = face.value("postscript", Json()).is_string() ? qs(face["postscript"].get<std::string>()) : QString();
                     faces.push_back(std::move(f));
                 }
@@ -509,7 +509,8 @@ void CharacterPanel::refresh() {
     const Json& own = at(c, "features");
     for (QToolButton* b : features) {
         const std::string tag = b->objectName().mid(8).toStdString();
-        b->setChecked(tag == "liga" ? at(c, "ligatures") != Json(false) : own.is_object() && own.value(tag, Json(0)).is_number_integer() && own[tag].get<int>() > 0);
+        const Json value = own.is_object() ? own.value(tag, Json(0)) : Json(0);  // (a const object's [] on a missing key: none)
+        b->setChecked(tag == "liga" ? at(c, "ligatures") != Json(false) : value.is_number_integer() && value.get<std::int64_t>() > 0);
     }
     language->setCurrentIndex(std::max(0, language->findData(at(c, "language").is_string() ? qs(at(c, "language").get<std::string>()) : QStringLiteral("ja"))));
     const std::string method = s.record != nullptr && s.record->native_type && s.record->native_type->contains("antialias")
@@ -771,18 +772,22 @@ TypeStylesPanel::TypeStylesPanel(MainWindow* window, bool paragraph) : window_(w
     connect(redefine_button, &QToolButton::clicked, this, [this] { redefine(); });
     connect(new_button, &QToolButton::clicked, this, [this] { new_style(); });
     connect(delete_button, &QToolButton::clicked, this, [this] { remove(); });
+    // (the panel menu's commands made as it opens: the same words in both style panels are not commands of the window's)
     auto* menu = new QMenu(menu_button);
-    menu->addAction(QStringLiteral("新規%1…").arg(what), this, [this] { new_style(); });
-    menu->addAction(QStringLiteral("スタイルを複製"), this, [this] { duplicate(); });
-    menu->addAction(QStringLiteral("スタイルを削除"), this, [this] { remove(); });
-    menu->addAction(QStringLiteral("スタイル名を変更…"), this, [this] {
-        const auto name = ask::get_text(this, QStringLiteral("スタイル名を変更"), QStringLiteral("新しい名前"), list->currentItem() != nullptr ? list->currentItem()->data(Qt::UserRole + 1).toString() : QString());
-        if (name) rename(*name);
+    connect(menu, &QMenu::aboutToShow, this, [this, menu, what] {
+        menu->clear();
+        menu->addAction(QStringLiteral("新規%1…").arg(what), this, [this] { new_style(); });
+        menu->addAction(QStringLiteral("スタイルを複製"), this, [this] { duplicate(); });
+        menu->addAction(QStringLiteral("スタイルを削除"), this, [this] { remove(); });
+        menu->addAction(QStringLiteral("スタイル名を変更…"), this, [this] {
+            const auto name = ask::get_text(this, QStringLiteral("スタイル名を変更"), QStringLiteral("新しい名前"), list->currentItem() != nullptr ? list->currentItem()->data(Qt::UserRole + 1).toString() : QString());
+            if (name) rename(*name);
+        });
+        menu->addSeparator();
+        menu->addAction(QStringLiteral("スタイルを再定義"), this, [this] { redefine(); });
+        menu->addAction(QStringLiteral("上書きを消去"), this, [this] { clear_override(); });
+        menu->addAction(QStringLiteral("スタイルオプション…"), this, [this] { options(); });
     });
-    menu->addSeparator();
-    menu->addAction(QStringLiteral("スタイルを再定義"), this, [this] { redefine(); });
-    menu->addAction(QStringLiteral("上書きを消去"), this, [this] { clear_override(); });
-    menu->addAction(QStringLiteral("スタイルオプション…"), this, [this] { options(); });
     menu_button->setMenu(menu);
     menu_button->setPopupMode(QToolButton::InstantPopup);
     auto* buttons = new QHBoxLayout;

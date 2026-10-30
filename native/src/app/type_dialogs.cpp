@@ -397,7 +397,7 @@ MissingFontsDialog::MissingFontsDialog(MainWindow* window, const Json& missing) 
         for (const Json& fam : families) {
             for (const Json& face : fam.value("styles", Json::array())) {
                 const QString path = qs(face.value("path", std::string()));
-                const int index = face.value("index", Json(0)).is_number_integer() ? face["index"].get<int>() : 0;
+                const int index = face.value("index", Json(0)).is_number_integer() ? face.value("index", Json(0)).get<int>() : 0;
                 const QString style = face.value("style", Json()).is_string() ? qs(face["style"].get<std::string>()) : QString();
                 box->addItem(QStringLiteral("%1 %2").arg(qs(fam.value("family", std::string())), style),
                              QStringLiteral("face:") + path + QChar(0x1f) + QString::number(index));

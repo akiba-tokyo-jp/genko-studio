@@ -275,6 +275,7 @@ private slots:
         QStringList seen;
         Json replaced;
         std::optional<std::string> chosen_line;
+        std::string seen_layer;
         s.responder->exec = [&](QDialog* dialog) {
             auto* d = qobject_cast<app::ReplaceDialog*>(dialog);
             if (d == nullptr) return 0;
@@ -288,11 +289,13 @@ private slots:
             replaced = s.last();
             d->replace_and_find();  // (nothing more in the line — "category" is not a whole "cat" —: the type layer's, found)
             seen << d->found->text();
+            seen_layer = s.window->target_layer() != nullptr ? s.window->target_layer()->id : std::string();  // (the type layer's "cat")
             return 0;
         };
         s.act("act_replace")->trigger();
-        QCOMPARE(seen, (QStringList{QStringLiteral("検索と置換"), QStringLiteral("found"), QStringLiteral("replaced"), QStringLiteral("置き換えました")}));
+        QCOMPARE(seen, (QStringList{QStringLiteral("検索と置換"), QStringLiteral("found"), QStringLiteral("replaced"), QStringLiteral("「cat」が見つかりました")}));
         QCOMPARE(chosen_line, std::optional<std::string>("L1"));
+        QCOMPARE(seen_layer, std::string("t1"));
         QCOMPARE(replaced, (Json{{"op", "edit_type"}, {"replace", Json{{"start", 0}, {"end", 3}, {"text", "dog"}}}, {"line", "L1"}}));
         QCOMPARE(s.window->book().story[0].text, std::string("dog and category"));
         // すべてを置換: replace_text with whole_word, the type layer too

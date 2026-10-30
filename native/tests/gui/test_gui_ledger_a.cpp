@@ -106,7 +106,10 @@ const QStringList& studio_docks() {
                                        // (PC5 J-a: ウィンドウ → レイヤーカンプ is a command, its dock's own switch beside it)
                                        QStringLiteral("レイヤーカンプ"),
                                        // (PC5 J-c: ウィンドウ → 注釈 so)
-                                       QStringLiteral("注釈")};
+                                       QStringLiteral("注釈"),
+                                       // (PC5 G-d: ウィンドウ → 文字・段落・文字スタイル・段落スタイル・字形 so)
+                                       QStringLiteral("文字"), QStringLiteral("段落"), QStringLiteral("文字スタイル"), QStringLiteral("段落スタイル"),
+                                       QStringLiteral("字形")};
     return titles;
 }
 

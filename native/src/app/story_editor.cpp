@@ -611,18 +611,45 @@ int ReplaceDialog::search() {
         item->setData(Qt::UserRole, QStringList{qs(line.page_index.json().dump()), qs(line.id)});
         results->addItem(item);
     }
+    // (PC5 G-d: the type layers replace_text replaces too — the unlocked ones of the pages shown, top first)
+    const core::Document& book = window_->book();
+    for (std::size_t row = 0; row < book.pages.size(); ++row) {
+        if (book.is_deferred(row)) continue;
+        const core::Page& page = book.page(row);
+        for (auto it = page.layers.rbegin(); it != page.layers.rend(); ++it) {
+            if (!core::type_text::is_type_layer(*it) || !it->type || it->locked) continue;
+            int hits = 0;
+            try {
+                hits = hits_in(it->type->text);
+            } catch (const std::exception&) {
+                results->clear();
+                count->setText(QStringLiteral("この正規表現は探すのに時間がかかりすぎるため、探すのをやめました（書き方を見直してください）"));
+                return 0;
+            }
+            if (hits == 0) continue;
+            found += hits;
+            const QString start = qs(render::text::utf8(render::text::u32(it->type->text).substr(0, 40)));
+            auto* item = new QListWidgetItem(QStringLiteral("%1 ページ　テキストレイヤー：%2").arg(qs(page.index.repr()), start));
+            item->setData(Qt::UserRole, QStringList{qs(page.index.json().dump()), QString(), qs(it->id)});
+            results->addItem(item);
+        }
+    }
     count->setText(found != 0 ? QStringLiteral("%1 か所（%2 行）").arg(found).arg(results->count()) : QStringLiteral("見つかりません"));
     return found;
 }
 
 void ReplaceDialog::go(QListWidgetItem* item) {
     const QStringList data = item->data(Qt::UserRole).toStringList();
-    if (data.size() != 2) return;
+    if (data.size() != 2 && data.size() != 3) return;
     const Json index = Json::parse(data[0].toStdString(), nullptr, false);
     const auto& pages = window_->book().pages;
     for (std::size_t row = 0; row < pages.size(); ++row) {
         if (pages[row]->index.json() == index) {
             window_->select_page(static_cast<int>(row));
+            if (data.size() == 3) {  // (a type layer's: chosen)
+                window_->set_target_layer(data[2].toStdString());
+                return;
+            }
             window_->on_line_selected(data[1].toStdString(), true);
             return;
         }
