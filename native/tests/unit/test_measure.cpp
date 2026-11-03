@@ -411,16 +411,15 @@ private slots:
         QVERIFY(!turned.page(0).measure && turned.page(0).annotations.empty());
     }
 
-    // MCP's apply_ops does not take them (the C++ build's own, as J-a's and J-c's); none is a frame any more but 目盛り
-    // マーカー (J-d2).
+    // MCP's apply_ops does not take them (the C++ build's own, as J-a's and J-c's); none is a frame any more (J-d2 wrote
+    // 目盛りマーカー and the question measure_values).
     void notTheAgents() {
         for (const char* name : {"set_measurement_scale", "add_count", "remove_count", "move_count", "clear_count", "new_count_group",
-                                 "delete_count_group", "set_count_group", "set_ruler_line", "straighten_layer", "measure_info"}) {
+                                 "delete_count_group", "set_count_group", "set_ruler_line", "straighten_layer", "measure_info",
+                                 "measure_values", "place_scale_marker"}) {
             QVERIFY2(!service::agent_op(name), name);
             for (const std::string_view frame : render::production_op_names()) QVERIFY2(frame != name, name);
         }
-        const auto frames = render::production_op_names();
-        QVERIFY(std::find(frames.begin(), frames.end(), std::string_view("place_scale_marker")) != frames.end());
     }
 
     // PSD's 1074 (annotations_map.rs scale_resource_roundtrip_and_keep_rules): written and read back, one this build

@@ -644,11 +644,11 @@ private slots:
         // (the smart object's ラスタライズ keeps its own name: the first of the words in the menus)
         QCOMPARE(studio.act("act_smart_rasterize")->text(), QStringLiteral("ラスタライズ"));
         const std::int64_t revision = studio.doc().revision;
-        // (PC5 J-d1: 計測スケールを設定 ▸ 初期設定・カスタム…, ものさしツール, カウントツール made real — test_gui_measure)
-        for (const char* name : {"act_measure_data_points", "act_measure_record", "act_measure_scale_marker", "act_video_from_file", "act_video_blank",
-                                 "act_video_insert_blank", "act_video_duplicate", "act_video_delete", "act_video_replace", "act_video_interpret",
-                                 "act_video_show_altered", "act_video_restore", "act_video_restore_all", "act_video_reload", "act_video_rasterize",
-                                 "act_panel_actions", "act_panel_measurement_log"}) {  // (PC5 J-a: レイヤーカンプ made real; J-c: 注釈)
+        // (PC5 J-d1: 計測スケールを設定 ▸ 初期設定・カスタム…, ものさしツール, カウントツール made real; J-d2: データポイントを選択 ▸
+        // カスタム…, 計測値を記録, 目盛りマーカーを配置…, ウィンドウ → 計測ログ — test_gui_measure)
+        for (const char* name : {"act_video_from_file", "act_video_blank", "act_video_insert_blank", "act_video_duplicate", "act_video_delete",
+                                 "act_video_replace", "act_video_interpret", "act_video_show_altered", "act_video_restore", "act_video_restore_all",
+                                 "act_video_reload", "act_video_rasterize", "act_panel_actions"}) {  // (PC5 J-a: レイヤーカンプ made real; J-c: 注釈)
             QAction* a = studio.act(name);
             QVERIFY2(a != nullptr, name);
             QVERIFY2(!a->statusTip().isEmpty(), name);
@@ -796,14 +796,16 @@ private slots:
         QCOMPARE(keys("act_hand_tool"), k({s("H")}));
         QCOMPARE(keys("act_screen_next"), k({s("F")}));
         QCOMPARE(dock("レイヤー")->toggleViewAction()->shortcuts(), k({s("F7")}));
-        // (PC5 H-d) メニュー… Ctrl+Alt+Shift+M; コマを結合 Ctrl+Alt+M — Photoshop's Shift+Ctrl+M left free for 計測値を記録 (the
-        // user's decision 13: J-d2), the key one no Photoshop key, no other command's
+        // (PC5 H-d) メニュー… Ctrl+Alt+Shift+M; コマを結合 Ctrl+Alt+M — Photoshop's Shift+Ctrl+M 計測値を記録's (the user's
+        // decision 13: J-d2), the key one no Photoshop key, no other command's
         QCOMPARE(keys("act_menus"), k({s("Ctrl+Alt+Shift+M")}));
         QCOMPARE(keys("act_merge"), k({s("Ctrl+Alt+M")}));
+        QCOMPARE(keys("act_measure_record"), k({s("Ctrl+Shift+M")}));
         QVERIFY(!key_sets::photoshop_defaults().contains(QStringLiteral("Ctrl+Alt+M")));
         QVERIFY(key_sets::photoshop_defaults().contains(QStringLiteral("Ctrl+Shift+M")));
         for (QAction* a : w->findChildren<QAction*>()) {
-            QVERIFY2(!a->shortcuts().contains(s("Ctrl+Shift+M")), qPrintable(a->text()));
+            // (Ctrl+Shift+M 計測値を記録's alone in the Photoshop set — PC5 J-d2)
+            if (a != w->action("act_measure_record")) QVERIFY2(!a->shortcuts().contains(s("Ctrl+Shift+M")), qPrintable(a->text()));
             // (Ctrl+Alt+M コマを結合's alone — no later part's: J-b's slices, I-a's — the review of H-d)
             if (a != w->action("act_merge")) QVERIFY2(!a->shortcuts().contains(s("Ctrl+Alt+M")), qPrintable(a->text()));
         }
@@ -854,6 +856,7 @@ private slots:
         QCOMPARE(keys("act_prefs"), k({s("Ctrl+,")}));
         QCOMPARE(keys("act_channel_composite"), k({s("Ctrl+Alt+2")}));
         QCOMPARE(keys("act_merge"), k({s("Ctrl+Shift+M")}));  // (Genko's as before: the user's decision 13)
+        QVERIFY(keys("act_measure_record").isEmpty());          // (PC5 J-d2: no key in Genko's set — Ctrl+Shift+M コマを結合's)
         QVERIFY(keys("act_menus").isEmpty());
         QVERIFY(dock("レイヤー")->toggleViewAction()->shortcuts().isEmpty());
         QCOMPARE(clashes(), QStringList());

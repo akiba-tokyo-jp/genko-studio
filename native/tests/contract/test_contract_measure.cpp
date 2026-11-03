@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <map>
 #include <string>
 
 #include "core/command_bus.hpp"
@@ -24,6 +25,7 @@
 #include "formats/open_file.hpp"
 #include "formats/pcraft_write.hpp"
 #include "render/image.hpp"
+#include "render/png.hpp"
 #include "render/ops_registry.hpp"
 #include "render/psd.hpp"
 #include "render/raster.hpp"
@@ -94,6 +96,14 @@ class TestContractMeasure : public QObject {
         return out;
     }
     Json project(const QString& book) { return Json::parse(genko::test::read_bytes(book + QStringLiteral("/project.json"))); }
+    // Every file under a book's folder and its bytes.
+    static std::map<std::string, std::string> folder_bytes(const QString& book) {
+        std::map<std::string, std::string> out;
+        for (const auto& entry : fs::recursive_directory_iterator(fs::path(book.toStdString()))) {
+            if (entry.is_regular_file()) out[entry.path().string()] = genko::test::read_bytes(QString::fromStdString(entry.path().string()));
+        }
+        return out;
+    }
     static bool names_measure(const Json& project) {
         const Json features = project.value("features", Json::array());
         return std::find(features.begin(), features.end(), Json("measure@1")) != features.end();
@@ -297,6 +307,139 @@ private slots:
         process.start(tool, QStringList{QStringLiteral("check"), file});
         QVERIFY(process.waitForFinished(600000));
         QVERIFY2(process.exitCode() == 0, process.readAllStandardOutput().constData());
+    }
+
+    // PC5 J-d2: `genko measure` — the rows 計測値を記録 makes (the whole page, an area, the ruler, the count; JSON and the
+    // measurement log's CSV), the book only read; the question measure_values through `genko apply` (nothing saved).
+    void measureThroughTheCommandLine() {
+        core::Document doc = book(true);
+        doc = run(doc, op("set_measurement_scale", {{"preset", "paper_mm"}}));
+        const QString book_path = path(QStringLiteral("rows.genko"));
+        genko::test::write_project(doc, fs::path(book_path.toStdString()));
+        const std::string before = genko::test::read_bytes(book_path + QStringLiteral("/project.json"));
+        const std::map<std::string, std::string> folder_before = folder_bytes(book_path);
+        int exit = -1;
+        Json whole = genko({QStringLiteral("measure"), book_path}, &exit);
+        QVERIFY2(exit == 0, whole.dump().c_str());
+        QCOMPARE(whole["source"], Json("selection"));
+        QCOMPARE(whole["grid_dpi"], Json(200));
+        QCOMPARE(whole["page"], Json(1));
+        QCOMPARE(whole["rows"].size(), std::size_t(1));
+        const Json& page_row = whole["rows"][0];
+        QCOMPARE(page_row["label"], Json("計測 1"));
+        QCOMPARE(page_row["scaleUnits"], Json("mm"));
+        QVERIFY(std::fabs(page_row["width"].get<double>() - 96.0) < 0.1);  // (the paper's mm)
+        QVERIFY(std::fabs(page_row["area"].get<double>() - 96.0 * 72.0) < 2.0);
+        QCOMPARE(whole["columns"][8], (Json{{"key", "area"}, {"name", "面積"}}));
+        // an area over the bar and beside it: two features, a summary first
+        const Json area{{"union", Json::array({Json{{"rect", Json::array({20, 34, 20, 4})}}, Json{{"rect", Json::array({60, 10, 10, 10})}}})}};
+        Json two = genko({QStringLiteral("measure"), book_path, QStringLiteral("--area"), QString::fromStdString(area.dump())}, &exit);
+        QVERIFY2(exit == 0, two.dump().c_str());
+        QCOMPARE(two["rows"].size(), std::size_t(3));
+        QCOMPARE(two["rows"][0]["count"], Json(2));
+        QCOMPARE(two["rows"][1]["label"], Json("フィーチャ 1"));
+        // (in the order of their first pixel: the paper's square above, then the strip over the bar — darker)
+        QVERIFY2(two["rows"][2]["grayMin"].get<double>() < 60.0 && two["rows"][1]["grayMin"].get<double>() > 250.0, two.dump().c_str());
+        // the CSV: the head of Photoshop's columns, a line a row
+        const auto ran = genko::test::run_genko({QStringLiteral("measure"), book_path, QStringLiteral("--area"), QString::fromStdString(area.dump()),
+                                                 QStringLiteral("--csv")});
+        QVERIFY2(ran.exit_code == 0, qPrintable(ran.described()));
+        const QStringList lines = QString::fromUtf8(ran.out).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+        QCOMPARE(lines.size(), 4);
+        QVERIFY2(lines[0].startsWith(QStringLiteral("ラベル,日時,ドキュメント,ソース,スケール,スケール単位,スケール係数,カウント,面積,周囲の長さ,円形度")), qPrintable(lines[0]));
+        QVERIFY(lines[0].endsWith(QStringLiteral("積分濃度,ヒストグラム")));
+        QVERIFY(lines[1].startsWith(QStringLiteral("計測 1,")) && lines[2].startsWith(QStringLiteral("フィーチャ 1,")));
+        // the ruler and the count (auto: the ruler first); refusals
+        Json refused = genko({QStringLiteral("measure"), book_path, QStringLiteral("--source"), QStringLiteral("ruler")}, &exit);
+        QVERIFY(exit != 0);
+        QVERIFY2(refused.dump().find("no ruler line") != std::string::npos, refused.dump().c_str());
+        genko({QStringLiteral("measure"), book_path, QStringLiteral("--source"), QStringLiteral("pen")}, &exit);
+        QCOMPARE(exit, 2);
+        genko({QStringLiteral("measure"), book_path, QStringLiteral("--page"), QStringLiteral("9")}, &exit);
+        QVERIFY(exit != 0);
+        // (the review's P3-4: `genko measure` only reads — every file of the book the same bytes after all of them)
+        QCOMPARE(folder_bytes(book_path), folder_before);
+        Json done = apply(book_path, QStringLiteral("r.json"),
+                          Json::array({op("set_ruler_line", {{"start", {10, 40}}, {"end", {40, 0}}}), op("add_count", {{"at_mm", {5, 5}}})}));
+        QVERIFY2(done.value("ok", false), done.dump().c_str());
+        Json ruler = genko({QStringLiteral("measure"), book_path}, &exit);
+        QCOMPARE(ruler["source"], Json("ruler"));
+        QCOMPARE(ruler["rows"][0]["length"], Json(50.0));  // (the paper's mm)
+        QCOMPARE(ruler["columns"].size(), std::size_t(9));
+        Json count = genko({QStringLiteral("measure"), book_path, QStringLiteral("--source"), QStringLiteral("count")}, &exit);
+        QCOMPARE(count["rows"][0]["count"], Json(1));
+        // the question through apply: answered, the book as it was
+        const std::string with = genko::test::read_bytes(book_path + QStringLiteral("/project.json"));
+        QVERIFY(with != before);
+        done = apply(book_path, QStringLiteral("q.json"), Json::array({op("measure_values", {{"source", "count"}})}));
+        QVERIFY2(done.dump().find("\"count\":1") != std::string::npos, done.dump().c_str());
+        QCOMPARE(genko::test::read_bytes(book_path + QStringLiteral("/project.json")), with);
+        // (the review's P2-3) a book titled as a formula: its CSV keeps it as text
+        core::Document formula = book();
+        formula.title = "=1+1";
+        const QString formula_path = path(QStringLiteral("formula.genko"));
+        genko::test::write_project(formula, fs::path(formula_path.toStdString()));
+        const auto csv = genko::test::run_genko({QStringLiteral("measure"), formula_path, QStringLiteral("--csv")});
+        QVERIFY2(csv.exit_code == 0, qPrintable(csv.described()));
+        QVERIFY2(QString::fromUtf8(csv.out).contains(QStringLiteral(",'=1+1（1 ページ）,")), csv.out.constData());
+    }
+
+    // PC5 J-d2: 目盛りマーカーを配置 through `genko apply` — a group 目盛りマーカー (groups@1) of a pen layer's rectangle
+    // (pen-shapes@1) and a type layer (type@1), saved and read back, drawn on the page (the bar's pixels black at the trim's
+    // bottom left); undone in one; a book that never had one as before.
+    void scaleMarkerThroughTheCommandLine() {
+        const QString book_path = path(QStringLiteral("marker.genko"));
+        genko::test::write_project(book(), fs::path(book_path.toStdString()));
+        const std::string before = genko::test::read_bytes(book_path + QStringLiteral("/project.json"));
+        Json done = apply(book_path, QStringLiteral("m.json"),
+                          Json::array({op("set_measurement_scale", {{"preset", "paper_mm"}}), op("place_scale_marker", {{"length", 10}})}));
+        QVERIFY2(done.value("ok", false), done.dump().c_str());
+        const Json saved = project(book_path);
+        const Json features = saved.value("features", Json::array());
+        for (const char* feature : {"groups@1", "pen-shapes@1", "type@1", "measure@1"})
+            QVERIFY2(std::find(features.begin(), features.end(), Json(feature)) != features.end(), (std::string(feature) + " " + features.dump()).c_str());
+        const auto loaded = storage::load_document(fs::path(book_path.toStdString()));
+        const core::Page& page = loaded.document.page(0);
+        QVERIFY(page.layers.size() >= 3);
+        const core::Layer& group = page.layers.back();
+        QCOMPARE(group.title, std::string("目盛りマーカー"));
+        QVERIFY(group.group);
+        const core::Layer& bar = page.layers[page.layers.size() - 3];
+        const core::Layer& text = page.layers[page.layers.size() - 2];
+        QCOMPARE(bar.kind, core::LayerKind::Strokes);
+        QCOMPARE(text.kind, core::LayerKind::Type);
+        QCOMPARE(text.type->text, std::string("10 mm"));
+        QCOMPARE(bar.parent_id, Json(group.id));
+        QCOMPARE(text.parent_id, Json(group.id));
+        // drawn: the bar 10 mm long at the trim's bottom left (black pixels there), the paper beside it
+        const QString png = path(QStringLiteral("marker.png"));
+        int exit = -1;
+        const Json drawn = genko({QStringLiteral("render"), book_path, QStringLiteral("--page"), QStringLiteral("1"), QStringLiteral("--dpi"), QStringLiteral("100"), QStringLiteral("--out"), png}, &exit);
+        QVERIFY2(exit == 0, drawn.dump().c_str());
+        const render::Image picture = render::read_png(genko::test::read_bytes(png), render::kPillowOpenLimits).convert("RGB");
+        const core::Rect trim = page.trim_rect_mm();
+        const Json bar_mm = done["results"][1]["bar_mm"];
+        const auto at = [&](double x_mm, double y_mm) {
+            const int x = static_cast<int>(x_mm / 25.4 * 100), y = static_cast<int>(y_mm / 25.4 * 100);
+            const std::string px = picture.crop(render::Box{x, y, x + 1, y + 1}).tobytes();
+            return static_cast<unsigned char>(px[0]) + static_cast<unsigned char>(px[1]) + static_cast<unsigned char>(px[2]);
+        };
+        const double mid_y = bar_mm[1].get<double>() + bar_mm[3].get<double>() / 2;
+        QVERIFY2(at(bar_mm[0].get<double>() + 5, mid_y) < 60, done.dump().c_str());
+        QVERIFY(at(bar_mm[0].get<double>() + 15, mid_y) > 600);
+        QVERIFY(bar_mm[0].get<double>() >= trim.x.value() && bar_mm[1].get<double>() + bar_mm[3].get<double>() <= trim.y.value() + trim.height.value());
+        QCOMPARE(bar_mm[2], Json(10.0));
+        // undone in one: the layers gone (the scale stays: its own step)
+        const Json undone = genko({QStringLiteral("undo"), book_path, QStringLiteral("--as"), QStringLiteral("human:test")}, &exit);
+        QVERIFY2(exit == 0, undone.dump().c_str());
+        const auto back = storage::load_document(fs::path(book_path.toStdString()));
+        for (const core::Layer& l : back.document.page(0).layers) QVERIFY(l.title != "目盛りマーカー");
+        // refused: the bar longer than the trim — the book as it was
+        const std::string kept = genko::test::read_bytes(book_path + QStringLiteral("/project.json"));
+        done = apply(book_path, QStringLiteral("n.json"), Json::array({op("place_scale_marker", {{"length", 500}})}));
+        QVERIFY(done.contains("failed"));
+        QCOMPARE(genko::test::read_bytes(book_path + QStringLiteral("/project.json")), kept);
+        QVERIFY(before != kept);
     }
 };
 

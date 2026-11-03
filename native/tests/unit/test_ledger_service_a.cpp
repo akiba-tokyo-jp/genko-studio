@@ -1248,6 +1248,8 @@ private slots:
                                            "delete_layers", "duplicate_layers", "ungroup_layers", "bake_layer_styles",
                                            // (PC5 J-b: slices@1's question, slice.list — SPEC PROD-01)
                                            "slices_info",
+                                           // (PC5 J-d2: 計測値を記録's values asked — SPEC PROD-01)
+                                           "measure_values",
                                            // (PC5 J-e1: timeline@1's question, timeline.info — SPEC PROD-01)
                                            "timeline_info"};
         for (const std::string& name : genko::render::ops_registry().names()) {
