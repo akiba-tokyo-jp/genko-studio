@@ -1180,6 +1180,18 @@ Json document_json(Ctx& ctx) {
     }
     Json layers = Json::array();
     for (Json& l : grouped(ctx, std::move(flat))) layers.push_back(std::move(l));
+    // (PC5 I-c, artboards@1: an artboard page is PhotoCraft's artboard over the whole document — a top-level group of its
+    // name, 通過, its board the page, its background and preset)
+    if (page.artboard) {
+        const core::Artboard& a = *page.artboard;
+        Json background = a.background == "custom" && a.rgb
+                              ? Json{{"custom", pc::to_json(pc::rgb_color((*a.rgb)[0] / 255.0, (*a.rgb)[1] / 255.0, (*a.rgb)[2] / 255.0))}}
+                              : Json(a.background == "black" || a.background == "transparent" ? a.background : std::string("white"));
+        Json board{{"rect", Json{{"x0", 0}, {"y0", 0}, {"x1", ctx.w}, {"y1", ctx.h}}}, {"background", std::move(background)}, {"preset", a.preset.value_or(std::string())}};
+        Json group = layer_json(ctx, a.name, nullptr, Json{{"kind", "group"}, {"children", std::move(layers)}, {"expanded", true}, {"artboard", std::move(board)}}, nullptr);
+        group["blend"] = "PassThrough";
+        layers = Json::array({std::move(group)});
+    }
     doc["layers"] = std::move(layers);
 
     // channels and the Quick Mask

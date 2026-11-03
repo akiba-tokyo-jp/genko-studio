@@ -478,6 +478,7 @@ private slots:
             "measure_info",  // (PC5 J-d1: measure@1's question, image.analysis.info — SPEC.md PROD-01)
             "bake_layer_styles",  // (PC5 I-a: すべてのレイヤー効果を統合 — SPEC.md AUTO-01; delete_layers, duplicate_layers, ungroup_layers are core's)
             "slices_info",  // (PC5 J-b: slices@1's question, slice.list — SPEC.md PROD-01)
+            "add_artboard", "artboard_from_layers", "set_artboard",  // (PC5 I-c: artboards@1, アートボード — SPEC.md AUTO-01)
             "measure_values",  // (PC5 J-d2: 計測値を記録's values asked, image.analysis.recordMeasurements — SPEC.md PROD-01)
             "timeline_info"};  // (PC5 J-e1: timeline@1's question, timeline.info — SPEC.md PROD-01)
         expected.insert(drawing_names.begin(), drawing_names.end());

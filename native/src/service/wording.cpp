@@ -857,6 +857,28 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the page's (\d+) slices kept from its PSD are replaced by the ones made from the guides)",
                          "このページが PSD から持っていたスライス \\1 個は、ガイドから作ったスライスに置き換わりました"));
         r.push_back(rule("the slices overlap in too many places to be cut into cells", "スライスの重なりが多すぎて、書き出す形に分けられません"));
+        // (PC5 I-c, artboards@1 — the C++ build's own: render/ops_artboards, formats/artboards)
+        r.push_back(rule(R"(page \S+ is a cover: a cover cannot be an artboard)", "表紙のページはアートボードにできません"));
+        r.push_back(rule(R"(page \S+ is in a spread: a page of a spread cannot be an artboard)", "見開きのページはアートボードにできません"));
+        r.push_back(rule(R"(page \S+ is not an artboard.*)", "このページはアートボードではありません（レイヤー → 新規 → アートボード… で作ります）"));
+        r.push_back(rule(R"(no artboard preset (.*))", "「\\1」というアートボードのプリセットはありません"));
+        r.push_back(rule("background is white, black, transparent or custom", "アートボードの背景は 白・黒・透明・その他 から選びます"));
+        r.push_back(rule(R"(a custom background takes its colour.*)", "背景が「その他」のときは、その色（rgb）を指定します"));
+        r.push_back(rule("rgb is a custom background's colour", "色（rgb）は、背景が「その他」のときだけ指定します"));
+        r.push_back(rule(R"(the resolution is the whole book's \((\S+) dpi\).*)", "解像度は原稿全体のものです（\\1 dpi）。変えるときは イメージ → 画像解像度… で変えます"));
+        r.push_back(rule(R"((?:width|height)_px is 1 to (\d+) pixels)", "アートボードの幅と高さは 1〜\\1 pixel です"));
+        r.push_back(rule(R"((?:width|height)_px is a whole number of pixels)", "アートボードの幅と高さは pixel の整数で指定します"));
+        r.push_back(rule(R"(artboard is null .*)", "アートボードを外すときは、ほかの設定を一緒に指定しません"));
+        r.push_back(rule(R"(\S+ cannot go with artboard null)", "アートボードを外すときは、ほかの設定を一緒に指定しません"));
+        r.push_back(rule(R"(origin_px is \[x, y\].*)", "カンバスの上の位置は [x, y]（pixel の整数）で指定します"));
+        r.push_back(rule(R"(page \S+: artboard.*)", "アートボードの設定が正しくありません"));
+        r.push_back(rule(R"(the artboards are not of one colour mode and profile.*)",
+                         "アートボードのカラーモードかプロファイルが違うため、1 つの PSD にまとめられません（イメージ → モード で揃えるか、1 つずつのファイルに書き出します）"));
+        r.push_back(rule(R"(the artboards are of different depths.*)",
+                         "アートボードのビット数が違うため、1 つの PSD にまとめられません（イメージ → モード で揃えるか、1 つずつのファイルに書き出します）"));
+        r.push_back(rule("the book has no artboards", "この原稿にはアートボードがありません"));
+        r.push_back(rule(R"(no artboard named (.*))", "「\\1」という名前のアートボードはありません"));
+        r.push_back(rule("the artboards' canvas is too large", "アートボードを並べたカンバスが大きすぎます"));
         // (PC5-0, Z0's review P1-1: a new layer of a 16- or 32-bit page painted at 8 bits for the book's precise budget)
         r.push_back(rule(R"(the layer is painted at 8 bits: the book's precise pixels would pass their budget.*)",
                          "本の高精度の画素の上限（1 GiB）を越えるか、本をまだ読み込み中のため、このレイヤーは 8 bit で塗りました"));

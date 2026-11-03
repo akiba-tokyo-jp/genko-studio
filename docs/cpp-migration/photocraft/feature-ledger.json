@@ -6169,9 +6169,21 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/artboards.cpp",
+        "native/src/render/psd_artboards.cpp",
+        "native/src/formats/copy.cpp",
+        "native/src/formats/open_file.cpp",
+        "native/src/formats/pcraft_write.cpp",
+        "native/src/render/pcraft_read.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/main_window_artboards.cpp",
+        "tools/migration/psd_artboards_check.py",
+        "native/tests/contract/test_contract_artboards.cpp",
+        "native/tests/gui/test_gui_artboards.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -6217,9 +6229,15 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/formats/artboards.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/main_window_artboards.cpp",
+        "native/tests/contract/test_contract_artboards.cpp",
+        "native/tests/gui/test_gui_artboards.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -18675,9 +18693,19 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/artboards.cpp",
+        "native/src/render/ops_artboards.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/render/ops_pagesize.cpp",
+        "native/src/app/main_window_artboards.cpp",
+        "native/src/app/artboard_dialog.cpp",
+        "native/tests/contract/test_contract_artboards.cpp",
+        "native/tests/gui/test_gui_artboards.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -21861,9 +21889,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/artboards.cpp",
+        "native/src/render/ops_artboards.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/render/page.cpp",
+        "native/src/app/main_window_artboards.cpp",
+        "native/src/app/artboard_dialog.cpp",
+        "native/tests/contract/test_contract_artboards.cpp",
+        "native/tests/gui/test_gui_artboards.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -21904,9 +21942,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/artboards.cpp",
+        "native/src/render/ops_artboards.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/app/main_window_artboards.cpp",
+        "native/tests/contract/test_contract_artboards.cpp",
+        "native/tests/gui/test_gui_artboards.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -21947,9 +21994,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/artboards.cpp",
+        "native/src/render/ops_artboards.cpp",
+        "native/src/storage/reader.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/render/layer_bounds.cpp",
+        "native/src/app/main_window_artboards.cpp",
+        "native/tests/contract/test_contract_artboards.cpp",
+        "native/tests/gui/test_gui_artboards.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -35967,9 +36023,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_artboards.cpp",
+        "native/src/core/ops_rulers.cpp",
+        "native/tests/gui/test_gui_artboards.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -36133,9 +36193,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_artboards.cpp",
+        "native/src/app/canvas.cpp",
+        "native/tests/gui/test_gui_artboards.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -37924,9 +37988,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-c、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_guide_view.cpp",
+        "native/src/app/canvas_guide_lines.cpp",
+        "native/tests/gui/test_gui_artboards.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
