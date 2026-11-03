@@ -1452,6 +1452,35 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("blend_channels is a layer's, not a folder's", "チャンネルの指定はレイヤーのものです（グループには付けられません）"));
         r.push_back(rule("not yet ported: high-precision merge of a clipped layer that leaves colour channels out.*",
                          "高精度のページでは、下のレイヤーへクリップしたままチャンネルを外したレイヤーを結合することはまだできません（クリップを外すか、チャンネルを全部入れると結合できます）"));
+        // (PC5 I-g — the C++ build's own: レイヤーを自動整列・自動合成, Photomerge, ファイルをスタックとして読み込み・統計 —
+        // render/ops_align, service/automate_merge)
+        r.push_back(rule("auto-align found no matching detail between the layers.*",
+                         "レイヤーの間に対応が見つかりません（重なりがあって模様のある、画素のレイヤーを選びます）"));
+        r.push_back(rule("photomerge found no matching detail between the pictures.*", "画像の間に対応が見つかりません（重なりのある写真を選びます）"));
+        r.push_back(rule(R"(the panorama would be -?\d+ × -?\d+ px \(about (-?\d+) 万 pixels\).*)",
+                         "パノラマが大きすぎます（約 \\1 万画素）。画像を減らすか、縮小して読み込んでください"));
+        r.push_back(rule("ids is \\[layer id, …\\]: two or more paint layers|select two or more paint layers \\(ids\\)",
+                         "画素のレイヤーを 2 枚以上選びます（レイヤー パネルで Ctrl を押しながら選びます）"));
+        r.push_back(rule("ids names the layer \\S+ twice", "同じレイヤーを 2 度選んでいます"));
+        r.push_back(rule(R"(more than (\d+) layers: choose fewer)", "レイヤーは \\1 枚までです"));
+        r.push_back(rule(R"(more than (\d+) pictures: choose fewer)", "画像は \\1 枚までです"));
+        r.push_back(rule("the layer \\S+ is not a paint layer \\(auto-align and auto-blend take paint layers\\)",
+                         "自動整列・自動合成できるのは、画素（ペイント）のレイヤーだけです"));
+        r.push_back(rule("projection is auto, perspective, cylindrical, spherical, collage or reposition|"
+                         "the layout is auto, perspective, cylindrical, spherical, collage or reposition",
+                         "投影法は 自動設定・遠近法・円筒法・球面法・コラージュ・位置の変更 のどれかです"));
+        r.push_back(rule("reference is one of the layers given \\(ids\\)", "基準のレイヤーは、選んだレイヤーの中から選びます"));
+        r.push_back(rule("interpolation is bicubic, bilinear or nearest", "補間方法は バイキュービック・バイリニア・ニアレストネイバー のどれかです"));
+        r.push_back(rule("focal_length is the mm of 35 mm film.*", "焦点距離は 35 mm 判に換算した mm（0 より大きく 2000 まで）です"));
+        r.push_back(rule("method is panorama or stack", "合成方法は パノラマ か 画像をスタック です"));
+        r.push_back(rule("the layers to blend hold different kinds of pixels.*",
+                         "選んだレイヤーの画素の種類（8 bit・高精度・インキ）が違います。そろえてから合成します"));
+        r.push_back(rule("Photomerge needs two or more pictures", "Photomerge には画像が 2 枚以上要ります"));
+        r.push_back(rule("no files to load into a stack", "読み込むファイルがありません"));
+        r.push_back(rule("the stack mode is entropy, .*", "スタックモードの名前が正しくありません"));
+        r.push_back(rule("the scale to read the pictures at is 10 to 100 %", "読み込むときの縮小は 10〜100 % です"));
+        r.push_back(rule("the picture (.*) could not be laid on the stack's page", "画像「\\1」をスタックのページに置けませんでした"));
+        r.push_back(rule("the picture has no pixels to load|a picture to load is missing", "読み込む画像の画素がありません"));
         r.push_back(rule("the layers have nothing to draw", "選んだレイヤーには、描かれたものがありません"));
         r.push_back(rule("layer \\S+ has nothing to rasterize", "このレイヤーには、ラスタライズするものがありません（すでに画素のレイヤーです）"));
         r.push_back(rule("the transform squashes the smart object flat|the picture would be laid too small", "スマートオブジェクトが潰れてしまう変形はできません"));

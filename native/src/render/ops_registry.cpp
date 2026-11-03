@@ -43,6 +43,7 @@
 #include "render/ops_annotations.hpp"
 #include "render/ops_measure.hpp"
 #include "render/ops_slices.hpp"
+#include "render/ops_align.hpp"
 
 namespace genko::render {
 
@@ -455,6 +456,8 @@ void register_render_ops(core::OpRegistry& registry) {
     register_measure_ops(registry);
     // PC5 J-b (slices@1: the slices, render/ops_slices)
     register_slice_ops(registry);
+    // PC5 I-g (レイヤーを自動整列・レイヤーを自動合成: auto_align_layers, auto_blend_layers — render/ops_align)
+    align::register_align_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {

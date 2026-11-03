@@ -55,6 +55,7 @@ void MainWindow::build_automate_actions() {
          QStringLiteral("起動・新規・開く・保存・閉じる・プリント・書き出しのときに流す手順を結び付けます"));
     make(QStringLiteral("act_script_browse"), QStringLiteral("参照…"), [this] { browse_script(); }, {},
          QStringLiteral("手順のファイル（操作の JSON か 1 行 1 操作）を選んで、開いている原稿に流します（genko script と同じ）"));
+    build_photomerge_actions();  // (PC5 I-g: Photomerge…, ファイルをスタックとして読み込み…・統計…, 編集's レイヤーを自動整列…・自動合成…)
 }
 
 void MainWindow::build_automate_menus() {
@@ -74,6 +75,7 @@ void MainWindow::build_automate_menus() {
     scripts_menu_->addAction(action(QStringLiteral("act_script_events")));
     scripts_menu_->addSeparator();
     scripts_menu_->addAction(action(QStringLiteral("act_script_browse")));
+    build_photomerge_menus();  // (PC5 I-g: Photomerge… last in 自動処理 ▸; ファイルをスタックとして読み込み…・統計… before 参照…)
     automate_menu_->menuAction()->setVisible(!automate_menu_->actions().isEmpty());  // (shown once it holds one)
 }
 

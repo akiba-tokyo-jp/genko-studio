@@ -237,6 +237,10 @@ genko_library(genko_app
     # PC5 J-b (スライス: the slices on the canvas, the スライスツール・スライス選択ツール, the window's commands)
     canvas_slices.cpp
     main_window_slices.cpp
+    # PC5 I-g (自動整列・自動合成・Photomerge・ファイルをスタックとして読み込み・統計)
+    auto_align_dialog.cpp
+    photomerge_dialog.cpp
+    main_window_photomerge.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent
