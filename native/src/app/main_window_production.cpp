@@ -5,9 +5,8 @@
 // the command in its own build_* under the same attribute (its menus here keep taking it by action()); a panel's row goes
 // for its dock's own toggle in build_production_docks. (make() puts a command made again under an attribute in the old
 // one's places and lets the old one go, so a row left behind never answers in its place — whichever is made first.)
-// Keys: none here. 計測値を記録 is Photoshop's Shift+Ctrl+M, which is コマを結合（割る前に戻す）'s (act_merge) in both key sets
-// (H-0's key_sets): J-d2 gives it only in the Photoshop set and only with act_merge's key there moved (a decision to ask);
-// アクション's Alt+F9 is free in both.
+// Keys: none here. 計測値を記録 (J-d2: main_window_measure.cpp) has Photoshop's Shift+Ctrl+M in the Photoshop set (the user's
+// decision 13: コマを結合 takes Ctrl+Alt+M there), none in Genko's (Ctrl+Shift+M コマを結合's); アクション's Alt+F9 is free in both.
 
 #include <QAction>
 #include <QMenu>
@@ -29,13 +28,8 @@ struct Frame {
     const char* tip;
 };
 
-// イメージ → 解析 ▸ (J-d2), in Photoshop's order (J-d1's 計測スケールを設定 ▸ 初期設定・カスタム…, ものさしツール and カウント
-// ツール are made by main_window_measure.cpp)
-constexpr Frame kAnalysis[] = {
-    {"act_measure_data_points", "カスタム…", "計測値を記録するときに出す項目を選びます"},
-    {"act_measure_record", "計測値を記録", "選択範囲・ものさし・カウントの計測値を計測ログに記録します"},
-    {"act_measure_scale_marker", "目盛りマーカーを配置…", "計測スケールの目盛りをページに置きます"},
-};
+// イメージ → 解析 ▸: every command made by main_window_measure.cpp now (J-d1's 計測スケールを設定 ▸ 初期設定・カスタム…,
+// ものさしツール and カウントツール; J-d2's データポイントを選択 ▸ カスタム…, 計測値を記録, 目盛りマーカーを配置…)
 
 // レイヤー → ビデオレイヤー ▸ (J-e2), in Photoshop's order
 constexpr Frame kVideo[] = {
@@ -53,17 +47,17 @@ constexpr Frame kVideo[] = {
     {"act_video_rasterize", "ラスタライズ", "今のフレームの見えをふつうのペイントレイヤーにします"},
 };
 
-// ウィンドウ's panels (J-g アクション, J-d2 計測ログ; タイムライン is the dock's; J-a's レイヤーカンプ is made by
-// main_window_layer_comps.cpp, after アクション; J-c's 注釈 by main_window_notes.cpp, after 計測ログ)
+// ウィンドウ's panels (J-g アクション; タイムライン is the dock's; J-a's レイヤーカンプ is made by main_window_layer_comps.cpp,
+// after アクション; J-d2's 計測ログ by main_window_measure.cpp, after レイヤーカンプ; J-c's 注釈 by main_window_notes.cpp,
+// after 計測ログ)
 constexpr Frame kPanels[] = {
     {"act_panel_actions", "アクション", "記録した操作の手順を並べ、再生・記録します"},
-    {"act_panel_measurement_log", "計測ログ", "記録した計測値の表"},
 };
 
 }  // namespace
 
 void MainWindow::build_production_actions() {
-    for (const std::span<const Frame> list : {std::span<const Frame>(kAnalysis), std::span<const Frame>(kVideo), std::span<const Frame>(kPanels)}) {
+    for (const std::span<const Frame> list : {std::span<const Frame>(kVideo), std::span<const Frame>(kPanels)}) {
         for (const Frame& frame : list) {
             const QString title = QString::fromUtf8(frame.title);
             make(QString::fromLatin1(frame.attribute), title, [this, title] { not_yet_command(title); }, {}, QString::fromUtf8(frame.tip));
@@ -71,7 +65,8 @@ void MainWindow::build_production_actions() {
     }
     build_layer_comp_actions();  // (PC5 J-a: レイヤーカンプ, レイヤーカンプからファイル…)
     build_note_actions();        // (PC5 J-c: 注釈ツール, 表示・非表示 → 注釈, 読み込み → 注釈…, ウィンドウ → 注釈)
-    build_measure_actions();     // (PC5 J-d1: 計測スケールを設定 ▸, ものさしツール, カウントツール, 表示・非表示 → カウント)
+    build_measure_actions();     // (PC5 J-d1: 計測スケールを設定 ▸, ものさしツール, カウントツール, 表示・非表示 → カウント; J-d2:
+                                 // データポイントを選択 ▸ カスタム…, 計測値を記録, 目盛りマーカーを配置…, ウィンドウ → 計測ログ)
     build_slice_actions();       // (PC5 J-b: スライスツール, スライス選択ツール, 表示・非表示 → スライス, スライスをロック・消去, 新規レイヤーベースのスライス)
 }
 
@@ -135,7 +130,10 @@ void MainWindow::build_production_docks() {
     // (each group's dock in its frame's place: its toggleViewAction() into view_menu_ instead of the frame)
     for (const Frame& frame : kPanels) {
         view_menu_->addAction(action(QString::fromLatin1(frame.attribute)));
-        if (std::string_view(frame.attribute) == "act_panel_actions") build_layer_comps_dock();  // (PC5 J-a: レイヤーカンプ)
+        if (std::string_view(frame.attribute) == "act_panel_actions") {
+            build_layer_comps_dock();      // (PC5 J-a: レイヤーカンプ)
+            build_measurement_log_dock();  // (PC5 J-d2: 計測ログ)
+        }
     }
     build_notes_dock();  // (PC5 J-c: 注釈, the canvas's notes and the 注釈ツール's options)
     build_measure_tools();  // (PC5 J-d1: the canvas's count marks and ruler line, the ものさしツール's and カウントツール's options)

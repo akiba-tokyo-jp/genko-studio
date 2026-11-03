@@ -73,6 +73,7 @@ class CloneSourcePanel;
 class PathsPanel;
 class LayerCompsPanel;
 class NotesPanel;
+class MeasurementLogPanel;
 class PatternsPanel;
 class BrushesPanel;
 class BrushSettingsPanel;
@@ -1980,6 +1981,17 @@ public:
     void show_ruler_readout(const std::optional<core::RulerLine>& line = std::nullopt);
     QLabel* ruler_readout() const { return ruler_readout_; }
     QComboBox* count_groups() const { return count_groups_; }
+    // (PC5 J-d2, main_window_measure.cpp) イメージ → 解析 → 計測値を記録: the page's rows (the selection — none: the whole page
+    // —, else the ruler line — this window's own too —, else the count) into the app's measurement log
+    // (app/measurement_log), kept to the data points, the 計測ログ panel shown. False: nothing recorded (said).
+    bool record_measurements();
+    // データポイントを選択 → カスタム…: the window of the points (共通・選択範囲・ものさしツール・カウントツール), this machine's.
+    void data_points_dialog();
+    // 目盛りマーカーを配置…: the window asked (長さ・フォント・サイズ・テキストを表示・テキストの位置・カラー), then place_scale_marker.
+    void scale_marker_dialog();
+    MeasurementLogPanel* measurement_log_panel() const { return measurement_log_panel_; }
+    // (計測値を記録 under way on a worker: the rows go into the log when it is done)
+    bool measuring() const { return measuring_; }
 
     // --- PC5 J-b (slices@1): main_window_slices.cpp — the スライスツール and the スライス選択ツール (the 切り抜き group; their
     // options), レイヤー → 新規レイヤーベースのスライス, 表示 → 表示・非表示 → スライス, スライスをロック, スライスを消去 (and スナップ
@@ -2013,6 +2025,10 @@ private:
     void build_measure_menus(QMenu* view);
     void build_measure_tools();
     void refresh_measure();
+    void build_measurement_log_dock();  // (PC5 J-d2: ウィンドウ → 計測ログ, after レイヤーカンプ)
+    MeasurementLogPanel* measurement_log_panel_ = nullptr;
+    bool measuring_ = false;
+    QDockWidget* measurement_log_dock_ = nullptr;
     QLabel* ruler_readout_ = nullptr;
     QComboBox* count_groups_ = nullptr;
     QToolButton* count_colour_ = nullptr;

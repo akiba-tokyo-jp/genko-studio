@@ -52,6 +52,7 @@
 #include "formats/artboards.hpp"
 #include "render/ops_annotations.hpp"
 #include "render/ops_measure.hpp"
+#include "render/measure_features.hpp"
 #include "render/ops_slices.hpp"
 #include "render/ops_layer_comps.hpp"
 #include "render/ops_variables.hpp"
@@ -3434,6 +3435,58 @@ int automate_command(const QStringList& all, bool ascii) {
     return print_run(inputs, std::move(result), a.flag("--json"), ascii);
 }
 
+// PC5 J-d2 (the C++ build's own, image.analysis.recordMeasurements): `genko measure <book> [--page N] [--source
+// auto|selection|ruler|count] [--area '<area>'] [--csv]` — the rows 計測値を記録 makes for the page (every data point of the
+// source; the selection: --area, none the whole page), as {"ok", "page", "source", "columns", "rows", "grid_dpi"?} or, with
+// --csv, as the measurement log's CSV. The book is only read; the log is the app's (nothing kept).
+int measure_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--page", true}, {"--source", true}, {"--area", true}, {"--csv", false}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 1, "src", a)) return usage("genko measure: " + *error);
+    std::int64_t wanted = 1;
+    if (const auto value = a.value("--page")) {
+        const auto n = int_option(*value);
+        if (!n) return usage("genko measure: argument --page: invalid int value: " + core::py_repr_str(value->toStdString()));
+        wanted = *n;
+    }
+    const std::string source = a.value("--source") ? a.value("--source")->toStdString() : std::string("auto");
+    if (source != "auto" && source != "selection" && source != "ruler" && source != "count")
+        return usage("genko measure: argument --source: invalid choice: " + core::py_repr_str(source) + " (choose from auto, selection, ruler, count)");
+    std::optional<Json> area;
+    if (const auto text = a.value("--area")) {
+        try {
+            area = Json::parse(text->toStdString());
+        } catch (const Json::exception&) {
+            return usage("genko measure: argument --area: not JSON");
+        }
+        if (source != "auto" && source != "selection") return usage("genko measure: argument --area: only with --source selection (or auto)");
+    }
+    const auto loaded = storage::load_document(path_arg(a.positional[0]));
+    const core::Document& doc = loaded.document;
+    const core::Page* page = nullptr;
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.pages[i]->index == core::Num(wanted) && !doc.is_deferred(i)) page = &doc.page(i);
+    }
+    if (page == nullptr) throw core::Error("key", "no page " + std::to_string(wanted));
+    render::measure::Recorded made;
+    try {
+        made = render::measure::record(doc, *page, source, area, 1, render::measure::now_text());
+    } catch (const core::OpError& error) {
+        return fail(error.what(), "apply", ascii, 1);
+    }
+    if (a.flag("--csv")) {
+        write_text(render::measure::csv(made.rows), stdout);
+        return 0;
+    }
+    Json columns = Json::array();
+    for (const std::string& key : render::measure::log_columns(made.rows)) columns.push_back(Json{{"key", key}, {"name", render::measure::column_name(key)}});
+    Json out{{"ok", true}, {"page", page->index.json()}, {"source", made.source}, {"columns", std::move(columns)}, {"rows", made.rows}};
+    if (made.grid_dpi > 0) out["grid_dpi"] = made.grid_dpi;
+    if (!made.notes.empty()) out["notes"] = made.notes;
+    print_json(out, ascii);
+    return 0;
+}
+
 }  // namespace
 
 int run_cli(int argc, char** argv) {
@@ -3485,6 +3538,7 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("batch")) return batch_command(args, ascii);    // (PC5 I-0: 自動処理の土台)
         if (command == QLatin1String("droplet")) return droplet_command(args, ascii);    // (PC5 I-e: ドロップレット)
         if (command == QLatin1String("automate")) return automate_command(args, ascii);  // (PC5 I-e: 画像プロセッサーほか)
+        if (command == QLatin1String("measure")) return measure_command(args, ascii);    // (PC5 J-d2: 計測値を記録)
         if (command == QLatin1String("studio")) return studio_command(args, ascii);
         if (command == QLatin1String("mcp")) return mcp_command(args);
         if (command == QLatin1String("serve")) return serve_command(args);

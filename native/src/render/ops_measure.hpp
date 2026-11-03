@@ -34,8 +34,17 @@
 //       turned about the page's middle by transform_layers, or the page turned and cut to the largest upright rectangle
 //       inside it by crop_page — one op, the same functions as theirs on the three ways —; the line cleared after, as
 //       Photoshop's)                                                                           レイヤーの角度補正
-// and the question (OpRegistry::add_query: nothing changed, journalled or saved):
+//   place_scale_marker {page, length? (the scale's units; a "nice" 1, 2 or 5 × 10ⁿ near a fifth of the trim's width),
+//       font?, size_pt? (1..1000, 12), text?: bool (true), position?: "top" | "bottom" (bottom), color?: "black" | "white"
+//       (black)} → {group, bar, text, bar_mm, pixels, label}  (PC5 J-d2: a group 目盛りマーカー at the trim's bottom left of a
+//       pen layer 目盛り — its rectangle a shape part — and a type layer of the label "<length> <units>", one step)
+//                                                                                               目盛りマーカーを配置
+// and the questions (OpRegistry::add_query: nothing changed, journalled or saved):
 //   measure_info {page} → {page, dpi, scale, ruler: {start, end, protractor, info} | null, count, notes}   image.analysis.info
+//   measure_values {page, source?: "auto" | "selection" | "ruler" | "count", area? (the selection; none: the whole page)}
+//       → {source, columns: [{key, name}], rows: [{key: value}], grid_dpi? (a selection's grid)}  (PC5 J-d2: the rows
+//       計測値を記録 adds — every data point of the source; render/measure_features —, the log being the app's)
+//                                                                                               image.analysis.recordMeasurements
 
 namespace genko::render::measure {
 

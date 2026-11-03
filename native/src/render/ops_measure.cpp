@@ -5,17 +5,22 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
 #include <limits>
 #include <numbers>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
+#include "core/areas.hpp"
 #include "core/error.hpp"
+#include "core/ids.hpp"
 #include "core/measure.hpp"
 #include "core/production_json.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "render/measure_features.hpp"
 #include "render/ops_annotations.hpp"
 #include "render/ops_registry.hpp"
 
@@ -408,6 +413,139 @@ void measure_info(core::OpContext& c) {
     c.report = listing(c.doc.page(at));
 }
 
+// (PC5 J-d2) 計測値を記録's values for the page, asked: the log is the app's (app/measurement_log), so the question only
+// answers the rows — every data point of the source, the summary's label 計測 1.
+void measure_values(core::OpContext& c) {
+    const std::size_t at = core::require_page(c.doc, c.op);
+    std::string source = "auto";
+    if (const Json* v = given(c.op, "source")) {
+        if (!v->is_string()) throw OpError("source is auto, selection, ruler or count");
+        source = v->get<std::string>();
+        if (source != "auto" && source != "selection" && source != "ruler" && source != "count") throw OpError("source is auto, selection, ruler or count");
+    }
+    std::optional<Json> area;
+    if (given(c.op, "area") != nullptr) area = core::op_area(c.op);
+    if (area && source != "auto" && source != "selection") throw OpError("area is the selection: only for source selection (or auto)");
+    const Recorded made = record(c.doc, c.doc.page(at), source, area, 1, now_text());
+    Json columns = Json::array();
+    for (const std::string& key : log_columns(made.rows)) columns.push_back(Json{{"key", key}, {"name", column_name(key)}});
+    c.report = Json{{"source", made.source}, {"columns", std::move(columns)}, {"rows", made.rows}};
+    if (made.grid_dpi > 0) (*c.report)["grid_dpi"] = made.grid_dpi;
+    c.notes.insert(c.notes.end(), made.notes.begin(), made.notes.end());
+}
+
+// The length as the marker's label writes it: a whole number as one, else as short as it reads back.
+std::string length_text(double v) {
+    if (v == std::floor(v) && std::fabs(v) < 1e15) return std::to_string(static_cast<long long>(v));
+    std::ostringstream out;
+    out << std::setprecision(15) << v;
+    return out.str();
+}
+
+// (PC5 J-d2) 目盛りマーカーを配置: a group 目盛りマーカー of a bar (a pen layer's rectangle, pen-shapes@1) and its label (a type
+// layer, type@1) at the trim's bottom left — PhotoCraft's place_scale_marker (its bar a raster layer there) in mm, one step.
+void place_scale_marker(core::OpContext& c) {
+    const std::size_t at = core::require_page(c.doc, c.op);
+    const core::Page& page = c.doc.page(at);
+    const std::optional<core::MeasurementScale> scale = page.measure ? page.measure->scale : std::nullopt;
+    const core::MeasurementScale s = scale.value_or(core::MeasurementScale{});
+    const double factor = core::scale_factor(scale), ppm = core::page_px_per_mm(page);
+    const core::Rect trim = page.trim_rect_mm();
+    const double tx = trim.x.value(), ty = trim.y.value(), tw = trim.width.value(), th = trim.height.value();
+    // (none given: a "nice" length — 1, 2 or 5 × 10ⁿ — near a fifth of the trim's width, in the scale's units)
+    const double length = given(c.op, "length") != nullptr ? positive(*given(c.op, "length"), "length") : nice_marker_length(page);
+    double size_pt = 12;
+    if (const Json* v = given(c.op, "size_pt")) {
+        size_pt = positive(*v, "size_pt");
+        if (size_pt < 1 || size_pt > 1000) throw OpError("size_pt is 1 to 1000");
+    }
+    std::optional<std::string> font;
+    if (const Json* v = given(c.op, "font")) {
+        if (!v->is_string() || v->get<std::string>().empty()) throw OpError("font is a font's name");
+        font = v->get<std::string>();
+    }
+    bool show_text = true;
+    if (const Json* v = given(c.op, "text")) show_text = flag(*v, "text");
+    bool top = false;
+    if (const Json* v = given(c.op, "position")) {
+        if (*v != Json("top") && *v != Json("bottom")) throw OpError("position is top or bottom");
+        top = *v == Json("top");
+    }
+    int shade = 0;
+    if (const Json* v = given(c.op, "color")) {
+        if (*v != Json("black") && *v != Json("white")) throw OpError("color is black or white");
+        shade = *v == Json("white") ? 255 : 0;
+    }
+    // (PhotoCraft's measures in the page's pixels, here in mm: a margin of 3 % of the trim's shorter side, the bar a quarter
+    // of the letters high, the letters under it — or over it)
+    const double size_mm = size_pt * 25.4 / 72.0, pixel = 1.0 / ppm;
+    const double margin = std::max(std::min(tw, th) * 0.03, 2 * pixel);
+    const double bar_h = std::clamp(size_mm / 4.0, 2 * pixel, std::max(2 * pixel, th / 4.0));
+    const double text_h = show_text ? size_mm * 1.25 : 0.0;
+    // (the review's P2-5: the bar and its letters wholly inside the trim, its margins kept — else refused)
+    const double px = length / factor;
+    const double room_px = (tw - 2 * margin) * ppm;
+    if (!(px >= 1.0) || px > room_px) {
+        std::ostringstream said;
+        said << std::fixed << std::setprecision(1) << "a " << length_text(length) << " " << s.units << " bar is " << px
+             << " pixels; it must fit the trim's " << room_px << " pixels inside its margins";
+        throw OpError(said.str());
+    }
+    if (bar_h + text_h + 2 * margin > th) {
+        std::ostringstream said;
+        said << std::fixed << std::setprecision(1) << "the scale marker's letters of " << size_pt << " pt do not fit the trim's height of " << th
+             << " mm";
+        throw OpError(said.str());
+    }
+    const double bar_y = top ? ty + th - margin - bar_h : ty + th - margin - bar_h - text_h;
+    const Json rect = Json::array({r4(tx + margin), r4(bar_y), r4(px / ppm), r4(bar_h)});
+    const std::string label = length_text(length) + " " + s.units;
+    const Json index = page.index.json();
+    const auto run = [&](const Json& sub) {
+        core::OpContext inner{c.doc, sub, c.actor};
+        (*ops_registry().find(sub["op"].get<std::string>()))(inner);
+        c.notes.insert(c.notes.end(), inner.notes.begin(), inner.notes.end());
+        return inner.report.value_or(Json::object());
+    };
+    const Json bar = run(Json{{"op", "add_shape_part"},
+                              {"page", index},
+                              {"new_layer", Json{{"name", "目盛り"}}},
+                              {"shape", Json{{"kind", "rect"}, {"rect", rect}}},
+                              {"fill", Json{{"rgb", Json::array({shade, shade, shade})}}}});
+    const std::string bar_id = bar.at("layer").get<std::string>();
+    Json ids = Json::array({bar_id});
+    Json text = nullptr;
+    if (show_text) {
+        const double baseline = top ? bar_y - size_mm * 0.3 : bar_y + bar_h + size_mm;
+        Json chars{{"rgb", Json::array({shade, shade, shade})}};
+        if (font) chars["font"] = *font;
+        const Json made = run(Json{{"op", "add_type_layer"},
+                                   {"page", index},
+                                   {"text", label},
+                                   {"point", Json::array({r4(tx + margin), r4(baseline)})},
+                                   {"wrap", "horizontal"},
+                                   {"size_pt", size_pt},
+                                   {"char", std::move(chars)},
+                                   {"title", label}});
+        text = made.at("layer_id");
+        ids.push_back(text);
+        // (its letters as set: inside the trim's margins, or the whole refused)
+        for (const core::Layer& l : c.doc.page(at).layers) {
+            if (l.id != text.get<std::string>() || !l.type) continue;
+            const double x = l.type->x_mm.value(), y = l.type->y_mm.value(), lw = l.type->w_mm.value(), lh = l.type->h_mm.value();
+            constexpr double kSlack = 0.01;
+            if (x + lw > tx + tw - margin + kSlack || y < ty - kSlack || y + lh > ty + th + kSlack) {
+                std::ostringstream said;
+                said << std::fixed << std::setprecision(1) << "the scale marker's label (" << lw << " × " << lh << " mm) does not fit the trim";
+                throw OpError(said.str());
+            }
+        }
+    }
+    const std::string group = core::new_id();
+    run(Json{{"op", "group_layers"}, {"page", index}, {"ids", ids}, {"id", group}, {"group", true}, {"name", "目盛りマーカー"}});
+    c.report = Json{{"group", group}, {"bar", bar_id}, {"text", text}, {"bar_mm", rect}, {"pixels", r4(px)}, {"label", label}};
+}
+
 }  // namespace
 
 Json listing(const core::Page& page) {
@@ -437,6 +575,9 @@ void register_measure_ops(core::OpRegistry& registry) {
     registry.add("set_ruler_line", measure::set_ruler_line);
     registry.add("straighten_layer", measure::straighten_layer);
     registry.add_query("measure_info", measure::measure_info);
+    // (PC5 J-d2) 計測値を記録's values, asked; 目盛りマーカーを配置
+    registry.add_query("measure_values", measure::measure_values);
+    registry.add("place_scale_marker", measure::place_scale_marker);
 }
 
 }  // namespace genko::render

@@ -3,6 +3,8 @@
 // 角度補正 — Alt: the page turned and cut —, 消去; the count groups, their colour, sizes and 表示, クリア) and 表示 → 表示・非表示
 // → カウント (the extra "count": app/canvas_measure.cpp) — each change of the book an op through apply_ops
 // (render/ops_measure), as the person. The ものさしツール's readout also in the 情報 panel.
+// PC5 J-d2: データポイントを選択 ▸ カスタム…, 計測値を記録 (the app's log: app/measurement_log), 目盛りマーカーを配置… (its
+// window, then the op place_scale_marker) and ウィンドウ → 計測ログ (the panel, after レイヤーカンプ).
 
 #include <QAction>
 #include <QApplication>
@@ -11,8 +13,12 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDockWidget>
+#include <QFutureWatcher>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QGridLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
@@ -24,7 +30,9 @@
 #include <QSpinBox>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QtConcurrent/QtConcurrentRun>
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 
@@ -33,9 +41,12 @@
 #include "app/config.hpp"
 #include "app/info_panels.hpp"
 #include "app/main_window.hpp"
+#include "app/measurement_log.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
 #include "core/measure.hpp"
+#include "render/measure_features.hpp"
+#include "service/wording.hpp"
 
 namespace genko::app {
 
@@ -84,6 +95,24 @@ void MainWindow::build_measure_actions() {
          {}, QStringLiteral("計測スケールを 1 pixel = 1 pixel に戻します"));
     make(QStringLiteral("act_measure_scale_custom"), QStringLiteral("カスタム…"), [this] { measurement_scale_dialog(); }, {},
          QStringLiteral("計測スケール（ピクセルの長さ・論理的な長さ・単位）を決めます"));
+    // (PC5 J-d2) イメージ → 解析 → データポイントを選択 ▸ カスタム… (image.analysis.selectDataPoints), 計測値を記録
+    // (image.analysis.recordMeasurements: Photoshop's Shift+Ctrl+M in its key set — key_sets::photoshop_keys, the user's
+    // decision 13 —, none in Genko's, where Ctrl+Shift+M is コマを結合's), 目盛りマーカーを配置… (image.analysis.placeScaleMarker)
+    make(QStringLiteral("act_measure_data_points"), QStringLiteral("カスタム…"), [this] { data_points_dialog(); }, {},
+         QStringLiteral("計測値を記録するときに出す項目（データポイント）を選びます"));
+    make(QStringLiteral("act_measure_record"), QStringLiteral("計測値を記録"), [this] { (void)record_measurements(); }, {},
+         QStringLiteral("選択範囲・ものさし・カウントの計測値を計測ログに記録します"));
+    make(QStringLiteral("act_measure_scale_marker"), QStringLiteral("目盛りマーカーを配置…"), [this] { scale_marker_dialog(); }, {},
+         QStringLiteral("計測スケールの長さの目盛りと文字を、ページの左下に置きます"));
+    // ウィンドウ → 計測ログ (window.panel.measurementLog)
+    make(QStringLiteral("act_panel_measurement_log"), QStringLiteral("計測ログ"),
+         [this] {
+             if (measurement_log_dock_ == nullptr) return;
+             const bool show = !measurement_log_dock_->isVisible();
+             measurement_log_dock_->setVisible(show);
+             if (show) measurement_log_dock_->raise();
+         },
+         {}, QStringLiteral("記録した計測値の表（このアプリを閉じるまで）"), true);
     // 表示 → 表示・非表示 → カウント (view.show.count): the extra "count" on the canvas
     QAction* shown = make(QStringLiteral("act_show_count"), QStringLiteral("カウント"), [] {}, {}, QStringLiteral("カウントツールの印と番号を表示します"), true);
     shown->setChecked(settings()->value(QStringLiteral("view/show_count"), true).toBool());
@@ -411,6 +440,230 @@ void MainWindow::measurement_scale_dialog() {
     if (measure_op(std::move(op))) {
         flash(QStringLiteral("計測スケールを決めました"), 3000);
     }
+}
+
+// --- PC5 J-d2: 計測値を記録, the 計測ログ panel, データポイントを選択, 目盛りマーカーを配置 ---------------------------------------
+
+void MainWindow::build_measurement_log_dock() {
+    measurement_log_panel_ = new MeasurementLogPanel(this);
+    measurement_log_dock_ = new QDockWidget(QStringLiteral("計測ログ"), this);
+    measurement_log_dock_->setObjectName(QStringLiteral("計測ログ"));
+    measurement_log_dock_->setWidget(measurement_log_panel_);
+    measurement_log_dock_->setMinimumWidth(200);
+    measurement_log_dock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
+    addDockWidget(Qt::BottomDockWidgetArea, measurement_log_dock_);  // (Photoshop's: a wide table under the canvas)
+    measurement_log_dock_->hide();  // (ウィンドウ → 計測ログ brings it, and 計測値を記録)
+    QAction* toggle = action(QStringLiteral("act_panel_measurement_log"));
+    view_menu_->addAction(toggle);
+    connect(measurement_log_dock_, &QDockWidget::visibilityChanged, this, [this, toggle](bool) {
+        const QSignalBlocker quiet(toggle);
+        toggle->setChecked(measurement_log_dock_->isVisible());
+    });
+}
+
+bool MainWindow::record_measurements() {
+    if (measuring_) {  // (one at a time: the one under way finishes first)
+        flash(QStringLiteral("計測しています…（終わるまでお待ちください）"), 3000);
+        return false;
+    }
+    const core::Page* page = current_page();
+    if (page == nullptr) return false;
+    const std::optional<Json> area = selection_area();
+    // (a ruler line the book could not take — this window's — measured as the page's: measuring never needs the book)
+    auto measured = std::make_shared<core::Page>(*page);
+    if (!area && canvas_->ruler_here && (!page->measure || !page->measure->ruler)) {
+        if (!measured->measure) measured->measure = core::Measure{};
+        measured->measure->ruler = *canvas_->ruler_here;
+    }
+    // (the review's P2-1: measured on a worker — the book and the page as they are now, shared, never changed —, the rows
+    // put in the log here when it is done; the window goes on meanwhile, 計測値を記録 waits)
+    struct Measured {
+        render::measure::Recorded made;
+        QString error;
+    };
+    const auto doc = std::make_shared<const core::Document>(book());
+    measuring_ = true;
+    QAction* record = action(QStringLiteral("act_measure_record"));
+    record->setEnabled(false);
+    QApplication::setOverrideCursor(Qt::BusyCursor);
+    flash(QStringLiteral("計測しています…"), 2000);
+    auto* watcher = new QFutureWatcher<Measured>(this);
+    connect(watcher, &QFutureWatcher<Measured>::finished, this, [this, watcher, record, had_area = area.has_value()] {
+        watcher->deleteLater();
+        QApplication::restoreOverrideCursor();
+        measuring_ = false;
+        record->setEnabled(true);
+        Measured result = watcher->result();
+        if (!result.error.isEmpty()) {
+            flash(QStringLiteral("計測値を記録できませんでした: %1").arg(wording::error(result.error)), 5000, true);
+            return;
+        }
+        const render::measure::Recorded& made = result.made;
+        try {  // (the review's P1-1: the log and its table made again — memory they cannot have said, not a crash)
+            (void)MeasurementLog::instance().add(made);
+        } catch (const std::exception&) {
+            flash(QStringLiteral("計測値を記録できませんでした: 計測ログに入れる記憶が足りません（計測ログの行を削除してください）"), 6000, true);
+            return;
+        }
+        if (measurement_log_dock_ != nullptr && !measurement_log_dock_->isVisible()) {
+            measurement_log_dock_->show();
+            measurement_log_dock_->raise();
+        }
+        const QString source = made.source == "selection" ? (had_area ? QStringLiteral("選択範囲") : QStringLiteral("ページ全体"))
+                               : made.source == "ruler"    ? QStringLiteral("ものさし")
+                                                           : QStringLiteral("カウント");
+        if (made.features_left_out > 0) {
+            flash(QStringLiteral("%1の計測値を記録しました（塊が %2 個と多いため、塊ごとの行は先頭の %3 個だけ。まとめの行は全部を数えています）")
+                      .arg(source)
+                      .arg(made.features_left_out + render::measure::kFeatureRowsMax)
+                      .arg(render::measure::kFeatureRowsMax),
+                  6000);
+        } else {
+            flash(QStringLiteral("%1の計測値を記録しました（%2 行）").arg(source).arg(made.rows.size()), 4000);
+        }
+    });
+    watcher->setFuture(QtConcurrent::run([doc, measured, area]() -> Measured {
+        Measured out;
+        try {
+            // (its number given when it goes into the log: a refused one takes none — the review's P3-2)
+            out.made = render::measure::record(*doc, *measured, "auto", area, 0, render::measure::now_text());
+        } catch (const std::exception& error) {
+            out.error = QString::fromUtf8(error.what());
+        }
+        return out;
+    }));
+    return true;
+}
+
+void MainWindow::data_points_dialog() {
+    namespace m = render::measure;
+    const m::DataPoints now = MeasurementLog::data_points();
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("データポイントを選択"));
+    dialog.setObjectName(QStringLiteral("data_points"));
+    auto* layout = new QVBoxLayout(&dialog);
+    // (Photoshop's groups: 共通 — every source's —, 選択範囲, ものさしツール, カウントツール)
+    struct Box {
+        QCheckBox* box;
+        std::string key;
+        std::string source;  // ("": 共通)
+    };
+    std::vector<Box> boxes;
+    const auto group = [&](const QString& title, const std::string& source, const std::vector<std::string>& keys) {
+        auto* frame = new QGroupBox(title);
+        frame->setObjectName(QStringLiteral("points_%1").arg(source.empty() ? QStringLiteral("common") : QString::fromStdString(source)));
+        auto* grid = new QGridLayout(frame);
+        for (std::size_t i = 0; i < keys.size(); ++i) {
+            auto* box = new QCheckBox(QString::fromStdString(m::column_name(keys[i])));
+            box->setObjectName(QStringLiteral("point_%1_%2").arg(source.empty() ? QStringLiteral("common") : QString::fromStdString(source),
+                                                                  QString::fromStdString(keys[i])));
+            const std::vector<std::string>& list = now.of(source.empty() ? "selection" : source);
+            box->setChecked(std::find(list.begin(), list.end(), keys[i]) != list.end());
+            grid->addWidget(box, static_cast<int>(i / 3), static_cast<int>(i % 3));
+            boxes.push_back({box, keys[i], source});
+        }
+        layout->addWidget(frame);
+    };
+    const auto own = [](std::string_view source) {
+        std::vector<std::string> keys = m::available(source);
+        keys.erase(keys.begin(), keys.begin() + 7);  // (the common ones first: label … scaleFactor)
+        return keys;
+    };
+    std::vector<std::string> common = m::available("count");
+    common.pop_back();
+    group(QStringLiteral("共通"), "", common);
+    group(QStringLiteral("選択範囲"), "selection", own("selection"));
+    group(QStringLiteral("ものさしツール"), "ruler", own("ruler"));
+    group(QStringLiteral("カウントツール"), "count", own("count"));
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::RestoreDefaults);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    buttons->button(QDialogButtonBox::RestoreDefaults)->setText(QStringLiteral("初期設定に戻す"));
+    buttons->button(QDialogButtonBox::RestoreDefaults)->setObjectName(QStringLiteral("points_defaults"));
+    connect(buttons->button(QDialogButtonBox::RestoreDefaults), &QPushButton::clicked, &dialog, [&boxes] {
+        for (const Box& b : boxes) b.box->setChecked(true);
+    });
+    layout->addWidget(buttons);
+    if (ask::exec(&dialog) != QDialog::Accepted) return;
+    Json changes = Json::object();
+    for (const Box& b : boxes) {
+        for (const std::string_view source : m::kSources) {
+            if (!b.source.empty() && b.source != source) continue;
+            changes[std::string(source)][b.key] = b.box->isChecked();
+        }
+    }
+    MeasurementLog::set_data_points(m::choose_data_points(now, changes));
+    flash(QStringLiteral("計測値を記録するときの項目を決めました"), 3000);
+}
+
+void MainWindow::scale_marker_dialog() {
+    const Asked asked = asking();
+    const core::Page* page = current_page();
+    if (page == nullptr) return;
+    const std::optional<core::MeasurementScale> scale = page->measure ? page->measure->scale : std::nullopt;
+    const QString units = QString::fromStdString(scale ? scale->units : core::MeasurementScale{}.units);
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("目盛りマーカー"));
+    dialog.setObjectName(QStringLiteral("scale_marker"));
+    auto* form = new QFormLayout(&dialog);
+    auto* length = new QDoubleSpinBox;
+    length->setObjectName(QStringLiteral("marker_length"));
+    // (the review's P3-3: any scale's lengths — 6 decimals over a wide range —; the nice length, left as it is shown, is
+    // the op's own: no length sent)
+    length->setRange(1e-6, 1e12);
+    length->setDecimals(6);
+    length->setValue(render::measure::nice_marker_length(*page));
+    const double shown_length = length->value();
+    length->setSuffix(QStringLiteral(" ") + units);
+    form->addRow(QStringLiteral("長さ"), length);
+    auto* font = new QLineEdit;
+    font->setObjectName(QStringLiteral("marker_font"));
+    font->setPlaceholderText(QStringLiteral("（既定のフォント）"));
+    form->addRow(QStringLiteral("フォント"), font);
+    auto* size = new QDoubleSpinBox;
+    size->setObjectName(QStringLiteral("marker_size"));
+    size->setRange(1, 1000);
+    size->setDecimals(1);
+    size->setValue(12);
+    size->setSuffix(QStringLiteral(" pt"));
+    form->addRow(QStringLiteral("サイズ"), size);
+    auto* text = new QCheckBox(QStringLiteral("テキストを表示"));
+    text->setObjectName(QStringLiteral("marker_text"));
+    text->setChecked(true);
+    form->addRow(text);
+    auto* position = new QComboBox;
+    position->setObjectName(QStringLiteral("marker_position"));
+    position->addItem(QStringLiteral("下"), QStringLiteral("bottom"));
+    position->addItem(QStringLiteral("上"), QStringLiteral("top"));
+    form->addRow(QStringLiteral("テキストの位置"), position);
+    auto* colour = new QComboBox;
+    colour->setObjectName(QStringLiteral("marker_color"));
+    colour->addItem(QStringLiteral("黒"), QStringLiteral("black"));
+    colour->addItem(QStringLiteral("白"), QStringLiteral("white"));
+    form->addRow(QStringLiteral("カラー"), colour);
+    auto* note = new QLabel(QStringLiteral("長さは計測スケールの単位で決めます（%1）。目盛りと文字は「目盛りマーカー」のグループになります")
+                                .arg(QString::fromStdString(core::describe(scale.value_or(core::MeasurementScale{})))));
+    note->setWordWrap(true);
+    theme::role(note, "hint");
+    form->addRow(note);
+    connect(text, &QCheckBox::toggled, &dialog, [=](bool on) {
+        font->setEnabled(on);
+        size->setEnabled(on);
+        position->setEnabled(on);
+    });
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    if (ask::exec(&dialog) != QDialog::Accepted || !still(asked)) return;
+    Json op{{"op", "place_scale_marker"},
+            {"size_pt", size->value()},
+            {"text", text->isChecked()},
+            {"position", position->currentData().toString().toStdString()},
+            {"color", colour->currentData().toString().toStdString()}};
+    if (length->value() != shown_length) op["length"] = length->value();
+    if (!font->text().trimmed().isEmpty()) op["font"] = font->text().trimmed().toStdString();
+    if (measure_op(std::move(op))) flash(QStringLiteral("目盛りマーカーを配置しました"), 3000);
 }
 
 }  // namespace genko::app
