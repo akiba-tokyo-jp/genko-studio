@@ -358,9 +358,20 @@ struct Writer::Impl {
         const auto palette = frame.picture.palette();
         int bits = 1;
         while ((1 << bits) < static_cast<int>(std::max<std::size_t>(palette.size(), 2))) ++bits;
+        // (Pillow: int(duration / 10), in GIF's 16 bits: a picture shown longer — the same one many times at a slow speed —
+        // is written again for the rest, as many times as it takes, so its time is kept whole: PC5 J-e1)
+        int left = frame.duration / 10;
+        do {
+            const int now = std::min(left, 0xFFFF);
+            left -= now;
+            gif_block(frame, bits, palette, now);
+        } while (left > 0);
+    }
+
+    void gif_block(const GifFrame& frame, int bits, const std::vector<std::array<std::uint8_t, 3>>& palette, int delay) {
         std::string out;
         out += std::string("\x21\xf9\x04\x00", 4);  // graphic control: no disposal, no transparency
-        put16le(out, frame.duration / 10);          // (Pillow: int(duration / 10))
+        put16le(out, delay);
         out.push_back('\0');
         out.push_back('\0');
         out.push_back('\x2c');

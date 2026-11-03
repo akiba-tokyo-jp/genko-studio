@@ -35,6 +35,8 @@
 #include "core/base64.hpp"
 #include "core/config_dir.hpp"
 #include "core/actor.hpp"
+#include "core/anim.hpp"
+#include "core/video.hpp"
 #include "core/clock.hpp"
 #include "core/command_bus.hpp"
 #include "core/covers.hpp"
@@ -313,6 +315,7 @@ int inspect(const QStringList& args, bool ascii) {
     bool notes = false;  // (PC5 J-c, the C++ build's own: --annotations [--page N], notes.list — the pages' notes)
     bool measuring = false;  // (PC5 J-d1, the C++ build's own: --measure [--page N], image.analysis.info — the pages' measuring)
     bool slicing = false;  // (PC5 J-b, the C++ build's own: --slices [--page N], slice.list — the pages' slices, the auto ones too)
+    bool timing = false;  // (PC5 J-e1, the C++ build's own: --timeline [--page N], timeline.info — the pages' timelines)
     const auto value_of = [&](qsizetype& i, const char* name, QString& into) -> bool {
         const QString& arg = args[i];
         const QString flag = QString::fromLatin1(name);
@@ -346,6 +349,8 @@ int inspect(const QStringList& args, bool ascii) {
             measuring = true;
         } else if (arg == QLatin1String("--slices")) {
             slicing = true;
+        } else if (arg == QLatin1String("--timeline")) {
+            timing = true;
         } else if (arg == QLatin1String("--stroke")) {
             if (i + 1 >= args.size()) return usage("argument --stroke: expected one argument");
             stroke = args[++i];
@@ -398,8 +403,11 @@ int inspect(const QStringList& args, bool ascii) {
     }
     if (!profile.isEmpty() && !pixel.isEmpty()) return usage("argument --profile: not with --pixel");
     if (!area_text.isEmpty() && page_text.isEmpty()) return usage("argument --area, --page: --area <area> with --page <N>");
-    if (!page_text.isEmpty() && area_text.isEmpty() && !paths && !comps && !notes && !measuring && !slicing)
+    if (!page_text.isEmpty() && area_text.isEmpty() && !paths && !comps && !notes && !measuring && !slicing && !timing)
         return usage("argument --page: only with --area, --paths, --comps or --annotations");  // (and --measure: the words as before)
+    if (timing && (slicing || measuring || notes || comps || variables || paths || looks || filters || file_info || !area_text.isEmpty() ||
+                   !pixel.isEmpty() || !profile.isEmpty() || !at_text.isEmpty() || !stroke.isEmpty()))
+        return usage("argument --timeline: only with --page");
     if (slicing && (measuring || notes || comps || variables || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty()))
         return usage("argument --slices: not with --measure, --annotations, --comps, --variables, --paths, --area, --pixel or --profile");
     if (measuring && (notes || comps || variables || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty()))
@@ -474,6 +482,22 @@ int inspect(const QStringList& args, bool ascii) {
             core::Json one = render::layer_comps::listing(doc.page(i));
             one["page"] = doc.pages[i]->index.json();
             pages.push_back(std::move(one));
+        }
+        if (page_number && pages.empty()) throw core::Error("key", "no page " + std::to_string(*page_number));
+        print_json(core::Json{{"pages", std::move(pages)}}, ascii);
+        return 0;
+    }
+    if (timing) {  // (PC5 J-e1, timeline.info: each page's timeline — fps, frames, loop, its length, work area, tracks, camera keys)
+        const core::Document& doc = loaded.document;
+        core::Json pages = core::Json::array();
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (page_number && doc.pages[i]->index != core::Num(*page_number)) continue;
+            if (doc.is_deferred(i)) continue;
+            try {
+                pages.push_back(core::timeline_info(doc.page(i)));
+            } catch (const std::exception& error) {  // (an anim's values no op makes — frames of words —: said for that page alone)
+                pages.push_back(core::Json{{"page", doc.pages[i]->index.json()}, {"animation", true}, {"error", error.what()}});
+            }
         }
         if (page_number && pages.empty()) throw core::Error("key", "no page " + std::to_string(*page_number));
         print_json(core::Json{{"pages", std::move(pages)}}, ascii);
@@ -700,6 +724,7 @@ int render_command(const QStringList& args, bool ascii) {
     std::int64_t page_number = 1;
     std::int64_t dpi = 150;
     std::string mode = "print";
+    std::optional<std::int64_t> frame;  // (PC5 J-e1, the C++ build's own: --frame N, an animation page's frame N)
     const auto value_of = [&](qsizetype& i, const QString& arg, const QString& flag, QString& value) {
         if (arg == flag) {
             if (i + 1 >= args.size()) return 1;
@@ -726,6 +751,11 @@ int render_command(const QStringList& args, bool ascii) {
             const auto n = py_int_arg(value);
             if (!n) return usage("argument --dpi: invalid int value: '" + value.toStdString() + "'");
             dpi = *n;
+        } else if ((found = value_of(i, arg, QStringLiteral("--frame"), value)) != 0) {
+            if (found == 1) return usage("argument --frame: expected one argument");
+            const auto n = py_int_arg(value);
+            if (!n) return usage("argument --frame: invalid int value: '" + value.toStdString() + "'");
+            frame = *n;
         } else if ((found = value_of(i, arg, QStringLiteral("--mode"), value)) != 0) {
             if (found == 1) return usage("argument --mode: expected one argument");
             mode = value.toStdString();
@@ -788,7 +818,15 @@ int render_command(const QStringList& args, bool ascii) {
     if (page == nullptr) return fail("no page " + std::to_string(page_number), "not_found", ascii, 1);
     render::RenderOptions options;
     options.mode = mode;
-    const render::RenderResult result = render::render_page(*page, static_cast<int>(dpi), options, &doc);
+    if (frame) {  // (PC5 J-e1, timeline.setFrame: the page as it is at that frame — without it an animation draws its first)
+        if (!core::anim::is_animation(*page)) return fail("the page is not an animation (set_animation first)", "value", ascii, 1);
+        const std::int64_t count = core::anim::frames_of(*page);
+        if (*frame < 1 || *frame > count) return fail("frame is 1 to " + std::to_string(count), "value", ascii, 1);
+        options.at_frame = true;
+    }
+    const render::RenderResult result =
+        frame ? render::render_page(core::anim::at_frame(*page, *frame), static_cast<int>(dpi), options, &doc)
+              : render::render_page(*page, static_cast<int>(dpi), options, &doc);
     if (out_path.has_parent_path()) {  // (args.out.parent.mkdir, before image.save: the WebP is written beside it)
         std::error_code ec;
         std::filesystem::create_directories(out_path.parent_path(), ec);
@@ -805,6 +843,7 @@ int render_command(const QStringList& args, bool ascii) {
     json["ok"] = true;
     json["path"] = out_text;
     json["mode"] = mode;
+    if (frame) json["frame"] = *frame;
     print_json(json, ascii);
     return 0;
 }
@@ -1123,7 +1162,9 @@ int export_command(const QStringList& args, bool ascii) {
                                           // (PC5 I-d, --format datasets: データセットからファイル…'s choices)
                                           {"--dataset-format", true}, {"--datasets", true}, {"--naming", true},
                                           // (PC5 J-b, --format slices: Web 用に保存 by slices)
-                                          {"--web", true}, {"--slices", true}, {"--numbers", true}, {"--html", false}, {"--images", true}};
+                                          {"--web", true}, {"--slices", true}, {"--numbers", true}, {"--html", false}, {"--images", true},
+                                          // (PC5 J-e1, --format animation: ビデオをレンダリング…'s 作業範囲)
+                                          {"--work-area", false}};
     Arguments a;
     if (auto error = parse_arguments(args, kOptions, 2, "src, out", a)) return usage("genko export: " + *error);
     // PC2a (file.export.colorLookupTables, the C++ build's own: not among Python's formats, whose choices it leaves as they
@@ -1143,6 +1184,8 @@ int export_command(const QStringList& args, bool ascii) {
     if (a.value("--dataset-format") || a.value("--datasets") || a.value("--naming"))
         return usage("genko export: argument --dataset-format, --datasets, --naming: only with --format datasets");
     if (a.value("--paths")) return usage("genko export: argument --paths: only with --format ai");
+    if (a.flag("--work-area") && a.value("--format") != std::optional<QString>(QStringLiteral("animation")))
+        return usage("genko export: argument --work-area: only with --format animation");
     if (a.value("--lut-size") || a.value("--title")) return usage("genko export: argument --lut-size, --title: only with --format cube");
     // (PC4 F-c: レイヤーからファイル…'s choices, only with --format layers; none of them: the files as before)
     formats::LayerFiles layer_files;
@@ -1312,7 +1355,10 @@ int export_command(const QStringList& args, bool ascii) {
             return usage("no page " + (ints["--page"] ? std::to_string(*ints["--page"]) : std::string("None")), 1);
         }
         const fs::path dest = file_given ? out : formats::detail::join(out, "p" + formats::detail::padded(page->index, 3) + ".gif");
-        paths = render::anim::export_animation(*page, dest, &doc, narrow(dpi.value_or(100)));
+        // (PC5 J-e1, --work-area: the page's work area only — all its frames when it has none)
+        std::optional<std::array<std::int64_t, 2>> range;
+        if (a.flag("--work-area") && core::anim::is_animation(*page)) range = core::played_frames(*page);
+        paths = render::anim::export_animation(*page, dest, &doc, narrow(dpi.value_or(100)), std::nullopt, true, "trim", std::nullopt, range);
         animated = page;
     } else if (f == "timelapse") {
         std::optional<Json> page;

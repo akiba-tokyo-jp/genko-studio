@@ -12,6 +12,7 @@
 #include "core/pynum.hpp"
 #include "core/smart.hpp"
 #include "core/strokes.hpp"
+#include "core/video.hpp"
 #include "storage/writer.hpp"
 
 namespace genko::storage {
@@ -253,6 +254,8 @@ Json snapshot(const core::Document& doc, bool full) {
             animation["tracks"] = anim.contains("tracks") ? anim["tracks"] : Json::array();
             animation["camera"] = anim.contains("camera") ? anim["camera"] : Json::array();
             animation["light_table"] = anim.contains("light_table") ? anim["light_table"] : Json::array();
+            // (PC5 J-e1, timeline@1: the work area, only while the page has one)
+            if (const auto work = anim.find("work"); work != anim.end() && core::timeline_work(*work)) animation["work"] = *work;
             item["animation"] = std::move(animation);
         }
         if (full) {

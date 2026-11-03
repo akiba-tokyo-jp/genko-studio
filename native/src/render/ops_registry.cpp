@@ -455,6 +455,8 @@ void register_render_ops(core::OpRegistry& registry) {
     register_measure_ops(registry);
     // PC5 J-b (slices@1: the slices, render/ops_slices)
     register_slice_ops(registry);
+    // PC5 J-e1 (timeline@1: set_animation's work area and fps are core/ops_anim's; the question timeline_info)
+    core::register_timeline_query(registry);
 }
 
 const core::OpRegistry& ops_registry() {
