@@ -195,33 +195,6 @@
    ]
   },
   {
-   "n": "set_animation work null",
-   "op": "set_animation",
-   "ok": true,
-   "steps": [
-    {
-     "ops": [
-      {
-       "op": "set_animation",
-       "page": 6,
-       "frames": 10,
-       "work": null
-      }
-     ]
-    },
-    {
-     "ops": [
-      {
-       "op": "set_animation",
-       "page": 6,
-       "fps": 30,
-       "work": null
-      }
-     ]
-    }
-   ]
-  },
-  {
    "n": "set_animation fps nan",
    "op": "set_animation",
    "ok": false,
@@ -2214,6 +2187,7 @@
   {"n": "work area with the frames in one op", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "frames": 100, "work": [50, 100]}]], "anim": {"frames": 100, "work": [50, 100]}, "timeline": true},
   {"n": "work area cut with the frames", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "frames": 24, "work": [10, 20]}], [{"op": "set_animation", "page": 1, "frames": 12}]], "anim": {"frames": 12, "work": [10, 12]}, "timeline": true},
   {"n": "work area past the frames cut to the last", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "frames": 24, "work": [20, 24]}], [{"op": "set_animation", "page": 1, "frames": 8}]], "anim": {"frames": 8, "work": [8, 8]}, "timeline": true},
+  {"n": "work null on an anim without one: as before", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "frames": 10, "work": null}], [{"op": "set_animation", "page": 1, "fps": 30, "work": null}]], "anim": {"frames": 10, "fps": 30.0}, "no_work": true, "timeline": false},
   {"n": "work area taken off", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "frames": 24, "work": [2, 3]}], [{"op": "set_animation", "page": 1, "work": null}]], "anim": {"frames": 24}, "no_work": true, "timeline": false},
   {"n": "work area and fps 90, then both as before", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "fps": 90, "work": [1, 2]}], [{"op": "set_animation", "page": 1, "fps": 24, "work": null}]], "anim": {"fps": 24.0}, "no_work": true, "timeline": false},
   {"n": "work area kept by the other keys", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "work": [4, 9]}], [{"op": "set_animation", "page": 1, "fps": 8, "loop": false}]], "anim": {"work": [4, 9], "loop": false, "fps": 8.0}, "timeline": true},
