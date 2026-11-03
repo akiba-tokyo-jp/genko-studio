@@ -143,6 +143,11 @@ std::vector<Pref> make_table() {
         text("workspace.stage", "ui/stage", Kind::Text, "", "作業の段階", Apply::NewWindow),
         text("workspace.quickAccess", "ui/quick", Kind::Text, "", "クイックアクセスに並べるコマンド（タブ区切り）", Apply::NewWindow),
         text("workspace.commandBar", "ui/commandbar", Kind::Text, "", "コマンドバーに並べるコマンド（タブ区切り）", Apply::NewWindow),
+        // (PC5 H-d: ワークスペースをロック, and 環境設定 → ワークスペース — PhotoCraft v0.2.0's prefs.rs Workspace, MIT)
+        boolean("workspace.locked", "ui/workspace_locked", false, "ワークスペースをロック"),
+        boolean("workspace.rememberWorkspaceChanges", "ui/workspace_remember", true, "ワークスペースの変更を記憶"),
+        boolean("workspace.autoShowHiddenPanels", "ui/auto_show_panels", true, "隠れたパネルを自動的に表示"),
+        boolean("workspace.largeTabs", "ui/large_tabs", false, "大きいタブ"),
         // tools (ツール)
         boolean("tools.radialMenu", "ui/radial", true, "描く道具の右クリックで円形のメニュー"),
         choice("tools.altTool", "keys/alt_tool", "picker", held, "Alt を押している間"),
@@ -248,6 +253,14 @@ std::vector<Pref> make_table() {
         text("shortcuts.*", "shortcuts/*", Kind::Keys, "", "ショートカット"),
         // keyboardShortcuts (キーボードショートカット: the key set — PC5 H-0, the user's decision 8)
         choice("keyboardShortcuts.keySet", "ui/key_set", "photoshop", {"photoshop", "genko"}, "キーの組"),
+        // (PC5 H-d: the person's own set over it — its keys are state.keySets.<name>)
+        text("keyboardShortcuts.ownSet", "ui/key_set_own", Kind::Text, "", "自分のキーの組（なし: キーの組のまま）"),
+        // menus (メニュー…: the items hidden — by their command's name, tab between —, and the items' colours — PC5 H-d)
+        text("menus.hidden", "menus/hidden", Kind::Text, "", "隠したメニュー項目（タブ区切り）"),
+        choice("menus.colors.*", "menus/colors/*", "none", {"none", "red", "orange", "yellow", "green", "blue", "violet", "gray"}, "メニュー項目の色"),
+        // toolbar (ツールバー…: the palette's tools by their attribute, "|" a line; the tools moved to 余分なツール — PC5 H-d)
+        text("toolbar.order", "toolbar/order", Kind::Text, "", "ツールバーの並び（タブ区切り、| は区切り）"),
+        text("toolbar.hidden", "toolbar/hidden", Kind::Text, "", "余分なツール（タブ区切り）"),
         // view (the view's switches kept for the next window)
         boolean("view.brushPreview", "ui/brush_preview", true, "ブラシプレビュー"),
         no_default(boolean("view.phoneView", "ui/phone_view", false, "スマホの画面の範囲を表示（なし: 縦読みの原稿だけ）")),
@@ -283,6 +296,7 @@ std::vector<Pref> make_table() {
         memory("state.guideLayouts.*", "guide_layouts/*"),  // (PC5 H-b: 新規ガイドレイアウトを作成…'s presets)
         memory("state.layerDetails", "ui/layer_details"),
         memory("state.keySetTold", "ui/key_set_told"),  // (PC5 H-0: the change of the default key set said once)
+        memory("state.keySets.*", "key_sets/*"),        // (PC5 H-d: the person's own key sets)
         memory("state.migration.*", "migration/*"),
         memory("state.move.*", "move/*"),
         memory("state.namesCurrent.*", "names_current/*"),
@@ -303,6 +317,7 @@ std::vector<Pref> make_table() {
         memory("state.type.recentGlyphs", "type/recent_glyphs"),
         memory("state.warp.*", "warp/*"),
         memory("state.workspaces.*", "workspaces/*"),
+        memory("state.workspaceChanges.*", "workspace_changes/*"),  // (PC5 H-d: a workspace as it was left)
     };
     return t;
 }
