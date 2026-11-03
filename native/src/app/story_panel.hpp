@@ -57,35 +57,25 @@ public:
     QCheckBox* vertical = nullptr;
     QPushButton* add_button = nullptr;
     QPushButton* apply_button = nullptr;
-    // The chosen line's lettering and balloon (style_box: shown beside the select tool)
+    // The chosen line's lettering and balloon (style_box: shown beside the select tool) — PC5 G-d: its face, size, tracking,
+    // rows' room, alignment, colour, weight, slant, width, 縦中横 and 約物の詰め are the 文字 and 段落 panels' (app/type_panels)
     QWidget* style_box = nullptr;
     QLabel* style_title = nullptr;
     QWidget* style_body = nullptr;
-    QComboBox* font = nullptr;
-    QDoubleSpinBox* size = nullptr;
-    QDoubleSpinBox* tracking = nullptr;
-    QDoubleSpinBox* leading = nullptr;
     QDoubleSpinBox* outline = nullptr;
     QDoubleSpinBox* border = nullptr;
-    QComboBox* align = nullptr;
     QComboBox* fill = nullptr;
-    QCheckBox* tcy = nullptr;
     QDoubleSpinBox* rotate = nullptr;
     QDoubleSpinBox* skew = nullptr;
-    QDoubleSpinBox* scale_x = nullptr;
     QPushButton* gradient = nullptr;
-    QCheckBox* yakumono = nullptr;
     QDoubleSpinBox* arc = nullptr;
     QComboBox* latin = nullptr;
     QComboBox* mark = nullptr;
-    QComboBox* weight = nullptr;
-    QCheckBox* italic = nullptr;
     QPushButton* outline_colour = nullptr;
     QDoubleSpinBox* wobble = nullptr;
     QCheckBox* double_line = nullptr;
     QSpinBox* spikes = nullptr;
     QDoubleSpinBox* spike_depth = nullptr;
-    QPushButton* color = nullptr;
     QPushButton* line_colour = nullptr;
     QPushButton* fill_colour = nullptr;
     QSpinBox* fill_cover = nullptr;
@@ -121,10 +111,7 @@ private:
     void style_changed();
     void pick_style_colour(const char* key, const QString& title, const QColor& fallback);
     void set_tail_width();
-    void font_changed();
-    std::optional<std::string> pick_system_font();
     void pick_gradient();
-    void pick_color();
     void pick_outline_colour();
     void reset_style();
     void show_rubies(const core::StoryLine* l);

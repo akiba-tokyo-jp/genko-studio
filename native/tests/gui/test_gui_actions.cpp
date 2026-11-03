@@ -449,8 +449,13 @@ private slots:
         // (act_layer_from_background, act_layer_group_from_layers), レイヤーのグループ解除 (act_layer_ungroup), 非表示レイヤーを削除
         // (act_layer_delete_hidden), クリッピングマスクを作成・解除 (act_clip_create, act_clip_release), ファイル → スクリプト →
         // すべての空のレイヤーを削除・すべてのレイヤー効果を統合 (act_delete_empty_layers, act_bake_layer_effects) — test_gui_layers.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{752});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8 and H-d's 12)
-                                                                  // (PC5 H-e's 3: 環境設定 ▸ ヒストリーログ…・仮想記憶ディスク…・拡張コントロール…)
+        // and PC5 G-d's 20 (SPEC TEXT-02) — ウィンドウ → 文字・段落・文字スタイル・段落スタイル・字形 (act_panel_<panel>), 書式 → パネル ▸
+        // 5 (act_type_panel_<panel>), フォントプレビューのサイズ ▸ 6 (act_type_preview_<size>), すべての見つからないフォントを置換・見つからない
+        // フォントを解決… (act_type_replace_missing, act_type_resolve_missing), 編集 → スペルチェック… (act_spelling) and 環境設定 → テキスト…
+        // (act_prefs_type: its page made) — test_gui_type_panels.
+        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12 and G-d's 20)
+        // (and PC5 H-e's 3: 環境設定 ▸ ヒストリーログ…・仮想記憶ディスク…・拡張コントロール… — 769＋3)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{772});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -1001,10 +1006,11 @@ private slots:
         }
         QCOMPARE(w->tool_palette()->windowTitle(), QStringLiteral("ツール"));
         const QStringList edit = items(menu(QStringLiteral("編集")));
-        // (PC5 H-d: メニュー… and ツールバー… after キーボードショートカット…)
-        QCOMPARE(edit.mid(edit.size() - 7),
-                 (QStringList{QStringLiteral("|"), QStringLiteral("検索"), QStringLiteral("|"), QStringLiteral("キーボードショートカット…"), QStringLiteral("メニュー…"),
-                              QStringLiteral("ツールバー…"), QStringLiteral("環境設定 ▸")}));
+        // (PC5 G-d: Photoshop's スペルチェック… and 検索と置換… after 検索; PC5 H-d: メニュー… and ツールバー… after
+        // キーボードショートカット…)
+        QCOMPARE(edit.mid(edit.size() - 9),
+                 (QStringList{QStringLiteral("|"), QStringLiteral("検索"), QStringLiteral("スペルチェック…"), QStringLiteral("検索と置換…"), QStringLiteral("|"),
+                              QStringLiteral("キーボードショートカット…"), QStringLiteral("メニュー…"), QStringLiteral("ツールバー…"), QStringLiteral("環境設定 ▸")}));
         QMenu* panes = w->findChild<QMenu*>(QStringLiteral("menu_preferences"));
         QVERIFY(panes != nullptr);
         QCOMPARE(items(panes), (QStringList{QStringLiteral("一般…"), QStringLiteral("インターフェイス…"),
@@ -1014,6 +1020,7 @@ private slots:
                                            QStringLiteral("書き出し…"), QStringLiteral("パフォーマンス…"), QStringLiteral("仮想記憶ディスク…"),  // (PC5 H-e)
                                            QStringLiteral("カーソル…"), QStringLiteral("透明部分・色域…"),
                                            QStringLiteral("単位・定規…"), QStringLiteral("ガイド・グリッド・スライス…"),  // (PC5 H-b)
+                                           QStringLiteral("テキスト…"),  // (PC5 G-d)
                                            QStringLiteral("拡張コントロール…"),  // (PC5 H-e)
                                            QStringLiteral("Camera Raw…"), QStringLiteral("ペンタブレット…"), QStringLiteral("長い時間の作業…")}));
         QVERIFY(!items(menu(QStringLiteral("ファイル"))).contains(QStringLiteral("環境設定…")));

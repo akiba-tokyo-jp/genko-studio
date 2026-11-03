@@ -373,13 +373,12 @@ private slots:
         QVERIFY(copied);
     }
 
-    // the later groups' ops: known by name, refused as not yet in this build
+    // the later groups' ops: every one written now (G-a line_to_type_layer, type_layer_to_line; G-b set_type; G-c type_style;
+    // G-d replace_fonts — its unknown keys refused: test_contract_type_fonts); add_type_layer's own refusals
     void laterOpsRefused() {
         const core::Document doc = with_type(plain_book());
-        for (const char* name : {"replace_fonts"}) {  // (G-a wrote line_to_type_layer, type_layer_to_line; G-b set_type; G-c type_style)
-            const std::string why = refusal(doc, Json::array({Json{{"op", name}, {"page", 1}, {"layer_id", "t1"}}}));
-            QVERIFY2(why.starts_with("not_yet_ported") && why.find(std::string(name) + " is not in the C++ build yet") != std::string::npos, why.c_str());
-        }
+        const std::string why = refusal(doc, Json::array({Json{{"op", "replace_fonts"}, {"page", 1}, {"layer_id", "t1"}}}));
+        QVERIFY2(why.find("unknown key page for replace_fonts") != std::string::npos, why.c_str());
         QVERIFY(refusal(doc, Json::array({Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "a"}}})).find("point [x, y] or box [x, y, w, h] (mm) is required") !=
                 std::string::npos);
         QVERIFY(refusal(doc, Json::array({Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "a"}, {"box", kBox}, {"balloon", "foo"}}})).find("balloon must be one of") !=

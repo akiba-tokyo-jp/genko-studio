@@ -251,6 +251,19 @@ std::vector<Pref> make_table() {
         // (PC5 J-b: the slices' two — their lines' colour and their numbers shown)
         colour("guidesGridAndSlices.sliceColor", "guides/slice_color", "#38b5ff", "スライスの線の色"),
         boolean("guidesGridAndSlices.showSliceNumbers", "guides/slice_numbers", true, "スライス番号を表示"),
+        // type (テキスト — PC5 G-d, edit.preferences.type: upstream's TypePrefs and Photoshop's 環境設定 → テキスト; Genko's own
+        // defaults where upstream's would change what typing does now — smart quotes, Esc, a placeholder — and スペルチェック's
+        // user dictionary and notation table. The app's memories under type/ are state.type.*, below)
+        boolean("type.smartQuotes", "type/smart_quotes", false, "スマート引用符を使用"),
+        boolean("type.missingGlyphProtection", "type/glyph_protection", true, "欠落グリフの保護を有効にする"),
+        boolean("type.showFontNamesInEnglish", "type/font_names_english", false, "フォント名を英語で表示"),
+        boolean("type.useEscToCommit", "type/esc_commits", false, "Esc キーを使用してテキストを確定"),
+        choice("type.fontPreview", "type/font_preview", "medium", {"off", "small", "medium", "large", "extraLarge", "huge"}, "フォントプレビューのサイズ"),
+        boolean("type.fillNewTypeLayersWithPlaceholder", "type/placeholder", false, "新規テキストレイヤーにプレースホルダーテキストを挿入"),
+        integer("type.recentFonts", "type/recent_fonts", 10, 0, 50, "最近使用したフォントの表示数"),
+        // (PC5 H-e, its review P2-3: the person's own dictionary and table — put back only when named)
+        kept(text("type.userDictionary", "type/user_dictionary", Kind::Text, "", "スペルチェックのユーザー辞書（タブ区切り）")),
+        kept(text("type.notations", "type/notations", Kind::Text, "[]", "表記の点検の表（JSON: [{from, to}]）")),
         // enhancedControls (拡張コントロール — PC5 H-e: a touch screen's two fingers, a trackpad's pinch and turn)
         boolean("enhancedControls.touchGestures", "ui/touch_gestures", true, "タッチジェスチャーを有効にする"),
         boolean("enhancedControls.zoomWithTrackpadPinch", "ui/pinch_zoom", true, "トラックパッドのピンチでズーム"),
@@ -353,6 +366,9 @@ std::vector<Pref> make_table() {
         // (PC5 G-c: 書式 → 初期設定の書式を保存's formatting; PC5 G-b: 書式 → 言語オプション ▸'s features shown)
         memory("state.type.defaultStyles", "type/default_styles"),
         memory("state.type.languageFeatures", "type/language_features"),
+        // (PC5 G-d: the fonts and the glyphs used last — 文字パネル's and 字形パネル's lists)
+        memory("state.type.recentFontsUsed", "type/recent_fonts_used"),
+        memory("state.type.recentGlyphs", "type/recent_glyphs"),
         memory("state.warp.*", "warp/*"),
         memory("state.workspaces.*", "workspaces/*"),
         memory("state.workspaceChanges.*", "workspace_changes/*"),  // (PC5 H-d: a workspace as it was left)

@@ -176,7 +176,7 @@ private slots:
         QStringList titles;
         for (int i = 0; i < dialog.tabs->count(); ++i) titles << dialog.tabs->tabText(i);
         QCOMPARE(titles, (QStringList{"一般", "インターフェイス", "ワークスペース", "ツール", "ヒストリーログ", "ファイル管理", "書き出し", "パフォーマンス",
-                                      "仮想記憶ディスク", "カーソル", "透明部分・色域", "単位・定規", "ガイド・グリッド・スライス", "拡張コントロール",
+                                      "仮想記憶ディスク", "カーソル", "透明部分・色域", "単位・定規", "ガイド・グリッド・スライス", "テキスト", "拡張コントロール",
                                       "Camera Raw", "ペンタブレット", "長い時間の作業"}));
         QCOMPARE(dialog.pages_list->count(), dialog.tabs->count());
         for (const app::preferences::Pane& pane : app::preferences::panes()) {

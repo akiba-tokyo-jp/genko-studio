@@ -1367,6 +1367,15 @@ const std::vector<Rule>& rules() {
                          "文字の設定（文字・段落の属性、スタイル）の指定が正しくありません"));
         r.push_back(rule("(?:a run(?:'s| must) |the runs must |a paragraph must |the paragraphs must |a style's (?:id|name) |two (?:character|paragraph) styles ).*",
                          "文字の範囲・段落・スタイルの指定が正しくありません"));
+        // (PC5 G-d: replace_fonts — the missing fonts replaced)
+        r.push_back(rule("unknown key (\\S+) for replace_fonts", "書体の置き換えに知らない鍵（\\1）があります"));
+        r.push_back(rule("map must be \\{font: the font it becomes\\}", "置き換え（map）は {見つからない書体: 置き換える書体} で指定します"));
+        r.push_back(rule("unknown key (\\S+) for the font (.*) is to become", "「\\2」を置き換える書体に知らない鍵（\\1）があります"));
+        r.push_back(rule("map: the font (.*) is not on this computer", "置き換える書体「\\1」が、このパソコンにありません"));
+        r.push_back(rule("map: face_index must be a whole number 0..255", "書体の面の番号（face_index）は 0〜255 の整数です"));
+        r.push_back(rule("map: (family|font_style|postscript) must be a name of 1..256 characters", "\\1 は 1〜256 文字の名前です"));
+        r.push_back(rule("(?:map: )?face_index (\\d+) is past the faces of (.*) \\(it holds (\\d+)\\)", "書体「\\2」の面は \\3 個です（面の番号 \\1 はありません）"));
+        r.push_back(rule("map: .*", "置き換える書体の指定が正しくありません"));
         // (variables@1, PC5 I-d — the C++ build's own: the variables and data sets, render/ops_variables, formats/datasets; a
         // variable's name may hold spaces — the review's P3-3 — so a name is taken as (.+?), not (\S+))
         r.push_back(rule(R"(variable (.+?): (.*))", [](const QRegularExpressionMatch& m) {

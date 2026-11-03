@@ -824,6 +824,8 @@ signals:
     void typePointRequested(double x_mm, double y_mm);
     void typeBoxRequested(const QRectF& box_mm);
     void typeLayerClicked(const QString& layer_id);
+    // PC5 G-d: an editor opened to type over a text (the window follows what is chosen in it: the panels' range)
+    void editorOpened(genko::app::InlineEditor* editor);
     // the paths: a subpath drawn with a pen ({"closed", "knots"} in mm: a set_path's subpath); the target path changed by
     // the path selection tool (its whole path)
     void pathDrawn(const genko::core::Json& subpath);

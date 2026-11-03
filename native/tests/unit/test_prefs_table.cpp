@@ -44,7 +44,10 @@ const std::vector<std::string>& app_keys() {
         "picker/size", "raw/auto_tone", "raw/depth", "raw/remembered/IMG_0001.CR2", "raw/remembered_order", "raw/resolution",
         "raw/sharpen", "raw/smart_object", "raw/space", "save/after_ms", "shapes/mode", "shapes/pen_mode", "shortcuts/ブラシツール",
         "shortcuts/水平方向に反転（表示）", "shortcuts_unread/グラデーション", "snap/guides", "snap/grid", "stroke/location",
-        "stroke/width_mm", "subview/images", "tablet/button", "tablet/gamma", "tool_presets/current_only", "type/default_styles", "type/language_features", "ui/brightness",
+        "stroke/width_mm", "subview/images", "tablet/button", "tablet/gamma", "tool_presets/current_only", "type/default_styles", "type/language_features",
+        // (PC5 G-d: 環境設定 → テキスト, スペルチェック's, 文字パネル・字形パネル's memories)
+        "type/smart_quotes", "type/glyph_protection", "type/font_names_english", "type/esc_commits", "type/font_preview", "type/placeholder",
+        "type/recent_fonts", "type/user_dictionary", "type/notations", "type/recent_fonts_used", "type/recent_glyphs", "ui/brightness",
         "ui/brush_preview", "ui/commandbar", "ui/cross_drawing", "ui/cursor", "ui/font_pt", "ui/gpu_canvas", "ui/gpu_memory_mb", "ui/hints", "ui/key_set", "ui/key_set_told",
         "ui/layer_details", "ui/mono_icons", "ui/next_steps", "ui/phone_view", "ui/quick", "ui/radial", "ui/raise_requests",
         "ui/reduce_motion", "ui/rest_minutes", "ui/stage", "ui/surround", "ui/theme", "ui/tool_names", "ui/ui_font", "ui/workspace",
@@ -403,13 +406,18 @@ private slots:
     // table once they are here) are put back only by their names: everything and their section pass over them.
     void theOwnListsAreKeptOnReset() {
         QVERIFY(prefs::by_path("workspace.quickAccess")->kept_on_reset && prefs::by_path("workspace.commandBar")->kept_on_reset);
+        QVERIFY(prefs::by_path("type.userDictionary")->kept_on_reset && prefs::by_path("type.notations")->kept_on_reset);  // (節 G's, G-d)
+        QVERIFY(!prefs::by_path("type.smartQuotes")->kept_on_reset);
         QVERIFY(!prefs::by_path("workspace.largeTabs")->kept_on_reset);
         auto s = fresh("kept.ini");
         QVERIFY(prefs::set(*s, Json{{"workspace.quickAccess", "検索	取り消し"}, {"workspace.commandBar", "取り消し"}, {"workspace.largeTabs", true},
-                                    {"interface.theme", "dark"}})
+                                    {"interface.theme", "dark"}, {"type.userDictionary", "Genko	manga"}, {"type.smartQuotes", true}})
                     .ok);
         QVERIFY(prefs::reset(*s).ok);
         QVERIFY(!s->contains(QStringLiteral("ui/theme")));
+        QVERIFY(!s->contains(QStringLiteral("type/smart_quotes")));
+        QVERIFY(prefs::reset(*s, "type").ok);
+        QCOMPARE(s->value(QStringLiteral("type/user_dictionary")).toString(), QStringLiteral("Genko	manga"));
         QCOMPARE(s->value(QStringLiteral("ui/quick")).toString(), QStringLiteral("検索	取り消し"));
         QVERIFY(prefs::reset(*s, "workspace").ok);
         QVERIFY(!s->contains(QStringLiteral("ui/large_tabs")));

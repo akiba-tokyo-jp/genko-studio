@@ -99,6 +99,8 @@ install(FILES "${GENKO_SOURCE_ROOT}/third_party/blake3/LICENSE_CC0" "${GENKO_SOU
 # (PC5 G-b: SheenBidi's C source, built into the program: its licence and where it came from)
 install(FILES "${GENKO_SOURCE_ROOT}/third_party/sheenbidi/LICENSE" "${GENKO_SOURCE_ROOT}/third_party/sheenbidi/PROVENANCE.json"
         DESTINATION "${_genko_doc}/licenses/sheenbidi")
+# (PC5 G-d: the SCOWL word list スペルチェック reads, in the program's resources: its licence and how it was made)
+install(FILES "${GENKO_SOURCE_ROOT}/resources/dict/LICENSE-SCOWL.txt" DESTINATION "${_genko_doc}/licenses/scowl")
 if(UNIX AND NOT APPLE)
   install(PROGRAMS "${GENKO_SOURCE_ROOT}/package/linux/install.sh" "${GENKO_SOURCE_ROOT}/package/linux/uninstall.sh" DESTINATION ".")
   # (a template for install.sh, which writes the menu item with the folder it put Genko in: not itself a menu item)

@@ -443,6 +443,22 @@ std::pair<std::u32string, std::vector<std::size_t>> without_periods_mapped(std::
     return {std::move(out), std::move(from)};
 }
 
+std::u32string mark_spans(std::u32string_view text, const std::vector<std::pair<std::size_t, std::size_t>>& spans) {
+    if (spans.empty()) return std::u32string(text);
+    std::u32string out;
+    std::size_t at = 0;
+    for (const auto& [start, end] : spans) {
+        if (start < at || end <= start || end > text.size() || text.substr(start, end - start).find(U'\n') != std::u32string_view::npos) continue;
+        out += text.substr(at, start - at);
+        out.push_back(kTcyOpen);
+        out += text.substr(start, end - start);
+        out.push_back(kTcyClose);
+        at = end;
+    }
+    out += text.substr(at);
+    return out;
+}
+
 std::u32string mark_tcy(std::u32string_view text, const StyleRuns& style_runs) {
     std::u32string out(text);
     std::size_t pos = 0;
@@ -828,7 +844,8 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
     for (const char32_t c : args.text) {
         if (c != U'\n') plain.push_back(c);
     }
-    const std::u32string text = mark_tcy(args.text, args.style_runs);  // (縦中横 chosen word by word)
+    // (縦中横 chosen word by word — PC5 G-d: and the record's ranges that ask for it, by place)
+    const std::u32string text = mark_tcy(mark_spans(args.text, args.tcy_spans), args.style_runs);
     const std::vector<Json> ruby_runs = args.mono_ruby ? mono_runs(args.ruby_runs) : args.ruby_runs;
     // the style of each cell, in reading order (cells never change order when they wrap)
     std::vector<Cell> seq;

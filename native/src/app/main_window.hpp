@@ -97,6 +97,11 @@ class TextToolSettings;
 class StoryPanel;
 class StoryEditor;
 class ReplaceDialog;
+class CharacterPanel;  // (PC5 G-d: app/type_panels.hpp)
+class ParagraphPanel;
+class TypeStylesPanel;
+class GlyphsPanel;
+class InlineEditor;
 class ApprovalBox;
 class PanelView;
 class QuickAccess;
@@ -1848,11 +1853,61 @@ public:
     // (laid on the chosen text's whole: its styles taken away, its own attributes cleared, then set_type — one step).
     void save_default_type_styles();
     void load_default_type_styles();
+    // --- PC5 G-d (app/main_window_type_panels.cpp, SPEC.md TEXT-02「文字・段落・スタイル・字形のパネル」…「書体の置き換え」) ---
+    // The range of the chosen text the editor typing over it has chosen (graphemes of its text, as set_type and type_style
+    // take them), while that text is still what the editor showed: none — the whole text (nothing chosen, a caret alone, or
+    // another text).
+    std::optional<std::pair<std::int64_t, std::int64_t>> type_range() const;
+    // The 文字・段落 panels' change on the chosen text: `attrs` (core::type_text's attributes, null taking one away) by
+    // set_type over the range chosen or the whole; a line of before (no native_type, not set by the OpenType typesetting)
+    // changed on its whole by what its style says (`style`, its keys: edit_line style — drawn as before) when `style` holds
+    // it.
+    void type_attrs(const core::Json& attrs, const core::Json& style);
+    // A line's own style keys (行間: style.leading) — edit_line style; a type layer: said that it is a line's.
+    void type_style_key(const core::Json& style);
+    // The panels shown again (the text chosen, its range, the book's styles).
+    void refresh_type_panels();
+    // 字形: a glyph put where the text is typed (the editor's caret), else where its caret was last, else at its end.
+    void insert_glyph(const QString& glyph);
+    // The fonts chosen last (文字 panel's list: "family:<name>" or a font), this one first.
+    void remember_font(const QString& data);
+    // 書式 → フォントプレビューのサイズ ▸ (環境設定 → テキスト's type.fontPreview: off, small, medium, large, extraLarge, huge).
+    QString font_preview() const;
+    void set_font_preview(const QString& size);
+    // 編集 → スペルチェック…; 書式 → 見つからないフォントを解決… (replace_fonts asked, then given the map chosen) and すべての見つから
+    // ないフォントを置換 (replace_fonts {all}).
+    void open_spelling();
+    void resolve_missing_fonts();
+    void replace_all_missing_fonts();
+    CharacterPanel* character_panel() const { return character_panel_; }
+    ParagraphPanel* paragraph_panel() const { return paragraph_panel_; }
+    TypeStylesPanel* character_styles_panel() const { return character_styles_panel_; }
+    TypeStylesPanel* paragraph_styles_panel() const { return paragraph_styles_panel_; }
+    GlyphsPanel* glyphs_panel() const { return glyphs_panel_; }
 
 private:
     void build_type_actions();
     void build_type_menu(QMenu* menu);
     QMenu* type_menu_ = nullptr;
+    // (PC5 G-d)
+    void build_type_panel_actions();
+    void build_type_docks();
+    void watch_type_editor(InlineEditor* editor);
+    // 環境設定 → テキスト's 欠落グリフの保護: the letters of the record its font has not (drawn in another), said.
+    void note_missing_glyphs(const core::StoryLine& record);
+    CharacterPanel* character_panel_ = nullptr;
+    ParagraphPanel* paragraph_panel_ = nullptr;
+    TypeStylesPanel* character_styles_panel_ = nullptr;
+    TypeStylesPanel* paragraph_styles_panel_ = nullptr;
+    GlyphsPanel* glyphs_panel_ = nullptr;
+    std::vector<QDockWidget*> type_docks_;
+    // (what the editor typing over a text has chosen: that text as the editor shows it without its marks, and the graphemes)
+    struct TypeSelection {
+        std::string text;
+        std::int64_t start = 0;
+        std::int64_t end = 0;
+    };
+    std::optional<TypeSelection> type_selection_;
     // --- PC5 節 J (制作の補助, SPEC.md PROD-01): main_window_production.cpp — the frames of イメージ → 解析 ▸, レイヤー →
     // ビデオレイヤー ▸ and ウィンドウ's panels (アクション・レイヤーカンプ・計測ログ・注釈), until their groups ------------------
 public:
