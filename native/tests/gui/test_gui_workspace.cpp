@@ -9,7 +9,15 @@
 #include <QtTest>
 
 #include <QAction>
+#include <QApplication>
 #include <QDockWidget>
+#include <QFile>
+#include <QTreeWidget>
+#include <QTabWidget>
+#include <QLabel>
+#include <QKeySequenceEdit>
+#include <QComboBox>
+#include <QCheckBox>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
@@ -32,7 +40,14 @@
 #include "app/preferences.hpp"
 #include "app/theme.hpp"
 #include "app/workspace.hpp"
+#include "app/comfort.hpp"
+#include "app/key_sets.hpp"
+#include "app/menu_look.hpp"
+#include "app/toolbar_dialog.hpp"
+#include "app/shortcuts_dialog.hpp"
+#include "core/paths.hpp"
 #include "gui_support.hpp"
+#include "service/studio_service.hpp"
 
 using namespace genko;
 using core::Json;
@@ -97,7 +112,9 @@ private slots:
     void initTestCase() { (void)gui_test::config_folder(); }
     void init() {
         auto store = app::settings();
-        for (const char* key : {"ui/quick", "ui/commandbar", "ui/tool_names", "ui/next_steps", "workspaces", "ui/workspace"}) store->remove(QString::fromLatin1(key));
+        for (const char* key : {"ui/quick", "ui/commandbar", "ui/tool_names", "ui/next_steps", "workspaces", "ui/workspace",
+                                // (PC5 H-d)
+                                "workspace_changes", "ui/workspace_locked", "ui/workspace_remember", "menus", "toolbar", "key_sets", "ui/key_set_own"}) store->remove(QString::fromLatin1(key));
     }
 
     // コマンドを探す: every command in the menus once (the menus inside menus too, not the empty "（…）" rows), by its
@@ -250,41 +267,62 @@ private slots:
         QCOMPARE(on_other, (QStringList{QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("取り消し")}));
     }
 
-    // Workspaces: the panels kept under a name (asked for), listed in ウィンドウ → ワークスペース, put back, deleted;
-    // はじめの配置に戻す: the panels as the window first showed them.
+    // Workspaces: the panels kept under a name (新規ワークスペース… — PC5 H-d, 今の配置をワークスペースとして残す… before), listed in
+    // ウィンドウ → ワークスペース after Photoshop's, chosen, deleted (ワークスペースを削除…, never the one in use); 初期設定: the panels
+    // as the window first showed them.
     void workspacesKeepThePanels() {
         Book b;
         QDockWidget* layers = b.dock(QStringLiteral("レイヤー"));
         QVERIFY(layers != nullptr && layers->isVisible());
-        b.answers.responder->get_text = [](const QString& title, const QString&, const QString&) {
-            return title == QStringLiteral("ワークスペース") ? std::optional<QString>(QStringLiteral(" ペン入れ ")) : std::nullopt;
+        b.on_dialog = [](QDialog* dialog) {
+            auto* named = qobject_cast<app::NewWorkspaceDialog*>(dialog);
+            if (named == nullptr) return 0;
+            named->name->setText(QStringLiteral(" ペン入れ "));
+            return static_cast<int>(QDialog::Accepted);
         };
         b.act("act_save_workspace")->trigger();
+        QCOMPARE(b.act("act_save_workspace")->text(), QStringLiteral("新規ワークスペース…"));
         QCOMPARE(app::workspaces(), QStringList{QStringLiteral("ペン入れ")});
         QVERIFY(b.window->last_notice().contains(QStringLiteral("ワークスペース「ペン入れ」を残しました")));
+        QCOMPARE(b.window->current_workspace(), QStringLiteral("ペン入れ"));
         layers->hide();
         QVERIFY(!layers->isVisible());
         QVERIFY(app::load_workspace(b.window.get(), QStringLiteral("ペン入れ")));
         QVERIFY(layers->isVisible());
         QCOMPARE(app::settings()->value(QStringLiteral("ui/workspace")).toString(), QStringLiteral("ペン入れ"));
-        // the menu: 残す…, はじめの配置に戻す, the names, 消す
+        // the menu: Photoshop's, the person's (the one in use checked), then リセット・新規…・削除…・ロック, the keys, 作業の段階
         QMenu* window_menu = b.menu(QStringLiteral("ウィンドウ"));
         QMenu* spaces = submenu(window_menu, QStringLiteral("ワークスペース"));
         QVERIFY(spaces != nullptr);
         emit spaces->aboutToShow();
-        const QStringList shown = texts(spaces);
-        QCOMPARE(shown.mid(0, 4), (QStringList{QStringLiteral("今の配置をワークスペースとして残す…"), QStringLiteral("はじめの配置に戻す"), QStringLiteral("|"),
-                                               QStringLiteral("ペン入れ")}));
-        QMenu* remove = submenu(spaces, QStringLiteral("消す"));
-        QVERIFY(remove != nullptr);
-        remove->actions().front()->trigger();
+        QCOMPARE(texts(spaces),
+                 (QStringList{QStringLiteral("初期設定"), QStringLiteral("グラフィックと Web"), QStringLiteral("モーション"), QStringLiteral("ペイント"),
+                              QStringLiteral("写真"), QStringLiteral("ピクセルアート"), QStringLiteral("|"), QStringLiteral("ペン入れ"), QStringLiteral("|"),
+                              QStringLiteral("ワークスペースをリセット"), QStringLiteral("新規ワークスペース…"), QStringLiteral("ワークスペースを削除…"),
+                              QStringLiteral("ワークスペースをロック"), QStringLiteral("|"), QStringLiteral("キーボードショートカット…"), QStringLiteral("|"),
+                              QStringLiteral("作業の段階")}));
+        QVERIFY(spaces->actions().at(7)->isChecked());
+        QVERIFY(!b.act("act_workspace_essentials")->isChecked());
+        // ワークスペースを削除…: the one in use refused, another deleted (asked which)
+        b.answers.responder->get_item = [](const QString&, const QString&, const QStringList& items, int, bool) {
+            return items.isEmpty() ? std::optional<QString>() : std::optional<QString>(items.front());
+        };
+        b.answers.responder->question = [](const QString&, const QString&) { return true; };
+        QVERIFY(!b.window->delete_workspace_dialog());
+        QVERIFY(b.window->last_notice().contains(QStringLiteral("今のワークスペースなので削除できません")));
+        b.act("act_workspace_essentials")->trigger();
+        QCOMPARE(b.window->current_workspace(), QStringLiteral("初期設定"));
+        b.act("act_delete_workspace")->trigger();
         QVERIFY(app::workspaces().isEmpty());
-        // はじめの配置に戻す
+        // 初期設定
         layers->hide();
         b.window->default_layout();
         QVERIFY(layers->isVisible());
         // no name: nothing kept
-        b.answers.responder->get_text = [](const QString&, const QString&, const QString&) { return std::optional<QString>(QStringLiteral("  ")); };
+        b.on_dialog = [](QDialog* dialog) {
+            if (auto* named = qobject_cast<app::NewWorkspaceDialog*>(dialog)) named->name->setText(QStringLiteral("  "));
+            return static_cast<int>(QDialog::Accepted);
+        };
         QVERIFY(!b.window->save_workspace());
         QVERIFY(app::workspaces().isEmpty());
     }
@@ -768,7 +806,7 @@ private slots:
         app::preferences::apply_all(b.window.get());
         QCOMPARE(b.act("act_undo")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+Shift+U")));
         {
-            app::preferences::PreferencesDialog dialog(b.window.get());
+            app::ShortcutsDialog dialog(b.window.get());  // (PC5 H-d: キーボードショートカット…'s own window)
             dialog.reset_keys();
             dialog.save();
         }
@@ -831,6 +869,656 @@ private slots:
         store->remove(QStringLiteral("names_current/shortcuts/グラデーション"));
         app::preferences::apply_shortcuts(b.window.get());
         QVERIFY(panel->shortcut().isEmpty());
+    }
+
+    // PC5 H-d (window.workspace.*, SPEC VIEW-01「ワークスペース」): Photoshop's workspaces built in — each its panels (the ones
+    // Genko has), the one chosen checked and the next window opened in it; ピクセルアート with the pixels' grid; a workspace
+    // left chosen again as it was left (環境設定 → ワークスペース → ワークスペースの変更を記憶), ワークスペースをリセット as it is built;
+    // 初期設定 the window's first panels; their names never a kept one's; the approval's panels never touched.
+    void theWorkspacesOfPhotoshop() {
+        Book b;
+        app::MainWindow* w = b.window.get();
+        const auto shown = [&b](const char* title) {
+            QDockWidget* d = b.dock(QString::fromUtf8(title));
+            return d != nullptr && d->isVisible();
+        };
+        std::map<QString, bool> first;
+        for (QDockWidget* d : w->findChildren<QDockWidget*>()) first[d->objectName()] = d->isVisible();
+        QCOMPARE(w->current_workspace(), QStringLiteral("初期設定"));
+        QCOMPARE(app::presets().size(), std::size_t{6});
+        QDockWidget* box = b.dock(QStringLiteral("承認箱"));
+        QVERIFY(box != nullptr);
+        const bool box_shown = box->isVisible();
+        b.act("act_workspace_painting")->trigger();
+        QCOMPARE(w->current_workspace(), QStringLiteral("ペイント"));
+        QVERIFY(b.act("act_workspace_painting")->isChecked() && !b.act("act_workspace_essentials")->isChecked());
+        for (const char* title : {"ブラシ", "ブラシ設定", "カラー", "レイヤー", "ナビゲーター", "オプション"}) QVERIFY2(shown(title), title);
+        for (const char* title : {"ページ", "台詞", "ヒストグラム"}) QVERIFY2(!shown(title), title);
+        QCOMPARE(box->isVisible(), box_shown);
+        b.act("act_workspace_photography")->trigger();
+        for (const char* title : {"ヒストグラム", "色調補正", "チャンネル", "レイヤー"}) QVERIFY2(shown(title), title);
+        QVERIFY(!shown("ブラシ"));
+        b.act("act_workspace_motion")->trigger();
+        QVERIFY(shown("タイムライン"));
+        b.act("act_workspace_graphic_and_web")->trigger();
+        for (const char* title : {"台詞", "シェイプ", "パス", "スタイル"}) QVERIFY2(shown(title), title);
+        QVERIFY(!b.act("act_pixel_grid")->isChecked());
+        b.act("act_workspace_pixel_art")->trigger();
+        QVERIFY(b.act("act_pixel_grid")->isChecked() && b.act("act_pixel_art")->isChecked());
+        QVERIFY(w->canvas()->show_pixel_grid);
+        b.act("act_pixel_grid")->setChecked(false);
+        b.act("act_pixel_art")->setChecked(false);
+        // a workspace left: chosen again as it was left; reset: as it is built
+        b.act("act_workspace_painting")->trigger();
+        b.dock(QStringLiteral("ブラシ"))->hide();
+        b.act("act_workspace_photography")->trigger();
+        b.act("act_workspace_painting")->trigger();
+        QVERIFY(!shown("ブラシ"));
+        b.act("act_workspace_reset")->trigger();
+        QVERIFY(shown("ブラシ"));
+        QVERIFY2(w->last_notice().contains(QStringLiteral("「ペイント」")), qPrintable(w->last_notice()));
+        // ... unless ワークスペースの変更を記憶 is off: as it is built each time
+        app::settings()->setValue(QStringLiteral("ui/workspace_remember"), QStringLiteral("false"));
+        b.dock(QStringLiteral("ブラシ"))->hide();
+        b.act("act_workspace_photography")->trigger();
+        b.act("act_workspace_painting")->trigger();
+        QVERIFY(shown("ブラシ"));
+        app::settings()->remove(QStringLiteral("ui/workspace_remember"));
+        // the next window opens in it
+        {
+            Book other;
+            QCOMPARE(other.window->current_workspace(), QStringLiteral("ペイント"));
+            QVERIFY(other.dock(QStringLiteral("ブラシ"))->isVisible());
+            QVERIFY(!other.dock(QStringLiteral("ページ"))->isVisible());
+        }
+        app::ask::set_responder(b.answers.responder);  // (the other window's answers gone with it: this one's again)
+        // 初期設定: the window's first panels
+        b.act("act_workspace_essentials")->trigger();
+        for (QDockWidget* d : w->findChildren<QDockWidget*>()) {
+            if (first.contains(d->objectName())) QVERIFY2(d->isVisible() == first[d->objectName()], qPrintable(d->objectName()));
+        }
+        // Photoshop's names are never a kept workspace's
+        for (const char* name : {"写真", "初期設定", "Essentials", "pixelArt", "グラフィックと Web"}) QVERIFY2(!w->save_workspace(QString::fromUtf8(name)), name);
+        QVERIFY(w->last_notice().contains(QStringLiteral("Genko にあるワークスペースの名前")));
+        QVERIFY(app::workspaces().isEmpty());
+    }
+
+    // PC5 H-d (window.workspace.newWorkspace): 新規ワークスペース… keeps the keys, the menus and the toolbar with the panels when
+    // chosen (Photoshop's), refuses a built-in workspace's name, and puts them back when the workspace is chosen again.
+    void aNewWorkspaceKeepsTheKeysMenusAndToolbar() {
+        Book b;
+        app::MainWindow* w = b.window.get();
+        app::settings()->setValue(QStringLiteral("shortcuts/移動ツール"), QStringLiteral("Ctrl+Alt+Shift+F2"));
+        app::menu_look::set_hidden({QStringLiteral("100%")});
+        app::toolbar::keep({QStringLiteral("act_move"), QStringLiteral("act_pen")}, {QStringLiteral("act_3d")});
+        app::preferences::apply_all(w);
+        QCOMPARE(b.act("act_move")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+Shift+F2")));
+        QCOMPARE(w->tool_palette()->actions().front(), b.act("act_move"));
+        const auto named = [](const QString& name, bool all) {
+            return [name, all](QDialog* dialog) {
+                auto* asked = qobject_cast<app::NewWorkspaceDialog*>(dialog);
+                if (asked == nullptr) return 0;
+                asked->name->setText(name);
+                for (QCheckBox* box : {asked->keys, asked->menus, asked->toolbar}) box->setChecked(all);
+                return static_cast<int>(QDialog::Accepted);
+            };
+        };
+        b.on_dialog = named(QStringLiteral("ペイント"), true);
+        QVERIFY(!w->new_workspace());
+        QVERIFY(w->last_notice().contains(QStringLiteral("Genko にあるワークスペースの名前")));
+        QVERIFY(app::workspaces().isEmpty());
+        b.on_dialog = named(QStringLiteral("仕上げ用"), true);
+        QVERIFY(w->new_workspace());
+        b.on_dialog = named(QStringLiteral("パネルだけ"), false);
+        QVERIFY(w->new_workspace());
+        QCOMPARE(app::workspaces(), (QStringList{QStringLiteral("パネルだけ"), QStringLiteral("仕上げ用")}));
+        // changed since
+        app::settings()->remove(QStringLiteral("shortcuts/移動ツール"));
+        app::menu_look::set_hidden({});
+        app::toolbar::keep(app::toolbar::default_order(), {});
+        app::preferences::apply_all(w);
+        QCOMPARE(b.act("act_move")->shortcut(), QKeySequence(QStringLiteral("V")));
+        QCOMPARE(w->tool_palette()->actions().front(), b.act("act_select"));
+        // a workspace kept without them leaves them as they are; one kept with them puts them back
+        w->choose_workspace(QStringLiteral("パネルだけ"));
+        QCOMPARE(b.act("act_move")->shortcut(), QKeySequence(QStringLiteral("V")));
+        w->choose_workspace(QStringLiteral("仕上げ用"));
+        QCOMPARE(w->current_workspace(), QStringLiteral("仕上げ用"));
+        QCOMPARE(b.act("act_move")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+Shift+F2")));
+        QCOMPARE(app::menu_look::hidden(), QStringList{QStringLiteral("100%")});
+        QCOMPARE(w->tool_palette()->actions().front(), b.act("act_move"));
+        QVERIFY(w->extra_tools() != nullptr && w->extra_tools()->menu()->actions().contains(b.act("act_3d")));
+        // (as they were)
+        b.act("act_workspace_essentials")->trigger();
+        for (const char* key : {"shortcuts/移動ツール", "menus/hidden", "toolbar/order", "toolbar/hidden"}) app::settings()->remove(QString::fromUtf8(key));
+        app::preferences::apply_all(w);
+        QVERIFY(w->extra_tools() == nullptr);
+    }
+
+    // PC5 H-d (window.workspace.lockWorkspace): ワークスペースをロック — the panels cannot be moved nor taken out of the window
+    // (every window, the next one too), closed still; unlocked, as they were.
+    void theWorkspaceLocks() {
+        Book b;
+        QDockWidget* layers = b.dock(QStringLiteral("レイヤー"));
+        const QDockWidget::DockWidgetFeatures own = layers->features();
+        QVERIFY(own.testFlag(QDockWidget::DockWidgetMovable));
+        b.act("act_lock_workspace")->trigger();
+        QVERIFY(b.act("act_lock_workspace")->isChecked());
+        for (QDockWidget* d : b.window->findChildren<QDockWidget*>()) {
+            QVERIFY2(!d->features().testFlag(QDockWidget::DockWidgetMovable) && !d->features().testFlag(QDockWidget::DockWidgetFloatable),
+                     qPrintable(d->objectName()));
+        }
+        QCOMPARE(layers->features().testFlag(QDockWidget::DockWidgetClosable), own.testFlag(QDockWidget::DockWidgetClosable));
+        QCOMPARE(app::settings()->value(QStringLiteral("ui/workspace_locked")).toString(), QStringLiteral("true"));
+        {
+            Book other;
+            QVERIFY(!other.dock(QStringLiteral("レイヤー"))->features().testFlag(QDockWidget::DockWidgetMovable));
+            QVERIFY(other.act("act_lock_workspace")->isChecked());
+        }
+        app::ask::set_responder(b.answers.responder);  // (the other window's answers gone with it: this one's again)
+        b.act("act_workspace_painting")->trigger();  // (a workspace chosen: its panels, still locked)
+        QVERIFY(!layers->features().testFlag(QDockWidget::DockWidgetMovable));
+        b.act("act_lock_workspace")->trigger();
+        QCOMPARE(layers->features(), own);
+        QCOMPARE(app::settings()->value(QStringLiteral("ui/workspace_locked")).toString(), QStringLiteral("false"));
+        b.act("act_workspace_essentials")->trigger();
+    }
+
+    // PC5 H-d (edit.keyboardShortcuts, SPEC VIEW-01「キーボードショートカットとメニュー」): キーボードショートカット…'s own window —
+    // every command by its menu; a key another command has said, taken from it or given up; one back to the set's; found by
+    // a part of its name or its key; 概要… as a page; the person's own set saved (never under a built-in set's name), chosen,
+    // kept and deleted (never a built-in one).
+    void theKeyboardShortcutsWindow() {
+        Book b;
+        app::MainWindow* w = b.window.get();
+        const auto key = [](const char* words) { return QKeySequence(QString::fromLatin1(words)); };
+        {
+            app::ShortcutsDialog dialog(w);
+            QCOMPARE(dialog.windowTitle(), QStringLiteral("キーボードショートカットとメニュー"));
+            QCOMPARE(dialog.tabs->count(), 2);
+            QCOMPARE(dialog.tabs->tabText(0), QStringLiteral("キーボードショートカット"));
+            QCOMPARE(dialog.tabs->tabText(1), QStringLiteral("メニュー"));
+            QTreeWidgetItem* move = dialog.row(QStringLiteral("移動ツール"));
+            QVERIFY(move != nullptr && move->parent() != nullptr && move->toolTip(0).contains(QStringLiteral(" → ")));
+            QCOMPARE(dialog.tree->topLevelItem(0)->text(0), QStringLiteral("ファイル"));
+            QCOMPARE(dialog.editor(QStringLiteral("移動ツール"))->keySequence(), key("V"));
+            // a key another command has: said, given up (やめる) or taken from it (前のコマンドから外して付ける)
+            dialog.editor(QStringLiteral("ブラシツール"))->setKeySequence(key("V"));
+            QVERIFY2(dialog.clash->text().contains(QStringLiteral("「V」")) && dialog.clash->text().contains(QStringLiteral("移動ツール")),
+                     qPrintable(dialog.clash->text()));
+            QVERIFY(dialog.take_button->isVisibleTo(&dialog) && dialog.keep_button->isVisibleTo(&dialog));
+            dialog.keep_previous();
+            QCOMPARE(dialog.editor(QStringLiteral("ブラシツール"))->keySequence(), key("B"));
+            QCOMPARE(dialog.editor(QStringLiteral("移動ツール"))->keySequence(), key("V"));
+            dialog.editor(QStringLiteral("ブラシツール"))->setKeySequence(key("V"));
+            dialog.take_from_previous();
+            QVERIFY(dialog.editor(QStringLiteral("移動ツール"))->keySequence().isEmpty());
+            QCOMPARE(dialog.editor(QStringLiteral("ブラシツール"))->keySequence(), key("V"));
+            // one back to the set's (its key another's again: said, taken)
+            dialog.reset_one(QStringLiteral("移動ツール"));
+            QVERIFY(dialog.clash->text().contains(QStringLiteral("ブラシツール")));
+            dialog.take_from_previous();
+            QVERIFY(dialog.editor(QStringLiteral("ブラシツール"))->keySequence().isEmpty());
+            dialog.reset_one(QStringLiteral("ブラシツール"));
+            QCOMPARE(dialog.editor(QStringLiteral("ブラシツール"))->keySequence(), key("B"));
+            QCOMPARE(dialog.editor(QStringLiteral("移動ツール"))->keySequence(), key("V"));
+            // (the row chosen)
+            dialog.editor(QStringLiteral("ブラシツール"))->setKeySequence(key("F11"));
+            dialog.tree->setCurrentItem(dialog.row(QStringLiteral("ブラシツール")));
+            dialog.reset_one_button->click();
+            QCOMPARE(dialog.editor(QStringLiteral("ブラシツール"))->keySequence(), key("B"));
+            // found by a part of its name or its key
+            dialog.filter->setText(QStringLiteral("ブラシツール"));
+            QVERIFY(!dialog.row(QStringLiteral("ブラシツール"))->isHidden() && dialog.row(QStringLiteral("移動ツール"))->isHidden());
+            dialog.filter->setText(QStringLiteral("Ctrl+Alt+Shift+K"));
+            QVERIFY(!dialog.row(QStringLiteral("キーボードショートカット…"))->isHidden());
+            QVERIFY(dialog.row(QStringLiteral("ブラシツール"))->isHidden());
+            dialog.filter->clear();
+            QVERIFY(!dialog.row(QStringLiteral("移動ツール"))->isHidden());
+            // 概要…: every command, its menu and its keys as a page
+            const QString html = dialog.summary_html();
+            QVERIFY(html.contains(QStringLiteral("<h2>ファイル</h2>")) && html.contains(QStringLiteral("Photoshop の初期設定")));
+            QVERIFY(html.contains(QStringLiteral("移動ツール</td><td>V</td>")));
+            QTemporaryDir out;
+            const QString page = out.filePath(QStringLiteral("keys.html"));
+            b.answers.responder->save_path = [page](const QString&, const QString&) { return page; };
+            dialog.summary_button->click();
+            QFile written(page);
+            QVERIFY(written.open(QIODevice::ReadOnly));
+            QCOMPARE(QString::fromUtf8(written.readAll()), html);
+            // the person's own set: never a built-in set's name; saved, chosen, kept by 決める
+            for (const char* name : {"Photoshop", "genko", "Photoshop の初期設定", "Genko（PC5 より前のキー）"}) {
+                QVERIFY2(!dialog.save_set(QString::fromUtf8(name)), name);
+            }
+            QVERIFY(dialog.clash->text().contains(QStringLiteral("Genko にある組の名前")));
+            QVERIFY(app::key_sets::own_sets().isEmpty());
+            QVERIFY(!dialog.delete_set_button->isEnabled());
+            dialog.editor(QStringLiteral("ブラシツール"))->setKeySequence(key("F11"));
+            QVERIFY(dialog.save_set(QStringLiteral("私の組")));
+            QCOMPARE(dialog.key_set->currentData().toString(), QStringLiteral("own:私の組"));
+            QVERIFY(dialog.delete_set_button->isEnabled());
+            dialog.save();
+            QCOMPARE(dialog.result(), int(QDialog::Accepted));
+        }
+        QCOMPARE(app::key_sets::chosen(), QStringLiteral("own:私の組"));
+        QCOMPARE(b.act("act_pen")->shortcut(), key("F11"));
+        QVERIFY(!app::settings()->contains(QStringLiteral("shortcuts/ブラシツール")));  // (the set's own key, not the person's over it)
+        {
+            Book other;  // (the next window: the same set)
+            QCOMPARE(other.act("act_pen")->shortcut(), key("F11"));
+        }
+        app::ask::set_responder(b.answers.responder);  // (the other window's answers gone with it: this one's again)
+        {
+            app::ShortcutsDialog again(w);
+            QCOMPARE(again.key_set->currentData().toString(), QStringLiteral("own:私の組"));
+            QCOMPARE(again.editor(QStringLiteral("ブラシツール"))->keySequence(), key("F11"));
+            again.key_set->setCurrentIndex(again.key_set->findData(QStringLiteral("photoshop")));
+            QCOMPARE(again.editor(QStringLiteral("ブラシツール"))->keySequence(), key("B"));
+            QVERIFY(!again.delete_set());  // (a built-in set: never deleted)
+            QVERIFY(again.clash->text().contains(QStringLiteral("削除できません")));
+            again.key_set->setCurrentIndex(again.key_set->findData(QStringLiteral("own:私の組")));
+            QCOMPARE(again.editor(QStringLiteral("ブラシツール"))->keySequence(), key("F11"));
+            b.answers.responder->question = [](const QString&, const QString&) { return true; };
+            QVERIFY(again.delete_set());
+            QCOMPARE(again.key_set->currentData().toString(), QStringLiteral("photoshop"));
+            QVERIFY(again.key_set->findData(QStringLiteral("own:私の組")) < 0);
+            QCOMPARE(app::key_sets::own_sets(), QStringList{QStringLiteral("私の組")});  // (deleted by 決める: the review's P3-9)
+            again.save();
+            QVERIFY(app::key_sets::own_sets().isEmpty());
+        }
+        QCOMPARE(app::key_sets::chosen(), QStringLiteral("photoshop"));
+        QCOMPARE(b.act("act_pen")->shortcut(), key("B"));
+    }
+
+    // PC5 H-d (edit.menus): メニュー… hides items and colours them (Photoshop's); a hidden item is out of its menu only while
+    // the menu is open — its key works, 検索 finds it, the help names its place —, the menu ends with すべてのメニュー項目を表示;
+    // the approval and the AI's connection hidden still ask (the approval's way unchanged).
+    void theMenusHideAndColourTheirItems() {
+        Book b;
+        app::MainWindow* w = b.window.get();
+        const QStringList hide{QStringLiteral("色の校正"), QStringLiteral("チャットでの承認…"), QStringLiteral("AI と作る…"), QStringLiteral("レイヤーをロック…")};
+        const auto names = app::by_text(w);
+        for (const QString& name : hide) QVERIFY2(names.contains(name), qPrintable(name));
+        {
+            app::ShortcutsDialog dialog(w, 1);
+            QCOMPARE(dialog.tabs->currentIndex(), 1);
+            QVERIFY(dialog.menu_tree->topLevelItemCount() > 5);
+            QVERIFY(!dialog.is_hidden(QStringLiteral("色の校正")));
+            for (const QString& name : hide) dialog.set_hidden(name, true);
+            dialog.set_colour(QStringLiteral("検索"), QStringLiteral("red"));
+            QCOMPARE(dialog.colour_of(QStringLiteral("検索")), QStringLiteral("red"));
+            dialog.save();
+        }
+        for (const QString& name : hide) QVERIFY2(app::menu_look::hidden().contains(name), qPrintable(name));
+        QCOMPARE(app::menu_look::coloured().at(QStringLiteral("検索")), QStringLiteral("red"));
+        QAction* proof = b.act("act_cmyk_proof");
+        QMenu* view = b.menu(QStringLiteral("表示"));
+        QVERIFY(view->actions().contains(proof));  // (closed: every item there, for the help and the keys' names)
+        view->popup(QPoint(20, 20));
+        QVERIFY(QTest::qWaitForWindowExposed(view));
+        QVERIFY(!view->actions().contains(proof));
+        QCOMPARE(view->actions().back()->text(), QString::fromUtf8(app::menu_look::kShowAll));
+        view->hide();
+        QVERIFY(view->actions().contains(proof));
+        QVERIFY(view->actions().back()->text() != QString::fromUtf8(app::menu_look::kShowAll));
+        // すべてのメニュー項目を表示: the menu again with every item
+        view->popup(QPoint(20, 20));
+        QVERIFY(QTest::qWaitForWindowExposed(view));
+        QAction* all = view->actions().back();
+        view->hide();
+        all->trigger();
+        QVERIFY(gui_test::wait_for([view] { return view->isVisible(); }, 3000));
+        QVERIFY(view->actions().contains(proof));
+        view->hide();
+        // its key works, 検索 finds it, its place is still its menu
+        QVERIFY(proof->isVisible() && proof->associatedObjects().contains(w));
+        const std::vector<QAction*> found = app::search(w, QStringLiteral("色の校正"));
+        QVERIFY(std::find(found.begin(), found.end(), proof) != found.end());
+        QCOMPARE(app::where(w, proof), QStringLiteral("表示"));
+        const bool before = proof->isChecked();
+        w->activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(w));
+        QTest::keyClick(w->canvas(), Qt::Key_Y, Qt::ControlModifier);
+        QCOMPARE(proof->isChecked(), !before);
+        if (proof->isChecked() != before) proof->trigger();
+        // the colour: a band and a tint over 検索 in 編集
+        QMenu* edit = b.menu(QStringLiteral("編集"));
+        edit->popup(QPoint(20, 20));
+        QVERIFY(QTest::qWaitForWindowExposed(edit));
+        const auto painted = app::menu_look::painted(edit);
+        QCOMPARE(painted.size(), std::size_t{1});
+        QCOMPARE(painted.front().first, edit->actionGeometry(b.act("act_find_command")));
+        QCOMPARE(painted.front().second, app::menu_look::colour(QStringLiteral("red")));
+        const QImage picture = edit->grab().toImage();
+        const QRect band = painted.front().first;
+        const QColor at = picture.pixelColor(QPoint(band.left() + 1, band.center().y()) * picture.devicePixelRatio());
+        QVERIFY2(std::abs(at.red() - 0xe5) <= 8 && std::abs(at.green() - 0x53) <= 8 && std::abs(at.blue() - 0x4b) <= 8, qPrintable(at.name()));
+        edit->hide();
+        // hidden, the approval and the AI's connection still ask
+        b.answers.asked.clear();
+        b.act("act_chat_approval")->trigger();
+        QVERIFY2(b.answers.asked.join(QStringLiteral("|")).contains(QStringLiteral("チャットでの承認")), qPrintable(b.answers.asked.join(QStringLiteral("|"))));
+        b.answers.asked.clear();
+        b.act("act_ai")->trigger();
+        QVERIFY2(b.answers.asked.join(QStringLiteral("|")).contains(QStringLiteral("AiDialog")), qPrintable(b.answers.asked.join(QStringLiteral("|"))));
+        // 初期設定に戻す: every item shown, no colour
+        {
+            app::ShortcutsDialog dialog(w, 1);
+            QVERIFY(dialog.is_hidden(QStringLiteral("色の校正")));
+            dialog.reset_menus();
+            QVERIFY(!dialog.is_hidden(QStringLiteral("色の校正")));
+            dialog.save();
+        }
+        QVERIFY(app::menu_look::hidden().isEmpty() && app::menu_look::coloured().empty());
+        view->popup(QPoint(20, 20));
+        QVERIFY(QTest::qWaitForWindowExposed(view));
+        QVERIFY(view->actions().contains(proof));
+        view->hide();
+    }
+
+    // PC5 H-d (edit.toolbar, SPEC VIEW-01「ツールバー」): ツールバー… — the palette in the person's order, the tools away under
+    // 余分なツール, kept for the next window; each button with its group (スポイト's ものさし・注釈・カウント — J-d1 —, 手のひらツール's
+    // ズームツール); ウィンドウ → ツール still shows and hides it; 初期設定に戻す.
+    void theToolbarKeepsItsOrder() {
+        Book b;
+        app::MainWindow* w = b.window.get();
+        const auto tools = [](app::MainWindow* window) {
+            QStringList out;
+            for (QAction* a : window->tool_palette()->actions()) out << (a->isSeparator() ? QStringLiteral("|") : a->property("genko_attribute").toString());
+            return out;
+        };
+        QCOMPARE(tools(w), app::toolbar::default_order());
+        QVERIFY(w->extra_tools() == nullptr);
+        {
+            app::ToolbarDialog dialog(w);
+            QCOMPARE(dialog.order(), app::toolbar::default_order());
+            dialog.shown->setCurrentRow(1);  // (移動ツール)
+            dialog.move(-1);
+            dialog.hide_tool(QStringLiteral("act_3d"));
+            dialog.hide_tool(QStringLiteral("act_effect"));
+            // (J-b's slices among them as Genko makes it)
+            QCOMPARE(dialog.hidden(), (QStringList{QStringLiteral("act_slice_tool"), QStringLiteral("act_slice_select_tool"), QStringLiteral("act_3d"), QStringLiteral("act_effect")}));
+            dialog.save();
+        }
+        QCOMPARE(tools(w).mid(0, 2), (QStringList{QStringLiteral("act_move"), QStringLiteral("act_select")}));
+        QVERIFY(!tools(w).contains(QStringLiteral("act_3d")) && !tools(w).contains(QStringLiteral("act_effect")));
+        QAction* extra = w->extra_tools();
+        QVERIFY(extra != nullptr && extra->menu() != nullptr && w->tool_palette()->actions().back() == extra);
+        QCOMPARE(extra->menu()->actions().size(), qsizetype{4});  // (the slices' 切り抜き group each, then the two)
+        QCOMPARE(extra->menu()->actions().mid(2), (QList<QAction*>{b.act("act_3d"), b.act("act_effect")}));
+        QVERIFY(extra->menu()->actions().front()->menu() != nullptr && extra->menu()->actions().front()->menu()->actions().contains(b.act("act_slice_tool")));
+        // each button keeps its group
+        auto* picker = qobject_cast<QToolButton*>(w->tool_palette()->widgetForAction(b.act("act_picker")));
+        QVERIFY(picker != nullptr && picker->menu() != nullptr);
+        QStringList group;
+        for (QAction* a : picker->menu()->actions()) group << a->property("genko_attribute").toString();
+        QCOMPARE(group, (QStringList{QStringLiteral("act_picker"), QStringLiteral("act_measure_ruler_tool"), QStringLiteral("act_note"),
+                                     QStringLiteral("act_measure_count_tool")}));
+        auto* hand = qobject_cast<QToolButton*>(w->tool_palette()->widgetForAction(b.act("act_hand_tool")));
+        QVERIFY(hand != nullptr && hand->menu() != nullptr && hand->menu()->actions().contains(b.act("act_zoom_tool")));
+        // ウィンドウ → ツール
+        QAction* panel = w->tool_palette()->toggleViewAction();
+        panel->trigger();
+        QVERIFY(!w->tool_palette()->isVisible());
+        panel->trigger();
+        QVERIFY(w->tool_palette()->isVisible());
+        // the next window: the same order
+        {
+            Book other;
+            QCOMPARE(tools(other.window.get()), tools(w));
+        }
+        app::ask::set_responder(b.answers.responder);  // (the other window's answers gone with it: this one's again)
+        // 初期設定に戻す
+        {
+            app::ToolbarDialog dialog(w);
+            QCOMPARE(dialog.hidden(), (QStringList{QStringLiteral("act_slice_tool"), QStringLiteral("act_slice_select_tool"), QStringLiteral("act_3d"), QStringLiteral("act_effect")}));
+            dialog.restore_defaults();
+            dialog.save();
+        }
+        QCOMPARE(tools(w), app::toolbar::default_order());
+        QVERIFY(w->extra_tools() == nullptr);
+        QVERIFY(!app::settings()->contains(QStringLiteral("toolbar/order")));
+        // (編集 → ツールバー… opens it)
+        b.answers.asked.clear();
+        b.act("act_toolbar")->trigger();
+        QCOMPARE(b.answers.asked, QStringList{QStringLiteral("genko::app::ToolbarDialog")});
+    }
+
+    // PC5 H-d (edit.preferences.workspace): 環境設定 → ワークスペース — 隠れたパネルを自動的に表示, 大きいタブ, ワークスペースの変更を記憶,
+    // ワークスペースをロック; the keys' page gone to キーボードショートカット… (a button there opens it).
+    void theWorkspacePreferences() {
+        Book b;
+        app::MainWindow* w = b.window.get();
+        {
+            app::preferences::PreferencesDialog dialog(w);
+            dialog.show_pane(QStringLiteral("workspace"));
+            QCOMPARE(dialog.tabs->tabText(dialog.tabs->currentIndex()), QStringLiteral("ワークスペース"));
+            for (int i = 0; i < dialog.tabs->count(); ++i) QVERIFY(dialog.tabs->tabText(i) != QStringLiteral("ショートカット"));
+            QCOMPARE(dialog.pages_list->count(), dialog.tabs->count());
+            QVERIFY(dialog.workspace_remember->isChecked() && dialog.auto_show_panels->isChecked());
+            QVERIFY(!dialog.large_tabs->isChecked() && !dialog.workspace_locked->isChecked());
+            b.answers.asked.clear();
+            dialog.keys_button->click();
+            QCOMPARE(b.answers.asked, QStringList{QStringLiteral("genko::app::ShortcutsDialog")});
+            dialog.large_tabs->setChecked(true);
+            dialog.auto_show_panels->setChecked(false);
+            dialog.workspace_locked->setChecked(true);
+            dialog.save();
+        }
+        QVERIFY(w->doc_tabs()->property("large").toBool());
+        QVERIFY(w->doc_tabs()->font().pointSizeF() > QApplication::font().pointSizeF());
+        QVERIFY(!w->canvas_only()->auto_show);
+        QVERIFY(!b.dock(QStringLiteral("レイヤー"))->features().testFlag(QDockWidget::DockWidgetMovable));
+        QVERIFY(b.act("act_lock_workspace")->isChecked());
+        // 原稿だけを表示: the window's edge brings no panel now
+        w->canvas_only()->toggle();
+        w->canvas_only()->watch_at(QPoint(2, w->height() / 2));
+        QVERIFY(w->canvas_only()->peek().isEmpty());
+        w->canvas_only()->toggle();
+        for (const char* key : {"ui/large_tabs", "ui/auto_show_panels", "ui/workspace_locked"}) app::settings()->remove(QString::fromLatin1(key));
+        app::preferences::apply_all(w);
+        QVERIFY(!w->doc_tabs()->property("large").toBool());
+        QVERIFY(w->canvas_only()->auto_show);
+        QVERIFY(b.dock(QStringLiteral("レイヤー"))->features().testFlag(QDockWidget::DockWidgetMovable));
+        w->canvas_only()->toggle();
+        w->canvas_only()->watch_at(QPoint(2, w->height() / 2));
+        QCOMPARE(w->canvas_only()->peek(), QStringLiteral("left"));
+        w->canvas_only()->toggle();
+    }
+
+
+    // The review of PC5 H-d, P2-1: in an agent's book with a request waiting, choosing a workspace — built in, the person's own,
+    // reset, 初期設定 — never hides the approval's panels (承認箱 shown while something waits), nor a window opening in one.
+    void theApprovalPanelsStayAsTheyAre() {
+        Book b;
+        app::MainWindow* w = b.window.get();
+        QDockWidget* box = b.dock(QStringLiteral("承認箱"));
+        QVERIFY(box != nullptr && !box->isVisible());
+        QVERIFY(w->save_workspace(QStringLiteral("ペン入れ")));  // (kept while nothing waited: the box hidden in it)
+        service::StudioService ai(gui_test::path_of(b.tmp.path()), "ai:hermes");
+        QVERIFY(ai.call("apply_ops", Json::array({"book.genko", Json::array({Json{{"op", "set_studio"}, {"premise", "屋上の話"}}})}), Json{{"commit", true}}).ok);
+        QVERIFY(ai.call("request_approval", Json::array(), Json{{"project", "book.genko"}, {"gate", "name"}, {"pages", {1}}}).ok);
+        w->session().check_outside();
+        QVERIFY(gui_test::wait_for([&] { return box->isVisible(); }, 60000));
+        QDockWidget* details = b.dock(QStringLiteral("コマの詳細"));
+        const bool details_shown = details->isVisible();
+        for (const char* name : {"act_workspace_painting", "act_workspace_photography", "act_workspace_reset", "act_workspace_essentials"}) {
+            b.act(name)->trigger();
+            QVERIFY2(box->isVisible(), name);
+            QVERIFY2(details->isVisible() == details_shown, name);
+        }
+        app::settings()->remove(QStringLiteral("workspace_changes/ペン入れ"));  // (ペン入れ as kept: the box hidden in it)
+        w->choose_workspace(QStringLiteral("ペン入れ"));
+        QVERIFY(box->isVisible());
+        b.act("act_workspace_reset")->trigger();
+        QVERIFY(box->isVisible());
+        w->default_layout();
+        QVERIFY(box->isVisible());
+        w->choose_workspace(QStringLiteral("ペン入れ"));
+        app::settings()->remove(QStringLiteral("workspace_changes/ペン入れ"));
+        // another window on the book, opening in ペン入れ: the box there too
+        {
+            app::MainWindow other(app::Session::open(b.path, gui_test::quick(gui_test::path_of(b.tmp.path() + QStringLiteral("/recovery2")))));
+            other.resize(1280, 860);
+            other.show();
+            for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+            QDockWidget* there = nullptr;
+            for (QDockWidget* d : other.findChildren<QDockWidget*>()) {
+                if (d->objectName() == QStringLiteral("承認箱")) there = d;
+            }
+            QVERIFY(there != nullptr && there->isVisible());
+            other.close();
+        }
+        b.act("act_workspace_essentials")->trigger();
+    }
+
+    // The review's P2-2: a workspace kept before PC5 H-d under a built-in one's name — 写真 — is moved, once, to 「写真（自分）」
+    // with its layouts, said; chosen, its own panels come (写真 is Photoshop's).
+    void aWorkspaceKeptUnderABuiltInNameIsMoved() {
+        {
+            Book before;
+            before.dock(QStringLiteral("レイヤー"))->hide();
+            app::save_workspace(before.window.get(), QStringLiteral("写真"));  // (as a build before H-d kept it: no name refused)
+            app::settings()->setValue(QStringLiteral("workspace_changes/写真"), QStringLiteral("x"));
+        }
+        app::settings()->setValue(QStringLiteral("ui/workspace"), QStringLiteral("写真"));
+        Book b;
+        QCOMPARE(app::workspaces(), QStringList{QStringLiteral("写真（自分）")});
+        QCOMPARE(app::settings()->value(QStringLiteral("ui/workspace")).toString(), QStringLiteral("写真（自分）"));
+        QVERIFY(!app::settings()->contains(QStringLiteral("workspace_changes/写真")));
+        QCOMPARE(app::settings()->value(QStringLiteral("workspace_changes/写真（自分）")).toString(), QStringLiteral("x"));
+        QVERIFY2(b.window->last_notice().contains(QStringLiteral("「写真（自分）」")), qPrintable(b.window->last_notice()));
+        app::settings()->remove(QStringLiteral("workspace_changes/写真（自分）"));  // (its layout as kept, then)
+        b.window->choose_workspace(QStringLiteral("写真（自分）"));
+        QVERIFY(!b.dock(QStringLiteral("レイヤー"))->isVisible());  // (the person's own panels)
+        b.act("act_workspace_photography")->trigger();
+        QVERIFY(b.dock(QStringLiteral("ヒストグラム"))->isVisible() && b.dock(QStringLiteral("レイヤー"))->isVisible());  // (Photoshop's)
+        QCOMPARE(app::move_reserved_workspaces().size(), std::size_t{0});  // (once)
+        b.act("act_workspace_essentials")->trigger();
+    }
+
+    // The review's P2-3: a window opening in the person's own workspace takes its panels, never the window's size kept with it
+    // (H-c's floating windows and 新規ウィンドウ keep theirs); chosen, the size comes too.
+    void aWindowOpeningKeepsItsSize() {
+        {
+            Book small;
+            small.window->resize(900, 600);
+            QCoreApplication::processEvents();
+            small.dock(QStringLiteral("レイヤー"))->hide();
+            QVERIFY(small.window->save_workspace(QStringLiteral("小さい窓")));
+        }
+        QCOMPARE(app::settings()->value(QStringLiteral("ui/workspace")).toString(), QStringLiteral("小さい窓"));
+        Book b;
+        QCOMPARE(b.window->current_workspace(), QStringLiteral("小さい窓"));
+        QCOMPARE(b.window->size(), QSize(1280, 860));
+        QVERIFY(!b.dock(QStringLiteral("レイヤー"))->isVisible());  // (its panels)
+        b.act("act_workspace_essentials")->trigger();
+        QVERIFY(b.dock(QStringLiteral("レイヤー"))->isVisible());
+    }
+
+    // The review's P3: 組を保存… refuses one key on two commands; 前のコマンドから外して付ける takes that key only (一般…'s Ctrl+, stays);
+    // メニュー…'s 決める keeps the items its tree does not show; 概要… never over the book; a workspace's broken keys never empty
+    // the person's; a tool moved to 余分なツール goes with its group; the lock reaches a panel made later; 組を削除 given up by
+    // やめる; an own set's keys and a hidden item kept under a command's old name.
+    void theReviewsSmallerOnes() {
+        Book b;
+        app::MainWindow* w = b.window.get();
+        const auto key = [](const char* words) { return QKeySequence(QString::fromLatin1(words)); };
+        {
+            app::ShortcutsDialog dialog(w);
+            dialog.editor(QStringLiteral("ブラシツール"))->setKeySequence(key("Ctrl+K"));  // (一般…'s first: said)
+            QVERIFY(!dialog.save_set(QStringLiteral("重なる組")));
+            QVERIFY(app::key_sets::own_sets().isEmpty());
+            dialog.take_from_previous();
+            b.answers.responder->save_path = [this_book = b.path](const QString&, const QString&) {
+                return QString::fromStdString(genko::core::path_to_utf8(this_book));
+            };
+            b.answers.asked.clear();
+            QVERIFY(!dialog.write_summary());  // (the book itself: refused, said)
+            QVERIFY2(!b.answers.asked.isEmpty(), "said");
+            QVERIFY(!dialog.clash->text().contains(QStringLiteral("書き出しました")));
+            QVERIFY(gui_test::read_book(b.path).pages.size() == 2);  // (the book as it was)
+            dialog.save();
+        }
+        QCOMPARE(b.act("act_pen")->shortcut(), key("Ctrl+K"));
+        QCOMPARE(b.act("act_prefs")->shortcuts(), QList<QKeySequence>{key("Ctrl+,")});  // (its other key kept)
+        app::settings()->remove(QStringLiteral("shortcuts"));
+        app::settings()->remove(QStringLiteral("key_sets"));
+        app::preferences::apply_all(w);
+        // メニュー…: a command the tree does not show keeps its setting
+        app::menu_look::set_hidden({QStringLiteral("どこにも無い命令")});
+        app::menu_look::set_coloured({{QStringLiteral("どこにも無い命令"), QStringLiteral("blue")}});
+        {
+            app::ShortcutsDialog dialog(w, 1);
+            dialog.set_hidden(QStringLiteral("色の校正"), true);
+            dialog.save();
+        }
+        QVERIFY(app::menu_look::hidden().contains(QStringLiteral("どこにも無い命令")) && app::menu_look::hidden().contains(QStringLiteral("色の校正")));
+        QCOMPARE(app::menu_look::coloured().at(QStringLiteral("どこにも無い命令")), QStringLiteral("blue"));
+        app::menu_look::set_hidden({});
+        app::menu_look::set_coloured({});
+        // a workspace's keys broken: the person's kept
+        app::settings()->setValue(QStringLiteral("shortcuts/移動ツール"), QStringLiteral("Ctrl+Alt+Shift+F2"));
+        app::settings()->setValue(QStringLiteral("ui/key_set"), QStringLiteral("genko"));
+        app::save_workspace(w, QStringLiteral("壊れた"));
+        app::settings()->setValue(QStringLiteral("workspaces/壊れた/keys"), QStringLiteral("{\"keys\": oops"));
+        QVERIFY(!app::load_workspace_extras(QStringLiteral("壊れた")));
+        QCOMPARE(app::settings()->value(QStringLiteral("shortcuts/移動ツール")).toString(), QStringLiteral("Ctrl+Alt+Shift+F2"));
+        QCOMPARE(app::settings()->value(QStringLiteral("ui/key_set")).toString(), QStringLiteral("genko"));
+        app::settings()->remove(QStringLiteral("shortcuts"));
+        app::settings()->remove(QStringLiteral("ui/key_set"));
+        app::preferences::apply_all(w);
+        // 余分なツール: スポイト with its group
+        app::toolbar::keep(app::toolbar::default_order(), {QStringLiteral("act_picker"), QStringLiteral("act_3d")});
+        w->fill_palette();
+        QMenu* extra = w->extra_tools()->menu();
+        QCOMPARE(extra->actions().size(), qsizetype{4});
+        QMenu* group = extra->actions().front()->menu();
+        QVERIFY(group != nullptr);
+        QStringList tools;
+        for (QAction* a : group->actions()) tools << a->property("genko_attribute").toString();
+        QCOMPARE(tools, (QStringList{QStringLiteral("act_picker"), QStringLiteral("act_measure_ruler_tool"), QStringLiteral("act_note"),
+                                     QStringLiteral("act_measure_count_tool")}));
+        QCOMPARE(extra->actions().at(1), b.act("act_3d"));  // (then J-b's slices, away as Genko makes it)
+        app::toolbar::keep(app::toolbar::default_order(), {});
+        w->fill_palette();
+        // the lock over a panel made later
+        b.act("act_lock_workspace")->trigger();
+        auto* later = new QDockWidget(QStringLiteral("あとから"), w);
+        later->setObjectName(QStringLiteral("あとから"));
+        later->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
+        w->addDockWidget(Qt::RightDockWidgetArea, later);
+        QVERIFY(gui_test::wait_for([later] { return !later->features().testFlag(QDockWidget::DockWidgetMovable); }, 3000));
+        b.act("act_lock_workspace")->trigger();
+        QVERIFY(later->features().testFlag(QDockWidget::DockWidgetMovable));
+        delete later;
+        // 組を削除, then やめる: the set kept
+        app::key_sets::save_own(QStringLiteral("残る組"), QStringLiteral("photoshop"), {});
+        b.answers.responder->question = [](const QString&, const QString&) { return true; };
+        {
+            app::ShortcutsDialog dialog(w);
+            dialog.key_set->setCurrentIndex(dialog.key_set->findData(QStringLiteral("own:残る組")));
+            QVERIFY(dialog.delete_set());
+            dialog.reject();
+        }
+        QCOMPARE(app::key_sets::own_sets(), QStringList{QStringLiteral("残る組")});
+        app::key_sets::delete_own(QStringLiteral("残る組"));
+        // under a command's old name (renamed()): an own set's key, a hidden item
+        const QString old = QStringLiteral("今の配置をワークスペースとして残す…");
+        app::key_sets::save_own(QStringLiteral("前の名前の組"), QStringLiteral("photoshop"), {{old, {key("Ctrl+Alt+Shift+F3")}}});
+        app::settings()->setValue(QStringLiteral("ui/key_set_own"), QStringLiteral("前の名前の組"));
+        app::menu_look::set_hidden({old});
+        app::preferences::apply_all(w);
+        QCOMPARE(b.act("act_save_workspace")->shortcut(), key("Ctrl+Alt+Shift+F3"));
+        {
+            app::ShortcutsDialog dialog(w, 1);
+            QVERIFY(dialog.is_hidden(QStringLiteral("新規ワークスペース…")));
+        }
+        app::settings()->remove(QStringLiteral("ui/key_set_own"));
+        app::key_sets::delete_own(QStringLiteral("前の名前の組"));
+        app::menu_look::set_hidden({});
+        app::preferences::apply_all(w);
+        QVERIFY(b.act("act_save_workspace")->shortcut().isEmpty());
     }
 
     // A short window: the palette's pictures shrink (down to 16 px) so the last tool stays within reach; the layers'

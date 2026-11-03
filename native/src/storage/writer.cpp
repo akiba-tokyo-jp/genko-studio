@@ -201,7 +201,8 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
     if (layer.vector_mask) out["vector_mask"] = core::vector::to_json(*layer.vector_mask);
     if (layer.link) out["link"] = *layer.link;
     if (layer.lock_position) out["lock_position"] = true;
-    if (layer.native_psd) out["native_psd"] = core::to_json(*layer.native_psd);  // (psd-keep@1, PC4)
+    // (psd-keep@1, PC4; PC5 G-e: a text layer's block kept only by a type layer)
+    if (const std::optional<core::PsdLayerKeep> keep = core::written_keep(layer)) out["native_psd"] = core::to_json(*keep);
     if (layer.style) out["style"] = *layer.style;  // (layer-styles@1, PC4 E6)
     if (layer.group) out["group"] = true;  // (groups@1, PC5 I-b)
     // (PC5 I-a: layer-locks@1's locks, blend-channels@1's channels — none: nothing written)

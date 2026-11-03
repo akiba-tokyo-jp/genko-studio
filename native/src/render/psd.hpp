@@ -239,6 +239,8 @@ public:
     // core::Error("format") for a block that cannot be read.
     std::optional<TextLayer> text(const Layer& layer) const;
     std::optional<Stroke> stroke(const Layer& layer) const;
+    // (PC5 G-e) A layer's TySh block's payload as the file holds it; nothing for a layer without one.
+    std::optional<std::string_view> text_block(const Layer& layer) const;
     // vector@1 (PC3 C-a, render/psd_paths): a layer's vmsk (or vsms) block's payload — its vector mask —, nothing for a layer
     // without one; and the file's path resources (its saved paths 2000–2997 with their names, its work path 1025, its
     // clipping path 2999), in the file's order.

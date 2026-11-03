@@ -466,6 +466,31 @@ Opened open_psd(std::string_view bytes, const std::string& file, const OpenOptio
             for (const Json& n : report["skipped"]) names += (names.empty() ? "" : "、") + (n.is_string() ? n.get<std::string>() : std::string());
             notes.push_back("この版で読めないレイヤーは開きませんでした（" + names + "）");
         }
+        // (PC5 G-e, the review's P2-1: the text layers — the fonts not found, those opened as their pixels and why, the rest)
+        if (const auto fonts = report.find("type_fonts_missing"); fonts != report.end() && fonts->is_array() && !fonts->empty()) {
+            std::string names;
+            std::size_t n = 0;
+            for (const Json& f : *fonts) {
+                if (f.is_string() && n++ < 10) names += (names.empty() ? "" : "、") + f.get<std::string>();
+            }
+            if (fonts->size() > 10) names += "、…";
+            notes.push_back("同梱の書体に無い書体は、名前を残して既定の書体で描きます（" + names + "）");
+        }
+        if (const auto pixels = report.find("type_as_pixels"); pixels != report.end() && pixels->is_array()) {
+            std::size_t said = 0;
+            for (const Json& p : *pixels) {
+                if (!p.is_object()) continue;
+                if (said++ == 20) {  // (at most 20 of them said one by one)
+                    notes.push_back("ほか " + std::to_string(pixels->size() - 20) + " 枚の文字レイヤーも画素で開きました");
+                    break;
+                }
+                const std::string why = p.value("why", std::string());
+                notes.push_back("文字レイヤー「" + p.value("title", std::string()) + "」は画素で開きました" + (why.empty() ? std::string() : "（" + why + "）"));
+            }
+        }
+        if (const auto said = report.find("type_notes"); said != report.end() && said->is_array())
+            for (const Json& n : *said)
+                if (n.is_string()) notes.push_back(n.get<std::string>());
         if (report.contains("groups_as_folders")) {  // (groups@1, PC5 I-b: nested past core::kGroupDepthMax)
             std::string names;
             for (const Json& n : report["groups_as_folders"]) names += (names.empty() ? "" : "、") + (n.is_string() ? n.get<std::string>() : std::string());

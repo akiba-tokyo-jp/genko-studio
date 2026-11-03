@@ -15,6 +15,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/ruby.hpp"
+#include "core/type_text.hpp"
 #include "formats/psd_text_detail.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
@@ -216,9 +217,35 @@ const std::vector<PsdTextFeature>& psd_text_unsupported() {
         {"emphasis", "傍点", "PSD の文字に傍点がないため、文字にできない"},
         {"ruby_runs", "組み方の変わる旧形式のルビ",
          "旧形式のルビ（ruby_runs）は位置で持つルビにして書くが、読みが本文より長いときなど画面と違う組み方になるため、文字にできない（ルビを振り直すと文字にできる）"},
+        // (PC5 G-e: a type layer's)
+        {"type_turned", "回したテキストレイヤーのフキダシ・ルビ・縁取り",
+         "フキダシ・ルビ・縁取りは本文と別のレイヤーのため、回したテキストレイヤーと一緒に回せず、文字にできない"},
     };
     return table;
 }
+
+namespace detail {
+
+std::vector<std::string> type_layer_features(const core::Layer& layer, const core::Num& page, std::int64_t dpi, const std::optional<std::string>& font_path) {
+    if (!layer.type) return {};
+    const core::StoryLine twin = core::type_text::line_of(layer, page);
+    std::vector<std::string> out = line_features(twin, dpi, font_path);
+    if (!out.empty()) return out;
+    const core::StoryLine& record = *layer.type;
+    const bool shaped = record.native_type && record.native_type->is_object() && record.native_type->contains("shape");
+    if (shaped && type_layer_plain(twin)) return out;  // (its own text layer: render/psd_type)
+    const bool alone = twin.balloon == "none" && (!twin.ruby_spans || twin.ruby_spans->empty()) && twin.ruby_runs.empty() &&
+                       !core::py_truthy(at(render::text::style_of(twin), "outline_mm"));
+    if (!alone && core::type_text::transform_of(record)) out.emplace_back("type_turned");
+    return out;
+}
+
+bool type_layer_plain(const core::StoryLine& twin) {
+    return twin.balloon == "none" && twin.tails.empty() && !twin.path && twin.emphasis_runs.empty() && twin.ruby_runs.empty() &&
+           (!twin.ruby_spans || twin.ruby_spans->empty()) && !core::py_truthy(core::get_or(twin.style, "outline_mm", Json()));
+}
+
+}  // namespace detail
 
 std::vector<PsdTextIssue> psd_text_issues(const core::Document& episode, std::int64_t dpi) {
     std::vector<PsdTextIssue> out;
@@ -230,6 +257,16 @@ std::vector<PsdTextIssue> psd_text_issues(const core::Document& episode, std::in
             if (features.empty()) continue;
             out.push_back(PsdTextIssue{core::py_int(page->index.json()), line->id, detail::words_of(line->text, 24), std::move(features)});
         }
+        for (const core::Layer& layer : page->layers) {  // (PC5 G-e: its type layers shown)
+            // (a hidden one too where the PSD writes the hidden layers — a page with layer comps: the review's P3-5)
+            const bool hidden_written = page->layer_comps && !page->layer_comps->comps.empty();
+            if (!core::type_text::is_type_layer(layer) || (!layer.visible && !hidden_written) || !layer.exportable) continue;
+            std::vector<std::string> features = detail::type_layer_features(layer, page->index, dpi, font_path);
+            if (features.empty()) continue;
+            PsdTextIssue issue{core::py_int(page->index.json()), std::string(), detail::words_of(layer.type->text, 24), std::move(features)};
+            issue.layer = layer.id;
+            out.push_back(std::move(issue));
+        }
     }
     return out;
 }
@@ -238,6 +275,7 @@ Json issues_json(const std::vector<PsdTextIssue>& issues) {
     Json out = Json::array();
     for (const PsdTextIssue& issue : issues) {
         out.push_back(Json{{"page", issue.page}, {"line", issue.line}, {"text", issue.text}, {"features", Json(issue.features)}});
+        if (!issue.layer.empty()) out.back()["layer"] = issue.layer;  // (PC5 G-e: a type layer's)
     }
     return out;
 }

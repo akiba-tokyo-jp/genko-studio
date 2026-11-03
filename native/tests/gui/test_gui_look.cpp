@@ -56,6 +56,7 @@
 #include "app/look.hpp"
 #include "app/main_window.hpp"
 #include "app/preferences.hpp"
+#include "app/shortcuts_dialog.hpp"
 #include "app/story_panel.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
@@ -739,14 +740,19 @@ private slots:
         Book book;
         app::MainWindow* w = book.window.get();
         app::preferences::PreferencesDialog dialog(w);
-        // two commands on one key are refused
-        dialog.editor(QStringLiteral("ブラシツール"))->setKeySequence(QKeySequence(QStringLiteral("E")));
-        dialog.save();
-        QVERIFY(dialog.clash->text().contains(QStringLiteral("「E」")));
-        QCOMPARE(book.act("act_pen")->shortcut().toString(), QStringLiteral("B"));
-        QCOMPARE(dialog.result(), int(QDialog::Rejected));
-        // (a free key: F11 — P is ペンツール's since PC3 C-a, F7 the レイヤー panel's since PC5 H-0: Photoshop's)
-        dialog.editor(QStringLiteral("ブラシツール"))->setKeySequence(QKeySequence(QStringLiteral("F11")));
+        // two commands on one key are refused (PC5 H-d: in キーボードショートカット…'s own window, 環境設定's page before)
+        {
+            app::ShortcutsDialog keys(w);
+            keys.editor(QStringLiteral("ブラシツール"))->setKeySequence(QKeySequence(QStringLiteral("E")));
+            keys.save();
+            QVERIFY(keys.clash->text().contains(QStringLiteral("「E」")));
+            QCOMPARE(book.act("act_pen")->shortcut().toString(), QStringLiteral("B"));
+            QCOMPARE(keys.result(), int(QDialog::Rejected));
+            // (a free key: F11 — P is ペンツール's since PC3 C-a, F7 the レイヤー panel's since PC5 H-0: Photoshop's)
+            keys.editor(QStringLiteral("ブラシツール"))->setKeySequence(QKeySequence(QStringLiteral("F11")));
+            keys.save();
+            QCOMPARE(keys.result(), int(QDialog::Accepted));
+        }
         // the pen tablet: a light hand gets a softer curve
         for (int i = 0; i < 60; ++i) dialog.pad->pressures.push_back(0.25 + 0.01 * (i % 10));
         dialog.measure();
@@ -778,7 +784,7 @@ private slots:
         }
         QCOMPARE(app::NewProjectDialog(w).paper->currentData().toString(), QStringLiteral("b5"));
         // back to the first keys
-        app::preferences::PreferencesDialog again(w);
+        app::ShortcutsDialog again(w);
         again.reset_keys();
         again.save();
         QCOMPARE(book.act("act_pen")->shortcut().toString(), QStringLiteral("B"));

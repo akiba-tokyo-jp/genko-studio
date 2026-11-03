@@ -66,6 +66,10 @@
 #include "render/raw.hpp"
 #include "render/selection.hpp"
 #include "render/smart_decode.hpp"
+#include "core/type_text.hpp"
+#include "render/ops_type.hpp"
+#include "render/psd_text.hpp"
+#include "render/psd_type.hpp"
 
 namespace genko::render {
 
@@ -1079,6 +1083,21 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     if (!book_lit && file_light != core::global_light(doc)) light_differs = file_light;
     Json styled = Json::array();
     std::vector<std::string> style_notes;
+    // (PC5 G-e, type@1, the coordinator's decision for G: the file's text layers as type layers — render/psd_type —, each
+    // its pixels where Genko's text cannot hold it, said; Python's view and the merged picture read: pixels as before. Its
+    // TySh block kept to be written back while the record is the same, when the file is laid on the page pixel for pixel
+    // at a whole resolution)
+    psd_type::Frame type_frame;
+    type_frame.mm_x = style_placement.mm_x;
+    type_frame.mm_y = style_placement.mm_y;
+    type_frame.x0_mm = style_placement.x0_mm;
+    type_frame.y0_mm = style_placement.y0_mm;
+    psd_type::Sheets type_sheets;
+    Json type_layers = Json::array(), type_pixels = Json::array();
+    std::vector<std::string> type_fonts_missing, type_notes;
+    const double file_dpi = file.dpi();
+    const bool type_keeps = keeping && where.at_x == 0 && where.at_y == 0 && same_size && where.page_w == file.width() && where.page_h == file.height() &&
+                            file_dpi >= 1 && file_dpi <= 100000 && file_dpi == std::floor(file_dpi);
     std::vector<core::Layer> made;
     std::vector<std::string> patterns_filled;  // (patterns@1: the pattern fill layers read)
     std::vector<std::string> shapes_skipped, shapes_read;  // (pen-shapes@1: shape layers this build cannot read, and those read)
@@ -1141,6 +1160,35 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
             }
             return kept;
         };
+        // (PC5 G-e: a text layer's record, when Genko's text holds it; its block)
+        std::optional<core::StoryLine> type_record;
+        std::string_view type_block;
+        if (!item.folder && item.kind == "text" && keeping && !merged_only && !psd_type::read_as_pixels()) {
+            std::string why;
+            try {
+                if (const std::optional<std::string_view> block = file.text_block(item)) {
+                    type_block = *block;
+                    const psd::TextLayer text = psd::read_tysh(*block, filters_budget.left);
+                    psd_type::Read typed = psd_type::read_text(text, type_frame, doc, type_sheets);
+                    for (const std::string& name : typed.missing_fonts) {
+                        if (std::find(type_fonts_missing.begin(), type_fonts_missing.end(), name) == type_fonts_missing.end() && type_fonts_missing.size() < 256)
+                            type_fonts_missing.push_back(name);
+                    }
+                    for (std::string& note : typed.notes) type_notes.push_back(std::move(note));
+                    if (typed.record) {
+                        type_ops::fit_point_text(*typed.record, doc);  // (a point text's box round its letters as set)
+                        type_record = std::move(typed.record);
+                    } else {
+                        why = typed.why;
+                    }
+                }
+            } catch (const core::Error& error) {
+                why = std::string("文字として読めません（") + error.what() + "）";
+            } catch (const core::OpError& error) {  // (its attributes or size what no type layer takes)
+                why = std::string("文字として読めません（") + error.what() + "）";
+            }
+            if (!type_record && type_pixels.size() < 256) type_pixels.push_back(Json{{"id", layer.id}, {"title", layer.title}, {"why", why}});
+        }
         if (item.folder && psd::python_view()) {
             layer.kind = core::LayerKind::Folder;  // (as psd.read_psd's: a folder, an order of layers only)
         } else if (item.folder && depth[i] >= core::kGroupDepthMax) {
@@ -1223,6 +1271,15 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
             layer.blend = "normal";
             if (auto mask = mask_of()) layer.mask = std::move(*mask);
             layer.vector_mask = vector_mask_of(item);
+        } else if (type_record) {
+            // (PC5 G-e: a type layer — its text set by Genko's typesetting —, as a type layer is made: not cut by the panels)
+            layer.kind = core::LayerKind::Type;
+            layer.role = core::LayerRole::Text;
+            layer.panel_clip = false;
+            layer.type = core::type_text::shared_record(*type_record);
+            if (auto mask = mask_of()) layer.mask = std::move(*mask);
+            layer.vector_mask = vector_mask_of(item);
+            type_layers.push_back(layer.id);
         } else {
             layer.kind = core::LayerKind::Raster;
             // (a painting app's picture: on a monochrome page it prints in grey and tones)
@@ -1358,6 +1415,14 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
         if (keeping && !merged_only) {
             bool effect = false;
             layer.native_psd = layer_keep(doc, file, item, names_layers, effect, kept_so_far);
+            // (PC5 G-e: a type layer's TySh block and its record's fingerprint, to be written back while it is the same)
+            if (layer.kind == core::LayerKind::Type && type_keeps && !type_block.empty() &&
+                kept_so_far.room(layer.native_psd ? layer.native_psd->blocks.size() : 0, type_block.size())) {
+                core::PsdLayerKeep keep = layer.native_psd.value_or(core::PsdLayerKeep{});
+                keep.blocks.emplace_back("TySh", kept(doc, type_block));
+                keep.text = psd_type::fingerprint(*layer.type, doc, doc.page(index), static_cast<std::int64_t>(file_dpi), where.page_w, where.page_h);
+                layer.native_psd = std::move(keep);
+            }
             // (layer-styles@1, PC4 E6: its effects, fill opacity and Blend If as its style — drawn by this build)
             if (!item.folder && core::takes_layer_style(layer) &&
                 style_from_record(layer, file, item, style_placement, light_differs, style_notes, filters_budget.left)) {
@@ -1525,6 +1590,21 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
                                                    [](const psd::File::TaggedBlock& g) { return core::psd_global_kept(g.key); }))) {
         report["psd_page"] = "earlier";  // (the page keeps an earlier PSD's resources and global blocks: this file's are not kept)
     }
+    // (PC5 G-e: the text layers read as type layers, those read as their pixels and why, the fonts not found by their
+    // PostScript names — drawn in the default —, the styles taken in and what else is said; each only when there is one)
+    if (!type_layers.empty()) report["type_layers"] = std::move(type_layers);
+    if (!type_pixels.empty()) report["type_as_pixels"] = std::move(type_pixels);
+    if (!type_fonts_missing.empty()) report["type_fonts_missing"] = type_fonts_missing;
+    if (!type_sheets.added.empty()) report["type_styles"] = type_sheets.added;
+    if (type_sheets.full) type_notes.push_back("文字スタイル・段落スタイルが 512 を超えるため、残りは読みませんでした（文字の見え方はそのまま）");
+    if (!type_notes.empty()) {
+        std::vector<std::string> once;
+        for (std::string& note : type_notes) {
+            if (std::find(once.begin(), once.end(), note) == once.end() && once.size() < 20) once.push_back(std::move(note));
+        }
+        report["type_notes"] = once;
+    }
+    if (report.contains("type_layers") || !type_sheets.added.empty()) core::type_text::add_feature(doc);
     if (!effects.empty()) report["effects"] = std::move(effects);
     if (book_lit && !styled.empty()) {  // (no style read: the book's light left as it is, the file's kept in its resources)
         doc.global_light = file_light[0] == core::kDefaultLightAngle && file_light[1] == core::kDefaultLightAltitude

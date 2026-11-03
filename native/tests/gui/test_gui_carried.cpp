@@ -391,12 +391,12 @@ private slots:
         }
         const QString guide = app::help::guide(w);
         QVERIFY(guide.contains(QStringLiteral("「ファイル → 新規…」")));  // (PC4 F-0: Photoshop's name)
-        QVERIFY(guide.contains(QStringLiteral("「ウィンドウ → 作業の段階」の「ネームの並び」「作画の並び」")));  // (where the stages are: Python's guide said 表示)
+        QVERIFY(guide.contains(QStringLiteral("「ウィンドウ → ワークスペース → 作業の段階」の「ネームの並び」「作画の並び」")));  // (where the stages are: Python's guide said 表示; PC5 H-d: in ワークスペース ▸)
         QVERIFY(guide.contains(QStringLiteral("ブラシツール（B）")));  // (PC4 E-0, decision 2)
         QVERIFY(guide.contains(QStringLiteral("[ と ] で太さ")));
         QVERIFY(guide.contains(QStringLiteral("「ページ → 台詞 → フキダシを手で描く」")));
         const QString faq = app::help::faq(w);
-        QVERIFY(faq.contains(QStringLiteral("「ウィンドウ → ワークスペース → はじめの配置に戻す」")));  // (a menu filled as it opens)
+        QVERIFY(faq.contains(QStringLiteral("「ウィンドウ → ワークスペース → 初期設定」")));  // (a menu filled as it opens; PC5 H-d: Photoshop's 初期設定)
         QVERIFY(faq.contains(QStringLiteral("「マスク ▾」、または「レイヤー → レイヤーマスク → マスクを編集する（ブラシで見せる・消しゴムで隠す）」")));
         QVERIFY(app::help::shortcut_html(w).contains(QStringLiteral("キーは「編集 → キーボードショートカット…」で変えられます")));  // (PC5 H-0)
         // a key changed: the guide and the list say the new one

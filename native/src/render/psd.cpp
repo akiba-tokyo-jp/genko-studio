@@ -1046,6 +1046,13 @@ std::optional<TextLayer> File::text(const Layer& layer) const {
     return read_tysh(std::string_view(data_).substr(static_cast<std::size_t>(rec.tysh_at), static_cast<std::size_t>(rec.tysh_size)));
 }
 
+std::optional<std::string_view> File::text_block(const Layer& layer) const {
+    if (layer.folder || layer.record >= records_.size()) return std::nullopt;
+    const Record& rec = records_[layer.record];
+    if (rec.tysh_size == 0) return std::nullopt;
+    return std::string_view(data_).substr(static_cast<std::size_t>(rec.tysh_at), static_cast<std::size_t>(rec.tysh_size));
+}
+
 std::optional<std::string_view> File::vector_mask(const Layer& layer) const {
     if (layer.record >= records_.size()) return std::nullopt;  // (a folder's too: groups@1, PC5 I-b)
     const Record& rec = records_[layer.record];

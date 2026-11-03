@@ -496,7 +496,8 @@ void MainWindow::showEvent(QShowEvent* event) {
                 if (shown && isVisible() && !dock->isFloating()) fade_in(dock->widget(), 140);
             });
         }
-        default_state_ = saveState();  // (ウィンドウ → ワークスペース → はじめの配置に戻す)
+        default_state_ = saveState();  // (ウィンドウ → ワークスペース → 初期設定)
+        restore_workspace_at_start();  // (PC5 H-d: the workspace in use last time)
         quick_access_->refresh();
     }
 }

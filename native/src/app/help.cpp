@@ -89,7 +89,8 @@ const char* const kFaq = R"HTML(
 <h3>画面が回った・反転したまま</h3>
 <p>{menu:act_turn_reset}（{key:act_turn_reset}）。</p>
 <h3>パネルを閉じてしまった</h3>
-<p>{top:ウィンドウ}から出し直せます。{menu:はじめの配置に戻す}で、最初の並びに戻ります。</p>
+<p>{top:ウィンドウ}から出し直せます。{menu:act_workspace_essentials}で、最初の並びに戻ります（{menu:act_workspace_reset}は、今のワークスペースを残したときの並びに）。
+パネルが動かないときは{menu:act_lock_workspace}が入っていないか確かめます。</p>
 <h3>文字が枠からはみ出す・小さすぎる</h3>
 <p>{menu:act_checks}（{key:act_checks}）で場所が分かります。台詞パネルで文字の大きさを「自動」にすると、フキダシに合わせて縮みます。</p>
 <h3>ほかのパソコンで開いたら線の見た目が違う</h3>
@@ -101,7 +102,8 @@ const char* const kFaq = R"HTML(
 <h3>台詞の文字の設定が見当たらない</h3>
 <p>選択ツール（{menu:act_select}）で台詞をクリックすると、左の「オプション」に文字とフキダシの設定が出ます。</p>
 <h3>キーを変えたい・筆圧が合わない</h3>
-<p>{menu:act_keyboard_shortcuts}でキーを変え（Photoshop と同じキーと、前の Genko のキーの組も選べます）、{menu:act_prefs_tablet}の試し書きで筆圧を合わせます。</p>
+<p>{menu:act_keyboard_shortcuts}でキーを変え（Photoshop と同じキーと、前の Genko のキーの組も選べます。自分の組も保存できます）、{menu:act_prefs_tablet}の試し書きで筆圧を合わせます。
+使わないメニューの項目は{menu:act_menus}で隠せ、ツールの並びは{menu:act_toolbar}で変えられます。</p>
 )HTML";
 
 namespace {

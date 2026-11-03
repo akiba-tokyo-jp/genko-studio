@@ -2655,9 +2655,14 @@
         ]
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/shortcuts_dialog.cpp",
+        "native/src/app/key_sets.cpp",
+        "native/tests/gui/test_gui_workspace.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -2701,9 +2706,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/shortcuts_dialog.cpp",
+        "native/src/app/menu_look.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -3851,9 +3860,15 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/preferences.cpp",
+        "native/src/app/main_window_workspace.cpp",
+        "native/src/core/prefs_table.cpp",
+        "native/tests/gui/test_gui_workspace.cpp",
+        "native/tests/unit/test_prefs_table.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4410,9 +4425,12 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/workspace.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4546,9 +4564,13 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/toolbar_dialog.cpp",
+        "native/src/app/main_window_workspace.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -4561,7 +4583,8 @@
         "tests": [],
         "gap": "道具の列の道具を隠す・並べ替える設定が無い",
         "note": "「コマンドバーを変える…」はコマンドの列で道具の列ではない"
-      }
+      },
+      "limitations": "PC5 H-d: 並べ替え・区切り・余分なツール・初期設定に戻すを作った。ツールのグループの組み替え（節 H 5.4）は作らない（グループは paint_tool_groups の表のまま。調整役の判断で行は閉じる）。"
     },
     {
       "id": "edit.transform",
@@ -40966,9 +40989,13 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_workspace.cpp",
+        "native/src/app/workspace.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -41004,9 +41031,13 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_workspace.cpp",
+        "native/src/app/workspace.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -41042,9 +41073,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_workspace.cpp",
+        "native/src/app/workspace.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -41080,9 +41115,12 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_workspace.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -41113,9 +41151,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_workspace.cpp",
+        "native/src/app/workspace.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -41151,9 +41193,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_workspace.cpp",
+        "native/src/app/workspace.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -41192,9 +41238,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_workspace.cpp",
+        "native/src/app/workspace.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -41230,9 +41280,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_workspace.cpp",
+        "native/src/app/workspace.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -41268,9 +41322,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_workspace.cpp",
+        "native/src/app/workspace.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -41306,9 +41364,13 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 H-d、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/main_window_workspace.cpp",
+        "native/src/app/workspace.cpp",
+        "native/tests/gui/test_gui_workspace.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
