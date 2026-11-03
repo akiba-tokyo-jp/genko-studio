@@ -226,8 +226,14 @@ int print_command(int argc, char** argv) {
         }
         if (!setup.dpi) setup.dpi = 300;
         if (paper) {
-            const QPageSize size(QSizeF(paper->width_mm, paper->height_mm), QPageSize::Millimeter, QString::fromStdString(paper->name), QPageSize::ExactMatch);
-            printer.setPageSize(size);
+            // (Qt's own size for a paper it knows — what the printer and the PDF take —, else the size given)
+            static const std::map<std::string, QPageSize::PageSizeId> kKnown{
+                {"a3", QPageSize::A3},       {"a4", QPageSize::A4},         {"a5", QPageSize::A5},   {"b4", QPageSize::JisB4},
+                {"b5", QPageSize::JisB5},    {"letter", QPageSize::Letter}, {"legal", QPageSize::Legal}, {"tabloid", QPageSize::Tabloid}};
+            const auto known = kKnown.find(paper->name);
+            printer.setPageSize(known != kKnown.end() ? QPageSize(known->second)
+                                                      : QPageSize(QSizeF(paper->width_mm, paper->height_mm), QPageSize::Millimeter,
+                                                                  QString::fromStdString(paper->name), QPageSize::ExactMatch));
         }
         printer.setPageOrientation(landscape ? QPageLayout::Landscape : QPageLayout::Portrait);
         if (to_pdf) printer.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout::Millimeter);
@@ -237,13 +243,14 @@ int print_command(int argc, char** argv) {
         const std::vector<fp::Sheet> sheets = printing::print_sheets(
             doc, printer, pages, setup, {}, [&hashes](const QImage& picture, const QRectF&) { hashes.push_back(rows_sha256(picture)); }, !dry);
         const auto [full, printable] = printing::paper_of(printer);
+        const QRectF sheet_mm = printer.pageLayout().fullRect(QPageLayout::Millimeter);
         Json out{{"ok", true}, {"dry_run", dry}};
         if (to_pdf && value("--pdf")) out["pdf"] = value("--pdf")->toStdString();
         if (!to_pdf) out["printer"] = printer.printerName().toStdString();
         out["copies"] = setup.copies;
         out["paper"] = Json{{"name", paper ? paper->name : std::string("printer")},
-                            {"width_mm", std::round(full.w * 1000.0) / 1000.0},
-                            {"height_mm", std::round(full.h * 1000.0) / 1000.0},
+                            {"width_mm", std::round(sheet_mm.width() * 1000.0) / 1000.0},
+                            {"height_mm", std::round(sheet_mm.height() * 1000.0) / 1000.0},
                             {"orientation", landscape ? "landscape" : "portrait"}};
         out["printable_mm"] = Json::array({std::round(printable.x * 1000.0) / 1000.0, std::round(printable.y * 1000.0) / 1000.0,
                                            std::round(printable.w * 1000.0) / 1000.0, std::round(printable.h * 1000.0) / 1000.0});

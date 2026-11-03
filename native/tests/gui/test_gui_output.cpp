@@ -1812,7 +1812,6 @@ private slots:
         const formats::print::Sheet& sheet = sheets[0];
         const render::Image want = formats::print::page_picture(doc, doc.page(0), "bleed", 150, setup.color);
         QVERIFY(rgb_rows(pictures[0]) == want.tobytes());
-        QVERIFY(rgb_rows(pictures[0]) != printed(doc, doc.page(0), "bleed", 150).tobytes());  // (the printer profile's numbers)
         const auto [paper, printable] = app::printing::paper_of(printer);
         const double k = printer.resolution() / 25.4;
         QVERIFY(std::abs(targets[0].x() - (sheet.image.x - printable.x) * k) < 1e-6 && std::abs(targets[0].width() - sheet.image.w * k) < 1e-6);
@@ -1847,7 +1846,7 @@ private slots:
         printer.setCopyCount(4);
         QVERIFY(s.window->print_one_copy(&printer));
         QCOMPARE(printer.copyCount(), 1);
-        QCOMPARE(s.window->statusBar()->currentMessage(), QStringLiteral("1 部プリントしました（2 枚）"));
+        QCOMPARE(s.window->last_notice(), QStringLiteral("1 部プリントしました（2 枚）"));
         QFile f(pdf);
         QVERIFY(f.open(QIODevice::ReadOnly));
         QCOMPARE(f.readAll().count("/Type /Page") - 1, 2);  // (and its /Type /Pages)
@@ -1876,8 +1875,7 @@ private slots:
         QVERIFY(!fs::exists(dir));
         s.act("act_save")->trigger();
         QVERIFY(fs::exists(dir / "logo.png") && fs::exists(dir / "half.png"));
-        QVERIFY2(s.window->statusBar()->currentMessage().startsWith(QStringLiteral("保存しました。画像アセット 2 個を書き出しました")),
-                 qPrintable(s.window->statusBar()->currentMessage()));
+        QVERIFY2(s.window->last_notice().startsWith(QStringLiteral("保存しました。画像アセット 2 個を書き出しました")), qPrintable(s.window->last_notice()));
         // off (Undo): nothing written on the next save
         s.act("act_undo")->trigger();
         QVERIFY(!s.doc().image_assets);

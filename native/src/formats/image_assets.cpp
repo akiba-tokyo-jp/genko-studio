@@ -103,8 +103,10 @@ std::pair<double, double> wanted(double w0, double h0, const core::image_assets:
     return {std::max(1.0, std::round(tw)), std::max(1.0, std::round(th))};
 }
 
+// A size other than the layer's own at the page's resolution: drawn at that, then made the size asked exactly (PhotoCraft's:
+// the layer's pixels resized — a 50 % of 64 × 40 is 32 × 20).
 bool sized(const core::image_assets::Spec& spec, const core::image_assets::Default& v) {
-    return spec.width || spec.height || v.width || v.height;
+    return spec.width || spec.height || v.width || v.height || spec.scale.value_or(1.0) != 1.0 || v.scale.value_or(1.0) != 1.0;
 }
 
 bool transparent(const std::string& format) { return format != "jpg" && format != "png24"; }
@@ -155,8 +157,7 @@ std::vector<std::string> write_group(const core::Document& doc, const Job& job, 
                                        render::codecs::Layout::Rgba, render::codecs::Sample::U8);
         picture = render::codecs::resized(picture, static_cast<std::uint32_t>(tw), static_cast<std::uint32_t>(th), options.resample);
     } else {
-        const double k = job.spec.scale.value_or(1.0) * v.scale.value_or(1.0);
-        picture = group_picture(doc, page, *job.layer, std::max(1, static_cast<int>(std::lround(base * k))));
+        picture = group_picture(doc, page, *job.layer, base);
     }
     if (!options.transparency) picture = over_white(picture);
     const std::string ext = core::path_to_utf8(out.extension()).substr(1);
@@ -263,9 +264,6 @@ Result generate(const core::Document& doc, const fs::path& dir, const WriteGuard
                         const auto [tw, th] = wanted(own.image.width(), own.image.height(), job.spec, v);
                         options.width = static_cast<std::uint32_t>(std::min(tw, 4.0e9));
                         options.height = static_cast<std::uint32_t>(std::min(th, 4.0e9));
-                    } else {
-                        options.scale = 100.0 * job.spec.scale.value_or(1.0) * v.scale.value_or(1.0);
-                        if (options.scale < 1.0 || options.scale > 1000.0) throw core::Error("value", "the scale is 1% to 1000%");
                     }
                     notes = write_copy(doc, job.page, out, options).notes;
                 }

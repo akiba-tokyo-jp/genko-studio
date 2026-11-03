@@ -11,6 +11,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -557,13 +558,22 @@ private slots:
             QVERIFY(std::find(names.begin(), names.end(), "img0") != names.end() && std::find(names.begin(), names.end(), "img3") != names.end());
             // a small picture inside its cell (200 × 150 less the spacing and the caption)
             for (const core::Layer& layer : page.layers) {
-                if (layer.title != "img0") continue;
-                formats::CopyOptions alone;
-                alone.layer = layer.id;
-                const formats::PagePicture picture = formats::copy_picture(first, 0, alone);
-                QVERIFY2(picture.image.width() <= 200 && picture.image.height() < 150,
-                         qPrintable(QStringLiteral("%1×%2").arg(picture.image.width()).arg(picture.image.height())));
-                QVERIFY(picture.image.width() > 150);  // (as large as its cell lets it be)
+                if (layer.title != "img0" || layer.kind != core::LayerKind::Raster) continue;  // (not its caption, named by its text)
+                // (its pixels on the sheet's grid, at the sheet's 72 ppi: the part that shows)
+                const formats::PagePicture picture = formats::layer_picture(page, layer, first, 72);
+                const unsigned all = render::codecs::channels(picture.image.layout());
+                std::uint32_t x0 = picture.image.width(), x1 = 0, y0 = picture.image.height(), y1 = 0;
+                for (std::uint32_t y = 0; y < picture.image.height(); ++y) {
+                    for (std::uint32_t x = 0; x < picture.image.width(); ++x) {
+                        if (picture.image.value((std::size_t(y) * picture.image.width() + x) * all + all - 1) <= 0.0f) continue;
+                        x0 = std::min(x0, x);
+                        x1 = std::max(x1, x + 1);
+                        y0 = std::min(y0, y);
+                        y1 = std::max(y1, y + 1);
+                    }
+                }
+                QVERIFY2(x1 > x0 && x1 - x0 <= 200 && y1 - y0 < 150 && x1 - x0 > 150,  // (inside its cell, as large as it lets it be)
+                         qPrintable(QStringLiteral("%1×%2").arg(x1 - x0).arg(y1 - y0)));
             }
             QCOMPARE(made.books[1].page(0).layers.size(), std::size_t(1 + 1 + 1));  // (背景, img4 and its caption)
         }

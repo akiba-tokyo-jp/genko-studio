@@ -117,18 +117,23 @@ private slots:
         QCOMPARE(out["ok"], Json(true));
         QCOMPARE(out["dry_run"], Json(true));
         QCOMPARE(out["paper"]["name"], Json("a4"));
-        QVERIFY(near(out["paper"]["width_mm"].get<double>(), 210.0, 0.01) && near(out["paper"]["height_mm"].get<double>(), 297.0, 0.01));
+        QVERIFY(near(out["paper"]["width_mm"].get<double>(), 210.0, 0.5) && near(out["paper"]["height_mm"].get<double>(), 297.0, 0.5));
+        // (a PDF's paper is printed whole: its printable part from the corner — Qt's size of A4 in its own units)
+        const std::vector<double> room = numbers(out["printable_mm"]);
+        QVERIFY(near(room[0], 0.0) && near(room[1], 0.0) && near(room[2], 210.0, 0.5) && near(room[3], 297.0, 0.5));
         QCOMPARE(out["color"], (Json{{"handling", "printer"}}));
         QCOMPARE(out["sheets"].size(), std::size_t{1});
         const Json& sheet = out["sheets"][0];
         QCOMPARE(sheet["pages"], Json::array({1}));
         QCOMPARE(sheet["pixels"], Json::array({120, 90}));
         QCOMPARE(sheet["dpi"], Json(72));
-        // (120 px at 72 ppi is 42.333 mm: fitted across the 210 mm, centred down the paper)
+        // (120 px at 72 ppi is 42.333 mm: fitted across the paper, centred down it)
         std::vector<double> image = numbers(sheet["image_mm"]);
-        QVERIFY2(near(image[0], 0.0) && near(image[2], 210.0) && near(image[3], 157.5) && near(image[1], (297.0 - 157.5) / 2.0), qPrintable(QString::fromStdString(sheet.dump())));
+        const double fitted_h = room[2] * 90.0 / 120.0;
+        QVERIFY2(near(image[0], 0.0) && near(image[2], room[2]) && near(image[3], fitted_h) && near(image[1], (room[3] - fitted_h) / 2.0),
+                 qPrintable(QString::fromStdString(sheet.dump())));
         QCOMPARE(sheet["trim_mm"], sheet["image_mm"]);  // (a picture's page: its finished size is all of it)
-        QVERIFY(near(sheet["scale"].get<double>(), 210.0 / (120 * 25.4 / 72) * 100.0, 0.001));
+        QVERIFY(near(sheet["scale"].get<double>(), room[2] / (120 * 25.4 / 72) * 100.0, 0.01));
         QCOMPARE(sheet["outside"], Json(false));
         QVERIFY(sheet["marks"]["lines"].empty() && sheet["marks"]["circles"].empty() && sheet["texts"].empty());
         // the picture as the page prints: its colour as it is (the printer manages the colours)
@@ -137,7 +142,7 @@ private slots:
         std::tie(code, out) = run({QStringLiteral("--scale"), QStringLiteral("actual")});
         QCOMPARE(code, 0);
         image = numbers(out["sheets"][0]["image_mm"]);
-        QVERIFY(near(image[2], 42.333) && near(image[3], 31.75) && near(image[0], (210.0 - 42.333) / 2.0, 0.003));
+        QVERIFY(near(image[2], 42.333) && near(image[3], 31.75) && near(image[0], (room[2] - 42.333) / 2.0, 0.003));
         QVERIFY(near(out["sheets"][0]["scale"].get<double>(), 100.0));
         std::tie(code, out) = run({QStringLiteral("--scale"), QStringLiteral("50%"), QStringLiteral("--position"), QStringLiteral("10,20")});
         QCOMPARE(code, 0);
@@ -150,10 +155,10 @@ private slots:
         // landscape A5, and a paper of its own size
         std::tie(code, out) = run({QStringLiteral("--paper"), QStringLiteral("a5"), QStringLiteral("--orientation"), QStringLiteral("landscape")});
         QCOMPARE(code, 0);
-        QVERIFY(near(out["paper"]["width_mm"].get<double>(), 210.0, 0.01) && near(out["paper"]["height_mm"].get<double>(), 148.0, 0.01));
+        QVERIFY(near(out["paper"]["width_mm"].get<double>(), 210.0, 0.5) && near(out["paper"]["height_mm"].get<double>(), 148.0, 0.5));
         std::tie(code, out) = run({QStringLiteral("--paper"), QStringLiteral("100x150")});
         QCOMPARE(code, 0);
-        QVERIFY(near(out["paper"]["width_mm"].get<double>(), 100.0, 0.01) && near(out["paper"]["height_mm"].get<double>(), 150.0, 0.01));
+        QVERIFY(near(out["paper"]["width_mm"].get<double>(), 100.0, 0.5) && near(out["paper"]["height_mm"].get<double>(), 150.0, 0.5));
         QCOMPARE(storage::read_file(book / "project.json"), before);  // (read only: never written)
         QVERIFY(!fs::exists(book / "project.lock"));
     }
@@ -202,13 +207,14 @@ private slots:
         std::tie(code, out) = cli({QStringLiteral("print"), q(book), QStringLiteral("--dry-run"), QStringLiteral("--dpi"), QStringLiteral("72"), QStringLiteral("--marks"),
                                    QStringLiteral("corner")});
         QCOMPARE(code, 0);
-        QVERIFY(near(numbers(out["sheets"][0]["image_mm"])[2], 210.0 - 2 * 12.7));
+        const double room_w = numbers(out["printable_mm"])[2];
+        QVERIFY(near(numbers(out["sheets"][0]["image_mm"])[2], room_w - 2 * 12.7));
         // labels alone: a quarter inch, the label 6 pt above
         std::tie(code, out) = cli({QStringLiteral("print"), q(book), QStringLiteral("--dry-run"), QStringLiteral("--dpi"), QStringLiteral("72"), QStringLiteral("--marks"),
                                    QStringLiteral("labels")});
         QCOMPARE(code, 0);
         const std::vector<double> labelled = numbers(out["sheets"][0]["image_mm"]);
-        QVERIFY(near(labelled[2], 210.0 - 2 * 6.35));
+        QVERIFY(near(labelled[2], room_w - 2 * 6.35));
         QVERIFY(near(numbers(out["sheets"][0]["texts"][0]["at_mm"])[1], labelled[1] - 6 * kPt));
         QVERIFY(out["sheets"][0]["marks"]["lines"].empty());
     }
