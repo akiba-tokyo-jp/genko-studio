@@ -292,6 +292,15 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - 文字スタイル・段落スタイル（PC5 G-c）:
   - `crates/engine/src/type_styles_cmds.rs`（403-659 行: 一覧・新規（文字の書式から作る、作って適用）・複製・削除（文字は見え方を保ち上書きとして持ち直す）・名前の変更・スタイルオプション（replace・clear）・適用（Alt で上書きの消去）・再定義（範囲の始めの書式から、段落スタイルでは文字スタイルが決める属性を除く）・上書きを消去、351-387 行: 今のスタイルと上書きの印）と `crates/doc/src/text_styles.rs`（70-72 行: 基本段落と「なし」、169-178 行: 番号つきの名前、209-219 行: 上書きはスタイルとの差）: 決まり → `native/src/core/type_styles.cpp`・`native/src/render/ops_type_styles.cpp`（`type_style`）。違う所だけを持つ記録で 1 字に 1 つの文字スタイルを保つ置き直しと、見え方を値まで保つ `keep_look`、書記素の範囲・段落の番号、上書きを見え方で決めること、名前の決まり（パネルの名前・64 字・複製の名前）、台詞の語ごとの書式の扱いは Genko のもの。
   - `crates/engine/src/type_extra_cmds.rs`（465-485 行: 初期設定の書式の保存・読み込み — 選んだ文字の始めの書式を覚え、文字全体に当てる）: 決まり → `native/src/core/type_styles.cpp`（`defaults_of`・`checked_defaults`）・`native/src/app/main_window_type.cpp`（`save_default_type_styles`・`load_default_type_styles`）・`native/src/app/preferences.cpp`。機械の設定に覚えること、スタイルを外してから `set_type` で当てる 1 手は Genko のもの。
+- パネル・スペルチェック・検索と置換・書体の置き換え・環境設定 → テキスト（PC5 G-d）:
+  - `crates/text/src/spell.rs`（1-235 行と試験）: 辞書の作り（`#NN` の段、小文字の索引、長さごとの語）、大文字の規則・'s・活字のアポストロフィー、候補（Damerau–Levenshtein の距離、4 字以下は 1・ほかは 2、入れ替えを先に、段の順、語の大文字の形）、語の切り出し → `native/src/service/spell.cpp`（Genko はラテン文字の語だけを読み、かな・漢字などで語を切る）、試験の考え → `native/tests/unit/test_spell.cpp`。
+  - `assets/dict/en_US-scowl-50.txt.gz` と `LICENSE-SCOWL.txt`: そのまま同梱 → `native/resources/dict/`（SCOWL の許諾は THIRD_PARTY.md）。
+  - `crates/engine/src/type_spell_cmds.rs`（1-260 行）: スペルチェックの操作（一覧・変更（語がまだあるか確かめる）・すべて変更（語単位）・辞書に追加・すべて無視）と字形の挿入（キャレット・範囲）→ `native/src/app/type_dialogs.cpp`（`SpellingDialog`）・`native/src/app/main_window_type_panels.cpp`（`insert_glyph`）。
+  - `crates/text/src/glyphs.rs`（1-100 行）: 字形パネルの表示の分類と、cmap から並べる字（制御文字・空白・異体字セレクターを除く）→ `native/src/app/type_panels.cpp`（`in_category`）・`native/src/render/text/shaping.cpp`（`charmap`）。
+  - `crates/engine/src/type_extra_cmds.rs`（399-460 行: 見つからない書体の一覧・map で置き換え・すべてを既定へ、その書体を持つ物だけ）→ `native/src/render/ops_type_fonts.cpp`（`replace_fonts`）。
+  - `crates/engine/src/edit_menu_cmds.rs`（926 行〜: 検索と置換 — 次を検索・置換・置換して次を検索・すべて置換、大文字と小文字・単語単位・向き・すべてのレイヤー）→ `native/src/app/story_editor.cpp`（`ReplaceDialog`）・`native/src/core/ops_lines.cpp`（`replace_text` の `whole_word`）。
+  - `crates/engine/src/prefs.rs`（594-618 行: `TypePrefs` の項目、84 行: フォントプレビューのサイズの値）→ `native/src/core/prefs_table.cpp`（`type.*`。既定は Genko の今の打ち方に合わせて一部違う）・`native/src/app/preferences_type.cpp`。
+  - `crates/ui-egui/src/type_panels_ui.rs`（文字スタイル・段落スタイルのパネル、字形パネル、スペルチェックの窓の振る舞い）→ `native/src/app/type_panels.cpp`・`native/src/app/type_dialogs.cpp`。
 
 ## レイヤー・アートボード・自動処理（PC5 節 I）
 

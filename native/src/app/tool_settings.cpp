@@ -38,7 +38,7 @@ const std::map<QString, std::pair<QString, QString>>& titles() {
         {QStringLiteral("eraser"), {QStringLiteral("消しゴムツール"), QStringLiteral("ペンの線は触れた所で切れる。トーンの上では削る")}},
         // (PC4 E1: brushes@1)
         {QStringLiteral("pencil"), {QStringLiteral("鉛筆ツール"), QStringLiteral("縁のくっきりした線で描く。Shift で直線。「自動消去」で、描画色の所から描き始めると背景色で描く")}},
-        {QStringLiteral("text"), {QStringLiteral("テキスト"), QStringLiteral("台詞を入れたい所をクリックして打つ（Ctrl+Enter で決定）")}},
+        {QStringLiteral("text"), {QStringLiteral("縦書き文字ツール"), QStringLiteral("台詞を入れたい所をクリックして打つ（Ctrl+Enter で決定）")}},
         // (PC5 G-a)
         {QStringLiteral("text_h"), {QStringLiteral("横書き文字ツール"),
                                     QStringLiteral("横書きの文字を入れる。テキストレイヤーなら、クリックでポイントテキスト、ドラッグで段落テキスト（Ctrl+Enter で決定）")}},

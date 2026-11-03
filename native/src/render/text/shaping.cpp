@@ -32,7 +32,10 @@ struct Face {
 
 // `keep`: kept among the few faces read last (shaping reads a face again and again); else read for this caller alone — a
 // list of every font read once (review P3-7: their bytes not held after it).
-std::shared_ptr<const Face> face_of(const std::string& font, unsigned index, bool keep = true) {
+std::shared_ptr<const Face> face_of(const std::string& named, unsigned asked, bool keep = true) {
+    // (PC5 G-d: a collection's face named with its number — render::face_font — opens that face)
+    const auto [font, own] = font_face(named);
+    const unsigned index = asked != 0 ? asked : own;
     static std::mutex mutex;
     static std::map<std::pair<std::string, unsigned>, std::shared_ptr<const Face>> cache;
     const auto key = std::make_pair(font, index);
@@ -148,6 +151,25 @@ std::string name_of(hb_face_t* face, hb_ot_name_id_t id) {
     return {};
 }
 
+// A name in one language alone (none where the font has none in it).
+std::string name_in(hb_face_t* face, hb_ot_name_id_t id, const char* language) {
+    const hb_language_t lang = hb_language_from_string(language, -1);
+    unsigned count = 0;
+    const hb_ot_name_entry_t* entries = hb_ot_name_list_names(face, &count);
+    bool has = false;
+    for (unsigned i = 0; i < count; ++i) {
+        if (entries[i].name_id == id && entries[i].language == lang) has = true;
+    }
+    if (!has) return {};
+    const unsigned length = hb_ot_name_get_utf8(face, id, lang, nullptr, nullptr);
+    if (length == 0 || length > 4096) return {};
+    std::string out(length + 1, '\0');
+    unsigned size = length + 1;
+    hb_ot_name_get_utf8(face, id, lang, &size, out.data());
+    out.resize(size);
+    return out;
+}
+
 std::string tag_name(hb_tag_t tag) {
     char text[5] = {};
     hb_tag_to_string(tag, text);
@@ -165,6 +187,9 @@ FontInfo font_info(const std::string& font, unsigned face_index, bool keep) {
     out.style = name_of(face, HB_OT_NAME_ID_TYPOGRAPHIC_SUBFAMILY);
     if (out.style.empty()) out.style = name_of(face, HB_OT_NAME_ID_FONT_SUBFAMILY);
     out.postscript = name_of(face, HB_OT_NAME_ID_POSTSCRIPT_NAME);
+    out.family_ja = name_in(face, HB_OT_NAME_ID_TYPOGRAPHIC_FAMILY, "ja");
+    if (out.family_ja.empty()) out.family_ja = name_in(face, HB_OT_NAME_ID_FONT_FAMILY, "ja");
+    if (out.family_ja == out.family) out.family_ja.clear();
     out.faces = std::max(1U, hb_face_count(held->blob));
     const unsigned axes = hb_ot_var_get_axis_count(face);
     std::vector<hb_ot_var_axis_info_t> infos(axes);
@@ -188,6 +213,41 @@ FontInfo font_info(const std::string& font, unsigned face_index, bool keep) {
     }
     std::sort(out.features.begin(), out.features.end());
     out.features.erase(std::unique(out.features.begin(), out.features.end()), out.features.end());
+    return out;
+}
+
+std::vector<char32_t> charmap(const std::string& font, unsigned face_index) {
+    const std::shared_ptr<const Face> held = face_of(font, face_index);
+    hb_set_t* set = hb_set_create();
+    hb_face_collect_unicodes(held->face, set);
+    std::vector<char32_t> out;
+    hb_codepoint_t c = HB_SET_VALUE_INVALID;
+    while (hb_set_next(set, &c)) {
+        const auto ch = static_cast<char32_t>(c);
+        const bool control = ch < 0x20 || (ch >= 0x7F && ch < 0xA0);
+        const bool selector = (ch >= 0xFE00 && ch <= 0xFE0F) || (ch >= 0xE0100 && ch <= 0xE01EF);
+        const bool space = ch != U' ' && (ch == 0x85 || ch == 0xA0 || ch == 0x1680 || (ch >= 0x2000 && ch <= 0x200F) || (ch >= 0x2028 && ch <= 0x202F) ||
+                                          ch == 0x205F || ch == 0x3000 || ch == 0xFEFF);
+        if (!control && !selector && !space) out.push_back(ch);
+    }
+    hb_set_destroy(set);
+    return out;
+}
+
+std::vector<char32_t> variants_of(const std::string& font, char32_t ch, unsigned face_index) {
+    const std::shared_ptr<const Face> held = face_of(font, face_index);
+    hb_set_t* selectors = hb_set_create();
+    hb_face_collect_variation_selectors(held->face, selectors);
+    std::vector<char32_t> out;
+    hb_codepoint_t vs = HB_SET_VALUE_INVALID;
+    hb_set_t* bases = hb_set_create();
+    while (hb_set_next(selectors, &vs)) {
+        hb_set_clear(bases);
+        hb_face_collect_variation_unicodes(held->face, vs, bases);
+        if (hb_set_has(bases, ch)) out.push_back(static_cast<char32_t>(vs));
+    }
+    hb_set_destroy(bases);
+    hb_set_destroy(selectors);
     return out;
 }
 

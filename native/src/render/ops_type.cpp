@@ -784,12 +784,6 @@ void type_layer_to_line(OpContext& c) {
     c.report = Json{{"id", id}};
 }
 
-// --- the later groups' ops (registered: their names known, refused until they are written) --------------------------------
-
-core::OpFunction later(std::string name, std::string group) {
-    return [name, group](OpContext&) { core::not_yet_ported(name + " is not in the C++ build yet (PC5 " + group + ")"); };
-}
-
 }  // namespace
 
 namespace type_ops {
@@ -817,7 +811,7 @@ void register_type_ops(core::OpRegistry& registry) {
     registry.add_query("type_style", type_ops::type_style, type_ops::type_style_asks);  // (PC5 G-c: render/ops_type_styles.cpp; its list a question)
     registry.add("line_to_type_layer", line_to_type_layer);
     registry.add("type_layer_to_line", type_layer_to_line);
-    registry.add("replace_fonts", later("replace_fonts", "G-d"));
+    registry.add_query("replace_fonts", type_ops::replace_fonts, type_ops::replace_fonts_asks);  // (PC5 G-d: render/ops_type_fonts.cpp; without a map or all, a question)
 }
 
 }  // namespace genko::render

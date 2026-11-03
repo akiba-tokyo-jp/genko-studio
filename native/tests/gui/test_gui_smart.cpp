@@ -31,9 +31,11 @@
 
 #include "app/adjust_panels.hpp"
 #include "app/canvas.hpp"
+#include "app/config.hpp"
 #include "app/inject.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "app/workspace.hpp"
 #include "core/base64.hpp"
 #include "core/color_model.hpp"
@@ -626,26 +628,54 @@ private slots:
         QCOMPARE(book.doc().story.size(), std::size_t(1));
         QCOMPARE(book.doc().story[0].id, std::string("l1"));
 
-        // the text tool's tooltip: its name and key alone; ラスタライズ → テキスト's: its words and its place
-        QCOMPARE(book.act("act_text")->toolTip(), QStringLiteral("テキスト（T）\nクリックした所に台詞を入力します（縦書き）"));
+        // the text tool's tooltip: its name and key alone (PC5 G-d: Photoshop's 縦書き文字ツール); ラスタライズ → テキスト's
+        // its words and its place — its name kept (review P2-3)
+        QCOMPARE(book.act("act_text")->toolTip(), QStringLiteral("縦書き文字ツール（T）\nクリックした所に台詞を入力します（縦書き）"));
         QVERIFY2(book.act("act_rasterize_type")->toolTip().startsWith(QStringLiteral("テキスト（レイヤー → ラスタライズ）\n")),
                  qPrintable(book.act("act_rasterize_type")->toolTip()));
-        // コマンドを探す: both found, each with its place; the names kept for the quick access and the command bar their own
+        // コマンドを探す: テキスト finds ラスタライズ's, with its place; 文字ツール the tool
         app::CommandSearch* search = w->find_command();
         search->query->setText(QStringLiteral("テキスト"));
-        const auto& found = search->found();
-        QVERIFY(std::find(found.begin(), found.end(), book.act("act_text")) != found.end());
-        QVERIFY(std::find(found.begin(), found.end(), book.act("act_rasterize_type")) != found.end());
-        QStringList rows;
-        for (int i = 0; i < search->results->count(); ++i) rows << search->results->item(i)->text();
-        for (const QString& row : {QStringLiteral("テキスト　（ツール）"), QStringLiteral("テキスト　（レイヤー → ラスタライズ）")}) {
-            QVERIFY2(std::any_of(rows.begin(), rows.end(), [&row](const QString& r) { return r.startsWith(row); }), qPrintable(rows.join(QStringLiteral(" | "))));
+        {
+            const auto& found = search->found();
+            QVERIFY(std::find(found.begin(), found.end(), book.act("act_rasterize_type")) != found.end());
+            QStringList rows;
+            for (int i = 0; i < search->results->count(); ++i) rows << search->results->item(i)->text();
+            QVERIFY2(std::any_of(rows.begin(), rows.end(), [](const QString& r) { return r.startsWith(QStringLiteral("テキスト　（レイヤー → ラスタライズ）")); }),
+                     qPrintable(rows.join(QStringLiteral(" | "))));
+        }
+        search->query->setText(QStringLiteral("文字ツール"));
+        {
+            const auto& found = search->found();
+            QVERIFY(std::find(found.begin(), found.end(), book.act("act_text")) != found.end());
         }
         search->close();
+        // the names kept for the quick access and the command bar: ラスタライズ's its own as before; テキスト and
+        // テキスト（ツール） — the tool's before — the tool's (preferences::renamed(), words_owner)
         const auto names = app::by_text(w);
-        QCOMPARE(names.at(QStringLiteral("テキスト（ツール）")), book.act("act_text"));
+        QCOMPARE(names.at(QStringLiteral("縦書き文字ツール")), book.act("act_text"));
         QCOMPARE(names.at(QStringLiteral("テキスト（レイヤー → ラスタライズ）")), book.act("act_rasterize_type"));
-        QCOMPARE(names.at(QStringLiteral("テキスト")), book.act("act_text"));  // (the words alone: the tool's, as before)
+        QCOMPARE(names.at(QStringLiteral("テキスト")), book.act("act_text"));
+        QVERIFY(!app::preferences::reused_name(QStringLiteral("テキスト")));
+        // (review P2-3) a quick access kept with its mark (names_current) since PC4 E4 — テキスト the tool then —, and one
+        // kept under テキスト（ツール）: the tool's place either way
+        app::keep(QStringLiteral("ui/quick"), QStringList{QStringLiteral("ブラシツール"), QStringLiteral("テキスト")});
+        QVERIFY(app::preferences::names_current(QStringLiteral("ui/quick")));
+        QCOMPARE(app::chosen(QStringLiteral("ui/quick"), app::kDefaultQuick), (QStringList{QStringLiteral("ブラシツール"), QStringLiteral("縦書き文字ツール")}));
+        app::settings()->setValue(QStringLiteral("ui/quick"), QStringLiteral("テキスト（ツール）\tテキスト（レイヤー → ラスタライズ）"));
+        QCOMPARE(app::chosen(QStringLiteral("ui/quick"), app::kDefaultQuick),
+                 (QStringList{QStringLiteral("縦書き文字ツール"), QStringLiteral("テキスト（レイヤー → ラスタライズ）")}));
+        app::settings()->remove(QStringLiteral("ui/quick"));
+        app::settings()->remove(QStringLiteral("names_current/ui/quick"));
+        // a key chosen under テキスト（ツール） or テキスト: the tool's, not ラスタライズ's
+        for (const QString& old : {QStringLiteral("テキスト（ツール）"), QStringLiteral("テキスト")}) {
+            app::settings()->setValue(QStringLiteral("shortcuts/") + old, QStringLiteral("Ctrl+Alt+Shift+Y"));
+            app::preferences::apply_shortcuts(w);
+            QCOMPARE(book.act("act_text")->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+Shift+Y")));
+            QVERIFY(book.act("act_rasterize_type")->shortcut().isEmpty());
+            app::settings()->remove(QStringLiteral("shortcuts/") + old);
+        }
+        app::preferences::apply_shortcuts(w);
     }
 };
 

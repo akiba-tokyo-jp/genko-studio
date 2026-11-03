@@ -282,6 +282,13 @@ const std::multimap<QString, QString>& renamed() {
                                                      // with スナップ先 ▸'s: by its place)
                                                      {QStringLiteral("選択範囲のエッジ"), QStringLiteral("選択範囲の境界線")},
                                                      {QStringLiteral("グリッド（表示 → 表示・非表示）"), QStringLiteral("グリッドを表示")},
+                                                     // (PC5 G-d, 節 G 5.4: the text tool and 検索と置換… by Photoshop's names —
+                                                     // the tool was テキスト, and テキスト（ツール） beside ラスタライズ ▸'s
+                                                     // テキスト since PC3 A4; that one keeps its name by its place — genko_placed —,
+                                                     // so テキスト is no reused name: the tool's, words_owner — review P2-3)
+                                                     {QStringLiteral("縦書き文字ツール"), QStringLiteral("テキスト")},
+                                                     {QStringLiteral("縦書き文字ツール"), QStringLiteral("テキスト（ツール）")},
+                                                     {QStringLiteral("検索と置換…"), QStringLiteral("台詞の検索・置換…")},
                                                      // (PC5 H-d: ウィンドウ → ワークスペース ▸ by Photoshop's names)
                                                      {QStringLiteral("新規ワークスペース…"), QStringLiteral("今の配置をワークスペースとして残す…")},
                                                      // (PC5 I-a, 節 I 1.2: レイヤー's commands by Photoshop's names)
@@ -322,7 +329,10 @@ const std::map<QString, QString>& words_owner() {
                                                 {QStringLiteral("ガイド"), QStringLiteral("act_snap_guides")},
                                                 {QStringLiteral("グリッド"), QStringLiteral("act_snap_grid")},
                                                 {QStringLiteral("すべて"), QStringLiteral("act_snap_all")},
-                                                {QStringLiteral("なし"), QStringLiteral("act_snap_none")}};
+                                                {QStringLiteral("なし"), QStringLiteral("act_snap_none")},
+                                                // (PC5 G-d: テキスト — the text tool's words before it was 縦書き文字ツール —
+                                                // stays its, not ラスタライズ ▸ テキスト's — review P2-3)
+                                                {QStringLiteral("テキスト"), QStringLiteral("act_text")}};
     return all;
 }
 
@@ -344,7 +354,7 @@ const std::vector<Pane>& panes() {
         {QStringLiteral("unitsAndRulers"), QStringLiteral("単位・定規…"), QStringLiteral("単位・定規")},  // (PC5 H-b)
         {QStringLiteral("guidesGridAndSlices"), QStringLiteral("ガイド・グリッド・スライス…"), QStringLiteral("ガイド・グリッド・スライス")},
         {QStringLiteral("plugIns"), QStringLiteral("プラグイン…"), QString()},
-        {QStringLiteral("type"), QStringLiteral("テキスト…"), QString()},
+        {QStringLiteral("type"), QStringLiteral("テキスト…"), QStringLiteral("テキスト")},  // (PC5 G-d)
         {QStringLiteral("enhancedControls"), QStringLiteral("拡張コントロール…"), QString()},
         {QStringLiteral("rawDefaults"), QStringLiteral("Camera Raw…"), QStringLiteral("Camera Raw")},
         {QStringLiteral("integrations"), QStringLiteral("連携…"), QString()},
@@ -1040,6 +1050,9 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     std::tie(units_page, guides_page) = unit_pages(this);
     tabs->addTab(units_page, QStringLiteral("単位・定規"));
     tabs->addTab(guides_page, QStringLiteral("ガイド・グリッド・スライス"));
+    // テキスト (PC5 G-d: app/preferences_type.cpp)
+    type_page = preferences::type_page(this);
+    tabs->addTab(type_page, QStringLiteral("テキスト"));
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("決める"));
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("やめる"));
@@ -1060,7 +1073,8 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
                                                   {QStringLiteral("書き出し"), "export"},
                                                   {QStringLiteral("Camera Raw"), "kind_placed"},
                                                   {QStringLiteral("単位・定規"), "ruler"},
-                                                  {QStringLiteral("ガイド・グリッド・スライス"), "kind_tone"}};
+                                                  {QStringLiteral("ガイド・グリッド・スライス"), "kind_tone"},
+                                                  {QStringLiteral("テキスト"), "text"}};  // (PC5 G-d)
     for (int page = 0; page < tabs->count(); ++page) {
         const auto picture = pictures.find(tabs->tabText(page));
         pages_list->addItem(new QListWidgetItem(icons::icon(picture != pictures.end() ? picture->second : "settings"), tabs->tabText(page)));
@@ -1199,6 +1213,7 @@ void PreferencesDialog::save() {
     store->setValue(QStringLiteral("view/gamut_color"), gamut_button->property("colour").value<QColor>().name());
     store->setValue(QStringLiteral("view/gamut_opacity"), gamut_percent->value());
     save_unit_pages(units_page, guides_page);  // (PC5 H-b)
+    save_type_page(type_page);                 // (PC5 G-d)
     // (PC5 H-d: ワークスペース)
     for (const auto& [key, box] : std::initializer_list<std::pair<const char*, QCheckBox*>>{{"ui/workspace_remember", workspace_remember},
                                                                                            {"ui/auto_show_panels", auto_show_panels},

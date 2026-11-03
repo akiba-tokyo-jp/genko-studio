@@ -25,6 +25,8 @@ foreach(_entry IN LISTS _genko_studio_data)
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_file}")
 endforeach()
 configure_file(studio_data.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/studio_data.cpp" @ONLY)
+# PC5 G-d: the English word list スペルチェック reads (SCOWL size 50, PhotoCraft v0.2.0's; its licence beside it)
+qt_add_resources(GENKO_SPELL_RESOURCES "${GENKO_SOURCE_ROOT}/resources/genko_spell.qrc")
 
 genko_library(genko_service
   SOURCES
@@ -69,6 +71,9 @@ genko_library(genko_service
     actions.cpp
     automate.cpp
     script_events.cpp
+    # PC5 G-d (スペルチェック: the English dictionary and the notation table)
+    spell.cpp
+    ${GENKO_SPELL_RESOURCES}
     "${CMAKE_CURRENT_BINARY_DIR}/studio_data.cpp"
   PUBLIC_DEPS genko_formats genko_render_ops genko_render genko_studio genko_storage genko_core Qt6::Core
-  PRIVATE_DEPS Qt6::Network)
+  PRIVATE_DEPS Qt6::Network ZLIB::ZLIB)

@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/genko/dict">
+    <file alias="en_US-scowl-50.txt.gz">dict/en_US-scowl-50.txt.gz</file>
+  </qresource>
+</RCC>

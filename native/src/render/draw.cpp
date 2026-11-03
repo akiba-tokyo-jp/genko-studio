@@ -724,7 +724,24 @@ bool bundled_font_present(const std::string& name) {
     }
 }
 
-std::shared_ptr<const QByteArray> font_bytes(const std::string& font) {
+std::string face_font(const std::string& font, unsigned index) {
+    if (index == 0) return font;
+    return font + kFaceMark + std::to_string(index);
+}
+
+std::pair<std::string, unsigned> font_face(const std::string& font) {
+    const std::size_t mark = font.rfind(kFaceMark);
+    if (mark == std::string::npos || mark + 1 >= font.size() || font.size() - mark > 4) return {font, 0};
+    unsigned index = 0;
+    for (std::size_t i = mark + 1; i < font.size(); ++i) {
+        if (font[i] < '0' || font[i] > '9') return {font, 0};
+        index = index * 10 + static_cast<unsigned>(font[i] - '0');
+    }
+    return {font.substr(0, mark), index};
+}
+
+std::shared_ptr<const QByteArray> font_bytes(const std::string& named) {
+    const std::string font = font_face(named).first;  // (PC5 G-d: a collection's face — its file's bytes)
     if (bundled_text_font(font)) return bundled_bytes(font);
     if (font == kPillowDefaultKey) return bundled_bytes("pillow_default");
     if (font.size() > 4096) throw core::Error("value", "font name exceeded");
@@ -762,7 +779,8 @@ struct TrueTypeFonts::State {
         if (library != nullptr) (void)FT_Done_Library(library);
     }
 
-    const File& file(const std::string& font) {
+    const File& file(const std::string& named) {
+        const std::string font = font_face(named).first;  // (PC5 G-d: a collection's faces share their file's bytes)
         if (const auto it = files.find(font); it != files.end()) return *it->second;
         auto entry = std::make_unique<File>();
         constexpr qint64 cap = 256 * 1024 * 1024;
@@ -824,7 +842,7 @@ const TrueTypeFont& TrueTypeFonts::truetype(const std::string& font, int size) {
     const State::File& file = s.file(font);
     FT_Face face = nullptr;
     const FT_Error error = FT_New_Memory_Face(s.library, reinterpret_cast<const FT_Byte*>(file.bytes->constData()),
-                                              static_cast<FT_Long>(file.bytes->size()), 0, &face);
+                                              static_cast<FT_Long>(file.bytes->size()), static_cast<FT_Long>(font_face(font).second), &face);
     if (error) {
         if (genko_imaging_error_kind() != 0 || s.memory.second) detail::throw_imaging_error();
         if (ours) check_text(error);
@@ -857,7 +875,8 @@ const TrueTypeFont& TrueTypeFonts::truetype(const std::string& font, int size, c
     (void)truetype(font, size);  // (its checks, and the file's bytes read once)
     const State::File& file = s.file(font);
     FT_Face face = nullptr;
-    if (FT_New_Memory_Face(s.library, reinterpret_cast<const FT_Byte*>(file.bytes->constData()), static_cast<FT_Long>(file.bytes->size()), 0, &face)) {
+    if (FT_New_Memory_Face(s.library, reinterpret_cast<const FT_Byte*>(file.bytes->constData()), static_cast<FT_Long>(file.bytes->size()),
+                           static_cast<FT_Long>(font_face(font).second), &face)) {
         if (genko_imaging_error_kind() != 0 || s.memory.second) detail::throw_imaging_error();
         throw NotYetPorted("default_font");
     }

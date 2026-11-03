@@ -63,7 +63,8 @@ Json materials_list();
 // fonts.json once looked for).
 Json system_fonts();
 // PC5 G-b (type.fonts): every font of the computer (Japanese or not) by family — [{family, styles: [{style, postscript, path,
-// japanese, axes?: [{tag, name, min, default, max}], faces?, index?}]}]: each face of a collection (.ttc) with its index —
+// japanese, axes?: [{tag, name, min, default, max}], faces?, index?}], family_ja? (PC5 G-d: its Japanese name)}]: each face
+// of a collection (.ttc) with its index —
 // looked for again when the font files change (their paths, sizes and times; kept in the config folder's type_fonts.json,
 // {signature, families}, and for the run).
 Json type_fonts();

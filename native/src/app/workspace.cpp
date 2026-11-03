@@ -38,7 +38,7 @@ const QStringList kDefaultCommandBar{QStringLiteral("取り消し"), QStringLite
                                      QStringLiteral("画面サイズに合わせる"), QStringLiteral("ズームアウト"), QStringLiteral("ズームイン"), QStringLiteral("|"),
                                      QStringLiteral("◀ 前のページ"), QStringLiteral("次のページ ▶"), QStringLiteral("|"),
                                      QStringLiteral("原稿を書き出す…")};  // (PC4 F-0: 書き出し…'s new name)
-const QStringList kDefaultQuick{QStringLiteral("ブラシツール"), QStringLiteral("消しゴムツール"), QStringLiteral("塗りつぶしツール"), QStringLiteral("テキスト"),
+const QStringList kDefaultQuick{QStringLiteral("ブラシツール"), QStringLiteral("消しゴムツール"), QStringLiteral("塗りつぶしツール"), QStringLiteral("縦書き文字ツール"),
                                 QStringLiteral("コマ割り"), QStringLiteral("選択範囲・選んだコマにトーンを貼る"), QStringLiteral("集中線"),
                                 QStringLiteral("水平方向に反転（表示）")};
 
@@ -128,7 +128,8 @@ std::map<const QAction*, QString> command_names(const std::vector<QAction*>& all
     std::optional<std::unordered_map<const QAction*, QString>> walked;
     for (const QAction* action : all) {
         QString place;
-        if (count[action->text()] > 1) {
+        // (one that keeps its place in its name though its words are its alone now — PC5 G-d: ラスタライズ ▸ テキスト)
+        if (count[action->text()] > 1 || action->property("genko_placed").toBool()) {
             if (known == nullptr) known = &walked.emplace(menu_places(window));
             place = place_of(*known, action);
         }
@@ -172,10 +173,11 @@ std::map<QString, QAction*> by_text(QMainWindow* window) {
     // (a name kept before others had the same words — the words alone: the first of them in the menus, the one that had
     // them then, as the layer panel's 色調補正のレイヤー's before レイヤー → 色調補正)
     for (QAction* action : listed) out.emplace(action->text(), action);
-    // (PC5 H-0: words a command came to share by a rename are the one's that had them before — preferences::words_owner)
+    // (PC5 H-0: words a command came to share by a rename are the one's that had them before — preferences::words_owner;
+    // PC5 G-d: whatever its words are now, as the text tool's テキスト)
     for (const auto& [words, attribute] : preferences::words_owner()) {
         for (QAction* action : listed) {
-            if (action->text() == words && action->property("genko_attribute").toString() == attribute) out[words] = action;
+            if (action->property("genko_attribute").toString() == attribute) out[words] = action;
         }
     }
     return out;
@@ -657,7 +659,7 @@ void delete_workspace(const QString& name) {
 
 const std::vector<Preset>& presets() {
     // (Photoshop's workspaces, its menu's order, and the panels each brings — Genko's panels by their titles: オプション
-    // the tool's, ナビゲーター, ヒストリー; 文字・段落 when 節 G makes them)
+    // the tool's, ナビゲーター, ヒストリー; 文字・段落 PC5 G-d's — their docks titled so, test_gui_type_panels)
     static const std::vector<Preset> all{
         {QStringLiteral("essentials"), QStringLiteral("初期設定"), {}, {}},
         {QStringLiteral("graphicAndWeb"), QStringLiteral("グラフィックと Web"),
@@ -768,7 +770,7 @@ QString modifier_tool(const QString& key) {
 const Choices& keyed_tools() {
     static const Choices all{{QStringLiteral("ブラシツール"), QStringLiteral("pen")},  {QStringLiteral("消しゴムツール"), QStringLiteral("eraser")},
                              {QStringLiteral("塗りつぶしツール"), QStringLiteral("fill")},    {QStringLiteral("選択範囲"), QStringLiteral("marquee")},
-                             {QStringLiteral("選択"), QStringLiteral("select")},        {QStringLiteral("テキスト"), QStringLiteral("text")},
+                             {QStringLiteral("選択"), QStringLiteral("select")},        {QStringLiteral("縦書き文字ツール"), QStringLiteral("text")},
                              {QStringLiteral("ベクター線の直し"), QStringLiteral("vector")}, {QStringLiteral("色混ぜ"), QStringLiteral("blend")},
                              {QStringLiteral("グラデーションツール"), QStringLiteral("gradient")}, {QStringLiteral("コマ"), QStringLiteral("frame")}};
     return all;

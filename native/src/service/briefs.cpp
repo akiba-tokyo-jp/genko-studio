@@ -576,7 +576,7 @@ FontFiles font_files() {
     }
     char hex[17] = {};
     std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(hash));
-    out.signature = std::to_string(out.paths.size()) + ":" + hex;
+    out.signature = std::to_string(out.paths.size()) + ":" + hex + ":2";  // (":2": PC5 G-d's list, with family_ja — a list of before looked for again)
     return out;
 }
 
@@ -661,6 +661,8 @@ Json type_fonts() {
                 }
                 Json& family = families[info.family];
                 if (family.is_null()) family = Json::object({{"family", info.family}, {"styles", Json::array()}});
+                // (PC5 G-d: its Japanese name, when it has one — 文字パネル without 環境設定 → テキスト's フォント名を英語で表示)
+                if (!family.contains("family_ja") && !info.family_ja.empty() && !core::utf8_error(info.family_ja)) family["family_ja"] = info.family_ja;
                 family["styles"].push_back(std::move(face));
             } catch (const std::exception&) {
                 if (index == 0) break;
