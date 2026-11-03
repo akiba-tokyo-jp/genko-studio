@@ -360,6 +360,7 @@ struct Ctx {
     psd_type::Sheets type_sheets;
     bool typed = false;
     std::vector<std::string> fonts_missing;
+    std::vector<std::pair<std::string, Json>> artboards;  // (PC5 I-c: a top-level group's id and its artboard)
 
     core::Page& page() { return doc.edit_page(0); }
 };
@@ -1507,7 +1508,11 @@ void read_layer(Ctx& ctx, const Json& m, const Json& parent, bool hidden, std::v
         layer.kind = core::LayerKind::Folder;
         layer.group = true;
         if (blend_from(m["blend"]) == "PassThrough") layer.blend = "pass_through";
-        if (optional_field(content, "artboard") != nullptr) ctx.notes.name("アートボードは PC5 で入るまで普通のグループにしました", name);
+        // (PC5 I-c, artboards@1: a top-level group's artboard — opened as a page of its own; a nested one's as a group)
+        if (const Json* board = optional_field(content, "artboard"); board != nullptr && !board->is_null()) {
+            if (ctx.groups == 0 && !parent.is_string()) ctx.artboards.emplace_back(layer.id, *board);
+            else ctx.notes.name("入れ子のアートボードは普通のグループにしました", name);
+        }
         const bool shut = hidden;
         if (ctx.groups >= kGroupsDeepMax) {
             ctx.notes.name("グループの入れ子が深すぎるため、中のレイヤーを外しました（" + std::to_string(kGroupsDeepMax) + " 段まで）", name);
@@ -2111,6 +2116,7 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
     out.doc = std::move(ctx.doc);
     out.notes = ctx.notes.take();
     out.unpacked = load.tally().unpacked;
+    out.artboards = std::move(ctx.artboards);
     return out;
 }
 

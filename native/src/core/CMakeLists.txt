@@ -160,6 +160,8 @@ genko_library(genko_core
     type_styles.cpp
     # PC5 I-a (レイヤーの基本の残り: layer-locks@1, blend-channels@1)
     layer_basics.cpp
+    # PC5 I-c (アートボード: artboards@1)
+    artboards.cpp
     # PC5 H-e (環境設定と API: genko commands' catalogue, genko session's session.json)
     commands_list.cpp
     session_file.cpp

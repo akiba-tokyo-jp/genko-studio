@@ -511,6 +511,44 @@ private slots:
         QVERIFY(genko::test::read_bytes(book + "/studio/logs/tools.jsonl").size() > logged);
     }
 
+    // PC5 J-e1 (the coordinator's decision on its review P2-1, SPEC PROD-01): an agent's set_animation through MCP is the
+    // public list's — an fps past 1..60 refused with Python's words, a work area an unknown key, ignored and said so —, the
+    // book naming nothing new; a person's `genko apply` takes them (timeline@1).
+    void anAgentsTimelineIsThePublicOnes() {
+        const QString dir = fresh("timeline");
+        const QString book = dir + "/root/t.genko";
+        {
+            Mcp mcp(dir + "/root", dir + "/config");
+            mcp.initialize();
+            QVERIFY(!make_book(mcp, "t.genko", 1).empty());
+            const auto apply = [&mcp](const Json& op) {
+                return Mcp::text(mcp.call("apply_ops", Json::object({{"project", "t.genko"}, {"ops", Json::array({op})}, {"commit", true}})));
+            };
+            for (const double fps : {61.0, 0.5, 120.0}) {
+                const Json refused = apply(Json::object({{"op", "set_animation"}, {"page", 1}, {"fps", fps}}));
+                QCOMPARE(refused["ok"], Json(false));
+                const std::string all = genko::core::dump_python(refused);
+                QVERIFY2(all.find("set_animation: fps is 1 to 60") != std::string::npos, all.c_str());
+            }
+            const Json taken = apply(Json::object({{"op", "set_animation"}, {"page", 1}, {"frames", 12}, {"fps", 24}, {"work", Json::array({2, 5})}}));
+            QCOMPARE(taken["ok"], Json(true));
+            const std::string all = genko::core::dump_python(taken);
+            QVERIFY2(all.find("set_animation: unknown keys ignored: work") != std::string::npos, all.c_str());
+            mcp.lines();
+        }
+        const std::string agents = genko::test::read_bytes(book + "/project.json");
+        QVERIFY(agents.find("\"anim\"") != std::string::npos);
+        QVERIFY2(agents.find("\"work\"") == std::string::npos && agents.find("timeline@1") == std::string::npos, agents.c_str());
+        // a person's genko apply: the work area and an fps past 60 taken, the book naming timeline@1
+        const QString ops = dir + "/work.json";
+        write_file(ops, R"([{"op": "set_animation", "page": 1, "fps": 90, "work": [2, 5]}])");
+        const genko::test::Run person = genko::test::run_genko({"apply", book, ops, "--agent", "human:owner"});
+        QVERIFY2(person.exit_code == 0, (person.out + person.err).constData());
+        QVERIFY2(person.out.indexOf("unknown keys") < 0, person.out.constData());
+        const std::string persons = genko::test::read_bytes(book + "/project.json");
+        QVERIFY(persons.find("timeline@1") != std::string::npos && persons.find("\"work\"") != std::string::npos);
+    }
+
     // An agent's Undo past a state an older Genko's `genko gc` removed (schema-v4 §8): refused in Japanese (undo_refused,
     // history_missing's words), nothing of the book written.
     void undoPastAGoneState() {

@@ -144,6 +144,8 @@ const std::map<std::string, const char*>& names() {
         // (PC5 J-b, slices@1: render/ops_slices)
         {"add_slice", "スライス"}, {"set_slice", "スライスオプション"}, {"delete_slices", "スライスを削除"}, {"divide_slice", "スライスを分割"},
         {"slices_from_guides", "ガイドからスライスを作成"},
+        // (PC5 I-c, artboards@1: render/ops_artboards)
+        {"add_artboard", "アートボード"}, {"artboard_from_layers", "レイヤーからのアートボード"}, {"set_artboard", "アートボードを編集"},
     };
     return table;
 }

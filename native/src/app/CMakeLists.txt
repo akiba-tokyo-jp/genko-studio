@@ -242,6 +242,9 @@ genko_library(genko_app
     session_file.cpp
     commands_file.cpp
     history_log.cpp
+    # PC5 I-c (アートボード: レイヤー → 新規 → アートボード, アートボードの設定, 表示, アートボードからファイル・PDF)
+    main_window_artboards.cpp
+    artboard_dialog.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

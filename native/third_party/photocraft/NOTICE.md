@@ -326,6 +326,12 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/file_cmds.rs`（716-765 行: `bake` と `flatten_all_effects` — 不透明度・描画モード・クリップを外して効果ごと描き、層の設定に残す）→ `native/src/render/ops_layer_styles.cpp`（`bake_layer_styles`。Genko の境界効果も描き込むこと、8 bit・高精度・インキの道、ブレンド条件を残すことは Genko のもの）。
   - `crates/io/src/blocks.rs`（10-58 行: `parse_brst`・`brst_data`・`locks_from_lspf`・`lspf_from_locks`）→ `native/src/render/import_psd.cpp`（`take_locks`・`take_channels`）・`native/src/formats/psd_export.cpp`（`own_locks`・`basics_blocks`）。`crates/compose/src/lib.rs`（661-690 行: `channel_weights`・`restore_channels` — 外したチャンネルは下の値のまま）→ `native/src/render/page.cpp`（`KeptChannels`。CMYK・Lab・グレーのページ（上流は RGB とグレーだけ）、高精度・インキの道への配線は Genko のもの）・`native/src/render/color_canvas.cpp`・`native/src/render/ink_canvas.cpp`（`keep_channels`）。`crates/format/src/manifest.rs` の `excluded_channels`・`Locks` → `native/src/render/pcraft_read.cpp`・`native/src/formats/pcraft_write.cpp`。
 
+- アートボード（PC5 I-c、artboards@1）:
+  - `crates/engine/src/artboard_cmds.rs`（20-31 行: プリセット、94-139 行: 背景と大きさの引数・`next_artboard_name`、146-320 行: 作る・グループ／レイヤーから・設定（大きさは左上から、手で変えるとプリセットを外す）、336-430 行: `artboards_to_files`・`raster_pdf`・`artboards_to_pdf`）→ `native/src/core/artboards.cpp`・`native/src/render/ops_artboards.cpp`・`native/src/formats/artboards.cpp`（アートボードは Genko のページ。上流のカンバスの上の板と GAP 100 は PSD に並べる位置に使う）。
+  - `crates/io/src/comps_map.rs`（67-110 行: `parse_artboard`・`write_artboard` — `artboardRect`・`artboardPresetName`・`artboardBackgroundType`・`Clr `）、`crates/io/src/blocks.rs`（98-131 行: `color_from_desc`・`color_to_desc`）→ `native/src/render/psd_artboards.cpp`。
+  - `crates/io/src/psd_import.rs`（313-315 行: グループの `artb` をアートボードに）、`crates/doc/src/comps.rs`（`Artboard`・`ArtboardBackground`）→ `native/src/formats/artboards.cpp`（`split_psd_artboards`・`split_pcraft_artboards`）・`native/src/formats/pcraft_write.cpp`。
+  - `crates/engine/src/artboard_cmds/tests.rs` の試験の考え（プリセット・名前・背景・書き出しのファイル名）→ `native/tests/contract/test_contract_artboards.cpp`。
+
 ## 表示・窓・環境設定（PC5 節 H）
 
 - 表示・窓・環境設定の土台（PC5 H-0）:

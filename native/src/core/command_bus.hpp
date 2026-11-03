@@ -210,6 +210,9 @@ void register_ruler_ops(OpRegistry& registry);
 // Register the animation ops of M3 (set_animation, add_anim_folder, add_cel, set_exposure, set_exposures,
 // set_camera_key, set_light_table).
 void register_anim_ops(OpRegistry& registry);
+// PC5 J-e1 (timeline@1, SPEC.md PROD-01): the question timeline_info (timeline.info) — the drawing registry's
+// (render/ops_registry.cpp), not core's.
+void register_timeline_query(OpRegistry& registry);
 
 // Register the vector line edits of M3 (vector_edit, trace_edit).
 void register_vector_ops(OpRegistry& registry);

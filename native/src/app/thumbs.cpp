@@ -80,6 +80,7 @@ std::string page_fingerprint(const core::Document& doc, const core::Page& page) 
         h.add(values);
     }
     h.add(page.extra);
+    if (page.artboard) h.add(core::to_json(*page.artboard));  // (artboards@1, PC5 I-c: its background — a page of none keeps its key)
     h.add(page.effects);
     h.add(opt(page.ruler));
     h.add(page.rulers);

@@ -452,10 +452,12 @@ private slots:
         // and PC5 G-d's 20 (SPEC TEXT-02) — ウィンドウ → 文字・段落・文字スタイル・段落スタイル・字形 (act_panel_<panel>), 書式 → パネル ▸
         // 5 (act_type_panel_<panel>), フォントプレビューのサイズ ▸ 6 (act_type_preview_<size>), すべての見つからないフォントを置換・見つからない
         // フォントを解決… (act_type_replace_missing, act_type_resolve_missing), 編集 → スペルチェック… (act_spelling) and 環境設定 → テキスト…
-        // (act_prefs_type: its page made) — test_gui_type_panels.
-        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12 and G-d's 20)
-        // (and PC5 H-e's 3: 環境設定 ▸ ヒストリーログ…・仮想記憶ディスク…・拡張コントロール… — 769＋3)
-        QCOMPARE(w->actions_by_name().size(), std::size_t{772});
+        // (act_prefs_type: its page made) — test_gui_type_panels; PC5 J-e1's 8 (SPEC PROD-01) — 次・前・最初・最後のフレーム,
+        // 作業範囲の開始点へ移動・終了点へ移動, フレームへ移動… (act_next_frame … act_go_to_frame) and ビデオをレンダリング… (act_render_video)
+        // — test_gui_anim.
+        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8 and I-c's 10: アートボード… など — test_gui_artboards)
+        // (and PC5 H-e's 3: 環境設定 ▸ ヒストリーログ…・仮想記憶ディスク…・拡張コントロール… — 787＋3)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{790});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -547,9 +549,13 @@ private slots:
         QVERIFY(exports != nullptr);
         QCOMPARE(items(exports), (QStringList{QStringLiteral("PNG としてクイック書き出し"), QStringLiteral("書き出し形式…"), QStringLiteral("|"),
                                              QStringLiteral("書き出しの環境設定…"), QStringLiteral("|"), QStringLiteral("Web 用に保存（従来）…"), QStringLiteral("|"),
-                                             QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("レイヤーからファイル…"),
+                                             QStringLiteral("原稿を書き出す…"), QStringLiteral("|"),
+                                             QStringLiteral("アートボードからファイル…"), QStringLiteral("アートボードから PDF…"),  // (PC5 I-c)
+                                             QStringLiteral("レイヤーからファイル…"),
                                              QStringLiteral("レイヤーカンプからファイル…"),  // (PC5 J-a)
-                                             QStringLiteral("パスを Illustrator へ…"), QStringLiteral("カラールックアップテーブル…"),
+                                             QStringLiteral("パスを Illustrator へ…"),
+                                             QStringLiteral("ビデオをレンダリング…"),  // (PC5 J-e1: after パスを Illustrator へ…, Photoshop's)
+                                             QStringLiteral("カラールックアップテーブル…"),
                                              QStringLiteral("データセットからファイル…")}));  // (PC5 I-d)
         // (PC5 H-0: no key in the Photoshop key set — Ctrl+E is 下のレイヤーと結合; Ctrl+E in the Genko set, theKeySets)
         QVERIFY(studio.act("act_export")->shortcuts().isEmpty());
@@ -964,12 +970,14 @@ private slots:
                               // スクリーンモード ▸, 表示・非表示 ▸ (ピクセルグリッド; H-b fills the rest), 手のひらツール)
                               QStringLiteral("32 bit プレビューオプション…"), QStringLiteral("|"),
                               QStringLiteral("ズームイン"), QStringLiteral("ズームアウト"), QStringLiteral("画面サイズに合わせる"),
+                              QStringLiteral("アートボードを画面サイズに合わせる"),  // (PC5 I-c)
                               QStringLiteral("レイヤーを画面サイズに合わせる"), QStringLiteral("100%"), QStringLiteral("200%"), QStringLiteral("プリントサイズ"),
                               QStringLiteral("|"), QStringLiteral("水平方向に反転"), QStringLiteral("パターンプレビュー"), QStringLiteral("ピクセルアートプレビュー"),
                               // (PC5 H-b: エクストラ, 表示・非表示 ▸ — ターゲットパス, ブラシプレビュー and 選択範囲のエッジ in it —, the guides')
                               QStringLiteral("|"), QStringLiteral("スクリーンモード ▸"), QStringLiteral("|"), QStringLiteral("エクストラ"), QStringLiteral("表示・非表示 ▸"),
                               QStringLiteral("|"), QStringLiteral("定規"), QStringLiteral("|"),
                               QStringLiteral("スナップ"), QStringLiteral("スナップ先 ▸"), QStringLiteral("|"), QStringLiteral("ガイドをロック"), QStringLiteral("ガイドを消去"),
+                              QStringLiteral("選択したアートボードのガイドを消去"),  // (PC5 I-c)
                               QStringLiteral("カンバスガイドを消去"), QStringLiteral("新規ガイド…"), QStringLiteral("新規ガイドレイアウトを作成…"),
                               QStringLiteral("シェイプから新規ガイドを作成"),
                               // (PC5 J-b: スライスをロック・スライスを消去)

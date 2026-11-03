@@ -19,6 +19,7 @@
 #include "core/ids.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
+#include "core/video.hpp"
 #include "core/pyops.hpp"
 #include "service/book.hpp"
 #include "service/briefs.hpp"
@@ -370,6 +371,9 @@ ToolResult StudioService::apply_ops(const Json& a) {
         }
     }
     core::ApplyResult result;
+    // (PC5 J-e1, the coordinator's decision on its review P2-1: an agent's set_animation is the public list's — 1..60,
+    // work an unknown key —; the window, `genko apply` and /v1/apply take timeline@1's)
+    const core::PublicAnimationOps public_animation;
     try {
         result = service::apply_ops(load_episode(path), ops, actor_, true);
         if (commit) {

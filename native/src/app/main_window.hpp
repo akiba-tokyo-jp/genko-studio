@@ -2119,6 +2119,28 @@ public:
 private:
     void build_layer_basic_actions();
     void build_layer_basic_menus(QMenu* layers);
+
+    // --- PC5 I-c (artboards@1, SPEC.md AUTO-01「アートボード」): main_window_artboards.cpp — レイヤー → 新規 → アートボード…・
+    // グループからのアートボード…・レイヤーからのアートボード…, イメージ → アートボードの設定…, 表示 → アートボードを画面サイズに合わせる・
+    // 選択したアートボードのガイドを消去, ファイル → 書き出し → アートボードからファイル…・アートボードから PDF… ------------------------
+public:
+    // アートボード…: its window (app/artboard_dialog), then add_artboard after this page; the new page shown.
+    void new_artboard();
+    // アートボードの設定…: this artboard's window, then set_artboard.
+    void artboard_settings();
+    // グループからのアートボード… (`group`: one group chosen) and レイヤーからのアートボード…: the name asked, then artboard_from_layers.
+    void artboard_from(bool group);
+    // アートボードを画面サイズに合わせる: this artboard alone filling the view.
+    void fit_artboard();
+    // 選択したアートボードのガイドを消去: this artboard's guides (delete_ruler, kind guide).
+    void clear_artboard_guides();
+    // アートボードからファイル… (pdf false: a file each, or one PSD) and アートボードから PDF…: the window, then formats/artboards.
+    void artboards_to_files(bool pdf);
+
+private:
+    void build_artboard_actions();
+    void build_artboard_menus(QMenu* layers, QMenu* pages);
+    void build_artboard_view_menus(QMenu* view);
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go
