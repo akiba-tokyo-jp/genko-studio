@@ -937,12 +937,14 @@ private slots:
                               // スクリーンモード ▸, 表示・非表示 ▸ (ピクセルグリッド; H-b fills the rest), 手のひらツール)
                               QStringLiteral("32 bit プレビューオプション…"), QStringLiteral("|"),
                               QStringLiteral("ズームイン"), QStringLiteral("ズームアウト"), QStringLiteral("画面サイズに合わせる"),
+                              QStringLiteral("アートボードを画面サイズに合わせる"),  // (PC5 I-c)
                               QStringLiteral("レイヤーを画面サイズに合わせる"), QStringLiteral("100%"), QStringLiteral("200%"), QStringLiteral("プリントサイズ"),
                               QStringLiteral("|"), QStringLiteral("水平方向に反転"), QStringLiteral("パターンプレビュー"), QStringLiteral("ピクセルアートプレビュー"),
                               // (PC5 H-b: エクストラ, 表示・非表示 ▸ — ターゲットパス, ブラシプレビュー and 選択範囲のエッジ in it —, the guides')
                               QStringLiteral("|"), QStringLiteral("スクリーンモード ▸"), QStringLiteral("|"), QStringLiteral("エクストラ"), QStringLiteral("表示・非表示 ▸"),
                               QStringLiteral("|"), QStringLiteral("定規"), QStringLiteral("|"),
                               QStringLiteral("スナップ"), QStringLiteral("スナップ先 ▸"), QStringLiteral("|"), QStringLiteral("ガイドをロック"), QStringLiteral("ガイドを消去"),
+                              QStringLiteral("選択したアートボードのガイドを消去"),  // (PC5 I-c)
                               QStringLiteral("カンバスガイドを消去"), QStringLiteral("新規ガイド…"), QStringLiteral("新規ガイドレイアウトを作成…"),
                               QStringLiteral("シェイプから新規ガイドを作成"),
                               // (PC5 J-b: スライスをロック・スライスを消去)
