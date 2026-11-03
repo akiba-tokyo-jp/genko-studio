@@ -237,6 +237,9 @@ genko_library(genko_app
     # PC5 J-b (スライス: the slices on the canvas, the スライスツール・スライス選択ツール, the window's commands)
     canvas_slices.cpp
     main_window_slices.cpp
+    # PC5 I-c (アートボード: レイヤー → 新規 → アートボード, アートボードの設定, 表示, アートボードからファイル・PDF)
+    main_window_artboards.cpp
+    artboard_dialog.cpp
     # PC5 I-g (自動整列・自動合成・Photomerge・ファイルをスタックとして読み込み・統計)
     auto_align_dialog.cpp
     photomerge_dialog.cpp

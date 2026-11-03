@@ -30,6 +30,7 @@
 #include "render/pcraft_read.hpp"
 #include "render/ops_registry.hpp"
 #include "render/import_psd.hpp"
+#include "formats/artboards.hpp"
 #include "render/png.hpp"
 #include "render/proof.hpp"
 #include "render/psd_image.hpp"
@@ -211,6 +212,7 @@ Opened pcraft_book(render::pcraft::Read read, const std::string& file) {
     out.notes = std::move(read.notes);
     core::Page& page = out.doc.edit_page(0);
     if (page.native_source && !file.empty() && file.find('/') == std::string::npos && file.find('\\') == std::string::npos) page.native_source->name = file;
+    split_pcraft_artboards(out.doc, read.artboards, out.notes);  // (PC5 I-c: an artboard is a page)
     return out;
 }
 
@@ -561,6 +563,8 @@ Opened open_psd(std::string_view bytes, const std::string& file, const OpenOptio
         doc.file_info = info;
     }
     doc.edit_page(0).native_source = std::move(source);
+    // (PC5 I-c, the user's decision 3: its artboards each a page of the book; import_psd keeps them a page's groups)
+    split_psd_artboards(doc, out.notes);
     return out;
 }
 

@@ -62,6 +62,9 @@ struct Read {
     core::Document doc;              // a book of one page, in memory (no folder)
     std::vector<std::string> notes;  // what it could not keep, in Japanese
     std::uint64_t unpacked = 0;      // the bytes its tiles and blobs unpacked to (the .pcraft files inside counted in)
+    // (PC5 I-c, artboards@1) its artboards: each top-level group's id (a group of the page) and its "artboard" as the file
+    // has it — what opens them as pages (formats::split_artboard_groups: an artboard is a page)
+    std::vector<std::pair<std::string, core::Json>> artboards;
 };
 
 // Bytes that look like a .pcraft written as a zip (a zip whose first file is manifest.json: how PhotoCraft and Genko write

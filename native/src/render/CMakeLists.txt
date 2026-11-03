@@ -280,6 +280,9 @@ genko_library(genko_render
     ops_type_fonts.cpp
     # PC5 G-e (PSD・.pcraft の文字: Photoshop's text layer and the type layer each other's)
     psd_type.cpp
+    # PC5 I-c (アートボード: artboards@1 — the ops, PSD's artb)
+    ops_artboards.cpp
+    psd_artboards.cpp
     # PC5 I-g (自動整列・自動合成・Photomerge: features, panorama, pyramid and their ops)
     features.cpp
     panorama.cpp

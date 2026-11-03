@@ -428,7 +428,7 @@ private slots:
                  QStringList({QStringLiteral("ページを追加（この後ろに）"), QStringLiteral("このページを複製"), QStringLiteral("このページを消す…"), QStringLiteral("|"),
                               QStringLiteral("このページを前へ"), QStringLiteral("このページを後ろへ"), QStringLiteral("次のページと見開きにする／解除"), QStringLiteral("|"),
                               QStringLiteral("原稿用紙の設定…"), QStringLiteral("絵柄を選ぶ…"), QStringLiteral("チャットでの承認…"), QStringLiteral("ノンブルの設定…"), QStringLiteral("このページのノンブルを隠す／出す"),
-                              QStringLiteral("表紙・カバーを足す…"), QStringLiteral("このページの担当…"), QStringLiteral("アニメーション（タイムライン）"), QStringLiteral("色モード"),
+                              QStringLiteral("表紙・カバーを足す…"), QStringLiteral("このページの担当…"), QStringLiteral("ビデオタイムラインを作成"), QStringLiteral("色モード"),
                               QStringLiteral("|"), QStringLiteral("コマ")}));
         // ファイル: after the scans (PC4 F-0: Photoshop's order — the export in 書き出し ▸ before them, ファイル情報… after them:
         // test_gui_actions' theFileMenuIsPhotoshops)

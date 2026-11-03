@@ -3085,6 +3085,40 @@
         "project": "book.genko",
         "ops": [
          {
+          "op": "set_animation",
+          "page": 2,
+          "fps": 61
+         }
+        ],
+        "commit": false
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "set_animation",
+          "page": 2,
+          "frames": 12,
+          "work": [
+           2,
+           5
+          ]
+         }
+        ],
+        "commit": false
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
           "op": "approve",
           "gate": "name",
           "page": 1
@@ -4040,6 +4074,40 @@
      "ops": [
       {
        "op": "info"
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "set_animation",
+          "page": 2,
+          "fps": 61
+         }
+        ],
+        "commit": false
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "set_animation",
+          "page": 2,
+          "frames": 12,
+          "work": [
+           2,
+           5
+          ]
+         }
+        ],
+        "commit": false
+       }
       },
       {
        "op": "call",
@@ -5011,6 +5079,40 @@
         "project": "book.genko",
         "ops": [
          {
+          "op": "set_animation",
+          "page": 2,
+          "fps": 61
+         }
+        ],
+        "commit": false
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "set_animation",
+          "page": 2,
+          "frames": 12,
+          "work": [
+           2,
+           5
+          ]
+         }
+        ],
+        "commit": false
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
           "op": "approve",
           "gate": "name",
           "page": 1
@@ -5966,6 +6068,40 @@
      "ops": [
       {
        "op": "info"
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "set_animation",
+          "page": 2,
+          "fps": 61
+         }
+        ],
+        "commit": false
+       }
+      },
+      {
+       "op": "call",
+       "name": "apply_ops",
+       "args": {
+        "project": "book.genko",
+        "ops": [
+         {
+          "op": "set_animation",
+          "page": 2,
+          "frames": 12,
+          "work": [
+           2,
+           5
+          ]
+         }
+        ],
+        "commit": false
+       }
       },
       {
        "op": "call",

@@ -177,6 +177,7 @@ void MainWindow::build_view_menus(QMenu* view) {
     screens->addAction(action(QStringLiteral("act_screen_next")));
     show_menu(view)->addAction(action(QStringLiteral("act_pixel_grid")));
     build_guide_view_menus(view);  // (PC5 H-b: エクストラ, 表示・非表示 ▸'s, the guides' — main_window_guide_view.cpp)
+    build_artboard_view_menus(view);  // (PC5 I-c: アートボードを画面サイズに合わせる, 選択したアートボードのガイドを消去 — main_window_artboards.cpp)
     // (after every part has put its commands in 表示 and in 表示・非表示 ▸: laid out once)
     lay_out_menu(show_menu(view), show_rows());
     lay_out_menu(view, view_rows());
