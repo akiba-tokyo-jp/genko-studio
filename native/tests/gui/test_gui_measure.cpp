@@ -369,7 +369,7 @@ private slots:
         QVERIFY(dock->isVisible() && b.act("act_panel_measurement_log")->isChecked());
         b.act("act_panel_measurement_log")->trigger();
         QVERIFY(!dock->isVisible());
-        const std::int64_t revision = b.window->book().revision;
+        const core::PagePtr unmeasured = b.window->book().pages[0];
         // the whole page: one row (counted on the 200 dpi grid, in the page's 300 dpi pixels), the panel shown
         b.act("act_measure_record")->trigger();
         QVERIFY2(!b.window->last_notice().contains(QStringLiteral("まだ使えません")), qPrintable(b.window->last_notice()));
@@ -383,7 +383,7 @@ private slots:
         QCOMPARE(panel->table()->horizontalHeaderItem(0)->text(), QStringLiteral("ラベル"));
         QVERIFY(panel->status()->text().contains(QStringLiteral("200 dpi")));
         // a selection over the bar: its gray darker than the paper's
-        b.canvas()->set_selection(Json{{"rect", Json::array({20, 40, 80, 10})}});
+        b.canvas()->set_selection(Json{{"poly", Json::array({Json::array({20, 40}), Json::array({100, 40}), Json::array({100, 50}), Json::array({20, 50})})}});
         b.act("act_measure_record")->trigger();
         QCOMPARE(log.rows().size(), std::size_t(2));
         QCOMPARE(log.rows()[1].values["label"], Json("計測 2"));
@@ -401,8 +401,8 @@ private slots:
         QCOMPARE(log.rows().back().values["source"], Json("カウントツール"));
         QCOMPARE(log.rows().back().values["count"], Json(1));
         QCOMPARE(panel->table()->rowCount(), 4);
-        const std::int64_t marked = b.window->book().revision;
-        QVERIFY(marked > revision);  // (the ruler line and the count are the book's; the records are not)
+        const core::PagePtr marked = b.window->book().pages[0];
+        QVERIFY(marked != unmeasured);  // (the ruler line and the count are the book's; the records are not)
         // 削除: the rows chosen (none: nothing)
         panel->table()->clearSelection();
         panel->button(QStringLiteral("log_delete"))->click();
@@ -425,7 +425,7 @@ private slots:
         text = file_text(csv);
         QCOMPARE(std::count(text.begin(), text.end(), '\n'), std::ptrdiff_t(2));
         QVERIFY(text.find("カウントツール") != std::string::npos && text.find("ものさしツール") == std::string::npos);
-        QCOMPARE(b.window->book().revision, marked);  // (recording, deleting, exporting: the book untouched)
+        QVERIFY(b.window->book().pages[0] == marked);  // (recording, deleting, exporting: the page untouched)
         // a page the person cannot change: its line this window's own, measured all the same
         app::MeasurementLog::instance().clear();
         Book held(true);
@@ -458,7 +458,10 @@ private slots:
         b.act("act_measure_record")->trigger();
         const app::MeasurementLog& log = app::MeasurementLog::instance();
         QCOMPARE(log.rows().size(), std::size_t(1));
-        QCOMPARE(log.rows()[0].values, (Json{{"label", "計測 1"}, {"area", 945.0 * 709.0 * 2.25}}));
+        // (the labels go on counting through the app's session, as Photoshop's: 計測 n)
+        QCOMPARE(log.rows()[0].values.size(), std::size_t(2));
+        QVERIFY(log.rows()[0].values["label"].get<std::string>().starts_with("計測 "));
+        QCOMPARE(log.rows()[0].values["area"].get<double>(), 945.0 * 709.0 * 2.25);
         QCOMPARE(b.window->measurement_log_panel()->table()->columnCount(), 2);
         // the window shows them as chosen; 初期設定に戻す: every one
         b.answers.responder->exec = [](QDialog* dialog) {

@@ -15,6 +15,7 @@
 #include "core/error.hpp"
 #include "core/measure.hpp"
 #include "core/pynum.hpp"
+#include "core/pyops.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
 #include "render/raster_ops.hpp"

@@ -340,7 +340,9 @@ private slots:
         QCOMPARE(text, std::string("ラベル,日時,ドキュメント,面積,ヒストグラム,長さ\n計測 1,t,\"a,\"\"b\"\"\",100.0,1 2 3,\n計測 2,,,,,5.0\n"));
         QCOMPARE(m::column_name("grayMean"), std::string("グレー値（平均）"));
         QCOMPARE(m::columns().size(), std::size_t(21));
-        QVERIFY(m::now_text().size() >= 25);  // (2026-11-03T21:05:00+09:00)
+        // (2026-11-03T21:05:00+09:00; on a machine at UTC 2026-11-03T12:05:00Z)
+        const std::string now = m::now_text();
+        QVERIFY2(now.size() >= 20 && now[4] == '-' && now[10] == 'T' && (now.back() == 'Z' || now[now.size() - 3] == ':'), now.c_str());
     }
 
     // place_scale_marker_builds_one_group_in_one_step: a group 目盛りマーカー of a pen layer's rectangle and a type layer, one

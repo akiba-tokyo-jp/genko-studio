@@ -394,8 +394,8 @@ private slots:
         // drawn: the bar 10 mm long at the trim's bottom left (black pixels there), the paper beside it
         const QString png = path(QStringLiteral("marker.png"));
         int exit = -1;
-        genko({QStringLiteral("render"), book_path, png, QStringLiteral("--page"), QStringLiteral("1"), QStringLiteral("--dpi"), QStringLiteral("100")}, &exit);
-        QVERIFY(exit == 0);
+        const Json drawn = genko({QStringLiteral("render"), book_path, QStringLiteral("--page"), QStringLiteral("1"), QStringLiteral("--dpi"), QStringLiteral("100"), QStringLiteral("--out"), png}, &exit);
+        QVERIFY2(exit == 0, drawn.dump().c_str());
         const render::Image picture = render::read_png(genko::test::read_bytes(png), render::kPillowOpenLimits).convert("RGB");
         const core::Rect trim = page.trim_rect_mm();
         const Json bar_mm = done["results"][1]["bar_mm"];

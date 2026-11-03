@@ -462,7 +462,7 @@ void MainWindow::build_measurement_log_dock() {
 bool MainWindow::record_measurements() {
     const core::Page* page = current_page();
     if (page == nullptr) return false;
-    const std::optional<Json> area = canvas_->selection_area();
+    const std::optional<Json> area = selection_area();
     // (a ruler line the book could not take — this window's — measured as the page's: measuring never needs the book)
     core::Page with_line;
     const core::Page* measured = page;
