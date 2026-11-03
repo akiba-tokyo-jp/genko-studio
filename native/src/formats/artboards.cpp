@@ -26,6 +26,7 @@
 #include "render/page.hpp"
 #include "render/pcraft_annotations.hpp"
 #include "render/pcraft_manifest.hpp"
+#include "render/png.hpp"
 #include "render/psd_artboards.hpp"
 
 namespace genko::formats {
@@ -234,10 +235,10 @@ std::vector<CopyResult> export_artboards(const core::Document& doc, const fs::pa
     const auto exts = copy_extensions();
     if (std::find(exts.begin(), exts.end(), extension) == exts.end()) throw core::Error("value", "not a format this build writes: " + extension);
     std::string prefix = files.prefix ? *files.prefix : (doc.title.empty() ? std::string("無題") : doc.title);
-    prefix = render::layer_comps::file_part(prefix);
+    if (!prefix.empty()) prefix = render::layer_comps::file_part(prefix);  // ("" given: the names alone)
     constexpr std::size_t kNameMost = 240;
     const std::size_t fixed = 1 + 1 + extension.size() + 4;  // (the _, the dot and extension, a _N)
-    prefix = cut(prefix, kNameMost > fixed + 16 ? kNameMost - fixed - 16 : 1);
+    if (!prefix.empty()) prefix = cut(prefix, kNameMost > fixed + 16 ? kNameMost - fixed - 16 : 1);
     std::set<std::string> taken;
     std::vector<CopyResult> out;
     for (const std::size_t at : pages) {
@@ -443,6 +444,22 @@ CopyResult export_artboards_psd(const core::Document& doc, const fs::path& file,
 
 namespace {
 
+// A layer outside the artboards that makes no page of its own: one of no pixels at all, or the paper this build writes
+// under a page's layers in every PSD (紙: white all over).
+bool nothing_or_paper(const core::Layer& layer) {
+    if (layer.kind != core::LayerKind::Raster || !layer.raster_png || layer.raster_png->empty() || layer.stroke_count() > 0) return false;
+    try {
+        const render::Image picture = render::read_png(*layer.raster_png).convert("RGBA");
+        if (!picture.getbbox(true)) return true;
+        if (layer.title != "紙") return false;
+        for (const auto& [lo, hi] : picture.getextrema())
+            if (lo < 255) return false;
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 struct Board {
     std::string id;
     render::psd_artboards::Board board;
@@ -498,7 +515,7 @@ void split_boards(core::Document& doc, const std::vector<Board>& boards, std::ve
     }
     std::vector<core::Layer> outside;
     for (const core::Layer& layer : page.layers) {
-        if (!board_ids.contains(top[layer.id])) outside.push_back(layer);
+        if (!board_ids.contains(top[layer.id]) && !nothing_or_paper(layer)) outside.push_back(layer);
     }
     if (!outside.empty()) {
         core::Page rest = page_of(outside);

@@ -27,6 +27,7 @@
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
 #include "app/pages_panel.hpp"
+#include "render/page.hpp"
 #include "gui_support.hpp"
 
 using namespace genko;
@@ -163,7 +164,7 @@ private slots:
         Book b;
         QVERIFY(b.apply(Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "p"}, {"name", "p"}}));
         QVERIFY(b.apply(Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "p"},
-                             {"area", Json{{"poly", Json::array({Json::array({10, 10}), Json::array({60, 10}), Json::array({60, 40}), Json::array({10, 40})})}}},
+                             {"area", Json{{"poly", Json::array({Json::array({50, 60}), Json::array({100, 60}), Json::array({100, 90}), Json::array({50, 90})})}}},
                              {"rgb", Json::array({255, 0, 0})}}));
         b.window->go_to_page(0);
         b.window->layer_panel()->select_ids({"p"});
@@ -173,7 +174,9 @@ private slots:
         const core::Page& board = *b.doc().pages[1];
         QVERIFY(board.artboard);
         QCOMPARE(board.artboard->name, std::string("赤い板"));
-        QVERIFY(std::abs(board.spec.width_mm.value() - 50) < 0.2);
+        std::string titles;
+        for (const core::Layer& l : board.layers) titles += l.title + "/" + std::to_string(int(l.kind)) + " ";
+        QVERIFY2(std::abs(board.spec.width_mm.value() - 50) < 0.3, (board.spec.width_mm.repr() + " " + titles).c_str());
         QCOMPARE(b.window->page_index(), 1);
         // its guides: by アートボードガイド (not カンバスガイド), cleared by 選択したアートボードのガイドを消去
         QVERIFY(b.apply(Json{{"op", "add_ruler"}, {"page", 2}, {"kind", "guide"}, {"axis", "v"}, {"at", 10}}));

@@ -36,7 +36,9 @@ def view(path: str) -> dict:
                     if colour is not None:
                         item["colour"] = [round(float(colour.get(k))) for k in (b"Rd  ", b"Grn ", b"Bl  ")]
         layers.append(item)
-    return {"depth": psd.depth, "width": psd.width, "height": psd.height, "layers": layers}
+    every = [{"name": l.name, "kind": l.kind, "bbox": list(l.bbox), "parent": l.parent.name if l.parent is not None and l.parent is not psd else None}
+             for l in psd.descendants()]
+    return {"depth": psd.depth, "width": psd.width, "height": psd.height, "layers": layers, "every": every}
 
 
 def main() -> int:

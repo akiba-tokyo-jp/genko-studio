@@ -33,6 +33,7 @@
 #include "render/page.hpp"
 #include "render/pcraft_read.hpp"
 #include "render/png.hpp"
+#include "render/raster.hpp"
 #include "storage/reader.hpp"
 #include "testsupport.hpp"
 
@@ -109,6 +110,26 @@ bool near(const std::array<int, 3>& a, const std::array<int, 3>& b, int by = 1) 
     for (int c = 0; c < 3; ++c)
         if (std::abs(a[c] - b[c]) > by) return false;
     return true;
+}
+// A paint layer of pixels on the page at `at` (its working 200 dpi grid): a block of `rgb` over [x0, x1) × [y0, y1).
+void add_pixels(core::Document& doc, std::size_t at, const std::string& id, int x0, int y0, int x1, int y1, std::array<int, 3> rgb) {
+    core::Page& page = doc.edit_page(at);
+    const render::Size size{render::mm_to_px(page.spec.width_mm.value(), 200), render::mm_to_px(page.spec.height_mm.value(), 200)};
+    std::string bytes(std::size_t(size.width) * std::size_t(size.height) * 4, '\0');
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            const std::size_t i = (std::size_t(y) * std::size_t(size.width) + std::size_t(x)) * 4;
+            for (int c = 0; c < 3; ++c) bytes[i + std::size_t(c)] = static_cast<char>(rgb[std::size_t(c)]);
+            bytes[i + 3] = static_cast<char>(255);
+        }
+    }
+    core::Layer layer;
+    layer.id = id;
+    layer.title = id;
+    layer.kind = core::LayerKind::Raster;
+    layer.panel_clip = false;
+    render::raster::save_raster(page, layer, render::Image::frombytes("RGBA", size, bytes));
+    page.layers.push_back(std::move(layer));
 }
 QByteArray shown(const std::array<int, 3>& c) { return QByteArray::number(c[0]) + "," + QByteArray::number(c[1]) + "," + QByteArray::number(c[2]); }
 int count_of(const std::string& text, const std::string& what) {
@@ -401,8 +422,8 @@ private slots:
                                                       Json{{"op", "add_artboard"}, {"preset", "Android 1080p"}, {"name", "B"}, {"background", "black"}},
                                                       Json{{"op", "add_artboard"}, {"width_px", 50}, {"height_px", 50}, {"name", "C"}, {"background", "custom"},
                                                            {"rgb", Json::array({10, 200, 30})}}}));
-        doc = run(doc, Json::array({op("add_layer", {{"kind", "paint"}, {"id", "a1"}, {"name", "a1"}}, 2), drawn_in("a1", 0, 0, 10, 10, Json::array({255, 0, 0}), 2),
-                                    op("set_artboard", {{"origin_px", Json::array({0, 300})}}, 4)}));
+        add_pixels(doc, 1, "a1", 0, 0, 28, 28, {255, 0, 0});  // (A: its red square, pixels — a PSD's layers are pictures)
+        doc = run(doc, op("set_artboard", {{"origin_px", Json::array({0, 300})}}, 4));
         const QString file = path(QStringLiteral("boards.psd"));
         const fs::path dest = core::path_from_utf8(file.toStdString());
         formats::ArtboardPsd options;
@@ -411,15 +432,18 @@ private slots:
         const Json view = psd_view(file);
         QVERIFY2(!view.contains("error"), view.dump().c_str());
         QCOMPARE(view["depth"].get<int>(), 8);
-        const Json& layers = view["layers"];
-        QCOMPARE(layers.size(), std::size_t(3));
+        // (the artboards — besides them the page's own as every page's PSD has them: the paper, the panels' borders)
+        Json layers = Json::array();
+        for (const Json& l : view["layers"])
+            if (l.value("kind", std::string()) == "artboard") layers.push_back(l);
+        QVERIFY2(layers.size() == 3, view.dump().c_str());
         // (top first: the last artboard on top; C where its place says, A and B to the right of it, 100 pixels apart, at its
         // top)
         QCOMPARE(layers[2]["name"].get<std::string>(), std::string("A"));
         QCOMPARE(layers[2]["kind"].get<std::string>(), std::string("artboard"));
         QCOMPARE(layers[2]["bbox"], Json::array({150, 300, 270, 380}));
         QCOMPARE(layers[2]["background"].get<int>(), 1);
-        QCOMPARE(layers[2]["children"], Json::array({"a1", "レイヤー 1"}));
+        QCOMPARE(layers[2]["children"], Json::array({"a1"}));
         QCOMPARE(layers[1]["name"].get<std::string>(), std::string("B"));
         QCOMPARE(layers[1]["bbox"], Json::array({370, 300, 730, 940}));
         QCOMPARE(layers[1]["background"].get<int>(), 2);
@@ -473,7 +497,8 @@ private slots:
                                                  QStringLiteral("--format"), QStringLiteral("artboards"), QStringLiteral("--artboard-format"), QStringLiteral("psd"),
                                                  QStringLiteral("--one-psd"), QStringLiteral("--json")});
         QVERIFY2(ran.exit_code == 0, qPrintable(ran.described()));
-        QCOMPARE(psd_view(path(QStringLiteral("cli.psd")))["layers"].size(), std::size_t(3));
+        const Json cli = psd_view(path(QStringLiteral("cli.psd")));
+        QCOMPARE(std::count_if(cli["layers"].begin(), cli["layers"].end(), [](const Json& l) { return l.value("kind", std::string()) == "artboard"; }), 3);
     }
 
     // A .pcraft of an artboard: PhotoCraft's artboard over the whole document (a top-level group, its board, background
