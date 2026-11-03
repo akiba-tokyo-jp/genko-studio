@@ -223,6 +223,13 @@ bool bundled_font_present(const std::string& name);
 // once per process and shared), a font file's by its path (read now: NotYetPorted "default_font" or "large_font" as
 // TrueTypeFonts::truetype says).
 std::shared_ptr<const QByteArray> font_bytes(const std::string& font);
+// PC5 G-d: one face of a font collection (.ttc, .otc) named as a font for TrueTypeFonts, font_bytes and render/text/shaping —
+// its file's name, kFaceMark and the face's number (face 0: the file's name alone). Never written into a book: a record keeps
+// the number as its character attribute face_index (core/type_text).
+inline constexpr char kFaceMark = '\x1f';
+std::string face_font(const std::string& font, unsigned index);
+// The file and the face of a name face_font made (any other name: itself and face 0).
+std::pair<std::string, unsigned> font_face(const std::string& font);
 // PC5 G-b: the name TrueTypeFonts::load_default opens Pillow's own default font by (font_bytes and truetype take it).
 const std::string& pillow_default_font();
 

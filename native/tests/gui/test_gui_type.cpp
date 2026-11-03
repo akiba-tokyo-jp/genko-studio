@@ -136,11 +136,13 @@ private slots:
         QMenu* type = s.menu_at(QStringLiteral("書式"));
         QVERIFY(type != nullptr);
         // (G-b: OpenType ▸ after 方向 ▸, 言語オプション ▸ after ワープテキスト…)
-        QCOMPARE(texts(type), QStringList({QStringLiteral("アンチエイリアス"), QStringLiteral("方向"), QStringLiteral("OpenType"), QStringLiteral("|"),
+        // (G-d: パネル ▸ first, フォントプレビューのサイズ ▸ before 言語オプション ▸, the missing fonts' two after 更新)
+        QCOMPARE(texts(type), QStringList({QStringLiteral("パネル"), QStringLiteral("アンチエイリアス"), QStringLiteral("方向"), QStringLiteral("OpenType"), QStringLiteral("|"),
                                            QStringLiteral("作業用パスを作成"), QStringLiteral("シェイプに変換"), QStringLiteral("テキストレイヤーをラスタライズ"),
                                            QStringLiteral("ポイントテキストに変換"), QStringLiteral("段落テキストに変換"), QStringLiteral("|"),
-                                           QStringLiteral("ワープテキスト…"), QStringLiteral("|"), QStringLiteral("言語オプション"), QStringLiteral("|"),
-                                           QStringLiteral("すべてのテキストレイヤーを更新"), QStringLiteral("|"), QStringLiteral("Lorem Ipsum をペースト"),
+                                           QStringLiteral("ワープテキスト…"), QStringLiteral("|"), QStringLiteral("フォントプレビューのサイズ"), QStringLiteral("言語オプション"),
+                                           QStringLiteral("|"), QStringLiteral("すべてのテキストレイヤーを更新"), QStringLiteral("すべての見つからないフォントを置換"),
+                                           QStringLiteral("見つからないフォントを解決…"), QStringLiteral("|"), QStringLiteral("Lorem Ipsum をペースト"),
                                            QStringLiteral("|"), QStringLiteral("初期設定の書式を読み込み"), QStringLiteral("初期設定の書式を保存"),  // (G-c)
                                            QStringLiteral("|"), QStringLiteral("台詞をテキストレイヤーに"), QStringLiteral("テキストレイヤーを台詞に")}));
         QCOMPARE(texts(s.menu_at(QStringLiteral("書式/アンチエイリアス"))),
