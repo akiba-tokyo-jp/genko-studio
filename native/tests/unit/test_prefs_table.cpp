@@ -73,7 +73,9 @@ const std::vector<std::string>& app_keys() {
         "ui/open_as_tabs", "ui/float_docking", "ui/tool_tooltips", "ui/zoom_to_center", "ui/flick_panning", "ui/transform_values",
         "ui/overscroll", "history_log/enabled", "history_log/destination", "history_log/file", "history_log/detail", "ui/memory_mb",
         "ui/history_states", "ui/scratch_folder", "ui/touch_gestures", "ui/pinch_zoom", "ui/trackpad_rotate",
-        "prefs/writer"};
+        "prefs/writer",
+        // (PC5 J-d2: データポイントを選択)
+        "measure/points"};
     return all;
 }
 

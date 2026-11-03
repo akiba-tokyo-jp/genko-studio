@@ -134,6 +134,8 @@ const std::vector<std::pair<QString, QList<QKeySequence>>>& photoshop_keys() {
         // (the user's decision 13, 2026-10-29 — PC5 H-d: Photoshop's Shift+Ctrl+M is 計測値を記録's, J-d2: コマを結合 takes a
         // modifier more, as the Genko-only tools do — Ctrl+Alt+M, none of Photoshop's —, Ctrl+Shift+M left free)
         {QStringLiteral("act_merge"), k({"Ctrl+Alt+M"})},
+        // (PC5 J-d2, the user's decision 13) 計測値を記録 Shift+Ctrl+M (Genko's set: none — Ctrl+Shift+M is コマを結合's there)
+        {QStringLiteral("act_measure_record"), k({"Ctrl+Shift+M"})},
         {QStringLiteral("act_tone_here"), {}},
         // チャンネル: Ctrl+2 the composite, Ctrl+3… each channel
         {QStringLiteral("act_channel_composite"), k({"Ctrl+2"})},
