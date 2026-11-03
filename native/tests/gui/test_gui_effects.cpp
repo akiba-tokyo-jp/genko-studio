@@ -168,9 +168,9 @@ private slots:
             {"act_screen_dots", "網点を画面で見る", "", "トーンを、印刷と同じ網点で表示します（拡大すると点が見えます）。切ると平らな灰色で速く描きます", true, "表示"},
             {"act_reset_shape", "選んだコマの形を元に戻す", "", "", false, "ページ/コマ"},
             {"act_layer_pen", "新しいペンのレイヤー", "Ctrl+Shift+N", "", false, "レイヤー"},
-            {"act_layer_paint", "新しいペイントのレイヤー", "", "", false, "レイヤー"},
-            {"act_layer_folder", "新しいフォルダ", "", "", false, "レイヤー"},
-            {"act_layer_dup", "レイヤーを複製", "", "", false, "レイヤー"},
+            {"act_layer_paint", "レイヤー…", "", "", false, "レイヤー"},
+            {"act_layer_folder", "グループ…", "", "", false, "レイヤー"},
+            {"act_layer_dup", "レイヤーを複製…", "", "", false, "レイヤー"},
             {"act_layer_merge", "下のレイヤーと結合", "Ctrl+E", "", false, "レイヤー"},
             {"act_layer_delete", "レイヤーを消す", "", "", false, "レイヤー"},
             {"act_layer_up", "前面へ", "Ctrl+]", "", false, "レイヤー/重ね順"},
@@ -840,6 +840,8 @@ private slots:
         s.trigger("act_layer_folder");
         QCOMPARE(s.last()["kind"], Json("folder"));
         const std::size_t now = s.ops.size();
+        // (PC5 I-a: レイヤーを複製… asks in its window — answered)
+        s.answers.responder->exec = [](QDialog*) { return int(QDialog::Accepted); };
         s.trigger("act_layer_dup");
         QCOMPARE(s.ops.size(), now + 1);
         s.trigger("act_layer_down");

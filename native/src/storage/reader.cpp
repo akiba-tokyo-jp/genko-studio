@@ -36,6 +36,7 @@
 #include "core/layer_styles.hpp"
 #include "core/type_text.hpp"
 #include "core/groups.hpp"
+#include "core/layer_basics.hpp"
 // PC5 J-0 (制作の補助)
 #include "core/annotations.hpp"
 #include "core/layer_comps.hpp"
@@ -95,7 +96,7 @@ constexpr std::array<std::string_view, 21> kLineKeys{"id", "page_index", "text",
                                                      "style", "tails",
                                                      // type@1 (PC5 G-0)
                                                      "native_type"};
-constexpr std::array<std::string_view, 53> kLayerKeys{
+constexpr std::array<std::string_view, 56> kLayerKeys{
     "id", "role", "kind", "visible", "exportable", "strokes", "raster_relpath", "fill_rgb", "lpi", "density",
     "region", "opacity", "material_id", "angle", "title", "blend", "clip", "lock_alpha", "locked", "panel_clip",
     "panel_each", "patches", "tone", "parent_id", "asset", "mask", "color", "reference", "fill", "adjust", "effect",
@@ -113,7 +114,9 @@ constexpr std::array<std::string_view, 53> kLayerKeys{
     // PC5 G-0 (type@1)
     "type",
     // PC5 I-b (groups@1)
-    "group"};
+    "group",
+    // PC5 I-a (layer-locks@1, blend-channels@1)
+    "lock_all", "lock_nest", "blend_channels"};
 constexpr std::array<std::string_view, 5> kPlacedOnlyKeys{"frame_id", "placement_mm", "fit", "clip_to", "finish"};
 constexpr std::array<std::string_view, 5> kMaskKeys{"enabled", "asset",
                                                     // masks@1 (PC3)
@@ -1381,6 +1384,25 @@ void Reader::read_layer_vectors(core::Layer& layer, const Json& data, const std:
             issue("broken_value", at_key(at, "lock_position"), {}, "a layer's lock_position must be true or false");
         }
     }
+    // (PC5 I-a, layer-locks@1: すべてをロック and the artboards' auto-nesting lock; blend-channels@1: the channels it blends)
+    for (const auto& [key, flag] : {std::pair<const char*, bool*>{"lock_all", &layer.lock_all}, {"lock_nest", &layer.lock_nest}}) {
+        if (const Json* lock = find(data, key); lock && !lock->is_null()) {
+            if (lock->is_boolean()) {
+                *flag = lock->get<bool>();
+            } else {
+                issue("broken_value", at_key(at, key), {}, std::string("a layer's ") + key + " must be true or false");
+            }
+        }
+    }
+    if (const Json* channels = find(data, "blend_channels"); channels && !channels->is_null()) {
+        const bool flags = channels->is_array() && !channels->empty() && channels->size() <= 4 &&
+                           std::all_of(channels->begin(), channels->end(), [](const Json& c) { return c.is_boolean(); });
+        if (flags) {
+            for (const Json& c : *channels) layer.blend_channels.push_back(c.get<bool>());
+        } else {
+            issue("broken_value", at_key(at, "blend_channels"), {}, "a layer's blend_channels must be 1 to 4 flags (true or false)");
+        }
+    }
 }
 
 // pen-shapes@1 (PC3): a pen layer's shape parts, read and checked once per asset in a load (as the strokes are).
@@ -1739,6 +1761,9 @@ core::Document Reader::migrate(const Json& payload) {
     // (groups@1, PC5 I-b: a group on a folder only, the blend pass_through a group's only)
     try { core::validate_groups(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (blend-channels@1, PC5 I-a: a flag for each colour channel of the page, on a page whose mode has them)
+    try { core::validate_layer_basics(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     // (variables@1, PC5 I-d: the variables in their normal form; the pictures their values name in the book's folder)
     try {
         core::validate_variables(doc);
@@ -2038,7 +2063,9 @@ bool is_known_feature(std::string_view feature) {
            feature == core::kLayerCompsFeature || feature == core::kSlicesFeature || feature == core::kAnnotationsFeature ||
            feature == core::kMeasureFeature || feature == core::kTimelineFeature || feature == core::kVideoFeature ||
            // PC5 I-d (core/variables.hpp)
-           feature == core::kVariablesFeature;
+           feature == core::kVariablesFeature ||
+           // PC5 I-a (core/layer_basics.hpp)
+           feature == core::kLayerLocksFeature || feature == core::kBlendChannelsFeature;
 }
 
 int project_version(const Json& payload) {

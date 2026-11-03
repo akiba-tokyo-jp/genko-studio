@@ -29,6 +29,7 @@
 #include "core/video.hpp"
 #include "core/patterns.hpp"
 #include "core/groups.hpp"
+#include "core/layer_basics.hpp"
 #include "core/type_text.hpp"
 #include "core/variables.hpp"
 #include "storage/fsutil.hpp"
@@ -203,6 +204,14 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
     if (const std::optional<core::PsdLayerKeep> keep = core::written_keep(layer)) out["native_psd"] = core::to_json(*keep);
     if (layer.style) out["style"] = *layer.style;  // (layer-styles@1, PC4 E6)
     if (layer.group) out["group"] = true;  // (groups@1, PC5 I-b)
+    // (PC5 I-a: layer-locks@1's locks, blend-channels@1's channels — none: nothing written)
+    if (layer.lock_all) out["lock_all"] = true;
+    if (layer.lock_nest) out["lock_nest"] = true;
+    if (!layer.blend_channels.empty()) {
+        Json channels = Json::array();
+        for (const bool on : layer.blend_channels) channels.push_back(on);
+        out["blend_channels"] = std::move(channels);
+    }
     if (placed) {
         out["asset"] = opt_string(layer.asset);
         out["frame_id"] = opt_string(layer.frame_id);
@@ -620,6 +629,15 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     }
     std::erase(features, std::string(core::kVariablesFeature));
     if (core::uses_variables(doc)) features.emplace_back(core::kVariablesFeature);
+    // PC5 I-a: layer-locks@1 (すべてをロック, the auto-nesting lock) and blend-channels@1 (channels left out), named while a layer
+    // has them
+    core::validate_layer_basics(doc);
+    const std::pair<std::string_view, bool> pc5a[] = {{core::kLayerLocksFeature, core::uses_layer_locks(doc)},
+                                                      {core::kBlendChannelsFeature, core::uses_blend_channels(doc)}};
+    for (const auto& [feature, used] : pc5a) {
+        std::erase(features, std::string(feature));
+        if (used) features.emplace_back(feature);
+    }
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 

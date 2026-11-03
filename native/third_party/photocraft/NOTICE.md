@@ -312,6 +312,11 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/lens_cmds.rs`（354-374 行: `lens_batch` — 2 枚以上なら統合してからレンズ補正、プロファイルの既定 auto）→ `native/src/service/automate.cpp`（`lens_steps`。見えているレイヤーで数えること、統合で残るレイヤーにかけることは Genko のもの）。
   - `crates/engine/src/automate_cmds.rs`（141-260 行: スクリプトイベントの名前と起こす所）→ `native/src/app/main_window.cpp`・`main_window_file.cpp`・`main_window_export.cpp`・`main_window_output.cpp`（人の保存だけ・バッチの間は起こさないことは Genko のもの）。窓は `native/src/app/automate_dialogs.cpp`（Qt。欄の名前は Photoshop）。
 
+- レイヤーの基本の残り（PC5 I-a、layer-locks@1・blend-channels@1）:
+  - `crates/engine/src/extra_cmds.rs`（403-428 行: `is_empty_layer`・`ungroup`、591 行: `layer_from_background`、655-675 行: 非表示レイヤーを削除・すべての空のレイヤーを削除・グループ解除の仕様）→ `native/src/core/layer_basics.cpp`（`empty_layer`・`folder_contents`・`forget_layers`）・`native/src/core/ops_layers.cpp`（`delete_layers`・`duplicate_layers`・`ungroup_layers`。芯の層と すべてをロック を残して言うこと、全ページ、指し先を外すこと、別のページへの複製、画素のファイルを持つ層を空としないことは Genko のもの）・`native/src/app/main_window_layers.cpp`。
+  - `crates/engine/src/file_cmds.rs`（716-765 行: `bake` と `flatten_all_effects` — 不透明度・描画モード・クリップを外して効果ごと描き、層の設定に残す）→ `native/src/render/ops_layer_styles.cpp`（`bake_layer_styles`。Genko の境界効果も描き込むこと、8 bit・高精度・インキの道、ブレンド条件を残すことは Genko のもの）。
+  - `crates/io/src/blocks.rs`（10-58 行: `parse_brst`・`brst_data`・`locks_from_lspf`・`lspf_from_locks`）→ `native/src/render/import_psd.cpp`（`take_locks`・`take_channels`）・`native/src/formats/psd_export.cpp`（`own_locks`・`basics_blocks`）。`crates/compose/src/lib.rs`（661-690 行: `channel_weights`・`restore_channels` — 外したチャンネルは下の値のまま）→ `native/src/render/page.cpp`（`KeptChannels`。CMYK・Lab・グレーのページ（上流は RGB とグレーだけ）、高精度・インキの道への配線は Genko のもの）・`native/src/render/color_canvas.cpp`・`native/src/render/ink_canvas.cpp`（`keep_channels`）。`crates/format/src/manifest.rs` の `excluded_channels`・`Locks` → `native/src/render/pcraft_read.cpp`・`native/src/formats/pcraft_write.cpp`。
+
 ## 表示・窓・環境設定（PC5 節 H）
 
 - 表示・窓・環境設定の土台（PC5 H-0）:
@@ -329,6 +334,9 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
 - 窓の区画と並べ方・パネル（PC5 H-c）:
   - `crates/ui-egui/src/view_cmds.rs`（137-148 行: 並べ方の名前 `LAYOUTS`、583-630 行: `arrange` — 並べるとどの原稿も区画に合わせる・タブに統合・浮動・同じ表示にする、636-667 行: `cells` — 各並べ方の区画の位置、`tile` の ceil(√n) 列）→ `native/src/app/doc_area.cpp`（`DocArea::cells`・`capacity`。区画を仕切りで動かせること・16 までは Genko のもの）・`native/src/app/main_window_arrange.cpp`（`arrange`・`consolidate_all`・`float_all`・`match_views`。同じ回転で表示は Genko の表示の回転と反転を当てる）。`crates/ui-egui/src/canvas.rs`（612-630 行: 前の原稿のほかの区画は見るだけ、クリックで前に）の考え → `native/src/app/pane_view.cpp`。`crates/ui-egui/src/menu_catalog.rs`（702-724 行: アレンジ の項目と並び）→ `build_arrange_menus`。
   - `crates/ui-egui/src/workspace_ui.rs`（119-127 行・295-310 行: Modifier Keys の Shift・Command・Alt を押したままにする）→ `native/src/app/main_window_arrange.cpp`（`build_arrange_docks`・`latch_key`。持ち替えの道具を持つことは Genko のもの）。
+- ワークスペース・キーボードショートカットとメニュー・ツールバー（PC5 H-d）:
+  - `crates/ui-egui/src/workspace_ui.rs`（100 行: 組み込みのワークスペースの名前 `PRESETS`、128-131 行: ロック、168-240 行: `new_workspace`（組み込みの名前を断る・キーボードショートカット・メニュー・ツールバーを一緒に残す）・`delete_workspace`（今のワークスペースは断る）・`select_workspace`・`apply_custom`）と `crates/ui-egui/src/menus.rs`（87-95 行・185-195 行: 組み込みの名前とリセット、789-806 行: `apply_workspace` の組み込みごとのパネル）→ `native/src/app/main_window_workspace.cpp`・`native/src/app/workspace.cpp`（`presets`・`reserved_workspace`・`save_workspace`・`load_workspace_extras`。パネルの組の中身・離れたときの並びを覚えること・承認のパネルに触れないことは Genko のもの）。
+  - `crates/engine/src/prefs.rs`（224-246 行: `Workspace` の項目と既定、677-689 行: `MenuCustomization`・`ToolbarCustomization`、1253-1298 行: `keyboard_shortcuts`（1 つずつ戻す・重なったキーを前のコマンドから外す・絞り込み）、1300-1355 行: `menus`（隠す・見せる・色の名前の表）・`toolbar`（隠す・並び））→ `native/src/app/shortcuts_dialog.cpp`・`native/src/app/menu_look.cpp`・`native/src/app/toolbar_dialog.cpp`・`native/src/core/prefs_table.cpp`（Qt で作り直した。組を保存する・概要の HTML・メニューを開いている間だけ隠すことは Genko のもの）。
 
 ## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1、PC5 節 J）
 

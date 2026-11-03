@@ -324,6 +324,10 @@ void MainWindow::show_help(const QString& what) {
 }
 
 void MainWindow::open_preferences(const QString& pane) {
+    if (pane == QLatin1String("keyboardShortcuts")) {  // (PC5 H-d: the keys' own window)
+        open_keyboard_shortcuts();
+        return;
+    }
     preferences::PreferencesDialog dialog(this);
     if (!pane.isEmpty()) dialog.show_pane(pane);  // (PC5 H-0: 編集 → 環境設定 ▸'s panes, キーボードショートカット…)
     ask::exec(&dialog);
@@ -408,7 +412,9 @@ void MainWindow::build_actions() {
          QStringLiteral("名前の一部を打つと、メニューのどこにあるかが分かり、そのまま実行できます"));
     make("act_edit_commandbar", QStringLiteral("コマンドバーを変える…"), [this] { edit_commandbar(this, commands_); }, {});
     make("act_edit_quick", QStringLiteral("クイックアクセスを変える…"), [this] { quick_access_->edit(); }, {});
-    make("act_save_workspace", QStringLiteral("今の配置をワークスペースとして残す…"), [this] { save_workspace(); }, {});
+    // (PC5 H-d: Photoshop's 新規ワークスペース… — its id kept, the old name in preferences::renamed())
+    make("act_save_workspace", QStringLiteral("新規ワークスペース…"), [this] { new_workspace(); }, {},
+         QStringLiteral("今のパネルの並びを、名前を付けたワークスペースとして残します（キー・メニュー・ツールバーも一緒に残せます）"));
     QAction* tool_names = make("act_tool_names", QStringLiteral("道具の名前を表示"), [] {}, {},
                                QStringLiteral("左の道具にアイコンと名前を並べます（環境に残ります）"), true);
     connect(tool_names, &QAction::triggered, this, [this](bool on) { show_tool_names(on); });
@@ -501,21 +507,24 @@ void MainWindow::build_actions() {
     build_layer_style_actions();  // (PC4 E6: レイヤー → レイヤースタイル ▸: main_window_styles.cpp)
     build_production_actions();   // (PC5 J-0: 解析 ▸, ビデオレイヤー ▸, the production's panels — frames: main_window_production.cpp)
     build_variable_actions();     // (PC5 I-d: 変数 ▸, データセットを適用…, データセットからファイル…, 変数データセット…: main_window_variables.cpp)
+    build_layer_basic_actions();  // (PC5 I-a: 背景からレイヤーへ…, レイヤーからのグループ…, グループ解除, クリッピングマスク, 非表示レイヤーを削除: main_window_layers.cpp)
     build_align_actions();      // (PC3 C-d: 重ね順・整列・分布・リンク・ロック, スナップ (with 定規's グリッドにスナップ), the move tool's: main_window_align.cpp)
     build_file_actions();       // (PC4 F-0: 節 F's new commands of ファイル, frames until F-b and F-c: main_window_file.cpp)
     build_filter_actions();     // (PC4 節 D: フィルター's commands, 前回のフィルター: filter_menu.cpp)
     build_view_actions();       // (PC5 H-0: 表示's commands of 節 H — H-a, H-b: main_window_view.cpp)
     build_arrange_actions();    // (PC5 H-0: ウィンドウ → アレンジ ▸ — H-c: main_window_arrange.cpp)
     build_edit_actions();       // (PC5 H-0: 編集's 環境設定 ▸, キーボードショートカット… — H-d, H-e, H-f: main_window_edit.cpp)
+    build_workspace_actions();  // (PC5 H-d: ウィンドウ → ワークスペース ▸ — main_window_workspace.cpp)
     make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
          QStringLiteral("部分選択ツールで選んだ制御点のところだけ、線を太くします"));
     make("act_color", QStringLiteral("カラーピッカー（描画色）…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
     // (one chosen in a list, then merged with the one under it: named apart from Python's 下のレイヤーと結合, which
     // merges the panel's chosen layer at once — a command's name says one thing)
     make("act_layer_merge_down", QStringLiteral("レイヤーを選んで下と結合…"), [this] { layer_operation("merge_down"); });
-    make("act_layer_merge_layers", QStringLiteral("選んだレイヤーを結合…"), [this] { layer_operation("merge_layers"); });
-    make("act_layer_merge_visible", QStringLiteral("表示レイヤーの結合コピーを作る"), [this] { layer_operation("merge_visible"); });
-    make("act_layer_flatten", QStringLiteral("画像をフラット化…"), [this] { layer_operation("flatten"); });
+    // (PC5 I-a: Photoshop's names — their ids kept, preferences::renamed())
+    make("act_layer_merge_layers", QStringLiteral("レイヤーを結合…"), [this] { layer_operation("merge_layers"); });
+    make("act_layer_merge_visible", QStringLiteral("表示レイヤーを結合したレイヤーを作成"), [this] { layer_operation("merge_visible"); });
+    make("act_layer_flatten", QStringLiteral("画像を統合…"), [this] { layer_operation("flatten"); });
     make("act_layer_convert_paint", QStringLiteral("ペイントレイヤーに変換"), [this] { layer_operation("convert_layer"); });
     make("act_layer_convert_pen", QStringLiteral("ペンレイヤーに変換…"), [this] { layer_operation("convert_pen"); });
     // panels
@@ -778,6 +787,7 @@ void MainWindow::build_menus() {
     build_layer_style_menus(layers);  // (PC4 E6: レイヤースタイル ▸ before レイヤーマスク: app/main_window_styles.cpp)
     build_production_menus(layers, pages);  // (PC5 J-0: ビデオレイヤー ▸ before ラスタライズ ▸, ページ → 解析 ▸: main_window_production.cpp)
     build_variable_menus(file, pages);  // (PC5 I-d: ページ → 変数 ▸・データセットを適用…, 書き出し ▸・読み込み ▸ の項目: main_window_variables.cpp)
+    build_layer_basic_menus(layers);  // (PC5 I-a: 新規 ▸ の 背景からレイヤーへ…・レイヤーからのグループ…, 非表示レイヤーを削除, クリッピングマスク, グループ解除: main_window_layers.cpp)
     build_notes_menus(file, view);  // (PC5 J-c: ファイル → 読み込み ▸ 注釈…, 表示 → 表示・非表示 ▸ 注釈: main_window_notes.cpp)
     build_measure_menus(view);  // (PC5 J-d1: 表示 → 表示・非表示 ▸ カウント: main_window_measure.cpp)
     build_slice_menus(view, layers);  // (PC5 J-b: 表示・非表示 ▸ スライス, スライスをロック・消去, レイヤー → 新規レイヤーベースのスライス: main_window_slices.cpp)
@@ -804,13 +814,15 @@ void MainWindow::build_menus() {
     view_menu_->addAction(action("act_edit_quick"));
     view_menu_->addAction(action("act_hints"));
     view_menu_->addSeparator();
-    QMenu* stage_menu = view_menu_->addMenu(QStringLiteral("作業の段階"));
+    // (PC5 H-d, 節 H 5.2: 作業の段階 ▸ — Genko's own — at the end of ワークスペース ▸: fill_workspaces)
+    stage_menu_ = new QMenu(QStringLiteral("作業の段階"), this);
     for (const Stage& stage : stages()) {
         const QString key = QString::fromLatin1(stage.key);
-        QAction* act = stage_menu->addAction(QStringLiteral("%1の並び").arg(QString::fromUtf8(stage.label)), this, [this, key] { apply_stage(key); });
+        QAction* act = stage_menu_->addAction(QStringLiteral("%1の並び").arg(QString::fromUtf8(stage.label)), this, [this, key] { apply_stage(key); });
         act->setStatusTip(QStringLiteral("この段階でよく使うパネルだけを出します"));
         stage_actions_[key] = act;
     }
+    fill_workspaces();  // (its commands in the menus from the start: the keys, 検索 and the help find them)
     build_edit_menu_tail(edit);  // (PC5 H-0: 検索, キーボードショートカット…, 環境設定 ▸ — main_window_edit.cpp)
     build_view_menus(view);      // (PC5 H-0: 表示 in Photoshop's order, every part's commands in it now — main_window_view.cpp)
     QMenu* help = bar->addMenu(QStringLiteral("ヘルプ"));
@@ -826,37 +838,13 @@ void MainWindow::build_toolbars() {
     palette_->setOrientation(Qt::Vertical);
     palette_->setIconSize(QSize(24, 24));
     palette_->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    // (Python's palette: select, move, pen, eraser, blend, shape, fill, lassofill, gradient, picker | frame | the selection)
-    for (const char* name : {"act_select", "act_move", "act_pen", "act_eraser", "act_blend", "act_shape", "act_fill", "act_lassofill", "act_gradient",
-                             "act_picker"})
-        palette_->addAction(action(name));
-    palette_->addSeparator();
-    palette_->addAction(action("act_text"));
-    palette_->addAction(action("act_frame"));
-    palette_->addSeparator();
-    for (const char* name : {"act_marquee", "act_lasso", "act_wand", "act_reshape"}) palette_->addAction(action(name));
-    palette_->addSeparator();
-    for (const char* name : {"act_ruler", "act_3d", "act_effect"}) palette_->addAction(action(name));
     for (const auto& [name, label] : {std::pair{"act_marquee", "長方形選択"}, {"act_lasso", "なげなわ"}, {"act_reshape", "線の修正"}, {"act_3d", "3D"}})
         action(QString::fromLatin1(name))->setIconText(QString::fromUtf8(label));  // (the palette's names stay short; menus keep the full name)
     addToolBar(Qt::LeftToolBarArea, palette_);
-    attach_tool_groups(palette_);  // (PC4 E-0: a tool's group on a long press or a right click: paint_panels.cpp)
-    {
-        // (PC5 H-a review P3: 手のひらツール last, as Photoshop's, ズームツール in its group — one button, so the palette still
-        // fits a short window)
-        QAction* hand = action(QStringLiteral("act_hand_tool"));
-        palette_->addAction(hand);
-        if (auto* button = qobject_cast<QToolButton*>(palette_->widgetForAction(hand))) {
-            auto* menu = new QMenu(button);
-            menu->setObjectName(QStringLiteral("tool_group:") + hand->objectName());
-            menu->addAction(hand);
-            menu->addAction(action(QStringLiteral("act_zoom_tool")));
-            button->setMenu(menu);
-            button->setPopupMode(QToolButton::DelayedPopup);
-            button->setContextMenuPolicy(Qt::CustomContextMenu);
-            connect(button, &QToolButton::customContextMenuRequested, button, [button, menu](const QPoint& at) { menu->popup(button->mapToGlobal(at)); });
-        }
-    }
+    // (Python's palette: select, move, pen, eraser, blend, shape, fill, lassofill, gradient, picker | frame | the selection —
+    // PC5 H-d: in the person's order, ツールバー…; each tool's group on a long press or a right click, PC4 E-0; 手のひらツール
+    // last with ズームツール in its group, PC5 H-a: main_window_workspace.cpp)
+    fill_palette();
     {
         QAction* names = action(QStringLiteral("act_tool_names"));
         const QSignalBlocker quiet(names);
@@ -1030,8 +1018,9 @@ const core::Layer* MainWindow::paint_layer() {
     const core::Page* page = current_page();
     const core::Layer* layer = target_layer();
     if (page == nullptr || layer == nullptr) return nullptr;
-    if (!drawable(*layer)) {
-        const QString why = layer->locked ? QStringLiteral("ロックされています") : QStringLiteral("ペンかペイントのレイヤーではありません");
+    if (!drawable(*layer, page)) {
+        const bool kind = layer->kind == core::LayerKind::Strokes || layer->kind == core::LayerKind::Raster || layer->kind == core::LayerKind::Tone;
+        const QString why = kind ? QStringLiteral("ロックされています") : QStringLiteral("ペンかペイントのレイヤーではありません");
         flash(QStringLiteral("「%1」には描けません（%2）。レイヤー パネルで選び直します").arg(wording::layer_label(*layer), why), 4000);
         return nullptr;
     }
@@ -1345,10 +1334,10 @@ void MainWindow::layer_operation(const std::string& operation) {
     if (operation == "merge_visible") {
         op["copy"] = true;
     } else if (operation == "flatten") {
-        QMessageBox confirm(QMessageBox::Warning,QStringLiteral("画像をフラット化"),
+        QMessageBox confirm(QMessageBox::Warning,QStringLiteral("画像を統合"),
             QStringLiteral("用紙色を背景に、表示中の作画を1つの不透明レイヤーへ結合します。\n非表示の作画レイヤーは破棄します（ネーム・下描き・コマ枠は保持）。\n操作は取り消せます。続けますか？"),QMessageBox::Yes|QMessageBox::No,this);
         confirm.setObjectName(QStringLiteral("flatten_layer_confirm"));confirm.setDefaultButton(QMessageBox::No);
-        confirm.button(QMessageBox::Yes)->setText(QStringLiteral("フラット化"));confirm.button(QMessageBox::No)->setText(QStringLiteral("取消"));
+        confirm.button(QMessageBox::Yes)->setText(QStringLiteral("統合"));confirm.button(QMessageBox::No)->setText(QStringLiteral("取消"));
         if (confirm.exec()!=QMessageBox::Yes) return;
         op["op"]="merge_visible";op["copy"]=false;op["flatten"]=true;
     } else {
@@ -1723,7 +1712,7 @@ void MainWindow::apply_stage(const QString& key) {
         }
     }
     settings()->setValue(QStringLiteral("ui/stage"), key);
-    flash(QStringLiteral("「%1」の並びにしました（ウィンドウ → 作業の段階）").arg(QString::fromUtf8(it->label)), 2500);
+    flash(QStringLiteral("「%1」の並びにしました（ウィンドウ → ワークスペース → 作業の段階）").arg(QString::fromUtf8(it->label)), 2500);
 }
 
 void MainWindow::delete_frame() {
@@ -1853,38 +1842,10 @@ void MainWindow::show_tool_names(bool on, bool save) {
     if (save) settings()->setValue(QStringLiteral("ui/tool_names"), on ? QStringLiteral("1") : QStringLiteral("0"));
 }
 
-void MainWindow::fill_workspaces() {
-    for (QMenu* sub : workspace_menu_->findChildren<QMenu*>(Qt::FindDirectChildrenOnly)) sub->deleteLater();  // (clear() leaves them)
-    workspace_menu_->clear();
-    workspace_menu_->addAction(action(QStringLiteral("act_save_workspace")));
-    workspace_menu_->addAction(QStringLiteral("はじめの配置に戻す"), this, [this] { default_layout(); });
-    const QStringList names = workspaces();
-    if (names.isEmpty()) return;
-    workspace_menu_->addSeparator();
-    for (const QString& name : names) workspace_menu_->addAction(name, this, [this, name] { load_workspace(this, name); });
-    QMenu* remove = workspace_menu_->addMenu(QStringLiteral("消す"));
-    for (const QString& name : names) remove->addAction(name, this, [name] { delete_workspace(name); });
-}
-
-bool MainWindow::save_workspace(std::optional<QString> name) {
-    if (!name) {
-        const auto typed = ask::get_text(this, QStringLiteral("ワークスペース"), QStringLiteral("名前（例: ペン入れ、写植）"));
-        if (!typed || typed->trimmed().isEmpty()) return false;
-        name = *typed;
-    }
-    const QString kept = name->trimmed();
-    if (kept.contains(QLatin1Char('/')) || kept.contains(QLatin1Char('\\'))) {
-        // (the settings keep a workspace under its name: "/" and "\" would make it a group inside another)
-        flash(QStringLiteral("ワークスペースの名前に「/」「\\」は使えません"), 5000, true);
-        return false;
-    }
-    genko::app::save_workspace(this, kept);
-    flash(QStringLiteral("ワークスペース「%1」を残しました（ウィンドウ → ワークスペース）").arg(kept), 3000);
-    return true;
-}
-
 void MainWindow::default_layout() {
-    if (!default_state_.isEmpty()) restoreState(default_state_);
+    keeping_approval_docks([this] {
+        if (!default_state_.isEmpty()) restoreState(default_state_);
+    });  // (PC5 H-d: the approval's panels as they are)
 }
 
 void MainWindow::make_launcher() {

@@ -111,7 +111,7 @@ void CanvasOnly::watch() {
 void CanvasOnly::watch_at(const QPoint& pos) {
     if (!on_) return;
     const int width = window_->width();
-    const bool inside = 0 <= pos.y() && pos.y() <= window_->height();
+    const bool inside = auto_show && 0 <= pos.y() && pos.y() <= window_->height();  // (PC5 H-d: off — the panels only by Tab)
     if (inside && 0 <= pos.x() && pos.x() <= kEdgePx) {
         show_side(QStringLiteral("left"));
     } else if (inside && width - kEdgePx <= pos.x() && pos.x() <= width) {
