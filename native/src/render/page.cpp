@@ -3226,7 +3226,13 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
         out.image = std::move(image);
         each(std::move(out));
     };
-    give("紙", Image::create("RGBA", size, Ink{255, 255, 255, 255}));
+    // (artboards@1, PC5 I-c review P2-2: an artboard's paper its background — black or its own colour; none when it is
+    // transparent — so that a PSD's and a .pcraft's layers show it; every other page's white, as before)
+    if (const auto under = core::artboard_underlay(page)) {
+        give("紙", Image::create("RGBA", size, Ink{(*under)[0], (*under)[1], (*under)[2], 255}));
+    } else if (!core::transparent_artboard(page)) {
+        give("紙", Image::create("RGBA", size, Ink{255, 255, 255, 255}));
+    }
     for (const LayerRole role : {LayerRole::Bg, LayerRole::Ink, LayerRole::Finish}) {
         const core::NumList* fill = page.fill_of(role);
         if (fill == nullptr) continue;

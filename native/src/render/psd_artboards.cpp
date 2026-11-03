@@ -48,7 +48,8 @@ bool artboard_key(std::string_view key) { return key == "artb" || key == "artd" 
 std::optional<Board> read(std::string_view block) {
     d::Object top;
     try {
-        top = d::read_versioned(block);
+        std::size_t budget = std::size_t(1) << 20;  // (an artb is some hundred bytes: a small budget — the review's P3-6)
+        top = d::read_versioned(block, 0, budget);
     } catch (const d::Broken&) {
         return std::nullopt;
     }
@@ -56,10 +57,12 @@ std::optional<Board> read(std::string_view block) {
     if (r == nullptr) return std::nullopt;
     const auto left = number(*r, "Left"), t = number(*r, "Top "), right = number(*r, "Rght"), b = number(*r, "Btom");
     if (!left || !t || !right || !b) return std::nullopt;
+    // (within the canvas's reach before they are rounded: the review's P3-1)
+    const double reach = 2.0 * static_cast<double>(core::kArtboardOriginMax);
+    for (const double v : {*left, *t, *right, *b})
+        if (!(std::fabs(v) <= reach)) return std::nullopt;
     Board out;
     out.rect = {std::llround(*left), std::llround(*t), std::llround(*right), std::llround(*b)};
-    for (const std::int64_t v : out.rect)
-        if (std::llabs(v) > core::kArtboardOriginMax * 2) return std::nullopt;
     if (out.rect[2] <= out.rect[0] || out.rect[3] <= out.rect[1]) return std::nullopt;
     if (const d::Value* preset = top.get("artboardPresetName"); preset != nullptr && preset->type == "TEXT") {
         out.preset = psd::utf8_of(preset->text);

@@ -219,6 +219,18 @@ void artboard_from_layers(core::OpContext& c) {
     for (const std::string& id : ids) {
         for (const std::string& inside : layer_bounds::inside(source, id)) taken.insert(inside);
     }
+    // (a studio book's rules — strict_gates, the review's P2-1: the layers taken off the page are deleted from it (or, remove
+    // false, copied) as delete_layers or duplicate_layers would, its name approved for a printed one; the new page has no name
+    // approved, so a printed layer put on it is refused, as duplicate_layers onto a page without name_ok is)
+    if (doc.strict_gates) {
+        Json ids_json = Json::array();
+        for (const std::string& id : ids) ids_json.push_back(id);
+        core::check_strict(doc, Json{{"op", remove ? "delete_layers" : "duplicate_layers"}, {"page", source.index.json()}, {"ids", ids_json}}, c.actor);
+        for (const core::Layer& layer : source.layers) {
+            if (!taken.contains(layer.id) || layer.role == core::LayerRole::Name || layer.role == core::LayerRole::Draft) continue;
+            throw OpError("artboard_from_layers of a printed layer onto a new page needs name_ok there (strict_gates)");
+        }
+    }
     // (the box: what they show, on the paper; none — nothing shown — the paper)
     const double pw = source.spec.width_mm.value(), ph = source.spec.height_mm.value();
     std::optional<layer_bounds::Box> box;
@@ -259,6 +271,7 @@ void artboard_from_layers(core::OpContext& c) {
     made.work_path.reset();
     made.clipping_path.reset();
     made.native_psd.reset();
+    made.native_source.reset();  // (the file the page was opened from is not this new page's: the review's P3-7)
     made.layer_comps.reset();
     made.slices.reset();
     made.annotations.clear();
@@ -277,14 +290,22 @@ void artboard_from_layers(core::OpContext& c) {
     }
     made.layers = std::move(layers);
     core::remap_layer_refs(made, {}, renamed);
-    const Num source_index = source.index;
+    // (right after the page — after the last page that is not a cover when the page is one, as add_page puts a new page:
+    // never among the covers, the review's P3-8)
+    std::optional<Num> after = source.index;
+    if (core::is_cover(source)) {
+        after.reset();
+        for (const auto& page : doc.pages)
+            if (!core::is_cover(*page) && (!after || *after < page->index)) after = page->index;
+    }
     const std::string made_id = made.id;
     doc.pages.push_back(std::make_shared<Page>(std::move(made)));
     {
         std::vector<Num> order;
+        if (!after) order.push_back(doc.pages.back()->index);
         for (std::size_t k = 0; k + 1 < doc.pages.size(); ++k) {
             order.push_back(doc.pages[k]->index);
-            if (doc.pages[k]->index == source_index) order.push_back(doc.pages.back()->index);
+            if (after && doc.pages[k]->index == *after) order.push_back(doc.pages.back()->index);
         }
         core::reorder_pages(doc, order);
     }

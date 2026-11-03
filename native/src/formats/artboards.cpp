@@ -132,19 +132,27 @@ std::string raster_pdf(const std::vector<PdfPage>& pages) {
     return out;
 }
 
-// The colour mode and profile a page is in (its depth apart), as one PSD of artboards asks them alike.
-std::string mode_key(const core::Page& page) {
-    if (page.color) {
-        const core::PageColor& c = *page.color;
-        return std::string(core::to_string(c.space)) + "|" + c.profile + (c.bitmap ? "|bitmap" : "") +
-               (!c.duotone.empty() ? "|duotone" : "");
+// Two pages of one colour mode, their depth apart, as one PSD of artboards asks them alike: the whole of their RGB mode
+// (profile, intent, an indexed page's table) or of their inks (space, profile, a duotone's inks, a bitmap's look, the
+// plates…) — the review's P3-4.
+bool same_mode(const core::Page& a, const core::Page& b) {
+    if (a.color.has_value() != b.color.has_value()) return false;
+    if (a.color) {
+        core::PageColor x = *a.color, y = *b.color;
+        x.depth = y.depth = 8;
+        return x == y;
     }
-    if (page.rgb) {
-        core::RgbMode plain = *page.rgb;
-        plain.depth = 8;
-        return std::string("rgb|") + plain.profile + (plain.is_default() ? "" : "|own");
-    }
-    return "rgb|";
+    core::RgbMode x = a.rgb.value_or(core::RgbMode{}), y = b.rgb.value_or(core::RgbMode{});
+    x.depth = y.depth = 8;
+    return x == y;
+}
+
+// A name Windows keeps for its devices (CON, PRN, AUX, NUL, COM1..9, LPT1..9 — in any case, before any dot).
+bool reserved_name(const std::string& stem) {
+    std::string base = lower(stem.substr(0, stem.find('.')));
+    while (!base.empty() && (base.back() == ' ')) base.pop_back();
+    if (base == "con" || base == "prn" || base == "aux" || base == "nul") return true;
+    return base.size() == 4 && (base.starts_with("com") || base.starts_with("lpt")) && base[3] >= '1' && base[3] <= '9';
 }
 
 int depth_of(const core::Page& page) {
@@ -244,7 +252,8 @@ std::vector<CopyResult> export_artboards(const core::Document& doc, const fs::pa
     for (const std::size_t at : pages) {
         const core::Page& page = doc.page(at);
         const std::string part = cut(render::layer_comps::file_part(page.artboard->name), kNameMost - fixed - prefix.size());
-        const std::string stem = prefix.empty() ? part : prefix + "_" + part;
+        std::string stem = prefix.empty() ? part : prefix + "_" + part;
+        if (reserved_name(stem)) stem += "_";  // (CON, NUL, COM1 …: Windows' devices — the review's P3-9)
         std::string name = stem;
         for (int n = 2; !taken.insert(lower(name)).second; ++n) name = stem + "_" + std::to_string(n);
         const fs::path dest = folder / core::path_from_utf8(name + "." + extension);
@@ -292,10 +301,9 @@ CopyResult export_artboards_psd(const core::Document& doc, const fs::path& file,
     const std::vector<std::size_t> pages = artboard_pages(doc, psd.artboards);
     if (psd.check) psd.check(file);
     // (the colour mode and profile alike; the depth the deepest's — RGB pages of sRGB made it on a copy)
-    const std::string key = mode_key(doc.page(pages.front()));
     int deepest = 0;
     for (const std::size_t at : pages) {
-        if (mode_key(doc.page(at)) != key) {
+        if (!same_mode(doc.page(at), doc.page(pages.front()))) {
             throw core::Error("value", "the artboards are not of one colour mode and profile: one PSD holds one (make them alike with Image › Mode, or write a file each)");
         }
         deepest = std::max(deepest, depth_of(doc.page(at)));
@@ -366,15 +374,26 @@ CopyResult export_artboards_psd(const core::Document& doc, const fs::path& file,
     }
     try {
         work = core::CommandBus(render::ops_registry()).apply(work, ops, core::Actor("human:genko")).doc;
-    } catch (const core::OpError& error) {
-        throw core::Error("value", error.what());
+    } catch (const core::ApplyError& error) {  // (the bus's: an op's refusal, a picture too large — the review's P3-3)
+        const std::string why = error.what();
+        throw core::Error(why.find("too large") != std::string::npos ? "image_too_large" : "value", why);
     }
     // (one page of them: each artboard's layers in a group of its name carrying its artb block, the first artboard's at
     // the bottom — Photoshop's Layers panel lists the last made on top)
     const std::size_t base_at = pages.front();
     core::Page base = work.page(base_at);
-    base.artboard.reset();
-    base.native_psd.reset();
+    // (the canvas outside the artboards: no paper of its own — a transparent artboard's page gives none, page_layers —; the
+    // file marked as one of artboards this build wrote, so that opening it leaves out the panels' empty layer, the
+    // review's P2-3)
+    base.artboard = core::Artboard{"_", std::nullopt, "transparent", std::nullopt, std::nullopt};
+    {
+        const std::string mark(render::psd_artboards::kGenkoMark);
+        const std::string mark_ref = core::bytes_ref(mark);
+        if (!work.native_files.contains(mark_ref)) work.native_files.emplace(mark_ref, std::make_shared<const std::string>(mark));
+        core::PsdPageKeep keep;
+        keep.globals.push_back(core::PsdGlobal{"8BIM", std::string(render::psd_artboards::kGenkoMarkKey), mark_ref});
+        base.native_psd = std::move(keep);
+    }
     std::vector<core::Layer> layers;
     std::set<std::string> ids;
     std::vector<std::string> notes;
@@ -468,7 +487,7 @@ struct Board {
 // The page's artboard groups (`boards`, the bottom of the Layers panel first: the order export_artboards_psd writes them
 // in, the first page's at the bottom) each made a page: what split_psd_artboards and
 // split_pcraft_artboards do once they have found them (`from`: PSD or .pcraft, for the notes).
-void split_boards(core::Document& doc, const std::vector<Board>& boards, std::vector<std::string>& notes, std::string_view from) {
+void split_boards(core::Document& doc, const std::vector<Board>& boards, std::vector<std::string>& notes, std::string_view from, bool ours) {
     const core::Page page = doc.page(0);
     std::set<std::string> board_ids;
     for (const Board& b : boards) board_ids.insert(b.id);
@@ -514,8 +533,16 @@ void split_boards(core::Document& doc, const std::vector<Board>& boards, std::ve
         cuts.push_back(b.board.rect);
     }
     std::vector<core::Layer> outside;
+    std::size_t left_out = 0;
     for (const core::Layer& layer : page.layers) {
-        if (!board_ids.contains(top[layer.id]) && !nothing_or_paper(layer)) outside.push_back(layer);
+        if (board_ids.contains(top[layer.id])) continue;
+        // (in a file of artboards this build wrote — its mark — the paper and the panels' empty layer every page's PSD has:
+        // not a page of their own, said; another file's layers outside every artboard all kept, the review's P2-3)
+        if (ours && nothing_or_paper(layer)) {
+            ++left_out;
+            continue;
+        }
+        outside.push_back(layer);
     }
     if (!outside.empty()) {
         core::Page rest = page_of(outside);
@@ -547,7 +574,14 @@ void split_boards(core::Document& doc, const std::vector<Board>& boards, std::ve
                            {"bleed_mm", 0},
                            {"margins", Json::array({0, 0, 0, 0})}});
     }
-    split = core::CommandBus(render::ops_registry()).apply(split, ops, core::Actor("human:genko")).doc;
+    try {
+        split = core::CommandBus(render::ops_registry()).apply(split, ops, core::Actor("human:genko")).doc;
+    } catch (const std::runtime_error& error) {
+        // (a board the pages cannot be cut to — too large, past the limits —: the file opened as one page, as before, said:
+        // the review's P3-2)
+        notes.push_back(std::string(from) + " のアートボードをページに分けられなかったため、1 ページのまま開きました（" + error.what() + "）");
+        return;
+    }
     for (std::size_t i = 0; i < split.pages.size(); ++i) {
         if (split.page(i).artboard) split.edit_page(i).own_spec = true;
     }
@@ -555,6 +589,7 @@ void split_boards(core::Document& doc, const std::vector<Board>& boards, std::ve
     notes.push_back(std::string(from) + " のアートボード " + std::to_string(boards.size()) + " 枚を、1 枚ずつページにしました");
     if (!outside.empty()) notes.push_back("アートボードの外のレイヤーは、最後のページ（アートボードの外）にしました");
     if (dropped) notes.push_back(std::string(from) + " のレイヤーカンプとスライスは、アートボードをページに分けたため読み込みませんでした");
+    if (left_out > 0) notes.push_back("Genko が書いたアートボードの PSD の紙と空のレイヤー（" + std::to_string(left_out) + " 枚）は読み込みませんでした");
 }
 
 }  // namespace
@@ -563,20 +598,38 @@ void split_psd_artboards(core::Document& doc, std::vector<std::string>& notes) {
     if (doc.pages.size() != 1) return;
     const core::Page& page = doc.page(0);
     std::vector<Board> boards;  // (the bottom of the Layers panel first)
+    std::vector<std::string> nested, unread;
     for (const core::Layer& layer : page.layers) {
-        if (layer.kind != core::LayerKind::Folder || layer.parent_id.is_string() || !layer.native_psd) continue;
+        if (layer.kind != core::LayerKind::Folder || !layer.native_psd) continue;
+        bool has = false, read = false;
         for (const auto& [key, ref] : layer.native_psd->blocks) {
             if (!render::psd_artboards::artboard_key(key)) continue;
+            has = true;
+            if (layer.parent_id.is_string()) break;
             const auto held = doc.native_files.find(ref);
             if (held == doc.native_files.end() || !held->second) continue;
             if (const auto board = render::psd_artboards::read(*held->second)) {
                 boards.push_back(Board{layer.id, *board});
+                read = true;
                 break;
             }
         }
+        if (!has || read) continue;
+        (layer.parent_id.is_string() ? nested : unread).push_back(layer.title);
     }
+    // (the review's P3-5: an artboard in a group, or one whose block cannot be read, stays a group — said)
+    const auto named = [](const std::vector<std::string>& names) {
+        std::string out;
+        for (const std::string& n : names) out += (out.empty() ? "" : "、") + n;
+        return out;
+    };
+    if (!nested.empty()) notes.push_back("入れ子のアートボードは普通のグループにしました（" + named(nested) + "）");
+    if (!unread.empty()) notes.push_back("読めないアートボードは普通のグループにしました（" + named(unread) + "）");
     if (boards.empty()) return;
-    split_boards(doc, boards, notes, "PSD");
+    const bool ours = page.native_psd && std::any_of(page.native_psd->globals.begin(), page.native_psd->globals.end(), [](const core::PsdGlobal& g) {
+                          return g.key == render::psd_artboards::kGenkoMarkKey;
+                      });
+    split_boards(doc, boards, notes, "PSD", ours);
 }
 
 void split_pcraft_artboards(core::Document& doc, const std::vector<std::pair<std::string, Json>>& artboards, std::vector<std::string>& notes) {
@@ -588,6 +641,8 @@ void split_pcraft_artboards(core::Document& doc, const std::vector<std::pair<std
     for (const auto& [id, value] : artboards) {
         try {
             const Json& rect = value.at("rect");
+            for (const char* k : {"x0", "y0", "x1", "y1"})
+                if (!rect.at(k).is_number_integer()) throw core::Error("value", "a board's place is whole pixels");  // (the review's P3-1)
             render::psd_artboards::Board board;
             board.rect = {rect.at("x0").get<std::int64_t>(), rect.at("y0").get<std::int64_t>(), rect.at("x1").get<std::int64_t>(),
                           rect.at("y1").get<std::int64_t>()};
@@ -614,7 +669,7 @@ void split_pcraft_artboards(core::Document& doc, const std::vector<std::pair<std
         if (const auto found = read.find(layer.id); found != read.end()) boards.push_back(Board{layer.id, found->second});
     }
     if (boards.empty()) return;
-    split_boards(doc, boards, notes, ".pcraft");
+    split_boards(doc, boards, notes, ".pcraft", false);
 }
 
 }  // namespace genko::formats

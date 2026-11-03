@@ -23,6 +23,7 @@
 
 #include "core/artboards.hpp"
 #include "core/command_bus.hpp"
+#include "core/ink.hpp"
 #include "core/json.hpp"
 #include "core/paths.hpp"
 #include "formats/artboards.hpp"
@@ -33,6 +34,8 @@
 #include "render/page.hpp"
 #include "render/pcraft_read.hpp"
 #include "render/png.hpp"
+#include "render/psd_artboards.hpp"
+#include "render/psd_descriptor.hpp"
 #include "render/raster.hpp"
 #include "storage/reader.hpp"
 #include "testsupport.hpp"
@@ -526,6 +529,171 @@ private slots:
         QCOMPARE(opened.doc.page(0).artboard->rgb.value(), (std::array<int, 3>{20, 40, 60}));
         QCOMPARE(pixels(opened.doc.page(0)), (std::array<int, 2>{64, 48}));
         QVERIFY(std::none_of(opened.notes.begin(), opened.notes.end(), [](const std::string& n) { return n.find("PC5 で入るまで") != std::string::npos; }));
+    }
+
+    // (the review's P2-1) A studio book's rules: the layers taken off a page as delete_layers (copied: as duplicate_layers)
+    // takes them — its name approved for a printed one —, and a printed layer put on the new page, which has no name
+    // approved, refused as duplicate_layers onto a page without name_ok is.
+    void strictBooks() {
+        core::Document doc = run(book(), Json::array({paint("a"), drawn_in("a", 10, 10, 30, 20, Json::array({200, 0, 0}))}));
+        doc.strict_gates = true;
+        QVERIFY(refusal(doc, op("delete_layers", {{"ids", Json::array({"a"})}})).find("needs name_ok on page 1") != std::string::npos);
+        std::string why = refusal(doc, op("artboard_from_layers", {{"ids", Json::array({"a"})}}));
+        QVERIFY2(why.find("needs name_ok on page 1 (strict_gates)") != std::string::npos, why.c_str());
+        why = refusal(doc, op("artboard_from_layers", {{"ids", Json::array({"a"})}, {"remove", false}}));
+        QVERIFY2(why.find("needs name_ok on page 1 (strict_gates)") != std::string::npos, why.c_str());
+        doc.edit_page(0).name_ok = true;
+        why = refusal(doc, op("artboard_from_layers", {{"ids", Json::array({"a"})}}));
+        QVERIFY2(why.find("onto a new page needs name_ok there (strict_gates)") != std::string::npos, why.c_str());
+        QCOMPARE(doc.pages.size(), std::size_t(1));
+        // (a book without the rules: as before)
+        doc.strict_gates = false;
+        QCOMPARE(run(doc, op("artboard_from_layers", {{"ids", Json::array({"a"})}})).pages.size(), std::size_t(2));
+    }
+
+    // (the review's P2-2) The background of an artboard in a file of layers: a PSD (コピーを保存, アートボードからファイル…) and a
+    // .pcraft — black and a colour its paper's colour, transparent no paper —, opened again drawn the same; a page that is
+    // no artboard keeps its white paper.
+    void backgroundsInFilesOfLayers() {
+        if (genko::test::python_ref().isEmpty()) QSKIP("no reference Python: set GENKO_PYREF or install /opt/pyref/bin/python");
+        struct Case {
+            const char* name;
+            Json background;
+            std::array<int, 3> colour;
+        };
+        const Case cases[] = {{"black", Json{{"background", "black"}}, {0, 0, 0}},
+                              {"custom", Json{{"background", "custom"}, {"rgb", Json::array({20, 40, 60})}}, {20, 40, 60}},
+                              {"transparent", Json{{"background", "transparent"}}, {255, 255, 255}}};
+        for (const Case& c : cases) {
+            Json add{{"op", "add_artboard"}, {"width_px", 80}, {"height_px", 60}, {"name", c.name}};
+            add.update(c.background);
+            core::Document doc = run(book(), add);
+            add_pixels(doc, 1, "dot", 0, 0, 20, 20, {255, 0, 0});
+            const bool clear = std::string(c.name) == "transparent";
+            // コピーを保存 (.psd) and アートボードからファイル… (psd): the paper's layer
+            const QString psd = path(QStringLiteral("bg-%1.psd").arg(QString::fromLatin1(c.name)));
+            formats::write_copy(doc, 1, core::path_from_utf8(psd.toStdString()));
+            const fs::path folder = core::path_from_utf8(path(QStringLiteral("bg-%1").arg(QString::fromLatin1(c.name))).toStdString());
+            fs::create_directories(folder);
+            formats::ArtboardFiles files;
+            files.extension = "psd";
+            files.prefix = std::string();
+            const auto written = formats::export_artboards(doc, folder, files);
+            for (const QString& file : {psd, QString::fromStdString(core::path_to_utf8(written.at(0).file))}) {
+                const Json view = psd_view(file);
+                QVERIFY2(!view.contains("error"), view.dump().c_str());
+                const bool paper = std::any_of(view["every"].begin(), view["every"].end(), [](const Json& l) { return l.value("name", std::string()) == "紙"; });
+                QVERIFY2(paper == !clear, (std::string(c.name) + ": " + view.dump()).c_str());
+                if (clear) continue;
+                // opened again: the paper's colour where nothing is drawn
+                const formats::Opened opened = formats::open_file(genko::test::read_bytes(file), "bg.psd");
+                const render::Image picture = drawn(opened.doc, opened.doc.page(0));
+                QVERIFY2(near(rgb_at(picture, 60, 45), c.colour, 2), (std::string(c.name) + ": " + shown(rgb_at(picture, 60, 45)).toStdString()).c_str());
+                QVERIFY2(near(rgb_at(picture, 2, 2), {255, 0, 0}, 3), shown(rgb_at(picture, 2, 2)));
+            }
+            // a .pcraft: the artboard's paper in its group the background's colour, none when transparent; opened again drawn the same
+            const fs::path pcraft = core::path_from_utf8(path(QStringLiteral("bg-%1.pcraft").arg(QString::fromLatin1(c.name))).toStdString());
+            formats::write_copy(doc, 1, pcraft);
+            const std::string bytes = genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(pcraft)));
+            const Json manifest = render::pcraft::read_manifest(bytes);
+            const Json& group = manifest.at("document").at("layers").at(0);
+            const Json& children = group.at("content").at("children");
+            const bool paper = std::any_of(children.begin(), children.end(), [](const Json& l) { return l.value("name", std::string()) == "紙"; });
+            QVERIFY2(paper == !clear, (std::string(c.name) + ": " + children.dump().substr(0, 400)).c_str());
+            const formats::Opened back = formats::open_file(bytes, "bg.pcraft");
+            QVERIFY(back.doc.page(0).artboard);
+            const render::Image again = drawn(back.doc, back.doc.page(0));
+            QVERIFY2(near(rgb_at(again, 60, 45), c.colour, 2), (std::string(c.name) + ": " + shown(rgb_at(again, 60, 45)).toStdString()).c_str());
+        }
+        // a page that is no artboard: its white paper as before
+        const core::Document plain = run(book(), paint("p"));
+        const QString file = path(QStringLiteral("plain-paper.psd"));
+        formats::write_copy(plain, 0, core::path_from_utf8(file.toStdString()));
+        const Json view = psd_view(file);
+        QVERIFY(std::any_of(view["every"].begin(), view["every"].end(), [](const Json& l) { return l.value("name", std::string()) == "紙"; }));
+    }
+
+    // (the review's P2-3) The layers outside every artboard of a PSD this build did not write as one of artboards — a person's
+    // white 紙 and an empty layer among them — all kept, on the page of the layers outside; this build's own file (its mark)
+    // leaves out its paper and empty layer, said.
+    void layersOutsideTheArtboards() {
+        core::Document doc = book();
+        add_pixels(doc, 0, "inside", 0, 0, 30, 30, {0, 0, 255});
+        add_pixels(doc, 0, "user", 0, 0, render::mm_to_px(60, 200), render::mm_to_px(80, 200), {255, 255, 255});
+        {
+            core::Page& page = doc.edit_page(0);
+            for (core::Layer& l : page.layers)
+                if (l.id == "user") l.title = "紙";
+            core::Layer folder;
+            folder.id = "board";
+            folder.title = "板";
+            folder.kind = core::LayerKind::Folder;
+            folder.group = true;
+            folder.blend = "pass_through";
+            const std::string block = render::psd_artboards::write(core::Artboard{"板", std::nullopt, "white", std::nullopt, std::nullopt}, {0, 0, 60, 60});
+            const std::string ref = core::bytes_ref(block);
+            doc.native_files.emplace(ref, std::make_shared<const std::string>(block));
+            core::PsdLayerKeep keep;
+            keep.blocks.emplace_back("artb", ref);
+            folder.native_psd = keep;
+            for (core::Layer& l : page.layers)
+                if (l.id == "inside") l.parent_id = "board";
+            // (the folder above what it holds)
+            const auto inside = std::find_if(page.layers.begin(), page.layers.end(), [](const core::Layer& l) { return l.id == "inside"; });
+            page.layers.insert(inside + 1, folder);
+        }
+        const QString file = path(QStringLiteral("theirs.psd"));
+        formats::write_copy(doc, 0, core::path_from_utf8(file.toStdString()));
+        const formats::Opened opened = formats::open_file(genko::test::read_bytes(file), "theirs.psd");
+        QCOMPARE(opened.doc.pages.size(), std::size_t(2));
+        QVERIFY(opened.doc.page(0).artboard);
+        const core::Page& outside = opened.doc.page(1);
+        QVERIFY(!outside.artboard);
+        QVERIFY(std::count_if(outside.layers.begin(), outside.layers.end(), [](const core::Layer& l) { return l.title == "紙"; }) >= 2);  // (theirs and this page's paper)
+        QVERIFY(std::none_of(opened.notes.begin(), opened.notes.end(), [](const std::string& n) { return n.find("読み込みませんでした") != std::string::npos; }));
+        // this build's own one PSD: its empty layer left out, said
+        core::Document boards = run(book(), Json{{"op", "add_artboard"}, {"width_px", 40}, {"height_px", 40}, {"name", "A"}});
+        const QString ours = path(QStringLiteral("ours.psd"));
+        formats::export_artboards_psd(boards, core::path_from_utf8(ours.toStdString()), {});
+        const formats::Opened mine = formats::open_file(genko::test::read_bytes(ours), "ours.psd");
+        QCOMPARE(mine.doc.pages.size(), std::size_t(1));
+        QVERIFY(std::any_of(mine.notes.begin(), mine.notes.end(), [](const std::string& n) { return n.find("Genko が書いたアートボードの PSD の紙と空のレイヤー") != std::string::npos; }));
+    }
+
+    // (the review's P3-1, P3-8, P3-9, P3-11) A board far past the canvas is no board; a cover's layers made an artboard go
+    // before the covers; a name Windows keeps for a device is not a file's name; a cover marked an artboard in the book opens
+    // read-only.
+    void edgesOfArtboards() {
+        namespace d = render::psd::descriptor;
+        d::Writer bounds;
+        bounds.number("Top ", 0);
+        bounds.number("Left", 1e30);
+        bounds.number("Btom", 10);
+        bounds.number("Rght", 1e30 + 10);
+        d::Writer board;
+        board.object("artboardRect", bounds, "classFloatRect");
+        QVERIFY(!render::psd_artboards::read(board.versioned("artboard")));
+        // the cover's layers: the new page before the covers
+        core::Document covered = run(book(2), Json{{"op", "add_cover"}, {"kind", "back"}});
+        const int cover = static_cast<int>(covered.pages.size());
+        covered = run(covered, Json::array({paint("c", cover), drawn_in("c", 5, 5, 20, 20, Json::array({9, 9, 9}), cover)}));
+        covered = run(covered, op("artboard_from_layers", {{"ids", Json::array({"c"})}}, cover));
+        QCOMPARE(covered.pages.size(), std::size_t(cover + 1));
+        QVERIFY(covered.pages.back()->extra.contains("cover"));
+        QVERIFY(covered.page(static_cast<std::size_t>(cover - 1)).artboard);
+        // CON: CON_
+        const core::Document named = run(book(), Json{{"op", "add_artboard"}, {"width_px", 10}, {"height_px", 10}, {"name", "CON"}});
+        const fs::path out = core::path_from_utf8(path(QStringLiteral("reserved")).toStdString());
+        fs::create_directories(out);
+        formats::ArtboardFiles files;
+        files.prefix = std::string();
+        QCOMPARE(core::path_to_utf8(formats::export_artboards(named, out, files).at(0).file.filename()), std::string("CON_.png"));
+        // a cover marked an artboard (written outside the ops): read-only
+        const fs::path dir = core::path_from_utf8(path(QStringLiteral("cover.genko")).toStdString());
+        genko::test::write_project(run(book(1), Json{{"op", "add_cover"}, {"kind", "front"}}), dir);
+        Json project = genko::test::read_json(QString::fromStdString(core::path_to_utf8(dir / "project.json")));
+        project["pages"][project["pages"].size() - 1]["artboard"] = Json{{"name", "C"}, {"background", "white"}};
+        QVERIFY(!storage::load_document_payload(project, dir).report.clean());
     }
 
     // The book written and read again (artboards@1 named while a page is an artboard); a mark it cannot read, or on a

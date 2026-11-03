@@ -160,8 +160,18 @@ void MainWindow::artboard_from(bool group) {
     const QString given = name->trimmed().isEmpty() ? fallback : name->trimmed();
     const int at = static_cast<int>(core::py_int(page->index.json()));
     if (apply_ops(Json::array({Json{{"op", "artboard_from_layers"}, {"page", page->index.json()}, {"ids", ids}, {"name", given.toStdString()}}}))) {
-        page_index_ = at;  // (the new page, right after this one)
+        // (the layers that stayed — the core layers, those locked with すべてをロック — said: the review's P3-11)
+        std::size_t kept = 0;
+        page_index_ = at;  // (the new page: right after this one, or — this one a cover — before the covers, its report's "page")
+        for (const Json& result : last_results_) {
+            if (!result.is_object()) continue;
+            if (result.contains("kept") && result["kept"].is_array()) kept += result["kept"].size();
+            if (result.contains("page") && result["page"].is_number_integer()) page_index_ = static_cast<int>(result["page"].get<std::int64_t>()) - 1;
+        }
         reload_pages();
+        if (kept > 0) {
+            flash(QStringLiteral("ネーム・ペン入れ・背景・仕上げのレイヤーとすべてをロックしたレイヤー（%1 枚）は、元のページにも残しました").arg(kept), 6000);
+        }
     }
 }
 
@@ -252,6 +262,7 @@ void MainWindow::artboards_to_files(bool pdf) {
         files.artboards = chosen;
         if (dialog.quality->isEnabled()) files.options.quality = dialog.quality->value();
         files.check = check;
+        check(where);  // (the folder asked first, before it is made — the review's P3-10)
         const auto written = off_ui([doc, where, files] {
             fs::create_directories(where);
             return formats::export_artboards(*doc, where, files);

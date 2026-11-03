@@ -15,6 +15,11 @@
 
 namespace genko::render::psd_artboards {
 
+// The global tagged block that marks a PSD of artboards this build wrote (formats::export_artboards_psd): opening it leaves
+// out the paper and the panels' empty layer every page's PSD has (formats::split_psd_artboards). Its payload, even in length.
+inline constexpr std::string_view kGenkoMarkKey = "GnkA";
+inline constexpr std::string_view kGenkoMark{"genko artboards\0", 16};
+
 // The keys of an artboard's block.
 bool artboard_key(std::string_view key);
 
