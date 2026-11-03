@@ -439,6 +439,13 @@ private slots:
         const QString other = path(QStringLiteral("type-again/dpi.psd"));
         (void)genko::formats::export_page_psd(loaded, loaded.page(0), genko::core::path_from_utf8(other.toStdString()), 200);
         QVERIFY(blocks(genko::test::read_bytes(other)).at("横") != original.at("横"));
+        // (a style it takes changed: anew; one that takes none, as it was)
+        const std::string cs = (*loaded.type_styles)["character"][0]["id"].get<std::string>();
+        const genko::core::Document restyled = run_ops(loaded, Json::array({Json{{"op", "type_style"}, {"kind", "character"}, {"action", "set"}, {"id", cs},
+                                                                                  {"attrs", Json{{"rgb", Json::array({0, 0, 255})}}}}}));
+        const auto after_style = again(restyled, "restyled");
+        QVERIFY(after_style.at("横") != original.at("横"));
+        QVERIFY(after_style.at("縦") == original.at("縦"));
     }
 
     // PC5 G-e, the review of J-b's P2-4's way: a book opened from a PSD with text layers before G-e (its text layers its

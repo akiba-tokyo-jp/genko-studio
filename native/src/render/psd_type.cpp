@@ -500,11 +500,22 @@ Read read_text(const psd::TextLayer& t, const Frame& frame, core::Document& doc,
     // (the whole text's style when every run takes the same; its own: what every run says alike)
     const bool one_style = !pieces.empty() && std::all_of(pieces.begin(), pieces.end(), [&](const Piece& p) { return p.style == pieces.front().style; });
     if (one_style && pieces.front().style) nt["char_style"] = *pieces.front().style;
-    Json whole = pieces.empty() ? Json::object() : pieces.front().own;
+    // (a value every run has — or, a run taking a style of its own as a range's, one its style gives over it —: the whole's)
+    const auto given_by_style = [&](const Piece& p, const std::string& name) {
+        if (one_style || !p.style) return false;
+        const Json* attrs = style_attrs(core::type_styles::Kind::Character, p.style, "char");
+        return attrs != nullptr && attrs->contains(name);
+    };
+    Json whole = Json::object();
+    std::set<std::string> asked;  // (each attribute's question once: a run's own value is the only one that can be everywhere)
     for (const Piece& p : pieces) {
-        for (auto it = whole.begin(); it != whole.end();) {
-            const auto there = p.own.find(it.key());
-            it = there == p.own.end() || *there != *it ? whole.erase(it) : std::next(it);
+        for (const auto& [name, value] : p.own.items()) {
+            if (!asked.insert(name).second) continue;
+            const bool everywhere = std::all_of(pieces.begin(), pieces.end(), [&](const Piece& q) {
+                const auto there = q.own.find(name);
+                return there != q.own.end() ? *there == value : given_by_style(q, name);
+            });
+            if (everywhere) whole[name] = value;
         }
     }
     if (!whole.empty()) nt["char"] = whole;
@@ -614,8 +625,8 @@ Read read_text(const psd::TextLayer& t, const Frame& frame, core::Document& doc,
         r.w_mm = core::Num(1);
         r.h_mm = core::Num(1);
     }
-    for (const double v : {r.x_mm.value(), r.y_mm.value(), ox, oy}) {
-        if (std::abs(v) > 1000.0) {
+    for (const double v : {r.x_mm.value(), r.y_mm.value(), r.w_mm.value(), r.h_mm.value(), ox, oy}) {
+        if (!std::isfinite(v) || std::abs(v) > 1000.0) {
             out.why = "文字がページから 1 m より遠くにあります";
             return out;
         }
@@ -1249,6 +1260,29 @@ std::atomic<int> pixels_for_test{0};
 PixelsForTest::PixelsForTest() { ++pixels_for_test; }
 PixelsForTest::~PixelsForTest() { --pixels_for_test; }
 bool read_as_pixels() { return pixels_for_test.load() > 0; }
+
+std::string fingerprint(const core::StoryLine& record, const core::Document& book, std::int64_t dpi, std::int64_t width_px, std::int64_t height_px) {
+    // (the styles it takes — Basic Paragraph and those it names — as they are: one redefined, its look not the block's)
+    const Json* all = book.type_styles ? &*book.type_styles : nullptr;
+    Json styles = Json::array({all != nullptr && all->is_object() && all->contains("basic") ? (*all)["basic"] : Json()});
+    if (record.native_type && record.native_type->is_object()) {
+        const Json& nt = *record.native_type;
+        const auto add = [&](core::type_styles::Kind kind, const Json* id) {
+            if (id == nullptr || !id->is_string()) return;
+            const Json* s = core::type_styles::find(all, kind, id->get<std::string>());
+            styles.push_back(s != nullptr ? *s : Json(id->get<std::string>()));
+        };
+        add(core::type_styles::Kind::Character, key(nt, "char_style"));
+        add(core::type_styles::Kind::Paragraph, key(nt, "para_style"));
+        for (const char* list : {"runs", "paragraphs"}) {
+            if (const Json* items = key(nt, list); items != nullptr && items->is_array()) {
+                for (const Json& item : *items)
+                    add(std::string_view(list) == "runs" ? core::type_styles::Kind::Character : core::type_styles::Kind::Paragraph, key(item, "style"));
+            }
+        }
+    }
+    return core::bytes_ref(fingerprint(record, dpi, width_px, height_px) + "\n" + styles.dump());
+}
 
 std::string fingerprint(const core::StoryLine& record, std::int64_t dpi, std::int64_t width_px, std::int64_t height_px) {
     Json spans = Json::array();

@@ -490,7 +490,10 @@ Engine resources(const std::vector<std::string>& fonts, const TextStyle& normal,
     }
     std::vector<Engine> paragraph_set{Engine::d({{"Name", Engine::t(u"Normal RGB")}, {"DefaultStyleSheet", Engine::i(0)}, {"Properties", paragraph_properties(ParagraphRun{})}})};
     for (Engine& sheet : para_sheets) paragraph_set.push_back(std::move(sheet));
-    std::vector<Engine> style_set{Engine::d({{"Name", Engine::t(u"Normal RGB")}, {"StyleSheetData", style_sheet(normal, fonts.size() > 1 ? 1 : 0)}})};
+    // (PC5 G-e: the normal sheet without the OpenType switches — a run that does not write one is off, not the normal one's)
+    TextStyle base = normal;
+    base.opentype = 0;
+    std::vector<Engine> style_set{Engine::d({{"Name", Engine::t(u"Normal RGB")}, {"StyleSheetData", style_sheet(base, fonts.size() > 1 ? 1 : 0)}})};
     for (Engine& sheet : char_sheets) style_set.push_back(std::move(sheet));
     return Engine::d({{"KinsokuSet",
                        Engine::l({kinsoku(u"PhotoshopKinsokuHard",

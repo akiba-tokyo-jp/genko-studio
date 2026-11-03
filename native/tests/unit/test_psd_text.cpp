@@ -1298,22 +1298,43 @@ private slots:
         QCOMPARE(read.record->text, record.text);
         QCOMPARE(nt["shape"], Json("point"));
         QCOMPARE(nt["antialias"], Json("none"));
-        QVERIFY(std::abs(nt["anchor_mm"][0].get<double>() - 30) < 1e-3 && std::abs(nt["anchor_mm"][1].get<double>() - 40) < 1e-3);
-        for (std::size_t i = 0; i < 6; ++i)
-            QVERIFY2(std::abs(nt["transform"][i].get<double>() - (*record.native_type)["transform"][i].get<double>()) < 1e-3, nt.dump().c_str());
+        // (the same place: the anchor read where the matrix took the anchor written, the matrix about it — the same map)
+        const Json& t0 = (*record.native_type)["transform"];
+        const double px = t0[0].get<double>() * 30 + t0[2].get<double>() * 40 + t0[4].get<double>();
+        const double py = t0[1].get<double>() * 30 + t0[3].get<double>() * 40 + t0[5].get<double>();
+        QVERIFY2(std::abs(nt["anchor_mm"][0].get<double>() - px) < 1e-3 && std::abs(nt["anchor_mm"][1].get<double>() - py) < 1e-3, nt.dump().c_str());
+        const Json& t1 = nt["transform"];
+        for (std::size_t i = 0; i < 4; ++i) QVERIFY2(std::abs(t1[i].get<double>() - t0[i].get<double>()) < 1e-3, nt.dump().c_str());
+        QVERIFY(std::abs(t1[0].get<double>() * px + t1[2].get<double>() * py + t1[4].get<double>() - px) < 1e-3);
+        QVERIFY(std::abs(t1[1].get<double>() * px + t1[3].get<double>() * py + t1[5].get<double>() - py) < 1e-3);
+        // (the whole text's own: what every range has — the colour the range's style does not give over it too)
+        QVERIFY2(nt.contains("char") && nt["char"].contains("rgb") && nt["char"].contains("features") && nt["char"].contains("tracking"), nt.dump().c_str());
         QCOMPARE(nt["char"]["rgb"], Json::array({10, 20, 30}));
-        QCOMPARE(nt["char"]["features"], Json{{"frac", 1}});
-        QVERIFY(std::abs(nt["char"]["size_mm"].get<double>() - 6) < 1e-3);
+        QCOMPARE(nt["char"]["features"], Json({{"frac", 1}}));
         QVERIFY(std::abs(nt["char"]["tracking"].get<double>() - 0.05) < 1e-6);
+        QVERIFY2(nt.contains("para") && nt["para"].contains("first_indent_mm"), nt.dump().c_str());
         QVERIFY(std::abs(nt["para"]["first_indent_mm"].get<double>() - 2) < 1e-3);
-        // (the range: its style the other book's of that name, its own size; its look the style's — not its own)
-        QCOMPARE(nt["runs"].size(), std::size_t{1});
+        // (the range: its style the other book's of that name; the look as written — its size 8, the rest 6, its colour and
+        // line the style's — not its own)
+        QVERIFY2(nt.contains("runs") && !nt["runs"].empty(), nt.dump().c_str());
         const Json& run = nt["runs"][0];
         QCOMPARE(run["start"], Json(0));
         QCOMPARE(run["end"], Json(5));
         const std::string cs = run["style"].get<std::string>();
-        QVERIFY(std::abs(run["char"]["size_mm"].get<double>() - 8) < 1e-3);
-        QVERIFY(!run["char"].contains("underline"));
+        QVERIFY(!run.contains("char") || !run["char"].contains("underline"));
+        const std::vector<genko::core::type_text::CharRun> look =
+            genko::core::type_text::resolve_chars(*read.record, other.type_styles ? &*other.type_styles : nullptr);
+        const auto at = [&](std::int64_t g) -> const Json& {
+            for (const auto& r : look)
+                if (r.start <= g && g < r.end) return r.attrs;
+            static const Json none;
+            return none;
+        };
+        QVERIFY(std::abs(at(0)["size_mm"].get<double>() - 8) < 1e-3 && std::abs(at(7)["size_mm"].get<double>() - 6) < 1e-3);
+        QCOMPARE(at(0)["rgb"], Json::array({200, 0, 0}));
+        QCOMPARE(at(0)["underline"], Json(true));
+        QCOMPARE(at(7)["rgb"], Json::array({10, 20, 30}));
+        QCOMPARE(at(7)["underline"], Json(false));
         QCOMPARE(nt["paragraphs"][0]["index"], Json(1));
         const std::string ps = nt["paragraphs"][0]["style"].get<std::string>();
         const Json& styles = *other.type_styles;

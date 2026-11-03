@@ -386,7 +386,8 @@ private slots:
                 std::string::npos);
     }
 
-    // (review P1-1) the layered exports: the type layer a pixel layer of its name, its picture its letters — PSD and .pcraft
+    // (review P1-1) the layered exports: the type layer a layer of its name, its picture its letters — PSD and .pcraft. (PC5
+    // G-e: a text layer of Photoshop's in a PSD, upstream's text layer in a .pcraft — read back a type layer)
     void layeredExports() {
         const core::Document doc = with_type(plain_book());
         QTemporaryDir scratch;
@@ -397,7 +398,8 @@ private slots:
         for (const render::psd::Layer& layer : file.layers()) {
             if (layer.name != "あいう") continue;
             found = true;
-            QCOMPARE(layer.kind, std::string("pixels"));
+            QCOMPARE(layer.kind, std::string("text"));
+            QVERIFY(file.text(layer) && file.text(layer)->text == u"あいう");
             QVERIFY(file.image(layer).getbbox().has_value());
         }
         QVERIFY(found);
@@ -405,7 +407,7 @@ private slots:
         const render::pcraft::Read read = render::pcraft::read(formats::pcraft_bytes(doc, 0, formats::PcraftOptions{}, &notes), "typed");
         bool kept = false;
         for (const core::Layer& layer : read.doc.page(0).layers)
-            kept = kept || (layer.title == "あいう" && layer.raster_png && !layer.raster_png->empty());
+            kept = kept || (layer.title == "あいう" && layer.kind == core::LayerKind::Type && layer.type && layer.type->text == "あいう");
         QVERIFY(kept);
     }
 
@@ -899,10 +901,11 @@ private slots:
         QVERIFY(found);
         std::vector<std::string> notes;
         const render::pcraft::Read read = render::pcraft::read(formats::pcraft_bytes(doc, 0, formats::PcraftOptions{}, &notes), "turned");
-        bool kept = false;
+        bool kept = false;  // (PC5 G-e: upstream's text layer, read back a type layer turned as it was)
         for (const core::Layer& layer : read.doc.page(0).layers)
-            kept = kept || (layer.title == "あいう" && layer.raster_png && !layer.raster_png->empty());
+            kept = kept || (layer.title == "あいう" && layer.kind == core::LayerKind::Type && core::type_text::transform_of(*layer.type).has_value());
         QVERIFY(kept);
+        QVERIFY2(std::abs(darkness(shown(read.doc)) - dark) < 0.1 * dark, "read back");
         const core::Document flat = run(doc, Json{{"op", "merge_visible"}, {"page", 1}, {"copy", false}, {"flatten", true}});
         QVERIFY2(std::abs(darkness(shown(flat)) - dark) < 0.1 * dark, "flattened");
         const core::Document smart = run(doc, Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"t1"})}});

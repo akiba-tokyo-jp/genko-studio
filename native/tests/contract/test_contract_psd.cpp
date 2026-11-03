@@ -201,7 +201,15 @@ Json as_python_folders(Json value) {
 }
 
 std::string corrections_more(const Json& own_read, const Json& python_view, const genko::core::Document& after) {
-    const Json own = as_python_folders(own_read);
+    Json own = as_python_folders(own_read);
+    // (PC5 G-e, the coordinator's decision for G: a text layer read as a type layer, or as its pixels said with why — the
+    // fixtures' text layers are a few bytes no text engine wrote: their pixels, as Python's view —, the reply's own keys)
+    if (own.contains("results") && own["results"].is_array()) {
+        for (Json& r : own["results"]) {
+            if (!r.is_object()) continue;
+            for (const char* key : {"type_layers", "type_as_pixels", "type_fonts_missing", "type_styles", "type_notes"}) r.erase(key);
+        }
+    }
     if (genko::core::dump_python(own) == genko::core::dump_python(python_view)) return "same";
     if (!own.value("ok", false) || !python_view.value("ok", false) || !own.contains("results") || !python_view.contains("results") ||
         own["results"].size() != python_view["results"].size())

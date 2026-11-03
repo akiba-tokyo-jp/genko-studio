@@ -117,5 +117,8 @@ bool read_as_pixels();
 // What a type layer read from a PSD is written back as while it is the same (psd-keep@1's text): its record, at this dpi
 // on a page of these pixels — "sha256:…".
 std::string fingerprint(const core::StoryLine& record, std::int64_t dpi, std::int64_t width_px, std::int64_t height_px);
+// The same with the styles the record takes in `book` (Basic Paragraph and those it names, as they are: a style redefined
+// since, its look is not the block's) — what psd-keep@1's `text` holds.
+std::string fingerprint(const core::StoryLine& record, const core::Document& book, std::int64_t dpi, std::int64_t width_px, std::int64_t height_px);
 
 }  // namespace genko::render::psd_type

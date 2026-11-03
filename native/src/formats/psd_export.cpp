@@ -1588,7 +1588,7 @@ public:
         const render::Size size = records_.size();
         // (read from a PSD and the same since — the record, the resolution, the page's pixels —: its block as it was)
         if (own.native_psd && !own.native_psd->text.empty() &&
-            own.native_psd->text == render::psd_type::fingerprint(record, dpi_, size.width, size.height)) {
+            own.native_psd->text == render::psd_type::fingerprint(record, episode_, dpi_, size.width, size.height)) {
             for (const auto& [key, ref] : own.native_psd->blocks) {
                 if (key != "TySh") continue;
                 if (const core::Bytes bytes = kept_psd_file(episode_, ref)) {
