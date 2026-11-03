@@ -164,7 +164,7 @@ private slots:
         const Json asked = report(doc, Json{{"op", "replace_fonts"}});
         QCOMPARE(asked["missing"].size(), std::size_t{2});
         QCOMPARE(asked["missing"][0]["font"], Json("/gone/Other.otf"));
-        QCOMPARE(asked["missing"][0]["texts"], Json(2));
+        QCOMPARE(asked["missing"][0]["texts"], Json(1));  // (the locked layer t2 not counted: it is left as it is — review P3-5 c)
         QCOMPARE(asked["missing"][0]["postscript"], Json("Other-Regular"));
         QCOMPARE(asked["missing"][1]["font"], Json(gone));
         QCOMPARE(asked["missing"][1]["texts"], Json(1));
