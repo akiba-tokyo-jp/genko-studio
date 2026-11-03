@@ -63,6 +63,44 @@ def _style(data, fonts) -> dict:
         "horizontal_scale": _number(get("HorizontalScale", 1)),
         "vertical_scale": _number(get("VerticalScale", 1)),
         "run_alignment": int(_value(get("StyleRunAlignment", 2))),
+        # (PC5 G-e: a type layer's keys)
+        "extra": {
+            "baseline_shift": _number(get("BaselineShift", 0)),
+            "caps": int(_value(get("FontCaps", 0))),
+            "underline": bool(_value(get("Underline", False))),
+            "strikethrough": bool(_value(get("Strikethrough", False))),
+            "auto_kerning": bool(_value(get("AutoKerning", True))),
+            "ligatures": bool(_value(get("Ligatures", True))),
+            "dligatures": bool(_value(get("DLigatures", False))),
+            "auto_leading": bool(_value(get("AutoLeading", False))),
+            "opentype": sorted(key for key in OPENTYPE_KEYS if bool(_value(get(key, False)))),
+        },
+    }
+
+
+# (PC5 G-e) EngineData's switches of 書式 › OpenType.
+OPENTYPE_KEYS = ["ContextualLigatures", "Swash", "OldStyle", "StylisticAlternates", "Titling", "Ornaments", "Ordinals", "Fractions"]
+
+
+def _paragraph(run) -> dict:
+    sheet = run["ParagraphSheet"]
+    props = sheet["Properties"]
+
+    def get(key, default):
+        return props[key] if key in props else default
+
+    return {
+        "justification": int(_value(get("Justification", 0))),
+        "extra": {
+            "first_indent": _number(get("FirstLineIndent", 0)),
+            "start_indent": _number(get("StartIndent", 0)),
+            "end_indent": _number(get("EndIndent", 0)),
+            "space_before": _number(get("SpaceBefore", 0)),
+            "space_after": _number(get("SpaceAfter", 0)),
+            "auto_leading": _number(get("AutoLeading", 1.2)),
+            "hyphenate": bool(_value(get("AutoHyphenate", False))),
+            "sheet": int(_value(sheet["Parent"])) if "Parent" in sheet else None,
+        },
     }
 
 
@@ -72,12 +110,16 @@ def _text(layer) -> dict:
     fonts = [_text_of(_value(font["Name"])) for font in resources["FontSet"]]
     style_run = engine["StyleRun"]
     runs = [
-        {"length": int(_value(length)), "style": _style(run["StyleSheet"]["StyleSheetData"], fonts)}
+        {
+            "length": int(_value(length)),
+            "style": _style(run["StyleSheet"]["StyleSheetData"], fonts),
+            "sheet": int(_value(run["StyleSheet"]["Parent"])) if "Parent" in run["StyleSheet"] else None,
+        }
         for length, run in zip(style_run["RunLengthArray"], style_run["RunArray"])
     ]
     paragraph_run = engine["ParagraphRun"]
     paragraphs = [
-        {"length": int(_value(length)), "justification": int(_value(run["ParagraphSheet"]["Properties"].get("Justification", 0)))}
+        {"length": int(_value(length)), **_paragraph(run)}
         for length, run in zip(paragraph_run["RunLengthArray"], paragraph_run["RunArray"])
     ]
     shapes = engine["Rendered"]["Shapes"]
@@ -93,6 +135,11 @@ def _text(layer) -> dict:
         "warp": _enum(layer.warp[b"warpStyle"]),
         "runs": runs,
         "paragraphs": paragraphs,
+        # (PC5 G-e: its anti-alias, and the named sheets past the normal ones)
+        "antialias": _enum(data[b"AntA"]),
+        "engine_antialias": int(_value(engine["AntiAlias"])),
+        "char_sheets": [_text_of(_value(s["Name"])) for s in list(resources["StyleSheetSet"])[1:]],
+        "para_sheets": [_text_of(_value(s["Name"])) for s in list(resources["ParagraphSheetSet"])[1:]],
     }
     if out["shape"] == "box":
         out["box"] = [_number(v) for v in photoshop["BoxBounds"]]

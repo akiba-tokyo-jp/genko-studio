@@ -39,14 +39,17 @@ struct PsdTextFeature {
 };
 const std::vector<PsdTextFeature>& psd_text_unsupported();
 
-// A placed line using some of them: its page, id, its first words and the features' keys.
+// A placed line using some of them: its page, id, its first words and the features' keys. (PC5 G-e) A type layer's too:
+// `layer` its id (`line` too), written as its pixels whatever the lines' way (only the strict editable export stops).
 struct PsdTextIssue {
     std::int64_t page = 0;
     std::string line;
     std::string text;
     std::vector<std::string> features;
+    std::string layer = {};
 };
-// Every placed line of the book's pages that the editable PSD cannot keep as text, page by page, at `dpi`.
+// Every placed line of the book's pages that the editable PSD cannot keep as text, page by page, at `dpi` — (PC5 G-e)
+// and every type layer shown (a smart object's contents' not).
 std::vector<PsdTextIssue> psd_text_issues(const core::Document& episode, std::int64_t dpi);
 core::Json issues_json(const std::vector<PsdTextIssue>& issues);
 
