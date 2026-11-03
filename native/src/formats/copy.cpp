@@ -1,6 +1,7 @@
 // コピーを保存… (formats/copy.hpp).
 
 #include "formats/copy.hpp"
+#include "formats/artboards.hpp"
 
 #include <algorithm>
 #include <random>
@@ -463,7 +464,8 @@ PagePicture copy_picture(const core::Document& doc, std::size_t at, const CopyOp
     } else {
         const auto [dw, dh] = page_picture_size(page, size.drawn_dpi, options.area);
         check_size(page, std::max(dw, size.width), std::max(dh, size.height));  // (before it is drawn)
-        out = page_picture(page, doc, size.drawn_dpi, options.area);
+        // (PC5 I-c: an artboard of a transparent background with its alpha — formats/artboards)
+        out = core::transparent_artboard(page) ? artboard_picture(page, doc, size.drawn_dpi, options.area) : page_picture(page, doc, size.drawn_dpi, options.area);
         if (out.image.width() != size.width || out.image.height() != size.height) {
             out.image = render::codecs::resized(out.image, size.width, size.height, options.resample);
         }

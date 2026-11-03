@@ -31,6 +31,8 @@ genko_library(genko_formats
     datasets.cpp
     # PC5 J-c (注釈: ファイル → 読み込み → 注釈…)
     notes_import.cpp
+    # PC5 I-c (アートボード: アートボードからファイル・PDF・1 つの PSD、PSD のアートボードをページに)
+    artboards.cpp
     # PC5 I-f (生成 → 画像アセット; プリントの配置・印・色の管理)
     image_assets.cpp
     print_marks.cpp

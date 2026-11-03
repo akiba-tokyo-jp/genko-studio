@@ -108,14 +108,89 @@
    ]
   },
   {
-   "n": "set_animation fps 61",
+   "n": "set_animation fps 121",
    "op": "set_animation",
    "ok": false,
    "ops": [
     {
      "op": "set_animation",
      "page": 6,
-     "fps": 61
+     "fps": 121
+    }
+   ]
+  },
+  {
+   "n": "set_animation fps 120.5",
+   "op": "set_animation",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_animation",
+     "page": 6,
+     "fps": 120.5
+    }
+   ]
+  },
+  {
+   "n": "set_animation fps 0.4",
+   "op": "set_animation",
+   "ok": false,
+   "ops": [
+    {
+     "op": "set_animation",
+     "page": 6,
+     "fps": 0.4
+    }
+   ]
+  },
+  {
+   "n": "set_animation fps at the ends of 1 to 60",
+   "op": "set_animation",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "set_animation",
+       "page": 6,
+       "fps": 1
+      }
+     ]
+    },
+    {
+     "ops": [
+      {
+       "op": "set_animation",
+       "page": 6,
+       "fps": 60
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "n": "set_animation fps 59.94 and 23.976",
+   "op": "set_animation",
+   "ok": true,
+   "steps": [
+    {
+     "ops": [
+      {
+       "op": "set_animation",
+       "page": 6,
+       "fps": 59.94
+      }
+     ]
+    },
+    {
+     "ops": [
+      {
+       "op": "set_animation",
+       "page": 6,
+       "fps": "23.976",
+       "frames": 48
+      }
+     ]
     }
    ]
   },
@@ -2095,5 +2170,33 @@
     }
    ]
   }
+ ],
+ "timeline_note": "PC5 J-e1 (timeline@1, SPEC.md PROD-01) — beyond Python, for test_contract_anim (timelineBeyondPython): set_animation's work area and its fps of 0.5..120 on page 1 of a new book of this build. n: name; steps: the ops, a step each; ok: whether the last step succeeds; error: words its refusal holds; anim: the keys of the page's anim after it (the others as they are); no_work: the anim has no work; timeline: whether the book saved names timeline@1 (read back as written, opened writable). The values of 1..60 and none of work stay as before: the cases above, against Python.",
+ "timeline_cases": [
+  {"n": "fps 61 names timeline@1", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "fps": 61}]], "anim": {"fps": 61.0}, "timeline": true},
+  {"n": "fps 0.5 names timeline@1", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "fps": 0.5}]], "anim": {"fps": 0.5}, "timeline": true},
+  {"n": "fps 120 as words names timeline@1", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "fps": "120"}]], "anim": {"fps": 120.0}, "timeline": true},
+  {"n": "fps 0.75 then 24: as before", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "fps": 0.75}], [{"op": "set_animation", "page": 1, "fps": 24}]], "anim": {"fps": 24.0}, "timeline": false},
+  {"n": "fps 23.976 as before", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "fps": 23.976}]], "anim": {"fps": 23.976}, "no_work": true, "timeline": false},
+  {"n": "fps 60 as before", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "fps": 60}]], "anim": {"fps": 60.0}, "timeline": false},
+  {"n": "fps 0.4 refused", "ok": false, "steps": [[{"op": "set_animation", "page": 1, "fps": 0.4}]], "error": "fps is 0.5 to 120"},
+  {"n": "fps 120.01 refused", "ok": false, "steps": [[{"op": "set_animation", "page": 1, "fps": 120.01}]], "error": "fps is 0.5 to 120"},
+  {"n": "work area", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "frames": 24, "work": [3, 10]}]], "anim": {"frames": 24, "work": [3, 10], "fps": 12}, "timeline": true},
+  {"n": "work area as words", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "work": ["2", 5.9]}]], "anim": {"work": [2, 5]}, "timeline": true},
+  {"n": "work area of one frame", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "frames": 6, "work": [6, 6]}]], "anim": {"work": [6, 6]}, "timeline": true},
+  {"n": "work area with the frames in one op", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "frames": 100, "work": [50, 100]}]], "anim": {"frames": 100, "work": [50, 100]}, "timeline": true},
+  {"n": "work area cut with the frames", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "frames": 24, "work": [10, 20]}], [{"op": "set_animation", "page": 1, "frames": 12}]], "anim": {"frames": 12, "work": [10, 12]}, "timeline": true},
+  {"n": "work area past the frames cut to the last", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "frames": 24, "work": [20, 24]}], [{"op": "set_animation", "page": 1, "frames": 8}]], "anim": {"frames": 8, "work": [8, 8]}, "timeline": true},
+  {"n": "work null on an anim without one: as before", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "frames": 10, "work": null}], [{"op": "set_animation", "page": 1, "fps": 30, "work": null}]], "anim": {"frames": 10, "fps": 30.0}, "no_work": true, "timeline": false},
+  {"n": "work area taken off", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "frames": 24, "work": [2, 3]}], [{"op": "set_animation", "page": 1, "work": null}]], "anim": {"frames": 24}, "no_work": true, "timeline": false},
+  {"n": "work area and fps 90, then both as before", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "fps": 90, "work": [1, 2]}], [{"op": "set_animation", "page": 1, "fps": 24, "work": null}]], "anim": {"fps": 24.0}, "no_work": true, "timeline": false},
+  {"n": "work area kept by the other keys", "ok": true, "steps": [[{"op": "set_animation", "page": 1, "work": [4, 9]}], [{"op": "set_animation", "page": 1, "fps": 8, "loop": false}]], "anim": {"work": [4, 9], "loop": false, "fps": 8.0}, "timeline": true},
+  {"n": "work past the frames refused", "ok": false, "steps": [[{"op": "set_animation", "page": 1, "frames": 10, "work": [5, 11]}]], "error": "work is [first, last]: frames of 1 to 10, or null"},
+  {"n": "work backwards refused", "ok": false, "steps": [[{"op": "set_animation", "page": 1, "work": [5, 3]}]], "error": "work is [first, last]: frames of 1 to 24, or null"},
+  {"n": "work from 0 refused", "ok": false, "steps": [[{"op": "set_animation", "page": 1, "work": [0, 3]}]], "error": "work is [first, last]: frames of 1 to 24, or null"},
+  {"n": "work of one number refused", "ok": false, "steps": [[{"op": "set_animation", "page": 1, "work": 3}]], "error": "work is [first, last]: frames of 1 to 24, or null"},
+  {"n": "work of three refused", "ok": false, "steps": [[{"op": "set_animation", "page": 1, "work": [1, 2, 3]}]], "error": "work is [first, last]: frames of 1 to 24, or null"},
+  {"n": "work of words refused", "ok": false, "steps": [[{"op": "set_animation", "page": 1, "work": ["a", 2]}]], "error": "work is [first, last]: frames of 1 to 24, or null"},
+  {"n": "work of nulls refused", "ok": false, "steps": [[{"op": "set_animation", "page": 1, "work": [null, 2]}]], "error": "work is [first, last]: frames of 1 to 24, or null"}
  ]
 }

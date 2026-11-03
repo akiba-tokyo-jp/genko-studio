@@ -149,6 +149,8 @@ genko_library(genko_core
     type_styles.cpp
     # PC5 I-a (レイヤーの基本の残り: layer-locks@1, blend-channels@1)
     layer_basics.cpp
+    # PC5 I-c (アートボード: artboards@1)
+    artboards.cpp
     # PC5 I-f (画像アセット: image-assets@1 — the book's generator setting, set_image_assets, the layers' naming rule)
     image_assets.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"

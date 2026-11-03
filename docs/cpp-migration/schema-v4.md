@@ -79,6 +79,7 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `video@1` | PC5 J-0（J-e2 が使う） | ページの `anim` の行の `video`（ビデオレイヤー: 素材のコマと描き替え）。PROD-01、この文書の「制作の補助」 |
 | `variables@1` | PC5 I-d | 本の `variables`（変数とデータセット。値の画像は本の素材）。SPEC AUTO-01「変数とデータセット」、この文書の「変数とデータセット」 |
 | `layer-locks@1` | PC5 I-a | 層の `"lock_all": true`（すべてをロック）と `"lock_nest": true`（アートボードの内外への自動ネストを防ぐ）。SPEC AUTO-01「レイヤーの基本」、この文書の「ロックとチャンネル」 |
+| `artboards@1` | PC5 I-c | ページの `artboard`（アートボードの印: 名前・プリセット・背景・PSD のカンバスの上の位置）。SPEC AUTO-01「アートボード」、この文書の「アートボード」 |
 | `blend-channels@1` | PC5 I-a | 層の `"blend_channels"`（混合オプションのチャンネル: ページの色のチャンネルごとの真偽）。SPEC AUTO-01「レイヤーの基本」、この文書の「ロックとチャンネル」 |
 | `image-assets@1` | PC5 I-f | 本の `"generator": {"image_assets": true}`（生成 → 画像アセット: 人の保存のたびに名前の付いたレイヤーを書き出す）。SPEC AUTO-01「プリント・コンタクトシート・画像アセット」、この文書の「画像アセット」 |
 
@@ -523,6 +524,14 @@ Photoshop の文字（テキストレイヤー・文字と段落の属性・ス�
 - **読み手の検査**: 上の形でない `variables`（知らない鍵・範囲の外・重なる名前・書き手の形（正規形）と違うもの）、値の画像が `assets/` に無い本は、読み取り専用で開く。variables@1 を知らない読み手（PC5 I-d より前の C++ 版）は、未知の拡張として読み取り専用で開く。
 - op（`set_variables`・`set_data_sets`・`apply_data_set`）は本の op。journal の `set_data_sets` は画像のバイトを `"<N base64 chars>"` にして残す。
 
+## アートボード（artboards@1。SPEC AUTO-01、PC5 I-c）
+
+アートボードは印を持つページ（利用者の決定 3）。
+
+- **ページの `"artboard"`**（ページの鍵の `measure` の後）: `{"name": 文字（1〜1024 バイト）, "preset"?: 文字（256 バイトまで）, "background": "white" | "black" | "transparent" | "custom", "rgb"?: [r, g, b]（0〜255。custom のときだけ、custom なら必ず）, "origin_px"?: [x, y]（−300000〜300000 の整数）}`。持たないページは書かない。大きさはページだけの用紙（`native_spec`、page-spec@1）。
+- 書き手は、どれかのページが `artboard` を持てば `features` に `artboards@1` を加え、無くなれば外す。持たない原稿は今と同じバイトで書く。
+- **読み手の検査**: 知らない鍵・型の違う値・範囲の外の `artboard`、表紙（`cover`）や見開き（`spread_with`）のページの `artboard` を持つ本は、読み取り専用で開く（読めない `artboard` はそのまま書き戻す鍵に残す）。artboards@1 を知らない読み手（PC5 I-c より前の C++ 版）は、未知の拡張として読み取り専用で開く。スマートオブジェクトの中身のページの `artboard` は読まない（そのまま書き戻す）。
+
 ## 画像アセット（image-assets@1。SPEC AUTO-01、PC5 I-f）
 
 - **本の `"generator"`**（本の鍵の `variables` の後）: `{"image_assets": true}` だけ。生成 → 画像アセット を入れた本だけが持ち、外すと書かない。持たない原稿は今と同じバイトで書く。
@@ -538,7 +547,7 @@ Photoshop の文書 1 つは Genko のページ 1 枚なので、レイヤーカ
 - **ページの `"slices"`**（slices@1）: `{"group": 文字, "next_id": 1.., "list": [スライス…]}`。スライスは `{"id": 1..（next_id より小さく、重ならない）, "origin": "user" | "layer", "layer"?: 層の id（layer のときだけ・必ず）, "name", "rect_mm": [x, y, w, h], "kind": "image" | "noImage" | "table", "url", "target", "message", "alt", "cell_text": 文字, "cell_text_is_html": bool, "align": [0..4, 0..4], "background": "#rrggbb" | null, "outsets": [上, 左, 下, 右]（ページの画素）}`、4096 個まで。自動スライスは持たない（毎回つくる）。`rect_mm` は位置 ±1e6 mm・幅と高さ 0 以上（書き手も読み手と同じ範囲を見る。J-b のレビュー P2-1 からは名前・グループ名・文字・`next_id`・揃え・外側の広げの上限もすべて同じ）。レイヤーベースのスライスの範囲は見るたびに層の外接・効果・`outsets` から作り、`rect_mm` は op が最後に見た範囲（PC5 J-b、PROD-01「スライス」）。名前は 1024 バイト、URL などの文字は 64 KB まで。スライスを全部消しても番号（`next_id`・`group`）は残して書く（次のスライスの番号を 1 からにしない）。
 - **ページの `"annotations"`**（annotations@1）: `[{"id": "an_" + 16 進 12 桁, "at_mm": [x, y], "popup_mm": [x, y, w, h] | null, "text": 文字（64 KB まで）, "author": 文字, "color": [r, g, b], "open": bool, "modified": "YYYY-MM-DDThh:mm:ssZ", "actor": "human:…" | "ai:…" | "genko"}]`、1000 個まで、id は重ならない。ページのメモ（`note`）とは別。（PC5 J-c）`modified` は日時の分からないもの（日時の無い PSD の注釈など）では空の文字。`at_mm` は印の左上、`popup_mm` の null は既定の枠（印の右下 6 mm に 60 × 36 mm）。`actor` は書いた人で、人のもの（`human:…`・`genko`）はエージェント（`ai:…`）の op では変わらない（PROD-01「注釈」）。ページの `native_psd` の `copied` に `Anno` の印があるとき、その指紋は注釈の JSON（この形）から作る。
 - **ページの `"measure"`**（measure@1）: `{"scale": {"pixel_length": >0, "logical_length": >0, "units": 文字} | null, "count_groups": [{"name", "color": [r, g, b], "marker_size": 1..10, "label_size": 8..72, "visible": bool, "points": [[x, y]…]（1 万まで）}]（256 まで）, "active_group": 0..（グループの番号。無ければ 0）, "ruler": {"start": [x, y], "end": [x, y], "protractor": [x, y] | null} | null}`。`scale` の null は 1 pixel = 1 pixel（Photoshop の初期設定）、`pixel_length` はページの解像度の画素。全部が既定のページは `measure` を書かない。計測ログは原稿に持たない。（PC5 J-d1）op が書く値: 位置は mm を小数 4 桁に丸めたもの、`scale` は初期設定（1・1・"pixels"）なら null、名前の無いグループは「カウントグループ n」。ページの大きさの op（回転・切り抜き・カンバスサイズ・画像解像度）は印と線を中身と同じ写像で動かす（`scale` はそのまま）。PSD のリソース 1074 は `copied` の印つきで保つ（この節の終わり）。（PC5 J-d2）計測値を記録の行・計測ログ・データポイントの選択は原稿に入らない（アプリの作業の間とこのパソコンの設定）。目盛りマーカーを配置は `measure` を変えず、ふつうの層（グループ・ペンの層の形の部品・文字レイヤー。groups@1・pen-shapes@1・type@1）を作る。
-- **アニメの作業範囲と fps**（timeline@1）: ページの `anim` に `"work": [始め, 終わり]`（フレームは 1 から、両端を含む、1 ≤ 始め ≤ 終わり ≤ 3000）、`"fps"` に 0.5 以上 1 未満か 60 を超え 120 以下の数（今の `set_animation` が受ける 1〜60 の数は小数でも今のまま。0.5〜120 の外の値は前のアニメが持ちうる値として今のまま読み、拡張を付けない）。形の違う `work`（2 つの整数でない）も前のアニメの値として保ち、拡張を付けない。
+- **アニメの作業範囲と fps**（timeline@1）: ページの `anim` に `"work": [始め, 終わり]`（フレームは 1 から、両端を含む、1 ≤ 始め ≤ 終わり ≤ 3000）、`"fps"` に 0.5 以上 1 未満か 60 を超え 120 以下の数（今の `set_animation` が受ける 1〜60 の数は小数でも今のまま。0.5〜120 の外の値は前のアニメが持ちうる値として今のまま読み、拡張を付けない）。形の違う `work`（2 つの整数でない）も前のアニメの値として保ち、拡張を付けない。書くのは `set_animation` の `work`・`fps`（PC5 J-e1。`frames` を減らすと `work` もその中に詰める）。`frames` を越える `work`（J-e1 より前の版で `frames` を減らした本）は、読むときにフレーム数で切って使う（再生・書き出しの範囲。値は書き換えない）。
 - **ビデオの行**（video@1）: アニメの行（`tracks` の 1 つ）の `"video"`: `{"footage": 素材 | null, "frames": [[素材のコマの番号 | null, 描き替えたセルの id | null]…]（タイムラインの 1 フレームに 1 つ、3000 まで）, "show_altered": bool, "placement_mm": [x, y, w, h], "fit": "contain" | "cover" | "stretch"}`。素材は `{"kind": "sequence" | "animation" | "image", "name", "frames": ["sha256:…"…]（素材のコマ: 原稿の素材ファイル、1〜3000）, "fps": >0, "size_px": [w, h], "depth": 8 | 16, "alpha": "straight" | "premultiplied" | "ignore", "par": >0, "source"?: {"path", "bytes", "sha256"}}`。動画ファイル（MP4・MOV・WebM）は読まないので、素材は連番（sequence）・動く画像（animation: GIF・APNG・WebP）・1 枚の画像（image）だけ（利用者の決定 4）。
 - 書き手は、それぞれを持つページがあるときだけ `features` にその拡張を加え（無くなれば外す）、空のもの（カンプ・スライス・注釈が無い、計測が全部既定）は書かない。持たない原稿は `features` も保存のバイトも今のまま。
 - **読み手の検査**: 形が上と違う（知らない鍵・型・範囲の外・重なる id・名指す物が無い）ページの本は、読み取り専用で開く（その値は読んだまま保つので失われない）。`anim` の `work`・`video` は、本が timeline@1・video@1 を名乗るときだけ見る（名乗らない本の値は前のアニメの値: 開ける。fps は名乗っても見ない）。これらの拡張を知らない読み手（PC5 J-0 より前の C++ 版）は、未知の拡張として読み取り専用で開く（作業範囲を無視して書き出したり、ビデオの行を空のフォルダーとして描いたりしないため）。

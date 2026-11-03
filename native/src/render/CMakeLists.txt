@@ -280,6 +280,9 @@ genko_library(genko_render
     ops_type_fonts.cpp
     # PC5 G-e (PSD・.pcraft の文字: Photoshop's text layer and the type layer each other's)
     psd_type.cpp
+    # PC5 I-c (アートボード: artboards@1 — the ops, PSD's artb)
+    ops_artboards.cpp
+    psd_artboards.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

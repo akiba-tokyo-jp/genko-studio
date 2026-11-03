@@ -633,6 +633,13 @@ genko_test(test_contract_layers SOURCES contract/test_contract_layers.cpp DEPS g
 # .pcraft's slices (upstream's reader with $GENKO_PCRAFT_CHECK).
 genko_test(test_contract_slices SOURCES contract/test_contract_slices.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC5 I-c (artboards@1, the user's decision 3: アートボード＝ページ): add_artboard, artboard_from_layers (layers, a group, what is
+# kept), set_artboard (size and anchor, the contents kept or moved, the preset, the mark taken off), a cover and a spread
+# refused; the background on the three ways of drawing; to files, to PDF, one PSD as psd-tools reads it (and through `genko
+# export --format artboards`); a PSD's artboards opened a page each (import_psd as before); a .pcraft's artboard; the book
+# written and read, a book without artboards as before.
+genko_test(test_contract_artboards SOURCES contract/test_contract_artboards.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 # PC3 C-e through the command line: every kind of page turned (inspect --pixel), undone and redone; a page of its own paper
@@ -815,6 +822,10 @@ if(GENKO_BUILD_APP)
   # sized, promoted, divided, deleted, スライスオプション), 新規レイヤーベースのスライス, 表示 → スライス・スライスをロック・スライスを
   # 消去・スナップ先 → スライス, 環境設定 → ガイド・グリッド・スライス's two, Web 用に保存 by slices — each change one Undo.
   genko_test(test_gui_slices SOURCES gui/test_gui_slices.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC5 I-c (artboards@1): レイヤー → 新規 ▸ アートボード…・グループ・レイヤーからのアートボード…, イメージ → アートボードの設定…, 表示 →
+  # アートボードを画面サイズに合わせる・選択したアートボードのガイドを消去・表示・非表示 ▸ アートボードガイド・アートボード名, 書き出し ▸
+  # アートボードからファイル…・PDF… — their places, the windows asked, each change one Undo.
+  genko_test(test_gui_artboards SOURCES gui/test_gui_artboards.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC5 I-e: ファイル → 自動処理 ▸ (バッチ…・ドロップレットを作成…・条件付きモード変更…・画像を合わせる…・レンズ補正…) and スクリプト ▸
   # (画像プロセッサー…・スクリプトイベントマネージャー…・参照…): their places, the windows asked, the script events raised by the
   # person's save (never the automatic one) and not run once their script changed

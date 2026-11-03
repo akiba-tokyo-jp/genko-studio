@@ -168,6 +168,7 @@ void PageCanvas::paint_page(QPainter& painter) {
     if (phone_view) draw_phone(painter);  // (the phone screens: canvas_scale.cpp)
     draw_grid(painter);    // (canvas_guides.cpp)
     draw_guide_lines(painter);  // (PC5 H-b: the guides placed — canvas_guide_lines.cpp)
+    draw_artboard_name(painter);  // (PC5 I-c: アートボード名)
     draw_rulers(painter);
     draw_layer_edges(painter);  // (PC5 H-b: レイヤーエッジ)
     draw_selection(painter);
