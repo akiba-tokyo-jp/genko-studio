@@ -17,6 +17,7 @@
 #include "app/ask.hpp"
 #include "app/automate_dialogs.hpp"
 #include "app/main_window.hpp"
+#include "app/open_dialog.hpp"
 #include "app/print_dialog.hpp"
 #include "app/session.hpp"
 #include "core/actor.hpp"

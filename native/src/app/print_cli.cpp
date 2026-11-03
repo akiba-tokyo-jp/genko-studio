@@ -146,11 +146,15 @@ int print_command(int argc, char** argv) {
         const QString p = position->trimmed().toLower();
         if (p != QLatin1String("center") && p != QLatin1String("centre")) {
             const QStringList parts = p.split(QLatin1Char(','));
-            const auto l = parts.size() == 2 ? number(parts[0]) : std::nullopt, t = parts.size() == 2 ? number(parts[1]) : std::nullopt;
-            if (!l || !t || std::abs(*l) > 1000.0 || std::abs(*t) > 1000.0) return usage("argument --position: center, or <left>,<top> in mm (within 1000)");
+            const char* const wrong = "argument --position: center, or <left>,<top> in mm (within 1000)";
+            if (parts.size() != 2) return usage(wrong);
+            const std::optional<double> l = number(parts[0]), t = number(parts[1]);
+            if (!l.has_value() || !t.has_value()) return usage(wrong);
+            const double left = l.value(), top = t.value();
+            if (left < -1000.0 || left > 1000.0 || top < -1000.0 || top > 1000.0) return usage(wrong);
             setup.center = false;
-            setup.left_mm = *l;
-            setup.top_mm = *t;
+            setup.left_mm = left;
+            setup.top_mm = top;
         }
     }
     setup.spreads = flags.contains(QStringLiteral("--spreads"));
