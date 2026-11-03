@@ -31,21 +31,7 @@ struct Frame {
 // イメージ → 解析 ▸: every command made by main_window_measure.cpp now (J-d1's 計測スケールを設定 ▸ 初期設定・カスタム…,
 // ものさしツール and カウントツール; J-d2's データポイントを選択 ▸ カスタム…, 計測値を記録, 目盛りマーカーを配置…)
 
-// レイヤー → ビデオレイヤー ▸ (J-e2), in Photoshop's order
-constexpr Frame kVideo[] = {
-    {"act_video_from_file", "ファイルから新規ビデオレイヤー…", "連番の画像・動く画像（GIF・APNG・WebP）をビデオレイヤーにします"},
-    {"act_video_blank", "新規空白ビデオレイヤー", "空のビデオレイヤーを足します"},
-    {"act_video_insert_blank", "空白フレームを挿入", "今のフレームに空白のフレームを差し込みます"},
-    {"act_video_duplicate", "フレームを複製", "今のフレームを複製します"},
-    {"act_video_delete", "フレームを削除", "今のフレームを削除して後ろを詰めます"},
-    {"act_video_replace", "フッテージを置き換え…", "ビデオレイヤーの素材を別のものに替えます"},
-    {"act_video_interpret", "フッテージを解釈…", "素材のフレームレート・アルファチャンネル・ピクセル縦横比を決めます"},
-    {"act_video_show_altered", "変更されたビデオを表示", "描き替えたフレームを見せるか、素材のまま見せるかを切り替えます"},
-    {"act_video_restore", "フレームを復元", "今のフレームの描き替えを外して素材に戻します"},
-    {"act_video_restore_all", "すべてのフレームを復元", "ビデオレイヤーの描き替えをすべて外します"},
-    {"act_video_reload", "フレームを再読み込み", "素材のファイルを読み直します"},
-    {"act_video_rasterize", "ラスタライズ", "今のフレームの見えをふつうのペイントレイヤーにします"},
-};
+// レイヤー → ビデオレイヤー ▸: every command made by main_window_video.cpp now (J-e2, in Photoshop's order)
 
 // ウィンドウ's panels (J-g アクション; タイムライン is the dock's; J-a's レイヤーカンプ is made by main_window_layer_comps.cpp,
 // after アクション; J-d2's 計測ログ by main_window_measure.cpp, after レイヤーカンプ; J-c's 注釈 by main_window_notes.cpp,
@@ -57,12 +43,11 @@ constexpr Frame kPanels[] = {
 }  // namespace
 
 void MainWindow::build_production_actions() {
-    for (const std::span<const Frame> list : {std::span<const Frame>(kVideo), std::span<const Frame>(kPanels)}) {
-        for (const Frame& frame : list) {
-            const QString title = QString::fromUtf8(frame.title);
-            make(QString::fromLatin1(frame.attribute), title, [this, title] { not_yet_command(title); }, {}, QString::fromUtf8(frame.tip));
-        }
+    for (const Frame& frame : kPanels) {
+        const QString title = QString::fromUtf8(frame.title);
+        make(QString::fromLatin1(frame.attribute), title, [this, title] { not_yet_command(title); }, {}, QString::fromUtf8(frame.tip));
     }
+    build_video_actions();       // (PC5 J-e2: ビデオレイヤー ▸, ラスタライズ → ビデオ, 読み込み → ビデオフレームからレイヤー…)
     build_layer_comp_actions();  // (PC5 J-a: レイヤーカンプ, レイヤーカンプからファイル…)
     build_note_actions();        // (PC5 J-c: 注釈ツール, 表示・非表示 → 注釈, 読み込み → 注釈…, ウィンドウ → 注釈)
     build_measure_actions();     // (PC5 J-d1: 計測スケールを設定 ▸, ものさしツール, カウントツール, 表示・非表示 → カウント; J-d2:

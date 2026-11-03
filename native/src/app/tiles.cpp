@@ -17,6 +17,7 @@
 
 #include "app/display_color.hpp"
 #include "core/anim.hpp"
+#include "render/footage.hpp"
 #include "core/covers.hpp"
 #include "core/pyconv.hpp"
 #include "core/smart.hpp"
@@ -881,7 +882,7 @@ void PageRenderer::dispatch() {
                     render::RenderResult drawn;
                     if (core::anim::is_animation(*raw)) {  // (the frame shown, with the frames around it faint)
                         options.at_frame = true;
-                        drawn = render::render_page(core::anim::at_frame(*raw, frame), dpi, options, doc.get());
+                        drawn = render::render_page(render::footage::frame_page(*raw, frame, doc.get()), dpi, options, doc.get());  // (PC5 J-e2: its video rows' footage)
                         if (onion) {
                             if (const auto ghost = onions->get(raw, frame, std::min(dpi, 100), doc)) {
                                 const render::Size full{render::mm_to_px(raw->spec.width_mm.value(), dpi),

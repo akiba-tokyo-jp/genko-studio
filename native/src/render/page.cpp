@@ -39,6 +39,7 @@
 #include "render/brushes.hpp"
 #include "render/channels.hpp"
 #include "render/color_canvas.hpp"
+#include "render/footage.hpp"
 #include "render/color_filters.hpp"
 #include "render/covers.hpp"
 #include "render/effects.hpp"
@@ -2560,7 +2561,7 @@ RenderResult render(const Page& page_in, int dpi, const RenderOptions& options, 
         if (anim != nullptr && core::py_truthy(*anim)) {
             RenderOptions framed = options;
             framed.at_frame = true;
-            return render(core::anim::at_frame(page_in, 1), dpi, framed, episode, omitted);
+            return render(footage::frame_page(page_in, 1, episode), dpi, framed, episode, omitted);  // (PC5 J-e2: its video rows' footage)
         }
     }
     if (options.region && needs_whole_page(page_in)) {
@@ -4114,6 +4115,7 @@ void clear_render_caches() {
     text::clear_balloon_cache();
     clear_placed_caches();
     smart::clear_caches();  // (smart-objects@1)
+    footage::clear_cache();  // (PC5 J-e2: the video rows' footage frames laid)
     {
         std::lock_guard lock(g_cache_mutex);
         g_stroke_cache.clear();

@@ -280,6 +280,10 @@ genko_library(genko_render
     ops_type_fonts.cpp
     # PC5 G-e (PSD・.pcraft の文字: Photoshop's text layer and the type layer each other's)
     psd_type.cpp
+    # PC5 J-e2 (ビデオレイヤー: video@1 — the footage read and laid, the ops)
+    footage.cpp
+    ops_video.cpp
+    pcraft_timeline.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

@@ -10,6 +10,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
+#include "core/video.hpp"
 
 namespace genko::core {
 
@@ -267,6 +268,11 @@ void forget_layers(Document& doc, std::size_t at, const std::set<std::string>& g
                 if (track.is_object() && track.contains("cels") && track["cels"].is_array()) {
                     for (Json& cel : track["cels"])  // [frame, cel layer id | null]
                         if (cel.is_array() && cel.size() >= 2 && named(cel[1])) cel[1] = nullptr;
+                }
+                // (PC5 J-e2, video@1: a video row's altered frame whose cel is gone shows its footage again)
+                if (is_video_row(track)) {
+                    for (Json& frame : track["video"]["frames"])  // [footage frame | null, cel layer id | null]
+                        if (named(frame[1])) frame[1] = nullptr;
                 }
                 tracks.push_back(std::move(track));
             }

@@ -7,10 +7,12 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <set>
 
 #include "core/anim.hpp"
 #include "core/error.hpp"
 #include "core/model.hpp"
+#include "core/placement.hpp"
 #include "core/production_json.hpp"
 #include "core/smart.hpp"
 
@@ -123,6 +125,38 @@ Json timeline_info(const Page& page) {
         track["cels"] = std::move(cels);
         const Json* entry = anim::track(page, folder);
         track["exposures"] = entry != nullptr && entry->is_object() && entry->contains("cels") ? entry->at("cels") : Json::array();
+        // (PC5 J-e2: a video row's footage and frames — the footage's frames counted, not listed)
+        if (entry != nullptr && is_video_row(*entry)) {
+            const Json& video = entry->at("video");
+            Json row = Json::object();
+            const Json& footage = video.at("footage");
+            if (footage.is_null()) {
+                row["footage"] = nullptr;
+            } else {
+                Json summary = Json::object();
+                for (const char* key : {"kind", "name", "fps", "size_px", "depth", "alpha", "par"}) summary[key] = footage.at(key);
+                summary["frames"] = footage.at("frames").size();
+                std::set<std::string> unique;
+                for (const Json& ref : footage.at("frames")) unique.insert(ref.get<std::string>());
+                summary["pictures"] = unique.size();
+                summary["bytes"] = footage_bytes(footage);
+                summary["source"] = footage.contains("source") ? footage.at("source") : Json();
+                row["footage"] = std::move(summary);
+            }
+            const Json& frames_of_row = video.at("frames");
+            std::int64_t altered = 0, blank = 0;
+            for (const Json& f : frames_of_row) {
+                if (!f[1].is_null()) ++altered;
+                if (f[0].is_null() && f[1].is_null()) ++blank;
+            }
+            row["frames"] = frames_of_row.size();
+            row["altered"] = altered;
+            row["blank"] = blank;
+            row["show_altered"] = video.at("show_altered");
+            row["placement_mm"] = video.at("placement_mm");
+            row["fit"] = video.at("fit");
+            track["video"] = std::move(row);
+        }
         tracks.push_back(std::move(track));
     }
     out["tracks"] = std::move(tracks);
@@ -198,6 +232,133 @@ void check_video(const Json& video) {
     (void)pj::rect_mm(pj::field(video, "placement_mm", where), where + ".placement_mm");
     const std::string fit = pj::text(pj::field(video, "fit", where), where + ".fit", 16);
     if (fit != "contain" && fit != "cover" && fit != "stretch") pj::wrong(where + ".fit", "must be contain, cover or stretch");
+}
+
+bool is_video_row(const Json& track) {
+    if (!track.is_object()) return false;
+    const auto video = track.find("video");
+    if (video == track.end()) return false;
+    try {
+        check_video(*video);
+        return true;
+    } catch (const Error&) {  // (not a video row: what an anim before it may hold)
+        return false;
+    }
+}
+
+const Json* video_row(const Page& page, const Json& folder_id) {
+    const Json* entry = anim::track(page, folder_id);
+    if (entry == nullptr || !is_video_row(*entry)) return nullptr;
+    return &entry->at("video");
+}
+
+VideoShown video_shown(const Page& page, const Json& folder_id, const Json& video, std::int64_t frame) {
+    VideoShown out;
+    const Json& frames = video.at("frames");
+    if (frame < 1 || frame > static_cast<std::int64_t>(frames.size())) return out;
+    const Json& entry = frames[static_cast<std::size_t>(frame - 1)];
+    if (video.at("show_altered").get<bool>() && entry[1].is_string()) {
+        const std::string& cel = entry[1].get_ref<const std::string&>();
+        for (const Layer* layer : anim::cels_of(page, folder_id)) {
+            if (layer->id == cel) {
+                out.kind = VideoShown::Kind::Cel;
+                out.cel = cel;
+                return out;
+            }
+        }
+    }
+    const Json& footage = video.at("footage");
+    if (entry[0].is_number_integer() && footage.is_object()) {
+        const std::int64_t index = entry[0].get<std::int64_t>();
+        if (index >= 0 && index < static_cast<std::int64_t>(footage.at("frames").size())) {
+            out.kind = VideoShown::Kind::Footage;
+            out.index = index;
+        }
+    }
+    return out;
+}
+
+std::optional<Rect> footage_placement(const Json& video) {
+    const Json& footage = video.at("footage");
+    if (!footage.is_object()) return std::nullopt;
+    const auto box = pj::rect_mm(video.at("placement_mm"), "placement_mm");
+    const double par = footage.at("par").get<double>();
+    const std::int64_t w = footage.at("size_px")[0].get<std::int64_t>(), h = footage.at("size_px")[1].get<std::int64_t>();
+    // (its pixels as wide as par makes them: the picture's width in square pixels, whole, for fit_rect)
+    const auto wide = std::max<std::int64_t>(1, static_cast<std::int64_t>(std::llround(static_cast<double>(w) * par)));
+    const Rect target{Num(box[0]), Num(box[1]), Num(box[2]), Num(box[3])};
+    return fit_rect(target, wide, h, video.at("fit").get<std::string>(), 0.0, 0.0, 1.0);
+}
+
+namespace {
+
+std::uint64_t picture_bytes(const Json& footage) {
+    const auto w = static_cast<std::uint64_t>(footage.at("size_px")[0].get<std::int64_t>());
+    const auto h = static_cast<std::uint64_t>(footage.at("size_px")[1].get<std::int64_t>());
+    return w * h * 4 * (footage.at("depth").get<std::int64_t>() > 8 ? 2 : 1);
+}
+
+// Each video row of the book (its pages and the pages of its smart objects' contents).
+template <typename Each>
+void each_video_row(const Document& doc, Each each) {
+    for (const smart::WrittenPage& written : smart::written_pages(doc)) {
+        const Json* spec = anim::spec(*written.page);
+        if (spec == nullptr) continue;
+        const auto tracks = spec->find("tracks");
+        if (tracks == spec->end() || !tracks->is_array()) continue;
+        for (const Json& track : *tracks) {
+            if (is_video_row(track)) each(track.at("video"));
+        }
+    }
+}
+
+}  // namespace
+
+std::uint64_t footage_bytes(const Json& footage) {
+    if (!footage.is_object()) return 0;
+    std::set<std::string> unique;
+    for (const Json& ref : footage.at("frames")) unique.insert(ref.get<std::string>());
+    return picture_bytes(footage) * unique.size();
+}
+
+std::uint64_t book_footage_bytes(const Document& doc) {
+    std::set<std::string> seen;
+    std::uint64_t total = 0;
+    each_video_row(doc, [&](const Json& video) {
+        const Json& footage = video.at("footage");
+        if (!footage.is_object()) return;
+        const std::uint64_t each = picture_bytes(footage);
+        for (const Json& ref : footage.at("frames")) {
+            if (seen.insert(ref.get<std::string>()).second) total += each;
+        }
+    });
+    return total;
+}
+
+std::vector<std::string> footage_refs(const Document& doc) {
+    std::vector<std::string> out;
+    std::set<std::string> seen;
+    each_video_row(doc, [&](const Json& video) {
+        const Json& footage = video.at("footage");
+        if (!footage.is_object()) return;
+        for (const Json& ref : footage.at("frames")) {
+            if (seen.insert(ref.get<std::string>()).second) out.push_back(ref.get<std::string>());
+        }
+    });
+    return out;
+}
+
+std::vector<std::int64_t> laid_footage(std::int64_t count, double footage_fps, double timeline_fps) {
+    std::vector<std::int64_t> out;
+    if (count <= 0 || !(footage_fps > 0) || !(timeline_fps > 0)) return out;
+    for (std::int64_t k = 0; static_cast<std::int64_t>(out.size()) < anim::kMaxFrames; ++k) {
+        // (the frame shown k frames after the start: floor(k × its fps ÷ the timeline's), a hair under a whole number
+        // taken as it)
+        const auto index = static_cast<std::int64_t>(std::floor(static_cast<double>(k) * footage_fps / timeline_fps + 1e-9));
+        if (index >= count) break;
+        out.push_back(index);
+    }
+    return out;
 }
 
 bool uses_timeline(const Document& doc) {

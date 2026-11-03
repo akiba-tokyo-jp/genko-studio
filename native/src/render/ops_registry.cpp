@@ -38,6 +38,7 @@
 #include "render/ops_groups.hpp"
 #include "render/ops_type.hpp"
 #include "render/ops_production.hpp"
+#include "render/ops_video.hpp"
 #include "render/ops_layer_comps.hpp"
 #include "render/ops_variables.hpp"
 #include "render/ops_annotations.hpp"
@@ -457,6 +458,8 @@ void register_render_ops(core::OpRegistry& registry) {
     register_slice_ops(registry);
     // PC5 J-e1 (timeline@1: set_animation's work area and fps are core/ops_anim's; the question timeline_info)
     core::register_timeline_query(registry);
+    // PC5 J-e2 (video@1: the video layers, render/ops_video)
+    register_video_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {

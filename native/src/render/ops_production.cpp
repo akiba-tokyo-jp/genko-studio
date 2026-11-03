@@ -12,11 +12,9 @@ namespace genko::render {
 namespace {
 
 // (J-a's レイヤーカンプ — layer-comps@1 — are written: render/ops_layer_comps; J-c's 注釈 — annotations@1 —:
-// render/ops_annotations; J-d1's and J-d2's 計測 — measure@1 —: render/ops_measure; J-b's スライス — slices@1 —: render/ops_slices)
-constexpr std::array<std::string_view, 11> kNames{
-    // J-e2: ビデオレイヤー (video@1)
-    "add_video_layer", "video_insert_blank", "video_duplicate", "video_delete", "video_restore", "video_restore_all", "video_alter",
-    "set_video_layer", "replace_footage", "rasterize_video", "footage_to_layers"};
+// render/ops_annotations; J-d1's and J-d2's 計測 — measure@1 —: render/ops_measure; J-b's スライス — slices@1 —: render/ops_slices;
+// J-e2's ビデオレイヤー — video@1 —: render/ops_video. None is a frame any more.)
+constexpr std::array<std::string_view, 0> kNames{};
 
 }  // namespace
 
