@@ -59,6 +59,10 @@ struct OpContext {
 
 using OpFunction = std::function<void(OpContext&)>;
 
+// The page at `row` locked by another than `actor`: refused ("page N locked by <them>") — for an op that finds the pages it
+// changes as it works (PC5 G-d review P2-2: replace_text's and replace_fonts').
+void check_page_held(const Document& doc, std::size_t row, const Actor& actor);
+
 // Python's selops.resolve: an op's "area" of a kind beyond {poly} and {mask} (rect, ellipse, layer, color, all, saved,
 // union, intersect, subtract, invert, grow_mm, feather_mm) as the {poly} or {mask} the drawing ops take, on the page
 // at `page` of the book. Some kinds need the page or a layer drawn, so the resolver is render's (render::ops_registry).

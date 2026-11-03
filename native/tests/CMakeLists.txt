@@ -197,6 +197,14 @@ genko_test(test_type_styles SOURCES unit/test_type_styles.cpp DEPS genko_test_su
 # text's box), Basic Paragraph too; saved and read back; a book without styles as before; the window's words for the refusals.
 genko_test(test_contract_type_styles SOURCES contract/test_contract_type_styles.cpp DEPS genko_test_support genko_render_ops genko_formats
            genko_service LABELS contract TIMEOUT 600)
+# PC5 G-d (SPEC.md TEXT-02「スペルチェック」): the English dictionary (upstream spell.rs's tests), the words Genko reads, the
+# notation table, a book's lines and type layers checked.
+genko_test(test_spell SOURCES unit/test_spell.cpp DEPS genko_test_support genko_render_ops genko_service LABELS unit)
+# PC5 G-d (「書体の置き換え」「検索と置換」「縦組みの属性」): replace_fonts (a question, a map, all; styles, rubies, locked layers),
+# a face of a collection (face_index), replace_text's whole_word and type layers, the whole text's tracking, leading,
+# alignment and a range's 縦中横 down, a smart object's contents keyed by the book's font and text gamma.
+genko_test(test_contract_type_fonts SOURCES contract/test_contract_type_fonts.cpp DEPS genko_test_support genko_render_ops genko_formats
+           genko_service LABELS contract TIMEOUT 600)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
 # PC3 C-e (SPEC.md COLOR-07「判型」): the page size ops on a book in memory — each thing on a page where the map takes it,
@@ -962,6 +970,9 @@ if(GENKO_BUILD_APP)
   # text on it, the input method's words —, a type layer typed over (its text clicked, its row double-clicked), 書式's
   # commands (アンチエイリアス, 方向, the conversions, ラスタライズ, 更新, Lorem ipsum, a line and a type layer each other's)
   genko_test(test_gui_type SOURCES gui/test_gui_type.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  # PC5 G-d (SPEC.md TEXT-02): the 文字・段落・文字スタイル・段落スタイル・字形 panels on the text chosen and its range, 検索と置換…,
+  # スペルチェック…, the missing fonts, 環境設定 → テキスト, the names and Shift+T
+  genko_test(test_gui_type_panels SOURCES gui/test_gui_type_panels.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
 endif()
 
 # `genko` alone starts the desktop app when it is built (test_app_e2e); without it, it is a usage error

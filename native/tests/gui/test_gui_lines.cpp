@@ -44,6 +44,8 @@
 #include "app/main_window.hpp"
 #include "app/story_editor.hpp"
 #include "app/story_panel.hpp"
+#include "app/config.hpp"
+#include "app/type_panels.hpp"
 #include "app/text_style.hpp"
 #include "app/tiles.hpp"
 #include "app/tool_settings.hpp"
@@ -239,7 +241,8 @@ private slots:
     void commandsAsPythonsWindowHasThem() {
         Studio s;
         const std::vector<Expected> expected{
-            {"act_text", "テキスト", "T", "クリックした所に台詞を入力します（縦書き）", true, "ツール"},
+            // (PC5 G-d, 節 G 5.4: Photoshop's names — 縦書き文字ツール, 編集 → 検索と置換…)
+            {"act_text", "縦書き文字ツール", "T", "クリックした所に台詞を入力します（縦書き）", true, "ツール"},
             {"act_line_type", "台詞を入れる（テキストの道具）", "", "", false, "ページ/台詞"},
             {"act_balloon_pen", "フキダシを手で描く", "", "ドラッグで囲んだ形のフキダシに台詞を入れます", true, "ページ/台詞"},
             {"act_line_edit", "選んだ台詞をその場で直す", "F2", "", false, "ページ/台詞"},
@@ -247,8 +250,8 @@ private slots:
             {"act_line_wrap", "縦書き・横書きを切り替える", "", "", false, "ページ/台詞"},
             {"act_story_editor", "ストーリーエディター…", "",  // (PC5 H-0, the Photoshop key set: Ctrl+Shift+L is 自動トーン補正's)
              "全ページの台詞をまとめて直す・台本を流し込む", false, "ページ"},
-            {"act_replace", "台詞の検索・置換…", "",  // (Ctrl+Alt+F: フィルターの再実行)
-             "全ページの台詞から言葉を探して置き換えます", false, "ページ"},
+            {"act_replace", "検索と置換…", "",  // (Ctrl+Alt+F: フィルターの再実行)
+             "台詞とテキストレイヤーの文字を探して、次へ・1 か所ずつ・すべてを置き換えます", false, "編集"},
         };
         for (const Expected& e : expected) {
             QAction* a = s.window->action(QString::fromLatin1(e.attribute));
@@ -264,7 +267,7 @@ private slots:
         QCOMPARE(s.window->tool_actions().at(QStringLiteral("text")), text);
         QVERIFY(s.window->tools_group()->actions().contains(text));
         QVERIFY(!text->icon().isNull());
-        QCOMPARE(text->toolTip(), QStringLiteral("テキスト（T）\nクリックした所に台詞を入力します（縦書き）"));
+        QCOMPARE(text->toolTip(), QStringLiteral("縦書き文字ツール（T）\nクリックした所に台詞を入力します（縦書き）"));
         QToolBar* palette = s.window->findChild<QToolBar*>(QStringLiteral("tools"));
         QVERIFY(palette != nullptr);
         const auto tools = palette->actions();
@@ -294,7 +297,7 @@ private slots:
         QVERIFY(!dock->features().testFlag(QDockWidget::DockWidgetClosable));
         QVERIFY(s.window->tabifiedDockWidgets(dock).contains(s.window->findChild<QDockWidget*>(QStringLiteral("ページ"))));
         QVERIFY(s.panel().empty_note->isVisible() || !dock->isVisible());
-        QCOMPARE(s.panel().empty_note->text(), QStringLiteral("このページにはまだ台詞がありません。\nテキストの道具（T）で、置きたい所をクリックします"));
+        QCOMPARE(s.panel().empty_note->text(), QStringLiteral("このページにはまだ台詞がありません。\n縦書き文字ツール（T）で、置きたい所をクリックします"));
         // ツールの設定: the text tool's page (TextToolSettings), and the select tool's with the chosen line's lettering
         auto* settings = s.window->text_settings();
         QCOMPARE(s.window->tool_settings()->page_for(QStringLiteral("text")), static_cast<QWidget*>(settings));
@@ -726,27 +729,40 @@ private slots:
                                               {"style_runs", Json::array({Json::array({"する", Json{{"scale", 1.25}, {"rgb", Json::array({1, 2, 255})}, {"bold", true}}})})}}}));
         s.window->on_line_selected("P1", false);
         QCOMPARE(panel.text->toPlainText(), QStringLiteral("《《絶対》》に｜約束《やくそく》{太、#0102ff、×1.25|する}"));
-        // the lettering beside the tool: one edit_line with every field (Python's _style_changed)
+        // the lettering beside the tool: one edit_line with every field (Python's _style_changed) — PC5 G-d (8-5 (a)): but the
+        // face, size, tracking, rows' room, alignment, colour, weight, slant, width, 縦中横 and 約物の詰め, the 文字 and 段落
+        // panels' now (below)
         QVERIFY(panel.style_body->isVisibleTo(panel.style_box));
         QCOMPARE(panel.style_title->text(), QStringLiteral("選んだ台詞の文字とフキダシ: 「絶対に約束する」"));
-        QCOMPARE(panel.leading->value(), 0.4);
-        QVERIFY(panel.tcy->isChecked());
         QVERIFY(!panel.tail_width->isEnabled());
         QCOMPARE(panel.layer_order->itemText(0), QStringLiteral("いちばん上（既定）"));
         QCOMPARE(panel.layer_order->count(), static_cast<int>(s.page().layers.size()) + 1);
-        panel.size->setValue(6.5);
-        emit panel.size->editingFinished();
-        const Json style = Json::parse(R"({"size_mm": 6.5, "tracking": 0.0, "leading": 0.4, "outline_mm": null, "border_mm": 0.35, "align": "top",
-            "fill": "white", "tcy": true, "rotate_deg": null, "skew_deg": null, "arc": null, "latin": "rotate", "emphasis_mark": "sesame",
-            "weight": null, "bold": null, "italic": null, "wobble": null, "double": null, "spikes": null, "spike_depth": null, "scale_x": null,
-            "yakumono": null, "fill_opacity": null, "text_dx_mm": null, "text_dy_mm": null, "path_curve": null, "ruby_scale": null,
+        panel.outline->setValue(0.5);
+        emit panel.outline->editingFinished();
+        const Json style = Json::parse(R"({"outline_mm": 0.5, "border_mm": 0.35,
+            "fill": "white", "rotate_deg": null, "skew_deg": null, "arc": null, "latin": "rotate", "emphasis_mark": "sesame",
+            "wobble": null, "double": null, "spikes": null, "spike_depth": null,
+            "fill_opacity": null, "text_dx_mm": null, "text_dy_mm": null, "path_curve": null, "ruby_scale": null,
             "mono_ruby": null})");
         QCOMPARE(s.last().dump(), (Json{{"op", "edit_line"}, {"id", "P1"}, {"style", style}}).dump());
         QVERIFY(drawn_as_book(s));
-        // (the panel follows an edit a moment later, as Python's side panels)
-        QTRY_COMPARE(panel.size->value(), 6.5);
-        panel.weight->setCurrentIndex(2);
-        emit panel.weight->activated(2);
+        // PC5 G-d: the 文字 and 段落 panels — a line of before changed by its style's keys (edit_line style), drawn as before
+        app::settings()->setValue(QStringLiteral("units/type"), QStringLiteral("mm"));
+        s.window->action("act_panel_character")->trigger();
+        s.window->action("act_panel_paragraph")->trigger();
+        app::CharacterPanel& chars = *s.window->character_panel();
+        app::ParagraphPanel& paragraph = *s.window->paragraph_panel();
+        QTRY_VERIFY(chars.isEnabled());
+        QCOMPARE(chars.line_leading->value(), 0.4);
+        QVERIFY(chars.tcy->isChecked());
+        chars.size->setValue(6.5);
+        emit chars.size->editingFinished();  // (review P2-5: sent once its editing ends)
+        QCOMPARE(s.last().dump(), (Json{{"op", "edit_line"}, {"id", "P1"}, {"style", Json{{"size_mm", 6.5}}}}).dump());
+        QVERIFY(drawn_as_book(s));
+        // (the panel follows an edit, as Python's side panels)
+        QTRY_COMPARE(chars.size->value(), 6.5);
+        chars.weight->setCurrentIndex(2);
+        emit chars.weight->activated(2);
         QCOMPARE(s.last()["style"]["weight"], Json("heavy"));
         panel.fill_cover->setValue(40);
         emit panel.fill_cover->editingFinished();
@@ -754,22 +770,23 @@ private slots:
         panel.spikes->setValue(12);
         emit panel.spikes->editingFinished();
         QVERIFY(s.last()["style"]["spikes"].is_number_integer());
-        panel.yakumono->setChecked(false);
-        emit panel.yakumono->clicked(false);
+        paragraph.yakumono->setChecked(false);
+        emit paragraph.yakumono->clicked(false);
         QCOMPARE(s.last()["style"]["yakumono"], Json(false));
         // a face, a colour, a gradient, the layer it sits under
-        panel.font->setCurrentIndex(panel.font->findData(QStringLiteral("maru")));
-        emit panel.font->activated(panel.font->currentIndex());
+        chars.family->setCurrentIndex(chars.family->findData(QStringLiteral("maru")));
+        emit chars.family->activated(chars.family->currentIndex());
         QCOMPARE(s.last().dump(), (Json{{"op", "edit_line"}, {"id", "P1"}, {"style", Json{{"font", "maru"}}}}).dump());
         s.answers.responder->colour = [](const QColor&, const QString& title) {
             return std::optional<QColor>(title == QStringLiteral("フキダシの線の色") ? QColor(10, 20, 30) : QColor(200, 100, 50));
         };
         panel.line_colour->click();
         QCOMPARE(s.last().dump(), (Json{{"op", "edit_line"}, {"id", "P1"}, {"style", Json{{"line_rgb", Json::array({10, 20, 30})}}}}).dump());
-        panel.color->click();
+        chars.color->click();
         QCOMPARE(s.last()["style"], Json({{"rgb", Json::array({200, 100, 50})}}));
         panel.outline_colour->click();
-        QCOMPARE(s.last()["style"].dump(), (Json{{"outline_rgb", Json::array({200, 100, 50})}, {"outline_mm", 0.6}}).dump());
+        // (the line's own 白フチ, 0.5 above, kept: 0.6 only where it has none)
+        QCOMPARE(s.last()["style"].dump(), (Json{{"outline_rgb", Json::array({200, 100, 50})}, {"outline_mm", 0.5}}).dump());
         panel.gradient->click();
         QCOMPARE(s.last()["style"]["gradient"].dump(),
                  (Json{{"rgb_from", Json::array({200, 100, 50})}, {"rgb_to", Json::array({200, 100, 50})}, {"angle", 90}}).dump());
@@ -781,19 +798,9 @@ private slots:
         emit panel.layer_order->activated(1);
         QCOMPARE(s.last()["style"], Json({{"below_layer", s.page().layers.back().id}}));
         QVERIFY(drawn_as_book(s));
-        // the computer's fonts (fonts.json in the config folder, as Python keeps them)
-        {
-            std::ofstream(gui_test::path_of(s.config.path()) / "fonts.json")
-                << R"([{"name": "Test Mincho", "style": "Regular", "path": "/fonts/test-mincho.ttf"}])";
-        }
-        s.answers.responder->get_item = [](const QString& title, const QString&, const QStringList& items, int, bool) {
-            return title == QStringLiteral("パソコンの書体") && items == QStringList{QStringLiteral("Test Mincho Regular")} ? std::optional<QString>(items.front())
-                                                                                                                       : std::nullopt;
-        };
-        panel.font->setCurrentIndex(panel.font->findData(QStringLiteral("__pick__")));
-        emit panel.font->activated(panel.font->currentIndex());
-        QCOMPARE(s.last()["style"], Json({{"font", "/fonts/test-mincho.ttf"}}));
-        QTRY_COMPARE(panel.font->currentText(), QStringLiteral("test-mincho"));
+        // (a font file the line names: shown by its name)
+        s.window->apply_ops(Json::array({Json{{"op", "edit_line"}, {"id", "P1"}, {"style", Json{{"font", "/fonts/test-mincho.ttf"}}}}}));
+        QTRY_COMPARE(chars.family->currentText(), QStringLiteral("test-mincho"));
         // 既定の設定に戻す: every style key but the group, cleared
         panel.reset->click();
         QCOMPARE(s.last()["style"].size(), std::size_t{46});
@@ -1181,32 +1188,38 @@ private slots:
         QCOMPARE(panel.text_dy->value(), 1.5);     // (and the fields after it)
         QCOMPARE(panel.layer_order->count(), static_cast<int>(s.page().layers.size()) + 1);
         panel.line_colour->click();     // [255]: QColor(255), a QRgb
-        panel.color->click();           // [7]
         panel.outline_colour->click();  // [1, 2]: no colour of two numbers (Python's TypeError): the default
         panel.fill_colour->click();
-        QCOMPARE(offered, (QList<QColor>{QColor(0, 0, 255), QColor(0, 0, 7), QColor(255, 255, 255), QColor(1, 2, 3)}));
+        QCOMPARE(offered, (QList<QColor>{QColor(0, 0, 255), QColor(255, 255, 255), QColor(1, 2, 3)}));
+        // (PC5 G-d: the face's size and colour are the 文字 panel's — a colour that is not three numbers offers the default)
+        app::settings()->setValue(QStringLiteral("units/type"), QStringLiteral("mm"));
+        s.window->action("act_panel_character")->trigger();
+        app::CharacterPanel& chars = *s.window->character_panel();
+        offered.clear();
+        chars.color->click();  // [7]
+        QCOMPARE(offered, (QList<QColor>{QColor(10, 10, 10)}));
         const std::size_t count = s.ops.size();
-        panel.size->setValue(5.0);
-        emit panel.size->editingFinished();
+        chars.size->setValue(5.0);
+        emit chars.size->editingFinished();  // (review P2-5: sent once its editing ends)
         QCOMPARE(s.ops.size(), count + 1);
         QCOMPARE(s.last()["style"]["size_mm"], Json(5.0));
         // written by hand: what is not a number shows as the field's default, the rest as it is
         s.window->on_line_selected("HAND", false);
         QCOMPARE(panel.current_id(), std::optional<std::string>("HAND"));
-        QCOMPARE(panel.size->value(), 0.0);
-        QCOMPARE(panel.tracking->value(), 0.3);
+        QTRY_COMPARE(chars.size->value(), 0.0);
+        QCOMPARE(chars.tracking->value(), 300);
         QCOMPARE(panel.spikes->value(), 0);
         QCOMPARE(panel.outline->value(), 0.0);
         QCOMPARE(panel.border->value(), 0.35);
         QCOMPARE(panel.fill_cover->value(), 100);
         QCOMPARE(panel.text_dx->value(), 2.5);
         offered.clear();
-        panel.color->click();           // "red": Python's QColor(*"red") fails: the default
+        chars.color->click();           // "red": the default
         panel.outline_colour->click();  // [1]
         QCOMPARE(offered, (QList<QColor>{QColor(10, 10, 10), QColor(0, 0, 1)}));
         const std::size_t edits = s.ops.size();
-        panel.tracking->setValue(0.5);
-        emit panel.tracking->editingFinished();
+        chars.tracking->setValue(500);
+        emit chars.tracking->editingFinished();  // (review P2-5: sent once its editing ends)
         QCOMPARE(s.ops.size(), edits + 1);
         QCOMPARE(s.last()["id"], Json("HAND"));
         QCOMPARE(s.last()["style"]["tracking"], Json(0.5));

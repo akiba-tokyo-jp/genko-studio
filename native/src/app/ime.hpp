@@ -61,6 +61,10 @@ public:
     bool finished() const { return finished_; }
     const QString& preedit() const { return preedit_; }
     QLabel* hint() const { return hint_; }
+    // PC5 G-d (環境設定 → テキスト): straight quotes typed made typographic ones (スマート引用符を使用), Esc keeping what was
+    // typed (Esc キーを使用してテキストを確定; off: Esc lets it go, as before).
+    bool smart_quotes = false;
+    bool esc_commits = false;
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;

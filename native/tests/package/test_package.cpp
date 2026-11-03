@@ -221,6 +221,7 @@ private slots:
                                   "licenses/optimized-routines/LICENSE-MIT", "licenses/lucide/LICENSE", "licenses/photocraft/LICENSE-MIT",
                                   "licenses/photocraft/NOTICE.md", "licenses/blake3/LICENSE_CC0", "licenses/blake3/LICENSE_A2",
                                   "licenses/blake3/LICENSE_A2LLVM",  // (PC4 F-f: BLAKE3)
+                                  "licenses/scowl/LICENSE-SCOWL.txt",  // (PC5 G-d: SCOWL)
                                   "LIBRAW-LGPL-ja.md", "licenses/libraw/COPYRIGHT", "licenses/libraw/LICENSE.LGPL", "licenses/libraw/LICENSE.CDDL"}) {  // (PC4 F-e)
             QVERIFY2(QFileInfo(doc + QLatin1Char('/') + QString::fromLatin1(there)).size() > 0, there);
         }
@@ -274,7 +275,9 @@ private slots:
             // (PC4 F-e: camera RAW — LibRaw, and the JasPer inside its Windows DLL)
             {"libraw", QStringLiteral("| LibRaw")}, {"jasper", QStringLiteral("| JasPer")},
             // (PC5 G-b: right-to-left text set across)
-            {"sheenbidi", QStringLiteral("| SheenBidi")}};
+            {"sheenbidi", QStringLiteral("| SheenBidi")},
+            // (PC5 G-d: the spelling check's English word list)
+            {"scowl", QStringLiteral("| SCOWL")}};
         std::set<std::string> listed;
         std::map<std::string, std::string> relation;
         for (const Json& r : sbom["relationships"]) {

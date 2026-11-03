@@ -56,6 +56,7 @@ genko_library(genko_app
     guide_dialogs.cpp
     view_units.cpp
     preferences_units.cpp
+    preferences_type.cpp
     main_window_arrange.cpp
     doc_area.cpp
     pane_view.cpp
@@ -208,6 +209,9 @@ genko_library(genko_app
     main_window_automate.cpp
     # PC5 G-0 (書式 メニュー)
     main_window_type.cpp
+    main_window_type_panels.cpp
+    type_panels.cpp
+    type_dialogs.cpp
     # PC5 J-0: the production's frames (解析 ▸, ビデオレイヤー ▸, its panels)
     main_window_production.cpp
     # PC5 J-a (layer-comps@1: ウィンドウ → レイヤーカンプ, レイヤーカンプからファイル…)

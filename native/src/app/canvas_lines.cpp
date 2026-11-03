@@ -490,6 +490,7 @@ InlineEditor* PageCanvas::open_editor(double x_mm, double y_mm, const QString& t
     auto* editor = new InlineEditor(this, text, std::move(on_done));
     editor_ = editor;
     editor->place(std::max(0.0, std::min(width() - 260.0, p.x())), std::max(20.0, std::min(height() - 110.0, p.y())));
+    emit editorOpened(editor);  // (PC5 G-d)
     return editor;
 }
 
