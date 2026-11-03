@@ -2,7 +2,10 @@
 
 #include <array>
 #include <cstddef>
+#include <functional>
 #include <vector>
+
+#include "core/error.hpp"
 
 #include "render/codecs/image.hpp"
 
@@ -33,10 +36,18 @@ struct FoundPhoto {
 // The photos on a scan of any layout and sample (grey, RGB, CMYK; with or without an alpha — a clear pixel taken as
 // white), in reading order (rows by the centre's height, in bands of a third of the smallest photo, then left to right).
 // None on a scan smaller than 8 px a side or one of a uniform colour.
-std::vector<FoundPhoto> find_photos(const codecs::CodecImage& scan);
+// render::Cancelled when `stopped` says so (asked between rows).
+std::vector<FoundPhoto> find_photos(const codecs::CodecImage& scan, const std::function<bool()>& stopped = {});
+
+// A photo whose corners cannot be mapped (a degenerate rectangle): cut_photo's refusal of that one.
+class Unmappable : public core::Error {
+public:
+    Unmappable() : core::Error("value", "the photo's corners cannot be mapped") {}
+};
 
 // The photo cut out of the scan upright: `width` × `height` (rounded) of the scan's layout, sample, profile and
-// resolution, opaque; interpolated bicubically (a 32-bit scan's values past 1 kept).
+// resolution, opaque; interpolated bicubically (a 32-bit scan's values past 1 kept). Its floats held in the imaging budget
+// (image_ops::Held). Unmappable for a photo whose corners cannot be mapped.
 codecs::CodecImage cut_photo(const codecs::CodecImage& scan, const FoundPhoto& photo);
 
 }  // namespace genko::render::scancrop

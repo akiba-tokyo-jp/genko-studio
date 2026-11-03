@@ -10,6 +10,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QPointer>
 #include <QProgressDialog>
 #include <QSpinBox>
 #include <QEventLoop>
@@ -33,6 +34,7 @@
 #include "app/main_window.hpp"
 #include "app/open_dialog.hpp"
 #include "app/session.hpp"
+#include "app/stoppable.hpp"
 #include "core/paths.hpp"
 #include "core/actor.hpp"
 #include "service/automate.hpp"
@@ -489,50 +491,7 @@ void MainWindow::script_event(service::script_events::Event event) {
 
 
 // --- PC5 I-h: HDR Pro に統合…・写真の切り抜きと角度補正 --------------------------------------------------------------------------
-
-namespace {
-
-// Work on a worker while a progress window says `label`: the window goes on drawing itself (the person's input held by the
-// modal progress window), 中止 asks the work to stop (`stopped` true: it throws render::Cancelled). Its result — none when
-// it was stopped — or the exception it threw, as if it had run here.
-template <class Work>
-auto stoppable(QWidget* parent, const QString& title, const QString& label, Work work)
-    -> std::optional<std::invoke_result_t<Work&, const std::function<bool()>&>> {
-    using Result = std::invoke_result_t<Work&, const std::function<bool()>&>;
-    std::atomic<bool> stop{false};
-    const std::function<bool()> stopped = [&stop] { return stop.load(); };
-    std::optional<Result> result;
-    std::exception_ptr error;
-    QProgressDialog progress(label, QStringLiteral("中止"), 0, 0, parent);
-    progress.setWindowTitle(title);
-    progress.setWindowModality(Qt::WindowModal);
-    progress.setMinimumDuration(300);
-    QEventLoop loop;
-    QFutureWatcher<void> watcher;
-    QObject::connect(&watcher, &QFutureWatcher<void>::finished, &loop, &QEventLoop::quit);
-    QObject::connect(&progress, &QProgressDialog::canceled, &progress, [&stop] { stop = true; });
-    watcher.setFuture(QtConcurrent::run([&] {
-        try {
-            result.emplace(work(stopped));
-        } catch (...) {
-            error = std::current_exception();
-        }
-    }));
-    if (!watcher.isFinished()) loop.exec();
-    watcher.waitForFinished();
-    progress.reset();
-    if (error) {
-        try {
-            std::rethrow_exception(error);
-        } catch (const render::Cancelled&) {
-            return std::nullopt;
-        }
-    }
-    if (stop) return std::nullopt;
-    return result;
-}
-
-}  // namespace
+// (the work on a worker with its progress window and 中止: app/stoppable.hpp's run_stoppable — the review's P2-4)
 
 void MainWindow::crop_photos() {
     const core::Page* page = current_page();
@@ -545,17 +504,22 @@ void MainWindow::crop_photos() {
     const std::optional<std::size_t> index = shown_page_at(now, page);
     if (!index) return;
     const QString title = QStringLiteral("写真の切り抜きと角度補正");
+    const QPointer<MainWindow> alive(this);
     std::optional<std::vector<formats::Opened>> made;
     try {
         const formats::OpenOptions options = file_open_options();
-        made = stoppable(this, title, QStringLiteral("写真を探しています…"), [now, at = *index, options](const std::function<bool()>&) {
-            return service::automate::crop_and_straighten(*now, at, options);
+        made = run_stoppable(this, title, QStringLiteral("写真を探しています…"), [now, at = *index, options](const std::function<bool()>& stopped) {
+            return service::automate::crop_and_straighten(*now, at, options, nullptr, stopped);
         });
     } catch (const std::exception& error) {
-        flash(QStringLiteral("%1: %2").arg(title, wording::error(QString::fromUtf8(error.what()))), 8000, true);
+        if (alive) flash(QStringLiteral("%1: %2").arg(title, wording::error(QString::fromUtf8(error.what()))), 8000, true);
         return;
     }
-    if (!made) return;
+    if (!alive) return;
+    if (!made) {
+        flash(QStringLiteral("%1を中止しました").arg(title), 4000);
+        return;
+    }
     if (made->empty()) {
         flash(QStringLiteral("%1: 一様な背景の上に写真が見つかりませんでした").arg(title), 6000, true);
         return;
@@ -573,32 +537,26 @@ void MainWindow::merge_to_hdr_dialog() {
     HdrFilesDialog chosen(this, open);
     if (ask::exec(&chosen) != QDialog::Accepted) return;
     // (what to read, in order: a file, or a book open here — its page shown, as it is now)
-    struct Source {
-        std::optional<fs::path> file;
-        std::shared_ptr<const core::Document> book;
-        std::size_t page = 0;
-        std::string name;
-    };
-    std::vector<Source> sources;
+    std::vector<automate::HdrSource> sources;
     try {
         if (chosen.use->currentData().toString() == QLatin1String("folder")) {
             const automate::Inputs inputs =
                 automate::list_inputs({core::path_from_utf8(QDir::fromNativeSeparators(chosen.folder->text().trimmed()).toStdString())});
             for (const automate::Input& input : inputs.items) {
-                if (!input.book) sources.push_back(Source{input.path, nullptr, 0, core::path_to_utf8(input.path.filename())});
+                if (!input.book) sources.push_back(automate::HdrSource{input.path, nullptr, 0, core::path_to_utf8(input.path.filename())});
             }
         } else {
             for (int i = 0; i < chosen.files->count(); ++i) {
                 const QString data = chosen.files->item(i)->data(Qt::UserRole).toString();
                 if (data.startsWith(QLatin1String("file:"))) {
                     const fs::path file = core::path_from_utf8(data.mid(5).toStdString());
-                    sources.push_back(Source{file, nullptr, 0, core::path_to_utf8(file.filename())});
+                    sources.push_back(automate::HdrSource{file, nullptr, 0, core::path_to_utf8(file.filename())});
                     continue;
                 }
                 const int tab = data.mid(5).toInt();
                 if (tab < 0 || tab >= static_cast<int>(documents_.size())) continue;
                 const Document& d = documents_[static_cast<std::size_t>(tab)];
-                Source s;
+                automate::HdrSource s;
                 s.book = d.session->snapshot();
                 s.name = d.title().toStdString();
                 if (d.session == session_ && current_page() != nullptr) {
@@ -619,36 +577,35 @@ void MainWindow::merge_to_hdr_dialog() {
     }
     const bool align = chosen.align->isChecked();
     const formats::OpenOptions options = file_open_options();
-    // (the exposures read on a worker, then made small for the window's preview)
+    const QPointer<MainWindow> alive(this);
+    // (read on a worker as the command line reads them — planned from the headers before anything is decoded, then one by
+    // one within the budget: service::automate::hdr_read, the review's P1-1 —, then made small for the window's preview)
     using Read = std::pair<std::vector<render::hdr::Shot>, std::vector<render::hdr::Shot>>;
-    struct Unread {
-        QString said;
+    const auto said = [](const std::exception& error) {
+        if (const auto* one = dynamic_cast<const automate::HdrReadError*>(&error))
+            return QStringLiteral("%1: %2").arg(QString::fromStdString(one->name), wording::error(QString::fromUtf8(one->reason.c_str())));
+        return wording::error(QString::fromUtf8(error.what()));
     };
     std::optional<Read> read;
     try {
-        read = stoppable(this, title, QStringLiteral("画像を読み込んでいます…"), [&sources, options](const std::function<bool()>& stopped) {
+        read = run_stoppable(this, title, QStringLiteral("画像を読み込んでいます…"), [sources, options](const std::function<bool()>& stopped) {
             Read out;
-            for (const Source& s : sources) {
+            out.first = automate::hdr_read(sources, options, stopped);
+            for (const render::hdr::Shot& shot : out.first) {
                 if (stopped()) throw render::Cancelled();
-                try {
-                    out.first.push_back(s.file ? automate::hdr_shot_file(*s.file, options, stopped) : automate::hdr_shot_of(*s.book, s.page, s.name));
-                } catch (const core::Error& error) {
-                    // (which one could not be read, in the window's words)
-                    throw Unread{QStringLiteral("%1: %2").arg(QString::fromStdString(s.name), wording::error(QString::fromUtf8(error.what())))};
-                }
+                out.second.push_back(render::hdr::reduced(shot, 480));
             }
-            automate::check_shots(out.first);
-            for (const render::hdr::Shot& shot : out.first) out.second.push_back(render::hdr::reduced(shot, 480));
             return out;
         });
-    } catch (const Unread& unread) {
-        flash(QStringLiteral("%1: %2").arg(title, unread.said), 8000, true);
-        return;
     } catch (const std::exception& error) {
-        flash(QStringLiteral("%1: %2").arg(title, wording::error(QString::fromUtf8(error.what()))), 8000, true);
+        if (alive) flash(QStringLiteral("%1: %2").arg(title, said(error)), 8000, true);
         return;
     }
-    if (!read) return;
+    if (!alive) return;
+    if (!read) {
+        flash(QStringLiteral("%1を中止しました").arg(title), 4000);
+        return;
+    }
     HdrDialog dialog(this, std::move(read->second), align);
     if (ask::exec(&dialog) != QDialog::Accepted) return;
     automate::HdrSettings settings;
@@ -661,13 +618,15 @@ void MainWindow::merge_to_hdr_dialog() {
     settings.title = "HDR";
     std::optional<automate::HdrMade> made;
     try {
-        made = stoppable(this, title, QStringLiteral("HDR Pro に統合しています…"), [&read, &settings](const std::function<bool()>& stopped) {
-            return automate::merge_to_hdr(std::move(read->first), settings, stopped);
+        auto shots = std::make_shared<std::vector<render::hdr::Shot>>(std::move(read->first));
+        made = run_stoppable(this, title, QStringLiteral("HDR Pro に統合しています…"), [shots, settings](const std::function<bool()>& stopped) {
+            return automate::merge_to_hdr(std::move(*shots), settings, stopped);
         });
     } catch (const std::exception& error) {
-        flash(QStringLiteral("%1: %2").arg(title, wording::error(QString::fromUtf8(error.what()))), 8000, true);
+        if (alive) flash(QStringLiteral("%1: %2").arg(title, wording::error(QString::fromUtf8(error.what()))), 8000, true);
         return;
     }
+    if (!alive) return;
     if (!made) {
         flash(QStringLiteral("%1を中止しました").arg(title), 4000);
         return;

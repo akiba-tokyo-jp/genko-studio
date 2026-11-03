@@ -3285,6 +3285,7 @@ int hdr_command(const QStringList& args, bool ascii) {
             bool ok = false;
             const double v = part.trimmed().toDouble(&ok);
             if (!ok || !std::isfinite(v)) return usage(where + "argument --ev: numbers (one EV a picture) separated by commas");
+            if (std::abs(v) > 30) return usage(where + "argument --ev: each within -30..30");  // (before anything is read: the review's P3-3)
             ev.push_back(v);
         }
         settings.ev = std::move(ev);
@@ -3345,7 +3346,9 @@ int crop_photos_command(const QStringList& args, bool ascii) {
     if (auto error = parse_arguments(args, kOptions, 1, "scan", a)) return usage("genko automate crop-photos: " + *error);
     const std::string where = "genko automate crop-photos: ";
     if (!a.value("--out")) return usage(where + "give --out <a folder for the books>");
-    const fs::path scan = path_arg(a.positional[0]);
+    // (a book's folder given with a / at its end: its name all the same — the review's P3-6)
+    fs::path scan = path_arg(a.positional[0]).lexically_normal();
+    if (scan.has_parent_path() && scan.filename().empty()) scan = scan.parent_path();
     std::int64_t page_number = 1;
     if (const auto p = a.value("--page")) {
         const auto n = int_option(*p);
@@ -3390,8 +3393,9 @@ int crop_photos_command(const QStringList& args, bool ascii) {
         for (const Json& f : files) write_text(f.get<std::string>() + "\n", stdout);
         return 0;
     }
-    print_json(Json{{"ok", true}, {"files", std::move(files)}, {"errors", Json::array()}, {"notes", std::move(notes)}, {"photos", report.value("photos", Json::array())}},
-               ascii);
+    Json reply{{"ok", true}, {"files", std::move(files)}, {"errors", Json::array()}, {"notes", std::move(notes)}, {"photos", report.value("photos", Json::array())}};
+    if (report.contains("skipped")) reply["skipped"] = report["skipped"];
+    print_json(reply, ascii);
     return 0;
 }
 

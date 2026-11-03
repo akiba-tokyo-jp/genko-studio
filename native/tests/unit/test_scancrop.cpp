@@ -17,6 +17,8 @@
 #include "formats/open_file.hpp"
 #include "formats/page_picture.hpp"
 #include "render/codecs/codecs.hpp"
+#include "render/codecs/limits.hpp"
+#include "render/page.hpp"
 #include "render/scancrop.hpp"
 #include "service/automate_photos.hpp"
 
@@ -179,6 +181,24 @@ private slots:
         const formats::Opened crowded = formats::picture_book(codecs::CodecImage::from_normalized(1400, 1000, codecs::Layout::Rgb, codecs::Sample::U8, scan(1400, 1000, many)), "多い");
         QVERIFY(many.size() > service::automate::kMaxPhotos);
         QVERIFY_THROWS_EXCEPTION(core::Error, service::automate::crop_and_straighten(crowded.doc, 0, {}));
+    }
+
+    // The review's P2-2, P3-5, P2-5: what cutting the photos out holds is seen before any is cut (past the budget:
+    // image_too_large); a photo whose corners cannot be mapped is that one's refusal (the service leaves it out); a stop
+    // stops it.
+    void theCutsAreCountedAndStopped() {
+        const codecs::CodecImage lid = codecs::CodecImage::blank(100, 100, codecs::Layout::Rgb, codecs::Sample::U16);
+        const std::uint64_t small = service::automate::crop_work_bytes(lid, {photo(50, 50, 40, 30, 5)});
+        QVERIFY(small > lid.data().size() && small < 1u << 20);
+        // (a 16-bit scan of 8000 × 8000 px wholly one photo, as the books it makes are counted)
+        const std::vector<scancrop::FoundPhoto> whole{photo(4000, 4000, 7990, 7990, 0)};
+        QVERIFY(service::automate::crop_work_bytes(lid, whole) > codecs::kAllocBudget);
+        scancrop::FoundPhoto flat = photo(50, 50, 0, 0, 0);
+        QVERIFY_THROWS_EXCEPTION(scancrop::Unmappable, scancrop::cut_photo(lid, flat));
+        const std::size_t w = 600, h = 440;
+        const formats::Opened opened = formats::picture_book(codecs::CodecImage::from_normalized(w, h, codecs::Layout::Rgb, codecs::Sample::U8, scan(w, h, kTruth)), "s");
+        QVERIFY_THROWS_EXCEPTION(render::Cancelled, service::automate::crop_and_straighten(opened.doc, 0, {}, nullptr, [] { return true; }));
+        QVERIFY_THROWS_EXCEPTION(render::Cancelled, scancrop::find_photos(codecs::CodecImage::blank(100, 100, codecs::Layout::Rgb, codecs::Sample::U8), [] { return true; }));
     }
 };
 

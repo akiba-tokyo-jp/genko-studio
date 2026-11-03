@@ -11,6 +11,8 @@
 #include <utility>
 
 #include "core/error.hpp"
+#include "render/image_ops.hpp"
+#include "render/page.hpp"
 #include "render/resample.hpp"
 
 namespace genko::render::scancrop {
@@ -163,7 +165,7 @@ std::array<std::array<double, 2>, 4> FoundPhoto::corners() const {
     return out;
 }
 
-std::vector<FoundPhoto> find_photos(const codecs::CodecImage& scan) {
+std::vector<FoundPhoto> find_photos(const codecs::CodecImage& scan, const std::function<bool()>& stopped) {
     const std::size_t w = scan.width(), h = scan.height();
     if (w < 8 || h < 8) return {};
     // (worked on at most 800 px a side)
@@ -172,6 +174,7 @@ std::vector<FoundPhoto> find_photos(const codecs::CodecImage& scan) {
     std::vector<std::array<float, 3>> small(sw * sh, {0, 0, 0});
     std::vector<std::uint32_t> cnt(sw * sh, 0);
     for (std::size_t y = 0; y < h; ++y) {
+        if (y % 64 == 0 && stopped && stopped()) throw Cancelled();
         for (std::size_t x = 0; x < w; ++x) {
             const std::size_t i = (y / k) * sw + x / k;
             const auto p = rgb_at(scan, y * w + x);
@@ -290,6 +293,7 @@ codecs::CodecImage cut_photo(const codecs::CodecImage& scan, const FoundPhoto& p
     const auto bw = static_cast<std::uint32_t>(std::max<std::int64_t>(ex - bx, 1)), bh = static_cast<std::uint32_t>(std::max<std::int64_t>(ey - by, 1));
     const codecs::CodecImage part = scan.crop(static_cast<std::uint32_t>(bx), static_cast<std::uint32_t>(by), bw, bh);
     const auto n = static_cast<int>(codecs::channels(scan.layout()));
+    const image_ops::Held held((std::uint64_t(bw) * bh + std::uint64_t(pw) * std::uint64_t(ph)) * std::uint64_t(n) * sizeof(float));
     resample::Plane plane(static_cast<int>(bw), static_cast<int>(bh), n, false);
     plane.hdr = codecs::is_float(scan.sample());
     plane.v = part.normalized();
@@ -298,7 +302,7 @@ codecs::CodecImage cut_photo(const codecs::CodecImage& scan, const FoundPhoto& p
     for (std::size_t i = 0; i < 4; ++i) quad[i] = {corners[i][0] - static_cast<double>(bx), corners[i][1] - static_cast<double>(by)};
     const auto to_part = resample::Homography::rect_to_quad({0.0, 0.0, static_cast<double>(pw), static_cast<double>(ph)}, quad);
     const auto to_photo = to_part ? to_part->inverse() : std::nullopt;
-    if (!to_photo) throw core::Error("value", "the photo's corners cannot be mapped");
+    if (!to_photo) throw Unmappable();
     resample::Plane cut = resample::project(plane, *to_photo, pw, ph, resample::Interp::Bicubic);
     // (opaque, as a scanned print)
     if (codecs::has_alpha(scan.layout())) {

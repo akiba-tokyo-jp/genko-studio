@@ -23,6 +23,7 @@
 #include "formats/page_picture.hpp"
 #include "raw_testgen.hpp"
 #include "render/codecs/codecs.hpp"
+#include "render/raw.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/reader.hpp"
 #include "testsupport.hpp"
@@ -251,11 +252,33 @@ private slots:
                                          QStringList{q(root / "a.png"), q(root / "b.png"), QStringLiteral("--book"), q(root / "x"), QStringLiteral("--method"),
                                                      QStringLiteral("local_adaptation")},  // (a method for 32 bits)
                                          QStringList{q(root / "a.png"), q(root / "b.png"), QStringLiteral("--book"), q(root / "x"), QStringLiteral("--ev"), QStringLiteral("0")},
-                                         QStringList{q(root / "a.png"), q(root / "b.png"), QStringLiteral("--book"), q(root / "x"), QStringLiteral("--ghost-base"), QStringLiteral("1")}}) {
+                                         QStringList{q(root / "a.png"), q(root / "b.png"), QStringLiteral("--book"), q(root / "x"), QStringLiteral("--ghost-base"), QStringLiteral("1")},
+                                         QStringList{q(root / "a.png"), q(root / "b.png"), QStringLiteral("--book"), q(root / "x"), QStringLiteral("--ev"), QStringLiteral("0,40")}}) {
             const test::Run r = test::run_genko(QStringList{QStringLiteral("automate"), QStringLiteral("hdr")} + usage);
             QVERIFY2(r.exit_code == 2, qPrintable(r.described()));
         }
         QVERIFY(!fs::exists(root / "x"));
+        // (the review's P1-1, P2-1: too much to hold, seen from the headers before anything is decoded — these are headers
+        // with no pixels, which decoding would call broken)
+        QStringList big;
+        for (int i = 0; i < 8; ++i) {
+            const fs::path file = root / ("big" + std::to_string(i) + ".ppm");
+            write(file, "P6\n6000 6000\n255\n");
+            big << q(file);
+        }
+        const auto [big_code, big_out] = run(big + QStringList{QStringLiteral("--book"), q(root / "x")});
+        QCOMPARE(big_code, 1);
+        QCOMPARE(big_out["code"].get<std::string>(), std::string("image_too_large"));
+        QVERIFY(!fs::exists(root / "x"));
+        // (a camera RAW file's linear development counted at its 18 bytes a pixel: refused past what it is given)
+        render::raw::Options tight;
+        tight.limits.max_alloc = 100000;  // (LibRaw's stage fits — 16 bytes a pixel —, the linear one's 18 do not)
+        try {
+            render::raw::develop_linear(raw_shot(1.0f), tight);
+            QFAIL("developed");
+        } catch (const core::Error& error) {
+            QCOMPARE(error.code(), std::string("image_too_large"));
+        }
     }
 
     void cropPhotosWritesABookOfEachPhoto() {

@@ -56,7 +56,7 @@ public:
     std::uint32_t height() const { return picture_.height(); }
     bool linear() const { return picture_.sample() == codecs::Sample::F32; }
     const codecs::CodecImage& picture() const { return picture_; }
-    // The level each channel of its linear values clips at (the largest it holds; 1 for a picture of display values).
+    // The level each channel of its linear values clips at (its 99.9th percentile; 1 for a picture of display values).
     float white(int c) const { return white_[static_cast<std::size_t>(c)]; }
     // Channel c of the pixel (x, y) as held (display values 0..1, or linear light), its alignment applied.
     float value(std::int64_t x, std::int64_t y, int c) const;
@@ -85,7 +85,7 @@ Shot reduced(const Shot& shot, int max_side);
 // --- the steps (each as hdr.rs) ----------------------------------------------------------------------------------------
 
 // Relative exposures (linear factors, the darkest 1) estimated from the shots themselves.
-std::vector<double> estimate_exposures(const std::vector<const Shot*>& shots);
+std::vector<double> estimate_exposures(const std::vector<const Shot*>& shots, const std::function<bool()>& stopped = {});
 // The translation (dx, dy) that aligns the grey picture `img` to `reference` (Ward's MTB), up to 2^levels px.
 std::pair<int, int> mtb_offset(std::size_t w, std::size_t h, const std::vector<float>& reference, const std::vector<float>& img, int levels);
 // The shots aligned to the middle exposure (by `exposures`) on a grey copy made at most 1536 px a side: each one's dx, dy.
@@ -113,7 +113,8 @@ struct Merged {
     double stops = 0;           // dynamic range (1st..99.9th percentile of the luminance)
 };
 
-// The aligned shots (all of one size, all of display values or all linear) merged. Its memory (the result, the ghosts'
+// The aligned shots (all of one size, all of display values or all linear) merged. Exposures all alike (no response can be
+// recovered from them) take sRGB's curve; light past what a float holds is refused (core::Error("value")). Its memory (the result, the ghosts'
 // mask) is held in the imaging budget while it is made (image_ops::Held: refused past it).
 Merged merge(const std::vector<Shot>& shots, const MergeOptions& options);
 
@@ -132,6 +133,6 @@ std::optional<Tone::Method> method_from(std::string_view text);
 const char* method_name(Tone::Method method);
 
 // Linear radiance tone mapped to display values (sRGB's curve) in 0..1, in place.
-void tone_map(std::vector<Rgba>& px, std::size_t w, std::size_t h, const Tone& tone);
+void tone_map(std::vector<Rgba>& px, std::size_t w, std::size_t h, const Tone& tone, const std::function<bool()>& stopped = {});
 
 }  // namespace genko::render::hdr

@@ -634,6 +634,12 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the toning (\S+) has no setting (\S+))", "このトーンの方法には \\2 の設定はありません"));
         r.push_back(rule(R"(the toning's (\S+) is a number)", "トーンの設定の \\1 は数です"));
         r.push_back(rule(R"(no exposure to merge)", "統合する画像がありません"));
+        r.push_back(rule(R"(the EV of (.*) is not a number within -30\.\.30)", "\\1 の EV は −30〜30 の数にしてください"));
+        r.push_back(rule(R"(the exposures hardly differ \((.*) EV from the darkest to the brightest\): .*)",
+                         "画像の露出がほとんど違いません（いちばん暗い画像から明るい画像まで \\1 EV）。露出の違う画像を選んでください"));
+        r.push_back(rule(R"(the merged light is past what a float holds .*)", "合成した明るさが大きすぎます（画像の値か EV が範囲の外です）"));
+        r.push_back(rule(R"(the photos are too large to cut out at once \(about (\d+) MiB of work; at most (\d+) MiB\))",
+                         "写真が大きすぎて一度に切り抜けません（作業に約 \\1 MiB。\\2 MiB まで）"));
         r.push_back(rule(R"(too many photos on the scan \((\d+); at most (\d+)\))", "写真が多すぎます（\\1 枚。\\2 枚まで）。スキャンを分けてください"));
         r.push_back(rule(R"(no photos found on a uniform background)", "一様な背景の上に写真が見つかりませんでした"));
         r.push_back(rule(R"(the photo's corners cannot be mapped)", "写真の角を求められませんでした"));

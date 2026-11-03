@@ -6,10 +6,14 @@
 // merge made a book of one page (32 bits: linear light in linear-srgb; 16, 8: tone mapped in sRGB), the exposures' EV
 // from the cameras' EXIF, the settings it refuses, the work's memory past the budget refused before it is made, a stop.
 
+#include <QTemporaryDir>
 #include <QtTest>
 
 #include <array>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -17,6 +21,7 @@
 #include "core/error.hpp"
 #include "core/exif.hpp"
 #include "core/json.hpp"
+#include "core/model.hpp"
 #include "formats/open_file.hpp"
 #include "formats/page_picture.hpp"
 #include "render/codecs/codecs.hpp"
@@ -317,6 +322,110 @@ private slots:
     }
 
     // 中止: the merge stops between rows (render::Cancelled), nothing made.
+    // The review's P1-1, P2-1: the reading planned from the headers — a set too big for the budget, or a picture past the
+    // limits, refused before any is decoded (these files are headers only: decoding one would say "format"); the open
+    // books' pages planned by their sizes the same; pictures of other sizes refused naming the one.
+    void theReadingIsPlannedBeforeAnythingIsDecoded() {
+        QTemporaryDir dir;
+        const auto file = [&](const std::string& name, int w, int h) {
+            const std::filesystem::path p = std::filesystem::path(dir.path().toStdString()) / name;
+            std::ofstream(p, std::ios::binary) << "P6\n" << w << " " << h << "\n255\n";  // (a header and no pixels)
+            return p;
+        };
+        std::vector<automate::HdrSource> big;
+        for (int i = 0; i < 8; ++i) big.push_back(automate::HdrSource{file("b" + std::to_string(i) + ".ppm", 6000, 6000), nullptr, 0, "b"});
+        const auto code_of = [](auto&& work) {
+            try {
+                work();
+            } catch (const core::Error& error) {
+                return error.code();
+            }
+            return std::string("none");
+        };
+        QCOMPARE(code_of([&] { automate::hdr_plan(big, {}); }), std::string("image_too_large"));
+        QCOMPARE(code_of([&] { automate::hdr_read(big, {}); }), std::string("image_too_large"));
+        std::vector<std::filesystem::path> paths;
+        for (const auto& s : big) paths.push_back(*s.file);
+        QCOMPARE(code_of([&] { automate::hdr_shots(paths, {}); }), std::string("image_too_large"));
+        // (one past the limits of 開く…)
+        const std::vector<automate::HdrSource> huge{{file("h0.ppm", 20000, 20000), nullptr, 0, "h0"}, {file("h1.ppm", 20000, 20000), nullptr, 0, "h1"}};
+        QCOMPARE(code_of([&] { automate::hdr_plan(huge, {}); }), std::string("image_too_large"));
+        // (a small set: planned, then its first file read — and refused as what it is: a header with no pixels)
+        const std::vector<automate::HdrSource> small{{file("s0.ppm", 40, 20), nullptr, 0, "s0"}, {file("s1.ppm", 40, 20), nullptr, 0, "s1"}};
+        const automate::HdrPlan plan = automate::hdr_plan(small, {});
+        QCOMPARE(plan.width, 40u);
+        QCOMPARE(plan.held, std::uint64_t(2 * 40 * 20 * 6));
+        try {
+            automate::hdr_read(small, {});
+            QFAIL("read");
+        } catch (const automate::HdrReadError& error) {
+            QCOMPARE(error.name, std::string("s0"));
+            QVERIFY2(error.code() != "image_too_large", error.what());  // (read, and found to be no picture)
+        }
+        // (sizes that differ: refused naming the one, before any is decoded)
+        const std::vector<automate::HdrSource> mixed{{file("m0.ppm", 40, 20), nullptr, 0, "m0"}, {file("m1.ppm", 30, 20), nullptr, 0, "m1"}};
+        try {
+            automate::hdr_plan(mixed, {});
+            QFAIL("planned");
+        } catch (const automate::HdrReadError& error) {
+            QCOMPARE(error.name, std::string("m1"));
+        }
+        // (a book's pages by their size and depth: 16 of B4 at 600 dpi, nothing drawn)
+        core::PageSpec spec = core::PageSpec::b4_comic();
+        spec.dpi = core::Num(600);
+        auto book = std::make_shared<const core::Document>(core::new_episode("t", core::Num(1), 1, spec));
+        std::vector<automate::HdrSource> pages;
+        for (int i = 0; i < 16; ++i) pages.push_back(automate::HdrSource{std::nullopt, book, 0, "p"});
+        QCOMPARE(code_of([&] { automate::hdr_plan(pages, {}); }), std::string("image_too_large"));
+    }
+
+    // The review's P2-3: pictures whose exposures hardly differ are refused saying why (no response recovered from them);
+    // merged as they are, the curve is sRGB's and nothing is inf or NaN.
+    void exposuresThatHardlyDifferAreRefused() {
+        const std::size_t w = 64, h = 24;
+        const auto sc = scene(w, h);
+        const auto refused = [](auto&& work) {
+            try {
+                work();
+            } catch (const core::Error& error) {
+                return std::string(error.what()).find("hardly differ") != std::string::npos;
+            }
+            return false;
+        };
+        QVERIFY(refused([&] { automate::merge_to_hdr({shoot(sc, w, h, 1.0f, codecs::Sample::U8, 0.01), shoot(sc, w, h, 1.0f, codecs::Sample::U8, 0.01)}, {}); }));
+        QVERIFY(refused([&] { automate::merge_to_hdr({shoot(sc, w, h, 1.0f), shoot(sc, w, h, 1.0f)}, {}); }));  // (the same picture twice)
+        automate::HdrSettings given;
+        given.ev = std::vector<double>{1, 1.2};
+        QVERIFY(refused([&] { automate::merge_to_hdr({shoot(sc, w, h, 1.0f), shoot(sc, w, h, 4.0f)}, given); }));
+        hdr::MergeOptions same;
+        same.exposures = {1.0, 1.0};
+        const hdr::Merged m = hdr::merge({shoot(sc, w, h, 1.0f), shoot(sc, w, h, 1.0f)}, same);
+        for (const float v : m.rgb) QVERIFY(std::isfinite(v));
+        // (linear light past what a float holds: refused, never inf)
+        std::string bytes(std::size_t(w) * h * 3 * sizeof(float), '\0');
+        auto* f = reinterpret_cast<float*>(bytes.data());
+        for (std::size_t i = 0; i < std::size_t(w) * h * 3; ++i) f[i] = 3.0e38f * (0.5f + 0.5f * static_cast<float>(i % 7) / 7.0f);
+        const hdr::Shot loud("loud", codecs::CodecImage::from_bytes(w, h, codecs::Layout::Rgb, codecs::Sample::F32, bytes));
+        hdr::MergeOptions tiny;
+        tiny.exposures = {1e-30, 2e-30};
+        QVERIFY_THROWS_EXCEPTION(core::Error, hdr::merge({loud, loud}, tiny));
+        // (a hot pixel does not set a linear shot's white)
+        std::fill(f, f + std::size_t(w) * h * 3, 0.25f);
+        f[0] = f[1] = f[2] = 1000.0f;
+        const hdr::Shot hot("hot", codecs::CodecImage::from_bytes(w, h, codecs::Layout::Rgb, codecs::Sample::F32, bytes));
+        QCOMPARE(hot.white(0), 0.25f);
+    }
+
+    // The review's P3-1: the ghosts' mask and its blur's copy counted.
+    void theWorkCountsTheGhosts() {
+        automate::HdrSettings plain, ghosts;
+        ghosts.remove_ghosts = true;
+        QCOMPARE(automate::hdr_work_bytes(1000, 1000, 0, ghosts) - automate::hdr_work_bytes(1000, 1000, 0, plain), std::uint64_t(0));  // (32 bits: making is the most)
+        ghosts.depth = plain.depth = 32;
+        QVERIFY(automate::hdr_work_bytes(1000, 1000, std::uint64_t(30) * 1000 * 1000, ghosts) - automate::hdr_work_bytes(1000, 1000, std::uint64_t(30) * 1000 * 1000, plain) ==
+                std::uint64_t(8) * 1000 * 1000);
+    }
+
     void aStopStopsIt() {
         const std::size_t w = 64, h = 64;
         const auto sc = scene(w, h);

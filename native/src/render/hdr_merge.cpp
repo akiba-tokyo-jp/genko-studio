@@ -97,14 +97,22 @@ Shot::Shot(std::string shot_name, codecs::CodecImage picture, std::optional<doub
     if (picture_.layout() != codecs::Layout::Rgb || (picture_.sample() != codecs::Sample::U8 && picture_.sample() != codecs::Sample::U16 && !linear()))
         throw core::Error("value", "an exposure is RGB of 8 or 16 bits or floats");
     if (linear()) {
-        // (the level each channel clips at: its largest finite value — a sensor's white —, 1 when it holds none above 0)
-        std::array<float, 3> most{0.0f, 0.0f, 0.0f};
-        const std::size_t n = picture_.sample_count();
-        for (std::size_t i = 0; i < n; ++i) {
-            const float v = read_sample<float>(picture_.data(), i);
-            if (std::isfinite(v)) most[i % 3] = std::max(most[i % 3], v);
+        // (the level each channel clips at — a sensor's white —: its 99.9th percentile of the finite values, so a hot pixel
+        // does not set it (the review's P3-4); 1 when it holds none above 0. Read from at most about a million pixels)
+        const std::size_t pixels = picture_.pixel_count();
+        const std::size_t step = std::max<std::size_t>(1, pixels / 1000000);
+        for (std::size_t c = 0; c < 3; ++c) {
+            std::vector<float> v;
+            v.reserve(pixels / step + 1);
+            for (std::size_t i = 0; i < pixels; i += step) {
+                const float x = read_sample<float>(picture_.data(), i * 3 + c);
+                if (std::isfinite(x) && x > 0.0f) v.push_back(x);
+            }
+            if (v.empty()) continue;
+            const auto at = v.begin() + static_cast<std::ptrdiff_t>(std::min(v.size() - 1, v.size() * 999 / 1000));
+            std::nth_element(v.begin(), at, v.end());
+            white_[c] = *at > 0.0f ? *at : 1.0f;
         }
-        for (std::size_t c = 0; c < 3; ++c) white_[c] = most[c] > 0.0f ? most[c] : 1.0f;
     }
 }
 
@@ -176,7 +184,7 @@ Shot reduced(const Shot& shot, int max_side) {
 
 // --- exposures -------------------------------------------------------------------------------------------------------------
 
-std::vector<double> estimate_exposures(const std::vector<const Shot*>& shots) {
+std::vector<double> estimate_exposures(const std::vector<const Shot*>& shots, const std::function<bool()>& stopped) {
     const std::size_t n = shots.size();
     if (n == 0) return {};
     const std::int64_t w = shots[0]->width(), h = shots[0]->height();
@@ -184,8 +192,10 @@ std::vector<double> estimate_exposures(const std::vector<const Shot*>& shots) {
     std::vector<double> mean(n, 0.0);
     for (std::size_t j = 0; j < n; ++j) {
         double s = 0;
-        for (std::int64_t y = 0; y < h; ++y)
+        for (std::int64_t y = 0; y < h; ++y) {
+            if (y % 64 == 0) check_stop(stopped);
             for (std::int64_t x = 0; x < w; ++x) s += luma(shots[j]->display(x, y, 0), shots[j]->display(x, y, 1), shots[j]->display(x, y, 2));
+        }
         mean[j] = s / static_cast<double>(std::max<std::size_t>(count, 1));
     }
     std::vector<std::size_t> order(n);
@@ -197,6 +207,7 @@ std::vector<double> estimate_exposures(const std::vector<const Shot*>& shots) {
         const Shot& b = *shots[order[k]];
         std::vector<double> ratios;
         for (std::size_t i = 0; i < count; i += 7) {
+            if (i % (7 << 16) == 0) check_stop(stopped);
             const std::int64_t x = static_cast<std::int64_t>(i % static_cast<std::size_t>(w)), y = static_cast<std::int64_t>(i / static_cast<std::size_t>(w));
             const float la = luma(a.display(x, y, 0), a.display(x, y, 1), a.display(x, y, 2));
             const float lb = luma(b.display(x, y, 0), b.display(x, y, 1), b.display(x, y, 2));
@@ -298,6 +309,7 @@ void align(std::vector<Shot>& shots, const std::vector<double>& exposures, const
         Grey g{sw, sh, std::vector<float>(sw * sh, 0.0f)};
         std::vector<float> c(sw * sh, 0.0f);
         for (std::size_t y = 0; y < h; ++y) {
+            if (y % 64 == 0) check_stop(stopped);
             for (std::size_t x = 0; x < w; ++x) {
                 const std::size_t j = (y / k) * sw + x / k;
                 const auto X = static_cast<std::int64_t>(x), Y = static_cast<std::int64_t>(y);
@@ -416,6 +428,7 @@ Merged merge(const std::vector<Shot>& shots, const MergeOptions& options) {
         for (std::size_t j = 0; j < p; ++j) {
             std::size_t well = 0;
             for (std::size_t i = 0; i < w * h; i += 3) {
+                if (i % (3 << 16) == 0) check_stop(options.stopped);
                 const auto [x, y] = px_at(i);
                 const float l = lum_display(shots[j], x, y);
                 if (l >= 0.1f && l < 0.9f) ++well;
@@ -431,8 +444,15 @@ Merged merge(const std::vector<Shot>& shots, const MergeOptions& options) {
     out.height = static_cast<std::uint32_t>(h);
     out.ghost_base = base;
     if (!linear) {
+        const auto [lo, hi] = std::minmax_element(log_dt.begin(), log_dt.end());
         if (options.response) {
             out.response = options.response;
+        } else if (*hi - *lo < 1e-6) {
+            // (exposures all alike: Debevec's system has no single solution — the review's P2-3 —, sRGB's curve in its place)
+            std::vector<double> g(256);
+            for (std::size_t k = 0; k < 256; ++k)
+                g[k] = std::log(std::max<double>(srgb_to_linear(static_cast<float>(k) / 255.0f), 1e-5)) - std::log(static_cast<double>(srgb_to_linear(128.0f / 255.0f)));
+            out.response = std::array<std::vector<double>, 3>{g, g, g};
         } else {
             std::vector<std::size_t> order(p);
             std::iota(order.begin(), order.end(), 0);
@@ -460,6 +480,7 @@ Merged merge(const std::vector<Shot>& shots, const MergeOptions& options) {
     };
     const image_ops::Held held(std::uint64_t(w) * h * 3 * sizeof(float) + (options.remove_ghosts ? std::uint64_t(w) * h * sizeof(float) : 0));
     out.rgb.assign(w * h * 3, 0.0f);
+    bool infinite = false;
     for (std::size_t y = 0; y < h; ++y) {
         if (y % 32 == 0) check_stop(options.stopped);
         const auto Y = static_cast<std::int64_t>(y);
@@ -488,9 +509,12 @@ Merged merge(const std::vector<Shot>& shots, const MergeOptions& options) {
                     le = log_radiance(pick, X, Y, c);
                 }
                 o[c] = static_cast<float>(std::exp(le));
+                if (!std::isfinite(o[c])) infinite = true;
             }
         }
     }
+    // (light past what a float holds — values or exposures out of any range —: refused, never written as inf or NaN)
+    if (infinite) throw core::Error("value", "the merged light is past what a float holds (an exposure's values or EV are out of range)");
     if (options.remove_ghosts && p > 1) {
         // (the weighted spread of the exposures' log radiance — their luminance)
         std::vector<float> ghost(w * h, 0.0f);
@@ -548,6 +572,7 @@ Merged merge(const std::vector<Shot>& shots, const MergeOptions& options) {
         for (std::size_t i = 0; i < w * h; ++i) {
             float& v = out.rgb[i * 3 + std::size_t(c)];
             v = static_cast<float>(static_cast<double>(v) * k);
+            if (!std::isfinite(v)) throw core::Error("value", "the merged light is past what a float holds (an exposure's values or EV are out of range)");
         }
     }
     std::vector<float> l;
@@ -580,10 +605,15 @@ const char* method_name(Tone::Method method) {
     return "local_adaptation";
 }
 
-void tone_map(std::vector<Rgba>& px, std::size_t w, std::size_t h, const Tone& tone) {
+void tone_map(std::vector<Rgba>& px, std::size_t w, std::size_t h, const Tone& tone, const std::function<bool()>& stopped) {
+    const auto every = [&](std::size_t i) {
+        if (i % (1u << 18) == 0) check_stop(stopped);
+    };
     std::size_t n = 0;
     double logs = 0;
-    for (const Rgba& q : px) {
+    for (std::size_t i = 0; i < px.size(); ++i) {
+        every(i);
+        const Rgba& q = px[i];
         if (!(q[3] > 0.0f)) continue;
         ++n;
         logs += std::log(static_cast<double>(std::max(luma(q), 1e-6f)));
@@ -595,7 +625,9 @@ void tone_map(std::vector<Rgba>& px, std::size_t w, std::size_t h, const Tone& t
             const float k = 0.18f / std::max(log_mean, 1e-6f);
             for (Rgba& q : px)
                 for (int c = 0; c < 3; ++c) q[std::size_t(c)] *= k;
+            check_stop(stopped);
             image_ops::hdr_toning(px, w, h, tone.local);
+            check_stop(stopped);
             for (Rgba& q : px)
                 for (int c = 0; c < 3; ++c) q[std::size_t(c)] = linear_to_srgb(std::clamp(q[std::size_t(c)], 0.0f, 1.0f));
             break;
@@ -609,7 +641,9 @@ void tone_map(std::vector<Rgba>& px, std::size_t w, std::size_t h, const Tone& t
         }
         case Tone::Method::HighlightCompression: {
             const float k = 0.18f / std::max(log_mean, 1e-6f);
-            for (Rgba& q : px) {
+            for (std::size_t i = 0; i < px.size(); ++i) {
+                every(i);
+                Rgba& q = px[i];
                 const float l = luma(q) * k;
                 const float ld = l / (1.0f + l);
                 const float r = l > 1e-9f ? ld / l * k : 0.0f;
@@ -622,6 +656,7 @@ void tone_map(std::vector<Rgba>& px, std::size_t w, std::size_t h, const Tone& t
             std::vector<float> lv(px.size());
             float lo = std::numeric_limits<float>::max(), hi = std::numeric_limits<float>::lowest();
             for (std::size_t i = 0; i < px.size(); ++i) {
+                every(i);
                 lv[i] = std::log(std::max(luma(px[i]), 1e-7f));
                 if (px[i][3] > 0.0f) {
                     lo = std::min(lo, lv[i]);
@@ -641,6 +676,7 @@ void tone_map(std::vector<Rgba>& px, std::size_t w, std::size_t h, const Tone& t
                 cdf[b] = static_cast<float>(acc / total);
             }
             for (std::size_t i = 0; i < px.size(); ++i) {
+                every(i);
                 const float target = cdf[static_cast<std::size_t>(std::clamp((lv[i] - lo) / span, 0.0f, 1.0f) * static_cast<float>(kBins - 1))];
                 // (the display value from the CDF; the colours' ratios kept in linear light)
                 const float tl = srgb_to_linear(target);

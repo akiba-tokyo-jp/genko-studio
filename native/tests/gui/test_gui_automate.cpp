@@ -512,6 +512,31 @@ private slots:
             QCOMPARE(px(page), std::make_pair(double(w), double(h)));
         }
     }
+
+    // PC5 I-h, the review's P1-1: the window's way reads as the command line's — too much to hold is refused from the
+    // headers before anything is decoded (headers with no pixels here), said, and the second window never opens.
+    void mergeToHdrRefusesTooMuchBeforeReading() {
+        Book b;
+        for (int i = 0; i < 8; ++i) write(b.root / ("big" + std::to_string(i) + ".ppm"), "P6\n6000 6000\n255\n");
+        bool second = false;
+        b.answers.responder->exec = [&](QDialog* dialog) {
+            if (auto* files = qobject_cast<app::HdrFilesDialog*>(dialog)) {
+                for (int i = 0; i < 8; ++i) {
+                    auto* item = new QListWidgetItem(QStringLiteral("big%1").arg(i), files->files);
+                    item->setData(Qt::UserRole, QStringLiteral("file:") + q(b.root / ("big" + std::to_string(i) + ".ppm")));
+                }
+                return int(QDialog::Accepted);
+            }
+            if (qobject_cast<app::HdrDialog*>(dialog) != nullptr) second = true;
+            return int(QDialog::Rejected);
+        };
+        const std::size_t tabs = b.window->documents().size();
+        b.act("act_merge_to_hdr_pro")->trigger();
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        QVERIFY(!second);
+        QCOMPARE(b.window->documents().size(), tabs);
+        QVERIFY2(b.window->last_error().contains(QStringLiteral("大きすぎて")), qPrintable(b.window->last_error()));
+    }
 };
 
 QTEST_MAIN(TestGuiAutomate)

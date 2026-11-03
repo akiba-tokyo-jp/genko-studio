@@ -17,7 +17,9 @@
 #include "core/exif.hpp"
 #include "core/paths.hpp"
 #include "formats/page_picture.hpp"
+#include "render/codecs/format.hpp"
 #include "render/codecs/limits.hpp"
+#include "render/codecs/codecs.hpp"
 #include "render/image.hpp"
 #include "render/image_ops.hpp"
 #include "render/ops_filters.hpp"
@@ -92,10 +94,10 @@ void check_settings(const std::vector<Shot>& shots, const HdrSettings& settings)
 // --- HDR Pro に統合 ---------------------------------------------------------------------------------------------------------
 
 std::uint64_t hdr_work_bytes(std::uint32_t width, std::uint32_t height, std::uint64_t shots_bytes, const HdrSettings& settings) {
-    // (the shots, the radiance (RGB floats) and the ghosts' mask; at 16 and 8 bits the toning's RGBA floats and its two
+    // (the shots, the radiance (RGB floats) and the ghosts' mask with the copy its blur takes; at 16 and 8 bits the toning's RGBA floats and its two
     // planes, the shots given up by then; then the picture and the page's raster)
     const std::uint64_t px = std::uint64_t(width) * height;
-    const std::uint64_t merging = shots_bytes + px * 12 + (settings.remove_ghosts ? px * 4 : 0);
+    const std::uint64_t merging = shots_bytes + px * 12 + (settings.remove_ghosts ? px * 8 : 0);  // (the mask, and its blur's copy)
     const std::uint64_t toning = settings.depth == 32 ? 0 : px * 12 + px * (16 + 8);
     const std::uint64_t making = settings.depth == 32 ? px * (12 + 12 + 16) : px * (16 + 6 + 8);
     return std::max({merging, toning, making});
@@ -171,26 +173,183 @@ void check_shots(const std::vector<Shot>& shots) {
     if (held > codecs::kAllocBudget) too_large(held);
 }
 
-std::vector<Shot> hdr_shots(const std::vector<fs::path>& files, const formats::OpenOptions& options, const std::function<bool()>& stopped) {
-    count_check(files.size());
+HdrReadError::HdrReadError(std::string source, std::string error_code, std::string why)
+    : core::Error(error_code, source + ": " + why), name(std::move(source)), reason(std::move(why)) {}
+
+namespace {
+
+// A big-endian number of `n` bytes at `at` (none past the bytes).
+std::optional<std::uint32_t> be(std::string_view b, std::size_t at, std::size_t n) {
+    if (at + n > b.size()) return std::nullopt;
+    std::uint32_t v = 0;
+    for (std::size_t i = 0; i < n; ++i) v = (v << 8) | static_cast<unsigned char>(b[at + i]);
+    return v;
+}
+
+// What one exposure will be, seen before it is decoded.
+struct Seen {
+    std::uint32_t width = 0, height = 0;
+    std::uint64_t shot = 0;   // the shot's bytes as held
+    std::uint64_t read = 0;   // what reading it holds at once besides the shots (its file, the decoded picture, the book's raster, the merged picture and its RGB)
+    bool linear = false;
+    bool known = false;       // its header said its size (a .pcraft, a picture of a header this build does not read: checked once read)
+};
+
+std::string lower_suffix(const fs::path& file) {
+    std::string suffix = core::path_to_utf8(file.extension());
+    std::transform(suffix.begin(), suffix.end(), suffix.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return suffix;
+}
+
+Seen seen_file(const fs::path& file, const formats::OpenOptions& options) {
+    Seen out;
+    const std::string bytes = storage::read_file(file);
+    const std::uint64_t size = bytes.size();
+    if (render::raw::is_raw(bytes, lower_suffix(file))) {
+        const render::raw::Info info = render::raw::identify(bytes, options.limits);
+        const auto [w, h] = render::raw::developed_size(info, core::raw::Develop{});
+        out.width = static_cast<std::uint32_t>(w);
+        out.height = static_cast<std::uint32_t>(h);
+        const std::uint64_t px = std::uint64_t(out.width) * out.height;
+        out.shot = px * 12;
+        out.read = size + std::uint64_t(info.raw_width) * std::uint64_t(info.raw_height) * 2 + px * 18;  // (render/raw check_size's linear stage)
+        out.linear = true;
+        out.known = true;
+        return out;
+    }
+    // (a PSD's or PSB's header: its size and depth; the codecs' formats: their size, the depth their format may hold)
+    std::uint64_t per = 6;
+    if (bytes.size() >= 26 && bytes.compare(0, 4, "8BPS") == 0) {
+        const auto h = be(bytes, 14, 4), w = be(bytes, 18, 4), depth = be(bytes, 22, 2);
+        if (!h || !w || !depth) return out;
+        out.width = *w;
+        out.height = *h;
+        per = *depth == 32 ? 12 : *depth == 16 ? 6 : 3;
+        out.linear = *depth == 32;
+    } else {
+        const auto format = codecs::detect(bytes);
+        const auto size_said = codecs::header_size(bytes);
+        if (!format || !size_said) return out;
+        out.width = size_said->first;
+        out.height = size_said->second;
+        switch (*format) {
+            case codecs::Format::OpenExr:
+            case codecs::Format::Hdr: per = 12; out.linear = true; break;
+            case codecs::Format::Jpeg: case codecs::Format::Gif: case codecs::Format::Bmp: case codecs::Format::WebP:
+            case codecs::Format::Qoi: case codecs::Format::Ico: case codecs::Format::Tga: per = 3; break;
+            default: per = 6; break;  // (PNG, TIFF, Netpbm, AVIF: 16 bits at most here — 32-bit TIFF is checked once read)
+        }
+    }
+    options.limits.check(out.width, out.height, codecs::Layout::Rgb, codecs::Sample::U8);  // (the sides and pixels 開く… takes)
+    const std::uint64_t px = std::uint64_t(out.width) * out.height;
+    out.shot = px * per;
+    out.read = size + px * (per * 3 + 16);
+    out.known = true;
+    return out;
+}
+
+Seen seen_page(const core::Document& doc, std::size_t at) {
+    Seen out;
+    if (at >= doc.pages.size()) throw core::Error("value", "no such page");
+    if (doc.is_deferred(at)) throw core::Error("page_not_loaded", "the page is not read yet");
+    const core::Page& page = doc.page(at);
+    const auto [w, h] = formats::page_picture_size(page, static_cast<int>(std::lround(page.spec.dpi.value())));
+    out.width = w;
+    out.height = h;
+    codecs::Limits{}.check(w, h, codecs::Layout::Rgb, codecs::Sample::U8);
+    const int depth = page.color ? page.color->depth : page.rgb ? page.rgb->depth : 8;
+    const std::uint64_t per = depth >= 32 ? 12 : depth >= 16 ? 6 : 3;
+    const std::uint64_t px = std::uint64_t(w) * h;
+    out.shot = px * per;
+    out.read = px * (per * 2 + 16);  // (the page drawn at its depth, its RGB)
+    out.linear = depth >= 32;
+    out.known = true;
+    return out;
+}
+
+void same_as_first(const Seen& first, const Seen& seen, const std::string& name) {
+    if (seen.width != first.width || seen.height != first.height) {
+        throw HdrReadError(name, "value",
+                           "the exposures must have the same pixel dimensions (" + std::to_string(first.width) + "×" + std::to_string(first.height) + " and " +
+                               std::to_string(seen.width) + "×" + std::to_string(seen.height) + ")");
+    }
+}
+
+}  // namespace
+
+HdrPlan hdr_plan(const std::vector<HdrSource>& sources, const formats::OpenOptions& options, const std::function<bool()>& stopped) {
+    count_check(sources.size());
+    HdrPlan plan;
+    std::optional<Seen> first;
+    std::uint64_t held = 0;
+    for (const HdrSource& source : sources) {
+        if (stopped && stopped()) throw render::Cancelled();
+        Seen seen;
+        try {
+            seen = source.file ? seen_file(*source.file, options) : seen_page(*source.book, source.page);
+        } catch (const HdrReadError&) {
+            throw;
+        } catch (const core::Error& error) {
+            throw HdrReadError(source.name, error.code(), error.what());
+        }
+        if (!seen.known) {
+            plan.unknown = true;
+            continue;
+        }
+        if (first) {
+            same_as_first(*first, seen, source.name);
+        } else {
+            first = seen;
+            plan.width = seen.width;
+            plan.height = seen.height;
+        }
+        plan.peak = std::max(plan.peak, held + seen.read);
+        held += seen.shot;
+        plan.held = held;
+    }
+    if (first) plan.peak = std::max(plan.peak, held + std::uint64_t(plan.width) * plan.height * 12);  // (and the merge's radiance)
+    if (plan.peak > codecs::kAllocBudget) too_large(plan.peak);
+    return plan;
+}
+
+std::vector<Shot> hdr_read(const std::vector<HdrSource>& sources, const formats::OpenOptions& options, const std::function<bool()>& stopped) {
+    (void)hdr_plan(sources, options, stopped);  // (refused before anything is decoded when the headers say it cannot fit)
     std::vector<Shot> shots;
     std::uint64_t held = 0;
-    for (const fs::path& file : files) {
+    for (const HdrSource& source : sources) {
         if (stopped && stopped()) throw render::Cancelled();
+        // (each read within what the budget has left after the shots held: its decoding and a RAW's development refused
+        // past it)
+        formats::OpenOptions within = options;
+        within.limits.max_alloc = std::min(options.limits.max_alloc, codecs::kAllocBudget - std::min(held, codecs::kAllocBudget));
         try {
-            shots.push_back(hdr_shot_file(file, options, stopped));
+            shots.push_back(source.file ? hdr_shot_file(*source.file, within, stopped) : hdr_shot_of(*source.book, source.page, source.name));
+        } catch (const render::Cancelled&) {
+            throw;
+        } catch (const HdrReadError&) {
+            throw;
         } catch (const core::Error& error) {
-            throw core::Error(error.code(), core::path_to_utf8(file.filename()) + ": " + error.what());
+            throw HdrReadError(source.name, error.code(), error.what());
         }
-        // (one file at a time: refused as soon as the shots held pass the budget, or one is not as the first)
         held += shot_bytes(shots.back());
         if (held > codecs::kAllocBudget) too_large(held);
-        if (shots.back().width() != shots.front().width() || shots.back().height() != shots.front().height() || shots.back().linear() != shots.front().linear()) {
-            check_shots(shots);
+        const Shot& one = shots.back();
+        if (one.width() != shots.front().width() || one.height() != shots.front().height()) {
+            throw HdrReadError(source.name, "value",
+                               "the exposures must have the same pixel dimensions (" + std::to_string(shots.front().width()) + "×" +
+                                   std::to_string(shots.front().height()) + " and " + std::to_string(one.width()) + "×" + std::to_string(one.height()) + ")");
         }
+        if (one.linear() != shots.front().linear())
+            throw HdrReadError(source.name, "value", "the exposures must be all of linear light (camera RAW files, 32-bit pictures) or all not");
     }
     check_shots(shots);
     return shots;
+}
+
+std::vector<Shot> hdr_shots(const std::vector<fs::path>& files, const formats::OpenOptions& options, const std::function<bool()>& stopped) {
+    std::vector<HdrSource> sources;
+    for (const fs::path& file : files) sources.push_back(HdrSource{file, nullptr, 0, core::path_to_utf8(file.filename())});
+    return hdr_read(sources, options, stopped);
 }
 
 render::hdr::Shot hdr_shot_of(const core::Document& doc, std::size_t page, const std::string& name) {
@@ -216,11 +375,20 @@ HdrRadiance hdr_radiance(std::vector<Shot> shots, const HdrSettings& settings, c
     } else {
         std::vector<const Shot*> refs;
         for (const Shot& s : shots) refs.push_back(&s);
-        exposures = render::hdr::estimate_exposures(refs);
+        exposures = render::hdr::estimate_exposures(refs, stopped);
         source = "estimated";
     }
     for (const double e : exposures)
         if (!(std::isfinite(e) && e > 0)) throw core::Error("value", "the exposures must be positive");
+    // (pictures of display values whose exposures hardly differ — the same EXIF, the same EV, a file twice —: no camera
+    // response can be recovered from them; refused, saying why — the review's P2-3. Linear light is only averaged)
+    if (!shots[0].linear()) {
+        const auto [lo, hi] = std::minmax_element(exposures.begin(), exposures.end());
+        if (std::log2(*hi / *lo) < 0.5) {
+            throw core::Error("value", "the exposures hardly differ (" + std::to_string(std::log2(*hi / *lo)).substr(0, 4) +
+                                           " EV from the darkest to the brightest): choose pictures of different exposures");
+        }
+    }
     if (settings.align) render::hdr::align(shots, exposures, stopped);
     render::hdr::MergeOptions merge;
     merge.exposures = exposures;
@@ -328,26 +496,68 @@ HdrMade merge_to_hdr(std::vector<Shot> shots, const HdrSettings& settings, const
 
 // --- 写真の切り抜きと角度補正 --------------------------------------------------------------------------------------------------
 
-std::vector<formats::Opened> crop_and_straighten(const core::Document& doc, std::size_t at, const formats::OpenOptions& options, Json* report) {
+std::uint64_t crop_work_bytes(const render::codecs::CodecImage& scan, const std::vector<render::scancrop::FoundPhoto>& photos) {
+    // (the scan held; then each photo in turn: the part of the scan it lies on and its floats, the photo's floats, its
+    // picture and its book's raster — the books made before it kept)
+    const std::uint64_t n = codecs::channels(scan.layout()), bytes = codecs::sample_bytes(scan.sample());
+    std::uint64_t peak = scan.data().size(), kept = 0;
+    for (const render::scancrop::FoundPhoto& f : photos) {
+        double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
+        for (const auto& c : f.corners()) {
+            x0 = std::min(x0, c[0]);
+            y0 = std::min(y0, c[1]);
+            x1 = std::max(x1, c[0]);
+            y1 = std::max(y1, c[1]);
+        }
+        const auto part = static_cast<std::uint64_t>(std::max(1.0, std::ceil(x1 - x0) + 7) * std::max(1.0, std::ceil(y1 - y0) + 7));
+        const auto px = static_cast<std::uint64_t>(std::max(1.0, std::round(f.width)) * std::max(1.0, std::round(f.height)));
+        const std::uint64_t book = px * 4 * std::max<std::uint64_t>(bytes, 2);  // (its page's raster: RGBA at its depth)
+        const std::uint64_t now = part * n * (bytes + 4) + px * n * (4 + bytes) + book;
+        peak = std::max(peak, scan.data().size() + kept + now);
+        kept += book;
+    }
+    return peak;
+}
+
+std::vector<formats::Opened> crop_and_straighten(const core::Document& doc, std::size_t at, const formats::OpenOptions& options, Json* report,
+                                                 const std::function<bool()>& stopped) {
     if (at >= doc.pages.size()) throw core::Error("value", "no such page");
     if (doc.is_deferred(at)) throw core::Error("page_not_loaded", "the page is not read yet");
+    const auto stop_here = [&] {
+        if (stopped && stopped()) throw render::Cancelled();
+    };
     const core::Page& page = doc.page(at);
     const int dpi = static_cast<int>(std::lround(page.spec.dpi.value()));
     const formats::PagePicture scan = formats::page_picture(page, doc, dpi);
-    const std::vector<render::scancrop::FoundPhoto> found = render::scancrop::find_photos(scan.image);
+    stop_here();
+    const std::vector<render::scancrop::FoundPhoto> found = render::scancrop::find_photos(scan.image, stopped);
     if (found.size() > kMaxPhotos) {
         throw core::Error("value", "too many photos on the scan (" + std::to_string(found.size()) + "; at most " + std::to_string(kMaxPhotos) + ")");
     }
+    // (what cutting them out holds at most, before any is cut — the review's P2-2 —, and their floats in the budget)
+    if (const std::uint64_t need = crop_work_bytes(scan.image, found); need > codecs::kAllocBudget) {
+        throw core::Error("image_too_large", "the photos are too large to cut out at once (about " + mib(need) + " MiB of work; at most " +
+                                                 mib(codecs::kAllocBudget) + " MiB)");
+    }
+    const render::ImageAllocationBudget budget{codecs::kAllocBudget};
     formats::OpenOptions as_is = options;
     as_is.working_rgb.clear();  // (the scan's own profile, or sRGB: never the working one assigned to it)
     std::vector<formats::Opened> out;
-    Json photos = Json::array();
+    Json photos = Json::array(), skipped = Json::array();
     const std::string title = doc.title.empty() ? std::string("スキャン") : doc.title;
     for (std::size_t k = 0; k < found.size(); ++k) {
+        stop_here();
         const render::scancrop::FoundPhoto& f = found[k];
-        codecs::CodecImage cut = render::scancrop::cut_photo(scan.image, f);
-        const std::uint32_t pw = cut.width(), ph = cut.height();
-        formats::Opened made = formats::picture_book(std::move(cut), title + " のコピー " + std::to_string(k + 1), as_is);
+        std::optional<codecs::CodecImage> cut;
+        try {
+            cut = render::scancrop::cut_photo(scan.image, f);
+        } catch (const render::scancrop::Unmappable&) {
+            // (a photo whose corners cannot be mapped: that one left out and said, the others made — the review's P3-5)
+            skipped.push_back(static_cast<std::int64_t>(k + 1));
+            continue;
+        }
+        const std::uint32_t pw = cut->width(), ph = cut->height();
+        formats::Opened made = formats::picture_book(std::move(*cut), title + " のコピー " + std::to_string(out.size() + 1), as_is);
         // (the grid of an opened picture's pixels only for an 8-bit RGB page, as 複製… makes one)
         const core::Page& p = made.doc.page(0);
         if (p.color || (p.rgb && p.rgb->depth != 8)) {
@@ -360,7 +570,15 @@ std::vector<formats::Opened> crop_and_straighten(const core::Document& doc, std:
                               {"angle", std::round(f.angle * 1e3) / 1e3},
                               {"center", Json::array({std::round(f.center[0] * 1e2) / 1e2, std::round(f.center[1] * 1e2) / 1e2})}});
     }
-    if (report != nullptr) *report = Json{{"photos", std::move(photos)}};
+    if (!skipped.empty() && !out.empty()) {
+        std::string said = "写真";
+        for (std::size_t i = 0; i < skipped.size(); ++i) said += (i == 0 ? " " : "・") + std::to_string(skipped[i].get<std::int64_t>());
+        out.front().notes.push_back(said + " は角を求められなかったので、切り抜きませんでした");
+    }
+    if (report != nullptr) {
+        *report = Json{{"photos", std::move(photos)}};
+        if (!skipped.empty()) (*report)["skipped"] = std::move(skipped);
+    }
     return out;
 }
 

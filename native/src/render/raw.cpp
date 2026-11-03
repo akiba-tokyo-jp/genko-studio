@@ -196,9 +196,12 @@ Info info_of(std::string_view bytes, const LibRaw& lr) {
     return out;
 }
 
+// What Genko does with LibRaw's picture: the output space, Camera Raw's adjustments first, or the linear development (PC5 I-h).
+enum class GenkoStage { Output, Adjust, Linear };
+
 // The development's size, its pixels and what it will hold at once, within the limits — before LibRaw unpacks the
 // sensor data (core::Error("image_too_large") past them).
-void check_size(const Info& info, bool half, const codecs::Limits& limits, bool adjust) {
+void check_size(const Info& info, bool half, const codecs::Limits& limits, GenkoStage then) {
     const std::int64_t div = half ? 2 : 1;
     const std::int64_t w = std::max<std::int64_t>(1, info.width / div), h = std::max<std::int64_t>(1, info.height / div);
     if (info.width < 1 || info.height < 1 || info.raw_width < 1 || info.raw_height < 1)
@@ -208,12 +211,12 @@ void check_size(const Info& info, bool half, const codecs::Limits& limits, bool 
     // (LibRaw: the sensor data — 4 samples a pixel for a sensor of more colours or none of a mosaic — and its picture of 4
     // samples, its 16-bit RGB; then Genko's: that RGB (6 a pixel) with the 16-bit output (6), or — Camera Raw's adjustments —
     // the float raster of prophoto-compat (16) held three times as the kernel's surface takes it (its source and its result),
-    // then the result (16) with the 16-bit output (6))
+    // then the result (16) with the 16-bit output (6), or — PC5 I-h's linear development — that RGB (6) with the float RGB (12))
     const std::uint64_t raw_px = std::uint64_t(info.raw_width) * std::uint64_t(info.raw_height);
     const std::uint64_t px = std::uint64_t(info.width) * std::uint64_t(info.height) / std::uint64_t(div * div);
     const std::uint64_t sensor = raw_px * (info.mosaic ? 2 : 8);
     const std::uint64_t libraw = sensor + px * 8 + px * 6;
-    const std::uint64_t genko = adjust ? px * 48 : px * 12;
+    const std::uint64_t genko = then == GenkoStage::Adjust ? px * 48 : then == GenkoStage::Linear ? px * 18 : px * 12;
     const std::uint64_t peak = std::max(libraw, genko);
     if (peak > limits.max_alloc) {
         throw core::Error("image_too_large", "the picture is too large to read at once (" + std::to_string(info.width) + "×" + std::to_string(info.height) +
@@ -388,11 +391,11 @@ struct Stage {
     std::vector<std::string> notes;
 };
 
-void raw_stage(Stage& stage, std::string_view bytes, const core::raw::Develop& develop, const Options& options, bool adjust) {
+void raw_stage(Stage& stage, std::string_view bytes, const core::raw::Develop& develop, const Options& options, GenkoStage then) {
     Run run(&options);
     open(run, bytes, options.limits);
     stage.info = info_of(bytes, *run.lr);
-    check_size(stage.info, options.half_size, options.limits, adjust);
+    check_size(stage.info, options.half_size, options.limits, then);
     libraw_output_params_t& p = run.lr->imgdata.params;
     p.output_color = 4;  // (ProPhoto)
     p.output_bps = 16;
@@ -638,7 +641,7 @@ Info identify(std::string_view bytes, const codecs::Limits& limits) {
     Run run(&options);
     open(run, bytes, limits);
     Info info = info_of(bytes, *run.lr);
-    check_size(info, false, limits, false);
+    check_size(info, false, limits, GenkoStage::Output);
     return info;
 }
 
@@ -648,7 +651,7 @@ Info unpacked(std::string_view bytes, const codecs::Limits& limits) {
     Run run(&options);
     open(run, bytes, limits);
     Info info = info_of(bytes, *run.lr);
-    check_size(info, false, limits, false);
+    check_size(info, false, limits, GenkoStage::Output);
     const int code = run.lr->unpack();
     if (code != LIBRAW_SUCCESS) failed(code, "unpack");
     if (run.data_errors > 0) throw core::Error("format", "the camera RAW file cannot be read (its data is cut short or broken)");
@@ -746,7 +749,7 @@ Developed develop(std::string_view bytes, const Json& raw, const Options& option
     const core::raw::Develop d = core::raw::develop_from(core::get(normal, "develop"));
     const Json* adjust = core::get(normal, "adjust");
     Stage stage;
-    raw_stage(stage, bytes, d, options, adjust != nullptr);
+    raw_stage(stage, bytes, d, options, adjust != nullptr ? GenkoStage::Adjust : GenkoStage::Output);
     const int w = stage.mem.image->width, h = stage.mem.image->height;
     // (linear ProPhoto → the output space, or — Camera Raw's adjustments — prophoto-compat first)
     const Profile linear(linear_prophoto());
@@ -837,7 +840,7 @@ Developed develop(std::string_view bytes, const Json& raw, const Options& option
 Developed develop_linear(std::string_view bytes, const Options& options) {
     const core::raw::Develop d;
     Stage stage;
-    raw_stage(stage, bytes, d, options, false);
+    raw_stage(stage, bytes, d, options, GenkoStage::Linear);
     const int w = stage.mem.image->width, h = stage.mem.image->height;
     const Profile linear(linear_prophoto());
     const Profile output(space_profile("linear-srgb"));
@@ -865,7 +868,7 @@ Preview preview(std::string_view bytes, const core::raw::Develop& develop, int m
     Options half = options;
     half.half_size = true;
     Stage stage;
-    raw_stage(stage, bytes, develop, half, false);
+    raw_stage(stage, bytes, develop, half, GenkoStage::Output);
     const int w = stage.mem.image->width, h = stage.mem.image->height;
     const double scale = max_side > 0 ? std::min(1.0, double(max_side) / std::max(w, h)) : 1.0;
     Preview out;

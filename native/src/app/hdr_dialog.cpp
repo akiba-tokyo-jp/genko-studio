@@ -25,6 +25,7 @@
 #include <tuple>
 
 #include "app/ask.hpp"
+#include "core/error.hpp"
 #include "core/json.hpp"
 #include "service/wording.hpp"
 
@@ -234,7 +235,14 @@ HdrDialog::HdrDialog(QWidget* parent, std::vector<render::hdr::Shot> shots, bool
     view_form->addRow(QStringLiteral("プレビューの露光量（EV）"), view);
     right->addWidget(view_row_);
     right->addStretch(1);
-    right->addWidget(ok_cancel(this, QStringLiteral("OK"), nullptr));
+    right->addWidget(ok_cancel(this, QStringLiteral("OK"), [this]() -> std::optional<QString> {
+        try {
+            (void)settings();
+        } catch (const std::exception& error) {
+            return wording::error(QString::fromUtf8(error.what()));
+        }
+        return std::nullopt;
+    }));
     layout->addLayout(right);
 
     later_ = new QTimer(this);
@@ -282,7 +290,10 @@ service::automate::HdrSettings HdrDialog::settings() const {
         for (int r = 0; r < images->rowCount(); ++r) {
             bool ok = false;
             const double v = images->item(r, 1) != nullptr ? images->item(r, 1)->text().trimmed().toDouble(&ok) : 0.0;
-            ev.push_back(ok && std::isfinite(v) ? v : 0.0);
+            // (an EV that is not a number within −30..30 said, never taken as 0 — the review's P3-3)
+            if (!ok || !std::isfinite(v) || std::abs(v) > 30)
+                throw core::Error("value", "the EV of " + images->item(r, 0)->text().toStdString() + " is not a number within -30..30");
+            ev.push_back(v);
         }
         s.ev = std::move(ev);
     }
