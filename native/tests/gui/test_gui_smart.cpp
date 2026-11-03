@@ -31,6 +31,7 @@
 
 #include "app/adjust_panels.hpp"
 #include "app/canvas.hpp"
+#include "app/config.hpp"
 #include "app/inject.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
