@@ -56,18 +56,21 @@ public:
     std::uint32_t height() const { return picture_.height(); }
     bool linear() const { return picture_.sample() == codecs::Sample::F32; }
     const codecs::CodecImage& picture() const { return picture_; }
-    // The level its linear values clip at (the largest it holds; 1 for a picture of display values).
-    float white() const { return white_; }
+    // The level each channel of its linear values clips at (the largest it holds; 1 for a picture of display values).
+    float white(int c) const { return white_[static_cast<std::size_t>(c)]; }
     // Channel c of the pixel (x, y) as held (display values 0..1, or linear light), its alignment applied.
     float value(std::int64_t x, std::int64_t y, int c) const;
-    // The same as a display value 0..1 (linear light: sRGB's curve over value / white).
+    // The same as a display value 0..1 (linear light: sRGB's curve over value / its channel's white).
     float display(std::int64_t x, std::int64_t y, int c) const;
+    // How near the pixel is to the clip, as a display value 0..1: its channels' largest display value (linear light — a
+    // sensor clips a channel and the colour of the others with it); for display values, channel c's own.
+    float level(std::int64_t x, std::int64_t y, int c) const;
     // Linear light (display values through sRGB's curve; linear ones as they are).
     float light(std::int64_t x, std::int64_t y, int c) const;
 
 private:
     codecs::CodecImage picture_;
-    float white_ = 1.0f;
+    std::array<float, 3> white_{1.0f, 1.0f, 1.0f};
 };
 
 // A picture of grey or RGB, with or without an alpha, of any sample, as RGB a Shot takes (U8, U16 as they are, F16 and

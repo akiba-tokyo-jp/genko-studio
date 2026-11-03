@@ -125,7 +125,7 @@ private slots:
         QVERIFY(!m.response.has_value());
         const auto probe = [&](std::size_t x) { return static_cast<double>(m.rgb[((h / 2) * w + x) * 3]) / sc[(h / 2) * w + x][0]; };
         const double k0 = probe(w / 2);
-        for (std::size_t x = 4; x < w - 4; x += 13) {
+        for (std::size_t x = 4; x < 110; x += 13) {  // (within the bracket: past x ≈ 115 the darkest shot clips too)
             const double r = probe(x) / k0;
             QVERIFY2(std::abs(std::log(r)) < 0.02, qPrintable(QStringLiteral("x %1: %2").arg(x).arg(r)));
         }
@@ -341,7 +341,7 @@ private slots:
         const codecs::CodecImage shown = automate::hdr_display(radiance, settings, -1.0);
         QCOMPARE(shown.layout(), codecs::Layout::Rgb);
         QCOMPARE(shown.sample(), codecs::Sample::U8);
-        QCOMPARE(shown.width(), 80u);
+        QCOMPARE(shown.width(), 75u);  // (made smaller by a whole factor: 300 / 4)
         settings.depth = 8;
         QVERIFY(automate::hdr_display(radiance, settings) != shown);
     }

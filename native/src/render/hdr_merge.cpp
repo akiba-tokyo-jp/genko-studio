@@ -97,14 +97,14 @@ Shot::Shot(std::string shot_name, codecs::CodecImage picture, std::optional<doub
     if (picture_.layout() != codecs::Layout::Rgb || (picture_.sample() != codecs::Sample::U8 && picture_.sample() != codecs::Sample::U16 && !linear()))
         throw core::Error("value", "an exposure is RGB of 8 or 16 bits or floats");
     if (linear()) {
-        // (the level it clips at: its largest finite value — a sensor's white —, 1 when it holds none above 0)
-        float most = 0.0f;
+        // (the level each channel clips at: its largest finite value — a sensor's white —, 1 when it holds none above 0)
+        std::array<float, 3> most{0.0f, 0.0f, 0.0f};
         const std::size_t n = picture_.sample_count();
         for (std::size_t i = 0; i < n; ++i) {
             const float v = read_sample<float>(picture_.data(), i);
-            if (std::isfinite(v)) most = std::max(most, v);
+            if (std::isfinite(v)) most[i % 3] = std::max(most[i % 3], v);
         }
-        white_ = most > 0.0f ? most : 1.0f;
+        for (std::size_t c = 0; c < 3; ++c) white_[c] = most[c] > 0.0f ? most[c] : 1.0f;
     }
 }
 
@@ -124,7 +124,12 @@ float Shot::value(std::int64_t x, std::int64_t y, int c) const {
 
 float Shot::display(std::int64_t x, std::int64_t y, int c) const {
     const float v = value(x, y, c);
-    return linear() ? linear_to_srgb(std::clamp(v / white_, 0.0f, 1.0f)) : v;
+    return linear() ? linear_to_srgb(std::clamp(v / white_[static_cast<std::size_t>(c)], 0.0f, 1.0f)) : v;
+}
+
+float Shot::level(std::int64_t x, std::int64_t y, int c) const {
+    if (!linear()) return value(x, y, c);
+    return std::max({display(x, y, 0), display(x, y, 1), display(x, y, 2)});
 }
 
 float Shot::light(std::int64_t x, std::int64_t y, int c) const {
@@ -464,7 +469,7 @@ Merged merge(const std::vector<Shot>& shots, const MergeOptions& options) {
             for (int c = 0; c < 3; ++c) {
                 double num = 0, den = 0;
                 for (std::size_t j = 0; j < p; ++j) {
-                    const double wt = hat(static_cast<double>(std::clamp(shots[j].display(X, Y, c), 0.0f, 1.0f)) * 255.0);
+                    const double wt = hat(static_cast<double>(std::clamp(shots[j].level(X, Y, c), 0.0f, 1.0f)) * 255.0);
                     if (wt <= 0.0) continue;
                     num += wt * log_radiance(j, X, Y, c);
                     den += wt;

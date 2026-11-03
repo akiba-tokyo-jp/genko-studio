@@ -3268,9 +3268,13 @@ int hdr_command(const QStringList& args, bool ascii) {
     }
     if (settings.ev && settings.ev->size() != files.size()) return usage(where + "argument --ev: one EV value a picture (" + std::to_string(files.size()) + ")");
     if (settings.ghost_base && *settings.ghost_base >= files.size()) return usage(where + "argument --ghost-base: 1.." + std::to_string(files.size()));
+    const std::string dest_text = pathlib_text(a.value("--book")->toStdString());
+    std::error_code ec;
+    if (fs::exists(storage::path_from_utf8(dest_text) / "project.json", ec)) {
+        return fail("a book is there already: " + storage::path_to_utf8(storage::path_from_utf8(dest_text) / "project.json"), "exists", ascii, 1);
+    }
     std::vector<render::hdr::Shot> shots = service::automate::hdr_shots(files, formats::OpenOptions{});
     service::automate::HdrMade made = service::automate::merge_to_hdr(std::move(shots), settings);
-    const std::string dest_text = pathlib_text(a.value("--book")->toStdString());
     write_made_book(storage::path_from_utf8(dest_text), made.book.doc);
     if (!a.flag("--json")) {
         write_text(dest_text + "\n", stdout);

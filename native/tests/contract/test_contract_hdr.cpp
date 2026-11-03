@@ -124,8 +124,10 @@ private slots:
             args << q(file);
         }
         const std::string before = storage::read_file(root / "s1.png");
+        // (--no-align: this scene is a ramp in one direction clipped over much of the brightest picture, where Ward's MTB has
+        // no edges to lock on — the alignment is test_hdr_merge's; here the light)
         const auto [code, out] = cli(args + QStringList{QStringLiteral("--book"), q(root / "hdr"), QStringLiteral("--ev=-2,0,2"),
-                                                         QStringLiteral("--json")});
+                                                         QStringLiteral("--no-align"), QStringLiteral("--json")});
         QVERIFY2(code == 0, out.dump().c_str());
         QCOMPARE(out["ok"].get<bool>(), true);
         QCOMPARE(out["files"], Json::array({core::path_to_utf8(root / "hdr")}));
@@ -146,7 +148,7 @@ private slots:
         QCOMPARE(pic.width(), std::uint32_t(kW));
         const auto ratio = [&](std::uint32_t x) { return pic.at(x, kH / 2, 1) / radiance(x, kH / 2)[1]; };
         const float k = ratio(kW / 2);
-        for (const std::uint32_t x : {8u, 30u, 90u, 110u}) QVERIFY2(std::abs(std::log(ratio(x) / k)) < 0.1, qPrintable(QString::number(ratio(x) / k)));
+        for (const std::uint32_t x : {8u, 30u, 90u, 110u}) QVERIFY2(std::abs(std::log(ratio(x) / k)) < 0.1, qPrintable(QStringLiteral("%1: %2").arg(x).arg(ratio(x) / k)));
         float most = 0;
         for (std::uint32_t x = 0; x < kW; ++x) most = std::max(most, pic.at(x, kH / 2, 0));
         QVERIFY2(most > 1.0f, qPrintable(QString::number(most)));
@@ -171,7 +173,7 @@ private slots:
             const fs::path dest = root / ("t" + std::to_string(mode) + method);
             const auto [code, out] = cli(QStringList{QStringLiteral("automate"), QStringLiteral("hdr")} + files +
                                          QStringList{QStringLiteral("--book"), q(dest), QStringLiteral("--mode"), QString::number(mode), QStringLiteral("--method"),
-                                                     QString::fromLatin1(method), QStringLiteral("--json")});
+                                                     QString::fromLatin1(method), QStringLiteral("--no-align"), QStringLiteral("--json")});
             QVERIFY2(code == 0, out.dump().c_str());
             QCOMPARE(out["hdr"]["exposure_source"].get<std::string>(), std::string("exif"));
             QVERIFY(std::abs(out["hdr"]["ev"][2].get<double>() - 4.0) < 1e-6);
@@ -182,10 +184,11 @@ private slots:
             QVERIFY(!page.rgb || page.rgb->icc == nullptr);  // (sRGB)
             const codecs::CodecImage pic = picture_of(doc);
             QCOMPARE(pic.sample(), mode == 16 ? codecs::Sample::U16 : codecs::Sample::U8);
-            // (both ends of the scene seen: darker on the left than on the right, neither black nor white)
-            const float left = pic.at(4, kH / 2, 1), right = pic.at(kW - 5, kH / 2, 1);
+            // (both ends of the bracket seen — past x ≈ 105 even the darkest picture is white —: darker on the left than on the
+            // right, neither black nor white)
+            const float left = pic.at(4, kH / 2, 1), right = pic.at(100, kH / 2, 1);
             QVERIFY2(left < right, method);
-            if (std::string_view(method) != "exposure_gamma") QVERIFY2(left > 0.01f && right < 0.999f, method);
+            if (std::string_view(method) != "exposure_gamma") QVERIFY2(left > 0.01f && right < 0.999f, qPrintable(QStringLiteral("%1: %2 %3").arg(method).arg(left).arg(right)));
         }
         // (--settings of the method; ghosts with a base; estimated without the cameras')
         const auto [code, out] = cli(QStringList{QStringLiteral("automate"), QStringLiteral("hdr")} + files +
@@ -209,7 +212,8 @@ private slots:
             files << q(file);
         }
         const auto [code, out] = cli(QStringList{QStringLiteral("automate"), QStringLiteral("hdr")} + files +
-                                     QStringList{QStringLiteral("--book"), q(root / "raw"), QStringLiteral("--ev"), QStringLiteral("0,2,4"), QStringLiteral("--json")});
+                                     QStringList{QStringLiteral("--book"), q(root / "raw"), QStringLiteral("--ev"), QStringLiteral("0,2,4"), QStringLiteral("--no-align"),
+                                                 QStringLiteral("--json")});
         QVERIFY2(code == 0, out.dump().c_str());
         const core::Document doc = book_at(root / "raw");
         QCOMPARE(doc.page(0).rgb->depth, 32);
