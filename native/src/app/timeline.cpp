@@ -2,13 +2,20 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
+#include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QGridLayout>
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QSpinBox>
+#include <QToolButton>
 #include <QStandardPaths>
 #include <QTableWidget>
 #include <QTimer>
@@ -30,6 +37,7 @@
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "core/video.hpp"
 #include "formats/exporting.hpp"
 #include "render/anim.hpp"
 #include "render/page.hpp"
@@ -44,6 +52,13 @@ QImage to_qimage(const render::Image& image) {
     const render::Image rgb = image.mode() == "RGB" ? image : image.convert("RGB");
     const std::string bytes = rgb.tobytes();
     return QImage(reinterpret_cast<const uchar*>(bytes.data()), rgb.width(), rgb.height(), rgb.width() * 3, QImage::Format_RGB888).copy();
+}
+
+// The frame shown, of how many, and the time it starts at (PC5 J-e1, timeline.info's time): "5 / 24（0.33 秒）".
+QString frame_text(std::int64_t frame, std::int64_t count, double fps) {
+    QString text = QStringLiteral("%1 / %2").arg(frame).arg(count);
+    if (fps > 0) text += QStringLiteral("（%1 秒）").arg(QString::number(static_cast<double>(frame - 1) / fps, 'f', 2));
+    return text;
 }
 
 QString title_of(const core::Page& page, const Json& id) {
@@ -68,11 +83,16 @@ TimelinePanel::TimelinePanel(MainWindow* window) : window_(window) {
     play_button = new QPushButton(QStringLiteral("▶ 再生"));
     play_button->setCheckable(true);
     connect(play_button, &QPushButton::toggled, this, [this](bool on) { play(on); });
-    fps = new QSpinBox;
-    fps->setRange(1, 60);
+    fps = new QDoubleSpinBox;  // (PC5 J-e1, timeline@1: 0.5..120, 23.976 and 29.97 too)
+    fps->setRange(core::kTimelineFpsMin, core::kTimelineFpsMax);
+    fps->setDecimals(3);
     fps->setSuffix(QStringLiteral(" fps"));
-    fps->setToolTip(QStringLiteral("1 秒に何フレーム進むか"));
-    connect(fps, &QSpinBox::editingFinished, this, [this] { set(Json{{"fps", fps->value()}}); });
+    fps->setToolTip(QStringLiteral("1 秒に何フレーム進むか（0.5〜120。1〜60 の外の速さは、この版より前の Genko では読み取り専用で開きます）"));
+    connect(fps, &QDoubleSpinBox::editingFinished, this, [this] {
+        const core::Page* p = page();
+        if (p != nullptr && core::anim::is_animation(*p) && std::abs(core::anim::fps_of(*p) - fps->value()) < 0.0005) return;  // (as it is)
+        set(Json{{"fps", fps->value()}});
+    });
     frames = new QSpinBox;
     frames->setRange(1, static_cast<int>(core::anim::kMaxFrames));
     frames->setSuffix(QStringLiteral(" フレーム"));
@@ -115,14 +135,56 @@ TimelinePanel::TimelinePanel(MainWindow* window) : window_(window) {
     connect(export_button, &QPushButton::clicked, this, [this] { export_animation(); });
     timer = new QTimer(this);
     connect(timer, &QTimer::timeout, this, [this] { tick(); });
+    // (PC5 J-e1) the frame before and after — the window's commands, put in by build_menu —, the work area, the menu
+    previous_button = new QToolButton;
+    next_button = new QToolButton;
+    work = new QCheckBox(QStringLiteral("作業範囲"));
+    work->setToolTip(QStringLiteral("再生とビデオのレンダリングを、このフレームの範囲だけにします"));
+    work_first = new QSpinBox;
+    work_last = new QSpinBox;
+    for (QSpinBox* box : {work_first, work_last}) {
+        box->setRange(1, static_cast<int>(core::anim::kMaxFrames));
+        connect(box, &QSpinBox::editingFinished, this, [this] {
+            if (!work->isChecked()) return;
+            const int a = work_first->value(), b = work_last->value();
+            set_work(std::array<std::int64_t, 2>{std::min(a, b), std::max(a, b)});
+        });
+    }
+    work_first->setToolTip(QStringLiteral("作業範囲の開始点"));
+    work_last->setToolTip(QStringLiteral("作業範囲の終了点"));
+    connect(work, &QCheckBox::toggled, this, [this](bool on) {
+        if (!on) {
+            set_work(std::nullopt);
+            return;
+        }
+        const int a = work_first->value(), b = work_last->value();
+        set_work(std::array<std::int64_t, 2>{std::min(a, b), std::max(a, b)});
+    });
+    panel_menu = new QMenu(this);
+    menu_button = new QToolButton;
+    menu_button->setText(QStringLiteral("≡"));
+    menu_button->setToolTip(QStringLiteral("タイムラインのメニュー"));
+    menu_button->setPopupMode(QToolButton::InstantPopup);
+    menu_button->setMenu(panel_menu);
 
+    auto* steps = new QHBoxLayout;
+    steps->addWidget(previous_button);
+    steps->addWidget(next_button);
+    steps->addWidget(where, 1);
+    steps->addWidget(menu_button);
+    auto* work_row = new QHBoxLayout;
+    work_row->addWidget(work);
+    work_row->addWidget(work_first);
+    work_row->addWidget(new QLabel(QStringLiteral("〜")));
+    work_row->addWidget(work_last);
     auto* top = new QGridLayout;
     top->addWidget(play_button, 0, 0);
     top->addWidget(fps, 0, 1);
     top->addWidget(frames, 1, 0);
     top->addWidget(loop, 1, 1);
     top->addWidget(onion, 2, 0);
-    top->addWidget(where, 2, 1);
+    top->addLayout(steps, 2, 1);
+    top->addLayout(work_row, 3, 0, 1, 2);
     auto* buttons = new QGridLayout;
     buttons->addWidget(add_folder_button, 0, 0);
     buttons->addWidget(add_cel_button, 0, 1);
@@ -162,9 +224,11 @@ void TimelinePanel::refresh() {
     const bool on = p != nullptr && core::anim::is_animation(*p);
     start->setVisible(p != nullptr && !on);
     for (QWidget* widget : std::initializer_list<QWidget*>{play_button, fps, frames, loop, onion, where, table, add_folder_button,
-                                                          add_cel_button, camera, export_button}) {
+                                                          add_cel_button, camera, export_button, previous_button, next_button, work}) {
         widget->setEnabled(on);
     }
+    work_first->setEnabled(on && work->isChecked());
+    work_last->setEnabled(on && work->isChecked());
     if (!on) {
         table->clear();
         table->setRowCount(0);
@@ -173,18 +237,39 @@ void TimelinePanel::refresh() {
         return;
     }
     std::int64_t count = 1;
+    std::optional<std::array<std::int64_t, 2>> work_now;
+    double speed = 12;
     try {
         count = core::anim::frames_of(*p);
         frame = std::clamp<std::int64_t>(frame, 1, count);
-        for (auto [box, value] : {std::pair{fps, static_cast<int>(core::anim::fps_of(*p))}, std::pair{frames, static_cast<int>(count)}}) {
-            box->blockSignals(true);
-            box->setValue(value);
-            box->blockSignals(false);
+        speed = core::anim::fps_of(*p);
+        {
+            const QSignalBlocker quiet(fps);
+            fps->setValue(speed);
+        }
+        {
+            const QSignalBlocker quiet(frames);
+            frames->setValue(static_cast<int>(count));
         }
         loop->blockSignals(true);
         loop->setChecked(core::anim::loops(*p));
         loop->blockSignals(false);
+        work_now = core::work_area(*p);
     } catch (const std::exception&) {
+    }
+    {  // (PC5 J-e1: the work area — its frames kept in the boxes while it is off, to turn it on again)
+        const QSignalBlocker quiet_work(work), quiet_first(work_first), quiet_last(work_last);
+        work->setChecked(work_now.has_value());
+        for (QSpinBox* box : {work_first, work_last}) box->setMaximum(static_cast<int>(count));
+        if (work_now) {
+            work_first->setValue(static_cast<int>((*work_now)[0]));
+            work_last->setValue(static_cast<int>((*work_now)[1]));
+        } else if (work_last->value() <= 1 || work_last->value() > count) {
+            work_first->setValue(1);
+            work_last->setValue(static_cast<int>(count));
+        }
+        work_first->setEnabled(work_now.has_value());
+        work_last->setEnabled(work_now.has_value());
     }
     const std::vector<std::string> ids = folder_ids();
     const int row_now = std::max(0, table->currentRow());
@@ -195,6 +280,13 @@ void TimelinePanel::refresh() {
     QStringList columns;
     for (std::int64_t f = 1; f <= count; ++f) columns << QString::number(f);
     table->setHorizontalHeaderLabels(columns);
+    const theme::Tokens& tones = theme::tokens();
+    if (work_now) {  // (PC5 J-e1: the frames outside the work area faint)
+        for (std::int64_t f = 1; f <= count; ++f) {
+            if (f >= (*work_now)[0] && f <= (*work_now)[1]) continue;
+            if (QTableWidgetItem* head = table->horizontalHeaderItem(static_cast<int>(f - 1))) head->setForeground(QBrush(QColor(tones.faint)));
+        }
+    }
     QStringList rows;
     for (const std::string& id : ids) rows << title_of(*p, Json(id));
     table->setVerticalHeaderLabels(rows);
@@ -245,7 +337,7 @@ void TimelinePanel::refresh() {
     }
     if (!ids.empty()) table->setCurrentCell(std::min(row_now, static_cast<int>(ids.size()) - 1), static_cast<int>(frame - 1));
     table->blockSignals(false);
-    where->setText(QStringLiteral("%1 / %2").arg(frame).arg(count));
+    where->setText(frame_text(frame, count, speed));
 }
 
 void TimelinePanel::set_frame(std::int64_t to, bool follow) {
@@ -401,18 +493,19 @@ void TimelinePanel::tick() {
         return;
     }
     const std::int64_t count = core::anim::frames_of(*p);
+    const auto [first, last] = core::played_frames(*p);  // (PC5 J-e1: the work area's frames, else all of them)
     std::int64_t next = frame + 1;
-    if (next > count) {
-        if (!core::anim::loops(*p)) {
+    if (next > last || next < first) {
+        if (!core::anim::loops(*p) && next > last) {
             play_button->setChecked(false);
             return;
         }
-        next = 1;
+        next = first;
     }
     frame = next;
     window_->anim_frames[p->id] = next;
     window_->canvas()->show_frame(frame_picture(*p, next));
-    where->setText(QStringLiteral("%1 / %2").arg(next).arg(count));
+    where->setText(frame_text(next, count, core::anim::fps_of(*p)));
 }
 
 QImage TimelinePanel::frame_picture(const core::Page& p, std::int64_t at) {
@@ -434,6 +527,16 @@ QImage TimelinePanel::frame_picture(const core::Page& p, std::int64_t at) {
 void TimelinePanel::export_animation() {
     const core::Page* p = page();
     if (p == nullptr) return;
+    if (!core::anim::is_animation(*p)) {
+        window_->flash(QStringLiteral("このページはアニメーションではありません（タイムラインの「ビデオタイムラインを作成」から）"), 5000);
+        return;
+    }
+    // (PC5 J-e1: ビデオをレンダリング's window first — the frames, the size, the speed —, then where and in which format)
+    RenderVideoDialog asked(this, *p);
+    if (ask::exec(&asked) != QDialog::Accepted) return;
+    const auto range = asked.frames();
+    const auto width = asked.width();
+    const auto speed = asked.speed();
     const auto& path = window_->session().path();
     const QString folder = path ? QString::fromStdString(core::path_to_utf8(path->parent_path()))
                                 : QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
@@ -448,7 +551,8 @@ void TimelinePanel::export_animation() {
     const std::string fmt = chosen.contains(QStringLiteral("連番")) ? std::string("frames") : (suffix.isEmpty() ? std::string("gif") : suffix.toStdString());
     QApplication::setOverrideCursor(Qt::WaitCursor);
     try {
-        render::anim::export_animation(*p, core::path_from_utf8(target.toStdString()), &window_->book(), 100, fmt);
+        render::anim::export_animation(*p, core::path_from_utf8(target.toStdString()), &window_->book(), 100, fmt, true, "trim", width,
+                                       range, speed);
     } catch (const std::exception& error) {
         QApplication::restoreOverrideCursor();
         ask::warning(this, QStringLiteral("Genko"), wording::error(QString::fromUtf8(error.what())));
@@ -458,6 +562,192 @@ void TimelinePanel::export_animation() {
     QString said = QStringLiteral("アニメーションを書き出しました: %1").arg(target);
     if (const auto note = formats::ink_note(*p)) said += QStringLiteral("（") + QString::fromStdString(*note) + QStringLiteral("）");  // (color-mode@1)
     window_->flash(said, 5000);
+}
+
+// --- PC5 J-e1: moving the frame, the work area, the panel's menu ----------------------------------------------------
+
+void TimelinePanel::go(const QString& where_to) {
+    const core::Page* p = page();
+    if (p == nullptr || !core::anim::is_animation(*p)) {
+        window_->flash(QStringLiteral("このページはアニメーションではありません（タイムラインの「ビデオタイムラインを作成」から）"), 4000);
+        return;
+    }
+    if (play_button->isChecked()) play_button->setChecked(false);  // (stepping stops the playing)
+    std::int64_t count = 1;
+    std::array<std::int64_t, 2> played{1, 1};
+    try {
+        count = core::anim::frames_of(*p);
+        played = core::played_frames(*p);
+    } catch (const std::exception&) {
+    }
+    const std::int64_t now = std::clamp<std::int64_t>(window_->current_frame(p), 1, count);
+    std::int64_t to = now;
+    if (where_to == QLatin1String("next")) {
+        to = now + 1;
+    } else if (where_to == QLatin1String("previous")) {
+        to = now - 1;
+    } else if (where_to == QLatin1String("first")) {
+        to = 1;
+    } else if (where_to == QLatin1String("last")) {
+        to = count;
+    } else if (where_to == QLatin1String("work_start")) {
+        to = played[0];
+    } else if (where_to == QLatin1String("work_end")) {
+        to = played[1];
+    }
+    set_frame(std::clamp<std::int64_t>(to, 1, count));
+}
+
+void TimelinePanel::ask_frame() {
+    const core::Page* p = page();
+    if (p == nullptr || !core::anim::is_animation(*p)) {
+        go(QString());  // (said so)
+        return;
+    }
+    const auto count = static_cast<int>(core::anim::frames_of(*p));
+    const auto chosen = ask::get_int(this, QStringLiteral("フレームへ移動"), QStringLiteral("フレーム（1〜%1）").arg(count),
+                                     static_cast<int>(std::clamp<std::int64_t>(window_->current_frame(p), 1, count)), 1, count);
+    if (!chosen) return;
+    if (play_button->isChecked()) play_button->setChecked(false);
+    set_frame(*chosen);
+}
+
+void TimelinePanel::set_work(std::optional<std::array<std::int64_t, 2>> span) {
+    const core::Page* p = page();
+    if (p == nullptr || !core::anim::is_animation(*p)) return;
+    if (core::work_area(*p) == span) {
+        refresh();
+        return;
+    }
+    set(Json{{"work", span ? Json::array({(*span)[0], (*span)[1]}) : Json()}});
+}
+
+void TimelinePanel::delete_timeline() {
+    const core::Page* p = page();
+    if (p == nullptr || !core::anim::is_animation(*p)) return;
+    play_button->setChecked(false);
+    ops(Json::array({Json{{"op", "set_animation"}, {"page", p->index.json()}, {"off", true}}}));
+    window_->canvas()->renderer().set_anim(1, false);
+}
+
+void TimelinePanel::build_menu() {
+    previous_button->setDefaultAction(window_->action(QStringLiteral("act_previous_frame")));
+    next_button->setDefaultAction(window_->action(QStringLiteral("act_next_frame")));
+    previous_button->setText(QStringLiteral("◀"));
+    next_button->setText(QStringLiteral("▶"));
+    panel_menu->clear();
+    panel_menu->addAction(window_->action(QStringLiteral("act_timeline")));  // (ビデオタイムラインを作成)
+    QAction* gone = panel_menu->addAction(QStringLiteral("タイムラインを削除"), this, [this] { delete_timeline(); });
+    gone->setObjectName(QStringLiteral("timeline_delete"));
+    gone->setToolTip(QStringLiteral("このページをふつうのページに戻します（セルはレイヤーのまま残ります）"));
+    panel_menu->addSeparator();
+    QMenu* moves = panel_menu->addMenu(QStringLiteral("移動"));
+    for (const char* name : {"act_next_frame", "act_previous_frame", "act_first_frame", "act_last_frame", "act_work_start", "act_work_end"}) {
+        moves->addAction(window_->action(QString::fromLatin1(name)));
+    }
+    moves->addSeparator();
+    moves->addAction(window_->action(QStringLiteral("act_go_to_frame")));
+    QMenu* area = panel_menu->addMenu(QStringLiteral("作業範囲"));
+    area->addAction(QStringLiteral("作業範囲の開始点を設定"), this, [this] {
+        const core::Page* p = page();
+        if (p == nullptr || !core::anim::is_animation(*p)) return;
+        const std::int64_t now = window_->current_frame(p);
+        const auto played = core::played_frames(*p);
+        set_work(std::array<std::int64_t, 2>{now, std::max(now, played[1])});
+    })->setObjectName(QStringLiteral("timeline_work_start"));
+    area->addAction(QStringLiteral("作業範囲の終了点を設定"), this, [this] {
+        const core::Page* p = page();
+        if (p == nullptr || !core::anim::is_animation(*p)) return;
+        const std::int64_t now = window_->current_frame(p);
+        const auto played = core::played_frames(*p);
+        set_work(std::array<std::int64_t, 2>{std::min(now, played[0]), now});
+    })->setObjectName(QStringLiteral("timeline_work_end"));
+    area->addAction(QStringLiteral("作業範囲をクリア"), this, [this] { set_work(std::nullopt); })->setObjectName(QStringLiteral("timeline_work_clear"));
+    panel_menu->addSeparator();
+    panel_menu->addAction(window_->action(QStringLiteral("act_render_video")));
+    connect(panel_menu, &QMenu::aboutToShow, this, [this, gone, area] {
+        const core::Page* p = page();
+        const bool on = p != nullptr && core::anim::is_animation(*p);
+        gone->setEnabled(on);
+        area->setEnabled(on);
+    });
+}
+
+// --- ビデオをレンダリング ----------------------------------------------------------------------------------------------
+
+RenderVideoDialog::RenderVideoDialog(QWidget* parent, const core::Page& page) : QDialog(parent) {
+    setWindowTitle(QStringLiteral("ビデオをレンダリング"));
+    try {
+        count_ = core::anim::frames_of(page);
+        work_ = core::played_frames(page);
+        page_fps_ = core::anim::fps_of(page);
+    } catch (const std::exception&) {
+    }
+    const bool has_work = core::work_area(page).has_value();
+    range = new QComboBox;
+    range->addItem(QStringLiteral("すべてのフレーム（1〜%1）").arg(count_), QStringLiteral("all"));
+    if (has_work) range->addItem(QStringLiteral("作業範囲（%1〜%2）").arg(work_[0]).arg(work_[1]), QStringLiteral("work"));
+    range->addItem(QStringLiteral("フレームを指定"), QStringLiteral("custom"));
+    if (has_work) range->setCurrentIndex(1);  // (Photoshop's: the work area when there is one)
+    first = new QSpinBox;
+    last = new QSpinBox;
+    for (QSpinBox* box : {first, last}) box->setRange(1, static_cast<int>(count_));
+    first->setValue(static_cast<int>(work_[0]));
+    last->setValue(static_cast<int>(work_[1]));
+    const auto follow = [this] {
+        const bool custom = range->currentData().toString() == QLatin1String("custom");
+        first->setEnabled(custom);
+        last->setEnabled(custom);
+    };
+    connect(range, qOverload<int>(&QComboBox::currentIndexChanged), this, [follow](int) { follow(); });
+    follow();
+    size = new QSpinBox;
+    size->setRange(0, 8192);
+    size->setSpecialValueText(QStringLiteral("ページのまま（100 dpi）"));
+    size->setSuffix(QStringLiteral(" px（幅）"));
+    size->setValue(0);
+    fps = new QDoubleSpinBox;
+    fps->setRange(core::kTimelineFpsMin, core::kTimelineFpsMax);
+    fps->setDecimals(3);
+    fps->setSuffix(QStringLiteral(" fps"));
+    fps->setValue(page_fps_);
+    auto* frames_row = new QHBoxLayout;
+    frames_row->addWidget(first);
+    frames_row->addWidget(new QLabel(QStringLiteral("〜")));
+    frames_row->addWidget(last);
+    auto* form = new QFormLayout;
+    form->addRow(QStringLiteral("範囲"), range);
+    form->addRow(QStringLiteral("フレーム"), frames_row);
+    form->addRow(QStringLiteral("大きさ"), size);
+    form->addRow(QStringLiteral("フレームレート"), fps);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("レンダリング…"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("キャンセル"));
+    connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    auto* layout = new QVBoxLayout(this);
+    layout->addLayout(form);
+    layout->addWidget(buttons);
+}
+
+std::array<std::int64_t, 2> RenderVideoDialog::frames() const {
+    const QString which = range->currentData().toString();
+    if (which == QLatin1String("work")) return work_;
+    if (which == QLatin1String("custom")) {
+        const std::int64_t a = first->value(), b = last->value();
+        return {std::min(a, b), std::max(a, b)};
+    }
+    return {1, count_};
+}
+
+std::optional<int> RenderVideoDialog::width() const {
+    if (size->value() == 0) return std::nullopt;
+    return size->value();
+}
+
+std::optional<double> RenderVideoDialog::speed() const {
+    if (std::abs(fps->value() - page_fps_) < 0.0005) return std::nullopt;  // (the page's own, as it is)
+    return fps->value();
 }
 
 }  // namespace genko::app

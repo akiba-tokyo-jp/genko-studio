@@ -10,11 +10,15 @@
 //    ffmpeg is there), each file played by Pillow (ffprobe for the MP4) against Python's own files: the frames, how long
 //    each shows and the loop the same, and for GIF, APNG and PNGs every pixel (WebP is lossy: its frames, their sizes
 //    and timing);
-//  - and beyond Python: a camera rect that is not finite is refused (Python would write NaN into the book).
+//  - and beyond Python: a camera rect that is not finite is refused (Python would write NaN into the book); PC5 J-e1's
+//    timeline@1 — set_animation's work area and fps of 0.5..120 (anim_cases.json's timeline_cases), a range of the frames
+//    and another speed written out, `genko export --format animation --work-area`, `genko render --frame`, `genko inspect
+//    --timeline`. (set_animation's refusal of an fps names 0.5 to 120: opsupport's with_decided_words.)
 // Skipped without the Python reference.
 
 #include <QtTest>
 
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <random>
@@ -477,6 +481,193 @@ private slots:
             ++checked;
         }
         QCOMPARE(checked, 3000);
+    }
+
+    // PC5 J-e1 (timeline@1, SPEC.md PROD-01), beyond Python: anim_cases.json's timeline_cases — set_animation's work area
+    // and its fps of 0.5..120 on a new book: what the anim holds after them, a refusal's words, the question timeline_info
+    // answering the same work area and changing nothing, and the book saved naming timeline@1 only while the page has a
+    // work area or an fps past 1..60 — read back as written, writable, the same bytes written again. A book whose anim was
+    // made with the values before (none, null) is written byte for byte as without them.
+    void timelineBeyondPython() {
+        const Json file = genko::test::read_json(genko::test::repo_root() + "/native/tests/contract/anim_cases.json");
+        const genko::core::CommandBus bus(genko::render::ops_registry());
+        const genko::core::Actor actor("human:作者");
+        const genko::core::Document base = genko::core::new_episode("タイムライン", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        int checked = 0, named = 0;
+        for (const Json& c : file["timeline_cases"]) {
+            const std::string name = c["n"].get<std::string>();
+            genko::core::Document doc = base;
+            std::string error;
+            bool ok = true;
+            for (const Json& step : c["steps"]) {
+                try {
+                    doc = bus.apply(doc, step, actor, false).doc;
+                } catch (const genko::core::ApplyError& e) {
+                    ok = false;
+                    error = e.what();
+                    break;
+                }
+            }
+            QVERIFY2(ok == c["ok"].get<bool>(), (name + ": " + error).c_str());
+            if (!ok) {
+                QVERIFY2(error.find(c["error"].get<std::string>()) != std::string::npos, (name + ": " + error).c_str());
+                ++checked;
+                continue;
+            }
+            const genko::core::Page& page = doc.page(0);
+            const Json* anim = genko::core::anim::spec(page);
+            QVERIFY2(anim != nullptr, name.c_str());
+            for (const auto& [key, value] : c["anim"].items()) {
+                QVERIFY2(anim->contains(key) && anim->at(key) == value, (name + ": " + key + " " + anim->dump()).c_str());
+            }
+            if (c.value("no_work", false)) QVERIFY2(!anim->contains("work"), (name + ": " + anim->dump()).c_str());
+            // the question: the work area as the anim holds it, nothing changed
+            const auto asked = bus.apply(doc, Json::array({Json{{"op", "timeline_info"}, {"page", 1}}}), actor, false);
+            QVERIFY(asked.unchanged);
+            QCOMPARE(asked.results.size(), std::size_t{1});
+            QCOMPARE(asked.results[0]["work"], anim->contains("work") ? anim->at("work") : Json());
+            QCOMPARE(asked.results[0]["timeline@1"], c["timeline"]);
+            // saved and read back
+            const fs::path dir = genko::storage::path_from_utf8(path(QStringLiteral("timeline/%1").arg(checked)).toStdString());
+            genko::test::write_project(doc, dir);
+            const std::string bytes = genko::storage::read_file(dir / "project.json");
+            const Json project = genko::core::parse_python_json(bytes);
+            const auto features = project.value("features", Json::array());
+            const bool names = std::find(features.begin(), features.end(), Json("timeline@1")) != features.end();
+            QVERIFY2(names == c["timeline"].get<bool>(), (name + ": " + features.dump()).c_str());
+            named += names ? 1 : 0;
+            const auto back = genko::storage::load_document(dir);
+            QVERIFY2(back.document.read_only_reason.empty(), (name + ": " + back.document.read_only_reason).c_str());
+            QVERIFY2(genko::core::anim::spec(back.document.page(0)) != nullptr && *genko::core::anim::spec(back.document.page(0)) == *anim, name.c_str());
+            genko::test::write_project(back.document, dir);
+            QVERIFY2(genko::storage::read_file(dir / "project.json") == bytes, name.c_str());
+            ++checked;
+        }
+        QCOMPARE(checked, static_cast<int>(file["timeline_cases"].size()));
+        QVERIFY(named >= 8);
+        // the values before: an anim made with "work": null written as one made without it
+        const auto written = [&](const char* ops, const QString& where) {
+            const genko::core::Document doc = bus.apply(base, Json::parse(ops), actor, false).doc;
+            const fs::path dir = genko::storage::path_from_utf8(path(where).toStdString());
+            genko::test::write_project(doc, dir);
+            return genko::storage::read_file(dir / "project.json");
+        };
+        const std::string plain = written(R"([{"op": "set_animation", "page": 1, "fps": 24, "frames": 30}])", QStringLiteral("timeline/plain"));
+        QCOMPARE(written(R"([{"op": "set_animation", "page": 1, "fps": 24, "frames": 30, "work": null}])", QStringLiteral("timeline/null")), plain);
+        QVERIFY(plain.find("timeline@1") == std::string::npos && plain.find("\"work\"") == std::string::npos);
+    }
+
+    // PC5 J-e1 (file.export.renderVideo, timeline.setFrame, timeline.info): the page of drawnAsTheFirstFrame (6 frames at 8
+    // fps) written out for a range of its frames — the numbered PNGs of frames 2..4 the same files as frames 2..4 of all of
+    // them, counted from frame_0001 —, at another speed (each frame shown 1/24 s, 2 s at 0.5 fps), a range or a speed outside
+    // refused; with a work area of 2..4, `genko export --format animation --work-area` writes the same GIF as the range
+    // (without it, all the frames as before; --work-area only for an animation); `genko render --frame 3` draws the page at
+    // frame 3 (the frame in its JSON; one past the frames or a page that is not an animation refused); `genko inspect
+    // --timeline` says its timeline.
+    void workAreaWrittenOut() {
+        QVERIFY2(doc_.has_value(), "drawnAsTheFirstFrame makes the books");
+        const genko::core::Page& page = doc_->page(1);
+        namespace ranim = genko::render::anim;
+        const QString all_dir = path("range/all"), part_dir = path("range/part");
+        const auto all = ranim::export_animation(page, genko::storage::path_from_utf8(all_dir.toStdString()), &*doc_, 20, std::string("frames"));
+        const auto part = ranim::export_animation(page, genko::storage::path_from_utf8(part_dir.toStdString()), &*doc_, 20, std::string("frames"), true,
+                                                  "trim", std::nullopt, std::array<std::int64_t, 2>{2, 4});
+        QCOMPARE(all.size(), std::size_t{6});
+        QCOMPARE(part.size(), std::size_t{3});
+        for (std::size_t i = 0; i < part.size(); ++i) {
+            QCOMPARE(genko::core::path_to_utf8(part[i].filename()), "frame_000" + std::to_string(i + 1) + ".png");
+            QVERIFY(genko::storage::read_file(part[i]) == genko::storage::read_file(all[i + 1]));
+        }
+        // the speed
+        const QString fast = path("range/fast.gif"), slow = path("range/slow.gif");
+        (void)ranim::export_animation(page, genko::storage::path_from_utf8(fast.toStdString()), &*doc_, 20, std::nullopt, true, "trim", std::nullopt,
+                                      std::array<std::int64_t, 2>{2, 5}, 24.0);
+        (void)ranim::export_animation(page, genko::storage::path_from_utf8(slow.toStdString()), &*doc_, 20, std::nullopt, true, "trim", std::nullopt,
+                                      std::nullopt, 0.5);
+        const auto read = genko::test::harness({"movie-info", path("range.json"), fast, slow}, path("pyenv"));
+        QVERIFY2(read.finished && read.exit_code == 0, read.err.right(2000).constData());
+        const Json info = genko::test::read_json(path("range.json"));
+        const auto total = [](const Json& durations) {
+            int sum = 0;
+            for (const Json& d : durations) sum += static_cast<int>(d.get<double>());
+            return sum;
+        };
+        QCOMPARE(total(info[fast.toStdString()]["durations"]), 4 * 40);  // (1/24 s: 42 ms, in GIF's 1/100 s)
+        QCOMPARE(total(info[slow.toStdString()]["durations"]), 6 * 2000);
+        for (const auto& [range, fps] : {std::pair{std::array<std::int64_t, 2>{0, 3}, 12.0}, std::pair{std::array<std::int64_t, 2>{4, 7}, 12.0},
+                                         std::pair{std::array<std::int64_t, 2>{4, 2}, 12.0}, std::pair{std::array<std::int64_t, 2>{1, 6}, 121.0}}) {
+            try {
+                (void)ranim::export_animation(page, genko::storage::path_from_utf8(path("range/no.gif").toStdString()), &*doc_, 20, std::nullopt, true,
+                                              "trim", std::nullopt, range, fps);
+                QFAIL("written");
+            } catch (const genko::core::Error& e) {
+                const std::string said = e.what();
+                QVERIFY2(said == "range is [first, last] of the frames 1 to 6" || said == "fps is 0.5 to 120", e.what());
+            }
+        }
+        QVERIFY(!QFile::exists(path("range/no.gif")));
+        // a work area of 2..4: the command line's --work-area
+        const genko::core::CommandBus bus(genko::render::ops_registry());
+        const genko::core::Document worked =
+            bus.apply(*doc_, Json::parse(R"([{"op": "set_animation", "page": 2, "work": [2, 4]}])"), genko::core::Actor("human:作者"), false).doc;
+        const QString book = path("worked.genko");
+        genko::test::write_project(worked, genko::storage::path_from_utf8(book.toStdString()));
+        const QString want = path("range/want.gif");
+        (void)ranim::export_animation(worked.page(1), genko::storage::path_from_utf8(want.toStdString()), &worked, 100, std::nullopt, true, "trim",
+                                      std::nullopt, std::array<std::int64_t, 2>{2, 4});
+        const QString got = path("range/cli.gif");
+        const auto cli = genko::test::run_genko({"export", book, got, "--format", "animation", "--page", "2", "--work-area"});
+        QVERIFY2(cli.finished && cli.exit_code == 0, (cli.out + cli.err).constData());
+        QVERIFY(genko::test::read_bytes(got) == genko::test::read_bytes(want));
+        const QString every = path("range/every.gif"), every_want = path("range/every-want.gif");
+        const auto plain = genko::test::run_genko({"export", book, every, "--format", "animation", "--page", "2"});
+        QVERIFY2(plain.finished && plain.exit_code == 0, (plain.out + plain.err).constData());
+        (void)ranim::export_animation(worked.page(1), genko::storage::path_from_utf8(every_want.toStdString()), &worked, 100);
+        QVERIFY(genko::test::read_bytes(every) == genko::test::read_bytes(every_want));
+        QVERIFY(genko::test::read_bytes(every) != genko::test::read_bytes(got));
+        const auto wrong = genko::test::run_genko({"export", book, path("range/x.png"), "--format", "png", "--work-area"});
+        QCOMPARE(wrong.exit_code, 2);
+        QVERIFY2(wrong.err.contains("--work-area: only with --format animation"), wrong.err.constData());
+        // genko render --frame
+        const QString out = path("range/frame3.png");
+        const auto drawn = genko::test::run_genko({"render", book, "--page", "2", "--dpi", "40", "--frame", "3", "--out", out});
+        QVERIFY2(drawn.finished && drawn.exit_code == 0, (drawn.out + drawn.err).constData());
+        QCOMPARE(genko::core::parse_python_json(drawn.out.toStdString())["frame"], Json(3));
+        genko::render::RenderOptions at;
+        at.at_frame = true;
+        const auto expected = genko::render::render_page(genko::core::anim::at_frame(worked.page(1), 3), 40, at, &worked).image;
+        const auto image = genko::render::read_png(genko::test::read_bytes(out));
+        QVERIFY(image.size() == expected.size() && image.tobytes() == expected.tobytes());
+        const auto first = genko::render::render_page(worked.page(1), 40, {}, &worked).image;  // (without --frame: frame 1, as before)
+        QVERIFY(genko::test::pixel_diff(image, first).pixels > 0);
+        const auto past = genko::test::run_genko({"render", book, "--page", "2", "--frame", "7", "--out", out});
+        QCOMPARE(past.exit_code, 1);
+        QVERIFY2((past.out + past.err).contains("frame is 1 to 6"), (past.out + past.err).constData());
+        const auto plain_page = genko::test::run_genko({"render", book, "--page", "1", "--frame", "1", "--out", out});
+        QCOMPARE(plain_page.exit_code, 1);
+        QVERIFY2((plain_page.out + plain_page.err).contains("not an animation"), (plain_page.out + plain_page.err).constData());
+        // genko inspect --timeline
+        const auto inspected = genko::test::run_genko({"inspect", book, "--timeline", "--page", "2"});
+        QVERIFY2(inspected.finished && inspected.exit_code == 0, (inspected.out + inspected.err).constData());
+        const Json said = genko::core::parse_python_json(inspected.out.toStdString())["pages"][0];
+        QCOMPARE(said["page"], Json(2));
+        QCOMPARE(said["animation"], Json(true));
+        QCOMPARE(said["frames"], Json(6));
+        QCOMPARE(said["fps"].get<double>(), 8.0);
+        QCOMPARE(said["work"], Json::array({2, 4}));
+        QCOMPARE(said["played"], Json::array({2, 4}));
+        QCOMPARE(said["seconds"].get<double>(), 0.75);
+        QCOMPARE(said["tracks"].size(), std::size_t{2});
+        QCOMPARE(said["tracks"][0]["folder"], Json("af"));
+        QCOMPARE(said["tracks"][0]["name"], Json("動き"));
+        QCOMPARE(said["camera_keys"], Json::array({1}));
+        QCOMPARE(said["light_table"], Json::array({"c3"}));
+        QCOMPARE(said["timeline@1"], Json(true));
+        const auto pages = genko::test::run_genko({"inspect", book, "--timeline"});
+        QVERIFY2(pages.finished && pages.exit_code == 0, (pages.out + pages.err).constData());
+        QCOMPARE(genko::core::parse_python_json(pages.out.toStdString())["pages"][0], (Json{{"page", 1}, {"animation", false}}));
+        const auto mixed = genko::test::run_genko({"inspect", book, "--timeline", "--slices"});
+        QCOMPARE(mixed.exit_code, 2);
     }
 
     // Beyond Python: a camera rect that is not finite is refused (Python keeps NaN and writes it into the book).

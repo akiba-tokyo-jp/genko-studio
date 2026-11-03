@@ -301,6 +301,10 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the page is not an animation.*", "このページはアニメーションではありません（先にタイムラインでアニメーションにする）"));
         r.push_back(rule(R"(rect is \[x, y, width, height\] in mm)", "カメラの範囲は［左, 上, 幅, 高さ］（mm）で指定します"));
         r.push_back(rule("cel must be a layer in the animation folder", "セルはそのアニメーションフォルダーの中のレイヤーです"));
+        // (PC5 J-e1, timeline@1: the speed, the work area, the frames rendered)
+        r.push_back(rule(R"(fps is 0\.5 to 120)", "フレームレートは 0.5〜120 fps です"));
+        r.push_back(rule(R"(work is \[first, last\]: frames of 1 to (\d+), or null)", "作業範囲は 1〜\\1 のフレームの［開始点, 終了点］で指定します"));
+        r.push_back(rule(R"(range is \[first, last\] of the frames 1 to (\d+))", "書き出すフレームは 1〜\\1 の［最初, 最後］で指定します"));
         r.push_back(rule("no plugin (.*)", "プラグイン「\\1」が見つかりません（プラグインのフォルダーに入れます）"));
         r.push_back(rule("plugin (.*?) cannot be loaded.*", "プラグイン「\\1」を読み込めません"));
         r.push_back(rule(R"(plugin (.*?) has no run\(image\))", "プラグイン「\\1」に処理（run）がありません"));

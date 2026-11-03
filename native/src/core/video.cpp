@@ -4,6 +4,7 @@
 
 #include "core/video.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -66,6 +67,68 @@ bool timeline_work(const Json& work) {
     const auto frame = [](const Json& v) { return v.is_number_integer() && !v.is_number_unsigned() ? v.get<std::int64_t>() : std::int64_t{0}; };
     const std::int64_t first = frame(work[0]), last = frame(work[1]);
     return first >= 1 && first <= last && last <= anim::kMaxFrames;
+}
+
+std::optional<std::array<std::int64_t, 2>> work_area(const Page& page) {
+    const Json* spec = anim::spec(page);
+    if (spec == nullptr) return std::nullopt;
+    const auto work = spec->find("work");
+    if (work == spec->end() || !timeline_work(*work)) return std::nullopt;
+    const std::int64_t count = anim::frames_of(page);
+    const std::int64_t last = std::min((*work)[1].get<std::int64_t>(), count);
+    return std::array<std::int64_t, 2>{std::min((*work)[0].get<std::int64_t>(), last), last};
+}
+
+std::array<std::int64_t, 2> played_frames(const Page& page) {
+    if (const auto work = work_area(page)) return *work;
+    return {1, anim::frames_of(page)};
+}
+
+Json timeline_info(const Page& page) {
+    Json out = Json::object();
+    out["page"] = page.index.json();
+    const Json* spec = anim::spec(page);
+    out["animation"] = spec != nullptr;
+    if (spec == nullptr) return out;
+    const std::int64_t frames = anim::frames_of(page);
+    const double fps = anim::fps_of(page);
+    const auto work = work_area(page);
+    const auto played = played_frames(page);
+    out["fps"] = fps;
+    out["frames"] = frames;
+    out["loop"] = anim::loops(page);
+    const auto seconds = [fps](std::int64_t n) { return fps > 0 ? Json(static_cast<double>(n) / fps) : Json(); };
+    out["seconds"] = seconds(frames);
+    out["work"] = work ? Json::array({(*work)[0], (*work)[1]}) : Json();
+    out["played"] = Json::array({played[0], played[1]});
+    out["played_seconds"] = seconds(played[1] - played[0] + 1);
+    Json tracks = Json::array();
+    for (const Json& folder : anim::folders(page)) {
+        Json track = Json::object();
+        track["folder"] = folder;
+        track["name"] = nullptr;
+        for (const Layer& layer : page.layers) {
+            if (folder.is_string() && layer.id == folder.get_ref<const std::string&>()) track["name"] = layer.title;
+        }
+        Json cels = Json::array();
+        for (const Layer* cel : anim::cels_of(page, folder)) cels.push_back(cel->id);
+        track["cels"] = std::move(cels);
+        const Json* entry = anim::track(page, folder);
+        track["exposures"] = entry != nullptr && entry->is_object() && entry->contains("cels") ? entry->at("cels") : Json::array();
+        tracks.push_back(std::move(track));
+    }
+    out["tracks"] = std::move(tracks);
+    Json keys = Json::array();
+    if (const auto camera = spec->find("camera"); camera != spec->end() && camera->is_array()) {
+        for (const Json& key : *camera) {
+            if (key.is_object() && key.contains("frame")) keys.push_back(key.at("frame"));
+        }
+    }
+    out["camera_keys"] = std::move(keys);
+    const auto light = spec->find("light_table");
+    out["light_table"] = light != spec->end() && light->is_array() ? *light : Json::array();
+    out["timeline@1"] = page_uses_timeline(page);
+    return out;
 }
 
 bool page_uses_timeline(const Page& page) {

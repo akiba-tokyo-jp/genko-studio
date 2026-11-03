@@ -23,10 +23,12 @@
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
 #include "app/plugins_dialog.hpp"
+#include "app/preferences.hpp"
 #include "app/tiles.hpp"
 #include "app/timeline.hpp"
 #include "service/wording.hpp"
 #include "core/anim.hpp"
+#include "core/video.hpp"
 #include "render/plugins.hpp"
 #include "render/timelapse.hpp"
 #include "testsupport.hpp"
@@ -161,7 +163,11 @@ private slots:
         panel->set_frame(3);
         panel->camera_here();
         QVERIFY(core::anim::camera_at(s.page(), 3).has_value());
-        // written out (the format from the file's name)
+        // written out (PC5 J-e1: ビデオをレンダリング's window — all the frames, as it opens — then where; the format from the
+        // file's name)
+        s.answers.responder->exec = [](QDialog* dialog) {
+            return qobject_cast<app::RenderVideoDialog*>(dialog) != nullptr ? int(QDialog::Accepted) : int(QDialog::Rejected);
+        };
         const QString gif = s.tmp.path() + "/w.gif";
         s.answers.responder->save_path_filtered = [gif](const QString&, const QString&, const QString&) {
             return std::pair<QString, QString>(gif, QStringLiteral("GIF (*.gif)"));
@@ -187,6 +193,144 @@ private slots:
         panel->refresh();
         QVERIFY(panel->start->isVisible());
         QVERIFY(!panel->table->isEnabled());
+    }
+
+    // PC5 J-e1 (SPEC.md PROD-01: timeline.*, window.panel.timeline, file.export.renderVideo): Photoshop's names (ページ →
+    // ビデオタイムラインを作成 — its old name read —, ウィンドウ → タイムライン, ファイル → 書き出し ▸ ビデオをレンダリング…), the
+    // panel's menu, the frame moved by the keys while the panel has the focus (← → Home End, Shift ← → to the work area's
+    // ends; the canvas keeps its arrows) and by フレームへ移動…, the work area (its boxes; played within it; the page names
+    // timeline@1), an fps past 60, ビデオをレンダリング's range and speed, タイムラインを削除, the words of the refusals.
+    void theTimelineMovesAndRenders() {
+        Studio s;
+        app::MainWindow* w = s.window.get();
+        // the names
+        QCOMPARE(w->action("act_timeline")->text(), QStringLiteral("ビデオタイムラインを作成"));
+        QVERIFY(app::preferences::old_names(QStringLiteral("ビデオタイムラインを作成")).contains(QStringLiteral("アニメーション（タイムライン）")));
+        QCOMPARE(w->findChild<QDockWidget*>(QStringLiteral("タイムライン"))->windowTitle(), QStringLiteral("タイムライン"));
+        QCOMPARE(w->action("act_render_video")->text(), QStringLiteral("ビデオをレンダリング…"));
+        QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_export"))->actions().contains(w->action("act_render_video")));
+        const std::vector<std::pair<const char*, QString>> moves{{"act_next_frame", QStringLiteral("次のフレーム")},
+                                                                  {"act_previous_frame", QStringLiteral("前のフレーム")},
+                                                                  {"act_first_frame", QStringLiteral("最初のフレーム")},
+                                                                  {"act_last_frame", QStringLiteral("最後のフレーム")},
+                                                                  {"act_work_start", QStringLiteral("作業範囲の開始点へ移動")},
+                                                                  {"act_work_end", QStringLiteral("作業範囲の終了点へ移動")},
+                                                                  {"act_go_to_frame", QStringLiteral("フレームへ移動…")}};
+        for (const auto& [name, text] : moves) QCOMPARE(w->action(name)->text(), text);
+        // a page that is not an animation: said so
+        w->action("act_next_frame")->trigger();
+        QVERIFY(w->last_notice().startsWith(QStringLiteral("このページはアニメーションではありません")));
+        // ビデオタイムラインを作成 from ページ: the panel shown and the page an animation
+        w->action("act_timeline")->trigger();
+        QVERIFY(core::anim::is_animation(s.page()));
+        app::TimelinePanel* panel = w->timeline();
+        QVERIFY(panel->isVisible());
+        QCOMPARE(core::anim::frames_of(s.page()), std::int64_t{24});
+        // its menu
+        QStringList items;
+        for (QAction* a : panel->panel_menu->actions()) items << (a->isSeparator() ? QStringLiteral("|") : a->menu() ? a->menu()->title() + QStringLiteral(" ▸") : a->text());
+        QCOMPARE(items, (QStringList{QStringLiteral("ビデオタイムラインを作成"), QStringLiteral("タイムラインを削除"), QStringLiteral("|"), QStringLiteral("移動 ▸"),
+                                     QStringLiteral("作業範囲 ▸"), QStringLiteral("|"), QStringLiteral("ビデオをレンダリング…")}));
+        // the keys: while the panel has the focus only, the same in both key sets
+        QCOMPARE(w->action("act_next_frame")->shortcuts(), QList<QKeySequence>{QKeySequence(Qt::Key_Right)});
+        QCOMPARE(w->action("act_work_end")->shortcuts(), QList<QKeySequence>{QKeySequence(Qt::SHIFT | Qt::Key_Right)});
+        QCOMPARE(w->action("act_next_frame")->shortcutContext(), Qt::WidgetWithChildrenShortcut);
+        w->activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(w));
+        panel->table->setFocus();
+        QVERIFY(gui_test::wait_for([&] { return panel->table->hasFocus(); }, 5000));
+        QTest::keyClick(panel->table, Qt::Key_Right);
+        QCOMPARE(w->current_frame(), std::int64_t{2});
+        QTest::keyClick(panel->table, Qt::Key_End);
+        QCOMPARE(w->current_frame(), std::int64_t{24});
+        QTest::keyClick(panel->table, Qt::Key_Right);  // (not past the last)
+        QCOMPARE(w->current_frame(), std::int64_t{24});
+        QTest::keyClick(panel->table, Qt::Key_Left);
+        QCOMPARE(w->current_frame(), std::int64_t{23});
+        QTest::keyClick(panel->table, Qt::Key_Home);
+        QCOMPARE(w->current_frame(), std::int64_t{1});
+        QCOMPARE(panel->where->text(), QStringLiteral("1 / 24（0.00 秒）"));
+        w->canvas()->setFocus();
+        QVERIFY(gui_test::wait_for([&] { return w->canvas()->hasFocus(); }, 5000));
+        QTest::keyClick(w->canvas(), Qt::Key_Right);  // (the canvas's arrow: not the timeline's)
+        QCOMPARE(w->current_frame(), std::int64_t{1});
+        // the work area, from its boxes: the book names timeline@1
+        panel->work_first->setValue(5);
+        panel->work_last->setValue(10);
+        panel->work->setChecked(true);
+        QCOMPARE(core::work_area(s.page()), (std::optional<std::array<std::int64_t, 2>>{{5, 10}}));
+        QVERIFY(core::page_uses_timeline(s.page()));
+        QVERIFY(panel->work_first->isEnabled());
+        panel->table->setFocus();
+        QVERIFY(gui_test::wait_for([&] { return panel->table->hasFocus(); }, 5000));
+        QTest::keyClick(panel->table, Qt::Key_Right, Qt::ShiftModifier);
+        QCOMPARE(w->current_frame(), std::int64_t{10});
+        QTest::keyClick(panel->table, Qt::Key_Left, Qt::ShiftModifier);
+        QCOMPARE(w->current_frame(), std::int64_t{5});
+        // played within it
+        panel->set_frame(10);
+        panel->play_button->setChecked(true);
+        panel->tick();
+        QCOMPARE(panel->frame, std::int64_t{5});
+        panel->play_button->setChecked(false);
+        // フレームへ移動…
+        s.answers.responder->get_int = [](const QString& title, const QString&, int, int lo, int hi) {
+            return title == QStringLiteral("フレームへ移動") && lo == 1 && hi == 24 ? std::optional<int>(7) : std::optional<int>();
+        };
+        w->action("act_go_to_frame")->trigger();
+        QCOMPARE(w->current_frame(), std::int64_t{7});
+        // an fps past 60
+        panel->fps->setValue(90);
+        emit panel->fps->editingFinished();
+        QCOMPARE(core::anim::fps_of(s.page()), 90.0);
+        // ビデオをレンダリング: the work area at 24 fps, as numbered PNGs (frames 5..10)
+        QString range_offered;
+        s.answers.responder->exec = [&](QDialog* dialog) {
+            auto* d = qobject_cast<app::RenderVideoDialog*>(dialog);
+            if (d == nullptr) return int(QDialog::Rejected);
+            range_offered = d->range->currentText();
+            d->fps->setValue(24);
+            return int(QDialog::Accepted);
+        };
+        const QString folder_out = s.tmp.path() + "/work";
+        s.answers.responder->save_path_filtered = [folder_out](const QString&, const QString&, const QString&) {
+            return std::pair<QString, QString>(folder_out, QStringLiteral("連番 PNG（フォルダー） (*)"));
+        };
+        w->action("act_render_video")->trigger();
+        QCOMPARE(range_offered, QStringLiteral("作業範囲（5〜10）"));
+        QCOMPARE(QDir(folder_out).entryList({QStringLiteral("frame_*.png")}, QDir::Files).size(), 6);
+        {
+            app::RenderVideoDialog d(w, s.page());
+            QCOMPARE(d.frames(), (std::array<std::int64_t, 2>{5, 10}));
+            QVERIFY(!d.speed().has_value());  // (the page's own)
+            d.range->setCurrentIndex(d.range->findData(QStringLiteral("all")));
+            QCOMPARE(d.frames(), (std::array<std::int64_t, 2>{1, 24}));
+            d.range->setCurrentIndex(d.range->findData(QStringLiteral("custom")));
+            d.first->setValue(12);
+            d.last->setValue(3);
+            QCOMPARE(d.frames(), (std::array<std::int64_t, 2>{3, 12}));
+            d.fps->setValue(0.5);
+            QCOMPARE(d.speed(), std::optional<double>(0.5));
+            d.size->setValue(320);
+            QCOMPARE(d.width(), std::optional<int>(320));
+        }
+        // the work area off, the fps back: as before (no timeline@1)
+        panel->work->setChecked(false);
+        QVERIFY(!core::work_area(s.page()).has_value());
+        panel->fps->setValue(12);
+        emit panel->fps->editingFinished();
+        QVERIFY(!core::page_uses_timeline(s.page()));
+        // the words
+        QCOMPARE(genko::wording::error(QStringLiteral("ops[0] set_animation: fps is 0.5 to 120")), QStringLiteral("フレームレートは 0.5〜120 fps です"));
+        QCOMPARE(genko::wording::error(QStringLiteral("ops[0] set_animation: work is [first, last]: frames of 1 to 24, or null")),
+                 QStringLiteral("作業範囲は 1〜24 のフレームの［開始点, 終了点］で指定します"));
+        // タイムラインを削除: an ordinary page again (the cels stay as layers)
+        const std::size_t layers = s.page().layers.size();
+        QAction* gone = panel->findChild<QAction*>(QStringLiteral("timeline_delete"));
+        QVERIFY(gone != nullptr);
+        gone->trigger();
+        QVERIFY(!core::anim::is_animation(s.page()));
+        QCOMPARE(s.page().layers.size(), layers);
     }
 
     void timelapseRecordsAndExports() {

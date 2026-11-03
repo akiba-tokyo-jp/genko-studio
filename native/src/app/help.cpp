@@ -58,7 +58,7 @@ const char* const kGuide = R"HTML(
 <h3>7. 点検して書き出す</h3>
 <p>{menu:act_checks}（{key:act_checks}）で、はみ出し・文字の小ささなどを探します。
 {menu:act_export}で PDF・TIFF・CMYK・PSD・レイヤーごとの PNG・Kindle・縦読み・SNS 用などに書き出します。PSD は{menu:act_import_psd}で読み込めます。制作過程は{menu:act_timelapse}で残せます。書き出す前にも点検が行われます。
-{menu:act_timeline}で、ページを短いアニメーションにできます（セル・タイムライン・前後のセルを透かす・カメラワーク・GIF や MP4 に書き出し）。
+{menu:act_timeline}で、ページを短いアニメーションにできます（セル・タイムライン・オニオンスキン・カメラワーク・作業範囲）。{menu:act_render_video}で GIF や MP4 などに書き出します。タイムラインのパネルでは ← → でフレームを動かせます。
 {menu:act_open}で開いた原稿はタブに並び、{key:act_next_doc}で切り替えます。{menu:act_new_window}で、拡大して描く窓と全体を見る窓を並べられます。
 紙で確かめたいときは{menu:act_print}（{key:act_print}）。</p>
 <h3>8. AI と一緒に描く（使う人だけ）</h3>

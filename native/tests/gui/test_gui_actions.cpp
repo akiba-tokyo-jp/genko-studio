@@ -449,7 +449,7 @@ private slots:
         // (act_layer_from_background, act_layer_group_from_layers), レイヤーのグループ解除 (act_layer_ungroup), 非表示レイヤーを削除
         // (act_layer_delete_hidden), クリッピングマスクを作成・解除 (act_clip_create, act_clip_release), ファイル → スクリプト →
         // すべての空のレイヤーを削除・すべてのレイヤー効果を統合 (act_delete_empty_layers, act_bake_layer_effects) — test_gui_layers.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{749});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8 and H-d's 12)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{757});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12 and J-e1's 8)
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -543,7 +543,9 @@ private slots:
                                              QStringLiteral("書き出しの環境設定…"), QStringLiteral("|"), QStringLiteral("Web 用に保存（従来）…"), QStringLiteral("|"),
                                              QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("レイヤーからファイル…"),
                                              QStringLiteral("レイヤーカンプからファイル…"),  // (PC5 J-a)
-                                             QStringLiteral("パスを Illustrator へ…"), QStringLiteral("カラールックアップテーブル…"),
+                                             QStringLiteral("パスを Illustrator へ…"),
+                                             QStringLiteral("ビデオをレンダリング…"),  // (PC5 J-e1: after パスを Illustrator へ…, Photoshop's)
+                                             QStringLiteral("カラールックアップテーブル…"),
                                              QStringLiteral("データセットからファイル…")}));  // (PC5 I-d)
         // (PC5 H-0: no key in the Photoshop key set — Ctrl+E is 下のレイヤーと結合; Ctrl+E in the Genko set, theKeySets)
         QVERIFY(studio.act("act_export")->shortcuts().isEmpty());

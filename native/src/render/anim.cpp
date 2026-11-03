@@ -13,6 +13,7 @@
 #include "core/paths.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "core/video.hpp"
 #include "render/movie.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
@@ -122,7 +123,8 @@ Image render_frame(const core::Page& page, std::int64_t frame, int dpi, const co
 
 std::vector<std::filesystem::path> export_animation(const core::Page& page, const std::filesystem::path& dest,
                                                     const core::Document* episode, int dpi, std::optional<std::string> fmt,
-                                                    bool camera, std::string_view area, std::optional<int> width) {
+                                                    bool camera, std::string_view area, std::optional<int> width,
+                                                    std::optional<std::array<std::int64_t, 2>> range, std::optional<double> fps) {
     if (!core::anim::is_animation(page)) throw core::PyValueError("the page is not an animation (set_animation first)");
     std::string format = fmt.value_or("");
     if (format.empty()) {
@@ -134,7 +136,13 @@ std::vector<std::filesystem::path> export_animation(const core::Page& page, cons
         throw core::PyValueError("format must be one of gif, webp, png, mp4, frames");
     }
     const std::int64_t count = core::anim::frames_of(page);
-    Image first = render_frame(page, 1, dpi, episode, camera, area);
+    // (PC5 J-e1: the frames asked for and the speed, else all of them at the page's — as before)
+    const std::int64_t from = range ? (*range)[0] : 1, to = range ? (*range)[1] : count;
+    if (from < 1 || to > count || from > to) {
+        throw core::PyValueError("range is [first, last] of the frames 1 to " + std::to_string(count));
+    }
+    if (fps && !(core::kTimelineFpsMin <= *fps && *fps <= core::kTimelineFpsMax)) throw core::PyValueError("fps is 0.5 to 120");
+    Image first = render_frame(page, from, dpi, episode, camera, area);
     Size size = first.size();
     if (width && *width != 0) {
         size = Size{*width, static_cast<int>(std::max<std::int64_t>(
@@ -150,10 +158,10 @@ std::vector<std::filesystem::path> export_animation(const core::Page& page, cons
         std::vector<std::filesystem::path> parts;
         std::vector<std::filesystem::path> files;
         try {
-            for (std::int64_t f = 1; f <= count; ++f) {
-                const Image picture = f == 1 ? first : render_frame(page, f, dpi, episode, camera, area, size);
+            for (std::int64_t f = from; f <= to; ++f) {
+                const Image picture = f == from ? first : render_frame(page, f, dpi, episode, camera, area, size);
                 char name[32];
-                std::snprintf(name, sizeof(name), "frame_%04lld.png", static_cast<long long>(f));
+                std::snprintf(name, sizeof(name), "frame_%04lld.png", static_cast<long long>(f - from + 1));
                 files.push_back(dest / name);
                 parts.push_back(dest / (std::string(".") + name + ".part"));
                 save_png(picture, parts.back());
@@ -170,9 +178,9 @@ std::vector<std::filesystem::path> export_animation(const core::Page& page, cons
     }
     std::filesystem::path out = dest;
     out.replace_extension("." + format);
-    movie::Writer writer(out, core::anim::fps_of(page), format, 0.0, core::anim::loops(page));
+    movie::Writer writer(out, fps.value_or(core::anim::fps_of(page)), format, 0.0, core::anim::loops(page));
     writer.add(first);
-    for (std::int64_t f = 2; f <= count; ++f) writer.add(render_frame(page, f, dpi, episode, camera, area, size));
+    for (std::int64_t f = from + 1; f <= to; ++f) writer.add(render_frame(page, f, dpi, episode, camera, area, size));
     return {writer.finish()};
 }
 

@@ -293,7 +293,10 @@ const std::multimap<QString, QString>& renamed() {
                                                      {QStringLiteral("レイヤーを非表示"), QStringLiteral("選んだレイヤーを隠す")},
                                                      {QStringLiteral("レイヤーを結合…"), QStringLiteral("選んだレイヤーを結合…")},
                                                      {QStringLiteral("表示レイヤーを結合したレイヤーを作成"), QStringLiteral("表示レイヤーの結合コピーを作る")},
-                                                     {QStringLiteral("画像を統合…"), QStringLiteral("画像をフラット化…")}};
+                                                     {QStringLiteral("画像を統合…"), QStringLiteral("画像をフラット化…")},
+                                                     // (PC5 J-e1, 節 J 1.2: the timeline's by Photoshop's name — ウィンドウ →
+                                                     // タイムライン is the panel's switch)
+                                                     {QStringLiteral("ビデオタイムラインを作成"), QStringLiteral("アニメーション（タイムライン）")}};
     return all;
 }
 
