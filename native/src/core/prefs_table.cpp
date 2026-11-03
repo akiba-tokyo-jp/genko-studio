@@ -285,6 +285,7 @@ std::vector<Pref> make_table() {
         memory("state.layerDetails", "ui/layer_details"),
         memory("state.keySetTold", "ui/key_set_told"),  // (PC5 H-0: the change of the default key set said once)
         memory("state.keySets.*", "key_sets/*"),        // (PC5 H-d: the person's own key sets)
+        memory("state.measure.points", "measure/points"),  // (PC5 J-d2: データポイントを選択's points, app/measurement_log)
         memory("state.migration.*", "migration/*"),
         memory("state.move.*", "move/*"),
         memory("state.namesCurrent.*", "names_current/*"),
