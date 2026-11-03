@@ -291,10 +291,16 @@ private slots:
                                                                        {"method", "panorama"}, {"new_id", "M"}}}));
             const Json& report = r.results.at(0);
             QCOMPARE(report["blended"], Json("M"));
-            QCOMPARE(mask_at(r.doc, "A", 10, 30), 255);
-            QCOMPARE(mask_at(r.doc, "B", 10, 30), 0);
-            QCOMPARE(mask_at(r.doc, "A", 190, 30), 0);
-            QCOMPARE(mask_at(r.doc, "B", 190, 30), 255);
+            // (the masks at the page's mask grid — 200 dpi here, finer than the layers' —, whole: no gap between the layers' pixels)
+            for (const char* id : {"A", "B"}) {
+                const render::Image m = render::read_png(*layer_of(r.doc, id).mask->png).convert("L");
+                int flips = 0;
+                for (int x = 1; x < m.width(); ++x) flips += (m.getpixel(x, m.height() / 2)[0] > 127) != (m.getpixel(x - 1, m.height() / 2)[0] > 127) ? 1 : 0;
+                QVERIFY2(flips <= 2, qPrintable(QStringLiteral("%1: %2 flips").arg(QString::fromLatin1(id)).arg(flips)));
+            }
+            const std::array<int, 4> masks{mask_at(r.doc, "A", 10, 30), mask_at(r.doc, "B", 10, 30), mask_at(r.doc, "A", 190, 30), mask_at(r.doc, "B", 190, 30)};
+            QVERIFY2(masks == (std::array<int, 4>{255, 0, 0, 255}),
+                     qPrintable(QStringLiteral("%1: %2 %3 %4 %5").arg(QString::fromStdString(mode.dump())).arg(masks[0]).arg(masks[1]).arg(masks[2]).arg(masks[3])));
             // (the merged layer above B, of their kind; the left's blue on the left)
             QCOMPARE(r.doc.page(0).layers.back().id, std::string("M"));
             const auto px = rgba_at(r.doc, "M", 5, 30);

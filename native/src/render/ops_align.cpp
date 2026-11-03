@@ -102,29 +102,45 @@ void rgba_rows(const Pixels& p, F&& row) {
 
 float luminance(const float* rgba) { return std::clamp(0.2126f * rgba[0] + 0.7152f * rgba[1] + 0.0722f * rgba[2], 0.0f, 1.0f); }
 
-// The pixels' luminance and coverage on a sw × sh grid laid over them (box: each of their pixels into the cell it falls in).
+// The pixels' luminance and coverage on a sw × sh grid laid over them: each of their pixels into the cell it falls in (box) —
+// on a grid finer than theirs (a mask grid of 200 dpi over a picture's), each cell the cell under its middle.
 Shrunk shrink_to(const Pixels& p, std::size_t sw, std::size_t sh) {
-    Shrunk s;
-    s.w = sw;
-    s.h = sh;
-    s.luma.assign(sw * sh, 0.0f);
-    s.alpha.assign(sw * sh, 0.0f);
-    std::vector<float> count(sw * sh, 0.0f);
     const std::size_t w = p.width(), h = p.height();
+    const std::size_t tw = std::min(sw, std::max<std::size_t>(w, 1)), th = std::min(sh, std::max<std::size_t>(h, 1));
+    Shrunk t;
+    t.w = tw;
+    t.h = th;
+    t.luma.assign(tw * th, 0.0f);
+    t.alpha.assign(tw * th, 0.0f);
+    std::vector<float> count(tw * th, 0.0f);
     rgba_rows(p, [&](std::size_t y, const std::vector<float>& line) {
-        const std::size_t sy = std::min(y * sh / std::max<std::size_t>(h, 1), sh - 1);
+        const std::size_t ty = std::min(y * th / std::max<std::size_t>(h, 1), th - 1);
         for (std::size_t x = 0; x < w; ++x) {
-            const std::size_t i = sy * sw + std::min(x * sw / std::max<std::size_t>(w, 1), sw - 1);
+            const std::size_t i = ty * tw + std::min(x * tw / std::max<std::size_t>(w, 1), tw - 1);
             const float* v = line.data() + x * 4;
             const float a = std::clamp(v[3], 0.0f, 1.0f);
-            s.luma[i] += luminance(v) * a;
-            s.alpha[i] += a;
+            t.luma[i] += luminance(v) * a;
+            t.alpha[i] += a;
             count[i] += 1.0f;
         }
     });
-    for (std::size_t i = 0; i < sw * sh; ++i) {
-        s.luma[i] = s.alpha[i] > 0.0f ? s.luma[i] / s.alpha[i] : 0.0f;
-        s.alpha[i] = count[i] > 0.0f ? s.alpha[i] / count[i] : 0.0f;
+    for (std::size_t i = 0; i < tw * th; ++i) {
+        t.luma[i] = t.alpha[i] > 0.0f ? t.luma[i] / t.alpha[i] : 0.0f;
+        t.alpha[i] = count[i] > 0.0f ? t.alpha[i] / count[i] : 0.0f;
+    }
+    if (tw == sw && th == sh) return t;
+    Shrunk s;
+    s.w = sw;
+    s.h = sh;
+    s.luma.resize(sw * sh);
+    s.alpha.resize(sw * sh);
+    for (std::size_t y = 0; y < sh; ++y) {
+        const std::size_t ty = std::min(static_cast<std::size_t>((static_cast<double>(y) + 0.5) * static_cast<double>(th) / static_cast<double>(sh)), th - 1);
+        for (std::size_t x = 0; x < sw; ++x) {
+            const std::size_t tx = std::min(static_cast<std::size_t>((static_cast<double>(x) + 0.5) * static_cast<double>(tw) / static_cast<double>(sw)), tw - 1);
+            s.luma[y * sw + x] = t.luma[ty * tw + tx];
+            s.alpha[y * sw + x] = t.alpha[ty * tw + tx];
+        }
     }
     return s;
 }

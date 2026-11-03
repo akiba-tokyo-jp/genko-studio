@@ -522,12 +522,18 @@ private slots:
         QCOMPARE(b.doc().page(0).layers.size(), std::size_t(1));
         QCOMPARE((*b.doc().page(0).layers[0].smart)["stack"], Json("mean"));
         // (Photomerge of three crops of one scene)
-        render::Image scene = render::Image::create("RGBA", render::Size{640, 300}, render::Ink{90, 90, 90, 255});
+        // (test_contract_auto_align's scene: blobs over a gradient)
+        render::Image scene = render::Image::create("RGBA", render::Size{640, 300}, render::Ink{0, 0, 0, 255});
+        for (int x = 0; x < 640; ++x) {
+            const int v = static_cast<int>((0.25 + 0.2 * x / 640) * 255);
+            scene.paste(render::Ink{v, v, v, 255}, render::Box{x, 0, x + 1, 300});
+        }
         render::features::Rng rng{3};
-        for (int k = 0; k < 400; ++k) {
+        for (int k = 0; k < 640 * 300 / 900; ++k) {
             const int cx = static_cast<int>(rng.next() % 640), cy = static_cast<int>(rng.next() % 300), r = 3 + static_cast<int>(rng.next() % 9);
-            const int v = static_cast<int>(rng.next() % 256), g = static_cast<int>(rng.next() % 256);
-            scene.paste(render::Ink{v, g, 255 - v, 255}, render::Box{std::max(cx - r, 0), std::max(cy - r / 2, 0), std::min(cx + r, 640), std::min(cy + r / 2, 300)});
+            const int v = static_cast<int>(rng.next() % 1000) * 255 / 1000, g = static_cast<int>(rng.next() % 1000) * 255 / 1000;
+            scene.paste(render::Ink{v, g, 255 - v, 255},
+                        render::Box{std::max(cx - r, 0), std::max(cy - r * 6 / 10, 0), std::min(cx + r, 640), std::min(cy + r * 6 / 10, 300)});
         }
         for (const auto& [name, x, y] : {std::tuple{"p0.png", 20, 30}, std::tuple{"p1.png", 190, 40}, std::tuple{"p2.png", 360, 25}}) {
             write(b.root / name, render::write_png(scene.crop(render::Box{x, y, x + 260, y + 220})));
