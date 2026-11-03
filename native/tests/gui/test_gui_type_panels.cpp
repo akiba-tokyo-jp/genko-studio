@@ -133,6 +133,13 @@ private slots:
         QVERIFY(s.act("act_panel_glyphs")->isChecked());
         s.act("act_panel_glyphs")->trigger();
         QTRY_VERIFY(!s.dock(QStringLiteral("type_glyphs"))->isVisible());
+        // (PC5 H-d's ワークスペース ▸ グラフィックと Web brings 文字 and 段落, their switches checked)
+        s.act("act_workspace_graphic_and_web")->trigger();
+        QTRY_VERIFY(s.dock(QStringLiteral("type_character"))->isVisible());
+        QVERIFY(s.dock(QStringLiteral("type_paragraph"))->isVisible() && !s.dock(QStringLiteral("type_glyphs"))->isVisible());
+        QVERIFY(s.act("act_panel_character")->isChecked() && s.act("act_panel_paragraph")->isChecked());
+        s.act("act_workspace_essentials")->trigger();
+        QTRY_VERIFY(!s.dock(QStringLiteral("type_character"))->isVisible());
         // the renamed: 縦書き文字ツール (T), 編集 → 検索と置換…; Shift+T turns the type tools round
         QCOMPARE(s.act("act_text")->text(), QStringLiteral("縦書き文字ツール"));
         QCOMPARE(s.act("act_replace")->text(), QStringLiteral("検索と置換…"));

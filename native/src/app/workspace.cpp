@@ -659,7 +659,7 @@ void delete_workspace(const QString& name) {
 
 const std::vector<Preset>& presets() {
     // (Photoshop's workspaces, its menu's order, and the panels each brings — Genko's panels by their titles: オプション
-    // the tool's, ナビゲーター, ヒストリー; 文字・段落 when 節 G makes them)
+    // the tool's, ナビゲーター, ヒストリー; 文字・段落 PC5 G-d's — their docks titled so, test_gui_type_panels)
     static const std::vector<Preset> all{
         {QStringLiteral("essentials"), QStringLiteral("初期設定"), {}, {}},
         {QStringLiteral("graphicAndWeb"), QStringLiteral("グラフィックと Web"),
