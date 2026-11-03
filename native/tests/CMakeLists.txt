@@ -739,6 +739,22 @@ genko_target_flags(genko_test_native_plugin)
 genko_test(test_native_plugins SOURCES unit/test_native_plugins.cpp DEPS genko_render_ops LABELS unit TIMEOUT 900)
 target_compile_definitions(test_native_plugins PRIVATE GENKO_TEST_NATIVE_PLUGIN="$<TARGET_FILE:genko_test_native_plugin>")
 add_dependencies(test_native_plugins genko_test_native_plugin)
+# WebAssembly filter plugins (PC5 J-f, plugins:WASM-ABI-v1, docs/PLUGIN_WASM.md) through genko-plugin-host (native/wasm-host,
+# built by cargo beside genko — GenkoPluginHost.cmake; without it, skipped): PhotoCraft's abi.rs ideas — the example
+# invert.wasm, every depth and model, bands and the selection, the settings, cleaning, hostile modules, budgets,
+# installing and the additional folder. The modules: native/tests/data/plugins.
+genko_test(test_wasm_plugins SOURCES unit/test_wasm_plugins.cpp DEPS genko_render_ops LABELS unit TIMEOUT 900)
+target_compile_definitions(test_wasm_plugins PRIVATE GENKO_TEST_NATIVE_PLUGIN="$<TARGET_FILE:genko_test_native_plugin>"
+                                                     GENKO_TEST_PLUGIN_HOST="$<TARGET_FILE_DIR:genko>/genko-plugin-host${CMAKE_EXECUTABLE_SUFFIX}")
+add_dependencies(test_wasm_plugins genko_test_native_plugin)
+if(TARGET genko_plugin_host)
+  add_dependencies(test_wasm_plugins genko_plugin_host)
+  add_dependencies(test_contract_plugins genko_plugin_host)
+endif()
+target_compile_definitions(test_contract_plugins PRIVATE GENKO_TEST_PLUGIN_HOST="$<TARGET_FILE_DIR:genko>/genko-plugin-host${CMAKE_EXECUTABLE_SUFFIX}"
+                                                         GENKO_TEST_NATIVE_PLUGIN="$<TARGET_FILE:genko_test_native_plugin>")
+add_dependencies(test_contract_plugins genko_test_native_plugin)
+target_link_libraries(test_contract_plugins PRIVATE genko_api)
 
 # 3D (M3-C): the geometry of figures, guides and models bit for bit against Python, the ops, the drawing.
 genko_test(test_contract_3d_geometry SOURCES contract/test_contract_3d_geometry.cpp DEPS genko_test_support genko_render

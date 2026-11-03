@@ -134,7 +134,7 @@ private slots:
         // plugin.json that cannot be used
         install("badjson", "{not json");
         install("listjson", "[1, 2]");
-        install("protocol2", R"({"protocol": 2, "name": "x", "executable": "filter"})");
+        install("protocol2", R"({"protocol": 3, "name": "x", "executable": "filter"})");  // (PC5 J-f: 2 is protocol 2 now)
         install("noname", R"({"protocol": 1, "executable": "filter"})");
         install("noprogram", R"({"protocol": 1, "name": "x", "executable": "missing"})", false);
         install("outside", R"({"protocol": 1, "name": "x", "executable": "../negative/filter"})", false);
@@ -185,7 +185,7 @@ private slots:
         const QString cannot = QStringLiteral("the plugin.json of plugin %1 cannot be used (%2)");
         QCOMPARE(problem("badjson/"), cannot.arg("badjson", "it is not JSON"));
         QCOMPARE(problem("listjson/"), cannot.arg("listjson", "it is not a JSON object"));
-        QCOMPARE(problem("protocol2/"), cannot.arg("protocol2", "its protocol must be 1"));
+        QCOMPARE(problem("protocol2/"), cannot.arg("protocol2", "its protocol must be 1 or 2"));
         QCOMPARE(problem("noname/"), cannot.arg("noname", "its name must be a text"));
         QCOMPARE(problem("noprogram/"), cannot.arg("noprogram", "its program missing is not in its folder"));
         QCOMPARE(problem("outside/"), cannot.arg("outside", "its executable must be a path inside the plugin's folder"));

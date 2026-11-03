@@ -494,7 +494,7 @@ private slots:
         std::ofstream(folder / "tint" / "plugin.json")
             << R"({"protocol": 1, "name": "色づけ", "executable": "tint", "args": ["--soft", "a b"], "params": {"amount": {"label": "強さ", "min": 0, "max": 1, "default": 0.5}}})";
         std::ofstream(folder / "tint" / "tint") << "not a program: never started here";
-        std::ofstream(folder / "broken" / "plugin.json") << R"({"protocol": 2, "name": "x", "executable": "x"})";
+        std::ofstream(folder / "broken" / "plugin.json") << R"({"protocol": 3, "name": "x", "executable": "x"})";  // (PC5 J-f: 2 is protocol 2 now)
         QString question;
         s.answers.responder->question = [&](const QString& title, const QString& text) {
             question = text;
@@ -524,7 +524,7 @@ private slots:
         w->action("act_plugin_settings")->trigger();
         QCOMPARE(tint_row, QStringLiteral("tint（プログラム） — 色づけ"));
         QCOMPARE(broken_row, QStringLiteral("broken（プログラム）（使えません）"));
-        QCOMPARE(broken_tip, QStringLiteral("プラグイン「broken」の plugin.json が使えません（protocol は 1 にします）"));
+        QCOMPARE(broken_tip, QStringLiteral("プラグイン「broken」の plugin.json が使えません（protocol は 1 か 2 にします）"));
         QVERIFY(!broken_checkable);
         QVERIFY(question.startsWith(QStringLiteral("「tint」（プログラム）を動かしてよいですか。")));
         QVERIFY2(question.contains(QStringLiteral("動かすプログラム: tint\n引数: --soft \"a b\"")), qPrintable(question));  // (what will run, as plugin.json says)

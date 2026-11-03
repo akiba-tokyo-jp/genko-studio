@@ -120,6 +120,7 @@ void add(OpContext& c) {
     Page& page = doc.edit_page(at);
     // (on top, the selection its mask when it has none: push_filter, which the ops putting their own on a smart object share)
     const std::size_t index = push_filter(doc, page, page.layers[i], kind->get<std::string>(), params_in(c.op), area);
+    keep_plugin_pictures(doc, at, i, &c.notes);  // (PC5 J-f: what its plugin filters make, kept)
     c.report = Json{{"index", index}};
 }
 
@@ -163,6 +164,7 @@ void set(OpContext& c) {
     }
     filters[index] = std::move(f);
     put_filters(doc.edit_page(at).layers[i], std::move(filters));
+    keep_plugin_pictures(doc, at, i, &c.notes);  // (PC5 J-f)
     c.report = Json{{"index", index}};
 }
 
@@ -178,6 +180,7 @@ void move(OpContext& c) {
     filters.erase(filters.begin() + static_cast<std::ptrdiff_t>(from));
     filters.insert(filters.begin() + static_cast<std::ptrdiff_t>(to), std::move(f));
     put_filters(doc.edit_page(at).layers[i], std::move(filters));
+    keep_plugin_pictures(doc, at, i, &c.notes);  // (PC5 J-f)
     c.report = Json{{"index", to}};
 }
 
@@ -196,6 +199,7 @@ void remove(OpContext& c) {
     const std::size_t index = index_at(c.op, "index", filters.size(), filters.size() - 1);
     filters.erase(filters.begin() + static_cast<std::ptrdiff_t>(index));
     put_filters(doc.edit_page(at).layers[i], std::move(filters));
+    keep_plugin_pictures(doc, at, i, &c.notes);  // (PC5 J-f)
 }
 
 void state(OpContext& c) {

@@ -2811,6 +2811,8 @@ auto plugin_work(Work&& work) {
         return work();
     } catch (const core::Error& error) {
         if (error.code() == "plugin_not_allowed" || error.code() == "plugin_runner") throw OpError(error.what());
+        // (PC5 J-f: a module that cannot be used; a plugin of 8 bits on other samples)
+        if (error.code() == "plugin_manifest" || error.code() == "plugin_8bit") throw OpError(error.what());
         throw;
     }
 }
@@ -2820,6 +2822,93 @@ auto plugin_work(Work&& work) {
     const std::string key = kind.substr(plugins::kPrefix.size());
     if (!plugins::installed(key)) throw core::PyValueError("no plugin " + key);
     throw OpError("a filter plugin works on 8-bit paint layers, not on a layer of precise colours");
+}
+
+// --- PC5 J-f (plugin.run): a plugin that works in bands (a WebAssembly module, a native one of protocol 2) on the
+// layer's own samples — precise colour, a page's inks, a channel lent as a grey picture — inside the op's area
+
+// The plugin of a filter_raster kind works in bands (installed, and a module or a native plugin of protocol 2).
+bool plugin_in_bands(const std::string& kind) {
+    if (!kind.starts_with(plugins::kPrefix)) return false;
+    const std::string key = kind.substr(plugins::kPrefix.size());
+    return plugins::installed(key) && plugins::works_in_bands(key);
+}
+
+// The op's area over a picture of the page `width` × `height` pixels: one value 0..1 a pixel (as filters.within masks).
+std::vector<float> area_coverage(const Page& page, const Json& area, int width, int height) {
+    const selection::AreaMask inside = selection::area_mask(area, raster::dpi_across(page, width));
+    Image mask = Image::create("L", Size{width, height}, Ink(0));
+    mask.paste(inside.mask, Point{static_cast<int>(inside.x0), static_cast<int>(inside.y0)});
+    const std::string bytes = mask.tobytes();
+    std::vector<float> out(bytes.size());
+    for (std::size_t i = 0; i < bytes.size(); ++i) out[i] = static_cast<float>(static_cast<unsigned char>(bytes[i]) / 255.0);
+    return out;
+}
+
+// A precise layer's raster through the plugin: its RGBA samples (the page's encoded values, 16 or 32 bits).
+void plugin_on_precise_pixels(const Page& page, Layer& layer, const std::string& kind, const Json& params, const Json* area) {
+    core::ColorRasterEdit edit(*layer.color_raster);
+    plugin_bands::Samples s;
+    s.width = static_cast<int>(edit.width());
+    s.height = static_cast<int>(edit.height());
+    s.depth = edit.floating() ? 32 : 16;
+    const std::size_t n = std::size_t(edit.width()) * edit.height();
+    s.data.resize(n * 4);
+    for (std::size_t i = 0; i < n; ++i) {
+        const std::array<double, 4> p = edit.pixel(i);
+        for (unsigned c = 0; c < 4; ++c) s.data[i * 4 + c] = static_cast<float>(p[c]);
+    }
+    const std::optional<std::vector<float>> cover = area ? std::optional(area_coverage(page, *area, s.width, s.height)) : std::nullopt;
+    plugins::run_samples(kind, s, cover ? &*cover : nullptr, params);
+    for (std::size_t i = 0; i < n; ++i) {
+        edit.set(i, {s.data[i * 4], s.data[i * 4 + 1], s.data[i * 4 + 2], std::clamp<double>(s.data[i * 4 + 3], 0.0, 1.0)});
+    }
+    layer.color_raster = std::make_shared<const std::string>(std::move(edit).take());
+}
+
+// Ink pixels through the plugin, in place: their normalised values (InkPixels::value), the alpha last.
+void plugin_on_inks(const Page& page, core::InkPixels& inks, const std::string& kind, const Json& params, const Json* area) {
+    plugin_bands::Samples s;
+    s.width = static_cast<int>(inks.width);
+    s.height = static_cast<int>(inks.height);
+    s.channels = inks.channels();
+    s.depth = inks.depth;
+    s.alpha = inks.has_alpha();
+    s.mode = plugin_bands::mode_of_inks(*page.color, inks.space);
+    const std::size_t n = inks.pixel_count();
+    s.data.resize(n * s.channels);
+    for (std::size_t i = 0; i < n; ++i) {
+        for (unsigned c = 0; c < s.channels; ++c) s.data[i * s.channels + c] = static_cast<float>(inks.value(i, c));
+    }
+    const std::optional<std::vector<float>> cover = area ? std::optional(area_coverage(page, *area, s.width, s.height)) : std::nullopt;
+    plugins::run_samples(kind, s, cover ? &*cover : nullptr, params);
+    for (std::size_t i = 0; i < n; ++i) {
+        for (unsigned c = 0; c < s.channels; ++c) inks.set(i, c, s.data[i * s.channels + c]);
+    }
+}
+
+// A channel lent to the op as a grey picture (render/channels' ChannelLending, render/mask_lending's MaskLending: a
+// hidden paint layer "lent_…" of its own): a plugin gets its one grey channel.
+bool lent_grey(const Layer& layer) { return layer.id.starts_with("lent_") && !layer.visible && !layer.exportable; }
+
+Image plugin_on_grey(const Image& rgba, const std::string& kind, const Json& params, const std::vector<float>* cover) {
+    plugin_bands::Samples s;
+    s.width = rgba.width();
+    s.height = rgba.height();
+    s.channels = 1;
+    s.alpha = false;
+    s.mode = plugin_bands::Mode::Gray;
+    const std::string bytes = rgba.tobytes();
+    const std::size_t n = std::size_t(s.width) * std::size_t(s.height);
+    s.data.resize(n);
+    for (std::size_t i = 0; i < n; ++i) s.data[i] = static_cast<float>(static_cast<unsigned char>(bytes[i * 4]) / 255.0);
+    plugins::run_samples(kind, s, cover, params);
+    std::string out(n * 4, '\xff');
+    for (std::size_t i = 0; i < n; ++i) {
+        const char v = static_cast<char>(static_cast<unsigned char>(std::lround(std::clamp(double(s.data[i]), 0.0, 1.0) * 255.0)));
+        std::fill_n(out.begin() + std::ptrdiff_t(i * 4), 3, v);
+    }
+    return Image::frombytes("RGBA", rgba.size(), out);
 }
 
 void filter_raster_pixels(OpContext& c) {
@@ -2849,6 +2938,11 @@ void filter_raster_pixels(OpContext& c) {
                 throw OpError(error.what());
             }
         };
+        if (plugin_in_bands(kind)) {  // (PC5 J-f: a plugin that works on the precise samples themselves)
+            const std::optional<Json> area = core::truthy_at(op, "area") ? std::optional<Json>(core::op_area(op)) : std::nullopt;
+            refused([&] { plugin_work([&] { plugin_on_precise_pixels(page, layer, kind, params, area ? &*area : nullptr); }); });
+            return;
+        }
         std::optional<adjust_ops::FilterWork> own;  // (PC2: a kind of the C++ build's own, or a native: render/ops_adjust)
         refused([&] {
             if (kind.starts_with("plugin:")) plugin_on_precise(kind);
@@ -2862,6 +2956,34 @@ void filter_raster_pixels(OpContext& c) {
             return color_filters::apply(page, layer, kind, own ? own->params : params, area ? &*area : nullptr);
         });
         layer.color_raster = std::make_shared<const std::string>(std::move(pixels));
+        return;
+    }
+    // (PC5 J-f: a plugin that works in bands works the page's inks themselves, its lines and pictures drawn into them first)
+    if (const std::string kind = core::truthy_at(op, "kind") ? core::py_str(op["kind"]) : std::string();
+        page.color && !layer.raster_png && plugin_in_bands(kind)) {
+        Json params = Json::object();
+        for (const auto& [key, value] : op.items()) {
+            if (key != "op" && key != "page" && key != "layer" && key != "id" && key != "kind" && key != "area") params[key] = value;
+        }
+        const std::optional<Json> area = core::truthy_at(op, "area") ? std::optional<Json>(core::op_area(op)) : std::nullopt;
+        const bool marks = layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer);
+        core::InkPixels inks = ink_edit::with_marks(page, layer, &doc);
+        try {
+            plugin_work([&] { plugin_on_inks(page, inks, kind, params, area ? &*area : nullptr); });
+        } catch (const core::PyUncaught&) {
+            throw;
+        } catch (const core::Error& error) {
+            if (error.code() != "value" && error.code() != "type") throw;
+            throw OpError(error.what());
+        }
+        layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(inks));
+        layer.ink_memo = {};
+        if (marks) {  // (as raster.bake_vectors leaves the layer: its marks in its pixels)
+            layer.strokes = core::empty_strokes();
+            layer.patches.clear();
+            layer.shapes = core::vector::empty_shapes();
+        }
+        layer.kind = LayerKind::Raster;
         return;
     }
     // color-mode@1: a CMYK or Lab page's paint layer filtered in its inks (render/ink_filters), its lines and pictures
@@ -2913,6 +3035,34 @@ void filter_raster_pixels(OpContext& c) {
     Json params = Json::object();
     for (const auto& [key, value] : op.items()) {
         if (key != "op" && key != "page" && key != "layer" && key != "id" && key != "kind" && key != "area") params[key] = value;
+    }
+    if (plugin_in_bands(kind)) {  // (PC5 J-f: inside the area by its coverage, as the plugin's bands are laid; a channel: grey)
+        std::optional<Image> mask;
+        if (core::truthy_at(op, "area")) {
+            const selection::AreaMask inside = selection::area_mask(core::op_area(op), raster::dpi_across(page, image.width()));
+            mask = Image::create("L", image.size(), Ink(0));
+            mask->paste(inside.mask, Point{static_cast<int>(inside.x0), static_cast<int>(inside.y0)});
+        }
+        Image out;
+        try {
+            out = plugin_work([&] {
+                if (!lent_grey(layer)) return plugins::run_8bit(kind, image, mask ? &*mask : nullptr, params);
+                std::vector<float> cover;
+                if (mask) {
+                    const std::string bytes = mask->tobytes();
+                    for (const char b : bytes) cover.push_back(static_cast<float>(static_cast<unsigned char>(b) / 255.0));
+                }
+                return plugin_on_grey(image, kind, params, mask ? &cover : nullptr);
+            });
+        } catch (const core::PyUncaught&) {
+            throw;
+        } catch (const core::Error& error) {
+            if (error.code() != "value" && error.code() != "type") throw;
+            throw OpError(error.what());
+        }
+        raster::save_raster(page, layer, out);
+        layer.kind = LayerKind::Raster;
+        return;
     }
     Image filtered;
     try {

@@ -1047,11 +1047,11 @@ void MainWindow::show_omitted(const QStringList& elements) {
                     .arg(words.join(QStringLiteral("・")));
     }
     if (!off.isEmpty()) {
-        text << QStringLiteral("プラグイン（%1）は使う設定になっていないため、その補正を表示していません（レイヤー → プラグインの設定）。")
+        text << QStringLiteral("プラグイン（%1）は使う設定になっていないため、その補正を表示していません（編集 → 環境設定 → プラグイン…）。")
                     .arg(off.join(QStringLiteral("・")));
     }
     if (!failed.isEmpty()) {
-        text << QStringLiteral("プラグイン（%1）を動かせなかったため、その補正を表示していません（Python と Pillow、プラグインの設定を確かめてください）。")
+        text << QStringLiteral("プラグイン（%1）を動かせなかったため、その補正を表示していません（Python と Pillow、編集 → 環境設定 → プラグイン… を確かめてください）。")
                     .arg(failed.join(QStringLiteral("・")));
     }
     unported_->setText(text.join(QLatin1Char(' ')));

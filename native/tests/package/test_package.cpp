@@ -277,7 +277,9 @@ private slots:
             // (PC5 G-b: right-to-left text set across)
             {"sheenbidi", QStringLiteral("| SheenBidi")},
             // (PC5 G-d: the spelling check's English word list)
-            {"scowl", QStringLiteral("| SCOWL")}};
+            {"scowl", QStringLiteral("| SCOWL")},
+            // (PC5 J-f: genko-plugin-host, the WebAssembly plugins' host, and the crates in it)
+            {"wasmi", QStringLiteral("| wasmi")}, {"wasmparser", QStringLiteral("| wasmparser")}, {"rust-crates", QStringLiteral("| genko-plugin-host の Rust のクレート")}};
         std::set<std::string> listed;
         std::map<std::string, std::string> relation;
         for (const Json& r : sbom["relationships"]) {

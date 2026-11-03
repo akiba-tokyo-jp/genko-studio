@@ -328,6 +328,10 @@ void MainWindow::open_preferences(const QString& pane) {
         open_keyboard_shortcuts();
         return;
     }
+    if (pane == QLatin1String("plugIns")) {  // (PC5 J-f: the plugins' own window, 環境設定 ▸ プラグイン…)
+        if (QAction* plugins = action(QStringLiteral("act_plugin_settings"))) plugins->trigger();
+        return;
+    }
     preferences::PreferencesDialog dialog(this);
     if (!pane.isEmpty()) dialog.show_pane(pane);  // (PC5 H-0: 編集 → 環境設定 ▸'s panes, キーボードショートカット…)
     ask::exec(&dialog);
@@ -733,8 +737,7 @@ void MainWindow::build_menus() {
     layers->addSeparator();
     build_matting_menu(layers);  // (PC3 B3: マッティング ▸, main_window_smart_select.cpp)
     layers->addSeparator();
-    layers->addAction(action("act_plugins"));
-    layers->addAction(action("act_plugin_settings"));
+    // (PC5 J-f: the plugins' folder and settings moved to フィルター → プラグイン ▸ and 編集 → 環境設定 ▸ プラグイン…)
     build_adjust_menus(layers, edit);  // (PC2: レイヤー → 色調補正, app/main_window_adjust.cpp)
     build_smart_menus(layers, file);   // (PC3: スマートオブジェクト and the placing commands, app/main_window_smart.cpp)
     build_type_menu(bar->addMenu(QStringLiteral("書式")));  // (PC5 G-0: Photoshop's 書式 after レイヤー, app/main_window_type.cpp)

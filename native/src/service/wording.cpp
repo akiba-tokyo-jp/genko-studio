@@ -305,15 +305,75 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(fps is 0\.5 to 120)", "フレームレートは 0.5〜120 fps です"));
         r.push_back(rule(R"(work is \[first, last\]: frames of 1 to (\d+), or null)", "作業範囲は 1〜\\1 のフレームの［開始点, 終了点］で指定します"));
         r.push_back(rule(R"(range is \[first, last\] of the frames 1 to (\d+))", "書き出すフレームは 1〜\\1 の［最初, 最後］で指定します"));
+        // (PC5 J-f: WebAssembly plugins — genko-plugin-host's limits and refusals, docs/PLUGIN_WASM.md —, protocol 2, installing)
+        r.push_back(rule(R"(plugin (.*?) failed \(plug-in exceeded its instruction budget\))",
+                         "プラグイン「\\1」が命令の数の上限を超えたため止めました（終わらない繰り返しの可能性があります）"));
+        r.push_back(rule(R"(plugin (.*?) failed \(plug-in exceeded its time budget\))", "プラグイン「\\1」が時間の上限（1 回 60 秒）を超えたため止めました"));
+        r.push_back(rule(R"(plugin (.*?) failed \(plug-in exceeded its memory budget.*\))", "プラグイン「\\1」がメモリの上限（512 MB）を超えたため止めました"));
+        r.push_back(rule(R"(plugin (.*?) failed \(plug-in trapped: (.*)\))", "プラグイン「\\1」が実行の途中で止まりました（WebAssembly のトラップ: \\2）"));
+        r.push_back(rule(R"(plugin (.*?) failed \(plug-in failed: pc_filter returned error code (-?\d+)\))", "プラグイン「\\1」が処理を断りました（コード \\2）"));
+        r.push_back(rule(R"(plugin (.*?) failed \(plug-in parameters: (.*)\))", "プラグイン「\\1」の設定が正しくありません（\\2）"));
+        r.push_back(rule(R"(the module of plugin (.*?) cannot be used \((.*)\))", [](const QRegularExpressionMatch& m) {
+            static const std::vector<std::pair<QRegularExpression, QString>> reasons = [] {
+                std::vector<std::pair<QRegularExpression, QString>> out;
+                const auto add = [&out](const char* pattern, const char* words) {
+                    out.emplace_back(QRegularExpression(QRegularExpression::anchoredPattern(QString::fromUtf8(pattern)), QRegularExpression::DotMatchesEverythingOption),
+                                     QString::fromUtf8(words));
+                };
+                add("a plugin of the same name comes first", "同じ名前のプラグインが先にあります");
+                add("it is larger than 32 MB", "32 MB を超えています");
+                add("it is not a WebAssembly module", "WebAssembly のモジュールではありません");
+                add("it cannot be read", "読めません");
+                add(R"(plug-in ABI: the module imports `(.*?)`.*)", "外の機能（\\1）を読み込もうとしています。プラグインはファイル・ネット・WASI を使えません");
+                add(R"(plug-in ABI: pc_abi_version returned (-?\d+).*)", "プラグインの ABI の版が 1 ではありません（\\1）");
+                add(R"(plug-in ABI: (.*))", "プラグインの ABI に合っていません（\\1）");
+                add(R"(plug-in manifest: (.*))", "manifest が正しくありません（\\1）");
+                add(R"(not a valid plug-in module: (.*))", "WebAssembly のモジュールとして正しくありません（\\1）");
+                add("plug-in exceeded its instruction budget", "読み込みの間に命令の数の上限を超えました");
+                add("plug-in exceeded its time budget", "読み込みの間に時間の上限を超えました");
+                add(R"(plug-in trapped: (.*))", "読み込みの間に止まりました（\\1）");
+                add(R"(module is (\d+) bytes \(limit (\d+)\))", "\\1 バイトあり、上限（\\2 バイト）を超えています");
+                return out;
+            }();
+            QString why = m.captured(2);
+            for (const auto& [pattern, words] : reasons) {
+                if (const auto found = pattern.match(why); found.hasMatch()) {
+                    why = words.contains(QLatin1Char('\\')) ? expand(words, found) : words;
+                    break;
+                }
+            }
+            return QStringLiteral("プラグイン「%1」の WebAssembly のモジュールが使えません（%2）").arg(m.captured(1), why);
+        }));
+        r.push_back(rule(R"(the WebAssembly plugins need genko-plugin-host beside Genko \(it was not found\), so plugin (.*) cannot run)",
+                         "WebAssembly のプラグインを動かす genko-plugin-host が Genko と同じフォルダーに無いため、プラグイン「\\1」を動かせません"));
+        r.push_back(rule(R"(the plugin host for plugin (.*?) could not be started.*)", "プラグイン「\\1」を動かす genko-plugin-host を起動できませんでした"));
+        r.push_back(rule(R"(plugin (.*?) works on 8-bit paint layers only.*)",
+                         "プラグイン「\\1」は 8 bit のペイントレイヤーにだけ使えます（WebAssembly のプラグインと、プロトコル 2 のネイティブのプラグインは、高精度・インキのレイヤーやチャンネルにも使えます）"));
+        r.push_back(rule(R"(plugin (.*?) cannot run here: its smart filter shows the picture it made last)",
+                         "プラグイン「\\1」はここでは動かないため、そのスマートフィルターは最後に作った絵で表示しています"));
+        r.push_back(rule(R"(plugin (.*?)'s smart filter could not be drawn to keep its picture.*)", "プラグイン「\\1」のスマートフィルターの絵を残せませんでした"));
+        r.push_back(rule("a filter plugin of 8 bits cannot be a smart filter on a page of inks.*",
+                         "8 bit のプラグインは、インキのページではスマートフィルターにできません（WebAssembly のプラグインと、プロトコル 2 のネイティブのプラグインはできます）"));
+        r.push_back(rule("a band of the picture does not fit in the plugin's memory", "絵の帯がプラグインのメモリに収まりません"));
+        r.push_back(rule(R"(only WebAssembly modules \(\.wasm\) and Python plugins \(\.py\) are installed so: (.*))",
+                         "入れられるのは WebAssembly のモジュール（.wasm）と Python のプラグイン（.py）です（\\1）"));
+        r.push_back(rule(R"(the name (.*) cannot be a plugin's)", "「\\1」はプラグインの名前にできません（_ や . で始まる名前、/ を含む名前は使えません）"));
+        r.push_back(rule(R"((.*) is larger than (32|16) MB)", "「\\1」は \\2 MB を超えているため入れられません"));
+        r.push_back(rule(R"((.*) is not a WebAssembly module)", "「\\1」は WebAssembly のモジュールではありません"));
+        r.push_back(rule(R"(a plugin of the name (.*) of another kind is installed)", "「\\1」という名前の、別の種類のプラグインが入っています"));
+        r.push_back(rule(R"(plugin (.*?) is a program's folder \(remove the folder itself\))",
+                         "プラグイン「\\1」はプログラムのフォルダーです（プラグインのフォルダーから、フォルダーごと取り除きます）"));
+        r.push_back(rule(R"(plugin (.*?) is in the additional plugins folder \(remove it there: (.*)\))",
+                         "プラグイン「\\1」は追加のプラグインフォルダーにあります（そこから取り除きます: \\2）"));
         r.push_back(rule("no plugin (.*)", "プラグイン「\\1」が見つかりません（プラグインのフォルダーに入れます）"));
         r.push_back(rule("plugin (.*?) cannot be loaded.*", "プラグイン「\\1」を読み込めません"));
         r.push_back(rule(R"(plugin (.*?) has no run\(image\))", "プラグイン「\\1」に処理（run）がありません"));
         r.push_back(rule("plugin (.*?) failed.*", "プラグイン「\\1」の処理が失敗しました"));
         r.push_back(rule("plugin (.*?) did not return a picture", "プラグイン「\\1」が絵を返しませんでした"));
-        r.push_back(rule("plugins need Python on this computer.*", "プラグインを使うには、このパソコンに Python が要ります（レイヤー → プラグインの設定で選べます）"));
+        r.push_back(rule("plugins need Python on this computer.*", "プラグインを使うには、このパソコンに Python が要ります（編集 → 環境設定 → プラグイン… で選べます）"));
         r.push_back(rule("plugins need Pillow in the Python that runs them.*", "プラグインを動かす Python に Pillow が要ります（pip install Pillow）"));
-        r.push_back(rule("plugin (.*?) is not chosen to run.*", "プラグイン「\\1」は使う設定になっていません（レイヤー → プラグインの設定で選びます）"));
-        r.push_back(rule("plugin (.*?) could not be started.*", "プラグイン「\\1」を動かす Python を起動できませんでした（プラグインの設定で Python を確かめてください）"));
+        r.push_back(rule("plugin (.*?) is not chosen to run.*", "プラグイン「\\1」は使う設定になっていません（編集 → 環境設定 → プラグイン… で選びます）"));
+        r.push_back(rule("plugin (.*?) could not be started.*", "プラグイン「\\1」を動かす Python を起動できませんでした（編集 → 環境設定 → プラグイン… で Python を確かめてください）"));
         r.push_back(rule("plugin (.*?) stopped before it answered.*", "プラグイン「\\1」が途中で止まりました（落ちたか、メモリが足りなかった可能性があります）"));
         r.push_back(rule(R"(plugin (.*?) did not finish in (\d+) seconds)", "プラグイン「\\1」が \\2 秒で終わらなかったため止めました"));
         r.push_back(rule("plugin (.*?) wrote back more than a picture", "プラグイン「\\1」が絵より多くのデータを返したため止めました"));
@@ -332,6 +392,10 @@ const std::vector<Rule>& rules() {
                 add("it is not JSON", "plugin.json が JSON ではありません");
                 add("it is not a JSON object", "plugin.json が JSON のオブジェクトではありません");
                 add("its protocol must be 1", "protocol は 1 にします");
+                // (PC5 J-f: protocol 2, its overlap and area)
+                add("its protocol must be 1 or 2", "protocol は 1 か 2 にします");
+                add("its overlap must be a whole number from 0 to 256", "overlap は 0〜256 の整数にします");
+                add("its area must be content or canvas", "area は content か canvas にします");
                 add("its name must be a text", "name（名前）を文字で書きます");
                 add("its args must be a list of texts", "args は文字のリストにします");
                 add("its params must be an object", "params はオブジェクトにします");

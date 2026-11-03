@@ -1226,6 +1226,19 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
             issue("missing_asset", at_key(at_key(at_key(at, "smart"), "filter_mask"), "asset"), asset->get<std::string>(),
                   "the smart object's filter mask " + AssetStore::relpath(asset->get<std::string>(), ".png") + " is missing");
         }
+        // (PC5 J-f, plugin-filters@1: the pictures its plugin filters keep)
+        if (const Json* filters = find(*layer.smart, "filters"); filters != nullptr && filters->is_array() && !dir_.empty()) {
+            for (std::size_t k = 0; k < filters->size(); ++k) {
+                const Json& f = (*filters)[k];
+                const Json* kept = f.is_object() ? find(f, "kept") : nullptr;
+                const Json* ref = kept != nullptr && kept->is_object() ? find(*kept, "asset") : nullptr;
+                const Json* suffix = kept != nullptr && kept->is_object() ? find(*kept, "suffix") : nullptr;
+                if (ref == nullptr || !ref->is_string() || suffix == nullptr || !suffix->is_string() || !AssetStore::is_ref(ref->get<std::string>())) continue;
+                if (store_.has(ref->get<std::string>(), suffix->get<std::string>())) continue;
+                issue("missing_asset", at_key(at_key(at, "smart"), "filters"), ref->get<std::string>(),
+                      "the picture a plugin filter keeps " + AssetStore::relpath(ref->get<std::string>(), suffix->get<std::string>()) + " is missing");
+            }
+        }
         // (PC3 A3: a PSD's placed layer block and Photoshop's picture of it)
         const Json* psd = find(*layer.smart, "psd");
         if (psd != nullptr && psd->is_object() && !dir_.empty()) {
@@ -2087,7 +2100,9 @@ bool is_known_feature(std::string_view feature) {
            // PC5 I-a (core/layer_basics.hpp)
            feature == core::kLayerLocksFeature || feature == core::kBlendChannelsFeature ||
            // PC5 I-c (core/artboards.hpp)
-           feature == core::kArtboardsFeature;
+           feature == core::kArtboardsFeature ||
+           // PC5 J-f (core/smart.hpp)
+           feature == core::smart::kPluginFiltersFeature;
 }
 
 int project_version(const Json& payload) {

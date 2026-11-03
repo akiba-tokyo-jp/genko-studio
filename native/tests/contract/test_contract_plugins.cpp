@@ -17,11 +17,21 @@
 #include <stop_token>
 #include <thread>
 
+#include <QFile>
+#include <QFileInfo>
+
+#include <algorithm>
+#include <cmath>
+
+#include "api/mcp_tools.hpp"
 #include "core/actor.hpp"
 #include "core/base64.hpp"
+#include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ink.hpp"
+#include "core/ops_util.hpp"
+#include "core/smart.hpp"
 #include "core/paths.hpp"
 #include "render/ink.hpp"
 #include "render/ops_registry.hpp"
@@ -384,11 +394,188 @@ private slots:
     }
 };
 
+// PC5 J-f (plugins:WASM-ABI-v1, SPEC.md PROD-01, docs/PLUGIN_WASM.md): WebAssembly plugins through the ops, without Python —
+// nothing runs until plugins are on and the module is chosen (as its bytes are; changed: chosen again); filter_raster with
+// a module on a paint layer of 8 bits (inside the selection), of precise colour, of a page's inks, on an alpha channel
+// (one grey channel); a host that falls over leaves the book as it was; a module's smart filter keeps its picture and the
+// smart object looks the same where the plugin cannot run; MCP has no tool that installs, chooses or consents.
+class TestContractWasmPlugins : public QObject {
+    Q_OBJECT
+    QTemporaryDir scratch_;
+    QString folder_;
+    QString host_;
+    const genko::core::CommandBus bus_{genko::render::ops_registry()};
+    const genko::core::Actor person_{"human:作者"};
+
+    void enable(bool on) {
+        plugins::Settings s = plugins::settings();
+        s.enabled = on;
+        plugins::save_settings(s);
+    }
+    genko::core::Document applied(const genko::core::Document& doc, const Json& ops) { return bus_.apply(doc, ops, person_, false).doc; }
+    const genko::core::Layer& layer_of(const genko::core::Document& doc, const std::string& id) {
+        return doc.page(0).layers[genko::core::layer_by_id(doc.page(0), id)];
+    }
+    genko::core::Document painted() {  // (a blue square on a clear page of 8 bits, layer "p")
+        genko::core::Document doc = genko::core::new_episode("w", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        const Json put{{"op", "put_raster"}, {"page", 1}, {"id", "p"}, {"png_base64", genko::core::b64encode(genko::render::write_png(picture()))}};
+        return applied(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "p"}}, put}));
+    }
+    genko::render::Image pixels(const genko::core::Document& doc, const std::string& id) {
+        return genko::render::read_png(*layer_of(doc, id).raster_png).convert("RGBA");
+    }
+
+private slots:
+    void initTestCase() {
+        QVERIFY(scratch_.isValid());
+        const QString config = scratch_.path() + "/config";
+        folder_ = config + "/plugins";
+        QDir().mkpath(folder_);
+        qputenv("GENKO_CONFIG_DIR", config.toUtf8());
+        host_ = QStringLiteral(GENKO_TEST_PLUGIN_HOST);
+        if (!QFileInfo::exists(host_)) QSKIP("genko-plugin-host was not built (no cargo): the WebAssembly plugins cannot run in this build");
+        qputenv("GENKO_PLUGIN_HOST", host_.toUtf8());
+        QVERIFY(QFile::copy(QStringLiteral(GENKO_TEST_DATA "/plugins/invert.wasm"), folder_ + "/invert.wasm"));
+    }
+
+    // Off at first, and off until chosen as its bytes are: the op refused, the book as it was.
+    void offUntilChosenAsItIs() {
+        const genko::core::Document doc = painted();
+        const Json op = Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "p"}, {"kind", "plugin:invert"}}});
+        QVERIFY(error_of([&] { (void)applied(doc, op); }).contains(QStringLiteral("plugin invert is not chosen to run")));
+        enable(true);
+        QVERIFY(error_of([&] { (void)applied(doc, op); }).contains(QStringLiteral("plugin invert is not chosen to run")));
+        plugins::choose("invert", true);
+        const genko::core::Document done = applied(doc, op);
+        QCOMPARE(pixels(done, "p").getpixel(30, 30), (std::vector<double>{225, 135, 35, 255}));
+        QCOMPARE(pixels(done, "p").getpixel(90, 130), (std::vector<double>{0, 0, 0, 0}));
+        // changed: chosen again
+        {
+            QFile file(folder_ + "/invert.wasm");
+            QVERIFY(file.open(QIODevice::Append));
+            file.write("\0", 1);
+        }
+        QVERIFY(error_of([&] { (void)applied(doc, op); }).contains(QStringLiteral("plugin invert is not chosen to run")));
+        QFile::remove(folder_ + "/invert.wasm");
+        QVERIFY(QFile::copy(QStringLiteral(GENKO_TEST_DATA "/plugins/invert.wasm"), folder_ + "/invert.wasm"));
+        QVERIFY(plugins::allowed("invert"));  // (the bytes chosen are back)
+        // inside the selection only (its coverage mixed as the bands are laid)
+        const genko::core::Document inside = applied(doc, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "p"}, {"kind", "plugin:invert"},
+                                                                            {"area", Json{{"poly", Json::array({Json::array({0, 0}), Json::array({5, 0}),
+                                                                                                                Json::array({5, 200}), Json::array({0, 200})})}}}}}));
+        const genko::render::Image in = pixels(inside, "p");
+        QCOMPARE(in.getpixel(15, 30), (std::vector<double>{225, 135, 35, 255}));  // (within 5 mm of the left at 200 dpi)
+        QCOMPARE(in.getpixel(55, 30), (std::vector<double>{30, 120, 220, 255}));  // (outside: as it was)
+    }
+
+    // A layer of precise colour (16 bits) and a page's inks (Lab, 16 bits): their own samples through the module.
+    void preciseAndInkLayers() {
+        enable(true);
+        plugins::choose("invert", true);
+        auto doc = genko::core::new_episode("w", genko::core::Num(1), 1, genko::core::PageSpec::custom(50, 50, 20, 20, 1, 2, 2, 2, 2, 200, "color"));
+        doc = applied(doc, Json::array({Json{{"op", "put_color_raster"}, {"page", 1}, {"width", 2}, {"height", 2}, {"precision", "u16"},
+                                             {"pixels", Json::array({1000, 2000, 3000, 65535, 1000, 2000, 3000, 65535, 1000, 2000, 3000, 65535, 1000, 2000,
+                                                                     3000, 65535})}}}));
+        const std::string precise = doc.page(0).layers.back().id;
+        const std::string before = *layer_of(doc, precise).color_raster;
+        doc = applied(doc, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", precise}, {"kind", "plugin:invert"}}}));
+        const genko::core::ColorRasterView was(before), now(*layer_of(doc, precise).color_raster);
+        for (std::size_t i = 0; i < std::size_t(now.width()) * now.height(); ++i) {
+            for (int c = 0; c < 3; ++c) QVERIFY(std::abs(now.pixel(i)[std::size_t(c)] - (1.0 - was.pixel(i)[std::size_t(c)])) < 1.0 / 65535 + 1e-9);
+            QCOMPARE(now.pixel(i)[3], was.pixel(i)[3]);
+        }
+        auto lab = genko::core::new_episode("w", genko::core::Num(1), 1, genko::core::PageSpec::custom(50, 50, 20, 20, 1, 2, 2, 2, 2, 200, "color"));
+        lab = applied(lab, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "lab"}, {"depth", 16}},
+                                        Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "ink"}},
+                                        Json{{"op", "fill"}, {"page", 1}, {"layer_id", "ink"}, {"x_mm", 25}, {"y_mm", 25}, {"rgb", Json::array({100, 150, 200})}}}));
+        QVERIFY(layer_of(lab, "ink").ink_raster);
+        const genko::core::InkPixels ink_before = genko::core::decode_ink_raster(*layer_of(lab, "ink").ink_raster);
+        lab = applied(lab, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "ink"}, {"kind", "plugin:invert"}}}));
+        QVERIFY(layer_of(lab, "ink").ink_raster && !layer_of(lab, "ink").raster_png);  // (its inks themselves, not a lent picture)
+        const genko::core::InkPixels ink_after = genko::core::decode_ink_raster(*layer_of(lab, "ink").ink_raster);
+        const std::size_t middle = std::size_t(ink_after.height / 2) * ink_after.width + ink_after.width / 2;
+        for (unsigned c = 0; c < 3; ++c) QVERIFY(std::abs(ink_after.value(middle, c) - (1.0 - ink_before.value(middle, c))) < 1.0 / 65535 + 1e-9);
+        QCOMPARE(ink_after.value(middle, 3), ink_before.value(middle, 3));
+    }
+
+    // An alpha channel (and so the Quick Mask) given as one grey channel: the channel's density turned over.
+    void alphaChannelAsGrey() {
+        enable(true);
+        plugins::choose("invert", true);
+        genko::core::Document doc = painted();
+        doc = applied(doc, Json::array({Json{{"op", "add_channel"}, {"page", 1}}}));
+        const std::string channel = doc.page(0).channels.at(0).id;
+        doc = applied(doc, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "p"}, {"kind", "plugin:invert"}, {"channel", channel}}}));
+        QVERIFY(doc.page(0).channels.at(0).raster);
+        const genko::core::InkPixels mask = genko::core::decode_ink_raster(*doc.page(0).channels.at(0).raster);
+        QCOMPARE(mask.channels(), 1u);
+        QVERIFY(mask.value(0, 0) > 0.99);  // (an empty channel, all clear: turned over, all full)
+        QCOMPARE(pixels(doc, "p").getpixel(30, 30), (std::vector<double>{30, 120, 220, 255}));  // (the layer as it was)
+    }
+
+    // A host that falls over: the op refused, the book as it was (and the app goes on).
+    void hostFallsOverBookStays() {
+        enable(true);
+        plugins::choose("invert", true);
+        plugins::forget_made();
+        const QString crash = scratch_.path() + "/crash-host";
+        QVERIFY(QFile::copy(QStringLiteral(GENKO_TEST_NATIVE_PLUGIN), crash));
+        QVERIFY(QFile::setPermissions(crash, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        qputenv("GENKO_PLUGIN_HOST", crash.toUtf8());
+        const genko::core::Document doc = painted();
+        QVERIFY(error_of([&] { (void)applied(doc, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "p"}, {"kind", "plugin:invert"}}})); })
+                    .contains(QStringLiteral("plugin invert stopped before it answered")));
+        QCOMPARE(pixels(doc, "p").getpixel(30, 30), (std::vector<double>{30, 120, 220, 255}));
+        qputenv("GENKO_PLUGIN_HOST", host_.toUtf8());
+    }
+
+    // plugin-filters@1: a module's smart filter keeps the picture it made; where the plugin cannot run (not chosen, not
+    // installed) the smart object looks as it did.
+    void smartFilterKeepsItsLook() {
+        enable(true);
+        plugins::choose("invert", true);
+        genko::core::Document doc = applied(painted(), Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"p"})}, {"new_id", "so"}}}));
+        const genko::core::ApplyResult added = bus_.apply(doc, Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "plugin:invert"}}}), person_, false);
+        doc = added.doc;
+        const Json& filter = (*layer_of(doc, "so").smart)["filters"][0];
+        QCOMPARE(filter["kind"], Json("plugin:invert"));
+        QVERIFY(filter.contains("kept"));
+        QCOMPARE(filter["kept"]["suffix"], Json(".png"));
+        QVERIFY(doc.smart_files.contains(filter["kept"]["asset"].get<std::string>()));
+        QVERIFY(genko::core::smart::uses_plugin_filters(doc));
+        genko::core::smart::validate_smart(doc);
+        genko::render::RenderOptions output;
+        const genko::render::Image drawn = genko::render::render_page(doc.page(0), 40, output, &doc).image;
+        enable(false);  // (the plugin cannot run here now: the kept picture)
+        genko::render::RenderOptions again;
+        const genko::render::Image kept = genko::render::render_page(doc.page(0), 40, again, &doc).image;
+        QVERIFY(drawn.tobytes() == kept.tobytes());
+        // (and not as the smart object without its filter: the look kept is the filtered one)
+        const genko::render::Image plain = genko::render::render_page(painted().page(0), 40, again, nullptr).image;
+        QVERIFY(plain.tobytes() != kept.tobytes());
+        // an op on the stack where the plugin cannot run: said
+        const genko::core::ApplyResult moved = bus_.apply(doc, Json::array({Json{{"op", "smart_filter_set"}, {"page", 1}, {"id", "so"}, {"opacity", 0.5}}}), person_, false);
+        QVERIFY(std::any_of(moved.warnings.begin(), moved.warnings.end(),
+                            [](const Json& n) { return n.is_string() && n.get<std::string>().find("cannot run here") != std::string::npos; }));
+        enable(true);
+    }
+
+    // MCP offers no tool that installs a plugin, chooses one or consents (plugin.list is inspect's, read only).
+    void noWayInFromMcp() {
+        for (const auto& tool : genko::api::mcp::tool_specs()) QVERIFY2(std::string(tool.name).find("plugin") == std::string::npos, std::string(tool.name).c_str());
+        QVERIFY(genko::api::mcp::find_tool("plugin_install") == nullptr);
+        enable(false);
+    }
+};
+
 int main(int argc, char** argv) {
     if (!qEnvironmentVariableIsSet("QTEST_FUNCTION_TIMEOUT")) qputenv("QTEST_FUNCTION_TIMEOUT", "900000");
     QCoreApplication app(argc, argv);
+    // (PC5 J-f: the WebAssembly plugins first — they need no Python — then the Python plugins, skipped without it)
+    TestContractWasmPlugins wasm;
+    const int wasm_failed = QTest::qExec(&wasm, argc, argv);
     TestContractPlugins test;
     QTEST_SET_MAIN_SOURCE_PATH
-    return QTest::qExec(&test, argc, argv);
+    return QTest::qExec(&test, argc, argv) + wasm_failed;
 }
 #include "test_contract_plugins.moc"

@@ -199,9 +199,35 @@ void check_filter(const std::string& who, const Json& f) {
     const Json* kind = get(f, "kind");
     if (kind == nullptr || !kind->is_string()) refuse(who + ": a smart filter names its kind");
     const std::string name = kind->get<std::string>();
-    if (!filter_kind(name)) refuse(who + ": the filter " + py_repr_str(name) + " cannot be a smart filter");
+    const bool plugin = plugin_filter(name);  // (PC5 J-f, plugin-filters@1)
+    if (!filter_kind(name) && !plugin) refuse(who + ": the filter " + py_repr_str(name) + " cannot be a smart filter");
     const Json* params = get(f, "params");
     if (params != nullptr && !params->is_object()) refuse(who + ": a smart filter's params are an object");
+    if (const Json* kept = get(f, "kept"); kept != nullptr) {
+        if (!plugin) refuse(who + ": only a plugin's smart filter keeps a picture");
+        const Json* asset = kept->is_object() ? get(*kept, "asset") : nullptr;
+        const Json* suffix = kept->is_object() ? get(*kept, "suffix") : nullptr;
+        if (asset == nullptr || !asset->is_string() || !is_ref(asset->get_ref<const std::string&>()) || suffix == nullptr ||
+            (*suffix != Json(".png") && *suffix != Json(".colorrgba") && *suffix != Json(kInkRasterSuffix)) || kept->size() != 2)
+            refuse(who + ": a plugin filter's kept picture is {asset, suffix}");
+    }
+    if (plugin) {  // (its settings are the plugin's: kept as given; blend, opacity and visible as any filter's)
+        if (const Json* blend = get(f, "blend"); blend != nullptr) {
+            if (!blend->is_string()) refuse(who + ": a smart filter's blend is a blend mode");
+            try {
+                (void)blend_mode(*blend);
+            } catch (const std::exception&) {
+                refuse(who + ": a smart filter's blend " + py_repr_str(blend->get<std::string>()) + " is not a blend mode");
+            }
+        }
+        if (const Json* opacity = get(f, "opacity"); opacity != nullptr) {
+            const double v = finite(*opacity, who + "'s smart filter opacity");
+            if (v < 0 || v > 1) refuse(who + ": a smart filter's opacity is 0 to 1");
+        }
+        if (const Json* visible = get(f, "visible"); visible != nullptr && !visible->is_boolean()) refuse(who + ": a smart filter's visible is true or false");
+        if (get(f, "space") != nullptr) refuse(who + ": a smart filter's space is contents (a filter that names places)");
+        return;
+    }
     const Json settings = params != nullptr ? *params : Json::object();
     if (const Json* blend = get(f, "blend"); blend != nullptr) {
         if (!blend->is_string()) refuse(who + ": a smart filter's blend is a blend mode");
@@ -399,6 +425,56 @@ bool filter_kind(std::string_view kind) {
 }
 
 bool bend_filter(std::string_view kind) { return std::find(kBendFilters.begin(), kBendFilters.end(), kind) != kBendFilters.end(); }
+
+bool plugin_filter(std::string_view kind) {
+    if (!kind.starts_with("plugin:")) return false;
+    const std::string_view key = kind.substr(7);
+    return !key.empty() && key != "." && key != ".." && key.find('/') == std::string_view::npos && key.find('\\') == std::string_view::npos;
+}
+
+namespace {
+
+// Each smart filter of the book's smart objects (its pages, and the pages of contents a smart object shows).
+void each_filter(const Document& doc, const std::function<void(const Json&)>& visit) {
+    const auto on_page = [&](const Page& page) {
+        for (const Layer& layer : page.layers) {
+            if (layer.kind != LayerKind::Smart || !layer.smart || !layer.smart->is_object()) continue;
+            const Json* filters = get(*layer.smart, "filters");
+            if (filters == nullptr || !filters->is_array()) continue;
+            for (const Json& f : *filters) visit(f);
+        }
+    };
+    for (const auto& page : doc.pages) {
+        if (page) on_page(*page);
+    }
+    for (const std::string& id : used_contents(doc)) {
+        if (const auto found = doc.smart_contents.find(id); found != doc.smart_contents.end() && found->second && found->second->page)
+            on_page(*found->second->page);
+    }
+}
+
+}  // namespace
+
+std::vector<std::pair<std::string, std::string>> kept_pictures(const Document& doc) {
+    std::vector<std::pair<std::string, std::string>> out;
+    each_filter(doc, [&](const Json& f) {
+        const Json* kept = f.is_object() ? get(f, "kept") : nullptr;
+        if (kept == nullptr || !kept->is_object()) return;
+        const Json* asset = get(*kept, "asset");
+        const Json* suffix = get(*kept, "suffix");
+        if (asset != nullptr && asset->is_string() && suffix != nullptr && suffix->is_string()) out.emplace_back(asset->get<std::string>(), suffix->get<std::string>());
+    });
+    return out;
+}
+
+bool uses_plugin_filters(const Document& doc) {
+    bool found = false;
+    each_filter(doc, [&](const Json& f) {
+        const Json* kind = f.is_object() ? get(f, "kind") : nullptr;
+        if (kind != nullptr && kind->is_string() && plugin_filter(kind->get<std::string>())) found = true;
+    });
+    return found;
+}
 
 bool placed_filter(std::string_view kind) {
     if (bend_filter(kind) || kind == "radial_blur" || kind == "zoom_blur") return true;

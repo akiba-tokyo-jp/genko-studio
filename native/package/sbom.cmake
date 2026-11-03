@@ -42,7 +42,12 @@ set(_packages
   "blake3~BLAKE3 (its C implementation: the .pcraft's hashes)~blake3~CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception~built-in"
   "sheenbidi~SheenBidi (the bidirectional order of right-to-left text set across)~sheenbidi~Apache-2.0~built-in"
   "scowl~SCOWL word list, size 50, en_US (the English dictionary of the spelling check)~=2020.12.07~LicenseRef-SCOWL~built-in"
-  "libraw~LibRaw (camera RAW: a shared library of its own)~libraw~LGPL-2.1-only OR CDDL-1.0~bundled:(^lib/libraw_r\\.so|(^|/)raw_r\\.dll$)")
+  "libraw~LibRaw (camera RAW: a shared library of its own)~libraw~LGPL-2.1-only OR CDDL-1.0~bundled:(^lib/libraw_r\\.so|(^|/)raw_r\\.dll$)"
+  # (PC5 J-f: genko-plugin-host, a program of its own beside genko — the WebAssembly plugins' host, Rust — and the crates
+  # built into it: package/licenses/wasm-host/NOTICES.txt)
+  "wasmi~wasmi (genko-plugin-host's WebAssembly interpreter, with wasmi_core, wasmi_ir and wasmi_collections)~=2.0.0~MIT OR Apache-2.0~bundled:^bin/genko-plugin-host(\\.exe)?$"
+  "wasmparser~wasmparser (wasmi's, in genko-plugin-host)~=0.228.0~Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT~built-in"
+  "rust-crates~Rust crates in genko-plugin-host (serde, serde_json, thiserror, itoa, memchr, libm, spin, bitflags, zmij) and the Rust standard library~=NOASSERTION~MIT~built-in")
 if(CMAKE_HOST_WIN32)
   list(APPEND _packages
     "zlib~zlib~zlib~Zlib~built-in" "libpng~libpng~libpng~libpng-2.0~built-in" "libjpeg-turbo~libjpeg-turbo~libjpeg_turbo~IJG AND BSD-3-Clause AND Zlib~built-in"

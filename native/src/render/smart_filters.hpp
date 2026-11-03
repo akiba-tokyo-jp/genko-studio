@@ -35,7 +35,16 @@ struct Filter {
     std::string blend = "normal";
     double opacity = 1.0;
     bool in_contents = false;  // (its places in the smart object's own mm: core::smart::in_contents)
+    // (PC5 J-f, plugin-filters@1) a plugin's filter: the picture it made, shown while the plugin cannot run here
+    std::optional<core::Json> kept;
 };
+
+// PC5 J-f (plugin-filters@1, core::smart::plugin_filter): the pictures the smart object's plugin filters keep made again
+// — each one whose plugin is chosen to run now: the smart object drawn with the filters up to it (it at normal, 100 %, no
+// filter mask) as rasterize_layer draws it, its pixels kept as the filter's "kept" (a book's file) —, after an op changed
+// its stack. Those whose plugin cannot run keep the picture they had. Notes (English, worded by the service) of each plugin
+// filter that cannot run now.
+void keep_plugin_pictures(core::Document& doc, std::size_t page, std::size_t layer, std::vector<std::string>* notes = nullptr);
 
 // The filters the smart object draws, the bottom one first: its visible ones while they are on (none otherwise), their
 // settings as kept.
