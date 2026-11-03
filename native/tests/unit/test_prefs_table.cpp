@@ -72,7 +72,8 @@ const std::vector<std::string>& app_keys() {
         "ui/animated_zoom", "ui/home_screen", "ui/ui_scale", "ui/canvas_border", "ui/channels_in_color", "ui/menu_colors", "ui/tooltips",
         "ui/open_as_tabs", "ui/float_docking", "ui/tool_tooltips", "ui/zoom_to_center", "ui/flick_panning", "ui/transform_values",
         "ui/overscroll", "history_log/enabled", "history_log/destination", "history_log/file", "history_log/detail", "ui/memory_mb",
-        "ui/history_states", "ui/scratch_folder", "ui/touch_gestures", "ui/pinch_zoom", "ui/trackpad_rotate"};
+        "ui/history_states", "ui/scratch_folder", "ui/touch_gestures", "ui/pinch_zoom", "ui/trackpad_rotate",
+        "prefs/writer"};
     return all;
 }
 
@@ -413,7 +414,11 @@ private slots:
         QVERIFY(prefs::set(*s, Json{{"workspace.quickAccess", "検索	取り消し"}, {"workspace.commandBar", "取り消し"}, {"workspace.largeTabs", true},
                                     {"interface.theme", "dark"}, {"type.userDictionary", "Genko	manga"}, {"type.smartQuotes", true}})
                     .ok);
+        // (set and reset sign what they write: this process — the app's watch tells another program's writes by it)
+        const QString signed_by = s->value(QString::fromLatin1(prefs::kWriterKey)).toString();
+        QVERIFY2(signed_by.startsWith(QString::number(QCoreApplication::applicationPid()) + QLatin1Char(' ')), qPrintable(signed_by));
         QVERIFY(prefs::reset(*s).ok);
+        QVERIFY(s->value(QString::fromLatin1(prefs::kWriterKey)).toString() != signed_by);
         QVERIFY(!s->contains(QStringLiteral("ui/theme")));
         QVERIFY(!s->contains(QStringLiteral("type/smart_quotes")));
         QVERIFY(prefs::reset(*s, "type").ok);

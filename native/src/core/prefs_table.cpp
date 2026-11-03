@@ -1,11 +1,13 @@
 #include "core/prefs_table.hpp"
 
 #include <QByteArray>
+#include <QCoreApplication>
 #include <QFileInfo>
 #include <QString>
 #include <QStringList>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <filesystem>
@@ -354,6 +356,7 @@ std::vector<Pref> make_table() {
         memory("state.migration.*", "migration/*"),
         memory("state.move.*", "move/*"),
         memory("state.namesCurrent.*", "names_current/*"),
+        memory("state.prefsWriter", "prefs/writer"),  // (PC5 H-e: who wrote through set and reset last — sign())
         memory("state.patterns.*", "patterns/*"),
         memory("state.pencil.*", "pencil/*"),
         memory("state.picker.*", "picker/*"),
@@ -849,9 +852,15 @@ Outcome set(QSettings& settings, const Json& values) {
         // (a list or a key that may hold a reused name: read as this build's names — the mark the app writes too)
         if (const auto mark = mark_of(key)) settings.setValue(QString::fromStdString(*mark), stored);
     }
+    sign(settings);
     settings.sync();
     if (settings.status() != QSettings::NoError) return refused("config_unwritable", "", "環境設定のファイルに書き込めません");
     return out;
+}
+
+void sign(QSettings& settings) {
+    static std::atomic<long long> count{0};
+    settings.setValue(QString::fromLatin1(kWriterKey), QStringLiteral("%1 %2").arg(QCoreApplication::applicationPid()).arg(++count));
 }
 
 Outcome reset(QSettings& settings, std::string_view path) {
@@ -870,6 +879,7 @@ Outcome reset(QSettings& settings, std::string_view path) {
         settings.remove(QString::fromStdString(n.key));
         if (!is_pattern(n.pref->key)) out.values[n.path] = decode(*n.pref, QVariant());
     }
+    sign(settings);
     settings.sync();
     if (settings.status() != QSettings::NoError) return refused("config_unwritable", "", "環境設定のファイルに書き込めません");
     return out;

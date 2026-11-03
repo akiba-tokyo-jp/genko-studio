@@ -51,6 +51,7 @@ public:
         follow();
         last_ = live_values();
         seen_ = settings_stamp(file_);
+        writer_ = writer();
     }
 
     std::function<void()> changed;
@@ -60,11 +61,16 @@ public:
         const SettingsStamp was = seen_;
         seen_ = settings_stamp(file_);
         core::Json now = live_values();
+        // (PC5 H-e: genko prefs set signs what it writes — core::prefs::sign —: another process's signature since the last
+        // look is another program's write, even kept in the file by an own write of the app that waited for its lock)
+        const QString signed_by = writer();
+        const bool foreign = signed_by != writer_ && !signed_by.startsWith(QString::number(QCoreApplication::applicationPid()) + QLatin1Char(' '));
+        writer_ = signed_by;
         // (the app's own writes alone, from the file as last seen: what it has applied itself — the base taken again,
         // nothing applied twice. PC5 H-e: another program's write among them — genko prefs set at the same moment — is
         // applied)
         if (own) {
-            const bool only_own = own->last_after == seen_ && own->unbroken && own->first_before == was;
+            const bool only_own = !foreign && own->last_after == seen_ && own->unbroken && own->first_before == was;
             own.reset();
             if (only_own) {
                 last_ = std::move(now);
@@ -97,7 +103,10 @@ private:
         quiet_.start();
     }
 
+    static QString writer() { return core::prefs::store()->value(QString::fromLatin1(core::prefs::kWriterKey)).toString(); }
+
     QString file_;
+    QString writer_;
     QFileSystemWatcher watcher_;
     QTimer quiet_;
     core::Json last_;

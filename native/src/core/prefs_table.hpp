@@ -113,6 +113,12 @@ const std::vector<std::string>& reused_names();
 // The mark set() writes with a key ("names_current/ui/quick"), or none.
 std::optional<std::string> mark_of(std::string_view key);
 
+// PC5 H-e: set() and reset() sign what they write ("<pid> <count>" under this key — state.prefsWriter): the app's watch of
+// settings.ini tells another program's write (genko prefs set) from its own by it, even when the app's own write came just
+// after and kept it (QSettings' lock: the app waited, then wrote both).
+inline constexpr const char* kWriterKey = "prefs/writer";
+void sign(QSettings& settings);
+
 // One value read through the table (the app's getters): `path` must be in it.
 Json value(QSettings& settings, std::string_view path);
 Json value(std::string_view path);

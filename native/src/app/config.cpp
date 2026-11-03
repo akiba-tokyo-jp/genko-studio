@@ -38,8 +38,11 @@ class OwnSettings : public QSettings {
 public:
     explicit OwnSettings(const QString& file) : QSettings(file, QSettings::IniFormat), file_(file), before_(settings_stamp(file)) {}
     ~OwnSettings() override {
+        // (PC5 H-e: another program's write while this store was open — genko prefs set — is read in by sync and written
+        // back with the app's: the file as it is just before is what the app's write starts from, so the watch applies it)
+        const SettingsStamp now = settings_stamp(file_);
         sync();
-        if (const SettingsStamp after = settings_stamp(file_); after != before_) settings_written(before_, after);
+        if (const SettingsStamp after = settings_stamp(file_); after != before_) settings_written(now, after);
     }
 
 private:
