@@ -144,7 +144,8 @@ private slots:
         QCOMPARE(out.mid(out.size() - 2), (QStringList{QStringLiteral("カラールックアップテーブル…"), QStringLiteral("データセットからファイル…")}));
         QMenu* imports = b.window->findChild<QMenu*>(QStringLiteral("menu_import"));
         QVERIFY(imports != nullptr);
-        QCOMPARE(items(imports), (QStringList{QStringLiteral("変数データセット…"), QStringLiteral("注釈…")}));  // (one 読み込み ▸, Photoshop's order)
+        // (one 読み込み ▸, Photoshop's order; PC5 J-e2's ビデオフレームからレイヤー… between)
+        QCOMPARE(items(imports), (QStringList{QStringLiteral("変数データセット…"), QStringLiteral("ビデオフレームからレイヤー…"), QStringLiteral("注釈…")}));
         QCOMPARE(b.window->findChildren<QMenu*>(QStringLiteral("menu_import")).size(), qsizetype(1));
         const QStringList file = items(top_menu(b.window.get(), QStringLiteral("ファイル")));
         QCOMPARE(file.at(file.indexOf(QStringLiteral("PSD をレイヤーのまま読み込む…")) + 1), QStringLiteral("読み込み ▸"));

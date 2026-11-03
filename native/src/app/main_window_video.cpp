@@ -16,6 +16,7 @@
 #include <QFormLayout>
 #include <QLabel>
 #include <QMenu>
+#include <QSignalBlocker>
 #include <QSpinBox>
 
 #include <filesystem>
@@ -174,9 +175,14 @@ bool MainWindow::video_op(Json op) {
 
 const core::Layer* MainWindow::alter_video_frame(const core::Layer& folder) {
     const std::string id = folder.id;
-    if (!video_op(Json{{"op", "video_alter"}, {"folder", id}})) return nullptr;
+    const core::Page* page = current_page();
+    if (page == nullptr) return nullptr;
+    const Json op{{"op", "video_alter"}, {"page", page->index.json()}, {"folder", id}, {"at", video_frame()}};
+    if (!video_op(op)) return nullptr;
     for (const Json& result : last_results_) {
         if (result.is_object() && result.contains("cel") && result["cel"].is_string()) {
+            // (a cel made now: what is drawn next is one step with it — apply_ops)
+            if (result.value("made", false)) video_alter_ = VideoAlter{op, result["cel"].get<std::string>(), book().revision};
             set_target_layer(result["cel"].get<std::string>());
             if (layer_panel() != nullptr) layer_panel()->refresh();
             return target_layer();

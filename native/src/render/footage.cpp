@@ -21,6 +21,7 @@
 #include "core/anim.hpp"
 #include "core/color_model.hpp"
 #include "core/geometry.hpp"
+#include "core/ids.hpp"
 #include "core/ink.hpp"
 #include "core/pyops.hpp"
 #include "core/error.hpp"
@@ -766,6 +767,9 @@ std::shared_ptr<const Made> make(const core::Document& doc, const core::Page& pa
             return found->second->second;
         }
     }
+    // (the scratch book's ids apart from the op's: an op that lays a frame takes the same ids whether it was remembered or not
+    // — the journal plays it again)
+    const core::ScopedIdsApart apart;
     const std::string bytes = with_alpha(*held, alpha);
     const smart::FileInfo info = smart::look_at(bytes, core::kFootageSuffix);
     core::Document scratch;

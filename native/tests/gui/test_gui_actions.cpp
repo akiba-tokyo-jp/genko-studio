@@ -454,9 +454,10 @@ private slots:
         // フォントを解決… (act_type_replace_missing, act_type_resolve_missing), 編集 → スペルチェック… (act_spelling) and 環境設定 → テキスト…
         // (act_prefs_type: its page made) — test_gui_type_panels; PC5 J-e1's 8 (SPEC PROD-01) — 次・前・最初・最後のフレーム,
         // 作業範囲の開始点へ移動・終了点へ移動, フレームへ移動… (act_next_frame … act_go_to_frame) and ビデオをレンダリング… (act_render_video)
-        // — test_gui_anim.
-        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20 and J-e1's 8)
-        QCOMPARE(w->actions_by_name().size(), std::size_t{777});
+        // — test_gui_anim; PC5 J-e2's 2 (SPEC PROD-01) — ラスタライズ → ビデオ (act_rasterize_video) and 読み込み → ビデオフレームからレイヤー…
+        // (act_video_frames_to_layers); its 12 of ビデオレイヤー ▸ made real in their frames' places — test_gui_anim.
+        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8 and J-e2's 2)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{779});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -645,10 +646,8 @@ private slots:
         QCOMPARE(studio.act("act_smart_rasterize")->text(), QStringLiteral("ラスタライズ"));
         const std::int64_t revision = studio.doc().revision;
         // (PC5 J-d1: 計測スケールを設定 ▸ 初期設定・カスタム…, ものさしツール, カウントツール made real; J-d2: データポイントを選択 ▸
-        // カスタム…, 計測値を記録, 目盛りマーカーを配置…, ウィンドウ → 計測ログ — test_gui_measure)
-        for (const char* name : {"act_video_from_file", "act_video_blank", "act_video_insert_blank", "act_video_duplicate", "act_video_delete",
-                                 "act_video_replace", "act_video_interpret", "act_video_show_altered", "act_video_restore", "act_video_restore_all",
-                                 "act_video_reload", "act_video_rasterize", "act_panel_actions"}) {  // (PC5 J-a: レイヤーカンプ made real; J-c: 注釈)
+        // カスタム…, 計測値を記録, 目盛りマーカーを配置…, ウィンドウ → 計測ログ — test_gui_measure; J-e2: ビデオレイヤー ▸ — test_gui_anim)
+        for (const char* name : {"act_panel_actions"}) {  // (PC5 J-a: レイヤーカンプ made real; J-c: 注釈)
             QAction* a = studio.act(name);
             QVERIFY2(a != nullptr, name);
             QVERIFY2(!a->statusTip().isEmpty(), name);

@@ -733,10 +733,30 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
     }
     QElapsedTimer clock;
     clock.start();
+    // (PC5 J-e2: what is drawn on a video layer's frame just altered — alter_video_frame — taken with the alter as one step: the
+    // alter undone and applied again before the ops, its cel the same id)
+    Json batch = ops;
+    std::vector<std::string> given = ids;
+    if (video_alter_ && video_alter_->revision == book().revision && ops.is_array() && ops.dump().find(video_alter_->cel) != std::string::npos &&
+        session_->can_undo()) {  // (only ops on its cel)
+        const VideoAlter alter = *video_alter_;
+        video_alter_.reset();
+        try {
+            session_->undo();
+            batch = Json::array({alter.op});
+            for (const Json& op : ops) batch.push_back(op);
+            given.insert(given.begin(), alter.cel);
+        } catch (const std::exception&) {  // (not undone: the ops on their own)
+            batch = ops;
+            given = ids;
+        }
+    }
+    video_alter_.reset();
     try {
         // (channels@1: the pixel ops on the channel targeted; smart-objects@1: in a contents' tab, on its contents)
         last_results_ = core::Json::array();
-        last_results_ = session_->apply(with_contents_target(with_channel_target(ops)), ids).results;  // (PC4 E5: what the ops reported)
+        last_results_ = session_->apply(with_contents_target(with_channel_target(batch)), given).results;  // (PC4 E5: what the ops reported)
+        if (batch.size() > ops.size() && last_results_.is_array() && !last_results_.empty()) last_results_.erase(last_results_.begin());
     } catch (const core::Error& error) {
         flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
         return false;

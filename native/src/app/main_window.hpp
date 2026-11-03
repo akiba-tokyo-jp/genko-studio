@@ -1934,6 +1934,14 @@ private:
     void build_video_actions();
     void build_video_menus(QMenu* file, QMenu* layers);
     std::optional<core::Json> read_video_footage(const QString& path, std::optional<double> fps, std::int64_t every = 1);
+    // The frame alter_video_frame altered just now (its op, its cel, the book's revision then): the next apply_ops takes it with
+    // its ops as one step (one Undo takes back the stroke and the cel).
+    struct VideoAlter {
+        core::Json op;
+        std::string cel;
+        std::int64_t revision = 0;
+    };
+    std::optional<VideoAlter> video_alter_;
     // --- PC5 J-a (layer-comps@1): main_window_layer_comps.cpp — ウィンドウ → レイヤーカンプ (its dock and panel) and ファイル →
     // 書き出し → レイヤーカンプからファイル…; each change of the book an op through apply_ops --------------------------------
 public:
