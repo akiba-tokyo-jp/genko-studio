@@ -794,6 +794,7 @@ private slots:
         app::CharacterPanel* chars = w->character_panel();
         QTRY_VERIFY(chars->family->isEnabled() && chars->isEnabled());
         chars->size->setValue(7);
+        emit chars->size->editingFinished();  // (review P2-5: sent once its editing ends)
         QVERIFY(w->line_by_id("a") != nullptr);
         QCOMPARE(number_at(w->line_by_id("a")->style, "size_mm", 0.0), 7.0);
         // the lines panel shows its list and words without scrolling

@@ -3,6 +3,7 @@
 #include <QComboBox>
 #include <QWidget>
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -93,6 +94,7 @@ private:
 
     MainWindow* window_;
     bool loading_ = false;
+    std::vector<std::function<void()>> pending_;  // (the number fields' changes waiting to be sent: review P2-5)
     bool fonts_read_ = false;
     bool waiting_fonts_ = false;  // (the computer's fonts being read for the list: review P2-6)
 };
@@ -123,6 +125,7 @@ private:
 
     MainWindow* window_;
     bool loading_ = false;
+    std::vector<std::function<void()>> pending_;  // (the number fields' changes waiting to be sent: review P2-5)
 };
 
 // 文字スタイル and 段落スタイル panels (one each, as Photoshop's): the book's styles — [なし] / [基本段落] first —, the one the

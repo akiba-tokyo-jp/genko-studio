@@ -882,6 +882,7 @@ private slots:
         app::CharacterPanel* chars = desk.window->character_panel();
         QTRY_VERIFY(chars->isEnabled());
         chars->scale_x->setValue(70);
+        emit chars->scale_x->editingFinished();  // (review P2-5: sent once its editing ends)
         QCOMPARE(story_line(desk.window->book(), "l")->style.value("scale_x", Json()), Json(0.7));
         app::ParagraphPanel* paragraph = desk.window->paragraph_panel();
         paragraph->yakumono->setChecked(false);

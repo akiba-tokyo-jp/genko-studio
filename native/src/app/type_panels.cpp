@@ -304,8 +304,11 @@ std::shared_ptr<const std::vector<char32_t>> charmap_of(const QString& font, int
 
 // review P2-5: a number field's change sent once — its editing finished (Enter, leaving it), or the arrows or the wheel
 // resting a moment —, not each step.
+// (`pending`: where its "send what is waiting now" goes — the panel's refresh sends it first, so showing the text again
+// never puts back the value being typed)
 template <typename Box>
-void settle(QObject* owner, Box* box, const std::function<bool()>& loading, const std::function<void()>& send) {
+void settle(QObject* owner, Box* box, const std::function<bool()>& loading, const std::function<void()>& send,
+            std::vector<std::function<void()>>& pending_sends) {
     auto* timer = new QTimer(box);
     timer->setSingleShot(true);
     timer->setInterval(400);
@@ -322,6 +325,10 @@ void settle(QObject* owner, Box* box, const std::function<bool()>& loading, cons
     });
     QObject::connect(timer, &QTimer::timeout, owner, flush);
     QObject::connect(box, &QAbstractSpinBox::editingFinished, owner, [timer, flush] {
+        timer->stop();
+        flush();
+    });
+    pending_sends.push_back([timer, flush] {
         timer->stop();
         flush();
     });
@@ -454,25 +461,25 @@ CharacterPanel::CharacterPanel(MainWindow* window) : window_(window) {
         const Lengths l = lengths(window_);
         const double mm = core::units::to_mm(v, l.unit, l.basis);
         set(Json{{"size_mm", v > 0 ? Json(mm) : Json()}}, Json{{"size_mm", v > 0 ? Json(mm) : Json()}});
-    });
+    }, pending_);
     settle(this, leading, loading, [this] {
         const double v = leading->value();
         const Lengths l = lengths(window_);
         set(Json{{"leading_mm", v > 0 ? Json(core::units::to_mm(v, l.unit, l.basis)) : Json("auto")}});
-    });
+    }, pending_);
     settle(this, baseline, loading, [this] {
         const Lengths l = lengths(window_);
         set(Json{{"baseline_shift_mm", core::units::to_mm(baseline->value(), l.unit, l.basis)}});
-    });
+    }, pending_);
     settle(this, line_leading, loading, [this] {
         const std::optional<Json> target = window_->type_target(true);
         const core::StoryLine* record = target ? window_->type_record(*target) : nullptr;
         if (record != nullptr) window_->type_style_key(Json{{"leading", line_leading->value()}});
-    });
+    }, pending_);
     connect(kerning, &QComboBox::activated, this, [this](int) { set(Json{{"kerning", kerning->currentData().toString().toStdString()}}); });
-    settle(this, tracking, loading, [this] { set(Json{{"tracking", tracking->value() / 1000.0}}, Json{{"tracking", tracking->value() / 1000.0}}); });
-    settle(this, scale_y, loading, [this] { set(Json{{"scale_y", scale_y->value() / 100.0}}); });
-    settle(this, scale_x, loading, [this] { set(Json{{"scale_x", scale_x->value() / 100.0}}, Json{{"scale_x", scale_x->value() / 100.0}}); });
+    settle(this, tracking, loading, [this] { set(Json{{"tracking", tracking->value() / 1000.0}}, Json{{"tracking", tracking->value() / 1000.0}}); }, pending_);
+    settle(this, scale_y, loading, [this] { set(Json{{"scale_y", scale_y->value() / 100.0}}); }, pending_);
+    settle(this, scale_x, loading, [this] { set(Json{{"scale_x", scale_x->value() / 100.0}}, Json{{"scale_x", scale_x->value() / 100.0}}); }, pending_);
     connect(weight, &QComboBox::activated, this, [this](int) {
         const QString w = weight->currentData().toString();
         set(Json{{"faux_bold", w.toStdString()}}, Json{{"weight", w == QLatin1String("normal") ? Json() : Json(w.toStdString())}, {"bold", nullptr}});
@@ -593,6 +600,7 @@ void CharacterPanel::fill_fonts() {
 }
 
 void CharacterPanel::refresh() {
+    for (const auto& send : pending_) send();  // (a field's change still waiting: sent before the panel shows the text again)
     const Shown s = shown(window_);
     setEnabled(s.record != nullptr);
     loading_ = true;
@@ -798,7 +806,7 @@ ParagraphPanel::ParagraphPanel(MainWindow* window) : window_(window) {
         settle(this, b, [this] { return loading_; }, [this, key, b] {
             const Lengths l = lengths(window_);
             set(Json{{key, core::py_round(core::units::to_mm(b->value(), l.unit, l.basis), 4)}});
-        });
+        }, pending_);
     }
     kinsoku = new QComboBox;
     kinsoku->setObjectName(QStringLiteral("type_kinsoku"));
@@ -846,6 +854,7 @@ ParagraphPanel::ParagraphPanel(MainWindow* window) : window_(window) {
 }
 
 void ParagraphPanel::refresh() {
+    for (const auto& send : pending_) send();  // (a field's change still waiting: sent first)
     const Shown s = shown(window_);
     setEnabled(s.record != nullptr);
     loading_ = true;

@@ -537,7 +537,9 @@ private slots:
         for (const auto& [action, name] : names) ++count[action->text()];
         int placed = 0;
         for (const auto& [action, name] : names) {
-            const QString place = count[action->text()] > 1 ? app::where(window, action) : QString();
+            // (PC5 G-d: one that keeps its place in its name — genko_placed, ラスタライズ → テキスト — though its words are its alone)
+            const bool placed_always = action->property("genko_placed").toBool();
+            const QString place = count[action->text()] > 1 || placed_always ? app::where(window, action) : QString();
             const QString expected = place.isEmpty() ? action->text() : action->text() + QStringLiteral("（") + place + QStringLiteral("）");
             if (name != expected) wrong << name + QStringLiteral(" / ") + expected;
             if (!place.isEmpty()) ++placed;

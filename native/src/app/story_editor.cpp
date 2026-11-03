@@ -812,7 +812,8 @@ bool ReplaceDialog::find_next() {
 }
 
 bool ReplaceDialog::replace_one() {
-    if (!last_) return find_next() && false;
+    // (nothing found — or only where the last replacement left off —: the next place found, nothing replaced)
+    if (!last_ || last_->start == last_->end) return find_next() && false;
     // (the place found, while its text is as it was)
     const std::vector<Spot> all = spots();
     const auto it = std::find_if(all.begin(), all.end(), [&](const Spot& s) { return s.target == last_->target; });

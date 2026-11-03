@@ -176,7 +176,7 @@ private slots:
         for (const int v : {110, 120, 130}) chars.tracking->setValue(v);
         QCOMPARE(s.ops.size(), before);
         QTRY_COMPARE(s.ops.size(), before + 1);
-        QCOMPARE(s.last()["tracking"], Json(0.13));
+        QVERIFY2(s.last()["tracking"] == Json(0.13), s.last().dump().c_str());
         emit chars.tracking->editingFinished();  // (nothing more to send)
         QCOMPARE(s.ops.size(), before + 1);
         // typing over it: the letters chosen — "cd" — are the range
