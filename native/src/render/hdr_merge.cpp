@@ -155,7 +155,7 @@ Shot reduced(const Shot& shot, int max_side) {
     for (std::uint32_t y = 0; y < h; ++y) {
         for (std::uint32_t x = 0; x < w; ++x) {
             const std::size_t i = std::size_t(y / k) * sw + x / k;
-            for (int c = 0; c < 3; ++c) sums[i * 3 + std::size_t(c)] += shot.value(x + shot.dx, y + shot.dy, c);
+            for (int c = 0; c < 3; ++c) sums[i * 3 + std::size_t(c)] += shot.value(std::int64_t(x) + shot.dx, std::int64_t(y) + shot.dy, c);
             counts[i] += 1.0f;
         }
     }

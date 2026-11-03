@@ -139,7 +139,6 @@ private slots:
         const std::size_t w = 64, h = 64;
         const std::vector<Rgb> sc(w * h, Rgb{0.2f, 0.2f, 0.2f});
         // (a "person" only in the third exposure)
-        std::vector<float> person;
         std::vector<hdr::Shot> shots{shoot(sc, w, h, 0.5f), shoot(sc, w, h, 1.0f)};
         {
             std::vector<float> v;

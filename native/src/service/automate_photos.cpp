@@ -21,6 +21,7 @@
 #include "render/image.hpp"
 #include "render/image_ops.hpp"
 #include "render/ops_filters.hpp"
+#include "render/page.hpp"
 #include "render/raw.hpp"
 #include "render/scancrop.hpp"
 #include "storage/fsutil.hpp"
@@ -136,24 +137,23 @@ render::hdr::Tone hdr_tone(std::string_view method, const Json& settings) {
 
 render::hdr::Shot hdr_shot_file(const fs::path& file, const formats::OpenOptions& options, const std::function<bool()>& stopped) {
     const std::string name = core::path_to_utf8(file.filename());
-    {
-        const std::string bytes = storage::read_file(file);
-        std::string suffix = core::path_to_utf8(file.extension());
-        std::transform(suffix.begin(), suffix.end(), suffix.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        if (render::raw::is_raw(bytes, suffix)) {
-            // (a camera RAW file: linear light as LibRaw develops it — its values the radiance, no response to estimate)
-            render::raw::Options raw;
-            raw.limits = options.limits;
-            raw.stopped = stopped;
-            render::raw::Developed made = render::raw::develop_linear(bytes, raw);
-            const auto& camera = made.info.camera;
-            return Shot(name, std::move(made.picture), render::hdr::exposure_factor(camera.shutter, camera.aperture, camera.iso));
-        }
-        formats::OpenOptions open = options;
-        open.folder = file.parent_path();
-        const formats::Opened opened = formats::open_file(bytes, name, open);
-        return page_shot(opened.doc, opened.doc.page(0), name);
+    const std::string bytes = storage::read_file(file);
+    std::string suffix = core::path_to_utf8(file.extension());
+    std::transform(suffix.begin(), suffix.end(), suffix.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (render::raw::is_raw(bytes, suffix)) {
+        // (a camera RAW file: linear light as LibRaw develops it — its values the radiance, no response to estimate)
+        render::raw::Options raw;
+        raw.limits = options.limits;
+        raw.stopped = stopped;
+        render::raw::Developed made = render::raw::develop_linear(bytes, raw);
+        const auto& camera = made.info.camera;
+        return Shot(name, std::move(made.picture), render::hdr::exposure_factor(camera.shutter, camera.aperture, camera.iso));
     }
+    formats::OpenOptions open = options;
+    open.folder = file.parent_path();
+    const formats::Opened opened = formats::open_file(bytes, name, open);
+    return page_shot(opened.doc, opened.doc.page(0), name);
+}
 
 void check_shots(const std::vector<Shot>& shots) {
     count_check(shots.size());

@@ -37,7 +37,7 @@ QDialogButtonBox* ok_cancel(QDialog* dialog, const QString& ok, std::function<st
     buttons->button(QDialogButtonBox::Ok)->setText(ok);
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("キャンセル"));
     QObject::connect(buttons, &QDialogButtonBox::accepted, dialog, [dialog, problem] {
-        if (const auto why = problem ? problem() : std::nullopt) {
+        if (const auto why = problem ? problem() : std::optional<QString>()) {
             ask::warning(dialog, dialog->windowTitle(), *why);
             return;
         }
