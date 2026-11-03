@@ -548,23 +548,21 @@ private slots:
             QCOMPARE(made.books[1].title, std::string("コンタクトシート-002"));
             const core::Page& page = first.page(0);
             QCOMPARE(depth == 16, page.rgb && page.rgb->depth == 16);
-            std::vector<std::string> names;
-            int captions = 0;
-            for (const core::Layer& layer : page.layers) {
-                if (layer.kind == core::LayerKind::Type) ++captions;
-                else names.push_back(layer.title);
-            }
-            QCOMPARE(captions, 4);  // (a caption a picture)
-            QVERIFY(std::find(names.begin(), names.end(), "img0") != names.end() && std::find(names.begin(), names.end(), "img3") != names.end());
+            std::vector<std::string> captions, layers;
+            for (const core::Layer& layer : page.layers) (layer.kind == core::LayerKind::Type ? captions : layers).push_back(layer.title);
+            QCOMPARE(captions.size(), std::size_t(4));  // (a caption a picture, named by its text)
+            QVERIFY(std::find(captions.begin(), captions.end(), "img0") != captions.end() && std::find(captions.begin(), captions.end(), "img3") != captions.end());
+            // (the small pictures in one layer of the sheet: a paint layer covers its page — the review's P1-1)
+            QCOMPARE(layers, (std::vector<std::string>{"背景", "サムネール"}));
             // a small picture inside its cell (200 × 150 less the spacing and the caption)
             for (const core::Layer& layer : page.layers) {
-                if (layer.title != "img0" || layer.kind != core::LayerKind::Raster) continue;  // (not its caption, named by its text)
-                // (its pixels on the sheet's grid, at the sheet's 72 ppi: the part that shows)
+                if (layer.title != "サムネール") continue;
+                // (its pixels on the sheet's grid, at the sheet's 72 ppi: the part of the first cell that shows)
                 const formats::PagePicture picture = formats::layer_picture(page, layer, first, 72);
                 const unsigned all = render::codecs::channels(picture.image.layout());
                 std::uint32_t x0 = picture.image.width(), x1 = 0, y0 = picture.image.height(), y1 = 0;
-                for (std::uint32_t y = 0; y < picture.image.height(); ++y) {
-                    for (std::uint32_t x = 0; x < picture.image.width(); ++x) {
+                for (std::uint32_t y = 0; y < std::min<std::uint32_t>(picture.image.height(), 150); ++y) {
+                    for (std::uint32_t x = 0; x < std::min<std::uint32_t>(picture.image.width(), 200); ++x) {
                         if (picture.image.value((std::size_t(y) * picture.image.width() + x) * all + all - 1) <= 0.0f) continue;
                         x0 = std::min(x0, x);
                         x1 = std::max(x1, x + 1);
@@ -576,6 +574,63 @@ private slots:
                          qPrintable(QStringLiteral("%1×%2").arg(x1 - x0).arg(y1 - y0)));
             }
             QCOMPARE(made.books[1].page(0).layers.size(), std::size_t(1 + 1 + 1));  // (背景, img4 and its caption)
+        }
+        // Photoshop's default sheet (8 × 10 in at 300 ppi, 5 × 6) of 16 bits: 30 pictures on one sheet (the review's P1-1: it
+        // passed the book's 1 GiB of precise pixels with a layer a picture)
+        {
+            fs::create_directories(root / "thirty");
+            for (int i = 0; i < 30; ++i) {
+                formats::NewImage image;
+                image.title = "t";
+                image.width = 40;
+                image.height = 30;
+                image.background = "#2266aa";
+                formats::write_copy(formats::new_image(image).doc, 0, root / "thirty" / ("t" + std::to_string(100 + i) + ".png"));
+            }
+            service::automate::ContactSheet plain;
+            plain.depth = 16;
+            const service::automate::ContactSheetResult many =
+                service::automate::contact_sheet(service::automate::list_inputs({root / "thirty"}).items, plain, service::automate::Options{});
+            QVERIFY2(many.errors.empty(), many.errors.dump().c_str());
+            QCOMPARE(many.books.size(), std::size_t(1));
+            QCOMPARE(many.images, std::size_t(30));
+            QVERIFY(many.books[0].page(0).rgb && many.books[0].page(0).rgb->depth == 16);
+            // handed on one by one: none kept
+            std::size_t handed = 0;
+            const service::automate::ContactSheetResult given = service::automate::contact_sheet(
+                service::automate::list_inputs({root / "thirty"}).items, plain, service::automate::Options{}, [&handed](core::Document&&) { ++handed; });
+            QVERIFY(given.books.empty() && given.sheets == 1 && handed == 1);
+        }
+        // refused before anything is opened: a 16-bit sheet whose layers pass the book's 1 GiB, too many cells, sheets kept
+        // together past 2 GiB
+        {
+            service::automate::ContactSheet big;
+            big.units = "px";
+            big.width = 9000;
+            big.height = 9000;
+            big.depth = 16;
+            QVERIFY_THROWS_EXCEPTION(core::Error, service::automate::check_contact_sheet(big));
+            try {
+                service::automate::contact_sheet(inputs, big, service::automate::Options{});
+                QFAIL("a 16-bit sheet past the book's budget was made");
+            } catch (const core::Error& error) {
+                QCOMPARE(error.code(), std::string("image_too_large"));
+            }
+            service::automate::ContactSheet cells;
+            cells.columns = 30;
+            cells.rows = 30;
+            QVERIFY_THROWS_EXCEPTION(core::Error, service::automate::check_contact_sheet(cells));
+            service::automate::ContactSheet one;
+            one.columns = 1;
+            one.rows = 1;
+            service::automate::check_contact_sheet(one, 60, false);  // (written one by one: fine)
+            QVERIFY_THROWS_EXCEPTION(core::Error, service::automate::check_contact_sheet(one, 60, true));  // (60 sheets kept open)
+            const test::Run refused = test::run_genko({QStringLiteral("automate"), QStringLiteral("contact-sheet"), q(root / "in"), QStringLiteral("--out"),
+                                                       q(root / "big"), QStringLiteral("--units"), QStringLiteral("px"), QStringLiteral("--width"),
+                                                       QStringLiteral("9000"), QStringLiteral("--height"), QStringLiteral("9000"), QStringLiteral("--depth"),
+                                                       QStringLiteral("16")});
+            QCOMPARE(refused.exit_code, 2);
+            QVERIFY(!fs::exists(root / "big"));
         }
         // grey; flattened without captions; filled down first
         sheet.depth = 8;
@@ -654,6 +709,10 @@ private slots:
         QVERIFY(!ia::parse_defaults("defaults are nice", 72.0));
         QVERIFY(ia::safe_relative("icons/a.png") && !ia::safe_relative("../a.png") && !ia::safe_relative("/a.png") && !ia::safe_relative("a\\b.png") &&
                 !ia::safe_relative("c:a.png"));
+        for (const char* windows : {"con.png", "AUX/x.png", "com1.jpg", "lpt9.gif", "a./b.png", "a /b.png", "x?.png", "a*.png", "a<b.png"}) {
+            QVERIFY2(!ia::safe_relative(windows), windows);
+        }
+        QVERIFY(ia::safe_relative("console.png") && ia::safe_relative("com10.png") && ia::safe_relative("a.b/c.png"));
 
         QTemporaryDir dir;
         const fs::path root = path_of(dir.path());
@@ -694,14 +753,16 @@ private slots:
             const core::PageSpec& s = doc.page(0).spec;
             return std::pair<long, long>{std::lround(s.width_mm.value() / 25.4 * s.dpi.value()), std::lround(s.height_mm.value() / 25.4 * s.dpi.value())};
         };
-        web_book(root / "web.genko", {{"logo.png, 50% small/logo.gif, logo.jpg80%, ../evil.png", false}, {"group.png", true}});
+        web_book(root / "web.genko", {{"logo.png, 50% small/logo.gif, logo.jpg80%, ../evil.png, nul.png, LOGO.png", false}, {"group.png", true}});
         auto [code, out] = cli({QStringLiteral("export"), q(root / "web.genko"), q(root / "assets"), QStringLiteral("--format"), QStringLiteral("image-assets"),
                                 QStringLiteral("--json")});
-        QCOMPARE(code, 0);
+        QCOMPARE(code, 1);  // (one not written: 1 — the review's P3-3)
         QCOMPARE(out["ok"], Json(false));
         QCOMPARE(out["count"], Json(4));
-        QCOMPARE(out["errors"].size(), std::size_t(1));
+        QCOMPARE(out["errors"].size(), std::size_t(3));
         QCOMPARE(out["errors"][0]["asset"], Json("../evil.png"));
+        QCOMPARE(out["errors"][1]["asset"], Json("nul.png"));   // (a Windows device's name)
+        QCOMPARE(out["errors"][2]["asset"], Json("LOGO.png"));  // (logo.png's file where case is not told apart)
         QVERIFY(!fs::exists(root / "evil.png"));
         QCOMPARE(size_of(root / "assets" / "logo.png"), (std::pair<long, long>{64, 40}));
         QCOMPARE(size_of(root / "assets" / "small" / "logo.gif"), (std::pair<long, long>{32, 20}));
@@ -741,6 +802,14 @@ private slots:
         Json plain_json = core::parse_python_json(plain);
         plain_json["revision"] = off["revision"];
         QCOMPARE(off, plain_json);  // (the same book but its revision)
+        // {"image_assets": false} read as off (the review's P3-7), written back as none
+        Json off_given = off;
+        off_given["generator"] = Json{{"image_assets", false}};
+        storage::write_atomic(root / "icon.genko" / "project.json", off_given.dump());
+        {
+            const core::Document read = storage::load_document(root / "icon.genko").document;
+            QVERIFY(read.read_only_reason.empty() && !read.image_assets);
+        }
         // a generator this build does not take: the book opens read-only
         Json odd = off;
         odd["generator"] = Json{{"image_assets", "yes"}};

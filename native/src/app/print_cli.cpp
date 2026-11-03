@@ -27,6 +27,7 @@
 #include "core/error.hpp"
 #include "core/json.hpp"
 #include "core/paths.hpp"
+#include "formats/copy.hpp"
 #include "formats/exporting.hpp"
 #include "formats/print_marks.hpp"
 #include "render/brushes.hpp"
@@ -202,6 +203,14 @@ int print_command(int argc, char** argv) {
     try {
         const storage::LoadResult loaded = storage::load_document(core::path_from_utf8(book->toStdString()));
         const core::Document& doc = loaded.document;
+        // (the review's P2-1: a PDF never into the book or its folder, over a file it links or a picture it was opened from)
+        if (const auto pdf = value("--pdf")) {
+            try {
+                formats::check_target(formats::write_guard(doc, core::path_from_utf8(book->toStdString())), core::path_from_utf8(pdf->toStdString()));
+            } catch (const core::Error& error) {
+                return usage(std::string("argument --pdf: ") + error.what());
+            }
+        }
         render::brushes::clear_custom();
         render::brushes::register_book(doc);  // (the book's own brushes, as `genko render` draws its pages)
         const auto count = static_cast<std::int64_t>(doc.pages.size());

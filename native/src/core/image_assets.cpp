@@ -4,6 +4,7 @@
 #include "core/image_assets.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cerrno>
 #include <cmath>
@@ -19,11 +20,11 @@ namespace genko::core {
 Json image_assets_json() { return Json{{"image_assets", true}}; }
 
 bool image_assets_from_json(const Json& value) {
-    if (!value.is_object() || value.size() != 1 || !value.contains("image_assets") || !value["image_assets"].is_boolean() ||
-        !value["image_assets"].get<bool>()) {
+    // ({"image_assets": false} — another program's way of saying off — is read as off; written back as none)
+    if (!value.is_object() || value.size() != 1 || !value.contains("image_assets") || !value["image_assets"].is_boolean()) {
         throw Error("value", "the book's generator is {\"image_assets\": true} or none");
     }
-    return true;
+    return value["image_assets"].get<bool>();
 }
 
 void register_image_asset_ops(OpRegistry& registry) {
@@ -234,11 +235,19 @@ bool safe_relative(std::string_view path) {
     for (std::size_t i = 0; i <= path.size(); ++i) {
         if (i < path.size()) {
             const auto c = static_cast<unsigned char>(path[i]);
-            if (c < 0x20 || c == 0x7f || c == '\\' || c == ':') return false;
+            if (c < 0x20 || c == 0x7f || c == '\\' || c == ':' || c == '<' || c == '>' || c == '"' || c == '|' || c == '?' || c == '*') return false;
             if (c != '/') continue;
         }
         const std::string_view part = path.substr(start, i - start);
         if (part.empty() || part == "." || part == "..") return false;
+        // (Windows: a part may not end in a dot or a space — "a." is "a" there —, nor be a device's name, whatever follows
+        // its first dot: con.png, nul.png, aux/x.png, com1.jpg, lpt9.gif)
+        if (part.back() == '.' || part.back() == ' ') return false;
+        std::string base = lower(part.substr(0, std::min(part.find('.'), part.size())));
+        while (!base.empty() && base.back() == ' ') base.pop_back();
+        static const std::array<std::string_view, 4> kDevices{"con", "prn", "aux", "nul"};
+        if (std::find(kDevices.begin(), kDevices.end(), base) != kDevices.end()) return false;
+        if (base.size() == 4 && (base.starts_with("com") || base.starts_with("lpt")) && base[3] >= '1' && base[3] <= '9') return false;
         start = i + 1;
     }
     return true;

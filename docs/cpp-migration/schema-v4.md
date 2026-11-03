@@ -527,7 +527,7 @@ Photoshop の文字（テキストレイヤー・文字と段落の属性・ス�
 
 - **本の `"generator"`**（本の鍵の `variables` の後）: `{"image_assets": true}` だけ。生成 → 画像アセット を入れた本だけが持ち、外すと書かない。持たない原稿は今と同じバイトで書く。
 - 書き手は `generator` を持つ本の `features` に `image-assets@1` を加え、外せば外す。
-- **読み手の検査**: `{"image_assets": true}` でない `generator`（ほかの鍵・true でない値）は読み取り専用で開く。image-assets@1 を知らない読み手（PC5 I-f より前の C++ 版）は、未知の拡張として読み取り専用で開く。
+- **読み手の検査**: `{"image_assets": false}` は切りとして読む（書き手は書かない）。それ以外の `{"image_assets": true}` でない `generator`（ほかの鍵・真偽でない値）は読み取り専用で開く。image-assets@1 を知らない読み手（PC5 I-f より前の C++ 版）は、未知の拡張として読み取り専用で開く。
 - op `set_image_assets {"on": bool}` は本の op（ページに触れない）。書き出すファイル（`<原稿の名前>-assets/`）は本の外で、本には持たない。
 
 ## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1。PROD-01、PC5 節 J）

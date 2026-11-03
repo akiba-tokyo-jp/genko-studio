@@ -19,8 +19,8 @@ class OpRegistry;
 
 inline constexpr std::string_view kImageAssetsFeature = "image-assets@1";
 
-// The book's "generator" as the writer writes it ({"image_assets": true}), and back (core::Error("value") for anything
-// else: another key, a value that is not true).
+// The book's "generator" as the writer writes it ({"image_assets": true}), and back ({"image_assets": false} read as off;
+// core::Error("value") for anything else: another key, a value that is not true or false).
 Json image_assets_json();
 bool image_assets_from_json(const Json& value);
 
@@ -57,8 +57,9 @@ struct Default {
 std::vector<Spec> parse_name(std::string_view name, double dpi);
 // A "default …" name's variants (none: not such a name; an empty list: "default" alone).
 std::optional<std::vector<Default>> parse_defaults(std::string_view name, double dpi);
-// A path under the assets' folder its rule takes: relative, "/" between its parts, no part empty, "." or "..", no "\", ":"
-// or control character. (Others are said as the asset's error and nothing is written for it.)
+// A path under the assets' folder its rule takes: relative, "/" between its parts, no part empty, "." or "..", no "\", ":",
+// < > " | ? * or control character, no part ending in a dot or a space, no Windows device name (con, prn, aux, nul,
+// com1..9, lpt1..9, before any dot). (Others are said as the asset's error and nothing is written for it.)
 bool safe_relative(std::string_view path);
 
 }  // namespace image_assets

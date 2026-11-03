@@ -640,9 +640,16 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the spacing is 0 or more)", "間隔は 0 以上です"));
         r.push_back(rule(R"(the sheets' name is 1 to 200 bytes)", "シートの名前は 1〜200 バイトです"));
         r.push_back(rule(R"(the sheet is at least 16 pixels a side)", "シートは 1 辺 16 pixel 以上にします"));
+        r.push_back(rule(R"(the sheet is too large \((\d+)×(\d+) pixels; its work would pass 2 GiB.*)",
+                         "シートが大きすぎます（\\1×\\2 pixel。作るのに 2 GiB を越えます）。シートを小さく・解像度を低く・8 bit にしてください"));
+        r.push_back(rule(R"(the sheet is too large \((\d+)×(\d+) pixels; a 16-bit sheet's layers would pass.*)",
+                         "16 bit のシートが大きすぎます（\\1×\\2 pixel。原稿の高精度の画素の上限 1 GiB を越えます）。シートを小さく・解像度を低く・8 bit にしてください"));
+        r.push_back(rule(R"(the sheets of (\d+) pictures would pass 2 GiB together \((\d+) sheets\).*)",
+                         "\\1 枚の画像のシート（\\2 枚）を開いたままにすると 2 GiB を越えます。画像を減らすか、列数・行数を増やすか、シートを小さくしてください"));
+        r.push_back(rule(R"(a sheet holds at most (\d+) pictures \(columns × rows\))", "1 枚のシートに置けるのは \\1 枚まで（列数 × 行数）です"));
         r.push_back(rule(R"(the sheet is too large \((\d+)×(\d+) pixels;.*)", "シートが大きすぎます（\\1×\\2 pixel。1 億 2 千万 pixel・1 辺 10 万 pixel まで）"));
         r.push_back(rule(R"(the asset's name is not a path inside the assets' folder)",
-                         "画像アセットの名前が、アセットのフォルダーの中の場所になっていません（.. や \\ や : は使えません）"));
+                         "画像アセットの名前が、アセットのフォルダーの中の場所になっていません（..・\\・: と、Windows で使えない名前は使えません）"));
         r.push_back(rule(R"(another layer writes an asset of this name)", "同じ名前の画像アセットを書き出すレイヤーがほかにあります"));
         r.push_back(rule(R"(the group has nothing to write)", "このグループには書き出すものがありません"));
         r.push_back(rule(R"((?:ops\[\d+\] set_image_assets: )?on is true or false.*)", "画像アセットの on は true か false です"));

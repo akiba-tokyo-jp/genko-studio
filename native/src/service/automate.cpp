@@ -17,6 +17,7 @@
 #include <set>
 #include <system_error>
 
+#include "core/color_raster.hpp"
 #include "core/covers.hpp"
 #include "core/ink.hpp"
 #include "core/paths.hpp"
@@ -30,6 +31,7 @@
 #include "render/brushes.hpp"
 #include "render/codecs/format.hpp"
 #include "render/codecs/image.hpp"
+#include "render/codecs/limits.hpp"
 #include "render/codecs/resize.hpp"
 #include "render/op_limits.hpp"
 #include "render/ops_registry.hpp"
@@ -1303,7 +1305,7 @@ Output droplet_output(const Droplet& droplet, const std::vector<Input>& inputs, 
 Json ContactSheetResult::json() const {
     Json out = Json::object();
     out["ok"] = errors.empty();
-    out["sheets"] = books.size();
+    out["sheets"] = sheets;
     out["images"] = images;
     out["width"] = width_px;
     out["height"] = height_px;
@@ -1321,18 +1323,22 @@ double sheet_px(double v, const ContactSheet& sheet) {
     return v * sheet.resolution;  // (in)
 }
 
-// One sheet being filled: its book, the captions to set, how many cells are taken.
+// One sheet being filled: its pixels (the サムネール layer's, at the sheet's layout and depth), the captions to set, how
+// many cells are taken.
 struct SheetInMaking {
-    core::Document doc;
+    std::string pixels;
     Json captions = Json::array();
     int taken = 0;
 };
+
+// What a sheet's pixels hold: 8 bits RGBA or grey and alpha, or 16 bits.
+std::uint64_t sheet_pixel_bytes(const ContactSheet& s) { return (s.mode == "gray" ? 2u : 4u) * (s.depth == 16 ? 2u : 1u); }
 
 }  // namespace
 
 void check_output_folder(const fs::path& folder) { refuse_inside_book(folder); }
 
-void check_contact_sheet(const ContactSheet& s) {
+void check_contact_sheet(const ContactSheet& s, std::size_t images, bool kept) {
     const auto finite = [](double v) { return std::isfinite(v); };
     if (s.units != "in" && s.units != "cm" && s.units != "mm" && s.units != "px") throw core::Error("value", "the units are in, cm, mm or px");
     if (!finite(s.width) || !finite(s.height) || !(s.width > 0.0) || !(s.height > 0.0)) throw core::Error("value", "the sheet's width and height are above 0");
@@ -1340,19 +1346,42 @@ void check_contact_sheet(const ContactSheet& s) {
     if (s.mode != "rgb" && s.mode != "gray") throw core::Error("value", "the mode is rgb or gray");
     if (s.depth != 8 && s.depth != 16) throw core::Error("value", "the depth is 8 or 16");
     if (s.columns < 1 || s.columns > 100 || s.rows < 1 || s.rows > 100) throw core::Error("value", "the columns and the rows are 1 to 100");
+    if (s.columns * s.rows > kContactSheetCells) {
+        throw core::Error("value", "a sheet holds at most " + std::to_string(kContactSheetCells) + " pictures (columns × rows)");
+    }
     if (!finite(s.font_pt) || s.font_pt < 4.0 || s.font_pt > 72.0) throw core::Error("value", "the caption's size is 4 to 72 pt");
     if (!finite(s.horizontal) || !finite(s.vertical) || s.horizontal < 0.0 || s.vertical < 0.0) throw core::Error("value", "the spacing is 0 or more");
     if (s.title.empty() || s.title.size() > 200) throw core::Error("value", "the sheets' name is 1 to 200 bytes");
     const double pw = std::round(sheet_px(s.width, s)), ph = std::round(sheet_px(s.height, s));
     if (pw < 16.0 || ph < 16.0) throw core::Error("value", "the sheet is at least 16 pixels a side");
+    const auto too_large = [&](const std::string& why) {
+        return core::Error("image_too_large", "the sheet is too large (" + std::to_string(static_cast<long long>(pw)) + "×" +
+                                                  std::to_string(static_cast<long long>(ph)) + " pixels; " + why + ")");
+    };
     if (pw > double(render::limits::kSide) || ph > double(render::limits::kSide) || pw * ph > double(render::limits::kPixels)) {
-        throw core::Error("image_too_large", "the sheet is too large (" + std::to_string(static_cast<long long>(pw)) + "×" +
-                                                 std::to_string(static_cast<long long>(ph)) + " pixels; at most 120000000 pixels, 100000 a side)");
+        throw too_large("at most 120000000 pixels, 100000 a side");
+    }
+    // (the review's P1-1, P2-2: the memory a sheet takes, counted before anything is opened)
+    const double pixels = pw * ph;
+    const double work = pixels * (2.0 * double(sheet_pixel_bytes(s)) + 4.0);  // (its pixels and their layer, the picture drawn)
+    if (work > double(render::codecs::kAllocBudget)) throw too_large("its work would pass 2 GiB: a smaller sheet, a lower resolution or 8 bits");
+    if (s.depth == 16 && s.mode == "rgb" && pixels * 8.0 * 2.0 > double(core::kColorRasterBookBytes)) {
+        throw too_large("a 16-bit sheet's layers would pass the book's 1 GiB of precise pixels: a smaller sheet, a lower resolution or 8 bits");
+    }
+    if (kept && images > 0) {
+        const double cells = double(s.columns) * double(s.rows);
+        const double sheets = std::ceil(double(images) / cells);
+        if (sheets * pixels * 2.0 * double(sheet_pixel_bytes(s)) > double(render::codecs::kAllocBudget)) {
+            throw core::Error("image_too_large", "the sheets of " + std::to_string(images) + " pictures would pass 2 GiB together (" +
+                                                     std::to_string(static_cast<long long>(sheets)) +
+                                                     " sheets): fewer pictures, more columns and rows, or a smaller sheet");
+        }
     }
 }
 
-ContactSheetResult contact_sheet(const std::vector<Input>& inputs, const ContactSheet& s, const Options& options) {
-    check_contact_sheet(s);
+ContactSheetResult contact_sheet(const std::vector<Input>& inputs, const ContactSheet& s, const Options& options,
+                                 const std::function<void(core::Document&&)>& each) {
+    check_contact_sheet(s, inputs.size(), !each);
     using render::codecs::CodecImage;
     using render::codecs::Layout;
     using render::codecs::Sample;
@@ -1380,21 +1409,18 @@ ContactSheetResult contact_sheet(const std::vector<Input>& inputs, const Contact
     const core::CommandBus bus(render::ops_registry());
 
     std::optional<SheetInMaking> making;
+    // the sheet in making finished — its book made, its small pictures one layer, its captions set, merged when asked — and
+    // handed on; one that cannot be is let go (nothing of it kept) and said
     const auto finish = [&] {
         if (!making) return;
-        Json ops = std::move(making->captions);
-        if (s.flatten) ops.push_back(Json{{"op", "merge_visible"}, {"page", 1}, {"copy", false}, {"flatten", true}});
-        core::Document doc = ops.empty() ? std::move(making->doc) : bus.apply(making->doc, ops, options.actor).doc;
-        result.books.push_back(std::move(doc));
+        SheetInMaking sheet = std::move(*making);
         making.reset();
-    };
-    // a picture put in the next cell (a new sheet when the last is full)
-    const auto put = [&](const render::Image& shown, const std::string& label) {
-        if (!making) {
+        char number[16];
+        std::snprintf(number, sizeof number, "-%03zu", result.sheets + 1);
+        const std::string title = s.title + number;
+        try {
             formats::NewImage blank;
-            char number[16];
-            std::snprintf(number, sizeof number, "-%03zu", result.books.size() + 1);
-            blank.title = s.title + number;
+            blank.title = title;
             blank.width = pw;
             blank.height = ph;
             blank.dpi = s.resolution;
@@ -1402,8 +1428,28 @@ ContactSheetResult contact_sheet(const std::vector<Input>& inputs, const Contact
             blank.depth = s.depth;
             blank.background = "white";
             blank.profile = grey ? "sgray" : "srgb";
-            making = SheetInMaking{formats::new_image(blank, open).doc, Json::array(), 0};
+            core::Document doc = formats::new_image(blank, open).doc;
+            CodecImage whole = CodecImage::from_bytes(pw, ph, layout, sample, std::move(sheet.pixels));
+            whole.meta.dpi = std::make_pair(s.resolution, s.resolution);
+            formats::Opened layer_book = formats::picture_book(std::move(whole), "サムネール", open);
+            core::Layer layer = layer_book.doc.page(0).layers.front();
+            layer.title = "サムネール";
+            doc.edit_page(0).layers.push_back(std::move(layer));
+            Json ops = std::move(sheet.captions);
+            if (s.flatten) ops.push_back(Json{{"op", "merge_visible"}, {"page", 1}, {"copy", false}, {"flatten", true}});
+            if (!ops.empty()) doc = bus.apply(doc, ops, options.actor).doc;
+            ++result.sheets;
+            if (each) each(std::move(doc));
+            else result.books.push_back(std::move(doc));
+        } catch (const core::Error& error) {
+            result.errors.push_back(Json{{"input", title}, {"error", error.what()}, {"code", error.code()}});
+        } catch (const std::exception& error) {
+            result.errors.push_back(Json{{"input", title}, {"error", error.what()}, {"code", "internal"}});
         }
+    };
+    // a picture put in the next cell (a new sheet when the last is full)
+    const auto put = [&](const render::Image& shown, const std::string& label) {
+        if (!making) making = SheetInMaking{std::string(std::size_t(pw) * ph * channels * bytes, '\0'), Json::array(), 0};
         const int k = making->taken;
         const int c = s.across ? k % s.columns : k / s.rows;
         const int r = s.across ? k / s.columns : k % s.rows;
@@ -1421,8 +1467,7 @@ ContactSheetResult contact_sheet(const std::vector<Input>& inputs, const Contact
                                                   rgb.tobytes());
         small = render::codecs::resized(small, tw, th, render::codecs::ResizeFilter::Bicubic).convert(grey ? Layout::Gray : Layout::Rgb, sample);
         const long ox = std::lround(x0 + (cell_w - tw) / 2.0), oy = std::lround(y0 + (box_h - th) / 2.0);
-        // (the sheet's size, clear but for the small picture: the layer of a paint layer's own grid)
-        std::string data(std::size_t(pw) * ph * channels * bytes, '\0');
+        // (pasted into the sheet's pixels: the small picture opaque, the rest of the layer clear)
         const unsigned colours = channels - 1;
         std::vector<float> row;
         for (std::uint32_t y = 0; y < th; ++y) {
@@ -1437,14 +1482,8 @@ ContactSheetResult contact_sheet(const std::vector<Input>& inputs, const Contact
                 }
             }
             const std::string stored = render::codecs::quantize(row, sample);
-            std::memcpy(data.data() + (std::size_t(sy) * pw + std::size_t(ox + x_from)) * channels * bytes, stored.data(), stored.size());
+            std::memcpy(making->pixels.data() + (std::size_t(sy) * pw + std::size_t(ox + x_from)) * channels * bytes, stored.data(), stored.size());
         }
-        CodecImage whole = CodecImage::from_bytes(pw, ph, layout, sample, std::move(data));
-        whole.meta.dpi = std::make_pair(s.resolution, s.resolution);
-        formats::Opened layer_book = formats::picture_book(std::move(whole), label, open);
-        core::Layer layer = layer_book.doc.page(0).layers.front();
-        layer.title = label;
-        making->doc.edit_page(0).layers.push_back(std::move(layer));
         if (s.caption) {
             making->captions.push_back(Json{{"op", "add_type_layer"},
                                             {"page", 1},

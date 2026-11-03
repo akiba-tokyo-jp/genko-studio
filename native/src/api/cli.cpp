@@ -1110,7 +1110,7 @@ int export_datasets(const Arguments& a, bool ascii) {
 // PC5 I-f (file.generate.imageAssets, 生成 → 画像アセット): `genko export <book> <folder> --format image-assets [--json]` — the
 // layers (and groups) named as files ("logo.png", "200% logo@2x.png", "48x48 icons/a.png8", "photo.jpg80%") written into the
 // folder now (formats::image_assets::generate; never into the book or over a file it links); the paths one a line (what could
-// not be written on stderr), or with --json {"ok": no errors, "count", "files", "errors", "notes"}.
+// not be written on stderr), or with --json {"ok": no errors, "count", "files", "errors", "notes"}; 1 when one could not be written.
 int export_image_assets(const Arguments& a, bool ascii) {
     for (const auto& [option, value] : a.values) {
         if (option != "--format") return usage("genko export: argument " + option + ": not with --format image-assets");
@@ -1142,7 +1142,7 @@ int export_image_assets(const Arguments& a, bool ascii) {
         for (const core::Json& e : result.errors) said += "genko export: " + e.value("asset", std::string()) + ": " + e.value("error", std::string()) + "\n";
         if (!said.empty()) write_text(said, stderr);
     }
-    return 0;
+    return result.errors.empty() ? 0 : 1;  // (an asset not written: 1, as a contact sheet's — the review's P3-3)
 }
 
 // `genko export <book> <out> [--format F] [options]` (Python's export command, genko/__main__.py): the book written
@@ -3335,12 +3335,12 @@ int contact_sheet_command(const QStringList& all, bool ascii) {
     service::automate::Options options;
     options.actor = core::Actor(std::string(core::kLegacyActor));
     options.stop_on_error = a.flag("--stop-on-error");
-    service::automate::ContactSheetResult result = service::automate::contact_sheet(inputs.items, sheet, options);
     std::error_code ec;
     fs::create_directories(out, ec);
     core::Json files = core::Json::array();
     std::string lines;
-    for (const core::Document& book : result.books) {
+    // (each sheet written as soon as it is finished, then let go: never every sheet in memory — the review's P1-1)
+    const auto write_sheet = [&](core::Document&& book) {
         fs::path file = out / core::path_from_utf8(formats::safe_name(book.title) + "." + extension);
         for (int n = 2; fs::exists(file, ec) && n < 10000; ++n) {
             file = out / core::path_from_utf8(formats::safe_name(book.title) + "-" + std::to_string(n) + "." + extension);
@@ -3349,6 +3349,12 @@ int contact_sheet_command(const QStringList& all, bool ascii) {
         const formats::CopyResult written = formats::write_copy(book, 0, file, copy);
         files.push_back(core::path_to_utf8(written.file));
         lines += core::path_to_utf8(written.file) + "\n";
+    };
+    service::automate::ContactSheetResult result;
+    try {
+        result = service::automate::contact_sheet(inputs.items, sheet, options, write_sheet);
+    } catch (const core::Error& error) {
+        return fail(error.what(), error.code(), ascii, 1);
     }
     if (a.flag("--json")) {
         core::Json reply = result.json();

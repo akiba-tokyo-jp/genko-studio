@@ -34,6 +34,7 @@
 #include "service/wording.hpp"
 #include "core/color_model.hpp"
 #include "core/error.hpp"
+#include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "formats/export.hpp"
 #include "formats/exporting.hpp"
@@ -514,6 +515,8 @@ void PrintDialog::print_pdf(const QString& file) {
     const QString name = title.empty() ? QStringLiteral("無題") : QString::fromStdString(title);
     const QString path = !file.isEmpty() ? file : ask::save_path(this, QStringLiteral("PDF に出力"), name + QStringLiteral(".pdf"), QStringLiteral("PDF (*.pdf)"));
     if (path.isEmpty()) return;
+    // (the review's P2-1: never into a book open here or its folder, a linked file, a picture a book was opened from — said)
+    if (window_->refuses_to_write(core::path_from_utf8(path.toStdString()))) return;
     QPrinter printer(QPrinter::HighResolution);
     printer.setOutputFormat(QPrinter::PdfFormat);
     printer.setOutputFileName(path);

@@ -1766,6 +1766,14 @@ private slots:
         QVERIFY(data.startsWith("%PDF"));
         QCOMPARE(data.count("/Type /Page") - data.count("/Type /Pages"), 2);
         QCOMPARE(app::printing::last_setup(), chosen);
+        // never into the book's folder (the review's P2-1): said, nothing written
+        const std::string kept = storage::read_file(s.path / "project.json");
+        s.on_print = [&](app::PrintDialog* d) {
+            d->print_pdf(QString::fromStdString(core::path_to_utf8(s.path / "project.json")));
+            QVERIFY(d->result() != static_cast<int>(QDialog::Accepted));
+        };
+        s.act("act_print")->trigger();
+        QCOMPARE(storage::read_file(s.path / "project.json"), kept);
         // opened again: as it was left; a CMYK printer profile (an ICC file) refused, said, nothing written
         const QString cmyk = s.tmp.path() + QStringLiteral("/cmyk.icc");
         storage::write_atomic(gui_test::path_of(cmyk), *core::builtin_profile("coated-cmyk")->bytes);
@@ -1875,6 +1883,7 @@ private slots:
         QVERIFY(core::parse_python_json(storage::read_file(s.path / "project.json"))["generator"] == (Json{{"image_assets", true}}));
         QVERIFY(!fs::exists(dir));
         s.act("act_save")->trigger();
+        QVERIFY(gui_test::wait_for([&] { return s.window->image_assets_written() == 1; }));  // (on a worker thread)
         QVERIFY(fs::exists(dir / "logo.png") && fs::exists(dir / "half.png"));
         QVERIFY2(s.window->last_notice().startsWith(QStringLiteral("保存しました。画像アセット 2 個を書き出しました")), qPrintable(s.window->last_notice()));
         // off (Undo): nothing written on the next save
@@ -1883,6 +1892,8 @@ private slots:
         QVERIFY(!assets->isChecked());
         fs::remove_all(dir);
         s.act("act_save")->trigger();
+        for (int i = 0; i < 20; ++i) QCoreApplication::processEvents();
+        QCOMPARE(s.window->image_assets_written(), 1);
         QVERIFY(!fs::exists(dir));
     }
 };

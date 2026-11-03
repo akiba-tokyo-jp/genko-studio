@@ -315,6 +315,14 @@ private slots:
         const QByteArray data = file.readAll();
         QVERIFY(data.startsWith("%PDF"));
         QCOMPARE(data.count("/Type /Page") - data.count("/Type /Pages"), 1);
+        // never into the book: its project.json, its folder (the review's P2-1) — 2, the book as it was
+        const std::string before = storage::read_file(book / "project.json");
+        for (const QString& inside : {q(book / "project.json"), q(book / "printed.pdf")}) {
+            const test::Run refused = test::run_genko({QStringLiteral("print"), q(book), QStringLiteral("--pdf"), inside, QStringLiteral("--dpi"), QStringLiteral("72")});
+            QVERIFY2(refused.exit_code == 2, qPrintable(inside));
+        }
+        QCOMPARE(storage::read_file(book / "project.json"), before);
+        QVERIFY(!fs::exists(book / "printed.pdf"));
         // a dry run with --pdf writes nothing
         const QString none = dir.filePath("無し.pdf");
         std::tie(code, out) = cli({QStringLiteral("print"), q(book), QStringLiteral("--pdf"), none, QStringLiteral("--dry-run")});

@@ -2119,12 +2119,15 @@ public:
     // コンタクトシート II… (its window, the sheets opened as new books).
     bool print_one_copy(QPrinter* printer = nullptr);
     void toggle_image_assets();
+    // (written on a worker thread: image_assets_written() counts the times they were done, said — tests wait on it)
     void image_assets_after_save();
+    int image_assets_written() const { return image_assets_done_; }
     void contact_sheet_dialog();
 
 private:
     void build_print_actions();
     void build_print_menus(QMenu* file);
+    int image_assets_done_ = 0;
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

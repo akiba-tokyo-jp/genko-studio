@@ -4,6 +4,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
+#include <cstring>
+#include <cctype>
 #include <set>
 #include <system_error>
 
@@ -109,6 +112,12 @@ bool sized(const core::image_assets::Spec& spec, const core::image_assets::Defau
     return spec.width || spec.height || v.width || v.height || spec.scale.value_or(1.0) != 1.0 || v.scale.value_or(1.0) != 1.0;
 }
 
+std::string folded(const std::string& path) {
+    std::string out = path;
+    for (char& c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return out;
+}
+
 bool transparent(const std::string& format) { return format != "jpg" && format != "png24"; }
 
 // A group's layers drawn alone over nothing at `dpi`, cut to what shows ("RGBA", sRGB 8 bits).
@@ -129,41 +138,64 @@ CodecImage group_picture(const core::Document& doc, const core::Page& page, cons
     return out;
 }
 
-// A picture with an alpha over white.
-CodecImage over_white(const CodecImage& rgba) {
-    CodecImage out = CodecImage::blank(rgba.width(), rgba.height(), render::codecs::Layout::Rgb, render::codecs::Sample::U8);
-    out.meta = rgba.meta;
-    std::string& data = out.data();
-    for (std::size_t i = 0; i < std::size_t(rgba.width()) * rgba.height(); ++i) {
-        const float a = std::clamp(rgba.value(i * 4 + 3), 0.0f, 1.0f);
-        for (unsigned c = 0; c < 3; ++c) {
-            const float v = rgba.value(i * 4 + c) * a + (1.0f - a);
-            data[i * 3 + c] = static_cast<char>(static_cast<unsigned char>(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)));
+// A picture with an alpha laid over white (no ink for CMYK), its alpha gone — any layout and depth.
+CodecImage over_white(const CodecImage& image) {
+    if (!render::codecs::has_alpha(image.layout())) return image;
+    const auto to = render::codecs::without_alpha(image.layout());
+    const unsigned all = render::codecs::channels(image.layout()), colours = render::codecs::colour_channels(image.layout());
+    const bool cmyk = render::codecs::is_cmyk(image.layout());
+    CodecImage out = CodecImage::blank(image.width(), image.height(), to, image.sample());
+    out.icc = image.icc;
+    out.meta = image.meta;
+    const std::size_t row_bytes = std::size_t(image.width()) * colours * render::codecs::sample_bytes(image.sample());
+    std::vector<float> row(std::size_t(image.width()) * colours);
+    for (std::uint32_t y = 0; y < image.height(); ++y) {
+        for (std::uint32_t x = 0; x < image.width(); ++x) {
+            const std::size_t at = (std::size_t(y) * image.width() + x) * all;
+            const float a = std::clamp(image.value(at + all - 1), 0.0f, 1.0f);
+            for (unsigned c = 0; c < colours; ++c) row[std::size_t(x) * colours + c] = image.value(at + c) * a + (cmyk ? 0.0f : 1.0f - a);
         }
+        const std::string stored = render::codecs::quantize(row, image.sample());
+        std::memcpy(out.data().data() + std::size_t(y) * row_bytes, stored.data(), row_bytes);
     }
     return out;
 }
 
-// One group's file: drawn at the resolution its scale asks (a size asked exactly: at the page's, then made that size).
-std::vector<std::string> write_group(const core::Document& doc, const Job& job, const core::image_assets::Default& v, const fs::path& out,
+// What a layer or a group holds at the page's resolution (drawn once for every variant of its assets): a layer alone cut
+// to what it holds (formats::copy_picture's), a group's layers drawn alone (render_contents).
+PagePicture drawn_once(const core::Document& doc, const Job& job) {
+    if (job.layer->kind == core::LayerKind::Folder) {
+        const core::Page& page = doc.page(job.page);
+        return PagePicture{group_picture(doc, page, *job.layer, page_dpi(page)), {}};
+    }
+    CopyOptions alone;
+    alone.layer = job.layer->id;
+    alone.transparency = true;
+    alone.metadata = Metadata::None;
+    return copy_picture(doc, job.page, alone);
+}
+
+// One file: the picture made the size its name and the variant ask (exactly: PhotoCraft's — the pixels resized), over white
+// for a format without transparency, its colours sRGB, written in place.
+std::vector<std::string> write_asset(const PagePicture& own, const Job& job, const core::image_assets::Default& v, const fs::path& out,
                                      const CopyOptions& options) {
-    const core::Page& page = doc.page(job.page);
-    const int base = page_dpi(page);
-    CodecImage picture;
+    CodecImage picture = own.image;
     if (sized(job.spec, v)) {
-        picture = group_picture(doc, page, *job.layer, base);
         const auto [tw, th] = wanted(picture.width(), picture.height(), job.spec, v);
         render::codecs::Limits{}.check(static_cast<std::int64_t>(std::min(tw, 1.0e12)), static_cast<std::int64_t>(std::min(th, 1.0e12)),
-                                       render::codecs::Layout::Rgba, render::codecs::Sample::U8);
+                                       picture.layout(), picture.sample());
+        const double was = picture.width();
         picture = render::codecs::resized(picture, static_cast<std::uint32_t>(tw), static_cast<std::uint32_t>(th), options.resample);
-    } else {
-        picture = group_picture(doc, page, *job.layer, base);
+        if (picture.meta.dpi) {
+            const double dpi = picture.meta.dpi->first * double(picture.width()) / was;
+            picture.meta.dpi = std::make_pair(dpi, dpi);
+        }
     }
     if (!options.transparency) picture = over_white(picture);
     const std::string ext = core::path_to_utf8(out.extension()).substr(1);
     const auto format = render::codecs::from_extension(ext);
     if (!format) throw core::Error("value", "no format for ." + ext);
-    std::vector<std::string> notes;
+    std::vector<std::string> notes = own.notes;
     const std::string bytes = encode_for(std::move(picture), *format, encode_options(options, ext), true, notes);
     storage::write_atomic(out, bytes);
     return notes;
@@ -226,6 +258,8 @@ Result generate(const core::Document& doc, const fs::path& dir, const WriteGuard
     };
     for (const Job& job : jobs) {
         const core::Page& page = doc.page(job.page);
+        std::optional<PagePicture> own;  // (drawn once, for its first file; its failure said for each)
+        std::optional<std::string> unable;
         for (const core::image_assets::Default& v : variants) {
             const std::size_t dot = job.spec.file.rfind('.');
             const std::string rel = v.folder + job.spec.file.substr(0, dot) + v.suffix + job.spec.file.substr(dot);
@@ -236,7 +270,7 @@ Result generate(const core::Document& doc, const fs::path& dir, const WriteGuard
                 fail("the asset's name is not a path inside the assets' folder");
                 continue;
             }
-            if (!taken.insert(rel).second) {
+            if (!taken.insert(folded(rel)).second) {
                 fail("another layer writes an asset of this name");
                 continue;
             }
@@ -247,26 +281,20 @@ Result generate(const core::Document& doc, const fs::path& dir, const WriteGuard
                 fs::create_directories(out.parent_path(), ec);
                 check_target(guard, out.parent_path());
                 CopyOptions options;
-                options.layer = job.layer->id;
                 options.transparency = transparent(job.spec.format);
                 options.metadata = Metadata::None;
                 options.srgb = true;
                 if (job.spec.format == "jpg") options.quality_percent = job.spec.quality.value_or(90);
-                std::vector<std::string> notes;
-                if (job.layer->kind == core::LayerKind::Folder) {
-                    notes = write_group(doc, job, v, out, options);
-                } else {
-                    if (sized(job.spec, v)) {
-                        // (the layer's own size first — what it holds is known once it is drawn —, then the size asked)
-                        CopyOptions plain = options;
-                        plain.transparency = true;
-                        const PagePicture own = copy_picture(doc, job.page, plain);
-                        const auto [tw, th] = wanted(own.image.width(), own.image.height(), job.spec, v);
-                        options.width = static_cast<std::uint32_t>(std::min(tw, 4.0e9));
-                        options.height = static_cast<std::uint32_t>(std::min(th, 4.0e9));
+                if (unable) throw core::Error("value", *unable);
+                if (!own) {
+                    try {
+                        own = drawn_once(doc, job);
+                    } catch (const std::exception& error) {
+                        unable = error.what();
+                        throw;
                     }
-                    notes = write_copy(doc, job.page, out, options).notes;
                 }
+                std::vector<std::string> notes = write_asset(*own, job, v, out, options);
                 if (job.spec.format == "png8") notes.push_back("png8 は 256 色にせず、フルカラーの PNG で書きました");
                 said(notes);
                 result.files.push_back(out);
