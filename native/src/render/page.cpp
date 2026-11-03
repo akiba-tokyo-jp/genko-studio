@@ -3226,7 +3226,13 @@ void page_layers(const core::Page& page, const core::Document& episode, int dpi,
         out.image = std::move(image);
         each(std::move(out));
     };
-    give("紙", Image::create("RGBA", size, Ink{255, 255, 255, 255}));
+    // (artboards@1, PC5 I-c review P2-2: an artboard's paper its background — black or its own colour; none when it is
+    // transparent — so that a PSD's and a .pcraft's layers show it; every other page's white, as before)
+    if (const auto under = core::artboard_underlay(page)) {
+        give("紙", Image::create("RGBA", size, Ink{(*under)[0], (*under)[1], (*under)[2], 255}));
+    } else if (!core::transparent_artboard(page)) {
+        give("紙", Image::create("RGBA", size, Ink{255, 255, 255, 255}));
+    }
     for (const LayerRole role : {LayerRole::Bg, LayerRole::Ink, LayerRole::Finish}) {
         const core::NumList* fill = page.fill_of(role);
         if (fill == nullptr) continue;
@@ -3518,7 +3524,13 @@ Image page_background(const core::Page& page, Size size, bool name_or_proof) {
     // Keep the established fill order and integer/channel semantics unchanged.
     std::vector<std::int64_t> paper{255, 255, 255};
     const Json* paper_json = get(page.extra, "paper_rgb");
-    if (paper_json != nullptr && core::py_truthy(*paper_json)) paper = first3(core::int_tuple(*paper_json));
+    // (artboards@1, PC5 I-c: an artboard's black or custom background under its layers — the 8-bit, precise and ink ways all
+    // start from this picture; a paper colour given — trim_page's white and black — before it)
+    if (paper_json != nullptr && core::py_truthy(*paper_json)) {
+        paper = first3(core::int_tuple(*paper_json));
+    } else if (const auto under = core::artboard_underlay(page)) {
+        paper = {(*under)[0], (*under)[1], (*under)[2]};
+    }
     Image rgba = Image::create("RGBA", size, Ink::with_alpha(paper, 255));
     std::vector<LayerRole> fill_roles{LayerRole::Bg, LayerRole::Ink, LayerRole::Finish};
     if (name_or_proof) fill_roles = {LayerRole::Bg, LayerRole::Name, LayerRole::Ink, LayerRole::Finish};

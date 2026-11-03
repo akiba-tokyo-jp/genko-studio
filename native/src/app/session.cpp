@@ -1647,7 +1647,8 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
                 // the conflict path below retains the complete local snapshot/history.
                 const bool creates_page = std::any_of(change->ops.begin(), change->ops.end(), [](const Json& op) {
                     const auto name = op.value("op", std::string());
-                    return name == "add_page" || name == "duplicate_page";
+                    return name == "add_page" || name == "duplicate_page" ||
+                           name == "add_artboard" || name == "artboard_from_layers";  // (PC5 I-c: an artboard is a page made)
                 });
                 if (creates_page && change->ops.size() > 1 && current->pages.size() != change->before->pages.size()) {
                     // A later op can reference a page created inside this same batch.

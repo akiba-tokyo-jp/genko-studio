@@ -51,6 +51,7 @@
 #include "core/pyops.hpp"
 #include "formats/copy.hpp"
 #include "formats/datasets.hpp"
+#include "formats/artboards.hpp"
 #include "render/ops_annotations.hpp"
 #include "render/ops_measure.hpp"
 #include "render/measure_features.hpp"
@@ -1146,6 +1147,101 @@ int export_datasets(const Arguments& a, bool ascii) {
     return 0;
 }
 
+// PC5 I-c (file.export.artboardsToFiles, file.export.artboardsToPdf, アートボードからファイル… / PDF…; artboards@1): `genko export
+// <book> <out> --format artboards [--artboard-format png|jpg|psd|…|pdf] [--artboards NAME,NAME…] [--prefix P] [--quality 0..12]
+// [--one-psd] [--json]` — the book's artboards (every one, or those named) each a file in the folder <out>
+// (<prefix>_<name>.<ext>: formats::export_artboards); with pdf the one PDF <out> of them (formats::export_artboards_pdf);
+// with --one-psd the one PSD (or .psb) <out> of them, each an artboard (formats::export_artboards_psd). The paths one a line,
+// or with --json {"ok": true, "count", "files"} (and "pages" for a PDF, "notes" when any).
+int export_artboards(const Arguments& a, bool ascii) {
+    std::string extension = "png";
+    if (const auto f = a.value("--artboard-format")) {
+        extension = f->toLower().toStdString();
+        const auto exts = formats::copy_extensions();
+        if (extension != "pdf" && std::find(exts.begin(), exts.end(), extension) == exts.end())
+            return usage("genko export: argument --artboard-format: not a format this build writes: " + extension);
+    }
+    const bool one_psd = a.flag("--one-psd");
+    if (one_psd && extension != "psd" && extension != "psb" && a.value("--artboard-format")) return usage("genko export: argument --one-psd: with --artboard-format psd or psb");
+    std::vector<std::string> names;
+    if (const auto given = a.value("--artboards")) {
+        for (const QString& part : given->split(QLatin1Char(','), Qt::SkipEmptyParts)) names.push_back(part.trimmed().toStdString());
+        if (names.empty()) return usage("genko export: argument --artboards: the artboards' names, e.g. A,B");
+    }
+    std::optional<int> quality;
+    if (const auto q = a.value("--quality")) {
+        bool ok = false;
+        const int v = q->toInt(&ok);
+        if (!ok || v < 0 || v > 12) return usage("genko export: argument --quality: an integer 0..12");
+        quality = v;
+    }
+    const fs::path src = path_arg(a.positional[0]);
+    const fs::path out = path_arg(a.positional[1]);
+    const auto loaded = storage::load_document(src);
+    const core::Document& doc = loaded.document;
+    // (the coordinator's P3-8, F-c's write_guard: never into the book or over a file it links — every file asked first)
+    const formats::WriteGuard guard = formats::write_guard(doc, src);
+    try {
+        formats::check_target(guard, out);
+    } catch (const core::Error& error) {
+        return usage(std::string("genko export: ") + error.what());
+    }
+    const auto check = [guard](const fs::path& file) { formats::check_target(guard, file); };
+    core::Json listed = core::Json::array();
+    core::Json json{{"ok", true}};
+    std::vector<std::string> notes;
+    try {
+        if (extension == "pdf") {
+            formats::ArtboardPdf pdf;
+            pdf.artboards = names;
+            pdf.quality = quality.value_or(10);
+            pdf.check = check;
+            const formats::ArtboardPdfResult made = formats::export_artboards_pdf(doc, out, pdf);
+            listed.push_back(core::path_to_utf8(made.file));
+            json["pages"] = made.pages;
+            notes = made.notes;
+        } else if (one_psd) {
+            formats::ArtboardPsd psd;
+            psd.artboards = names;
+            psd.psb = extension == "psb" || core::path_to_utf8(out.extension()) == ".psb";
+            psd.check = check;
+            const formats::CopyResult made = formats::export_artboards_psd(doc, out, psd);
+            listed.push_back(core::path_to_utf8(made.file));
+            notes = made.notes;
+        } else {
+            formats::ArtboardFiles files;
+            files.extension = extension;
+            if (const auto prefix = a.value("--prefix")) files.prefix = prefix->toStdString();
+            files.artboards = names;
+            files.options.quality = quality;
+            files.check = check;
+            fs::create_directories(out);
+            for (const formats::CopyResult& r : formats::export_artboards(doc, out, files)) {
+                listed.push_back(core::path_to_utf8(r.file));
+                for (const std::string& n : r.notes)
+                    if (std::find(notes.begin(), notes.end(), n) == notes.end()) notes.push_back(n);
+            }
+        }
+    } catch (const core::Error& error) {
+        if (std::string_view(error.code()) == "refused_target") return usage(std::string("genko export: ") + error.what());
+        if (std::string_view(error.code()) == "value" || std::string_view(error.code()) == "image_too_large" ||
+            std::string_view(error.code()) == "psd_too_large")
+            return fail(error.what(), "export", ascii, 1);
+        throw;
+    }
+    if (a.flag("--json")) {
+        json["count"] = listed.size();
+        json["files"] = listed;
+        if (!notes.empty()) json["notes"] = notes;
+        print_json(json, ascii);
+    } else {
+        std::string lines;
+        for (const core::Json& f : listed) lines += f.get<std::string>() + "\n";
+        write_text(lines, stdout);
+    }
+    return 0;
+}
+
 // `genko export <book> <out> [--format F] [options]` (Python's export command, genko/__main__.py): the book written
 // out in one format; the paths of the files one a line, or with --json {"ok": true, "count", "files"}.
 int export_command(const QStringList& args, bool ascii) {
@@ -1164,7 +1260,9 @@ int export_command(const QStringList& args, bool ascii) {
                                           // (PC5 J-b, --format slices: Web 用に保存 by slices)
                                           {"--web", true}, {"--slices", true}, {"--numbers", true}, {"--html", false}, {"--images", true},
                                           // (PC5 J-e1, --format animation: ビデオをレンダリング…'s 作業範囲)
-                                          {"--work-area", false}};
+                                          {"--work-area", false},
+                                          // (PC5 I-c, --format artboards: アートボードからファイル… / PDF…'s choices)
+                                          {"--artboard-format", true}, {"--artboards", true}, {"--one-psd", false}};
     Arguments a;
     if (auto error = parse_arguments(args, kOptions, 2, "src, out", a)) return usage("genko export: " + *error);
     // PC2a (file.export.colorLookupTables, the C++ build's own: not among Python's formats, whose choices it leaves as they
@@ -1183,6 +1281,10 @@ int export_command(const QStringList& args, bool ascii) {
     if (a.value("--format") == std::optional<QString>(QStringLiteral("datasets"))) return export_datasets(a, ascii);
     if (a.value("--dataset-format") || a.value("--datasets") || a.value("--naming"))
         return usage("genko export: argument --dataset-format, --datasets, --naming: only with --format datasets");
+    // PC5 I-c (file.export.artboardsToFiles, file.export.artboardsToPdf): the book's artboards, a file each, one PDF or one PSD
+    if (a.value("--format") == std::optional<QString>(QStringLiteral("artboards"))) return export_artboards(a, ascii);
+    if (a.value("--artboard-format") || a.value("--artboards") || a.flag("--one-psd"))
+        return usage("genko export: argument --artboard-format, --artboards, --one-psd: only with --format artboards");
     if (a.value("--paths")) return usage("genko export: argument --paths: only with --format ai");
     if (a.flag("--work-area") && a.value("--format") != std::optional<QString>(QStringLiteral("animation")))
         return usage("genko export: argument --work-area: only with --format animation");

@@ -79,6 +79,7 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `video@1` | PC5 J-0（J-e2 が使う） | ページの `anim` の行の `video`（ビデオレイヤー: 素材のコマと描き替え）。PROD-01、この文書の「制作の補助」 |
 | `variables@1` | PC5 I-d | 本の `variables`（変数とデータセット。値の画像は本の素材）。SPEC AUTO-01「変数とデータセット」、この文書の「変数とデータセット」 |
 | `layer-locks@1` | PC5 I-a | 層の `"lock_all": true`（すべてをロック）と `"lock_nest": true`（アートボードの内外への自動ネストを防ぐ）。SPEC AUTO-01「レイヤーの基本」、この文書の「ロックとチャンネル」 |
+| `artboards@1` | PC5 I-c | ページの `artboard`（アートボードの印: 名前・プリセット・背景・PSD のカンバスの上の位置）。SPEC AUTO-01「アートボード」、この文書の「アートボード」 |
 | `blend-channels@1` | PC5 I-a | 層の `"blend_channels"`（混合オプションのチャンネル: ページの色のチャンネルごとの真偽）。SPEC AUTO-01「レイヤーの基本」、この文書の「ロックとチャンネル」 |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
@@ -521,6 +522,14 @@ Photoshop の文字（テキストレイヤー・文字と段落の属性・ス�
 - 書き手は `variables` を持つ本の `features` に `variables@1` を加え、無くなれば外す。持たない原稿は今と同じバイトで書く。値の画像のうち本のフォルダーにまだ無いもの（新しく渡された画像）を `assets/` に書く。
 - **読み手の検査**: 上の形でない `variables`（知らない鍵・範囲の外・重なる名前・書き手の形（正規形）と違うもの）、値の画像が `assets/` に無い本は、読み取り専用で開く。variables@1 を知らない読み手（PC5 I-d より前の C++ 版）は、未知の拡張として読み取り専用で開く。
 - op（`set_variables`・`set_data_sets`・`apply_data_set`）は本の op。journal の `set_data_sets` は画像のバイトを `"<N base64 chars>"` にして残す。
+
+## アートボード（artboards@1。SPEC AUTO-01、PC5 I-c）
+
+アートボードは印を持つページ（利用者の決定 3）。
+
+- **ページの `"artboard"`**（ページの鍵の `measure` の後）: `{"name": 文字（1〜1024 バイト）, "preset"?: 文字（256 バイトまで）, "background": "white" | "black" | "transparent" | "custom", "rgb"?: [r, g, b]（0〜255。custom のときだけ、custom なら必ず）, "origin_px"?: [x, y]（−300000〜300000 の整数）}`。持たないページは書かない。大きさはページだけの用紙（`native_spec`、page-spec@1）。
+- 書き手は、どれかのページが `artboard` を持てば `features` に `artboards@1` を加え、無くなれば外す。持たない原稿は今と同じバイトで書く。
+- **読み手の検査**: 知らない鍵・型の違う値・範囲の外の `artboard`、表紙（`cover`）や見開き（`spread_with`）のページの `artboard` を持つ本は、読み取り専用で開く（読めない `artboard` はそのまま書き戻す鍵に残す）。artboards@1 を知らない読み手（PC5 I-c より前の C++ 版）は、未知の拡張として読み取り専用で開く。スマートオブジェクトの中身のページの `artboard` は読まない（そのまま書き戻す）。
 
 ## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1。PROD-01、PC5 節 J）
 

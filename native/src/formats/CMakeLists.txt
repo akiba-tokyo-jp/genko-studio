@@ -31,5 +31,7 @@ genko_library(genko_formats
     datasets.cpp
     # PC5 J-c (注釈: ファイル → 読み込み → 注釈…)
     notes_import.cpp
+    # PC5 I-c (アートボード: アートボードからファイル・PDF・1 つの PSD、PSD のアートボードをページに)
+    artboards.cpp
   PUBLIC_DEPS genko_render genko_core Qt6::Core
   PRIVATE_DEPS genko_storage ZLIB::ZLIB JPEG::JPEG TIFF::TIFF ${GENKO_LCMS2})

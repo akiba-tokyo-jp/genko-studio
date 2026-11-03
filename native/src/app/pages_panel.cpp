@@ -49,7 +49,9 @@ QString page_text(const core::Page& page) {
         const bool first = page.index < *page.spread_with;
         extra += QStringLiteral("\n見開き %1–%2").arg(number(first ? page.index : *page.spread_with), number(first ? *page.spread_with : page.index));
     }
-    if (!page.numero) extra += QStringLiteral("\nノンブルなし");
+    // (artboards@1, PC5 I-c: an artboard's mark and name)
+    if (page.artboard) extra += QStringLiteral("\n▭ アートボード「%1」").arg(QString::fromStdString(page.artboard->name));
+    if (!page.numero && !page.artboard) extra += QStringLiteral("\nノンブルなし");
     if (!who.isEmpty()) extra += QStringLiteral("\n担当 %1").arg(who);
     return QStringLiteral("%1 ページ\n%2%3%4%5").arg(number(page.index), name, art, done, extra);
 }

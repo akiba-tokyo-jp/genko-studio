@@ -280,6 +280,9 @@ genko_library(genko_render
     ops_type_fonts.cpp
     # PC5 G-e (PSD・.pcraft の文字: Photoshop's text layer and the type layer each other's)
     psd_type.cpp
+    # PC5 I-c (アートボード: artboards@1 — the ops, PSD's artb)
+    ops_artboards.cpp
+    psd_artboards.cpp
     # PC5 I-h (HDR Pro に統合・写真の切り抜きと角度補正: the exposures merged and tone mapped, the photos on a scan)
     hdr_merge.cpp
     scancrop.cpp

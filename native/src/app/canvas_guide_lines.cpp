@@ -64,7 +64,7 @@ QString PageCanvas::length_words(double mm, bool across) const {
 // --- the guides -------------------------------------------------------------------------------------------------------
 
 std::optional<std::string> PageCanvas::guide_at(const QPointF& widget) const {
-    if (page() == nullptr || lock_guides || !shows(show_guide_lines) || !show_canvas_guides) return std::nullopt;
+    if (page() == nullptr || lock_guides || !shows(show_guide_lines) || !page_guides_shown()) return std::nullopt;
     const QPointF mm = to_mm(widget);
     const double reach = 4.0 / std::max(0.01, view_.scale);  // (4 screen pixels)
     std::optional<std::string> best;
@@ -115,6 +115,27 @@ bool PageCanvas::guide_grab(const QPointF& widget, Qt::KeyboardModifiers modifie
     return false;
 }
 
+// (PC5 I-c, artboards@1: an artboard page's guides are its アートボードガイド, the others' カンバスガイド)
+bool PageCanvas::page_guides_shown() const {
+    const core::Page* p = page();
+    return p != nullptr && p->artboard ? show_artboard_guides : show_canvas_guides;
+}
+
+// (PC5 I-c, artboards@1: アートボード名 — the artboard's name just over its top left, as Photoshop's canvas shows it)
+void PageCanvas::draw_artboard_name(QPainter& painter) const {
+    const core::Page* p = page();
+    if (p == nullptr || !p->artboard || !shows(show_artboard_names)) return;
+    painter.save();
+    painter.resetTransform();
+    const QPointF corner = to_widget(QPointF(0, 0));
+    QFont font = painter.font();
+    font.setPointSizeF(std::max(7.0, font.pointSizeF() * 0.9));
+    painter.setFont(font);
+    painter.setPen(palette().color(QPalette::WindowText));
+    painter.drawText(QPointF(corner.x(), corner.y() - 4), QString::fromStdString(p->artboard->name));
+    painter.restore();
+}
+
 void PageCanvas::draw_guide_lines(QPainter& painter) const {
     if (page() == nullptr) return;
     // (across the whole view, past the paper: the view's corners in the unturned view)
@@ -130,7 +151,7 @@ void PageCanvas::draw_guide_lines(QPainter& painter) const {
         for (const double y : guide_preview->across) painter.drawLine(QPointF(view.left(), pt(0, y).y()), QPointF(view.right(), pt(0, y).y()));
         painter.restore();
     }
-    if (!shows(show_guide_lines) || !show_canvas_guides) return;
+    if (!shows(show_guide_lines) || !page_guides_shown()) return;
     painter.save();
     QPen pen(guide_colour, 1, guide_style);
     pen.setCosmetic(true);
