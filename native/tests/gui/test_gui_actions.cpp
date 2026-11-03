@@ -456,7 +456,8 @@ private slots:
         // 作業範囲の開始点へ移動・終了点へ移動, フレームへ移動… (act_next_frame … act_go_to_frame) and ビデオをレンダリング… (act_render_video)
         // — test_gui_anim.
         // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8 and I-c's 10: アートボード… など — test_gui_artboards)
-        QCOMPARE(w->actions_by_name().size(), std::size_t{787});
+        // (PC5 J-f's 1: フィルター → プラグイン ▸ プラグインをインストール… (act_plugin_install) — test_gui_anim)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{788});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -1028,6 +1029,7 @@ private slots:
                                            QStringLiteral("ツール…"), QStringLiteral("ファイル管理…"),
                                            QStringLiteral("書き出し…"), QStringLiteral("パフォーマンス…"), QStringLiteral("カーソル…"), QStringLiteral("透明部分・色域…"),
                                            QStringLiteral("単位・定規…"), QStringLiteral("ガイド・グリッド・スライス…"),  // (PC5 H-b)
+                                           QStringLiteral("プラグイン…"),  // (PC5 J-f: the plugins' own window, act_plugin_settings)
                                            QStringLiteral("テキスト…"),  // (PC5 G-d)
                                            QStringLiteral("Camera Raw…"), QStringLiteral("ペンタブレット…"), QStringLiteral("長い時間の作業…")}));
         QVERIFY(!items(menu(QStringLiteral("ファイル"))).contains(QStringLiteral("環境設定…")));

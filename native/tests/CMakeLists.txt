@@ -755,6 +755,8 @@ target_compile_definitions(test_contract_plugins PRIVATE GENKO_TEST_PLUGIN_HOST=
                                                          GENKO_TEST_NATIVE_PLUGIN="$<TARGET_FILE:genko_test_native_plugin>")
 add_dependencies(test_contract_plugins genko_test_native_plugin)
 target_link_libraries(test_contract_plugins PRIVATE genko_api)
+# (PC5 J-f: 環境設定 → プラグイン…'s WebAssembly rows — test_gui_anim is made further down)
+set(GENKO_TEST_PLUGIN_HOST_DEF "GENKO_TEST_PLUGIN_HOST=\"$<TARGET_FILE_DIR:genko>/genko-plugin-host${CMAKE_EXECUTABLE_SUFFIX}\"")
 
 # 3D (M3-C): the geometry of figures, guides and models bit for bit against Python, the ops, the drawing.
 genko_test(test_contract_3d_geometry SOURCES contract/test_contract_3d_geometry.cpp DEPS genko_test_support genko_render
@@ -1045,3 +1047,10 @@ foreach(slow test_contract_raster_ops test_smart_stack test_contract_ops_cli tes
     set_property(TEST ${slow} APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=${function_ms}")
   endif()
 endforeach()
+# (PC5 J-f: 編集 → 環境設定 → プラグイン…'s WebAssembly rows read the module's manifest through genko-plugin-host)
+if(TARGET test_gui_anim)
+  target_compile_definitions(test_gui_anim PRIVATE ${GENKO_TEST_PLUGIN_HOST_DEF})
+  if(TARGET genko_plugin_host)
+    add_dependencies(test_gui_anim genko_plugin_host)
+  endif()
+endif()
