@@ -39,7 +39,7 @@ public:
     explicit OwnSettings(const QString& file) : QSettings(file, QSettings::IniFormat), file_(file), before_(settings_stamp(file)) {}
     ~OwnSettings() override {
         sync();
-        if (const SettingsStamp after = settings_stamp(file_); after != before_) settings_written(after);
+        if (const SettingsStamp after = settings_stamp(file_); after != before_) settings_written(before_, after);
     }
 
 private:

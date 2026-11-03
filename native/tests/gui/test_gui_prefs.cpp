@@ -50,6 +50,7 @@
 
 using namespace genko;
 using core::Json;
+namespace fs = std::filesystem;
 
 namespace {
 
@@ -101,7 +102,7 @@ struct Desk {
     app::PageCanvas* canvas() const { return window->canvas(); }
     fs::path another(const std::string& name) {
         const fs::path path = gui_test::path_of(tmp.path() + QString::fromStdString("/" + name));
-        gui_test::write_book(path, book_doc(name));
+        gui_test::write_book(path, book_doc(name.substr(0, name.find('.'))));
         return path;
     }
 };
@@ -134,8 +135,10 @@ private slots:
         QVERIFY(made["commands"].size() == d.window->actions_by_name().size() || made["commands"].size() > 500);
         const QString file = genko::test::repo_root() + QStringLiteral("/native/src/core/data/commands.json");
         if (qEnvironmentVariableIsSet("GENKO_WRITE_COMMANDS")) {
-            std::ofstream out(gui_test::path_of(file), std::ios::binary);
-            out << made.dump(1) << "\n";
+            std::ofstream out(gui_test::path_of(file), std::ios::binary);  // (a command a line: a change reads as its lines)
+            out << "{\"v\": 1, \"commands\": [\n";
+            for (std::size_t i = 0; i < made["commands"].size(); ++i) out << (i == 0 ? "" : ",\n") << made["commands"][i].dump();
+            out << "\n]}\n";
         }
         const Json kept = Json::parse(read_text(file).toStdString());
         if (kept != made) {
@@ -290,23 +293,32 @@ private slots:
             QCOMPARE(QString::fromStdString(other.interpolation()), QStringLiteral("bicubic"));
         }
         // the tooltips
+        // (the application's filter sees a tooltip's event before the button: what reaches the button would be shown)
+        struct Seen : QObject {
+            bool got = false;
+            bool eventFilter(QObject*, QEvent* event) override {
+                if (event->type() == QEvent::ToolTip) got = true;
+                return event->type() == QEvent::ToolTip;
+            }
+        } seen;
         QPushButton button(QStringLiteral("x"));
         button.setToolTip(QStringLiteral("説明"));
-        button.show();
-        const auto tip = [&button] {
-            QToolTip::hideText();
+        button.installEventFilter(&seen);
+        const auto tip = [&button, &seen] {
+            seen.got = false;
             QHelpEvent help(QEvent::ToolTip, QPoint(2, 2), button.mapToGlobal(QPoint(2, 2)));
             QApplication::sendEvent(&button, &help);
-            return QToolTip::text();
+            return seen.got;
         };
-        QCOMPARE(tip(), QStringLiteral("説明"));
+        QVERIFY(tip());
         QVERIFY(set_prefs(Json{{"interface.showTooltips", false}}));
         app::preferences::apply_all(d.window.get());
-        QVERIFY(tip().isEmpty());
-        QVERIFY(set_prefs(Json{{"interface.showTooltips", true}}));
+        QVERIFY(!tip());
+        QVERIFY(set_prefs(Json{{"interface.showTooltips", true}, {"tools.showTooltips", false}}));
         app::preferences::apply_all(d.window.get());
-        QCOMPARE(tip(), QStringLiteral("説明"));
-        QToolTip::hideText();
+        QVERIFY(tip());  // (not a tool's: shown)
+        QVERIFY(set_prefs(Json{{"tools.showTooltips", true}}));
+        app::preferences::apply_all(d.window.get());
         // 仮想記憶ディスク: the caches' folder
         QTemporaryDir scratch;
         QVERIFY(set_prefs(Json{{"scratchDisks.folder", scratch.path().toStdString()}}));
@@ -363,7 +375,7 @@ private slots:
         };
         Json tabs = tabs_of_desk(read);
         QCOMPARE(tabs.size(), std::size_t{1});
-        QCOMPARE(tabs[0]["title"], Json("環境"));
+        QCOMPARE(tabs[0]["title"], Json("環境 第1話"));
         QCOMPARE(tabs[0]["saved"], Json(true));
         QCOMPARE(tabs[0]["page"], Json(1));
         QVERIFY(read["foreground"].is_string() && read["foreground"].get<std::string>().size() == 7);
@@ -373,7 +385,7 @@ private slots:
         QVERIFY(app::session_file::write_now());
         tabs = tabs_of_desk(core::session_file::read());
         QCOMPARE(tabs.size(), std::size_t{2});
-        QCOMPARE(tabs[1]["title"], Json("二冊目"));
+        QCOMPARE(tabs[1]["title"], Json("二冊目 第1話"));
     }
 
     // ドキュメントをタブで開く off: a book opened in a window of its own; that window let go over the first one's tabs docks there.
@@ -384,11 +396,12 @@ private slots:
         d.window->open_project(d.another("別窓.genko"));
         QVERIFY(gui_test::wait_for([&] { return app::documents::windows().size() == windows + 1; }));
         app::MainWindow* own = nullptr;
-        for (app::MainWindow* w : app::documents::windows()) {
-            if (w != d.window.get() && !w->documents().empty() && w->documents().front().title() == QStringLiteral("別窓")) own = w;
-        }
-        QVERIFY(own != nullptr);
-        QVERIFY(gui_test::wait_for([own] { return own->documents().size() == 1 && own->documents().front().session->path(); }));
+        QVERIFY(gui_test::wait_for([&] {  // (the book read on a worker: its window shows it once read)
+            for (app::MainWindow* w : app::documents::windows()) {
+                if (w != d.window.get() && w->documents().size() == 1 && w->documents().front().title().startsWith(QStringLiteral("別窓"))) own = w;
+            }
+            return own != nullptr;
+        }));
         QCOMPARE(d.window->documents().size(), std::size_t{1});
         // not over the tabs: stays; over them: docked, its window closed
         QVERIFY(!own->dock_over(d.window->mapToGlobal(QPoint(-500, -500))));

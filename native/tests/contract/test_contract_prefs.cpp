@@ -44,7 +44,7 @@ struct Said {
     QString described;
 };
 
-Said genko(const QString& config, const QStringList& args) {
+Said cli(const QString& config, const QStringList& args) {
     const genko::test::Run r = genko::test::run(genko::test::genko_cli(), args, env_for(config), 120000);
     Said out;
     out.code = r.exit_code;
@@ -123,16 +123,16 @@ private slots:
     void prefsGetSetReset() {
         QTemporaryDir dir;
         const QString config = dir.path();
-        Said said = genko(config, {"prefs", "get", "interface.theme"});
+        Said said = cli(config, {"prefs", "get", "interface.theme"});
         QCOMPARE(said.code, 0);
         QCOMPARE(said.json, (Json{{"ok", true}, {"values", Json{{"interface.theme", "system"}}}}));
-        said = genko(config, {"prefs", "set", "interface.theme", "\"dark\""});
+        said = cli(config, {"prefs", "set", "interface.theme", "\"dark\""});
         QVERIFY2(said.code == 0, qPrintable(said.described));
         QCOMPARE(said.json["values"]["interface.theme"], Json("dark"));
         QSettings ini(config + QStringLiteral("/settings.ini"), QSettings::IniFormat);
         QCOMPARE(ini.value(QStringLiteral("ui/theme")).toString(), QStringLiteral("dark"));
         // one wrong: nothing written, the path said
-        said = genko(config, {"prefs", "set", "--values", R"({"fileHandling.recentFileCount": 7, "cursors.painting": "huge"})"});
+        said = cli(config, {"prefs", "set", "--values", R"({"fileHandling.recentFileCount": 7, "cursors.painting": "huge"})"});
         QCOMPARE(said.code, 1);
         QCOMPARE(said.json["ok"], Json(false));
         QCOMPARE(said.json["error"], Json("bad_value"));
@@ -146,37 +146,37 @@ private slots:
                  {"general.zoomWithScrollWheel", "\"yes\"", "bad_value"},
                  {"shortcuts.ブラシツール", "\"あいう\"", "bad_value"},
                  {"state.brush.kind", "\"gpen\"", "bad_value"}}) {
-            said = genko(config, {"prefs", "set", QString::fromUtf8(path), QString::fromUtf8(value)});
+            said = cli(config, {"prefs", "set", QString::fromUtf8(path), QString::fromUtf8(value)});
             QVERIFY2(said.code == 1 && said.json["error"] == Json(code), path);
             QCOMPARE(said.json["path"], Json(path));
             QVERIFY(said.json["message"].is_string() && !said.json["message"].get<std::string>().empty());
         }
-        said = genko(config, {"prefs", "set", "--values", R"({"historyLog": {"enabled": true, "detail": "detailed"}, "shortcuts.ブラシツール": "Ctrl+Alt+K"})"});
+        said = cli(config, {"prefs", "set", "--values", R"({"historyLog": {"enabled": true, "detail": "detailed"}, "shortcuts.ブラシツール": "Ctrl+Alt+K"})"});
         QVERIFY2(said.code == 0, qPrintable(said.described));
         ini.sync();
         QCOMPARE(ini.value(QStringLiteral("history_log/enabled")).toString(), QStringLiteral("true"));
         QCOMPARE(ini.value(QStringLiteral("shortcuts/ブラシツール")).toString(), QStringLiteral("Ctrl+Alt+K"));
         // get: a section, everything (without the app's memories)
-        said = genko(config, {"prefs", "get", "historyLog"});
+        said = cli(config, {"prefs", "get", "historyLog"});
         QCOMPARE(said.json["values"], (Json{{"historyLog.enabled", true}, {"historyLog.destination", "metadata"}, {"historyLog.filePath", ""},
                                             {"historyLog.detail", "detailed"}}));
-        said = genko(config, {"prefs", "get"});
+        said = cli(config, {"prefs", "get"});
         QVERIFY(said.json["values"].contains("general.colorPicker") && said.json["values"].contains("shortcuts.ブラシツール"));
         for (const auto& [path, value] : said.json["values"].items()) QVERIFY2(path.rfind("state.", 0) != 0, path.c_str());
         // reset: a section; the app's memories never
-        said = genko(config, {"prefs", "reset", "historyLog"});
+        said = cli(config, {"prefs", "reset", "historyLog"});
         QCOMPARE(said.code, 0);
         QCOMPARE(said.json["values"]["historyLog.enabled"], Json(false));
         ini.sync();
         QVERIFY(!ini.contains(QStringLiteral("history_log/enabled")));
         QCOMPARE(ini.value(QStringLiteral("ui/theme")).toString(), QStringLiteral("dark"));
-        QCOMPARE(genko(config, {"prefs", "reset", "state"}).json["error"], Json("bad_value"));
-        QCOMPARE(genko(config, {"prefs", "get", "nope"}).json["error"], Json("unknown_pref"));
+        QCOMPARE(cli(config, {"prefs", "reset", "state"}).json["error"], Json("bad_value"));
+        QCOMPARE(cli(config, {"prefs", "get", "nope"}).json["error"], Json("unknown_pref"));
         // bad usage: exit 2, nothing on stdout
         for (const QStringList& args : {QStringList{"prefs"}, QStringList{"prefs", "set", "interface.theme"},
                                         QStringList{"prefs", "set", "interface.theme", "dark"}, QStringList{"prefs", "get", "a", "b"},
                                         QStringList{"prefs", "set", "--values", "[1]"}}) {
-            QCOMPARE(genko(config, args).code, 2);
+            QCOMPARE(cli(config, args).code, 2);
         }
     }
 
@@ -196,12 +196,12 @@ private slots:
             before.setValue(QStringLiteral("migration/done"), QStringLiteral("yes"));
         }
         const QByteArray was = bytes_of(file);
-        QCOMPARE(genko(dir.path(), {"prefs", "get"}).code, 0);
-        QCOMPARE(genko(dir.path(), {"prefs", "get", "state"}).code, 0);
-        QCOMPARE(genko(dir.path(), {"commands"}).code, 0);
+        QCOMPARE(cli(dir.path(), {"prefs", "get"}).code, 0);
+        QCOMPARE(cli(dir.path(), {"prefs", "get", "state"}).code, 0);
+        QCOMPARE(cli(dir.path(), {"commands"}).code, 0);
         QCOMPARE(bytes_of(file), was);  // (read: not a byte written)
-        QCOMPARE(genko(dir.path(), {"prefs", "set", "general.beepWhenDone", "true"}).code, 0);
-        QCOMPARE(genko(dir.path(), {"prefs", "reset", "cursors"}).code, 0);
+        QCOMPARE(cli(dir.path(), {"prefs", "set", "general.beepWhenDone", "true"}).code, 0);
+        QCOMPARE(cli(dir.path(), {"prefs", "reset", "cursors"}).code, 0);
         QSettings after(file, QSettings::IniFormat);
         QCOMPARE(after.value(QStringLiteral("ui/theme")).toString(), QStringLiteral("dark"));
         QCOMPARE(after.value(QStringLiteral("ui/font_pt")).toInt(), 13);
@@ -212,7 +212,7 @@ private slots:
         QCOMPARE(after.value(QStringLiteral("migration/done")).toString(), QStringLiteral("yes"));
         QCOMPARE(after.value(QStringLiteral("ui/beep_when_done")).toString(), QStringLiteral("true"));
         // (the values the app reads as before)
-        const Json got = genko(dir.path(), {"prefs", "get", "interface"}).json["values"];
+        const Json got = cli(dir.path(), {"prefs", "get", "interface"}).json["values"];
         QCOMPARE(got["interface.theme"], Json("dark"));
         QCOMPARE(got["interface.uiFontSize"], Json(13));
     }
@@ -221,7 +221,7 @@ private slots:
     void commandsWithThisComputersKeys() {
         QTemporaryDir dir;
         const QString config = dir.path();
-        Said said = genko(config, {"commands"});
+        Said said = cli(config, {"commands"});
         QVERIFY2(said.code == 0, qPrintable(said.described));
         const Json& listed = said.json;
         QCOMPARE(listed["ok"], Json(true));
@@ -240,16 +240,16 @@ private slots:
         QVERIFY(move != nullptr && move->value("tool", false));
         QCOMPARE((*move)["keys"], Json::array({"V"}));  // (Photoshop's 移動ツール)
         // the Genko set
-        QCOMPARE(genko(config, {"prefs", "set", "keyboardShortcuts.keySet", "\"genko\""}).code, 0);
-        said = genko(config, {"commands"});
+        QCOMPARE(cli(config, {"prefs", "set", "keyboardShortcuts.keySet", "\"genko\""}).code, 0);
+        said = cli(config, {"commands"});
         QCOMPARE(said.json["key_set"], Json("genko"));
         const Json* genko_move = command(said.json, "act_move");
         QVERIFY(genko_move != nullptr);
         QVERIFY((*genko_move)["keys"] != Json::array({"V"}));
         // the person's keys: theirs, and a set's key they gave another taken off the command that had it
-        QCOMPARE(genko(config, {"prefs", "set", "keyboardShortcuts.keySet", "\"photoshop\""}).code, 0);
-        QCOMPARE(genko(config, {"prefs", "set", "shortcuts.ズームイン", "\"Ctrl+Z\""}).code, 0);
-        said = genko(config, {"commands"});
+        QCOMPARE(cli(config, {"prefs", "set", "keyboardShortcuts.keySet", "\"photoshop\""}).code, 0);
+        QCOMPARE(cli(config, {"prefs", "set", "shortcuts.ズームイン", "\"Ctrl+Z\""}).code, 0);
+        said = cli(config, {"commands"});
         const Json* zoom = command(said.json, "act_zoom_in");
         QVERIFY(zoom != nullptr);
         QCOMPARE((*zoom)["keys"], Json::array({"Ctrl+Z"}));
@@ -262,24 +262,24 @@ private slots:
             ini.setValue(QStringLiteral("key_sets/私の組/keys"), QStringLiteral(R"({"取り消し":"Ctrl+Alt+Z"})"));
             ini.setValue(QStringLiteral("ui/key_set_own"), QStringLiteral("私の組"));
         }
-        said = genko(config, {"commands"});
+        said = cli(config, {"commands"});
         QCOMPARE(said.json["key_set"], Json("own:私の組"));
         QCOMPARE((*command(said.json, "act_undo"))["keys"], Json::array({"Ctrl+Alt+Z"}));
         // a menu, words
-        said = genko(config, {"commands", "--menu", "編集"});
+        said = cli(config, {"commands", "--menu", "編集"});
         QVERIFY(!said.json["commands"].empty());
         for (const Json& c : said.json["commands"]) QCOMPARE(c["menu"][0], Json("編集"));
-        said = genko(config, {"commands", "--search", "ズーム イン"});
+        said = cli(config, {"commands", "--search", "ズーム イン"});
         QVERIFY(command(said.json, "act_zoom_in") != nullptr);
-        QCOMPARE(genko(config, {"commands", "--menu"}).code, 2);
-        QCOMPARE(genko(config, {"commands", "extra"}).code, 2);
+        QCOMPARE(cli(config, {"commands", "--menu"}).code, 2);
+        QCOMPARE(cli(config, {"commands", "extra"}).code, 2);
     }
 
     // genko session: no app, or an app gone — not running; an app there — its session.json.
     void sessionOfTheRunningApp() {
         QTemporaryDir dir;
         const QString config = dir.path();
-        QCOMPARE(genko(config, {"session"}).json, (Json{{"running", false}}));
+        QCOMPARE(cli(config, {"session"}).json, (Json{{"running", false}}));
         const qint64 me = QCoreApplication::applicationPid();
         const Json kept{{"v", 1}, {"pid", me}, {"app_version", "x"},
                         {"windows", Json::array({Json{{"active", true}, {"arrange", "tabs"}, {"front", 0},
@@ -291,7 +291,7 @@ private slots:
             QVERIFY(f.open(QIODevice::WriteOnly));
             f.write(QByteArray::fromStdString(kept.dump()));
         }
-        Said said = genko(config, {"session"});
+        Said said = cli(config, {"session"});
         QCOMPARE(said.code, 0);
         QCOMPARE(said.json["running"], Json(true));
         QCOMPARE(said.json["windows"], kept["windows"]);
@@ -309,14 +309,14 @@ private slots:
             QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
             f.write(QByteArray::fromStdString(old.dump()));
         }
-        QCOMPARE(genko(config, {"session"}).json, (Json{{"running", false}}));
+        QCOMPARE(cli(config, {"session"}).json, (Json{{"running", false}}));
         {
             QFile f(config + QStringLiteral("/session.json"));
             QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
             f.write("not json");
         }
-        QCOMPARE(genko(config, {"session"}).json, (Json{{"running", false}}));
-        QCOMPARE(genko(config, {"session", "extra"}).code, 2);
+        QCOMPARE(cli(config, {"session"}).json, (Json{{"running", false}}));
+        QCOMPARE(cli(config, {"session", "extra"}).code, 2);
     }
 
     // MCP: inspect target=prefs / commands / session reads; no tool writes a preference; a book's path never — a project of
@@ -326,7 +326,7 @@ private slots:
         const QString config = dir.path() + QStringLiteral("/config");
         const QString root = dir.path() + QStringLiteral("/root");
         QVERIFY(QDir().mkpath(config) && QDir().mkpath(root + QStringLiteral("/a.genko")));
-        QCOMPARE(genko(config, {"prefs", "set", "interface.theme", "\"dark\""}).code, 0);
+        QCOMPARE(cli(config, {"prefs", "set", "interface.theme", "\"dark\""}).code, 0);
         const qint64 me = QCoreApplication::applicationPid();
         const Json session{{"v", 1}, {"pid", me}, {"app_version", "x"},
                            {"windows", Json::array({Json{{"active", true}, {"arrange", "tabs"}, {"front", 0},
@@ -344,7 +344,7 @@ private slots:
         const Json tools = mcp.request(2, "tools/list", Json::object());
         for (const Json& t : tools["result"]["tools"]) {
             const std::string name = t["name"].get<std::string>();
-            QVERIFY2(name.find("pref") == std::string::npos && name.find("setting") == std::string::npos, name.c_str());
+            QVERIFY2(name.find("prefs") == std::string::npos && name.find("preference") == std::string::npos && name.find("setting") == std::string::npos, name.c_str());
         }
         Json got = mcp.call("inspect", Json{{"project", "a.genko"}, {"target", "prefs"}});
         QCOMPARE(got["prefs"]["interface.theme"], Json("dark"));

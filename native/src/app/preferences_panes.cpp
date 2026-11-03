@@ -166,7 +166,10 @@ public:
         still_.setSingleShot(true);
         still_.setInterval(350);
         connect(&still_, &QTimer::timeout, this, [this] {
-            if (window_ != nullptr) (void)window_->dock_over(QCursor::pos());
+            // (only a window the person moved by its title bar — the pointer still on it, above the window's inside —; a
+            // window the app placed, or moved by the keys, never)
+            const QPoint at = QCursor::pos();
+            if (window_ != nullptr && window_->frameGeometry().contains(at) && at.y() < window_->geometry().top()) (void)window_->dock_over(at);
         });
         window->installEventFilter(this);
     }
@@ -410,6 +413,8 @@ void apply_panes(MainWindow* window) {
         window->set_default_interpolation(text("general.imageInterpolation"));
         new DockWatch(window);
     }
+    // (ヒストリーログ: the window's books followed — the one it opened with too; a book shown later, as it comes to the front)
+    for (const Document& d : window->documents()) history_log::follow(d.session.get());
     static bool once = false;
     if (!once && QCoreApplication::instance() != nullptr) {
         once = true;

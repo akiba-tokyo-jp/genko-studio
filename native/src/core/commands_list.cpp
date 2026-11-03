@@ -13,12 +13,12 @@
 
 #include "core/prefs_table.hpp"
 
-namespace genko::core::commands {
-
-namespace detail {
+namespace genko::core::detail {
 extern const unsigned char kCommandsJson[];
 extern const std::size_t kCommandsJsonSize;
-}  // namespace detail
+}  // namespace genko::core::detail
+
+namespace genko::core::commands {
 
 namespace {
 
