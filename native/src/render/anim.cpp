@@ -9,12 +9,14 @@
 #include <utility>
 
 #include "core/anim.hpp"
+#include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/paths.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/video.hpp"
 #include "render/movie.hpp"
+#include "render/op_limits.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
 
@@ -124,7 +126,8 @@ Image render_frame(const core::Page& page, std::int64_t frame, int dpi, const co
 std::vector<std::filesystem::path> export_animation(const core::Page& page, const std::filesystem::path& dest,
                                                     const core::Document* episode, int dpi, std::optional<std::string> fmt,
                                                     bool camera, std::string_view area, std::optional<int> width,
-                                                    std::optional<std::array<std::int64_t, 2>> range, std::optional<double> fps) {
+                                                    std::optional<std::array<std::int64_t, 2>> range, std::optional<double> fps,
+                                                    const std::function<bool(std::int64_t, std::int64_t)>& progress) {
     if (!core::anim::is_animation(page)) throw core::PyValueError("the page is not an animation (set_animation first)");
     std::string format = fmt.value_or("");
     if (format.empty()) {
@@ -142,11 +145,22 @@ std::vector<std::filesystem::path> export_animation(const core::Page& page, cons
         throw core::PyValueError("range is [first, last] of the frames 1 to " + std::to_string(count));
     }
     if (fps && !(core::kTimelineFpsMin <= *fps && *fps <= core::kTimelineFpsMax)) throw core::PyValueError("fps is 0.5 to 120");
+    // (PC5 J-e1: each frame written told, and given up when asked — nothing left written)
+    const std::int64_t total = to - from + 1;
+    const auto step = [&progress, total](std::int64_t done) {
+        if (progress && !progress(done, total)) throw core::Error("cancelled", "the video was not rendered (cancelled)");
+    };
     Image first = render_frame(page, from, dpi, episode, camera, area);
     Size size = first.size();
     if (width && *width != 0) {
-        size = Size{*width, static_cast<int>(std::max<std::int64_t>(
-                                1, core::py_round_int(static_cast<double>(first.height()) * *width / first.width())))};
+        // (PC5 J-e1: a frame no larger than an op's picture — a narrow camera made wide would take the machine's memory)
+        const double tall = static_cast<double>(first.height()) * *width / first.width();
+        try {
+            limits::check_sides(static_cast<double>(*width), std::max(1.0, tall), "the video's frame");
+        } catch (const core::OpError& error) {  // (a writing's refusal, as a picture too large to write is refused)
+            throw core::Error("image_too_large", error.what());
+        }
+        size = Size{*width, static_cast<int>(std::max<std::int64_t>(1, core::py_round_int(tall)))};
     }
     if (first.size() != size) first = first.resize(size, Resample::Lanczos);
     if (format == "frames") {
@@ -165,6 +179,7 @@ std::vector<std::filesystem::path> export_animation(const core::Page& page, cons
                 files.push_back(dest / name);
                 parts.push_back(dest / (std::string(".") + name + ".part"));
                 save_png(picture, parts.back());
+                step(f - from + 1);
             }
             for (std::size_t i = 0; i < parts.size(); ++i) {
                 std::filesystem::rename(parts[i], files[i], error);
@@ -180,7 +195,11 @@ std::vector<std::filesystem::path> export_animation(const core::Page& page, cons
     out.replace_extension("." + format);
     movie::Writer writer(out, fps.value_or(core::anim::fps_of(page)), format, 0.0, core::anim::loops(page));
     writer.add(first);
-    for (std::int64_t f = from + 1; f <= to; ++f) writer.add(render_frame(page, f, dpi, episode, camera, area, size));
+    step(1);
+    for (std::int64_t f = from + 1; f <= to; ++f) {
+        writer.add(render_frame(page, f, dpi, episode, camera, area, size));
+        step(f - from + 1);
+    }
     return {writer.finish()};
 }
 

@@ -69,6 +69,14 @@ bool timeline_work(const Json& work) {
     return first >= 1 && first <= last && last <= anim::kMaxFrames;
 }
 
+namespace {
+thread_local int public_animation_depth = 0;
+}  // namespace
+
+PublicAnimationOps::PublicAnimationOps() { ++public_animation_depth; }
+PublicAnimationOps::~PublicAnimationOps() { --public_animation_depth; }
+bool public_animation_ops() { return public_animation_depth > 0; }
+
 std::optional<std::array<std::int64_t, 2>> work_area(const Page& page) {
     const Json* spec = anim::spec(page);
     if (spec == nullptr) return std::nullopt;

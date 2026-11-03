@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -49,12 +50,15 @@ Image render_frame(const core::Page& page, std::int64_t frame, int dpi, const co
 // PC5 J-e1 (ビデオをレンダリング…, file.export.renderVideo): `range` the frames written, [first, last] of the page's frames
 // (none: all of them, as before; core::played_frames gives the work area's) — the numbered PNGs counted from frame_0001
 // whatever the first —, `fps` the speed written (0.5..120; none: the page's). PyValueError "range is [first, last] of
-// the frames 1 to N", "fps is 0.5 to 120".
+// the frames 1 to N", "fps is 0.5 to 120". A frame of `width` past an op's picture (render/op_limits: 100000 a side, 120
+// million pixels) is refused before it is drawn (OpError "the video's frame is too large …"). `progress` (frames written,
+// of how many) after each frame; false: given up — core::Error("cancelled"), nothing left written.
 std::vector<std::filesystem::path> export_animation(const core::Page& page, const std::filesystem::path& dest,
                                                     const core::Document* episode = nullptr, int dpi = 100,
                                                     std::optional<std::string> fmt = std::nullopt, bool camera = true,
                                                     std::string_view area = "trim", std::optional<int> width = std::nullopt,
                                                     std::optional<std::array<std::int64_t, 2>> range = std::nullopt,
-                                                    std::optional<double> fps = std::nullopt);
+                                                    std::optional<double> fps = std::nullopt,
+                                                    const std::function<bool(std::int64_t, std::int64_t)>& progress = {});
 
 }  // namespace genko::render::anim

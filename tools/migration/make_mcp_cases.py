@@ -184,6 +184,11 @@ def client_ops_first() -> list:
 def client_ops_second() -> list:
     return [
         {"op": "info"},
+        # (PC5 J-e1, the coordinator's decision on its review P2-1: an agent's set_animation is the public list's — an fps
+        # past 1..60 refused as Python refuses it, a work area an unknown key ignored —; dry runs, writing nothing)
+        {"op": "call", "name": "apply_ops", "args": {"project": BOOK, "ops": [{"op": "set_animation", "page": 2, "fps": 61}], "commit": False}},
+        {"op": "call", "name": "apply_ops", "args": {"project": BOOK, "ops": [{"op": "set_animation", "page": 2, "frames": 12, "work": [2, 5]}],
+                                                     "commit": False}},
         # the refusals an agent meets: a gate, a lock, the person's switch for chat approvals, another
         # conversation's change and a person's (each conversation's first write is held back once: book_in_use)
         {"op": "call", "name": "apply_ops", "args": {"project": BOOK, "ops": [{"op": "approve", "gate": "name", "page": 1}], "commit": True}},

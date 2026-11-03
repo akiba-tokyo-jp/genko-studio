@@ -12,6 +12,7 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QMenu>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -90,7 +91,8 @@ TimelinePanel::TimelinePanel(MainWindow* window) : window_(window) {
     fps->setToolTip(QStringLiteral("1 秒に何フレーム進むか（0.5〜120。1〜60 の外の速さは、この版より前の Genko では読み取り専用で開きます）"));
     connect(fps, &QDoubleSpinBox::editingFinished, this, [this] {
         const core::Page* p = page();
-        if (p != nullptr && core::anim::is_animation(*p) && std::abs(core::anim::fps_of(*p) - fps->value()) < 0.0005) return;  // (as it is)
+        // (as shown — the page's, or a value past 0.5..120 an anim before it held, put in the box's range: never written for that)
+        if (p == nullptr || !core::anim::is_animation(*p) || fps->value() == fps_shown_) return;
         set(Json{{"fps", fps->value()}});
     });
     frames = new QSpinBox;
@@ -246,6 +248,7 @@ void TimelinePanel::refresh() {
         {
             const QSignalBlocker quiet(fps);
             fps->setValue(speed);
+            fps_shown_ = fps->value();
         }
         {
             const QSignalBlocker quiet(frames);
@@ -481,6 +484,12 @@ void TimelinePanel::play(bool on) {
         if (p != nullptr && core::anim::is_animation(*p)) window_->canvas()->renderer().set_anim(frame, onion->isChecked());
         return;
     }
+    // (PC5 J-e1: from the work area's first frame when the frame shown is outside it or at its end — Photoshop's)
+    try {
+        const auto [first, last] = core::played_frames(*p);
+        if (frame < first || frame >= last) set_frame(first, false);
+    } catch (const std::exception&) {
+    }
     play_button->setText(QStringLiteral("■ 止める"));
     played_.clear();
     timer->start(static_cast<int>(std::max<std::int64_t>(15, core::py_round_int(1000.0 / core::anim::fps_of(*p)))));
@@ -549,18 +558,53 @@ void TimelinePanel::export_animation() {
     if (target.isEmpty()) return;
     const QString suffix = QFileInfo(target).suffix();
     const std::string fmt = chosen.contains(QStringLiteral("連番")) ? std::string("frames") : (suffix.isEmpty() ? std::string("gif") : suffix.toStdString());
+    // (a width asked for: drawn at the resolution that gives it — 100 to 600 dpi — then made that wide, not a 100 dpi
+    // picture blown up; the book and the page as they are now, whatever comes in while the frames are drawn)
+    const core::Document book = window_->book();
+    const core::Page shown = *p;
+    int dpi = 100;
+    if (width) {
+        double across_mm = shown.trim_rect_mm().width.value();
+        try {
+            if (const auto rect = core::anim::camera_at(shown, range[0]); rect && rect->size() >= 4 && (*rect)[2] > 0) across_mm = (*rect)[2];
+        } catch (const std::exception&) {
+        }
+        const double at_100 = across_mm / 25.4 * 100.0;
+        if (at_100 > 0) dpi = static_cast<int>(std::clamp(std::ceil(100.0 * *width / at_100), 100.0, 600.0));
+    }
+    QProgressDialog progress(QStringLiteral("ビデオをレンダリングしています…"), QStringLiteral("キャンセル"), 0,
+                             static_cast<int>(range[1] - range[0] + 1), this);
+    progress.setWindowTitle(QStringLiteral("ビデオをレンダリング"));
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(500);
+    const auto told = [&progress](std::int64_t done, std::int64_t) {
+        progress.setValue(static_cast<int>(done));
+        QCoreApplication::processEvents();
+        return !progress.wasCanceled();
+    };
     QApplication::setOverrideCursor(Qt::WaitCursor);
     try {
-        render::anim::export_animation(*p, core::path_from_utf8(target.toStdString()), &window_->book(), 100, fmt, true, "trim", width,
-                                       range, speed);
+        render::anim::export_animation(shown, core::path_from_utf8(target.toStdString()), &book, dpi, fmt, true, "trim", width, range, speed,
+                                       told);
+    } catch (const core::Error& error) {
+        QApplication::restoreOverrideCursor();
+        progress.reset();
+        if (std::string_view(error.code()) == "cancelled") {
+            window_->flash(QStringLiteral("ビデオのレンダリングをやめました（何も書き出していません）"), 5000);
+            return;
+        }
+        ask::warning(this, QStringLiteral("Genko"), wording::error(QString::fromUtf8(error.what())));
+        return;
     } catch (const std::exception& error) {
         QApplication::restoreOverrideCursor();
+        progress.reset();
         ask::warning(this, QStringLiteral("Genko"), wording::error(QString::fromUtf8(error.what())));
         return;
     }
     QApplication::restoreOverrideCursor();
+    progress.reset();
     QString said = QStringLiteral("アニメーションを書き出しました: %1").arg(target);
-    if (const auto note = formats::ink_note(*p)) said += QStringLiteral("（") + QString::fromStdString(*note) + QStringLiteral("）");  // (color-mode@1)
+    if (const auto note = formats::ink_note(shown)) said += QStringLiteral("（") + QString::fromStdString(*note) + QStringLiteral("）");  // (color-mode@1)
     window_->flash(said, 5000);
 }
 
@@ -615,11 +659,30 @@ void TimelinePanel::ask_frame() {
 void TimelinePanel::set_work(std::optional<std::array<std::int64_t, 2>> span) {
     const core::Page* p = page();
     if (p == nullptr || !core::anim::is_animation(*p)) return;
-    if (core::work_area(*p) == span) {
-        refresh();
+    try {
+        if (core::work_area(*p) == span) {
+            refresh();
+            return;
+        }
+    } catch (const std::exception& error) {  // (an anim's values no op makes — frames of words —: said, nothing changed)
+        window_->flash(wording::error(QString::fromUtf8(error.what())), 5000);
         return;
     }
     set(Json{{"work", span ? Json::array({(*span)[0], (*span)[1]}) : Json()}});
+}
+
+void TimelinePanel::set_work_end(bool start) {
+    const core::Page* p = page();
+    if (p == nullptr || !core::anim::is_animation(*p)) return;
+    std::array<std::int64_t, 2> played{1, 1};
+    try {
+        played = core::played_frames(*p);
+    } catch (const std::exception& error) {
+        window_->flash(wording::error(QString::fromUtf8(error.what())), 5000);
+        return;
+    }
+    const std::int64_t now = window_->current_frame(p);
+    set_work(start ? std::array<std::int64_t, 2>{now, std::max(now, played[1])} : std::array<std::int64_t, 2>{std::min(now, played[0]), now});
 }
 
 void TimelinePanel::delete_timeline() {
@@ -634,6 +697,10 @@ void TimelinePanel::build_menu() {
     next_button->setDefaultAction(window_->action(QStringLiteral("act_next_frame")));
     previous_button->setText(QStringLiteral("◀"));
     next_button->setText(QStringLiteral("▶"));
+    // (made again from nothing each time it is called — J-e2 adds its video layers' items to it —: the submenus and the
+    // panel's own items before gone, the window's commands only taken out)
+    disconnect(menu_shown_);
+    for (QMenu* sub : panel_menu->findChildren<QMenu*>(QString(), Qt::FindDirectChildrenOnly)) delete sub;
     panel_menu->clear();
     panel_menu->addAction(window_->action(QStringLiteral("act_timeline")));  // (ビデオタイムラインを作成)
     QAction* gone = panel_menu->addAction(QStringLiteral("タイムラインを削除"), this, [this] { delete_timeline(); });
@@ -647,28 +714,17 @@ void TimelinePanel::build_menu() {
     moves->addSeparator();
     moves->addAction(window_->action(QStringLiteral("act_go_to_frame")));
     QMenu* area = panel_menu->addMenu(QStringLiteral("作業範囲"));
-    area->addAction(QStringLiteral("作業範囲の開始点を設定"), this, [this] {
-        const core::Page* p = page();
-        if (p == nullptr || !core::anim::is_animation(*p)) return;
-        const std::int64_t now = window_->current_frame(p);
-        const auto played = core::played_frames(*p);
-        set_work(std::array<std::int64_t, 2>{now, std::max(now, played[1])});
-    })->setObjectName(QStringLiteral("timeline_work_start"));
-    area->addAction(QStringLiteral("作業範囲の終了点を設定"), this, [this] {
-        const core::Page* p = page();
-        if (p == nullptr || !core::anim::is_animation(*p)) return;
-        const std::int64_t now = window_->current_frame(p);
-        const auto played = core::played_frames(*p);
-        set_work(std::array<std::int64_t, 2>{std::min(now, played[0]), now});
-    })->setObjectName(QStringLiteral("timeline_work_end"));
+    area->setObjectName(QStringLiteral("timeline_work_menu"));
+    area->addAction(QStringLiteral("作業範囲の開始点を設定"), this, [this] { set_work_end(true); })->setObjectName(QStringLiteral("timeline_work_start"));
+    area->addAction(QStringLiteral("作業範囲の終了点を設定"), this, [this] { set_work_end(false); })->setObjectName(QStringLiteral("timeline_work_end"));
     area->addAction(QStringLiteral("作業範囲をクリア"), this, [this] { set_work(std::nullopt); })->setObjectName(QStringLiteral("timeline_work_clear"));
     panel_menu->addSeparator();
     panel_menu->addAction(window_->action(QStringLiteral("act_render_video")));
-    connect(panel_menu, &QMenu::aboutToShow, this, [this, gone, area] {
+    menu_shown_ = connect(panel_menu, &QMenu::aboutToShow, this, [this] {
         const core::Page* p = page();
         const bool on = p != nullptr && core::anim::is_animation(*p);
-        gone->setEnabled(on);
-        area->setEnabled(on);
+        if (auto* gone_now = panel_menu->findChild<QAction*>(QStringLiteral("timeline_delete"))) gone_now->setEnabled(on);
+        if (auto* area_now = panel_menu->findChild<QMenu*>(QStringLiteral("timeline_work_menu"))) area_now->setEnabled(on);
     });
 }
 
@@ -676,13 +732,15 @@ void TimelinePanel::build_menu() {
 
 RenderVideoDialog::RenderVideoDialog(QWidget* parent, const core::Page& page) : QDialog(parent) {
     setWindowTitle(QStringLiteral("ビデオをレンダリング"));
+    bool has_work = false;
     try {
         count_ = core::anim::frames_of(page);
         work_ = core::played_frames(page);
         page_fps_ = core::anim::fps_of(page);
-    } catch (const std::exception&) {
+        has_work = core::work_area(page).has_value();
+    } catch (const std::exception&) {  // (an anim's values no op makes: all of its frames, at 12 fps, as the panel shows it)
+        work_ = {1, count_};
     }
-    const bool has_work = core::work_area(page).has_value();
     range = new QComboBox;
     range->addItem(QStringLiteral("すべてのフレーム（1〜%1）").arg(count_), QStringLiteral("all"));
     if (has_work) range->addItem(QStringLiteral("作業範囲（%1〜%2）").arg(work_[0]).arg(work_[1]), QStringLiteral("work"));

@@ -44,6 +44,19 @@ inline constexpr double kTimelineFpsMax = 120;
 bool timeline_fps(const Json& fps);
 bool timeline_work(const Json& work);
 
+// The coordinator's decision on J-e1's review P2-1 (節 J 3.1): an agent's apply_ops through MCP
+// (service::StudioService::apply_ops) keeps set_animation as the public list (ops_schema.json, `genko schema`) and Python
+// have it — an fps of 1..60 ("fps is 1 to 60"), "work" an unknown key, ignored and said so. While one of these lives on
+// this thread, the ops applied on it take that; the window, `genko apply` and the HTTP API's /v1/apply take timeline@1's.
+class PublicAnimationOps {
+public:
+    PublicAnimationOps();
+    ~PublicAnimationOps();
+    PublicAnimationOps(const PublicAnimationOps&) = delete;
+    PublicAnimationOps& operator=(const PublicAnimationOps&) = delete;
+};
+bool public_animation_ops();
+
 // The work area (作業範囲, PC5 J-e1) of a page's anim: its work of the shape above, cut to the anim's frames (a book whose
 // frames a build before J-e1 cut down may hold one past them); none: no work area (all the frames), not an animation.
 std::optional<std::array<std::int64_t, 2>> work_area(const Page& page);

@@ -72,6 +72,8 @@ public:
     void ask_frame();
     // The work area (timeline@1): [first, last] of the frames, none: all of them (set_animation's work).
     void set_work(std::optional<std::array<std::int64_t, 2>> work);
+    // 作業範囲の開始点を設定 (`start`) / 終了点を設定: the frame shown as the work area's first or last frame.
+    void set_work_end(bool start);
     void delete_timeline();  // (timeline.delete: set_animation off — the cels stay as layers)
 
     QCheckBox* onion = nullptr;
@@ -97,7 +99,8 @@ public:
     QSpinBox* work_last = nullptr;
     QToolButton* menu_button = nullptr;
     QMenu* panel_menu = nullptr;
-    // Its menu's commands and buttons made from the window's commands once they are made (MainWindow::build_anim_dock).
+    // Its menu's commands and buttons made from the window's commands once they are made (MainWindow::build_anim_dock); safe
+    // to call again (the menu made anew: J-e2 adds the video layers' items in it, before ビデオをレンダリング…).
     void build_menu();
 
 private:
@@ -109,6 +112,8 @@ private:
 
     MainWindow* window_;
     std::map<std::int64_t, QImage> played_;
+    double fps_shown_ = -1;  // (the fps box's value as refresh put it: left as it is, nothing is written)
+    QMetaObject::Connection menu_shown_;  // (build_menu's: made again with it)
 };
 
 // ビデオをレンダリング (PC5 J-e1, file.export.renderVideo): which frames — すべてのフレーム, 作業範囲 (the page's, when it

@@ -122,9 +122,14 @@ void set_animation(OpContext& c) {
     }
     Json& data = anim_of(page, true);
     if (has(c.op, "fps")) {
-        // (PC5 J-e1, timeline@1: 0.5..120 — 1..60 as before, written as before; past it the book names timeline@1)
+        // (PC5 J-e1, timeline@1: 0.5..120 — 1..60 as before, written as before; past it the book names timeline@1. An agent
+        // through MCP: 1..60, Python's words — core::public_animation_ops)
         const double fps = to_float(c.op["fps"]);
-        if (!(kTimelineFpsMin <= fps && fps <= kTimelineFpsMax)) throw OpError("fps is 0.5 to 120");
+        if (public_animation_ops()) {
+            if (!(1 <= fps && fps <= 60)) throw OpError("fps is 1 to 60");
+        } else if (!(kTimelineFpsMin <= fps && fps <= kTimelineFpsMax)) {
+            throw OpError("fps is 0.5 to 120");
+        }
         data["fps"] = fps;
     }
     if (has(c.op, "frames")) {
@@ -156,7 +161,9 @@ void set_animation(OpContext& c) {
         }
     }
     if (has(c.op, "loop")) data["loop"] = py_truthy(c.op["loop"]);
-    if (has(c.op, "work")) {  // (PC5 J-e1, timeline@1: the work area, [first, last] of the frames; null: none — all of them)
+    // (PC5 J-e1, timeline@1: the work area, [first, last] of the frames; null: none — all of them. An agent through MCP: an
+    // unknown key, ignored and said so as Python does — core::public_animation_ops, command_bus's native_key)
+    if (has(c.op, "work") && !public_animation_ops()) {
         const Json& given = c.op["work"];
         if (given.is_null()) {
             data.erase("work");

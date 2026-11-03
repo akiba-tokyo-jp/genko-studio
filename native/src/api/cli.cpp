@@ -491,7 +491,11 @@ int inspect(const QStringList& args, bool ascii) {
         for (std::size_t i = 0; i < doc.pages.size(); ++i) {
             if (page_number && doc.pages[i]->index != core::Num(*page_number)) continue;
             if (doc.is_deferred(i)) continue;
-            pages.push_back(core::timeline_info(doc.page(i)));
+            try {
+                pages.push_back(core::timeline_info(doc.page(i)));
+            } catch (const std::exception& error) {  // (an anim's values no op makes — frames of words —: said for that page alone)
+                pages.push_back(core::Json{{"page", doc.pages[i]->index.json()}, {"animation", true}, {"error", error.what()}});
+            }
         }
         if (page_number && pages.empty()) throw core::Error("key", "no page " + std::to_string(*page_number));
         print_json(core::Json{{"pages", std::move(pages)}}, ascii);

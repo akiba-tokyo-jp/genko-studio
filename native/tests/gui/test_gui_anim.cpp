@@ -224,6 +224,13 @@ private slots:
         // ビデオタイムラインを作成 from ページ: the panel shown and the page an animation
         w->action("act_timeline")->trigger();
         QVERIFY(core::anim::is_animation(s.page()));
+        // (one step: 取り消し takes the timeline, its folder and its first cel back at once)
+        const std::size_t plain_layers = s.page().layers.size();
+        w->action("act_undo")->trigger();
+        QVERIFY(!core::anim::is_animation(s.page()));
+        QCOMPARE(s.page().layers.size() + 2, plain_layers);
+        w->action("act_timeline")->trigger();
+        QVERIFY(core::anim::is_animation(s.page()));
         app::TimelinePanel* panel = w->timeline();
         QVERIFY(panel->isVisible());
         QCOMPARE(core::anim::frames_of(s.page()), std::int64_t{24});
@@ -232,6 +239,15 @@ private slots:
         for (QAction* a : panel->panel_menu->actions()) items << (a->isSeparator() ? QStringLiteral("|") : a->menu() ? a->menu()->title() + QStringLiteral(" ▸") : a->text());
         QCOMPARE(items, (QStringList{QStringLiteral("ビデオタイムラインを作成"), QStringLiteral("タイムラインを削除"), QStringLiteral("|"), QStringLiteral("移動 ▸"),
                                      QStringLiteral("作業範囲 ▸"), QStringLiteral("|"), QStringLiteral("ビデオをレンダリング…")}));
+        // (made again — J-e2's items go in it —: the same menu, nothing left over, its items followed as it opens)
+        panel->build_menu();
+        panel->build_menu();
+        QStringList again;
+        for (QAction* a : panel->panel_menu->actions()) again << (a->isSeparator() ? QStringLiteral("|") : a->menu() ? a->menu()->title() + QStringLiteral(" ▸") : a->text());
+        QCOMPARE(again, items);
+        QCOMPARE(panel->panel_menu->findChildren<QMenu*>(QString(), Qt::FindDirectChildrenOnly).size(), qsizetype(2));
+        emit panel->panel_menu->aboutToShow();
+        QVERIFY(panel->findChild<QAction*>(QStringLiteral("timeline_delete"))->isEnabled());
         // the keys: while the panel has the focus only, the same in both key sets
         QCOMPARE(w->action("act_next_frame")->shortcuts(), QList<QKeySequence>{QKeySequence(Qt::Key_Right)});
         QCOMPARE(w->action("act_work_end")->shortcuts(), QList<QKeySequence>{QKeySequence(Qt::SHIFT | Qt::Key_Right)});
@@ -255,7 +271,16 @@ private slots:
         QVERIFY(gui_test::wait_for([&] { return w->canvas()->hasFocus(); }, 5000));
         QTest::keyClick(w->canvas(), Qt::Key_Right);  // (the canvas's arrow: not the timeline's)
         QCOMPARE(w->current_frame(), std::int64_t{1});
-        // the work area, from its boxes: the book names timeline@1
+        // the work area, from its boxes: the book names timeline@1 — one step, taken back to the anim as it was
+        const Json anim_before = *core::anim::spec(s.page());
+        panel->work_first->setValue(5);
+        panel->work_last->setValue(10);
+        panel->work->setChecked(true);
+        QVERIFY(core::work_area(s.page()).has_value());
+        w->action("act_undo")->trigger();
+        QVERIFY(!core::work_area(s.page()).has_value());
+        QCOMPARE(core::anim::spec(s.page())->dump(), anim_before.dump());
+        QVERIFY(!panel->work->isChecked());
         panel->work_first->setValue(5);
         panel->work_last->setValue(10);
         panel->work->setChecked(true);
@@ -268,12 +293,30 @@ private slots:
         QCOMPARE(w->current_frame(), std::int64_t{10});
         QTest::keyClick(panel->table, Qt::Key_Left, Qt::ShiftModifier);
         QCOMPARE(w->current_frame(), std::int64_t{5});
-        // played within it
+        // played within it: from its first frame when the frame shown is at its end or outside it (Photoshop's), round again
+        // after its last
         panel->set_frame(10);
         panel->play_button->setChecked(true);
+        QCOMPARE(panel->frame, std::int64_t{5});
+        panel->tick();
+        QCOMPARE(panel->frame, std::int64_t{6});
+        panel->play_button->setChecked(false);
+        panel->set_frame(9);
+        panel->play_button->setChecked(true);
+        QCOMPARE(panel->frame, std::int64_t{9});
+        panel->tick();
         panel->tick();
         QCOMPARE(panel->frame, std::int64_t{5});
         panel->play_button->setChecked(false);
+        panel->set_frame(20);  // (outside it, the loop off: still played from its first frame)
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "set_animation"}, {"page", 1}, {"loop", false}}})));
+        panel->play_button->setChecked(true);
+        QCOMPARE(panel->frame, std::int64_t{5});
+        panel->tick();
+        QCOMPARE(panel->frame, std::int64_t{6});
+        QVERIFY(panel->play_button->isChecked());
+        panel->play_button->setChecked(false);
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "set_animation"}, {"page", 1}, {"loop", true}}})));
         // フレームへ移動…
         s.answers.responder->get_int = [](const QString& title, const QString&, int, int lo, int hi) {
             return title == QStringLiteral("フレームへ移動") && lo == 1 && hi == 24 ? std::optional<int>(7) : std::optional<int>();
@@ -332,6 +375,23 @@ private slots:
         gone->trigger();
         QVERIFY(!core::anim::is_animation(s.page()));
         QCOMPARE(s.page().layers.size(), layers);
+    }
+
+    // (PC5 J-e1, the review's P3-4) A page someone else holds: ビデオタイムラインを作成 changes nothing — the refusal said, the book
+    // as it was —, and the page stays an ordinary one.
+    void aHeldPageIsNotMadeAnAnimation() {
+        core::Document doc = book_doc();
+        doc.page_locks[doc.page(0).id] = "human:other";
+        Studio s(doc);
+        app::MainWindow* w = s.window.get();
+        const std::int64_t revision = w->book().revision;
+        const std::size_t layers = s.page().layers.size();
+        w->action("act_timeline")->trigger();
+        QVERIFY(!core::anim::is_animation(s.page()));
+        QCOMPARE(w->book().revision, revision);
+        QCOMPARE(s.page().layers.size(), layers);
+        QVERIFY(!w->last_error().isEmpty());
+        QVERIFY(w->timeline()->start->isVisible());
     }
 
     void timelapseRecordsAndExports() {

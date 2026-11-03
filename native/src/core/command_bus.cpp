@@ -13,6 +13,7 @@
 #include "core/groups.hpp"
 #include "core/layer_basics.hpp"
 #include "core/variables.hpp"
+#include "core/video.hpp"
 #include "core/adjust.hpp"
 #include "core/adjust_kinds.hpp"
 #include "core/channels.hpp"
@@ -88,6 +89,9 @@ bool own_setting(const Json& op, std::string_view name, std::string_view key);
 bool pattern_key(std::string_view op, std::string_view key) { return key == "pattern" && (op == "fill_area" || op == "fill" || op == "add_layer"); }
 // PC5 G-d (SPEC TEXT-02「検索と置換」): replace_text's whole_word — taken, so neither ignored nor unknown.
 bool word_key(std::string_view op, std::string_view key) { return op == "replace_text" && key == "whole_word"; }
+// PC5 J-e1 (timeline@1): set_animation's work — taken, but for an agent through MCP (core::public_animation_ops), which is
+// given the public list's set_animation: an unknown key there, ignored, as Python says.
+bool timeline_key(std::string_view op, std::string_view key) { return op == "set_animation" && key == "work" && !public_animation_ops(); }
 
 // Python's _usage: the keys given that the op does not take, and how the op is written. (`channel`: the op's "channel"
 // is this build's own there — it names a channel or plate of its page: core::channel_target —, so not one of them; nor
@@ -99,7 +103,7 @@ std::string usage(const Json& op, bool channel = false) {
     std::vector<std::string> strange;
     for (const auto& [key, value] : op.items()) {
         if (!schema->contains(key) && key != "op" && key != "area" && !key.starts_with("_") && !paper_key(op, key) &&
-            !stroke_colour_key(op, key) && !dab_key(name, key) && !pattern_key(name, key) && !fill_key(name, key) && !word_key(name, key) && !(key == "channel" && channel) &&
+            !stroke_colour_key(op, key) && !dab_key(name, key) && !pattern_key(name, key) && !fill_key(name, key) && !word_key(name, key) && !timeline_key(name, key) && !(key == "channel" && channel) &&
             !own_setting(op, name, key)) {
             strange.push_back(key);
         }
@@ -137,6 +141,7 @@ bool native_key(std::string_view op, std::string_view key) {
            // PC4 E3 (patterns@1): a pattern fill — fill_area's and fill's pattern, add_layer's of kind fill
            pattern_key(op, key) ||
            word_key(op, key) ||  // (PC5 G-d)
+           timeline_key(op, key) ||  // (PC5 J-e1)
            // PC5 I-a (layer-locks@1, blend-channels@1): set_layer's and set_layers' locks, set_layer's channels
            ((op == "set_layer" || op == "set_layers") && (key == "lock_all" || key == "lock_nest")) ||
            (op == "set_layer" && key == "blend_channels");
