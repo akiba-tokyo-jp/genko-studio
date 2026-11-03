@@ -10,6 +10,7 @@
 #include <QSettings>
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <set>
 #include <string>
 
@@ -60,7 +61,13 @@ const std::vector<std::string>& app_keys() {
         "key_sets/私の組/keys", "menus/hidden", "menus/colors/検索", "menus/colors/HSB/HSL", "toolbar/order", "toolbar/hidden",
         "workspaces/ペン入れ/keys", "workspaces/ペン入れ/menus", "workspaces/ペン入れ/toolbar", "workspace_changes/写真",
         // (PC5 J-b: ガイド・グリッド・スライス's slices, 表示・非表示 ▸ スライス, スナップ先 ▸ スライス)
-        "guides/slice_color", "guides/slice_numbers", "view/show_slices", "snap/slices"};
+        "guides/slice_color", "guides/slice_numbers", "view/show_slices", "snap/slices",
+        // (PC5 H-e: 一般, インターフェイス, ワークスペース's two, ツール, ヒストリーログ, パフォーマンス, 仮想記憶ディスク, 拡張コントロール)
+        "ui/color_picker", "ui/interpolation", "ui/beep_when_done", "ui/export_clipboard", "ui/place_resize", "ui/wheel_zooms",
+        "ui/animated_zoom", "ui/home_screen", "ui/ui_scale", "ui/canvas_border", "ui/channels_in_color", "ui/menu_colors", "ui/tooltips",
+        "ui/open_as_tabs", "ui/float_docking", "ui/tool_tooltips", "ui/zoom_to_center", "ui/flick_panning", "ui/transform_values",
+        "ui/overscroll", "history_log/enabled", "history_log/destination", "history_log/file", "history_log/detail", "ui/memory_mb",
+        "ui/history_states", "ui/scratch_folder", "ui/touch_gestures", "ui/pinch_zoom", "ui/trackpad_rotate"};
     return all;
 }
 
@@ -330,6 +337,64 @@ private slots:
         QVERIFY(prefs::reset(*s, "menus").ok);
         QVERIFY(!s->contains(QStringLiteral("menus/colors/検索")) && !s->contains(QStringLiteral("menus/hidden")));
         QCOMPARE(s->value(QStringLiteral("toolbar/hidden")).toString(), QStringLiteral("act_3d"));
+    }
+
+    // PC5 H-e: every one of upstream's eighteen sections has its entries but the plug-ins' and the integrations' (節 J's) and
+    // the type's (節 G's); the panes' preferences have what Genko does now as their defaults (the computer's colour window,
+    // bilinear, the tabs, the wheel scrolling, the start screen, the history log off, all of ヒストリー, 256 MB of the
+    // screen's tiles, the trackpad not turning the view); their ranges and choices checked.
+    void thePanesOfH_e() {
+        for (const char* section : {"general", "interface", "workspace", "tools", "historyLog", "fileHandling", "export", "performance",
+                                    "scratchDisks", "cursors", "transparencyAndGamut", "unitsAndRulers", "guidesGridAndSlices",
+                                    "enhancedControls", "rawDefaults"}) {
+            const bool any = std::any_of(prefs::table().begin(), prefs::table().end(),
+                                         [section](const prefs::Pref& p) { return p.path.rfind(std::string(section) + ".", 0) == 0; });
+            QVERIFY2(any, section);
+        }
+        const auto fallback = [](const char* path) { return prefs::decode(*prefs::by_path(path), QVariant()); };
+        QCOMPARE(fallback("general.colorPicker"), Json("system"));
+        QCOMPARE(fallback("general.imageInterpolation"), Json("bilinear"));
+        QCOMPARE(fallback("general.zoomWithScrollWheel"), Json(false));
+        QCOMPARE(fallback("general.autoShowHomeScreen"), Json(true));
+        QCOMPARE(fallback("general.resizeImageDuringPlace"), Json(true));
+        QCOMPARE(fallback("workspace.openDocumentsAsTabs"), Json(true));
+        QCOMPARE(fallback("historyLog.enabled"), Json(false));
+        QCOMPARE(fallback("historyLog.destination"), Json("metadata"));
+        QCOMPARE(fallback("performance.historyStates"), Json(1000));
+        QCOMPARE(fallback("performance.memoryUsageMb"), Json(256));
+        QCOMPARE(fallback("scratchDisks.folder"), Json(""));
+        QCOMPARE(fallback("enhancedControls.rotateViewWithTrackpad"), Json(false));
+        QCOMPARE(fallback("interface.canvasBorder"), Json("dropShadow"));
+        QCOMPARE(prefs::by_path("interface.uiScale")->apply, prefs::Apply::Restart);
+        QCOMPARE(prefs::by_path("scratchDisks.folder")->apply, prefs::Apply::Restart);
+        auto s = fresh("he.ini");
+        for (const auto& [path, value] : std::vector<std::pair<const char*, Json>>{{"performance.historyStates", 0},
+                                                                                 {"performance.historyStates", 1001},
+                                                                                 {"performance.memoryUsageMb", 32},
+                                                                                 {"interface.uiScale", "150"},
+                                                                                 {"historyLog.detail", "verbose"},
+                                                                                 {"interface.canvasBorder", "shadow"}}) {
+            QVERIFY2(!prefs::set(*s, Json{{path, value}}).ok, path);
+        }
+        QVERIFY(prefs::set(*s, Json{{"historyLog", Json{{"enabled", true}, {"destination", "both"}, {"filePath", "/tmp/log.txt"}, {"detail", "detailed"}}},
+                                    {"performance.historyStates", 50}})
+                    .ok);
+        QCOMPARE(s->value(QStringLiteral("history_log/destination")).toString(), QStringLiteral("both"));
+        QCOMPARE(s->value(QStringLiteral("ui/history_states")).toInt(), 50);
+    }
+
+    // PC5 H-e for H-0's review P3-6: keys as Qt writes them, and nothing else.
+    void keysAreKeys() {
+        const prefs::Pref& keys = *prefs::by_path("shortcuts.*");
+        for (const char* fine : {"Ctrl+K", "Ctrl+Shift+K", "Ctrl++", "Ctrl+-", "Ctrl+;", "Ctrl+Alt+Shift+'", "F7", "PgUp", "Shift+F12",
+                                 "Ctrl+K, Ctrl+X", "Ctrl+B|Ctrl+Alt+B", "Media Play", "+", "Ctrl+,", "Ctrl+]"}) {
+            QVERIFY2(!prefs::check(keys, Json(fine)).has_value(), fine);
+        }
+        for (const char* wrong : {"あいう", "Ctrl+", "Ctrl+B||", "Hyper+K", "Ctrl+あいう", "1, 2, 3, 4, 5", "|"}) {
+            QVERIFY2(prefs::check(keys, Json(wrong)).has_value(), wrong);
+        }
+        QVERIFY(!prefs::check(keys, Json("")).has_value());  // (none: no key)
+        QVERIFY(!prefs::check(keys, Json("あ")).has_value());  // (one character is a key: a keyboard's own)
     }
 };
 

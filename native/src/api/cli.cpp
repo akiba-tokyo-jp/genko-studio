@@ -28,6 +28,7 @@
 #include "api/buildinfo.hpp"
 #include "api/server_cli.hpp"
 #include "api/studio_cli.hpp"
+#include "api/prefs_cli.hpp"
 #include "core/brush_dabs.hpp"
 #include "core/brushes.hpp"
 #include "core/filter_kinds.hpp"
@@ -3332,6 +3333,9 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("batch")) return batch_command(args, ascii);    // (PC5 I-0: 自動処理の土台)
         if (command == QLatin1String("droplet")) return droplet_command(args, ascii);    // (PC5 I-e: ドロップレット)
         if (command == QLatin1String("automate")) return automate_command(args, ascii);  // (PC5 I-e: 画像プロセッサーほか)
+        if (command == QLatin1String("prefs")) return prefs_command(args, ascii);        // (PC5 H-e: prefs.get/set/reset)
+        if (command == QLatin1String("commands")) return commands_command(args, ascii);  // (PC5 H-e: command.list)
+        if (command == QLatin1String("session")) return session_command(args, ascii);    // (PC5 H-e: session.inspect)
         if (command == QLatin1String("studio")) return studio_command(args, ascii);
         if (command == QLatin1String("mcp")) return mcp_command(args);
         if (command == QLatin1String("serve")) return serve_command(args);

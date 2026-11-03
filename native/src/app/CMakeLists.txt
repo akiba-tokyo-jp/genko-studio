@@ -230,6 +230,11 @@ genko_library(genko_app
     # PC5 J-b (スライス: the slices on the canvas, the スライスツール・スライス選択ツール, the window's commands)
     canvas_slices.cpp
     main_window_slices.cpp
+    # PC5 H-e (環境設定と API: the panes of 環境設定, session.json, commands.json, the history log)
+    preferences_panes.cpp
+    session_file.cpp
+    commands_file.cpp
+    history_log.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

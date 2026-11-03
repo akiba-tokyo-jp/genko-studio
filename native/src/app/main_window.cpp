@@ -48,6 +48,7 @@
 #include "app/dialogs.hpp"
 #include "app/doc_area.hpp"
 #include "app/documents.hpp"
+#include "app/history_log.hpp"
 #include "app/ime.hpp"
 #include "app/inputs.hpp"
 #include "app/look.hpp"
@@ -1103,6 +1104,7 @@ void MainWindow::show_document(int index) {
     // let go, whatever its page's id — a duplicate shares it —; never finished on this one)
     if (session_ != doc.session || contents_ != doc.contents) canvas_->let_go();
     doc_ = index;
+    history_log::follow(doc.session.get());  // (PC5 H-e: ヒストリーログ — once for a book)
     arrange_follow();  // (PC5 H-c: the canvas to its tab's cell — before the view is given: the cell's size —, main_window_arrange.cpp)
     session_ = doc.session;
     page_index_ = doc.page_index;
@@ -1195,6 +1197,12 @@ void MainWindow::open_project(const fs::path& path) {
     const auto [window, index] = documents::find(path);
     if (window == this) {
         switch_document(index);
+        return;
+    }
+    // (PC5 H-e: ドキュメントをタブで開く off — a window of its own)
+    if (MainWindow* there = window_to_open_in(); there != this) {
+        there->opened_event_ = event;
+        there->open_project(path);
         return;
     }
     if (window != nullptr) {  // (another window has it: the two share it)

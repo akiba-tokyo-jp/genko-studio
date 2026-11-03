@@ -344,6 +344,11 @@ void MainWindow::ask_missing_profile(formats::Opened& opened) {
 }
 
 void MainWindow::add_picture_book(core::Document doc, const std::vector<std::string>& notes, std::optional<fs::path> source) {
+    // (PC5 H-e: ドキュメントをタブで開く off — a window of its own)
+    if (MainWindow* there = window_to_open_in(); there != this) {
+        there->add_picture_book(std::move(doc), notes, std::move(source));
+        return;
+    }
     Session::Options options;
     options.idle = std::min(options.longest, std::chrono::milliseconds(preferences::save_after_ms()));
     // (PC4 F-e: a camera RAW's colours are its development's — Camera Raw's ワークフロー chose its space —, never the

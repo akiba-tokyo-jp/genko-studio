@@ -503,6 +503,20 @@ public:
     // A two-finger gesture: spread to zoom about the fingers, twist to turn the view, slide to move.
     void pinch(double factor, double turn_deg, const QPointF& centre, const QPointF& moved);
 
+    // --- 環境設定 (PC5 H-e: 一般, インターフェイス, ツール, 拡張コントロール — app/preferences_panes' apply_panes) ---------------------
+    bool wheel_zooms = false;      // スクロールホイールでズーム (Shift with the wheel still scrolls across)
+    bool animated_zoom = true;     // アニメーションズーム (and 動きを減らす: none)
+    bool zoom_to_center = false;   // クリックした点を中央にズーム (the zoom tool's click)
+    bool flick_panning = true;     // フリックパンを有効にする (the page slides on when let go moving)
+    bool transform_values = true;  // 変形値を表示 (the box's size, its turn or its move by the pointer while it is dragged)
+    bool overscroll = true;        // オーバースクロール (off: the page never scrolled past its edges, centred when smaller)
+    bool touch_gestures = true;    // タッチジェスチャーを有効にする (a touch screen's two fingers)
+    bool pinch_zoom = true;        // トラックパッドのピンチでズーム
+    bool trackpad_rotate = false;  // トラックパッドで表示を回転
+    QString page_border = QStringLiteral("dropShadow");  // 境界線: dropShadow | line | none
+    // (overscroll off: the pan brought back so that the page covers the view, or sits in its middle when smaller)
+    void keep_in_view();
+
     // --- 環境設定 (M6: Python's canvas.pen_button, cursor_kind, modifier_tools, tool_modifiers) ----------------------
     // The pen's side button (or its middle one): menu (the right click's menu) | picker (スポイト) | hand (moves the view).
     QString pen_button = QStringLiteral("menu");

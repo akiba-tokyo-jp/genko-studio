@@ -328,9 +328,14 @@ void MainWindow::open_preferences(const QString& pane) {
         open_keyboard_shortcuts();
         return;
     }
-    preferences::PreferencesDialog dialog(this);
-    if (!pane.isEmpty()) dialog.show_pane(pane);  // (PC5 H-0: 編集 → 環境設定 ▸'s panes, キーボードショートカット…)
-    ask::exec(&dialog);
+    // (PC5 H-e: この面を初期設定に戻す and すべての環境設定をリセット… open it again at the pane, its values as they are now)
+    for (QString at = pane;;) {
+        preferences::PreferencesDialog dialog(this);
+        if (!at.isEmpty()) dialog.show_pane(at);  // (PC5 H-0: 編集 → 環境設定 ▸'s panes, キーボードショートカット…)
+        ask::exec(&dialog);
+        if (dialog.reopen.isEmpty()) break;
+        at = dialog.reopen;
+    }
 }
 
 QAction* MainWindow::action(const QString& attribute) const {

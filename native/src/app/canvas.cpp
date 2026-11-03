@@ -43,6 +43,7 @@ PageCanvas::PageCanvas(QWidget* parent) : QWidget(parent), renderer_(std::make_u
             return;
         }
         view_.pan += pan_speed_;
+        keep_in_view();  // (PC5 H-e: オーバースクロール off)
         view_.fitted = false;
         rerender_.start();
         update();
@@ -544,7 +545,7 @@ void PageCanvas::glide(const std::function<void()>& change) {
     const ViewState before = view_;
     change();
     const ViewState after = view_;
-    if (reduce_motion() || !isVisible() || before.scale <= 0 ||
+    if (!animated_zoom || reduce_motion() || !isVisible() || before.scale <= 0 ||  // (PC5 H-e: アニメーションズーム)
         (before.scale == after.scale && before.pan == after.pan)) {
         return;
     }

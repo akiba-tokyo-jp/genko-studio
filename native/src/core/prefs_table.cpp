@@ -128,6 +128,17 @@ std::vector<Pref> make_table() {
     const Strings per_tool{"", "none", "picker", "select", "move", "eraser", "pen", "fill"};
     const Strings policies{"preserve", "convert", "off"};
     std::vector<Pref> t{
+        // general (一般 — PC5 H-e, edit.preferences.general; PhotoCraft v0.2.0's prefs.rs General, MIT: the ones Genko's window
+        // has. Where upstream's default would change what Genko does now — the computer's colour window, bilinear for a
+        // transform — the default is Genko's)
+        choice("general.colorPicker", "ui/color_picker", "system", {"system", "genko"}, "カラーピッカー"),
+        choice("general.imageInterpolation", "ui/interpolation", "bilinear", {"nearest", "bilinear", "bicubic"}, "画像補間法", Apply::NewWindow),
+        boolean("general.beepWhenDone", "ui/beep_when_done", false, "完了したらビープ音"),
+        boolean("general.exportClipboard", "ui/export_clipboard", true, "クリップボードの書き出し"),
+        boolean("general.resizeImageDuringPlace", "ui/place_resize", true, "配置時に画像サイズを変更"),
+        boolean("general.zoomWithScrollWheel", "ui/wheel_zooms", false, "スクロールホイールでズーム"),
+        boolean("general.animatedZoom", "ui/animated_zoom", true, "アニメーションズーム"),
+        boolean("general.autoShowHomeScreen", "ui/home_screen", true, "ホーム画面を自動表示", Apply::Restart),
         // interface (インターフェイス)
         choice("interface.theme", "ui/theme", "system", {"system", "light", "dark"}, "画面の色"),
         integer("interface.panelBrightness", "ui/brightness", 0, -2, 2, "パネルの明るさ"),
@@ -138,6 +149,13 @@ std::vector<Pref> make_table() {
         boolean("interface.showHints", "ui/hints", false, "パネルに説明の文を出す"),
         spelled(boolean("interface.toolNames", "ui/tool_names", false, "道具の名前を表示", Apply::NewWindow), "1", "0"),
         spelled(boolean("interface.nextSteps", "ui/next_steps", true, "次の作業の案内を表示", Apply::NewWindow), "on", "off"),
+        // (PC5 H-e: Photoshop's 環境設定 → インターフェイス — UI の拡大・縮小 on the next start, the page's border, the channels' small
+        // pictures in their colours, メニュー…'s colours shown, the tooltips)
+        choice("interface.uiScale", "ui/ui_scale", "auto", {"auto", "100", "200"}, "UI の拡大・縮小", Apply::Restart),
+        choice("interface.canvasBorder", "ui/canvas_border", "dropShadow", {"dropShadow", "line", "none"}, "境界線"),
+        boolean("interface.showChannelsInColor", "ui/channels_in_color", false, "チャンネルをカラーで表示"),
+        boolean("interface.showMenuColors", "ui/menu_colors", true, "メニューカラーを表示"),
+        boolean("interface.showTooltips", "ui/tooltips", true, "ツールヒントを表示"),
         // workspace (ワークスペース)
         text("workspace.current", "ui/workspace", Kind::Text, "", "今のワークスペース", Apply::NewWindow),
         text("workspace.stage", "ui/stage", Kind::Text, "", "作業の段階", Apply::NewWindow),
@@ -148,12 +166,28 @@ std::vector<Pref> make_table() {
         boolean("workspace.rememberWorkspaceChanges", "ui/workspace_remember", true, "ワークスペースの変更を記憶"),
         boolean("workspace.autoShowHiddenPanels", "ui/auto_show_panels", true, "隠れたパネルを自動的に表示"),
         boolean("workspace.largeTabs", "ui/large_tabs", false, "大きいタブ"),
+        // (PC5 H-e: a book opened in a tab of the window or in a window of its own; a window of one book let go over another
+        // window's tabs taken in there)
+        boolean("workspace.openDocumentsAsTabs", "ui/open_as_tabs", true, "ドキュメントをタブで開く"),
+        boolean("workspace.enableFloatingDocumentWindowDocking", "ui/float_docking", true, "フローティングドキュメントウィンドウのドッキングを有効にする"),
         // tools (ツール)
         boolean("tools.radialMenu", "ui/radial", true, "描く道具の右クリックで円形のメニュー"),
         choice("tools.altTool", "keys/alt_tool", "picker", held, "Alt を押している間"),
         choice("tools.ctrlTool", "keys/ctrl_tool", "select", held, "Ctrl を押している間"),
         boolean("tools.holdToSwitch", "keys/hold_swap", true, "道具のキーを押している間だけ持ち替える"),
         choice("tools.modifiers.*.*", "keys/*/*", "", per_tool, "道具ごとの修飾キー"),
+        // (PC5 H-e: Photoshop's 環境設定 → ツール — the tools' tooltips, the zoom tool's click, the hand's flick, the transform's
+        // values shown, the page scrolled past its edges)
+        boolean("tools.showTooltips", "ui/tool_tooltips", true, "ツールヒントを表示"),
+        boolean("tools.zoomClickedPointToCenter", "ui/zoom_to_center", false, "クリックした点を中央にズーム"),
+        boolean("tools.enableFlickPanning", "ui/flick_panning", true, "フリックパンを有効にする"),
+        boolean("tools.showTransformationValues", "ui/transform_values", true, "変形値を表示"),
+        boolean("tools.overscroll", "ui/overscroll", true, "オーバースクロール"),
+        // historyLog (ヒストリーログ — PC5 H-e: written by this computer's app as its books change; never in the book)
+        boolean("historyLog.enabled", "history_log/enabled", false, "ヒストリーログ"),
+        choice("historyLog.destination", "history_log/destination", "metadata", {"metadata", "textFile", "both"}, "保存先"),
+        text("historyLog.filePath", "history_log/file", Kind::Path, "", "テキストファイル"),
+        choice("historyLog.detail", "history_log/detail", "concise", {"sessionsOnly", "concise", "detailed"}, "編集ログの項目"),
         // fileHandling (ファイル管理)
         integer("fileHandling.recentFileCount", "files/recent_count", 20, 0, 100, "最近使用したファイルの数"),
         boolean("fileHandling.lowercaseExtension", "files/lowercase_extension", true, "拡張子を小文字にする"),
@@ -168,6 +202,12 @@ std::vector<Pref> make_table() {
         boolean("performance.useGpu", "ui/gpu_canvas", false, "原稿の表示にグラフィックボードを使う", Apply::NewWindow),
         // (PC5 H-a, render:GPU-CPU-parity: the most the page's tiles take on the card)
         integer("performance.gpuMemoryMb", "ui/gpu_memory_mb", 512, 64, 1024, "グラフィックボードの記憶の上限（MB）", Apply::NewWindow),
+        // (PC5 H-e: the app's own memory — the screen's finer tiles kept; the ops' budgets as they are — and ヒストリー's rows)
+        integer("performance.memoryUsageMb", "ui/memory_mb", 256, 64, 16384, "使用するメモリ（MB。表示の覚え）"),
+        integer("performance.historyStates", "ui/history_states", 1000, 1, 1000, "ヒストリー数"),
+        // scratchDisks (仮想記憶ディスク — PC5 H-e, the coordinator's decision: no pixel is put out to a disk; the folder of the
+        // app's own caches — the books' small pictures, the covers —, "" the config folder's cache)
+        text("scratchDisks.folder", "ui/scratch_folder", Kind::Path, "", "仮想記憶ディスク（覚えの置き場所）", Apply::Restart),
         // cursors (カーソル)
         choice("cursors.painting", "ui/cursor", "circle", {"circle", "circle_cross", "cross", "dot", "tip"}, "ペンのカーソル"),
         boolean("cursors.showOnlyCrosshairWhilePainting", "ui/cross_drawing", false, "描いている間は十字だけにする"),
@@ -202,6 +242,10 @@ std::vector<Pref> make_table() {
         // (PC5 J-b: the slices' two — their lines' colour and their numbers shown)
         colour("guidesGridAndSlices.sliceColor", "guides/slice_color", "#38b5ff", "スライスの線の色"),
         boolean("guidesGridAndSlices.showSliceNumbers", "guides/slice_numbers", true, "スライス番号を表示"),
+        // enhancedControls (拡張コントロール — PC5 H-e: a touch screen's two fingers, a trackpad's pinch and turn)
+        boolean("enhancedControls.touchGestures", "ui/touch_gestures", true, "タッチジェスチャーを有効にする"),
+        boolean("enhancedControls.zoomWithTrackpadPinch", "ui/pinch_zoom", true, "トラックパッドのピンチでズーム"),
+        boolean("enhancedControls.rotateViewWithTrackpad", "ui/trackpad_rotate", false, "トラックパッドで表示を回転"),
         // rawDefaults (Camera Raw)
         choice("rawDefaults.colorSpace", "raw/space", "adobe-rgb-compat", {"prophoto-compat", "adobe-rgb-compat", "srgb", "display-p3"}, "色空間"),
         choice("rawDefaults.bitDepth", "raw/depth", "16", {"8", "16"}, "ビット数"),
@@ -406,6 +450,44 @@ bool hex_colour(const std::string& text) {
     return std::all_of(text.begin() + 1, text.end(), [](unsigned char c) { return std::isxdigit(c) != 0; });
 }
 
+// Keys as Qt writes them (QKeySequence's PortableText — core has no QtGui to read them with, PC5 H-e for H-0's review
+// P3-6): up to four chords ", " between, each modifiers and one key — "Ctrl+Shift+K", "Ctrl++", "F7", "Ctrl+;", "PgUp" —,
+// the key a single character or a key's name (letters, digits, spaces: "Media Play"). Words that are no key ("あいう") are not.
+bool keys_text(const std::string& text) {
+    const auto chord_fits = [](std::string chord) {
+        if (chord.empty()) return false;
+        std::string key;
+        if (chord == "+" || (chord.size() >= 2 && chord.compare(chord.size() - 2, 2, "++") == 0)) {  // (the key "+")
+            key = "+";
+            chord.erase(chord.size() - (chord == "+" ? 1 : 2));
+        } else {
+            const std::size_t plus = chord.rfind('+');
+            key = plus == std::string::npos ? chord : chord.substr(plus + 1);
+            chord.erase(plus == std::string::npos ? 0 : plus);
+        }
+        if (key.empty()) return false;
+        if (!chord.empty()) {
+            for (const std::string& modifier : split(chord, '+')) {
+                if (modifier != "Ctrl" && modifier != "Shift" && modifier != "Alt" && modifier != "Meta" && modifier != "Num") return false;
+            }
+        }
+        const QString letters = QString::fromStdString(key);
+        if (letters.size() == 1 || (letters.size() == 2 && letters.at(0).isHighSurrogate())) return letters.at(0).isPrint() || letters.at(0).isSurrogate();
+        if (!std::isalpha(static_cast<unsigned char>(key.front()))) return false;
+        return std::all_of(key.begin(), key.end(), [](unsigned char c) { return c < 0x80 && (std::isalnum(c) != 0 || c == ' '); });
+    };
+    std::vector<std::string> chords;
+    std::size_t at = 0;
+    while (true) {
+        const std::size_t next = text.find(", ", at);
+        chords.push_back(text.substr(at, next == std::string::npos ? std::string::npos : next - at));
+        if (next == std::string::npos) break;
+        at = next + 2;
+    }
+    if (chords.size() > 4) return false;
+    return std::all_of(chords.begin(), chords.end(), chord_fits);
+}
+
 std::string number_text(double value) {
     if (std::isfinite(value) && value == std::floor(value) && std::fabs(value) < 1e15) return std::to_string(static_cast<long long>(value));
     return QString::number(value, 'g', 15).toStdString();
@@ -566,7 +648,7 @@ std::optional<std::string> check(const Pref& p, const Json& value) {
     case Kind::Keys: {
         if (!value.is_string()) return wrong();
         for (const std::string& one : split(value.get<std::string>(), '|')) {
-            if (one.empty()) return wrong();
+            if (!keys_text(one)) return wrong();
         }
         return std::nullopt;
     }

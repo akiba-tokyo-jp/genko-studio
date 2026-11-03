@@ -449,7 +449,8 @@ private slots:
         // (act_layer_from_background, act_layer_group_from_layers), レイヤーのグループ解除 (act_layer_ungroup), 非表示レイヤーを削除
         // (act_layer_delete_hidden), クリッピングマスクを作成・解除 (act_clip_create, act_clip_release), ファイル → スクリプト →
         // すべての空のレイヤーを削除・すべてのレイヤー効果を統合 (act_delete_empty_layers, act_bake_layer_effects) — test_gui_layers.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{749});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8 and H-d's 12)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{752});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8 and H-d's 12)
+                                                                  // (PC5 H-e's 3: 環境設定 ▸ ヒストリーログ…・仮想記憶ディスク…・拡張コントロール…)
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -1008,9 +1009,12 @@ private slots:
         QVERIFY(panes != nullptr);
         QCOMPARE(items(panes), (QStringList{QStringLiteral("一般…"), QStringLiteral("インターフェイス…"),
                                            QStringLiteral("ワークスペース…"),  // (PC5 H-d)
-                                           QStringLiteral("ツール…"), QStringLiteral("ファイル管理…"),
-                                           QStringLiteral("書き出し…"), QStringLiteral("パフォーマンス…"), QStringLiteral("カーソル…"), QStringLiteral("透明部分・色域…"),
+                                           QStringLiteral("ツール…"), QStringLiteral("ヒストリーログ…"),  // (PC5 H-e)
+                                           QStringLiteral("ファイル管理…"),
+                                           QStringLiteral("書き出し…"), QStringLiteral("パフォーマンス…"), QStringLiteral("仮想記憶ディスク…"),  // (PC5 H-e)
+                                           QStringLiteral("カーソル…"), QStringLiteral("透明部分・色域…"),
                                            QStringLiteral("単位・定規…"), QStringLiteral("ガイド・グリッド・スライス…"),  // (PC5 H-b)
+                                           QStringLiteral("拡張コントロール…"),  // (PC5 H-e)
                                            QStringLiteral("Camera Raw…"), QStringLiteral("ペンタブレット…"), QStringLiteral("長い時間の作業…")}));
         QVERIFY(!items(menu(QStringLiteral("ファイル"))).contains(QStringLiteral("環境設定…")));
         QVERIFY(!items(menu(QStringLiteral("ヘルプ"))).contains(QStringLiteral("検索")));
@@ -1021,7 +1025,13 @@ private slots:
             if (auto* prefs = qobject_cast<genko::app::preferences::PreferencesDialog*>(dialog)) page = prefs->tabs->tabText(prefs->tabs->currentIndex());
             return int(QDialog::Rejected);
         };
-        for (const auto& [pane, title] : std::vector<std::pair<const char*, const char*>>{{"act_prefs", "表示・作業"},
+        // (PC5 H-e: each pane its own page — 一般 no more the 表示・作業 of them all)
+        for (const auto& [pane, title] : std::vector<std::pair<const char*, const char*>>{{"act_prefs", "一般"},
+                                                                                          {"act_prefs_interface", "インターフェイス"},
+                                                                                          {"act_prefs_historyLog", "ヒストリーログ"},
+                                                                                          {"act_prefs_scratchDisks", "仮想記憶ディスク"},
+                                                                                          {"act_prefs_enhancedControls", "拡張コントロール"},
+                                                                                          {"act_prefs_comfort", "長い時間の作業"},
                                                                                           {"act_prefs_fileHandling", "ファイル管理"},
                                                                                           {"act_prefs_export", "書き出し"},
                                                                                           {"act_prefs_transparencyAndGamut", "透明部分・色域"},

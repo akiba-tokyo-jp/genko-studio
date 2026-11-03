@@ -13,6 +13,7 @@
 #include "app/filter_menu.hpp"
 
 #include <QApplication>
+#include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFutureWatcher>
 #include <QMenu>
@@ -42,6 +43,7 @@
 #include "app/vanishing_window.hpp"
 #include "app/layer_dialogs.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "core/adjust_kinds.hpp"
 #include "core/command_bus.hpp"
 #include "core/filter_kinds.hpp"
@@ -598,6 +600,8 @@ bool MainWindow::send_filter(const Json& ops, const QString& name, bool heavy) {
     QObject::connect(progress, &QProgressDialog::canceled, progress, [p = progress.data()] {
         if (p->stopping) p->stopping();
     });
+    QElapsedTimer working;  // (PC5 H-e: 完了したらビープ音 — a long one)
+    working.start();
     filter_working_ = stop;
     progress->show();
     QTimer tick;
@@ -666,6 +670,7 @@ bool MainWindow::send_filter(const Json& ops, const QString& name, bool heavy) {
         progress->hide();
         progress->deleteLater();
     }
+    if (applied) preferences::done_after(working.elapsed());  // (PC5 H-e: 完了したらビープ音)
     if (!said.isEmpty()) flash(said, trouble ? 6000 : 4000, trouble);
     if (close_after_filter_) {  // (asked to close while it was worked: closed now that it is back)
         close_after_filter_ = false;

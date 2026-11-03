@@ -13,6 +13,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -142,6 +143,31 @@ void apply_all(MainWindow* window);
 std::pair<QWidget*, QWidget*> unit_pages(QWidget* parent);
 void save_unit_pages(QWidget* units, QWidget* guides);
 
+class PreferencesDialog;
+
+// (PC5 H-e: app/preferences_panes.cpp, 節 H 5.4) The panes' pages: a page of headed rows (a scroll area — its form inside),
+// and a field made from a row of core/prefs_table (a check box with its words for a Boolean, a choice with its words, a
+// number with its range, a file or a folder with 選ぶ…: its object name "prefs_<path>", its property "pref" the path;
+// (the words before it, the field)). 決める writes the fields with prefs::set (all or none: a refusal said).
+using FormRows = std::vector<std::pair<QString, QWidget*>>;
+using FormSections = std::vector<std::pair<QString, FormRows>>;
+QWidget* form_page(const FormSections& sections);
+std::pair<QString, QWidget*> pane_row(const char* path);
+bool save_pane_fields(QWidget* root);
+// The pages in Photoshop's order of the panes (a page no pane names after them), each with この面を初期設定に戻す.
+void arrange_pages(PreferencesDialog* dialog);
+// What この面を初期設定に戻す puts back: a pane's paths (its section — the person's lists, dictionaries and the chosen
+// workspace left alone —; ファイル管理 with 原稿と保存's).
+std::vector<std::string> pane_paths(const QString& pane);
+// 仮想記憶ディスク's words: where the app keeps its caches and the room left there.
+QLabel* scratch_note();
+// What the preferences H-e added do in an open window (apply_all calls it): the canvas's wheel, zoom, flick, transform
+// values, overscroll, gestures and border; the tooltips; the channels in colour; ヒストリー数; the screen's memory; the
+// history log and session.json followed.
+void apply_panes(MainWindow* window);
+// 完了したらビープ音: a long work done (5 s or more: a filter, a file written) says so with the computer's beep.
+void done_after(qint64 elapsed_ms);
+
 // 透明部分・色域 (PhotoCraft v0.2.0's prefs.rs TransparencyAndGamut, MIT; SPEC COLOR-03 PC1b): the checker shown under
 // what is transparent (the layers' small pictures) — its square's side in pixels (0: none, white) and its two colours —
 // and the gamut warning's mark (色域外警告): its colour and opacity (%).
@@ -255,6 +281,13 @@ public:
     void forget_gamma();
     // 決める: kept and applied (every window), the dialog accepted.
     void save();
+    // (PC5 H-e) この面を初期設定に戻す: what is chosen kept first (as 決める), the pane's preferences put back (prefs::reset), every
+    // window told, and the dialog opened again at the pane (`reopen`: MainWindow::open_preferences). すべての環境設定をリセット…:
+    // the same for everything (the app's memories kept). Both asked first.
+    QPushButton* reset_all = nullptr;
+    QString reopen;
+    void reset_pane(const QString& pane);
+    void reset_everything();
 
 private:
     void show_gamma();

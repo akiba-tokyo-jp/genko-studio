@@ -181,7 +181,7 @@ void ChannelPanel::refresh() {
 
 QIcon ChannelPanel::thumbnail(const core::Page& page, const core::Channel& channel) {
     const auto it = thumbs_.find(channel.id);
-    if (it != thumbs_.end() && it->second.raster == channel.raster) return it->second.icon;
+    if (it != thumbs_.end() && it->second.raster == channel.raster && it->second.coloured == in_colour) return it->second.icon;
     const double w = page.spec.width_mm.value(), h = page.spec.height_mm.value();
     const int tw = w >= h ? 36 : std::max(1, static_cast<int>(std::lround(36 * w / h)));
     const int th = w >= h ? std::max(1, static_cast<int>(std::lround(36 * h / w))) : 36;
@@ -190,10 +190,24 @@ QIcon ChannelPanel::thumbnail(const core::Page& page, const core::Channel& chann
         const render::Image mask = render::channels::thumbnail(channel, render::Size{tw, th});  // (read row by row, not kept)
         const std::string bytes = mask.tobytes();
         QImage image(reinterpret_cast<const uchar*>(bytes.data()), tw, th, tw, QImage::Format_Grayscale8);
-        icon = QIcon(QPixmap::fromImage(image.copy()));
+        if (in_colour) {  // (PC5 H-e: the dark of the grey in the channel's colour — a spot channel's ink, a mask's overlay)
+            QImage tinted(tw, th, QImage::Format_RGB32);
+            const QColor ink(channel.color[0], channel.color[1], channel.color[2]);
+            for (int y = 0; y < th; ++y) {
+                const uchar* row = image.constScanLine(y);
+                for (int x = 0; x < tw; ++x) {
+                    const double paper = row[x] / 255.0;
+                    const auto mix = [paper](int c) { return static_cast<int>(std::lround(255.0 * paper + c * (1.0 - paper))); };
+                    tinted.setPixel(x, y, qRgb(mix(ink.red()), mix(ink.green()), mix(ink.blue())));
+                }
+            }
+            icon = QIcon(QPixmap::fromImage(tinted));
+        } else {
+            icon = QIcon(QPixmap::fromImage(image.copy()));
+        }
     } catch (const std::exception&) {
     }
-    thumbs_[channel.id] = Thumb{channel.raster, icon};
+    thumbs_[channel.id] = Thumb{channel.raster, icon, in_colour};
     return icon;
 }
 

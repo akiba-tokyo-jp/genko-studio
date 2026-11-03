@@ -7,7 +7,10 @@
 
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/commands_list.hpp"
 #include "core/ops_schema.hpp"
+#include "core/prefs_table.hpp"
+#include "core/session_file.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
@@ -495,6 +498,38 @@ ToolResult StudioService::inspect(const Json& a) {
         Json data = Json::object({{"ops", std::move(found)}});
         if (!unknown.empty()) data["unknown"] = std::move(unknown);
         return ToolResult(true, std::move(data));
+    }
+    // (PC5 H-e, prefs.get・command.list・session.inspect: this computer's preferences — op: a section or a section.key —, the
+    // screen's commands with its keys — op: words to look for — and the books the running app has open. Reading only: the AI
+    // never changes a preference (the coordinator's decision, 節 H 8-8 (a)); a book's folder only as a project of this
+    // server's root, never a path. The tool's words and the unknown target's list are the contract's, left as they are)
+    if (core::is_one_of(target, {"prefs", "commands", "session"})) {
+        const auto store = core::prefs::store();
+        const std::string asked = py_truthy(a["op"]) ? core::py_strip(py_str(a["op"])) : std::string();
+        if (core::py_equals(target, Json("prefs"))) {
+            const core::prefs::Outcome out = core::prefs::get(*store, asked);
+            if (!out.ok) return fail(out.message, out.code, "/op");
+            return ToolResult(true, Json::object({{"prefs", out.values}}));
+        }
+        if (core::py_equals(target, Json("commands"))) {
+            Json listed = core::commands::list(*store, {}, asked);
+            return ToolResult(true, Json::object({{"key_set", listed["key_set"]}, {"commands", std::move(listed["commands"])}}));
+        }
+        Json session = core::session_file::read();
+        std::error_code ec;
+        const fs::path root = fs::weakly_canonical(root_, ec);
+        Json none = Json::array();
+        for (Json& window : session.contains("windows") && session["windows"].is_array() ? session["windows"] : none) {
+            if (!window.is_object() || !window.contains("tabs") || !window["tabs"].is_array()) continue;
+            for (Json& tab : window["tabs"]) {
+                if (!tab.is_object() || !tab.contains("path")) continue;
+                const fs::path book = fs::weakly_canonical(core::path_from_utf8(py_str(tab["path"])), ec);
+                const fs::path inside = ec ? fs::path() : book.lexically_relative(root);
+                tab.erase("path");
+                if (!inside.empty() && *inside.begin() != ".." && !inside.is_absolute()) tab["project"] = core::path_to_utf8(inside);
+            }
+        }
+        return ToolResult(true, Json::object({{"session", std::move(session)}}));
     }
     const fs::path path = project_path(a["project"]);
     if (core::py_equals(target, Json("schemas"))) {

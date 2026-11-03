@@ -364,3 +364,7 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/psd/src/slices.rs`（版 6 の読み書きと後ろの記述子の外側の広げ、版 7・8 の記述子）と `crates/io/src/slices_map.rs`（自動スライスを捨てて読む、lyid の層を名指す、層の無いレイヤーベースのスライスをユーザー定義にする、自動スライスも書く）→ `native/src/render/psd_slices.{hpp,cpp}`（ファイルの絵を置いた所の mm に直すこと・指紋で読んだバイトのまま書くかを決めることは Genko のもの）。
   - `crates/engine/src/web_cmds.rs`（626-707 行: `slice_file`・`html_escape`・`html_table`、709-797 行: スライスごとの書き出しと spacer.gif）→ `native/src/formats/web_export.cpp`（`save_slices_for_web`・`web_slices_html`。1 回描いて切り出すこと・書き先の守り・まとめて置くことは Genko のもの）。
   - `crates/ui-egui/src/slice_ui.rs`（道具の押す・動かす・離す、枠と番号の描き方、オプションの並び）→ `native/src/app/canvas_slices.cpp`・`native/src/app/main_window_slices.cpp`（Qt で作り直した。つまみで大きさを変えること・スタイル・スナップは Genko のもの）。
+- 環境設定と API（PC5 H-e）:
+  - `crates/engine/src/prefs.rs`（150-670 行: `General`・`Interface`・`Workspace`・`Tools`・`HistoryLog`・`Performance`・`ScratchDisks`・`EnhancedControls` の項目の名前と選択肢、1377-1412 行: `prefs.get`・`prefs.set`・`prefs.reset` の形（全部か無し））→ `native/src/core/prefs_table.cpp` の行・`native/src/api/prefs_cli.cpp`・`native/src/app/preferences_panes.cpp`（Qt で作り直し、Genko の既定は今の振る舞い）。
+  - `crates/engine/src/commands.rs`（759-810 行: `session.inspect`・`command.list` の中身）→ `native/src/core/session_file.cpp`・`native/src/core/commands_list.cpp`・`native/src/app/session_file.cpp`・`native/src/app/commands_file.cpp`（ファイルを介する形に作り直した）。
+  - `crates/ui-egui/src/prefs_ui.rs`（238-266 行: `history_log` のテキストファイルへの書き方と詳しさ）→ `native/src/app/history_log.cpp`。

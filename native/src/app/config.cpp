@@ -10,6 +10,7 @@
 #include "app/settings_watch.hpp"
 #include "core/config_dir.hpp"
 #include "core/paths.hpp"
+#include "core/prefs_table.hpp"
 
 namespace genko::app {
 
@@ -80,6 +81,12 @@ std::string default_actor() {
 
 fs::path recovery_root() { return ensure(config_dir() / "recovery"); }
 
-fs::path cache_root() { return ensure(config_dir() / "cache"); }
+fs::path cache_root() {
+    // (PC5 H-e, 環境設定 → 仮想記憶ディスク — the coordinator's decision: no pixel is put out there; the app's caches, the books'
+    // small pictures and the covers, are kept in the folder chosen — none: the config folder's cache)
+    const std::string chosen = core::prefs::value("scratchDisks.folder").get<std::string>();
+    if (!chosen.empty()) return ensure(core::path_from_utf8(chosen) / "genko-cache");
+    return ensure(config_dir() / "cache");
+}
 
 }  // namespace genko::app

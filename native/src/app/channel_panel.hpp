@@ -31,6 +31,8 @@ public:
     explicit ChannelPanel(MainWindow* window);
     // The page's rows again (after a change, another page, another view).
     void refresh();
+    // (PC5 H-e, 環境設定 → インターフェイス → チャンネルをカラーで表示: the channels' small pictures tinted with their colours)
+    bool in_colour = false;
     // Tests and the window: the list, the buttons, the menu; each row's key ("composite", a plate's name, a channel's
     // id, "stock:<name>").
     QListWidget* list() const { return list_; }
@@ -64,6 +66,7 @@ private:
     struct Thumb {
         core::Bytes raster;
         QIcon icon;
+        bool coloured = false;  // (PC5 H-e: made in_colour)
     };
     std::map<std::string, Thumb> thumbs_;
 };
