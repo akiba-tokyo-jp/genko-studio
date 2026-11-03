@@ -60,7 +60,9 @@ const std::vector<std::string>& app_keys() {
         "key_sets/私の組/keys", "menus/hidden", "menus/colors/検索", "menus/colors/HSB/HSL", "toolbar/order", "toolbar/hidden",
         "workspaces/ペン入れ/keys", "workspaces/ペン入れ/menus", "workspaces/ペン入れ/toolbar", "workspace_changes/写真",
         // (PC5 J-b: ガイド・グリッド・スライス's slices, 表示・非表示 ▸ スライス, スナップ先 ▸ スライス)
-        "guides/slice_color", "guides/slice_numbers", "view/show_slices", "snap/slices"};
+        "guides/slice_color", "guides/slice_numbers", "view/show_slices", "snap/slices",
+        // (PC5 I-f: プリント…'s last settings and printer — 1 部プリント's)
+        "print/last", "print/printer"};
     return all;
 }
 

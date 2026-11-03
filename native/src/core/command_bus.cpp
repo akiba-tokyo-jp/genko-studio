@@ -285,7 +285,9 @@ bool not_per_page(std::string_view name) {
                          "allow_chat_approval", "name_ok", "advance", "set_bible", "set_script", "define_brush",
                          "set_brush", "split_channels", "merge_channels",
                          // (variables@1, PC5 I-d: the book's variables and data sets)
-                         "set_variables", "set_data_sets", "apply_data_set"});
+                         "set_variables", "set_data_sets", "apply_data_set",
+                         // (image-assets@1, PC5 I-f: 生成 → 画像アセット, the book's)
+                         "set_image_assets"});
 }
 
 bool printed(const Layer& layer) { return layer.role != LayerRole::Name && layer.role != LayerRole::Draft; }
@@ -310,7 +312,9 @@ bool page_local_op(std::string_view name) {
 }
 
 bool book_op(std::string_view name) {
-    return one_of(name, {"set_brush", "define_brush", "set_autosave", "add_ticket", "set_ticket", "reorder_lines"});
+    return one_of(name, {"set_brush", "define_brush", "set_autosave", "add_ticket", "set_ticket", "reorder_lines",
+                         // (image-assets@1, PC5 I-f: no page touched)
+                         "set_image_assets"});
 }
 
 bool line_op(std::string_view name) {

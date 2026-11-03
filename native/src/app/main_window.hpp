@@ -42,6 +42,7 @@ class QFormLayout;
 class QTabBar;
 class QToolBar;
 class QMenu;
+class QPrinter;
 class QDockWidget;
 class QPushButton;
 class QVBoxLayout;
@@ -2038,6 +2039,21 @@ public:
 private:
     void build_layer_basic_actions();
     void build_layer_basic_menus(QMenu* layers);
+
+public:
+    // PC5 I-f (app/main_window_print.cpp; SPEC.md AUTO-01「プリント」「コンタクトシート」「画像アセット」): 1 部プリント — the
+    // book's every page with the last プリント… settings, one copy, to the last printer (else the computer's default; none: said)
+    // or to `printer` given (tests), nothing asked —; ファイル → 生成 → 画像アセット on or off for the book (set_image_assets);
+    // the assets written after a save the person makes (never the automatic save: save() and the .genko 別名で保存 call it);
+    // コンタクトシート II… (its window, the sheets opened as new books).
+    bool print_one_copy(QPrinter* printer = nullptr);
+    void toggle_image_assets();
+    void image_assets_after_save();
+    void contact_sheet_dialog();
+
+private:
+    void build_print_actions();
+    void build_print_menus(QMenu* file);
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

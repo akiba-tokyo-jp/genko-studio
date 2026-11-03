@@ -1434,6 +1434,7 @@ void MainWindow::save() {
         session_->mark_saved();  // (PC4 F-b: 復帰 comes back here)
         flash(QStringLiteral("保存しました: %1").arg(QDir::toNativeSeparators(qpath(*session_->path()))), 3000);
         script_event(service::script_events::Event::SaveDocument);  // (PC5 I-e: the person's save — never the automatic one)
+        image_assets_after_save();  // (PC5 I-f: 生成 → 画像アセット, after the person's save only)
     } else {
         flash(QStringLiteral("保存できませんでした: %1").arg(failure_reason(session_->status())), 6000, true);
     }
@@ -1507,6 +1508,7 @@ bool MainWindow::save_as_and_wait(const QString&, std::shared_ptr<Session> origi
     refresh_status();
     flash(QStringLiteral("保存しました: %1").arg(QDir::toNativeSeparators(target)), 3000);
     script_event(service::script_events::Event::SaveDocument);  // (PC5 I-e: スクリプトイベント)
+    image_assets_after_save();  // (PC5 I-f: 生成 → 画像アセット)
     return true;
 }
 

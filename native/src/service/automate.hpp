@@ -273,4 +273,49 @@ std::vector<fs::path> write_launchers(const fs::path& droplet, const fs::path& g
 // The runner's Output of a droplet run on `inputs` (`out`, else its own folder, else droplet-output beside the first input).
 Output droplet_output(const Droplet& droplet, const std::vector<Input>& inputs, const std::optional<fs::path>& out);
 
+// --- PC5 I-f: コンタクトシート II -----------------------------------------------------------------------------------------
+
+// コンタクトシート II (file.automate.contactSheetII; PhotoCraft's automate_cmds.rs 406-505 contact_sheet, MIT): each picture
+// (a book's: each of its pages) made small enough for its cell — turned a quarter when that fits it better, when asked —
+// and put on new sheets (books in memory, no path: one page each, of the size, resolution, mode and depth asked, a white
+// 背景): a paint layer for each picture (named by its file's stem; its pixels only the small picture, never the file), its
+// caption a horizontal type layer under it, the sheets filled across first or down first; every layer merged into one when
+// asked. The pictures are opened one at a time (as the runner opens them); one that cannot be opened is said in `errors` and
+// the others are put. A sheet past the codecs' limits (120 million pixels, 100000 a side) is refused before it is made.
+struct ContactSheet {
+    double width = 8.0;           // the sheet's size in `units` (Photoshop's 8 × 10 in, 300 ppi)
+    double height = 10.0;
+    std::string units = "in";     // in | cm | mm | px
+    double resolution = 300.0;    // ppi, 72..1200
+    std::string mode = "rgb";     // rgb | gray
+    int depth = 8;                // 8 | 16
+    int columns = 5;              // 1..100
+    int rows = 6;                 // 1..100
+    bool across = true;           // 横方向優先 (else 縦方向優先)
+    bool auto_spacing = true;     // else `horizontal`, `vertical` in `units`
+    double horizontal = 0.0;
+    double vertical = 0.0;
+    bool rotate = false;          // 最適な配置になるように回転
+    bool caption = true;          // ファイル名をキャプションとして使用
+    double font_pt = 12.0;        // 4..72
+    bool flatten = false;         // すべてのレイヤーを統合
+    std::string title = "コンタクトシート";  // the sheets' names: <title>-001, -002 …
+};
+struct ContactSheetResult {
+    std::vector<core::Document> books;          // the sheets, in order
+    core::Json errors = core::Json::array();    // {"input", "error", "code"}
+    std::size_t images = 0;                     // the pictures put
+    std::size_t width_px = 0, height_px = 0;    // each sheet's
+    bool cancelled = false;
+    // {"ok", "sheets", "images", "width", "height", "errors", "cancelled"?}
+    core::Json json() const;
+};
+// core::Error("value") for a setting out of its range (before anything is opened).
+void check_contact_sheet(const ContactSheet& sheet);
+// The sheets of these inputs (Options: `open` how a picture is opened, `actor` who sets the captions, `cancelled` and
+// `progress` as the runner's; the steps are not taken).
+ContactSheetResult contact_sheet(const std::vector<Input>& inputs, const ContactSheet& sheet, const Options& options);
+// A folder written into that lies in a book's folder (or is one): core::Error("refused_target"), as the runner refuses it.
+void check_output_folder(const fs::path& folder);
+
 }  // namespace genko::service::automate

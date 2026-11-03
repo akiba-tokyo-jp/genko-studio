@@ -230,6 +230,9 @@ genko_library(genko_app
     # PC5 J-b (スライス: the slices on the canvas, the スライスツール・スライス選択ツール, the window's commands)
     canvas_slices.cpp
     main_window_slices.cpp
+    # PC5 I-f (1 部プリント, 生成 → 画像アセット, コンタクトシート II…; `genko print`)
+    main_window_print.cpp
+    print_cli.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

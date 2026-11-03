@@ -12,6 +12,8 @@
 #include <chrono>
 #include <cstdint>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <set>
 #include <system_error>
 
@@ -23,9 +25,15 @@
 #include "core/smart.hpp"
 #include "formats/copy.hpp"
 #include "formats/export.hpp"
+#include "formats/open_file.hpp"
+#include "formats/page_picture.hpp"
 #include "render/brushes.hpp"
 #include "render/codecs/format.hpp"
+#include "render/codecs/image.hpp"
+#include "render/codecs/resize.hpp"
+#include "render/op_limits.hpp"
 #include "render/ops_registry.hpp"
+#include "render/page.hpp"
 #include "render/timelapse.hpp"
 #include "service/actions.hpp"
 #include "service/studio_service.hpp"
@@ -1288,6 +1296,212 @@ Output droplet_output(const Droplet& droplet, const std::vector<Input>& inputs, 
         output.folder = first.parent_path() / "droplet-output";
     }
     return output;
+}
+
+// --- PC5 I-f: コンタクトシート II ------------------------------------------------------------------------------------------
+
+Json ContactSheetResult::json() const {
+    Json out = Json::object();
+    out["ok"] = errors.empty();
+    out["sheets"] = books.size();
+    out["images"] = images;
+    out["width"] = width_px;
+    out["height"] = height_px;
+    out["errors"] = errors;
+    if (cancelled) out["cancelled"] = true;
+    return out;
+}
+
+namespace {
+
+double sheet_px(double v, const ContactSheet& sheet) {
+    if (sheet.units == "cm") return v * sheet.resolution / 2.54;
+    if (sheet.units == "mm") return v * sheet.resolution / 25.4;
+    if (sheet.units == "px") return v;
+    return v * sheet.resolution;  // (in)
+}
+
+// One sheet being filled: its book, the captions to set, how many cells are taken.
+struct SheetInMaking {
+    core::Document doc;
+    Json captions = Json::array();
+    int taken = 0;
+};
+
+}  // namespace
+
+void check_output_folder(const fs::path& folder) { refuse_inside_book(folder); }
+
+void check_contact_sheet(const ContactSheet& s) {
+    const auto finite = [](double v) { return std::isfinite(v); };
+    if (s.units != "in" && s.units != "cm" && s.units != "mm" && s.units != "px") throw core::Error("value", "the units are in, cm, mm or px");
+    if (!finite(s.width) || !finite(s.height) || !(s.width > 0.0) || !(s.height > 0.0)) throw core::Error("value", "the sheet's width and height are above 0");
+    if (!finite(s.resolution) || s.resolution < 72.0 || s.resolution > 1200.0) throw core::Error("value", "the resolution is 72 to 1200 ppi");
+    if (s.mode != "rgb" && s.mode != "gray") throw core::Error("value", "the mode is rgb or gray");
+    if (s.depth != 8 && s.depth != 16) throw core::Error("value", "the depth is 8 or 16");
+    if (s.columns < 1 || s.columns > 100 || s.rows < 1 || s.rows > 100) throw core::Error("value", "the columns and the rows are 1 to 100");
+    if (!finite(s.font_pt) || s.font_pt < 4.0 || s.font_pt > 72.0) throw core::Error("value", "the caption's size is 4 to 72 pt");
+    if (!finite(s.horizontal) || !finite(s.vertical) || s.horizontal < 0.0 || s.vertical < 0.0) throw core::Error("value", "the spacing is 0 or more");
+    if (s.title.empty() || s.title.size() > 200) throw core::Error("value", "the sheets' name is 1 to 200 bytes");
+    const double pw = std::round(sheet_px(s.width, s)), ph = std::round(sheet_px(s.height, s));
+    if (pw < 16.0 || ph < 16.0) throw core::Error("value", "the sheet is at least 16 pixels a side");
+    if (pw > double(render::limits::kSide) || ph > double(render::limits::kSide) || pw * ph > double(render::limits::kPixels)) {
+        throw core::Error("image_too_large", "the sheet is too large (" + std::to_string(static_cast<long long>(pw)) + "×" +
+                                                 std::to_string(static_cast<long long>(ph)) + " pixels; at most 120000000 pixels, 100000 a side)");
+    }
+}
+
+ContactSheetResult contact_sheet(const std::vector<Input>& inputs, const ContactSheet& s, const Options& options) {
+    check_contact_sheet(s);
+    using render::codecs::CodecImage;
+    using render::codecs::Layout;
+    using render::codecs::Sample;
+    ContactSheetResult result;
+    const auto pw = static_cast<std::uint32_t>(std::round(sheet_px(s.width, s)));
+    const auto ph = static_cast<std::uint32_t>(std::round(sheet_px(s.height, s)));
+    result.width_px = pw;
+    result.height_px = ph;
+    const double gap = std::max(2.0, std::min(pw, ph) * 0.014);  // (PhotoCraft's automatic spacing)
+    const double hs = s.auto_spacing ? gap : sheet_px(s.horizontal, s), vs = s.auto_spacing ? gap : sheet_px(s.vertical, s);
+    const double caption_px = s.caption ? s.font_pt * s.resolution / 72.0 * 1.5 : 0.0;
+    const double cell_w = std::max(1.0, (pw - (s.columns + 1) * hs) / s.columns);
+    const double cell_h = std::max(1.0, (ph - (s.rows + 1) * vs) / s.rows);
+    const double box_h = std::max(1.0, cell_h - caption_px);
+    const int per_sheet = s.columns * s.rows;
+    const bool grey = s.mode == "gray";
+    const Layout layout = grey ? Layout::GrayA : Layout::Rgba;
+    const Sample sample = s.depth == 16 ? Sample::U16 : Sample::U8;
+    const unsigned channels = grey ? 2u : 4u, bytes = render::codecs::sample_bytes(sample);
+    // (the sheets in sRGB — or sGray —, as the small pictures are: the screen's colours of each picture)
+    formats::OpenOptions open = options.open;
+    open.working_rgb.clear();
+    open.working_gray.clear();
+    const double mm = 25.4 / s.resolution;
+    const core::CommandBus bus(render::ops_registry());
+
+    std::optional<SheetInMaking> making;
+    const auto finish = [&] {
+        if (!making) return;
+        Json ops = std::move(making->captions);
+        if (s.flatten) ops.push_back(Json{{"op", "merge_visible"}, {"page", 1}, {"copy", false}, {"flatten", true}});
+        core::Document doc = ops.empty() ? std::move(making->doc) : bus.apply(making->doc, ops, options.actor).doc;
+        result.books.push_back(std::move(doc));
+        making.reset();
+    };
+    // a picture put in the next cell (a new sheet when the last is full)
+    const auto put = [&](const render::Image& shown, const std::string& label) {
+        if (!making) {
+            formats::NewImage blank;
+            char number[16];
+            std::snprintf(number, sizeof number, "-%03zu", result.books.size() + 1);
+            blank.title = s.title + number;
+            blank.width = pw;
+            blank.height = ph;
+            blank.dpi = s.resolution;
+            blank.mode = s.mode;
+            blank.depth = s.depth;
+            blank.background = "white";
+            blank.profile = grey ? "sgray" : "srgb";
+            making = SheetInMaking{formats::new_image(blank, open).doc, Json::array(), 0};
+        }
+        const int k = making->taken;
+        const int c = s.across ? k % s.columns : k / s.rows;
+        const int r = s.across ? k / s.columns : k % s.rows;
+        const double x0 = hs + c * (cell_w + hs), y0 = vs + r * (cell_h + vs);
+        render::Image picture = shown;
+        const auto fit = [&](double w, double h) { return std::min(cell_w / w, box_h / h); };
+        if (s.rotate && fit(picture.height(), picture.width()) > fit(picture.width(), picture.height()) * 1.001) {
+            picture = picture.transpose(render::Transpose::Rotate270);  // (a quarter clockwise)
+        }
+        const double f = fit(picture.width(), picture.height());
+        const auto tw = static_cast<std::uint32_t>(std::max(1.0, std::round(picture.width() * f)));
+        const auto th = static_cast<std::uint32_t>(std::max(1.0, std::round(picture.height() * f)));
+        const render::Image rgb = picture.convert("RGB");
+        CodecImage small = CodecImage::from_bytes(static_cast<std::uint32_t>(rgb.width()), static_cast<std::uint32_t>(rgb.height()), Layout::Rgb, Sample::U8,
+                                                  rgb.tobytes());
+        small = render::codecs::resized(small, tw, th, render::codecs::ResizeFilter::Bicubic).convert(grey ? Layout::Gray : Layout::Rgb, sample);
+        const long ox = std::lround(x0 + (cell_w - tw) / 2.0), oy = std::lround(y0 + (box_h - th) / 2.0);
+        // (the sheet's size, clear but for the small picture: the layer of a paint layer's own grid)
+        std::string data(std::size_t(pw) * ph * channels * bytes, '\0');
+        const unsigned colours = channels - 1;
+        std::vector<float> row;
+        for (std::uint32_t y = 0; y < th; ++y) {
+            const long sy = oy + static_cast<long>(y);
+            if (sy < 0 || sy >= static_cast<long>(ph)) continue;
+            const long x_from = std::max(0L, -ox), x_to = std::min<long>(static_cast<long>(tw), static_cast<long>(pw) - ox);
+            if (x_to <= x_from) continue;
+            row.assign(std::size_t(x_to - x_from) * channels, 1.0f);
+            for (long x = x_from; x < x_to; ++x) {
+                for (unsigned ch = 0; ch < colours; ++ch) {
+                    row[std::size_t(x - x_from) * channels + ch] = small.value((std::size_t(y) * tw + std::size_t(x)) * colours + ch);
+                }
+            }
+            const std::string stored = render::codecs::quantize(row, sample);
+            std::memcpy(data.data() + (std::size_t(sy) * pw + std::size_t(ox + x_from)) * channels * bytes, stored.data(), stored.size());
+        }
+        CodecImage whole = CodecImage::from_bytes(pw, ph, layout, sample, std::move(data));
+        whole.meta.dpi = std::make_pair(s.resolution, s.resolution);
+        formats::Opened layer_book = formats::picture_book(std::move(whole), label, open);
+        core::Layer layer = layer_book.doc.page(0).layers.front();
+        layer.title = label;
+        making->doc.edit_page(0).layers.push_back(std::move(layer));
+        if (s.caption) {
+            making->captions.push_back(Json{{"op", "add_type_layer"},
+                                            {"page", 1},
+                                            {"text", label},
+                                            {"point", Json::array({core::py_round((x0 + cell_w / 2.0) * mm, 4),
+                                                                   core::py_round((y0 + box_h + caption_px * 0.72) * mm, 4)})},
+                                            {"size_pt", s.font_pt},
+                                            {"wrap", "horizontal"},
+                                            {"para", Json{{"align", "center"}}}});
+        }
+        ++result.images;
+        if (++making->taken >= per_sheet) finish();
+    };
+    // (each picture drawn about twice the size of its cell, at most at its own resolution: as it prints)
+    const auto drawn = [&](const core::Page& page, const core::Document& doc) {
+        const double own = std::max(1.0, std::round(page.spec.dpi.value()));
+        const auto [w0, h0] = formats::page_picture_size(page, static_cast<int>(own), "paper");
+        const double longest = std::max<double>(1.0, std::max(w0, h0));
+        const double k = std::min(1.0, 2.0 * std::max(cell_w, box_h) / longest);
+        render::RenderOptions look;
+        look.mode = "print";
+        return render::render_page(page, std::max(1, static_cast<int>(std::ceil(own * k))), look, &doc).image;
+    };
+    for (std::size_t i = 0; i < inputs.size(); ++i) {
+        const Input& input = inputs[i];
+        if (options.cancelled && options.cancelled()) {
+            result.cancelled = true;
+            break;
+        }
+        if (options.progress) options.progress(i, inputs.size(), input.path);
+        const std::string where = core::path_to_utf8(input.path);
+        const std::string stem = core::path_to_utf8(input.path.stem());
+        try {
+            if (input.book) {
+                const storage::LoadResult loaded = storage::load_document(input.path);
+                if (options.book_brushes) render::brushes::register_book(loaded.document);
+                for (std::size_t at = 0; at < loaded.document.pages.size(); ++at) {
+                    const core::Page& page = loaded.document.page(at);
+                    put(drawn(page, loaded.document), stem + " " + page.index.repr());
+                }
+            } else {
+                formats::OpenOptions reading = options.open;
+                reading.folder = input.path.parent_path();
+                const formats::Opened opened = formats::open_file(storage::read_file(input.path), core::path_to_utf8(input.path.filename()), reading);
+                put(drawn(opened.doc.page(0), opened.doc), stem);
+            }
+        } catch (const core::Error& error) {
+            result.errors.push_back(Json{{"input", where}, {"error", error.what()}, {"code", error.code()}});
+            if (options.stop_on_error) break;
+        } catch (const std::exception& error) {
+            result.errors.push_back(Json{{"input", where}, {"error", error.what()}, {"code", "internal"}});
+            if (options.stop_on_error) break;
+        }
+    }
+    finish();
+    if (options.progress) options.progress(inputs.size(), inputs.size(), {});
+    return result;
 }
 
 }  // namespace genko::service::automate
