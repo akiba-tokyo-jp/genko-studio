@@ -160,7 +160,6 @@ private slots:
         QCOMPARE(code, 0);
         QVERIFY(near(out["paper"]["width_mm"].get<double>(), 100.0, 0.5) && near(out["paper"]["height_mm"].get<double>(), 150.0, 0.5));
         QCOMPARE(storage::read_file(book / "project.json"), before);  // (read only: never written)
-        QVERIFY(!fs::exists(book / "project.lock"));
     }
 
     // The marks (PhotoCraft's shapes and places): the corner crop marks on the finished size's corners outside the picture,

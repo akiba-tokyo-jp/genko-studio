@@ -277,6 +277,7 @@ int probe(int argc, char** argv) {
         seen = buttons_of(&printing, true);
         for (QWidget* field : std::vector<QWidget*>{printing.pages, printing.area, printing.scale, printing.spreads})
             seen.push_back(Seen{QStringLiteral("print field"), field, false});
+        seen.push_back(Seen{QStringLiteral("PDF に出力…"), printing.pdf_button, true});  // (PC5 I-f: on its own row, in sight)
         out << look_at(QStringLiteral("print"), &printing, printing.sizeHint(), seen).dump() << "\n";
     }
     // PC5 H-c (ウィンドウ → アレンジ): the books in 4 and 6 cells of the window — each cell, the canvas in front and the panes

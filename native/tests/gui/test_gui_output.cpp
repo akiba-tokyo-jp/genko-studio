@@ -264,7 +264,8 @@ private slots:
         const QStringList file = menu_items(w, QStringLiteral("ファイル"));
         QCOMPARE(file.indexOf(QStringLiteral("プリント…")), file.indexOf(QStringLiteral("ファイル情報…")) + 2);
         QCOMPARE(file.at(file.indexOf(QStringLiteral("プリント…")) - 1), QStringLiteral("|"));
-        QCOMPARE(file.at(file.indexOf(QStringLiteral("プリント…")) + 1), QStringLiteral("|"));
+        QCOMPARE(file.at(file.indexOf(QStringLiteral("プリント…")) + 1), QStringLiteral("1 部プリント"));  // (PC5 I-f: in its group)
+        QCOMPARE(file.at(file.indexOf(QStringLiteral("プリント…")) + 2), QStringLiteral("|"));
         QStringList exports;
         for (QAction* a : w->findChild<QMenu*>(QStringLiteral("menu_export"))->actions()) exports << (a->isSeparator() ? QStringLiteral("|") : a->text());
         // (PC4 F-c: Photoshop's レイヤーからファイル… first in that group)

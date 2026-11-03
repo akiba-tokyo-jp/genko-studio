@@ -322,6 +322,8 @@ PrintDialog::PrintDialog(MainWindow* window) : QDialog(window), window_(window) 
     color_handling->addItem(QStringLiteral("Genko によるカラー管理"), QStringLiteral("genko"));
     printer_profile = new QComboBox;
     printer_profile->setObjectName(QStringLiteral("printer_profile"));
+    printer_profile->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);  // (a long description: not a wide window)
+    printer_profile->setMinimumContentsLength(14);
     for (const core::BuiltinProfile& profile : core::builtin_profiles()) {
         if (profile.space != core::ProfileSpace::Rgb) continue;  // (Qt hands the printer RGB)
         printer_profile->addItem(QString::fromUtf8(profile.description.data(), static_cast<qsizetype>(profile.description.size())),
@@ -369,8 +371,6 @@ PrintDialog::PrintDialog(MainWindow* window) : QDialog(window), window_(window) 
     theme::role(note, "hint");
     auto* buttons = new QDialogButtonBox;
     print_button = buttons->addButton(QStringLiteral("プリンターを選んで印刷…"), QDialogButtonBox::AcceptRole);
-    pdf_button = buttons->addButton(QStringLiteral("PDF に出力…"), QDialogButtonBox::ActionRole);
-    connect(pdf_button, &QPushButton::clicked, this, [this] { print_pdf(); });
     preview_button = buttons->addButton(QStringLiteral("プレビュー…"), QDialogButtonBox::ActionRole);
     connect(preview_button, &QPushButton::clicked, this, [this] { preview(); });
     this_page = buttons->addButton(QStringLiteral("このページだけ"), QDialogButtonBox::ActionRole);
@@ -378,9 +378,16 @@ PrintDialog::PrintDialog(MainWindow* window) : QDialog(window), window_(window) 
     cancel_button = buttons->addButton(QStringLiteral("やめる"), QDialogButtonBox::RejectRole);
     connect(cancel_button, &QPushButton::clicked, this, &QDialog::reject);
     connect(print_button, &QPushButton::clicked, this, [this] { print(); });
+    // (PDF に出力… on a row of its own: the buttons' row as wide as before, on a small screen too)
+    pdf_button = new QPushButton(QStringLiteral("PDF に出力…"));
+    connect(pdf_button, &QPushButton::clicked, this, [this] { print_pdf(); });
+    auto* pdf_row = new QHBoxLayout;
+    pdf_row->addWidget(pdf_button);
+    pdf_row->addStretch(1);
     auto* layout = new QVBoxLayout(this);
     layout->addWidget(tabs);
     layout->addWidget(note);
+    layout->addLayout(pdf_row);
     layout->addWidget(buttons);
     for (QComboBox* box : {area, scale, color_handling}) connect(box, &QComboBox::currentIndexChanged, this, [this] { follow(); });
     connect(center, &QCheckBox::toggled, this, [this] { follow(); });
