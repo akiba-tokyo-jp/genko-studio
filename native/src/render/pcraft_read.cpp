@@ -1134,6 +1134,9 @@ bool as_type(Ctx& ctx, core::Layer& layer, const Json& content, const std::strin
         if (error.code() == "image_too_large") throw;
         ctx.notes.name(std::string("文字レイヤーは画素にしました（文字として読めません: ") + error.what() + "）", name);
         return false;
+    } catch (const core::OpError& error) {  // (its attributes or size what no type layer takes)
+        ctx.notes.name(std::string("文字レイヤーは画素にしました（文字として読めません: ") + error.what() + "）", name);
+        return false;
     }
 }
 
@@ -2039,7 +2042,7 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
                     frame.mm_x = frame.mm_y = ctx.mm;
                     psd_type::take_sheets(*sheets, frame, ctx.doc, ctx.type_sheets);
                 }
-            } catch (const core::Error&) {
+            } catch (const std::exception&) {
                 ctx.notes.add("文字スタイル・段落スタイルが読めないため外しました");
             }
             if (ctx.type_sheets.full) ctx.notes.add("文字スタイル・段落スタイルが 512 を超えるため、残りは読みませんでした");

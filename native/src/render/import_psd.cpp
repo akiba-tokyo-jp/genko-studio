@@ -1155,6 +1155,8 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
                 }
             } catch (const core::Error& error) {
                 why = std::string("文字として読めません（") + error.what() + "）";
+            } catch (const core::OpError& error) {  // (its attributes or size what no type layer takes)
+                why = std::string("文字として読めません（") + error.what() + "）";
             }
             if (!type_record && type_pixels.size() < 256) type_pixels.push_back(Json{{"id", layer.id}, {"title", layer.title}, {"why", why}});
         }

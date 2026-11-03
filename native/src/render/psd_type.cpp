@@ -151,11 +151,11 @@ std::string style_name(const Json* styles, core::type_styles::Kind kind, std::u1
     const std::string base(kind == core::type_styles::Kind::Character ? core::type_styles::kCharacterBase : core::type_styles::kParagraphBase);
     try {
         name = core::type_styles::checked_name(nullptr, kind, Json(name.empty() ? base : name));
-    } catch (const core::Error&) {
+    } catch (const std::exception&) {
         name = core::ruby::slice(name, 0, 64);
         try {
             name = core::type_styles::checked_name(nullptr, kind, Json(name));
-        } catch (const core::Error&) {
+        } catch (const std::exception&) {
             name = base;
         }
     }
@@ -169,11 +169,14 @@ const Json* same_style(const Json* styles, core::type_styles::Kind kind, const s
     if (list == nullptr || !list->is_array()) return nullptr;
     for (const Json& s : *list) {
         if (s.value("name", std::string()) != name) continue;
-        Json other = s;
-        other.erase("id");
-        Json mine = item;
-        mine.erase("id");
-        return other == mine ? &s : nullptr;
+        // (its attributes the same: what it holds of char and para — an empty part not written)
+        for (const char* part : {"char", "para"}) {
+            const Json* theirs = key(s, part);
+            const Json* mine = key(item, part);
+            const bool none_theirs = theirs == nullptr || theirs->empty(), none_mine = mine == nullptr || mine->empty();
+            if (none_theirs != none_mine || (!none_theirs && *theirs != *mine)) return nullptr;
+        }
+        return &s;
     }
     return nullptr;
 }
@@ -651,13 +654,13 @@ Read read_text(const psd::TextLayer& t, const Frame& frame, core::Document& doc,
         try {
             core::vector::check_native_warp(warp);
             r.style["native_warp"] = std::move(warp);
-        } catch (const core::Error&) {
+        } catch (const std::exception&) {
             out.notes.push_back("ワープテキストの「" + t.warp + "」は Genko に無いため外しました");
         }
     }
     try {
         r.native_type = core::type_text::check_native_type(nt, r.text);
-    } catch (const core::Error& error) {
+    } catch (const std::exception& error) {
         out.why = std::string("文字の設定を Genko の文字で表せません（") + error.what() + "）";
         return out;
     }
