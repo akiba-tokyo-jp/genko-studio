@@ -283,8 +283,9 @@ private slots:
                                                    QStringLiteral("前のページを透かす（オニオンスキン）")}));
         QVERIFY(view.indexOf(QStringLiteral("定規")) < guides && view.indexOf(QStringLiteral("表示・非表示")) >= 0 && view.indexOf(QStringLiteral("表示・非表示")) < view.indexOf(QStringLiteral("定規")));
         const QStringList pages = menu_items(w, QStringLiteral("ページ"));
-        // (Python's row: 台詞の検索・置換…, 本の形でプレビュー… (M6), 入稿前の点検)
-        QCOMPARE(pages.indexOf(QStringLiteral("本の形でプレビュー…")), pages.indexOf(QStringLiteral("台詞の検索・置換…")) + 1);
+        // (Python's row: 台詞の検索・置換…, 本の形でプレビュー… (M6), 入稿前の点検; PC5 G-d: 台詞の検索・置換… is 編集 → 検索と置換…)
+        QVERIFY(pages.indexOf(QStringLiteral("本の形でプレビュー…")) > 0 && !pages.contains(QStringLiteral("検索と置換…")));
+        QCOMPARE(edit.indexOf(QStringLiteral("検索と置換…")), edit.indexOf(QStringLiteral("スペルチェック…")) + 1);
         QCOMPARE(pages.indexOf(QStringLiteral("入稿前の点検")), pages.indexOf(QStringLiteral("本の形でプレビュー…")) + 1);
         QCOMPARE(pages.at(pages.indexOf(QStringLiteral("入稿前の点検")) + 1), QStringLiteral("|"));
         // 原稿を書き出す… (書き出し…) at the end of the command bar (workspace.DEFAULT_COMMANDBAR), with its picture

@@ -951,6 +951,7 @@ void MainWindow::build_docks() {
     build_material_dock();  // (素材, トーン, 効果線: main_window_materials.cpp)
     build_output_docks();   // (履歴 and 点検, tabs when they are opened: main_window_output.cpp)
     build_production_docks();  // (PC5 J-0: アクション, レイヤーカンプ, 計測ログ, 注釈 — frames: main_window_production.cpp)
+    build_type_docks();  // (PC5 G-d: 文字, 段落, 文字スタイル, 段落スタイル, 字形 — tabs beside the layers when opened: main_window_type_panels.cpp)
     tabifyDockWidget(pages_dock_, library_dock_);  // (資料 last)
     view_menu_->addAction(library_dock_->toggleViewAction());
     library_dock_->hide();

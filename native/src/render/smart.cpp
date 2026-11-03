@@ -783,6 +783,11 @@ std::string contents_key(const Ctx& ctx, const core::SmartContents& contents, in
                       (ctx.rough ? " r" : "") + (ctx.dots ? " d" : "") + (ctx.screen_dots ? " s" : "");
     // (PC5 G-c: the book's type styles, which its contents' type layers take — a style changed draws them anew; a book with
     // none, and contents with no type layer, keyed as before)
+    // (PC5 G-d: and the book's own font and text gamma, which its contents' type layers are drawn with — keyed only for
+    // contents with a type layer in a book that sets them, so the rest keep their keys)
+    const bool typed = (!ctx.episode->font_path.empty() || ctx.episode->text_gamma) && holds_type(*ctx.episode, contents);
+    if (typed && !ctx.episode->font_path.empty()) key += " font " + ctx.episode->font_path;
+    if (typed && ctx.episode->text_gamma) key += " gamma " + std::to_string(*ctx.episode->text_gamma);
     if (ctx.episode->type_styles && !ctx.episode->type_styles->is_null() && holds_type(*ctx.episode, contents)) {
         const core::Json* styles = &*ctx.episode->type_styles;
         if (text::TypeStyles::current() == styles) {

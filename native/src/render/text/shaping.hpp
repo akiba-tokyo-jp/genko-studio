@@ -76,8 +76,16 @@ struct FontInfo {
     std::vector<FontAxis> axes;
     std::vector<std::string> features;
     unsigned faces = 1;
+    std::string family_ja;  // (PC5 G-d: the family as the font names it in Japanese, when it does — 環境設定 → テキスト)
 };
 // `keep` false: the font read for this call alone, not kept with those shaping reads (a list of every font: review P3-7).
 FontInfo font_info(const std::string& font, unsigned face_index = 0, bool keep = true);
+
+// PC5 G-d (字形パネル, type.panels.glyphs): the characters a font's face maps (its cmap: controls and whitespace other than
+// the space left out, the variation selectors too), in order; and the variation selectors (U+FE00…, U+E0100…: Ideographic
+// Variation Sequences, the cmap's format 14) the face maps after `ch` — its 異体字 — in order. core::Error /
+// render::NotYetPorted as font_info for a font that cannot be read.
+std::vector<char32_t> charmap(const std::string& font, unsigned face_index = 0);
+std::vector<char32_t> variants_of(const std::string& font, char32_t ch, unsigned face_index = 0);
 
 }  // namespace genko::render::text

@@ -22,7 +22,7 @@
 //                   new_id?} → {id}: a line and a type layer each other's (G-a)
 //   set_type (G-b, render/ops_type_set.cpp): below (type_ops::set_type).
 //   type_style (G-c, render/ops_type_styles.cpp): below (type_ops::type_style); its list a question.
-//   replace_fonts: registered; not_yet_ported until G-d writes it.
+//   replace_fonts (G-d, render/ops_type_fonts.cpp): below (type_ops::replace_fonts); without a map or all a question.
 // A type layer turned, scaled or slanted (transform_layers, the page's turns and mirrors) keeps its text: the map goes
 // into its matrix (native_type.transform); moved, its record moves (render/layer_transform, core/page_geometry).
 
@@ -76,6 +76,23 @@ void words_to_runs(core::StoryLine& record, core::Json& nt);
 // attrs: {attribute (TEXT-02's tables, size_pt): value, null: taken away}. Basic Paragraph's id is "basic".
 void type_style(core::OpContext& c);
 bool type_style_asks(const core::Json& op);
+
+// PC5 G-d (render/ops_type_fonts.cpp, SPEC.md TEXT-02「書体の置き換え」): 見つからないフォントを解決… and すべての見つからない
+// フォントを置換 —
+//   replace_fonts {} → {missing: [{font, texts, family?, font_style?, postscript?}]}: the fonts the book's texts and styles
+//                 name that this computer does not have (a question: changes nothing, replace_fonts_asks);
+//   replace_fonts {map?: {missing font: font | {font, face_index?, family?, font_style?, postscript?} | null}, all?} →
+//                 {missing: [fonts], replaced: texts, styles: bool}: each missing font the map names becomes its font (null:
+//                 the default face), and with `all` every other missing one the default face; the fonts this computer has
+//                 are left as they are; a locked type layer is left as it is.
+void replace_fonts(core::OpContext& c);
+bool replace_fonts_asks(const core::Json& op);
+// PC5 G-d (review P3-6): a face of a font file past those it holds is refused ("face_index N is past the faces of F (it
+// holds M)"); a bundled font, a font not on this computer or face 0 says nothing. set_type and replace_fonts ask it.
+void check_face(const std::string& font, std::int64_t face_index);
+// The faces a record's character attributes name (the whole text's and its ranges', each with the font it is a face of:
+// its own, the whole text's, or the line's) — each checked.
+void check_faces(const core::StoryLine& record);
 
 }  // namespace type_ops
 

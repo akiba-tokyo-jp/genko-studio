@@ -62,7 +62,8 @@ class TestTypeText : public QObject {
 private slots:
     // the tables: G-b's and G-c's names, each once, and the defaults name every attribute
     void tables() {
-        QCOMPARE(tt::char_attrs().size(), std::size_t{25});
+        QCOMPARE(tt::char_attrs().size(), std::size_t{26});  // (PC5 G-d: face_index — a face of a collection)
+        QVERIFY(refusal_of([] { tt::check_char(Json{{"face_index", 1.5}}); }).find("whole number") != std::string::npos);
         QCOMPARE(tt::para_attrs().size(), std::size_t{12});
         for (const tt::Attr& a : tt::char_attrs()) QVERIFY2(tt::char_defaults().contains(std::string(a.name)), std::string(a.name).c_str());
         for (const tt::Attr& a : tt::para_attrs()) QVERIFY2(tt::para_defaults().contains(std::string(a.name)), std::string(a.name).c_str());

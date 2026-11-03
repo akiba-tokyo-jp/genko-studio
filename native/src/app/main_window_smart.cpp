@@ -251,6 +251,9 @@ void MainWindow::build_smart_actions() {
     // レイヤー → ラスタライズ
     make("act_rasterize_type", QStringLiteral("テキスト"), [this] { rasterize_type(); }, {},
          QStringLiteral("選んだ台詞（フキダシと文字）を、見えているとおりの画素のレイヤーにします（台詞としては直せなくなります）"));
+    // (PC5 G-d review P2-3: its name テキスト（レイヤー → ラスタライズ） kept — the lists and keys kept under it stay its, and
+    // テキスト alone the text tool's — though the tool is 縦書き文字ツール now)
+    action("act_rasterize_type")->setProperty("genko_placed", true);
     make("act_rasterize_fill", QStringLiteral("塗りつぶし内容"), [this] { rasterize("fill"); }, {},
          QStringLiteral("選んだ塗りつぶし・グラデーションのレイヤーを、画素のレイヤーにします"));
     make("act_rasterize_smart", QStringLiteral("スマートオブジェクト"), [this] { rasterize("smart"); }, {},

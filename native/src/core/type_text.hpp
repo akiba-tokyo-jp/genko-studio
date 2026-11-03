@@ -78,6 +78,7 @@ struct Attr {
 };
 
 // The character attributes (mm for lengths; colours 8-bit sRGB as a line's): font, family, font_style, postscript,
+// face_index (PC5 G-d: the face of a collection `font` names, 0..255),
 // size_mm, rgb, tracking (of the em), leading_mm, baseline_shift_mm, scale_x, scale_y, faux_bold, faux_italic, underline,
 // strikethrough, caps, kerning, ligatures, discretionary_ligatures, features, variations, language, proportional, tcy.
 std::span<const Attr> char_attrs();
