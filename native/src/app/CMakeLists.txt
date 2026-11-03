@@ -231,6 +231,9 @@ genko_library(genko_app
     # PC5 J-d1 (計測: the count marks and the ものさしツール on the canvas, the window's commands)
     canvas_measure.cpp
     main_window_measure.cpp
+    # PC5 J-d2 (計測ログ: the app's log of 計測値を記録, its panel)
+    measurement_log.cpp
+    measurement_log_panel.cpp
     # PC5 J-b (スライス: the slices on the canvas, the スライスツール・スライス選択ツール, the window's commands)
     canvas_slices.cpp
     main_window_slices.cpp
