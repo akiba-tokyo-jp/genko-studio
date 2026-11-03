@@ -180,7 +180,7 @@ void set_animation(OpContext& c) {
 }
 
 // timeline_info (timeline.info, a question: core/video.hpp timeline_info): the page's timeline.
-void timeline_info(OpContext& c) {
+void timeline_question(OpContext& c) {
     const std::size_t at = require_page(c.doc, c.op);
     c.report = core::timeline_info(c.doc.page(at));
 }
@@ -323,6 +323,6 @@ void register_anim_ops(OpRegistry& registry) {
     registry.add("set_light_table", set_light_table);
 }
 
-void register_timeline_query(OpRegistry& registry) { registry.add_query("timeline_info", timeline_info); }
+void register_timeline_query(OpRegistry& registry) { registry.add_query("timeline_info", timeline_question); }
 
 }  // namespace genko::core

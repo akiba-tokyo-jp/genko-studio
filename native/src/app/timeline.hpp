@@ -122,7 +122,7 @@ public:
     // [first, last] of the page's frames.
     std::array<std::int64_t, 2> frames() const;
     // The width asked for (none: as the page draws).
-    std::optional<int> width() const;
+    std::optional<int> width_px() const;
     // The speed asked for (none: the page's own).
     std::optional<double> speed() const;
 

@@ -258,7 +258,7 @@ private slots:
         panel->work_first->setValue(5);
         panel->work_last->setValue(10);
         panel->work->setChecked(true);
-        QCOMPARE(core::work_area(s.page()), (std::optional<std::array<std::int64_t, 2>>{{5, 10}}));
+        QCOMPARE(core::work_area(s.page()), std::optional<std::array<std::int64_t, 2>>(std::array<std::int64_t, 2>{5, 10}));
         QVERIFY(core::page_uses_timeline(s.page()));
         QVERIFY(panel->work_first->isEnabled());
         panel->table->setFocus();
@@ -312,7 +312,7 @@ private slots:
             d.fps->setValue(0.5);
             QCOMPARE(d.speed(), std::optional<double>(0.5));
             d.size->setValue(320);
-            QCOMPARE(d.width(), std::optional<int>(320));
+            QCOMPARE(d.width_px(), std::optional<int>(320));
         }
         // the work area off, the fps back: as before (no timeline@1)
         panel->work->setChecked(false);

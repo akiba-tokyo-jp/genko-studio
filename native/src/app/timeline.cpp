@@ -535,7 +535,7 @@ void TimelinePanel::export_animation() {
     RenderVideoDialog asked(this, *p);
     if (ask::exec(&asked) != QDialog::Accepted) return;
     const auto range = asked.frames();
-    const auto width = asked.width();
+    const auto width = asked.width_px();
     const auto speed = asked.speed();
     const auto& path = window_->session().path();
     const QString folder = path ? QString::fromStdString(core::path_to_utf8(path->parent_path()))
@@ -627,7 +627,6 @@ void TimelinePanel::delete_timeline() {
     if (p == nullptr || !core::anim::is_animation(*p)) return;
     play_button->setChecked(false);
     ops(Json::array({Json{{"op", "set_animation"}, {"page", p->index.json()}, {"off", true}}}));
-    window_->canvas()->renderer().set_anim(1, false);
 }
 
 void TimelinePanel::build_menu() {
@@ -740,7 +739,7 @@ std::array<std::int64_t, 2> RenderVideoDialog::frames() const {
     return {1, count_};
 }
 
-std::optional<int> RenderVideoDialog::width() const {
+std::optional<int> RenderVideoDialog::width_px() const {
     if (size->value() == 0) return std::nullopt;
     return size->value();
 }
