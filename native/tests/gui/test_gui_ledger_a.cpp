@@ -105,7 +105,9 @@ const QStringList& studio_docks() {
                                        // (PC5 J-a: ウィンドウ → レイヤーカンプ is a command, its dock's own switch beside it)
                                        QStringLiteral("レイヤーカンプ"),
                                        // (PC5 J-c: ウィンドウ → 注釈 so)
-                                       QStringLiteral("注釈")};
+                                       QStringLiteral("注釈"),
+                                       // (PC5 J-d2: ウィンドウ → 計測ログ so)
+                                       QStringLiteral("計測ログ")};
     return titles;
 }
 
