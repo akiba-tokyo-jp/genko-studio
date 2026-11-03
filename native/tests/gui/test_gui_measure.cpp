@@ -5,22 +5,28 @@
 // `apply` (the line cleared) and, with Alt, the page turned and cut —; the カウントツール — a click puts a mark, a drag moves
 // it, Alt+click takes it away, the options' groups (＋・－, the active one), sizes, 表示 and クリア, 表示 → カウント off hiding
 // the marks — each change one Undo.
+// PC5 J-d2: データポイントを選択 ▸ カスタム… (its window), 計測値を記録 (Shift+Ctrl+M in the Photoshop set) into the 計測ログ panel
+// (ウィンドウ → 計測ログ: the table, 削除, 書き出し… — the CSV), 目盛りマーカーを配置… (its window, one step).
 
 #include <QtTest>
 
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
+#include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QFile>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMenuBar>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QTableWidget>
 #include <QTemporaryDir>
 #include <QToolButton>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 
@@ -28,15 +34,27 @@
 #include "app/info_panels.hpp"
 #include "app/inject.hpp"
 #include "app/main_window.hpp"
+#include "app/measurement_log.hpp"
 #include "core/command_bus.hpp"
 #include "core/measure.hpp"
 #include "gui_support.hpp"
 #include "render/image.hpp"
+#include "render/measure_features.hpp"
 #include "render/ops_registry.hpp"
 #include "render/raster.hpp"
 
 using namespace genko;
 using core::Json;
+
+namespace {
+
+std::string file_text(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    return file.readAll().toStdString();
+}
+
+}  // namespace
 namespace inject = genko::app::inject;
 
 namespace {
@@ -325,6 +343,169 @@ private slots:
         // (off the paper: no mark)
         inject::click_mm(b.canvas(), QPointF(-20, -20));
         QCOMPARE(core::count_total(b.measure()), std::size_t(1));
+    }
+
+    // PC5 J-d2: イメージ → 解析 ▸ データポイントを選択 ▸ カスタム…, 計測値を記録 (Shift+Ctrl+M in the Photoshop set), 目盛りマーカーを
+    // 配置… made (not frames), ウィンドウ → 計測ログ after レイヤーカンプ; 計測値を記録 — the whole page, a selection, the ruler line
+    // (this window's own too), the count — into the 計測ログ panel (shown), the book unchanged; 削除 of the rows chosen;
+    // 書き出し… (the CSV of the chosen rows, else all: UTF-8 with its BOM, Photoshop's columns).
+    void theMeasurementLog() {
+        Book b;
+        app::MeasurementLog::instance().clear();
+        QMenu* points = b.find<QMenu>("menu_measure_points");
+        QCOMPARE(points->actions(), (QList<QAction*>{b.act("act_measure_data_points")}));
+        QMenu* analysis = b.find<QMenu>("menu_analysis");
+        for (const char* name : {"act_measure_record", "act_measure_scale_marker"}) QVERIFY2(analysis->actions().contains(b.act(name)), name);
+        QCOMPARE(b.act("act_measure_record")->shortcuts(), (QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Shift+M"))}));
+        QMenu* window_menu = b.top(QStringLiteral("ウィンドウ"));
+        const QList<QAction*> in_window = window_menu->actions();
+        QCOMPARE(in_window.indexOf(b.act("act_panel_layer_comps")) + 1, in_window.indexOf(b.act("act_panel_measurement_log")));
+        QCOMPARE(in_window.indexOf(b.act("act_panel_measurement_log")) + 1, in_window.indexOf(b.act("act_panel_notes")));
+        app::MeasurementLogPanel* panel = b.window->measurement_log_panel();
+        QVERIFY(panel != nullptr);
+        QDockWidget* dock = b.window->findChild<QDockWidget*>(QStringLiteral("計測ログ"));
+        QVERIFY(dock != nullptr && !dock->isVisible());
+        b.act("act_panel_measurement_log")->trigger();
+        QVERIFY(dock->isVisible() && b.act("act_panel_measurement_log")->isChecked());
+        b.act("act_panel_measurement_log")->trigger();
+        QVERIFY(!dock->isVisible());
+        const std::int64_t revision = b.window->book().revision;
+        // the whole page: one row (counted on the 200 dpi grid, in the page's 300 dpi pixels), the panel shown
+        b.act("act_measure_record")->trigger();
+        QVERIFY2(!b.window->last_notice().contains(QStringLiteral("まだ使えません")), qPrintable(b.window->last_notice()));
+        QVERIFY(dock->isVisible());
+        const app::MeasurementLog& log = app::MeasurementLog::instance();
+        QCOMPARE(log.rows().size(), std::size_t(1));
+        QCOMPARE(log.rows()[0].values["label"], Json("計測 1"));
+        QCOMPARE(log.rows()[0].values["source"], Json("選択範囲"));
+        QCOMPARE(log.rows()[0].values["area"].get<double>(), 945.0 * 709.0 * 2.25);
+        QCOMPARE(panel->table()->rowCount(), 1);
+        QCOMPARE(panel->table()->horizontalHeaderItem(0)->text(), QStringLiteral("ラベル"));
+        QVERIFY(panel->status()->text().contains(QStringLiteral("200 dpi")));
+        // a selection over the bar: its gray darker than the paper's
+        b.canvas()->set_selection(Json{{"rect", Json::array({20, 40, 80, 10})}});
+        b.act("act_measure_record")->trigger();
+        QCOMPARE(log.rows().size(), std::size_t(2));
+        QCOMPARE(log.rows()[1].values["label"], Json("計測 2"));
+        QVERIFY(log.rows()[1].values["grayMin"].get<double>() < 100.0);
+        QVERIFY(log.rows()[1].values["grayMax"].get<double>() > 250.0);
+        b.canvas()->set_selection(std::nullopt);
+        // the ruler line, then the count (auto: the ruler first)
+        b.window->measure_op(Json{{"op", "set_ruler_line"}, {"start", {10, 10}}, {"end", {40, 50}}});
+        b.act("act_measure_record")->trigger();
+        QCOMPARE(log.rows().back().values["source"], Json("ものさしツール"));
+        QVERIFY(log.rows().back().values.contains("angle"));
+        b.window->measure_op(Json{{"op", "set_ruler_line"}, {"clear", true}});
+        b.window->measure_op(Json{{"op", "add_count"}, {"at_mm", {10, 10}}});
+        b.act("act_measure_record")->trigger();
+        QCOMPARE(log.rows().back().values["source"], Json("カウントツール"));
+        QCOMPARE(log.rows().back().values["count"], Json(1));
+        QCOMPARE(panel->table()->rowCount(), 4);
+        const std::int64_t marked = b.window->book().revision;
+        QVERIFY(marked > revision);  // (the ruler line and the count are the book's; the records are not)
+        // 削除: the rows chosen (none: nothing)
+        panel->table()->clearSelection();
+        panel->button(QStringLiteral("log_delete"))->click();
+        QCOMPARE(log.rows().size(), std::size_t(4));
+        panel->table()->selectRow(1);
+        panel->button(QStringLiteral("log_delete"))->click();
+        QCOMPARE(log.rows().size(), std::size_t(3));
+        QCOMPARE(log.rows()[1].values["source"], Json("ものさしツール"));
+        // 書き出し…: the rows chosen, else all
+        const QString csv = b.tmp.path() + QStringLiteral("/log.csv");
+        b.answers.responder->save_path = [csv](const QString&, const QString&) { return csv; };
+        panel->table()->clearSelection();
+        panel->button(QStringLiteral("log_export"))->click();
+        std::string text = file_text(csv);
+        QVERIFY(text.starts_with("\xEF\xBB\xBF" "ラベル,日時,ドキュメント,ソース,スケール"));
+        QCOMPARE(std::count(text.begin(), text.end(), '\n'), std::ptrdiff_t(4));
+        QVERIFY(text.find("計測 1,") != std::string::npos && text.find("カウントツール") != std::string::npos);
+        panel->table()->selectRow(2);
+        panel->button(QStringLiteral("log_export"))->click();
+        text = file_text(csv);
+        QCOMPARE(std::count(text.begin(), text.end(), '\n'), std::ptrdiff_t(2));
+        QVERIFY(text.find("カウントツール") != std::string::npos && text.find("ものさしツール") == std::string::npos);
+        QCOMPARE(b.window->book().revision, marked);  // (recording, deleting, exporting: the book untouched)
+        // a page the person cannot change: its line this window's own, measured all the same
+        app::MeasurementLog::instance().clear();
+        Book held(true);
+        held.act("act_measure_ruler_tool")->trigger();
+        held.drag(QPointF(20, 60), QPointF(80, 60));
+        QVERIFY(held.canvas()->ruler_here);
+        held.act("act_measure_record")->trigger();
+        QCOMPARE(log.rows().size(), std::size_t(1));
+        QCOMPARE(log.rows()[0].values["source"], Json("ものさしツール"));
+        QVERIFY(std::fabs(log.rows()[0].values["length"].get<double>() - 60.0 * 300 / 25.4) < 5);
+    }
+
+    // データポイントを選択 → カスタム…: the points of each source (共通 for all three), this machine's; 計測値を記録 keeps a row to
+    // them; 初期設定に戻す.
+    void theDataPoints() {
+        Book b;
+        app::MeasurementLog::instance().clear();
+        b.answers.responder->exec = [](QDialog* dialog) {
+            for (QCheckBox* box : dialog->findChildren<QCheckBox*>()) box->setChecked(false);
+            dialog->findChild<QCheckBox*>(QStringLiteral("point_common_label"))->setChecked(true);
+            dialog->findChild<QCheckBox*>(QStringLiteral("point_selection_area"))->setChecked(true);
+            dialog->findChild<QCheckBox*>(QStringLiteral("point_ruler_length"))->setChecked(true);
+            return int(QDialog::Accepted);
+        };
+        b.act("act_measure_data_points")->trigger();
+        const render::measure::DataPoints points = app::MeasurementLog::data_points();
+        QCOMPARE(points.selection, (std::vector<std::string>{"label", "area"}));
+        QCOMPARE(points.ruler, (std::vector<std::string>{"label", "length"}));
+        QCOMPARE(points.count, (std::vector<std::string>{"label"}));
+        b.act("act_measure_record")->trigger();
+        const app::MeasurementLog& log = app::MeasurementLog::instance();
+        QCOMPARE(log.rows().size(), std::size_t(1));
+        QCOMPARE(log.rows()[0].values, (Json{{"label", "計測 1"}, {"area", 945.0 * 709.0 * 2.25}}));
+        QCOMPARE(b.window->measurement_log_panel()->table()->columnCount(), 2);
+        // the window shows them as chosen; 初期設定に戻す: every one
+        b.answers.responder->exec = [](QDialog* dialog) {
+            if (!dialog->findChild<QCheckBox*>(QStringLiteral("point_selection_area"))->isChecked()) return int(QDialog::Rejected);
+            if (dialog->findChild<QCheckBox*>(QStringLiteral("point_selection_perimeter"))->isChecked()) return int(QDialog::Rejected);
+            dialog->findChild<QPushButton*>(QStringLiteral("points_defaults"))->click();
+            return int(QDialog::Accepted);
+        };
+        b.act("act_measure_data_points")->trigger();
+        QCOMPARE(app::MeasurementLog::data_points(), render::measure::DataPoints{});
+        app::MeasurementLog::instance().clear();
+    }
+
+    // 目盛りマーカーを配置…: its window (the nice length in the scale's units; the size, the text, its place, the colour), then
+    // one step — a group 目盛りマーカー of the bar and its label —, undone in one.
+    void theScaleMarker() {
+        Book b;
+        b.window->measure_op(Json{{"op", "set_measurement_scale"}, {"preset", "paper_mm"}});
+        const std::size_t before = b.page().layers.size();
+        double asked_length = 0;
+        QString suffix;
+        b.answers.responder->exec = [&asked_length, &suffix](QDialog* dialog) {
+            auto* length = dialog->findChild<QDoubleSpinBox*>(QStringLiteral("marker_length"));
+            asked_length = length->value();
+            suffix = length->suffix();
+            dialog->findChild<QComboBox*>(QStringLiteral("marker_color"))->setCurrentIndex(1);
+            return int(QDialog::Accepted);
+        };
+        b.act("act_measure_scale_marker")->trigger();
+        QCOMPARE(asked_length, 5.0);  // (a fifth of the trim's 40 mm wide, 8 mm → 5 mm)
+        QCOMPARE(suffix, QStringLiteral(" mm"));
+        QCOMPARE(b.page().layers.size(), before + 3);
+        const core::Layer& group = b.page().layers.back();
+        QCOMPARE(group.title, std::string("目盛りマーカー"));
+        QVERIFY(group.group);
+        QCOMPARE(b.page().layers[before + 1].kind, core::LayerKind::Type);
+        QCOMPARE(b.page().layers[before + 1].type->text, std::string("5 mm"));
+        b.act("act_undo")->trigger();
+        QCOMPARE(b.page().layers.size(), before);
+        // refused (too long for the trim): said, nothing placed
+        b.answers.responder->exec = [](QDialog* dialog) {
+            dialog->findChild<QDoubleSpinBox*>(QStringLiteral("marker_length"))->setValue(5000);
+            return int(QDialog::Accepted);
+        };
+        b.act("act_measure_scale_marker")->trigger();
+        QCOMPARE(b.page().layers.size(), before);
+        QVERIFY2(b.window->last_error().contains(QStringLiteral("仕上がりの幅")), qPrintable(b.window->last_error()));
     }
 };
 

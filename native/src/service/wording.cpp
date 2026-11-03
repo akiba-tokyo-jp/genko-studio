@@ -792,6 +792,18 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"((trim|bleed_mm|margins) is only for crop: true)", "\\1 は、ページを回して切り抜くとき（crop: true）だけ指定します"));
         r.push_back(rule(R"(the page's count marks, ruler line or notes would lie past 1000 m from the page)",
                          "カウントの印・ものさしの線・注釈が、ページから 1000 m より遠くへ出てしまうため、できません"));
+        // (PC5 J-d2 — the C++ build's own: 計測値を記録's values, 目盛りマーカーを配置; render/measure_features, render/ops_measure)
+        r.push_back(rule("the selection is empty", "選択範囲が空です"));
+        r.push_back(rule(R"(the (selection|page) measured is too large.*)", "選択範囲が大きすぎて数えられません（1 億 2 千万画素まで）"));
+        r.push_back(rule("source is auto, selection, ruler or count", "計測のソースは auto・selection・ruler・count のどれかです"));
+        r.push_back(rule(R"(area is the selection: only for source selection \(or auto\))", "選択範囲（area）は、ソースが selection（か auto）のときだけ指定します"));
+        r.push_back(rule(R"(a (\S+) (.+) bar is ([0-9.]+) pixels; it must fit the trim's ([0-9.]+) pixels)",
+                         "目盛りの長さ \\1 \\2 は \\3 画素で、仕上がりの幅（\\4 画素）に入りません（1 画素以上で、幅に入る長さにします）"));
+        r.push_back(rule(R"((length|size_pt) must be a number greater than 0)", "\\1 は 0 より大きい数で指定します"));
+        r.push_back(rule("size_pt is 1 to 1000", "文字のサイズ（size_pt）は 1〜1000 pt で指定します"));
+        r.push_back(rule("font is a font's name", "フォントはフォントの名前で指定します"));
+        r.push_back(rule("position is top or bottom", "テキストの位置は top（上）か bottom（下）で指定します"));
+        r.push_back(rule("color is black or white", "目盛りマーカーのカラーは black（黒）か white（白）で指定します"));
         // (PC5 J-b, slices@1 — the C++ build's own: the slices, render/ops_slices; Web 用に保存 by slices)
         r.push_back(rule("the page's slices would lie past 1000 m from the page", "スライスが、ページから 1000 m より遠くへ出てしまうため、できません"));
         r.push_back(rule(R"((rect_mm|rect_px) is \[x, y, width, height\].*)", "スライスの範囲（\\1）は [x, y, 幅, 高さ] で、幅と高さは 0 より大きくします"));
