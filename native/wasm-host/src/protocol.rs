@@ -14,7 +14,7 @@
 //!
 //! One wall-clock budget covers the whole run (every band), as PhotoCraft's `apply`.
 
-use std::io::{BufRead, Read, Write};
+use std::io::{BufRead, Write};
 
 use serde_json::{Map, Value, json};
 

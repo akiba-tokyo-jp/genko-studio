@@ -796,7 +796,7 @@ private:
     QProcess& process_;
     std::string key_;
     std::chrono::seconds limit_;
-    const std::stop_token& stop_;
+    std::stop_token stop_;
     QElapsedTimer clock_;
     std::string out_;
     std::string err_;
@@ -971,7 +971,7 @@ Hosted host_module(const std::string& key, const std::string& chosen_sha256, std
         std::lock_guard lock(g_wasm_limits_mutex);
         if (g_wasm_limits.is_object() && !g_wasm_limits.empty()) hello["limits"] = g_wasm_limits;
     }
-    const Reply reply = out.talk->ask(hello, module.bytes, 0);
+    const Reply reply = out.talk->ask(hello, module.bytes, std::size_t{1} << 20);  // (a manifest is 64 KiB at most)
     if (!core::py_truthy(core::py_get(reply.header, "ok"))) {
         const Json error = core::py_get(reply.header, "error", "the host refused it");
         throw core::PyValueError("the module of plugin " + key + " cannot be used (" + core::py_str(error) + ")");

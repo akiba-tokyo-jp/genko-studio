@@ -37,6 +37,7 @@
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/plugins.hpp"
+#include "render/smart.hpp"
 #include "render/png.hpp"
 #include "rendertest.hpp"
 #include "testsupport.hpp"
@@ -544,15 +545,25 @@ private slots:
         QVERIFY(doc.smart_files.contains(filter["kept"]["asset"].get<std::string>()));
         QVERIFY(genko::core::smart::uses_plugin_filters(doc));
         genko::core::smart::validate_smart(doc);
+        // (the mean difference of two pictures of the page, a sample)
+        const auto apart = [](const genko::render::Image& a, const genko::render::Image& b) {
+            const std::string x = a.tobytes(), y = b.tobytes();
+            if (x.size() != y.size() || x.empty()) return 255.0;
+            double sum = 0;
+            for (std::size_t i = 0; i < x.size(); ++i) sum += std::abs(int(static_cast<unsigned char>(x[i])) - int(static_cast<unsigned char>(y[i])));
+            return sum / double(x.size());
+        };
         genko::render::RenderOptions output;
         const genko::render::Image drawn = genko::render::render_page(doc.page(0), 40, output, &doc).image;
-        enable(false);  // (the plugin cannot run here now: the kept picture)
+        enable(false);  // (the plugin cannot run here now: the kept picture, made at 200 dpi, drawn at this resolution)
+        genko::render::smart::clear_caches();  // (the smart object drawn again, not the picture kept from before)
+        plugins::forget_made();
         genko::render::RenderOptions again;
         const genko::render::Image kept = genko::render::render_page(doc.page(0), 40, again, &doc).image;
-        QVERIFY(drawn.tobytes() == kept.tobytes());
+        QVERIFY2(apart(drawn, kept) < 0.5, qPrintable(QString::number(apart(drawn, kept))));
         // (and not as the smart object without its filter: the look kept is the filtered one)
         const genko::render::Image plain = genko::render::render_page(painted().page(0), 40, again, nullptr).image;
-        QVERIFY(plain.tobytes() != kept.tobytes());
+        QVERIFY2(apart(plain, kept) > apart(drawn, kept) + 0.05, qPrintable(QString::number(apart(plain, kept))));
         // an op on the stack where the plugin cannot run: said
         const genko::core::ApplyResult moved = bus_.apply(doc, Json::array({Json{{"op", "smart_filter_set"}, {"page", 1}, {"id", "so"}, {"opacity", 0.5}}}), person_, false);
         QVERIFY(std::any_of(moved.warnings.begin(), moved.warnings.end(),
