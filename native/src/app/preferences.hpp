@@ -154,6 +154,8 @@ using FormSections = std::vector<std::pair<QString, FormRows>>;
 QWidget* form_page(const FormSections& sections);
 std::pair<QString, QWidget*> pane_row(const char* path);
 bool save_pane_fields(QWidget* root);
+// (review P3-8) Whether every field's value fits its row — said when one does not: 決める asks it before it writes anything.
+bool pane_fields_fit(QWidget* root);
 // The pages in Photoshop's order of the panes (a page no pane names after them), each with この面を初期設定に戻す.
 void arrange_pages(PreferencesDialog* dialog);
 // What この面を初期設定に戻す puts back: a pane's paths (its section — the person's lists, dictionaries and the chosen

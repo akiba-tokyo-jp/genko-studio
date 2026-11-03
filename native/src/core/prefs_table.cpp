@@ -1,12 +1,14 @@
 #include "core/prefs_table.hpp"
 
 #include <QByteArray>
+#include <QFileInfo>
 #include <QString>
 #include <QStringList>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <filesystem>
 #include <set>
 
 #include "core/config_dir.hpp"
@@ -110,6 +112,12 @@ Pref memory(std::string path, std::string key) {
     return p;
 }
 
+// (PC5 H-e, review P2-3: the person's own list or dictionary — put back only when named)
+Pref kept(Pref p) {
+    p.kept_on_reset = true;
+    return p;
+}
+
 // (none is its value when nothing is chosen: the computer's own, the book's)
 Pref no_default(Pref p) {
     p.none_ok = true;
@@ -159,8 +167,8 @@ std::vector<Pref> make_table() {
         // workspace (ワークスペース)
         text("workspace.current", "ui/workspace", Kind::Text, "", "今のワークスペース", Apply::NewWindow),
         text("workspace.stage", "ui/stage", Kind::Text, "", "作業の段階", Apply::NewWindow),
-        text("workspace.quickAccess", "ui/quick", Kind::Text, "", "クイックアクセスに並べるコマンド（タブ区切り）", Apply::NewWindow),
-        text("workspace.commandBar", "ui/commandbar", Kind::Text, "", "コマンドバーに並べるコマンド（タブ区切り）", Apply::NewWindow),
+        kept(text("workspace.quickAccess", "ui/quick", Kind::Text, "", "クイックアクセスに並べるコマンド（タブ区切り）", Apply::NewWindow)),
+        kept(text("workspace.commandBar", "ui/commandbar", Kind::Text, "", "コマンドバーに並べるコマンド（タブ区切り）", Apply::NewWindow)),
         // (PC5 H-d: ワークスペースをロック, and 環境設定 → ワークスペース — PhotoCraft v0.2.0's prefs.rs Workspace, MIT)
         boolean("workspace.locked", "ui/workspace_locked", false, "ワークスペースをロック"),
         boolean("workspace.rememberWorkspaceChanges", "ui/workspace_remember", true, "ワークスペースの変更を記憶"),
@@ -206,8 +214,9 @@ std::vector<Pref> make_table() {
         integer("performance.memoryUsageMb", "ui/memory_mb", 256, 64, 16384, "使用するメモリ（MB。表示の覚え）"),
         integer("performance.historyStates", "ui/history_states", 1000, 1, 1000, "ヒストリー数"),
         // scratchDisks (仮想記憶ディスク — PC5 H-e, the coordinator's decision: no pixel is put out to a disk; the folder of the
-        // app's own caches — the books' small pictures, the covers —, "" the config folder's cache)
-        text("scratchDisks.folder", "ui/scratch_folder", Kind::Path, "", "仮想記憶ディスク（覚えの置き場所）", Apply::Restart),
+        // app's own caches — the books' small pictures, the covers —, "" the config folder's cache; a cache written after it
+        // is chosen goes there — review P3-5 —, never in a book nor where nothing can be written: check)
+        text("scratchDisks.folder", "ui/scratch_folder", Kind::Path, "", "仮想記憶ディスク（覚えの置き場所）"),
         // cursors (カーソル)
         choice("cursors.painting", "ui/cursor", "circle", {"circle", "circle_cross", "cross", "dot", "tip"}, "ペンのカーソル"),
         boolean("cursors.showOnlyCrosshairWhilePainting", "ui/cross_drawing", false, "描いている間は十字だけにする"),
@@ -450,9 +459,33 @@ bool hex_colour(const std::string& text) {
     return std::all_of(text.begin() + 1, text.end(), [](unsigned char c) { return std::isxdigit(c) != 0; });
 }
 
+// The keys' names QKeySequence's PortableText writes (Qt 6 qkeysequence.cpp's keyname table, the ones a keyboard has: a
+// name it does not know — "Banana" — reads back as no key).
+bool key_name(const std::string& name) {
+    static const std::set<std::string> names{
+        "Space", "Esc", "Tab", "Backtab", "Backspace", "Return", "Enter", "Ins", "Del", "Pause", "Print", "SysReq", "Home", "End", "Left",
+        "Up", "Right", "Down", "PgUp", "PgDown", "CapsLock", "NumLock", "ScrollLock", "Menu", "Help", "Back", "Forward", "Stop", "Refresh",
+        "Volume Down", "Volume Mute", "Volume Up", "Bass Boost", "Bass Up", "Bass Down", "Treble Up", "Treble Down", "Media Play",
+        "Media Stop", "Media Previous", "Media Next", "Media Record", "Media Pause", "Toggle Media Play/Pause", "Home Page", "Favorites",
+        "Search", "Standby", "Open URL", "Launch Mail", "Launch Media", "Monitor Brightness Up", "Monitor Brightness Down",
+        "Keyboard Brightness Up", "Keyboard Brightness Down", "Power Off", "Wake Up", "Eject", "Screensaver", "WWW", "Sleep", "Calculator",
+        "Clear", "Close", "Copy", "Cut", "Paste", "Save", "Zoom In", "Zoom Out", "Microphone Mute", "New", "Open", "Find", "Undo", "Redo",
+        "Select", "Cancel", "Printer", "Execute", "Play", "Zoom", "Exit", "Kanji", "Muhenkan", "Henkan", "Romaji", "Hiragana", "Katakana",
+        "Hiragana Katakana", "Zenkaku", "Hankaku", "Zenkaku Hankaku", "Touroku", "Massyo", "Kana Lock", "Kana Shift", "Eisu Shift",
+        "Eisu toggle", "Touchpad Toggle", "Touchpad On", "Touchpad Off"};
+    if (names.contains(name)) return true;
+    if (name.size() >= 2 && name.size() <= 3 && name[0] == 'F' && std::all_of(name.begin() + 1, name.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
+        const int n = std::stoi(name.substr(1));
+        return name[1] != '0' && n >= 1 && n <= 35;
+    }
+    return false;
+}
+
 // Keys as Qt writes them (QKeySequence's PortableText — core has no QtGui to read them with, PC5 H-e for H-0's review
-// P3-6): up to four chords ", " between, each modifiers and one key — "Ctrl+Shift+K", "Ctrl++", "F7", "Ctrl+;", "PgUp" —,
-// the key a single character or a key's name (letters, digits, spaces: "Media Play"). Words that are no key ("あいう") are not.
+// P3-6 and H-e's review P3-1: what reads back as the same words): up to four chords ", " between, each its modifiers in
+// Qt's order (Ctrl, Alt, Shift, Meta, Num — each once) and one key — "Ctrl+Shift+K", "Ctrl++", "F7", "Ctrl+;", "PgUp" —, the
+// key a single character (a letter in upper case) or one of the keys' names. Words that are no key ("あいう", "Banana",
+// "F99") are not.
 bool keys_text(const std::string& text) {
     const auto chord_fits = [](std::string chord) {
         if (chord.empty()) return false;
@@ -467,14 +500,20 @@ bool keys_text(const std::string& text) {
         }
         if (key.empty()) return false;
         if (!chord.empty()) {
+            static const std::vector<std::string> order{"Ctrl", "Alt", "Shift", "Meta", "Num"};
+            std::size_t next = 0;
             for (const std::string& modifier : split(chord, '+')) {
-                if (modifier != "Ctrl" && modifier != "Shift" && modifier != "Alt" && modifier != "Meta" && modifier != "Num") return false;
+                const auto at = std::find(order.begin() + static_cast<std::ptrdiff_t>(next), order.end(), modifier);
+                if (at == order.end()) return false;  // (not a modifier, twice, or out of Qt's order)
+                next = static_cast<std::size_t>(at - order.begin()) + 1;
             }
         }
         const QString letters = QString::fromStdString(key);
-        if (letters.size() == 1 || (letters.size() == 2 && letters.at(0).isHighSurrogate())) return letters.at(0).isPrint() || letters.at(0).isSurrogate();
-        if (!std::isalpha(static_cast<unsigned char>(key.front()))) return false;
-        return std::all_of(key.begin(), key.end(), [](unsigned char c) { return c < 0x80 && (std::isalnum(c) != 0 || c == ' '); });
+        if (letters.size() == 1 || (letters.size() == 2 && letters.at(0).isHighSurrogate())) {
+            if (letters.at(0).isLower() && letters.at(0).unicode() < 0x80) return false;  // (Qt writes a letter in upper case)
+            return letters.at(0).isPrint() || letters.at(0).isSurrogate();
+        }
+        return key_name(key);
     };
     std::vector<std::string> chords;
     std::size_t at = 0;
@@ -628,6 +667,21 @@ std::optional<std::string> path_of(std::string_view key) {
 std::optional<std::string> check(const Pref& p, const Json& value) {
     const auto wrong = [&p] { return std::optional<std::string>("「" + p.path + "」は " + describe(p) + " です"); };
     if (value.is_string() && value.get<std::string>().empty() && p.none_ok) return std::nullopt;
+    if (p.path == "scratchDisks.folder" && value.is_string()) {
+        // (PC5 H-e, review P3-5: the caches' folder — never in a book, nor where nothing can be written)
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        const fs::path chosen = path_from_utf8(value.get<std::string>());
+        if (!chosen.is_absolute()) return std::optional<std::string>("「" + p.path + "」はフォルダーのフルパスです");
+        for (fs::path at = chosen; !at.empty(); at = at.parent_path()) {
+            if (fs::exists(at / "project.json", ec)) return std::optional<std::string>("「" + p.path + "」に原稿のフォルダーの中は選べません");
+            if (at == at.parent_path()) break;
+        }
+        fs::path existing = chosen;
+        while (!existing.empty() && !fs::exists(existing, ec) && existing != existing.parent_path()) existing = existing.parent_path();
+        const QFileInfo info(QString::fromStdString(path_to_utf8(existing)));
+        if (!info.isDir() || !info.isWritable()) return std::optional<std::string>("「" + p.path + "」のフォルダーに書き込めません");
+    }
     switch (p.kind) {
     case Kind::Boolean:
         return value.is_boolean() ? std::nullopt : wrong();
@@ -794,7 +848,9 @@ Outcome reset(QSettings& settings, std::string_view path) {
         return refused("bad_value", std::string(path), "「" + std::string(path) + "」はアプリが覚えている値で、ここからは戻せません");
     }
     Outcome out;
+    const bool everything = path.empty() || is_section(path);
     for (const Named& n : *entries) {
+        if (everything && n.pref->kept_on_reset) continue;  // (the person's own lists: put back only by their names — review P2-3)
         settings.remove(QString::fromStdString(n.key));
         if (!is_pattern(n.pref->key)) out.values[n.path] = decode(*n.pref, QVariant());
     }

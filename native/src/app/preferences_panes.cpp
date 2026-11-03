@@ -105,7 +105,8 @@ const std::map<std::string, QString>& tips() {
                                                      "描く処理の上限は変わりません")},
         {"performance.historyStates", QStringLiteral("ヒストリー パネルに並べる最近の編集の数（古いものも原稿には残り、取り消しで戻れます）")},
         {"scratchDisks.folder", QStringLiteral("縮小図・表紙の覚えを置くフォルダー（空: 設定のフォルダーの中）。Genko は画素をディスクに逃がさないので、"
-                                               "ここは覚えの置き場所だけです（次に起動したときから）")},
+                                               "ここは覚えの置き場所だけです。決めるとすぐ効きます（ページ パネルの縮小図は次に開く窓から）。"
+                                               "原稿のフォルダーの中・書き込めない所は選べません")},
         {"enhancedControls.touchGestures", QStringLiteral("タッチ画面の 2 本の指で、拡大・回転・移動をします")},
         {"enhancedControls.zoomWithTrackpadPinch", QStringLiteral("トラックパッドのピンチで拡大・縮小します")},
         {"enhancedControls.rotateViewWithTrackpad", QStringLiteral("トラックパッドで 2 本の指を回して、表示を回転します")},
@@ -276,7 +277,9 @@ std::pair<QString, QWidget*> pane_row(const char* path) {
     return {pref->kind == prefs::Kind::Boolean ? QString() : label, shown};
 }
 
-bool save_pane_fields(QWidget* root) {
+namespace {
+
+Json pane_values(QWidget* root) {
     Json values = Json::object();
     for (QWidget* field : root->findChildren<QWidget*>()) {
         const QString path = field->property(kPref).toString();
@@ -290,6 +293,26 @@ bool save_pane_fields(QWidget* root) {
         else continue;
         values[path.toStdString()] = std::move(value);
     }
+    return values;
+}
+
+}  // namespace
+
+bool pane_fields_fit(QWidget* root) {
+    const Json values = pane_values(root);  // (held: items() of a temporary would dangle)
+    for (const auto& [path, value] : values.items()) {
+        const prefs::Pref* pref = prefs::by_path(path);
+        if (pref == nullptr) continue;
+        if (const auto wrong = prefs::check(*pref, value)) {
+            ask::warning(root, QStringLiteral("環境設定"), QString::fromStdString(*wrong));
+            return false;
+        }
+    }
+    return true;
+}
+
+bool save_pane_fields(QWidget* root) {
+    const Json values = pane_values(root);
     if (values.empty()) return true;
     const auto store = settings();
     const prefs::Outcome out = prefs::set(*store, values);
@@ -340,14 +363,15 @@ void arrange_pages(PreferencesDialog* dialog) {
 std::vector<std::string> pane_paths(const QString& pane) {
     const std::string id = pane.toStdString();
     if (id == "fileHandling") return {"fileHandling", "book"};
-    // (the person's lists and the chosen ones — the workspace in use, the quick access, the command bar, the type's dictionary
-    // and table — are not this pane's settings: kept)
-    static const std::set<std::string> kept{"workspace.current", "workspace.stage", "workspace.quickAccess", "workspace.commandBar",
-                                            "type.userDictionary", "type.notations"};
-    if (id == "workspace" || id == "type") {
+    // (a section put back passes over the person's own lists — the quick access, the command bar, the type's dictionary and
+    // table: Pref::kept_on_reset, review P2-3 —; the workspace in use and the stage are not this pane's either: kept)
+    if (id == "workspace") {
         std::vector<std::string> out;
         for (const prefs::Pref& p : prefs::table()) {
-            if (p.path.rfind(id + ".", 0) == 0 && !kept.contains(p.path) && p.path.find('*') == std::string::npos) out.push_back(p.path);
+            if (p.path.rfind("workspace.", 0) == 0 && !p.kept_on_reset && p.path != "workspace.current" && p.path != "workspace.stage" &&
+                p.path.find('*') == std::string::npos) {
+                out.push_back(p.path);
+            }
         }
         return out;
     }
@@ -420,7 +444,7 @@ void apply_panes(MainWindow* window) {
         new DockWatch(window);
     }
     // (ヒストリーログ: the window's books followed — the one it opened with too; a book shown later, as it comes to the front)
-    for (const Document& d : window->documents()) history_log::follow(d.session.get());
+    for (const Document& d : window->documents()) history_log::follow(d.session.get(), d.source);
     static bool once = false;
     if (!once && QCoreApplication::instance() != nullptr) {
         once = true;
@@ -460,7 +484,7 @@ void PreferencesDialog::reset_pane(const QString& pane) {
 
 void PreferencesDialog::reset_everything() {
     if (!ask::question(this, QStringLiteral("すべての環境設定をリセット"),
-                       QStringLiteral("このパソコンの環境設定をすべて初めの値に戻しますか？（キー・メニュー・ツールバーも。道具の覚えと残したワークスペースは残ります）"))) {
+                       QStringLiteral("このパソコンの環境設定をすべて初めの値に戻しますか？（キー・メニュー・ツールバーも。道具の覚え・残したワークスペース・クイックアクセスとコマンドバーの並び・ユーザー辞書と表記の表は残ります）"))) {
         return;
     }
     save();
@@ -504,7 +528,10 @@ bool MainWindow::dock_over(const QPoint& global) {
         finish_typing();
         store_document();
         const Document going = documents_.front();
-        other->take_document(going);
+        // (the same book shown there already — 新規ウィンドウ's other window —: not twice, as すべてをタブに統合 does)
+        const bool there = std::any_of(other->documents_.begin(), other->documents_.end(),
+                                       [&going](const Document& d) { return d.session == going.session && d.contents == going.contents; });
+        if (!there) other->take_document(going);
         other->mark_tabs();
         other->raise();
         other->activateWindow();

@@ -13,7 +13,9 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QFile>
+#include <QDir>
 #include <QHelpEvent>
+#include <QImage>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -124,7 +126,10 @@ private slots:
     }
     void init() { fresh(); }
 
-    // commands.json is the menus' commands (made from a window as it is now; GENKO_WRITE_COMMANDS=1 writes it).
+    // commands.json is the menus' commands (made from a window as it is now). When the menus change, it is made again so:
+    // (1) GENKO_WRITE_COMMANDS=1 ./test_gui_prefs commandsJsonIsTheMenus writes native/src/core/data/commands.json (that
+    // run still fails its last check: the catalogue built into it is the old one); (2) build genko_core, genko, test_gui_prefs
+    // and test_contract_prefs again (CMake embeds the file anew); (3) run them again.
     void commandsJsonIsTheMenus() {
         const auto store = app::settings();
         store->remove(QStringLiteral("shortcuts"));
@@ -132,7 +137,10 @@ private slots:
         store->remove(QStringLiteral("ui/key_set_own"));
         Desk d;
         const Json made = app::commands_catalogue(d.window.get());
-        QVERIFY(made["commands"].size() == d.window->actions_by_name().size() || made["commands"].size() > 500);
+        // (every command the keys know by name — preferences::commands: the panels' switches and the commands without an
+        // attribute too, so more than the window's attributes, actions_by_name — once)
+        QCOMPARE(made["commands"].size(), app::preferences::commands(d.window.get()).size());
+        QVERIFY(made["commands"].size() > d.window->actions_by_name().size());
         const QString file = genko::test::repo_root() + QStringLiteral("/native/src/core/data/commands.json");
         if (qEnvironmentVariableIsSet("GENKO_WRITE_COMMANDS")) {
             std::ofstream out(gui_test::path_of(file), std::ios::binary);  // (a command a line: a change reads as its lines)
@@ -145,7 +153,8 @@ private slots:
             std::string where;
             (void)genko::test::strict_equal(kept, made, &where);
             QFAIL(qPrintable(QStringLiteral("native/src/core/data/commands.json is not the menus (%1): GENKO_WRITE_COMMANDS=1 test_gui_prefs "
-                                            "commandsJsonIsTheMenus writes it")
+                                            "commandsJsonIsTheMenus writes it, then build genko_core, genko, test_gui_prefs and "
+                                            "test_contract_prefs again and run them")
                                  .arg(QString::fromStdString(where))));
         }
         QCOMPARE(core::commands::catalogue(), made);  // (the one built in: genko commands reads it)
@@ -438,9 +447,74 @@ private slots:
         QVERIFY(set_prefs(Json{{"historyLog.filePath", inside.toStdString()}}));
         QVERIFY(d.window->apply_ops(Json::array({Json{{"op", "add_ruler"}, {"page", 1}, {"kind", "guide"}, {"axis", "v"}, {"at", 20}}})));
         QVERIFY(!QFile::exists(inside));
-        QVERIFY(set_prefs(Json{{"historyLog.enabled", false}}));
+        // (review P3-3: nor a file of this computer's config folder — its settings, its tokens)
+        const QString config = QString::fromUtf8(qgetenv("GENKO_CONFIG_DIR")) + QStringLiteral("/history.txt");
+        QVERIFY(set_prefs(Json{{"historyLog.filePath", config.toStdString()}}));
+        QVERIFY(d.window->apply_ops(Json::array({Json{{"op", "add_ruler"}, {"page", 1}, {"kind", "guide"}, {"axis", "v"}, {"at", 25}}})));
+        QVERIFY(!QFile::exists(config));
+        QVERIFY(set_prefs(Json{{"historyLog.filePath", file.toStdString()}, {"historyLog.enabled", false}}));
         QVERIFY(d.window->apply_ops(Json::array({Json{{"op", "add_ruler"}, {"page", 1}, {"kind", "guide"}, {"axis", "v"}, {"at", 30}}})));
         QCOMPARE(read_text(file), more);  // (off: nothing more)
+    }
+
+    // review P2-2: the 閉じる line goes through the same guard as the others — never into the picture a book was opened from,
+    // nor into another open book; into the log's own file, it is written.
+    void historyLogClosingIsGuarded() {
+        Desk d;
+        QTemporaryDir files;
+        const QString png = files.path() + QStringLiteral("/元の画像.png");
+        QImage picture(40, 30, QImage::Format_RGB32);
+        picture.fill(Qt::white);
+        QVERIFY(picture.save(png));
+        const QByteArray was = [&png] {
+            QFile f(png);
+            return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+        }();
+        auto* other = new app::MainWindow;
+        other->open_path(gui_test::path_of(png));
+        QVERIFY(gui_test::wait_for([other] { return other->documents().size() == 1 && other->documents().front().source.has_value(); }));
+        QVERIFY(set_prefs(Json{{"historyLog", Json{{"enabled", true}, {"destination", "textFile"}, {"filePath", png.toStdString()}, {"detail", "concise"}}}}));
+        delete other;  // (its book closed: the 閉じる line kept from the picture)
+        QApplication::processEvents();
+        QFile after(png);
+        QVERIFY(after.open(QIODevice::ReadOnly));
+        QCOMPARE(after.readAll(), was);
+        // another open book's folder: never — the log's own file: written
+        const QString in_desk = gui_test::qpath(d.book / "closing.txt");
+        QVERIFY(set_prefs(Json{{"historyLog.filePath", in_desk.toStdString()}}));
+        {
+            app::MainWindow second(app::Session::open(d.another("閉じる本.genko"), gui_test::quick(gui_test::path_of(files.path() + "/recovery"))));
+        }
+        QApplication::processEvents();
+        const QString log = files.path() + QStringLiteral("/log.txt");
+        QVERIFY(set_prefs(Json{{"historyLog.filePath", log.toStdString()}}));
+        {
+            app::MainWindow third(app::Session::open(d.another("三冊目.genko"), gui_test::quick(gui_test::path_of(files.path() + "/recovery"))));
+        }
+        QVERIFY2(gui_test::wait_for([&log] { return read_text(log).contains(QStringLiteral("三冊目\t閉じる")); }), qPrintable(read_text(log)));
+        QVERIFY(!QFile::exists(in_desk));  // (the book closed before it: nothing written in the open one's folder)
+        QVERIFY(!read_text(log).contains(QStringLiteral("閉じる本\t閉じる")));
+        QVERIFY(set_prefs(Json{{"historyLog.enabled", false}}));
+    }
+
+    // review P3-8: 決める with a field refused writes nothing — the others' changes neither — and keeps the dialog open.
+    void savingIsAllOrNothing() {
+        Desk d;
+        QTemporaryDir places;
+        QVERIFY(QDir(places.path()).mkpath(QStringLiteral("x.genko")));
+        QFile project(places.path() + QStringLiteral("/x.genko/project.json"));
+        QVERIFY(project.open(QIODevice::WriteOnly));
+        project.close();
+        app::preferences::PreferencesDialog dialog(d.window.get());
+        dialog.findChild<QCheckBox*>(QStringLiteral("prefs_general.zoomWithScrollWheel"))->setChecked(true);
+        dialog.font_pt->setValue(17);
+        dialog.findChild<QLineEdit*>(QStringLiteral("prefs_scratchDisks.folder"))->setText(places.path() + QStringLiteral("/x.genko"));
+        dialog.save();
+        QVERIFY(dialog.result() != int(QDialog::Accepted));
+        QVERIFY(!app::settings()->contains(QStringLiteral("ui/wheel_zooms")));
+        QVERIFY(app::settings()->value(QStringLiteral("ui/font_pt")).toInt() != 17);
+        QVERIFY(!app::settings()->contains(QStringLiteral("ui/scratch_folder")));
+        QVERIFY(!d.answers.asked.isEmpty() && d.answers.asked.last().contains(QStringLiteral("原稿のフォルダー")));
     }
 
     // ヒストリーログ → メタデータ: the files written from the book carry its saved edits as photoshop:History; off, as before.

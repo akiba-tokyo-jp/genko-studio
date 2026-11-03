@@ -180,6 +180,23 @@ private slots:
         }
     }
 
+    // review P2-3: genko prefs reset (everything, a section) passes over the person's own lists; named, they go back.
+    void resetKeepsThePersonsLists() {
+        QTemporaryDir dir;
+        const QString config = dir.path();
+        QCOMPARE(cli(config, {"prefs", "set", "--values", R"({"workspace.quickAccess": "検索", "workspace.commandBar": "取り消し", "interface.theme": "dark"})"}).code, 0);
+        QCOMPARE(cli(config, {"prefs", "reset"}).code, 0);
+        QCOMPARE(cli(config, {"prefs", "reset", "workspace"}).code, 0);
+        Json got = cli(config, {"prefs", "get", "workspace"}).json["values"];
+        QCOMPARE(got["workspace.quickAccess"], Json("検索"));
+        QCOMPARE(got["workspace.commandBar"], Json("取り消し"));
+        QCOMPARE(cli(config, {"prefs", "get", "interface.theme"}).json["values"]["interface.theme"], Json("system"));
+        QCOMPARE(cli(config, {"prefs", "reset", "workspace.quickAccess"}).code, 0);
+        got = cli(config, {"prefs", "get", "workspace"}).json["values"];
+        QCOMPARE(got["workspace.quickAccess"], Json(""));
+        QCOMPARE(got["workspace.commandBar"], Json("取り消し"));
+    }
+
     // The settings of an earlier version stay as they were: reading changes nothing in the file; setting and resetting
     // change only what they name (the person's keys, the tools' memories, the workspaces kept, keys this build does not know).
     void anEarlierVersionsSettingsAreKept() {
@@ -327,6 +344,15 @@ private slots:
         const QString root = dir.path() + QStringLiteral("/root");
         QVERIFY(QDir().mkpath(config) && QDir().mkpath(root + QStringLiteral("/a.genko")));
         QCOMPARE(cli(config, {"prefs", "set", "interface.theme", "\"dark\""}).code, 0);
+        // (review P2-1: a folder outside the root, a file inside it)
+        const std::string outside = (dir.path() + QStringLiteral("/backups")).toStdString();
+        const std::string inside = (root + QStringLiteral("/logs/history.txt")).toStdString();
+        QVERIFY(QDir().mkpath(dir.path() + QStringLiteral("/backups")) && QDir().mkpath(root + QStringLiteral("/logs")));
+        QCOMPARE(cli(config, {"prefs", "set", "--values", QString::fromStdString(Json{{"book.backupFolder", outside}, {"historyLog.filePath", inside}}.dump())}).code, 0);
+        {
+            QSettings ini(config + QStringLiteral("/settings.ini"), QSettings::IniFormat);
+            ini.setValue(QStringLiteral("subview/images"), (dir.path() + QStringLiteral("/secret/reference.png")));
+        }
         const qint64 me = QCoreApplication::applicationPid();
         const Json session{{"v", 1}, {"pid", me}, {"app_version", "x"},
                            {"windows", Json::array({Json{{"active", true}, {"arrange", "tabs"}, {"front", 0},
@@ -349,6 +375,14 @@ private slots:
         Json got = mcp.call("inspect", Json{{"project", "a.genko"}, {"target", "prefs"}});
         QCOMPARE(got["prefs"]["interface.theme"], Json("dark"));
         QVERIFY(!got["prefs"].contains("state.brush.kind"));
+        // (review P2-1: a path out of the root never said — in it, from the root; the app's memories refused by name too)
+        QCOMPARE(got["prefs"]["book.backupFolder"], Json("(root の外)"));
+        QCOMPARE(got["prefs"]["historyLog.filePath"], Json(QStringLiteral("logs/history.txt").toStdString()));
+        QVERIFY2(got.dump().find(outside) == std::string::npos && got.dump().find(dir.path().toStdString()) == std::string::npos, got.dump().c_str());
+        for (const char* memory : {"state", "state.subview.images", "state.ai.client"}) {
+            got = mcp.call("inspect", Json{{"project", "a.genko"}, {"target", "prefs"}, {"op", memory}});
+            QVERIFY2(got.dump().find("bad_value") != std::string::npos && got.dump().find("secret") == std::string::npos, got.dump().c_str());
+        }
         got = mcp.call("inspect", Json{{"project", "a.genko"}, {"target", "prefs"}, {"op", "historyLog.enabled"}});
         QCOMPARE(got["prefs"], (Json{{"historyLog.enabled", false}}));
         got = mcp.call("inspect", Json{{"project", "a.genko"}, {"target", "prefs"}, {"op", "nope.nothing"}});

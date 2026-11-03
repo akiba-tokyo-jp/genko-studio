@@ -834,7 +834,7 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     note->setWordWrap(true);
     reset_all = new QPushButton(QStringLiteral("すべての環境設定をリセット…"));
     reset_all->setObjectName(QStringLiteral("prefs_reset_all"));
-    reset_all->setToolTip(QStringLiteral("このパソコンの環境設定をすべて初めの値に戻します（キー・メニュー・ワークスペースの選択も。道具の覚え・残したワークスペースは残します）"));
+    reset_all->setToolTip(QStringLiteral("このパソコンの環境設定をすべて初めの値に戻します（キー・メニュー・ワークスペースの選択も。道具の覚え・残したワークスペース・クイックアクセスとコマンドバーの並び・ユーザー辞書と表記の表は残します）"));
     connect(reset_all, &QPushButton::clicked, this, [this] { reset_everything(); });
     tabs->addTab(form_page({{QStringLiteral("オプション"),
                              {pane_row("general.colorPicker"), pane_row("general.imageInterpolation"), pane_row("general.autoShowHomeScreen"),
@@ -1083,7 +1083,7 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     pages_list->setFixedWidth(150);
     // (each page's picture by its title — PC5 H-d: the keys' page went to キーボードショートカット…, ワークスペース came)
     const std::map<QString, const char*> pictures{{QStringLiteral("ペンタブレット"), "pen"},
-                                                  {QStringLiteral("表示・作業"), "settings"},
+                                                  {QStringLiteral("一般"), "settings"},
                                                   {QStringLiteral("ワークスペース"), "kind_tone"},
                                                   {QStringLiteral("透明部分・色域"), "kind_tone"},
                                                   {QStringLiteral("ファイル管理"), "open"},
@@ -1178,6 +1178,7 @@ void PreferencesDialog::pick_backup() {
 }
 
 void PreferencesDialog::save() {
+    if (!pane_fields_fit(this)) return;  // (PC5 H-e, review P3-8: a field refused — nothing written, the dialog kept open)
     const auto store = settings();
     store->setValue(QStringLiteral("ui/font_pt"), font_pt->value());
     store->setValue(QStringLiteral("ui/ui_font"), ui_font->currentData());
@@ -1235,7 +1236,7 @@ void PreferencesDialog::save() {
                                                                                            {"ui/large_tabs", large_tabs},
                                                                                            {"ui/workspace_locked", workspace_locked}})
         store->setValue(QString::fromLatin1(key), box->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
-    if (!save_pane_fields(this)) return;  // (PC5 H-e: the fields made from the table, written at once — a refusal said, kept open)
+    if (!save_pane_fields(this)) return;  // (PC5 H-e: the fields made from the table, checked before anything was written: written at once)
     for (MainWindow* window : documents::windows()) apply_all(window);  // (this computer's: every window)
     accept();
 }

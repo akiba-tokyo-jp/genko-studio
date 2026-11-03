@@ -31,6 +31,7 @@
 #include "app/documents.hpp"
 #include "app/file_info_dialog.hpp"
 #include "app/look.hpp"
+#include "app/history_log.hpp"
 #include "app/main_window.hpp"
 #include "app/off_ui.hpp"
 #include "app/open_dialog.hpp"
@@ -361,6 +362,7 @@ void MainWindow::add_picture_book(core::Document doc, const std::vector<std::str
         if (documents_[i].session != added) continue;
         documents_[i].picture = true;
         documents_[i].source = source;
+        history_log::follow(added.get(), source);  // (PC5 H-e: ヒストリーログ — never written to the picture it came from)
         doc_tabs_->setTabText(static_cast<int>(i), documents_[i].title());
     }
     if (session_ == added) {

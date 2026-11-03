@@ -9,6 +9,7 @@
 #include <QStringList>
 
 #include <algorithm>
+#include <map>
 #include <filesystem>
 #include <memory>
 #include <vector>
@@ -18,6 +19,7 @@
 #include "app/history_panel.hpp"
 #include "app/main_window.hpp"
 #include "app/session.hpp"
+#include "core/config_dir.hpp"
 #include "core/paths.hpp"
 #include "core/prefs_table.hpp"
 #include "formats/copy.hpp"
@@ -82,26 +84,57 @@ void say_once(const QString& file, const QString& words) {
     }
 }
 
-// The line appended to the chosen file — never a book's folder or what lies in it, a file a book's smart object links, a
-// picture a book was opened from (the books open now: formats::write_guard, as the exports' files are kept from them).
-void append(const Session& session, const QString& text) {
+// What a followed book's lines are kept from, taken while it is open (its folder, the picture it was opened from, its
+// book as last changed — the files its smart objects link): its 閉じる line, written when the book is gone, is kept
+// from the same (review P2-2).
+struct Material {
+    std::optional<fs::path> path;
+    std::optional<fs::path> source;
+    std::shared_ptr<const core::Document> doc;
+};
+std::map<const Session*, std::shared_ptr<Material>> followed;
+
+// Whether a line may go to `dest` — never a book's folder or what lies in it, a file a book's smart object links, a picture
+// a book was opened from (this book and every one open now: formats::write_guard, as the exports' files are kept from
+// them), nor a file of this computer's config folder (its settings, its tokens, session.json — review P3-3).
+bool may_write(const fs::path& dest, const Material& own) {
+    try {
+        const fs::path config = core::config_dir().lexically_normal();
+        const fs::path in_config = dest.lexically_normal().lexically_relative(config);
+        if (!in_config.empty() && *in_config.begin() != "..") return false;
+        formats::WriteGuard guard;
+        const auto take = [&guard](const core::Document* doc, const std::optional<fs::path>& path, const std::optional<fs::path>& source) {
+            if (doc != nullptr) {
+                formats::WriteGuard one = formats::write_guard(*doc, path);
+                guard.books.insert(guard.books.end(), one.books.begin(), one.books.end());
+                guard.linked.insert(guard.linked.end(), one.linked.begin(), one.linked.end());
+                guard.sources.insert(guard.sources.end(), one.sources.begin(), one.sources.end());
+            } else if (path) {
+                guard.books.push_back(*path);
+            }
+            if (source) guard.sources.push_back(*source);
+        };
+        take(own.doc.get(), own.path, own.source);
+        for (MainWindow* window : documents::windows()) {
+            for (const Document& d : window->documents()) {
+                if (!d.session) continue;
+                const auto snapshot = d.session->snapshot();
+                take(snapshot.get(), d.session->path(), d.source);
+            }
+        }
+        formats::check_target(guard, dest);
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+// The line appended to the chosen file when may_write lets it.
+void append(const Material& own, const QString& text) {
     const Chosen c = chosen();
     if (!c.text) return;
     const fs::path dest = core::path_from_utf8(c.file.toStdString());
-    try {
-        const auto doc = session.snapshot();
-        if (doc) {
-            formats::WriteGuard guard = formats::write_guard(*doc, session.path());
-            for (MainWindow* window : documents::windows()) {
-                for (const Document& d : window->documents()) {
-                    if (!d.session) continue;
-                    if (d.session->path()) guard.books.push_back(*d.session->path());
-                    if (d.source) guard.sources.push_back(*d.source);
-                }
-            }
-            formats::check_target(guard, dest);
-        }
-    } catch (const std::exception&) {
+    if (!may_write(dest, own)) {
         say_once(c.file, QStringLiteral("ヒストリーログを「%1」に書けません（原稿・原稿の中・原稿が使うファイルには書きません）。"
                                         "編集 → 環境設定 → ヒストリーログ でほかの場所を選びます")
                              .arg(c.file));
@@ -130,13 +163,20 @@ QString line(const QString& title, const QString& words, const Json& ops, bool d
     return out;
 }
 
-void follow(Session* session) {
-    if (session == nullptr || session->property("genko_history_log").toBool()) return;
-    session->setProperty("genko_history_log", true);
+void follow(Session* session, std::optional<std::filesystem::path> source) {
+    if (session == nullptr) return;
+    if (const auto known = followed.find(session); known != followed.end()) {
+        if (source) known->second->source = std::move(source);  // (a picture's book: its file, known once its tab has it)
+        return;
+    }
+    auto own = std::make_shared<Material>(Material{session->path(), std::move(source), session->snapshot()});
+    followed[session] = own;
     auto title = std::make_shared<QString>(title_of(*session));
-    if (chosen().text) append(*session, line(*title, QStringLiteral("開く"), Json(), false));
-    QObject::connect(session, &Session::changed, session, [session, title](const BookChange& change) {
+    if (chosen().text) append(*own, line(*title, QStringLiteral("開く"), Json(), false));
+    QObject::connect(session, &Session::changed, session, [session, title, own](const BookChange& change) {
         *title = title_of(*session);
+        own->path = session->path();
+        own->doc = session->snapshot();
         const Chosen c = chosen();
         if (!c.text || c.detail == QLatin1String("sessionsOnly")) return;
         QString words;
@@ -149,19 +189,12 @@ void follow(Session* session) {
             case BookChange::Why::SaveAs: words = QStringLiteral("別名で保存"); break;
             default: return;  // (another's change taken in, the book read again: not this person's edit)
         }
-        append(*session, line(*title, words, ops, c.detail == QLatin1String("detailed")));
+        append(*own, line(*title, words, ops, c.detail == QLatin1String("detailed")));
     });
-    QObject::connect(session, &QObject::destroyed, [title, path = session->path()] {
-        // (the book closed: its window gone — the session is gone too, so the guard is of the books still open)
-        const Chosen c = chosen();
-        if (!c.text) return;
-        QFile out(c.file);
-        const fs::path dest = core::path_from_utf8(c.file.toStdString());
-        if (path) {
-            const fs::path rel = dest.lexically_normal().lexically_relative(path->lexically_normal());
-            if (!rel.empty() && *rel.begin() != "..") return;  // (never inside the book)
-        }
-        if (out.open(QIODevice::WriteOnly | QIODevice::Append)) out.write((line(*title, QStringLiteral("閉じる"), Json(), false) + QLatin1Char('\n')).toUtf8());
+    QObject::connect(session, &QObject::destroyed, [session, title, own] {
+        // (the book closed: kept from what it was kept from while open — and from the books still open — review P2-2)
+        followed.erase(session);
+        append(*own, line(*title, QStringLiteral("閉じる"), Json(), false));
     });
 }
 

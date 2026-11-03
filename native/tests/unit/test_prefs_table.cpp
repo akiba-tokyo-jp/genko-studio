@@ -7,6 +7,8 @@
 
 #include <QtTest>
 
+#include <QDir>
+#include <QFile>
 #include <QSettings>
 #include <QTemporaryDir>
 
@@ -366,7 +368,21 @@ private slots:
         QCOMPARE(fallback("enhancedControls.rotateViewWithTrackpad"), Json(false));
         QCOMPARE(fallback("interface.canvasBorder"), Json("dropShadow"));
         QCOMPARE(prefs::by_path("interface.uiScale")->apply, prefs::Apply::Restart);
-        QCOMPARE(prefs::by_path("scratchDisks.folder")->apply, prefs::Apply::Restart);
+        QCOMPARE(prefs::by_path("scratchDisks.folder")->apply, prefs::Apply::Live);  // (review P3-5: a cache written after goes there)
+        {  // (review P3-5: the caches' folder never in a book, never where nothing can be written, never a relative path)
+            QTemporaryDir places;
+            QVERIFY(QDir(places.path()).mkpath(QStringLiteral("book.genko/assets")));
+            QFile project(places.path() + QStringLiteral("/book.genko/project.json"));
+            QVERIFY(project.open(QIODevice::WriteOnly));
+            project.close();
+            const prefs::Pref& scratch = *prefs::by_path("scratchDisks.folder");
+            QVERIFY(prefs::check(scratch, Json((places.path() + QStringLiteral("/book.genko")).toStdString())).has_value());
+            QVERIFY(prefs::check(scratch, Json((places.path() + QStringLiteral("/book.genko/assets/cache")).toStdString())).has_value());
+            QVERIFY(prefs::check(scratch, Json("relative/folder")).has_value());
+            QVERIFY(!prefs::check(scratch, Json((places.path() + QStringLiteral("/caches/not/yet")).toStdString())).has_value());
+            QVERIFY(!prefs::check(scratch, Json(places.path().toStdString())).has_value());
+            QVERIFY(!prefs::check(scratch, Json("")).has_value());
+        }
         auto s = fresh("he.ini");
         for (const auto& [path, value] : std::vector<std::pair<const char*, Json>>{{"performance.historyStates", 0},
                                                                                  {"performance.historyStates", 1001},
@@ -383,6 +399,26 @@ private slots:
         QCOMPARE(s->value(QStringLiteral("ui/history_states")).toInt(), 50);
     }
 
+    // PC5 H-e, review P2-3: the person's own lists (the quick access, the command bar — and 節 G's dictionary and notation
+    // table once they are here) are put back only by their names: everything and their section pass over them.
+    void theOwnListsAreKeptOnReset() {
+        QVERIFY(prefs::by_path("workspace.quickAccess")->kept_on_reset && prefs::by_path("workspace.commandBar")->kept_on_reset);
+        QVERIFY(!prefs::by_path("workspace.largeTabs")->kept_on_reset);
+        auto s = fresh("kept.ini");
+        QVERIFY(prefs::set(*s, Json{{"workspace.quickAccess", "検索	取り消し"}, {"workspace.commandBar", "取り消し"}, {"workspace.largeTabs", true},
+                                    {"interface.theme", "dark"}})
+                    .ok);
+        QVERIFY(prefs::reset(*s).ok);
+        QVERIFY(!s->contains(QStringLiteral("ui/theme")));
+        QCOMPARE(s->value(QStringLiteral("ui/quick")).toString(), QStringLiteral("検索	取り消し"));
+        QVERIFY(prefs::reset(*s, "workspace").ok);
+        QVERIFY(!s->contains(QStringLiteral("ui/large_tabs")));
+        QCOMPARE(s->value(QStringLiteral("ui/commandbar")).toString(), QStringLiteral("取り消し"));
+        QVERIFY(prefs::reset(*s, "workspace.quickAccess").ok);  // (named: put back)
+        QVERIFY(!s->contains(QStringLiteral("ui/quick")));
+        QVERIFY(s->contains(QStringLiteral("ui/commandbar")));
+    }
+
     // PC5 H-e for H-0's review P3-6: keys as Qt writes them, and nothing else.
     void keysAreKeys() {
         const prefs::Pref& keys = *prefs::by_path("shortcuts.*");
@@ -390,7 +426,10 @@ private slots:
                                  "Ctrl+K, Ctrl+X", "Ctrl+B|Ctrl+Alt+B", "Media Play", "+", "Ctrl+,", "Ctrl+]"}) {
             QVERIFY2(!prefs::check(keys, Json(fine)).has_value(), fine);
         }
-        for (const char* wrong : {"あいう", "Ctrl+", "Ctrl+B||", "Hyper+K", "Ctrl+あいう", "1, 2, 3, 4, 5", "|"}) {
+        // (review P3-1: what Qt would not read back as the same words — a name it does not know, F99, modifiers out of its
+        // order or twice, a letter in lower case)
+        for (const char* wrong : {"あいう", "Ctrl+", "Ctrl+B||", "Hyper+K", "Ctrl+あいう", "1, 2, 3, 4, 5", "|", "Banana", "Ctrl+Hello World", "F99", "F0",
+                                  "Shift+Ctrl+K", "Ctrl+Ctrl+K", "Ctrl+a"}) {
             QVERIFY2(prefs::check(keys, Json(wrong)).has_value(), wrong);
         }
         QVERIFY(!prefs::check(keys, Json("")).has_value());  // (none: no key)

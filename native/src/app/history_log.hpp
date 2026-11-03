@@ -2,6 +2,7 @@
 
 #include <QString>
 
+#include <filesystem>
 #include <optional>
 #include <string>
 
@@ -23,8 +24,9 @@ class Session;
 
 namespace history_log {
 
-// Its changes written (once for a book however many windows show it). The first window starts it.
-void follow(Session* session);
+// Its changes written (once for a book however many windows show it). The first window starts it; a picture's book is told
+// its file (`source`) once its tab has it — its lines, 閉じる too, are never written there (review P2-2).
+void follow(Session* session, std::optional<std::filesystem::path> source = std::nullopt);
 // The metadata's source given to the exports (once, at the first window).
 void install();
 // A line of the text file (tests): the time, the book's title, the words (and the ops' names with 詳細).

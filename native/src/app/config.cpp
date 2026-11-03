@@ -85,7 +85,11 @@ fs::path cache_root() {
     // (PC5 H-e, 環境設定 → 仮想記憶ディスク — the coordinator's decision: no pixel is put out there; the app's caches, the books'
     // small pictures and the covers, are kept in the folder chosen — none: the config folder's cache)
     const std::string chosen = core::prefs::value("scratchDisks.folder").get<std::string>();
-    if (!chosen.empty()) return ensure(core::path_from_utf8(chosen) / "genko-cache");
+    if (!chosen.empty()) {
+        const fs::path there = ensure(core::path_from_utf8(chosen) / "genko-cache");
+        std::error_code ec;
+        if (fs::is_directory(there, ec)) return there;  // (a drive taken away, a folder gone: the config folder's, as with none)
+    }
     return ensure(config_dir() / "cache");
 }
 

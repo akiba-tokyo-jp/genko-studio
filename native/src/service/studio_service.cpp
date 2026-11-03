@@ -506,28 +506,66 @@ ToolResult StudioService::inspect(const Json& a) {
     if (core::is_one_of(target, {"prefs", "commands", "session"})) {
         const auto store = core::prefs::store();
         const std::string asked = py_truthy(a["op"]) ? core::py_strip(py_str(a["op"])) : std::string();
+        std::error_code ec;
+        const fs::path root = fs::weakly_canonical(root_, ec);
+        // (a file or a folder of this computer: as a path under this server's root, never one outside it — review P2-1)
+        const auto under_root = [&root](const std::string& text) -> std::optional<std::string> {
+            std::error_code err;
+            const fs::path where = fs::weakly_canonical(core::path_from_utf8(text), err);
+            if (err) return std::nullopt;
+            const fs::path inside = where.lexically_relative(root);
+            if (inside.empty() || *inside.begin() == ".." || inside.is_absolute()) return std::nullopt;
+            return core::path_to_utf8(inside);
+        };
         if (core::py_equals(target, Json("prefs"))) {
-            const core::prefs::Outcome out = core::prefs::get(*store, asked);
+            // (the app's memories — section state: the pictures the subview holds, the workspaces, the AI's client — are not
+            // preferences: never an agent's to read — review P2-1)
+            if (asked == "state" || asked.rfind("state.", 0) == 0) {
+                return fail("「" + asked + "」はアプリが覚えている値で、読めません", "bad_value", "/op");
+            }
+            core::prefs::Outcome out = core::prefs::get(*store, asked);
             if (!out.ok) return fail(out.message, out.code, "/op");
+            for (auto& [path, value] : out.values.items()) {
+                const core::prefs::Pref* pref = core::prefs::by_path(path);
+                if (pref == nullptr || pref->kind != core::prefs::Kind::Path || !value.is_string() || value.get<std::string>().empty()) continue;
+                value = under_root(value.get<std::string>()).value_or("(root の外)");
+            }
             return ToolResult(true, Json::object({{"prefs", out.values}}));
         }
         if (core::py_equals(target, Json("commands"))) {
             Json listed = core::commands::list(*store, {}, asked);
             return ToolResult(true, Json::object({{"key_set", listed["key_set"]}, {"commands", std::move(listed["commands"])}}));
         }
-        Json session = core::session_file::read();
-        std::error_code ec;
-        const fs::path root = fs::weakly_canonical(root_, ec);
-        Json none = Json::array();
-        for (Json& window : session.contains("windows") && session["windows"].is_array() ? session["windows"] : none) {
-            if (!window.is_object() || !window.contains("tabs") || !window["tabs"].is_array()) continue;
-            for (Json& tab : window["tabs"]) {
-                if (!tab.is_object() || !tab.contains("path")) continue;
-                const fs::path book = fs::weakly_canonical(core::path_from_utf8(py_str(tab["path"])), ec);
-                const fs::path inside = ec ? fs::path() : book.lexically_relative(root);
-                tab.erase("path");
-                if (!inside.empty() && *inside.begin() != ".." && !inside.is_absolute()) tab["project"] = core::path_to_utf8(inside);
+        // (the session's own words alone — a key session.json may come to hold later is never passed on — review P3-7)
+        const Json read = core::session_file::read();
+        Json session = Json::object();
+        for (const char* key : {"running", "v", "app_version", "foreground", "background", "updated_at"}) {
+            if (read.contains(key)) session[key] = read[key];
+        }
+        if (read.value("running", false)) {
+            Json windows = Json::array();
+            for (const Json& window : core::iterate(py_get(read, "windows", Json::array()))) {
+                if (!window.is_object()) continue;
+                Json kept = Json::object();
+                for (const char* key : {"active", "arrange", "front"}) {
+                    if (window.contains(key)) kept[key] = window[key];
+                }
+                Json tabs = Json::array();
+                for (const Json& tab : core::iterate(py_get(window, "tabs", Json::array()))) {
+                    if (!tab.is_object()) continue;
+                    Json one = Json::object();
+                    for (const char* key : {"index", "title", "saved", "revision", "page", "contents"}) {
+                        if (tab.contains(key)) one[key] = tab[key];
+                    }
+                    if (tab.contains("path") && tab["path"].is_string()) {
+                        if (const auto project = under_root(tab["path"].get<std::string>())) one["project"] = *project;
+                    }
+                    tabs.push_back(std::move(one));
+                }
+                kept["tabs"] = std::move(tabs);
+                windows.push_back(std::move(kept));
             }
+            session["windows"] = std::move(windows);
         }
         return ToolResult(true, Json::object({{"session", std::move(session)}}));
     }

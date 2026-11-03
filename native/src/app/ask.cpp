@@ -1,7 +1,5 @@
 #include "app/ask.hpp"
 
-#include "core/prefs_table.hpp"
-
 #include <QColorDialog>
 #include <QDesktopServices>
 #include <QDialog>
@@ -9,6 +7,8 @@
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QUrl>
+
+#include "core/prefs_table.hpp"
 
 namespace genko::app::ask {
 

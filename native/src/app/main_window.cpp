@@ -1104,7 +1104,7 @@ void MainWindow::show_document(int index) {
     // let go, whatever its page's id — a duplicate shares it —; never finished on this one)
     if (session_ != doc.session || contents_ != doc.contents) canvas_->let_go();
     doc_ = index;
-    history_log::follow(doc.session.get());  // (PC5 H-e: ヒストリーログ — once for a book)
+    history_log::follow(doc.session.get(), doc.source);  // (PC5 H-e: ヒストリーログ — once for a book)
     arrange_follow();  // (PC5 H-c: the canvas to its tab's cell — before the view is given: the cell's size —, main_window_arrange.cpp)
     session_ = doc.session;
     page_index_ = doc.page_index;
