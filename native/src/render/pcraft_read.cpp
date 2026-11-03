@@ -1161,7 +1161,7 @@ bool as_type(Ctx& ctx, core::Layer& layer, const Json& content, const std::strin
         if (error.code() == "image_too_large") throw;
         ctx.notes.name(std::string("文字レイヤーは画素にしました（文字として読めません: ") + error.what() + "）", name);
         return false;
-    } catch (const core::OpError& error) {  // (its attributes or size what no type layer takes)
+    } catch (const std::exception& error) {  // (its attributes or size what no type layer takes; JSON of another type — review P3-4)
         ctx.notes.name(std::string("文字レイヤーは画素にしました（文字として読めません: ") + error.what() + "）", name);
         return false;
     }

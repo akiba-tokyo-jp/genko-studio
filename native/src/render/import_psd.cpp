@@ -1420,7 +1420,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
                 kept_so_far.room(layer.native_psd ? layer.native_psd->blocks.size() : 0, type_block.size())) {
                 core::PsdLayerKeep keep = layer.native_psd.value_or(core::PsdLayerKeep{});
                 keep.blocks.emplace_back("TySh", kept(doc, type_block));
-                keep.text = psd_type::fingerprint(*layer.type, doc, static_cast<std::int64_t>(file_dpi), where.page_w, where.page_h);
+                keep.text = psd_type::fingerprint(*layer.type, doc, doc.page(index), static_cast<std::int64_t>(file_dpi), where.page_w, where.page_h);
                 layer.native_psd = std::move(keep);
             }
             // (layer-styles@1, PC4 E6: its effects, fill opacity and Blend If as its style — drawn by this build)

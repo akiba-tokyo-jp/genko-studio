@@ -1309,7 +1309,10 @@ public:
         if (!alone && turn) return false;
         render::psd::TextLayer body = in_inks(body_text(twin, set, m));
         with_warp(body, twin);
-        if (body.text.empty()) return false;
+        if (body.text.empty()) {  // (nothing a text layer would hold: its picture, nothing lost — the review's P3-5)
+            records_.add(std::move(layer));
+            return true;
+        }
         if (turn) {  // (its matrix over the text's: page pixels to page pixels)
             const auto& t = *turn;
             const auto b = body.transform;
@@ -1610,21 +1613,23 @@ private:
     render::text::Fonts fonts_;
 };
 
-// PC5 G-e (type@1, SPEC.md TEXT-02「PSD・.pcraft の文字」): a page's type layers as Photoshop's text layers, each with its
-// picture, settings, masks and style — whatever way the lines are written (the type layers are Photoshop's text layers,
-// not the lines' pictures): one read from a PSD and the same since as the TySh block it came with; a point or box text of
+// PC5 G-e (type@1, SPEC.md TEXT-02「PSD・.pcraft の文字」): a page's type layers in a PSD written 文字を編集可能なレイヤーとして
+// 保持 (`editable`; 見た目優先で画像化: their pictures, as before G-e — the review's P2-4, the coordinator's decision (a)) as
+// Photoshop's text layers, each with its picture, settings, masks and style: one read from a PSD and the same since — its
+// record and styles, the resolution, the page's pixels and colour mode — as the TySh block it came with; a point or box text of
 // nothing PSD text cannot keep as its text, runs, paragraphs, styles, matrix and anti-alias (render/psd_type::text_of);
 // another (set in its balloon) as the lettering sets it (PSD-01's way: EditableLines::add_type); one using what PSD text
 // cannot keep (psd_text_unsupported) as its pixels — a strict editable export has stopped before (check_psd_text).
 class TypeLayers {
 public:
-    TypeLayers(Records& records, const core::Document& episode, const core::Page& page, int dpi, PsdTextReport& report, const core::PageColor* ink)
-        : records_(records), episode_(episode), page_(page), dpi_(dpi), report_(report), ink_(ink),
+    TypeLayers(Records& records, const core::Document& episode, const core::Page& page, int dpi, PsdTextReport& report, const core::PageColor* ink,
+               bool editable)
+        : records_(records), episode_(episode), page_(page), dpi_(dpi), report_(report), ink_(ink), editable_(editable),
           lines_(records, episode, dpi, records.size(), core::py_int(page.index.json()), report, ink) {}
 
     void add(render::PageLayer&& layer) {
         const core::Layer& own = *layer.type;
-        if (!own.type) {
+        if (!own.type || !editable_) {  // (見た目優先で画像化: its picture)
             records_.add(std::move(layer));
             return;
         }
@@ -1632,7 +1637,7 @@ public:
         const render::Size size = records_.size();
         // (read from a PSD and the same since — the record, the resolution, the page's pixels —: its block as it was)
         if (own.native_psd && !own.native_psd->text.empty() &&
-            own.native_psd->text == render::psd_type::fingerprint(record, episode_, dpi_, size.width, size.height)) {
+            own.native_psd->text == render::psd_type::fingerprint(record, episode_, page_, dpi_, size.width, size.height)) {
             for (const auto& [key, ref] : own.native_psd->blocks) {
                 if (key != "TySh") continue;
                 if (const core::Bytes bytes = kept_psd_file(episode_, ref)) {
@@ -1669,7 +1674,8 @@ public:
             if (lines_.add_type(twin, std::move(layer), turn)) return;
             features.emplace_back("type_turned");
         }
-        PsdTextIssue issue{core::py_int(page_.index.json()), own.id, detail::words_of(twin.text, 24), std::move(features)};
+        // (a type layer's: `layer` its id, `line` none — the review's P3-9)
+        PsdTextIssue issue{core::py_int(page_.index.json()), std::string(), detail::words_of(twin.text, 24), std::move(features)};
         issue.layer = own.id;
         report_.rasterized.push_back(std::move(issue));
         records_.add(std::move(layer));  // (its pixels)
@@ -1688,6 +1694,7 @@ private:
     int dpi_;
     PsdTextReport& report_;
     const core::PageColor* ink_;
+    bool editable_;
     EditableLines lines_;
     render::text::Fonts fonts_;
 };
@@ -2047,7 +2054,7 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
     PsdTextReport type_report;
-    TypeLayers types(records, episode, page, static_cast<int>(dpi), report != nullptr ? *report : type_report, &color);  // (PC5 G-e)
+    TypeLayers types(records, episode, page, static_cast<int>(dpi), report != nullptr ? *report : type_report, &color, text.editable);  // (PC5 G-e)
     const auto each = [&](render::PageLayer&& layer) {
         if (layer.type != nullptr) {  // (PC5 G-e: a type layer as a text layer)
             types.add(std::move(layer));
@@ -2140,7 +2147,7 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
     PsdTextReport type_report;
-    TypeLayers types(records, episode, page, static_cast<int>(dpi), report != nullptr ? *report : type_report, nullptr);  // (PC5 G-e)
+    TypeLayers types(records, episode, page, static_cast<int>(dpi), report != nullptr ? *report : type_report, nullptr, text.editable);  // (PC5 G-e)
     const auto each = [&](render::PageLayer&& layer) {
         if (layer.type != nullptr) types.add(std::move(layer));  // (PC5 G-e: a type layer as a text layer)
         else records.add(std::move(layer));
@@ -2334,7 +2341,7 @@ std::string page_psd_bytes(const core::Document& episode, const core::Page& page
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
     PsdTextReport type_report;
-    TypeLayers types(records, episode, page, static_cast<int>(dpi), report != nullptr ? *report : type_report, nullptr);  // (PC5 G-e)
+    TypeLayers types(records, episode, page, static_cast<int>(dpi), report != nullptr ? *report : type_report, nullptr, text.editable);  // (PC5 G-e)
     const auto each = [&](render::PageLayer&& layer) {
         if (layer.type != nullptr) types.add(std::move(layer));  // (PC5 G-e: a type layer as a text layer)
         else records.add(std::move(layer));
@@ -2418,7 +2425,7 @@ std::string contents_psd_bytes(const core::Document& episode, const core::Page& 
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
     PsdTextReport type_report;
-    TypeLayers types(records, episode, page, static_cast<int>(dpi), type_report, nullptr);  // (PC5 G-e)
+    TypeLayers types(records, episode, page, static_cast<int>(dpi), type_report, nullptr, false);  // (PC5 G-e)
     const auto each = [&](render::PageLayer&& layer) {
         if (layer.name == "紙" || layer.name == "コマ枠" || layer.name == "ノンブル") return;  // (the contents' own: no paper, borders or nombre)
         if (layer.type != nullptr) types.add(std::move(layer));  // (PC5 G-e: a type layer as a text layer)

@@ -63,6 +63,7 @@ struct Sheets {
     std::map<std::string, std::string> taken;  // (kind, name and keys → the book's id)
     std::vector<std::string> added;            // (the ids made, in order)
     bool full = false;                         // (a kind past its 512: not taken, said)
+    bool full_char = false, full_para = false; // (which: the rest of that kind not worked out — the review's P3-6)
 };
 
 // What a text layer became: its record (none: the layer is read as its pixels, `why` in words) and what is said of it.
@@ -118,7 +119,9 @@ bool read_as_pixels();
 // on a page of these pixels — "sha256:…".
 std::string fingerprint(const core::StoryLine& record, std::int64_t dpi, std::int64_t width_px, std::int64_t height_px);
 // The same with the styles the record takes in `book` (Basic Paragraph and those it names, as they are: a style redefined
-// since, its look is not the block's) — what psd-keep@1's `text` holds.
-std::string fingerprint(const core::StoryLine& record, const core::Document& book, std::int64_t dpi, std::int64_t width_px, std::int64_t height_px);
+// since, its look is not the block's) and the colour mode of its page (an RGB document's FillColor is not a CMYK one's:
+// the review's P3-3) — what psd-keep@1's `text` holds.
+std::string fingerprint(const core::StoryLine& record, const core::Document& book, const core::Page& page, std::int64_t dpi, std::int64_t width_px,
+                        std::int64_t height_px);
 
 }  // namespace genko::render::psd_type

@@ -167,16 +167,24 @@ const Json* same_style(const Json* styles, core::type_styles::Kind kind, const s
     if (styles == nullptr) return nullptr;
     const Json* list = key(*styles, kind == core::type_styles::Kind::Character ? "character" : "paragraph");
     if (list == nullptr || !list->is_array()) return nullptr;
+    // (the name, or the name with the number unique_name gave it when it met another of the name: the review's P3-1)
+    const auto named = [&](const std::string& given) {
+        if (given == name) return true;
+        if (given.size() <= name.size() + 1 || given.compare(0, name.size() + 1, name + " ") != 0) return false;
+        return std::all_of(given.begin() + static_cast<std::ptrdiff_t>(name.size() + 1), given.end(), [](char c) { return c >= '0' && c <= '9'; });
+    };
     for (const Json& s : *list) {
-        if (s.value("name", std::string()) != name) continue;
+        const Json* given = key(s, "name");
+        if (given == nullptr || !given->is_string() || !named(given->get<std::string>())) continue;
         // (its attributes the same: what it holds of char and para — an empty part not written)
+        bool same = true;
         for (const char* part : {"char", "para"}) {
             const Json* theirs = key(s, part);
             const Json* mine = key(item, part);
             const bool none_theirs = theirs == nullptr || theirs->empty(), none_mine = mine == nullptr || mine->empty();
-            if (none_theirs != none_mine || (!none_theirs && *theirs != *mine)) return nullptr;
+            if (none_theirs != none_mine || (!none_theirs && *theirs != *mine)) same = false;
         }
-        return &s;
+        if (same) return &s;
     }
     return nullptr;
 }
@@ -188,6 +196,7 @@ std::optional<std::string> take_sheet(core::Document& doc, Sheets& sheets, core:
     const std::string seen = std::string(character ? "c" : "p") + "\n" + psd::utf8_of(sheet.name) + "\n" + sheet.data.dump() + "\n" +
                              std::to_string(sheet.default_sheet);
     if (const auto it = sheets.taken.find(seen); it != sheets.taken.end()) return it->second;
+    if (character ? sheets.full_char : sheets.full_para) return std::nullopt;
     const Json* styles = doc.type_styles ? &*doc.type_styles : nullptr;
     Json item = Json::object();
     if (character) {
@@ -205,6 +214,7 @@ std::optional<std::string> take_sheet(core::Document& doc, Sheets& sheets, core:
     const Json* list = styles != nullptr ? key(*styles, character ? "character" : "paragraph") : nullptr;
     if (list != nullptr && list->is_array() && list->size() >= 512) {
         sheets.full = true;
+        (character ? sheets.full_char : sheets.full_para) = true;
         return std::nullopt;
     }
     item["id"] = core::type_styles::next_id(styles, kind);
@@ -443,6 +453,14 @@ void take_sheets(const psd::TextLayer& t, const Frame& frame, core::Document& do
 
 Read read_text(const psd::TextLayer& t, const Frame& frame, core::Document& doc, Sheets& sheets) {
     Read out;
+    // (a text past what a type layer holds by its UTF-16 alone — at most 16 units a grapheme — said before it is spread
+    // into code points and graphemes outside the reading's budget: the review's P2-3)
+    const auto too_long = [&](std::size_t units) {
+        if (units <= type_ops::kMaxTypeText * 16) return false;
+        out.why = "文字が多すぎます（" + std::to_string(type_ops::kMaxTypeText) + " 字まで）";
+        return true;
+    };
+    if (too_long(t.text.size()) || (t.text.empty() && too_long(t.engine_text.size()))) return out;
     std::u16string text16 = t.text;
     if (text16.empty() && !t.engine_text.empty()) {
         text16 = t.engine_text;
@@ -759,7 +777,7 @@ std::optional<psd::TextLayer> text_of(const core::StoryLine& record, const core:
             for (std::size_t p = bounds[static_cast<std::size_t>(g)]; p < bounds[static_cast<std::size_t>(g) + 1]; ++p) {
                 char32_t c = points[p];
                 std::string name;
-                if (font == nullptr && postscript != nullptr && postscript->is_string()) name = postscript->get<std::string>();
+                if ((font == nullptr || !font->is_string()) && postscript != nullptr && postscript->is_string()) name = postscript->get<std::string>();
                 else name = font_name(fonts.path_for(face, std::u32string(1, c == U'\n' || c < 0x20 ? U' ' : c)));
                 s.font = name;
                 if (c == U'\n') c = U'\r';
@@ -1264,7 +1282,8 @@ PixelsForTest::PixelsForTest() { ++pixels_for_test; }
 PixelsForTest::~PixelsForTest() { --pixels_for_test; }
 bool read_as_pixels() { return pixels_for_test.load() > 0; }
 
-std::string fingerprint(const core::StoryLine& record, const core::Document& book, std::int64_t dpi, std::int64_t width_px, std::int64_t height_px) {
+std::string fingerprint(const core::StoryLine& record, const core::Document& book, const core::Page& page, std::int64_t dpi, std::int64_t width_px,
+                        std::int64_t height_px) {
     // (the styles it takes — Basic Paragraph and those it names — as they are: one redefined, its look not the block's)
     const Json* all = book.type_styles ? &*book.type_styles : nullptr;
     Json styles = Json::array({all != nullptr && all->is_object() && all->contains("basic") ? (*all)["basic"] : Json()});
@@ -1284,7 +1303,11 @@ std::string fingerprint(const core::StoryLine& record, const core::Document& boo
             }
         }
     }
-    return core::bytes_ref(fingerprint(record, dpi, width_px, height_px) + "\n" + styles.dump());
+    // (the page's colour mode: inks of a space and depth, an RGB page of a depth, or 8-bit RGB)
+    const std::string mode = page.color ? "ink " + std::to_string(static_cast<int>(page.color->space)) + " " + std::to_string(page.color->depth)
+                             : page.rgb ? "rgb " + std::to_string(page.rgb->depth)
+                                        : std::string("rgb 8");
+    return core::bytes_ref(fingerprint(record, dpi, width_px, height_px) + "\n" + styles.dump() + "\n" + mode);
 }
 
 std::string fingerprint(const core::StoryLine& record, std::int64_t dpi, std::int64_t width_px, std::int64_t height_px) {

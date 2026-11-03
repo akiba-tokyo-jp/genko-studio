@@ -332,6 +332,11 @@ private slots:
             std::string where;
             QVERIFY2(genko::test::same_content(theirs[file], own_view(file), &where), where.c_str());
             Json& layers = theirs[file]["layers"];
+            if (!editable) {  // (見た目優先で画像化: the type layers their pictures, as before G-e — nothing said)
+                for (const char* name : {"/横", "/縦", "/グラデ", "/フキダシ付き"}) QCOMPARE(layers[name]["kind"], Json("pixel"));
+                QVERIFY(report.rasterized.empty() && report.text_layers == 0);
+                continue;
+            }
             QCOMPARE(layers["/横"]["kind"], Json("type"));
             QCOMPARE(layers["/縦"]["kind"], Json("type"));
             QCOMPARE(layers["/グラデ"]["kind"], Json("pixel"));
@@ -340,6 +345,7 @@ private slots:
             QCOMPARE(layers["フキダシ付き/フキダシ"]["kind"], Json("pixel"));
             QCOMPARE(report.rasterized.size(), std::size_t{1});
             QCOMPARE(report.rasterized.front().layer, std::string("t4"));
+            QVERIFY(report.rasterized.front().line.empty());  // (a type layer's: `line` none — the review's P3-9)
             Json& across = layers["/横"]["text"];
             QCOMPARE(across["text"], Json("Hello 1/2\r二行目の文字"));
             QCOMPARE(across["orientation"], Json("Hrzn"));
@@ -419,7 +425,8 @@ private slots:
         const auto again = [&](const genko::core::Document& book, const char* name) {
             const QString at = path(QStringLiteral("type-again/%1.psd").arg(QString::fromLatin1(name)));
             QDir().mkpath(path(QStringLiteral("type-again")));
-            (void)genko::formats::export_page_psd(book, book.page(0), genko::core::path_from_utf8(at.toStdString()), kDpi);
+            (void)genko::formats::export_page_psd(book, book.page(0), genko::core::path_from_utf8(at.toStdString()), kDpi,
+                                                  genko::formats::PsdText{true, true});
             return blocks(genko::test::read_bytes(at));
         };
         const auto same = again(opened.doc, "same");
@@ -437,7 +444,8 @@ private slots:
         QVERIFY(psd::read_tysh(changed.at("横")).text == u"Changed");
         QVERIFY(changed.at("縦") == original.at("縦"));
         const QString other = path(QStringLiteral("type-again/dpi.psd"));
-        (void)genko::formats::export_page_psd(loaded, loaded.page(0), genko::core::path_from_utf8(other.toStdString()), 200);
+        (void)genko::formats::export_page_psd(loaded, loaded.page(0), genko::core::path_from_utf8(other.toStdString()), 200,
+                                              genko::formats::PsdText{true, true});
         QVERIFY(blocks(genko::test::read_bytes(other)).at("横") != original.at("横"));
         // (a style it takes changed: anew; one that takes none, as it was)
         const std::string cs = (*loaded.type_styles)["character"][0]["id"].get<std::string>();
@@ -446,6 +454,51 @@ private slots:
         const auto after_style = again(restyled, "restyled");
         QVERIFY(after_style.at("横") != original.at("横"));
         QVERIFY(after_style.at("縦") == original.at("縦"));
+        // (its anti-alias, matrix, anchor or warp changed: anew — the fingerprint's watch, the review's missing test (5))
+        const std::string down_id = layer_named(loaded.page(0), "縦")->id;
+        for (const Json& change : {Json{{"antialias", "crisp"}}, Json{{"transform", Json::array({0.9, 0.1, -0.1, 0.9, 1, 2})}},
+                                   Json{{"box", Json::array({118, 30, 30, 90})}}, Json{{"warp", Json{{"style", "arc"}, {"bend", 20}}}}}) {
+            Json op{{"op", "edit_type"}, {"page", 1}, {"layer_id", down_id}};
+            for (const auto& [k, v] : change.items()) op[k] = v;
+            const auto moved = again(run_ops(loaded, Json::array({op})), "changed-down");
+            QVERIFY2(moved.at("縦") != original.at("縦"), change.dump().c_str());
+        }
+        // (its page made CMYK: anew — the colour mode in the fingerprint, the review's P3-3)
+        const genko::core::Document cmyk = run_ops(loaded, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}}}));
+        QVERIFY(again(cmyk, "cmyk").at("縦") != original.at("縦"));
+        // (the image way: no text layer — its pictures, the kept block not written)
+        const QString image = path(QStringLiteral("type-again/image.psd"));
+        (void)genko::formats::export_page_psd(loaded, loaded.page(0), genko::core::path_from_utf8(image.toStdString()), kDpi);
+        QVERIFY(blocks(genko::test::read_bytes(image)).empty());
+    }
+
+    // PC5 G-e (the review's P2-1): opening a PSD (the window's, the CLI's and MCP's 開く) says what of its text layers it
+    // could not hold — a font not among the bundled ones by its PostScript name, a text layer opened as its pixels and why.
+    void openingSaysTheText() {
+        genko::core::Document doc = genko::core::new_episode("書体", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        doc = run_ops(doc, Json::parse(R"([
+            {"op": "add_type_layer", "page": 1, "text": "Arial", "point": [20, 40], "wrap": "horizontal", "new_id": "a", "title": "書体",
+             "char": {"postscript": "ArialMT"}},
+            {"op": "add_type_layer", "page": 1, "text": "壊す", "point": [20, 80], "wrap": "horizontal", "new_id": "b", "title": "壊す"}])"));
+        const std::string file = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(path("notes").toStdString()), kDpi,
+                                                                  genko::formats::PsdText{true, false})
+                                     .front()
+                                     .string();
+        std::string bytes = genko::test::read_bytes(QString::fromStdString(file));
+        {  // (the second's TySh made one of another version: not read)
+            const psd::File read = psd::File::read(bytes);
+            for (const auto& layer : read.layers()) {
+                if (layer.name != "壊す") continue;
+                const std::size_t at = bytes.find(std::string(*read.text_block(layer)));
+                QVERIFY(at != std::string::npos);
+                bytes[at + 1] = 2;
+            }
+        }
+        const genko::formats::Opened opened = genko::formats::open_file(bytes, "notes.psd");
+        std::string all;
+        for (const std::string& n : opened.notes) all += n + "\n";
+        QVERIFY2(all.find("ArialMT") != std::string::npos && all.find("既定の書体") != std::string::npos, all.c_str());
+        QVERIFY2(all.find("文字レイヤー「壊す」は画素で開きました（文字として読めません") != std::string::npos, all.c_str());
     }
 
     // PC5 G-e, the review of J-b's P2-4's way: a book opened from a PSD with text layers before G-e (its text layers its

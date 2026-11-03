@@ -232,6 +232,7 @@ private:
     std::string word() {
         const std::size_t from = at_;
         while (at_ < data_.size() && !ends(data_[at_])) ++at_;
+        spend(at_ - from);  // (PC5 G-e, the review's P3-6: before it is made)
         return std::string(data_.substr(from, at_ - from));
     }
 
@@ -290,9 +291,9 @@ private:
                     if (at_ >= data_.size()) broken("a text in the text engine's data does not end");
                     b = data_[at_++];
                 }
+                spend(2);  // (its bytes and its UTF-16 units, before they are made: the review's P3-6)
                 bytes += b;
             }
-            spend(bytes.size() * 2);  // (its bytes and its UTF-16 units)
             if (bytes.size() >= 2 && static_cast<unsigned char>(bytes[0]) == 0xfe && static_cast<unsigned char>(bytes[1]) == 0xff) {
                 for (std::size_t i = 2; i + 1 < bytes.size(); i += 2) {
                     out.text.push_back(static_cast<char16_t>((static_cast<unsigned char>(bytes[i]) << 8) | static_cast<unsigned char>(bytes[i + 1])));

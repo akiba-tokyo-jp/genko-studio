@@ -258,10 +258,12 @@ std::vector<PsdTextIssue> psd_text_issues(const core::Document& episode, std::in
             out.push_back(PsdTextIssue{core::py_int(page->index.json()), line->id, detail::words_of(line->text, 24), std::move(features)});
         }
         for (const core::Layer& layer : page->layers) {  // (PC5 G-e: its type layers shown)
-            if (!core::type_text::is_type_layer(layer) || !layer.visible || !layer.exportable) continue;
+            // (a hidden one too where the PSD writes the hidden layers — a page with layer comps: the review's P3-5)
+            const bool hidden_written = page->layer_comps && !page->layer_comps->comps.empty();
+            if (!core::type_text::is_type_layer(layer) || (!layer.visible && !hidden_written) || !layer.exportable) continue;
             std::vector<std::string> features = detail::type_layer_features(layer, page->index, dpi, font_path);
             if (features.empty()) continue;
-            PsdTextIssue issue{core::py_int(page->index.json()), layer.id, detail::words_of(layer.type->text, 24), std::move(features)};
+            PsdTextIssue issue{core::py_int(page->index.json()), std::string(), detail::words_of(layer.type->text, 24), std::move(features)};
             issue.layer = layer.id;
             out.push_back(std::move(issue));
         }

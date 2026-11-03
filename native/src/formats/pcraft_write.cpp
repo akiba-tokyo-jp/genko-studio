@@ -751,9 +751,12 @@ Json layer_json(Ctx& ctx, const std::string& name, const core::Layer* layer, Jso
             for (const char c : *layer->link) n = (n ^ static_cast<unsigned char>(c)) * 1099511628211ull;
             out["link_group"] = n >> 12;
         }
-        if (layer->native_psd) {
+        // (PC5 G-e, the review's P2-2: what written_keep keeps, never a text layer's block — upstream writes a text layer's
+        // TySh anew from its text, and a layer written as pixels must not carry its text of before)
+        if (const std::optional<core::PsdLayerKeep> keep = core::written_keep(*layer)) {
             Json blocks = Json::array();
-            for (const auto& [key, ref] : layer->native_psd->blocks) {
+            for (const auto& [key, ref] : keep->blocks) {
+                if (core::psd_text_key(key)) continue;
                 if (const auto bytes = file_bytes(ctx.doc, ref, core::kPsdBlockSuffix)) {
                     blocks.push_back(Json::array({pc::hex_of(key), ctx.objects.blob(*bytes)}));
                 } else {
@@ -761,7 +764,7 @@ Json layer_json(Ctx& ctx, const std::string& name, const core::Layer* layer, Jso
                 }
             }
             out["psd_blocks"] = std::move(blocks);
-            if (layer->native_psd->id && *layer->native_psd->id >= 0 && *layer->native_psd->id <= 0xffffffff) out["psd_id"] = *layer->native_psd->id;
+            if (keep->id && *keep->id >= 0 && *keep->id <= 0xffffffff) out["psd_id"] = *keep->id;
         }
     } else if (shown != nullptr) {
         if (shown->mask) {

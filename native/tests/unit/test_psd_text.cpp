@@ -14,6 +14,7 @@
 
 #include <QCryptographicHash>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QTemporaryDir>
 
@@ -42,6 +43,9 @@
 #include "render/psd.hpp"
 #include "render/psd_text.hpp"
 #include "render/psd_type.hpp"
+#include "render/ops_type.hpp"
+#include "core/ink.hpp"
+#include "core/psd_keep.hpp"
 #include "render/text/lettering.hpp"
 #include "core/type_text.hpp"
 #include "testsupport.hpp"
@@ -513,13 +517,20 @@ private slots:
         for (const char* font : {kGothic, kMincho, kMaru, kSfx}) {
             QVERIFY2(std::find(report_.fonts.begin(), report_.fonts.end(), font) != report_.fonts.end(), font);
         }
+        QStringList shas;
+        bool same = true;
         for (std::size_t i = 0; i < files.size(); ++i) {
             const Read& page = editable_page(i);
             QVERIFY(page.file.merged()->tobytes() == image_page(i).file.merged()->tobytes());
             QCOMPARE(page.file.dpi(), double{kDpi});
             const std::string bytes = genko::test::read_bytes(QString::fromStdString(files[i].string()));
             QVERIFY(bytes.find("glyf") == std::string::npos && bytes.find("OTTO") == std::string::npos);
+            // (PC5 G-e: the same bytes as before the type layers' keys — psd_book_hashes.hpp)
+            const QString sha = QString::fromLatin1(QCryptographicHash::hash(QByteArray::fromStdString(bytes), QCryptographicHash::Sha256).toHex());
+            shas << sha;
+            same = same && sha == QString::fromLatin1(genko::test::kPsdBookEditable[i]);
         }
+        QVERIFY2(same, qPrintable(shas.join(QStringLiteral(" "))));
     }
 
     // color-mode@1 (群D): the editable PSD of a CMYK page (mode 4) and a Lab one (mode 9) — text layers as on an RGB
@@ -1251,6 +1262,90 @@ private slots:
         QVERIFY2(read.record.has_value(), read.why.c_str());
         QCOMPARE(read.record->text, std::string("a\xef\xbf\xbd" "b\xef\xbf\xbd"));
         QVERIFY(Json::parse(read.record->native_type->dump()).is_object());
+    }
+
+    // PC5 G-e (the review's P2-3): a text past what a type layer holds told by its UTF-16 alone — before it is spread into code
+    // points and graphemes outside the reading's budget —, quickly; read through its TySh block too.
+    void hugeTextIsSaidFirst() {
+        psd::TextLayer huge;
+        huge.text = std::u16string(genko::render::type_ops::kMaxTypeText * 16 + 1, u'あ');
+        Document doc = a_book();
+        genko::render::psd_type::Sheets sheets;
+        QElapsedTimer timer;
+        timer.start();
+        auto read = genko::render::psd_type::read_text(huge, genko::render::psd_type::Frame{}, doc, sheets);
+        QVERIFY(!read.record && read.why.find("多すぎ") != std::string::npos);
+        huge.engine_text = huge.text + u"\r";
+        huge.text.clear();
+        read = genko::render::psd_type::read_text(huge, genko::render::psd_type::Frame{}, doc, sheets);
+        QVERIFY(!read.record && read.why.find("多すぎ") != std::string::npos);
+        QVERIFY2(timer.elapsed() < 2000, qPrintable(QString::number(timer.elapsed())));
+        psd::TextLayer written;
+        written.text = std::u16string(4 * 1024 * 1024, u'a');  // (8 MB of Txt, twenty-odd times what a type layer holds)
+        psd::TextStyle style;
+        written.runs = {{written.text.size() + 1, style}};
+        written.paragraphs = {{written.text.size() + 1, 0}};
+        const psd::TextLayer back = psd::read_tysh(psd::tysh(written));
+        timer.restart();
+        read = genko::render::psd_type::read_text(back, genko::render::psd_type::Frame{}, doc, sheets);
+        QVERIFY(!read.record && read.why.find("多すぎ") != std::string::npos);
+        QVERIFY2(timer.elapsed() < 2000, qPrintable(QString::number(timer.elapsed())));
+    }
+
+    // PC5 G-e (the review's missing test (2)): a layer that is no longer a type layer keeps no text layer's block or
+    // fingerprint — written_keep, the project's JSON and its assets —, and the book does not name type@1 for them; a type
+    // layer keeps both.
+    void textBlocksOnlyOnTypeLayers() {
+        const std::string tysh = "a text layer's block", lnsr = "its kind";
+        genko::core::PsdLayerKeep keep;
+        keep.blocks = {{"TySh", genko::core::bytes_ref(tysh)}, {"lnsr", genko::core::bytes_ref(lnsr)}};
+        keep.text = genko::core::bytes_ref("a fingerprint");
+        genko::core::Layer raster;
+        raster.kind = genko::core::LayerKind::Strokes;  // (a pen layer: any but a type layer)
+        raster.native_psd = keep;
+        const auto written = genko::core::written_keep(raster);
+        QVERIFY(written && written->text.empty() && written->blocks.size() == 1 && written->blocks[0].first == "lnsr");
+        genko::core::Layer type = raster;
+        type.kind = genko::core::LayerKind::Type;
+        QVERIFY(genko::core::written_keep(type) == keep);
+        genko::core::Layer alone = raster;
+        alone.native_psd->blocks.pop_back();
+        QVERIFY(!genko::core::written_keep(alone));
+        Document doc = a_book();
+        doc.native_files[genko::core::bytes_ref(tysh)] = std::make_shared<const std::string>(tysh);
+        doc.native_files[genko::core::bytes_ref(lnsr)] = std::make_shared<const std::string>(lnsr);
+        raster.id = "r1";
+        raster.role = genko::core::LayerRole::User;
+        doc.edit_page(0).layers.push_back(raster);
+        const QString dir = tmp_.path() + QStringLiteral("/kept.genko");
+        genko::test::write_project(doc, genko::core::path_from_utf8(dir.toStdString()));
+        const std::string json = genko::test::read_bytes(dir + QStringLiteral("/project.json"));
+        QVERIFY(json.find(genko::core::bytes_ref(lnsr)) != std::string::npos);
+        QVERIFY(json.find(genko::core::bytes_ref(tysh)) == std::string::npos);
+        QVERIFY(json.find(keep.text) == std::string::npos);
+        QVERIFY(json.find("type@1") == std::string::npos);
+    }
+
+    // PC5 G-e (the review's P3-1): a sheet whose name met another style of the book (a 「強調」 of another colour) read again from
+    // the same file: the style made then — 「強調 2」 —, not one more.
+    void sheetsReadAgainAfterAName() {
+        Document doc = a_book();
+        doc.type_styles = genko::core::type_text::check_type_styles(Json::parse(R"({"character": [{"id": "cs-1", "name": "強調", "char": {"rgb": [200, 0, 0]}}]})"));
+        psd::TextLayer t;
+        t.text = u"青い字";
+        psd::TextStyle s;
+        s.sheet = 0;
+        t.runs = {{4, s}};
+        t.paragraphs = {{4, 0}};
+        t.char_sheets = {psd::NamedSheet{u"強調", Json{{"FillColor", Json::array({0, 0, 255})}}, 0}};
+        for (int i = 0; i < 2; ++i) {
+            genko::render::psd_type::Sheets sheets;
+            QVERIFY(genko::render::psd_type::read_text(t, genko::render::psd_type::Frame{}, doc, sheets).record.has_value());
+        }
+        const Json& list = (*doc.type_styles)["character"];
+        QCOMPARE(list.size(), std::size_t{2});
+        QCOMPARE(list[1]["name"], Json("強調 2"));
+        QCOMPARE(list[1]["char"]["rgb"], Json::array({0, 0, 255}));
     }
 
     // PC5 G-e: a type layer's record as a text layer and back (render/psd_type: text_of, read_text) — a point text across,

@@ -1214,14 +1214,13 @@ private slots:
         std::set<int> ids;
         for (const core::PsdResource& r : page.native_psd->resources) ids.insert(r.id);
         QCOMPARE(ids, (std::set<int>{1037}));
-        // (its PSD: no TySh on a layer but the type layer's own — written anew, not the kept bytes —, one clipping path
+        // (its PSD: no TySh on a layer — the type layer its picture in the image way, PC5 G-e review P2-4 —, one clipping path
         // resource at most)
         const fs::path psd = at("kept.psd");
         formats::export_page_psd(opened.doc, page, psd);
         const render::psd::File file = render::psd::File::read(genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(psd))));
         for (const auto& layer : file.layers()) {
-            for (const auto& block : file.blocks(layer)) QVERIFY(block.key != "TySh" || layer.name == "Type");
-            if (layer.name == "Type") QVERIFY(file.text(layer) && file.text(layer)->text == u"Hello");
+            for (const auto& block : file.blocks(layer)) QVERIFY(block.key != "TySh");
         }
         int clipping = 0, counts = 0;
         for (const auto& r : file.resources()) {
@@ -1321,6 +1320,15 @@ private slots:
         QCOMPARE((*t2->type->native_type)["shape"], Json("box"));
         QVERIFY(std::abs(t2->type->w_mm.value() - 10) < 0.01 && std::abs(t2->type->h_mm.value() - 25) < 0.01);
         QVERIFY(std::find(opened.doc.features.begin(), opened.doc.features.end(), "type@1") != opened.doc.features.end());
+        // (a text layer of JSON of another type — "orientation": 1 —: its pixels, as before G-e, said — the review's P3-4)
+        Json broken = m;
+        for (Json& l : broken["document"]["layers"]) {
+            if (l["name"] == Json("横")) l["content"]["orientation"] = 1;
+        }
+        const formats::Opened odd = formats::open_file(bundle(broken, bytes), "odd.pcraft");
+        const core::Layer* pixels = titled(odd.doc.page(0), "横");
+        QVERIFY(pixels && pixels->kind == core::LayerKind::Raster);
+        QVERIFY2(said(odd.notes, "文字レイヤーは画素"), joined(odd.notes).c_str());
         // (upstream's reader: text layers of that text)
         const QString tool = qEnvironmentVariable("GENKO_PCRAFT_CHECK");
         if (tool.isEmpty()) return;
@@ -1342,6 +1350,36 @@ private slots:
             QVERIFY2((*l)["name"] == Json("横") ? (*l)["text"] == Json("Hi 1/2\nふたつめ") : (*l)["text"] == Json("縦の文字"), l->dump().c_str());
         }
         QCOMPARE(texts, 2);
+    }
+
+    // PC5 G-e (the review's P2-2): a type layer read from a PSD keeps its TySh block — never written into a .pcraft's
+    // psd_blocks: upstream makes a text layer's anew, and one written as its pixels (a 傍点 put on it since) must not carry its
+    // text of before.
+    void textBlocksNeverInPsdBlocks() {
+        const core::Document book = run(small_book(), Json::parse(R"([
+            {"op": "add_type_layer", "page": 1, "text": "読んだ文字", "point": [5, 10], "wrap": "horizontal", "new_id": "t1", "title": "読んだ"}])"));
+        const fs::path psd = at("typed.psd");
+        formats::export_page_psd(book, book.page(0), psd, 150, formats::PsdText{true, false});
+        const formats::Opened opened = formats::open_file(genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(psd))), "typed.psd");
+        const core::Layer* read = titled(opened.doc.page(0), "読んだ");
+        QVERIFY(read && read->kind == core::LayerKind::Type && read->native_psd && !read->native_psd->text.empty());
+        const auto blocks_of = [&](const core::Document& doc, const std::string& title, std::string& kind) {
+            const Json m = manifest_of(formats::pcraft_bytes(doc, 0));
+            for (const Json& l : m["document"]["layers"]) {
+                if (l["name"] != Json(title)) continue;
+                kind = l["content"]["kind"].get<std::string>();
+                return l.value("psd_blocks", Json::array());
+            }
+            return Json();
+        };
+        std::string kind;
+        Json blocks = blocks_of(opened.doc, "読んだ", kind);
+        QCOMPARE(kind, std::string("text"));
+        for (const Json& b : blocks) QVERIFY2(b[0] != Json("54795368"), blocks.dump().c_str());  // ("TySh")
+        const core::Document marked = run(opened.doc, Json::array({Json{{"op", "edit_type"}, {"page", 1}, {"layer_id", read->id}, {"emphasis_runs", Json::array({"文字"})}}}));
+        blocks = blocks_of(marked, "読んだ", kind);
+        QCOMPARE(kind, std::string("raster"));
+        for (const Json& b : blocks) QVERIFY2(b[0] != Json("54795368"), blocks.dump().c_str());
     }
 
     // (with $GENKO_PCRAFT_CHECK, the tool built: upstream's reader reads what this build wrote — every fixture read and

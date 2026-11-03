@@ -398,11 +398,18 @@ private slots:
         for (const render::psd::Layer& layer : file.layers()) {
             if (layer.name != "あいう") continue;
             found = true;
-            QCOMPARE(layer.kind, std::string("text"));
-            QVERIFY(file.text(layer) && file.text(layer)->text == u"あいう");
+            // (見た目優先で画像化, the default: its picture — PC5 G-e, the review's P2-4: a text layer only when kept editable)
+            QCOMPARE(layer.kind, std::string("pixels"));
             QVERIFY(file.image(layer).getbbox().has_value());
         }
         QVERIFY(found);
+        const fs::path editable = core::path_from_utf8(scratch.path().toStdString()) / "typed-editable.psd";
+        formats::export_page_psd(doc, doc.page(0), editable, 200, formats::PsdText{true, false});
+        const render::psd::File as_text = render::psd::File::read(read_text(editable));
+        bool text = false;
+        for (const render::psd::Layer& layer : as_text.layers())
+            text = text || (layer.name == "あいう" && layer.kind == "text" && as_text.text(layer)->text == u"あいう" && as_text.image(layer).getbbox().has_value());
+        QVERIFY(text);
         std::vector<std::string> notes;
         const render::pcraft::Read read = render::pcraft::read(formats::pcraft_bytes(doc, 0, formats::PcraftOptions{}, &notes), "typed");
         bool kept = false;

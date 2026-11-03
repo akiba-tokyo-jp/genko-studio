@@ -207,6 +207,14 @@ std::string corrections_more(const Json& own_read, const Json& python_view, cons
     if (own.contains("results") && own["results"].is_array()) {
         for (Json& r : own["results"]) {
             if (!r.is_object()) continue;
+            // (each text layer opened as its pixels named among the layers made, with why — the review: the reply's shape held)
+            if (const auto pixels = r.find("type_as_pixels"); pixels != r.end()) {
+                for (const Json& p : *pixels) {
+                    const Json layers = r.value("layers", Json::array());
+                    const bool made = std::any_of(layers.begin(), layers.end(), [&](const Json& l) { return l.value("id", Json()) == p.value("id", Json()); });
+                    if (!made || p.value("why", std::string()).empty()) return "a text layer opened as its pixels without why: " + p.dump();
+                }
+            }
             for (const char* key : {"type_layers", "type_as_pixels", "type_fonts_missing", "type_styles", "type_notes"}) r.erase(key);
         }
     }
