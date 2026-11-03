@@ -453,8 +453,10 @@ private slots:
         // 5 (act_type_panel_<panel>), フォントプレビューのサイズ ▸ 6 (act_type_preview_<size>), すべての見つからないフォントを置換・見つからない
         // フォントを解決… (act_type_replace_missing, act_type_resolve_missing), 編集 → スペルチェック… (act_spelling) and 環境設定 → テキスト…
         // (act_prefs_type: its page made) — test_gui_type_panels.
-        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12 and G-d's 20)
-        QCOMPARE(w->actions_by_name().size(), std::size_t{769});
+        // and PC5 I-h's 2 — ファイル → 自動処理 → 写真の切り抜きと角度補正・HDR Pro に統合… (act_crop_straighten_photos,
+        // act_merge_to_hdr_pro) — test_gui_automate.
+        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20 and I-h's 2)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{771});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -536,8 +538,10 @@ private slots:
         QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate")) != nullptr);
         QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate"))->menuAction()->isVisible());
         QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_automate"))),
-                 (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"), QStringLiteral("条件付きモード変更…"),
-                              QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…")}));
+                 (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"),
+                              QStringLiteral("写真の切り抜きと角度補正"), QStringLiteral("|"),  // (PC5 I-h)
+                              QStringLiteral("条件付きモード変更…"), QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…"),
+                              QStringLiteral("|"), QStringLiteral("HDR Pro に統合…")}));  // (PC5 I-h)
         QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_scripts"))),
                  (QStringList{QStringLiteral("画像プロセッサー…"), QStringLiteral("すべての空のレイヤーを削除"), QStringLiteral("すべてのレイヤー効果を統合"),  // (PC5 I-a)
                               QStringLiteral("すべてのマスクを統合"), QStringLiteral("|"),

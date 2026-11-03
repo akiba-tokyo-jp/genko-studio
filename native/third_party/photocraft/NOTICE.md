@@ -326,6 +326,12 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/file_cmds.rs`（716-765 行: `bake` と `flatten_all_effects` — 不透明度・描画モード・クリップを外して効果ごと描き、層の設定に残す）→ `native/src/render/ops_layer_styles.cpp`（`bake_layer_styles`。Genko の境界効果も描き込むこと、8 bit・高精度・インキの道、ブレンド条件を残すことは Genko のもの）。
   - `crates/io/src/blocks.rs`（10-58 行: `parse_brst`・`brst_data`・`locks_from_lspf`・`lspf_from_locks`）→ `native/src/render/import_psd.cpp`（`take_locks`・`take_channels`）・`native/src/formats/psd_export.cpp`（`own_locks`・`basics_blocks`）。`crates/compose/src/lib.rs`（661-690 行: `channel_weights`・`restore_channels` — 外したチャンネルは下の値のまま）→ `native/src/render/page.cpp`（`KeptChannels`。CMYK・Lab・グレーのページ（上流は RGB とグレーだけ）、高精度・インキの道への配線は Genko のもの）・`native/src/render/color_canvas.cpp`・`native/src/render/ink_canvas.cpp`（`keep_channels`）。`crates/format/src/manifest.rs` の `excluded_channels`・`Locks` → `native/src/render/pcraft_read.cpp`・`native/src/formats/pcraft_write.cpp`。
 
+- HDR Pro に統合・写真の切り抜きと角度補正（PC5 I-h）:
+  - `crates/algo/src/hdr.rs`（1-541 行: `estimate_exposures`・`mtb_offset`（G. Ward の MTB）・`sample_pixels`・`response_curve`（Debevec・Malik）・`merge`（帽子形の重み・ゴーストの除去・基準の露出への倍率）・`tone_map` の 4 つの方法、試験の考え）→ `native/src/render/hdr_merge.{hpp,cpp}`（式は同じ。画像は読んだ深さのまま持ち、位置合わせは読むときにずらす。カメラ RAW の線形の光は応答曲線を推定せずにそのまま合成する: Genko の追加）・`native/tests/unit/test_hdr_merge.cpp`。
+  - `crates/algo/src/photo_util.rs`（`solve_dense`・`Normal`・sRGB の曲線）→ `native/src/render/hdr_merge.cpp`。ローカル適応は `crates/algo/src/tone.rs` の `hdr_toning`（PC2c で移した `render/tone_ops.cpp`）を使う。
+  - `crates/algo/src/scancrop.rs`（1-299 行: 背景の中央値・大津のしきい値・閉じて開く・8 近傍の部分・凸包・最小の外接長方形・読む順、試験の考え）→ `native/src/render/scancrop.{hpp,cpp}`（切り出しは `render/resample` の射影で、スキャンの深さのまま）・`native/tests/unit/test_scancrop.cpp`。
+  - `crates/engine/src/photo_cmds.rs`（559-700 行: `merge_to_hdr` — 露出の決め方（引数・EXIF・推定）、真ん中の露出への位置合わせ、モードと方法の引数と範囲、702-755 行: `crop_and_straighten`）→ `native/src/service/automate_photos.{hpp,cpp}`（結果は 開く… と同じ名前の無い本。32 bit は内蔵の linear-srgb）。`crates/algo/src/exif.rs` の `exposure_factor` → `render::hdr::exposure_factor`。
+
 ## 表示・窓・環境設定（PC5 節 H）
 
 - 表示・窓・環境設定の土台（PC5 H-0）:

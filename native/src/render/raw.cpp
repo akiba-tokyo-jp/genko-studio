@@ -834,6 +834,33 @@ Developed develop(std::string_view bytes, const Json& raw, const Options& option
     return out;
 }
 
+Developed develop_linear(std::string_view bytes, const Options& options) {
+    const core::raw::Develop d;
+    Stage stage;
+    raw_stage(stage, bytes, d, options, false);
+    const int w = stage.mem.image->width, h = stage.mem.image->height;
+    const Profile linear(linear_prophoto());
+    const Profile output(space_profile("linear-srgb"));
+    const auto to_output = float_transform(linear.p, output.p);
+    std::string rgb(std::size_t(w) * std::size_t(h) * 3 * sizeof(float), '\0');
+    std::vector<float> row(std::size_t(w) * 3);
+    for (int y = 0; y < h; ++y) {
+        if (y % 64 == 0 && options.stopped && options.stopped()) throw Cancelled();
+        linear_row(stage, y, row.data());
+        cmsDoTransform(to_output->t, row.data(), row.data(), static_cast<cmsUInt32Number>(w));
+        for (float& v : row) v = std::isfinite(v) ? std::max(v, 0.0f) : 0.0f;  // (out of sRGB's gamut: no negative light)
+        std::memcpy(rgb.data() + std::size_t(y) * row.size() * sizeof(float), row.data(), row.size() * sizeof(float));
+    }
+    stage.mem.reset();
+    Developed out;
+    out.info = stage.info;
+    out.multipliers = stage.multipliers;
+    out.notes = std::move(stage.notes);
+    out.picture = codecs::CodecImage::from_bytes(std::uint32_t(w), std::uint32_t(h), codecs::Layout::Rgb, codecs::Sample::F32, std::move(rgb));
+    out.picture.icc = space_icc("linear-srgb");
+    return out;
+}
+
 Preview preview(std::string_view bytes, const core::raw::Develop& develop, int max_side, const Options& options) {
     Options half = options;
     half.half_size = true;

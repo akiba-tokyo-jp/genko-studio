@@ -5,7 +5,8 @@
 // (a folder of each format), 画像を合わせる… and 条件付きモード変更… (the page in front, one Undo), レンズ補正… (a picture without
 // the EXIF's focal length said, nothing written), スクリプトイベントマネージャー… (a script bound: run on the person's save,
 // never on the automatic one; changed since it was bound: not run, said), 参照… (a steps file run on the page, a gate refused
-// before anything runs).
+// before anything runs). PC5 I-h: 写真の切り抜きと角度補正 (the page's photos new books in tabs) and HDR Pro に統合… (its two
+// windows answered: a new book of 32 or 16 bits).
 
 #include <QtTest>
 
@@ -17,19 +18,26 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QPushButton>
+#include <QTableWidget>
 #include <QSpinBox>
 #include <QTemporaryDir>
 
+#include <array>
+#include <cmath>
 #include <memory>
 #include <string>
 
 #include "app/actions.hpp"
 #include "app/automate_dialogs.hpp"
+#include "app/hdr_dialog.hpp"
 #include "app/main_window.hpp"
 #include "app/session.hpp"
+#include "core/color_model.hpp"
 #include "core/paths.hpp"
 #include "formats/copy.hpp"
 #include "formats/open_file.hpp"
+#include "render/codecs/codecs.hpp"
 #include "gui_support.hpp"
 #include "service/automate.hpp"
 #include "service/script_events.hpp"
@@ -136,13 +144,15 @@ private slots:
         Book b;
         QVERIFY(b.window->automate_menu()->menuAction()->isVisible());
         QCOMPARE(items(b.window->automate_menu()), (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"),
-                                                             QStringLiteral("条件付きモード変更…"), QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…")}));
+                                                             QStringLiteral("写真の切り抜きと角度補正"), QStringLiteral("|"),  // (PC5 I-h)
+                                                             QStringLiteral("条件付きモード変更…"), QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…"),
+                                                             QStringLiteral("|"), QStringLiteral("HDR Pro に統合…")}));  // (PC5 I-h)
         // (PC5 I-a: すべての空のレイヤーを削除・すべてのレイヤー効果を統合 after 画像プロセッサー… — test_gui_layers)
         QCOMPARE(items(b.window->scripts_menu()), (QStringList{QStringLiteral("画像プロセッサー…"), QStringLiteral("すべての空のレイヤーを削除"),
                                                             QStringLiteral("すべてのレイヤー効果を統合"), QStringLiteral("すべてのマスクを統合"), QStringLiteral("|"),
                                                             QStringLiteral("スクリプトイベントマネージャー…"), QStringLiteral("|"), QStringLiteral("参照…")}));
         for (const char* name : {"act_batch", "act_create_droplet", "act_conditional_mode_change", "act_fit_image", "act_lens_correction_batch",
-                                 "act_image_processor", "act_script_events", "act_script_browse"}) {
+                                 "act_image_processor", "act_script_events", "act_script_browse", "act_crop_straighten_photos", "act_merge_to_hdr_pro"}) {
             QVERIFY2(b.act(name) != nullptr && b.act(name)->shortcuts().isEmpty(), name);
         }
     }
@@ -409,6 +419,98 @@ private slots:
         b.act("act_script_browse")->trigger();
         QCOMPARE(b.doc().page(0).note, std::string("one"));
         QVERIFY(b.window->status_label()->text().contains(QStringLiteral("手順に入れられません")));
+    }
+
+    // PC5 I-h: 写真の切り抜きと角度補正 — the page in front's photos each a new book in a tab of its own, the page unchanged;
+    // a page with none says so.
+    void cropPhotosInTheWindow() {
+        Book b;
+        const std::size_t w = 400, h = 300;
+        std::vector<float> v(w * h * 3, 0.97f);
+        for (const auto& [cx, cy, pw, ph, angle] : {std::array<double, 5>{110, 100, 140, 100, 5}, std::array<double, 5>{290, 200, 120, 100, -8}}) {
+            const double rad = angle * 3.14159265358979 / 180.0;
+            for (std::size_t y = 0; y < h; ++y)
+                for (std::size_t x = 0; x < w; ++x) {
+                    const double dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+                    if (std::abs(std::cos(rad) * dx + std::sin(rad) * dy) < pw / 2 && std::abs(-std::sin(rad) * dx + std::cos(rad) * dy) < ph / 2)
+                        for (std::size_t c = 0; c < 3; ++c) v[(y * w + x) * 3 + c] = 0.3f + 0.15f * static_cast<float>(c);
+                }
+        }
+        b.window->add_picture_book(
+            formats::picture_book(render::codecs::CodecImage::from_normalized(w, h, render::codecs::Layout::Rgb, render::codecs::Sample::U8, v), "スキャン").doc, {});
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        const std::size_t tabs = b.window->documents().size();
+        const std::int64_t revision = b.doc().revision;
+        b.act("act_crop_straighten_photos")->trigger();
+        QTRY_COMPARE(b.window->documents().size(), tabs + 2);
+        QCOMPARE(b.doc().title, std::string("スキャン のコピー 2"));
+        const auto [pw, ph] = px(b.doc().page(0));
+        QVERIFY2(std::abs(pw - 120) < 6 && std::abs(ph - 100) < 6, qPrintable(QStringLiteral("%1×%2").arg(pw).arg(ph)));
+        QCOMPARE(b.window->documents()[tabs - 1].session->snapshot()->revision, revision);  // (the scan unchanged)
+        // (a page of no photos: nothing made, said)
+        b.open_picture(60, 40);
+        const std::size_t now = b.window->documents().size();
+        b.act("act_crop_straighten_photos")->trigger();
+        QCoreApplication::processEvents();
+        QCOMPARE(b.window->documents().size(), now);
+    }
+
+    // PC5 I-h: HDR Pro に統合… — the exposures chosen (files, and a book open here), the window's preview and its EVs, then a
+    // new book in a tab of its own: 32 bits of linear light (linear-srgb), or 16 bits tone mapped.
+    void mergeToHdrInTheWindow() {
+        Book b;
+        const std::size_t w = 90, h = 30;
+        const auto exposure = [&](float dt) {
+            std::vector<float> v;
+            for (std::size_t y = 0; y < h; ++y)
+                for (std::size_t x = 0; x < w; ++x) {
+                    const float l = std::min(0.004f * std::pow(2.0f, static_cast<float>(x) / w * 10.0f) * (1.0f + 0.2f * std::sin(y * 0.5f)) * dt, 1.0f);
+                    for (int c = 0; c < 3; ++c) v.push_back(l <= 0.0031308f ? 12.92f * l : 1.055f * std::pow(l, 1.0f / 2.4f) - 0.055f);
+                }
+            return render::codecs::CodecImage::from_normalized(w, h, render::codecs::Layout::Rgb, render::codecs::Sample::U8, v);
+        };
+        for (int i = 0; i < 2; ++i) write(b.root / ("e" + std::to_string(i) + ".png"), render::codecs::encode(exposure(i == 0 ? 0.25f : 1.0f), render::codecs::Format::Png));
+        b.window->add_picture_book(formats::picture_book(exposure(4.0f), "明るい").doc, {});
+        for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+        for (const int depth : {32, 16}) {
+            bool previewed = false;
+            b.answers.responder->exec = [&](QDialog* dialog) {
+                if (auto* files = qobject_cast<app::HdrFilesDialog*>(dialog)) {
+                    for (int i = 0; i < 2; ++i) {
+                        auto* item = new QListWidgetItem(QStringLiteral("e%1").arg(i), files->files);
+                        item->setData(Qt::UserRole, QStringLiteral("file:") + q(b.root / ("e" + std::to_string(i) + ".png")));
+                    }
+                    // (開いているファイルを追加: the books open here — the picture in front among them)
+                    const int before = files->files->count();
+                    for (QPushButton* button : files->findChildren<QPushButton*>())
+                        if (button->text() == QStringLiteral("開いているファイルを追加")) button->click();
+                    for (int i = files->files->count() - 1; i >= before; --i)
+                        if (!files->files->item(i)->text().startsWith(QStringLiteral("明るい"))) delete files->files->item(i);
+                    return files->files->count() == 3 ? int(QDialog::Accepted) : int(QDialog::Rejected);
+                }
+                if (auto* hdr = qobject_cast<app::HdrDialog*>(dialog)) {
+                    hdr->mode->setCurrentIndex(hdr->mode->findData(depth));
+                    hdr->refresh();
+                    previewed = !hdr->shown().isNull() && hdr->images->rowCount() == 3 && !hdr->images->item(2, 1)->text().isEmpty();
+                    return int(QDialog::Accepted);
+                }
+                return int(QDialog::Rejected);
+            };
+            const std::size_t tabs = b.window->documents().size();
+            b.act("act_merge_to_hdr_pro")->trigger();
+            QTRY_COMPARE(b.window->documents().size(), tabs + 1);
+            QVERIFY(previewed);
+            const core::Page& page = b.doc().page(0);
+            QCOMPARE(b.doc().title, std::string("HDR"));
+            QVERIFY(page.rgb.has_value());
+            QCOMPARE(page.rgb->depth, depth);
+            if (depth == 32) {
+                QCOMPARE(*page.rgb->icc, *core::builtin_profile("linear-srgb")->bytes);
+            } else {
+                QVERIFY(page.rgb->icc == nullptr);
+            }
+            QCOMPARE(px(page), std::make_pair(double(w), double(h)));
+        }
     }
 };
 
