@@ -236,6 +236,8 @@ struct PageLayer {
     // (PC5 J-a) a hidden layer, given when page_layers is asked for them (`hidden_too`: a PSD of a page with layer comps
     // writes them hidden, so that Photoshop's comps show them)
     bool hidden = false;
+    // (PC5 G-e, type@1) a type layer's picture: that layer (a PSD writes it as Photoshop's text layer, `image` its look)
+    const core::Layer* type = nullptr;
 };
 
 // psd.page_layers(page, episode, dpi), bottom to top: the paper, the page's fills, each visible exported pixel layer

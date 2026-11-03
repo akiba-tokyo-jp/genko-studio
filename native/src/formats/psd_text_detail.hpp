@@ -27,6 +27,13 @@ std::string words_of(const std::string& text, std::size_t count);
 // lettering for).
 std::vector<std::string> line_features(const core::StoryLine& line, std::optional<std::int64_t> dpi = std::nullopt,
                                        const std::optional<std::string>& font_path = std::nullopt);
+// (PC5 G-e) What a type layer of a page uses that its text layer cannot keep: its record's as a line's (line_features), and
+// "type_turned" for one turned (native_type.transform) that is written as the lettering sets it with its balloon, rubies
+// or edge — layers of their own, which do not turn with it. And whether a type layer's record (as a line) has nothing past
+// its text a text layer of its own cannot hold: no balloon, tails, emphasis, rubies or edge (render/psd_type writes it).
+std::vector<std::string> type_layer_features(const core::Layer& layer, const core::Num& page, std::int64_t dpi,
+                                             const std::optional<std::string>& font_path);
+bool type_layer_plain(const core::StoryLine& twin);
 // The line as the editable PSD sets it: a line of Python's holding its ruby_runs by place where the explicit rule finds
 // them (core::ruby::from_runs), as render::text::ruby_places tells them apart.
 core::StoryLine by_place(const core::StoryLine& line);

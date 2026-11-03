@@ -44,6 +44,8 @@
 #include "core/patterns.hpp"
 #include "render/psd_effects.hpp"
 #include "render/psd_text.hpp"
+#include "render/psd_type.hpp"
+#include "core/type_text.hpp"
 #include "render/psd_production.hpp"
 #include "render/smart.hpp"
 #include "render/text/balloons.hpp"
@@ -267,6 +269,11 @@ public:
 
     // (PC3 A3) a smart object's picture written with the blocks of a placed layer (PlacedLayers::blocks)
     void placed(std::function<std::string(const core::Layer&)> blocks) { placed_ = std::move(blocks); }
+    // (PC5 G-e) the next record's text layer's blocks (its TySh, written anew or as kept, and its effects), and a PSB's
+    void text_block(std::string blocks) { text_ = std::move(blocks); }
+    std::string take_text() { return std::exchange(text_, std::string()); }
+    bool is_psb() const { return psb_; }
+    render::Size size() const { return size_; }
     std::string placed_blocks(const render::PageLayer& layer) const {
         return placed_ && layer.smart != nullptr ? placed_(*layer.smart) : std::string();
     }
@@ -444,6 +451,7 @@ public:
         if (layer.shape != nullptr) flags_ = 0x18;  // (bits 3 and 4: its pixel data is not what it shows)
         const std::string blocks = vector_block(layer.vector_mask) + placed_blocks(layer) + (layer.shape != nullptr ? shape_blocks(*layer.shape) : std::string()) +
                                    pattern_blocks(layer) +  // (patterns@1, PC4 E3)
+                                   take_text() +            // (PC5 G-e: a type layer's text)
                                    style_blocks() +         // (layer-styles@1, PC4 E6)
                                    basics_blocks();         // (PC5 I-a: layer-locks@1, blend-channels@1)
         const Image rgba = layer.image.mode() == "RGBA" ? std::move(layer.image) : layer.image.convert("RGBA");
@@ -914,6 +922,7 @@ private:
         }
         for (const auto& [key, ref] : keep.blocks) {
             if (key == "lspf" || key == "lyid" || theirs.contains(key)) continue;
+            if (core::psd_text_key(key)) continue;  // (PC5 G-e: a type layer's text, the writer's to write — kept or anew)
             if (key == "shmd" && own_shmd) continue;  // (PC5 J-a: with the page's items, below)
             if (core::psb_long_key(key) && !same_version) continue;
             if (const core::Bytes bytes = kept_file(ref)) out += render::psd_keep::tagged_block("8BIM", key, *bytes, psb_, false);
@@ -971,6 +980,7 @@ private:
     std::optional<RgbOut> rgb_;
     render::GrayCurve gray_;  // (PC5-0: a 32-bit grey page's tone curve, its lightness written in linear light)
     std::function<std::string(const core::Layer&)> placed_;
+    std::string text_;  // (PC5 G-e)
     std::string records_;
     std::string data_;
     int count_ = 0;
@@ -1280,6 +1290,88 @@ public:
         records_.group("台詞 " + words);
     }
 
+    // PC5 G-e: a type layer without a point or box shape (one set in its balloon, as a line is) — `twin` its record as a
+    // line, `layer` its picture with its settings — written as the lettering sets it (body_text): one text layer of its
+    // picture when it has no balloon, rubies or edge, else a group of its balloon, its text and rubies (a line's) with the
+    // layer's settings, mask and name (its own layer style not on a group: said). `turn`: its matrix at the page's pixels
+    // (native_type.transform), laid over the text's; one turned cannot be laid out as a group (false: the caller draws it).
+    bool add_type(const core::StoryLine& twin_given, render::PageLayer&& layer, const std::optional<std::array<double, 6>>& turn) {
+        const render::text::TextGamma gamma(text_gamma_);
+        const render::text::TypeStyles type_styles(type_styles_);
+        const core::StoryLine twin = detail::by_place(twin_given);
+        detail::font_warnings(twin, page_, font_path_, fonts_, nullptr, report_.warnings);
+        const render::text::EditableLine editable = render::text::editable_line(twin, dpi_, font_path_);
+        const render::text::SetLetters& set = editable.lettering->set;
+        const std::array<double, 6> m = editable.to_page;
+        Image balloon = drawn(twin, render::text::LetterParts{true, false, false, true});
+        const std::optional<render::Box> balloon_box = balloon.getbbox();
+        const bool alone = !balloon_box && set.rubies.empty() && !set.halo;
+        if (!alone && turn) return false;
+        render::psd::TextLayer body = in_inks(body_text(twin, set, m));
+        with_warp(body, twin);
+        if (body.text.empty()) {  // (nothing a text layer would hold: its picture, nothing lost — the review's P3-5)
+            records_.add(std::move(layer));
+            return true;
+        }
+        if (turn) {  // (its matrix over the text's: page pixels to page pixels)
+            const auto& t = *turn;
+            const auto b = body.transform;
+            body.transform = {t[0] * b[0] + t[2] * b[1], t[1] * b[0] + t[3] * b[1], t[0] * b[2] + t[2] * b[3],
+                              t[1] * b[2] + t[3] * b[3], t[0] * b[4] + t[2] * b[5] + t[4], t[1] * b[4] + t[3] * b[5] + t[5]};
+        }
+        const auto [anta, engine] = render::psd_type::anta_of(twin.native_type && twin.native_type->is_object() ? twin.native_type->value("antialias", std::string("smooth")) : "smooth");
+        body.antialias = anta;
+        body.engine_antialias = engine;
+        if (alone) {
+            records_.text_block(tagged("TySh", render::psd::tysh(body)));
+            records_.add(std::move(layer));
+            ++report_.text_layers;
+            return true;
+        }
+        // a group: its balloon, its text with its edge and its rubies, the type layer's settings on the group
+        std::string effects;
+        if (set.halo) {
+            const render::text::Rgb& rgb = set.halo->second;
+            render::psd::Stroke halo;
+            halo.size = static_cast<double>(set.halo->first);
+            halo.rgb = {colour(rgb, 0), colour(rgb, 1), colour(rgb, 2)};
+            if (ink_ != nullptr) {
+                const std::vector<double> ink = render::ink::ink_of(*ink_, halo.rgb);
+                if (ink_->space == core::InkSpace::Cmyk) halo.cmyk = std::array<double, 4>{ink[0], ink[1], ink[2], ink[3]};
+                else halo.lab = std::array<double, 3>{ink[0], ink[1], ink[2]};
+            }
+            effects = tagged("lfx2", render::psd::lfx2(halo));
+        }
+        render::PageLayer end;
+        end.section = "end";
+        records_.add(std::move(end));
+        if (balloon_box) records_.add_part("フキダシ", balloon.crop(*balloon_box), {balloon_box->x0, balloon_box->y0}, {});
+        balloon = Image();
+        {
+            Image letters = drawn(twin, render::text::LetterParts{false, true, false, false});
+            const auto box = letters.getbbox();
+            records_.add_part("本文 #" + twin.id, box ? letters.crop(*box) : letters.crop(render::Box{0, 0, 1, 1}),
+                              box ? render::Point{box->x0, box->y0} : render::Point{0, 0}, tagged("TySh", render::psd::tysh(body)) + effects);
+            ++report_.text_layers;
+        }
+        if (!set.rubies.empty()) {
+            Image rubies = drawn(twin, render::text::LetterParts{false, false, true, false});
+            for (std::size_t k = 0; k < set.rubies.size(); ++k) {
+                const render::text::RubyDrawn& place = set.rubies[k];
+                const render::Box box = on_page(m, place.ruby, 3);
+                Image piece = rubies.crop(box);
+                rubies.paste(Image::create("RGBA", piece.size(), render::Ink{0, 0, 0, 0}), render::Point{box.x0, box.y0});
+                records_.add_part("ルビ「" + render::text::utf8(place.reading) + "」 #" + twin.id + "-r" + std::to_string(place.span), piece, {box.x0, box.y0},
+                                  tagged("TySh", render::psd::tysh(in_inks(ruby_text(set, place, m)))) + effects);
+                ++report_.ruby_layers;
+            }
+        }
+        layer.section = "group";
+        layer.image = Image();
+        records_.add(std::move(layer));
+        return true;
+    }
+
 private:
     Image blank() const { return Image::create("RGBA", size_, render::Ink{0, 0, 0, 0}); }
 
@@ -1518,6 +1610,92 @@ private:
     std::optional<double> text_gamma_;  // (the book's)
     const core::Json* type_styles_ = nullptr;  // (the book's type styles: the episode outlives the lines)
     const core::PageColor* ink_;  // (a CMYK or Lab page's: its colours)
+    render::text::Fonts fonts_;
+};
+
+// PC5 G-e (type@1, SPEC.md TEXT-02「PSD・.pcraft の文字」): a page's type layers in a PSD written 文字を編集可能なレイヤーとして
+// 保持 (`editable`; 見た目優先で画像化: their pictures, as before G-e — the review's P2-4, the coordinator's decision (a)) as
+// Photoshop's text layers, each with its picture, settings, masks and style: one read from a PSD and the same since — its
+// record and styles, the resolution, the page's pixels and colour mode — as the TySh block it came with; a point or box text of
+// nothing PSD text cannot keep as its text, runs, paragraphs, styles, matrix and anti-alias (render/psd_type::text_of);
+// another (set in its balloon) as the lettering sets it (PSD-01's way: EditableLines::add_type); one using what PSD text
+// cannot keep (psd_text_unsupported) as its pixels — a strict editable export has stopped before (check_psd_text).
+class TypeLayers {
+public:
+    TypeLayers(Records& records, const core::Document& episode, const core::Page& page, int dpi, PsdTextReport& report, const core::PageColor* ink,
+               bool editable)
+        : records_(records), episode_(episode), page_(page), dpi_(dpi), report_(report), ink_(ink), editable_(editable),
+          lines_(records, episode, dpi, records.size(), core::py_int(page.index.json()), report, ink) {}
+
+    void add(render::PageLayer&& layer) {
+        const core::Layer& own = *layer.type;
+        if (!own.type || !editable_) {  // (見た目優先で画像化: its picture)
+            records_.add(std::move(layer));
+            return;
+        }
+        const core::StoryLine& record = *own.type;
+        const render::Size size = records_.size();
+        // (read from a PSD and the same since — the record, the resolution, the page's pixels —: its block as it was)
+        if (own.native_psd && !own.native_psd->text.empty() &&
+            own.native_psd->text == render::psd_type::fingerprint(record, episode_, page_, dpi_, size.width, size.height)) {
+            for (const auto& [key, ref] : own.native_psd->blocks) {
+                if (key != "TySh") continue;
+                if (const core::Bytes bytes = kept_psd_file(episode_, ref)) {
+                    records_.text_block(render::psd_keep::tagged_block("8BIM", "TySh", *bytes, records_.is_psb(), false));
+                    records_.add(std::move(layer));
+                    ++report_.text_layers;
+                    return;
+                }
+            }
+        }
+        const core::StoryLine twin = core::type_text::line_of(own, page_.index);
+        std::vector<std::string> features = detail::type_layer_features(own, page_.index, dpi_, episode_.font_path);
+        const double k = static_cast<double>(dpi_) / 25.4;
+        const std::string shape = record.native_type && record.native_type->is_object() ? record.native_type->value("shape", std::string()) : std::string();
+        if (features.empty() && !shape.empty() && detail::type_layer_plain(twin)) {
+            std::optional<render::psd::TextLayer> text =
+                render::psd_type::text_of(record, episode_, k, [this](const std::string& font) { return font_name(font); });
+            if (text) {
+                if (ink_ != nullptr && ink_->space == core::InkSpace::Cmyk) {  // (color-mode@1: a CMYK document's text colours as its inks)
+                    for (render::psd::StyleRun& run : text->runs) {
+                        const std::vector<double> ink = render::ink::ink_of(*ink_, run.style.fill);
+                        run.style.fill_cmyk = std::array<double, 4>{ink[0], ink[1], ink[2], ink[3]};
+                    }
+                }
+                records_.text_block(tagged("TySh", render::psd::tysh(*text)));
+                records_.add(std::move(layer));
+                ++report_.text_layers;
+                return;
+            }
+        }
+        if (features.empty()) {
+            std::optional<std::array<double, 6>> turn;
+            if (const auto t = core::type_text::transform_of(record)) turn = std::array<double, 6>{(*t)[0], (*t)[1], (*t)[2], (*t)[3], (*t)[4] * k, (*t)[5] * k};
+            if (lines_.add_type(twin, std::move(layer), turn)) return;
+            features.emplace_back("type_turned");
+        }
+        // (a type layer's: `layer` its id, `line` none — the review's P3-9)
+        PsdTextIssue issue{core::py_int(page_.index.json()), std::string(), detail::words_of(twin.text, 24), std::move(features)};
+        issue.layer = own.id;
+        report_.rasterized.push_back(std::move(issue));
+        records_.add(std::move(layer));  // (its pixels)
+    }
+
+private:
+    std::string font_name(const std::string& path) {
+        std::string name = detail::font_name(fonts_, path);
+        if (std::find(report_.fonts.begin(), report_.fonts.end(), name) == report_.fonts.end()) report_.fonts.push_back(name);
+        return name;
+    }
+
+    Records& records_;
+    const core::Document& episode_;
+    const core::Page& page_;
+    int dpi_;
+    PsdTextReport& report_;
+    const core::PageColor* ink_;
+    bool editable_;
+    EditableLines lines_;
     render::text::Fonts fonts_;
 };
 
@@ -1875,7 +2053,13 @@ std::string page_psd_inks(const core::Document& episode, const core::Page& page,
     PlacedLayers placed(episode, dpi, depth);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
+    PsdTextReport type_report;
+    TypeLayers types(records, episode, page, static_cast<int>(dpi), report != nullptr ? *report : type_report, &color, text.editable);  // (PC5 G-e)
     const auto each = [&](render::PageLayer&& layer) {
+        if (layer.type != nullptr) {  // (PC5 G-e: a type layer as a text layer)
+            types.add(std::move(layer));
+            return;
+        }
         if (!layer.section.empty() || layer.shape != nullptr) {  // (pen-shapes@1: a pen layer's group and its shape layers)
             records.add(std::move(layer));
             return;
@@ -1962,7 +2146,12 @@ std::string page_psd_rgb(const core::Document& episode, const core::Page& page, 
     PlacedLayers placed(episode, dpi, depth_of_contents);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
-    const auto each = [&](render::PageLayer&& layer) { records.add(std::move(layer)); };
+    PsdTextReport type_report;
+    TypeLayers types(records, episode, page, static_cast<int>(dpi), report != nullptr ? *report : type_report, nullptr, text.editable);  // (PC5 G-e)
+    const auto each = [&](render::PageLayer&& layer) {
+        if (layer.type != nullptr) types.add(std::move(layer));  // (PC5 G-e: a type layer as a text layer)
+        else records.add(std::move(layer));
+    };
     const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, size, episode);
     if (text.editable) {  // (PSD-01: each placed line's layers made here)
         PsdTextReport own;
@@ -2151,7 +2340,12 @@ std::string page_psd_bytes(const core::Document& episode, const core::Page& page
     PlacedLayers placed(episode, dpi, depth);  // (PC3 A3)
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
-    const auto each = [&](render::PageLayer&& layer) { records.add(std::move(layer)); };
+    PsdTextReport type_report;
+    TypeLayers types(records, episode, page, static_cast<int>(dpi), report != nullptr ? *report : type_report, nullptr, text.editable);  // (PC5 G-e)
+    const auto each = [&](render::PageLayer&& layer) {
+        if (layer.type != nullptr) types.add(std::move(layer));  // (PC5 G-e: a type layer as a text layer)
+        else records.add(std::move(layer));
+    };
     const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, rgb.size(), episode);
     if (text.editable) {  // (PSD-01: each placed line's layers made here)
         PsdTextReport own;
@@ -2230,9 +2424,12 @@ std::string contents_psd_bytes(const core::Document& episode, const core::Page& 
     PlacedLayers placed(episode, dpi, depth);
     records.placed([&placed](const core::Layer& layer) { return placed.blocks(layer); });
     records.paper(page.spec.width_mm.value(), page.spec.height_mm.value());
+    PsdTextReport type_report;
+    TypeLayers types(records, episode, page, static_cast<int>(dpi), type_report, nullptr, false);  // (PC5 G-e)
     const auto each = [&](render::PageLayer&& layer) {
         if (layer.name == "紙" || layer.name == "コマ枠" || layer.name == "ノンブル") return;  // (the contents' own: no paper, borders or nombre)
-        records.add(std::move(layer));
+        if (layer.type != nullptr) types.add(std::move(layer));  // (PC5 G-e: a type layer as a text layer)
+        else records.add(std::move(layer));
     };
     const std::function<void(const core::Layer&)> adjust_layers = adjustments(records, page, rgb.size(), episode);
     render::page_layers(page, episode, static_cast<int>(dpi), each, nullptr, &adjust_layers, true, hidden_layers_too(page), true);

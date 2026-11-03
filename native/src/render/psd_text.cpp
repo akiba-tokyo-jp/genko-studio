@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
@@ -201,7 +202,8 @@ void write_engine(std::string& out, const Engine& value, int indent) {
 // brackets as UTF-16 with \-escapes).
 class EngineReader {
 public:
-    explicit EngineReader(std::string_view data) : data_(data) {}
+    // (PC5 G-e: `budget` — what its values may take in memory, spent as they are made: TooLarge past it)
+    explicit EngineReader(std::string_view data, std::size_t* budget = nullptr) : data_(data), budget_(budget) {}
 
     Engine root() {
         skip();
@@ -216,6 +218,11 @@ public:
     }
 
 private:
+    void spend(std::size_t n) {
+        if (budget_ == nullptr) return;
+        if (n > *budget_) throw descriptor::TooLarge("its text engine's data is too large to read");
+        *budget_ -= n;
+    }
     static bool space(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\0'; }
     void skip() {
         while (at_ < data_.size() && space(data_[at_])) ++at_;
@@ -225,6 +232,7 @@ private:
     std::string word() {
         const std::size_t from = at_;
         while (at_ < data_.size() && !ends(data_[at_])) ++at_;
+        spend(at_ - from);  // (PC5 G-e, the review's P3-6: before it is made)
         return std::string(data_.substr(from, at_ - from));
     }
 
@@ -243,6 +251,7 @@ private:
             if (data_[at_] != '/') broken("a key expected in the text engine's data");
             ++at_;
             std::string key = word();
+            spend(sizeof(std::pair<std::string, Engine>) * 2 + key.size());  // (its slot — twice, as a vector grows — and key)
             dict.dict.emplace_back(std::move(key), value(depth + 1));
         }
     }
@@ -267,6 +276,7 @@ private:
                     ++at_;
                     break;
                 }
+                spend(sizeof(Engine) * 2);  // (its slot, twice as a vector grows)
                 out.list.push_back(value(depth + 1));
             }
         } else if (c == '(') {
@@ -281,6 +291,7 @@ private:
                     if (at_ >= data_.size()) broken("a text in the text engine's data does not end");
                     b = data_[at_++];
                 }
+                spend(2);  // (its bytes and its UTF-16 units, before they are made: the review's P3-6)
                 bytes += b;
             }
             if (bytes.size() >= 2 && static_cast<unsigned char>(bytes[0]) == 0xfe && static_cast<unsigned char>(bytes[1]) == 0xff) {
@@ -322,6 +333,7 @@ private:
 
     std::string_view data_;
     std::size_t at_ = 0;
+    std::size_t* budget_ = nullptr;
 };
 
 const Engine* path(const Engine& root, std::initializer_list<std::string_view> keys) {
@@ -362,14 +374,14 @@ std::array<int, 3> rgb_of_cmyk(const std::array<double, 4>& c) {
     return out;
 }
 
-Engine paragraph_properties(int justification) {
-    return Engine::d({{"Justification", Engine::i(justification)},
-                      {"FirstLineIndent", Engine::f(0.0)},
-                      {"StartIndent", Engine::f(0.0)},
-                      {"EndIndent", Engine::f(0.0)},
-                      {"SpaceBefore", Engine::f(0.0)},
-                      {"SpaceAfter", Engine::f(0.0)},
-                      {"AutoHyphenate", Engine::b(false)},
+Engine paragraph_properties(const ParagraphRun& p) {
+    return Engine::d({{"Justification", Engine::i(p.justification)},
+                      {"FirstLineIndent", Engine::f(p.first_indent)},
+                      {"StartIndent", Engine::f(p.start_indent)},
+                      {"EndIndent", Engine::f(p.end_indent)},
+                      {"SpaceBefore", Engine::f(p.space_before)},
+                      {"SpaceAfter", Engine::f(p.space_after)},
+                      {"AutoHyphenate", Engine::b(p.hyphenate)},
                       {"HyphenatedWordSize", Engine::i(6)},
                       {"PreHyphen", Engine::i(2)},
                       {"PostHyphen", Engine::i(2)},
@@ -378,7 +390,7 @@ Engine paragraph_properties(int justification) {
                       {"WordSpacing", Engine::fs({0.8, 1.0, 1.33})},
                       {"LetterSpacing", Engine::fs({0.0, 0.0, 0.0})},
                       {"GlyphSpacing", Engine::fs({1.0, 1.0, 1.0})},
-                      {"AutoLeading", Engine::f(1.2)},
+                      {"AutoLeading", Engine::f(p.auto_leading)},
                       {"LeadingType", Engine::i(0)},
                       {"Hanging", Engine::b(false)},
                       {"Burasagari", Engine::b(false)},
@@ -387,24 +399,24 @@ Engine paragraph_properties(int justification) {
 }
 
 Engine style_sheet(const TextStyle& s, std::int64_t font) {
-    return Engine::d({{"Font", Engine::i(font)},
+    Engine out = Engine::d({{"Font", Engine::i(font)},
                       {"FontSize", Engine::f(s.size)},
                       {"FauxBold", Engine::b(s.faux_bold)},
                       {"FauxItalic", Engine::b(s.faux_italic)},
-                      {"AutoLeading", Engine::b(false)},
+                      {"AutoLeading", Engine::b(s.auto_leading)},
                       {"Leading", Engine::f(s.leading)},
                       {"HorizontalScale", Engine::f(s.horizontal_scale)},
                       {"VerticalScale", Engine::f(s.vertical_scale)},
                       {"Tracking", Engine::f(s.tracking)},
-                      {"AutoKerning", Engine::b(true)},
+                      {"AutoKerning", Engine::b(s.auto_kerning)},
                       {"Kerning", Engine::i(0)},
-                      {"BaselineShift", Engine::f(0.0)},
-                      {"FontCaps", Engine::i(0)},
+                      {"BaselineShift", Engine::f(s.baseline_shift)},
+                      {"FontCaps", Engine::i(s.caps)},
                       {"FontBaseline", Engine::i(0)},
-                      {"Underline", Engine::b(false)},
-                      {"Strikethrough", Engine::b(false)},
-                      {"Ligatures", Engine::b(true)},
-                      {"DLigatures", Engine::b(false)},
+                      {"Underline", Engine::b(s.underline)},
+                      {"Strikethrough", Engine::b(s.strikethrough)},
+                      {"Ligatures", Engine::b(s.ligatures)},
+                      {"DLigatures", Engine::b(s.dligatures)},
                       {"BaselineDirection", Engine::i(s.baseline_direction)},
                       {"Tsume", Engine::f(0.0)},
                       {"StyleRunAlignment", Engine::i(s.run_alignment)},
@@ -421,10 +433,44 @@ Engine style_sheet(const TextStyle& s, std::int64_t font) {
                       {"HindiNumbers", Engine::b(false)},
                       {"Kashida", Engine::i(1)},
                       {"DiacriticPos", Engine::i(2)}});
+    for (std::size_t i = 0; i < kOpenTypeKeys.size(); ++i) {  // (PC5 G-e: the OpenType switches on)
+        if ((s.opentype >> i) & 1u) out.dict.emplace_back(std::string(kOpenTypeKeys[i].key), Engine::b(true));
+    }
+    return out;
+}
+
+// PC5 G-e: a named sheet's keys (NamedSheet::data) as the text engine's dictionary — Font by its index in `fonts` (added
+// when it is not there), FillColor as a colour —, its other keys numbers (an integer of the engine's integer keys) and
+// truth values; what is neither is not written.
+Engine sheet_data(const core::Json& data, const std::function<std::int64_t(const std::string&)>& font_index) {
+    static constexpr std::array<std::string_view, 6> kIntegers{"Font", "FontCaps", "Justification", "Kerning", "FontBaseline", "LeadingType"};
+    Engine out = Engine::d({});
+    if (!data.is_object()) return out;
+    for (const auto& [key, value] : data.items()) {
+        if (key == "Font" && value.is_string()) {
+            out.dict.emplace_back(key, Engine::i(font_index(value.get<std::string>())));
+        } else if (key == "FillColor" && value.is_array() && value.size() == 3) {
+            std::array<int, 3> rgb{};
+            for (std::size_t i = 0; i < 3; ++i) rgb[i] = value[i].is_number() ? std::clamp(value[i].get<int>(), 0, 255) : 0;
+            out.dict.emplace_back(key, colour(rgb));
+        } else if (key == "FillColor" && value.is_object() && value.contains("cmyk") && value["cmyk"].is_array() && value["cmyk"].size() == 4) {
+            std::array<double, 4> cmyk{};
+            for (std::size_t i = 0; i < 4; ++i) cmyk[i] = value["cmyk"][i].is_number() ? std::clamp(value["cmyk"][i].get<double>(), 0.0, 1.0) : 0.0;
+            out.dict.emplace_back(key, colour_cmyk(cmyk));
+        } else if (value.is_boolean()) {
+            out.dict.emplace_back(key, Engine::b(value.get<bool>()));
+        } else if (value.is_number()) {
+            const bool integer = std::find(kIntegers.begin(), kIntegers.end(), key) != kIntegers.end();
+            out.dict.emplace_back(key, integer ? Engine::i(std::llround(value.get<double>())) : Engine::f(value.get<double>()));
+        }
+    }
+    return out;
 }
 
 // Photoshop's own kinsoku and mojikumi sets (the resources every text names; this writer sets nothing by them).
-Engine resources(const std::vector<std::string>& fonts, const TextStyle& normal) {
+// (PC5 G-e: the named sheets after the normal ones — none for a line of PSD-01's)
+Engine resources(const std::vector<std::string>& fonts, const TextStyle& normal, std::vector<Engine> char_sheets = {},
+                 std::vector<Engine> para_sheets = {}) {
     const auto kinsoku = [](std::u16string_view name, std::u16string_view no_start, std::u16string_view no_end) {
         return Engine::d({{"Name", Engine::t(name)},
                           {"NoStart", Engine::t(no_start)},
@@ -443,6 +489,13 @@ Engine resources(const std::vector<std::string>& fonts, const TextStyle& normal)
     for (int i = 1; i <= 4; ++i) {
         mojikumi.push_back(Engine::d({{"InternalName", Engine::t(u"Photoshop6MojiKumiSet" + std::u16string(1, static_cast<char16_t>(u'0' + i)))}}));
     }
+    std::vector<Engine> paragraph_set{Engine::d({{"Name", Engine::t(u"Normal RGB")}, {"DefaultStyleSheet", Engine::i(0)}, {"Properties", paragraph_properties(ParagraphRun{})}})};
+    for (Engine& sheet : para_sheets) paragraph_set.push_back(std::move(sheet));
+    // (PC5 G-e: the normal sheet without the OpenType switches — a run that does not write one is off, not the normal one's)
+    TextStyle base = normal;
+    base.opentype = 0;
+    std::vector<Engine> style_set{Engine::d({{"Name", Engine::t(u"Normal RGB")}, {"StyleSheetData", style_sheet(base, fonts.size() > 1 ? 1 : 0)}})};
+    for (Engine& sheet : char_sheets) style_set.push_back(std::move(sheet));
     return Engine::d({{"KinsokuSet",
                        Engine::l({kinsoku(u"PhotoshopKinsokuHard",
                                           u"、。，．・：；？！ー―’”）〕］｝"
@@ -457,12 +510,8 @@ Engine resources(const std::vector<std::string>& fonts, const TextStyle& normal)
                       {"MojiKumiSet", Engine::l(std::move(mojikumi))},
                       {"TheNormalStyleSheet", Engine::i(0)},
                       {"TheNormalParagraphSheet", Engine::i(0)},
-                      {"ParagraphSheetSet",
-                       Engine::l({Engine::d({{"Name", Engine::t(u"Normal RGB")},
-                                             {"DefaultStyleSheet", Engine::i(0)},
-                                             {"Properties", paragraph_properties(0)}})})},
-                      {"StyleSheetSet", Engine::l({Engine::d({{"Name", Engine::t(u"Normal RGB")},
-                                                         {"StyleSheetData", style_sheet(normal, fonts.size() > 1 ? 1 : 0)}})})},
+                      {"ParagraphSheetSet", Engine::l(std::move(paragraph_set))},
+                      {"StyleSheetSet", Engine::l(std::move(style_set))},
                       {"FontSet", Engine::l(std::move(font_set))},
                       {"SuperscriptSize", Engine::f(0.583)},
                       {"SuperscriptPosition", Engine::f(0.333)},
@@ -482,16 +531,33 @@ std::string engine_data(const TextLayer& layer) {
     std::vector<Engine> style_runs;
     std::vector<Engine> style_lengths;
     for (const StyleRun& run : layer.runs) {
-        style_runs.push_back(Engine::d({{"StyleSheet", Engine::d({{"StyleSheetData", style_sheet(run.style, font_index(run.style.font))}})}}));
+        Engine sheet = Engine::d({});
+        // (PC5 G-e: the named sheet it takes, by its index in StyleSheetSet — the normal one first)
+        if (run.style.sheet && *run.style.sheet >= 0 && static_cast<std::size_t>(*run.style.sheet) < layer.char_sheets.size())
+            sheet.dict.emplace_back("Parent", Engine::i(*run.style.sheet + 1));
+        sheet.dict.emplace_back("StyleSheetData", style_sheet(run.style, font_index(run.style.font)));
+        style_runs.push_back(Engine::d({{"StyleSheet", std::move(sheet)}}));
         style_lengths.push_back(Engine::i(static_cast<std::int64_t>(run.length)));
     }
     std::vector<Engine> paragraph_runs;
     std::vector<Engine> paragraph_lengths;
     const auto adjustments = [] { return Engine::d({{"Axis", Engine::fs({1.0, 0.0, 1.0})}, {"XY", Engine::fs({0.0, 0.0})}}); };
     for (const ParagraphRun& run : layer.paragraphs) {
-        paragraph_runs.push_back(Engine::d({{"ParagraphSheet", Engine::d({{"DefaultStyleSheet", Engine::i(0)}, {"Properties", paragraph_properties(run.justification)}})},
-                                            {"Adjustments", adjustments()}}));
+        Engine sheet = Engine::d({{"DefaultStyleSheet", Engine::i(0)}});
+        if (run.sheet && *run.sheet >= 0 && static_cast<std::size_t>(*run.sheet) < layer.para_sheets.size())
+            sheet.dict.emplace_back("Parent", Engine::i(*run.sheet + 1));
+        sheet.dict.emplace_back("Properties", paragraph_properties(run));
+        paragraph_runs.push_back(Engine::d({{"ParagraphSheet", std::move(sheet)}, {"Adjustments", adjustments()}}));
         paragraph_lengths.push_back(Engine::i(static_cast<std::int64_t>(run.length)));
+    }
+    // (PC5 G-e: the named sheets, their fonts named after the runs')
+    const std::function<std::int64_t(const std::string&)> named_font = [&](const std::string& name) { return font_index(name); };
+    std::vector<Engine> char_sheets, para_sheets;
+    for (const NamedSheet& s : layer.char_sheets)
+        char_sheets.push_back(Engine::d({{"Name", Engine::t(s.name)}, {"StyleSheetData", sheet_data(s.data, named_font)}}));
+    for (const NamedSheet& s : layer.para_sheets) {
+        const int dss = s.default_sheet > 0 && static_cast<std::size_t>(s.default_sheet) <= layer.char_sheets.size() ? s.default_sheet : 0;
+        para_sheets.push_back(Engine::d({{"Name", Engine::t(s.name)}, {"DefaultStyleSheet", Engine::i(dss)}, {"Properties", sheet_data(s.data, named_font)}}));
     }
     const std::int64_t direction = layer.vertical ? 2 : 0;
     const std::int64_t shape = layer.box ? 1 : 0;
@@ -525,7 +591,7 @@ std::string engine_data(const TextLayer& layer) {
                                  {"GridColor", colour({0, 0, 255})},
                                  {"GridLeadingFillColor", colour({0, 0, 255})},
                                  {"AlignLineHeightToGridFlags", Engine::b(false)}})},
-         {"AntiAlias", Engine::i(4)},
+         {"AntiAlias", Engine::i(std::clamp(layer.engine_antialias, 0, 4))},
          {"UseFractionalGlyphWidths", Engine::b(true)},
          {"Rendered", Engine::d({{"Version", Engine::i(1)},
                                  {"Shapes", Engine::d({{"WritingDirection", Engine::i(direction)},
@@ -534,7 +600,7 @@ std::string engine_data(const TextLayer& layer) {
                                                                                           {"Lines", Engine::d({{"WritingDirection", Engine::i(direction)},
                                                                                                                {"Children", Engine::l({})}})},
                                                                                           {"Cookie", Engine::d({{"Photoshop", Engine::d(std::move(photoshop))}})}})})}})}})}});
-    const Engine res = resources(fonts, normal);
+    const Engine res = resources(fonts, normal, std::move(char_sheets), std::move(para_sheets));
     const Engine root = Engine::d({{"EngineDict", std::move(engine_dict)}, {"ResourceDict", res}, {"DocumentResources", res}});
     std::string out = "\n\n";
     write_engine(out, root, 0);
@@ -550,28 +616,96 @@ Descriptor bounds_of(const std::array<double, 4>& b) {
     return d;
 }
 
-TextStyle style_from(const Engine& data, const std::vector<std::string>& fonts) {
+// (PC5 G-e) A sheet's key, else its base's (the normal sheet's): nothing when neither gives it.
+const Engine* key_of(const Engine& data, const Engine* base, std::string_view key) {
+    if (const Engine* v = data.get(key)) return v;
+    return base != nullptr ? base->get(key) : nullptr;
+}
+
+// A finite number within ±1e9 (what a text engine's number may be read as: a broken file's is the fallback)
+double sane(double v, double fallback) { return std::isfinite(v) && std::abs(v) <= 1e9 ? v : fallback; }
+
+// A FillColor: its RGB (0–255), and a CMYK document's inks when it is one's.
+void fill_of(const Engine* colour_of, TextStyle& s) {
+    if (colour_of == nullptr) return;
+    const Engine* values = colour_of->get("Values");
+    if (values == nullptr || values->kind != Engine::Kind::list || values->list.size() < 4) return;
+    const auto at = [&](std::size_t i) { return std::clamp(sane(values->list[i].number, 0.0), 0.0, 1.0); };
+    if (number_or(colour_of->get("Type"), 1) == 2 && values->list.size() >= 5) {  // (a CMYK document's)
+        s.fill_cmyk = std::array<double, 4>{at(1), at(2), at(3), at(4)};
+        s.fill = rgb_of_cmyk(*s.fill_cmyk);
+    } else {
+        for (std::size_t i = 0; i < 3; ++i) s.fill[i] = static_cast<int>(std::lround(at(i + 1) * 255.0));
+    }
+}
+
+TextStyle style_from(const Engine& data, const std::vector<std::string>& fonts, const Engine* base = nullptr) {
     TextStyle s;
-    const auto index = static_cast<std::int64_t>(number_or(data.get("Font"), 0));
+    const auto num = [&](std::string_view key, double fallback) { return sane(number_or(key_of(data, base, key), fallback), fallback); };
+    const auto flag = [&](std::string_view key, bool fallback) { return bool_or(key_of(data, base, key), fallback); };
+    const auto index = static_cast<std::int64_t>(num("Font", 0));
     s.font = index >= 0 && static_cast<std::size_t>(index) < fonts.size() ? fonts[static_cast<std::size_t>(index)] : std::string();
-    s.size = number_or(data.get("FontSize"), s.size);
-    s.faux_bold = bool_or(data.get("FauxBold"), false);
-    s.faux_italic = bool_or(data.get("FauxItalic"), false);
-    if (const Engine* values = path(data, {"FillColor", "Values"}); values != nullptr && values->kind == Engine::Kind::list && values->list.size() >= 4) {
-        if (number_or(path(data, {"FillColor", "Type"}), 1) == 2 && values->list.size() >= 5) {  // (a CMYK document's)
-            s.fill_cmyk = std::array<double, 4>{values->list[1].number, values->list[2].number, values->list[3].number, values->list[4].number};
-            s.fill = rgb_of_cmyk(*s.fill_cmyk);
-        } else {
-            for (std::size_t i = 0; i < 3; ++i) s.fill[i] = static_cast<int>(std::lround(values->list[i + 1].number * 255.0));
+    s.size = num("FontSize", s.size);
+    s.faux_bold = flag("FauxBold", false);
+    s.faux_italic = flag("FauxItalic", false);
+    fill_of(key_of(data, base, "FillColor"), s);
+    s.tracking = num("Tracking", 0.0);
+    s.leading = num("Leading", 0.0);
+    s.horizontal_scale = num("HorizontalScale", 1.0);
+    s.vertical_scale = num("VerticalScale", 1.0);
+    s.baseline_direction = static_cast<int>(num("BaselineDirection", 2));
+    s.run_alignment = static_cast<int>(num("StyleRunAlignment", 2));
+    // (PC5 G-e)
+    s.baseline_shift = num("BaselineShift", 0.0);
+    s.caps = static_cast<int>(std::clamp(num("FontCaps", 0), 0.0, 2.0));
+    s.underline = flag("Underline", false);
+    s.strikethrough = flag("Strikethrough", false);
+    s.auto_kerning = flag("AutoKerning", true);
+    s.ligatures = flag("Ligatures", true);
+    s.dligatures = flag("DLigatures", false);
+    s.auto_leading = flag("AutoLeading", false);
+    for (std::size_t i = 0; i < kOpenTypeKeys.size(); ++i) {
+        if (flag(kOpenTypeKeys[i].key, false)) s.opentype |= 1u << i;
+    }
+    return s;
+}
+
+ParagraphRun paragraph_from(const Engine& properties, const Engine* base) {
+    ParagraphRun p;
+    const auto num = [&](std::string_view key, double fallback) { return sane(number_or(key_of(properties, base, key), fallback), fallback); };
+    p.justification = static_cast<int>(std::clamp(num("Justification", 0), 0.0, 6.0));
+    p.first_indent = num("FirstLineIndent", 0.0);
+    p.start_indent = num("StartIndent", 0.0);
+    p.end_indent = num("EndIndent", 0.0);
+    p.space_before = num("SpaceBefore", 0.0);
+    p.space_after = num("SpaceAfter", 0.0);
+    p.auto_leading = num("AutoLeading", 1.2);
+    p.hyphenate = bool_or(key_of(properties, base, "AutoHyphenate"), false);
+    return p;
+}
+
+// (PC5 G-e) A named sheet's keys as NamedSheet::data: numbers and truth values, Font by its name, FillColor as RGB or inks.
+core::Json sheet_json(const Engine& data, const std::vector<std::string>& fonts) {
+    core::Json out = core::Json::object();
+    if (data.kind != Engine::Kind::dict) return out;
+    for (const auto& [key, value] : data.dict) {
+        if (key == "Font") {
+            const auto index = static_cast<std::int64_t>(sane(number_or(&value, -1), -1));
+            if (index >= 0 && static_cast<std::size_t>(index) < fonts.size()) out[key] = fonts[static_cast<std::size_t>(index)];
+        } else if (key == "FillColor") {
+            TextStyle s;
+            fill_of(&value, s);
+            if (s.fill_cmyk) out[key] = core::Json{{"cmyk", core::Json::array({(*s.fill_cmyk)[0], (*s.fill_cmyk)[1], (*s.fill_cmyk)[2], (*s.fill_cmyk)[3]})}};
+            else out[key] = core::Json::array({s.fill[0], s.fill[1], s.fill[2]});
+        } else if (value.kind == Engine::Kind::boolean) {
+            out[key] = value.boolean;
+        } else if (value.kind == Engine::Kind::integer || value.kind == Engine::Kind::number) {
+            if (!std::isfinite(value.number) || std::abs(value.number) > 1e9) continue;
+            if (value.kind == Engine::Kind::integer) out[key] = static_cast<std::int64_t>(value.number);
+            else out[key] = value.number;
         }
     }
-    s.tracking = number_or(data.get("Tracking"), 0.0);
-    s.leading = number_or(data.get("Leading"), 0.0);
-    s.horizontal_scale = number_or(data.get("HorizontalScale"), 1.0);
-    s.vertical_scale = number_or(data.get("VerticalScale"), 1.0);
-    s.baseline_direction = static_cast<int>(number_or(data.get("BaselineDirection"), 2));
-    s.run_alignment = static_cast<int>(number_or(data.get("StyleRunAlignment"), 2));
-    return s;
+    return out;
 }
 
 std::size_t length_of(const Engine& e) {
@@ -596,7 +730,7 @@ std::string tysh(const TextLayer& layer) {
     text.text("Txt ", layer.text);
     text.enumerated("textGridding", "textGridding", "None");
     text.enumerated("Ornt", "Ornt", layer.vertical ? "Vrtc" : "Hrzn");
-    text.enumerated("AntA", "Annt", "antiAliasSharp");
+    text.enumerated("AntA", "Annt", layer.antialias.empty() ? std::string("antiAliasSharp") : layer.antialias);
     text.object("bounds", bounds_of(layer.bounds), "bounds");
     text.object("boundingBox", bounds_of(layer.bounds), "boundingBox");
     text.integer("TextIndex", 0);
@@ -622,8 +756,8 @@ std::string tysh(const TextLayer& layer) {
 
 namespace {
 
-TextLayer tysh_of(std::string_view payload) {
-    Bytes b(payload);
+TextLayer tysh_of(std::string_view payload, std::size_t& budget) {
+    Bytes b(payload, budget);
     TextLayer out;
     if (b.left() < 2 || b.u16() != 1) broken("not a TySh block of version 1");
     for (double& v : out.transform) v = b.f64();
@@ -633,8 +767,10 @@ TextLayer tysh_of(std::string_view payload) {
     if (b.u16() != 1) broken("a warp version other than 1");
     if (b.u32() != 16) broken("a descriptor version other than 16");
     const DObject warp = descriptor::read_structure(b, 0);
+    budget -= std::min(budget, b.spent());  // (PC5 G-e: the file's one budget)
     if (const DValue* t = text.get("Txt "); t != nullptr) out.text = t->text;
     if (const DValue* o = text.get("Ornt"); o != nullptr) out.vertical = o->enum_value == "Vrtc";
+    if (const DValue* a = text.get("AntA"); a != nullptr && !a->enum_value.empty()) out.antialias = a->enum_value;  // (PC5 G-e)
     if (const DValue* bounds = text.get("bounds"); bounds != nullptr && bounds->object) {
         const char* const keys[4] = {"Left", "Top ", "Rght", "Btom"};
         for (std::size_t i = 0; i < 4; ++i) {
@@ -648,28 +784,91 @@ TextLayer tysh_of(std::string_view payload) {
     if (const DValue* r = warp.get("warpRotate"); r != nullptr) out.warp_vertical = r->enum_value == "Vrtc";
     const DValue* data = text.get("EngineData");
     if (data == nullptr) broken("no EngineData");
-    const Engine root = EngineReader(data->raw).root();
+    const Engine root = EngineReader(data->raw, &budget).root();
     std::vector<std::string> fonts;
-    if (const Engine* set = path(root, {"ResourceDict", "FontSet"}); set != nullptr) {
+    // (PC5 G-e: the ResourceDict, else DocumentResources, as Photoshop may write either)
+    const Engine* resource = root.get("ResourceDict") != nullptr ? root.get("ResourceDict") : root.get("DocumentResources");
+    if (const Engine* set = resource != nullptr ? resource->get("FontSet") : nullptr; set != nullptr) {
         for (const Engine& font : set->list) {
             const Engine* name = font.get("Name");
             fonts.push_back(name != nullptr ? utf8_of(name->text) : std::string());
         }
     }
+    // (PC5 G-e: the normal sheets the runs are over, and the named ones — by their index past the normal one's)
+    const auto index_of = [](const Engine* e, std::size_t count) -> std::optional<std::size_t> {
+        const double v = number_or(e, -1);
+        if (!(v >= 0) || v >= static_cast<double>(count)) return std::nullopt;
+        return static_cast<std::size_t>(v);
+    };
+    const Engine* char_set = resource != nullptr ? resource->get("StyleSheetSet") : nullptr;
+    const Engine* para_set = resource != nullptr ? resource->get("ParagraphSheetSet") : nullptr;
+    const std::size_t char_count = char_set != nullptr && char_set->kind == Engine::Kind::list ? char_set->list.size() : 0;
+    const std::size_t para_count = para_set != nullptr && para_set->kind == Engine::Kind::list ? para_set->list.size() : 0;
+    const std::size_t normal_char = index_of(resource != nullptr ? resource->get("TheNormalStyleSheet") : nullptr, char_count).value_or(0);
+    const std::size_t normal_para = index_of(resource != nullptr ? resource->get("TheNormalParagraphSheet") : nullptr, para_count).value_or(0);
+    const Engine* base_char = char_count > normal_char ? char_set->list[normal_char].get("StyleSheetData") : nullptr;
+    const Engine* base_para = para_count > normal_para ? para_set->list[normal_para].get("Properties") : nullptr;
+    // (a set's index → its place among the named sheets; the normal one none)
+    const auto named = [](std::size_t index, std::size_t normal) -> std::optional<int> {
+        if (index == normal) return std::nullopt;
+        return static_cast<int>(index < normal ? index : index - 1);
+    };
+    for (std::size_t i = 0; i < char_count; ++i) {
+        if (i == normal_char) continue;
+        const Engine& s = char_set->list[i];
+        const Engine* name = s.get("Name");
+        const Engine* d = s.get("StyleSheetData");
+        out.char_sheets.push_back(NamedSheet{name != nullptr ? name->text : std::u16string(), d != nullptr ? sheet_json(*d, fonts) : core::Json::object(), 0});
+    }
+    for (std::size_t i = 0; i < para_count; ++i) {
+        if (i == normal_para) continue;
+        const Engine& s = para_set->list[i];
+        const Engine* name = s.get("Name");
+        const Engine* d = s.get("Properties");
+        NamedSheet sheet{name != nullptr ? name->text : std::u16string(), d != nullptr ? sheet_json(*d, fonts) : core::Json::object(), 0};
+        if (const auto dss = index_of(s.get("DefaultStyleSheet"), char_count)) {
+            if (const auto at = named(*dss, normal_char)) sheet.default_sheet = *at + 1;
+        }
+        out.para_sheets.push_back(std::move(sheet));
+    }
+    // (a run's sheet: its Parent index, else its Name — PhotoCraft's psd_styles.rs reads both)
+    const auto reference = [&](const Engine* sheet, const Engine* set, std::size_t count, std::size_t normal) -> std::optional<int> {
+        if (sheet == nullptr) return std::nullopt;
+        std::optional<std::size_t> index = index_of(sheet->get("Parent"), count);
+        if (!index && sheet->get("Name") != nullptr && set != nullptr) {
+            for (std::size_t i = 0; i < count; ++i) {
+                const Engine* n = set->list[i].get("Name");
+                if (n != nullptr && n->text == sheet->get("Name")->text) {
+                    index = i;
+                    break;
+                }
+            }
+        }
+        return index ? named(*index, normal) : std::nullopt;
+    };
+    if (const Engine* aa = path(root, {"EngineDict", "AntiAlias"}); aa != nullptr) out.engine_antialias = static_cast<int>(std::clamp(sane(aa->number, 4), 0.0, 4.0));
     if (const Engine* editor = path(root, {"EngineDict", "Editor", "Text"}); editor != nullptr) out.engine_text = editor->text;
     const Engine* style_runs = path(root, {"EngineDict", "StyleRun", "RunArray"});
     const Engine* style_lengths = path(root, {"EngineDict", "StyleRun", "RunLengthArray"});
     if (style_runs == nullptr || style_lengths == nullptr || style_runs->list.size() != style_lengths->list.size()) broken("the style runs");
     for (std::size_t i = 0; i < style_runs->list.size(); ++i) {
-        const Engine* data_i = path(style_runs->list[i], {"StyleSheet", "StyleSheetData"});
-        out.runs.push_back(StyleRun{length_of(style_lengths->list[i]), data_i != nullptr ? style_from(*data_i, fonts) : TextStyle{}});
+        const Engine* sheet = style_runs->list[i].get("StyleSheet");
+        const Engine* data_i = sheet != nullptr ? sheet->get("StyleSheetData") : nullptr;
+        StyleRun run{length_of(style_lengths->list[i]), data_i != nullptr ? style_from(*data_i, fonts, base_char) : TextStyle{}};
+        run.style.sheet = reference(sheet, char_set, char_count, normal_char);
+        out.runs.push_back(std::move(run));
     }
     const Engine* paragraph_runs = path(root, {"EngineDict", "ParagraphRun", "RunArray"});
     const Engine* paragraph_lengths = path(root, {"EngineDict", "ParagraphRun", "RunLengthArray"});
     if (paragraph_runs != nullptr && paragraph_lengths != nullptr && paragraph_runs->list.size() == paragraph_lengths->list.size()) {
+        static const Engine kNothing = Engine::d({});
         for (std::size_t i = 0; i < paragraph_runs->list.size(); ++i) {
-            const Engine* justification = path(paragraph_runs->list[i], {"ParagraphSheet", "Properties", "Justification"});
-            out.paragraphs.push_back(ParagraphRun{length_of(paragraph_lengths->list[i]), static_cast<int>(number_or(justification, 0))});
+            const Engine* sheet = paragraph_runs->list[i].get("ParagraphSheet");
+            const Engine* properties = sheet != nullptr ? sheet->get("Properties") : nullptr;
+            ParagraphRun p = paragraph_from(properties != nullptr ? *properties : kNothing, base_para);
+            p.length = length_of(paragraph_lengths->list[i]);
+            p.sheet = reference(sheet, para_set, para_count, normal_para);
+            out.paragraphs.push_back(std::move(p));
         }
     }
     if (const Engine* shapes = path(root, {"EngineDict", "Rendered", "Shapes", "Children"}); shapes != nullptr && !shapes->list.empty()) {
@@ -686,7 +885,12 @@ TextLayer tysh_of(std::string_view payload) {
 }  // namespace
 
 TextLayer read_tysh(std::string_view payload) {
-    return reading([payload] { return tysh_of(payload); });
+    std::size_t budget = descriptor::kUnpackedBudget;
+    return read_tysh(payload, budget);
+}
+
+TextLayer read_tysh(std::string_view payload, std::size_t& budget) {
+    return reading([payload, &budget] { return tysh_of(payload, budget); });
 }
 
 std::string lfx2(const Stroke& stroke) {

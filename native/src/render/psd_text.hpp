@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/json.hpp"
 #include "render/psd_descriptor.hpp"
 
 // PSD-01: Photoshop's text layer structures, written by the editable PSD (formats/psd_export.cpp) and read back by
@@ -36,9 +37,42 @@ struct TextStyle {
     // (color-mode@1) FillColor as a CMYK document's inks (Type 2: C, M, Y, K 0..1), when it is one; fill then the RGB
     // they stand for (K alone: its grey)
     std::optional<std::array<double, 4>> fill_cmyk;
+    // PC5 G-e (type@1: a type layer's attributes; their defaults what PSD-01 writes for a line): BaselineShift (px, up),
+    // FontCaps (0 normal, 1 small caps, 2 all caps), Underline, Strikethrough, AutoKerning (off: no kerning), Ligatures,
+    // DLigatures, AutoLeading (on: the paragraph's AutoLeading of the size — Leading not looked at), the OpenType
+    // switches on (kOpenTypeKeys' bits: written only when on) and the named character sheet the run takes (its Parent: an
+    // index into StyleSheetSet; none: the normal one)
+    double baseline_shift = 0.0;
+    int caps = 0;
+    bool underline = false;
+    bool strikethrough = false;
+    bool auto_kerning = true;
+    bool ligatures = true;
+    bool dligatures = false;
+    bool auto_leading = false;
+    unsigned opentype = 0;
+    std::optional<int> sheet = std::nullopt;
+    // (PC5 G-e, not written to a PSD) Genko's character attributes of the run as they are (core::type_text's: a .pcraft's
+    // text read, a type layer's resolved for a .pcraft written) — render/psd_type takes them over the keys above
+    core::Json attrs = core::Json::object();
 
     bool operator==(const TextStyle&) const = default;
 };
+
+// PC5 G-e: EngineData's switches of 書式 › OpenType (after PhotoCraft's text/psd.rs OPENTYPE_KEYS, MIT) and the OpenType
+// feature each turns on — a TextStyle's `opentype` bit i is kOpenTypeKeys[i].
+struct OpenTypeKey {
+    std::string_view key;
+    std::string_view tag;
+};
+inline constexpr std::array<OpenTypeKey, 8> kOpenTypeKeys{{{"ContextualLigatures", "calt"},
+                                                           {"Swash", "swsh"},
+                                                           {"OldStyle", "onum"},
+                                                           {"StylisticAlternates", "salt"},
+                                                           {"Titling", "titl"},
+                                                           {"Ornaments", "ornm"},
+                                                           {"Ordinals", "ordn"},
+                                                           {"Fractions", "frac"}}};
 
 // `length` characters (UTF-16 code units) in one style, or in one paragraph (Justification: 0 left / top, 1 right /
 // bottom, 2 centre, 3 justified with the last line to the left / top, 6 justified, the last line too).
@@ -51,8 +85,33 @@ struct StyleRun {
 struct ParagraphRun {
     std::size_t length = 0;
     int justification = 0;
+    // PC5 G-e (type@1; the defaults PSD-01's): FirstLineIndent, StartIndent, EndIndent, SpaceBefore, SpaceAfter (px),
+    // AutoLeading (of the size), AutoHyphenate, and the named paragraph sheet it takes (its Parent: an index into
+    // ParagraphSheetSet; none: the normal one)
+    double first_indent = 0.0;
+    double start_indent = 0.0;
+    double end_indent = 0.0;
+    double space_before = 0.0;
+    double space_after = 0.0;
+    double auto_leading = 1.2;
+    bool hyphenate = false;
+    std::optional<int> sheet = std::nullopt;
+    core::Json attrs = core::Json::object();  // (PC5 G-e, not written to a PSD: Genko's paragraph attributes, as TextStyle's)
 
     bool operator==(const ParagraphRun&) const = default;
+};
+
+// PC5 G-e: a named sheet of the text engine's ResourceDict — a character sheet of StyleSheetSet (its StyleSheetData) or a
+// paragraph sheet of ParagraphSheetSet (its Properties, and the character sheet it takes: DefaultStyleSheet) —, `data`
+// the keys it gives as JSON: numbers and truth values as they are, Font as the font's PostScript name, FillColor as
+// [r, g, b] (0..255) or {"cmyk": [c, m, y, k]} (0..1). The normal sheets (TheNormalStyleSheet, TheNormalParagraphSheet)
+// are not among them.
+struct NamedSheet {
+    std::u16string name;
+    core::Json data = core::Json::object();
+    int default_sheet = 0;  // (a paragraph sheet's DefaultStyleSheet)
+
+    bool operator==(const NamedSheet&) const = default;
 };
 
 // A text layer (TySh). `text` is the layer's characters, "\r" between its lines (the text engine's own trailing "\r"
@@ -78,6 +137,14 @@ struct TextLayer {
     double warp_perspective = 0.0;
     double warp_perspective_other = 0.0;
     bool warp_vertical = false;
+    // PC5 G-e: the anti-alias (the TxLr descriptor's AntA — Anno, antiAliasSharp, AnCr, AnSt, AnSm, antiAliasPlatformGray,
+    // antiAliasPlatformLCD — and EngineData's AntiAlias 0..4), as PSD-01 writes them for a line by default; and the named
+    // sheets of the ResourceDict after its normal ones (StyleSheetSet, ParagraphSheetSet: sheet i written at index i + 1),
+    // the runs' `sheet` naming them so. Read back: the file's sheets but its normal ones, `sheet` then an index into them.
+    std::string antialias = "antiAliasSharp";
+    int engine_antialias = 4;
+    std::vector<NamedSheet> char_sheets;
+    std::vector<NamedSheet> para_sheets;
 
     // The style of the character at `at` (UTF-16 code units); nothing past the runs.
     const TextStyle* style_at(std::size_t at) const;
@@ -86,8 +153,13 @@ struct TextLayer {
 // The TySh block's payload for a text layer (version 1, text version 50, the TxLr descriptor with its EngineData, the
 // warp descriptor: warpNone unless the layer has one). Fonts are named in the order the runs first use them, after Photoshop's AdobeInvisFont.
 std::string tysh(const TextLayer& layer);
-// A TySh block's payload read back: core::Error("format") when it is not one this reader takes.
+// A TySh block's payload read back: core::Error("format") when it is not one this reader takes. (PC5 G-e) Each run's
+// style is its StyleSheetData over the normal sheet's (a key the run does not give: the normal sheet's, then the
+// default), each paragraph's Properties likewise. `budget`: what reading it may take in memory, spent from it (the file's
+// one descriptor budget: psd::descriptor::TooLarge past it) — its descriptors' and its EngineData's values, texts and
+// lists alike —, the EngineData nested 64 deep at most.
 TextLayer read_tysh(std::string_view payload);
+TextLayer read_tysh(std::string_view payload, std::size_t& budget);
 
 // A single-colour stroke around a layer's pixels (the layer effect 「境界線」, FrFX): `size` pixels outside (or inside,
 // centre) the letters, in `rgb`, at `opacity` per cent.
