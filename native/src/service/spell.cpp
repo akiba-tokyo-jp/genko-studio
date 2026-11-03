@@ -11,10 +11,12 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 #include <mutex>
 #include <tuple>
 
 #include "core/error.hpp"
+#include "core/layer_basics.hpp"
 #include "core/ruby.hpp"
 #include "core/type_text.hpp"
 
@@ -445,7 +447,10 @@ std::vector<Finding> check(const core::Document& doc, const Options& options) {
             check_text(line->text, options, base, out, suggested);
         }
         for (auto it = page->layers.rbegin(); it != page->layers.rend(); ++it) {
-            if (!core::type_text::is_type_layer(*it) || !it->type || it->locked) continue;  // (a layer with no record: a broken book)
+            // (a layer with no record — a broken book —, a locked one, すべてをロック too, passed over)
+            if (!core::type_text::is_type_layer(*it) || !it->type || it->locked ||
+                core::locked_all(page->layers, static_cast<std::size_t>(std::distance(it, page->layers.rend())) - 1))
+                continue;
             Finding base;
             base.layer_id = it->id;
             base.page = page->index;

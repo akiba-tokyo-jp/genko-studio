@@ -29,6 +29,7 @@
 #include "core/balloon_tails.hpp"
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
+#include "core/layer_basics.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
@@ -968,7 +969,8 @@ void replace_text(OpContext& c) {
         if (!pages.empty() && std::none_of(pages.begin(), pages.end(), [&](std::int64_t p) { return page.index == Num(p); })) continue;
         for (std::size_t j = 0; j < page.layers.size(); ++j) {
             const Layer& layer = page.layers[j];
-            if (!type_text::is_type_layer(layer) || !layer.type || layer.locked) continue;
+            // (locked, or — layer-locks@1, PC5 I-a — すべてをロック: left as it is)
+            if (!type_text::is_type_layer(layer) || !layer.type || layer.locked || locked_all(page.layers, j)) continue;
             StoryLine record = *layer.type;
             if (replace_in(record, Json::object({{"page", page.index.json()}, {"layer_id", layer.id}})) == 0) continue;
             c.doc.edit_page(i).layers[j].type = type_text::shared_record(std::move(record));

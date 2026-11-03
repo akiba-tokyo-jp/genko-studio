@@ -36,6 +36,7 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"
+#include "core/layer_basics.hpp"
 #include "core/pyre.hpp"
 #include "render/ops_registry.hpp"
 #include "render/text/fonts.hpp"
@@ -617,7 +618,9 @@ int ReplaceDialog::search() {
         if (book.is_deferred(row)) continue;
         const core::Page& page = book.page(row);
         for (auto it = page.layers.rbegin(); it != page.layers.rend(); ++it) {
-            if (!core::type_text::is_type_layer(*it) || !it->type || it->locked) continue;
+            if (!core::type_text::is_type_layer(*it) || !it->type || it->locked ||
+                core::locked_all(page.layers, static_cast<std::size_t>(std::distance(it, page.layers.rend())) - 1))
+                continue;  // (replace_text leaves a locked one — すべてをロック too — as it is)
             int hits = 0;
             try {
                 hits = hits_in(it->type->text);
@@ -709,7 +712,9 @@ std::vector<ReplaceDialog::Spot> ReplaceDialog::spots() const {
         const core::Page& page = book.page(row);
         for (const core::StoryLine* line : book.story_for_page(page.index)) out.push_back(Spot{Json{{"line", line->id}}, static_cast<int>(row), line->text});
         for (auto it = page.layers.rbegin(); it != page.layers.rend(); ++it) {
-            if (!core::type_text::is_type_layer(*it) || !it->type || it->locked) continue;
+            if (!core::type_text::is_type_layer(*it) || !it->type || it->locked ||
+                core::locked_all(page.layers, static_cast<std::size_t>(std::distance(it, page.layers.rend())) - 1))
+                continue;  // (replace_text leaves a locked one — すべてをロック too — as it is)
             out.push_back(Spot{Json{{"page", page.index.json()}, {"layer_id", it->id}}, static_cast<int>(row), it->type->text});
         }
     }

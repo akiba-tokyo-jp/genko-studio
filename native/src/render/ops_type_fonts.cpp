@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "core/command_bus.hpp"
+#include "core/layer_basics.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
@@ -199,7 +200,7 @@ void each_record(Document& doc, const std::function<bool(StoryLine&)>& visit, st
         bool any = false;
         for (std::size_t j = 0; j < page.layers.size(); ++j) {
             const core::Layer& layer = page.layers[j];
-            if (!core::type_text::is_type_layer(layer) || !layer.type || layer.locked) continue;
+            if (!core::type_text::is_type_layer(layer) || !layer.type || layer.locked || core::locked_all(page.layers, j)) continue;  // (すべてをロック too)
             StoryLine record = *layer.type;
             if (!visit(record)) continue;
             fit_point_text(record, doc);
@@ -229,9 +230,10 @@ std::map<std::string, Seen> missing_fonts(const Document& doc) {
     std::map<std::string, Seen> seen;
     for (const StoryLine& line : doc.story) look_at(line, seen);
     const auto on_page = [&](const core::Page& page) {
-        for (const core::Layer& layer : page.layers) {
+        for (std::size_t j = 0; j < page.layers.size(); ++j) {
+            const core::Layer& layer = page.layers[j];
             // (a locked one is left as it is, so not listed either: review P3-5 c)
-            if (core::type_text::is_type_layer(layer) && layer.type && !layer.locked) look_at(*layer.type, seen);
+            if (core::type_text::is_type_layer(layer) && layer.type && !layer.locked && !core::locked_all(page.layers, j)) look_at(*layer.type, seen);
         }
     };
     for (std::size_t i = 0; i < doc.pages.size(); ++i) {
