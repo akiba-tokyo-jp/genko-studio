@@ -10,6 +10,7 @@
 #include <QComboBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QPushButton>
@@ -258,7 +259,7 @@ private slots:
         panel->work_first->setValue(5);
         panel->work_last->setValue(10);
         panel->work->setChecked(true);
-        QCOMPARE(core::work_area(s.page()), std::optional<std::array<std::int64_t, 2>>(std::array<std::int64_t, 2>{5, 10}));
+        QVERIFY(core::work_area(s.page()) == (std::optional<std::array<std::int64_t, 2>>(std::array<std::int64_t, 2>{5, 10})));
         QVERIFY(core::page_uses_timeline(s.page()));
         QVERIFY(panel->work_first->isEnabled());
         panel->table->setFocus();
