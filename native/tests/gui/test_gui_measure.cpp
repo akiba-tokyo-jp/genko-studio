@@ -370,8 +370,14 @@ private slots:
         b.act("act_panel_measurement_log")->trigger();
         QVERIFY(!dock->isVisible());
         const core::PagePtr unmeasured = b.window->book().pages[0];
-        // the whole page: one row (counted on the 200 dpi grid, in the page's 300 dpi pixels), the panel shown
+        // the whole page: one row (counted on the 200 dpi grid, in the page's 300 dpi pixels), the panel shown — measured on a
+        // worker (the review's P2-1: 計測値を記録 waits meanwhile, a second press refused)
         b.act("act_measure_record")->trigger();
+        QVERIFY(b.window->measuring());
+        QVERIFY(!b.act("act_measure_record")->isEnabled());
+        QVERIFY(!b.window->record_measurements());
+        QTRY_VERIFY_WITH_TIMEOUT(!b.window->measuring(), 60000);
+        QVERIFY(b.act("act_measure_record")->isEnabled());
         QVERIFY2(!b.window->last_notice().contains(QStringLiteral("まだ使えません")), qPrintable(b.window->last_notice()));
         QVERIFY(dock->isVisible());
         const app::MeasurementLog& log = app::MeasurementLog::instance();
@@ -385,6 +391,7 @@ private slots:
         // a selection over the bar: its gray darker than the paper's
         b.canvas()->set_selection(Json{{"poly", Json::array({Json::array({20, 40}), Json::array({100, 40}), Json::array({100, 50}), Json::array({20, 50})})}});
         b.act("act_measure_record")->trigger();
+        QTRY_VERIFY_WITH_TIMEOUT(!b.window->measuring(), 60000);
         QCOMPARE(log.rows().size(), std::size_t(2));
         QCOMPARE(log.rows()[1].values["label"], Json("計測 2"));
         QVERIFY(log.rows()[1].values["grayMin"].get<double>() < 100.0);
@@ -393,11 +400,13 @@ private slots:
         // the ruler line, then the count (auto: the ruler first)
         b.window->measure_op(Json{{"op", "set_ruler_line"}, {"start", {10, 10}}, {"end", {40, 50}}});
         b.act("act_measure_record")->trigger();
+        QTRY_VERIFY_WITH_TIMEOUT(!b.window->measuring(), 60000);
         QCOMPARE(log.rows().back().values["source"], Json("ものさしツール"));
         QVERIFY(log.rows().back().values.contains("angle"));
         b.window->measure_op(Json{{"op", "set_ruler_line"}, {"clear", true}});
         b.window->measure_op(Json{{"op", "add_count"}, {"at_mm", {10, 10}}});
         b.act("act_measure_record")->trigger();
+        QTRY_VERIFY_WITH_TIMEOUT(!b.window->measuring(), 60000);
         QCOMPARE(log.rows().back().values["source"], Json("カウントツール"));
         QCOMPARE(log.rows().back().values["count"], Json(1));
         QCOMPARE(panel->table()->rowCount(), 4);
@@ -411,6 +420,13 @@ private slots:
         panel->button(QStringLiteral("log_delete"))->click();
         QCOMPARE(log.rows().size(), std::size_t(3));
         QCOMPARE(log.rows()[1].values["source"], Json("ものさしツール"));
+        // 書き出し…: never over the book (the review's P2-4: said, its project.json as it was)
+        const QString project = QString::fromStdString(b.path.string()) + QStringLiteral("/project.json");
+        const std::string project_before = file_text(project);
+        b.answers.responder->save_path = [project](const QString&, const QString&) { return project; };
+        panel->button(QStringLiteral("log_export"))->click();
+        QCOMPARE(file_text(project), project_before);
+        QVERIFY(!b.answers.asked.isEmpty() && b.answers.asked.last().startsWith(QStringLiteral("書き出し: ")));
         // 書き出し…: the rows chosen, else all
         const QString csv = b.tmp.path() + QStringLiteral("/log.csv");
         b.answers.responder->save_path = [csv](const QString&, const QString&) { return csv; };
@@ -433,6 +449,7 @@ private slots:
         held.drag(QPointF(20, 60), QPointF(80, 60));
         QVERIFY(held.canvas()->ruler_here);
         held.act("act_measure_record")->trigger();
+        QTRY_VERIFY_WITH_TIMEOUT(!held.window->measuring(), 60000);
         QCOMPARE(log.rows().size(), std::size_t(1));
         QCOMPARE(log.rows()[0].values["source"], Json("ものさしツール"));
         QVERIFY(std::fabs(log.rows()[0].values["length"].get<double>() - 60.0 * 300 / 25.4) < 5);
@@ -456,6 +473,7 @@ private slots:
         QCOMPARE(points.ruler, (std::vector<std::string>{"label", "length"}));
         QCOMPARE(points.count, (std::vector<std::string>{"label"}));
         b.act("act_measure_record")->trigger();
+        QTRY_VERIFY_WITH_TIMEOUT(!b.window->measuring(), 60000);
         const app::MeasurementLog& log = app::MeasurementLog::instance();
         QCOMPARE(log.rows().size(), std::size_t(1));
         // (the labels go on counting through the app's session, as Photoshop's: 計測 n)

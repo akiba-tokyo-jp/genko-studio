@@ -35,9 +35,9 @@ public:
     static MeasurementLog& instance();
 
     const std::vector<Row>& rows() const { return rows_; }
-    // The number the next 計測値を記録 labels its rows with (計測 n), taken.
-    std::size_t take_number() { return ++measurements_; }
-    // The rows recorded, each kept to the data points of their source; their ids.
+    // The rows recorded, each kept to the data points of their source, the summary labelled with the log's next number
+    // (計測 n: counted through the app's session, a refused record taking none); their ids. Nothing put in when memory
+    // fails (std::bad_alloc thrown).
     std::vector<std::uint64_t> add(const render::measure::Recorded& made);
     // 選んだ行を削除 (the ids given; none: all of them). How many went.
     std::size_t remove(const std::vector<std::uint64_t>& ids);
@@ -79,6 +79,8 @@ public:
     QLabel* status() const { return status_; }
 
 private:
+    void fill();
+
     MainWindow* window_;
     QTableWidget* table_ = nullptr;
     QLabel* status_ = nullptr;

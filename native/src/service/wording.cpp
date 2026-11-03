@@ -794,11 +794,18 @@ const std::vector<Rule>& rules() {
                          "カウントの印・ものさしの線・注釈が、ページから 1000 m より遠くへ出てしまうため、できません"));
         // (PC5 J-d2 — the C++ build's own: 計測値を記録's values, 目盛りマーカーを配置; render/measure_features, render/ops_measure)
         r.push_back(rule("the selection is empty", "選択範囲が空です"));
-        r.push_back(rule(R"(the (selection|page) measured is too large.*)", "選択範囲が大きすぎて数えられません（1 億 2 千万画素まで）"));
+        r.push_back(rule(R"(the (selection|page) measured is too large \(.*)", "選択範囲が大きすぎて数えられません（1 億 2 千万画素まで）"));
         r.push_back(rule("source is auto, selection, ruler or count", "計測のソースは auto・selection・ruler・count のどれかです"));
         r.push_back(rule(R"(area is the selection: only for source selection \(or auto\))", "選択範囲（area）は、ソースが selection（か auto）のときだけ指定します"));
-        r.push_back(rule(R"(a (\S+) (.+) bar is ([0-9.]+) pixels; it must fit the trim's ([0-9.]+) pixels)",
-                         "目盛りの長さ \\1 \\2 は \\3 画素で、仕上がりの幅（\\4 画素）に入りません（1 画素以上で、幅に入る長さにします）"));
+        r.push_back(rule(R"(a (\S+) (.+) bar is ([0-9.]+) pixels; it must fit the trim's ([0-9.]+) pixels inside its margins)",
+                         "目盛りの長さ \\1 \\2 は \\3 画素で、仕上がりの幅から余白を除いた \\4 画素に入りません（1 画素以上で、そこに入る長さにします）"));
+        r.push_back(rule(R"(the scale marker's letters of ([0-9.]+) pt do not fit the trim's height of ([0-9.]+) mm)",
+                         "目盛りマーカーの文字（\\1 pt）が、仕上がりの高さ（\\2 mm）に入りません（文字を小さくします）"));
+        r.push_back(rule(R"(the scale marker's label \(([0-9.]+) × ([0-9.]+) mm\) does not fit the trim)",
+                         "目盛りマーカーの文字（\\1 × \\2 mm）が仕上がりに入りません（文字を小さくするか短い長さにします）"));
+        r.push_back(rule(R"(the selection has (\d+) features: rows for the first (\d+) only \(the summary counts them all\))",
+                         "選択範囲の塊が \\1 個と多いため、塊ごとの行は先頭の \\2 個だけにしました（まとめの行は全部を数えています）"));
+        r.push_back(rule("the selection measured is too large to count in memory", "選択範囲が大きすぎて、記憶の中で数えられません（選択範囲を小さくします）"));
         r.push_back(rule(R"((length|size_pt) must be a number greater than 0)", "\\1 は 0 より大きい数で指定します"));
         r.push_back(rule("size_pt is 1 to 1000", "文字のサイズ（size_pt）は 1〜1000 pt で指定します"));
         r.push_back(rule("font is a font's name", "フォントはフォントの名前で指定します"));

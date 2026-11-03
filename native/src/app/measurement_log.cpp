@@ -22,11 +22,26 @@ MeasurementLog& MeasurementLog::instance() {
 
 std::vector<std::uint64_t> MeasurementLog::add(const render::measure::Recorded& made) {
     const render::measure::DataPoints points = data_points();
-    std::vector<std::uint64_t> ids;
-    for (const Json& row : made.rows) {
-        rows_.push_back(Row{++next_row_, render::measure::kept(row, points.of(made.source))});
-        ids.push_back(next_row_);
+    // (made whole first, then put in: memory it cannot have leaves the log as it was — the review's P1-1; the number taken
+    // only for rows that go in — P3-2)
+    const std::size_t number = measurements_ + 1;
+    std::vector<Row> added;
+    added.reserve(made.rows.size());
+    std::uint64_t id = next_row_;
+    for (std::size_t i = 0; i < made.rows.size(); ++i) {
+        Json row = made.rows[i];
+        if (i == 0 && row.is_object()) row["label"] = "計測 " + std::to_string(number);  // (the summary: the log's numbering)
+        added.push_back(Row{++id, render::measure::kept(row, points.of(made.source))});
     }
+    rows_.reserve(rows_.size() + added.size());
+    std::vector<std::uint64_t> ids;
+    ids.reserve(added.size());
+    for (Row& row : added) {
+        ids.push_back(row.id);
+        rows_.push_back(std::move(row));
+    }
+    next_row_ = id;
+    measurements_ = number;
     if (made.grid_dpi > 0) last_grid_dpi_ = made.grid_dpi;
     emit changed();
     return ids;

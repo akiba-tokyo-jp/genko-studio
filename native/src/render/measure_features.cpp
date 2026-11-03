@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <numbers>
 
 #include "core/channels.hpp"
@@ -17,6 +18,7 @@
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "render/op_limits.hpp"
+#include "render/imaging.hpp"
 #include "render/page.hpp"
 #include "render/raster_ops.hpp"
 #include "render/selection.hpp"
@@ -86,11 +88,48 @@ void check_source(std::string_view source) {
 
 double Feature::circularity() const { return perimeter > 0 ? std::min(4.0 * std::numbers::pi * area / (perimeter * perimeter), 1.0) : 0.0; }
 
+namespace {
+
+// Bytes borrowed from the imaging budget the caller is in (record's: kMeasureBudget; none: nothing counted), given back
+// when the lease goes. OpError when the budget has not that much left.
+class Lease {
+public:
+    Lease() = default;
+    ~Lease() { genko_imaging_budget_release(&reservation_); }
+    Lease(const Lease&) = delete;
+    Lease& operator=(const Lease&) = delete;
+    void borrow(std::uint64_t bytes) {
+        if (!genko_imaging_budget_reserve(&reservation_, bytes)) {
+            genko_imaging_clear_error();
+            throw OpError("the selection measured is too large to count in memory");
+        }
+    }
+
+private:
+    ImagingMemoryInstance reservation_{};
+};
+
+// A gray as the measures take it: a value that is not a number (NaN) as 0 — never past the histogram's bins.
+double finite_gray(float value) { return std::isnan(value) ? 0.0 : static_cast<double>(value); }
+
+}  // namespace
+
+void Leases::borrow(std::uint64_t bytes) {
+    if (bytes == 0) return;
+    held_.push_back(std::make_shared<Lease>());
+    std::static_pointer_cast<Lease>(held_.back())->borrow(bytes);
+}
+
 std::vector<Feature> measure_features(std::span<const std::uint8_t> mask, std::span<const float> gray, std::size_t w, std::size_t h,
-                                      std::array<std::int64_t, 2> origin, double range) {
-    // Two-pass connected components (8 directions).
+                                      std::array<std::int64_t, 2> origin, double range, std::size_t detailed, Leases* leases) {
+    Leases own;
+    Leases& borrowed = leases != nullptr ? *leases : own;
+    // Two-pass connected components (8 directions). The labels and the union-find table borrowed from the budget (the
+    // table as it grows: a lacy selection — screentone dots — makes as many provisional labels as dots).
+    borrowed.borrow(std::uint64_t(w) * h * sizeof(std::uint32_t));
     std::vector<std::uint32_t> label(w * h, kNone);
     std::vector<std::uint32_t> parent;
+    std::size_t lent = 0;  // (parent's entries borrowed for, with index's)
     for (std::size_t y = 0; y < h; ++y) {
         for (std::size_t x = 0; x < w; ++x) {
             const std::size_t i = y * w + x;
@@ -106,6 +145,11 @@ std::vector<Feature> measure_features(std::span<const std::uint8_t> mask, std::s
             for (const std::uint32_t n : nbrs)
                 if (n != kNone) best = std::min(best, root(parent, n));
             if (best == kNone) {
+                if (parent.size() == lent) {
+                    const std::size_t more = std::max<std::size_t>(1 << 16, lent);
+                    borrowed.borrow(std::uint64_t(more) * 2 * sizeof(std::uint32_t));
+                    lent += more;
+                }
                 best = static_cast<std::uint32_t>(parent.size());
                 parent.push_back(best);
             } else {
@@ -131,6 +175,10 @@ std::vector<Feature> measure_features(std::span<const std::uint8_t> mask, std::s
         if (index[r] == kNone) index[r] = n++;
         l = index[r];
     }
+    std::vector<std::uint32_t>().swap(index);
+    std::vector<std::uint32_t>().swap(parent);
+    // each feature's scalars (its histogram and values only for the first `detailed`)
+    borrowed.borrow(std::uint64_t(n) * (sizeof(Feature) + 2 * sizeof(double)));
     std::vector<double> perimeter(n, 0.0);
     // Perimeter: marching squares over the pixel-centre grid (padded with unselected pixels), each cell's length given
     // to the feature of a pixel in it.
@@ -160,10 +208,8 @@ std::vector<Feature> measure_features(std::span<const std::uint8_t> mask, std::s
     for (Feature& f : features) {
         f.gray_min = std::numeric_limits<double>::max();
         f.gray_max = std::numeric_limits<double>::lowest();
-        f.histogram.assign(256, 0);
     }
     std::vector<double> sums(n, 0.0);
-    std::vector<std::vector<std::uint16_t>> values(n);
     for (std::size_t y = 0; y < h; ++y) {
         for (std::size_t x = 0; x < w; ++x) {
             const std::uint32_t l = label[y * w + x];
@@ -177,12 +223,28 @@ std::vector<Feature> measure_features(std::span<const std::uint8_t> mask, std::s
             } else {
                 f.x0 = std::min(f.x0, px), f.y0 = std::min(f.y0, py), f.x1 = std::max(f.x1, px + 1), f.y1 = std::max(f.y1, py + 1);
             }
-            const double g = static_cast<double>(gray[y * w + x]);
+            const double g = finite_gray(gray[y * w + x]);
             f.gray_min = std::min(f.gray_min, g);
             f.gray_max = std::max(f.gray_max, g);
             sums[l] += g;
-            const double clamped = std::clamp(g, 0.0, 1.0);
-            f.histogram[static_cast<std::size_t>(std::round(clamped * 255.0))] += 1;
+        }
+    }
+    // the first `detailed` features' histograms and medians (a second pass: their values only)
+    const std::size_t shown = std::min<std::size_t>(n, detailed);
+    std::uint64_t held = 0;
+    for (std::size_t i = 0; i < shown; ++i) held += static_cast<std::uint64_t>(features[i].area);
+    borrowed.borrow(held * sizeof(std::uint16_t) + std::uint64_t(shown) * (256 * sizeof(std::uint64_t) + sizeof(std::vector<std::uint16_t>)));
+    std::vector<std::vector<std::uint16_t>> values(shown);
+    for (std::size_t i = 0; i < shown; ++i) {
+        features[i].histogram.assign(256, 0);
+        values[i].reserve(static_cast<std::size_t>(features[i].area));
+    }
+    if (shown > 0) {
+        for (std::size_t i = 0; i < w * h; ++i) {
+            const std::uint32_t l = label[i];
+            if (l == kNone || l >= shown) continue;
+            const double clamped = std::clamp(finite_gray(gray[i]), 0.0, 1.0);
+            features[l].histogram[static_cast<std::size_t>(std::round(clamped * 255.0))] += 1;
             values[l].push_back(static_cast<std::uint16_t>(std::round(clamped * 65535.0)));
         }
     }
@@ -192,7 +254,7 @@ std::vector<Feature> measure_features(std::span<const std::uint8_t> mask, std::s
         f.gray_mean = sums[i] / std::max(f.area, 1.0) * range;
         f.gray_min *= range;
         f.gray_max *= range;
-        f.gray_median = median(values[i]) * range;
+        if (i < shown) f.gray_median = median(values[i]) * range;
     }
     return features;
 }
@@ -206,7 +268,7 @@ double median(std::vector<std::uint16_t>& values) {
     return m / 65535.0;
 }
 
-Feature summary(const std::vector<Feature>& features, double median_of_all) {
+Feature summary(const std::vector<Feature>& features, double median_of_all, const std::vector<std::uint64_t>* histogram_of_all) {
     Feature out;
     out.histogram.assign(256, 0);
     out.gray_min = std::numeric_limits<double>::max();
@@ -215,7 +277,8 @@ Feature summary(const std::vector<Feature>& features, double median_of_all) {
     for (const Feature& f : features) {
         out.area += f.area;
         out.perimeter += f.perimeter;
-        for (std::size_t i = 0; i < out.histogram.size() && i < f.histogram.size(); ++i) out.histogram[i] += f.histogram[i];
+        if (histogram_of_all == nullptr)
+            for (std::size_t i = 0; i < out.histogram.size() && i < f.histogram.size(); ++i) out.histogram[i] += f.histogram[i];
         if (f.bounded) {
             if (!out.bounded) {
                 out.x0 = f.x0, out.y0 = f.y0, out.x1 = f.x1, out.y1 = f.y1;
@@ -228,6 +291,7 @@ Feature summary(const std::vector<Feature>& features, double median_of_all) {
         out.gray_max = std::max(out.gray_max, f.gray_max);
         weighted += f.gray_mean * f.area;
     }
+    if (histogram_of_all != nullptr) out.histogram = *histogram_of_all;
     out.gray_mean = weighted / std::max(out.area, 1.0);
     out.gray_median = median_of_all;
     return out;
@@ -332,14 +396,17 @@ struct Gray {
     double range = 255.0;
 };
 
-Gray gray_of(const core::Document& doc, const core::Page& page, int dpi, const RenderRegion& region, std::vector<std::string>& notes) {
+Gray gray_of(const core::Document& doc, const core::Page& page, int dpi, const RenderRegion& region, std::vector<std::string>& notes,
+             Leases& leases) {
     Gray out;
     const int depth = core::page_depth(page);
     out.range = depth == 16 ? 32768.0 : depth == 32 ? 1.0 : 255.0;
     const bool grey_inks = page.color && page.color->space == core::InkSpace::Gray;
     const bool precise = !page.color && page.rgb && page.rgb->depth > 8;
+    leases.borrow(std::uint64_t(region.w) * std::uint64_t(region.h) * sizeof(float));
     out.values.assign(static_cast<std::size_t>(region.w) * static_cast<std::size_t>(region.h), 0.0f);
-    const int band = std::max(1, static_cast<int>(8'000'000 / std::max(1, region.w)));
+    // (bands of 4 million pixels: what one band draws — a precise page's canvas, its values — held in the budget too)
+    const int band = std::max(1, static_cast<int>(4'000'000 / std::max(1, region.w)));
     std::vector<std::string> omitted;
     for (int top = 0; top < region.h; top += band) {
         RenderOptions options = proof_options();
@@ -440,8 +507,11 @@ Recorded record(const core::Document& doc, const core::Page& page, std::string_v
         out.rows.push_back(std::move(row));
         return out;
     }
-    // the selection (none: the whole page), counted on the page's selection grid
+    // the selection (none: the whole page), counted on the page's selection grid — what it holds borrowed from the imaging
+    // budget (the review's P2-2: past it, refused as too large)
     use_brushes_of(doc);  // (as the ops that draw see the book)
+    const ImageAllocationBudget budget(kMeasureBudget);
+    Leases leases;
     const int dpi = selection::grid_dpi(page);
     out.grid_dpi = dpi;
     const int pw = mm_to_px(page.spec.width_mm.value(), dpi), ph = mm_to_px(page.spec.height_mm.value(), dpi);
@@ -454,23 +524,30 @@ Recorded record(const core::Document& doc, const core::Page& page, std::string_v
         box = Box{std::max(0, held->x0), std::max(0, held->y0), std::min(pw, held->x1), std::min(ph, held->y1)};
         if (box.width() <= 0 || box.height() <= 0) throw OpError("the selection is empty");
         limits::check_picture(box.width(), box.height(), "the selection measured");
-        const std::string bytes = drawn.crop(box).tobytes();
-        mask.resize(bytes.size());
-        for (std::size_t i = 0; i < bytes.size(); ++i) mask[i] = static_cast<unsigned char>(bytes[i]) >= 128 ? 1 : 0;  // (coverage ≥ 50 %)
+        leases.borrow(std::uint64_t(box.width()) * std::uint64_t(box.height()));
+        mask.resize(static_cast<std::size_t>(box.width()) * static_cast<std::size_t>(box.height()));
+        for (int y = 0; y < box.height(); ++y) {  // (row by row: no second copy of the box's mask)
+            const std::string row = drawn.crop(Box{box.x0, box.y0 + y, box.x1, box.y0 + y + 1}).tobytes();
+            std::uint8_t* into = mask.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(box.width());
+            for (std::size_t x = 0; x < row.size(); ++x) into[x] = static_cast<unsigned char>(row[x]) >= 128 ? 1 : 0;  // (coverage ≥ 50 %)
+        }
     } else {
         limits::check_picture(pw, ph, "the page measured");
+        leases.borrow(std::uint64_t(pw) * std::uint64_t(ph));
         mask.assign(static_cast<std::size_t>(pw) * static_cast<std::size_t>(ph), 1);
     }
     const std::size_t w = static_cast<std::size_t>(box.width()), h = static_cast<std::size_t>(box.height());
-    const Gray gray = gray_of(doc, page, dpi, RenderRegion{box.x0, box.y0, box.width(), box.height()}, out.notes);
-    const std::vector<Feature> features = measure_features(mask, gray.values, w, h, {box.x0, box.y0}, gray.range);
+    const Gray gray = gray_of(doc, page, dpi, RenderRegion{box.x0, box.y0, box.width(), box.height()}, out.notes, leases);
+    const std::vector<Feature> features = measure_features(mask, gray.values, w, h, {box.x0, box.y0}, gray.range, kFeatureRowsMax, &leases);
     if (features.empty()) throw OpError("the selection is empty");
-    // the median of every value selected (as one feature's)
-    std::vector<std::uint64_t> counts(65536, 0);
+    // the histogram and the median of every value selected (as one feature's), counted
+    std::vector<std::uint64_t> counts(65536, 0), histogram(256, 0);
     std::uint64_t total = 0;
     for (std::size_t i = 0; i < mask.size(); ++i) {
         if (mask[i] == 0) continue;
-        counts[static_cast<std::size_t>(std::round(std::clamp(static_cast<double>(gray.values[i]), 0.0, 1.0) * 65535.0))] += 1;
+        const double g = std::isnan(gray.values[i]) ? 0.0 : std::clamp(static_cast<double>(gray.values[i]), 0.0, 1.0);
+        counts[static_cast<std::size_t>(std::round(g * 65535.0))] += 1;
+        histogram[static_cast<std::size_t>(std::round(g * 255.0))] += 1;
         ++total;
     }
     const auto nth = [&](std::uint64_t k) {  // (the k-th value, 0 the least)
@@ -485,13 +562,19 @@ Recorded record(const core::Document& doc, const core::Page& page, std::string_v
     if (total % 2 == 0) middle = (middle + nth(total / 2 - 1)) / 2.0;
     const double per = core::page_px_per_mm(page) / (dpi / 25.4);  // (page pixels a counted pixel)
     Json row = base_row(doc, page, out.source, label, now);
-    feature_values(row, summary(features, middle / 65535.0 * gray.range), features.size(), per, factor);
+    feature_values(row, summary(features, middle / 65535.0 * gray.range, &histogram), features.size(), per, factor);
     out.rows.push_back(std::move(row));
     if (features.size() > 1) {
-        for (std::size_t i = 0; i < features.size(); ++i) {
+        const std::size_t shown = std::min(features.size(), kFeatureRowsMax);
+        for (std::size_t i = 0; i < shown; ++i) {
             Json one = base_row(doc, page, out.source, "フィーチャ " + std::to_string(i + 1), now);
             feature_values(one, features[i], 1, per, factor);
             out.rows.push_back(std::move(one));
+        }
+        if (shown < features.size()) {  // (the review's P1-1)
+            out.features_left_out = features.size() - shown;
+            out.notes.push_back("the selection has " + std::to_string(features.size()) + " features: rows for the first " + std::to_string(shown) +
+                                " only (the summary counts them all)");
         }
     }
     return out;
@@ -535,6 +618,9 @@ std::string csv_field(const Json& value) {
     std::string s;
     if (value.is_string()) {
         s = value.get<std::string>();
+        // (the review's P2-3: a text a spreadsheet would take for a formula — a book's title, the scale's units — kept as
+        // text by a leading ' (OWASP's CSV injection); numbers, -45 among them, as they are)
+        if (!s.empty() && std::string_view("=+-@\t\r").find(s.front()) != std::string_view::npos) s.insert(s.begin(), '\'');
     } else if (value.is_array()) {
         for (const Json& v : value) s += (s.empty() ? "" : " ") + v.dump();
     } else if (!value.is_null()) {

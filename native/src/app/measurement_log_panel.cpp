@@ -79,6 +79,17 @@ MeasurementLogPanel::MeasurementLogPanel(MainWindow* window) : QWidget(window), 
 QToolButton* MeasurementLogPanel::button(const QString& name) const { return findChild<QToolButton*>(name); }
 
 void MeasurementLogPanel::refresh() {
+    try {  // (the review's P1-1: a table the memory cannot hold said, never a crash)
+        fill();
+    } catch (const std::exception&) {
+        table_->clear();
+        table_->setRowCount(0);
+        table_->setColumnCount(0);
+        status_->setText(QStringLiteral("計測ログが大きすぎて表に出せません（行を削除するか、書き出し… で CSV にしてください）"));
+    }
+}
+
+void MeasurementLogPanel::fill() {
     const MeasurementLog& log = MeasurementLog::instance();
     const std::vector<std::string> keys = log.columns();
     table_->clear();
@@ -131,10 +142,11 @@ void MeasurementLogPanel::export_csv() {
     const std::vector<std::uint64_t> ids = chosen();
     const QString path = ask::save_path(this, QStringLiteral("計測値を書き出し"), QStringLiteral("計測ログ.csv"), QStringLiteral("CSV (*.csv)"));
     if (path.isEmpty()) return;
+    // (the review's P2-4: never over this book, its folder, a linked file or a picture a book was opened from — said)
+    if (window_->refuses_to_write(core::path_from_utf8(path.toStdString()))) return;
     // (UTF-8 with its BOM, as a spreadsheet opens a CSV of Japanese words)
-    const std::string text = "\xEF\xBB\xBF" + log.csv(ids);
     try {
-        storage::write_atomic(core::path_from_utf8(path.toStdString()), text);
+        storage::write_atomic(core::path_from_utf8(path.toStdString()), "\xEF\xBB\xBF" + log.csv(ids));
     } catch (const std::exception& error) {
         window_->flash(QStringLiteral("書き出せませんでした: %1").arg(QString::fromUtf8(error.what())), 5000, true);
         return;

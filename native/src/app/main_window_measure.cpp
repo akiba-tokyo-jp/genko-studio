@@ -14,6 +14,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDockWidget>
+#include <QFutureWatcher>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QGridLayout>
@@ -29,6 +30,7 @@
 #include <QSpinBox>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
 #include <cmath>
@@ -460,38 +462,76 @@ void MainWindow::build_measurement_log_dock() {
 }
 
 bool MainWindow::record_measurements() {
+    if (measuring_) {  // (one at a time: the one under way finishes first)
+        flash(QStringLiteral("計測しています…（終わるまでお待ちください）"), 3000);
+        return false;
+    }
     const core::Page* page = current_page();
     if (page == nullptr) return false;
     const std::optional<Json> area = selection_area();
     // (a ruler line the book could not take — this window's — measured as the page's: measuring never needs the book)
-    core::Page with_line;
-    const core::Page* measured = page;
+    auto measured = std::make_shared<core::Page>(*page);
     if (!area && canvas_->ruler_here && (!page->measure || !page->measure->ruler)) {
-        with_line = *page;
-        if (!with_line.measure) with_line.measure = core::Measure{};
-        with_line.measure->ruler = *canvas_->ruler_here;
-        measured = &with_line;
+        if (!measured->measure) measured->measure = core::Measure{};
+        measured->measure->ruler = *canvas_->ruler_here;
     }
-    MeasurementLog& log = MeasurementLog::instance();
-    render::measure::Recorded made;
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    try {
-        made = render::measure::record(book(), *measured, "auto", area, log.take_number(), render::measure::now_text());
-    } catch (const std::exception& error) {
+    // (the review's P2-1: measured on a worker — the book and the page as they are now, shared, never changed —, the rows
+    // put in the log here when it is done; the window goes on meanwhile, 計測値を記録 waits)
+    struct Measured {
+        render::measure::Recorded made;
+        QString error;
+    };
+    const auto doc = std::make_shared<const core::Document>(book());
+    measuring_ = true;
+    QAction* record = action(QStringLiteral("act_measure_record"));
+    record->setEnabled(false);
+    QApplication::setOverrideCursor(Qt::BusyCursor);
+    flash(QStringLiteral("計測しています…"), 2000);
+    auto* watcher = new QFutureWatcher<Measured>(this);
+    connect(watcher, &QFutureWatcher<Measured>::finished, this, [this, watcher, record, had_area = area.has_value()] {
+        watcher->deleteLater();
         QApplication::restoreOverrideCursor();
-        flash(QStringLiteral("計測値を記録できませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))), 5000, true);
-        return false;
-    }
-    QApplication::restoreOverrideCursor();
-    (void)log.add(made);
-    if (measurement_log_dock_ != nullptr && !measurement_log_dock_->isVisible()) {
-        measurement_log_dock_->show();
-        measurement_log_dock_->raise();
-    }
-    const QString source = made.source == "selection" ? (area ? QStringLiteral("選択範囲") : QStringLiteral("ページ全体"))
-                           : made.source == "ruler"    ? QStringLiteral("ものさし")
-                                                       : QStringLiteral("カウント");
-    flash(QStringLiteral("%1の計測値を記録しました（%2 行）").arg(source).arg(made.rows.size()), 4000);
+        measuring_ = false;
+        record->setEnabled(true);
+        Measured result = watcher->result();
+        if (!result.error.isEmpty()) {
+            flash(QStringLiteral("計測値を記録できませんでした: %1").arg(wording::error(result.error)), 5000, true);
+            return;
+        }
+        const render::measure::Recorded& made = result.made;
+        try {  // (the review's P1-1: the log and its table made again — memory they cannot have said, not a crash)
+            (void)MeasurementLog::instance().add(made);
+        } catch (const std::exception&) {
+            flash(QStringLiteral("計測値を記録できませんでした: 計測ログに入れる記憶が足りません（計測ログの行を削除してください）"), 6000, true);
+            return;
+        }
+        if (measurement_log_dock_ != nullptr && !measurement_log_dock_->isVisible()) {
+            measurement_log_dock_->show();
+            measurement_log_dock_->raise();
+        }
+        const QString source = made.source == "selection" ? (had_area ? QStringLiteral("選択範囲") : QStringLiteral("ページ全体"))
+                               : made.source == "ruler"    ? QStringLiteral("ものさし")
+                                                           : QStringLiteral("カウント");
+        if (made.features_left_out > 0) {
+            flash(QStringLiteral("%1の計測値を記録しました（塊が %2 個と多いため、塊ごとの行は先頭の %3 個だけ。まとめの行は全部を数えています）")
+                      .arg(source)
+                      .arg(made.features_left_out + render::measure::kFeatureRowsMax)
+                      .arg(render::measure::kFeatureRowsMax),
+                  6000);
+        } else {
+            flash(QStringLiteral("%1の計測値を記録しました（%2 行）").arg(source).arg(made.rows.size()), 4000);
+        }
+    });
+    watcher->setFuture(QtConcurrent::run([doc, measured, area]() -> Measured {
+        Measured out;
+        try {
+            // (its number given when it goes into the log: a refused one takes none — the review's P3-2)
+            out.made = render::measure::record(*doc, *measured, "auto", area, 0, render::measure::now_text());
+        } catch (const std::exception& error) {
+            out.error = QString::fromUtf8(error.what());
+        }
+        return out;
+    }));
     return true;
 }
 
@@ -568,9 +608,12 @@ void MainWindow::scale_marker_dialog() {
     auto* form = new QFormLayout(&dialog);
     auto* length = new QDoubleSpinBox;
     length->setObjectName(QStringLiteral("marker_length"));
-    length->setRange(0.0001, 1e9);
-    length->setDecimals(4);
+    // (the review's P3-3: any scale's lengths — 6 decimals over a wide range —; the nice length, left as it is shown, is
+    // the op's own: no length sent)
+    length->setRange(1e-6, 1e12);
+    length->setDecimals(6);
     length->setValue(render::measure::nice_marker_length(*page));
+    const double shown_length = length->value();
     length->setSuffix(QStringLiteral(" ") + units);
     form->addRow(QStringLiteral("長さ"), length);
     auto* font = new QLineEdit;
@@ -614,11 +657,11 @@ void MainWindow::scale_marker_dialog() {
     form->addRow(buttons);
     if (ask::exec(&dialog) != QDialog::Accepted || !still(asked)) return;
     Json op{{"op", "place_scale_marker"},
-            {"length", length->value()},
             {"size_pt", size->value()},
             {"text", text->isChecked()},
             {"position", position->currentData().toString().toStdString()},
             {"color", colour->currentData().toString().toStdString()}};
+    if (length->value() != shown_length) op["length"] = length->value();
     if (!font->text().trimmed().isEmpty()) op["font"] = font->text().trimmed().toStdString();
     if (measure_op(std::move(op))) flash(QStringLiteral("目盛りマーカーを配置しました"), 3000);
 }

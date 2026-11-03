@@ -1935,6 +1935,8 @@ public:
     // 目盛りマーカーを配置…: the window asked (長さ・フォント・サイズ・テキストを表示・テキストの位置・カラー), then place_scale_marker.
     void scale_marker_dialog();
     MeasurementLogPanel* measurement_log_panel() const { return measurement_log_panel_; }
+    // (計測値を記録 under way on a worker: the rows go into the log when it is done)
+    bool measuring() const { return measuring_; }
 
     // --- PC5 J-b (slices@1): main_window_slices.cpp — the スライスツール and the スライス選択ツール (the 切り抜き group; their
     // options), レイヤー → 新規レイヤーベースのスライス, 表示 → 表示・非表示 → スライス, スライスをロック, スライスを消去 (and スナップ
@@ -1970,6 +1972,7 @@ private:
     void refresh_measure();
     void build_measurement_log_dock();  // (PC5 J-d2: ウィンドウ → 計測ログ, after レイヤーカンプ)
     MeasurementLogPanel* measurement_log_panel_ = nullptr;
+    bool measuring_ = false;
     QDockWidget* measurement_log_dock_ = nullptr;
     QLabel* ruler_readout_ = nullptr;
     QComboBox* count_groups_ = nullptr;

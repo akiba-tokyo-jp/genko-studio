@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "core/base64.hpp"
 #include "core/command_bus.hpp"
 #include "core/json.hpp"
 #include "core/measure.hpp"
@@ -22,6 +23,7 @@
 #include "render/image.hpp"
 #include "render/measure_features.hpp"
 #include "render/ops_registry.hpp"
+#include "render/png.hpp"
 #include "render/selection.hpp"
 
 using namespace genko;
@@ -394,6 +396,115 @@ private slots:
         const core::Document marked = run(deep, op("place_scale_marker", {{"length", 100}}));  // (no scale: 100 pixels)
         QCOMPARE(marked.page(0).layers.back().title, std::string("目盛りマーカー"));
         QCOMPARE(marked.page(0).layers.size(), std::size_t(3));
+    }
+
+    // (the review's P1-1, P2-2, P3-1) A lacy selection — screentone dots, one pixel in four —: every feature counted in the
+    // summary, rows and histograms for the first kFeatureRowsMax only (said), what it holds a small multiple of its pixels
+    // and borrowed from the imaging budget (a budget too small: refused); a gray that is no number read as 0.
+    void aLacySelection() {
+        const std::size_t side = 1000;
+        const auto dots = mask_of(side, side, [](std::size_t x, std::size_t y) { return x % 2 == 0 && y % 2 == 0; });
+        const std::vector<float> gray(side * side, 0.5f);
+        {
+            const render::ImageAllocationBudget budget(m::kMeasureBudget);
+            m::Leases leases;
+            const auto f = m::measure_features(dots, gray, side, side, {0, 0}, 255.0, m::kFeatureRowsMax, &leases);
+            QCOMPARE(f.size(), std::size_t(250000));
+            QCOMPARE(f[0].histogram.size(), std::size_t(256));
+            QCOMPARE(f[m::kFeatureRowsMax - 1].histogram.size(), std::size_t(256));
+            QVERIFY(f[m::kFeatureRowsMax].histogram.empty());
+            QCOMPARE(f[m::kFeatureRowsMax].area, 1.0);
+            QCOMPARE(f.back().gray_mean, 127.5);
+            // (the labels — 4 bytes a pixel —, the union table as it grew and the features' table: under 96 MB for a
+            // million pixels and a quarter million features)
+            QVERIFY2(budget.peak() > std::uint64_t(side * side * 4) && budget.peak() < 96ULL * 1024 * 1024, std::to_string(budget.peak()).c_str());
+        }
+        {
+            const render::ImageAllocationBudget small(1024 * 1024);
+            m::Leases leases;
+            bool refused = false;
+            try {
+                (void)m::measure_features(dots, gray, side, side, {0, 0}, 255.0, m::kFeatureRowsMax, &leases);
+            } catch (const core::OpError& error) {
+                refused = std::string(error.what()) == "the selection measured is too large to count in memory";
+            }
+            QVERIFY(refused);
+        }
+        // through record: a page of dots selected by a mask area — the summary of all, 10000 feature rows, the rest said
+        core::Document doc = book(400, 300, 200);
+        std::string bytes(400 * 300, '\0');
+        for (std::size_t y = 0; y < 300; y += 2)
+            for (std::size_t x = 0; x < 400; x += 2) bytes[y * 400 + x] = static_cast<char>(255);
+        const std::string png = render::write_png(render::Image::frombytes("L", render::Size{400, 300}, bytes));
+        const Json area{{"mask", Json{{"box", Json::array({0, 0, 400 * 25.4 / 200, 300 * 25.4 / 200})}, {"png", core::b64encode(png)}}}};
+        const m::Recorded made = m::record(doc, doc.page(0), "selection", area, 1, "t");
+        QCOMPARE(made.rows.size(), m::kFeatureRowsMax + 1);
+        QCOMPARE(made.rows[0]["count"], Json(30000));
+        QCOMPARE(made.rows[0]["area"].get<double>(), 30000.0);
+        std::uint64_t counted_all = 0;
+        for (const Json& v : made.rows[0]["histogram"]) counted_all += v.get<std::uint64_t>();
+        QCOMPARE(counted_all, std::uint64_t(30000));
+        QCOMPARE(made.features_left_out, std::size_t(20000));
+        QVERIFY(std::any_of(made.notes.begin(), made.notes.end(), [](const std::string& n) { return n.find("30000 features") != std::string::npos; }));
+        // a gray that is no number: read as 0, never past the histogram's bins
+        std::vector<float> odd(16, 0.5f);
+        odd[3] = std::numeric_limits<float>::quiet_NaN();
+        const auto nan = m::measure_features(mask_of(4, 4, [](std::size_t, std::size_t) { return true; }), odd, 4, 4, {0, 0}, 255.0);
+        QCOMPARE(nan.size(), std::size_t(1));
+        QCOMPARE(nan[0].gray_min, 0.0);
+        QCOMPARE(nan[0].histogram[0], std::uint64_t(1));
+    }
+
+    // (the review's P2-3) The CSV never hands a spreadsheet a formula: a text starting with = + - @, a tab or CR gets a ';
+    // numbers as they are.
+    void noFormulasInTheCsv() {
+        QCOMPARE(m::csv_field(Json("=1+1")), std::string("'=1+1"));
+        QCOMPARE(m::csv_field(Json("+cmd")), std::string("'+cmd"));
+        QCOMPARE(m::csv_field(Json("-x")), std::string("'-x"));
+        QCOMPARE(m::csv_field(Json("@SUM(A1)")), std::string("'@SUM(A1)"));
+        QCOMPARE(m::csv_field(Json("\tx")), std::string("'\tx"));
+        QCOMPARE(m::csv_field(Json("=HYPERLINK(\"a\",\"b\")")), std::string("\"'=HYPERLINK(\"\"a\"\",\"\"b\"\")\""));
+        QCOMPARE(m::csv_field(Json(-45.0)), std::string("-45.0"));
+        QCOMPARE(m::csv_field(Json("a=b")), std::string("a=b"));
+        // a book titled so: its document column kept as text
+        core::Document doc = book();
+        doc.title = "=1+1";
+        const m::Recorded made = m::record(doc, doc.page(0), "count", std::nullopt, 1, "t");
+        const std::string text = m::csv(made.rows);
+        QVERIFY2(text.find(",'=1+1（1 ページ）,") != std::string::npos, text.c_str());
+    }
+
+    // (the review's P2-5, P3-4) The marker wholly inside the trim and its margins — refused when its bar, its letters' height
+    // or its label's width would not be —; the page's locks (すべてをロック: a locked layer kept as it was) and strict gates
+    // as any op's.
+    void theScaleMarkerInsideTheTrim() {
+        core::Document doc = book(400, 300, 254);  // (40 × 30 mm; margins 0.9 mm)
+        doc = run(doc, op("set_measurement_scale", {{"pixel_length", 10}, {"logical_length", 1}, {"units", "mm"}}));
+        // (39 mm: past the 38.2 mm inside the margins — the trim's own 40 would have let it through before)
+        QVERIFY(refusal(doc, op("place_scale_marker", {{"length", 39}})).find("inside its margins") != std::string::npos);
+        const Json fits = report(doc, op("place_scale_marker", {{"length", 38}, {"size_pt", 6}}));
+        QVERIFY(fits["bar_mm"][0].get<double>() + fits["bar_mm"][2].get<double>() <= 40.0 - 0.9 + 1e-6);
+        QVERIFY(refusal(doc, op("place_scale_marker", {{"size_pt", 1000}})).find("do not fit the trim's height") != std::string::npos);
+        QVERIFY(refusal(doc, op("place_scale_marker", {{"size_pt", 60}})).find("do not fit the trim's height") != std::string::npos);
+        core::Document tall = run(book(400, 1000, 254), op("set_measurement_scale", {{"pixel_length", 10}, {"logical_length", 1},
+                                                                                     {"units", "millimetres measured very carefully"}}));
+        const std::string wide = refusal(tall, op("place_scale_marker", {{"size_pt", 40}}));
+        QVERIFY2(wide.find("label") != std::string::npos && wide.find("does not fit the trim") != std::string::npos, wide.c_str());
+        // a layer locked with すべてをロック: kept as it was, the marker placed beside it
+        core::Document locked = doc;
+        locked = run(locked, op("add_layer", {{"kind", "paint"}, {"name", "下"}, {"id", "base"}}));
+        locked.edit_page(0).layers.back().lock_all = true;
+        const core::Document with = run(locked, op("place_scale_marker"));
+        QCOMPARE(with.page(0).layers.front().id, std::string("base"));
+        QVERIFY(with.page(0).layers.front().lock_all);
+        QVERIFY(with.page(0).layers.front().parent_id.is_null());
+        // strict gates: not a layout op — placed alike whether the name is approved or not, by an agent too
+        core::Document strict = doc;
+        strict.strict_gates = true;
+        for (const bool approved : {false, true}) {
+            strict.edit_page(0).name_ok = approved;
+            QCOMPARE(run_ops(strict, Json::array({op("place_scale_marker")}), "ai:claude").doc.page(0).layers.back().title, std::string("目盛りマーカー"));
+        }
     }
 };
 

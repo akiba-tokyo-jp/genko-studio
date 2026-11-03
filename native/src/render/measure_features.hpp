@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -45,15 +47,35 @@ struct Feature {
     std::int64_t height() const { return y1 - y0; }
 };
 
+// The feature rows 計測値を記録 gives at most (the review's P1-1: a lacy selection — screentone dots — has hundreds of
+// thousands): past it the summary counts them all, the rows are the first ones', and a note says so.
+inline constexpr std::size_t kFeatureRowsMax = 10000;
+// What measuring a selection may hold at once (its mask, gray values, labels, the features' table, the pictures drawn for
+// it): the imaging budget record opens (ImageAllocationBudget), as the filters'.
+inline constexpr std::uint64_t kMeasureBudget = 2ULL * 1024 * 1024 * 1024;
+
+// Bytes borrowed from the imaging budget the caller is in (none: nothing counted), held until this goes. core::OpError
+// "the selection measured is too large to count in memory" when the budget has not that much left.
+class Leases {
+public:
+    void borrow(std::uint64_t bytes);
+
+private:
+    std::vector<std::shared_ptr<void>> held_;
+};
+
 // measure_features: `mask` (w × h, non-zero: selected) split into 8-connected features in the order of their first pixel
-// (scan order), each measured against `gray` (0..1, w × h); `origin` offsets the bounds; `range` what a gray of 1 reads as.
+// (scan order), each measured against `gray` (0..1, w × h; NaN read as 0); `origin` offsets the bounds; `range` what a gray
+// of 1 reads as. Only the first `detailed` have their histogram and median (the others' histogram empty, median 0). The
+// labels and the tables borrowed into `leases` (none: its own, given back on return).
 std::vector<Feature> measure_features(std::span<const std::uint8_t> mask, std::span<const float> gray, std::size_t w, std::size_t h,
-                                      std::array<std::int64_t, 2> origin, double range);
+                                      std::array<std::int64_t, 2> origin, double range,
+                                      std::size_t detailed = std::numeric_limits<std::size_t>::max(), Leases* leases = nullptr);
 // The median of values 0..65535 (as 0..1): the upper middle one, or of an even count the mean of the two middle ones.
 double median(std::vector<std::uint16_t>& values);
 // The summary over features: their areas and perimeters added, bounds joined, the area-weighted mean, `median` given (the
-// median of every value).
-Feature summary(const std::vector<Feature>& features, double median_of_all);
+// median of every value), the histogram given (none: the features' added).
+Feature summary(const std::vector<Feature>& features, double median_of_all, const std::vector<std::uint64_t>* histogram_of_all = nullptr);
 
 // --- the data points (the log's columns) -------------------------------------------------------------------------------
 
@@ -94,6 +116,7 @@ struct Recorded {
     int grid_dpi = 0;           // (selection: the grid it was counted on)
     std::vector<core::Json> rows;  // each {key: value} of every point the source has, in the columns' order
     std::vector<std::string> notes;
+    std::size_t features_left_out = 0;  // (the features past kFeatureRowsMax: no row of their own, in the summary all the same)
 };
 // The rows 計測値を記録 adds for the page: `source` auto (the selection — `area` given —, else the ruler line, else the
 // count marks, else the whole page as a selection) | selection | ruler | count; `area` the selection (an op's plain area;
@@ -114,8 +137,9 @@ double nice_marker_length(const core::Page& page);
 
 // The columns any row has, in Photoshop's order.
 std::vector<std::string> log_columns(std::span<const core::Json> rows);
-// One field: text as it is, a list (the histogram) its items with spaces, numbers as JSON writes them, none empty; quoted
-// when it holds a comma, a quote or a line break.
+// One field: text as it is (but one starting with = + - @, a tab or CR: a ' before it, never a spreadsheet's formula), a
+// list (the histogram) its items with spaces, numbers as JSON writes them, none empty; quoted when it holds a comma, a
+// quote or a line break.
 std::string csv_field(const core::Json& value);
 // The rows as CSV: a head of the columns' names, a line for each row (UTF-8, "\n").
 std::string csv(std::span<const core::Json> rows);

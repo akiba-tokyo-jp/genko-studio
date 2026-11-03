@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <map>
 #include <string>
 
 #include "core/command_bus.hpp"
@@ -95,6 +96,14 @@ class TestContractMeasure : public QObject {
         return out;
     }
     Json project(const QString& book) { return Json::parse(genko::test::read_bytes(book + QStringLiteral("/project.json"))); }
+    // Every file under a book's folder and its bytes.
+    static std::map<std::string, std::string> folder_bytes(const QString& book) {
+        std::map<std::string, std::string> out;
+        for (const auto& entry : fs::recursive_directory_iterator(fs::path(book.toStdString()))) {
+            if (entry.is_regular_file()) out[entry.path().string()] = genko::test::read_bytes(QString::fromStdString(entry.path().string()));
+        }
+        return out;
+    }
     static bool names_measure(const Json& project) {
         const Json features = project.value("features", Json::array());
         return std::find(features.begin(), features.end(), Json("measure@1")) != features.end();
@@ -308,6 +317,7 @@ private slots:
         const QString book_path = path(QStringLiteral("rows.genko"));
         genko::test::write_project(doc, fs::path(book_path.toStdString()));
         const std::string before = genko::test::read_bytes(book_path + QStringLiteral("/project.json"));
+        const std::map<std::string, std::string> folder_before = folder_bytes(book_path);
         int exit = -1;
         Json whole = genko({QStringLiteral("measure"), book_path}, &exit);
         QVERIFY2(exit == 0, whole.dump().c_str());
@@ -347,6 +357,8 @@ private slots:
         QCOMPARE(exit, 2);
         genko({QStringLiteral("measure"), book_path, QStringLiteral("--page"), QStringLiteral("9")}, &exit);
         QVERIFY(exit != 0);
+        // (the review's P3-4: `genko measure` only reads — every file of the book the same bytes after all of them)
+        QCOMPARE(folder_bytes(book_path), folder_before);
         Json done = apply(book_path, QStringLiteral("r.json"),
                           Json::array({op("set_ruler_line", {{"start", {10, 40}}, {"end", {40, 0}}}), op("add_count", {{"at_mm", {5, 5}}})}));
         QVERIFY2(done.value("ok", false), done.dump().c_str());
@@ -362,6 +374,14 @@ private slots:
         done = apply(book_path, QStringLiteral("q.json"), Json::array({op("measure_values", {{"source", "count"}})}));
         QVERIFY2(done.dump().find("\"count\":1") != std::string::npos, done.dump().c_str());
         QCOMPARE(genko::test::read_bytes(book_path + QStringLiteral("/project.json")), with);
+        // (the review's P2-3) a book titled as a formula: its CSV keeps it as text
+        core::Document formula = book();
+        formula.title = "=1+1";
+        const QString formula_path = path(QStringLiteral("formula.genko"));
+        genko::test::write_project(formula, fs::path(formula_path.toStdString()));
+        const auto csv = genko::test::run_genko({QStringLiteral("measure"), formula_path, QStringLiteral("--csv")});
+        QVERIFY2(csv.exit_code == 0, qPrintable(csv.described()));
+        QVERIFY2(QString::fromUtf8(csv.out).contains(QStringLiteral(",'=1+1（1 ページ）,")), csv.out.constData());
     }
 
     // PC5 J-d2: 目盛りマーカーを配置 through `genko apply` — a group 目盛りマーカー (groups@1) of a pen layer's rectangle

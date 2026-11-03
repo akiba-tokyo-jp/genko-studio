@@ -452,16 +452,8 @@ void place_scale_marker(core::OpContext& c) {
     const double factor = core::scale_factor(scale), ppm = core::page_px_per_mm(page);
     const core::Rect trim = page.trim_rect_mm();
     const double tx = trim.x.value(), ty = trim.y.value(), tw = trim.width.value(), th = trim.height.value();
-    const double width_px = tw * ppm;
     // (none given: a "nice" length — 1, 2 or 5 × 10ⁿ — near a fifth of the trim's width, in the scale's units)
     const double length = given(c.op, "length") != nullptr ? positive(*given(c.op, "length"), "length") : nice_marker_length(page);
-    const double px = length / factor;
-    if (!(px >= 1.0) || px > width_px) {
-        std::ostringstream said;
-        said << std::fixed << std::setprecision(1) << "a " << length_text(length) << " " << s.units << " bar is " << px
-             << " pixels; it must fit the trim's " << width_px << " pixels";
-        throw OpError(said.str());
-    }
     double size_pt = 12;
     if (const Json* v = given(c.op, "size_pt")) {
         size_pt = positive(*v, "size_pt");
@@ -490,6 +482,21 @@ void place_scale_marker(core::OpContext& c) {
     const double margin = std::max(std::min(tw, th) * 0.03, 2 * pixel);
     const double bar_h = std::clamp(size_mm / 4.0, 2 * pixel, std::max(2 * pixel, th / 4.0));
     const double text_h = show_text ? size_mm * 1.25 : 0.0;
+    // (the review's P2-5: the bar and its letters wholly inside the trim, its margins kept — else refused)
+    const double px = length / factor;
+    const double room_px = (tw - 2 * margin) * ppm;
+    if (!(px >= 1.0) || px > room_px) {
+        std::ostringstream said;
+        said << std::fixed << std::setprecision(1) << "a " << length_text(length) << " " << s.units << " bar is " << px
+             << " pixels; it must fit the trim's " << room_px << " pixels inside its margins";
+        throw OpError(said.str());
+    }
+    if (bar_h + text_h + 2 * margin > th) {
+        std::ostringstream said;
+        said << std::fixed << std::setprecision(1) << "the scale marker's letters of " << size_pt << " pt do not fit the trim's height of " << th
+             << " mm";
+        throw OpError(said.str());
+    }
     const double bar_y = top ? ty + th - margin - bar_h : ty + th - margin - bar_h - text_h;
     const Json rect = Json::array({r4(tx + margin), r4(bar_y), r4(px / ppm), r4(bar_h)});
     const std::string label = length_text(length) + " " + s.units;
@@ -522,6 +529,17 @@ void place_scale_marker(core::OpContext& c) {
                                    {"title", label}});
         text = made.at("layer_id");
         ids.push_back(text);
+        // (its letters as set: inside the trim's margins, or the whole refused)
+        for (const core::Layer& l : c.doc.page(at).layers) {
+            if (l.id != text.get<std::string>() || !l.type) continue;
+            const double x = l.type->x_mm.value(), y = l.type->y_mm.value(), lw = l.type->w_mm.value(), lh = l.type->h_mm.value();
+            constexpr double kSlack = 0.01;
+            if (x + lw > tx + tw - margin + kSlack || y < ty - kSlack || y + lh > ty + th + kSlack) {
+                std::ostringstream said;
+                said << std::fixed << std::setprecision(1) << "the scale marker's label (" << lw << " × " << lh << " mm) does not fit the trim";
+                throw OpError(said.str());
+            }
+        }
     }
     const std::string group = core::new_id();
     run(Json{{"op", "group_layers"}, {"page", index}, {"ids", ids}, {"id", group}, {"group", true}, {"name", "目盛りマーカー"}});
