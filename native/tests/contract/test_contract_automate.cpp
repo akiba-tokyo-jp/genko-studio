@@ -4,6 +4,9 @@
 // ops; `genko batch` takes a folder's pictures through steps into files コピーを保存 writes byte for byte (again: the next
 // free names; --format and --quality; --json), never writes a picture in place, and writes a book's pages (--out) or the
 // book itself (--save, the journal naming the script) — an オートアクション of the settings folder too (--action).
+// PC5 I-f: コンタクトシート II (`genko automate contact-sheet` and service::automate::contact_sheet: the sheets, a paint layer and
+// a caption a picture, inside its cell; 16 bits, grey, flattened; a book's pages; errors and names) and 画像アセット (the naming
+// rule, `genko export --format image-assets`'s files, image-assets@1 through set_image_assets).
 
 #include <QTemporaryDir>
 #include <QtTest>
@@ -16,10 +19,14 @@
 
 #include "core/json.hpp"
 #include "core/command_bus.hpp"
+#include "core/ids.hpp"
+#include "core/image_assets.hpp"
 #include "core/model.hpp"
 #include "core/paths.hpp"
 #include "formats/copy.hpp"
 #include "formats/open_file.hpp"
+#include "formats/page_picture.hpp"
+#include "render/codecs/image.hpp"
 #include "render/ops_registry.hpp"
 #include "service/actions.hpp"
 #include "service/automate.hpp"
@@ -483,6 +490,255 @@ private slots:
         QCOMPARE(test::run_genko({QStringLiteral("droplet"), q(droplet)}).exit_code, 2);
         QCOMPARE(test::run_genko({QStringLiteral("droplet"), q(droplet), q(root / "in"), QStringLiteral("--steps"), q(root / "fit.txt")}).exit_code, 2);
         QCOMPARE(test::run_genko({QStringLiteral("droplet"), QStringLiteral("--create"), q(root / "d" / "x")}).exit_code, 2);
+    }
+
+    // PC5 I-f: コンタクトシート II (PhotoCraft's contact_sheet_places_thumbnails_with_captions): five pictures on 2 × 2 sheets of
+    // 400 × 300 px — two sheets, a paint layer each named by its file (its pixels only the small picture, inside its cell) and a
+    // horizontal type layer for its caption; 16 bits and grey sheets; flattened without captions one layer; a book's pages; a
+    // file that is not a picture said and the others put; never written into a book.
+    void contactSheet() {
+        QTemporaryDir dir;
+        const fs::path root = path_of(dir.path());
+        fs::create_directories(root / "in");
+        for (int i = 0; i < 5; ++i) {
+            formats::NewImage image;
+            image.title = "img" + std::to_string(i);
+            image.width = 60;
+            image.height = 30;
+            image.background = i % 2 == 0 ? "#cc3333" : "#3333cc";
+            formats::write_copy(formats::new_image(image).doc, 0, root / "in" / ("img" + std::to_string(i) + ".png"));
+        }
+        auto [code, out] = cli({QStringLiteral("automate"), QStringLiteral("contact-sheet"), q(root / "in"), QStringLiteral("--out"), q(root / "out"), QStringLiteral("--units"),
+                                QStringLiteral("px"), QStringLiteral("--width"), QStringLiteral("400"), QStringLiteral("--height"), QStringLiteral("300"),
+                                QStringLiteral("--resolution"), QStringLiteral("72"), QStringLiteral("--columns"), QStringLiteral("2"), QStringLiteral("--rows"),
+                                QStringLiteral("2"), QStringLiteral("--font-size"), QStringLiteral("10"), QStringLiteral("--rotate"), QStringLiteral("--json")});
+        QVERIFY2(code == 0, out.dump().c_str());
+        QCOMPARE(out["sheets"], Json(2));
+        QCOMPARE(out["images"], Json(5));
+        QCOMPARE(out["width"], Json(400));
+        QCOMPARE(out["height"], Json(300));
+        QCOMPARE(out["files"].size(), std::size_t(2));
+        for (const Json& file : out["files"]) {
+            const fs::path written = path_of(QString::fromStdString(file.get<std::string>()));
+            QVERIFY(written.parent_path() == root / "out" && written.extension() == ".png");
+            const core::Document doc = formats::open_file(storage::read_file(written), core::path_to_utf8(written.filename())).doc;
+            const core::PageSpec& s = doc.page(0).spec;
+            QCOMPARE(std::lround(s.width_mm.value() / 25.4 * s.dpi.value()), 400L);
+            QCOMPARE(std::lround(s.height_mm.value() / 25.4 * s.dpi.value()), 300L);
+        }
+        // the sheets as books
+        service::automate::ContactSheet sheet;
+        sheet.units = "px";
+        sheet.width = 400;
+        sheet.height = 300;
+        sheet.resolution = 72;
+        sheet.columns = 2;
+        sheet.rows = 2;
+        sheet.font_pt = 10;
+        sheet.rotate = true;
+        const auto inputs = service::automate::list_inputs({root / "in"}).items;
+        for (const int depth : {8, 16}) {
+            sheet.depth = depth;
+            const service::automate::ContactSheetResult made = service::automate::contact_sheet(inputs, sheet, service::automate::Options{});
+            QCOMPARE(made.books.size(), std::size_t(2));
+            QCOMPARE(made.images, std::size_t(5));
+            const core::Document& first = made.books[0];
+            QCOMPARE(first.title, std::string("コンタクトシート-001"));
+            QCOMPARE(made.books[1].title, std::string("コンタクトシート-002"));
+            const core::Page& page = first.page(0);
+            QCOMPARE(depth == 16, page.rgb && page.rgb->depth == 16);
+            std::vector<std::string> names;
+            int captions = 0;
+            for (const core::Layer& layer : page.layers) {
+                if (layer.kind == core::LayerKind::Type) ++captions;
+                else names.push_back(layer.title);
+            }
+            QCOMPARE(captions, 4);  // (a caption a picture)
+            QVERIFY(std::find(names.begin(), names.end(), "img0") != names.end() && std::find(names.begin(), names.end(), "img3") != names.end());
+            // a small picture inside its cell (200 × 150 less the spacing and the caption)
+            for (const core::Layer& layer : page.layers) {
+                if (layer.title != "img0") continue;
+                formats::CopyOptions alone;
+                alone.layer = layer.id;
+                const formats::PagePicture picture = formats::copy_picture(first, 0, alone);
+                QVERIFY2(picture.image.width() <= 200 && picture.image.height() < 150,
+                         qPrintable(QStringLiteral("%1×%2").arg(picture.image.width()).arg(picture.image.height())));
+                QVERIFY(picture.image.width() > 150);  // (as large as its cell lets it be)
+            }
+            QCOMPARE(made.books[1].page(0).layers.size(), std::size_t(1 + 1 + 1));  // (背景, img4 and its caption)
+        }
+        // grey; flattened without captions; filled down first
+        sheet.depth = 8;
+        sheet.mode = "gray";
+        sheet.caption = false;
+        sheet.flatten = true;
+        sheet.across = false;
+        const service::automate::ContactSheetResult flat = service::automate::contact_sheet(inputs, sheet, service::automate::Options{});
+        QCOMPARE(flat.books.size(), std::size_t(2));
+        QVERIFY(flat.books[0].page(0).color && flat.books[0].page(0).color->space == core::InkSpace::Gray);
+        QCOMPARE(flat.books[0].page(0).layers.size(), std::size_t(1));
+        // a book's pages; a file that is not a picture (said, the others put)
+        write_book(root / "本.genko", 50, 40);
+        write(root / "メモ.txt", "not a picture");
+        std::tie(code, out) = cli({QStringLiteral("automate"), QStringLiteral("contact-sheet"), q(root / "本.genko"), q(root / "メモ.txt"), q(root / "in" / "img1.png"),
+                                   QStringLiteral("--out"), q(root / "out2"), QStringLiteral("--units"), QStringLiteral("px"), QStringLiteral("--width"),
+                                   QStringLiteral("300"), QStringLiteral("--height"), QStringLiteral("300"), QStringLiteral("--resolution"), QStringLiteral("72"),
+                                   QStringLiteral("--format"), QStringLiteral("psd"), QStringLiteral("--json")});
+        QCOMPARE(code, 1);
+        QCOMPARE(out["images"], Json(2));
+        QCOMPARE(out["errors"].size(), std::size_t(1));
+        QCOMPARE(out["errors"][0]["input"], Json(core::path_to_utf8(root / "メモ.txt")));
+        QCOMPARE(out["files"].size(), std::size_t(1));
+        QVERIFY(fs::exists(root / "out2" / "コンタクトシート-001.psd"));
+        // the same name again: the next free one
+        std::tie(code, out) = cli({QStringLiteral("automate"), QStringLiteral("contact-sheet"), q(root / "in" / "img1.png"), QStringLiteral("--out"), q(root / "out2"),
+                                   QStringLiteral("--format"), QStringLiteral("psd"), QStringLiteral("--units"), QStringLiteral("px"), QStringLiteral("--width"),
+                                   QStringLiteral("100"), QStringLiteral("--height"), QStringLiteral("100"), QStringLiteral("--json")});
+        QCOMPARE(code, 0);
+        QCOMPARE(out["files"][0], Json(core::path_to_utf8(root / "out2" / "コンタクトシート-001-2.psd")));
+        // never into a book; the settings checked first
+        const test::Run inside = test::run_genko({QStringLiteral("automate"), QStringLiteral("contact-sheet"), q(root / "in"), QStringLiteral("--out"),
+                                                  q(root / "本.genko" / "sheets")});
+        QCOMPARE(inside.exit_code, 2);
+        QVERIFY(!fs::exists(root / "本.genko" / "sheets"));
+        for (const QStringList& bad : {QStringList{QStringLiteral("--columns"), QStringLiteral("0")}, QStringList{QStringLiteral("--depth"), QStringLiteral("32")},
+                                       QStringList{QStringLiteral("--units"), QStringLiteral("pt")}, QStringList{QStringLiteral("--mode"), QStringLiteral("cmyk")},
+                                       QStringList{QStringLiteral("--width"), QStringLiteral("100000"), QStringLiteral("--units"), QStringLiteral("in")}}) {
+            QStringList args{QStringLiteral("automate"), QStringLiteral("contact-sheet"), q(root / "in"), QStringLiteral("--out"), q(root / "out3")};
+            args << bad;
+            QVERIFY2(test::run_genko(args).exit_code == 2, qPrintable(bad.join(QLatin1Char(' '))));
+        }
+        QVERIFY(!fs::exists(root / "out3"));
+    }
+
+    // PC5 I-f: 生成 → 画像アセット — the naming rule (PhotoCraft's generator_naming_grammar), the files of a book's named layers
+    // and groups as `genko export --format image-assets` writes them (cut to what they hold, scaled, sized, each format; a
+    // "default" layer's variants), a name outside the folder refused, and image-assets@1: set_image_assets writes the book's
+    // generator and names the feature, off writes the book as before.
+    void imageAssets() {
+        namespace ia = core::image_assets;
+        const std::vector<ia::Spec> a = ia::parse_name("200% foo@2x.png, 48x48 icons/bar.png8 + photo.jpg8", 72.0);
+        QCOMPARE(a.size(), std::size_t(3));
+        QCOMPARE(a[0].file, std::string("foo@2x.png"));
+        QCOMPARE(a[0].format, std::string("png32"));
+        QCOMPARE(a[0].scale, std::optional<double>(2.0));
+        QCOMPARE(a[1].file, std::string("icons/bar.png"));
+        QCOMPARE(a[1].format, std::string("png8"));
+        QCOMPARE(a[1].width, std::optional<double>(48.0));
+        QCOMPARE(a[1].height, std::optional<double>(48.0));
+        QCOMPARE(a[2].file, std::string("photo.jpg"));
+        QCOMPARE(a[2].quality, std::optional<int>(80));
+        const std::vector<ia::Spec> b = ia::parse_name("?x100 thumb.jpg50%", 72.0);
+        QCOMPARE(b.size(), std::size_t(1));
+        QVERIFY(!b[0].width && b[0].height == std::optional<double>(100.0) && b[0].quality == std::optional<int>(50));
+        const std::vector<ia::Spec> c = ia::parse_name("1in x 2cm label.gif", 300.0);
+        QCOMPARE(c.size(), std::size_t(1));
+        QCOMPARE(c[0].width, std::optional<double>(300.0));
+        QVERIFY(std::abs(*c[0].height - 236.22) < 0.01);
+        QVERIFY(ia::parse_name("Layer 1", 72.0).empty());
+        QVERIFY(ia::parse_name("notes.txt", 72.0).empty());
+        QVERIFY(ia::parse_name("x.jpgq", 72.0).empty());
+        const auto d = ia::parse_defaults("default 50% low/ + 200% @2x", 72.0);
+        QVERIFY(d.has_value());
+        QCOMPARE(*d, (std::vector<ia::Default>{ia::Default{0.5, std::nullopt, std::nullopt, "low/", ""}, ia::Default{2.0, std::nullopt, std::nullopt, "", "@2x"}}));
+        QVERIFY(!ia::parse_defaults("defaults are nice", 72.0));
+        QVERIFY(ia::safe_relative("icons/a.png") && !ia::safe_relative("../a.png") && !ia::safe_relative("/a.png") && !ia::safe_relative("a\\b.png") &&
+                !ia::safe_relative("c:a.png"));
+
+        QTemporaryDir dir;
+        const fs::path root = path_of(dir.path());
+        // a 64 × 48 picture whose layer holds rows 8..47 (PhotoCraft's: its asset 64 × 40)
+        const auto web_book = [&](const fs::path& at, const std::vector<std::pair<std::string, bool>>& more) {
+            render::codecs::CodecImage picture = render::codecs::CodecImage::blank(64, 48, render::codecs::Layout::Rgba, render::codecs::Sample::U8);
+            for (std::size_t y = 8; y < 48; ++y) {
+                for (std::size_t x = 0; x < 64; ++x) {
+                    const std::size_t i = (y * 64 + x) * 4;
+                    picture.data()[i] = static_cast<char>(200);
+                    picture.data()[i + 1] = static_cast<char>(x * 4);
+                    picture.data()[i + 2] = static_cast<char>(40);
+                    picture.data()[i + 3] = static_cast<char>(255);
+                }
+            }
+            picture.meta.dpi = std::make_pair(72.0, 72.0);
+            core::Document doc = formats::picture_book(std::move(picture), "web").doc;
+            core::Page& page = doc.edit_page(0);
+            page.layers[0].title = more.front().first;
+            for (std::size_t k = 1; k < more.size(); ++k) {
+                core::Layer folder;
+                folder.id = core::new_id();
+                folder.kind = core::LayerKind::Folder;
+                folder.title = more[k].first;
+                if (more[k].second) page.layers[0].parent_id = folder.id;  // (the picture's layer inside it)
+                page.layers.push_back(std::move(folder));
+            }
+            storage::ProjectLock lock(at, "human:test");
+            lock.try_acquire();
+            storage::SaveRequest request;
+            request.actor = "human:test";
+            request.base_revision = doc.revision;
+            request.ops = Json::array();
+            storage::Saver(lock).save(doc, request);
+        };
+        const auto size_of = [](const fs::path& file) {
+            const core::Document doc = formats::open_file(storage::read_file(file), core::path_to_utf8(file.filename())).doc;
+            const core::PageSpec& s = doc.page(0).spec;
+            return std::pair<long, long>{std::lround(s.width_mm.value() / 25.4 * s.dpi.value()), std::lround(s.height_mm.value() / 25.4 * s.dpi.value())};
+        };
+        web_book(root / "web.genko", {{"logo.png, 50% small/logo.gif, logo.jpg80%, ../evil.png", false}, {"group.png", true}});
+        auto [code, out] = cli({QStringLiteral("export"), q(root / "web.genko"), q(root / "assets"), QStringLiteral("--format"), QStringLiteral("image-assets"),
+                                QStringLiteral("--json")});
+        QCOMPARE(code, 0);
+        QCOMPARE(out["ok"], Json(false));
+        QCOMPARE(out["count"], Json(4));
+        QCOMPARE(out["errors"].size(), std::size_t(1));
+        QCOMPARE(out["errors"][0]["asset"], Json("../evil.png"));
+        QVERIFY(!fs::exists(root / "evil.png"));
+        QCOMPARE(size_of(root / "assets" / "logo.png"), (std::pair<long, long>{64, 40}));
+        QCOMPARE(size_of(root / "assets" / "small" / "logo.gif"), (std::pair<long, long>{32, 20}));
+        QCOMPARE(size_of(root / "assets" / "logo.jpg"), (std::pair<long, long>{64, 40}));
+        QCOMPARE(size_of(root / "assets" / "group.png"), (std::pair<long, long>{64, 40}));  // (a group: its layers drawn alone)
+        QVERIFY(storage::read_file(root / "assets" / "logo.jpg").starts_with("\xff\xd8"));
+        QVERIFY(storage::read_file(root / "assets" / "small" / "logo.gif").starts_with("GIF8"));
+        // a "default" layer's variant: 200 % with @2x
+        web_book(root / "icon.genko", {{"icon.png", false}, {"default 200% @2x", false}});
+        std::tie(code, out) = cli({QStringLiteral("export"), q(root / "icon.genko"), q(root / "icons"), QStringLiteral("--format"), QStringLiteral("image-assets"),
+                                   QStringLiteral("--json")});
+        QCOMPARE(code, 0);
+        QCOMPARE(out["files"], Json::array({core::path_to_utf8(root / "icons" / "icon@2x.png")}));
+        QCOMPARE(size_of(root / "icons" / "icon@2x.png"), (std::pair<long, long>{128, 80}));
+        // never into the book; another option refused
+        QCOMPARE(test::run_genko({QStringLiteral("export"), q(root / "web.genko"), q(root / "web.genko" / "a"), QStringLiteral("--format"), QStringLiteral("image-assets")})
+                     .exit_code,
+                 2);
+        QCOMPARE(test::run_genko({QStringLiteral("export"), q(root / "web.genko"), q(root / "x"), QStringLiteral("--format"), QStringLiteral("image-assets"),
+                                  QStringLiteral("--dpi"), QStringLiteral("72")})
+                     .exit_code,
+                 2);
+        // image-assets@1: on writes the generator and names the feature; off writes the book as it was written before
+        const std::string plain = storage::read_file(root / "icon.genko" / "project.json");
+        QVERIFY(plain.find("\"generator\"") == std::string::npos && plain.find("image-assets@1") == std::string::npos);
+        write(root / "on.json", R"([{"op": "set_image_assets", "on": true}])");
+        write(root / "off.json", R"([{"op": "set_image_assets", "on": false}])");
+        QCOMPARE(test::run_genko({QStringLiteral("apply"), q(root / "icon.genko"), q(root / "on.json")}).exit_code, 0);
+        const Json on = core::parse_python_json(storage::read_file(root / "icon.genko" / "project.json"));
+        QCOMPARE(on["generator"], (Json{{"image_assets", true}}));
+        QVERIFY(std::find(on["features"].begin(), on["features"].end(), Json("image-assets@1")) != on["features"].end());
+        QVERIFY(storage::load_document(root / "icon.genko").document.image_assets);
+        QCOMPARE(test::run_genko({QStringLiteral("apply"), q(root / "icon.genko"), q(root / "off.json")}).exit_code, 0);
+        const Json off = core::parse_python_json(storage::read_file(root / "icon.genko" / "project.json"));
+        QVERIFY(!off.contains("generator"));
+        QVERIFY(std::find(off["features"].begin(), off["features"].end(), Json("image-assets@1")) == off["features"].end());
+        Json plain_json = core::parse_python_json(plain);
+        plain_json["revision"] = off["revision"];
+        QCOMPARE(off, plain_json);  // (the same book but its revision)
+        // a generator this build does not take: the book opens read-only
+        Json odd = off;
+        odd["generator"] = Json{{"image_assets", "yes"}};
+        storage::write_atomic(root / "icon.genko" / "project.json", odd.dump());
+        QVERIFY(!storage::load_document(root / "icon.genko").document.read_only_reason.empty());
+        // the op's refusal
+        write(root / "bad.json", R"([{"op": "set_image_assets", "on": "yes"}])");
+        QCOMPARE(test::run_genko({QStringLiteral("apply"), q(root / "web.genko"), q(root / "bad.json")}).exit_code, 1);
     }
 };
 

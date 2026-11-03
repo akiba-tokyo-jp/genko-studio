@@ -449,7 +449,9 @@ private slots:
         // (act_layer_from_background, act_layer_group_from_layers), レイヤーのグループ解除 (act_layer_ungroup), 非表示レイヤーを削除
         // (act_layer_delete_hidden), クリッピングマスクを作成・解除 (act_clip_create, act_clip_release), ファイル → スクリプト →
         // すべての空のレイヤーを削除・すべてのレイヤー効果を統合 (act_delete_empty_layers, act_bake_layer_effects) — test_gui_layers.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{749});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8 and H-d's 12)
+        // and PC5 I-f's 3 — ファイル → 1 部プリント (act_print_one_copy), 生成 → 画像アセット (act_image_assets), 自動処理 → コンタクトシート II…
+        // (act_contact_sheet) — test_gui_output and test_gui_automate.
+        QCOMPARE(w->actions_by_name().size(), std::size_t{752});  // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12 and I-f's 3)
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -519,19 +521,24 @@ private slots:
                  (QStringList{QStringLiteral("新規…"), QStringLiteral("開く…"), QStringLiteral("指定形式で開く…"), QStringLiteral("最近使用したファイルを開く ▸"),
                               QStringLiteral("|"), QStringLiteral("AI と作る…"), QStringLiteral("|"), QStringLiteral("閉じる"), QStringLiteral("すべてを閉じる"),
                               QStringLiteral("その他を閉じる"), QStringLiteral("|"), QStringLiteral("保存"), QStringLiteral("別名で保存…"), QStringLiteral("コピーを保存…"),
-                              QStringLiteral("復帰"), QStringLiteral("|"), QStringLiteral("書き出し ▸"), QStringLiteral("|"), QStringLiteral("埋め込みを配置…"),
+                              QStringLiteral("復帰"), QStringLiteral("|"), QStringLiteral("書き出し ▸"),
+                              QStringLiteral("生成 ▸"),  // (PC5 I-f: 生成 ▸ 画像アセット)
+                              QStringLiteral("|"), QStringLiteral("埋め込みを配置…"),
                               QStringLiteral("リンクを配置…"), QStringLiteral("パッケージ…"), QStringLiteral("|"), QStringLiteral("画像を読み込む…"),
                               QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"), QStringLiteral("ほかの原稿のページを取り込む…"),
                               QStringLiteral("PSD をレイヤーのまま読み込む…"), QStringLiteral("読み込み ▸"),  // (PC5 I-d・J-c: 読み込み ▸ 変数データセット…・注釈…)
                               QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|"),
-                              QStringLiteral("プリント…"), QStringLiteral("|"), QStringLiteral("タイムラプスを記録する"), QStringLiteral("タイムラプスを書き出す…"),
+                              QStringLiteral("プリント…"), QStringLiteral("1 部プリント"),  // (PC5 I-f)
+                              QStringLiteral("|"), QStringLiteral("タイムラプスを記録する"), QStringLiteral("タイムラプスを書き出す…"),
                               QStringLiteral("|"), QStringLiteral("自動処理 ▸"), QStringLiteral("スクリプト ▸"), QStringLiteral("オートアクション ▸"),
                               QStringLiteral("|"), QStringLiteral("終了")}));  // (PC5 H-0: 環境設定 in 編集)
         // (PC5 I-0, SPEC.md AUTO-01: 自動処理 ▸ is a frame, shown once a group puts a command in it — PC5 I-e's)
         QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate")) != nullptr);
         QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate"))->menuAction()->isVisible());
         QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_automate"))),
-                 (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"), QStringLiteral("条件付きモード変更…"),
+                 (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"),
+                              QStringLiteral("コンタクトシート II…"), QStringLiteral("|"),  // (PC5 I-f)
+                              QStringLiteral("条件付きモード変更…"),
                               QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…")}));
         QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_scripts"))),
                  (QStringList{QStringLiteral("画像プロセッサー…"), QStringLiteral("すべての空のレイヤーを削除"), QStringLiteral("すべてのレイヤー効果を統合"),  // (PC5 I-a)

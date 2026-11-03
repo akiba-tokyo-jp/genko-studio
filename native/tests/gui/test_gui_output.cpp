@@ -13,6 +13,8 @@
 //     undoes), the list of the book in front;
 //   - 点検: the issues listed as Python lists them (the stopping ones first, by page), each shown on its page (its place
 //     marked, its line chosen, its layer drawn on), out of date after an edit; the select tool's page has the row;
+//   - (PC5 I-f) プリント…'s position and size, marks, colour management and PDF に出力… (kept for the next time), print_sheets'
+//     pictures and places, 1 部プリント, 生成 → 画像アセット written after the person's save only;
 //   - nothing goes out of a book still being read, nor is it checked;
 //   - the phone screens (where they end down a tall page, kept as chosen), the scales (a guide pulled from each,
 //     add_ruler as Python's window sends it, none when let go on the scale or with the scales off).
@@ -61,6 +63,8 @@
 #include "app/workspace.hpp"
 #include "app/preferences.hpp"
 #include "app/print_dialog.hpp"
+#include "core/color_model.hpp"
+#include "formats/print_marks.hpp"
 #include "app/save_for_web_dialog.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
@@ -877,7 +881,8 @@ private slots:
             for (int i = 0; i < d->area->count(); ++i) areas << d->area->itemText(i);
             for (int i = 0; i < d->scale->count(); ++i) scales << d->scale->itemText(i);
             QCOMPARE(areas, (QStringList{QStringLiteral("仕上がりで切る"), QStringLiteral("裁ち落としまで"), QStringLiteral("用紙全体（トンボ付き）")}));
-            QCOMPARE(scales, (QStringList{QStringLiteral("用紙に合わせる"), QStringLiteral("原寸（100%）")}));
+            // (PC5 I-f: Photoshop's 拡大・縮小 % after them)
+            QCOMPARE(scales, (QStringList{QStringLiteral("用紙に合わせる"), QStringLiteral("原寸（100%）"), QStringLiteral("拡大・縮小")}));
             QCOMPARE(d->spreads->text(), QStringLiteral("見開きは 2 ページを 1 枚に"));
             QCOMPARE(d->print_button->text(), QStringLiteral("プリンターを選んで印刷…"));
             d->this_page->click();
@@ -1695,6 +1700,190 @@ private slots:
         QVERIFY(dialog.preview->image().isNull());
         dialog.format->setCurrentIndex(dialog.format->findData(QStringLiteral("pdf")));
         QVERIFY(dialog.preview->image().isNull());
+    }
+
+    // PC5 I-f (SPEC.md AUTO-01「プリント」): プリント…'s parts of Photoshop's — 位置と大きさ (拡大・縮小, 中央に配置 or 上・左),
+    // トンボと印 (corner marks off for the whole paper, which has Genko's own), カラーマネジメント (RGB printer profiles only, the four
+    // intents, 黒点の補正) — the settings into a PDF (PDF に出力…), kept for the next time (and 1 部プリント); a CMYK printer
+    // profile refused, said.
+    void printDialogOfPC5() {
+        core::Document book = core::new_episode("小さな本", core::Num(1), 2, core::PageSpec::custom(60, 60, 54, 54, 2, 5, 5, 4, 4, 600));
+        Studio s(book);
+        app::settings()->remove(QStringLiteral("print/last"));
+        const QString pdf = s.tmp.path() + QStringLiteral("/marks.pdf");
+        formats::print::Setup chosen;
+        bool seen = false;
+        s.on_print = [&](app::PrintDialog* d) {
+            seen = true;
+            QStringList tabs;
+            for (int i = 0; i < d->tabs->count(); ++i) tabs << d->tabs->tabText(i);
+            QCOMPARE(tabs, (QStringList{QStringLiteral("ページ"), QStringLiteral("位置と大きさ"), QStringLiteral("トンボと印"), QStringLiteral("カラーマネジメント")}));
+            QCOMPARE(d->setup(), formats::print::Setup{});  // (nothing kept yet: the defaults)
+            QStringList handling, intents, profiles;
+            for (int i = 0; i < d->color_handling->count(); ++i) handling << d->color_handling->itemText(i);
+            for (int i = 0; i < d->intent->count(); ++i) intents << d->intent->itemText(i);
+            for (int i = 0; i < d->printer_profile->count(); ++i) profiles << d->printer_profile->itemData(i).toString();
+            QCOMPARE(handling, (QStringList{QStringLiteral("プリンターによるカラー管理"), QStringLiteral("Genko によるカラー管理")}));
+            QCOMPARE(intents, (QStringList{QStringLiteral("知覚的"), QStringLiteral("彩度"), QStringLiteral("相対的な色域を維持"), QStringLiteral("絶対的な色域を維持")}));
+            QVERIFY(profiles.contains(QStringLiteral("display-p3")) && profiles.contains(QStringLiteral("srgb")));
+            QVERIFY(!profiles.contains(QStringLiteral("coated-cmyk")) && !profiles.contains(QStringLiteral("gray-gamma-2.2")));  // (Qt prints RGB)
+            QVERIFY(!d->printer_profile->isEnabled() && !d->percent->isEnabled() && !d->left->isEnabled());
+            d->area->setCurrentIndex(d->area->findData(QStringLiteral("paper")));
+            QVERIFY(!d->corner_marks->isEnabled());  // (the whole paper has Genko's crop marks)
+            d->area->setCurrentIndex(d->area->findData(QStringLiteral("bleed")));
+            QVERIFY(d->corner_marks->isEnabled());
+            d->scale->setCurrentIndex(d->scale->findData(QStringLiteral("percent")));
+            QVERIFY(d->percent->isEnabled());
+            d->percent->setValue(50);
+            d->center->setChecked(false);
+            QVERIFY(d->left->isEnabled() && d->top->isEnabled());
+            d->left->setValue(10);
+            d->top->setValue(20);
+            for (QCheckBox* box : {d->corner_marks, d->center_marks, d->registration_marks, d->labels}) box->setChecked(true);
+            d->color_handling->setCurrentIndex(1);
+            QVERIFY(d->printer_profile->isEnabled());
+            d->printer_profile->setCurrentIndex(d->printer_profile->findData(QStringLiteral("display-p3")));
+            d->intent->setCurrentIndex(d->intent->findData(QStringLiteral("perceptual")));
+            d->bpc->setChecked(false);
+            chosen = d->setup();
+            QCOMPARE(chosen.area, std::string("bleed"));
+            QCOMPARE(chosen.scale, std::string("percent"));
+            QCOMPARE(chosen.percent, 50.0);
+            QVERIFY(!chosen.center && chosen.left_mm == 10.0 && chosen.top_mm == 20.0);
+            QVERIFY(chosen.marks.corner && chosen.marks.center && chosen.marks.registration && chosen.marks.labels && !chosen.marks.description);
+            QCOMPARE(chosen.color, (formats::print::Color{true, "display-p3", "perceptual", false}));
+            d->print_pdf(pdf);
+            QCOMPARE(d->result(), static_cast<int>(QDialog::Accepted));
+        };
+        s.act("act_print")->trigger();
+        QVERIFY(seen);
+        QCOMPARE(s.window->statusBar()->currentMessage(), QStringLiteral("2 枚を PDF に書きました: %1").arg(pdf));
+        QFile f(pdf);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        const QByteArray data = f.readAll();
+        QVERIFY(data.startsWith("%PDF"));
+        QCOMPARE(data.count("/Type /Page") - data.count("/Type /Pages"), 2);
+        QCOMPARE(app::printing::last_setup(), chosen);
+        // opened again: as it was left; a CMYK printer profile (an ICC file) refused, said, nothing written
+        const QString cmyk = s.tmp.path() + QStringLiteral("/cmyk.icc");
+        storage::write_atomic(gui_test::path_of(cmyk), *core::builtin_profile("coated-cmyk")->bytes);
+        const QString refused = s.tmp.path() + QStringLiteral("/refused.pdf");
+        s.on_print = [&](app::PrintDialog* d) {
+            QCOMPARE(d->setup(), chosen);
+            formats::print::Setup other = chosen;
+            other.color.profile = cmyk.toStdString();
+            d->show_setup(other);
+            d->print_pdf(refused);
+            QVERIFY(d->result() != static_cast<int>(QDialog::Accepted));
+        };
+        s.act("act_print")->trigger();
+        QVERIFY2(s.answers.asked.join(QLatin1Char('|')).contains(QStringLiteral("印刷: プリンタープロファイルが RGB のものではありません")),
+                 qPrintable(s.answers.asked.join(QLatin1Char('|'))));
+        QVERIFY(!QFile::exists(refused));
+        app::settings()->remove(QStringLiteral("print/last"));
+    }
+
+    // PC5 I-f: print_sheets — each sheet's picture (Genko's colour management: formats::print::page_picture through the
+    // printer's profile, not the screen's colours) drawn where formats::print::place puts it on the printer's printable part,
+    // the marks on the finished size (the bleed's crop marks inside the picture's edges).
+    void printSheetsPlacesThemAndTheirMarks() {
+        core::Document book = core::new_episode("小さな本", core::Num(1), 1, core::PageSpec::custom(60, 60, 54, 54, 2, 5, 5, 4, 4, 600));
+        Studio s(book);
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", s.ink()},
+                                                      {"points", Json::array({Json::array({10, 10, 0.5}), Json::array({40, 45, 0.9})})}, {"width_mm", 3}}})));
+        const core::Document& doc = s.doc();
+        QPrinter printer(QPrinter::ScreenResolution);
+        printer.setOutputFormat(QPrinter::PdfFormat);
+        printer.setOutputFileName(s.tmp.path() + QStringLiteral("/sheet.pdf"));
+        formats::print::Setup setup;
+        setup.area = "bleed";
+        setup.scale = "actual";
+        setup.dpi = 150;
+        setup.marks = formats::print::marks_of("corner,center,registration,labels");
+        setup.color = formats::print::Color{true, "display-p3", "relative", true};
+        std::vector<QImage> pictures;
+        std::vector<QRectF> targets;
+        const std::vector<formats::print::Sheet> sheets = app::printing::print_sheets(doc, printer, {1}, setup, {}, [&](const QImage& picture, const QRectF& target) {
+            pictures.push_back(picture);
+            targets.push_back(target);
+        });
+        QCOMPARE(sheets.size(), std::size_t{1});
+        const formats::print::Sheet& sheet = sheets[0];
+        const render::Image want = formats::print::page_picture(doc, doc.page(0), "bleed", 150, setup.color);
+        QVERIFY(rgb_rows(pictures[0]) == want.tobytes());
+        QVERIFY(rgb_rows(pictures[0]) != printed(doc, doc.page(0), "bleed", 150).tobytes());  // (the printer profile's numbers)
+        const auto [paper, printable] = app::printing::paper_of(printer);
+        const double k = printer.resolution() / 25.4;
+        QVERIFY(std::abs(targets[0].x() - (sheet.image.x - printable.x) * k) < 1e-6 && std::abs(targets[0].width() - sheet.image.w * k) < 1e-6);
+        QVERIFY(std::abs(sheet.image.w - want.width() * 25.4 / 150) < 1e-6);  // (its real size)
+        // the bleed's finished size inside the picture, the marks on it, outside the picture
+        QVERIFY(sheet.trim.x > sheet.image.x + 1.0 && sheet.trim.x + sheet.trim.w < sheet.image.x + sheet.image.w - 1.0);
+        QCOMPARE(sheet.lines.size(), std::size_t{20});
+        QCOMPARE(sheet.circles.size(), std::size_t{4});
+        QCOMPARE(sheet.lines[0].y0, sheet.trim.y);
+        QVERIFY(sheet.lines[0].x0 < sheet.image.x && sheet.lines[0].x1 < sheet.lines[0].x0);
+        QCOMPARE(sheet.texts.size(), std::size_t{1});
+        QCOMPARE(sheet.texts[0].text, std::string("小さな本　1 ページ"));
+    }
+
+    // PC5 I-f: 1 部プリント (Alt+Shift+Ctrl+P, after プリント…) — the book's every page with the last settings, one copy, to the
+    // printer given (none asked); said.
+    void printOneCopy() {
+        Studio s(gui_test::new_doc(2));
+        QCOMPARE(s.act("act_print_one_copy")->text(), QStringLiteral("1 部プリント"));
+        QCOMPARE(s.act("act_print_one_copy")->shortcuts(), (QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Alt+Shift+P"))}));
+        const QStringList file = menu_items(s.window.get(), QStringLiteral("ファイル"));
+        QCOMPARE(file.indexOf(QStringLiteral("1 部プリント")), file.indexOf(QStringLiteral("プリント…")) + 1);
+        formats::print::Setup last;
+        last.copies = 3;
+        last.marks.labels = true;
+        last.dpi = 150;  // (not kept: the printer's)
+        app::printing::remember(last, QString());
+        QPrinter printer(QPrinter::ScreenResolution);
+        printer.setOutputFormat(QPrinter::PdfFormat);
+        const QString pdf = s.tmp.path() + QStringLiteral("/one.pdf");
+        printer.setOutputFileName(pdf);
+        printer.setCopyCount(4);
+        QVERIFY(s.window->print_one_copy(&printer));
+        QCOMPARE(printer.copyCount(), 1);
+        QCOMPARE(s.window->statusBar()->currentMessage(), QStringLiteral("1 部プリントしました（2 枚）"));
+        QFile f(pdf);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        QCOMPARE(f.readAll().count("/Type /Page") - 1, 2);  // (and its /Type /Pages)
+        app::settings()->remove(QStringLiteral("print/last"));
+    }
+
+    // PC5 I-f (SPEC.md AUTO-01「画像アセット」): ファイル → 生成 → 画像アセット — on for the book (one change, undone as any), the
+    // named layer's files written into <book>-assets after the person's save and never on the automatic one; off: none.
+    void imageAssetsOnTheSave() {
+        core::Document book = core::new_episode("小さな本", core::Num(1), 1, core::PageSpec::custom(60, 60, 54, 54, 2, 5, 5, 4, 4, 600));
+        Studio s(book);
+        const QStringList file = menu_items(s.window.get(), QStringLiteral("ファイル"));
+        QCOMPARE(file.indexOf(QStringLiteral("生成")), file.indexOf(QStringLiteral("書き出し")) + 1);
+        QVERIFY(s.window->findChild<QMenu*>(QStringLiteral("menu_generate")) != nullptr);
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "logo"}, {"name", "logo.png, 50% half.png"}},
+                                                 Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "logo"},
+                                                      {"points", Json::array({Json::array({10, 10, 0.5}), Json::array({30, 20, 0.9})})}, {"width_mm", 2}}})));
+        QAction* assets = s.act("act_image_assets");
+        QVERIFY(assets->isCheckable() && !assets->isChecked());
+        assets->trigger();
+        QVERIFY(s.doc().image_assets);
+        QVERIFY(assets->isChecked());
+        const fs::path dir = s.path.parent_path() / "book-assets";
+        QVERIFY(s.saved());  // (the automatic save: no assets)
+        QVERIFY(core::parse_python_json(storage::read_file(s.path / "project.json"))["generator"] == (Json{{"image_assets", true}}));
+        QVERIFY(!fs::exists(dir));
+        s.act("act_save")->trigger();
+        QVERIFY(fs::exists(dir / "logo.png") && fs::exists(dir / "half.png"));
+        QVERIFY2(s.window->statusBar()->currentMessage().startsWith(QStringLiteral("保存しました。画像アセット 2 個を書き出しました")),
+                 qPrintable(s.window->statusBar()->currentMessage()));
+        // off (Undo): nothing written on the next save
+        s.act("act_undo")->trigger();
+        QVERIFY(!s.doc().image_assets);
+        QVERIFY(!assets->isChecked());
+        fs::remove_all(dir);
+        s.act("act_save")->trigger();
+        QVERIFY(!fs::exists(dir));
     }
 };
 

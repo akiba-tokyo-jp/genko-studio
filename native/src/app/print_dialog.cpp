@@ -144,7 +144,8 @@ std::vector<fp::Sheet> print_sheets(const core::Document& episode, QPrinter& pri
     const int dpi = setup.dpi.value_or(print_dpi(printer));
     check_pages(episode, pages, setup.spreads);
     const auto groups = sheets(episode, pages, setup.spreads);
-    const auto [paper, printable] = paper_of(printer);
+    const auto room = paper_of(printer);
+    const fp::RectMm paper = room.first, printable = room.second;
     const int resolution = printer.resolution() != 0 ? printer.resolution() : dpi;
     const double k = resolution / 25.4;  // (device pixels a mm)
     const std::string description = setup.marks.description ? fp::description_of(episode) : std::string();
@@ -413,7 +414,7 @@ fp::Setup PrintDialog::setup() const {
     out.marks.description = description->isChecked();
     out.marks.labels = labels->isChecked();
     out.color.genko = color_handling->currentData().toString() == QLatin1String("genko");
-    out.color.profile = printer_profile->currentData().toString().toStdString();
+    if (out.color.genko) out.color.profile = printer_profile->currentData().toString().toStdString();
     out.color.intent = intent->currentData().toString().toStdString();
     out.color.bpc = bpc->isChecked();
     return out;

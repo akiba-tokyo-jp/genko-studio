@@ -80,6 +80,7 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `variables@1` | PC5 I-d | 本の `variables`（変数とデータセット。値の画像は本の素材）。SPEC AUTO-01「変数とデータセット」、この文書の「変数とデータセット」 |
 | `layer-locks@1` | PC5 I-a | 層の `"lock_all": true`（すべてをロック）と `"lock_nest": true`（アートボードの内外への自動ネストを防ぐ）。SPEC AUTO-01「レイヤーの基本」、この文書の「ロックとチャンネル」 |
 | `blend-channels@1` | PC5 I-a | 層の `"blend_channels"`（混合オプションのチャンネル: ページの色のチャンネルごとの真偽）。SPEC AUTO-01「レイヤーの基本」、この文書の「ロックとチャンネル」 |
+| `image-assets@1` | PC5 I-f | 本の `"generator": {"image_assets": true}`（生成 → 画像アセット: 人の保存のたびに名前の付いたレイヤーを書き出す）。SPEC AUTO-01「プリント・コンタクトシート・画像アセット」、この文書の「画像アセット」 |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -521,6 +522,13 @@ Photoshop の文字（テキストレイヤー・文字と段落の属性・ス�
 - 書き手は `variables` を持つ本の `features` に `variables@1` を加え、無くなれば外す。持たない原稿は今と同じバイトで書く。値の画像のうち本のフォルダーにまだ無いもの（新しく渡された画像）を `assets/` に書く。
 - **読み手の検査**: 上の形でない `variables`（知らない鍵・範囲の外・重なる名前・書き手の形（正規形）と違うもの）、値の画像が `assets/` に無い本は、読み取り専用で開く。variables@1 を知らない読み手（PC5 I-d より前の C++ 版）は、未知の拡張として読み取り専用で開く。
 - op（`set_variables`・`set_data_sets`・`apply_data_set`）は本の op。journal の `set_data_sets` は画像のバイトを `"<N base64 chars>"` にして残す。
+
+## 画像アセット（image-assets@1。SPEC AUTO-01、PC5 I-f）
+
+- **本の `"generator"`**（本の鍵の `variables` の後）: `{"image_assets": true}` だけ。生成 → 画像アセット を入れた本だけが持ち、外すと書かない。持たない原稿は今と同じバイトで書く。
+- 書き手は `generator` を持つ本の `features` に `image-assets@1` を加え、外せば外す。
+- **読み手の検査**: `{"image_assets": true}` でない `generator`（ほかの鍵・true でない値）は読み取り専用で開く。image-assets@1 を知らない読み手（PC5 I-f より前の C++ 版）は、未知の拡張として読み取り専用で開く。
+- op `set_image_assets {"on": bool}` は本の op（ページに触れない）。書き出すファイル（`<原稿の名前>-assets/`）は本の外で、本には持たない。
 
 ## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1。PROD-01、PC5 節 J）
 

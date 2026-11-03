@@ -1247,7 +1247,9 @@ private slots:
                                            // (PC5 I-a: レイヤーの基本の残り — SPEC AUTO-01)
                                            "delete_layers", "duplicate_layers", "ungroup_layers", "bake_layer_styles",
                                            // (PC5 J-b: slices@1's question, slice.list — SPEC PROD-01)
-                                           "slices_info"};
+                                           "slices_info",
+                                           // (PC5 I-f: image-assets@1, 生成 → 画像アセット — SPEC AUTO-01)
+                                           "set_image_assets"};
         for (const std::string& name : genko::render::ops_registry().names()) {
             if (listed.count(name) == 0 && own.count(name) == 0) missing += (missing.empty() ? "" : ", ") + name;
         }
