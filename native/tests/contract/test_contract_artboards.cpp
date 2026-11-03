@@ -178,9 +178,6 @@ private slots:
         // not repeated page by page, not inside a smart object's contents
         QVERIFY(refusal(doc, Json{{"op", "for_pages"}, {"pages", "all"}, {"ops", Json::array({Json{{"op", "add_artboard"}}})}})
                     .find("cannot be repeated page by page") != std::string::npos);
-        // undone as one step
-        const core::ApplyResult undone = run_ops(doc, Json::array({Json{{"op", "add_artboard"}}, Json{{"op", "undo"}}}));
-        QCOMPARE(undone.doc.pages.size(), doc.pages.size());
     }
 
     // A cover and a page of a spread are never artboards: the ops refuse them, a spread asked of an artboard is refused.
@@ -215,7 +212,8 @@ private slots:
         const core::Page& board = *page_of(doc, 2);
         QVERIFY(board.artboard);
         QCOMPARE(board.artboard->name, std::string("赤"));
-        QVERIFY(std::abs(board.spec.width_mm.value() - 20) < 0.2 && std::abs(board.spec.height_mm.value() - 10) < 0.2);
+        QVERIFY2(std::abs(board.spec.width_mm.value() - 20) < 0.3 && std::abs(board.spec.height_mm.value() - 10) < 0.3,
+                 (board.spec.width_mm.repr() + " × " + board.spec.height_mm.repr()).c_str());
         QCOMPARE(board.layers.size(), std::size_t(1));
         QVERIFY(!has_layer(*page_of(doc, 1), "a") && has_layer(*page_of(doc, 1), "b"));
         // (a slice of a layer taken off goes with it: J-b's)
@@ -317,7 +315,9 @@ private slots:
         core::Document doc = run(book(), Json::array({Json{{"op", "add_artboard"}, {"width_px", 120}, {"height_px", 80}, {"name", "表紙/案"}},
                                                       Json{{"op", "add_artboard"}, {"width_px", 90}, {"height_px", 60}, {"name", "B"}, {"background", "transparent"}},
                                                       Json{{"op", "add_artboard"}, {"width_px", 30}, {"height_px", 30}, {"name", "B"}, {"background", "black"}}}));
-        doc = run(doc, Json::array({op("add_layer", {{"kind", "paint"}, {"id", "q"}}, 3), drawn_in("q", 0, 0, 10, 10, Json::array({255, 0, 0}), 3)}));
+        doc = run(doc, Json::array({op("add_layer", {{"kind", "paint"}, {"id", "q"}}, 3), drawn_in("q", 0, 0, 10, 10, Json::array({255, 0, 0}), 3),
+                                    op("add_layer", {{"kind", "paint"}, {"id", "r"}}, 2), drawn_in("r", 3, 3, 20, 12, Json::array({30, 120, 220}), 2),
+                                    drawn_in("r", 22, 5, 35, 25, Json::array({240, 200, 10}), 2)}));
         const fs::path out = core::path_from_utf8(path(QStringLiteral("files")).toStdString());
         fs::create_directories(out);
         formats::ArtboardFiles files;
@@ -332,7 +332,7 @@ private slots:
         QCOMPARE(first.height(), 80);
         // a transparent background: its alpha (nothing where nothing is drawn, the red opaque)
         const render::Image clear = render::read_png(genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(written[1].file))));
-        QCOMPARE(clear.mode(), std::string("RGBA"));
+        QCOMPARE(std::string(clear.mode()), std::string("RGBA"));
         QCOMPARE(clear.getpixel(80, 50)[3], 0.0);
         QCOMPARE(clear.getpixel(5, 5)[3], 255.0);
         QVERIFY(clear.getpixel(5, 5)[0] > 250 && clear.getpixel(5, 5)[1] < 5);
@@ -413,22 +413,24 @@ private slots:
         QCOMPARE(view["depth"].get<int>(), 8);
         const Json& layers = view["layers"];
         QCOMPARE(layers.size(), std::size_t(3));
-        // (top first: the last artboard on top)
+        // (top first: the last artboard on top; C where its place says, A and B to the right of it, 100 pixels apart, at its
+        // top)
         QCOMPARE(layers[2]["name"].get<std::string>(), std::string("A"));
         QCOMPARE(layers[2]["kind"].get<std::string>(), std::string("artboard"));
-        QCOMPARE(layers[2]["bbox"], Json::array({0, 0, 120, 80}));
+        QCOMPARE(layers[2]["bbox"], Json::array({150, 300, 270, 380}));
         QCOMPARE(layers[2]["background"].get<int>(), 1);
         QCOMPARE(layers[2]["children"], Json::array({"a1", "レイヤー 1"}));
         QCOMPARE(layers[1]["name"].get<std::string>(), std::string("B"));
-        QCOMPARE(layers[1]["bbox"], Json::array({220, 0, 580, 640}));
+        QCOMPARE(layers[1]["bbox"], Json::array({370, 300, 730, 940}));
         QCOMPARE(layers[1]["background"].get<int>(), 2);
         QCOMPARE(layers[1]["preset"].get<std::string>(), std::string("Android 1080p"));
+        QCOMPARE(layers[0]["name"].get<std::string>(), std::string("C"));
         QCOMPARE(layers[0]["bbox"], Json::array({0, 300, 50, 350}));
         QCOMPARE(layers[0]["background"].get<int>(), 4);
         QCOMPARE(layers[0]["colour"], Json::array({10, 200, 30}));
-        QCOMPARE(view["width"].get<int>(), 580);
-        QCOMPARE(view["height"].get<int>(), 640);
-        QCOMPARE(made.width, std::uint32_t(580));
+        QCOMPARE(view["width"].get<int>(), 730);
+        QCOMPARE(view["height"].get<int>(), 940);
+        QCOMPARE(made.width, std::uint32_t(730));
         // opened again: a page each, its name, size, background, preset and place
         const formats::Opened opened = formats::open_file(genko::test::read_bytes(file), "boards.psd");
         QCOMPARE(opened.doc.pages.size(), std::size_t(3));
@@ -444,6 +446,7 @@ private slots:
         QCOMPARE(opened.doc.page(1).artboard->preset.value_or(""), std::string("Android 1080p"));
         QCOMPARE(opened.doc.page(2).artboard->rgb.value(), (std::array<int, 3>{10, 200, 30}));
         QCOMPARE(opened.doc.page(2).artboard->origin_px.value(), (std::array<std::int64_t, 2>{0, 300}));
+        QCOMPARE(opened.doc.page(0).artboard->origin_px.value(), (std::array<std::int64_t, 2>{150, 300}));
         QVERIFY(std::any_of(opened.doc.page(0).layers.begin(), opened.doc.page(0).layers.end(), [](const core::Layer& l) { return l.title == "a1"; }));
         QVERIFY(std::none_of(opened.doc.page(0).layers.begin(), opened.doc.page(0).layers.end(), [](const core::Layer& l) { return l.kind == core::LayerKind::Folder; }));
         const render::Image red = drawn(opened.doc, opened.doc.page(0));

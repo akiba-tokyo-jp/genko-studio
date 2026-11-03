@@ -448,7 +448,8 @@ struct Board {
     render::psd_artboards::Board board;
 };
 
-// The page's artboard groups (`boards`, the top of the Layers panel first) each made a page: what split_psd_artboards and
+// The page's artboard groups (`boards`, the bottom of the Layers panel first: the order export_artboards_psd writes them
+// in, the first page's at the bottom) each made a page: what split_psd_artboards and
 // split_pcraft_artboards do once they have found them (`from`: PSD or .pcraft, for the notes).
 void split_boards(core::Document& doc, const std::vector<Board>& boards, std::vector<std::string>& notes, std::string_view from) {
     const core::Page page = doc.page(0);
@@ -544,9 +545,8 @@ void split_boards(core::Document& doc, const std::vector<Board>& boards, std::ve
 void split_psd_artboards(core::Document& doc, std::vector<std::string>& notes) {
     if (doc.pages.size() != 1) return;
     const core::Page& page = doc.page(0);
-    std::vector<Board> boards;  // (the top of the Layers panel first)
-    for (auto it = page.layers.rbegin(); it != page.layers.rend(); ++it) {
-        const core::Layer& layer = *it;
+    std::vector<Board> boards;  // (the bottom of the Layers panel first)
+    for (const core::Layer& layer : page.layers) {
         if (layer.kind != core::LayerKind::Folder || layer.parent_id.is_string() || !layer.native_psd) continue;
         for (const auto& [key, ref] : layer.native_psd->blocks) {
             if (!render::psd_artboards::artboard_key(key)) continue;
@@ -592,9 +592,9 @@ void split_pcraft_artboards(core::Document& doc, const std::vector<std::pair<std
             notes.push_back("読めないアートボードは普通のグループにしました");
         }
     }
-    std::vector<Board> boards;  // (the top of the Layers panel first)
-    for (auto it = page.layers.rbegin(); it != page.layers.rend(); ++it) {
-        if (const auto found = read.find(it->id); found != read.end()) boards.push_back(Board{it->id, found->second});
+    std::vector<Board> boards;  // (the bottom of the Layers panel first)
+    for (const core::Layer& layer : page.layers) {
+        if (const auto found = read.find(layer.id); found != read.end()) boards.push_back(Board{layer.id, found->second});
     }
     if (boards.empty()) return;
     split_boards(doc, boards, notes, ".pcraft");

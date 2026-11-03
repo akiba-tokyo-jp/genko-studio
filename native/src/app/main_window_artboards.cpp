@@ -6,6 +6,10 @@
 // links (export_guard).
 
 #include <QAction>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QLineEdit>
+#include <QSpinBox>
 #include <QDir>
 #include <QMenu>
 
@@ -19,6 +23,7 @@
 #include "app/main_window.hpp"
 #include "app/off_ui.hpp"
 #include "core/artboards.hpp"
+#include "core/covers.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "formats/artboards.hpp"
