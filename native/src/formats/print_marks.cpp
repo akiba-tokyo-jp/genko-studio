@@ -78,17 +78,6 @@ struct Transform {
     }
 };
 
-// The area a page is cut to: the whole paper when the area asked is all of it (a picture's page: no bleed, no margin) — the
-// exports' crop_to counts an edge at 0 mm as one pixel in (render::mm_to_px is at least 1), which would cut the picture's
-// first row and column away.
-std::string_view cut_area(const core::Page& page, std::string_view area) {
-    if (area == "paper") return area;
-    const core::Rect r = area == "bleed" ? page.bleed_rect_mm() : page.trim_rect_mm();
-    const bool whole = r.x.value() <= 0.0 && r.y.value() <= 0.0 && r.width.value() >= page.spec.width_mm.value() &&
-                       r.height.value() >= page.spec.height_mm.value();
-    return whole ? std::string_view("paper") : area;
-}
-
 cmsHPROFILE open(const std::optional<std::string>& bytes) {
     return bytes ? cmsOpenProfileFromMem(bytes->data(), static_cast<cmsUInt32Number>(bytes->size())) : cmsCreate_sRGBProfile();
 }
@@ -332,12 +321,12 @@ Sheet place(int width_px, int height_px, int dpi, const RectMm& trim_px, const R
     return sheet;
 }
 
-RectMm trim_in(const core::Page& page, std::string_view asked, int dpi) {
-    const std::string_view area = cut_area(page, asked);
+RectMm trim_in(const core::Page& page, std::string_view area, int dpi) {
     const core::Rect trim = page.trim_rect_mm();
-    // (as crop_to cuts: render::mm_to_px; an edge at the paper's own, 0 mm, at 0)
-    const auto px = [dpi](double v) { return v <= 0.0 ? 0.0 : static_cast<double>(render::mm_to_px(v, dpi)); };
-    RectMm out{px(trim.x.value()), px(trim.y.value()), px(trim.width.value()), px(trim.height.value())};
+    // (as crop_to cuts: an edge's place as render::edge_px puts it, a size as render::mm_to_px)
+    const auto px = [dpi](double v) { return static_cast<double>(render::edge_px(v, dpi)); };
+    const auto size = [dpi](double v) { return static_cast<double>(render::mm_to_px(v, dpi)); };
+    RectMm out{px(trim.x.value()), px(trim.y.value()), size(trim.width.value()), size(trim.height.value())};
     if (area == "trim") {
         out.x = out.y = 0.0;
     } else if (area == "bleed") {
@@ -359,11 +348,10 @@ std::string label_of(const core::Document& doc, const std::vector<const core::Pa
 
 std::string description_of(const core::Document& doc) { return doc.file_info ? doc.file_info->description : std::string(); }
 
-render::Image page_picture(const core::Document& doc, const core::Page& page, std::string_view asked, int dpi, const Color& color) {
-    const std::string_view area = cut_area(page, asked);
+render::Image page_picture(const core::Document& doc, const core::Page& page, std::string_view area, int dpi, const Color& color) {
     render::RenderOptions options;
     options.mode = "print";
-    options.crop_marks = asked == "paper";  // (Genko's own crop marks: the whole paper asked)
+    options.crop_marks = area == "paper";
     if (!color.genko) return crop_to(render::render_page(page, dpi, options, &doc).image, page, area, dpi);
     const std::optional<std::string> printer = printer_profile(color);
     // the page's own colours where render_page gives them: an RGB page of a colour model its values in its profile, a grey or

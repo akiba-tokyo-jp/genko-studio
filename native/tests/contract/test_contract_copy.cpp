@@ -37,6 +37,7 @@
 #include "render/codecs/codecs.hpp"
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
+#include "render/page.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/lock.hpp"
 #include "storage/transaction.hpp"
@@ -870,6 +871,99 @@ private slots:
         for (const Json& f : written["files"]) QVERIFY(f.get<std::string>().ends_with(".jpg"));
         r = genko::test::run_genko({QStringLiteral("export"), q(book), q(dir / "nolayers"), QStringLiteral("--prefix"), QStringLiteral("x")});
         QCOMPARE(r.exit_code, 2);
+    }
+
+    // The user's decision 15 (2026-11-04): a part cut from a page's picture whose edge is the paper's own (0 mm: a picture's
+    // page, the Webtoon type) begins at its first pixel — render::edge_px; mm_to_px, at least 1, cut its first row and column
+    // away and put a black one beyond (8 bits), or cut the picture one pixel smaller (its values, its inks, コピーを保存). The
+    // exports' crop_to, values_crop_to, inks_crop_to and area_box; a page with margins cut as before, byte for byte.
+    void edgesOfAPageWithoutMargin() {
+        QCOMPARE(render::edge_px(0.0, 72), 0);
+        QCOMPARE(render::edge_px(0.1, 72), 0);  // (0.28 px: rounded to 0)
+        QCOMPARE(render::edge_px(-1.0, 72), 0);
+        QCOMPARE(render::edge_px(0.2, 72), render::mm_to_px(0.2, 72));
+        QCOMPARE(render::edge_px(3.0, 600), render::mm_to_px(3.0, 600));
+        QTemporaryDir dir;
+        const fs::path root = path_of(dir.path());
+        // a picture of 60 × 40 at 72 ppi, one colour, in 8 bits, 16 bits and CMYK (its values and its inks)
+        const auto solid = [](Layout layout, Sample sample) {
+            CodecImage image = CodecImage::blank(60, 40, layout, sample);
+            const unsigned all = render::codecs::channels(layout);
+            std::vector<float> values(std::size_t(60) * 40 * all);
+            for (std::size_t i = 0; i < std::size_t(60) * 40; ++i) {
+                for (unsigned c = 0; c < all; ++c) values[i * all + c] = c == 0 ? 0.2f : c == 1 ? 0.4f : 0.8f;
+            }
+            image = CodecImage::from_normalized(60, 40, layout, sample, values);
+            image.meta.dpi = std::make_pair(72.0, 72.0);
+            return formats::picture_book(std::move(image), "edge").doc;
+        };
+        const core::Document eight = solid(Layout::Rgb, Sample::U8);
+        const core::Document sixteen = solid(Layout::Rgb, Sample::U16);
+        const core::Document inks = solid(Layout::Cmyk, Sample::U8);
+        for (const char* area : {"trim", "bleed"}) {
+            // 8 bits: the whole picture, its edge columns its own colour (not cut away, not black)
+            render::RenderOptions print;
+            print.mode = "print";
+            const render::Image whole = render::render_page(eight.page(0), 72, print, &eight).image.convert("RGB");
+            const render::Image cut = formats::crop_to(whole, eight.page(0), area, 72);
+            QCOMPARE(cut.width(), 60);
+            QCOMPARE(cut.height(), 40);
+            QVERIFY2(cut.tobytes() == whole.tobytes(), area);
+            // コピーを保存's area (area_box) and the exports' values and inks: the picture's whole size
+            for (const core::Document* doc : {&eight, &sixteen, &inks}) {
+                formats::CopyOptions options;
+                options.area = area;
+                const formats::PagePicture copy = formats::copy_picture(*doc, 0, options);
+                QCOMPARE(copy.image.width(), 60u);
+                QCOMPARE(copy.image.height(), 40u);
+            }
+            for (const auto& [doc, name] : {std::pair{&sixteen, "sixteen"}, std::pair{&inks, "inks"}, std::pair{&eight, "eight"}}) {
+                const fs::path book = root / (std::string(name) + "-" + area + ".genko");
+                write_book(*doc, book);
+                const fs::path out = root / (std::string(name) + "-" + area + "-out");
+                const test::Run run = test::run_genko({QStringLiteral("export"), QString::fromStdString(core::path_to_utf8(book)),
+                                                       QString::fromStdString(core::path_to_utf8(out)), QStringLiteral("--format"), QStringLiteral("tiff"),
+                                                       QStringLiteral("--area"), QString::fromLatin1(area), QStringLiteral("--dpi"), QStringLiteral("72"),
+                                                       QStringLiteral("--json")});
+                QVERIFY2(run.exit_code == 0, run.err.constData());
+                const Json files = test::one_line(run.out)["files"];
+                QCOMPARE(files.size(), std::size_t(1));
+                const fs::path tif = path_of(QString::fromStdString(files[0].get<std::string>()));
+                const formats::Opened read = formats::open_file(storage::read_file(tif), core::path_to_utf8(tif.filename()));
+                const formats::PagePicture back = formats::page_picture(read.doc.page(0), read.doc, 72, "paper");
+                QCOMPARE(back.image.width(), 60u);
+                QCOMPARE(back.image.height(), 40u);
+                // (its last column and row the picture's colour, as its middle: nothing black beyond it)
+                const unsigned all = render::codecs::channels(back.image.layout());
+                const auto at = [&](std::uint32_t x, std::uint32_t y, unsigned c) { return back.image.value((std::size_t(y) * 60 + x) * all + c); };
+                for (unsigned c = 0; c < render::codecs::colour_channels(back.image.layout()); ++c) {
+                    QVERIFY2(std::abs(at(59, 39, c) - at(30, 20, c)) < 1e-3 && std::abs(at(0, 0, c) - at(30, 20, c)) < 1e-3, name);
+                }
+            }
+        }
+        // the Webtoon type (no bleed, no margin): its trim's picture the paper's, its edges white
+        core::Document strip = core::new_episode("strip", core::Num(1), 1, core::PageSpec::webtoon());
+        render::RenderOptions print;
+        print.mode = "print";
+        const render::Image paper = render::render_page(strip.page(0), 72, print, &strip).image.convert("RGB");
+        for (const char* area : {"trim", "bleed"}) {
+            const core::Rect r = std::string_view(area) == "bleed" ? strip.page(0).bleed_rect_mm() : strip.page(0).trim_rect_mm();
+            if (r.x.value() > 0.0 || r.y.value() > 0.0) continue;  // (a type with bleed: not this case)
+            const render::Image cut = formats::crop_to(paper, strip.page(0), area, 72);
+            const std::string bytes = cut.tobytes();
+            const std::size_t last = std::size_t(cut.width()) * 3 - 3;
+            QVERIFY2(static_cast<unsigned char>(bytes[last]) == 255 && static_cast<unsigned char>(bytes[0]) == 255, area);  // (white, not black)
+        }
+        // a page with margins (B4): cut as before — the edges as mm_to_px puts them —, byte for byte
+        core::Document comic = core::new_episode("comic", core::Num(1), 1, core::PageSpec::b4_comic());
+        const render::Image drawn = render::render_page(comic.page(0), 72, print, &comic).image;
+        for (const char* area : {"trim", "bleed"}) {
+            const core::Rect r = std::string_view(area) == "bleed" ? comic.page(0).bleed_rect_mm() : comic.page(0).trim_rect_mm();
+            const int x0 = render::mm_to_px(r.x.value(), 72), y0 = render::mm_to_px(r.y.value(), 72);
+            const render::Image before =
+                drawn.crop(render::Box{x0, y0, x0 + render::mm_to_px(r.width.value(), 72), y0 + render::mm_to_px(r.height.value(), 72)});
+            QVERIFY2(formats::crop_to(drawn, comic.page(0), area, 72).tobytes() == before.tobytes(), area);
+        }
     }
 };
 
