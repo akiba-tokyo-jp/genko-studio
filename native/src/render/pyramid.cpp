@@ -160,14 +160,22 @@ std::vector<float> blend(std::size_t w, std::size_t h, std::size_t ch, const std
 
 std::size_t tile_overlap(std::size_t levels) { return 5u << std::min(levels, kMaxTiledLevels); }
 
+std::uint64_t tile_bytes(std::size_t images, std::size_t ch, std::size_t levels, std::size_t tile) {
+    const std::uint64_t side = tile + 2 * tile_overlap(std::clamp<std::size_t>(levels, 1, kMaxTiledLevels)) + 32;
+    const std::uint64_t px = side * side, per = (ch + 1) * sizeof(float);
+    // (each picture read (colours, weights) and its two pyramids, two of them at once while one is added in; the sums and
+    // their collapse; the result)
+    return px * per * (std::uint64_t(images) * 2 + 4 + 4) + px * per * 3;
+}
+
 void blend_tiled(std::size_t w, std::size_t h, std::size_t ch, std::size_t images, const ReadPart& read, const ReadPart& weight, std::size_t levels,
-                 bool clamp, const WritePart& write) {
+                 bool clamp, const WritePart& write, std::size_t tile) {
     levels = std::clamp<std::size_t>(levels, 1, kMaxTiledLevels);
     const std::size_t overlap = tile_overlap(levels), grid = std::size_t(1) << (levels - 1);
-    for (std::size_t ty = 0; ty < h; ty += kTile) {
-        for (std::size_t tx = 0; tx < w; tx += kTile) {
+    for (std::size_t ty = 0; ty < h; ty += tile) {
+        for (std::size_t tx = 0; tx < w; tx += tile) {
             segment::check_stop();
-            const std::size_t cw = std::min(kTile, w - tx), chh = std::min(kTile, h - ty);
+            const std::size_t cw = std::min(tile, w - tx), chh = std::min(tile, h - ty);
             // (the tile widened by the overlap, its corner on the coarsest level's grid so the tiles' levels line up)
             const std::size_t x0 = (tx > overlap ? tx - overlap : 0) / grid * grid, y0 = (ty > overlap ? ty - overlap : 0) / grid * grid;
             const std::size_t x1 = std::min(w, tx + cw + overlap), y1 = std::min(h, ty + chh + overlap);

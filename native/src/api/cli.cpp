@@ -55,6 +55,9 @@
 #include "render/ops_slices.hpp"
 #include "render/ops_layer_comps.hpp"
 #include "render/ops_variables.hpp"
+#include "render/ops_align.hpp"
+#include "render/panorama.hpp"
+#include "render/stack.hpp"
 #include "formats/export.hpp"
 #include "formats/exporting.hpp"
 #include "formats/open_file.hpp"
@@ -3219,6 +3222,13 @@ int automate_book_command(const QString& kind, const QStringList& rest, bool asc
     if (fs::exists(dest / "project.json", ec)) {
         return fail("a book is there already: " + storage::path_to_utf8(dest / "project.json") + " (genko automate never writes over a book)", "exists", ascii, 1);
     }
+    // (the review's P3-2: what is asked checked before any file is read)
+    if (kind == QLatin1String("photomerge") && !render::panorama::layout_from(a.value("--layout").value_or(QStringLiteral("auto")).trimmed().toStdString())) {
+        return usage(where + "argument --layout: auto, perspective, cylindrical, spherical, collage or reposition");
+    }
+    if (kind == QLatin1String("statistics") && !render::stack::stat_of(a.value("--mode").value_or(QStringLiteral("median")).trimmed().toLower().toStdString())) {
+        return usage(where + "argument --mode: entropy, kurtosis, maximum, mean, median, minimum, range, skewness, standard_deviation, summation or variance");
+    }
     std::vector<fs::path> given;
     for (const QString& p : a.positional) given.push_back(path_arg(p));
     service::automate::InputOptions listing;
@@ -3228,6 +3238,10 @@ int automate_book_command(const QString& kind, const QStringList& rest, bool asc
     for (const service::automate::Input& input : inputs.items) {
         if (input.book) return usage(where + "pictures only (a book is not one): " + core::path_to_utf8(input.path));
         files.push_back(input.path);
+    }
+    // (more pictures than it takes: said before any is read — Photomerge's and an aligned stack's 32)
+    if ((kind == QLatin1String("photomerge") || a.flag("--align")) && files.size() > render::align::kMaxLayers) {
+        throw core::Error("value", "more than " + std::to_string(render::align::kMaxLayers) + " pictures: choose fewer");
     }
     const core::Actor actor{std::string(core::kLegacyActor)};
     formats::Opened made;
@@ -3250,7 +3264,7 @@ int automate_book_command(const QString& kind, const QStringList& rest, bool asc
             if (!v || *v < 10 || *v > 100) return usage(where + "argument --scale: 10..100 (%)");
             o.scale = static_cast<int>(*v);
         }
-        service::automate::Panorama pano = service::automate::photomerge(service::automate::open_pictures(files, o.open), o);
+        service::automate::Panorama pano = service::automate::photomerge(service::automate::picture_files(files, o.open), o);
         made = std::move(pano.opened);
         info = std::move(pano.info);
     } else {
@@ -3258,7 +3272,7 @@ int automate_book_command(const QString& kind, const QStringList& rest, bool asc
         o.actor = actor;
         o.align = a.flag("--align");
         o.smart = a.flag("--smart");
-        const std::vector<service::automate::Picture> pictures = service::automate::open_pictures(files, o.open);
+        const std::vector<service::automate::Picture> pictures = service::automate::picture_files(files, o.open);
         if (kind == QLatin1String("statistics")) {
             const std::string mode = a.value("--mode").value_or(QStringLiteral("median")).trimmed().toLower().toStdString();
             made = service::automate::statistics(pictures, mode, o);

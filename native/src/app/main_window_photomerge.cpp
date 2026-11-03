@@ -29,6 +29,7 @@
 #include "core/actor.hpp"
 #include "core/paths.hpp"
 #include "render/fx.hpp"
+#include "render/ops_align.hpp"
 #include "render/page.hpp"
 #include "render/segment/segment.hpp"
 #include "service/automate.hpp"
@@ -131,20 +132,23 @@ void MainWindow::made_book(const QString& title, const std::function<formats::Op
     const QPointer<MainWindow> alive(this);
     auto stop = std::make_shared<std::stop_source>();
     auto done = std::make_shared<std::atomic<double>>(0.0);
-    QProgressDialog progress(QStringLiteral("%1を作っています…").arg(title), QStringLiteral("中止"), 0, 1000, this);
-    progress.setObjectName(QStringLiteral("made_book_progress"));
-    progress.setWindowTitle(title);
-    progress.setWindowModality(Qt::ApplicationModal);
-    progress.setMinimumDuration(300);
-    progress.setAutoClose(false);
-    progress.setAutoReset(false);
-    QObject::connect(&progress, &QProgressDialog::canceled, &progress, [stop, &progress, title] {
+    // (the review's P2-6: the progress window on the heap, watched — one owner, the window —, its own cancel taken off: 中止
+    // asks the work to stop and says so, the window staying until the work is back, as send_filter's)
+    const QPointer<QProgressDialog> progress = new QProgressDialog(QStringLiteral("%1を作っています…").arg(title), QStringLiteral("中止"), 0, 1000, this);
+    progress->setObjectName(QStringLiteral("made_book_progress"));
+    progress->setWindowTitle(title);
+    progress->setWindowModality(Qt::ApplicationModal);
+    progress->setMinimumDuration(300);
+    progress->setAutoClose(false);
+    progress->setAutoReset(false);
+    QObject::disconnect(progress, SIGNAL(canceled()), progress, SLOT(cancel()));
+    QObject::connect(progress, &QProgressDialog::canceled, progress, [stop, p = progress.data(), title] {
         stop->request_stop();
-        progress.setLabelText(QStringLiteral("%1を中止しています…").arg(title));
+        p->setLabelText(QStringLiteral("%1を中止しています…").arg(title));
     });
     QTimer tick;
     tick.setInterval(100);
-    QObject::connect(&tick, &QTimer::timeout, &progress, [&progress, done] { progress.setValue(static_cast<int>(done->load() * 1000)); });
+    QObject::connect(&tick, &QTimer::timeout, progress, [p = progress.data(), done] { p->setValue(static_cast<int>(done->load() * 1000)); });
     tick.start();
     struct Made {
         std::optional<formats::Opened> opened;
@@ -166,9 +170,13 @@ void MainWindow::made_book(const QString& title, const std::function<formats::Op
         }
     }));
     if (!watcher.isFinished()) loop.exec();
+    if (!watcher.isFinished()) stop->request_stop();  // (the loop left early — the app quitting —: stopped, then waited for)
     watcher.waitForFinished();
     tick.stop();
-    progress.reset();
+    if (progress) {
+        progress->hide();
+        progress->deleteLater();
+    }
     if (!alive) return;
     Made made = watcher.result();
     if (made.cancelled || stop->stop_requested()) {
@@ -184,14 +192,18 @@ void MainWindow::made_book(const QString& title, const std::function<formats::Op
 
 namespace {
 
-// What a source list names: files (a folder's pictures: opened on the worker, open_pictures), and the open books' pages chosen
+// What a source list names: files (a folder's pictures: their headers read on the worker, picture_files; each opened in its turn), and the open books' pages chosen
 // (their snapshots).
 struct Sources {
     std::vector<fs::path> files;
     std::vector<automate::Picture> open;
     // The pictures: the files opened (on the worker), then the open books'.
+    // core::Error("value") for more pictures than `most`.
+    void check(std::size_t most) const {
+        if (files.size() + open.size() > most) throw core::Error("value", "more than " + std::to_string(most) + " pictures: choose fewer");
+    }
     std::vector<automate::Picture> pictures(const formats::OpenOptions& options) const {
-        std::vector<automate::Picture> out = automate::open_pictures(files, options);
+        std::vector<automate::Picture> out = automate::picture_files(files, options);
         out.insert(out.end(), open.begin(), open.end());
         return out;
     }
@@ -236,6 +248,7 @@ void MainWindow::photomerge_dialog() {
     options.open = file_open_options();
     try {
         const Sources sources = pictures_of(dialog.source, documents_, doc_, current_page());
+        sources.check(render::align::kMaxLayers);  // (the review's P1-1, P3-1: more than it takes said before any file is read)
         made_book(QStringLiteral("Photomerge"), [sources, options] { return automate::photomerge(sources.pictures(options.open), options).opened; });
     } catch (const std::exception& error) {
         flash(QStringLiteral("Photomerge: %1").arg(wording::error(QString::fromUtf8(error.what()))), 8000, true);
@@ -252,6 +265,7 @@ void MainWindow::load_stack_dialog() {
     options.smart = dialog.smart != nullptr && dialog.smart->isChecked();
     try {
         const Sources sources = pictures_of(dialog.source, documents_, doc_, current_page());
+        if (options.align) sources.check(render::align::kMaxLayers);
         made_book(QStringLiteral("ファイルをスタックとして読み込み"), [sources, options] { return automate::load_files_into_stack(sources.pictures(options.open), options); });
     } catch (const std::exception& error) {
         flash(QStringLiteral("ファイルをスタックとして読み込み: %1").arg(wording::error(QString::fromUtf8(error.what()))), 8000, true);
@@ -268,6 +282,7 @@ void MainWindow::statistics_dialog() {
     const std::string mode = dialog.mode->currentData().toString().toStdString();
     try {
         const Sources sources = pictures_of(dialog.source, documents_, doc_, current_page());
+        if (options.align) sources.check(render::align::kMaxLayers);
         made_book(QStringLiteral("統計"), [sources, options, mode] { return automate::statistics(sources.pictures(options.open), mode, options); });
     } catch (const std::exception& error) {
         flash(QStringLiteral("統計: %1").arg(wording::error(QString::fromUtf8(error.what()))), 8000, true);

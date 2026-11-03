@@ -454,14 +454,15 @@ private slots:
                                                  Json{{"op", "put_raster"}, {"page", 1}, {"id", "A"}, {"png_base64", tex(20, 20)}},
                                                  Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "B"}, {"name", "B"}},
                                                  Json{{"op", "put_raster"}, {"page", 1}, {"id", "B"}, {"png_base64", tex(31, 13)}}})));
-        const auto left_of_b = [&b] {
+        const auto left_of = [&b](const char* id) {
             for (const core::Layer& l : b.doc().page(0).layers) {
-                if (l.id != "B") continue;
+                if (l.id != id) continue;
                 const render::Image img = render::read_png(*l.raster_png);
                 return img.getbbox() ? img.getbbox()->x0 : -1;
             }
             return -1;
         };
+        const auto left_of_b = [&left_of] { return left_of("B"); };
         QCOMPARE(left_of_b(), 31);
         // (one layer chosen: said, nothing done)
         b.window->layer_panel()->select_ids({"B"});
@@ -475,7 +476,9 @@ private slots:
         });
         const std::size_t done = b.window->session().history().done.size();
         b.act("act_auto_align_layers")->trigger();
-        QVERIFY(std::abs(left_of_b() - 20) <= 1);
+        // (the reference chosen by how they join — the review of I-g, P2-4 —: either moved onto the other)
+        QVERIFY(std::abs(left_of_b() - left_of("A")) <= 1);
+        QVERIFY(left_of_b() != 31 || left_of("A") != 20);
         QCOMPARE(b.window->session().history().done.size(), done + 1);
         b.act("act_undo")->trigger();
         QCOMPARE(left_of_b(), 31);

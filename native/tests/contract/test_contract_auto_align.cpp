@@ -221,7 +221,7 @@ private slots:
             const auto before_a = bounds(doc, "A");
             QVERIFY(std::abs(bounds(doc, "B")[0] - 31) <= 1);
             const core::ApplyResult r = applied(doc, Json::array({Json{{"op", "auto_align_layers"}, {"page", 1}, {"ids", Json::array({"A", "B"})},
-                                                                       {"projection", "reposition"}}}));
+                                                                       {"projection", "reposition"}, {"reference", "A"}}}));
             const Json& report = r.results.at(0);
             QCOMPARE(report["reference"], Json("A"));
             QCOMPARE(report["layout"], Json("reposition"));
@@ -254,6 +254,159 @@ private slots:
             const core::Document again = run(doc, Json::array({op}));
             QVERIFY2(*layer_of(again, "B").raster_png == *layer_of(r.doc, "B").raster_png, projection);
         }
+    }
+
+    // (the review of I-g, P2-4 and P3-6) No reference given: the best joined layer — a flat layer at the bottom that joins none
+    // is left out (failed), the others aligned —; that flat layer given as the reference: 対応が見つかりません. A layer linked to
+    // one that moves moves with it.
+    void referenceIsChosenAndLinksMoveAlong() {
+        core::Document doc = two_layers(300, 240, texture(300, 240, 20, 20), texture(300, 240, 31, 13));
+        const std::string first = doc.page(0).layers.front().id;
+        render::Image flat = render::Image::create("RGBA", render::Size{300, 240}, render::Ink{120, 120, 120, 255});
+        render::Image dot = render::Image::create("RGBA", render::Size{300, 240}, render::Ink{0, 0, 0, 0});
+        dot.paste(render::Ink{200, 30, 30, 255}, render::Box{250, 200, 260, 210});
+        doc = run(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "Z"}, {"name", "Z"}, {"after", first}},
+                                    Json{{"op", "put_raster"}, {"page", 1}, {"id", "Z"}, {"png_base64", core::b64encode(render::write_png(flat))}},
+                                    Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "L"}, {"name", "L"}},
+                                    Json{{"op", "put_raster"}, {"page", 1}, {"id", "L"}, {"png_base64", core::b64encode(render::write_png(dot))}},
+                                    Json{{"op", "link_layers"}, {"page", 1}, {"ids", Json::array({"B", "L"})}, {"link", true}}}));
+        QCOMPARE(doc.page(0).layers[1].id, std::string("Z"));
+        const core::ApplyResult r = applied(doc, Json::array({Json{{"op", "auto_align_layers"}, {"page", 1}, {"ids", Json::array({"Z", "A", "B"})},
+                                                                   {"projection", "reposition"}}}));
+        const Json& report = r.results.at(0);
+        QCOMPARE(report["failed"], Json::array({"Z"}));
+        QVERIFY(report["reference"] == Json("A") || report["reference"] == Json("B"));
+        QVERIFY(disagreement(r.doc) < 0.02);
+        // (L, linked to B, moved as B did — or stayed with B the reference)
+        const auto b0 = bounds(doc, "B"), b1 = bounds(r.doc, "B"), l0 = bounds(doc, "L"), l1 = bounds(r.doc, "L");
+        QVERIFY2(std::abs((l1[0] - l0[0]) - (b1[0] - b0[0])) <= 1 && std::abs((l1[1] - l0[1]) - (b1[1] - b0[1])) <= 1,
+                 qPrintable(QStringLiteral("B %1,%2 L %3,%4").arg(b1[0] - b0[0]).arg(b1[1] - b0[1]).arg(l1[0] - l0[0]).arg(l1[1] - l0[1])));
+        const std::string said = refused(doc, Json{{"op", "auto_align_layers"}, {"page", 1}, {"ids", Json::array({"Z", "A", "B"})}, {"reference", "Z"}});
+        QVERIFY2(said.find("対応が見つかりません") != std::string::npos, said.c_str());
+    }
+
+    // (P2-3) strict_gates: before the name is approved neither op touches the printed layers; after it, both do.
+    void strictGatesHoldBoth() {
+        core::Document doc = two_layers(300, 240, texture(300, 240, 20, 20), texture(300, 240, 31, 13));
+        doc.strict_gates = true;
+        for (const char* name : {"auto_align_layers", "auto_blend_layers"}) {
+            const std::string said = refused(doc, Json{{"op", name}, {"page", 1}, {"ids", Json::array({"A", "B"})}});
+            QVERIFY2(said.find("needs name_ok") != std::string::npos, (std::string(name) + ": " + said).c_str());
+        }
+        doc.edit_page(0).name_ok = true;
+        for (const char* name : {"auto_align_layers", "auto_blend_layers"}) QVERIFY2(refused(doc, Json{{"op", name}, {"page", 1}, {"ids", Json::array({"A", "B"})}}).empty(), name);
+    }
+
+    // (P3-5) The merged layer goes above the layers clipped onto the top one (its clipping group kept whole).
+    void mergedLayerKeepsTheClippingGroup() {
+        core::Document doc = two_layers(300, 240, texture(300, 240, 20, 20), texture(300, 240, 31, 13));
+        doc = run(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "K"}, {"name", "K"}, {"after", "B"}, {"clip", true}}}));
+        const core::Document r = run(doc, Json::array({Json{{"op", "auto_blend_layers"}, {"page", 1}, {"ids", Json::array({"A", "B"})}, {"new_id", "M"}}}));
+        const auto& layers = r.page(0).layers;
+        const auto at = [&](const char* id) { return std::find_if(layers.begin(), layers.end(), [id](const core::Layer& l) { return l.id == id; }) - layers.begin(); };
+        QCOMPARE(at("K"), at("B") + 1);
+        QCOMPARE(at("M"), at("K") + 1);
+    }
+
+    // (P2-5) Photomerge lays each picture in the first one's profile: a picture of another profile converted first — the
+    // pictures agree where they overlap, the panorama in sRGB.
+    void photomergeConvertsProfiles() {
+        const render::Image sc = scene(640, 300, 3);
+        std::vector<service::automate::Picture> pictures;
+        for (const auto& [x, y] : {std::pair{20, 30}, std::pair{190, 40}}) {
+            const std::string name = "p" + std::to_string(x) + ".png";
+            formats::Opened o = formats::open_file(render::write_png(crop(sc, x, y, 260, 220)), name);
+            core::Document d = std::move(o.doc);
+            if (x == 190) d = run(d, Json::array({Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "prophoto-compat"}}}));
+            pictures.push_back({name, std::make_shared<const core::Document>(std::move(d)), 0});
+        }
+        QVERIFY(pictures[1].doc->page(0).rgb && !pictures[1].doc->page(0).rgb->profile.empty());
+        service::automate::PhotomergeOptions options;
+        options.layout = "reposition";
+        options.blend = false;
+        const service::automate::Panorama p = service::automate::photomerge(pictures, options);
+        const core::Document& book = p.opened.doc;
+        QVERIFY(!book.page(0).rgb || book.page(0).rgb->profile.empty());
+        // (where both show — scene 200..240 × 90..230, the panorama's 180..220 × 60..200 —, their colours on the average the same)
+        std::array<double, 3> sum_a{}, sum_b{};
+        int count = 0;
+        for (int y = 60; y < 200; y += 4) {
+            for (int x = 180; x < 220; x += 4) {
+                const auto a = rgba_at(book, book.page(0).layers[0].id, x, y), b = rgba_at(book, book.page(0).layers[1].id, x, y);
+                QVERIFY(a[3] > 0.99f && b[3] > 0.99f);
+                for (int k = 0; k < 3; ++k) {
+                    sum_a[k] += a[k];
+                    sum_b[k] += b[k];
+                }
+                ++count;
+            }
+        }
+        for (int k = 0; k < 3; ++k) {
+            QVERIFY2(std::fabs(sum_a[k] - sum_b[k]) / count < 3.0 / 255.0, qPrintable(QStringLiteral("%1: %2 vs %3").arg(k).arg(sum_a[k] / count).arg(sum_b[k] / count)));
+        }
+    }
+
+    // (P1-1, P2-7, P3-1) The pictures weighed by their headers before any is decoded: too large refused in words, more than
+    // it takes refused before any file is read, the scale counted.
+    void refusesLargePicturesBeforeDecoding() {
+        QTemporaryDir dir;
+        const fs::path root = path_of(dir.path());
+        // (QOI headers of large pictures with no pixels after them: decoding them would fail — the words say they were weighed)
+        const auto qoi = [](std::uint32_t w, std::uint32_t h) {
+            std::string b = "qoif";
+            for (const std::uint32_t v : {w, h}) {
+                for (int s = 24; s >= 0; s -= 8) b.push_back(static_cast<char>((v >> s) & 0xFF));
+            }
+            b += std::string("\x04\x00", 2);
+            b += std::string("\x00\x00\x00\x00\x00\x00\x00\x01", 8);
+            return b;
+        };
+        write(root / "a.qoi", qoi(6000, 6000));
+        write(root / "b.qoi", qoi(6000, 6000));
+        write(root / "c.qoi", qoi(10000, 10000));
+        write(root / "d.qoi", qoi(10000, 10000));
+        const auto pictures = service::automate::picture_files({root / "a.qoi", root / "b.qoi"}, {});
+        QCOMPARE(service::automate::picture_size(pictures[0]), (std::pair<std::int64_t, std::int64_t>{6000, 6000}));
+        const auto said = [](const std::function<void()>& f) -> std::string {
+            try {
+                f();
+            } catch (const std::exception& e) {
+                return e.what();
+            }
+            return {};
+        };
+        service::automate::PhotomergeOptions options;
+        std::string what = said([&] { (void)service::automate::photomerge(pictures, options); });
+        QVERIFY2(what.find("too large to stitch at once") != std::string::npos, what.c_str());
+        QVERIFY(genko::wording::error(QString::fromStdString(what)).contains(QStringLiteral("画像が大きすぎて")));
+        // (read at half their size they fit: weighed, then opened — and these, having no pixels, cannot be)
+        options.scale = 50;
+        what = said([&] { (void)service::automate::photomerge(pictures, options); });
+        QVERIFY2(!what.empty() && what.find("too large to stitch") == std::string::npos, what.c_str());
+        service::automate::StackOptions stack;
+        stack.actor = core::Actor("human:作者");
+        const auto big = service::automate::picture_files({root / "c.qoi", root / "d.qoi"}, {});
+        what = said([&] { (void)service::automate::load_files_into_stack(big, stack); });
+        QVERIFY2(what.find("the stack would be too large") != std::string::npos, what.c_str());
+        what = said([&] { (void)service::automate::statistics(big, "median", stack); });
+        QVERIFY2(what.find("the stack would be too large") != std::string::npos, what.c_str());
+        // (33 pictures — that are not there —: refused before any is opened; an aligned stack likewise; a wrong mode first)
+        std::vector<service::automate::Picture> many;
+        for (int i = 0; i < 33; ++i) {
+            service::automate::Picture p;
+            p.name = "x" + std::to_string(i);
+            p.file = root / ("missing" + std::to_string(i) + ".png");
+            p.width = p.height = 10;
+            many.push_back(p);
+        }
+        what = said([&] { (void)service::automate::photomerge(many, service::automate::PhotomergeOptions{}); });
+        QVERIFY2(what.find("more than 32 pictures") != std::string::npos, what.c_str());
+        stack.align = true;
+        what = said([&] { (void)service::automate::load_files_into_stack(many, stack); });
+        QVERIFY2(what.find("more than 32 pictures to align") != std::string::npos, what.c_str());
+        what = said([&] { (void)service::automate::statistics(many, "average", stack); });
+        QVERIFY2(what.find("the stack mode is") != std::string::npos, what.c_str());
+        QVERIFY(render::align::photomerge_bytes(20'000'000, 24'000'000, true, false) > 2'000'000'000ULL);
     }
 
     void refusesWhatItShould() {

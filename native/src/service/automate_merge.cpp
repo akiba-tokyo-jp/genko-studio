@@ -5,12 +5,18 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <string>
+#include <tuple>
 
+#include "core/actor.hpp"
+#include "core/base64.hpp"
 #include "core/ids.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
+#include "render/codecs/codecs.hpp"
 #include "render/fill.hpp"
+#include "render/segment/segment.hpp"
 #include "render/image.hpp"
 #include "render/image_ops.hpp"
 #include "render/layer_masks.hpp"
@@ -128,32 +134,134 @@ render::resample::Plane plane_of(const core::Document& book) {
     return out;
 }
 
+// A file opened as a book (formats::open_file), its folder given for what a .pcraft names beside it.
+std::shared_ptr<const core::Document> open_book(const fs::path& file, const std::string& name, const formats::OpenOptions& open) {
+    formats::OpenOptions options = open;
+    options.folder = file.parent_path();
+    return std::make_shared<const core::Document>(formats::open_file(storage::read_file(file), name, options).doc);
+}
+
+// The picture as a book: an open book's page as it is given, a file opened now (one at a time: let go by the caller).
+Picture opened(const Picture& p, const formats::OpenOptions& open) {
+    render::segment::check_stop();  // (the review's P3-3: stopped between the files)
+    if (p.doc || !p.file) return p;
+    Picture out = p;
+    out.doc = open_book(*p.file, p.name, open);
+    out.page = 0;
+    return out;
+}
+
+// What a page's colours are numbers of: an RGB page's profile (empty: sRGB), a grey or CMYK page's, none for Lab and the
+// special modes.
+struct Profile {
+    std::string ref;
+    core::Bytes icc;
+};
+std::optional<Profile> profile_of(const core::Page& page) {
+    if (page.color) {
+        if (page.color->profile.empty()) return std::nullopt;
+        return Profile{page.color->profile, page.color->icc};
+    }
+    if (page.rgb && page.rgb->table) return std::nullopt;
+    return page.rgb ? Profile{page.rgb->profile, page.rgb->icc} : Profile{};
+}
+
+// convert_profile of the book's page into `to` (its ICC bytes, or a built-in profile by its ref; an empty ref is sRGB), when the
+// page's own is another (the review's P2-5: the numbers of one profile never laid as another's). core::Error("value") when the
+// colours cannot be converted.
+core::Document in_profile(core::Document doc, const std::optional<Profile>& to, const std::string& name, const core::Actor& actor) {
+    if (!to) return doc;
+    const std::optional<Profile> now = profile_of(doc.page(0));
+    if (now && now->ref == to->ref) return doc;
+    Json op{{"op", "convert_profile"}, {"page", 1}};
+    if (to->ref.empty()) op["profile"] = "srgb";
+    else if (to->icc) op["icc"] = core::b64encode(*to->icc);
+    else op["profile"] = to->ref;
+    try {
+        return applied(doc, Json::array({op}), actor);
+    } catch (const std::exception& error) {
+        throw core::Error("value", "the colours of the picture " + name + " cannot be converted into the first picture's profile (" + error.what() + ")");
+    }
+}
+
+// Bytes in 万 pixels, for the words that refuse.
+std::string man(double pixels) { return std::to_string(static_cast<long long>(pixels / 10000.0)); }
+
 }  // namespace
 
-std::vector<Picture> open_pictures(const std::vector<fs::path>& files, const formats::OpenOptions& open) {
+std::vector<Picture> picture_files(const std::vector<fs::path>& files, const formats::OpenOptions& open) {
     if (files.size() > kMaxStackFiles) throw core::Error("value", "more than " + std::to_string(kMaxStackFiles) + " files to take: choose fewer");
     std::vector<Picture> out;
     for (const fs::path& file : files) {
-        const std::string name = core::path_to_utf8(file.filename());
-        formats::OpenOptions options = open;
-        options.folder = file.parent_path();
-        formats::Opened opened = formats::open_file(storage::read_file(file), name, options);
-        out.push_back(Picture{name, std::make_shared<const core::Document>(std::move(opened.doc)), 0});
+        render::segment::check_stop();
+        Picture p;
+        p.name = core::path_to_utf8(file.filename());
+        p.file = file;
+        const std::string bytes = storage::read_file(file);
+        if (const auto size = render::codecs::header_size(bytes)) {
+            p.width = size->first;
+            p.height = size->second;
+        } else {
+            // (a PSD, a RAW file, a .pcraft …: its page seen once, then let go)
+            const auto book = open_book(file, p.name, open);
+            std::tie(p.width, p.height) = pixels_of(book->page(0));
+        }
+        out.push_back(std::move(p));
     }
     return out;
 }
 
+std::pair<std::int64_t, std::int64_t> picture_size(const Picture& picture) {
+    if (picture.doc) return pixels_of(picture.doc->page(picture.page));
+    return {picture.width, picture.height};
+}
+
+namespace {
+
+std::uint64_t stack_bytes(const std::vector<Picture>& pictures, int bytes_per_pixel) {
+    std::int64_t w = 0, h = 0, largest = 0;
+    for (const Picture& p : pictures) {
+        const auto [pw, ph] = picture_size(p);
+        w = std::max(w, pw);
+        h = std::max(h, ph);
+        largest = std::max(largest, pw * ph);
+    }
+    // (each layer of the page as big as the largest picture, held as its pixels at the depth — the most its bytes take —, and
+    // one picture at a time worked on in floats: decoded, converted, widened — four RGBA floats a pixel, twice)
+    return std::uint64_t(pictures.size()) * std::uint64_t(w) * std::uint64_t(h) * std::uint64_t(bytes_per_pixel) +
+           std::uint64_t(std::max(largest, w * h)) * 32u;
+}
+
+void check_stack(const std::vector<Picture>& pictures, int bytes_per_pixel) {
+    const std::uint64_t bytes = stack_bytes(pictures, bytes_per_pixel);
+    if (bytes > render::align::kBudget) {
+        throw core::Error("value", "the stack would be too large to hold at once (about " + std::to_string(bytes >> 20) +
+                                       " MiB of 2048): use fewer or smaller pictures");
+    }
+}
+
+}  // namespace
+
 formats::Opened load_files_into_stack(const std::vector<Picture>& pictures, const StackOptions& options) {
     if (pictures.empty()) throw core::Error("value", "no files to load into a stack");
     if (pictures.size() > kMaxStackFiles) throw core::Error("value", "more than " + std::to_string(kMaxStackFiles) + " files to take: choose fewer");
-    // (the first picture's mode, depth and resolution; the largest picture's size)
-    core::Document base = flat_book(pictures.front(), options.open);
+    // (the review's P3-1: auto_align_layers takes at most 32 layers — said before any file is opened)
+    if (options.align && pictures.size() > render::align::kMaxLayers) {
+        throw core::Error("value", "more than " + std::to_string(render::align::kMaxLayers) + " pictures to align: choose fewer");
+    }
+    // (the review's P2-7: the stack weighed before any picture is decoded — 8 bits RGBA a pixel the least —, again by the
+    // first picture's depth once it is open)
+    check_stack(pictures, 4);
+    // (the first picture's mode, depth, profile and resolution; the largest picture's size)
+    core::Document base = flat_book(opened(pictures.front(), options.open), options.open);
     const std::string mode = stack_mode(base.page(0));
     const int depth = depth_of(base.page(0));
+    check_stack(pictures, 4 * std::max(depth, 8) / 8);
     base = conformed(std::move(base), mode, depth, options.actor);
+    const std::optional<Profile> profile = profile_of(base.page(0));
     std::int64_t w = 0, h = 0;
     for (const Picture& p : pictures) {
-        const auto [pw, ph] = pixels_of(p.doc->page(p.page));
+        const auto [pw, ph] = picture_size(p);
         w = std::max(w, pw);
         h = std::max(h, ph);
     }
@@ -163,7 +271,7 @@ formats::Opened load_files_into_stack(const std::vector<Picture>& pictures, cons
         h = std::max(h, bh);
     }
     base = widened(std::move(base), w, h, options.actor);
-    // (one layer a picture, the first at the bottom, each its name)
+    // (one layer a picture, the first at the bottom, each its name; each picture opened in its turn and let go)
     std::vector<core::Layer> layers;
     {
         core::Layer first = only_layer(base);
@@ -172,7 +280,8 @@ formats::Opened load_files_into_stack(const std::vector<Picture>& pictures, cons
     }
     std::vector<std::string> notes;
     for (std::size_t i = 1; i < pictures.size(); ++i) {
-        core::Document other = conformed(flat_book(pictures[i], options.open), mode, depth, options.actor);
+        core::Document other = conformed(flat_book(opened(pictures[i], options.open), options.open), mode, depth, options.actor);
+        other = in_profile(std::move(other), mode == "lab" ? std::nullopt : profile, pictures[i].name, options.actor);
         other = widened(std::move(other), w, h, options.actor);
         const auto [ow, oh] = pixels_of(other.page(0));
         if (ow != w || oh != h) throw core::Error("value", "the picture " + pictures[i].name + " could not be laid on the stack's page");
@@ -213,33 +322,67 @@ Panorama photomerge(const std::vector<Picture>& pictures, const PhotomergeOption
     if (options.scale < 10 || options.scale > 100) throw core::Error("value", "the scale to read the pictures at is 10 to 100 %");
     if (pictures.size() < 2) throw core::Error("value", "Photomerge needs two or more pictures");
     if (pictures.size() > render::align::kMaxLayers) throw core::Error("value", "more than " + std::to_string(render::align::kMaxLayers) + " pictures: choose fewer");
+    // (the review's P1-1: the pictures weighed before any is decoded — each held as RGBA floats at the scale read, and the
+    // largest decoded and made RGBA floats at full size while it is read)
+    {
+        const double s = options.scale / 100.0;
+        double held = 0.0, largest = 0.0, pixels = 0.0;
+        for (const Picture& p : pictures) {
+            const auto [w, h] = picture_size(p);
+            const double n = static_cast<double>(w) * static_cast<double>(h);
+            held += std::ceil(w * s) * std::ceil(h * s) * 16.0;
+            largest = std::max(largest, n);
+            pixels += n * s * s;
+        }
+        if (held + largest * 32.0 > static_cast<double>(render::align::kBudget)) {
+            throw core::Error("value", "the pictures are too large to stitch at once (about " + man(pixels) +
+                                           " 万 pixels in all): use fewer pictures or shrink them when they are read");
+        }
+    }
     const render::ImageAllocationBudget budget{render::align::kBudget};
-    // (each picture flat, as RGBA: one book held at a time while its pixels are read)
+    // (each picture opened in its turn, its colours made the first picture's profile's, flat, as RGBA held in the budget)
     std::vector<render::align::Source> sources;
+    std::vector<std::unique_ptr<render::image_ops::Held>> holding;
     std::vector<double> focals;
     int depth = 8;
-    std::optional<core::RgbMode> profile;
+    std::optional<Profile> profile;
+    std::optional<core::RgbMode> first_rgb;
     double dpi = 72.0;
+    const core::Actor actor(std::string(core::kLegacyActor));
     for (std::size_t i = 0; i < pictures.size(); ++i) {
-        const Picture& p = pictures[i];
+        const Picture p = opened(pictures[i], options.open);
         if (const auto camera = render::picture_camera(*p.doc, p.doc->page(p.page), nullptr); camera && camera->focal_length_35mm) {
             focals.push_back(*camera->focal_length_35mm);
         }
-        const core::Document book = flat_book(p, options.open);
-        const core::Page& page = book.page(0);
+        core::Document book = flat_book(p, options.open);
         if (i == 0) {
+            const core::Page& page = book.page(0);
             dpi = page.spec.dpi.value();
-            const bool precise = !page.color && page.rgb && page.rgb->depth > 8 && !page.rgb->table;
-            depth = precise ? page.rgb->depth : 8;
-            if (!page.color && page.rgb && !page.rgb->table) profile = page.rgb;
+            const bool precise = page.color ? page.color->depth > 8 : page.rgb && page.rgb->depth > 8 && !page.rgb->table;
+            depth = precise ? (page.color ? std::min(page.color->depth, 16) : page.rgb->depth) : 8;
+            // (an RGB first picture's profile is the panorama's; a grey, CMYK or Lab one's colours as they show in sRGB)
+            profile = !page.color && !(page.rgb && page.rgb->table) ? profile_of(page) : std::optional<Profile>(Profile{});
+            if (!page.color && page.rgb && !page.rgb->table) first_rgb = page.rgb;
         }
+        // (the review's P2-5: every picture's numbers made the panorama's profile's — an RGB page converted, any other made RGB
+        // in it first)
+        if (book.page(0).color || (book.page(0).rgb && book.page(0).rgb->table)) {
+            Json set{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}};
+            if (depth > 8) set["depth"] = depth;
+            book = applied(book, Json::array({set}), actor);
+        }
+        book = in_profile(std::move(book), profile, p.name, actor);
+        const auto [w, h] = pixels_of(book.page(0));
+        holding.push_back(std::make_unique<render::image_ops::Held>(std::uint64_t(w) * std::uint64_t(h) * 16u));
         render::align::Source s{p.name, plane_of(book)};
         if (options.scale < 100) {
-            const int w = std::max(1, static_cast<int>(std::lround(s.plane.width * options.scale / 100.0)));
-            const int h = std::max(1, static_cast<int>(std::lround(s.plane.height * options.scale / 100.0)));
+            const int sw = std::max(1, static_cast<int>(std::lround(s.plane.width * options.scale / 100.0)));
+            const int sh = std::max(1, static_cast<int>(std::lround(s.plane.height * options.scale / 100.0)));
             const bool hdr = s.plane.hdr;
-            s.plane = render::resample::resize(s.plane, w, h, render::resample::Filter::Bicubic, false);
+            auto small = std::make_unique<render::image_ops::Held>(std::uint64_t(sw) * std::uint64_t(sh) * 16u);
+            s.plane = render::resample::resize(s.plane, sw, sh, render::resample::Filter::Bicubic, false);
             s.plane.hdr = hdr;
+            holding.back() = std::move(small);
         }
         sources.push_back(std::move(s));
     }
@@ -256,7 +399,8 @@ Panorama photomerge(const std::vector<Picture>& pictures, const PhotomergeOption
         merge.focal35 = focals[focals.size() / 2];
     }
     merge.max_pixels = kMaxPanoramaPixels;
-    merge.budget = render::align::kBudget;
+    // (the review's P2-1: what the stitching may hold is what the budget has left beside the pictures held)
+    merge.budget = render::align::kBudget > budget.live() ? render::align::kBudget - budget.live() : 1;
     render::align::Merged merged;
     try {
         merged = render::align::photomerge(sources, merge);
@@ -264,6 +408,13 @@ Panorama photomerge(const std::vector<Picture>& pictures, const PhotomergeOption
         throw core::Error("value", error.what());
     }
     sources.clear();
+    holding.clear();
+    // (the parts it made held while the book's layers are made of them, one layer's pixels at a time)
+    std::uint64_t made = 0;
+    for (const auto& part : merged.layers) made += std::uint64_t(part.plane.v.size()) * sizeof(float);
+    for (const auto& part : merged.masks) made += std::uint64_t(part.plane.v.size()) * sizeof(float);
+    if (merged.fill) made += std::uint64_t(merged.fill->v.size()) * sizeof(float);
+    const render::image_ops::Held parts(made);
     // (the book: an image of the panorama's size, RGB at the first picture's depth and profile, transparent)
     formats::NewImage image;
     image.title = "パノラマ";
@@ -276,10 +427,23 @@ Panorama photomerge(const std::vector<Picture>& pictures, const PhotomergeOption
     Panorama out;
     out.opened = formats::new_image(image, options.open);
     core::Document& doc = out.opened.doc;
-    if (profile && depth == 8 && !profile->profile.empty()) {
-        // (an 8-bit picture of its own profile: the panorama's numbers are its numbers)
-        core::RgbMode kept = *profile;
-        kept.depth = 8;
+    if (first_rgb && !first_rgb->profile.empty()) {
+        // (the first picture's profile — 8 bits or precise —: the panorama's numbers are its numbers, every picture converted
+        // into it above)
+        core::RgbMode kept = *first_rgb;
+        kept.depth = depth;
+        kept.table.reset();
+        doc.rgb = kept;
+        doc.edit_page(0).rgb = kept;
+    } else if (depth == 8) {
+        // (sRGB: the numbers the pictures were converted into, whatever the working space)
+        doc.rgb.reset();
+        doc.edit_page(0).rgb.reset();
+    } else {
+        core::RgbMode kept = doc.page(0).rgb.value_or(core::RgbMode{});
+        kept.depth = depth;
+        kept.profile.clear();
+        kept.icc = nullptr;
         doc.rgb = kept;
         doc.edit_page(0).rgb = kept;
     }

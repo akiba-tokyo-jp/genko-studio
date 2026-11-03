@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <vector>
 
@@ -43,7 +44,11 @@ std::size_t tile_overlap(std::size_t levels);  // 5·2^levels
 using ReadPart = std::function<void(std::size_t, std::size_t, std::size_t, std::size_t, std::size_t, std::vector<float>&)>;
 using WritePart = std::function<void(std::size_t, std::size_t, std::size_t, std::size_t, const std::vector<float>&)>;
 void blend_tiled(std::size_t w, std::size_t h, std::size_t ch, std::size_t images, const ReadPart& read, const ReadPart& weight, std::size_t levels,
-                 bool clamp, const WritePart& write);
+                 bool clamp, const WritePart& write, std::size_t tile = kTile);
+// What blend_tiled holds at once for `images` pictures of `ch` values in tiles of `tile` (the review of I-g, P2-2): each
+// picture's colours and weights over the widened tile, their Laplacian and Gaussian levels (a third more each), the levels
+// summed — above the peak.
+std::uint64_t tile_bytes(std::size_t images, std::size_t ch, std::size_t levels, std::size_t tile = kTile);
 
 // One-hot weights: focus stacking (the sharpest wins at each pixel; `alpha[k]` where picture k shows) and panorama.
 std::vector<std::vector<float>> stack_weights(std::size_t w, std::size_t h, const std::vector<std::vector<float>>& luma,

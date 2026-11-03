@@ -9,6 +9,7 @@
 #include <sstream>
 
 #include "core/ids.hpp"
+#include "core/layer_basics.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
@@ -184,7 +185,9 @@ void auto_align_layers(core::OpContext& c) {
     const std::string projection = core::truthy_at(c.op, "projection") ? core::py_str(c.op["projection"]) : std::string("auto");
     const auto layout = panorama::layout_from(projection);
     if (!layout) throw OpError("projection is auto, perspective, cylindrical, spherical, collage or reposition");
-    std::size_t ref = 0;
+    // (the review's P2-4: none given — the layer the most of the others join, the middle one of equals, as Photomerge and
+    // Photoshop take it; given — that one)
+    std::optional<std::size_t> ref;
     if (const Json* given = core::get(c.op, "reference"); given != nullptr && !given->is_null()) {
         const auto found = given->is_string() ? std::find(ids.begin(), ids.end(), given->get<std::string>()) : ids.end();
         if (found == ids.end()) throw OpError("reference is one of the layers given (ids)");
@@ -243,6 +246,7 @@ void auto_align_layers(core::OpContext& c) {
     }
     if (moves.empty()) throw OpError(std::string("auto-align ") + kNoMatch);
     Json aligned = Json::array();
+    std::set<std::string> moved_along;
     for (std::size_t n = 0; n < moves.size(); ++n) {
         segment::check_stop();
         const std::size_t i = moves[n];
@@ -270,6 +274,12 @@ void auto_align_layers(core::OpContext& c) {
             };
         }
         layer_transform::move_layer(doc, at, ids[i], m, std::nullopt, *interp);
+        // (the review's P3-6: the layers linked to it move with it — transform@1's links, as every move —, but those chosen,
+        // which take their own placements)
+        for (const std::string& linked : layer_transform::layers_moved(doc.page(at), {ids[i]})) {
+            if (linked == ids[i] || std::find(ids.begin(), ids.end(), linked) != ids.end() || !moved_along.insert(linked).second) continue;
+            layer_transform::move_layer(doc, at, linked, m, std::nullopt, *interp);
+        }
         aligned.push_back(Json{{"id", ids[i]}, {"model", model_of(al->layout)}, {"matches", inliers[i]}, {"matrix", matrix}});
         progress(0.6 + 0.4 * static_cast<double>(n + 1) / static_cast<double>(moves.size()));
     }
@@ -367,7 +377,10 @@ void auto_blend_layers(core::OpContext& c) {
     if (method != "panorama" && method != "stack") throw OpError("method is panorama or stack");
     const bool seamless = core::has(c.op, "seamless") ? core::py_truthy(c.op["seamless"]) : true;
     for (const std::string& id : ids) {
-        if (doc.page(at).layers[core::layer_by_id(doc.page(at), id)].locked) throw OpError("the layer is locked");
+        const std::size_t i = core::layer_by_id(doc.page(at), id);
+        if (doc.page(at).layers[i].locked) throw OpError("the layer is locked");
+        // (in a folder of すべてをロック, or so itself: its mask is its look, and the merged layer would go in that folder)
+        if (core::locked_all(doc.page(at).layers, i)) throw OpError("the layer " + id + " is locked (lock_all)");
     }
     std::string new_id = core::truthy_at(c.op, "new_id") ? core::py_str(c.op["new_id"]) : std::string();
     if (!new_id.empty()) {
@@ -467,8 +480,15 @@ void auto_blend_layers(core::OpContext& c) {
                 }
             }
         };
+        // (the review's P2-2: a tile's work — every layer's colours and weights and their levels — held in the budget before it
+        // is made; smaller tiles when what is left of it is short, refused past the smallest)
+        std::size_t tile = pyramid::kTile;
+        const std::uint64_t left = kBudget > budget.live() ? kBudget - budget.live() : 0;
+        while (tile > 256 && pyramid::tile_bytes(n, ch, levels, tile) > left) tile /= 2;
+        if (pyramid::tile_bytes(n, ch, levels, tile) > left) image_ops::too_large();
+        const image_ops::Held tile_work(pyramid::tile_bytes(n, ch, levels, tile));
         std::size_t tiles = 0;
-        const std::size_t all_tiles = ceil_div(gw, pyramid::kTile) * ceil_div(gh, pyramid::kTile);
+        const std::size_t all_tiles = ceil_div(gw, tile) * ceil_div(gh, tile);
         pyramid::blend_tiled(gw, gh, ch, n, colours, weight, levels, clamp,
                              [&](std::size_t x0, std::size_t y0, std::size_t w, std::size_t h, const std::vector<float>& core_px) {
                                  for (std::size_t y = 0; y < h; ++y) {
@@ -482,7 +502,7 @@ void auto_blend_layers(core::OpContext& c) {
                                      }
                                  }
                                  progress(0.6 + 0.4 * static_cast<double>(++tiles) / static_cast<double>(std::max<std::size_t>(all_tiles, 1)));
-                             });
+                             }, tile);
         // (above the top layer, in its folder)
         std::size_t top = 0;
         for (std::size_t i = 0; i < edited.layers.size(); ++i) {
@@ -497,7 +517,10 @@ void auto_blend_layers(core::OpContext& c) {
         layer.panel_clip = edited.layers[top].panel_clip;
         layer.panel_each = edited.layers[top].panel_each;
         const std::string made = layer.id;
-        edited.layers.insert(edited.layers.begin() + static_cast<std::ptrdiff_t>(top + 1), std::move(layer));
+        // (the review's P3-5: above the layers clipped onto the top one, so its clipping group is not cut)
+        std::size_t place = top + 1;
+        while (place < edited.layers.size() && edited.layers[place].clip && edited.layers[place].parent_id == layer.parent_id) ++place;
+        edited.layers.insert(edited.layers.begin() + static_cast<std::ptrdiff_t>(place), std::move(layer));
         image_ops::put_layer_pixels(doc, at, made, out);
         blended = made;
     }
@@ -549,12 +572,15 @@ std::optional<XY> full_inverse(const Placement& p, double k, double u, double v)
 // --- Photomerge ----------------------------------------------------------------------------------------------------------
 
 std::uint64_t photomerge_bytes(std::uint64_t canvas, std::uint64_t parts, bool blend, bool fill) {
-    // (each picture over its box: RGBA floats warped, its colours and coverage and weights; the blend's levels (a third more)
-    // of the panorama's colours and weights and its coverage; the fill's panorama of colours twice; a layer of the book made
-    // at a time: the panorama's RGBA floats)
-    std::uint64_t bytes = parts * (4 + 3 + 1 + 1) * sizeof(float) + canvas * 4 * sizeof(float);
-    if (blend) bytes += canvas * (3 + 1) * sizeof(float) * 4 / 3 * 2 + canvas * sizeof(float);
-    if (fill) bytes += canvas * 4 * sizeof(float) * 2;
+    // (the review's P2-1, above the peak: each picture over its box — RGBA floats warped (16 bytes a pixel); with blend its
+    // colours and coverage (16), weights (4), the layer and mask made of it (20) and multiband's own of it while it is worked
+    // (colours, coverage, weights, the hole mask, a band, its expansion and reduction: 60) —; the panorama's levels of colours
+    // and weights (a third more), the collapse and its expansion, the blend kept and the coverage (64 a pixel); the fill's
+    // plane and its working copies (48); a layer of the book made at a time (16))
+    std::uint64_t bytes = canvas * 16;
+    if (!blend) return bytes + parts * 16;
+    bytes += parts * (16 + 16 + 4 + 20 + 60) + canvas * 64;
+    if (fill) bytes += canvas * 48;
     return bytes;
 }
 
@@ -602,11 +628,15 @@ Merged photomerge(const std::vector<Source>& sources, const MergeOptions& option
     Merged out;
     out.layout = std::string(panorama::layout_name(al->layout));
     out.reference = al->reference;
-    for (std::size_t i = 0; i < n; ++i) (al->placements[i] ? out.placed : out.failed).push_back(i);
-    // (the canvas: the placed pictures' union)
+    // (the canvas: the placed pictures' union — a picture none of whose edge lands at a finite place is not placed: the
+    // review's P3-4)
     double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
     std::vector<std::array<double, 4>> boxes;
-    for (const std::size_t i : out.placed) {
+    for (std::size_t i = 0; i < n; ++i) {
+        if (!al->placements[i]) {
+            out.failed.push_back(i);
+            continue;
+        }
         const double w = sources[i].plane.width, h = sources[i].plane.height;
         std::array<double, 4> b{1e300, 1e300, -1e300, -1e300};
         for (int t = 0; t <= 64; ++t) {
@@ -617,12 +647,18 @@ Merged photomerge(const std::vector<Source>& sources, const MergeOptions& option
                 b = {std::min(b[0], u[0]), std::min(b[1], u[1]), std::max(b[2], u[0]), std::max(b[3], u[1])};
             }
         }
+        if (!(b[2] >= b[0] && b[3] >= b[1])) {
+            out.failed.push_back(i);
+            continue;
+        }
+        out.placed.push_back(i);
         boxes.push_back(b);
         x0 = std::min(x0, b[0]);
         y0 = std::min(y0, b[1]);
         x1 = std::max(x1, b[2]);
         y1 = std::max(y1, b[3]);
     }
+    if (out.placed.size() < 2) throw OpError("photomerge found no matching detail between the pictures (対応が見つかりません)");
     const double cwf = std::ceil(x1 - x0), chf = std::ceil(y1 - y0);
     const auto too_big = [&](double w, double h) {
         std::ostringstream said;
@@ -647,9 +683,10 @@ Merged photomerge(const std::vector<Source>& sources, const MergeOptions& option
         roi.push_back({rx0, ry0, rx1, ry1});
         parts += std::uint64_t(std::max(rx1 - rx0, 0)) * std::uint64_t(std::max(ry1 - ry0, 0));
     }
-    if (options.budget > 0 && photomerge_bytes(std::uint64_t(cw) * std::uint64_t(chh), parts, options.blend, options.content_aware_fill) > options.budget) {
-        throw too_big(cwf, chf);
-    }
+    const std::uint64_t work = photomerge_bytes(std::uint64_t(cw) * std::uint64_t(chh), parts, options.blend, options.content_aware_fill);
+    if (options.budget > 0 && work > options.budget) throw too_big(cwf, chf);
+    // (held in the imaging budget while it is worked: past what is left of it, refused before anything is made)
+    const image_ops::Held holding(work);
     // (each picture drawn into its box: a plane's homography, a cylinder's or sphere's inverse map)
     std::vector<resample::Plane> warped;
     for (std::size_t j = 0; j < out.placed.size(); ++j) {
@@ -693,7 +730,9 @@ Merged photomerge(const std::vector<Source>& sources, const MergeOptions& option
             im.alpha[p] = v[3];
         }
         rois.push_back(std::move(im));
+        warped[j] = resample::Plane();  // (let go as soon as its colours are taken: the review's P2-1)
     }
+    warped.clear();
     const bool hdr = !sources.empty() && sources.front().plane.hdr;
     std::vector<Placement> shifted;
     std::vector<std::pair<std::size_t, std::size_t>> sizes;

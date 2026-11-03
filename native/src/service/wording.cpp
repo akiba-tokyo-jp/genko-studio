@@ -1464,6 +1464,13 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("ids names the layer \\S+ twice", "同じレイヤーを 2 度選んでいます"));
         r.push_back(rule(R"(more than (\d+) layers: choose fewer)", "レイヤーは \\1 枚までです"));
         r.push_back(rule(R"(more than (\d+) pictures: choose fewer)", "画像は \\1 枚までです"));
+        r.push_back(rule(R"(more than (\d+) pictures to align: choose fewer)", "位置合わせできる画像は \\1 枚までです"));
+        r.push_back(rule(R"(the pictures are too large to stitch at once \(about (-?\d+) 万 pixels in all\).*)",
+                         "画像が大きすぎて、一度につなげません（合わせて約 \\1 万画素）。画像を減らすか、縮小して読み込んでください"));
+        r.push_back(rule(R"(the stack would be too large to hold at once \(about (\d+) MiB of 2048\).*)",
+                         "スタックが大きすぎて、一度に持てません（約 \\1 MiB。2048 MiB まで）。画像を減らすか、小さな画像にしてください"));
+        r.push_back(rule(R"(the colours of the picture (.*) cannot be converted into the first picture's profile.*)",
+                         "画像「\\1」の色を、最初の画像のプロファイルに変換できません"));
         r.push_back(rule("the layer \\S+ is not a paint layer \\(auto-align and auto-blend take paint layers\\)",
                          "自動整列・自動合成できるのは、画素（ペイント）のレイヤーだけです"));
         r.push_back(rule("projection is auto, perspective, cylindrical, spherical, collage or reposition|"

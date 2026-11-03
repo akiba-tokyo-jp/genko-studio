@@ -282,13 +282,19 @@ Output droplet_output(const Droplet& droplet, const std::vector<Input>& inputs, 
 // never changed. PhotoCraft v0.2.0's file_cmds.rs (676-712), automate_cmds.rs (359-389) and photo_cmds.rs (392-550), MIT.
 struct Picture {
     std::string name;                                // (the layer's name: the file's name, or the book's title)
-    std::shared_ptr<const core::Document> doc;
+    std::shared_ptr<const core::Document> doc;       // (a book's page; none: a file, opened when its turn comes)
     std::size_t page = 0;
+    std::optional<fs::path> file;                    // (a file: formats::open_file of it, one at a time)
+    std::int64_t width = 0, height = 0;              // (a file's pixels as its header says them)
 };
-// The files as pictures (opened one at a time when they are taken: `open_pictures` opens each now — formats::open_file, its
-// errors —; at most kMaxStackFiles).
+// The files as pictures, not opened: their sizes read from their headers (render::codecs::header_size; a file whose header
+// does not say it — a PSD, a RAW file … — opened once to see its page, then let go), so what they make can be weighed against
+// the limits before any of them is decoded (the review of I-g, P1-1). At most kMaxStackFiles (core::Error("value") past it);
+// core::Error as open_file throws them for a file that is not a picture.
 inline constexpr std::size_t kMaxStackFiles = 100;
-std::vector<Picture> open_pictures(const std::vector<fs::path>& files, const formats::OpenOptions& open);
+std::vector<Picture> picture_files(const std::vector<fs::path>& files, const formats::OpenOptions& open);
+// A picture's pixels across and down (its header's, or its page's).
+std::pair<std::int64_t, std::int64_t> picture_size(const Picture& picture);
 
 struct StackOptions {
     core::Actor actor;
