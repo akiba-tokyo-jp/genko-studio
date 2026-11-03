@@ -226,7 +226,7 @@ public:
     QLabel* gamma_note = nullptr;
     std::optional<double> gamma;
     QComboBox* button = nullptr;
-    // 表示・作業
+    // 一般・インターフェイス・ツール・パフォーマンス・カーソル・長い時間の作業 (PC5 H-e: their own pages — once 表示・作業)
     QComboBox* ui_font = nullptr;
     QSpinBox* font_pt = nullptr;
     QComboBox* paper = nullptr;

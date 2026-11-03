@@ -44,6 +44,7 @@
 #include "app/history_panel.hpp"
 #include "app/look.hpp"
 #include "app/main_window.hpp"
+#include "app/memory.hpp"
 #include "app/preferences.hpp"
 #include "app/session_file.hpp"
 #include "app/theme.hpp"
@@ -389,7 +390,12 @@ void apply_panes(MainWindow* window) {
     canvas->page_border = QString::fromStdString(text("interface.canvasBorder"));
     canvas->keep_in_view();
     // (パフォーマンス → 使用するメモリ: the finer tiles the window keeps — the ops' own budgets stay as they are)
-    canvas->renderer().set_fine_budget(static_cast<std::size_t>(prefs::value(*store, "performance.memoryUsageMb").get<std::int64_t>()) * 1024 * 1024);
+    const std::size_t budget = static_cast<std::size_t>(prefs::value(*store, "performance.memoryUsageMb").get<std::int64_t>()) * 1024 * 1024;
+    if (window->property("genko_fine_budget").toULongLong() != budget) {
+        window->setProperty("genko_fine_budget", QVariant::fromValue<qulonglong>(budget));
+        canvas->renderer().set_fine_budget(budget);
+        memory::give_back();  // (made smaller: the room let go goes back to the computer — app/memory)
+    }
     if (HistoryPanel* history = window->history(); history != nullptr) {
         const int states = static_cast<int>(prefs::value(*store, "performance.historyStates").get<std::int64_t>());
         if (history->states != states) {
