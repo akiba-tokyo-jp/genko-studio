@@ -34,6 +34,7 @@
 #include "formats/page_picture.hpp"
 #include "formats/pillow_save.hpp"
 #include "formats/web_export.hpp"
+#include "render/anim.hpp"
 #include "render/codecs/codecs.hpp"
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
@@ -921,12 +922,12 @@ private slots:
                 const fs::path book = root / (std::string(name) + "-" + area + ".genko");
                 write_book(*doc, book);
                 const fs::path out = root / (std::string(name) + "-" + area + "-out");
-                const test::Run run = test::run_genko({QStringLiteral("export"), QString::fromStdString(core::path_to_utf8(book)),
+                const genko::test::Run run = genko::test::run_genko({QStringLiteral("export"), QString::fromStdString(core::path_to_utf8(book)),
                                                        QString::fromStdString(core::path_to_utf8(out)), QStringLiteral("--format"), QStringLiteral("tiff"),
                                                        QStringLiteral("--area"), QString::fromLatin1(area), QStringLiteral("--dpi"), QStringLiteral("72"),
                                                        QStringLiteral("--json")});
                 QVERIFY2(run.exit_code == 0, run.err.constData());
-                const Json files = test::one_line(run.out)["files"];
+                const Json files = genko::test::one_line(run.out)["files"];
                 QCOMPARE(files.size(), std::size_t(1));
                 const fs::path tif = path_of(QString::fromStdString(files[0].get<std::string>()));
                 const formats::Opened read = formats::open_file(storage::read_file(tif), core::path_to_utf8(tif.filename()));
@@ -939,6 +940,24 @@ private slots:
                 for (unsigned c = 0; c < render::codecs::colour_channels(back.image.layout()); ++c) {
                     QVERIFY2(std::abs(at(59, 39, c) - at(30, 20, c)) < 1e-3 && std::abs(at(0, 0, c) - at(30, 20, c)) < 1e-3, name);
                 }
+            }
+        }
+        // the Webtoon and SNS exports (profiles.trimmed): the picture as drawn, its first row and column kept
+        {
+            render::RenderOptions plain;
+            plain.mode = "print";
+            plain.finish = false;
+            const render::Image read = formats::trimmed(eight.page(0), eight, 72);
+            QCOMPARE(read.width(), 60);
+            QCOMPARE(read.height(), 40);
+            QVERIFY(read.tobytes() == render::render_page(eight.page(0), 72, plain, &eight).image.tobytes());
+            // the animation's frames (render/anim's own crop_to: アニメーションを書き出す, ビデオをレンダリング…), cut to trim or bleed
+            const render::Image drawn = render::render_page(eight.page(0), 72, plain, &eight).image.convert("RGB");
+            for (const char* area : {"trim", "bleed"}) {
+                const render::Image frame = render::anim::render_frame(eight.page(0), 1, 72, &eight, false, area);
+                QCOMPARE(frame.width(), 60);
+                QCOMPARE(frame.height(), 40);
+                QVERIFY2(frame.tobytes() == drawn.tobytes(), area);
             }
         }
         // the Webtoon type (no bleed, no margin): its trim's picture the paper's, its edges white
