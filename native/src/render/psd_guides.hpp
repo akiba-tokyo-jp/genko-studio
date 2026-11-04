@@ -18,7 +18,8 @@
 // "h", at mm), those the page has already (within 0.01 mm) left out. A PSD read onto a page (import_psd) brings none, as
 // Photoshop's 配置. Psd-keep@1 never kept 1032 (the grid and guides): nothing else changes.
 // Written (formats/psd_export): the page's guide rulers (mm at the picture's resolution → pixels × 32, rounded) — none on
-// the page: no 1032 (the file as before, byte for byte).
+// the page: no 1032 (the file as before, byte for byte). None either while a psd::PythonView lives (psd.py writes no
+// guides: the Python reference's view, which the contract tests compare a page's PSD with).
 
 namespace genko::render::psd_guides {
 

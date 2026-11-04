@@ -11,6 +11,7 @@
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "render/psd_adjust.hpp"
 
 namespace genko::render::psd_guides {
 
@@ -80,6 +81,9 @@ bool read(core::Page& page, std::string_view data, const psd_production::ReadCon
 }
 
 std::optional<std::string> write(const core::Page& page, const psd_production::WriteContext& context) {
+    // (the Python reference's view — psd::PythonView, which the contract tests compare with —: psd.py writes no guides, so
+    // none there; a book's guide rulers are older than H-b, and its pages' PSDs in that view are Python's, byte for byte)
+    if (psd::python_view()) return std::nullopt;
     const auto guides = guides_of(page);
     if (guides.empty()) return std::nullopt;
     const double w_mm = page.spec.width_mm.value(), h_mm = page.spec.height_mm.value();
