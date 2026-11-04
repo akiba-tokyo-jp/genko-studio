@@ -2,6 +2,7 @@
 // PageCanvas mouse*Event, tabletEvent, wheelEvent, keyPressEvent and the panel tool's _frame_press/_move/_release).
 
 #include <QContextMenuEvent>
+#include <QElapsedTimer>
 #include <QGestureEvent>
 #include <QGuiApplication>
 #include <QKeyEvent>
@@ -22,6 +23,7 @@
 #include "core/frames.hpp"
 #include "core/ids.hpp"
 #include "core/pynum.hpp"
+#include "core/stroke_geom.hpp"
 
 namespace genko::app {
 
@@ -172,6 +174,64 @@ void PageCanvas::finish_stroke() {
     back_from_eraser_end();
     update_cursor();  // (PC4 E1: the pointer as it is when not drawing)
     emit changed();
+    update();
+}
+
+// --- the control channel's pen (PC5 J-g) ----------------------------------------------------------------------------
+
+namespace {
+
+double monotonic_ms() {
+    static QElapsedTimer clock;
+    if (!clock.isValid()) clock.start();
+    return static_cast<double>(clock.nsecsElapsed()) / 1e6;
+}
+
+PenSample control_sample(const QPointF& mm, double pressure, double time_ms) {
+    const core::PenPoint packed = core::pack_point(mm.x(), mm.y(), std::clamp(pressure, 0.0, 1.0));
+    PenSample sample;
+    sample.x_mm = packed.x;
+    sample.y_mm = packed.y;
+    sample.pressure = packed.p.value_or(0.7);
+    sample.time_ms = time_ms;
+    return sample;
+}
+
+}  // namespace
+
+bool PageCanvas::control_press(const QPointF& mm, double pressure) {
+    if (page() == nullptr || !is_stroke_tool(tool_) || !stroke_.empty() || control_stroke_ || panning_) return false;
+    control_stroke_ = true;
+    const PenSample sample = control_sample(mm, pressure, monotonic_ms());
+    begin_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, 0.0, true, sample);
+    return true;
+}
+
+void PageCanvas::control_move(const QPointF& mm, double pressure) {
+    if (!control_stroke_ || stroke_.empty()) return;
+    const PenSample sample = control_sample(mm, pressure, monotonic_ms());
+    extend_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, 0.0, false, sample);
+}
+
+void PageCanvas::control_release() {
+    if (!control_stroke_) return;
+    control_stroke_ = false;
+    finish_stroke();
+}
+
+void PageCanvas::control_cancel() {
+    if (!control_stroke_) return;
+    control_stroke_ = false;
+    stroke_.clear();
+    turns_.clear();
+    tilts_.clear();
+    times_.clear();
+    wheels_.clear();
+    smoother_.reset();
+    live_.reset();
+    live_copies_.clear();
+    live_snapped_ = false;
+    update_cursor();
     update();
 }
 

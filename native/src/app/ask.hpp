@@ -38,6 +38,19 @@ struct Responder {
     std::function<bool(const QUrl& url)> open_url;  // a web page shown in the browser (true: it opened)
 };
 
+// (PC5 J-g, SPEC.md PROD-01「制御チャンネル」) While one lives, nothing is asked: no dialog opens, every question is
+// answered as cancelled (none, false, no path, QDialog::Rejected) — the control channel's pen never reaches a dialog, the
+// test responder's neither. refused(): how many questions were turned away so (ever).
+class Closed {
+public:
+    Closed();
+    ~Closed();
+    Closed(const Closed&) = delete;
+    Closed& operator=(const Closed&) = delete;
+};
+bool closed();
+int refused();
+
 // The responder for tests (null: the real dialogs).
 void set_responder(std::shared_ptr<Responder> responder);
 std::shared_ptr<Responder> responder();

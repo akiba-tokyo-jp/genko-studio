@@ -47,6 +47,7 @@ struct Session::Job {
         Json journal_ops = Json::array();
         std::string action = "edit";
         std::string script;    // Edit: (PC5 I-0) the script it came from
+        std::string actor;     // Edit: (PC5 J-g) who made it, when not the session's person (apply_as)
         std::string txn;
         std::string expect_top;  // Undo/Redo: the transaction that must be on top of the journal's stack
     };
@@ -207,7 +208,7 @@ Session::JobResult Session::execute(const Job& job) {
                 JobResult::Step done;
                 if (step.kind == Action::Kind::Edit) {
                     storage::SaveRequest request;
-                    request.actor = job.actor;
+                    request.actor = step.actor.empty() ? job.actor : step.actor;
                     request.base_revision = base;
                     request.ops = step.journal_ops;
                     request.action = step.action;
@@ -518,6 +519,7 @@ void Session::finish_reading(const JobResult& r) {
         again->ops = change->ops;
         again->recover = change->recover;
         again->script = change->script;
+        again->actor = change->actor;
         again->before = base;
         if (change->whole) {  // (復帰 is refused while pages are read: never made again on another book)
             *failures << QStringLiteral("復帰は、ほかの変更の後には当てませんでした");
@@ -557,7 +559,7 @@ void Session::finish_reading(const JobResult& r) {
                 }
             }
             core::ScopedIdScript script(change->ids);
-            core::ApplyResult result = bus.apply(*base, again->ops, core::Actor(actor_));
+            core::ApplyResult result = bus.apply(*base, again->ops, actor_of(*change));
             again->journal_ops = result.journal_ops;
             again->ids = script.taken();
             again->after = std::make_shared<const core::Document>(std::move(result.doc));
@@ -736,6 +738,17 @@ core::ApplyResult Session::apply(const Json& ops, const std::vector<std::string>
     return keep_applied(ops, std::move(result), script.taken());
 }
 
+core::ApplyResult Session::apply_as(const Json& ops, const core::Actor& actor, const std::vector<std::string>& ids) {
+    if (saving_as_) throw core::ApplyError("別名保存中です。完了してから編集してください。", "save_as_busy");
+    if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
+    if (discarded_) throw core::ApplyError("the book was closed", "closed");
+    const core::CommandBus bus(*registry_);
+    core::ScopedIdScript script(ids);
+    core::ApplyResult result = bus.apply(*doc_, ops, actor);
+    if (result.unchanged) return result;
+    return keep_applied(ops, std::move(result), script.taken(), actor);
+}
+
 core::ApplyResult Session::apply_worked(const Json& ops, const DocPtr& base, core::ApplyResult result, const std::vector<std::string>& taken) {
     if (base != doc_) return apply(ops, taken);  // (the book changed meanwhile: worked out again on it, the same ids first)
     if (saving_as_) throw core::ApplyError("別名保存中です。完了してから編集してください。", "save_as_busy");
@@ -745,10 +758,11 @@ core::ApplyResult Session::apply_worked(const Json& ops, const DocPtr& base, cor
     return keep_applied(ops, std::move(result), taken);
 }
 
-core::ApplyResult Session::keep_applied(const Json& ops, core::ApplyResult result, std::vector<std::string> ids) {
+core::ApplyResult Session::keep_applied(const Json& ops, core::ApplyResult result, std::vector<std::string> ids, std::optional<core::Actor> actor) {
     auto change = std::make_shared<Change>();
     change->id = new_change_id();
     change->ops = ops;
+    change->actor = std::move(actor);
     change->journal_ops = result.journal_ops;
     change->script = script_;
     change->ids = std::move(ids);
@@ -1072,7 +1086,7 @@ Session::History Session::history() const {
     const auto of_change = [&](const Change& change) {
         HistoryEntry entry;
         entry.ops = change.ops;
-        entry.actor = actor_;
+        entry.actor = actor_of(change).name();
         entry.saved = change.on_disk;
         if (change.on_disk && read) {
             if (const auto it = read->prepared.find(change.txn); it != read->prepared.end()) {
@@ -1266,6 +1280,7 @@ void Session::start_job() {
             step.journal_ops = action.change->journal_ops;
             step.action = action.change->recover ? "recover" : "edit";
             step.script = action.change->script;
+            if (action.change->actor) step.actor = action.change->actor->name();
         } else if (action.kind == Action::Kind::Undo || action.kind == Action::Kind::Redo) {
             step.expect_top = action.change->txn;
         }
@@ -1664,11 +1679,12 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
                 }
             }
             core::ScopedIdScript script(change->ids);
-            core::ApplyResult result = bus.apply(*current, moved ? *moved : change->ops, core::Actor(actor_));
+            core::ApplyResult result = bus.apply(*current, moved ? *moved : change->ops, actor_of(*change));
             auto again = std::make_shared<Change>();
             again->id = new_change_id();
             again->ops = moved ? *moved : change->ops;
             again->script = change->script;
+            again->actor = change->actor;
             again->journal_ops = result.journal_ops;
             again->ids = script.taken();
             again->before = current;
