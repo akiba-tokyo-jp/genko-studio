@@ -3508,9 +3508,12 @@ int mm_to_px(double mm, int dpi) {
 }
 
 Box rect_px(const core::Rect& rect, int dpi) {
-    // (the user's decision 15: its left and top edges as edge_px — at the paper's own edge, 0 mm, at 0 —, its size as mm_to_px)
-    const int x = edge_px(rect.x.value(), dpi);
-    const int y = edge_px(rect.y.value(), dpi);
+    // (its edges still as mm_to_px, at least 1: a frame's box, and the clip of a picture placed with nothing to clip it to — the
+    // paper —, so counting its left and top edge at 0 changes pages with margins too: a picture placed past the paper —
+    // test_contract_studio's placed book, test_contract_service's atari scan. Left as Python's until the user decides: SPEC
+    // 「切る範囲の辺」)
+    const int x = mm_to_px(rect.x.value(), dpi);
+    const int y = mm_to_px(rect.y.value(), dpi);
     const int w = mm_to_px(rect.width.value(), dpi);
     const int h = mm_to_px(rect.height.value(), dpi);
     return Box{x, y, x + w, y + h};

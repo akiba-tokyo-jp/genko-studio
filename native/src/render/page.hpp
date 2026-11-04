@@ -122,7 +122,6 @@ int mm_to_px(double mm, int dpi);
 int edge_px(double mm, int dpi);
 
 // A box in mm as pixels: (x0, y0, x1, y1), each corner through mm_to_px.
-// (its left and top edges as edge_px — the user's decision 15 —, its width and height as mm_to_px)
 Box rect_px(const core::Rect& rect, int dpi);
 
 // The same participation rule for page rendering and destructive layer editing.

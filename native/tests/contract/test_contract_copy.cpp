@@ -879,18 +879,11 @@ private slots:
     }
 
     // The rest of decision 15's mistake (the coordinator's reading of the user's 直しなさい: every edge of a page without margin
-    // counted at least 1): a frame's box (rect_px), two pages side by side cut to their trims (render_spread), a jacket's part
-    // cut out (front_of, 本の形でプレビュー) and the preview's badges (service::annotate) — at 0 for an edge at 0 mm. A page
-    // with margins as before (test_contract_render compares its spreads, jackets and frames with Python's, byte for byte).
-    void edgesOfFramesSpreadsCoversAndPreviews() {
+    // counted at least 1): two pages side by side cut to their trims (render_spread), a jacket's part cut out (front_of,
+    // 本の形でプレビュー) and the preview's badges (service::annotate) — at 0 for an edge at 0 mm. A page with margins as before
+    // (test_contract_render compares its spreads and jackets with Python's, byte for byte). (rect_px is left as Python's: SPEC.)
+    void edgesOfSpreadsCoversAndPreviews() {
         const auto rect = [](double x, double y, double w, double h) { return core::Rect{core::Num(x), core::Num(y), core::Num(w), core::Num(h)}; };
-        const auto same = [](const render::Box& a, const render::Box& b) { return a.x0 == b.x0 && a.y0 == b.y0 && a.x1 == b.x1 && a.y1 == b.y1; };
-        QVERIFY(same(render::rect_px(rect(0, 0, 10, 20), 72), render::Box{0, 0, 28, 57}));
-        for (const auto& r : {rect(5, 7.5, 10, 20), rect(0.2, 3, 100, 0.1)}) {  // (away from the paper's edge: as before)
-            const int x = render::mm_to_px(r.x.value(), 72), y = render::mm_to_px(r.y.value(), 72);
-            QVERIFY(same(render::rect_px(r, 72),
-                         render::Box{x, y, x + render::mm_to_px(r.width.value(), 72), y + render::mm_to_px(r.height.value(), 72)}));
-        }
         // a paper that is the page (no bleed, no paper beyond the finished size: as a picture's page is)
         const core::PageSpec bare = core::PageSpec::custom(100, 140, 100, 140, 0, 10, 10, 10, 10, 300, "color");
         core::Document book = core::new_episode("edges", core::Num(1), 2, bare);
@@ -904,7 +897,7 @@ private slots:
         const render::Image spread = render::render_spread(book, book.page(0).index, book.page(1).index, 30, print, true);
         QCOMPARE(spread.width(), 2 * w);
         QCOMPARE(spread.height(), h);
-        // a frame at the paper's corner: its border on the first column and row
+        // a frame at the paper's corner (its box as rect_px puts it: left as Python's, SPEC 「切る範囲の辺」) and the preview's badge of it
         {
             core::Page& page = book.edit_page(0);
             core::Frame frame;
@@ -914,9 +907,6 @@ private slots:
             page.frames = {frame};
         }
         const render::Image drawn = render::render_page(book.page(0), 72, print, &book).image.convert("RGB");
-        const std::string pixels = drawn.tobytes();
-        const auto at = [&](int x, int y) { return static_cast<unsigned char>(pixels[(std::size_t(y) * drawn.width() + x) * 3]); };
-        QVERIFY2(at(0, 100) < 128 && at(100, 0) < 128, "the frame's border at the paper's edge");
         // the preview's badge of that frame: on the first column
         render::Image white = render::Image::create("RGB", drawn.size(), render::Ink{255, 255, 255});
         const render::Image marked = service::annotate(white, book.page(0), 72, core::Json(nullptr));
