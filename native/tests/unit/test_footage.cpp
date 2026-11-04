@@ -352,7 +352,7 @@ private slots:
         const genko::core::CommandBus bus(genko::render::ops_registry());
         const genko::core::Actor actor("human:test");
         Json ops = Json::array({Json{{"op", "set_color_mode"}, {"page", 2}, {"mode", "rgb"}, {"depth", 16}},
-                                Json{{"op", "set_color_mode"}, {"page", 3}, {"mode", "cmyk"}}});
+                                Json{{"op", "set_color_mode"}, {"page", 3}, {"mode", "cmyk"}, {"profile", "coated-cmyk"}}});
         for (int p = 1; p <= 3; ++p) ops.push_back(Json{{"op", "add_video_layer"}, {"page", p}, {"footage", footage}, {"id", "v" + std::to_string(p)}});
         doc = bus.apply(doc, ops, actor, false).doc;
         genko::render::footage::clear_cache();

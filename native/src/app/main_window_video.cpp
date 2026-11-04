@@ -117,7 +117,7 @@ void MainWindow::build_video_menus(QMenu* file, QMenu* layers) {
             const auto folder = video_folder();
             bool on = true;
             if (page != nullptr && folder) {
-                if (const Json* video = core::video_row(*page, Json(*folder))) on = video->at("show_altered").get<bool>();
+                if (const Json* row = core::video_row(*page, Json(*folder))) on = row->at("show_altered").get<bool>();
             }
             const QSignalBlocker quiet(action(QStringLiteral("act_video_show_altered")));
             action(QStringLiteral("act_video_show_altered"))->setChecked(on);

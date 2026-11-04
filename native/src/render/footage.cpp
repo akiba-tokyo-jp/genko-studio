@@ -503,7 +503,6 @@ CodecImage normal_picture(std::string_view bytes, const codecs::Limits& limits, 
     return picture.convert(Layout::Rgba, deep ? Sample::U16 : Sample::U8);
 }
 
-std::string hex_ref(const std::string& ref) { return ref.starts_with("sha256:") ? ref.substr(7) : ref; }
 
 void check_room(std::uint64_t width, std::uint64_t height, std::uint64_t frames, int depth, std::uint64_t most) {
     const std::uint64_t need = width * height * 4 * (depth > 8 ? 2 : 1) * frames;

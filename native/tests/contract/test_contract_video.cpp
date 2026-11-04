@@ -160,7 +160,7 @@ private slots:
         const Json features = project["features"];
         QVERIFY2(std::find(features.begin(), features.end(), Json("video@1")) != features.end(), features.dump().c_str());
         QVERIFY(std::find(features.begin(), features.end(), Json("timeline@1")) == features.end());  // (10 fps)
-        const Json anim = project["pages"][0]["extra"]["anim"];
+        const Json anim = project["pages"][0]["anim"];
         QCOMPARE(anim["frames"], Json(4));
         QCOMPARE(anim["fps"], Json(10.0));
         // inspect --timeline
@@ -185,7 +185,7 @@ private slots:
         const std::string before = genko::test::read_bytes(book_path + QStringLiteral("/project.json"));
         done = apply(book_path, QStringLiteral("b.json"), Json::array({op("video_insert_blank", {{"folder", "v"}, {"at", 2}})}));
         QVERIFY2(done.value("ok", false), done.dump().c_str());
-        QCOMPARE(genko::test::read_json(book_path + QStringLiteral("/project.json"))["pages"][0]["extra"]["anim"]["frames"], Json(5));
+        QCOMPARE(genko::test::read_json(book_path + QStringLiteral("/project.json"))["pages"][0]["anim"]["frames"], Json(5));
         (void)genko({QStringLiteral("undo"), book_path, QStringLiteral("--as"), QStringLiteral("human:test")}, &exit);
         QCOMPARE(exit, 0);
         QVERIFY(genko::test::read_bytes(book_path + QStringLiteral("/project.json")) == before);
@@ -284,7 +284,7 @@ private slots:
         doc = run(doc, op("rasterize_video", {{"folder", "v"}, {"at", 4}, {"id", raster["id"]}}));
         QVERIFY(core::video_row(doc.page(0), Json("v")) == nullptr);
         QVERIFY(!core::page_uses_video(doc.page(0)));
-        QCOMPARE(doc.page(0).layers.size(), layers - 2);  // (the folder and its cel for one paint layer)
+        QCOMPARE(doc.page(0).layers.size(), layers - 1);  // (the folder and its cel: one paint layer)
         const auto it = std::find_if(doc.page(0).layers.begin(), doc.page(0).layers.end(), [&](const core::Layer& l) { return Json(l.id) == raster["id"]; });
         QVERIFY(it != doc.page(0).layers.end() && it->kind == core::LayerKind::Raster && it->raster_png);
         QVERIFY(near(middle(doc, 1), kColours[3]));  // (on every frame now)
@@ -334,9 +334,24 @@ private slots:
         Json missing = f;
         missing["frames"] = Json::array({"sha256:" + std::string(64, 'a')});
         QVERIFY(refusal(doc, op("add_video_layer", {{"footage", missing}})).find("is not in the book") != std::string::npos);
-        Json huge = f;
-        huge["size_px"] = Json::array({40000, 30000});
-        QVERIFY2(refusal(doc, op("add_video_layer", {{"footage", huge}})).find("4 GiB") != std::string::npos, refusal(doc, op("add_video_layer", {{"footage", huge}})).c_str());
+        // (a footage that says another size than its frames are)
+        Json wrong = f;
+        wrong["size_px"] = Json::array({40000, 30000});
+        QVERIFY2(refusal(doc, op("add_video_layer", {{"footage", wrong}})).find("size_px") != std::string::npos, refusal(doc, op("add_video_layer", {{"footage", wrong}})).c_str());
+        // (the book's footage past 4 GiB: a row of 3000 pictures of 10000 × 10000 already there, one more refused)
+        core::Document full = doc;
+        Json big = f;
+        big["size_px"] = Json::array({10000, 10000});
+        big["frames"] = Json::array();
+        for (int i = 0; i < 11; ++i) {
+            char hex[65];
+            std::snprintf(hex, sizeof(hex), "%064x", i + 1);
+            big["frames"].push_back(std::string("sha256:") + hex);
+        }
+        (*full.edit_page(0).extra.find("anim"))["tracks"][0]["video"]["footage"] = big;
+        QVERIFY(core::book_footage_bytes(full) > core::kFootageMaxBytes);
+        const std::string past = refusal(full, op("add_video_layer", {{"footage", f}}));
+        QVERIFY2(past.find("4 GiB") != std::string::npos, past.c_str());
         Json odd = f;
         odd["kind"] = "movie";
         QVERIFY(!refusal(doc, op("add_video_layer", {{"footage", odd}})).empty());

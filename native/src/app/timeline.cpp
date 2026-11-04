@@ -769,7 +769,7 @@ void TimelinePanel::build_menu() {
     // (PC5 J-e2: レイヤー → ビデオレイヤー ▸'s commands, the window's)
     QMenu* video = panel_menu->addMenu(QStringLiteral("ビデオレイヤー"));
     video->setObjectName(QStringLiteral("timeline_video_menu"));
-    for (const char* name : {"act_video_from_file", "act_video_blank", nullptr, "act_video_insert_blank", "act_video_duplicate", "act_video_delete", nullptr,
+    for (const char* name : std::initializer_list<const char*>{"act_video_from_file", "act_video_blank", nullptr, "act_video_insert_blank", "act_video_duplicate", "act_video_delete", nullptr,
                              "act_video_replace", "act_video_interpret", nullptr, "act_video_show_altered", "act_video_restore",
                              "act_video_restore_all", "act_video_reload", nullptr, "act_video_rasterize"}) {
         if (name == nullptr) video->addSeparator();

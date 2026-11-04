@@ -438,7 +438,8 @@ private slots:
         emit w->canvas()->strokeCommitted(stroke);
         QVERIFY2(gui_test::wait_for([&] { return s.page().layers.size() == layers + 1; }, 10000), qPrintable(w->last_error()));
         const core::Layer* cel = w->target_layer();
-        QVERIFY(cel != nullptr && cel->kind == core::LayerKind::Raster && cel->parent_id == Json(*folder));
+        QVERIFY2(cel != nullptr && cel->kind == core::LayerKind::Raster && cel->parent_id == Json(*folder),
+                 cel == nullptr ? "none" : (cel->id + " " + cel->parent_id.dump() + " " + std::to_string(static_cast<int>(cel->kind))).c_str());
         QVERIFY(core::video_row(s.page(), Json(*folder))->at("frames")[1][1] == Json(cel->id));
         QVERIFY(w->book().revision > steps);
         panel->refresh();

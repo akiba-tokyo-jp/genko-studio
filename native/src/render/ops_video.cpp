@@ -26,6 +26,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/video.hpp"
+#include "render/codecs/codecs.hpp"
 #include "render/footage.hpp"
 #include "render/not_yet_ported.hpp"
 #include "storage/asset_store.hpp"
@@ -201,6 +202,14 @@ Json footage_given(const Document& doc, const Json& given) {
         if (!seen.insert(r).second) continue;
         const bool held = doc.smart_files.contains(r) || (doc.asset_dir && storage::AssetStore(*doc.asset_dir).has(r, core::kFootageSuffix));
         if (!held) throw OpError("the footage's frame " + r + " is not in the book");
+    }
+    // (its first frame's header as the footage says: its size and depth — the book's 4 GiB is counted by them)
+    const std::optional<std::string> first = footage::frame_bytes(doc, out["frames"][0].get<std::string>());
+    const auto size = first ? codecs::header_size(*first) : std::nullopt;
+    const int depth = first && first->size() > 24 && first->compare(1, 3, "PNG") == 0 ? static_cast<unsigned char>((*first)[24]) : 0;
+    if (!size || static_cast<std::int64_t>(size->first) != out["size_px"][0].get<std::int64_t>() ||
+        static_cast<std::int64_t>(size->second) != out["size_px"][1].get<std::int64_t>() || depth != out["depth"].get<std::int64_t>()) {
+        throw OpError("the footage's frames are not the PNG pictures of its size_px and depth");
     }
     return out;
 }
