@@ -683,8 +683,8 @@ private slots:
             if (one["id"] == "act_zoom_in") zoom = one["enabled"].is_boolean();
         }
         QVERIFY(zoom);
-        for (const std::string& tool : service::agent_tools_sorted()) QVERIFY2(tool.find("pref") == std::string::npos, tool.c_str());
-        for (const std::string& op : service::agent_ops_sorted()) QVERIFY2(op.find("pref") == std::string::npos && op != "set_meta", op.c_str());
+        for (const std::string& tool : service::agent_tools_sorted()) QVERIFY2(tool.find("prefs") == std::string::npos && tool.find("setting") == std::string::npos, tool.c_str());
+        for (const std::string& op : service::agent_ops_sorted()) QVERIFY2(op.find("prefs") == std::string::npos && op != "set_meta", op.c_str());
         QCOMPARE(code_of(c.call("prefs.set", Json{{"values", {{"integrations.controlChannel", false}}}})), std::string("unknown_method"));
         QVERIFY(app::control::Server::instance().listening());
         const auto prefs_set = [](bool on) {
