@@ -425,8 +425,9 @@ private slots:
         pp::read(document, context);
         // (PC5 J-a: レイヤーカンプ read — this one not of upstream's form: said so, in its place; PC5 J-c: 注釈 read — the
         // page's note now, nothing said; PC5 I-d: 変数とデータセット read — not of upstream's form: said so; PC5 J-d1: 計測 read —
-        // the page's count mark now, its fields' defaults filled as upstream's serde reads them, nothing said)
-        QCOMPARE(said, (std::vector<std::string>{"レイヤーカンプは読めない形のため外しました", "タイムラインは Genko に無いため外しました",
+        // the page's count mark now, its fields' defaults filled as upstream's serde reads them, nothing said; PC5 J-e2:
+        // タイムライン read — this one, an fps alone, not of upstream's form: said so, in its place)
+        QCOMPARE(said, (std::vector<std::string>{"レイヤーカンプは読めない形のため外しました", "タイムラインは読めない形のため外しました",
                                                  "変数とデータセットは読めない形のため外しました"}));
         QCOMPARE(page.annotations.size(), std::size_t(1));
         QCOMPARE(page.annotations[0].text, std::string("a"));

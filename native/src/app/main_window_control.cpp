@@ -193,6 +193,7 @@ Json MainWindow::control_execute(const Json& ops, const std::string& actor) {
     const ask::Closed closed;
     const core::PublicAnimationOps public_ops;  // (an agent's set_animation as MCP's apply_ops has it: J-e1)
     const core::ApplyResult result = session_->apply_as(ops, rules::actor_of(actor));
+    video_alter_.reset();  // (PC5 J-e2's alter run is the person's: the channel's change ends it — never undone with the person's next line)
     Json out{{"applied", result.applied}, {"warnings", result.has_warnings ? result.warnings : Json::array()}, {"revision", book().revision}};
     if (!result.results.empty()) out["results"] = result.results;
     return out;

@@ -700,15 +700,17 @@ private slots:
                                       Json{{"op", "move_count"}, {"page", 1}, {"index", 0}, {"x", 2}, {"y", 2}},
                                       Json{{"op", "delete_count_group"}, {"page", 1}, {"group", 1}},
                                       Json{{"op", "clear_count"}, {"page", 1}},
-                                      Json{{"op", "auto_align_layers"}, {"page", 1}, {"ids", Json::array({"a", "b"})}}});
+                                      Json{{"op", "auto_align_layers"}, {"page", 1}, {"ids", Json::array({"a", "b"})}},
+                                      Json{{"op", "add_video_layer"}, {"page", 1}}, Json{{"op", "video_alter"}, {"page", 1}, {"folder", "f"}, {"at", 2}},
+                                      Json{{"op", "rasterize_video"}, {"page", 1}, {"folder", "f"}, {"at", 1}}});
         const Json kept = service::actions::recordable(ops);
         QStringList names;
         for (const Json& op : kept) names << QString::fromStdString(op["op"].get<std::string>());
         QCOMPARE(names, (QStringList{"place_scale_marker", "new_layer_comp", "add_slice", "add_annotation", "add_count", "remove_count", "move_count",
-                                     "delete_count_group", "clear_count", "auto_align_layers"}));
+                                     "delete_count_group", "clear_count", "auto_align_layers", "add_video_layer", "video_alter", "rasterize_video"}));
         const std::vector<bool> bound = service::actions::page_bound(kept);
-        QVERIFY(bound == (std::vector<bool>{false, false, false, false, false, true, true, true, false, true}));
-        QCOMPARE(service::actions::playable(kept).size(), std::size_t(6));
+        QVERIFY(bound == (std::vector<bool>{false, false, false, false, false, true, true, true, false, true, false, true, true}));
+        QCOMPARE(service::actions::playable(kept).size(), std::size_t(7));
     }
 
     // The script events' table: sealed by the window; changed outside, read off with why; a script changed since it was

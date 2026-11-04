@@ -7089,9 +7089,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-e2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/video.cpp",
+        "native/src/render/ops_video.cpp",
+        "native/src/render/footage.cpp",
+        "native/src/app/main_window_video.cpp",
+        "native/tests/contract/test_contract_video.cpp",
+        "native/tests/unit/test_footage.cpp",
+        "native/tests/gui/test_gui_anim.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -24184,9 +24192,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-e2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/video.cpp",
+        "native/src/render/ops_video.cpp",
+        "native/src/render/footage.cpp",
+        "native/src/app/main_window_video.cpp",
+        "native/tests/contract/test_contract_video.cpp",
+        "native/tests/unit/test_footage.cpp",
+        "native/tests/gui/test_gui_anim.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -26990,9 +27006,17 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-e2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/video.cpp",
+        "native/src/render/ops_video.cpp",
+        "native/src/render/footage.cpp",
+        "native/src/app/main_window_video.cpp",
+        "native/tests/contract/test_contract_video.cpp",
+        "native/tests/unit/test_footage.cpp",
+        "native/tests/gui/test_gui_anim.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27039,9 +27063,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-e2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/video.cpp",
+        "native/src/render/ops_video.cpp",
+        "native/src/render/footage.cpp",
+        "native/src/app/main_window_video.cpp",
+        "native/tests/contract/test_contract_video.cpp",
+        "native/tests/unit/test_footage.cpp",
+        "native/tests/gui/test_gui_anim.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27082,9 +27114,17 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-e2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/video.cpp",
+        "native/src/render/ops_video.cpp",
+        "native/src/render/footage.cpp",
+        "native/src/app/main_window_video.cpp",
+        "native/tests/contract/test_contract_video.cpp",
+        "native/tests/unit/test_footage.cpp",
+        "native/tests/gui/test_gui_anim.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27132,9 +27172,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-e2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/video.cpp",
+        "native/src/render/ops_video.cpp",
+        "native/src/render/footage.cpp",
+        "native/src/app/main_window_video.cpp",
+        "native/tests/contract/test_contract_video.cpp",
+        "native/tests/unit/test_footage.cpp",
+        "native/tests/gui/test_gui_anim.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27175,9 +27223,17 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-e2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/video.cpp",
+        "native/src/render/ops_video.cpp",
+        "native/src/render/footage.cpp",
+        "native/src/app/main_window_video.cpp",
+        "native/tests/contract/test_contract_video.cpp",
+        "native/tests/unit/test_footage.cpp",
+        "native/tests/gui/test_gui_anim.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27224,9 +27280,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-e2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/video.cpp",
+        "native/src/render/ops_video.cpp",
+        "native/src/render/footage.cpp",
+        "native/src/app/main_window_video.cpp",
+        "native/tests/contract/test_contract_video.cpp",
+        "native/tests/unit/test_footage.cpp",
+        "native/tests/gui/test_gui_anim.cpp",
+        "native/src/storage/writer.cpp",
+        "native/src/storage/reader.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27269,9 +27335,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-e2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/video.cpp",
+        "native/src/render/ops_video.cpp",
+        "native/src/render/footage.cpp",
+        "native/src/app/main_window_video.cpp",
+        "native/tests/contract/test_contract_video.cpp",
+        "native/tests/unit/test_footage.cpp",
+        "native/tests/gui/test_gui_anim.cpp",
+        "native/src/render/pcraft_timeline.cpp",
+        "native/src/formats/pcraft_write.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27312,9 +27388,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-e2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/video.cpp",
+        "native/src/render/ops_video.cpp",
+        "native/src/render/footage.cpp",
+        "native/src/app/main_window_video.cpp",
+        "native/tests/contract/test_contract_video.cpp",
+        "native/tests/unit/test_footage.cpp",
+        "native/tests/gui/test_gui_anim.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27355,9 +27439,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-e2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/video.cpp",
+        "native/src/render/ops_video.cpp",
+        "native/src/render/footage.cpp",
+        "native/src/app/main_window_video.cpp",
+        "native/tests/contract/test_contract_video.cpp",
+        "native/tests/unit/test_footage.cpp",
+        "native/tests/gui/test_gui_anim.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27398,9 +27490,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-e2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/video.cpp",
+        "native/src/render/ops_video.cpp",
+        "native/src/render/footage.cpp",
+        "native/src/app/main_window_video.cpp",
+        "native/tests/contract/test_contract_video.cpp",
+        "native/tests/unit/test_footage.cpp",
+        "native/tests/gui/test_gui_anim.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27441,9 +27541,17 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-e2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/video.cpp",
+        "native/src/render/ops_video.cpp",
+        "native/src/render/footage.cpp",
+        "native/src/app/main_window_video.cpp",
+        "native/tests/contract/test_contract_video.cpp",
+        "native/tests/unit/test_footage.cpp",
+        "native/tests/gui/test_gui_anim.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -27489,9 +27597,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-e2、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/core/video.cpp",
+        "native/src/render/ops_video.cpp",
+        "native/src/render/footage.cpp",
+        "native/src/app/main_window_video.cpp",
+        "native/tests/contract/test_contract_video.cpp",
+        "native/tests/unit/test_footage.cpp",
+        "native/tests/gui/test_gui_anim.cpp",
+        "native/src/core/anim.cpp",
+        "native/src/app/timeline.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

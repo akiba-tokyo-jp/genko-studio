@@ -43,6 +43,10 @@ const std::vector<std::string> kNotRecorded{"undo", "set_meta", "set_bible", "ad
 // delete_count_group with "group" or "index"): the recorded page's; a mark added, every mark cleared, a group made, the
 // scale, the ruler's line and the scale marker (place_scale_marker) are any page's
 const std::vector<std::string> kCountOps{"remove_count", "move_count", "set_count_group", "delete_count_group"};
+// (PC5 J-g) a video layer named by its folder (J-e2's video_insert_blank … rasterize_video with "folder"): the recorded page's;
+// a video layer made (add_video_layer) and a footage's frames made layers (footage_to_layers) are any page's
+const std::vector<std::string> kVideoOps{"video_insert_blank", "video_duplicate", "video_delete", "video_restore", "video_restore_all",
+                                         "video_alter", "set_video_layer", "replace_footage", "rasterize_video"};
 
 bool in(const std::vector<std::string>& list, std::string_view name) { return std::find(list.begin(), list.end(), name) != list.end(); }
 
@@ -156,6 +160,9 @@ std::vector<bool> page_bound(const Json& ops) {
             for (const char* key : {"slice", "number", "layer"})
                 if (const auto it = op.find(key); it != op.end() && !it->is_null()) bound = true;
             if (const auto it = op.find("slices"); it != op.end() && it->is_array()) bound = true;
+        }
+        if (in(kVideoOps, name)) {
+            if (const auto it = op.find("folder"); it != op.end() && !it->is_null()) bound = true;
         }
         if (in(kCountOps, name)) {
             for (const char* key : {"group", "index"})
