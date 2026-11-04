@@ -247,6 +247,10 @@ genko_library(genko_app
     # PC5 I-c (アートボード: レイヤー → 新規 → アートボード, アートボードの設定, 表示, アートボードからファイル・PDF)
     main_window_artboards.cpp
     artboard_dialog.cpp
+    # PC5 I-g (自動整列・自動合成・Photomerge・ファイルをスタックとして読み込み・統計)
+    auto_align_dialog.cpp
+    photomerge_dialog.cpp
+    main_window_photomerge.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

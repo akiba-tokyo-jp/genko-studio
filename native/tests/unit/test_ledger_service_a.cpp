@@ -1253,7 +1253,9 @@ private slots:
                                            // (PC5 J-d2: 計測値を記録's values asked — SPEC PROD-01)
                                            "measure_values",
                                            // (PC5 J-e1: timeline@1's question, timeline.info — SPEC PROD-01)
-                                           "timeline_info"};
+                                           "timeline_info",
+                                           // (PC5 I-g: レイヤーを自動整列・レイヤーを自動合成 — SPEC AUTO-01)
+                                           "auto_align_layers", "auto_blend_layers"};
         for (const std::string& name : genko::render::ops_registry().names()) {
             if (listed.count(name) == 0 && own.count(name) == 0) missing += (missing.empty() ? "" : ", ") + name;
         }

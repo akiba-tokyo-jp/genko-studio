@@ -273,4 +273,74 @@ std::vector<fs::path> write_launchers(const fs::path& droplet, const fs::path& g
 // The runner's Output of a droplet run on `inputs` (`out`, else its own folder, else droplet-output beside the first input).
 Output droplet_output(const Droplet& droplet, const std::vector<Input>& inputs, const std::optional<fs::path>& out);
 
+// --- PC5 I-g: ファイルをスタックとして読み込み・統計・Photomerge -------------------------------------------------------------
+
+// Each makes a new book of one page in memory (no folder: saving it asks where its .genko goes, as 新規… does) from pictures —
+// files opened as a picture is opened (formats::open_file), or a page of a book open in the window (Photoshop's 開いている
+// ファイルを追加) —, each flattened (a page of more than one layer, or of one with a mask, a style …: its merged picture,
+// formats::duplicate_page). The changes after the first page is made go through the bus (run_steps) as `actor`; the sources are
+// never changed. PhotoCraft v0.2.0's file_cmds.rs (676-712), automate_cmds.rs (359-389) and photo_cmds.rs (392-550), MIT.
+struct Picture {
+    std::string name;                                // (the layer's name: the file's name, or the book's title)
+    std::shared_ptr<const core::Document> doc;       // (a book's page; none: a file, opened when its turn comes)
+    std::size_t page = 0;
+    std::optional<fs::path> file;                    // (a file: formats::open_file of it, one at a time)
+    std::int64_t width = 0, height = 0;              // (a file's pixels as its header says them)
+    // A book's page as a picture.
+    static Picture of(std::string name, std::shared_ptr<const core::Document> doc, std::size_t page = 0) {
+        Picture p;
+        p.name = std::move(name);
+        p.doc = std::move(doc);
+        p.page = page;
+        return p;
+    }
+};
+// The files as pictures, not opened: their sizes read from their headers (render::codecs::header_size; a file whose header
+// does not say it — a PSD, a RAW file … — opened once to see its page, then let go), so what they make can be weighed against
+// the limits before any of them is decoded (the review of I-g, P1-1). At most kMaxStackFiles (core::Error("value") past it);
+// core::Error as open_file throws them for a file that is not a picture.
+inline constexpr std::size_t kMaxStackFiles = 100;
+std::vector<Picture> picture_files(const std::vector<fs::path>& files, const formats::OpenOptions& open);
+// A picture's pixels across and down (its header's, or its page's).
+std::pair<std::int64_t, std::int64_t> picture_size(const Picture& picture);
+
+struct StackOptions {
+    core::Actor actor;
+    formats::OpenOptions open;
+    bool smart = false;  // (読み込み後にスマートオブジェクトを作成: the layers into one smart object)
+    bool align = false;  // (ソース画像を自動的に位置合わせ: auto_align_layers, projection auto)
+};
+// ファイルをスタックとして読み込み… (file.scripts.loadFilesIntoStack): a book of the first picture's colour mode, depth and
+// resolution, as wide and as high as the largest picture; each picture one layer at the top left at its own pixels (converted
+// to the first's mode and depth — set_color_mode —, its numbers kept in its profile), named by its name, the first at the
+// bottom. Then `align`, then `smart`. core::Error("value") for no picture or more than kMaxStackFiles; the ops' OpError.
+formats::Opened load_files_into_stack(const std::vector<Picture>& pictures, const StackOptions& options);
+// 統計… (file.scripts.statistics): the stack, aligned with `align`, made one smart object and its stack mode set (smart_stack:
+// render/stack's 11 — entropy, kurtosis, maximum, mean, median, minimum, range, skewness, standard_deviation, summation,
+// variance). core::Error("value") for a mode that is none of them.
+formats::Opened statistics(const std::vector<Picture>& pictures, const std::string& mode, const StackOptions& options);
+
+struct PhotomergeOptions {
+    std::string layout = "auto";       // auto | perspective | cylindrical | spherical | collage | reposition
+    bool blend = true;                 // 画像を合成
+    bool vignette = false;             // 周辺光量補正
+    bool geometric = false;            // 幾何学的歪曲の補正
+    bool content_aware_fill = false;   // 透明な領域をコンテンツに応じて塗りつぶす
+    std::optional<double> focal_length;  // (mm of 35 mm film; none: the EXIF's when the pictures say it, else found)
+    int scale = 100;                   // 読み込むときに縮小 (%: 10..100, Genko's own: for a panorama past the limits)
+    formats::OpenOptions open;
+};
+// The limits of a panorama (refused past them before it is made: "the panorama would be W × H px …" — パノラマが大きすぎます):
+// the pixels a page may have (120 million) and the imaging budget's 2 GiB of work.
+inline constexpr std::uint64_t kMaxPanoramaPixels = 120'000'000;
+struct Panorama {
+    formats::Opened opened;
+    core::Json info = core::Json::object();  // {layout, reference, placed, failed, width, height, layers, focal_length35, …}
+};
+// Photomerge… (file.automate.photomerge): a book of the panorama — each picture placed one layer (its name; with blend its mask
+// shows its part, the seams where they agree, tones evened), with content_aware_fill a layer of the filled edges on top —, RGB
+// (a CMYK, Lab or grey picture's colours as they show in RGB), of the first picture's depth (precise when it is) and profile.
+// render::align's errors (対応が見つかりません, パノラマが大きすぎます).
+Panorama photomerge(const std::vector<Picture>& pictures, const PhotomergeOptions& options);
+
 }  // namespace genko::service::automate

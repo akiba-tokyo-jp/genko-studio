@@ -7,6 +7,8 @@
 // never on the automatic one; changed since it was bound: not run, said), 参照… (a steps file run on the page, a gate refused
 // before anything runs). PC5 I-h: 写真の切り抜きと角度補正 (the page's photos new books in tabs) and HDR Pro に統合… (its two
 // windows answered: a new book of 32 or 16 bits).
+// PC5 I-g: 編集 → レイヤーを自動整列…・レイヤーを自動合成… (two paint layers chosen: on a worker, one Undo; one chosen: said),
+// ファイル → 自動処理 → Photomerge… and スクリプト → ファイルをスタックとして読み込み…・統計… (each a new book in a tab of its own).
 
 #include <QtTest>
 
@@ -28,13 +30,24 @@
 #include <memory>
 #include <string>
 
+#include <QRadioButton>
+
+#include <tuple>
+
 #include "app/actions.hpp"
+#include "app/auto_align_dialog.hpp"
 #include "app/automate_dialogs.hpp"
 #include "app/hdr_dialog.hpp"
+#include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
+#include "app/photomerge_dialog.hpp"
 #include "app/session.hpp"
 #include "core/color_model.hpp"
+#include "core/base64.hpp"
 #include "core/paths.hpp"
+#include "render/features.hpp"
+#include "render/image.hpp"
+#include "render/png.hpp"
 #include "formats/copy.hpp"
 #include "formats/open_file.hpp"
 #include "render/codecs/codecs.hpp"
@@ -146,13 +159,18 @@ private slots:
         QCOMPARE(items(b.window->automate_menu()), (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"),
                                                              QStringLiteral("写真の切り抜きと角度補正"), QStringLiteral("|"),  // (PC5 I-h)
                                                              QStringLiteral("条件付きモード変更…"), QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…"),
-                                                             QStringLiteral("|"), QStringLiteral("HDR Pro に統合…")}));  // (PC5 I-h)
-        // (PC5 I-a: すべての空のレイヤーを削除・すべてのレイヤー効果を統合 after 画像プロセッサー… — test_gui_layers)
+                                                             QStringLiteral("|"), QStringLiteral("HDR Pro に統合…"),  // (PC5 I-h)
+                                                             QStringLiteral("Photomerge…")}));  // (PC5 I-g)
+        // (PC5 I-a: すべての空のレイヤーを削除・すべてのレイヤー効果を統合 after 画像プロセッサー… — test_gui_layers; PC5 I-g:
+        // ファイルをスタックとして読み込み…・統計… after スクリプトイベントマネージャー…)
         QCOMPARE(items(b.window->scripts_menu()), (QStringList{QStringLiteral("画像プロセッサー…"), QStringLiteral("すべての空のレイヤーを削除"),
                                                             QStringLiteral("すべてのレイヤー効果を統合"), QStringLiteral("すべてのマスクを統合"), QStringLiteral("|"),
-                                                            QStringLiteral("スクリプトイベントマネージャー…"), QStringLiteral("|"), QStringLiteral("参照…")}));
+                                                            QStringLiteral("スクリプトイベントマネージャー…"), QStringLiteral("|"),
+                                                            QStringLiteral("ファイルをスタックとして読み込み…"), QStringLiteral("統計…"), QStringLiteral("|"),
+                                                            QStringLiteral("参照…")}));
         for (const char* name : {"act_batch", "act_create_droplet", "act_conditional_mode_change", "act_fit_image", "act_lens_correction_batch",
-                                 "act_image_processor", "act_script_events", "act_script_browse", "act_crop_straighten_photos", "act_merge_to_hdr_pro"}) {
+                                 "act_image_processor", "act_script_events", "act_script_browse", "act_crop_straighten_photos", "act_merge_to_hdr_pro",
+                                 "act_photomerge", "act_load_files_into_stack", "act_statistics", "act_auto_align_layers", "act_auto_blend_layers"}) {
             QVERIFY2(b.act(name) != nullptr && b.act(name)->shortcuts().isEmpty(), name);
         }
     }
@@ -536,6 +554,129 @@ private slots:
         QVERIFY(!second);
         QCOMPARE(b.window->documents().size(), tabs);
         QVERIFY2(b.window->last_error().contains(QStringLiteral("大きすぎて")), qPrintable(b.window->last_error()));
+    }
+
+    // PC5 I-g: レイヤーを自動整列… (two layers chosen: on; B put back on A on a worker, one Undo) and レイヤーを自動合成… (each a
+    // mask, the merged layer above); with one layer chosen they are off and say why.
+    void autoAlignAndBlendInTheWindow() {
+        Book b;
+        b.open_picture(300, 240);
+        const auto tex = [](int dx, int dy) {
+            render::Image img = render::Image::create("RGBA", render::Size{300, 240}, render::Ink{0, 0, 0, 0});
+            img.paste(render::Ink{102, 102, 102, 255}, render::Box{dx, dy, dx + 240, dy + 180});
+            std::uint64_t seed = 99;
+            for (int k = 0; k < 120; ++k) {
+                const auto rnd = [&seed] {
+                    seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
+                    return static_cast<double>(seed >> 33) / static_cast<double>(1ULL << 31);
+                };
+                const int x = static_cast<int>(rnd() * 220.0), y = static_cast<int>(rnd() * 160.0);
+                const int w = 4 + static_cast<int>(rnd() * 14.0), h = 4 + static_cast<int>(rnd() * 10.0);
+                const int v = static_cast<int>(rnd() * 255);
+                img.paste(render::Ink{v, 255 - v, v / 2, 255}, render::Box{dx + x, dy + y, dx + x + w, dy + y + h});
+            }
+            return core::b64encode(render::write_png(img));
+        };
+        QVERIFY(b.window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "A"}, {"name", "A"}},
+                                                 Json{{"op", "put_raster"}, {"page", 1}, {"id", "A"}, {"png_base64", tex(20, 20)}},
+                                                 Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "B"}, {"name", "B"}},
+                                                 Json{{"op", "put_raster"}, {"page", 1}, {"id", "B"}, {"png_base64", tex(31, 13)}}})));
+        const auto left_of = [&b](const char* id) {
+            for (const core::Layer& l : b.doc().page(0).layers) {
+                if (l.id != id) continue;
+                const render::Image img = render::read_png(*l.raster_png);
+                return img.getbbox() ? img.getbbox()->x0 : -1;
+            }
+            return -1;
+        };
+        const auto left_of_b = [&left_of] { return left_of("B"); };
+        QCOMPARE(left_of_b(), 31);
+        // (one layer chosen: said, nothing done)
+        b.window->layer_panel()->select_ids({"B"});
+        b.act("act_auto_align_layers")->trigger();
+        QCOMPARE(left_of_b(), 31);
+        b.window->layer_panel()->select_ids({"A", "B"});
+        QCOMPARE(b.window->chosen_paint_layers(), (std::vector<std::string>{"A", "B"}));
+        b.answer<app::AutoAlignDialog>([](app::AutoAlignDialog* d) {
+            for (auto& [key, button] : d->projections) button->setChecked(key == "reposition");
+            return true;
+        });
+        const std::size_t done = b.window->session().history().done.size();
+        b.act("act_auto_align_layers")->trigger();
+        // (the reference chosen by how they join — the review of I-g, P2-4 —: either moved onto the other)
+        QVERIFY(std::abs(left_of_b() - left_of("A")) <= 1);
+        QVERIFY(left_of_b() != 31 || left_of("A") != 20);
+        QCOMPARE(b.window->session().history().done.size(), done + 1);
+        b.act("act_undo")->trigger();
+        QCOMPARE(left_of_b(), 31);
+        b.window->layer_panel()->select_ids({"A", "B"});
+        b.answer<app::AutoBlendDialog>([](app::AutoBlendDialog* d) {
+            d->panorama->setChecked(true);
+            d->seamless->setChecked(true);
+            return true;
+        });
+        const std::size_t layers = b.doc().page(0).layers.size();
+        b.act("act_auto_blend_layers")->trigger();
+        QCOMPARE(b.doc().page(0).layers.size(), layers + 1);
+        for (const core::Layer& l : b.doc().page(0).layers) {
+            if (l.id == "A" || l.id == "B") QVERIFY(l.mask.has_value());
+        }
+    }
+
+    // PC5 I-g: ファイルをスタックとして読み込み… (two pictures: a book of two layers in a tab of its own), 統計… (one smart object of
+    // the stack mode chosen) and Photomerge… (three crops placed again: a layer a picture).
+    void stackStatisticsAndPhotomergeInTheWindow() {
+        Book b;
+        picture(b.root / "a.png", 60, 30);
+        picture(b.root / "b.png", 40, 50);
+        const std::size_t books = b.window->documents().size();
+        b.answer<app::StackDialog>([&b](app::StackDialog* d) {
+            if (d->mode != nullptr) return false;
+            d->source.list->addItem(q(b.root / "a.png"));
+            d->source.list->addItem(q(b.root / "b.png"));
+            return !d->problem();
+        });
+        b.act("act_load_files_into_stack")->trigger();
+        QVERIFY(gui_test::wait_for([&] { return b.window->documents().size() == books + 1; }));
+        QCOMPARE(b.doc().page(0).layers.size(), std::size_t(2));
+        QCOMPARE(px(b.doc().page(0)), (std::pair<double, double>{60.0, 50.0}));
+        b.answer<app::StackDialog>([&b](app::StackDialog* d) {
+            if (d->mode == nullptr) return false;
+            choose(d->mode, QStringLiteral("mean"));
+            d->source.list->addItem(q(b.root / "a.png"));
+            d->source.list->addItem(q(b.root / "b.png"));
+            return true;
+        });
+        b.act("act_statistics")->trigger();
+        QVERIFY(gui_test::wait_for([&] { return b.window->documents().size() == books + 2; }));
+        QCOMPARE(b.doc().page(0).layers.size(), std::size_t(1));
+        QCOMPARE((*b.doc().page(0).layers[0].smart)["stack"], Json("mean"));
+        // (Photomerge of three crops of one scene)
+        // (test_contract_auto_align's scene: blobs over a gradient)
+        render::Image scene = render::Image::create("RGBA", render::Size{640, 300}, render::Ink{0, 0, 0, 255});
+        for (int x = 0; x < 640; ++x) {
+            const int v = static_cast<int>((0.25 + 0.2 * x / 640) * 255);
+            scene.paste(render::Ink{v, v, v, 255}, render::Box{x, 0, x + 1, 300});
+        }
+        render::features::Rng rng{3};
+        for (int k = 0; k < 640 * 300 / 900; ++k) {
+            const int cx = static_cast<int>(rng.next() % 640), cy = static_cast<int>(rng.next() % 300), r = 3 + static_cast<int>(rng.next() % 9);
+            const int v = static_cast<int>(rng.next() % 1000) * 255 / 1000, g = static_cast<int>(rng.next() % 1000) * 255 / 1000;
+            scene.paste(render::Ink{v, g, 255 - v, 255},
+                        render::Box{std::max(cx - r, 0), std::max(cy - r * 6 / 10, 0), std::min(cx + r, 640), std::min(cy + r * 6 / 10, 300)});
+        }
+        for (const auto& [name, x, y] : {std::tuple{"p0.png", 20, 30}, std::tuple{"p1.png", 190, 40}, std::tuple{"p2.png", 360, 25}}) {
+            write(b.root / name, render::write_png(scene.crop(render::Box{x, y, x + 260, y + 220})));
+        }
+        b.answer<app::PhotomergeDialog>([&b](app::PhotomergeDialog* d) {
+            choose(d->layout, QStringLiteral("reposition"));
+            for (const char* name : {"p0.png", "p1.png", "p2.png"}) d->source.list->addItem(q(b.root / name));
+            return !d->problem();
+        });
+        b.act("act_photomerge")->trigger();
+        QVERIFY(gui_test::wait_for([&] { return b.window->documents().size() == books + 3; }));
+        QCOMPARE(b.doc().page(0).layers.size(), std::size_t(3));
+        QVERIFY(std::abs(px(b.doc().page(0)).first - 600.0) <= 2.0);
     }
 };
 

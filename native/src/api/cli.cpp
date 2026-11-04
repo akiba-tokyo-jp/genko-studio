@@ -59,6 +59,9 @@
 #include "render/ops_slices.hpp"
 #include "render/ops_layer_comps.hpp"
 #include "render/ops_variables.hpp"
+#include "render/ops_align.hpp"
+#include "render/panorama.hpp"
+#include "render/stack.hpp"
 #include "formats/export.hpp"
 #include "formats/exporting.hpp"
 #include "formats/open_file.hpp"
@@ -3502,6 +3505,124 @@ int crop_photos_command(const QStringList& args, bool ascii) {
     return 0;
 }
 
+// PC5 I-g (SPEC.md AUTO-01「ファイルをスタックとして読み込み・統計・Photomerge」): `genko automate stack|statistics|photomerge
+// <pictures…> --book <dest>` — the new book service/automate makes of the pictures (files, or folders of them: --recurse),
+// written to `dest` as `genko new` writes one (never over a book), {"ok", "path", "notes", "layers", …what it found}:
+//   - stack (ファイルをスタックとして読み込み): --smart (one smart object), --align (auto_align_layers);
+//   - statistics (統計): --mode <stack mode> (median), --align;
+//   - photomerge (Photomerge): --layout auto|perspective|cylindrical|spherical|collage|reposition (auto), --no-blend,
+//     --vignette, --geometric, --fill (透明な領域をコンテンツに応じて塗りつぶす), --focal-length <mm, 35 mm>, --scale <10..100 %>.
+// As the person (no --agent: an agent's tools never reach the files, design 節 I 3.5); a book among the inputs is refused.
+int automate_book_command(const QString& kind, const QStringList& rest, bool ascii) {
+    static constexpr Option kOptions[] = {{"--book", true},     {"--title", true},     {"--smart", false},    {"--align", false},
+                                          {"--mode", true},     {"--layout", true},    {"--no-blend", false}, {"--vignette", false},
+                                          {"--geometric", false}, {"--fill", false},   {"--focal-length", true}, {"--scale", true},
+                                          {"--recurse", false}};
+    const std::string where = "genko automate " + kind.toStdString() + ": ";
+    Arguments a;
+    if (auto error = parse_arguments(rest, kOptions, 1, "inputs", a, true)) return usage(where + *error);
+    static const std::map<QString, std::vector<const char*>> kOwn = {
+        {QStringLiteral("stack"), {"--smart", "--align"}},
+        {QStringLiteral("statistics"), {"--mode", "--align"}},
+        {QStringLiteral("photomerge"), {"--layout", "--no-blend", "--vignette", "--geometric", "--fill", "--focal-length", "--scale"}}};
+    for (const char* option : {"--smart", "--align", "--mode", "--layout", "--no-blend", "--vignette", "--geometric", "--fill", "--focal-length", "--scale"}) {
+        const auto& own = kOwn.at(kind);
+        if ((a.flag(option) || a.value(option)) && std::find_if(own.begin(), own.end(), [option](const char* o) { return std::string_view(o) == option; }) == own.end()) {
+            return usage(where + option + " is not one of its options");
+        }
+    }
+    const auto book = a.value("--book");
+    if (!book) return usage(where + "give --book <the new book's folder>");
+    const std::string dest_text = pathlib_text(book->toStdString());
+    const fs::path dest = storage::path_from_utf8(dest_text);
+    std::error_code ec;
+    if (fs::exists(dest / "project.json", ec)) {
+        return fail("a book is there already: " + storage::path_to_utf8(dest / "project.json") + " (genko automate never writes over a book)", "exists", ascii, 1);
+    }
+    // (the review's P3-2: what is asked checked before any file is read)
+    if (kind == QLatin1String("photomerge") && !render::panorama::layout_from(a.value("--layout").value_or(QStringLiteral("auto")).trimmed().toStdString())) {
+        return usage(where + "argument --layout: auto, perspective, cylindrical, spherical, collage or reposition");
+    }
+    if (kind == QLatin1String("statistics") && !render::stack::stat_of(a.value("--mode").value_or(QStringLiteral("median")).trimmed().toLower().toStdString())) {
+        return usage(where + "argument --mode: entropy, kurtosis, maximum, mean, median, minimum, range, skewness, standard_deviation, summation or variance");
+    }
+    std::vector<fs::path> given;
+    for (const QString& p : a.positional) given.push_back(path_arg(p));
+    service::automate::InputOptions listing;
+    listing.recurse = a.flag("--recurse");
+    const service::automate::Inputs inputs = service::automate::list_inputs(given, listing);
+    std::vector<fs::path> files;
+    for (const service::automate::Input& input : inputs.items) {
+        if (input.book) return usage(where + "pictures only (a book is not one): " + core::path_to_utf8(input.path));
+        files.push_back(input.path);
+    }
+    // (more pictures than it takes: said before any is read — Photomerge's and an aligned stack's 32)
+    if ((kind == QLatin1String("photomerge") || a.flag("--align")) && files.size() > render::align::kMaxLayers) {
+        throw core::Error("value", "more than " + std::to_string(render::align::kMaxLayers) + " pictures: choose fewer");
+    }
+    const core::Actor actor{std::string(core::kLegacyActor)};
+    formats::Opened made;
+    Json info = Json::object();
+    if (kind == QLatin1String("photomerge")) {
+        service::automate::PhotomergeOptions o;
+        o.layout = a.value("--layout").value_or(QStringLiteral("auto")).trimmed().toStdString();
+        o.blend = !a.flag("--no-blend");
+        o.vignette = a.flag("--vignette");
+        o.geometric = a.flag("--geometric");
+        o.content_aware_fill = a.flag("--fill");
+        if (const auto f = a.value("--focal-length")) {
+            bool ok = false;
+            const double v = f->trimmed().toDouble(&ok);
+            if (!ok || !std::isfinite(v) || v <= 0.0 || v > 2000.0) return usage(where + "argument --focal-length: mm of 35 mm film (more than 0, at most 2000)");
+            o.focal_length = v;
+        }
+        if (const auto s = a.value("--scale")) {
+            const auto v = int_option(*s);
+            if (!v || *v < 10 || *v > 100) return usage(where + "argument --scale: 10..100 (%)");
+            o.scale = static_cast<int>(*v);
+        }
+        service::automate::Panorama pano = service::automate::photomerge(service::automate::picture_files(files, o.open), o);
+        made = std::move(pano.opened);
+        info = std::move(pano.info);
+    } else {
+        service::automate::StackOptions o;
+        o.actor = actor;
+        o.align = a.flag("--align");
+        o.smart = a.flag("--smart");
+        const std::vector<service::automate::Picture> pictures = service::automate::picture_files(files, o.open);
+        if (kind == QLatin1String("statistics")) {
+            const std::string mode = a.value("--mode").value_or(QStringLiteral("median")).trimmed().toLower().toStdString();
+            made = service::automate::statistics(pictures, mode, o);
+            info["mode"] = mode;
+        } else {
+            made = service::automate::load_files_into_stack(pictures, o);
+        }
+        info["images"] = pictures.size();
+    }
+    if (const auto title = a.value("--title")) made.doc.title = title->toStdString();
+    storage::ProjectLock lock(dest, std::string(core::kLegacyActor));
+    lock.try_acquire();
+    if (fs::exists(dest / "project.json", ec)) return fail("a book is there already: " + storage::path_to_utf8(dest / "project.json"), "exists", ascii, 1);
+    storage::SaveRequest request;
+    request.actor = std::string(core::kLegacyActor);
+    request.base_revision = 0;
+    request.ops = Json::array();
+    storage::Saver(lock).save(made.doc, request);
+    lock.release();
+    Json notes = Json::array();
+    for (const std::string& note : made.notes) notes.push_back(note);
+    Json out = Json::object();
+    out["ok"] = true;
+    out["path"] = dest_text;
+    out["notes"] = std::move(notes);
+    out["layers"] = made.doc.page(0).layers.size();
+    for (auto it = info.begin(); it != info.end(); ++it) {
+        if (!out.contains(it.key())) out[it.key()] = it.value();
+    }
+    print_json(out, ascii);
+    return 0;
+}
+
 // `genko automate <kind> <inputs…>` (PC5 I-e, SPEC.md AUTO-01: ファイル → 自動処理 ▸・スクリプト ▸'s command line): each
 // picture or book as `genko batch` takes them (--out <folder> | --save | --dry-run; --format, --quality, --prefix, --suffix,
 // --recurse, --stop-on-error, --agent, --name, --json) through
@@ -3518,6 +3639,10 @@ int automate_command(const QStringList& all, bool ascii) {
     // (PC5 I-h: HDR Pro に統合 and 写真の切り抜きと角度補正 make new books — their own arguments)
     if (!all.isEmpty() && all.front() == QLatin1String("hdr")) return hdr_command(all.mid(1), ascii);
     if (!all.isEmpty() && all.front() == QLatin1String("crop-photos")) return crop_photos_command(all.mid(1), ascii);
+    // (PC5 I-g: the kinds that make a new book)
+    if (!all.isEmpty() && (all.front() == QLatin1String("stack") || all.front() == QLatin1String("statistics") || all.front() == QLatin1String("photomerge"))) {
+        return automate_book_command(all.front(), all.mid(1), ascii);
+    }
     if (all.isEmpty() || !kKinds.contains(all.front()))return usage("genko automate: image-processor, fit, mode or lens");
     const QString kind = all.front();
     static constexpr Option kOptions[] = {{"--out", true},     {"--save", false},          {"--dry-run", false},      {"--format", true},

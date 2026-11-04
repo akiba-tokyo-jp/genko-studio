@@ -1738,9 +1738,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-g、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/features.cpp",
+        "native/src/render/panorama.cpp",
+        "native/src/render/ops_align.cpp",
+        "native/src/app/auto_align_dialog.cpp",
+        "native/src/app/main_window_photomerge.cpp",
+        "native/tests/unit/test_features.cpp",
+        "native/tests/unit/test_panorama.cpp",
+        "native/tests/contract/test_contract_auto_align.cpp",
+        "native/tests/gui/test_gui_automate.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -1781,9 +1791,18 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-g、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/panorama.cpp",
+        "native/src/render/pyramid.cpp",
+        "native/src/render/ops_align.cpp",
+        "native/src/app/auto_align_dialog.cpp",
+        "native/src/app/main_window_photomerge.cpp",
+        "native/tests/unit/test_panorama.cpp",
+        "native/tests/contract/test_contract_auto_align.cpp",
+        "native/tests/gui/test_gui_automate.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -5996,9 +6015,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-g、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/panorama.cpp",
+        "native/src/render/ops_align.cpp",
+        "native/src/service/automate_merge.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/photomerge_dialog.cpp",
+        "native/src/app/main_window_photomerge.cpp",
+        "native/tests/unit/test_panorama.cpp",
+        "native/tests/contract/test_contract_auto_align.cpp",
+        "native/tests/gui/test_gui_automate.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -8050,9 +8079,16 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-g、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/service/automate_merge.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/photomerge_dialog.cpp",
+        "native/src/app/main_window_photomerge.cpp",
+        "native/tests/contract/test_contract_auto_align.cpp",
+        "native/tests/gui/test_gui_automate.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -8144,9 +8180,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-g、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/service/automate_merge.cpp",
+        "native/src/render/stack.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/photomerge_dialog.cpp",
+        "native/src/app/main_window_photomerge.cpp",
+        "native/tests/contract/test_contract_auto_align.cpp",
+        "native/tests/gui/test_gui_automate.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

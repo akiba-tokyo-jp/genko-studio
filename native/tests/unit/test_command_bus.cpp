@@ -480,7 +480,8 @@ private slots:
             "slices_info",  // (PC5 J-b: slices@1's question, slice.list — SPEC.md PROD-01)
             "add_artboard", "artboard_from_layers", "set_artboard",  // (PC5 I-c: artboards@1, アートボード — SPEC.md AUTO-01)
             "measure_values",  // (PC5 J-d2: 計測値を記録's values asked, image.analysis.recordMeasurements — SPEC.md PROD-01)
-            "timeline_info"};  // (PC5 J-e1: timeline@1's question, timeline.info — SPEC.md PROD-01)
+            "timeline_info",  // (PC5 J-e1: timeline@1's question, timeline.info — SPEC.md PROD-01)
+            "auto_align_layers", "auto_blend_layers"};  // (PC5 I-g: レイヤーを自動整列・レイヤーを自動合成 — SPEC.md AUTO-01)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);

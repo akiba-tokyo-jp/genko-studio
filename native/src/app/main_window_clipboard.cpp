@@ -177,6 +177,7 @@ void MainWindow::build_clipboard_menu(QMenu* edit) {
     edit->addSeparator();
     build_transform_items(edit);  // (コンテンツに応じて拡大・縮小… パペットワープ 遠近法ワープ 自由変形: main_window_transform.cpp)
     build_transform_menu(edit->addMenu(QStringLiteral("変形")));  // (main_window_select.cpp; ゆがみ… is フィルター's: filter_menu.cpp)
+    build_auto_align_items(edit);  // (PC5 I-g: レイヤーを自動整列…・レイヤーを自動合成…, main_window_photomerge.cpp)
 }
 
 std::optional<Json> MainWindow::copied_items(const std::optional<Json>& area, const core::Layer* of) {

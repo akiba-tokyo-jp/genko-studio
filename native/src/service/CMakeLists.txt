@@ -75,6 +75,8 @@ genko_library(genko_service
     spell.cpp
     # PC5 I-h (HDR Pro に統合・写真の切り抜きと角度補正: new books of exposures and of a scan's photos)
     automate_photos.cpp
+    # PC5 I-g (ファイルをスタックとして読み込み・統計・Photomerge: new books of pictures)
+    automate_merge.cpp
     ${GENKO_SPELL_RESOURCES}
     "${CMAKE_CURRENT_BINARY_DIR}/studio_data.cpp"
   PUBLIC_DEPS genko_formats genko_render_ops genko_render genko_studio genko_storage genko_core Qt6::Core

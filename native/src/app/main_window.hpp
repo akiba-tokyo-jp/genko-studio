@@ -2145,6 +2145,26 @@ private:
     void build_artboard_actions();
     void build_artboard_menus(QMenu* layers, QMenu* pages);
     void build_artboard_view_menus(QMenu* view);
+    // --- PC5 I-g (SPEC.md AUTO-01「自動整列・自動合成」「Photomerge」「ファイルをスタックとして読み込み・統計」):
+    // main_window_photomerge.cpp — 編集 → レイヤーを自動整列…・レイヤーを自動合成… (auto_align_layers, auto_blend_layers through
+    // send_filter: on a worker, 中止 leaves the book as it was, one Undo), ファイル → 自動処理 → Photomerge…, スクリプト →
+    // ファイルをスタックとして読み込み…・統計… (service::automate's new books, made on a worker with 中止, each a book in a tab of its
+    // own) -----------------------------------------------------------------------------------------------------------------
+public:
+    void auto_align_dialog();
+    void auto_blend_dialog();
+    void photomerge_dialog();
+    void load_stack_dialog();
+    void statistics_dialog();
+    // The paint layers chosen in the layers panel on the page shown (two or more: the commands are on), the bottom first.
+    std::vector<std::string> chosen_paint_layers() const;
+
+private:
+    void build_photomerge_actions();
+    void build_photomerge_menus();
+    void build_auto_align_items(QMenu* edit);
+    // A new book made on a worker (`make`), the window waiting with its progress and 中止; the book in a tab of its own.
+    void made_book(const QString& title, const std::function<formats::Opened()>& make);
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go
