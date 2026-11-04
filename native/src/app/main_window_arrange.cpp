@@ -61,7 +61,11 @@ const std::vector<Arrangement>& arrangements() {
 // holds for a moment (環境設定's Alt / Ctrl tools) held again at a press, if a click elsewhere let it go.
 class Latch : public QObject {
 public:
-    explicit Latch(MainWindow* window) : QObject(window), window_(window) {}
+    explicit Latch(MainWindow* window) : QObject(window), window_(window) {
+        // (~MainWindow lets it go first by this name: the canvas's own going sends it events while the window is no longer a
+        // MainWindow — V3 ASan, UBSan's "member call … not … of type 'MainWindow'")
+        setObjectName(QStringLiteral("genko_modifier_latch"));
+    }
 
     bool eventFilter(QObject* watched, QEvent* event) override {
         const Qt::KeyboardModifiers kept = window_->latched_keys();

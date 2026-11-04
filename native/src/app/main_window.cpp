@@ -483,11 +483,20 @@ void MainWindow::back_up(const std::shared_ptr<Session>& session) {
 }
 
 MainWindow::~MainWindow() {
+    // (PC5 H-c's 修飾キー watch on the canvas reads this window: gone before the window's parts, which send it events as they
+    // go — QWidget's own destructor, when this is no longer a MainWindow)
+    delete findChild<QObject*>(QStringLiteral("genko_modifier_latch"), Qt::FindDirectChildrenOnly);
+    // (a line still being typed on a canvas: let go, not set — a window closed set it already, as its closeEvent asks, and
+    // one going without being closed would get it as its QWidget's destructor takes the focus away, no longer a MainWindow)
+    for (InlineEditor* typing : findChildren<InlineEditor*>()) typing->finish(false);
     cancel_smart_select();  // (PC3 B3: a smart selection still worked out on its worker stops — not waited for to its end)
     stop_filter_work();     // (PC4 節 D: a heavy filter's preview on its worker stops, as the smart selection)
     disconnect_session();
     documents::remove(this);
     render::clear_placed_caches();  // (a window closed: its books' placed pictures are let go)
+    // (after this body the window is no longer a MainWindow while QWidget's destructor closes and hides it and its parts go:
+    // their signals reach it no more — V3 ASan: a window going without being closed, its panels' visibilityChanged)
+    for (QObject* part : findChildren<QObject*>()) part->disconnect(this);
 }
 
 void MainWindow::showEvent(QShowEvent* event) {

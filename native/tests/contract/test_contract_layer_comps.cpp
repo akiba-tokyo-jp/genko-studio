@@ -321,7 +321,8 @@ private slots:
                                                     {"move", Json::array({5 * 25.4 / 200, 0})}});
         const QString moved_psd = path(QStringLiteral("moved.psd"));
         (void)formats::export_page_psd(moved, moved.page(0), fs::path(moved_psd.toStdString()), 200);
-        for (const Json& l : comps_view(moved_psd)["layers"])
+        const Json moved_view = comps_view(moved_psd);  // (kept: a range-for over a temporary's member dangles — V3 ASan)
+        for (const Json& l : moved_view["layers"])
             if (l["name"] == Json("pic")) QCOMPARE(l["cmls"]["layerSettings"][0]["Ofst"]["Hrzn"], Json(-15));
         // a layer they name deleted: the comps kept, 1065 written
         const core::Document deleted = run(back, Json{{"op", "delete_layer"}, {"page", 1}, {"id", titled(back, "pic")->id}});
@@ -334,12 +335,14 @@ private slots:
         const QString gone_psd = path(QStringLiteral("gone.psd"));
         (void)formats::export_page_psd(gone, gone.page(0), fs::path(gone_psd.toStdString()), 200);
         QVERIFY(!blocks_of(gone_psd).contains("1065"));
-        for (const Json& l : comps_view(gone_psd)["layers"]) QVERIFY2(l["cmls"].is_null(), l.dump().c_str());
+        const Json gone_view = comps_view(gone_psd);
+        for (const Json& l : gone_view["layers"]) QVERIFY2(l["cmls"].is_null(), l.dump().c_str());
         // (a page without comps: no 1065, no lyid written for its layers — as before)
         const QString plain = path(QStringLiteral("plain.psd"));
         (void)formats::export_page_psd(book(), book().page(0), fs::path(plain.toStdString()), 200);
         QVERIFY(!blocks_of(plain).contains("1065"));
-        for (const Json& l : comps_view(plain)["layers"]) QVERIFY2(l["lyid"].is_null() && l["cmls"].is_null(), l.dump().c_str());
+        const Json plain_view = comps_view(plain);
+        for (const Json& l : plain_view["layers"]) QVERIFY2(l["lyid"].is_null() && l["cmls"].is_null(), l.dump().c_str());
     }
 
     // (the review's P2-3, the coordinator's decision) A page with comps writes its hidden layers too, hidden — Photoshop's
@@ -365,7 +368,8 @@ private slots:
         plain = run(plain, Json{{"op", "set_layer"}, {"page", 1}, {"id", "pic"}, {"visible", false}});
         const QString plain_file = path(QStringLiteral("hidden-plain.psd"));
         (void)formats::export_page_psd(plain, plain.page(0), fs::path(plain_file.toStdString()), 200);
-        for (const Json& l : comps_view(plain_file)["layers"]) QVERIFY2(l["name"] != Json("pic"), l.dump().c_str());
+        const Json plain_file_view = comps_view(plain_file);
+        for (const Json& l : plain_file_view["layers"]) QVERIFY2(l["name"] != Json("pic"), l.dump().c_str());
     }
 
     // (the review's P3-6) A comp's long name: the file's name cut to at most 240 bytes by whole characters.

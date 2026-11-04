@@ -2042,7 +2042,10 @@ private slots:
         print.mode = "print";
         const render::Image drawn = render::render_page(s.doc().page(0), 100, print, &s.doc()).image;
         QVERIFY(render::render_cache_bytes() > 0);
-        const QImage shown = c->renderer().compose(c->renderer().shown_dpi());
+        // (the level shown now — the base one, when the finer is not yet drawn: under ASan it was not, V3 — compared after with
+        // itself: the same picture at the same level)
+        const int shown_dpi = c->renderer().shown_dpi();
+        const QImage shown = c->renderer().compose(shown_dpi);
         done = s.window->purge(QStringLiteral("all"));
         QVERIFY2(done.items.contains(QStringLiteral("描いた絵の覚え")), qPrintable(done.items.join(QStringLiteral(","))));
         QCOMPARE(render::render_cache_bytes(), std::int64_t{0});
@@ -2051,7 +2054,7 @@ private slots:
         c->renderer().set_screen_dots(!c->renderer().screen_dots());  // (every tile drawn again — twice)
         c->renderer().set_screen_dots(!c->renderer().screen_dots());
         QVERIFY(c->wait_rendered(60000));
-        QVERIFY(c->renderer().compose(c->renderer().shown_dpi()) == shown);
+        QVERIFY(c->renderer().compose(shown_dpi) == shown);
         // the book as it was: nothing of it changed by any of them
         QCOMPARE(gui_test::ink_strokes(s.doc(), 0), std::size_t{1});
     }

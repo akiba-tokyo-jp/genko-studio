@@ -662,9 +662,14 @@ ColorPicture on_precise(const core::Document& doc, const core::Page& page, const
         } else if (core::smart::plugin_filter(f.kind)) {  // (PC5 J-f: the page's values through the plugin)
             out = plugin_precise(doc, page, f, now, space);
         } else {
+            // (a 16-bit page's filter gets the values a 16-bit raster holds: the picture laid through the smart object's matrix
+            // with a cubic kernel reaches past 0..1 at a hard edge — V3, test_smart_filters —, which the raster would refuse)
+            const bool u16 = precision == "u16";
             const core::Layer raster = raster_layer(core::encode_color_pixels(static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), precision, [&](std::size_t i) {
                 const auto& p = now.pixels[i];
-                return std::array<double, 4>{space.encode(0, p[0]), space.encode(1, p[1]), space.encode(2, p[2]), p[3]};
+                std::array<double, 4> v{space.encode(0, p[0]), space.encode(1, p[1]), space.encode(2, p[2]), p[3]};
+                if (u16) for (unsigned c = 0; c < 3; ++c) v[c] = std::clamp(v[c], 0.0, 1.0);
+                return v;
             }));
             const std::string bytes = precise_step(doc, work, raster, f);
             const core::ColorRasterView view(bytes);

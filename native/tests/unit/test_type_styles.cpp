@@ -22,6 +22,7 @@
 #include "core/type_styles.hpp"
 #include "core/type_text.hpp"
 #include "render/ops_registry.hpp"
+#include "regex_timing.hpp"
 #include "testsupport.hpp"
 
 using namespace genko;
@@ -545,36 +546,62 @@ private slots:
 
     // P2-4: a text of 2000 paragraphs and 100 000 letters: a style applied, its look asked, the styles listed — quickly
     void longTexts() {
-        std::string text;
-        for (int p = 0; p < 2000; ++p) text += std::string(49, 'a') + "\n";
-        core::StoryLine record;
-        record.text = text;
-        record.style = Json::object();
-        Json styles = Json{{"paragraph", Json::array({Json{{"id", "ps-1"}, {"name", "P"}, {"para", Json{{"space_after_mm", 1}}}}})},
-                           {"character", Json::array({Json{{"id", "cs-1"}, {"name", "C"}, {"char", Json{{"underline", true}}}}})}};
-        QElapsedTimer clock;
-        clock.start();
-        ts::restyle(record, &styles, ts::Kind::Paragraph, std::nullopt, std::optional<std::string>("ps-1"), false);
-        ts::restyle(record, &styles, ts::Kind::Paragraph, ts::Range{50, 120}, std::optional<std::string>(), false);  // (two paragraphs Basic: laid on each)
-        ts::restyle(record, &styles, ts::Kind::Character, ts::Range{10, 90000}, std::optional<std::string>("cs-1"), false);
-        const qint64 applied = clock.elapsed();
-        clock.restart();
-        const Json now = ts::current(record, &styles, std::nullopt);
-        (void)ts::current(record, &styles, ts::Range{40, 60});
-        const qint64 asked = clock.elapsed();
-        QCOMPARE(now["paragraph_mixed"], Json(true));
-        QVERIFY2(applied < 3000, qPrintable(QString::number(applied)));
-        QVERIFY2(asked < 1000, qPrintable(QString::number(asked)));
-        // through the book: list (a question) of a text so long
-        core::Document doc = plain_book();
-        doc.type_styles = core::type_text::check_type_styles(styles);
-        core::StoryLine& line = doc.add_line(core::Num(1), text, "", std::nullopt, "", core::Num(5), core::Num(5), core::Num(40), core::Num(40), "none");
-        line.id = "long";
-        line.native_type = record.native_type;
-        clock.restart();
-        const core::ApplyResult listed = run_ops(doc, Json::array({Json{{"op", "type_style"}, {"kind", "paragraph"}, {"action", "list"}, {"line", "long"}}}));
-        QVERIFY2(clock.elapsed() < 2000, qPrintable(QString::number(clock.elapsed())));
-        QCOMPARE(listed.results[0]["current"]["paragraph_mixed"], Json(true));
+        // (a text of `paragraphs` paragraphs of 50 letters: a style applied three ways, its look asked, the styles listed
+        // through the book — the times each took)
+        struct Times {
+            qint64 applied = 0, asked = 0, listed = 0;
+        };
+        const Json styles = Json{{"paragraph", Json::array({Json{{"id", "ps-1"}, {"name", "P"}, {"para", Json{{"space_after_mm", 1}}}}})},
+                                 {"character", Json::array({Json{{"id", "cs-1"}, {"name", "C"}, {"char", Json{{"underline", true}}}}})}};
+        const auto timed = [&styles](int paragraphs) {
+            Times t;
+            std::string text;
+            for (int p = 0; p < paragraphs; ++p) text += std::string(49, 'a') + "\n";
+            const std::int64_t letters = static_cast<std::int64_t>(paragraphs) * 50;
+            core::StoryLine record;
+            record.text = text;
+            record.style = Json::object();
+            Json own = styles;
+            QElapsedTimer clock;
+            clock.start();
+            ts::restyle(record, &own, ts::Kind::Paragraph, std::nullopt, std::optional<std::string>("ps-1"), false);
+            ts::restyle(record, &own, ts::Kind::Paragraph, ts::Range{50, 120}, std::optional<std::string>(), false);  // (two paragraphs Basic: laid on each)
+            ts::restyle(record, &own, ts::Kind::Character, ts::Range{10, letters * 9 / 10}, std::optional<std::string>("cs-1"), false);
+            t.applied = clock.elapsed();
+            clock.restart();
+            const Json now = ts::current(record, &own, std::nullopt);
+            (void)ts::current(record, &own, ts::Range{40, 60});
+            t.asked = clock.elapsed();
+            [&] { QCOMPARE(now["paragraph_mixed"], Json(true)); }();
+            // through the book: list (a question) of a text so long
+            core::Document doc = plain_book();
+            doc.type_styles = core::type_text::check_type_styles(own);
+            core::StoryLine& line = doc.add_line(core::Num(1), text, "", std::nullopt, "", core::Num(5), core::Num(5), core::Num(40), core::Num(40), "none");
+            line.id = "long";
+            line.native_type = record.native_type;
+            clock.restart();
+            const core::ApplyResult listed = run_ops(doc, Json::array({Json{{"op", "type_style"}, {"kind", "paragraph"}, {"action", "list"}, {"line", "long"}}}));
+            t.listed = clock.elapsed();
+            [&] { QCOMPARE(listed.results[0]["current"]["paragraph_mixed"], Json(true)); }();
+            return t;
+        };
+        const Times long_one = timed(2000);  // (100 000 letters)
+        if (QTest::currentTestFailed()) return;
+        // (3 s, 1 s and 2 s: a release build's bounds. A sanitizer's build at -O0 runs all of it many times slower — the V3
+        // ASan run took 3.3 s to apply, as long to ask —: there what P2-4 is about is checked, the time growing as the text
+        // does, not as its square — a tenth of the text timed the same way, in this build, now, the long one at most 30 times
+        // its time (the square's would be 100) — as the regex tests' bounds are: support/regex_timing.hpp)
+        if constexpr (genko::test::kOptimizedBuild) {
+            QVERIFY2(long_one.applied < 3000, qPrintable(QString::number(long_one.applied)));
+            QVERIFY2(long_one.asked < 1000, qPrintable(QString::number(long_one.asked)));
+            QVERIFY2(long_one.listed < 2000, qPrintable(QString::number(long_one.listed)));
+        } else {
+            const Times tenth = timed(200);
+            const auto within = [](qint64 long_ms, qint64 tenth_ms) { return long_ms < std::max<qint64>(250, 30 * tenth_ms); };
+            QVERIFY2(within(long_one.applied, tenth.applied), qPrintable(QStringLiteral("applied in %1 ms, a tenth in %2 ms").arg(long_one.applied).arg(tenth.applied)));
+            QVERIFY2(within(long_one.asked, tenth.asked), qPrintable(QStringLiteral("asked in %1 ms, a tenth in %2 ms").arg(long_one.asked).arg(tenth.asked)));
+            QVERIFY2(within(long_one.listed, tenth.listed), qPrintable(QStringLiteral("listed in %1 ms, a tenth in %2 ms").arg(long_one.listed).arg(tenth.listed)));
+        }
     }
 
     // P2-5: a colour changed sets nothing anew: Basic Paragraph's colour on a book of 500 lines, quickly

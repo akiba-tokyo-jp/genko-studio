@@ -37,6 +37,12 @@ namespace genko::app {
 
 class MainWindow;
 
+// The bundled lettering fonts (lettering::bundled_fonts) added to the application, once, as it starts (theme::apply): the
+// font list shows each in its face. Added later — as the list was first filled — Qt's font cache is cleared under the
+// fonts already in use, and the engines loaded for them after it are kept past the application (V3 ASan: fontconfig's
+// fallback patterns of test_gui_layout's windows reported as leaks).
+void register_bundled_fonts();
+
 // A font list that says when its popup is about to open (the computer's fonts are read then, once).
 class FontBox : public QComboBox {
     Q_OBJECT

@@ -24,6 +24,7 @@
 #include "app/config.hpp"
 #include "app/glass.hpp"
 #include "app/icons.hpp"
+#include "app/type_panels.hpp"
 
 namespace genko::app::theme {
 
@@ -353,6 +354,7 @@ void apply(QApplication* app) {
     // the screen's letters: the bundled family (the same on every computer) or the computer's own
     if (!system_font()) system_font() = QApplication::font();
     const QString bundled = font_choice() == QLatin1String("genko") ? ui_family() : QString();
+    register_bundled_fonts();  // (before any window lays out its letters: type_panels.hpp)
     const QString target = bundled.isEmpty() ? system_font()->family() : bundled;
     if (QApplication::font().family() != target) {
         QFont font = QApplication::font();

@@ -289,7 +289,8 @@ private slots:
         doc = set(doc, Json{{"range", Json::array({1, 4})}, {"underline", true}});
         QCOMPARE((*record_of(doc).native_type)["runs"].size(), std::size_t{3});
         doc = set(doc, Json{{"rgb", Json::array({0, 0, 0})}});
-        for (const Json& run : (*record_of(doc).native_type)["runs"]) QVERIFY(!run.value("char", Json::object()).contains("rgb"));
+        const core::StoryLine black = record_of(doc);  // (kept: a range-for over a temporary's member dangles — V3 ASan)
+        for (const Json& run : (*black.native_type)["runs"]) QVERIFY(!run.value("char", Json::object()).contains("rgb"));
         QVERIFY(!ink_mm(doc, true).has_value());
         // paragraphs: a range's paragraphs
         core::Document two = latin("one\ntwo\nthree");

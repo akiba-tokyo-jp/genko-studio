@@ -622,7 +622,8 @@ private slots:
         core::Document none = book();
         add_pixels(none, "p", "P", 40, 40, 160, 160, {0, 0, 0});
         (void)formats::export_page_psd(none, none.page(0), fs::path(plain.toStdString()), 100);
-        for (const Json& l : psd_view(plain)["layers"]) QVERIFY2(l["lspf"].is_null() && l["brst"].is_null(), l.dump().c_str());
+        const Json plain_view = psd_view(plain);  // (kept: a range-for over a temporary's member dangles — V3 ASan)
+        for (const Json& l : plain_view["layers"]) QVERIFY2(l["lspf"].is_null() && l["brst"].is_null(), l.dump().c_str());
     }
 
     // .pcraft: the locks (all, artboard) and the excluded channels written and read back.

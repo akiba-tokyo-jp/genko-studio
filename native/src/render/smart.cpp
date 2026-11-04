@@ -1853,7 +1853,10 @@ std::pair<std::string, std::string> filtered_upto(const core::Document& doc, con
         return {".colorrgba", core::encode_color_pixels(static_cast<std::uint32_t>(made.size.width), static_cast<std::uint32_t>(made.size.height),
                                                         page.rgb->depth == 32 ? "f32" : "u16", [&](std::size_t i) {
                                                             const auto& p = made.pixels[i];
-                                                            return std::array<double, 4>{space.encode(0, p[0]), space.encode(1, p[1]), space.encode(2, p[2]), p[3]};
+                                                            std::array<double, 4> v{space.encode(0, p[0]), space.encode(1, p[1]), space.encode(2, p[2]), p[3]};
+                                                            // (kept at 16 bits: the values such a raster holds — as on_precise hands them)
+                                                            if (page.rgb->depth != 32) for (unsigned c = 0; c < 3; ++c) v[c] = std::clamp(v[c], 0.0, 1.0);
+                                                            return v;
                                                         })};
     }
     std::optional<Image> base = picture_8bit(ctx, bare, whole);

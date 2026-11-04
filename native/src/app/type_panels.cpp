@@ -1286,4 +1286,8 @@ void GlyphsPanel::insert(const QString& glyph) {
     refresh();
 }
 
+void register_bundled_fonts() {
+    for (const auto& [key, label] : lettering::bundled_fonts()) (void)qt_family(key == QLatin1String("antique") ? QStringLiteral("mincho") : key);
+}
+
 }  // namespace genko::app

@@ -474,7 +474,8 @@ private slots:
         QVERIFY(QFile::copy(data("invert.wasm"), elsewhere + "/myinvert.wasm"));
         QCOMPARE(plugins::install(genko::core::path_from_utf8((elsewhere + "/myinvert.wasm").toStdString())), std::string("myinvert"));
         QVERIFY(QFileInfo::exists(folder_ + "/myinvert.wasm"));
-        const auto* added = listed(plugins::listed(), "myinvert");
+        const auto now = plugins::listed();  // (kept: listed() points into it — V3 ASan)
+        const auto* added = listed(now, "myinvert");
         QVERIFY(added != nullptr && added->wasm && !added->chosen);  // (installed: not chosen)
         QVERIFY(QFile::copy(data("invert.wasm"), elsewhere + "/a:b.wasm"));  // (review P3-10: ':' names a drive on Windows)
         QCOMPARE(refusal([&] { (void)plugins::install(genko::core::path_from_utf8((elsewhere + "/a:b.wasm").toStdString())); }),

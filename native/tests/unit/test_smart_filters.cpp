@@ -309,7 +309,8 @@ private slots:
             if (why.empty() || why.find(words) == std::string::npos) qWarning("%s: %s", more.dump().c_str(), why.c_str());
             return !why.empty() && why.find(words) != std::string::npos;
         };
-        QVERIFY(says(Json{{"kind", "plugin:sepia"}}, "a filter plugin cannot be a smart filter"));
+        // (PC5 J-f, plugin-filters@1 — the user's decision 14 —: a plugin's filter can be one, of a plugin chosen here; none here)
+        QVERIFY(says(Json{{"kind", "plugin:sepia"}}, "no plugin sepia"));
         QVERIFY(says(Json{{"kind", "match_color"}, {"source_stats", Json::object()}}, "cannot be a smart filter"));
         QVERIFY(says(Json{{"kind", "nope"}}, "cannot be a smart filter"));
         QVERIFY(says(Json{{"kind", "color_lookup"}, {"data", "TITLE \"x\"\nLUT_3D_SIZE 2\n"}}, "one of the looks"));
@@ -378,7 +379,15 @@ private slots:
         };
         QVERIFY(with([](Json& s) { s["filters"][0]["strength"] = 1; }).find("is not known to this build") != std::string::npos);
         QVERIFY(with([](Json& s) { s["filters"][0]["kind"] = "match_color"; }).find("cannot be a smart filter") != std::string::npos);
-        QVERIFY(with([](Json& s) { s["filters"][0]["kind"] = "plugin:sepia"; }).find("cannot be a smart filter") != std::string::npos);
+        // (PC5 J-f, plugin-filters@1: a plugin's smart filter is read as it is — its settings the plugin's —, a picture kept only
+        // by one and only as {asset, suffix})
+        QVERIFY(with([](Json& s) { s["filters"][0]["kind"] = "plugin:sepia"; }).empty());
+        QVERIFY(with([](Json& s) { s["filters"][0]["kept"] = Json{{"asset", "sha256:" + std::string(64, 'a')}, {"suffix", ".png"}}; })
+                    .find("only a plugin's smart filter keeps a picture") != std::string::npos);
+        QVERIFY(with([](Json& s) {
+                    s["filters"][0]["kind"] = "plugin:sepia";
+                    s["filters"][0]["kept"] = Json{{"asset", 1}};
+                }).find("kept picture is {asset, suffix}") != std::string::npos);
         QVERIFY(with([](Json& s) { s["filters"][0]["blend"] = "nope"; }).find("is not a blend mode") != std::string::npos);
         QVERIFY(with([](Json& s) { s["filters"][0]["opacity"] = 2; }).find("opacity is 0 to 1") != std::string::npos);
         QVERIFY(with([](Json& s) { s["filters"][0]["visible"] = "yes"; }).find("true or false") != std::string::npos);

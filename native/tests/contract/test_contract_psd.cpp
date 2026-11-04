@@ -1384,7 +1384,8 @@ private slots:
         namespace pp = genko::render::psd_production;
         const std::string source = keep_file("keep.psd");
         std::string kept;
-        for (const auto& r : psd::File::read(source).resources())
+        const psd::File source_file = psd::File::read(source);  // (kept: its resources are views into it — V3 ASan)
+        for (const auto& r : source_file.resources())
             if (r.id == 1050) kept = std::string(r.data);
         QVERIFY(!kept.empty());
         QDir().mkpath(path(QStringLiteral("before-jb")));
@@ -1414,7 +1415,8 @@ private slots:
         const auto resource_1050 = [&](const core::Document& book, const char* name) {
             const QString at = path(QStringLiteral("before-jb/%1.psd").arg(QString::fromLatin1(name)));
             (void)genko::formats::export_page_psd(book, book.page(0), genko::storage::path_from_utf8(at.toStdString()), 150);
-            for (const auto& r : psd::File::read(genko::test::read_bytes(at)).resources())
+            const psd::File written = psd::File::read(genko::test::read_bytes(at));
+            for (const auto& r : written.resources())
                 if (r.id == 1050) return std::string(r.data);
             return std::string();
         };
