@@ -38,7 +38,7 @@ Image tinted(const Image& image, const std::array<int, 3>& rgb, double strength)
 Image crop_to(const Image& image, const core::Page& page, std::string_view area, int dpi) {
     if (area == "paper") return image;
     const core::Rect r = area == "bleed" ? page.bleed_rect_mm() : page.trim_rect_mm();
-    const int x0 = mm_to_px(r.x.value(), dpi), y0 = mm_to_px(r.y.value(), dpi);
+    const int x0 = edge_px(r.x.value(), dpi), y0 = edge_px(r.y.value(), dpi);
     return image.crop(Box{x0, y0, x0 + mm_to_px(r.width.value(), dpi), y0 + mm_to_px(r.height.value(), dpi)});
 }
 

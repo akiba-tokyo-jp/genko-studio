@@ -24,8 +24,8 @@ render::Box area_box(const core::Page& page, std::string_view area, int dpi, int
     if (area == "paper") return {0, 0, w, h};
     if (area != "bleed" && area != "trim") throw core::Error("value", "the area is paper, bleed or trim");
     const core::Rect r = area == "bleed" ? page.bleed_rect_mm() : page.trim_rect_mm();
-    const int x0 = std::clamp(render::mm_to_px(r.x.value(), dpi), 0, std::max(0, w - 1));
-    const int y0 = std::clamp(render::mm_to_px(r.y.value(), dpi), 0, std::max(0, h - 1));
+    const int x0 = std::clamp(render::edge_px(r.x.value(), dpi), 0, std::max(0, w - 1));
+    const int y0 = std::clamp(render::edge_px(r.y.value(), dpi), 0, std::max(0, h - 1));
     const int x1 = std::clamp(x0 + render::mm_to_px(r.width.value(), dpi), x0 + 1, std::max(x0 + 1, w));
     const int y1 = std::clamp(y0 + render::mm_to_px(r.height.value(), dpi), y0 + 1, std::max(y0 + 1, h));
     return {x0, y0, x1, y1};

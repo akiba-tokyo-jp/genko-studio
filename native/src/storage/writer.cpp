@@ -33,6 +33,7 @@
 #include "core/artboards.hpp"
 #include "core/type_text.hpp"
 #include "core/variables.hpp"
+#include "core/image_assets.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/reader.hpp"
 
@@ -645,6 +646,9 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     core::validate_artboards(doc);
     std::erase(features, std::string(core::kArtboardsFeature));
     if (core::uses_artboards(doc)) features.emplace_back(core::kArtboardsFeature);
+    // PC5 I-f: image-assets@1 (生成 → 画像アセット), named while it is on
+    std::erase(features, std::string(core::kImageAssetsFeature));
+    if (doc.image_assets) features.emplace_back(core::kImageAssetsFeature);
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 
@@ -682,6 +686,7 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     if (doc.global_light) out["global_light"] = core::global_light_json(*doc.global_light);  // (layer-styles@1, PC4 E6)
     if (doc.type_styles) out["type_styles"] = *doc.type_styles;  // (type@1, PC5 G-0)
     if (doc.variables) out["variables"] = *doc.variables;  // (variables@1, PC5 I-d)
+    if (doc.image_assets) out["generator"] = core::image_assets_json();  // (image-assets@1, PC5 I-f)
     out["spec"] = spec_to_json(doc.spec);
     if (Json color = color_json(store, doc.color, doc.rgb); !color.is_null() || doc.text_gamma) {
         // (the book's text_gamma, last, under its colour model: a default RGB one written for it)

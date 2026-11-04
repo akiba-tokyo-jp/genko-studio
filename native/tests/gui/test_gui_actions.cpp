@@ -460,9 +460,11 @@ private slots:
         // and PC5 I-g's 5 (SPEC AUTO-01「自動整列・自動合成」「Photomerge」) — 編集 → レイヤーを自動整列…・レイヤーを自動合成…
         // (act_auto_align_layers, act_auto_blend_layers), ファイル → 自動処理 → Photomerge… (act_photomerge), スクリプト →
         // ファイルをスタックとして読み込み…・統計… (act_load_files_into_stack, act_statistics) — test_gui_automate.
-        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8, I-c's 10: アートボード… など — test_gui_artboards —, I-h's 2 and I-g's 5)
-        // (and PC5 H-e's 3: 環境設定 ▸ ヒストリーログ…・仮想記憶ディスク…・拡張コントロール… — 794＋3)
-        QCOMPARE(w->actions_by_name().size(), std::size_t{797});
+        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8, I-c's 10: アートボード… など — test_gui_artboards —, I-h's 2, I-g's 5 and I-f's 3)
+        // and PC5 I-f's 3 — ファイル → 1 部プリント (act_print_one_copy), 生成 → 画像アセット (act_image_assets), 自動処理 → コンタクトシート II…
+        // (act_contact_sheet) — test_gui_output and test_gui_automate.
+        // (and PC5 H-e's 3: 環境設定 ▸ ヒストリーログ…・仮想記憶ディスク…・拡張コントロール… — 797＋3)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{800});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -532,12 +534,15 @@ private slots:
                  (QStringList{QStringLiteral("新規…"), QStringLiteral("開く…"), QStringLiteral("指定形式で開く…"), QStringLiteral("最近使用したファイルを開く ▸"),
                               QStringLiteral("|"), QStringLiteral("AI と作る…"), QStringLiteral("|"), QStringLiteral("閉じる"), QStringLiteral("すべてを閉じる"),
                               QStringLiteral("その他を閉じる"), QStringLiteral("|"), QStringLiteral("保存"), QStringLiteral("別名で保存…"), QStringLiteral("コピーを保存…"),
-                              QStringLiteral("復帰"), QStringLiteral("|"), QStringLiteral("書き出し ▸"), QStringLiteral("|"), QStringLiteral("埋め込みを配置…"),
+                              QStringLiteral("復帰"), QStringLiteral("|"), QStringLiteral("書き出し ▸"),
+                              QStringLiteral("生成 ▸"),  // (PC5 I-f: 生成 ▸ 画像アセット)
+                              QStringLiteral("|"), QStringLiteral("埋め込みを配置…"),
                               QStringLiteral("リンクを配置…"), QStringLiteral("パッケージ…"), QStringLiteral("|"), QStringLiteral("画像を読み込む…"),
                               QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"), QStringLiteral("ほかの原稿のページを取り込む…"),
                               QStringLiteral("PSD をレイヤーのまま読み込む…"), QStringLiteral("読み込み ▸"),  // (PC5 I-d・J-c: 読み込み ▸ 変数データセット…・注釈…)
                               QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|"),
-                              QStringLiteral("プリント…"), QStringLiteral("|"), QStringLiteral("タイムラプスを記録する"), QStringLiteral("タイムラプスを書き出す…"),
+                              QStringLiteral("プリント…"), QStringLiteral("1 部プリント"),  // (PC5 I-f)
+                              QStringLiteral("|"), QStringLiteral("タイムラプスを記録する"), QStringLiteral("タイムラプスを書き出す…"),
                               QStringLiteral("|"), QStringLiteral("自動処理 ▸"), QStringLiteral("スクリプト ▸"), QStringLiteral("オートアクション ▸"),
                               QStringLiteral("|"), QStringLiteral("終了")}));  // (PC5 H-0: 環境設定 in 編集)
         // (PC5 I-0, SPEC.md AUTO-01: 自動処理 ▸ is a frame, shown once a group puts a command in it — PC5 I-e's)
@@ -545,7 +550,7 @@ private slots:
         QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate"))->menuAction()->isVisible());
         QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_automate"))),
                  (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"),
-                              QStringLiteral("写真の切り抜きと角度補正"), QStringLiteral("|"),  // (PC5 I-h)
+                              QStringLiteral("写真の切り抜きと角度補正"), QStringLiteral("コンタクトシート II…"), QStringLiteral("|"),  // (PC5 I-h, I-f)
                               QStringLiteral("条件付きモード変更…"), QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…"),
                               QStringLiteral("|"), QStringLiteral("HDR Pro に統合…"),  // (PC5 I-h)
                               QStringLiteral("Photomerge…")}));  // (PC5 I-g)

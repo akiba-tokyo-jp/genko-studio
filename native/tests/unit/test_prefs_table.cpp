@@ -75,7 +75,9 @@ const std::vector<std::string>& app_keys() {
         "ui/history_states", "ui/scratch_folder", "ui/touch_gestures", "ui/pinch_zoom", "ui/trackpad_rotate",
         "prefs/writer",
         // (PC5 J-d2: データポイントを選択)
-        "measure/points"};
+        "measure/points",
+        // (PC5 I-f: プリント…'s last settings and printer — 1 部プリント's)
+        "print/last", "print/printer"};
     return all;
 }
 
