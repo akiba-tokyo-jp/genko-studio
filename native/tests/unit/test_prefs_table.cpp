@@ -361,6 +361,13 @@ private slots:
                                          [section](const prefs::Pref& p) { return p.path.rfind(std::string(section) + ".", 0) == 0; });
             QVERIFY2(any, section);
         }
+        // (プラグイン: a pane with no row — whether plugins run, which may and the additional folder are the person's, in the
+        // plugins' own window (plugin_settings.json), never a preference genko prefs or an agent reads or writes: J-f's
+        // review P3-6)
+        QVERIFY(std::none_of(prefs::table().begin(), prefs::table().end(), [](const prefs::Pref& p) {
+            return p.path.rfind("plugIns.", 0) == 0 || p.key.rfind("plugin", 0) == 0 || p.key.rfind("plugins/", 0) == 0;
+        }));
+        QVERIFY(prefs::by_path("plugIns.enabled") == nullptr && prefs::by_path("plugIns.extraFolder") == nullptr);
         const auto fallback = [](const char* path) { return prefs::decode(*prefs::by_path(path), QVariant()); };
         QCOMPARE(fallback("general.colorPicker"), Json("system"));
         QCOMPARE(fallback("general.imageInterpolation"), Json("bilinear"));

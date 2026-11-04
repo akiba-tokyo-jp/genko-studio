@@ -51,6 +51,7 @@
 #include "app/tiles.hpp"
 #include "core/paths.hpp"
 #include "core/prefs_table.hpp"
+#include "render/plugins.hpp"
 
 namespace genko::app {
 
@@ -339,7 +340,8 @@ void arrange_pages(PreferencesDialog* dialog) {
     }
     for (const auto& [widget, title] : ordered) {
         const auto pane = pane_of.find(title);
-        if (pane == pane_of.end()) {
+        // (プラグイン: what the plugins may do is put back in their own window, never by this button — J-f's review P3-6)
+        if (pane == pane_of.end() || pane->second == QLatin1String("plugIns")) {
             tabs->addTab(widget, title);
             continue;
         }
@@ -376,6 +378,33 @@ std::vector<std::string> pane_paths(const QString& pane) {
         return out;
     }
     return {id};
+}
+
+QWidget* plugins_page(MainWindow* window) {
+    auto* status = new QLabel;
+    status->setObjectName(QStringLiteral("prefs_plugins_status"));
+    status->setWordWrap(true);
+    const auto show = [status] {
+        const render::plugins::Settings now = render::plugins::settings();
+        const QString folder = now.use_extra_folder && !now.extra_folder.empty() ? QString::fromStdString(now.extra_folder) : QStringLiteral("使わない");
+        status->setText(QStringLiteral("プラグイン: %1　動かしてよいもの: %2 個\n追加のプラグインフォルダー: %3")
+                            .arg(now.enabled ? QStringLiteral("使う") : QStringLiteral("使わない"))
+                            .arg(now.chosen.is_object() ? static_cast<int>(now.chosen.size()) : 0)
+                            .arg(folder));
+    };
+    show();
+    auto* open = new QPushButton(QStringLiteral("プラグイン…"));
+    open->setObjectName(QStringLiteral("prefs_plugins_window"));
+    open->setToolTip(QStringLiteral("プラグインを使うか、追加のプラグインフォルダー、どれを動かしてよいかを決める窓を開きます"));
+    QObject::connect(open, &QPushButton::clicked, status, [window, show] {
+        if (QAction* plugins = window != nullptr ? window->action(QStringLiteral("act_plugin_settings")) : nullptr) plugins->trigger();
+        show();
+    });
+    auto* hint = new QLabel(QStringLiteral("プラグインを使うか・どれを動かしてよいか（同意）は、プラグイン… の窓でだけ決めます。"
+                                           "genko prefs や AI（MCP）からは読めず、変えられません。"));
+    hint->setWordWrap(true);
+    theme::role(hint, "hint");
+    return form_page({{QStringLiteral("プラグイン"), {{QString(), status}, {QString(), open}, {QString(), hint}}}});
 }
 
 QLabel* scratch_note() {

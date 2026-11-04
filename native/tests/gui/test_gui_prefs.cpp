@@ -43,10 +43,13 @@
 #include "app/session_file.hpp"
 #include "app/settings_watch.hpp"
 #include "core/commands_list.hpp"
+#include "core/config_dir.hpp"
+#include "core/paths.hpp"
 #include "core/json.hpp"
 #include "core/prefs_table.hpp"
 #include "core/session_file.hpp"
 #include "formats/file_xmp.hpp"
+#include "render/plugins.hpp"
 #include "gui_support.hpp"
 #include "testsupport.hpp"
 
@@ -176,18 +179,60 @@ private slots:
         QStringList titles;
         for (int i = 0; i < dialog.tabs->count(); ++i) titles << dialog.tabs->tabText(i);
         QCOMPARE(titles, (QStringList{"一般", "インターフェイス", "ワークスペース", "ツール", "ヒストリーログ", "ファイル管理", "書き出し", "パフォーマンス",
-                                      "仮想記憶ディスク", "カーソル", "透明部分・色域", "単位・定規", "ガイド・グリッド・スライス", "テキスト", "拡張コントロール",
+                                      "仮想記憶ディスク", "カーソル", "透明部分・色域", "単位・定規", "ガイド・グリッド・スライス", "プラグイン", "テキスト", "拡張コントロール",
                                       "Camera Raw", "ペンタブレット", "長い時間の作業"}));
         QCOMPARE(dialog.pages_list->count(), dialog.tabs->count());
         for (const app::preferences::Pane& pane : app::preferences::panes()) {
             if (pane.page.isEmpty()) continue;
             dialog.show_pane(pane.id);
             QCOMPARE(dialog.tabs->tabText(dialog.tabs->currentIndex()), pane.page);
-            QVERIFY2(dialog.findChild<QPushButton*>(QStringLiteral("prefs_reset_") + pane.id) != nullptr, qPrintable(pane.id));
+            // (プラグイン: what the plugins may do is put back in their own window, never by this button — J-f's review P3-6)
+            const bool resettable = pane.id != QLatin1String("plugIns");
+            QVERIFY2((dialog.findChild<QPushButton*>(QStringLiteral("prefs_reset_") + pane.id) != nullptr) == resettable, qPrintable(pane.id));
         }
         // (仮想記憶ディスク says where the caches are and that no pixel goes there)
         auto* note = dialog.findChild<QLabel*>(QStringLiteral("prefs_scratch_note"));
         QVERIFY(note != nullptr && note->text().contains(QStringLiteral("画素")));
+    }
+
+    // J-f's review P3-6: プラグイン is a page of the dialog — what the plugins' settings are now, and プラグイン… opening their
+    // own window (the person's consent and choice are there alone); 決める and すべての環境設定をリセット… leave the plugins'
+    // file as it was.
+    void thePluginsPageOpensTheirWindow() {
+        Desk d;
+        const fs::path file = core::config_dir() / "plugin_settings.json";
+        render::plugins::Settings mine;
+        mine.enabled = true;
+        mine.chosen = Json{{"one", Json{{"sha256", "00"}}}, {"two", Json{{"sha256", "11"}}}};
+        mine.use_extra_folder = true;
+        mine.extra_folder = core::path_to_utf8(gui_test::path_of(d.tmp.path() + "/extra"));
+        render::plugins::save_settings(mine);
+        const QByteArray was = read_text(QString::fromStdString(core::path_to_utf8(file))).toUtf8();
+        {
+            app::preferences::PreferencesDialog dialog(d.window.get());
+            dialog.show_pane(QStringLiteral("plugIns"));
+            QCOMPARE(dialog.tabs->tabText(dialog.tabs->currentIndex()), QStringLiteral("プラグイン"));
+            auto* status = dialog.findChild<QLabel*>(QStringLiteral("prefs_plugins_status"));
+            QVERIFY(status != nullptr);
+            QVERIFY2(status->text().contains(QStringLiteral("使う")) && status->text().contains(QStringLiteral("2 個")) &&
+                         status->text().contains(QString::fromStdString(mine.extra_folder)),
+                     qPrintable(status->text()));
+            auto* open = dialog.findChild<QPushButton*>(QStringLiteral("prefs_plugins_window"));
+            QVERIFY(open != nullptr);
+            d.answers.asked.clear();
+            open->click();
+            QVERIFY2(d.answers.asked.contains(QStringLiteral("genko::app::PluginsDialog")), qPrintable(d.answers.asked.join(QStringLiteral(" | "))));
+            dialog.save();
+            QCOMPARE(dialog.result(), int(QDialog::Accepted));
+        }
+        QCOMPARE(read_text(QString::fromStdString(core::path_to_utf8(file))).toUtf8(), was);
+        {  // (すべての環境設定をリセット…: the preferences, not the plugins' consent)
+            d.answers.responder->question = [](const QString&, const QString&) { return true; };
+            app::preferences::PreferencesDialog dialog(d.window.get());
+            dialog.reset_everything();
+        }
+        QCOMPARE(read_text(QString::fromStdString(core::path_to_utf8(file))).toUtf8(), was);
+        std::filesystem::remove(file);
     }
 
     // 決める writes the fields (the window follows); この面を初期設定に戻す puts one pane back; すべての環境設定をリセット… every

@@ -197,6 +197,71 @@ private slots:
         QCOMPARE(got["workspace.commandBar"], Json("取り消し"));
     }
 
+    // J-f's review P3-6: the plugins' settings (plugin_settings.json: whether they run, which may — the person's consent —,
+    // the additional folder) are the person's, in the plugins' own window: genko prefs and MCP's inspect prefs neither show
+    // them nor write them, and a reset leaves the file as it was.
+    void pluginsAreThePersonsWindowsOnly() {
+        QTemporaryDir dir;
+        const QString config = dir.path() + QStringLiteral("/config");
+        const QString root = dir.path() + QStringLiteral("/root");
+        QVERIFY(QDir().mkpath(config) && QDir().mkpath(root + QStringLiteral("/a.genko")));
+        const std::string extra = (dir.path() + QStringLiteral("/my-extra-plugins")).toStdString();
+        const Json chosen{{"secret_plugin", Json{{"sha256", "0123abcd"}}}};
+        const QString file = config + QStringLiteral("/plugin_settings.json");
+        {
+            QFile f(file);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(QByteArray::fromStdString(
+                Json{{"enabled", true}, {"python", ""}, {"chosen", chosen}, {"use_extra_folder", true}, {"extra_folder", extra}}.dump(1)));
+        }
+        const QByteArray was = bytes_of(file);
+        const auto unsaid = [&extra](const Json& said) {
+            const std::string text = said.dump();
+            return text.find("my-extra-plugins") == std::string::npos && text.find("secret_plugin") == std::string::npos &&
+                   text.find(extra) == std::string::npos;
+        };
+        // get: everything and the pane's section — nothing of the plugins
+        Said said = cli(config, {"prefs", "get"});
+        QVERIFY2(said.code == 0, qPrintable(said.described));
+        QVERIFY2(unsaid(said.json), said.json.dump().c_str());
+        for (const auto& [path, value] : said.json["values"].items()) QVERIFY2(path.rfind("plugIns.", 0) != 0, path.c_str());
+        said = cli(config, {"prefs", "get", "plugIns"});
+        QVERIFY2(said.code == 0, qPrintable(said.described));
+        QCOMPARE(said.json["values"], Json::object());
+        for (const char* path : {"plugIns.enabled", "plugIns.chosen", "plugIns.useExtraFolder", "plugIns.extraFolder", "plugIns.extra_folder"}) {
+            QCOMPARE(cli(config, {"prefs", "get", QString::fromUtf8(path)}).json["error"], Json("unknown_pref"));
+        }
+        // set: refused by name, all or none (the other value not written either)
+        for (const auto& [path, value] : std::vector<std::pair<const char*, const char*>>{{"plugIns.enabled", "false"},
+                                                                                       {"plugIns.chosen", "{}"},
+                                                                                       {"plugIns.use_extra_folder", "false"},
+                                                                                       {"plugIns.extraFolder", "\"/tmp\""}}) {
+            said = cli(config, {"prefs", "set", QString::fromUtf8(path), QString::fromUtf8(value)});
+            QVERIFY2(said.code == 1 && said.json["error"] == Json("unknown_pref"), path);
+        }
+        said = cli(config, {"prefs", "set", "--values", R"({"interface.theme": "dark", "plugIns": {"enabled": false, "chosen": {}}})"});
+        QCOMPARE(said.json["error"], Json("unknown_pref"));
+        QCOMPARE(cli(config, {"prefs", "get", "interface.theme"}).json["values"]["interface.theme"], Json("system"));
+        // reset: everything, the section — the plugins' file as it was
+        QCOMPARE(cli(config, {"prefs", "reset", "plugIns"}).code, 0);
+        QCOMPARE(cli(config, {"prefs", "reset"}).code, 0);
+        QCOMPARE(bytes_of(file), was);
+        // MCP: inspect prefs — nothing of the plugins, the plugins' paths unknown
+        {
+            Mcp mcp(root, config);
+            Json got = mcp.call("inspect", Json{{"project", "a.genko"}, {"target", "prefs"}});
+            QVERIFY(got["prefs"].is_object() && !got["prefs"].empty());
+            QVERIFY2(unsaid(got), got.dump().c_str());
+            got = mcp.call("inspect", Json{{"project", "a.genko"}, {"target", "prefs"}, {"op", "plugIns"}});
+            QCOMPARE(got["prefs"], Json::object());
+            for (const char* path : {"plugIns.enabled", "plugIns.chosen", "plugIns.extraFolder"}) {
+                got = mcp.call("inspect", Json{{"project", "a.genko"}, {"target", "prefs"}, {"op", path}});
+                QVERIFY2(got.dump().find("unknown_pref") != std::string::npos && unsaid(got), got.dump().c_str());
+            }
+        }
+        QCOMPARE(bytes_of(file), was);
+    }
+
     // The settings of an earlier version stay as they were: reading changes nothing in the file; setting and resetting
     // change only what they name (the person's keys, the tools' memories, the workspaces kept, keys this build does not know).
     void anEarlierVersionsSettingsAreKept() {

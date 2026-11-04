@@ -1094,6 +1094,8 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("やめる"));
     connect(buttons, &QDialogButtonBox::accepted, this, &PreferencesDialog::save);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    // プラグイン (PC5 J-f, its review P3-6: the pane a page of the dialog as the others are; the plugins' own window from it)
+    tabs->addTab(plugins_page(window_), QStringLiteral("プラグイン"));
     arrange_pages(this);  // (PC5 H-e: the pages in Photoshop's order of its panes, each with この面を初期設定に戻す)
     // the pages chosen from a list at the side (as the main window's panels are chosen), not tabs across the top
     tabs->tabBar()->hide();

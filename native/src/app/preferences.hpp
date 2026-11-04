@@ -166,6 +166,11 @@ void arrange_pages(PreferencesDialog* dialog);
 std::vector<std::string> pane_paths(const QString& pane);
 // 仮想記憶ディスク's words: where the app keeps its caches and the room left there.
 QLabel* scratch_note();
+// プラグイン (PC5 J-f's pane in H-e's way, J-f's review P3-6): what is set for the plugins now — on or off, how many are
+// chosen, the additional folder — and プラグイン… (act_plugin_settings: the plugins' own window, where they are turned on,
+// chosen and agreed to — a person's alone: never a row of core/prefs_table, so neither genko prefs nor the AI reads or
+// writes them). Without この面を初期設定に戻す.
+QWidget* plugins_page(MainWindow* window);
 // What the preferences H-e added do in an open window (apply_all calls it): the canvas's wheel, zoom, flick, transform
 // values, overscroll, gestures and border; the tooltips; the channels in colour; ヒストリー数; the screen's memory; the
 // history log and session.json followed.
