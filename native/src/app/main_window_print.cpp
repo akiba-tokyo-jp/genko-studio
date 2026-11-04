@@ -68,10 +68,11 @@ void MainWindow::build_print_menus(QMenu* file) {
     });
     // 1 部プリント after プリント…
     file->insertAction(after(action(QStringLiteral("act_print"))), action(QStringLiteral("act_print_one_copy")));
-    // 自動処理 ▸: コンタクトシート II… in its own part before 条件付きモード変更… (Photoshop's; I-h's 写真の切り抜きと角度補正 joins it)
-    if (QAction* mode = action(QStringLiteral("act_conditional_mode_change")); automate_menu_ != nullptr && mode != nullptr) {
-        automate_menu_->insertAction(mode, action(QStringLiteral("act_contact_sheet")));
-        automate_menu_->insertSeparator(mode);
+    // 自動処理 ▸: コンタクトシート II… right after 写真の切り抜きと角度補正, in its part (Photoshop's; PC5 I-h's)
+    if (automate_menu_ != nullptr) {
+        const QList<QAction*> automate = automate_menu_->actions();
+        const qsizetype at = automate.indexOf(action(QStringLiteral("act_crop_straighten_photos")));
+        automate_menu_->insertAction(at >= 0 && at + 1 < automate.size() ? automate[at + 1] : nullptr, action(QStringLiteral("act_contact_sheet")));
     }
 }
 

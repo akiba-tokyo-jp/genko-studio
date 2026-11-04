@@ -455,10 +455,12 @@ private slots:
         // (act_prefs_type: its page made) — test_gui_type_panels; PC5 J-e1's 8 (SPEC PROD-01) — 次・前・最初・最後のフレーム,
         // 作業範囲の開始点へ移動・終了点へ移動, フレームへ移動… (act_next_frame … act_go_to_frame) and ビデオをレンダリング… (act_render_video)
         // — test_gui_anim.
+        // and PC5 I-h's 2 — ファイル → 自動処理 → 写真の切り抜きと角度補正・HDR Pro に統合… (act_crop_straighten_photos,
+        // act_merge_to_hdr_pro) — test_gui_automate.
+        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8, I-c's 10: アートボード… など — test_gui_artboards — I-h's 2 and I-f's 3)
         // and PC5 I-f's 3 — ファイル → 1 部プリント (act_print_one_copy), 生成 → 画像アセット (act_image_assets), 自動処理 → コンタクトシート II…
         // (act_contact_sheet) — test_gui_output and test_gui_automate.
-        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8, I-c's 10: アートボード… など — test_gui_artboards — and I-f's 3)
-        QCOMPARE(w->actions_by_name().size(), std::size_t{790});
+        QCOMPARE(w->actions_by_name().size(), std::size_t{792});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -544,9 +546,9 @@ private slots:
         QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate"))->menuAction()->isVisible());
         QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_automate"))),
                  (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"),
-                              QStringLiteral("コンタクトシート II…"), QStringLiteral("|"),  // (PC5 I-f)
-                              QStringLiteral("条件付きモード変更…"),
-                              QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…")}));
+                              QStringLiteral("写真の切り抜きと角度補正"), QStringLiteral("コンタクトシート II…"), QStringLiteral("|"),  // (PC5 I-h, I-f)
+                              QStringLiteral("条件付きモード変更…"), QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…"),
+                              QStringLiteral("|"), QStringLiteral("HDR Pro に統合…")}));  // (PC5 I-h)
         QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_scripts"))),
                  (QStringList{QStringLiteral("画像プロセッサー…"), QStringLiteral("すべての空のレイヤーを削除"), QStringLiteral("すべてのレイヤー効果を統合"),  // (PC5 I-a)
                               QStringLiteral("すべてのマスクを統合"), QStringLiteral("|"),

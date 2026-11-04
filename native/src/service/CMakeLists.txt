@@ -73,6 +73,8 @@ genko_library(genko_service
     script_events.cpp
     # PC5 G-d (スペルチェック: the English dictionary and the notation table)
     spell.cpp
+    # PC5 I-h (HDR Pro に統合・写真の切り抜きと角度補正: new books of exposures and of a scan's photos)
+    automate_photos.cpp
     ${GENKO_SPELL_RESOURCES}
     "${CMAKE_CURRENT_BINARY_DIR}/studio_data.cpp"
   PUBLIC_DEPS genko_formats genko_render_ops genko_render genko_studio genko_storage genko_core Qt6::Core

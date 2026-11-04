@@ -93,6 +93,7 @@
 #include "render/timelapse.hpp"
 #include "service/actions.hpp"
 #include "service/automate.hpp"
+#include "service/automate_photos.hpp"
 #include "service/spell.hpp"
 #include "core/prefs_table.hpp"
 #include "storage/doctor.hpp"
@@ -3374,6 +3375,173 @@ int droplet_command(const QStringList& args, bool ascii) {
     return print_run(inputs, std::move(result), a.flag("--json"), ascii);
 }
 
+// PC5 I-h (SPEC.md AUTO-01): a new book written at `dest` as `genko new` writes one (never over a book), by the person who
+// runs the command line.
+void write_made_book(const fs::path& dest, const core::Document& doc) {
+    std::error_code ec;
+    if (fs::exists(dest / "project.json", ec)) throw core::Error("exists", "a book is there already: " + storage::path_to_utf8(dest / "project.json"));
+    storage::ProjectLock lock(dest, std::string(core::kLegacyActor));
+    lock.try_acquire();
+    if (fs::exists(dest / "project.json", ec)) throw core::Error("exists", "a book is there already: " + storage::path_to_utf8(dest / "project.json"));
+    storage::SaveRequest request;
+    request.actor = std::string(core::kLegacyActor);
+    request.base_revision = 0;
+    request.ops = Json::array();
+    storage::Saver(lock).save(doc, request);
+    lock.release();
+}
+
+// `genko automate hdr <pictures…> --book <new book> [--mode 32|16|8] [--method local_adaptation|exposure_gamma|
+// highlight_compression|equalize_histogram] [--settings '<JSON>'] [--ev a,b,…] [--no-align] [--remove-ghosts]
+// [--ghost-base N] [--title T] [--recurse] [--json]` (PC5 I-h, file.automate.mergeToHdrPro): the pictures (files, or the
+// pictures of a folder) merged by service/automate_photos into a new book of one page written at --book (32 bits: linear
+// light in linear-srgb; 16, 8: tone mapped), {"ok", "files": [book], "errors": [], "notes", "path", "hdr": report}.
+int hdr_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--book", true},     {"--mode", true},          {"--method", true}, {"--settings", true},
+                                          {"--ev", true},       {"--no-align", false},     {"--remove-ghosts", false},
+                                          {"--ghost-base", true}, {"--title", true},       {"--recurse", false}, {"--json", false}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 1, "inputs", a, true)) return usage("genko automate hdr: " + *error);
+    const std::string where = "genko automate hdr: ";
+    if (!a.value("--book")) return usage(where + "give --book <the new book's folder>");
+    service::automate::HdrSettings settings;
+    const auto mode = int_option(a.value("--mode").value_or(QStringLiteral("32")));
+    if (!mode || (*mode != 32 && *mode != 16 && *mode != 8)) return usage(where + "argument --mode: 32, 16 or 8");
+    settings.depth = static_cast<int>(*mode);
+    if ((a.value("--method") || a.value("--settings")) && settings.depth == 32) return usage(where + "--method and --settings are for --mode 16 or 8");
+    Json tone_settings = Json::object();
+    if (const auto text = a.value("--settings")) {
+        try {
+            tone_settings = core::parse_python_json(text->toStdString());
+        } catch (const core::Error& error) {
+            return usage(where + "argument --settings: not JSON (" + error.what() + ")");
+        }
+    }
+    try {
+        settings.tone = service::automate::hdr_tone(a.value("--method").value_or(QStringLiteral("local_adaptation")).trimmed().toStdString(), tone_settings);
+    } catch (const core::Error& error) {
+        return usage(where + error.what());
+    }
+    if (const auto text = a.value("--ev")) {
+        std::vector<double> ev;
+        for (const QString& part : text->split(QLatin1Char(','), Qt::KeepEmptyParts)) {
+            bool ok = false;
+            const double v = part.trimmed().toDouble(&ok);
+            if (!ok || !std::isfinite(v)) return usage(where + "argument --ev: numbers (one EV a picture) separated by commas");
+            if (std::abs(v) > 30) return usage(where + "argument --ev: each within -30..30");  // (before anything is read: the review's P3-3)
+            ev.push_back(v);
+        }
+        settings.ev = std::move(ev);
+    }
+    settings.align = !a.flag("--no-align");
+    settings.remove_ghosts = a.flag("--remove-ghosts");
+    if (const auto base = a.value("--ghost-base")) {
+        const auto n = int_option(*base);
+        if (!n || *n < 1) return usage(where + "argument --ghost-base: the number of a picture (1, 2, …)");
+        if (!settings.remove_ghosts) return usage(where + "--ghost-base is for --remove-ghosts");
+        settings.ghost_base = static_cast<std::size_t>(*n - 1);
+    }
+    settings.title = a.value("--title").value_or(QStringLiteral("HDR")).trimmed().toStdString();
+    std::vector<fs::path> given;
+    for (const QString& p : a.positional) given.push_back(path_arg(p));
+    service::automate::InputOptions listing;
+    listing.recurse = a.flag("--recurse");
+    const service::automate::Inputs inputs = service::automate::list_inputs(given, listing);
+    if (!inputs.skipped.empty()) {
+        const Json& first = inputs.skipped.front();
+        return fail(first.value("path", std::string()) + ": " + first.value("reason", std::string()), "not_found", ascii, 1);
+    }
+    std::vector<fs::path> files;
+    for (const service::automate::Input& input : inputs.items) {
+        if (input.book) return usage(where + "a book is not an exposure (give pictures): " + core::path_to_utf8(input.path));
+        files.push_back(input.path);
+    }
+    if (settings.ev && settings.ev->size() != files.size()) return usage(where + "argument --ev: one EV value a picture (" + std::to_string(files.size()) + ")");
+    if (settings.ghost_base && *settings.ghost_base >= files.size()) return usage(where + "argument --ghost-base: 1.." + std::to_string(files.size()));
+    const std::string dest_text = pathlib_text(a.value("--book")->toStdString());
+    std::error_code ec;
+    if (fs::exists(storage::path_from_utf8(dest_text) / "project.json", ec)) {
+        return fail("a book is there already: " + storage::path_to_utf8(storage::path_from_utf8(dest_text) / "project.json"), "exists", ascii, 1);
+    }
+    std::vector<render::hdr::Shot> shots = service::automate::hdr_shots(files, formats::OpenOptions{});
+    service::automate::HdrMade made = service::automate::merge_to_hdr(std::move(shots), settings);
+    write_made_book(storage::path_from_utf8(dest_text), made.book.doc);
+    if (!a.flag("--json")) {
+        write_text(dest_text + "\n", stdout);
+        for (const std::string& note : made.book.notes) write_text(note + "\n", stderr);
+        return 0;
+    }
+    Json notes = Json::array();
+    for (const std::string& note : made.book.notes) notes.push_back(note);
+    print_json(Json{{"ok", true}, {"files", Json::array({dest_text})}, {"errors", Json::array()}, {"notes", std::move(notes)}, {"path", dest_text},
+                    {"hdr", std::move(made.report)}},
+               ascii);
+    return 0;
+}
+
+// `genko automate crop-photos <scan> --out <folder> [--page N] [--json]` (PC5 I-h, file.automate.cropAndStraightenPhotos):
+// the photos on the scan (a picture, or a page of a book — N, 1 unless given) each a new book of one page written in the
+// folder as <the scan's name>-<n> (none written when one is there already), {"ok", "files": [books], "errors": [],
+// "notes", "photos": [{"width", "height", "angle", "center"}]}. No photo found: exit 1 (code "not_found").
+int crop_photos_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--out", true}, {"--page", true}, {"--json", false}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 1, "scan", a)) return usage("genko automate crop-photos: " + *error);
+    const std::string where = "genko automate crop-photos: ";
+    if (!a.value("--out")) return usage(where + "give --out <a folder for the books>");
+    // (a book's folder given with a / at its end: its name all the same — the review's P3-6)
+    fs::path scan = path_arg(a.positional[0]).lexically_normal();
+    if (scan.has_parent_path() && scan.filename().empty()) scan = scan.parent_path();
+    std::int64_t page_number = 1;
+    if (const auto p = a.value("--page")) {
+        const auto n = int_option(*p);
+        if (!n || *n < 1) return usage(where + "argument --page: a page's number (1, 2, …)");
+        page_number = *n;
+    }
+    std::error_code ec;
+    core::Document doc;
+    std::size_t at = 0;
+    std::string stem;
+    if (fs::is_directory(scan, ec)) {
+        refuse_legacy(scan);
+        doc = storage::load_document(scan).document;
+        std::optional<std::size_t> found;
+        for (std::size_t i = 0; i < doc.pages.size(); ++i)
+            if (core::py_int(doc.page(i).index.json()) == page_number) found = i;
+        if (!found) return fail("no page " + std::to_string(page_number) + " in the book", "not_found", ascii, 1);
+        at = *found;
+        stem = core::path_to_utf8(scan.filename()) + "-p" + std::to_string(page_number);
+    } else {
+        if (a.value("--page")) return usage(where + "--page is for a book");
+        doc = formats::open_file(storage::read_file(scan), core::path_to_utf8(scan.filename()), formats::OpenOptions{}).doc;
+        stem = core::path_to_utf8(scan.stem());
+    }
+    Json report;
+    std::vector<formats::Opened> books = service::automate::crop_and_straighten(doc, at, formats::OpenOptions{}, &report);
+    if (books.empty()) return fail("no photos found on a uniform background", "not_found", ascii, 1);
+    const fs::path out = path_arg(*a.value("--out"));
+    std::vector<fs::path> dests;
+    for (std::size_t k = 0; k < books.size(); ++k) {
+        dests.push_back(out / core::path_from_utf8(stem + "-" + std::to_string(k + 1)));
+        if (fs::exists(dests.back(), ec)) return fail("there is something there already: " + core::path_to_utf8(dests.back()), "exists", ascii, 1);
+    }
+    fs::create_directories(out, ec);
+    Json files = Json::array(), notes = Json::array();
+    for (std::size_t k = 0; k < books.size(); ++k) {
+        write_made_book(dests[k], books[k].doc);
+        files.push_back(core::path_to_utf8(dests[k]));
+        for (const std::string& note : books[k].notes) notes.push_back(note);
+    }
+    if (!a.flag("--json")) {
+        for (const Json& f : files) write_text(f.get<std::string>() + "\n", stdout);
+        return 0;
+    }
+    Json reply{{"ok", true}, {"files", std::move(files)}, {"errors", Json::array()}, {"notes", std::move(notes)}, {"photos", report.value("photos", Json::array())}};
+    if (report.contains("skipped")) reply["skipped"] = report["skipped"];
+    print_json(reply, ascii);
+    return 0;
+}
+
 // `genko automate <kind> <inputs…>` (PC5 I-e, SPEC.md AUTO-01: ファイル → 自動処理 ▸・スクリプト ▸'s command line): each
 // picture or book as `genko batch` takes them (--out <folder> | --save | --dry-run; --format, --quality, --prefix, --suffix,
 // --recurse, --stop-on-error, --agent, --name, --json) through
@@ -3525,7 +3693,10 @@ int automate_command(const QStringList& all, bool ascii) {
                                                           {QStringLiteral("lens"), "レンズ補正"}};
     // (PC5 I-f: コンタクトシート II — new sheets, not the runner's steps)
     if (!all.isEmpty() && all.front() == QLatin1String("contact-sheet")) return contact_sheet_command(all.mid(1), ascii);
-    if (all.isEmpty() || !kKinds.contains(all.front())) return usage("genko automate: image-processor, fit, mode or lens");
+    // (PC5 I-h: HDR Pro に統合 and 写真の切り抜きと角度補正 make new books — their own arguments)
+    if (!all.isEmpty() && all.front() == QLatin1String("hdr")) return hdr_command(all.mid(1), ascii);
+    if (!all.isEmpty() && all.front() == QLatin1String("crop-photos")) return crop_photos_command(all.mid(1), ascii);
+    if (all.isEmpty() || !kKinds.contains(all.front()))return usage("genko automate: image-processor, fit, mode or lens");
     const QString kind = all.front();
     static constexpr Option kOptions[] = {{"--out", true},     {"--save", false},          {"--dry-run", false},      {"--format", true},
                                           {"--formats", true}, {"--quality", true},        {"--prefix", true},        {"--suffix", true},

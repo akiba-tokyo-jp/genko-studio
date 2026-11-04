@@ -283,6 +283,9 @@ genko_library(genko_render
     # PC5 I-c (アートボード: artboards@1 — the ops, PSD's artb)
     ops_artboards.cpp
     psd_artboards.cpp
+    # PC5 I-h (HDR Pro に統合・写真の切り抜きと角度補正: the exposures merged and tone mapped, the photos on a scan)
+    hdr_merge.cpp
+    scancrop.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

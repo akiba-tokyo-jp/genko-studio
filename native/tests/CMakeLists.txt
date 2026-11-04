@@ -698,6 +698,16 @@ genko_test(test_automate SOURCES unit/test_automate.cpp DEPS genko_test_support 
 genko_test(test_contract_automate SOURCES contract/test_contract_automate.cpp DEPS genko_test_support genko_service
            LABELS contract TIMEOUT 900)
 add_dependencies(test_contract_automate genko)
+# PC5 I-h (SPEC.md AUTO-01: HDR Pro に統合・写真の切り抜きと角度補正): render/hdr_merge (exposures of a known radiance merged
+# back at 8 and 16 bits and of linear light, the estimated exposures, the response, ghosts, MTB, the four tone mappings) and
+# the books service/automate_photos makes of them; render/scancrop (rotated photos on a scan: their number, angles within
+# 0.5°, sizes; each cut out upright at the scan's depth) and the books of a page's photos. `genko automate hdr` (32 bits in
+# linear-srgb, 16 and 8 tone mapped, EXIF's exposures, synthetic RAW files as linear light) and `genko automate crop-photos`.
+genko_test(test_hdr_merge SOURCES unit/test_hdr_merge.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 600)
+genko_test(test_scancrop SOURCES unit/test_scancrop.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 600)
+genko_test(test_contract_hdr SOURCES contract/test_contract_hdr.cpp support/raw_testgen.cpp DEPS genko_test_support genko_service
+           LABELS contract TIMEOUT 900)
+add_dependencies(test_contract_hdr genko)
 # PC5 I-f (SPEC.md AUTO-01「プリント」): `genko print` — the sheet's place (fitted, at its size, scaled, at a position), the
 # marks' shapes and places, the label and the description, Genko's colour management through the printer's profile as
 # Little CMS converts (a CMYK page from its inks), a PDF and a dry run, the book never written, the refusals.
