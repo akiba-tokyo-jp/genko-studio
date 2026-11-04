@@ -64,6 +64,83 @@ int main(int argc, char** argv) {
     }
     std::string line;
     if (!std::getline(std::cin, line)) return 2;
+    // (PC5 J-f: a copy of this program named crash-host… stands in for a genko-plugin-host that falls over)
+    if (std::string(argv[0]).find("crash-host") != std::string::npos) std::abort();
+    // (PC5 J-f, review P2-4: sleep-host… never answers — having started a process of its own that writes grandchild.txt
+    // beside it after 3 seconds unless stopped with it —; flood-host… writes 64 MB without a line break)
+    const auto sleep_long = [](const std::string& beside) {
+#ifndef _WIN32
+        if (::fork() == 0) {
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+            std::ofstream(beside + "/grandchild.txt") << "ran on\n";
+            std::_Exit(0);
+        }
+#endif
+        std::this_thread::sleep_for(std::chrono::seconds(1000));
+    };
+    const std::string self = argv[0];
+    const std::string self_dir = std::filesystem::path(self).parent_path().string();
+    const auto flood = [] {
+        const std::string block(1 << 20, 'x');
+        for (int i = 0; i < 64; ++i) std::fwrite(block.data(), 1, block.size(), stdout);
+        std::fflush(stdout);
+    };
+    if (self.find("sleep-host") != std::string::npos) {
+        sleep_long(self_dir);
+        return 0;
+    }
+    if (self.find("flood-host") != std::string::npos) {
+        flood();
+        return 0;
+    }
+    // (PC5 J-f: protocol 2 — bands of f32 samples, one request after another until stdin ends: invert turns the colour
+    // samples over (1 − v, the alpha kept when bit 8 of format says there is one) and puts the setting "red" (0..1) in the
+    // first channel; fail refuses; crash stops after the first band; environment answers with 1 in every sample when
+    // GENKO_PLUGIN_PROTOCOL is 2 and the secret was not passed on, 0 otherwise)
+    if (number_of(line, "protocol", 0) == 2) {
+        do {
+            const long w = number_of(line, "width", 0), h = number_of(line, "height", 0), ch = number_of(line, "channels", 0);
+            const long format = number_of(line, "format", 0);
+            if (w <= 0 || h <= 0 || ch <= 0 || w > 100000 || h > 100000 || ch > 64) {
+                reply(R"({"ok": false, "error": "not a band"})");
+                return 0;
+            }
+            std::vector<float> samples(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * static_cast<std::size_t>(ch));
+            std::cin.read(reinterpret_cast<char*>(samples.data()), static_cast<std::streamsize>(samples.size() * 4));
+            if (what == "fail") {
+                reply(R"({"ok": false, "error": "no paper today"})");
+                return 0;
+            }
+            if (what == "crash") std::abort();
+            if (what == "sleep") {  // (its grandchild beside the plugin's own folder)
+                const char* home = std::getenv("GENKO_PLUGIN_HOME");
+                sleep_long(home != nullptr ? home : ".");
+                return 0;
+            }
+            if (what == "flood") {
+                flood();
+                return 0;
+            }
+            const bool alpha = (format & 256) != 0;
+            const std::size_t n = static_cast<std::size_t>(ch);
+            const long red = number_of(line, "red", -1);
+            const char* secret = std::getenv("GENKO_TEST_SECRET");
+            const char* protocol = std::getenv("GENKO_PLUGIN_PROTOCOL");
+            const bool good = secret == nullptr && protocol != nullptr && std::string(protocol) == "2";
+            for (std::size_t i = 0; i < samples.size(); ++i) {
+                const std::size_t c = i % n;
+                if (what == "environment") {
+                    samples[i] = good ? 1.0f : 0.0f;
+                } else if (!(alpha && c == n - 1)) {
+                    samples[i] = 1.0f - samples[i];
+                    if (c == 0 && red >= 0) samples[i] = static_cast<float>(red) / 255.0f;
+                }
+            }
+            reply(R"({"ok": true, "width": )" + std::to_string(w) + R"(, "height": )" + std::to_string(h) + R"(, "channels": )" + std::to_string(ch) + "}",
+                  std::string(reinterpret_cast<const char*>(samples.data()), samples.size() * 4));
+        } while (std::getline(std::cin, line));
+        return 0;
+    }
     const long width = number_of(line, "width", 0);
     const long height = number_of(line, "height", 0);
     if (number_of(line, "protocol", 0) != 1 || width <= 0 || height <= 0 || width > 100000 || height > 100000) {

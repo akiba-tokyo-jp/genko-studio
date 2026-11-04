@@ -93,6 +93,7 @@
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/codecs/codecs.hpp"
+#include "render/plugins.hpp"
 #include "render/png.hpp"
 #include "render/timelapse.hpp"
 #include "service/actions.hpp"
@@ -4009,6 +4010,41 @@ int measure_command(const QStringList& args, bool ascii) {
     return 0;
 }
 
+// PC5 J-f (plugin.list, plugin.install, plugin.remove, plugin.reload; SPEC PROD-01, docs/PLUGIN_WASM.md): `genko plugins
+// list | reload | install FILE | remove KEY` — the plugins' folder as the app's 環境設定 → プラグイン… shows it. Never chooses
+// a plugin to run, nor turns plugins on (only the person does, in the app): an installed plugin stays off until chosen.
+int plugins_command(const QStringList& args, bool ascii) {
+    if (args.isEmpty()) return usage("genko plugins: list | reload | install FILE | remove KEY");
+    const QString what = args.front();
+    const auto listing = [&](const std::vector<render::plugins::Listed>& items) {
+        const render::plugins::Settings s = render::plugins::settings();
+        Json plugins = Json::array();
+        for (const render::plugins::Listed& item : items) plugins.push_back(render::plugins::listed_json(item));
+        Json out{{"ok", true}, {"enabled", s.enabled}, {"folder", core::path_to_utf8(render::plugins::folder())}, {"plugins", std::move(plugins)}};
+        if (s.use_extra_folder && !s.extra_folder.empty()) out["extra_folder"] = s.extra_folder;
+        print_json(out, ascii);
+        return 0;
+    };
+    try {
+        if (what == QLatin1String("list") && args.size() == 1) return listing(render::plugins::listed());
+        if (what == QLatin1String("reload") && args.size() == 1) return listing(render::plugins::reload());
+        if (what == QLatin1String("install") && args.size() == 2) {
+            const std::string key = render::plugins::install(path_arg(args[1]));
+            print_json(Json{{"ok", true}, {"key", key}, {"chosen", false}}, ascii);
+            return 0;
+        }
+        if (what == QLatin1String("remove") && args.size() == 2) {
+            const std::string key = args[1].toStdString();
+            render::plugins::remove(key);
+            print_json(Json{{"ok", true}, {"key", key}}, ascii);
+            return 0;
+        }
+    } catch (const core::Error& error) {
+        return fail(error.what(), error.code(), ascii, 1);
+    }
+    return usage("genko plugins: list | reload | install FILE | remove KEY");
+}
+
 }  // namespace
 
 int run_cli(int argc, char** argv) {
@@ -4064,6 +4100,7 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("commands")) return commands_command(args, ascii);  // (PC5 H-e: command.list)
         if (command == QLatin1String("session")) return session_command(args, ascii);    // (PC5 H-e: session.inspect)
         if (command == QLatin1String("measure")) return measure_command(args, ascii);    // (PC5 J-d2: 計測値を記録)
+        if (command == QLatin1String("plugins")) return plugins_command(args, ascii);    // (PC5 J-f: plugin.list・install・remove・reload)
         // (PC5 I-f: `genko print` is the app's — main.cpp sends it there; here when this build has no app, or --ascii came first)
         if (command == QLatin1String("print")) return usage("genko print: give it first (genko print <book> … --ascii), in a build with the app");
         if (command == QLatin1String("studio")) return studio_command(args, ascii);

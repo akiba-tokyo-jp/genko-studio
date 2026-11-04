@@ -81,11 +81,24 @@ void MainWindow::build_anim_actions() {
         std::error_code ec;
         std::filesystem::create_directories(render::plugins::folder(), ec);
         QDesktopServices::openUrl(QUrl::fromLocalFile(QString::fromStdString(core::path_to_utf8(render::plugins::folder()))));
-    }, {}, QStringLiteral("フィルターのプラグイン（.py）を入れるフォルダー"));
-    make("act_plugin_settings", QStringLiteral("プラグインの設定…"), [this] {
+    }, {}, QStringLiteral("フィルターのプラグイン（.wasm・.py・プログラムのフォルダー）を入れるフォルダー"));
+    // (PC5 J-f, edit.preferences.plugIns: Photoshop's 環境設定 ▸ プラグイン… — the old プラグインの設定…, preferences::renamed())
+    make("act_plugin_settings", QStringLiteral("プラグイン…"), [this] {
         PluginsDialog dialog(this);
         if (ask::exec(&dialog) == QDialog::Accepted) follow_filter_menu();  // (フィルター → プラグイン: the plugins chosen)
-    }, {}, QStringLiteral("プラグインを使うか、どの Python で、どれを動かしてよいか"));
+    }, {}, QStringLiteral("プラグインを使うか、追加のプラグインフォルダー、どの Python で、どれを動かしてよいか"));
+    // (PC5 J-f, plugin.install: フィルター → プラグイン ▸ プラグインをインストール… — copied into the plugins' folder, not chosen)
+    make("act_plugin_install", QStringLiteral("プラグインをインストール…"), [this] {
+        const QString path = ask::open_path(this, QStringLiteral("プラグインをインストール"), QStringLiteral("プラグイン (*.wasm *.py)"));
+        if (path.isEmpty()) return;
+        try {
+            const std::string key = render::plugins::install(core::path_from_utf8(path.toStdString()));
+            flash(QStringLiteral("プラグイン「%1」を入れました。動かすには 編集 → 環境設定 → プラグイン… で選びます").arg(QString::fromStdString(key)), 6000);
+        } catch (const std::exception& error) {
+            ask::warning(this, QStringLiteral("プラグインをインストール"), wording::error(QString::fromUtf8(error.what())));
+        }
+    }, {},
+         QStringLiteral("WebAssembly のプラグイン（.wasm）か Python のプラグイン（.py）をプラグインのフォルダーに入れます（動かすには 環境設定 → プラグイン… で選びます）"));
 }
 
 void MainWindow::build_anim_dock() {

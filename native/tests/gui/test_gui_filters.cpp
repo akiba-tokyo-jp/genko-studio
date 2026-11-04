@@ -221,7 +221,9 @@ private slots:
                               QStringLiteral("球面…"), QStringLiteral("極座標…"), QStringLiteral("置き換え…"), QStringLiteral("渦巻き…")}));
         QCOMPARE(words_of(book.menu("menu_filter_manga")),
                  (QStringList{QStringLiteral("線画抽出…"), QStringLiteral("ゴミ取り…"), QStringLiteral("雨…"), QStringLiteral("光彩…"), QStringLiteral("白黒にする…")}));
-        QCOMPARE(words_of(book.menu("menu_filter_plugins")), (QStringList{QStringLiteral("プラグインのフォルダーを開く"), QStringLiteral("プラグインの設定…")}));
+        // (PC5 J-f: プラグインをインストール…; 環境設定 ▸ プラグイン… — the old プラグインの設定…)
+        QCOMPARE(words_of(book.menu("menu_filter_plugins")),
+                 (QStringList{QStringLiteral("プラグインをインストール…"), QStringLiteral("プラグインのフォルダーを開く"), QStringLiteral("プラグイン…")}));
         for (const char* key : {"menu_filter_pixelate", "menu_filter_video", "menu_filter_blur_gallery", "menu_filter_stylize", "menu_filter_distort", "menu_filter_other"})
             QVERIFY2(book.menu(key) != nullptr && !book.menu(key)->isEmpty(), key);
         // the keys (Photoshop's — PC5 H-0's Photoshop key set: フィルターの再実行 Ctrl+Alt+F, レンズ補正… Ctrl+Shift+R; Ctrl+F and none in the Genko set)

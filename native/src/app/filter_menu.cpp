@@ -192,7 +192,8 @@ const std::vector<FilterSubmenu>& filter_menu_table() {
           manga_item("act_filter_manga_rain", "雨…", "rain"), manga_item("act_filter_manga_glow", "光彩…", "glow"),
           manga_item("act_filter_manga_bitonal", "白黒にする…", "bitonal")}},
         // (the filters a person installed and chose to run come first when it opens: their contents are PC5's)
-        {QStringLiteral("plugins"), QStringLiteral("プラグイン"), {existing("act_plugins"), existing("act_plugin_settings")}},
+        // (PC5 J-f: プラグインをインストール… — PhotoCraft's Install Plug-in… —, and 環境設定 ▸ プラグイン… beside the folder)
+        {QStringLiteral("plugins"), QStringLiteral("プラグイン"), {existing("act_plugin_install"), existing("act_plugins"), existing("act_plugin_settings")}},
     };
     return table;
 }
@@ -343,7 +344,7 @@ void MainWindow::follow_filter_menu() {
                 const std::string kind = std::string(render::plugins::kPrefix) + plugin.key;
                 act->setData(QString::fromStdString(kind));
                 act->setProperty("filter_plugin", true);
-                act->setEnabled(paint);
+                act->setEnabled(paint || smart);  // (PC5 J-f: on a smart object, a smart filter)
                 FilterItem item;
                 item.title = act->text() + QStringLiteral("…");
                 item.kind = kind;
@@ -375,8 +376,8 @@ void MainWindow::filter_command(const FilterItem& item) {
         flash(QStringLiteral("「%1」は、ペン・ペイントのレイヤーかスマートオブジェクトを選んでから使います").arg(name), 4000, true);
         return;
     }
-    if (!drawing && smart && (item.op != "filter_raster" || item.kind.starts_with(render::plugins::kPrefix) ||
-                              (!item.python && !core::smart::filter_kind(item.kind)))) {
+    // (PC5 J-f: a plugin's filter is a smart filter too — plugin-filters@1)
+    if (!drawing && smart && (item.op != "filter_raster" || (!item.python && !core::smart::filter_kind(item.kind)))) {
         flash(QStringLiteral("「%1」はスマートオブジェクトには使えません（ラスタライズしてから使います）").arg(name), 5000, true);
         return;
     }

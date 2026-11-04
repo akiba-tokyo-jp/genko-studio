@@ -3608,9 +3608,15 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-f、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/plugins_dialog.cpp",
+        "native/src/app/main_window_edit.cpp",
+        "native/src/app/preferences.cpp",
+        "native/tests/gui/test_gui_anim.cpp",
+        "native/tests/gui/test_gui_actions.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -29705,9 +29711,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-f、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/plugins.cpp",
+        "native/src/app/plugins_dialog.cpp",
+        "native/src/app/main_window_anim.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_wasm_plugins.cpp",
+        "native/tests/gui/test_gui_anim.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -29740,9 +29753,16 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-f、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/plugins.cpp",
+        "native/src/app/plugins_dialog.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/service/studio_service.cpp",
+        "native/tests/unit/test_wasm_plugins.cpp",
+        "native/tests/gui/test_gui_anim.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -29775,9 +29795,15 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-f、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/plugins.cpp",
+        "native/src/app/plugins_dialog.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_wasm_plugins.cpp",
+        "native/tests/gui/test_gui_anim.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -29809,9 +29835,15 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-f、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/plugins.cpp",
+        "native/src/app/plugins_dialog.cpp",
+        "native/src/api/cli.cpp",
+        "native/tests/unit/test_wasm_plugins.cpp",
+        "native/tests/gui/test_gui_anim.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -29843,9 +29875,20 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-f、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/plugins.cpp",
+        "native/src/render/plugin_bands.cpp",
+        "native/src/render/raster_ops.cpp",
+        "native/src/render/smart_filters.cpp",
+        "native/src/render/ops_smart_filters.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/wasm-host/tests/abi.rs",
+        "native/tests/unit/test_wasm_plugins.cpp",
+        "native/tests/contract/test_contract_plugins.cpp",
+        "native/tests/unit/test_native_plugins.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -43783,9 +43826,20 @@
       "label_ja": "WASMフィルタープラグイン互換",
       "kind": "cross_cutting",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-f、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/wasm-host/src/manifest.rs",
+        "native/wasm-host/src/runtime.rs",
+        "native/wasm-host/src/protocol.rs",
+        "native/src/render/plugins.cpp",
+        "native/src/render/plugin_bands.cpp",
+        "native/cmake/GenkoPluginHost.cmake",
+        "docs/PLUGIN_WASM.md",
+        "native/wasm-host/tests/abi.rs",
+        "native/tests/unit/test_wasm_plugins.cpp",
+        "native/tests/contract/test_contract_plugins.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

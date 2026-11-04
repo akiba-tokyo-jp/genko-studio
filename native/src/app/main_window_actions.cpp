@@ -328,7 +328,9 @@ void MainWindow::open_preferences(const QString& pane) {
         open_keyboard_shortcuts();
         return;
     }
-    // (PC5 H-e: この面を初期設定に戻す and すべての環境設定をリセット… open it again at the pane, its values as they are now)
+    // (PC5 H-e: この面を初期設定に戻す and すべての環境設定をリセット… open it again at the pane, its values as they are now. The
+    // プラグイン pane — PC5 J-f — is a page of it too, J-f's review P3-6: what the plugins are allowed to do is the plugins' own
+    // window's, act_plugin_settings, opened from that page)
     for (QString at = pane;;) {
         preferences::PreferencesDialog dialog(this);
         if (!at.isEmpty()) dialog.show_pane(at);  // (PC5 H-0: 編集 → 環境設定 ▸'s panes, キーボードショートカット…)
@@ -739,8 +741,7 @@ void MainWindow::build_menus() {
     layers->addSeparator();
     build_matting_menu(layers);  // (PC3 B3: マッティング ▸, main_window_smart_select.cpp)
     layers->addSeparator();
-    layers->addAction(action("act_plugins"));
-    layers->addAction(action("act_plugin_settings"));
+    // (PC5 J-f: the plugins' folder and settings moved to フィルター → プラグイン ▸ and 編集 → 環境設定 ▸ プラグイン…)
     build_adjust_menus(layers, edit);  // (PC2: レイヤー → 色調補正, app/main_window_adjust.cpp)
     build_smart_menus(layers, file);   // (PC3: スマートオブジェクト and the placing commands, app/main_window_smart.cpp)
     build_type_menu(bar->addMenu(QStringLiteral("書式")));  // (PC5 G-0: Photoshop's 書式 after レイヤー, app/main_window_type.cpp)

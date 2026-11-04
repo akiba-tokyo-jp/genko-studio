@@ -17,7 +17,8 @@ void MainWindow::build_edit_actions() {
     make("act_prefs", QStringLiteral("一般…"), [this] { open_preferences(QStringLiteral("general")); }, {QKeySequence(QStringLiteral("Ctrl+,"))},
          QStringLiteral("画面・道具・ファイル・書き出しなど、このパソコンでの Genko の使い心地を決めます"));
     for (const preferences::Pane& pane : preferences::panes()) {
-        if (pane.id == QLatin1String("general") || pane.page.isEmpty()) continue;
+        // (PC5 J-f: プラグイン… is the plugins' window, act_plugin_settings — main_window_anim)
+        if (pane.id == QLatin1String("general") || pane.id == QLatin1String("plugIns") || pane.page.isEmpty()) continue;
         const QString id = pane.id;
         make(QStringLiteral("act_prefs_%1").arg(id), pane.label, [this, id] { open_preferences(id); });
     }
@@ -45,6 +46,10 @@ void MainWindow::build_edit_menu_tail(QMenu* edit) {
     panes->setObjectName(QStringLiteral("menu_preferences"));
     for (const preferences::Pane& pane : preferences::panes()) {
         if (pane.page.isEmpty()) continue;
+        if (pane.id == QLatin1String("plugIns")) {  // (PC5 J-f)
+            panes->addAction(action(QStringLiteral("act_plugin_settings")));
+            continue;
+        }
         panes->addAction(action(pane.id == QLatin1String("general") ? QStringLiteral("act_prefs") : QStringLiteral("act_prefs_%1").arg(pane.id)));
     }
 }

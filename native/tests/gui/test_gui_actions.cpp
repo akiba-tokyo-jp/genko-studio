@@ -463,8 +463,9 @@ private slots:
         // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8, I-c's 10: アートボード… など — test_gui_artboards —, I-h's 2, I-g's 5 and I-f's 3)
         // and PC5 I-f's 3 — ファイル → 1 部プリント (act_print_one_copy), 生成 → 画像アセット (act_image_assets), 自動処理 → コンタクトシート II…
         // (act_contact_sheet) — test_gui_output and test_gui_automate.
-        // (and PC5 H-e's 3: 環境設定 ▸ ヒストリーログ…・仮想記憶ディスク…・拡張コントロール… — 797＋3)
-        QCOMPARE(w->actions_by_name().size(), std::size_t{800});
+        // (PC5 J-f's 1: フィルター → プラグイン ▸ プラグインをインストール… (act_plugin_install) — test_gui_anim)
+        // (and PC5 H-e's 3: 環境設定 ▸ ヒストリーログ…・仮想記憶ディスク…・拡張コントロール… — 798＋3)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{801});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -1046,6 +1047,7 @@ private slots:
                                            QStringLiteral("書き出し…"), QStringLiteral("パフォーマンス…"), QStringLiteral("仮想記憶ディスク…"),  // (PC5 H-e)
                                            QStringLiteral("カーソル…"), QStringLiteral("透明部分・色域…"),
                                            QStringLiteral("単位・定規…"), QStringLiteral("ガイド・グリッド・スライス…"),  // (PC5 H-b)
+                                           QStringLiteral("プラグイン…"),  // (PC5 J-f: the plugins' own window, act_plugin_settings)
                                            QStringLiteral("テキスト…"),  // (PC5 G-d)
                                            QStringLiteral("拡張コントロール…"),  // (PC5 H-e)
                                            QStringLiteral("Camera Raw…"), QStringLiteral("ペンタブレット…"), QStringLiteral("長い時間の作業…")}));

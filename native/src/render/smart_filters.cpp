@@ -25,7 +25,11 @@
 #include "render/layer_transform.hpp"
 #include "render/ops_adjust.hpp"
 #include "render/ops_filters.hpp"
+#include "render/raster.hpp"
+#include "render/smart.hpp"
+#include "render/page.hpp"
 #include "render/page_internal.hpp"
+#include "render/plugins.hpp"
 #include "render/png.hpp"
 #include "render/resample.hpp"
 #include "render/selection.hpp"
@@ -415,6 +419,7 @@ std::vector<Filter> shown(const core::Layer& layer) {
         if (const Json* blend = core::get(f, "blend"); blend != nullptr && blend->is_string()) one.blend = blend->get<std::string>();
         if (const Json* opacity = core::get(f, "opacity"); opacity != nullptr && opacity->is_number()) one.opacity = std::clamp(opacity->get<double>(), 0.0, 1.0);
         one.in_contents = core::smart::in_contents(f);
+        if (const Json* kept = core::get(f, "kept"); kept != nullptr && kept->is_object()) one.kept = *kept;  // (PC5 J-f)
         out.push_back(std::move(one));
     }
     return out;
@@ -459,6 +464,160 @@ std::vector<Filter> drawn_filters(const core::Document& doc, const core::Page& p
     return out;
 }
 
+// --- PC5 J-f (plugin-filters@1): a plugin's filter, drawn while its plugin runs here, else the picture it kept -------
+
+// The kept picture's bytes and suffix (the book's files, or those an op made since): none when it keeps none.
+core::Bytes kept_bytes(const core::Document& doc, const Filter& f, std::string* suffix) {
+    if (!f.kept) return nullptr;
+    const Json* ref = core::get(*f.kept, "asset");
+    const Json* given = core::get(*f.kept, "suffix");
+    if (ref == nullptr || !ref->is_string() || given == nullptr || !given->is_string()) return nullptr;
+    *suffix = given->get<std::string>();
+    if (const auto held = doc.smart_files.find(ref->get<std::string>()); held != doc.smart_files.end() && held->second) return held->second;
+    if (!doc.asset_dir || !storage::AssetStore::is_ref(ref->get<std::string>()) || !storage::AssetStore::is_suffix(*suffix)) return nullptr;
+    auto bytes = storage::AssetStore(*doc.asset_dir).get_bytes(ref->get<std::string>(), *suffix, storage::kAssetMaxBytes);
+    if (!bytes) return nullptr;
+    return std::make_shared<const std::string>(std::move(*bytes));
+}
+
+std::string plugin_key(const Filter& f) { return f.kind.substr(plugins::kPrefix.size()); }
+
+// Whether the plugin runs here (installed, plugins on, chosen as it is).
+bool plugin_runs(const Filter& f) {
+    try {
+        return plugins::allowed(plugin_key(f));
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+// The kept picture as an 8-bit picture of `size` (a PNG kept on an 8-bit page; a precise one as the screen shows it).
+std::optional<Image> kept_8bit(const core::Document& doc, const Filter& f, Size size) {
+    std::string suffix;
+    const core::Bytes bytes = kept_bytes(doc, f, &suffix);
+    if (!bytes) return std::nullopt;
+    try {
+        if (suffix == ".png") {
+            const Image kept = read_png(*bytes, kPillowOpenLimits).convert("RGBA");
+            return kept.size() == size ? kept : kept.resize(size, Resample::Bilinear);
+        }
+        if (suffix == ".colorrgba") return color_raster_preview(core::ColorRasterView(*bytes), size, Box{0, 0, size.width, size.height});
+    } catch (const std::exception&) {
+    }
+    return std::nullopt;
+}
+
+Image plugin_8bit(const core::Document& doc, const Filter& f, const Image& rgba) {
+    if (plugin_runs(f)) {
+        try {
+            return plugins::run(f.kind, rgba, f.params);
+        } catch (const Cancelled&) {
+            throw;
+        } catch (const std::exception&) {  // (it could not run: the picture it kept, as where it is not)
+        }
+    }
+    if (auto kept = kept_8bit(doc, f, rgba.size())) return std::move(*kept);
+    return rgba;
+}
+
+ColorPicture plugin_precise(const core::Document& doc, const core::Page& page, const Filter& f, const ColorPicture& now, const RgbSpace& space) {
+    if (plugin_runs(f)) {
+        try {
+            if (!plugins::works_in_bands(plugin_key(f))) return color_picture(plugins::run(f.kind, picture_rgba(now, space), f.params), space);
+            ColorPicture out = now;  // (its bands read and written in place: the page's encoded values, its depth)
+            plugin_bands::Picture p;
+            p.width = now.size.width;
+            p.height = now.size.height;
+            p.depth = page.rgb && page.rgb->depth == 32 ? 32 : 16;
+            const std::size_t w = std::size_t(p.width);
+            p.read = [&out, &space, w](int y, int x0, int x1, float* to) {
+                for (int x = x0; x < x1; ++x) {
+                    const auto& px = out.pixels[std::size_t(y) * w + std::size_t(x)];
+                    for (unsigned c = 0; c < 3; ++c) to[std::size_t(x - x0) * 4 + c] = static_cast<float>(space.encode(c, px[c]));
+                    to[std::size_t(x - x0) * 4 + 3] = static_cast<float>(px[3]);
+                }
+            };
+            p.write = [&out, &space, w](int y, int x0, int x1, const float* in) {
+                for (int x = x0; x < x1; ++x) {
+                    auto& px = out.pixels[std::size_t(y) * w + std::size_t(x)];
+                    for (unsigned c = 0; c < 3; ++c) px[c] = space.decode(c, in[std::size_t(x - x0) * 4 + c]);
+                    px[3] = std::clamp<double>(in[std::size_t(x - x0) * 4 + 3], 0.0, 1.0);
+                }
+            };
+            plugins::run_picture(f.kind, p, f.params);
+            return out;
+        } catch (const Cancelled&) {
+            throw;
+        } catch (const std::exception&) {
+        }
+    }
+    std::string suffix;
+    if (const core::Bytes bytes = kept_bytes(doc, f, &suffix)) {
+        try {
+            if (suffix == ".colorrgba") return color_picture(core::ColorRasterView(*bytes), now.size, Box{0, 0, now.size.width, now.size.height}, space);
+            if (suffix == ".png") {
+                const Image kept = read_png(*bytes, kPillowOpenLimits).convert("RGBA");
+                return color_picture(kept.size() == now.size ? kept : kept.resize(now.size, Resample::Bilinear), space);
+            }
+        } catch (const std::exception&) {
+        }
+    }
+    return now;
+}
+
+InkPicture plugin_inks(const core::Document& doc, const core::Page& page, const Filter& f, const InkPicture& now) {
+    const core::PageColor& color = *page.color;
+    const unsigned n = now.channels;
+    if (plugin_runs(f) && plugins::works_in_bands(plugin_key(f))) {
+        try {
+            core::InkPixels px = pixels_of(now, color);
+            plugin_bands::Picture p;  // (read and written in place, a band at a time)
+            p.width = static_cast<int>(px.width);
+            p.height = static_cast<int>(px.height);
+            p.channels = px.channels();
+            p.depth = px.depth;
+            p.alpha = px.has_alpha();
+            p.mode = plugin_bands::mode_of_inks(color, px.space);
+            const unsigned k = p.channels;
+            const std::size_t w = px.width;
+            p.read = [&px, k, w](int y, int x0, int x1, float* to) {
+                for (int x = x0; x < x1; ++x)
+                    for (unsigned c = 0; c < k; ++c) to[std::size_t(x - x0) * k + c] = static_cast<float>(px.value(std::size_t(y) * w + std::size_t(x), c));
+            };
+            p.write = [&px, k, w](int y, int x0, int x1, const float* in) {
+                for (int x = x0; x < x1; ++x)
+                    for (unsigned c = 0; c < k; ++c) px.set(std::size_t(y) * w + std::size_t(x), c, in[std::size_t(x - x0) * k + c]);
+            };
+            plugins::run_picture(f.kind, p, f.params);
+            return picture_of(px, n);
+        } catch (const Cancelled&) {
+            throw;
+        } catch (const std::exception&) {
+        }
+    }
+    std::string suffix;
+    if (const core::Bytes bytes = kept_bytes(doc, f, &suffix); bytes && suffix == core::kInkRasterSuffix) {
+        try {
+            const core::InkPixels inks = core::decode_ink_raster(*bytes);
+            InkPicture kept = picture_of(inks, n);
+            if (kept.size == now.size) return kept;
+            // (another resolution: each pixel the nearest of the kept picture's)
+            InkPicture out{now.size, n, std::vector<double>(now.values.size(), 0.0)};
+            for (int y = 0; y < now.size.height; ++y) {
+                const int sy = std::min(kept.size.height - 1, int((y + 0.5) * kept.size.height / now.size.height));
+                for (int x = 0; x < now.size.width; ++x) {
+                    const int sx = std::min(kept.size.width - 1, int((x + 0.5) * kept.size.width / now.size.width));
+                    std::copy_n(kept.values.data() + (std::size_t(sy) * kept.size.width + sx) * (n + 1), n + 1,
+                                out.values.data() + (std::size_t(y) * now.size.width + x) * (n + 1));
+                }
+            }
+            return out;
+        } catch (const std::exception&) {
+        }
+    }
+    return now;
+}
+
 }  // namespace
 
 Image on_8bit(const core::Document& doc, const core::Page& page, const core::Layer& layer, const Image& rgba_in, int dpi) {
@@ -467,7 +626,9 @@ Image on_8bit(const core::Document& doc, const core::Page& page, const core::Lay
     const core::Page work = stand_in(page, false, false);
     Image now = rgba;
     for (const Filter& f : drawn_filters(doc, page, layer)) {
-        Image out = core::smart::bend_filter(f.kind) ? bend_8bit(page, f, now) : step_8bit(doc, work, f, now);
+        Image out = core::smart::bend_filter(f.kind)     ? bend_8bit(page, f, now)
+                    : core::smart::plugin_filter(f.kind) ? plugin_8bit(doc, f, now)  // (PC5 J-f)
+                                                         : step_8bit(doc, work, f, now);
         now = replaces(f) ? std::move(out) : detail::blend_over(now, out, f.blend, f.opacity, nullptr);
     }
     const auto mask = mask_ref(layer);
@@ -498,6 +659,8 @@ ColorPicture on_precise(const core::Document& doc, const core::Page& page, const
         ColorPicture out;
         if (core::smart::bend_filter(f.kind)) {  // (PC3 A5: the picture bent, in linear light)
             out = bend_precise(page, f, now);
+        } else if (core::smart::plugin_filter(f.kind)) {  // (PC5 J-f: the page's values through the plugin)
+            out = plugin_precise(doc, page, f, now, space);
         } else {
             const core::Layer raster = raster_layer(core::encode_color_pixels(static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), precision, [&](std::size_t i) {
                 const auto& p = now.pixels[i];
@@ -549,6 +712,8 @@ InkPicture on_inks(const core::Document& doc, const core::Page& page, const core
         InkPicture out;
         if (core::smart::bend_filter(f.kind)) {  // (PC3 A5: the picture bent, on the canvas's values)
             out = bend_inks(page, f, now);
+        } else if (core::smart::plugin_filter(f.kind)) {  // (PC5 J-f: the page's inks through the plugin)
+            out = plugin_inks(doc, page, f, now);
         } else {
             const std::string bytes = ink_step(doc, work, pixels_of(now, color), f);
             const core::InkPixels inks = core::decode_ink_raster(bytes);
@@ -586,7 +751,14 @@ InkPicture on_inks(const core::Document& doc, const core::Page& page, const core
 
 core::Json settled(const core::Document& doc, const core::Page& page, std::string_view kind, const core::Json& given) {
     const std::string name(kind);
-    if (name.starts_with("plugin:")) throw core::OpError("a filter plugin cannot be a smart filter (rasterize the smart object to run it)");
+    if (name.starts_with("plugin:")) {  // (PC5 J-f, plugin-filters@1: a plugin chosen to run; its settings as given)
+        const std::string key = name.substr(plugins::kPrefix.size());
+        if (!core::smart::plugin_filter(name) || !plugins::installed(key)) throw core::OpError("no plugin " + key);
+        if (!plugins::allowed(key)) throw core::OpError("plugin " + key + " is not chosen to run (turn plugins on and choose it in the plugin settings)");
+        if (page.color && !plugins::works_in_bands(key))
+            throw core::OpError("a filter plugin of 8 bits cannot be a smart filter on a page of inks (a WebAssembly plugin or a native one of protocol 2 can)");
+        return given.is_object() ? given : Json::object();
+    }
     if (!core::smart::filter_kind(name)) throw core::OpError("the filter " + name + " cannot be a smart filter");
     if (core::smart::bend_filter(name)) return refused([&] { return smart_bends::settled(name, given, page); });  // (PC3 A5)
     const Json params = given.is_object() ? given : Json::object();
@@ -645,6 +817,57 @@ std::size_t push_filter(core::Document& doc, const core::Page& page, core::Layer
     Json& s = *layer.smart;
     if (Json* psd = s.contains("psd") ? &s["psd"] : nullptr; psd != nullptr && psd->is_object()) psd->erase("shown");  // (PC3 A3)
     return index;
+}
+
+namespace {
+thread_local bool g_previewing = false;
+}  // namespace
+
+PreviewScope::PreviewScope() : was_(g_previewing) { g_previewing = true; }
+PreviewScope::~PreviewScope() { g_previewing = was_; }
+
+void keep_plugin_pictures(core::Document& doc, std::size_t at, std::size_t i, std::vector<std::string>* notes, std::size_t from) {
+    const core::Layer& seen = doc.page(at).layers.at(i);
+    if (seen.kind != core::LayerKind::Smart || !seen.smart || !seen.smart->is_object()) return;
+    const Json* now = core::get(*seen.smart, "filters");
+    if (now == nullptr || !now->is_array()) return;
+    Json filters = *now;
+    bool changed = false;
+    for (std::size_t k = 0; k < filters.size(); ++k) {
+        Json& f = filters[k];
+        const std::string kind = core::py_str(core::py_get(f, "kind", Json("")));
+        if (!core::smart::plugin_filter(kind)) continue;
+        const std::string key = kind.substr(plugins::kPrefix.size());
+        bool runs = false;
+        try {
+            runs = plugins::allowed(key);
+        } catch (const std::exception&) {
+        }
+        if (!runs) {
+            if (notes != nullptr) notes->push_back("plugin " + key + " cannot run here: its smart filter shows the picture it made last");
+            continue;
+        }
+        // (one below what changed keeps its picture: what it is laid on has not changed; a preview makes none)
+        if (g_previewing || (k < from && f.contains("kept"))) continue;
+        std::pair<std::string, std::string> made;
+        try {
+            made = smart::filtered_upto(doc, doc.page(at), doc.page(at).layers[i], k, raster::kWorkingDpi);
+        } catch (const Cancelled&) {
+            throw;
+        } catch (const std::exception& error) {
+            if (notes != nullptr) notes->push_back("plugin " + key + "'s smart filter could not be drawn to keep its picture (" + error.what() + ")");
+            continue;
+        }
+        const std::string ref = core::bytes_ref(made.second);
+        doc.smart_files[ref] = std::make_shared<const std::string>(std::move(made.second));
+        const Json kept{{"asset", ref}, {"suffix", made.first}};
+        if (f.contains("kept") && f["kept"] == kept) continue;
+        f["kept"] = kept;
+        changed = true;
+        // (the filter's picture taken from now on: those above it are made again from it)
+        core::smart::put_setting(doc.edit_page(at).layers[i], "filters", filters);
+    }
+    if (changed) core::smart::put_setting(doc.edit_page(at).layers[i], "filters", std::move(filters));
 }
 
 std::string mask_of_area(const core::Page& page, const core::Json& area) {

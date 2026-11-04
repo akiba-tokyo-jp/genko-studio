@@ -35,6 +35,28 @@ struct Filter {
     std::string blend = "normal";
     double opacity = 1.0;
     bool in_contents = false;  // (its places in the smart object's own mm: core::smart::in_contents)
+    // (PC5 J-f, plugin-filters@1) a plugin's filter: the picture it made, shown while the plugin cannot run here
+    std::optional<core::Json> kept;
+};
+
+// PC5 J-f (plugin-filters@1, core::smart::plugin_filter): the pictures the smart object's plugin filters keep made again
+// — each one from the `from`-th filter up (what is below it is laid on what has not changed: kept as it is, unless it has
+// none) whose plugin is chosen to run now: what the filter makes as the drawing makes it (smart::filtered_upto, review
+// P2-2: its filters up to it on the smart object's picture, before the page's finish and screen), kept as the filter's
+// "kept" (a book's file) —, after an op changed its stack. Those whose plugin cannot run keep the picture they had. Notes
+// (English, worded by the service) of each plugin filter that cannot run now. None made while a PreviewScope lives.
+void keep_plugin_pictures(core::Document& doc, std::size_t page, std::size_t layer, std::vector<std::string>* notes = nullptr,
+                          std::size_t from = 0);
+// While it lives, on this thread, the ops are a preview's (the window's): plugin filters keep no pictures.
+class PreviewScope {
+public:
+    PreviewScope();
+    ~PreviewScope();
+    PreviewScope(const PreviewScope&) = delete;
+    PreviewScope& operator=(const PreviewScope&) = delete;
+
+private:
+    bool was_;
 };
 
 // The filters the smart object draws, the bottom one first: its visible ones while they are on (none otherwise), their
