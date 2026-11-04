@@ -228,6 +228,8 @@ genko_library(genko_app
     canvas_notes.cpp
     # PC5 I-e (バッチ・ドロップレット・画像プロセッサー・画像を合わせる・条件付きモード変更・レンズ補正・スクリプトイベントマネージャー・参照)
     automate_dialogs.cpp
+    # PC5 I-h (HDR Pro に統合…'s two windows)
+    hdr_dialog.cpp
     # PC5 J-d1 (計測: the count marks and the ものさしツール on the canvas, the window's commands)
     canvas_measure.cpp
     main_window_measure.cpp
@@ -240,6 +242,13 @@ genko_library(genko_app
     # PC5 I-c (アートボード: レイヤー → 新規 → アートボード, アートボードの設定, 表示, アートボードからファイル・PDF)
     main_window_artboards.cpp
     artboard_dialog.cpp
+    # PC5 I-g (自動整列・自動合成・Photomerge・ファイルをスタックとして読み込み・統計)
+    auto_align_dialog.cpp
+    photomerge_dialog.cpp
+    main_window_photomerge.cpp
+    # PC5 I-f (1 部プリント, 生成 → 画像アセット, コンタクトシート II…; `genko print`)
+    main_window_print.cpp
+    print_cli.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

@@ -82,6 +82,7 @@ v3 から外すもの: なし（未知キーも `extra` として書き戻す）
 | `artboards@1` | PC5 I-c | ページの `artboard`（アートボードの印: 名前・プリセット・背景・PSD のカンバスの上の位置）。SPEC AUTO-01「アートボード」、この文書の「アートボード」 |
 | `blend-channels@1` | PC5 I-a | 層の `"blend_channels"`（混合オプションのチャンネル: ページの色のチャンネルごとの真偽）。SPEC AUTO-01「レイヤーの基本」、この文書の「ロックとチャンネル」 |
 | `plugin-filters@1` | PC5 J-f | スマートオブジェクトの `filters` に人のプラグインのスマートフィルター（`kind` が `plugin:<キー>`）と、その残した絵 `kept` を持つこと。SPEC PROD-01「プラグイン（WebAssembly）」・COMP-04、この文書の「制作の補助」 |
+| `image-assets@1` | PC5 I-f | 本の `"generator": {"image_assets": true}`（生成 → 画像アセット: 人の保存のたびに名前の付いたレイヤーを書き出す）。SPEC AUTO-01「プリント・コンタクトシート・画像アセット」、この文書の「画像アセット」 |
 
 拡張を使う op が初めて適用されたときに `features` へ加える。拡張を使わない原稿は `features: []`。
 
@@ -531,6 +532,13 @@ Photoshop の文字（テキストレイヤー・文字と段落の属性・ス�
 - **ページの `"artboard"`**（ページの鍵の `measure` の後）: `{"name": 文字（1〜1024 バイト）, "preset"?: 文字（256 バイトまで）, "background": "white" | "black" | "transparent" | "custom", "rgb"?: [r, g, b]（0〜255。custom のときだけ、custom なら必ず）, "origin_px"?: [x, y]（−300000〜300000 の整数）}`。持たないページは書かない。大きさはページだけの用紙（`native_spec`、page-spec@1）。
 - 書き手は、どれかのページが `artboard` を持てば `features` に `artboards@1` を加え、無くなれば外す。持たない原稿は今と同じバイトで書く。
 - **読み手の検査**: 知らない鍵・型の違う値・範囲の外の `artboard`、表紙（`cover`）や見開き（`spread_with`）のページの `artboard` を持つ本は、読み取り専用で開く（読めない `artboard` はそのまま書き戻す鍵に残す）。artboards@1 を知らない読み手（PC5 I-c より前の C++ 版）は、未知の拡張として読み取り専用で開く。スマートオブジェクトの中身のページの `artboard` は読まない（そのまま書き戻す）。
+
+## 画像アセット（image-assets@1。SPEC AUTO-01、PC5 I-f）
+
+- **本の `"generator"`**（本の鍵の `variables` の後）: `{"image_assets": true}` だけ。生成 → 画像アセット を入れた本だけが持ち、外すと書かない。持たない原稿は今と同じバイトで書く。
+- 書き手は `generator` を持つ本の `features` に `image-assets@1` を加え、外せば外す。
+- **読み手の検査**: `{"image_assets": false}` は切りとして読む（書き手は書かない）。それ以外の `{"image_assets": true}` でない `generator`（ほかの鍵・真偽でない値）は読み取り専用で開く。image-assets@1 を知らない読み手（PC5 I-f より前の C++ 版）は、未知の拡張として読み取り専用で開く。
+- op `set_image_assets {"on": bool}` は本の op（ページに触れない）。書き出すファイル（`<原稿の名前>-assets/`）は本の外で、本には持たない。
 
 ## 制作の補助（layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1。PROD-01、PC5 節 J）
 

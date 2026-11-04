@@ -126,6 +126,10 @@ struct Developed {
 // The file developed with `raw` (a contents' raw, set_camera_raw's: {"develop", "adjust"?, "camera"?}; read as
 // core::raw::normal_raw reads it — keys left out at their defaults).
 Developed develop(std::string_view bytes, const core::Json& raw, const Options& options = {});
+// (PC5 I-h: HDR Pro に統合's camera RAW input) the RAW stage of `develop` alone with camera-raw@1's defaults (the white
+// balance as shot, the file's baseline exposure, AHD, clip, the file's orientation) — no adjustments, no output curve, no
+// sharpening —: RGB floats of linear light in the built-in linear-srgb (its ICC the picture's; values past 1 kept).
+Developed develop_linear(std::string_view bytes, const Options& options = {});
 
 // Camera Raw's window: the RAW stage of `develop` (no adjustments, no sharpening) at the window's size, as straight RGBA
 // floats in prophoto-compat (its values past 1 kept), and how they show on the screen (prophoto-compat → sRGB's display

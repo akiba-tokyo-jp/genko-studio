@@ -693,9 +693,41 @@ genko_test(test_automate SOURCES unit/test_automate.cpp DEPS genko_test_support 
 # picture never written in place) and of a book (--save: its pages changed, the journal's name).
 # PC5 I-e: `genko automate` (画像プロセッサー of a PNG, a 16-bit TIFF and a CMYK JPEG; 画像を合わせる; 条件付きモード変更; レンズ補正 as
 # the filter one by one) and `genko droplet` (made with its launchers, run by itself and by its launcher; an agent refused).
+# PC5 I-f: `genko automate contact-sheet` (the sheets' layers and captions, 16 bits, grey, flattened, a book's pages), 画像アセット
+# (the naming rule, `genko export --format image-assets`, image-assets@1).
 genko_test(test_contract_automate SOURCES contract/test_contract_automate.cpp DEPS genko_test_support genko_service
            LABELS contract TIMEOUT 900)
 add_dependencies(test_contract_automate genko)
+# PC5 I-h (SPEC.md AUTO-01: HDR Pro に統合・写真の切り抜きと角度補正): render/hdr_merge (exposures of a known radiance merged
+# back at 8 and 16 bits and of linear light, the estimated exposures, the response, ghosts, MTB, the four tone mappings) and
+# the books service/automate_photos makes of them; render/scancrop (rotated photos on a scan: their number, angles within
+# 0.5°, sizes; each cut out upright at the scan's depth) and the books of a page's photos. `genko automate hdr` (32 bits in
+# linear-srgb, 16 and 8 tone mapped, EXIF's exposures, synthetic RAW files as linear light) and `genko automate crop-photos`.
+genko_test(test_hdr_merge SOURCES unit/test_hdr_merge.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 600)
+genko_test(test_scancrop SOURCES unit/test_scancrop.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 600)
+genko_test(test_contract_hdr SOURCES contract/test_contract_hdr.cpp support/raw_testgen.cpp DEPS genko_test_support genko_service
+           LABELS contract TIMEOUT 900)
+add_dependencies(test_contract_hdr genko)
+# PC5 I-g (SPEC.md AUTO-01「自動整列・自動合成」「Photomerge」): the registration (render/features: Harris, steered BRIEF,
+# RANSAC — known maps undone within 0.5 px, the same again) and the panorama (render/panorama, render/pyramid: the layouts, the
+# focal length, the placements, gains, seams, the multi-band blend, focus stacking, the tiled blend as the whole), as PhotoCraft's
+# algo tests them.
+genko_test(test_features SOURCES unit/test_features.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_panorama SOURCES unit/test_panorama.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC5 I-g: auto_align_layers on 8-bit, 16-bit and CMYK pages (reposition within a pixel, the six projections, the refusals:
+# a lock, nothing to match, an agent), auto_blend_layers (the panorama's masks and seamless layer of their kind, focus
+# stacking), Photomerge's new book (its size, layers, masks, the edges filled, the same again, too large refused), ファイルを
+# スタックとして読み込み, 統計's median and `genko automate stack|statistics|photomerge`.
+# (test_contract_align is PC3 C-d's align_layers: this one is named for 自動整列)
+genko_test(test_contract_auto_align SOURCES contract/test_contract_auto_align.cpp DEPS genko_test_support genko_service
+           LABELS contract TIMEOUT 1800)
+add_dependencies(test_contract_auto_align genko)
+# PC5 I-f (SPEC.md AUTO-01「プリント」): `genko print` — the sheet's place (fitted, at its size, scaled, at a position), the
+# marks' shapes and places, the label and the description, Genko's colour management through the printer's profile as
+# Little CMS converts (a CMYK page from its inks), a PDF and a dry run, the book never written, the refusals.
+genko_test(test_contract_print SOURCES contract/test_contract_print.cpp DEPS genko_test_support genko_render_ops genko_formats ${GENKO_LCMS2}
+           LABELS contract TIMEOUT 900)
+add_dependencies(test_contract_print genko)
 # The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
 # across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a
 # warped line's pictures within ARCHITECTURE.md §9: Python's homography comes from numpy's SVD).

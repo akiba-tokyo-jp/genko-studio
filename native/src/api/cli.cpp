@@ -51,6 +51,7 @@
 #include "core/pyops.hpp"
 #include "formats/copy.hpp"
 #include "formats/datasets.hpp"
+#include "formats/image_assets.hpp"
 #include "formats/artboards.hpp"
 #include "render/ops_annotations.hpp"
 #include "render/ops_measure.hpp"
@@ -58,6 +59,9 @@
 #include "render/ops_slices.hpp"
 #include "render/ops_layer_comps.hpp"
 #include "render/ops_variables.hpp"
+#include "render/ops_align.hpp"
+#include "render/panorama.hpp"
+#include "render/stack.hpp"
 #include "formats/export.hpp"
 #include "formats/exporting.hpp"
 #include "formats/open_file.hpp"
@@ -93,6 +97,7 @@
 #include "render/timelapse.hpp"
 #include "service/actions.hpp"
 #include "service/automate.hpp"
+#include "service/automate_photos.hpp"
 #include "service/spell.hpp"
 #include "core/prefs_table.hpp"
 #include "storage/doctor.hpp"
@@ -1242,6 +1247,44 @@ int export_artboards(const Arguments& a, bool ascii) {
     return 0;
 }
 
+// PC5 I-f (file.generate.imageAssets, 生成 → 画像アセット): `genko export <book> <folder> --format image-assets [--json]` — the
+// layers (and groups) named as files ("logo.png", "200% logo@2x.png", "48x48 icons/a.png8", "photo.jpg80%") written into the
+// folder now (formats::image_assets::generate; never into the book or over a file it links); the paths one a line (what could
+// not be written on stderr), or with --json {"ok": no errors, "count", "files", "errors", "notes"}; 1 when one could not be written.
+int export_image_assets(const Arguments& a, bool ascii) {
+    for (const auto& [option, value] : a.values) {
+        if (option != "--format") return usage("genko export: argument " + option + ": not with --format image-assets");
+    }
+    const fs::path src = path_arg(a.positional[0]);
+    const fs::path out = path_arg(a.positional[1]);
+    const auto loaded = storage::load_document(src);
+    const formats::WriteGuard guard = formats::write_guard(loaded.document, src);
+    try {
+        formats::check_target(guard, out);
+    } catch (const core::Error& error) {
+        return usage(std::string("genko export: ") + error.what());
+    }
+    const formats::image_assets::Result result = formats::image_assets::generate(loaded.document, out, guard);
+    core::Json listed = core::Json::array();
+    std::string lines;
+    for (const fs::path& file : result.files) {
+        listed.push_back(core::path_to_utf8(file));
+        lines += core::path_to_utf8(file) + "\n";
+    }
+    if (a.flag("--json")) {
+        core::Json notes = core::Json::array();
+        for (const std::string& note : result.notes) notes.push_back(note);
+        print_json(core::Json{{"ok", result.errors.empty()}, {"count", result.files.size()}, {"files", listed}, {"errors", result.errors}, {"notes", notes}},
+                   ascii);
+    } else {
+        write_text(lines, stdout);
+        std::string said;
+        for (const core::Json& e : result.errors) said += "genko export: " + e.value("asset", std::string()) + ": " + e.value("error", std::string()) + "\n";
+        if (!said.empty()) write_text(said, stderr);
+    }
+    return result.errors.empty() ? 0 : 1;  // (an asset not written: 1, as a contact sheet's — the review's P3-3)
+}
+
 // `genko export <book> <out> [--format F] [options]` (Python's export command, genko/__main__.py): the book written
 // out in one format; the paths of the files one a line, or with --json {"ok": true, "count", "files"}.
 int export_command(const QStringList& args, bool ascii) {
@@ -1279,6 +1322,8 @@ int export_command(const QStringList& args, bool ascii) {
         return usage("genko export: argument --web, --slices, --numbers, --html, --images: only with --format slices");
     // PC5 I-d (file.export.dataSetsAsFiles): the book's data sets, a file each
     if (a.value("--format") == std::optional<QString>(QStringLiteral("datasets"))) return export_datasets(a, ascii);
+    // PC5 I-f (file.generate.imageAssets): the layers named as files, written now
+    if (a.value("--format") == std::optional<QString>(QStringLiteral("image-assets"))) return export_image_assets(a, ascii);
     if (a.value("--dataset-format") || a.value("--datasets") || a.value("--naming"))
         return usage("genko export: argument --dataset-format, --datasets, --naming: only with --format datasets");
     // PC5 I-c (file.export.artboardsToFiles, file.export.artboardsToPdf): the book's artboards, a file each, one PDF or one PSD
@@ -3334,6 +3379,291 @@ int droplet_command(const QStringList& args, bool ascii) {
     return print_run(inputs, std::move(result), a.flag("--json"), ascii);
 }
 
+// PC5 I-h (SPEC.md AUTO-01): a new book written at `dest` as `genko new` writes one (never over a book), by the person who
+// runs the command line.
+void write_made_book(const fs::path& dest, const core::Document& doc) {
+    std::error_code ec;
+    if (fs::exists(dest / "project.json", ec)) throw core::Error("exists", "a book is there already: " + storage::path_to_utf8(dest / "project.json"));
+    storage::ProjectLock lock(dest, std::string(core::kLegacyActor));
+    lock.try_acquire();
+    if (fs::exists(dest / "project.json", ec)) throw core::Error("exists", "a book is there already: " + storage::path_to_utf8(dest / "project.json"));
+    storage::SaveRequest request;
+    request.actor = std::string(core::kLegacyActor);
+    request.base_revision = 0;
+    request.ops = Json::array();
+    storage::Saver(lock).save(doc, request);
+    lock.release();
+}
+
+// `genko automate hdr <pictures…> --book <new book> [--mode 32|16|8] [--method local_adaptation|exposure_gamma|
+// highlight_compression|equalize_histogram] [--settings '<JSON>'] [--ev a,b,…] [--no-align] [--remove-ghosts]
+// [--ghost-base N] [--title T] [--recurse] [--json]` (PC5 I-h, file.automate.mergeToHdrPro): the pictures (files, or the
+// pictures of a folder) merged by service/automate_photos into a new book of one page written at --book (32 bits: linear
+// light in linear-srgb; 16, 8: tone mapped), {"ok", "files": [book], "errors": [], "notes", "path", "hdr": report}.
+int hdr_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--book", true},     {"--mode", true},          {"--method", true}, {"--settings", true},
+                                          {"--ev", true},       {"--no-align", false},     {"--remove-ghosts", false},
+                                          {"--ghost-base", true}, {"--title", true},       {"--recurse", false}, {"--json", false}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 1, "inputs", a, true)) return usage("genko automate hdr: " + *error);
+    const std::string where = "genko automate hdr: ";
+    if (!a.value("--book")) return usage(where + "give --book <the new book's folder>");
+    service::automate::HdrSettings settings;
+    const auto mode = int_option(a.value("--mode").value_or(QStringLiteral("32")));
+    if (!mode || (*mode != 32 && *mode != 16 && *mode != 8)) return usage(where + "argument --mode: 32, 16 or 8");
+    settings.depth = static_cast<int>(*mode);
+    if ((a.value("--method") || a.value("--settings")) && settings.depth == 32) return usage(where + "--method and --settings are for --mode 16 or 8");
+    Json tone_settings = Json::object();
+    if (const auto text = a.value("--settings")) {
+        try {
+            tone_settings = core::parse_python_json(text->toStdString());
+        } catch (const core::Error& error) {
+            return usage(where + "argument --settings: not JSON (" + error.what() + ")");
+        }
+    }
+    try {
+        settings.tone = service::automate::hdr_tone(a.value("--method").value_or(QStringLiteral("local_adaptation")).trimmed().toStdString(), tone_settings);
+    } catch (const core::Error& error) {
+        return usage(where + error.what());
+    }
+    if (const auto text = a.value("--ev")) {
+        std::vector<double> ev;
+        for (const QString& part : text->split(QLatin1Char(','), Qt::KeepEmptyParts)) {
+            bool ok = false;
+            const double v = part.trimmed().toDouble(&ok);
+            if (!ok || !std::isfinite(v)) return usage(where + "argument --ev: numbers (one EV a picture) separated by commas");
+            if (std::abs(v) > 30) return usage(where + "argument --ev: each within -30..30");  // (before anything is read: the review's P3-3)
+            ev.push_back(v);
+        }
+        settings.ev = std::move(ev);
+    }
+    settings.align = !a.flag("--no-align");
+    settings.remove_ghosts = a.flag("--remove-ghosts");
+    if (const auto base = a.value("--ghost-base")) {
+        const auto n = int_option(*base);
+        if (!n || *n < 1) return usage(where + "argument --ghost-base: the number of a picture (1, 2, …)");
+        if (!settings.remove_ghosts) return usage(where + "--ghost-base is for --remove-ghosts");
+        settings.ghost_base = static_cast<std::size_t>(*n - 1);
+    }
+    settings.title = a.value("--title").value_or(QStringLiteral("HDR")).trimmed().toStdString();
+    std::vector<fs::path> given;
+    for (const QString& p : a.positional) given.push_back(path_arg(p));
+    service::automate::InputOptions listing;
+    listing.recurse = a.flag("--recurse");
+    const service::automate::Inputs inputs = service::automate::list_inputs(given, listing);
+    if (!inputs.skipped.empty()) {
+        const Json& first = inputs.skipped.front();
+        return fail(first.value("path", std::string()) + ": " + first.value("reason", std::string()), "not_found", ascii, 1);
+    }
+    std::vector<fs::path> files;
+    for (const service::automate::Input& input : inputs.items) {
+        if (input.book) return usage(where + "a book is not an exposure (give pictures): " + core::path_to_utf8(input.path));
+        files.push_back(input.path);
+    }
+    if (settings.ev && settings.ev->size() != files.size()) return usage(where + "argument --ev: one EV value a picture (" + std::to_string(files.size()) + ")");
+    if (settings.ghost_base && *settings.ghost_base >= files.size()) return usage(where + "argument --ghost-base: 1.." + std::to_string(files.size()));
+    const std::string dest_text = pathlib_text(a.value("--book")->toStdString());
+    std::error_code ec;
+    if (fs::exists(storage::path_from_utf8(dest_text) / "project.json", ec)) {
+        return fail("a book is there already: " + storage::path_to_utf8(storage::path_from_utf8(dest_text) / "project.json"), "exists", ascii, 1);
+    }
+    std::vector<render::hdr::Shot> shots = service::automate::hdr_shots(files, formats::OpenOptions{});
+    service::automate::HdrMade made = service::automate::merge_to_hdr(std::move(shots), settings);
+    write_made_book(storage::path_from_utf8(dest_text), made.book.doc);
+    if (!a.flag("--json")) {
+        write_text(dest_text + "\n", stdout);
+        for (const std::string& note : made.book.notes) write_text(note + "\n", stderr);
+        return 0;
+    }
+    Json notes = Json::array();
+    for (const std::string& note : made.book.notes) notes.push_back(note);
+    print_json(Json{{"ok", true}, {"files", Json::array({dest_text})}, {"errors", Json::array()}, {"notes", std::move(notes)}, {"path", dest_text},
+                    {"hdr", std::move(made.report)}},
+               ascii);
+    return 0;
+}
+
+// `genko automate crop-photos <scan> --out <folder> [--page N] [--json]` (PC5 I-h, file.automate.cropAndStraightenPhotos):
+// the photos on the scan (a picture, or a page of a book — N, 1 unless given) each a new book of one page written in the
+// folder as <the scan's name>-<n> (none written when one is there already), {"ok", "files": [books], "errors": [],
+// "notes", "photos": [{"width", "height", "angle", "center"}]}. No photo found: exit 1 (code "not_found").
+int crop_photos_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--out", true}, {"--page", true}, {"--json", false}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 1, "scan", a)) return usage("genko automate crop-photos: " + *error);
+    const std::string where = "genko automate crop-photos: ";
+    if (!a.value("--out")) return usage(where + "give --out <a folder for the books>");
+    // (a book's folder given with a / at its end: its name all the same — the review's P3-6)
+    fs::path scan = path_arg(a.positional[0]).lexically_normal();
+    if (scan.has_parent_path() && scan.filename().empty()) scan = scan.parent_path();
+    std::int64_t page_number = 1;
+    if (const auto p = a.value("--page")) {
+        const auto n = int_option(*p);
+        if (!n || *n < 1) return usage(where + "argument --page: a page's number (1, 2, …)");
+        page_number = *n;
+    }
+    std::error_code ec;
+    core::Document doc;
+    std::size_t at = 0;
+    std::string stem;
+    if (fs::is_directory(scan, ec)) {
+        refuse_legacy(scan);
+        doc = storage::load_document(scan).document;
+        std::optional<std::size_t> found;
+        for (std::size_t i = 0; i < doc.pages.size(); ++i)
+            if (core::py_int(doc.page(i).index.json()) == page_number) found = i;
+        if (!found) return fail("no page " + std::to_string(page_number) + " in the book", "not_found", ascii, 1);
+        at = *found;
+        stem = core::path_to_utf8(scan.filename()) + "-p" + std::to_string(page_number);
+    } else {
+        if (a.value("--page")) return usage(where + "--page is for a book");
+        doc = formats::open_file(storage::read_file(scan), core::path_to_utf8(scan.filename()), formats::OpenOptions{}).doc;
+        stem = core::path_to_utf8(scan.stem());
+    }
+    Json report;
+    std::vector<formats::Opened> books = service::automate::crop_and_straighten(doc, at, formats::OpenOptions{}, &report);
+    if (books.empty()) return fail("no photos found on a uniform background", "not_found", ascii, 1);
+    const fs::path out = path_arg(*a.value("--out"));
+    std::vector<fs::path> dests;
+    for (std::size_t k = 0; k < books.size(); ++k) {
+        dests.push_back(out / core::path_from_utf8(stem + "-" + std::to_string(k + 1)));
+        if (fs::exists(dests.back(), ec)) return fail("there is something there already: " + core::path_to_utf8(dests.back()), "exists", ascii, 1);
+    }
+    fs::create_directories(out, ec);
+    Json files = Json::array(), notes = Json::array();
+    for (std::size_t k = 0; k < books.size(); ++k) {
+        write_made_book(dests[k], books[k].doc);
+        files.push_back(core::path_to_utf8(dests[k]));
+        for (const std::string& note : books[k].notes) notes.push_back(note);
+    }
+    if (!a.flag("--json")) {
+        for (const Json& f : files) write_text(f.get<std::string>() + "\n", stdout);
+        return 0;
+    }
+    Json reply{{"ok", true}, {"files", std::move(files)}, {"errors", Json::array()}, {"notes", std::move(notes)}, {"photos", report.value("photos", Json::array())}};
+    if (report.contains("skipped")) reply["skipped"] = report["skipped"];
+    print_json(reply, ascii);
+    return 0;
+}
+
+// PC5 I-g (SPEC.md AUTO-01「ファイルをスタックとして読み込み・統計・Photomerge」): `genko automate stack|statistics|photomerge
+// <pictures…> --book <dest>` — the new book service/automate makes of the pictures (files, or folders of them: --recurse),
+// written to `dest` as `genko new` writes one (never over a book), {"ok", "path", "notes", "layers", …what it found}:
+//   - stack (ファイルをスタックとして読み込み): --smart (one smart object), --align (auto_align_layers);
+//   - statistics (統計): --mode <stack mode> (median), --align;
+//   - photomerge (Photomerge): --layout auto|perspective|cylindrical|spherical|collage|reposition (auto), --no-blend,
+//     --vignette, --geometric, --fill (透明な領域をコンテンツに応じて塗りつぶす), --focal-length <mm, 35 mm>, --scale <10..100 %>.
+// As the person (no --agent: an agent's tools never reach the files, design 節 I 3.5); a book among the inputs is refused.
+int automate_book_command(const QString& kind, const QStringList& rest, bool ascii) {
+    static constexpr Option kOptions[] = {{"--book", true},     {"--title", true},     {"--smart", false},    {"--align", false},
+                                          {"--mode", true},     {"--layout", true},    {"--no-blend", false}, {"--vignette", false},
+                                          {"--geometric", false}, {"--fill", false},   {"--focal-length", true}, {"--scale", true},
+                                          {"--recurse", false}};
+    const std::string where = "genko automate " + kind.toStdString() + ": ";
+    Arguments a;
+    if (auto error = parse_arguments(rest, kOptions, 1, "inputs", a, true)) return usage(where + *error);
+    static const std::map<QString, std::vector<const char*>> kOwn = {
+        {QStringLiteral("stack"), {"--smart", "--align"}},
+        {QStringLiteral("statistics"), {"--mode", "--align"}},
+        {QStringLiteral("photomerge"), {"--layout", "--no-blend", "--vignette", "--geometric", "--fill", "--focal-length", "--scale"}}};
+    for (const char* option : {"--smart", "--align", "--mode", "--layout", "--no-blend", "--vignette", "--geometric", "--fill", "--focal-length", "--scale"}) {
+        const auto& own = kOwn.at(kind);
+        if ((a.flag(option) || a.value(option)) && std::find_if(own.begin(), own.end(), [option](const char* o) { return std::string_view(o) == option; }) == own.end()) {
+            return usage(where + option + " is not one of its options");
+        }
+    }
+    const auto book = a.value("--book");
+    if (!book) return usage(where + "give --book <the new book's folder>");
+    const std::string dest_text = pathlib_text(book->toStdString());
+    const fs::path dest = storage::path_from_utf8(dest_text);
+    std::error_code ec;
+    if (fs::exists(dest / "project.json", ec)) {
+        return fail("a book is there already: " + storage::path_to_utf8(dest / "project.json") + " (genko automate never writes over a book)", "exists", ascii, 1);
+    }
+    // (the review's P3-2: what is asked checked before any file is read)
+    if (kind == QLatin1String("photomerge") && !render::panorama::layout_from(a.value("--layout").value_or(QStringLiteral("auto")).trimmed().toStdString())) {
+        return usage(where + "argument --layout: auto, perspective, cylindrical, spherical, collage or reposition");
+    }
+    if (kind == QLatin1String("statistics") && !render::stack::stat_of(a.value("--mode").value_or(QStringLiteral("median")).trimmed().toLower().toStdString())) {
+        return usage(where + "argument --mode: entropy, kurtosis, maximum, mean, median, minimum, range, skewness, standard_deviation, summation or variance");
+    }
+    std::vector<fs::path> given;
+    for (const QString& p : a.positional) given.push_back(path_arg(p));
+    service::automate::InputOptions listing;
+    listing.recurse = a.flag("--recurse");
+    const service::automate::Inputs inputs = service::automate::list_inputs(given, listing);
+    std::vector<fs::path> files;
+    for (const service::automate::Input& input : inputs.items) {
+        if (input.book) return usage(where + "pictures only (a book is not one): " + core::path_to_utf8(input.path));
+        files.push_back(input.path);
+    }
+    // (more pictures than it takes: said before any is read — Photomerge's and an aligned stack's 32)
+    if ((kind == QLatin1String("photomerge") || a.flag("--align")) && files.size() > render::align::kMaxLayers) {
+        throw core::Error("value", "more than " + std::to_string(render::align::kMaxLayers) + " pictures: choose fewer");
+    }
+    const core::Actor actor{std::string(core::kLegacyActor)};
+    formats::Opened made;
+    Json info = Json::object();
+    if (kind == QLatin1String("photomerge")) {
+        service::automate::PhotomergeOptions o;
+        o.layout = a.value("--layout").value_or(QStringLiteral("auto")).trimmed().toStdString();
+        o.blend = !a.flag("--no-blend");
+        o.vignette = a.flag("--vignette");
+        o.geometric = a.flag("--geometric");
+        o.content_aware_fill = a.flag("--fill");
+        if (const auto f = a.value("--focal-length")) {
+            bool ok = false;
+            const double v = f->trimmed().toDouble(&ok);
+            if (!ok || !std::isfinite(v) || v <= 0.0 || v > 2000.0) return usage(where + "argument --focal-length: mm of 35 mm film (more than 0, at most 2000)");
+            o.focal_length = v;
+        }
+        if (const auto s = a.value("--scale")) {
+            const auto v = int_option(*s);
+            if (!v || *v < 10 || *v > 100) return usage(where + "argument --scale: 10..100 (%)");
+            o.scale = static_cast<int>(*v);
+        }
+        service::automate::Panorama pano = service::automate::photomerge(service::automate::picture_files(files, o.open), o);
+        made = std::move(pano.opened);
+        info = std::move(pano.info);
+    } else {
+        service::automate::StackOptions o;
+        o.actor = actor;
+        o.align = a.flag("--align");
+        o.smart = a.flag("--smart");
+        const std::vector<service::automate::Picture> pictures = service::automate::picture_files(files, o.open);
+        if (kind == QLatin1String("statistics")) {
+            const std::string mode = a.value("--mode").value_or(QStringLiteral("median")).trimmed().toLower().toStdString();
+            made = service::automate::statistics(pictures, mode, o);
+            info["mode"] = mode;
+        } else {
+            made = service::automate::load_files_into_stack(pictures, o);
+        }
+        info["images"] = pictures.size();
+    }
+    if (const auto title = a.value("--title")) made.doc.title = title->toStdString();
+    storage::ProjectLock lock(dest, std::string(core::kLegacyActor));
+    lock.try_acquire();
+    if (fs::exists(dest / "project.json", ec)) return fail("a book is there already: " + storage::path_to_utf8(dest / "project.json"), "exists", ascii, 1);
+    storage::SaveRequest request;
+    request.actor = std::string(core::kLegacyActor);
+    request.base_revision = 0;
+    request.ops = Json::array();
+    storage::Saver(lock).save(made.doc, request);
+    lock.release();
+    Json notes = Json::array();
+    for (const std::string& note : made.notes) notes.push_back(note);
+    Json out = Json::object();
+    out["ok"] = true;
+    out["path"] = dest_text;
+    out["notes"] = std::move(notes);
+    out["layers"] = made.doc.page(0).layers.size();
+    for (auto it = info.begin(); it != info.end(); ++it) {
+        if (!out.contains(it.key())) out[it.key()] = it.value();
+    }
+    print_json(out, ascii);
+    return 0;
+}
+
 // `genko automate <kind> <inputs…>` (PC5 I-e, SPEC.md AUTO-01: ファイル → 自動処理 ▸・スクリプト ▸'s command line): each
 // picture or book as `genko batch` takes them (--out <folder> | --save | --dry-run; --format, --quality, --prefix, --suffix,
 // --recurse, --stop-on-error, --agent, --name, --json) through
@@ -3342,12 +3672,157 @@ int droplet_command(const QStringList& args, bool ascii) {
 //   - fit (画像を合わせる): --width, --height, --dont-enlarge, --resample;
 //   - mode (条件付きモード変更): --to rgb|gray|cmyk|lab, --from <modes,…> | any (any);
 //   - lens (レンズ補正): --settings <JSON of the filter's settings> (the profile auto unless given).
+// PC5 I-f (file.automate.contactSheetII, コンタクトシート II…): `genko automate contact-sheet <inputs…> --out <folder>
+// [--format png|jpg|psd|tif|…] [--quality 0..12] [--width W] [--height H] [--units in|cm|mm|px] [--resolution R]
+// [--mode rgb|gray] [--depth 8|16] [--columns C] [--rows R] [--down] [--spacing <horizontal>,<vertical>] [--rotate]
+// [--no-caption] [--font-size PT] [--flatten] [--name N] [--recurse] [--stop-on-error] [--json]` — the pictures (a book's: its
+// pages) on new sheets (service::automate::contact_sheet), each sheet a file <name>-NNN.<format> in the folder (PSD keeps its
+// layers; a name taken gets -2 …; never into a book or over an input); the files one a line, or with --json
+// {"ok", "sheets", "images", "width", "height", "errors", "files"}.
+int contact_sheet_command(const QStringList& all, bool ascii) {
+    static constexpr Option kOptions[] = {{"--out", true},        {"--format", true},   {"--quality", true},  {"--width", true},
+                                          {"--height", true},     {"--units", true},    {"--resolution", true}, {"--mode", true},
+                                          {"--depth", true},      {"--columns", true},  {"--rows", true},     {"--down", false},
+                                          {"--spacing", true},    {"--rotate", false},  {"--no-caption", false}, {"--font-size", true},
+                                          {"--flatten", false},   {"--name", true},     {"--recurse", false}, {"--stop-on-error", false},
+                                          {"--json", false}};
+    const std::string where = "genko automate contact-sheet: ";
+    Arguments a;
+    if (auto error = parse_arguments(all, kOptions, 1, "inputs", a, true)) return usage(where + *error);
+    if (!a.value("--out")) return usage(where + "give --out <folder>");
+    service::automate::ContactSheet sheet;
+    const auto real = [&](const char* option, double& into) -> bool {
+        const auto text = a.value(option);
+        if (!text) return true;
+        bool ok = false;
+        const double v = text->trimmed().toDouble(&ok);
+        if (!ok || !std::isfinite(v)) return false;
+        into = v;
+        return true;
+    };
+    const auto whole = [&](const char* option, int& into) -> bool {
+        const auto text = a.value(option);
+        if (!text) return true;
+        bool ok = false;
+        const int v = text->trimmed().toInt(&ok);
+        if (!ok) return false;
+        into = v;
+        return true;
+    };
+    for (const char* option : {"--width", "--height", "--resolution", "--font-size"}) {
+        double* into = std::string_view(option) == "--width" ? &sheet.width : std::string_view(option) == "--height" ? &sheet.height
+                       : std::string_view(option) == "--resolution" ? &sheet.resolution : &sheet.font_pt;
+        if (!real(option, *into)) return usage(where + "argument " + option + ": a number");
+    }
+    if (!whole("--columns", sheet.columns) || !whole("--rows", sheet.rows) || !whole("--depth", sheet.depth)) {
+        return usage(where + "argument --columns, --rows, --depth: an integer");
+    }
+    if (const auto u = a.value("--units")) sheet.units = u->trimmed().toLower().toStdString();
+    if (const auto m = a.value("--mode")) sheet.mode = m->trimmed().toLower().toStdString();
+    if (const auto n = a.value("--name")) sheet.title = n->toStdString();
+    if (const auto spacing = a.value("--spacing")) {
+        const QStringList parts = spacing->split(QLatin1Char(','));
+        bool ok_h = false, ok_v = false;
+        if (parts.size() != 2) return usage(where + "argument --spacing: <horizontal>,<vertical> in the units");
+        sheet.horizontal = parts[0].trimmed().toDouble(&ok_h);
+        sheet.vertical = parts[1].trimmed().toDouble(&ok_v);
+        if (!ok_h || !ok_v) return usage(where + "argument --spacing: <horizontal>,<vertical> in the units");
+        sheet.auto_spacing = false;
+    }
+    sheet.across = !a.flag("--down");
+    sheet.rotate = a.flag("--rotate");
+    sheet.caption = !a.flag("--no-caption");
+    sheet.flatten = a.flag("--flatten");
+    try {
+        service::automate::check_contact_sheet(sheet);
+    } catch (const core::Error& error) {
+        return usage(where + error.what());
+    }
+    std::string extension = "png";
+    if (const auto format = a.value("--format")) {
+        const auto f = format_option(*format);
+        if (!f || *f == "same") return usage(where + "not a format this build writes: ." + format->toStdString());
+        extension = *f;
+    }
+    formats::CopyOptions copy;
+    if (const auto q = a.value("--quality")) {
+        copy.quality = quality_option(*q);
+        if (!copy.quality) return usage(where + "argument --quality: 0..12");
+    }
+    std::vector<fs::path> given;
+    for (const QString& p : a.positional) given.push_back(path_arg(p));
+    service::automate::InputOptions listing;
+    listing.recurse = a.flag("--recurse");
+    const service::automate::Inputs inputs = service::automate::list_inputs(given, listing);
+    const fs::path out = path_arg(*a.value("--out"));
+    // (never into a book, nor over an input picture)
+    std::vector<fs::path> sources;
+    for (const auto& input : inputs.items) {
+        if (!input.book) sources.push_back(input.path);
+    }
+    formats::WriteGuard guard = formats::write_guard(core::Document{}, std::nullopt, sources);
+    for (const auto& input : inputs.items) {
+        if (input.book) guard.books.push_back(input.path);
+    }
+    try {
+        formats::check_target(guard, out);
+        service::automate::check_output_folder(out);
+    } catch (const core::Error& error) {
+        return usage(where + error.what());
+    }
+    service::automate::Options options;
+    options.actor = core::Actor(std::string(core::kLegacyActor));
+    options.stop_on_error = a.flag("--stop-on-error");
+    std::error_code ec;
+    fs::create_directories(out, ec);
+    core::Json files = core::Json::array();
+    std::string lines;
+    // (each sheet written as soon as it is finished, then let go: never every sheet in memory — the review's P1-1)
+    const auto write_sheet = [&](core::Document&& book) {
+        fs::path file = out / core::path_from_utf8(formats::safe_name(book.title) + "." + extension);
+        for (int n = 2; fs::exists(file, ec) && n < 10000; ++n) {
+            file = out / core::path_from_utf8(formats::safe_name(book.title) + "-" + std::to_string(n) + "." + extension);
+        }
+        formats::check_target(guard, file);
+        const formats::CopyResult written = formats::write_copy(book, 0, file, copy);
+        files.push_back(core::path_to_utf8(written.file));
+        lines += core::path_to_utf8(written.file) + "\n";
+    };
+    service::automate::ContactSheetResult result;
+    try {
+        result = service::automate::contact_sheet(inputs.items, sheet, options, write_sheet);
+    } catch (const core::Error& error) {
+        return fail(error.what(), error.code(), ascii, 1);
+    }
+    if (a.flag("--json")) {
+        core::Json reply = result.json();
+        reply["files"] = files;
+        reply["skipped"] = inputs.skipped;
+        print_json(reply, ascii);
+    } else {
+        write_text(lines, stdout);
+        std::string said;
+        for (const core::Json& e : result.errors) said += where + e.value("input", std::string()) + ": " + e.value("error", std::string()) + "\n";
+        if (!said.empty()) write_text(said, stderr);
+    }
+    return result.errors.empty() ? 0 : 1;
+}
+
 int automate_command(const QStringList& all, bool ascii) {
     static const std::map<QString, std::string> kKinds = {{QStringLiteral("image-processor"), "画像プロセッサー"},
                                                           {QStringLiteral("fit"), "画像を合わせる"},
                                                           {QStringLiteral("mode"), "条件付きモード変更"},
                                                           {QStringLiteral("lens"), "レンズ補正"}};
-    if (all.isEmpty() || !kKinds.contains(all.front())) return usage("genko automate: image-processor, fit, mode or lens");
+    // (PC5 I-f: コンタクトシート II — new sheets, not the runner's steps)
+    if (!all.isEmpty() && all.front() == QLatin1String("contact-sheet")) return contact_sheet_command(all.mid(1), ascii);
+    // (PC5 I-h: HDR Pro に統合 and 写真の切り抜きと角度補正 make new books — their own arguments)
+    if (!all.isEmpty() && all.front() == QLatin1String("hdr")) return hdr_command(all.mid(1), ascii);
+    if (!all.isEmpty() && all.front() == QLatin1String("crop-photos")) return crop_photos_command(all.mid(1), ascii);
+    // (PC5 I-g: the kinds that make a new book)
+    if (!all.isEmpty() && (all.front() == QLatin1String("stack") || all.front() == QLatin1String("statistics") || all.front() == QLatin1String("photomerge"))) {
+        return automate_book_command(all.front(), all.mid(1), ascii);
+    }
+    if (all.isEmpty() || !kKinds.contains(all.front()))return usage("genko automate: image-processor, fit, mode or lens");
     const QString kind = all.front();
     static constexpr Option kOptions[] = {{"--out", true},     {"--save", false},          {"--dry-run", false},      {"--format", true},
                                           {"--formats", true}, {"--quality", true},        {"--prefix", true},        {"--suffix", true},
@@ -3622,6 +4097,8 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("automate")) return automate_command(args, ascii);  // (PC5 I-e: 画像プロセッサーほか)
         if (command == QLatin1String("measure")) return measure_command(args, ascii);    // (PC5 J-d2: 計測値を記録)
         if (command == QLatin1String("plugins")) return plugins_command(args, ascii);    // (PC5 J-f: plugin.list・install・remove・reload)
+        // (PC5 I-f: `genko print` is the app's — main.cpp sends it there; here when this build has no app, or --ascii came first)
+        if (command == QLatin1String("print")) return usage("genko print: give it first (genko print <book> … --ascii), in a build with the app");
         if (command == QLatin1String("studio")) return studio_command(args, ascii);
         if (command == QLatin1String("mcp")) return mcp_command(args);
         if (command == QLatin1String("serve")) return serve_command(args);

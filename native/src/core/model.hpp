@@ -530,6 +530,9 @@ struct Document {
     std::optional<Json> type_styles;
     // PC5 I-d (variables@1, core/variables.hpp): its variables and data sets in their normal form (none: none)
     std::optional<Json> variables;
+    // PC5 I-f (image-assets@1, core/image_assets.hpp): 生成 → 画像アセット is on — the layers named as files are written
+    // beside the book on each save the person makes (written as "generator": {"image_assets": true}; off: not written)
+    bool image_assets = false;
     // PC2a (adjustments@1): the 3D lookup tables its color_lookup corrections use (their "lut"), by their asset ref
     // (core/lut3d: GKLU bytes). Written as assets/<ab>/<64 hex>.gklut; only those a correction uses are written and read.
     std::map<std::string, Bytes> luts;

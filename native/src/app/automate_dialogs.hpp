@@ -14,6 +14,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QDoubleSpinBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -175,6 +176,33 @@ private:
     service::script_events::Table table_;
     bool outside_ = false;          // (the table was changed outside Genko: never turned on by 追加)
     std::size_t outside_rows_ = 0;  // (its bindings then, marked until removed)
+};
+
+// PC5 I-f: コンタクトシート II… (file.automate.contactSheetII): the pictures (a folder, files, or the open books) on new
+// sheets — service::automate::ContactSheet's settings, Photoshop's 文書・サムネール・キャプション.
+class ContactSheetDialog : public QDialog {
+    Q_OBJECT
+public:
+    explicit ContactSheetDialog(QWidget* parent);
+    SourceChoice source;
+    QComboBox* units = nullptr;          // data in | cm | mm | px
+    QDoubleSpinBox* width = nullptr;
+    QDoubleSpinBox* height = nullptr;
+    QDoubleSpinBox* resolution = nullptr;
+    QComboBox* mode = nullptr;           // data rgb | gray
+    QComboBox* depth = nullptr;          // data 8 | 16
+    QCheckBox* flatten = nullptr;        // すべてのレイヤーを統合
+    QComboBox* place = nullptr;          // data across | down
+    QSpinBox* columns = nullptr;
+    QSpinBox* rows = nullptr;
+    QCheckBox* auto_spacing = nullptr;   // 自動間隔
+    QDoubleSpinBox* vertical = nullptr;
+    QDoubleSpinBox* horizontal = nullptr;
+    QCheckBox* rotate = nullptr;         // 最適な配置になるように回転
+    QCheckBox* caption = nullptr;        // ファイル名をキャプションとして使用
+    QDoubleSpinBox* font_pt = nullptr;
+    service::automate::ContactSheet sheet() const;
+    std::optional<QString> problem() const;
 };
 
 }  // namespace genko::app

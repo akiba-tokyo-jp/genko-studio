@@ -116,6 +116,10 @@ inline constexpr std::int64_t kMaxAreaPixels = 1'500'000'000;
 
 // max(1, round(mm / 25.4 * dpi)).
 int mm_to_px(double mm, int dpi);
+// (the user's decision 15, 2026-11-04) Where an edge of a part cut from a page's picture lies: mm_to_px — but 0 for an edge
+// at the paper's own edge (0 mm, or less than half a pixel in). mm_to_px is at least 1 (a size); an edge counted so put a
+// page without bleed or margin one pixel out of its picture (its first row and column cut away, a black one beyond).
+int edge_px(double mm, int dpi);
 
 // A box in mm as pixels: (x0, y0, x1, y1), each corner through mm_to_px.
 Box rect_px(const core::Rect& rect, int dpi);

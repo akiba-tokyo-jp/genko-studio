@@ -296,7 +296,9 @@ bool not_per_page(std::string_view name) {
                          // (variables@1, PC5 I-d: the book's variables and data sets)
                          "set_variables", "set_data_sets", "apply_data_set",
                          // (artboards@1, PC5 I-c: an artboard is a page made)
-                         "add_artboard", "artboard_from_layers"});
+                         "add_artboard", "artboard_from_layers",
+                         // (image-assets@1, PC5 I-f: 生成 → 画像アセット, the book's)
+                         "set_image_assets"});
 }
 
 bool printed(const Layer& layer) { return layer.role != LayerRole::Name && layer.role != LayerRole::Draft; }
@@ -321,7 +323,9 @@ bool page_local_op(std::string_view name) {
 }
 
 bool book_op(std::string_view name) {
-    return one_of(name, {"set_brush", "define_brush", "set_autosave", "add_ticket", "set_ticket", "reorder_lines"});
+    return one_of(name, {"set_brush", "define_brush", "set_autosave", "add_ticket", "set_ticket", "reorder_lines",
+                         // (image-assets@1, PC5 I-f: no page touched)
+                         "set_image_assets"});
 }
 
 bool line_op(std::string_view name) {
@@ -666,7 +670,9 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
         }
     }
     // (PC5 I-a: deleting, copying, ungrouping or baking printed layers is drawing on the page — named ids, or every layer)
-    if (named && one_of(name, {"delete_layers", "duplicate_layers", "ungroup_layers", "bake_layer_styles"})) {
+    // (PC5 I-g: auto_blend_layers masks the layers named and makes a printed merged layer, auto_align_layers draws them again
+    // — as transform_layers, but on the cylinder or sphere a filter of their pixels: both on printed layers after the name)
+    if (named && one_of(name, {"delete_layers", "duplicate_layers", "ungroup_layers", "bake_layer_styles", "auto_align_layers", "auto_blend_layers"})) {
         const Json* page_value = get(op_in, "page");
         const bool all_pages = page_value != nullptr && page_value->is_string() && page_value->get_ref<const std::string&>() == "all";
         std::vector<const Page*> pages;

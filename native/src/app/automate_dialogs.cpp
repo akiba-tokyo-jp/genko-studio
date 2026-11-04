@@ -5,6 +5,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QDir>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -654,6 +655,125 @@ events::Table ScriptEventsDialog::table() const {
     events::Table out = table_;
     out.enabled = enabled->isChecked();
     return out;
+}
+
+// --- PC5 I-f: コンタクトシート II… ---------------------------------------------------------------------------------------
+
+ContactSheetDialog::ContactSheetDialog(QWidget* parent) : QDialog(parent) {
+    setObjectName(QStringLiteral("contact_sheet_dialog"));
+    setWindowTitle(QStringLiteral("コンタクトシート II"));
+    auto* layout = new QVBoxLayout(this);
+    layout->addWidget(source_row(this, source, false));
+    const service::automate::ContactSheet plain;
+    const auto real = [this](QWidget* owner, double lo, double hi, double value, int decimals) {
+        auto* box = new QDoubleSpinBox(owner);
+        box->setRange(lo, hi);
+        box->setDecimals(decimals);
+        box->setValue(value);
+        return box;
+    };
+    // 文書 (Photoshop's: 単位・幅・高さ・解像度・モード・ビット数・すべてのレイヤーを統合)
+    auto* document = new QGroupBox(QStringLiteral("ドキュメント"), this);
+    auto* document_layout = new QFormLayout(document);
+    units = new QComboBox(document);
+    units->addItem(QStringLiteral("inch"), QStringLiteral("in"));
+    units->addItem(QStringLiteral("cm"), QStringLiteral("cm"));
+    units->addItem(QStringLiteral("mm"), QStringLiteral("mm"));
+    units->addItem(QStringLiteral("pixel"), QStringLiteral("px"));
+    width = real(document, 0.01, 100000.0, plain.width, 2);
+    height = real(document, 0.01, 100000.0, plain.height, 2);
+    resolution = real(document, 72.0, 1200.0, plain.resolution, 0);
+    resolution->setSuffix(QStringLiteral(" pixel/inch"));
+    mode = new QComboBox(document);
+    mode->addItem(QStringLiteral("RGB カラー"), QStringLiteral("rgb"));
+    mode->addItem(QStringLiteral("グレースケール"), QStringLiteral("gray"));
+    depth = new QComboBox(document);
+    depth->addItem(QStringLiteral("8 bit"), 8);
+    depth->addItem(QStringLiteral("16 bit"), 16);
+    flatten = new QCheckBox(QStringLiteral("すべてのレイヤーを統合"), document);
+    document_layout->addRow(QStringLiteral("単位"), units);
+    document_layout->addRow(QStringLiteral("幅"), width);
+    document_layout->addRow(QStringLiteral("高さ"), height);
+    document_layout->addRow(QStringLiteral("解像度"), resolution);
+    document_layout->addRow(QStringLiteral("モード"), mode);
+    document_layout->addRow(QStringLiteral("ビット数"), depth);
+    document_layout->addRow(flatten);
+    layout->addWidget(document);
+    // サムネール
+    auto* thumbs = new QGroupBox(QStringLiteral("サムネール"), this);
+    auto* thumbs_layout = new QFormLayout(thumbs);
+    place = new QComboBox(thumbs);
+    place->addItem(QStringLiteral("横方向優先"), QStringLiteral("across"));
+    place->addItem(QStringLiteral("縦方向優先"), QStringLiteral("down"));
+    columns = new QSpinBox(thumbs);
+    columns->setRange(1, 100);
+    columns->setValue(plain.columns);
+    rows = new QSpinBox(thumbs);
+    rows->setRange(1, 100);
+    rows->setValue(plain.rows);
+    auto_spacing = new QCheckBox(QStringLiteral("自動間隔"), thumbs);
+    auto_spacing->setChecked(true);
+    vertical = real(thumbs, 0.0, 10000.0, 0.0, 2);
+    horizontal = real(thumbs, 0.0, 10000.0, 0.0, 2);
+    rotate = new QCheckBox(QStringLiteral("最適な配置になるように回転"), thumbs);
+    thumbs_layout->addRow(QStringLiteral("配置"), place);
+    thumbs_layout->addRow(QStringLiteral("列数"), columns);
+    thumbs_layout->addRow(QStringLiteral("行数"), rows);
+    thumbs_layout->addRow(auto_spacing);
+    thumbs_layout->addRow(QStringLiteral("垂直方向"), vertical);
+    thumbs_layout->addRow(QStringLiteral("水平方向"), horizontal);
+    thumbs_layout->addRow(rotate);
+    layout->addWidget(thumbs);
+    QDoubleSpinBox* v = vertical;
+    QDoubleSpinBox* h = horizontal;
+    const auto spacing = [v, h](bool automatic) {
+        v->setEnabled(!automatic);
+        h->setEnabled(!automatic);
+    };
+    connect(auto_spacing, &QCheckBox::toggled, this, spacing);
+    spacing(true);
+    // キャプション
+    caption = new QCheckBox(QStringLiteral("ファイル名をキャプションとして使用"), this);
+    caption->setChecked(true);
+    font_pt = real(this, 4.0, 72.0, plain.font_pt, 1);
+    font_pt->setSuffix(QStringLiteral(" pt"));
+    auto* captions = new QFormLayout;
+    captions->addRow(caption);
+    captions->addRow(QStringLiteral("フォントサイズ"), font_pt);
+    connect(caption, &QCheckBox::toggled, font_pt, &QWidget::setEnabled);
+    layout->addLayout(captions);
+    layout->addWidget(ok_cancel(this, QStringLiteral("OK"), [this] { return problem(); }));
+}
+
+service::automate::ContactSheet ContactSheetDialog::sheet() const {
+    service::automate::ContactSheet out;
+    out.units = units->currentData().toString().toStdString();
+    out.width = width->value();
+    out.height = height->value();
+    out.resolution = resolution->value();
+    out.mode = mode->currentData().toString().toStdString();
+    out.depth = depth->currentData().toInt();
+    out.flatten = flatten->isChecked();
+    out.across = place->currentData().toString() == QLatin1String("across");
+    out.columns = columns->value();
+    out.rows = rows->value();
+    out.auto_spacing = auto_spacing->isChecked();
+    out.vertical = vertical->value();
+    out.horizontal = horizontal->value();
+    out.rotate = rotate->isChecked();
+    out.caption = caption->isChecked();
+    out.font_pt = font_pt->value();
+    return out;
+}
+
+std::optional<QString> ContactSheetDialog::problem() const {
+    if (const auto why = source_problem(source)) return why;
+    try {
+        service::automate::check_contact_sheet(sheet());
+    } catch (const std::exception& error) {
+        return wording::error(QString::fromUtf8(error.what()));
+    }
+    return std::nullopt;
 }
 
 }  // namespace genko::app

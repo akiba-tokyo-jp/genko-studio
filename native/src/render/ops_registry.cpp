@@ -4,6 +4,7 @@
 #include <unordered_map>
 
 #include "core/channels.hpp"
+#include "core/image_assets.hpp"
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
@@ -44,6 +45,7 @@
 #include "render/ops_annotations.hpp"
 #include "render/ops_measure.hpp"
 #include "render/ops_slices.hpp"
+#include "render/ops_align.hpp"
 
 namespace genko::render {
 
@@ -460,6 +462,10 @@ void register_render_ops(core::OpRegistry& registry) {
     core::register_timeline_query(registry);
     // PC5 I-c (artboards@1: add_artboard, artboard_from_layers, set_artboard — render/ops_artboards)
     register_artboard_ops(registry);
+    // PC5 I-g (レイヤーを自動整列・レイヤーを自動合成: auto_align_layers, auto_blend_layers — render/ops_align)
+    align::register_align_ops(registry);
+    // PC5 I-f (image-assets@1: 生成 → 画像アセット on or off, core/image_assets)
+    core::register_image_asset_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {

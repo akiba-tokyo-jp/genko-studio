@@ -684,6 +684,75 @@ const std::vector<Rule>& rules() {
                          "改行などの制御文字や引用符を含む場所・名前には、起動ファイルを作りません。別の場所か名前を選んでください: \\2"));
         r.push_back(rule(R"(the launcher's path is too long)", "場所の名前が長すぎるので、起動ファイルを作れません"));
         r.push_back(rule(R"(no file to run the droplet on)", "ドロップレットで処理するファイルがありません"));
+        // (PC5 I-h: HDR Pro に統合・写真の切り抜きと角度補正 — service/automate_photos, render/hdr_merge, render/scancrop)
+        r.push_back(rule(R"(Merge to HDR Pro takes (\d+) to (\d+) exposures \((\d+) given\))", "HDR Pro に統合できる画像は \\1〜\\2 枚です（\\3 枚）"));
+        r.push_back(rule(R"(the exposures must have the same pixel dimensions \((.*)\))", "HDR Pro に統合する画像は、すべて同じ大きさ（pixel）にしてください（\\1）"));
+        r.push_back(rule(R"(the exposures must be all of linear light .*)", "カメラ RAW・32 bit の画像（線形の光）と、ほかの画像は一緒に統合できません"));
+        r.push_back(rule(R"(the exposures are too large to merge at once \(about (\d+) MiB of work; at most (\d+) MiB\))",
+                         "画像が大きすぎて一度に統合できません（作業に約 \\1 MiB。\\2 MiB まで）。画像の枚数を減らすか、縮小してから統合してください"));
+        r.push_back(rule(R"(an exposure of CMYK cannot be merged.*)", "CMYK の画像は HDR に統合できません（RGB かグレースケールの画像を選んでください）"));
+        r.push_back(rule(R"(an exposure is RGB of 8 or 16 bits or floats)", "HDR に統合できるのは RGB の 8・16・32 bit の画像です"));
+        r.push_back(rule(R"(the HDR mode is 32, 16 or 8 bits)", "HDR Pro に統合のモードは 32・16・8 bit です"));
+        r.push_back(rule(R"(give one EV value an exposure|one exposure value an image)", "EV は画像 1 枚に 1 つずつ指定してください"));
+        r.push_back(rule(R"(an EV value is a number within -30\.\.30)", "EV は −30〜30 の数です"));
+        r.push_back(rule(R"(the ghosts' base is one of the exposures)", "ゴーストを除く基準の画像は、統合する画像の中から選んでください"));
+        r.push_back(rule(R"(the exposures must be positive)", "露出の値は正の数です"));
+        r.push_back(rule(R"(the HDR toning method is .*)", "トーンの方法は ローカル適応・露光量とガンマ・ハイライト圧縮・ヒストグラムの平均化 です"));
+        r.push_back(rule(R"(the toning's settings are a JSON object)", "トーンの設定が正しくありません"));
+        r.push_back(rule(R"(the toning (\S+) has no setting (\S+))", "このトーンの方法には \\2 の設定はありません"));
+        r.push_back(rule(R"(the toning's (\S+) is a number)", "トーンの設定の \\1 は数です"));
+        r.push_back(rule(R"(no exposure to merge)", "統合する画像がありません"));
+        r.push_back(rule(R"(the EV of (.*) is not a number within -30\.\.30)", "\\1 の EV は −30〜30 の数にしてください"));
+        r.push_back(rule(R"(the exposures hardly differ \((.*) EV from the darkest to the brightest\): .*)",
+                         "画像の露出がほとんど違いません（いちばん暗い画像から明るい画像まで \\1 EV）。露出の違う画像を選んでください"));
+        r.push_back(rule(R"(the merged light is past what a float holds .*)", "合成した明るさが大きすぎます（画像の値か EV が範囲の外です）"));
+        r.push_back(rule(R"(the photos are too large to cut out at once \(about (\d+) MiB of work; at most (\d+) MiB\))",
+                         "写真が大きすぎて一度に切り抜けません（作業に約 \\1 MiB。\\2 MiB まで）"));
+        r.push_back(rule(R"(too many photos on the scan \((\d+); at most (\d+)\))", "写真が多すぎます（\\1 枚。\\2 枚まで）。スキャンを分けてください"));
+        r.push_back(rule(R"(no photos found on a uniform background)", "一様な背景の上に写真が見つかりませんでした"));
+        r.push_back(rule(R"(the photo's corners cannot be mapped)", "写真の角を求められませんでした"));
+        // (PC5 I-f, SPEC.md AUTO-01: プリント… and `genko print` — formats/print_marks —, コンタクトシート II, 画像アセット)
+        r.push_back(rule(R"(the printer's profile is not an RGB profile.*)",
+                         "プリンタープロファイルが RGB のものではありません（プリンターには RGB の絵を渡すため、CMYK・グレーのプロファイルは選べません）"));
+        r.push_back(rule(R"(the printer's profile is not found: (.*))", "プリンタープロファイルが見つかりません: \\1"));
+        r.push_back(rule(R"(the printer's profile cannot be read)", "プリンタープロファイルを読み込めません"));
+        r.push_back(rule(R"(the printer's profile cannot be used.*)", "このプリンタープロファイルでは色を変換できません"));
+        r.push_back(rule(R"(the page's profile cannot be read)", "ページのカラープロファイルを読み込めません"));
+        r.push_back(rule(R"(the page's colours were not drawn at its size)", "ページの色を描けませんでした"));
+        r.push_back(rule(R"(Genko's colour management needs the printer's profile)", "Genko によるカラー管理には、プリンタープロファイルを選んでください"));
+        r.push_back(rule(R"(the rendering intent is .*)", "マッチング方法は、知覚的・彩度・相対的な色域を維持・絶対的な色域を維持から選びます"));
+        r.push_back(rule(R"(the area is trim, bleed or paper)", "範囲は、仕上がりで切る・裁ち落としまで・用紙全体から選びます"));
+        r.push_back(rule(R"(the scale is fit, actual or a percent)", "大きさは、用紙に合わせる・原寸・拡大・縮小から選びます"));
+        r.push_back(rule(R"(the scale is 1% to 1000%)", "拡大・縮小は 1〜1000% です"));
+        r.push_back(rule(R"(the copies are 1 to 999)", "部数は 1〜999 です"));
+        r.push_back(rule(R"(the position is within 1000 mm of the paper's corner)", "位置は、用紙の角から 1000 mm までです"));
+        r.push_back(rule(R"(the resolution is 72 to 600 dpi)", "解像度は 72〜600 dpi です"));
+        r.push_back(rule(R"(the paper is a4, .*)", "用紙は a4・a3・a5・b4・b5・letter・legal・tabloid・4x6・5x7 か、幅x高さ（mm、25〜2000）です"));
+        r.push_back(rule(R"(the marks are corner, .*)", "印は corner・center・registration・description・labels から選びます"));
+        r.push_back(rule(R"(the units are in, cm, mm or px)", "単位は inch・cm・mm・pixel から選びます"));
+        r.push_back(rule(R"(the sheet's width and height are above 0)", "シートの幅と高さは 0 より大きくします"));
+        r.push_back(rule(R"(the resolution is 72 to 1200 ppi)", "解像度は 72〜1200 pixel/inch です"));
+        r.push_back(rule(R"(the mode is rgb or gray)", "モードは RGB カラーかグレースケールです"));
+        r.push_back(rule(R"(the depth is 8 or 16)", "ビット数は 8 か 16 です"));
+        r.push_back(rule(R"(the columns and the rows are 1 to 100)", "列数と行数は 1〜100 です"));
+        r.push_back(rule(R"(the caption's size is 4 to 72 pt)", "キャプションのフォントサイズは 4〜72 pt です"));
+        r.push_back(rule(R"(the spacing is 0 or more)", "間隔は 0 以上です"));
+        r.push_back(rule(R"(the sheets' name is 1 to 200 bytes)", "シートの名前は 1〜200 バイトです"));
+        r.push_back(rule(R"(the sheet is at least 16 pixels a side)", "シートは 1 辺 16 pixel 以上にします"));
+        r.push_back(rule(R"(the sheet is too large \((\d+)×(\d+) pixels; its work would pass 2 GiB.*)",
+                         "シートが大きすぎます（\\1×\\2 pixel。作るのに 2 GiB を越えます）。シートを小さく・解像度を低く・8 bit にしてください"));
+        r.push_back(rule(R"(the sheet is too large \((\d+)×(\d+) pixels; a 16-bit sheet's layers would pass.*)",
+                         "16 bit のシートが大きすぎます（\\1×\\2 pixel。原稿の高精度の画素の上限 1 GiB を越えます）。シートを小さく・解像度を低く・8 bit にしてください"));
+        r.push_back(rule(R"(the sheets of (\d+) pictures would pass 2 GiB together \((\d+) sheets\).*)",
+                         "\\1 枚の画像のシート（\\2 枚）を開いたままにすると 2 GiB を越えます。画像を減らすか、列数・行数を増やすか、シートを小さくしてください"));
+        r.push_back(rule(R"(a sheet holds at most (\d+) pictures \(columns × rows\))", "1 枚のシートに置けるのは \\1 枚まで（列数 × 行数）です"));
+        r.push_back(rule(R"(the sheet is too large \((\d+)×(\d+) pixels;.*)", "シートが大きすぎます（\\1×\\2 pixel。1 億 2 千万 pixel・1 辺 10 万 pixel まで）"));
+        r.push_back(rule(R"(the asset's name is not a path inside the assets' folder)",
+                         "画像アセットの名前が、アセットのフォルダーの中の場所になっていません（..・\\・: と、Windows で使えない名前は使えません）"));
+        r.push_back(rule(R"(another layer writes an asset of this name)", "同じ名前の画像アセットを書き出すレイヤーがほかにあります"));
+        r.push_back(rule(R"(the group has nothing to write)", "このグループには書き出すものがありません"));
+        r.push_back(rule(R"((?:ops\[\d+\] set_image_assets: )?on is true or false.*)", "画像アセットの on は true か false です"));
+        r.push_back(rule(R"(the book's generator is .*)", "原稿の画像アセットの設定（generator）が正しくありません"));
         r.push_back(rule(R"(the colour profile cannot be read \((.*)\))", "カラープロファイルを読み込めません"));
         r.push_back(rule(R"(the file cannot be read \(it is larger than 2 GiB\))", "ファイルが大きすぎて読み込めません（2 GiB まで）"));
         // (this build's own: put_raster reads only a regular file — not a device or a pipe, whose reading may not end)
@@ -1546,6 +1615,42 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("blend_channels is a layer's, not a folder's", "チャンネルの指定はレイヤーのものです（グループには付けられません）"));
         r.push_back(rule("not yet ported: high-precision merge of a clipped layer that leaves colour channels out.*",
                          "高精度のページでは、下のレイヤーへクリップしたままチャンネルを外したレイヤーを結合することはまだできません（クリップを外すか、チャンネルを全部入れると結合できます）"));
+        // (PC5 I-g — the C++ build's own: レイヤーを自動整列・自動合成, Photomerge, ファイルをスタックとして読み込み・統計 —
+        // render/ops_align, service/automate_merge)
+        r.push_back(rule("auto-align found no matching detail between the layers.*",
+                         "レイヤーの間に対応が見つかりません（重なりがあって模様のある、画素のレイヤーを選びます）"));
+        r.push_back(rule("photomerge found no matching detail between the pictures.*", "画像の間に対応が見つかりません（重なりのある写真を選びます）"));
+        r.push_back(rule(R"(the panorama would be -?\d+ × -?\d+ px \(about (-?\d+) 万 pixels\).*)",
+                         "パノラマが大きすぎます（約 \\1 万画素）。画像を減らすか、縮小して読み込んでください"));
+        r.push_back(rule("ids is \\[layer id, …\\]: two or more paint layers|select two or more paint layers \\(ids\\)",
+                         "画素のレイヤーを 2 枚以上選びます（レイヤー パネルで Ctrl を押しながら選びます）"));
+        r.push_back(rule("ids names the layer \\S+ twice", "同じレイヤーを 2 度選んでいます"));
+        r.push_back(rule(R"(more than (\d+) layers: choose fewer)", "レイヤーは \\1 枚までです"));
+        r.push_back(rule(R"(more than (\d+) pictures: choose fewer)", "画像は \\1 枚までです"));
+        r.push_back(rule(R"(more than (\d+) pictures to align: choose fewer)", "位置合わせできる画像は \\1 枚までです"));
+        r.push_back(rule(R"(the pictures are too large to stitch at once \(about (-?\d+) 万 pixels in all\).*)",
+                         "画像が大きすぎて、一度につなげません（合わせて約 \\1 万画素）。画像を減らすか、縮小して読み込んでください"));
+        r.push_back(rule(R"(the stack would be too large to hold at once \(about (\d+) MiB of 2048\).*)",
+                         "スタックが大きすぎて、一度に持てません（約 \\1 MiB。2048 MiB まで）。画像を減らすか、小さな画像にしてください"));
+        r.push_back(rule(R"(the colours of the picture (.*) cannot be converted into the first picture's profile.*)",
+                         "画像「\\1」の色を、最初の画像のプロファイルに変換できません"));
+        r.push_back(rule("the layer \\S+ is not a paint layer \\(auto-align and auto-blend take paint layers\\)",
+                         "自動整列・自動合成できるのは、画素（ペイント）のレイヤーだけです"));
+        r.push_back(rule("projection is auto, perspective, cylindrical, spherical, collage or reposition|"
+                         "the layout is auto, perspective, cylindrical, spherical, collage or reposition",
+                         "投影法は 自動設定・遠近法・円筒法・球面法・コラージュ・位置の変更 のどれかです"));
+        r.push_back(rule("reference is one of the layers given \\(ids\\)", "基準のレイヤーは、選んだレイヤーの中から選びます"));
+        r.push_back(rule("interpolation is bicubic, bilinear or nearest", "補間方法は バイキュービック・バイリニア・ニアレストネイバー のどれかです"));
+        r.push_back(rule("focal_length is the mm of 35 mm film.*", "焦点距離は 35 mm 判に換算した mm（0 より大きく 2000 まで）です"));
+        r.push_back(rule("method is panorama or stack", "合成方法は パノラマ か 画像をスタック です"));
+        r.push_back(rule("the layers to blend hold different kinds of pixels.*",
+                         "選んだレイヤーの画素の種類（8 bit・高精度・インキ）が違います。そろえてから合成します"));
+        r.push_back(rule("Photomerge needs two or more pictures", "Photomerge には画像が 2 枚以上要ります"));
+        r.push_back(rule("no files to load into a stack", "読み込むファイルがありません"));
+        r.push_back(rule("the stack mode is entropy, .*", "スタックモードの名前が正しくありません"));
+        r.push_back(rule("the scale to read the pictures at is 10 to 100 %", "読み込むときの縮小は 10〜100 % です"));
+        r.push_back(rule("the picture (.*) could not be laid on the stack's page", "画像「\\1」をスタックのページに置けませんでした"));
+        r.push_back(rule("the picture has no pixels to load|a picture to load is missing", "読み込む画像の画素がありません"));
         r.push_back(rule("the layers have nothing to draw", "選んだレイヤーには、描かれたものがありません"));
         r.push_back(rule("layer \\S+ has nothing to rasterize", "このレイヤーには、ラスタライズするものがありません（すでに画素のレイヤーです）"));
         r.push_back(rule("the transform squashes the smart object flat|the picture would be laid too small", "スマートオブジェクトが潰れてしまう変形はできません"));

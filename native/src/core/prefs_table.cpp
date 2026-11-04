@@ -319,6 +319,7 @@ std::vector<Pref> make_table() {
         memory("state.warp.*", "warp/*"),
         memory("state.workspaces.*", "workspaces/*"),
         memory("state.workspaceChanges.*", "workspace_changes/*"),  // (PC5 H-d: a workspace as it was left)
+        memory("state.print.*", "print/*"),  // (PC5 I-f: プリント…'s last settings and printer, 1 部プリント's)
     };
     return t;
 }

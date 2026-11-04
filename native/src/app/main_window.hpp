@@ -42,6 +42,7 @@ class QFormLayout;
 class QTabBar;
 class QToolBar;
 class QMenu;
+class QPrinter;
 class QDockWidget;
 class QPushButton;
 class QVBoxLayout;
@@ -883,6 +884,10 @@ private:
     void lens_batch_dialog();
     void script_events_dialog();
     void browse_script();
+    // PC5 I-h (app/main_window_automate.cpp, app/hdr_dialog.hpp): 写真の切り抜きと角度補正 (the page in front: its photos new
+    // books) and HDR Pro に統合… (its two windows; the exposures read and merged on a worker, a progress window stopping it).
+    void crop_photos();
+    void merge_to_hdr_dialog();
     std::optional<service::automate::Inputs> inputs_of(const SourceChoice& source);
     bool run_automate(const QString& title, const std::vector<service::automate::Input>& inputs, const core::Json& steps,
                       const service::automate::Output& output, service::automate::Options options, const core::Json& skipped);
@@ -2131,6 +2136,44 @@ private:
     void build_artboard_actions();
     void build_artboard_menus(QMenu* layers, QMenu* pages);
     void build_artboard_view_menus(QMenu* view);
+    // --- PC5 I-g (SPEC.md AUTO-01「自動整列・自動合成」「Photomerge」「ファイルをスタックとして読み込み・統計」):
+    // main_window_photomerge.cpp — 編集 → レイヤーを自動整列…・レイヤーを自動合成… (auto_align_layers, auto_blend_layers through
+    // send_filter: on a worker, 中止 leaves the book as it was, one Undo), ファイル → 自動処理 → Photomerge…, スクリプト →
+    // ファイルをスタックとして読み込み…・統計… (service::automate's new books, made on a worker with 中止, each a book in a tab of its
+    // own) -----------------------------------------------------------------------------------------------------------------
+public:
+    void auto_align_dialog();
+    void auto_blend_dialog();
+    void photomerge_dialog();
+    void load_stack_dialog();
+    void statistics_dialog();
+    // The paint layers chosen in the layers panel on the page shown (two or more: the commands are on), the bottom first.
+    std::vector<std::string> chosen_paint_layers() const;
+
+private:
+    void build_photomerge_actions();
+    void build_photomerge_menus();
+    void build_auto_align_items(QMenu* edit);
+    // A new book made on a worker (`make`), the window waiting with its progress and 中止; the book in a tab of its own.
+    void made_book(const QString& title, const std::function<formats::Opened()>& make);
+
+public:
+    // PC5 I-f (app/main_window_print.cpp; SPEC.md AUTO-01「プリント」「コンタクトシート」「画像アセット」): 1 部プリント — the
+    // book's every page with the last プリント… settings, one copy, to the last printer (else the computer's default; none: said)
+    // or to `printer` given (tests), nothing asked —; ファイル → 生成 → 画像アセット on or off for the book (set_image_assets);
+    // the assets written after a save the person makes (never the automatic save: save() and the .genko 別名で保存 call it);
+    // コンタクトシート II… (its window, the sheets opened as new books).
+    bool print_one_copy(QPrinter* printer = nullptr);
+    void toggle_image_assets();
+    // (written on a worker thread: image_assets_written() counts the times they were done, said — tests wait on it)
+    void image_assets_after_save();
+    int image_assets_written() const { return image_assets_done_; }
+    void contact_sheet_dialog();
+
+private:
+    void build_print_actions();
+    void build_print_menus(QMenu* file);
+    int image_assets_done_ = 0;
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

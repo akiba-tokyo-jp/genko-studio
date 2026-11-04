@@ -100,7 +100,8 @@ fs::path export_epub(const core::Document& episode, const fs::path& dest, int dp
 fs::path export_kindle(const core::Document& episode, const fs::path& dest, int long_edge = kKindleLongEdge,
                        std::optional<bool> gray = std::nullopt, bool dots = false);
 
-// profiles.trimmed: the page as read on screen (no bleed, no dots, no crop marks).
+// profiles.trimmed: the page as read on screen (no bleed, no dots, no crop marks). Its edges as crop_to's (render::edge_px:
+// the user's decision 15) — the Webtoon and SNS exports.
 render::Image trimmed(const core::Page& page, const core::Document& episode, int dpi);
 // profiles.export_webtoon: every page `width_px` wide, stacked (`gap_px` apart) and cut into slices of at most
 // `max_height` px: 001.png, 002.png, … (fmt "jpeg": .jpg at `quality`), sRGB, optimized.
