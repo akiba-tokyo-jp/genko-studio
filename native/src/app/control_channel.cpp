@@ -13,6 +13,7 @@
 
 #include <algorithm>
 
+#include "app/canvas.hpp"
 #include "app/documents.hpp"
 #include "app/main_window.hpp"
 #include "core/error.hpp"
@@ -473,6 +474,14 @@ bool Server::eventFilter(QObject* watched, QEvent* event) {
     case QEvent::DragEnter:
     case QEvent::DragMove:
     case QEvent::Drop:
+    case QEvent::MouseButtonRelease:
+    case QEvent::TabletRelease:
+        // (a button let go goes through — nothing grabbed before stays held —, but never onto a canvas: it would let go of
+        // the channel's line there)
+        if ((event->type() == QEvent::MouseButtonRelease || event->type() == QEvent::TabletRelease) && qobject_cast<PageCanvas*>(watched) == nullptr) {
+            return QObject::eventFilter(watched, event);
+        }
+        [[fallthrough]];
     case QEvent::TouchBegin:
     case QEvent::TouchUpdate:
     case QEvent::TouchEnd:
@@ -480,8 +489,7 @@ bool Server::eventFilter(QObject* watched, QEvent* event) {
     case QEvent::ContextMenu:
     case QEvent::NativeGesture:
     case QEvent::InputMethod:
-        return true;  // (the person's input held while the channel's pen draws: the status bar says so — a button let go
-                      // still goes through, so nothing grabbed before stays held)
+        return true;  // (the person's input held while the channel's pen draws: the status bar says so)
     default:
         return QObject::eventFilter(watched, event);
     }

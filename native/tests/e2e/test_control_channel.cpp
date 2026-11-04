@@ -522,7 +522,8 @@ private slots:
     void deepLinesAreNeverRead() {
         Book book;
         channel(true);
-        QCOMPARE(service::control::nesting(R"({"a":["[[[{","\"[",[1,{"b":[2]}]]})"), 5);
+        const std::string sample = "{\"a\":[\"[[[{\",\"\\\"[\",[1,{\"b\":[2]}]]}";  // ({"a":["[[[{","\"[",[1,{"b":[2]}]]})
+        QCOMPARE(service::control::nesting(sample), 5);
         QCOMPARE(service::control::nesting(std::string(100, '[')), service::control::kMaxDepth + 1);
         const int deep = 500000;
         {
@@ -624,7 +625,7 @@ private slots:
             channel(false);
         }
         qputenv("XDG_RUNTIME_DIR", kept);
-        (void)::chown(QFile::encodeName(other.path()).constData(), ::geteuid(), ::getegid());
+        QVERIFY(::chown(QFile::encodeName(other.path()).constData(), ::geteuid(), ::getegid()) == 0);
     }
 
     // P3-1 and P3-3 of the review: a token revoked ends its connection at the next line; a token named as the person who

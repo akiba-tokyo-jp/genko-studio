@@ -303,6 +303,7 @@ void PageCanvas::stop_coast() {
 bool PageCanvas::coasting() const { return coast_timer_.isActive(); }
 
 void PageCanvas::mousePressEvent(QMouseEvent* event) {
+    if (control_stroke_) return;  // (PC5 J-g: the person's line waits while the channel's draws)
     setFocus();
     const QPointF pos = unturned(event->position());
     if (event->button() == Qt::LeftButton && space_ && (event->modifiers() & Qt::ShiftModifier)) {
@@ -374,6 +375,7 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
 }
 
 void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
+    if (control_stroke_) return;  // (PC5 J-g: the channel's line takes no point of the person's)
     if (turning_) {
         const double angle = std::atan2(event->position().y() - height() / 2.0, event->position().x() - width() / 2.0) * 180.0 / kPi;
         double turn = angle - turning_->first;
@@ -490,6 +492,7 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
+    if (control_stroke_) return;  // (PC5 J-g: the control channel's line is let go by the channel alone)
     if (turning_) {
         turning_.reset();
         return;
@@ -826,6 +829,10 @@ void PageCanvas::back_from_eraser_end() {
 }
 
 void PageCanvas::tabletEvent(QTabletEvent* event) {
+    if (control_stroke_) {  // (PC5 J-g: the person's pen waits while the channel's draws)
+        event->accept();
+        return;
+    }
     const auto type = event->type();
     last_pressure_ = event->pressure();  // (the vector tool's traces take the pen's pressure)
     // the pen's side button (or its middle one) as chosen in 環境設定: the eyedropper or the hand (the right click's
