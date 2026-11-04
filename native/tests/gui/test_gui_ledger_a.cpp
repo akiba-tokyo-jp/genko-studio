@@ -111,7 +111,9 @@ const QStringList& studio_docks() {
                                        QStringLiteral("文字"), QStringLiteral("段落"), QStringLiteral("文字スタイル"), QStringLiteral("段落スタイル"),
                                        QStringLiteral("字形"),
                                        // (PC5 J-d2: ウィンドウ → 計測ログ so)
-                                       QStringLiteral("計測ログ")};
+                                       QStringLiteral("計測ログ"),
+                                       // (PC5 J-g: ウィンドウ → アクション so)
+                                       QStringLiteral("アクション")};
     return titles;
 }
 
