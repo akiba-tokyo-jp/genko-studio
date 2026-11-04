@@ -13,6 +13,7 @@
 #include <QTemporaryDir>
 
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <stop_token>
 #include <thread>
@@ -40,6 +41,9 @@
 #include "render/smart.hpp"
 #include "render/png.hpp"
 #include "rendertest.hpp"
+#include "storage/asset_store.hpp"
+#include "storage/gc.hpp"
+#include "storage/reader.hpp"
 #include "testsupport.hpp"
 
 using genko::core::Json;
@@ -425,6 +429,29 @@ class TestContractWasmPlugins : public QObject {
     genko::render::Image pixels(const genko::core::Document& doc, const std::string& id) {
         return genko::render::read_png(*layer_of(doc, id).raster_png).convert("RGBA");
     }
+    // the mean difference of two pictures of the page, a sample
+    static double apart(const genko::render::Image& a, const genko::render::Image& b) {
+        const std::string x = a.tobytes(), y = b.tobytes();
+        if (x.size() != y.size() || x.empty()) return 255.0;
+        double sum = 0;
+        for (std::size_t i = 0; i < x.size(); ++i) sum += std::abs(int(static_cast<unsigned char>(x[i])) - int(static_cast<unsigned char>(y[i])));
+        return sum / double(x.size());
+    }
+    // The page drawn with the plugin running, and again where it cannot (plugins off: the pictures kept): the same look.
+    void same_look_without_plugin(const genko::core::Document& doc, const char* what) {
+        enable(true);
+        genko::render::smart::clear_caches();
+        plugins::forget_made();
+        genko::render::RenderOptions output;
+        const genko::render::Image drawn = genko::render::render_page(doc.page(0), 40, output, &doc).image;
+        enable(false);
+        genko::render::smart::clear_caches();
+        plugins::forget_made();
+        genko::render::RenderOptions again;
+        const genko::render::Image kept = genko::render::render_page(doc.page(0), 40, again, &doc).image;
+        QVERIFY2(apart(drawn, kept) < 0.5, qPrintable(QStringLiteral("%1: %2").arg(QString::fromUtf8(what)).arg(apart(drawn, kept))));
+        enable(true);
+    }
 
 private slots:
     void initTestCase() {
@@ -569,6 +596,121 @@ private slots:
         QVERIFY(std::any_of(moved.warnings.begin(), moved.warnings.end(),
                             [](const Json& n) { return n.is_string() && n.get<std::string>().find("cannot run here") != std::string::npos; }));
         enable(true);
+    }
+
+    // (review P2-2) The picture kept is the filter's own output (the smart object's picture before its finish and tone,
+    // through the filters up to the plugin's), so where the plugin cannot run the page looks as it did: a picture's
+    // smart object on a monochrome page (its finish screens it in the page, not twice) and a tone's smart object (its
+    // black laid by the page, not twice).
+    void keptLookOfFinishedAndToneSmartObjects() {
+        enable(true);
+        plugins::choose("invert", true);
+        // a grey picture placed on a monochrome page: its finish draws it in dots
+        genko::render::Image grey = genko::render::Image::create("RGBA", genko::render::Size{240, 320}, genko::render::Ink{255, 255, 255, 255});
+        grey.paste(genko::render::Ink{90, 90, 90, 255}, genko::render::Box{20, 20, 180, 260});
+        genko::core::Document file = genko::core::new_episode("w", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        file = applied(file, Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", genko::core::b64encode(genko::render::write_png(grey))}, {"name", "grey.png"}, {"id", "file"}}}));
+        const std::string placed = file.page(0).layers.back().id;
+        QVERIFY(layer_of(file, placed).smart);
+        file = applied(file, Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", placed}, {"kind", "plugin:invert"}}}));
+        QVERIFY((*layer_of(file, placed).smart)["filters"][0].contains("kept"));
+        same_look_without_plugin(file, "a picture's smart object on a monochrome page");
+        // a tone made a smart object
+        genko::core::Document tone = genko::core::new_episode("w", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
+        tone = applied(tone, Json::array({Json{{"op", "add_tone"}, {"page", 1}, {"id", "tn"}, {"density", 0.3}, {"lpi", 60}, {"angle", 45},
+                                               {"area", Json{{"poly", Json::array({Json::array({40, 120}), Json::array({160, 120}), Json::array({160, 240}),
+                                                                                  Json::array({40, 240})})}}}},
+                                          Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"tn"})}, {"new_id", "so"}},
+                                          Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "plugin:invert"}}}));
+        QVERIFY((*layer_of(tone, "so").smart)["filters"][0].contains("kept"));
+        same_look_without_plugin(tone, "a tone's smart object");
+        enable(true);
+    }
+
+    // (review P2-3) plugin-filters@1 saved and read again: the feature and the kept pictures with it; a kept picture
+    // missing said (missing_asset); the plugin's filters removed, the feature goes and the book is written as it was
+    // before they came; `genko gc` keeps the pictures kept.
+    void keptPicturesSavedAndReadAgain() {
+        enable(true);
+        plugins::choose("invert", true);
+        const genko::core::Document before = applied(painted(), Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"p"})}, {"new_id", "so"}}}));
+        const genko::core::Document doc = applied(before, Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "plugin:invert"}},
+                                                                       Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "gaussian_blur"}, {"radius", 2}}}));
+        const Json kept = (*layer_of(doc, "so").smart)["filters"][0]["kept"];
+        const std::string ref = kept["asset"].get<std::string>(), suffix = kept["suffix"].get<std::string>();
+        const std::filesystem::path book = genko::core::path_from_utf8((scratch_.path() + "/book").toStdString());
+        genko::test::write_project(doc, book);
+        const Json written = genko::test::read_json(QString::fromStdString((book / "project.json").string()));
+        QVERIFY(std::find(written["features"].begin(), written["features"].end(), Json("plugin-filters@1")) != written["features"].end());
+        const genko::storage::AssetStore store(book);
+        QVERIFY(store.has(ref, suffix));
+        // read again: the same filters, kept picture and all
+        const genko::storage::LoadResult again = genko::storage::load_document(book);
+        QVERIFY2(again.report.clean(), again.report.to_json().dump().c_str());
+        QCOMPARE((*layer_of(again.document, "so").smart)["filters"], (*layer_of(doc, "so").smart)["filters"]);
+        QVERIFY(again.document.smart_files.contains(ref));
+        QCOMPARE(*again.document.smart_files.at(ref), *doc.smart_files.at(ref));
+        // `genko gc`: the kept picture stays (an asset nothing refers to, as old, goes)
+        const std::string orphan = genko::storage::AssetStore(book).put_bytes("nothing refers to me", ".png");
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(book / "assets")) {
+            if (entry.is_regular_file()) std::filesystem::last_write_time(entry.path(), std::filesystem::file_time_type::clock::now() - std::chrono::hours(48));
+        }
+        const Json swept = genko::storage::gc(book, false);
+        QCOMPARE(swept["removed"], Json::array({genko::storage::AssetStore::relpath(orphan, ".png")}));
+        QVERIFY(store.has(ref, suffix));
+        QVERIFY(genko::storage::load_document(book).report.clean());
+        // the kept picture missing: said, the rest read
+        std::filesystem::remove(store.path(ref, suffix));
+        const genko::storage::LoadResult lost = genko::storage::load_document(book);
+        QVERIFY(std::any_of(lost.report.issues.begin(), lost.report.issues.end(),
+                            [&](const genko::storage::LoadIssue& issue) { return issue.kind == "missing_asset" && issue.ref == ref; }));
+        // the plugin's filter removed (the other one too): no feature, the book as it was written before they came
+        const genko::core::Document removed = applied(doc, Json::array({Json{{"op", "smart_filter_delete"}, {"page", 1}, {"id", "so"}, {"index", 0}},
+                                                                        Json{{"op", "smart_filter_delete"}, {"page", 1}, {"id", "so"}, {"index", 0}}}));
+        QVERIFY(!genko::core::smart::uses_plugin_filters(removed));
+        const std::filesystem::path first = book.parent_path() / "before", second = book.parent_path() / "after";
+        genko::test::write_project(before, first);
+        genko::test::write_project(removed, second);
+        const std::string a = genko::test::read_bytes(QString::fromStdString((first / "project.json").string()));
+        const std::string b = genko::test::read_bytes(QString::fromStdString((second / "project.json").string()));
+        QVERIFY(a.find("plugin-filters@1") == std::string::npos);
+        QCOMPARE(QString::fromStdString(b), QString::fromStdString(a));
+        enable(true);
+    }
+
+    // (review P3-10) A plugin's smart filter refused where it cannot be: a plugin installed but not chosen, none of the
+    // name; on a page of inks an 8-bit plugin (protocol 1), a module taken.
+    void smartFilterRefusedWhereItCannotBe() {
+        enable(true);
+        plugins::choose("invert", false);
+        QVERIFY(plugins::installed("invert") && !plugins::allowed("invert"));
+        const genko::core::Document so = applied(painted(), Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"p"})}, {"new_id", "so"}}}));
+        const auto add = [&](const genko::core::Document& doc, const char* kind) {
+            return error_of([&] { (void)applied(doc, Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", kind}}})); });
+        };
+        QVERIFY2(add(so, "plugin:invert").contains(QStringLiteral("plugin invert is not chosen to run")), qPrintable(add(so, "plugin:invert")));
+        QVERIFY(add(so, "plugin:nothing").contains(QStringLiteral("no plugin nothing")));
+        // an 8-bit native plugin (protocol 1), chosen
+        const QString program = QStringLiteral("filter") + (QFileInfo(QStringLiteral(GENKO_TEST_NATIVE_PLUGIN)).suffix() == QLatin1String("exe") ? ".exe" : "");
+        QVERIFY(QDir().mkpath(folder_ + "/eight"));
+        write(folder_ + "/eight/plugin.json", genko::core::dump(Json{{"protocol", 1}, {"name", "8 bit"}, {"executable", program.toStdString()},
+                                                                     {"args", Json::array({"invert"})}},
+                                                                genko::core::DumpOptions{}));
+        QVERIFY(QFile::copy(QStringLiteral(GENKO_TEST_NATIVE_PLUGIN), folder_ + "/eight/" + program));
+        QVERIFY(QFile::setPermissions(folder_ + "/eight/" + program, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        plugins::choose("eight", true);
+        plugins::choose("invert", true);
+        QVERIFY(add(so, "plugin:eight").isEmpty());  // (an 8-bit page: taken)
+        auto inks = genko::core::new_episode("w", genko::core::Num(1), 1, genko::core::PageSpec::custom(50, 50, 20, 20, 1, 2, 2, 2, 2, 200, "color"));
+        inks = applied(inks, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"depth", 8}},
+                                          Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "p"}},
+                                          Json{{"op", "fill"}, {"page", 1}, {"layer_id", "p"}, {"x_mm", 25}, {"y_mm", 25}, {"rgb", Json::array({100, 150, 200})}},
+                                          Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"p"})}, {"new_id", "so"}}}));
+        QVERIFY(inks.page(0).color);
+        QVERIFY2(add(inks, "plugin:eight").contains(QStringLiteral("a filter plugin of 8 bits cannot be a smart filter on a page of inks")), qPrintable(add(inks, "plugin:eight")));
+        QVERIFY2(add(inks, "plugin:invert").isEmpty(), qPrintable(add(inks, "plugin:invert")));
+        plugins::choose("eight", false);
+        QDir(folder_ + "/eight").removeRecursively();
     }
 
     // MCP offers no tool that installs a plugin, chooses one or consents (plugin.list is inspect's, read only).

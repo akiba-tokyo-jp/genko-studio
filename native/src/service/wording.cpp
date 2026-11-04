@@ -324,6 +324,7 @@ const std::vector<Rule>& rules() {
                 add("it is larger than 32 MB", "32 MB を超えています");
                 add("it is not a WebAssembly module", "WebAssembly のモジュールではありません");
                 add("it cannot be read", "読めません");
+                add("its name must end in .wasm in lower case", "ファイルの名前は小文字の .wasm で終わるようにします");
                 add(R"(plug-in ABI: the module imports `(.*?)`.*)", "外の機能（\\1）を読み込もうとしています。プラグインはファイル・ネット・WASI を使えません");
                 add(R"(plug-in ABI: pc_abi_version returned (-?\d+).*)", "プラグインの ABI の版が 1 ではありません（\\1）");
                 add(R"(plug-in ABI: (.*))", "プラグインの ABI に合っていません（\\1）");
@@ -355,9 +356,12 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("a filter plugin of 8 bits cannot be a smart filter on a page of inks.*",
                          "8 bit のプラグインは、インキのページではスマートフィルターにできません（WebAssembly のプラグインと、プロトコル 2 のネイティブのプラグインはできます）"));
         r.push_back(rule("a band of the picture does not fit in the plugin's memory", "絵の帯がプラグインのメモリに収まりません"));
+        r.push_back(rule("the picture is too large for a filter plugin to work on in memory",
+                         "絵が大きく、プラグインのフィルターに使えるメモリが足りません（解像度を下げるか、範囲を選んでからかけます）"));
+        r.push_back(rule(R"(plugin (.*?) could not be removed \((.*)\))", "プラグイン「\\1」を取り除けませんでした（\\2）"));
         r.push_back(rule(R"(only WebAssembly modules \(\.wasm\) and Python plugins \(\.py\) are installed so: (.*))",
                          "入れられるのは WebAssembly のモジュール（.wasm）と Python のプラグイン（.py）です（\\1）"));
-        r.push_back(rule(R"(the name (.*) cannot be a plugin's)", "「\\1」はプラグインの名前にできません（_ や . で始まる名前、/ を含む名前は使えません）"));
+        r.push_back(rule(R"(the name (.*) cannot be a plugin's)", "「\\1」はプラグインの名前にできません（_ や . で始まる名前、/ や : を含む名前は使えません）"));
         r.push_back(rule(R"((.*) is larger than (32|16) MB)", "「\\1」は \\2 MB を超えているため入れられません"));
         r.push_back(rule(R"((.*) is not a WebAssembly module)", "「\\1」は WebAssembly のモジュールではありません"));
         r.push_back(rule(R"(a plugin of the name (.*) of another kind is installed)", "「\\1」という名前の、別の種類のプラグインが入っています"));

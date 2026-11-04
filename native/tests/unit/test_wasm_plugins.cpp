@@ -17,11 +17,14 @@
 #include <QFileInfo>
 #include <QTemporaryDir>
 
+#include <chrono>
 #include <cmath>
 #include <fstream>
+#include <thread>
 
 #include "core/error.hpp"
 #include "core/paths.hpp"
+#include "render/image.hpp"
 #include "render/plugin_bands.hpp"
 #include "render/plugins.hpp"
 
@@ -121,6 +124,7 @@ private slots:
         big.write(QByteArray("\0asm", 4));
         QVERIFY(big.resize((qint64{32} << 20) + 1));
         big.close();
+        QVERIFY(QFile::copy(data("invert.wasm"), folder_ + "/Shouty.WASM"));  // (its extension in capitals: review P3-4)
     }
 
     void init() {
@@ -144,6 +148,9 @@ private slots:
                  QStringLiteral("the module of plugin notwasm cannot be used (it is not a WebAssembly module)"));
         QCOMPARE(QString::fromStdString(*listed(all, "big")->problem), QStringLiteral("the module of plugin big cannot be used (it is larger than 32 MB)"));
         QVERIFY(!listed(all, "garbage")->problem);  // (its header says it is one: what it is, the host says once chosen)
+        QVERIFY(invert->sha256.empty());  // (plugins off: no module read through for its digest — review P3-3)
+        QCOMPARE(QString::fromStdString(*listed(all, "Shouty")->problem),
+                 QStringLiteral("the module of plugin Shouty cannot be used (its name must end in .wasm in lower case)"));
         QVERIFY(plugins::installed("invert"));
         QVERIFY(plugins::works_in_bands("invert"));
         QVERIFY(!plugins::allowed("invert"));
@@ -153,6 +160,8 @@ private slots:
         enable(true);
         QVERIFY(refusal([] { plugins::choose("notwasm", true); }).contains(QStringLiteral("it is not a WebAssembly module")));
         QVERIFY(refusal([] { plugins::choose("big", true); }).contains(QStringLiteral("larger than 32 MB")));
+        QVERIFY(!refusal([] { plugins::choose("Shouty", true); }).isEmpty());  // (review P3-4: never the module Shouty)
+        QVERIFY(!plugins::allowed("Shouty"));
         enable(false);
     }
 
@@ -383,6 +392,56 @@ private slots:
         QVERIFY(clock.elapsed() < 5000);
     }
 
+    // (review P2-1) A large picture is never held whole in f32: read and written back band by band where it is kept, what
+    // the run holds borrowed from the imaging budget — a B4 page at 600 dpi (6071 × 8598, 835 MB in f32) needs a tenth of
+    // that, a picture of 3000 × 2000 runs under far less than its own f32 —, refused (OpError) when the budget has not
+    // that much left.
+    void largePictureHeldInBands() {
+        choose("invert");
+        const auto mb = [](std::uint64_t n) { return n / (1u << 20); };
+        const std::uint64_t whole_b4 = std::uint64_t(6071) * 8598 * 4 * 4;
+        for (const unsigned overlap : {0u, 256u}) {
+            bands::Shape shape;
+            shape.overlap = overlap;
+            const std::uint64_t held = bands::held_bytes(6071, 8598, 4, shape);
+            QVERIFY2(held < (std::uint64_t{96} << 20) && held * 8 < whole_b4, qPrintable(QStringLiteral("%1 MiB").arg(mb(held))));
+        }
+        const int w = 3000, h = 2000;
+        const auto sample = [](int x, int y, unsigned c) { return c == 3 ? 1.0f : static_cast<float>((x * 3 + y * 5 + int(c) * 7) % 101) / 100.0f; };
+        bands::Picture p;
+        p.width = w;
+        p.height = h;
+        p.depth = 32;
+        std::uint64_t wrong = 0, written = 0;
+        p.read = [&](int y, int x0, int x1, float* out) {
+            for (int x = x0; x < x1; ++x) {
+                for (unsigned c = 0; c < 4; ++c) *out++ = sample(x, y, c);
+            }
+        };
+        p.write = [&](int y, int x0, int x1, const float* in) {
+            for (int x = x0; x < x1; ++x) {
+                for (unsigned c = 0; c < 4; ++c) {
+                    const float want = c == 3 ? 1.0f : 1.0f - sample(x, y, c);
+                    wrong += std::abs(*in++ - want) > 1e-6f ? 1 : 0;
+                }
+            }
+            written += std::uint64_t(x1 - x0);
+        };
+        {
+            const genko::render::ImageAllocationBudget budget{std::uint64_t{1} << 30};
+            plugins::run_picture("plugin:invert", p, Json::object());
+            QCOMPARE(wrong, std::uint64_t{0});
+            QCOMPARE(written, std::uint64_t(w) * h);
+            const std::uint64_t f32 = std::uint64_t(w) * h * 4 * 4;
+            QVERIFY2(budget.peak() >= bands::held_bytes(w, h, 4, bands::Shape{}) && budget.peak() * 2 < f32,
+                     qPrintable(QStringLiteral("peak %1 MiB of %2 MiB").arg(mb(budget.peak())).arg(mb(f32))));
+        }
+        {
+            const genko::render::ImageAllocationBudget small{std::uint64_t{1} << 20};
+            QVERIFY(refusal([&] { plugins::run_picture("plugin:invert", p, Json::object()); }).contains(QStringLiteral("the picture is too large for a filter plugin to work on in memory")));
+        }
+    }
+
     // A module changed after it was chosen is chosen again (its bytes are checked as they go to the host).
     void changedIsChosenAgain() {
         put("invert", "changing");
@@ -414,6 +473,9 @@ private slots:
         QVERIFY(QFileInfo::exists(folder_ + "/myinvert.wasm"));
         const auto* added = listed(plugins::listed(), "myinvert");
         QVERIFY(added != nullptr && added->wasm && !added->chosen);  // (installed: not chosen)
+        QVERIFY(QFile::copy(data("invert.wasm"), elsewhere + "/a:b.wasm"));  // (review P3-10: ':' names a drive on Windows)
+        QCOMPARE(refusal([&] { (void)plugins::install(genko::core::path_from_utf8((elsewhere + "/a:b.wasm").toStdString())); }),
+                 QStringLiteral("plugin_install: the name a:b.wasm cannot be a plugin's"));
         std::ofstream(genko::core::path_from_utf8((elsewhere + "/notes.txt").toStdString())) << "x";
         QVERIFY(refusal([&] { (void)plugins::install(genko::core::path_from_utf8((elsewhere + "/notes.txt").toStdString())); }).startsWith(QStringLiteral("plugin_install: only WebAssembly modules")));
         std::ofstream(genko::core::path_from_utf8((elsewhere + "/fake.wasm").toStdString())) << "MZ";
@@ -467,6 +529,30 @@ private slots:
         bands::Samples s = picture(8, 8, 8);
         QVERIFY2(refusal([&] { plugins::run_samples("plugin:invert", s, nullptr, Json::object()); }).startsWith(QStringLiteral("plugin_runner: plugin invert stopped before it answered")),
                  qPrintable(refusal([&] { plugins::run_samples("plugin:invert", s, nullptr, Json::object()); })));
+        // (review P2-4) a host that never answers — stopped at the run's time, with the process it started (its group) —,
+        // and one that writes back without end — stopped at what a manifest may be —: the runner's trouble too
+        const auto stand_in = [&](const QString& name) {
+            const QString to = scratch_.path() + "/" + name;
+            QFile::remove(to);
+            QVERIFY(QFile::copy(QStringLiteral(GENKO_TEST_NATIVE_PLUGIN), to));
+            QVERIFY(QFile::setPermissions(to, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+            plugins::set_host_for_testing(genko::core::path_from_utf8(to.toStdString()));
+        };
+        plugins::set_run_time_for_testing(std::chrono::seconds(2));
+        QFile::remove(scratch_.path() + "/grandchild.txt");
+        stand_in(QStringLiteral("sleep-host"));
+        QElapsedTimer clock;
+        clock.start();
+        QCOMPARE(refusal([&] { plugins::run_samples("plugin:invert", s, nullptr, Json::object()); }),
+                 QStringLiteral("plugin_runner: plugin invert did not finish in 2 seconds"));
+        QVERIFY(clock.elapsed() < 10000);
+        stand_in(QStringLiteral("flood-host"));
+        QVERIFY(refusal([&] { plugins::run_samples("plugin:invert", s, nullptr, Json::object()); }).startsWith(QStringLiteral("plugin_runner: plugin invert wrote back more than a picture")));
+        plugins::set_run_time_for_testing(std::chrono::seconds(0));
+#ifndef _WIN32
+        std::this_thread::sleep_for(std::chrono::seconds(4));
+        QVERIFY(!QFileInfo::exists(scratch_.path() + "/grandchild.txt"));
+#endif
         plugins::set_host_for_testing(genko::core::path_from_utf8(((scratch_.path() + "/no-such-host")).toStdString()));
         QCOMPARE(refusal([&] { plugins::run_samples("plugin:invert", s, nullptr, Json::object()); }),
                  QStringLiteral("plugin_runner: the WebAssembly plugins need genko-plugin-host beside Genko (it was not found), so plugin invert cannot run"));
