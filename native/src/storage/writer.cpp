@@ -534,6 +534,13 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     }
     std::erase(features, std::string(core::kFiltersFeature));
     if (core::uses_filters(doc) || !filter_files.empty()) features.emplace_back(core::kFiltersFeature);
+    // PC5 J-f (plugin-filters@1): the pictures plugin filters keep (what they made, shown where the plugin is not), and the
+    // feature while a smart object holds a plugin's filter
+    for (const auto& [ref, suffix] : core::smart::kept_pictures(doc)) {
+        if (const auto file = doc.smart_files.find(ref); file != doc.smart_files.end() && file->second) store.put_known(ref, *file->second, suffix);
+    }
+    std::erase(features, std::string(core::smart::kPluginFiltersFeature));
+    if (core::smart::uses_plugin_filters(doc)) features.emplace_back(core::smart::kPluginFiltersFeature);
     // PC4 節 D6 (vanishing-point@1): a page's planes of 消点 (its "vanishing"), the feature while a page keeps them
     core::validate_vanishing(doc);
     std::erase(features, std::string(core::kVanishingFeature));

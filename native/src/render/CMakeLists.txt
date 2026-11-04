@@ -46,6 +46,7 @@ genko_library(genko_render
     anim.cpp
     timelapse.cpp
     plugins.cpp
+    plugin_bands.cpp
     colour.cpp
     proof.cpp
     hdr_preview.cpp

@@ -1410,7 +1410,7 @@ private slots:
                 return genko::wording::error(QString::fromUtf8(e.what()));
             }
         };
-        QCOMPARE(print(1), QStringLiteral("プラグイン「offplug」は使う設定になっていません（レイヤー → プラグインの設定で選びます）"));
+        QCOMPARE(print(1), QStringLiteral("プラグイン「offplug」は使う設定になっていません（編集 → 環境設定 → プラグイン… で選びます）"));
         QCOMPARE(print(2), QStringLiteral("1"));
         QFile::remove(plugins + QStringLiteral("/offplug.py"));
     }

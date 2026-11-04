@@ -36,6 +36,8 @@ set(GENKO_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 set(GENKO_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 add_subdirectory(src)
+# (PC5 J-f: genko-plugin-host, the WebAssembly plugins' host — Rust, cargo; without it only those plugins are missing)
+include(GenkoPluginHost)
 # the distribution: cmake --install, cpack (M6; the app's: the headless build is not distributed)
 if(GENKO_BUILD_APP)
   include(GenkoPackage)

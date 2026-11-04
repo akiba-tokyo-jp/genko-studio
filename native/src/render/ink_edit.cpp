@@ -23,6 +23,7 @@
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
 #include "render/page_pixels.hpp"
+#include "render/plugins.hpp"
 #include "render/png.hpp"
 #include "render/layer_masks.hpp"
 #include "render/raster.hpp"
@@ -924,7 +925,13 @@ bool shown_in_page(const core::Page& page, const core::Layer& layer) {
 }  // namespace
 
 bool lends(std::string_view op, const core::Json& args) {
-    if (op == "filter_raster") return core::truthy_at(args, "kind") && core::py_str(args["kind"]).starts_with("plugin:");
+    if (op == "filter_raster") {
+        if (!core::truthy_at(args, "kind") || !core::py_str(args["kind"]).starts_with("plugin:")) return false;
+        // (PC5 J-f: a plugin that works in bands — a WebAssembly module, a native one of protocol 2 — works the inks
+        // themselves: render/raster_ops)
+        const std::string key = core::py_str(args["kind"]).substr(plugins::kPrefix.size());
+        return !(plugins::installed(key) && plugins::works_in_bands(key));
+    }
     // (PC3 C-c: Liquify's strokes move the inks themselves, render/distort_ops)
     if (op == "liquify" && core::truthy_at(args, "strokes")) return false;
     static constexpr std::array<std::string_view, 7> kOnTarget{"smudge", "liquify", "add_shape", "flood_fill", "gradient_fill",

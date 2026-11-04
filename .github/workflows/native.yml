@@ -107,6 +107,8 @@ jobs:
           key: libraw-0.22.2-${{ hashFiles('tools/ci/build_libraw.sh') }}
       - if: steps.libraw-cache.outputs.cache-hit != 'true'
         run: bash tools/ci/build_libraw.sh "${{ runner.temp }}/libraw"
+      - name: genko-plugin-host (WebAssembly plugins, Rust — crates by native/wasm-host/Cargo.lock; PC5 J-f)
+        run: bash tools/ci/build_wasm_host.sh "${{ runner.temp }}/wasm-host"
       - name: Qt (official binaries, LGPL modules only)
         uses: actions/cache@v4
         id: qt-cache

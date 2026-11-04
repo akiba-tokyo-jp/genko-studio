@@ -20,6 +20,7 @@
 #include <QTemporaryDir>
 
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <map>
 #include <stop_token>
@@ -134,7 +135,7 @@ private slots:
         // plugin.json that cannot be used
         install("badjson", "{not json");
         install("listjson", "[1, 2]");
-        install("protocol2", R"({"protocol": 2, "name": "x", "executable": "filter"})");
+        install("protocol2", R"({"protocol": 3, "name": "x", "executable": "filter"})");  // (PC5 J-f: 2 is protocol 2 now)
         install("noname", R"({"protocol": 1, "executable": "filter"})");
         install("noprogram", R"({"protocol": 1, "name": "x", "executable": "missing"})", false);
         install("outside", R"({"protocol": 1, "name": "x", "executable": "../negative/filter"})", false);
@@ -185,7 +186,7 @@ private slots:
         const QString cannot = QStringLiteral("the plugin.json of plugin %1 cannot be used (%2)");
         QCOMPARE(problem("badjson/"), cannot.arg("badjson", "it is not JSON"));
         QCOMPARE(problem("listjson/"), cannot.arg("listjson", "it is not a JSON object"));
-        QCOMPARE(problem("protocol2/"), cannot.arg("protocol2", "its protocol must be 1"));
+        QCOMPARE(problem("protocol2/"), cannot.arg("protocol2", "its protocol must be 1 or 2"));
         QCOMPARE(problem("noname/"), cannot.arg("noname", "its name must be a text"));
         QCOMPARE(problem("noprogram/"), cannot.arg("noprogram", "its program missing is not in its folder"));
         QCOMPARE(problem("outside/"), cannot.arg("outside", "its executable must be a path inside the plugin's folder"));
@@ -348,6 +349,93 @@ private slots:
         for (const auto& d : plugins::available()) offered.push_back(d.key);
         QVERIFY(std::find(offered.begin(), offered.end(), "fails") != offered.end());
         QVERIFY(std::find(offered.begin(), offered.end(), "badjson") == offered.end());
+        enable(false);
+    }
+
+    // PC5 J-f: protocol 2 — the picture in bands of f32 samples in its own colour model (render/plugin_bands): any depth,
+    // one grey channel, a CMYK page's inks; its settings with _image, its protocol in the environment; a refusal and a
+    // crash said as protocol 1's; plugin.json's overlap and area checked.
+    void protocolTwoBands() {
+        enable(true);
+        const auto v2 = [&](const std::string& name, const std::string& work, const std::string& more = {}) {
+            Json data = genko::core::parse_python_json(manifest(name, work));
+            data["protocol"] = 2;
+            if (!more.empty()) data.update(genko::core::parse_python_json(more));
+            return genko::core::dump(data, genko::core::DumpOptions{});
+        };
+        install("bands", v2("帯", "invert"));
+        install("bandsenv", v2("帯の環境", "environment"));
+        install("bandsfail", v2("帯で断る", "fail"));
+        install("bandscrash", v2("帯で落ちる", "crash"));
+        install("badoverlap", v2("x", "invert", R"({"overlap": 300})"));
+        install("badarea", v2("x", "invert", R"({"area": "page"})"));
+        QVERIFY(plugins::works_in_bands("bands"));
+        QVERIFY(!plugins::works_in_bands("negative"));  // (protocol 1: 8-bit RGBA)
+        for (const char* key : {"bands", "bandsenv", "bandsfail", "bandscrash"}) plugins::choose(key, true);
+        genko::render::plugin_bands::Samples s;
+        s.width = 300;  // (two tiles across: two bands)
+        s.height = 20;
+        s.depth = 16;
+        for (int i = 0; i < 300 * 20; ++i) {
+            for (const float v : {0.1f, 0.2f, 0.3f, 1.0f}) s.data.push_back(v);
+        }
+        plugins::run_samples("plugin:bands", s, nullptr, Json::object());
+        QVERIFY(std::abs(s.data[0] - 0.9f) < 1e-6f && std::abs(s.data[2] - 0.7f) < 1e-6f && s.data[3] == 1.0f);
+        QVERIFY(std::abs(s.data.back() - 1.0f) < 1e-6f && std::abs(s.data[s.data.size() - 2] - 0.7f) < 1e-6f);
+        plugins::run_samples("plugin:bands", s, nullptr, Json{{"red", 51}});  // (its settings reach it)
+        QVERIFY(std::abs(s.data[0] - 0.2f) < 1e-6f);
+        genko::render::plugin_bands::Samples grey;
+        grey.width = 4;
+        grey.height = 1;
+        grey.channels = 1;
+        grey.alpha = false;
+        grey.mode = genko::render::plugin_bands::Mode::Gray;
+        grey.data = {0.0f, 0.25f, 0.5f, 1.0f};
+        plugins::run_samples("plugin:bands", grey, nullptr, Json::object());
+        QVERIFY(grey.data == (std::vector<float>{1.0f, 0.75f, 0.5f, 0.0f}));
+        genko::render::plugin_bands::Samples env = s;
+        plugins::run_samples("plugin:bandsenv", env, nullptr, Json::object());
+        QCOMPARE(env.data[0], 1.0f);  // (GENKO_PLUGIN_PROTOCOL=2, no secrets)
+        // the 8-bit picture of a paint layer too
+        QCOMPARE(plugins::run("plugin:bands", picture()).getpixel(30, 30), (std::vector<double>{225, 135, 35, 255}));
+        QVERIFY(refusal([&] { plugins::run_samples("plugin:bandsfail", s, nullptr, Json::object()); }).startsWith("value: plugin bandsfail failed (no paper today)"));
+        QVERIFY(refusal([&] { plugins::run_samples("plugin:bandscrash", s, nullptr, Json::object()); }).startsWith("plugin_runner: plugin bandscrash stopped before it answered"));
+        // (review P2-4) one that never answers, stopped at the run's time with what it started; one that floods
+        install("bandssleep", v2("帯で眠る", "sleep"));
+        install("bandsflood", v2("帯であふれる", "flood"));
+        plugins::choose("bandssleep", true);
+        plugins::choose("bandsflood", true);
+        plugins::set_run_time_for_testing(std::chrono::seconds(2));
+        QFile::remove(folder_ + "/bandssleep/grandchild.txt");
+        QElapsedTimer clock;
+        clock.start();
+        QCOMPARE(refusal([&] { plugins::run_samples("plugin:bandssleep", s, nullptr, Json::object()); }),
+                 QStringLiteral("plugin_runner: plugin bandssleep did not finish in 2 seconds"));
+        QVERIFY(clock.elapsed() < 10000);
+        QVERIFY(refusal([&] { plugins::run_samples("plugin:bandsflood", s, nullptr, Json::object()); }).startsWith("plugin_runner: plugin bandsflood wrote back more than a picture"));
+        plugins::set_run_time_for_testing(std::chrono::seconds(0));
+#ifndef _WIN32
+        std::this_thread::sleep_for(std::chrono::seconds(4));
+        QVERIFY(!QFile::exists(folder_ + "/bandssleep/grandchild.txt"));  // (its process group stopped whole)
+#endif
+        // (overlap and area are protocol 2's: protocol 1 keeps them as keys it does not know — review P3-1)
+        install("oldarea", manifest("古い", "invert"));
+        {
+            Json data = genko::core::parse_python_json(manifest("古い", "invert"));
+            data["area"] = "page";
+            data["overlap"] = "2";
+            write(folder_ + "/oldarea/plugin.json", genko::core::dump(data, genko::core::DumpOptions{}));
+        }
+        QVERIFY(refusal([] { plugins::choose("oldarea", true); }).isEmpty());
+        QVERIFY(refusal([] { plugins::choose("badoverlap", true); }).contains("its overlap must be a whole number from 0 to 256"));
+        QVERIFY(refusal([] { plugins::choose("badarea", true); }).contains("its area must be content or canvas"));
+        // a plugin of protocol 1 takes 8-bit pictures only
+        plugins::choose("negative", true);
+        QVERIFY(refusal([&] { plugins::run_samples("plugin:negative", s, nullptr, Json::object()); }).startsWith("plugin_8bit"));
+        for (const char* key : {"bands", "bandsenv", "bandsfail", "bandscrash", "badoverlap", "badarea", "bandssleep", "bandsflood", "oldarea"}) {
+            plugins::choose(key, false);
+            QDir(folder_ + "/" + key).removeRecursively();
+        }
         enable(false);
     }
 

@@ -81,6 +81,7 @@
 #include "render/placed.hpp"
 #include "render/timelapse.hpp"
 #include "render/ops_registry.hpp"
+#include "render/smart_filters.hpp"
 
 namespace genko::app {
 
@@ -607,6 +608,7 @@ void MainWindow::preview_ops(const std::optional<core::Json>& ops) {
     }
     try {
         const core::CommandBus bus(render::ops_registry());
+        const render::smart_filters::PreviewScope previewing;  // (PC5 J-f: a preview keeps no plugin filter's picture)
         // (channels@1: what is previewed is what is applied: the pixel ops on the channel targeted)
         auto result = bus.apply(*session_->snapshot(), with_contents_target(with_channel_target(*ops)), core::Actor(session_->actor()));
         show_preview(std::move(result.doc));
@@ -1074,11 +1076,11 @@ void MainWindow::show_omitted(const QStringList& elements) {
                     .arg(words.join(QStringLiteral("・")));
     }
     if (!off.isEmpty()) {
-        text << QStringLiteral("プラグイン（%1）は使う設定になっていないため、その補正を表示していません（レイヤー → プラグインの設定）。")
+        text << QStringLiteral("プラグイン（%1）は使う設定になっていないため、その補正を表示していません（編集 → 環境設定 → プラグイン…）。")
                     .arg(off.join(QStringLiteral("・")));
     }
     if (!failed.isEmpty()) {
-        text << QStringLiteral("プラグイン（%1）を動かせなかったため、その補正を表示していません（Python と Pillow、プラグインの設定を確かめてください）。")
+        text << QStringLiteral("プラグイン（%1）を動かせなかったため、その補正を表示していません（Python と Pillow、編集 → 環境設定 → プラグイン… を確かめてください）。")
                     .arg(failed.join(QStringLiteral("・")));
     }
     unported_->setText(text.join(QLatin1Char(' ')));

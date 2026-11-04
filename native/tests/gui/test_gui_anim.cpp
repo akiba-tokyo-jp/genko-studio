@@ -8,6 +8,9 @@
 #include <QAction>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QLabel>
@@ -18,6 +21,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QTableWidget>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include "gui_support.hpp"
@@ -494,7 +498,7 @@ private slots:
         std::ofstream(folder / "tint" / "plugin.json")
             << R"({"protocol": 1, "name": "色づけ", "executable": "tint", "args": ["--soft", "a b"], "params": {"amount": {"label": "強さ", "min": 0, "max": 1, "default": 0.5}}})";
         std::ofstream(folder / "tint" / "tint") << "not a program: never started here";
-        std::ofstream(folder / "broken" / "plugin.json") << R"({"protocol": 2, "name": "x", "executable": "x"})";
+        std::ofstream(folder / "broken" / "plugin.json") << R"({"protocol": 3, "name": "x", "executable": "x"})";  // (PC5 J-f: 2 is protocol 2 now)
         QString question;
         s.answers.responder->question = [&](const QString& title, const QString& text) {
             question = text;
@@ -524,7 +528,7 @@ private slots:
         w->action("act_plugin_settings")->trigger();
         QCOMPARE(tint_row, QStringLiteral("tint（プログラム） — 色づけ"));
         QCOMPARE(broken_row, QStringLiteral("broken（プログラム）（使えません）"));
-        QCOMPARE(broken_tip, QStringLiteral("プラグイン「broken」の plugin.json が使えません（protocol は 1 にします）"));
+        QCOMPARE(broken_tip, QStringLiteral("プラグイン「broken」の plugin.json が使えません（protocol は 1 か 2 にします）"));
         QVERIFY(!broken_checkable);
         QVERIFY(question.startsWith(QStringLiteral("「tint」（プログラム）を動かしてよいですか。")));
         QVERIFY2(question.contains(QStringLiteral("動かすプログラム: tint\n引数: --soft \"a b\"")), qPrintable(question));  // (what will run, as plugin.json says)
@@ -598,6 +602,117 @@ private slots:
         render::plugins::save_settings(off);
         std::filesystem::remove(folder / "twin.py");
         std::filesystem::remove_all(folder / "twin");
+    }
+
+    // PC5 J-f (edit.preferences.plugIns, plugin.install, plugin.remove, plugin.reload): 編集 → 環境設定 ▸ プラグイン… — a
+    // WebAssembly module listed by its file and size (nothing run), chosen with its own question (a sandbox), then named by
+    // its manifest and offered among the filters; インストール… copies one in unchosen, 取り除く takes it out, the additional
+    // folder is kept and read; フィルター → プラグイン ▸ プラグインをインストール… does the same as インストール….
+    void webAssemblyPluginsInTheirPane() {
+        Studio s;
+        app::MainWindow* w = s.window.get();
+        if (QFileInfo::exists(QStringLiteral(GENKO_TEST_PLUGIN_HOST))) render::plugins::set_host_for_testing(std::filesystem::path(GENKO_TEST_PLUGIN_HOST));
+        const bool host = QFileInfo::exists(QStringLiteral(GENKO_TEST_PLUGIN_HOST));
+        const std::filesystem::path folder = render::plugins::folder();
+        std::filesystem::create_directories(folder);
+        std::filesystem::copy_file(GENKO_TEST_DATA "/plugins/invert.wasm", folder / "invert.wasm", std::filesystem::copy_options::overwrite_existing);
+        QCOMPARE(w->action("act_plugin_settings")->text(), QStringLiteral("プラグイン…"));
+        QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_preferences"))->actions().contains(w->action("act_plugin_settings")));
+        QString question, row_text, row_after;
+        const QString extra = QDir::tempPath() + QStringLiteral("/genko-gui-extra-%1").arg(QCoreApplication::applicationPid());
+        QDir().mkpath(extra);
+        s.answers.responder->question = [&](const QString& title, const QString& text) {
+            if (title == QStringLiteral("プラグインを動かす")) question = text;
+            return true;
+        };
+        s.answers.responder->exec = [&](QDialog* dialog) {
+            auto* d = qobject_cast<app::PluginsDialog*>(dialog);
+            if (d == nullptr) return int(QDialog::Rejected);
+            if (d->windowTitle() != QStringLiteral("プラグイン")) return int(QDialog::Rejected);
+            d->enabled->setChecked(true);
+            d->use_extra->setChecked(true);
+            d->extra->setText(extra);
+            for (int i = 0; i < d->list->count(); ++i) {
+                QListWidgetItem* row = d->list->item(i);
+                if (row->data(Qt::UserRole).toString() == QStringLiteral("invert")) {
+                    row_text = row->text();
+                    row->setCheckState(Qt::Checked);
+                }
+            }
+            return d->keep() ? int(QDialog::Accepted) : int(QDialog::Rejected);
+        };
+        w->action("act_plugin_settings")->trigger();
+        QCOMPARE(row_text, QStringLiteral("invert.wasm  1 KB"));  // (its file and size: nothing ran to list it)
+        QVERIFY2(question.startsWith(QStringLiteral("「invert.wasm」（WebAssembly）を動かしてよいですか。")), qPrintable(question));
+        QVERIFY(question.contains(QStringLiteral("ファイルもネットも使えません")));
+        QVERIFY(render::plugins::allowed("invert"));
+        QVERIFY(render::plugins::settings().use_extra_folder);
+        QCOMPARE(QString::fromStdString(render::plugins::settings().extra_folder), extra);
+        if (host) {  // (named by its manifest once chosen, among the filters)
+            QCOMPARE(plugin_filters(w).at(QStringLiteral("plugin:invert")), QStringLiteral("Invert (WebAssembly)"));
+            s.answers.responder->exec = [&](QDialog* dialog) {
+                auto* d = qobject_cast<app::PluginsDialog*>(dialog);
+                if (d == nullptr) return int(QDialog::Rejected);
+                for (int i = 0; i < d->list->count(); ++i) {
+                    if (d->list->item(i)->data(Qt::UserRole).toString() == QStringLiteral("invert")) row_after = d->list->item(i)->text();
+                }
+                return int(QDialog::Rejected);
+            };
+            w->action("act_plugin_settings")->trigger();
+            QCOMPARE(row_after, QStringLiteral("invert.wasm — Invert (WebAssembly) 1.0.0（PhotoCraft contributors）  1 KB"));
+        }
+        // インストール… / 取り除く / 読み直す; the menu's プラグインをインストール…
+        QFile::copy(QStringLiteral(GENKO_TEST_DATA "/plugins/invert.wasm"), extra + QStringLiteral("/../genko-gui-copy.wasm"));
+        const QString copy = QDir(extra + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("genko-gui-copy.wasm"));
+        bool installed = false, removed = false;
+        int rows_extra = -1;
+        s.answers.responder->exec = [&](QDialog* dialog) {
+            auto* d = qobject_cast<app::PluginsDialog*>(dialog);
+            if (d == nullptr) return int(QDialog::Rejected);
+            installed = d->install_file(copy);
+            int at = -1;
+            for (int i = 0; i < d->list->count(); ++i) {
+                if (d->list->item(i)->data(Qt::UserRole).toString() == QStringLiteral("genko-gui-copy")) at = i;
+            }
+            QFile::copy(QStringLiteral(GENKO_TEST_DATA "/plugins/invert.wasm"), extra + QStringLiteral("/fromextra.wasm"));
+            d->reload();
+            rows_extra = 0;
+            for (int i = 0; i < d->list->count(); ++i) rows_extra += d->list->item(i)->data(Qt::UserRole).toString() == QStringLiteral("fromextra") ? 1 : 0;
+            for (int i = 0; i < d->list->count(); ++i) {
+                if (d->list->item(i)->data(Qt::UserRole).toString() == QStringLiteral("genko-gui-copy")) at = i;
+            }
+            removed = at >= 0 && d->remove_row(at);
+            return int(QDialog::Rejected);
+        };
+        w->action("act_plugin_settings")->trigger();
+        QVERIFY(installed);
+        QVERIFY(removed);
+        QCOMPARE(rows_extra, 1);
+        QVERIFY(!std::filesystem::exists(folder / "genko-gui-copy.wasm"));
+        s.answers.responder->open_path = [&](const QString&, const QString&) { return copy; };
+        w->action("act_plugin_install")->trigger();
+        QVERIFY(std::filesystem::exists(folder / "genko-gui-copy.wasm"));
+        QVERIFY(!render::plugins::allowed("genko-gui-copy"));  // (installed: not chosen)
+        QVERIFY(w->last_notice().startsWith(QStringLiteral("プラグイン「genko-gui-copy」を入れました")));
+        // the WebAssembly plugins' words
+        QCOMPARE(genko::wording::error(QStringLiteral("ops[0] filter_raster: plugin loop failed (plug-in exceeded its instruction budget)")),
+                 QStringLiteral("プラグイン「loop」が命令の数の上限を超えたため止めました（終わらない繰り返しの可能性があります）"));
+        QCOMPARE(genko::wording::error(QStringLiteral("the module of plugin imports cannot be used (plug-in ABI: the module imports `wasi_snapshot_preview1.fd_write`, "
+                                                    "but plug-ins get no host imports (no WASI, files or network))")),
+                 QStringLiteral("プラグイン「imports」の WebAssembly のモジュールが使えません（外の機能（wasi_snapshot_preview1.fd_write）を読み込もうとしています。"
+                                "プラグインはファイル・ネット・WASI を使えません）"));
+        QCOMPARE(genko::wording::error(QStringLiteral("the WebAssembly plugins need genko-plugin-host beside Genko (it was not found), so plugin x cannot run")),
+                 QStringLiteral("WebAssembly のプラグインを動かす genko-plugin-host が Genko と同じフォルダーに無いため、プラグイン「x」を動かせません"));
+        std::filesystem::remove(folder / "genko-gui-copy.wasm");
+        std::filesystem::remove(folder / "invert.wasm");
+        QFile::remove(copy);
+        QDir(extra).removeRecursively();
+        render::plugins::Settings off = render::plugins::settings();
+        off.enabled = false;
+        off.use_extra_folder = false;
+        off.extra_folder.clear();
+        off.chosen = Json::object();
+        render::plugins::save_settings(off);
     }
 
     void timelapseNeedsASavedBook() {
