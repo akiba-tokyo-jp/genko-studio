@@ -286,6 +286,14 @@ struct Picture {
     std::size_t page = 0;
     std::optional<fs::path> file;                    // (a file: formats::open_file of it, one at a time)
     std::int64_t width = 0, height = 0;              // (a file's pixels as its header says them)
+    // A book's page as a picture.
+    static Picture of(std::string name, std::shared_ptr<const core::Document> doc, std::size_t page = 0) {
+        Picture p;
+        p.name = std::move(name);
+        p.doc = std::move(doc);
+        p.page = page;
+        return p;
+    }
 };
 // The files as pictures, not opened: their sizes read from their headers (render::codecs::header_size; a file whose header
 // does not say it — a PSD, a RAW file … — opened once to see its page, then let go), so what they make can be weighed against

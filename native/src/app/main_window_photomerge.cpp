@@ -234,7 +234,7 @@ Sources pictures_of(const SourceFiles& source, const std::vector<Document>& docs
             page = static_cast<std::size_t>(d.page_index);
         }
         if (snap->is_deferred(page)) throw core::Error("page_not_loaded", "the page is not read yet");
-        out.open.push_back(automate::Picture{d.title().toStdString(), snap, page});
+        out.open.push_back(automate::Picture::of(d.title().toStdString(), snap, page));
     }
     return out;
 }

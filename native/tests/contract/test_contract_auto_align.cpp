@@ -318,7 +318,7 @@ private slots:
             formats::Opened o = formats::open_file(render::write_png(crop(sc, x, y, 260, 220)), name);
             core::Document d = std::move(o.doc);
             if (x == 190) d = run(d, Json::array({Json{{"op", "convert_profile"}, {"page", 1}, {"profile", "prophoto-compat"}}}));
-            pictures.push_back({name, std::make_shared<const core::Document>(std::move(d)), 0});
+            pictures.push_back(service::automate::Picture::of(name, std::make_shared<const core::Document>(std::move(d))));
         }
         QVERIFY(pictures[1].doc->page(0).rgb && !pictures[1].doc->page(0).rgb->profile.empty());
         service::automate::PhotomergeOptions options;
@@ -492,7 +492,7 @@ private slots:
         for (std::size_t i = 0; i < offs.size(); ++i) {
             const std::string name = "p" + std::to_string(i) + ".png";
             formats::Opened o = formats::open_file(render::write_png(crop(sc, offs[i][0], offs[i][1], 260, 220)), name);
-            pictures.push_back({name, std::make_shared<const core::Document>(std::move(o.doc)), 0});
+            pictures.push_back(service::automate::Picture::of(name, std::make_shared<const core::Document>(std::move(o.doc))));
         }
         service::automate::PhotomergeOptions options;
         options.layout = "reposition";
@@ -516,7 +516,7 @@ private slots:
         std::vector<service::automate::Picture> flat;
         for (int i = 0; i < 2; ++i) {
             formats::Opened o = formats::open_file(render::write_png(render::Image::create("RGB", render::Size{200, 150}, render::Ink{90, 90, 90})), "f.png");
-            flat.push_back({"f.png", std::make_shared<const core::Document>(std::move(o.doc)), 0});
+            flat.push_back(service::automate::Picture::of("f.png", std::make_shared<const core::Document>(std::move(o.doc))));
         }
         try {
             (void)service::automate::photomerge(flat, service::automate::PhotomergeOptions{});
@@ -560,7 +560,7 @@ private slots:
         std::vector<service::automate::Picture> pictures;
         for (const auto& [name, w, h, v] : {std::tuple{"a.png", 40, 30, 60}, std::tuple{"b.png", 50, 20, 120}, std::tuple{"c.png", 30, 45, 200}}) {
             formats::Opened o = formats::open_file(render::write_png(render::Image::create("RGB", render::Size{w, h}, render::Ink{v, v, v})), name);
-            pictures.push_back({name, std::make_shared<const core::Document>(std::move(o.doc)), 0});
+            pictures.push_back(service::automate::Picture::of(name, std::make_shared<const core::Document>(std::move(o.doc))));
         }
         service::automate::StackOptions options;
         options.actor = core::Actor("human:作者");
@@ -586,7 +586,7 @@ private slots:
             render::Image shot = render::Image::create("RGB", render::Size{40, 30}, render::Ink{102, 102, 102});
             if (k == 2) shot.paste(render::Ink{255, 255, 255}, render::Box{10, 10, 20, 20});
             formats::Opened o = formats::open_file(render::write_png(shot), "s" + std::to_string(k) + ".png");
-            pictures.push_back({"s" + std::to_string(k) + ".png", std::make_shared<const core::Document>(std::move(o.doc)), 0});
+            pictures.push_back(service::automate::Picture::of("s" + std::to_string(k) + ".png", std::make_shared<const core::Document>(std::move(o.doc))));
         }
         service::automate::StackOptions options;
         options.actor = core::Actor("human:作者");
