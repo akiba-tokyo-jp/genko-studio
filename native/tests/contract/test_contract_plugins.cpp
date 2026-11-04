@@ -609,8 +609,8 @@ private slots:
         genko::render::Image grey = genko::render::Image::create("RGBA", genko::render::Size{240, 320}, genko::render::Ink{255, 255, 255, 255});
         grey.paste(genko::render::Ink{90, 90, 90, 255}, genko::render::Box{20, 20, 180, 260});
         genko::core::Document file = genko::core::new_episode("w", genko::core::Num(1), 1, genko::core::PageSpec::a4_mono());
-        file = applied(file, Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", genko::core::b64encode(genko::render::write_png(grey))}, {"name", "grey.png"}, {"id", "file"}}}));
-        const std::string placed = file.page(0).layers.back().id;
+        file = applied(file, Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", genko::core::b64encode(genko::render::write_png(grey))}, {"name", "grey.png"}, {"new_id", "file"}}}));
+        const std::string placed = "file";
         QVERIFY(layer_of(file, placed).smart);
         file = applied(file, Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", placed}, {"kind", "plugin:invert"}}}));
         QVERIFY((*layer_of(file, placed).smart)["filters"][0].contains("kept"));
@@ -635,7 +635,7 @@ private slots:
         plugins::choose("invert", true);
         const genko::core::Document before = applied(painted(), Json::array({Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"p"})}, {"new_id", "so"}}}));
         const genko::core::Document doc = applied(before, Json::array({Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "plugin:invert"}},
-                                                                       Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "gaussian_blur"}, {"radius", 2}}}));
+                                                                       Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "blur"}, {"radius", 2}}}));
         const Json kept = (*layer_of(doc, "so").smart)["filters"][0]["kept"];
         const std::string ref = kept["asset"].get<std::string>(), suffix = kept["suffix"].get<std::string>();
         const std::filesystem::path book = genko::core::path_from_utf8((scratch_.path() + "/book").toStdString());
@@ -648,8 +648,20 @@ private slots:
         const genko::storage::LoadResult again = genko::storage::load_document(book);
         QVERIFY2(again.report.clean(), again.report.to_json().dump().c_str());
         QCOMPARE((*layer_of(again.document, "so").smart)["filters"], (*layer_of(doc, "so").smart)["filters"]);
-        QVERIFY(again.document.smart_files.contains(ref));
-        QCOMPARE(*again.document.smart_files.at(ref), *doc.smart_files.at(ref));
+        // (the kept picture read from the book's files where the plugin cannot run: the look as before it was saved)
+        {
+            enable(false);
+            genko::render::smart::clear_caches();
+            plugins::forget_made();
+            genko::render::RenderOptions one, two;
+            const genko::render::Image held = genko::render::render_page(doc.page(0), 40, one, &doc).image;
+            genko::render::smart::clear_caches();
+            const genko::render::Image read = genko::render::render_page(again.document.page(0), 40, two, &again.document).image;
+            QVERIFY2(apart(held, read) < 0.01, qPrintable(QString::number(apart(held, read))));
+            const genko::render::Image plain = genko::render::render_page(before.page(0), 40, two, &before).image;
+            QVERIFY2(apart(plain, read) > 0.05, qPrintable(QString::number(apart(plain, read))));  // (not the smart object without its filters)
+            enable(true);
+        }
         // `genko gc`: the kept picture stays (an asset nothing refers to, as old, goes)
         const std::string orphan = genko::storage::AssetStore(book).put_bytes("nothing refers to me", ".png");
         for (const auto& entry : std::filesystem::recursive_directory_iterator(book / "assets")) {
@@ -702,7 +714,7 @@ private slots:
         plugins::choose("invert", true);
         QVERIFY(add(so, "plugin:eight").isEmpty());  // (an 8-bit page: taken)
         auto inks = genko::core::new_episode("w", genko::core::Num(1), 1, genko::core::PageSpec::custom(50, 50, 20, 20, 1, 2, 2, 2, 2, 200, "color"));
-        inks = applied(inks, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "cmyk"}, {"depth", 8}},
+        inks = applied(inks, Json::array({Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "lab"}, {"depth", 16}},
                                           Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "p"}},
                                           Json{{"op", "fill"}, {"page", 1}, {"layer_id", "p"}, {"x_mm", 25}, {"y_mm", 25}, {"rgb", Json::array({100, 150, 200})}},
                                           Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"p"})}, {"new_id", "so"}}}));

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "render/imaging.hpp"
 #include "render/page.hpp"

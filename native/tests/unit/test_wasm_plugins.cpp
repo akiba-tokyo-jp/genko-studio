@@ -393,8 +393,8 @@ private slots:
     }
 
     // (review P2-1) A large picture is never held whole in f32: read and written back band by band where it is kept, what
-    // the run holds borrowed from the imaging budget — a B4 page at 600 dpi (6071 × 8598, 835 MB in f32) needs a tenth of
-    // that, a picture of 3000 × 2000 runs under far less than its own f32 —, refused (OpError) when the budget has not
+    // the run holds borrowed from the imaging budget — a B4 page at 600 dpi (6071 × 8598, 835 MB in f32) needs a
+    // sixteenth of that (a fifth with the most overlap), a picture of 3000 × 2000 runs under far less than its own f32 —, refused (OpError) when the budget has not
     // that much left.
     void largePictureHeldInBands() {
         choose("invert");
@@ -404,7 +404,10 @@ private slots:
             bands::Shape shape;
             shape.overlap = overlap;
             const std::uint64_t held = bands::held_bytes(6071, 8598, 4, shape);
-            QVERIFY2(held < (std::uint64_t{96} << 20) && held * 8 < whole_b4, qPrintable(QStringLiteral("%1 MiB").arg(mb(held))));
+            // (no overlap: about 47 MiB; the most overlap, 256 pixels each side, makes each band 1.5 × 3 times as large:
+            // about 155 MiB — a fifth of the picture in f32)
+            const std::uint64_t most = overlap == 0 ? std::uint64_t{64} << 20 : std::uint64_t{192} << 20;
+            QVERIFY2(held < most && held * 5 < whole_b4, qPrintable(QStringLiteral("%1 MiB").arg(mb(held))));
         }
         const int w = 3000, h = 2000;
         const auto sample = [](int x, int y, unsigned c) { return c == 3 ? 1.0f : static_cast<float>((x * 3 + y * 5 + int(c) * 7) % 101) / 100.0f; };
