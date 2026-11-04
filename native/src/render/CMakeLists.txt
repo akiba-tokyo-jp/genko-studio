@@ -283,6 +283,9 @@ genko_library(genko_render
     # PC5 I-c (アートボード: artboards@1 — the ops, PSD's artb)
     ops_artboards.cpp
     psd_artboards.cpp
+    # PC5 I-h (HDR Pro に統合・写真の切り抜きと角度補正: the exposures merged and tone mapped, the photos on a scan)
+    hdr_merge.cpp
+    scancrop.cpp
     # PC5 I-g (自動整列・自動合成・Photomerge: features, panorama, pyramid and their ops)
     features.cpp
     panorama.cpp

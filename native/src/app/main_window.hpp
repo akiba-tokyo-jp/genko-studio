@@ -883,6 +883,10 @@ private:
     void lens_batch_dialog();
     void script_events_dialog();
     void browse_script();
+    // PC5 I-h (app/main_window_automate.cpp, app/hdr_dialog.hpp): 写真の切り抜きと角度補正 (the page in front: its photos new
+    // books) and HDR Pro に統合… (its two windows; the exposures read and merged on a worker, a progress window stopping it).
+    void crop_photos();
+    void merge_to_hdr_dialog();
     std::optional<service::automate::Inputs> inputs_of(const SourceChoice& source);
     bool run_automate(const QString& title, const std::vector<service::automate::Input>& inputs, const core::Json& steps,
                       const service::automate::Output& output, service::automate::Options options, const core::Json& skipped);

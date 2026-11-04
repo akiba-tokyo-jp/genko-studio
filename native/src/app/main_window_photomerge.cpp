@@ -26,6 +26,7 @@
 #include "app/open_dialog.hpp"
 #include "app/photomerge_dialog.hpp"
 #include "app/session.hpp"
+#include "app/stoppable.hpp"
 #include "core/actor.hpp"
 #include "core/paths.hpp"
 #include "render/fx.hpp"
@@ -55,8 +56,7 @@ void MainWindow::build_photomerge_actions() {
 }
 
 void MainWindow::build_photomerge_menus() {
-    // (自動処理 ▸: Photomerge… last, after a separator — Photoshop's order, after HDR Pro に統合…)
-    if (!automate_menu_->actions().isEmpty() && !automate_menu_->actions().back()->isSeparator()) automate_menu_->addSeparator();
+    // (自動処理 ▸: Photomerge… last, right after HDR Pro に統合… — one group, Photoshop's order: the review's P3-8)
     automate_menu_->addAction(action(QStringLiteral("act_photomerge")));
     automate_menu_->menuAction()->setVisible(true);
     // (スクリプト ▸: ファイルをスタックとして読み込み…・統計… after スクリプトイベントマネージャー…, before 参照…)
@@ -129,65 +129,22 @@ QStringList open_titles(const std::vector<Document>& docs) {
 }  // namespace
 
 void MainWindow::made_book(const QString& title, const std::function<formats::Opened()>& make_it) {
+    // (the review's P2-6, and the coordinator's: I-h's run_stoppable — the progress window on the heap, one owner, its own
+    // cancel taken off, 中止 asking the work to stop, a wait left early stopping it first —, its progress the render work's)
     const QPointer<MainWindow> alive(this);
-    auto stop = std::make_shared<std::stop_source>();
-    auto done = std::make_shared<std::atomic<double>>(0.0);
-    // (the review's P2-6: the progress window on the heap, watched — one owner, the window —, its own cancel taken off: 中止
-    // asks the work to stop and says so, the window staying until the work is back, as send_filter's)
-    const QPointer<QProgressDialog> progress = new QProgressDialog(QStringLiteral("%1を作っています…").arg(title), QStringLiteral("中止"), 0, 1000, this);
-    progress->setObjectName(QStringLiteral("made_book_progress"));
-    progress->setWindowTitle(title);
-    progress->setWindowModality(Qt::ApplicationModal);
-    progress->setMinimumDuration(300);
-    progress->setAutoClose(false);
-    progress->setAutoReset(false);
-    QObject::disconnect(progress, SIGNAL(canceled()), progress, SLOT(cancel()));
-    QObject::connect(progress, &QProgressDialog::canceled, progress, [stop, p = progress.data(), title] {
-        stop->request_stop();
-        p->setLabelText(QStringLiteral("%1を中止しています…").arg(title));
-    });
-    QTimer tick;
-    tick.setInterval(100);
-    QObject::connect(&tick, &QTimer::timeout, progress, [p = progress.data(), done] { p->setValue(static_cast<int>(done->load() * 1000)); });
-    tick.start();
-    struct Made {
-        std::optional<formats::Opened> opened;
-        std::string error;
-        bool cancelled = false;
-    };
-    QFutureWatcher<Made> watcher;
-    QEventLoop loop;
-    QObject::connect(&watcher, &QFutureWatcher<Made>::finished, &loop, &QEventLoop::quit);
-    watcher.setFuture(QtConcurrent::run([make_it, token = stop->get_token(), done]() -> Made {
-        const render::segment::StopScope scope(token);
-        const render::fx::ProgressScope progress_scope(*done);
-        try {
-            return Made{make_it(), {}, false};
-        } catch (const render::Cancelled&) {
-            return Made{std::nullopt, {}, true};
-        } catch (const std::exception& error) {
-            return Made{std::nullopt, error.what(), false};
-        }
-    }));
-    if (!watcher.isFinished()) loop.exec();
-    if (!watcher.isFinished()) stop->request_stop();  // (the loop left early — the app quitting —: stopped, then waited for)
-    watcher.waitForFinished();
-    tick.stop();
-    if (progress) {
-        progress->hide();
-        progress->deleteLater();
+    std::optional<formats::Opened> made;
+    try {
+        made = run_stoppable(this, title, QStringLiteral("%1を作っています…").arg(title), [make_it](const std::function<bool()>&) { return make_it(); });
+    } catch (const std::exception& error) {
+        if (alive) flash(QStringLiteral("%1: %2").arg(title, wording::error(QString::fromUtf8(error.what()))), 8000, true);
+        return;
     }
     if (!alive) return;
-    Made made = watcher.result();
-    if (made.cancelled || stop->stop_requested()) {
+    if (!made) {
         flash(QStringLiteral("%1を中止しました").arg(title), 4000);
         return;
     }
-    if (!made.opened) {
-        flash(QStringLiteral("%1: %2").arg(title, wording::error(QString::fromStdString(made.error))), 8000, true);
-        return;
-    }
-    add_picture_book(std::move(made.opened->doc), made.opened->notes);
+    add_picture_book(std::move(made->doc), made->notes);
 }
 
 namespace {

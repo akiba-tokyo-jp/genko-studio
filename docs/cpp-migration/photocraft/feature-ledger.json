@@ -5739,9 +5739,17 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-h、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/scancrop.cpp",
+        "native/src/service/automate_photos.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/main_window_automate.cpp",
+        "native/tests/unit/test_scancrop.cpp",
+        "native/tests/contract/test_contract_hdr.cpp",
+        "native/tests/gui/test_gui_automate.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -5885,9 +5893,19 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 I-h、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/render/hdr_merge.cpp",
+        "native/src/render/raw.cpp",
+        "native/src/service/automate_photos.cpp",
+        "native/src/api/cli.cpp",
+        "native/src/app/main_window_automate.cpp",
+        "native/src/app/hdr_dialog.cpp",
+        "native/tests/unit/test_hdr_merge.cpp",
+        "native/tests/contract/test_contract_hdr.cpp",
+        "native/tests/gui/test_gui_automate.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

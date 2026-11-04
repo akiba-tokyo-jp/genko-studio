@@ -10,10 +10,19 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QPointer>
 #include <QProgressDialog>
 #include <QSpinBox>
+#include <QEventLoop>
+#include <QFutureWatcher>
+#include <QtConcurrent>
 
 #include <algorithm>
+#include <atomic>
+#include <exception>
+#include <functional>
+#include <optional>
+#include <type_traits>
 #include <cmath>
 #include <filesystem>
 #include <utility>
@@ -21,14 +30,18 @@
 #include "app/actions.hpp"
 #include "app/ask.hpp"
 #include "app/automate_dialogs.hpp"
+#include "app/hdr_dialog.hpp"
 #include "app/main_window.hpp"
 #include "app/open_dialog.hpp"
 #include "app/session.hpp"
+#include "app/stoppable.hpp"
 #include "core/paths.hpp"
 #include "core/actor.hpp"
 #include "service/automate.hpp"
+#include "service/automate_photos.hpp"
 #include "service/script_events.hpp"
 #include "service/wording.hpp"
+#include "render/page.hpp"
 
 namespace genko::app {
 
@@ -55,6 +68,11 @@ void MainWindow::build_automate_actions() {
          QStringLiteral("起動・新規・開く・保存・閉じる・プリント・書き出しのときに流す手順を結び付けます"));
     make(QStringLiteral("act_script_browse"), QStringLiteral("参照…"), [this] { browse_script(); }, {},
          QStringLiteral("手順のファイル（操作の JSON か 1 行 1 操作）を選んで、開いている原稿に流します（genko script と同じ）"));
+    // PC5 I-h: 写真の切り抜きと角度補正, HDR Pro に統合… (new books: the page and the pictures they read are not changed)
+    make(QStringLiteral("act_crop_straighten_photos"), QStringLiteral("写真の切り抜きと角度補正"), [this] { crop_photos(); }, {},
+         QStringLiteral("スキャンしたページの写真を 1 枚ずつ見つけ、傾きを直して新しい原稿にします（元のページは変わりません）"));
+    make(QStringLiteral("act_merge_to_hdr_pro"), QStringLiteral("HDR Pro に統合…"), [this] { merge_to_hdr_dialog(); }, {},
+         QStringLiteral("露出違いの画像を 1 枚の HDR 画像（32 bit）か、トーンを整えた 16・8 bit の画像にして新しい原稿にします"));
     build_photomerge_actions();  // (PC5 I-g: Photomerge…, ファイルをスタックとして読み込み…・統計…, 編集's レイヤーを自動整列…・自動合成…)
 }
 
@@ -62,9 +80,15 @@ void MainWindow::build_automate_menus() {
     // (the later groups put their commands in automate_menu_ and scripts_menu_ here, in Photoshop's order)
     for (const char* name : {"act_batch", "act_create_droplet"}) automate_menu_->addAction(action(QString::fromLatin1(name)));
     automate_menu_->addSeparator();
+    // (PC5 I-h: 写真の切り抜きと角度補正 — I-f's コンタクトシート II… after it —, then a separator)
+    automate_menu_->addAction(action(QStringLiteral("act_crop_straighten_photos")));
+    automate_menu_->addSeparator();
     for (const char* name : {"act_conditional_mode_change", "act_fit_image", "act_lens_correction_batch"}) {
         automate_menu_->addAction(action(QString::fromLatin1(name)));
     }
+    // (PC5 I-h: HDR Pro に統合… last, after a separator — I-g's Photomerge… after it)
+    automate_menu_->addSeparator();
+    automate_menu_->addAction(action(QStringLiteral("act_merge_to_hdr_pro")));
     // スクリプト ▸: 画像プロセッサー… first, then すべてのマスクを統合 (PC3 B2) / スクリプトイベントマネージャー… / 参照…
     const QList<QAction*> scripts = scripts_menu_->actions();
     scripts_menu_->insertAction(scripts.isEmpty() ? nullptr : scripts.front(), action(QStringLiteral("act_image_processor")));
@@ -465,6 +489,158 @@ void MainWindow::script_event(service::script_events::Event event) {
             break;
         }
     }
+}
+
+
+// --- PC5 I-h: HDR Pro に統合…・写真の切り抜きと角度補正 --------------------------------------------------------------------------
+// (the work on a worker with its progress window and 中止: app/stoppable.hpp's run_stoppable — the review's P2-4)
+
+void MainWindow::crop_photos() {
+    const core::Page* page = current_page();
+    if (page == nullptr) {
+        flash(QStringLiteral("原稿を開いていないので、写真の切り抜きと角度補正をしませんでした"), 6000, true);
+        return;
+    }
+    // (the page shown, by its id — in コンテンツを編集's tab its contents' page —, read as it is now: the book unchanged)
+    const std::shared_ptr<const core::Document> now = contents_ ? shown_book() : session_->snapshot();
+    const std::optional<std::size_t> index = shown_page_at(now, page);
+    if (!index) return;
+    const QString title = QStringLiteral("写真の切り抜きと角度補正");
+    const QPointer<MainWindow> alive(this);
+    std::optional<std::vector<formats::Opened>> made;
+    try {
+        const formats::OpenOptions options = file_open_options();
+        made = run_stoppable(this, title, QStringLiteral("写真を探しています…"), [now, at = *index, options](const std::function<bool()>& stopped) {
+            return service::automate::crop_and_straighten(*now, at, options, nullptr, stopped);
+        });
+    } catch (const std::exception& error) {
+        if (alive) flash(QStringLiteral("%1: %2").arg(title, wording::error(QString::fromUtf8(error.what()))), 8000, true);
+        return;
+    }
+    if (!alive) return;
+    if (!made) {
+        flash(QStringLiteral("%1を中止しました").arg(title), 4000);
+        return;
+    }
+    if (made->empty()) {
+        flash(QStringLiteral("%1: 一様な背景の上に写真が見つかりませんでした").arg(title), 6000, true);
+        return;
+    }
+    const std::size_t count = made->size();
+    for (formats::Opened& book : *made) add_picture_book(std::move(book.doc), book.notes);
+    flash(QStringLiteral("%1: %2 枚の写真を新しい原稿にしました").arg(title).arg(count), 6000);
+}
+
+void MainWindow::merge_to_hdr_dialog() {
+    namespace automate = service::automate;
+    const QString title = QStringLiteral("HDR Pro に統合");
+    std::vector<std::pair<QString, int>> open;
+    for (std::size_t i = 0; i < documents_.size(); ++i) open.emplace_back(documents_[i].title(), static_cast<int>(i));
+    HdrFilesDialog chosen(this, open);
+    if (ask::exec(&chosen) != QDialog::Accepted) return;
+    // (what to read, in order: a file, or a book open here — its page shown, as it is now)
+    std::vector<automate::HdrSource> sources;
+    try {
+        if (chosen.use->currentData().toString() == QLatin1String("folder")) {
+            const automate::Inputs inputs =
+                automate::list_inputs({core::path_from_utf8(QDir::fromNativeSeparators(chosen.folder->text().trimmed()).toStdString())});
+            for (const automate::Input& input : inputs.items) {
+                if (!input.book) sources.push_back(automate::HdrSource{input.path, nullptr, 0, core::path_to_utf8(input.path.filename())});
+            }
+        } else {
+            for (int i = 0; i < chosen.files->count(); ++i) {
+                const QString data = chosen.files->item(i)->data(Qt::UserRole).toString();
+                if (data.startsWith(QLatin1String("file:"))) {
+                    const fs::path file = core::path_from_utf8(data.mid(5).toStdString());
+                    sources.push_back(automate::HdrSource{file, nullptr, 0, core::path_to_utf8(file.filename())});
+                    continue;
+                }
+                const int tab = data.mid(5).toInt();
+                if (tab < 0 || tab >= static_cast<int>(documents_.size())) continue;
+                const Document& d = documents_[static_cast<std::size_t>(tab)];
+                automate::HdrSource s;
+                s.book = d.session->snapshot();
+                s.name = d.title().toStdString();
+                if (d.session == session_ && current_page() != nullptr) {
+                    if (const auto at = shown_page_at(s.book, current_page())) s.page = *at;
+                } else {
+                    s.page = static_cast<std::size_t>(std::clamp<int>(d.page_index, 0, std::max<int>(static_cast<int>(s.book->pages.size()) - 1, 0)));
+                }
+                sources.push_back(std::move(s));
+            }
+        }
+        if (sources.size() < automate::kHdrMinImages || sources.size() > automate::kHdrMaxImages) {
+            throw core::Error("value", "Merge to HDR Pro takes " + std::to_string(automate::kHdrMinImages) + " to " +
+                                           std::to_string(automate::kHdrMaxImages) + " exposures (" + std::to_string(sources.size()) + " given)");
+        }
+    } catch (const std::exception& error) {
+        flash(QStringLiteral("%1: %2").arg(title, wording::error(QString::fromUtf8(error.what()))), 8000, true);
+        return;
+    }
+    const bool align = chosen.align->isChecked();
+    const formats::OpenOptions options = file_open_options();
+    const QPointer<MainWindow> alive(this);
+    // (read on a worker as the command line reads them — planned from the headers before anything is decoded, then one by
+    // one within the budget: service::automate::hdr_read, the review's P1-1 —, then made small for the window's preview)
+    using Read = std::pair<std::vector<render::hdr::Shot>, std::vector<render::hdr::Shot>>;
+    const auto said = [](const std::exception& error) {
+        if (const auto* one = dynamic_cast<const automate::HdrReadError*>(&error))
+            return QStringLiteral("%1: %2").arg(QString::fromStdString(one->name), wording::error(QString::fromUtf8(one->reason.c_str())));
+        return wording::error(QString::fromUtf8(error.what()));
+    };
+    std::optional<Read> read;
+    try {
+        read = run_stoppable(this, title, QStringLiteral("画像を読み込んでいます…"), [sources, options](const std::function<bool()>& stopped) {
+            Read out;
+            out.first = automate::hdr_read(sources, options, stopped);
+            for (const render::hdr::Shot& shot : out.first) {
+                if (stopped()) throw render::Cancelled();
+                out.second.push_back(render::hdr::reduced(shot, 480));
+            }
+            return out;
+        });
+    } catch (const std::exception& error) {
+        if (alive) flash(QStringLiteral("%1: %2").arg(title, said(error)), 8000, true);
+        return;
+    }
+    if (!alive) return;
+    if (!read) {
+        flash(QStringLiteral("%1を中止しました").arg(title), 4000);
+        return;
+    }
+    HdrDialog dialog(this, std::move(read->second), align);
+    if (ask::exec(&dialog) != QDialog::Accepted) return;
+    automate::HdrSettings settings;
+    try {
+        settings = dialog.settings();
+    } catch (const std::exception& error) {
+        flash(QStringLiteral("%1: %2").arg(title, wording::error(QString::fromUtf8(error.what()))), 8000, true);
+        return;
+    }
+    settings.title = "HDR";
+    std::optional<automate::HdrMade> made;
+    try {
+        auto shots = std::make_shared<std::vector<render::hdr::Shot>>(std::move(read->first));
+        made = run_stoppable(this, title, QStringLiteral("HDR Pro に統合しています…"), [shots, settings](const std::function<bool()>& stopped) {
+            return automate::merge_to_hdr(std::move(*shots), settings, stopped);
+        });
+    } catch (const std::exception& error) {
+        if (alive) flash(QStringLiteral("%1: %2").arg(title, wording::error(QString::fromUtf8(error.what()))), 8000, true);
+        return;
+    }
+    if (!alive) return;
+    if (!made) {
+        flash(QStringLiteral("%1を中止しました").arg(title), 4000);
+        return;
+    }
+    const double stops = made->report.value("stops", 0.0);
+    add_picture_book(std::move(made->book.doc), made->book.notes);
+    flash(QStringLiteral("%1: %2 枚の画像から %3 bit の画像を作りました（明るさの幅 約 %4 段）")
+              .arg(title)
+              .arg(sources.size())
+              .arg(settings.depth)
+              .arg(stops, 0, 'f', 1),
+          6000);
 }
 
 }  // namespace genko::app

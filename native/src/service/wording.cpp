@@ -616,6 +616,33 @@ const std::vector<Rule>& rules() {
                          "改行などの制御文字や引用符を含む場所・名前には、起動ファイルを作りません。別の場所か名前を選んでください: \\2"));
         r.push_back(rule(R"(the launcher's path is too long)", "場所の名前が長すぎるので、起動ファイルを作れません"));
         r.push_back(rule(R"(no file to run the droplet on)", "ドロップレットで処理するファイルがありません"));
+        // (PC5 I-h: HDR Pro に統合・写真の切り抜きと角度補正 — service/automate_photos, render/hdr_merge, render/scancrop)
+        r.push_back(rule(R"(Merge to HDR Pro takes (\d+) to (\d+) exposures \((\d+) given\))", "HDR Pro に統合できる画像は \\1〜\\2 枚です（\\3 枚）"));
+        r.push_back(rule(R"(the exposures must have the same pixel dimensions \((.*)\))", "HDR Pro に統合する画像は、すべて同じ大きさ（pixel）にしてください（\\1）"));
+        r.push_back(rule(R"(the exposures must be all of linear light .*)", "カメラ RAW・32 bit の画像（線形の光）と、ほかの画像は一緒に統合できません"));
+        r.push_back(rule(R"(the exposures are too large to merge at once \(about (\d+) MiB of work; at most (\d+) MiB\))",
+                         "画像が大きすぎて一度に統合できません（作業に約 \\1 MiB。\\2 MiB まで）。画像の枚数を減らすか、縮小してから統合してください"));
+        r.push_back(rule(R"(an exposure of CMYK cannot be merged.*)", "CMYK の画像は HDR に統合できません（RGB かグレースケールの画像を選んでください）"));
+        r.push_back(rule(R"(an exposure is RGB of 8 or 16 bits or floats)", "HDR に統合できるのは RGB の 8・16・32 bit の画像です"));
+        r.push_back(rule(R"(the HDR mode is 32, 16 or 8 bits)", "HDR Pro に統合のモードは 32・16・8 bit です"));
+        r.push_back(rule(R"(give one EV value an exposure|one exposure value an image)", "EV は画像 1 枚に 1 つずつ指定してください"));
+        r.push_back(rule(R"(an EV value is a number within -30\.\.30)", "EV は −30〜30 の数です"));
+        r.push_back(rule(R"(the ghosts' base is one of the exposures)", "ゴーストを除く基準の画像は、統合する画像の中から選んでください"));
+        r.push_back(rule(R"(the exposures must be positive)", "露出の値は正の数です"));
+        r.push_back(rule(R"(the HDR toning method is .*)", "トーンの方法は ローカル適応・露光量とガンマ・ハイライト圧縮・ヒストグラムの平均化 です"));
+        r.push_back(rule(R"(the toning's settings are a JSON object)", "トーンの設定が正しくありません"));
+        r.push_back(rule(R"(the toning (\S+) has no setting (\S+))", "このトーンの方法には \\2 の設定はありません"));
+        r.push_back(rule(R"(the toning's (\S+) is a number)", "トーンの設定の \\1 は数です"));
+        r.push_back(rule(R"(no exposure to merge)", "統合する画像がありません"));
+        r.push_back(rule(R"(the EV of (.*) is not a number within -30\.\.30)", "\\1 の EV は −30〜30 の数にしてください"));
+        r.push_back(rule(R"(the exposures hardly differ \((.*) EV from the darkest to the brightest\): .*)",
+                         "画像の露出がほとんど違いません（いちばん暗い画像から明るい画像まで \\1 EV）。露出の違う画像を選んでください"));
+        r.push_back(rule(R"(the merged light is past what a float holds .*)", "合成した明るさが大きすぎます（画像の値か EV が範囲の外です）"));
+        r.push_back(rule(R"(the photos are too large to cut out at once \(about (\d+) MiB of work; at most (\d+) MiB\))",
+                         "写真が大きすぎて一度に切り抜けません（作業に約 \\1 MiB。\\2 MiB まで）"));
+        r.push_back(rule(R"(too many photos on the scan \((\d+); at most (\d+)\))", "写真が多すぎます（\\1 枚。\\2 枚まで）。スキャンを分けてください"));
+        r.push_back(rule(R"(no photos found on a uniform background)", "一様な背景の上に写真が見つかりませんでした"));
+        r.push_back(rule(R"(the photo's corners cannot be mapped)", "写真の角を求められませんでした"));
         r.push_back(rule(R"(the colour profile cannot be read \((.*)\))", "カラープロファイルを読み込めません"));
         r.push_back(rule(R"(the file cannot be read \(it is larger than 2 GiB\))", "ファイルが大きすぎて読み込めません（2 GiB まで）"));
         // (this build's own: put_raster reads only a regular file — not a device or a pipe, whose reading may not end)

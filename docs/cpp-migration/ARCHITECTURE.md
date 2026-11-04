@@ -21,6 +21,8 @@ native/
               オートアクションの置き場 actions、手順の読みと実行器 automate、スクリプトイベントの表 script_events。CLI とアプリが呼び、
               MCP・HTTP からは呼ばない。formats の上に置くのは、再生（actions::replay）と agent_op の表が service にあるため。
               PC5 I-e のバッチ・ドロップレット（と起動ファイル）・画像プロセッサー・レンズ補正・条件付きモード変更も automate に。
+              PC5 I-h の HDR Pro に統合・写真の切り抜きと角度補正は automate_photos（新しい本を作る。算法は render の
+              hdr_merge・scancrop）。
               PC5 I-g のファイルをスタックとして読み込み・統計・Photomerge は automate_merge.cpp（新しい本を作り、その後の変更は
               CommandBus を人として通る）。整列と合成の算法は render の features・panorama・pyramid（上流の移植、外部ライブラリなし、
               決まった種）、op の auto_align_layers・auto_blend_layers は render/ops_align（層を描き直すのは layer_transform の 1 か所）
