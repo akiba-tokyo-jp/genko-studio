@@ -467,7 +467,10 @@ private slots:
         // (act_video_frames_to_layers); its 12 of ビデオレイヤー ▸ made real in their frames' places — test_gui_anim.
         // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8, I-c's 10: アートボード… など — test_gui_artboards —, I-h's 2, I-g's 5, I-f's 3, J-f's 1 and J-e2's 2)
         // (and PC5 H-e's 3: 環境設定 ▸ ヒストリーログ…・仮想記憶ディスク…・拡張コントロール… — 800＋3)
-        QCOMPARE(w->actions_by_name().size(), std::size_t{803});
+        // (and PC5 H-f's 16: 編集 → 最後の状態を切り替え (act_toggle_last_state), メモリをクリア ▸ 5 (act_purge_undo, act_purge_clipboard,
+        // act_purge_histories, act_purge_all, act_purge_video_cache) — test_gui_output —, 表示 → ピクセル縦横比 ▸ 9 (act_pixel_aspect_custom
+        // and the 8 ratios) and ピクセル縦横比を補正 (act_pixel_aspect_correction) — test_gui_view: 803＋16)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{819});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));

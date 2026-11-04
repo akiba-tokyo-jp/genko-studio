@@ -1255,4 +1255,8 @@ void clear_balloon_cache() {
     remembered_stretches().clear();
 }
 
+std::int64_t balloon_cache_bytes() {
+    return layout_cache_bytes() + remembered_masks().used() + remembered_sheets().used() + remembered_stretches().used();
+}
+
 }  // namespace genko::render::text

@@ -1786,6 +1786,11 @@ std::int64_t cache_pixels() {
                                      inks_filtered().bytes() / 40);
 }
 
+std::int64_t cache_bytes() {
+    return static_cast<std::int64_t>(pictures().bytes() + deep_pictures().bytes() + ink_pictures().bytes() + precise_filtered().bytes() +
+                                     inks_filtered().bytes());
+}
+
 Counts counts() { return Counts{g_contents_drawn.load(), g_files_decoded.load()}; }
 
 void set_budget_for_testing(std::size_t bytes) {

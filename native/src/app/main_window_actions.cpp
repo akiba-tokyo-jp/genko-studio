@@ -642,6 +642,7 @@ void MainWindow::build_menus() {
     QMenu* edit = bar->addMenu(QStringLiteral("編集"));
     edit->addAction(action("act_undo"));
     edit->addAction(action("act_redo"));
+    edit->addAction(action("act_toggle_last_state"));  // (PC5 H-f: main_window_purge.cpp)
     edit->addAction(action("act_history"));
     edit->addSeparator();
     build_clipboard_menu(edit);  // (カット … 描画色で塗りつぶし, 変形: main_window_clipboard.cpp)

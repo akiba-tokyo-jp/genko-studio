@@ -29,10 +29,13 @@ void MainWindow::build_edit_actions() {
          QStringLiteral("メニューの項目を隠したり、色を付けたりします（隠した項目もキーと検索で使えます）"));
     make("act_toolbar", QStringLiteral("ツールバー…"), [this] { open_toolbar_dialog(); }, {},
          QStringLiteral("左のツールの並びを変え、使わないツールを「余分なツール」へ移します"));
-    // (H-f: 最後の状態を切り替え, メモリをクリア ▸)
+    // (H-f: 最後の状態を切り替え, メモリをクリア ▸ — main_window_purge.cpp)
+    build_purge_actions();
 }
 
 void MainWindow::build_edit_menu_tail(QMenu* edit) {
+    edit->addSeparator();
+    build_purge_menu(edit);  // (PC5 H-f: メモリをクリア ▸, before 検索)
     edit->addSeparator();
     edit->addAction(action("act_find_command"));  // (検索)
     // (PC5 G-d: Photoshop's スペルチェック… and 検索と置換… after 検索)

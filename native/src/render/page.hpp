@@ -281,5 +281,8 @@ std::vector<Box> nombre_areas(const core::Page& page, int dpi, const core::Docum
 
 // The remembered layer pictures and masks are forgotten (a new process starts without them).
 void clear_render_caches();
+// (PC5 H-f, メモリをクリア) About how many bytes they hold now (the pictures' pixels, the letters' and balloons', the smart
+// objects', the placed pictures', the footage frames').
+std::int64_t render_cache_bytes();
 
 }  // namespace genko::render

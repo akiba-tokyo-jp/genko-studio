@@ -16,6 +16,7 @@
 #include "app/perf.hpp"
 #include "app/theme.hpp"
 #include "core/frames.hpp"
+#include "core/pixel_aspect.hpp"
 
 namespace genko::app {
 
@@ -268,14 +269,32 @@ void PageCanvas::stroke_dropped() {
 
 // --- the view ------------------------------------------------------------------------------------------------------
 
+double PageCanvas::shown_aspect() const {
+    const core::Page* p = aspect_correction_ ? page() : nullptr;
+    return p != nullptr && !core::square_pixels(p->pixel_aspect) && core::pixel_aspect_allowed(p->pixel_aspect) ? p->pixel_aspect : 1.0;
+}
+
+void PageCanvas::set_pixel_aspect_correction(bool on) {
+    if (on == aspect_correction_) return;
+    aspect_correction_ = on;
+    live_reset();
+    rerender_.start();
+    emit changed();
+    update();
+}
+
 QTransform PageCanvas::view_transform() const {
     QTransform view;
-    if (view_.rotation == 0.0 && !view_.flipped && !view_.flipped_v) return view;
+    // (PC5 H-f: the page's pixels widened across by their aspect ratio — the unturned view's x, the page's own —, then
+    // turned and mirrored)
+    const double aspect = shown_aspect();
+    if (view_.rotation == 0.0 && !view_.flipped && !view_.flipped_v && aspect == 1.0) return view;
     const double cx = width() / 2.0;
     const double cy = height() / 2.0;
     view.translate(cx, cy);
     view.rotate(view_.rotation);
     if (view_.flipped || view_.flipped_v) view.scale(view_.flipped ? -1 : 1, view_.flipped_v ? -1 : 1);
+    if (aspect != 1.0) view.scale(aspect, 1.0);
     view.translate(-cx, -cy);
     return view;
 }
@@ -285,7 +304,7 @@ QTransform PageCanvas::mm_transform() const {
 }
 
 QPointF PageCanvas::unturned(const QPointF& widget) const {
-    if (view_.rotation == 0.0 && !view_.flipped && !view_.flipped_v) return widget;
+    if (view_.rotation == 0.0 && !view_.flipped && !view_.flipped_v && shown_aspect() == 1.0) return widget;
     return view_transform().inverted().map(widget);
 }
 
@@ -388,7 +407,8 @@ int page_pixel_dpi(const core::Page* page) {
 
 int PageCanvas::wanted_dpi() const {
     const double ratio = devicePixelRatioF() > 0 ? devicePixelRatioF() : 1.0;
-    const double dpi = view_.scale * 25.4 * ratio;
+    // (PC5 H-f: widened by the pixel aspect ratio, the tiles as fine as the screen across)
+    const double dpi = view_.scale * 25.4 * ratio * std::max(1.0, shown_aspect());
     const double step = std::max(48.0, std::nearbyint(dpi / 24) * 24);
     // (PC5 H-a, 画素の段: as fine as the page's own pixels, which zoomed in further are laid enlarged; finer than the
     // detail's 432 dpi on a page of a finer resolution)
@@ -418,7 +438,8 @@ void PageCanvas::fit_page() {
     if (page() == nullptr || width() <= 0 || height() <= 0) return;
     const QRectF r = view_rect_mm();
     const double margin = 16;
-    view_.scale = std::max(kMinScale, std::min(max_scale(), std::min((width() - 2 * margin) / r.width(), (height() - 2 * margin) / r.height())));
+    const double aspect = shown_aspect();  // (PC5 H-f: as wide as it is shown)
+    view_.scale = std::max(kMinScale, std::min(max_scale(), std::min((width() - 2 * margin) / (r.width() * aspect), (height() - 2 * margin) / r.height())));
     view_.pan = QPointF((width() - r.width() * view_.scale) / 2 - r.x() * view_.scale, (height() - r.height() * view_.scale) / 2 - r.y() * view_.scale);
     view_.fitted = true;
     after_zoom();
@@ -459,7 +480,9 @@ void PageCanvas::actual_pixels(double percent) { zoom_by(percent / 100.0 * pixel
 void PageCanvas::fit_box(const QRectF& box_mm) {
     if (page() == nullptr || width() <= 0 || height() <= 0 || !(box_mm.width() > 0) || !(box_mm.height() > 0)) return;
     const double margin = 20;  // (PhotoCraft's fit_layers: 20 px around)
-    view_.scale = std::max(kMinScale, std::min(max_scale(), std::min((width() - 2 * margin) / box_mm.width(), (height() - 2 * margin) / box_mm.height())));
+    const double aspect = shown_aspect();  // (PC5 H-f: as wide as it is shown)
+    view_.scale = std::max(kMinScale,
+                           std::min(max_scale(), std::min((width() - 2 * margin) / (box_mm.width() * aspect), (height() - 2 * margin) / box_mm.height())));
     const QPointF c = box_mm.center();
     view_.pan = QPointF(width() / 2.0 - c.x() * view_.scale, height() / 2.0 - c.y() * view_.scale);
     view_.fitted = false;

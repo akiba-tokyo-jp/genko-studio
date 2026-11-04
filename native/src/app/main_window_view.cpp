@@ -164,6 +164,7 @@ void MainWindow::build_view_actions() {
     // (render:GPU-CPU-parity: the card could not draw the page — the processor draws it now, and the person is told)
     connect(canvas_, &PageCanvas::gpuFailed, this, [this](const QString& message) { flash(message, 6000, true); });
     build_guide_view_actions();  // (PC5 H-b: main_window_guide_view.cpp)
+    build_pixel_aspect_actions();  // (PC5 H-f: ピクセル縦横比 ▸, ピクセル縦横比を補正 — main_window_pixel_aspect.cpp)
 }
 
 void MainWindow::build_view_menus(QMenu* view) {
@@ -178,6 +179,7 @@ void MainWindow::build_view_menus(QMenu* view) {
     show_menu(view)->addAction(action(QStringLiteral("act_pixel_grid")));
     build_guide_view_menus(view);  // (PC5 H-b: エクストラ, 表示・非表示 ▸'s, the guides' — main_window_guide_view.cpp)
     build_artboard_view_menus(view);  // (PC5 I-c: アートボードを画面サイズに合わせる, 選択したアートボードのガイドを消去 — main_window_artboards.cpp)
+    build_pixel_aspect_menu(view);    // (PC5 H-f: ピクセル縦横比 ▸, ピクセル縦横比を補正 — main_window_pixel_aspect.cpp)
     // (after every part has put its commands in 表示 and in 表示・非表示 ▸: laid out once)
     lay_out_menu(show_menu(view), show_rows());
     lay_out_menu(view, view_rows());

@@ -58,7 +58,9 @@ bool page_op(const Json& op) {
                                                 // multichannel then)
                                                 "hdr_toning", "merge_spot_channel", "delete_channel",
                                                 // (PC5 I-c: an artboard's size, Canvas Size's way)
-                                                "set_artboard"};
+                                                "set_artboard",
+                                                // (PC5 H-f: the page's pixel aspect ratio — the view's only, no layer changed)
+                                                "set_pixel_aspect"};
     const Json* name = op.is_object() ? get(op, "op") : nullptr;
     if (name == nullptr || !name->is_string()) return false;
     const std::string& text = name->get_ref<const std::string&>();

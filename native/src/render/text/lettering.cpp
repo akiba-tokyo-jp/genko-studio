@@ -2121,6 +2121,8 @@ void clear_layout_cache() {
     pictures().clear();
 }
 
+std::int64_t layout_cache_bytes() { return layouts().used() + layout_shapes().used() + speaker_boxes().used() + pictures().used(); }
+
 SpeakerFonts::SpeakerFonts(std::stop_token stop) : stop_(std::move(stop)) {}
 SpeakerFonts::~SpeakerFonts() = default;
 

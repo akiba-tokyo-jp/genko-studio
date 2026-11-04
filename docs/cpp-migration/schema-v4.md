@@ -561,3 +561,10 @@ Photoshop の文書 1 つは Genko のページ 1 枚なので、レイヤーカ
 - **新しい拡張・キーは無い**: ガイドは今までのページの `rulers` の定規 `{"id", "kind": "guide", "axis": "h" | "v", "at": mm, "points": [], "active", "visible"}`（`h` は横のガイドで `at` は上からの mm、`v` は縦で左からの mm）のまま。ガイドのロック・エクストラ・表示・非表示 ▸ の切り替え・単位・ガイドとグリッドの色は機械の設定（settings.ini）で、原稿に書かない。
 - **op**（H-b、C++ 版だけ）: `delete_ruler` の `"kind"`（`id` が無いとき、その種類の定規だけを消す。`for_pages` で全ページ）。新しい `add_guide_layout`（`{"page", "columns"?: {"count", "width_mm"?, "gutter_mm"?}, "rows"?: {"count", "height_mm"?, "gutter_mm"?}, "margin_mm"?: 数 | [上, 左, 下, 右], "center_columns"?, "clear"?, "from"?: "paper" | "trim" | "frame"}` → 上の形のガイドの定規。結果 `{"rulers", "vertical", "horizontal"}`）。中身と断りは SPEC VIEW-01。
 - **PSD**: リソース 1032（グリッドとガイド）をガイドの定規として読み書きする（SPEC VIEW-01「PSD のガイド」）。psd-keep@1 は前から 1032 を保たない。
+
+## ピクセル縦横比（pixel-aspect@1。VIEW-01、PC5 H-f。利用者の決定 10）
+
+- **ページの `"pixel_aspect"`**（ページの鍵の `artboard` の後）: 数（画素の幅 ÷ 高さ、0.1〜10）。1（正方形）のページは書かない。表示だけの値で、画素・描画・書き出しは変えない（SPEC VIEW-01「ピクセル縦横比」）。
+- 書き手は、どれかのページの `pixel_aspect` が 1 でなければ `features` に `pixel-aspect@1` を加え、すべて 1 に戻れば外す。持たない原稿は今と同じバイトで書く。範囲の外の比のページを持つ本は書かない（core::Error `value`）。
+- **読み手の検査**: 数でない・範囲の外の `pixel_aspect` を持つ本は、読み取り専用で開く（読めない値はそのまま書き戻す鍵に残す）。pixel-aspect@1 を知らない読み手（PC5 H-f より前の C++ 版）は、未知の拡張として読み取り専用で開く。スマートオブジェクトの中身のページの `pixel_aspect` は読まない（そのまま書き戻す）。
+- op `set_pixel_aspect {"page", "ratio" | "preset"}`（ページの op）。PSD のリソース 1064 と行き来する（psd-keep@1 の印 `copied` の `1064`）。

@@ -764,6 +764,7 @@ core::ApplyResult Session::keep_applied(const Json& ops, core::ApplyResult resul
     undone_.clear();
     queue_.push_back(Action{Action::Kind::Edit, change, core::new_txn_id(), ++next_seq_, false});
     redo_floor_ = next_seq_;
+    stepped_back_ = false;
     ++generation_;
     touch(BookChange{BookChange::Why::Edit, ops, change->before, change->after});
     schedule_save();
@@ -792,6 +793,32 @@ void Session::trim_history() {
         forget(*oldest);  // (in the journal, under the changes still in memory)
         trimmed_ = true;
     }
+}
+
+Session::Purged Session::purge_history() {
+    Purged out;
+    out.states = states_read_.size();
+    states_read_.clear();
+    journal_read_.reset();
+    const auto held_now = [this] {
+        std::size_t held = 0;
+        for (const auto& change : done_) held += change->held;
+        return held;
+    };
+    const std::size_t changes = done_.size();
+    const std::size_t held = held_now();
+    // (as the history's limit lets them go, the limit nothing for once: every change saved but the latest)
+    const std::size_t bytes_limit = options_.history_bytes;
+    const std::size_t changes_limit = options_.history_changes;
+    options_.history_bytes = 0;
+    options_.history_changes = 0;
+    trim_history();
+    options_.history_bytes = bytes_limit;
+    options_.history_changes = changes_limit;
+    out.changes = changes - done_.size();
+    out.bytes = held - std::min(held, held_now());
+    if (out.changes > 0) emit statusChanged();
+    return out;
 }
 
 void Session::undo() {
@@ -837,6 +864,7 @@ void Session::undo() {
             queue_.push_back(Action{Action::Kind::Undo, change, core::new_txn_id(), ++next_seq_, false});
         }
         doc_ = change->before;
+        stepped_back_ = true;
         ++generation_;
         touch(BookChange{BookChange::Why::Undo, change->ops, change->after, change->before});
         schedule_save();
@@ -846,6 +874,7 @@ void Session::undo() {
     if (!queue_.empty() && queue_.back().kind == Action::Kind::DiskRedo && !queue_.back().in_flight && !queue_.back().sent) {
         // the journal redo asked last, not given to the disk yet: taken back, nothing written for either
         queue_.pop_back();
+        stepped_back_ = true;
         emit statusChanged();
         return;
     }
@@ -855,6 +884,7 @@ void Session::undo() {
     if (path_ && journal_after().undo > 0) {
         // a change saved before this session: undone through the journal, and the book read again after it
         queue_.push_back(Action{Action::Kind::DiskUndo, nullptr, core::new_txn_id(), ++next_seq_, false});
+        stepped_back_ = true;
         save_now();
         emit statusChanged();
         return;
@@ -952,6 +982,7 @@ void Session::redo() {
         const auto last = std::find_if(queue_.rbegin(), queue_.rend(), [](const Action& a) { return a.kind == Action::Kind::DiskUndo; });
         if (last->in_flight || last->sent) throw core::ApplyError("取り消しを原稿に書き込み中です。書き終わってからやり直してください。", "busy");
         queue_.erase(std::next(last).base());
+        stepped_back_ = false;
         emit statusChanged();
         return;
     }
@@ -972,6 +1003,7 @@ void Session::redo() {
             queue_.push_back(Action{Action::Kind::Edit, change, core::new_txn_id(), ++next_seq_, false});
         }
         doc_ = change->after;
+        stepped_back_ = false;
         ++generation_;
         touch(BookChange{BookChange::Why::Redo, change->ops, change->before, change->after});
         schedule_save();
@@ -980,6 +1012,7 @@ void Session::redo() {
     if (loading_) throw core::ApplyError("原稿の残りのページを読み込み中です。読み込みが終わってからやり直してください。", "loading");
     if (path_ && journal_after().redo > 0) {
         queue_.push_back(Action{Action::Kind::DiskRedo, nullptr, core::new_txn_id(), ++next_seq_, false});
+        stepped_back_ = false;
         save_now();
         emit statusChanged();
         return;

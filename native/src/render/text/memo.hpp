@@ -93,6 +93,12 @@ public:
         used_ = 0;
     }
 
+    // (PC5 H-f, メモリをクリア: what its values take now — their bytes as put, and their keys)
+    std::int64_t used() {
+        const std::lock_guard lock(mutex_);
+        return used_;
+    }
+
 private:
     struct Item {
         std::string key;

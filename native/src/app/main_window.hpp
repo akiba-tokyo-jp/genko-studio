@@ -2229,6 +2229,35 @@ private:
     void build_print_actions();
     void build_print_menus(QMenu* file);
     int image_assets_done_ = 0;
+
+public:
+    // PC5 H-f (app/main_window_purge.cpp; SPEC.md VIEW-01「取り消しとメモリをクリア」): 編集 → 最後の状態を切り替え — Undo, or Redo
+    // when the last step through the history was back (Session::stepped_back): twice, the book as it was; another writer's
+    // change is never taken back (the journal's undo refuses it, as Undo's) —, and メモリをクリア ▸ (the coordinator's decision:
+    // memory only — the journal keeps every change, Undo still reaches them): what = "undo" (the book in front's history in
+    // memory), "clipboard" (every window's copy, and the computer's clipboard while it holds Genko's), "histories" (every
+    // open book's), "video" (the footage frames and the frames drawn for playing) or "all" (those, and every picture the
+    // drawing remembers — layers, placed pictures, letters, 3D, smart objects — and the finer tiles out of sight). The free
+    // room goes back to the system (memory::give_back); what was let go is said in the status line and returned.
+    struct Purged {
+        QStringList items;      // what was let go, in words (取り消し, クリップボード, …)
+        std::int64_t bytes = 0;  // about how much
+    };
+    Purged purge(const QString& what);
+    void toggle_last_state();
+    // PC5 H-f (app/main_window_pixel_aspect.cpp; the user's decision 10, pixel-aspect@1): 表示 → ピクセル縦横比 ▸ — the page's
+    // ratio set (set_pixel_aspect, one Undo; カスタムピクセル縦横比… asks for a ratio of its own, kept by its name on this
+    // computer) — and ピクセル縦横比を補正 (the canvas widened by it, the view's only).
+    bool set_pixel_aspect(double ratio);
+    void ask_custom_pixel_aspect();
+
+private:
+    void build_purge_actions();
+    void build_purge_menu(QMenu* edit);
+    std::int64_t purge_clipboard();  // (main_window_clipboard.cpp: this window's copy, and the computer's while it is Genko's)
+    void build_pixel_aspect_actions();
+    void build_pixel_aspect_menu(QMenu* view);
+    void refresh_pixel_aspect();
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

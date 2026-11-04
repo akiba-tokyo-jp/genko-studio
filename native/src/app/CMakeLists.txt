@@ -255,6 +255,9 @@ genko_library(genko_app
     # PC5 I-f (1 部プリント, 生成 → 画像アセット, コンタクトシート II…; `genko print`)
     main_window_print.cpp
     print_cli.cpp
+    # PC5 H-f (最後の状態を切り替え・メモリをクリア ▸, ピクセル縦横比 ▸・ピクセル縦横比を補正)
+    main_window_purge.cpp
+    main_window_pixel_aspect.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

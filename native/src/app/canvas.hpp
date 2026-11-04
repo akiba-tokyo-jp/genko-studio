@@ -495,6 +495,13 @@ public:
     // ピクセルアートのプレビュー (view.pixelArtPreview): the page's tiles laid nearest, never smoothed.
     void set_pixel_art(bool on);
     bool pixel_art() const;
+    // ピクセル縦横比を補正 (view.pixelAspectRatioCorrection, PC5 H-f, pixel-aspect@1): the page's pixel aspect ratio shown — the
+    // view widened (or narrowed) across by it, about the middle of the canvas, under its turn and mirror —; off: the pixels
+    // square. The view's only: to_mm and to_widget go through it, so every tool still works in the page's own square pixels.
+    // shown_aspect: the factor across now (1: square, or off).
+    void set_pixel_aspect_correction(bool on);
+    bool pixel_aspect_correction() const { return aspect_correction_; }
+    double shown_aspect() const;
     // ズームツール's options (PC5 H-a): ズームアウト (a click zooms out, Alt in) and スクラブズーム (dragging left and right
     // zooms out and in about the point pressed, instead of a box).
     bool zoom_out_mode = false;
@@ -1079,6 +1086,7 @@ private:
     QImage shown_frame_;  // show_frame
     std::unique_ptr<PageRenderer> renderer_;
     ViewState view_;
+    bool aspect_correction_ = true;  // (PC5 H-f: set_pixel_aspect_correction)
     QString tool_ = QStringLiteral("select");
     std::optional<QString> held_tool_;
     QString held_key_;

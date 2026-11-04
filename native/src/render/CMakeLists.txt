@@ -296,6 +296,8 @@ genko_library(genko_render
     footage.cpp
     ops_video.cpp
     pcraft_timeline.cpp
+    # PC5 H-f (画素の縦横比: PSD's 1064)
+    psd_pixel_aspect.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

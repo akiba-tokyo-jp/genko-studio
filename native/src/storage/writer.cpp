@@ -31,6 +31,7 @@
 #include "core/groups.hpp"
 #include "core/layer_basics.hpp"
 #include "core/artboards.hpp"
+#include "core/pixel_aspect.hpp"
 #include "core/type_text.hpp"
 #include "core/variables.hpp"
 #include "core/image_assets.hpp"
@@ -369,6 +370,8 @@ Json page_json(const core::Page& page, AssetStore& store) {
     if (page.measure && !page.measure->empty()) out[std::string(core::kMeasureKey)] = core::to_json(*page.measure);
     // (PC5 I-c: artboards@1's mark — none: nothing written)
     if (page.artboard) out[std::string(core::kArtboardKey)] = core::to_json(*page.artboard);
+    // (PC5 H-f: pixel-aspect@1's ratio — square: nothing written)
+    if (!core::square_pixels(page.pixel_aspect)) out[std::string(core::kPixelAspectKey)] = page.pixel_aspect;
     for (const auto& [key, value] : page.extra.items()) {
         if (!is_known_page_key(key)) out[key] = value;
     }
@@ -660,6 +663,10 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     // PC5 I-f: image-assets@1 (生成 → 画像アセット), named while it is on
     std::erase(features, std::string(core::kImageAssetsFeature));
     if (doc.image_assets) features.emplace_back(core::kImageAssetsFeature);
+    // PC5 H-f: pixel-aspect@1 (a page's pixel aspect ratio, for the view only), named while a page's pixels are not square
+    core::validate_pixel_aspect(doc);
+    std::erase(features, std::string(core::kPixelAspectFeature));
+    if (core::uses_pixel_aspect(doc)) features.emplace_back(core::kPixelAspectFeature);
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 

@@ -167,6 +167,8 @@ genko_library(genko_core
     # PC5 H-e (環境設定と API: genko commands' catalogue, genko session's session.json)
     commands_list.cpp
     session_file.cpp
+    # PC5 H-f (画素の縦横比: pixel-aspect@1 — the pages' ratio, its menu's ratios, set_pixel_aspect)
+    pixel_aspect.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/commands_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"

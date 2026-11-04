@@ -197,6 +197,20 @@ public:
     // asset, read as the book reads its project.json); none when that state is not held (an older Genko's genko gc took
     // it, the journal cannot be read) or past the changes done.
     std::optional<DocPtr> state_at(std::size_t done) const;
+    // (PC5 H-f, 最後の状態を切り替え) The last step through the history was back — an undo (in memory or through the journal),
+    // no redo nor change since —: the next toggle goes forward again.
+    bool stepped_back() const { return stepped_back_; }
+    // (PC5 H-f, メモリをクリア → 取り消し・ヒストリー; the coordinator's decision: memory only) What memory holds of the
+    // history let go: the journal's states read for 履歴 and the History Brush (state_at), the journal as read, and this
+    // session's changes already saved — but the latest — (each holds the book as it was before it), as the history's
+    // limit lets them go (Options::history_changes): Undo still reaches all of them, through the journal, which keeps
+    // every change. What is not saved yet, and the changes undone, stay.
+    struct Purged {
+        std::size_t changes = 0;  // the changes that left memory
+        std::size_t states = 0;   // the journal's states let go
+        std::size_t bytes = 0;    // the precise colour pictures only those changes held
+    };
+    Purged purge_history();
 
     // --- the disk -------------------------------------------------------------------------------------------
     SaveStatus status() const;
@@ -367,6 +381,7 @@ private:
     bool trimmed_ = false;        // trim_history let changes of this session go to the journal
     std::uint64_t redo_floor_ = 0;  // apply(): what was undone before it (an action's seq below this) is not redone
     std::string script_;            // (PC5 I-0) set_script
+    bool stepped_back_ = false;     // (PC5 H-f) stepped_back
     mutable std::shared_ptr<const JournalRead> journal_read_;  // history(): the journal as last read
     // state_at(): the journal's states read last, by their refs (at most kStatesKept, the latest last: a book of many pages
     // read again and again — the History Brush's source changed — is not held without end)

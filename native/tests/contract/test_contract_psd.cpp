@@ -73,6 +73,7 @@
 #include "render/psd.hpp"
 #include "render/psd_adjust.hpp"
 #include "render/psd_image.hpp"
+#include "render/psd_pixel_aspect.hpp"
 #include "render/psd_production.hpp"
 #include "render/psd_slices.hpp"
 #include "render/smart_decode.hpp"
@@ -2163,6 +2164,108 @@ private slots:
             const int theirs = seen["pixels"][k][0].get<int>();
             QVERIFY2(std::abs(ours - theirs) <= 3, (std::to_string(k) + ": " + std::to_string(ours) + " vs psd-tools " + std::to_string(theirs)).c_str());
         }
+    }
+
+    // (PC5 H-f, pixel-aspect@1) The PSD's 1064: the page's ratio written (version 2, the ratio as a big-endian double) and
+    // nothing else changed — the pixels square, the file as the one of a square page but for it —, read back as the page's
+    // when the file is opened (its bytes written again while the ratio is the one read; the page's own once changed; none
+    // once square), not onto a page (import_psd), not when it is square, broken or out of range; the other exports' files
+    // the same as a square page's.
+    void pixelAspectResource() {
+        namespace core = genko::core;
+        namespace pa = genko::render::psd_pixel_aspect;
+        const core::CommandBus bus(genko::render::ops_registry());
+        const core::Document square = core::new_episode("t", core::Num(std::int64_t{1}), 1, core::PageSpec::custom(60, 40, 60, 40, 0, 0, 0, 0, 0, 150, "mono"));
+        const auto with_ratio = [&](const core::Document& doc, double ratio) {
+            return bus.apply(doc, Json::array({Json{{"op", "set_pixel_aspect"}, {"page", 1}, {"ratio", ratio}}}), core::Actor()).doc;
+        };
+        const core::Document wide = with_ratio(square, 1.5);
+        QDir().mkpath(path(QStringLiteral("aspect")));
+        const auto written = [&](const core::Document& book, const QString& name) {
+            const QString at = path(QStringLiteral("aspect/%1.psd").arg(name));
+            (void)genko::formats::export_page_psd(book, book.page(0), genko::storage::path_from_utf8(at.toStdString()), 150);
+            return genko::test::read_bytes(at);
+        };
+        const auto resource = [](const std::string& bytes, unsigned id) -> std::optional<std::string> {
+            const psd::File file = psd::File::read(bytes);
+            for (const auto& r : file.resources())
+                if (r.id == id) return std::string(r.data);
+            return std::nullopt;
+        };
+        const std::string plain = written(square, QStringLiteral("square"));
+        QVERIFY(!resource(plain, 1064));  // (a square page: none — the file as before)
+        const std::string widened = written(wide, QStringLiteral("wide"));
+        const auto data = resource(widened, 1064);
+        QVERIFY(data.has_value());
+        QCOMPARE(data->size(), std::size_t(12));
+        QCOMPARE(data->substr(0, 4), std::string("\0\0\0\2", 4));
+        QVERIFY(pa::ratio_of(*data) == std::optional<double>(1.5));
+        QCOMPARE(pa::bytes_of(1.5), *data);
+        {  // (the rest of the file as a square page's: written without the row, the same bytes)
+            std::vector<genko::render::psd_production::Row> others;
+            for (const auto& row : genko::render::psd_production::rows())
+                if (row.resource != 1064) others.push_back(row);
+            const genko::render::psd_production::TableForTest table(others);
+            QVERIFY(written(wide, QStringLiteral("wide-without")) == plain);
+        }
+        // the pictures written are a square page's (PNG, at the same resolution)
+        {
+            const QString a = path(QStringLiteral("aspect/png-square")), b = path(QStringLiteral("aspect/png-wide"));
+            const auto files_a = genko::formats::export_png_sequence(square, genko::storage::path_from_utf8(a.toStdString()), 100);
+            const auto files_b = genko::formats::export_png_sequence(wide, genko::storage::path_from_utf8(b.toStdString()), 100);
+            QCOMPARE(files_a.size(), files_b.size());
+            for (std::size_t i = 0; i < files_a.size(); ++i) {
+                QVERIFY(genko::test::read_bytes(QString::fromStdString(genko::storage::path_to_utf8(files_a[i]))) ==
+                        genko::test::read_bytes(QString::fromStdString(genko::storage::path_to_utf8(files_b[i]))));
+            }
+        }
+        // opened: the page's ratio, the block kept with its mark; written again: the file's bytes
+        genko::formats::Opened opened = genko::formats::open_file(widened, "wide.psd");
+        QCOMPARE(opened.doc.page(0).pixel_aspect, 1.5);
+        QVERIFY(opened.doc.page(0).native_psd);
+        QVERIFY(std::any_of(opened.doc.page(0).native_psd->copied.begin(), opened.doc.page(0).native_psd->copied.end(),
+                            [](const core::PsdCopied& c) { return c.resource == 1064; }));
+        QVERIFY(resource(written(opened.doc, QStringLiteral("again")), 1064) == data);
+        // changed: the page's own; square: none
+        QVERIFY(resource(written(with_ratio(opened.doc, 0.91), QStringLiteral("ntsc")), 1064) == std::optional<std::string>(pa::bytes_of(0.91)));
+        QVERIFY(!resource(written(with_ratio(opened.doc, 1.0), QStringLiteral("back")), 1064));
+        // saved as a book and read back: the ratio and the mark kept, the file's bytes written again
+        {
+            const QString book = path(QStringLiteral("aspect/book.genko"));
+            genko::test::write_project(opened.doc, genko::storage::path_from_utf8(book.toStdString()));
+            const auto loaded = genko::storage::load_document(genko::storage::path_from_utf8(book.toStdString()));
+            QVERIFY2(loaded.document.read_only_reason.empty(), loaded.document.read_only_reason.c_str());
+            QCOMPARE(loaded.document.page(0).pixel_aspect, 1.5);
+            QVERIFY(resource(written(loaded.document, QStringLiteral("loaded")), 1064) == data);
+        }
+        // read onto a page (import_psd, Photoshop's 配置): the page's own ratio stays
+        {
+            const QString file = path(QStringLiteral("aspect/wide.psd"));
+            const auto done = bus.apply(square, Json::array({Json{{"op", "import_psd"}, {"page", 1}, {"path", file.toStdString()}}}), core::Actor());
+            QCOMPARE(done.doc.page(0).pixel_aspect, 1.0);
+        }
+        // a square, broken or hostile 1064: not read (kept as it was, unmarked)
+        genko::render::psd_production::ReadContext opened_context;
+        opened_context.opened = true;
+        const auto read = [&](const std::string& bytes) {
+            core::Page page;
+            return std::pair{pa::read(page, bytes, opened_context), page.pixel_aspect};
+        };
+        QVERIFY(read(pa::bytes_of(2.0)) == std::pair(true, 2.0));
+        std::string version_one = pa::bytes_of(0.9);
+        version_one[3] = 1;
+        QVERIFY(read(version_one) == std::pair(true, 0.9));
+        std::string version_three = pa::bytes_of(2.0);
+        version_three[3] = 3;
+        QVERIFY(read(version_three) == std::pair(false, 1.0));
+        QVERIFY(read(pa::bytes_of(1.0)) == std::pair(false, 1.0));
+        QVERIFY(read(pa::bytes_of(11.0)) == std::pair(false, 1.0));
+        QVERIFY(read(pa::bytes_of(-2.0)) == std::pair(false, 1.0));
+        QVERIFY(read(pa::bytes_of(std::nan(""))) == std::pair(false, 1.0));
+        QVERIFY(read(pa::bytes_of(2.0).substr(0, 11)) == std::pair(false, 1.0));
+        genko::render::psd_production::ReadContext onto_context;  // (not opened: read onto a page)
+        core::Page onto;
+        QVERIFY(!pa::read(onto, pa::bytes_of(2.0), onto_context));
     }
 };
 

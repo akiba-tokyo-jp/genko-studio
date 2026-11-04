@@ -289,6 +289,10 @@ struct PageRenderer::OnionStore {
         }
         return wait.get();
     }
+    void release() {  // (PC5 H-f, メモリをクリア)
+        std::lock_guard lock(mutex);
+        for (Slot& s : kept) s = Slot{};
+    }
 };
 
 // (PC5 H-a, review P2-3) A page drawn whole for any part of it (render::draws_whole_page: a correction that moves shapes):
@@ -436,6 +440,19 @@ void PageRenderer::trim_fine() {
         tile.pending = QRect(QPoint(0, 0), tile_rect(l, i).size());  // (drawn again when it is wanted)
         ++fine_released_;
     }
+}
+
+std::size_t PageRenderer::purge() {
+    const std::size_t before = fine_bytes();
+    const std::size_t budget = fine_budget_;
+    fine_budget_ = 0;  // (every finer tile out of sight let go, once)
+    trim_fine();
+    fine_budget_ = budget;
+    if (running_ == 0) {  // (nothing being drawn waits for them)
+        if (wholes_) wholes_->release();
+        if (onions_) onions_->release();
+    }
+    return before - std::min(before, fine_bytes());
 }
 
 void PageRenderer::set_anim(std::int64_t frame, bool onion) {

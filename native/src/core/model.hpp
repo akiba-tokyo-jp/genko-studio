@@ -410,6 +410,10 @@ struct Page {
     std::optional<Measure> measure;
     // PC5 I-c (artboards@1, core/artboards.hpp): the page as an artboard (none: a page as every page)
     std::optional<Artboard> artboard;
+    // PC5 H-f (pixel-aspect@1, core/pixel_aspect.hpp; the user's decision 10): the width of a pixel over its height, for the
+    // view only — ピクセル縦横比を補正 widens the view by it; the pixels, the drawing and every file written stay square (1:
+    // nothing written)
+    double pixel_aspect = 1.0;
 
     Rect paper_rect_mm() const;
     Rect trim_rect_mm() const;

@@ -143,6 +143,10 @@ public:
     void set_fine_budget(std::size_t bytes);
     std::size_t fine_bytes() const;
     std::size_t fine_released() const { return fine_released_; }
+    // (PC5 H-f, メモリをクリア) The finer levels' tiles out of sight let go now, whatever their budget (drawn again when they
+    // are wanted), and the page drawn whole and the onion skin kept for the tiles, when no tile is being drawn; the bytes
+    // the tiles let go held. The tiles in sight and the whole page's level stay: the screen shows them.
+    std::size_t purge();
     // A page drawn whole for any part of it (render::draws_whole_page): how many times it was drawn whole (each level
     // once while the page and its look stay the same — review P2-3; tests).
     std::size_t wholes_drawn() const;

@@ -787,6 +787,67 @@ private slots:
         }
     }
 
+    // (PC5 H-f, pixel-aspect@1: a page's pixel aspect ratio for the view — written only when it is not square, and the book
+    // names the feature only then; the books without one written as before, byte for byte)
+    void pixelAspectExtension() {
+        namespace core = genko::core;
+        QVERIFY(genko::storage::is_known_feature("pixel-aspect@1"));
+        QTemporaryDir tmp;
+        {  // (the old book: none, its bytes as before)
+            const auto old = genko::storage::load_document(to_path(genko::test::test_data("legacy/book-v3.genko")));
+            const fs::path out = to_path(tmp.path()) / "old.genko";
+            genko::test::write_project(old.document, out);
+            const std::string text = genko::storage::read_file(out / "project.json");
+            QVERIFY(text.find("pixel_aspect") == std::string::npos && text.find("pixel-aspect@1") == std::string::npos);
+            for (const core::PagePtr& page : genko::storage::load_document(out).document.pages) QCOMPARE(page->pixel_aspect, 1.0);
+        }
+        Json payload = minimal_book(4);
+        payload["book_id"] = core::new_book_id();
+        payload["pages"][0]["id"] = "pg_000000000001";
+        const auto base = genko::storage::load_document(make_book(tmp, "base", payload));
+        QVERIFY2(base.document.read_only_reason.empty(), base.document.read_only_reason.c_str());
+        const fs::path square = to_path(tmp.path()) / "square.genko";
+        genko::test::write_project(base.document, square);
+        const std::string square_text = genko::storage::read_file(square / "project.json");
+        QVERIFY(square_text.find("pixel_aspect") == std::string::npos);
+        // a ratio: written and named, read back the same
+        core::Document doc = base.document;
+        doc.edit_page(0).pixel_aspect = 0.91;
+        const fs::path wide = to_path(tmp.path()) / "wide.genko";
+        genko::test::write_project(doc, wide);
+        const Json written = core::parse_python_json(genko::storage::read_file(wide / "project.json"));
+        QCOMPARE(written["pages"][0]["pixel_aspect"], Json(0.91));
+        const auto features = written["features"].get<std::vector<std::string>>();
+        QVERIFY(std::find(features.begin(), features.end(), "pixel-aspect@1") != features.end());
+        const auto back = genko::storage::load_document(wide);
+        QVERIFY2(back.document.read_only_reason.empty(), back.document.read_only_reason.c_str());
+        QCOMPARE(back.document.page(0).pixel_aspect, 0.91);
+        QVERIFY(!back.document.page(0).extra.contains("pixel_aspect"));
+        // square again: the bytes of the book that never had one
+        core::Document again = back.document;
+        again.edit_page(0).pixel_aspect = 1.0;
+        genko::test::write_project(again, square);
+        QCOMPARE(genko::storage::read_file(square / "project.json"), square_text);
+        // a ratio no page may have, or not a number: reported (the book read-only), kept as read
+        for (const Json& bad : {Json(20), Json(0.05), Json("2"), Json(true)}) {
+            Json broken = written;
+            broken["pages"][0]["pixel_aspect"] = bad;
+            const auto result = genko::storage::load_document(make_book(tmp, "bad", broken));
+            QVERIFY2(!result.document.read_only_reason.empty(), bad.dump().c_str());
+            QCOMPARE(result.document.page(0).pixel_aspect, 1.0);
+            QVERIFY(result.document.page(0).extra.contains("pixel_aspect"));
+        }
+        // the writer refuses a book of such a ratio
+        core::Document wrong = base.document;
+        wrong.edit_page(0).pixel_aspect = 12;
+        try {
+            genko::test::write_project(wrong, to_path(tmp.path()) / "wrong.genko");
+            QFAIL("a ratio past 10 was written");
+        } catch (const core::Error& error) {
+            QCOMPARE(error.code(), std::string("value"));
+        }
+    }
+
     void projectJsonFromCopiedLegacyBookInPlace() {
         // the v3 test book copied, then written as v4 in its own folder: every asset is reused
         QTemporaryDir tmp;

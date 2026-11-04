@@ -188,6 +188,8 @@ std::pair<Image, std::int64_t> text_image(const core::StoryLine& line, int dpi,
 std::shared_ptr<const Layout> remembered_layout(const core::StoryLine& line, int dpi, const std::optional<std::string>& font_path,
                                                 std::stop_token stop = {});
 void clear_layout_cache();
+// (PC5 H-f, メモリをクリア) The bytes they hold now.
+std::int64_t layout_cache_bytes();
 
 class Fonts;
 

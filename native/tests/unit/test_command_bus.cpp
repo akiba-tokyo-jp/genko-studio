@@ -482,7 +482,8 @@ private slots:
             "measure_values",  // (PC5 J-d2: 計測値を記録's values asked, image.analysis.recordMeasurements — SPEC.md PROD-01)
             "timeline_info",  // (PC5 J-e1: timeline@1's question, timeline.info — SPEC.md PROD-01)
             "auto_align_layers", "auto_blend_layers",  // (PC5 I-g: レイヤーを自動整列・レイヤーを自動合成 — SPEC.md AUTO-01)
-            "set_image_assets"};  // (PC5 I-f: image-assets@1, 生成 → 画像アセット — SPEC.md AUTO-01)
+            "set_image_assets",  // (PC5 I-f: image-assets@1, 生成 → 画像アセット — SPEC.md AUTO-01)
+            "set_pixel_aspect"};  // (PC5 H-f: pixel-aspect@1, 表示 → ピクセル縦横比 — SPEC.md VIEW-01)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);
@@ -898,6 +899,43 @@ private slots:
         QCOMPARE(genko::core::journal_op(op).dump(), std::string(R"({"op":"put_raster","page":1,"png_base64":"<12 base64 chars>","layer":"bg"})"));
         const auto result = apply(book(), R"([{"op": "set_note", "page": 1, "note": "n", "png_base64": "AAAA"}])");
         QCOMPARE(result.journal_ops[0]["png_base64"], Json("<4 base64 chars>"));
+    }
+
+    // (PC5 H-f, pixel-aspect@1) set_pixel_aspect: a ratio or a preset of 表示 → ピクセル縦横比, the page's only, nothing drawn
+    // changed; refusals; the page's lock asked as any op on it; strict_gates lets it be (the view's only, nothing printed).
+    void pixelAspectOp() {
+        const Document doc = book();
+        const auto wide = apply(doc, R"([{"op": "set_pixel_aspect", "page": 2, "ratio": 1.5}])");
+        QCOMPARE(wide.doc.page(1).pixel_aspect, 1.5);
+        QCOMPARE(wide.doc.page(0).pixel_aspect, 1.0);
+        QCOMPARE(wide.doc.page(1).layers.size(), doc.page(1).layers.size());
+        QVERIFY(wide.doc.page(0).layers.size() == doc.page(0).layers.size() && wide.doc.pages[0] == doc.pages[0]);  // (the others not copied)
+        QCOMPARE(wide.results[0]["pixel_aspect"], Json(1.5));
+        QCOMPARE(wide.results[0]["page"], Json(2));
+        QCOMPARE(apply(doc, R"([{"op": "set_pixel_aspect", "page": 1, "preset": "d1DvNtsc"}])").doc.page(0).pixel_aspect, 0.91);
+        QCOMPARE(apply(doc, R"([{"op": "set_pixel_aspect", "page": 1, "preset": "anamorphic2To1"}])").doc.page(0).pixel_aspect, 2.0);
+        QCOMPARE(apply(wide.doc, R"([{"op": "set_pixel_aspect", "page": 2, "preset": "square"}])").doc.page(1).pixel_aspect, 1.0);
+        QCOMPARE(apply(doc, R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 10}])").doc.page(0).pixel_aspect, 10.0);
+        QCOMPARE(apply(doc, R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 0.1}])").doc.page(0).pixel_aspect, 0.1);
+        const auto refused = [&](const char* batch, const char* words) {
+            const std::string error = error_of(doc, ops(batch));
+            QVERIFY2(error.find(words) != std::string::npos, error.c_str());
+        };
+        refused(R"([{"op": "set_pixel_aspect", "page": 1}])", "give ratio");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 2, "preset": "square"}])", "give ratio");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 10.5}])", "between 0.1 and 10");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 0}])", "between 0.1 and 10");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": "2"}])", "ratio is a number");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": true}])", "ratio is a number");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "preset": "cinema"}])", "no pixel aspect ratio 'cinema'");
+        refused(R"([{"op": "set_pixel_aspect", "page": 9, "ratio": 2}])", "page");
+        // another's lock on the page refuses it; strict_gates before the name's approval does not
+        const auto locked = apply(doc, R"([{"op": "lock_page", "page": 1}])", "ai:x");
+        const std::string error = error_of(locked.doc, ops(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 2}])"), "ai:y");
+        QVERIFY2(error.find("locked by ai:x") != std::string::npos, error.c_str());
+        Document strict = doc;
+        strict.strict_gates = true;
+        QCOMPARE(apply(strict, R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 2}])", "ai:y").doc.page(0).pixel_aspect, 2.0);
     }
 };
 

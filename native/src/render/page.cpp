@@ -4151,4 +4151,20 @@ void clear_render_caches() {
     g_decoded.clear();
 }
 
+std::int64_t render_cache_bytes() {
+    const auto of = [](const Image& image) { return static_cast<std::int64_t>(image.width()) * image.height() * std::max(1, image.bands()); };
+    std::int64_t bytes = text::balloon_cache_bytes() + placed_cache_pixels() * 4 + smart::cache_bytes() + footage::cache_bytes();
+    {
+        std::lock_guard lock(g_cache_mutex);
+        for (const auto& e : g_stroke_cache) bytes += of(e->image);
+    }
+    {
+        std::lock_guard lock(g_mask_mutex);
+        for (const auto& m : g_masks) bytes += of(m->mask);
+    }
+    std::lock_guard lock(g_decoded_mutex);
+    for (const auto& d : g_decoded) bytes += of(d->image);
+    return bytes;
+}
+
 }  // namespace genko::render

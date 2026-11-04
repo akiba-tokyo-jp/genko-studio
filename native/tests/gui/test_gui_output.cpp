@@ -15,6 +15,9 @@
 //     marked, its line chosen, its layer drawn on), out of date after an edit; the select tool's page has the row;
 //   - (PC5 I-f) プリント…'s position and size, marks, colour management and PDF に出力… (kept for the next time), print_sheets'
 //     pictures and places, 1 部プリント, 生成 → 画像アセット written after the person's save only;
+//   - (PC5 H-f) 最後の状態を切り替え (twice: as it was; another person's change never taken back) and メモリをクリア ▸ (the
+//     copy gone — nothing to paste —, the history's memory let go while Undo still reaches every change through the journal,
+//     what the drawing remembers emptied and the page drawn again the same);
 //   - nothing goes out of a book still being read, nor is it checked;
 //   - the phone screens (where they end down a tall page, kept as chosen), the scales (a guide pulled from each,
 //     add_ruler as Python's window sends it, none when let go on the scale or with the scales off).
@@ -35,6 +38,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QPrintDialog>
 #include <QPrintPreviewDialog>
@@ -1898,6 +1902,135 @@ private slots:
         for (int i = 0; i < 20; ++i) QCoreApplication::processEvents();
         QCOMPARE(s.window->image_assets_written(), 1);
         QVERIFY(!fs::exists(dir));
+    }
+
+    // PC5 H-f (SPEC.md VIEW-01「取り消しとメモリをクリア」): 編集 → 最後の状態を切り替え (Ctrl+Alt+Z, after やり直し) — pressed twice,
+    // the book as it was; after an Undo it goes forward; a change another person saved since is not taken back (the journal's
+    // undo refuses it, as Undo's).
+    void toggleLastState() {
+        Studio s(gui_test::new_doc(2));
+        QAction* toggle = s.act("act_toggle_last_state");
+        QVERIFY(toggle != nullptr);
+        QCOMPARE(toggle->text(), QStringLiteral("最後の状態を切り替え"));
+        QVERIFY(toggle->shortcuts().contains(QKeySequence(QStringLiteral("Ctrl+Alt+Z"))));
+        const QStringList edit = menu_items(s.window.get(), QStringLiteral("編集"));
+        QCOMPARE(edit.indexOf(QStringLiteral("最後の状態を切り替え")), edit.indexOf(QStringLiteral("やり直し")) + 1);
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_page"}, {"count", 1}}})));
+        QCOMPARE(s.doc().pages.size(), std::size_t{3});
+        toggle->trigger();
+        QCOMPARE(s.doc().pages.size(), std::size_t{2});
+        toggle->trigger();
+        QCOMPARE(s.doc().pages.size(), std::size_t{3});
+        toggle->trigger();
+        QCOMPARE(s.doc().pages.size(), std::size_t{2});
+        toggle->trigger();
+        QCOMPARE(s.doc().pages.size(), std::size_t{3});
+        // after a plain Undo: forward again
+        s.act("act_undo")->trigger();
+        QCOMPARE(s.doc().pages.size(), std::size_t{2});
+        toggle->trigger();
+        QCOMPARE(s.doc().pages.size(), std::size_t{3});
+        // another person's change saved since: not taken back
+        QVERIFY(s.saved());
+        {
+            auto options = gui_test::quick(gui_test::path_of(s.tmp.path() + QStringLiteral("/recovery-other")));
+            options.actor = "ai:hermes";
+            auto other = app::Session::open(s.path, options);
+            other->apply(Json::array({Json{{"op", "add_page"}, {"count", 2}}}));
+            QVERIFY(other->wait_saved(std::chrono::milliseconds(10000)));
+        }
+        s.session->check_outside();
+        QVERIFY(gui_test::wait_for([&] { return s.doc().pages.size() == 5; }));
+        toggle->trigger();
+        QVERIFY(gui_test::wait_for([&] { return s.session->wait_idle(std::chrono::milliseconds(50)); }));
+        for (int i = 0; i < 20; ++i) QCoreApplication::processEvents();
+        QCOMPARE(s.doc().pages.size(), std::size_t{5});
+        QCOMPARE(gui_test::read_book(s.path).pages.size(), std::size_t{5});
+    }
+
+    // 編集 → メモリをクリア ▸ (取り消し・クリップボード・ヒストリー・すべて・ビデオキャッシュ, before 検索; the coordinator's decision:
+    // memory only, the journal keeps every change): クリップボード — nothing to paste after it, another program's clipboard
+    // left alone —; ヒストリー — the changes saved leave memory, Undo still takes them back through the journal —; すべて — what
+    // the drawing remembers empty, the page drawn again the same —; what was let go said.
+    void purgeMemory() {
+        Studio s(gui_test::new_doc(2));
+        QMenu* purge_menu = s.window->findChild<QMenu*>(QStringLiteral("menu_purge"));
+        QVERIFY(purge_menu != nullptr);
+        QCOMPARE(purge_menu->title(), QStringLiteral("メモリをクリア"));
+        QStringList names;
+        for (QAction* a : purge_menu->actions()) names << (a->isSeparator() ? QStringLiteral("|") : a->text());
+        QCOMPARE(names, (QStringList{QStringLiteral("取り消し"), QStringLiteral("クリップボード"), QStringLiteral("ヒストリー"), QStringLiteral("すべて"),
+                                     QStringLiteral("|"), QStringLiteral("ビデオキャッシュ")}));
+        const QStringList edit = menu_items(s.window.get(), QStringLiteral("編集"));
+        const qsizetype at = edit.indexOf(QStringLiteral("メモリをクリア"));
+        QVERIFY2(at > 0 && edit.indexOf(QStringLiteral("検索")) > at, qPrintable(edit.join(QStringLiteral(" / "))));
+        for (const char* name : {"act_purge_undo", "act_purge_histories", "act_purge_all"})
+            QVERIFY2(s.act(name)->statusTip().contains(QStringLiteral("取り消しの記録は原稿に残ります")), name);
+        // クリップボード: a copy, then cleared — the window's and the computer's —; a paste finds nothing
+        const std::string ink = s.ink();
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", ink},
+                                                      {"points", Json::array({Json::array({30, 30, 0.5}), Json::array({80, 90, 0.5})})}, {"width_mm", 1}}})));
+        s.window->set_target_layer(ink);
+        s.act("act_copy")->trigger();
+        QClipboard* clip = QGuiApplication::clipboard();
+        QVERIFY(clip->mimeData() != nullptr && clip->mimeData()->hasFormat(QStringLiteral("application/x-genko-items+json")));
+        app::MainWindow::Purged done = s.window->purge(QStringLiteral("clipboard"));
+        QCOMPARE(done.items, QStringList{QStringLiteral("クリップボード")});
+        QVERIFY(done.bytes > 0);
+        QVERIFY(clip->mimeData() == nullptr || !clip->mimeData()->hasFormat(QStringLiteral("application/x-genko-items+json")));
+        QVERIFY2(s.window->last_notice().startsWith(QStringLiteral("メモリをクリアしました：クリップボード（約 ")), qPrintable(s.window->last_notice()));
+        const std::size_t layers = s.doc().page(0).layers.size();
+        s.act("act_paste")->trigger();
+        QCOMPARE(s.doc().page(0).layers.size(), layers);
+        QVERIFY2(s.window->last_notice().contains(QStringLiteral("ペーストするものがありません")), qPrintable(s.window->last_notice()));
+        // (another program's clipboard is not Genko's: left as it is)
+        clip->setText(QStringLiteral("ほかのアプリの文字"));
+        if (!clip->ownsClipboard()) {
+            s.window->purge(QStringLiteral("clipboard"));
+            QCOMPARE(clip->text(), QStringLiteral("ほかのアプリの文字"));
+        }
+        // nothing left to clear: said
+        done = s.window->purge(QStringLiteral("video"));
+        QVERIFY(done.items.isEmpty());
+        QCOMPARE(s.window->last_notice(), QStringLiteral("クリアするものはありませんでした"));
+        // ヒストリー: the changes saved leave memory (the latest stays), the journal keeps them — Undo takes every one back
+        for (int i = 0; i < 3; ++i) QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_page"}, {"count", 1}}})));
+        QCOMPARE(s.doc().pages.size(), std::size_t{5});
+        QVERIFY(s.saved());
+        QVERIFY(s.session->changes_in_memory() >= 4);
+        done = s.window->purge(QStringLiteral("histories"));
+        QVERIFY(done.items.contains(QStringLiteral("ヒストリー")));
+        QCOMPARE(s.session->changes_in_memory(), std::size_t{1});
+        QVERIFY(s.window->last_notice().contains(QStringLiteral("取り消しの記録は原稿に残っています")));
+        for (std::size_t want : {std::size_t{4}, std::size_t{3}, std::size_t{2}}) {
+            s.act("act_undo")->trigger();
+            QVERIFY2(gui_test::wait_for([&] { return s.session->wait_idle(std::chrono::milliseconds(50)) && s.doc().pages.size() == want; }),
+                     qPrintable(QString::number(s.doc().pages.size())));
+        }
+        QCOMPARE(gui_test::ink_strokes(s.doc(), 0), std::size_t{1});  // (the line drawn first: the next Undo's)
+        s.act("act_undo")->trigger();
+        QVERIFY(gui_test::wait_for([&] { return s.session->wait_idle(std::chrono::milliseconds(50)) && gui_test::ink_strokes(s.doc(), 0) == 0; }));
+        // すべて: what the drawing remembers let go; the page drawn again, the same picture
+        s.act("act_redo")->trigger();
+        QVERIFY(gui_test::wait_for([&] { return s.session->wait_idle(std::chrono::milliseconds(50)) && gui_test::ink_strokes(s.doc(), 0) == 1; }));
+        app::PageCanvas* c = s.canvas();
+        QVERIFY(c->wait_rendered(60000));
+        render::RenderOptions print;
+        print.mode = "print";
+        const render::Image drawn = render::render_page(s.doc().page(0), 100, print, &s.doc()).image;
+        QVERIFY(render::render_cache_bytes() > 0);
+        const QImage shown = c->renderer().compose(c->renderer().shown_dpi());
+        done = s.window->purge(QStringLiteral("all"));
+        QVERIFY2(done.items.contains(QStringLiteral("描いた絵の覚え")), qPrintable(done.items.join(QStringLiteral(","))));
+        QCOMPARE(render::render_cache_bytes(), std::int64_t{0});
+        QVERIFY(s.window->last_notice().startsWith(QStringLiteral("メモリをクリアしました：")));
+        QVERIFY(render::render_page(s.doc().page(0), 100, print, &s.doc()).image.tobytes() == drawn.tobytes());
+        c->renderer().set_screen_dots(!c->renderer().screen_dots());  // (every tile drawn again — twice)
+        c->renderer().set_screen_dots(!c->renderer().screen_dots());
+        QVERIFY(c->wait_rendered(60000));
+        QVERIFY(c->renderer().compose(c->renderer().shown_dpi()) == shown);
+        // the book as it was: nothing of it changed by any of them
+        QCOMPARE(gui_test::ink_strokes(s.doc(), 0), std::size_t{1});
     }
 };
 

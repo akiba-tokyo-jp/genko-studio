@@ -593,8 +593,9 @@ void PageCanvas::contextMenuEvent(QContextMenuEvent* event) {
 }
 
 void PageCanvas::keep_in_view() {
-    // (a turned or mirrored view: its edges are not the page's — left as it is, review P3-10)
-    if (overscroll || page() == nullptr || view_.scale <= 0 || view_.rotation != 0.0 || view_.flipped || view_.flipped_v) return;
+    // (a turned or mirrored view — or one widened by the pixel aspect ratio, PC5 H-f —: its edges are not the page's — left
+    // as it is, review P3-10)
+    if (overscroll || page() == nullptr || view_.scale <= 0 || view_.rotation != 0.0 || view_.flipped || view_.flipped_v || shown_aspect() != 1.0) return;
     const double pw = page()->spec.width_mm.value() * view_.scale;
     const double ph = page()->spec.height_mm.value() * view_.scale;
     const auto keep = [](double& pan, double page_px, double view_px) {

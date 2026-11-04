@@ -5,6 +5,7 @@
 
 #include "core/channels.hpp"
 #include "core/image_assets.hpp"
+#include "core/pixel_aspect.hpp"
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
@@ -469,6 +470,8 @@ void register_render_ops(core::OpRegistry& registry) {
     core::register_image_asset_ops(registry);
     // PC5 J-e2 (video@1: the video layers, render/ops_video)
     register_video_ops(registry);
+    // PC5 H-f (pixel-aspect@1: 表示 → ピクセル縦横比, the page's ratio for the view — core/pixel_aspect)
+    core::register_pixel_aspect_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {

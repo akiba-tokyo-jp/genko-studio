@@ -108,6 +108,13 @@ public:
     // first (a frame let go is drawn again when it plays again); how many they hold now.
     std::int64_t played_most = 256ll << 20;
     std::int64_t played_bytes() const { return played_bytes_; }
+    // (PC5 H-f, メモリをクリア → ビデオキャッシュ・すべて) The frames drawn for playing let go (drawn again when they play again);
+    // the bytes they held.
+    std::int64_t purge_played() {
+        const std::int64_t bytes = played_bytes_;
+        forget_played();
+        return bytes;
+    }
 
 private:
     const core::Page* page() const;

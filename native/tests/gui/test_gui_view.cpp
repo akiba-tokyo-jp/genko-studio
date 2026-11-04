@@ -2,7 +2,8 @@
 // 11: 100% one page pixel a screen pixel, 200%, プリントサイズ the paper), a 600 dpi B4 page zoomed to its pixels (画素の段:
 // its own pixels laid as squares), レイヤーを画面サイズに合わせる, ピクセルグリッド (the grid of the layer drawn on) and where it
 // shows, ピクセルアートプレビュー, 手のひらツール and ズームツール (a click, Alt+click, a drag, and their options: ズームアウト,
-// スクラブズーム — the clicks pc0 found untested), スクリーンモード in F's order, and the 32 bit プレビューオプション window.
+// スクラブズーム — the clicks pc0 found untested), スクリーンモード in F's order, and the 32 bit プレビューオプション window; PC5 H-f:
+// ピクセル縦横比 ▸ and ピクセル縦横比を補正 (the view widened, the tools in the page's own pixels, カスタムピクセル縦横比…).
 
 #include <QtTest>
 
@@ -11,8 +12,10 @@
 #include <QDialog>
 #include <QDoubleSpinBox>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenu>
 #include <QMenuBar>
+#include <QPushButton>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QToolBar>
@@ -34,6 +37,7 @@
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/raster.hpp"
+#include "render/selection.hpp"
 
 using namespace gui_test;
 using genko::app::MainWindow;
@@ -529,6 +533,131 @@ private slots:
         eight.trigger("act_32bit_preview");
         QVERIFY(!asked);
         QVERIFY(eight.window->last_notice().contains(QStringLiteral("32 bit")));
+    }
+
+    // PC5 H-f (the user's decision 10, pixel-aspect@1): 表示 → ピクセル縦横比 ▸ — Photoshop's ratios, the page's ratio set with one
+    // Undo — and ピクセル縦横比を補正: the view widened across by it (the view's only: down as it was), every point of the page
+    // where it shows (to_mm and to_widget each other's), a selection dragged on the widened view in the page's own mm, the
+    // book's pixels and its pictures not changed; カスタムピクセル縦横比… a ratio of its own, kept by its name.
+    void pixelAspectRatio() {
+        View v(new_doc(1));
+        PageCanvas* c = v.canvas();
+        MainWindow* w = v.window.get();
+        QMenu* ratios = nullptr;
+        QMenu* view = nullptr;
+        for (QAction* top : w->menuBar()->actions()) {
+            if (top->menu() != nullptr && top->text() == QStringLiteral("表示")) view = top->menu();
+        }
+        QVERIFY(view != nullptr);
+        QStringList view_rows;
+        for (QAction* item : view->actions()) {
+            if (item->menu() != nullptr && item->menu()->title() == QStringLiteral("ピクセル縦横比")) ratios = item->menu();
+            view_rows << (item->isSeparator() ? QStringLiteral("|") : item->text());
+        }
+        QVERIFY(ratios != nullptr);
+        // (Photoshop's place: after 色域外警告, then ピクセル縦横比を補正 and 32 bit プレビューオプション…)
+        const qsizetype at = view_rows.indexOf(QStringLiteral("ピクセル縦横比"));
+        QVERIFY2(at > 0 && view_rows[at - 1] == QStringLiteral("|") && view_rows[at + 1] == QStringLiteral("ピクセル縦横比を補正") &&
+                     view_rows[at + 2] == QStringLiteral("32 bit プレビューオプション…"),
+                 qPrintable(view_rows.join(QStringLiteral(" / "))));
+        QStringList names;
+        for (QAction* item : ratios->actions()) names << (item->isSeparator() ? QStringLiteral("|") : item->text());
+        QCOMPARE(names, (QStringList{QStringLiteral("カスタムピクセル縦横比…"), QStringLiteral("|"), QStringLiteral("正方形"), QStringLiteral("D1/DV NTSC (0.91)"),
+                                     QStringLiteral("D1/DV PAL (1.09)"), QStringLiteral("D1/DV NTSC ワイドスクリーン (1.21)"),
+                                     QStringLiteral("HDV 1080/DVCPRO HD 720 (1.33)"), QStringLiteral("D1/DV PAL ワイドスクリーン (1.46)"),
+                                     QStringLiteral("DVCPRO HD 1080 (1.5)"), QStringLiteral("アナモルフィック 2:1 (2)")}));
+        emit ratios->aboutToShow();
+        QVERIFY(v.act("act_pixel_aspect_square")->isChecked());
+        QAction* correction = v.act("act_pixel_aspect_correction");
+        QVERIFY(correction->isCheckable() && correction->isChecked());
+        const double w_mm = c->page()->spec.width_mm.value(), h_mm = c->page()->spec.height_mm.value();
+        const auto across = [&] { return c->to_widget(QPointF(w_mm, 0)).x() - c->to_widget(QPointF(0, 0)).x(); };
+        const auto down = [&] { return c->to_widget(QPointF(0, h_mm)).y() - c->to_widget(QPointF(0, 0)).y(); };
+        QVERIFY(std::abs(across() - c->scale() * w_mm) < 1e-6);
+        const double down_before = down();
+        // アナモルフィック 2:1: the page's ratio, one change; the view twice as wide, as tall as it was
+        int edits = 0;
+        QObject::connect(v.session.get(), &Session::changed, w, [&edits](const genko::app::BookChange& change) {
+            if (change.why == genko::app::BookChange::Why::Edit) ++edits;
+        });
+        const auto pixels_before = w->book().page(0).layers;
+        v.trigger("act_pixel_aspect_anamorphic");
+        QCOMPARE(edits, 1);
+        QCOMPARE(w->book().page(0).pixel_aspect, 2.0);
+        QCOMPARE(c->shown_aspect(), 2.0);
+        emit ratios->aboutToShow();
+        QVERIFY(v.act("act_pixel_aspect_anamorphic")->isChecked() && !v.act("act_pixel_aspect_square")->isChecked());
+        QVERIFY2(std::abs(across() - 2 * c->scale() * w_mm) < 1e-6, qPrintable(QString::number(across())));
+        QVERIFY(std::abs(down() - down_before) < 1e-6);
+        // every point where it shows, and back
+        for (const QPointF mm : {QPointF(0, 0), QPointF(w_mm, h_mm), QPointF(12.5, 40.25), QPointF(-3, 7)}) {
+            const QPointF back = c->to_mm(c->to_widget(mm));
+            QVERIFY2(std::abs(back.x() - mm.x()) < 1e-9 && std::abs(back.y() - mm.y()) < 1e-9, qPrintable(QStringLiteral("%1,%2").arg(back.x()).arg(back.y())));
+        }
+        // a selection dragged on the widened view: the page's own mm (the tool works in the page's square pixels)
+        w->choose_tool(QStringLiteral("rect"));
+        inject::mouse_stroke(c, {QPointF(20, 30), QPointF(40, 45), QPointF(60, 70)});
+        QVERIFY(c->selection().has_value());
+        const std::vector<double> box = render::selection::area_bbox(c->selection()->area);
+        QVERIFY2(box.size() == 4 && std::abs(box[0] - 20) < 0.5 && std::abs(box[1] - 30) < 0.5 && std::abs(box[2] - 40) < 0.5 && std::abs(box[3] - 40) < 0.5,
+                 Json(box).dump().c_str());
+        c->set_selection(std::nullopt);
+        // the correction off: square again on the screen (the page's ratio kept); on again
+        correction->trigger();
+        QVERIFY(!correction->isChecked() && c->shown_aspect() == 1.0);
+        QVERIFY(std::abs(across() - c->scale() * w_mm) < 1e-6);
+        QCOMPARE(w->book().page(0).pixel_aspect, 2.0);
+        correction->trigger();
+        QCOMPARE(c->shown_aspect(), 2.0);
+        // 画面サイズに合わせる: as wide as it shows
+        v.trigger("act_fit");
+        v.settle();
+        QVERIFY2(across() <= c->width() + 1e-6, qPrintable(QStringLiteral("%1 > %2").arg(across()).arg(c->width())));
+        // the book's pixels and layers as they were, one Undo takes the ratio back
+        QCOMPARE(w->book().page(0).layers.size(), pixels_before.size());
+        v.trigger("act_undo");
+        QCOMPARE(w->book().page(0).pixel_aspect, 1.0);
+        QCOMPARE(c->shown_aspect(), 1.0);
+        // a page of a ratio shown without the correction, chosen again: the correction comes back on (Photoshop's)
+        correction->trigger();
+        v.trigger("act_pixel_aspect_d1_ntsc");
+        QVERIFY(correction->isChecked());
+        QCOMPARE(c->shown_aspect(), 0.91);
+        // カスタムピクセル縦横比…: a ratio of its own, kept by its name; chosen again from the kept ones, deleted
+        genko::app::settings()->remove(QStringLiteral("view/custom_pixel_aspects"));
+        v.answers->responder->exec = [](QDialog* dialog) {
+            dialog->findChild<QLineEdit*>(QStringLiteral("pixel_aspect_name"))->setText(QStringLiteral("シネマ"));
+            dialog->findChild<QDoubleSpinBox*>(QStringLiteral("pixel_aspect_ratio"))->setValue(1.25);
+            return int(QDialog::Accepted);
+        };
+        v.trigger("act_pixel_aspect_custom");
+        QCOMPARE(w->book().page(0).pixel_aspect, 1.25);
+        emit ratios->aboutToShow();
+        QVERIFY(v.act("act_pixel_aspect_custom")->isChecked());
+        v.trigger("act_pixel_aspect_square");
+        QCOMPARE(w->book().page(0).pixel_aspect, 1.0);
+        QCOMPARE(c->shown_aspect(), 1.0);
+        v.answers->responder->exec = [](QDialog* dialog) {
+            auto* saved = dialog->findChild<QComboBox*>(QStringLiteral("pixel_aspect_saved"));
+            const int kept = saved->findData(QStringLiteral("シネマ"));
+            if (kept < 0) return int(QDialog::Rejected);
+            saved->setCurrentIndex(kept);
+            return int(QDialog::Accepted);
+        };
+        v.trigger("act_pixel_aspect_custom");
+        QCOMPARE(w->book().page(0).pixel_aspect, 1.25);
+        v.answers->responder->exec = [](QDialog* dialog) {
+            auto* saved = dialog->findChild<QComboBox*>(QStringLiteral("pixel_aspect_saved"));
+            saved->setCurrentIndex(saved->findData(QStringLiteral("シネマ")));
+            dialog->findChild<QPushButton*>(QStringLiteral("pixel_aspect_delete"))->click();
+            return int(QDialog::Rejected);
+        };
+        v.trigger("act_pixel_aspect_custom");
+        QVERIFY(!genko::app::settings()->value(QStringLiteral("view/custom_pixel_aspects")).toString().contains(QStringLiteral("シネマ")));
+        QCOMPARE(w->book().page(0).pixel_aspect, 1.25);  // (キャンセル: the page as it was)
+        // saved: the book names pixel-aspect@1
+        QVERIFY(v.session->wait_saved(std::chrono::milliseconds(10000)));
+        QCOMPARE(read_book(v.book).page(0).pixel_aspect, 1.25);
     }
 };
 

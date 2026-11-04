@@ -1257,7 +1257,9 @@ private slots:
                                            // (PC5 I-g: レイヤーを自動整列・レイヤーを自動合成 — SPEC AUTO-01)
                                            "auto_align_layers", "auto_blend_layers",
                                            // (PC5 I-f: image-assets@1, 生成 → 画像アセット — SPEC AUTO-01)
-                                           "set_image_assets"};
+                                           "set_image_assets",
+                                           // (PC5 H-f: pixel-aspect@1, 表示 → ピクセル縦横比 — SPEC VIEW-01)
+                                           "set_pixel_aspect"};
         for (const std::string& name : genko::render::ops_registry().names()) {
             if (listed.count(name) == 0 && own.count(name) == 0) missing += (missing.empty() ? "" : ", ") + name;
         }

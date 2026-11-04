@@ -93,6 +93,8 @@ std::pair<std::string, std::string> filtered_upto(const core::Document& doc, con
 // The pictures remembered between tiles, forgotten (clear_render_caches), and how many pixels they hold.
 void clear_caches();
 std::int64_t cache_pixels();
+// (PC5 H-f, メモリをクリア) The bytes they hold.
+std::int64_t cache_bytes();
 // Tests: the bytes each kind of picture remembered may hold together (0: the build's own, 512 MiB).
 void set_budget_for_testing(std::size_t bytes);
 

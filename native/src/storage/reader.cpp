@@ -39,6 +39,7 @@
 #include "core/groups.hpp"
 #include "core/layer_basics.hpp"
 #include "core/artboards.hpp"
+#include "core/pixel_aspect.hpp"
 // PC5 J-0 (制作の補助)
 #include "core/annotations.hpp"
 #include "core/layer_comps.hpp"
@@ -442,6 +443,7 @@ private:
     // PC5 J-0 (layer-comps@1, slices@1, annotations@1, measure@1)
     void read_page_production(core::Page& page, const std::string& at);
     void read_page_artboard(core::Page& page, const std::string& at);  // (PC5 I-c: artboards@1)
+    void read_page_pixel_aspect(core::Page& page, const std::string& at);  // (PC5 H-f: pixel-aspect@1)
     void check_named(const std::string& ref, std::string_view suffix, const std::string& at, std::string_view noun);
     std::unordered_map<std::string, core::vector::ShapeListPtr> shape_blobs_;  // (shapes read in this load)
 };
@@ -1602,6 +1604,7 @@ core::Document Reader::migrate(const Json& payload) {
         read_page_files(page, at);
         read_page_production(page, at);  // (PC5 J-0)
         read_page_artboard(page, at);     // (PC5 I-c)
+        read_page_pixel_aspect(page, at);  // (PC5 H-f)
         page_list.push_back(std::make_shared<core::Page>(std::move(page)));
         if (skip_assets_) deferred.push_back(page_list.back());
     }
@@ -1910,6 +1913,20 @@ void Reader::read_page_artboard(core::Page& page, const std::string& at) {
     page.extra.erase(it);
 }
 
+// PC5 H-f (pixel-aspect@1, SPEC.md VIEW-01「ピクセル縦横比」): the page's pixel aspect ratio, taken out of the keys written back
+// as they were read (one that cannot be read is reported and kept so: the book is read-only).
+void Reader::read_page_pixel_aspect(core::Page& page, const std::string& at) {
+    const auto it = page.extra.find(std::string(core::kPixelAspectKey));
+    if (it == page.extra.end()) return;
+    try {
+        page.pixel_aspect = core::pixel_aspect_from_json(*it);
+    } catch (const core::Error& error) {
+        issue("broken_value", at_key(at, std::string(core::kPixelAspectKey)), {}, error.what());
+        return;
+    }
+    page.extra.erase(it);
+}
+
 // file-info@1 (PC4): the book's File Info, kept under "file_info" (taken out of the keys written back as they were read; one
 // that cannot be read is reported and kept so: the book is read-only).
 void Reader::read_file_info(core::Document& doc) {
@@ -2117,7 +2134,9 @@ bool is_known_feature(std::string_view feature) {
            // PC5 J-f (core/smart.hpp)
            feature == core::smart::kPluginFiltersFeature ||
            // PC5 I-f (core/image_assets.hpp)
-           feature == core::kImageAssetsFeature;
+           feature == core::kImageAssetsFeature ||
+           // PC5 H-f (core/pixel_aspect.hpp)
+           feature == core::kPixelAspectFeature;
 }
 
 int project_version(const Json& payload) {

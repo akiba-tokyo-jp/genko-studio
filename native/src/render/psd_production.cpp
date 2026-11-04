@@ -14,6 +14,7 @@
 #include "render/psd_annotations.hpp"
 #include "render/psd_comps.hpp"
 #include "render/psd_guides.hpp"
+#include "render/psd_pixel_aspect.hpp"
 #include "render/psd_slices.hpp"
 
 namespace genko::render::psd_production {
@@ -23,7 +24,7 @@ namespace {
 // (each group adds its row here — J-a: 1065 and its layers' cmls; J-b: {1050, …, true, …}; J-c: {-1, "Anno", "J-c", false,
 // …} (its writer puts back the sound notes of WriteContext::kept_global("Anno")); J-d1: {1074, …} and {1080, "", "J-d1",
 // false, nullptr, nullptr, nullptr, supersedes})
-constexpr std::array<Row, 6> kRows{{
+constexpr std::array<Row, 7> kRows{{
     {psd_comps::kResource, "", "J-a", true, psd_comps::read, psd_comps::write, psd_comps::fingerprint, nullptr, "cmls", psd_comps::write_layers},
     // (PC5 J-c: the notes, Anno; its sound notes kept in the kept bytes and written back after the page's)
     {-1, psd_annotations::kKey, "J-c", false, psd_annotations::read, psd_annotations::write, psd_annotations::fingerprint, nullptr, "", nullptr},
@@ -36,6 +37,9 @@ constexpr std::array<Row, 6> kRows{{
     {psd_annotations::kCountResource, "", "J-d1", false, nullptr, nullptr, nullptr, psd_annotations::counts_own, "", nullptr},
     // (PC5 J-b: the slices, 1050 — its layer-based slices name their layers' lyids: never into a file without layers)
     {psd_slices::kResource, "", "J-b", true, psd_slices::read, psd_slices::write, psd_slices::fingerprint, nullptr, "", nullptr},
+    // (PC5 H-f: the pixel aspect ratio, 1064 — read when it is not square; the file's bytes written back while it is the one read)
+    {psd_pixel_aspect::kResource, "", "H-f", false, psd_pixel_aspect::read, psd_pixel_aspect::write, psd_pixel_aspect::fingerprint, nullptr, "",
+     nullptr},
 }};
 
 std::span<const Row>& table() {
