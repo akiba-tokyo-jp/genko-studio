@@ -457,10 +457,13 @@ private slots:
         // — test_gui_anim.
         // and PC5 I-h's 2 — ファイル → 自動処理 → 写真の切り抜きと角度補正・HDR Pro に統合… (act_crop_straighten_photos,
         // act_merge_to_hdr_pro) — test_gui_automate.
-        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8, I-c's 10: アートボード… など — test_gui_artboards — I-h's 2 and I-f's 3)
+        // and PC5 I-g's 5 (SPEC AUTO-01「自動整列・自動合成」「Photomerge」) — 編集 → レイヤーを自動整列…・レイヤーを自動合成…
+        // (act_auto_align_layers, act_auto_blend_layers), ファイル → 自動処理 → Photomerge… (act_photomerge), スクリプト →
+        // ファイルをスタックとして読み込み…・統計… (act_load_files_into_stack, act_statistics) — test_gui_automate.
+        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8, I-c's 10: アートボード… など — test_gui_artboards —, I-h's 2, I-g's 5 and I-f's 3)
         // and PC5 I-f's 3 — ファイル → 1 部プリント (act_print_one_copy), 生成 → 画像アセット (act_image_assets), 自動処理 → コンタクトシート II…
         // (act_contact_sheet) — test_gui_output and test_gui_automate.
-        QCOMPARE(w->actions_by_name().size(), std::size_t{792});
+        QCOMPARE(w->actions_by_name().size(), std::size_t{797});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -548,11 +551,14 @@ private slots:
                  (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"),
                               QStringLiteral("写真の切り抜きと角度補正"), QStringLiteral("コンタクトシート II…"), QStringLiteral("|"),  // (PC5 I-h, I-f)
                               QStringLiteral("条件付きモード変更…"), QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…"),
-                              QStringLiteral("|"), QStringLiteral("HDR Pro に統合…")}));  // (PC5 I-h)
+                              QStringLiteral("|"), QStringLiteral("HDR Pro に統合…"),  // (PC5 I-h)
+                              QStringLiteral("Photomerge…")}));  // (PC5 I-g)
         QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_scripts"))),
                  (QStringList{QStringLiteral("画像プロセッサー…"), QStringLiteral("すべての空のレイヤーを削除"), QStringLiteral("すべてのレイヤー効果を統合"),  // (PC5 I-a)
                               QStringLiteral("すべてのマスクを統合"), QStringLiteral("|"),
-                              QStringLiteral("スクリプトイベントマネージャー…"), QStringLiteral("|"), QStringLiteral("参照…")}));
+                              QStringLiteral("スクリプトイベントマネージャー…"), QStringLiteral("|"),
+                              QStringLiteral("ファイルをスタックとして読み込み…"), QStringLiteral("統計…"), QStringLiteral("|"),  // (PC5 I-g)
+                              QStringLiteral("参照…")}));
         QMenu* exports = w->findChild<QMenu*>(QStringLiteral("menu_export"));
         QVERIFY(exports != nullptr);
         QCOMPARE(items(exports), (QStringList{QStringLiteral("PNG としてクイック書き出し"), QStringLiteral("書き出し形式…"), QStringLiteral("|"),

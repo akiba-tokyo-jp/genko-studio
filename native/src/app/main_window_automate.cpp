@@ -73,6 +73,7 @@ void MainWindow::build_automate_actions() {
          QStringLiteral("スキャンしたページの写真を 1 枚ずつ見つけ、傾きを直して新しい原稿にします（元のページは変わりません）"));
     make(QStringLiteral("act_merge_to_hdr_pro"), QStringLiteral("HDR Pro に統合…"), [this] { merge_to_hdr_dialog(); }, {},
          QStringLiteral("露出違いの画像を 1 枚の HDR 画像（32 bit）か、トーンを整えた 16・8 bit の画像にして新しい原稿にします"));
+    build_photomerge_actions();  // (PC5 I-g: Photomerge…, ファイルをスタックとして読み込み…・統計…, 編集's レイヤーを自動整列…・自動合成…)
 }
 
 void MainWindow::build_automate_menus() {
@@ -98,6 +99,7 @@ void MainWindow::build_automate_menus() {
     scripts_menu_->addAction(action(QStringLiteral("act_script_events")));
     scripts_menu_->addSeparator();
     scripts_menu_->addAction(action(QStringLiteral("act_script_browse")));
+    build_photomerge_menus();  // (PC5 I-g: Photomerge… last in 自動処理 ▸; ファイルをスタックとして読み込み…・統計… before 参照…)
     automate_menu_->menuAction()->setVisible(!automate_menu_->actions().isEmpty());  // (shown once it holds one)
 }
 

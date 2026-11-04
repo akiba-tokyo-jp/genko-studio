@@ -242,6 +242,10 @@ genko_library(genko_app
     # PC5 I-c (アートボード: レイヤー → 新規 → アートボード, アートボードの設定, 表示, アートボードからファイル・PDF)
     main_window_artboards.cpp
     artboard_dialog.cpp
+    # PC5 I-g (自動整列・自動合成・Photomerge・ファイルをスタックとして読み込み・統計)
+    auto_align_dialog.cpp
+    photomerge_dialog.cpp
+    main_window_photomerge.cpp
     # PC5 I-f (1 部プリント, 生成 → 画像アセット, コンタクトシート II…; `genko print`)
     main_window_print.cpp
     print_cli.cpp

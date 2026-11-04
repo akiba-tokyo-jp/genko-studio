@@ -17,9 +17,11 @@
 #include <QPointer>
 #include <QProgressDialog>
 #include <QString>
+#include <QTimer>
 #include <QWidget>
 #include <QtConcurrent>
 
+#include <atomic>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -28,6 +30,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "render/fx.hpp"
 #include "render/page.hpp"
 #include "render/segment/segment.hpp"
 
@@ -55,12 +58,24 @@ auto run_stoppable(QWidget* parent, const QString& title, const QString& label, 
         std::exception_ptr error;
         bool cancelled = false;
     };
+    // (PC5 I-g: how far the render work is, as render::fx::ProgressScope says it — the window busy until it says anything)
+    auto fraction = std::make_shared<std::atomic<double>>(0.0);
+    QTimer tick;
+    tick.setInterval(100);
+    QObject::connect(&tick, &QTimer::timeout, progress, [p = progress.data(), fraction] {
+        const double f = fraction->load();
+        if (f <= 0.0) return;
+        if (p->maximum() != 1000) p->setRange(0, 1000);
+        p->setValue(static_cast<int>(f * 1000));
+    });
+    tick.start();
     QFutureWatcher<void> watcher;
     QEventLoop loop;
     QObject::connect(&watcher, &QFutureWatcher<void>::finished, &loop, &QEventLoop::quit);
     auto done = std::make_shared<Done>();
-    watcher.setFuture(QtConcurrent::run([work = std::move(work), token = stop->get_token(), done]() mutable {
+    watcher.setFuture(QtConcurrent::run([work = std::move(work), token = stop->get_token(), done, fraction]() mutable {
         const render::segment::StopScope scope(token);
+        const render::fx::ProgressScope progress_scope(*fraction);
         const std::function<bool()> stopped = [token] { return token.stop_requested(); };
         try {
             done->result.emplace(work(stopped));
@@ -73,6 +88,7 @@ auto run_stoppable(QWidget* parent, const QString& title, const QString& label, 
     if (!watcher.isFinished()) loop.exec();
     if (!watcher.isFinished()) stop->request_stop();  // (the loop left early — the app quitting —: stopped, then waited for)
     watcher.waitForFinished();
+    tick.stop();
     if (progress) {
         progress->hide();
         progress->deleteLater();

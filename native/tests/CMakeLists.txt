@@ -708,6 +708,20 @@ genko_test(test_scancrop SOURCES unit/test_scancrop.cpp DEPS genko_test_support 
 genko_test(test_contract_hdr SOURCES contract/test_contract_hdr.cpp support/raw_testgen.cpp DEPS genko_test_support genko_service
            LABELS contract TIMEOUT 900)
 add_dependencies(test_contract_hdr genko)
+# PC5 I-g (SPEC.md AUTO-01「自動整列・自動合成」「Photomerge」): the registration (render/features: Harris, steered BRIEF,
+# RANSAC — known maps undone within 0.5 px, the same again) and the panorama (render/panorama, render/pyramid: the layouts, the
+# focal length, the placements, gains, seams, the multi-band blend, focus stacking, the tiled blend as the whole), as PhotoCraft's
+# algo tests them.
+genko_test(test_features SOURCES unit/test_features.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_panorama SOURCES unit/test_panorama.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC5 I-g: auto_align_layers on 8-bit, 16-bit and CMYK pages (reposition within a pixel, the six projections, the refusals:
+# a lock, nothing to match, an agent), auto_blend_layers (the panorama's masks and seamless layer of their kind, focus
+# stacking), Photomerge's new book (its size, layers, masks, the edges filled, the same again, too large refused), ファイルを
+# スタックとして読み込み, 統計's median and `genko automate stack|statistics|photomerge`.
+# (test_contract_align is PC3 C-d's align_layers: this one is named for 自動整列)
+genko_test(test_contract_auto_align SOURCES contract/test_contract_auto_align.cpp DEPS genko_test_support genko_service
+           LABELS contract TIMEOUT 1800)
+add_dependencies(test_contract_auto_align genko)
 # PC5 I-f (SPEC.md AUTO-01「プリント」): `genko print` — the sheet's place (fitted, at its size, scaled, at a position), the
 # marks' shapes and places, the label and the description, Genko's colour management through the printer's profile as
 # Little CMS converts (a CMYK page from its inks), a PDF and a dry run, the book never written, the refusals.
