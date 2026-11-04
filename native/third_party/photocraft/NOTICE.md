@@ -408,3 +408,6 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/plugins/tests/abi.rs`（278 行: 試験の考えと WAT のモジュール）→ `native/wasm-host/tests/abi.rs`・`native/tests/unit/test_wasm_plugins.cpp`。`crates/plugins/tests/fixtures/invert.wasm`（833 バイト、元は `examples/plugins/invert-rs`）→ `native/tests/data/plugins/invert.wasm`（そのまま）。`crates/plugins/examples/wat2wasm.rs` → `native/wasm-host/examples/wat2wasm.rs`（`--any` を足した）。
   - `docs/plugins.md`（ABI v1・manifest・画素・上限の表）→ `docs/PLUGIN_WASM.md`（日本語で書き直し、Genko の置き方と同意を足した）。
 
+- ビデオレイヤー（PC5 J-e2）:
+  - `crates/engine/src/video_cmds.rs`（47-160 行: `edit_video`（今のフレームに差し込む・複製・削除し、行がタイムラインより長ければ延ばす）・`insert_blank`・`duplicate_frame`・`delete_frame`・`restore_frame`・`restore_all`・`show_altered`・`rasterize`、160-300 行: `load_frames`（1 枚の画像か、フォルダーの画像を名前の順に）・`new_from_file`（タイムラインが無ければ素材の速さで作る）・`replace_footage`・`interpret_footage`・`reload_frame`・`frames_to_layers`）→ `native/src/render/ops_video.{hpp,cpp}`・`native/src/render/footage.{hpp,cpp}`（ビデオの行をアニメーションフォルダーの行にし、素材を原稿の素材ファイルで持つこと・描き替えをセルにして復元で素材に戻すこと・フレームを `at` で受けること・連番を隣のファイルから集めること・GIF・APNG・WebP の全部のフレームを読むこと・上限を読む前に見ること・素材の速さで並べ直すことは Genko のもの）。
+  - `crates/doc/src/video.rs`（`Timeline` の serde の名前と `clamp`）と `crates/format/src/manifest.rs`（`timeline`）→ `native/src/render/pcraft_timeline.{hpp,cpp}`。

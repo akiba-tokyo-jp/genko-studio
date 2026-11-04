@@ -36,6 +36,7 @@
 #include "core/config_dir.hpp"
 #include "core/actor.hpp"
 #include "core/anim.hpp"
+#include "render/footage.hpp"
 #include "core/video.hpp"
 #include "core/clock.hpp"
 #include "core/command_bus.hpp"
@@ -831,7 +832,7 @@ int render_command(const QStringList& args, bool ascii) {
         options.at_frame = true;
     }
     const render::RenderResult result =
-        frame ? render::render_page(core::anim::at_frame(*page, *frame), static_cast<int>(dpi), options, &doc)
+        frame ? render::render_page(render::footage::frame_page(*page, *frame, &doc), static_cast<int>(dpi), options, &doc)
               : render::render_page(*page, static_cast<int>(dpi), options, &doc);
     if (out_path.has_parent_path()) {  // (args.out.parent.mkdir, before image.save: the WebP is written beside it)
         std::error_code ec;

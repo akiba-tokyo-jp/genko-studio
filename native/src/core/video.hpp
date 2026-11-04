@@ -3,9 +3,12 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include "core/json.hpp"
+#include "core/model.hpp"
 
 // timeline@1 and video@1 (PC5 節 J、SPEC.md PROD-01「タイムライン・ビデオレイヤー」・schema-v4.md「制作の補助」): what the
 // timeline (タイムライン) and the video layers (ビデオレイヤー) add inside a page's animation (`page.extra["anim"]`,
@@ -67,6 +70,46 @@ std::array<std::int64_t, 2> played_frames(const Page& page);
 // played, the tracks (each folder, its name, its cels and its exposure sheet), the camera's keys, the light table and
 // whether the page names timeline@1. (The frame shown is the window's: not the book's.)
 Json timeline_info(const Page& page);
+// --- PC5 J-e2: the video rows (ビデオレイヤー) ---------------------------------------------------------------------------
+// A video layer is an animation folder whose track has a "video" of the shape above (its folder a folder layer; the
+// track's own exposure sheet "cels" empty). At a frame f of the timeline its frames[f - 1] says what shows: its altered cel
+// (描き替えたフレーム: a paint layer in the folder) while show_altered, else the footage's frame of that index laid as a
+// placed picture is (placement_mm, fit), else nothing (a blank frame, or past the row's end). The footage's frames are the
+// book's asset files (PNG: 8 or 16 bits, RGBA; one picture held once however often it is shown).
+
+// The footage of all the book's video rows decoded together may take this much (each footage frame w × h × 4 samples of
+// its depth, a picture counted once): footage past it is refused before it is read (render/footage).
+inline constexpr std::uint64_t kFootageMaxBytes = 4ull << 30;
+inline constexpr std::string_view kFootageSuffix = ".png";
+
+// Is this track a video row (its "video" of video@1's shape)?
+bool is_video_row(const Json& track);
+// The video row of the page's track of this folder (nullptr: none, or not a video row).
+const Json* video_row(const Page& page, const Json& folder_id);
+// What the video row shows at this frame of the timeline (1..).
+struct VideoShown {
+    enum class Kind { Nothing, Cel, Footage };
+    Kind kind = Kind::Nothing;
+    std::string cel;          // Cel: the altered cel's layer id
+    std::int64_t index = -1;  // Footage: the footage frame's index (0..)
+};
+VideoShown video_shown(const Page& page, const Json& folder_id, const Json& video, std::int64_t frame);
+// Where the whole footage frame lands on the page (mm): fitted (contain, cover, stretch) in its placement_mm, its pixels
+// as wide as their aspect ratio (par) makes them. None for a row without footage.
+std::optional<Rect> footage_placement(const Json& video);
+// The bytes the footage takes decoded (each picture once): w × h × 4 × (8 bits: 1, 16 bits: 2).
+std::uint64_t footage_bytes(const Json& footage);
+// The bytes all the book's footage takes decoded (each picture once, across the rows): kFootageMaxBytes at most.
+// `except`: one video row (the book's) left out — the footage a replacement takes the place of (the review's P2-4).
+std::uint64_t book_footage_bytes(const Document& doc, const Json* except = nullptr);
+// What more the book's footage may take decoded (kFootageMaxBytes less what it holds, `except` left out).
+std::uint64_t footage_room(const Document& doc, const Json* except = nullptr);
+// The footage frames' asset refs the book's video rows name (each once; the pages and the smart objects' contents pages).
+std::vector<std::string> footage_refs(const Document& doc);
+// The footage's frames laid on the timeline from `start` (1..): the timeline's frame start + k shows the footage frame
+// floor(k × footage fps ÷ timeline fps) while it is one of the footage's `count` (as many entries as that makes).
+std::vector<std::int64_t> laid_footage(std::int64_t count, double footage_fps, double timeline_fps);
+
 // Does the page's anim hold timeline@1's (a work area as above, or such an fps)? video@1's (a track's video row as above)?
 // What is not so — a "work" or a "video" of another shape — is what an anim before them may hold: named by nothing, kept.
 bool page_uses_timeline(const Page& page);

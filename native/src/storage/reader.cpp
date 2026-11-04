@@ -1806,6 +1806,8 @@ core::Document Reader::migrate(const Json& payload) {
     try {
         const auto named = [&](std::string_view f) { return std::find(doc.features.begin(), doc.features.end(), f) != doc.features.end(); };
         core::validate_timeline(doc, named(core::kTimelineFeature), named(core::kVideoFeature));
+        // (PC5 J-e2: the footage frames its video rows show, in the book's folder)
+        for (const std::string& ref : core::footage_refs(doc)) check_named(ref, core::kFootageSuffix, "/pages", "footage frame of a video layer");
     }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     return doc;

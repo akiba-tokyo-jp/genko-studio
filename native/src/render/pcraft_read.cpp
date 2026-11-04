@@ -1007,7 +1007,7 @@ void note_extras(Ctx& ctx, const Json& m, const std::string& name) {
         ctx.notes.name("高度な合成のチャンネルの指定は、グループ・このページの色モードでは使えないため外しました", name);
     }
     if (const Json* label = optional_field(m, "label"); label != nullptr && *label != Json("None")) ctx.notes.name("レイヤーのラベルの色は外しました", name);
-    if (optional_field(m, "video") != nullptr) ctx.notes.name("ビデオレイヤーのコマはタイムライン（PC5）が入るまで読めないため外しました", name);
+    if (optional_field(m, "video") != nullptr) ctx.notes.name("ビデオレイヤーのほかのフレームは .pcraft に無いため、今のフレームをレイヤーにしました", name);  // (PC5 J-e2)
 }
 
 // The settings every layer has: its name, visibility, opacity (its fill opacity with it when it has no effects), blend,

@@ -32,6 +32,7 @@
 #include "app/theme.hpp"
 #include "service/wording.hpp"
 #include "core/anim.hpp"
+#include "render/footage.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"
 #include "core/paths.hpp"
@@ -291,7 +292,9 @@ void TimelinePanel::refresh() {
         }
     }
     QStringList rows;
-    for (const std::string& id : ids) rows << title_of(*p, Json(id));
+    for (const std::string& id : ids) {  // (PC5 J-e2: a video layer's row said so)
+        rows << (core::video_row(*p, Json(id)) != nullptr ? QStringLiteral("%1（ビデオ）").arg(title_of(*p, Json(id))) : title_of(*p, Json(id)));
+    }
     table->setVerticalHeaderLabels(rows);
     std::set<std::int64_t> keys;
     const Json* data = core::anim::spec(*p);
@@ -304,6 +307,28 @@ void TimelinePanel::refresh() {
     const theme::Tokens& colours = theme::tokens();
     for (std::size_t r = 0; r < ids.size(); ++r) {
         const Json folder(ids[r]);
+        // (PC5 J-e2: a video layer's row — ▪ its footage's frame, ✎ an altered frame, nothing a blank one)
+        if (const Json* video = core::video_row(*p, folder)) {
+            for (std::int64_t column = 0; column < count; ++column) {
+                const std::int64_t f = column + 1;
+                const core::VideoShown shown = core::video_shown(*p, folder, *video, f);
+                const bool altered = f <= static_cast<std::int64_t>(video->at("frames").size()) && video->at("frames")[static_cast<std::size_t>(column)][1].is_string();
+                QString text = shown.kind == core::VideoShown::Kind::Footage ? QStringLiteral("▪") : QString();
+                if (altered) text = QStringLiteral("✎");
+                auto* item = new QTableWidgetItem(text);
+                item->setTextAlignment(Qt::AlignCenter);
+                item->setToolTip(altered ? QStringLiteral("描き替えたフレーム") : shown.kind == core::VideoShown::Kind::Footage
+                                                                                   ? QStringLiteral("素材のフレーム %1").arg(shown.index + 1)
+                                                                                   : QStringLiteral("空白のフレーム"));
+                if (f == frame) {
+                    item->setBackground(QBrush(QColor(colours.accent_soft)));
+                } else if (keys.contains(f)) {
+                    item->setBackground(QBrush(QColor(colours.selected)));
+                }
+                table->setItem(static_cast<int>(r), static_cast<int>(column), item);
+            }
+            continue;
+        }
         std::map<std::int64_t, Json> starts;
         try {
             if (const Json* track = core::anim::track(*p, folder)) {
@@ -351,7 +376,12 @@ void TimelinePanel::set_frame(std::int64_t to, bool follow) {
     if (const auto folder = current_folder(); follow && folder) {
         Json cel;
         try {
-            cel = core::anim::cel_at(*p, Json(*folder), frame);
+            if (const Json* video = core::video_row(*p, Json(*folder))) {  // (PC5 J-e2: its altered frame, else the video layer)
+                const core::VideoShown shown = core::video_shown(*p, Json(*folder), *video, frame);
+                cel = shown.kind == core::VideoShown::Kind::Cel ? Json(shown.cel) : Json(*folder);
+            } else {
+                cel = core::anim::cel_at(*p, Json(*folder), frame);
+            }
         } catch (const std::exception&) {
         }
         const core::Layer* target = window_->target_layer();
@@ -418,6 +448,23 @@ QMenu* TimelinePanel::cell_menu(int row, int column) {
     const std::int64_t at = column + 1;
     const Json index = p->index.json();
     auto* menu = new QMenu(this);
+    if (core::video_row(*p, Json(folder)) != nullptr) {  // (PC5 J-e2: a video layer's frame — the ビデオレイヤー ▸ commands there)
+        const auto video = [this, folder, at](const char* op) {
+            window_->set_target_layer(folder);
+            set_frame(at, false);
+            window_->video_op(Json{{"op", op}, {"folder", folder}, {"at", at}});
+        };
+        menu->addAction(QStringLiteral("空白フレームを挿入"), this, [video] { video("video_insert_blank"); });
+        menu->addAction(QStringLiteral("フレームを複製"), this, [video] { video("video_duplicate"); });
+        menu->addAction(QStringLiteral("フレームを削除"), this, [video] { video("video_delete"); });
+        menu->addSeparator();
+        menu->addAction(QStringLiteral("フレームを復元"), this, [video] { video("video_restore"); });
+        menu->addSeparator();
+        menu->addAction(QStringLiteral("このフレームのカメラを消す"), this, [this, index, at] {
+            ops(Json::array({Json{{"op", "set_camera_key"}, {"page", index}, {"frame", at}, {"rect", nullptr}}}));
+        });
+        return menu;
+    }
     for (const core::Layer* layer : core::anim::cels_of(*p, Json(folder))) {
         const std::string id = layer->id;
         menu->addAction(QStringLiteral("セル「%1」を出す").arg(QString::fromStdString(layer->title)), this, [this, index, folder, at, id] {
@@ -491,7 +538,7 @@ void TimelinePanel::play(bool on) {
     } catch (const std::exception&) {
     }
     play_button->setText(QStringLiteral("■ 止める"));
-    played_.clear();
+    forget_played();
     timer->start(static_cast<int>(std::max<std::int64_t>(15, core::py_round_int(1000.0 / core::anim::fps_of(*p)))));
 }
 
@@ -518,7 +565,11 @@ void TimelinePanel::tick() {
 }
 
 QImage TimelinePanel::frame_picture(const core::Page& p, std::int64_t at) {
-    if (const auto found = played_.find(at); found != played_.end()) return found->second;
+    if (const auto found = played_.find(at); found != played_.end()) {
+        played_order_.remove(at);
+        played_order_.push_back(at);
+        return found->second;
+    }
     const int dpi = std::min(100, window_->canvas()->wanted_dpi());
     QImage picture;
     try {
@@ -526,11 +577,27 @@ QImage TimelinePanel::frame_picture(const core::Page& p, std::int64_t at) {
         options.mode = "proof";
         options.at_frame = true;
         options.skip_unported = true;  // (a preview on screen)
-        picture = to_qimage(render::render_page(core::anim::at_frame(p, at), dpi, options, &window_->book()).image);
+        picture = to_qimage(render::render_page(render::footage::frame_page(p, at, &window_->book()), dpi, options, &window_->book()).image);
     } catch (const std::exception&) {
     }
     played_[at] = picture;
+    played_order_.push_back(at);
+    played_bytes_ += static_cast<std::int64_t>(picture.sizeInBytes());
+    while (played_bytes_ > played_most && played_order_.size() > 1) {  // (the oldest let go: at most played_most)
+        const auto old = played_.find(played_order_.front());
+        if (old != played_.end()) {
+            played_bytes_ -= static_cast<std::int64_t>(old->second.sizeInBytes());
+            played_.erase(old);
+        }
+        played_order_.pop_front();
+    }
     return picture;
+}
+
+void TimelinePanel::forget_played() {
+    played_.clear();
+    played_order_.clear();
+    played_bytes_ = 0;
 }
 
 void TimelinePanel::export_animation() {
@@ -718,6 +785,16 @@ void TimelinePanel::build_menu() {
     area->addAction(QStringLiteral("作業範囲の開始点を設定"), this, [this] { set_work_end(true); })->setObjectName(QStringLiteral("timeline_work_start"));
     area->addAction(QStringLiteral("作業範囲の終了点を設定"), this, [this] { set_work_end(false); })->setObjectName(QStringLiteral("timeline_work_end"));
     area->addAction(QStringLiteral("作業範囲をクリア"), this, [this] { set_work(std::nullopt); })->setObjectName(QStringLiteral("timeline_work_clear"));
+    panel_menu->addSeparator();
+    // (PC5 J-e2: レイヤー → ビデオレイヤー ▸'s commands, the window's)
+    QMenu* video = panel_menu->addMenu(QStringLiteral("ビデオレイヤー"));
+    video->setObjectName(QStringLiteral("timeline_video_menu"));
+    for (const char* name : std::initializer_list<const char*>{"act_video_from_file", "act_video_blank", nullptr, "act_video_insert_blank", "act_video_duplicate", "act_video_delete", nullptr,
+                             "act_video_replace", "act_video_interpret", nullptr, "act_video_show_altered", "act_video_restore",
+                             "act_video_restore_all", "act_video_reload", nullptr, "act_video_rasterize"}) {
+        if (name == nullptr) video->addSeparator();
+        else if (QAction* command = window_->action(QString::fromLatin1(name))) video->addAction(command);
+    }
     panel_menu->addSeparator();
     panel_menu->addAction(window_->action(QStringLiteral("act_render_video")));
     menu_shown_ = connect(panel_menu, &QMenu::aboutToShow, this, [this] {

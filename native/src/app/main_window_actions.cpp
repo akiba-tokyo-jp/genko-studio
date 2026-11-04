@@ -68,6 +68,8 @@
 #include "core/pyconv.hpp"
 #include "core/exposure.hpp"
 #include "core/pynum.hpp"
+#include "core/anim.hpp"
+#include "core/video.hpp"
 #include "render/brushes.hpp"
 #include "render/image.hpp"
 #include "render/layer_bounds.hpp"
@@ -798,6 +800,7 @@ void MainWindow::build_menus() {
     build_measure_menus(view);  // (PC5 J-d1: 表示 → 表示・非表示 ▸ カウント: main_window_measure.cpp)
     build_slice_menus(view, layers);  // (PC5 J-b: 表示・非表示 ▸ スライス, スライスをロック・消去, レイヤー → 新規レイヤーベースのスライス: main_window_slices.cpp)
     build_print_menus(file);  // (PC5 I-f: 生成 ▸ 画像アセット after 書き出し ▸, 1 部プリント after プリント…, 自動処理 ▸ コンタクトシート II…: main_window_print.cpp)
+    build_video_menus(file, layers);  // (PC5 J-e2: 読み込み ▸ ビデオフレームからレイヤー…, ラスタライズ ▸ ビデオ: main_window_video.cpp)
     pages->addAction(action("act_book_preview"));
     pages->addAction(action("act_checks"));
     pages->addSeparator();
@@ -1026,6 +1029,12 @@ const core::Layer* MainWindow::paint_layer() {
     const core::Page* page = current_page();
     const core::Layer* layer = target_layer();
     if (page == nullptr || layer == nullptr) return nullptr;
+    // (PC5 J-e2, video@1: drawing on a video layer alters the frame shown — its cel made, then drawn on: main_window_video.cpp)
+    if (layer->kind == core::LayerKind::Folder && core::anim::is_animation(*page) && core::video_row(*page, core::Json(layer->id)) != nullptr) {
+        layer = alter_video_frame(*layer);
+        page = current_page();
+        if (layer == nullptr || page == nullptr) return nullptr;
+    }
     if (!drawable(*layer, page)) {
         const bool kind = layer->kind == core::LayerKind::Strokes || layer->kind == core::LayerKind::Raster || layer->kind == core::LayerKind::Tone;
         const QString why = kind ? QStringLiteral("ロックされています") : QStringLiteral("ペンかペイントのレイヤーではありません");
