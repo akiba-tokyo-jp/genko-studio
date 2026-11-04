@@ -13,6 +13,7 @@
 #include "core/config_dir.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
+#include "render/ops_registry.hpp"
 #include "service/wording.hpp"
 #include "storage/fsutil.hpp"
 
@@ -38,7 +39,7 @@ const std::vector<std::string> kGateOps{"approve", "revoke", "allow_chat_approva
 // measure_info, measure_values, type_info)
 const std::vector<std::string> kNotRecorded{"undo", "set_meta", "set_bible", "add_page", "delete_page", "duplicate_page", "reorder", "set_page_spec",
                                             "add_artboard", "artboard_from_layers", "set_variables", "set_data_sets", "slices_info", "measure_info",
-                                            "measure_values", "type_info"};
+                                            "measure_values", "type_info", "timeline_info"};
 // (PC5 J-g) the count's marks and groups named by their number on the page (J-d1's remove_count, move_count, set_count_group,
 // delete_count_group with "group" or "index"): the recorded page's; a mark added, every mark cleared, a group made, the
 // scale, the ruler's line and the scale marker (place_scale_marker) are any page's
@@ -130,7 +131,8 @@ Json recordable(const Json& ops) {
     for (const Json& op : ops) {
         if (!op.is_object()) continue;
         const std::string name = op_name(op);
-        if (!in(kNotRecorded, name) && !gate_op(name)) out.push_back(op);
+        // (PC5 J-g: nor a question — an op added as one, or type_style and replace_fonts when they only ask)
+        if (!in(kNotRecorded, name) && !gate_op(name) && !render::ops_registry().is_query(op)) out.push_back(op);
     }
     return out;
 }

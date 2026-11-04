@@ -424,6 +424,8 @@ public:
     void control_release();
     void control_cancel();
     bool control_drawing() const { return control_stroke_; }
+    // (PC5 J-g, the review's P3-11) The person draws a line or moves the view now (the channel changes no view meanwhile).
+    bool person_drawing() const { return (!stroke_.empty() && !control_stroke_) || panning_; }
 
     // --- the view -------------------------------------------------------------------------------------------
     double scale() const { return view_.scale; }

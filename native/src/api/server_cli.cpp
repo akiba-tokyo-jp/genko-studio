@@ -257,8 +257,14 @@ int control_command(const QStringList& args, bool ascii) {
         token = qEnvironmentVariable("GENKO_TOKEN").trimmed().toStdString();
     }
     if (token.empty()) return usage("genko control: error: a token is needed: --token-file <file> or GENKO_TOKEN (genko token add --actor ai:<name>)");
+    QString why;
+    const QString name = service::control::server_name(&why);
+    if (name.isEmpty()) {  // (no folder of the person's own: never a shared one — the review's P2-2)
+        print(Json::object({{"ok", false}, {"error", "制御チャンネルにつなげません: " + why.toStdString()}, {"code", "not_listening"}}));
+        return 1;
+    }
     QLocalSocket socket;
-    socket.connectToServer(service::control::server_name());
+    socket.connectToServer(name);
     if (!socket.waitForConnected(3000)) {
         print(Json::object({{"ok", false},
                             {"error", "制御チャンネルにつながりません（Genko を開いて、環境設定 → 連携 で制御チャンネルを入れてください）"},
@@ -269,6 +275,12 @@ int control_command(const QStringList& args, bool ascii) {
         socket.write(QByteArray::fromStdString(line.dump()) + '\n');
         return socket.waitForBytesWritten(service::control::kTimeoutMs) || socket.bytesToWrite() == 0;
     };
+    if (!service::control::peer_is_mine(socket, &why)) {  // (the token goes to this person's Genko only)
+        socket.abort();
+        print(Json::object({{"ok", false}, {"error", "制御チャンネルの相手を確かめられないので、トークンを送りませんでした: " + why.toStdString()},
+                            {"code", "not_mine"}}));
+        return 1;
+    }
     QByteArray buffer;
     Json answer;
     send(Json::object({{"id", "auth"}, {"method", "auth"}, {"params", Json::object({{"token", token}})}}));

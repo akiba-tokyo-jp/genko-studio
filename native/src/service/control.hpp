@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QtGlobal>
 
 #include <cstddef>
 #include <map>
@@ -12,6 +13,8 @@
 
 #include "core/actor.hpp"
 #include "core/json.hpp"
+
+class QLocalSocket;
 
 // 制御チャンネル (PC5 J-g, SPEC.md PROD-01「制御チャンネル」; the shape of PhotoCraft v0.2.0's control protocol, MIT —
 // docs/control-protocol.md, crates/automation/src/security.rs — on Genko's rules): a program of this computer's person
@@ -41,11 +44,27 @@ inline constexpr std::size_t kMaxLine = std::size_t(1) << 20;  // a request's by
 inline constexpr int kMaxConnections = 4;
 inline constexpr int kTimeoutMs = 30000;  // a line read, an answer written; the pen held without a word
 inline constexpr std::size_t kMaxOps = 500;  // as MCP's apply_ops
+inline constexpr int kMaxDepth = 64;         // a line's brackets inside one another (counted before it is read)
+inline constexpr int kMaxForPages = 4;       // for_pages inside for_pages, as deep as engine.execute looks
+inline constexpr std::size_t kMaxEvents = 10000;  // ui.pointer's events in one call
+inline constexpr qint64 kMaxPending = qint64(64) << 20;  // answers not taken yet: past this no more lines are read
 
 // The channel's local socket: genko-studio-control-<the user's name, letters and digits only> (app/links' form) — a named
 // pipe on Windows, a socket in the person's runtime folder elsewhere (a folder of the person's own: no one else can put a
 // socket of that name before Genko's).
-QString server_name();
+// Empty (and `why` said, in Japanese) when there is no folder of the person's own to put it in — the runtime folder
+// missing, another's, or open to others (never a shared folder's name: someone else could be listening there first).
+QString server_name(QString* why = nullptr);
+
+// The program at the other end of a connection is this person's (Linux: SO_PEERCRED; macOS and the BSDs: getpeereid;
+// Windows: the pipe's server or client process run by this user). False, `why` said, when it is not or cannot be told:
+// `genko control` checks the app before it sends its token, the app checks every program that connects.
+bool peer_is_mine(QLocalSocket& socket, QString* why = nullptr);
+bool peer_is_mine(QLocalSocket& socket, bool server_side, QString* why);
+
+// How deep the brackets of a line go ([ and { inside one another, those inside strings not counted); `limit`: the count
+// stops past it (a line deeper than kMaxDepth is never parsed: nlohmann's copies go down it by recursion).
+int nesting(std::string_view line, int limit = kMaxDepth + 1);
 
 // Every method the channel answers (the table the tests go round): who may call it, whether it changes the book.
 struct Method {

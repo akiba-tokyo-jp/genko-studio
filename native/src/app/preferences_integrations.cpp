@@ -41,7 +41,9 @@ QWidget* integrations_page(QWidget* parent) {
     theme::role(about, "hint");
     rows->addRow(QString(), about);
     const control::Server& server = control::Server::instance();
-    auto* state = new QLabel(server.listening() ? QStringLiteral("いまは待っています（%1）").arg(server.words()) : QStringLiteral("いまは切っています"));
+    auto* state = new QLabel(server.listening()             ? QStringLiteral("いまは待っています（%1）").arg(server.words())
+                             : !server.problem().isEmpty() ? QStringLiteral("入れてありますが、待てません: %1").arg(server.problem())
+                                                           : QStringLiteral("いまは切っています"));
     state->setObjectName(QStringLiteral("prefs_control_state"));
     state->setWordWrap(true);
     rows->addRow(QStringLiteral("状態"), state);

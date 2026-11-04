@@ -51,6 +51,8 @@ public:
     QString drawing() const;
     // The status bar's words (empty: off).
     QString words() const;
+    // Why it is not listening though 環境設定 says so (empty: it is, or it is off).
+    QString problem() const { return problem_; }
     // Tests: a connection's line answered as the server answers it, as `actor` (the auth already made), and the window it
     // works in (none: the active MainWindow, else the first visible one).
     core::Json handle(const core::Json& request, const std::string& actor, MainWindow* window = nullptr);
@@ -83,6 +85,8 @@ private:
     QString pen_actor_;
     QTimer* pen_timer_ = nullptr;
     bool holding_input_ = false;
+    bool wanted_ = false;  // (環境設定 says it is on)
+    QString problem_;      // (why it could not listen)
 };
 
 }  // namespace genko::app::control

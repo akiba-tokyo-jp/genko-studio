@@ -255,7 +255,9 @@ bool json_equals_string(const Json& value, std::string_view text) {
 // An op on a page someone else has locked: refused ("page N locked by <them>").
 void check_held(const Document& doc, const Page& page, const Num& index, const Actor& actor) {
     const Json* owner = get(doc.page_locks, page.id);  // (v3: locks follow the page, not its position)
-    if (owner != nullptr && py_truthy(*owner) && !json_equals_string(*owner, actor.name())) {
+    // (PC5 J-g, the review's P3-3: an actor with an agent's rights — the control channel's — never goes through a lock, even
+    // one under its own name: a person's lock is the person's, whoever names a token so)
+    if (owner != nullptr && py_truthy(*owner) && (!json_equals_string(*owner, actor.name()) || actor.agent_rights())) {
         throw OpError("page " + index.repr() + " locked by " + py_str(*owner));
     }
 }

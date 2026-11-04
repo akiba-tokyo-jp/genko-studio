@@ -32,13 +32,23 @@ namespace {
 
 [[noreturn]] void bad(const std::string& message) { throw core::Error("bad_params", message); }
 
+// The menus listing files and windows (最近使用したファイルを開く, ウィンドウ → 開いている原稿): their items are other books'
+// names, never shown to the channel (the review's P3-4)
+bool lists_files(const QMenu* menu, const QMenu* recent) {
+    return menu == recent || menu->title().remove(QLatin1Char('&')) == QStringLiteral("開いている原稿");
+}
+
 // A menu's commands as a tree: {menu, items: […]} and {name (attribute), words, on, checked?, invoke}
-Json menu_tree(const QMenu* menu) {
+Json menu_tree(const QMenu* menu, const QMenu* recent) {
     Json items = Json::array();
     for (QAction* act : menu->actions()) {
         if (act->isSeparator() || !act->isVisible()) continue;
         if (act->menu() != nullptr) {
-            Json sub = menu_tree(act->menu());
+            if (lists_files(act->menu(), recent)) {
+                items.push_back(Json{{"menu", act->menu()->title().remove(QLatin1Char('&')).toStdString()}, {"items", Json::array()}, {"listed", false}});
+                continue;
+            }
+            Json sub = menu_tree(act->menu(), recent);
             sub["menu"] = act->menu()->title().remove(QLatin1Char('&')).toStdString();
             items.push_back(std::move(sub));
             continue;
@@ -64,7 +74,7 @@ Json MainWindow::control_inspect() const {
     out["page"] = page != nullptr ? Json{{"page", page->index.json()}, {"id", page->id}, {"position", page_index_}, {"pages", b.pages.size()}} : Json();
     out["frame"] = current_frame(page);
     out["zoom"] = Json{{"percent", std::round(canvas_->zoom_percent_exact() * 100.0) / 100.0}, {"rotation", canvas_->rotation()}};
-    out["read_only"] = session_->read_only_reason();
+    out["read_only"] = !session_->read_only_reason().empty();  // (whether, not why: the reason may name a file)
     out["book"] = Json{{"title", b.title}, {"revision", b.revision}};
     Json panels = Json::array();
     for (QDockWidget* dock : findChildren<QDockWidget*>()) {
@@ -77,11 +87,10 @@ Json MainWindow::control_inspect() const {
         open.push_back(Json{{"title", documents_[i].title().toStdString()}, {"front", static_cast<int>(i) == doc_}});
     }
     out["books"] = std::move(open);
-    out["window"] = windowTitle().toStdString();
     Json menus = Json::array();
     for (QAction* top : menuBar()->actions()) {
         if (top->menu() == nullptr || !top->isVisible()) continue;
-        Json m = menu_tree(top->menu());
+        Json m = menu_tree(top->menu(), recent_menu_);
         m["menu"] = top->menu()->title().remove(QLatin1Char('&')).toStdString();
         menus.push_back(std::move(m));
     }
@@ -209,7 +218,15 @@ Json MainWindow::control_pen(const Json& events, const std::string& actor, bool&
             const std::string kind = e["kind"].get<std::string>();
             const Json x = e.value("x", Json()), y = e.value("y", Json());
             const Json pressure = e.value("pressure", Json(0.7));
-            const bool placed = x.is_number() && y.is_number() && std::isfinite(x.get<double>()) && std::isfinite(y.get<double>());
+            bool placed = x.is_number() && y.is_number() && std::isfinite(x.get<double>()) && std::isfinite(y.get<double>());
+            if (placed) {  // (the review's P3-6: on the page, or within 1 m of it — as a pen on the screen is)
+                const core::Page* on = current_page();
+                const double w_mm = on != nullptr ? on->spec.width_mm.value() : 0.0;
+                const double h_mm = on != nullptr ? on->spec.height_mm.value() : 0.0;
+                if (x.get<double>() < -1000 || y.get<double>() < -1000 || x.get<double>() > w_mm + 1000 || y.get<double>() > h_mm + 1000) {
+                    bad("x・y はページの上か、その 1 m の内（mm）");
+                }
+            }
             if (!pressure.is_number() || !(pressure.get<double>() >= 0.0 && pressure.get<double>() <= 1.0)) bad("pressure は 0〜1");
             const QPointF mm = placed ? QPointF(x.get<double>(), y.get<double>()) : QPointF();
             if (kind == "down") {

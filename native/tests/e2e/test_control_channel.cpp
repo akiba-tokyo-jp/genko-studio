@@ -14,6 +14,7 @@
 #include <QApplication>
 #include <QDialog>
 #include <QDockWidget>
+#include <QFileInfo>
 #include <QImage>
 #include <QLabel>
 #include <QLocalSocket>
@@ -21,6 +22,9 @@
 #include <QProcess>
 #include <QSettings>
 #include <QTemporaryDir>
+
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <memory>
 
@@ -410,6 +414,8 @@ private slots:
         Client c;
         QVERIFY(c.open() && c.auth(service::tokens::add("ai:bot")));
         QVERIFY(c.call("ui.set", Json{{"tool", "pen"}})["ok"] == true);
+        app::inject::mouse_stroke(book.window->canvas(), {QPointF(150, 150), QPointF(160, 170)});  // (the person's: Ctrl+Z has one to take)
+        book.window->start_recording();  // (the person records: nothing of the channel's goes in)
         const std::size_t before = gui_test::ink_strokes(book.doc());
         Json down = c.call("ui.pointer", Json{{"events", Json::array({Json{{"kind", "down"}, {"x", 30}, {"y", 30}, {"pressure", 0.5}},
                                                                       Json{{"kind", "move"}, {"x", 50}, {"y", 40}}})}});
@@ -430,6 +436,8 @@ private slots:
         QVERIFY2(up["ok"] == true && up["result"]["applied"] == true && up["result"]["drawing"] == false, up.dump().c_str());
         QCOMPARE(gui_test::ink_strokes(book.doc()), before + 1);
         QCOMPARE(book.last_actor(), std::string("ai:bot"));
+        QVERIFY(book.window->recording() && book.window->recording()->empty());  // (the channel's line never in the person's action)
+        book.window->drop_recording();
         // given back: the status bar, the person's line taken again
         QVERIFY(!label->text().contains(QStringLiteral("描いています")));
         QVERIFY(c.call("ui.inspect")["result"]["channel"]["input_held"] == false);
@@ -507,6 +515,157 @@ private slots:
         QVERIFY(!app::control::Server::instance().drawing().isEmpty());
         QVERIFY(gui_test::wait_for([] { return app::control::Server::instance().drawing().isEmpty(); }, service::control::kTimeoutMs + 5000));
         QVERIFY(!book.window->canvas()->control_drawing());
+    }
+
+    // P1-1 of the review: a line whose brackets go deep is never read — before auth closed without a word (the app still
+    // there), after it refused; for_pages inside for_pages refused past a few
+    void deepLinesAreNeverRead() {
+        Book book;
+        channel(true);
+        QCOMPARE(service::control::nesting(R"({"a":["[[[{","\"[",[1,{"b":[2]}]]})"), 5);
+        QCOMPARE(service::control::nesting(std::string(100, '[')), service::control::kMaxDepth + 1);
+        const int deep = 500000;
+        {
+            Client c;
+            QVERIFY(c.open());
+            c.send_raw(QByteArray(R"({"method":"auth","params":)") + QByteArray(deep, '[') + QByteArray(deep, ']') + "}\n");
+            QVERIFY(c.closed(20000) && c.buffer.isEmpty());
+        }
+        Client c;
+        QVERIFY(c.open() && c.auth(service::tokens::add("ai:bot")));
+        c.send_raw(QByteArray(R"({"method":"ui.inspect","id":)") + QByteArray(deep, '[') + QByteArray(deep, ']') + "}\n");
+        auto refused = c.line(20000);
+        QVERIFY(refused && code_of(*refused) == "bad_request");
+        c.send_raw(QByteArray(R"({"method":"engine.execute","params":{"ops":)") + QByteArray(deep, '[') + QByteArray(deep, ']') + "}}\n");
+        refused = c.line(20000);
+        QVERIFY(refused && code_of(*refused) == "bad_request");
+        Json nested = Json::array({stroke(book.ink_id())});
+        for (int i = 0; i < 6; ++i) nested = Json::array({Json{{"op", "for_pages"}, {"pages", "all"}, {"ops", nested}}});
+        QCOMPARE(code_of(c.call("engine.execute", Json{{"ops", nested}})), std::string("ops_invalid"));
+        QVERIFY(c.call("methods")["ok"] == true);  // (still there)
+    }
+
+    // P2-1 of the review: a call refused midway gives the pen back — the line thrown away, nothing busy, the person's input
+    // taken; a move or up with no down of the connection's refused
+    void aRefusalMidwayGivesThePenBack() {
+        Book book;
+        channel(true);
+        Client c;
+        QVERIFY(c.open() && c.auth(service::tokens::add("ai:bot")));
+        QVERIFY(c.call("ui.set", Json{{"tool", "pen"}})["ok"] == true);
+        const std::size_t before = gui_test::ink_strokes(book.doc());
+        for (const Json& events : {Json::array({Json{{"kind", "down"}, {"x", 30}, {"y", 30}}, Json{{"kind", "move"}, {"x", 40}, {"y", 40}, {"pressure", 2}}}),
+                                   Json::array({Json{{"kind", "down"}, {"x", 30}, {"y", 30}}, Json{{"kind", "down"}, {"x", 31}, {"y", 31}}}),
+                                   Json::array({Json{{"kind", "down"}, {"x", 30}, {"y", 30}}, Json{{"kind", "move"}, {"x", 1e9}, {"y", 40}}}),
+                                   Json::array({Json{{"kind", "down"}, {"x", 30}, {"y", 30}}, Json{{"kind", "jump"}}})}) {
+            const Json out = c.call("ui.pointer", Json{{"events", events}});
+            QVERIFY2(out["ok"] == false, out.dump().c_str());
+            QVERIFY(!book.window->canvas()->control_drawing());
+            QVERIFY(app::control::Server::instance().drawing().isEmpty());
+            QVERIFY(c.call("ui.inspect")["result"]["channel"]["input_held"] == false);
+        }
+        QVERIFY(c.call("engine.execute", Json{{"ops", Json::array({stroke(book.ink_id())})}})["ok"] == true);  // (not busy)
+        app::inject::mouse_stroke(book.window->canvas(), {QPointF(100, 100), QPointF(120, 130)});
+        QCOMPARE(gui_test::ink_strokes(book.doc()), before + 2);
+        Client other;
+        QVERIFY(other.open() && other.auth(service::tokens::add("ai:other")));
+        for (const char* kind : {"up", "move"}) {
+            QCOMPARE(code_of(other.call("ui.pointer", Json{{"events", Json::array({Json{{"kind", kind}, {"x", 1}, {"y", 1}}})}})), std::string("bad_params"));
+        }
+        Json many = Json::array();
+        for (std::size_t i = 0; i <= service::control::kMaxEvents; ++i) many.push_back(Json{{"kind", "move"}, {"x", 1}, {"y", 1}});
+        QCOMPARE(code_of(c.call("ui.pointer", Json{{"events", many}})), std::string("bad_params"));
+        // the person drawing: the view and the book wait (the review's P3-11)
+        QTest::mousePress(book.window->canvas(), Qt::LeftButton, Qt::NoModifier, QPoint(300, 300));
+        QVERIFY(book.window->canvas()->person_drawing());
+        QCOMPARE(code_of(c.call("ui.set", Json{{"zoom", 80}})), std::string("busy"));
+        QCOMPARE(code_of(c.call("ui.menu.invoke", Json{{"id", "act_zoom_in"}})), std::string("busy"));
+        QCOMPARE(code_of(c.call("engine.execute", Json{{"ops", Json::array({stroke(book.ink_id())})}})), std::string("busy"));
+        QTest::mouseRelease(book.window->canvas(), Qt::LeftButton, Qt::NoModifier, QPoint(320, 320));
+        QVERIFY(!book.window->canvas()->person_drawing());
+        QVERIFY(c.call("ui.set", Json{{"zoom", 80}})["ok"] == true);
+    }
+
+    // P2-2 of the review: no runtime folder of the person's own — no channel, never a shared folder; the program at the other
+    // end is this person's
+    void onlyAFolderOfThePersonsOwn() {
+        Book book;
+        channel(true);
+        Client c;
+        QVERIFY(c.open());
+        QString why;
+        QVERIFY(service::control::peer_is_mine(c.socket, &why));
+        c.socket.abort();
+        channel(false);
+        QTemporaryDir other;
+        QVERIFY(::chown(QFile::encodeName(other.path()).constData(), 4242, 4242) == 0);
+        const QByteArray kept = qgetenv("XDG_RUNTIME_DIR");
+        qputenv("XDG_RUNTIME_DIR", other.path().toUtf8());
+        const QString name = service::control::server_name(&why);
+        if (!name.isEmpty()) {  // (Qt may have gone to a folder of its own instead: it must be the person's, 0700)
+            struct stat info {};
+            QVERIFY(::stat(QFile::encodeName(QFileInfo(name).path()).constData(), &info) == 0);
+            QVERIFY(info.st_uid == ::geteuid() && (info.st_mode & 077) == 0);
+            QVERIFY(!name.startsWith(other.path()));
+        } else {
+            QVERIFY(!why.isEmpty());
+            channel(true);
+            QVERIFY(!app::control::Server::instance().listening());
+            QVERIFY(app::control::Server::instance().problem() == why);
+            auto* label = book.window->findChild<QLabel*>(QStringLiteral("controlChannelState"));
+            QVERIFY(label != nullptr && label->text().contains(QStringLiteral("待てません")));
+            QProcess cli;
+            QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+            env.insert(QStringLiteral("GENKO_TOKEN"), QString::fromStdString(service::tokens::add("ai:bot")));
+            cli.setProcessEnvironment(env);
+            cli.start(QStringLiteral(GENKO_CLI), {QStringLiteral("control"), QStringLiteral("methods")});
+            QVERIFY(gui_test::wait_for([&] { return cli.state() == QProcess::NotRunning; }, 30000));
+            QCOMPARE(Json::parse(cli.readAllStandardOutput().toStdString()).value("code", std::string()), std::string("not_listening"));
+            channel(false);
+        }
+        qputenv("XDG_RUNTIME_DIR", kept);
+        (void)::chown(QFile::encodeName(other.path()).constData(), ::geteuid(), ::getegid());
+    }
+
+    // P3-1 and P3-3 of the review: a token revoked ends its connection at the next line; a token named as the person who
+    // locked a page does not go through the lock
+    void revokedTokensAndThePersonsLocks() {
+        Book book;
+        channel(true);
+        const std::string token = service::tokens::add("ai:bot");
+        Client c;
+        QVERIFY(c.open() && c.auth(token));
+        QVERIFY(c.call("methods")["ok"] == true);
+        QCOMPARE(service::tokens::revoke(token.substr(0, 8)), 1);
+        const Json gone = c.call("methods");
+        QCOMPARE(code_of(gone), std::string("token_revoked"));
+        QVERIFY(c.closed());
+        QVERIFY(book.window->apply_ops(Json::array({Json{{"op", "lock_page"}, {"page", 1}}})));
+        Client same;  // (the person's own name on a token)
+        QVERIFY(same.open() && same.auth(service::tokens::add("human:tester")));
+        const Json locked = same.call("engine.execute", Json{{"ops", Json::array({stroke(book.ink_id())})}});
+        QVERIFY2(locked["ok"] == false && message_of(locked).find("human:tester") != std::string::npos, locked.dump().c_str());
+        // the settings: no method changes them (the person's 環境設定 and `genko prefs set` alone)
+        for (const char* method : {"prefs.set", "prefs.reset", "integrations.set", "edit.preferences.integrations"}) {
+            QCOMPARE(code_of(same.call(method, Json{{"path", "integrations.controlChannel"}, {"value", false}, {"values", {{"integrations.controlChannel", false}}}})),
+                     std::string("unknown_method"));
+        }
+        QVERIFY(core::prefs::value("integrations.controlChannel") == Json(true));
+        // ui.inspect: no other book's file name — the recent files' and the open books' menus listed empty
+        const Json seen = same.call("ui.inspect")["result"];
+        QVERIFY(seen["read_only"].is_boolean() && !seen.contains("window"));
+        bool recent = false;
+        std::function<void(const Json&)> walk = [&](const Json& m) {
+            for (const Json& item : m["items"]) {
+                if (item.value("menu", std::string()) == "最近使用したファイルを開く") {
+                    recent = true;
+                    QVERIFY(item["items"].empty() && item["listed"] == false);
+                }
+                if (item.contains("items")) walk(item);
+            }
+        };
+        for (const Json& m : seen["menus"]) walk(m);
+        (void)recent;  // (shown only once a file was opened: when it is, listed empty)
     }
 
     void genkoControlFromAnotherProcess() {

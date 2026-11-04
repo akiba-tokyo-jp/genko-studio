@@ -4,11 +4,23 @@
 #include "service/control.hpp"
 
 #include <QDir>
+#include <QFileInfo>
+#include <QLocalSocket>
 #include <QStandardPaths>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <array>
 #include <functional>
+#include <vector>
 
 #include "core/ops_schema.hpp"
 #include "core/pyconv.hpp"
@@ -57,7 +69,7 @@ bool reads_a_file(std::string_view op) { return op == "import_psd" || op == "imp
 
 }  // namespace
 
-QString server_name() {
+QString server_name(QString* why) {
     QString user;
     for (const char* key : {"LOGNAME", "USER", "LNAME", "USERNAME"}) {  // (as links::server_name: getpass.getuser())
         user = qEnvironmentVariable(key);
@@ -69,12 +81,105 @@ QString server_name() {
     }
     const QString name = QStringLiteral("genko-studio-control-%1").arg(kept.isEmpty() ? QStringLiteral("user") : kept);
 #ifdef _WIN32
-    return name;  // (a named pipe; QLocalServer::UserAccessOption gives it the person's own access)
+    (void)why;
+    return name;  // (a named pipe; QLocalServer::UserAccessOption gives it the person's own access, peer_is_mine checks it)
 #else
-    // (QStandardPaths makes the runtime folder the person's own, 0700: XDG_RUNTIME_DIR, else /tmp/runtime-<user>)
+    // (QStandardPaths gives the runtime folder only when it is the person's own: XDG_RUNTIME_DIR, else /tmp/runtime-<user>.
+    // None, another's, or open to others: no channel — never QLocalServer's shared temporary folder)
     const QString folder = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
-    return folder.isEmpty() ? name : QDir(folder).filePath(name);
+    const auto refuse = [why](const QString& words) {
+        if (why != nullptr) *why = words;
+        return QString();
+    };
+    if (folder.isEmpty()) return refuse(QStringLiteral("この利用者だけの実行時フォルダー（XDG_RUNTIME_DIR）がありません"));
+    struct stat info {};
+    const QByteArray native = QFile::encodeName(folder);
+    if (::lstat(native.constData(), &info) != 0 || !S_ISDIR(info.st_mode)) return refuse(QStringLiteral("実行時フォルダーがありません: ") + folder);
+    if (info.st_uid != ::geteuid()) return refuse(QStringLiteral("実行時フォルダーの持ち主がこの利用者ではありません: ") + folder);
+    if ((info.st_mode & 077) != 0) return refuse(QStringLiteral("実行時フォルダーがほかの利用者にも開いています（0700 でない）: ") + folder);
+    return QDir(folder).filePath(name);
 #endif
+}
+
+bool peer_is_mine(QLocalSocket& socket, QString* why) { return peer_is_mine(socket, false, why); }
+
+bool peer_is_mine(QLocalSocket& socket, bool server_side, QString* why) {
+    const auto refuse = [why](const QString& words) {
+        if (why != nullptr) *why = words;
+        return false;
+    };
+    const qintptr handle = socket.socketDescriptor();
+    if (handle == -1) return refuse(QStringLiteral("つないだ相手を確かめられません"));
+#ifdef _WIN32
+    // (the pipe's other end: its process, run by this user — the server's for a client, the client's for the server)
+    ULONG pid = 0;
+    const HANDLE pipe = reinterpret_cast<HANDLE>(handle);
+    const BOOL got = server_side ? GetNamedPipeClientProcessId(pipe, &pid) : GetNamedPipeServerProcessId(pipe, &pid);
+    if (!got || pid == 0) return refuse(QStringLiteral("つないだ相手のプロセスを確かめられません"));
+    const auto user_of = [](HANDLE process, std::vector<unsigned char>& buffer) -> PSID {
+        HANDLE token = nullptr;
+        if (!OpenProcessToken(process, TOKEN_QUERY, &token)) return nullptr;
+        DWORD size = 0;
+        GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+        buffer.assign(size, 0);
+        PSID sid = nullptr;
+        if (size > 0 && GetTokenInformation(token, TokenUser, buffer.data(), size, &size)) sid = reinterpret_cast<TOKEN_USER*>(buffer.data())->User.Sid;
+        CloseHandle(token);
+        return sid;
+    };
+    const HANDLE other = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (other == nullptr) return refuse(QStringLiteral("つないだ相手のプロセスを確かめられません"));
+    std::vector<unsigned char> theirs;
+    std::vector<unsigned char> ours;
+    const PSID their_sid = user_of(other, theirs);
+    const PSID our_sid = user_of(GetCurrentProcess(), ours);
+    CloseHandle(other);
+    if (their_sid == nullptr || our_sid == nullptr) return refuse(QStringLiteral("つないだ相手の利用者を確かめられません"));
+    if (!EqualSid(their_sid, our_sid)) return refuse(QStringLiteral("つないだ相手がこの利用者のプログラムではありません"));
+    return true;
+#elif defined(__linux__)
+    (void)server_side;
+    struct ucred cred {};
+    socklen_t size = sizeof(cred);
+    if (::getsockopt(static_cast<int>(handle), SOL_SOCKET, SO_PEERCRED, &cred, &size) != 0) return refuse(QStringLiteral("つないだ相手を確かめられません"));
+    if (cred.uid != ::geteuid()) return refuse(QStringLiteral("つないだ相手がこの利用者のプログラムではありません"));
+    return true;
+#else
+    (void)server_side;
+    uid_t uid = 0;
+    gid_t gid = 0;
+    if (::getpeereid(static_cast<int>(handle), &uid, &gid) != 0) return refuse(QStringLiteral("つないだ相手を確かめられません"));
+    if (uid != ::geteuid()) return refuse(QStringLiteral("つないだ相手がこの利用者のプログラムではありません"));
+    return true;
+#endif
+}
+
+int nesting(std::string_view line, int limit) {
+    int depth = 0;
+    int deepest = 0;
+    bool in_string = false;
+    bool escaped = false;
+    for (const char c : line) {
+        if (in_string) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                in_string = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            in_string = true;
+        } else if (c == '[' || c == '{') {
+            deepest = std::max(deepest, ++depth);
+            if (deepest >= limit) return deepest;
+        } else if (c == ']' || c == '}') {
+            if (depth > 0) --depth;
+        }
+    }
+    return deepest;
 }
 
 std::span<const Method> methods() { return kMethods; }
@@ -95,21 +200,26 @@ Json methods_json() {
 }
 
 std::optional<std::string> authenticate(std::string_view line, const std::map<std::string, std::string>& tokens) {
+    if (nesting(line) > kMaxDepth) return std::nullopt;  // (never parsed: P1-1 of the review)
     Json request;
     try {
         request = Json::parse(line);
     } catch (const std::exception&) {
         return std::nullopt;
     }
-    if (!request.is_object() || request.value("method", Json()) != Json("auth")) return std::nullopt;
-    const Json params = request.value("params", Json());
-    if (!params.is_object() || !params.contains("token") || !params["token"].is_string()) return std::nullopt;
-    const std::string& given = params["token"].get_ref<const std::string&>();
+    if (!request.is_object()) return std::nullopt;
+    const auto method = request.find("method");
+    if (method == request.end() || *method != Json("auth")) return std::nullopt;
+    const auto params = request.find("params");
+    if (params == request.end() || !params->is_object()) return std::nullopt;
+    const auto token = params->find("token");
+    if (token == params->end() || !token->is_string()) return std::nullopt;
+    const std::string& given = token->get_ref<const std::string&>();
     std::optional<std::string> found;
-    for (const auto& [token, actor] : tokens) {  // (every token compared to the end: the time says nothing of which is near)
-        unsigned diff = token.size() == given.size() ? 0U : 1U;
-        for (std::size_t i = 0; i < token.size(); ++i) diff |= static_cast<unsigned char>(token[i]) ^ static_cast<unsigned char>(i < given.size() ? given[i] : 0);
-        if (diff == 0 && !token.empty()) found = actor;
+    for (const auto& [kept, actor] : tokens) {  // (every token compared to the end: the time says nothing of which is near)
+        unsigned diff = kept.size() == given.size() ? 0U : 1U;
+        for (std::size_t i = 0; i < kept.size(); ++i) diff |= static_cast<unsigned char>(kept[i]) ^ static_cast<unsigned char>(i < given.size() ? given[i] : 0);
+        if (diff == 0 && !kept.empty()) found = actor;
     }
     if (found && !(found->starts_with("human:") || found->starts_with("ai:"))) return std::nullopt;
     return found;
@@ -121,27 +231,33 @@ bool human_token(const std::string& token_actor) { return token_actor.starts_wit
 
 std::optional<Refusal> refused_ops(const Json& ops) {
     if (!ops.is_array() || ops.size() > kMaxOps) return Refusal{"ops_invalid", "ops は 500 個までの配列", "/ops"};
-    std::function<std::optional<Refusal>(const Json&, const std::string&)> look = [&look](const Json& list, const std::string& at) -> std::optional<Refusal> {
+    std::function<std::optional<Refusal>(const Json&, const std::string&, int)> look = [&look](const Json& list, const std::string& at,
+                                                                                            int depth) -> std::optional<Refusal> {
+        if (depth > kMaxForPages) return Refusal{"ops_invalid", "for_pages の入れ子が深すぎる", at};
         for (std::size_t i = 0; i < list.size(); ++i) {
             const Json& op = list[i];
             const std::string where = at + "/" + std::to_string(i);
             if (!op.is_object()) return Refusal{"ops_invalid", "op はオブジェクト", where};
-            const Json name = op.value("op", Json());
-            if (!name.is_string() || !service::agent_op(name.get<std::string>())) {
-                return Refusal{"op_not_allowed", "op " + core::py_str(name) + " はこの道具では使えない", where + "/op"};
-            }
-            if (reads_a_file(name.get<std::string>())) {
-                return Refusal{"op_not_allowed",
-                               "op " + name.get<std::string>() + " はファイルを読むので制御チャンネルでは使えない（MCP の apply_ops か genko apply で）",
+            const auto found = op.find("op");
+            if (found == op.end() || !found->is_string() || !service::agent_op(found->get_ref<const std::string&>())) {
+                return Refusal{"op_not_allowed", "op " + (found == op.end() ? std::string("None") : core::py_str(*found)) + " はこの道具では使えない",
                                where + "/op"};
             }
-            if (name == Json("for_pages") && op.contains("ops") && op["ops"].is_array()) {
-                if (auto refused = look(op["ops"], where + "/ops")) return refused;
+            const std::string& name = found->get_ref<const std::string&>();
+            if (reads_a_file(name)) {
+                return Refusal{"op_not_allowed", "op " + name + " はファイルを読むので制御チャンネルでは使えない（MCP の apply_ops か genko apply で）",
+                               where + "/op"};
+            }
+            if (name == "for_pages") {
+                const auto inner = op.find("ops");
+                if (inner != op.end() && inner->is_array()) {
+                    if (auto refused = look(*inner, where + "/ops", depth + 1)) return refused;
+                }
             }
         }
         return std::nullopt;
     };
-    return look(ops, "/ops");
+    return look(ops, "/ops", 0);
 }
 
 Json engine_commands() {

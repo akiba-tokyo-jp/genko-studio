@@ -691,6 +691,7 @@ private slots:
                                       Json{{"op", "set_variables"}, {"variables", Json::array()}}, Json{{"op", "set_data_sets"}},
                                       Json{{"op", "measure_values"}, {"page", 1}}, Json{{"op", "slices_info"}, {"page", 1}},
                                       Json{{"op", "type_info"}, {"page", 1}}, Json{{"op", "measure_info"}, {"page", 1}},
+                                      Json{{"op", "timeline_info"}, {"page", 1}},
                                       Json{{"op", "lock_page"}, {"page", 1}}, Json{{"op", "approve"}, {"gate", "name"}},
                                       Json{{"op", "place_scale_marker"}, {"page", 1}}, Json{{"op", "new_layer_comp"}, {"page", 1}, {"name", "c"}},
                                       Json{{"op", "add_slice"}, {"page", 1}, {"rect", Json::array({0, 0, 10, 10})}},
