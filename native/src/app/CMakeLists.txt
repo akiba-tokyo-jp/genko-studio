@@ -240,6 +240,11 @@ genko_library(genko_app
     # PC5 J-b (スライス: the slices on the canvas, the スライスツール・スライス選択ツール, the window's commands)
     canvas_slices.cpp
     main_window_slices.cpp
+    # PC5 H-e (環境設定と API: the panes of 環境設定, session.json, commands.json, the history log)
+    preferences_panes.cpp
+    session_file.cpp
+    commands_file.cpp
+    history_log.cpp
     # PC5 I-c (アートボード: レイヤー → 新規 → アートボード, アートボードの設定, 表示, アートボードからファイル・PDF)
     main_window_artboards.cpp
     artboard_dialog.cpp

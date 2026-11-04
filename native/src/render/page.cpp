@@ -3509,6 +3509,10 @@ int mm_to_px(double mm, int dpi) {
 }
 
 Box rect_px(const core::Rect& rect, int dpi) {
+    // (its edges still as mm_to_px, at least 1: a frame's box, and the clip of a picture placed with nothing to clip it to — the
+    // paper —, so counting its left and top edge at 0 changes pages with margins too: a picture placed past the paper —
+    // test_contract_studio's placed book, test_contract_service's atari scan. Left as Python's until the user decides: SPEC
+    // 「切る範囲の辺」)
     const int x = mm_to_px(rect.x.value(), dpi);
     const int y = mm_to_px(rect.y.value(), dpi);
     const int w = mm_to_px(rect.width.value(), dpi);
@@ -3842,13 +3846,14 @@ Image render_spread(const core::Document& episode, const core::Num& first, const
     Image right_img = render_page(*right, dpi, o, &episode).image;
     const core::Rect lt = left->trim_rect_mm();
     const core::Rect rt = right->trim_rect_mm();
-    const auto top = [&](const core::Rect& t) { return to_trim ? mm_to_px(t.y.value(), dpi) : 0; };
+    // (the user's decision 15: an edge at the paper's own, 0 mm, at 0 — edge_px, as crop_to cuts)
+    const auto top = [&](const core::Rect& t) { return to_trim ? edge_px(t.y.value(), dpi) : 0; };
     const auto bottom = [&](const core::Rect& t, const Image& img) {
         return to_trim ? mm_to_px((t.y + t.height).value(), dpi) : img.height();
     };
-    left_img = left_img.crop(Box{to_trim ? mm_to_px(lt.x.value(), dpi) : 0, top(lt), mm_to_px((lt.x + lt.width).value(), dpi),
+    left_img = left_img.crop(Box{to_trim ? edge_px(lt.x.value(), dpi) : 0, top(lt), mm_to_px((lt.x + lt.width).value(), dpi),
                                  bottom(lt, left_img)});
-    right_img = right_img.crop(Box{mm_to_px(rt.x.value(), dpi), top(rt),
+    right_img = right_img.crop(Box{edge_px(rt.x.value(), dpi), top(rt),
                                    to_trim ? mm_to_px((rt.x + rt.width).value(), dpi) : right_img.width(), bottom(rt, right_img)});
     Image image = Image::create("RGB", Size{left_img.width() + right_img.width(), std::max(left_img.height(), right_img.height())},
                                 Ink{255, 255, 255});

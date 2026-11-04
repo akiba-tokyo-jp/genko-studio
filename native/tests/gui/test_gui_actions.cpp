@@ -466,8 +466,8 @@ private slots:
         // and PC5 J-e2's 2 (SPEC PROD-01) — ラスタライズ → ビデオ (act_rasterize_video) and 読み込み → ビデオフレームからレイヤー…
         // (act_video_frames_to_layers); its 12 of ビデオレイヤー ▸ made real in their frames' places — test_gui_anim.
         // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8, I-c's 10: アートボード… など — test_gui_artboards —, I-h's 2, I-g's 5, I-f's 3, J-f's 1 and J-e2's 2)
-        // (PC5 J-g's 1: 環境設定 ▸ 連携… — test_control_channel)
-        QCOMPARE(w->actions_by_name().size(), std::size_t{801});
+        // (and PC5 H-e's 3: 環境設定 ▸ ヒストリーログ…・仮想記憶ディスク…・拡張コントロール… — 800＋3; PC5 J-g's 1: 環境設定 ▸ 連携…)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{804});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -1042,11 +1042,14 @@ private slots:
         QVERIFY(panes != nullptr);
         QCOMPARE(items(panes), (QStringList{QStringLiteral("一般…"), QStringLiteral("インターフェイス…"),
                                            QStringLiteral("ワークスペース…"),  // (PC5 H-d)
-                                           QStringLiteral("ツール…"), QStringLiteral("ファイル管理…"),
-                                           QStringLiteral("書き出し…"), QStringLiteral("パフォーマンス…"), QStringLiteral("カーソル…"), QStringLiteral("透明部分・色域…"),
+                                           QStringLiteral("ツール…"), QStringLiteral("ヒストリーログ…"),  // (PC5 H-e)
+                                           QStringLiteral("ファイル管理…"),
+                                           QStringLiteral("書き出し…"), QStringLiteral("パフォーマンス…"), QStringLiteral("仮想記憶ディスク…"),  // (PC5 H-e)
+                                           QStringLiteral("カーソル…"), QStringLiteral("透明部分・色域…"),
                                            QStringLiteral("単位・定規…"), QStringLiteral("ガイド・グリッド・スライス…"),  // (PC5 H-b)
                                            QStringLiteral("プラグイン…"),  // (PC5 J-f: the plugins' own window, act_plugin_settings)
                                            QStringLiteral("テキスト…"),  // (PC5 G-d)
+                                           QStringLiteral("拡張コントロール…"),  // (PC5 H-e)
                                            QStringLiteral("Camera Raw…"), QStringLiteral("連携…"),  // (PC5 J-g)
                                            QStringLiteral("ペンタブレット…"), QStringLiteral("長い時間の作業…")}));
         QVERIFY(!items(menu(QStringLiteral("ファイル"))).contains(QStringLiteral("環境設定…")));
@@ -1058,7 +1061,13 @@ private slots:
             if (auto* prefs = qobject_cast<genko::app::preferences::PreferencesDialog*>(dialog)) page = prefs->tabs->tabText(prefs->tabs->currentIndex());
             return int(QDialog::Rejected);
         };
-        for (const auto& [pane, title] : std::vector<std::pair<const char*, const char*>>{{"act_prefs", "表示・作業"},
+        // (PC5 H-e: each pane its own page — 一般 no more the 表示・作業 of them all)
+        for (const auto& [pane, title] : std::vector<std::pair<const char*, const char*>>{{"act_prefs", "一般"},
+                                                                                          {"act_prefs_interface", "インターフェイス"},
+                                                                                          {"act_prefs_historyLog", "ヒストリーログ"},
+                                                                                          {"act_prefs_scratchDisks", "仮想記憶ディスク"},
+                                                                                          {"act_prefs_enhancedControls", "拡張コントロール"},
+                                                                                          {"act_prefs_comfort", "長い時間の作業"},
                                                                                           {"act_prefs_fileHandling", "ファイル管理"},
                                                                                           {"act_prefs_export", "書き出し"},
                                                                                           {"act_prefs_transparencyAndGamut", "透明部分・色域"},

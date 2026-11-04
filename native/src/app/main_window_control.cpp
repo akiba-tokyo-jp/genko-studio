@@ -17,6 +17,8 @@
 #include "app/ask.hpp"
 #include "app/canvas.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
+#include "app/workspace.hpp"
 #include "app/timeline.hpp"
 #include "core/error.hpp"
 #include "core/video.hpp"
@@ -95,6 +97,18 @@ Json MainWindow::control_inspect() const {
         menus.push_back(std::move(m));
     }
     out["menus"] = std::move(menus);
+    // (PC5 H-e's command.list with whether each is on now: its ids those of commands.json — genko commands, core::commands)
+    Json commands = Json::array();
+    auto* self = const_cast<MainWindow*>(this);
+    const auto names = command_names(self);
+    for (QAction* act : preferences::commands(self)) {
+        const QString name = command_name(names, act);
+        const QString attribute = act->property("genko_attribute").toString();
+        Json one{{"id", (attribute.isEmpty() ? name : attribute).toStdString()}, {"name", name.toStdString()}, {"enabled", act->isEnabled()}};
+        if (act->isCheckable()) one["checked"] = act->isChecked();
+        commands.push_back(std::move(one));
+    }
+    out["commands"] = std::move(commands);
     if (page != nullptr) {
         try {
             out["measure"] = render::measure::listing(*page);

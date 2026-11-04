@@ -65,8 +65,9 @@ render::Image annotate(const render::Image& image, const core::Page& page, int d
         ++order;
         const core::Rect& r = frame->rect;
         const int x2 = render::mm_to_px((r.x + r.width).value(), dpi);
-        const int y = render::mm_to_px(r.y.value(), dpi);
-        const int x = render::mm_to_px(r.x.value(), dpi);
+        // (the user's decision 15: a left or top edge at the paper's own, 0 mm, at 0 — render::edge_px —; an end as mm_to_px)
+        const int y = render::edge_px(r.y.value(), dpi);
+        const int x = render::edge_px(r.x.value(), dpi);
         draw.rectangle(render::BoxF{double(x), double(y), double(x + badge), double(y + badge)}, rgb(40, 90, 200));
         draw.text(render::PointD{double(x + badge / 5), double(y + badge / 8)}, render::text::u32(std::to_string(order)), font,
                   rgb(255, 255, 255));
@@ -77,14 +78,14 @@ render::Image annotate(const render::Image& image, const core::Page& page, int d
         const NumBox rect{r.x, r.y, r.width, r.height};
         for (const Figure& fig : figures(*panel, rect)) {
             for (const auto& [box, width] : {std::pair<const NumBox*, int>{&fig.body, 1}, std::pair<const NumBox*, int>{&fig.head, 2}}) {
-                const int bx = render::mm_to_px((*box)[0].value(), dpi);
-                const int by = render::mm_to_px((*box)[1].value(), dpi);
+                const int bx = render::edge_px((*box)[0].value(), dpi);
+                const int by = render::edge_px((*box)[1].value(), dpi);
                 const int bw = render::mm_to_px((*box)[2].value(), dpi);
                 const int bh = render::mm_to_px((*box)[3].value(), dpi);
                 draw.rectangle(render::BoxF{double(bx), double(by), double(bx + bw), double(by + bh)}, std::nullopt, rgb(200, 80, 60), width);
             }
-            const int hx = render::mm_to_px(fig.head[0].value(), dpi);
-            const int hy = render::mm_to_px(fig.head[1].value(), dpi);
+            const int hx = render::edge_px(fig.head[0].value(), dpi);
+            const int hy = render::edge_px(fig.head[1].value(), dpi);
             draw.text(render::PointD{double(hx + 3), double(hy + 2)}, render::text::u32(core::py_str(fig.char_id)), small, rgb(200, 80, 60));
         }
         std::u32string label = render::text::u32(text::head(slot + " " + core::py_str(core::py_get(*panel, "shot")) + "/" +

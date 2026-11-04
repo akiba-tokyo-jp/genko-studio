@@ -28,6 +28,7 @@
 #include "api/buildinfo.hpp"
 #include "api/server_cli.hpp"
 #include "api/studio_cli.hpp"
+#include "api/prefs_cli.hpp"
 #include "core/brush_dabs.hpp"
 #include "core/brushes.hpp"
 #include "core/filter_kinds.hpp"
@@ -4096,6 +4097,9 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("batch")) return batch_command(args, ascii);    // (PC5 I-0: 自動処理の土台)
         if (command == QLatin1String("droplet")) return droplet_command(args, ascii);    // (PC5 I-e: ドロップレット)
         if (command == QLatin1String("automate")) return automate_command(args, ascii);  // (PC5 I-e: 画像プロセッサーほか)
+        if (command == QLatin1String("prefs")) return prefs_command(args, ascii);        // (PC5 H-e: prefs.get/set/reset)
+        if (command == QLatin1String("commands")) return commands_command(args, ascii);  // (PC5 H-e: command.list)
+        if (command == QLatin1String("session")) return session_command(args, ascii);    // (PC5 H-e: session.inspect)
         if (command == QLatin1String("measure")) return measure_command(args, ascii);    // (PC5 J-d2: 計測値を記録)
         if (command == QLatin1String("plugins")) return plugins_command(args, ascii);    // (PC5 J-f: plugin.list・install・remove・reload)
         // (PC5 I-f: `genko print` is the app's — main.cpp sends it there; here when this build has no app, or --ascii came first)

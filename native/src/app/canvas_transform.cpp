@@ -3,12 +3,14 @@
 // commands' own ways), Warp's Bézier mesh, Puppet Warp's pins and Perspective Warp's planes. Each drag let go sends the
 // spec for a preview, Enter for the op (transform_layers); the window builds the op (app/main_window_transform.cpp).
 
+#include <QFontMetricsF>
 #include <QKeyEvent>
 #include <QPainter>
 #include <QPainterPath>
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 #include "app/canvas.hpp"
 #include "app/theme.hpp"
@@ -590,6 +592,32 @@ void PageCanvas::draw_transform(QPainter& painter) const {
         const QPointF h = pt(c.x(), c.y());
         painter.setPen(QPen(kBox, 1.2));
         painter.drawEllipse(h, 4, 4);  // (the reference point: what it turns about)
+        // (PC5 H-e, 環境設定 → ツール → 変形値を表示: by the pointer while the box is dragged — how far it moved, its turn, or its
+        // width and height —, in the ruler's unit)
+        if (transform_values && t.drag && t.drag->moved) {
+            const auto& m = t.matrix;
+            const auto& was = t.drag->matrix;
+            QString words;
+            if (t.drag->kind == QLatin1String("move")) {
+                words = QStringLiteral("X: %1  Y: %2").arg(length_words(m[4] - was[4], true), length_words(m[5] - was[5], false));
+            } else if (t.drag->kind == QLatin1String("rotate")) {
+                words = QStringLiteral("%1°").arg(QString::number(std::atan2(m[1], m[0]) * 180.0 / std::numbers::pi, 'f', 1));
+            } else {
+                const QPointF across = t.quad[1] - t.quad[0];
+                const QPointF down = t.quad[3] - t.quad[0];
+                words = QStringLiteral("W: %1  H: %2").arg(length_words(std::hypot(across.x(), across.y()), true),
+                                                           length_words(std::hypot(down.x(), down.y()), false));
+            }
+            const QPointF at = pt(t.drag->at.x(), t.drag->at.y()) + QPointF(16, 18);
+            const QFontMetricsF metrics(painter.font());
+            const QRectF box = metrics.boundingRect(words).adjusted(-6, -3, 6, 3).translated(at - metrics.boundingRect(words).topLeft());
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(30, 30, 30, 210));
+            painter.drawRoundedRect(box, 4, 4);
+            painter.setPen(Qt::white);
+            painter.drawText(box, Qt::AlignCenter, words);
+            painter.setBrush(Qt::NoBrush);
+        }
     }
     painter.restore();
 }

@@ -37,6 +37,7 @@
 #include "core/pyconv.hpp"
 #include "../gui/gui_support.hpp"
 #include "service/control.hpp"
+#include "service/studio_service.hpp"
 #include "service/tokens.hpp"
 #include "storage/journal.hpp"
 
@@ -667,6 +668,36 @@ private slots:
         };
         for (const Json& m : seen["menus"]) walk(m);
         (void)recent;  // (shown only once a file was opened: when it is, listed empty)
+    }
+
+    // H-e's seam: 連携 is a row of 環境設定's table — the person's `genko prefs set` turns it on and off (the app follows),
+    // no way of the AI's (MCP's tools, the channel itself) does; ui.inspect's commands are commands.json's, each with on
+    void thePersonsCommandLineAloneTurnsItOnOrOff() {
+        Book book;
+        channel(true);
+        Client c;
+        QVERIFY(c.open() && c.auth(service::tokens::add("ai:bot")));
+        const Json seen = c.call("ui.inspect")["result"];
+        bool zoom = false;
+        for (const Json& one : seen["commands"]) {
+            if (one["id"] == "act_zoom_in") zoom = one["enabled"].is_boolean();
+        }
+        QVERIFY(zoom);
+        for (const std::string& tool : service::agent_tools_sorted()) QVERIFY2(tool.find("pref") == std::string::npos, tool.c_str());
+        for (const std::string& op : service::agent_ops_sorted()) QVERIFY2(op.find("pref") == std::string::npos && op != "set_meta", op.c_str());
+        QCOMPARE(code_of(c.call("prefs.set", Json{{"values", {{"integrations.controlChannel", false}}}})), std::string("unknown_method"));
+        QVERIFY(app::control::Server::instance().listening());
+        const auto prefs_set = [](bool on) {
+            QProcess cli;
+            cli.start(QStringLiteral(GENKO_CLI), {QStringLiteral("prefs"), QStringLiteral("set"), QStringLiteral("integrations.controlChannel"),
+                                                  on ? QStringLiteral("true") : QStringLiteral("false")});
+            return gui_test::wait_for([&] { return cli.state() == QProcess::NotRunning; }, 30000) && cli.exitCode() == 0;
+        };
+        QVERIFY(prefs_set(false));
+        QVERIFY(gui_test::wait_for([] { return !app::control::Server::instance().listening(); }, 15000));
+        QVERIFY(c.closed());
+        QVERIFY(prefs_set(true));
+        QVERIFY(gui_test::wait_for([] { return app::control::Server::instance().listening(); }, 15000));
     }
 
     void genkoControlFromAnotherProcess() {

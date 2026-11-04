@@ -10,6 +10,7 @@
 #include "app/settings_watch.hpp"
 #include "core/config_dir.hpp"
 #include "core/paths.hpp"
+#include "core/prefs_table.hpp"
 
 namespace genko::app {
 
@@ -37,8 +38,11 @@ class OwnSettings : public QSettings {
 public:
     explicit OwnSettings(const QString& file) : QSettings(file, QSettings::IniFormat), file_(file), before_(settings_stamp(file)) {}
     ~OwnSettings() override {
+        // (PC5 H-e: another program's write while this store was open — genko prefs set — is read in by sync and written
+        // back with the app's: the file as it is just before is what the app's write starts from, so the watch applies it)
+        const SettingsStamp now = settings_stamp(file_);
         sync();
-        if (const SettingsStamp after = settings_stamp(file_); after != before_) settings_written(after);
+        if (const SettingsStamp after = settings_stamp(file_); after != before_) settings_written(now, after);
     }
 
 private:
@@ -80,6 +84,16 @@ std::string default_actor() {
 
 fs::path recovery_root() { return ensure(config_dir() / "recovery"); }
 
-fs::path cache_root() { return ensure(config_dir() / "cache"); }
+fs::path cache_root() {
+    // (PC5 H-e, 環境設定 → 仮想記憶ディスク — the coordinator's decision: no pixel is put out there; the app's caches, the books'
+    // small pictures and the covers, are kept in the folder chosen — none: the config folder's cache)
+    const std::string chosen = core::prefs::value("scratchDisks.folder").get<std::string>();
+    if (!chosen.empty()) {
+        const fs::path there = ensure(core::path_from_utf8(chosen) / "genko-cache");
+        std::error_code ec;
+        if (fs::is_directory(there, ec)) return there;  // (a drive taken away, a folder gone: the config folder's, as with none)
+    }
+    return ensure(config_dir() / "cache");
+}
 
 }  // namespace genko::app

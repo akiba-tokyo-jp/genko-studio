@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -17,6 +18,13 @@ namespace genko::formats {
 // packet's as it was while the book of a file keeps the title it was opened with (its file's name). The packet it was opened with is read from
 // the book in memory (Document::native_files) or its assets (Document::asset_dir); one that cannot be read is made anew.
 std::optional<std::string> book_xmp(const core::Document& doc);
+
+// PC5 H-e (環境設定 → ヒストリーログ, 保存先 メタデータ): the edits of a book as Photoshop's photoshop:History puts them in the
+// files written from it — one a line —, or none. The app gives it while the person keeps the log so (app/history_log): a
+// book's files then carry them in their packet (a book with no File Info too); the command line gives none, and its files
+// are as before.
+using HistorySource = std::function<std::optional<std::string>(const core::Document&)>;
+void set_history_source(HistorySource source);
 
 // The file's bytes with the packet put in, as Photoshop puts it (PhotoCraft's codecs write it so):
 //   - PNG: an iTXt chunk "XML:com.adobe.xmp" (uncompressed) before the first IDAT;

@@ -8,6 +8,8 @@
 #include <QMessageBox>
 #include <QUrl>
 
+#include "core/prefs_table.hpp"
+
 namespace genko::app::ask {
 
 namespace {
@@ -82,7 +84,9 @@ std::optional<QString> get_item(QWidget* parent, const QString& title, const QSt
 std::optional<QColor> colour(QWidget* parent, const QColor& now, const QString& title) {
     if (shut()) return std::nullopt;
     if (const auto r = current(); r && r->colour) return r->colour(now, title);
-    const QColor chosen = QColorDialog::getColor(now, parent, title);
+    // (PC5 H-e, 環境設定 → 一般 → カラーピッカー: the computer's own window, or Genko's — Qt's, the same on every computer)
+    const bool own = core::prefs::value("general.colorPicker").get<std::string>() == "genko";
+    const QColor chosen = QColorDialog::getColor(now, parent, title, own ? QColorDialog::ColorDialogOptions(QColorDialog::DontUseNativeDialog) : QColorDialog::ColorDialogOptions());
     return chosen.isValid() ? std::optional<QColor>(chosen) : std::nullopt;
 }
 

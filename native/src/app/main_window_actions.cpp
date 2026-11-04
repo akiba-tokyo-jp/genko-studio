@@ -334,13 +334,16 @@ void MainWindow::open_preferences(const QString& pane) {
         open_keyboard_shortcuts();
         return;
     }
-    if (pane == QLatin1String("plugIns")) {  // (PC5 J-f: the plugins' own window, 環境設定 ▸ プラグイン…)
-        if (QAction* plugins = action(QStringLiteral("act_plugin_settings"))) plugins->trigger();
-        return;
+    // (PC5 H-e: この面を初期設定に戻す and すべての環境設定をリセット… open it again at the pane, its values as they are now. The
+    // プラグイン pane — PC5 J-f — is a page of it too, J-f's review P3-6: what the plugins are allowed to do is the plugins' own
+    // window's, act_plugin_settings, opened from that page)
+    for (QString at = pane;;) {
+        preferences::PreferencesDialog dialog(this);
+        if (!at.isEmpty()) dialog.show_pane(at);  // (PC5 H-0: 編集 → 環境設定 ▸'s panes, キーボードショートカット…)
+        ask::exec(&dialog);
+        if (dialog.reopen.isEmpty()) break;
+        at = dialog.reopen;
     }
-    preferences::PreferencesDialog dialog(this);
-    if (!pane.isEmpty()) dialog.show_pane(pane);  // (PC5 H-0: 編集 → 環境設定 ▸'s panes, キーボードショートカット…)
-    ask::exec(&dialog);
 }
 
 QAction* MainWindow::action(const QString& attribute) const {
