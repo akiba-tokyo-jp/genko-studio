@@ -611,7 +611,7 @@ private slots:
     void webAssemblyPluginsInTheirPane() {
         Studio s;
         app::MainWindow* w = s.window.get();
-        if (QFileInfo::exists(QStringLiteral(GENKO_TEST_PLUGIN_HOST))) qputenv("GENKO_PLUGIN_HOST", QByteArray(GENKO_TEST_PLUGIN_HOST));
+        if (QFileInfo::exists(QStringLiteral(GENKO_TEST_PLUGIN_HOST))) render::plugins::set_host_for_testing(std::filesystem::path(GENKO_TEST_PLUGIN_HOST));
         const bool host = QFileInfo::exists(QStringLiteral(GENKO_TEST_PLUGIN_HOST));
         const std::filesystem::path folder = render::plugins::folder();
         std::filesystem::create_directories(folder);

@@ -45,9 +45,9 @@ set(_packages
   "libraw~LibRaw (camera RAW: a shared library of its own)~libraw~LGPL-2.1-only OR CDDL-1.0~bundled:(^lib/libraw_r\\.so|(^|/)raw_r\\.dll$)"
   # (PC5 J-f: genko-plugin-host, a program of its own beside genko — the WebAssembly plugins' host, Rust — and the crates
   # built into it: package/licenses/wasm-host/NOTICES.txt)
-  "wasmi~wasmi (genko-plugin-host's WebAssembly interpreter, with wasmi_core, wasmi_ir and wasmi_collections)~=2.0.0~MIT OR Apache-2.0~bundled:^bin/genko-plugin-host(\\.exe)?$"
-  "wasmparser~wasmparser (wasmi's, in genko-plugin-host)~=0.228.0~Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT~built-in"
-  "rust-crates~Rust crates in genko-plugin-host (serde, serde_json, thiserror, itoa, memchr, libm, spin, bitflags, zmij) and the Rust standard library~=NOASSERTION~MIT~built-in")
+  "wasmi~wasmi (genko-plugin-host's WebAssembly interpreter, with wasmi_core, wasmi_ir and wasmi_collections)~=2.0.0~MIT OR Apache-2.0~only-with:^bin/genko-plugin-host(\\.exe)?$:bundled:^bin/genko-plugin-host(\\.exe)?$"
+  "wasmparser~wasmparser (wasmi's, in genko-plugin-host)~=0.228.0~Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT~only-with:^bin/genko-plugin-host(\\.exe)?$:built-in-host"
+  "rust-crates~Rust crates in genko-plugin-host (serde, serde_json, thiserror, itoa, memchr, libm, spin, bitflags, zmij) and the Rust standard library~=NOASSERTION~MIT~only-with:^bin/genko-plugin-host(\\.exe)?$:built-in-host")
 if(CMAKE_HOST_WIN32)
   list(APPEND _packages
     "zlib~zlib~zlib~Zlib~built-in" "libpng~libpng~libpng~libpng-2.0~built-in" "libjpeg-turbo~libjpeg-turbo~libjpeg_turbo~IJG AND BSD-3-Clause AND Zlib~built-in"
@@ -117,11 +117,28 @@ foreach(_entry IN LISTS _packages)
   else()
     _version(${_key} _ver)
   endif()
+  # (PC5 J-f, review P3-9: "only-with:<regex>:<where>" — listed only when a file of the folder matches: genko-plugin-host's
+  # crates, absent from a folder built without cargo)
+  if(_where MATCHES "^only-with:([^:]+):(.*)$")
+    set(_needed "${CMAKE_MATCH_1}")
+    set(_where "${CMAKE_MATCH_2}")
+    set(_there FALSE)
+    foreach(_file IN LISTS _files)
+      if(_file MATCHES "${_needed}")
+        set(_there TRUE)
+      endif()
+    endforeach()
+    if(NOT _there)
+      continue()
+    endif()
+  endif()
   set(_comment "")
   if(_where STREQUAL "system")
     set(_comment "the computer's own library: linked dynamically, not in the folder")
   elseif(_where STREQUAL "built-in")
     set(_comment "built into the program")
+  elseif(_where STREQUAL "built-in-host")
+    set(_comment "built into genko-plugin-host")
   endif()
   set(_pkg "{\"SPDXID\": \"SPDXRef-Package-${_id}\", \"name\": \"${_name}\", \"versionInfo\": \"${_ver}\", \"downloadLocation\": \"NOASSERTION\", \"licenseConcluded\": \"${_licence}\", \"licenseDeclared\": \"${_licence}\", \"copyrightText\": \"NOASSERTION\", \"filesAnalyzed\": false, \"comment\": \"${_comment}\"}")
   string(JSON _doc SET "${_doc}" packages ${_p} "${_pkg}")

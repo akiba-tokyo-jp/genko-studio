@@ -110,7 +110,7 @@ private slots:
         qputenv("GENKO_CONFIG_DIR", config_.toUtf8());
         host_ = QStringLiteral(GENKO_TEST_PLUGIN_HOST);
         if (!QFileInfo::exists(host_)) QSKIP("genko-plugin-host was not built (no cargo): the WebAssembly plugins cannot run in this build");
-        qputenv("GENKO_PLUGIN_HOST", host_.toUtf8());
+        plugins::set_host_for_testing(genko::core::path_from_utf8((host_).toStdString()));
         for (const char* name : {"invert", "double", "shift", "canvas", "params", "nan", "loop", "bomb", "trap", "refuses", "imports", "badmanifest"})
             put(QString::fromLatin1(name));
         // files that are not modules: a broken one with the header, one without it, one too large
@@ -126,13 +126,13 @@ private slots:
     void init() {
         plugins::set_wasm_limits_for_testing(Json());
         plugins::forget_made();
-        qputenv("GENKO_PLUGIN_HOST", host_.toUtf8());
+        plugins::set_host_for_testing(genko::core::path_from_utf8((host_).toStdString()));
     }
 
     // Listed by their files alone — nothing runs to list them (the host is not even there) —, off until chosen.
     void listedWithoutRunning() {
         enable(false);
-        qputenv("GENKO_PLUGIN_HOST", (scratch_.path() + "/no-such-host").toUtf8());
+        plugins::set_host_for_testing(genko::core::path_from_utf8(((scratch_.path() + "/no-such-host")).toStdString()));
         const auto all = plugins::listed();
         const auto* invert = listed(all, "invert");
         QVERIFY(invert != nullptr);
@@ -463,11 +463,11 @@ private slots:
         QFile::remove(crash);
         QVERIFY(QFile::copy(QStringLiteral(GENKO_TEST_NATIVE_PLUGIN), crash));
         QVERIFY(QFile::setPermissions(crash, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
-        qputenv("GENKO_PLUGIN_HOST", crash.toUtf8());
+        plugins::set_host_for_testing(genko::core::path_from_utf8((crash).toStdString()));
         bands::Samples s = picture(8, 8, 8);
         QVERIFY2(refusal([&] { plugins::run_samples("plugin:invert", s, nullptr, Json::object()); }).startsWith(QStringLiteral("plugin_runner: plugin invert stopped before it answered")),
                  qPrintable(refusal([&] { plugins::run_samples("plugin:invert", s, nullptr, Json::object()); })));
-        qputenv("GENKO_PLUGIN_HOST", (scratch_.path() + "/no-such-host").toUtf8());
+        plugins::set_host_for_testing(genko::core::path_from_utf8(((scratch_.path() + "/no-such-host")).toStdString()));
         QCOMPARE(refusal([&] { plugins::run_samples("plugin:invert", s, nullptr, Json::object()); }),
                  QStringLiteral("plugin_runner: the WebAssembly plugins need genko-plugin-host beside Genko (it was not found), so plugin invert cannot run"));
         // (a Python plugin takes 8-bit pictures only)

@@ -5,15 +5,15 @@
 # finds it there). Without cargo, or when cargo cannot build it (no network for the crates the first time), only the
 # WebAssembly plugins are missing: Genko says so when one is chosen; every other part builds as before.
 #
-#   GENKO_PLUGIN_HOST  ON (default) | OFF
+#   GENKO_BUILD_PLUGIN_HOST  ON (default) | OFF
 #
 # Windows: the same cargo build (the MSVC toolchain); checked on a Windows machine after the merge.
 
-option(GENKO_PLUGIN_HOST "Build genko-plugin-host (the WebAssembly plugins' host, Rust: cargo)" ON)
+option(GENKO_BUILD_PLUGIN_HOST "Build genko-plugin-host (the WebAssembly plugins' host, Rust: cargo)" ON)
 
 set(GENKO_PLUGIN_HOST_NAME "")  # (the program's name beside genko when it is built: tests and the distribution)
-if(NOT GENKO_PLUGIN_HOST)
-  message(STATUS "genko-plugin-host: off (GENKO_PLUGIN_HOST=OFF): WebAssembly plugins will not run")
+if(NOT GENKO_BUILD_PLUGIN_HOST)
+  message(STATUS "genko-plugin-host: off (GENKO_BUILD_PLUGIN_HOST=OFF): WebAssembly plugins will not run")
   return()
 endif()
 find_program(GENKO_CARGO cargo HINTS "$ENV{CARGO_HOME}/bin" "$ENV{HOME}/.cargo/bin")

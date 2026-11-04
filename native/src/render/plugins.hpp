@@ -144,8 +144,8 @@ inline constexpr std::uintmax_t kMostModuleBytes = std::uintmax_t{32} << 20;  //
 // The plugin takes the picture in bands of f32 samples in its own colour model (a WebAssembly module, a native plugin
 // of protocol 2), so it works on precise and ink layers and channels too; else it takes 8-bit RGBA only.
 bool works_in_bands(const std::string& key);
-// The program that runs WebAssembly modules: GENKO_PLUGIN_HOST, else genko-plugin-host beside this program (none: the
-// WebAssembly plugins cannot run, said as the runner's trouble).
+// The program that runs WebAssembly modules: genko-plugin-host beside this program (none: the WebAssembly plugins cannot
+// run, said as the runner's trouble). Tests give theirs (set_host_for_testing): no environment variable chooses it.
 std::optional<std::filesystem::path> host_program();
 
 // plugins.run on samples (render/plugin_bands): a chosen plugin that works in bands over `picture`, in place;
@@ -169,6 +169,12 @@ Image run_8bit(std::string_view kind, const Image& image, const Image* coverage,
 // The WebAssembly host's limits lowered for tests (the keys of PhotoCraft's Limits: fuel_base, wall_time_ms, …; null:
 // as they are). Never raised.
 void set_wasm_limits_for_testing(const core::Json& limits);
+// Tests: the host program to start (an empty path: none; nullopt: the one beside this program), and a run's time for each
+// 8 million pixels of protocol 2 (0 s: kRunTime).
+void set_host_for_testing(const std::optional<std::filesystem::path>& host);
+void set_run_time_for_testing(std::chrono::seconds unit);
+// What a plugin runs as now: its chosen digest while it is allowed, else "" (what a drawing that ran it remembers it by).
+std::string run_digest(const std::string& key);
 
 // plugin.install: a file put into the plugins' folder (a .wasm module: its size and its header looked at, nothing run;
 // a .py file as it is), replacing one of the same name; it is not chosen to run. Its key. core::Error("plugin_install",

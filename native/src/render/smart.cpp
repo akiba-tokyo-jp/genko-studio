@@ -36,6 +36,7 @@
 #include "render/not_yet_ported.hpp"
 #include "render/page_internal.hpp"
 #include "render/placed.hpp"
+#include "render/plugins.hpp"
 #include "render/png.hpp"
 #include "render/proof.hpp"
 #include "render/raw.hpp"
@@ -1468,6 +1469,15 @@ std::string filtered_key(const Ctx& ctx, const core::Layer& layer, const core::S
          frame != nullptr && frame->panel ? *frame->panel : Json(), ctx.episode->bible.characters, page.spec.width_mm.json(), page.spec.height_mm.json(),
          page.spec.expression, page.rgb ? core::to_json(*page.rgb) : Json(), page.color ? core::to_json(*page.color) : Json(),
          ctx.episode->asset_dir ? core::path_to_utf8(*ctx.episode->asset_dir) : std::string()});
+    // (PC5 J-f, review P3-8: a plugin's filter is drawn by what the plugin is now — chosen as which bytes, or not at all)
+    Json plugins_now = Json::array();
+    if (const Json* filters = core::get(*layer.smart, "filters"); filters != nullptr && filters->is_array()) {
+        for (const Json& f : *filters) {
+            const std::string kind = core::py_str(core::py_get(f, "kind", Json("")));
+            if (core::smart::plugin_filter(kind)) plugins_now.push_back(kind + "=" + plugins::run_digest(kind.substr(plugins::kPrefix.size())));
+        }
+    }
+    if (!plugins_now.empty()) return "filtered " + core::dump_canonical(bits) + core::dump_canonical(plugins_now);
     return "filtered " + core::dump_canonical(bits);
 }
 

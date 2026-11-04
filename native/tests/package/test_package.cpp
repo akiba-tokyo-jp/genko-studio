@@ -252,6 +252,12 @@ private slots:
             named.insert(name);
         }
         QVERIFY(named.contains(kProgram));
+        // (PC5 J-f: genko-plugin-host beside genko when it was built, named with wasmi's package; its crates' licences)
+        for (const QString host : {QStringLiteral("bin/genko-plugin-host"), QStringLiteral("bin/genko-plugin-host.exe")}) {
+            if (!QFileInfo::exists(prefix_ + QLatin1Char('/') + host)) continue;
+            QVERIFY2(named.contains(host), qPrintable(host));
+            QVERIFY(QFileInfo::exists(doc + QStringLiteral("/licenses/wasm-host/NOTICES.txt")));
+        }
         for (const QString& name : files_in(prefix_)) {
             if (is_library(name) && !QFileInfo(prefix_ + QLatin1Char('/') + name).isSymLink()) QVERIFY2(named.contains(name), qPrintable(name));
         }

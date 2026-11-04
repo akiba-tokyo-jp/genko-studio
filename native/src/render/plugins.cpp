@@ -319,7 +319,9 @@ constexpr std::int64_t kProtocolBands = 2;  // (PC5 J-f: native plugins of proto
 std::filesystem::path native_home(const std::string& key) { return folder() / core::path_from_utf8(key); }
 
 bool usable_key(const std::string& key) {
-    return !key.empty() && key.find('/') == std::string::npos && key.find('\\') == std::string::npos && key != "." && key != "..";
+    // (PC5 J-f, review P3-10: no ':' either — on Windows "C:x" names a file relative to a drive's own folder)
+    return !key.empty() && key.find('/') == std::string::npos && key.find('\\') == std::string::npos && key.find(':') == std::string::npos && key != "." &&
+           key != "..";
 }
 
 // A plugin of this key is a native one: no Python file of its name, its folder holding a plugin.json.
@@ -388,12 +390,13 @@ Native parse_native(const std::string& key, const std::string& text) {
     if (!protocol.is_number_integer() || (protocol.get<std::int64_t>() != kProtocol && protocol.get<std::int64_t>() != kProtocolBands))
         manifest_problem(key, "its protocol must be 1 or 2");
     out.protocol = protocol.get<std::int64_t>();
-    if (const Json overlap = field("overlap"); !overlap.is_null()) {
+    // (overlap and area are protocol 2's: a plugin.json of protocol 1 keeps them as keys it does not know, as before)
+    if (const Json overlap = field("overlap"); out.protocol == kProtocolBands && !overlap.is_null()) {
         if (!overlap.is_number_integer() || overlap.get<std::int64_t>() < 0 || overlap.get<std::int64_t>() > 256)
             manifest_problem(key, "its overlap must be a whole number from 0 to 256");
         out.overlap = static_cast<unsigned>(overlap.get<std::int64_t>());
     }
-    if (const Json area = field("area"); !area.is_null()) {
+    if (const Json area = field("area"); out.protocol == kProtocolBands && !area.is_null()) {
         if (area != Json("content") && area != Json("canvas")) manifest_problem(key, "its area must be content or canvas");
         out.whole_canvas = area == Json("canvas");
     }
@@ -805,6 +808,8 @@ private:
 
 std::mutex g_wasm_limits_mutex;
 Json g_wasm_limits;  // (tests: the host's limits lowered)
+std::optional<std::filesystem::path> g_host_for_testing;  // (tests: the host to start; empty: none)
+std::chrono::seconds g_run_time_for_testing{0};          // (tests: a run's time for protocol 2, shorter)
 
 // The folders WebAssembly modules are found in: the plugins' folder, then the additional one while it is used.
 std::vector<std::filesystem::path> wasm_folders(const Settings& s) {
@@ -831,17 +836,20 @@ bool other_kind(const std::string& key) {
            std::filesystem::is_regular_file(native_home(key) / "plugin.json", ec);
 }
 
-// The module a key names: <key>.wasm in the first folder that has it (none when a plugin of another kind has the key).
+// The module a key names: <key>.wasm (its extension in lower case: review P3-4) in the first folder that has it, looked at
+// directly (review P3-3: no folder is read through); none when a plugin of another kind has the key.
 std::optional<std::filesystem::path> wasm_file(const std::string& key) {
-    if (!usable_key(key) || other_kind(key)) return std::nullopt;
+    if (!usable_key(key) || key.starts_with("_") || key.starts_with(".") || other_kind(key)) return std::nullopt;
     for (const std::filesystem::path& dir : wasm_folders(settings())) {
         std::error_code ec;
-        for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
-            if (wasm_name(entry.path()) && core::path_to_utf8(entry.path().stem()) == key && entry.is_regular_file(ec)) return entry.path();
-        }
+        const std::filesystem::path path = dir / core::path_from_utf8(key + ".wasm");
+        if (std::filesystem::is_regular_file(path, ec)) return path;
     }
     return std::nullopt;
 }
+
+// A module's file named with its extension in another case (foo.WASM): listed, never used (one name, one file).
+bool wasm_case_only(const std::filesystem::path& path) { return core::path_to_utf8(path.extension()) != ".wasm"; }
 
 [[noreturn]] void module_problem(const std::string& key, const std::string& why) {
     throw core::Error("plugin_manifest", "the module of plugin " + key + " cannot be used (" + why + ")");
@@ -1025,7 +1033,12 @@ Json settings_for_manifest(const Json& manifest, const Json& given) {
 
 // The time a run may take: kRunTime for each kRunPixels pixels or part (the host's own budget is 60 seconds a run).
 std::chrono::seconds run_limit(std::size_t pixels) {
-    return kRunTime * static_cast<std::int64_t>(std::max<std::size_t>(1, (pixels + kRunPixels - 1) / kRunPixels));
+    std::chrono::seconds unit = kRunTime;
+    {
+        std::lock_guard lock(g_wasm_limits_mutex);
+        if (g_run_time_for_testing.count() > 0) unit = g_run_time_for_testing;
+    }
+    return unit * static_cast<std::int64_t>(std::max<std::size_t>(1, (pixels + kRunPixels - 1) / kRunPixels));
 }
 
 // What a run in bands may borrow at most from the imaging budget (opened here when the caller has none; the caller's
@@ -1176,6 +1189,12 @@ std::vector<Listed> listed() {
             item.wasm = true;
             item.path = core::path_to_utf8(path);
             item.bytes = std::filesystem::file_size(path, ec);
+            if (wasm_case_only(path)) {  // (review P3-4: foo.WASM is never the module foo — one name, one file)
+                item.sha256 = "!";
+                item.problem = "the module of plugin " + item.key + " cannot be used (its name must end in .wasm in lower case)";
+                out.push_back(std::move(item));
+                continue;
+            }
             if (taken.contains(item.key)) {
                 item.sha256 = "!";
                 item.problem = "the module of plugin " + item.key + " cannot be used (a plugin of the same name comes first)";
@@ -1183,6 +1202,11 @@ std::vector<Listed> listed() {
                 continue;
             }
             taken.insert(item.key);
+            if (!now.enabled) {  // (plugins off: none runs — its size and header only, no digest read through: review P3-3)
+                if (const auto problem = module_problem_of(path)) item.problem = "the module of plugin " + item.key + " cannot be used (" + *problem + ")";
+                out.push_back(std::move(item));
+                continue;
+            }
             const auto state = module_now(item.key);
             if (!state) continue;
             item.sha256 = state->sha256;
@@ -1506,10 +1530,12 @@ bool works_in_bands(const std::string& key) {
 
 std::optional<std::filesystem::path> host_program() {
     std::error_code ec;
-    if (const QByteArray given = qgetenv("GENKO_PLUGIN_HOST"); !given.isEmpty()) {
-        const std::filesystem::path path = core::path_from_utf8(QString::fromLocal8Bit(given).toStdString());
-        if (std::filesystem::is_regular_file(path, ec)) return path;
-        return std::nullopt;
+    {
+        std::lock_guard lock(g_wasm_limits_mutex);
+        if (g_host_for_testing) {  // (tests: the host they built, or a stand-in — never an environment variable: review P3-5)
+            if (g_host_for_testing->empty() || !std::filesystem::is_regular_file(*g_host_for_testing, ec)) return std::nullopt;
+            return *g_host_for_testing;
+        }
     }
     if (QCoreApplication::instance() == nullptr) return std::nullopt;
 #ifdef Q_OS_WIN
@@ -1600,6 +1626,26 @@ plugin_bands::Picture grey_picture(Image& rgba, const Image* cover) {
     return p;
 }
 
+void set_host_for_testing(const std::optional<std::filesystem::path>& host) {
+    std::lock_guard lock(g_wasm_limits_mutex);
+    g_host_for_testing = host;
+}
+
+void set_run_time_for_testing(std::chrono::seconds unit) {
+    std::lock_guard lock(g_wasm_limits_mutex);
+    g_run_time_for_testing = unit;
+}
+
+std::string run_digest(const std::string& key) {
+    try {
+        if (!allowed(key)) return {};
+        const Json chosen = core::py_get(settings().chosen, key);
+        return chosen.is_string() ? chosen.get<std::string>() : std::string();
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
 void set_wasm_limits_for_testing(const Json& limits) {
     std::lock_guard lock(g_wasm_limits_mutex);
     g_wasm_limits = limits;
@@ -1644,22 +1690,27 @@ std::string install(const std::filesystem::path& file) {
 }
 
 void remove(const std::string& key) {
-    std::error_code ec;
     if (!usable_key(key)) throw core::PyValueError("no plugin " + key);
     const std::filesystem::path python = folder() / core::path_from_utf8(key + ".py");
     const std::filesystem::path module = folder() / core::path_from_utf8(key + ".wasm");
-    if (std::filesystem::is_regular_file(python, ec)) {
-        std::filesystem::remove(python, ec);
-    } else if (std::filesystem::is_regular_file(native_home(key) / "plugin.json", ec)) {
+    // (the file the key names, as way_of finds it: a Python file, else a native plugin's folder, else a module; review
+    // P3-10: each looked at with its own error, and the removal's own said as it is)
+    std::error_code looked;
+    std::filesystem::path gone;
+    if (std::filesystem::is_regular_file(python, looked)) {
+        gone = python;
+    } else if (std::error_code e; std::filesystem::is_regular_file(native_home(key) / "plugin.json", e)) {
         throw core::Error("plugin_install", "plugin " + key + " is a program's folder (remove the folder itself)");
-    } else if (std::filesystem::is_regular_file(module, ec)) {
-        std::filesystem::remove(module, ec);
+    } else if (std::error_code e2; std::filesystem::is_regular_file(module, e2)) {
+        gone = module;
     } else if (const auto elsewhere = wasm_file(key)) {
         throw core::Error("plugin_install", "plugin " + key + " is in the additional plugins folder (remove it there: " + core::path_to_utf8(*elsewhere) + ")");
     } else {
         throw core::PyValueError("no plugin " + key);
     }
-    if (ec) throw core::Error("io", "plugin " + key + " could not be removed (" + ec.message() + ")");
+    std::error_code removed;
+    if (!std::filesystem::remove(gone, removed) || removed)
+        throw core::Error("io", "plugin " + key + " could not be removed (" + (removed ? removed.message() : std::string("it is not there any more")) + ")");
     Settings s = settings();
     if (s.chosen.contains(key)) {
         s.chosen.erase(key);

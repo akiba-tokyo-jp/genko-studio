@@ -66,6 +66,33 @@ int main(int argc, char** argv) {
     if (!std::getline(std::cin, line)) return 2;
     // (PC5 J-f: a copy of this program named crash-host… stands in for a genko-plugin-host that falls over)
     if (std::string(argv[0]).find("crash-host") != std::string::npos) std::abort();
+    // (PC5 J-f, review P2-4: sleep-host… never answers — having started a process of its own that writes grandchild.txt
+    // beside it after 3 seconds unless stopped with it —; flood-host… writes 64 MB without a line break)
+    const auto sleep_long = [](const std::string& beside) {
+#ifndef _WIN32
+        if (::fork() == 0) {
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+            std::ofstream(beside + "/grandchild.txt") << "ran on\n";
+            std::_Exit(0);
+        }
+#endif
+        std::this_thread::sleep_for(std::chrono::seconds(1000));
+    };
+    const std::string self = argv[0];
+    const std::string self_dir = std::filesystem::path(self).parent_path().string();
+    const auto flood = [] {
+        const std::string block(1 << 20, 'x');
+        for (int i = 0; i < 64; ++i) std::fwrite(block.data(), 1, block.size(), stdout);
+        std::fflush(stdout);
+    };
+    if (self.find("sleep-host") != std::string::npos) {
+        sleep_long(self_dir);
+        return 0;
+    }
+    if (self.find("flood-host") != std::string::npos) {
+        flood();
+        return 0;
+    }
     // (PC5 J-f: protocol 2 — bands of f32 samples, one request after another until stdin ends: invert turns the colour
     // samples over (1 − v, the alpha kept when bit 8 of format says there is one) and puts the setting "red" (0..1) in the
     // first channel; fail refuses; crash stops after the first band; environment answers with 1 in every sample when
@@ -85,6 +112,15 @@ int main(int argc, char** argv) {
                 return 0;
             }
             if (what == "crash") std::abort();
+            if (what == "sleep") {  // (its grandchild beside the plugin's own folder)
+                const char* home = std::getenv("GENKO_PLUGIN_HOME");
+                sleep_long(home != nullptr ? home : ".");
+                return 0;
+            }
+            if (what == "flood") {
+                flood();
+                return 0;
+            }
             const bool alpha = (format & 256) != 0;
             const std::size_t n = static_cast<std::size_t>(ch);
             const long red = number_of(line, "red", -1);

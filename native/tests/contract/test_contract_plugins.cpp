@@ -435,7 +435,7 @@ private slots:
         qputenv("GENKO_CONFIG_DIR", config.toUtf8());
         host_ = QStringLiteral(GENKO_TEST_PLUGIN_HOST);
         if (!QFileInfo::exists(host_)) QSKIP("genko-plugin-host was not built (no cargo): the WebAssembly plugins cannot run in this build");
-        qputenv("GENKO_PLUGIN_HOST", host_.toUtf8());
+        plugins::set_host_for_testing(genko::core::path_from_utf8((host_).toStdString()));
         QVERIFY(QFile::copy(QStringLiteral(GENKO_TEST_DATA "/plugins/invert.wasm"), folder_ + "/invert.wasm"));
     }
 
@@ -522,12 +522,12 @@ private slots:
         const QString crash = scratch_.path() + "/crash-host";
         QVERIFY(QFile::copy(QStringLiteral(GENKO_TEST_NATIVE_PLUGIN), crash));
         QVERIFY(QFile::setPermissions(crash, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
-        qputenv("GENKO_PLUGIN_HOST", crash.toUtf8());
+        plugins::set_host_for_testing(genko::core::path_from_utf8((crash).toStdString()));
         const genko::core::Document doc = painted();
         QVERIFY(error_of([&] { (void)applied(doc, Json::array({Json{{"op", "filter_raster"}, {"page", 1}, {"id", "p"}, {"kind", "plugin:invert"}}})); })
                     .contains(QStringLiteral("plugin invert stopped before it answered")));
         QCOMPARE(pixels(doc, "p").getpixel(30, 30), (std::vector<double>{30, 120, 220, 255}));
-        qputenv("GENKO_PLUGIN_HOST", host_.toUtf8());
+        plugins::set_host_for_testing(genko::core::path_from_utf8((host_).toStdString()));
     }
 
     // plugin-filters@1: a module's smart filter keeps the picture it made; where the plugin cannot run (not chosen, not

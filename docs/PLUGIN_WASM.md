@@ -18,7 +18,7 @@ C++ 版 Genko の拡張です（SPEC.md COMP-04・PROD-01、PC5 J-f）。上流 
 ## 動かすまで
 
 - プラグインは最初は使いません。「プラグインを使う」をオンにし、一覧でモジュールにチェックを付け、確かめの問いに「はい」と答えたものだけが動きます。
-- 一覧を出すときは、.wasm のファイルの名前と大きさ（と、先頭の `\0asm`、32 MB を超えないか）を見るだけで、**何も動かしません**。名前・版・作者・設定（manifest）はモジュール自身が言うものなので、選んだ後に読みます。
+- 一覧を出すときは、.wasm のファイルの名前と大きさ（と、先頭の `\0asm`、32 MB を超えないか）を見るだけで、**何も動かしません**（プラグインを使う設定のときだけ、バイトの sha256 も計ります）。拡張子は小文字の `.wasm` だけを使い、`foo.WASM` のように大小だけ違うものは使えないものとして出します。名前・版・作者・設定（manifest）はモジュール自身が言うものなので、選んだ後に読みます。
 - 選んだときの .wasm のバイト（sha256）を覚えます。変わったら動かさず、選び直してもらいます。動かすたびにバイトを読み直して照らし、照らしたのと同じバイトを動かします。
 - AI（MCP）・HTTP・制御チャンネルには、プラグインを入れる・選ぶ・同意する入口がありません。MCP の `inspect` の `plugins` で一覧を読むことだけができます。
 
@@ -131,7 +131,7 @@ Genko での中身:
 
 ## 組み方（Genko を組む人へ）
 
-- `native/wasm-host` は CMake が cargo で組み（`cargo build --release --locked`。版は `Cargo.lock` の checksum で確かめる）、genko と同じフォルダーに置きます（`native/cmake/GenkoPluginHost.cmake`）。cargo が無い・組めないときは警告だけ出し、WebAssembly のプラグインだけが使えません（ほかは今のまま組めます）。`-DGENKO_PLUGIN_HOST=OFF` で組みません。
+- `native/wasm-host` は CMake が cargo で組み（`cargo build --release --locked`。版は `Cargo.lock` の checksum で確かめる）、genko と同じフォルダーに置きます（`native/cmake/GenkoPluginHost.cmake`）。cargo が無い・組めないときは警告だけ出し、WebAssembly のプラグインだけが使えません（ほかは今のまま組めます）。`-DGENKO_BUILD_PLUGIN_HOST=OFF` で組みません。組めなかったときも印を残すので、網の無い機械で組み直すたびに cargo が網を探して待つことはありません（`Cargo.toml`・`Cargo.lock`・ソースが変わったとき、作り直しの構成のときにもう一度組みます）。ホストは genko の隣のものだけを使い、環境変数では選べません（試験は試験の口で渡します）。
 - CI は `tools/ci/build_wasm_host.sh`（crates.io から取って組み、ホストの試験 `cargo test` を流す）。
 - Windows も同じ cargo（MSVC の道具）で組みます（`genko-plugin-host.exe`。実機での確かめは統合の後の Windows の作業）。vcpkg は使いません。
 - 中のクレートとライセンスは `docs/cpp-migration/THIRD_PARTY.md`・SBOM・配布物の `licenses/wasm-host/NOTICES.txt`。

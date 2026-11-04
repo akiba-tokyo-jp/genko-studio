@@ -313,7 +313,9 @@ bool PluginsDialog::keep() {
                 row->setCheckState(Qt::Unchecked);
                 continue;
             }
-            render::plugins::choose(key.toStdString(), on, row->data(Qt::UserRole + 1).toString().toStdString());
+            // (a module listed while plugins were off was not read through: chosen as its bytes are now)
+            const std::string shown = row->data(Qt::UserRole + 1).toString().toStdString();
+            render::plugins::choose(key.toStdString(), on, shown.empty() ? std::nullopt : std::optional<std::string>(shown));
         }
     } catch (const std::exception& error) {
         ask::warning(this, QStringLiteral("Genko"), wording::error(QString::fromUtf8(error.what())));

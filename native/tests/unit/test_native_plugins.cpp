@@ -400,12 +400,39 @@ private slots:
         QCOMPARE(plugins::run("plugin:bands", picture()).getpixel(30, 30), (std::vector<double>{225, 135, 35, 255}));
         QVERIFY(refusal([&] { plugins::run_samples("plugin:bandsfail", s, nullptr, Json::object()); }).startsWith("value: plugin bandsfail failed (no paper today)"));
         QVERIFY(refusal([&] { plugins::run_samples("plugin:bandscrash", s, nullptr, Json::object()); }).startsWith("plugin_runner: plugin bandscrash stopped before it answered"));
+        // (review P2-4) one that never answers, stopped at the run's time with what it started; one that floods
+        install("bandssleep", v2("帯で眠る", "sleep"));
+        install("bandsflood", v2("帯であふれる", "flood"));
+        plugins::choose("bandssleep", true);
+        plugins::choose("bandsflood", true);
+        plugins::set_run_time_for_testing(std::chrono::seconds(2));
+        QFile::remove(folder_ + "/bandssleep/grandchild.txt");
+        QElapsedTimer clock;
+        clock.start();
+        QCOMPARE(refusal([&] { plugins::run_samples("plugin:bandssleep", s, nullptr, Json::object()); }),
+                 QStringLiteral("plugin_runner: plugin bandssleep did not finish in 2 seconds"));
+        QVERIFY(clock.elapsed() < 10000);
+        QVERIFY(refusal([&] { plugins::run_samples("plugin:bandsflood", s, nullptr, Json::object()); }).startsWith("plugin_runner: plugin bandsflood wrote back more than a picture"));
+        plugins::set_run_time_for_testing(std::chrono::seconds(0));
+#ifndef _WIN32
+        std::this_thread::sleep_for(std::chrono::seconds(4));
+        QVERIFY(!QFile::exists(folder_ + "/bandssleep/grandchild.txt"));  // (its process group stopped whole)
+#endif
+        // (overlap and area are protocol 2's: protocol 1 keeps them as keys it does not know — review P3-1)
+        install("oldarea", manifest("古い", "invert"));
+        {
+            Json data = genko::core::parse_python_json(manifest("古い", "invert"));
+            data["area"] = "page";
+            data["overlap"] = "2";
+            write(folder_ + "/oldarea/plugin.json", genko::core::dump(data, genko::core::DumpOptions{}));
+        }
+        QVERIFY(refusal([] { plugins::choose("oldarea", true); }).isEmpty());
         QVERIFY(refusal([] { plugins::choose("badoverlap", true); }).contains("its overlap must be a whole number from 0 to 256"));
         QVERIFY(refusal([] { plugins::choose("badarea", true); }).contains("its area must be content or canvas"));
         // a plugin of protocol 1 takes 8-bit pictures only
         plugins::choose("negative", true);
         QVERIFY(refusal([&] { plugins::run_samples("plugin:negative", s, nullptr, Json::object()); }).startsWith("plugin_8bit"));
-        for (const char* key : {"bands", "bandsenv", "bandsfail", "bandscrash", "badoverlap", "badarea"}) {
+        for (const char* key : {"bands", "bandsenv", "bandsfail", "bandscrash", "badoverlap", "badarea", "bandssleep", "bandsflood", "oldarea"}) {
             plugins::choose(key, false);
             QDir(folder_ + "/" + key).removeRecursively();
         }
