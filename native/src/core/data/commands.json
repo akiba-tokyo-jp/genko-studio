@@ -1,4 +1,5 @@
 {"v": 1, "commands": [
+{"id":"act_print_one_copy","name":"1 部プリント","old_names":[],"menu":["ファイル"],"keys":{"photoshop":["Ctrl+Alt+Shift+P"],"genko":["Ctrl+Alt+Shift+P"]},"checkable":false,"tool":false},
 {"id":"act_actual_pixels","name":"100%","old_names":[],"menu":["表示"],"keys":{"photoshop":["Ctrl+1"],"genko":[]},"checkable":false,"tool":false},
 {"id":"act_depth_16","name":"16 bit/チャンネル","old_names":[],"menu":["ページ","色モード"],"keys":{"photoshop":[],"genko":[]},"checkable":true,"tool":false},
 {"id":"act_rotate_180","name":"180°","old_names":[],"menu":["ページ","画像の回転"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
@@ -211,6 +212,7 @@
 {"id":"act_frame","name":"コマ割り","old_names":[],"menu":["ツール"],"keys":{"photoshop":["K"],"genko":["F"]},"checkable":true,"tool":true},
 {"id":"act_frame_numbers","name":"コマ番号（読み順）を表示","old_names":[],"menu":["ページ","コマ"],"keys":{"photoshop":[],"genko":[]},"checkable":true,"tool":false},
 {"id":"act_gutters","name":"コマ間隔の設定…","old_names":[],"menu":["ページ","コマ"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
+{"id":"act_contact_sheet","name":"コンタクトシート II…","old_names":[],"menu":["ファイル","自動処理"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
 {"id":"act_content_aware_fill","name":"コンテンツに応じた塗りつぶし…","old_names":[],"menu":["編集"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
 {"id":"act_content_aware_scale","name":"コンテンツに応じて拡大・縮小…","old_names":[],"menu":["編集"],"keys":{"photoshop":["Ctrl+Alt+Shift+C"],"genko":["Ctrl+Alt+Shift+C"]},"checkable":false,"tool":false},
 {"id":"act_smart_export","name":"コンテンツを書き出し…","old_names":[],"menu":["レイヤー","スマートオブジェクト"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
@@ -823,6 +825,7 @@
 {"id":"act_fit_image","name":"画像を合わせる…","old_names":[],"menu":["ファイル","自動処理"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
 {"id":"act_layer_flatten","name":"画像を統合…","old_names":["画像をフラット化…"],"menu":["レイヤー"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
 {"id":"act_import","name":"画像を読み込む…","old_names":[],"menu":["ファイル"],"keys":{"photoshop":[],"genko":["Ctrl+Shift+I"]},"checkable":false,"tool":false},
+{"id":"act_image_assets","name":"画像アセット","old_names":[],"menu":["ファイル","生成"],"keys":{"photoshop":[],"genko":[]},"checkable":true,"tool":false},
 {"id":"act_image_processor","name":"画像プロセッサー…","old_names":[],"menu":["ファイル","スクリプト"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
 {"id":"act_apply_image","name":"画像操作…","old_names":[],"menu":["レイヤー","色調補正"],"keys":{"photoshop":[],"genko":[]},"checkable":false,"tool":false},
 {"id":"act_image_size","name":"画像解像度…","old_names":[],"menu":["ページ"],"keys":{"photoshop":["Ctrl+Alt+I"],"genko":[]},"checkable":false,"tool":false},
