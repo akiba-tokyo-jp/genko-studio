@@ -537,7 +537,7 @@ private slots:
                               QStringLiteral("PSD をレイヤーのまま読み込む…"), QStringLiteral("読み込み ▸"),  // (PC5 I-d・J-c: 読み込み ▸ 変数データセット…・注釈…)
                               QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|"),
                               QStringLiteral("プリント…"), QStringLiteral("|"), QStringLiteral("タイムラプスを記録する"), QStringLiteral("タイムラプスを書き出す…"),
-                              QStringLiteral("|"), QStringLiteral("自動処理 ▸"), QStringLiteral("スクリプト ▸"), QStringLiteral("オートアクション ▸"),
+                              QStringLiteral("|"), QStringLiteral("自動処理 ▸"), QStringLiteral("スクリプト ▸"), QStringLiteral("アクション ▸"),
                               QStringLiteral("|"), QStringLiteral("終了")}));  // (PC5 H-0: 環境設定 in 編集)
         // (PC5 I-0, SPEC.md AUTO-01: 自動処理 ▸ is a frame, shown once a group puts a command in it — PC5 I-e's)
         QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate")) != nullptr);
@@ -660,7 +660,7 @@ private slots:
         // カスタム…, 計測値を記録, 目盛りマーカーを配置…, ウィンドウ → 計測ログ — test_gui_measure)
         for (const char* name : {"act_video_from_file", "act_video_blank", "act_video_insert_blank", "act_video_duplicate", "act_video_delete",
                                  "act_video_replace", "act_video_interpret", "act_video_show_altered", "act_video_restore", "act_video_restore_all",
-                                 "act_video_reload", "act_video_rasterize", "act_panel_actions"}) {  // (PC5 J-a: レイヤーカンプ made real; J-c: 注釈)
+                                 "act_video_reload", "act_video_rasterize"}) {  // (PC5 J-a: レイヤーカンプ made real; J-c: 注釈; J-g: アクション)
             QAction* a = studio.act(name);
             QVERIFY2(a != nullptr, name);
             QVERIFY2(!a->statusTip().isEmpty(), name);
@@ -678,7 +678,7 @@ private slots:
         for (const auto& [attribute, count] : made) QVERIFY2(count == 1, qPrintable(attribute));
         const std::vector<QAction*> listed = genko::app::preferences::commands(w);
         for (const char* name : {"act_measure_record", "act_measure_scale_custom", "act_measure_data_points", "act_video_rasterize", "act_panel_notes",
-                                 "act_panel_layer_comps", "act_comps_to_files"}) {
+                                 "act_panel_layer_comps", "act_comps_to_files", "act_panel_actions"}) {
             QAction* own = studio.act(name);
             QVERIFY2(std::find(listed.begin(), listed.end(), own) != listed.end(), name);
         }
