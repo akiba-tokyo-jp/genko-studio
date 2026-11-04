@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <stop_token>
 #include <string>
@@ -152,6 +153,15 @@ std::optional<std::filesystem::path> host_program();
 // core::Error("plugin_8bit").
 void run_samples(std::string_view kind, plugin_bands::Samples& picture, const std::vector<float>* coverage, const core::Json& params,
                  const std::stop_token& stop = {});
+// The same over a picture read and written where it is kept (render/plugin_bands::Picture: an 8-bit picture, a precise
+// raster, a page's inks), band by band — never held whole in f32 (review P2-1).
+void run_picture(std::string_view kind, plugin_bands::Picture& picture, const core::Json& params, const std::stop_token& stop = {});
+// The pictures the 8-bit ways give the bands (written in place into `rgba`, RGBA: a copy of the caller's): its RGB and
+// alpha, or (a channel lent as a paint layer) its grey alone, written back grey and opaque; `cover` ("L", its size): the
+// selection's coverage, and a mask's coverage a row at a time.
+plugin_bands::Picture rgba_picture(Image& rgba, const Image* cover);
+plugin_bands::Picture grey_picture(Image& rgba, const Image* cover);
+std::function<void(int, int, int, float*)> mask_coverage(const Image& mask);
 // The 8-bit way of a plugin that works in bands, inside a coverage ("L", the picture's size; none: all of it): the
 // picture as RGB with its alpha (render/plugin_bands, 8 bits). run() is this without a coverage for such a plugin.
 Image run_8bit(std::string_view kind, const Image& image, const Image* coverage, const core::Json& params, const std::stop_token& stop = {});

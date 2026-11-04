@@ -37,6 +37,7 @@
 #include "core/poses.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "render/imaging.hpp"
 #include "render/page.hpp"
 #include "storage/fsutil.hpp"
 
@@ -1027,10 +1028,15 @@ std::chrono::seconds run_limit(std::size_t pixels) {
     return kRunTime * static_cast<std::int64_t>(std::max<std::size_t>(1, (pixels + kRunPixels - 1) / kRunPixels));
 }
 
-// A plugin that works in bands over the samples (in place): a module through genko-plugin-host, or a native plugin of
-// protocol 2 (its checked copy), each band one request.
-void run_in_bands(const std::string& key, Way way, const std::string& chosen_sha256, plugin_bands::Samples& picture,
-                  const std::vector<float>* coverage, const Json& params, const std::stop_token& stop) {
+// What a run in bands may borrow at most from the imaging budget (opened here when the caller has none; the caller's
+// when it has: render/plugin_bands, review P2-1).
+constexpr std::uint64_t kPluginBudget = std::uint64_t{2} << 30;
+
+// A plugin that works in bands over the picture (written back where it is kept): a module through genko-plugin-host, or a
+// native plugin of protocol 2 (its checked copy), each band one request.
+void run_in_bands(const std::string& key, Way way, const std::string& chosen_sha256, plugin_bands::Picture& picture, const Json& params,
+                  const std::stop_token& stop) {
+    const ImageAllocationBudget budget{kPluginBudget};
     const std::chrono::seconds limit = run_limit(std::size_t(picture.width) * std::size_t(picture.height));
     const auto refused = [&](const Reply& reply) {
         const Json error = core::py_get(reply.header, "error", "");
@@ -1063,7 +1069,7 @@ void run_in_bands(const std::string& key, Way way, const std::string& chosen_sha
         };
         shape.band_bytes = limit_of("band_bytes", shape.band_bytes);
         shape.memory_bytes = limit_of("max_memory_bytes", shape.memory_bytes);
-        plugin_bands::run(picture, shape, coverage, settings_for_manifest(hosted.manifest, params), band_through(*hosted.talk), stop);
+        plugin_bands::run(picture, shape, settings_for_manifest(hosted.manifest, params), band_through(*hosted.talk), stop);
         hosted.talk->close();
         return;
     }
@@ -1087,34 +1093,8 @@ void run_in_bands(const std::string& key, Way way, const std::string& chosen_sha
     plugin_bands::Shape shape;
     shape.overlap = launch.plugin.overlap;
     shape.whole_canvas = launch.plugin.whole_canvas;
-    plugin_bands::run(picture, shape, coverage, params.is_object() ? params : Json::object(), band_through(talk), stop);
+    plugin_bands::run(picture, shape, params.is_object() ? params : Json::object(), band_through(talk), stop);
     talk.close();
-}
-
-// An 8-bit RGBA picture as samples (RGB and its alpha, 0..1) and back (rounded).
-plugin_bands::Samples samples_of(const Image& rgba) {
-    plugin_bands::Samples out;
-    out.width = rgba.width();
-    out.height = rgba.height();
-    const std::string bytes = rgba.tobytes();
-    out.data.resize(bytes.size());
-    for (std::size_t i = 0; i < bytes.size(); ++i) out.data[i] = static_cast<float>(static_cast<unsigned char>(bytes[i]) / 255.0);
-    return out;
-}
-
-Image image_of(const plugin_bands::Samples& samples, Size size) {
-    std::string bytes(samples.data.size(), '\0');
-    for (std::size_t i = 0; i < bytes.size(); ++i)
-        bytes[i] = static_cast<char>(static_cast<unsigned char>(std::lround(std::clamp(double(samples.data[i]), 0.0, 1.0) * 255.0)));
-    return Image::frombytes("RGBA", size, bytes);
-}
-
-// A picture's coverage ("L") as one value a pixel.
-std::vector<float> coverage_of(const Image& mask) {
-    const std::string bytes = mask.convert("L").tobytes();
-    std::vector<float> out(bytes.size());
-    for (std::size_t i = 0; i < bytes.size(); ++i) out[i] = static_cast<float>(static_cast<unsigned char>(bytes[i]) / 255.0);
-    return out;
 }
 
 // The digest a chosen plugin of this way runs as (not chosen: refused).
@@ -1476,9 +1456,10 @@ Image run(std::string_view kind, const Image& image, const Json& params, const s
             const std::size_t count = static_cast<std::size_t>(rgba.width()) * static_cast<std::size_t>(rgba.height());
             const auto limit = kRunTime * static_cast<std::int64_t>(std::max<std::size_t>(1, (count + kRunPixels - 1) / kRunPixels));
             if (bands) {
-                plugin_bands::Samples samples = samples_of(rgba);
-                run_in_bands(key, way, code.sha256, samples, nullptr, params, stop);
-                picture = std::make_shared<const Image>(image_of(samples, rgba.size()));
+                Image made = rgba.copy();  // (the bands written into it, row by row: render/plugin_bands)
+                plugin_bands::Picture over = rgba_picture(made, nullptr);
+                run_in_bands(key, way, code.sha256, over, params, stop);
+                picture = std::make_shared<const Image>(std::move(made));
             } else {
                 Reply reply = native ? ask_native(key, prepare_native(key, code.sha256), head, pixels, limit, count * 4 + 65536, stop)
                                      : ask_runner(key, code, "run", head, pixels, limit, count * 4 + 65536, stop);
@@ -1541,8 +1522,13 @@ std::optional<std::filesystem::path> host_program() {
     return std::nullopt;
 }
 
-void run_samples(std::string_view kind, plugin_bands::Samples& picture, const std::vector<float>* coverage, const Json& params,
+void run_samples(std::string_view kind, plugin_bands::Samples& samples, const std::vector<float>* coverage, const Json& params,
                  const std::stop_token& stop) {
+    plugin_bands::Picture picture = plugin_bands::picture_of(samples, coverage);
+    run_picture(kind, picture, params, stop);
+}
+
+void run_picture(std::string_view kind, plugin_bands::Picture& picture, const Json& params, const std::stop_token& stop) {
     const std::string key(kind.starts_with(kPrefix) ? kind.substr(kPrefix.size()) : kind);
     const Way way = way_of(key);
     if (way != Way::Wasm && way != Way::NativeBands) {
@@ -1550,17 +1536,68 @@ void run_samples(std::string_view kind, plugin_bands::Samples& picture, const st
         throw core::Error("plugin_8bit", "plugin " + key + " works on 8-bit paint layers only (a WebAssembly plugin or a native one of protocol 2 works on any)");
     }
     const std::string sha = chosen_sha(key, way);
-    run_in_bands(key, way, sha, picture, coverage, params, stop);
+    run_in_bands(key, way, sha, picture, params, stop);
 }
 
 Image run_8bit(std::string_view kind, const Image& image, const Image* coverage, const Json& params, const std::stop_token& stop) {
     if (coverage == nullptr) return run(kind, image, params, stop);
-    const Image rgba = image.mode() == "RGBA" ? image : image.convert("RGBA");
-    plugin_bands::Samples samples = samples_of(rgba);
-    const std::vector<float> cover = coverage_of(*coverage);
-    if (cover.size() != std::size_t(rgba.width()) * std::size_t(rgba.height())) throw core::Error("value", "the selection is not the picture's size");
-    run_samples(kind, samples, &cover, params, stop);
-    return image_of(samples, rgba.size());
+    Image made = image.mode() == "RGBA" ? image.copy() : image.convert("RGBA");
+    const Image cover = coverage->mode() == "L" ? *coverage : coverage->convert("L");
+    if (cover.size() != made.size()) throw core::Error("value", "the selection is not the picture's size");
+    plugin_bands::Picture picture = rgba_picture(made, &cover);
+    run_picture(kind, picture, params, stop);
+    return made;
+}
+
+std::function<void(int, int, int, float*)> mask_coverage(const Image& mask) {
+    Imaging im = mask.raw();
+    return [im](int y, int x0, int x1, float* out) {
+        const auto* row = reinterpret_cast<const unsigned char*>(im->image[y]) + x0;
+        for (int x = 0; x < x1 - x0; ++x) out[x] = static_cast<float>(row[x] / 255.0);
+    };
+}
+
+plugin_bands::Picture rgba_picture(Image& rgba, const Image* cover) {
+    plugin_bands::Picture p;
+    p.width = rgba.width();
+    p.height = rgba.height();
+    Imaging im = rgba.raw();
+    p.read = [im](int y, int x0, int x1, float* out) {
+        const auto* row = reinterpret_cast<const unsigned char*>(im->image[y]) + std::size_t(x0) * 4;
+        for (std::size_t i = 0; i < std::size_t(x1 - x0) * 4; ++i) out[i] = static_cast<float>(row[i] / 255.0);
+    };
+    p.write = [im](int y, int x0, int x1, const float* in) {
+        auto* row = reinterpret_cast<unsigned char*>(im->image[y]) + std::size_t(x0) * 4;
+        for (std::size_t i = 0; i < std::size_t(x1 - x0) * 4; ++i)
+            row[i] = static_cast<unsigned char>(std::lround(std::clamp(double(in[i]), 0.0, 1.0) * 255.0));
+    };
+    if (cover != nullptr) p.coverage = mask_coverage(*cover);
+    return p;
+}
+
+plugin_bands::Picture grey_picture(Image& rgba, const Image* cover) {
+    plugin_bands::Picture p;
+    p.width = rgba.width();
+    p.height = rgba.height();
+    p.channels = 1;
+    p.alpha = false;
+    p.mode = plugin_bands::Mode::Gray;
+    Imaging im = rgba.raw();
+    p.read = [im](int y, int x0, int x1, float* out) {
+        const auto* row = reinterpret_cast<const unsigned char*>(im->image[y]);
+        for (int x = x0; x < x1; ++x) out[x - x0] = static_cast<float>(row[std::size_t(x) * 4] / 255.0);
+    };
+    p.write = [im](int y, int x0, int x1, const float* in) {
+        auto* row = reinterpret_cast<unsigned char*>(im->image[y]);
+        for (int x = x0; x < x1; ++x) {
+            const auto v = static_cast<unsigned char>(std::lround(std::clamp(double(in[x - x0]), 0.0, 1.0) * 255.0));
+            unsigned char* px = row + std::size_t(x) * 4;
+            px[0] = px[1] = px[2] = v;
+            px[3] = 255;
+        }
+    };
+    if (cover != nullptr) p.coverage = mask_coverage(*cover);
+    return p;
 }
 
 void set_wasm_limits_for_testing(const Json& limits) {

@@ -20,6 +20,7 @@
 #include <unordered_map>
 
 #include "core/base64.hpp"
+#include "core/color_raster.hpp"
 #include "core/error.hpp"
 #include "core/ink.hpp"
 #include "core/paths.hpp"
@@ -1784,6 +1785,65 @@ void set_budget_for_testing(std::size_t bytes) {
     ink_pictures().set_budget(budget);
     precise_filtered().set_budget(budget);
     inks_filtered().set_budget(budget);
+}
+
+std::pair<std::string, std::string> filtered_upto(const core::Document& doc, const core::Page& page, const core::Layer& layer, std::size_t upto,
+                                                  int dpi) {
+    // the smart object with its filters up to that one (it at normal, 100 %, shown), without the filter mask
+    core::Layer staged = layer;
+    Json& s = *staged.smart;
+    const Json filters = s.contains("filters") && s["filters"].is_array() ? s["filters"] : Json::array();
+    if (upto >= filters.size()) throw core::Error("value", "the smart object has no smart filter " + std::to_string(upto));
+    Json upto_it = Json::array();
+    for (std::size_t j = 0; j <= upto; ++j) upto_it.push_back(filters[j]);
+    upto_it[upto]["blend"] = "normal";
+    upto_it[upto]["opacity"] = 1.0;
+    upto_it[upto]["visible"] = true;
+    s["filters"] = std::move(upto_it);
+    s.erase("filter_mask");
+    s.erase("filters_on");
+    if (s.contains("psd") && s["psd"].is_object()) s["psd"].erase("shown");
+    // (the drawing's context for print, as render_page makes it)
+    std::vector<std::string> omitted;
+    Ctx ctx;
+    ctx.page = &page;
+    ctx.episode = &doc;
+    ctx.dpi = dpi;
+    ctx.size = Size{to_px(page.spec.width_mm.value(), dpi), to_px(page.spec.height_mm.value(), dpi)};
+    ctx.mode = "print";
+    ctx.finish = page.color ? false : page.spec.expression != "color";
+    ctx.omitted = &omitted;
+    const core::Layer bare = unfiltered(staged);
+    const Box whole = whole_page(ctx);
+    if (page.color) {
+        const core::PageColor& color = *page.color;
+        std::optional<InkPicture> base = picture_inks(ctx, bare, whole);
+        if (!base) {
+            const std::optional<Image> eight = picture_8bit(ctx, bare, whole);
+            base = ink_picture(eight ? *eight : Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0}), color);
+        }
+        const InkPicture made = smart_filters::on_inks(doc, page, staged, *base, dpi);
+        InkCanvas canvas(color, made.size);
+        canvas.blend(made, 1.0, false, "normal");
+        return {std::string(core::kInkRasterSuffix), core::encode_ink_raster(canvas.ink_pixels(color.depth, true))};
+    }
+    if (page.rgb && page.rgb->depth > 8) {
+        const RgbSpace space = RgbSpace::of(page);
+        std::optional<ColorPicture> base = picture_precise(ctx, bare, whole, space);
+        if (!base) {
+            const std::optional<Image> eight = picture_8bit(ctx, bare, whole);
+            base = color_picture(eight ? *eight : Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0}), space);
+        }
+        const ColorPicture made = smart_filters::on_precise(doc, page, staged, *base, space, dpi);
+        return {".colorrgba", core::encode_color_pixels(static_cast<std::uint32_t>(made.size.width), static_cast<std::uint32_t>(made.size.height),
+                                                        page.rgb->depth == 32 ? "f32" : "u16", [&](std::size_t i) {
+                                                            const auto& p = made.pixels[i];
+                                                            return std::array<double, 4>{space.encode(0, p[0]), space.encode(1, p[1]), space.encode(2, p[2]), p[3]};
+                                                        })};
+    }
+    std::optional<Image> base = picture_8bit(ctx, bare, whole);
+    if (!base) base = Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0});
+    return {".png", write_png(smart_filters::on_8bit(doc, page, staged, *base, dpi), 1)};
 }
 
 }  // namespace genko::render::smart

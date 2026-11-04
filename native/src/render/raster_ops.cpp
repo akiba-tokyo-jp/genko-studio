@@ -9,6 +9,7 @@
 #include "render/ink_filters.hpp"
 #include "render/ops_layer_styles.hpp"
 #include "render/plugins.hpp"
+#include "render/segment/segment.hpp"
 
 #include <QCryptographicHash>
 #include <QFile>
@@ -2825,7 +2826,9 @@ auto plugin_work(Work&& work) {
 }
 
 // --- PC5 J-f (plugin.run): a plugin that works in bands (a WebAssembly module, a native one of protocol 2) on the
-// layer's own samples — precise colour, a page's inks, a channel lent as a grey picture — inside the op's area
+// layer's own samples — precise colour, a page's inks, a channel lent as a grey picture — inside the op's area, read and
+// written band by band where they are kept (render/plugin_bands, review P2-1); stopped as the window's work is
+// (segment::StopScope)
 
 // The plugin of a filter_raster kind works in bands (installed, and a module or a native plugin of protocol 2).
 bool plugin_in_bands(const std::string& kind) {
@@ -2834,81 +2837,81 @@ bool plugin_in_bands(const std::string& kind) {
     return plugins::installed(key) && plugins::works_in_bands(key);
 }
 
-// The op's area over a picture of the page `width` × `height` pixels: one value 0..1 a pixel (as filters.within masks).
-std::vector<float> area_coverage(const Page& page, const Json& area, int width, int height) {
+// The window's stop for this thread's work (none outside it).
+std::stop_token plugin_stop() {
+    const std::stop_token* stop = segment::current_stop();
+    return stop != nullptr ? *stop : std::stop_token{};
+}
+
+// The op's area over a picture of the page `width` × `height` pixels ("L", as filters.within masks).
+Image area_mask(const Page& page, const Json& area, int width, int height) {
     const selection::AreaMask inside = selection::area_mask(area, raster::dpi_across(page, width));
     Image mask = Image::create("L", Size{width, height}, Ink(0));
     mask.paste(inside.mask, Point{static_cast<int>(inside.x0), static_cast<int>(inside.y0)});
-    const std::string bytes = mask.tobytes();
-    std::vector<float> out(bytes.size());
-    for (std::size_t i = 0; i < bytes.size(); ++i) out[i] = static_cast<float>(static_cast<unsigned char>(bytes[i]) / 255.0);
-    return out;
+    return mask;
 }
 
-// A precise layer's raster through the plugin: its RGBA samples (the page's encoded values, 16 or 32 bits).
+// A precise layer's raster through the plugin: its RGBA samples (the page's encoded values, 16 or 32 bits), in place.
 void plugin_on_precise_pixels(const Page& page, Layer& layer, const std::string& kind, const Json& params, const Json* area) {
     core::ColorRasterEdit edit(*layer.color_raster);
-    plugin_bands::Samples s;
-    s.width = static_cast<int>(edit.width());
-    s.height = static_cast<int>(edit.height());
-    s.depth = edit.floating() ? 32 : 16;
-    const std::size_t n = std::size_t(edit.width()) * edit.height();
-    s.data.resize(n * 4);
-    for (std::size_t i = 0; i < n; ++i) {
-        const std::array<double, 4> p = edit.pixel(i);
-        for (unsigned c = 0; c < 4; ++c) s.data[i * 4 + c] = static_cast<float>(p[c]);
-    }
-    const std::optional<std::vector<float>> cover = area ? std::optional(area_coverage(page, *area, s.width, s.height)) : std::nullopt;
-    plugins::run_samples(kind, s, cover ? &*cover : nullptr, params);
-    for (std::size_t i = 0; i < n; ++i) {
-        edit.set(i, {s.data[i * 4], s.data[i * 4 + 1], s.data[i * 4 + 2], std::clamp<double>(s.data[i * 4 + 3], 0.0, 1.0)});
-    }
+    plugin_bands::Picture p;
+    p.width = static_cast<int>(edit.width());
+    p.height = static_cast<int>(edit.height());
+    p.depth = edit.floating() ? 32 : 16;
+    const std::size_t w = edit.width();
+    p.read = [&edit, w](int y, int x0, int x1, float* out) {
+        for (int x = x0; x < x1; ++x) {
+            const std::array<double, 4> px = edit.pixel(std::size_t(y) * w + std::size_t(x));
+            for (unsigned c = 0; c < 4; ++c) out[std::size_t(x - x0) * 4 + c] = static_cast<float>(px[c]);
+        }
+    };
+    p.write = [&edit, w](int y, int x0, int x1, const float* in) {
+        for (int x = x0; x < x1; ++x) {
+            const float* v = in + std::size_t(x - x0) * 4;
+            edit.set(std::size_t(y) * w + std::size_t(x), {v[0], v[1], v[2], std::clamp<double>(v[3], 0.0, 1.0)});
+        }
+    };
+    const std::optional<Image> mask = area ? std::optional(area_mask(page, *area, p.width, p.height)) : std::nullopt;
+    if (mask) p.coverage = plugins::mask_coverage(*mask);
+    plugins::run_picture(kind, p, params, plugin_stop());
     layer.color_raster = std::make_shared<const std::string>(std::move(edit).take());
 }
 
 // Ink pixels through the plugin, in place: their normalised values (InkPixels::value), the alpha last.
 void plugin_on_inks(const Page& page, core::InkPixels& inks, const std::string& kind, const Json& params, const Json* area) {
-    plugin_bands::Samples s;
-    s.width = static_cast<int>(inks.width);
-    s.height = static_cast<int>(inks.height);
-    s.channels = inks.channels();
-    s.depth = inks.depth;
-    s.alpha = inks.has_alpha();
-    s.mode = plugin_bands::mode_of_inks(*page.color, inks.space);
-    const std::size_t n = inks.pixel_count();
-    s.data.resize(n * s.channels);
-    for (std::size_t i = 0; i < n; ++i) {
-        for (unsigned c = 0; c < s.channels; ++c) s.data[i * s.channels + c] = static_cast<float>(inks.value(i, c));
-    }
-    const std::optional<std::vector<float>> cover = area ? std::optional(area_coverage(page, *area, s.width, s.height)) : std::nullopt;
-    plugins::run_samples(kind, s, cover ? &*cover : nullptr, params);
-    for (std::size_t i = 0; i < n; ++i) {
-        for (unsigned c = 0; c < s.channels; ++c) inks.set(i, c, s.data[i * s.channels + c]);
-    }
+    plugin_bands::Picture p;
+    p.width = static_cast<int>(inks.width);
+    p.height = static_cast<int>(inks.height);
+    p.channels = inks.channels();
+    p.depth = inks.depth;
+    p.alpha = inks.has_alpha();
+    p.mode = plugin_bands::mode_of_inks(*page.color, inks.space);
+    const unsigned n = p.channels;
+    const std::size_t w = inks.width;
+    p.read = [&inks, n, w](int y, int x0, int x1, float* out) {
+        for (int x = x0; x < x1; ++x) {
+            for (unsigned c = 0; c < n; ++c) out[std::size_t(x - x0) * n + c] = static_cast<float>(inks.value(std::size_t(y) * w + std::size_t(x), c));
+        }
+    };
+    p.write = [&inks, n, w](int y, int x0, int x1, const float* in) {
+        for (int x = x0; x < x1; ++x) {
+            for (unsigned c = 0; c < n; ++c) inks.set(std::size_t(y) * w + std::size_t(x), c, in[std::size_t(x - x0) * n + c]);
+        }
+    };
+    const std::optional<Image> mask = area ? std::optional(area_mask(page, *area, p.width, p.height)) : std::nullopt;
+    if (mask) p.coverage = plugins::mask_coverage(*mask);
+    plugins::run_picture(kind, p, params, plugin_stop());
 }
 
 // A channel lent to the op as a grey picture (render/channels' ChannelLending, render/mask_lending's MaskLending: a
 // hidden paint layer "lent_…" of its own): a plugin gets its one grey channel.
 bool lent_grey(const Layer& layer) { return layer.id.starts_with("lent_") && !layer.visible && !layer.exportable; }
 
-Image plugin_on_grey(const Image& rgba, const std::string& kind, const Json& params, const std::vector<float>* cover) {
-    plugin_bands::Samples s;
-    s.width = rgba.width();
-    s.height = rgba.height();
-    s.channels = 1;
-    s.alpha = false;
-    s.mode = plugin_bands::Mode::Gray;
-    const std::string bytes = rgba.tobytes();
-    const std::size_t n = std::size_t(s.width) * std::size_t(s.height);
-    s.data.resize(n);
-    for (std::size_t i = 0; i < n; ++i) s.data[i] = static_cast<float>(static_cast<unsigned char>(bytes[i * 4]) / 255.0);
-    plugins::run_samples(kind, s, cover, params);
-    std::string out(n * 4, '\xff');
-    for (std::size_t i = 0; i < n; ++i) {
-        const char v = static_cast<char>(static_cast<unsigned char>(std::lround(std::clamp(double(s.data[i]), 0.0, 1.0) * 255.0)));
-        std::fill_n(out.begin() + std::ptrdiff_t(i * 4), 3, v);
-    }
-    return Image::frombytes("RGBA", rgba.size(), out);
+Image plugin_on_grey(const Image& rgba, const std::string& kind, const Json& params, const Image* mask) {
+    Image made = rgba.mode() == "RGBA" ? rgba.copy() : rgba.convert("RGBA");
+    plugin_bands::Picture p = plugins::grey_picture(made, mask);
+    plugins::run_picture(kind, p, params, plugin_stop());
+    return made;
 }
 
 void filter_raster_pixels(OpContext& c) {
@@ -3037,22 +3040,13 @@ void filter_raster_pixels(OpContext& c) {
         if (key != "op" && key != "page" && key != "layer" && key != "id" && key != "kind" && key != "area") params[key] = value;
     }
     if (plugin_in_bands(kind)) {  // (PC5 J-f: inside the area by its coverage, as the plugin's bands are laid; a channel: grey)
-        std::optional<Image> mask;
-        if (core::truthy_at(op, "area")) {
-            const selection::AreaMask inside = selection::area_mask(core::op_area(op), raster::dpi_across(page, image.width()));
-            mask = Image::create("L", image.size(), Ink(0));
-            mask->paste(inside.mask, Point{static_cast<int>(inside.x0), static_cast<int>(inside.y0)});
-        }
+        const std::optional<Image> mask =
+            core::truthy_at(op, "area") ? std::optional(area_mask(page, core::op_area(op), image.width(), image.height())) : std::nullopt;
         Image out;
         try {
             out = plugin_work([&] {
-                if (!lent_grey(layer)) return plugins::run_8bit(kind, image, mask ? &*mask : nullptr, params);
-                std::vector<float> cover;
-                if (mask) {
-                    const std::string bytes = mask->tobytes();
-                    for (const char b : bytes) cover.push_back(static_cast<float>(static_cast<unsigned char>(b) / 255.0));
-                }
-                return plugin_on_grey(image, kind, params, mask ? &cover : nullptr);
+                if (!lent_grey(layer)) return plugins::run_8bit(kind, image, mask ? &*mask : nullptr, params, plugin_stop());
+                return plugin_on_grey(image, kind, params, mask ? &*mask : nullptr);
             });
         } catch (const core::PyUncaught&) {
             throw;

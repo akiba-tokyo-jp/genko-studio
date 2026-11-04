@@ -78,6 +78,7 @@
 #include "render/placed.hpp"
 #include "render/timelapse.hpp"
 #include "render/ops_registry.hpp"
+#include "render/smart_filters.hpp"
 
 namespace genko::app {
 
@@ -604,6 +605,7 @@ void MainWindow::preview_ops(const std::optional<core::Json>& ops) {
     }
     try {
         const core::CommandBus bus(render::ops_registry());
+        const render::smart_filters::PreviewScope previewing;  // (PC5 J-f: a preview keeps no plugin filter's picture)
         // (channels@1: what is previewed is what is applied: the pixel ops on the channel targeted)
         auto result = bus.apply(*session_->snapshot(), with_contents_target(with_channel_target(*ops)), core::Actor(session_->actor()));
         show_preview(std::move(result.doc));
