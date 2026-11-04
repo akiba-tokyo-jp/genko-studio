@@ -2,14 +2,17 @@
 //  - through the command line: footage read into a book (render/footage: a GIF's frames, the book's assets), a video layer
 //    added with `genko apply` (the page made an animation at the footage's speed, the book naming video@1), `genko inspect
 //    --timeline` saying its footage and frames, `genko render --frame` drawing the footage's frame, a blank frame inserted
-//    and undone with `genko undo` (project.json byte for byte as before);
+//    and undone with `genko undo` (the pages as before — their content: the journal's state gives an anim's keys in their
+//    names' order, as it does any page's extra);
 //  - the ops on a book in memory: frames inserted, duplicated (an altered frame's cel copied) and deleted (its cel gone),
 //    the timeline made longer; a frame altered (its cel holding the footage's frame) shown or not (変更されたビデオを表示),
 //    restored, all restored; the footage interpreted at another speed (its frames laid again, the altered ones where they
 //    were) and replaced (frames past its end blank); rasterized at a frame (the video layer gone, a paint layer of what it
 //    showed in its place); ビデオフレームからレイヤー into layers and into an animation folder's cels;
-//  - refused: not a video layer, a frame outside, a locked video layer (locked, すべてをロック), another's page lock, footage
-//    the book does not hold, the book's footage past 4 GiB, more than 500 frames to layers; not an agent's op (MCP);
+//  - refused: not a video layer, a frame outside or not a whole number, a locked video layer (locked, すべてをロック), another's
+//    page lock, footage the book does not hold, the book's footage past 4 GiB, more than 500 frames to layers; not an
+//    agent's op (MCP); strict_gates before the name (the footage's pixels made printed layers, printed layers taken away);
+//    a hand-written timeline of 100 million frames never laid frame by frame; the footage interpreted keeping its edits;
 //  - written: video@1 only while a page has a video row, its footage frames among the book's assets, read back the same
 //    and written again byte for byte; a footage frame gone from the book read-only; a book without video rows (an
 //    animation of cels) drawn as before — frame_page is at_frame — and named as before;
@@ -18,6 +21,7 @@
 
 #include <QtTest>
 
+#include <QElapsedTimer>
 #include <QProcess>
 #include <QTemporaryDir>
 
@@ -385,6 +389,60 @@ private slots:
                                  "video_alter", "set_video_layer", "replace_footage", "rasterize_video", "footage_to_layers"}) {
             QVERIFY2(!service::agent_op(name), name);
         }
+    }
+
+    // (the coordinator's decision on the review's P2-5) strict_gates: what makes printed layers of the footage's pixels or
+    // takes printed layers away needs the page's name approved; a blank video layer and a blank frame do not.
+    void strictGates() {
+        core::Document doc = book();
+        const Json f = footage(doc);
+        doc.strict_gates = true;
+        const std::string first = refusal(doc, op("add_video_layer", {{"footage", f}, {"id", "v"}}));
+        QVERIFY2(first.find("needs name_ok") != std::string::npos, first.c_str());
+        QVERIFY(refusal(doc, op("footage_to_layers", {{"footage", f}})).find("needs name_ok") != std::string::npos);
+        core::Document blank = run(doc, op("add_video_layer", {{"id", "b"}}));  // (nothing printed made)
+        QVERIFY(core::video_row(blank.page(0), Json("b")) != nullptr);
+        blank = run(blank, op("video_insert_blank", {{"folder", "b"}, {"at", 1}}));
+        QVERIFY(refusal(blank, op("video_alter", {{"folder", "b"}, {"at", 1}})).find("needs name_ok") != std::string::npos);
+        // (the name approved: made; then taken back to a page whose name is not approved — every op that takes printed
+        // layers away refused)
+        core::Document approved = doc;
+        approved.edit_page(0).name_ok = true;
+        approved = run(approved, op("add_video_layer", {{"footage", f}, {"id", "v"}}));
+        approved = run(approved, op("video_alter", {{"folder", "v"}, {"at", 2}}));
+        core::Document unapproved = approved;
+        unapproved.edit_page(0).name_ok = false;
+        for (const char* name : {"video_restore", "video_delete", "video_duplicate", "rasterize_video"}) {
+            const std::string why = refusal(unapproved, op(name, {{"folder", "v"}, {"at", 2}}));
+            QVERIFY2(why.find("needs name_ok") != std::string::npos, (std::string(name) + ": " + why).c_str());
+        }
+        QVERIFY(refusal(unapproved, op("video_restore_all", {{"folder", "v"}})).find("needs name_ok") != std::string::npos);
+        QVERIFY(refusal(unapproved, op("video_insert_blank", {{"folder", "v"}, {"at", 2}})).empty());
+    }
+
+    // (the review's P2-2, P3-10, P3-11) A hand-written timeline of 100 million frames: a blank video layer of 3000 frames at
+    // most, made at once, a frame past 3000 refused; `at` a whole number only; the footage interpreted at another speed
+    // keeping the blank frame inserted and the frame deleted.
+    void bigTimelinesWholeFramesAndKeptEdits() {
+        core::Document doc = book();
+        (void)footage(doc);
+        doc.edit_page(0).extra["anim"] = Json{{"fps", 12}, {"frames", 100000000}, {"loop", true}, {"tracks", Json::array()}};
+        QElapsedTimer clock;
+        clock.start();
+        doc = run(doc, op("add_video_layer", {{"id", "b"}}));
+        QCOMPARE(core::video_row(doc.page(0), Json("b"))->at("frames").size(), std::size_t(3000));
+        QVERIFY(refusal(doc, op("video_insert_blank", {{"folder", "b"}, {"at", 3000}})).find("longer than 3000") != std::string::npos);
+        QVERIFY(clock.elapsed() < 20000);
+        core::Document v = video_book();
+        for (const Json& at : {Json("2"), Json(2.5), Json(true), Json(-1), Json(5)}) {
+            QVERIFY2(refusal(v, op("video_insert_blank", {{"folder", "v"}, {"at", at}})).find("at is a frame") != std::string::npos, at.dump().c_str());
+        }
+        // (frames 0 1 2 3 at 10 fps: a blank inserted at 2, frame 2 deleted — 0 _ 1 3 —, then at 5 fps: each run laid again)
+        v = run(v, op("video_insert_blank", {{"folder", "v"}, {"at", 2}}));
+        v = run(v, op("video_delete", {{"folder", "v"}, {"at", 4}}));
+        QCOMPARE(frames_of(v), Json::parse("[[0,null],[null,null],[1,null],[3,null]]"));
+        v = run(v, op("set_video_layer", {{"folder", "v"}, {"fps", 5}}));
+        QCOMPARE(frames_of(v), Json::parse("[[0,null],[0,null],[null,null],[1,null],[1,null],[3,null],[3,null]]"));
     }
 
     void writtenAndReadBack() {

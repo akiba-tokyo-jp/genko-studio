@@ -538,7 +538,7 @@ void TimelinePanel::play(bool on) {
     } catch (const std::exception&) {
     }
     play_button->setText(QStringLiteral("■ 止める"));
-    played_.clear();
+    forget_played();
     timer->start(static_cast<int>(std::max<std::int64_t>(15, core::py_round_int(1000.0 / core::anim::fps_of(*p)))));
 }
 
@@ -565,7 +565,11 @@ void TimelinePanel::tick() {
 }
 
 QImage TimelinePanel::frame_picture(const core::Page& p, std::int64_t at) {
-    if (const auto found = played_.find(at); found != played_.end()) return found->second;
+    if (const auto found = played_.find(at); found != played_.end()) {
+        played_order_.remove(at);
+        played_order_.push_back(at);
+        return found->second;
+    }
     const int dpi = std::min(100, window_->canvas()->wanted_dpi());
     QImage picture;
     try {
@@ -577,7 +581,23 @@ QImage TimelinePanel::frame_picture(const core::Page& p, std::int64_t at) {
     } catch (const std::exception&) {
     }
     played_[at] = picture;
+    played_order_.push_back(at);
+    played_bytes_ += static_cast<std::int64_t>(picture.sizeInBytes());
+    while (played_bytes_ > played_most && played_order_.size() > 1) {  // (the oldest let go: at most played_most)
+        const auto old = played_.find(played_order_.front());
+        if (old != played_.end()) {
+            played_bytes_ -= static_cast<std::int64_t>(old->second.sizeInBytes());
+            played_.erase(old);
+        }
+        played_order_.pop_front();
+    }
     return picture;
+}
+
+void TimelinePanel::forget_played() {
+    played_.clear();
+    played_order_.clear();
+    played_bytes_ = 0;
 }
 
 void TimelinePanel::export_animation() {

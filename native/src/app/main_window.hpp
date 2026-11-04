@@ -1937,7 +1937,19 @@ public:
 private:
     void build_video_actions();
     void build_video_menus(QMenu* file, QMenu* layers);
-    std::optional<core::Json> read_video_footage(const QString& path, std::optional<double> fps, std::int64_t every = 1);
+    // How footage is read (render::footage::ReadOptions'): its speed, every n-th, at most so many frames, its long frames
+    // shown as long as they last, the video row it replaces (its footage not counted against the room).
+    struct VideoRead {
+        std::optional<double> fps;
+        std::int64_t every = 1;
+        std::int64_t most_frames = 3000;
+        bool repeat = true;
+        const core::Json* except = nullptr;
+    };
+    // The footage read into the book's assets on a worker (a progress window and 中止); `fresh`: the pictures new to the
+    // book (drop_fresh_footage gives them back when the op is refused). Said and none when it cannot be.
+    std::optional<core::Json> read_video_footage(const QString& path, const VideoRead& how, std::vector<std::string>* fresh);
+    void drop_fresh_footage(const std::vector<std::string>& fresh);
     // The frame alter_video_frame altered just now (its op, its cel, the book's revision then): the next apply_ops takes it with
     // its ops as one step (one Undo takes back the stroke and the cel).
     struct VideoAlter {

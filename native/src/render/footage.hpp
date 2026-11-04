@@ -48,6 +48,15 @@ struct ReadOptions {
     std::optional<std::array<std::int64_t, 2>> range;     // the file's frames read, [first, last] from 1 (none: all)
     std::uint64_t most_bytes = 4ull << 30;                // what the footage may take decoded (the book's room for it)
     codecs::Limits limits{};                              // each picture's (a test's smaller ones)
+    // (the review's P2-1, P3-3) at most this many frames, a moving picture's long frames shown as many times as they last
+    // counted (ビデオフレームからレイヤー…: 500 pictures, `repeat` false: each picture once) — refused before any is read
+    std::int64_t most_frames = 3000;
+    bool repeat = true;
+    // (the review's P2-6, P3-4) asked between frames: true stops the reading (render::Cancelled); told how far it is
+    // (0..1); each picture the store kept handed back when the reading fails or is stopped (the store's to take away)
+    std::function<bool()> stopped;
+    std::function<void(double)> progress;
+    std::function<void(const std::string& ref)> drop;
 };
 
 struct Footage {

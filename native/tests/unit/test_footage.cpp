@@ -12,6 +12,7 @@
 
 #include <QtTest>
 
+#include <QElapsedTimer>
 #include <QTemporaryDir>
 
 #include <cmath>
@@ -300,6 +301,103 @@ private slots:
         ft::ReadOptions speed;
         speed.fps = 200;
         QCOMPARE(code_of([&] { (void)ft::read_footage(moving("gif"), speed, held.store()); }), std::string("value"));
+    }
+
+    // (the review's P2-1) A moving picture whose long frame would be shown more than 3000 times — an APNG of a frame of
+    // 1/1000 s and one of 65535 s, every n-th of it, a GIF of 2/100 s and 655.35 s — refused before any frame is read or
+    // kept (its lengths counted by the counting read), in 64 bits however large every is.
+    void longFramesCountedBeforeReading() {
+        std::string apng = genko::storage::read_file(moving("png"));
+        std::vector<std::size_t> controls;
+        for (std::size_t at = apng.find("fcTL"); at != std::string::npos; at = apng.find("fcTL", at + 4)) controls.push_back(at + 4);
+        QCOMPARE(controls.size(), std::size_t(3));
+        const auto delay = [&](std::size_t data, unsigned num, unsigned den) {
+            apng[data + 20] = static_cast<char>(num >> 8);
+            apng[data + 21] = static_cast<char>(num & 0xFF);
+            apng[data + 22] = static_cast<char>(den >> 8);
+            apng[data + 23] = static_cast<char>(den & 0xFF);
+        };
+        delay(controls[0], 1, 1000);
+        delay(controls[1], 1, 1000);
+        delay(controls[2], 65535, 1);
+        put(at("long/long.png"), apng);
+        Held held;
+        QElapsedTimer clock;
+        clock.start();
+        QCOMPARE(code_of([&] { (void)ft::read_footage(at("long/long.png"), {}, held.store()); }), std::string("value"));
+        ft::ReadOptions every;
+        every.every = 2;  // (frames 1 and 3: 2 ms and 131070 s)
+        QCOMPARE(code_of([&] { (void)ft::read_footage(at("long/long.png"), every, held.store()); }), std::string("value"));
+        every.every = 3000;  // (its long frame alone, as long as 3000 of it: refused, nothing read)
+        every.range = std::array<std::int64_t, 2>{3, 3};
+        QCOMPARE(code_of([&] { (void)ft::read_footage(at("long/long.png"), every, held.store()); }), std::string("value"));
+        every.range = std::array<std::int64_t, 2>{1, 2};
+        every.every = 1;
+        QCOMPARE(ft::read_footage(at("long/long.png"), every, held.store()).json["frames"].size(), std::size_t(2));  // (two short frames)
+        QVERIFY(clock.elapsed() < 20000);
+        QCOMPARE(held.stored, 2);
+        put(at("long/long.gif"), gif(1, 1, {GifFrame{0, 0, 1, 1, {1}, 0, -1, 2}, GifFrame{0, 0, 1, 1, {2}, 0, -1, 65535}}));
+        Held none;
+        QCOMPARE(code_of([&] { (void)ft::read_footage(at("long/long.gif"), {}, none.store()); }), std::string("value"));
+        QCOMPARE(none.stored, 0);
+        // (each picture once: ビデオフレームからレイヤー…'s reading — at most 2 here)
+        ft::ReadOptions once;
+        once.repeat = false;
+        once.most_frames = 2;
+        QCOMPARE(ft::read_footage(at("long/long.gif"), once, none.store()).json["frames"].size(), std::size_t(2));
+        once.most_frames = 1;
+        QCOMPARE(code_of([&] { (void)ft::read_footage(at("long/long.gif"), once, none.store()); }), std::string("value"));
+    }
+
+    // (the review's P3-3, P3-4, P2-6) At most so many frames refused before any is read; what a failed or stopped reading
+    // kept handed back; the reading told how far it is and stopped when asked.
+    void readingGivesBackAndStops() {
+        put(at("back/b1.png"), png(plain(6, 4, 9, 9, 9)));
+        put(at("back/b2.png"), png(plain(6, 4, 8, 8, 8)));
+        put(at("back/b3.png"), png(plain(7, 4, 8, 8, 8)));
+        Held held;
+        std::vector<std::string> dropped;
+        ft::ReadOptions options;
+        options.drop = [&](const std::string& ref) { dropped.push_back(ref); };
+        QCOMPARE(code_of([&] { (void)ft::read_footage(at("back/b1.png"), options, held.store()); }), std::string("value"));  // (b3's size)
+        QCOMPARE(held.stored, 2);
+        QCOMPARE(dropped.size(), std::size_t(2));
+        options.most_frames = 2;
+        dropped.clear();
+        QCOMPARE(code_of([&] { (void)ft::read_footage(at("back/b1.png"), options, held.store()); }), std::string("value"));
+        QCOMPARE(held.stored, 2);  // (refused before any was read)
+        QVERIFY(dropped.empty());
+        options.most_frames = 3000;
+        options.range = std::array<std::int64_t, 2>{1, 2};
+        std::vector<double> told;
+        options.progress = [&](double done) { told.push_back(done); };
+        QCOMPARE(ft::read_footage(at("back/b1.png"), options, held.store()).json["frames"].size(), std::size_t(2));
+        QCOMPARE(told, (std::vector<double>{0.5, 1.0}));
+        options.stopped = [&] { return !told.empty() && told.size() >= 3; };
+        dropped.clear();
+        bool cancelled = false;
+        try {
+            (void)ft::read_footage(at("back/b1.png"), options, held.store());
+        } catch (const genko::render::Cancelled&) {
+            cancelled = true;
+        }
+        QVERIFY(cancelled);
+        QCOMPARE(dropped.size(), std::size_t(1));
+    }
+
+    // (the review's P2-4) The room a replacement reads into: the book's footage less the row it replaces.
+    void roomLeftForAReplacement() {
+        genko::core::Document doc = genko::core::new_episode("ビデオ", genko::core::Num(1), 1,
+                                                             genko::core::PageSpec::custom(96, 72, 20, 20, 1, 2, 2, 2, 2, 200, "color"));
+        doc.edit_page(0).frames.clear();
+        put(at("room/r1.png"), png(plain(40, 30, 1, 2, 3)));
+        const Json footage = ft::read_footage(at("room/r1.png"), {}, ft::memory_store(doc)).json;
+        const genko::core::CommandBus bus(genko::render::ops_registry());
+        doc = bus.apply(doc, Json::array({Json{{"op", "add_video_layer"}, {"page", 1}, {"footage", footage}, {"id", "v"}}}), genko::core::Actor("human:test"), false).doc;
+        const Json* row = genko::core::video_row(doc.page(0), Json("v"));
+        QCOMPARE(genko::core::book_footage_bytes(doc), std::uint64_t(40 * 30 * 4));
+        QCOMPARE(genko::core::footage_room(doc), genko::core::kFootageMaxBytes - 40 * 30 * 4);
+        QCOMPARE(genko::core::footage_room(doc, row), genko::core::kFootageMaxBytes);
     }
 
     void brokenNeverReadPastTheirBounds() {

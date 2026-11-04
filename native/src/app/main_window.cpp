@@ -15,6 +15,8 @@
 #include <QDir>
 #include <QDockWidget>
 #include <QElapsedTimer>
+
+#include <set>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QGuiApplication>
@@ -737,8 +739,22 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
     // alter undone and applied again before the ops, its cel the same id)
     Json batch = ops;
     std::vector<std::string> given = ids;
-    if (video_alter_ && video_alter_->revision == book().revision && ops.is_array() && ops.dump().find(video_alter_->cel) != std::string::npos &&
-        session_->can_undo()) {  // (only ops on its cel)
+    // (only what draws on its cel — a line, a fill, a filter… — the review's P3-5 (b): renaming it is a step of its own)
+    const auto draws_on_cel = [&ops](const std::string& cel) {
+        static const std::set<std::string, std::less<>> kDrawing{
+            "add_stroke", "put_raster", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area", "fill_enclosed",
+            "gradient_fill", "transform_area", "delete_area", "paste", "smudge", "liquify", "add_shape", "fill_gaps", "vector_edit", "background_eraser",
+            "blur_brush", "burn", "clone_stamp", "color_replacement", "content_aware_fill", "dodge", "healing_brush", "history_brush", "mixer_brush",
+            "sharpen_brush", "smudge_brush", "sponge", "spot_healing"};
+        if (!ops.is_array() || ops.empty()) return false;
+        for (const Json& op : ops) {
+            const auto name = op.is_object() ? op.find("op") : op.end();
+            if (name == op.end() || !name->is_string() || !kDrawing.contains(name->get_ref<const std::string&>())) return false;
+        }
+        return ops.dump().find(cel) != std::string::npos;
+    };
+    bool rejoined = false;
+    if (video_alter_ && video_alter_->revision == book().revision && draws_on_cel(video_alter_->cel) && session_->can_undo()) {
         const VideoAlter alter = *video_alter_;
         video_alter_.reset();
         try {
@@ -746,6 +762,7 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
             batch = Json::array({alter.op});
             for (const Json& op : ops) batch.push_back(op);
             given.insert(given.begin(), alter.cel);
+            rejoined = true;
         } catch (const std::exception&) {  // (not undone: the ops on their own)
             batch = ops;
             given = ids;
@@ -760,10 +777,15 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
             if (last_results_.is_array() && !last_results_.empty()) last_results_.erase(last_results_.begin());
             set_target_layer(given.front());
         }
-    } catch (const core::Error& error) {
-        flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
-        return false;
     } catch (const std::exception& error) {
+        // (PC5 J-e2, the review's P3-5 (a): the alter taken back for them, the ops refused — the alter put back as it was)
+        if (rejoined) {
+            try {
+                session_->redo();
+                set_target_layer(given.front());
+            } catch (const std::exception&) {
+            }
+        }
         flash(wording::error(QString::fromUtf8(error.what())), 6000, true);  // (the window and the book stay as they were)
         return false;
     }

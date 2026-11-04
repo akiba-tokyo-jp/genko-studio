@@ -82,9 +82,10 @@ void lengthen(Json& anim, std::int64_t count) {
     if (count > now) anim["frames"] = count;
 }
 
+// The timeline's frames, at most 3000 (an anim before them may say more: the review's P2-2 — never laid frame by frame).
 std::int64_t frames_of(const Json& anim) {
     try {
-        return std::max<std::int64_t>(1, core::to_int(core::py_or(anim.contains("frames") ? anim.at("frames") : Json(), 1)));
+        return std::clamp<std::int64_t>(core::to_int(core::py_or(anim.contains("frames") ? anim.at("frames") : Json(), 1)), 1, core::anim::kMaxFrames);
     } catch (const std::exception&) {
         throw OpError("the page's animation has frames that cannot be read");
     }
@@ -134,12 +135,10 @@ std::int64_t frame_at(const Json& op, std::int64_t count, std::string_view key =
     const Json* v = core::get(op, key);
     const std::string wrong = std::string(key) + " is a frame of the timeline, 1 to " + std::to_string(count);
     if (v == nullptr || v->is_null()) throw OpError(wrong);
-    std::int64_t frame = 0;
-    try {
-        frame = core::to_int_held(*v);
-    } catch (const std::exception&) {
-        throw OpError(wrong);
-    }
+    // (a whole number only: the review's P3-10)
+    if (!v->is_number_integer()) throw OpError(wrong);
+    const std::int64_t frame = v->is_number_unsigned() ? (v->get<std::uint64_t>() > static_cast<std::uint64_t>(count) ? count + 1 : static_cast<std::int64_t>(v->get<std::uint64_t>()))
+                                                       : v->get<std::int64_t>();
     if (frame < 1 || frame > count) throw OpError(wrong);
     return frame;
 }
@@ -254,11 +253,43 @@ void lay(Json& frames, const Json& footage, double timeline_fps, std::int64_t st
     }
 }
 
-// The first frame (1..) holding a footage frame (none: 1).
-std::int64_t laid_from(const Json& frames) {
-    for (std::size_t k = 0; k < frames.size(); ++k)
-        if (!frames[k][0].is_null()) return static_cast<std::int64_t>(k) + 1;
-    return 1;
+// フッテージを解釈's new speed (the review's P3-11): the row's footage laid again at it where it runs as it was laid — each run
+// of footage frames one after another (as the old speed laid them) re-laid from its first to its last at the new speed —,
+// what was inserted (a blank frame) and the gaps a deletion left kept between the runs; the altered cels where they were.
+void relay(Json& frames, double old_fps, double new_fps, double timeline_fps) {
+    const auto step = std::max<std::int64_t>(1, static_cast<std::int64_t>(std::ceil(old_fps / timeline_fps - 1e-9)));
+    std::vector<Json> column;  // (the new footage numbers)
+    std::size_t k = 0;
+    while (k < frames.size()) {
+        const Json& at = frames[k][0];
+        if (!at.is_number_integer()) {
+            column.emplace_back();
+            ++k;
+            continue;
+        }
+        const std::int64_t first = at.get<std::int64_t>();
+        std::int64_t last = first;
+        std::size_t j = k + 1;
+        while (j < frames.size() && frames[j][0].is_number_integer() && frames[j][0].get<std::int64_t>() >= last &&
+               frames[j][0].get<std::int64_t>() <= last + step) {
+            last = frames[j][0].get<std::int64_t>();
+            ++j;
+        }
+        for (const std::int64_t n : core::laid_footage(last - first + 1, new_fps, timeline_fps)) {
+            column.emplace_back(first + n);
+            if (static_cast<std::int64_t>(column.size()) > core::anim::kMaxFrames) break;
+        }
+        k = j;
+    }
+    std::size_t length = column.size();
+    for (std::size_t i = 0; i < frames.size(); ++i)
+        if (!frames[i][1].is_null()) length = std::max(length, i + 1);
+    if (static_cast<std::int64_t>(length) > core::anim::kMaxFrames) throw OpError("the video layer would be longer than 3000 frames");
+    Json out = Json::array();
+    for (std::size_t i = 0; i < length; ++i) {
+        out.push_back(Json::array({i < column.size() ? column[i] : Json(), i < frames.size() ? frames[i][1] : Json()}));
+    }
+    frames = std::move(out);
 }
 
 // A paint layer of the footage frame shown at that frame of the row (a cel's copy, the footage frame, or empty).
@@ -521,9 +552,10 @@ void set_video_layer(OpContext& c) {
             throw OpError("fps is 0.5 to 120");
         }
         if (!(fps >= core::kTimelineFpsMin && fps <= core::kTimelineFpsMax)) throw OpError("fps is 0.5 to 120");
+        const double before = video["footage"]["fps"].get<double>();
         video["footage"]["fps"] = fps;
         Json& frames = video["frames"];
-        lay(frames, video["footage"], fps_of(anim_of(page, false)), laid_from(frames));
+        relay(frames, before, fps, fps_of(anim_of(page, false)));
         lengthen(anim_of(page, false), static_cast<std::int64_t>(frames.size()));
     }
     if (core::has(c.op, "placement_mm")) video["placement_mm"] = core::production::to_json(placement_given(c.op, page));

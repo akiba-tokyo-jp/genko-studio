@@ -321,10 +321,11 @@ std::uint64_t footage_bytes(const Json& footage) {
     return picture_bytes(footage) * unique.size();
 }
 
-std::uint64_t book_footage_bytes(const Document& doc) {
+std::uint64_t book_footage_bytes(const Document& doc, const Json* except) {
     std::set<std::string> seen;
     std::uint64_t total = 0;
     each_video_row(doc, [&](const Json& video) {
+        if (&video == except) return;
         const Json& footage = video.at("footage");
         if (!footage.is_object()) return;
         const std::uint64_t each = picture_bytes(footage);
@@ -333,6 +334,11 @@ std::uint64_t book_footage_bytes(const Document& doc) {
         }
     });
     return total;
+}
+
+std::uint64_t footage_room(const Document& doc, const Json* except) {
+    const std::uint64_t held = book_footage_bytes(doc, except);
+    return held >= kFootageMaxBytes ? 0 : kFootageMaxBytes - held;
 }
 
 std::vector<std::string> footage_refs(const Document& doc) {

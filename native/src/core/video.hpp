@@ -100,7 +100,10 @@ std::optional<Rect> footage_placement(const Json& video);
 // The bytes the footage takes decoded (each picture once): w × h × 4 × (8 bits: 1, 16 bits: 2).
 std::uint64_t footage_bytes(const Json& footage);
 // The bytes all the book's footage takes decoded (each picture once, across the rows): kFootageMaxBytes at most.
-std::uint64_t book_footage_bytes(const Document& doc);
+// `except`: one video row (the book's) left out — the footage a replacement takes the place of (the review's P2-4).
+std::uint64_t book_footage_bytes(const Document& doc, const Json* except = nullptr);
+// What more the book's footage may take decoded (kFootageMaxBytes less what it holds, `except` left out).
+std::uint64_t footage_room(const Document& doc, const Json* except = nullptr);
 // The footage frames' asset refs the book's video rows name (each once; the pages and the smart objects' contents pages).
 std::vector<std::string> footage_refs(const Document& doc);
 // The footage's frames laid on the timeline from `start` (1..): the timeline's frame start + k shows the footage frame

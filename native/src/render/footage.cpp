@@ -29,6 +29,7 @@
 #include "core/smart.hpp"
 #include "core/video.hpp"
 #include "render/codecs/codecs.hpp"
+#include "render/page.hpp"
 #include "render/ops_smart_parts.hpp"
 #include "render/smart_decode.hpp"
 #include "storage/asset_store.hpp"
@@ -109,7 +110,11 @@ struct Moving {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
     std::int64_t frames = 0;
+    std::vector<int> ms;  // (each frame's length, the counting read's too: the review's P2-1)
 };
+
+// A frame's length as the players take it (GIF's 0 and 1/100 s: 1/10 s).
+int gif_ms(int delay) { return delay <= 1 ? 100 : delay * 10; }
 // Each frame of the canvas (RGBA, 8 bits, straight) and how long it shows (ms).
 using EachFrame = std::function<void(const std::string& rgba, int ms)>;
 
@@ -263,6 +268,7 @@ std::optional<Moving> gif_frames(std::string_view b, const codecs::Limits& limit
         std::string data;
         blocks(each != nullptr ? &data : nullptr);
         if (++m.frames > core::anim::kMaxFrames * 16) throw core::Error("value", "the moving picture has too many frames");
+        m.ms.push_back(gif_ms(delay));
         if (each != nullptr) {
             if (fw == 0 || fh == 0) broken("the GIF's frame has no size");
             if (static_cast<std::uint64_t>(fw) * fh > static_cast<std::uint64_t>(limits.max_pixels)) {
@@ -294,7 +300,7 @@ std::optional<Moving> gif_frames(std::string_view b, const codecs::Limits& limit
                 }
                 px[3] = static_cast<char>(0xFF);
             }
-            (*each)(canvas, delay <= 1 ? 100 : delay * 10);
+            (*each)(canvas, gif_ms(delay));
             if (disposal == 2) {
                 for (std::size_t y = fy; y < std::min(h, fy + fh); ++y) {
                     for (std::size_t x = fx; x < std::min(w, fx + fw); ++x) std::fill_n(canvas.data() + (y * w + x) * 4, 4, '\0');
@@ -383,6 +389,7 @@ std::optional<Moving> apng_frames(std::string_view b, const codecs::Limits& limi
     m.height = be32(ihdr, 4);
     limits.check(m.width, m.height, Layout::Rgba, Sample::U8);
     m.frames = static_cast<std::int64_t>(frames.size());
+    for (const Frame& f : frames) m.ms.push_back(f.ms <= 0 ? 100 : f.ms);
     if (each == nullptr) return m;
     const std::size_t w = m.width, h = m.height;
     std::string canvas(w * h * 4, '\0'), saved;
@@ -442,6 +449,33 @@ struct WebPDecoder {
 std::optional<Moving> webp_frames(std::string_view b, const codecs::Limits& limits, const EachFrame* each) {
     if (b.size() < 16 || b.substr(0, 4) != "RIFF" || b.substr(8, 4) != "WEBP") return std::nullopt;
     WebPData data{reinterpret_cast<const uint8_t*>(b.data()), b.size()};
+    // (its canvas's size from its header first — the decoder takes two canvases as it is made: the review's P3-2 —, and
+    // each frame's length from the demuxer, before any frame is decoded)
+    Moving m;
+    {
+        WebPDemuxer* demux = WebPDemux(&data);
+        if (demux == nullptr) broken("the WebP cannot be read");
+        m.width = WebPDemuxGetI(demux, WEBP_FF_CANVAS_WIDTH);
+        m.height = WebPDemuxGetI(demux, WEBP_FF_CANVAS_HEIGHT);
+        m.frames = WebPDemuxGetI(demux, WEBP_FF_FRAME_COUNT);
+        try {
+            limits.check(m.width, m.height, Layout::Rgba, Sample::U8);
+        } catch (...) {
+            WebPDemuxDelete(demux);
+            throw;
+        }
+        WebPIterator it;
+        if (m.frames > 1 && m.frames <= core::anim::kMaxFrames * 16 && WebPDemuxGetFrame(demux, 1, &it)) {
+            do m.ms.push_back(it.duration <= 0 ? 100 : it.duration);
+            while (WebPDemuxNextFrame(&it));
+            WebPDemuxReleaseIterator(&it);
+        }
+        WebPDemuxDelete(demux);
+    }
+    if (m.frames <= 1) return std::nullopt;
+    if (m.frames > core::anim::kMaxFrames * 16) throw core::Error("value", "the moving picture has too many frames");
+    if (static_cast<std::int64_t>(m.ms.size()) != m.frames) broken("the WebP's frames cannot be read");
+    if (each == nullptr) return m;
     WebPAnimDecoderOptions options;
     if (!WebPAnimDecoderOptionsInit(&options)) broken("the WebP cannot be read");
     options.color_mode = MODE_RGBA;
@@ -450,14 +484,7 @@ std::optional<Moving> webp_frames(std::string_view b, const codecs::Limits& limi
     anim.decoder = WebPAnimDecoderNew(&data, &options);
     if (anim.decoder == nullptr) broken("the WebP cannot be read");
     WebPAnimInfo info{};
-    if (!WebPAnimDecoderGetInfo(anim.decoder, &info)) broken("the WebP cannot be read");
-    if (info.frame_count <= 1) return std::nullopt;
-    Moving m;
-    m.width = info.canvas_width;
-    m.height = info.canvas_height;
-    limits.check(m.width, m.height, Layout::Rgba, Sample::U8);
-    m.frames = info.frame_count;
-    if (each == nullptr) return m;
+    if (!WebPAnimDecoderGetInfo(anim.decoder, &info) || info.canvas_width != m.width || info.canvas_height != m.height) broken("the WebP cannot be read");
     int before = 0;
     while (WebPAnimDecoderHasMoreFrames(anim.decoder)) {
         uint8_t* frame = nullptr;
@@ -490,8 +517,7 @@ std::string png_of(const CodecImage& rgba) {
 
 // A picture read for a sequence: RGBA of 8 bits, or of 16 where it holds more (its colours as numbers; linear light given
 // sRGB's curve).
-CodecImage normal_picture(std::string_view bytes, const codecs::Limits& limits, std::vector<std::string>& notes, bool deep) {
-    CodecImage picture = codecs::decode(bytes, limits);
+CodecImage normal_picture(CodecImage picture, std::string_view bytes, std::vector<std::string>& notes, bool deep) {
     if (const auto format = codecs::detect(bytes); format && codecs::linear_light(*format)) picture = codecs::srgb_encoded(picture);
     if (picture.icc && std::find(notes.begin(), notes.end(), "素材の色のプロファイルは使わず、数値のまま sRGB として扱います") == notes.end()) {
         notes.emplace_back("素材の色のプロファイルは使わず、数値のまま sRGB として扱います");
@@ -575,7 +601,45 @@ std::vector<fs::path> sequence_files(const fs::path& path, bool sequence) {
     return out;
 }
 
-Footage read_footage(const fs::path& path, const ReadOptions& options, const Store& store) {
+namespace {
+
+// The reading's own bookkeeping: each frame's picture handed to the store remembered, given back (options.drop) when the
+// reading fails or is stopped; stopped and told how far it is between frames.
+struct Reading {
+    const ReadOptions& options;
+    const Store& store;
+    std::vector<std::string> kept;
+    std::int64_t done = 0, of = 1;
+
+    std::string keep(const CodecImage& picture) {
+        std::string ref = store(png_of(picture));
+        kept.push_back(ref);
+        return ref;
+    }
+    void step() {
+        ++done;
+        if (options.progress) options.progress(static_cast<double>(done) / static_cast<double>(std::max<std::int64_t>(1, of)));
+        if (options.stopped && options.stopped()) throw render::Cancelled();
+    }
+    void give_back() {
+        if (!options.drop) return;
+        std::set<std::string> seen;
+        for (const std::string& ref : kept) {
+            if (seen.insert(ref).second) options.drop(ref);
+        }
+    }
+};
+
+// A picture's size and depth by its header (none: unknown — read whole), as check_room takes them.
+std::optional<std::array<std::uint64_t, 3>> header_of(std::string_view bytes) {
+    const auto size = codecs::header_size(bytes);
+    if (!size) return std::nullopt;
+    // (a PNG's bit depth is in its header; any other picture taken at 8 bits until it is read)
+    const bool deep_png = bytes.size() > 24 && bytes.substr(1, 3) == "PNG" && static_cast<unsigned char>(bytes[24]) > 8;
+    return std::array<std::uint64_t, 3>{size->first, size->second, deep_png ? 16u : 8u};
+}
+
+Footage read_whole_footage(const fs::path& path, const ReadOptions& options, Reading& reading) {
     if (options.fps && !(*options.fps >= core::kTimelineFpsMin && *options.fps <= core::kTimelineFpsMax)) {
         throw core::Error("value", "fps is 0.5 to 120");
     }
@@ -595,53 +659,74 @@ Footage read_footage(const fs::path& path, const ReadOptions& options, const Sto
         const std::string name = core::path_to_utf8(files.front().filename());
         if (const auto m = moving(bytes, options.limits, nullptr)) {
             const std::vector<std::int64_t> picked = chosen(m->frames, options);
+            if (static_cast<std::int64_t>(m->ms.size()) != m->frames) broken("the moving picture's frames cannot be read");
+            // (the frames' lengths counted before any is decoded — every n-th shows for n of them, in 64 bits —, the speed
+            // its shortest's, a longer one shown as many times as it lasts: past 3000 refused before anything is read —
+            // the review's P2-1)
+            std::vector<std::int64_t> lasts;
+            for (const std::int64_t f : picked) lasts.push_back(static_cast<std::int64_t>(m->ms[static_cast<std::size_t>(f - 1)]) * options.every);
+            const std::int64_t shortest = *std::min_element(lasts.begin(), lasts.end());
+            double fps = options.fps.value_or(std::clamp(1000.0 / static_cast<double>(std::max<std::int64_t>(1, shortest)), core::kTimelineFpsMin,
+                                                         core::kTimelineFpsMax));
+            fps = std::round(fps * 1000) / 1000;  // (3 places, as the timeline's field shows it)
+            const double each_ms = 1000.0 / fps;
+            std::vector<std::int64_t> times;
+            std::int64_t total = 0;
+            for (const std::int64_t ms : lasts) {
+                const double many = std::round(static_cast<double>(ms) / each_ms);
+                const std::int64_t n = options.fps || !options.repeat ? 1 : std::max<std::int64_t>(1, many > 1e9 ? std::int64_t{1000000000} : static_cast<std::int64_t>(many));
+                total += n;
+                if (total > options.most_frames) {
+                    throw core::Error("value", "the footage has more than " + std::to_string(options.most_frames) +
+                                                   " frames, its long frames shown as long as they last (read part of it: range, every)");
+                }
+                times.push_back(n);
+            }
             check_room(m->width, m->height, picked.size(), 8, options.most_bytes);
-            std::vector<std::pair<std::string, int>> frames;  // (ref, ms)
+            reading.of = static_cast<std::int64_t>(picked.size());
+            Json refs = Json::array();
             std::size_t next = 0;
             std::int64_t at = 0;
-            const EachFrame keep = [&](const std::string& rgba, int ms) {
+            const EachFrame keep = [&](const std::string& rgba, int) {
                 ++at;
-                if (next >= picked.size() || picked[next] != at) return;
+                if (next >= picked.size() || picked[next] != at) {
+                    if (options.stopped && options.stopped()) throw render::Cancelled();
+                    return;
+                }
+                const std::string ref = reading.keep(CodecImage::from_bytes(m->width, m->height, Layout::Rgba, Sample::U8, rgba));
+                for (std::int64_t k = 0; k < times[next]; ++k) refs.push_back(ref);
                 ++next;
-                const CodecImage picture = CodecImage::from_bytes(m->width, m->height, Layout::Rgba, Sample::U8, rgba);
-                frames.emplace_back(store(png_of(picture)), ms * static_cast<int>(options.every));
+                reading.step();
             };
             (void)moving(bytes, options.limits, &keep);
-            if (frames.size() != picked.size()) broken("the moving picture's frames cannot all be read");
-            // (laid at its shortest frame's speed, a longer one shown as many times as it lasts)
-            int shortest = frames.front().second;
-            for (const auto& [ref, ms] : frames) shortest = std::min(shortest, ms);
-            double fps = options.fps.value_or(std::clamp(1000.0 / std::max(1, shortest), core::kTimelineFpsMin, core::kTimelineFpsMax));
-            const double each_ms = 1000.0 / fps;
-            Json refs = Json::array();
-            for (const auto& [ref, ms] : frames) {
-                const auto times = options.fps ? 1 : std::max<std::int64_t>(1, std::llround(ms / each_ms));
-                for (std::int64_t k = 0; k < times; ++k) refs.push_back(ref);
-                if (static_cast<std::int64_t>(refs.size()) > core::anim::kMaxFrames) {
-                    throw core::Error("value", "the footage has more than 3000 frames (read part of it: range, every)");
-                }
-            }
-            fps = std::round(fps * 1000) / 1000;  // (3 places, as the timeline's field shows it)
-            out.read = static_cast<std::int64_t>(frames.size());
+            if (next != picked.size()) broken("the moving picture's frames cannot all be read");
+            out.read = static_cast<std::int64_t>(picked.size());
             out.json = footage_json("animation", name, refs, fps, m->width, m->height, 8, source);
             return out;
         }
         (void)chosen(1, options);
-        const CodecImage first = codecs::decode(bytes, options.limits);
-        const bool deep = first.sample() != Sample::U8;
-        check_room(first.width(), first.height(), 1, deep ? 16 : 8, options.most_bytes);
-        const CodecImage picture = normal_picture(bytes, options.limits, out.notes, deep);
+        // (its size by its header before its pixels: the review's P3-1)
+        if (const auto head = header_of(bytes)) check_room((*head)[0], (*head)[1], 1, static_cast<int>((*head)[2]), options.most_bytes);
+        CodecImage decoded = codecs::decode(bytes, options.limits);
+        const bool deep = decoded.sample() != Sample::U8;
+        check_room(decoded.width(), decoded.height(), 1, deep ? 16 : 8, options.most_bytes);
+        const CodecImage picture = normal_picture(std::move(decoded), bytes, out.notes, deep);
         out.read = 1;
-        out.json = footage_json("image", name, Json::array({store(png_of(picture))}), options.fps.value_or(30.0), picture.width(), picture.height(),
+        out.json = footage_json("image", name, Json::array({reading.keep(picture)}), options.fps.value_or(30.0), picture.width(), picture.height(),
                                 deep ? 16 : 8, source);
+        reading.step();
         return out;
     }
     // (a numbered sequence)
     const std::vector<std::int64_t> picked = chosen(static_cast<std::int64_t>(files.size()), options);
+    if (static_cast<std::int64_t>(picked.size()) > options.most_frames) {
+        throw core::Error("value", "the footage has more than " + std::to_string(options.most_frames) + " frames (read part of it: range, every)");
+    }
+    reading.of = static_cast<std::int64_t>(picked.size());
     const std::string first_bytes = read_whole(files[static_cast<std::size_t>(picked.front() - 1)]);
-    const auto size = codecs::header_size(first_bytes);
-    if (!size) throw core::Error("unidentified_image", "cannot identify image file: " + core::path_to_utf8(files[static_cast<std::size_t>(picked.front() - 1)]));
-    check_room(size->first, size->second, picked.size(), 8, options.most_bytes);
+    const auto head = header_of(first_bytes);
+    if (!head) throw core::Error("unidentified_image", "cannot identify image file: " + core::path_to_utf8(files[static_cast<std::size_t>(picked.front() - 1)]));
+    check_room((*head)[0], (*head)[1], picked.size(), static_cast<int>((*head)[2]), options.most_bytes);
     Json refs = Json::array();
     std::string listed;
     std::uint64_t total = 0;
@@ -652,20 +737,21 @@ Footage read_footage(const fs::path& path, const ReadOptions& options, const Sto
         const std::string bytes = i == 0 ? first_bytes : read_whole(file);
         total += bytes.size();
         listed += storage::sha256_hex(bytes) + "\n";
-        if (i == 0) {
-            const CodecImage probe = codecs::decode(bytes, options.limits);
-            deep = probe.sample() != Sample::U8;
-            width = probe.width();
-            height = probe.height();
+        CodecImage decoded = codecs::decode(bytes, options.limits);
+        if (i == 0) {  // (the first decoded once: its depth the sequence's)
+            deep = decoded.sample() != Sample::U8;
+            width = decoded.width();
+            height = decoded.height();
             check_room(width, height, picked.size(), deep ? 16 : 8, options.most_bytes);
         }
-        const CodecImage picture = normal_picture(bytes, options.limits, out.notes, deep);
+        const CodecImage picture = normal_picture(std::move(decoded), bytes, out.notes, deep);
         if (picture.width() != width || picture.height() != height) {
             throw core::Error("value", "the sequence's pictures are not all of one size (" + std::to_string(width) + "×" + std::to_string(height) + ", " +
                                            core::path_to_utf8(file.filename()) + " " + std::to_string(picture.width()) + "×" +
                                            std::to_string(picture.height()) + ")");
         }
-        refs.push_back(store(png_of(picture)));
+        refs.push_back(reading.keep(picture));
+        reading.step();
     }
     const bool folder = fs::is_directory(path, ec);
     const fs::path named = folder ? path : files.front();
@@ -675,6 +761,19 @@ Footage read_footage(const fs::path& path, const ReadOptions& options, const Sto
     out.read = static_cast<std::int64_t>(picked.size());
     out.json = footage_json(picked.size() == 1 && !folder ? "image" : "sequence", name, refs, options.fps.value_or(30.0), width, height, deep ? 16 : 8, source);
     return out;
+}
+
+}  // namespace
+
+Footage read_footage(const fs::path& path, const ReadOptions& options, const Store& store) {
+    if (options.most_frames < 1 || options.most_frames > core::anim::kMaxFrames) throw core::Error("value", "most_frames is 1 to 3000");
+    Reading reading{options, store, {}};
+    try {
+        return read_whole_footage(path, options, reading);
+    } catch (...) {  // (the pictures it kept given back: the review's P3-4)
+        reading.give_back();
+        throw;
+    }
 }
 
 Store book_store(const fs::path& book) {
@@ -858,6 +957,8 @@ void lay_footage(core::Page& out, const core::Page& page, std::int64_t frame, co
         const std::string& id = folder.get_ref<const std::string&>();
         const auto at = std::find_if(out.layers.begin(), out.layers.end(), [&](const core::Layer& l) { return l.id == id; });
         if (at == out.layers.end() || at->kind != core::LayerKind::Folder) continue;
+        // (laid once: a page with_footage laid — a file's picture of it drawn — is not laid again)
+        if (std::any_of(out.layers.begin(), out.layers.end(), [&](const core::Layer& l) { return l.id == id + "~footage"; })) continue;
         core::Layer layer;
         try {
             layer = footage_layer(*episode, page, video, shown.index);

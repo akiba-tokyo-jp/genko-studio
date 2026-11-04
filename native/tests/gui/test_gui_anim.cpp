@@ -475,10 +475,21 @@ private slots:
         w->action("act_video_interpret")->trigger();
         QCOMPARE(core::video_row(s.page(), Json(*folder))->at("footage").at("fps"), Json(5.0));
         QCOMPARE(core::video_row(s.page(), Json(*folder))->at("frames").size(), std::size_t(8));
-        // フレームを再読み込み: the file read again; gone: said
+        // フレームを再読み込み: the file named shown and asked first (no: nothing read), then read again; gone: said
+        const Json frames_before = core::video_row(s.page(), Json(*folder))->at("frames");
+        QStringList asked;
+        s.answers.responder->question = [&asked](const QString& title, const QString& text) {
+            asked << title + QStringLiteral(": ") + text;
+            return false;
+        };
+        w->action("act_video_reload")->trigger();
+        QVERIFY(!asked.isEmpty() && asked.back().contains(gif) && asked.back().contains(QStringLiteral("同じ中身")));
+        QCOMPARE(core::video_row(s.page(), Json(*folder))->at("frames"), frames_before);
+        s.answers.responder->question = [](const QString&, const QString&) { return true; };
         w->action("act_video_reload")->trigger();
         QVERIFY2(w->last_error().isEmpty() || !w->last_error().contains(QStringLiteral("見つかりません")), qPrintable(w->last_error()));
         QCOMPARE(core::video_row(s.page(), Json(*folder))->at("footage").at("fps"), Json(5.0));
+        QCOMPARE(core::video_row(s.page(), Json(*folder))->at("frames"), frames_before);
         QFile::rename(gif, gif + QStringLiteral(".moved"));
         w->action("act_video_reload")->trigger();
         QVERIFY(w->last_error().contains(QStringLiteral("元のファイルが見つかりません")));
@@ -517,6 +528,54 @@ private slots:
         const std::size_t before = s.page().layers.size();
         w->action("act_video_frames_to_layers")->trigger();
         QCOMPARE(s.page().layers.size(), before + 2);
+    }
+
+    // (the review's P2-3) フレームを再読み込み of a GIF of frames of other lengths (1/10 s, 3/10 s, 1/10 s: shown 1, 3 and 1
+    // times at 10 fps): the same frames after it, its interpreted speed kept.
+    void videoReloadKeepsLongFrames() {
+        Studio s;
+        app::MainWindow* w = s.window.get();
+        const QString gif = s.tmp.path() + QStringLiteral("/long.gif");
+        {
+            std::vector<render::Image> pictures;  // (the same picture in a row: one frame shown as long — movie::Writer's)
+            for (const auto& rgb : {std::array<int, 3>{255, 0, 0}, {0, 255, 0}, {0, 255, 0}, {0, 255, 0}, {0, 0, 255}}) {
+                pictures.push_back(render::Image::create("RGBA", render::Size{16, 12}, render::Ink{rgb[0], rgb[1], rgb[2], 255}).convert("RGB"));
+            }
+            (void)render::movie::write_movie(pictures, gui_test::path_of(gif), 10, "gif");
+        }
+        w->new_video_layer(gif);
+        const auto folder = w->video_folder();
+        QVERIFY2(folder.has_value(), qPrintable(w->last_error()));
+        const Json before = core::video_row(s.page(), Json(*folder))->at("footage").at("frames");
+        QCOMPARE(before.size(), std::size_t(5));
+        QVERIFY(before[1] == before[2] && before[2] == before[3] && before[0] != before[1]);
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "set_video_layer"}, {"page", 1}, {"folder", *folder}, {"fps", 20}}})));
+        s.answers.responder->question = [](const QString&, const QString&) { return true; };
+        w->action("act_video_reload")->trigger();
+        const Json* after = core::video_row(s.page(), Json(*folder));
+        QCOMPARE(after->at("footage").at("frames"), before);
+        QCOMPARE(after->at("footage").at("fps"), Json(20.0));
+        for (const Json& f : after->at("frames")) QVERIFY(f[0].is_number_integer() && f[0].get<std::int64_t>() < 5);
+    }
+
+    // (the review's P2-7; 節 J 4.3) The frames drawn for playing kept within their bytes, the oldest let go first.
+    void playedFramesKeptWithinBounds() {
+        Studio s;
+        app::MainWindow* w = s.window.get();
+        w->action("act_timeline")->trigger();
+        app::TimelinePanel* panel = w->timeline();
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "set_animation"}, {"page", 1}, {"frames", 12}}})));
+        panel->played_most = 1;  // (one frame at most kept: the latest)
+        panel->play(true);
+        std::int64_t most = 0;
+        for (int i = 0; i < 12; ++i) {
+            panel->tick();
+            most = std::max(most, panel->played_bytes());
+        }
+        panel->play(false);
+        QVERIFY(most > 0);
+        QVERIFY2(most <= 5 * 1024 * 1024, std::to_string(most).c_str());  // (one A4 frame at 100 dpi, never twelve)
+        panel->played_most = 256ll << 20;
     }
 
     void aHeldPageIsNotMadeAnAnimation() {

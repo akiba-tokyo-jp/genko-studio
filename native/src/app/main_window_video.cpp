@@ -26,11 +26,15 @@
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
 #include "app/session.hpp"
+#include "app/stoppable.hpp"
 #include "app/timeline.hpp"
 #include "core/anim.hpp"
 #include "core/paths.hpp"
 #include "core/video.hpp"
 #include "render/footage.hpp"
+#include "render/fx.hpp"
+#include "storage/asset_store.hpp"
+#include "storage/fsutil.hpp"
 #include "service/wording.hpp"
 
 namespace genko::app {
@@ -191,27 +195,68 @@ const core::Layer* MainWindow::alter_video_frame(const core::Layer& folder) {
     return nullptr;
 }
 
-std::optional<Json> MainWindow::read_video_footage(const QString& path, std::optional<double> fps, std::int64_t every) {
+std::optional<Json> MainWindow::read_video_footage(const QString& path, const VideoRead& how, std::vector<std::string>* fresh) {
     if (!session_->path()) {
         flash(QStringLiteral("ビデオの素材を読み込む前に、原稿を保存します（ファイル → 別名で保存…）"), 6000, true);
         return std::nullopt;
     }
     render::footage::ReadOptions options;
-    options.fps = fps;
-    options.every = every;
-    const std::uint64_t held = core::book_footage_bytes(book());
-    options.most_bytes = held >= core::kFootageMaxBytes ? 0 : core::kFootageMaxBytes - held;
-    QApplication::setOverrideCursor(Qt::WaitCursor);
+    options.fps = how.fps;
+    options.every = how.every;
+    options.most_frames = how.most_frames;
+    options.repeat = how.repeat;
+    // (the room left: the book's footage less what the footage replaced holds — the review's P2-4)
+    options.most_bytes = core::footage_room(book(), how.except);
+    // (on a worker with its progress window and 中止 — the review's P2-6 —; the pictures new to the book given back when the
+    // reading fails or is stopped — P3-4 —, and named in `fresh` for the caller to give back when its op is refused)
+    const std::filesystem::path book_dir = *session_->path();
+    auto made = std::make_shared<std::vector<std::string>>();
+    const render::footage::Store into = [book_dir, made](const std::string& png) {
+        const storage::AssetStore store(book_dir);
+        const std::string ref = storage::AssetStore::ref(png);
+        const bool there = store.has(ref, core::kFootageSuffix);
+        (void)storage::AssetStore(book_dir).put_bytes(png, core::kFootageSuffix);
+        if (!there) made->push_back(ref);
+        return ref;
+    };
+    options.drop = [book_dir, made](const std::string& ref) {
+        if (std::find(made->begin(), made->end(), ref) == made->end()) return;
+        std::error_code ec;
+        std::filesystem::remove(storage::AssetStore(book_dir).path(ref, core::kFootageSuffix), ec);
+    };
+    const std::filesystem::path source = core::path_from_utf8(path.toStdString());
+    const QString title = QStringLiteral("素材の読み込み");
     try {
-        render::footage::Footage read =
-            render::footage::read_footage(core::path_from_utf8(path.toStdString()), options, render::footage::book_store(*session_->path()));
-        QApplication::restoreOverrideCursor();
-        if (!read.notes.empty()) flash(QString::fromStdString(read.notes.front()), 5000);
-        return read.json;
+        const auto read = run_stoppable(this, title, QStringLiteral("素材を読み込んでいます…"),
+                                        [source, options, into](const std::function<bool()>& stopped) {
+                                            render::footage::ReadOptions mine = options;
+                                            mine.stopped = stopped;
+                                            mine.progress = [](double done) { render::fx::ProgressScope::put(done); };
+                                            return render::footage::read_footage(source, mine, into);
+                                        });
+        if (!read) {
+            for (const std::string& ref : *made) options.drop(ref);  // (stopped after it was read: nothing kept)
+            flash(QStringLiteral("素材の読み込みを中止しました"), 4000);
+            return std::nullopt;
+        }
+        if (!read->notes.empty()) flash(QString::fromStdString(read->notes.front()), 5000);
+        if (fresh != nullptr) *fresh = *made;
+        return read->json;
     } catch (const std::exception& error) {
-        QApplication::restoreOverrideCursor();
         flash(QStringLiteral("素材を読み込めません:\n%1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
         return std::nullopt;
+    }
+}
+
+void MainWindow::drop_fresh_footage(const std::vector<std::string>& fresh) {
+    if (!session_->path()) return;
+    for (const std::string& ref : fresh) {
+        if (!core::footage_refs(book()).empty()) {
+            const auto held = core::footage_refs(book());
+            if (std::find(held.begin(), held.end(), ref) != held.end()) continue;  // (named by the book after all)
+        }
+        std::error_code ec;
+        std::filesystem::remove(storage::AssetStore(*session_->path()).path(ref, core::kFootageSuffix), ec);
     }
 }
 
@@ -219,20 +264,30 @@ void MainWindow::new_video_layer(const QString& path) {
     if (current_page() == nullptr) return;
     const QString file = path.isEmpty() ? ask::open_path(this, QStringLiteral("ファイルから新規ビデオレイヤー"), kPictures) : path;
     if (file.isEmpty()) return;
-    const auto footage = read_video_footage(file, std::nullopt);
+    std::vector<std::string> fresh;
+    const auto footage = read_video_footage(file, VideoRead{}, &fresh);
     if (!footage) return;
-    if (video_op(Json{{"op", "add_video_layer"}, {"footage", *footage}}) && timeline_ != nullptr) timeline_->set_frame(1, false);
+    if (!video_op(Json{{"op", "add_video_layer"}, {"footage", *footage}})) {
+        drop_fresh_footage(fresh);
+        return;
+    }
+    if (timeline_ != nullptr) timeline_->set_frame(1, false);
 }
 
 void MainWindow::replace_video_footage(const QString& path) {
-    if (!video_folder()) {
+    const core::Page* page = current_page();
+    const auto folder = video_folder();
+    if (page == nullptr || !folder) {
         video_op(Json{{"op", "replace_footage"}});  // (says to choose one)
         return;
     }
     const QString file = path.isEmpty() ? ask::open_path(this, QStringLiteral("フッテージを置き換え"), kPictures) : path;
     if (file.isEmpty()) return;
-    const auto footage = read_video_footage(file, std::nullopt);
-    if (footage) video_op(Json{{"op", "replace_footage"}, {"footage", *footage}});
+    VideoRead how;
+    how.except = core::video_row(*current_page(), Json(*folder));
+    std::vector<std::string> fresh;
+    const auto footage = read_video_footage(file, how, &fresh);
+    if (footage && !video_op(Json{{"op", "replace_footage"}, {"footage", *footage}})) drop_fresh_footage(fresh);
 }
 
 void MainWindow::reload_video_footage() {
@@ -243,23 +298,42 @@ void MainWindow::reload_video_footage() {
         video_op(Json{{"op", "replace_footage"}});  // (says to choose one)
         return;
     }
-    const Json& footage = video->at("footage");
+    const Json footage = video->at("footage");
     if (!footage.is_object() || !footage.contains("source")) {
         flash(QStringLiteral("このビデオレイヤーには読み直す元のファイルがありません"), 5000, true);
         return;
     }
     const QString source = QString::fromStdString(footage.at("source").at("path").get<std::string>());
+    const std::filesystem::path at = core::path_from_utf8(source.toStdString());
     std::error_code ec;
-    if (!std::filesystem::exists(core::path_from_utf8(source.toStdString()), ec)) {
+    if (!std::filesystem::exists(at, ec)) {
         flash(QStringLiteral("元のファイルが見つかりません:\n%1").arg(source), 6000, true);
         return;
     }
-    const auto read = read_video_footage(source, footage.at("fps").get<double>());
+    // (the file the book names shown before it is read — a book from elsewhere may name any file: the review's P3-6 —, and
+    // whether it changed since, a moving picture's or a picture's)
+    QString changed;
+    if (footage.at("kind") != Json("sequence") && std::filesystem::is_regular_file(at, ec)) {
+        try {
+            changed = storage::sha256_file(at) == footage.at("source").at("sha256").get<std::string>() ? QStringLiteral("（読み込んだときと同じ中身です）")
+                                                                                                        : QStringLiteral("（読み込んだときから変わっています）");
+        } catch (const std::exception&) {
+        }
+    }
+    if (!ask::question(this, QStringLiteral("フレームを再読み込み"), QStringLiteral("次のファイルを読み直して、このビデオレイヤーの素材にします%1:\n%2").arg(changed, source))) return;
+    // (a moving picture read again as it was read — its long frames shown as long as they last, the speed of its own —,
+    // then given the speed it was interpreted at: the review's P2-3; a sequence at that speed)
+    VideoRead how;
+    if (footage.at("kind") != Json("animation")) how.fps = footage.at("fps").get<double>();
+    how.except = video;
+    std::vector<std::string> fresh;
+    const auto read = read_video_footage(source, how, &fresh);
     if (!read) return;
     Json again = *read;
+    again["fps"] = footage.at("fps");
     again["alpha"] = footage.at("alpha");
     again["par"] = footage.at("par");
-    video_op(Json{{"op", "replace_footage"}, {"footage", again}});
+    if (!video_op(Json{{"op", "replace_footage"}, {"footage", again}})) drop_fresh_footage(fresh);
 }
 
 void MainWindow::interpret_video_footage() {
@@ -334,9 +408,15 @@ void MainWindow::video_frames_to_layers(const QString& path, std::int64_t every,
         every = step->value();
         animation = cels->isChecked();
     }
-    const auto footage = read_video_footage(file, std::nullopt, every);
+    // (at most 500 pictures, each once, refused before any is read: the review's P3-3)
+    VideoRead how;
+    how.every = every;
+    how.most_frames = 500;
+    how.repeat = false;
+    std::vector<std::string> fresh;
+    const auto footage = read_video_footage(file, how, &fresh);
     if (!footage) return;
-    video_op(Json{{"op", "footage_to_layers"}, {"footage", *footage}, {"into", *animation ? "cels" : "layers"}});
+    if (!video_op(Json{{"op", "footage_to_layers"}, {"footage", *footage}, {"into", *animation ? "cels" : "layers"}})) drop_fresh_footage(fresh);
 }
 
 }  // namespace genko::app
