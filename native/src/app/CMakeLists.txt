@@ -214,6 +214,7 @@ genko_library(genko_app
     type_dialogs.cpp
     # PC5 J-0: the production's frames (解析 ▸, ビデオレイヤー ▸, its panels)
     main_window_production.cpp
+    main_window_video.cpp
     # PC5 J-a (layer-comps@1: ウィンドウ → レイヤーカンプ, レイヤーカンプからファイル…)
     main_window_layer_comps.cpp
     layer_comps_panel.cpp

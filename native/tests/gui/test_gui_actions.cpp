@@ -460,12 +460,14 @@ private slots:
         // and PC5 I-g's 5 (SPEC AUTO-01「自動整列・自動合成」「Photomerge」) — 編集 → レイヤーを自動整列…・レイヤーを自動合成…
         // (act_auto_align_layers, act_auto_blend_layers), ファイル → 自動処理 → Photomerge… (act_photomerge), スクリプト →
         // ファイルをスタックとして読み込み…・統計… (act_load_files_into_stack, act_statistics) — test_gui_automate.
-        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8, I-c's 10: アートボード… など — test_gui_artboards —, I-h's 2, I-g's 5 and I-f's 3)
         // and PC5 I-f's 3 — ファイル → 1 部プリント (act_print_one_copy), 生成 → 画像アセット (act_image_assets), 自動処理 → コンタクトシート II…
         // (act_contact_sheet) — test_gui_output and test_gui_automate.
         // (PC5 J-f's 1: フィルター → プラグイン ▸ プラグインをインストール… (act_plugin_install) — test_gui_anim)
-        // (and PC5 H-e's 3: 環境設定 ▸ ヒストリーログ…・仮想記憶ディスク…・拡張コントロール… — 798＋3)
-        QCOMPARE(w->actions_by_name().size(), std::size_t{801});
+        // and PC5 J-e2's 2 (SPEC PROD-01) — ラスタライズ → ビデオ (act_rasterize_video) and 読み込み → ビデオフレームからレイヤー…
+        // (act_video_frames_to_layers); its 12 of ビデオレイヤー ▸ made real in their frames' places — test_gui_anim.
+        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8, I-c's 10: アートボード… など — test_gui_artboards —, I-h's 2, I-g's 5, I-f's 3, J-f's 1 and J-e2's 2)
+        // (and PC5 H-e's 3: 環境設定 ▸ ヒストリーログ…・仮想記憶ディスク…・拡張コントロール… — 800＋3)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{803});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -664,10 +666,8 @@ private slots:
         QCOMPARE(studio.act("act_smart_rasterize")->text(), QStringLiteral("ラスタライズ"));
         const std::int64_t revision = studio.doc().revision;
         // (PC5 J-d1: 計測スケールを設定 ▸ 初期設定・カスタム…, ものさしツール, カウントツール made real; J-d2: データポイントを選択 ▸
-        // カスタム…, 計測値を記録, 目盛りマーカーを配置…, ウィンドウ → 計測ログ — test_gui_measure)
-        for (const char* name : {"act_video_from_file", "act_video_blank", "act_video_insert_blank", "act_video_duplicate", "act_video_delete",
-                                 "act_video_replace", "act_video_interpret", "act_video_show_altered", "act_video_restore", "act_video_restore_all",
-                                 "act_video_reload", "act_video_rasterize", "act_panel_actions"}) {  // (PC5 J-a: レイヤーカンプ made real; J-c: 注釈)
+        // カスタム…, 計測値を記録, 目盛りマーカーを配置…, ウィンドウ → 計測ログ — test_gui_measure; J-e2: ビデオレイヤー ▸ — test_gui_anim)
+        for (const char* name : {"act_panel_actions"}) {  // (PC5 J-a: レイヤーカンプ made real; J-c: 注釈)
             QAction* a = studio.act(name);
             QVERIFY2(a != nullptr, name);
             QVERIFY2(!a->statusTip().isEmpty(), name);

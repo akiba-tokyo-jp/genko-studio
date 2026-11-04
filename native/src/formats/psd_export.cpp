@@ -13,6 +13,7 @@
 #include <set>
 #include <unordered_map>
 
+#include "core/video.hpp"
 #include "core/channels.hpp"
 #include "core/error.hpp"
 #include "core/groups.hpp"
@@ -28,6 +29,7 @@
 #include "formats/pillow_save.hpp"
 #include "formats/psd_adjust.hpp"
 #include "formats/psd_text_detail.hpp"
+#include "render/footage.hpp"
 #include "render/channels.hpp"
 #include "render/color_canvas.hpp"
 #include "render/ink.hpp"
@@ -2382,8 +2384,13 @@ std::string page_psd_bytes(const core::Document& episode, const core::Page& page
 
 // The page's PSD (export_page_psd), put into `output` at `dest`. (PC4 F-d: `psb` a PSB; a PSD of a page past 30000
 // pixels a side refused before it is drawn, one past 2 GiB before it is written)
-void put_page_psd(detail::Output& output, const core::Document& episode, const core::Page& page, const fs::path& dest,
+void put_page_psd(detail::Output& output, const core::Document& episode, const core::Page& page_in, const fs::path& dest,
                   std::optional<std::int64_t> dpi_given, const PsdText& text = {}, PsdTextReport* report = nullptr, bool psb = false) {
+    // (PC5 J-e2, the review's P3-12: a video layer's first frame written as a layer of its own — as the merged picture shows
+    // it —, a PSD holding no video rows)
+    const bool video = core::page_uses_video(page_in);
+    const core::Page laid = video ? render::footage::with_footage(page_in, 1, &episode) : core::Page();
+    const core::Page& page = video ? laid : page_in;
     const std::int64_t dpi = psd_dpi(episode, dpi_given);
     check_dpi(dpi);
     if (!psb) {

@@ -292,6 +292,10 @@ genko_library(genko_render
     panorama.cpp
     pyramid.cpp
     ops_align.cpp
+    # PC5 J-e2 (ビデオレイヤー: video@1 — the footage read and laid, the ops)
+    footage.cpp
+    ops_video.cpp
+    pcraft_timeline.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core

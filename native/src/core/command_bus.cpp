@@ -710,6 +710,25 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
         }
         return;
     }
+    // (PC5 J-e2, the coordinator's decision on the review's P2-5: a video layer's ops that take printed layers away — its
+    // altered cels, its folder — or make printed layers of the footage's pixels are drawing on the page, after the name:
+    // the footage laid as a new video layer or as layers, a frame altered or rasterized; a frame deleted, duplicated or
+    // restored, every frame restored, where the video layer is printed)
+    if (named && one_of(name, {"add_video_layer", "footage_to_layers", "video_alter", "rasterize_video", "video_delete", "video_duplicate",
+                               "video_restore", "video_restore_all"})) {
+        const Page& page = page_of(op_in);
+        bool drawn = name == "footage_to_layers" || name == "video_alter" || name == "rasterize_video";
+        if (name == "add_video_layer") {
+            const Json* footage = get(op_in, "footage");
+            drawn = footage != nullptr && !footage->is_null();
+        } else if (!drawn) {  // (the video layer printed: its folder not a name's or a draft's)
+            const Json* folder = get(op_in, "folder");
+            for (const Layer& layer : page.layers) {
+                if (folder != nullptr && json_equals_string(*folder, layer.id)) drawn = printed(layer);
+            }
+        }
+        if (drawn && !page.name_ok) throw OpError(name + " on a printed layer needs name_ok on page " + page.index.repr() + " (strict_gates)");
+    }
     if (named && name == "advance" && json_equals_string(op_in.value("to", Json(nullptr)), "finish")) {
         const Page& page = page_of(op_in);
         if (!page.art_ok) throw OpError("page " + page.index.repr() + ": finish needs the art approved (strict_gates)");

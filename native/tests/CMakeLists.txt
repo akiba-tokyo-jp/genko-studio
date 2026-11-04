@@ -229,6 +229,10 @@ genko_test(test_variables SOURCES unit/test_variables.cpp DEPS genko_test_suppor
 # delete, the refusals; an Anno block read and written again, a sound note kept, the dates) with Genko's actors (an agent
 # never changes a person's note), the JSON, a .pcraft's notes, the import's ops, MCP's apply_ops not taking the ops.
 genko_test(test_annotations SOURCES unit/test_annotations.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service LABELS unit)
+# PC5 J-e2 (video@1, render/footage): a sequence's files in order, a sequence (8 and 16 bits), every frame of a GIF, an APNG
+# and a WebP (a GIF's disposal by hand), refusals before decoding, broken and huge files never read past their bounds, a
+# footage frame laid on an 8-bit, 16-bit and CMYK page.
+genko_test(test_footage SOURCES unit/test_footage.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
 # PC5 J-d1 (measure@1, SPEC.md PROD-01「計測」): the measuring as PhotoCraft's tests check it (the scale set and its words, the
 # ruler's readout and the protractor, the inscribed rectangle, レイヤーの角度補正 of a layer and of the page cut — the same as
 # transform_layers' and crop_page's on the 8-bit, 16-bit and CMYK pages —, the count groups and marks, the info asked
@@ -643,6 +647,13 @@ genko_test(test_contract_slices SOURCES contract/test_contract_slices.cpp DEPS g
 # export --format artboards`); a PSD's artboards opened a page each (import_psd as before); a .pcraft's artboard; the book
 # written and read, a book without artboards as before.
 genko_test(test_contract_artboards SOURCES contract/test_contract_artboards.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC5 J-e2 (video@1): the video layers through the command line (footage read into the book, apply, inspect --timeline,
+# render --frame, undo; a footage frame gone read-only), the ops (frames inserted, duplicated, deleted, altered, restored;
+# the footage interpreted, replaced; rasterized; frames to layers and cels), refusals (locks, footage not held or past 4
+# GiB, not an agent's op), video@1 written and read back, a book of cels as before, ビデオをレンダリング and a .pcraft
+# (upstream's reader with $GENKO_PCRAFT_CHECK).
+genko_test(test_contract_video SOURCES contract/test_contract_video.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service
            LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)

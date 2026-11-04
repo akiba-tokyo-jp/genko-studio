@@ -632,6 +632,10 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
         std::erase(features, std::string(feature));
         if (used) features.emplace_back(feature);
     }
+    // (PC5 J-e2, video@1: the footage frames its video rows show that only the book in memory holds)
+    for (const std::string& ref : core::footage_refs(doc)) {
+        if (const auto held = doc.smart_files.find(ref); held != doc.smart_files.end() && held->second) store.put_known(ref, *held->second, core::kFootageSuffix);
+    }
     // PC5 I-d: variables@1 (the book's variables and data sets, and the pictures their values name — those only the book in
     // memory holds), named while the book has them
     core::validate_variables(doc);

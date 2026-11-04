@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstdint>
+#include <list>
 #include <map>
 #include <optional>
 #include <string>
@@ -103,6 +104,11 @@ public:
     // to call again (the menu made anew: J-e2 adds the video layers' items in it, before ビデオをレンダリング…).
     void build_menu();
 
+    // (PC5 J-e2, the review's P2-7; 節 J 4.3) the frames drawn for playing kept up to this many bytes, the oldest let go
+    // first (a frame let go is drawn again when it plays again); how many they hold now.
+    std::int64_t played_most = 256ll << 20;
+    std::int64_t played_bytes() const { return played_bytes_; }
+
 private:
     const core::Page* page() const;
     bool ops(const core::Json& ops);
@@ -112,6 +118,9 @@ private:
 
     MainWindow* window_;
     std::map<std::int64_t, QImage> played_;
+    std::list<std::int64_t> played_order_;  // (the latest last)
+    std::int64_t played_bytes_ = 0;
+    void forget_played();
     double fps_shown_ = -1;  // (the fps box's value as refresh put it: left as it is, nothing is written)
     QMetaObject::Connection menu_shown_;  // (build_menu's: made again with it)
 };
