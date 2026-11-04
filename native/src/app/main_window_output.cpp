@@ -104,6 +104,9 @@ void MainWindow::build_output_docks() {
     addDockWidget(Qt::RightDockWidgetArea, history_dock_);
     tabifyDockWidget(pages_dock_, history_dock_);
     history_dock_->hide();
+    // (PC5 H-f review P3-8: its switch's own id — commands.json's — whatever its name becomes: ヒストリー（ウィンドウ） since
+    // メモリをクリア ▸ ヒストリー shares its words)
+    history_dock_->toggleViewAction()->setProperty("genko_attribute", QStringLiteral("dock_history"));
     connect(history_dock_, &QDockWidget::visibilityChanged, this, [this](bool shown) {
         if (shown) history_->refresh();
     });

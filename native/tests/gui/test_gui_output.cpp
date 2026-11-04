@@ -2001,6 +2001,17 @@ private slots:
             s.window->purge(QStringLiteral("clipboard"));
             QCOMPARE(clip->text(), QStringLiteral("ほかのアプリの文字"));
         }
+        // (review P3-6) the window's copy alone — the computer's clipboard taken by another since —: let go, and said
+        s.act("act_copy")->trigger();
+        clip->clear();
+        done = s.window->purge(QStringLiteral("clipboard"));
+        QCOMPARE(done.items, QStringList{QStringLiteral("クリップボード")});
+        QVERIFY2(s.window->last_notice().startsWith(QStringLiteral("メモリをクリアしました：クリップボード")), qPrintable(s.window->last_notice()));
+        s.act("act_paste")->trigger();
+        QCOMPARE(s.doc().page(0).layers.size(), layers);
+        // (review P3-7, P3-8) set_pixel_aspect in ヒストリー's words; the panel's switch keeps its own id
+        QCOMPARE(app::history::describe(Json::array({Json{{"op", "set_pixel_aspect"}, {"page", 1}, {"ratio", 2}}})), QStringLiteral("ピクセル縦横比"));
+        QCOMPARE(s.dock(QStringLiteral("ヒストリー"))->toggleViewAction()->property("genko_attribute").toString(), QStringLiteral("dock_history"));
         // nothing left to clear: said
         done = s.window->purge(QStringLiteral("video"));
         QVERIFY(done.items.isEmpty());

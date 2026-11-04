@@ -90,8 +90,9 @@ MainWindow::Purged MainWindow::purge(const QString& what) {
     }
     if (what == QLatin1String("clipboard") || all) {
         std::int64_t bytes = 0;
-        for (MainWindow* w : windows) bytes += w->purge_clipboard();
-        if (bytes > 0) {
+        bool any = false;
+        for (MainWindow* w : windows) any = w->purge_clipboard(bytes) || any;
+        if (any) {  // (a copy let go — one never put on the computer's clipboard too —: said, review P3-6)
             out.items << QStringLiteral("クリップボード");
             out.bytes += bytes;
         }

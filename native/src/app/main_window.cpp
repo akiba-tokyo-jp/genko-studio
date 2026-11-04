@@ -1099,6 +1099,7 @@ void MainWindow::refresh_actions() {
     }
     if (QAction* name_ok = action(QStringLiteral("act_name_ok"))) name_ok->setVisible(agent_book());  // (stages are for books made with agents)
     contents_tab_follow();  // (smart-objects@1: what a contents' tab cannot use, greyed)
+    refresh_pixel_aspect();  // (PC5 H-f review P3-1: the page's ratio marked after a page, a tab or an Undo too)
 }
 
 void MainWindow::show_omitted(const QStringList& elements) {

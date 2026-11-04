@@ -603,6 +603,31 @@ private slots:
         QVERIFY2(box.size() == 4 && std::abs(box[0] - 20) < 0.5 && std::abs(box[1] - 30) < 0.5 && std::abs(box[2] - 40) < 0.5 && std::abs(box[3] - 40) < 0.5,
                  Json(box).dump().c_str());
         c->set_selection(std::nullopt);
+        // (review P3-4) turned and mirrored too: the page's x widened, then mirrored and turned — every point back, a selection
+        // dragged in the page's own mm
+        c->set_rotation(30);
+        c->flip_view(true);
+        for (const QPointF mm : {QPointF(0, 0), QPointF(w_mm, h_mm), QPointF(12.5, 40.25), QPointF(-3, 7)}) {
+            const QPointF back = c->to_mm(c->to_widget(mm));
+            QVERIFY2(std::abs(back.x() - mm.x()) < 1e-9 && std::abs(back.y() - mm.y()) < 1e-9, qPrintable(QStringLiteral("%1,%2").arg(back.x()).arg(back.y())));
+        }
+        {  // (the page's top edge on the screen: twice as long as its side's, per mm — the widening along the page's x)
+            const QPointF o = c->to_widget(QPointF(0, 0)), x = c->to_widget(QPointF(10, 0)), y = c->to_widget(QPointF(0, 10));
+            QVERIFY(std::abs(std::hypot(x.x() - o.x(), x.y() - o.y()) - 2 * std::hypot(y.x() - o.x(), y.y() - o.y())) < 1e-6);
+        }
+        inject::mouse_stroke(c, {QPointF(20, 30), QPointF(40, 45), QPointF(60, 70)});
+        QVERIFY(c->selection().has_value());
+        const std::vector<double> turned_box = render::selection::area_bbox(c->selection()->area);
+        // (its corners where they were pressed and let go: the box around it reaches them — a box turned with the view may be wider)
+        QVERIFY2(turned_box.size() == 4 && turned_box[0] <= 20.5 && turned_box[1] <= 30.5 && turned_box[0] + turned_box[2] >= 59.5 &&
+                     turned_box[1] + turned_box[3] >= 69.5,
+                 Json(turned_box).dump().c_str());
+        c->set_selection(std::nullopt);
+        c->reset_view();
+        // (review P3-2) ズームツールの囲み: as wide as it shows — the box's width on the screen within the canvas
+        c->zoom_to_rect(0, 0, w_mm, 10);
+        QVERIFY2(across() <= c->width() + 1e-6, qPrintable(QStringLiteral("%1 > %2").arg(across()).arg(c->width())));
+        c->fit_page();
         // the correction off: square again on the screen (the page's ratio kept); on again
         correction->trigger();
         QVERIFY(!correction->isChecked() && c->shown_aspect() == 1.0);
@@ -619,6 +644,8 @@ private slots:
         v.trigger("act_undo");
         QCOMPARE(w->book().page(0).pixel_aspect, 1.0);
         QCOMPARE(c->shown_aspect(), 1.0);
+        // (review P3-1: the ratio's mark follows the book without the menu shown)
+        QVERIFY(gui_test::wait_for([&] { return v.act("act_pixel_aspect_square")->isChecked(); }));
         // a page of a ratio shown without the correction, chosen again: the correction comes back on (Photoshop's)
         correction->trigger();
         v.trigger("act_pixel_aspect_d1_ntsc");

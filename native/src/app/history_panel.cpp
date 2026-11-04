@@ -150,6 +150,8 @@ const std::map<std::string, const char*>& names() {
         {"slices_from_guides", "ガイドからスライスを作成"},
         // (PC5 I-c, artboards@1: render/ops_artboards)
         {"add_artboard", "アートボード"}, {"artboard_from_layers", "レイヤーからのアートボード"}, {"set_artboard", "アートボードを編集"},
+        // (PC5 H-f, pixel-aspect@1: core/pixel_aspect)
+        {"set_pixel_aspect", "ピクセル縦横比"},
     };
     return table;
 }

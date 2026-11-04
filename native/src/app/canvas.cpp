@@ -510,7 +510,8 @@ void PageCanvas::zoom_to_rect(double x0, double y0, double x1, double y1) {
     const double w = std::abs(x1 - x0);
     const double h = std::abs(y1 - y0);
     if (w < 0.5 || h < 0.5) return;
-    view_.scale = std::max(kMinScale, std::min(max_scale(), std::min(width() / w, height() / h) * 0.95));
+    // (PC5 H-f review P3-2: as wide as it shows)
+    view_.scale = std::max(kMinScale, std::min(max_scale(), std::min(width() / (w * shown_aspect()), height() / h) * 0.95));
     const double cx = (x0 + x1) / 2;
     const double cy = (y0 + y1) / 2;
     view_.pan = QPointF(width() / 2.0 - cx * view_.scale, height() / 2.0 - cy * view_.scale);

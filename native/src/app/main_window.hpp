@@ -2255,7 +2255,9 @@ public:
 private:
     void build_purge_actions();
     void build_purge_menu(QMenu* edit);
-    std::int64_t purge_clipboard();  // (main_window_clipboard.cpp: this window's copy, and the computer's while it is Genko's)
+    // (main_window_clipboard.cpp: this window's copy, and the computer's while it is Genko's; true when anything was let go,
+    // about how much added to `bytes`)
+    bool purge_clipboard(std::int64_t& bytes);
     void build_pixel_aspect_actions();
     void build_pixel_aspect_menu(QMenu* view);
     void refresh_pixel_aspect();

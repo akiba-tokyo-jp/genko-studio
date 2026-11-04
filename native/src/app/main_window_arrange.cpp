@@ -296,6 +296,7 @@ void MainWindow::fill_pane(PaneView* pane, std::uint64_t tab) {
 void MainWindow::pane_look(PaneView* pane) {
     // (what the canvas in front shows over the page, the pane too: the guides, the grid, the extras and their switches)
     pane->show_guides = canvas_->show_guides;
+    pane->set_pixel_aspect_correction(canvas_->pixel_aspect_correction());  // (PC5 H-f review P3-1: a pane made later too)
     pane->show_frame_numbers = canvas_->show_frame_numbers;
     pane->rulers_visible = canvas_->rulers_visible;
     pane->grid_visible = canvas_->grid_visible;

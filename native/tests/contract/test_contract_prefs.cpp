@@ -319,6 +319,10 @@ private slots:
         QCOMPARE((*undo)["name"], Json("取り消し（編集）"));
         QCOMPARE((*undo)["keys"], Json::array({"Ctrl+Z"}));
         QCOMPARE((*undo)["menu"], Json::array({"編集"}));
+        // (PC5 H-f review P3-8: the history panel's switch by its own id, whatever its name — ヒストリー（ウィンドウ） now)
+        const Json* history = command(listed, "dock_history");
+        QVERIFY(history != nullptr);
+        QCOMPARE((*history)["name"], Json("ヒストリー（ウィンドウ）"));
         const Json* move = command(listed, "act_move");
         QVERIFY(move != nullptr && move->value("tool", false));
         QCOMPARE((*move)["keys"], Json::array({"V"}));  // (Photoshop's 移動ツール)
