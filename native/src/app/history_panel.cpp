@@ -239,8 +239,10 @@ void HistoryPanel::refresh() {
     list_->addItem(start);
     const std::string& me = window_->session().actor();
     int n = 0;
+    const int left_out = std::max(0, done_ - std::max(1, states));  // (PC5 H-e: ヒストリー数)
     for (const Session::HistoryEntry& entry : timeline.done) {
         ++n;
+        if (n <= left_out) continue;
         const std::string actor = entry.actor.is_null() ? std::string() : core::py_str(entry.actor);
         QString who;
         if (!actor.empty() && actor != me) {
@@ -260,7 +262,7 @@ void HistoryPanel::refresh() {
     }
     // (PC3 B4: the History Brush's source marked — a row past the present cannot be one: back to （はじめ）)
     if (brush_source() > done_) window_->history_brush_row.reset();
-    if (QListWidgetItem* source = list_->item(brush_source())) {
+    if (QListWidgetItem* source = list_->item(brush_source() == 0 ? 0 : brush_source() > left_out ? brush_source() - left_out : -1)) {
         QPixmap mark(12, 12);  // (a diamond, as the panel's words stay as they are)
         mark.fill(Qt::transparent);
         QPainter painter(&mark);
@@ -273,12 +275,12 @@ void HistoryPanel::refresh() {
         source->setData(Qt::UserRole + 1, true);
         source->setToolTip(QStringLiteral("ヒストリーブラシは、この状態に塗り戻します"));
     }
-    QListWidgetItem* now = list_->item(done_);
+    QListWidgetItem* now = list_->item(done_ == 0 ? 0 : done_ - left_out);
     now->setText(QStringLiteral("▶ ") + now->text());
     QFont font = now->font();
     font.setBold(true);
     now->setFont(font);
-    list_->setCurrentRow(done_);
+    list_->setCurrentRow(done_ == 0 ? 0 : done_ - left_out);
     list_->scrollToItem(now);
 }
 

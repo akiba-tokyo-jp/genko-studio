@@ -315,6 +315,16 @@ void PageCanvas::draw_shadow(QPainter& painter, const QRectF& page_rect) const {
     // this paint is all under the sheet's white)
     if (painted_within(painter, painting_, page_rect)) return;
     const double scale = std::max(0.2, std::sqrt(std::abs(painter.transform().determinant())));
+    // (PC5 H-e, 環境設定 → インターフェイス → 境界線: ドロップシャドウ — this —, ライン — a thin grey line round the sheet — or なし)
+    if (page_border == QLatin1String("none")) return;
+    if (page_border == QLatin1String("line")) {
+        painter.setPen(QPen(QColor(0, 0, 0, theme::tokens().dark ? 150 : 90), 1.0 / scale));
+        painter.setBrush(Qt::NoBrush);
+        const double out = 0.5 / scale;
+        painter.drawRect(page_rect.adjusted(-out, -out, out, out));
+        painter.setPen(Qt::NoPen);
+        return;
+    }
     painter.setPen(Qt::NoPen);
     const bool dark = theme::tokens().dark;
     for (int i = 6; i >= 1; --i) {

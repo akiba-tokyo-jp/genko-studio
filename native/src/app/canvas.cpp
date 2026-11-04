@@ -43,6 +43,7 @@ PageCanvas::PageCanvas(QWidget* parent) : QWidget(parent), renderer_(std::make_u
             return;
         }
         view_.pan += pan_speed_;
+        keep_in_view();  // (PC5 H-e: オーバースクロール off)
         view_.fitted = false;
         rerender_.start();
         update();
@@ -428,6 +429,7 @@ void PageCanvas::zoom_by(double factor, std::optional<QPointF> anchor) {
     const QPointF mm = mm_of(at);
     view_.scale = std::max(kMinScale, std::min(max_scale(), view_.scale * factor));
     view_.pan = QPointF(at.x() - mm.x() * view_.scale, at.y() - mm.y() * view_.scale);
+    keep_in_view();  // (PC5 H-e, review P3-10: オーバースクロール off — zoomed out, the page in the middle at once)
     view_.fitted = false;
     after_zoom();
 }
@@ -544,7 +546,7 @@ void PageCanvas::glide(const std::function<void()>& change) {
     const ViewState before = view_;
     change();
     const ViewState after = view_;
-    if (reduce_motion() || !isVisible() || before.scale <= 0 ||
+    if (!animated_zoom || reduce_motion() || !isVisible() || before.scale <= 0 ||  // (PC5 H-e: アニメーションズーム)
         (before.scale == after.scale && before.pan == after.pan)) {
         return;
     }

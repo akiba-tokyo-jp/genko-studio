@@ -23,6 +23,7 @@
 #include "app/test_script.hpp"
 #include "app/theme.hpp"
 #include "core/paths.hpp"
+#include "core/prefs_table.hpp"
 #include "service/stylecat.hpp"
 
 namespace genko::app {
@@ -51,6 +52,15 @@ int run_app(int argc, char** argv) {
         qputenv("QT_FORCE_STDERR_LOGGING", "1");
     }
     // Qt reads the native wide command line on Windows; CRT argv loses Japanese paths.
+    // (PC5 H-e, 環境設定 → インターフェイス → UI の拡大・縮小 — read before the application is made: 100 % or 200 % whatever the
+    // screen says; auto, or a scale asked for by the environment, as before)
+    if (!qEnvironmentVariableIsSet("QT_SCALE_FACTOR") && !qEnvironmentVariableIsSet("QT_ENABLE_HIGHDPI_SCALING")) {
+        const std::string scale = core::prefs::value("interface.uiScale").get<std::string>();
+        if (scale == "100" || scale == "200") {
+            qputenv("QT_ENABLE_HIGHDPI_SCALING", "0");
+            if (scale == "200") qputenv("QT_SCALE_FACTOR", "2");
+        }
+    }
     QApplication app(argc, argv);
     const QStringList arguments = QCoreApplication::arguments().mid(2);
     std::optional<fs::path> path;
@@ -96,7 +106,8 @@ int run_app(int argc, char** argv) {
     }
     theme::apply(&app);  // (the look before the first window: the start screen too)
     test_script::start();
-    if (!path) {
+    // (PC5 H-e, 環境設定 → 一般 → ホーム画面を自動表示: off, the window with a new untitled book at once)
+    if (!path && core::prefs::value("general.autoShowHomeScreen").get<bool>()) {
         StartDialog start;
         if (!waiting.isEmpty()) {
             std::optional<std::string> wanted;
@@ -118,7 +129,7 @@ int run_app(int argc, char** argv) {
     window->show();
     if (keys_from_before) key_sets::tell_new_default(window);  // (once: the keys are Photoshop's now, Genko's a click away)
     window->raise_at_start();  // (PC5 I-e: スクリプトイベント アプリケーションを起動, once the book is open)
-    window->open_path(*path);  // (PC4 F-b: a book's folder, or a file opened as a book of one page in memory)
+    if (path) window->open_path(*path);  // (PC4 F-b: a book's folder, or a file opened as a book of one page in memory)
     for (const QString& url : std::exchange(waiting, {})) window->open_link_when_ready(url);
     const int code = QApplication::exec();
     // (windows still open when the loop was ended some other way: closed without asking, their books as they are)

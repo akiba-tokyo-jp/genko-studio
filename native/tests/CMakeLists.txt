@@ -605,6 +605,10 @@ genko_test(test_contract_layer_comps SOURCES contract/test_contract_layer_comps.
 # without guides: the file as before), read back here, psd-tools' guides read here; core/units' lengths.
 genko_test(test_contract_guides SOURCES contract/test_contract_guides.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC5 H-e (SPEC.md VIEW-01「環境設定と API」): genko prefs get/set/reset (all or none, refusals, an earlier version's settings
+# kept), genko commands (this computer's keys over the catalogue), genko session (the app there or not), MCP's inspect
+# target=prefs, commands and session (reading only, no path out of the root).
+genko_test(test_contract_prefs SOURCES contract/test_contract_prefs.cpp DEPS genko_test_support LABELS contract TIMEOUT 900)
 # PC5 I-d (variables@1): a picture put in a paint layer on the 8-bit, 16-bit, 32-bit and CMYK pages (fit, fill, conform,
 # as_is × the nine places × clip), a smart object's contents replaced, the variables through the command line (apply, undo,
 # inspect --variables, export --format datasets: the files' names, the book unchanged), saved and read again (variables@1,
@@ -913,6 +917,9 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_brush_settings SOURCES gui/test_gui_brush_settings.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_tool_presets SOURCES gui/test_gui_tool_presets.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_guides SOURCES gui/test_gui_guides.cpp DEPS genko_app GUI TIMEOUT 900)
+  # PC5 H-e: 環境設定's panes and what they do, genko prefs set applied to the app running, commands.json made from the menus,
+  # session.json, the history log
+  genko_test(test_gui_prefs SOURCES gui/test_gui_prefs.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_colours SOURCES gui/test_gui_colours.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_workspace SOURCES gui/test_gui_workspace.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_look SOURCES gui/test_gui_look.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)

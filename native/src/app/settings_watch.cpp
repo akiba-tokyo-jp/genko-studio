@@ -31,8 +31,14 @@ core::Json live_values() {
 
 QString settings_file() { return QString::fromStdString(core::path_to_utf8(config_dir() / "settings.ini")); }
 
-// The file as the app itself last left it (its own writes: settings() — app/config).
-std::optional<SettingsStamp> own;
+// The app's own writes since the watch last looked (settings() — app/config): the file as the first found it, as the last
+// left it, and whether they followed one another (none written by another program between them).
+struct OwnWrites {
+    SettingsStamp first_before;
+    SettingsStamp last_after;
+    bool unbroken = true;
+};
+std::optional<OwnWrites> own;
 
 class Watch : public QObject {
 public:
@@ -45,18 +51,31 @@ public:
         follow();
         last_ = live_values();
         seen_ = settings_stamp(file_);
+        writer_ = writer();
     }
 
     std::function<void()> changed;
 
     bool look() {
         follow();
+        const SettingsStamp was = seen_;
         seen_ = settings_stamp(file_);
         core::Json now = live_values();
-        // (the app's own write: what it has applied itself — the base taken again, nothing applied twice)
-        if (own && *own == seen_) {
-            last_ = std::move(now);
-            return false;
+        // (PC5 H-e: genko prefs set signs what it writes — core::prefs::sign —: another process's signature since the last
+        // look is another program's write, even kept in the file by an own write of the app that waited for its lock)
+        const QString signed_by = writer();
+        const bool foreign = signed_by != writer_ && !signed_by.startsWith(QString::number(QCoreApplication::applicationPid()) + QLatin1Char(' '));
+        writer_ = signed_by;
+        // (the app's own writes alone, from the file as last seen: what it has applied itself — the base taken again,
+        // nothing applied twice. PC5 H-e: another program's write among them — genko prefs set at the same moment — is
+        // applied)
+        if (own) {
+            const bool only_own = !foreign && own->last_after == seen_ && own->unbroken && own->first_before == was;
+            own.reset();
+            if (only_own) {
+                last_ = std::move(now);
+                return false;
+            }
         }
         if (now == last_) return false;
         last_ = std::move(now);
@@ -84,7 +103,10 @@ private:
         quiet_.start();
     }
 
+    static QString writer() { return core::prefs::store()->value(QString::fromLatin1(core::prefs::kWriterKey)).toString(); }
+
     QString file_;
+    QString writer_;
     QFileSystemWatcher watcher_;
     QTimer quiet_;
     core::Json last_;
@@ -101,7 +123,14 @@ SettingsStamp settings_stamp(const QString& file) {
     return {info.lastModified().toMSecsSinceEpoch(), info.size()};
 }
 
-void settings_written(const SettingsStamp& stamp) { own = stamp; }
+void settings_written(const SettingsStamp& before, const SettingsStamp& after) {
+    if (!own) {
+        own = OwnWrites{before, after, true};
+        return;
+    }
+    if (before != own->last_after) own->unbroken = false;  // (another program wrote between the app's writes)
+    own->last_after = after;
+}
 
 void watch_settings(std::function<void()> changed) {
     if (the_watch == nullptr) {

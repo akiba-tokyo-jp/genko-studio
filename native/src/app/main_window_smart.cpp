@@ -35,6 +35,7 @@
 #include "app/main_window.hpp"
 #include "app/open_dialog.hpp"
 #include "app/smart_panel.hpp"
+#include "core/prefs_table.hpp"
 #include "core/base64.hpp"
 #include "core/color_raster.hpp"
 #include "core/ids.hpp"
@@ -389,6 +390,8 @@ bool MainWindow::place_smart(const QString& file, bool as_placed, bool linked) {
                {"title", named.completeBaseName().toStdString()}};
     place.update(use);
     if (link) place["link"] = *link;
+    // (PC5 H-e, 環境設定 → 一般 → 配置時に画像サイズを変更: off, a picture larger than the page placed at its own size)
+    if (!as_placed && !core::prefs::value("general.resizeImageDuringPlace").get<bool>()) place["scale"] = 100;
     const core::Frame* frame = as_placed ? selected_frame() : nullptr;
     if (as_placed) {
         if (frame != nullptr) {

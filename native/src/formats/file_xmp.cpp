@@ -4,6 +4,8 @@
 
 #include <zlib.h>
 
+#include <mutex>
+
 #include "core/file_info.hpp"
 #include "storage/asset_store.hpp"
 
@@ -29,7 +31,46 @@ std::string opened_title(const std::string& name) {
 
 }  // namespace
 
+namespace {
+
+std::mutex history_mutex;
+HistorySource history_source;
+
+std::optional<std::string> history_of(const core::Document& doc) {
+    HistorySource source;
+    {
+        const std::lock_guard<std::mutex> lock(history_mutex);
+        source = history_source;
+    }
+    if (!source) return std::nullopt;
+    try {
+        return source(doc);
+    } catch (const std::exception&) {  // (the log cannot be read: the file written without it)
+        return std::nullopt;
+    }
+}
+
+std::optional<std::string> info_xmp(const core::Document& doc);
+
+}  // namespace
+
+void set_history_source(HistorySource source) {
+    const std::lock_guard<std::mutex> lock(history_mutex);
+    history_source = std::move(source);
+}
+
 std::optional<std::string> book_xmp(const core::Document& doc) {
+    std::optional<std::string> packet = info_xmp(doc);
+    if (const auto history = history_of(doc); history && !history->empty()) {
+        // (PC5 H-e: the history log's, in the packet of the book's File Info or a packet of its own)
+        return core::with_xmp_history(packet ? std::move(*packet) : core::write_xmp(std::nullopt, core::FileInfo{}, std::nullopt), *history);
+    }
+    return packet;
+}
+
+namespace {
+
+std::optional<std::string> info_xmp(const core::Document& doc) {
     if (!doc.file_info || doc.file_info->empty()) return std::nullopt;
     const core::FileInfo& info = *doc.file_info;
     std::optional<std::string> packet;
@@ -53,6 +94,8 @@ std::optional<std::string> book_xmp(const core::Document& doc) {
     }
     return core::write_xmp(packet ? std::optional<std::string_view>(*packet) : std::nullopt, info, title);
 }
+
+}  // namespace
 
 std::string png_with_xmp(std::string png, std::string_view xmp) {
     if (png.size() < 8) return png;

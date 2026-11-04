@@ -19,6 +19,7 @@
 #include "app/main_window.hpp"
 #include "app/preferences.hpp"
 #include "app/workspace.hpp"
+#include "core/prefs_table.hpp"
 
 namespace genko::app::menu_look {
 
@@ -253,7 +254,8 @@ void set_coloured(const std::map<QString, QString>& chosen) {
 void apply(MainWindow* window) {
     Look* look = look_of(window);
     const QStringList hid = hidden();
-    const auto colour_of = coloured();
+    // (PC5 H-e, 環境設定 → インターフェイス → メニューカラーを表示: off, the colours kept but not painted)
+    const auto colour_of = core::prefs::value("interface.showMenuColors").get<bool>() ? coloured() : std::map<QString, QString>{};
     look->hidden.clear();
     look->colours.clear();
     if (!hid.isEmpty() || !colour_of.empty()) {
