@@ -16,8 +16,11 @@ namespace genko::app {
 // settings.ini as it stands: (modified, ms since the epoch; size), or (0, 0) when it is not there.
 using SettingsStamp = std::pair<long long, long long>;
 SettingsStamp settings_stamp(const QString& file);
-// The app wrote settings.ini, leaving it so (app/config's settings() when its store goes and the file changed).
-void settings_written(const SettingsStamp& stamp);
+// The app wrote settings.ini, from the file as it was when it opened it (`before`), leaving it so (`after`: app/config's
+// settings() when its store goes and the file changed). PC5 H-e: only the app's own writes one after the other, from the
+// file as the watch last saw it, are its own; a write of another program between them — the app's store then read it and
+// wrote it back with its own (QSettings' lock keeps both) — is applied as any other.
+void settings_written(const SettingsStamp& before, const SettingsStamp& after);
 
 // Watch from now (once for the app: a later call only changes what is called). `changed` is called on the app's thread,
 // a moment after the file stops changing, when a preference's value is not what it was.

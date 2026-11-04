@@ -226,7 +226,8 @@ void PageCanvas::start_pan(const QPointF& pos) {
 }
 
 void PageCanvas::coast() {
-    if (reduce_motion() || std::abs(pan_speed_.x()) + std::abs(pan_speed_.y()) < 0.4 || pan_clock_.elapsed() / 1000.0 - pan_time_ > 0.08) {
+    if (!flick_panning || reduce_motion() || std::abs(pan_speed_.x()) + std::abs(pan_speed_.y()) < 0.4 ||
+        pan_clock_.elapsed() / 1000.0 - pan_time_ > 0.08) {  // (PC5 H-e: フリックパンを有効にする)
         emit changed();
         return;
     }
@@ -345,6 +346,7 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
     if (panning_) {
         const QPointF delta = pos - last_pos_;
         view_.pan += delta;
+        keep_in_view();  // (PC5 H-e: オーバースクロール off)
         last_pos_ = pos;
         const double now = pan_clock_.elapsed() / 1000.0;
         const double frames = std::max(1.0, (now - pan_time_) / 0.016);  // (the speed per screen frame, a little smoothed)
@@ -457,7 +459,11 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
             zoom_to_rect(a.x(), a.y(), b.x(), b.y());
         } else {
             const bool out = zoom_out_;
-            glide([this, out, start] { zoom_by(out ? 0.5 : 2.0, start); });
+            const QPointF clicked = mm_of(start);
+            glide([this, out, start, clicked] {
+                zoom_by(out ? 0.5 : 2.0, start);
+                if (zoom_to_center) center_on(clicked.x(), clicked.y());  // (PC5 H-e: クリックした点を中央にズーム)
+            });
         }
         // (PC5 H-c: the zoom tool with Shift — every pane —, or its すべてのウィンドウをズーム — every window)
         if ((zoom_all || (event->modifiers() & Qt::ShiftModifier)) && before > 0) emit handUsed(view_.scale / before, QPointF(), zoom_all);
@@ -586,8 +592,21 @@ void PageCanvas::contextMenuEvent(QContextMenuEvent* event) {
     emit contextMenuAt(frame != nullptr ? QString::fromStdString(frame->id) : QString(), event->globalPos());
 }
 
+void PageCanvas::keep_in_view() {
+    // (a turned or mirrored view: its edges are not the page's — left as it is, review P3-10)
+    if (overscroll || page() == nullptr || view_.scale <= 0 || view_.rotation != 0.0 || view_.flipped || view_.flipped_v) return;
+    const double pw = page()->spec.width_mm.value() * view_.scale;
+    const double ph = page()->spec.height_mm.value() * view_.scale;
+    const auto keep = [](double& pan, double page_px, double view_px) {
+        pan = page_px >= view_px ? std::clamp(pan, view_px - page_px, 0.0) : (view_px - page_px) / 2.0;
+    };
+    keep(view_.pan.rx(), pw, width());
+    keep(view_.pan.ry(), ph, height());
+}
+
 void PageCanvas::wheelEvent(QWheelEvent* event) {
-    if (event->modifiers() & Qt::ControlModifier) {
+    // (PC5 H-e, スクロールホイールでズーム: the wheel alone zooms — Shift with it still scrolls across)
+    if ((event->modifiers() & Qt::ControlModifier) || (wheel_zooms && !(event->modifiers() & Qt::ShiftModifier))) {
         const int delta = event->angleDelta().y() != 0 ? event->angleDelta().y() : event->pixelDelta().y();
         if (delta != 0) zoom_by(1.0 + std::max(-0.5, std::min(0.5, delta / 600.0)), unturned(event->position()));
         return;
@@ -601,12 +620,26 @@ void PageCanvas::wheelEvent(QWheelEvent* event) {
     }
     const QPointF moved = unturned(QPointF(dx, dy)) - unturned(QPointF(0, 0));  // the page follows the fingers, turned or not
     view_.pan += moved;
+    keep_in_view();  // (PC5 H-e: オーバースクロール off)
     view_.fitted = false;
     rerender_.start();
     update();
 }
 
 bool PageCanvas::event(QEvent* e) {
+    // (PC5 H-e, 拡張コントロール: a touch screen's fingers, a trackpad's pinch and its turn — each can be turned off)
+    if (e->type() == QEvent::Gesture && !touch_gestures) {
+        e->ignore();
+        return true;
+    }
+    if (e->type() == QEvent::NativeGesture) {
+        auto* native = static_cast<QNativeGestureEvent*>(e);
+        if (native->gestureType() == Qt::ZoomNativeGesture && !pinch_zoom) return true;
+        if (native->gestureType() == Qt::RotateNativeGesture) {
+            if (trackpad_rotate && native->value() != 0.0) rotate_view(native->value());
+            return true;
+        }
+    }
     if (e->type() == QEvent::Gesture) {  // two fingers on a touch screen: zoom, turn, move
         auto* gesture = static_cast<QGestureEvent*>(e);
         if (auto* p = static_cast<QPinchGesture*>(gesture->gesture(Qt::PinchGesture))) {

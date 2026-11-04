@@ -8,6 +8,17 @@ string(REGEX REPLACE "(${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${
 configure_file(ops_schema_data.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp" @ONLY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GENKO_OPS_SCHEMA_FILE}")
 
+# The screen's commands (`genko commands`, PC5 H-e: command.list) are embedded from data/commands.json — made from the menus
+# by test_gui_prefs and checked against them there —; a change to the file re-runs CMake.
+set(GENKO_COMMANDS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/data/commands.json")
+file(READ "${GENKO_COMMANDS_FILE}" _genko_commands_hex HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," GENKO_COMMANDS_BYTES "${_genko_commands_hex}")
+set(_b "0x[0-9a-f][0-9a-f],")
+string(REGEX REPLACE "(${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b})" "\\1\n"
+       GENKO_COMMANDS_BYTES "${GENKO_COMMANDS_BYTES}")
+configure_file(commands_data.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/commands_data.cpp" @ONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GENKO_COMMANDS_FILE}")
+
 # The Unicode names of Python's unicodedata.lookup (core/pyre's \N{…}), embedded from data/unicode_names.bin
 # (tools/migration/pyre_tables.py writes it); a change to the file re-runs CMake.
 set(GENKO_PYRE_NAMES_FILE "${CMAKE_CURRENT_SOURCE_DIR}/data/unicode_names.bin")
@@ -153,6 +164,10 @@ genko_library(genko_core
     artboards.cpp
     # PC5 I-f (画像アセット: image-assets@1 — the book's generator setting, set_image_assets, the layers' naming rule)
     image_assets.cpp
+    # PC5 H-e (環境設定と API: genko commands' catalogue, genko session's session.json)
+    commands_list.cpp
+    session_file.cpp
+    "${CMAKE_CURRENT_BINARY_DIR}/commands_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"

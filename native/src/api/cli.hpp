@@ -30,6 +30,9 @@ namespace genko::api {
 //                [--width W] [--max-height H] [--long-edge E] [--jpeg] [--spreads] [--fps F] [--seconds S] [--page N] [--json]
 //                                                the book written out (formats/export.hpp); the files' paths one a line,
 //                                                or {"ok": true, "count", "files"} with --json
+//   genko prefs get|set|reset …, genko commands [--menu M] [--search W], genko session
+//                                                (PC5 H-e) this computer's preferences, the screen's commands with its keys,
+//                                                what the running app has open (api/prefs_cli.hpp)
 //   genko studio <command> …                     the studio's agent tools and human approvals (api/studio_cli.hpp)
 //   genko mcp --root R [--agent ai:<name>] [--transport stdio|streamable-http] [--host H] [--port P]
 //   genko serve --root R [--host H] [--port P] [--allow-origin O]… [--allow-host H]…

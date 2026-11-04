@@ -54,6 +54,9 @@ struct Pref {
     Apply apply = Apply::Live;
     std::string label;      // the words of 環境設定 (Japanese); "" for the app's memories
     bool none_ok = false;   // "" is a value too (none chosen: the computer's own, no folder…)
+    // (PC5 H-e, review P2-3) the person's own lists and dictionaries — the quick access, the command bar, 節 G's user
+    // dictionary and notation table —: put back only when named (reset of everything or of a section passes over them)
+    bool kept_on_reset = false;
 };
 
 // The sections in order: upstream's eighteen, then Genko's.
@@ -97,7 +100,8 @@ Outcome get(QSettings& settings, std::string_view path = {});
 // object sets its keys).
 Outcome set(QSettings& settings, const Json& values);
 // A path, a section or everything back to its value when the file has none — the app's memories (section state) left
-// alone: "" never touches them, naming them is refused (bad_value).
+// alone: "" never touches them, naming them is refused (bad_value). The person's own lists (kept_on_reset) are put back
+// only when named: everything and a section pass over them.
 Outcome reset(QSettings& settings, std::string_view path = {});
 
 // Old names of commands a later command took for its own ("グラデーション": the tool's before PC4 E-0, the panel's since E4;
@@ -108,6 +112,12 @@ Outcome reset(QSettings& settings, std::string_view path = {});
 const std::vector<std::string>& reused_names();
 // The mark set() writes with a key ("names_current/ui/quick"), or none.
 std::optional<std::string> mark_of(std::string_view key);
+
+// PC5 H-e: set() and reset() sign what they write ("<pid> <count>" under this key — state.prefsWriter): the app's watch of
+// settings.ini tells another program's write (genko prefs set) from its own by it, even when the app's own write came just
+// after and kept it (QSettings' lock: the app waited, then wrote both).
+inline constexpr const char* kWriterKey = "prefs/writer";
+void sign(QSettings& settings);
 
 // One value read through the table (the app's getters): `path` must be in it.
 Json value(QSettings& settings, std::string_view path);

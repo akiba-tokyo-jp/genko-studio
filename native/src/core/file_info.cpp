@@ -485,6 +485,17 @@ std::string write_xmp(std::optional<std::string_view> packet, const FileInfo& in
     return x;
 }
 
+std::string with_xmp_history(std::string packet, std::string_view history) {
+    std::string x = without(packet, "photoshop:History");
+    if (history.empty()) return x;
+    const std::string description = "  <rdf:Description rdf:about=\"\" xmlns:photoshop=\"http://ns.adobe.com/photoshop/1.0/\">\n"
+                                    "   <photoshop:History>" +
+                                    xml_escape(history) + "</photoshop:History>\n  </rdf:Description>\n ";
+    const std::size_t at = x.rfind("</rdf:RDF>");
+    x.insert(at == std::string::npos ? x.size() : at, description);
+    return x;
+}
+
 Json to_json(const NativeSource& source) {
     Json out = Json::object();
     out["format"] = source.format;

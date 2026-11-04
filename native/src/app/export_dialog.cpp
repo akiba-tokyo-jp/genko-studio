@@ -10,6 +10,7 @@
 #include <QDoubleSpinBox>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QImage>
@@ -33,6 +34,7 @@
 #include "app/ask.hpp"
 #include "app/config.hpp"
 #include "app/fit_preview.hpp"
+#include "app/preferences.hpp"
 #include "app/look.hpp"
 #include "app/path_label.hpp"
 #include "app/theme.hpp"
@@ -555,7 +557,12 @@ fs::path ExportDialog::out() const {
 void ExportDialog::run() {
     if (running_) return;
     running_ = true;
-    const auto done = qScopeGuard([this] { running_ = false; });
+    QElapsedTimer working;  // (PC5 H-e: 完了したらビープ音 — a long export)
+    working.start();
+    const auto done = qScopeGuard([this, &working] {
+        running_ = false;
+        preferences::done_after(working.elapsed());
+    });
     if (!episode_->deferred.empty()) {  // (a book whose pages are still being read: the ones not read yet would come out empty)
         ask::warning(this, QStringLiteral("Genko"), wording::error(QStringLiteral("the book's pages are still being read: try again in a moment")));
         return;

@@ -78,6 +78,9 @@ std::string xmp_title(std::string_view packet);
 // and every other property kept as it was; a new packet when there is none (or it holds no rdf:RDF). The author is split
 // at ";" into dc:creator's names ("Smith, John" is one), each keyword is one rdf:li of dc:subject. Linear in the packet.
 std::string write_xmp(std::optional<std::string_view> packet, const FileInfo& info, std::optional<std::string_view> title);
+// PC5 H-e (ヒストリーログ → メタデータ): the packet with Photoshop's photoshop:History — the edits, one a line — in place of any it
+// had (none given: taken away), in an rdf:Description of its own at the end.
+std::string with_xmp_history(std::string packet, std::string_view history);
 // The bytes as UTF-8 text, each sequence that is not well formed one U+FFFD (Python's bytes.decode("utf-8", "replace")).
 std::string utf8_replaced(std::string_view bytes);
 

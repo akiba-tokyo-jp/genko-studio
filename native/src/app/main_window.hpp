@@ -525,6 +525,16 @@ public:
     // すべてをタブに統合: every other window's tabs into this window's (a book open here already not twice), those windows
     // closed (nothing asked: their books are open here), the tabs' way again.
     void consolidate_all();
+    // (PC5 H-e, 環境設定 → ワークスペース; app/preferences_panes.cpp) ドキュメントをタブで開く off: the window a book is opened in —
+    // a new window of its own when this one shows a book already (an untouched untitled one gives its place, as before).
+    MainWindow* window_to_open_in();
+    // フローティングドキュメントウィンドウのドッキングを有効にする: this window of one book let go with the pointer at `global`
+    // over another window's tabs (its tab bar, or the top of its page when it has one tab) goes into that window's tabs and
+    // closes. False: not over one, more than one book here, or turned off.
+    bool dock_over(const QPoint& global);
+    // 環境設定 → 一般 → 画像補間法: how a selection's pixels are resampled when it is transformed, in a new window.
+    void set_default_interpolation(const std::string& how) { transform_interp_ = how; }
+    const std::string& interpolation() const { return transform_interp_; }
     // 同じズーム倍率で表示・同じ位置に表示・同じ回転で表示・すべてを同じ表示にする: the view in front given to the window's panes and
     // to the other windows' pages (the zoom by its %, the place by where it is on its page, the turn and the mirrors).
     void match_views(bool zoom, bool location, bool rotation);
