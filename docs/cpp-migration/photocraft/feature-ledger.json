@@ -3445,9 +3445,14 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-g、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/preferences_integrations.cpp: 編集 → 環境設定 ▸ 連携…（H-e の面の作り）。上流 Integrations の allow_agent_control に当たる integrations.controlChannel（既定は切、持ち主だけのローカル接続、決定 6・節 J 3.7）",
+        "上流の control_port は Genko では使わない（制御チャンネルは TCP のポートでなく QLocalServer。節 J 3.7 の 6）。AI 接続（「AI と作る…」・MCP・genko serve・トークン）は前からのとおり",
+        "native/src/core/prefs_table.cpp: integrations.controlChannel（genko prefs は人の CLI から変えられる。MCP・HTTP・制御チャンネルからは変えられない）",
+        "native/tests/e2e/test_control_channel.cpp・native/tests/gui/test_gui_prefs.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
