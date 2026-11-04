@@ -56,7 +56,9 @@ bool page_op(const Json& op) {
                                                 "apply_layer_comp", "set_global_light", "replace_fonts", "set_text_gamma",
                                                 // (the page flattened: HDR トーン, a spot channel merged, a plate deleted — the page
                                                 // multichannel then)
-                                                "hdr_toning", "merge_spot_channel", "delete_channel"};
+                                                "hdr_toning", "merge_spot_channel", "delete_channel",
+                                                // (PC5 I-c: an artboard's size, Canvas Size's way)
+                                                "set_artboard"};
     const Json* name = op.is_object() ? get(op, "op") : nullptr;
     if (name == nullptr || !name->is_string()) return false;
     const std::string& text = name->get_ref<const std::string&>();

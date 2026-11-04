@@ -12,6 +12,7 @@
 
 #include "core/groups.hpp"
 #include "core/layer_basics.hpp"
+#include "core/artboards.hpp"
 #include "core/variables.hpp"
 #include "core/video.hpp"
 #include "core/adjust.hpp"
@@ -293,7 +294,9 @@ bool not_per_page(std::string_view name) {
                          "allow_chat_approval", "name_ok", "advance", "set_bible", "set_script", "define_brush",
                          "set_brush", "split_channels", "merge_channels",
                          // (variables@1, PC5 I-d: the book's variables and data sets)
-                         "set_variables", "set_data_sets", "apply_data_set"});
+                         "set_variables", "set_data_sets", "apply_data_set",
+                         // (artboards@1, PC5 I-c: an artboard is a page made)
+                         "add_artboard", "artboard_from_layers"});
 }
 
 bool printed(const Layer& layer) { return layer.role != LayerRole::Name && layer.role != LayerRole::Draft; }
@@ -663,7 +666,9 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
         }
     }
     // (PC5 I-a: deleting, copying, ungrouping or baking printed layers is drawing on the page — named ids, or every layer)
-    if (named && one_of(name, {"delete_layers", "duplicate_layers", "ungroup_layers", "bake_layer_styles"})) {
+    // (PC5 I-g: auto_blend_layers masks the layers named and makes a printed merged layer, auto_align_layers draws them again
+    // — as transform_layers, but on the cylinder or sphere a filter of their pixels: both on printed layers after the name)
+    if (named && one_of(name, {"delete_layers", "duplicate_layers", "ungroup_layers", "bake_layer_styles", "auto_align_layers", "auto_blend_layers"})) {
         const Json* page_value = get(op_in, "page");
         const bool all_pages = page_value != nullptr && page_value->is_string() && page_value->get_ref<const std::string&>() == "all";
         std::vector<const Page*> pages;
@@ -1406,6 +1411,7 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     validate_groups(work);  // (groups@1, PC5 I-b: a group on a folder only, pass_through a group's only)
                     validate_variables(work);  // (variables@1, PC5 I-d: the book's variables in their normal form)
                     validate_layer_basics(work);  // (blend-channels@1, PC5 I-a: a flag for each colour channel of the page)
+                    validate_artboards(work);  // (artboards@1, PC5 I-c: an artboard well formed, never a cover's or a spread's)
                 } catch (const Error& error) {
                     if (error.code() == "not_yet_ported") throw;
                     throw OpError(error.what());

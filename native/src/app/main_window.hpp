@@ -883,6 +883,10 @@ private:
     void lens_batch_dialog();
     void script_events_dialog();
     void browse_script();
+    // PC5 I-h (app/main_window_automate.cpp, app/hdr_dialog.hpp): 写真の切り抜きと角度補正 (the page in front: its photos new
+    // books) and HDR Pro に統合… (its two windows; the exposures read and merged on a worker, a progress window stopping it).
+    void crop_photos();
+    void merge_to_hdr_dialog();
     std::optional<service::automate::Inputs> inputs_of(const SourceChoice& source);
     bool run_automate(const QString& title, const std::vector<service::automate::Input>& inputs, const core::Json& steps,
                       const service::automate::Output& output, service::automate::Options options, const core::Json& skipped);
@@ -2142,6 +2146,48 @@ public:
 private:
     void build_layer_basic_actions();
     void build_layer_basic_menus(QMenu* layers);
+
+    // --- PC5 I-c (artboards@1, SPEC.md AUTO-01「アートボード」): main_window_artboards.cpp — レイヤー → 新規 → アートボード…・
+    // グループからのアートボード…・レイヤーからのアートボード…, イメージ → アートボードの設定…, 表示 → アートボードを画面サイズに合わせる・
+    // 選択したアートボードのガイドを消去, ファイル → 書き出し → アートボードからファイル…・アートボードから PDF… ------------------------
+public:
+    // アートボード…: its window (app/artboard_dialog), then add_artboard after this page; the new page shown.
+    void new_artboard();
+    // アートボードの設定…: this artboard's window, then set_artboard.
+    void artboard_settings();
+    // グループからのアートボード… (`group`: one group chosen) and レイヤーからのアートボード…: the name asked, then artboard_from_layers.
+    void artboard_from(bool group);
+    // アートボードを画面サイズに合わせる: this artboard alone filling the view.
+    void fit_artboard();
+    // 選択したアートボードのガイドを消去: this artboard's guides (delete_ruler, kind guide).
+    void clear_artboard_guides();
+    // アートボードからファイル… (pdf false: a file each, or one PSD) and アートボードから PDF…: the window, then formats/artboards.
+    void artboards_to_files(bool pdf);
+
+private:
+    void build_artboard_actions();
+    void build_artboard_menus(QMenu* layers, QMenu* pages);
+    void build_artboard_view_menus(QMenu* view);
+    // --- PC5 I-g (SPEC.md AUTO-01「自動整列・自動合成」「Photomerge」「ファイルをスタックとして読み込み・統計」):
+    // main_window_photomerge.cpp — 編集 → レイヤーを自動整列…・レイヤーを自動合成… (auto_align_layers, auto_blend_layers through
+    // send_filter: on a worker, 中止 leaves the book as it was, one Undo), ファイル → 自動処理 → Photomerge…, スクリプト →
+    // ファイルをスタックとして読み込み…・統計… (service::automate's new books, made on a worker with 中止, each a book in a tab of its
+    // own) -----------------------------------------------------------------------------------------------------------------
+public:
+    void auto_align_dialog();
+    void auto_blend_dialog();
+    void photomerge_dialog();
+    void load_stack_dialog();
+    void statistics_dialog();
+    // The paint layers chosen in the layers panel on the page shown (two or more: the commands are on), the bottom first.
+    std::vector<std::string> chosen_paint_layers() const;
+
+private:
+    void build_photomerge_actions();
+    void build_photomerge_menus();
+    void build_auto_align_items(QMenu* edit);
+    // A new book made on a worker (`make`), the window waiting with its progress and 中止; the book in a tab of its own.
+    void made_book(const QString& title, const std::function<formats::Opened()>& make);
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

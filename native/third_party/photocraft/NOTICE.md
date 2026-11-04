@@ -326,6 +326,24 @@ PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT、同梱 `L
   - `crates/engine/src/file_cmds.rs`（716-765 行: `bake` と `flatten_all_effects` — 不透明度・描画モード・クリップを外して効果ごと描き、層の設定に残す）→ `native/src/render/ops_layer_styles.cpp`（`bake_layer_styles`。Genko の境界効果も描き込むこと、8 bit・高精度・インキの道、ブレンド条件を残すことは Genko のもの）。
   - `crates/io/src/blocks.rs`（10-58 行: `parse_brst`・`brst_data`・`locks_from_lspf`・`lspf_from_locks`）→ `native/src/render/import_psd.cpp`（`take_locks`・`take_channels`）・`native/src/formats/psd_export.cpp`（`own_locks`・`basics_blocks`）。`crates/compose/src/lib.rs`（661-690 行: `channel_weights`・`restore_channels` — 外したチャンネルは下の値のまま）→ `native/src/render/page.cpp`（`KeptChannels`。CMYK・Lab・グレーのページ（上流は RGB とグレーだけ）、高精度・インキの道への配線は Genko のもの）・`native/src/render/color_canvas.cpp`・`native/src/render/ink_canvas.cpp`（`keep_channels`）。`crates/format/src/manifest.rs` の `excluded_channels`・`Locks` → `native/src/render/pcraft_read.cpp`・`native/src/formats/pcraft_write.cpp`。
 
+- アートボード（PC5 I-c、artboards@1）:
+  - `crates/engine/src/artboard_cmds.rs`（20-31 行: プリセット、94-139 行: 背景と大きさの引数・`next_artboard_name`、146-320 行: 作る・グループ／レイヤーから・設定（大きさは左上から、手で変えるとプリセットを外す）、336-430 行: `artboards_to_files`・`raster_pdf`・`artboards_to_pdf`）→ `native/src/core/artboards.cpp`・`native/src/render/ops_artboards.cpp`・`native/src/formats/artboards.cpp`（アートボードは Genko のページ。上流のカンバスの上の板と GAP 100 は PSD に並べる位置に使う）。
+  - `crates/io/src/comps_map.rs`（67-110 行: `parse_artboard`・`write_artboard` — `artboardRect`・`artboardPresetName`・`artboardBackgroundType`・`Clr `）、`crates/io/src/blocks.rs`（98-131 行: `color_from_desc`・`color_to_desc`）→ `native/src/render/psd_artboards.cpp`。
+  - `crates/io/src/psd_import.rs`（313-315 行: グループの `artb` をアートボードに）、`crates/doc/src/comps.rs`（`Artboard`・`ArtboardBackground`）→ `native/src/formats/artboards.cpp`（`split_psd_artboards`・`split_pcraft_artboards`）・`native/src/formats/pcraft_write.cpp`。
+  - `crates/engine/src/artboard_cmds/tests.rs` の試験の考え（プリセット・名前・背景・書き出しのファイル名）→ `native/tests/contract/test_contract_artboards.cpp`。
+
+- HDR Pro に統合・写真の切り抜きと角度補正（PC5 I-h）:
+  - `crates/algo/src/hdr.rs`（1-541 行: `estimate_exposures`・`mtb_offset`（G. Ward の MTB）・`sample_pixels`・`response_curve`（Debevec・Malik）・`merge`（帽子形の重み・ゴーストの除去・基準の露出への倍率）・`tone_map` の 4 つの方法、試験の考え）→ `native/src/render/hdr_merge.{hpp,cpp}`（式は同じ。画像は読んだ深さのまま持ち、位置合わせは読むときにずらす。カメラ RAW の線形の光は応答曲線を推定せずにそのまま合成する: Genko の追加）・`native/tests/unit/test_hdr_merge.cpp`。
+  - `crates/algo/src/photo_util.rs`（`solve_dense`・`Normal`・sRGB の曲線）→ `native/src/render/hdr_merge.cpp`。ローカル適応は `crates/algo/src/tone.rs` の `hdr_toning`（PC2c で移した `render/tone_ops.cpp`）を使う。
+  - `crates/algo/src/scancrop.rs`（1-299 行: 背景の中央値・大津のしきい値・閉じて開く・8 近傍の部分・凸包・最小の外接長方形・読む順、試験の考え）→ `native/src/render/scancrop.{hpp,cpp}`（切り出しは `render/resample` の射影で、スキャンの深さのまま）・`native/tests/unit/test_scancrop.cpp`。
+  - `crates/engine/src/photo_cmds.rs`（559-700 行: `merge_to_hdr` — 露出の決め方（引数・EXIF・推定）、真ん中の露出への位置合わせ、モードと方法の引数と範囲、702-755 行: `crop_and_straighten`）→ `native/src/service/automate_photos.{hpp,cpp}`（結果は 開く… と同じ名前の無い本。32 bit は内蔵の linear-srgb）。`crates/algo/src/exif.rs` の `exposure_factor` → `render::hdr::exposure_factor`。
+- 自動整列・自動合成・Photomerge・ファイルをスタックとして読み込み・統計（PC5 I-g）:
+  - `crates/algo/src/features.rs`（1-562 行: Harris のコーナー・steered BRIEF・照合・RANSAC・正規化 DLT・`register` とその試験）→ `native/src/render/features.cpp`（同じ定数と順。乱数 SplitMix64 も同じ）。
+  - `crates/algo/src/panorama.rs`（1-1433 行: レイアウトと投影・動き・`Placement`・組の照合と Brown–Lowe の確かめ・焦点距離・最大全域木と束調整・伸びすぎの判定・ゲインと周辺光量・継ぎ目・多重解像度合成とその試験）→ `native/src/render/panorama.cpp`（並列の `par_map` は順を保つ 1 本のスレッドに）。`crates/algo/src/photo_util.rs`（`solve_dense`・`Normal`・`Rng`）→ `native/src/render/features.cpp`・`panorama.cpp`。
+  - `crates/algo/src/pyramid.rs`（1-316 行: REDUCE・EXPAND・ガウシアンとラプラシアンのピラミッド・合成・焦点合成とパノラマの重み、その試験）→ `native/src/render/pyramid.cpp`（1024 px のタイルに分けて合成する `blend_tiled`、32 bit の値を 0〜1 に切らないことは Genko のもの）。
+  - `crates/engine/src/align_cmds.rs`（43-221 行: `auto_align`・`auto_blend` とその試験）・`crates/engine/src/photo_cmds.rs`（95-391 行: 輝度と被覆の縮小・登録・平面の行列・`seam_blend`・`seam_order`、392-550 行: Photomerge と端の塗りつぶし）→ `native/src/render/ops_align.cpp`（op `auto_align_layers`・`auto_blend_layers`、層を 3 つの道で描き直すこと（`render/layer_transform`）、ページの mm の行列、マスクをページのマスクの格子に、自動合成の重みを縮めた格子で、記憶の見積もりと上限で断ることは Genko のもの）・`native/src/service/automate_merge.cpp`（新しい本の作り方は Genko のもの）。
+  - `crates/engine/src/file_cmds.rs`（676-712 行: `load_files_into_stack`）・`crates/engine/src/automate_cmds.rs`（359-389 行: `statistics`）→ `native/src/service/automate_merge.cpp`（モードと深さを `set_color_mode` で、大きさを `set_canvas_size` でそろえること、統計を常に 1 つの SO にしてからスタックモードを付けることは Genko のもの）。窓は `native/src/app/auto_align_dialog.cpp`・`native/src/app/photomerge_dialog.cpp`（Qt。欄の名前は Photoshop）。
+
 ## 表示・窓・環境設定（PC5 節 H）
 
 - 表示・窓・環境設定の土台（PC5 H-0）:

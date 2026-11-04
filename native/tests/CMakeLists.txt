@@ -637,6 +637,13 @@ genko_test(test_contract_layers SOURCES contract/test_contract_layers.cpp DEPS g
 # .pcraft's slices (upstream's reader with $GENKO_PCRAFT_CHECK).
 genko_test(test_contract_slices SOURCES contract/test_contract_slices.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC5 I-c (artboards@1, the user's decision 3: アートボード＝ページ): add_artboard, artboard_from_layers (layers, a group, what is
+# kept), set_artboard (size and anchor, the contents kept or moved, the preset, the mark taken off), a cover and a spread
+# refused; the background on the three ways of drawing; to files, to PDF, one PSD as psd-tools reads it (and through `genko
+# export --format artboards`); a PSD's artboards opened a page each (import_psd as before); a .pcraft's artboard; the book
+# written and read, a book without artboards as before.
+genko_test(test_contract_artboards SOURCES contract/test_contract_artboards.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
 # PC5 J-e2 (video@1): the video layers through the command line (footage read into the book, apply, inspect --timeline,
 # render --frame, undo; a footage frame gone read-only), the ops (frames inserted, duplicated, deleted, altered, restored;
 # the footage interpreted, replaced; rasterized; frames to layers and cels), refusals (locks, footage not held or past 4
@@ -700,6 +707,30 @@ genko_test(test_automate SOURCES unit/test_automate.cpp DEPS genko_test_support 
 genko_test(test_contract_automate SOURCES contract/test_contract_automate.cpp DEPS genko_test_support genko_service
            LABELS contract TIMEOUT 900)
 add_dependencies(test_contract_automate genko)
+# PC5 I-h (SPEC.md AUTO-01: HDR Pro に統合・写真の切り抜きと角度補正): render/hdr_merge (exposures of a known radiance merged
+# back at 8 and 16 bits and of linear light, the estimated exposures, the response, ghosts, MTB, the four tone mappings) and
+# the books service/automate_photos makes of them; render/scancrop (rotated photos on a scan: their number, angles within
+# 0.5°, sizes; each cut out upright at the scan's depth) and the books of a page's photos. `genko automate hdr` (32 bits in
+# linear-srgb, 16 and 8 tone mapped, EXIF's exposures, synthetic RAW files as linear light) and `genko automate crop-photos`.
+genko_test(test_hdr_merge SOURCES unit/test_hdr_merge.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 600)
+genko_test(test_scancrop SOURCES unit/test_scancrop.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 600)
+genko_test(test_contract_hdr SOURCES contract/test_contract_hdr.cpp support/raw_testgen.cpp DEPS genko_test_support genko_service
+           LABELS contract TIMEOUT 900)
+add_dependencies(test_contract_hdr genko)
+# PC5 I-g (SPEC.md AUTO-01「自動整列・自動合成」「Photomerge」): the registration (render/features: Harris, steered BRIEF,
+# RANSAC — known maps undone within 0.5 px, the same again) and the panorama (render/panorama, render/pyramid: the layouts, the
+# focal length, the placements, gains, seams, the multi-band blend, focus stacking, the tiled blend as the whole), as PhotoCraft's
+# algo tests them.
+genko_test(test_features SOURCES unit/test_features.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_panorama SOURCES unit/test_panorama.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC5 I-g: auto_align_layers on 8-bit, 16-bit and CMYK pages (reposition within a pixel, the six projections, the refusals:
+# a lock, nothing to match, an agent), auto_blend_layers (the panorama's masks and seamless layer of their kind, focus
+# stacking), Photomerge's new book (its size, layers, masks, the edges filled, the same again, too large refused), ファイルを
+# スタックとして読み込み, 統計's median and `genko automate stack|statistics|photomerge`.
+# (test_contract_align is PC3 C-d's align_layers: this one is named for 自動整列)
+genko_test(test_contract_auto_align SOURCES contract/test_contract_auto_align.cpp DEPS genko_test_support genko_service
+           LABELS contract TIMEOUT 1800)
+add_dependencies(test_contract_auto_align genko)
 # The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
 # across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a
 # warped line's pictures within ARCHITECTURE.md §9: Python's homography comes from numpy's SVD).
@@ -818,6 +849,10 @@ if(GENKO_BUILD_APP)
   # sized, promoted, divided, deleted, スライスオプション), 新規レイヤーベースのスライス, 表示 → スライス・スライスをロック・スライスを
   # 消去・スナップ先 → スライス, 環境設定 → ガイド・グリッド・スライス's two, Web 用に保存 by slices — each change one Undo.
   genko_test(test_gui_slices SOURCES gui/test_gui_slices.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC5 I-c (artboards@1): レイヤー → 新規 ▸ アートボード…・グループ・レイヤーからのアートボード…, イメージ → アートボードの設定…, 表示 →
+  # アートボードを画面サイズに合わせる・選択したアートボードのガイドを消去・表示・非表示 ▸ アートボードガイド・アートボード名, 書き出し ▸
+  # アートボードからファイル…・PDF… — their places, the windows asked, each change one Undo.
+  genko_test(test_gui_artboards SOURCES gui/test_gui_artboards.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC5 I-e: ファイル → 自動処理 ▸ (バッチ…・ドロップレットを作成…・条件付きモード変更…・画像を合わせる…・レンズ補正…) and スクリプト ▸
   # (画像プロセッサー…・スクリプトイベントマネージャー…・参照…): their places, the windows asked, the script events raised by the
   # person's save (never the automatic one) and not run once their script changed

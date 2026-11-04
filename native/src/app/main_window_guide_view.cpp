@@ -46,6 +46,11 @@ const ShowItem kShowItems[] = {
      "選んだレイヤーの描かれた範囲を細い線で囲みます"},
     {"act_show_guides", "ガイド", "view/show_guides", true, &PageCanvas::show_guide_lines, "置いたガイドを表示します"},
     {"act_show_canvas_guides", "カンバスガイド", "view/show_canvas_guides", true, &PageCanvas::show_canvas_guides, "ページに置いたガイドを表示します"},
+    // (PC5 I-c, artboards@1: an artboard page's guides, and its name over it)
+    {"act_show_artboard_guides", "アートボードガイド", "view/show_artboard_guides", true, &PageCanvas::show_artboard_guides,
+     "アートボードのページに置いたガイドを表示します"},
+    {"act_show_artboard_names", "アートボード名", "view/show_artboard_names", true, &PageCanvas::show_artboard_names,
+     "アートボードの名前をページの左上の上に表示します"},
     {"act_show_smart_guides", "スマートガイド", "view/show_smart_guides", true, &PageCanvas::show_smart_guides,
      "ドラッグ中に、ほかのレイヤーや用紙の中央にそろった線と、両隣と同じになった間隔を表示します"},
     {"act_show_mesh", "メッシュ", "view/show_mesh", true, &PageCanvas::show_mesh, "ワープ・パペットワープ・遠近法ワープの格子と枠を表示します"},

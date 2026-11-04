@@ -18,6 +18,7 @@
 #include "core/ink.hpp"
 #include "core/json.hpp"
 #include "core/psd_keep.hpp"
+#include "core/artboards.hpp"
 // PC5 節 J (layer-comps@1, slices@1, annotations@1, measure@1)
 #include "core/annotations.hpp"
 #include "core/layer_comps.hpp"
@@ -407,6 +408,8 @@ struct Page {
     std::optional<Slices> slices;
     std::vector<Annotation> annotations;
     std::optional<Measure> measure;
+    // PC5 I-c (artboards@1, core/artboards.hpp): the page as an artboard (none: a page as every page)
+    std::optional<Artboard> artboard;
 
     Rect paper_rect_mm() const;
     Rect trim_rect_mm() const;

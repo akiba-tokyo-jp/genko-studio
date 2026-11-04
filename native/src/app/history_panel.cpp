@@ -127,6 +127,8 @@ const std::map<std::string, const char*>& names() {
         // (PC5 I-a: core/ops_layers, render/ops_layer_styles)
         {"delete_layers", "レイヤーを削除した"}, {"duplicate_layers", "レイヤーを複製した"}, {"ungroup_layers", "グループを解除した"},
         {"bake_layer_styles", "レイヤー効果を統合した"},
+        // (PC5 I-g: render/ops_align)
+        {"auto_align_layers", "レイヤーを自動整列した"}, {"auto_blend_layers", "レイヤーを自動合成した"},
         // (PC5 H-b: core/ops_rulers)
         {"add_guide_layout", "ガイドレイアウトを作った"},
         // (PC5 J-a, layer-comps@1: render/ops_layer_comps)
@@ -144,6 +146,8 @@ const std::map<std::string, const char*>& names() {
         // (PC5 J-b, slices@1: render/ops_slices)
         {"add_slice", "スライス"}, {"set_slice", "スライスオプション"}, {"delete_slices", "スライスを削除"}, {"divide_slice", "スライスを分割"},
         {"slices_from_guides", "ガイドからスライスを作成"},
+        // (PC5 I-c, artboards@1: render/ops_artboards)
+        {"add_artboard", "アートボード"}, {"artboard_from_layers", "レイヤーからのアートボード"}, {"set_artboard", "アートボードを編集"},
     };
     return table;
 }

@@ -37,6 +37,7 @@
 #include "core/type_text.hpp"
 #include "core/groups.hpp"
 #include "core/layer_basics.hpp"
+#include "core/artboards.hpp"
 // PC5 J-0 (制作の補助)
 #include "core/annotations.hpp"
 #include "core/layer_comps.hpp"
@@ -437,6 +438,7 @@ private:
     void read_file_info(core::Document& doc);
     // PC5 J-0 (layer-comps@1, slices@1, annotations@1, measure@1)
     void read_page_production(core::Page& page, const std::string& at);
+    void read_page_artboard(core::Page& page, const std::string& at);  // (PC5 I-c: artboards@1)
     void check_named(const std::string& ref, std::string_view suffix, const std::string& at, std::string_view noun);
     std::unordered_map<std::string, core::vector::ShapeListPtr> shape_blobs_;  // (shapes read in this load)
 };
@@ -1583,6 +1585,7 @@ core::Document Reader::migrate(const Json& payload) {
         read_page_vectors(page, at);
         read_page_files(page, at);
         read_page_production(page, at);  // (PC5 J-0)
+        read_page_artboard(page, at);     // (PC5 I-c)
         page_list.push_back(std::make_shared<core::Page>(std::move(page)));
         if (skip_assets_) deferred.push_back(page_list.back());
     }
@@ -1764,6 +1767,9 @@ core::Document Reader::migrate(const Json& payload) {
     // (blend-channels@1, PC5 I-a: a flag for each colour channel of the page, on a page whose mode has them)
     try { core::validate_layer_basics(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (artboards@1, PC5 I-c: an artboard well formed, never a cover's or a spread's)
+    try { core::validate_artboards(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     // (variables@1, PC5 I-d: the variables in their normal form; the pictures their values name in the book's folder)
     try {
         core::validate_variables(doc);
@@ -1864,6 +1870,20 @@ void Reader::read_page_production(core::Page& page, const std::string& at) {
         core::Measure measure = core::measure_from_json(raw);
         if (!measure.empty()) page.measure = std::move(measure);
     });
+}
+
+// PC5 I-c (artboards@1, SPEC.md AUTO-01「アートボード」): the page's artboard, taken out of the keys written back as they were
+// read (one that cannot be read is reported and kept so: the book is read-only; a cover's or a spread's: validate_artboards).
+void Reader::read_page_artboard(core::Page& page, const std::string& at) {
+    const auto it = page.extra.find(std::string(core::kArtboardKey));
+    if (it == page.extra.end()) return;
+    try {
+        if (!it->is_null()) page.artboard = core::artboard_from_json(*it);
+    } catch (const core::Error& error) {
+        issue("broken_value", at_key(at, std::string(core::kArtboardKey)), {}, error.what());
+        return;
+    }
+    page.extra.erase(it);
 }
 
 // file-info@1 (PC4): the book's File Info, kept under "file_info" (taken out of the keys written back as they were read; one
@@ -2067,7 +2087,9 @@ bool is_known_feature(std::string_view feature) {
            // PC5 I-d (core/variables.hpp)
            feature == core::kVariablesFeature ||
            // PC5 I-a (core/layer_basics.hpp)
-           feature == core::kLayerLocksFeature || feature == core::kBlendChannelsFeature;
+           feature == core::kLayerLocksFeature || feature == core::kBlendChannelsFeature ||
+           // PC5 I-c (core/artboards.hpp)
+           feature == core::kArtboardsFeature;
 }
 
 int project_version(const Json& payload) {

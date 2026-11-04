@@ -621,6 +621,7 @@ void PageRenderer::show(DocPtr doc, std::size_t index) {
                        old.color == page.color &&  // (color-mode@1: another mode, profile or table of inks: all of it)
                        same_channels(old.channels, page.channels) &&  // (channels@1)
                        old.fills == page.fills && old.extra == page.extra && old.effects == page.effects && old.ruler == page.ruler &&
+                       old.artboard == page.artboard &&  // (artboards@1, PC5 I-c: its background under the page)
                        old.rulers == page.rulers && old.prims == page.prims && old.numero == page.numero &&
                        old.onion_from == page.onion_from && same_onion && same_book && old.layers.size() == page.layers.size() &&
                        doc_->brush_custom == doc->brush_custom && doc_->story.size() == doc->story.size() &&

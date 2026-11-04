@@ -454,10 +454,16 @@ private slots:
         // フォントを解決… (act_type_replace_missing, act_type_resolve_missing), 編集 → スペルチェック… (act_spelling) and 環境設定 → テキスト…
         // (act_prefs_type: its page made) — test_gui_type_panels; PC5 J-e1's 8 (SPEC PROD-01) — 次・前・最初・最後のフレーム,
         // 作業範囲の開始点へ移動・終了点へ移動, フレームへ移動… (act_next_frame … act_go_to_frame) and ビデオをレンダリング… (act_render_video)
-        // — test_gui_anim; PC5 J-e2's 2 (SPEC PROD-01) — ラスタライズ → ビデオ (act_rasterize_video) and 読み込み → ビデオフレームからレイヤー…
+        // — test_gui_anim.
+        // and PC5 I-h's 2 — ファイル → 自動処理 → 写真の切り抜きと角度補正・HDR Pro に統合… (act_crop_straighten_photos,
+        // act_merge_to_hdr_pro) — test_gui_automate.
+        // and PC5 I-g's 5 (SPEC AUTO-01「自動整列・自動合成」「Photomerge」) — 編集 → レイヤーを自動整列…・レイヤーを自動合成…
+        // (act_auto_align_layers, act_auto_blend_layers), ファイル → 自動処理 → Photomerge… (act_photomerge), スクリプト →
+        // ファイルをスタックとして読み込み…・統計… (act_load_files_into_stack, act_statistics) — test_gui_automate.
+        // and PC5 J-e2's 2 (SPEC PROD-01) — ラスタライズ → ビデオ (act_rasterize_video) and 読み込み → ビデオフレームからレイヤー…
         // (act_video_frames_to_layers); its 12 of ビデオレイヤー ▸ made real in their frames' places — test_gui_anim.
-        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8 and J-e2's 2)
-        QCOMPARE(w->actions_by_name().size(), std::size_t{779});
+        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8, I-c's 10: アートボード… など — test_gui_artboards —, I-h's 2, I-g's 5 and J-e2's 2)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{796});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -539,17 +545,24 @@ private slots:
         QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate")) != nullptr);
         QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate"))->menuAction()->isVisible());
         QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_automate"))),
-                 (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"), QStringLiteral("条件付きモード変更…"),
-                              QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…")}));
+                 (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"),
+                              QStringLiteral("写真の切り抜きと角度補正"), QStringLiteral("|"),  // (PC5 I-h)
+                              QStringLiteral("条件付きモード変更…"), QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…"),
+                              QStringLiteral("|"), QStringLiteral("HDR Pro に統合…"),  // (PC5 I-h)
+                              QStringLiteral("Photomerge…")}));  // (PC5 I-g)
         QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_scripts"))),
                  (QStringList{QStringLiteral("画像プロセッサー…"), QStringLiteral("すべての空のレイヤーを削除"), QStringLiteral("すべてのレイヤー効果を統合"),  // (PC5 I-a)
                               QStringLiteral("すべてのマスクを統合"), QStringLiteral("|"),
-                              QStringLiteral("スクリプトイベントマネージャー…"), QStringLiteral("|"), QStringLiteral("参照…")}));
+                              QStringLiteral("スクリプトイベントマネージャー…"), QStringLiteral("|"),
+                              QStringLiteral("ファイルをスタックとして読み込み…"), QStringLiteral("統計…"), QStringLiteral("|"),  // (PC5 I-g)
+                              QStringLiteral("参照…")}));
         QMenu* exports = w->findChild<QMenu*>(QStringLiteral("menu_export"));
         QVERIFY(exports != nullptr);
         QCOMPARE(items(exports), (QStringList{QStringLiteral("PNG としてクイック書き出し"), QStringLiteral("書き出し形式…"), QStringLiteral("|"),
                                              QStringLiteral("書き出しの環境設定…"), QStringLiteral("|"), QStringLiteral("Web 用に保存（従来）…"), QStringLiteral("|"),
-                                             QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("レイヤーからファイル…"),
+                                             QStringLiteral("原稿を書き出す…"), QStringLiteral("|"),
+                                             QStringLiteral("アートボードからファイル…"), QStringLiteral("アートボードから PDF…"),  // (PC5 I-c)
+                                             QStringLiteral("レイヤーからファイル…"),
                                              QStringLiteral("レイヤーカンプからファイル…"),  // (PC5 J-a)
                                              QStringLiteral("パスを Illustrator へ…"),
                                              QStringLiteral("ビデオをレンダリング…"),  // (PC5 J-e1: after パスを Illustrator へ…, Photoshop's)
@@ -966,12 +979,14 @@ private slots:
                               // スクリーンモード ▸, 表示・非表示 ▸ (ピクセルグリッド; H-b fills the rest), 手のひらツール)
                               QStringLiteral("32 bit プレビューオプション…"), QStringLiteral("|"),
                               QStringLiteral("ズームイン"), QStringLiteral("ズームアウト"), QStringLiteral("画面サイズに合わせる"),
+                              QStringLiteral("アートボードを画面サイズに合わせる"),  // (PC5 I-c)
                               QStringLiteral("レイヤーを画面サイズに合わせる"), QStringLiteral("100%"), QStringLiteral("200%"), QStringLiteral("プリントサイズ"),
                               QStringLiteral("|"), QStringLiteral("水平方向に反転"), QStringLiteral("パターンプレビュー"), QStringLiteral("ピクセルアートプレビュー"),
                               // (PC5 H-b: エクストラ, 表示・非表示 ▸ — ターゲットパス, ブラシプレビュー and 選択範囲のエッジ in it —, the guides')
                               QStringLiteral("|"), QStringLiteral("スクリーンモード ▸"), QStringLiteral("|"), QStringLiteral("エクストラ"), QStringLiteral("表示・非表示 ▸"),
                               QStringLiteral("|"), QStringLiteral("定規"), QStringLiteral("|"),
                               QStringLiteral("スナップ"), QStringLiteral("スナップ先 ▸"), QStringLiteral("|"), QStringLiteral("ガイドをロック"), QStringLiteral("ガイドを消去"),
+                              QStringLiteral("選択したアートボードのガイドを消去"),  // (PC5 I-c)
                               QStringLiteral("カンバスガイドを消去"), QStringLiteral("新規ガイド…"), QStringLiteral("新規ガイドレイアウトを作成…"),
                               QStringLiteral("シェイプから新規ガイドを作成"),
                               // (PC5 J-b: スライスをロック・スライスを消去)
