@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/actor.hpp"
 #include "core/command_bus.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
@@ -160,6 +161,10 @@ public:
     // Apply ops at once in memory (throws core::ApplyError and leaves the book as it was). `ids`: the ids new_id()
     // gives first while they are applied (a pen line's id chosen before it was drawn). [{"op": "undo"}] is undo().
     core::ApplyResult apply(const core::Json& ops, const std::vector<std::string>& ids = {});
+    // (PC5 J-g, SPEC.md PROD-01「制御チャンネル」) apply() as another actor than the person: the control channel's token's
+    // (core::Actor::with_agent_rights — the rules MCP's apply_ops has). The change is the book's as any other — in 履歴, Undo
+    // takes it back, a rebase applies it again as that actor — and the journal names that actor.
+    core::ApplyResult apply_as(const core::Json& ops, const core::Actor& actor, const std::vector<std::string>& ids = {});
     // apply() of ops a worker applied already to `base` (a window's preview, PC3 B4: its result, the ids new_id() gave
     // meanwhile): taken as it is when the book is still `base` (the same change, journal and ids as apply() makes), else
     // applied again with those ids first.
@@ -288,6 +293,7 @@ private:
         DocPtr after;
         bool recover = false;          // adopting a recovery point (saved as action "recover")
         std::string script;            // (PC5 I-0) the script it came from: the journal's "script"
+        std::optional<core::Actor> actor;  // (PC5 J-g) apply_as's actor: the journal's (none: the session's person)
         bool whole = false;            // 復帰: the book put back whole (its ops are not made again on another book)
         std::string txn;               // the transaction that first saved it (the journal's entry for it)
         bool on_disk = false;          // that transaction is committed: undo and redo now go through the journal
@@ -328,7 +334,10 @@ private:
     static JobResult execute(const Job& job);
 
     // apply()'s change of `result` (its ops applied to the book as it is, new_id() giving `ids`) kept, shown and saved.
-    core::ApplyResult keep_applied(const core::Json& ops, core::ApplyResult result, std::vector<std::string> ids);
+    core::ApplyResult keep_applied(const core::Json& ops, core::ApplyResult result, std::vector<std::string> ids,
+                                   std::optional<core::Actor> actor = std::nullopt);
+    // The actor a change was made as (apply_as's, else the person's).
+    core::Actor actor_of(const Change& change) const { return change.actor ? *change.actor : core::Actor(actor_); }
     void touch(BookChange change);
     void schedule_save();
     void start_job();

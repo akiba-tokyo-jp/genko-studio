@@ -466,11 +466,11 @@ private slots:
         // and PC5 J-e2's 2 (SPEC PROD-01) — ラスタライズ → ビデオ (act_rasterize_video) and 読み込み → ビデオフレームからレイヤー…
         // (act_video_frames_to_layers); its 12 of ビデオレイヤー ▸ made real in their frames' places — test_gui_anim.
         // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8, I-c's 10: アートボード… など — test_gui_artboards —, I-h's 2, I-g's 5, I-f's 3, J-f's 1 and J-e2's 2)
-        // (and PC5 H-e's 3: 環境設定 ▸ ヒストリーログ…・仮想記憶ディスク…・拡張コントロール… — 800＋3)
+        // (and PC5 H-e's 3: 環境設定 ▸ ヒストリーログ…・仮想記憶ディスク…・拡張コントロール… — 800＋3; PC5 J-g's 1: 環境設定 ▸ 連携…)
         // (and PC5 H-f's 16: 編集 → 最後の状態を切り替え (act_toggle_last_state), メモリをクリア ▸ 5 (act_purge_undo, act_purge_clipboard,
         // act_purge_histories, act_purge_all, act_purge_video_cache) — test_gui_output —, 表示 → ピクセル縦横比 ▸ 9 (act_pixel_aspect_custom
-        // and the 8 ratios) and ピクセル縦横比を補正 (act_pixel_aspect_correction) — test_gui_view: 803＋16)
-        QCOMPARE(w->actions_by_name().size(), std::size_t{819});
+        // and the 8 ratios) and ピクセル縦横比を補正 (act_pixel_aspect_correction) — test_gui_view: 804＋16)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{820});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -549,7 +549,7 @@ private slots:
                               QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|"),
                               QStringLiteral("プリント…"), QStringLiteral("1 部プリント"),  // (PC5 I-f)
                               QStringLiteral("|"), QStringLiteral("タイムラプスを記録する"), QStringLiteral("タイムラプスを書き出す…"),
-                              QStringLiteral("|"), QStringLiteral("自動処理 ▸"), QStringLiteral("スクリプト ▸"), QStringLiteral("オートアクション ▸"),
+                              QStringLiteral("|"), QStringLiteral("自動処理 ▸"), QStringLiteral("スクリプト ▸"), QStringLiteral("アクション ▸"),
                               QStringLiteral("|"), QStringLiteral("終了")}));  // (PC5 H-0: 環境設定 in 編集)
         // (PC5 I-0, SPEC.md AUTO-01: 自動処理 ▸ is a frame, shown once a group puts a command in it — PC5 I-e's)
         QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate")) != nullptr);
@@ -669,8 +669,8 @@ private slots:
         QCOMPARE(studio.act("act_smart_rasterize")->text(), QStringLiteral("ラスタライズ"));
         const std::int64_t revision = studio.doc().revision;
         // (PC5 J-d1: 計測スケールを設定 ▸ 初期設定・カスタム…, ものさしツール, カウントツール made real; J-d2: データポイントを選択 ▸
-        // カスタム…, 計測値を記録, 目盛りマーカーを配置…, ウィンドウ → 計測ログ — test_gui_measure; J-e2: ビデオレイヤー ▸ — test_gui_anim)
-        for (const char* name : {"act_panel_actions"}) {  // (PC5 J-a: レイヤーカンプ made real; J-c: 注釈)
+        // カスタム…, 計測値を記録, 目盛りマーカーを配置…, ウィンドウ → 計測ログ — test_gui_measure; J-e2: ビデオレイヤー; J-g: アクション
+        for (const char* name : std::initializer_list<const char*>{}) {  // (no frame left: every group made its own real)
             QAction* a = studio.act(name);
             QVERIFY2(a != nullptr, name);
             QVERIFY2(!a->statusTip().isEmpty(), name);
@@ -688,7 +688,7 @@ private slots:
         for (const auto& [attribute, count] : made) QVERIFY2(count == 1, qPrintable(attribute));
         const std::vector<QAction*> listed = genko::app::preferences::commands(w);
         for (const char* name : {"act_measure_record", "act_measure_scale_custom", "act_measure_data_points", "act_video_rasterize", "act_panel_notes",
-                                 "act_panel_layer_comps", "act_comps_to_files"}) {
+                                 "act_panel_layer_comps", "act_comps_to_files", "act_panel_actions"}) {
             QAction* own = studio.act(name);
             QVERIFY2(std::find(listed.begin(), listed.end(), own) != listed.end(), name);
         }
@@ -1057,7 +1057,8 @@ private slots:
                                            QStringLiteral("プラグイン…"),  // (PC5 J-f: the plugins' own window, act_plugin_settings)
                                            QStringLiteral("テキスト…"),  // (PC5 G-d)
                                            QStringLiteral("拡張コントロール…"),  // (PC5 H-e)
-                                           QStringLiteral("Camera Raw…"), QStringLiteral("ペンタブレット…"), QStringLiteral("長い時間の作業…")}));
+                                           QStringLiteral("Camera Raw…"), QStringLiteral("連携…"),  // (PC5 J-g)
+                                           QStringLiteral("ペンタブレット…"), QStringLiteral("長い時間の作業…")}));
         QVERIFY(!items(menu(QStringLiteral("ファイル"))).contains(QStringLiteral("環境設定…")));
         QVERIFY(!items(menu(QStringLiteral("ヘルプ"))).contains(QStringLiteral("検索")));
         // each pane opens the dialog at its page

@@ -60,7 +60,7 @@ QString step_label(const Json& op) { return history::describe(Json::array({op}))
 // --- the dialog --------------------------------------------------------------------------------------------------------
 
 ActionsDialog::ActionsDialog(MainWindow* window) : QDialog(window), window_(window) {
-    setWindowTitle(QStringLiteral("オートアクションの管理"));
+    setWindowTitle(QStringLiteral("アクションの管理"));
     resize(560, 420);
     names = new QListWidget;
     steps = new QListWidget;
@@ -126,7 +126,7 @@ void ActionsDialog::fill_steps() {
 }
 
 void ActionsDialog::keep() {
-    if (const auto failed = save(data_)) ask::warning(this, QStringLiteral("オートアクション"), *failed);
+    if (const auto failed = save(data_)) ask::warning(this, QStringLiteral("アクション"), *failed);
     fill_steps();
 }
 
@@ -162,15 +162,15 @@ void ActionsDialog::rename() {
     Json again = Json::object();
     for (const auto& [key, value] : data_.items()) again[key == name->toStdString() ? renamed.toStdString() : key] = value;
     data_ = again;
-    if (const auto failed = save(data_)) ask::warning(this, QStringLiteral("オートアクション"), *failed);
+    if (const auto failed = save(data_)) ask::warning(this, QStringLiteral("アクション"), *failed);
     fill_names(renamed);
 }
 
 void ActionsDialog::remove_current() {
     const auto name = current();
-    if (name && ask::question(this, QStringLiteral("オートアクション"), QStringLiteral("「%1」を消しますか？").arg(*name))) {
+    if (name && ask::question(this, QStringLiteral("アクション"), QStringLiteral("「%1」を消しますか？").arg(*name))) {
         data_.erase(name->toStdString());
-        if (const auto failed = save(data_)) ask::warning(this, QStringLiteral("オートアクション"), *failed);
+        if (const auto failed = save(data_)) ask::warning(this, QStringLiteral("アクション"), *failed);
         fill_names();
     }
 }

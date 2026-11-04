@@ -77,6 +77,9 @@ genko_library(genko_service
     automate_photos.cpp
     # PC5 I-g (ファイルをスタックとして読み込み・統計・Photomerge: new books of pictures)
     automate_merge.cpp
+    # PC5 J-g (制御チャンネル: the tokens of tokens.json — moved from api/ for the app —, the channel's rules)
+    tokens.cpp
+    control.cpp
     ${GENKO_SPELL_RESOURCES}
     "${CMAKE_CURRENT_BINARY_DIR}/studio_data.cpp"
   PUBLIC_DEPS genko_formats genko_render_ops genko_render genko_studio genko_storage genko_core Qt6::Core

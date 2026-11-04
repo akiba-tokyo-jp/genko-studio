@@ -1,5 +1,9 @@
 #include "api/server_cli.hpp"
 
+#include <QByteArray>
+#include <QFile>
+#include <QLocalSocket>
+
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -16,6 +20,7 @@
 #include "core/json.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
+#include "service/control.hpp"
 
 namespace genko::api {
 
@@ -209,6 +214,97 @@ int token_command(const QStringList& args, bool ascii) {
         print(Json::object({{"ok", false}, {"error", error.what()}, {"code", error.code()}}));
         return 1;
     }
+}
+
+// (PC5 J-g) one line read from the channel: none when it closed or said nothing within the time
+static std::optional<QByteArray> control_line(QLocalSocket& socket, QByteArray& buffer) {
+    for (;;) {
+        if (const qsizetype end = buffer.indexOf('\n'); end >= 0) {
+            QByteArray line = buffer.left(end);
+            buffer.remove(0, end + 1);
+            return line;
+        }
+        if (socket.state() != QLocalSocket::ConnectedState && socket.bytesAvailable() == 0) return std::nullopt;
+        if (!socket.waitForReadyRead(service::control::kTimeoutMs) && socket.bytesAvailable() == 0) return std::nullopt;
+        buffer += socket.readAll();
+    }
+}
+
+int control_command(const QStringList& args, bool ascii) {
+    Parsed parsed;
+    const std::vector<Spec> specs = {{"--token-file"}};
+    if (auto error = parse(args, specs, parsed)) return usage("genko control: error: " + *error);
+    if (parsed.positional.empty()) return usage("genko control: error: the following arguments are required: method (genko control methods: the list)");
+    if (parsed.positional.size() > 2) return usage("genko control: error: unrecognized arguments: " + parsed.positional[2]);
+    const auto print = [ascii](const Json& out) { write_text(core::dump_python(out, ascii) + "\n", stdout); };
+    const std::string method = parsed.positional[0];
+    Json params = Json::object();
+    if (parsed.positional.size() == 2) {
+        try {
+            params = Json::parse(parsed.positional[1]);
+        } catch (const std::exception&) {
+            return usage("genko control: error: params is one JSON object ({\"ops\": [...]})");
+        }
+        if (!params.is_object()) return usage("genko control: error: params is one JSON object");
+    }
+    // the token: --token-file (its first line), else GENKO_TOKEN (never an argument: a command line is seen by others)
+    std::string token;
+    if (const auto file = parsed.value("--token-file")) {
+        QFile in(QString::fromStdString(*file));
+        if (!in.open(QIODevice::ReadOnly)) return usage("genko control: error: cannot read --token-file " + *file);
+        token = QString::fromUtf8(in.readLine()).trimmed().toStdString();
+    } else {
+        token = qEnvironmentVariable("GENKO_TOKEN").trimmed().toStdString();
+    }
+    if (token.empty()) return usage("genko control: error: a token is needed: --token-file <file> or GENKO_TOKEN (genko token add --actor ai:<name>)");
+    QString why;
+    const QString name = service::control::server_name(&why);
+    if (name.isEmpty()) {  // (no folder of the person's own: never a shared one — the review's P2-2)
+        print(Json::object({{"ok", false}, {"error", "制御チャンネルにつなげません: " + why.toStdString()}, {"code", "not_listening"}}));
+        return 1;
+    }
+    QLocalSocket socket;
+    socket.connectToServer(name);
+    if (!socket.waitForConnected(3000)) {
+        print(Json::object({{"ok", false},
+                            {"error", "制御チャンネルにつながりません（Genko を開いて、環境設定 → 連携 で制御チャンネルを入れてください）"},
+                            {"code", "not_listening"}}));
+        return 1;
+    }
+    const auto send = [&socket](const Json& line) {
+        socket.write(QByteArray::fromStdString(line.dump()) + '\n');
+        return socket.waitForBytesWritten(service::control::kTimeoutMs) || socket.bytesToWrite() == 0;
+    };
+    if (!service::control::peer_is_mine(socket, &why)) {  // (the token goes to this person's Genko only)
+        socket.abort();
+        print(Json::object({{"ok", false}, {"error", "制御チャンネルの相手を確かめられないので、トークンを送りませんでした: " + why.toStdString()},
+                            {"code", "not_mine"}}));
+        return 1;
+    }
+    QByteArray buffer;
+    Json answer;
+    send(Json::object({{"id", "auth"}, {"method", "auth"}, {"params", Json::object({{"token", token}})}}));
+    const auto authed = control_line(socket, buffer);
+    if (!authed) {
+        print(Json::object({{"ok", false}, {"error", "トークンが通りませんでした（genko token list で確かめる）"}, {"code", "not_authenticated"}}));
+        return 1;
+    }
+    send(Json::object({{"id", 1}, {"method", method}, {"params", params}}));
+    const auto line = control_line(socket, buffer);
+    if (!line) {
+        print(Json::object({{"ok", false}, {"error", "制御チャンネルが答えませんでした"}, {"code", "no_answer"}}));
+        return 1;
+    }
+    try {
+        answer = Json::parse(line->toStdString());
+    } catch (const std::exception&) {
+        print(Json::object({{"ok", false}, {"error", "制御チャンネルの答えが読めませんでした"}, {"code", "bad_answer"}}));
+        return 1;
+    }
+    socket.disconnectFromServer();
+    answer.erase("id");
+    print(answer);
+    return answer.value("ok", Json(false)) == Json(true) ? 0 : 1;
 }
 
 }  // namespace genko::api

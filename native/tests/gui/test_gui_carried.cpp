@@ -1,4 +1,4 @@
-// The features carried over to M6 (Python's test_h4, test_i0, test_f6, test_m10, test_j9): オートアクション (recorded,
+// The features carried over to M6 (Python's test_h4, test_i0, test_f6, test_m10, test_j9): アクション (recorded,
 // played on another page with new ids as one step to undo, aimed at the layer drawn on and the chosen panel, managed,
 // played on every page), 画像を読み込む (into the chosen panel, kept in the book), マスクを編集する (the pen paints the
 // mask, not lines), 枠線の間隔・破線の長さ・揺れ, and 本の形でプレビュー (the spreads as the book is bound, a page turning).
@@ -6,12 +6,14 @@
 #include <QtTest>
 
 #include <QDialog>
+#include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QImage>
 #include <QLabel>
 #include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
+#include <QToolButton>
 #include <QTextBrowser>
 #include <QPainter>
 #include <QRegularExpression>
@@ -19,6 +21,7 @@
 #include <memory>
 
 #include "app/actions.hpp"
+#include "app/actions_panel.hpp"
 #include "app/bookview.hpp"
 #include "app/canvas.hpp"
 #include "app/config.hpp"
@@ -128,6 +131,60 @@ private slots:
         w->start_recording();
         w->drop_recording();
         QVERIFY(!w->recording() && !w->status_label()->text().contains(QStringLiteral("記録中")));
+    }
+
+    // PC5 J-g (window.panel.actions): ウィンドウ → アクション — the dock (Alt+F9 in Photoshop's keys), the actions kept and the
+    // steps of the one chosen, 記録 (a name first) → 停止 kept under it, 再生 on the page in front, 削除; ファイル → アクション ▸
+    // (オートアクション before) the same actions
+    void theActionsPanel() {
+        Book book;
+        app::MainWindow* w = book.window.get();
+        QAction* toggle = book.act("act_panel_actions");
+        QVERIFY(toggle != nullptr && toggle->isCheckable() && toggle->text() == QStringLiteral("アクション"));
+        QVERIFY(!w->actions_dock()->isVisible());
+        toggle->trigger();
+        QVERIFY(w->actions_dock()->isVisible() && toggle->isChecked());
+        QCOMPARE(w->actions_dock()->objectName(), QStringLiteral("アクション"));
+        app::ActionsPanel* panel = w->actions_panel();
+        QVERIFY(panel != nullptr && panel->record->isEnabled() && !panel->stop->isEnabled());
+        // 記録: the name asked first, then what is done is recorded
+        book.answers.responder->get_text = [](const QString&, const QString&, const QString&) { return std::optional<QString>(QStringLiteral("影を足す")); };
+        panel->record->click();
+        QVERIFY(w->recording() && panel->stop->isEnabled() && !panel->record->isEnabled());
+        QVERIFY(panel->state->text().contains(QStringLiteral("記録中")) && panel->state->text().contains(QStringLiteral("影を足す")));
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"name", "影"}, {"id", "shade"}}})));
+        QVERIFY(panel->state->text().contains(QStringLiteral("1 手")));
+        panel->stop->click();
+        QVERIFY(!w->recording());
+        QVERIFY(app::actions::load().contains("影を足す"));
+        QVERIFY(!panel->names->findItems(QStringLiteral("影を足す"), Qt::MatchExactly).isEmpty());
+        QCOMPARE(*panel->current(), QStringLiteral("影を足す"));
+        QCOMPARE(panel->steps->count(), 1);
+        QVERIFY(panel->steps->item(0)->text().startsWith(QStringLiteral("1. ")));
+        // 再生 on page 3: one Undo
+        w->go_to_page(3);
+        const std::size_t before = book.page(2).layers.size();
+        const std::size_t steps = w->session().history().done.size();
+        panel->play->click();
+        QCOMPARE(book.page(2).layers.size(), before + 1);
+        QCOMPARE(w->session().history().done.size(), steps + 1);
+        // ファイル → アクション ▸ holds the same
+        QCOMPARE(w->actions_menu()->title(), QStringLiteral("アクション"));
+        emit w->actions_menu()->aboutToShow();
+        QStringList titles;
+        for (QAction* a : w->actions_menu()->actions()) titles << a->text();
+        QVERIFY(titles.contains(QStringLiteral("実行: 影を足す")));
+        // 削除 (asked first)
+        panel->remove->click();
+        QVERIFY(!app::actions::load().contains("影を足す"));
+        QCOMPARE(panel->names->count(), 0);
+        QVERIFY(!panel->play->isEnabled() && panel->state->text().contains(QStringLiteral("まだありません")));
+        // 記録 without a name: nothing recorded
+        book.answers.responder->get_text = [](const QString&, const QString&, const QString&) { return std::optional<QString>(); };
+        panel->record->click();
+        QVERIFY(!w->recording());
+        toggle->trigger();
+        QVERIFY(!w->actions_dock()->isVisible());
     }
 
     void replayAimsAtTheCurrentLayerAndPanel() {

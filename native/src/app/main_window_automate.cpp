@@ -53,7 +53,7 @@ void MainWindow::build_automate_actions() {
     // PC5 I-e: 自動処理 ▸ (Photoshop's バッチ…・ドロップレットを作成… / 条件付きモード変更…・画像を合わせる…・レンズ補正…) and
     // スクリプト ▸ (画像プロセッサー… / スクリプトイベントマネージャー… / 参照…)
     make(QStringLiteral("act_batch"), QStringLiteral("バッチ…"), [this] { batch_dialog(); }, {},
-         QStringLiteral("フォルダー・ファイルの画像や原稿に、オートアクションか手順のファイルを 1 つずつ流します"));
+         QStringLiteral("フォルダー・ファイルの画像や原稿に、アクションか手順のファイルを 1 つずつ流します"));
     make(QStringLiteral("act_create_droplet"), QStringLiteral("ドロップレットを作成…"), [this] { create_droplet_dialog(); }, {},
          QStringLiteral("ファイルをドロップすると手順を流す、ドロップレット（と起動ファイル）を作ります"));
     make(QStringLiteral("act_conditional_mode_change"), QStringLiteral("条件付きモード変更…"), [this] { mode_change_dialog(); }, {},

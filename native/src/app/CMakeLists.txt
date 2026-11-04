@@ -258,6 +258,11 @@ genko_library(genko_app
     # PC5 H-f (最後の状態を切り替え・メモリをクリア ▸, ピクセル縦横比 ▸・ピクセル縦横比を補正)
     main_window_purge.cpp
     main_window_pixel_aspect.cpp
+    # PC5 J-g (制御チャンネル: the local socket and what it does in a window; ウィンドウ → アクション; 環境設定 → 連携)
+    control_channel.cpp
+    main_window_control.cpp
+    actions_panel.cpp
+    preferences_integrations.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

@@ -199,7 +199,7 @@ void MainWindow::build_file_menu(QMenu* file) {
     scripts_menu_->setObjectName(QStringLiteral("menu_scripts"));
     scripts_menu_->addAction(action("act_flatten_masks"));  // (PC3 B2: file.scripts.*)
     build_automate_menus();
-    actions_menu_ = file->addMenu(QStringLiteral("オートアクション"));
+    actions_menu_ = file->addMenu(QStringLiteral("アクション"));  // (PC5 J-g: オートアクション before — Photoshop's name)
     actions_menu_->setProperty("remade", true);
     connect(actions_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_actions_menu);
     fill_actions_menu();

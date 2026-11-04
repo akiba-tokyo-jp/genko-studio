@@ -4108,6 +4108,7 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("mcp")) return mcp_command(args);
         if (command == QLatin1String("serve")) return serve_command(args);
         if (command == QLatin1String("token")) return token_command(args, ascii);
+        if (command == QLatin1String("control")) return control_command(args, ascii);  // (PC5 J-g: 制御チャンネル)
         return usage("unknown command: " + command.toStdString());
     } catch (const storage::UnsupportedProjectVersion& error) {
         return fail(error.what(), error.code(), ascii, 2);

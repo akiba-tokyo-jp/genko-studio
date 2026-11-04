@@ -1,4 +1,4 @@
-#include "api/tokens.hpp"
+#include "service/tokens.hpp"
 
 #include <QRandomGenerator>
 
@@ -19,7 +19,7 @@
 #include "core/poses.hpp"
 #include "storage/fsutil.hpp"
 
-namespace genko::api::tokens {
+namespace genko::service::tokens {
 
 namespace fs = std::filesystem;
 using core::Json;
@@ -130,4 +130,4 @@ int revoke(const std::string& prefix) {
     return removed;
 }
 
-}  // namespace genko::api::tokens
+}  // namespace genko::service::tokens

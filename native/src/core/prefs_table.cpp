@@ -277,6 +277,8 @@ std::vector<Pref> make_table() {
         choice("rawDefaults.sharpenFor", "raw/sharpen", "none", {"none", "screen", "glossy", "matte"}, "出力のシャープ"),
         boolean("rawDefaults.openAsSmartObject", "raw/smart_object", false, "スマートオブジェクトとして開く"),
         boolean("rawDefaults.applyAutoTone", "raw/auto_tone", false, "自動補正を適用"),
+        // integrations (連携; PC5 J-g: the control channel — off unless the person turns it on, SPEC.md PROD-01)
+        boolean("integrations.controlChannel", "control/enabled", false, "制御チャンネル（このパソコンのプログラムが、トークンで画面を見て、前の原稿に操作を当てる）"),
         // tablet (ペンタブレット)
         no_default(number("tablet.pressureGamma", "tablet/gamma", "", 0.3, 3, "自分に合わせた筆圧の曲線（γ。なし: ふつう）")),
         choice("tablet.penButton", "tablet/button", "menu", {"menu", "picker", "hand"}, "ペンのサイドボタン"),

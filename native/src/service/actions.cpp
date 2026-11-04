@@ -13,6 +13,7 @@
 #include "core/config_dir.hpp"
 #include "core/ids.hpp"
 #include "core/pyconv.hpp"
+#include "render/ops_registry.hpp"
 #include "service/wording.hpp"
 #include "storage/fsutil.hpp"
 
@@ -33,7 +34,20 @@ const std::vector<std::string> kBoundOps{"delete_stroke", "reshape_stroke", "edi
 // the gates and the locks (GATE_OPS and the page locks): a person's own, never done again by a recording or a script
 const std::vector<std::string> kGateOps{"approve", "revoke", "allow_chat_approval", "lock_page", "unlock_page", "name_ok", "advance"};
 // what a recording leaves out besides the gates: undo, the book's settings and its pages
-const std::vector<std::string> kNotRecorded{"undo", "set_meta", "set_bible", "add_page", "delete_page", "duplicate_page", "reorder", "set_page_spec"};
+// (PC5 J-g: the pages an artboard makes — I-c's add_artboard, artboard_from_layers — as add_page; the book's variables and
+// data sets — I-d's set_variables, set_data_sets — as set_bible; the questions, which change nothing — slices_info,
+// measure_info, measure_values, type_info)
+const std::vector<std::string> kNotRecorded{"undo", "set_meta", "set_bible", "add_page", "delete_page", "duplicate_page", "reorder", "set_page_spec",
+                                            "add_artboard", "artboard_from_layers", "set_variables", "set_data_sets", "slices_info", "measure_info",
+                                            "measure_values", "type_info", "timeline_info"};
+// (PC5 J-g) the count's marks and groups named by their number on the page (J-d1's remove_count, move_count, set_count_group,
+// delete_count_group with "group" or "index"): the recorded page's; a mark added, every mark cleared, a group made, the
+// scale, the ruler's line and the scale marker (place_scale_marker) are any page's
+const std::vector<std::string> kCountOps{"remove_count", "move_count", "set_count_group", "delete_count_group"};
+// (PC5 J-g) a video layer named by its folder (J-e2's video_insert_blank … rasterize_video with "folder"): the recorded page's;
+// a video layer made (add_video_layer) and a footage's frames made layers (footage_to_layers) are any page's
+const std::vector<std::string> kVideoOps{"video_insert_blank", "video_duplicate", "video_delete", "video_restore", "video_restore_all",
+                                         "video_alter", "set_video_layer", "replace_footage", "rasterize_video"};
 
 bool in(const std::vector<std::string>& list, std::string_view name) { return std::find(list.begin(), list.end(), name) != list.end(); }
 
@@ -92,7 +106,7 @@ std::optional<std::string> save(const Json& all) {
     try {
         storage::write_atomic(path(), core::dump(all, options));
     } catch (const std::exception& error) {
-        return QStringLiteral("オートアクションを書けませんでした（%1）").arg(wording::error(std::string(error.what()))).toStdString();
+        return QStringLiteral("アクションを書けませんでした（%1）").arg(wording::error(std::string(error.what()))).toStdString();
     }
     return std::nullopt;
 }
@@ -117,7 +131,8 @@ Json recordable(const Json& ops) {
     for (const Json& op : ops) {
         if (!op.is_object()) continue;
         const std::string name = op_name(op);
-        if (!in(kNotRecorded, name) && !gate_op(name)) out.push_back(op);
+        // (PC5 J-g: nor a question — an op added as one, or type_style and replace_fonts when they only ask)
+        if (!in(kNotRecorded, name) && !gate_op(name) && !render::ops_registry().is_query(op)) out.push_back(op);
     }
     return out;
 }
@@ -147,6 +162,13 @@ std::vector<bool> page_bound(const Json& ops) {
             for (const char* key : {"slice", "number", "layer"})
                 if (const auto it = op.find(key); it != op.end() && !it->is_null()) bound = true;
             if (const auto it = op.find("slices"); it != op.end() && it->is_array()) bound = true;
+        }
+        if (in(kVideoOps, name)) {
+            if (const auto it = op.find("folder"); it != op.end() && !it->is_null()) bound = true;
+        }
+        if (in(kCountOps, name)) {
+            for (const char* key : {"group", "index"})
+                if (const auto it = op.find(key); it != op.end() && !it->is_null()) bound = true;
         }
         out.push_back(bound);
     }

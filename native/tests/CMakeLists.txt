@@ -924,6 +924,13 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_workspace SOURCES gui/test_gui_workspace.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_look SOURCES gui/test_gui_look.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_carried SOURCES gui/test_gui_carried.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC5 J-g (制御チャンネル, SPEC.md PROD-01): the running app's local socket — off by default, nothing answered before auth,
+  # an ai: token's ops in the journal as ai:…, MCP's refusals (a human: token too), no method reaching an approval, a
+  # consent, a setting or a file, the view's commands only, 1 MiB lines and 4 connections, the pen as the token's actor
+  # holding the person's input while it draws — in this process, from `genko control`, and `genko app` started with it on
+  genko_test(test_control_channel SOURCES e2e/test_control_channel.cpp DEPS genko_app genko_test_support LABELS e2e GUI TIMEOUT 900)
+  target_compile_definitions(test_control_channel PRIVATE GENKO_CLI="$<TARGET_FILE:genko>")
+  add_dependencies(test_control_channel genko)
   # PC3 A0 (smart-objects@1): レイヤー → スマートオブジェクト・ラスタライズ, the layer panel, 埋め込みを配置…, a large file on a
   # 16-bit page, the 属性 panel's part (its size, its colours).
   genko_test(test_gui_smart SOURCES gui/test_gui_smart.cpp DEPS genko_app genko_test_support ZLIB::ZLIB GUI TIMEOUT 600)

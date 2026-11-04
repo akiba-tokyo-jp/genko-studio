@@ -2,6 +2,7 @@
 // PageCanvas mouse*Event, tabletEvent, wheelEvent, keyPressEvent and the panel tool's _frame_press/_move/_release).
 
 #include <QContextMenuEvent>
+#include <QElapsedTimer>
 #include <QGestureEvent>
 #include <QGuiApplication>
 #include <QKeyEvent>
@@ -22,6 +23,7 @@
 #include "core/frames.hpp"
 #include "core/ids.hpp"
 #include "core/pynum.hpp"
+#include "core/stroke_geom.hpp"
 
 namespace genko::app {
 
@@ -175,6 +177,64 @@ void PageCanvas::finish_stroke() {
     update();
 }
 
+// --- the control channel's pen (PC5 J-g) ----------------------------------------------------------------------------
+
+namespace {
+
+double monotonic_ms() {
+    static QElapsedTimer clock;
+    if (!clock.isValid()) clock.start();
+    return static_cast<double>(clock.nsecsElapsed()) / 1e6;
+}
+
+PenSample control_sample(const QPointF& mm, double pressure, double time_ms) {
+    const core::PenPoint packed = core::pack_point(mm.x(), mm.y(), std::clamp(pressure, 0.0, 1.0));
+    PenSample sample;
+    sample.x_mm = packed.x;
+    sample.y_mm = packed.y;
+    sample.pressure = packed.p.value_or(0.7);
+    sample.time_ms = time_ms;
+    return sample;
+}
+
+}  // namespace
+
+bool PageCanvas::control_press(const QPointF& mm, double pressure) {
+    if (page() == nullptr || !is_stroke_tool(tool_) || !stroke_.empty() || control_stroke_ || panning_) return false;
+    control_stroke_ = true;
+    const PenSample sample = control_sample(mm, pressure, monotonic_ms());
+    begin_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, 0.0, true, sample);
+    return true;
+}
+
+void PageCanvas::control_move(const QPointF& mm, double pressure) {
+    if (!control_stroke_ || stroke_.empty()) return;
+    const PenSample sample = control_sample(mm, pressure, monotonic_ms());
+    extend_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, 0.0, false, sample);
+}
+
+void PageCanvas::control_release() {
+    if (!control_stroke_) return;
+    control_stroke_ = false;
+    finish_stroke();
+}
+
+void PageCanvas::control_cancel() {
+    if (!control_stroke_) return;
+    control_stroke_ = false;
+    stroke_.clear();
+    turns_.clear();
+    tilts_.clear();
+    times_.clear();
+    wheels_.clear();
+    smoother_.reset();
+    live_.reset();
+    live_copies_.clear();
+    live_snapped_ = false;
+    update_cursor();
+    update();
+}
+
 // --- the mouse -----------------------------------------------------------------------------------------------------
 
 void PageCanvas::update_cursor(std::optional<QPointF> pos) {
@@ -244,6 +304,7 @@ void PageCanvas::stop_coast() {
 bool PageCanvas::coasting() const { return coast_timer_.isActive(); }
 
 void PageCanvas::mousePressEvent(QMouseEvent* event) {
+    if (control_stroke_) return;  // (PC5 J-g: the person's line waits while the channel's draws)
     setFocus();
     const QPointF pos = unturned(event->position());
     if (event->button() == Qt::LeftButton && space_ && (event->modifiers() & Qt::ShiftModifier)) {
@@ -315,6 +376,7 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
 }
 
 void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
+    if (control_stroke_) return;  // (PC5 J-g: the channel's line takes no point of the person's)
     if (turning_) {
         const double angle = std::atan2(event->position().y() - height() / 2.0, event->position().x() - width() / 2.0) * 180.0 / kPi;
         double turn = angle - turning_->first;
@@ -432,6 +494,7 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
+    if (control_stroke_) return;  // (PC5 J-g: the control channel's line is let go by the channel alone)
     if (turning_) {
         turning_.reset();
         return;
@@ -800,6 +863,10 @@ void PageCanvas::back_from_eraser_end() {
 }
 
 void PageCanvas::tabletEvent(QTabletEvent* event) {
+    if (control_stroke_) {  // (PC5 J-g: the person's pen waits while the channel's draws)
+        event->accept();
+        return;
+    }
     const auto type = event->type();
     last_pressure_ = event->pressure();  // (the vector tool's traces take the pen's pressure)
     // the pen's side button (or its middle one) as chosen in 環境設定: the eyedropper or the hand (the right click's

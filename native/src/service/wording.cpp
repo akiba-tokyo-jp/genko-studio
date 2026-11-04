@@ -646,7 +646,7 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(step ([0-9.]+): (\S+) is a pseudo op and cannot be inside for_pages)",
                          "手順 \\1: \\2 は手順の中だけの操作なので、for_pages の中には置けません（手順の上の段に置いてください）"));
         r.push_back(rule(R"(the action was changed after it was bound: (.*))",
-                         "オートアクション「\\1」は結び付けた後で変わりました。スクリプトイベントマネージャーで選び直してください"));
+                         "アクション「\\1」は結び付けた後で変わりました。スクリプトイベントマネージャーで選び直してください"));
         r.push_back(rule(R"(the script's name is longer than (\d+) characters)", "スクリプトの名前が長すぎます（\\1 文字まで）"));
         r.push_back(rule(R"(more than (\d+) files and folders to look through: choose fewer)", "見るファイルとフォルダーが多すぎます（\\1 個まで）"));
         r.push_back(rule(R"(step ([0-9.]+): not an op.*)","手順 \\1 が操作の形ではありません（{\"op\": 操作の名前, …引数} で書きます）"));
@@ -660,7 +660,7 @@ const std::vector<Rule>& rules() {
                          "スクリプト「\\1」は結び付けた後で変わりました。スクリプトイベントマネージャーで選び直してください"));
         r.push_back(rule("a picture's own file is never written: write the batch into a folder", "元の画像には書きません。書き出すフォルダーを選んでください"));
         r.push_back(rule(R"(more than (\d+) files to take: choose fewer)", "ファイルが多すぎます（\\1 個まで）"));
-        r.push_back(rule(R"(no action (.*))", "オートアクション \\1 がありません"));
+        r.push_back(rule(R"(no action (.*))", "アクション \\1 がありません"));
         // (PC5 I-e: 条件付きモード変更・画像プロセッサー・レンズ補正・ドロップレット — service/automate)
         r.push_back(rule(R"(conditional_mode_change takes .*)", "条件付きモード変更には、ページと変換後のモードを指定します"));
         r.push_back(rule(R"(conditional_mode_change: to is .*)", "条件付きモード変更の変換後のモードは、RGB・グレースケール・CMYK・Lab です"));

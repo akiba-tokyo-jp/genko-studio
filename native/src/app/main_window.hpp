@@ -75,6 +75,7 @@ class PathsPanel;
 class LayerCompsPanel;
 class NotesPanel;
 class MeasurementLogPanel;
+class ActionsPanel;  // (PC5 J-g: app/actions_panel.hpp)
 class PatternsPanel;
 class BrushesPanel;
 class BrushSettingsPanel;
@@ -2258,6 +2259,46 @@ private:
     void build_pixel_aspect_actions();
     void build_pixel_aspect_menu(QMenu* view);
     void refresh_pixel_aspect();
+    // --- PC5 J-g (SPEC.md PROD-01「アクション」「制御チャンネル」): app/actions_panel.cpp — ウィンドウ → アクション (Alt+F9 in
+    // Photoshop's set), the recorded actions in a dock; app/main_window_control.cpp — what the control channel
+    // (app/control_channel.hpp) does in this window: look, the view, the view's commands, the book's ops and the pen, as the
+    // token's actor with an agent's rights (service/control.hpp's rules) -------------------------------------------------
+public:
+    ActionsPanel* actions_panel() const { return actions_panel_; }
+    QDockWidget* actions_dock() const { return actions_dock_; }
+    // ui.inspect: the tool, the page and frame, the zoom, the panels (service::control::view_panels), the books open (their
+    // titles), the menus' tree (each command's words, attribute, whether it is on — and whether ui.menu.invoke takes it),
+    // the page's measurements. Never a path of a file.
+    core::Json control_inspect() const;
+    // ui.set {page?, frame?, zoom?, center?, fit?, tool?, panels?}: the view as asked (nothing of the book); what it is
+    // then. core::Error("bad_params") for a value it does not take (nothing changed).
+    core::Json control_set(const core::Json& params);
+    // ui.menu.invoke: one of the view's commands (service::control::view_command) chosen; core::Error("not_allowed") for
+    // any other, ("not_enabled") for one that is off.
+    core::Json control_menu(const QString& attribute);
+    // ui.screenshot: the canvas (or the whole window) as PNG, its longest side at most max_side (0: as it is).
+    QByteArray control_screenshot(bool whole_window, int max_side) const;
+    // engine.execute: ops on the book in front as `actor` (service::control::actor_of — MCP's apply_ops' ops and refusals);
+    // {applied, warnings, results} or core::Error / core::ApplyError.
+    core::Json control_execute(const core::Json& ops, const std::string& actor);
+    // ui.pointer's events [{kind: down | move | up, x, y (mm on the page in front), pressure?}]: a line drawn with the pen,
+    // the pencil or the eraser in hand, applied as `actor` when it is let go. `holding`: a line still being drawn after
+    // these events. {"events": n, "drawing": bool, "applied"?: bool} or core::Error.
+    core::Json control_pen(const core::Json& events, const std::string& actor, bool& holding);
+    // The line being drawn by the channel thrown away (the connection gone, the time up, Esc).
+    void control_pen_cancel();
+    // The status bar's words for the channel (empty: none shown); `drawing`: its pen is on the canvas.
+    void control_state(const QString& words, bool drawing);
+
+private:
+    void build_actions_dock();
+    ActionsPanel* actions_panel_ = nullptr;
+    QDockWidget* actions_dock_ = nullptr;
+    QLabel* control_label_ = nullptr;
+    // (the channel's pen: apply_ops applies as this actor, through service::control's rules, while it is set)
+    std::optional<core::Actor> control_actor_;
+    QString control_refused_;  // why apply_ops refused the pen's ops (its words)
+    bool control_applied_ = false;
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

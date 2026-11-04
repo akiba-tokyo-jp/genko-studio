@@ -414,6 +414,18 @@ public:
     void stroke_applied(const std::string& id);
     // The line could not be applied: its live picture goes.
     void stroke_dropped();
+    // (PC5 J-g, SPEC.md PROD-01「制御チャンネル」's pen) A line given from outside the window's input: points on the page
+    // (mm) and the pen's pressure (0..1), drawn with the stroke tool in hand as the mouse draws one, never a click of any
+    // other tool. control_press starts it (false: no page, not a stroke tool, or a line is being drawn already),
+    // control_move adds a point, control_release lets it go (strokeCommitted, as a line let go), control_cancel throws it
+    // away (nothing committed).
+    bool control_press(const QPointF& mm, double pressure);
+    void control_move(const QPointF& mm, double pressure);
+    void control_release();
+    void control_cancel();
+    bool control_drawing() const { return control_stroke_; }
+    // (PC5 J-g, the review's P3-11) The person draws a line or moves the view now (the channel changes no view meanwhile).
+    bool person_drawing() const { return (!stroke_.empty() && !control_stroke_) || panning_; }
 
     // --- the view -------------------------------------------------------------------------------------------
     double scale() const { return view_.scale; }
@@ -1107,6 +1119,8 @@ private:
     bool live_snapped_ = false;                          // live_ holds the snapped line (drawn whole each time)
     bool live_failed_ = false;                           // this stroke's live line could not be drawn (live_sync)
     std::unique_ptr<LiveInk> committing_;
+    bool control_stroke_ = false;  // (PC5 J-g) the line being drawn is the control channel's
+    double control_t0_ = -1;       // its first point's time (ms on the monotonic clock)
     struct Overlay {
         std::unique_ptr<LiveInk> ink;
         std::uint64_t generation = 0;

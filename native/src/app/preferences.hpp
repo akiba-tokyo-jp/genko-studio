@@ -145,6 +145,9 @@ void save_unit_pages(QWidget* units, QWidget* guides);
 // 環境設定 → テキスト (PC5 G-d, app/preferences_type.cpp): its page, and what 決める keeps of it.
 QWidget* type_page(QWidget* parent);
 void save_type_page(QWidget* page);
+// 連携 (PC5 J-g: app/preferences_integrations.cpp): the control channel on or off (its row's field, written by
+// save_pane_fields with the others).
+QWidget* integrations_page(QWidget* parent);
 
 class PreferencesDialog;
 
@@ -287,6 +290,7 @@ public:
     QWidget* units_page = nullptr;
     QWidget* guides_page = nullptr;
     QWidget* type_page = nullptr;  // (テキスト, PC5 G-d)
+    QWidget* integrations_page = nullptr;  // (連携, PC5 J-g)
 
     void measure();
     void forget_gamma();

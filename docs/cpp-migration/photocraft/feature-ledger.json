@@ -40428,9 +40428,16 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-g、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/app/actions_panel.cpp",
+        "native/src/app/main_window_production.cpp",
+        "native/src/app/main_window_actions.cpp",
+        "native/src/service/actions.cpp",
+        "native/tests/gui/test_gui_carried.cpp",
+        "native/tests/unit/test_automate.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -44149,9 +44156,17 @@
       "label_ja": "ローカル制御・UI読取・操作・画像取得",
       "kind": "cross_cutting",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "未着手",
+      "implementation_status": "実装済み（PC5 J-g、未統合）",
       "acceptance_status": "未実施",
-      "evidence": [],
+      "evidence": [
+        "native/src/service/control.cpp",
+        "native/src/app/control_channel.cpp",
+        "native/src/app/main_window_control.cpp",
+        "native/src/app/session.cpp",
+        "native/src/api/server_cli.cpp",
+        "native/src/app/preferences_integrations.cpp",
+        "native/tests/e2e/test_control_channel.cpp"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",

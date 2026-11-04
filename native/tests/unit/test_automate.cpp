@@ -683,6 +683,37 @@ private slots:
         QVERIFY(service::actions::load().empty());
     }
 
+    // PC5 J-g: the PC5 ops in the recording — the pages an artboard makes, the book's variables, the questions left out;
+    // the count's marks named by their number bound to the recorded page; the scale marker, a comp, a slice drawn, an
+    // annotation added any page's; the approvals and the page locks never recorded.
+    void actionsRecordThePc5Ops() {
+        const Json ops = Json::array({Json{{"op", "add_artboard"}, {"name", "a"}}, Json{{"op", "artboard_from_layers"}, {"page", 1}},
+                                      Json{{"op", "set_variables"}, {"variables", Json::array()}}, Json{{"op", "set_data_sets"}},
+                                      Json{{"op", "measure_values"}, {"page", 1}}, Json{{"op", "slices_info"}, {"page", 1}},
+                                      Json{{"op", "type_info"}, {"page", 1}}, Json{{"op", "measure_info"}, {"page", 1}},
+                                      Json{{"op", "timeline_info"}, {"page", 1}},
+                                      Json{{"op", "lock_page"}, {"page", 1}}, Json{{"op", "approve"}, {"gate", "name"}},
+                                      Json{{"op", "place_scale_marker"}, {"page", 1}}, Json{{"op", "new_layer_comp"}, {"page", 1}, {"name", "c"}},
+                                      Json{{"op", "add_slice"}, {"page", 1}, {"rect", Json::array({0, 0, 10, 10})}},
+                                      Json{{"op", "add_annotation"}, {"page", 1}, {"x", 1}, {"y", 1}, {"text", "t"}},
+                                      Json{{"op", "add_count"}, {"page", 1}, {"x", 1}, {"y", 1}},
+                                      Json{{"op", "remove_count"}, {"page", 1}, {"group", 0}, {"index", 2}},
+                                      Json{{"op", "move_count"}, {"page", 1}, {"index", 0}, {"x", 2}, {"y", 2}},
+                                      Json{{"op", "delete_count_group"}, {"page", 1}, {"group", 1}},
+                                      Json{{"op", "clear_count"}, {"page", 1}},
+                                      Json{{"op", "auto_align_layers"}, {"page", 1}, {"ids", Json::array({"a", "b"})}},
+                                      Json{{"op", "add_video_layer"}, {"page", 1}}, Json{{"op", "video_alter"}, {"page", 1}, {"folder", "f"}, {"at", 2}},
+                                      Json{{"op", "rasterize_video"}, {"page", 1}, {"folder", "f"}, {"at", 1}}});
+        const Json kept = service::actions::recordable(ops);
+        QStringList names;
+        for (const Json& op : kept) names << QString::fromStdString(op["op"].get<std::string>());
+        QCOMPARE(names, (QStringList{"place_scale_marker", "new_layer_comp", "add_slice", "add_annotation", "add_count", "remove_count", "move_count",
+                                     "delete_count_group", "clear_count", "auto_align_layers", "add_video_layer", "video_alter", "rasterize_video"}));
+        const std::vector<bool> bound = service::actions::page_bound(kept);
+        QVERIFY(bound == (std::vector<bool>{false, false, false, false, false, true, true, true, false, true, false, true, true}));
+        QCOMPARE(service::actions::playable(kept).size(), std::size_t(7));
+    }
+
     // The script events' table: sealed by the window; changed outside, read off with why; a script changed since it was
     // bound not run; everything's bindings with each event's; no event while an event's steps run.
     void scriptEventsSealed() {
