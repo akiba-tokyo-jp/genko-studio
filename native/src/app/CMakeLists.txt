@@ -247,6 +247,9 @@ genko_library(genko_app
     auto_align_dialog.cpp
     photomerge_dialog.cpp
     main_window_photomerge.cpp
+    # PC5 I-f (1 部プリント, 生成 → 画像アセット, コンタクトシート II…; `genko print`)
+    main_window_print.cpp
+    print_cli.cpp
     ${GENKO_APP_RESOURCES}
     ${GENKO_APP_FONTS}
   PUBLIC_DEPS genko_core genko_storage genko_render genko_render_ops genko_formats genko_service Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Concurrent

@@ -4,6 +4,7 @@
 #include <unordered_map>
 
 #include "core/channels.hpp"
+#include "core/image_assets.hpp"
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
@@ -464,6 +465,8 @@ void register_render_ops(core::OpRegistry& registry) {
     register_artboard_ops(registry);
     // PC5 I-g (レイヤーを自動整列・レイヤーを自動合成: auto_align_layers, auto_blend_layers — render/ops_align)
     align::register_align_ops(registry);
+    // PC5 I-f (image-assets@1: 生成 → 画像アセット on or off, core/image_assets)
+    core::register_image_asset_ops(registry);
     // PC5 J-e2 (video@1: the video layers, render/ops_video)
     register_video_ops(registry);
 }

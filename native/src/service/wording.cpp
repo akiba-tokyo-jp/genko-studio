@@ -643,6 +643,48 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(too many photos on the scan \((\d+); at most (\d+)\))", "写真が多すぎます（\\1 枚。\\2 枚まで）。スキャンを分けてください"));
         r.push_back(rule(R"(no photos found on a uniform background)", "一様な背景の上に写真が見つかりませんでした"));
         r.push_back(rule(R"(the photo's corners cannot be mapped)", "写真の角を求められませんでした"));
+        // (PC5 I-f, SPEC.md AUTO-01: プリント… and `genko print` — formats/print_marks —, コンタクトシート II, 画像アセット)
+        r.push_back(rule(R"(the printer's profile is not an RGB profile.*)",
+                         "プリンタープロファイルが RGB のものではありません（プリンターには RGB の絵を渡すため、CMYK・グレーのプロファイルは選べません）"));
+        r.push_back(rule(R"(the printer's profile is not found: (.*))", "プリンタープロファイルが見つかりません: \\1"));
+        r.push_back(rule(R"(the printer's profile cannot be read)", "プリンタープロファイルを読み込めません"));
+        r.push_back(rule(R"(the printer's profile cannot be used.*)", "このプリンタープロファイルでは色を変換できません"));
+        r.push_back(rule(R"(the page's profile cannot be read)", "ページのカラープロファイルを読み込めません"));
+        r.push_back(rule(R"(the page's colours were not drawn at its size)", "ページの色を描けませんでした"));
+        r.push_back(rule(R"(Genko's colour management needs the printer's profile)", "Genko によるカラー管理には、プリンタープロファイルを選んでください"));
+        r.push_back(rule(R"(the rendering intent is .*)", "マッチング方法は、知覚的・彩度・相対的な色域を維持・絶対的な色域を維持から選びます"));
+        r.push_back(rule(R"(the area is trim, bleed or paper)", "範囲は、仕上がりで切る・裁ち落としまで・用紙全体から選びます"));
+        r.push_back(rule(R"(the scale is fit, actual or a percent)", "大きさは、用紙に合わせる・原寸・拡大・縮小から選びます"));
+        r.push_back(rule(R"(the scale is 1% to 1000%)", "拡大・縮小は 1〜1000% です"));
+        r.push_back(rule(R"(the copies are 1 to 999)", "部数は 1〜999 です"));
+        r.push_back(rule(R"(the position is within 1000 mm of the paper's corner)", "位置は、用紙の角から 1000 mm までです"));
+        r.push_back(rule(R"(the resolution is 72 to 600 dpi)", "解像度は 72〜600 dpi です"));
+        r.push_back(rule(R"(the paper is a4, .*)", "用紙は a4・a3・a5・b4・b5・letter・legal・tabloid・4x6・5x7 か、幅x高さ（mm、25〜2000）です"));
+        r.push_back(rule(R"(the marks are corner, .*)", "印は corner・center・registration・description・labels から選びます"));
+        r.push_back(rule(R"(the units are in, cm, mm or px)", "単位は inch・cm・mm・pixel から選びます"));
+        r.push_back(rule(R"(the sheet's width and height are above 0)", "シートの幅と高さは 0 より大きくします"));
+        r.push_back(rule(R"(the resolution is 72 to 1200 ppi)", "解像度は 72〜1200 pixel/inch です"));
+        r.push_back(rule(R"(the mode is rgb or gray)", "モードは RGB カラーかグレースケールです"));
+        r.push_back(rule(R"(the depth is 8 or 16)", "ビット数は 8 か 16 です"));
+        r.push_back(rule(R"(the columns and the rows are 1 to 100)", "列数と行数は 1〜100 です"));
+        r.push_back(rule(R"(the caption's size is 4 to 72 pt)", "キャプションのフォントサイズは 4〜72 pt です"));
+        r.push_back(rule(R"(the spacing is 0 or more)", "間隔は 0 以上です"));
+        r.push_back(rule(R"(the sheets' name is 1 to 200 bytes)", "シートの名前は 1〜200 バイトです"));
+        r.push_back(rule(R"(the sheet is at least 16 pixels a side)", "シートは 1 辺 16 pixel 以上にします"));
+        r.push_back(rule(R"(the sheet is too large \((\d+)×(\d+) pixels; its work would pass 2 GiB.*)",
+                         "シートが大きすぎます（\\1×\\2 pixel。作るのに 2 GiB を越えます）。シートを小さく・解像度を低く・8 bit にしてください"));
+        r.push_back(rule(R"(the sheet is too large \((\d+)×(\d+) pixels; a 16-bit sheet's layers would pass.*)",
+                         "16 bit のシートが大きすぎます（\\1×\\2 pixel。原稿の高精度の画素の上限 1 GiB を越えます）。シートを小さく・解像度を低く・8 bit にしてください"));
+        r.push_back(rule(R"(the sheets of (\d+) pictures would pass 2 GiB together \((\d+) sheets\).*)",
+                         "\\1 枚の画像のシート（\\2 枚）を開いたままにすると 2 GiB を越えます。画像を減らすか、列数・行数を増やすか、シートを小さくしてください"));
+        r.push_back(rule(R"(a sheet holds at most (\d+) pictures \(columns × rows\))", "1 枚のシートに置けるのは \\1 枚まで（列数 × 行数）です"));
+        r.push_back(rule(R"(the sheet is too large \((\d+)×(\d+) pixels;.*)", "シートが大きすぎます（\\1×\\2 pixel。1 億 2 千万 pixel・1 辺 10 万 pixel まで）"));
+        r.push_back(rule(R"(the asset's name is not a path inside the assets' folder)",
+                         "画像アセットの名前が、アセットのフォルダーの中の場所になっていません（..・\\・: と、Windows で使えない名前は使えません）"));
+        r.push_back(rule(R"(another layer writes an asset of this name)", "同じ名前の画像アセットを書き出すレイヤーがほかにあります"));
+        r.push_back(rule(R"(the group has nothing to write)", "このグループには書き出すものがありません"));
+        r.push_back(rule(R"((?:ops\[\d+\] set_image_assets: )?on is true or false.*)", "画像アセットの on は true か false です"));
+        r.push_back(rule(R"(the book's generator is .*)", "原稿の画像アセットの設定（generator）が正しくありません"));
         r.push_back(rule(R"(the colour profile cannot be read \((.*)\))", "カラープロファイルを読み込めません"));
         r.push_back(rule(R"(the file cannot be read \(it is larger than 2 GiB\))", "ファイルが大きすぎて読み込めません（2 GiB まで）"));
         // (this build's own: put_raster reads only a regular file — not a device or a pipe, whose reading may not end)

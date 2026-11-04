@@ -511,6 +511,7 @@ void MainWindow::build_actions() {
     build_variable_actions();     // (PC5 I-d: 変数 ▸, データセットを適用…, データセットからファイル…, 変数データセット…: main_window_variables.cpp)
     build_layer_basic_actions();  // (PC5 I-a: 背景からレイヤーへ…, レイヤーからのグループ…, グループ解除, クリッピングマスク, 非表示レイヤーを削除: main_window_layers.cpp)
     build_artboard_actions();     // (PC5 I-c: アートボード…, グループ・レイヤーからのアートボード…, アートボードの設定…, 表示と書き出しの: main_window_artboards.cpp)
+    build_print_actions();  // (PC5 I-f: 1 部プリント, 生成 → 画像アセット, コンタクトシート II…: main_window_print.cpp)
     build_align_actions();      // (PC3 C-d: 重ね順・整列・分布・リンク・ロック, スナップ (with 定規's グリッドにスナップ), the move tool's: main_window_align.cpp)
     build_file_actions();       // (PC4 F-0: 節 F's new commands of ファイル, frames until F-b and F-c: main_window_file.cpp)
     build_filter_actions();     // (PC4 節 D: フィルター's commands, 前回のフィルター: filter_menu.cpp)
@@ -795,6 +796,7 @@ void MainWindow::build_menus() {
     build_notes_menus(file, view);  // (PC5 J-c: ファイル → 読み込み ▸ 注釈…, 表示 → 表示・非表示 ▸ 注釈: main_window_notes.cpp)
     build_measure_menus(view);  // (PC5 J-d1: 表示 → 表示・非表示 ▸ カウント: main_window_measure.cpp)
     build_slice_menus(view, layers);  // (PC5 J-b: 表示・非表示 ▸ スライス, スライスをロック・消去, レイヤー → 新規レイヤーベースのスライス: main_window_slices.cpp)
+    build_print_menus(file);  // (PC5 I-f: 生成 ▸ 画像アセット after 書き出し ▸, 1 部プリント after プリント…, 自動処理 ▸ コンタクトシート II…: main_window_print.cpp)
     build_video_menus(file, layers);  // (PC5 J-e2: 読み込み ▸ ビデオフレームからレイヤー…, ラスタライズ ▸ ビデオ: main_window_video.cpp)
     pages->addAction(action("act_book_preview"));
     pages->addAction(action("act_checks"));

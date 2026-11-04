@@ -151,6 +151,8 @@ genko_library(genko_core
     layer_basics.cpp
     # PC5 I-c (アートボード: artboards@1)
     artboards.cpp
+    # PC5 I-f (画像アセット: image-assets@1 — the book's generator setting, set_image_assets, the layers' naming rule)
+    image_assets.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"

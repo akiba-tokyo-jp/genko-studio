@@ -33,6 +33,7 @@
 #include "core/brush_dabs.hpp"
 #include "core/patterns.hpp"
 #include "core/variables.hpp"
+#include "core/image_assets.hpp"
 #include "core/layer_styles.hpp"
 #include "core/type_text.hpp"
 #include "core/groups.hpp"
@@ -57,7 +58,7 @@ using core::Point;
 
 namespace {
 
-constexpr std::array<std::string_view, 27> kTopKeys{
+constexpr std::array<std::string_view, 28> kTopKeys{
     "version", "revision", "title", "episode", "binding", "start_side", "strict_gates", "autosave",
     "font_path", "page_locks", "brush", "nombre", "spec", "bible", "tickets", "studio", "pages", "story",
     // v4
@@ -71,7 +72,9 @@ constexpr std::array<std::string_view, 27> kTopKeys{
     // type@1 (PC5 G-0)
     "type_styles",
     // variables@1 (PC5 I-d)
-    "variables"};
+    "variables",
+    // image-assets@1 (PC5 I-f)
+    "generator"};
 
 constexpr std::array<std::string_view, 21> kPageKeys{
     "id", "art_ok", "plan", "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
@@ -1639,6 +1642,14 @@ core::Document Reader::migrate(const Json& payload) {
     if (const Json* styles = find(payload, "type_styles"); styles != nullptr && !styles->is_null()) doc.type_styles = *styles;
     // (variables@1, PC5 I-d: the book's variables, as the writer writes them: core::validate_variables below)
     if (const Json* variables = find(payload, "variables"); variables != nullptr && !variables->is_null()) doc.variables = *variables;
+    // (image-assets@1, PC5 I-f: 生成 → 画像アセット, {"image_assets": true} only; anything else, the book read-only)
+    if (const Json* generator = find(payload, "generator"); generator != nullptr && !generator->is_null()) {
+        try {
+            doc.image_assets = core::image_assets_from_json(*generator);
+        } catch (const core::Error& error) {
+            issue("broken_value", "/generator", {}, error.what());
+        }
+    }
     doc.nombre = dict_or_empty(payload, "nombre");
     if (const Json* bible = find(payload, "bible"); bible && core::py_truthy(*bible)) {
         if (!bible->is_object()) format_error("/bible", "the bible must be an object, not " + core::py_repr(*bible));
@@ -2089,7 +2100,9 @@ bool is_known_feature(std::string_view feature) {
            // PC5 I-a (core/layer_basics.hpp)
            feature == core::kLayerLocksFeature || feature == core::kBlendChannelsFeature ||
            // PC5 I-c (core/artboards.hpp)
-           feature == core::kArtboardsFeature;
+           feature == core::kArtboardsFeature ||
+           // PC5 I-f (core/image_assets.hpp)
+           feature == core::kImageAssetsFeature;
 }
 
 int project_version(const Json& payload) {

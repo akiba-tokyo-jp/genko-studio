@@ -343,4 +343,62 @@ struct Panorama {
 // render::align's errors (対応が見つかりません, パノラマが大きすぎます).
 Panorama photomerge(const std::vector<Picture>& pictures, const PhotomergeOptions& options);
 
+// --- PC5 I-f: コンタクトシート II -----------------------------------------------------------------------------------------
+
+// コンタクトシート II (file.automate.contactSheetII; PhotoCraft's automate_cmds.rs 406-505 contact_sheet, MIT): each picture
+// (a book's: each of its pages) made small enough for its cell — turned a quarter when that fits it better, when asked —
+// and put on new sheets (books in memory, no path: one page each, of the size, resolution, mode and depth asked, a white
+// 背景): the small pictures pasted into one paint layer of the sheet, サムネール (a Genko paint layer's pixels cover its page: a
+// layer each would be a whole sheet each — PC5 I-f's review P1-1), each caption a horizontal type layer under its picture,
+// the sheets filled across first or down first; every layer merged into one when asked. The pictures are opened one at a
+// time (as the runner opens them); one that cannot be opened is said in `errors` and the others are put. Each sheet is
+// finished (its captions set, merged) before the next is begun, handed to `each` when given (then not kept); a sheet that
+// cannot be finished is let go and said in `errors`. What a sheet may be is checked before anything is opened
+// (check_contact_sheet).
+struct ContactSheet {
+    double width = 8.0;           // the sheet's size in `units` (Photoshop's 8 × 10 in, 300 ppi)
+    double height = 10.0;
+    std::string units = "in";     // in | cm | mm | px
+    double resolution = 300.0;    // ppi, 72..1200
+    std::string mode = "rgb";     // rgb | gray
+    int depth = 8;                // 8 | 16
+    int columns = 5;              // 1..100
+    int rows = 6;                 // 1..100
+    bool across = true;           // 横方向優先 (else 縦方向優先)
+    bool auto_spacing = true;     // else `horizontal`, `vertical` in `units`
+    double horizontal = 0.0;
+    double vertical = 0.0;
+    bool rotate = false;          // 最適な配置になるように回転
+    bool caption = true;          // ファイル名をキャプションとして使用
+    double font_pt = 12.0;        // 4..72
+    bool flatten = false;         // すべてのレイヤーを統合
+    std::string title = "コンタクトシート";  // the sheets' names: <title>-001, -002 …
+};
+struct ContactSheetResult {
+    std::vector<core::Document> books;          // the sheets, in order (none when they were handed to `each`)
+    std::size_t sheets = 0;                     // the sheets made
+    core::Json errors = core::Json::array();    // {"input", "error", "code"}
+    std::size_t images = 0;                     // the pictures put
+    std::size_t width_px = 0, height_px = 0;    // each sheet's
+    bool cancelled = false;
+    // {"ok", "sheets", "images", "width", "height", "errors", "cancelled"?}
+    core::Json json() const;
+};
+// At most this many cells on a sheet (columns × rows): a caption each is a type layer of the page.
+inline constexpr int kContactSheetCells = 400;
+// core::Error("value") for a setting out of its range, core::Error("image_too_large") for a sheet whose memory would pass
+// what this build holds (before anything is opened): a sheet past the codecs' limits (120 million pixels, 100000 a side);
+// its work (the sheet's pixels in memory twice and the 8-bit picture drawn of it) past the 2 GiB of render's allocation
+// budget; a 16-bit sheet's two layers (背景 and サムネール, 8 bytes a pixel) past the book's 1 GiB of precise pixels; and, with
+// `images` given and `kept` (the window keeps every sheet open: no `each`), the sheets those pictures need, together, past
+// the 2 GiB.
+void check_contact_sheet(const ContactSheet& sheet, std::size_t images = 0, bool kept = false);
+// The sheets of these inputs (Options: `open` how a picture is opened, `actor` who sets the captions, `cancelled` and
+// `progress` as the runner's; the steps are not taken). With `each`, every sheet is given to it once finished and not kept
+// (ContactSheetResult::books empty; `sheets` counts them).
+ContactSheetResult contact_sheet(const std::vector<Input>& inputs, const ContactSheet& sheet, const Options& options,
+                                 const std::function<void(core::Document&&)>& each = {});
+// A folder written into that lies in a book's folder (or is one): core::Error("refused_target"), as the runner refuses it.
+void check_output_folder(const fs::path& folder);
+
 }  // namespace genko::service::automate

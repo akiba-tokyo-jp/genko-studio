@@ -3494,6 +3494,12 @@ std::vector<core::LayerRole> export_plan(const core::Page&) {
             LayerRole::Text};
 }
 
+int edge_px(double mm, int dpi) {
+    const double px = mm / 25.4 * dpi;
+    if (!(px > 0.0) || core::py_round_int(px) <= 0) return 0;
+    return mm_to_px(mm, dpi);
+}
+
 int mm_to_px(double mm, int dpi) {
     const double px = mm / 25.4 * dpi;
     // max(1, round(px)); a size an int cannot hold is held as the largest (the page is refused as too large)
