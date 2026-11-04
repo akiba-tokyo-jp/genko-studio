@@ -802,6 +802,17 @@ target_compile_definitions(test_contract_plugins PRIVATE GENKO_TEST_PLUGIN_HOST=
                                                          GENKO_TEST_NATIVE_PLUGIN="$<TARGET_FILE:genko_test_native_plugin>")
 add_dependencies(test_contract_plugins genko_test_native_plugin)
 target_link_libraries(test_contract_plugins PRIVATE genko_api)
+# (PC5 J-f: the WebAssembly half of the same file as its own program — one QtTest object, one Totals line per run)
+genko_test(test_contract_wasm_plugins SOURCES contract/test_contract_plugins.cpp DEPS genko_test_support genko_render_ops
+           LABELS contract TIMEOUT 1800)
+target_compile_definitions(test_contract_wasm_plugins PRIVATE GENKO_WASM_SUITE
+                                                              GENKO_TEST_PLUGIN_HOST="$<TARGET_FILE_DIR:genko>/genko-plugin-host${CMAKE_EXECUTABLE_SUFFIX}"
+                                                              GENKO_TEST_NATIVE_PLUGIN="$<TARGET_FILE:genko_test_native_plugin>")
+add_dependencies(test_contract_wasm_plugins genko_test_native_plugin)
+if(TARGET genko_plugin_host)
+  add_dependencies(test_contract_wasm_plugins genko_plugin_host)
+endif()
+target_link_libraries(test_contract_wasm_plugins PRIVATE genko_api)
 # (PC5 J-f: 環境設定 → プラグイン…'s WebAssembly rows — test_gui_anim is made further down)
 set(GENKO_TEST_PLUGIN_HOST_DEF "GENKO_TEST_PLUGIN_HOST=\"$<TARGET_FILE_DIR:genko>/genko-plugin-host${CMAKE_EXECUTABLE_SUFFIX}\"")
 

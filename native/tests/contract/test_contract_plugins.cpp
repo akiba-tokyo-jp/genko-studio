@@ -736,11 +736,15 @@ private slots:
 int main(int argc, char** argv) {
     if (!qEnvironmentVariableIsSet("QTEST_FUNCTION_TIMEOUT")) qputenv("QTEST_FUNCTION_TIMEOUT", "900000");
     QCoreApplication app(argc, argv);
-    // (PC5 J-f: the WebAssembly plugins first — they need no Python — then the Python plugins, skipped without it)
-    TestContractWasmPlugins wasm;
-    const int wasm_failed = QTest::qExec(&wasm, argc, argv);
-    TestContractPlugins test;
     QTEST_SET_MAIN_SOURCE_PATH
-    return QTest::qExec(&test, argc, argv) + wasm_failed;
+    // (PC5 J-f: one QtTest object per program, so each run reports one Totals line — the WebAssembly plugins are the
+    // program test_contract_wasm_plugins, built from this file with GENKO_WASM_SUITE; the Python plugins are this one)
+#ifdef GENKO_WASM_SUITE
+    TestContractWasmPlugins wasm;
+    return QTest::qExec(&wasm, argc, argv);
+#else
+    TestContractPlugins test;
+    return QTest::qExec(&test, argc, argv);
+#endif
 }
 #include "test_contract_plugins.moc"
