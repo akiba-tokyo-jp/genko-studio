@@ -123,6 +123,10 @@ void MainWindow::build_output_docks() {
 
 // After a change to the book: the checks are out of date, the history follows.
 void MainWindow::output_panels_follow(bool now) {
+    if (QAction* assets = action("act_image_assets"); assets != nullptr) {  // (PC5 I-f: 生成 → 画像アセット as the book in front has it)
+        const QSignalBlocker quiet(assets);
+        assets->setChecked(book().image_assets);
+    }
     if (checks_ != nullptr) checks_->refresh();
     history_follows(now);
 }

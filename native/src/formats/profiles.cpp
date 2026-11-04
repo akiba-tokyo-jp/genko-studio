@@ -53,8 +53,9 @@ Image trimmed(const core::Page& page, const core::Document& episode, int dpi) {
     options.finish = false;
     const Image image = render::render_page(page, dpi, options, &episode).image;
     const core::Rect trim = page.trim_rect_mm();
-    const int x0 = render::mm_to_px(trim.x.value(), dpi);
-    const int y0 = render::mm_to_px(trim.y.value(), dpi);
+    // (the user's decision 15: an edge at the paper's own, 0 mm — the Webtoon type —, at 0, as crop_to cuts)
+    const int x0 = render::edge_px(trim.x.value(), dpi);
+    const int y0 = render::edge_px(trim.y.value(), dpi);
     return image.crop(render::Box{x0, y0, x0 + render::mm_to_px(trim.width.value(), dpi), y0 + render::mm_to_px(trim.height.value(), dpi)});
 }
 

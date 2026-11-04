@@ -148,6 +148,8 @@ const std::vector<std::pair<QString, QList<QKeySequence>>>& photoshop_keys() {
         {QStringLiteral("act_channel_9"), k({"Ctrl+9"})},
         // ウィンドウ: レイヤー F7 (a panel's switch by its panel's object name)
         {QStringLiteral("dock:レイヤー"), k({"F7"})},
+        // ファイル: 1 部プリント (PC5 I-f; the same key in both sets)
+        {QStringLiteral("act_print_one_copy"), k({"Ctrl+Alt+Shift+P"})},
         // (PC5 J-g) アクション Alt+F9 (Genko's set: none)
         {QStringLiteral("act_panel_actions"), k({"Alt+F9"})},
     };

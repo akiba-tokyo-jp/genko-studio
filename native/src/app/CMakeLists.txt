@@ -246,6 +246,9 @@ genko_library(genko_app
     auto_align_dialog.cpp
     photomerge_dialog.cpp
     main_window_photomerge.cpp
+    # PC5 I-f (1 部プリント, 生成 → 画像アセット, コンタクトシート II…; `genko print`)
+    main_window_print.cpp
+    print_cli.cpp
     # PC5 J-g (制御チャンネル: the local socket and what it does in a window; ウィンドウ → アクション; 環境設定 → 連携)
     control_channel.cpp
     main_window_control.cpp

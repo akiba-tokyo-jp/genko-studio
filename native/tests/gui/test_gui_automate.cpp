@@ -9,6 +9,7 @@
 // windows answered: a new book of 32 or 16 bits).
 // PC5 I-g: 編集 → レイヤーを自動整列…・レイヤーを自動合成… (two paint layers chosen: on a worker, one Undo; one chosen: said),
 // ファイル → 自動処理 → Photomerge… and スクリプト → ファイルをスタックとして読み込み…・統計… (each a new book in a tab of its own).
+// PC5 I-f: コンタクトシート II… (after 写真の切り抜きと角度補正): a folder's pictures on new sheets, each a book of its own.
 
 #include <QtTest>
 
@@ -23,6 +24,7 @@
 #include <QPushButton>
 #include <QTableWidget>
 #include <QSpinBox>
+#include <QTabBar>
 #include <QTemporaryDir>
 
 #include <array>
@@ -157,7 +159,7 @@ private slots:
         Book b;
         QVERIFY(b.window->automate_menu()->menuAction()->isVisible());
         QCOMPARE(items(b.window->automate_menu()), (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"),
-                                                             QStringLiteral("写真の切り抜きと角度補正"), QStringLiteral("|"),  // (PC5 I-h)
+                                                             QStringLiteral("写真の切り抜きと角度補正"), QStringLiteral("コンタクトシート II…"), QStringLiteral("|"),  // (PC5 I-h, I-f)
                                                              QStringLiteral("条件付きモード変更…"), QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…"),
                                                              QStringLiteral("|"), QStringLiteral("HDR Pro に統合…"),  // (PC5 I-h)
                                                              QStringLiteral("Photomerge…")}));  // (PC5 I-g)
@@ -170,7 +172,8 @@ private slots:
                                                             QStringLiteral("参照…")}));
         for (const char* name : {"act_batch", "act_create_droplet", "act_conditional_mode_change", "act_fit_image", "act_lens_correction_batch",
                                  "act_image_processor", "act_script_events", "act_script_browse", "act_crop_straighten_photos", "act_merge_to_hdr_pro",
-                                 "act_photomerge", "act_load_files_into_stack", "act_statistics", "act_auto_align_layers", "act_auto_blend_layers"}) {
+                                 "act_photomerge", "act_load_files_into_stack", "act_statistics", "act_auto_align_layers", "act_auto_blend_layers",
+                                 "act_contact_sheet"}) {
             QVERIFY2(b.act(name) != nullptr && b.act(name)->shortcuts().isEmpty(), name);
         }
     }
@@ -299,6 +302,51 @@ private slots:
         QVERIFY(fs::exists(b.root / "out" / "PNG" / "a.png"));
         const formats::Opened made = formats::open_file(storage::read_file(b.root / "out" / "PNG" / "a.png"), "a.png");
         QCOMPARE(px(made.doc.page(0)), (std::pair<double, double>{30.0, 15.0}));
+    }
+
+    // PC5 I-f: コンタクトシート II… — a folder's pictures on new sheets, each opened as a book of its own (no path: never
+    // written), the window's settings taken (its size, columns and rows; captions); the settings checked before anything is
+    // opened.
+    void contactSheetInTheWindow() {
+        Book b;
+        fs::create_directories(b.root / "in");
+        for (int i = 0; i < 3; ++i) picture(b.root / "in" / ("p" + std::to_string(i) + ".png"), 60, 30);
+        const int before = b.window->doc_tabs()->count();
+        b.answer<app::ContactSheetDialog>([&b](app::ContactSheetDialog* d) {
+            choose(d->units, QStringLiteral("px"));
+            d->width->setValue(300);
+            d->height->setValue(200);
+            d->resolution->setValue(72);
+            d->columns->setValue(2);
+            d->rows->setValue(1);
+            d->font_pt->setValue(9);
+            choose(d->source.box, QStringLiteral("folder"));
+            d->source.folder->setText(q(b.root / "in"));
+            const service::automate::ContactSheet sheet = d->sheet();
+            return sheet.units == "px" && sheet.columns == 2 && sheet.rows == 1 && sheet.caption && !d->problem();
+        });
+        b.act("act_contact_sheet")->trigger();
+        QCOMPARE(b.window->doc_tabs()->count(), before + 2);  // (three pictures on 2 × 1 sheets)
+        const core::Document& last = b.doc();
+        QCOMPARE(px(last.page(0)), (std::pair<double, double>{300.0, 200.0}));
+        QVERIFY(!b.window->session().path());
+        int captions = 0;
+        for (const core::Layer& layer : last.page(0).layers) captions += layer.kind == core::LayerKind::Type ? 1 : 0;
+        QCOMPARE(captions, 1);  // (the third picture alone on the second sheet)
+        // a setting out of its range: said in the window, nothing made
+        bool said = false;
+        b.answer<app::ContactSheetDialog>([&said](app::ContactSheetDialog* d) {
+            choose(d->source.box, QStringLiteral("folder"));
+            d->source.folder->setText(QStringLiteral("/nowhere"));
+            choose(d->units, QStringLiteral("px"));
+            d->width->setValue(8);
+            said = d->problem().has_value();
+            return false;
+        });
+        const int now = b.window->doc_tabs()->count();
+        b.act("act_contact_sheet")->trigger();
+        QVERIFY(said);
+        QCOMPARE(b.window->doc_tabs()->count(), now);
     }
 
     // 画像を合わせる… and 条件付きモード変更…: the page in front, one Undo each; a mode not listed left as it is (said).

@@ -693,6 +693,8 @@ genko_test(test_automate SOURCES unit/test_automate.cpp DEPS genko_test_support 
 # picture never written in place) and of a book (--save: its pages changed, the journal's name).
 # PC5 I-e: `genko automate` (画像プロセッサー of a PNG, a 16-bit TIFF and a CMYK JPEG; 画像を合わせる; 条件付きモード変更; レンズ補正 as
 # the filter one by one) and `genko droplet` (made with its launchers, run by itself and by its launcher; an agent refused).
+# PC5 I-f: `genko automate contact-sheet` (the sheets' layers and captions, 16 bits, grey, flattened, a book's pages), 画像アセット
+# (the naming rule, `genko export --format image-assets`, image-assets@1).
 genko_test(test_contract_automate SOURCES contract/test_contract_automate.cpp DEPS genko_test_support genko_service
            LABELS contract TIMEOUT 900)
 add_dependencies(test_contract_automate genko)
@@ -720,6 +722,12 @@ genko_test(test_panorama SOURCES unit/test_panorama.cpp DEPS genko_test_support 
 genko_test(test_contract_auto_align SOURCES contract/test_contract_auto_align.cpp DEPS genko_test_support genko_service
            LABELS contract TIMEOUT 1800)
 add_dependencies(test_contract_auto_align genko)
+# PC5 I-f (SPEC.md AUTO-01「プリント」): `genko print` — the sheet's place (fitted, at its size, scaled, at a position), the
+# marks' shapes and places, the label and the description, Genko's colour management through the printer's profile as
+# Little CMS converts (a CMYK page from its inks), a PDF and a dry run, the book never written, the refusals.
+genko_test(test_contract_print SOURCES contract/test_contract_print.cpp DEPS genko_test_support genko_render_ops genko_formats ${GENKO_LCMS2}
+           LABELS contract TIMEOUT 900)
+add_dependencies(test_contract_print genko)
 # The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
 # across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a
 # warped line's pictures within ARCHITECTURE.md §9: Python's homography comes from numpy's SVD).

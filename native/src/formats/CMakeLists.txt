@@ -33,5 +33,8 @@ genko_library(genko_formats
     notes_import.cpp
     # PC5 I-c (アートボード: アートボードからファイル・PDF・1 つの PSD、PSD のアートボードをページに)
     artboards.cpp
+    # PC5 I-f (生成 → 画像アセット; プリントの配置・印・色の管理)
+    image_assets.cpp
+    print_marks.cpp
   PUBLIC_DEPS genko_render genko_core Qt6::Core
   PRIVATE_DEPS genko_storage ZLIB::ZLIB JPEG::JPEG TIFF::TIFF ${GENKO_LCMS2})
