@@ -77,6 +77,10 @@ struct Refusal {
 };
 std::optional<Refusal> refused_ops(const Json& ops);
 
+// engine.commands: the ops engine.execute takes, with their arguments (genko schema's entries MCP's apply_ops takes,
+// those that read a file left out).
+Json engine_commands();
+
 // ui.menu.invoke's commands (the view's only: the zoom and the fit, the timeline's frames, the extras' switches, the
 // panels' switches — never one that changes the book, opens a dialog or reaches the approvals), by attribute.
 const std::vector<std::string>& view_commands();

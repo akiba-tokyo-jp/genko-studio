@@ -44,6 +44,7 @@
 #include "app/canvas.hpp"
 #include "app/comfort.hpp"
 #include "app/config.hpp"
+#include "app/control_channel.hpp"
 #include "app/documents.hpp"
 #include "app/icons.hpp"
 #include "app/key_sets.hpp"
@@ -360,7 +361,7 @@ const std::vector<Pane>& panes() {
         {QStringLiteral("type"), QStringLiteral("テキスト…"), QStringLiteral("テキスト")},  // (PC5 G-d)
         {QStringLiteral("enhancedControls"), QStringLiteral("拡張コントロール…"), QString()},
         {QStringLiteral("rawDefaults"), QStringLiteral("Camera Raw…"), QStringLiteral("Camera Raw")},
-        {QStringLiteral("integrations"), QStringLiteral("連携…"), QString()},
+        {QStringLiteral("integrations"), QStringLiteral("連携…"), QStringLiteral("連携")},  // (PC5 J-g)
         {QStringLiteral("tablet"), QStringLiteral("ペンタブレット…"), QStringLiteral("ペンタブレット")},
         {QStringLiteral("comfort"), QStringLiteral("長い時間の作業…"), QStringLiteral("表示・作業")}};
     return all;
@@ -640,6 +641,7 @@ void apply_all(MainWindow* window) {
     window->apply_proof_view();  // (透明部分・色域: the gamut warning's mark)
     window->apply_guide_prefs();  // (PC5 H-b: 単位・定規, ガイド・グリッド・スライス)
     canvas->update();
+    control::Server::instance().follow_settings();  // (PC5 J-g: 連携's control channel on or off; the status bar's words)
 }
 
 bool tool_keys_dialog(QWidget* parent, MainWindow* window, const std::function<void(QDialog&)>& before_exec) {
@@ -1056,6 +1058,9 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     // テキスト (PC5 G-d: app/preferences_type.cpp)
     type_page = preferences::type_page(this);
     tabs->addTab(type_page, QStringLiteral("テキスト"));
+    // 連携 (PC5 J-g: app/preferences_integrations.cpp — the control channel)
+    integrations_page = preferences::integrations_page(this);
+    tabs->addTab(integrations_page, QStringLiteral("連携"));
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("決める"));
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("やめる"));
@@ -1077,7 +1082,8 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
                                                   {QStringLiteral("Camera Raw"), "kind_placed"},
                                                   {QStringLiteral("単位・定規"), "ruler"},
                                                   {QStringLiteral("ガイド・グリッド・スライス"), "kind_tone"},
-                                                  {QStringLiteral("テキスト"), "text"}};  // (PC5 G-d)
+                                                  {QStringLiteral("テキスト"), "text"},  // (PC5 G-d)
+                                                  {QStringLiteral("連携"), "settings"}};  // (PC5 J-g)
     for (int page = 0; page < tabs->count(); ++page) {
         const auto picture = pictures.find(tabs->tabText(page));
         pages_list->addItem(new QListWidgetItem(icons::icon(picture != pictures.end() ? picture->second : "settings"), tabs->tabText(page)));
@@ -1217,6 +1223,7 @@ void PreferencesDialog::save() {
     store->setValue(QStringLiteral("view/gamut_opacity"), gamut_percent->value());
     save_unit_pages(units_page, guides_page);  // (PC5 H-b)
     save_type_page(type_page);                 // (PC5 G-d)
+    save_integrations_page(integrations_page);  // (PC5 J-g)
     // (PC5 H-d: ワークスペース)
     for (const auto& [key, box] : std::initializer_list<std::pair<const char*, QCheckBox*>>{{"ui/workspace_remember", workspace_remember},
                                                                                            {"ui/auto_show_panels", auto_show_panels},

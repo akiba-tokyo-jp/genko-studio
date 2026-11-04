@@ -10,6 +10,7 @@
 #include <array>
 #include <functional>
 
+#include "core/ops_schema.hpp"
 #include "core/pyconv.hpp"
 #include "service/studio_service.hpp"
 
@@ -141,6 +142,15 @@ std::optional<Refusal> refused_ops(const Json& ops) {
         return std::nullopt;
     };
     return look(ops, "/ops");
+}
+
+Json engine_commands() {
+    Json out = Json::array();
+    for (const Json& op : core::ops_schema()) {
+        const Json name = op.value("op", Json());
+        if (name.is_string() && service::agent_op(name.get<std::string>()) && !reads_a_file(name.get<std::string>())) out.push_back(op);
+    }
+    return Json{{"ops", std::move(out)}, {"note", "engine.execute {ops: [...]} に、この op を並べる（MCP の apply_ops と同じ断り）"}};
 }
 
 const std::vector<std::string>& view_commands() { return kViewCommands; }

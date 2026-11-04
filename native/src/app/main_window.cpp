@@ -38,6 +38,7 @@
 #include <chrono>
 
 #include "app/actions.hpp"
+#include "app/actions_panel.hpp"
 #include "app/brush_panel.hpp"  // (PC4 E1: the blend and the pencil)
 #include "app/adjust_forms.hpp"
 #include "app/ask.hpp"
@@ -67,6 +68,8 @@
 #include "app/workspace.hpp"
 #include "app/colours.hpp"
 #include "service/wording.hpp"
+#include "core/video.hpp"
+#include "service/control.hpp"
 #include "core/actor.hpp"
 #include "core/command_bus.hpp"
 #include "core/paths.hpp"
@@ -733,6 +736,25 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
     }
     QElapsedTimer clock;
     clock.start();
+    if (control_actor_) {
+        // (PC5 J-g: the control channel's pen — its line's ops as the token's actor, MCP's ops and refusals; never recorded
+        // into an action, the person's)
+        if (const auto refused = service::control::refused_ops(ops)) {
+            control_refused_ = QString::fromStdString(refused->message);
+            flash(control_refused_, 6000, true);
+            return false;
+        }
+        try {
+            const core::PublicAnimationOps public_ops;
+            last_results_ = session_->apply_as(with_contents_target(with_channel_target(ops)), *control_actor_, ids).results;
+        } catch (const std::exception& error) {
+            control_refused_ = wording::error(QString::fromUtf8(error.what()));
+            flash(control_refused_, 6000, true);
+            return false;
+        }
+        control_applied_ = true;
+        return true;
+    }
     try {
         // (channels@1: the pixel ops on the channel targeted; smart-objects@1: in a contents' tab, on its contents)
         last_results_ = core::Json::array();
@@ -745,14 +767,19 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
         return false;
     }
     perf::event("applied", {{"ms", clock.nsecsElapsed() / 1e6}, {"op", ops.size() > 0 && ops[0].contains("op") ? ops[0]["op"] : Json()}});
-    if (recording_) {  // (オートアクション: what was done goes into the recording)
+    if (recording_) {  // (アクション: what was done goes into the recording)
         for (Json& op : actions::recordable(ops)) recording_->push_back(std::move(op));
+        if (actions_panel_ != nullptr && actions_dock_ != nullptr && actions_dock_->isVisible()) actions_panel_->refresh();
     }
     return true;
 }
 
 bool MainWindow::apply_worked(const Json& ops, const Json& targeted, const DocPtr& base, core::ApplyResult result,
                               const std::vector<std::string>& taken) {
+    if (control_actor_) {  // (PC5 J-g: the channel's pen makes no worker's change)
+        control_refused_ = QStringLiteral("この操作は制御チャンネルのペンでは当てられません");
+        return false;
+    }
     QElapsedTimer clock;
     clock.start();
     try {
@@ -949,7 +976,7 @@ void MainWindow::refresh_status() {
         refresh_actions();
         return;
     }
-    const QString saved = state_words(status) + (recording_ ? QStringLiteral(" ・ ● オートアクションを記録中") : QString());
+    const QString saved = state_words(status) + (recording_ ? QStringLiteral(" ・ ● アクションを記録中") : QString());
     const core::Page* page = current_page();
     if (page == nullptr) {
         status_->setText(saved);

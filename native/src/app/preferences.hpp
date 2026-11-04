@@ -144,6 +144,9 @@ void save_unit_pages(QWidget* units, QWidget* guides);
 // 環境設定 → テキスト (PC5 G-d, app/preferences_type.cpp): its page, and what 決める keeps of it.
 QWidget* type_page(QWidget* parent);
 void save_type_page(QWidget* page);
+// 連携 (PC5 J-g: app/preferences_integrations.cpp): the control channel on or off.
+QWidget* integrations_page(QWidget* parent);
+void save_integrations_page(QWidget* page);
 
 // 透明部分・色域 (PhotoCraft v0.2.0's prefs.rs TransparencyAndGamut, MIT; SPEC COLOR-03 PC1b): the checker shown under
 // what is transparent (the layers' small pictures) — its square's side in pixels (0: none, white) and its two colours —
@@ -254,6 +257,7 @@ public:
     QWidget* units_page = nullptr;
     QWidget* guides_page = nullptr;
     QWidget* type_page = nullptr;  // (テキスト, PC5 G-d)
+    QWidget* integrations_page = nullptr;  // (連携, PC5 J-g)
 
     void measure();
     void forget_gamma();

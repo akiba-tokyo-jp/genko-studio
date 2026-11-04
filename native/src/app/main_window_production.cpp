@@ -1,7 +1,7 @@
 // The production's commands (PC5 節 J, SPEC.md PROD-01「制作の補助」): the frames J-0 puts in Photoshop's places — ページ
 // (Photoshop's イメージ) → 解析 ▸, レイヤー → ビデオレイヤー ▸, ウィンドウ's panels アクション・レイヤーカンプ・計測ログ・注釈 —,
 // each saying it is not in this build yet until its group writes it (J-a レイヤーカンプ, J-c 注釈, J-d1/J-d2 計測,
-// J-e2 ビデオレイヤー, J-g アクション). A group makes a frame real by taking its rows out of the tables below and making
+// J-e2 ビデオレイヤー; J-g's アクション is real). A group makes a frame real by taking its rows out of the tables below and making
 // the command in its own build_* under the same attribute (its menus here keep taking it by action()); a panel's row goes
 // for its dock's own toggle in build_production_docks. (make() puts a command made again under an attribute in the old
 // one's places and lets the old one go, so a row left behind never answers in its place — whichever is made first.)
@@ -9,13 +9,16 @@
 // decision 13: コマを結合 takes Ctrl+Alt+M there), none in Genko's (Ctrl+Shift+M コマを結合's); アクション's Alt+F9 is free in both.
 
 #include <QAction>
+#include <QDockWidget>
 #include <QMenu>
+#include <QSignalBlocker>
 
 #include <algorithm>
 #include <iterator>
 #include <span>
 #include <string_view>
 
+#include "app/actions_panel.hpp"
 #include "app/main_window.hpp"
 
 namespace genko::app {
@@ -47,22 +50,26 @@ constexpr Frame kVideo[] = {
     {"act_video_rasterize", "ラスタライズ", "今のフレームの見えをふつうのペイントレイヤーにします"},
 };
 
-// ウィンドウ's panels (J-g アクション; タイムライン is the dock's; J-a's レイヤーカンプ is made by main_window_layer_comps.cpp,
-// after アクション; J-d2's 計測ログ by main_window_measure.cpp, after レイヤーカンプ; J-c's 注釈 by main_window_notes.cpp,
-// after 計測ログ)
-constexpr Frame kPanels[] = {
-    {"act_panel_actions", "アクション", "記録した操作の手順を並べ、再生・記録します"},
-};
+// ウィンドウ's panels: J-g's アクション (app/actions_panel.cpp, made below), J-a's レイヤーカンプ (main_window_layer_comps.cpp)
+// after it, J-d2's 計測ログ (main_window_measure.cpp) after レイヤーカンプ, J-c's 注釈 (main_window_notes.cpp) after 計測ログ;
+// タイムライン is the dock's.
 
 }  // namespace
 
 void MainWindow::build_production_actions() {
-    for (const std::span<const Frame> list : {std::span<const Frame>(kVideo), std::span<const Frame>(kPanels)}) {
-        for (const Frame& frame : list) {
-            const QString title = QString::fromUtf8(frame.title);
-            make(QString::fromLatin1(frame.attribute), title, [this, title] { not_yet_command(title); }, {}, QString::fromUtf8(frame.tip));
-        }
+    for (const Frame& frame : kVideo) {
+        const QString title = QString::fromUtf8(frame.title);
+        make(QString::fromLatin1(frame.attribute), title, [this, title] { not_yet_command(title); }, {}, QString::fromUtf8(frame.tip));
     }
+    // (PC5 J-g: ウィンドウ → アクション — Alt+F9 in Photoshop's key set, none in Genko's)
+    make(QStringLiteral("act_panel_actions"), QStringLiteral("アクション"),
+         [this] {
+             if (actions_dock_ == nullptr) return;
+             const bool show = !actions_dock_->isVisible();
+             actions_dock_->setVisible(show);
+             if (show) actions_dock_->raise();
+         },
+         {}, QStringLiteral("記録した操作の手順を並べ、再生・記録します"), true);
     build_layer_comp_actions();  // (PC5 J-a: レイヤーカンプ, レイヤーカンプからファイル…)
     build_note_actions();        // (PC5 J-c: 注釈ツール, 表示・非表示 → 注釈, 読み込み → 注釈…, ウィンドウ → 注釈)
     build_measure_actions();     // (PC5 J-d1: 計測スケールを設定 ▸, ものさしツール, カウントツール, 表示・非表示 → カウント; J-d2:
@@ -127,17 +134,32 @@ void MainWindow::build_production_menus(QMenu* layers, QMenu* pages) {
 }
 
 void MainWindow::build_production_docks() {
-    // (each group's dock in its frame's place: its toggleViewAction() into view_menu_ instead of the frame)
-    for (const Frame& frame : kPanels) {
-        view_menu_->addAction(action(QString::fromLatin1(frame.attribute)));
-        if (std::string_view(frame.attribute) == "act_panel_actions") {
-            build_layer_comps_dock();      // (PC5 J-a: レイヤーカンプ)
-            build_measurement_log_dock();  // (PC5 J-d2: 計測ログ)
-        }
-    }
+    // (each group's dock and its switch in ウィンドウ ▸, in Photoshop's order)
+    build_actions_dock();          // (PC5 J-g: アクション)
+    build_layer_comps_dock();      // (PC5 J-a: レイヤーカンプ)
+    build_measurement_log_dock();  // (PC5 J-d2: 計測ログ)
     build_notes_dock();  // (PC5 J-c: 注釈, the canvas's notes and the 注釈ツール's options)
     build_measure_tools();  // (PC5 J-d1: the canvas's count marks and ruler line, the ものさしツール's and カウントツール's options)
     build_slice_tools();  // (PC5 J-b: the canvas's slices, the スライスツール's and スライス選択ツール's options)
+}
+
+void MainWindow::build_actions_dock() {
+    actions_panel_ = new ActionsPanel(this);
+    actions_dock_ = new QDockWidget(QStringLiteral("アクション"), this);
+    actions_dock_->setObjectName(QStringLiteral("アクション"));
+    actions_dock_->setWidget(actions_panel_);
+    actions_dock_->setMinimumWidth(200);
+    actions_dock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
+    addDockWidget(Qt::RightDockWidgetArea, actions_dock_);
+    if (layers_dock_ != nullptr) tabifyDockWidget(layers_dock_, actions_dock_);
+    actions_dock_->hide();  // (ウィンドウ → アクション brings it)
+    QAction* toggle = action(QStringLiteral("act_panel_actions"));
+    view_menu_->addAction(toggle);
+    connect(actions_dock_, &QDockWidget::visibilityChanged, this, [this, toggle](bool) {
+        const QSignalBlocker quiet(toggle);
+        toggle->setChecked(actions_dock_->isVisible());
+        if (actions_dock_->isVisible() && actions_panel_ != nullptr) actions_panel_->refresh();
+    });
 }
 
 void MainWindow::not_yet_command(const QString& name) { flash(QStringLiteral("「%1」は、この版ではまだ使えません").arg(name), 4000, true); }
