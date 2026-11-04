@@ -777,8 +777,11 @@ private slots:
         for (const QString& name : app::kDefaultCommandBar + app::kDefaultQuick) QVERIFY2(name == QLatin1String("|") || by.count(name), qPrintable(name));
         // the panels' switches by their old titles
         app::settings()->setValue(QStringLiteral("ui/quick"), QStringLiteral("全体図\tツールの設定\t履歴"));
+        // (PC5 H-f: ヒストリー by its place since 編集 → メモリをクリア ▸ ヒストリー shares its words; the words alone still the
+        // panel's — preferences::words_owner)
         QCOMPARE(app::chosen(QStringLiteral("ui/quick"), app::kDefaultQuick),
-                 (QStringList{QStringLiteral("ナビゲーター"), QStringLiteral("オプション"), QStringLiteral("ヒストリー")}));
+                 (QStringList{QStringLiteral("ナビゲーター"), QStringLiteral("オプション"), QStringLiteral("ヒストリー（ウィンドウ）")}));
+        QCOMPARE(by.at(QStringLiteral("ヒストリー")), b.dock(QStringLiteral("ヒストリー"))->toggleViewAction());
         app::settings()->remove(QStringLiteral("ui/quick"));
         // keys chosen under the old names
         app::settings()->setValue(QStringLiteral("shortcuts/左右反転して見る"), QStringLiteral("Ctrl+Alt+K"));

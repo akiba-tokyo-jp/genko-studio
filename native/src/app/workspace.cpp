@@ -3,6 +3,7 @@
 #include <QAction>
 #include <QCheckBox>
 #include <QDialogButtonBox>
+#include <QDockWidget>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QJsonDocument>
@@ -175,9 +176,12 @@ std::map<QString, QAction*> by_text(QMainWindow* window) {
     for (QAction* action : listed) out.emplace(action->text(), action);
     // (PC5 H-0: words a command came to share by a rename are the one's that had them before — preferences::words_owner;
     // PC5 G-d: whatever its words are now, as the text tool's テキスト)
+    // (PC5 H-f: a panel's switch by its dock — "dock:<its object name>", as key_sets names it)
     for (const auto& [words, attribute] : preferences::words_owner()) {
         for (QAction* action : listed) {
-            if (action->property("genko_attribute").toString() == attribute) out[words] = action;
+            const auto* dock = qobject_cast<const QDockWidget*>(action->parent());
+            const QString owner = dock != nullptr ? QStringLiteral("dock:") + dock->objectName() : action->property("genko_attribute").toString();
+            if (owner == attribute) out[words] = action;
         }
     }
     return out;

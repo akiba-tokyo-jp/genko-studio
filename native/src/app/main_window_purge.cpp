@@ -8,6 +8,7 @@
 #include <QLocale>
 #include <QMenu>
 
+#include <algorithm>
 #include <set>
 
 #include "app/canvas.hpp"

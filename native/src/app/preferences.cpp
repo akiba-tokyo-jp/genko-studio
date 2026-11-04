@@ -306,7 +306,14 @@ const std::multimap<QString, QString>& renamed() {
                                                      {QStringLiteral("ビデオタイムラインを作成"), QStringLiteral("アニメーション（タイムライン）")},
                                                      // (PC5 J-f, edit.preferences.plugIns: the plugins' settings are 環境設定 ▸
                                                      // プラグイン…)
-                                                     {QStringLiteral("プラグイン…"), QStringLiteral("プラグインの設定…")}};
+                                                     {QStringLiteral("プラグイン…"), QStringLiteral("プラグインの設定…")},
+                                                     // (PC5 H-f: 編集 → メモリをクリア ▸'s 取り消し and ヒストリー share their
+                                                     // words with 編集's 取り消し and ウィンドウ's ヒストリー: those by their places
+                                                     // now, their old names kept — their keys still read under their words too)
+                                                     {QStringLiteral("取り消し（編集）"), QStringLiteral("元に戻す")},
+                                                     {QStringLiteral("取り消し（編集）"), QStringLiteral("取り消し")},
+                                                     {QStringLiteral("ヒストリー（ウィンドウ）"), QStringLiteral("履歴")},
+                                                     {QStringLiteral("ヒストリー（ウィンドウ）"), QStringLiteral("ヒストリー")}};
     return all;
 }
 
@@ -338,7 +345,12 @@ const std::map<QString, QString>& words_owner() {
                                                 {QStringLiteral("なし"), QStringLiteral("act_snap_none")},
                                                 // (PC5 G-d: テキスト — the text tool's words before it was 縦書き文字ツール —
                                                 // stays its, not ラスタライズ ▸ テキスト's — review P2-3)
-                                                {QStringLiteral("テキスト"), QStringLiteral("act_text")}};
+                                                {QStringLiteral("テキスト"), QStringLiteral("act_text")},
+                                                // (PC5 H-f: 編集 → メモリをクリア ▸'s 取り消し and ヒストリー came to share 編集's
+                                                // 取り消し and ウィンドウ → ヒストリー's words — the panel's switch by its dock,
+                                                // "dock:<its object name>")
+                                                {QStringLiteral("取り消し"), QStringLiteral("act_undo")},
+                                                {QStringLiteral("ヒストリー"), QStringLiteral("dock:履歴")}};
     return all;
 }
 

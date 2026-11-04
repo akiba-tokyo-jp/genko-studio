@@ -281,7 +281,9 @@ private slots:
         QCOMPARE(exports.indexOf(QStringLiteral("レイヤーカンプからファイル…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 5);
         QCOMPARE(exports.indexOf(QStringLiteral("パスを Illustrator へ…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 6);
         const QStringList edit = menu_items(w, QStringLiteral("編集"));
-        QCOMPARE(edit.mid(0, 4), (QStringList{QStringLiteral("取り消し"), QStringLiteral("やり直し"), QStringLiteral("ヒストリー…"), QStringLiteral("|")}));
+        // (PC5 H-f: 最後の状態を切り替え after やり直し, as Photoshop's)
+        QCOMPARE(edit.mid(0, 5), (QStringList{QStringLiteral("取り消し"), QStringLiteral("やり直し"), QStringLiteral("最後の状態を切り替え"),
+                                              QStringLiteral("ヒストリー…"), QStringLiteral("|")}));
         const QStringList view = menu_items(w, QStringLiteral("表示"));
         const int guides = view.indexOf(QStringLiteral("仕上がり線・基本枠を表示"));
         // (PC5 H-0, 節 H 5.1: 表示 in Photoshop's order — 定規 (目盛りを表示 before), ブラシプレビュー and パターンプレビュー in their
@@ -1961,6 +1963,16 @@ private slots:
         for (QAction* a : purge_menu->actions()) names << (a->isSeparator() ? QStringLiteral("|") : a->text());
         QCOMPARE(names, (QStringList{QStringLiteral("取り消し"), QStringLiteral("クリップボード"), QStringLiteral("ヒストリー"), QStringLiteral("すべて"),
                                      QStringLiteral("|"), QStringLiteral("ビデオキャッシュ")}));
+        // (its 取り消し and ヒストリー share their words with 編集's 取り消し and ウィンドウ's ヒストリー: those told apart by their
+        // places, keys and lists kept under the words alone still theirs)
+        const auto first = app::by_text(s.window.get());
+        QCOMPARE(first.at(QStringLiteral("取り消し")), s.act("act_undo"));
+        QCOMPARE(first.at(QStringLiteral("ヒストリー")), s.dock(QStringLiteral("ヒストリー"))->toggleViewAction());
+        const auto placed = app::command_names(s.window.get());
+        QCOMPARE(placed.at(s.act("act_undo")), QStringLiteral("取り消し（編集）"));
+        QCOMPARE(placed.at(s.act("act_purge_undo")), QStringLiteral("取り消し（編集 → メモリをクリア）"));
+        QCOMPARE(app::preferences::old_names(QStringLiteral("取り消し（編集）")), (QStringList{QStringLiteral("元に戻す"), QStringLiteral("取り消し")}));
+        QCOMPARE(app::preferences::old_names(QStringLiteral("ヒストリー（ウィンドウ）")), (QStringList{QStringLiteral("履歴"), QStringLiteral("ヒストリー")}));
         const QStringList edit = menu_items(s.window.get(), QStringLiteral("編集"));
         const qsizetype at = edit.indexOf(QStringLiteral("メモリをクリア"));
         QVERIFY2(at > 0 && edit.indexOf(QStringLiteral("検索")) > at, qPrintable(edit.join(QStringLiteral(" / "))));

@@ -315,7 +315,8 @@ private slots:
         }
         const Json* undo = command(listed, "act_undo");
         QVERIFY(undo != nullptr);
-        QCOMPARE((*undo)["name"], Json("取り消し"));
+        // (PC5 H-f: 編集 → メモリをクリア ▸ 取り消し shares its words — the user's decision 8: told apart by their places)
+        QCOMPARE((*undo)["name"], Json("取り消し（編集）"));
         QCOMPARE((*undo)["keys"], Json::array({"Ctrl+Z"}));
         QCOMPARE((*undo)["menu"], Json::array({"編集"}));
         const Json* move = command(listed, "act_move");

@@ -986,7 +986,9 @@ private slots:
         QCOMPARE(items(menu(QStringLiteral("表示"))),
                  (QStringList{QStringLiteral("校正の設定 ▸"), QStringLiteral("色の校正"), QStringLiteral("色域外警告"), QStringLiteral("|"),
                               // (PC5 H-a: 32 bit プレビューオプション…, レイヤーを画面サイズに合わせる, 100%, 200%, ピクセルアートプレビュー,
-                              // スクリーンモード ▸, 表示・非表示 ▸ (ピクセルグリッド; H-b fills the rest), 手のひらツール)
+                              // スクリーンモード ▸, 表示・非表示 ▸ (ピクセルグリッド; H-b fills the rest), 手のひらツール;
+                              // PC5 H-f: ピクセル縦横比 ▸, ピクセル縦横比を補正)
+                              QStringLiteral("ピクセル縦横比 ▸"), QStringLiteral("ピクセル縦横比を補正"),
                               QStringLiteral("32 bit プレビューオプション…"), QStringLiteral("|"),
                               QStringLiteral("ズームイン"), QStringLiteral("ズームアウト"), QStringLiteral("画面サイズに合わせる"),
                               QStringLiteral("アートボードを画面サイズに合わせる"),  // (PC5 I-c)
@@ -1041,6 +1043,8 @@ private slots:
         QCOMPARE(edit.mid(edit.size() - 9),
                  (QStringList{QStringLiteral("|"), QStringLiteral("検索"), QStringLiteral("スペルチェック…"), QStringLiteral("検索と置換…"), QStringLiteral("|"),
                               QStringLiteral("キーボードショートカット…"), QStringLiteral("メニュー…"), QStringLiteral("ツールバー…"), QStringLiteral("環境設定 ▸")}));
+        // (PC5 H-f: メモリをクリア ▸ before 検索, between lines)
+        QCOMPARE(edit.mid(edit.size() - 11, 2), (QStringList{QStringLiteral("|"), QStringLiteral("メモリをクリア ▸")}));
         QMenu* panes = w->findChild<QMenu*>(QStringLiteral("menu_preferences"));
         QVERIFY(panes != nullptr);
         QCOMPARE(items(panes), (QStringList{QStringLiteral("一般…"), QStringLiteral("インターフェイス…"),

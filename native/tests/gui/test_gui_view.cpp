@@ -574,8 +574,9 @@ private slots:
         const auto across = [&] { return c->to_widget(QPointF(w_mm, 0)).x() - c->to_widget(QPointF(0, 0)).x(); };
         const auto down = [&] { return c->to_widget(QPointF(0, h_mm)).y() - c->to_widget(QPointF(0, 0)).y(); };
         QVERIFY(std::abs(across() - c->scale() * w_mm) < 1e-6);
-        const double down_before = down();
-        // アナモルフィック 2:1: the page's ratio, one change; the view twice as wide, as tall as it was
+        QVERIFY(std::abs(down() - c->scale() * h_mm) < 1e-6);
+        // アナモルフィック 2:1: the page's ratio, one change; the view twice as wide as the zoom says, as tall as it says (a
+        // fitted view fitted again to the wider page)
         int edits = 0;
         QObject::connect(v.session.get(), &Session::changed, w, [&edits](const genko::app::BookChange& change) {
             if (change.why == genko::app::BookChange::Why::Edit) ++edits;
@@ -588,7 +589,7 @@ private slots:
         emit ratios->aboutToShow();
         QVERIFY(v.act("act_pixel_aspect_anamorphic")->isChecked() && !v.act("act_pixel_aspect_square")->isChecked());
         QVERIFY2(std::abs(across() - 2 * c->scale() * w_mm) < 1e-6, qPrintable(QString::number(across())));
-        QVERIFY(std::abs(down() - down_before) < 1e-6);
+        QVERIFY(std::abs(down() - c->scale() * h_mm) < 1e-6);
         // every point where it shows, and back
         for (const QPointF mm : {QPointF(0, 0), QPointF(w_mm, h_mm), QPointF(12.5, 40.25), QPointF(-3, 7)}) {
             const QPointF back = c->to_mm(c->to_widget(mm));
