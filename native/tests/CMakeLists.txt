@@ -681,7 +681,7 @@ genko_test(test_contract_codecs SOURCES contract/test_contract_codecs.cpp DEPS g
 # size, a layer alone cut to what it holds, the quality, the metadata's three, a CMYK page's colours the same everywhere,
 # too large refused first, the estimate, クイック書き出し's places and formats, レイヤーからファイル… (its default files as before),
 # `genko copy` and `genko export --format layers`' new choices.
-genko_test(test_contract_copy SOURCES contract/test_contract_copy.cpp DEPS genko_test_support genko_formats genko_render_ops
+genko_test(test_contract_copy SOURCES contract/test_contract_copy.cpp DEPS genko_test_support genko_formats genko_render_ops genko_service
            LABELS contract TIMEOUT 900)
 add_dependencies(test_contract_copy genko)
 # PC5 I-0 (SPEC.md AUTO-01: 自動処理の土台): the steps' three forms and their errors, the ops no step may be and an agent's

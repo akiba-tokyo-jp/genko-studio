@@ -180,7 +180,8 @@ const QPixmap& BookPreview::pixmap(int index) {
             for (const core::Fold& fold : core::folds(*page, core::to_string(doc_->binding))) {
                 if (fold.name != part) continue;
                 const core::Rect t = page->trim_rect_mm();
-                image = image.crop(render::Box{render::mm_to_px(fold.x0, kPreviewDpi), render::mm_to_px(t.y.value(), kPreviewDpi),
+                // (the user's decision 15: an edge at the paper's own, 0 mm, at 0 — render::edge_px, as front_of cuts)
+                image = image.crop(render::Box{render::edge_px(fold.x0, kPreviewDpi), render::edge_px(t.y.value(), kPreviewDpi),
                                                render::mm_to_px(fold.x1, kPreviewDpi), render::mm_to_px(t.y.value() + t.height.value(), kPreviewDpi)});
                 break;
             }

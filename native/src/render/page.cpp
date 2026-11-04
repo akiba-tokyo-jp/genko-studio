@@ -3508,8 +3508,9 @@ int mm_to_px(double mm, int dpi) {
 }
 
 Box rect_px(const core::Rect& rect, int dpi) {
-    const int x = mm_to_px(rect.x.value(), dpi);
-    const int y = mm_to_px(rect.y.value(), dpi);
+    // (the user's decision 15: its left and top edges as edge_px — at the paper's own edge, 0 mm, at 0 —, its size as mm_to_px)
+    const int x = edge_px(rect.x.value(), dpi);
+    const int y = edge_px(rect.y.value(), dpi);
     const int w = mm_to_px(rect.width.value(), dpi);
     const int h = mm_to_px(rect.height.value(), dpi);
     return Box{x, y, x + w, y + h};
@@ -3841,13 +3842,14 @@ Image render_spread(const core::Document& episode, const core::Num& first, const
     Image right_img = render_page(*right, dpi, o, &episode).image;
     const core::Rect lt = left->trim_rect_mm();
     const core::Rect rt = right->trim_rect_mm();
-    const auto top = [&](const core::Rect& t) { return to_trim ? mm_to_px(t.y.value(), dpi) : 0; };
+    // (the user's decision 15: an edge at the paper's own, 0 mm, at 0 — edge_px, as crop_to cuts)
+    const auto top = [&](const core::Rect& t) { return to_trim ? edge_px(t.y.value(), dpi) : 0; };
     const auto bottom = [&](const core::Rect& t, const Image& img) {
         return to_trim ? mm_to_px((t.y + t.height).value(), dpi) : img.height();
     };
-    left_img = left_img.crop(Box{to_trim ? mm_to_px(lt.x.value(), dpi) : 0, top(lt), mm_to_px((lt.x + lt.width).value(), dpi),
+    left_img = left_img.crop(Box{to_trim ? edge_px(lt.x.value(), dpi) : 0, top(lt), mm_to_px((lt.x + lt.width).value(), dpi),
                                  bottom(lt, left_img)});
-    right_img = right_img.crop(Box{mm_to_px(rt.x.value(), dpi), top(rt),
+    right_img = right_img.crop(Box{edge_px(rt.x.value(), dpi), top(rt),
                                    to_trim ? mm_to_px((rt.x + rt.width).value(), dpi) : right_img.width(), bottom(rt, right_img)});
     Image image = Image::create("RGB", Size{left_img.width() + right_img.width(), std::max(left_img.height(), right_img.height())},
                                 Ink{255, 255, 255});

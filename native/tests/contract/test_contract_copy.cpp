@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "core/command_bus.hpp"
+#include "core/covers.hpp"
 #include "core/exif.hpp"
 #include "core/model.hpp"
 #include "render/codecs/metadata.hpp"
@@ -36,9 +37,11 @@
 #include "formats/web_export.hpp"
 #include "render/anim.hpp"
 #include "render/codecs/codecs.hpp"
+#include "render/covers.hpp"
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
+#include "service/preview.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/lock.hpp"
 #include "storage/transaction.hpp"
@@ -49,6 +52,7 @@ namespace render = genko::render;
 namespace formats = genko::formats;
 namespace codecs = genko::render::codecs;
 namespace storage = genko::storage;
+namespace service = genko::service;
 namespace fs = std::filesystem;
 using codecs::CodecImage;
 using codecs::Layout;
@@ -872,6 +876,67 @@ private slots:
         for (const Json& f : written["files"]) QVERIFY(f.get<std::string>().ends_with(".jpg"));
         r = genko::test::run_genko({QStringLiteral("export"), q(book), q(dir / "nolayers"), QStringLiteral("--prefix"), QStringLiteral("x")});
         QCOMPARE(r.exit_code, 2);
+    }
+
+    // The rest of decision 15's mistake (the coordinator's reading of the user's 直しなさい: every edge of a page without margin
+    // counted at least 1): a frame's box (rect_px), two pages side by side cut to their trims (render_spread), a jacket's part
+    // cut out (front_of, 本の形でプレビュー) and the preview's badges (service::annotate) — at 0 for an edge at 0 mm. A page
+    // with margins as before (test_contract_render compares its spreads, jackets and frames with Python's, byte for byte).
+    void edgesOfFramesSpreadsCoversAndPreviews() {
+        const auto rect = [](double x, double y, double w, double h) { return core::Rect{core::Num(x), core::Num(y), core::Num(w), core::Num(h)}; };
+        const auto same = [](const render::Box& a, const render::Box& b) { return a.x0 == b.x0 && a.y0 == b.y0 && a.x1 == b.x1 && a.y1 == b.y1; };
+        QVERIFY(same(render::rect_px(rect(0, 0, 10, 20), 72), render::Box{0, 0, 28, 57}));
+        for (const auto& r : {rect(5, 7.5, 10, 20), rect(0.2, 3, 100, 0.1)}) {  // (away from the paper's edge: as before)
+            const int x = render::mm_to_px(r.x.value(), 72), y = render::mm_to_px(r.y.value(), 72);
+            QVERIFY(same(render::rect_px(r, 72),
+                         render::Box{x, y, x + render::mm_to_px(r.width.value(), 72), y + render::mm_to_px(r.height.value(), 72)}));
+        }
+        // a paper that is the page (no bleed, no paper beyond the finished size: as a picture's page is)
+        const core::PageSpec bare = core::PageSpec::custom(100, 140, 100, 140, 0, 10, 10, 10, 10, 300, "color");
+        core::Document book = core::new_episode("edges", core::Num(1), 2, bare);
+        const core::Rect trim = book.page(0).trim_rect_mm();
+        QCOMPARE(trim.x.value(), 0.0);
+        QCOMPARE(trim.y.value(), 0.0);
+        const int w = render::mm_to_px(trim.width.value(), 30), h = render::mm_to_px(trim.height.value(), 30);
+        render::RenderOptions print;
+        print.mode = "print";
+        // the spread cut to its trims: two whole pages (each lost a row and a column before)
+        const render::Image spread = render::render_spread(book, book.page(0).index, book.page(1).index, 30, print, true);
+        QCOMPARE(spread.width(), 2 * w);
+        QCOMPARE(spread.height(), h);
+        // a frame at the paper's corner: its border on the first column and row
+        {
+            core::Page& page = book.edit_page(0);
+            core::Frame frame;
+            frame.id = "edge";
+            frame.rect = rect(0, 0, 100, 100);
+            frame.border_mm = 1.0;
+            page.frames = {frame};
+        }
+        const render::Image drawn = render::render_page(book.page(0), 72, print, &book).image.convert("RGB");
+        const std::string pixels = drawn.tobytes();
+        const auto at = [&](int x, int y) { return static_cast<unsigned char>(pixels[(std::size_t(y) * drawn.width() + x) * 3]); };
+        QVERIFY2(at(0, 100) < 128 && at(100, 0) < 128, "the frame's border at the paper's edge");
+        // the preview's badge of that frame: on the first column
+        render::Image white = render::Image::create("RGB", drawn.size(), render::Ink{255, 255, 255});
+        const render::Image marked = service::annotate(white, book.page(0), 72, core::Json(nullptr));
+        const std::string badge = marked.convert("RGB").tobytes();
+        QCOMPARE(static_cast<int>(static_cast<unsigned char>(badge[(std::size_t(2) * marked.width() + 0) * 3 + 2])), 200);  // (rgb(40, 90, 200))
+        // a jacket of that book without flaps: its 表紙 cut from the paper's edge, as wide and as high as the part
+        core::Document jacket = core::new_episode("jacket", core::Num(1), 1, bare);
+        {
+            core::Page& page = jacket.edit_page(0);
+            page.extra["cover"] = core::Json{{"kind", "jacket"}, {"spine_mm", 6}, {"flap_mm", 0}};
+            page.spec = core::spec_for(jacket.spec, page.extra["cover"]);
+        }
+        const std::vector<core::Fold> parts = core::folds(jacket.page(0), "right");
+        QVERIFY(!parts.empty());
+        QCOMPARE(parts.front().x0, 0.0);
+        const render::Image sheet = render::render_page(jacket.page(0), 30, print, &jacket).image;
+        const render::Image front = render::front_of(jacket.page(0), sheet, 30, "right", parts.front().name);
+        QCOMPARE(front.width(), render::mm_to_px(parts.front().x1, 30));
+        QCOMPARE(front.height(), render::mm_to_px(jacket.page(0).trim_rect_mm().height.value(), 30));
+        QVERIFY(front.tobytes() == sheet.crop(render::Box{0, 0, front.width(), front.height()}).tobytes());
     }
 
     // The user's decision 15 (2026-11-04): a part cut from a page's picture whose edge is the paper's own (0 mm: a picture's
