@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 #include "core/error.hpp"
 #include "render/page.hpp"
@@ -125,11 +126,16 @@ void run(Samples& picture, const Shape& shape, const std::vector<float>* coverag
     }
     Json given = params.is_object() ? params : Json::object();
     const bool int_depth = picture.depth != 32;
+    // (the bands read the picture as it came — a band's margins lie in its neighbours, written before it —: with an
+    // overlap, from a copy; without one a band reads only its own pixels, so the picture itself)
+    std::optional<Samples> before;
+    if (ov > 0) before = picture;
+    const Samples& source = before ? *before : picture;
     for (const Box& band : bands) {
         if (stop.stop_requested()) throw Cancelled();
         const Box input = inflate(band, ov);
         const int iw = input.x1 - input.x0, ih = input.y1 - input.y0;
-        std::vector<float> data = read_clamped(picture, input);
+        std::vector<float> data = read_clamped(source, input);
         const std::vector<float> original = data;
         Json p = given;
         p["_image"] = Json{{"x", input.x0},

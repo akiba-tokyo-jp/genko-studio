@@ -722,7 +722,7 @@ public:
                 if (core::py_truthy(core::py_get(reply, "ok")) && reply.contains("width")) {
                     const auto count = [&](const char* k) {
                         const Json v = core::py_get(reply, k);
-                        return v.is_number_unsigned() ? v.get<std::uint64_t>() : std::uint64_t{0};
+                        return v.is_number_integer() && v.get<std::int64_t>() > 0 ? static_cast<std::uint64_t>(v.get<std::int64_t>()) : std::uint64_t{0};
                     };
                     const std::uint64_t bytes = count("width") * count("height") * count("channels") * 4;
                     if (bytes > most) {
@@ -1055,11 +1055,11 @@ void run_in_bands(const std::string& key, Way way, const std::string& chosen_sha
         Hosted hosted = host_module(key, chosen_sha256, limit, stop);
         plugin_bands::Shape shape;
         const Json overlap = core::py_get(hosted.manifest, "overlap", 0);
-        shape.overlap = overlap.is_number_unsigned() ? static_cast<unsigned>(std::min<std::uint64_t>(overlap.get<std::uint64_t>(), 256)) : 0;
+        shape.overlap = overlap.is_number_integer() && overlap.get<std::int64_t>() > 0 ? static_cast<unsigned>(std::min<std::int64_t>(overlap.get<std::int64_t>(), 256)) : 0;
         shape.whole_canvas = core::py_get(hosted.manifest, "area", "content") == Json("canvas");
         const auto limit_of = [&](const char* k, std::size_t otherwise) {
             const Json v = core::py_get(hosted.limits, k);
-            return v.is_number_unsigned() ? static_cast<std::size_t>(v.get<std::uint64_t>()) : otherwise;
+            return v.is_number_integer() && v.get<std::int64_t>() > 0 ? static_cast<std::size_t>(v.get<std::int64_t>()) : otherwise;
         };
         shape.band_bytes = limit_of("band_bytes", shape.band_bytes);
         shape.memory_bytes = limit_of("max_memory_bytes", shape.memory_bytes);
