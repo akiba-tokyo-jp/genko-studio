@@ -11,6 +11,7 @@
 
 #include <QtTest>
 
+#include <QApplication>
 #include <QDialog>
 #include <QImage>
 #include <QLabel>
@@ -28,6 +29,7 @@
 #include "app/inject.hpp"
 #include "app/main_window.hpp"
 #include "core/prefs_table.hpp"
+#include "core/pyconv.hpp"
 #include "../gui/gui_support.hpp"
 #include "service/control.hpp"
 #include "service/tokens.hpp"
@@ -151,7 +153,7 @@ private slots:
 
     void offByDefault() {
         Book book;
-        QCOMPARE(core::prefs::value("integrations.controlChannel"), Json(false));
+        QVERIFY(core::prefs::value("integrations.controlChannel") == Json(false));
         app::control::Server::instance().follow_settings();
         QVERIFY(!app::control::Server::instance().listening());
         QLocalSocket socket;
@@ -332,13 +334,13 @@ private slots:
         const std::int64_t revision = book.doc().revision;
         Json set = c.call("ui.set", Json{{"page", 2}, {"zoom", 50}, {"tool", "pencil"}, {"panels", {{"アクション", true}}}});
         QVERIFY2(set["ok"] == true, set.dump().c_str());
-        QCOMPARE(book.window->current_page()->index.json(), Json(2));
+        QVERIFY(book.window->current_page()->index.json() == Json(2));
         QCOMPARE(book.window->canvas()->tool(), QStringLiteral("pencil"));
         QVERIFY(book.window->actions_dock()->isVisible());
         QVERIFY(std::abs(book.window->canvas()->zoom_percent_exact() - 50) < 0.5);
         // a value it does not take: nothing changed
         QCOMPARE(code_of(c.call("ui.set", Json{{"page", 1}, {"zoom", -3}})), std::string("bad_params"));
-        QCOMPARE(book.window->current_page()->index.json(), Json(2));
+        QVERIFY(book.window->current_page()->index.json() == Json(2));
         QCOMPARE(code_of(c.call("ui.set", Json{{"title", "x"}})), std::string("bad_params"));
         QCOMPARE(code_of(c.call("ui.set", Json{{"tool", "no_such_tool"}})), std::string("bad_params"));
         // a view's command

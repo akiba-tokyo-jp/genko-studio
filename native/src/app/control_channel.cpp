@@ -8,6 +8,7 @@
 #include <QKeyEvent>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QStringList>
 #include <QTimer>
 
 #include <algorithm>
@@ -163,8 +164,9 @@ void Server::drop(Connection* c) {
     socket->disconnect(this);
     socket->abort();
     socket->deleteLater();
-    std::unique_ptr<Connection> gone = std::move(*it);
+    dead_.push_back(std::move(*it));
     connections_.erase(it);
+    QTimer::singleShot(0, this, [this] { dead_.clear(); });
     tell_windows();
 }
 
@@ -283,6 +285,10 @@ Json Server::handle(const Json& request, const std::string& actor, MainWindow* w
             const QByteArray png = w->control_screenshot(whole, static_cast<int>(side.get<std::int64_t>()));
             if (png.isEmpty()) return rules::refusal(id, "failed", "絵を撮れませんでした");
             return rules::answer(id, Json{{"mime", "image/png"}, {"base64", png.toBase64().toStdString()}, {"part", whole ? "window" : "canvas"}});
+        }
+        const bool pen_here = pen_owner_ != nullptr && pen_window_ == w;
+        if ((method == "ui.set" || method == "ui.menu.invoke") && pen_here) {
+            return rules::refusal(id, "busy", "制御チャンネルのペンが描いている間は表示を変えられません");
         }
         if (method == "ui.set") return rules::answer(id, w->control_set(params));
         if (method == "ui.menu.invoke") {

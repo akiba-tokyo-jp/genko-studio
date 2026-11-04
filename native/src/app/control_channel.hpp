@@ -75,6 +75,7 @@ private:
 
     QLocalServer* server_ = nullptr;
     std::vector<std::unique_ptr<Connection>> connections_;
+    std::vector<std::unique_ptr<Connection>> dead_;  // (dropped, freed once the event loop is back: never under a handler)
     // the pen: whose it is, in which window, the time it waits for its next words
     Connection* pen_owner_ = nullptr;
     QPointer<MainWindow> pen_window_;

@@ -707,7 +707,7 @@ private slots:
         QCOMPARE(names, (QStringList{"place_scale_marker", "new_layer_comp", "add_slice", "add_annotation", "add_count", "remove_count", "move_count",
                                      "delete_count_group", "clear_count", "auto_align_layers"}));
         const std::vector<bool> bound = service::actions::page_bound(kept);
-        QCOMPARE(bound, (std::vector<bool>{false, false, false, false, false, true, true, true, false, true}));
+        QVERIFY(bound == (std::vector<bool>{false, false, false, false, false, true, true, true, false, true}));
         QCOMPARE(service::actions::playable(kept).size(), std::size_t(6));
     }
 
