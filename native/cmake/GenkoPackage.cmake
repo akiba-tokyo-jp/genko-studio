@@ -21,6 +21,11 @@ if(UNIX AND NOT APPLE)
   set_target_properties(genko PROPERTIES INSTALL_RPATH "\$ORIGIN/../lib")
 endif()
 install(TARGETS genko RUNTIME DESTINATION bin)
+# (PC5 J-f: genko-plugin-host beside genko, when it was built — GenkoPluginHost.cmake — with its crates' licences)
+if(GENKO_PLUGIN_HOST_NAME)
+  install(PROGRAMS "$<TARGET_FILE_DIR:genko>/${GENKO_PLUGIN_HOST_NAME}" DESTINATION bin OPTIONAL)
+  install(FILES "${GENKO_SOURCE_ROOT}/package/licenses/wasm-host/NOTICES.txt" DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/genko-studio/licenses/wasm-host")
+endif()
 
 # Qt's libraries and plugins (platforms, image formats, styles…) with the ICU they come with, and the six small xcb
 # utility libraries Qt's xcb platform needs that a desktop may lack (MIT). Every other library Genko was linked with

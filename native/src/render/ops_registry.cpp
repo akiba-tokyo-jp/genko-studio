@@ -40,6 +40,7 @@
 #include "render/ops_artboards.hpp"
 #include "render/ops_type.hpp"
 #include "render/ops_production.hpp"
+#include "render/ops_video.hpp"
 #include "render/ops_layer_comps.hpp"
 #include "render/ops_variables.hpp"
 #include "render/ops_annotations.hpp"
@@ -466,6 +467,8 @@ void register_render_ops(core::OpRegistry& registry) {
     align::register_align_ops(registry);
     // PC5 I-f (image-assets@1: 生成 → 画像アセット on or off, core/image_assets)
     core::register_image_asset_ops(registry);
+    // PC5 J-e2 (video@1: the video layers, render/ops_video)
+    register_video_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {

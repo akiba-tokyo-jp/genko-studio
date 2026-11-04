@@ -513,7 +513,12 @@ ToolResult StudioService::inspect(const Json& a) {
             plugins.push_back(Json::object({{"key", p.key}, {"name", p.name}, {"params", p.params},
                                             {"kind", std::string(render::plugins::kPrefix) + p.key}}));
         }
-        return ToolResult(true, Json::object({{"plugins", std::move(plugins)}, {"folder", core::path_to_utf8(render::plugins::folder())}}));
+        // (PC5 J-f, plugin.list: every plugin of the folder as listed — read only; nothing here installs, chooses or
+        // consents: those are the person's, in the app)
+        Json installed = Json::array();
+        for (const render::plugins::Listed& item : render::plugins::listed()) installed.push_back(render::plugins::listed_json(item));
+        return ToolResult(true, Json::object({{"plugins", std::move(plugins)}, {"folder", core::path_to_utf8(render::plugins::folder())},
+                                              {"installed", std::move(installed)}}));
     }
     const core::Document doc = load_episode(path);
     if (core::py_equals(target, Json("brushes"))) return ToolResult(true, Json::object({{"brushes", briefs::brushes_list(doc)}}));

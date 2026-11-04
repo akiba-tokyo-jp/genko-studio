@@ -1,0 +1,40 @@
+[package]
+name = "genko-plugin-host"
+description = "Genko's WebAssembly filter plug-in host: PhotoCraft's resource-limited wasmi sandbox, run as a process of its own"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+
+# Not part of any workspace: Genko's CMake builds it on its own (native/cmake/GenkoPluginHost.cmake,
+# tools/ci/build_wasm_host.sh).
+[workspace]
+
+[lib]
+name = "genko_plugin_host"
+path = "src/lib.rs"
+
+[[bin]]
+name = "genko-plugin-host"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+thiserror = "2"
+# Pure-Rust WebAssembly interpreter (MIT OR Apache-2.0), the version and features of PhotoCraft v0.2.0's
+# crates/plugins: no `wat` (text is for tests), no memory64; `validate` keeps full module validation on;
+# `portable-dispatch` so a long-running module never overflows the host's stack.
+wasmi = { version = "=2.0.0", default-features = false, features = ["std", "validate", "stable", "portable-dispatch"] }
+
+[dev-dependencies]
+# WebAssembly text -> binary for the test modules (Apache-2.0 WITH LLVM-exception); tests and examples only.
+wat = "1.228"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

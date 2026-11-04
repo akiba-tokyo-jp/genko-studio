@@ -1914,6 +1914,51 @@ private:
     void build_production_actions();
     void build_production_menus(QMenu* layers, QMenu* pages);
     void build_production_docks();
+    // --- PC5 J-e2 (video@1): main_window_video.cpp — レイヤー → ビデオレイヤー ▸, ラスタライズ → ビデオ, ファイル → 読み込み →
+    // ビデオフレームからレイヤー…, the timeline panel's video items; each change of the book an op through apply_ops ----------
+public:
+    // The video layer chosen (the layer drawn on, or the folder it is in; else the timeline's row) on the page shown, and
+    // the frame shown of the page's timeline.
+    std::optional<std::string> video_folder() const;
+    std::int64_t video_frame() const;
+    // A video op on the page shown (its "page", "folder" and "at" put in where it takes them), said when refused.
+    bool video_op(core::Json op);
+    // A stroke (or any drawing) begins on the video layer: the frame shown altered (video_alter: its cel made, the footage's
+    // frame in it), its cel the layer drawn on. Null when it cannot be.
+    const core::Layer* alter_video_frame(const core::Layer& folder);
+    // ファイルから新規ビデオレイヤー… / フッテージを置き換え… / ビデオフレームからレイヤー…: the file (or folder) asked when none is
+    // given, its frames read into the book (render/footage), the op applied. フレームを再読み込み: the footage's file read again.
+    void new_video_layer(const QString& path = {});
+    void replace_video_footage(const QString& path = {});
+    void reload_video_footage();
+    void video_frames_to_layers(const QString& path = {}, std::int64_t every = 0, std::optional<bool> animation = std::nullopt);
+    // フッテージを解釈…: the footage's speed, alpha and pixel aspect ratio asked.
+    void interpret_video_footage();
+
+private:
+    void build_video_actions();
+    void build_video_menus(QMenu* file, QMenu* layers);
+    // How footage is read (render::footage::ReadOptions'): its speed, every n-th, at most so many frames, its long frames
+    // shown as long as they last, the video row it replaces (its footage not counted against the room).
+    struct VideoRead {
+        std::optional<double> fps;
+        std::int64_t every = 1;
+        std::int64_t most_frames = 3000;
+        bool repeat = true;
+        const core::Json* except = nullptr;
+    };
+    // The footage read into the book's assets on a worker (a progress window and 中止); `fresh`: the pictures new to the
+    // book (drop_fresh_footage gives them back when the op is refused). Said and none when it cannot be.
+    std::optional<core::Json> read_video_footage(const QString& path, const VideoRead& how, std::vector<std::string>* fresh);
+    void drop_fresh_footage(const std::vector<std::string>& fresh);
+    // The frame alter_video_frame altered just now (its op, its cel, the book's revision then): the next apply_ops takes it with
+    // its ops as one step (one Undo takes back the stroke and the cel).
+    struct VideoAlter {
+        core::Json op;
+        std::string cel;
+        std::int64_t revision = 0;
+    };
+    std::optional<VideoAlter> video_alter_;
     // --- PC5 J-a (layer-comps@1): main_window_layer_comps.cpp — ウィンドウ → レイヤーカンプ (its dock and panel) and ファイル →
     // 書き出し → レイヤーカンプからファイル…; each change of the book an op through apply_ops --------------------------------
 public:

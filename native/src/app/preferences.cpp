@@ -303,7 +303,10 @@ const std::multimap<QString, QString>& renamed() {
                                                      {QStringLiteral("画像を統合…"), QStringLiteral("画像をフラット化…")},
                                                      // (PC5 J-e1, 節 J 1.2: the timeline's by Photoshop's name — ウィンドウ →
                                                      // タイムライン is the panel's switch)
-                                                     {QStringLiteral("ビデオタイムラインを作成"), QStringLiteral("アニメーション（タイムライン）")}};
+                                                     {QStringLiteral("ビデオタイムラインを作成"), QStringLiteral("アニメーション（タイムライン）")},
+                                                     // (PC5 J-f, edit.preferences.plugIns: the plugins' settings are 環境設定 ▸
+                                                     // プラグイン…)
+                                                     {QStringLiteral("プラグイン…"), QStringLiteral("プラグインの設定…")}};
     return all;
 }
 
@@ -356,7 +359,8 @@ const std::vector<Pane>& panes() {
         {QStringLiteral("transparencyAndGamut"), QStringLiteral("透明部分・色域…"), QStringLiteral("透明部分・色域")},
         {QStringLiteral("unitsAndRulers"), QStringLiteral("単位・定規…"), QStringLiteral("単位・定規")},  // (PC5 H-b)
         {QStringLiteral("guidesGridAndSlices"), QStringLiteral("ガイド・グリッド・スライス…"), QStringLiteral("ガイド・グリッド・スライス")},
-        {QStringLiteral("plugIns"), QStringLiteral("プラグイン…"), QString()},
+        // (PC5 J-f: the plugins' own window — app/plugins_dialog —, its command act_plugin_settings: main_window_edit)
+        {QStringLiteral("plugIns"), QStringLiteral("プラグイン…"), QStringLiteral("プラグイン")},
         {QStringLiteral("type"), QStringLiteral("テキスト…"), QStringLiteral("テキスト")},  // (PC5 G-d)
         {QStringLiteral("enhancedControls"), QStringLiteral("拡張コントロール…"), QString()},
         {QStringLiteral("rawDefaults"), QStringLiteral("Camera Raw…"), QStringLiteral("Camera Raw")},

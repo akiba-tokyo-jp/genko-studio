@@ -1229,6 +1229,19 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
             issue("missing_asset", at_key(at_key(at_key(at, "smart"), "filter_mask"), "asset"), asset->get<std::string>(),
                   "the smart object's filter mask " + AssetStore::relpath(asset->get<std::string>(), ".png") + " is missing");
         }
+        // (PC5 J-f, plugin-filters@1: the pictures its plugin filters keep)
+        if (const Json* filters = find(*layer.smart, "filters"); filters != nullptr && filters->is_array() && !dir_.empty()) {
+            for (std::size_t k = 0; k < filters->size(); ++k) {
+                const Json& f = (*filters)[k];
+                const Json* kept = f.is_object() ? find(f, "kept") : nullptr;
+                const Json* ref = kept != nullptr && kept->is_object() ? find(*kept, "asset") : nullptr;
+                const Json* suffix = kept != nullptr && kept->is_object() ? find(*kept, "suffix") : nullptr;
+                if (ref == nullptr || !ref->is_string() || suffix == nullptr || !suffix->is_string() || !AssetStore::is_ref(ref->get<std::string>())) continue;
+                if (store_.has(ref->get<std::string>(), suffix->get<std::string>())) continue;
+                issue("missing_asset", at_key(at_key(at, "smart"), "filters"), ref->get<std::string>(),
+                      "the picture a plugin filter keeps " + AssetStore::relpath(ref->get<std::string>(), suffix->get<std::string>()) + " is missing");
+            }
+        }
         // (PC3 A3: a PSD's placed layer block and Photoshop's picture of it)
         const Json* psd = find(*layer.smart, "psd");
         if (psd != nullptr && psd->is_object() && !dir_.empty()) {
@@ -1793,6 +1806,8 @@ core::Document Reader::migrate(const Json& payload) {
     try {
         const auto named = [&](std::string_view f) { return std::find(doc.features.begin(), doc.features.end(), f) != doc.features.end(); };
         core::validate_timeline(doc, named(core::kTimelineFeature), named(core::kVideoFeature));
+        // (PC5 J-e2: the footage frames its video rows show, in the book's folder)
+        for (const std::string& ref : core::footage_refs(doc)) check_named(ref, core::kFootageSuffix, "/pages", "footage frame of a video layer");
     }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     return doc;
@@ -2099,6 +2114,8 @@ bool is_known_feature(std::string_view feature) {
            feature == core::kLayerLocksFeature || feature == core::kBlendChannelsFeature ||
            // PC5 I-c (core/artboards.hpp)
            feature == core::kArtboardsFeature ||
+           // PC5 J-f (core/smart.hpp)
+           feature == core::smart::kPluginFiltersFeature ||
            // PC5 I-f (core/image_assets.hpp)
            feature == core::kImageAssetsFeature;
 }

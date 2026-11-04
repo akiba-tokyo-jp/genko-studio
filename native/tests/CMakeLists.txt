@@ -229,6 +229,10 @@ genko_test(test_variables SOURCES unit/test_variables.cpp DEPS genko_test_suppor
 # delete, the refusals; an Anno block read and written again, a sound note kept, the dates) with Genko's actors (an agent
 # never changes a person's note), the JSON, a .pcraft's notes, the import's ops, MCP's apply_ops not taking the ops.
 genko_test(test_annotations SOURCES unit/test_annotations.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service LABELS unit)
+# PC5 J-e2 (video@1, render/footage): a sequence's files in order, a sequence (8 and 16 bits), every frame of a GIF, an APNG
+# and a WebP (a GIF's disposal by hand), refusals before decoding, broken and huge files never read past their bounds, a
+# footage frame laid on an 8-bit, 16-bit and CMYK page.
+genko_test(test_footage SOURCES unit/test_footage.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
 # PC5 J-d1 (measure@1, SPEC.md PROD-01「計測」): the measuring as PhotoCraft's tests check it (the scale set and its words, the
 # ruler's readout and the protractor, the inscribed rectangle, レイヤーの角度補正 of a layer and of the page cut — the same as
 # transform_layers' and crop_page's on the 8-bit, 16-bit and CMYK pages —, the count groups and marks, the info asked
@@ -640,6 +644,13 @@ genko_test(test_contract_slices SOURCES contract/test_contract_slices.cpp DEPS g
 # written and read, a book without artboards as before.
 genko_test(test_contract_artboards SOURCES contract/test_contract_artboards.cpp DEPS genko_test_support genko_render_ops genko_formats
            LABELS contract TIMEOUT 900)
+# PC5 J-e2 (video@1): the video layers through the command line (footage read into the book, apply, inspect --timeline,
+# render --frame, undo; a footage frame gone read-only), the ops (frames inserted, duplicated, deleted, altered, restored;
+# the footage interpreted, replaced; rasterized; frames to layers and cels), refusals (locks, footage not held or past 4
+# GiB, not an agent's op), video@1 written and read back, a book of cels as before, ビデオをレンダリング and a .pcraft
+# (upstream's reader with $GENKO_PCRAFT_CHECK).
+genko_test(test_contract_video SOURCES contract/test_contract_video.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 # PC3 C-e through the command line: every kind of page turned (inspect --pixel), undone and redone; a page of its own paper
@@ -771,6 +782,24 @@ genko_target_flags(genko_test_native_plugin)
 genko_test(test_native_plugins SOURCES unit/test_native_plugins.cpp DEPS genko_render_ops LABELS unit TIMEOUT 900)
 target_compile_definitions(test_native_plugins PRIVATE GENKO_TEST_NATIVE_PLUGIN="$<TARGET_FILE:genko_test_native_plugin>")
 add_dependencies(test_native_plugins genko_test_native_plugin)
+# WebAssembly filter plugins (PC5 J-f, plugins:WASM-ABI-v1, docs/PLUGIN_WASM.md) through genko-plugin-host (native/wasm-host,
+# built by cargo beside genko — GenkoPluginHost.cmake; without it, skipped): PhotoCraft's abi.rs ideas — the example
+# invert.wasm, every depth and model, bands and the selection, the settings, cleaning, hostile modules, budgets,
+# installing and the additional folder. The modules: native/tests/data/plugins.
+genko_test(test_wasm_plugins SOURCES unit/test_wasm_plugins.cpp DEPS genko_render_ops LABELS unit TIMEOUT 900)
+target_compile_definitions(test_wasm_plugins PRIVATE GENKO_TEST_NATIVE_PLUGIN="$<TARGET_FILE:genko_test_native_plugin>"
+                                                     GENKO_TEST_PLUGIN_HOST="$<TARGET_FILE_DIR:genko>/genko-plugin-host${CMAKE_EXECUTABLE_SUFFIX}")
+add_dependencies(test_wasm_plugins genko_test_native_plugin)
+if(TARGET genko_plugin_host)
+  add_dependencies(test_wasm_plugins genko_plugin_host)
+  add_dependencies(test_contract_plugins genko_plugin_host)
+endif()
+target_compile_definitions(test_contract_plugins PRIVATE GENKO_TEST_PLUGIN_HOST="$<TARGET_FILE_DIR:genko>/genko-plugin-host${CMAKE_EXECUTABLE_SUFFIX}"
+                                                         GENKO_TEST_NATIVE_PLUGIN="$<TARGET_FILE:genko_test_native_plugin>")
+add_dependencies(test_contract_plugins genko_test_native_plugin)
+target_link_libraries(test_contract_plugins PRIVATE genko_api)
+# (PC5 J-f: 環境設定 → プラグイン…'s WebAssembly rows — test_gui_anim is made further down)
+set(GENKO_TEST_PLUGIN_HOST_DEF "GENKO_TEST_PLUGIN_HOST=\"$<TARGET_FILE_DIR:genko>/genko-plugin-host${CMAKE_EXECUTABLE_SUFFIX}\"")
 
 # 3D (M3-C): the geometry of figures, guides and models bit for bit against Python, the ops, the drawing.
 genko_test(test_contract_3d_geometry SOURCES contract/test_contract_3d_geometry.cpp DEPS genko_test_support genko_render
@@ -1061,3 +1090,10 @@ foreach(slow test_contract_raster_ops test_smart_stack test_contract_ops_cli tes
     set_property(TEST ${slow} APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=${function_ms}")
   endif()
 endforeach()
+# (PC5 J-f: 編集 → 環境設定 → プラグイン…'s WebAssembly rows read the module's manifest through genko-plugin-host)
+if(TARGET test_gui_anim)
+  target_compile_definitions(test_gui_anim PRIVATE ${GENKO_TEST_PLUGIN_HOST_DEF})
+  if(TARGET genko_plugin_host)
+    add_dependencies(test_gui_anim genko_plugin_host)
+  endif()
+endif()

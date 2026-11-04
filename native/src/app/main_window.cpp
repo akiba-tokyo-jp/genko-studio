@@ -15,6 +15,8 @@
 #include <QDir>
 #include <QDockWidget>
 #include <QElapsedTimer>
+
+#include <set>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QGuiApplication>
@@ -78,6 +80,7 @@
 #include "render/placed.hpp"
 #include "render/timelapse.hpp"
 #include "render/ops_registry.hpp"
+#include "render/smart_filters.hpp"
 
 namespace genko::app {
 
@@ -604,6 +607,7 @@ void MainWindow::preview_ops(const std::optional<core::Json>& ops) {
     }
     try {
         const core::CommandBus bus(render::ops_registry());
+        const render::smart_filters::PreviewScope previewing;  // (PC5 J-f: a preview keeps no plugin filter's picture)
         // (channels@1: what is previewed is what is applied: the pixel ops on the channel targeted)
         auto result = bus.apply(*session_->snapshot(), with_contents_target(with_channel_target(*ops)), core::Actor(session_->actor()));
         show_preview(std::move(result.doc));
@@ -733,14 +737,57 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
     }
     QElapsedTimer clock;
     clock.start();
+    // (PC5 J-e2: what is drawn on a video layer's frame just altered — alter_video_frame — taken with the alter as one step: the
+    // alter undone and applied again before the ops, its cel the same id)
+    Json batch = ops;
+    std::vector<std::string> given = ids;
+    // (only what draws on its cel — a line, a fill, a filter… — the review's P3-5 (b): renaming it is a step of its own)
+    const auto draws_on_cel = [&ops](const std::string& cel) {
+        static const std::set<std::string, std::less<>> kDrawing{
+            "add_stroke", "put_raster", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area", "fill_enclosed",
+            "gradient_fill", "transform_area", "delete_area", "paste", "smudge", "liquify", "add_shape", "fill_gaps", "vector_edit", "background_eraser",
+            "blur_brush", "burn", "clone_stamp", "color_replacement", "content_aware_fill", "dodge", "healing_brush", "history_brush", "mixer_brush",
+            "sharpen_brush", "smudge_brush", "sponge", "spot_healing"};
+        if (!ops.is_array() || ops.empty()) return false;
+        for (const Json& op : ops) {
+            const auto name = op.is_object() ? op.find("op") : op.end();
+            if (name == op.end() || !name->is_string() || !kDrawing.contains(name->get_ref<const std::string&>())) return false;
+        }
+        return ops.dump().find(cel) != std::string::npos;
+    };
+    bool rejoined = false;
+    if (video_alter_ && video_alter_->revision == book().revision && draws_on_cel(video_alter_->cel) && session_->can_undo()) {
+        const VideoAlter alter = *video_alter_;
+        video_alter_.reset();
+        try {
+            session_->undo();
+            batch = Json::array({alter.op});
+            for (const Json& op : ops) batch.push_back(op);
+            given.insert(given.begin(), alter.cel);
+            rejoined = true;
+        } catch (const std::exception&) {  // (not undone: the ops on their own)
+            batch = ops;
+            given = ids;
+        }
+    }
+    video_alter_.reset();
     try {
         // (channels@1: the pixel ops on the channel targeted; smart-objects@1: in a contents' tab, on its contents)
         last_results_ = core::Json::array();
-        last_results_ = session_->apply(with_contents_target(with_channel_target(ops)), ids).results;  // (PC4 E5: what the ops reported)
-    } catch (const core::Error& error) {
-        flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
-        return false;
+        last_results_ = session_->apply(with_contents_target(with_channel_target(batch)), given).results;  // (PC4 E5: what the ops reported)
+        if (batch.size() > ops.size()) {  // (the alter taken with them: its cel drawn on still, its report not theirs)
+            if (last_results_.is_array() && !last_results_.empty()) last_results_.erase(last_results_.begin());
+            set_target_layer(given.front());
+        }
     } catch (const std::exception& error) {
+        // (PC5 J-e2, the review's P3-5 (a): the alter taken back for them, the ops refused — the alter put back as it was)
+        if (rejoined) {
+            try {
+                session_->redo();
+                set_target_layer(given.front());
+            } catch (const std::exception&) {
+            }
+        }
         flash(wording::error(QString::fromUtf8(error.what())), 6000, true);  // (the window and the book stay as they were)
         return false;
     }
@@ -1047,11 +1094,11 @@ void MainWindow::show_omitted(const QStringList& elements) {
                     .arg(words.join(QStringLiteral("・")));
     }
     if (!off.isEmpty()) {
-        text << QStringLiteral("プラグイン（%1）は使う設定になっていないため、その補正を表示していません（レイヤー → プラグインの設定）。")
+        text << QStringLiteral("プラグイン（%1）は使う設定になっていないため、その補正を表示していません（編集 → 環境設定 → プラグイン…）。")
                     .arg(off.join(QStringLiteral("・")));
     }
     if (!failed.isEmpty()) {
-        text << QStringLiteral("プラグイン（%1）を動かせなかったため、その補正を表示していません（Python と Pillow、プラグインの設定を確かめてください）。")
+        text << QStringLiteral("プラグイン（%1）を動かせなかったため、その補正を表示していません（Python と Pillow、編集 → 環境設定 → プラグイン… を確かめてください）。")
                     .arg(failed.join(QStringLiteral("・")));
     }
     unported_->setText(text.join(QLatin1Char(' ')));

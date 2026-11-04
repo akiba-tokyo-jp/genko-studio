@@ -15,6 +15,7 @@
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
 #include "core/video.hpp"
+#include "render/footage.hpp"
 #include "render/movie.hpp"
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
@@ -109,7 +110,7 @@ Image render_frame(const core::Page& page, std::int64_t frame, int dpi, const co
     options.finish = false;
     options.at_frame = true;  // (the page as it is at that frame: anim.at_frame's copy)
     options.skip_unported = skip_unported;
-    Image image = render_page(core::anim::at_frame(page, frame), dpi, options, episode).image.convert("RGB");
+    Image image = render_page(footage::frame_page(page, frame, episode), dpi, options, episode).image.convert("RGB");  // (PC5 J-e2: its video rows' footage)
     const auto rect = camera ? core::anim::camera_at(page, frame) : std::nullopt;
     if (rect) {
         if (rect->size() < 4) throw core::PyValueError("not enough values to unpack (expected 4, got " + std::to_string(rect->size()) + ")");

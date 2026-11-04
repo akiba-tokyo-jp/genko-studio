@@ -114,11 +114,23 @@ bool is_contents_id(std::string_view text);
 // blend modes at an opacity of 0..1 —, "filters_on" (none: on) and "filter_mask" ({"asset": "sha256:…", "enabled"}: a
 // PNG "L" of the page at 150 dpi, as a layer's mask, through which the filtered picture shows over the unfiltered one).
 inline constexpr std::size_t kFiltersMax = 64;
-inline constexpr std::array<std::string_view, 6> kFilterKeys{"kind", "params", "blend", "opacity", "visible", "space"};
+inline constexpr std::array<std::string_view, 7> kFilterKeys{"kind", "params", "blend", "opacity", "visible", "space", "kept"};
 // Can a filter_raster kind be a smart filter (SO に掛けられる)? Python's filters (core::kAdjustments, kShapeFilters: what
 // they make is their settings' and the layer's pixels' — noise and rain by their seed) and the C++ build's own kinds
-// registered so (AdjustKind::smart). Never a plugin (a person's program: what it makes is the machine's).
+// registered so (AdjustKind::smart). Never a plugin (a person's program: what it makes is the machine's) — those are
+// plugin_filter's, below.
 bool filter_kind(std::string_view kind);
+// PC5 J-f (plugin-filters@1, SPEC.md PROD-01): a smart filter of a person's plugin ("plugin:<key>"): drawn again while the
+// plugin is installed and chosen to run; otherwise the picture it made when its stack was last changed while it could run
+// is shown — "kept": {"asset": "sha256:…", "suffix": ".png" | ".colorrgba" | ".gkir"} (the page's kind of pixels at 200
+// dpi: what came out of it before its blend and opacity), so the look does not change where the plugin is not. The book
+// names the feature while one is on a smart object (an older build opens it read-only rather than drawing it otherwise).
+inline constexpr std::string_view kPluginFiltersFeature = "plugin-filters@1";
+bool plugin_filter(std::string_view kind);
+// The kept pictures of the book's plugin filters (the pages and the contents' pages): their refs and suffixes.
+std::vector<std::pair<std::string, std::string>> kept_pictures(const Document& doc);
+// A plugin filter is on a smart object of the book.
+bool uses_plugin_filters(const Document& doc);
 // Are the smart object's filters drawn: on, and one of them shown?
 bool filters_drawn(const Layer& layer);
 // (PC4 D7, review P2-5) The digest (sha256, 64 hexadecimal digits) of a smart object's filters and whether they show: a

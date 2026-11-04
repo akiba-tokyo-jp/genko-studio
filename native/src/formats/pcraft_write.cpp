@@ -16,6 +16,7 @@
 #include <thread>
 #include <utility>
 
+#include "core/video.hpp"
 #include "core/groups.hpp"
 #include "core/adjust.hpp"
 #include "core/channels.hpp"
@@ -34,6 +35,7 @@
 #include "formats/export.hpp"
 #include "formats/file_xmp.hpp"
 #include "formats/output.hpp"
+#include "render/footage.hpp"
 #include "render/blake3.hpp"
 #include "render/color_canvas.hpp"
 #include "render/image.hpp"
@@ -1444,6 +1446,15 @@ int dpi_of(const core::Page& page, const PcraftOptions& options) {
 
 std::vector<std::string> write_pcraft(const core::Document& doc, std::size_t page, const std::function<void(std::string_view)>& sink, const PcraftOptions& options) {
     const core::Page& p = page_at(doc, page);
+    if (core::page_uses_video(p)) {  // (PC5 J-e2: a video layer's first frame as a layer — a .pcraft holds no video rows)
+        std::vector<std::string> laid;
+        const core::Page shown = render::footage::with_footage(p, 1, &doc, &laid);
+        std::vector<std::string> notes = write_page(doc, shown, dpi_of(p, options), 0, sink);
+        for (const std::string& title : laid) {
+            notes.push_back("ビデオレイヤー「" + title + "」は 1 フレーム目の素材をレイヤーにしました（ほかのフレームは .pcraft に無いため書きません）");
+        }
+        return notes;
+    }
     return write_page(doc, p, dpi_of(p, options), 0, sink);
 }
 
