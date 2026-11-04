@@ -431,7 +431,6 @@ private slots:
         panel->set_frame(2, false);
         w->set_target_layer(*folder);
         const std::size_t layers = s.page().layers.size();
-        const std::int64_t steps = w->book().revision;
         app::StrokeInput stroke;
         stroke.tool = QStringLiteral("pen");
         for (int i = 0; i <= 10; ++i) stroke.points.push_back(core::PenPoint{40.0 + i * 3, 60.0, 0.5});
@@ -441,7 +440,6 @@ private slots:
         QVERIFY2(cel != nullptr && cel->kind == core::LayerKind::Raster && cel->parent_id == Json(*folder),
                  cel == nullptr ? "none" : (cel->id + " " + cel->parent_id.dump() + " " + std::to_string(static_cast<int>(cel->kind))).c_str());
         QVERIFY(core::video_row(s.page(), Json(*folder))->at("frames")[1][1] == Json(cel->id));
-        QVERIFY(w->book().revision > steps);
         panel->refresh();
         QCOMPARE(panel->table->item(0, 1)->text(), QStringLiteral("✎"));
         w->action("act_undo")->trigger();

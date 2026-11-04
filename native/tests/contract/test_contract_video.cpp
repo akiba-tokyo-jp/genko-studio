@@ -108,6 +108,27 @@ bool near(const std::vector<double>& px, const int rgb[3], int tolerance = 8) {
 
 const int kWhite[3] = {255, 255, 255};
 
+// Where two values first differ ("": nowhere).
+std::string first_difference(const Json& a, const Json& b, const std::string& at = "") {
+    if (a.type() != b.type()) return at + ": " + a.dump().substr(0, 200) + " | " + b.dump().substr(0, 200);
+    if (a.is_object()) {
+        for (const auto& [key, value] : a.items()) {
+            if (!b.contains(key)) return at + "/" + key + ": only before";
+            if (std::string d = first_difference(value, b.at(key), at + "/" + key); !d.empty()) return d;
+        }
+        for (const auto& [key, value] : b.items())
+            if (!a.contains(key)) return at + "/" + key + ": only after";
+        return {};
+    }
+    if (a.is_array()) {
+        if (a.size() != b.size()) return at + ": " + std::to_string(a.size()) + " | " + std::to_string(b.size()) + " items";
+        for (std::size_t i = 0; i < a.size(); ++i)
+            if (std::string d = first_difference(a[i], b[i], at + "/" + std::to_string(i)); !d.empty()) return d;
+        return {};
+    }
+    return a == b ? std::string() : at + ": " + a.dump().substr(0, 200) + " | " + b.dump().substr(0, 200);
+}
+
 }  // namespace
 
 class TestContractVideo : public QObject {
@@ -182,13 +203,17 @@ private slots:
             QVERIFY2(near(image.getpixel(image.width() / 2, image.height() / 2), kColours[frame - 1]), std::to_string(frame).c_str());
         }
         // a blank frame inserted, undone
-        const std::string before = genko::test::read_bytes(book_path + QStringLiteral("/project.json"));
+        const Json before = genko::test::read_json(book_path + QStringLiteral("/project.json"));
         done = apply(book_path, QStringLiteral("b.json"), Json::array({op("video_insert_blank", {{"folder", "v"}, {"at", 2}})}));
         QVERIFY2(done.value("ok", false), done.dump().c_str());
         QCOMPARE(genko::test::read_json(book_path + QStringLiteral("/project.json"))["pages"][0]["anim"]["frames"], Json(5));
         (void)genko({QStringLiteral("undo"), book_path, QStringLiteral("--as"), QStringLiteral("human:test")}, &exit);
         QCOMPARE(exit, 0);
-        QVERIFY(genko::test::read_bytes(book_path + QStringLiteral("/project.json")) == before);
+        const Json undone = genko::test::read_json(book_path + QStringLiteral("/project.json"));
+        // (the same content — the journal's undo may give an object's keys in another order)
+        const std::string differ = first_difference(before["pages"], undone["pages"]);
+        QVERIFY2(differ.empty(), differ.c_str());
+        QCOMPARE(undone["features"], before["features"]);
         // a footage frame gone from the book: read-only
         const QString copy = path(QStringLiteral("gone.genko"));
         genko::test::copy_tree(book_path, copy);

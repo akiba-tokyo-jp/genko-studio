@@ -369,7 +369,9 @@ private slots:
             options.at_frame = true;
             const genko::render::Image drawn = genko::render::render_page(shown, 50, options, &doc).image.convert("RGB");
             const auto px = drawn.getpixel(drawn.width() / 2, drawn.height() / 2);
-            QVERIFY2(px[2] > 200 && px[0] < 60, (std::to_string(i) + ": " + std::to_string(px[0]) + " " + std::to_string(px[2])).c_str());
+            // (blue: on the CMYK page as its inks show it, out of the inks' gamut)
+            const bool blue = i < 2 ? px[2] > 200 && px[0] < 60 : px[2] > px[0] + 50 && px[2] > px[1] + 30;
+            QVERIFY2(blue, (std::to_string(i) + ": " + std::to_string(px[0]) + " " + std::to_string(px[1]) + " " + std::to_string(px[2])).c_str());
         }
         const auto made = ft::layers_made();
         (void)ft::frame_page(doc.page(0), 1, &doc);
