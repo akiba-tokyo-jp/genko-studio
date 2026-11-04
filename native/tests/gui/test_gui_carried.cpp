@@ -6,6 +6,7 @@
 #include <QtTest>
 
 #include <QDialog>
+#include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QImage>
 #include <QLabel>

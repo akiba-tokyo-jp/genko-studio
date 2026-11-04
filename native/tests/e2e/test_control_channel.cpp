@@ -13,6 +13,7 @@
 
 #include <QApplication>
 #include <QDialog>
+#include <QDockWidget>
 #include <QImage>
 #include <QLabel>
 #include <QLocalSocket>
@@ -501,6 +502,7 @@ private slots:
         channel(true);
         Client c;
         QVERIFY(c.open() && c.auth(service::tokens::add("ai:bot")));
+        QVERIFY(c.call("ui.set", Json{{"tool", "pen"}})["ok"] == true);
         QVERIFY(c.call("ui.pointer", Json{{"events", Json::array({Json{{"kind", "down"}, {"x", 30}, {"y", 30}}})}})["ok"] == true);
         QVERIFY(!app::control::Server::instance().drawing().isEmpty());
         QVERIFY(gui_test::wait_for([] { return app::control::Server::instance().drawing().isEmpty(); }, service::control::kTimeoutMs + 5000));

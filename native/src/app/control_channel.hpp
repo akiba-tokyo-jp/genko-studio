@@ -34,6 +34,7 @@ class Server : public QObject {
 
 public:
     static Server& instance();
+    ~Server() override;
 
     // Listening when 環境設定 says so (integrations.controlChannel), else not (the connections closed). Each window's
     // preferences::apply_all calls it.

@@ -48,6 +48,8 @@ Server::Server() : QObject(QCoreApplication::instance()) {
     connect(pen_timer_, &QTimer::timeout, this, [this] { let_go_pen(QStringLiteral("制御チャンネルのペンが 30 秒止まったので、線を描かずに戻しました")); });
 }
 
+Server::~Server() = default;
+
 void Server::follow_settings() {
     bool on = false;
     try {

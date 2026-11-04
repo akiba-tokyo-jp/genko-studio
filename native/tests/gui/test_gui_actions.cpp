@@ -461,7 +461,7 @@ private slots:
         // (act_auto_align_layers, act_auto_blend_layers), ファイル → 自動処理 → Photomerge… (act_photomerge), スクリプト →
         // ファイルをスタックとして読み込み…・統計… (act_load_files_into_stack, act_statistics) — test_gui_automate.
         // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8, I-c's 10: アートボード… など — test_gui_artboards —, I-h's 2 and I-g's 5)
-        QCOMPARE(w->actions_by_name().size(), std::size_t{794});
+        QCOMPARE(w->actions_by_name().size(), std::size_t{795});  // (PC5 J-g: 環境設定 ▸ 連携…)
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -1039,7 +1039,8 @@ private slots:
                                            QStringLiteral("書き出し…"), QStringLiteral("パフォーマンス…"), QStringLiteral("カーソル…"), QStringLiteral("透明部分・色域…"),
                                            QStringLiteral("単位・定規…"), QStringLiteral("ガイド・グリッド・スライス…"),  // (PC5 H-b)
                                            QStringLiteral("テキスト…"),  // (PC5 G-d)
-                                           QStringLiteral("Camera Raw…"), QStringLiteral("ペンタブレット…"), QStringLiteral("長い時間の作業…")}));
+                                           QStringLiteral("Camera Raw…"), QStringLiteral("連携…"),  // (PC5 J-g)
+                                           QStringLiteral("ペンタブレット…"), QStringLiteral("長い時間の作業…")}));
         QVERIFY(!items(menu(QStringLiteral("ファイル"))).contains(QStringLiteral("環境設定…")));
         QVERIFY(!items(menu(QStringLiteral("ヘルプ"))).contains(QStringLiteral("検索")));
         // each pane opens the dialog at its page

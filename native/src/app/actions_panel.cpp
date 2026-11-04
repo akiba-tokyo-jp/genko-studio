@@ -79,7 +79,8 @@ void ActionsPanel::refresh() {
     {
         const QSignalBlocker quiet(names);
         names->clear();
-        for (const auto& [name, value] : actions::load().items()) names->addItem(QString::fromStdString(name));
+        const Json kept = actions::load();
+        for (auto it = kept.begin(); it != kept.end(); ++it) names->addItem(QString::fromStdString(it.key()));
         QListWidgetItem* again = nullptr;
         if (chosen) {
             const auto found = names->findItems(*chosen, Qt::MatchExactly);
