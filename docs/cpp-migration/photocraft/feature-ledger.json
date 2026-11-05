@@ -1275,8 +1275,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/commands_list.cpp",
         "native/src/core/data/commands.json",
@@ -1318,8 +1318,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/measure.cpp",
         "native/src/render/ops_measure.cpp",
@@ -1353,8 +1353,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/measure.cpp",
         "native/src/render/ops_measure.cpp",
@@ -1388,8 +1388,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/measure.cpp",
         "native/src/render/ops_measure.cpp",
@@ -1422,8 +1422,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/measure.cpp",
         "native/src/render/ops_measure.cpp",
@@ -1457,8 +1457,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/measure.cpp",
         "native/src/render/ops_measure.cpp",
@@ -1491,8 +1491,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/measure.cpp",
         "native/src/render/ops_measure.cpp",
@@ -1526,8 +1526,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/measure.cpp",
         "native/src/render/ops_measure.cpp",
@@ -1738,8 +1738,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-g、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-g、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/features.cpp",
         "native/src/render/panorama.cpp",
@@ -1791,8 +1791,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-g、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-g、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/panorama.cpp",
         "native/src/render/pyramid.cpp",
@@ -1841,8 +1841,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/service/spell.cpp",
         "native/src/app/type_dialogs.cpp",
@@ -2584,8 +2584,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/story_editor.cpp",
         "native/src/core/ops_lines.cpp",
@@ -2695,8 +2695,8 @@
         ]
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/shortcuts_dialog.cpp",
         "native/src/app/key_sets.cpp",
@@ -2746,8 +2746,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/shortcuts_dialog.cpp",
         "native/src/app/menu_look.cpp",
@@ -3111,8 +3111,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/preferences_panes.cpp",
         "native/src/app/preferences.cpp",
@@ -3271,8 +3271,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/preferences_panes.cpp",
         "native/src/app/preferences.cpp",
@@ -3330,8 +3330,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b・J-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b・J-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/preferences_units.cpp",
         "native/src/core/prefs_table.cpp",
@@ -3386,8 +3386,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/preferences_panes.cpp",
         "native/src/app/preferences.cpp",
@@ -3445,8 +3445,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-g、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-g、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/preferences_integrations.cpp: 編集 → 環境設定 ▸ 連携…（H-e の面の作り）。上流 Integrations の allow_agent_control に当たる integrations.controlChannel（既定は切、持ち主だけのローカル接続、決定 6・節 J 3.7）",
         "上流の control_port は Genko では使わない（制御チャンネルは TCP のポートでなく QLocalServer。節 J 3.7 の 6）。AI 接続（「AI と作る…」・MCP・genko serve・トークン）は前からのとおり",
@@ -3500,8 +3500,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/preferences_panes.cpp",
         "native/src/app/preferences.cpp",
@@ -3558,8 +3558,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/preferences_panes.cpp",
         "native/src/app/preferences.cpp",
@@ -3613,8 +3613,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/plugins_dialog.cpp",
         "native/src/app/main_window_edit.cpp",
@@ -3716,8 +3716,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/preferences_panes.cpp",
         "native/src/app/preferences.cpp",
@@ -3766,8 +3766,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/preferences_panes.cpp",
         "native/src/app/preferences.cpp",
@@ -3873,8 +3873,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/preferences_type.cpp",
         "native/src/core/prefs_table.cpp",
@@ -3922,8 +3922,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/units.cpp",
         "native/src/app/view_units.cpp",
@@ -3976,8 +3976,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-d・H-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-d・H-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/preferences.cpp",
         "native/src/app/main_window_workspace.cpp",
@@ -4292,8 +4292,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_purge.cpp",
         "native/src/app/main_window_clipboard.cpp",
@@ -4345,8 +4345,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_purge.cpp",
         "native/src/app/main_window_clipboard.cpp",
@@ -4398,8 +4398,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_purge.cpp",
         "native/src/app/main_window_clipboard.cpp",
@@ -4451,8 +4451,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_purge.cpp",
         "native/src/app/main_window_clipboard.cpp",
@@ -4504,8 +4504,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_purge.cpp",
         "native/src/app/main_window_clipboard.cpp",
@@ -4555,8 +4555,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_actions.cpp",
         "native/src/app/session.cpp",
@@ -4598,8 +4598,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/workspace.cpp",
         "native/tests/gui/test_gui_workspace.cpp"
@@ -4694,8 +4694,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_purge.cpp",
         "native/src/app/session.cpp",
@@ -4743,8 +4743,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/toolbar_dialog.cpp",
         "native/src/app/main_window_workspace.cpp",
@@ -5627,8 +5627,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_actions.cpp",
         "native/src/app/session.cpp",
@@ -5682,8 +5682,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/service/automate.cpp",
         "native/src/api/cli.cpp",
@@ -5733,8 +5733,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/service/automate.cpp",
         "native/src/render/ops_ink.cpp",
@@ -5791,8 +5791,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/service/automate.cpp",
         "native/src/app/automate_dialogs.cpp",
@@ -5841,8 +5841,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/service/automate.cpp",
         "native/src/api/cli.cpp",
@@ -5892,8 +5892,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-h、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-h、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/scancrop.cpp",
         "native/src/service/automate_photos.cpp",
@@ -5943,8 +5943,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/service/automate.cpp",
         "native/src/api/cli.cpp",
@@ -5994,8 +5994,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/service/automate.cpp",
         "native/src/render/fx_lens.cpp",
@@ -6046,8 +6046,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-h、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-h、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/hdr_merge.cpp",
         "native/src/render/raw.cpp",
@@ -6099,8 +6099,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-g、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-g、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/panorama.cpp",
         "native/src/render/ops_align.cpp",
@@ -6137,8 +6137,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/service/automate.cpp",
         "native/src/api/cli.cpp",
@@ -6321,8 +6321,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_file.cpp",
         "native/tests/gui/test_gui_actions.cpp"
@@ -6372,8 +6372,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/artboards.cpp",
         "native/src/render/psd_artboards.cpp",
@@ -6432,8 +6432,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/artboards.cpp",
         "native/src/api/cli.cpp",
@@ -6537,8 +6537,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/datasets.cpp",
         "native/src/api/cli.cpp",
@@ -6683,8 +6683,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/copy.cpp",
         "native/src/api/cli.cpp",
@@ -6909,8 +6909,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/anim.cpp",
         "native/src/app/timeline.cpp",
@@ -7076,8 +7076,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/image_assets.cpp",
         "native/src/formats/image_assets.cpp",
@@ -7128,8 +7128,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/notes_import.cpp",
         "native/src/render/psd_annotations.cpp",
@@ -7179,8 +7179,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/datasets.cpp",
         "native/src/render/pcraft_variables.cpp",
@@ -7229,8 +7229,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/render/ops_video.cpp",
@@ -7280,8 +7280,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/scanner.cpp",
         "native/src/app/main_window_file.cpp",
@@ -7647,8 +7647,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/formats/print_marks.cpp",
         "native/src/app/print_dialog.cpp",
@@ -7700,8 +7700,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_print.cpp",
         "native/src/app/print_dialog.cpp",
@@ -7943,8 +7943,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/service/automate.cpp",
         "native/src/app/main_window_automate.cpp",
@@ -8000,8 +8000,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/ops_layers.cpp",
         "native/src/core/layer_basics.cpp",
@@ -8050,8 +8050,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_styles.cpp",
         "native/src/app/main_window_layers.cpp",
@@ -8147,8 +8147,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/service/automate.cpp",
         "native/src/api/cli.cpp",
@@ -8198,8 +8198,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-g、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-g、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/service/automate_merge.cpp",
         "native/src/api/cli.cpp",
@@ -8248,8 +8248,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/service/script_events.cpp",
         "native/src/app/automate_dialogs.cpp",
@@ -8299,8 +8299,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-g、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-g、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/service/automate_merge.cpp",
         "native/src/render/stack.cpp",
@@ -16146,8 +16146,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/measure.cpp",
         "native/src/render/ops_measure.cpp",
@@ -16182,8 +16182,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/measure.cpp",
         "native/src/render/ops_measure.cpp",
@@ -16231,8 +16231,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_measure.cpp",
         "native/src/render/measure_features.cpp",
@@ -16281,8 +16281,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/measure_features.cpp",
         "native/src/render/ops_measure.cpp",
@@ -16333,8 +16333,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/measure.cpp",
         "native/src/render/ops_measure.cpp",
@@ -16385,8 +16385,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/measure_features.cpp",
         "native/src/app/measurement_log.cpp",
@@ -16434,8 +16434,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/measure.cpp",
         "native/src/render/ops_measure.cpp",
@@ -16471,8 +16471,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/measure.cpp",
         "native/src/render/ops_measure.cpp",
@@ -16522,8 +16522,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/variables.cpp",
         "native/src/render/ops_variables.cpp",
@@ -18277,8 +18277,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/variables.cpp",
         "native/src/render/ops_variables.cpp",
@@ -18327,8 +18327,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/variables.cpp",
         "native/src/render/ops_variables.cpp",
@@ -18943,8 +18943,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/artboards.cpp",
         "native/src/render/ops_artboards.cpp",
@@ -19225,8 +19225,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_layers.cpp",
         "native/src/app/key_sets.cpp",
@@ -19282,8 +19282,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/ops_layers.cpp",
         "native/src/core/layer_basics.cpp",
@@ -19340,8 +19340,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/ops_layers.cpp",
         "native/src/core/layer_basics.cpp",
@@ -19790,8 +19790,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/ops_layers.cpp",
         "native/src/core/layer_basics.cpp",
@@ -19900,8 +19900,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_actions.cpp",
         "native/src/app/preferences.cpp",
@@ -19953,8 +19953,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/layer_panel.cpp",
         "native/src/app/preferences.cpp",
@@ -20005,8 +20005,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/layer_panel.cpp",
         "native/src/app/preferences.cpp",
@@ -21935,8 +21935,8 @@
       },
       "upstream_menu": null,
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/raster_ops.cpp",
         "native/tests/contract/test_contract_layers.cpp"
@@ -21987,8 +21987,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_actions.cpp",
         "native/src/app/preferences.cpp",
@@ -22044,8 +22044,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_actions.cpp",
         "native/src/app/preferences.cpp",
@@ -22086,8 +22086,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/layer_panel.cpp",
         "native/src/core/ops_arrange.cpp",
@@ -22139,8 +22139,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/artboards.cpp",
         "native/src/render/ops_artboards.cpp",
@@ -22192,8 +22192,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/artboards.cpp",
         "native/src/render/ops_artboards.cpp",
@@ -22244,8 +22244,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/artboards.cpp",
         "native/src/render/ops_artboards.cpp",
@@ -22296,8 +22296,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_groups.cpp",
         "native/src/core/groups.cpp",
@@ -22350,8 +22350,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_materials.cpp",
         "native/src/app/main_window_actions.cpp",
@@ -22406,8 +22406,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_layers.cpp",
         "native/src/core/ops_arrange.cpp",
@@ -22459,8 +22459,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_materials.cpp",
         "native/src/app/main_window_actions.cpp",
@@ -22514,8 +22514,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_layers.cpp",
         "native/tests/gui/test_gui_layers.cpp"
@@ -23836,8 +23836,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_slices.cpp",
         "native/src/core/slice_layout.cpp",
@@ -24332,8 +24332,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/render/ops_video.cpp",
@@ -24370,8 +24370,8 @@
       },
       "upstream_menu": null,
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_layers.cpp",
         "native/tests/gui/test_gui_layers.cpp"
@@ -24422,8 +24422,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/layer_panel.cpp",
         "native/src/app/main_window_layers.cpp",
@@ -24460,8 +24460,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/layer_panel.cpp",
         "native/src/app/layer_panel_masks.cpp",
@@ -24588,8 +24588,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/ops_layers.cpp",
         "native/src/core/layer_basics.cpp",
@@ -24643,8 +24643,8 @@
       },
       "upstream_menu": null,
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/layer_panel.cpp",
         "native/src/app/preferences.cpp",
@@ -26655,8 +26655,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/ops_layers.cpp",
         "native/src/core/layer_basics.cpp",
@@ -27146,8 +27146,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/render/ops_video.cpp",
@@ -27203,8 +27203,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/render/ops_video.cpp",
@@ -27254,8 +27254,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/render/ops_video.cpp",
@@ -27312,8 +27312,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/render/ops_video.cpp",
@@ -27363,8 +27363,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/render/ops_video.cpp",
@@ -27420,8 +27420,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/render/ops_video.cpp",
@@ -27475,8 +27475,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/render/ops_video.cpp",
@@ -27528,8 +27528,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/render/ops_video.cpp",
@@ -27579,8 +27579,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/render/ops_video.cpp",
@@ -27630,8 +27630,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/render/ops_video.cpp",
@@ -27681,8 +27681,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/render/ops_video.cpp",
@@ -27737,8 +27737,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/render/ops_video.cpp",
@@ -27775,8 +27775,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_comps.cpp",
         "native/src/core/layer_comps.cpp",
@@ -27810,8 +27810,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_comps.cpp",
         "native/src/core/layer_comps.cpp",
@@ -27845,8 +27845,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_comps.cpp",
         "native/src/core/layer_comps.cpp",
@@ -27880,8 +27880,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_comps.cpp",
         "native/src/core/layer_comps.cpp",
@@ -27916,8 +27916,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_comps.cpp",
         "native/src/core/layer_comps.cpp",
@@ -27954,8 +27954,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_comps.cpp",
         "native/src/core/layer_comps.cpp",
@@ -27989,8 +27989,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_comps.cpp",
         "native/src/core/layer_comps.cpp",
@@ -28024,8 +28024,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_comps.cpp",
         "native/src/core/layer_comps.cpp",
@@ -28059,8 +28059,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_comps.cpp",
         "native/src/core/layer_comps.cpp",
@@ -28094,8 +28094,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_comps.cpp",
         "native/src/core/layer_comps.cpp",
@@ -28129,8 +28129,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_comps.cpp",
         "native/src/core/layer_comps.cpp",
@@ -28164,8 +28164,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_comps.cpp",
         "native/src/core/layer_comps.cpp",
@@ -28199,8 +28199,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_layer_comps.cpp",
         "native/src/core/layer_comps.cpp",
@@ -28234,8 +28234,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/measurement_log.cpp",
         "native/src/app/measurement_log_panel.cpp",
@@ -28266,8 +28266,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/measure_features.cpp",
         "native/src/app/measurement_log.cpp",
@@ -28302,8 +28302,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/measurement_log.cpp",
         "native/src/app/measurement_log_panel.cpp",
@@ -28337,8 +28337,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_annotations.cpp",
         "native/src/core/annotations.cpp",
@@ -28382,8 +28382,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_annotations.cpp",
         "native/src/core/annotations.cpp",
@@ -28424,8 +28424,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_annotations.cpp",
         "native/src/api/cli.cpp",
@@ -28463,8 +28463,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_annotations.cpp",
         "native/src/core/annotations.cpp",
@@ -29900,8 +29900,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/plugins.cpp",
         "native/src/app/plugins_dialog.cpp",
@@ -29942,8 +29942,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/plugins.cpp",
         "native/src/app/plugins_dialog.cpp",
@@ -29984,8 +29984,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/plugins.cpp",
         "native/src/app/plugins_dialog.cpp",
@@ -30024,8 +30024,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/plugins.cpp",
         "native/src/app/plugins_dialog.cpp",
@@ -30064,8 +30064,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/plugins.cpp",
         "native/src/render/plugin_bands.cpp",
@@ -30111,8 +30111,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/api/prefs_cli.cpp",
         "native/src/core/prefs_table.cpp",
@@ -30151,8 +30151,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/api/prefs_cli.cpp",
         "native/src/core/prefs_table.cpp",
@@ -30190,8 +30190,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/api/prefs_cli.cpp",
         "native/src/core/prefs_table.cpp",
@@ -31807,8 +31807,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-e、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-e、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/session_file.cpp",
         "native/src/core/session_file.cpp",
@@ -32178,8 +32178,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_slices.cpp",
         "native/src/core/slice_layout.cpp",
@@ -32215,8 +32215,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_slices.cpp",
         "native/src/core/slice_layout.cpp",
@@ -32252,8 +32252,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_slices.cpp",
         "native/src/core/slice_layout.cpp",
@@ -32289,8 +32289,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_slices.cpp",
         "native/src/core/slice_layout.cpp",
@@ -32324,8 +32324,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_slices.cpp",
         "native/src/core/slice_layout.cpp",
@@ -32362,8 +32362,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_slices.cpp",
         "native/src/core/slice_layout.cpp",
@@ -32399,8 +32399,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_slices.cpp",
         "native/src/core/slice_layout.cpp",
@@ -32606,8 +32606,8 @@
       },
       "upstream_menu": null,
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/core/ops_anim.cpp",
@@ -32648,8 +32648,8 @@
       },
       "upstream_menu": null,
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/core/ops_anim.cpp",
@@ -32688,8 +32688,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/core/ops_anim.cpp",
@@ -32728,8 +32728,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/timeline.cpp",
         "native/src/app/main_window_anim.cpp",
@@ -32764,8 +32764,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/timeline.cpp",
         "native/src/app/main_window_anim.cpp",
@@ -32800,8 +32800,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/timeline.cpp",
         "native/src/app/main_window_anim.cpp",
@@ -32838,8 +32838,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/video.cpp",
         "native/src/core/ops_anim.cpp",
@@ -33218,8 +33218,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type.cpp",
         "native/src/core/type_text.cpp",
@@ -33257,8 +33257,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type.cpp",
         "native/src/core/type_text.cpp",
@@ -33308,8 +33308,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type.cpp",
         "native/src/core/type_text.cpp",
@@ -33359,8 +33359,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type.cpp",
         "native/src/core/type_text.cpp",
@@ -33410,8 +33410,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type.cpp",
         "native/src/core/type_text.cpp",
@@ -33461,8 +33461,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type.cpp",
         "native/src/core/type_text.cpp",
@@ -33512,8 +33512,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type.cpp",
         "native/src/core/type_text.cpp",
@@ -33548,8 +33548,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -33581,8 +33581,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -33614,8 +33614,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -33647,8 +33647,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -33680,8 +33680,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -33713,8 +33713,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -33746,8 +33746,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -33779,8 +33779,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -33812,8 +33812,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -33858,8 +33858,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type.cpp",
         "native/src/core/type_text.cpp",
@@ -33907,8 +33907,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type.cpp",
         "native/src/core/type_text.cpp",
@@ -33992,8 +33992,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type.cpp",
         "native/src/core/type_text.cpp",
@@ -34086,8 +34086,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type.cpp",
         "native/src/core/type_text.cpp",
@@ -34137,8 +34137,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type_panels.cpp",
         "native/src/app/type_panels.cpp",
@@ -34174,8 +34174,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type_panels.cpp",
         "native/src/app/type_panels.cpp",
@@ -34211,8 +34211,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type_panels.cpp",
         "native/src/app/type_panels.cpp",
@@ -34248,8 +34248,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type_panels.cpp",
         "native/src/app/type_panels.cpp",
@@ -34285,8 +34285,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type_panels.cpp",
         "native/src/app/type_panels.cpp",
@@ -34317,8 +34317,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/service/briefs.cpp",
         "native/src/render/text/shaping.cpp",
@@ -34357,8 +34357,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type.cpp",
         "native/src/core/type_text.cpp",
@@ -34396,8 +34396,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type.cpp",
         "native/src/core/type_text.cpp",
@@ -34441,8 +34441,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/tests/gui/test_gui_type.cpp"
@@ -34477,8 +34477,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/src/render/text/lettering.cpp",
@@ -34520,8 +34520,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/src/render/text/lettering.cpp",
@@ -34559,8 +34559,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/src/render/text/bidi.cpp",
@@ -34607,8 +34607,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/app/main_window_type.cpp",
@@ -34660,8 +34660,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/src/render/ops_type_set.cpp",
@@ -34713,8 +34713,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/src/render/ops_type_set.cpp",
@@ -34766,8 +34766,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/src/render/ops_type_set.cpp",
@@ -34819,8 +34819,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/src/render/ops_type_set.cpp",
@@ -34872,8 +34872,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/src/render/ops_type_set.cpp",
@@ -34925,8 +34925,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/src/render/ops_type_set.cpp",
@@ -34978,8 +34978,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/src/render/ops_type_set.cpp",
@@ -35039,8 +35039,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/src/render/ops_type_set.cpp",
@@ -35100,8 +35100,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/src/render/ops_type_set.cpp",
@@ -35153,8 +35153,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/src/render/ops_type_set.cpp",
@@ -35206,8 +35206,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type.cpp",
         "native/src/core/type_text.cpp",
@@ -35266,8 +35266,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type.cpp",
         "native/src/core/type_text.cpp",
@@ -35316,8 +35316,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/type_panels.cpp",
         "native/src/app/main_window_type_panels.cpp",
@@ -35362,8 +35362,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/type_panels.cpp",
         "native/src/app/main_window_type_panels.cpp",
@@ -35399,8 +35399,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/type_panels.cpp",
         "native/src/app/main_window_type_panels.cpp",
@@ -35438,8 +35438,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/type_panels.cpp",
         "native/src/app/main_window_type_panels.cpp",
@@ -35480,8 +35480,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/type_panels.cpp",
         "native/src/app/main_window_type_panels.cpp",
@@ -35512,8 +35512,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -35545,8 +35545,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -35578,8 +35578,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -35611,8 +35611,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -35644,8 +35644,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -35677,8 +35677,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -35710,8 +35710,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -35743,8 +35743,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -35776,8 +35776,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/render/ops_type_styles.cpp",
@@ -35822,8 +35822,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/tests/gui/test_gui_type.cpp",
@@ -35951,8 +35951,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type_fonts.cpp",
         "native/src/app/main_window_type_panels.cpp",
@@ -36002,8 +36002,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type_fonts.cpp",
         "native/src/app/type_dialogs.cpp",
@@ -36053,8 +36053,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/type_styles.cpp",
         "native/src/app/main_window_type.cpp",
@@ -36092,8 +36092,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_type_set.cpp",
         "native/src/render/text/opentype.cpp",
@@ -36152,8 +36152,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/tests/gui/test_gui_type.cpp",
@@ -36249,8 +36249,8 @@
       },
       "upstream_menu": null,
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/variables.cpp",
         "native/src/render/ops_variables.cpp",
@@ -36288,8 +36288,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_view.cpp",
         "native/src/app/canvas.cpp",
@@ -36343,8 +36343,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_guide_view.cpp",
         "native/src/core/ops_rulers.cpp",
@@ -36394,8 +36394,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_guide_view.cpp",
         "native/src/core/ops_rulers.cpp",
@@ -36447,8 +36447,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_artboards.cpp",
         "native/src/core/ops_rulers.cpp",
@@ -36497,8 +36497,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/ops_slices.cpp",
         "native/src/core/slice_layout.cpp",
@@ -36534,8 +36534,8 @@
       },
       "upstream_menu": null,
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas_guide_lines.cpp",
         "native/src/app/canvas_scale.cpp",
@@ -36578,8 +36578,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_guide_view.cpp",
         "native/src/app/canvas_guide_lines.cpp",
@@ -36617,8 +36617,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_artboards.cpp",
         "native/src/app/canvas.cpp",
@@ -36658,8 +36658,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_view.cpp",
         "native/src/app/canvas.cpp",
@@ -36696,8 +36696,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_actions.cpp",
         "native/src/app/canvas.cpp",
@@ -36739,8 +36739,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_actions.cpp",
         "native/src/app/canvas.cpp",
@@ -36833,8 +36833,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_guide_view.cpp",
         "native/src/app/canvas_guide_lines.cpp",
@@ -36884,8 +36884,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_slices.cpp",
         "native/src/app/canvas_slices.cpp",
@@ -36916,8 +36916,8 @@
       },
       "upstream_menu": null,
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas_guide_lines.cpp",
         "native/src/app/canvas_scale.cpp",
@@ -36966,8 +36966,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_guide_view.cpp",
         "native/src/app/guide_dialogs.cpp",
@@ -37019,8 +37019,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/ops_rulers.cpp",
         "native/src/core/guide_layout.hpp",
@@ -37138,8 +37138,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/tiles.cpp",
         "native/src/app/canvas_view.cpp",
@@ -37177,8 +37177,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/pixel_aspect.cpp",
         "native/src/app/main_window_pixel_aspect.cpp",
@@ -37221,8 +37221,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/pixel_aspect.cpp",
         "native/src/app/main_window_pixel_aspect.cpp",
@@ -37265,8 +37265,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/pixel_aspect.cpp",
         "native/src/app/main_window_pixel_aspect.cpp",
@@ -37309,8 +37309,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/pixel_aspect.cpp",
         "native/src/app/main_window_pixel_aspect.cpp",
@@ -37353,8 +37353,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/pixel_aspect.cpp",
         "native/src/app/main_window_pixel_aspect.cpp",
@@ -37397,8 +37397,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/pixel_aspect.cpp",
         "native/src/app/main_window_pixel_aspect.cpp",
@@ -37441,8 +37441,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/pixel_aspect.cpp",
         "native/src/app/main_window_pixel_aspect.cpp",
@@ -37485,8 +37485,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/pixel_aspect.cpp",
         "native/src/app/main_window_pixel_aspect.cpp",
@@ -37529,8 +37529,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/pixel_aspect.cpp",
         "native/src/app/main_window_pixel_aspect.cpp",
@@ -37572,8 +37572,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas.cpp",
         "native/src/app/main_window_pixel_aspect.cpp",
@@ -37608,8 +37608,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_actions.cpp",
         "native/src/app/canvas.cpp",
@@ -38310,8 +38310,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas_scale.cpp",
         "native/src/core/units.cpp",
@@ -38354,8 +38354,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_view.cpp",
         "native/src/app/comfort.cpp",
@@ -38396,8 +38396,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_view.cpp",
         "native/tests/gui/test_gui_view.cpp"
@@ -38437,8 +38437,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_view.cpp",
         "native/src/app/comfort.cpp",
@@ -38479,8 +38479,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_guide_view.cpp",
         "native/tests/gui/test_gui_guides.cpp"
@@ -38515,8 +38515,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 I-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 I-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_guide_view.cpp",
         "native/src/app/canvas_guide_lines.cpp",
@@ -38598,8 +38598,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas_guide_lines.cpp",
         "native/src/app/main_window_guide_view.cpp",
@@ -38640,8 +38640,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_measure.cpp",
         "native/src/app/canvas_measure.cpp",
@@ -38678,8 +38678,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas_transform.cpp",
         "native/src/app/main_window_guide_view.cpp",
@@ -38715,8 +38715,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas_guides.cpp",
         "native/src/app/main_window_guides.cpp",
@@ -38760,8 +38760,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas_guide_lines.cpp",
         "native/src/app/main_window_guide_view.cpp",
@@ -38806,8 +38806,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas_guide_lines.cpp",
         "native/src/app/main_window_guide_view.cpp",
@@ -38843,8 +38843,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas_transform.cpp",
         "native/src/app/main_window_guide_view.cpp",
@@ -38880,8 +38880,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas_notes.cpp",
         "native/src/app/main_window_notes.cpp",
@@ -38917,8 +38917,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas_view.cpp",
         "native/src/app/canvas_paint.cpp",
@@ -38995,8 +38995,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_guide_view.cpp",
         "native/tests/gui/test_gui_guides.cpp"
@@ -39031,8 +39031,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_slices.cpp",
         "native/src/app/canvas_slices.cpp",
@@ -39071,8 +39071,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas_snap.cpp",
         "native/src/app/canvas_guide_lines.cpp",
@@ -39425,8 +39425,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_align.cpp",
         "native/src/app/canvas_snap.cpp",
@@ -39470,8 +39470,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/render/hdr_preview.cpp",
         "native/src/app/tiles.cpp",
@@ -39510,8 +39510,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_view.cpp",
         "native/src/app/canvas.cpp",
@@ -39554,8 +39554,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_actions.cpp",
         "native/src/app/canvas.cpp",
@@ -39596,8 +39596,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_actions.cpp",
         "native/src/app/canvas.cpp",
@@ -39639,8 +39639,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -39684,8 +39684,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -39729,8 +39729,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -39774,8 +39774,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -39819,8 +39819,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -39860,8 +39860,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -39900,8 +39900,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -39940,8 +39940,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -39980,8 +39980,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -40020,8 +40020,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -40065,8 +40065,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -40106,8 +40106,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -40147,8 +40147,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -40188,8 +40188,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -40229,8 +40229,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -40270,8 +40270,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -40311,8 +40311,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -40352,8 +40352,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -40393,8 +40393,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/src/app/doc_area.cpp",
@@ -40433,8 +40433,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-g、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-g、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/actions_panel.cpp",
         "native/src/app/main_window_production.cpp",
@@ -40645,8 +40645,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/type_panels.cpp",
         "native/src/app/main_window_type_panels.cpp",
@@ -40686,8 +40686,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/type_panels.cpp",
         "native/src/app/main_window_type_panels.cpp",
@@ -40801,8 +40801,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/type_panels.cpp",
         "native/src/app/main_window_type_panels.cpp",
@@ -40915,8 +40915,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_actions.cpp",
         "native/src/app/main_window_arrange.cpp",
@@ -40999,8 +40999,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/layer_comps_panel.cpp",
         "native/src/app/main_window_layer_comps.cpp",
@@ -41036,8 +41036,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_actions.cpp",
         "native/src/app/main_window_arrange.cpp",
@@ -41080,8 +41080,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d2、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d2、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/measurement_log_panel.cpp",
         "native/src/app/main_window_measure.cpp",
@@ -41117,8 +41117,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_arrange.cpp",
         "native/tests/gui/test_gui_arrange.cpp",
@@ -41153,8 +41153,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_actions.cpp",
         "native/src/app/main_window_arrange.cpp",
@@ -41196,8 +41196,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/notes_panel.cpp",
         "native/src/app/main_window_notes.cpp",
@@ -41232,8 +41232,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_actions.cpp",
         "native/src/app/main_window_arrange.cpp",
@@ -41276,8 +41276,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/type_panels.cpp",
         "native/src/app/main_window_type_panels.cpp",
@@ -41316,8 +41316,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/type_panels.cpp",
         "native/src/app/main_window_type_panels.cpp",
@@ -41588,8 +41588,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-e1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-e1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/timeline.cpp",
         "native/src/app/main_window_anim.cpp",
@@ -41674,8 +41674,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_actions.cpp",
         "native/src/app/main_window_arrange.cpp",
@@ -41717,8 +41717,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_workspace.cpp",
         "native/src/app/workspace.cpp",
@@ -41759,8 +41759,8 @@
         "alternate_menus": []
       },
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_workspace.cpp",
         "native/src/app/workspace.cpp",
@@ -41801,8 +41801,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_workspace.cpp",
         "native/src/app/workspace.cpp",
@@ -41843,8 +41843,8 @@
         "alternate_menus": []
       },
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_workspace.cpp",
         "native/tests/gui/test_gui_workspace.cpp"
@@ -41879,8 +41879,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_workspace.cpp",
         "native/src/app/workspace.cpp",
@@ -41921,8 +41921,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_workspace.cpp",
         "native/src/app/workspace.cpp",
@@ -41966,8 +41966,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_workspace.cpp",
         "native/src/app/workspace.cpp",
@@ -42008,8 +42008,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_workspace.cpp",
         "native/src/app/workspace.cpp",
@@ -42050,8 +42050,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_workspace.cpp",
         "native/src/app/workspace.cpp",
@@ -42092,8 +42092,8 @@
         "alternate_menus": []
       },
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-d、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-d、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_workspace.cpp",
         "native/src/app/workspace.cpp",
@@ -42377,8 +42377,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/measure.cpp",
         "native/src/render/ops_measure.cpp",
@@ -42406,8 +42406,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-c、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-c、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas_notes.cpp",
         "native/src/app/paint_panels.cpp",
@@ -42431,8 +42431,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-d1、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-d1、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/core/measure.cpp",
         "native/src/render/ops_measure.cpp",
@@ -42642,8 +42642,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 G-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 G-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_type.cpp",
         "native/tests/gui/test_gui_type.cpp",
@@ -42673,8 +42673,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas_input.cpp",
         "native/src/app/main_window_view.cpp",
@@ -42705,8 +42705,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas_input.cpp",
         "native/src/app/main_window_view.cpp",
@@ -43281,8 +43281,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_slices.cpp",
         "native/src/app/canvas_slices.cpp",
@@ -43305,8 +43305,8 @@
       "kind": "tool",
       "upstream_source": "crates/ui-egui/src/state.rs",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-b、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-b、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/main_window_slices.cpp",
         "native/src/app/canvas_slices.cpp",
@@ -43982,8 +43982,8 @@
       "label_ja": "GPU/CPU描画と資源代替",
       "kind": "cross_cutting",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 H-a、未統合。一致の許しは利用者の決定 2026-10-29: 再標本しない表示は 1/255、回転・画面に合わせた倍率は 2/255 を超える画素 2‰ まで・差 12/255 まで。試験は test_gui_canvas_gpu（Xvfb・Mesa、--gpu のとき））",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 H-a、PC5 として統合 98b180b。一致の許しは利用者の決定 2026-10-29: 再標本しない表示は 1/255、回転・画面に合わせた倍率は 2/255 を超える画素 2‰ まで・差 12/255 まで。試験は test_gui_canvas_gpu（Xvfb・Mesa、--gpu のとき））",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/app/canvas_gpu.cpp",
         "native/src/app/tiles.cpp",
@@ -44125,8 +44125,8 @@
       "label_ja": "WASMフィルタープラグイン互換",
       "kind": "cross_cutting",
       "genko_status": "なし（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-f、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-f、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/wasm-host/src/manifest.rs",
         "native/wasm-host/src/runtime.rs",
@@ -44161,8 +44161,8 @@
       "label_ja": "ローカル制御・UI読取・操作・画像取得",
       "kind": "cross_cutting",
       "genko_status": "一部（2026-10-16 照合）",
-      "implementation_status": "実装済み（PC5 J-g、未統合）",
-      "acceptance_status": "未実施",
+      "implementation_status": "実装済み（PC5 J-g、PC5 として統合 98b180b）",
+      "acceptance_status": "Linux V3 合格（PC5 の出口、凍結 98b180b、2026-11-05）。Windows は配布前に実機で（deferred）",
       "evidence": [
         "native/src/service/control.cpp",
         "native/src/app/control_channel.cpp",
