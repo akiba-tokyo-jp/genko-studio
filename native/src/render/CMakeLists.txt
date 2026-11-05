@@ -314,7 +314,7 @@ endif()
 # register_3d_ops) and ops_registry() holds them with core's ops; they are applied through core's CommandBus.
 set(GENKO_RENDER_OPS_SOURCES ops_registry.cpp ops_tones.cpp ops_effects.cpp ops_3d.cpp import_psd.cpp)
 if(GENKO_LIBRARY_KIND STREQUAL "SHARED")
-  # (a sanitizer build's shared libraries, cmake/GenkoFlags.cmake: stamp_material in genko_render applies ops through
+  # (shared libraries — a sanitizer build, or GENKO_SHARED_LIBRARIES: cmake/GenkoFlags.cmake —: stamp_material in genko_render applies ops through
   # ops_registry(), held here — shared libraries cannot depend on each other both ways, so the two are one library)
   target_sources(genko_render PRIVATE ${GENKO_RENDER_OPS_SOURCES})
   add_library(genko_render_ops INTERFACE)

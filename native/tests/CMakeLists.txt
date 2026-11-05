@@ -969,7 +969,7 @@ if(GENKO_BUILD_APP)
   target_compile_definitions(test_package PRIVATE GENKO_CMAKE_COMMAND="${CMAKE_COMMAND}" GENKO_BUILD_DIR="${CMAKE_BINARY_DIR}"
                                                   GENKO_VERSION="${PROJECT_VERSION}")
   if(GENKO_LIBRARY_KIND STREQUAL "SHARED")
-    # (a sanitizer build: Genko's own libraries are shared and go beside the program — GenkoFlags.cmake)
+    # (a sanitizer build, or GENKO_SHARED_LIBRARIES: Genko's own libraries are shared and go beside the program — GenkoFlags.cmake)
     target_compile_definitions(test_package PRIVATE GENKO_SHARED_LIBRARIES=1)
   endif()
   add_dependencies(test_package genko)

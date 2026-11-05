@@ -43,7 +43,7 @@ qt_generate_deploy_app_script(
                        "/libxcb-render-util[.]so" "/libxcb-util[.]so")
 install(SCRIPT "${GENKO_DEPLOY_SCRIPT}")
 if(GENKO_LIBRARY_KIND STREQUAL "SHARED" AND UNIX AND NOT APPLE)
-  # (a sanitizer build, where Genko's own libraries are shared — GenkoFlags.cmake: Qt's deployment copies them beside
+  # (a sanitizer build or GENKO_SHARED_LIBRARIES, where Genko's own libraries are shared — GenkoFlags.cmake: Qt's deployment copies them beside
   # the program with the build folder's library paths still in them; pointed at the folder they are in instead)
   install(CODE "file(GLOB _genko_own \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/lib/libgenko_*.so\")
 foreach(_lib IN LISTS _genko_own)

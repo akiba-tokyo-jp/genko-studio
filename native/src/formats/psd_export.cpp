@@ -1877,6 +1877,9 @@ bool hidden_layers_too(const core::Page& page) { return page.layer_comps && !pag
 
 // A layer comps' or slices' resource is written back only while every layer read with it is on the page (its lyid kept).
 bool kept_layers_there(const core::Page& page) {
+    // (a page kept nothing from a PSD — written with its own resources or a layer's style only —: nothing to check, and no
+    // kept ids to read: PC5 V3's Debug, where the empty optional's ids were read and the program fell)
+    if (!page.native_psd) return true;
     std::set<std::int64_t> here;
     for (const core::Layer& layer : page.layers) {
         if (layer.native_psd && layer.native_psd->id) here.insert(*layer.native_psd->id);
