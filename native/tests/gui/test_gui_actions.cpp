@@ -56,8 +56,6 @@ namespace core = genko::core;
 
 namespace {
 
-using Std = QKeySequence::StandardKey;
-
 struct Expected {
     const char* attribute;
     const char* text;
@@ -67,8 +65,7 @@ struct Expected {
     const char* menu;  // where it is: "ページ/コマ" is the コマ submenu of ページ
 };
 
-// (each key once — on Windows the standard Redo is Ctrl+Y itself, and a key bound twice would never fire —, and none
-// where the system has no standard one: Quit on Windows)
+// (each key once: a key bound twice would never fire)
 QList<QKeySequence> k(std::initializer_list<QKeySequence> keys) {
     QList<QKeySequence> unique;
     for (const QKeySequence& key : keys) {
@@ -80,19 +77,20 @@ QKeySequence s(const char* text) { return QKeySequence(QString::fromLatin1(text)
 
 // Python's words, keys and tips (main.py _build_actions), and the menu each is in — with PC5 H-0's Photoshop names
 // (節 H 1.2, the user's decision 12) and the Photoshop key set, the default since (the user's decision 8: key_sets; the
-// Genko set's keys — Python's — in theKeySets).
+// Genko set's keys — Python's — in theKeySets). Where Python took the system's standard key (QKeySequence(std.X), which
+// differs by system), the same keys on every system: every key Windows' and X11's had (PC5 V3: commands.json is one).
 const std::vector<Expected>& expected() {
     static const std::vector<Expected> list = {
         // (PC4 F-0, 節 F 5.1: ファイル's commands by Photoshop's names — 新規…, 別名で保存…, 終了)
-        {"act_new", "新規…", k({QKeySequence(Std::New)}), "", false, "ファイル"},
-        {"act_open", "開く…", k({QKeySequence(Std::Open)}), "", false, "ファイル"},
-        {"act_save", "保存", k({QKeySequence(Std::Save)}), "変更は自動で保存されます。今すぐ書き込むときに使います", false, "ファイル"},
-        {"act_save_as", "別名で保存…", k({QKeySequence(Std::SaveAs)}), "", false, "ファイル"},
-        {"act_undo", "取り消し", k({QKeySequence(Std::Undo)}), "", false, "編集"},
+        {"act_new", "新規…", k({s("Ctrl+N")}), "", false, "ファイル"},
+        {"act_open", "開く…", k({s("Ctrl+O")}), "", false, "ファイル"},
+        {"act_save", "保存", k({s("Ctrl+S")}), "変更は自動で保存されます。今すぐ書き込むときに使います", false, "ファイル"},
+        {"act_save_as", "別名で保存…", k({s("Ctrl+Shift+S")}), "", false, "ファイル"},
+        {"act_undo", "取り消し", k({s("Ctrl+Z")}), "", false, "編集"},
         {"act_redo", "やり直し", k({s("Ctrl+Shift+Z")}), "", false, "編集"},
         {"act_fit", "画面サイズに合わせる", k({s("Ctrl+0")}), "", false, "表示"},
-        {"act_zoom_in", "ズームイン", k({QKeySequence(Std::ZoomIn), s("Ctrl+=")}), "", false, "表示"},
-        {"act_zoom_out", "ズームアウト", k({QKeySequence(Std::ZoomOut)}), "", false, "表示"},
+        {"act_zoom_in", "ズームイン", k({s("Ctrl++"), s("Ctrl+=")}), "", false, "表示"},
+        {"act_zoom_out", "ズームアウト", k({s("Ctrl+-")}), "", false, "表示"},
         {"act_actual", "プリントサイズ", {}, "", false, "表示"},
         {"act_turn_left", "左に回す（15°）", k({s("-"), s("Ctrl+Alt+Left")}),
          "表示だけを回します（原稿は回りません）。Shift＋スペースを押しながらドラッグでも回せます", false, "表示"},
@@ -102,8 +100,8 @@ const std::vector<Expected>& expected() {
         {"act_zoom_value", "表示倍率を打ち込む…", {}, "倍率（%）を数で決めます。ステータスバーの倍率でも", false, "表示"},
         {"act_mirror", "水平方向に反転", {}, "表示だけを左右反転します（絵の歪みを見つける）。原稿は変わりません", true, "表示"},
         {"act_overview", "ページを並べて見る", k({s("Ctrl+Shift+O")}), "全ページを縮小図で並べ、ダブルクリックで開きます", false, "表示"},
-        {"act_prev", "◀ 前のページ", k({QKeySequence(Std::MoveToPreviousPage), s("Ctrl+Left")}), "", false, "表示"},
-        {"act_next", "次のページ ▶", k({QKeySequence(Std::MoveToNextPage), s("Ctrl+Right")}), "", false, "表示"},
+        {"act_prev", "◀ 前のページ", k({s("PgUp"), s("Ctrl+Left")}), "", false, "表示"},
+        {"act_next", "次のページ ▶", k({s("PgDown"), s("Ctrl+Right")}), "", false, "表示"},
         {"act_guides", "仕上がり線・基本枠を表示", {}, "断ち切り（裁ち落とし）・仕上がり線・基本枠", true, "表示"},
         // (PC1b, SPEC COLOR-03: Python's 「CMYK で見る（色校正）」 is now 色の校正 — View → Proof Colors — on Ctrl+Alt+Y
         // (Ctrl+Y is やり直す); it shows what 校正の設定 chooses, the working CMYK unless another: the user's decision
@@ -140,13 +138,13 @@ const std::vector<Expected>& expected() {
         {"act_page_up", "このページを前へ", k({s("Ctrl+Shift+Up")}), "", false, "ページ"},
         {"act_page_down", "このページを後ろへ", k({s("Ctrl+Shift+Down")}), "", false, "ページ"},
         {"act_name_ok", "ネーム完了 → 作画へ進む", {}, "承認の要らない原稿（AI を使わない原稿）で使います", false, "ページ"},
-        // (every key the system has for Close, Ctrl+W among them: Python binds only the first, Ctrl+F4 on Windows)
-        {"act_close", "閉じる", QKeySequence::keyBindings(Std::Close), "この原稿を閉じます（最後の原稿ならウィンドウも）", false, "ファイル"},
+        // (every key the systems have for Close, Ctrl+W among them: Python binds only the first, Ctrl+F4 on Windows)
+        {"act_close", "閉じる", k({s("Ctrl+F4"), s("Ctrl+W"), QKeySequence(Qt::Key_Close)}), "この原稿を閉じます（最後の原稿ならウィンドウも）", false, "ファイル"},
         {"act_new_window", "新規ウィンドウ", {}, "この原稿をもう 1 つのウィンドウで開きます。拡大して描きながら、別の窓で全体を見る", false,
          "ウィンドウ/アレンジ"},
         {"act_next_doc", "次の原稿", k({s("Ctrl+Tab")}), "", false, "ウィンドウ"},
         {"act_prev_doc", "前の原稿", k({s("Ctrl+Shift+Tab")}), "", false, "ウィンドウ"},
-        {"act_quit", "終了", k({QKeySequence(Std::Quit)}), "", false, "ファイル"},
+        {"act_quit", "終了", k({s("Ctrl+Q")}), "", false, "ファイル"},
     };
     return list;
 }
@@ -871,7 +869,7 @@ private slots:
         QCOMPARE(keys("act_guides"), k({s("Ctrl+;")}));
         QCOMPARE(keys("act_history"), k({s("Ctrl+H")}));
         QCOMPARE(keys("act_cmyk_proof"), k({s("Ctrl+Alt+Y")}));
-        QCOMPARE(keys("act_redo"), k({QKeySequence(Std::Redo), s("Ctrl+Y")}));
+        QCOMPARE(keys("act_redo"), k({s("Ctrl+Y"), s("Ctrl+Shift+Z")}));
         QCOMPARE(keys("act_find_command"), k({s("Ctrl+Shift+F")}));
         QCOMPARE(keys("act_filter_last"), k({s("Ctrl+F")}));
         QCOMPARE(keys("act_export"), k({s("Ctrl+E")}));

@@ -1187,8 +1187,12 @@ private slots:
         QVERIFY(std::find(found.begin(), found.end(), proof) != found.end());
         QCOMPARE(app::where(w, proof), QStringLiteral("表示"));
         const bool before = proof->isChecked();
+        // (the window itself active, not only its window handle: on xcb without a window manager the menu just closed keeps
+        // the focus as a window of w's — qWaitForWindowActive(w) is true then —, QApplication::activeWindow() is none and a
+        // key goes nowhere until the activation comes)
         w->activateWindow();
         QVERIFY(QTest::qWaitForWindowActive(w));
+        QVERIFY(gui_test::wait_for([w] { return QApplication::activeWindow() == w; }, 5000));
         QTest::keyClick(w->canvas(), Qt::Key_Y, Qt::ControlModifier);
         QCOMPARE(proof->isChecked(), !before);
         if (proof->isChecked() != before) proof->trigger();

@@ -82,11 +82,18 @@ using core::Json;
 
 namespace {
 
-using Std = QKeySequence::StandardKey;
-
-// QKeySequence(k) for each key: a standard key is its first binding on this system (as Python's QKeySequence(std.X)).
+// The keys of a command. Python's commands took the system's standard keys (QKeySequence(std.X): its first binding on
+// this system), which differ by system (Redo is Ctrl+Y on Windows, Ctrl+Shift+Z on X11; Quit has none on Windows, Ctrl+Q
+// on X11; Close Ctrl+F4 too on Windows): the keys here are the same on every system (PC5 V3 — commands.json, which
+// genko commands reads, is one catalogue for every system; the key sets are the same wherever the app runs). Where the
+// systems differed, a command keeps every key it had on any of them (Windows' and X11's: no one loses a key they used);
+// Qt's "Ctrl" is the Command key on macOS, as the standard keys there.
+QList<QKeySequence> keys(std::initializer_list<const char*> list) {
+    QList<QKeySequence> out;
+    for (const char* key : list) out << QKeySequence(QString::fromLatin1(key));
+    return out;
+}
 QList<QKeySequence> keys(std::initializer_list<QKeySequence> list) { return QList<QKeySequence>(list); }
-QKeySequence std_key(Std key) { return QKeySequence(key); }
 
 struct Stage {
     const char* key;
@@ -391,17 +398,17 @@ QAction* MainWindow::make(const QString& attribute, const QString& title, std::f
 void MainWindow::build_actions() {
     PageCanvas* c = canvas_;
     // (PC4 F-0, 節 F 5.1: ファイル's commands by Photoshop's names — 新規…, 別名で保存…, 終了; preferences::renamed())
-    make("act_new", QStringLiteral("新規…"), [this] { new_book(); }, keys({std_key(Std::New)}));
-    make("act_open", QStringLiteral("開く…"), [this] { open_book(); }, keys({std_key(Std::Open)}));
-    make("act_save", QStringLiteral("保存"), [this] { save(); }, keys({std_key(Std::Save)}), QStringLiteral("変更は自動で保存されます。今すぐ書き込むときに使います"));
-    make("act_save_as", QStringLiteral("別名で保存…"), [this] { save_as(); }, keys({std_key(Std::SaveAs)}));
+    make("act_new", QStringLiteral("新規…"), [this] { new_book(); }, keys({"Ctrl+N"}));
+    make("act_open", QStringLiteral("開く…"), [this] { open_book(); }, keys({"Ctrl+O"}));
+    make("act_save", QStringLiteral("保存"), [this] { save(); }, keys({"Ctrl+S"}), QStringLiteral("変更は自動で保存されます。今すぐ書き込むときに使います"));
+    make("act_save_as", QStringLiteral("別名で保存…"), [this] { save_as(); }, keys({"Ctrl+Shift+S"}));
     make("act_exposure", QStringLiteral("露光量の調整層…"), [this] { exposure_dialog(); });
-    make("act_undo", QStringLiteral("取り消し"), [this] { undo(); }, keys({std_key(Std::Undo)}));
-    make("act_redo", QStringLiteral("やり直し"), [this] { redo(); }, keys({std_key(Std::Redo), QKeySequence(QStringLiteral("Ctrl+Y"))}));
+    make("act_undo", QStringLiteral("取り消し"), [this] { undo(); }, keys({"Ctrl+Z"}));
+    make("act_redo", QStringLiteral("やり直し"), [this] { redo(); }, keys({"Ctrl+Y", "Ctrl+Shift+Z"}));
     make("act_fit", QStringLiteral("画面サイズに合わせる"), [c] { c->glide([c] { c->fit_page(); }); }, keys({QKeySequence(QStringLiteral("Ctrl+0"))}));
     make("act_zoom_in", QStringLiteral("ズームイン"), [c] { c->glide([c] { c->zoom_by(1.25); }); },
-         keys({std_key(Std::ZoomIn), QKeySequence(QStringLiteral("Ctrl+="))}));
-    make("act_zoom_out", QStringLiteral("ズームアウト"), [c] { c->glide([c] { c->zoom_by(0.8); }); }, keys({std_key(Std::ZoomOut)}));
+         keys({"Ctrl++", "Ctrl+="}));
+    make("act_zoom_out", QStringLiteral("ズームアウト"), [c] { c->glide([c] { c->zoom_by(0.8); }); }, keys({"Ctrl+-"}));
     make("act_actual", QStringLiteral("プリントサイズ"), [c] { c->glide([c] { c->actual_size(); }); }, keys({QKeySequence(QStringLiteral("Ctrl+1"))}));
     // (- and ^ as in CLIP STUDIO PAINT, too: Intel graphics drivers take Ctrl+Alt+arrows to turn the whole screen)
     make("act_turn_left", QStringLiteral("左に回す（15°）"), [c] { c->rotate_view(-15); },
@@ -444,8 +451,8 @@ void MainWindow::build_actions() {
     make("act_ai", QStringLiteral("AI と作る…"), [this] { open_ai_dialog(); }, {}, QStringLiteral("Claude などの AI をつなぐ設定・この原稿で動いた AI・最初に頼むこと"));
     make("act_overview", QStringLiteral("ページを並べて見る"), [this] { page_overview(); }, keys({QKeySequence(QStringLiteral("Ctrl+Shift+O"))}),
          QStringLiteral("全ページを縮小図で並べ、ダブルクリックで開きます"));
-    make("act_prev", QStringLiteral("◀ 前のページ"), [this] { jump(-1); }, keys({std_key(Std::MoveToPreviousPage), QKeySequence(QStringLiteral("Ctrl+Left"))}));
-    make("act_next", QStringLiteral("次のページ ▶"), [this] { jump(1); }, keys({std_key(Std::MoveToNextPage), QKeySequence(QStringLiteral("Ctrl+Right"))}));
+    make("act_prev", QStringLiteral("◀ 前のページ"), [this] { jump(-1); }, keys({"PgUp", "Ctrl+Left"}));
+    make("act_next", QStringLiteral("次のページ ▶"), [this] { jump(1); }, keys({"PgDown", "Ctrl+Right"}));
     QAction* guides = make("act_guides", QStringLiteral("仕上がり線・基本枠を表示"), [] {}, keys({QKeySequence(QStringLiteral("Ctrl+;"))}),
                            QStringLiteral("断ち切り（裁ち落とし）・仕上がり線・基本枠"), true);
     guides->setChecked(true);
@@ -613,13 +620,14 @@ void MainWindow::build_actions() {
     build_book_actions();  // (見開き, ノンブル, 原稿用紙, 表紙・カバー, 担当, 作品の結合, PSD: main_window_book.cpp)
     make("act_name_ok", QStringLiteral("ネーム完了 → 作画へ進む"), [this] { name_ok(); }, {}, QStringLiteral("承認の要らない原稿（AI を使わない原稿）で使います"));
     // books and windows
-    // (every key the system has for Close, not only the first as Python's QKeySequence(std.Close) gives: Ctrl+W closes
-    // a book — with its question — on Windows and Linux too, where Ctrl+F4 comes first; SPEC SAVE-01, AC-SAVE 2)
-    make("act_close", QStringLiteral("閉じる"), [this] { close_document(); }, QKeySequence::keyBindings(Std::Close),
+    // (every key the systems have for Close — Windows' Ctrl+F4, Ctrl+W, the Close key; X11's Ctrl+W, the Close key —, not
+    // only the first as Python's QKeySequence(std.Close) gives: Ctrl+W closes a book — with its question — everywhere;
+    // SPEC SAVE-01, AC-SAVE 2)
+    make("act_close", QStringLiteral("閉じる"), [this] { close_document(); }, keys({"Ctrl+F4", "Ctrl+W", "Close"}),
          QStringLiteral("この原稿を閉じます（最後の原稿ならウィンドウも）"));
     make("act_next_doc", QStringLiteral("次の原稿"), [this] { next_document(1); }, keys({QKeySequence(QStringLiteral("Ctrl+Tab"))}));
     make("act_prev_doc", QStringLiteral("前の原稿"), [this] { next_document(-1); }, keys({QKeySequence(QStringLiteral("Ctrl+Shift+Tab"))}));
-    make("act_quit", QStringLiteral("終了"), [] { QApplication::closeAllWindows(); }, keys({std_key(Std::Quit)}));
+    make("act_quit", QStringLiteral("終了"), [] { QApplication::closeAllWindows(); }, keys({"Ctrl+Q"}));
     // the tools' pictures and their tooltips with their keys
     for (const auto& [name, attribute] : {std::pair{"select", "act_select"}, {"pen", "act_pen"}, {"eraser", "act_eraser"}, {"frame", "act_frame"},
                                           {"picker", "act_picker"}, {"fill", "act_fill"}, {"lassofill", "act_lassofill"},

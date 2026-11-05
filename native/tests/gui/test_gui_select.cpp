@@ -36,7 +36,6 @@ namespace inject = genko::app::inject;
 
 namespace {
 
-using Std = QKeySequence::StandardKey;
 
 struct Expected {
     const char* attribute;
@@ -61,7 +60,7 @@ const std::vector<Expected>& expected() {
         {"act_sel_pen", "選択ペン", {}, "なぞった所を選択範囲に足す", true, "ツール"},
         {"act_sel_erase", "選択消し", {}, "なぞった所を選択範囲から外す", true, "ツール"},
         {"act_magic_eraser", "マジック消しゴムツール", {}, "クリックした所に近い色の所を透明にします（描く先のペイントのレイヤー）", true, "ツール"},
-        {"act_select_all", "すべてを選択", {QKeySequence(Std::SelectAll)}, "", false, "選択範囲"},
+        {"act_select_all", "すべてを選択", {s("Ctrl+A")}, "", false, "選択範囲"},
         {"act_deselect", "選択を解除", {s("Ctrl+D")}, "", false, "選択範囲"},
         {"act_sel_invert", "選択範囲を反転", {s("Ctrl+Shift+I")},  // (PC5 H-0: the Photoshop key set)
          "", false, "選択範囲"},
@@ -82,10 +81,10 @@ const std::vector<Expected>& expected() {
         {"act_sel_layer", "ピクセルを選択", {}, "描く先のレイヤーで描いてある所を選ぶ", false, "選択範囲"},
         {"act_sel_keep", "選択範囲をストック…", {}, "名前を付けてページに残す（後で「ストックから選ぶ」）", false, "選択範囲"},
         {"act_quick_mask", "クイックマスクモードで編集", {}, "選択範囲を赤で見せ、ブラシなどの道具で直す", true, "選択範囲"},
-        {"act_copy", "コピー", {QKeySequence(Std::Copy)}, "", false, "編集"},
-        {"act_cut", "カット", {QKeySequence(Std::Cut)}, "", false, "編集"},
-        {"act_paste", "ペースト", {QKeySequence(Std::Paste)}, "新しいレイヤーにペーストします（そのまま動かせます）", false, "編集"},
-        {"act_delete_area", "消去", {}, "", false, "編集"},
+        {"act_copy", "コピー", {s("Ctrl+C")}, "", false, "編集"},
+        {"act_cut", "カット", {s("Ctrl+X")}, "", false, "編集"},
+        {"act_paste", "ペースト", {s("Ctrl+V")}, "新しいレイヤーにペーストします（そのまま動かせます）", false, "編集"},
+        {"act_delete_area", "消去", {s("Del"), s("Backspace")}, "", false, "編集"},
         {"act_flip_h", "水平方向に反転", {}, "", false, "編集/変形"},
         {"act_flip_v", "垂直方向に反転", {}, "", false, "編集/変形"},
         {"act_fill_selection", "描画色で塗りつぶし", {s("Alt+Backspace")}, "", false, "編集"},
@@ -191,7 +190,8 @@ private slots:
         // (すべてを選択 and 選択を解除 in 編集 too)
         for (const char* name : {"act_select_all", "act_deselect"})
             QVERIFY2(menu_at(studio.window.get(), QStringLiteral("編集"))->actions().contains(studio.window->action(QString::fromLatin1(name))), name);
-        QVERIFY(studio.window->action("act_delete_area")->shortcuts().contains(s("Backspace")));
+        // (the same keys on every system — PC5 V3 —: Delete's first and Backspace, not X11's Ctrl+D, 選択を解除's)
+        QCOMPARE(studio.window->action("act_delete_area")->shortcuts(), (QList<QKeySequence>{s("Del"), s("Backspace")}));
         // the tools: the marquee in its ways
         for (const auto& [name, way] : {std::pair{"act_marquee", "rect"}, {"act_lasso", "lasso"}, {"act_wand", "wand"}, {"act_sel_ellipse", "ellipse"},
                                         {"act_sel_polyline", "polyline"}, {"act_sel_pen", "pen"}, {"act_sel_erase", "erase"}}) {
