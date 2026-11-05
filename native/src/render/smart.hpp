@@ -82,9 +82,19 @@ bool developed_ready(const core::Document& doc, const core::SmartContents& conte
 // The file's bytes (null when the book does not hold them).
 core::Bytes file_bytes(const core::Document& doc, const core::SmartContents& contents);
 
+// PC5 J-f (plugin-filters@1, review P2-2): what the smart object's `upto`-th smart filter makes — its filters up to it (that
+// one at normal, 100 %, no filter mask) laid on its picture as the drawing lays them (the same way as its filtered picture:
+// its contents as a page of `dpi` draws them, before what the page lays over the smart object's picture: its finish, its
+// screen) —, as a file of the page's kind of pixels: {suffix, bytes} (".png" 8 bits, ".colorrgba" precise colour, ".gkir"
+// inks). The page drawn as for print (the monochrome finish by the page). Errors as the filters' (NotYetPorted, …).
+std::pair<std::string, std::string> filtered_upto(const core::Document& doc, const core::Page& page, const core::Layer& layer, std::size_t upto,
+                                                  int dpi);
+
 // The pictures remembered between tiles, forgotten (clear_render_caches), and how many pixels they hold.
 void clear_caches();
 std::int64_t cache_pixels();
+// (PC5 H-f, メモリをクリア) The bytes they hold.
+std::int64_t cache_bytes();
 // Tests: the bytes each kind of picture remembered may hold together (0: the build's own, 512 MiB).
 void set_budget_for_testing(std::size_t bytes);
 

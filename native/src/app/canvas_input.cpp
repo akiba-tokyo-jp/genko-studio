@@ -2,7 +2,9 @@
 // PageCanvas mouse*Event, tabletEvent, wheelEvent, keyPressEvent and the panel tool's _frame_press/_move/_release).
 
 #include <QContextMenuEvent>
+#include <QElapsedTimer>
 #include <QGestureEvent>
+#include <QGuiApplication>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QNativeGestureEvent>
@@ -13,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include "app/canvas.hpp"
 #include "app/pen.hpp"
@@ -20,6 +23,7 @@
 #include "core/frames.hpp"
 #include "core/ids.hpp"
 #include "core/pynum.hpp"
+#include "core/stroke_geom.hpp"
 
 namespace genko::app {
 
@@ -173,13 +177,74 @@ void PageCanvas::finish_stroke() {
     update();
 }
 
+// --- the control channel's pen (PC5 J-g) ----------------------------------------------------------------------------
+
+namespace {
+
+double monotonic_ms() {
+    static QElapsedTimer clock;
+    if (!clock.isValid()) clock.start();
+    return static_cast<double>(clock.nsecsElapsed()) / 1e6;
+}
+
+PenSample control_sample(const QPointF& mm, double pressure, double time_ms) {
+    const core::PenPoint packed = core::pack_point(mm.x(), mm.y(), std::clamp(pressure, 0.0, 1.0));
+    PenSample sample;
+    sample.x_mm = packed.x;
+    sample.y_mm = packed.y;
+    sample.pressure = packed.p.value_or(0.7);
+    sample.time_ms = time_ms;
+    return sample;
+}
+
+}  // namespace
+
+bool PageCanvas::control_press(const QPointF& mm, double pressure) {
+    if (page() == nullptr || !is_stroke_tool(tool_) || !stroke_.empty() || control_stroke_ || panning_) return false;
+    control_stroke_ = true;
+    const PenSample sample = control_sample(mm, pressure, monotonic_ms());
+    begin_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, 0.0, true, sample);
+    return true;
+}
+
+void PageCanvas::control_move(const QPointF& mm, double pressure) {
+    if (!control_stroke_ || stroke_.empty()) return;
+    const PenSample sample = control_sample(mm, pressure, monotonic_ms());
+    extend_stroke(QPointF(sample.x_mm, sample.y_mm), sample.pressure, 0.0, false, sample);
+}
+
+void PageCanvas::control_release() {
+    if (!control_stroke_) return;
+    control_stroke_ = false;
+    finish_stroke();
+}
+
+void PageCanvas::control_cancel() {
+    if (!control_stroke_) return;
+    control_stroke_ = false;
+    stroke_.clear();
+    turns_.clear();
+    tilts_.clear();
+    times_.clear();
+    wheels_.clear();
+    smoother_.reset();
+    live_.reset();
+    live_copies_.clear();
+    live_snapped_ = false;
+    update_cursor();
+    update();
+}
+
 // --- the mouse -----------------------------------------------------------------------------------------------------
 
 void PageCanvas::update_cursor(std::optional<QPointF> pos) {
     if (panning_) {
         setCursor(Qt::ClosedHandCursor);
-    } else if (space_) {
+    } else if (space_ || tool_ == QLatin1String("hand")) {  // (PC5 H-a: 手のひらツール)
         setCursor(Qt::OpenHandCursor);
+    } else if (const auto guide = pos && page() != nullptr ? grabbable_guide(view_transform().map(*pos), QGuiApplication::keyboardModifiers())
+                                                           : std::nullopt) {
+        setCursor(guide->second ? Qt::SplitVCursor : Qt::SplitHCursor);  // (PC5 H-b: a guide a press would grab)
     } else if (is_drawing_tool(tool_)) {
         // the brush's circle is drawn on the page (paint_page); the pointer itself as chosen in 環境設定 (PC4 E1: the cross
         // alone without the brush preview, and while drawing when so chosen)
@@ -194,7 +259,7 @@ void PageCanvas::update_cursor(std::optional<QPointF> pos) {
                tool_ == QLatin1String("reshape") || tool_ == QLatin1String("ruler") || tool_ == QLatin1String("3d") ||
                tool_ == QLatin1String("effect") || tool_ == QLatin1String("stamp")) {
         setCursor(Qt::CrossCursor);
-    } else if (tool_ == QLatin1String("text")) {
+    } else if (is_text_tool(tool_)) {
         setCursor(Qt::IBeamCursor);
     } else if (tool_ == QLatin1String("frame") && pos && page() != nullptr) {
         const QPointF mm = mm_of(*pos);
@@ -221,7 +286,8 @@ void PageCanvas::start_pan(const QPointF& pos) {
 }
 
 void PageCanvas::coast() {
-    if (reduce_motion() || std::abs(pan_speed_.x()) + std::abs(pan_speed_.y()) < 0.4 || pan_clock_.elapsed() / 1000.0 - pan_time_ > 0.08) {
+    if (!flick_panning || reduce_motion() || std::abs(pan_speed_.x()) + std::abs(pan_speed_.y()) < 0.4 ||
+        pan_clock_.elapsed() / 1000.0 - pan_time_ > 0.08) {  // (PC5 H-e: フリックパンを有効にする)
         emit changed();
         return;
     }
@@ -238,6 +304,7 @@ void PageCanvas::stop_coast() {
 bool PageCanvas::coasting() const { return coast_timer_.isActive(); }
 
 void PageCanvas::mousePressEvent(QMouseEvent* event) {
+    if (control_stroke_) return;  // (PC5 J-g: the person's line waits while the channel's draws)
     setFocus();
     const QPointF pos = unturned(event->position());
     if (event->button() == Qt::LeftButton && space_ && (event->modifiers() & Qt::ShiftModifier)) {
@@ -245,8 +312,8 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
         turning_ = std::make_pair(angle, view_.rotation);  // Shift+Space: turn the view
         return;
     }
-    if (event->button() == Qt::MiddleButton || (event->button() == Qt::LeftButton && space_)) {
-        start_pan(pos);
+    if (event->button() == Qt::MiddleButton || (event->button() == Qt::LeftButton && (space_ || tool_ == QLatin1String("hand")))) {
+        start_pan(pos);  // (PC5 H-a: 手のひらツール drags the view as Space does)
         return;
     }
     if (page() == nullptr || event->button() != Qt::LeftButton) return;
@@ -254,8 +321,9 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
     if (guide_press(event->position())) return;  // (a guide line pulled from a scale: canvas_scale.cpp)
     const QPointF mm = mm_of(pos);
     if (transform_press(pos, mm, event->modifiers())) return;  // (自由変形 and the warps' box: canvas_transform.cpp)
+    if (guide_grab(event->position(), event->modifiers())) return;  // (PC5 H-b: a guide placed, not while transforming — canvas_guide_lines.cpp)
     press_pos_ = pos;
-    snap_lines_.clear();
+    forget_snap();
     snap_moving.clear();  // (the move tool's are given again as its drag starts)
     if (tool_ == QLatin1String("move")) {
         if (move_box_handle(pos)) {  // (PC3 C-d: バウンディングボックス's □ — 自由変形 from here: canvas_snap.cpp)
@@ -277,9 +345,12 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
         update();
         return;
     }
-    if (tool_ == QLatin1String("zoom")) {  // 虫めがね: a click zooms in (Alt: out), a drag zooms into the area
+    if (tool_ == QLatin1String("zoom")) {  // ズームツール: a click zooms in (Alt: out), a drag zooms into the area
         zoom_drag_ = std::make_pair(pos, pos);
-        zoom_out_ = (event->modifiers() & Qt::AltModifier) != 0;
+        // (PC5 H-a, its options: ズームアウト turns the click about, Alt still the other way; スクラブズーム drags the zoom)
+        zoom_out_ = ((event->modifiers() & Qt::AltModifier) != 0) != zoom_out_mode;
+        scrub_ = pos;
+        scrubbed_ = false;
         return;
     }
     if (tool_ == QLatin1String("select")) {
@@ -305,6 +376,7 @@ void PageCanvas::mousePressEvent(QMouseEvent* event) {
 }
 
 void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
+    if (control_stroke_) return;  // (PC5 J-g: the channel's line takes no point of the person's)
     if (turning_) {
         const double angle = std::atan2(event->position().y() - height() / 2.0, event->position().x() - width() / 2.0) * 180.0 / kPi;
         double turn = angle - turning_->first;
@@ -317,6 +389,18 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
     const QPointF pos = unturned(event->position());
     if (!panning_ && work_ && work_->move && (event->buttons() & Qt::LeftButton) && work_->move(mm_of(pos), event->modifiers())) return;  // (PC4 D4)
     if (zoom_drag_) {
+        if (scrubby_zoom && scrub_) {  // (スクラブズーム: right zooms in, left out, about the point pressed)
+            const double dx = pos.x() - scrub_->x();
+            scrub_ = pos;
+            if (std::abs(pos.x() - zoom_drag_->first.x()) > 3 || scrubbed_) {
+                scrubbed_ = true;
+                if (dx != 0.0) {
+                    zoom_by(std::exp(dx / 120.0), zoom_drag_->first);
+                    if (zoom_all || (event->modifiers() & Qt::ShiftModifier)) emit handUsed(std::exp(dx / 120.0), QPointF(), zoom_all);  // (PC5 H-c)
+                }
+            }
+            return;
+        }
         zoom_drag_->second = pos;
         update();
         return;
@@ -324,6 +408,7 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
     if (panning_) {
         const QPointF delta = pos - last_pos_;
         view_.pan += delta;
+        keep_in_view();  // (PC5 H-e: オーバースクロール off)
         last_pos_ = pos;
         const double now = pan_clock_.elapsed() / 1000.0;
         const double frames = std::max(1.0, (now - pan_time_) / 0.016);  // (the speed per screen frame, a little smoothed)
@@ -332,6 +417,9 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
         view_.fitted = false;
         rerender_.start();
         update();
+        // (PC5 H-c: the hand with Shift — every pane —, or 手のひらツール's すべてのウィンドウをスクロール — every window)
+        const bool every = scroll_all && tool_ == QLatin1String("hand") && !space_;
+        if (every || (event->modifiers() & Qt::ShiftModifier)) emit handUsed(1.0, delta, every);
         return;
     }
     if (transform_move(mm_of(pos), event->modifiers())) return;
@@ -406,6 +494,7 @@ void PageCanvas::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
+    if (control_stroke_) return;  // (PC5 J-g: the control channel's line is let go by the channel alone)
     if (turning_) {
         turning_.reset();
         return;
@@ -413,22 +502,34 @@ void PageCanvas::mouseReleaseEvent(QMouseEvent* event) {
     if (!panning_ && event->button() == Qt::LeftButton && work_ && work_->release && work_->release(to_mm(event->position()), event->modifiers()))
         return;  // (PC4 D4)
     if (guide_release(event->position())) return;
-    if (!snap_lines_.empty()) {  // (PC3 C-d: what a drag snapped to shows while it lasts)
-        snap_lines_.clear();
+    if (!snap_lines_.empty() || !spacing_.empty()) {  // (PC3 C-d: what a drag snapped to shows while it lasts)
+        forget_snap();
         update();
     }
     move_snap_box_.reset();
     if (zoom_drag_) {
         const auto [start, end] = *zoom_drag_;
         zoom_drag_.reset();
+        scrub_.reset();
+        if (std::exchange(scrubbed_, false)) {  // (スクラブズーム: zoomed as it was dragged)
+            update();
+            return;
+        }
+        const double before = view_.scale;
         if (std::abs(end.x() - start.x()) > 6 && std::abs(end.y() - start.y()) > 6) {
             const QPointF a = mm_of(start);
             const QPointF b = mm_of(end);
             zoom_to_rect(a.x(), a.y(), b.x(), b.y());
         } else {
             const bool out = zoom_out_;
-            glide([this, out, start] { zoom_by(out ? 0.5 : 2.0, start); });
+            const QPointF clicked = mm_of(start);
+            glide([this, out, start, clicked] {
+                zoom_by(out ? 0.5 : 2.0, start);
+                if (zoom_to_center) center_on(clicked.x(), clicked.y());  // (PC5 H-e: クリックした点を中央にズーム)
+            });
         }
+        // (PC5 H-c: the zoom tool with Shift — every pane —, or its すべてのウィンドウをズーム — every window)
+        if ((zoom_all || (event->modifiers() & Qt::ShiftModifier)) && before > 0) emit handUsed(view_.scale / before, QPointF(), zoom_all);
         update();
         return;
     }
@@ -496,6 +597,13 @@ void PageCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
         fit_page();
         return;
     }
+    // (PC5 H-b: a guide double-clicked where a press would grab it — 新規ガイド… asks where it goes)
+    if (event->button() == Qt::LeftButton && !work_) {
+        if (const auto guide = grabbable_guide(event->position(), event->modifiers())) {
+            emit guideAsked(QString::fromStdString(guide->first));
+            return;
+        }
+    }
     if (work_ && event->button() == Qt::LeftButton) {  // (PC4 D4: the second press of a double click is the work's press too)
         mousePressEvent(event);
         return;
@@ -516,6 +624,8 @@ void PageCanvas::mouseDoubleClickEvent(QMouseEvent* event) {
         finish_curve();
         return;
     }
+    if (tool_ == QLatin1String("note") && note_double(event->position())) return;  // (PC5 J-c: a note's box opened or closed)
+    if (tool_ == QLatin1String("slice_select") && slice_double(event->position())) return;  // (PC5 J-b: スライスオプション)
     if (tool_ == QLatin1String("frame") && !frame_poly_.empty()) {
         if (frame_poly_.size() > 1 && frame_poly_.back() == frame_poly_[frame_poly_.size() - 2]) {
             frame_poly_.pop_back();  // (the double click's second press added the same corner again)
@@ -545,8 +655,22 @@ void PageCanvas::contextMenuEvent(QContextMenuEvent* event) {
     emit contextMenuAt(frame != nullptr ? QString::fromStdString(frame->id) : QString(), event->globalPos());
 }
 
+void PageCanvas::keep_in_view() {
+    // (a turned or mirrored view — or one widened by the pixel aspect ratio, PC5 H-f —: its edges are not the page's — left
+    // as it is, review P3-10)
+    if (overscroll || page() == nullptr || view_.scale <= 0 || view_.rotation != 0.0 || view_.flipped || view_.flipped_v || shown_aspect() != 1.0) return;
+    const double pw = page()->spec.width_mm.value() * view_.scale;
+    const double ph = page()->spec.height_mm.value() * view_.scale;
+    const auto keep = [](double& pan, double page_px, double view_px) {
+        pan = page_px >= view_px ? std::clamp(pan, view_px - page_px, 0.0) : (view_px - page_px) / 2.0;
+    };
+    keep(view_.pan.rx(), pw, width());
+    keep(view_.pan.ry(), ph, height());
+}
+
 void PageCanvas::wheelEvent(QWheelEvent* event) {
-    if (event->modifiers() & Qt::ControlModifier) {
+    // (PC5 H-e, スクロールホイールでズーム: the wheel alone zooms — Shift with it still scrolls across)
+    if ((event->modifiers() & Qt::ControlModifier) || (wheel_zooms && !(event->modifiers() & Qt::ShiftModifier))) {
         const int delta = event->angleDelta().y() != 0 ? event->angleDelta().y() : event->pixelDelta().y();
         if (delta != 0) zoom_by(1.0 + std::max(-0.5, std::min(0.5, delta / 600.0)), unturned(event->position()));
         return;
@@ -560,12 +684,26 @@ void PageCanvas::wheelEvent(QWheelEvent* event) {
     }
     const QPointF moved = unturned(QPointF(dx, dy)) - unturned(QPointF(0, 0));  // the page follows the fingers, turned or not
     view_.pan += moved;
+    keep_in_view();  // (PC5 H-e: オーバースクロール off)
     view_.fitted = false;
     rerender_.start();
     update();
 }
 
 bool PageCanvas::event(QEvent* e) {
+    // (PC5 H-e, 拡張コントロール: a touch screen's fingers, a trackpad's pinch and its turn — each can be turned off)
+    if (e->type() == QEvent::Gesture && !touch_gestures) {
+        e->ignore();
+        return true;
+    }
+    if (e->type() == QEvent::NativeGesture) {
+        auto* native = static_cast<QNativeGestureEvent*>(e);
+        if (native->gestureType() == Qt::ZoomNativeGesture && !pinch_zoom) return true;
+        if (native->gestureType() == Qt::RotateNativeGesture) {
+            if (trackpad_rotate && native->value() != 0.0) rotate_view(native->value());
+            return true;
+        }
+    }
     if (e->type() == QEvent::Gesture) {  // two fingers on a touch screen: zoom, turn, move
         auto* gesture = static_cast<QGestureEvent*>(e);
         if (auto* p = static_cast<QPinchGesture*>(gesture->gesture(Qt::PinchGesture))) {
@@ -601,6 +739,8 @@ void PageCanvas::hold_modifier(const QString& key, bool down) {
         tool.clear();  // (the path tools' own: Alt breaks a handle, puts a corner, copies)
     }
     if (is_clone_tool(base) && key == QLatin1String("alt")) tool.clear();  // (PC3 B4: Alt+click sets the clone source)
+    // (PC5 J-d1: the ものさしツール's Alt draws the protractor's arm, the カウントツール's takes a mark away)
+    if ((base == QLatin1String("measure") || base == QLatin1String("count")) && key == QLatin1String("alt")) tool.clear();
     if (base == QLatin1String("move") && key == QLatin1String("ctrl")) tool.clear();  // (PC3 C-d: Ctrl+click picks the layer there)
     if (const auto own_tool = tool_modifiers.find(base); own_tool != tool_modifiers.end()) {
         // (this tool's own setting wins; Shift switches only when a tool says so)
@@ -723,6 +863,10 @@ void PageCanvas::back_from_eraser_end() {
 }
 
 void PageCanvas::tabletEvent(QTabletEvent* event) {
+    if (control_stroke_) {  // (PC5 J-g: the person's pen waits while the channel's draws)
+        event->accept();
+        return;
+    }
     const auto type = event->type();
     last_pressure_ = event->pressure();  // (the vector tool's traces take the pen's pressure)
     // the pen's side button (or its middle one) as chosen in 環境設定: the eyedropper or the hand (the right click's
@@ -765,6 +909,13 @@ void PageCanvas::tabletEvent(QTabletEvent* event) {
             if (work_->release) work_->release(mm, event->modifiers());
         }
         event->accept();  // (no mouse made of it: the work had it once)
+        return;
+    }
+    // (PC5 H-b, the review's P2-1: a guide the mouse would grab here, the pen grabs too — the event left to come as the mouse —,
+    // and its drag goes on so)
+    if (page() != nullptr && is_drawing_tool(tool_) && !space_ &&
+        (guide_drag_ || (type == QEvent::TabletPress && event->button() == Qt::LeftButton && grabbable_guide(event->position(), event->modifiers())))) {
+        event->ignore();
         return;
     }
     const bool eraser_end = event->pointerType() == QPointingDevice::PointerType::Eraser;

@@ -283,6 +283,7 @@ std::optional<std::string> genko_blend(std::string_view upstream) {
 }
 
 std::string upstream_blend(std::string_view genko) {
+    if (genko == "pass_through") return "PassThrough";  // (groups@1, PC5 I-b: a group's 通過)
     for (const auto& [name, g] : kBlends) {
         if (!g.empty() && g == genko) return std::string(name);
     }

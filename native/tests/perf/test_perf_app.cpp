@@ -235,6 +235,12 @@ private slots:
         const qint64 whole_book_ms = opening.elapsed();
         qInfo("the other pages read in %lld ms from the start", static_cast<long long>(whole_book_ms));
         window->choose_tool(QStringLiteral("pen"));
+        if (qEnvironmentVariableIsSet("GENKO_PERF_SCALE")) {  // (PC5 H-a review P2-4: the series at this zoom — screen px a mm)
+            const double scale = qEnvironmentVariable("GENKO_PERF_SCALE").toDouble();
+            if (scale > 0) window->canvas()->zoom_by(scale / window->canvas()->scale());
+            QVERIFY(window->canvas()->wait_rendered(300000));
+            qInfo("zoomed to %.3f screen px a mm: the live line drawn at %d dpi", window->canvas()->scale(), window->canvas()->wanted_dpi());
+        }
         Player player(window.get(), pen_series(minutes));
         player.start();
         QVERIFY(wait_until([&] { return player.finished(); }, static_cast<int>(minutes * 60000 + 300000)));

@@ -23,6 +23,7 @@
 #include "core/filter_kinds.hpp"
 #include "core/ids.hpp"
 #include "core/ink.hpp"
+#include "core/layer_basics.hpp"
 #include "core/lut3d.hpp"
 #include "core/masks.hpp"
 #include "core/ops_util.hpp"
@@ -37,6 +38,7 @@
 #include "render/not_yet_ported.hpp"
 #include "render/ops_smart_parts.hpp"
 #include "render/pcraft_manifest.hpp"
+#include "render/pcraft_production.hpp"
 #include "render/png.hpp"
 #include "render/proof.hpp"
 #include "render/raw.hpp"
@@ -44,6 +46,10 @@
 #include "render/smart_decode.hpp"
 #include "render/zip.hpp"
 #include "render/zstd.hpp"
+#include "core/type_text.hpp"
+#include "render/ops_type.hpp"
+#include "render/psd_text.hpp"
+#include "render/psd_type.hpp"
 
 namespace genko::render::pcraft {
 
@@ -347,6 +353,14 @@ struct Ctx {
     std::set<std::string> filter_notes;                   // (PC4 D7: the notes naming a smart filter, at most kFilterNotesMax)
     std::map<std::string, std::string> nested;            // (a blob of a smart object's file → its contents' id: read once)
     std::map<std::string, std::string> unread;            // (… or why it could not be: tried once)
+    std::map<std::string, std::string> layer_ids;         // (PC5 J-a: a document layer's id → the layer made of it)
+    // (PC5 G-e: the document's text styles, its text layers read as type layers — their styles the book's —, the fonts not
+    // found by their PostScript names)
+    const Json* text_styles = nullptr;
+    psd_type::Sheets type_sheets;
+    bool typed = false;
+    std::vector<std::string> fonts_missing;
+    std::vector<std::pair<std::string, Json>> artboards;  // (PC5 I-c: a top-level group's id and its artboard)
 
     core::Page& page() { return doc.edit_page(0); }
 };
@@ -985,11 +999,15 @@ void note_extras(Ctx& ctx, const Json& m, const std::string& name) {
     if (const Json* blend_if = optional_field(m, "blend_if"); blend_if != nullptr && !(blend_if->is_object() && blend_if->value("ranges", Json::array()).empty())) {
         ctx.notes.name("ブレンド条件（Blend If）は Genko に無いため外しました", name);
     }
-    if (const Json* excluded = optional_field(m, "excluded_channels"); excluded != nullptr && *excluded != Json(0)) {
-        ctx.notes.name("高度な合成のチャンネルの指定は Genko に無いため外しました", name);
+    // (PC5 I-a, blend-channels@1: a group's, or on a page whose mode has no channels to leave out — base_layer reads the rest)
+    const Json& content = field(m, "content", "layer");
+    const bool group = content.is_object() && content.value("kind", Json()) == Json("group");
+    if (const Json* excluded = optional_field(m, "excluded_channels"); excluded != nullptr && *excluded != Json(0) &&
+                                                                        (group || core::blend_channel_count(ctx.doc.page(0)) == 0)) {
+        ctx.notes.name("高度な合成のチャンネルの指定は、グループ・このページの色モードでは使えないため外しました", name);
     }
     if (const Json* label = optional_field(m, "label"); label != nullptr && *label != Json("None")) ctx.notes.name("レイヤーのラベルの色は外しました", name);
-    if (optional_field(m, "video") != nullptr) ctx.notes.name("ビデオレイヤーのコマはタイムライン（PC5）が入るまで読めないため外しました", name);
+    if (optional_field(m, "video") != nullptr) ctx.notes.name("ビデオレイヤーのほかのフレームは .pcraft に無いため、今のフレームをレイヤーにしました", name);  // (PC5 J-e2)
 }
 
 // The settings every layer has: its name, visibility, opacity (its fill opacity with it when it has no effects), blend,
@@ -1003,6 +1021,9 @@ core::Layer base_layer(Ctx& ctx, const Json& m, const std::string& name, const J
     layer.panel_clip = false;
     layer.parent_id = parent;
     layer.visible = boolean(field(m, "visible", "layer"), "layer.visible") && !hidden;
+    if (const Json* id = optional_field(m, "id"); id != nullptr && (id->is_number_unsigned() || id->is_number_integer())) {
+        ctx.layer_ids.emplace(id->dump(), layer.id);  // (PC5 J-a: the layer comps' states name it so)
+    }
     double opacity = std::clamp(number(field(m, "opacity", "layer"), "layer.opacity"), 0.0, 1.0);
     const double fill = std::clamp(number(field(m, "fill_opacity", "layer"), "layer.fill_opacity"), 0.0, 1.0);
     if (fill < 1.0) opacity *= fill;  // (its effects, which the fill opacity spares, are left out)
@@ -1019,11 +1040,32 @@ core::Layer base_layer(Ctx& ctx, const Json& m, const std::string& name, const J
     layer.lock_alpha = all || boolean(field(locks, "transparency", "locks"), "locks.transparency");
     layer.locked = all || boolean(field(locks, "pixels", "locks"), "locks.pixels");
     layer.lock_position = all || boolean(field(locks, "position", "locks"), "locks.position");
+    // (PC5 I-a, layer-locks@1: すべてをロック and the artboards' auto-nesting lock its own; blend-channels@1: the colour
+    // channels it leaves out, bit i the page's channel i — a group's are not: note_extras)
+    layer.lock_all = all;
+    if (const Json* nest = optional_field(locks, "artboard")) layer.lock_nest = boolean(*nest, "locks.artboard");
+    // (the review's P3-7: a value not a whole number of bits — a file that opened before I-a with it — is left out and
+    // said, not refused; bits past the page's channels too)
+    if (const Json* excluded = optional_field(m, "excluded_channels"); excluded != nullptr && *excluded != Json(0)) {
+        const unsigned count = core::blend_channel_count(ctx.doc.page(0));
+        const Json& content = field(m, "content", "layer");
+        const bool group = content.is_object() && content.value("kind", Json()) == Json("group");
+        const bool bits_given = excluded->is_number_integer() &&
+                                (excluded->is_number_unsigned() ? excluded->get<std::uint64_t>() < (std::uint64_t(1) << 62) : excluded->get<std::int64_t>() > 0);
+        if (!bits_given) {
+            ctx.notes.name("高度な合成のチャンネルの指定が読めないため外しました", name);
+        } else if (count != 0 && !group) {  // (a group's, a page of no channels: note_extras says so)
+            const std::int64_t bits = excluded->get<std::int64_t>();
+            std::vector<bool> on(count, true);
+            for (unsigned c = 0; c < count; ++c) on[c] = (bits & (std::int64_t(1) << c)) == 0;
+            if (count < 63 && (bits >> count) != 0) ctx.notes.name("このページの色モードに無いチャンネルの指定は外しました", name);
+            if (std::any_of(on.begin(), on.end(), [](bool v) { return !v; })) layer.blend_channels = std::move(on);
+        }
+    }
     if (const Json* group = optional_field(m, "link_group")) layer.link = "pcraft-" + std::to_string(whole(*group, "layer.link_group"));
     ctx.mask_frame.reset();
-    // (a group's mask is not a folder's: not made — read_layer says so)
-    const bool group = field(field(m, "content", "layer"), "kind", "layer.content") == Json("group");
-    if (const Json* mask = optional_field(m, "mask"); mask != nullptr && !group) layer.mask = mask_of(ctx, *mask, name, ctx.mask_frame);
+    // (groups@1, PC5 I-b: a group's mask as a layer's)
+    if (const Json* mask = optional_field(m, "mask"); mask != nullptr) layer.mask = mask_of(ctx, *mask, name, ctx.mask_frame);
     if (const Json* vm = optional_field(m, "vector_mask")) layer.vector_mask = vector_mask_from(*vm, ctx.mm);
     // (psd-keep@1: the PSD's blocks it carried that a PSD's reader keeps — PC4 F-d's rules: not those this build writes or
     // reads into the layer —, and its PSD layer id with them or when the page keeps what names layers by it)
@@ -1089,6 +1131,41 @@ std::string filter_note(Ctx& ctx, std::string named, std::string plain) {
     if (ctx.filter_notes.size() >= kFilterNotesMax) return plain;
     ctx.filter_notes.insert(named);
     return named;
+}
+
+// PC5 G-e (type@1, design G 2.9): a text layer as a type layer (render/psd_type), when Genko's text holds it — false
+// (with why, said) for its pixels.
+bool as_type(Ctx& ctx, core::Layer& layer, const Json& content, const std::string& name) {
+    try {
+        const std::optional<psd::TextLayer> text = psd_type::from_pcraft(content, ctx.text_styles);
+        if (!text) return false;
+        psd_type::Frame frame;
+        frame.mm_x = ctx.mm;
+        frame.mm_y = ctx.mm;
+        psd_type::Read read = psd_type::read_text(*text, frame, ctx.doc, ctx.type_sheets);
+        for (const std::string& font : read.missing_fonts) {
+            if (std::find(ctx.fonts_missing.begin(), ctx.fonts_missing.end(), font) == ctx.fonts_missing.end()) ctx.fonts_missing.push_back(font);
+        }
+        for (const std::string& note : read.notes) ctx.notes.name(note, name);
+        if (!read.record) {
+            ctx.notes.name("文字レイヤーは画素にしました（" + read.why + "）", name);
+            return false;
+        }
+        type_ops::fit_point_text(*read.record, ctx.doc);
+        layer.kind = core::LayerKind::Type;
+        layer.role = core::LayerRole::Text;
+        layer.panel_clip = false;
+        layer.type = core::type_text::shared_record(std::move(*read.record));
+        ctx.typed = true;
+        return true;
+    } catch (const core::Error& error) {
+        if (error.code() == "image_too_large") throw;
+        ctx.notes.name(std::string("文字レイヤーは画素にしました（文字として読めません: ") + error.what() + "）", name);
+        return false;
+    } catch (const std::exception& error) {  // (its attributes or size what no type layer takes; JSON of another type — review P3-4)
+        ctx.notes.name(std::string("文字レイヤーは画素にしました（文字として読めません: ") + error.what() + "）", name);
+        return false;
+    }
 }
 
 bool as_pixels(Ctx& ctx, core::Layer& layer, const Json* cache, const std::string& name) {
@@ -1426,19 +1503,17 @@ void read_layer(Ctx& ctx, const Json& m, const Json& parent, bool hidden, std::v
     ctx.load.layer();
     core::Layer layer = base_layer(ctx, m, name, parent, hidden);
     if (kind == "group") {
+        // (groups@1, PC5 I-b, the user's decision 2: a group drawn as PhotoCraft draws it — its visibility, opacity, blend
+        // (通過 among them), mask, vector mask and clipping; what is in it keeps its own visibility)
         layer.kind = core::LayerKind::Folder;
-        if (layer.opacity < 1.0 || (layer.blend != "normal" && blend_from(m["blend"]) != "PassThrough") || optional_field(m, "mask") != nullptr ||
-            layer.vector_mask) {
-            ctx.notes.name("フォルダーの不透明度・描画モード・マスクは Genko のフォルダーに無いため外しました", name);
+        layer.group = true;
+        if (blend_from(m["blend"]) == "PassThrough") layer.blend = "pass_through";
+        // (PC5 I-c, artboards@1: a top-level group's artboard — opened as a page of its own; a nested one's as a group)
+        if (const Json* board = optional_field(content, "artboard"); board != nullptr && !board->is_null()) {
+            if (ctx.groups == 0 && !parent.is_string()) ctx.artboards.emplace_back(layer.id, *board);
+            else ctx.notes.name("入れ子のアートボードは普通のグループにしました", name);
         }
-        if (layer.clip) ctx.notes.name("フォルダーのクリッピングは Genko のフォルダーに無いため外しました", name);
-        if (optional_field(content, "artboard") != nullptr) ctx.notes.name("アートボードは PC5 で入るまで普通のフォルダーにしました", name);
-        layer.opacity = 1.0;
-        layer.blend = "normal";
-        layer.mask.reset();
-        layer.vector_mask.reset();
-        layer.clip = false;
-        const bool shut = !layer.visible;
+        const bool shut = hidden;
         if (ctx.groups >= kGroupsDeepMax) {
             ctx.notes.name("グループの入れ子が深すぎるため、中のレイヤーを外しました（" + std::to_string(kGroupsDeepMax) + " 段まで）", name);
         } else {
@@ -1486,11 +1561,11 @@ void read_layer(Ctx& ctx, const Json& m, const Json& parent, bool hidden, std::v
         layer.fill = std::move(fill);
         layer.opacity = std::round(layer.opacity * alpha * 1000.0) / 1000.0;
     } else if (kind == "text") {
-        if (!as_pixels(ctx, layer, optional_field(content, "cache"), name)) {
+        if (as_type(ctx, layer, content, name)) {  // (PC5 G-e: a type layer)
+        } else if (!as_pixels(ctx, layer, optional_field(content, "cache"), name)) {
             ctx.notes.name("文字レイヤーは画素を持たないため外しました（文字として読めません）", name);
             return;
         }
-        ctx.notes.name("文字レイヤーは画素にしました（文字として編集はできません）", name);
     } else if (kind == "shape") {
         std::optional<core::vector::ShapePart> part;
         try {
@@ -1734,6 +1809,7 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
         }
     }
     std::vector<core::Layer> layers;
+    ctx.text_styles = optional_field(d, "text_styles");  // (PC5 G-e: what its text layers' styles are)
     read_layers(ctx, field(d, "layers", "document"), Json(nullptr), false, layers);
     ctx.page().layers = std::move(layers);
 
@@ -1972,27 +2048,45 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
     }
     ctx.page().native_source = std::move(source);
 
-    // what Genko has no place for yet (PC5's), said
-    const auto said_of = [&](const char* key, const char* what) {
-        if (const Json* v = optional_field(d, key); v != nullptr && !empty_value(*v)) ctx.notes.add(std::string(what) + "は Genko に無いため外しました");
-    };
-    said_of("layer_comps", "レイヤーカンプ");
-    said_of("notes", "注釈");
-    said_of("slices", "スライス");
-    said_of("timeline", "タイムライン");
-    if (const Json* variables = optional_field(d, "variables"); variables != nullptr && !empty_value(*variables)) ctx.notes.add("変数とデータセットは Genko に無いため外しました");
-    if (const Json* measurement = optional_field(d, "measurement")) {  // (its scale alone, as every document has one: nothing to say)
-        const Json* counts = optional_field(*measurement, "count_groups");
-        const Json* ruler = optional_field(*measurement, "ruler");
-        if ((counts != nullptr && !empty_value(*counts)) || ruler != nullptr) ctx.notes.add("計測（カウント・ものさし）は Genko に無いため外しました");
+    // PC5 節 J (render/pcraft_production): the layer comps, notes, slices, timeline, variables (節 I) and measuring onto the
+    // page — each by its group's row; one not read yet left out and said, in the order PC4 F-f said them
+    {
+        pcraft_production::ReadContext production;
+        production.page = &ctx.page();
+        production.mm = ctx.mm;
+        production.say = [&ctx](std::string note) { ctx.notes.add(std::move(note)); };
+        production.layers = ctx.layer_ids;  // (PC5 J-a)
+        if (ctx.load.limits().depth == 0) {  // (PC5 I-d: the variables, the book's — a .pcraft inside a smart object's left out, said)
+            production.book = &ctx.doc;
+            production.beside = ctx.load.limits().beside;
+        }
+        pcraft_production::read(d, production);
     }
-    if (const Json* styles = optional_field(d, "text_styles")) {  // (the basic paragraph style every document has: nothing to say)
+    // (PC5 G-e: its character and paragraph styles the book's — those no text layer took too —; the basic paragraph style
+    // every document has not read: Genko's Basic Paragraph stays the book's)
+    if (const Json* styles = optional_field(d, "text_styles")) {
         const Json* character = optional_field(*styles, "character");
         const Json* paragraph = optional_field(*styles, "paragraph");
-        if ((character != nullptr && !empty_value(*character)) || (paragraph != nullptr && !empty_value(*paragraph)) || optional_field(*styles, "psd_raw") != nullptr) {
-            ctx.notes.add("文字スタイル・段落スタイルは Genko に無いため外しました");
+        if ((character != nullptr && !empty_value(*character)) || (paragraph != nullptr && !empty_value(*paragraph))) {
+            try {
+                if (const std::optional<psd::TextLayer> sheets = psd_type::from_pcraft(Json{{"text", ""}}, styles)) {
+                    psd_type::Frame frame;
+                    frame.mm_x = frame.mm_y = ctx.mm;
+                    psd_type::take_sheets(*sheets, frame, ctx.doc, ctx.type_sheets);
+                }
+            } catch (const std::exception&) {
+                ctx.notes.add("文字スタイル・段落スタイルが読めないため外しました");
+            }
+            if (ctx.type_sheets.full) ctx.notes.add("文字スタイル・段落スタイルが 512 を超えるため、残りは読みませんでした");
         }
+        if (optional_field(*styles, "psd_raw") != nullptr) ctx.notes.add("文字スタイルの PSD の元の設定は Genko に無いため外しました");
     }
+    if (!ctx.fonts_missing.empty()) {
+        std::string listed;
+        for (std::size_t i = 0; i < ctx.fonts_missing.size() && i < 10; ++i) listed += (listed.empty() ? "" : "、") + ctx.fonts_missing[i];
+        ctx.notes.add("同梱の書体に無い書体は、名前を残して既定の書体で描きます（" + listed + (ctx.fonts_missing.size() > 10 ? "、…" : "") + "）");
+    }
+    if (ctx.typed || !ctx.type_sheets.added.empty()) core::type_text::add_feature(ctx.doc);
 
     // the book as a book must be (what an op leaves is checked so too)
     try {
@@ -2022,6 +2116,7 @@ Read build(Loader& load, const Json& manifest, std::string_view title, int depth
     out.doc = std::move(ctx.doc);
     out.notes = ctx.notes.take();
     out.unpacked = load.tally().unpacked;
+    out.artboards = std::move(ctx.artboards);
     return out;
 }
 

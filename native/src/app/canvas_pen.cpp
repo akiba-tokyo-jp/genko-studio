@@ -337,7 +337,7 @@ bool PageCanvas::path_release() {
 
 void PageCanvas::draw_paths(QPainter& painter) const {
     const bool tool = is_path_tool(tool_);
-    if (!tool && !show_target_path && pen_knots_.empty()) return;
+    if (!tool && !shows(show_target_path) && pen_knots_.empty()) return;  // (PC5 H-b: エクストラ too)
     const auto draw_subpath = [&](const vec::Subpath& s, const QColor& colour, double width) {
         QPolygonF line;
         for (const QPointF& p : outline(s)) line << pt(p.x(), p.y());
@@ -364,7 +364,7 @@ void PageCanvas::draw_paths(QPainter& painter) const {
         }
         painter.setBrush(Qt::NoBrush);
     };
-    if (tool || show_target_path) {
+    if (tool || shows(show_target_path)) {
         std::optional<vec::Path> path = path_drag_ ? path_dragged() : target_path_now();
         if (path) {
             for (std::size_t i = 0; i < path->subpaths.size(); ++i) {

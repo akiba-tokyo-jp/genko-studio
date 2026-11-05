@@ -17,6 +17,8 @@
 #include <QStandardItemModel>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
 #include "app/ask.hpp"
 #include "app/layer_panel.hpp"
 #include "app/plugins_dialog.hpp"
@@ -24,6 +26,7 @@
 #include "app/theme.hpp"
 #include "app/timeline.hpp"
 #include "service/wording.hpp"
+#include "core/anim.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "render/movie.hpp"
@@ -35,8 +38,40 @@ namespace genko::app {
 using core::Json;
 
 void MainWindow::build_anim_actions() {
-    make("act_timeline", QStringLiteral("アニメーション（タイムライン）"), [this] { show_dock(QStringLiteral("タイムライン")); }, {},
-         QStringLiteral("このページを短いアニメーションにします: セル・タイムライン・オニオンスキン・カメラワーク・書き出し"));
+    // (PC5 J-e1, 節 J 1.2: Photoshop's ビデオタイムラインを作成 — its id kept, the old name in preferences::renamed(); the panel's
+    // switch is ウィンドウ → タイムライン): the panel shown, and the page made an animation when it is not one yet
+    make("act_timeline", QStringLiteral("ビデオタイムラインを作成"), [this] {
+        show_dock(QStringLiteral("タイムライン"));
+        const core::Page* page = current_page();
+        if (timeline_ != nullptr && page != nullptr && !core::anim::is_animation(*page)) timeline_->start_animation();
+    }, {}, QStringLiteral("このページを短いアニメーションにします: セル・タイムライン・オニオンスキン・カメラワーク・書き出し"));
+    // (PC5 J-e1, timeline.nextFrame・previousFrame・setFrame: the frame shown moved — the window's, not the book's. Their keys
+    // work while the タイムライン panel has the focus: ← →, Home End, Shift with ← → to the work area's ends — the same in
+    // both key sets, never the canvas's arrows)
+    const auto go = [this](const char* where) {
+        return [this, where] {
+            if (timeline_ != nullptr) timeline_->go(QString::fromLatin1(where));
+        };
+    };
+    make("act_next_frame", QStringLiteral("次のフレーム"), go("next"), QList<QKeySequence>{QKeySequence(Qt::Key_Right)},
+         QStringLiteral("タイムラインの次のフレームを見ます"));
+    make("act_previous_frame", QStringLiteral("前のフレーム"), go("previous"), QList<QKeySequence>{QKeySequence(Qt::Key_Left)},
+         QStringLiteral("タイムラインの前のフレームを見ます"));
+    make("act_first_frame", QStringLiteral("最初のフレーム"), go("first"), QList<QKeySequence>{QKeySequence(Qt::Key_Home)},
+         QStringLiteral("タイムラインの最初のフレームを見ます"));
+    make("act_last_frame", QStringLiteral("最後のフレーム"), go("last"), QList<QKeySequence>{QKeySequence(Qt::Key_End)},
+         QStringLiteral("タイムラインの最後のフレームを見ます"));
+    make("act_work_start", QStringLiteral("作業範囲の開始点へ移動"), go("work_start"), QList<QKeySequence>{QKeySequence(Qt::SHIFT | Qt::Key_Left)},
+         QStringLiteral("作業範囲の最初のフレームを見ます（作業範囲が無ければ最初のフレーム）"));
+    make("act_work_end", QStringLiteral("作業範囲の終了点へ移動"), go("work_end"), QList<QKeySequence>{QKeySequence(Qt::SHIFT | Qt::Key_Right)},
+         QStringLiteral("作業範囲の最後のフレームを見ます（作業範囲が無ければ最後のフレーム）"));
+    make("act_go_to_frame", QStringLiteral("フレームへ移動…"), [this] {
+        if (timeline_ != nullptr) timeline_->ask_frame();
+    }, {}, QStringLiteral("番号を決めて、そのフレームを見ます"));
+    // (PC5 J-e1, file.export.renderVideo: ファイル → 書き出し ▸ and the timeline's menu)
+    make("act_render_video", QStringLiteral("ビデオをレンダリング…"), [this] {
+        if (timeline_ != nullptr) timeline_->export_animation();
+    }, {}, QStringLiteral("アニメーションのページを、動く画像（GIF・WebP・APNG・MP4）か連番 PNG に書き出します（範囲・大きさ・フレームレート）"));
     make("act_timelapse", QStringLiteral("タイムラプスを記録する"), [this] { toggle_timelapse(action("act_timelapse")->isChecked()); }, {},
          QStringLiteral("保存のたびに、変わったページの小さな絵を残します（制作過程の動画にできます）"), true);
     make("act_timelapse_export", QStringLiteral("タイムラプスを書き出す…"), [this] { export_timelapse(); }, {},
@@ -46,11 +81,24 @@ void MainWindow::build_anim_actions() {
         std::error_code ec;
         std::filesystem::create_directories(render::plugins::folder(), ec);
         QDesktopServices::openUrl(QUrl::fromLocalFile(QString::fromStdString(core::path_to_utf8(render::plugins::folder()))));
-    }, {}, QStringLiteral("フィルターのプラグイン（.py）を入れるフォルダー"));
-    make("act_plugin_settings", QStringLiteral("プラグインの設定…"), [this] {
+    }, {}, QStringLiteral("フィルターのプラグイン（.wasm・.py・プログラムのフォルダー）を入れるフォルダー"));
+    // (PC5 J-f, edit.preferences.plugIns: Photoshop's 環境設定 ▸ プラグイン… — the old プラグインの設定…, preferences::renamed())
+    make("act_plugin_settings", QStringLiteral("プラグイン…"), [this] {
         PluginsDialog dialog(this);
         if (ask::exec(&dialog) == QDialog::Accepted) follow_filter_menu();  // (フィルター → プラグイン: the plugins chosen)
-    }, {}, QStringLiteral("プラグインを使うか、どの Python で、どれを動かしてよいか"));
+    }, {}, QStringLiteral("プラグインを使うか、追加のプラグインフォルダー、どの Python で、どれを動かしてよいか"));
+    // (PC5 J-f, plugin.install: フィルター → プラグイン ▸ プラグインをインストール… — copied into the plugins' folder, not chosen)
+    make("act_plugin_install", QStringLiteral("プラグインをインストール…"), [this] {
+        const QString path = ask::open_path(this, QStringLiteral("プラグインをインストール"), QStringLiteral("プラグイン (*.wasm *.py)"));
+        if (path.isEmpty()) return;
+        try {
+            const std::string key = render::plugins::install(core::path_from_utf8(path.toStdString()));
+            flash(QStringLiteral("プラグイン「%1」を入れました。動かすには 編集 → 環境設定 → プラグイン… で選びます").arg(QString::fromStdString(key)), 6000);
+        } catch (const std::exception& error) {
+            ask::warning(this, QStringLiteral("プラグインをインストール"), wording::error(QString::fromUtf8(error.what())));
+        }
+    }, {},
+         QStringLiteral("WebAssembly のプラグイン（.wasm）か Python のプラグイン（.py）をプラグインのフォルダーに入れます（動かすには 環境設定 → プラグイン… で選びます）"));
 }
 
 void MainWindow::build_anim_dock() {
@@ -64,6 +112,24 @@ void MainWindow::build_anim_dock() {
     navigator_dock_->raise();
     view_menu_->addAction(timeline_dock_->toggleViewAction());
     timeline_dock_->hide();  // (for some work only: the menu brings it)
+    // (PC5 J-e1) the moving commands' keys while the panel has the focus only (the canvas keeps its arrows), the panel's menu
+    // and buttons, and ビデオをレンダリング… in ファイル → 書き出し ▸ right after パスを Illustrator へ… (Photoshop's order)
+    for (const char* name : {"act_next_frame", "act_previous_frame", "act_first_frame", "act_last_frame", "act_work_start", "act_work_end"}) {
+        QAction* act = action(QString::fromLatin1(name));
+        act->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+        removeAction(act);
+        timeline_->addAction(act);
+    }
+    timeline_->build_menu();
+    if (export_menu_ != nullptr) {
+        const QList<QAction*> exports = export_menu_->actions();
+        const auto paths = std::find(exports.begin(), exports.end(), action(QStringLiteral("act_export_paths_ai")));
+        if (paths != exports.end() && std::next(paths) != exports.end()) {
+            export_menu_->insertAction(*std::next(paths), action(QStringLiteral("act_render_video")));
+        } else {
+            export_menu_->addAction(action(QStringLiteral("act_render_video")));
+        }
+    }
 }
 
 std::int64_t MainWindow::current_frame(const core::Page* page) const {
@@ -75,7 +141,7 @@ std::int64_t MainWindow::current_frame(const core::Page* page) const {
 
 void MainWindow::show_dock(const QString& title) {
     for (QDockWidget* dock : findChildren<QDockWidget*>()) {
-        if (dock->windowTitle() == title) {
+        if (dock->windowTitle() == title || dock->objectName() == title) {  // (PC5 H-0: or its name before Photoshop's)
             dock->show();
             dock->raise();
         }

@@ -25,6 +25,8 @@ foreach(_entry IN LISTS _genko_studio_data)
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_file}")
 endforeach()
 configure_file(studio_data.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/studio_data.cpp" @ONLY)
+# PC5 G-d: the English word list スペルチェック reads (SCOWL size 50, PhotoCraft v0.2.0's; its licence beside it)
+qt_add_resources(GENKO_SPELL_RESOURCES "${GENKO_SOURCE_ROOT}/resources/genko_spell.qrc")
 
 genko_library(genko_service
   SOURCES
@@ -65,6 +67,20 @@ genko_library(genko_service
     studio_output.cpp
     tool_table.cpp
     human_service.cpp
+    # PC5 I-0 (自動処理の土台: オートアクションの置き場, the steps and the runner, the script events' table)
+    actions.cpp
+    automate.cpp
+    script_events.cpp
+    # PC5 G-d (スペルチェック: the English dictionary and the notation table)
+    spell.cpp
+    # PC5 I-h (HDR Pro に統合・写真の切り抜きと角度補正: new books of exposures and of a scan's photos)
+    automate_photos.cpp
+    # PC5 I-g (ファイルをスタックとして読み込み・統計・Photomerge: new books of pictures)
+    automate_merge.cpp
+    # PC5 J-g (制御チャンネル: the tokens of tokens.json — moved from api/ for the app —, the channel's rules)
+    tokens.cpp
+    control.cpp
+    ${GENKO_SPELL_RESOURCES}
     "${CMAKE_CURRENT_BINARY_DIR}/studio_data.cpp"
   PUBLIC_DEPS genko_formats genko_render_ops genko_render genko_studio genko_storage genko_core Qt6::Core
-  PRIVATE_DEPS Qt6::Network)
+  PRIVATE_DEPS Qt6::Network ZLIB::ZLIB)

@@ -1,11 +1,14 @@
 #pragma once
 
+#include <QColor>
 #include <QElapsedTimer>
 #include <QImage>
 #include <QPointF>
 #include <QPointer>
+#include <QRectF>
 #include <QRegion>
 #include <QTimer>
+#include <QTransform>
 #include <QVector>
 #include <QWidget>
 
@@ -23,9 +26,12 @@
 #include "app/pen.hpp"
 #include "app/tiles.hpp"
 #include "core/geometry.hpp"
+#include "core/guide_layout.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
+#include "core/slice_layout.hpp"
 #include "core/snap.hpp"
+#include "core/units.hpp"
 #include "render/dabs/dynamics.hpp"
 
 class QKeyEvent;
@@ -81,7 +87,10 @@ class PageCanvas : public QWidget {
 
 public:
     static constexpr double kMinScale = 0.3;
+    // The most the view zooms in on any page (screen px a mm); on a page of a finer resolution, as far as its pixels at
+    // kMaxPixelZoom times (PC5 H-a, 画素の段: Photoshop's 3200 %) — max_scale().
     static constexpr double kMaxScale = 12.0;
+    static constexpr double kMaxPixelZoom = 32.0;
     static constexpr int kHandlePx = 7;
 
     explicit PageCanvas(QWidget* parent = nullptr);
@@ -362,6 +371,25 @@ public:
     std::optional<std::string> selected_line_id;
     // The text tool draws a balloon's outline by hand (フキダシを手で描く) instead of placing a line where clicked.
     bool balloon_pen = false;
+    // PC5 G-a (type@1): the text tools — テキスト ("text": down or across as its options say) and 横書き文字ツール
+    // ("text_h": across). What they make (the window's, from its options): lines, or type layers — a click a point text
+    // (typePointRequested), a drag a box text (typeBoxRequested). A click on a type layer's text, with either, types over
+    // it (typeLayerClicked).
+    static bool is_text_tool(const QString& tool);
+    bool type_layers = false;
+    // The type layer chosen (the window's target layer, when it is one): its box (mm; a point text's round its letters),
+    // its matrix (none: upright), whether a box text's letters run past its box (Photoshop's ⊞ at its foot) — drawn with
+    // the text tools and the move tool.
+    struct TypeFrame {
+        std::string layer_id;
+        QRectF box;
+        std::optional<std::array<double, 6>> transform;
+        bool box_text = false;
+        bool overflow = false;
+    };
+    std::optional<TypeFrame> type_frame;
+    // The topmost type layer shown on the page whose text is at this point (mm), or none.
+    std::optional<std::string> hit_type_layer(double x_mm, double y_mm) const;
     // The page's lines (Python's canvas.lines: the book's story for the page shown).
     std::vector<const core::StoryLine*> lines() const;
     // Type a line at this point of the page (Python's open_editor): on_done(the words, or nothing) when finished. An
@@ -386,6 +414,18 @@ public:
     void stroke_applied(const std::string& id);
     // The line could not be applied: its live picture goes.
     void stroke_dropped();
+    // (PC5 J-g, SPEC.md PROD-01「制御チャンネル」's pen) A line given from outside the window's input: points on the page
+    // (mm) and the pen's pressure (0..1), drawn with the stroke tool in hand as the mouse draws one, never a click of any
+    // other tool. control_press starts it (false: no page, not a stroke tool, or a line is being drawn already),
+    // control_move adds a point, control_release lets it go (strokeCommitted, as a line let go), control_cancel throws it
+    // away (nothing committed).
+    bool control_press(const QPointF& mm, double pressure);
+    void control_move(const QPointF& mm, double pressure);
+    void control_release();
+    void control_cancel();
+    bool control_drawing() const { return control_stroke_; }
+    // (PC5 J-g, the review's P3-11) The person draws a line or moves the view now (the channel changes no view meanwhile).
+    bool person_drawing() const { return (!stroke_.empty() && !control_stroke_) || panning_; }
 
     // --- the view -------------------------------------------------------------------------------------------
     double scale() const { return view_.scale; }
@@ -396,30 +436,105 @@ public:
     bool flipped_vertical() const { return view_.flipped_v; }
     void fit_page();
     void zoom_by(double factor, std::optional<QPointF> anchor = std::nullopt);
+    // プリントサイズ: the paper as large as it is (at 96 dpi, the screen Photoshop's print size assumes on Windows — PC5 H-b:
+    // 環境設定 → 単位・定規 → 画面の解像度, print_dpi).
     void actual_size();
+    double print_dpi = 96;
+    // PC5 H-a (the user's decision 11): the zoom in the page's pixels — 100 % one page pixel a screen pixel (the screen's
+    // own pixels: devicePixelRatio counted), 200 % two. The scale (screen px a mm) of 100 %.
+    double pixel_scale() const;
+    // 100%, 200%: the page's pixels at that zoom about the middle of the view.
+    void actual_pixels(double percent = 100.0);
+    // The most the view zooms in here (kMaxScale, or the page's pixels at kMaxPixelZoom times).
+    double max_scale() const;
+    // レイヤーを画面サイズに合わせる (and the hand and zoom tools' 画面にフィット): the view zoomed and centred on a box of the
+    // page (mm), with a margin.
+    void fit_box(const QRectF& box_mm);
     void center_on(double x_mm, double y_mm);
     void rotate_view(double degrees);
     void set_rotation(double degrees);
     void flip_view(std::optional<bool> on = std::nullopt);
     void flip_view_vertical(std::optional<bool> on = std::nullopt);
     void reset_view();
+    // The zoom in the page's pixels (decision 11), rounded, and as it is.
     void set_zoom_percent(double percent);
     int zoom_percent() const;
+    double zoom_percent_exact() const;
     void zoom_to_rect(double x0, double y0, double x1, double y1);
     // Change the view at once and draw the way there over a moment (unless motion is reduced).
     void glide(const std::function<void()>& change);
     ViewState view_state() const { return view_; }
     void set_view_state(const ViewState& state);
+    // The view moved by this much on the screen (unturned: as a drag of the hand moves it).
+    void pan_by(const QPointF& moved);
+    // ウィンドウ → アレンジ (PC5 H-c): the hand and the zoom tool used here with Shift held (a drag, a click — not the wheel:
+    // Shift+wheel scrolls across here alone, as before) — or, from their options, すべてのウィンドウを
+    // スクロール (the hand tool) and すべてのウィンドウをズーム (the zoom tool) — do the same in the window's other panes, and with
+    // the options in the other windows too (handUsed). A view-only canvas (a pane beside the one in front, app/pane_view)
+    // takes no tool and keeps only the whole page's tiles (節 H 4.5).
+    bool zoom_all = false;
+    bool scroll_all = false;
+    bool view_only() const { return view_only_; }
+    // (PC5 H-c review P3-1) Space held here now (a pane beside this canvas pans with it, as the canvas does).
+    bool space_held() const { return space_; }
+    // (PC5 H-c review P2-1) What a tool left half done — a transform's or warp's box, the crop box, the pen's anchors, a
+    // figure's or a polygon selection's corners, a ruler being placed, a line being drawn — let go (another book comes to
+    // the front: never finished on it); half_done: any of them, or words being typed, here now; finish_half_done: each
+    // finished as Enter finishes it (its signal to the window, on the book it was begun on).
+    void let_go();
+    bool half_done() const;
+    void finish_half_done();
     // A point on the widget as page mm (through the view's turn and mirror), and back.
     QPointF to_mm(const QPointF& widget) const;
     QPointF to_widget(const QPointF& mm) const;
     // The part of the page in sight (mm).
     QRectF seen_mm() const;
-    // The resolution that matches the zoom (one page pixel per screen pixel, up to the detail), and the whole page's.
+    // The resolution that matches the zoom (one tile pixel per screen pixel), and the whole page's. Up to the page's own
+    // (画素の段, PC5 H-a): zoomed in past it, the tiles are the page's pixels, laid enlarged.
     int wanted_dpi() const;
+    // Zoomed in past the page's own pixels (画素の段): they show as squares.
+    bool pixel_step() const;
+    // ピクセルグリッド (view.show.pixelGrid, PC5 H-a): the grid of the layer drawn on (grid_layer: a paint or precise layer's
+    // pixels, a pen or vector layer's — or none — the page's resolution) drawn over the page once a cell of it is
+    // kPixelGridPx screen pixels or more (Photoshop's 500 % and up), turning with the view.
+    bool show_pixel_grid = false;
+    std::optional<std::string> grid_layer;
+    static constexpr double kPixelGridPx = 5.0;
+    int pixel_grid_dpi() const;
+    // (a cell of it, mm across and down)
+    QSizeF pixel_grid_cell_mm() const;
+    bool pixel_grid_shown() const;
+    // ピクセルアートのプレビュー (view.pixelArtPreview): the page's tiles laid nearest, never smoothed.
+    void set_pixel_art(bool on);
+    bool pixel_art() const;
+    // ピクセル縦横比を補正 (view.pixelAspectRatioCorrection, PC5 H-f, pixel-aspect@1): the page's pixel aspect ratio shown — the
+    // view widened (or narrowed) across by it, about the middle of the canvas, under its turn and mirror —; off: the pixels
+    // square. The view's only: to_mm and to_widget go through it, so every tool still works in the page's own square pixels.
+    // shown_aspect: the factor across now (1: square, or off).
+    void set_pixel_aspect_correction(bool on);
+    bool pixel_aspect_correction() const { return aspect_correction_; }
+    double shown_aspect() const;
+    // ズームツール's options (PC5 H-a): ズームアウト (a click zooms out, Alt in) and スクラブズーム (dragging left and right
+    // zooms out and in about the point pressed, instead of a box).
+    bool zoom_out_mode = false;
+    bool scrubby_zoom = false;
     int base_dpi() const { return std::min(wanted_dpi(), PageRenderer::kBaseDpi); }
     // A two-finger gesture: spread to zoom about the fingers, twist to turn the view, slide to move.
     void pinch(double factor, double turn_deg, const QPointF& centre, const QPointF& moved);
+
+    // --- 環境設定 (PC5 H-e: 一般, インターフェイス, ツール, 拡張コントロール — app/preferences_panes' apply_panes) ---------------------
+    bool wheel_zooms = false;      // スクロールホイールでズーム (Shift with the wheel still scrolls across)
+    bool animated_zoom = true;     // アニメーションズーム (and 動きを減らす: none)
+    bool zoom_to_center = false;   // クリックした点を中央にズーム (the zoom tool's click)
+    bool flick_panning = true;     // フリックパンを有効にする (the page slides on when let go moving)
+    bool transform_values = true;  // 変形値を表示 (the box's size, its turn or its move by the pointer while it is dragged)
+    bool overscroll = true;        // オーバースクロール (off: the page never scrolled past its edges, centred when smaller)
+    bool touch_gestures = true;    // タッチジェスチャーを有効にする (a touch screen's two fingers)
+    bool pinch_zoom = true;        // トラックパッドのピンチでズーム
+    bool trackpad_rotate = false;  // トラックパッドで表示を回転
+    QString page_border = QStringLiteral("dropShadow");  // 境界線: dropShadow | line | none
+    // (overscroll off: the pan brought back so that the page covers the view, or sits in its middle when smaller)
+    void keep_in_view();
 
     // --- 環境設定 (M6: Python's canvas.pen_button, cursor_kind, modifier_tools, tool_modifiers) ----------------------
     // The pen's side button (or its middle one): menu (the right click's menu) | picker (スポイト) | hand (moves the view).
@@ -449,6 +564,11 @@ public:
     // canvas keeps the events, the cursor and the focus). Off: drawn by the processor again.
     void use_gpu(bool on);
     bool gpu() const { return gpu_surface_ != nullptr; }
+    // (PC5 H-a) the card could not draw (its context not made, or lost): the canvas draws by the processor again and
+    // says so (gpuFailed)
+    void gpu_failed();
+    // GPU の記憶 (環境設定 ui/gpu_memory_mb, MB): the most the page's tiles take on the card (PageRenderer's texture budget).
+    static std::size_t gpu_budget_bytes();
     QWidget* gpu_surface() const { return gpu_surface_; }
     // (every repaint asked of the canvas reaches the surface too)
     void update();
@@ -483,6 +603,139 @@ public:
     bool has_work() const { return work_ != nullptr; }
     bool work_remove() { return work_ && work_->remove && work_->remove(); }
 
+    // (PC5 J-0, SPEC.md PROD-01「エクストラ」) What the production draws over the page it shows — the slices (J-b), the notes
+    // (J-c), the count marks and the ruler tool's line (J-d1) —: one painter a key (the 表示 → 表示・非表示 ▸ item that shows
+    // it: "slices", "notes", "count", "ruler"), each given the page and the view (ExtraView): lines and words the same size at
+    // any zoom (drawn in the screen's pixels). Drawn after the selection, before the tools' handles; not on the pictures
+    // written or printed. `extras_shown` is エクストラ's master switch (節 H's H-b: it hides them all), show_extra one's own.
+    // The painter turns and flips with the view (as the guides do: a word drawn on it is mirrored while the view is flipped —
+    // a painter drawing words draws them at `at`'s point with the painter's turn undone, if they must read). Each canvas of
+    // the app has its own painters (a new window's canvas too: the group adds them where the canvas is made).
+    struct ExtraView {
+        QTransform at;       // a place of the page (mm) → where the painter draws it
+        double per_mm = 1;   // the screen's pixels a mm
+        QRectF seen_mm;      // the part of the page in sight (mm): draw only what meets it (256 groups × 10000 marks)
+        QRegion painting;    // the part of the canvas painted again (the canvas's own pixels; empty: all of it)
+    };
+    struct CanvasExtra {
+        QString key;
+        std::function<void(QPainter& painter, const core::Page& page, const ExtraView& view)> paint;
+    };
+    void add_extra(CanvasExtra extra);  // (a key added again: its painter in place of the one before)
+    void show_extra(const QString& key, bool shown);
+    bool extra_shown(const QString& key) const;
+    std::vector<QString> extra_keys() const;
+    bool extras_shown = true;
+    // (PC5 J-c, 注釈 — annotations@1, app/canvas_notes.cpp) The notes' painter (the extra "notes": each note's mark in its
+    // colour where it lies, its box of text beside it while it is open — words upright and the same size at any zoom),
+    // the note the 注釈 panel shows (its mark drawn chosen), and the 注釈ツール ("note"): a click on a mark chooses it and
+    // a drag moves it (noteChosen, noteMoved), a double click opens or closes its box (noteOpened), a click elsewhere puts
+    // a new note there (noteRequested). A mark's place on the canvas (none: not in sight) and the note under a point of it.
+    void paint_notes(QPainter& painter, const core::Page& page, const ExtraView& view) const;
+    QString chosen_note;
+    std::optional<QString> note_at(const QPointF& widget) const;
+    // (PC5 J-d1, 計測 — measure@1, app/canvas_measure.cpp) The count marks' painter (the extra "count": each visible group's
+    // marks — a dot of its colour and size, its number beside it in its label size —, the same size at any zoom) and the
+    // ものさしツール's line (the extra "ruler", while the ものさしツール is in hand: the line, its ends, the protractor's
+    // arm and the angle between). The ものさしツール ("measure"): a drag draws a line (Shift: by 45°), a drag of an end
+    // moves it, of the line moves it whole, Alt+drag from an end draws the protractor's arm (rulerMoving while it goes,
+    // rulerDrawn when let go). The カウントツール ("count"): a click puts a mark of the active group (countRequested), Alt+
+    // click takes the mark there away (countRemoved), a drag moves one (countMoved). The line in hand (none: the page's).
+    void paint_count(QPainter& painter, const core::Page& page, const ExtraView& view) const;
+    void paint_ruler(QPainter& painter, const core::Page& page, const ExtraView& view) const;
+    std::optional<core::RulerLine> ruler_in_hand() const;
+    // A line the page could not take (the op refused: the page locked, the book read-only): this window's alone, drawn and
+    // read until another line is drawn, the page changes or 消去 (none: the page's).
+    std::optional<core::RulerLine> ruler_here;
+    std::string ruler_here_page;  // (the page it was drawn on: let go on another)
+    // The count mark under a point of the canvas (its group and index; none: no visible one within 6 screen pixels).
+    std::optional<std::pair<std::size_t, std::size_t>> count_at(const QPointF& widget) const;
+    // (PC5 J-b, スライス — slices@1, app/canvas_slices.cpp) The slices' painter (the extra "slices": each slice's outline in
+    // slice_colour and its number in a badge — show_slice_numbers —, the auto ones dotted while a slice tool is in hand,
+    // the chosen one orange with its handles) and the two tools: the スライスツール ("slice": a drag draws a user slice —
+    // sliceDrawn —, Shift square, slice_style 1 縦横比を固定 · 2 固定サイズ, a click chooses the slice there) and the スライス
+    // 選択ツール ("slice_select": a click chooses — sliceChosen —, a drag moves the chosen one, a handle sizes a user slice —
+    // sliceMoved —, a double click asks its options — sliceOptionsAsked). lock_slices (スライスをロック): no gesture changes
+    // them (slicesLocked). The page's slices now come from the window (slice_view: made again when the page changes).
+    struct SliceView {
+        std::vector<core::ResolvedSlice> slices;
+        core::SliceGrid grid;
+        std::vector<std::int64_t> order;  // the stored slices' ids in the list's order (a later one on top)
+    };
+    std::function<const SliceView*()> slice_view;
+    void paint_slices(QPainter& painter, const core::Page& page, const ExtraView& view) const;
+    std::optional<int> chosen_slice;  // its number as shown
+    bool lock_slices = false;
+    bool show_slice_numbers = true;
+    bool hide_auto_slices = false;
+    bool snap_slices = true;  // (表示 → スナップ先 → スライス: their edges)
+    QColor slice_colour = QColor(0x38, 0xb5, 0xff);
+    int slice_style = 0;  // 0 標準, 1 縦横比を固定 (slice_style_w : slice_style_h), 2 固定サイズ (the page's pixels)
+    double slice_style_w = 1, slice_style_h = 1;
+    static bool is_slice_tool(const QString& tool);
+    // The slice under a point of the canvas (a stored one before an auto one, the later on top; none: off the page).
+    std::optional<core::ResolvedSlice> slice_at(const QPointF& widget) const;
+    std::optional<core::ResolvedSlice> chosen_slice_now() const;
+    QRectF slice_mm(const core::ResolvedSlice& slice) const;  // (its rect, mm)
+
+    // --- PC5 H-b: ガイド・グリッド・エクストラ・単位 (canvas_guide_lines.cpp; SPEC.md VIEW-01) --------------------------------------
+    // What エクストラ hides with the rest (shows: one's own switch and the master's): the guides, the grid, the layers' edges,
+    // the selection's edges, the target path, the smart guides, the warps' mesh and pins, the pixel grid, the production's.
+    bool shows(bool own) const { return own && extras_shown; }
+    // The guides (the page's rulers of kind "guide") drawn across the view — 表示 → 表示・非表示 ▸ ガイド (show_guide_lines)
+    // and カンバスガイド (show_canvas_guides: the page's own; an artboard's come with 節 I) — in 環境設定 → ガイド・グリッド・
+    // スライス's colour and style. The move tool grabs one (the other tools while Ctrl is held; the ruler tool never) and
+    // drags it (rulerEdited {at}); let go on a scale or out of the view it is taken away (guideRemoved); Alt+click turns it
+    // about where it was clicked ({axis, at}); a double click asks where it goes (guideAsked). ガイドをロック: none is
+    // grabbed (nor one fixed). Snapping to them is the snap's (canvas_snap.cpp), as before.
+    bool show_guide_lines = true;
+    bool show_canvas_guides = true;
+    // (PC5 I-c, artboards@1) アートボードガイド: an artboard page's guides — its own switch in place of カンバスガイド's
+    // (page_guides_shown) —, and アートボード名: an artboard's name drawn over its top left (draw_artboard_name)
+    bool show_artboard_guides = true;
+    bool show_artboard_names = true;
+    bool page_guides_shown() const;
+    bool lock_guides = false;
+    QColor guide_colour = QColor(0x4a, 0xff, 0xff);
+    Qt::PenStyle guide_style = Qt::SolidLine;  // lines | dashed lines | dots
+    // The grid's colour and style, and its thick lines every `grid_subdivisions` of grid_mm (環境設定: グリッド線・分割数).
+    QColor grid_colour = QColor(80, 140, 220);
+    Qt::PenStyle grid_style = Qt::SolidLine;
+    int grid_subdivisions = 5;
+    // スマートガイド: the lines a drag lined up with layer to layer and with the paper's middle (magenta), and the gaps a
+    // moved box has equal to its neighbours on both sides said in the ruler's unit.
+    bool show_smart_guides = true;
+    QColor smart_colour = QColor(0xe6, 0x49, 0x80);
+    struct Spacing {  // a gap equal on both sides of a moved box: along x (vertical false) or along y, from … to, at `across`
+        bool vertical = false;
+        double from = 0, to = 0, across = 0;
+    };
+    const std::vector<Spacing>& spacing() const { return spacing_; }  // (while a drag lasts)
+    // レイヤーエッジ: the chosen layers' boxes (x0, y0, x1, y1 mm, the window's) drawn as thin lines.
+    bool show_layer_edges = false;
+    std::function<std::vector<std::array<double, 4>>()> layer_edges;
+    // メッシュ・編集ピン: the warps' grid and the puppet's box (mesh), their anchors, handles and pins (edit pins) — hidden,
+    // the warp goes on as it was.
+    bool show_mesh = true;
+    bool show_edit_pins = true;
+    // 単位・定規 (core/units.hpp): the scales and the words of a length in the ruler's unit (the page's pixels, its sides).
+    core::units::Unit ruler_unit = core::units::Unit::Mm;
+    double points_per_inch = 72;
+    double column_pt = 180;
+    double gutter_pt = 12;
+    core::units::Basis unit_basis(bool across) const;  // (across: a length along the page's width)
+    QString length_words(double mm, bool across) const;
+    // The guide under a point of the widget that a press would grab (none: none, locked, hidden), and the one being dragged.
+    std::optional<std::string> guide_at(const QPointF& widget) const;
+    // (the review's P2-1 and P2-2) The guide a press here with these keys grabs — its id and whether it is across — with the
+    // tool in hand: the move tool (unless the press is on its box's □: the □ first), another tool with Ctrl held unless Ctrl
+    // means something of its own there (the ruler, the hand, the zoom; the crop, the shape and the path tools — Ctrl: no
+    // snapping —). None: not one. The pen grabs as the mouse does.
+    std::optional<std::pair<std::string, bool>> grabbable_guide(const QPointF& widget, Qt::KeyboardModifiers modifiers) const;
+    std::optional<std::string> dragged_guide() const;
+    // 新規ガイドレイアウトを作成…'s preview: the guides it would add, drawn faintly while its window is open (none: none).
+    std::optional<core::GuideLayout> guide_preview;
+
 signals:
     void changed();
     void zoomChanged(double scale);
@@ -503,6 +756,11 @@ signals:
     void toolHeld(const QString& tool);
     void omittedChanged(const QStringList& elements);
     void renderFailed(const QString& message);
+    // PC5 H-a: the graphics card stopped drawing the page (the canvas draws it by the processor now)
+    void gpuFailed(const QString& message);
+    // PC5 H-c: the view zoomed (factor) or moved (on the screen, unturned) by the hand or the zoom tool with Shift held, or by
+    // their すべてのウィンドウを… options (every_window): the window does the same in its other panes (and other windows).
+    void handUsed(double factor, const QPointF& moved, bool every_window);
     // the pointer over the page with no button down (mm): the status bar's values there (color-model@1)
     void pointerOver(double x_mm, double y_mm);
     // the selection: a new area and how it joins (replace | add | subtract | intersect); the selection pen's line
@@ -544,6 +802,9 @@ signals:
     // (the part, where to: pose_mannequin / pose_figure)
     void rulerPlaced(const genko::core::Json& ruler);
     void rulerEdited(const QString& ruler_id, const genko::core::Json& change);
+    // (PC5 H-b) a guide dragged off the view or onto a scale (delete_ruler), a guide double-clicked (新規ガイド… to move it)
+    void guideRemoved(const QString& ruler_id);
+    void guideAsked(const QString& ruler_id);
     void primSelected(const QString& prim_id);
     void primEdited(const QString& prim_id, const genko::core::Json& change);
     void primPosed(const QString& prim_id, const QString& handle, const genko::core::Json& to);
@@ -553,6 +814,25 @@ signals:
     void effectSelected(const QString& effect_id);
     void effectMoved(const QString& effect_id, const QPointF& centre);
     void stampRequested(double x_mm, double y_mm);
+    // (PC5 J-c) 注釈ツール: a new note asked for here (mm); a note chosen ("": none); one dragged to (mm); one double clicked
+    void noteRequested(double x_mm, double y_mm);
+    void noteChosen(const QString& id);
+    void noteMoved(const QString& id, double x_mm, double y_mm);
+    void noteOpened(const QString& id);
+    // (PC5 J-d1) ものさしツール: the line as it is dragged (mm; `protractor`: its arm's end at `arm`), and as it is let go;
+    // カウントツール: a mark asked for here (mm), the mark of a group taken away, moved to (mm)
+    void rulerMoving(QPointF start, QPointF end, bool protractor, QPointF arm);
+    void rulerDrawn(QPointF start, QPointF end, bool protractor, QPointF arm);
+    void countRequested(double x_mm, double y_mm);
+    void countRemoved(int group, int index);
+    void countMoved(int group, int index, double x_mm, double y_mm);
+    // (PC5 J-b) スライスツール: a slice drawn (mm); スライス選択ツール: the slice of a number chosen (0: none), moved or sized
+    // to (mm), its options asked; a gesture refused while the slices are locked
+    void sliceDrawn(QRectF mm);
+    void sliceChosen(int number);
+    void sliceMoved(int number, QRectF mm);
+    void sliceOptionsAsked(int number);
+    void slicesLocked();
     // the lines: the text tool clicked here (mm); a balloon's outline drawn by hand ([[x, y], …] mm); a line chosen (and
     // whether its panel opens); a line's box or tails changed ({x_mm, y_mm, w_mm, h_mm} | {tails}: move_line, or {style}:
     // edit_line); a double click on a balloon (type over it); a right click on one; a balloon dragged to (mm)
@@ -563,6 +843,13 @@ signals:
     void lineEditRequested(const QString& line_id);
     void lineContextMenu(const QString& line_id, const QPoint& global);
     void textMoved(const QString& line_id, double x_mm, double y_mm);
+    // PC5 G-a: a text tool making type layers clicked here (a point text) or dragged over this box (a box text, mm); a
+    // type layer's text clicked with a text tool
+    void typePointRequested(double x_mm, double y_mm);
+    void typeBoxRequested(const QRectF& box_mm);
+    void typeLayerClicked(const QString& layer_id);
+    // PC5 G-d: an editor opened to type over a text (the window follows what is chosen in it: the panels' range)
+    void editorOpened(genko::app::InlineEditor* editor);
     // the paths: a subpath drawn with a pen ({"closed", "knots"} in mm: a set_path's subpath); the target path changed by
     // the path selection tool (its whole path)
     void pathDrawn(const genko::core::Json& subpath);
@@ -585,6 +872,8 @@ protected:
     void leaveEvent(QEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
     bool event(QEvent* event) override;
+    // (PC5 H-c: a pane's canvas — app/pane_view)
+    void set_view_only(bool on) { view_only_ = on; }
 
 private:
     struct FrameDrag {
@@ -712,6 +1001,7 @@ private:
     bool guide_release(const QPointF& widget);
     void draw_guide_drag(QPainter& painter) const;
     void draw_scale(QPainter& painter) const;
+    void draw_scale_in_unit(QPainter& painter) const;  // (PC5 H-b: the scales in a unit other than mm)
     void draw_phone(QPainter& painter) const;
     void draw_highlight(QPainter& painter) const;
 
@@ -741,6 +1031,7 @@ private:
     bool snapped_preview_applies() const;  // (for the line being drawn)
     bool near_point(const QPointF& pos, const QPointF& mm, double px = 8) const;
     void draw_grid(QPainter& painter) const;
+    void draw_pixel_grid(QPainter& painter) const;  // (PC5 H-a: canvas_view.cpp)
     void line_across(QPainter& painter, const QPointF& a, const QPointF& d, double length = 2000.0) const;
     void draw_one_ruler(QPainter& painter, const core::Json& ruler, bool selected) const;
     void draw_rulers(QPainter& painter) const;
@@ -779,6 +1070,8 @@ private:
     bool text_press(const QPointF& mm);
     bool text_move(const QPointF& mm, bool pressed);
     bool text_release();
+    void draw_type(QPainter& painter) const;  // (PC5 G-a: the box dragged for a box text, the chosen type layer's frame)
+    std::optional<std::pair<QPointF, QPointF>> type_drag_;  // (PC5 G-a: where the drag began and is now, mm)
     // 線の編集 and 線の修正 (canvas_vector.cpp)
     std::vector<core::StrokePtr> vector_strokes() const;
     core::StrokePtr vector_hit(double x, double y) const;
@@ -805,6 +1098,7 @@ private:
     QImage shown_frame_;  // show_frame
     std::unique_ptr<PageRenderer> renderer_;
     ViewState view_;
+    bool aspect_correction_ = true;  // (PC5 H-f: set_pixel_aspect_correction)
     QString tool_ = QStringLiteral("select");
     std::optional<QString> held_tool_;
     QString held_key_;
@@ -825,6 +1119,8 @@ private:
     bool live_snapped_ = false;                          // live_ holds the snapped line (drawn whole each time)
     bool live_failed_ = false;                           // this stroke's live line could not be drawn (live_sync)
     std::unique_ptr<LiveInk> committing_;
+    bool control_stroke_ = false;  // (PC5 J-g) the line being drawn is the control channel's
+    double control_t0_ = -1;       // its first point's time (ms on the monotonic clock)
     struct Overlay {
         std::unique_ptr<LiveInk> ink;
         std::uint64_t generation = 0;
@@ -846,9 +1142,13 @@ private:
     struct GuideDrag {  // a guide line pulled from a scale: its axis (h | v) and where it is (mm; none: not yet moved)
         QString axis;
         std::optional<double> at;
+        std::optional<std::string> id;  // (PC5 H-b: a guide placed, grabbed — its ruler's id)
+        bool turn = false;              // (Alt held as it was grabbed: a click turns it)
     };
     std::optional<GuideDrag> guide_drag_;
     bool zoom_out_ = false;
+    std::optional<QPointF> scrub_;  // (スクラブズーム: the point last dragged to)
+    bool scrubbed_ = false;
     std::optional<std::pair<QPointF, QPointF>> tool_drag_;  // the layer-move tool (mm)
     // the path tools (canvas_pen.cpp): the pen's anchors so far (the curvature pen's: its anchors, a corner not smooth),
     // the anchor whose handles a drag pulls; a subpath or one of its points dragged with the path selection tool
@@ -960,6 +1260,72 @@ private:
     };
     std::optional<Warp> warp_;
     std::shared_ptr<CanvasWork> work_;  // (PC4 D4: set_work)
+    std::vector<CanvasExtra> extras_;   // (PC5 J-0: add_extra, in the order added)
+    // (PC5 J-c: the 注釈ツール's drag of a mark — app/canvas_notes.cpp)
+    struct NoteDrag {
+        QString id;
+        QPointF grabbed;  // (the press, mm)
+        QPointF to;       // (where the pointer is, mm)
+        bool moved = false;
+    };
+    std::optional<NoteDrag> note_drag_;
+    bool note_asked_ = false;  // (the last press asked for a new note: its double click's second press opens nothing)
+    bool note_press(const QPointF& pos, const QPointF& mm);
+    bool note_move(const QPointF& mm);
+    bool note_release();
+    bool note_double(const QPointF& widget);
+    // (PC5 J-d1: the ものさしツール's drag — which part: a new line, an end, the whole line, the protractor's arm — and the
+    // カウントツール's drag of a mark — app/canvas_measure.cpp)
+    struct MeasureDrag {
+        enum class Part { New, Start, End, Line, Arm };
+        Part part = Part::New;
+        core::RulerLine line;      // (as it is now)
+        core::RulerLine was;       // (as the press found it)
+        QPointF grabbed;           // (the press, mm)
+        bool moved = false;
+    };
+    std::optional<MeasureDrag> measure_drag_;
+    struct CountDrag {
+        std::size_t group = 0, index = 0;
+        QPointF grabbed, to;  // (mm)
+        bool moved = false;
+    };
+    std::optional<CountDrag> count_drag_;
+    bool measure_press(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool measure_move(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool measure_release();
+    bool count_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool count_move(const QPointF& mm);
+    bool count_release();
+    // (PC5 J-b: a slice tool's drag — a new slice, the chosen one moved, one of its handles — app/canvas_slices.cpp)
+    struct SliceDrag {
+        enum class Part { New, Move, Handle };
+        Part part = Part::New;
+        int handle = -1;   // (0..3 the corners from the top left, 4..7 the sides' middles from the top)
+        int number = 0;    // (the slice moved or sized)
+        QPointF grabbed;   // (the press, mm)
+        QRectF was, now;   // (mm)
+        bool moved = false;
+    };
+    std::optional<SliceDrag> slice_drag_;
+    int snap_slice_moving_ = 0;  // (the slice being moved: its edges no snap target)
+    bool slice_press(const QPointF& pos, const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool slice_move(const QPointF& mm, Qt::KeyboardModifiers modifiers);
+    bool slice_release();
+    bool slice_double(const QPointF& widget);
+    QRectF slice_drawn(const QPointF& from, const QPointF& to, Qt::KeyboardModifiers modifiers) const;
+    void draw_slice_drag(QPainter& painter) const;
+    std::vector<QString> extras_hidden_;
+    void draw_extras(QPainter& painter) const;
+    // (PC5 H-b: canvas_guide_lines.cpp) the guides, the layers' edges, the equal gaps of a moved box; a guide grabbed
+    bool guide_grab(const QPointF& widget, Qt::KeyboardModifiers modifiers);
+    void draw_guide_lines(QPainter& painter) const;
+    void draw_artboard_name(QPainter& painter) const;  // (PC5 I-c: canvas_guide_lines.cpp)
+    void draw_layer_edges(QPainter& painter) const;
+    void draw_spacing(QPainter& painter) const;
+    std::vector<Spacing> spacing_;
+    void find_spacing(const std::array<double, 4>& box);
+    void forget_snap();
     mutable std::optional<std::pair<std::string, QImage>> mask_picture_;  // (the area and the quick mask it shows)
 
     // gliding between views
@@ -969,6 +1335,7 @@ private:
     QTimer rerender_;
 
     QWidget* gpu_surface_ = nullptr;  // use_gpu
+    bool view_only_ = false;          // set_view_only (PC5 H-c)
 };
 
 // Whether motion should be reduced (環境設定 ui/reduce_motion; with no choice, as the system says).

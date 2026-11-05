@@ -1,6 +1,7 @@
 // The animation ops (Python's genko/animops.py): the timeline (set_animation), animation folders and cels
 // (add_anim_folder, add_cel), the exposure sheet (set_exposure, set_exposures), the camera (set_camera_key) and the
-// light table (set_light_table). No pictures. core/anim.hpp reads the timeline they write.
+// light table (set_light_table). No pictures. core/anim.hpp reads the timeline they write. PC5 J-e1 (timeline@1,
+// core/video.hpp): set_animation's work area and its fps of 0.5..120, and the question timeline_info.
 //
 // Where Python would keep a number that is not finite (a camera rect of "nan" or "inf", which its json.dumps writes as
 // NaN / Infinity), the op is refused here: a book never holds one (docs/cpp-migration/ARCHITECTURE.md §3).
@@ -16,6 +17,7 @@
 #include "core/ids.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
+#include "core/video.hpp"
 
 namespace genko::core {
 
@@ -120,8 +122,14 @@ void set_animation(OpContext& c) {
     }
     Json& data = anim_of(page, true);
     if (has(c.op, "fps")) {
+        // (PC5 J-e1, timeline@1: 0.5..120 — 1..60 as before, written as before; past it the book names timeline@1. An agent
+        // through MCP: 1..60, Python's words — core::public_animation_ops)
         const double fps = to_float(c.op["fps"]);
-        if (!(1 <= fps && fps <= 60)) throw OpError("fps is 1 to 60");
+        if (public_animation_ops()) {
+            if (!(1 <= fps && fps <= 60)) throw OpError("fps is 1 to 60");
+        } else if (!(kTimelineFpsMin <= fps && fps <= kTimelineFpsMax)) {
+            throw OpError("fps is 0.5 to 120");
+        }
         data["fps"] = fps;
     }
     if (has(c.op, "frames")) {
@@ -147,8 +155,41 @@ void set_animation(OpContext& c) {
             if (py_less(frame_key(key), Json(frames), "<=")) camera.push_back(key);
         }
         data["camera"] = std::move(camera);
+        if (const auto work = data.find("work"); work != data.end() && timeline_work(*work)) {  // (the work area cut to them)
+            const std::int64_t last = std::min((*work)[1].get<std::int64_t>(), frames);
+            *work = Json::array({std::min((*work)[0].get<std::int64_t>(), last), last});
+        }
     }
     if (has(c.op, "loop")) data["loop"] = py_truthy(c.op["loop"]);
+    // (PC5 J-e1, timeline@1: the work area, [first, last] of the frames; null: none — all of them. An agent through MCP: an
+    // unknown key, ignored and said so as Python does — core::public_animation_ops, command_bus's native_key)
+    if (has(c.op, "work") && !public_animation_ops()) {
+        const Json& given = c.op["work"];
+        if (given.is_null()) {
+            data.erase("work");
+        } else {
+            const std::int64_t count = anim::frames_of(page);
+            const std::string wrong = "work is [first, last]: frames of 1 to " + std::to_string(count) + ", or null";
+            if (!given.is_array() || given.size() != 2) throw OpError(wrong);
+            std::int64_t first = 0, last = 0;
+            try {
+                first = to_int_held(given[0]);
+                last = to_int_held(given[1]);
+            } catch (const PyValueError&) {
+                throw OpError(wrong);
+            } catch (const PyTypeError&) {
+                throw OpError(wrong);
+            }
+            if (first < 1 || last > count || first > last) throw OpError(wrong);
+            data["work"] = Json::array({first, last});
+        }
+    }
+}
+
+// timeline_info (timeline.info, a question: core/video.hpp timeline_info): the page's timeline.
+void timeline_question(OpContext& c) {
+    const std::size_t at = require_page(c.doc, c.op);
+    c.report = core::timeline_info(c.doc.page(at));
 }
 
 void add_anim_folder(OpContext& c) {
@@ -288,5 +329,7 @@ void register_anim_ops(OpRegistry& registry) {
     registry.add("set_camera_key", set_camera_key);
     registry.add("set_light_table", set_light_table);
 }
+
+void register_timeline_query(OpRegistry& registry) { registry.add_query("timeline_info", timeline_question); }
 
 }  // namespace genko::core

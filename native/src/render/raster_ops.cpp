@@ -1,5 +1,7 @@
 #include "render/raster_ops.hpp"
 
+#include "core/groups.hpp"
+#include "core/layer_basics.hpp"
 #include "core/layer_styles.hpp"
 #include "render/dab_ops.hpp"
 #include "render/ink.hpp"
@@ -7,6 +9,7 @@
 #include "render/ink_filters.hpp"
 #include "render/ops_layer_styles.hpp"
 #include "render/plugins.hpp"
+#include "render/segment/segment.hpp"
 
 #include <QCryptographicHash>
 #include <QFile>
@@ -42,6 +45,7 @@
 #endif
 
 #include "core/areas.hpp"
+#include "core/color_raster.hpp"
 #include "core/base64.hpp"
 #include "core/config_dir.hpp"
 #include "core/filters.hpp"
@@ -274,9 +278,11 @@ Image fill_reference(const Document& doc, const Page& page, std::size_t target, 
 // those values can do (a blend); an 8-bit layer's fill without it keeps the picture it always laid (the same bytes; a
 // gradient with the new keys a picture at the layer's grid: its lines stay lines, the coordinator's decision after the
 // review) — a channel's or a mask's lent to the op too (an 8-bit picture on any page) —, a pen or tone layer's too.
-bool precise_or_inks(const Page& page, const Layer& layer) {
+// (PC5-0: an empty one made precise within the book's budget — past it painted at 8 bits as before, said in `notes`)
+bool precise_or_inks(const Document& doc, std::size_t at, const Layer& layer, std::vector<std::string>* notes) {
+    const Page& page = doc.page(at);
     return layer.color_raster != nullptr || layer.ink_raster != nullptr || (page.color.has_value() && layer.raster_png == nullptr) ||
-           paint_fill::becomes_precise(page, layer);
+           paint_fill::becomes_precise(doc, at, layer, notes);
 }
 
 // The op's blend: none for normal or none given; OpError for what is not one of the blends.
@@ -379,7 +385,7 @@ void fill(OpContext& c) {
     const std::optional<std::string> blend = blend_given(op);
     const Json* precise = core::get(op, "color_rgb");
     if (precise != nullptr && precise->is_null()) precise = nullptr;
-    if (page.layers[ti].kind == LayerKind::Raster && (blend || precise_or_inks(page, page.layers[ti]))) {
+    if (page.layers[ti].kind == LayerKind::Raster && (blend || precise_or_inks(doc, at, page.layers[ti], &c.notes))) {
         std::array<double, 3> colour{};
         if (precise != nullptr && !page.color && page.rgb && page.rgb->depth != 8) {
             colour = colour_of(*precise, doc, "color_rgb");
@@ -732,7 +738,7 @@ void gradient_fill_new(OpContext& c, std::size_t at, std::size_t ti, const std::
     const Layer& target = page.layers[ti];
     // (the coordinator's decision after E4's review: an 8-bit paint layer in the 通常 mode keeps its lines as lines — the
     // user's decision 3, and the gradient tool's way before E4 —, the gradient a picture laid on it below)
-    if (target.kind == LayerKind::Raster && (blend || precise_or_inks(page, target))) {
+    if (target.kind == LayerKind::Raster && (blend || precise_or_inks(doc, at, target, &c.notes))) {
         std::optional<paint_fill::Coverage> coverage;
         if (core::truthy_at(op, "area")) {
             coverage = paint_fill::Coverage{};
@@ -830,7 +836,7 @@ void gradient_fill(OpContext& c) {
     if (from.size() != 2 || to.size() != 2) throw OpError(message);
     if (core::py_hypot(to[0] - from[0], to[1] - from[1]) < 0.5) throw OpError("the gradient needs a longer drag");
     // (PC4 E4: the keys of this build, or a precise or ink paint layer — render/paint_fill and new_gradient)
-    if (new_gradient_keys(op) || (page.layers[ti].kind == LayerKind::Raster && precise_or_inks(page, page.layers[ti]))) {
+    if (new_gradient_keys(op) || (page.layers[ti].kind == LayerKind::Raster && precise_or_inks(doc, at, page.layers[ti], &c.notes))) {
         gradient_fill_new(c, at, ti, from, to);
         return;
     }
@@ -960,7 +966,7 @@ void set_layer_mask(OpContext& c) {
     Page& page = doc.edit_page(at);
     Layer& layer = page.layers[core::layer_by_id(page, core::truthy_at(op, "id") ? core::py_str(op["id"]) : std::string())];
     if (layer.locked) throw OpError("the layer is locked");  // (Python masks it)
-    if (layer.kind == LayerKind::Folder) throw OpError("a folder cannot take a mask (mask the layers in it)");
+    if (layer.kind == LayerKind::Folder && !core::is_group(layer)) throw OpError("a folder cannot take a mask (mask the layers in it)");  // (groups@1: a group can)
     if (core::truthy_at(op, "delete")) {
         layer.mask.reset();
         return;
@@ -997,7 +1003,7 @@ void paint_mask(OpContext& c) {
     Page& page = doc.edit_page(at);
     Layer& layer = page.layers[core::layer_by_id(page, core::truthy_at(op, "id") ? core::py_str(op["id"]) : std::string())];
     if (layer.locked) throw OpError("the layer is locked");  // (Python masks it)
-    if (layer.kind == LayerKind::Folder) throw OpError("a folder cannot take a mask (mask the layers in it)");
+    if (layer.kind == LayerKind::Folder && !core::is_group(layer)) throw OpError("a folder cannot take a mask (mask the layers in it)");  // (groups@1: a group can)
     const Json* raw = core::get(op, "points");
     core::PenPoints points = core::parse_points(raw != nullptr && core::py_truthy(*raw) ? *raw : Json::array());
     if (points.empty()) throw OpError("points needs at least one [x_mm, y_mm] pair");
@@ -1040,6 +1046,8 @@ void check_mergeable(const Page& page, const std::vector<std::size_t>& layers) {
             throw OpError("placed images and tones cannot be merged");
         }
         if (layer.locked) throw OpError("the layer is locked");
+        // (PC5 I-a review P2-1: すべてをロック — its own, or its folder's — as locked)
+        if (core::locked_all(page.layers, i)) throw OpError("the layer " + layer.id + " is locked (lock_all)");
     }
 }
 
@@ -1058,13 +1066,41 @@ void into_pixels(const Page& page, Layer& target, const Image& picture) {
     target.blend = "normal";
     target.opacity = 1.0;
     target.clip = false;
+    target.blend_channels.clear();  // (PC5 I-a, blend-channels@1: drawn in, as its blend)
     target.native_psd.reset();  // (psd-keep@1, PC4 F-d: a PSD's effects and blocks are not the merged or converted layer's)
+    target.type.reset();        // (type@1, PC5 G-0: a type layer merged into, or converted: its text drawn in)
     raster::save_raster(page, target, picture);
 }
 
 // layerops._composite: the layers drawn over each other as they show (blend, opacity, clip), over transparency
 bool merge_draws(const Layer& layer);
 Image composite_layers(const Document& doc, const Page& page, const std::vector<std::size_t>& layers, int dpi, const Image* background = nullptr) {
+    // (blend-channels@1, PC5 I-a: a layer that leaves colour channels out — the layers drawn as the page draws them, over
+    // nothing, render_contents)
+    if (std::any_of(layers.begin(), layers.end(), [&](std::size_t i) { return core::leaves_channels_out(page.layers[i]); })) {
+        Page alone = page;
+        alone.layers.clear();
+        if (background != nullptr) {  // (画像を統合: over the paper, as the page shows it — a channel left out keeps the paper's)
+            Layer paper;
+            paper.id = "paper";
+            paper.kind = LayerKind::Raster;
+            paper.panel_clip = false;
+            raster::save_raster(page, paper, background->convert("RGBA"));
+            alone.layers.push_back(std::move(paper));
+        }
+        for (const std::size_t i : layers) {
+            const Layer& layer = page.layers[i];
+            if (layer.kind == LayerKind::Folder || (background && !merge_draws(layer))) continue;
+            alone.layers.push_back(layer);
+            alone.layers.back().parent_id = nullptr;
+        }
+        RenderOptions options;
+        options.mode = "proof";
+        options.finish = false;
+        options.contents = true;
+        options.onion = false;
+        return render_contents(alone, dpi, options, &doc).image.convert("RGBA");
+    }
     const Size size = page_px(page, dpi);
     Image out = background ? *background : Image::create("RGBA", size, Ink{0, 0, 0, 0});
     std::optional<Image> prev;
@@ -1111,7 +1147,8 @@ bool merge_draws(const Layer& l) {
     return l.color_raster || l.raster_png || l.stroke_count() || !l.patches.empty() || shape_parts::any(l) ||
            (l.kind == LayerKind::Fill && l.fill && core::py_truthy(*l.fill)) ||
            (l.kind == LayerKind::Adjust && l.adjust && core::py_truthy(*l.adjust)) ||
-           l.kind == LayerKind::Tone || l.kind == LayerKind::Placed || l.kind == LayerKind::Smart;
+           l.kind == LayerKind::Tone || l.kind == LayerKind::Placed || l.kind == LayerKind::Smart ||
+           l.kind == LayerKind::Type;  // (type@1, PC5 G-0: its text drawn)
 }
 bool merge_tail_clipped(const Page& page, const std::vector<std::size_t>& layers) {
     bool proof = true, print = merge_printed(page.layers[layers.front()]);
@@ -1139,9 +1176,55 @@ void into_color_pixels(Layer& target, std::pair<std::string, bool> pixels) {
     target.fill.reset(); target.adjust.reset(); target.effect.reset(); target.fill_rgb.reset();
     target.screen.reset(); target.color.reset(); target.tone.reset(); target.source.reset();
     target.blend = "normal"; target.opacity = 1; target.clip = pixels.second; target.panel_clip = false;
+    target.blend_channels.clear();  // (PC5 I-a, blend-channels@1: drawn in, as its blend)
     target.native_psd.reset();  // (psd-keep@1, PC4 F-d: a PSD's effects and blocks are not the merged layer's)
+    target.type.reset();        // (type@1, PC5 G-0: its text drawn in)
     target.color_raster = pixels.first.empty() ? core::Bytes{} : std::make_shared<const std::string>(std::move(pixels.first));
 }
+// (blend-channels@1, PC5 I-a review P3-2: layers one of which leaves colour channels out, merged in precise colour as the page
+// draws them — render_contents' precise way, ColorCanvas::keep_channels —, over nothing or, flattened, over the paper. Its
+// first layer clipped to what is under the merge is not ported: the clipping kept so needs the layers under it)
+std::pair<std::string, bool> channels_kept_merge(const Document& doc, const Page& page, const std::vector<std::size_t>& layers, bool flatten,
+                                                 int dpi, Size size) {
+    Page alone = page;
+    alone.layers.clear();
+    if (flatten) {
+        Layer paper;
+        paper.id = "paper";
+        paper.kind = LayerKind::Raster;
+        paper.panel_clip = false;
+        raster::save_raster(page, paper, page_background(page, size, false).convert("RGBA"));
+        alone.layers.push_back(std::move(paper));
+    }
+    bool first = true;
+    for (const std::size_t i : layers) {
+        const Layer& layer = page.layers[i];
+        if (layer.kind == LayerKind::Folder || (flatten && !merge_draws(layer))) continue;
+        if (first && layer.clip && !flatten) throw NotYetPorted("high-precision merge of a clipped layer that leaves colour channels out (blend-channels@1)");
+        first = false;
+        alone.layers.push_back(layer);
+        alone.layers.back().parent_id = nullptr;
+    }
+    if (first) return {"", false};
+    RenderOptions options;
+    options.mode = "proof";
+    options.finish = false;
+    options.contents = true;
+    options.onion = false;
+    options.precise = true;
+    const RenderResult drawn = render_contents(alone, dpi, options, &doc);
+    if (drawn.precise && !drawn.precise->empty()) return {*drawn.precise, false};
+    // (nothing precise among them, on a page drawn in precise colour for its other layers: their 8-bit picture's values)
+    const Image rgba = drawn.image.convert("RGBA");
+    const std::string bytes = rgba.tobytes();
+    return {core::encode_color_pixels(static_cast<std::uint32_t>(size.width), static_cast<std::uint32_t>(size.height), "u16",
+                                      [&bytes](std::size_t i) {
+                                          const auto at = [&](std::size_t c) { return static_cast<unsigned char>(bytes[i * 4 + c]) / 255.0; };
+                                          return std::array<double, 4>{at(0), at(1), at(2), at(3)};
+                                      }),
+            false};
+}
+
 std::pair<std::string, bool> composite_color_layers(const Document& doc, const Page& page,
                                    const std::vector<std::size_t>& layers, bool flatten = false) {
     // (at the finest grid of the page's pixel layers, 200 to 600 dpi — its masks' and selections' —: a picture opened at
@@ -1171,6 +1254,8 @@ std::pair<std::string, bool> composite_color_layers(const Document& doc, const P
         if (!std::binary_search(layers.begin(), layers.end(), i) && page.layers[i].visible &&
             page.layers[i].kind != LayerKind::Folder && merge_draws(page.layers[i]))
             throw NotYetPorted("high-precision merge spans an unselected visible layer");
+    if (std::any_of(layers.begin(), layers.end(), [&](std::size_t i) { return core::leaves_channels_out(page.layers[i]); }))
+        return channels_kept_merge(doc, page, layers, flatten, dpi, size);
     // (color-model@1: an RGB page of a profile merges in its space, its paint layers' pixels as its values)
     ColorCanvas out(flatten ? page_background(page,size,false) : Image::create("RGBA",size,Ink{0,0,0,0}), RgbSpace::of(page));
     const Box all{0, 0, size.width, size.height};
@@ -1312,6 +1397,49 @@ void after_merge(Page& page, const std::vector<std::size_t>& merged) {
     page.layers = std::move(kept);
 }
 
+// groups@1 (PC5 I-b): layers merged together are in one group (or none) — the merged layer stays where the first is —, and
+// what a merge of what shows composites is not drawn through a group that changes its look (its opacity, blend or mask:
+// merge the group's layers in it first)
+void check_merged_groups(const Page& page, const std::vector<std::size_t>& layers) {
+    if (!core::has_groups(page.layers) || layers.empty()) return;
+    const std::vector<std::optional<std::size_t>> owners = core::group_owners(page.layers);
+    for (const std::size_t i : layers)
+        if (owners[i] != owners[layers.front()]) throw OpError("the layers to merge are in different groups (merge them in their group)");
+}
+
+// groups@1 (PC5 I-b, the coordinator's decision on review P2-5): does what shows go through a group (a layer shown is in one)?
+// It is then merged as the page draws it — the groups' opacity, blend, mask, clipping and order (render_contents) —, and the
+// groups it went through are taken off (what they did is in the pixels).
+bool shown_through_groups(const Page& page, const std::vector<std::size_t>& shown) {
+    if (!core::has_groups(page.layers)) return false;
+    const std::vector<std::optional<std::size_t>> owners = core::group_owners(page.layers);
+    return std::any_of(shown.begin(), shown.end(), [&](std::size_t i) { return owners[i].has_value(); });
+}
+Image grouped_picture(const Document& doc, const Page& page, const std::vector<std::size_t>& shown, int dpi, const Image* background) {
+    Page alone = page;
+    alone.layers.clear();
+    for (std::size_t i = 0; i < page.layers.size(); ++i) {
+        if (core::is_group(page.layers[i]) || std::find(shown.begin(), shown.end(), i) != shown.end()) alone.layers.push_back(page.layers[i]);
+    }
+    RenderOptions options;
+    options.mode = "proof";
+    options.finish = false;
+    options.contents = true;
+    options.onion = false;
+    Image picture = render_contents(alone, dpi, options, &doc).image.convert("RGBA");
+    return background != nullptr ? alpha_composite(background->convert("RGBA"), picture) : picture;
+}
+// (after: the groups the merged layers were drawn through taken off, the merged layer and what they held left in none)
+void without_shown_groups(Page& page, const std::string& kept) {
+    const std::vector<std::optional<std::size_t>> owners = core::group_owners(page.layers);
+    std::set<std::string> gone;
+    for (std::size_t i = 0; i < page.layers.size(); ++i)
+        if (core::is_group(page.layers[i]) && core::shown_in_groups(page.layers, i, owners)) gone.insert(page.layers[i].id);
+    std::erase_if(page.layers, [&](const Layer& l) { return gone.contains(l.id); });
+    for (Layer& l : page.layers)
+        if (l.id == kept || (l.parent_id.is_string() && gone.contains(l.parent_id.get<std::string>()))) l.parent_id = nullptr;
+}
+
 void merge_layers(OpContext& c) {
     Document& doc = c.doc;
     const Json& op = c.op;
@@ -1324,6 +1452,7 @@ void merge_layers(OpContext& c) {
     }
     if (layers.size() < 2) throw OpError("choose two or more layers to merge");
     check_mergeable(page, layers);
+    check_merged_groups(page, layers);  // (groups@1, PC5 I-b)
     if (has_precision(page, layers)) {
         auto bytes = composite_color_layers(doc, page, layers);
         into_color_pixels(page.layers[layers.front()], std::move(bytes));
@@ -1372,6 +1501,7 @@ void merge_visible(OpContext& c) {
             parents_visible(page, layer)) shown.push_back(i);
     }
     if (shown.empty()) throw OpError("no layer is showing");
+    const bool grouped = shown_through_groups(page, shown);  // (groups@1, PC5 I-b)
     std::vector<std::size_t> removed=shown;
     if (flatten) {
         if (page_background(page,Size{1,1},false).tobytes()!=page_background(page,Size{1,1},true).tobytes())
@@ -1395,8 +1525,12 @@ void merge_visible(OpContext& c) {
                 empty.exportable=previous.exportable;page.layers[i]=std::move(empty);
             }
         }
+        const std::string kept = page.layers[shown.front()].id;
         after_merge(page, removed);
+        if (grouped) without_shown_groups(page, kept);
     };
+    if (grouped && has_precision(page, shown))
+        throw NotYetPorted("merging what shows through groups on a page in precise colour (turn グループとして描く off first)");
     if (has_precision(page, shown)) {
         auto bytes = composite_color_layers(doc, page, shown, flatten);
         if (flatten && bytes.second) throw NotYetPorted("flatten with external clipping");
@@ -1424,10 +1558,11 @@ void merge_visible(OpContext& c) {
         }
         // (PC4 F-b: a page of grid "finest" at its grid, raster::working_dpi; any other at the working dpi as before)
         const Image background=page_background(page,page_px(page,raster::working_dpi(page)),false);
-        picture=composite_layers(doc,page,shown,raster::working_dpi(page),&background);
+        picture=grouped ? grouped_picture(doc,page,shown,raster::working_dpi(page),&background)
+                        : composite_layers(doc,page,shown,raster::working_dpi(page),&background);
         into_pixels(page,page.layers[shown.front()],picture);finish();return;
     }
-    picture=composite_layers(doc,page,shown,raster::working_dpi(page));
+    picture=grouped ? grouped_picture(doc,page,shown,raster::working_dpi(page),nullptr) : composite_layers(doc,page,shown,raster::working_dpi(page));
     if (copy) {
         Layer layer;
         layer.id = core::truthy_at(op, "id") ? core::py_str(op["id"]) : core::new_id();
@@ -1444,7 +1579,9 @@ void merge_visible(OpContext& c) {
     }
     into_pixels(page, page.layers[shown.front()], picture);
     page.layers[shown.front()].style.reset();  // (PC4 E6: the styles are drawn into the merged pixels)
+    const std::string kept = page.layers[shown.front()].id;
     after_merge(page, shown);
+    if (grouped) without_shown_groups(page, kept);  // (groups@1)
 }
 
 // --- Python's repr of a Layer (merge_down's error for a folder, which is not among the layers it looks in) ------------
@@ -1592,7 +1729,8 @@ void merge_down(OpContext& c) {
         if (item.locked) throw OpError("the layer is locked");
     }
     // (PC4 E6, layer-styles@1: a layer with a style is merged with its style drawn in — the merged layer has none)
-    const bool styled = core::has_layer_style(page.layers[ui]) || core::has_layer_style(page.layers[li]);
+    // (blend-channels@1, PC5 I-a: an upper layer that leaves colour channels out is merged as the page draws it, as a styled one)
+    const bool styled = core::has_layer_style(page.layers[ui]) || core::has_layer_style(page.layers[li]) || core::leaves_channels_out(page.layers[ui]);
     if (has_precision(page, {li, ui})) {
         auto bytes = composite_color_layers(doc, page, {li, ui});
         into_color_pixels(page.layers[li], std::move(bytes));
@@ -1606,6 +1744,7 @@ void merge_down(OpContext& c) {
         ground.opacity = 1.0;
         ground.blend = "normal";
         ground.clip = false;
+        ground.blend_channels.clear();  // (PC5 I-a: its channels stay the layer's, as its blend)
         alone.layers = {ground, page.layers[ui]};
         const Image merged = composite_layers(doc, alone, {0, 1}, raster::working_dpi(page));
         Layer& into = page.layers[li];
@@ -1621,6 +1760,7 @@ void merge_down(OpContext& c) {
         into.style.reset();
         raster::save_raster(page, into, merged);
         page.layers[li].native_psd.reset();
+        page.layers[li].type.reset();  // (type@1, PC5 G-0: a type layer merged into: its text drawn in)
         page.layers.erase(page.layers.begin() + static_cast<std::ptrdiff_t>(ui));
         return;
     }
@@ -1673,6 +1813,7 @@ void merge_down(OpContext& c) {
         raster::save_raster(page, into, merged);
     }
     page.layers[li].native_psd.reset();  // (psd-keep@1, PC4 F-d: a PSD's effects and blocks are not the merged layer's)
+    page.layers[li].type.reset();  // (type@1, PC5 G-0: a type layer merged into: its text drawn in)
     page.layers.erase(page.layers.begin() + static_cast<std::ptrdiff_t>(ui));
 }
 
@@ -1743,10 +1884,12 @@ void convert_layer(OpContext& c) {
         const std::string blend = layer.blend;
         const double opacity = layer.opacity;
         const bool clip = layer.clip;
+        const std::vector<bool> channels = layer.blend_channels;  // (PC5 I-a: kept, as its blend)
         into_pixels(page, layer, picture);  // (the mask is drawn into the pixels)
         layer.blend = blend;
         layer.opacity = opacity;
         layer.clip = clip;
+        layer.blend_channels = channels;
         layer.asset.reset();
         return;
     }
@@ -2669,6 +2812,8 @@ auto plugin_work(Work&& work) {
         return work();
     } catch (const core::Error& error) {
         if (error.code() == "plugin_not_allowed" || error.code() == "plugin_runner") throw OpError(error.what());
+        // (PC5 J-f: a module that cannot be used; a plugin of 8 bits on other samples)
+        if (error.code() == "plugin_manifest" || error.code() == "plugin_8bit") throw OpError(error.what());
         throw;
     }
 }
@@ -2678,6 +2823,95 @@ auto plugin_work(Work&& work) {
     const std::string key = kind.substr(plugins::kPrefix.size());
     if (!plugins::installed(key)) throw core::PyValueError("no plugin " + key);
     throw OpError("a filter plugin works on 8-bit paint layers, not on a layer of precise colours");
+}
+
+// --- PC5 J-f (plugin.run): a plugin that works in bands (a WebAssembly module, a native one of protocol 2) on the
+// layer's own samples — precise colour, a page's inks, a channel lent as a grey picture — inside the op's area, read and
+// written band by band where they are kept (render/plugin_bands, review P2-1); stopped as the window's work is
+// (segment::StopScope)
+
+// The plugin of a filter_raster kind works in bands (installed, and a module or a native plugin of protocol 2).
+bool plugin_in_bands(const std::string& kind) {
+    if (!kind.starts_with(plugins::kPrefix)) return false;
+    const std::string key = kind.substr(plugins::kPrefix.size());
+    return plugins::installed(key) && plugins::works_in_bands(key);
+}
+
+// The window's stop for this thread's work (none outside it).
+std::stop_token plugin_stop() {
+    const std::stop_token* stop = segment::current_stop();
+    return stop != nullptr ? *stop : std::stop_token{};
+}
+
+// The op's area over a picture of the page `width` × `height` pixels ("L", as filters.within masks).
+Image area_mask(const Page& page, const Json& area, int width, int height) {
+    const selection::AreaMask inside = selection::area_mask(area, raster::dpi_across(page, width));
+    Image mask = Image::create("L", Size{width, height}, Ink(0));
+    mask.paste(inside.mask, Point{static_cast<int>(inside.x0), static_cast<int>(inside.y0)});
+    return mask;
+}
+
+// A precise layer's raster through the plugin: its RGBA samples (the page's encoded values, 16 or 32 bits), in place.
+void plugin_on_precise_pixels(const Page& page, Layer& layer, const std::string& kind, const Json& params, const Json* area) {
+    core::ColorRasterEdit edit(*layer.color_raster);
+    plugin_bands::Picture p;
+    p.width = static_cast<int>(edit.width());
+    p.height = static_cast<int>(edit.height());
+    p.depth = edit.floating() ? 32 : 16;
+    const std::size_t w = edit.width();
+    p.read = [&edit, w](int y, int x0, int x1, float* out) {
+        for (int x = x0; x < x1; ++x) {
+            const std::array<double, 4> px = edit.pixel(std::size_t(y) * w + std::size_t(x));
+            for (unsigned c = 0; c < 4; ++c) out[std::size_t(x - x0) * 4 + c] = static_cast<float>(px[c]);
+        }
+    };
+    p.write = [&edit, w](int y, int x0, int x1, const float* in) {
+        for (int x = x0; x < x1; ++x) {
+            const float* v = in + std::size_t(x - x0) * 4;
+            edit.set(std::size_t(y) * w + std::size_t(x), {v[0], v[1], v[2], std::clamp<double>(v[3], 0.0, 1.0)});
+        }
+    };
+    const std::optional<Image> mask = area ? std::optional(area_mask(page, *area, p.width, p.height)) : std::nullopt;
+    if (mask) p.coverage = plugins::mask_coverage(*mask);
+    plugins::run_picture(kind, p, params, plugin_stop());
+    layer.color_raster = std::make_shared<const std::string>(std::move(edit).take());
+}
+
+// Ink pixels through the plugin, in place: their normalised values (InkPixels::value), the alpha last.
+void plugin_on_inks(const Page& page, core::InkPixels& inks, const std::string& kind, const Json& params, const Json* area) {
+    plugin_bands::Picture p;
+    p.width = static_cast<int>(inks.width);
+    p.height = static_cast<int>(inks.height);
+    p.channels = inks.channels();
+    p.depth = inks.depth;
+    p.alpha = inks.has_alpha();
+    p.mode = plugin_bands::mode_of_inks(*page.color, inks.space);
+    const unsigned n = p.channels;
+    const std::size_t w = inks.width;
+    p.read = [&inks, n, w](int y, int x0, int x1, float* out) {
+        for (int x = x0; x < x1; ++x) {
+            for (unsigned c = 0; c < n; ++c) out[std::size_t(x - x0) * n + c] = static_cast<float>(inks.value(std::size_t(y) * w + std::size_t(x), c));
+        }
+    };
+    p.write = [&inks, n, w](int y, int x0, int x1, const float* in) {
+        for (int x = x0; x < x1; ++x) {
+            for (unsigned c = 0; c < n; ++c) inks.set(std::size_t(y) * w + std::size_t(x), c, in[std::size_t(x - x0) * n + c]);
+        }
+    };
+    const std::optional<Image> mask = area ? std::optional(area_mask(page, *area, p.width, p.height)) : std::nullopt;
+    if (mask) p.coverage = plugins::mask_coverage(*mask);
+    plugins::run_picture(kind, p, params, plugin_stop());
+}
+
+// A channel lent to the op as a grey picture (render/channels' ChannelLending, render/mask_lending's MaskLending: a
+// hidden paint layer "lent_…" of its own): a plugin gets its one grey channel.
+bool lent_grey(const Layer& layer) { return layer.id.starts_with("lent_") && !layer.visible && !layer.exportable; }
+
+Image plugin_on_grey(const Image& rgba, const std::string& kind, const Json& params, const Image* mask) {
+    Image made = rgba.mode() == "RGBA" ? rgba.copy() : rgba.convert("RGBA");
+    plugin_bands::Picture p = plugins::grey_picture(made, mask);
+    plugins::run_picture(kind, p, params, plugin_stop());
+    return made;
 }
 
 void filter_raster_pixels(OpContext& c) {
@@ -2707,6 +2941,11 @@ void filter_raster_pixels(OpContext& c) {
                 throw OpError(error.what());
             }
         };
+        if (plugin_in_bands(kind)) {  // (PC5 J-f: a plugin that works on the precise samples themselves)
+            const std::optional<Json> area = core::truthy_at(op, "area") ? std::optional<Json>(core::op_area(op)) : std::nullopt;
+            refused([&] { plugin_work([&] { plugin_on_precise_pixels(page, layer, kind, params, area ? &*area : nullptr); }); });
+            return;
+        }
         std::optional<adjust_ops::FilterWork> own;  // (PC2: a kind of the C++ build's own, or a native: render/ops_adjust)
         refused([&] {
             if (kind.starts_with("plugin:")) plugin_on_precise(kind);
@@ -2720,6 +2959,34 @@ void filter_raster_pixels(OpContext& c) {
             return color_filters::apply(page, layer, kind, own ? own->params : params, area ? &*area : nullptr);
         });
         layer.color_raster = std::make_shared<const std::string>(std::move(pixels));
+        return;
+    }
+    // (PC5 J-f: a plugin that works in bands works the page's inks themselves, its lines and pictures drawn into them first)
+    if (const std::string kind = core::truthy_at(op, "kind") ? core::py_str(op["kind"]) : std::string();
+        page.color && !layer.raster_png && plugin_in_bands(kind)) {
+        Json params = Json::object();
+        for (const auto& [key, value] : op.items()) {
+            if (key != "op" && key != "page" && key != "layer" && key != "id" && key != "kind" && key != "area") params[key] = value;
+        }
+        const std::optional<Json> area = core::truthy_at(op, "area") ? std::optional<Json>(core::op_area(op)) : std::nullopt;
+        const bool marks = layer.stroke_count() > 0 || !layer.patches.empty() || shape_parts::any(layer);
+        core::InkPixels inks = ink_edit::with_marks(page, layer, &doc);
+        try {
+            plugin_work([&] { plugin_on_inks(page, inks, kind, params, area ? &*area : nullptr); });
+        } catch (const core::PyUncaught&) {
+            throw;
+        } catch (const core::Error& error) {
+            if (error.code() != "value" && error.code() != "type") throw;
+            throw OpError(error.what());
+        }
+        layer.ink_raster = std::make_shared<const std::string>(core::encode_ink_raster(inks));
+        layer.ink_memo = {};
+        if (marks) {  // (as raster.bake_vectors leaves the layer: its marks in its pixels)
+            layer.strokes = core::empty_strokes();
+            layer.patches.clear();
+            layer.shapes = core::vector::empty_shapes();
+        }
+        layer.kind = LayerKind::Raster;
         return;
     }
     // color-mode@1: a CMYK or Lab page's paint layer filtered in its inks (render/ink_filters), its lines and pictures
@@ -2771,6 +3038,25 @@ void filter_raster_pixels(OpContext& c) {
     Json params = Json::object();
     for (const auto& [key, value] : op.items()) {
         if (key != "op" && key != "page" && key != "layer" && key != "id" && key != "kind" && key != "area") params[key] = value;
+    }
+    if (plugin_in_bands(kind)) {  // (PC5 J-f: inside the area by its coverage, as the plugin's bands are laid; a channel: grey)
+        const std::optional<Image> mask =
+            core::truthy_at(op, "area") ? std::optional(area_mask(page, core::op_area(op), image.width(), image.height())) : std::nullopt;
+        Image out;
+        try {
+            out = plugin_work([&] {
+                if (!lent_grey(layer)) return plugins::run_8bit(kind, image, mask ? &*mask : nullptr, params, plugin_stop());
+                return plugin_on_grey(image, kind, params, mask ? &*mask : nullptr);
+            });
+        } catch (const core::PyUncaught&) {
+            throw;
+        } catch (const core::Error& error) {
+            if (error.code() != "value" && error.code() != "type") throw;
+            throw OpError(error.what());
+        }
+        raster::save_raster(page, layer, out);
+        layer.kind = LayerKind::Raster;
+        return;
     }
     Image filtered;
     try {
@@ -3160,7 +3446,7 @@ bool paints_layer_values(std::string_view name, const core::Json& op, const core
         // (a pen or tone layer, an 8-bit paint layer in the 通常 mode: a picture laid on it, lent as before)
         if (page.layers[ti].kind != LayerKind::Raster) return false;
         const Json* blend = core::get(op, "blend");
-        return precise_or_inks(page, page.layers[ti]) || (blend != nullptr && !blend->is_null() && *blend != Json("normal"));
+        return precise_or_inks(doc, at, page.layers[ti], nullptr) || (blend != nullptr && !blend->is_null() && *blend != Json("normal"));
     } catch (const std::exception&) {
         return false;  // (the op says what is wrong)
     }

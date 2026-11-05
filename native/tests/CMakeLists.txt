@@ -24,6 +24,7 @@ genko_test(test_buildinfo SOURCES unit/test_buildinfo.cpp DEPS genko_api LABELS 
 genko_test(test_http_server SOURCES unit/test_http_server.cpp DEPS genko_api Qt6::Network LABELS unit)
 genko_test(test_mcp_connection SOURCES unit/test_mcp_connection.cpp DEPS genko_api LABELS unit)
 genko_test(test_json SOURCES unit/test_json.cpp DEPS genko_test_support LABELS unit)
+genko_test(test_prefs_table SOURCES unit/test_prefs_table.cpp DEPS genko_test_support LABELS unit)  # (PC5 H-0: 環境設定の表)
 genko_test(test_pynum SOURCES unit/test_pynum.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_model SOURCES unit/test_model.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_strokes SOURCES unit/test_strokes.cpp DEPS genko_test_support LABELS unit)
@@ -169,7 +170,41 @@ genko_test(test_grd SOURCES unit/test_grd.cpp DEPS genko_test_support genko_rend
 # (a page without styles drawn and written as before), the ops, Blend If and the fill, merges, PSD's lfx2 written and read
 # back, saved, opened and undone; the styles' library (upstream's built-in groups), .asl files and `genko styles`.
 genko_test(test_layer_styles SOURCES unit/test_layer_styles.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+# PC5 I-b (groups@1: グループとフレーム)
+genko_test(test_groups SOURCES unit/test_groups.cpp DEPS genko_test_support genko_render_ops genko_storage genko_formats LABELS unit TIMEOUT 600)
 genko_test(test_style_presets SOURCES unit/test_style_presets.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC5 G-0 (SPEC.md TEXT-02「文字」, type@1): the type record's tables and normal form, the order of resolution, the ranges through
+# edits, style_runs as ranges, a line's record as a type layer's; the HarfBuzz way in (the bundled faces' glyphs, across and down).
+genko_test(test_type_text SOURCES unit/test_type_text.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC5 G-0: the type layer through the ops, the disk and the drawing — a book without type@1 as before, saved and read back,
+# read-only when broken, drawn as its line, the three ways alike, edit_type and type_info, moved, rasterized, duplicated, the
+# later groups' ops refused by name.
+genko_test(test_contract_type SOURCES contract/test_contract_type.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 600)
+# PC5 G-b (SPEC.md TEXT-02「OpenType の組み方」「右から左」): HarfBuzz's glyphs with the test fonts (tests/data/type: features,
+# axes, a font's names), SheenBidi's levels and runs, a paragraph shaped and a row placed, glyphs drawn by their ids.
+genko_test(test_shaping SOURCES unit/test_shaping.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC5 G-b: the OpenType typesetting through the ops and the drawing — the lines of before drawn as before, a line across
+# with features drawn now, set_type on the whole text and a range, the attributes drawn (size, colour, lines, shift, caps,
+# alignment, indents, leading), right-to-left text set across, the cells chosen down, saved and read back.
+genko_test(test_contract_opentype SOURCES contract/test_contract_opentype.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service
+           LABELS contract TIMEOUT 600)
+# PC5 G-c (SPEC.md TEXT-02「文字スタイル・段落スタイル」): the book's character and paragraph styles through type_style — a style's
+# life (made, applied, overridden, changed, cleared, renamed, duplicated, deleted with the looks kept), from the text and
+# redefined, Basic Paragraph, one style a letter, list a question, names, a smart object's contents, the default formatting.
+genko_test(test_type_styles SOURCES unit/test_type_styles.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC5 G-c: the styles drawn — a style changed sets the lines and type layers that take it anew (the page's pixels, a point
+# text's box), Basic Paragraph too; saved and read back; a book without styles as before; the window's words for the refusals.
+genko_test(test_contract_type_styles SOURCES contract/test_contract_type_styles.cpp DEPS genko_test_support genko_render_ops genko_formats
+           genko_service LABELS contract TIMEOUT 600)
+# PC5 G-d (SPEC.md TEXT-02「スペルチェック」): the English dictionary (upstream spell.rs's tests), the words Genko reads, the
+# notation table, a book's lines and type layers checked.
+genko_test(test_spell SOURCES unit/test_spell.cpp DEPS genko_test_support genko_render_ops genko_service LABELS unit)
+# PC5 G-d (「書体の置き換え」「検索と置換」「縦組みの属性」): replace_fonts (a question, a map, all; styles, rubies, locked layers),
+# a face of a collection (face_index), replace_text's whole_word and type layers, the whole text's tracking, leading,
+# alignment and a range's 縦中横 down, a smart object's contents keyed by the book's font and text gamma.
+genko_test(test_contract_type_fonts SOURCES contract/test_contract_type_fonts.cpp DEPS genko_test_support genko_render_ops genko_formats
+           genko_service LABELS contract TIMEOUT 600)
 genko_test(test_resample SOURCES unit/test_resample.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_page_geometry SOURCES unit/test_page_geometry.cpp DEPS genko_test_support LABELS unit)
 # PC3 C-e (SPEC.md COLOR-07「判型」): the page size ops on a book in memory — each thing on a page where the map takes it,
@@ -182,6 +217,39 @@ genko_test(test_transform SOURCES unit/test_transform.cpp DEPS genko_test_suppor
 # PC3 C-d (SPEC.md COLOR-07「移動・整列」): align and distribute by whole working pixels (PhotoCraft's layer_multi_cmds.rs
 # tests), the stacking order among siblings with folders, links, snapping's targets (snap.rs' tests).
 genko_test(test_align SOURCES unit/test_align.cpp DEPS genko_test_support genko_render_ops LABELS unit)
+# PC5 J-a (layer-comps@1, SPEC.md PROD-01「レイヤーカンプ」): the comps as PhotoCraft's tests check them (capture, each
+# option applied alone, the last document state, the comps managed and gone round, the layers gone, the refusals) on the
+# 8-bit, 16-bit and CMYK pages, a pen layer's lines and a style put back, locks and links, a copied page.
+genko_test(test_layer_comps SOURCES unit/test_layer_comps.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC5 I-d (variables@1, SPEC.md AUTO-01「変数とデータセット」): the variables' normal form and refusals, defined, given and
+# applied (visibility, a type layer's and a line's text) in one step, a picture's bytes kept out of the journal, a text file of
+# data sets (PhotoCraft's variables_cmds/tests.rs).
+genko_test(test_variables SOURCES unit/test_variables.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+# PC5 J-c (annotations@1, SPEC.md PROD-01「注釈」): the notes as PhotoCraft's tests check them (add, edit, move with its box,
+# delete, the refusals; an Anno block read and written again, a sound note kept, the dates) with Genko's actors (an agent
+# never changes a person's note), the JSON, a .pcraft's notes, the import's ops, MCP's apply_ops not taking the ops.
+genko_test(test_annotations SOURCES unit/test_annotations.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service LABELS unit)
+# PC5 J-e2 (video@1, render/footage): a sequence's files in order, a sequence (8 and 16 bits), every frame of a GIF, an APNG
+# and a WebP (a GIF's disposal by hand), refusals before decoding, broken and huge files never read past their bounds, a
+# footage frame laid on an 8-bit, 16-bit and CMYK page.
+genko_test(test_footage SOURCES unit/test_footage.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
+# PC5 J-d1 (measure@1, SPEC.md PROD-01「計測」): the measuring as PhotoCraft's tests check it (the scale set and its words, the
+# ruler's readout and the protractor, the inscribed rectangle, レイヤーの角度補正 of a layer and of the page cut — the same as
+# transform_layers' and crop_page's on the 8-bit, 16-bit and CMYK pages —, the count groups and marks, the info asked
+# without a change), the marks carried by the page size ops, PSD's 1074 and 1080, a .pcraft's measurement, MCP's apply_ops
+# not taking the ops.
+genko_test(test_measure SOURCES unit/test_measure.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service LABELS unit TIMEOUT 600)
+# PC5 J-d2 (SPEC.md PROD-01「計測」): 計測値を記録's values as PhotoCraft's tests check them (the square, the disc, the slanted line,
+# the 8 directions, a hole, the gray values in the 8-, 16- and 32-bit ranges, a selection counted on the page's grid in the
+# page's pixels, the ruler's and the count's rows), the data points and the CSV, the question measure_values, 目盛りマーカー
+# を配置 (one op: a group of a pen layer's rectangle and a type layer; refused; a 16-bit page).
+genko_test(test_measure_features SOURCES unit/test_measure_features.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+# PC5 J-b (slices@1, SPEC.md PROD-01「スライス」): the slices as PhotoCraft's tests check them (the auto slices and the
+# numbering, user slices and their options, promote and divide, the slices from the guides and clearing them, a layer-based
+# slice following its layer and its effects and going with it), each edge rounded alone (neighbours share it), the page size
+# ops and a duplicated page carrying them, PSD's 1050 (versions 6 and 7) onto a page and back, a .pcraft's slices, MCP's
+# apply_ops not taking the ops.
+genko_test(test_slices SOURCES unit/test_slices.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service LABELS unit TIMEOUT 600)
 # PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame; and PC2a's tone kinds
@@ -527,6 +595,66 @@ genko_test(test_contract_transform SOURCES contract/test_contract_transform.cpp 
 # undone, `genko inspect --at`.
 genko_test(test_contract_align SOURCES contract/test_contract_align.cpp DEPS genko_test_support genko_render_ops
            LABELS contract TIMEOUT 900)
+# PC5 J-a (layer-comps@1): the comps through the command line (apply, undo, inspect --comps, export --format comps), the
+# PSD's 1065 and the layers' cmls as psd-tools reads them (read back, written as read while unchanged, anew, gone), a
+# .pcraft's layer_comps (upstream's reader with $GENKO_PCRAFT_CHECK).
+genko_test(test_contract_layer_comps SOURCES contract/test_contract_layer_comps.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC5 H-b (SPEC.md VIEW-01「ガイド」): add_guide_layout (upstream's own test's values, its ways and refusals), delete_ruler's
+# kind (for_pages too), the layout through the command line and one undo, the PSD's 1032 as psd-tools reads it (none
+# without guides: the file as before), read back here, psd-tools' guides read here; core/units' lengths.
+genko_test(test_contract_guides SOURCES contract/test_contract_guides.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC5 H-e (SPEC.md VIEW-01「環境設定と API」): genko prefs get/set/reset (all or none, refusals, an earlier version's settings
+# kept), genko commands (this computer's keys over the catalogue), genko session (the app there or not), MCP's inspect
+# target=prefs, commands and session (reading only, no path out of the root).
+genko_test(test_contract_prefs SOURCES contract/test_contract_prefs.cpp DEPS genko_test_support LABELS contract TIMEOUT 900)
+# PC5 I-d (variables@1): a picture put in a paint layer on the 8-bit, 16-bit, 32-bit and CMYK pages (fit, fill, conform,
+# as_is × the nine places × clip), a smart object's contents replaced, the variables through the command line (apply, undo,
+# inspect --variables, export --format datasets: the files' names, the book unchanged), saved and read again (variables@1,
+# the pictures in assets/, a book without them as before), a .pcraft's variables written and read back.
+genko_test(test_contract_variables SOURCES contract/test_contract_variables.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC5 J-c (annotations@1): the notes through the command line (apply as a person and an agent, the agent refused on a
+# person's note, undo, inspect --annotations), the PSD's Anno as psd-tools reads it (read back, written as read while
+# unchanged, anew, gone; keep.psd's; a sound note kept), a .pcraft's notes (upstream's reader with $GENKO_PCRAFT_CHECK),
+# ファイル → 読み込み → 注釈…'s reading.
+genko_test(test_contract_annotations SOURCES contract/test_contract_annotations.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC5 J-d1 (measure@1): the measuring through the command line (apply, undo, inspect --measure, the question measure_info
+# saving nothing; the book as before once all is taken away), レイヤーの角度補正 through `genko apply` the same as the op
+# (8-bit and 16-bit pages), the PSD's 1074 as psd-tools reads it (written, read back, as read while unchanged, anew, gone)
+# and 1080 kept until the page has its own marks, a .pcraft's measurement (upstream's reader with $GENKO_PCRAFT_CHECK).
+genko_test(test_contract_measure SOURCES contract/test_contract_measure.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC5 I-a (SPEC.md AUTO-01「レイヤーの基本」): delete_layers (several, a group with what it holds, the core layers and すべてを
+# ロック kept, hidden, empty, every page; what named them let go or kept; written and read again), duplicate_layers (a group,
+# another page), ungroup_layers, すべてをロック (layer-locks@1), the channels left out (blend-channels@1) on the three ways and
+# through `genko render`, bake_layer_styles, PSD's lspf and brst as psd-tools reads them, a .pcraft's, a book without them
+# as before.
+genko_test(test_contract_layers SOURCES contract/test_contract_layers.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC5 J-b (slices@1): the slices through the command line (apply, undo, inspect --slices, the question slices_info saving
+# nothing; a layer-based slice following its layer and going with it; slicesFromGuides, divide, clear), the PSD's 1050 as
+# psd-tools reads it (written, read back, as read while unchanged, anew, gone; a file psd-tools made), Web 用に保存 by
+# slices (genko export --format slices: the pictures and the HTML table, the user slices, scaled, the write guard), a
+# .pcraft's slices (upstream's reader with $GENKO_PCRAFT_CHECK).
+genko_test(test_contract_slices SOURCES contract/test_contract_slices.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC5 I-c (artboards@1, the user's decision 3: アートボード＝ページ): add_artboard, artboard_from_layers (layers, a group, what is
+# kept), set_artboard (size and anchor, the contents kept or moved, the preset, the mark taken off), a cover and a spread
+# refused; the background on the three ways of drawing; to files, to PDF, one PSD as psd-tools reads it (and through `genko
+# export --format artboards`); a PSD's artboards opened a page each (import_psd as before); a .pcraft's artboard; the book
+# written and read, a book without artboards as before.
+genko_test(test_contract_artboards SOURCES contract/test_contract_artboards.cpp DEPS genko_test_support genko_render_ops genko_formats
+           LABELS contract TIMEOUT 900)
+# PC5 J-e2 (video@1): the video layers through the command line (footage read into the book, apply, inspect --timeline,
+# render --frame, undo; a footage frame gone read-only), the ops (frames inserted, duplicated, deleted, altered, restored;
+# the footage interpreted, replaced; rasterized; frames to layers and cels), refusals (locks, footage not held or past 4
+# GiB, not an agent's op), video@1 written and read back, a book of cels as before, ビデオをレンダリング and a .pcraft
+# (upstream's reader with $GENKO_PCRAFT_CHECK).
+genko_test(test_contract_video SOURCES contract/test_contract_video.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service
+           LABELS contract TIMEOUT 900)
 genko_test(test_contract_image_ops SOURCES contract/test_contract_image_ops.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
 # PC3 C-e through the command line: every kind of page turned (inspect --pixel), undone and redone; a page of its own paper
@@ -568,9 +696,53 @@ genko_test(test_contract_codecs SOURCES contract/test_contract_codecs.cpp DEPS g
 # size, a layer alone cut to what it holds, the quality, the metadata's three, a CMYK page's colours the same everywhere,
 # too large refused first, the estimate, クイック書き出し's places and formats, レイヤーからファイル… (its default files as before),
 # `genko copy` and `genko export --format layers`' new choices.
-genko_test(test_contract_copy SOURCES contract/test_contract_copy.cpp DEPS genko_test_support genko_formats genko_render_ops
+genko_test(test_contract_copy SOURCES contract/test_contract_copy.cpp DEPS genko_test_support genko_formats genko_render_ops genko_service
            LABELS contract TIMEOUT 900)
 add_dependencies(test_contract_copy genko)
+# PC5 I-0 (SPEC.md AUTO-01: 自動処理の土台): the steps' three forms and their errors, the ops no step may be and an agent's
+# ops only, the pseudo ops, the steps aimed at the pages, the runner's inputs, outputs' names, errors, stop and cancel, a
+# picture through no steps as コピーを保存 writes it, the actions kept by service/actions, the script events' sealed table.
+genko_test(test_automate SOURCES unit/test_automate.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 600)
+# PC5 I-0: `genko script` as `genko apply` (the same reply, the journal's script name; the gates, undo and an agent's ops
+# refused), `genko batch` of a folder of pictures (the files コピーを保存 writes, again under the next free names, --json, a
+# picture never written in place) and of a book (--save: its pages changed, the journal's name).
+# PC5 I-e: `genko automate` (画像プロセッサー of a PNG, a 16-bit TIFF and a CMYK JPEG; 画像を合わせる; 条件付きモード変更; レンズ補正 as
+# the filter one by one) and `genko droplet` (made with its launchers, run by itself and by its launcher; an agent refused).
+# PC5 I-f: `genko automate contact-sheet` (the sheets' layers and captions, 16 bits, grey, flattened, a book's pages), 画像アセット
+# (the naming rule, `genko export --format image-assets`, image-assets@1).
+genko_test(test_contract_automate SOURCES contract/test_contract_automate.cpp DEPS genko_test_support genko_service
+           LABELS contract TIMEOUT 900)
+add_dependencies(test_contract_automate genko)
+# PC5 I-h (SPEC.md AUTO-01: HDR Pro に統合・写真の切り抜きと角度補正): render/hdr_merge (exposures of a known radiance merged
+# back at 8 and 16 bits and of linear light, the estimated exposures, the response, ghosts, MTB, the four tone mappings) and
+# the books service/automate_photos makes of them; render/scancrop (rotated photos on a scan: their number, angles within
+# 0.5°, sizes; each cut out upright at the scan's depth) and the books of a page's photos. `genko automate hdr` (32 bits in
+# linear-srgb, 16 and 8 tone mapped, EXIF's exposures, synthetic RAW files as linear light) and `genko automate crop-photos`.
+genko_test(test_hdr_merge SOURCES unit/test_hdr_merge.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 600)
+genko_test(test_scancrop SOURCES unit/test_scancrop.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 600)
+genko_test(test_contract_hdr SOURCES contract/test_contract_hdr.cpp support/raw_testgen.cpp DEPS genko_test_support genko_service
+           LABELS contract TIMEOUT 900)
+add_dependencies(test_contract_hdr genko)
+# PC5 I-g (SPEC.md AUTO-01「自動整列・自動合成」「Photomerge」): the registration (render/features: Harris, steered BRIEF,
+# RANSAC — known maps undone within 0.5 px, the same again) and the panorama (render/panorama, render/pyramid: the layouts, the
+# focal length, the placements, gains, seams, the multi-band blend, focus stacking, the tiled blend as the whole), as PhotoCraft's
+# algo tests them.
+genko_test(test_features SOURCES unit/test_features.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+genko_test(test_panorama SOURCES unit/test_panorama.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
+# PC5 I-g: auto_align_layers on 8-bit, 16-bit and CMYK pages (reposition within a pixel, the six projections, the refusals:
+# a lock, nothing to match, an agent), auto_blend_layers (the panorama's masks and seamless layer of their kind, focus
+# stacking), Photomerge's new book (its size, layers, masks, the edges filled, the same again, too large refused), ファイルを
+# スタックとして読み込み, 統計's median and `genko automate stack|statistics|photomerge`.
+# (test_contract_align is PC3 C-d's align_layers: this one is named for 自動整列)
+genko_test(test_contract_auto_align SOURCES contract/test_contract_auto_align.cpp DEPS genko_test_support genko_service
+           LABELS contract TIMEOUT 1800)
+add_dependencies(test_contract_auto_align genko)
+# PC5 I-f (SPEC.md AUTO-01「プリント」): `genko print` — the sheet's place (fitted, at its size, scaled, at a position), the
+# marks' shapes and places, the label and the description, Genko's colour management through the printer's profile as
+# Little CMS converts (a CMYK page from its inks), a PDF and a dry run, the book never written, the refusals.
+genko_test(test_contract_print SOURCES contract/test_contract_print.cpp DEPS genko_test_support genko_render_ops genko_formats ${GENKO_LCMS2}
+           LABELS contract TIMEOUT 900)
+add_dependencies(test_contract_print genko)
 # The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
 # across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a
 # warped line's pictures within ARCHITECTURE.md §9: Python's homography comes from numpy's SVD).
@@ -614,6 +786,35 @@ genko_target_flags(genko_test_native_plugin)
 genko_test(test_native_plugins SOURCES unit/test_native_plugins.cpp DEPS genko_render_ops LABELS unit TIMEOUT 900)
 target_compile_definitions(test_native_plugins PRIVATE GENKO_TEST_NATIVE_PLUGIN="$<TARGET_FILE:genko_test_native_plugin>")
 add_dependencies(test_native_plugins genko_test_native_plugin)
+# WebAssembly filter plugins (PC5 J-f, plugins:WASM-ABI-v1, docs/PLUGIN_WASM.md) through genko-plugin-host (native/wasm-host,
+# built by cargo beside genko — GenkoPluginHost.cmake; without it, skipped): PhotoCraft's abi.rs ideas — the example
+# invert.wasm, every depth and model, bands and the selection, the settings, cleaning, hostile modules, budgets,
+# installing and the additional folder. The modules: native/tests/data/plugins.
+genko_test(test_wasm_plugins SOURCES unit/test_wasm_plugins.cpp DEPS genko_render_ops LABELS unit TIMEOUT 900)
+target_compile_definitions(test_wasm_plugins PRIVATE GENKO_TEST_NATIVE_PLUGIN="$<TARGET_FILE:genko_test_native_plugin>"
+                                                     GENKO_TEST_PLUGIN_HOST="$<TARGET_FILE_DIR:genko>/genko-plugin-host${CMAKE_EXECUTABLE_SUFFIX}")
+add_dependencies(test_wasm_plugins genko_test_native_plugin)
+if(TARGET genko_plugin_host)
+  add_dependencies(test_wasm_plugins genko_plugin_host)
+  add_dependencies(test_contract_plugins genko_plugin_host)
+endif()
+target_compile_definitions(test_contract_plugins PRIVATE GENKO_TEST_PLUGIN_HOST="$<TARGET_FILE_DIR:genko>/genko-plugin-host${CMAKE_EXECUTABLE_SUFFIX}"
+                                                         GENKO_TEST_NATIVE_PLUGIN="$<TARGET_FILE:genko_test_native_plugin>")
+add_dependencies(test_contract_plugins genko_test_native_plugin)
+target_link_libraries(test_contract_plugins PRIVATE genko_api)
+# (PC5 J-f: the WebAssembly half of the same file as its own program — one QtTest object, one Totals line per run)
+genko_test(test_contract_wasm_plugins SOURCES contract/test_contract_plugins.cpp DEPS genko_test_support genko_render_ops
+           LABELS contract TIMEOUT 1800)
+target_compile_definitions(test_contract_wasm_plugins PRIVATE GENKO_WASM_SUITE
+                                                              GENKO_TEST_PLUGIN_HOST="$<TARGET_FILE_DIR:genko>/genko-plugin-host${CMAKE_EXECUTABLE_SUFFIX}"
+                                                              GENKO_TEST_NATIVE_PLUGIN="$<TARGET_FILE:genko_test_native_plugin>")
+add_dependencies(test_contract_wasm_plugins genko_test_native_plugin)
+if(TARGET genko_plugin_host)
+  add_dependencies(test_contract_wasm_plugins genko_plugin_host)
+endif()
+target_link_libraries(test_contract_wasm_plugins PRIVATE genko_api)
+# (PC5 J-f: 環境設定 → プラグイン…'s WebAssembly rows — test_gui_anim is made further down)
+set(GENKO_TEST_PLUGIN_HOST_DEF "GENKO_TEST_PLUGIN_HOST=\"$<TARGET_FILE_DIR:genko>/genko-plugin-host${CMAKE_EXECUTABLE_SUFFIX}\"")
 
 # 3D (M3-C): the geometry of figures, guides and models bit for bit against Python, the ops, the drawing.
 genko_test(test_contract_3d_geometry SOURCES contract/test_contract_3d_geometry.cpp DEPS genko_test_support genko_render
@@ -673,6 +874,30 @@ if(GENKO_BUILD_APP)
   # PC3 C-d: レイヤー → 重ね順・整列・分布・リンク・ロック…, 表示 → スナップ・スナップ先 (the words, keys and places), the move
   # tool's drag (by whole working pixels, the linked layers along), 自動選択 (Ctrl+click), snapping (a guide, Ctrl off)
   genko_test(test_gui_align SOURCES gui/test_gui_align.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC5 J-a (layer-comps@1): ウィンドウ → レイヤーカンプ (the dock, its panel's rows, buttons and menu, the windows asked,
+  # each one Undo) and ファイル → 書き出し → レイヤーカンプからファイル…
+  genko_test(test_gui_layer_comps SOURCES gui/test_gui_layer_comps.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC5 I-d (variables@1): ページ → 変数 ▸ 定義…・データセット…, データセットを適用…, ファイル → 書き出し → データセットからファイル…,
+  # ファイル → 読み込み → 変数データセット… (their places, the windows asked, each one Undo)
+  genko_test(test_gui_variables SOURCES gui/test_gui_variables.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC5 J-c (annotations@1): the 注釈ツール (a click, a drag, a double click; its options), ウィンドウ → 注釈 (the panel),
+  # 表示 → 表示・非表示 → 注釈, ファイル → 読み込み → 注釈… — each change one Undo
+  genko_test(test_gui_notes SOURCES gui/test_gui_notes.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC5 J-d1 (measure@1): 計測スケールを設定 ▸, the ものさしツール (the line, its readout, the protractor, 消去, レイヤーの角度補正
+  # the same as the op), the カウントツール (marks put, moved, taken away; the groups and their options), 表示 → カウント.
+  genko_test(test_gui_measure SOURCES gui/test_gui_measure.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC5 J-b (slices@1): the スライスツール (a drag, Shift, a click; ガイドからスライスを作成), the スライス選択ツール (chosen, moved,
+  # sized, promoted, divided, deleted, スライスオプション), 新規レイヤーベースのスライス, 表示 → スライス・スライスをロック・スライスを
+  # 消去・スナップ先 → スライス, 環境設定 → ガイド・グリッド・スライス's two, Web 用に保存 by slices — each change one Undo.
+  genko_test(test_gui_slices SOURCES gui/test_gui_slices.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC5 I-c (artboards@1): レイヤー → 新規 ▸ アートボード…・グループ・レイヤーからのアートボード…, イメージ → アートボードの設定…, 表示 →
+  # アートボードを画面サイズに合わせる・選択したアートボードのガイドを消去・表示・非表示 ▸ アートボードガイド・アートボード名, 書き出し ▸
+  # アートボードからファイル…・PDF… — their places, the windows asked, each change one Undo.
+  genko_test(test_gui_artboards SOURCES gui/test_gui_artboards.cpp DEPS genko_app GUI TIMEOUT 600)
+  # PC5 I-e: ファイル → 自動処理 ▸ (バッチ…・ドロップレットを作成…・条件付きモード変更…・画像を合わせる…・レンズ補正…) and スクリプト ▸
+  # (画像プロセッサー…・スクリプトイベントマネージャー…・参照…): their places, the windows asked, the script events raised by the
+  # person's save (never the automatic one) and not run once their script changed
+  genko_test(test_gui_automate SOURCES gui/test_gui_automate.cpp DEPS genko_app GUI TIMEOUT 900)
   # チャンネル (channels@1, COLOR-03): the panel, the target keys, a fill on a channel, the view, options, split.
   genko_test(test_gui_channels SOURCES gui/test_gui_channels.cpp DEPS genko_app GUI TIMEOUT 600)
   # PC2c (COLOR-04): レイヤー → 色調補正's local corrections and image calculations, 編集 → フェード (only right after).
@@ -703,10 +928,20 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_brush_settings SOURCES gui/test_gui_brush_settings.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_tool_presets SOURCES gui/test_gui_tool_presets.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_guides SOURCES gui/test_gui_guides.cpp DEPS genko_app GUI TIMEOUT 900)
+  # PC5 H-e: 環境設定's panes and what they do, genko prefs set applied to the app running, commands.json made from the menus,
+  # session.json, the history log
+  genko_test(test_gui_prefs SOURCES gui/test_gui_prefs.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_colours SOURCES gui/test_gui_colours.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_workspace SOURCES gui/test_gui_workspace.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_look SOURCES gui/test_gui_look.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
   genko_test(test_gui_carried SOURCES gui/test_gui_carried.cpp DEPS genko_app genko_test_support GUI TIMEOUT 600)
+  # PC5 J-g (制御チャンネル, SPEC.md PROD-01): the running app's local socket — off by default, nothing answered before auth,
+  # an ai: token's ops in the journal as ai:…, MCP's refusals (a human: token too), no method reaching an approval, a
+  # consent, a setting or a file, the view's commands only, 1 MiB lines and 4 connections, the pen as the token's actor
+  # holding the person's input while it draws — in this process, from `genko control`, and `genko app` started with it on
+  genko_test(test_control_channel SOURCES e2e/test_control_channel.cpp DEPS genko_app genko_test_support LABELS e2e GUI TIMEOUT 900)
+  target_compile_definitions(test_control_channel PRIVATE GENKO_CLI="$<TARGET_FILE:genko>")
+  add_dependencies(test_control_channel genko)
   # PC3 A0 (smart-objects@1): レイヤー → スマートオブジェクト・ラスタライズ, the layer panel, 埋め込みを配置…, a large file on a
   # 16-bit page, the 属性 panel's part (its size, its colours).
   genko_test(test_gui_smart SOURCES gui/test_gui_smart.cpp DEPS genko_app genko_test_support ZLIB::ZLIB GUI TIMEOUT 600)
@@ -734,7 +969,7 @@ if(GENKO_BUILD_APP)
   target_compile_definitions(test_package PRIVATE GENKO_CMAKE_COMMAND="${CMAKE_COMMAND}" GENKO_BUILD_DIR="${CMAKE_BINARY_DIR}"
                                                   GENKO_VERSION="${PROJECT_VERSION}")
   if(GENKO_LIBRARY_KIND STREQUAL "SHARED")
-    # (a sanitizer build: Genko's own libraries are shared and go beside the program — GenkoFlags.cmake)
+    # (a sanitizer build, or GENKO_SHARED_LIBRARIES: Genko's own libraries are shared and go beside the program — GenkoFlags.cmake)
     target_compile_definitions(test_package PRIVATE GENKO_SHARED_LIBRARIES=1)
   endif()
   add_dependencies(test_package genko)
@@ -763,6 +998,38 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_actions SOURCES gui/test_gui_actions.cpp DEPS genko_app GUI TIMEOUT 900)
   # the canvas's gestures: the panel tool (cuts, gutters, corners, drawn panels) and the view
   genko_test(test_gui_canvas SOURCES gui/test_gui_canvas.cpp DEPS genko_app GUI TIMEOUT 1200)
+  # PC5 H-a (SPEC VIEW-01): the zoom in the page's pixels (100%, 200%, プリントサイズ), a 600 dpi B4 zoomed to its pixels,
+  # レイヤーを画面サイズに合わせる, ピクセルグリッド, ピクセルアートプレビュー, 手のひらツール and ズームツール, スクリーンモード, 32 bit
+  # プレビューオプション…
+  genko_test(test_gui_view SOURCES gui/test_gui_view.cpp DEPS genko_app GUI TIMEOUT 900)
+  # PC5 H-a (review P2-2): render:GPU-CPU-parity — test_gui_canvas's theCardShowsWhatTheProcessorDraws again on Xvfb with
+  # Mesa's OpenGL (xcb), where the card's picture is compared with the processor's (offscreen has no OpenGL: there it checks
+  # the way back to the processor). Labels gui and gpu; in a validation plan only when asked for (validation_policy --gpu).
+  # No xvfb-run on the machine: the test fails saying so (never a skip).
+  function(genko_xvfb_test name target)
+    find_program(GENKO_XVFB_RUN xvfb-run)
+    if(GENKO_XVFB_RUN)
+      add_test(NAME ${name} COMMAND ${GENKO_XVFB_RUN} -a -s "-screen 0 1920x1200x24" $<TARGET_FILE:${target}> ${ARGN})
+    else()
+      add_test(NAME ${name} COMMAND ${CMAKE_COMMAND} -E echo "${name}: xvfb-run is not on this machine (apt install xvfb)")
+      set_tests_properties(${name} PROPERTIES FAIL_REGULAR_EXPRESSION "xvfb-run is not")
+    endif()
+    set_tests_properties(${name} PROPERTIES LABELS "gui;gpu" TIMEOUT 600
+                         ENVIRONMENT "QT_QPA_PLATFORM=xcb;LIBGL_ALWAYS_SOFTWARE=1;QTEST_FUNCTION_TIMEOUT=500000")
+  endfunction()
+  if(UNIX AND NOT APPLE)
+    genko_xvfb_test(test_gui_canvas_gpu test_gui_canvas theCardShowsWhatTheProcessorDraws)
+  endif()
+  # PC5 H-c (SPEC VIEW-01「窓の区画と並べ方」): ウィンドウ → アレンジ — the books in cells of one window (4 アップ, the panes, a pane
+  # clicked to the front, a tab in no cell, 16 at most), ウィンドウを分離 and すべてをタブに統合, 同じ…で表示, Shift in every pane,
+  # closing asked once, ツール and 修飾キー, and the one window, one pane way as before; on Xvfb (test_gui_arrange_gpu) the
+  # canvas on the graphics card moved to another cell
+  genko_test(test_gui_arrange SOURCES gui/test_gui_arrange.cpp DEPS genko_app GUI TIMEOUT 900)
+  if(UNIX AND NOT APPLE)
+    genko_xvfb_test(test_gui_arrange_gpu test_gui_arrange theCardFollowsTheFrontPane)
+  endif()
+  # PC5 H-a: the tiles — 画素の段 laid nearest, ピクセルアートプレビュー, 32 bit プレビュー on the three ways, the tiles on the card
+  genko_test(test_tiles SOURCES unit/test_tiles.cpp DEPS genko_app LABELS unit TIMEOUT 600)
   # saving and closing (AC-SAVE 2, 3, 4, 6, 8, 10): failures shown, the question before closing, recovery, retries
   genko_test(test_gui_save SOURCES gui/test_gui_save.cpp DEPS genko_app GUI TIMEOUT 900)
   target_compile_definitions(test_gui_save PRIVATE GENKO_CLI="$<TARGET_FILE:genko>")
@@ -801,6 +1068,13 @@ if(GENKO_BUILD_APP)
   # the approval box's model and the AI dialog's Qt-free part against Python's (review_model.py, ai_link.py, links.py);
   # what `genko mcp` keeps in a book read by Python's readers; the reply drafts left alone by the Python version
   genko_test(test_contract_studio_gui SOURCES contract/test_contract_studio_gui.cpp DEPS genko_app genko_test_support LABELS contract TIMEOUT 1800)
+  # PC5 G-a (SPEC.md TEXT-02): the text tools' type layers — a click a point text, a drag a box text, a click on the path a
+  # text on it, the input method's words —, a type layer typed over (its text clicked, its row double-clicked), 書式's
+  # commands (アンチエイリアス, 方向, the conversions, ラスタライズ, 更新, Lorem ipsum, a line and a type layer each other's)
+  genko_test(test_gui_type SOURCES gui/test_gui_type.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
+  # PC5 G-d (SPEC.md TEXT-02): the 文字・段落・文字スタイル・段落スタイル・字形 panels on the text chosen and its range, 検索と置換…,
+  # スペルチェック…, the missing fonts, 環境設定 → テキスト, the names and Shift+T
+  genko_test(test_gui_type_panels SOURCES gui/test_gui_type_panels.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
 endif()
 
 # `genko` alone starts the desktop app when it is built (test_app_e2e); without it, it is a usage error
@@ -841,3 +1115,10 @@ foreach(slow test_contract_raster_ops test_smart_stack test_contract_ops_cli tes
     set_property(TEST ${slow} APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=${function_ms}")
   endif()
 endforeach()
+# (PC5 J-f: 編集 → 環境設定 → プラグイン…'s WebAssembly rows read the module's manifest through genko-plugin-host)
+if(TARGET test_gui_anim)
+  target_compile_definitions(test_gui_anim PRIVATE ${GENKO_TEST_PLUGIN_HOST_DEF})
+  if(TARGET genko_plugin_host)
+    add_dependencies(test_gui_anim genko_plugin_host)
+  endif()
+endif()

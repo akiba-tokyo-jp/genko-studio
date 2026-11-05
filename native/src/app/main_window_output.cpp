@@ -79,12 +79,13 @@ void MainWindow::build_output_actions() {
          QStringLiteral("PDF・TIFF・PSD・縦読み・SNS 用などに書き出します"));
     make("act_print", QStringLiteral("プリント…"), [this] { print_book(); }, {QKeySequence(QStringLiteral("Ctrl+P"))},
          QStringLiteral("プリンターで紙に印刷します（仕上がりで切る・用紙全体）"));
-    make("act_history", QStringLiteral("履歴…"), [this] { show_dock(QStringLiteral("履歴")); }, {QKeySequence(QStringLiteral("Ctrl+H"))},
+    make("act_history", QStringLiteral("ヒストリー…"), [this] { show_dock(QStringLiteral("ヒストリー")); }, {QKeySequence(QStringLiteral("Ctrl+H"))},
          QStringLiteral("変更の一覧。クリックでその時点まで戻る・進む"));
     QAction* phone = make("act_phone", QStringLiteral("スマホの画面の範囲を表示"), [this] { toggle_phone(); }, {},
                           QStringLiteral("縦読みの原稿で、スマホ 1 画面に入る範囲と画面の切れ目"), true);
-    QAction* scale = make("act_scale", QStringLiteral("目盛りを表示"), [] {}, {QKeySequence(QStringLiteral("Ctrl+R"))},
-                          QStringLiteral("上と左に mm の目盛り。目盛りからドラッグするとガイド線を引けます"), true);
+    // (PC5 H-0, the user's decision 12: Photoshop's 定規 — Genko's 目盛り; the drawing rulers are 描画定規)
+    QAction* scale = make("act_scale", QStringLiteral("定規"), [] {}, {QKeySequence(QStringLiteral("Ctrl+R"))},
+                          QStringLiteral("上と左に mm の定規。定規からドラッグするとガイド線を引けます"), true);
     connect(scale, &QAction::triggered, this, [this](bool on) {
         canvas_->show_scale = on;
         canvas_->update();
@@ -103,6 +104,9 @@ void MainWindow::build_output_docks() {
     addDockWidget(Qt::RightDockWidgetArea, history_dock_);
     tabifyDockWidget(pages_dock_, history_dock_);
     history_dock_->hide();
+    // (PC5 H-f review P3-8: its switch's own id — commands.json's — whatever its name becomes: ヒストリー（ウィンドウ） since
+    // メモリをクリア ▸ ヒストリー shares its words)
+    history_dock_->toggleViewAction()->setProperty("genko_attribute", QStringLiteral("dock_history"));
     connect(history_dock_, &QDockWidget::visibilityChanged, this, [this](bool shown) {
         if (shown) history_->refresh();
     });
@@ -122,6 +126,10 @@ void MainWindow::build_output_docks() {
 
 // After a change to the book: the checks are out of date, the history follows.
 void MainWindow::output_panels_follow(bool now) {
+    if (QAction* assets = action("act_image_assets"); assets != nullptr) {  // (PC5 I-f: 生成 → 画像アセット as the book in front has it)
+        const QSignalBlocker quiet(assets);
+        assets->setChecked(book().image_assets);
+    }
     if (checks_ != nullptr) checks_->refresh();
     history_follows(now);
 }
@@ -197,17 +205,18 @@ void MainWindow::export_book() {
         if (session->wait_saved(std::chrono::seconds(30)) && !session->unsaved()) return QString();
         return QStringLiteral("原稿を保存できていないため、正式な書き出しをしていません: %1").arg(failure_reason(session->status()));
     };
-    ask::exec(&dialog);
+    const bool exported = ask::exec(&dialog) == QDialog::Accepted;  // (accepted: files written)
     if (dialog.fix_requested) run_checks();
     session_->check_outside();  // (an official export may have recorded an approval: Python's sync)
     reload_pages();
+    if (exported) script_event(service::script_events::Event::Export);  // (PC5 I-e: スクリプトイベント)
 }
 
 void MainWindow::print_book() {
     if (!read_whole(*this)) return;
     session_->save_now();  // (Python's commit_now)
     PrintDialog dialog(this);
-    ask::exec(&dialog);
+    if (ask::exec(&dialog) == QDialog::Accepted) script_event(service::script_events::Event::Print);  // (PC5 I-e: printed)
 }
 
 void MainWindow::toggle_phone() {

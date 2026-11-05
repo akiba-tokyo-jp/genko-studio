@@ -4,7 +4,8 @@
 // from a picture put into the book), the fill opacity and Blend If, the same style on 16-bit, 32-bit, CMYK, Lab and grey
 // pages; the ops (an effect merged or added, scaled, hidden, the global light, レイヤーを作成, merged down); a book without
 // styles drawn and written as before; saved, opened, undone and done again; written to a PSD (lfx2, iOpa, the blending
-// ranges) and read back by this build and by psd-tools.
+// ranges) and read back by this build (psd-tools reads it in test_contract_psd_smart: Windows runs this one without the
+// reference Python).
 
 #include <QDir>
 #include <QTemporaryDir>
@@ -717,33 +718,6 @@ private slots:
         notes.clear();
         QVERIFY(!render::psd_effects::style_of(std::string("\0\0\0\0\0\0\0\x10\xFF\xFF\xFF\xFF", 12), placement, notes));
         QCOMPARE(notes.size(), std::size_t(1));
-
-        // psd-tools: the layer's effects as Photoshop's
-        if (genko::test::python_ref().isEmpty()) QSKIP("no reference Python: set GENKO_PYREF or install /opt/pyref/bin/python");
-        const QString answer = scratch.path() + QStringLiteral("/answer.json");
-        const auto ran = genko::test::run(genko::test::python_ref(),
-                                          {QStringLiteral("-I"), genko::test::repo_root() + QStringLiteral("/tools/migration/psd_effects_check.py"), answer,
-                                           QString::fromStdString(storage::path_to_utf8(file))},
-                                          genko::test::python_env(scratch.path() + QStringLiteral("/pyenv")));
-        QVERIFY2(ran.exit_code == 0, qPrintable(ran.described()));
-        const Json seen = genko::test::read_json(answer);
-        Json layer;
-        for (const Json& l : seen["layers"])
-            if (!l["effects"].empty()) layer = l;
-        QVERIFY2(layer.is_object(), seen.dump().c_str());
-        QCOMPARE(layer["enabled"], Json(true));
-        std::vector<std::string> kinds;
-        for (const Json& e : layer["effects"]) kinds.push_back(e["kind"].get<std::string>());
-        std::sort(kinds.begin(), kinds.end());
-        QCOMPARE(kinds, (std::vector<std::string>{"DropShadow", "PatternOverlay", "Stroke"}));
-        for (const Json& e : layer["effects"]) {
-            if (e["kind"] == Json("DropShadow")) {
-                QVERIFY2(std::abs(e["distance"].get<double>() - 10) < 0.6, e.dump().c_str());  // (1.27 mm at 200 dpi)
-                QVERIFY2(std::abs(e["opacity"].get<double>() - 50) < 0.6, e.dump().c_str());
-            }
-            if (e["kind"] == Json("Stroke")) QVERIFY2(std::abs(e["size"].get<double>() - 6) < 0.6, e.dump().c_str());
-        }
-        QVERIFY2(std::abs(layer["fill_opacity"].get<double>() - 128) <= 1, layer.dump().c_str());
     }
 };
 

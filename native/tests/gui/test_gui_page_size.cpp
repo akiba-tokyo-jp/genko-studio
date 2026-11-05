@@ -130,7 +130,7 @@ private slots:
     void theCommandsAndTheirKeys() {
         Window w;
         const std::vector<std::tuple<const char*, const char*, const char*, const char*>> commands{
-            {"act_image_size", "画像解像度…", "", "ページ"},
+            {"act_image_size", "画像解像度…", "Ctrl+Alt+I", "ページ"},  // (PC5 H-0: the Photoshop key set)
             {"act_canvas_size", "カンバスサイズ…", "Ctrl+Alt+C", "ページ"},
             {"act_rotate_180", "180°", "", "ページ/画像の回転"},
             {"act_rotate_90cw", "90°（時計回り）", "", "ページ/画像の回転"},
@@ -141,7 +141,7 @@ private slots:
             {"act_crop", "切り抜き", "", "ページ"},
             {"act_trim", "トリミング…", "", "ページ"},
             {"act_reveal_all", "すべての領域を表示", "", "ページ"},
-            {"act_crop_tool", "切り抜きツール", "Shift+C", "ツール"}};
+            {"act_crop_tool", "切り抜きツール", "C", "ツール"}  /* (PC5 H-0: the Photoshop key set) */};
         for (const auto& [name, title, key, menu] : commands) {
             QAction* act = w.window->action(QString::fromLatin1(name));
             QVERIFY2(act != nullptr, name);

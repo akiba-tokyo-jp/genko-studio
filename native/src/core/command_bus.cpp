@@ -10,6 +10,11 @@
 #include <utility>
 #include <vector>
 
+#include "core/groups.hpp"
+#include "core/layer_basics.hpp"
+#include "core/artboards.hpp"
+#include "core/variables.hpp"
+#include "core/video.hpp"
 #include "core/adjust.hpp"
 #include "core/adjust_kinds.hpp"
 #include "core/channels.hpp"
@@ -24,6 +29,8 @@
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
 #include "core/studio.hpp"
+#include "core/type_styles.hpp"
+#include "core/type_text.hpp"
 
 namespace genko::core {
 
@@ -81,6 +88,11 @@ bool fill_key(std::string_view op, std::string_view key) {
 bool own_setting(const Json& op, std::string_view name, std::string_view key);
 // patterns@1 (PC4 E3): a pattern fill — fill_area's and fill's pattern, add_layer's of kind fill.
 bool pattern_key(std::string_view op, std::string_view key) { return key == "pattern" && (op == "fill_area" || op == "fill" || op == "add_layer"); }
+// PC5 G-d (SPEC TEXT-02「検索と置換」): replace_text's whole_word — taken, so neither ignored nor unknown.
+bool word_key(std::string_view op, std::string_view key) { return op == "replace_text" && key == "whole_word"; }
+// PC5 J-e1 (timeline@1): set_animation's work — taken, but for an agent through MCP (core::public_animation_ops), which is
+// given the public list's set_animation: an unknown key there, ignored, as Python says.
+bool timeline_key(std::string_view op, std::string_view key) { return op == "set_animation" && key == "work" && !public_animation_ops(); }
 
 // Python's _usage: the keys given that the op does not take, and how the op is written. (`channel`: the op's "channel"
 // is this build's own there — it names a channel or plate of its page: core::channel_target —, so not one of them; nor
@@ -92,7 +104,7 @@ std::string usage(const Json& op, bool channel = false) {
     std::vector<std::string> strange;
     for (const auto& [key, value] : op.items()) {
         if (!schema->contains(key) && key != "op" && key != "area" && !key.starts_with("_") && !paper_key(op, key) &&
-            !stroke_colour_key(op, key) && !dab_key(name, key) && !pattern_key(name, key) && !fill_key(name, key) && !(key == "channel" && channel) &&
+            !stroke_colour_key(op, key) && !dab_key(name, key) && !pattern_key(name, key) && !fill_key(name, key) && !word_key(name, key) && !timeline_key(name, key) && !(key == "channel" && channel) &&
             !own_setting(op, name, key)) {
             strange.push_back(key);
         }
@@ -114,6 +126,7 @@ std::string usage(const Json& op, bool channel = false) {
 bool native_key(std::string_view op, std::string_view key) {
     return (op == "merge_visible" && key == "flatten") || (op == "convert_layer" && key == "preserve_precision") ||
            (op == "define_brush" && key == "paper") || ((op == "add_line" || op == "edit_line") && key == "ruby_spans") ||
+           ((op == "add_line" || op == "edit_line") && key == "native_type") ||  // (type@1, PC5 G-0)
            (op == "add_stroke" && key == "color_rgb") || dab_key(op, key) || fill_key(op, key) ||
            key == "contents" ||  // (smart-objects@1: any op on a smart object's page)
            // PC3 (masks@1): set_layer_mask's linked, density and feather_mm; a pixel op's layer_mask (its layer's mask
@@ -127,7 +140,12 @@ bool native_key(std::string_view op, std::string_view key) {
            // PC3 C-c (SPEC COLOR-07): Filter › Liquify's strokes and its field's spacing
            (op == "liquify" && (key == "strokes" || key == "mesh_mm")) ||
            // PC4 E3 (patterns@1): a pattern fill — fill_area's and fill's pattern, add_layer's of kind fill
-           pattern_key(op, key);
+           pattern_key(op, key) ||
+           word_key(op, key) ||  // (PC5 G-d)
+           timeline_key(op, key) ||  // (PC5 J-e1)
+           // PC5 I-a (layer-locks@1, blend-channels@1): set_layer's and set_layers' locks, set_layer's channels
+           ((op == "set_layer" || op == "set_layers") && (key == "lock_all" || key == "lock_nest")) ||
+           (op == "set_layer" && key == "blend_channels");
 }
 
 // PC2 (SPEC COLOR-04): the settings of this build's own an op of Python's reads by what else it was given —
@@ -200,6 +218,16 @@ const Page* first_page(const Document& doc, const Num& index) {
 
 // Python's _op_page_index: the page an op is about (its "page", or the page of the line a line op names).
 std::optional<Num> op_page_index(const Document& doc, const Json& op) {
+    // (type@1, PC5 節 G: the type ops that name a line by its "line" are about that line's page, whatever "page" says)
+    static const std::set<std::string, std::less<>> kTypeLineOps{"edit_type", "type_info", "set_type", "type_style", "line_to_type_layer"};
+    if (const Json* name = get(op, "op"); name != nullptr && name->is_string() && kTypeLineOps.contains(name->get_ref<const std::string&>())) {
+        if (const Json* line_id = get(op, "line"); line_id != nullptr && !line_id->is_null()) {
+            for (const StoryLine& line : doc.story) {
+                if (line_id->is_string() && line.id == line_id->get_ref<const std::string&>()) return line.page_index;
+            }
+            return std::nullopt;
+        }
+    }
     if (const Json* page = get(op, "page")) {
         try {
             return Num(py_int(*page));
@@ -227,7 +255,9 @@ bool json_equals_string(const Json& value, std::string_view text) {
 // An op on a page someone else has locked: refused ("page N locked by <them>").
 void check_held(const Document& doc, const Page& page, const Num& index, const Actor& actor) {
     const Json* owner = get(doc.page_locks, page.id);  // (v3: locks follow the page, not its position)
-    if (owner != nullptr && py_truthy(*owner) && !json_equals_string(*owner, actor.name())) {
+    // (PC5 J-g, the review's P3-3: an actor with an agent's rights — the control channel's — never goes through a lock, even
+    // one under its own name: a person's lock is the person's, whoever names a token so)
+    if (owner != nullptr && py_truthy(*owner) && (!json_equals_string(*owner, actor.name()) || actor.agent_rights())) {
         throw OpError("page " + index.repr() + " locked by " + py_str(*owner));
     }
 }
@@ -264,7 +294,13 @@ bool not_per_page(std::string_view name) {
     return one_of(name, {"add_page", "delete_page", "duplicate_page", "import_pages", "reorder", "move_page",
                          "set_page_spec", "add_cover", "for_pages", "replace_text", "approve", "revoke",
                          "allow_chat_approval", "name_ok", "advance", "set_bible", "set_script", "define_brush",
-                         "set_brush", "split_channels", "merge_channels"});
+                         "set_brush", "split_channels", "merge_channels",
+                         // (variables@1, PC5 I-d: the book's variables and data sets)
+                         "set_variables", "set_data_sets", "apply_data_set",
+                         // (artboards@1, PC5 I-c: an artboard is a page made)
+                         "add_artboard", "artboard_from_layers",
+                         // (image-assets@1, PC5 I-f: 生成 → 画像アセット, the book's)
+                         "set_image_assets"});
 }
 
 bool printed(const Layer& layer) { return layer.role != LayerRole::Name && layer.role != LayerRole::Draft; }
@@ -289,7 +325,9 @@ bool page_local_op(std::string_view name) {
 }
 
 bool book_op(std::string_view name) {
-    return one_of(name, {"set_brush", "define_brush", "set_autosave", "add_ticket", "set_ticket", "reorder_lines"});
+    return one_of(name, {"set_brush", "define_brush", "set_autosave", "add_ticket", "set_ticket", "reorder_lines",
+                         // (image-assets@1, PC5 I-f: no page touched)
+                         "set_image_assets"});
 }
 
 bool line_op(std::string_view name) {
@@ -323,6 +361,10 @@ void read_as_touched_pages_does(const Json& ops) {
 }
 
 }  // namespace
+
+void check_page_held(const Document& doc, std::size_t row, const Actor& actor) {
+    if (row < doc.pages.size()) check_held(doc, *doc.pages[row], doc.pages[row]->index, actor);
+}
 
 ApplyError::ApplyError(const std::string& message, std::string code) : Error(std::move(code), message) {}
 
@@ -368,7 +410,31 @@ const OpRegistry& OpRegistry::builtin() {
     return registry;
 }
 
+// (PC5 G-c review P3-11: an op's function given again — render::ops_registry wraps every op so — keeps it a question when it
+// is one; add_query and its asks say which)
 void OpRegistry::add(std::string name, OpFunction function) { ops_[std::move(name)] = std::move(function); }
+
+void OpRegistry::add_query(std::string name, OpFunction function) {
+    asks_.erase(name);
+    queries_.insert(name);
+    ops_[std::move(name)] = std::move(function);
+}
+
+bool OpRegistry::is_query(std::string_view name) const { return queries_.find(name) != queries_.end(); }
+
+void OpRegistry::add_query(std::string name, OpFunction function, std::function<bool(const Json&)> asks) {
+    queries_.erase(name);
+    asks_[name] = std::move(asks);
+    ops_[std::move(name)] = std::move(function);
+}
+
+bool OpRegistry::is_query(const Json& op) const {
+    const Json* name = op.is_object() ? get(op, "op") : nullptr;
+    if (name == nullptr || !name->is_string()) return false;
+    if (is_query(std::string_view(name->get_ref<const std::string&>()))) return true;
+    const auto it = asks_.find(name->get_ref<const std::string&>());
+    return it != asks_.end() && it->second && it->second(op);
+}
 
 void OpRegistry::set_area_resolver(AreaResolver resolver) { area_resolver_ = std::move(resolver); }
 
@@ -409,6 +475,86 @@ bool paper_on_every_page(const Json& op) {
     return page == nullptr || page->is_null() || *page == Json("") || py_equals(*page, Json(0));
 }
 
+// PC5 G-c (review P2-1): the pages a type_style that changes a style of the book reaches — set, delete, redefine: the pages
+// of the texts that take it (lines, type layers, and the pages showing smart object contents with such a type layer; Basic
+// Paragraph: the texts of type@1). Their locks are asked, as set_text_gamma asks every page's.
+static std::vector<std::size_t> type_style_pages(const Document& doc, const Json& op) {
+    const std::string action = op.value("action", Json()).is_string() ? op["action"].get<std::string>() : std::string();
+    if (action != "set" && action != "delete" && action != "redefine") return {};
+    const Json* kind_value = get(op, "kind");
+    if (kind_value == nullptr || (*kind_value != Json("character") && *kind_value != Json("paragraph"))) return {};
+    const type_styles::Kind kind = *kind_value == Json("character") ? type_styles::Kind::Character : type_styles::Kind::Paragraph;
+    std::string id;
+    if (const Json* given = get(op, "id"); given != nullptr && given->is_string()) {
+        id = given->get<std::string>();
+    } else if (action == "redefine") {  // (no id: the style the text named takes at its range's start)
+        const StoryLine* record = nullptr;
+        if (const Json* line = get(op, "line"); line != nullptr && line->is_string()) {
+            for (const StoryLine& l : doc.story) {
+                if (l.id == line->get_ref<const std::string&>()) record = &l;
+            }
+        } else if (const Json* layer_id = get(op, "layer_id"); layer_id != nullptr && layer_id->is_string()) {
+            if (const auto index = op_page_index(doc, op)) {
+                if (const Page* page = first_page(doc, *index)) {
+                    for (const Layer& l : page->layers) {
+                        if (l.id == layer_id->get_ref<const std::string&>() && l.type) record = l.type.get();
+                    }
+                }
+            }
+        }
+        if (record == nullptr) return {};
+        std::int64_t at = 0;
+        if (const Json* range = get(op, "range"); range != nullptr && range->is_array() && !range->empty() && (*range)[0].is_number_integer())
+            at = (*range)[0].get<std::int64_t>();
+        if (kind == type_styles::Kind::Character) {
+            const auto found = type_styles::character_style_at(*record, at);
+            if (!found) return {};
+            id = *found;
+        } else {
+            id = type_styles::paragraph_style_at(*record, at);
+        }
+    } else {
+        return {};
+    }
+    const bool basic = kind == type_styles::Kind::Paragraph && id == type_styles::kBasic;
+    const auto reached = [&](const StoryLine& record, bool layer) {
+        if (!type_styles::takes(record, kind, id)) return false;
+        if (!basic) return true;
+        return layer || record.native_type.has_value() || (record.style.is_object() && record.style.contains("features"));
+    };
+    std::set<std::size_t> out;
+    for (const StoryLine& line : doc.story) {
+        if (!reached(line, false)) continue;
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (doc.pages[i]->index == line.page_index) out.insert(i);
+        }
+    }
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        for (const Layer& layer : doc.pages[i]->layers) {
+            if (layer.type && reached(*layer.type, true)) out.insert(i);
+        }
+    }
+    for (const auto& [contents, held] : doc.smart_contents) {
+        if (!held || !held->page) continue;
+        const bool used = std::any_of(held->page->layers.begin(), held->page->layers.end(), [&](const Layer& l) { return l.type && reached(*l.type, true); });
+        if (!used) continue;
+        for (const std::size_t at : smart::pages_using(doc, contents)) out.insert(at);
+    }
+    return {out.begin(), out.end()};
+}
+
+// The page duplicate_layers or duplicate_channel copies onto (its to_page as the op reads it: require_page), or none — none
+// given, "new" (a new page), or one the book does not have.
+static std::optional<std::size_t> page_copied_onto(const Document& doc, const Json& op) {
+    const Json* to = get(op, "to_page");
+    if (to == nullptr || to->is_null() || *to == Json("new")) return std::nullopt;
+    try {
+        return require_page(doc, Json{{"page", *to}});
+    } catch (const OpError&) {
+        return std::nullopt;
+    }
+}
+
 void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
     const Json* name_value = get(op, "op");
     const std::string name = name_value != nullptr && name_value->is_string() ? name_value->get<std::string>() : "";
@@ -425,16 +571,17 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
         for (const auto& each : doc.pages) check_held(doc, *each, each->index, actor);
         return;
     }
-    if (named && name == "duplicate_channel") {  // (channels@1: the page it copies onto is asked too, then its own)
-        const Json* to = get(op, "to_page");
-        if (to != nullptr && to->is_number_integer()) {
-            for (const auto& each : doc.pages) {
-                if (each->index == Num(to->get<std::int64_t>())) {
-                    check_held(doc, *each, each->index, actor);
-                    break;
-                }
-            }
+    if (named && (name == "delete_layers" || name == "bake_layer_styles")) {  // (PC5 I-a: "page": "all" — every page asked)
+        const Json* page = get(op, "page");
+        if (page != nullptr && page->is_string() && page->get_ref<const std::string&>() == "all") {
+            for (const auto& each : doc.pages) check_held(doc, *each, each->index, actor);
+            return;
         }
+    }
+    if (named && (name == "duplicate_layers" || name == "duplicate_channel")) {
+        // (PC5 I-a, channels@1: the page it copies onto is asked too — found as the op finds it (2, 2.0, "2"…: the review's
+        // P2-4) —, then its own; a page the book does not have is the op's to refuse)
+        if (const std::optional<std::size_t> to = page_copied_onto(doc, op)) check_held(doc, doc.page(*to), doc.page(*to).index, actor);
     }
     if (named && name == "merge_channels") {  // (channels@1: every page it takes is asked)
         const Json* pages = get(op, "pages");
@@ -468,6 +615,9 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
             for (const std::size_t at : smart::pages_using(doc, id->get<std::string>())) check_held(doc, doc.page(at), doc.page(at).index, actor);
         }
         return;
+    }
+    if (named && name == "type_style") {  // (PC5 G-c review P2-1: a style of the book changed — the pages of its texts asked)
+        for (const std::size_t at : type_style_pages(doc, op)) check_held(doc, doc.page(at), doc.page(at).index, actor);
     }
     // (Python takes a lock on a page the book does not have, and lets it go, without a word: refused here)
     const bool lock_op = named && (name == "lock_page" || name == "unlock_page");
@@ -520,6 +670,66 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
             throw OpError("page " + page.index.repr() +
                           ": the name is approved; a person must revoke it before the layout changes (strict_gates)");
         }
+    }
+    // (PC5 I-a: deleting, copying, ungrouping or baking printed layers is drawing on the page — named ids, or every layer)
+    // (PC5 I-g: auto_blend_layers masks the layers named and makes a printed merged layer, auto_align_layers draws them again
+    // — as transform_layers, but on the cylinder or sphere a filter of their pixels: both on printed layers after the name)
+    if (named && one_of(name, {"delete_layers", "duplicate_layers", "ungroup_layers", "bake_layer_styles", "auto_align_layers", "auto_blend_layers"})) {
+        const Json* page_value = get(op_in, "page");
+        const bool all_pages = page_value != nullptr && page_value->is_string() && page_value->get_ref<const std::string&>() == "all";
+        std::vector<const Page*> pages;
+        if (all_pages) {
+            for (const auto& each : doc.pages) pages.push_back(each.get());
+        } else {
+            pages.push_back(&page_of(op_in));
+        }
+        const Json* ids = get(op_in, "ids");
+        const Json* id = get(op_in, "id");
+        const bool hidden = truthy_at(op_in, "hidden");
+        const bool empty = truthy_at(op_in, "empty");
+        // (the review's P3-6: the layers the op takes — those named, or those hidden, empty or with effects — not every one)
+        const auto taken = [&](const std::vector<Layer>& layers, std::size_t i) {
+            const Layer& l = layers[i];
+            if (ids != nullptr && ids->is_array() &&
+                std::any_of(ids->begin(), ids->end(), [&](const Json& v) { return json_equals_string(v, l.id) || json_equals_string(v, py_str(l.parent_id)); }))
+                return true;
+            if (id != nullptr && name != "bake_layer_styles") return json_equals_string(*id, l.id) || json_equals_string(l.parent_id, py_str(*id));
+            if (name == "delete_layers") return (hidden && !l.visible) || (empty && empty_layer(layers, i));
+            if (name == "bake_layer_styles" && (ids == nullptr || !ids->is_array()))
+                return l.style && l.style->is_object() && l.style->contains("effects") && !(*l.style)["effects"].empty();
+            return false;
+        };
+        const Page* onto = nullptr;  // (duplicate_layers' page copied onto: its name approved too — the review's P2-4)
+        if (name == "duplicate_layers") {
+            if (const std::optional<std::size_t> to = page_copied_onto(doc, op_in)) onto = &doc.page(*to);
+        }
+        for (const Page* page : pages) {
+            bool touched = false;
+            for (std::size_t i = 0; i < page->layers.size() && !touched; ++i) touched = printed(page->layers[i]) && taken(page->layers, i);
+            if (!touched) continue;
+            if (!page->name_ok) throw OpError(name + " on a printed layer needs name_ok on page " + page->index.repr() + " (strict_gates)");
+            if (onto != nullptr && !onto->name_ok) throw OpError(name + " of a printed layer onto page " + onto->index.repr() + " needs name_ok there (strict_gates)");
+        }
+        return;
+    }
+    // (PC5 J-e2, the coordinator's decision on the review's P2-5: a video layer's ops that take printed layers away — its
+    // altered cels, its folder — or make printed layers of the footage's pixels are drawing on the page, after the name:
+    // the footage laid as a new video layer or as layers, a frame altered or rasterized; a frame deleted, duplicated or
+    // restored, every frame restored, where the video layer is printed)
+    if (named && one_of(name, {"add_video_layer", "footage_to_layers", "video_alter", "rasterize_video", "video_delete", "video_duplicate",
+                               "video_restore", "video_restore_all"})) {
+        const Page& page = page_of(op_in);
+        bool drawn = name == "footage_to_layers" || name == "video_alter" || name == "rasterize_video";
+        if (name == "add_video_layer") {
+            const Json* footage = get(op_in, "footage");
+            drawn = footage != nullptr && !footage->is_null();
+        } else if (!drawn) {  // (the video layer printed: its folder not a name's or a draft's)
+            const Json* folder = get(op_in, "folder");
+            for (const Layer& layer : page.layers) {
+                if (folder != nullptr && json_equals_string(*folder, layer.id)) drawn = printed(layer);
+            }
+        }
+        if (drawn && !page.name_ok) throw OpError(name + " on a printed layer needs name_ok on page " + page.index.repr() + " (strict_gates)");
     }
     if (named && name == "advance" && json_equals_string(op_in.value("to", Json(nullptr)), "finish")) {
         const Page& page = page_of(op_in);
@@ -851,6 +1061,21 @@ Json journal_op(const Json& op) {
         } else if (is_op(out, "set_adjustment") || (is_op(out, "filter_raster") && out.value("kind", Json()) == Json("color_lookup"))) {
             file_text(out);
         }
+        // (variables@1, PC5 I-d: a data set's picture given as its bytes — kept by the book as an asset)
+        if (is_op(out, "set_data_sets")) {
+            if (const auto sets = out.find("data_sets"); sets != out.end() && sets->is_array()) {
+                for (Json& set : *sets) {
+                    if (!set.is_object() || !set.contains("values") || !set["values"].is_array()) continue;
+                    for (Json& value : set["values"]) {
+                        if (!value.is_object() || !value.contains("value") || !value["value"].is_object()) continue;
+                        Json& picture = value["value"];
+                        if (const auto data = picture.find("data"); data != picture.end() && data->is_string()) {
+                            *data = "<" + std::to_string(code_points(data->get_ref<const std::string&>())) + " base64 chars>";
+                        }
+                    }
+                }
+            }
+        }
     }
     return out;
 }
@@ -1040,7 +1265,8 @@ std::optional<Json> apply_in_contents(const CommandBus& bus, Document& work, con
                            after.episode == work.episode && after.binding == work.binding && after.tickets == work.tickets &&
                            after.nombre == work.nombre && after.bible.plot == work.bible.plot && after.bible.characters == work.bible.characters &&
                            after.pages[0]->name_ok == page->name_ok && after.pages[0]->art_ok == page->art_ok &&
-                           after.pages[0]->stage == page->stage && smart::same_panels(after.pages[0]->frames, page->frames);
+                           after.pages[0]->stage == page->stage && smart::same_panels(after.pages[0]->frames, page->frames) &&
+                           after.type_styles == work.type_styles;  // (PC5 G-c review P1-1: the book's type styles are changed in the book)
     if (!same_book) throw ApplyError(prefix + "this op cannot be used inside smart object contents");
     work.luts = after.luts;
     work.papers = after.papers;
@@ -1121,8 +1347,30 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
         ops = std::move(expanded);
     }
 
+    // (PC5 G-0: questions — OpRegistry::add_query — asked alone, as a dry run: never with ops that change the book)
+    const auto question = [&](const Json& op) { return registry_.is_query(op); };  // (PC5 G-c: by its arguments too)
+    const auto questions = static_cast<std::size_t>(std::count_if(ops.begin(), ops.end(), question));
+    if (questions > 0 && questions < ops.size()) {
+        for (std::size_t i = 0; i < ops.size(); ++i) {
+            if (!question(ops[i])) continue;
+            const std::string name = ops[i]["op"].get<std::string>();
+            throw ApplyError("ops[" + std::to_string(i) + "] " + name + ": " + name + " is a question: ask it alone, not with ops that change the book");
+        }
+    }
+    const bool asking = questions > 0 && questions == ops.size();
+
     read_as_touched_pages_does(ops);
-    refuse_unread_pages(doc, ops);
+    if (!asking) {
+        refuse_unread_pages(doc, ops);
+    } else if (!doc.deferred.empty()) {  // (PC5 G-c review P3-7: questions change no page — asked unless of a page not read yet)
+        for (const Json& op : ops) {
+            if (get(op, "page") == nullptr) continue;
+            try {
+                if (doc.is_deferred(require_page(doc, op))) throw ApplyError("the book's pages are still being read: try again in a moment", "page_not_loaded");
+            } catch (const OpError&) {  // (no such page: the op says so)
+            }
+        }
+    }
     Document work = doc;  // (the pages stay shared until an op changes one)
     std::vector<char> channels(ops.size(), 0);  // (channels@1: the ops whose "channel" named a channel or plate of their page)
     std::vector<std::string> notes;             // (PC4: what the ops said they did not use, OpContext::notes)
@@ -1167,8 +1415,12 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     if (schema_of(seen) != nullptr && !is_op(seen, "undo")) not_yet_ported(name_text + " is not in the C++ build yet");
                     throw OpError("unknown op: " + name_text);
                 }
+                // (layer-locks@1, PC5 I-a: the layers locked with すべてをロック before the op — kept as they were after it)
+                const std::vector<LockedLayer> locked = locked_layers(work);
                 OpContext context{work, *current, actor};
                 (*function)(context);
+                check_locked_layers(locked, work, *current);
+                settle_blend_channels(work);  // (blend-channels@1: a page whose mode changed blends every channel again)
                 validate_color_document(work);
                 try {
                     validate_ink_document(work);  // (color-mode@1: what an op leaves on a CMYK or Lab page)
@@ -1180,6 +1432,11 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                     vector::validate_vector(work);  // (PC3: vector@1, pen-shapes@1, transform@1, page-spec@1)
                     validate_pattern_fills(work);   // (patterns@1, PC4 E3: no fill names a pattern the book does not keep)
                     validate_layer_styles(work);    // (layer-styles@1, PC4 E6: a style in its normal form, on a layer that takes one)
+                    type_text::validate_type(work);  // (type@1, PC5 G-0: a record in its normal form; a type layer draws its text alone)
+                    validate_groups(work);  // (groups@1, PC5 I-b: a group on a folder only, pass_through a group's only)
+                    validate_variables(work);  // (variables@1, PC5 I-d: the book's variables in their normal form)
+                    validate_layer_basics(work);  // (blend-channels@1, PC5 I-a: a flag for each colour channel of the page)
+                    validate_artboards(work);  // (artboards@1, PC5 I-c: an artboard well formed, never a cover's or a spread's)
                 } catch (const Error& error) {
                     if (error.code() == "not_yet_ported") throw;
                     throw OpError(error.what());
@@ -1223,6 +1480,11 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
     for (auto& warning : validate_document(work)) result.warnings.push_back(std::move(warning));
     for (auto& warning : unknown_key_warnings(ops, channels)) result.warnings.push_back(std::move(warning));
     for (std::string& note : notes) result.warnings.push_back(std::move(note));
+    if (asking) {  // (questions: the book as it was given, nothing to journal)
+        result.unchanged = true;
+        result.doc = doc;
+        return result;
+    }
     for (const Json& op : ops) result.journal_ops.push_back(journal_op(op));
     result.doc = std::move(work);
     return result;

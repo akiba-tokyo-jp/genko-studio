@@ -48,7 +48,11 @@ endif()
 # Genko's libraries (and the vendored Pillow) are static, except in a sanitizer build, where they are shared: there each
 # test program would otherwise carry every library again, instrumented (about 0.4 GB each), and the build of all the
 # tests no longer fits the machines the suites run on. What is tested is the same code; only how it is linked differs.
-if(GENKO_SANITIZE AND NOT MSVC)
+# GENKO_SHARED_LIBRARIES asks for the same in another build (off by default: Release and Debug static as before): the
+# exit's Debug validation (PC5 V3), whose some 300 test programs at -g0 each carry every library — 70 to 140 MB each,
+# about 28 GB — more than its machine holds.
+option(GENKO_SHARED_LIBRARIES "Build Genko's libraries shared, as a sanitizer build does (Linux; for test builds that must fit a small disk)" OFF)
+if(NOT MSVC AND (GENKO_SANITIZE OR GENKO_SHARED_LIBRARIES))
   set(GENKO_LIBRARY_KIND SHARED)
 else()
   set(GENKO_LIBRARY_KIND STATIC)

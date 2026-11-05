@@ -10,11 +10,15 @@
 //       the headless HTTP API (api/headless_server.hpp)
 //   genko token add --actor human:<name>|ai:<name> | list | revoke --id <prefix>
 //       the HTTP tokens (tokens.json in the config folder)
+//   genko control <method> [params JSON] [--token-file F]   (PC5 J-g, SPEC.md PROD-01「制御チャンネル」)
+//       one call on the running app's control channel (app/control_channel.hpp): the token from --token-file or
+//       GENKO_TOKEN; the answer {"ok", "result" | "error"} on stdout (exit 0 when ok, 1 when refused or not listening)
 
 namespace genko::api {
 
 int mcp_command(const QStringList& args);
 int serve_command(const QStringList& args);
 int token_command(const QStringList& args, bool ascii);
+int control_command(const QStringList& args, bool ascii);
 
 }  // namespace genko::api

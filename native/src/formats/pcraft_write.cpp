@@ -16,6 +16,8 @@
 #include <thread>
 #include <utility>
 
+#include "core/video.hpp"
+#include "core/groups.hpp"
 #include "core/adjust.hpp"
 #include "core/channels.hpp"
 #include "core/color_model.hpp"
@@ -33,6 +35,7 @@
 #include "formats/export.hpp"
 #include "formats/file_xmp.hpp"
 #include "formats/output.hpp"
+#include "render/footage.hpp"
 #include "render/blake3.hpp"
 #include "render/color_canvas.hpp"
 #include "render/image.hpp"
@@ -40,12 +43,18 @@
 #include "render/ink_canvas.hpp"
 #include "render/page.hpp"
 #include "render/pcraft_manifest.hpp"
+#include "render/pcraft_production.hpp"
 #include "render/png.hpp"
 #include "render/shape_parts.hpp"
 #include "render/smart_filters.hpp"
 #include "render/zip.hpp"
 #include "render/zstd.hpp"
 #include "storage/asset_store.hpp"
+#include "core/type_text.hpp"
+#include "formats/psd_text_detail.hpp"
+#include "render/psd_type.hpp"
+#include "render/text/fonts.hpp"
+#include "render/text/shaping.hpp"
 
 namespace genko::formats {
 
@@ -242,6 +251,7 @@ struct Ctx {
     int depth = 0;
     render::RgbSpace space;                                         // (an RGB page's: its profile's, or sRGB)
     std::map<const core::SmartContents*, std::string> written;      // (contents written as a .pcraft inside: its blob, once)
+    std::map<std::string, std::string> layer_ids;                   // (PC5 J-a: a layer's id → its first layer's id in the document)
 
     void note(const std::string& text) {
         if (said.insert(text).second) notes.push_back(text);
@@ -705,7 +715,8 @@ Json no_effects() { return Json{{"enabled", true}, {"items", Json::array()}, {"p
 
 Json locks_of(const core::Layer* layer) {
     return Json{{"transparency", layer != nullptr && layer->lock_alpha}, {"pixels", layer != nullptr && layer->locked},
-                {"position", layer != nullptr && layer->lock_position}, {"artboard", false}, {"all", false}};
+                {"position", layer != nullptr && layer->lock_position}, {"artboard", layer != nullptr && layer->lock_nest},
+                {"all", layer != nullptr && layer->lock_all}};  // (PC5 I-a, layer-locks@1)
 }
 
 // A layer's common settings (its content given): from the Genko layer when there is one, else plain.
@@ -728,6 +739,12 @@ Json layer_json(Ctx& ctx, const std::string& name, const core::Layer* layer, Jso
              {"fill_cache", nullptr},
              {"link_group", nullptr}};
     if (layer != nullptr) {
+        ctx.layer_ids.emplace(layer->id, out["id"].dump());  // (PC5 J-a: the layer comps' states name it so)
+        // (PC5 I-a, blend-channels@1: the colour channels it leaves out, bit i the page's channel i)
+        std::uint64_t excluded = 0;
+        for (std::size_t c = 0; c < layer->blend_channels.size(); ++c)
+            if (!layer->blend_channels[c]) excluded |= std::uint64_t(1) << c;
+        if (excluded != 0) out["excluded_channels"] = excluded;
         if (layer->mask && layer->mask->png && !layer->mask->png->empty()) out["mask"] = mask_json(ctx, *layer->mask);
         if (layer->vector_mask) out["vector_mask"] = pc::vector_mask_json(*layer->vector_mask, ctx.px);
         if (layer->link) {
@@ -736,9 +753,12 @@ Json layer_json(Ctx& ctx, const std::string& name, const core::Layer* layer, Jso
             for (const char c : *layer->link) n = (n ^ static_cast<unsigned char>(c)) * 1099511628211ull;
             out["link_group"] = n >> 12;
         }
-        if (layer->native_psd) {
+        // (PC5 G-e, the review's P2-2: what written_keep keeps, never a text layer's block — upstream writes a text layer's
+        // TySh anew from its text, and a layer written as pixels must not carry its text of before)
+        if (const std::optional<core::PsdLayerKeep> keep = core::written_keep(*layer)) {
             Json blocks = Json::array();
-            for (const auto& [key, ref] : layer->native_psd->blocks) {
+            for (const auto& [key, ref] : keep->blocks) {
+                if (core::psd_text_key(key)) continue;
                 if (const auto bytes = file_bytes(ctx.doc, ref, core::kPsdBlockSuffix)) {
                     blocks.push_back(Json::array({pc::hex_of(key), ctx.objects.blob(*bytes)}));
                 } else {
@@ -746,7 +766,7 @@ Json layer_json(Ctx& ctx, const std::string& name, const core::Layer* layer, Jso
                 }
             }
             out["psd_blocks"] = std::move(blocks);
-            if (layer->native_psd->id && *layer->native_psd->id >= 0 && *layer->native_psd->id <= 0xffffffff) out["psd_id"] = *layer->native_psd->id;
+            if (keep->id && *keep->id >= 0 && *keep->id <= 0xffffffff) out["psd_id"] = *keep->id;
         }
     } else if (shown != nullptr) {
         if (shown->mask) {
@@ -780,6 +800,42 @@ std::size_t index_of(const core::Page& page, const std::string& id) {
 
 std::string title_of(const core::Layer& layer) { return !layer.title.empty() ? layer.title : std::string(core::to_string(layer.role)) + " " + layer.id.substr(0, 6); }
 
+// PC5 G-e (type@1, design G 2.9): a type layer as upstream's text layer (render/psd_type::to_pcraft) — a point or box text
+// of nothing a text layer cannot hold, its picture the cache —; another (rubies, 傍点, a balloon, the letters' effects, set
+// in its balloon) none: its pixels, said.
+std::optional<Json> type_content(Ctx& ctx, const core::Layer& layer, const render::PageLayer* shown, const std::string& name) {
+    if (!layer.type || shown == nullptr) return std::nullopt;
+    const core::StoryLine twin = core::type_text::line_of(layer, ctx.page.index);
+    std::optional<render::psd::TextLayer> text;
+    std::map<std::string, std::pair<std::string, std::string>> families;  // (a PostScript name → its family and style)
+    if (detail::line_features(twin).empty() && detail::type_layer_plain(twin)) {
+        render::text::Fonts fonts;
+        const auto font_name = [&](const std::string& path) {
+            const std::string ps = detail::font_name(fonts, path);
+            if (!families.contains(ps)) {
+                try {
+                    const render::text::FontInfo info = render::text::font_info(path, 0, false);
+                    families[ps] = {info.family, info.style};
+                } catch (const std::exception&) {
+                    families[ps] = {};
+                }
+            }
+            return ps;
+        };
+        text = render::psd_type::text_of(*layer.type, ctx.doc, ctx.px, font_name);
+    }
+    if (!text) {
+        ctx.note("ルビ・傍点・フキダシ・文字の効果のあるテキストレイヤー、フキダシに入れたテキストレイヤーは画素にしました（「" + name + "」）");
+        return std::nullopt;
+    }
+    Json content = render::psd_type::to_pcraft(*text, ctx.dpi, [&](const std::string& ps) {
+        const auto it = families.find(ps);
+        return it == families.end() ? std::pair<std::string, std::string>{} : it->second;
+    });
+    content["cache"] = picture_surface(ctx, shown->image, shown->inks, shown->page_values);
+    return content;
+}
+
 // A layer of the page (the picture page_layers drew of it, when it did) as an upstream layer.
 std::optional<Json> layer_of(Ctx& ctx, const core::Layer& layer, const render::PageLayer* shown, std::set<std::string>& patterns) {
     const std::string name = title_of(layer);
@@ -805,6 +861,9 @@ std::optional<Json> layer_of(Ctx& ctx, const core::Layer& layer, const render::P
     }
     if (layer.kind == core::LayerKind::Smart) {
         if (auto content = smart_content(ctx, layer, shown, name)) return layer_json(ctx, name, &layer, std::move(*content), nullptr);
+    }
+    if (layer.kind == core::LayerKind::Type) {  // (PC5 G-e: upstream's text layer, its picture the cache)
+        if (auto content = type_content(ctx, layer, shown, name)) return layer_json(ctx, name, &layer, std::move(*content), nullptr);
     }
     if (shown != nullptr && shown->shape != nullptr) {
         const core::vector::ShapePart& part = *shown->shape;
@@ -1011,11 +1070,13 @@ std::vector<Json> grouped(Ctx& ctx, std::vector<Out> flat) {
             const core::Layer* f = find_layer(ctx.page, folder);
             Json content{{"kind", "group"}, {"children", std::move(children)}, {"expanded", true}, {"artboard", nullptr}};
             Json group = layer_json(ctx, f != nullptr ? title_of(*f) : std::string("フォルダー"), f, std::move(content), nullptr);
-            group["blend"] = "PassThrough";
-            group["opacity"] = 1.0;
-            group["clipped"] = false;
-            group["mask"] = nullptr;
-            group["vector_mask"] = nullptr;
+            if (f == nullptr || !f->group) {  // (a folder that is not a group draws as 通過 with nothing of its own; groups@1: a group's own)
+                group["blend"] = "PassThrough";
+                group["opacity"] = 1.0;
+                group["clipped"] = false;
+                group["mask"] = nullptr;
+                group["vector_mask"] = nullptr;
+            }
             out.push_back(std::move(group));
         }
         return out;
@@ -1035,6 +1096,7 @@ Json document_json(Ctx& ctx) {
     std::set<std::string> patterns;
     std::vector<Out> flat;
     std::size_t next = 0;  // (the page's layers written so far, page_layers' or hidden)
+    const std::vector<std::optional<std::size_t>> owners = core::group_owners(page.layers);  // (groups@1: made once)
     const auto hidden_until = [&](std::size_t index) {
         for (; next < index && next < page.layers.size(); ++next) {
             const core::Layer& l = page.layers[next];
@@ -1044,7 +1106,7 @@ Json document_json(Ctx& ctx) {
             const bool pen = l.kind == core::LayerKind::Strokes && l.role != core::LayerRole::Tone && (l.stroke_count() > 0 || !l.patches.empty()) &&
                              !render::shape_parts::any(l) && !(l.raster_png && !l.raster_png->empty()) && !l.color_raster && !l.ink_raster;
             // (and a smart object page_layers gives no picture of — its file not in the book —: written, and said)
-            const bool unseen = !l.visible || pen || l.kind == core::LayerKind::Smart || (l.kind == core::LayerKind::Fill && l.fill && core::pattern_of_fill(*l.fill) == nullptr);
+            const bool unseen = !core::shown_in_groups(page.layers, next, owners) || pen || l.kind == core::LayerKind::Smart || (l.kind == core::LayerKind::Fill && l.fill && core::pattern_of_fill(*l.fill) == nullptr);  // (groups@1: in a hidden group too)
             if (!unseen || l.kind == core::LayerKind::Folder || !l.exportable || l.role == core::LayerRole::Name || l.role == core::LayerRole::Draft) continue;
             if (auto made = layer_of(ctx, l, nullptr, patterns)) flat.push_back(Out{std::move(*made), folder_of(l)});
         }
@@ -1120,6 +1182,18 @@ Json document_json(Ctx& ctx) {
     }
     Json layers = Json::array();
     for (Json& l : grouped(ctx, std::move(flat))) layers.push_back(std::move(l));
+    // (PC5 I-c, artboards@1: an artboard page is PhotoCraft's artboard over the whole document — a top-level group of its
+    // name, 通過, its board the page, its background and preset)
+    if (page.artboard) {
+        const core::Artboard& a = *page.artboard;
+        Json background = a.background == "custom" && a.rgb
+                              ? Json{{"custom", pc::to_json(pc::rgb_color((*a.rgb)[0] / 255.0, (*a.rgb)[1] / 255.0, (*a.rgb)[2] / 255.0))}}
+                              : Json(a.background == "black" || a.background == "transparent" ? a.background : std::string("white"));
+        Json board{{"rect", Json{{"x0", 0}, {"y0", 0}, {"x1", ctx.w}, {"y1", ctx.h}}}, {"background", std::move(background)}, {"preset", a.preset.value_or(std::string())}};
+        Json group = layer_json(ctx, a.name, nullptr, Json{{"kind", "group"}, {"children", std::move(layers)}, {"expanded", true}, {"artboard", std::move(board)}}, nullptr);
+        group["blend"] = "PassThrough";
+        layers = Json::array({std::move(group)});
+    }
     doc["layers"] = std::move(layers);
 
     // channels and the Quick Mask
@@ -1262,6 +1336,20 @@ Json document_json(Ctx& ctx) {
         }
         doc["duotone"] = Json{{"inks", std::move(inks)}, {"psd_raw", nullptr}};
     }
+    // (PC5 G-e: the book's character and paragraph styles, upstream's TextStyles — a book of none: not written, as before)
+    if (ctx.doc.type_styles && !ctx.doc.type_styles->is_null()) doc["text_styles"] = render::psd_type::pcraft_text_styles(ctx.doc);
+    // PC5 節 J (render/pcraft_production): the page's layer comps, notes, slices, timeline and measuring — each by its group's
+    // row (none written until then)
+    {
+        render::pcraft_production::WriteContext production;
+        production.px = ctx.px;
+        production.layers = ctx.layer_ids;  // (PC5 J-a)
+        production.book = &ctx.doc;  // (PC5 I-d: the variables, the book's)
+        production.say = [&ctx](std::string note) {
+            if (ctx.said.insert(note).second) ctx.notes.push_back(std::move(note));
+        };
+        render::pcraft_production::write(ctx.page, doc, production);
+    }
     return doc;
 }
 
@@ -1358,6 +1446,15 @@ int dpi_of(const core::Page& page, const PcraftOptions& options) {
 
 std::vector<std::string> write_pcraft(const core::Document& doc, std::size_t page, const std::function<void(std::string_view)>& sink, const PcraftOptions& options) {
     const core::Page& p = page_at(doc, page);
+    if (core::page_uses_video(p)) {  // (PC5 J-e2: a video layer's first frame as a layer — a .pcraft holds no video rows)
+        std::vector<std::string> laid;
+        const core::Page shown = render::footage::with_footage(p, 1, &doc, &laid);
+        std::vector<std::string> notes = write_page(doc, shown, dpi_of(p, options), 0, sink);
+        for (const std::string& title : laid) {
+            notes.push_back("ビデオレイヤー「" + title + "」は 1 フレーム目の素材をレイヤーにしました（ほかのフレームは .pcraft に無いため書きません）");
+        }
+        return notes;
+    }
     return write_page(doc, p, dpi_of(p, options), 0, sink);
 }
 

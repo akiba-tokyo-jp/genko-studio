@@ -16,7 +16,8 @@ namespace {
 constexpr std::array<std::string_view, 2> kBindings{"right", "left"};
 constexpr std::array<std::string_view, 10> kRoles{"name", "draft", "ink", "bg", "finish",
                                                   "tone", "effect", "frames", "text", "user"};
-constexpr std::array<std::string_view, 8> kKinds{"raster", "strokes", "fill", "tone", "folder", "placed", "adjust", "smart"};
+constexpr std::array<std::string_view, 9> kKinds{"raster", "strokes", "fill", "tone", "folder", "placed", "adjust", "smart",
+                                                  "type"};  // (type@1, PC5 G-0)
 
 template <class Enum, std::size_t N>
 std::optional<Enum> enum_from(const std::array<std::string_view, N>& names, std::string_view text) {

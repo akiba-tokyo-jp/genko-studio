@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "core/json.hpp"
 #include "render/draw.hpp"
@@ -54,6 +55,11 @@ public:
 
     // fonts.truetype(path, size): the font at max(6, size) px.
     const TrueTypeFont& truetype(const std::string& path, std::int64_t size);
+    // PC5 G-b: the font with its variable axes set (TrueTypeFonts::truetype's), falling back as truetype() does.
+    const TrueTypeFont& truetype(const std::string& path, std::int64_t size, const std::vector<std::pair<std::string, float>>& axes);
+    // PC5 G-b: the font file the OpenType typesetting shapes and draws `path` with: `path`, or Pillow's own default font
+    // (render::pillow_default_font) when the file cannot be read (as truetype() draws it then).
+    std::string readable(const std::string& path);
     // fonts.has_glyph(path, char): the font draws the character with something other than its "no glyph" box (a
     // character drawn as nothing counts when it is whitespace).
     bool has_glyph(const std::string& path, std::u32string_view ch);
@@ -69,6 +75,7 @@ public:
 private:
     TrueTypeFonts fonts_;
     std::map<std::pair<std::string, std::u32string>, bool> glyphs_;
+    std::map<std::string, std::string> readable_;
 };
 
 }  // namespace genko::render::text

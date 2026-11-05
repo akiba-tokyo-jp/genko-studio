@@ -140,25 +140,26 @@ private slots:
         QCOMPARE(studio.panel()->keys(), (std::vector<std::string>{"composite", "red", "green", "blue"}));
     }
 
-    // Ctrl+Alt+2…9 (PhotoCraft's ⌘2…⌘9; Ctrl+2 stays 定規にスナップ): 2 the composite, 3… the plates, then the channels;
+    // Ctrl+2…9 in the Photoshop key set (PC5 H-0, the user's decision 8; PhotoCraft's ⌘2…⌘9 — Ctrl+Alt+2…9 in the Genko set,
+    // where Ctrl+2 is 描画定規にスナップ): 2 the composite, 3… the plates, then the channels;
     // a slot with nothing said so.
     void targetKeys() {
         Studio studio;
         studio.window->apply_ops(Json::array({Json{{"op", "add_channel"}, {"page", 1}}}));
         const std::string alpha = studio.page().channels[0].id;
-        QCOMPARE(studio.window->action(QStringLiteral("act_channel_composite"))->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+2")));
+        QCOMPARE(studio.window->action(QStringLiteral("act_channel_composite"))->shortcut(), QKeySequence(QStringLiteral("Ctrl+2")));
         for (int slot = 3; slot <= 9; ++slot) {
-            QCOMPARE(studio.window->action(QStringLiteral("act_channel_%1").arg(slot))->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+%1").arg(slot)));
+            QCOMPARE(studio.window->action(QStringLiteral("act_channel_%1").arg(slot))->shortcut(), QKeySequence(QStringLiteral("Ctrl+%1").arg(slot)));
         }
-        QVERIFY(studio.window->action(QStringLiteral("act_snap"))->shortcut() == QKeySequence(QStringLiteral("Ctrl+2")));
+        QVERIFY(studio.window->action(QStringLiteral("act_snap"))->shortcut().isEmpty());  // (PC5 H-0: Photoshop's Ctrl+2…9)
         studio.window->activateWindow();
         QVERIFY(QTest::qWaitForWindowActive(studio.window.get()));
-        QTest::keyClick(studio.window->canvas(), Qt::Key_3, Qt::ControlModifier | Qt::AltModifier);
+        QTest::keyClick(studio.window->canvas(), Qt::Key_3, Qt::ControlModifier);
         QCOMPARE(studio.window->channel_view().target, std::string("red"));
         QCOMPARE(studio.shown().planes, (std::optional<std::vector<bool>>(std::vector<bool>{true, false, false})));
-        QTest::keyClick(studio.window->canvas(), Qt::Key_6, Qt::ControlModifier | Qt::AltModifier);
+        QTest::keyClick(studio.window->canvas(), Qt::Key_6, Qt::ControlModifier);
         QCOMPARE(studio.window->channel_view().target, alpha);
-        QTest::keyClick(studio.window->canvas(), Qt::Key_2, Qt::ControlModifier | Qt::AltModifier);
+        QTest::keyClick(studio.window->canvas(), Qt::Key_2, Qt::ControlModifier);
         QCOMPARE(studio.window->channel_view().target, std::string());
         studio.window->action(QStringLiteral("act_channel_9"))->trigger();
         QCOMPARE(studio.window->channel_view().target, std::string());

@@ -18,16 +18,19 @@ SAFETY = {
 
 def inventory(root):
     text = (Path(root) / 'native/tests/CMakeLists.txt').read_text(encoding='utf-8')
-    result = {'normal': set(), 'contract': set(), 'perf': set()}
+    result = {'normal': set(), 'contract': set(), 'perf': set(), 'gpu': set()}
     for name, body in re.findall(r'genko_test\((test_\w+)\s+(.*?)\)', text, re.S):
         kind = 'perf' if re.search(r'LABELS\s+perf\b', body) else 'contract' if re.search(r'LABELS\s+contract\b', body) else 'normal'
         result[kind].add(name)
+    # (PC5 H-a: a GUI test run again on Xvfb with Mesa's OpenGL — the graphics card's way —, Linux only; in a plan only when
+    # asked for: make_plan(gpu=True), --gpu)
+    result['gpu'] |= set(re.findall(r'genko_xvfb_test\((test_\w+)\s', text))
     if not result['normal'] or not result['contract']:
         raise ValueError('CTest台帳を抽出できません')
     return result
 
 
-def make_plan(paths, phase, root):
+def make_plan(paths, phase, root, gpu=False):
     if phase not in PHASES:
         raise ValueError('不明な検証段階')
     paths = sorted(set(paths))
@@ -111,6 +114,9 @@ def make_plan(paths, phase, root):
             if preset.startswith('windows'):
                 selected -= inv['contract']
             selected &= all_tests
+            # (PC5 H-a: the graphics card's way on Xvfb, asked for, on Linux, with the app's tests)
+            if gpu and preset.startswith('linux') and (full or any(n.startswith('test_gui_') for n in selected)):
+                selected |= inv['gpu']
             if not selected:
                 raise ValueError('native試験の選択が空です')
             rows.append({'preset': preset, 'suite': 'full' if full else 'related',
@@ -194,6 +200,8 @@ def main():
     parser.add_argument('--github-output')
     parser.add_argument('--ci-baseline-branch')
     parser.add_argument('--repository')
+    # (PC5 H-a: the GUI tests on Xvfb and Mesa too — test_gui_canvas_gpu —; the machine needs xvfb-run and Mesa)
+    parser.add_argument('--gpu', action='store_true')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     base = args.base
@@ -217,7 +225,7 @@ def main():
                 'performance_required': False,
                 'reasons': ['全構成合格PRと全tree・検証制御が同一。証跡を再使用し再buildしない']}
     else:
-        plan = make_plan(paths, args.phase, root)
+        plan = make_plan(paths, args.phase, root, gpu=args.gpu)
     plan.update(base=base, head=args.head, baseline_run=evidence.get('html_url') if evidence else None,
                 baseline_error=baseline_error)
     if args.ci_baseline_branch and not base:

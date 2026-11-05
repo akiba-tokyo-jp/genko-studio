@@ -120,6 +120,12 @@ def _claim_file(rel: str) -> bool:
     return len(parts) >= 3 and parts[-3:-1] == ["studio", "claims"] and parts[-1].endswith(".json")
 
 
+# The user's decision of 2026-10-28 (PC5-0): review.html names the menu item the C++ build has (ファイル → 書き出し →
+# 原稿を書き出す…) where Python's names one that is no longer there.
+_REVIEW_EXPORT_PY = "Genko アプリの「書き出し…」から書き出せます。".encode("utf-8")
+_REVIEW_EXPORT_CPP = "Genko アプリの「ファイル → 書き出し → 原稿を書き出す…」から書き出せます。".encode("utf-8")
+
+
 def _files(folder: Path, prefix: str, root: str, config: str) -> dict:
     """Each file's sha256, the root's and the config folder's paths in it written <root> and <config> first (a file
     that names them is the same on both sides)."""
@@ -138,6 +144,8 @@ def _files(folder: Path, prefix: str, root: str, config: str) -> dict:
         data = path.read_bytes()
         if _claim_file(rel):  # (a lease: its time, the time it was taken plus the lease, written <expires>)
             data = re.sub(rb'"expires": -?[0-9][0-9.eE+-]*', b'"expires": "<expires>"', data)
+        if rel.endswith(".html"):  # (genko review's page: the menu named as the C++ build names it, the user's decision 2026-10-28)
+            data = data.replace(_REVIEW_EXPORT_PY, _REVIEW_EXPORT_CPP)
         data = data.replace(root.encode("utf-8"), b"<root>")
         if config:
             data = data.replace(config.encode("utf-8"), b"<config>")

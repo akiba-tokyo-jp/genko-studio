@@ -428,7 +428,7 @@ private slots:
                  QStringList({QStringLiteral("ページを追加（この後ろに）"), QStringLiteral("このページを複製"), QStringLiteral("このページを消す…"), QStringLiteral("|"),
                               QStringLiteral("このページを前へ"), QStringLiteral("このページを後ろへ"), QStringLiteral("次のページと見開きにする／解除"), QStringLiteral("|"),
                               QStringLiteral("原稿用紙の設定…"), QStringLiteral("絵柄を選ぶ…"), QStringLiteral("チャットでの承認…"), QStringLiteral("ノンブルの設定…"), QStringLiteral("このページのノンブルを隠す／出す"),
-                              QStringLiteral("表紙・カバーを足す…"), QStringLiteral("このページの担当…"), QStringLiteral("アニメーション（タイムライン）"), QStringLiteral("色モード"),
+                              QStringLiteral("表紙・カバーを足す…"), QStringLiteral("このページの担当…"), QStringLiteral("ビデオタイムラインを作成"), QStringLiteral("色モード"),
                               QStringLiteral("|"), QStringLiteral("コマ")}));
         // ファイル: after the scans (PC4 F-0: Photoshop's order — the export in 書き出し ▸ before them, ファイル情報… after them:
         // test_gui_actions' theFileMenuIsPhotoshops)
@@ -437,9 +437,10 @@ private slots:
         const QStringList in_file = menu_texts(file);
         const int scanner = static_cast<int>(in_file.indexOf(QStringLiteral("スキャナーから取り込む…")));
         QVERIFY(scanner > 0);
-        QCOMPARE(in_file.mid(scanner - 1, 7), QStringList({QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"),
+        // (PC5 J-c: Photoshop's 読み込み ▸ — 注釈… — after them)
+        QCOMPARE(in_file.mid(scanner - 1, 8), QStringList({QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"),
                                                            QStringLiteral("ほかの原稿のページを取り込む…"), QStringLiteral("PSD をレイヤーのまま読み込む…"),
-                                                           QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|")}));
+                                                           QStringLiteral("読み込み"), QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|")}));
     }
 
     // 次のページと見開きにする／解除: with the next page when they face each other; else, when the page before faces it,

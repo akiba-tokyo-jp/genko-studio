@@ -49,6 +49,8 @@ public:
     // items; and a list of unit floats (VlLs of UntF: a shape stroke's dashes).
     void objects(std::string_view key, const std::vector<std::pair<std::string, Writer>>& items);
     void units(std::string_view key, std::string_view unit, const std::vector<double>& values);
+    // (PC5 J-a) a list of integers (VlLs of long: a layer comps' compList)
+    void integers(std::string_view key, const std::vector<std::int32_t>& values);
     // (PC4 E6) another writer's items after these (an effect's descriptor made of parts)
     void append(const Writer& other) {
         body_ += other.body_;

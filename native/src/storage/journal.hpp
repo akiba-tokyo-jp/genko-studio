@@ -81,6 +81,7 @@ struct HistoryItem {
     std::optional<std::string> after;
     std::string before_old;  // legacy: the v3 snapshot refs
     std::string after_old;
+    std::string script;  // (PC5 I-0) the prepare line's "script": the script that made the change; empty: none
 };
 
 struct Stacks {

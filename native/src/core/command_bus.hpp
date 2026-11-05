@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <set>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -58,6 +59,10 @@ struct OpContext {
 
 using OpFunction = std::function<void(OpContext&)>;
 
+// The page at `row` locked by another than `actor`: refused ("page N locked by <them>") — for an op that finds the pages it
+// changes as it works (PC5 G-d review P2-2: replace_text's and replace_fonts').
+void check_page_held(const Document& doc, std::size_t row, const Actor& actor);
+
 // Python's selops.resolve: an op's "area" of a kind beyond {poly} and {mask} (rect, ellipse, layer, color, all, saved,
 // union, intersect, subtract, invert, grow_mm, feather_mm) as the {poly} or {mask} the drawing ops take, on the page
 // at `page` of the book. Some kinds need the page or a layer drawn, so the resolver is render's (render::ops_registry).
@@ -75,6 +80,16 @@ public:
     void add(std::string name, OpFunction function);
     const OpFunction* find(std::string_view name) const;
     std::vector<std::string> names() const;
+    // (PC5 G-0) An op that only answers a question (type_info): it changes nothing, and a batch of such ops alone is applied
+    // as a dry run whoever asks (ApplyResult::unchanged: nothing saved, journalled or put in the history).
+    void add_query(std::string name, OpFunction function);
+    bool is_query(std::string_view name) const;
+    // A name written as a literal is a name, not an op (a Json would take it too).
+    bool is_query(const char* name) const { return is_query(std::string_view(name)); }
+    // (PC5 G-c) An op that is a question when `asks` says so of it (type_style's list) and changes the book otherwise.
+    void add_query(std::string name, OpFunction function, std::function<bool(const Json&)> asks);
+    // Is this op (an object with its "op") a question?
+    bool is_query(const Json& op) const;
 
     // Without a resolver the bus refuses an area that needs one with not_yet_ported.
     void set_area_resolver(AreaResolver resolver);
@@ -82,6 +97,8 @@ public:
 
 private:
     std::map<std::string, OpFunction, std::less<>> ops_;
+    std::set<std::string, std::less<>> queries_;
+    std::map<std::string, std::function<bool(const Json&)>, std::less<>> asks_;  // (PC5 G-c: ops a question by their arguments)
     AreaResolver area_resolver_;
 };
 
@@ -92,6 +109,9 @@ struct ApplyResult {
     bool has_warnings = true;         // false for [{"op": "undo"}] (Python's reply has no "warnings" then)
     Json results = Json::array();     // what some ops report: {"index", "op", …} (the reply's "results" when any)
     Json journal_ops = Json::array(); // the ops as the journal records them (Python's _journal_op)
+    // (PC5 G-0) every op a question (OpRegistry::add_query): `doc` the book given, no journal ops — the caller saves nothing,
+    // journals nothing and puts nothing in the history, as for a dry run
+    bool unchanged = false;
 };
 
 class CommandBus {
@@ -190,6 +210,9 @@ void register_ruler_ops(OpRegistry& registry);
 // Register the animation ops of M3 (set_animation, add_anim_folder, add_cel, set_exposure, set_exposures,
 // set_camera_key, set_light_table).
 void register_anim_ops(OpRegistry& registry);
+// PC5 J-e1 (timeline@1, SPEC.md PROD-01): the question timeline_info (timeline.info) — the drawing registry's
+// (render/ops_registry.cpp), not core's.
+void register_timeline_query(OpRegistry& registry);
 
 // Register the vector line edits of M3 (vector_edit, trace_edit).
 void register_vector_ops(OpRegistry& registry);

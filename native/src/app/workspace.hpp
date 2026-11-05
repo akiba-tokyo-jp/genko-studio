@@ -12,10 +12,12 @@
 #include <vector>
 
 class QAction;
+class QCheckBox;
 class QGridLayout;
 class QLineEdit;
 class QListWidget;
 class QMainWindow;
+class QMenu;
 class QPushButton;
 class QToolBar;
 
@@ -45,8 +47,13 @@ std::unordered_map<const QAction*, QString> menu_places(QMainWindow* window);
 // the property "remade"), deleted then: not a command to keep in the quick access, the command bar or the keys, nor to
 // find.
 bool remade(const QAction* action);
-// The commands whose name, menu or explanation holds every word (in any order, any case).
+// The commands whose name, menu, explanation or old name (preferences::renamed) holds every word (in any order, any case).
 std::vector<QAction*> search(QMainWindow* window, const QString& words);
+// PC5 H-0: a menu laid out in an order — rows of a command's attribute ("act_fit"), a menu inside it by its title
+// ("▸校正の設定") and "|" for a line. A row naming nothing the menu holds is passed over (a later part's command not made
+// yet); what the menu holds that no row names stays after the rows, after a line, in its order. Lines are never doubled
+// nor at an end.
+void lay_out_menu(QMenu* menu, const QStringList& rows);
 
 // コマンドを探す (Ctrl+Shift+F): type part of a name, Enter does it.
 class CommandSearch : public QDialog {
@@ -152,8 +159,45 @@ bool hold_swap();
 
 // Workspaces: where the panels and the window are, kept under a name.
 QStringList workspaces();
-void save_workspace(QMainWindow* window, const QString& name);
-bool load_workspace(QMainWindow* window, const QString& name);
+// (PC5 H-d, window.workspace.newWorkspace — Photoshop's 新規ワークスペース: the keys, the menus and the toolbar kept with the
+// panels when chosen — workspaces/<name>/keys, menus, toolbar —, laid again when it is chosen)
+void save_workspace(QMainWindow* window, const QString& name, bool keys = false, bool menus = false, bool toolbar = false);
+// (geometry: the window's size and place kept with it too — false for a window opening: its own)
+bool load_workspace(QMainWindow* window, const QString& name, bool geometry = true);
+// (the review of PC5 H-d, P2-2) Workspaces a person kept before H-d under a built-in one's name (写真, ペイント, 初期設定…) moved
+// to 「<名前>（自分）」 — their layouts (workspaces/, workspace_changes/) and ui/workspace with them; (old, new) each.
+std::vector<std::pair<QString, QString>> move_reserved_workspaces();
+// The keys, menus and toolbar kept with a workspace put back as this computer's (true when it had any: every window to be
+// applied again).
+bool load_workspace_extras(const QString& name);
 void delete_workspace(const QString& name);
+
+// PC5 H-d (window.workspace.*; PhotoCraft v0.2.0's workspace_ui.rs PRESETS, MIT; SPEC VIEW-01「ワークスペース」): Photoshop's
+// workspaces built in, in its menu's order — 初期設定 (the panels as the window first showed them), グラフィックと Web, モーション,
+// ペイント, 写真, ピクセルアート: the panels each shows (by title or object name; one Genko does not have yet passed over), the
+// ones in front. The approval's panels (承認箱, コマの詳細, 資料) are never touched by them.
+struct Preset {
+    QString id;
+    QString label;
+    QStringList show;  // (none: 初期設定 — the window's first layout)
+    QStringList front;
+};
+const std::vector<Preset>& presets();
+const Preset* preset(const QString& label);
+// A built-in workspace's name (its words or its id): never a workspace kept under it.
+bool reserved_workspace(const QString& name);
+
+// 新規ワークスペース…: the name, and what is kept with the panels.
+class NewWorkspaceDialog : public QDialog {
+    Q_OBJECT
+
+public:
+    explicit NewWorkspaceDialog(QWidget* parent);
+
+    QLineEdit* name = nullptr;
+    QCheckBox* keys = nullptr;
+    QCheckBox* menus = nullptr;
+    QCheckBox* toolbar = nullptr;
+};
 
 }  // namespace genko::app

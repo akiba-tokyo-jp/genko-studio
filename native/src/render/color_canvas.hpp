@@ -33,6 +33,26 @@ private:
     struct Impl;
     std::shared_ptr<const Impl> impl_;
 };
+// PC5-0 (the user's decision of 2026-10-28): a grey page's tone curve — its profile's (grayTRC), sGray's (the sRGB
+// curve) without one —: its lightness (encoded, 0..1 or HDR) in linear light and back, as RgbSpace's decode and encode.
+class GrayCurve {
+public:
+    GrayCurve() = default;  // (sGray)
+    explicit GrayCurve(const core::PageColor& color);
+    double decode(double encoded) const;
+    double encode(double linear) const;
+
+private:
+    struct Impl;
+    std::shared_ptr<const Impl> impl_;
+};
+// PC5-0 (Z0's review P3-2): a 32-bit sample through a tone curve, kept a finite float — NaN 0 (as max(0, NaN) read it
+// before), past the float's range its largest — so what this build writes it reads back, and a file's NaN still reads.
+double finite_sample(double v);
+// PC5-0 (Z0's review P2-1): a 32-bit file's linear samples (colours then, `alpha`, the alpha: `channels` a pixel) encoded
+// by the tone curve of the file's own profile (`icc`: RGB's or grey's; none, or one that is not of their colours: the
+// sRGB curve), as a page of that profile holds them — the inverse of what this build writes in a 32-bit PSD.
+void encode_by_profile(std::vector<float>& samples, unsigned channels, bool alpha, const std::string& icc);
 // PC2d (document:color-depth-model): a layer's own picture over a part of the page in a canvas's space, before it is
 // composited — a precise layer's pixels with what is drawn on it (its lines, the pictures laid on it, its effects): per
 // pixel straight linear-light RGB (the space's primaries) and its alpha.
@@ -88,7 +108,8 @@ public:
     // A pixel is painted where the drawing changes it on that picture or on one whose colour samples all lie half the
     // range away (so a balloon over a precise colour that rounds to its own colour still covers it). What is drawn so
     // is not a layer: the alpha a clipped layer clips to stays that of the layer before.
-    void draw_8bit(const std::function<void(Image&)>& draw);
+    // (PC5 H-a: `marks`, the canvas's size: 255 set where the drawing painted)
+    void draw_8bit(const std::function<void(Image&)>& draw, std::vector<unsigned char>* marks = nullptr);
     // The picture as the screen shows it (sRGB).
     Image image() const;
     Size size() const;
@@ -109,6 +130,17 @@ public:
                 const std::function<void(std::vector<float>& pixels, const std::vector<float>& weight)>& run);
     // (after the last part) the next layer clips to the styled one
     void styled_done();
+    // PC5 I-b (groups@1): a pass-through group's opacity × mask (`mask`, "L", the canvas's size; none: 1) between the
+    // pixels before what it holds was drawn (`before`, picture()) and now — each pixel `before` + (now − before) × that,
+    // premultiplied by its alpha; what the next layer clips to is left.
+    void mix_back(const ColorPicture& before, double opacity, const Image* mask = nullptr);
+    // PC5 I-a (blend-channels@1): the colour channels a layer leaves out (`on`: R, G, B, false for one left out) back to their
+    // values in `before` (picture() before the layer was drawn); its alpha and what the next layer clips to as drawn.
+    void keep_channels(const ColorPicture& before, const std::vector<bool>& on);
+    // PC5 I-b: what the next layer clips to (`alpha`, "L", the canvas's size: a group's shape).
+    void clip_to(const Image& alpha);
+    // PC5 I-b: what the next layer would clip to ("L", the canvas's size; all 255 when nothing is set).
+    Image clip_alpha() const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

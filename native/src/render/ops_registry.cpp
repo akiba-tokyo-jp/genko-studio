@@ -4,6 +4,8 @@
 #include <unordered_map>
 
 #include "core/channels.hpp"
+#include "core/image_assets.hpp"
+#include "core/pixel_aspect.hpp"
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
@@ -17,9 +19,11 @@
 #include "render/color_edit.hpp"
 #include "render/dab_ops.hpp"
 #include "render/ink_edit.hpp"
+#include "render/paint_fill.hpp"
 #include "render/ops_3d.hpp"
 #include "render/ops_adjust.hpp"
 #include "render/paper.hpp"
+#include "render/page.hpp"
 #include "render/placed.hpp"
 #include "render/image.hpp"
 #include "render/ink.hpp"
@@ -33,6 +37,17 @@
 #include "render/ops_formats.hpp"
 #include "render/ops_paint_tools.hpp"
 #include "render/ops_layer_styles.hpp"
+#include "render/ops_groups.hpp"
+#include "render/ops_artboards.hpp"
+#include "render/ops_type.hpp"
+#include "render/ops_production.hpp"
+#include "render/ops_video.hpp"
+#include "render/ops_layer_comps.hpp"
+#include "render/ops_variables.hpp"
+#include "render/ops_annotations.hpp"
+#include "render/ops_measure.hpp"
+#include "render/ops_slices.hpp"
+#include "render/ops_align.hpp"
 
 namespace genko::render {
 
@@ -235,7 +250,13 @@ private:
 // than before, or all of a page whose mode it changed) are looked at; the rest keep their bytes. A bitmap or indexed
 // page's name and draft layers (kept as layers by the flatten, never printed) keep their pixels as they are: the page
 // shows them through its last map — the table's colours, two — as it shows the rest.
-void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& before) {
+// (PC5-0, the review's P1-1: a deep page's new 8-bit pixels made precise within the book's precise budget — past it, or
+// while the book's pages are still being read, they stay 8-bit, as before PC5-0, and paint_fill::kKeptAt8Bits is said in
+// `notes`)
+// (PC5 I-a, the review's P2-3: `op` the op's name — bake_layer_styles on a deep page drawn in 8 bits before it, no precise
+// pixels on it, keeps the pixels it baked 8-bit: the page drawn as before, its other layers' look not changed)
+void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& before, std::vector<std::string>* notes = nullptr,
+                     std::string_view op = {}) {
     for (std::size_t p = 0; p < doc.pages.size(); ++p) {
         if (doc.is_deferred(p)) continue;
         const core::Page& seen = doc.page(p);
@@ -248,6 +269,7 @@ void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& befo
             if (b && b->id == seen.id) was = b.get();
         }
         if (was == &seen) continue;  // (not edited)
+        const bool kept_8bit = deep && op == "bake_layer_styles" && was != nullptr && !uses_color_precision(*was, false) && !uses_color_precision(*was, true);
         // (a page made bitmap or indexed now: all its layers; a deep page's only the pixels an op made — a change of its
         // depth or profile converts its layers itself, set_color_mode, and assign_profile keeps their bytes)
         const bool same_mode = was != nullptr && (deep || (was->color == seen.color && was->rgb == seen.rgb));
@@ -258,6 +280,17 @@ void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& befo
             }
             return true;
         };
+        // (PC5-0, the user's decision of 2026-10-28: a layer cut at the panels is made precise when it was an empty paint
+        // layer before the op — a new paint layer getting its first pixels —; one that had 8-bit pixels keeps them, and
+        // the layers an op makes itself (import_psd's, which may be 8-bit for the book's budget) are as before)
+        const auto was_empty = [&](const core::Layer& layer) {
+            if (was == nullptr) return false;
+            for (const core::Layer& old : was->layers) {
+                if (old.id == layer.id)
+                    return (old.raster_png == nullptr || old.raster_png->empty()) && old.color_raster == nullptr && old.ink_raster == nullptr;
+            }
+            return false;
+        };
         std::vector<std::size_t> todo;
         for (std::size_t i = 0; i < seen.layers.size(); ++i) {
             const core::Layer& layer = seen.layers[i];
@@ -265,8 +298,9 @@ void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& befo
             if (!pixels || !changed(layer)) continue;
             if ((bitmap || indexed) && (layer.role == core::LayerRole::Name || layer.role == core::LayerRole::Draft)) continue;
             // (deep: a paint layer a precise raster can hold — render/page's and set_color_mode's rule)
+            if (kept_8bit) continue;
             if (deep && (layer.kind != core::LayerKind::Raster || layer.role == core::LayerRole::Tone || layer.stroke_count() || !layer.patches.empty() ||
-                         layer.panel_clip || layer.effect || layer.screen || layer.color)) {
+                         (layer.panel_clip && !was_empty(layer)) || layer.effect || layer.screen || layer.color)) {
                 continue;
             }
             todo.push_back(i);
@@ -314,6 +348,11 @@ void keep_page_modes(core::Document& doc, const std::vector<core::PagePtr>& befo
                 continue;
             }
             const int depth = page.rgb->depth;
+            const std::uint64_t made = 16 + static_cast<std::uint64_t>(picture.width()) * static_cast<std::uint64_t>(picture.height()) * 4 * (depth == 16 ? 2 : 4);
+            if (!paint_fill::precise_fits(doc, made)) {
+                paint_fill::note_once(notes, paint_fill::kKeptAt8Bits);
+                continue;
+            }
             const auto* q = reinterpret_cast<const unsigned char*>(bytes.data());
             layer.color_raster = std::make_shared<const std::string>(core::encode_color_pixels(
                 static_cast<std::uint32_t>(picture.width()), static_cast<std::uint32_t>(picture.height()), depth == 16 ? "u16" : "f32",
@@ -403,6 +442,36 @@ void register_render_ops(core::OpRegistry& registry) {
     register_pattern_ops(registry);
     // PC4 E6 (layer-styles@1: a layer's style and the book's global light, render/ops_layer_styles)
     register_layer_style_ops(registry);
+    // PC5 節 G (文字; type@1: the type ops — G-0 writes add_type_layer, edit_type and type_info, the others frames until
+    // their groups: render/ops_type.hpp)
+    register_type_ops(registry);
+    // PC5 I-b (groups@1: Frame from Layers, render/ops_groups)
+    register_group_ops(registry);
+    // PC5 節 J (制作の補助: カンプ・スライス・注釈・計測・ビデオ): the frames of its new ops (render/ops_production); each group's
+    // register_* after it puts its ops in their places
+    register_production_ops(registry);
+    // PC5 J-a (layer-comps@1: the layer comps, render/ops_layer_comps)
+    register_layer_comp_ops(registry);
+    // PC5 I-d (variables@1: set_variables, set_data_sets, apply_data_set — render/ops_variables)
+    register_variable_ops(registry);
+    // PC5 J-c (annotations@1: the notes, render/ops_annotations)
+    register_annotation_ops(registry);
+    // PC5 J-d1 (measure@1: the measurement scale, the count marks, the ruler line, レイヤーの角度補正 — render/ops_measure)
+    register_measure_ops(registry);
+    // PC5 J-b (slices@1: the slices, render/ops_slices)
+    register_slice_ops(registry);
+    // PC5 J-e1 (timeline@1: set_animation's work area and fps are core/ops_anim's; the question timeline_info)
+    core::register_timeline_query(registry);
+    // PC5 I-c (artboards@1: add_artboard, artboard_from_layers, set_artboard — render/ops_artboards)
+    register_artboard_ops(registry);
+    // PC5 I-g (レイヤーを自動整列・レイヤーを自動合成: auto_align_layers, auto_blend_layers — render/ops_align)
+    align::register_align_ops(registry);
+    // PC5 I-f (image-assets@1: 生成 → 画像アセット on or off, core/image_assets)
+    core::register_image_asset_ops(registry);
+    // PC5 J-e2 (video@1: the video layers, render/ops_video)
+    register_video_ops(registry);
+    // PC5 H-f (pixel-aspect@1: 表示 → ピクセル縦横比, the page's ratio for the view — core/pixel_aspect)
+    core::register_pixel_aspect_ops(registry);
 }
 
 const core::OpRegistry& ops_registry() {
@@ -485,7 +554,7 @@ const core::OpRegistry& ops_registry() {
                 if (!target) {
                     op(c);
                     channels::follow_depth(c.doc);
-                    keep_page_modes(c.doc, before);
+                    keep_page_modes(c.doc, before, &c.notes, name);
                     return;
                 }
                 const std::size_t at = core::require_page(c.doc, c.op);
@@ -516,8 +585,21 @@ const core::OpRegistry& ops_registry() {
                 c.report = std::move(inner.report);
                 c.notes = std::move(inner.notes);
                 channels::follow_depth(c.doc);
-                keep_page_modes(c.doc, before);
+                keep_page_modes(c.doc, before, &c.notes);
             });
+        }
+        // (PC5 J-b, slices@1: a layer gone takes its layer-based slices with it, whichever op took it — Photoshop's —, a merge
+        // or a smart object's moves them onto the layer it went into. LAST: an op added after this is not wrapped —
+        // test_slices' everyOpFollowsTheLayers asks each op of the registry, slices::follows_layers)
+        for (const std::string& name : r.names()) {
+            if (r.is_query(std::string_view(name))) continue;
+            const core::OpFunction inner = *r.find(name);
+            r.add(name, [inner](core::OpContext& c) {
+                const std::vector<core::PagePtr> before = c.doc.pages;
+                inner(c);
+                slices::follow_layers(c.doc, before, c.op);
+            });
+            slices::mark_followed(name);
         }
         return r;
     }();

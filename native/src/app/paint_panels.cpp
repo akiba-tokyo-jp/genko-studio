@@ -28,7 +28,10 @@ const std::vector<MainWindow::ToolGroup>& MainWindow::paint_tool_groups() {
         // (Genko's 色混ぜ beside Photoshop's ぼかし・シャープ・指先, which change pixels: E5)
         {"ぼかし", {"act_blur_tool", "act_sharpen_tool", "act_smudge_tool", "act_blend"}},
         {"覆い焼き", {"act_dodge_tool", "act_burn_tool", "act_sponge_tool"}},
-        {"スポイト", {"act_picker"}},
+        // (PC5 J-c: 注釈ツール; J-d1: ものさしツール・カウントツール — Photoshop's order)
+        {"スポイト", {"act_picker", "act_measure_ruler_tool", "act_note", "act_measure_count_tool"}},
+        // (PC5 J-b: スライスツール・スライス選択ツール — Photoshop's 切り抜き group)
+        {"切り抜き", {"act_crop_tool", "act_slice_tool", "act_slice_select_tool"}},
     };
     return groups;
 }

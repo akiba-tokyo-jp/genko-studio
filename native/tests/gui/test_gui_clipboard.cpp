@@ -101,7 +101,7 @@ private slots:
         struct Expected { const char* attribute; const char* text; const char* key; const char* place; };
         for (const Expected& e : std::initializer_list<Expected>{
                  {"act_copy_merged", "結合部分をコピー", "Ctrl+Shift+C", "編集"},
-                 {"act_paste_in_place", "同じ位置にペースト", "", "編集/特殊ペースト"},
+                 {"act_paste_in_place", "同じ位置にペースト", "Ctrl+Shift+V", "編集/特殊ペースト"},  // (PC5 H-0: the Photoshop key set)
                  {"act_paste_into", "選択範囲内へペースト", "Ctrl+Alt+Shift+V", "編集/特殊ペースト"},
                  {"act_paste_outside", "選択範囲外へペースト", "", "編集/特殊ペースト"},
                  {"act_fill_dialog", "塗りつぶし…", "Shift+F5", "編集"},

@@ -221,6 +221,7 @@ private slots:
                                   "licenses/optimized-routines/LICENSE-MIT", "licenses/lucide/LICENSE", "licenses/photocraft/LICENSE-MIT",
                                   "licenses/photocraft/NOTICE.md", "licenses/blake3/LICENSE_CC0", "licenses/blake3/LICENSE_A2",
                                   "licenses/blake3/LICENSE_A2LLVM",  // (PC4 F-f: BLAKE3)
+                                  "licenses/scowl/LICENSE-SCOWL.txt",  // (PC5 G-d: SCOWL)
                                   "LIBRAW-LGPL-ja.md", "licenses/libraw/COPYRIGHT", "licenses/libraw/LICENSE.LGPL", "licenses/libraw/LICENSE.CDDL"}) {  // (PC4 F-e)
             QVERIFY2(QFileInfo(doc + QLatin1Char('/') + QString::fromLatin1(there)).size() > 0, there);
         }
@@ -251,6 +252,12 @@ private slots:
             named.insert(name);
         }
         QVERIFY(named.contains(kProgram));
+        // (PC5 J-f: genko-plugin-host beside genko when it was built, named with wasmi's package; its crates' licences)
+        for (const QString& host : {QStringLiteral("bin/genko-plugin-host"), QStringLiteral("bin/genko-plugin-host.exe")}) {
+            if (!QFileInfo::exists(prefix_ + QLatin1Char('/') + host)) continue;
+            QVERIFY2(named.contains(host), qPrintable(host));
+            QVERIFY(QFileInfo::exists(doc + QStringLiteral("/licenses/wasm-host/NOTICES.txt")));
+        }
         for (const QString& name : files_in(prefix_)) {
             if (is_library(name) && !QFileInfo(prefix_ + QLatin1Char('/') + name).isSymLink()) QVERIFY2(named.contains(name), qPrintable(name));
         }
@@ -272,7 +279,13 @@ private slots:
             // (PC4 F-f: the .pcraft's compression and hashes)
             {"zstd", QStringLiteral("| Zstandard")}, {"blake3", QStringLiteral("| BLAKE3")},
             // (PC4 F-e: camera RAW — LibRaw, and the JasPer inside its Windows DLL)
-            {"libraw", QStringLiteral("| LibRaw")}, {"jasper", QStringLiteral("| JasPer")}};
+            {"libraw", QStringLiteral("| LibRaw")}, {"jasper", QStringLiteral("| JasPer")},
+            // (PC5 G-b: right-to-left text set across)
+            {"sheenbidi", QStringLiteral("| SheenBidi")},
+            // (PC5 G-d: the spelling check's English word list)
+            {"scowl", QStringLiteral("| SCOWL")},
+            // (PC5 J-f: genko-plugin-host, the WebAssembly plugins' host, and the crates in it)
+            {"wasmi", QStringLiteral("| wasmi")}, {"wasmparser", QStringLiteral("| wasmparser")}, {"rust-crates", QStringLiteral("| genko-plugin-host の Rust のクレート")}};
         std::set<std::string> listed;
         std::map<std::string, std::string> relation;
         for (const Json& r : sbom["relationships"]) {

@@ -8,6 +8,7 @@
 
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/video.hpp"
 
 namespace genko::core::anim {
 
@@ -112,7 +113,15 @@ Page at_frame(const Page& page, std::int64_t frame) {
     const Json tracks = py_get(*data, "tracks", Json::array());
     for (const Json& entry : iterate(tracks)) {
         const Json folder = py_get(entry, "folder");
-        const Json shown = cel_at(page, folder, frame);
+        // (PC5 J-e2, video@1: a video row shows its altered cel at that frame, if any — its footage's frame is laid by
+        // render/footage —, never its exposure sheet)
+        Json shown;
+        if (is_video_row(entry)) {
+            const VideoShown seen = video_shown(page, folder, entry.at("video"), frame);
+            if (seen.kind == VideoShown::Kind::Cel) shown = seen.cel;
+        } else {
+            shown = cel_at(page, folder, frame);
+        }
         for (const Layer* layer : cels_of(page, folder)) {
             if (!py_equals(Json(layer->id), shown)) hide.insert(layer->id);
         }

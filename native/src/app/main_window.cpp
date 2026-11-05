@@ -15,6 +15,8 @@
 #include <QDir>
 #include <QDockWidget>
 #include <QElapsedTimer>
+
+#include <set>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QGuiApplication>
@@ -38,6 +40,7 @@
 #include <chrono>
 
 #include "app/actions.hpp"
+#include "app/actions_panel.hpp"
 #include "app/brush_panel.hpp"  // (PC4 E1: the blend and the pencil)
 #include "app/adjust_forms.hpp"
 #include "app/ask.hpp"
@@ -46,7 +49,9 @@
 #include "app/config.hpp"
 #include "app/preferences.hpp"
 #include "app/dialogs.hpp"
+#include "app/doc_area.hpp"
 #include "app/documents.hpp"
+#include "app/history_log.hpp"
 #include "app/ime.hpp"
 #include "app/inputs.hpp"
 #include "app/look.hpp"
@@ -54,25 +59,32 @@
 #include "app/navigator.hpp"
 #include "app/pages_panel.hpp"
 #include "app/paths_panel.hpp"
+#include "app/layer_comps_panel.hpp"
+#include "app/notes_panel.hpp"
 #include "app/perf.hpp"
 #include "app/reply_box.hpp"
 #include "app/save_status.hpp"
+#include "app/settings_watch.hpp"
 #include "app/studio_widgets.hpp"
 #include "app/icons.hpp"
 #include "app/theme.hpp"
 #include "app/workspace.hpp"
 #include "app/colours.hpp"
 #include "service/wording.hpp"
+#include "core/video.hpp"
+#include "service/control.hpp"
 #include "core/actor.hpp"
 #include "core/command_bus.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
+#include "core/layer_basics.hpp"
 #include "formats/copy.hpp"
 #include "render/brushes.hpp"
 #include "render/dabs/lines.hpp"
 #include "render/placed.hpp"
 #include "render/timelapse.hpp"
 #include "render/ops_registry.hpp"
+#include "render/smart_filters.hpp"
 
 namespace genko::app {
 
@@ -140,6 +152,11 @@ bool open_elsewhere(const Session* session, const MainWindow* but) {
 }
 
 }  // namespace documents
+
+std::uint64_t new_tab_id() {
+    static std::uint64_t next = 0;
+    return ++next;
+}
 
 QString Document::title() const {
     if (contents) return QStringLiteral("%1の中身").arg(contents_title.isEmpty() ? QStringLiteral("スマートオブジェクト") : contents_title);  // (PC3 A1)
@@ -335,7 +352,11 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     column->addWidget(unported_);
     column->addWidget(read_only_);
     column->addWidget(failure_bar_);
-    column->addWidget(canvas_, 1);
+    // (PC5 H-c: the canvas alone in the middle — the tabs' way, as before — or the cells of ウィンドウ → アレンジ around it)
+    doc_area_ = new DocArea(canvas_);
+    connect(doc_area_, &DocArea::paneActivated, this, &MainWindow::activate_pane);
+    connect(canvas_, &PageCanvas::handUsed, this, &MainWindow::hand_used);
+    column->addWidget(doc_area_, 1);
     setCentralWidget(central);
     ime_ = new ImeEntry(canvas_);  // (the entrance for typed words; the text tool types in its InlineEditor, ime.hpp)
     ime_->hide();
@@ -349,7 +370,7 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     zoom_label_ = new QLabel;
     statusBar()->addPermanentWidget(zoom_label_);
     zoom_box_ = new QSpinBox;  // (表示倍率の直接入力)
-    zoom_box_->setRange(5, 6400);
+    zoom_box_->setRange(1, 3200);  // (PC5 H-a, the user's decision 11: the page's pixels, 100 % one a screen pixel)
     zoom_box_->setSuffix(QStringLiteral(" %"));
     zoom_box_->setToolTip(QStringLiteral("表示倍率。数を打ち込んで Enter"));
     zoom_box_->setKeyboardTracking(false);
@@ -373,19 +394,23 @@ MainWindow::MainWindow(std::shared_ptr<Session> session) {
     known_requests_ = request_ids();
     studio_follow(true);
     refresh_ai();
-    // comfort (comfort.cpp): 原稿だけを表示 — Tab on the page only (elsewhere Tab moves between fields) — at the top of
-    // the window menu, and the rest reminder
+    // comfort (comfort.cpp): 原稿だけを表示 — Tab on the page only (elsewhere Tab moves between fields) — in the window
+    // menu after アレンジ ▸ and ワークスペース ▸ (PC5 H-0), and the rest reminder
     canvas_only_ = new CanvasOnly(this);
     QAction* only = make("act_canvas_only", QStringLiteral("原稿だけを表示"), [this] { canvas_only_->toggle(); }, {QKeySequence(Qt::Key_Tab)},
                          QStringLiteral("パネルとバーを隠して原稿だけにします（Tab で戻る）。左右の端にカーソルを寄せるとその側のパネルが出ます"));
     removeAction(only);
     only->setShortcutContext(Qt::WidgetWithChildrenShortcut);
     canvas_->addAction(only);
-    view_menu_->insertAction(view_menu_->actions().isEmpty() ? nullptr : view_menu_->actions().front(), only);
+    view_menu_->insertAction(action("act_next_doc"), only);  // (PC5 H-0, 節 H 5.2: after アレンジ ▸ and ワークスペース ▸, Photoshop's first)
     rest_ = new RestReminder(this);
     // the person's own keys and ways (環境設定): every command named by its words, its keys as chosen
     preferences::name_commands(this);
     preferences::apply_all(this);
+    // (PC5 H-0: a preference another program writes — genko prefs set — applied to every window open)
+    watch_settings([] {
+        for (MainWindow* window : documents::windows()) preferences::apply_all(window);
+    });
     if (gpu_available()) canvas_->use_gpu(true);  // (the page drawn by the graphics card, when chosen and real)
     theme::name_buttons(this);
     // (tool_settings.fit_narrow, as Python's window does to the side panels and the tool settings: each shrinks to the
@@ -458,11 +483,20 @@ void MainWindow::back_up(const std::shared_ptr<Session>& session) {
 }
 
 MainWindow::~MainWindow() {
+    // (PC5 H-c's 修飾キー watch on the canvas reads this window: gone before the window's parts, which send it events as they
+    // go — QWidget's own destructor, when this is no longer a MainWindow)
+    delete findChild<QObject*>(QStringLiteral("genko_modifier_latch"), Qt::FindDirectChildrenOnly);
+    // (a line still being typed on a canvas: let go, not set — a window closed set it already, as its closeEvent asks, and
+    // one going without being closed would get it as its QWidget's destructor takes the focus away, no longer a MainWindow)
+    for (InlineEditor* typing : findChildren<InlineEditor*>()) typing->finish(false);
     cancel_smart_select();  // (PC3 B3: a smart selection still worked out on its worker stops — not waited for to its end)
     stop_filter_work();     // (PC4 節 D: a heavy filter's preview on its worker stops, as the smart selection)
     disconnect_session();
     documents::remove(this);
     render::clear_placed_caches();  // (a window closed: its books' placed pictures are let go)
+    // (after this body the window is no longer a MainWindow while QWidget's destructor closes and hides it and its parts go:
+    // their signals reach it no more — V3 ASan: a window going without being closed, its panels' visibilityChanged)
+    for (QObject* part : findChildren<QObject*>()) part->disconnect(this);
 }
 
 void MainWindow::showEvent(QShowEvent* event) {
@@ -478,7 +512,8 @@ void MainWindow::showEvent(QShowEvent* event) {
                 if (shown && isVisible() && !dock->isFloating()) fade_in(dock->widget(), 140);
             });
         }
-        default_state_ = saveState();  // (ウィンドウ → ワークスペース → はじめの配置に戻す)
+        default_state_ = saveState();  // (ウィンドウ → ワークスペース → 初期設定)
+        restore_workspace_at_start();  // (PC5 H-d: the workspace in use last time)
         quick_access_->refresh();
     }
 }
@@ -535,9 +570,13 @@ const core::Page* MainWindow::current_page() const {
 
 bool MainWindow::agent_book() const { return book().strict_gates || core::py_truthy(book().studio); }
 
-bool MainWindow::drawable(const core::Layer& layer) {
+bool MainWindow::drawable(const core::Layer& layer, const core::Page* page) {
+    bool all = layer.lock_all;  // (PC5 I-a: すべてをロック — its own, or a folder's it is in)
+    if (page != nullptr && !page->layers.empty() && &layer >= page->layers.data() && &layer < page->layers.data() + page->layers.size()) {
+        all = core::locked_all(page->layers, static_cast<std::size_t>(&layer - page->layers.data()));
+    }
     return (layer.kind == core::LayerKind::Strokes || layer.kind == core::LayerKind::Raster || layer.kind == core::LayerKind::Tone) &&
-           !layer.locked;
+           !layer.locked && !all;
 }
 
 const core::Layer* MainWindow::target_layer() const {
@@ -565,6 +604,7 @@ void MainWindow::set_target_layer(const std::string& layer_id) {
     }
     if (layer_panel_ != nullptr) layer_panel_->show_target();  // (not built again: a Ctrl / Shift+click keeps the others)
     if (materials_ != nullptr) materials_->refresh();
+    refresh_type_frame();  // (PC5 G-a: a type layer chosen — its box on the canvas)
 }
 
 std::optional<core::Json> MainWindow::selection_area() const {
@@ -580,6 +620,7 @@ void MainWindow::preview_ops(const std::optional<core::Json>& ops) {
     }
     try {
         const core::CommandBus bus(render::ops_registry());
+        const render::smart_filters::PreviewScope previewing;  // (PC5 J-f: a preview keeps no plugin filter's picture)
         // (channels@1: what is previewed is what is applied: the pixel ops on the channel targeted)
         auto result = bus.apply(*session_->snapshot(), with_contents_target(with_channel_target(*ops)), core::Actor(session_->actor()));
         show_preview(std::move(result.doc));
@@ -640,7 +681,8 @@ void MainWindow::pen_changed() {
         tool_settings_->set_badge(badge);
     }
     add_background(fields);  // (PC4 E2, review P2-4: the line drawn as it goes takes the 背景色 the brush moves to)
-    canvas_->set_live_pen(fields, layer != nullptr && drawable(*layer) ? std::optional<std::string>(layer->id) : std::nullopt);
+    canvas_->set_live_pen(fields, layer != nullptr && drawable(*layer, current_page()) ? std::optional<std::string>(layer->id) : std::nullopt);
+    canvas_->grid_layer = layer != nullptr ? std::optional<std::string>(layer->id) : std::nullopt;  // (PC5 H-a: ピクセルグリッド's layer)
     canvas_->brush_width_mm = pen_.width_mm;
     canvas_->eraser_mm = eraser_mm_;
     canvas_->smoothing = QString::fromStdString(pen_.smoothing);
@@ -681,7 +723,14 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
         {"add_scene", QStringLiteral("3D の背景を置いています…")},        {"add_prim3d", QStringLiteral("3D を置いています…")},
         {"pose_figure", QStringLiteral("3D のポーズを変えています…")},    {"pose_mannequin", QStringLiteral("3D のポーズを変えています…")},
         {"import_pages", QStringLiteral("ページを取り込んでいます…")},       {"smart_place", QStringLiteral("スマートオブジェクトを置いています…")},
-        {"layer_style_to_layers", QStringLiteral("レイヤースタイルをレイヤーにしています…")}};  // (PC4 E6 review P3-6)
+        {"layer_style_to_layers", QStringLiteral("レイヤースタイルをレイヤーにしています…")},  // (PC4 E6 review P3-6)
+        // (PC5 J-a, the review's P3-7: each layer's place read)
+        {"new_layer_comp", QStringLiteral("レイヤーカンプを記録しています…")}, {"update_layer_comp", QStringLiteral("レイヤーカンプを記録しています…")},
+        {"apply_layer_comp", QStringLiteral("レイヤーカンプを適用しています…")},
+        // (PC5 I-d, the review's P2-1: pictures put in, a data set's pictures checked)
+        {"apply_data_set", QStringLiteral("データセットを適用しています…")}, {"set_data_sets", QStringLiteral("データセットを確かめています…")},
+        // (PC5 I-a, the review's P3-8: すべてのレイヤー効果を統合, すべての空のレイヤーを削除 — every page)
+        {"bake_layer_styles", QStringLiteral("レイヤー効果を統合しています…")}, {"delete_layers", QStringLiteral("レイヤーを削除しています…")}};
     struct Busy {
         bool on = false;
         ~Busy() {
@@ -701,26 +750,94 @@ bool MainWindow::apply_ops(const Json& ops, const std::vector<std::string>& ids)
     }
     QElapsedTimer clock;
     clock.start();
+    if (control_actor_) {
+        // (PC5 J-g: the control channel's pen — its line's ops as the token's actor, MCP's ops and refusals; never recorded
+        // into an action, the person's)
+        if (const auto refused = service::control::refused_ops(ops)) {
+            control_refused_ = QString::fromStdString(refused->message);
+            flash(control_refused_, 6000, true);
+            return false;
+        }
+        try {
+            const core::PublicAnimationOps public_ops;
+            last_results_ = session_->apply_as(with_contents_target(with_channel_target(ops)), *control_actor_, ids).results;
+        } catch (const std::exception& error) {
+            control_refused_ = wording::error(QString::fromUtf8(error.what()));
+            flash(control_refused_, 6000, true);
+            return false;
+        }
+        video_alter_.reset();  // (PC5 J-e2's alter is the person's: a change of the channel's ends it, never undone with theirs)
+        control_applied_ = true;
+        return true;
+    }
+    // (PC5 J-e2: what is drawn on a video layer's frame just altered — alter_video_frame — taken with the alter as one step: the
+    // alter undone and applied again before the ops, its cel the same id)
+    Json batch = ops;
+    std::vector<std::string> given = ids;
+    // (only what draws on its cel — a line, a fill, a filter… — the review's P3-5 (b): renaming it is a step of its own)
+    const auto draws_on_cel = [&ops](const std::string& cel) {
+        static const std::set<std::string, std::less<>> kDrawing{
+            "add_stroke", "put_raster", "erase_raster", "erase", "filter_raster", "flood_fill", "fill", "fill_area", "fill_enclosed",
+            "gradient_fill", "transform_area", "delete_area", "paste", "smudge", "liquify", "add_shape", "fill_gaps", "vector_edit", "background_eraser",
+            "blur_brush", "burn", "clone_stamp", "color_replacement", "content_aware_fill", "dodge", "healing_brush", "history_brush", "mixer_brush",
+            "sharpen_brush", "smudge_brush", "sponge", "spot_healing"};
+        if (!ops.is_array() || ops.empty()) return false;
+        for (const Json& op : ops) {
+            const auto name = op.is_object() ? op.find("op") : op.end();
+            if (name == op.end() || !name->is_string() || !kDrawing.contains(name->get_ref<const std::string&>())) return false;
+        }
+        return ops.dump().find(cel) != std::string::npos;
+    };
+    bool rejoined = false;
+    if (video_alter_ && video_alter_->revision == book().revision && draws_on_cel(video_alter_->cel) && session_->can_undo()) {
+        const VideoAlter alter = *video_alter_;
+        video_alter_.reset();
+        try {
+            session_->undo();
+            batch = Json::array({alter.op});
+            for (const Json& op : ops) batch.push_back(op);
+            given.insert(given.begin(), alter.cel);
+            rejoined = true;
+        } catch (const std::exception&) {  // (not undone: the ops on their own)
+            batch = ops;
+            given = ids;
+        }
+    }
+    video_alter_.reset();
     try {
         // (channels@1: the pixel ops on the channel targeted; smart-objects@1: in a contents' tab, on its contents)
         last_results_ = core::Json::array();
-        last_results_ = session_->apply(with_contents_target(with_channel_target(ops)), ids).results;  // (PC4 E5: what the ops reported)
-    } catch (const core::Error& error) {
-        flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
-        return false;
+        last_results_ = session_->apply(with_contents_target(with_channel_target(batch)), given).results;  // (PC4 E5: what the ops reported)
+        if (batch.size() > ops.size()) {  // (the alter taken with them: its cel drawn on still, its report not theirs)
+            if (last_results_.is_array() && !last_results_.empty()) last_results_.erase(last_results_.begin());
+            set_target_layer(given.front());
+        }
     } catch (const std::exception& error) {
+        // (PC5 J-e2, the review's P3-5 (a): the alter taken back for them, the ops refused — the alter put back as it was)
+        if (rejoined) {
+            try {
+                session_->redo();
+                set_target_layer(given.front());
+            } catch (const std::exception&) {
+            }
+        }
         flash(wording::error(QString::fromUtf8(error.what())), 6000, true);  // (the window and the book stay as they were)
         return false;
     }
     perf::event("applied", {{"ms", clock.nsecsElapsed() / 1e6}, {"op", ops.size() > 0 && ops[0].contains("op") ? ops[0]["op"] : Json()}});
-    if (recording_) {  // (オートアクション: what was done goes into the recording)
+    if (recording_) {  // (アクション: what was done goes into the recording)
         for (Json& op : actions::recordable(ops)) recording_->push_back(std::move(op));
+        if (actions_panel_ != nullptr && actions_dock_ != nullptr && actions_dock_->isVisible()) actions_panel_->refresh();
     }
     return true;
 }
 
 bool MainWindow::apply_worked(const Json& ops, const Json& targeted, const DocPtr& base, core::ApplyResult result,
                               const std::vector<std::string>& taken) {
+    if (control_actor_) {  // (PC5 J-g: the channel's pen makes no worker's change)
+        control_refused_ = QStringLiteral("この操作は制御チャンネルのペンでは当てられません");
+        return false;
+    }
     QElapsedTimer clock;
     clock.start();
     try {
@@ -813,6 +930,11 @@ void MainWindow::show_page() {
     channel_view_changed();  // (channels@1: this page's view on screen, its panel)
     quick_mask_follow();     // (masks@1: the page's Quick Mask, its menu item and the tools painting it)
     if (paths_panel_ != nullptr && paths_dock_ != nullptr && paths_dock_->isVisible()) paths_panel_->refresh();  // (vector@1, PC3 C-a)
+    if (layer_comps_panel_ != nullptr && layer_comps_dock_ != nullptr && layer_comps_dock_->isVisible()) layer_comps_panel_->refresh();  // (PC5 J-a)
+    if (notes_panel_ != nullptr) refresh_notes();  // (PC5 J-c: the chosen note while the page has it)
+    if (character_panel_ != nullptr) refresh_type_panels();  // (PC5 G-d: the type panels shown, as the book is now)
+    if (count_groups_ != nullptr) refresh_measure();  // (PC5 J-d1: the ものさしツール's readout, the count groups)
+    if (canvas_->slice_view) refresh_slices();  // (PC5 J-b: the page's slices made again, the chosen one while it is there)
     if (patterns_panel_ != nullptr && patterns_dock_ != nullptr && patterns_dock_->isVisible()) patterns_panel_->refresh();  // (PC4 E3)
     if (lines_later_) {
         lines_timer_.start();
@@ -839,6 +961,7 @@ void MainWindow::select_page(int row) {
     }
     if (row != page_index_) {
         perf::event("page_switch", {{"row", row}});
+        if (notes_panel_ != nullptr) notes_panel_->commit_text();  // (PC5 J-c: the note's text typed, on its own page)
         session_->save_now();  // a page switch writes what was done on the last page (on the worker)
         canvas_->set_selection(std::nullopt);
         canvas_->highlight_box.reset();  // (a problem shown by the checks stays on its page)
@@ -885,7 +1008,7 @@ void MainWindow::refresh_status() {
     setWindowTitle(QStringLiteral("%1 第%2話 — Genko Studio").arg(QString::fromStdString(b.title), QString::fromStdString(b.episode.repr())));
     if (doc_ < doc_tabs_->count()) {
         doc_tabs_->setTabText(doc_, documents_[static_cast<std::size_t>(doc_)].title());
-        doc_tabs_->setTabToolTip(doc_, session_->path() ? QDir::toNativeSeparators(qpath(*session_->path())) : QStringLiteral("未保存"));
+        doc_tabs_->setTabToolTip(doc_, tab_tip(doc_));  // (its path; PC5 H-c: its cell too)
     }
     save_label_->show_status(status);
     failure_bar_->show_status(status);
@@ -911,7 +1034,7 @@ void MainWindow::refresh_status() {
         refresh_actions();
         return;
     }
-    const QString saved = state_words(status) + (recording_ ? QStringLiteral(" ・ ● オートアクションを記録中") : QString());
+    const QString saved = state_words(status) + (recording_ ? QStringLiteral(" ・ ● アクションを記録中") : QString());
     const core::Page* page = current_page();
     if (page == nullptr) {
         status_->setText(saved);
@@ -979,8 +1102,13 @@ void MainWindow::refresh_zoom() {
 void MainWindow::refresh_actions() {
     show_color_mode();
     if (auto* exposure = action("act_exposure")) exposure->setEnabled(current_page() && session_->read_only_reason().empty());
+    // (PC5 I-d, the review's P1-1: the variables' commands change the book — none on a book read only)
+    for (const char* name : {"act_variables_define", "act_variables_data_sets", "act_apply_data_set", "act_import_data_sets"}) {
+        if (QAction* act = action(QString::fromLatin1(name))) act->setEnabled(current_page() != nullptr && session_->read_only_reason().empty());
+    }
     if (QAction* name_ok = action(QStringLiteral("act_name_ok"))) name_ok->setVisible(agent_book());  // (stages are for books made with agents)
     contents_tab_follow();  // (smart-objects@1: what a contents' tab cannot use, greyed)
+    refresh_pixel_aspect();  // (PC5 H-f review P3-1: the page's ratio marked after a page, a tab or an Undo too)
 }
 
 void MainWindow::show_omitted(const QStringList& elements) {
@@ -1005,11 +1133,11 @@ void MainWindow::show_omitted(const QStringList& elements) {
                     .arg(words.join(QStringLiteral("・")));
     }
     if (!off.isEmpty()) {
-        text << QStringLiteral("プラグイン（%1）は使う設定になっていないため、その補正を表示していません（レイヤー → プラグインの設定）。")
+        text << QStringLiteral("プラグイン（%1）は使う設定になっていないため、その補正を表示していません（編集 → 環境設定 → プラグイン…）。")
                     .arg(off.join(QStringLiteral("・")));
     }
     if (!failed.isEmpty()) {
-        text << QStringLiteral("プラグイン（%1）を動かせなかったため、その補正を表示していません（Python と Pillow、プラグインの設定を確かめてください）。")
+        text << QStringLiteral("プラグイン（%1）を動かせなかったため、その補正を表示していません（Python と Pillow、編集 → 環境設定 → プラグイン… を確かめてください）。")
                     .arg(failed.join(QStringLiteral("・")));
     }
     unported_->setText(text.join(QLatin1Char(' ')));
@@ -1053,11 +1181,17 @@ void MainWindow::store_document() {
     doc.page_index = page_index_;
     doc.view = canvas_->view_state();
     doc.target_layer = target_layer_id_;
+    keep_pane_views();  // (PC5 H-c: the panes' views too, each in its tab)
 }
 
 void MainWindow::show_document(int index) {
     const Document& doc = documents_[static_cast<std::size_t>(index)];
+    // (PC5 H-c review P2-1: another book — or another contents' tab — in front: what a tool left half done on the canvas is
+    // let go, whatever its page's id — a duplicate shares it —; never finished on this one)
+    if (session_ != doc.session || contents_ != doc.contents) canvas_->let_go();
     doc_ = index;
+    history_log::follow(doc.session.get(), doc.source);  // (PC5 H-e: ヒストリーログ — once for a book)
+    arrange_follow();  // (PC5 H-c: the canvas to its tab's cell — before the view is given: the cell's size —, main_window_arrange.cpp)
     session_ = doc.session;
     page_index_ = doc.page_index;
     target_layer_id_ = doc.target_layer;
@@ -1144,13 +1278,22 @@ void MainWindow::add_document(std::shared_ptr<Session> session) {
 
 void MainWindow::open_project(const fs::path& path) {
     remember_project(path);
+    // (PC5 I-e: the script event raised once it is open — 新規ドキュメント for a book 新規… made, else ドキュメントを開く)
+    const service::script_events::Event event = std::exchange(opened_event_, std::nullopt).value_or(service::script_events::Event::OpenDocument);
     const auto [window, index] = documents::find(path);
     if (window == this) {
         switch_document(index);
         return;
     }
+    // (PC5 H-e: ドキュメントをタブで開く off — a window of its own)
+    if (MainWindow* there = window_to_open_in(); there != this) {
+        there->opened_event_ = event;
+        there->open_project(path);
+        return;
+    }
     if (window != nullptr) {  // (another window has it: the two share it)
         add_document(window->documents()[static_cast<std::size_t>(index)].session);
+        raise_opened(event);
         return;
     }
     // read on a worker thread (a thick book takes a moment): the window keeps answering
@@ -1158,11 +1301,12 @@ void MainWindow::open_project(const fs::path& path) {
     using Read = std::pair<std::optional<Session::Opened>, QString>;
     auto* watcher = new QFutureWatcher<Read>(this);
     const fs::path where = path;
-    connect(watcher, &QFutureWatcher<Read>::finished, this, [this, watcher, where] {
+    connect(watcher, &QFutureWatcher<Read>::finished, this, [this, watcher, where, event] {
         Read read = watcher->result();
         watcher->deleteLater();
         flash_timer_.stop();
         if (!read.first) {
+            start_pending_ = false;  // (PC5 I-e: the first book not opened — no アプリケーションを起動 later)
             ask::warning(this, QStringLiteral("Genko"), QStringLiteral("原稿を開けませんでした:\n%1").arg(wording::error(read.second)) + links_kept());
             refresh_status();
             return;
@@ -1188,7 +1332,9 @@ void MainWindow::open_project(const fs::path& path) {
             const std::shared_ptr<Session> added = opened;
             add_document(std::move(opened));
             if (session_ == added) color_policy_on_open(added);  // (カラー設定's policies: a page of another profile kept, converted or asked)
+            if (session_ == added) raise_opened(event);  // (PC5 I-e: スクリプトイベント)
         } catch (const std::exception& error) {
+            start_pending_ = false;  // (PC5 I-e: the first book not opened — no アプリケーションを起動 later)
             ask::warning(this, QStringLiteral("Genko"),
                          QStringLiteral("原稿・復旧用コピーを開けませんでした:\n%1").arg(wording::error(QString::fromUtf8(error.what()))) + links_kept());
             refresh_status();
@@ -1269,7 +1415,10 @@ bool MainWindow::close_document(int index) {
     // (smart-objects@1: a book also in another tab here — its contents' tab, or the book's beside it — stays open there)
     const auto& closing = documents_[static_cast<std::size_t>(index)].session;
     const bool shared_here = std::count_if(documents_.begin(), documents_.end(), [&](const Document& d) { return d.session == closing; }) > 1;
-    if (!shared_here && !documents::open_elsewhere(closing.get(), this) && !settle(index)) return false;
+    {
+        const service::script_events::Firing closing_save;  // (a save to close: no ドキュメントを保存 — the review's P3-11)
+        if (!shared_here && !documents::open_elsewhere(closing.get(), this) && !settle(index)) return false;
+    }
     if (index != doc_) store_document();
     documents_.erase(documents_.begin() + index);
     doc_tabs_->blockSignals(true);
@@ -1280,7 +1429,9 @@ bool MainWindow::close_document(int index) {
         show_document(std::min(index, static_cast<int>(documents_.size()) - 1));
     } else {
         doc_ = doc_tabs_->currentIndex();
+        arrange_follow();  // (PC5 H-c: its cell gone)
     }
+    script_event(service::script_events::Event::CloseDocument);  // (PC5 I-e: after it, as Photoshop's — on the book now in front)
     return true;
 }
 
@@ -1321,6 +1472,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
             show_document(i);
         }
         bool discard = false;
+        const service::script_events::Firing closing_save;  // (a save to close: no ドキュメントを保存)
         if (!settle(i, QStringLiteral("閉じる"), &discard)) {
             event->ignore();
             return;
@@ -1356,9 +1508,11 @@ void MainWindow::new_book() {
     }
     if (ask::exec(&dialog) != QDialog::Accepted) return;
     if (dialog.created) {
+        opened_event_ = service::script_events::Event::NewDocument;  // (PC5 I-e: raised once it is open)
         open_project(*dialog.created);
     } else if (dialog.image) {  // (PC4 F-b: 画像 — a book of one page in memory, its .genko asked for when it is saved)
         add_picture_book(std::move(dialog.image->doc), dialog.image->notes);
+        script_event(service::script_events::Event::NewDocument);  // (PC5 I-e: スクリプトイベント)
     }
 }
 
@@ -1373,6 +1527,8 @@ void MainWindow::save() {
     if (session_->wait_saved(std::chrono::milliseconds(30000)) && !session_->unsaved()) {
         session_->mark_saved();  // (PC4 F-b: 復帰 comes back here)
         flash(QStringLiteral("保存しました: %1").arg(QDir::toNativeSeparators(qpath(*session_->path()))), 3000);
+        script_event(service::script_events::Event::SaveDocument);  // (PC5 I-e: the person's save — never the automatic one)
+        image_assets_after_save();  // (PC5 I-f: 生成 → 画像アセット, after the person's save only)
     } else {
         flash(QStringLiteral("保存できませんでした: %1").arg(failure_reason(session_->status())), 6000, true);
     }
@@ -1404,7 +1560,7 @@ void MainWindow::save_as() {
     save_as_and_wait(QString(), origin, path);
 }
 
-bool MainWindow::save_as_and_wait(const QString&, std::shared_ptr<Session> origin, const QString& chosen) {
+bool MainWindow::save_as_and_wait(const QString& verb, std::shared_ptr<Session> origin, const QString& chosen) {
     if (!origin) origin = session_;
     if (session_ != origin) return false;
     const QPointer<MainWindow> alive(this);
@@ -1445,6 +1601,8 @@ bool MainWindow::save_as_and_wait(const QString&, std::shared_ptr<Session> origi
     watch();
     refresh_status();
     flash(QStringLiteral("保存しました: %1").arg(QDir::toNativeSeparators(target)), 3000);
+    script_event(service::script_events::Event::SaveDocument);  // (PC5 I-e: スクリプトイベント)
+    if (verb.isEmpty()) image_assets_after_save();  // (PC5 I-f: 生成 → 画像アセット — not on the way to closing: a verb given)
     return true;
 }
 
@@ -1580,7 +1738,7 @@ void MainWindow::refresh_first_steps() {
     const bool empty = !first_steps_closed_ && !lines && !drawn && !panels;
     if (empty && first_steps_ == nullptr) {
         first_steps_ = first_steps_bar();
-        column_->insertWidget(column_->indexOf(canvas_), first_steps_);
+        column_->insertWidget(column_->indexOf(doc_area_), first_steps_);
     }
     if (first_steps_ != nullptr) first_steps_->setVisible(empty);
     for (QPushButton* button : first_buttons_) {  // (the keys as they are now: 環境設定 may have changed them)
@@ -1591,7 +1749,7 @@ void MainWindow::refresh_first_steps() {
     const bool next = panels && wanted != nullptr && wanted->isChecked() && !(first_steps_ != nullptr && first_steps_->isVisible());
     if (next && next_steps_ == nullptr) {
         next_steps_ = next_steps_bar();
-        column_->insertWidget(column_->indexOf(canvas_), next_steps_);
+        column_->insertWidget(column_->indexOf(doc_area_), next_steps_);
     }
     if (next_steps_ == nullptr) return;
     const bool saved = session_->path().has_value() && session_->status().kind == SaveKind::Saved;

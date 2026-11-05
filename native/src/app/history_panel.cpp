@@ -110,12 +110,48 @@ const std::map<std::string, const char*>& names() {
         {"render_picture", "描画した"}, {"vanishing_point", "消点で描いた"},
         // (PC4 F-b: render/ops_formats; 復帰 is the session's, app/session.cpp Session::revert)
         {"set_file_info", "ファイル情報を変えた"}, {"revert", "復帰"},
+        // (PC5 G-0, type@1: render/ops_type)
+        {"add_type_layer", "テキストレイヤーを作った"}, {"edit_type", "文字を直した"},
+        // (PC5 G-a)
+        {"line_to_type_layer", "台詞をテキストレイヤーにした"}, {"type_layer_to_line", "テキストレイヤーを台詞にした"},
+        // (PC5 G-c)
+        {"type_style", "文字スタイル・段落スタイルを変えた"},
         // (PC4 E5: render/ops_paint_tools)
         {"dodge", "覆い焼きした"}, {"burn", "焼き込んだ"}, {"sponge", "スポンジで直した"}, {"blur_brush", "ぼかした"},
         {"sharpen_brush", "シャープにした"}, {"smudge_brush", "指先でのばした"}, {"mixer_brush", "混合ブラシで描いた"},
         {"background_eraser", "背景を消した"}, {"color_replacement", "色を置き換えた"},
         // (PC4 F-e: render/ops_camera_raw — a RAW smart object's development, an op of the book's)
         {"set_camera_raw", "Camera Raw で現像の設定を変えた"},
+        // (PC5 I-b, groups@1: render/ops_groups)
+        {"frame_from_layers", "レイヤーからフレームを作った"},
+        // (PC5 I-a: core/ops_layers, render/ops_layer_styles)
+        {"delete_layers", "レイヤーを削除した"}, {"duplicate_layers", "レイヤーを複製した"}, {"ungroup_layers", "グループを解除した"},
+        {"bake_layer_styles", "レイヤー効果を統合した"},
+        // (PC5 I-g: render/ops_align)
+        {"auto_align_layers", "レイヤーを自動整列した"}, {"auto_blend_layers", "レイヤーを自動合成した"},
+        // (PC5 H-b: core/ops_rulers)
+        {"add_guide_layout", "ガイドレイアウトを作った"},
+        // (PC5 J-a, layer-comps@1: render/ops_layer_comps)
+        {"new_layer_comp", "新規レイヤーカンプ"}, {"update_layer_comp", "レイヤーカンプを更新"}, {"apply_layer_comp", "レイヤーカンプを適用"},
+        {"set_layer_comp", "レイヤーカンプオプション"}, {"duplicate_layer_comp", "レイヤーカンプを複製"}, {"delete_layer_comp", "レイヤーカンプを削除"},
+        {"clear_layer_comp_warnings", "レイヤーカンプの警告をクリア"},
+        // (PC5 I-d, variables@1: render/ops_variables)
+        {"set_variables", "変数を定義"}, {"set_data_sets", "データセットを変更"}, {"apply_data_set", "データセットを適用"},
+        // (PC5 I-f, image-assets@1: core/image_assets)
+        {"set_image_assets", "画像アセット"},
+        // (PC5 J-c, annotations@1: render/ops_annotations)
+        {"add_annotation", "注釈を追加"}, {"set_annotation", "注釈を編集"}, {"delete_annotations", "注釈を削除"},
+        // (PC5 J-d1, measure@1: render/ops_measure)
+        {"set_measurement_scale", "計測スケールを設定"}, {"add_count", "カウント"}, {"remove_count", "カウントを削除"}, {"move_count", "カウントを移動"},
+        {"clear_count", "カウントをクリア"}, {"new_count_group", "新規カウントグループ"}, {"delete_count_group", "カウントグループを削除"},
+        {"set_count_group", "カウントグループのオプション"}, {"set_ruler_line", "ものさし"}, {"straighten_layer", "レイヤーの角度補正"},
+        // (PC5 J-b, slices@1: render/ops_slices)
+        {"add_slice", "スライス"}, {"set_slice", "スライスオプション"}, {"delete_slices", "スライスを削除"}, {"divide_slice", "スライスを分割"},
+        {"slices_from_guides", "ガイドからスライスを作成"},
+        // (PC5 I-c, artboards@1: render/ops_artboards)
+        {"add_artboard", "アートボード"}, {"artboard_from_layers", "レイヤーからのアートボード"}, {"set_artboard", "アートボードを編集"},
+        // (PC5 H-f, pixel-aspect@1: core/pixel_aspect)
+        {"set_pixel_aspect", "ピクセル縦横比"},
     };
     return table;
 }
@@ -129,6 +165,20 @@ QString describe(const Json& ops) {
             // NAMES.get(str(op.get("op")), "原稿を変えた")
             const Json* kind = op.is_object() && op.contains("op") ? &op["op"] : nullptr;
             const std::string key = kind != nullptr ? core::py_str(*kind) : std::string("None");
+            // (PC5 H-b: a guide's own words — the ruler ops naming one by its kind, or moving one by its place)
+            const bool guide = op.is_object() && op.value("kind", Json()) == Json("guide");
+            if (key == "add_ruler" && guide) {
+                named << QStringLiteral("ガイドを置いた");
+                continue;
+            }
+            if (key == "delete_ruler" && guide) {
+                named << QStringLiteral("ガイドを消した");
+                continue;
+            }
+            if (key == "edit_ruler" && op.is_object() && (op.contains("at") || op.contains("axis")) && !op.contains("points")) {
+                named << QStringLiteral("ガイドを動かした");
+                continue;
+            }
             const auto it = names().find(key);
             named << (it != names().end() ? QString::fromUtf8(it->second) : QStringLiteral("原稿を変えた"));
         }
@@ -191,8 +241,10 @@ void HistoryPanel::refresh() {
     list_->addItem(start);
     const std::string& me = window_->session().actor();
     int n = 0;
+    const int left_out = std::max(0, done_ - std::max(1, states));  // (PC5 H-e: ヒストリー数)
     for (const Session::HistoryEntry& entry : timeline.done) {
         ++n;
+        if (n <= left_out) continue;
         const std::string actor = entry.actor.is_null() ? std::string() : core::py_str(entry.actor);
         QString who;
         if (!actor.empty() && actor != me) {
@@ -212,7 +264,7 @@ void HistoryPanel::refresh() {
     }
     // (PC3 B4: the History Brush's source marked — a row past the present cannot be one: back to （はじめ）)
     if (brush_source() > done_) window_->history_brush_row.reset();
-    if (QListWidgetItem* source = list_->item(brush_source())) {
+    if (QListWidgetItem* source = list_->item(brush_source() == 0 ? 0 : brush_source() > left_out ? brush_source() - left_out : -1)) {
         QPixmap mark(12, 12);  // (a diamond, as the panel's words stay as they are)
         mark.fill(Qt::transparent);
         QPainter painter(&mark);
@@ -225,12 +277,12 @@ void HistoryPanel::refresh() {
         source->setData(Qt::UserRole + 1, true);
         source->setToolTip(QStringLiteral("ヒストリーブラシは、この状態に塗り戻します"));
     }
-    QListWidgetItem* now = list_->item(done_);
+    QListWidgetItem* now = list_->item(done_ == 0 ? 0 : done_ - left_out);
     now->setText(QStringLiteral("▶ ") + now->text());
     QFont font = now->font();
     font.setBold(true);
     now->setFont(font);
-    list_->setCurrentRow(done_);
+    list_->setCurrentRow(done_ == 0 ? 0 : done_ - left_out);
     list_->scrollToItem(now);
 }
 

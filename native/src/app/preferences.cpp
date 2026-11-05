@@ -36,6 +36,7 @@
 #include <cmath>
 #include <set>
 #include <stdexcept>
+#include <tuple>
 
 #include "app/ask.hpp"
 #include "app/brush_panel.hpp"
@@ -43,14 +44,20 @@
 #include "app/canvas.hpp"
 #include "app/comfort.hpp"
 #include "app/config.hpp"
+#include "app/control_channel.hpp"
 #include "app/documents.hpp"
 #include "app/icons.hpp"
+#include "app/key_sets.hpp"
 #include "app/look.hpp"
 #include "app/main_window.hpp"
+#include "app/menu_look.hpp"
 #include "app/theme.hpp"
+#include "app/tool_settings.hpp"
 #include "app/workspace.hpp"
 #include "core/model.hpp"
+#include "core/prefs_table.hpp"
 #include "core/pynum.hpp"
+#include "core/type_styles.hpp"
 
 namespace genko::app::preferences {
 
@@ -77,19 +84,25 @@ const std::vector<std::pair<QString, QString>>& pen_buttons() {
     return all;
 }
 
-int ui_font_pt() { return settings()->value(QStringLiteral("ui/font_pt"), 0).toInt(); }
+// (PC5 H-0: read through 環境設定の表 — core/prefs_table: its fallbacks, ranges and choices)
+namespace {
 
-QString default_paper() { return settings()->value(QStringLiteral("new/paper"), QString()).toString(); }
-
-int recent_count() {
-    bool ok = false;
-    const int value = settings()->value(QStringLiteral("files/recent_count"), kRecentDefault).toInt(&ok);
-    return ok ? std::clamp(value, 0, kRecentMax) : kRecentDefault;
+core::Json pref(const char* path) {
+    const auto store = settings();
+    return core::prefs::value(*store, path);
 }
 
-bool lowercase_extension() { return truthy(settings()->value(QStringLiteral("files/lowercase_extension"), QStringLiteral("true"))); }
+}  // namespace
 
-bool ignore_exif_profile() { return truthy(settings()->value(QStringLiteral("files/ignore_exif_profile"), QStringLiteral("false"))); }
+int ui_font_pt() { return pref("interface.uiFontSize").get<int>(); }
+
+QString default_paper() { return QString::fromStdString(pref("book.newPaper").get<std::string>()); }
+
+int recent_count() { return pref("fileHandling.recentFileCount").get<int>(); }
+
+bool lowercase_extension() { return pref("fileHandling.lowercaseExtension").get<bool>(); }
+
+bool ignore_exif_profile() { return pref("fileHandling.ignoreExifProfileTag").get<bool>(); }
 
 int save_after_ms() {
     bool ok = false;
@@ -98,24 +111,36 @@ int save_after_ms() {
 }
 
 std::optional<double> tablet_gamma() {
-    const QVariant value = settings()->value(QStringLiteral("tablet/gamma"));
-    bool ok = false;
-    const double gamma = value.toString().toDouble(&ok);
-    if (!value.isValid() || value.toString().isEmpty() || !ok) return std::nullopt;
-    return gamma;
+    const core::Json gamma = pref("tablet.pressureGamma");
+    if (!gamma.is_number()) return std::nullopt;  // ("": the usual curve)
+    return gamma.get<double>();
 }
 
-bool brush_preview() { return truthy(settings()->value(QStringLiteral("ui/brush_preview"), QStringLiteral("true"))); }
+bool brush_preview() { return pref("view.brushPreview").get<bool>(); }
 
 void set_brush_preview(bool on) { settings()->setValue(QStringLiteral("ui/brush_preview"), on ? QStringLiteral("true") : QStringLiteral("false")); }
 
-bool cross_while_drawing() { return truthy(settings()->value(QStringLiteral("ui/cross_drawing"), QStringLiteral("false"))); }
+bool cross_while_drawing() { return pref("cursors.showOnlyCrosshairWhilePainting").get<bool>(); }
 
-QString pen_button() {
-    const QString value = settings()->value(QStringLiteral("tablet/button"), QStringLiteral("menu")).toString();
-    const auto& all = pen_buttons();
-    return std::any_of(all.begin(), all.end(), [&value](const auto& b) { return b.second == value; }) ? value : QStringLiteral("menu");
+std::optional<core::Json> default_type_styles() {
+    const QByteArray kept = settings()->value(QStringLiteral("type/default_styles")).toString().toUtf8();
+    if (kept.isEmpty()) return std::nullopt;
+    try {
+        const core::Json formatting = core::type_styles::checked_defaults(core::Json::parse(kept.toStdString()));
+        if (formatting.is_null()) return std::nullopt;
+        return formatting;
+    } catch (const std::exception&) {  // (written by hand, or by another build: as if none were kept)
+        return std::nullopt;
+    }
 }
+
+void set_default_type_styles(const core::Json& formatting) {
+    const core::Json checked = core::type_styles::checked_defaults(formatting);
+    if (checked.is_null()) return;
+    settings()->setValue(QStringLiteral("type/default_styles"), QString::fromStdString(checked.dump()));
+}
+
+QString pen_button() { return QString::fromStdString(pref("tablet.penButton").get<std::string>()); }
 
 double gamma_for(const std::vector<double>& pressures) {
     std::vector<double> usable;
@@ -232,12 +257,129 @@ const std::multimap<QString, QString>& renamed() {
                                                      {QStringLiteral("ブラシサイズを小さく"), QStringLiteral("細く（ペン・消しゴム）")},
                                                      {QStringLiteral("選んだ線を描画色にする"), QStringLiteral("選んだ線をペンの色にする")},
                                                      {QStringLiteral("マスクを編集する（ブラシで見せる・消しゴムで隠す）"),
-                                                      QStringLiteral("マスクを編集する（ペンで見せる・消しゴムで隠す）")}};
+                                                      QStringLiteral("マスクを編集する（ペンで見せる・消しゴムで隠す）")},
+                                                     // (PC5 H-0, 節 H 1.2 and the user's decision 12: 表示, ウィンドウ and 編集's
+                                                     // commands and the panels by Photoshop's names; 表示 → 水平方向に反転 and 定規
+                                                     // share their words with 編集 → 変形's and the 定規 tool: by their places)
+                                                     {QStringLiteral("取り消し"), QStringLiteral("元に戻す")},
+                                                     {QStringLiteral("やり直し"), QStringLiteral("やり直す")},
+                                                     {QStringLiteral("画面サイズに合わせる"), QStringLiteral("全体を表示")},
+                                                     {QStringLiteral("ズームイン"), QStringLiteral("拡大")},
+                                                     {QStringLiteral("ズームアウト"), QStringLiteral("縮小")},
+                                                     {QStringLiteral("プリントサイズ"), QStringLiteral("原寸（紙の大きさ）")},
+                                                     {QStringLiteral("ズームツール"), QStringLiteral("虫めがね")},
+                                                     {QStringLiteral("水平方向に反転（表示）"), QStringLiteral("左右反転して見る")},
+                                                     {QStringLiteral("定規（表示）"), QStringLiteral("目盛りを表示")},
+                                                     {QStringLiteral("描画定規を表示"), QStringLiteral("定規を表示")},
+                                                     {QStringLiteral("描画定規にスナップ"), QStringLiteral("定規にスナップ")},
+                                                     {QStringLiteral("ヒストリー…"), QStringLiteral("履歴…")},
+                                                     {QStringLiteral("ヒストリー"), QStringLiteral("履歴")},
+                                                     {QStringLiteral("ナビゲーター"), QStringLiteral("全体図")},
+                                                     {QStringLiteral("オプション"), QStringLiteral("ツールの設定")},
+                                                     {QStringLiteral("検索"), QStringLiteral("コマンドを探す…")},
+                                                     {QStringLiteral("新規ウィンドウ"), QStringLiteral("新しいウィンドウ（同じ原稿）")},
+                                                     {QStringLiteral("一般…"), QStringLiteral("環境設定…")},
+                                                     // (PC5 H-b: 表示 → 表示・非表示 ▸ by Photoshop's names — グリッド shares its words
+                                                     // with スナップ先 ▸'s: by its place)
+                                                     {QStringLiteral("選択範囲のエッジ"), QStringLiteral("選択範囲の境界線")},
+                                                     {QStringLiteral("グリッド（表示 → 表示・非表示）"), QStringLiteral("グリッドを表示")},
+                                                     // (PC5 G-d, 節 G 5.4: the text tool and 検索と置換… by Photoshop's names —
+                                                     // the tool was テキスト, and テキスト（ツール） beside ラスタライズ ▸'s
+                                                     // テキスト since PC3 A4; that one keeps its name by its place — genko_placed —,
+                                                     // so テキスト is no reused name: the tool's, words_owner — review P2-3)
+                                                     {QStringLiteral("縦書き文字ツール"), QStringLiteral("テキスト")},
+                                                     {QStringLiteral("縦書き文字ツール"), QStringLiteral("テキスト（ツール）")},
+                                                     {QStringLiteral("検索と置換…"), QStringLiteral("台詞の検索・置換…")},
+                                                     // (PC5 H-d: ウィンドウ → ワークスペース ▸ by Photoshop's names)
+                                                     {QStringLiteral("新規ワークスペース…"), QStringLiteral("今の配置をワークスペースとして残す…")},
+                                                     // (PC5 I-a, 節 I 1.2: レイヤー's commands by Photoshop's names)
+                                                     {QStringLiteral("レイヤー…"), QStringLiteral("新しいペイントのレイヤー")},
+                                                     {QStringLiteral("グループ…"), QStringLiteral("新しいフォルダ")},
+                                                     {QStringLiteral("レイヤーを複製…"), QStringLiteral("レイヤーを複製")},
+                                                     {QStringLiteral("レイヤーをグループ化"), QStringLiteral("選んだレイヤーをフォルダにまとめる")},
+                                                     {QStringLiteral("レイヤーを表示"), QStringLiteral("選んだレイヤーを見せる")},
+                                                     {QStringLiteral("レイヤーを非表示"), QStringLiteral("選んだレイヤーを隠す")},
+                                                     {QStringLiteral("レイヤーを結合…"), QStringLiteral("選んだレイヤーを結合…")},
+                                                     {QStringLiteral("表示レイヤーを結合したレイヤーを作成"), QStringLiteral("表示レイヤーの結合コピーを作る")},
+                                                     {QStringLiteral("画像を統合…"), QStringLiteral("画像をフラット化…")},
+                                                     // (PC5 J-e1, 節 J 1.2: the timeline's by Photoshop's name — ウィンドウ →
+                                                     // タイムライン is the panel's switch)
+                                                     {QStringLiteral("ビデオタイムラインを作成"), QStringLiteral("アニメーション（タイムライン）")},
+                                                     // (PC5 J-f, edit.preferences.plugIns: the plugins' settings are 環境設定 ▸
+                                                     // プラグイン…)
+                                                     {QStringLiteral("プラグイン…"), QStringLiteral("プラグインの設定…")},
+                                                     // (PC5 H-f: 編集 → メモリをクリア ▸'s 取り消し and ヒストリー share their
+                                                     // words with 編集's 取り消し and ウィンドウ's ヒストリー: those by their places
+                                                     // now, their old names kept — their keys still read under their words too)
+                                                     {QStringLiteral("取り消し（編集）"), QStringLiteral("元に戻す")},
+                                                     {QStringLiteral("取り消し（編集）"), QStringLiteral("取り消し")},
+                                                     {QStringLiteral("ヒストリー（ウィンドウ）"), QStringLiteral("履歴")},
+                                                     {QStringLiteral("ヒストリー（ウィンドウ）"), QStringLiteral("ヒストリー")}};
     return all;
 }
 
+QStringList old_names(const QString& name) {
+    QStringList out;
+    for (auto [old, end] = renamed().equal_range(name); old != end; ++old) {
+        if (!reused_name(old->second)) out << old->second;  // (a reused name is a later command's own: never read as this one's)
+    }
+    return out;
+}
+
 const std::vector<QString>& reused_names() {
-    static const std::vector<QString> all{QStringLiteral("グラデーション")};
+    // (PC5 H-0: 書き出し… — 原稿を書き出す…'s before PC4 F-0 — is 編集 → 環境設定 → 書き出し…'s own name since; the list is
+    // core/prefs_table's, whose set() marks a key it writes)
+    static const std::vector<QString> all = [] {
+        std::vector<QString> out;
+        for (const std::string& name : core::prefs::reused_names()) out.push_back(QString::fromStdString(name));
+        return out;
+    }();
+    return all;
+}
+
+const std::map<QString, QString>& words_owner() {
+    static const std::map<QString, QString> all{{QStringLiteral("定規"), QStringLiteral("act_ruler")},
+                                                // (PC5 H-b: 表示・非表示 ▸'s ガイド・グリッド・すべて・なし came to share スナップ先 ▸'s words)
+                                                {QStringLiteral("ガイド"), QStringLiteral("act_snap_guides")},
+                                                {QStringLiteral("グリッド"), QStringLiteral("act_snap_grid")},
+                                                {QStringLiteral("すべて"), QStringLiteral("act_snap_all")},
+                                                {QStringLiteral("なし"), QStringLiteral("act_snap_none")},
+                                                // (PC5 G-d: テキスト — the text tool's words before it was 縦書き文字ツール —
+                                                // stays its, not ラスタライズ ▸ テキスト's — review P2-3)
+                                                {QStringLiteral("テキスト"), QStringLiteral("act_text")},
+                                                // (PC5 H-f: 編集 → メモリをクリア ▸'s 取り消し and ヒストリー came to share 編集's
+                                                // 取り消し and ウィンドウ → ヒストリー's words — the panel's switch by its dock,
+                                                // "dock:<its object name>")
+                                                {QStringLiteral("取り消し"), QStringLiteral("act_undo")},
+                                                {QStringLiteral("ヒストリー"), QStringLiteral("dock:履歴")}};
+    return all;
+}
+
+const std::vector<Pane>& panes() {
+    // (Photoshop's 環境設定 ▸ in its order, then Genko's own, each pane the dialog's page of the same words — PC5 H-e; the
+    // plug-ins' and the integrations' are 節 J's, the type's 節 G's: no page yet, not in the menu)
+    static const std::vector<Pane> all{
+        {QStringLiteral("general"), QStringLiteral("一般…"), QStringLiteral("一般")},
+        {QStringLiteral("interface"), QStringLiteral("インターフェイス…"), QStringLiteral("インターフェイス")},
+        {QStringLiteral("workspace"), QStringLiteral("ワークスペース…"), QStringLiteral("ワークスペース")},  // (PC5 H-d)
+        {QStringLiteral("tools"), QStringLiteral("ツール…"), QStringLiteral("ツール")},
+        {QStringLiteral("historyLog"), QStringLiteral("ヒストリーログ…"), QStringLiteral("ヒストリーログ")},
+        {QStringLiteral("fileHandling"), QStringLiteral("ファイル管理…"), QStringLiteral("ファイル管理")},
+        {QStringLiteral("export"), QStringLiteral("書き出し…"), QStringLiteral("書き出し")},
+        {QStringLiteral("performance"), QStringLiteral("パフォーマンス…"), QStringLiteral("パフォーマンス")},
+        {QStringLiteral("scratchDisks"), QStringLiteral("仮想記憶ディスク…"), QStringLiteral("仮想記憶ディスク")},
+        {QStringLiteral("cursors"), QStringLiteral("カーソル…"), QStringLiteral("カーソル")},
+        {QStringLiteral("transparencyAndGamut"), QStringLiteral("透明部分・色域…"), QStringLiteral("透明部分・色域")},
+        {QStringLiteral("unitsAndRulers"), QStringLiteral("単位・定規…"), QStringLiteral("単位・定規")},  // (PC5 H-b)
+        {QStringLiteral("guidesGridAndSlices"), QStringLiteral("ガイド・グリッド・スライス…"), QStringLiteral("ガイド・グリッド・スライス")},
+        // (PC5 J-f: the plugins' own window — app/plugins_dialog —, its command act_plugin_settings: main_window_edit)
+        {QStringLiteral("plugIns"), QStringLiteral("プラグイン…"), QStringLiteral("プラグイン")},
+        {QStringLiteral("type"), QStringLiteral("テキスト…"), QStringLiteral("テキスト")},  // (PC5 G-d)
+        {QStringLiteral("enhancedControls"), QStringLiteral("拡張コントロール…"), QStringLiteral("拡張コントロール")},
+        {QStringLiteral("rawDefaults"), QStringLiteral("Camera Raw…"), QStringLiteral("Camera Raw")},
+        {QStringLiteral("integrations"), QStringLiteral("連携…"), QStringLiteral("連携")},  // (PC5 J-g)
+        {QStringLiteral("tablet"), QStringLiteral("ペンタブレット…"), QStringLiteral("ペンタブレット")},
+        {QStringLiteral("comfort"), QStringLiteral("長い時間の作業…"), QStringLiteral("長い時間の作業")}};
     return all;
 }
 
@@ -256,6 +398,29 @@ void mark_names_current(const QString& key) {
     const auto store = settings();
     store->setValue(QStringLiteral("names_current/") + key, store->value(key).toString());
 }
+
+namespace {
+
+// The old keys a command's keys are read under when it has none under its name (apply_shortcuts' order): its old names'
+// (renamed(), a reused one only while not marked as the new command's) and its words alone when another command came to
+// share them.
+QStringList old_keys(MainWindow* window, QAction* action, const std::map<const QAction*, QString>& names, const std::map<QString, QAction*>& first) {
+    const auto current = [](const QString& name) { return names_current(QStringLiteral("shortcuts/") + name); };
+    const QString name = command_name(names, action);
+    const auto words = first.find(action->text());
+    const bool first_of_words = name != action->text() && words != first.end() && words->second == action;
+    QStringList out;
+    for (const QString& now : first_of_words ? QStringList{name, action->text()} : QStringList{name}) {
+        for (auto [old, end] = renamed().equal_range(now); old != end; ++old) {
+            if (!(reused_name(old->second) && current(old->second))) out << QStringLiteral("shortcuts/%1").arg(old->second);
+        }
+    }
+    if (first_of_words) out << QStringLiteral("shortcuts/%1").arg(action->text());
+    (void)window;
+    return out;
+}
+
+}  // namespace
 
 void apply_shortcuts(MainWindow* window) {
     const auto store = settings();
@@ -319,7 +484,20 @@ void apply_shortcuts(MainWindow* window) {
         if (keys != action->shortcuts()) action->setShortcuts(keys);
     }
     retip(window);
-    if (!taken.isEmpty()) window->flash(taken.join(QLatin1Char('\n')) + QStringLiteral("（環境設定 → ショートカットで変えられます）"), 8000);
+    // (said once for the window: the same keys taken off again — each time the keys are applied — are not said again)
+    const QString said = taken.join(QLatin1Char('\n'));
+    if (!taken.isEmpty() && window->property("genko_keys_taken").toString() != said) {
+        window->flash(said + QStringLiteral("（編集 → キーボードショートカット… で変えられます）"), 8000);
+    }
+    window->setProperty("genko_keys_taken", said);
+}
+
+QString keys_in_words(const std::vector<const QAction*>& actions) {
+    QStringList keys;
+    for (const QAction* action : actions) {
+        if (action != nullptr && !action->shortcut().isEmpty()) keys << action->shortcut().toString(QKeySequence::NativeText);
+    }
+    return keys.isEmpty() ? QString() : QStringLiteral("（%1）").arg(keys.join(QStringLiteral("・")));
 }
 
 void retip(MainWindow* window) {
@@ -335,6 +513,33 @@ void retip(MainWindow* window) {
         action->setToolTip(QString(name).remove(QLatin1Char('&')) + (keys.isEmpty() ? QString() : QStringLiteral("（%1）").arg(keys)) +
                            (what.isEmpty() ? QString() : QStringLiteral("\n") + what));
     }
+}
+
+void keep_keys(MainWindow* window, const std::vector<std::pair<QString, QStringList>>& keys, const std::map<QString, QList<QKeySequence>>& set_keys) {
+    const auto store = settings();
+    std::map<QString, QStringList> chosen(keys.begin(), keys.end());
+    const auto names = command_names(window);
+    const auto first = by_text(window);
+    for (QAction* action : preferences::commands(window)) {
+        const QString name = command_name(names, action);
+        const auto mine = chosen.find(name);
+        if (mine == chosen.end()) continue;  // (not shown: as it is)
+        const QStringList now = mine->second;
+        const auto found = set_keys.find(name);
+        const QList<QKeySequence> defaults = found != set_keys.end() ? found->second : QList<QKeySequence>();
+        const QStringList first_default = defaults.isEmpty() ? QStringList() : QStringList{defaults.front().toString()};
+        const QString key = QStringLiteral("shortcuts/%1").arg(name);
+        if (now == first_default) {
+            store->remove(key);
+            // (PC5 H-0: and the keys read under its old names — else the next apply_shortcuts reads them back)
+            for (const QString& old : old_keys(window, action, names, first)) store->remove(old);
+            action->setShortcuts(defaults);
+        } else {
+            store->setValue(key, now.join(QLatin1Char('|')));
+        }
+    }
+    // (PC4 E4: the keys under a reused name are kept by this build's names)
+    for (const QString& reused : preferences::reused_names()) preferences::mark_names_current(QStringLiteral("shortcuts/") + reused);
 }
 
 std::vector<Clash> conflicts(const std::vector<std::pair<QString, QStringList>>& mapping) {
@@ -423,10 +628,16 @@ QColor gamut_colour() {
     return colour.isValid() ? colour : QColor(128, 128, 128);
 }
 
-int gamut_opacity() { return std::clamp(settings()->value(QStringLiteral("view/gamut_opacity"), 100).toInt(), 1, 100); }
+int gamut_opacity() { return pref("transparencyAndGamut.gamutWarningOpacity").get<int>(); }
 
 void apply_all(MainWindow* window) {
+    // (PC5 H-0: the key set's keys first — each command's own then —, the person's over them)
+    key_sets::apply(window, key_sets::chosen());  // (PC5 H-d: the person's own set over its built-in one)
+    name_commands(window);
     apply_shortcuts(window);
+    window->apply_workspace_prefs();  // (PC5 H-d: ツールバー…'s palette, the lock, 大きいタブ, 隠れたパネルを自動的に表示)
+    menu_look::apply(window);         // (PC5 H-d: メニュー…'s hidden and coloured items)
+    if (ToolSettings* ts = window->tool_settings(); ts != nullptr && !ts->tool().isEmpty()) ts->show_tool(ts->tool());  // (its keys in its title)
     window->set_save_after(save_after_ms());
     PageCanvas* canvas = window->canvas();
     canvas->pen_button = pen_button();
@@ -444,7 +655,10 @@ void apply_all(MainWindow* window) {
     canvas->tool_modifiers = tool_modifiers();
     canvas->refresh_cursor();
     window->apply_proof_view();  // (透明部分・色域: the gamut warning's mark)
+    window->apply_guide_prefs();  // (PC5 H-b: 単位・定規, ガイド・グリッド・スライス)
+    apply_panes(window);          // (PC5 H-e: 一般, インターフェイス, ツール, ヒストリーログ, パフォーマンス, 拡張コントロール)
     canvas->update();
+    control::Server::instance().follow_settings();  // (PC5 J-g: 連携's control channel on or off; the status bar's words)
 }
 
 bool tool_keys_dialog(QWidget* parent, MainWindow* window, const std::function<void(QDialog&)>& before_exec) {
@@ -525,37 +739,6 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     setWindowTitle(QStringLiteral("環境設定"));
     setMinimumSize(560, 480);
     tabs = new QTabWidget;
-    // shortcuts
-    table = new QTableWidget(0, 2);
-    table->setHorizontalHeaderLabels({QStringLiteral("コマンド"), QStringLiteral("ショートカット")});
-    table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    table->verticalHeader()->setVisible(false);
-    const auto names = command_names(window);
-    for (QAction* action : preferences::commands(window)) {
-        const QString name = command_name(names, action);  // (its place too when another has the same words)
-        const int row = table->rowCount();
-        table->insertRow(row);
-        auto* item = new QTableWidgetItem(name);
-        item->setFlags(item->flags() & ~Qt::ItemIsEditable);
-        table->setItem(row, 0, item);
-        auto* edit = new QKeySequenceEdit(action->shortcut());
-        if (auto* field = edit->findChild<QLineEdit*>()) field->setPlaceholderText(QStringLiteral("キーを押す"));
-        edit->setAccessibleName(QStringLiteral("%1 のショートカット").arg(name));
-        table->setCellWidget(row, 1, edit);
-        editors.emplace_back(name, edit);
-    }
-    clash = new QLabel;
-    theme::role(clash, "error");
-    clash->setWordWrap(true);
-    auto* reset = new QPushButton(QStringLiteral("すべて最初のキーに戻す"));
-    connect(reset, &QPushButton::clicked, this, &PreferencesDialog::reset_keys);
-    auto* keys = new QWidget;
-    auto* kl = new QVBoxLayout(keys);
-    kl->addWidget(new QLabel(QStringLiteral("キーを変えたいコマンドの右をクリックして、新しいキーを押します。")));
-    kl->addWidget(table, 1);
-    kl->addWidget(clash);
-    kl->addWidget(reset);
-    tabs->addTab(keys, QStringLiteral("ショートカット"));
     // the pen tablet
     pad = new PressurePad;
     gamma_note = new QLabel;
@@ -632,6 +815,13 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     gpu->setChecked(truthy(settings()->value(QStringLiteral("ui/gpu_canvas"), QStringLiteral("false"))));
     gpu->setToolTip(QStringLiteral("拡大・回転がなめらかになります（次に開いた窓から）。原稿が白いままになったら外してください。"
                                    "対応していないパソコンでは、入れていても使いません"));
+    gpu_memory = new QSpinBox;  // (PC5 H-a, render:GPU-CPU-parity)
+    gpu_memory->setObjectName(QStringLiteral("gpu_memory"));
+    gpu_memory->setRange(64, 1024);  // (Qt's own texture cache keeps 1 GiB at most: review P3-1)
+    gpu_memory->setSingleStep(64);
+    gpu_memory->setSuffix(QStringLiteral(" MB"));
+    gpu_memory->setValue(static_cast<int>(PageCanvas::gpu_budget_bytes() / (1024 * 1024)));
+    gpu_memory->setToolTip(QStringLiteral("グラフィックボードで表示するときに、原稿の絵を置いておく量の上限です。超えると、前に表示した所から外します（次に開いた窓から）"));
     motion = new QCheckBox(QStringLiteral("動きを減らす"));
     motion->setToolTip(QStringLiteral("メニューの開き方・拡大の寄り方・知らせの出方などの動きを止めます（決めていなければパソコンの設定に合わせます）"));
     motion->setChecked(reduce_motion());
@@ -667,32 +857,100 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     per_tool = new QPushButton(QStringLiteral("道具ごとの修飾キー…"));
     per_tool->setToolTip(QStringLiteral("ブラシツール・消しゴムツールなど道具ごとに、Alt・Ctrl・Shift を押している間の道具を決めます"));
     connect(per_tool, &QPushButton::clicked, this, [this] { tool_keys_dialog(this, window_); });
-    auto* work = new QWidget;
-    QFormLayout* wl = look::form();
-    work->setLayout(wl);
-    auto* note = new QLabel(QStringLiteral("文字の大きさは、決めるとすぐに変わります。"));
+    // (PC5 H-e, 節 H 5.4: Photoshop's panes — 一般, インターフェイス, ツール, ヒストリーログ, パフォーマンス, 仮想記憶ディスク, カーソル,
+    // 拡張コントロール — and Genko's 長い時間の作業, each a page of its own where 表示・作業 had them all; the fields of the
+    // preferences H-e added made from their rows of core/prefs_table: app/preferences_panes.cpp)
+    auto* note = new QLabel(QStringLiteral("文字の大きさは、決めるとすぐに変わります。UI の拡大・縮小は、次に起動したときから。"));
     theme::role(note, "hint");
-    const std::vector<std::pair<QString, std::vector<std::pair<QString, QWidget*>>>> sections{
-        {QStringLiteral("見た目"),
-         {{QStringLiteral("画面の色"), theme}, {QStringLiteral("パネルの明るさ"), brightness}, {QStringLiteral("原稿のまわり"), surround},
-          {QStringLiteral("画面の書体"), ui_font}, {QStringLiteral("画面の文字の大きさ"), font_pt}, {QString(), note}, {QString(), mono_icons},
-          {QString(), hints}, {QString(), gpu}}},
-        {QStringLiteral("描く・操作"),
-         {{QStringLiteral("ペンのカーソル"), cursor}, {QString(), cross_drawing}, {QStringLiteral("Alt を押している間"), alt_tool},
-          {QStringLiteral("Ctrl を押している間"), ctrl_tool},
-          {QString(), per_tool}, {QString(), hold_swap}, {QString(), radial}}},
-        {QStringLiteral("長い時間の作業"), {{QStringLiteral("休憩の案内"), rest}, {QString(), motion}, {QString(), requests}}}};
-    for (const auto& [head, rows] : sections) {
-        wl->addRow(look::section(head));
-        for (const auto& [label, widget] : rows) wl->addRow(label, widget);
+    note->setWordWrap(true);
+    reset_all = new QPushButton(QStringLiteral("すべての環境設定をリセット…"));
+    reset_all->setObjectName(QStringLiteral("prefs_reset_all"));
+    reset_all->setToolTip(QStringLiteral("このパソコンの環境設定をすべて初めの値に戻します（キー・メニュー・ワークスペースの選択も。道具の覚え・残したワークスペース・クイックアクセスとコマンドバーの並び・ユーザー辞書と表記の表は残します）"));
+    connect(reset_all, &QPushButton::clicked, this, [this] { reset_everything(); });
+    tabs->addTab(form_page({{QStringLiteral("オプション"),
+                             {pane_row("general.colorPicker"), pane_row("general.imageInterpolation"), pane_row("general.autoShowHomeScreen"),
+                              pane_row("general.beepWhenDone"), pane_row("general.exportClipboard"), pane_row("general.resizeImageDuringPlace"),
+                              pane_row("general.zoomWithScrollWheel"), pane_row("general.animatedZoom")}},
+                            {QString(), {{QString(), reset_all}}}}),
+                 QStringLiteral("一般"));
+    tabs->addTab(form_page({{QStringLiteral("外観"),
+                             {{QStringLiteral("カラーテーマ"), theme}, {QStringLiteral("パネルの明るさ"), brightness},
+                              {QStringLiteral("カンバスカラー"), surround}, pane_row("interface.canvasBorder")}},
+                            {QStringLiteral("表示"),
+                             {{QStringLiteral("UI のフォント"), ui_font}, {QStringLiteral("UI のフォントサイズ"), font_pt}, pane_row("interface.uiScale"),
+                              {QString(), note}}},
+                            {QStringLiteral("オプション"),
+                             {{QString(), mono_icons}, {QString(), hints}, pane_row("interface.showTooltips"), pane_row("interface.showMenuColors"),
+                              pane_row("interface.showChannelsInColor")}}}),
+                 QStringLiteral("インターフェイス"));
+    tabs->addTab(form_page({{QStringLiteral("オプション"),
+                             {{QStringLiteral("Alt を押している間"), alt_tool}, {QStringLiteral("Ctrl を押している間"), ctrl_tool}, {QString(), per_tool},
+                              {QString(), hold_swap}, {QString(), radial}, pane_row("tools.showTooltips"), pane_row("tools.zoomClickedPointToCenter"),
+                              pane_row("tools.enableFlickPanning"), pane_row("tools.showTransformationValues"), pane_row("tools.overscroll")}}}),
+                 QStringLiteral("ツール"));
+    tabs->addTab(form_page({{QStringLiteral("ヒストリーログ"),
+                             {pane_row("historyLog.enabled"), pane_row("historyLog.destination"), pane_row("historyLog.filePath"),
+                              pane_row("historyLog.detail")}}}),
+                 QStringLiteral("ヒストリーログ"));
+    tabs->addTab(form_page({{QStringLiteral("メモリの使用状況"), {pane_row("performance.memoryUsageMb")}},
+                            {QStringLiteral("ヒストリー"), {pane_row("performance.historyStates")}},
+                            {QStringLiteral("グラフィックプロセッサーの設定"), {{QString(), gpu}, {QStringLiteral("グラフィックボードの記憶の上限"), gpu_memory}}}}),
+                 QStringLiteral("パフォーマンス"));
+    tabs->addTab(form_page({{QStringLiteral("仮想記憶ディスク"), {pane_row("scratchDisks.folder"), {QString(), scratch_note()}}}}),
+                 QStringLiteral("仮想記憶ディスク"));
+    tabs->addTab(form_page({{QStringLiteral("ペイントカーソル"), {{QStringLiteral("ペンのカーソル"), cursor}, {QString(), cross_drawing}}}}),
+                 QStringLiteral("カーソル"));
+    tabs->addTab(form_page({{QStringLiteral("拡張コントロール"),
+                             {pane_row("enhancedControls.touchGestures"), pane_row("enhancedControls.zoomWithTrackpadPinch"),
+                              pane_row("enhancedControls.rotateViewWithTrackpad")}}}),
+                 QStringLiteral("拡張コントロール"));
+    tabs->addTab(form_page({{QStringLiteral("長い時間の作業"), {{QStringLiteral("休憩の案内"), rest}, {QString(), motion}, {QString(), requests}}}}),
+                 QStringLiteral("長い時間の作業"));
+    {
+        // ワークスペース (PC5 H-d, edit.preferences.workspace; PhotoCraft v0.2.0's prefs.rs Workspace, MIT): the ones Genko's
+        // window has — Photoshop's アイコンパネルを自動的に折りたたむ and 狭いオプションバー have nothing to fold here (Genko's
+        // panels are never icons, オプション is a panel); ドキュメントをタブで開く and the floating windows' docking are H-e's
+        const auto on = [](const char* key, bool fallback) {
+            const QString value = settings()->value(QString::fromLatin1(key), fallback ? QStringLiteral("true") : QStringLiteral("false")).toString();
+            return truthy(value);
+        };
+        workspace_remember = new QCheckBox(QStringLiteral("ワークスペースの変更を記憶"));
+        workspace_remember->setChecked(on("ui/workspace_remember", true));
+        workspace_remember->setToolTip(QStringLiteral("ワークスペースを選び直したとき、前に動かしたパネルの並びで戻します。切ると、いつも残した並びで戻します"));
+        auto_show_panels = new QCheckBox(QStringLiteral("隠れたパネルを自動的に表示"));
+        auto_show_panels->setChecked(on("ui/auto_show_panels", true));
+        auto_show_panels->setToolTip(QStringLiteral("原稿だけを表示（Tab）の間、窓の左右の端にカーソルを寄せると、その側のパネルを出します"));
+        large_tabs = new QCheckBox(QStringLiteral("大きいタブ"));
+        large_tabs->setChecked(on("ui/large_tabs", false));
+        large_tabs->setToolTip(QStringLiteral("開いている原稿のタブを大きくします"));
+        workspace_locked = new QCheckBox(QStringLiteral("ワークスペースをロック"));
+        workspace_locked->setChecked(on("ui/workspace_locked", false));
+        workspace_locked->setToolTip(QStringLiteral("パネルを動かしたり、窓から外したりできないようにします（ウィンドウ → ワークスペース → ワークスペースをロック）"));
+        for (auto [name, box] : std::initializer_list<std::pair<const char*, QCheckBox*>>{{"workspace_remember", workspace_remember},
+                                                                                         {"auto_show_panels", auto_show_panels},
+                                                                                         {"large_tabs", large_tabs},
+                                                                                         {"workspace_locked", workspace_locked}})
+            box->setObjectName(QStringLiteral("prefs_%1").arg(QString::fromLatin1(name)));
+        auto* page = new QWidget;
+        QFormLayout* rows = look::form();
+        page->setLayout(rows);
+        rows->addRow(look::section(QStringLiteral("オプション")));
+        rows->addRow(QString(), auto_show_panels);
+        rows->addRow(QString(), large_tabs);
+        rows->addRow(QString(), workspace_remember);
+        rows->addRow(QString(), workspace_locked);
+        // (PC5 H-e: ドキュメントをタブで開く, フローティングドキュメントウィンドウのドッキングを有効にする — H-c's windows)
+        for (const char* path : {"workspace.openDocumentsAsTabs", "workspace.enableFloatingDocumentWindowDocking"}) {
+            const auto [label, field] = pane_row(path);
+            rows->addRow(label, field);
+        }
+        auto* hint = new QLabel(QStringLiteral("パネルの並びは ウィンドウ → ワークスペース で選び、残し、初めの並びに戻せます。"));
+        hint->setWordWrap(true);
+        theme::role(hint, "hint");
+        rows->addRow(QString(), hint);
+        look::quiet_labels(rows);
+        tabs->addTab(page, QStringLiteral("ワークスペース"));
     }
-    look::quiet_labels(wl);
-    auto* scroll = new QScrollArea;
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    scroll->setWidget(work);
-    tabs->addTab(scroll, QStringLiteral("表示・作業"));
     // ファイル管理 (PC4 F-b, edit.preferences.fileHandling: 原稿と保存 and the files' own)
     QWidget* files_page = nullptr;
     {
@@ -838,20 +1096,45 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
         look::quiet_labels(rows);
         tabs->addTab(page, QStringLiteral("Camera Raw"));
     }
+    // 単位・定規 and ガイド・グリッド・スライス (PC5 H-b: app/preferences_units.cpp)
+    std::tie(units_page, guides_page) = unit_pages(this);
+    tabs->addTab(units_page, QStringLiteral("単位・定規"));
+    tabs->addTab(guides_page, QStringLiteral("ガイド・グリッド・スライス"));
+    // テキスト (PC5 G-d: app/preferences_type.cpp)
+    type_page = preferences::type_page(this);
+    tabs->addTab(type_page, QStringLiteral("テキスト"));
+    // 連携 (PC5 J-g: app/preferences_integrations.cpp — the control channel)
+    integrations_page = preferences::integrations_page(this);
+    tabs->addTab(integrations_page, QStringLiteral("連携"));
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("決める"));
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("やめる"));
     connect(buttons, &QDialogButtonBox::accepted, this, &PreferencesDialog::save);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    // プラグイン (PC5 J-f, its review P3-6: the pane a page of the dialog as the others are; the plugins' own window from it)
+    tabs->addTab(plugins_page(window_), QStringLiteral("プラグイン"));
+    arrange_pages(this);  // (PC5 H-e: the pages in Photoshop's order of its panes, each with この面を初期設定に戻す)
     // the pages chosen from a list at the side (as the main window's panels are chosen), not tabs across the top
     tabs->tabBar()->hide();
     tabs->setDocumentMode(true);
     pages_list = new QListWidget;
     pages_list->setObjectName(QStringLiteral("prefsNav"));
     pages_list->setFixedWidth(150);
-    int page = 0;
-    for (const char* picture : {"search", "pen", "settings", "kind_tone", "open", "export", "kind_placed"}) {
-        pages_list->addItem(new QListWidgetItem(icons::icon(picture), tabs->tabText(page++)));
+    // (each page's picture by its title — PC5 H-d: the keys' page went to キーボードショートカット…, ワークスペース came)
+    const std::map<QString, const char*> pictures{{QStringLiteral("ペンタブレット"), "pen"},
+                                                  {QStringLiteral("一般"), "settings"},
+                                                  {QStringLiteral("ワークスペース"), "kind_tone"},
+                                                  {QStringLiteral("透明部分・色域"), "kind_tone"},
+                                                  {QStringLiteral("ファイル管理"), "open"},
+                                                  {QStringLiteral("書き出し"), "export"},
+                                                  {QStringLiteral("Camera Raw"), "kind_placed"},
+                                                  {QStringLiteral("単位・定規"), "ruler"},
+                                                  {QStringLiteral("ガイド・グリッド・スライス"), "kind_tone"},
+                                                  {QStringLiteral("テキスト"), "text"},  // (PC5 G-d)
+                                                  {QStringLiteral("連携"), "settings"}};  // (PC5 J-g)
+    for (int page = 0; page < tabs->count(); ++page) {
+        const auto picture = pictures.find(tabs->tabText(page));
+        pages_list->addItem(new QListWidgetItem(icons::icon(picture != pictures.end() ? picture->second : "settings"), tabs->tabText(page)));
     }
     connect(pages_list, &QListWidget::currentRowChanged, tabs, &QTabWidget::setCurrentIndex);
     connect(tabs, &QTabWidget::currentChanged, this, [this](int i) {
@@ -865,8 +1148,18 @@ PreferencesDialog::PreferencesDialog(MainWindow* window) : QDialog(window), wind
     middle->setContentsMargins(0, 0, 0, 0);
     auto* body = new QWidget;
     body->setLayout(middle);
+    // (PC5 H-d: the keys in their own window — Photoshop's キーボードショートカット… — opened from here too)
+    keys_button = new QPushButton(QStringLiteral("キーボードショートカット…"));
+    keys_button->setObjectName(QStringLiteral("prefs_keyboard_shortcuts"));
+    keys_button->setToolTip(QStringLiteral("コマンドのキーとキーの組（Photoshop・Genko）、メニューの項目を変えます（編集 → キーボードショートカット…）"));
+    connect(keys_button, &QPushButton::clicked, this, [this] { window_->open_keyboard_shortcuts(); });
+    auto* keys_row = new QWidget;
+    auto* note_row = new QHBoxLayout(keys_row);
+    note_row->setContentsMargins(0, 0, 0, 0);
+    note_row->addWidget(keys_button);
+    note_row->addStretch(1);
     look::frame(this, look::header(QStringLiteral("環境設定"), QStringLiteral("このパソコンでの Genko の使い心地です。原稿には残りません。")), body,
-                nullptr, look::footer(buttons));
+                nullptr, look::footer(buttons, keys_row));
     resize(820, 620);
     show_gamma();
 }
@@ -884,13 +1177,6 @@ void PreferencesDialog::show_checker() {
     QImage swatch(checker_preview->size(), QImage::Format_RGB32);
     paint_checker(swatch, c);
     checker_preview->setPixmap(QPixmap::fromImage(swatch));
-}
-
-QKeySequenceEdit* PreferencesDialog::editor(const QString& command) const {
-    for (const auto& [name, edit] : editors) {
-        if (name == command) return edit;
-    }
-    return nullptr;
 }
 
 void PreferencesDialog::show_gamma() {
@@ -917,19 +1203,14 @@ void PreferencesDialog::forget_gamma() {
     show_gamma();
 }
 
-void PreferencesDialog::reset_keys() {
-    for (const auto& [name, edit] : editors) {
-        const auto found = window_->default_shortcuts.find(name);
-        edit->setKeySequence(found != window_->default_shortcuts.end() && !found->second.isEmpty() ? found->second.front() : QKeySequence());
+void PreferencesDialog::show_pane(const QString& id) {
+    QString page;
+    for (const Pane& pane : panes()) {
+        if (pane.id == id) page = pane.page;
     }
-}
-
-std::vector<std::pair<QString, QStringList>> PreferencesDialog::mapping() const {
-    std::vector<std::pair<QString, QStringList>> out;
-    for (const auto& [name, edit] : editors) {
-        out.emplace_back(name, edit->keySequence().isEmpty() ? QStringList() : QStringList{edit->keySequence().toString()});
+    for (int i = 0; i < tabs->count(); ++i) {
+        if (tabs->tabText(i) == page) tabs->setCurrentIndex(i);
     }
-    return out;
 }
 
 void PreferencesDialog::pick_backup() {
@@ -938,32 +1219,8 @@ void PreferencesDialog::pick_backup() {
 }
 
 void PreferencesDialog::save() {
-    const auto keys = mapping();
-    if (const auto clashes = conflicts(keys); !clashes.empty()) {
-        const Clash& first = clashes.front();
-        clash->setText(QStringLiteral("「%1」が「%2」と「%3」の両方に付いています。どちらかを変えます。").arg(first.keys, first.first, first.second));
-        tabs->setCurrentIndex(0);
-        return;
-    }
+    if (!pane_fields_fit(this)) return;  // (PC5 H-e, review P3-8: a field refused — nothing written, the dialog kept open)
     const auto store = settings();
-    std::map<QString, QStringList> chosen(keys.begin(), keys.end());
-    const auto names = command_names(window_);
-    for (QAction* action : preferences::commands(window_)) {
-        const QString name = command_name(names, action);
-        const QStringList now = chosen[name];
-        const auto found = window_->default_shortcuts.find(name);
-        const QList<QKeySequence> defaults = found != window_->default_shortcuts.end() ? found->second : QList<QKeySequence>();
-        const QStringList first_default = defaults.isEmpty() ? QStringList() : QStringList{defaults.front().toString()};
-        const QString key = QStringLiteral("shortcuts/%1").arg(name);
-        if (now == first_default) {
-            store->remove(key);
-            action->setShortcuts(defaults);
-        } else {
-            store->setValue(key, now.join(QLatin1Char('|')));
-        }
-    }
-    // (PC4 E4: the keys under a reused name are kept by this build's names)
-    for (const QString& reused : preferences::reused_names()) preferences::mark_names_current(QStringLiteral("shortcuts/") + reused);
     store->setValue(QStringLiteral("ui/font_pt"), font_pt->value());
     store->setValue(QStringLiteral("ui/ui_font"), ui_font->currentData());
     store->setValue(QStringLiteral("new/paper"), paper->currentData());
@@ -979,6 +1236,7 @@ void PreferencesDialog::save() {
     store->setValue(QStringLiteral("ui/rest_minutes"), rest->currentData());
     store->setValue(QStringLiteral("ui/raise_requests"), requests->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     store->setValue(QStringLiteral("ui/gpu_canvas"), gpu->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
+    if (gpu_memory->value() != static_cast<int>(PageCanvas::gpu_budget_bytes() / (1024 * 1024))) store->setValue(QStringLiteral("ui/gpu_memory_mb"), gpu_memory->value());
     if (motion->isChecked() == system_reduces_motion()) {  // (as the computer is set: keep following it)
         store->remove(QStringLiteral("ui/reduce_motion"));
     } else {
@@ -1012,6 +1270,15 @@ void PreferencesDialog::save() {
     store->setValue(QStringLiteral("view/checker_dark"), checker_dark->property("colour").value<QColor>().name());
     store->setValue(QStringLiteral("view/gamut_color"), gamut_button->property("colour").value<QColor>().name());
     store->setValue(QStringLiteral("view/gamut_opacity"), gamut_percent->value());
+    save_unit_pages(units_page, guides_page);  // (PC5 H-b)
+    save_type_page(type_page);                 // (PC5 G-d)
+    // (PC5 H-d: ワークスペース)
+    for (const auto& [key, box] : std::initializer_list<std::pair<const char*, QCheckBox*>>{{"ui/workspace_remember", workspace_remember},
+                                                                                           {"ui/auto_show_panels", auto_show_panels},
+                                                                                           {"ui/large_tabs", large_tabs},
+                                                                                           {"ui/workspace_locked", workspace_locked}})
+        store->setValue(QString::fromLatin1(key), box->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
+    if (!save_pane_fields(this)) return;  // (PC5 H-e: the fields made from the table, checked before anything was written: written at once)
     for (MainWindow* window : documents::windows()) apply_all(window);  // (this computer's: every window)
     accept();
 }

@@ -65,6 +65,7 @@ Json to_json(const PsdLayerKeep& keep) {
     out["blocks"] = std::move(blocks);
     if (!keep.ranges.empty()) out["ranges"] = keep.ranges;
     if (keep.id) out["id"] = *keep.id;
+    if (!keep.text.empty()) out["text"] = keep.text;  // (PC5 G-e)
     return out;
 }
 
@@ -82,13 +83,18 @@ Json to_json(const PsdPageKeep& keep) {
         out["ids"] = std::move(ids);
     }
     if (keep.from) out["from"] = Json{{"version", keep.from->version}, {"mode", keep.from->mode}, {"depth", keep.from->depth}};
+    if (!keep.copied.empty()) {  // (PC5 J-0)
+        Json copied = Json::array();
+        for (const PsdCopied& c : keep.copied) copied.push_back(Json::array({c.resource >= 0 ? Json(c.resource) : Json(c.global), c.fingerprint}));
+        out["copied"] = std::move(copied);
+    }
     return out;
 }
 
 PsdLayerKeep psd_layer_keep_from_json(const Json& value) {
     const std::string what = "a layer's native_psd";
     if (!value.is_object()) refuse(what + " is an object");
-    only_keys(value, {"blocks", "ranges", "id"}, what);
+    only_keys(value, {"blocks", "ranges", "id", "text"}, what);
     PsdLayerKeep keep;
     for (const Json& block : list_of(value, "blocks", what)) {
         if (!block.is_array() || block.size() != 2) refuse(what + "'s blocks are [key, asset]");
@@ -96,6 +102,7 @@ PsdLayerKeep psd_layer_keep_from_json(const Json& value) {
     }
     if (const Json* ranges = get(value, "ranges"); ranges != nullptr && !ranges->is_null()) keep.ranges = text(*ranges, what + "'s ranges");
     if (const Json* id = get(value, "id"); id != nullptr && !id->is_null()) keep.id = whole(*id, what + "'s id");
+    if (const Json* t = get(value, "text"); t != nullptr && !t->is_null()) keep.text = text(*t, what + "'s text");  // (PC5 G-e)
     check_psd_keep(keep);
     return keep;
 }
@@ -103,7 +110,7 @@ PsdLayerKeep psd_layer_keep_from_json(const Json& value) {
 PsdPageKeep psd_page_keep_from_json(const Json& value) {
     const std::string what = "a page's native_psd";
     if (!value.is_object()) refuse(what + " is an object");
-    only_keys(value, {"resources", "globals", "ids", "from"}, what);
+    only_keys(value, {"resources", "globals", "ids", "from", "copied"}, what);
     PsdPageKeep keep;
     for (const Json& item : list_of(value, "resources", what)) {
         if (!item.is_array() || item.size() != 3) refuse(what + "'s resources are [id, name, asset]");
@@ -126,6 +133,17 @@ PsdPageKeep psd_page_keep_from_json(const Json& value) {
         };
         keep.from = PsdFrom{number("version"), number("mode"), number("depth")};
     }
+    for (const Json& item : list_of(value, "copied", what)) {  // (PC5 J-0)
+        if (!item.is_array() || item.size() != 2 || !(item[0].is_number_integer() || item[0].is_string())) refuse(what + "'s copied are [id | key, fingerprint]");
+        PsdCopied c;
+        if (item[0].is_string()) {
+            c.global = text(item[0], what + "'s copied key");
+        } else {
+            c.resource = static_cast<int>(std::clamp<std::int64_t>(whole(item[0], what + "'s copied id"), -1, 65536));
+        }
+        c.fingerprint = text(item[1], what + "'s copied fingerprint");
+        keep.copied.push_back(std::move(c));
+    }
     check_psd_keep(keep);
     return keep;
 }
@@ -139,6 +157,12 @@ void check_psd_keep(const PsdLayerKeep& keep) {
     }
     if (!keep.ranges.empty() && !is_ref(keep.ranges)) refuse(what + "'s ranges are an asset (sha256:…)");
     if (keep.id && (*keep.id < 0 || *keep.id > 0xffffffffLL)) refuse(what + "'s id is a layer id (0..4294967295)");
+    // (PC5 G-e: a type layer's fingerprint, with the text layer's block it goes with)
+    if (!keep.text.empty()) {
+        if (!is_ref(keep.text)) refuse(what + "'s text is a fingerprint (sha256:…)");
+        if (std::none_of(keep.blocks.begin(), keep.blocks.end(), [](const auto& b) { return psd_text_key(b.first); }))
+            refuse(what + "'s text goes with its TySh block");
+    }
 }
 
 void check_psd_keep(const PsdPageKeep& keep) {
@@ -163,6 +187,15 @@ void check_psd_keep(const PsdPageKeep& keep) {
         if (keep.from->mode < 0 || keep.from->mode > 9) refuse(what + "'s from mode is Photoshop's colour mode (0..9)");
         if (keep.from->depth != 1 && keep.from->depth != 8 && keep.from->depth != 16 && keep.from->depth != 32)
             refuse(what + "'s from depth is 1, 8, 16 or 32");
+    }
+    for (const PsdCopied& c : keep.copied) {  // (PC5 J-0: a kept block's, once)
+        const bool kept = c.resource >= 0 ? std::any_of(keep.resources.begin(), keep.resources.end(), [&](const PsdResource& r) { return r.id == c.resource; })
+                                          : std::any_of(keep.globals.begin(), keep.globals.end(), [&](const PsdGlobal& g) { return g.key == c.global; });
+        if (!kept) refuse(what + "'s copied names a block it keeps");
+        if (c.fingerprint.empty() || c.fingerprint.size() > 128) refuse(what + "'s copied fingerprint is 1..128 bytes");
+        if (std::count(keep.copied.begin(), keep.copied.end(), c) > 1 ||
+            std::count_if(keep.copied.begin(), keep.copied.end(), [&](const PsdCopied& o) { return o.resource == c.resource && o.global == c.global; }) > 1)
+            refuse(what + "'s copied names a block once");
     }
 }
 
@@ -197,12 +230,26 @@ std::vector<std::pair<std::string, std::string_view>> psd_keep_assets(const Docu
             for (const PsdGlobal& g : keep->globals) add(g.ref);
         }
         for (const Layer& layer : written.page->layers) {
-            if (!layer.native_psd) continue;
-            for (const auto& [key, ref] : layer.native_psd->blocks) add(ref);
-            add(layer.native_psd->ranges);
+            const std::optional<PsdLayerKeep> keep = written_keep(layer);  // (PC5 G-e: a text layer's block only a type layer's)
+            if (!keep) continue;
+            for (const auto& [key, ref] : keep->blocks) add(ref);
+            add(keep->ranges);
         }
     }
     return out;
+}
+
+bool psd_text_key(std::string_view key) { return key == "TySh" || key == "tySh"; }
+
+std::optional<PsdLayerKeep> written_keep(const Layer& layer) {
+    if (!layer.native_psd) return std::nullopt;
+    if (layer.kind == LayerKind::Type) return layer.native_psd;
+    PsdLayerKeep keep = *layer.native_psd;
+    if (keep.text.empty() && std::none_of(keep.blocks.begin(), keep.blocks.end(), [](const auto& b) { return psd_text_key(b.first); })) return keep;
+    keep.text.clear();
+    std::erase_if(keep.blocks, [](const auto& b) { return psd_text_key(b.first); });
+    if (keep.empty()) return std::nullopt;
+    return keep;
 }
 
 namespace {

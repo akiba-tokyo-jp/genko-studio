@@ -23,6 +23,7 @@
 
 #include "app/ask.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "core/channels.hpp"
 #include "render/channels.hpp"
 #include "render/ops_registry.hpp"
@@ -131,14 +132,21 @@ void ChannelPanel::refresh() {
         return item;
     };
     const bool all = std::none_of(view.hidden.begin(), view.hidden.end(), [](bool h) { return h; });
+    // (the targets' keys as they are now — the key set chosen, the person's own: Ctrl+2… in Photoshop's, Ctrl+Alt+2… in
+    // Genko's — never written in the words; PC5 H-d)
+    const auto keys_of = [this](int slot) {
+        const QString attribute = slot == 2 ? QStringLiteral("act_channel_composite") : QStringLiteral("act_channel_%1").arg(slot);
+        return preferences::keys_in_words({window_->action(attribute)});
+    };
     const std::vector<std::string> plates = core::plate_names(*page);
     const std::vector<std::string> labels = core::plate_labels(*page);
-    QListWidgetItem* chosen = add_row("composite", composite_label(*page), all, QIcon(), QStringLiteral("合成（Ctrl+Alt+2）"));
+    QListWidgetItem* chosen = add_row("composite", composite_label(*page), all, QIcon(), QStringLiteral("合成") + keys_of(2));
     int slot = 3;
     if (plates.size() > 1) {
         for (std::size_t k = 0; k < plates.size(); ++k) {
             QListWidgetItem* item = add_row(plates[k], QString::fromStdString(labels[k]), !view.hidden[k], QIcon(),
-                                            QStringLiteral("色の版（Ctrl+Alt+%1）").arg(slot++));
+                                            QStringLiteral("色の版") + keys_of(slot));
+            ++slot;
             if (view.target == plates[k]) chosen = item;
         }
     }
@@ -147,7 +155,7 @@ void ChannelPanel::refresh() {
         const bool spot = channel.kind == core::ChannelKind::Spot;
         const bool shown = spot ? !view.hidden_spots.contains(channel.id) : view.shown.contains(channel.id);
         QString tip = spot ? QStringLiteral("特色チャンネル") : channel.quick_mask ? QStringLiteral("クイックマスク") : QStringLiteral("アルファチャンネル");
-        if (slot <= 9) tip += QStringLiteral("（Ctrl+Alt+%1）").arg(slot);
+        if (slot <= 9) tip += keys_of(slot);
         ++slot;
         QListWidgetItem* item = add_row(channel.id, QString::fromStdString(channel.name) + (spot ? QStringLiteral("（特色）") : QString()), shown,
                                         thumbnail(*page, channel), tip);
@@ -173,7 +181,7 @@ void ChannelPanel::refresh() {
 
 QIcon ChannelPanel::thumbnail(const core::Page& page, const core::Channel& channel) {
     const auto it = thumbs_.find(channel.id);
-    if (it != thumbs_.end() && it->second.raster == channel.raster) return it->second.icon;
+    if (it != thumbs_.end() && it->second.raster == channel.raster && it->second.coloured == in_colour) return it->second.icon;
     const double w = page.spec.width_mm.value(), h = page.spec.height_mm.value();
     const int tw = w >= h ? 36 : std::max(1, static_cast<int>(std::lround(36 * w / h)));
     const int th = w >= h ? std::max(1, static_cast<int>(std::lround(36 * h / w))) : 36;
@@ -182,10 +190,24 @@ QIcon ChannelPanel::thumbnail(const core::Page& page, const core::Channel& chann
         const render::Image mask = render::channels::thumbnail(channel, render::Size{tw, th});  // (read row by row, not kept)
         const std::string bytes = mask.tobytes();
         QImage image(reinterpret_cast<const uchar*>(bytes.data()), tw, th, tw, QImage::Format_Grayscale8);
-        icon = QIcon(QPixmap::fromImage(image.copy()));
+        if (in_colour) {  // (PC5 H-e: the dark of the grey in the channel's colour — a spot channel's ink, a mask's overlay)
+            QImage tinted(tw, th, QImage::Format_RGB32);
+            const QColor ink(channel.color[0], channel.color[1], channel.color[2]);
+            for (int y = 0; y < th; ++y) {
+                const uchar* row = image.constScanLine(y);
+                for (int x = 0; x < tw; ++x) {
+                    const double paper = row[x] / 255.0;
+                    const auto mix = [paper](int c) { return static_cast<int>(std::lround(255.0 * paper + c * (1.0 - paper))); };
+                    tinted.setPixel(x, y, qRgb(mix(ink.red()), mix(ink.green()), mix(ink.blue())));
+                }
+            }
+            icon = QIcon(QPixmap::fromImage(tinted));
+        } else {
+            icon = QIcon(QPixmap::fromImage(image.copy()));
+        }
     } catch (const std::exception&) {
     }
-    thumbs_[channel.id] = Thumb{channel.raster, icon};
+    thumbs_[channel.id] = Thumb{channel.raster, icon, in_colour};
     return icon;
 }
 

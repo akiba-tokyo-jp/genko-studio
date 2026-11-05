@@ -555,7 +555,8 @@ void validate_ink_document(const Document& doc) {
             if (kinds > 1) throw Error("value", "a layer holds one kind of pixels at most (layer " + layer.id + ")");
             // (a correction layer's own blend is not looked at, as Python does not — the user's decision 2 of PC2: its
             // native.blend is checked by core::validate_adjustments)
-            const bool own_blend = layer.kind != LayerKind::Adjust;
+            // (groups@1, PC5 I-b: a group's 通過 is no blend of its own: what it holds is laid by theirs)
+            const bool own_blend = layer.kind != LayerKind::Adjust && !(layer.group && layer.blend == "pass_through");
             if (own_blend && page->color && page->color->space == InkSpace::Lab && !lab_blend(layer.blend)) {
                 throw Error("value", "a Lab page cannot composite the blend " + py_repr_str(layer.blend) + " (layer " + layer.id + ")");
             }

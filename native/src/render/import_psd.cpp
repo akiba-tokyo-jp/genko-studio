@@ -25,6 +25,8 @@
 #include <fstream>
 #endif
 
+#include "core/groups.hpp"
+#include "core/layer_basics.hpp"
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/ids.hpp"
@@ -38,6 +40,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
+#include "render/color_canvas.hpp"
 #include "render/fill.hpp"
 #include "render/import_profile.hpp"
 #include "render/op_limits.hpp"
@@ -54,6 +57,8 @@
 #include "render/psd_paths.hpp"
 #include "render/psd_shapes.hpp"
 #include "render/psd_effects.hpp"
+#include "render/psd_production.hpp"
+#include "render/ops_annotations.hpp"
 #include "core/layer_styles.hpp"
 #include "render/raster.hpp"
 #include "render/not_yet_ported.hpp"
@@ -61,6 +66,10 @@
 #include "render/raw.hpp"
 #include "render/selection.hpp"
 #include "render/smart_decode.hpp"
+#include "core/type_text.hpp"
+#include "render/ops_type.hpp"
+#include "render/psd_text.hpp"
+#include "render/psd_type.hpp"
 
 namespace genko::render {
 
@@ -698,6 +707,34 @@ void take_locks(core::Layer& layer, std::uint32_t locks) {
     layer.lock_alpha = all || (locks & 1u) != 0;
     layer.locked = all || (locks & 2u) != 0;
     layer.lock_position = all || (locks & 4u) != 0;
+    // (PC5 I-a, layer-locks@1: すべてをロック as its own, and the artboards' auto-nesting lock, bit 4)
+    layer.lock_all = all;
+    layer.lock_nest = (locks & 0x10u) != 0;
+}
+
+// PC5 I-a (blend-channels@1): the colour channels a record leaves out (brst: their indices — PhotoCraft v0.2.0's
+// io/src/blocks.rs parse_brst, MIT) as the layer's own on a page of the file's mode (RGB, CMYK, Lab, grey); whether they
+// were taken (on a page of another mode they are not: said).
+bool take_channels(core::Layer& layer, const psd::File& file, const psd::Layer& item, const core::Page& page) {
+    std::optional<std::string_view> data;
+    for (const psd::File::TaggedBlock& b : file.blocks(item))
+        if (b.key == "brst") data = b.data;
+    if (!data) return false;
+    const unsigned count = core::blend_channel_count(page);
+    const int mode = file.mode();
+    const bool same_mode = count != 0 && ((!page.color && mode == 3) || (page.color && ((page.color->space == core::InkSpace::Cmyk && mode == 4) ||
+                                                                                      (page.color->space == core::InkSpace::Lab && mode == 9) ||
+                                                                                      (page.color->space == core::InkSpace::Gray && mode == 1))));
+    if (!same_mode || item.folder) return false;
+    std::vector<bool> on(count, true);
+    for (std::size_t k = 0; k + 4 <= data->size(); k += 4) {
+        std::uint32_t c = 0;
+        for (std::size_t b = 0; b < 4; ++b) c = (c << 8) | static_cast<unsigned char>((*data)[k + b]);
+        if (c < count) on[c] = false;
+    }
+    if (std::all_of(on.begin(), on.end(), [](bool v) { return v; })) return false;
+    layer.blend_channels = std::move(on);
+    return true;
 }
 
 // The way a layer's pixels come in at their depth (the user's decision 3: the layers at the file's depth): a page in
@@ -725,42 +762,75 @@ bool linear_page(const core::Page& page) {
     return linear != nullptr && linear->bytes && *linear->bytes == *page.rgb->icc;
 }
 
-// A 32-bit file's sample as the page holds it (Photoshop's 32 bits are linear light): as it is on a page of linear light,
-// else encoded by 1/2.2 as this build reads 32 bits everywhere (render/psd's 8-bit picture, smart_decode's deep picture),
-// its values past 1 kept.
-float encoded(float v, bool as_is) { return as_is ? v : static_cast<float>(std::pow(std::max(0.0f, v), 1.0 / 2.2)); }
+// A 32-bit file's samples are linear light (Photoshop's 32 bits): taken in at the file's depth they are encoded by the
+// page's own tone curve (PC5-0, the user's decision of 2026-10-28: the inverse of what this build writes, render's
+// RgbSpace and GrayCurve) — as they are on a page of linear light —, values past 0..1 by the same formula.
 
 // A part of the file (a layer's box, or the merged picture) on the page layer (`size` pixels, the file's canvas at `at`),
-// as a page of inks of the page's depth holds it: each sample as it is (a 32-bit grey file's encoded), clear around it.
+// as a page of inks of the page's depth holds it: each sample as it is (a 32-bit grey file's encoded by the page's
+// curve), clear around it.
 core::InkPixels deep_inks(const psd::File::DeepPart& part, const core::PageColor& color, Size size, Point at) {
     const std::int64_t width = std::max(1, size.width), height = std::max(1, size.height);
     core::InkPixels canvas = core::blank_ink_pixels(color.space, color.depth, static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height));
     const unsigned colours = canvas.colours();
     const bool as_is = part.depth != 32;
+    const GrayCurve curve = as_is ? GrayCurve() : GrayCurve(color);
+    const auto encoded = [&](float v) { return as_is ? static_cast<double>(v) : finite_sample(curve.encode(v)); };
     const std::int64_t left = part.left + at.x, top = part.top + at.y;
     for (std::int64_t y = std::max<std::int64_t>(0, top); y < std::min(height, top + part.height); ++y) {
         for (std::int64_t x = std::max<std::int64_t>(0, left); x < std::min(width, left + part.width); ++x) {
             const std::size_t from = static_cast<std::size_t>((y - top) * part.width + (x - left));
             const std::size_t to = static_cast<std::size_t>(y * width + x);
-            for (unsigned c = 0; c < colours && c < part.colours; ++c) canvas.set(to, c, encoded(part.value(c, from), as_is));
+            for (unsigned c = 0; c < colours && c < part.colours; ++c) canvas.set(to, c, encoded(part.value(c, from)));
             canvas.set(to, colours, std::clamp(part.value(part.colours, from), 0.0f, 1.0f));
         }
     }
     return canvas;
 }
 
-// The same as a colour raster of the page's depth (u16 or f32: the values as they are — a 32-bit file's encoded unless
-// the page is linear —, past 1 kept at 32 bits).
-std::string deep_color_raster(const psd::File::DeepPart& part, int depth, Size size, Point at, bool linear) {
+// The same as a colour raster of the page's depth (u16 or f32: the values as they are — a 32-bit file's encoded by the
+// page's curves unless the page is linear —, past 0..1 kept at 32 bits).
+std::string deep_color_raster(const psd::File::DeepPart& part, const core::Page& page, Size size, Point at, bool linear) {
+    const int depth = page.rgb->depth;
     const auto w = static_cast<std::uint32_t>(std::max(1, size.width)), h = static_cast<std::uint32_t>(std::max(1, size.height));
     const bool as_is = part.depth != 32 || linear;
+    const RgbSpace space = as_is ? RgbSpace() : RgbSpace::of(page);
+    const auto encoded = [&](unsigned c, float v) { return as_is ? static_cast<double>(v) : finite_sample(space.encode(c, v)); };
     return core::encode_color_pixels(w, h, depth == 16 ? "u16" : "f32", [&](std::size_t i) {
         const std::int64_t x = static_cast<std::int64_t>(i % w) - part.left - at.x, y = static_cast<std::int64_t>(i / w) - part.top - at.y;
         if (x < 0 || y < 0 || x >= part.width || y >= part.height) return std::array<double, 4>{0.0, 0.0, 0.0, 0.0};
         const auto k = static_cast<std::size_t>(y * part.width + x);
-        return std::array<double, 4>{encoded(part.value(0, k), as_is), encoded(part.value(1, k), as_is), encoded(part.value(2, k), as_is),
+        return std::array<double, 4>{encoded(0, part.value(0, k)), encoded(1, part.value(1, k)), encoded(2, part.value(2, k)),
                                      std::clamp(static_cast<double>(part.value(3, k)), 0.0, 1.0)};
     });
+}
+
+// PC5-0 (Z0's review P2-1): a 32-bit RGB or grey file's pixel layer as 8 bits over the whole canvas ("RGBA", as
+// File::image gives it) — its linear colours encoded by the tone curve of the file's profile (encode_by_profile: the
+// inverse of the 32-bit PSD this build writes; Python's view reads them by 1/2.2), its transparency as it is —; nothing
+// for another file (or one whose layer is not read so).
+std::optional<Image> eight_bits_of_32(const psd::File& file, const psd::Layer& item) {
+    if (psd::python_view() || file.depth() != 32 || (file.mode() != 3 && file.mode() != 1)) return std::nullopt;
+    const std::optional<psd::File::DeepPart> part = file.layer_deep(item);
+    if (!part || (part->colours != 3 && part->colours != 1)) return std::nullopt;
+    const unsigned colours = part->colours, all = colours + 1;
+    const std::size_t n = static_cast<std::size_t>(std::max<std::int64_t>(0, part->width)) * static_cast<std::size_t>(std::max<std::int64_t>(0, part->height));
+    std::vector<float> samples(n * all);
+    for (std::size_t i = 0; i < n; ++i)
+        for (unsigned c = 0; c < all; ++c) samples[i * all + c] = part->value(c, i);
+    encode_by_profile(samples, all, true, file.icc());
+    const auto byte = [](float v) { return static_cast<unsigned char>(std::lround(std::clamp(std::isnan(v) ? 0.0f : v, 0.0f, 1.0f) * 255.0f)); };
+    const std::int64_t width = std::max<std::int64_t>(1, file.width()), height = std::max<std::int64_t>(1, file.height());
+    std::string rgba(static_cast<std::size_t>(width * height) * 4, '\0');
+    for (std::int64_t y = std::max<std::int64_t>(0, part->top); y < std::min(height, part->top + part->height); ++y) {
+        for (std::int64_t x = std::max<std::int64_t>(0, part->left); x < std::min(width, part->left + part->width); ++x) {
+            const std::size_t from = static_cast<std::size_t>((y - part->top) * part->width + (x - part->left)) * all;
+            char* to = rgba.data() + static_cast<std::size_t>(y * width + x) * 4;
+            for (unsigned c = 0; c < 3; ++c) to[c] = static_cast<char>(byte(samples[from + (colours == 1 ? 0 : c)]));
+            to[3] = static_cast<char>(byte(samples[from + colours]));
+        }
+    }
+    return Image::frombytes("RGBA", Size{static_cast<int>(width), static_cast<int>(height)}, rgba);
 }
 
 // The bytes of the precise colour rasters the book holds (each allocation once, as core::validate_color_document counts).
@@ -928,6 +998,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     Keeping kept_so_far;                  // (what is kept, and whether any was left out)
     bool ranges_kept = false;             // (a layer keeps its blending ranges: its page says the mode they are of)
     std::vector<std::int64_t> kept_ids;  // (the layer ids of the layers made, which the page's comps and slices name)
+    std::map<std::int64_t, std::string> lyid_layers;  // (PC5 J-0: … and the layers made of them, render/psd_production)
     // (vector@1, PC3 C-a: a path of the file — fractions of its canvas — on the page as its picture is placed, mm)
     const double mm_x = page.spec.width_mm.value() / static_cast<double>(where.page_w);
     const double mm_y = page.spec.height_mm.value() / static_cast<double>(where.page_h);
@@ -1012,6 +1083,21 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     if (!book_lit && file_light != core::global_light(doc)) light_differs = file_light;
     Json styled = Json::array();
     std::vector<std::string> style_notes;
+    // (PC5 G-e, type@1, the coordinator's decision for G: the file's text layers as type layers — render/psd_type —, each
+    // its pixels where Genko's text cannot hold it, said; Python's view and the merged picture read: pixels as before. Its
+    // TySh block kept to be written back while the record is the same, when the file is laid on the page pixel for pixel
+    // at a whole resolution)
+    psd_type::Frame type_frame;
+    type_frame.mm_x = style_placement.mm_x;
+    type_frame.mm_y = style_placement.mm_y;
+    type_frame.x0_mm = style_placement.x0_mm;
+    type_frame.y0_mm = style_placement.y0_mm;
+    psd_type::Sheets type_sheets;
+    Json type_layers = Json::array(), type_pixels = Json::array();
+    std::vector<std::string> type_fonts_missing, type_notes;
+    const double file_dpi = file.dpi();
+    const bool type_keeps = keeping && where.at_x == 0 && where.at_y == 0 && same_size && where.page_w == file.width() && where.page_h == file.height() &&
+                            file_dpi >= 1 && file_dpi <= 100000 && file_dpi == std::floor(file_dpi);
     std::vector<core::Layer> made;
     std::vector<std::string> patterns_filled;  // (patterns@1: the pattern fill layers read)
     std::vector<std::string> shapes_skipped, shapes_read;  // (pen-shapes@1: shape layers this build cannot read, and those read)
@@ -1027,6 +1113,16 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     Json filters_read = Json::array(), filters_shown = Json::array();
     Json raw_shown = Json::array();  // (PC4 F-e: smart objects of a camera RAW shown as Photoshop drew them)
     std::size_t filters_unsaid = 0;
+    // (groups@1, PC5 I-b: groups nested at most core::kGroupDepthMax deep — a folder deeper is made a folder that is not a
+    // group (an order of layers, as psd.read_psd makes every folder: nothing held while drawn), its name said in the
+    // report's groups_as_folders)
+    std::vector<std::size_t> depth(layers.size(), 0);
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+        std::size_t d = 0;
+        for (auto at = layers[i].parent; at && *at < layers.size() && d <= layers.size(); at = layers[*at].parent) ++d;
+        depth[i] = d;
+    }
+    std::vector<std::string> deep_folders;
     for (std::size_t i = 0; i < layers.size(); ++i) {
         const psd::Layer& item = layers[i];
         core::Layer layer;
@@ -1064,8 +1160,49 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
             }
             return kept;
         };
-        if (item.folder) {
+        // (PC5 G-e: a text layer's record, when Genko's text holds it; its block)
+        std::optional<core::StoryLine> type_record;
+        std::string_view type_block;
+        if (!item.folder && item.kind == "text" && keeping && !merged_only && !psd_type::read_as_pixels()) {
+            std::string why;
+            try {
+                if (const std::optional<std::string_view> block = file.text_block(item)) {
+                    type_block = *block;
+                    const psd::TextLayer text = psd::read_tysh(*block, filters_budget.left);
+                    psd_type::Read typed = psd_type::read_text(text, type_frame, doc, type_sheets);
+                    for (const std::string& name : typed.missing_fonts) {
+                        if (std::find(type_fonts_missing.begin(), type_fonts_missing.end(), name) == type_fonts_missing.end() && type_fonts_missing.size() < 256)
+                            type_fonts_missing.push_back(name);
+                    }
+                    for (std::string& note : typed.notes) type_notes.push_back(std::move(note));
+                    if (typed.record) {
+                        type_ops::fit_point_text(*typed.record, doc);  // (a point text's box round its letters as set)
+                        type_record = std::move(typed.record);
+                    } else {
+                        why = typed.why;
+                    }
+                }
+            } catch (const core::Error& error) {
+                why = std::string("文字として読めません（") + error.what() + "）";
+            } catch (const core::OpError& error) {  // (its attributes or size what no type layer takes)
+                why = std::string("文字として読めません（") + error.what() + "）";
+            }
+            if (!type_record && type_pixels.size() < 256) type_pixels.push_back(Json{{"id", layer.id}, {"title", layer.title}, {"why", why}});
+        }
+        if (item.folder && psd::python_view()) {
+            layer.kind = core::LayerKind::Folder;  // (as psd.read_psd's: a folder, an order of layers only)
+        } else if (item.folder && depth[i] >= core::kGroupDepthMax) {
+            layer.kind = core::LayerKind::Folder;  // (groups@1: nested past the limit — an order of layers only, said)
+            deep_folders.push_back(item.name);
+        } else if (item.folder) {
+            // (groups@1, PC5 I-b, the user's decision 2: a group drawn as Photoshop draws it — its visibility, opacity, blend
+            // (通過 among them), mask and vector mask)
             layer.kind = core::LayerKind::Folder;
+            layer.group = true;
+            if (item.pass_through) layer.blend = "pass_through";
+            layer.clip = item.group_clip;
+            if (auto mask = mask_of()) layer.mask = std::move(*mask);
+            layer.vector_mask = vector_mask_of(item);
         } else if (item.kind == "shape") {
             // (pen-shapes@1, PC3 C-b: a shape layer as a new pen layer of one shape part — render/psd_shapes —, as the PSD
             // shows it: not cut by the panels; one whose fill this build cannot read, left out as before)
@@ -1134,6 +1271,15 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
             layer.blend = "normal";
             if (auto mask = mask_of()) layer.mask = std::move(*mask);
             layer.vector_mask = vector_mask_of(item);
+        } else if (type_record) {
+            // (PC5 G-e: a type layer — its text set by Genko's typesetting —, as a type layer is made: not cut by the panels)
+            layer.kind = core::LayerKind::Type;
+            layer.role = core::LayerRole::Text;
+            layer.panel_clip = false;
+            layer.type = core::type_text::shared_record(*type_record);
+            if (auto mask = mask_of()) layer.mask = std::move(*mask);
+            layer.vector_mask = vector_mask_of(item);
+            type_layers.push_back(layer.id);
         } else {
             layer.kind = core::LayerKind::Raster;
             // (a painting app's picture: on a monochrome page it prints in grey and tones)
@@ -1149,7 +1295,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
                          : core::blank_ink_pixels(mode->space, mode->depth, static_cast<std::uint32_t>(page_px.width), static_cast<std::uint32_t>(page_px.height))));
             } else if (deep == DeepWay::Rgb && item.kind != "smart") {
                 layer.color_raster = std::make_shared<const std::string>(
-                    part ? deep_color_raster(*part, page.rgb->depth, page_px, paste_corner(where), linear_page(page))
+                    part ? deep_color_raster(*part, page, page_px, paste_corner(where), linear_page(page))
                          : core::encode_color_pixels(static_cast<std::uint32_t>(page_px.width), static_cast<std::uint32_t>(page_px.height),
                                                      page.rgb->depth == 16 ? "u16" : "f32", [](std::size_t) { return std::array<double, 4>{0, 0, 0, 0}; }));
                 if (std::find(doc.features.begin(), doc.features.end(), core::kColorRasterFeature) == doc.features.end())
@@ -1166,9 +1312,14 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
             } else {
                 // (onto a clear layer: the pixels as they are)
                 Image canvas = Image::create("RGBA", page_px, Ink{0, 0, 0, 0});
+                // (PC5-0, Z0's review P2-1: a 32-bit file's layer by its profile's curve — a placed layer's picture too —)
+                const auto eight = [&] {
+                    if (std::optional<Image> by_curve = eight_bits_of_32(file, item)) return std::move(*by_curve);
+                    return file.image(item);
+                };
                 const Image picture = way.converting ? import_profile::taken(numbers_of(merged ? *merged : file.image(item)), way, page)
                                                      : merged ? *merged
-                                                              : file.image(item);
+                                                              : eight();
                 canvas.paste(same_size ? picture : picture.resize(shown, Resample::Lanczos), paste_corner(where));
                 layer.raster_png = fills::png_bytes(canvas);
                 layer.raster_relpath = raster::page_folder(page) + "/user-" + layer.id + ".png";
@@ -1264,6 +1415,14 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
         if (keeping && !merged_only) {
             bool effect = false;
             layer.native_psd = layer_keep(doc, file, item, names_layers, effect, kept_so_far);
+            // (PC5 G-e: a type layer's TySh block and its record's fingerprint, to be written back while it is the same)
+            if (layer.kind == core::LayerKind::Type && type_keeps && !type_block.empty() &&
+                kept_so_far.room(layer.native_psd ? layer.native_psd->blocks.size() : 0, type_block.size())) {
+                core::PsdLayerKeep keep = layer.native_psd.value_or(core::PsdLayerKeep{});
+                keep.blocks.emplace_back("TySh", kept(doc, type_block));
+                keep.text = psd_type::fingerprint(*layer.type, doc, doc.page(index), static_cast<std::int64_t>(file_dpi), where.page_w, where.page_h);
+                layer.native_psd = std::move(keep);
+            }
             // (layer-styles@1, PC4 E6: its effects, fill opacity and Blend If as its style — drawn by this build)
             if (!item.folder && core::takes_layer_style(layer) &&
                 style_from_record(layer, file, item, style_placement, light_differs, style_notes, filters_budget.left)) {
@@ -1271,9 +1430,29 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
                 if (core::style_shows_effects(*layer.style) || !(*layer.style)["effects"].empty()) effect = false;
             }
             if (effect) effects.push_back(layer.id);
-            if (layer.native_psd && layer.native_psd->id) kept_ids.push_back(*layer.native_psd->id);
+            if (layer.native_psd && layer.native_psd->id) {
+                kept_ids.push_back(*layer.native_psd->id);
+                lyid_layers.emplace(*layer.native_psd->id, layer.id);
+            }
             ranges_kept = ranges_kept || (layer.native_psd && !layer.native_psd->ranges.empty());
             if (const auto locks = file.protection(item); locks && *locks != 0) take_locks(layer, *locks);
+            // (PC5 I-a: the auto-nesting lock its own now — the kept lspf without it: the layer's lock_nest says it)
+            if (layer.lock_nest && layer.native_psd) {
+                for (auto& [key, ref] : layer.native_psd->blocks) {
+                    if (key != "lspf") continue;
+                    for (const psd::File::TaggedBlock& b : file.blocks(item)) {
+                        if (b.key != "lspf" || b.data.size() < 4) continue;
+                        std::string bits(b.data);
+                        bits[3] = static_cast<char>(static_cast<unsigned char>(bits[3]) & ~0x10u);
+                        ref = kept(doc, bits);
+                    }
+                }
+            }
+            // (PC5 I-a: its channels left out, its own now — the block not kept besides)
+            if (take_channels(layer, file, item, page) && layer.native_psd) {
+                std::erase_if(layer.native_psd->blocks, [](const auto& block) { return block.first == "brst"; });
+                if (layer.native_psd->empty()) layer.native_psd.reset();
+            }
         }
         made.push_back(std::move(layer));
     }
@@ -1301,6 +1480,7 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     target.layers.insert(target.layers.begin() + static_cast<std::ptrdiff_t>(at), std::make_move_iterator(made.begin()),
                          std::make_move_iterator(made.end()));
     Json report = Json::object({{"layers", std::move(listed)}, {"skipped", std::move(skipped)}});
+    if (!deep_folders.empty()) report["groups_as_folders"] = deep_folders;  // (groups@1: said only when there are)
     // (PC3 A3: the placed layers made smart objects, and those read as their pixels and why — said only when there are)
     if (!smart_objects.empty()) report["smart_objects"] = std::move(smart_objects);
     if (!placed_pixels.empty()) report["placed_as_pixels"] = std::move(placed_pixels);
@@ -1356,6 +1536,32 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
     }
     if (!paths.empty()) report["paths"] = std::move(paths);
     if (op.contains("embedded_profile")) report["embedded_profile"] = import_profile::report(way);
+    // (PC5 J-0, render/psd_production: the file's layer comps, slices, notes and measurement scale read onto the page by
+    // their groups — those read kept with the rest below, marked copied with what the page held of them)
+    psd_production::Taken production;
+    if (keeping) {
+        std::vector<std::pair<int, std::string_view>> copied_resources;
+        for (const psd::File::ImageResource& r : file_resources) {
+            if (psd_production::copies_resource(static_cast<int>(r.id))) copied_resources.emplace_back(static_cast<int>(r.id), r.data);
+        }
+        std::vector<std::pair<std::string, std::string_view>> copied_globals;
+        for (const psd::File::TaggedBlock& g : file_globals) {
+            if (psd_production::copies_global(g.key)) copied_globals.emplace_back(g.key, g.data);
+        }
+        if (!copied_resources.empty() || !copied_globals.empty()) {
+            psd_production::ReadContext context;
+            context.onto = &onto;
+            context.layers = lyid_layers;
+            context.width_px = static_cast<double>(file.width());
+            context.height_px = static_cast<double>(file.height());
+            context.merged_only = merged_only;
+            context.page_had = page_had;
+            context.report = &report;
+            context.doc = &doc;  // (PC5 J-a: its layers' kept blocks — their cmls —, what they show)
+            context.opened = exact;  // (PC5 H-b: a page made of the file — opened —, not one read onto)
+            production = psd_production::read(doc.edit_page(index), copied_resources, copied_globals, context);
+        }
+    }
     // (psd-keep@1, PC4 F-d: the page's own — the patterns a fill took left out of its pattern blocks —, the ids of the
     // layers read with them; the layers keeping effects; what was not kept)
     if (page_keeps) {
@@ -1368,6 +1574,11 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
         const bool named_gone = merged_only ? !file_ids.empty()
                                             : std::any_of(file_ids.begin(), file_ids.end(), [&](std::int64_t id) { return !made_ids.contains(id); });
         core::PsdPageKeep keep = page_keep(doc, file, taken, named_gone, kept_so_far);
+        for (const core::PsdCopied& c : production.copied) {  // (PC5 J-0: the marks of the blocks kept — not one left out)
+            const bool held = c.resource >= 0 ? std::any_of(keep.resources.begin(), keep.resources.end(), [&](const core::PsdResource& r) { return r.id == c.resource; })
+                                              : std::any_of(keep.globals.begin(), keep.globals.end(), [&](const core::PsdGlobal& g) { return g.key == c.global; });
+            if (held) keep.copied.push_back(c);
+        }
         if (!keep.resources.empty() || !keep.globals.empty() || ranges_kept) {
             if (names_layers && !named_gone) keep.ids = kept_ids;
             keep.from = core::PsdFrom{file.psb() ? 2 : 1, file.mode(), file.depth()};
@@ -1379,6 +1590,21 @@ Json import_data(core::Document& doc, const Json& op, std::string data, bool exa
                                                    [](const psd::File::TaggedBlock& g) { return core::psd_global_kept(g.key); }))) {
         report["psd_page"] = "earlier";  // (the page keeps an earlier PSD's resources and global blocks: this file's are not kept)
     }
+    // (PC5 G-e: the text layers read as type layers, those read as their pixels and why, the fonts not found by their
+    // PostScript names — drawn in the default —, the styles taken in and what else is said; each only when there is one)
+    if (!type_layers.empty()) report["type_layers"] = std::move(type_layers);
+    if (!type_pixels.empty()) report["type_as_pixels"] = std::move(type_pixels);
+    if (!type_fonts_missing.empty()) report["type_fonts_missing"] = type_fonts_missing;
+    if (!type_sheets.added.empty()) report["type_styles"] = type_sheets.added;
+    if (type_sheets.full) type_notes.push_back("文字スタイル・段落スタイルが 512 を超えるため、残りは読みませんでした（文字の見え方はそのまま）");
+    if (!type_notes.empty()) {
+        std::vector<std::string> once;
+        for (std::string& note : type_notes) {
+            if (std::find(once.begin(), once.end(), note) == once.end() && once.size() < 20) once.push_back(std::move(note));
+        }
+        report["type_notes"] = once;
+    }
+    if (report.contains("type_layers") || !type_sheets.added.empty()) core::type_text::add_feature(doc);
     if (!effects.empty()) report["effects"] = std::move(effects);
     if (book_lit && !styled.empty()) {  // (no style read: the book's light left as it is, the file's kept in its resources)
         doc.global_light = file_light[0] == core::kDefaultLightAngle && file_light[1] == core::kDefaultLightAltitude
@@ -1421,6 +1647,7 @@ void import_psd(core::OpContext& c) {
     } else {
         throw OpError("import_psd needs path or psd (base64)");
     }
+    const annotations::ReadingActor reader(c.actor);  // (PC5 J-c, the review's P2-3: the file's notes the op's actor's)
     c.report = import_data(doc, op, std::move(data), false);
 }
 

@@ -61,6 +61,9 @@ private:
     unsigned sample_bytes_;
 };
 std::string encode_color_raster(const Json& op);
+// PC5 H-a: a raster's width and height from its head alone (its 16 bytes and its length checked; its samples not read —
+// ColorRasterView reads every float of an f32 raster): what the view asks of a layer's grid on every paint.
+std::array<std::uint32_t, 2> color_raster_size(std::string_view bytes);
 // The raster in tiles of kColorTile pixels square (smaller at its right and bottom edges), row by row, each a raster
 // of its own (GKCR, the same precision).
 std::vector<std::string> color_tiles(std::string_view raster);

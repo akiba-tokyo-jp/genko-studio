@@ -579,15 +579,17 @@ private slots:
         QVERIFY2(loaded.document.read_only_reason.empty(), loaded.document.read_only_reason.c_str());
         QCOMPARE(genko::test::book_problems(book), std::string());
 
-        // refused, the book as it was: a plugin (its result the machine's), a kind that reads another layer
+        // refused, the book as it was: a plugin not installed (PC5 J-f, plugin-filters@1: a plugin chosen to run can be a
+        // smart filter now — test_contract_plugins), a kind that reads another layer
         const std::string kept = genko::test::read_bytes(book + QStringLiteral("/project.json"));
-        for (const Json& refused : {Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "plugin:sepia"}},
-                                    Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "match_color"}, {"source", Json{{"layer", "so"}}}}}) {
+        for (const auto& [refused, said] : std::vector<std::pair<Json, std::string>>{
+                 {Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "plugin:sepia"}}, "no plugin sepia"},
+                 {Json{{"op", "smart_filter_add"}, {"page", 1}, {"id", "so"}, {"kind", "match_color"}, {"source", Json{{"layer", "so"}}}}, "smart filter"}}) {
             genko::test::write_bytes(path(QStringLiteral("f-refused.json")), Json::array({refused}).dump());
             const Json reply = genko({QStringLiteral("apply"), book, path(QStringLiteral("f-refused.json")), QStringLiteral("--agent"), QStringLiteral("human:test")},
                                      &exit);
             QVERIFY2(exit != 0 && !reply.value("ok", true), reply.dump().c_str());
-            QVERIFY2(reply.dump().find("smart filter") != std::string::npos, reply.dump().c_str());
+            QVERIFY2(reply.dump().find(said) != std::string::npos, reply.dump().c_str());
             QCOMPARE(genko::test::read_bytes(book + QStringLiteral("/project.json")), kept);
         }
     }

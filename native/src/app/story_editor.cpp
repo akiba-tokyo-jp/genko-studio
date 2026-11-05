@@ -4,6 +4,7 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QItemSelectionModel>
@@ -24,6 +25,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <string_view>
 #include <tuple>
 
 #include "app/ask.hpp"
@@ -34,9 +36,12 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/ids.hpp"
+#include "core/layer_basics.hpp"
 #include "core/pyre.hpp"
 #include "render/ops_registry.hpp"
 #include "render/text/fonts.hpp"
+#include "core/ruby.hpp"
+#include "core/type_text.hpp"
 
 namespace genko::app {
 
@@ -480,11 +485,26 @@ void StoryEditor::apply() {
     }
 }
 
-// --- 台詞の検索・置換 ---------------------------------------------------------------------------------------------------
+// --- 検索と置換 (台詞の検索・置換 before PC5 G-d) ---------------------------------------------------------------------------
+
+namespace {
+
+// re.escape(text) as Python 3.12 escapes (core/ops_lines' replace_text reads the words so): its special characters.
+std::string escaped(const std::string& text) {
+    static constexpr std::string_view kSpecial = "()[]{}?*+-|^$\\.&~# \t\n\r\v\f";
+    std::string out;
+    for (const char ch : text) {
+        if (kSpecial.find(ch) != std::string_view::npos) out.push_back('\\');
+        out.push_back(ch);
+    }
+    return out;
+}
+
+}  // namespace
 
 ReplaceDialog::ReplaceDialog(MainWindow* window) : QDialog(window), window_(window) {
     setObjectName(QStringLiteral("replace_dialog"));
-    setWindowTitle(QStringLiteral("台詞の検索・置換"));
+    setWindowTitle(QStringLiteral("検索と置換"));  // (PC5 G-d: Photoshop's 編集 → 検索と置換…)
     resize(520, 480);
     find = new QLineEdit;
     find->setPlaceholderText(QStringLiteral("探す言葉"));
@@ -492,25 +512,53 @@ ReplaceDialog::ReplaceDialog(MainWindow* window) : QDialog(window), window_(wind
     replace->setPlaceholderText(QStringLiteral("置き換える言葉（空にすると消す）"));
     regex = new QCheckBox(QStringLiteral("正規表現で探す"));
     speakers = new QCheckBox(QStringLiteral("話者の名前も"));
+    // (PC5 G-d: Photoshop's options — 大文字と小文字を区別 on, as Genko's search was —, and where the last was found)
+    case_sensitive = new QCheckBox(QStringLiteral("大文字と小文字を区別"));
+    case_sensitive->setChecked(true);
+    whole_word = new QCheckBox(QStringLiteral("単語単位"));
+    backward = new QCheckBox(QStringLiteral("前方へ検索"));
+    all_layers = new QCheckBox(QStringLiteral("すべてのレイヤーを検索"));
+    all_layers->setChecked(true);
+    all_layers->setToolTip(QStringLiteral("オフ: 選んだテキストレイヤー・台詞だけを探します"));
+    found = new QLabel;
+    found->setWordWrap(true);
+    for (QCheckBox* box : {regex, case_sensitive, whole_word, backward, all_layers}) connect(box, &QCheckBox::toggled, this, [this] { last_.reset(); });
     results = new QListWidget;
     connect(results, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) { go(item); });
     count = new QLabel;
     auto* search_button = new QPushButton(QStringLiteral("探す"));
     connect(search_button, &QPushButton::clicked, this, [this] { search(); });
-    auto* run = new QPushButton(QStringLiteral("全部置き換える"));
+    auto* run = new QPushButton(QStringLiteral("すべてを置換"));
     connect(run, &QPushButton::clicked, this, [this] { replace_all(); });
+    auto* next = new QPushButton(QStringLiteral("次を検索"));
+    next->setObjectName(QStringLiteral("find_next"));
+    connect(next, &QPushButton::clicked, this, [this] { find_next(); });
+    auto* one = new QPushButton(QStringLiteral("置換"));
+    one->setObjectName(QStringLiteral("replace_one"));
+    connect(one, &QPushButton::clicked, this, [this] { replace_one(); });
+    auto* both = new QPushButton(QStringLiteral("置換して次を検索"));
+    both->setObjectName(QStringLiteral("replace_and_find"));
+    connect(both, &QPushButton::clicked, this, [this] { replace_and_find(); });
     auto* form = new QFormLayout;
     form->addRow(QStringLiteral("探す"), find);
     form->addRow(QStringLiteral("置き換え"), replace);
-    auto* options = new QHBoxLayout;
-    options->addWidget(regex);
-    options->addWidget(speakers);
+    auto* options = new QGridLayout;
+    options->addWidget(all_layers, 0, 0);
+    options->addWidget(backward, 0, 1);
+    options->addWidget(case_sensitive, 1, 0);
+    options->addWidget(whole_word, 1, 1);
+    options->addWidget(regex, 2, 0);
+    options->addWidget(speakers, 2, 1);
+    auto* steps = new QHBoxLayout;
+    for (QPushButton* b : {next, one, both}) steps->addWidget(b);
     auto* buttons = new QHBoxLayout;
     buttons->addWidget(search_button);
     buttons->addWidget(run);
     auto* layout = new QVBoxLayout(this);
     layout->addLayout(form);
     layout->addLayout(options);
+    layout->addLayout(steps);
+    layout->addWidget(found);
     layout->addLayout(buttons);
     layout->addWidget(count);
     layout->addWidget(results, 1);
@@ -523,11 +571,16 @@ int ReplaceDialog::search() {
     if (text.isEmpty()) return 0;
     // re.compile(text if regex else re.escape(text)), and len(pattern.findall(…)) of each line (core/pyre: Python's re);
     // the search bounded as replace_text's is (a pattern that would take too long is said, never left running)
+    // (PC5 G-d: 単語単位 and 大文字と小文字を区別 as replace_text reads them)
     std::optional<core::PyPattern> compiled;
     std::optional<core::PyLiteralPattern> literal;
     try {
-        if (regex->isChecked()) compiled.emplace(utf8(text), 0);
-        else literal.emplace(utf8(text), false);
+        if (regex->isChecked() || whole_word->isChecked() || !case_sensitive->isChecked()) {
+            const std::string body = regex->isChecked() ? utf8(text) : escaped(utf8(text));
+            compiled.emplace(whole_word->isChecked() ? "(?<!\\w)(?:" + body + ")(?!\\w)" : body, case_sensitive->isChecked() ? 0 : core::PyPattern::kIgnoreCase);
+        } else {
+            literal.emplace(utf8(text), false);
+        }
     } catch (const std::exception&) {  // (re.error; and what Python's dialog would not catch either)
         count->setText(QStringLiteral("正規表現が読めません"));
         return 0;
@@ -559,18 +612,47 @@ int ReplaceDialog::search() {
         item->setData(Qt::UserRole, QStringList{qs(line.page_index.json().dump()), qs(line.id)});
         results->addItem(item);
     }
+    // (PC5 G-d: the type layers replace_text replaces too — the unlocked ones of the pages shown, top first)
+    const core::Document& book = window_->book();
+    for (std::size_t row = 0; row < book.pages.size(); ++row) {
+        if (book.is_deferred(row)) continue;
+        const core::Page& page = book.page(row);
+        for (auto it = page.layers.rbegin(); it != page.layers.rend(); ++it) {
+            if (!core::type_text::is_type_layer(*it) || !it->type || it->locked ||
+                core::locked_all(page.layers, static_cast<std::size_t>(std::distance(it, page.layers.rend())) - 1))
+                continue;  // (replace_text leaves a locked one — すべてをロック too — as it is)
+            int hits = 0;
+            try {
+                hits = hits_in(it->type->text);
+            } catch (const std::exception&) {
+                results->clear();
+                count->setText(QStringLiteral("この正規表現は探すのに時間がかかりすぎるため、探すのをやめました（書き方を見直してください）"));
+                return 0;
+            }
+            if (hits == 0) continue;
+            found += hits;
+            const QString start = qs(render::text::utf8(render::text::u32(it->type->text).substr(0, 40)));
+            auto* item = new QListWidgetItem(QStringLiteral("%1 ページ　テキストレイヤー：%2").arg(qs(page.index.repr()), start));
+            item->setData(Qt::UserRole, QStringList{qs(page.index.json().dump()), QString(), qs(it->id)});
+            results->addItem(item);
+        }
+    }
     count->setText(found != 0 ? QStringLiteral("%1 か所（%2 行）").arg(found).arg(results->count()) : QStringLiteral("見つかりません"));
     return found;
 }
 
 void ReplaceDialog::go(QListWidgetItem* item) {
     const QStringList data = item->data(Qt::UserRole).toStringList();
-    if (data.size() != 2) return;
+    if (data.size() != 2 && data.size() != 3) return;
     const Json index = Json::parse(data[0].toStdString(), nullptr, false);
     const auto& pages = window_->book().pages;
     for (std::size_t row = 0; row < pages.size(); ++row) {
         if (pages[row]->index.json() == index) {
             window_->select_page(static_cast<int>(row));
+            if (data.size() == 3) {  // (a type layer's: chosen)
+                window_->set_target_layer(data[2].toStdString());
+                return;
+            }
             window_->on_line_selected(data[1].toStdString(), true);
             return;
         }
@@ -578,17 +660,197 @@ void ReplaceDialog::go(QListWidgetItem* item) {
 }
 
 void ReplaceDialog::replace_all() {
-    const int found = search();
-    if (found == 0) return;
-    const Json op{{"op", "replace_text"},
-                  {"find", utf8(find->text())},
-                  {"replace", utf8(replace->text())},
-                  {"regex", regex->isChecked()},
-                  {"speakers", speakers->isChecked()}};
+    if (!all_layers->isChecked()) {  // (PC5 G-d: the chosen text alone — its words replaced in one edit_type)
+        const std::optional<Json> target = window_->type_target(true);
+        const core::StoryLine* record = target ? window_->type_record(*target) : nullptr;
+        if (record == nullptr || find->text().isEmpty()) return;
+        std::pair<std::string, std::int64_t> out;
+        try {
+            out = replaced(record->text);  // (re.subn over the whole text, as replace_text: review P3-1)
+        } catch (const std::exception& error) {
+            found->setText(QStringLiteral("探せませんでした（%1）").arg(QString::fromUtf8(error.what())));
+            return;
+        }
+        if (out.second == 0 || out.first == record->text) {
+            found->setText(out.second == 0 ? QStringLiteral("見つかりません") : QStringLiteral("置き換えても同じです"));
+            return;
+        }
+        Json op{{"op", "edit_type"}, {"text", out.first}};
+        for (const auto& [key, value] : target->items()) op[key] = value;
+        if (window_->apply_ops(Json::array({op}))) window_->flash(QStringLiteral("%1 か所を置き換えました（元に戻すは 1 回）").arg(out.second), 4000);
+        last_.reset();
+        return;
+    }
+    const int hits = search();
+    if (hits == 0) return;
+    Json op{{"op", "replace_text"},
+            {"find", utf8(find->text())},
+            {"replace", utf8(replace->text())},
+            {"regex", regex->isChecked()},
+            {"speakers", speakers->isChecked()}};
+    // (PC5 G-d: what replace_text takes besides — written only when they differ from its defaults, as before)
+    if (!case_sensitive->isChecked()) op["case"] = false;
+    if (whole_word->isChecked()) op["whole_word"] = true;
     if (window_->apply_ops(Json::array({op}))) {
-        window_->flash(QStringLiteral("%1 か所を置き換えました（元に戻すは 1 回）").arg(found), 4000);
+        window_->flash(QStringLiteral("%1 か所を置き換えました（元に戻すは 1 回）").arg(hits), 4000);
         search();
     }
+    last_.reset();
+}
+
+std::vector<ReplaceDialog::Spot> ReplaceDialog::spots() const {
+    std::vector<Spot> out;
+    const core::Document& book = window_->book();
+    if (!all_layers->isChecked()) {
+        const std::optional<Json> target = window_->type_target(false);
+        const core::StoryLine* record = target ? window_->type_record(*target) : nullptr;
+        if (record != nullptr) out.push_back(Spot{*target, -1, record->text});
+        return out;
+    }
+    for (std::size_t row = 0; row < book.pages.size(); ++row) {
+        if (book.is_deferred(row)) continue;
+        const core::Page& page = book.page(row);
+        for (const core::StoryLine* line : book.story_for_page(page.index)) out.push_back(Spot{Json{{"line", line->id}}, static_cast<int>(row), line->text});
+        for (auto it = page.layers.rbegin(); it != page.layers.rend(); ++it) {
+            if (!core::type_text::is_type_layer(*it) || !it->type || it->locked ||
+                core::locked_all(page.layers, static_cast<std::size_t>(std::distance(it, page.layers.rend())) - 1))
+                continue;  // (replace_text leaves a locked one — すべてをロック too — as it is)
+            out.push_back(Spot{Json{{"page", page.index.json()}, {"layer_id", it->id}}, static_cast<int>(row), it->type->text});
+        }
+    }
+    return out;
+}
+
+std::vector<std::pair<std::int64_t, std::int64_t>> ReplaceDialog::places(const std::string& text) const {
+    std::vector<std::pair<std::int64_t, std::int64_t>> out;
+    const std::string words = utf8(find->text());
+    if (words.empty()) return out;
+    const std::string body = regex->isChecked() ? words : escaped(words);
+    const core::PyPattern pattern(whole_word->isChecked() ? "(?<!\\w)(?:" + body + ")(?!\\w)" : body, case_sensitive->isChecked() ? 0 : core::PyPattern::kIgnoreCase);
+    core::PyReBudget budget;
+    for (const auto& groups : pattern.spans(text, budget)) {
+        if (!groups.empty() && groups.front().second > groups.front().first) out.push_back(groups.front());
+    }
+    return out;
+}
+
+std::string ReplaceDialog::replacement(const std::string& text, std::int64_t start, std::int64_t end) const {
+    // (the words found as replace_text replaces them: its template read as re.sub reads it, the match in its text)
+    const std::string words = utf8(find->text());
+    const std::string body = regex->isChecked() ? words : escaped(words);
+    const core::PyPattern pattern(whole_word->isChecked() ? "(?<!\\w)(?:" + body + ")(?!\\w)" : body, case_sensitive->isChecked() ? 0 : core::PyPattern::kIgnoreCase);
+    core::PyReBudget budget;
+    std::vector<core::PyReMatch> matches;
+    (void)pattern.subn(utf8(replace->text()), text, &matches, budget);
+    for (const core::PyReMatch& m : matches) {
+        if (static_cast<std::int64_t>(m.start) == start && static_cast<std::int64_t>(m.end) == end) return core::ruby::to_utf8(m.with);
+    }
+    throw core::Error("not_found", "the words found are not where they were");
+}
+
+std::pair<std::string, std::int64_t> ReplaceDialog::replaced(const std::string& text) const {
+    const std::string words = utf8(find->text());
+    const std::string body = regex->isChecked() ? words : escaped(words);
+    const core::PyPattern pattern(whole_word->isChecked() ? "(?<!\\w)(?:" + body + ")(?!\\w)" : body, case_sensitive->isChecked() ? 0 : core::PyPattern::kIgnoreCase);
+    core::PyReBudget budget;
+    return pattern.subn(utf8(replace->text()), text, nullptr, budget);
+}
+
+bool ReplaceDialog::find_next() {
+    if (find->text().isEmpty()) return false;
+    const std::vector<Spot> all = spots();
+    if (all.empty()) {
+        found->setText(QStringLiteral("探すテキストがありません"));
+        return false;
+    }
+    // where the last was found (its text's place in the order; none: the start — the end, backward)
+    const bool back = backward->isChecked();
+    std::size_t from_spot = back ? all.size() - 1 : 0;
+    std::optional<std::int64_t> from_at;
+    if (last_) {
+        for (std::size_t i = 0; i < all.size(); ++i) {
+            if (all[i].target == last_->target) {
+                from_spot = i;
+                from_at = back ? last_->start : last_->end;
+            }
+        }
+    }
+    try {
+        for (std::size_t step = 0; step <= all.size(); ++step) {
+            const std::size_t i = back ? (from_spot + all.size() * 2 - step) % all.size() : (from_spot + step) % all.size();
+            const Spot& spot = all[i];
+            std::vector<std::pair<std::int64_t, std::int64_t>> at = places(spot.text);
+            if (back) std::reverse(at.begin(), at.end());
+            for (const auto& [s, e] : at) {
+                if (step == 0 && from_at && (back ? e > *from_at : s < *from_at)) continue;
+                if (step == all.size() && from_at && (back ? e <= *from_at : s >= *from_at)) continue;  // (round again: up to where it began)
+                last_ = Found{spot.target, spot.text, s, e};
+                if (spot.page_row >= 0) window_->select_page(spot.page_row);
+                if (spot.target.contains("line")) {
+                    window_->on_line_selected(spot.target["line"].get<std::string>(), false);
+                } else {
+                    window_->set_target_layer(spot.target["layer_id"].get<std::string>());
+                }
+                const std::u32string cps = core::ruby::code_points(spot.text);
+                const QString word = QString::fromStdString(core::ruby::to_utf8(std::u32string_view(cps).substr(static_cast<std::size_t>(s), static_cast<std::size_t>(e - s))));
+                found->setText(QStringLiteral("「%1」が見つかりました%2").arg(word, step == all.size() || (step > 0 && i == (back ? all.size() - 1 : 0) && from_spot != i)
+                                                                                      ? QStringLiteral("（はじめから探しました）")
+                                                                                      : QString()));
+                window_->refresh_type_panels();
+                return true;
+            }
+        }
+    } catch (const std::exception& error) {
+        const auto* own = dynamic_cast<const core::Error*>(&error);
+        found->setText(own != nullptr && own->code() == "regex_too_slow" ? QStringLiteral("この正規表現は探すのに時間がかかりすぎるため、探すのをやめました")
+                                                                         : QStringLiteral("探せませんでした（%1）").arg(QString::fromUtf8(error.what())));
+        return false;
+    }
+    last_.reset();
+    found->setText(QStringLiteral("見つかりません"));
+    return false;
+}
+
+bool ReplaceDialog::replace_one() {
+    // (nothing found — or only where the last replacement left off —: the next place found, nothing replaced)
+    if (!last_ || last_->start == last_->end) return find_next() && false;
+    // (the place found, while its text is as it was)
+    const std::vector<Spot> all = spots();
+    const auto it = std::find_if(all.begin(), all.end(), [&](const Spot& s) { return s.target == last_->target; });
+    if (it == all.end() || it->text != last_->text) {
+        last_.reset();
+        found->setText(QStringLiteral("見つけた所が変わりました。もう一度探します"));
+        return false;
+    }
+    const std::u32string cps = core::ruby::code_points(it->text);
+    std::string with;
+    try {
+        with = replacement(it->text, last_->start, last_->end);
+    } catch (const std::exception& error) {
+        found->setText(QStringLiteral("置き換えられませんでした（%1）").arg(QString::fromUtf8(error.what())));
+        return false;
+    }
+    // (graphemes, as edit_type takes them: a place inside a grapheme takes the whole of it)
+    const std::vector<std::size_t> b = core::ruby::bounds(cps);
+    const auto g_start = static_cast<std::int64_t>(std::upper_bound(b.begin(), b.end(), static_cast<std::size_t>(last_->start)) - b.begin()) - 1;
+    const auto g_end = static_cast<std::int64_t>(std::lower_bound(b.begin(), b.end(), static_cast<std::size_t>(last_->end)) - b.begin());
+    Json op{{"op", "edit_type"}, {"replace", Json{{"start", g_start}, {"end", g_end}, {"text", with}}}};
+    for (const auto& [key, value] : last_->target.items()) op[key] = value;
+    if (!window_->apply_ops(Json::array({op}))) return false;
+    // (searched on from after what it put)
+    const std::int64_t end = last_->start + static_cast<std::int64_t>(core::ruby::code_points(with).size());
+    std::string now = it->text;
+    for (const Spot& s : spots()) {
+        if (s.target == last_->target) now = s.text;
+    }
+    last_ = Found{last_->target, now, backward->isChecked() ? last_->start : end, backward->isChecked() ? last_->start : end};
+    found->setText(QStringLiteral("置き換えました"));
+    window_->refresh_type_panels();
+    return true;
+}
+
+void ReplaceDialog::replace_and_find() {
+    if (replace_one()) find_next();
 }
 
 }  // namespace genko::app

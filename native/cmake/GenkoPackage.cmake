@@ -21,6 +21,11 @@ if(UNIX AND NOT APPLE)
   set_target_properties(genko PROPERTIES INSTALL_RPATH "\$ORIGIN/../lib")
 endif()
 install(TARGETS genko RUNTIME DESTINATION bin)
+# (PC5 J-f: genko-plugin-host beside genko, when it was built — GenkoPluginHost.cmake — with its crates' licences)
+if(GENKO_PLUGIN_HOST_NAME)
+  install(PROGRAMS "$<TARGET_FILE_DIR:genko>/${GENKO_PLUGIN_HOST_NAME}" DESTINATION bin OPTIONAL)
+  install(FILES "${GENKO_SOURCE_ROOT}/package/licenses/wasm-host/NOTICES.txt" DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/genko-studio/licenses/wasm-host")
+endif()
 
 # Qt's libraries and plugins (platforms, image formats, styles…) with the ICU they come with, and the six small xcb
 # utility libraries Qt's xcb platform needs that a desktop may lack (MIT). Every other library Genko was linked with
@@ -38,7 +43,7 @@ qt_generate_deploy_app_script(
                        "/libxcb-render-util[.]so" "/libxcb-util[.]so")
 install(SCRIPT "${GENKO_DEPLOY_SCRIPT}")
 if(GENKO_LIBRARY_KIND STREQUAL "SHARED" AND UNIX AND NOT APPLE)
-  # (a sanitizer build, where Genko's own libraries are shared — GenkoFlags.cmake: Qt's deployment copies them beside
+  # (a sanitizer build or GENKO_SHARED_LIBRARIES, where Genko's own libraries are shared — GenkoFlags.cmake: Qt's deployment copies them beside
   # the program with the build folder's library paths still in them; pointed at the folder they are in instead)
   install(CODE "file(GLOB _genko_own \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/lib/libgenko_*.so\")
 foreach(_lib IN LISTS _genko_own)
@@ -96,6 +101,11 @@ install(FILES "${GENKO_SOURCE_ROOT}/third_party/optimized-routines/LICENSE-MIT" 
 install(FILES "${GENKO_SOURCE_ROOT}/third_party/blake3/LICENSE_CC0" "${GENKO_SOURCE_ROOT}/third_party/blake3/LICENSE_A2"
               "${GENKO_SOURCE_ROOT}/third_party/blake3/LICENSE_A2LLVM" "${GENKO_SOURCE_ROOT}/third_party/blake3/PROVENANCE.json"
         DESTINATION "${_genko_doc}/licenses/blake3")
+# (PC5 G-b: SheenBidi's C source, built into the program: its licence and where it came from)
+install(FILES "${GENKO_SOURCE_ROOT}/third_party/sheenbidi/LICENSE" "${GENKO_SOURCE_ROOT}/third_party/sheenbidi/PROVENANCE.json"
+        DESTINATION "${_genko_doc}/licenses/sheenbidi")
+# (PC5 G-d: the SCOWL word list スペルチェック reads, in the program's resources: its licence and how it was made)
+install(FILES "${GENKO_SOURCE_ROOT}/resources/dict/LICENSE-SCOWL.txt" DESTINATION "${_genko_doc}/licenses/scowl")
 if(UNIX AND NOT APPLE)
   install(PROGRAMS "${GENKO_SOURCE_ROOT}/package/linux/install.sh" "${GENKO_SOURCE_ROOT}/package/linux/uninstall.sh" DESTINATION ".")
   # (a template for install.sh, which writes the menu item with the folder it put Genko in: not itself a menu item)

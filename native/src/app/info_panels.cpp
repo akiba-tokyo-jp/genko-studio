@@ -26,6 +26,7 @@
 #include "app/main_window.hpp"
 #include "app/theme.hpp"
 #include "app/tiles.hpp"
+#include "app/view_units.hpp"
 #include "core/color_model.hpp"
 #include "core/color_raster.hpp"
 #include "core/ink.hpp"
@@ -253,12 +254,15 @@ InfoPanel::InfoPanel(MainWindow* window) : window_(window) {
     values_ = label("infoValues");
     proof_ = label("infoProof");
     selection_ = label("infoSelection");
+    ruler_ = label("infoRuler");
     form->addRow(QStringLiteral("位置"), place_);
     form->addRow(QStringLiteral("画面の色"), screen_);
     form->addRow(QStringLiteral("ページの値"), values_);
     form->addRow(QStringLiteral("校正の値"), proof_);
     form->addRow(QStringLiteral("選択範囲"), selection_);
-    place_->setToolTip(QStringLiteral("ポインターの位置（mm と、原稿の解像度の画素）"));
+    form->addRow(QStringLiteral("ものさし"), ruler_);
+    ruler_->setToolTip(QStringLiteral("ものさしツールの線: 角度（A）・長さ（L1・分度器の L2）・幅（W）・高さ（H）・始点（X・Y）"));
+    place_->setToolTip(QStringLiteral("ポインターの位置（環境設定の定規の単位と、原稿の解像度の画素）"));
     values_->setToolTip(QStringLiteral("ページの色モードの値（genko inspect --pixel・ステータスバーと同じ）"));
     proof_->setToolTip(QStringLiteral("色の校正のプロファイルでの値（CMYK はインキの %）"));
 }
@@ -271,11 +275,23 @@ void InfoPanel::show_at(std::optional<QPointF> mm) {
         return;
     }
     const double dpi = page->spec.dpi.truthy() ? page->spec.dpi.value() : 350.0;
-    place_->setText(QStringLiteral("X %1 mm（%2 px）  Y %3 mm（%4 px）")
-                        .arg(mm->x(), 0, 'f', 1)
-                        .arg(std::floor(mm->x() / 25.4 * dpi), 0, 'f', 0)
-                        .arg(mm->y(), 0, 'f', 1)
-                        .arg(std::floor(mm->y() / 25.4 * dpi), 0, 'f', 0));
+    // (PC5 H-b: in 環境設定 → 単位・定規's unit — mm as before, with the page's pixels)
+    const core::units::Unit unit = view_units::ruler();
+    if (unit == core::units::Unit::Mm) {
+        place_->setText(QStringLiteral("X %1 mm（%2 px）  Y %3 mm（%4 px）")
+                            .arg(mm->x(), 0, 'f', 1)
+                            .arg(std::floor(mm->x() / 25.4 * dpi), 0, 'f', 0)
+                            .arg(mm->y(), 0, 'f', 1)
+                            .arg(std::floor(mm->y() / 25.4 * dpi), 0, 'f', 0));
+    } else if (unit == core::units::Unit::Px) {
+        place_->setText(QStringLiteral("X %1 px  Y %2 px").arg(std::floor(mm->x() / 25.4 * dpi), 0, 'f', 0).arg(std::floor(mm->y() / 25.4 * dpi), 0, 'f', 0));
+    } else {
+        place_->setText(QStringLiteral("X %1（%2 px）  Y %3（%4 px）")
+                            .arg(view_units::words(mm->x(), unit, view_units::basis(page, true)))
+                            .arg(std::floor(mm->x() / 25.4 * dpi), 0, 'f', 0)
+                            .arg(view_units::words(mm->y(), unit, view_units::basis(page, false)))
+                            .arg(std::floor(mm->y() / 25.4 * dpi), 0, 'f', 0));
+    }
     try {
         // (as the status bar reads it: the page drawn at the book's resolution, 300 dpi at most)
         const double at_dpi = window_->book().spec.dpi.truthy() ? std::min(300.0, window_->book().spec.dpi.value()) : 300.0;
@@ -308,6 +324,21 @@ void InfoPanel::show_at(std::optional<QPointF> mm) {
     }
 }
 
+void InfoPanel::show_ruler(const std::optional<core::Json>& r) {
+    if (!r) {
+        ruler_->setText(QStringLiteral("—"));
+        return;
+    }
+    const auto num = [&](const char* key) { return r->at(key).get<double>(); };
+    QString text = QStringLiteral("A %1°  L1 %2 mm（%3 px）").arg(num("angle"), 0, 'f', 1).arg(num("l1_mm"), 0, 'f', 2).arg(num("l1"), 0, 'f', 0);
+    if (r->at("protractor").get<bool>()) text += QStringLiteral("  L2 %1 mm（%2 px）").arg(num("l2_mm"), 0, 'f', 2).arg(num("l2"), 0, 'f', 0);
+    text += QStringLiteral("\nW %1  H %2 mm  X %3  Y %4 mm").arg(num("w_mm"), 0, 'f', 2).arg(num("h_mm"), 0, 'f', 2).arg(num("x_mm"), 0, 'f', 2).arg(num("y_mm"), 0, 'f', 2);
+    if (r->at("units").get<std::string>() != "pixels") {
+        text += QStringLiteral("\n計測スケールで %1 %2").arg(num("length"), 0, 'f', 2).arg(QString::fromStdString(r->at("units").get<std::string>()));
+    }
+    ruler_->setText(text);
+}
+
 void InfoPanel::show_selection() {
     const auto& chosen = window_->canvas()->selection();
     const core::Page* page = window_->current_page();
@@ -319,11 +350,22 @@ void InfoPanel::show_selection() {
     for (const QPointF& q : chosen->outline) outline << q;
     const QRectF box = outline.boundingRect();
     const double dpi = page->spec.dpi.truthy() ? page->spec.dpi.value() : 350.0;
-    selection_->setText(QStringLiteral("幅 %1 mm（%2 px）  高さ %3 mm（%4 px）")
-                            .arg(box.width(), 0, 'f', 1)
-                            .arg(std::lround(box.width() / 25.4 * dpi))
-                            .arg(box.height(), 0, 'f', 1)
-                            .arg(std::lround(box.height() / 25.4 * dpi)));
+    const core::units::Unit unit = view_units::ruler();  // (PC5 H-b)
+    if (unit == core::units::Unit::Mm) {
+        selection_->setText(QStringLiteral("幅 %1 mm（%2 px）  高さ %3 mm（%4 px）")
+                                .arg(box.width(), 0, 'f', 1)
+                                .arg(std::lround(box.width() / 25.4 * dpi))
+                                .arg(box.height(), 0, 'f', 1)
+                                .arg(std::lround(box.height() / 25.4 * dpi)));
+    } else if (unit == core::units::Unit::Px) {
+        selection_->setText(QStringLiteral("幅 %1 px  高さ %2 px").arg(std::lround(box.width() / 25.4 * dpi)).arg(std::lround(box.height() / 25.4 * dpi)));
+    } else {
+        selection_->setText(QStringLiteral("幅 %1（%2 px）  高さ %3（%4 px）")
+                                .arg(view_units::words(box.width(), unit, view_units::basis(page, true)))
+                                .arg(std::lround(box.width() / 25.4 * dpi))
+                                .arg(view_units::words(box.height(), unit, view_units::basis(page, false)))
+                                .arg(std::lround(box.height() / 25.4 * dpi)));
+    }
 }
 
 // --- the window's side -----------------------------------------------------------------------------------------------

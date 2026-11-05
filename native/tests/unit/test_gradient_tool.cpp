@@ -17,8 +17,11 @@
 #include <string>
 #include <vector>
 
+#include "core/base64.hpp"
+#include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/ink.hpp"
 #include "core/ops_util.hpp"
 #include "core/paths.hpp"
 #include "render/image.hpp"
@@ -26,6 +29,7 @@
 #include "render/ops_registry.hpp"
 #include "render/page_internal.hpp"
 #include "render/paint_fill.hpp"
+#include "render/png.hpp"
 #include "render/raster.hpp"
 #include "render/selection.hpp"
 #include "storage/lock.hpp"
@@ -337,10 +341,10 @@ private slots:
         QVERIFY(refusal(precise, Json::array({exact})).find("a stop's colour") != std::string::npos);
     }
 
-    // a new (empty) paint layer of a page of 16 or 32 bits that may hold precise pixels (not cut at the panels: the rule of
-    // keep_page_modes and set_color_mode): a gradient and a fill make it precise (its pixels finer than 8 bits, no picture
-    // laid on it); one cut at the panels keeps the picture as before; an alpha channel of such a page takes a gradient as
-    // before (lent as an 8-bit picture)
+    // a new (empty) paint layer of a page of 16 or 32 bits that may hold precise pixels (the rule of keep_page_modes and
+    // set_color_mode): a gradient and a fill make it precise (its pixels finer than 8 bits, no picture laid on it) — one
+    // cut at the panels too, add_layer's default (the user's decision of 2026-10-28; before it the picture was laid) —;
+    // an alpha channel of such a page takes a gradient as before (lent as an 8-bit picture)
     void emptyLayersOfPrecisePagesBecomePrecise() {
         for (const std::string& kind : {std::string("16"), std::string("32")}) {
             const core::Document clipped = run(as_kind(paint_book(), kind), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "fresh"}});
@@ -350,7 +354,7 @@ private slots:
             {
                 const core::Document laid = run(clipped, op);
                 const core::Layer& fresh = laid.page(0).layers[core::layer_by_id(laid.page(0), "fresh")];
-                QVERIFY2(fresh.color_raster == nullptr && fresh.patches.size() == 1, kind.c_str());
+                QVERIFY2(fresh.panel_clip && fresh.color_raster != nullptr && fresh.patches.empty(), kind.c_str());
             }
             const core::Document doc = run(clipped, Json{{"op", "set_layer"}, {"page", 1}, {"id", "fresh"}, {"panel_clip", false}});
             QVERIFY(doc.page(0).layers[core::layer_by_id(doc.page(0), "fresh")].color_raster == nullptr);
@@ -386,6 +390,133 @@ private slots:
             QVERIFY(drawn.page(0).layers[i].color_raster == doc.page(0).layers[i].color_raster);
             QVERIFY(drawn.page(0).layers[i].patches.empty());
         }
+    }
+
+    // PC5-0 (the user's decision of 2026-10-28): a new paint layer — add_layer's default, cut at the panels — of an RGB
+    // page of 16 or 32 bits is at the page's depth: a gradient makes it precise, its paint cut at the panels as an 8-bit
+    // layer's is (clear outside them), a layer of 8-bit pixels already stays 8-bit; a grey page of 16 or 32 bits gives it
+    // its inks at that depth (as before); an 8-bit page lays the picture on it (as before), and a layer let out of the
+    // panels (set_layer panel_clip: false) is made precise as before.
+    void newLayersAreAtThePagesDepth() {
+        core::Document base = core::new_episode("新しい層", core::Num(1), 1, core::PageSpec::custom(2 * kInch, 2 * kInch, 40, 40, 1, 2, 2, 2, 2, 200, "color"));
+        base.edit_page(0).numero = false;
+        QVERIFY(!base.page(0).frames.empty());
+        Json across{{"op", "gradient_fill"}, {"page", 1}, {"layer_id", "fresh"}, {"from", Json::array({0, 25})}, {"to", Json::array({50, 25})},
+                    {"stops", Json::parse("[[0, [0, 0, 0]], [1, [255, 255, 255]]]")}};
+        const Json add{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "fresh"}};
+        for (const int depth : {16, 32}) {
+            const core::Document deep = run(base, Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", depth}});
+            core::Document laid = run_ops(deep, Json::array({add, across})).doc;
+            const core::Layer& fresh = laid.page(0).layers[core::layer_by_id(laid.page(0), "fresh")];
+            QVERIFY(fresh.panel_clip);
+            QVERIFY2(fresh.color_raster != nullptr && fresh.patches.empty(), qPrintable(QString::number(depth)));
+            QCOMPARE(core::ColorRasterView(*fresh.color_raster).metadata("")["precision"], Json(depth == 16 ? "u16" : "f32"));
+            const Pixels p = whole(laid, "fresh");
+            QVERIFY(p.at(at_mm(p, 0.5, 25))[3] == 0.0f);   // (outside the panels: clear)
+            QVERIFY(p.at(at_mm(p, 25.4, 25.4))[3] == 1.0f);  // (inside: painted)
+            std::set<float> levels;
+            const std::size_t row = at_mm(p, 0, 25.4) / p.width() * p.width();
+            for (std::size_t x = 0; x < p.width(); ++x) levels.insert(p.at(row + x)[0]);
+            QVERIFY2(levels.size() > 256, qPrintable(QString("%1: %2 levels").arg(depth).arg(levels.size())));
+            // 8-bit pixels an op lays on it (put_raster) once it was made: the page's precise pixels (keep_page_modes)
+            {
+                std::string grey;
+                for (int i = 0; i < 40 * 40; ++i) grey += std::string("\x40\x80\xC0\xFF", 4);
+                const core::Document made = run(deep, add);
+                const core::Document put = run(made, Json{{"op", "put_raster"}, {"page", 1}, {"id", "fresh"},
+                                                          {"png_base64", core::b64encode(render::write_png(render::Image::frombytes("RGBA", Size{40, 40}, grey)))}});
+                const core::Layer& taken = put.page(0).layers[core::layer_by_id(put.page(0), "fresh")];
+                QVERIFY2(taken.panel_clip && taken.color_raster != nullptr && (taken.raster_png == nullptr || taken.raster_png->empty()),
+                         qPrintable(QString::number(depth)));
+            }
+            // a layer whose 8-bit pixels an op made before: they stay 8-bit
+            core::Document old = deep;
+            old = run(old, add);
+            core::Layer& eight = old.edit_page(0).layers[core::layer_by_id(old.page(0), "fresh")];
+            std::string bytes;
+            for (int i = 0; i < 40 * 40; ++i) bytes += std::string("\x10\x20\x30\xFF", 4);
+            render::raster::save_raster(old.edit_page(0), eight, render::Image::frombytes("RGBA", Size{40, 40}, bytes));
+            Json multiplied = across;
+            multiplied["blend"] = "multiply";  // (into its pixels)
+            const core::Document kept = run(old, multiplied);
+            const core::Layer& still = kept.page(0).layers[core::layer_by_id(kept.page(0), "fresh")];
+            QVERIFY(still.color_raster == nullptr && still.raster_png != nullptr && still.raster_png != eight.raster_png);
+            // let out of the panels: made precise, as before
+            const core::Document out = run_ops(deep, Json::array({add, Json{{"op", "set_layer"}, {"page", 1}, {"id", "fresh"}, {"panel_clip", false}}, across})).doc;
+            const core::Layer& free = out.page(0).layers[core::layer_by_id(out.page(0), "fresh")];
+            QVERIFY(!free.panel_clip && free.color_raster != nullptr);
+        }
+        // grey of 16 and 32 bits: its inks at the page's depth
+        for (const int depth : {16, 32}) {
+            const core::Document grey = run(base, Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "gray"}, {"depth", depth}});
+            const core::Document laid = run_ops(grey, Json::array({add, across})).doc;
+            const core::Layer& fresh = laid.page(0).layers[core::layer_by_id(laid.page(0), "fresh")];
+            QVERIFY(fresh.ink_raster != nullptr && fresh.color_raster == nullptr && fresh.raster_png == nullptr);
+            QCOMPARE(core::ink_raster_header(*fresh.ink_raster).depth, depth);
+        }
+        // an 8-bit page: the picture laid on it, as before
+        const core::Document eight = run_ops(base, Json::array({add, across})).doc;
+        const core::Layer& fresh = eight.page(0).layers[core::layer_by_id(eight.page(0), "fresh")];
+        QVERIFY(fresh.color_raster == nullptr && fresh.patches.size() == 1);
+    }
+
+    // PC5-0 (the coordinator's decision after Z0's review, P1-1): a new paint layer whose precise pixels would take the book
+    // past its precise budget (1 GiB: here one f32 layer of a page of 1042 mm square at the working 200 dpi is 1.08 GB) is
+    // painted at 8 bits as before PC5-0 — a fill (into its pixels: a blend; fill_area's plain colour lays a picture on any
+    // layer), a gradient, a pattern, a dab tool, a picture put on it —, never refused,
+    // and the op's warnings say so; within the budget a small picture put on it is precise, and a merge into an empty
+    // layer is composited precise as before.
+    void pastTheBudgetNewLayersStayAt8Bits() {
+        core::Document big = core::new_episode("大きな本", core::Num(1), 1, core::PageSpec::custom(1042, 1042, 1000, 1000, 1, 2, 2, 2, 2, 200, "color"));
+        big.edit_page(0).numero = false;
+        big = run(big, Json{{"op", "set_color_mode"}, {"page", 1}, {"mode", "rgb"}, {"depth", 32}});
+        QVERIFY(render::paint_fill::precise_layer_bytes(big.page(0)) > core::kColorRasterBookBytes);
+        big = run(big, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "fresh"}});
+        std::string tile;
+        for (int i = 0; i < 8 * 8; ++i) tile += (i % 3 == 0) ? std::string("\xff\x00\x00\xff", 4) : std::string("\x00\x00\xff\xff", 4);
+        const std::string tile_png = core::b64encode(render::write_png(render::Image::frombytes("RGBA", Size{8, 8}, tile)));
+        big = run(big, Json{{"op", "add_pattern"}, {"name", "市松"}, {"png", tile_png}, {"dpi", 100}, {"id", "pat"}});
+        const Json small_area{{"rect", Json::array({100, 100, 20, 20})}};
+        const std::vector<Json> ops{
+            Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "fresh"}, {"area", small_area}, {"rgb", Json::array({200, 40, 40})}, {"blend", "multiply"}},
+            Json{{"op", "gradient_fill"}, {"page", 1}, {"layer_id", "fresh"}, {"from", Json::array({100, 110})}, {"to", Json::array({120, 110})},
+                 {"stops", Json::parse("[[0, [0, 0, 0]], [1, [255, 255, 255]]]")}, {"area", small_area}},
+            Json{{"op", "fill_area"}, {"page", 1}, {"layer_id", "fresh"}, {"area", small_area}, {"pattern", Json{{"id", "pat"}}}},
+            Json{{"op", "mixer_brush"}, {"page", 1}, {"layer_id", "fresh"}, {"points", Json::parse("[[100, 100], [120, 100]]")}, {"width_mm", 2},
+                 {"rgb", Json::array({20, 200, 20})}},
+            // (a picture of the page's working grid: its precise pixels would pass the budget too; a small one fits, below)
+            Json{{"op", "put_raster"}, {"page", 1}, {"id", "fresh"},
+                 {"png_base64", core::b64encode(render::write_png(render::Image::create("RGBA", Size{8205, 8205}, render::Ink{30, 60, 90, 255})))}},
+        };
+        for (const Json& op : ops) {
+            const core::ApplyResult done = run_ops(big, Json::array({op}));
+            const core::Layer& fresh = done.doc.page(0).layers[core::layer_by_id(done.doc.page(0), "fresh")];
+            QVERIFY2(fresh.color_raster == nullptr, op.dump().c_str());
+            if (op["op"] != Json("mixer_brush")) {  // (a dab tool on an empty layer changes nothing: nothing to say)
+                QVERIFY2((fresh.raster_png && !fresh.raster_png->empty()) || !fresh.patches.empty(), op.dump().c_str());
+                QVERIFY2(done.warnings.dump().find(render::paint_fill::kKeptAt8Bits) != std::string::npos, (op.dump() + " " + done.warnings.dump()).c_str());
+            }
+        }
+        // within the budget: a small picture put on it (precise at its own grid), a layer merged down into an empty paint
+        // layer the panels cut — the result precise
+        {
+            const core::Document put = run(big, Json{{"op", "put_raster"}, {"page", 1}, {"id", "fresh"}, {"png_base64", tile_png}});
+            QVERIFY(put.page(0).layers[core::layer_by_id(put.page(0), "fresh")].color_raster != nullptr);
+        }
+        core::Document small = run(as_kind(paint_book(), "16"), Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "fresh"}});
+        small = run(small, Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "upper"}, {"after", "fresh"}});
+        {
+            core::Page& p = small.edit_page(0);
+            std::string bytes;
+            for (int i = 0; i < 40 * 40; ++i) bytes += std::string("\x10\x80\xF0\xFF", 4);
+            render::raster::save_raster(p, p.layers[core::layer_by_id(p, "upper")], render::Image::frombytes("RGBA", Size{40, 40}, bytes));
+        }
+        QVERIFY(small.page(0).layers[core::layer_by_id(small.page(0), "upper")].raster_png != nullptr);
+        const core::Document merged = run(small, Json{{"op", "merge_down"}, {"page", 1}, {"id", "upper"}});
+        // (a merge on a page of 16 or 32 bits composites in precise colour, as since PC2d — not by becomes_precise or
+        // keep_page_modes: the result precise and let out of the panels, its budget the book's check after the op —)
+        const core::Layer& into = merged.page(0).layers[core::layer_by_id(merged.page(0), "fresh")];
+        QVERIFY(into.color_raster != nullptr && !into.panel_clip);
     }
 
     // a pen layer: a picture laid on it, as before (the new shapes and keys in it), a blend refused; the calls without the

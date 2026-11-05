@@ -165,7 +165,7 @@ BrushesPanel::BrushesPanel(MainWindow* window) : window_(window) {
         row->addWidget(b);
         return b;
     };
-    add("brush_preset_new", QStringLiteral("＋"), QStringLiteral("新規ブラシプリセット…: 今のブラシ（ツールの設定の）を自分のブラシとして加えます"), [this] { new_preset(); });
+    add("brush_preset_new", QStringLiteral("＋"), QStringLiteral("新規ブラシプリセット…: 今のブラシ（オプションの）を自分のブラシとして加えます"), [this] { new_preset(); });
     add("brush_preset_rename", QStringLiteral("名前…"), QStringLiteral("選んだ自分のブラシの名前を変えます"), [this] { rename(); });
     add("brush_preset_delete", QStringLiteral("削除"), QStringLiteral("選んだ自分のブラシをライブラリから消します（描いた線はそのまま）"), [this] { remove(); });
     auto* more = new QToolButton;

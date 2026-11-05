@@ -12,9 +12,11 @@
 #include "app/ask.hpp"
 #include "app/comfort.hpp"
 #include "app/config.hpp"
+#include "app/ime.hpp"
 #include "app/perf.hpp"
 #include "app/theme.hpp"
 #include "core/frames.hpp"
+#include "core/pixel_aspect.hpp"
 
 namespace genko::app {
 
@@ -42,6 +44,7 @@ PageCanvas::PageCanvas(QWidget* parent) : QWidget(parent), renderer_(std::make_u
             return;
         }
         view_.pan += pan_speed_;
+        keep_in_view();  // (PC5 H-e: オーバースクロール off)
         view_.fitted = false;
         rerender_.start();
         update();
@@ -116,6 +119,45 @@ void PageCanvas::set_page(DocPtr doc, std::size_t index) {
     }
 }
 
+void PageCanvas::let_go() {
+    stroke_.clear();
+    live_.reset();
+    overlays_.clear();
+    frame_drag_.reset();
+    frame_poly_.clear();
+    line_drag_.reset();
+    handle_drag_.reset();
+    balloon_stroke_.clear();
+    pen_knots_.clear();
+    pen_handle_.reset();
+    shape_pts_.clear();
+    poly_points_.clear();
+    cancel_ruler();
+    if (warping()) cancel_warp();
+    if (crop_) set_crop(std::nullopt);
+    cancel_transform();
+    update();
+}
+
+bool PageCanvas::half_done() const {
+    return transforming() || warping() || crop_.has_value() || !pen_knots_.empty() || !shape_pts_.empty() || !poly_points_.empty() ||
+           editor() != nullptr;
+}
+
+void PageCanvas::finish_half_done() {
+    if (InlineEditor* typing = editor()) typing->finish(true);
+    if (transforming()) finish_transform();
+    if (warping()) finish_warp();
+    if (crop_) {  // (as Enter on it: crop_key)
+        const CropBox box = *crop_;
+        set_crop(std::nullopt);
+        emit cropRequested(box.rect(), box.angle);
+    }
+    if (!pen_knots_.empty()) finish_pen(false);
+    if (!shape_pts_.empty()) finish_shape(false);
+    if (!poly_points_.empty()) finish_points();
+}
+
 void PageCanvas::clear_page() {
     doc_.reset();
     index_ = 0;
@@ -139,7 +181,9 @@ void PageCanvas::show_frame(const QImage& picture) {
 
 void PageCanvas::request_tiles() {
     if (page() == nullptr || width() <= 0 || height() <= 0) return;
-    renderer_->want(base_dpi(), wanted_dpi(), seen_mm());
+    // (PC5 H-c, 節 H 4.5: a pane beside the one in front keeps the whole page's tiles only)
+    const int base = base_dpi();
+    renderer_->want(base, view_only_ ? base : wanted_dpi(), seen_mm());
 }
 
 bool PageCanvas::wait_rendered(int ms) {
@@ -225,14 +269,32 @@ void PageCanvas::stroke_dropped() {
 
 // --- the view ------------------------------------------------------------------------------------------------------
 
+double PageCanvas::shown_aspect() const {
+    const core::Page* p = aspect_correction_ ? page() : nullptr;
+    return p != nullptr && !core::square_pixels(p->pixel_aspect) && core::pixel_aspect_allowed(p->pixel_aspect) ? p->pixel_aspect : 1.0;
+}
+
+void PageCanvas::set_pixel_aspect_correction(bool on) {
+    if (on == aspect_correction_) return;
+    aspect_correction_ = on;
+    live_reset();
+    rerender_.start();
+    emit changed();
+    update();
+}
+
 QTransform PageCanvas::view_transform() const {
     QTransform view;
-    if (view_.rotation == 0.0 && !view_.flipped && !view_.flipped_v) return view;
+    // (PC5 H-f: the page's pixels widened across by their aspect ratio — the unturned view's x, the page's own —, then
+    // turned and mirrored)
+    const double aspect = shown_aspect();
+    if (view_.rotation == 0.0 && !view_.flipped && !view_.flipped_v && aspect == 1.0) return view;
     const double cx = width() / 2.0;
     const double cy = height() / 2.0;
     view.translate(cx, cy);
     view.rotate(view_.rotation);
     if (view_.flipped || view_.flipped_v) view.scale(view_.flipped ? -1 : 1, view_.flipped_v ? -1 : 1);
+    if (aspect != 1.0) view.scale(aspect, 1.0);
     view.translate(-cx, -cy);
     return view;
 }
@@ -242,7 +304,7 @@ QTransform PageCanvas::mm_transform() const {
 }
 
 QPointF PageCanvas::unturned(const QPointF& widget) const {
-    if (view_.rotation == 0.0 && !view_.flipped && !view_.flipped_v) return widget;
+    if (view_.rotation == 0.0 && !view_.flipped && !view_.flipped_v && shown_aspect() == 1.0) return widget;
     return view_transform().inverted().map(widget);
 }
 
@@ -259,6 +321,48 @@ QPointF PageCanvas::to_widget(const QPointF& mm) const { return mm_transform().m
 void PageCanvas::set_work(std::shared_ptr<CanvasWork> work) {
     work_ = std::move(work);
     update();
+}
+
+// --- PC5 J-0: the production's extras (slices, notes, count marks, the ruler line) -----------------------------------
+
+void PageCanvas::add_extra(CanvasExtra extra) {
+    const auto same = std::find_if(extras_.begin(), extras_.end(), [&](const CanvasExtra& e) { return e.key == extra.key; });
+    if (same != extras_.end()) {
+        *same = std::move(extra);
+    } else {
+        extras_.push_back(std::move(extra));
+    }
+    update();
+}
+
+void PageCanvas::show_extra(const QString& key, bool shown) {
+    std::erase(extras_hidden_, key);
+    if (!shown) extras_hidden_.push_back(key);
+    update();
+}
+
+bool PageCanvas::extra_shown(const QString& key) const { return std::find(extras_hidden_.begin(), extras_hidden_.end(), key) == extras_hidden_.end(); }
+
+std::vector<QString> PageCanvas::extra_keys() const {
+    std::vector<QString> out;
+    for (const CanvasExtra& e : extras_) out.push_back(e.key);
+    return out;
+}
+
+void PageCanvas::draw_extras(QPainter& painter) const {
+    const core::Page* p = page();
+    if (!extras_shown || p == nullptr || extras_.empty()) return;
+    ExtraView view;
+    view.at = QTransform(view_.scale, 0, 0, view_.scale, view_.pan.x(), view_.pan.y());  // (pt: page mm → the unturned view)
+    view.per_mm = view_.scale;
+    view.seen_mm = seen_mm();
+    view.painting = painting_;
+    for (const CanvasExtra& e : extras_) {
+        if (!e.paint || !extra_shown(e.key)) continue;
+        painter.save();
+        e.paint(painter, *p, view);
+        painter.restore();
+    }
 }
 
 QRectF PageCanvas::seen_mm() const {
@@ -290,17 +394,52 @@ QRectF PageCanvas::view_rect_mm() const {
     return QRectF(x0, 0.0, w, p->spec.height_mm.value());
 }
 
+namespace {
+
+// The page's own resolution (its paper's dpi; 0: no page, or none to speak of).
+int page_pixel_dpi(const core::Page* page) {
+    if (page == nullptr) return 0;
+    const double dpi = page->spec.dpi.value();
+    return std::isfinite(dpi) && dpi >= 1 ? static_cast<int>(std::lround(dpi)) : 0;
+}
+
+}  // namespace
+
 int PageCanvas::wanted_dpi() const {
     const double ratio = devicePixelRatioF() > 0 ? devicePixelRatioF() : 1.0;
-    const double dpi = view_.scale * 25.4 * ratio;
-    return static_cast<int>(std::max(48.0, std::min<double>(PageRenderer::kDetailDpi, std::nearbyint(dpi / 24) * 24)));
+    // (PC5 H-f: widened by the pixel aspect ratio, the tiles as fine as the screen across)
+    const double dpi = view_.scale * 25.4 * ratio * std::max(1.0, shown_aspect());
+    const double step = std::max(48.0, std::nearbyint(dpi / 24) * 24);
+    // (PC5 H-a, 画素の段: as fine as the page's own pixels, which zoomed in further are laid enlarged; finer than the
+    // detail's 432 dpi on a page of a finer resolution)
+    const int pixel = page_pixel_dpi(page());
+    if (pixel > 0 && (step >= pixel || dpi >= pixel)) return pixel;
+    // (review P2-3, P3-7: past the detail's 432 dpi, the page's own pixels once they are at most 1.4 times finer than the
+    // screen — one level for all those zooms, laid a little smaller —; else the detail at most, as before)
+    if (pixel > 0 && step > PageRenderer::kDetailDpi && pixel <= dpi * 1.4) return pixel;
+    return static_cast<int>(std::min<double>(PageRenderer::kDetailDpi, step));
 }
+
+bool PageCanvas::pixel_step() const {
+    const int pixel = page_pixel_dpi(page());
+    const double ratio = devicePixelRatioF() > 0 ? devicePixelRatioF() : 1.0;
+    return pixel > 0 && view_.scale * 25.4 * ratio > pixel * (1.0 + 1e-9);
+}
+
+double PageCanvas::pixel_scale() const {
+    const double ratio = devicePixelRatioF() > 0 ? devicePixelRatioF() : 1.0;
+    const int pixel = page_pixel_dpi(page());
+    return (pixel > 0 ? pixel : 96) / 25.4 / ratio;  // (no page: as the paper at 96 dpi)
+}
+
+double PageCanvas::max_scale() const { return std::max(kMaxScale, kMaxPixelZoom * pixel_scale()); }
 
 void PageCanvas::fit_page() {
     if (page() == nullptr || width() <= 0 || height() <= 0) return;
     const QRectF r = view_rect_mm();
     const double margin = 16;
-    view_.scale = std::max(kMinScale, std::min(kMaxScale, std::min((width() - 2 * margin) / r.width(), (height() - 2 * margin) / r.height())));
+    const double aspect = shown_aspect();  // (PC5 H-f: as wide as it is shown)
+    view_.scale = std::max(kMinScale, std::min(max_scale(), std::min((width() - 2 * margin) / (r.width() * aspect), (height() - 2 * margin) / r.height())));
     view_.pan = QPointF((width() - r.width() * view_.scale) / 2 - r.x() * view_.scale, (height() - r.height() * view_.scale) / 2 - r.y() * view_.scale);
     view_.fitted = true;
     after_zoom();
@@ -309,8 +448,9 @@ void PageCanvas::fit_page() {
 void PageCanvas::zoom_by(double factor, std::optional<QPointF> anchor) {
     const QPointF at = anchor.value_or(QPointF(width() / 2.0, height() / 2.0));
     const QPointF mm = mm_of(at);
-    view_.scale = std::max(kMinScale, std::min(kMaxScale, view_.scale * factor));
+    view_.scale = std::max(kMinScale, std::min(max_scale(), view_.scale * factor));
     view_.pan = QPointF(at.x() - mm.x() * view_.scale, at.y() - mm.y() * view_.scale);
+    keep_in_view();  // (PC5 H-e, review P3-10: オーバースクロール off — zoomed out, the page in the middle at once)
     view_.fitted = false;
     after_zoom();
 }
@@ -324,7 +464,30 @@ void PageCanvas::center_on(double x_mm, double y_mm) {
     update();
 }
 
-void PageCanvas::actual_size() { zoom_by((96 / 25.4) / view_.scale); }
+void PageCanvas::pan_by(const QPointF& moved) {
+    if (moved.isNull()) return;
+    view_.pan += moved;
+    view_.fitted = false;
+    rerender_.start();
+    emit changed();
+    update();
+}
+
+void PageCanvas::actual_size() { zoom_by((std::max(1.0, print_dpi) / 25.4) / view_.scale); }
+
+void PageCanvas::actual_pixels(double percent) { zoom_by(percent / 100.0 * pixel_scale() / view_.scale); }
+
+void PageCanvas::fit_box(const QRectF& box_mm) {
+    if (page() == nullptr || width() <= 0 || height() <= 0 || !(box_mm.width() > 0) || !(box_mm.height() > 0)) return;
+    const double margin = 20;  // (PhotoCraft's fit_layers: 20 px around)
+    const double aspect = shown_aspect();  // (PC5 H-f: as wide as it is shown)
+    view_.scale = std::max(kMinScale,
+                           std::min(max_scale(), std::min((width() - 2 * margin) / (box_mm.width() * aspect), (height() - 2 * margin) / box_mm.height())));
+    const QPointF c = box_mm.center();
+    view_.pan = QPointF(width() / 2.0 - c.x() * view_.scale, height() / 2.0 - c.y() * view_.scale);
+    view_.fitted = false;
+    after_zoom();
+}
 
 void PageCanvas::after_zoom() {
     live_reset();
@@ -333,18 +496,22 @@ void PageCanvas::after_zoom() {
     update();
 }
 
-int PageCanvas::zoom_percent() const { return static_cast<int>(std::nearbyint(view_.scale / (96 / 25.4) * 100)); }
+// (PC5 H-a, the user's decision 11: the page's pixels, 100 % one a screen pixel; the paper's size is プリントサイズ)
+int PageCanvas::zoom_percent() const { return static_cast<int>(std::nearbyint(zoom_percent_exact())); }
+
+double PageCanvas::zoom_percent_exact() const { return view_.scale / pixel_scale() * 100; }
 
 void PageCanvas::set_zoom_percent(double percent) {
-    percent = std::max(1.0, percent);
-    zoom_by((percent / 100 * 96 / 25.4) / view_.scale);
+    percent = std::max(0.01, percent);
+    zoom_by(percent / 100 * pixel_scale() / view_.scale);
 }
 
 void PageCanvas::zoom_to_rect(double x0, double y0, double x1, double y1) {
     const double w = std::abs(x1 - x0);
     const double h = std::abs(y1 - y0);
     if (w < 0.5 || h < 0.5) return;
-    view_.scale = std::max(kMinScale, std::min(kMaxScale, std::min(width() / w, height() / h) * 0.95));
+    // (PC5 H-f review P3-2: as wide as it shows)
+    view_.scale = std::max(kMinScale, std::min(max_scale(), std::min(width() / (w * shown_aspect()), height() / h) * 0.95));
     const double cx = (x0 + x1) / 2;
     const double cy = (y0 + y1) / 2;
     view_.pan = QPointF(width() / 2.0 - cx * view_.scale, height() / 2.0 - cy * view_.scale);
@@ -393,7 +560,7 @@ void PageCanvas::set_view_state(const ViewState& state) {
         fit_page();
         return;
     }
-    view_.scale = std::max(kMinScale, std::min(kMaxScale, state.scale));
+    view_.scale = std::max(kMinScale, std::min(max_scale(), state.scale));
     view_.pan = state.pan;
     view_.fitted = false;
     after_zoom();
@@ -403,7 +570,7 @@ void PageCanvas::glide(const std::function<void()>& change) {
     const ViewState before = view_;
     change();
     const ViewState after = view_;
-    if (reduce_motion() || !isVisible() || before.scale <= 0 ||
+    if (!animated_zoom || reduce_motion() || !isVisible() || before.scale <= 0 ||  // (PC5 H-e: アニメーションズーム)
         (before.scale == after.scale && before.pan == after.pan)) {
         return;
     }

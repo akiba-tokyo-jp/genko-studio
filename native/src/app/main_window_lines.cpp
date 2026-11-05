@@ -21,6 +21,7 @@
 #include "app/ime.hpp"
 #include "app/lettering.hpp"
 #include "app/main_window.hpp"
+#include "app/preferences.hpp"
 #include "app/story_editor.hpp"
 #include "app/story_panel.hpp"
 #include "app/tool_settings.hpp"
@@ -63,7 +64,8 @@ std::optional<std::string> added_line(const core::Document& book, const std::vec
 // --- the commands ----------------------------------------------------------------------------------------------------
 
 void MainWindow::build_line_actions() {
-    make("act_text", QStringLiteral("テキスト"), [this] { choose_tool(QStringLiteral("text")); }, {QKeySequence(QStringLiteral("T"))},
+    // (PC5 G-d, 節 G 5.4: Photoshop's 縦書き文字ツール — テキスト before, preferences::renamed())
+    make("act_text", QStringLiteral("縦書き文字ツール"), [this] { choose_tool(QStringLiteral("text")); }, {QKeySequence(QStringLiteral("T"))},
          QStringLiteral("クリックした所に台詞を入力します（縦書き）"), true);
     QAction* text = action("act_text");
     tools_->addAction(text);
@@ -71,8 +73,9 @@ void MainWindow::build_line_actions() {
     tool_actions_[QStringLiteral("text")] = text;
     make("act_story_editor", QStringLiteral("ストーリーエディター…"), [this] { open_story_editor(); }, {QKeySequence(QStringLiteral("Ctrl+Shift+L"))},
          QStringLiteral("全ページの台詞をまとめて直す・台本を流し込む"));
-    make("act_replace", QStringLiteral("台詞の検索・置換…"), [this] { replace_dialog(); }, {QKeySequence(QStringLiteral("Ctrl+Alt+F"))},
-         QStringLiteral("全ページの台詞から言葉を探して置き換えます"));
+    // (PC5 G-d, 節 G 5.4: Photoshop's 編集 → 検索と置換… — 台詞の検索・置換… in ページ before, preferences::renamed())
+    make("act_replace", QStringLiteral("検索と置換…"), [this] { replace_dialog(); }, {QKeySequence(QStringLiteral("Ctrl+Alt+F"))},
+         QStringLiteral("台詞とテキストレイヤーの文字を探して、次へ・1 か所ずつ・すべてを置き換えます"));
     make("act_line_type", QStringLiteral("台詞を入れる（テキストの道具）"), [this] { choose_tool(QStringLiteral("text")); });
     QAction* pen = make("act_balloon_pen", QStringLiteral("フキダシを手で描く"), [] {}, {}, QStringLiteral("ドラッグで囲んだ形のフキダシに台詞を入れます"), true);
     connect(pen, &QAction::triggered, this, [this](bool on) {
@@ -126,7 +129,7 @@ void MainWindow::build_line_menus(QMenu* pages) {
     lines->addAction(action("act_line_delete"));
     pages->addSeparator();
     pages->addAction(action("act_story_editor"));
-    pages->addAction(action("act_replace"));
+    // (PC5 G-d: 検索と置換… is 編集's — build_edit_menu_tail)
 }
 
 void MainWindow::build_line_dock() {
@@ -163,7 +166,10 @@ void MainWindow::panel_for_tool(const QString& tool) {
                                         QStringLiteral("lassofill"), QStringLiteral("vector"), QStringLiteral("blend"),
                                         QStringLiteral("liquify"), QStringLiteral("gradient"), QStringLiteral("shape"),
                                         QStringLiteral("pencil")};  // (PC4 E1)
-    QDockWidget* want = tool == QLatin1String("text")                              ? lines_dock_
+    // (PC5 G-a: 横書き文字ツール sets across whatever the option says; the type layers' frame drawn with the text tools)
+    if (text_settings_ != nullptr) text_settings_->vertical->setEnabled(tool != QLatin1String("text_h"));
+    if (PageCanvas::is_text_tool(tool) || tool == QLatin1String("move")) refresh_type_frame();
+    QDockWidget* want = PageCanvas::is_text_tool(tool)                              ? lines_dock_
                         : drawing.contains(tool) || PageCanvas::is_pixel_tool(tool) ? layers  // (PC4 E5: the brushes that change pixels)
                                                                                     : nullptr;
     QDockWidget* other = want == lines_dock_ ? layers : lines_dock_;
@@ -176,6 +182,7 @@ void MainWindow::refresh_lines() {
     if (story_ == nullptr) return;
     story_->refresh();
     story_->select(canvas_->selected_line_id);  // (the chosen line's settings beside the tool stay current)
+    refresh_type_frame();                       // (PC5 G-a: the chosen type layer's box after an edit)
 }
 
 // --- the lines typed on the page ------------------------------------------------------------------------------------
@@ -198,7 +205,8 @@ void MainWindow::type_new_line(double x_mm, double y_mm) {
     if (page == nullptr) return;
     const auto origin = session_;
     const std::string page_id = page->id;
-    canvas_->open_editor(x_mm, y_mm, QString(), [this, origin, page_id, x_mm, y_mm](std::optional<QString> typed) {
+    const QString tool = canvas_->tool();  // (PC5 G-a review P2-1: 横書き文字ツール types across)
+    canvas_->open_editor(x_mm, y_mm, QString(), [this, origin, page_id, x_mm, y_mm, tool](std::optional<QString> typed) {
         if (!typed || typed->isEmpty() || closed_) return;
         // (the book as it is now: the page may have gone while the words were typed)
         const core::Page* target = nullptr;
@@ -211,7 +219,7 @@ void MainWindow::type_new_line(double x_mm, double y_mm) {
         }
         const lettering::Marks marks = lettering::parse_marks(*typed);
         const core::Frame* frame = target->frame_at(Num(x_mm), Num(y_mm));
-        const TextToolSettings::LineFields fields = text_settings_->line_fields();
+        const TextToolSettings::LineFields fields = text_settings_->line_fields(tool);
         const Json box = lettering::place_at(x_mm, y_mm, marks.text, fields.balloon, fields.vertical, frame);
         Json op{{"op", "add_line"}, {"page", target->index.json()}, {"text", marks.text}, {"balloon", fields.balloon}};
         for (const auto& [key, value] : box.items()) op[key] = value;
@@ -296,6 +304,13 @@ void MainWindow::edit_line_inline(const std::string& line_id) {
                                      {"emphasis_runs", marks.emphasis_runs},
                                      {"style_runs", marks.style_runs}}});
         lettering::put_ruby(ops[0], marks, current, true);  // (TEXT-01: by place when Python's runs would not say where)
+        if (!render::text::shape_of(*current).empty()) {  // (PC5 G-a: a point or box text keeps its anchor or box — edit_type sets it)
+            ops[0]["op"] = "edit_type";
+            ops[0]["line"] = ops[0]["id"];
+            ops[0].erase("id");
+            apply_ops(ops);
+            return;
+        }
         const Json size = lettering::refit(*current, frame_by_id(current->frame_id), marks.text, current->balloon, current->wrap == "vertical");
         // keep the balloon's centre where it was
         const double cx = (current->x_mm + current->w_mm / Num(2)).value();
@@ -312,11 +327,15 @@ void MainWindow::on_line_selected(const std::string& line_id, bool open_panel) {
     story_->refresh();
     story_->select(line_id);
     if (open_panel) show_dock(QStringLiteral("台詞"));
+    refresh_type_panels();  // (PC5 G-d: the 文字・段落 panels follow the line chosen)
 }
 
 const core::StoryLine* MainWindow::selected_line_or_say() {
     const core::StoryLine* line = canvas_->selected_line_id ? line_by_id(*canvas_->selected_line_id) : nullptr;
-    if (line == nullptr) flash(QStringLiteral("先に選択ツール（V）で台詞（フキダシ）をクリックして選びます"), 4000);
+    // (PC5 H-0: the select tool's keys now — none in the Photoshop key set unless chosen)
+    if (line == nullptr) {
+        flash(QStringLiteral("先に選択ツール%1で台詞（フキダシ）をクリックして選びます").arg(preferences::keys_in_words({action("act_select")})), 4000);
+    }
     return line;
 }
 
@@ -333,6 +352,10 @@ void MainWindow::toggle_selected_wrap() {
     const core::StoryLine* line = selected_line_or_say();
     if (line == nullptr) return;
     const bool vertical = line->wrap != "vertical";
+    if (!render::text::shape_of(*line).empty()) {  // (PC5 G-a: a point or box text turned where it is set — no refit)
+        apply_ops(Json::array({Json{{"op", "edit_type"}, {"line", line->id}, {"wrap", vertical ? "vertical" : "horizontal"}}}));
+        return;
+    }
     Json move{{"op", "move_line"}, {"id", line->id}};
     const Json size = lettering::refit(*line, frame_by_id(line->frame_id), line->text, line->balloon, vertical);
     for (const auto& [key, value] : size.items()) move[key] = value;

@@ -8,6 +8,17 @@ string(REGEX REPLACE "(${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${
 configure_file(ops_schema_data.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp" @ONLY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GENKO_OPS_SCHEMA_FILE}")
 
+# The screen's commands (`genko commands`, PC5 H-e: command.list) are embedded from data/commands.json — made from the menus
+# by test_gui_prefs and checked against them there —; a change to the file re-runs CMake.
+set(GENKO_COMMANDS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/data/commands.json")
+file(READ "${GENKO_COMMANDS_FILE}" _genko_commands_hex HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," GENKO_COMMANDS_BYTES "${_genko_commands_hex}")
+set(_b "0x[0-9a-f][0-9a-f],")
+string(REGEX REPLACE "(${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b}${_b})" "\\1\n"
+       GENKO_COMMANDS_BYTES "${GENKO_COMMANDS_BYTES}")
+configure_file(commands_data.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/commands_data.cpp" @ONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GENKO_COMMANDS_FILE}")
+
 # The Unicode names of Python's unicodedata.lookup (core/pyre's \N{…}), embedded from data/unicode_names.bin
 # (tools/migration/pyre_tables.py writes it); a change to the file re-runs CMake.
 set(GENKO_PYRE_NAMES_FILE "${CMAKE_CURRENT_SOURCE_DIR}/data/unicode_names.bin")
@@ -46,6 +57,7 @@ genko_library(genko_core
     ids.cpp
     paths.cpp
     config_dir.cpp
+    prefs_table.cpp
     base64.cpp
     geometry.cpp
     model.cpp
@@ -81,6 +93,7 @@ genko_library(genko_core
     adjust_tone.cpp
     adjust_color.cpp
     rulers.cpp
+    units.cpp
     command_bus.cpp
     ops_util.cpp
     ops_book.cpp
@@ -128,6 +141,35 @@ genko_library(genko_core
     raw_develop.cpp
     # PC4 E6 (レイヤースタイル: layer-styles@1)
     layer_styles.cpp
+    # PC5 G-0 (文字: type@1 の記録・属性の表・解決・範囲の追従)
+    type_text.cpp
+    # PC5 I-b (グループ: groups@1 の印・確かめ・層の木)
+    groups.cpp
+    # PC5 J-0 (制作の補助の土台: layer-comps@1, slices@1, annotations@1, measure@1, timeline@1, video@1)
+    production_json.cpp
+    layer_comps.cpp
+    slices.cpp
+    annotations.cpp
+    measure.cpp
+    video.cpp
+    # PC5 I-d (変数とデータセット: variables@1)
+    variables.cpp
+    # PC5 J-b (スライス: slices@1 の画素の位置・自動スライス・番号・分割・ガイドから)
+    slice_layout.cpp
+    # PC5 G-c (文字スタイル・段落スタイル: type@1 の本のスタイルと適用・再定義・削除・上書きの消去)
+    type_styles.cpp
+    # PC5 I-a (レイヤーの基本の残り: layer-locks@1, blend-channels@1)
+    layer_basics.cpp
+    # PC5 I-c (アートボード: artboards@1)
+    artboards.cpp
+    # PC5 I-f (画像アセット: image-assets@1 — the book's generator setting, set_image_assets, the layers' naming rule)
+    image_assets.cpp
+    # PC5 H-e (環境設定と API: genko commands' catalogue, genko session's session.json)
+    commands_list.cpp
+    session_file.cpp
+    # PC5 H-f (画素の縦横比: pixel-aspect@1 — the pages' ratio, its menu's ratios, set_pixel_aspect)
+    pixel_aspect.cpp
+    "${CMAKE_CURRENT_BINARY_DIR}/commands_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/ops_schema_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/pyre_names_data.cpp"
     "${CMAKE_CURRENT_BINARY_DIR}/builtin_profiles_data.cpp"

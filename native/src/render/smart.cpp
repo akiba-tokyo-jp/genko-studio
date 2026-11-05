@@ -20,12 +20,14 @@
 #include <unordered_map>
 
 #include "core/base64.hpp"
+#include "core/color_raster.hpp"
 #include "core/error.hpp"
 #include "core/ink.hpp"
 #include "core/paths.hpp"
 #include "core/placement.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "core/type_text.hpp"
 #include "render/color_canvas.hpp"
 #include "render/imaging.hpp"
 #include "render/ink.hpp"
@@ -34,12 +36,14 @@
 #include "render/not_yet_ported.hpp"
 #include "render/page_internal.hpp"
 #include "render/placed.hpp"
+#include "render/plugins.hpp"
 #include "render/png.hpp"
 #include "render/proof.hpp"
 #include "render/raw.hpp"
 #include "render/smart_decode.hpp"
 #include "render/smart_filters.hpp"
 #include "render/stack.hpp"
+#include "render/text/opentype.hpp"
 #include "storage/asset_store.hpp"
 
 namespace genko::render::smart {
@@ -756,9 +760,46 @@ void left_out(const Ctx& ctx, const std::vector<std::string>& omitted) {
     for (const std::string& element : omitted) detail::skip_unported(ctx, element);
 }
 
+// Do the contents (or contents inside them) hold a type layer? (PC5 G-c review P3-1: only theirs take the book's styles)
+bool holds_type(const core::Document& doc, const core::SmartContents& contents) {
+    std::set<const core::Page*> seen;
+    std::vector<const core::Page*> todo;
+    if (contents.page) todo.push_back(contents.page.get());
+    while (!todo.empty()) {
+        const core::Page* page = todo.back();
+        todo.pop_back();
+        if (page == nullptr || !seen.insert(page).second) continue;
+        for (const core::Layer& layer : page->layers) {
+            if (core::type_text::is_type_layer(layer)) return true;
+        }
+        for (const std::string& id : core::smart::shown_on(*page)) {
+            const auto it = doc.smart_contents.find(id);
+            if (it != doc.smart_contents.end() && it->second && it->second->page) todo.push_back(it->second->page.get());
+        }
+    }
+    return false;
+}
+
 std::string contents_key(const Ctx& ctx, const core::SmartContents& contents, int dpi) {
-    return "contents " + identity(*ctx.episode, contents) + " " + std::to_string(dpi) + " " + ctx.mode + (ctx.finish ? " f" : "") + (ctx.rough ? " r" : "") +
-           (ctx.dots ? " d" : "") + (ctx.screen_dots ? " s" : "");
+    std::string key = "contents " + identity(*ctx.episode, contents) + " " + std::to_string(dpi) + " " + ctx.mode + (ctx.finish ? " f" : "") +
+                      (ctx.rough ? " r" : "") + (ctx.dots ? " d" : "") + (ctx.screen_dots ? " s" : "");
+    // (PC5 G-c: the book's type styles, which its contents' type layers take — a style changed draws them anew; a book with
+    // none, and contents with no type layer, keyed as before)
+    // (PC5 G-d: and the book's own font and text gamma, which its contents' type layers are drawn with — keyed only for
+    // contents with a type layer in a book that sets them, so the rest keep their keys)
+    const bool typed = (!ctx.episode->font_path.empty() || ctx.episode->text_gamma) && holds_type(*ctx.episode, contents);
+    if (typed && !ctx.episode->font_path.empty()) key += " font " + ctx.episode->font_path;
+    if (typed && ctx.episode->text_gamma) key += " gamma " + std::to_string(*ctx.episode->text_gamma);
+    if (ctx.episode->type_styles && !ctx.episode->type_styles->is_null() && holds_type(*ctx.episode, contents)) {
+        const core::Json* styles = &*ctx.episode->type_styles;
+        if (text::TypeStyles::current() == styles) {
+            key += " styles " + text::TypeStyles::digest();
+        } else {
+            const text::TypeStyles scope(styles);
+            key += " styles " + text::TypeStyles::digest();
+        }
+    }
+    return key;
 }
 
 // The contents' page drawn whole at `dpi` ("RGBA", over nothing), remembered.
@@ -1428,6 +1469,15 @@ std::string filtered_key(const Ctx& ctx, const core::Layer& layer, const core::S
          frame != nullptr && frame->panel ? *frame->panel : Json(), ctx.episode->bible.characters, page.spec.width_mm.json(), page.spec.height_mm.json(),
          page.spec.expression, page.rgb ? core::to_json(*page.rgb) : Json(), page.color ? core::to_json(*page.color) : Json(),
          ctx.episode->asset_dir ? core::path_to_utf8(*ctx.episode->asset_dir) : std::string()});
+    // (PC5 J-f, review P3-8: a plugin's filter is drawn by what the plugin is now — chosen as which bytes, or not at all)
+    Json plugins_now = Json::array();
+    if (const Json* filters = core::get(*layer.smart, "filters"); filters != nullptr && filters->is_array()) {
+        for (const Json& f : *filters) {
+            const std::string kind = core::py_str(core::py_get(f, "kind", Json("")));
+            if (core::smart::plugin_filter(kind)) plugins_now.push_back(kind + "=" + plugins::run_digest(kind.substr(plugins::kPrefix.size())));
+        }
+    }
+    if (!plugins_now.empty()) return "filtered " + core::dump_canonical(bits) + core::dump_canonical(plugins_now);
     return "filtered " + core::dump_canonical(bits);
 }
 
@@ -1736,6 +1786,11 @@ std::int64_t cache_pixels() {
                                      inks_filtered().bytes() / 40);
 }
 
+std::int64_t cache_bytes() {
+    return static_cast<std::int64_t>(pictures().bytes() + deep_pictures().bytes() + ink_pictures().bytes() + precise_filtered().bytes() +
+                                     inks_filtered().bytes());
+}
+
 Counts counts() { return Counts{g_contents_drawn.load(), g_files_decoded.load()}; }
 
 void set_budget_for_testing(std::size_t bytes) {
@@ -1745,6 +1800,68 @@ void set_budget_for_testing(std::size_t bytes) {
     ink_pictures().set_budget(budget);
     precise_filtered().set_budget(budget);
     inks_filtered().set_budget(budget);
+}
+
+std::pair<std::string, std::string> filtered_upto(const core::Document& doc, const core::Page& page, const core::Layer& layer, std::size_t upto,
+                                                  int dpi) {
+    // the smart object with its filters up to that one (it at normal, 100 %, shown), without the filter mask
+    core::Layer staged = layer;
+    Json& s = *staged.smart;
+    const Json filters = s.contains("filters") && s["filters"].is_array() ? s["filters"] : Json::array();
+    if (upto >= filters.size()) throw core::Error("value", "the smart object has no smart filter " + std::to_string(upto));
+    Json upto_it = Json::array();
+    for (std::size_t j = 0; j <= upto; ++j) upto_it.push_back(filters[j]);
+    upto_it[upto]["blend"] = "normal";
+    upto_it[upto]["opacity"] = 1.0;
+    upto_it[upto]["visible"] = true;
+    s["filters"] = std::move(upto_it);
+    s.erase("filter_mask");
+    s.erase("filters_on");
+    if (s.contains("psd") && s["psd"].is_object()) s["psd"].erase("shown");
+    // (the drawing's context for print, as render_page makes it)
+    std::vector<std::string> omitted;
+    Ctx ctx;
+    ctx.page = &page;
+    ctx.episode = &doc;
+    ctx.dpi = dpi;
+    ctx.size = Size{to_px(page.spec.width_mm.value(), dpi), to_px(page.spec.height_mm.value(), dpi)};
+    ctx.mode = "print";
+    ctx.finish = page.color ? false : page.spec.expression != "color";
+    ctx.omitted = &omitted;
+    const core::Layer bare = unfiltered(staged);
+    const Box whole = whole_page(ctx);
+    if (page.color) {
+        const core::PageColor& color = *page.color;
+        std::optional<InkPicture> base = picture_inks(ctx, bare, whole);
+        if (!base) {
+            const std::optional<Image> eight = picture_8bit(ctx, bare, whole);
+            base = ink_picture(eight ? *eight : Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0}), color);
+        }
+        const InkPicture made = smart_filters::on_inks(doc, page, staged, *base, dpi);
+        InkCanvas canvas(color, made.size);
+        canvas.blend(made, 1.0, false, "normal");
+        return {std::string(core::kInkRasterSuffix), core::encode_ink_raster(canvas.ink_pixels(color.depth, true))};
+    }
+    if (page.rgb && page.rgb->depth > 8) {
+        const RgbSpace space = RgbSpace::of(page);
+        std::optional<ColorPicture> base = picture_precise(ctx, bare, whole, space);
+        if (!base) {
+            const std::optional<Image> eight = picture_8bit(ctx, bare, whole);
+            base = color_picture(eight ? *eight : Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0}), space);
+        }
+        const ColorPicture made = smart_filters::on_precise(doc, page, staged, *base, space, dpi);
+        return {".colorrgba", core::encode_color_pixels(static_cast<std::uint32_t>(made.size.width), static_cast<std::uint32_t>(made.size.height),
+                                                        page.rgb->depth == 32 ? "f32" : "u16", [&](std::size_t i) {
+                                                            const auto& p = made.pixels[i];
+                                                            std::array<double, 4> v{space.encode(0, p[0]), space.encode(1, p[1]), space.encode(2, p[2]), p[3]};
+                                                            // (kept at 16 bits: the values such a raster holds — as on_precise hands them)
+                                                            if (page.rgb->depth != 32) for (unsigned c = 0; c < 3; ++c) v[c] = std::clamp(v[c], 0.0, 1.0);
+                                                            return v;
+                                                        })};
+    }
+    std::optional<Image> base = picture_8bit(ctx, bare, whole);
+    if (!base) base = Image::create("RGBA", ctx.size, Ink{0, 0, 0, 0});
+    return {".png", write_png(smart_filters::on_8bit(doc, page, staged, *base, dpi), 1)};
 }
 
 }  // namespace genko::render::smart

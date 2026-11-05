@@ -46,6 +46,8 @@ struct Session::Job {
         DocPtr doc;            // Edit: the book to save
         Json journal_ops = Json::array();
         std::string action = "edit";
+        std::string script;    // Edit: (PC5 I-0) the script it came from
+        std::string actor;     // Edit: (PC5 J-g) who made it, when not the session's person (apply_as)
         std::string txn;
         std::string expect_top;  // Undo/Redo: the transaction that must be on top of the journal's stack
     };
@@ -206,11 +208,12 @@ Session::JobResult Session::execute(const Job& job) {
                 JobResult::Step done;
                 if (step.kind == Action::Kind::Edit) {
                     storage::SaveRequest request;
-                    request.actor = job.actor;
+                    request.actor = step.actor.empty() ? job.actor : step.actor;
                     request.base_revision = base;
                     request.ops = step.journal_ops;
                     request.action = step.action;
                     request.txn = step.txn;
+                    request.script = step.script;
                     // (タイムラプス: the book as it was on disk, to know the pages this save changes)
                     const bool lapse = render::timelapse::is_on(*step.doc);
                     Json before;
@@ -515,6 +518,8 @@ void Session::finish_reading(const JobResult& r) {
         again->id = new_change_id();
         again->ops = change->ops;
         again->recover = change->recover;
+        again->script = change->script;
+        again->actor = change->actor;
         again->before = base;
         if (change->whole) {  // (復帰 is refused while pages are read: never made again on another book)
             *failures << QStringLiteral("復帰は、ほかの変更の後には当てませんでした");
@@ -554,7 +559,7 @@ void Session::finish_reading(const JobResult& r) {
                 }
             }
             core::ScopedIdScript script(change->ids);
-            core::ApplyResult result = bus.apply(*base, again->ops, core::Actor(actor_));
+            core::ApplyResult result = bus.apply(*base, again->ops, actor_of(*change));
             again->journal_ops = result.journal_ops;
             again->ids = script.taken();
             again->after = std::make_shared<const core::Document>(std::move(result.doc));
@@ -729,7 +734,19 @@ core::ApplyResult Session::apply(const Json& ops, const std::vector<std::string>
     const core::CommandBus bus(*registry_);
     core::ScopedIdScript script(ids);
     core::ApplyResult result = bus.apply(*doc_, ops, core::Actor(actor_));
+    if (result.unchanged) return result;  // (PC5 G-0: questions alone — type_info —: no change, no history, nothing to save)
     return keep_applied(ops, std::move(result), script.taken());
+}
+
+core::ApplyResult Session::apply_as(const Json& ops, const core::Actor& actor, const std::vector<std::string>& ids) {
+    if (saving_as_) throw core::ApplyError("別名保存中です。完了してから編集してください。", "save_as_busy");
+    if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
+    if (discarded_) throw core::ApplyError("the book was closed", "closed");
+    const core::CommandBus bus(*registry_);
+    core::ScopedIdScript script(ids);
+    core::ApplyResult result = bus.apply(*doc_, ops, actor);
+    if (result.unchanged) return result;
+    return keep_applied(ops, std::move(result), script.taken(), actor);
 }
 
 core::ApplyResult Session::apply_worked(const Json& ops, const DocPtr& base, core::ApplyResult result, const std::vector<std::string>& taken) {
@@ -737,14 +754,17 @@ core::ApplyResult Session::apply_worked(const Json& ops, const DocPtr& base, cor
     if (saving_as_) throw core::ApplyError("別名保存中です。完了してから編集してください。", "save_as_busy");
     if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
     if (discarded_) throw core::ApplyError("the book was closed", "closed");
+    if (result.unchanged) return result;  // (PC5 G-0: questions alone)
     return keep_applied(ops, std::move(result), taken);
 }
 
-core::ApplyResult Session::keep_applied(const Json& ops, core::ApplyResult result, std::vector<std::string> ids) {
+core::ApplyResult Session::keep_applied(const Json& ops, core::ApplyResult result, std::vector<std::string> ids, std::optional<core::Actor> actor) {
     auto change = std::make_shared<Change>();
     change->id = new_change_id();
     change->ops = ops;
+    change->actor = std::move(actor);
     change->journal_ops = result.journal_ops;
+    change->script = script_;
     change->ids = std::move(ids);
     change->before = doc_;
     change->after = std::make_shared<const core::Document>(std::move(result.doc));
@@ -758,6 +778,7 @@ core::ApplyResult Session::keep_applied(const Json& ops, core::ApplyResult resul
     undone_.clear();
     queue_.push_back(Action{Action::Kind::Edit, change, core::new_txn_id(), ++next_seq_, false});
     redo_floor_ = next_seq_;
+    stepped_back_ = false;
     ++generation_;
     touch(BookChange{BookChange::Why::Edit, ops, change->before, change->after});
     schedule_save();
@@ -786,6 +807,32 @@ void Session::trim_history() {
         forget(*oldest);  // (in the journal, under the changes still in memory)
         trimmed_ = true;
     }
+}
+
+Session::Purged Session::purge_history() {
+    Purged out;
+    out.states = states_read_.size();
+    states_read_.clear();
+    journal_read_.reset();
+    const auto held_now = [this] {
+        std::size_t held = 0;
+        for (const auto& change : done_) held += change->held;
+        return held;
+    };
+    const std::size_t changes = done_.size();
+    const std::size_t held = held_now();
+    // (as the history's limit lets them go, the limit nothing for once: every change saved but the latest)
+    const std::size_t bytes_limit = options_.history_bytes;
+    const std::size_t changes_limit = options_.history_changes;
+    options_.history_bytes = 0;
+    options_.history_changes = 0;
+    trim_history();
+    options_.history_bytes = bytes_limit;
+    options_.history_changes = changes_limit;
+    out.changes = changes - done_.size();
+    out.bytes = held - std::min(held, held_now());
+    if (out.changes > 0) emit statusChanged();
+    return out;
 }
 
 void Session::undo() {
@@ -831,6 +878,7 @@ void Session::undo() {
             queue_.push_back(Action{Action::Kind::Undo, change, core::new_txn_id(), ++next_seq_, false});
         }
         doc_ = change->before;
+        stepped_back_ = true;
         ++generation_;
         touch(BookChange{BookChange::Why::Undo, change->ops, change->after, change->before});
         schedule_save();
@@ -840,6 +888,7 @@ void Session::undo() {
     if (!queue_.empty() && queue_.back().kind == Action::Kind::DiskRedo && !queue_.back().in_flight && !queue_.back().sent) {
         // the journal redo asked last, not given to the disk yet: taken back, nothing written for either
         queue_.pop_back();
+        stepped_back_ = true;
         emit statusChanged();
         return;
     }
@@ -849,6 +898,7 @@ void Session::undo() {
     if (path_ && journal_after().undo > 0) {
         // a change saved before this session: undone through the journal, and the book read again after it
         queue_.push_back(Action{Action::Kind::DiskUndo, nullptr, core::new_txn_id(), ++next_seq_, false});
+        stepped_back_ = true;
         save_now();
         emit statusChanged();
         return;
@@ -946,6 +996,7 @@ void Session::redo() {
         const auto last = std::find_if(queue_.rbegin(), queue_.rend(), [](const Action& a) { return a.kind == Action::Kind::DiskUndo; });
         if (last->in_flight || last->sent) throw core::ApplyError("取り消しを原稿に書き込み中です。書き終わってからやり直してください。", "busy");
         queue_.erase(std::next(last).base());
+        stepped_back_ = false;
         emit statusChanged();
         return;
     }
@@ -966,6 +1017,7 @@ void Session::redo() {
             queue_.push_back(Action{Action::Kind::Edit, change, core::new_txn_id(), ++next_seq_, false});
         }
         doc_ = change->after;
+        stepped_back_ = false;
         ++generation_;
         touch(BookChange{BookChange::Why::Redo, change->ops, change->before, change->after});
         schedule_save();
@@ -974,6 +1026,7 @@ void Session::redo() {
     if (loading_) throw core::ApplyError("原稿の残りのページを読み込み中です。読み込みが終わってからやり直してください。", "loading");
     if (path_ && journal_after().redo > 0) {
         queue_.push_back(Action{Action::Kind::DiskRedo, nullptr, core::new_txn_id(), ++next_seq_, false});
+        stepped_back_ = false;
         save_now();
         emit statusChanged();
         return;
@@ -1066,7 +1119,7 @@ Session::History Session::history() const {
     const auto of_change = [&](const Change& change) {
         HistoryEntry entry;
         entry.ops = change.ops;
-        entry.actor = actor_;
+        entry.actor = actor_of(change).name();
         entry.saved = change.on_disk;
         if (change.on_disk && read) {
             if (const auto it = read->prepared.find(change.txn); it != read->prepared.end()) {
@@ -1259,6 +1312,8 @@ void Session::start_job() {
             step.doc = action.change->after;
             step.journal_ops = action.change->journal_ops;
             step.action = action.change->recover ? "recover" : "edit";
+            step.script = action.change->script;
+            if (action.change->actor) step.actor = action.change->actor->name();
         } else if (action.kind == Action::Kind::Undo || action.kind == Action::Kind::Redo) {
             step.expect_top = action.change->txn;
         }
@@ -1640,7 +1695,8 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
                 // the conflict path below retains the complete local snapshot/history.
                 const bool creates_page = std::any_of(change->ops.begin(), change->ops.end(), [](const Json& op) {
                     const auto name = op.value("op", std::string());
-                    return name == "add_page" || name == "duplicate_page";
+                    return name == "add_page" || name == "duplicate_page" ||
+                           name == "add_artboard" || name == "artboard_from_layers";  // (PC5 I-c: an artboard is a page made)
                 });
                 if (creates_page && change->ops.size() > 1 && current->pages.size() != change->before->pages.size()) {
                     // A later op can reference a page created inside this same batch.
@@ -1656,10 +1712,12 @@ void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo
                 }
             }
             core::ScopedIdScript script(change->ids);
-            core::ApplyResult result = bus.apply(*current, moved ? *moved : change->ops, core::Actor(actor_));
+            core::ApplyResult result = bus.apply(*current, moved ? *moved : change->ops, actor_of(*change));
             auto again = std::make_shared<Change>();
             again->id = new_change_id();
             again->ops = moved ? *moved : change->ops;
+            again->script = change->script;
+            again->actor = change->actor;
             again->journal_ops = result.journal_ops;
             again->ids = script.taken();
             again->before = current;

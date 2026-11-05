@@ -18,6 +18,7 @@
 #include "core/error.hpp"
 #include "core/model.hpp"
 #include "render/image.hpp"
+#include "render/ops_production.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
@@ -461,7 +462,28 @@ private slots:
             "color_replacement", "add_pattern", "rename_pattern", "delete_pattern",  // (PC4 節 E's ops, frames until their groups: SPEC.md COLOR-09)
             "render_picture", "vanishing_point",  // (PC4 節 D's ops: D4 炎・額縁・木, D6 消点 — SPEC.md COLOR-08)
             "set_layer_style", "add_layer_effect", "set_global_light", "scale_layer_style", "show_layer_effects",
-            "layer_style_to_layers"};  // (PC4 E6: layer-styles@1, SPEC.md COLOR-09)
+            "layer_style_to_layers",  // (PC4 E6: layer-styles@1, SPEC.md COLOR-09)
+            "add_type_layer", "edit_type", "type_info", "set_type", "type_style", "line_to_type_layer", "type_layer_to_line",
+            "replace_fonts",  // (PC5 G-0: type@1, the type ops — G-0's and the later groups' frames, SPEC.md TEXT-02)
+            "new_layer_comp", "update_layer_comp", "apply_layer_comp", "set_layer_comp", "duplicate_layer_comp", "delete_layer_comp",
+            "clear_layer_comp_warnings", "add_slice", "set_slice", "delete_slices", "divide_slice", "slices_from_guides",
+            "add_annotation", "set_annotation", "delete_annotations", "set_measurement_scale", "add_count", "remove_count",
+            "move_count", "clear_count", "new_count_group", "delete_count_group", "set_count_group", "set_ruler_line",
+            "straighten_layer", "place_scale_marker", "add_video_layer", "video_insert_blank", "video_duplicate", "video_delete",
+            "video_restore", "video_restore_all", "video_alter", "set_video_layer", "replace_footage", "rasterize_video",
+            "footage_to_layers",  // (PC5 節 J's ops, frames until their groups: SPEC.md PROD-01)
+
+            "frame_from_layers",  // (PC5 I-b: groups@1, レイヤーからのフレーム — SPEC.md AUTO-01)
+            "set_variables", "set_data_sets", "apply_data_set",  // (PC5 I-d: variables@1, 変数とデータセット — SPEC.md AUTO-01)
+            "measure_info",  // (PC5 J-d1: measure@1's question, image.analysis.info — SPEC.md PROD-01)
+            "bake_layer_styles",  // (PC5 I-a: すべてのレイヤー効果を統合 — SPEC.md AUTO-01; delete_layers, duplicate_layers, ungroup_layers are core's)
+            "slices_info",  // (PC5 J-b: slices@1's question, slice.list — SPEC.md PROD-01)
+            "add_artboard", "artboard_from_layers", "set_artboard",  // (PC5 I-c: artboards@1, アートボード — SPEC.md AUTO-01)
+            "measure_values",  // (PC5 J-d2: 計測値を記録's values asked, image.analysis.recordMeasurements — SPEC.md PROD-01)
+            "timeline_info",  // (PC5 J-e1: timeline@1's question, timeline.info — SPEC.md PROD-01)
+            "auto_align_layers", "auto_blend_layers",  // (PC5 I-g: レイヤーを自動整列・レイヤーを自動合成 — SPEC.md AUTO-01)
+            "set_image_assets",  // (PC5 I-f: image-assets@1, 生成 → 画像アセット — SPEC.md AUTO-01)
+            "set_pixel_aspect"};  // (PC5 H-f: pixel-aspect@1, 表示 → ピクセル縦横比 — SPEC.md VIEW-01)
         expected.insert(drawing_names.begin(), drawing_names.end());
         const std::set<std::string> actual(all_names.begin(), all_names.end());
         QCOMPARE(actual, expected);
@@ -469,6 +491,16 @@ private slots:
         QVERIFY(all.area_resolver());
         QVERIFY(!core_ops.area_resolver());
         QVERIFY(all.find("erase") != core_ops.find("erase"));
+        // (PC5 J-0: 節 J's frames refuse, naming the op, and leave the book as it was)
+        for (const std::string_view name : genko::render::production_op_names()) {
+            try {
+                bus().apply(book(), Json::array({Json{{"op", std::string(name)}, {"page", 1}}}), Actor());
+                QFAIL("a frame did something");
+            } catch (const ApplyError& error) {
+                QCOMPARE(error.code(), std::string("not_yet_ported"));
+                QVERIFY2(std::string(error.what()).find(std::string(name)) != std::string::npos, error.what());
+            }
+        }
         QVERIFY(all.find("erase_raster") != core_ops.find("erase_raster"));
         // the bus without a registry has core's
         QCOMPARE(error_of(book(), ops(R"([{"op": "add_tone", "page": 1}])")).substr(0, 7), std::string("(applie"));
@@ -867,6 +899,43 @@ private slots:
         QCOMPARE(genko::core::journal_op(op).dump(), std::string(R"({"op":"put_raster","page":1,"png_base64":"<12 base64 chars>","layer":"bg"})"));
         const auto result = apply(book(), R"([{"op": "set_note", "page": 1, "note": "n", "png_base64": "AAAA"}])");
         QCOMPARE(result.journal_ops[0]["png_base64"], Json("<4 base64 chars>"));
+    }
+
+    // (PC5 H-f, pixel-aspect@1) set_pixel_aspect: a ratio or a preset of 表示 → ピクセル縦横比, the page's only, nothing drawn
+    // changed; refusals; the page's lock asked as any op on it; strict_gates lets it be (the view's only, nothing printed).
+    void pixelAspectOp() {
+        const Document doc = book();
+        const auto wide = apply(doc, R"([{"op": "set_pixel_aspect", "page": 2, "ratio": 1.5}])");
+        QCOMPARE(wide.doc.page(1).pixel_aspect, 1.5);
+        QCOMPARE(wide.doc.page(0).pixel_aspect, 1.0);
+        QCOMPARE(wide.doc.page(1).layers.size(), doc.page(1).layers.size());
+        QVERIFY(wide.doc.page(0).layers.size() == doc.page(0).layers.size() && wide.doc.pages[0] == doc.pages[0]);  // (the others not copied)
+        QCOMPARE(wide.results[0]["pixel_aspect"], Json(1.5));
+        QCOMPARE(wide.results[0]["page"], Json(2));
+        QCOMPARE(apply(doc, R"([{"op": "set_pixel_aspect", "page": 1, "preset": "d1DvNtsc"}])").doc.page(0).pixel_aspect, 0.91);
+        QCOMPARE(apply(doc, R"([{"op": "set_pixel_aspect", "page": 1, "preset": "anamorphic2To1"}])").doc.page(0).pixel_aspect, 2.0);
+        QCOMPARE(apply(wide.doc, R"([{"op": "set_pixel_aspect", "page": 2, "preset": "square"}])").doc.page(1).pixel_aspect, 1.0);
+        QCOMPARE(apply(doc, R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 10}])").doc.page(0).pixel_aspect, 10.0);
+        QCOMPARE(apply(doc, R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 0.1}])").doc.page(0).pixel_aspect, 0.1);
+        const auto refused = [&](const char* batch, const char* words) {
+            const std::string error = error_of(doc, ops(batch));
+            QVERIFY2(error.find(words) != std::string::npos, error.c_str());
+        };
+        refused(R"([{"op": "set_pixel_aspect", "page": 1}])", "give ratio");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 2, "preset": "square"}])", "give ratio");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 10.5}])", "between 0.1 and 10");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 0}])", "between 0.1 and 10");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": "2"}])", "ratio is a number");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": true}])", "ratio is a number");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "preset": "cinema"}])", "no pixel aspect ratio 'cinema'");
+        refused(R"([{"op": "set_pixel_aspect", "page": 9, "ratio": 2}])", "page");
+        // another's lock on the page refuses it; strict_gates before the name's approval does not
+        const auto locked = apply(doc, R"([{"op": "lock_page", "page": 1}])", "ai:x");
+        const std::string error = error_of(locked.doc, ops(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 2}])"), "ai:y");
+        QVERIFY2(error.find("locked by ai:x") != std::string::npos, error.c_str());
+        Document strict = doc;
+        strict.strict_gates = true;
+        QCOMPARE(apply(strict, R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 2}])", "ai:y").doc.page(0).pixel_aspect, 2.0);
     }
 };
 

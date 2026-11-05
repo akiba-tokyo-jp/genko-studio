@@ -57,6 +57,7 @@
 #include "app/pages_panel.hpp"
 #include "app/review_model.hpp"
 #include "app/story_panel.hpp"
+#include "app/type_panels.hpp"
 #include "app/studio_widgets.hpp"
 #include "app/theme.hpp"
 #include "core/actor.hpp"
@@ -661,7 +662,7 @@ private slots:
         QVERIFY(!box->geometry().intersects(quick->geometry()));  // (nothing lies over the approval box)
     }
 
-    // test_nine_menus_and_the_tabs_whole_on_a_1366_screen: nine menus (ten since PC4's フィルター); the panels' row of tabs with レイヤー shows every
+    // test_nine_menus_and_the_tabs_whole_on_a_1366_screen: nine menus (ten since PC4's フィルター, eleven since PC5's 書式); the panels' row of tabs with レイヤー shows every
     // tab whole (none behind the scroll arrows) on a 1366 × 768 screen.
     void nineMenusAndTheTabsWholeOnA1366Screen() {
         core::Document doc = b4(2);
@@ -674,7 +675,11 @@ private slots:
         int menus = 0;
         for (QAction* a : w->menuBar()->actions())
             if (a->menu() != nullptr) ++menus;
-        QCOMPARE(menus, 10);  // (PC4 節 D, the user's decision 1: フィルター after レイヤー — the menu bar still whole at 1366)
+        // (PC4 節 D, the user's decision 1: フィルター after レイヤー; PC5 G-0: 書式 between them, design section G 5.1 — the menu bar still
+        // whole at 1366)
+        QCOMPARE(menus, 11);
+        const QRect last = w->menuBar()->actionGeometry(w->menuBar()->actions().last());
+        QVERIFY2(!last.isEmpty() && last.right() <= w->menuBar()->width(), qPrintable(QStringLiteral("%1 of %2").arg(last.right()).arg(w->menuBar()->width())));
         QTabBar* bar = nullptr;
         for (QTabBar* b : w->findChildren<QTabBar*>()) {
             if (!b->isVisible()) continue;
@@ -724,7 +729,7 @@ private slots:
         choose({"red", "blue"});
         const auto chosen = panel->selected_ids();
         QCOMPARE(std::set<std::string>(chosen.begin(), chosen.end()), (std::set<std::string>{"red", "blue"}));
-        QAction* group = titled(panel->many_menu(), QStringLiteral("選んだレイヤーをフォルダにまとめる"));
+        QAction* group = titled(panel->many_menu(), QStringLiteral("レイヤーをグループ化"));
         QVERIFY(group != nullptr);
         group->trigger();
         panel->refresh();
@@ -734,7 +739,7 @@ private slots:
         QVERIFY(folder != nullptr);
         QCOMPARE(layer_with_id(desk.page(), "red")->parent_id, Json(folder->id));
         choose({"red", "blue"});
-        QAction* merge = titled(panel->many_menu(), QStringLiteral("選んだレイヤーを結合"));
+        QAction* merge = titled(panel->many_menu(), QStringLiteral("レイヤーを結合"));
         QVERIFY(merge != nullptr);
         merge->trigger();
         QVERIFY(layer_with_id(desk.page(), "blue") == nullptr);
@@ -795,8 +800,9 @@ private slots:
         QVERIFY(blend != nullptr);
         QStringList blends;
         for (int i = 0; i < blend->count(); ++i) blends << blend->itemData(i).toString();
-        QCOMPARE(blends.size(), 20);
+        QCOMPARE(blends.size(), 21);  // (and PC5 I-b's 通過, a group's only: test_gui_layers)
         QVERIFY(blends.contains(QStringLiteral("color_dodge")));
+        QCOMPARE(blends.last(), QStringLiteral("pass_through"));
     }
 
     // test_skew_handles_and_the_resampling_choice: the selection's diamond on its top side slants it (the top slides, the
@@ -806,7 +812,7 @@ private slots:
         app::MainWindow* w = desk.window.get();
         app::PageCanvas* canvas = desk.canvas();
         w->choose_tool(QStringLiteral("rect"));
-        canvas->set_zoom_percent(100);  // (the handles apart on the screen)
+        canvas->actual_size();  // (the handles apart on the screen: プリントサイズ, the 100 % before PC5 H-a)
         canvas->center_on(70, 70);
         const std::vector<QPointF> square{QPointF(50, 50), QPointF(90, 50), QPointF(90, 90), QPointF(50, 90)};
         canvas->set_selection(Json{{"poly", Json::array({Json::array({50, 50}), Json::array({90, 50}), Json::array({90, 90}), Json::array({50, 90})})}}, square);
@@ -864,17 +870,23 @@ private slots:
     }
 
     // test_the_lettering_fields: 長体・平体 (scale_x) and the punctuation's spacing (yakumono) of the lettering, each an
-    // edit of the line's style (yakumono alone: test_gui_lines).
+    // edit of the line's style (yakumono alone: test_gui_lines) — PC5 G-d (8-5 (a)): the 文字 panel's 水平比率 and the 段落
+    // panel's 約物を詰める.
     void theLetteringFields() {
         Desk desk(two_panels_book());
         app::StoryPanel* panel = desk.window->story();
         panel->refresh();
         panel->select(std::string("l"));
-        panel->scale_x->setValue(0.7);
-        emit panel->scale_x->editingFinished();
+        desk.window->action("act_panel_character")->trigger();
+        desk.window->action("act_panel_paragraph")->trigger();
+        app::CharacterPanel* chars = desk.window->character_panel();
+        QTRY_VERIFY(chars->isEnabled());
+        chars->scale_x->setValue(70);
+        emit chars->scale_x->editingFinished();  // (review P2-5: sent once its editing ends)
         QCOMPARE(story_line(desk.window->book(), "l")->style.value("scale_x", Json()), Json(0.7));
-        panel->yakumono->setChecked(false);
-        emit panel->yakumono->clicked(false);
+        app::ParagraphPanel* paragraph = desk.window->paragraph_panel();
+        paragraph->yakumono->setChecked(false);
+        emit paragraph->yakumono->clicked(false);
         QCOMPARE(story_line(desk.window->book(), "l")->style.value("yakumono", Json()), Json(false));
     }
 
@@ -1150,7 +1162,7 @@ private slots:
         QVERIFY(windows != nullptr);
         QStringList texts;
         for (QAction* a : windows->actions()) texts << a->text();
-        QVERIFY(texts.contains(QStringLiteral("新しいウィンドウ（同じ原稿）")) && texts.contains(QStringLiteral("次の原稿")));
+        QVERIFY(texts.contains(QStringLiteral("アレンジ")) && texts.contains(QStringLiteral("次の原稿")));  // (PC5 H-0: アレンジ → 新規ウィンドウ)
         desk.window->resize(1024, 640);
         QCoreApplication::processEvents();
         QVERIFY(desk.window->doc_tabs()->isVisible());
@@ -1240,7 +1252,7 @@ private slots:
         const auto hand = core::mannequin::skeleton(figure).point("r_hand");
         const QPointF from(hand[0], hand[1]);
         const QPointF target(hand[0] - 25, hand[1] - 30);
-        canvas->set_zoom_percent(100);  // (the joints apart on the screen)
+        canvas->actual_size();  // (the joints apart on the screen: プリントサイズ, the 100 % before PC5 H-a)
         canvas->center_on((from.x() + target.x()) / 2, (from.y() + target.y()) / 2);
         inject::mouse_stroke(canvas, {from, (from + target) / 2, target});
         const auto moved = core::mannequin::skeleton(desk.page().prims[0]);

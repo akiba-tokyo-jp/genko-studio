@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "core/base64.hpp"
+#include "core/groups.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
@@ -22,6 +23,7 @@
 #include "render/op_limits.hpp"
 #include "render/page.hpp"
 #include "render/page_pixels.hpp"
+#include "render/plugins.hpp"
 #include "render/png.hpp"
 #include "render/layer_masks.hpp"
 #include "render/raster.hpp"
@@ -923,7 +925,13 @@ bool shown_in_page(const core::Page& page, const core::Layer& layer) {
 }  // namespace
 
 bool lends(std::string_view op, const core::Json& args) {
-    if (op == "filter_raster") return core::truthy_at(args, "kind") && core::py_str(args["kind"]).starts_with("plugin:");
+    if (op == "filter_raster") {
+        if (!core::truthy_at(args, "kind") || !core::py_str(args["kind"]).starts_with("plugin:")) return false;
+        // (PC5 J-f: a plugin that works in bands — a WebAssembly module, a native one of protocol 2 — works the inks
+        // themselves: render/raster_ops)
+        const std::string key = core::py_str(args["kind"]).substr(plugins::kPrefix.size());
+        return !(plugins::installed(key) && plugins::works_in_bands(key));
+    }
     // (PC3 C-c: Liquify's strokes move the inks themselves, render/distort_ops)
     if (op == "liquify" && core::truthy_at(args, "strokes")) return false;
     static constexpr std::array<std::string_view, 7> kOnTarget{"smudge", "liquify", "add_shape", "flood_fill", "gradient_fill",
@@ -973,11 +981,15 @@ Lending::Lending(core::Document& doc, std::size_t at, std::string_view op, const
                 if (layer.visible && layer.kind != core::LayerKind::Folder && layer.role != core::LayerRole::Name &&
                     layer.role != core::LayerRole::Draft && shown_in_page(page, layer)) {
                     merge.layers.push_back(layer);
+                } else if (core::is_group(layer)) {
+                    merge.layers.push_back(layer);  // (groups@1, PC5 I-b: drawn through its groups, composite_ink_layers)
                 }
             }
             merge.paper = truthy_or(args, "flatten", false);
+            const auto first = std::find_if(merge.layers.begin(), merge.layers.end(), [](const core::Layer& l) { return l.kind != core::LayerKind::Folder; });
+            if (first == merge.layers.end()) merge.layers.clear();  // (groups@1: groups alone are nothing shown)
             if (!merge.layers.empty()) {
-                if (!truthy_or(args, "copy", true)) merge.target = merge.layers.front().id;  // (else the layer it makes)
+                if (!truthy_or(args, "copy", true)) merge.target = first->id;  // (else the layer it makes)
                 else if (const auto id = text_at(args, "id")) merge.target = *id;
             }
         } else if (op == "convert_layer") {

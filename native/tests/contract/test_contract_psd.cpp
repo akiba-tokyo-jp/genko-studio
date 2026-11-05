@@ -57,6 +57,7 @@
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/exposure.hpp"
 #include "core/ids.hpp"
 #include "core/ink.hpp"
 #include "core/paths.hpp"
@@ -72,6 +73,9 @@
 #include "render/psd.hpp"
 #include "render/psd_adjust.hpp"
 #include "render/psd_image.hpp"
+#include "render/psd_pixel_aspect.hpp"
+#include "render/psd_production.hpp"
+#include "render/psd_slices.hpp"
 #include "render/smart_decode.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
@@ -178,7 +182,43 @@ std::string skipped_but_adjusted(const Json& cpp, const Json& python) {
 // it differs only by correction layers made of adjustment layers (the user's decision 5): each import's layers
 // Python's view's with those among them (their titles, the layers kind adjust in `after`), its skipped layers the
 // view's without exactly those names; else what differs.
-std::string corrections_more(const Json& own, const Json& python_view, const genko::core::Document& after) {
+// (groups@1, PC5 I-b, the user's decision 2: this build reads a PSD's group as a group — its mark, its blend 通過, its mask,
+// vector mask and clipping —, which psd.read_psd reads as a folder of none: those taken off, the reply is Python's view's)
+Json as_python_folders(Json value) {
+    if (value.is_array()) {
+        for (Json& item : value) item = as_python_folders(std::move(item));
+    } else if (value.is_object()) {
+        if (value.value("kind", Json()) == Json("folder")) {  // (the reply's snapshot holds no mark: every folder)
+            value.erase("group");
+            if (value.value("blend", Json()) == Json("pass_through")) value["blend"] = "normal";
+            value.erase("mask");
+            value.erase("vector_mask");
+            if (value.contains("clip")) value["clip"] = false;
+        }
+        value.erase("groups_as_folders");  // (import_psd's word of groups nested past core::kGroupDepthMax)
+        for (auto& [key, item] : value.items()) item = as_python_folders(std::move(item));
+    }
+    return value;
+}
+
+std::string corrections_more(const Json& own_read, const Json& python_view, const genko::core::Document& after) {
+    Json own = as_python_folders(own_read);
+    // (PC5 G-e, the coordinator's decision for G: a text layer read as a type layer, or as its pixels said with why — the
+    // fixtures' text layers are a few bytes no text engine wrote: their pixels, as Python's view —, the reply's own keys)
+    if (own.contains("results") && own["results"].is_array()) {
+        for (Json& r : own["results"]) {
+            if (!r.is_object()) continue;
+            // (each text layer opened as its pixels named among the layers made, with why — the review: the reply's shape held)
+            if (const auto pixels = r.find("type_as_pixels"); pixels != r.end()) {
+                for (const Json& p : *pixels) {
+                    const Json layers = r.value("layers", Json::array());
+                    const bool made = std::any_of(layers.begin(), layers.end(), [&](const Json& l) { return l.value("id", Json()) == p.value("id", Json()); });
+                    if (!made || p.value("why", std::string()).empty()) return "a text layer opened as its pixels without why: " + p.dump();
+                }
+            }
+            for (const char* key : {"type_layers", "type_as_pixels", "type_fonts_missing", "type_styles", "type_notes"}) r.erase(key);
+        }
+    }
     if (genko::core::dump_python(own) == genko::core::dump_python(python_view)) return "same";
     if (!own.value("ok", false) || !python_view.value("ok", false) || !own.contains("results") || !python_view.contains("results") ||
         own["results"].size() != python_view["results"].size())
@@ -212,7 +252,9 @@ std::string corrections_more(const Json& own, const Json& python_view, const gen
         if (!why.empty()) return why;
         more += static_cast<int>(extra.size());
     }
-    return more > 0 ? std::string() : "the replies differ: " + genko::core::dump_python(own).substr(0, 600);
+    std::string where;
+    (void)genko::test::strict_equal(own, python_view, &where);
+    return more > 0 ? std::string() : "the replies differ (" + where.substr(0, 600) + "): " + genko::core::dump_python(own).substr(0, 300);
 }
 
 // The harness's psd_images record of `data` (Pillow's Image.open, then load()): what render::psd_image_size refuses
@@ -1014,6 +1056,128 @@ private slots:
     // and read back keeps them (its assets, psd-keep@1), and writes the same file; the effects said (the report, the
     // notes); a layer deleted drops the comps and slices that name it, a merge drops what the merged layer kept, a
     // duplicate keeps it (its layer id written once).
+    // PC5 J-0 (render/psd_production): the PSD's blocks the production copies, through a table the test sets (J-a's 1065 and
+    // J-c's Anno stood in for). keep.psd's 1065 and Anno read onto the page are kept marked copied with what the page held;
+    // written while the page's are as read, the file's own bytes come back (and the kept bytes are lent to the writer: Anno's
+    // sound notes); changed, the page's own; gone, neither. A file without layers (an indexed page's flat PSD) has no 1065
+    // (it names layers). The table is asked once a file. A book saved keeps the marks.
+    void copiedBlocksComeBackOrAnew() {
+        namespace core = genko::core;
+        namespace pp = genko::render::psd_production;
+        static int asked = 0;
+        static bool lent = false;
+        static const pp::Row rows[] = {
+            {1065, {}, "J-a", true,
+             [](core::Page& page, std::string_view data, const pp::ReadContext& context) {
+                 if (context.layers.empty()) return false;  // (its layers: the lyids read)
+                 core::LayerComps comps;
+                 core::LayerComp comp;
+                 comp.id = 1;
+                 comp.name = "read " + std::to_string(data.size());
+                 comps.comps.push_back(comp);
+                 page.layer_comps = comps;
+                 return true;
+             },
+             [](const core::Page& page, const pp::WriteContext& context) -> std::optional<std::string> {
+                 if (!page.layer_comps || page.layer_comps->empty() || context.lyids.empty()) return std::nullopt;
+                 return "own " + page.layer_comps->comps[0].name;
+             },
+             [](const core::Page& page, const core::Document*) {
+                 return page.layer_comps && !page.layer_comps->empty() ? pp::fingerprint_of(core::to_json(*page.layer_comps)) : std::string();
+             },
+             nullptr, {}, nullptr},
+            {-1, "Anno", "J-c", false,
+             [](core::Page& page, std::string_view, const pp::ReadContext&) {
+                 core::Annotation note;
+                 note.id = "an_000000000001";
+                 note.text = "read";
+                 note.modified = "2026-10-29T00:00:00Z";
+                 page.annotations.push_back(note);
+                 return true;
+             },
+             [](const core::Page& page, const pp::WriteContext& context) -> std::optional<std::string> {
+                 if (page.annotations.empty()) return std::nullopt;
+                 lent = context.kept_global && context.kept_global("Anno").has_value();  // (its sound notes there)
+                 return "own " + page.annotations[0].text;
+             },
+             [](const core::Page& page, const core::Document*) { return page.annotations.empty() ? std::string() : pp::fingerprint_of(core::to_json(page.annotations)); },
+             [](const core::Page&) {
+                 ++asked;
+                 return false;
+             },
+             {}, nullptr},
+        };
+        const pp::TableForTest table(rows);
+        const std::string source = keep_file("keep.psd");
+        const psd::File src = psd::File::read(source);
+        std::map<unsigned, std::string> src_resources;
+        for (const auto& r : src.resources()) src_resources[r.id] = std::string(r.data);
+        std::map<std::string, std::string> src_globals;
+        for (const auto& g : src.global_blocks()) src_globals[g.key] = std::string(g.data);
+        genko::formats::Opened opened = genko::formats::open_file(source, "keep.psd");
+        core::Document& doc = opened.doc;
+        {
+            const core::Page& page = doc.page(0);
+            QVERIFY(page.layer_comps && page.layer_comps->comps[0].name == "read " + std::to_string(src_resources[1065].size()));
+            QCOMPARE(page.annotations.size(), std::size_t(1));
+            QVERIFY(page.native_psd);
+            QCOMPARE(page.native_psd->copied.size(), std::size_t(2));  // (1065 and Anno, still kept)
+            QVERIFY(std::any_of(page.native_psd->resources.begin(), page.native_psd->resources.end(), [](const core::PsdResource& r) { return r.id == 1065; }));
+        }
+        QDir().mkpath(path(QStringLiteral("copied")));
+        const auto written = [&](const core::Document& book, const char* name) -> std::map<std::string, std::string> {
+            const QString at = path(QStringLiteral("copied/%1.psd").arg(QString::fromLatin1(name)));
+            asked = 0;
+            (void)genko::formats::export_page_psd(book, book.page(0), genko::storage::path_from_utf8(at.toStdString()), 150);
+            const psd::File out = psd::File::read(genko::test::read_bytes(at));
+            std::map<std::string, std::string> blocks;
+            for (const auto& r : out.resources()) blocks[std::to_string(r.id)] = std::string(r.data);
+            for (const auto& g : out.global_blocks()) blocks[g.key] = std::string(g.data);
+            return blocks;
+        };
+        // as read: the file's own bytes
+        auto blocks = written(doc, "same");
+        QCOMPARE(asked, 1);  // (the table asked once a file)
+        QVERIFY(blocks["1065"] == src_resources[1065]);
+        QVERIFY(blocks["Anno"] == src_globals["Anno"]);
+        // changed: the page's own (the kept bytes lent to the writer)
+        core::Document changed = doc;
+        changed.edit_page(0).layer_comps->comps[0].name = "renamed";
+        changed.edit_page(0).annotations[0].text = "edited";
+        lent = false;
+        blocks = written(changed, "changed");
+        QCOMPARE(asked, 1);  // (the table asked once a file)
+        QCOMPARE(blocks["1065"], std::string("own renamed"));
+        QCOMPARE(blocks["Anno"], std::string("own edited"));
+        QVERIFY(lent);
+        // gone: neither
+        core::Document gone = doc;
+        gone.edit_page(0).layer_comps.reset();
+        gone.edit_page(0).annotations.clear();
+        blocks = written(gone, "gone");
+        QCOMPARE(asked, 1);  // (the table asked once a file)
+        QVERIFY(!blocks.contains("1065") && !blocks.contains("Anno"));
+        QVERIFY(blocks.contains("1050") && blocks.contains("Patt"));  // (the others kept as before)
+        // a file without layers: no 1065 (an indexed page's — its layers let go first: keep.psd's do not all merge)
+        core::Document bare = doc;
+        bare.edit_page(0).layers.clear();
+        const core::Document indexed =
+            genko::core::CommandBus(genko::render::ops_registry()).apply(bare, Json::array({Json{{"op", "to_indexed"}, {"page", 1}, {"colors", 8}}}), core::Actor()).doc;
+        QVERIFY(indexed.page(0).rgb && indexed.page(0).rgb->table);
+        blocks = written(indexed, "flat");
+        QCOMPARE(asked, 1);  // (the table asked once a file)
+        QVERIFY(!blocks.contains("1065"));
+        // saved and read back: the marks kept
+        const QString book = path(QStringLiteral("copied/book.genko"));
+        genko::test::write_project(doc, genko::storage::path_from_utf8(book.toStdString()));
+        const auto loaded = genko::storage::load_document(genko::storage::path_from_utf8(book.toStdString()));
+        QVERIFY2(loaded.document.read_only_reason.empty(), loaded.document.read_only_reason.c_str());
+        QCOMPARE(loaded.document.page(0).native_psd->copied, doc.page(0).native_psd->copied);
+        blocks = written(loaded.document, "loaded");
+        QCOMPARE(asked, 1);  // (the table asked once a file)
+        QVERIFY(blocks["1065"] == src_resources[1065]);
+    }
+
     void keptBlocksComeBack() {
         namespace core = genko::core;
         namespace fs = std::filesystem;
@@ -1156,7 +1320,7 @@ private slots:
         (void)genko::formats::export_page_psd(read.document, read.document.page(0), genko::storage::path_from_utf8(again.toStdString()), 150);
         QVERIFY(genko::test::read_bytes(again) == bytes);
 
-        // a layer deleted: the comps and slices that name it are not written; a merge drops what the merged layer kept; a
+        // a layer deleted: the slices that name it are not written (PC5 J-a: the comps are the page's); a merge drops what the merged layer kept; a
         // duplicate keeps it, its id written once
         const genko::core::CommandBus bus(genko::render::ops_registry());
         const auto applied = [&](const Json& ops) { return bus.apply(doc, ops, core::Actor("human:test")).doc; };
@@ -1171,11 +1335,17 @@ private slots:
         QVERIFY(resource_ids(doc, QStringLiteral("all.psd")).contains(1065));
         const core::Document deleted = applied(Json::array({Json{{"op", "delete_layer"}, {"page", 1}, {"id", plain->id}}}));
         const std::set<unsigned> left = resource_ids(deleted, QStringLiteral("deleted.psd"));
-        QVERIFY(!left.contains(1065) && !left.contains(1050) && left.contains(1037) && left.contains(1054));
+        // (PC5 J-a: the layer comps are the page's — read from 1065 —, kept when a layer is deleted: 1065 written still)
+        // (PC5 J-b: the slices are the page's too — read from 1050: keep.psd's one layer-based slice names 効果, still there —,
+        // so 1050 is written still; the layer it names deleted takes its slice, and 1050, with it)
+        QVERIFY(left.contains(1065) && left.contains(1050) && left.contains(1037) && left.contains(1054));
         // (Blend If is locked, lock all: unlocked first — 効果 too)
         const auto unlocked = [](const std::string& id) {
             return Json{{"op", "set_layer"}, {"page", 1}, {"id", id}, {"locked", false}, {"lock_alpha", false}, {"lock_position", false}};
         };
+        // (PC5 J-b: the layer its slice names deleted — 効果 —: the slice gone with it, no 1050)
+        QVERIFY(!resource_ids(applied(Json::array({unlocked(effects->id), Json{{"op", "delete_layer"}, {"page", 1}, {"id", effects->id}}})), QStringLiteral("no-slice.psd"))
+                     .contains(1050));
         const core::Document merged =
             applied(Json::array({unlocked(blend_if->id), unlocked(effects->id), Json{{"op", "merge_down"}, {"page", 1}, {"id", blend_if->id}}}));
         const core::Layer* into = layer_named(merged.page(0), "効果");
@@ -1203,6 +1373,70 @@ private slots:
             QVERIFY(!viewed.doc.page(0).native_psd);
             for (const core::Layer& l : viewed.doc.page(0).layers) QVERIFY(!l.native_psd && !l.lock_position);
         }
+    }
+
+    // (PC5 J-b review P2-4, P3-1) A book of the time before J-b — keep.psd opened while 1050 was kept as it was (no slices
+    // read, the block unmarked) and saved — opened with the real table: saved again, project.json's bytes the same and no
+    // slices@1; to a PSD, the kept 1050 the file's own bytes. A slice made on it reads the kept ones first (said), the page's
+    // 1050 written then; every slice deleted after: no 1050 (the kept one never back).
+    void bookBeforeSlicesKeepsItsBlock() {
+        namespace core = genko::core;
+        namespace pp = genko::render::psd_production;
+        const std::string source = keep_file("keep.psd");
+        std::string kept;
+        const psd::File source_file = psd::File::read(source);  // (kept: its resources are views into it — V3 ASan)
+        for (const auto& r : source_file.resources())
+            if (r.id == 1050) kept = std::string(r.data);
+        QVERIFY(!kept.empty());
+        QDir().mkpath(path(QStringLiteral("before-jb")));
+        const QString old_book = path(QStringLiteral("before-jb/old.genko"));
+        {
+            std::vector<pp::Row> before_jb;  // (the table as it was: no row of 1050)
+            for (const pp::Row& r : pp::rows())
+                if (r.resource != 1050) before_jb.push_back(r);
+            const pp::TableForTest table(before_jb);
+            genko::formats::Opened opened = genko::formats::open_file(source, "keep.psd");
+            const core::Page& page = opened.doc.page(0);
+            QVERIFY(!page.slices);
+            QVERIFY(page.native_psd);
+            QVERIFY(std::none_of(page.native_psd->copied.begin(), page.native_psd->copied.end(), [](const core::PsdCopied& c) { return c.resource == 1050; }));
+            QVERIFY(std::any_of(page.native_psd->resources.begin(), page.native_psd->resources.end(), [](const core::PsdResource& r) { return r.id == 1050; }));
+            genko::test::write_project(opened.doc, genko::storage::path_from_utf8(old_book.toStdString()));
+        }
+        const std::string old_json = genko::test::read_bytes(old_book + QStringLiteral("/project.json"));
+        core::Document doc = genko::storage::load_document(genko::storage::path_from_utf8(old_book.toStdString())).document;
+        QVERIFY(!doc.page(0).slices);
+        const QString again = path(QStringLiteral("before-jb/again.genko"));
+        genko::test::write_project(doc, genko::storage::path_from_utf8(again.toStdString()));
+        const std::string again_json = genko::test::read_bytes(again + QStringLiteral("/project.json"));
+        QVERIFY(again_json == old_json);
+        const Json features = Json::parse(again_json).value("features", Json::array());
+        QVERIFY(std::find(features.begin(), features.end(), Json("slices@1")) == features.end());
+        const auto resource_1050 = [&](const core::Document& book, const char* name) {
+            const QString at = path(QStringLiteral("before-jb/%1.psd").arg(QString::fromLatin1(name)));
+            (void)genko::formats::export_page_psd(book, book.page(0), genko::storage::path_from_utf8(at.toStdString()), 150);
+            const psd::File written = psd::File::read(genko::test::read_bytes(at));
+            for (const auto& r : written.resources())
+                if (r.id == 1050) return std::string(r.data);
+            return std::string();
+        };
+        QVERIFY(resource_1050(doc, "same") == kept);
+        // a slice made on it: Photoshop's read first, said
+        const core::CommandBus bus(genko::render::ops_registry());
+        const auto added = bus.apply(doc, Json::array({Json{{"op", "add_slice"}, {"page", 1}, {"rect_px", {0, 0, 4, 4}}, {"name", "new"}}}), core::Actor("human:test"));
+        QVERIFY2(added.warnings.dump().find("slices kept from its PSD were read as its own slices first") != std::string::npos, added.warnings.dump().c_str());
+        const core::Page& now = added.doc.page(0);
+        QVERIFY(now.slices && now.slices->list.size() >= 2);
+        QCOMPARE(now.slices->list.back().name, std::string("new"));
+        const std::string mine = resource_1050(added.doc, "added");
+        QVERIFY(!mine.empty() && mine != kept);
+        const auto parsed = genko::render::psd_slices::parse(mine);
+        QVERIFY(parsed && std::any_of(parsed->slices.begin(), parsed->slices.end(), [](const genko::render::psd_slices::FileSlice& f) { return f.name == "new"; }));
+        QCOMPARE(std::count_if(parsed->slices.begin(), parsed->slices.end(), [](const genko::render::psd_slices::FileSlice& f) { return f.origin != 0; }),
+                 std::ptrdiff_t(now.slices->list.size()));
+        // every slice deleted: none (the kept one is not written back)
+        const auto gone = bus.apply(added.doc, Json::array({Json{{"op", "delete_slices"}, {"page", 1}, {"slices", "all"}}}), core::Actor("human:test"));
+        QVERIFY(resource_1050(gone.doc, "gone").empty());
     }
 
     // The layers at their depth (the user's decision 3): psd-tools' files of 16 and 32 bits (RGB, CMYK, Lab, grey; and
@@ -1635,6 +1869,7 @@ private slots:
         const core::SmartContents* contents = core::smart::contents_of(read, *so);
         QVERIFY(contents != nullptr && contents->page);
         QVERIFY(contents->page->native_psd);
+        QCOMPARE(contents->page->annotations.size(), std::size_t(1));  // (PC5 J-c: keep.psd's note, its page's with the Anno it marks)
         const QString inner = path(QStringLiteral("so-inner.psd"));
         (void)genko::formats::export_page_psd(read, *contents->page, genko::storage::path_from_utf8(inner.toStdString()), 150);
         const std::string inner_bytes = genko::test::read_bytes(inner);
@@ -1684,8 +1919,9 @@ private slots:
     }
 
     // P2-2: a 32-bit file onto a page of another depth comes in as before F-d (onto a 16-bit page at 8 bits, its values past
-    // 1 no refusal); onto a 32-bit page in sRGB its linear values encoded by 1/2.2 — the same look as the 8-bit page's
-    // (within a step of 8 bits) —; onto a page of linear light as they are.
+    // 1 no refusal); onto a 32-bit page in sRGB its linear values encoded by the page's curve, sRGB's, and onto the 8-bit
+    // page by the file's (none: sRGB's) and rounded — the user's decision of 2026-10-28 and Z0's review P2-1: the inverse
+    // of the 32-bit PSD this build writes, before it 1/2.2 (Python's view still so) —; onto a page of linear light as they are.
     void thirtyTwoBitFilesComeInAsBefore() {
         namespace core = genko::core;
         const genko::core::CommandBus bus(genko::render::ops_registry());
@@ -1725,9 +1961,10 @@ private slots:
                 const auto shown = png.getpixel(x, y);
                 for (int ch = 0; ch < 3; ++ch) {
                     const double v = below["values"][std::to_string(ch)][static_cast<std::size_t>(y * 8 + x)].get<double>();
-                    const double want = std::pow(std::max(0.0, v), 1 / 2.2);
+                    const double want = genko::core::linear_to_srgb(v);
                     QVERIFY2(std::fabs(px[static_cast<std::size_t>(ch)] - want) < 1e-5, (std::to_string(px[static_cast<std::size_t>(ch)]) + " for " + std::to_string(want)).c_str());
-                    QVERIFY(std::fabs(std::min(1.0, want) * 255 - shown[static_cast<std::size_t>(ch)]) <= 1.0);
+                    const double in_8_bits = genko::core::linear_to_srgb(v);  // (the 8-bit page's too: Z0's review P2-1)
+                    QVERIFY(std::fabs(std::min(1.0, in_8_bits) * 255 - shown[static_cast<std::size_t>(ch)]) <= 1.0);
                 }
             }
         }
@@ -1771,6 +2008,266 @@ private slots:
             }
             QCOMPARE(own, 1);
         }
+    }
+
+    // PC5 I-b (groups@1, SPEC AUTO-01「グループ」): groups written to a PSD — a pass-through group with a multiply inside, an
+    // isolated one, one of 50 % and one masked to the left half — read by psd-tools as groups of those settings, whose
+    // composite is this build's page; opened again, the groups come back as groups and draw the same. A folder that is not
+    // a group is written as before (its layers, no group).
+    void groupsGoThroughAPsd() {
+        namespace core = genko::core;
+        const auto run = [](const core::Document& doc, const Json& ops) {
+            return core::CommandBus(genko::render::ops_registry()).apply(doc, ops, core::Actor("human:test")).doc;
+        };
+        const auto fresh = [&] {
+            core::Document doc = core::new_episode("gr", core::Num(1), 1, core::PageSpec::custom(40, 40, 30, 30, 1, 2, 2, 2, 2, 100, "color"),
+                                                   core::Binding::Right);
+            doc.edit_page(0).frames.clear();
+            return doc;
+        };
+        // (a paint layer of pixels over the whole page, grey: as a picture painted, which a PSD writes as its own layer)
+        const auto paint = [](const std::string& id, int grey, const std::string& blend) {
+            core::Layer layer;
+            layer.id = id;
+            layer.title = id;
+            layer.kind = core::LayerKind::Raster;
+            layer.blend = blend;
+            layer.panel_clip = false;
+            layer.raster_png = std::make_shared<const std::string>(
+                genko::render::write_png(genko::render::Image::create("RGBA", genko::render::Size{157, 157}, genko::render::Ink{grey, grey, grey, 255})));
+            return layer;
+        };
+        const auto book = [&](const Json& group, const std::string& child_blend, int child) {
+            core::Document doc = fresh();
+            doc.edit_page(0).layers.push_back(paint("base", 128, "normal"));
+            Json ops = Json::array();
+            Json folder{{"op", "add_layer"}, {"page", 1}, {"kind", "folder"}, {"id", "g"}, {"name", "g"}};
+            Json settings{{"op", "set_layer"}, {"page", 1}, {"id", "g"}};
+            for (const auto& [key, value] : group.items()) (key == "group" || key == "blend" ? folder : settings)[key] = value;
+            ops.push_back(folder);
+            if (settings.size() > 3) ops.push_back(settings);
+            doc = run(doc, ops);
+            core::Layer inside = paint("child", child, child_blend);
+            inside.parent_id = "g";
+            doc.edit_page(0).layers.push_back(std::move(inside));
+            return doc;
+        };
+        const Json left{{"poly", Json::array({Json::array({0, 0}), Json::array({20, 0}), Json::array({20, 40}), Json::array({0, 40})})}};
+        struct Case {
+            std::string name;
+            core::Document doc;
+            std::string blend;  // (psd-tools' name of the group's blend; "" no group)
+            int opacity;
+        };
+        std::vector<Case> cases;
+        cases.push_back({"pass", book(Json{{"group", true}}, "multiply", 128), "PASS_THROUGH", 255});
+        cases.push_back({"alone", book(Json{{"group", true}, {"blend", "normal"}}, "multiply", 128), "NORMAL", 255});
+        cases.push_back({"half", book(Json{{"group", true}, {"blend", "normal"}, {"opacity", 0.5}}, "normal", 0), "NORMAL", 128});
+        cases.push_back({"masked", run(book(Json{{"group", true}}, "normal", 0), Json::array({Json{{"op", "set_layer_mask"}, {"page", 1}, {"id", "g"}, {"area", left}}})),
+                         "PASS_THROUGH", 255});
+        cases.push_back({"folder", book(Json::object(), "multiply", 128), "", 255});
+        QDir().mkpath(path(QStringLiteral("groups")));
+        QStringList files;
+        for (const Case& c : cases) {
+            files << path(QStringLiteral("groups/%1.psd").arg(QString::fromStdString(c.name)));
+            (void)genko::formats::export_page_psd(c.doc, c.doc.page(0), genko::storage::path_from_utf8(files.last().toStdString()), 100);
+        }
+        const QString out = path(QStringLiteral("groups/view.json"));
+        const auto ran = genko::test::run(genko::test::python_ref(),
+                                          QStringList{genko::test::repo_root() + QStringLiteral("/tools/migration/psd_groups_check.py"), out, QStringLiteral("39,78;118,78")} + files,
+                                          genko::test::python_env(path(QStringLiteral("pyenv"))));
+        QVERIFY2(ran.exit_code == 0, ran.err.right(2000).constData());
+        const Json view = genko::test::read_json(out);
+        genko::render::RenderOptions options;
+        options.mode = "print";
+        for (std::size_t i = 0; i < cases.size(); ++i) {
+            const Case& c = cases[i];
+            const Json& seen = view[files[static_cast<int>(i)].toStdString()];
+            QVERIFY2(!seen.contains("error"), seen.dump().c_str());
+            const Json* group = nullptr;
+            for (const Json& l : seen["layers"]) {
+                if (l["name"] == Json("g")) group = &l;
+                if (l["name"] == Json("child")) QCOMPARE(l["parent"], c.blend.empty() ? Json(nullptr) : Json("g"));
+            }
+            if (c.blend.empty()) {
+                QVERIFY2(group == nullptr, c.name.c_str());  // (a folder that is not a group: its layers only, as before)
+            } else {
+                QVERIFY2(group != nullptr && (*group)["kind"] == Json("group"), c.name.c_str());
+                QCOMPARE((*group)["blend"], Json(c.blend));
+                QCOMPARE((*group)["opacity"], Json(c.opacity));
+                QCOMPARE((*group)["mask"], Json(c.name == "masked"));
+            }
+            // psd-tools' composite is this build's page
+            const genko::render::Image drawn = genko::render::render_page(c.doc.page(0), 100, options, &c.doc).image.convert("RGB");
+            const std::array<std::array<int, 2>, 2> spots{{{39, 78}, {118, 78}}};
+            for (std::size_t k = 0; k < spots.size(); ++k) {
+                const int ours = drawn.getpixel(spots[k][0], spots[k][1])[0];
+                const int theirs = seen["pixels"][k][0].get<int>();
+                QVERIFY2(std::abs(ours - theirs) <= 3, (c.name + ": " + std::to_string(ours) + " vs psd-tools " + std::to_string(theirs)).c_str());
+            }
+            // opened again: a group again (a folder of before: none), drawn the same
+            const genko::formats::Opened opened = genko::formats::open_file(genko::test::read_bytes(files[static_cast<int>(i)]), c.name + ".psd");
+            const core::Layer* back = nullptr;
+            for (const core::Layer& l : opened.doc.page(0).layers)
+                if (l.title == "g") back = &l;
+            if (c.blend.empty()) {
+                QVERIFY(back == nullptr);
+                continue;
+            }
+            QVERIFY2(back != nullptr && back->group && back->kind == core::LayerKind::Folder, c.name.c_str());
+            QCOMPARE(back->blend, std::string(c.blend == "PASS_THROUGH" ? "pass_through" : "normal"));
+            QVERIFY(std::abs(back->opacity - c.opacity / 255.0) < 0.01);
+            QCOMPARE(back->mask.has_value(), c.name == "masked");
+            const genko::render::Image again = genko::render::render_page(opened.doc.page(0), 100, options, &opened.doc).image.convert("RGB");
+            for (const auto& spot : spots) {
+                const int ours = drawn.getpixel(spot[0], spot[1])[0];
+                const int read = again.getpixel(spot[0], spot[1])[0];
+                QVERIFY2(std::abs(ours - read) <= 3, (c.name + " opened: " + std::to_string(read) + " vs " + std::to_string(ours)).c_str());
+            }
+        }
+    }
+
+    // PC5 I-b (review P3-9): a PSD of groups made by psd-tools, not by this build — a multiply group and a hidden one
+    // (tools/migration/psd_groups_make.py) — opens with them as groups: the multiply group's blend, the hidden group
+    // hidden with what it holds kept in it; drawn as psd-tools composites it.
+    void groupsMadeByPsdTools() {
+        namespace core = genko::core;
+        QDir().mkpath(path(QStringLiteral("groups-made")));
+        const QString file = path(QStringLiteral("groups-made/made.psd")), out = path(QStringLiteral("groups-made/view.json"));
+        const auto env = genko::test::python_env(path(QStringLiteral("pyenv")));
+        auto ran = genko::test::run(genko::test::python_ref(), QStringList{genko::test::repo_root() + QStringLiteral("/tools/migration/psd_groups_make.py"), file}, env);
+        QVERIFY2(ran.exit_code == 0, ran.err.right(2000).constData());
+        ran = genko::test::run(genko::test::python_ref(),
+                               QStringList{genko::test::repo_root() + QStringLiteral("/tools/migration/psd_groups_check.py"), out, QStringLiteral("39,78;118,78"), file}, env);
+        QVERIFY2(ran.exit_code == 0, ran.err.right(2000).constData());
+        const Json seen = genko::test::read_json(out)[file.toStdString()];
+        QVERIFY2(!seen.contains("error"), seen.dump().c_str());
+        const genko::formats::Opened opened = genko::formats::open_file(genko::test::read_bytes(file), "made.psd");
+        const auto named = [&](const std::string& title) -> const core::Layer* {
+            for (const core::Layer& l : opened.doc.page(0).layers)
+                if (l.title == title) return &l;
+            return nullptr;
+        };
+        const core::Layer *mul = named("mul"), *hid = named("hid"), *dark = named("dark"), *black = named("black");
+        QVERIFY(mul != nullptr && hid != nullptr && dark != nullptr && black != nullptr);
+        QVERIFY(mul->group && mul->kind == core::LayerKind::Folder && mul->visible);
+        QCOMPARE(mul->blend, std::string("multiply"));
+        QVERIFY(hid->group && !hid->visible);
+        QCOMPARE(dark->parent_id, Json(mul->id));
+        QCOMPARE(black->parent_id, Json(hid->id));
+        QVERIFY(black->visible);  // (hidden by its group, not itself)
+        genko::render::RenderOptions options;
+        options.mode = "print";
+        const genko::render::Image drawn = genko::render::render_page(opened.doc.page(0), 100, options, &opened.doc).image.convert("RGB");
+        const int w = drawn.width(), h = drawn.height();
+        const std::array<std::array<int, 2>, 2> spots{{{w / 4, h / 2}, {w * 3 / 4, h / 2}}};
+        for (std::size_t k = 0; k < spots.size(); ++k) {
+            const int ours = drawn.getpixel(spots[k][0], spots[k][1])[0];
+            const int theirs = seen["pixels"][k][0].get<int>();
+            QVERIFY2(std::abs(ours - theirs) <= 3, (std::to_string(k) + ": " + std::to_string(ours) + " vs psd-tools " + std::to_string(theirs)).c_str());
+        }
+    }
+
+    // (PC5 H-f, pixel-aspect@1) The PSD's 1064: the page's ratio written (version 2, the ratio as a big-endian double) and
+    // nothing else changed — the pixels square, the file as the one of a square page but for it —, read back as the page's
+    // when the file is opened (its bytes written again while the ratio is the one read; the page's own once changed; none
+    // once square), not onto a page (import_psd), not when it is square, broken or out of range; the other exports' files
+    // the same as a square page's.
+    void pixelAspectResource() {
+        namespace core = genko::core;
+        namespace pa = genko::render::psd_pixel_aspect;
+        const core::CommandBus bus(genko::render::ops_registry());
+        const core::Document square = core::new_episode("t", core::Num(std::int64_t{1}), 1, core::PageSpec::custom(60, 40, 60, 40, 0, 0, 0, 0, 0, 150, "mono"));
+        const auto with_ratio = [&](const core::Document& doc, double ratio) {
+            return bus.apply(doc, Json::array({Json{{"op", "set_pixel_aspect"}, {"page", 1}, {"ratio", ratio}}}), core::Actor()).doc;
+        };
+        const core::Document wide = with_ratio(square, 1.5);
+        QDir().mkpath(path(QStringLiteral("aspect")));
+        const auto written = [&](const core::Document& book, const QString& name) {
+            const QString at = path(QStringLiteral("aspect/%1.psd").arg(name));
+            (void)genko::formats::export_page_psd(book, book.page(0), genko::storage::path_from_utf8(at.toStdString()), 150);
+            return genko::test::read_bytes(at);
+        };
+        const auto resource = [](const std::string& bytes, unsigned id) -> std::optional<std::string> {
+            const psd::File file = psd::File::read(bytes);
+            for (const auto& r : file.resources())
+                if (r.id == id) return std::string(r.data);
+            return std::nullopt;
+        };
+        const std::string plain = written(square, QStringLiteral("square"));
+        QVERIFY(!resource(plain, 1064));  // (a square page: none — the file as before)
+        const std::string widened = written(wide, QStringLiteral("wide"));
+        const auto data = resource(widened, 1064);
+        QVERIFY(data.has_value());
+        QCOMPARE(data->size(), std::size_t(12));
+        QCOMPARE(data->substr(0, 4), std::string("\0\0\0\2", 4));
+        QVERIFY(pa::ratio_of(*data) == std::optional<double>(1.5));
+        QCOMPARE(pa::bytes_of(1.5), *data);
+        {  // (the rest of the file as a square page's: written without the row, the same bytes)
+            std::vector<genko::render::psd_production::Row> others;
+            for (const auto& row : genko::render::psd_production::rows())
+                if (row.resource != 1064) others.push_back(row);
+            const genko::render::psd_production::TableForTest table(others);
+            QVERIFY(written(wide, QStringLiteral("wide-without")) == plain);
+        }
+        // the pictures written are a square page's (PNG, at the same resolution)
+        {
+            const QString a = path(QStringLiteral("aspect/png-square")), b = path(QStringLiteral("aspect/png-wide"));
+            const auto files_a = genko::formats::export_png_sequence(square, genko::storage::path_from_utf8(a.toStdString()), 100);
+            const auto files_b = genko::formats::export_png_sequence(wide, genko::storage::path_from_utf8(b.toStdString()), 100);
+            QCOMPARE(files_a.size(), files_b.size());
+            for (std::size_t i = 0; i < files_a.size(); ++i) {
+                QVERIFY(genko::test::read_bytes(QString::fromStdString(genko::storage::path_to_utf8(files_a[i]))) ==
+                        genko::test::read_bytes(QString::fromStdString(genko::storage::path_to_utf8(files_b[i]))));
+            }
+        }
+        // opened: the page's ratio, the block kept with its mark; written again: the file's bytes
+        genko::formats::Opened opened = genko::formats::open_file(widened, "wide.psd");
+        QCOMPARE(opened.doc.page(0).pixel_aspect, 1.5);
+        QVERIFY(opened.doc.page(0).native_psd);
+        QVERIFY(std::any_of(opened.doc.page(0).native_psd->copied.begin(), opened.doc.page(0).native_psd->copied.end(),
+                            [](const core::PsdCopied& c) { return c.resource == 1064; }));
+        QVERIFY(resource(written(opened.doc, QStringLiteral("again")), 1064) == data);
+        // changed: the page's own; square: none
+        QVERIFY(resource(written(with_ratio(opened.doc, 0.91), QStringLiteral("ntsc")), 1064) == std::optional<std::string>(pa::bytes_of(0.91)));
+        QVERIFY(!resource(written(with_ratio(opened.doc, 1.0), QStringLiteral("back")), 1064));
+        // saved as a book and read back: the ratio and the mark kept, the file's bytes written again
+        {
+            const QString book = path(QStringLiteral("aspect/book.genko"));
+            genko::test::write_project(opened.doc, genko::storage::path_from_utf8(book.toStdString()));
+            const auto loaded = genko::storage::load_document(genko::storage::path_from_utf8(book.toStdString()));
+            QVERIFY2(loaded.document.read_only_reason.empty(), loaded.document.read_only_reason.c_str());
+            QCOMPARE(loaded.document.page(0).pixel_aspect, 1.5);
+            QVERIFY(resource(written(loaded.document, QStringLiteral("loaded")), 1064) == data);
+        }
+        // read onto a page (import_psd, Photoshop's 配置): the page's own ratio stays
+        {
+            const QString file = path(QStringLiteral("aspect/wide.psd"));
+            const auto done = bus.apply(square, Json::array({Json{{"op", "import_psd"}, {"page", 1}, {"path", file.toStdString()}}}), core::Actor());
+            QCOMPARE(done.doc.page(0).pixel_aspect, 1.0);
+        }
+        // a square, broken or hostile 1064: not read (kept as it was, unmarked)
+        genko::render::psd_production::ReadContext opened_context;
+        opened_context.opened = true;
+        const auto read = [&](const std::string& bytes) {
+            core::Page page;
+            return std::pair{pa::read(page, bytes, opened_context), page.pixel_aspect};
+        };
+        QVERIFY(read(pa::bytes_of(2.0)) == std::pair(true, 2.0));
+        std::string version_one = pa::bytes_of(0.9);
+        version_one[3] = 1;
+        QVERIFY(read(version_one) == std::pair(true, 0.9));
+        std::string version_three = pa::bytes_of(2.0);
+        version_three[3] = 3;
+        QVERIFY(read(version_three) == std::pair(false, 1.0));
+        QVERIFY(read(pa::bytes_of(1.0)) == std::pair(false, 1.0));
+        QVERIFY(read(pa::bytes_of(11.0)) == std::pair(false, 1.0));
+        QVERIFY(read(pa::bytes_of(-2.0)) == std::pair(false, 1.0));
+        QVERIFY(read(pa::bytes_of(std::nan(""))) == std::pair(false, 1.0));
+        QVERIFY(read(pa::bytes_of(2.0).substr(0, 11)) == std::pair(false, 1.0));
+        genko::render::psd_production::ReadContext onto_context;  // (not opened: read onto a page)
+        core::Page onto;
+        QVERIFY(!pa::read(onto, pa::bytes_of(2.0), onto_context));
     }
 };
 

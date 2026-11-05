@@ -7,10 +7,14 @@
 
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/commands_list.hpp"
 #include "core/ops_schema.hpp"
+#include "core/prefs_table.hpp"
+#include "core/session_file.hpp"
 #include "core/paths.hpp"
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
+#include "render/ops_variables.hpp"
 #include "render/plugins.hpp"
 #include "service/book.hpp"
 #include "service/briefs.hpp"
@@ -495,6 +499,76 @@ ToolResult StudioService::inspect(const Json& a) {
         if (!unknown.empty()) data["unknown"] = std::move(unknown);
         return ToolResult(true, std::move(data));
     }
+    // (PC5 H-e, prefs.get・command.list・session.inspect: this computer's preferences — op: a section or a section.key —, the
+    // screen's commands with its keys — op: words to look for — and the books the running app has open. Reading only: the AI
+    // never changes a preference (the coordinator's decision, 節 H 8-8 (a)); a book's folder only as a project of this
+    // server's root, never a path. The tool's words and the unknown target's list are the contract's, left as they are)
+    if (core::is_one_of(target, {"prefs", "commands", "session"})) {
+        const auto store = core::prefs::store();
+        const std::string asked = py_truthy(a["op"]) ? core::py_strip(py_str(a["op"])) : std::string();
+        std::error_code ec;
+        const fs::path root = fs::weakly_canonical(root_, ec);
+        // (a file or a folder of this computer: as a path under this server's root, never one outside it — review P2-1)
+        const auto under_root = [&root](const std::string& text) -> std::optional<std::string> {
+            std::error_code err;
+            const fs::path where = fs::weakly_canonical(core::path_from_utf8(text), err);
+            if (err) return std::nullopt;
+            const fs::path inside = where.lexically_relative(root);
+            if (inside.empty() || *inside.begin() == ".." || inside.is_absolute()) return std::nullopt;
+            return core::path_to_utf8(inside);
+        };
+        if (core::py_equals(target, Json("prefs"))) {
+            // (the app's memories — section state: the pictures the subview holds, the workspaces, the AI's client — are not
+            // preferences: never an agent's to read — review P2-1)
+            if (asked == "state" || asked.rfind("state.", 0) == 0) {
+                return fail("「" + asked + "」はアプリが覚えている値で、読めません", "bad_value", "/op");
+            }
+            core::prefs::Outcome out = core::prefs::get(*store, asked);
+            if (!out.ok) return fail(out.message, out.code, "/op");
+            for (auto& [path, value] : out.values.items()) {
+                const core::prefs::Pref* pref = core::prefs::by_path(path);
+                if (pref == nullptr || pref->kind != core::prefs::Kind::Path || !value.is_string() || value.get<std::string>().empty()) continue;
+                value = under_root(value.get<std::string>()).value_or("(root の外)");
+            }
+            return ToolResult(true, Json::object({{"prefs", out.values}}));
+        }
+        if (core::py_equals(target, Json("commands"))) {
+            Json listed = core::commands::list(*store, {}, asked);
+            return ToolResult(true, Json::object({{"key_set", listed["key_set"]}, {"commands", std::move(listed["commands"])}}));
+        }
+        // (the session's own words alone — a key session.json may come to hold later is never passed on — review P3-7)
+        const Json read = core::session_file::read();
+        Json session = Json::object();
+        for (const char* key : {"running", "v", "app_version", "foreground", "background", "updated_at"}) {
+            if (read.contains(key)) session[key] = read[key];
+        }
+        if (read.value("running", false)) {
+            Json windows = Json::array();
+            for (const Json& window : core::iterate(py_get(read, "windows", Json::array()))) {
+                if (!window.is_object()) continue;
+                Json kept = Json::object();
+                for (const char* key : {"active", "arrange", "front"}) {
+                    if (window.contains(key)) kept[key] = window[key];
+                }
+                Json tabs = Json::array();
+                for (const Json& tab : core::iterate(py_get(window, "tabs", Json::array()))) {
+                    if (!tab.is_object()) continue;
+                    Json one = Json::object();
+                    for (const char* key : {"index", "title", "saved", "revision", "page", "contents"}) {
+                        if (tab.contains(key)) one[key] = tab[key];
+                    }
+                    if (tab.contains("path") && tab["path"].is_string()) {
+                        if (const auto project = under_root(tab["path"].get<std::string>())) one["project"] = *project;
+                    }
+                    tabs.push_back(std::move(one));
+                }
+                kept["tabs"] = std::move(tabs);
+                windows.push_back(std::move(kept));
+            }
+            session["windows"] = std::move(windows);
+        }
+        return ToolResult(true, Json::object({{"session", std::move(session)}}));
+    }
     const fs::path path = project_path(a["project"]);
     if (core::py_equals(target, Json("schemas"))) {
         return ToolResult(true, Json::object({{"schemas", Json::object({{"bible@1", studio::schema("bible@1")},
@@ -512,7 +586,12 @@ ToolResult StudioService::inspect(const Json& a) {
             plugins.push_back(Json::object({{"key", p.key}, {"name", p.name}, {"params", p.params},
                                             {"kind", std::string(render::plugins::kPrefix) + p.key}}));
         }
-        return ToolResult(true, Json::object({{"plugins", std::move(plugins)}, {"folder", core::path_to_utf8(render::plugins::folder())}}));
+        // (PC5 J-f, plugin.list: every plugin of the folder as listed — read only; nothing here installs, chooses or
+        // consents: those are the person's, in the app)
+        Json installed = Json::array();
+        for (const render::plugins::Listed& item : render::plugins::listed()) installed.push_back(render::plugins::listed_json(item));
+        return ToolResult(true, Json::object({{"plugins", std::move(plugins)}, {"folder", core::path_to_utf8(render::plugins::folder())},
+                                              {"installed", std::move(installed)}}));
     }
     const core::Document doc = load_episode(path);
     if (core::py_equals(target, Json("brushes"))) return ToolResult(true, Json::object({{"brushes", briefs::brushes_list(doc)}}));
@@ -525,6 +604,9 @@ ToolResult StudioService::inspect(const Json& a) {
         return ToolResult(true, Json::object({{"script", script ? *script : Json()}}));
     }
     if (core::py_equals(target, Json("studio"))) return ToolResult(true, Json::object({{"studio", doc.studio}}));
+    // (PC5 I-d, variables.list: the book's variables and data sets, as genko inspect --variables shows them; reading only —
+    // their ops are not an agent's: the tool's words and the unknown target's list are the contract's, left as they are)
+    if (core::py_equals(target, Json("variables"))) return ToolResult(true, Json::object({{"variables", render::variables_listing(doc)}}));
     if (core::py_equals(target, Json("snapshot"))) {
         Json snap = storage::snapshot(doc);
         if (!page.is_null()) {  // (that page alone: the rest of the book is not sent again)

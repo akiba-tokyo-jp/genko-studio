@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "core/areas.hpp"
+#include "core/groups.hpp"
 #include "core/ids.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
@@ -86,6 +87,10 @@ void group_layers(OpContext& c) {
     folder.kind = LayerKind::Folder;
     folder.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("フォルダー");
     folder.exportable = true;
+    if (truthy_at(op, "group")) {  // (groups@1, PC5 I-b: drawn as Photoshop's group, 通過)
+        folder.group = true;
+        folder.blend = std::string(kPassThrough);
+    }
     folder.parent_id = page.layers[last].parent_id;
     for (std::size_t i = 0; i < page.layers.size(); ++i) {
         if (page.layers[i].id == folder.id) throw OpError("layer " + folder.id + " exists");
@@ -250,6 +255,8 @@ void forget_area(OpContext& c) {
 }
 
 }  // namespace
+
+void group_layers_op(OpContext& c) { group_layers(c); }
 
 void register_arrange_ops(OpRegistry& registry) {
     registry.add("group_layers", group_layers);

@@ -317,11 +317,15 @@ bool MainWindow::work_path_from_selection(std::optional<double> tolerance_mm) {
 }
 
 void MainWindow::line_work_path() {
-    if (!canvas_->selected_line_id) {
-        flash(QStringLiteral("先に台詞を選びます（選択ツールで台詞をクリック）"), 3000);
+    // (PC5 G-a review P2-6: the chosen type layer's text too — 書式 → 作業用パスを作成)
+    const std::optional<Json> target = type_target(false);
+    if (!target) {
+        flash(QStringLiteral("先にテキストレイヤー（レイヤー パネル）か台詞（選択ツールでクリック）を選びます"), 3000);
         return;
     }
-    if (!apply_ops(Json::array({Json{{"op", "text_to_path"}, {"id", *canvas_->selected_line_id}}}))) return;
+    const Json op = target->contains("layer_id") ? Json{{"op", "text_to_path"}, {"page", (*target)["page"]}, {"id", (*target)["layer_id"]}}
+                                                 : Json{{"op", "text_to_path"}, {"id", (*target)["line"]}};
+    if (!apply_ops(Json::array({op}))) return;
     canvas_->target_path = QStringLiteral("work");
     if (paths_panel_ != nullptr && paths_dock_->isVisible()) paths_panel_->refresh();
 }

@@ -67,6 +67,7 @@
 #include "app/pages_panel.hpp"
 #include "app/pen.hpp"
 #include "app/story_panel.hpp"
+#include "app/type_panels.hpp"
 #include "app/theme.hpp"
 #include "app/thumbs.hpp"
 #include "app/tool_settings.hpp"
@@ -100,8 +101,19 @@ namespace {
 // The panels on the right of Python's window (main.py studio_docks), in its order.
 const QStringList& studio_docks() {
     static const QStringList titles = {QStringLiteral("承認箱"), QStringLiteral("レイヤー"), QStringLiteral("台詞"), QStringLiteral("ページ"),
-                                       QStringLiteral("カラー"), QStringLiteral("コマの詳細"), QStringLiteral("履歴"), QStringLiteral("素材"),
-                                       QStringLiteral("定規・3D"), QStringLiteral("点検"), QStringLiteral("資料")};
+                                       QStringLiteral("カラー"), QStringLiteral("コマの詳細"), QStringLiteral("ヒストリー"), QStringLiteral("素材"),
+                                       QStringLiteral("定規・3D"), QStringLiteral("点検"), QStringLiteral("資料"),
+                                       // (PC5 J-a: ウィンドウ → レイヤーカンプ is a command, its dock's own switch beside it)
+                                       QStringLiteral("レイヤーカンプ"),
+                                       // (PC5 J-c: ウィンドウ → 注釈 so)
+                                       QStringLiteral("注釈"),
+                                       // (PC5 G-d: ウィンドウ → 文字・段落・文字スタイル・段落スタイル・字形 so)
+                                       QStringLiteral("文字"), QStringLiteral("段落"), QStringLiteral("文字スタイル"), QStringLiteral("段落スタイル"),
+                                       QStringLiteral("字形"),
+                                       // (PC5 J-d2: ウィンドウ → 計測ログ so)
+                                       QStringLiteral("計測ログ"),
+                                       // (PC5 J-g: ウィンドウ → アクション so)
+                                       QStringLiteral("アクション")};
     return titles;
 }
 
@@ -458,14 +470,14 @@ private slots:
         Book b(book_of(4), QSize(1024, 640));
         MainWindow* w = b.w();
         QStringList docks = studio_docks();
-        docks << QStringLiteral("ツールの設定");  // (Python's brush_dock)
+        docks << QStringLiteral("オプション");  // (Python's brush_dock; PC5 H-0: Photoshop's name)
         QStringList cut;
         for (const QString& title : docks) {
             QDockWidget* dock = b.dock(title);
             if (dock == nullptr || !dock->isVisible()) continue;
             dock->raise();
             std::vector<QString> tools = {QString()};
-            if (title == QStringLiteral("ツールの設定")) {
+            if (title == QStringLiteral("オプション")) {
                 tools.clear();
                 for (const auto& entry : w->tool_actions()) tools.push_back(entry.first);
             }
@@ -780,9 +792,13 @@ private slots:
         QWidget* page = w->tool_settings()->current_page();
         QVERIFY(page != nullptr && page->isAncestorOf(box) && box->isVisible());
         QVERIFY2(story->style_title->text().contains(QStringLiteral("今日こそ")), qPrintable(story->style_title->text()));
-        QVERIFY(story->font->isEnabled());
-        story->size->setValue(7);
-        emit story->size->editingFinished();
+        // (PC5 G-d, 8-5 (a): the size is the 文字 panel's — ウィンドウ → 文字 —, in 環境設定 → 単位・定規's 文字の単位)
+        app::settings()->setValue(QStringLiteral("units/type"), QStringLiteral("mm"));
+        b.trigger("act_panel_character");
+        app::CharacterPanel* chars = w->character_panel();
+        QTRY_VERIFY(chars->family->isEnabled() && chars->isEnabled());
+        chars->size->setValue(7);
+        emit chars->size->editingFinished();  // (review P2-5: sent once its editing ends)
         QVERIFY(w->line_by_id("a") != nullptr);
         QCOMPARE(number_at(w->line_by_id("a")->style, "size_mm", 0.0), 7.0);
         // the lines panel shows its list and words without scrolling
@@ -834,7 +850,7 @@ private slots:
         pen.stabilize = 7;
         w->pen() = pen;
         w->pen_changed();
-        c->set_zoom_percent(100);
+        c->actual_size();  // (プリントサイズ: the paper at 96 dpi, the 100 % before PC5 H-a — the user's decision 11)
         c->center_on(97, 150);
         std::vector<QPointF> path;
         for (int i = 0; i < 50; ++i) path.emplace_back(60 + i * 1.5, 150 + 6 * std::sin(i * 1.3));  // (a shaky hand)
@@ -869,15 +885,26 @@ private slots:
         Book b(doc, QSize(1280, 800), QStringLiteral("b.genko"), [](const fs::path& path) { app::remember_project(path); });
         QStringList titles;
         for (QAction* top : b.w()->menuBar()->actions()) titles << top->text();
-        // (PC4 節 D, the user's decision 1: フィルター after レイヤー)
+        // (PC4 節 D, the user's decision 1: フィルター after レイヤー; PC5 G-0: Photoshop's 書式 between them, design section G 5.1)
         QCOMPARE(titles, (QStringList{QStringLiteral("ファイル"), QStringLiteral("編集"), QStringLiteral("表示"), QStringLiteral("ツール"), QStringLiteral("選択範囲"),
-                                      QStringLiteral("レイヤー"), QStringLiteral("フィルター"), QStringLiteral("ページ"), QStringLiteral("ウィンドウ"),
+                                      QStringLiteral("レイヤー"), QStringLiteral("書式"), QStringLiteral("フィルター"), QStringLiteral("ページ"), QStringLiteral("ウィンドウ"),
                                       QStringLiteral("ヘルプ")}));
         const QStringList file = texts(b.menu(QStringLiteral("ファイル")));
         QVERIFY(file.contains(QStringLiteral("最近使用したファイルを開く")) && file.contains(QStringLiteral("閉じる")) && file.contains(QStringLiteral("終了")));
         const QStringList edit = texts(b.menu(QStringLiteral("編集")));
         QVERIFY(edit.contains(QStringLiteral("すべてを選択")) && edit.contains(QStringLiteral("消去")));
         QVERIFY(texts(b.menu(QStringLiteral("レイヤー"))).contains(QStringLiteral("レイヤーマスク")));
+        // (PC5 G-0: 書式 with the type commands this build has, as Photoshop names them; G-a: アンチエイリアス ▸, 方向 ▸, the
+        // conversions, ラスタライズ, 更新, Lorem ipsum and a line and a type layer each other's; G-b: OpenType ▸, 言語オプション ▸;
+        // G-c: 初期設定の書式を読み込み・初期設定の書式を保存; G-d: パネル ▸, フォントプレビューのサイズ ▸, the missing fonts' two)
+        QCOMPARE(texts(b.menu(QStringLiteral("書式"))),
+                 (QStringList{QStringLiteral("パネル"), QStringLiteral("アンチエイリアス"), QStringLiteral("方向"), QStringLiteral("OpenType"), QString(), QStringLiteral("作業用パスを作成"),
+                              QStringLiteral("シェイプに変換"), QStringLiteral("テキストレイヤーをラスタライズ"), QStringLiteral("ポイントテキストに変換"),
+                              QStringLiteral("段落テキストに変換"), QString(), QStringLiteral("ワープテキスト…"), QString(), QStringLiteral("フォントプレビューのサイズ"),
+                              QStringLiteral("言語オプション"), QString(), QStringLiteral("すべてのテキストレイヤーを更新"), QStringLiteral("すべての見つからないフォントを置換"),
+                              QStringLiteral("見つからないフォントを解決…"), QString(),
+                              QStringLiteral("Lorem Ipsum をペースト"), QString(), QStringLiteral("初期設定の書式を読み込み"), QStringLiteral("初期設定の書式を保存"),
+                              QString(), QStringLiteral("台詞をテキストレイヤーに"), QStringLiteral("テキストレイヤーを台詞に")}));
         QVERIFY(texts(submenu(b.menu(QStringLiteral("ページ")), QStringLiteral("台詞"))).contains(QStringLiteral("フキダシの形")));
         QMenu* tools = b.menu(QStringLiteral("ツール"));
         QVERIFY(texts(submenu(tools, QStringLiteral("定規"))).contains(QStringLiteral("直線定規")));
@@ -938,7 +965,7 @@ private slots:
         MainWindow* w = b.w();
         PageCanvas* c = b.canvas();
         c->zoom_by(3.0);
-        QDockWidget* navigator_dock = b.dock(QStringLiteral("全体図"));
+        QDockWidget* navigator_dock = b.dock(QStringLiteral("ナビゲーター"));  // (PC5 H-0: Photoshop's name)
         QVERIFY(navigator_dock != nullptr && navigator_dock->isVisible());
         app::Navigator* nav = w->navigator();
         const QRectF rect = nav->page_rect();
@@ -1001,11 +1028,11 @@ private slots:
     }
 
     // test_the_help_knows_todays_tools: the guide and the answers (as the person reads them, the menus' words filled in)
-    // speak of {大|…}, 移動ツール, グラデーション, 全体図, 道具の名前を表示, 印刷 and 電子音.
+    // speak of {大|…}, 移動ツール, グラデーション, ナビゲーター (PC5 H-0: 全体図 before), 道具の名前を表示, 印刷 and 電子音.
     void test_the_help_knows_todays_tools() {
         Book b(h2_book(), QSize(1280, 720));
         const QString help = app::help::guide(b.w()) + app::help::faq(b.w());
-        for (const QString& words : {QStringLiteral("{大|"), QStringLiteral("移動ツール"), QStringLiteral("グラデーション"), QStringLiteral("全体図"),
+        for (const QString& words : {QStringLiteral("{大|"), QStringLiteral("移動ツール"), QStringLiteral("グラデーション"), QStringLiteral("ナビゲーター"),
                                      QStringLiteral("道具の名前を表示"), QStringLiteral("印刷"), QStringLiteral("電子音")}) {
             QVERIFY2(help.contains(words), qPrintable(words));
         }

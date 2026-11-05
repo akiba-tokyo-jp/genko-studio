@@ -15,8 +15,11 @@
 #include "app/config.hpp"
 #include "app/frame_tools.hpp"
 #include "core/channels.hpp"
+#include "core/groups.hpp"
+#include "core/vector.hpp"
 #include "core/json.hpp"
 #include "core/paths.hpp"
+#include "core/ruby.hpp"
 #include "core/strokes.hpp"
 #include "render/page.hpp"
 #include "storage/asset_store.hpp"
@@ -77,6 +80,7 @@ std::string page_fingerprint(const core::Document& doc, const core::Page& page) 
         h.add(values);
     }
     h.add(page.extra);
+    if (page.artboard) h.add(core::to_json(*page.artboard));  // (artboards@1, PC5 I-c: its background — a page of none keeps its key)
     h.add(page.effects);
     h.add(opt(page.ruler));
     h.add(page.rulers);
@@ -89,6 +93,7 @@ std::string page_fingerprint(const core::Document& doc, const core::Page& page) 
         h.add(look);
         h.add_bytes(channel.raster, &channel.memo);
     }
+    const bool grouped = core::has_groups(page.layers);  // (groups@1)
     for (const core::Layer& layer : page.layers) {
         Json look = Json::object();
         look["id"] = layer.id;
@@ -113,6 +118,10 @@ std::string page_fingerprint(const core::Document& doc, const core::Page& page) 
         look["adjust"] = opt(layer.adjust);
         look["effect"] = opt(layer.effect);
         look["screen"] = opt(layer.screen);
+        // (groups@1, PC5 I-b: drawn as a group, or in one — said only on a page of groups, so a page of none keeps its key)
+        if (layer.group) look["group"] = true;
+        if (grouped) look["parent_id"] = layer.parent_id;
+        if (grouped && layer.vector_mask) look["vector_mask"] = core::vector::to_json(*layer.vector_mask);
         look["finish"] = opt(layer.finish);
         look["color"] = layer.color ? Json(*layer.color) : Json(nullptr);
         if (layer.fill_rgb) {
@@ -146,6 +155,15 @@ std::string page_fingerprint(const core::Document& doc, const core::Page& page) 
             h.add(strokes.blob_ref);  // (the hash of the very bytes of these lines)
         } else {
             h.add(storage::AssetStore::ref(core::strokes_blob(strokes)));
+        }
+        if (layer.type) {  // (type@1, PC5 G-c review P3-3: a type layer's record, and the book's styles it takes)
+            const core::StoryLine& r = *layer.type;
+            Json words = Json::array();
+            for (const auto& [word, style] : r.style_runs) words.push_back(Json::array({word, style}));
+            h.add(Json{{"type", Json::array({r.text, r.wrap, r.balloon, r.x_mm.json(), r.y_mm.json(), r.w_mm.json(), r.h_mm.json(), r.style,
+                                              r.native_type ? *r.native_type : Json(), words, Json(r.ruby_runs), Json(r.emphasis_runs),
+                                              r.ruby_spans ? core::ruby::to_json(*r.ruby_spans) : Json()})}});
+            if (doc.type_styles) h.add(Json{{"type_styles", *doc.type_styles}});
         }
         if (layer.shapes && !layer.shapes->items.empty()) {  // (pen-shapes@1, PC3 C-b: its shape parts)
             h.add(std::string_view("pen-shapes/1"));

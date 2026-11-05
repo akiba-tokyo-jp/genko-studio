@@ -387,6 +387,7 @@ private slots:
                 const Json got = cpp_reply(doc, step["ops"], step["agent"].get<std::string>(), step["dry_run"].get<bool>(),
                                            step["ids_from"].get<std::int64_t>(), m3b::to_path(path(QStringLiteral("seq/%1-%2").arg(k).arg(s))), &after);
                 Json want = step["reply"];
+                genko::test::with_words_of_2026_10_28(want);  // (the words the person changed on 2026-10-28, put into Python's)
                 if (step.contains("payload")) want["payload"] = step["payload"];
                 ++steps;
                 const std::string diff = compare(got, want, step["ops"], doc, has_prefix(repairs.nonfinite, at), tally);

@@ -17,6 +17,7 @@
 #include "core/pyops.hpp"
 #include "core/error.hpp"
 #include "core/file_info.hpp"
+#include "core/groups.hpp"
 #include "core/ids.hpp"
 #include "core/ink.hpp"
 #include "core/raw_develop.hpp"
@@ -29,6 +30,7 @@
 #include "render/pcraft_read.hpp"
 #include "render/ops_registry.hpp"
 #include "render/import_psd.hpp"
+#include "formats/artboards.hpp"
 #include "render/png.hpp"
 #include "render/proof.hpp"
 #include "render/psd_image.hpp"
@@ -210,6 +212,7 @@ Opened pcraft_book(render::pcraft::Read read, const std::string& file) {
     out.notes = std::move(read.notes);
     core::Page& page = out.doc.edit_page(0);
     if (page.native_source && !file.empty() && file.find('/') == std::string::npos && file.find('\\') == std::string::npos) page.native_source->name = file;
+    split_pcraft_artboards(out.doc, read.artboards, out.notes);  // (PC5 I-c: an artboard is a page)
     return out;
 }
 
@@ -218,7 +221,11 @@ Opened pcraft_book(render::pcraft::Read read, const std::string& file) {
 Opened open_folder(const std::filesystem::path& folder, const OpenOptions&) {
     std::string name = core::utf8_replaced(core::path_to_utf8(folder.filename()));
     if (name.empty()) name = core::utf8_replaced(core::path_to_utf8(folder.parent_path().filename()));
-    return pcraft_book(render::pcraft::read_folder(folder, stem_of(name)), name);
+    render::pcraft::ReadLimits limits;
+    std::filesystem::path here = folder;
+    if (here.filename().empty()) here = here.parent_path();
+    limits.beside = here.parent_path();  // (PC5 I-d: its data sets' pictures, beside it)
+    return pcraft_book(render::pcraft::read_folder(folder, stem_of(name), limits), name);
 }
 
 Opened picture_book(CodecImage picture, std::string_view title, const OpenOptions& options) {
@@ -401,8 +408,8 @@ Opened open_psd(std::string_view bytes, const std::string& file, const OpenOptio
             std::string icc = chosen.empty() || render::proof::same_as_srgb(chosen) ? std::string() : chosen;
             // (the PC4 F-d review: a 32-bit file's values are linear light, as Photoshop's 32 bits are — in sRGB's colours
             // (its profile sRGB's, or none) the page is the built-in linear-srgb's and they come in as they are, as an
-            // OpenEXR's do; in another profile's the page is that profile's and they are encoded by 1/2.2, as this build
-            // reads 32 bits elsewhere)
+            // OpenEXR's do; in another profile's the page is that profile's and they are encoded by its tone curves, the
+            // inverse of how this build writes a 32-bit PSD: import_psd, PC5-0)
             if (depth == 32 && icc.empty()) icc = builtin_bytes("linear-srgb");
             if (depth != 8 || !icc.empty()) {
                 core::RgbMode mode;
@@ -458,6 +465,36 @@ Opened open_psd(std::string_view bytes, const std::string& file, const OpenOptio
             std::string names;
             for (const Json& n : report["skipped"]) names += (names.empty() ? "" : "、") + (n.is_string() ? n.get<std::string>() : std::string());
             notes.push_back("この版で読めないレイヤーは開きませんでした（" + names + "）");
+        }
+        // (PC5 G-e, the review's P2-1: the text layers — the fonts not found, those opened as their pixels and why, the rest)
+        if (const auto fonts = report.find("type_fonts_missing"); fonts != report.end() && fonts->is_array() && !fonts->empty()) {
+            std::string names;
+            std::size_t n = 0;
+            for (const Json& f : *fonts) {
+                if (f.is_string() && n++ < 10) names += (names.empty() ? "" : "、") + f.get<std::string>();
+            }
+            if (fonts->size() > 10) names += "、…";
+            notes.push_back("同梱の書体に無い書体は、名前を残して既定の書体で描きます（" + names + "）");
+        }
+        if (const auto pixels = report.find("type_as_pixels"); pixels != report.end() && pixels->is_array()) {
+            std::size_t said = 0;
+            for (const Json& p : *pixels) {
+                if (!p.is_object()) continue;
+                if (said++ == 20) {  // (at most 20 of them said one by one)
+                    notes.push_back("ほか " + std::to_string(pixels->size() - 20) + " 枚の文字レイヤーも画素で開きました");
+                    break;
+                }
+                const std::string why = p.value("why", std::string());
+                notes.push_back("文字レイヤー「" + p.value("title", std::string()) + "」は画素で開きました" + (why.empty() ? std::string() : "（" + why + "）"));
+            }
+        }
+        if (const auto said = report.find("type_notes"); said != report.end() && said->is_array())
+            for (const Json& n : *said)
+                if (n.is_string()) notes.push_back(n.get<std::string>());
+        if (report.contains("groups_as_folders")) {  // (groups@1, PC5 I-b: nested past core::kGroupDepthMax)
+            std::string names;
+            for (const Json& n : report["groups_as_folders"]) names += (names.empty() ? "" : "、") + (n.is_string() ? n.get<std::string>() : std::string());
+            notes.push_back("グループの入れ子が深すぎるため、" + std::to_string(core::kGroupDepthMax) + " 段より深いものはグループとして描かないフォルダーにしました（" + names + "）");
         }
         if (report.contains("psd_blocks_cut")) notes.push_back("PSD の塊の一部は、多すぎるか大きすぎるため保てませんでした");
         // (PC4 D7: Photoshop's smart filters — read as Genko's, or the smart objects left as Photoshop's picture: at most 8
@@ -526,6 +563,8 @@ Opened open_psd(std::string_view bytes, const std::string& file, const OpenOptio
         doc.file_info = info;
     }
     doc.edit_page(0).native_source = std::move(source);
+    // (PC5 I-c, the user's decision 3: its artboards each a page of the book; import_psd keeps them a page's groups)
+    split_psd_artboards(doc, out.notes);
     return out;
 }
 
@@ -711,7 +750,9 @@ Opened open_file(std::string_view bytes, std::string_view name, const OpenOption
     // (a .pcraft by what it holds — a zip whose first file is manifest.json —, or a zip named so; a picture named .pcraft is
     // opened as the picture it is)
     if (render::pcraft::is_pcraft(bytes) || (suffix == ".pcraft" && bytes.starts_with(std::string_view("PK", 2)))) {
-        return pcraft_book(render::pcraft::read(bytes, stem_of(file)), file);
+        render::pcraft::ReadLimits limits;
+        limits.beside = options.folder;  // (PC5 I-d: its data sets' pictures)
+        return pcraft_book(render::pcraft::read(bytes, stem_of(file), limits), file);
     }
     const auto format = options.as ? options.as : render::codecs::detect(bytes);
     if (!format) throw core::Error("unidentified_image", "the file is not a picture of a format this build knows");

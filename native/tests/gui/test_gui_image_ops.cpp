@@ -103,7 +103,8 @@ class TestGuiImageOps : public QObject {
 private slots:
     void initTestCase() { (void)gui_test::config_folder(); }
 
-    // The commands where design 5 puts them, without keys; フェード off until there is something to fade.
+    // The commands where design 5 puts them, without keys (フェード… Photoshop's Ctrl+Shift+F in the Photoshop key set, PC5
+    // H-0); フェード off until there is something to fade.
     void commands() {
         Book book;
         for (const char* name : {"act_shadows_highlights", "act_hdr_toning", "act_replace_color", "act_match_color", "act_apply_image",
@@ -116,7 +117,7 @@ private slots:
         QAction* fade = book.act("act_fade");
         QVERIFY(fade != nullptr);
         QVERIFY(menus_of(book.window.get(), fade).contains(QStringLiteral("編集")));
-        QVERIFY(fade->shortcuts().isEmpty());
+        QCOMPARE(fade->shortcuts(), QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Shift+F"))});
         QVERIFY(!fade->isEnabled());
         // 履歴's words
         QCOMPARE(app::history::describe(Json::array({Json{{"op", "fade_layer"}}})), QStringLiteral("フェードした"));

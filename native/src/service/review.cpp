@@ -439,7 +439,7 @@ std::string review_html(const std::filesystem::path& project, int max_px) {
     }
     parts += "<h2>書き出し</h2>";
     if (py_truthy(report["ok"])) {
-        parts += "<p class='ok'>点検は通っています。Genko アプリの「書き出し…」から書き出せます。</p>" +
+        parts += "<p class='ok'>点検は通っています。Genko アプリの「ファイル → 書き出し → 原稿を書き出す…」から書き出せます。</p>" +
                  cmd("genko studio export " + proj + " --format pdf --out 出力先", "正式に書き出す（コマンド）");
     } else {
         const Json& errors = report["errors"];

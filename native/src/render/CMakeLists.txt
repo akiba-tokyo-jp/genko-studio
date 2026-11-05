@@ -46,8 +46,10 @@ genko_library(genko_render
     anim.cpp
     timelapse.cpp
     plugins.cpp
+    plugin_bands.cpp
     colour.cpp
     proof.cpp
+    hdr_preview.cpp
     import_profile.cpp
     ink.cpp
     ink_canvas.cpp
@@ -239,11 +241,68 @@ genko_library(genko_render
     # PC4 F-e (カメラ RAW: LibRaw の包み・現像の設定と色・埋め込みプレビュー、RAW のスマートオブジェクトの op)
     raw.cpp
     ops_camera_raw.cpp
+    # PC5 G-0 (文字の土台: 文字の層の絵・type の op・HarfBuzz の組み方の口)
+    type_layer.cpp
+    ops_type.cpp
+    text/shaping.cpp
+    # PC5 G-b (組版・OpenType・書体・右から左: the OpenType typesetting's rows, SheenBidi's order, set_type)
+    text/bidi.cpp
+    text/opentype.cpp
+    ops_type_set.cpp
+    # PC5 I-b (グループとフレーム: レイヤーからのフレーム)
+    ops_groups.cpp
+    # PC5 J-0 (制作の補助の土台: the production's op frames, its PSD blocks and .pcraft keys)
+    ops_production.cpp
+    ops_layer_comps.cpp
+    psd_production.cpp
+    psd_guides.cpp
+    psd_comps.cpp
+    pcraft_production.cpp
+    pcraft_comps.cpp
+    # PC5 I-d (変数とデータセット: variables@1's ops and their .pcraft key)
+    ops_variables.cpp
+    pcraft_variables.cpp
+    # PC5 J-c (注釈: annotations@1 — the ops, PSD's Anno, a .pcraft's notes)
+    ops_annotations.cpp
+    psd_annotations.cpp
+    pcraft_annotations.cpp
+    # PC5 J-d1 (計測: measure@1 — the ops, a .pcraft's measurement; PSD's 1074 in psd_annotations.cpp)
+    ops_measure.cpp
+    pcraft_measure.cpp
+    # PC5 J-d2 (計測値を記録の値・計測ログの列と CSV)
+    measure_features.cpp
+    # PC5 J-b (スライス: slices@1 — the ops, PSD's 1050, a .pcraft's slices)
+    ops_slices.cpp
+    psd_slices.cpp
+    pcraft_slices.cpp
+    # PC5 G-c (文字スタイル・段落スタイル: type_style)
+    ops_type_styles.cpp
+    # PC5 G-d (書体の置き換え: replace_fonts)
+    ops_type_fonts.cpp
+    # PC5 G-e (PSD・.pcraft の文字: Photoshop's text layer and the type layer each other's)
+    psd_type.cpp
+    # PC5 I-c (アートボード: artboards@1 — the ops, PSD's artb)
+    ops_artboards.cpp
+    psd_artboards.cpp
+    # PC5 I-h (HDR Pro に統合・写真の切り抜きと角度補正: the exposures merged and tone mapped, the photos on a scan)
+    hdr_merge.cpp
+    scancrop.cpp
+    # PC5 I-g (自動整列・自動合成・Photomerge: features, panorama, pyramid and their ops)
+    features.cpp
+    panorama.cpp
+    pyramid.cpp
+    ops_align.cpp
+    # PC5 J-e2 (ビデオレイヤー: video@1 — the footage read and laid, the ops)
+    footage.cpp
+    ops_video.cpp
+    pcraft_timeline.cpp
+    # PC5 H-f (画素の縦横比: PSD's 1064)
+    psd_pixel_aspect.cpp
     ${GENKO_MATERIAL_RESOURCES}
     ${GENKO_TEXT_RESOURCES}
   PUBLIC_DEPS genko_core Qt6::Core
   PRIVATE_DEPS genko_storage pillow_imaging PNG::PNG JPEG::JPEG ZLIB::ZLIB TIFF::TIFF Freetype::Freetype ${GENKO_WEBP} ${GENKO_LCMS2}
-               ${GENKO_OPENEXR} ${GENKO_AVIF} ${GENKO_ZSTD} genko_blake3 ${GENKO_LIBRAW})
+               ${GENKO_OPENEXR} ${GENKO_AVIF} ${GENKO_ZSTD} genko_blake3 ${GENKO_LIBRAW} ${GENKO_HARFBUZZ} genko_sheenbidi)
 # (sin, cos, atan2, hypot, pow, log go through core/pymath.cpp, which calls libm exactly as CPython does)
 # (numpy's float32 hypotf, atan2f: called in libm as numpy calls them; sinf, cosf, powf: glibc's, libm_float.cpp, with
 # std::fma where glibc's FMA build fuses. MSVC: /fp:precise, with which these have no intrinsic forms)
@@ -255,7 +314,7 @@ endif()
 # register_3d_ops) and ops_registry() holds them with core's ops; they are applied through core's CommandBus.
 set(GENKO_RENDER_OPS_SOURCES ops_registry.cpp ops_tones.cpp ops_effects.cpp ops_3d.cpp import_psd.cpp)
 if(GENKO_LIBRARY_KIND STREQUAL "SHARED")
-  # (a sanitizer build's shared libraries, cmake/GenkoFlags.cmake: stamp_material in genko_render applies ops through
+  # (shared libraries — a sanitizer build, or GENKO_SHARED_LIBRARIES: cmake/GenkoFlags.cmake —: stamp_material in genko_render applies ops through
   # ops_registry(), held here — shared libraries cannot depend on each other both ways, so the two are one library)
   target_sources(genko_render PRIVATE ${GENKO_RENDER_OPS_SOURCES})
   add_library(genko_render_ops INTERFACE)

@@ -32,7 +32,20 @@
 #include "core/psd_keep.hpp"
 #include "core/brush_dabs.hpp"
 #include "core/patterns.hpp"
+#include "core/variables.hpp"
+#include "core/image_assets.hpp"
 #include "core/layer_styles.hpp"
+#include "core/type_text.hpp"
+#include "core/groups.hpp"
+#include "core/layer_basics.hpp"
+#include "core/artboards.hpp"
+#include "core/pixel_aspect.hpp"
+// PC5 J-0 (制作の補助)
+#include "core/annotations.hpp"
+#include "core/layer_comps.hpp"
+#include "core/measure.hpp"
+#include "core/slices.hpp"
+#include "core/video.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 
@@ -46,7 +59,7 @@ using core::Point;
 
 namespace {
 
-constexpr std::array<std::string_view, 25> kTopKeys{
+constexpr std::array<std::string_view, 28> kTopKeys{
     "version", "revision", "title", "episode", "binding", "start_side", "strict_gates", "autosave",
     "font_path", "page_locks", "brush", "nombre", "spec", "bible", "tickets", "studio", "pages", "story",
     // v4
@@ -56,7 +69,13 @@ constexpr std::array<std::string_view, 25> kTopKeys{
     // patterns@1 (PC4)
     "patterns",
     // layer-styles@1 (PC4 E6)
-    "global_light"};
+    "global_light",
+    // type@1 (PC5 G-0)
+    "type_styles",
+    // variables@1 (PC5 I-d)
+    "variables",
+    // image-assets@1 (PC5 I-f)
+    "generator"};
 
 constexpr std::array<std::string_view, 21> kPageKeys{
     "id", "art_ok", "plan", "index", "note", "name_ok", "stage", "spread_with", "numero", "onion_from", "lt_threshold",
@@ -76,11 +95,13 @@ constexpr std::array<std::string_view, 4> kRectKeys{"x", "y", "width", "height"}
 constexpr std::array<std::string_view, 14> kFrameKeys{"id", "rect", "split_axis", "clip", "bleed", "border_mm",
                                                       "children", "panel", "poly", "split", "custom", "curves",
                                                       "line", "corner_mm"};
-constexpr std::array<std::string_view, 20> kLineKeys{"id", "page_index", "text", "speaker", "frame_id", "ruby",
+constexpr std::array<std::string_view, 21> kLineKeys{"id", "page_index", "text", "speaker", "frame_id", "ruby",
                                                      "x_mm", "y_mm", "w_mm", "h_mm", "balloon", "tail", "wrap",
                                                      "ruby_runs", "ruby_spans", "path", "emphasis_runs", "style_runs",
-                                                     "style", "tails"};
-constexpr std::array<std::string_view, 51> kLayerKeys{
+                                                     "style", "tails",
+                                                     // type@1 (PC5 G-0)
+                                                     "native_type"};
+constexpr std::array<std::string_view, 56> kLayerKeys{
     "id", "role", "kind", "visible", "exportable", "strokes", "raster_relpath", "fill_rgb", "lpi", "density",
     "region", "opacity", "material_id", "angle", "title", "blend", "clip", "lock_alpha", "locked", "panel_clip",
     "panel_each", "patches", "tone", "parent_id", "asset", "mask", "color", "reference", "fill", "adjust", "effect",
@@ -94,7 +115,13 @@ constexpr std::array<std::string_view, 51> kLayerKeys{
     // PC4 (psd-keep@1)
     "native_psd",
     // PC4 E6 (layer-styles@1)
-    "style"};
+    "style",
+    // PC5 G-0 (type@1)
+    "type",
+    // PC5 I-b (groups@1)
+    "group",
+    // PC5 I-a (layer-locks@1, blend-channels@1)
+    "lock_all", "lock_nest", "blend_channels"};
 constexpr std::array<std::string_view, 5> kPlacedOnlyKeys{"frame_id", "placement_mm", "fit", "clip_to", "finish"};
 constexpr std::array<std::string_view, 5> kMaskKeys{"enabled", "asset",
                                                     // masks@1 (PC3)
@@ -413,6 +440,10 @@ private:
     void read_layer_files(core::Layer& layer, const Json& data, const std::string& at);
     void read_page_files(core::Page& page, const std::string& at);
     void read_file_info(core::Document& doc);
+    // PC5 J-0 (layer-comps@1, slices@1, annotations@1, measure@1)
+    void read_page_production(core::Page& page, const std::string& at);
+    void read_page_artboard(core::Page& page, const std::string& at);  // (PC5 I-c: artboards@1)
+    void read_page_pixel_aspect(core::Page& page, const std::string& at);  // (PC5 H-f: pixel-aspect@1)
     void check_named(const std::string& ref, std::string_view suffix, const std::string& at, std::string_view noun);
     std::unordered_map<std::string, core::vector::ShapeListPtr> shape_blobs_;  // (shapes read in this load)
 };
@@ -528,6 +559,9 @@ core::StoryLine Reader::read_line(const Json& data, const std::string& at) {
     }
     line.style = dict_or_empty(data, "style");
     for (const Json& tail : list_or_empty(data, "tails")) line.tails.push_back(core::py_dict(tail));
+    // (type@1, PC5 G-0: as the writer writes it; one that is not in its normal form, the book read-only:
+    // core::type_text::validate_type below)
+    if (const Json* native = find(data, "native_type"); native != nullptr && !native->is_null()) line.native_type = *native;
     check_keys(data, kLineKeys, at, "line");
     return line;
 }
@@ -1133,6 +1167,15 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
     layer.angle = to_float(data, "angle", 45.0, at);
     layer.title = to_str_or(data, "title", "");
     layer.blend = to_str_or(data, "blend", "normal");
+    // (groups@1, PC5 I-b: a folder drawn as a group — one on another layer, or a blend pass_through elsewhere, the book
+    // read-only: core::validate_groups below)
+    if (const Json* group = find(data, "group"); group != nullptr && !group->is_null()) {
+        if (group->is_boolean()) {
+            layer.group = group->get<bool>();
+        } else {
+            issue("broken_value", at_key(at, "group"), {}, "a layer's group must be true or false");
+        }
+    }
     layer.clip = to_bool(data, "clip", false);
     layer.lock_alpha = to_bool(data, "lock_alpha", false);
     layer.locked = to_bool(data, "locked", false);
@@ -1188,6 +1231,19 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
             issue("missing_asset", at_key(at_key(at_key(at, "smart"), "filter_mask"), "asset"), asset->get<std::string>(),
                   "the smart object's filter mask " + AssetStore::relpath(asset->get<std::string>(), ".png") + " is missing");
         }
+        // (PC5 J-f, plugin-filters@1: the pictures its plugin filters keep)
+        if (const Json* filters = find(*layer.smart, "filters"); filters != nullptr && filters->is_array() && !dir_.empty()) {
+            for (std::size_t k = 0; k < filters->size(); ++k) {
+                const Json& f = (*filters)[k];
+                const Json* kept = f.is_object() ? find(f, "kept") : nullptr;
+                const Json* ref = kept != nullptr && kept->is_object() ? find(*kept, "asset") : nullptr;
+                const Json* suffix = kept != nullptr && kept->is_object() ? find(*kept, "suffix") : nullptr;
+                if (ref == nullptr || !ref->is_string() || suffix == nullptr || !suffix->is_string() || !AssetStore::is_ref(ref->get<std::string>())) continue;
+                if (store_.has(ref->get<std::string>(), suffix->get<std::string>())) continue;
+                issue("missing_asset", at_key(at_key(at, "smart"), "filters"), ref->get<std::string>(),
+                      "the picture a plugin filter keeps " + AssetStore::relpath(ref->get<std::string>(), suffix->get<std::string>()) + " is missing");
+            }
+        }
         // (PC3 A3: a PSD's placed layer block and Photoshop's picture of it)
         const Json* psd = find(*layer.smart, "psd");
         if (psd != nullptr && psd->is_object() && !dir_.empty()) {
@@ -1226,6 +1282,9 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
     read_layer_vectors(layer, data, at);  // (PC3: vector@1's vector mask, transform@1's link and position lock)
     read_layer_files(layer, data, at);    // (PC4: psd-keep@1's kept blocks)
     check_keys(data, kLayerKeys, at, "layer");
+    if (layer.kind != core::LayerKind::Type && find(data, "type") != nullptr) {  // (type@1: a type layer's record only)
+        issue("unknown_key", at_key(at, "type"), {}, "a " + std::string(core::to_string(layer.kind)) + " layer's type is not written back");
+    }
     if (!placed && !smart) {
         for (const auto& key : kPlacedOnlyKeys) {
             if (find(data, key) != nullptr) {
@@ -1251,6 +1310,25 @@ core::Layer Reader::read_layer(const Json& data, const std::string& at) {
             if (truthy_at(data, key)) {
                 issue("unknown_key", at_key(at, key), {}, "a smart object's " + std::string(key) + " is not written back");
             }
+        }
+        return layer;
+    }
+    if (layer.kind == core::LayerKind::Type) {  // (type@1, PC5 G-0: its record, read as a line's; no pixels or lines of its own)
+        const std::string here = at_key(at, "type");
+        const Json* record = find(data, "type");
+        if (record == nullptr || !record->is_object()) {
+            issue("broken_value", here, {}, "a type layer's type must be its record (an object)");
+        } else {
+            for (const char* key : {"id", "page_index", "speaker", "frame_id"}) {
+                if (find(*record, key) != nullptr) issue("unknown_key", at_key(here, key), {}, "a type layer's record has no " + std::string(key) + ": not written back");
+            }
+            Json as_line = *record;
+            as_line["id"] = layer.id;
+            as_line["page_index"] = 0;
+            layer.type = core::type_text::shared_record(core::type_text::record_of(read_line(as_line, here)));
+        }
+        for (const auto* key : {"strokes", "patches", "strokes_blob", "raster_relpath", "asset", "ink_raster", "color_raster", "shapes_blob"}) {
+            if (truthy_at(data, key)) issue("unknown_key", at_key(at, key), {}, "a type layer's " + std::string(key) + " is not written back");
         }
         return layer;
     }
@@ -1324,6 +1402,25 @@ void Reader::read_layer_vectors(core::Layer& layer, const Json& data, const std:
             layer.lock_position = lock->get<bool>();
         } else {
             issue("broken_value", at_key(at, "lock_position"), {}, "a layer's lock_position must be true or false");
+        }
+    }
+    // (PC5 I-a, layer-locks@1: すべてをロック and the artboards' auto-nesting lock; blend-channels@1: the channels it blends)
+    for (const auto& [key, flag] : {std::pair<const char*, bool*>{"lock_all", &layer.lock_all}, {"lock_nest", &layer.lock_nest}}) {
+        if (const Json* lock = find(data, key); lock && !lock->is_null()) {
+            if (lock->is_boolean()) {
+                *flag = lock->get<bool>();
+            } else {
+                issue("broken_value", at_key(at, key), {}, std::string("a layer's ") + key + " must be true or false");
+            }
+        }
+    }
+    if (const Json* channels = find(data, "blend_channels"); channels && !channels->is_null()) {
+        const bool flags = channels->is_array() && !channels->empty() && channels->size() <= 4 &&
+                           std::all_of(channels->begin(), channels->end(), [](const Json& c) { return c.is_boolean(); });
+        if (flags) {
+            for (const Json& c : *channels) layer.blend_channels.push_back(c.get<bool>());
+        } else {
+            issue("broken_value", at_key(at, "blend_channels"), {}, "a layer's blend_channels must be 1 to 4 flags (true or false)");
         }
     }
 }
@@ -1505,6 +1602,9 @@ core::Document Reader::migrate(const Json& payload) {
         read_channels(page, at);
         read_page_vectors(page, at);
         read_page_files(page, at);
+        read_page_production(page, at);  // (PC5 J-0)
+        read_page_artboard(page, at);     // (PC5 I-c)
+        read_page_pixel_aspect(page, at);  // (PC5 H-f)
         page_list.push_back(std::make_shared<core::Page>(std::move(page)));
         if (skip_assets_) deferred.push_back(page_list.back());
     }
@@ -1552,6 +1652,18 @@ core::Document Reader::migrate(const Json& payload) {
             doc.global_light = values;
         } catch (const core::Error& error) {
             issue("broken_value", "/global_light", {}, error.what());
+        }
+    }
+    // (type@1, PC5 G-0: the book's type styles, as the writer writes them: core::type_text::validate_type below)
+    if (const Json* styles = find(payload, "type_styles"); styles != nullptr && !styles->is_null()) doc.type_styles = *styles;
+    // (variables@1, PC5 I-d: the book's variables, as the writer writes them: core::validate_variables below)
+    if (const Json* variables = find(payload, "variables"); variables != nullptr && !variables->is_null()) doc.variables = *variables;
+    // (image-assets@1, PC5 I-f: 生成 → 画像アセット, {"image_assets": true} only; anything else, the book read-only)
+    if (const Json* generator = find(payload, "generator"); generator != nullptr && !generator->is_null()) {
+        try {
+            doc.image_assets = core::image_assets_from_json(*generator);
+        } catch (const core::Error& error) {
+            issue("broken_value", "/generator", {}, error.what());
         }
     }
     doc.nombre = dict_or_empty(payload, "nombre");
@@ -1673,6 +1785,34 @@ core::Document Reader::migrate(const Json& payload) {
     // (PC4 E6: layer-styles@1's styles, each in its normal form on a layer that takes one)
     try { core::validate_layer_styles(doc); }
     catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (PC5 G-0: type@1's records, type layers and type styles, each in its normal form)
+    try { core::type_text::validate_type(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/story", {}, error.what()); }
+    // (groups@1, PC5 I-b: a group on a folder only, the blend pass_through a group's only)
+    try { core::validate_groups(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (blend-channels@1, PC5 I-a: a flag for each colour channel of the page, on a page whose mode has them)
+    try { core::validate_layer_basics(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (artboards@1, PC5 I-c: an artboard well formed, never a cover's or a spread's)
+    try { core::validate_artboards(doc); }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
+    // (variables@1, PC5 I-d: the variables in their normal form; the pictures their values name in the book's folder)
+    try {
+        core::validate_variables(doc);
+        if (doc.variables) doc.variables = core::variables_to_json(core::variables_from_json(*doc.variables));  // (its keys in their order)
+        for (const auto& [ref, suffix] : core::variable_pictures(doc)) check_named(ref, suffix, "/variables", "picture of a data set");
+    } catch (const core::Error& error) {
+        issue("broken_value", "/variables", {}, error.what());
+    }
+    // (PC5 J-0: timeline@1's work area, video@1's video rows, in a page's anim of a book that names them — kept as read)
+    try {
+        const auto named = [&](std::string_view f) { return std::find(doc.features.begin(), doc.features.end(), f) != doc.features.end(); };
+        core::validate_timeline(doc, named(core::kTimelineFeature), named(core::kVideoFeature));
+        // (PC5 J-e2: the footage frames its video rows show, in the book's folder)
+        for (const std::string& ref : core::footage_refs(doc)) check_named(ref, core::kFootageSuffix, "/pages", "footage frame of a video layer");
+    }
+    catch (const core::Error& error) { issue("broken_value", "/pages", {}, error.what()); }
     return doc;
 }
 
@@ -1727,6 +1867,64 @@ void Reader::read_page_files(core::Page& page, const std::string& at) {
             for (const core::PsdGlobal& g : page.native_psd->globals) check_named(g.ref, core::kPsdBlockSuffix, at_key(at, "native_psd"), "kept PSD block");
         }
     }
+}
+
+// PC5 J-0 (SPEC.md PROD-01): a page's layer comps, slices, notes and measuring, taken out of the keys written back as they
+// were read (one that cannot be read — a key, a type or a value this build does not know — is reported and kept so: the
+// book is read-only). An empty one is as none.
+void Reader::read_page_production(core::Page& page, const std::string& at) {
+    const auto take = [&](std::string_view key, const auto& read) {
+        const auto it = page.extra.find(std::string(key));
+        if (it == page.extra.end()) return;
+        try {
+            if (!it->is_null()) read(*it);
+        } catch (const core::Error& error) {
+            issue("broken_value", at_key(at, std::string(key)), {}, error.what());
+            return;
+        }
+        page.extra.erase(it);
+    };
+    take(core::kLayerCompsKey, [&](const Json& raw) {
+        core::LayerComps comps = core::layer_comps_from_json(raw);
+        if (!comps.empty()) page.layer_comps = std::move(comps);
+    });
+    take(core::kSlicesKey, [&](const Json& raw) {
+        core::Slices slices = core::slices_from_json(raw);
+        if (!slices.empty()) page.slices = std::move(slices);
+    });
+    take(core::kAnnotationsKey, [&](const Json& raw) { page.annotations = core::annotations_from_json(raw); });
+    take(core::kMeasureKey, [&](const Json& raw) {
+        core::Measure measure = core::measure_from_json(raw);
+        if (!measure.empty()) page.measure = std::move(measure);
+    });
+}
+
+// PC5 I-c (artboards@1, SPEC.md AUTO-01「アートボード」): the page's artboard, taken out of the keys written back as they were
+// read (one that cannot be read is reported and kept so: the book is read-only; a cover's or a spread's: validate_artboards).
+void Reader::read_page_artboard(core::Page& page, const std::string& at) {
+    const auto it = page.extra.find(std::string(core::kArtboardKey));
+    if (it == page.extra.end()) return;
+    try {
+        if (!it->is_null()) page.artboard = core::artboard_from_json(*it);
+    } catch (const core::Error& error) {
+        issue("broken_value", at_key(at, std::string(core::kArtboardKey)), {}, error.what());
+        return;
+    }
+    page.extra.erase(it);
+}
+
+// PC5 H-f (pixel-aspect@1, SPEC.md VIEW-01「ピクセル縦横比」): the page's pixel aspect ratio, taken out of the keys written back
+// as they were read (one that cannot be read is reported and kept so: the book is read-only).
+void Reader::read_page_pixel_aspect(core::Page& page, const std::string& at) {
+    const auto it = page.extra.find(std::string(core::kPixelAspectKey));
+    if (it == page.extra.end()) return;
+    try {
+        page.pixel_aspect = core::pixel_aspect_from_json(*it);
+    } catch (const core::Error& error) {
+        issue("broken_value", at_key(at, std::string(core::kPixelAspectKey)), {}, error.what());
+        return;
+    }
+    page.extra.erase(it);
 }
 
 // file-info@1 (PC4): the book's File Info, kept under "file_info" (taken out of the keys written back as they were read; one
@@ -1845,6 +2043,7 @@ core::Page Reader::read_contents_page(const Json& raw, const std::string& at, co
     read_channels(page, at);
     read_page_vectors(page, at);
     read_page_files(page, at);  // (PC4: file-info@1, psd-keep@1)
+    read_page_production(page, at);  // (PC5 J-0: layer-comps@1, slices@1, annotations@1, measure@1)
     return page;
 }
 
@@ -1918,7 +2117,26 @@ bool is_known_feature(std::string_view feature) {
            // PC4 節 D (core/filter_kinds.hpp, core/vanishing.hpp)
            feature == core::kFiltersFeature || feature == core::kVanishingFeature ||
            // PC4 E6 (core/layer_styles.hpp)
-           feature == core::kLayerStylesFeature;
+           feature == core::kLayerStylesFeature ||
+           // PC5 G-0 (core/type_text.hpp)
+           feature == core::kTypeFeature ||
+           // PC5 I-b (core/groups.hpp)
+           feature == core::kGroupsFeature ||
+           // PC5 J-0 (core/layer_comps.hpp, core/slices.hpp, core/annotations.hpp, core/measure.hpp, core/video.hpp)
+           feature == core::kLayerCompsFeature || feature == core::kSlicesFeature || feature == core::kAnnotationsFeature ||
+           feature == core::kMeasureFeature || feature == core::kTimelineFeature || feature == core::kVideoFeature ||
+           // PC5 I-d (core/variables.hpp)
+           feature == core::kVariablesFeature ||
+           // PC5 I-a (core/layer_basics.hpp)
+           feature == core::kLayerLocksFeature || feature == core::kBlendChannelsFeature ||
+           // PC5 I-c (core/artboards.hpp)
+           feature == core::kArtboardsFeature ||
+           // PC5 J-f (core/smart.hpp)
+           feature == core::smart::kPluginFiltersFeature ||
+           // PC5 I-f (core/image_assets.hpp)
+           feature == core::kImageAssetsFeature ||
+           // PC5 H-f (core/pixel_aspect.hpp)
+           feature == core::kPixelAspectFeature;
 }
 
 int project_version(const Json& payload) {

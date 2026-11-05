@@ -5,13 +5,18 @@
 
 #include <QtTest>
 
+#include <QComboBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QKeySequenceEdit>
+#include <QTabWidget>
+#include <QToolBar>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
+#include <QPushButton>
 #include <QSettings>
 
 #include <map>
@@ -31,7 +36,13 @@
 #include "app/preferences.hpp"
 #include "app/templates.hpp"
 #include "app/theme.hpp"
+#include "app/tool_settings.hpp"
+#include "app/key_sets.hpp"
+#include "app/settings_watch.hpp"
+#include "app/shortcuts_dialog.hpp"
+#include "app/workspace.hpp"
 #include "core/frames.hpp"
+#include "core/paths.hpp"
 #include "gui_support.hpp"
 #include "render/ops_registry.hpp"
 
@@ -45,8 +56,6 @@ namespace core = genko::core;
 
 namespace {
 
-using Std = QKeySequence::StandardKey;
-
 struct Expected {
     const char* attribute;
     const char* text;
@@ -56,8 +65,7 @@ struct Expected {
     const char* menu;  // where it is: "ページ/コマ" is the コマ submenu of ページ
 };
 
-// (each key once — on Windows the standard Redo is Ctrl+Y itself, and a key bound twice would never fire —, and none
-// where the system has no standard one: Quit on Windows)
+// (each key once: a key bound twice would never fire)
 QList<QKeySequence> k(std::initializer_list<QKeySequence> keys) {
     QList<QKeySequence> unique;
     for (const QKeySequence& key : keys) {
@@ -67,48 +75,51 @@ QList<QKeySequence> k(std::initializer_list<QKeySequence> keys) {
 }
 QKeySequence s(const char* text) { return QKeySequence(QString::fromLatin1(text)); }
 
-// Python's words, keys and tips (main.py _build_actions), and the menu each is in.
+// Python's words, keys and tips (main.py _build_actions), and the menu each is in — with PC5 H-0's Photoshop names
+// (節 H 1.2, the user's decision 12) and the Photoshop key set, the default since (the user's decision 8: key_sets; the
+// Genko set's keys — Python's — in theKeySets). Where Python took the system's standard key (QKeySequence(std.X), which
+// differs by system), the same keys on every system: every key Windows' and X11's had (PC5 V3: commands.json is one).
 const std::vector<Expected>& expected() {
     static const std::vector<Expected> list = {
         // (PC4 F-0, 節 F 5.1: ファイル's commands by Photoshop's names — 新規…, 別名で保存…, 終了)
-        {"act_new", "新規…", k({QKeySequence(Std::New)}), "", false, "ファイル"},
-        {"act_open", "開く…", k({QKeySequence(Std::Open)}), "", false, "ファイル"},
-        {"act_save", "保存", k({QKeySequence(Std::Save)}), "変更は自動で保存されます。今すぐ書き込むときに使います", false, "ファイル"},
-        {"act_save_as", "別名で保存…", k({QKeySequence(Std::SaveAs)}), "", false, "ファイル"},
-        {"act_undo", "元に戻す", k({QKeySequence(Std::Undo)}), "", false, "編集"},
-        {"act_redo", "やり直す", k({QKeySequence(Std::Redo), s("Ctrl+Y")}), "", false, "編集"},
-        {"act_fit", "全体を表示", k({s("Ctrl+0")}), "", false, "表示"},
-        {"act_zoom_in", "拡大", k({QKeySequence(Std::ZoomIn), s("Ctrl+=")}), "", false, "表示"},
-        {"act_zoom_out", "縮小", k({QKeySequence(Std::ZoomOut)}), "", false, "表示"},
-        {"act_actual", "原寸（紙の大きさ）", k({s("Ctrl+1")}), "", false, "表示"},
+        {"act_new", "新規…", k({s("Ctrl+N")}), "", false, "ファイル"},
+        {"act_open", "開く…", k({s("Ctrl+O")}), "", false, "ファイル"},
+        {"act_save", "保存", k({s("Ctrl+S")}), "変更は自動で保存されます。今すぐ書き込むときに使います", false, "ファイル"},
+        {"act_save_as", "別名で保存…", k({s("Ctrl+Shift+S")}), "", false, "ファイル"},
+        {"act_undo", "取り消し", k({s("Ctrl+Z")}), "", false, "編集"},
+        {"act_redo", "やり直し", k({s("Ctrl+Shift+Z")}), "", false, "編集"},
+        {"act_fit", "画面サイズに合わせる", k({s("Ctrl+0")}), "", false, "表示"},
+        {"act_zoom_in", "ズームイン", k({s("Ctrl++"), s("Ctrl+=")}), "", false, "表示"},
+        {"act_zoom_out", "ズームアウト", k({s("Ctrl+-")}), "", false, "表示"},
+        {"act_actual", "プリントサイズ", {}, "", false, "表示"},
         {"act_turn_left", "左に回す（15°）", k({s("-"), s("Ctrl+Alt+Left")}),
          "表示だけを回します（原稿は回りません）。Shift＋スペースを押しながらドラッグでも回せます", false, "表示"},
         {"act_turn_right", "右に回す（15°）", k({s("^"), s("Ctrl+Alt+Right")}), "表示だけを回します（原稿は回りません）", false, "表示"},
         {"act_turn_reset", "回転・反転を戻す", k({s("Ctrl+Alt+0")}), "", false, "表示"},
-        {"act_zoom_tool", "虫めがね", k({s("Z")}), "クリックで拡大、Alt＋クリックで縮小、ドラッグで囲んだ所を画面いっぱいに", true, "表示"},
+        {"act_zoom_tool", "ズームツール", k({s("Z")}), "クリックで拡大、Alt＋クリックで縮小、ドラッグで囲んだ所を画面いっぱいに", true, "表示"},
         {"act_zoom_value", "表示倍率を打ち込む…", {}, "倍率（%）を数で決めます。ステータスバーの倍率でも", false, "表示"},
-        {"act_mirror", "左右反転して見る", k({s("H")}), "表示だけを左右反転します（絵の歪みを見つける）。原稿は変わりません", true, "表示"},
+        {"act_mirror", "水平方向に反転", {}, "表示だけを左右反転します（絵の歪みを見つける）。原稿は変わりません", true, "表示"},
         {"act_overview", "ページを並べて見る", k({s("Ctrl+Shift+O")}), "全ページを縮小図で並べ、ダブルクリックで開きます", false, "表示"},
-        {"act_prev", "◀ 前のページ", k({QKeySequence(Std::MoveToPreviousPage), s("Ctrl+Left")}), "", false, "表示"},
-        {"act_next", "次のページ ▶", k({QKeySequence(Std::MoveToNextPage), s("Ctrl+Right")}), "", false, "表示"},
-        {"act_guides", "仕上がり線・基本枠を表示", k({s("Ctrl+;")}), "断ち切り（裁ち落とし）・仕上がり線・基本枠", true, "表示"},
+        {"act_prev", "◀ 前のページ", k({s("PgUp"), s("Ctrl+Left")}), "", false, "表示"},
+        {"act_next", "次のページ ▶", k({s("PgDown"), s("Ctrl+Right")}), "", false, "表示"},
+        {"act_guides", "仕上がり線・基本枠を表示", {}, "断ち切り（裁ち落とし）・仕上がり線・基本枠", true, "表示"},
         // (PC1b, SPEC COLOR-03: Python's 「CMYK で見る（色校正）」 is now 色の校正 — View → Proof Colors — on Ctrl+Alt+Y
         // (Ctrl+Y is やり直す); it shows what 校正の設定 chooses, the working CMYK unless another: the user's decision
         // (working CMYK coated-cmyk), Python's own conversion kept there as 書き出しの CMYK)
-        {"act_cmyk_proof", "色の校正", k({s("Ctrl+Alt+Y")}), "印刷したときの色など、校正の設定で選んだ見え方で表示します（表示だけ。原稿は変わりません）", true, "表示"},
-        {"act_select", "選択", k({s("V")}), "コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす", true, "ツール"},
+        {"act_cmyk_proof", "色の校正", k({s("Ctrl+Y")}), "印刷したときの色など、校正の設定で選んだ見え方で表示します（表示だけ。原稿は変わりません）", true, "表示"},
+        {"act_select", "選択", k({s("Shift+N")}), "コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす", true, "ツール"},
         {"act_pen", "ブラシツール", k({s("B")}), "レイヤー パネルで選んだレイヤーに描きます", true, "ツール"},
         {"act_eraser", "消しゴムツール", k({s("E")}), "ペンの線は触れた所で切れます", true, "ツール"},
-        {"act_frame", "コマ割り", k({s("F")}),
+        {"act_frame", "コマ割り", k({s("K")}),
          "コマの中をドラッグして割る（斜めも。水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで間隔を動かす・選んだコマの角をドラッグで形を変える", true,
          "ツール"},
         // (PC3 C-d, decision 5's 移動ツール: the layers chosen and their linked ones, Ctrl+click picking a layer)
-        {"act_move", "移動ツール", k({s("Q")}), "選んだレイヤーをリンクしたレイヤーと一緒にドラッグで動かす（Shift で縦・横・45°、Ctrl+クリックでそこのレイヤーを選ぶ）", true, "ツール"},
+        {"act_move", "移動ツール", k({s("V")}), "選んだレイヤーをリンクしたレイヤーと一緒にドラッグで動かす（Shift で縦・横・45°、Ctrl+クリックでそこのレイヤーを選ぶ）", true, "ツール"},
         {"act_point_wider", "選んだ点を太く", k({s("Ctrl+Alt+]")}), "部分選択ツールで選んだ制御点のところだけ、線を太くします", false, "ツール"},  // (PC3 C-b)
-        {"act_color", "カラーピッカー（描画色）…", k({s("C")}), "", false, "ツール"},  // (PC4 E-0, decision 2)
-        {"act_split_h", "コマを横に割る（上下に分ける）", k({s("Ctrl+Shift+H")}), "", false, "ページ/コマ"},
-        {"act_split_v", "コマを縦に割る（左右に分ける）", k({s("Ctrl+Shift+V")}), "", false, "ページ/コマ"},
-        {"act_merge", "コマを結合（割る前に戻す）", k({s("Ctrl+Shift+M")}), "", false, "ページ/コマ"},
+        {"act_color", "カラーピッカー（描画色）…", {}, "", false, "ツール"},  // (PC4 E-0, decision 2)
+        {"act_split_h", "コマを横に割る（上下に分ける）", {}, "", false, "ページ/コマ"},
+        {"act_split_v", "コマを縦に割る（左右に分ける）", {}, "", false, "ページ/コマ"},
+        {"act_merge", "コマを結合（割る前に戻す）", k({s("Ctrl+Alt+M")}), "", false, "ページ/コマ"},  // (the user's decision 13: Photoshop's set — Genko's Ctrl+Shift+M)
         {"act_delete_frame", "このコマを消す（ほかのコマはそのまま）", {}, "", false, "ページ/コマ"},
         {"act_frame_selection", "このコマを選択範囲にする", {}, "選んだコマの形を選択範囲にします（塗りつぶし・トーン・消去をコマの中だけに）", false, "ページ/コマ"},
         {"act_gutters", "コマ間隔の設定…", {}, "新しく割るときの上下・左右の間隔", false, "ページ/コマ"},
@@ -127,13 +138,13 @@ const std::vector<Expected>& expected() {
         {"act_page_up", "このページを前へ", k({s("Ctrl+Shift+Up")}), "", false, "ページ"},
         {"act_page_down", "このページを後ろへ", k({s("Ctrl+Shift+Down")}), "", false, "ページ"},
         {"act_name_ok", "ネーム完了 → 作画へ進む", {}, "承認の要らない原稿（AI を使わない原稿）で使います", false, "ページ"},
-        // (every key the system has for Close, Ctrl+W among them: Python binds only the first, Ctrl+F4 on Windows)
-        {"act_close", "閉じる", QKeySequence::keyBindings(Std::Close), "この原稿を閉じます（最後の原稿ならウィンドウも）", false, "ファイル"},
-        {"act_new_window", "新しいウィンドウ（同じ原稿）", {}, "この原稿をもう 1 つのウィンドウで開きます。拡大して描きながら、別の窓で全体を見る", false,
-         "ウィンドウ"},
+        // (every key the systems have for Close, Ctrl+W among them: Python binds only the first, Ctrl+F4 on Windows)
+        {"act_close", "閉じる", k({s("Ctrl+F4"), s("Ctrl+W"), QKeySequence(Qt::Key_Close)}), "この原稿を閉じます（最後の原稿ならウィンドウも）", false, "ファイル"},
+        {"act_new_window", "新規ウィンドウ", {}, "この原稿をもう 1 つのウィンドウで開きます。拡大して描きながら、別の窓で全体を見る", false,
+         "ウィンドウ/アレンジ"},
         {"act_next_doc", "次の原稿", k({s("Ctrl+Tab")}), "", false, "ウィンドウ"},
         {"act_prev_doc", "前の原稿", k({s("Ctrl+Shift+Tab")}), "", false, "ウィンドウ"},
-        {"act_quit", "終了", k({QKeySequence(Std::Quit)}), "", false, "ファイル"},
+        {"act_quit", "終了", k({s("Ctrl+Q")}), "", false, "ファイル"},
     };
     return list;
 }
@@ -375,7 +386,89 @@ private slots:
         // act_layer_style_paste, act_layer_style_clear), 包括光源… (act_global_light), レイヤーを作成 (act_layer_style_layers),
         // すべての効果を隠す・表示 (act_layer_style_hide_all, act_layer_style_show_all), 効果を拡大・縮小… (act_layer_style_scale)
         // — theirs (test_gui_styles).
-        QCOMPARE(w->actions_by_name().size(), std::size_t{584});
+        // and the 11 of PC5 H-0 (SPEC VIEW-01) — 編集 → キーボードショートカット… and 環境設定 ▸'s panes with a page
+        // (act_keyboard_shortcuts, act_prefs_<pane>; 一般… is act_prefs) — theKeySets and theMenusOfPC5 below.
+        // and the 13 of PC5 H-a (SPEC VIEW-01) — 表示 → 100%・200%・レイヤーを画面サイズに合わせる・ピクセルグリッド・ピクセルアート
+        // プレビュー・32 bit プレビューオプション…・手のひらツール, スクリーンモード ▸'s three and 次のスクリーンモード, the hand and zoom
+        // tools' 画面にフィット and スクラブズーム (act_actual_pixels, act_200_percent, act_fit_layers, act_pixel_grid, act_pixel_art,
+        // act_32bit_preview, act_hand_tool, act_screen_standard, act_screen_full_menu, act_screen_full, act_screen_next,
+        // act_fill_screen, act_scrubby_zoom) — test_gui_view.
+        // and the 23 frames of PC5 J-0 (SPEC PROD-01) — ページ → 解析 ▸'s 7 (act_measure_*), レイヤー → ビデオレイヤー ▸'s 12
+        // (act_video_*), ウィンドウ's アクション・レイヤーカンプ・計測ログ・注釈 (act_panel_*) — theProductionFramesSayNotYet's.
+        // and the 17 of PC5 G-a (SPEC TEXT-02) — ツール → 横書き文字ツール (act_text_h), 書式 → アンチエイリアス ▸ 7 (act_type_aa_<method>),
+        // 方向 ▸ 横書き・縦書き (act_type_horizontal, act_type_vertical), テキストレイヤーをラスタライズ・ポイントテキストに変換・
+        // 段落テキストに変換・すべてのテキストレイヤーを更新・Lorem Ipsum をペースト (act_type_rasterize, act_type_to_point,
+        // act_type_to_box, act_type_update_all, act_type_lorem), 台詞をテキストレイヤーに・テキストレイヤーを台詞に
+        // (act_line_to_type_layer, act_type_layer_to_line) — theirs (test_gui_type).
+        // and the 16 of PC5 G-b (SPEC TEXT-02) — 書式 → OpenType ▸ 11 (act_type_ot_<tag>: liga, calt, dlig, swsh, salt, titl, ornm,
+        // ordn, frac, onum and palt), 言語オプション ▸ 初期設定・東アジア言語・中東言語および南アジア言語の機能 (act_type_lang_<which>), 中東および
+        // 南アジア言語用 Composer (act_type_composer_world), 右から左の段落 (act_type_rtl) — theirs (test_gui_type).
+        // and PC5 J-a's ファイル → 書き出し → レイヤーカンプからファイル… (act_comps_to_files; its ウィンドウ → レイヤーカンプ is the
+        // frame's attribute made real) — test_gui_layer_comps.
+        // and the 1 of PC5 I-b (SPEC AUTO-01「グループ」) — レイヤー → 新規 → レイヤーからのフレーム… (act_layer_frame) —
+        // test_gui_layers.
+        // and the 5 of PC5 I-d (SPEC AUTO-01「変数とデータセット」) — ページ → 変数 ▸ 定義…・データセット…, データセットを適用…,
+        // ファイル → 書き出し → データセットからファイル…, ファイル → 読み込み → 変数データセット… (act_variables_define,
+        // act_variables_data_sets, act_apply_data_set, act_data_sets_to_files, act_import_data_sets) — test_gui_variables.
+        // and PC5 J-c's 3 — ツール → 注釈ツール (act_note), 表示 → 表示・非表示 → 注釈 (act_show_notes), ファイル → 読み込み →
+        // 注釈… (act_import_notes); its ウィンドウ → 注釈 is the frame's attribute made real — test_gui_notes.
+        // and the 17 of PC5 H-b (SPEC VIEW-01「ガイド・グリッド・エクストラ」) — 表示 → エクストラ (act_extras), 表示・非表示 ▸'s
+        // レイヤーエッジ・ガイド・カンバスガイド・スマートガイド・メッシュ・編集ピン・すべて・なし・エクストラオプションを表示…
+        // (act_show_layer_edges, act_show_guides, act_show_canvas_guides, act_show_smart_guides, act_show_mesh, act_show_edit_pins,
+        // act_show_all, act_show_none, act_extras_options), ガイドをロック・ガイドを消去・カンバスガイドを消去・新規ガイド…・
+        // 新規ガイドレイアウトを作成… (act_lock_guides, act_clear_guides, act_clear_canvas_guides, act_new_guide,
+        // act_new_guide_layout), 編集 → 環境設定 ▸ 単位・定規…・ガイド・グリッド・スライス… (act_prefs_unitsAndRulers,
+        // act_prefs_guidesGridAndSlices) — test_gui_guides.
+        // and PC5 I-e's 8 — ファイル → 自動処理 → バッチ…・ドロップレットを作成…・条件付きモード変更…・画像を合わせる…・レンズ補正…
+        // (act_batch, act_create_droplet, act_conditional_mode_change, act_fit_image, act_lens_correction_batch), スクリプト →
+        // 画像プロセッサー…・スクリプトイベントマネージャー…・参照… (act_image_processor, act_script_events, act_script_browse) —
+        // test_gui_automate.
+        // and PC5 J-d1's 1 — 表示 → 表示・非表示 → カウント (act_show_count); its 計測スケールを設定 ▸ 初期設定・カスタム…, ものさしツール and
+        // カウントツール are the frames' attributes made real — test_gui_measure.
+        // and PC5 G-c's 2 — 書式 → 初期設定の書式を読み込み・初期設定の書式を保存 (act_type_load_defaults, act_type_save_defaults) —
+        // test_gui_type.
+        // and the 20 of PC5 H-c (SPEC VIEW-01「窓の区画と並べ方」) — ウィンドウ → アレンジ ▸ すべてを左右に並べる・すべてを上下に並べる・
+        // 2 アップ（縦）・2 アップ（横）・3 アップ（縦）・3 アップ（横）・3 アップ（スタック）・4 アップ・6 アップ (act_arrange_tile_vertical,
+        // act_arrange_tile_horizontal, act_arrange_2up_vertical, act_arrange_2up_horizontal, act_arrange_3up_vertical,
+        // act_arrange_3up_horizontal, act_arrange_3up_stacked, act_arrange_4up, act_arrange_6up), すべてをタブに統合・重ねて表示・
+        // 並べて表示 (act_arrange_consolidate, act_arrange_cascade, act_arrange_tile), ウィンドウを分離・すべてのウィンドウを分離
+        // (act_float_window, act_float_all), 同じズーム倍率で表示・同じ位置に表示・同じ回転で表示・すべてを同じ表示にする
+        // (act_match_zoom, act_match_location, act_match_rotation, act_match_all), and the hand's and zoom tool's
+        // すべてのウィンドウをスクロール・すべてのウィンドウをズーム (act_scroll_all, act_zoom_all) — test_gui_arrange.
+        // and the 12 of PC5 H-d (SPEC VIEW-01「ワークスペース」「キーボードショートカットとメニュー」「ツールバー」) — 編集 → メニュー…・
+        // ツールバー… (act_menus, act_toolbar), 環境設定 ▸ ワークスペース… (act_prefs_workspace), ウィンドウ → ワークスペース ▸ 初期設定・
+        // グラフィックと Web・モーション・ペイント・写真・ピクセルアート (act_workspace_essentials, act_workspace_graphic_and_web,
+        // act_workspace_motion, act_workspace_painting, act_workspace_photography, act_workspace_pixel_art)・ワークスペースをリセット・
+        // ワークスペースを削除…・ワークスペースをロック (act_workspace_reset, act_delete_workspace, act_lock_workspace) — test_gui_workspace.
+        // and PC5 J-b's 7 — スライスツール・スライス選択ツール (act_slice_tool, act_slice_select_tool), 表示 → 表示・非表示 → スライス
+        // (act_show_slices), スナップ先 → スライス (act_snap_slices), スライスをロック・スライスを消去 (act_lock_slices, act_clear_slices),
+        // レイヤー → 新規レイヤーベースのスライス (act_layer_slice) — test_gui_slices.
+        // and the 8 of PC5 I-a (SPEC AUTO-01「レイヤーの基本」) — レイヤー → 新規 → 背景からレイヤーへ…・レイヤーからのグループ…
+        // (act_layer_from_background, act_layer_group_from_layers), レイヤーのグループ解除 (act_layer_ungroup), 非表示レイヤーを削除
+        // (act_layer_delete_hidden), クリッピングマスクを作成・解除 (act_clip_create, act_clip_release), ファイル → スクリプト →
+        // すべての空のレイヤーを削除・すべてのレイヤー効果を統合 (act_delete_empty_layers, act_bake_layer_effects) — test_gui_layers.
+        // and PC5 G-d's 20 (SPEC TEXT-02) — ウィンドウ → 文字・段落・文字スタイル・段落スタイル・字形 (act_panel_<panel>), 書式 → パネル ▸
+        // 5 (act_type_panel_<panel>), フォントプレビューのサイズ ▸ 6 (act_type_preview_<size>), すべての見つからないフォントを置換・見つからない
+        // フォントを解決… (act_type_replace_missing, act_type_resolve_missing), 編集 → スペルチェック… (act_spelling) and 環境設定 → テキスト…
+        // (act_prefs_type: its page made) — test_gui_type_panels; PC5 J-e1's 8 (SPEC PROD-01) — 次・前・最初・最後のフレーム,
+        // 作業範囲の開始点へ移動・終了点へ移動, フレームへ移動… (act_next_frame … act_go_to_frame) and ビデオをレンダリング… (act_render_video)
+        // — test_gui_anim.
+        // and PC5 I-h's 2 — ファイル → 自動処理 → 写真の切り抜きと角度補正・HDR Pro に統合… (act_crop_straighten_photos,
+        // act_merge_to_hdr_pro) — test_gui_automate.
+        // and PC5 I-g's 5 (SPEC AUTO-01「自動整列・自動合成」「Photomerge」) — 編集 → レイヤーを自動整列…・レイヤーを自動合成…
+        // (act_auto_align_layers, act_auto_blend_layers), ファイル → 自動処理 → Photomerge… (act_photomerge), スクリプト →
+        // ファイルをスタックとして読み込み…・統計… (act_load_files_into_stack, act_statistics) — test_gui_automate.
+        // and PC5 I-f's 3 — ファイル → 1 部プリント (act_print_one_copy), 生成 → 画像アセット (act_image_assets), 自動処理 → コンタクトシート II…
+        // (act_contact_sheet) — test_gui_output and test_gui_automate.
+        // (PC5 J-f's 1: フィルター → プラグイン ▸ プラグインをインストール… (act_plugin_install) — test_gui_anim)
+        // and PC5 J-e2's 2 (SPEC PROD-01) — ラスタライズ → ビデオ (act_rasterize_video) and 読み込み → ビデオフレームからレイヤー…
+        // (act_video_frames_to_layers); its 12 of ビデオレイヤー ▸ made real in their frames' places — test_gui_anim.
+        // (wip-pc's 674, H-b's 17, I-e's 8, J-d1's 1, G-c's 2, H-c's 20, J-b's 7, I-a's 8, H-d's 12, G-d's 20, J-e1's 8, I-c's 10: アートボード… など — test_gui_artboards —, I-h's 2, I-g's 5, I-f's 3, J-f's 1 and J-e2's 2)
+        // (and PC5 H-e's 3: 環境設定 ▸ ヒストリーログ…・仮想記憶ディスク…・拡張コントロール… — 800＋3; PC5 J-g's 1: 環境設定 ▸ 連携…)
+        // (and PC5 H-f's 16: 編集 → 最後の状態を切り替え (act_toggle_last_state), メモリをクリア ▸ 5 (act_purge_undo, act_purge_clipboard,
+        // act_purge_histories, act_purge_all, act_purge_video_cache) — test_gui_output —, 表示 → ピクセル縦横比 ▸ 9 (act_pixel_aspect_custom
+        // and the 8 ratios) and ピクセル縦横比を補正 (act_pixel_aspect_correction) — test_gui_view: 804＋16)
+        QCOMPARE(w->actions_by_name().size(), std::size_t{820});
         QVERIFY(w->action("act_chat_approval"));
         QVERIFY(w->action("act_style"));
         QVERIFY(w->action("act_exposure"));
@@ -401,11 +494,13 @@ private slots:
             const bool palette_tool = name == QLatin1String("act_select") || name == QLatin1String("act_pen") || name == QLatin1String("act_eraser") ||
                                       name == QLatin1String("act_frame") || name == QLatin1String("act_move");
             if (palette_tool) {
-                QCOMPARE(a->toolTip(), QStringLiteral("%1（%2）\n%3").arg(a->text(), a->shortcut().toString(), a->statusTip()));
+                const QString keys = a->shortcut().toString();
+                QCOMPARE(a->toolTip(), a->text() + (keys.isEmpty() ? QString() : QStringLiteral("（%1）").arg(keys)) + QStringLiteral("\n") + a->statusTip());
             } else if (*e.tip != '\0') {
                 const QString keys = a->shortcut().toString(QKeySequence::NativeText);
-                QCOMPARE(a->toolTip(), QString::fromUtf8(e.text) + (keys.isEmpty() ? QString() : QStringLiteral("（%1）").arg(keys)) + QStringLiteral("\n") +
-                                           QString::fromUtf8(e.tip));
+                // (its name: its place too when another command has the same words — PC5 H-0's 水平方向に反転（表示）)
+                const QString called = genko::app::command_name(genko::app::command_names(w), a);
+                QCOMPARE(a->toolTip(), called + (keys.isEmpty() ? QString() : QStringLiteral("（%1）").arg(keys)) + QStringLiteral("\n") + QString::fromUtf8(e.tip));
             }
         }
         // the palette and the command bar (Python's order); with M3's eight ways of the marquee (test_gui_select) and its
@@ -413,8 +508,10 @@ private slots:
         // text tool (test_gui_lines); PC3 C-a's three path tools (test_gui_paths); the crop tool (PC3 C-e, test_gui_page_size);
         // PC3 B4's four retouching tools (test_gui_retouch); PC3 C-b's five shape tools besides 長方形ツール (test_gui_shapes)
         // PC3 B3's オブジェクト選択ツール and クイック選択ツール (test_gui_select_mask); PC4 E1's 鉛筆ツール (test_gui_brushes); PC4 E5's
-        // nine brushes that change pixels (test_gui_paint_tools)
-        QCOMPARE(w->tools_group()->actions().size(), 53);
+        // nine brushes that change pixels (test_gui_paint_tools); PC5 H-a's 手のひらツール (test_gui_view); PC5 G-a's
+        // 横書き文字ツール (test_gui_type); PC5 J-c's 注釈ツール (test_gui_notes); PC5 J-d1's ものさしツール and カウントツール
+        // (test_gui_measure)
+        QCOMPARE(w->tools_group()->actions().size(), 60);  // (PC5 J-b: スライスツール, スライス選択ツール)
     }
 
     // PC4 F-0 (SPEC FILE-01; 節 F 5.1・5.2): ファイル in Photoshop's order and names — the book's export is 書き出し ▸
@@ -441,20 +538,46 @@ private slots:
                  (QStringList{QStringLiteral("新規…"), QStringLiteral("開く…"), QStringLiteral("指定形式で開く…"), QStringLiteral("最近使用したファイルを開く ▸"),
                               QStringLiteral("|"), QStringLiteral("AI と作る…"), QStringLiteral("|"), QStringLiteral("閉じる"), QStringLiteral("すべてを閉じる"),
                               QStringLiteral("その他を閉じる"), QStringLiteral("|"), QStringLiteral("保存"), QStringLiteral("別名で保存…"), QStringLiteral("コピーを保存…"),
-                              QStringLiteral("復帰"), QStringLiteral("|"), QStringLiteral("書き出し ▸"), QStringLiteral("|"), QStringLiteral("埋め込みを配置…"),
+                              QStringLiteral("復帰"), QStringLiteral("|"), QStringLiteral("書き出し ▸"),
+                              QStringLiteral("生成 ▸"),  // (PC5 I-f: 生成 ▸ 画像アセット)
+                              QStringLiteral("|"), QStringLiteral("埋め込みを配置…"),
                               QStringLiteral("リンクを配置…"), QStringLiteral("パッケージ…"), QStringLiteral("|"), QStringLiteral("画像を読み込む…"),
                               QStringLiteral("スキャン画像を線画にして取り込む…"), QStringLiteral("スキャナーから取り込む…"), QStringLiteral("ほかの原稿のページを取り込む…"),
-                              QStringLiteral("PSD をレイヤーのまま読み込む…"), QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|"),
-                              QStringLiteral("プリント…"), QStringLiteral("|"), QStringLiteral("タイムラプスを記録する"), QStringLiteral("タイムラプスを書き出す…"),
-                              QStringLiteral("|"), QStringLiteral("スクリプト ▸"), QStringLiteral("オートアクション ▸"), QStringLiteral("環境設定…"), QStringLiteral("|"),
-                              QStringLiteral("終了")}));
+                              QStringLiteral("PSD をレイヤーのまま読み込む…"), QStringLiteral("読み込み ▸"),  // (PC5 I-d・J-c: 読み込み ▸ 変数データセット…・注釈…)
+                              QStringLiteral("|"), QStringLiteral("ファイル情報…"), QStringLiteral("|"),
+                              QStringLiteral("プリント…"), QStringLiteral("1 部プリント"),  // (PC5 I-f)
+                              QStringLiteral("|"), QStringLiteral("タイムラプスを記録する"), QStringLiteral("タイムラプスを書き出す…"),
+                              QStringLiteral("|"), QStringLiteral("自動処理 ▸"), QStringLiteral("スクリプト ▸"), QStringLiteral("アクション ▸"),
+                              QStringLiteral("|"), QStringLiteral("終了")}));  // (PC5 H-0: 環境設定 in 編集)
+        // (PC5 I-0, SPEC.md AUTO-01: 自動処理 ▸ is a frame, shown once a group puts a command in it — PC5 I-e's)
+        QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate")) != nullptr);
+        QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_automate"))->menuAction()->isVisible());
+        QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_automate"))),
+                 (QStringList{QStringLiteral("バッチ…"), QStringLiteral("ドロップレットを作成…"), QStringLiteral("|"),
+                              QStringLiteral("写真の切り抜きと角度補正"), QStringLiteral("コンタクトシート II…"), QStringLiteral("|"),  // (PC5 I-h, I-f)
+                              QStringLiteral("条件付きモード変更…"), QStringLiteral("画像を合わせる…"), QStringLiteral("レンズ補正…"),
+                              QStringLiteral("|"), QStringLiteral("HDR Pro に統合…"),  // (PC5 I-h)
+                              QStringLiteral("Photomerge…")}));  // (PC5 I-g)
+        QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_scripts"))),
+                 (QStringList{QStringLiteral("画像プロセッサー…"), QStringLiteral("すべての空のレイヤーを削除"), QStringLiteral("すべてのレイヤー効果を統合"),  // (PC5 I-a)
+                              QStringLiteral("すべてのマスクを統合"), QStringLiteral("|"),
+                              QStringLiteral("スクリプトイベントマネージャー…"), QStringLiteral("|"),
+                              QStringLiteral("ファイルをスタックとして読み込み…"), QStringLiteral("統計…"), QStringLiteral("|"),  // (PC5 I-g)
+                              QStringLiteral("参照…")}));
         QMenu* exports = w->findChild<QMenu*>(QStringLiteral("menu_export"));
         QVERIFY(exports != nullptr);
         QCOMPARE(items(exports), (QStringList{QStringLiteral("PNG としてクイック書き出し"), QStringLiteral("書き出し形式…"), QStringLiteral("|"),
                                              QStringLiteral("書き出しの環境設定…"), QStringLiteral("|"), QStringLiteral("Web 用に保存（従来）…"), QStringLiteral("|"),
-                                             QStringLiteral("原稿を書き出す…"), QStringLiteral("|"), QStringLiteral("レイヤーからファイル…"),
-                                             QStringLiteral("パスを Illustrator へ…"), QStringLiteral("カラールックアップテーブル…")}));
-        QCOMPARE(studio.act("act_export")->shortcuts(), QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+E"))});
+                                             QStringLiteral("原稿を書き出す…"), QStringLiteral("|"),
+                                             QStringLiteral("アートボードからファイル…"), QStringLiteral("アートボードから PDF…"),  // (PC5 I-c)
+                                             QStringLiteral("レイヤーからファイル…"),
+                                             QStringLiteral("レイヤーカンプからファイル…"),  // (PC5 J-a)
+                                             QStringLiteral("パスを Illustrator へ…"),
+                                             QStringLiteral("ビデオをレンダリング…"),  // (PC5 J-e1: after パスを Illustrator へ…, Photoshop's)
+                                             QStringLiteral("カラールックアップテーブル…"),
+                                             QStringLiteral("データセットからファイル…")}));  // (PC5 I-d)
+        // (PC5 H-0: no key in the Photoshop key set — Ctrl+E is 下のレイヤーと結合; Ctrl+E in the Genko set, theKeySets)
+        QVERIFY(studio.act("act_export")->shortcuts().isEmpty());
         QCOMPARE(studio.act("act_print")->text(), QStringLiteral("プリント…"));
         // (節 F's new ones: Photoshop's keys — F-b's connected (PC4 F-b: test_gui_file says what they do), F-c's too (PC4 F-c:
         // test_gui_output) —; F-c's open their windows, the book unchanged when they are closed)
@@ -497,8 +620,103 @@ private slots:
         QCOMPARE(w->documents().size(), books);
     }
 
-    // No two commands share a key (Qt would take the key as ambiguous and do neither): PC1b's 色の校正 (Ctrl+Alt+Y — Ctrl+Y
-    // is やり直す), 色域外警告 (Ctrl+Shift+Y) and カラー設定… (Ctrl+Shift+K) among them.
+    // PC5 J-0 (SPEC PROD-01; 節 J 5.1・5.3・4.2): the production's frames in Photoshop's places — ページ (イメージ) → 解析 ▸,
+    // レイヤー → ビデオレイヤー ▸ before ラスタライズ ▸, ウィンドウ's アクション・レイヤーカンプ・計測ログ・注釈 —, each saying it is
+    // not in this build yet and changing nothing; the canvas's extras drawn by their painters, shown and hidden by key and
+    // by the master switch.
+    void theProductionFramesSayNotYet() {
+        Studio studio;
+        MainWindow* w = studio.window.get();
+        const auto items = [](QMenu* menu) {
+            QStringList out;
+            for (QAction* a : menu->actions()) {
+                if (a->isSeparator()) out << QStringLiteral("|");
+                else if (a->menu() != nullptr) out << a->menu()->title() + QStringLiteral(" ▸");
+                else out << a->text();
+            }
+            return out;
+        };
+        QMenu* analysis = w->findChild<QMenu*>(QStringLiteral("menu_analysis"));
+        QVERIFY(analysis != nullptr);
+        QCOMPARE(items(analysis), (QStringList{QStringLiteral("計測スケールを設定 ▸"), QStringLiteral("データポイントを選択 ▸"), QStringLiteral("計測値を記録"),
+                                              QStringLiteral("|"), QStringLiteral("ものさしツール"), QStringLiteral("カウントツール"), QStringLiteral("|"),
+                                              QStringLiteral("目盛りマーカーを配置…")}));
+        QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_measure_scale"))), (QStringList{QStringLiteral("初期設定"), QStringLiteral("カスタム…")}));
+        QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_measure_points"))), (QStringList{QStringLiteral("カスタム…")}));
+        QMenu* video = w->findChild<QMenu*>(QStringLiteral("menu_video_layers"));
+        QVERIFY(video != nullptr);
+        QCOMPARE(items(video), (QStringList{QStringLiteral("ファイルから新規ビデオレイヤー…"), QStringLiteral("新規空白ビデオレイヤー"), QStringLiteral("|"),
+                                           QStringLiteral("空白フレームを挿入"), QStringLiteral("フレームを複製"), QStringLiteral("フレームを削除"), QStringLiteral("|"),
+                                           QStringLiteral("フッテージを置き換え…"), QStringLiteral("フッテージを解釈…"), QStringLiteral("|"),
+                                           QStringLiteral("変更されたビデオを表示"), QStringLiteral("フレームを復元"), QStringLiteral("すべてのフレームを復元"),
+                                           QStringLiteral("フレームを再読み込み"), QStringLiteral("|"), QStringLiteral("ラスタライズ")}));
+        QMenu* layers = nullptr;
+        QMenu* window_menu = nullptr;
+        for (QAction* top : w->menuBar()->actions()) {
+            if (top->menu() != nullptr && top->menu()->title() == QStringLiteral("レイヤー")) layers = top->menu();
+            if (top->menu() != nullptr && top->menu()->title() == QStringLiteral("ウィンドウ")) window_menu = top->menu();
+        }
+        QVERIFY(layers != nullptr && window_menu != nullptr);
+        const QStringList in_layers = items(layers);
+        QCOMPARE(in_layers.indexOf(QStringLiteral("ビデオレイヤー ▸")) + 1, in_layers.indexOf(QStringLiteral("ラスタライズ ▸")));
+        const QStringList in_window = items(window_menu);
+        for (const char* panel : {"アクション", "レイヤーカンプ", "計測ログ", "注釈", "タイムライン"}) {
+            QVERIFY2(in_window.contains(QString::fromUtf8(panel)), panel);
+        }
+        // (the smart object's ラスタライズ keeps its own name: the first of the words in the menus)
+        QCOMPARE(studio.act("act_smart_rasterize")->text(), QStringLiteral("ラスタライズ"));
+        const std::int64_t revision = studio.doc().revision;
+        // (PC5 J-d1: 計測スケールを設定 ▸ 初期設定・カスタム…, ものさしツール, カウントツール made real; J-d2: データポイントを選択 ▸
+        // カスタム…, 計測値を記録, 目盛りマーカーを配置…, ウィンドウ → 計測ログ — test_gui_measure; J-e2: ビデオレイヤー; J-g: アクション
+        for (const char* name : std::initializer_list<const char*>{}) {  // (no frame left: every group made its own real)
+            QAction* a = studio.act(name);
+            QVERIFY2(a != nullptr, name);
+            QVERIFY2(!a->statusTip().isEmpty(), name);
+            a->trigger();
+            QVERIFY2(w->last_notice().contains(QStringLiteral("この版ではまだ使えません")) && w->last_notice().contains(a->text()), qPrintable(w->last_notice()));
+        }
+        QCOMPARE(studio.doc().revision, revision);
+        // (P2-3: one command an attribute — a frame made real takes its place: make() lets the old one go —, and the keys'
+        // window, the search and the keys laid again find the command the menus hold)
+        std::map<QString, int> made;
+        for (QAction* a : w->findChildren<QAction*>()) {
+            const QString attribute = a->property("genko_attribute").toString();
+            if (!attribute.isEmpty()) ++made[attribute];
+        }
+        for (const auto& [attribute, count] : made) QVERIFY2(count == 1, qPrintable(attribute));
+        const std::vector<QAction*> listed = genko::app::preferences::commands(w);
+        for (const char* name : {"act_measure_record", "act_measure_scale_custom", "act_measure_data_points", "act_video_rasterize", "act_panel_notes",
+                                 "act_panel_layer_comps", "act_comps_to_files", "act_panel_actions"}) {
+            QAction* own = studio.act(name);
+            QVERIFY2(std::find(listed.begin(), listed.end(), own) != listed.end(), name);
+        }
+        // the extras: a painter a key, over the page, shown and hidden
+        PageCanvas* canvas = w->canvas();
+        int drawn = 0;
+        canvas->add_extra({QStringLiteral("count"), [&drawn](QPainter&, const core::Page&, const PageCanvas::ExtraView& view) {
+                               if (view.per_mm > 0 && view.at.map(QPointF(10, 10)) != view.at.map(QPointF(20, 20)) && view.seen_mm.contains(QPointF(10, 10)))
+                                   ++drawn;
+                           }});
+        // (PC5 J-c's notes first; J-d1's count — this test's painter in its place — and ruler; J-b's slices)
+        QCOMPARE(canvas->extra_keys(), (std::vector<QString>{QStringLiteral("notes"), QStringLiteral("count"), QStringLiteral("ruler"), QStringLiteral("slices")}));
+        (void)canvas->grab();
+        QVERIFY(drawn > 0);
+        canvas->show_extra(QStringLiteral("count"), false);
+        QVERIFY(!canvas->extra_shown(QStringLiteral("count")));
+        drawn = 0;
+        (void)canvas->grab();
+        QCOMPARE(drawn, 0);
+        canvas->show_extra(QStringLiteral("count"), true);
+        canvas->extras_shown = false;
+        (void)canvas->grab();
+        QCOMPARE(drawn, 0);
+        canvas->extras_shown = true;
+        (void)canvas->grab();
+        QVERIFY(drawn > 0);
+    }
+
+    // No two commands share a key (Qt would take the key as ambiguous and do neither): PC1b's 色の校正 (Ctrl+Y in the Photoshop
+    // key set — やり直し Ctrl+Shift+Z — since PC5 H-0), 色域外警告 (Ctrl+Shift+Y) and カラー設定… (Ctrl+Shift+K) among them.
     void noTwoCommandsShareAKey() {
         Studio studio;
         MainWindow* w = studio.window.get();
@@ -513,10 +731,10 @@ private slots:
             }
         }
         QVERIFY2(clashes.isEmpty(), qPrintable(clashes.join(QStringLiteral(", "))));
-        QCOMPARE(owner.at(QStringLiteral("Ctrl+Alt+Y")), QStringLiteral("act_cmyk_proof"));
+        QCOMPARE(owner.at(QStringLiteral("Ctrl+Y")), QStringLiteral("act_cmyk_proof"));  // (PC5 H-0: Photoshop's)
         QCOMPARE(owner.at(QStringLiteral("Ctrl+Shift+Y")), QStringLiteral("act_gamut_warning"));
         QCOMPARE(owner.at(QStringLiteral("Ctrl+Shift+K")), QStringLiteral("act_color_settings"));
-        QCOMPARE(owner.at(QStringLiteral("Ctrl+Y")), QStringLiteral("act_redo"));
+        QCOMPARE(owner.at(QStringLiteral("Ctrl+Shift+Z")), QStringLiteral("act_redo"));
         // (選択を解除 keeps Ctrl+D on X11 too, whose keys for Delete hold it: 消去 takes Delete's first and Backspace,
         // as Python's)
         QCOMPARE(owner.at(QStringLiteral("Ctrl+D")), QStringLiteral("act_deselect"));
@@ -534,11 +752,348 @@ private slots:
             QVERIFY(w->action(QStringLiteral("act_gamut_warning"))->shortcuts().isEmpty());
             QVERIFY2(w->last_notice().contains(QStringLiteral("色域外警告")) && w->last_notice().contains(QStringLiteral("ページを並べて見る")),
                      qPrintable(w->last_notice()));
+            // (said once: the keys applied again — the same key taken off again — not said again; PC5 H-0)
+            w->flash(QStringLiteral("ほかの知らせ"), 3000);
+            genko::app::preferences::apply_all(w);
+            QCOMPARE(w->last_notice(), QStringLiteral("ほかの知らせ"));
+            QVERIFY(w->action(QStringLiteral("act_gamut_warning"))->shortcuts().isEmpty());
             genko::app::settings()->remove(QStringLiteral("shortcuts/ページを並べて見る"));
             genko::app::preferences::apply_all(w);
             QCOMPARE(w->action(QStringLiteral("act_gamut_warning"))->shortcuts(), QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Shift+Y"))});
             QCOMPARE(w->action(QStringLiteral("act_overview"))->shortcuts(), QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Shift+O"))});
         }
+    }
+
+    // PC5 H-0 (the user's decision 8, SPEC VIEW-01): the keys come in sets — Photoshop's by default, Genko's before PC5
+    // chosen back in 環境設定 → ショートカット (キーボードショートカット…) —; every row of the Photoshop set names a command
+    // of the window, neither set gives one key to two commands, and a key the person chose stays over either set.
+    void theKeySets() {
+        namespace key_sets = genko::app::key_sets;
+        Studio studio;
+        MainWindow* w = studio.window.get();
+        const auto clashes = [w] {
+            std::map<QString, QAction*> owner;
+            QStringList out;
+            for (QAction* a : w->findChildren<QAction*>()) {
+                if (a->text().isEmpty() || a->menu() != nullptr) continue;
+                for (const QKeySequence& key : a->shortcuts()) {
+                    const auto [it, fresh] = owner.emplace(key.toString(QKeySequence::PortableText), a);
+                    if (!fresh && it->second != a) out << key.toString() + QStringLiteral(": ") + it->second->text() + QStringLiteral(" / ") + a->text();
+                }
+            }
+            return out;
+        };
+        const auto dock = [w](const char* object) {
+            for (QDockWidget* d : w->findChildren<QDockWidget*>(QString::fromUtf8(object))) return d;
+            return static_cast<QDockWidget*>(nullptr);
+        };
+        const auto keys = [w](const char* name) { return w->action(QString::fromLatin1(name))->shortcuts(); };
+        QCOMPARE(key_sets::current(), QStringLiteral("photoshop"));
+        QCOMPARE(key_sets::sets().size(), std::size_t{2});
+        for (const auto& [row, set] : key_sets::photoshop_keys()) {
+            if (row.startsWith(QStringLiteral("dock:"))) {
+                QVERIFY2(!w->findChildren<QDockWidget*>(row.mid(5)).isEmpty(), qPrintable(row));
+            } else {
+                QVERIFY2(w->action(row) != nullptr, qPrintable(row));
+                QCOMPARE(w->action(row)->shortcuts(), set);
+            }
+        }
+        QCOMPARE(clashes(), QStringList());
+        // Photoshop's: 移動ツール V, クイックマスク Q, コマ割り K (Photoshop's フレームツール), 検索 Ctrl+F, フィルターの再実行 Ctrl+Alt+F,
+        // 下のレイヤーと結合 Ctrl+E, 一般… Ctrl+K, the channels Ctrl+2…, レイヤー F7; Genko's that Photoshop gives another: none
+        QCOMPARE(keys("act_move"), k({s("V")}));
+        QCOMPARE(keys("act_quick_mask"), k({s("Q")}));
+        QCOMPARE(keys("act_frame"), k({s("K")}));
+        QCOMPARE(keys("act_find_command"), k({s("Ctrl+F")}));
+        QCOMPARE(keys("act_filter_last"), k({s("Ctrl+Alt+F")}));
+        QCOMPARE(keys("act_layer_merge"), k({s("Ctrl+E")}));
+        QCOMPARE(keys("act_prefs"), k({s("Ctrl+K"), s("Ctrl+,")}));
+        QCOMPARE(keys("act_keyboard_shortcuts"), k({s("Ctrl+Alt+Shift+K")}));
+        QCOMPARE(keys("act_channel_composite"), k({s("Ctrl+2")}));
+        QCOMPARE(keys("act_scale"), k({s("Ctrl+R")}));  // (定規: Photoshop's the same)
+        // (PC5 H-a) 100% Ctrl+1, 手のひらツール H, スクリーンモード F
+        QCOMPARE(keys("act_actual_pixels"), k({s("Ctrl+1")}));
+        QCOMPARE(keys("act_hand_tool"), k({s("H")}));
+        QCOMPARE(keys("act_screen_next"), k({s("F")}));
+        QCOMPARE(dock("レイヤー")->toggleViewAction()->shortcuts(), k({s("F7")}));
+        // (PC5 H-d) メニュー… Ctrl+Alt+Shift+M; コマを結合 Ctrl+Alt+M — Photoshop's Shift+Ctrl+M 計測値を記録's (the user's
+        // decision 13: J-d2), the key one no Photoshop key, no other command's
+        QCOMPARE(keys("act_menus"), k({s("Ctrl+Alt+Shift+M")}));
+        QCOMPARE(keys("act_merge"), k({s("Ctrl+Alt+M")}));
+        QCOMPARE(keys("act_measure_record"), k({s("Ctrl+Shift+M")}));
+        QVERIFY(!key_sets::photoshop_defaults().contains(QStringLiteral("Ctrl+Alt+M")));
+        QVERIFY(key_sets::photoshop_defaults().contains(QStringLiteral("Ctrl+Shift+M")));
+        for (QAction* a : w->findChildren<QAction*>()) {
+            // (Ctrl+Shift+M 計測値を記録's alone in the Photoshop set — PC5 J-d2)
+            if (a != w->action("act_measure_record")) QVERIFY2(!a->shortcuts().contains(s("Ctrl+Shift+M")), qPrintable(a->text()));
+            // (Ctrl+Alt+M コマを結合's alone — no later part's: J-b's slices, I-a's — the review of H-d)
+            if (a != w->action("act_merge")) QVERIFY2(!a->shortcuts().contains(s("Ctrl+Alt+M")), qPrintable(a->text()));
+        }
+        for (const char* none : {"act_mirror", "act_actual", "act_guides", "act_history", "act_snap", "act_show_rulers", "act_export"}) {
+            QVERIFY2(keys(none).isEmpty(), none);
+        }
+        // the Genko-only tools whose letter Photoshop gives another: a key Photoshop leaves free (the user's decision
+        // 2026-10-29) — 選択 Shift+N, 効果線 Shift+K, 3D 操作 Shift+D, 線の修正 Shift+R, 塗りつぶし Shift+Q
+        QCOMPARE(keys("act_select"), k({s("Shift+N")}));
+        QCOMPARE(keys("act_effect"), k({s("Shift+K")}));
+        QCOMPARE(keys("act_3d"), k({s("Shift+D")}));
+        QCOMPARE(keys("act_reshape"), k({s("Shift+R")}));
+        QCOMPARE(keys("act_fill"), k({s("Shift+Q")}));
+        for (const QString& tool : key_sets::genko_tools()) {
+            const QList<QKeySequence> own = w->action(tool)->shortcuts();
+            QVERIFY2(!own.isEmpty(), qPrintable(tool));
+            for (const QKeySequence& key : own) {
+                QVERIFY2(!key_sets::photoshop_defaults().contains(key.toString(QKeySequence::PortableText)), qPrintable(tool + QStringLiteral(" ") + key.toString()));
+            }
+        }
+        QVERIFY(key_sets::photoshop_defaults().contains(QStringLiteral("Shift+B")) && key_sets::photoshop_defaults().contains(QStringLiteral("V")));
+        // the keys the words say are the commands' own now (the オプション panel's title, a notice): Photoshop's here
+        const auto title = [w](const char* tool) {
+            w->choose_tool(QString::fromLatin1(tool));
+            return w->tool_settings()->title()->text();
+        };
+        QCOMPARE(title("select"), QStringLiteral("選択（Shift+N）"));
+        QCOMPARE(title("frame"), QStringLiteral("コマ割り（K）"));
+        QCOMPARE(title("move"), QStringLiteral("移動ツール（V）"));
+        QCOMPARE(title("shape"), QStringLiteral("シェイプツール（U・Shift+U）"));
+        // Genko's set: the keys before PC5 back
+        genko::app::settings()->setValue(QStringLiteral("ui/key_set"), QStringLiteral("genko"));
+        genko::app::preferences::apply_all(w);
+        QCOMPARE(key_sets::current(), QStringLiteral("genko"));
+        QCOMPARE(keys("act_move"), k({s("Q")}));
+        QCOMPARE(keys("act_select"), k({s("V")}));
+        QCOMPARE(keys("act_frame"), k({s("F")}));
+        QCOMPARE(keys("act_mirror"), k({s("H")}));
+        QCOMPARE(keys("act_actual"), k({s("Ctrl+1")}));
+        for (const char* none : {"act_actual_pixels", "act_hand_tool", "act_screen_next"}) QVERIFY2(keys(none).isEmpty(), none);  // (PC5 H-a)
+        QCOMPARE(keys("act_guides"), k({s("Ctrl+;")}));
+        QCOMPARE(keys("act_history"), k({s("Ctrl+H")}));
+        QCOMPARE(keys("act_cmyk_proof"), k({s("Ctrl+Alt+Y")}));
+        QCOMPARE(keys("act_redo"), k({s("Ctrl+Y"), s("Ctrl+Shift+Z")}));
+        QCOMPARE(keys("act_find_command"), k({s("Ctrl+Shift+F")}));
+        QCOMPARE(keys("act_filter_last"), k({s("Ctrl+F")}));
+        QCOMPARE(keys("act_export"), k({s("Ctrl+E")}));
+        QCOMPARE(keys("act_prefs"), k({s("Ctrl+,")}));
+        QCOMPARE(keys("act_channel_composite"), k({s("Ctrl+Alt+2")}));
+        QCOMPARE(keys("act_merge"), k({s("Ctrl+Shift+M")}));  // (Genko's as before: the user's decision 13)
+        QVERIFY(keys("act_measure_record").isEmpty());          // (PC5 J-d2: no key in Genko's set — Ctrl+Shift+M コマを結合's)
+        QVERIFY(keys("act_menus").isEmpty());
+        QVERIFY(dock("レイヤー")->toggleViewAction()->shortcuts().isEmpty());
+        QCOMPARE(clashes(), QStringList());
+        QCOMPARE(title("select"), QStringLiteral("選択（V）"));  // (Genko's: the title follows the set)
+        QCOMPARE(title("frame"), QStringLiteral("コマ割り（F）"));
+        QCOMPARE(title("shape"), QStringLiteral("シェイプツール（O・Shift+O）"));
+        // a key the person chose stays over either set
+        genko::app::settings()->setValue(QStringLiteral("shortcuts/移動ツール"), QStringLiteral("Ctrl+Alt+Shift+F2"));
+        genko::app::preferences::apply_all(w);
+        QCOMPARE(keys("act_move"), k({s("Ctrl+Alt+Shift+F2")}));
+        key_sets::set_current(QStringLiteral("photoshop"));
+        genko::app::preferences::apply_all(w);
+        QCOMPARE(keys("act_move"), k({s("Ctrl+Alt+Shift+F2")}));
+        genko::app::settings()->remove(QStringLiteral("shortcuts/移動ツール"));
+        genko::app::preferences::apply_all(w);
+        QCOMPARE(keys("act_move"), k({s("V")}));
+        // キーボードショートカット…'s キーの組 (PC5 H-d: its own window, 環境設定 → ショートカット before): the keys shown follow the set
+        // chosen (the person's own stay), kept by 決める
+        {
+            genko::app::ShortcutsDialog dialog(w);
+            QCOMPARE(dialog.key_set->currentData().toString(), QStringLiteral("photoshop"));
+            QCOMPARE(dialog.editor(QStringLiteral("移動ツール"))->keySequence(), s("V"));
+            dialog.editor(QStringLiteral("選択"))->setKeySequence(s("Ctrl+Alt+N"));
+            dialog.key_set->setCurrentIndex(dialog.key_set->findData(QStringLiteral("genko")));
+            QCOMPARE(dialog.editor(QStringLiteral("移動ツール"))->keySequence(), s("Q"));
+            QCOMPARE(dialog.editor(QStringLiteral("選択"))->keySequence(), s("Ctrl+Alt+N"));
+            dialog.reset_keys();
+            QCOMPARE(dialog.editor(QStringLiteral("選択"))->keySequence(), s("V"));
+            dialog.save();
+        }
+        QCOMPARE(key_sets::current(), QStringLiteral("genko"));
+        QCOMPARE(keys("act_move"), k({s("Q")}));
+        QVERIFY(!genko::app::settings()->contains(QStringLiteral("shortcuts/選択")));
+        // (the next window as it was left, then the default again)
+        genko::app::settings()->remove(QStringLiteral("ui/key_set"));
+        genko::app::preferences::apply_all(w);
+        QCOMPARE(keys("act_move"), k({s("V")}));
+        // a preference written by another program (genko prefs set — H-e): the watch of settings.ini applies it to the
+        // windows open; a write of the app's memories only is not one, nor the app's own write of a preference (what it
+        // writes it has applied itself — the export's settings, ブラシプレビュー)
+        const QString file = QString::fromStdString(genko::core::path_to_utf8(genko::app::config_dir() / "settings.ini"));
+        const auto other = [&file](const char* key, const QString& value) {
+            QSettings program(file, QSettings::IniFormat);  // (not the app's own settings(): another program)
+            if (value.isNull()) program.remove(QString::fromLatin1(key));
+            else program.setValue(QString::fromLatin1(key), value);
+        };
+        (void)genko::app::settings_changed_now();
+        other("ui/key_set", QStringLiteral("genko"));
+        QVERIFY(genko::app::settings_changed_now());
+        QCOMPARE(keys("act_move"), k({s("Q")}));
+        other("brush/kind", QStringLiteral("gpen"));
+        QVERIFY(!genko::app::settings_changed_now());
+        genko::app::settings()->setValue(QStringLiteral("ui/brush_preview"), QStringLiteral("false"));
+        genko::app::settings()->setValue(QStringLiteral("export/jpeg_quality"), 70);
+        QVERIFY(!genko::app::settings_changed_now());
+        genko::app::settings()->remove(QStringLiteral("ui/brush_preview"));
+        genko::app::settings()->remove(QStringLiteral("export/jpeg_quality"));
+        QVERIFY(!genko::app::settings_changed_now());
+        other("ui/key_set", QString());
+        QVERIFY(genko::app::settings_changed_now());
+        QCOMPARE(keys("act_move"), k({s("V")}));
+        // a person whose settings are from before the Photoshop set became the default: told once on the app's start, and
+        // the Genko set a click away (the coordinator's decision with the user's decision 8); a new person never told
+        genko::app::settings()->remove(QStringLiteral("ui/key_set_told"));
+        QVERIFY(!genko::app::settings()->allKeys().isEmpty());
+        QVERIFY(key_sets::from_before_pc5());
+        QVERIFY(!key_sets::from_before_pc5());  // (once)
+        key_sets::tell_new_default(w);
+        QVERIFY2(w->last_notice().contains(QStringLiteral("Photoshop")) && w->last_notice().contains(QStringLiteral("Genko の組に戻す")), qPrintable(w->last_notice()));
+        auto* back = w->findChild<QPushButton*>(QStringLiteral("key_set_back"));
+        QVERIFY(back != nullptr && back->text() == QStringLiteral("Genko の組に戻す"));
+        back->click();
+        QCOMPARE(key_sets::current(), QStringLiteral("genko"));
+        QCOMPARE(keys("act_move"), k({s("Q")}));
+        QVERIFY(!back->isVisible());  // (gone)
+        genko::app::settings()->remove(QStringLiteral("ui/key_set"));
+        genko::app::preferences::apply_all(w);
+        QCOMPARE(keys("act_move"), k({s("V")}));
+        {
+            // (chosen already: not told)
+            genko::app::settings()->remove(QStringLiteral("ui/key_set_told"));
+            genko::app::settings()->setValue(QStringLiteral("ui/key_set"), QStringLiteral("photoshop"));
+            QVERIFY(!key_sets::from_before_pc5());
+            genko::app::settings()->remove(QStringLiteral("ui/key_set"));
+        }
+    }
+
+    // PC5 H-0 (節 H 5.1・5.2・5.4, SPEC VIEW-01): 表示 in Photoshop's order with Genko's own after a line; ウィンドウ → アレンジ ▸
+    // (新規ウィンドウ) and ワークスペース ▸ first; 編集 ends with 検索, キーボードショートカット… and 環境設定 ▸ (its panes, each
+    // opening its page) — 環境設定… no longer in ファイル nor 検索 in ヘルプ; the panels by Photoshop's names.
+    void theMenusOfPC5() {
+        Studio studio;
+        MainWindow* w = studio.window.get();
+        const auto menu = [w](const QString& title) -> QMenu* {
+            for (QAction* top : w->menuBar()->actions()) {
+                if (top->menu() != nullptr && top->menu()->title() == title) return top->menu();
+            }
+            return nullptr;
+        };
+        const auto items = [](QMenu* m) {
+            QStringList out;
+            for (QAction* a : m->actions()) out << (a->isSeparator() ? QStringLiteral("|") : a->menu() != nullptr ? a->menu()->title() + QStringLiteral(" ▸") : a->text());
+            return out;
+        };
+        QCOMPARE(items(menu(QStringLiteral("表示"))),
+                 (QStringList{QStringLiteral("校正の設定 ▸"), QStringLiteral("色の校正"), QStringLiteral("色域外警告"), QStringLiteral("|"),
+                              // (PC5 H-a: 32 bit プレビューオプション…, レイヤーを画面サイズに合わせる, 100%, 200%, ピクセルアートプレビュー,
+                              // スクリーンモード ▸, 表示・非表示 ▸ (ピクセルグリッド; H-b fills the rest), 手のひらツール;
+                              // PC5 H-f: ピクセル縦横比 ▸, ピクセル縦横比を補正)
+                              QStringLiteral("ピクセル縦横比 ▸"), QStringLiteral("ピクセル縦横比を補正"),
+                              QStringLiteral("32 bit プレビューオプション…"), QStringLiteral("|"),
+                              QStringLiteral("ズームイン"), QStringLiteral("ズームアウト"), QStringLiteral("画面サイズに合わせる"),
+                              QStringLiteral("アートボードを画面サイズに合わせる"),  // (PC5 I-c)
+                              QStringLiteral("レイヤーを画面サイズに合わせる"), QStringLiteral("100%"), QStringLiteral("200%"), QStringLiteral("プリントサイズ"),
+                              QStringLiteral("|"), QStringLiteral("水平方向に反転"), QStringLiteral("パターンプレビュー"), QStringLiteral("ピクセルアートプレビュー"),
+                              // (PC5 H-b: エクストラ, 表示・非表示 ▸ — ターゲットパス, ブラシプレビュー and 選択範囲のエッジ in it —, the guides')
+                              QStringLiteral("|"), QStringLiteral("スクリーンモード ▸"), QStringLiteral("|"), QStringLiteral("エクストラ"), QStringLiteral("表示・非表示 ▸"),
+                              QStringLiteral("|"), QStringLiteral("定規"), QStringLiteral("|"),
+                              QStringLiteral("スナップ"), QStringLiteral("スナップ先 ▸"), QStringLiteral("|"), QStringLiteral("ガイドをロック"), QStringLiteral("ガイドを消去"),
+                              QStringLiteral("選択したアートボードのガイドを消去"),  // (PC5 I-c)
+                              QStringLiteral("カンバスガイドを消去"), QStringLiteral("新規ガイド…"), QStringLiteral("新規ガイドレイアウトを作成…"),
+                              QStringLiteral("シェイプから新規ガイドを作成"),
+                              // (PC5 J-b: スライスをロック・スライスを消去)
+                              QStringLiteral("|"), QStringLiteral("スライスをロック"), QStringLiteral("スライスを消去"),
+                              QStringLiteral("|"), QStringLiteral("上下反転して見る"), QStringLiteral("左に回す（15°）"), QStringLiteral("右に回す（15°）"),
+                              QStringLiteral("回転・反転を戻す"), QStringLiteral("表示倍率を打ち込む…"), QStringLiteral("ズームツール"), QStringLiteral("手のひらツール"),
+                              QStringLiteral("|"),
+                              QStringLiteral("ページを並べて見る"), QStringLiteral("◀ 前のページ"), QStringLiteral("次のページ ▶"), QStringLiteral("|"),
+                              QStringLiteral("仕上がり線・基本枠を表示"), QStringLiteral("スマホの画面の範囲を表示"),
+                              QStringLiteral("前のページを透かす（オニオンスキン）"), QStringLiteral("網点を画面で見る"), QStringLiteral("|"), QStringLiteral("道具の名前を表示")}));
+        // (PC5 H-a: Photoshop's three screen modes and F going round them; 表示・非表示 ▸ with ピクセルグリッド, H-b's after)
+        QCOMPARE(items(w->findChild<QMenu*>(QStringLiteral("menu_screen_mode"))),
+                 (QStringList{QStringLiteral("標準スクリーンモード"), QStringLiteral("メニュー付きフルスクリーンモード"), QStringLiteral("フルスクリーンモード"),
+                              QStringLiteral("|"), QStringLiteral("次のスクリーンモード")}));
+        QVERIFY(items(w->findChild<QMenu*>(QStringLiteral("menu_show"))).contains(QStringLiteral("ピクセルグリッド")));
+        // (one 表示・非表示 ▸ — show_menu(view), whichever part comes first —, in 表示, found again by show_menu)
+        QCOMPARE(w->findChildren<QMenu*>(QStringLiteral("menu_show")).size(), 1);
+        QCOMPARE(items(menu(QStringLiteral("表示"))).count(QStringLiteral("表示・非表示 ▸")), 1);
+        const QStringList window = items(menu(QStringLiteral("ウィンドウ")));
+        QCOMPARE(window.mid(0, 4), (QStringList{QStringLiteral("アレンジ ▸"), QStringLiteral("ワークスペース ▸"), QStringLiteral("|"), QStringLiteral("原稿だけを表示")}));
+        QMenu* arrange = w->findChild<QMenu*>(QStringLiteral("menu_arrange"));
+        QVERIFY(arrange != nullptr);
+        // (PC5 H-c: Photoshop's アレンジ ▸ — the cells, the tabs and windows, the views made the same, 新規ウィンドウ last)
+        QCOMPARE(items(arrange),
+                 (QStringList{QStringLiteral("すべてを左右に並べる"), QStringLiteral("すべてを上下に並べる"), QStringLiteral("2 アップ（縦）"),
+                              QStringLiteral("2 アップ（横）"), QStringLiteral("3 アップ（縦）"), QStringLiteral("3 アップ（横）"), QStringLiteral("3 アップ（スタック）"),
+                              QStringLiteral("4 アップ"), QStringLiteral("6 アップ"), QStringLiteral("|"), QStringLiteral("すべてをタブに統合"),
+                              QStringLiteral("重ねて表示"), QStringLiteral("並べて表示"), QStringLiteral("|"), QStringLiteral("ウィンドウを分離"),
+                              QStringLiteral("すべてのウィンドウを分離"), QStringLiteral("|"), QStringLiteral("同じズーム倍率で表示"), QStringLiteral("同じ位置に表示"),
+                              QStringLiteral("同じ回転で表示"), QStringLiteral("すべてを同じ表示にする"), QStringLiteral("|"), QStringLiteral("新規ウィンドウ")}));
+        for (const char* panel : {"ツール", "修飾キー"}) QVERIFY2(window.contains(QString::fromUtf8(panel)), panel);
+        for (const char* panel : {"ナビゲーター", "オプション", "ヒストリー"}) QVERIFY2(window.contains(QString::fromUtf8(panel)), panel);
+        for (const auto& [object, title] : {std::pair{"全体図", "ナビゲーター"}, {"ツールの設定", "オプション"}, {"履歴", "ヒストリー"}}) {
+            const auto docks = w->findChildren<QDockWidget*>(QString::fromUtf8(object));  // (the workspaces' keys kept)
+            QCOMPARE(docks.size(), qsizetype{1});
+            QCOMPARE(docks.front()->windowTitle(), QString::fromUtf8(title));
+        }
+        QCOMPARE(w->tool_palette()->windowTitle(), QStringLiteral("ツール"));
+        const QStringList edit = items(menu(QStringLiteral("編集")));
+        // (PC5 G-d: Photoshop's スペルチェック… and 検索と置換… after 検索; PC5 H-d: メニュー… and ツールバー… after
+        // キーボードショートカット…)
+        QCOMPARE(edit.mid(edit.size() - 9),
+                 (QStringList{QStringLiteral("|"), QStringLiteral("検索"), QStringLiteral("スペルチェック…"), QStringLiteral("検索と置換…"), QStringLiteral("|"),
+                              QStringLiteral("キーボードショートカット…"), QStringLiteral("メニュー…"), QStringLiteral("ツールバー…"), QStringLiteral("環境設定 ▸")}));
+        // (PC5 H-f: メモリをクリア ▸ before 検索, between lines)
+        QCOMPARE(edit.mid(edit.size() - 11, 2), (QStringList{QStringLiteral("|"), QStringLiteral("メモリをクリア ▸")}));
+        QMenu* panes = w->findChild<QMenu*>(QStringLiteral("menu_preferences"));
+        QVERIFY(panes != nullptr);
+        QCOMPARE(items(panes), (QStringList{QStringLiteral("一般…"), QStringLiteral("インターフェイス…"),
+                                           QStringLiteral("ワークスペース…"),  // (PC5 H-d)
+                                           QStringLiteral("ツール…"), QStringLiteral("ヒストリーログ…"),  // (PC5 H-e)
+                                           QStringLiteral("ファイル管理…"),
+                                           QStringLiteral("書き出し…"), QStringLiteral("パフォーマンス…"), QStringLiteral("仮想記憶ディスク…"),  // (PC5 H-e)
+                                           QStringLiteral("カーソル…"), QStringLiteral("透明部分・色域…"),
+                                           QStringLiteral("単位・定規…"), QStringLiteral("ガイド・グリッド・スライス…"),  // (PC5 H-b)
+                                           QStringLiteral("プラグイン…"),  // (PC5 J-f: the plugins' own window, act_plugin_settings)
+                                           QStringLiteral("テキスト…"),  // (PC5 G-d)
+                                           QStringLiteral("拡張コントロール…"),  // (PC5 H-e)
+                                           QStringLiteral("Camera Raw…"), QStringLiteral("連携…"),  // (PC5 J-g)
+                                           QStringLiteral("ペンタブレット…"), QStringLiteral("長い時間の作業…")}));
+        QVERIFY(!items(menu(QStringLiteral("ファイル"))).contains(QStringLiteral("環境設定…")));
+        QVERIFY(!items(menu(QStringLiteral("ヘルプ"))).contains(QStringLiteral("検索")));
+        // each pane opens the dialog at its page
+        const auto shown = studio.answers->responder->exec;
+        QString page;
+        studio.answers->responder->exec = [&page](QDialog* dialog) {
+            if (auto* prefs = qobject_cast<genko::app::preferences::PreferencesDialog*>(dialog)) page = prefs->tabs->tabText(prefs->tabs->currentIndex());
+            return int(QDialog::Rejected);
+        };
+        // (PC5 H-e: each pane its own page — 一般 no more the 表示・作業 of them all)
+        for (const auto& [pane, title] : std::vector<std::pair<const char*, const char*>>{{"act_prefs", "一般"},
+                                                                                          {"act_prefs_interface", "インターフェイス"},
+                                                                                          {"act_prefs_historyLog", "ヒストリーログ"},
+                                                                                          {"act_prefs_scratchDisks", "仮想記憶ディスク"},
+                                                                                          {"act_prefs_enhancedControls", "拡張コントロール"},
+                                                                                          {"act_prefs_comfort", "長い時間の作業"},
+                                                                                          {"act_prefs_fileHandling", "ファイル管理"},
+                                                                                          {"act_prefs_export", "書き出し"},
+                                                                                          {"act_prefs_transparencyAndGamut", "透明部分・色域"},
+                                                                                          {"act_prefs_rawDefaults", "Camera Raw"},
+                                                                                          {"act_prefs_tablet", "ペンタブレット"},
+                                                                                          {"act_prefs_workspace", "ワークスペース"}}) {
+            page.clear();
+            studio.trigger(pane);
+            QCOMPARE(page, QString::fromUtf8(title));
+        }
+        // (PC5 H-d: キーボードショートカット… and メニュー… open their own window at their tab — 環境設定's page no more)
+        int tab = -1;
+        studio.answers->responder->exec = [&tab](QDialog* dialog) {
+            if (auto* keys = qobject_cast<genko::app::ShortcutsDialog*>(dialog)) tab = keys->tabs->currentIndex();
+            return int(QDialog::Rejected);
+        };
+        studio.trigger("act_keyboard_shortcuts");
+        QCOMPARE(tab, 0);
+        studio.trigger("act_menus");
+        QCOMPARE(tab, 1);
+        studio.answers->responder->exec = shown;
     }
 
     // ウィンドウ → 開いている原稿 (document.activate): every book open in the window by its number and title, the one in
@@ -606,7 +1161,17 @@ private slots:
                                                   {"blurtool", "act_blur_tool"}, {"sharpentool", "act_sharpen_tool"}, {"smudgetool", "act_smudge_tool"},
                                                   {"dodge", "act_dodge_tool"}, {"burn", "act_burn_tool"}, {"sponge", "act_sponge_tool"},
                                                   {"mixer", "act_mixer_brush"}, {"bgeraser", "act_background_eraser"},
-                                                  {"colorreplace", "act_color_replacement"}};
+                                                  {"colorreplace", "act_color_replacement"},
+                                                  // (PC5 H-a: 手のひらツール)
+                                                  {"hand", "act_hand_tool"},
+                                                  // (PC5 G-a: 横書き文字ツール)
+                                                  {"text_h", "act_text_h"},
+                                                  // (PC5 J-c: 注釈ツール)
+                                                  {"note", "act_note"},
+                                                  // (PC5 J-d1: ものさしツール, カウントツール — the frames' attributes made real)
+                                                  {"measure", "act_measure_ruler_tool"}, {"count", "act_measure_count_tool"},
+                                                  // (PC5 J-b: スライスツール, スライス選択ツール)
+                                                  {"slice", "act_slice_tool"}, {"slice_select", "act_slice_select_tool"}};
         QCOMPARE(w->tool_actions().size(), tools.size());
         QVERIFY(w->tools_group()->isExclusive());
         QVERIFY(w->action(QStringLiteral("act_select"))->isChecked());
@@ -663,10 +1228,10 @@ private slots:
             QAction* a = w->stage_actions().at(key);
             QCOMPARE(a->text(), label + QStringLiteral("の並び"));
             QCOMPARE(a->statusTip(), QStringLiteral("この段階でよく使うパネルだけを出します"));
-            QVERIFY(menus_of(w, a).contains(QStringLiteral("ウィンドウ/作業の段階")));
+            QVERIFY(menus_of(w, a).contains(QStringLiteral("ウィンドウ/ワークスペース/作業の段階")));  // (PC5 H-d: in ワークスペース ▸, 節 H 5.2)
             a->trigger();
             QCOMPARE(genko::app::settings()->value(QStringLiteral("ui/stage")).toString(), key);
-            QCOMPARE(w->last_notice(), QStringLiteral("「%1」の並びにしました（ウィンドウ → 作業の段階）").arg(label));
+            QCOMPARE(w->last_notice(), QStringLiteral("「%1」の並びにしました（ウィンドウ → ワークスペース → 作業の段階）").arg(label));
             for (QDockWidget* dock : w->findChildren<QDockWidget*>()) {
                 if (dock->windowTitle() == QLatin1String("全体図")) QCOMPARE(dock->isVisible(), navigator);
                 if (dock->windowTitle() == QLatin1String("ページ")) QCOMPARE(dock->isVisible(), pages);
@@ -707,13 +1272,18 @@ private slots:
         QVERIFY(!c->fitted());
         studio.trigger("act_zoom_out");
         QVERIFY(qFuzzyCompare(c->scale(), fitted * 1.25 * 0.8));
+        // (PC5 H-a, the user's decision 11: プリントサイズ is the paper at 96 dpi; the % is the page's pixels — 100% one a
+        // screen pixel)
         studio.trigger("act_actual");
+        QVERIFY(qFuzzyCompare(c->scale(), 96 / 25.4));
+        studio.trigger("act_actual_pixels");
         QCOMPARE(c->zoom_percent(), 100);
+        QVERIFY(qFuzzyCompare(c->scale(), c->page()->spec.dpi.value() / 25.4 / c->devicePixelRatioF()));
         studio.trigger("act_fit");
         QVERIFY(c->fitted());
         QVERIFY(qFuzzyCompare(c->scale(), fitted));
         studio.answers->responder->get_int = [](const QString&, const QString& label, int, int lo, int hi) {
-            return label == QStringLiteral("倍率（%。100 で紙の大きさ）") && lo == 5 && hi == 6400 ? std::optional<int>(250) : std::nullopt;
+            return label == QStringLiteral("倍率（%。100 で画素等倍）") && lo == 1 && hi == 3200 ? std::optional<int>(250) : std::nullopt;
         };
         studio.trigger("act_zoom_value");
         QCOMPARE(c->zoom_percent(), 250);

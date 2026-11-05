@@ -18,6 +18,7 @@
 #include "core/pyops.hpp"
 #include "core/pyrandom.hpp"
 #include "core/ruby.hpp"
+#include "core/type_text.hpp"
 #include "render/draw.hpp"
 #include "render/npcompat.hpp"
 #include "render/page.hpp"
@@ -680,6 +681,7 @@ core::StoryLine upright_twin(const core::StoryLine& ln, const TurnedSheet& sheet
     }
     twin.x_mm = core::Num(ln.x_mm.value() - left);
     twin.y_mm = core::Num(ln.y_mm.value() - top);
+    core::type_text::move_anchor(twin, -left, -top);  // (PC5 G-a review P2-2: a point text's anchor on the sheet too)
     if (ln.path && !ln.path->empty()) {
         std::vector<core::Point> moved;
         for (const core::Point& p : *ln.path) moved.push_back(core::Point{core::Num(p.x.value() - left), core::Num(p.y.value() - top)});
@@ -1251,6 +1253,10 @@ void clear_balloon_cache() {
     remembered_masks().clear();
     remembered_sheets().clear();
     remembered_stretches().clear();
+}
+
+std::int64_t balloon_cache_bytes() {
+    return layout_cache_bytes() + remembered_masks().used() + remembered_sheets().used() + remembered_stretches().used();
 }
 
 }  // namespace genko::render::text

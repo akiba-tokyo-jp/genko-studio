@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/actor.hpp"
 #include "core/command_bus.hpp"
 #include "core/json.hpp"
 #include "core/model.hpp"
@@ -160,10 +161,18 @@ public:
     // Apply ops at once in memory (throws core::ApplyError and leaves the book as it was). `ids`: the ids new_id()
     // gives first while they are applied (a pen line's id chosen before it was drawn). [{"op": "undo"}] is undo().
     core::ApplyResult apply(const core::Json& ops, const std::vector<std::string>& ids = {});
+    // (PC5 J-g, SPEC.md PROD-01「制御チャンネル」) apply() as another actor than the person: the control channel's token's
+    // (core::Actor::with_agent_rights — the rules MCP's apply_ops has). The change is the book's as any other — in 履歴, Undo
+    // takes it back, a rebase applies it again as that actor — and the journal names that actor.
+    core::ApplyResult apply_as(const core::Json& ops, const core::Actor& actor, const std::vector<std::string>& ids = {});
     // apply() of ops a worker applied already to `base` (a window's preview, PC3 B4: its result, the ids new_id() gave
     // meanwhile): taken as it is when the book is still `base` (the same change, journal and ids as apply() makes), else
     // applied again with those ids first.
     core::ApplyResult apply_worked(const core::Json& ops, const DocPtr& base, core::ApplyResult result, const std::vector<std::string>& taken);
+    // (PC5 I-0, SPEC.md AUTO-01) The script, batch or script event the changes applied from now on come from: the journal
+    // names each by it (storage::SaveRequest::script); empty: none.
+    void set_script(std::string script) { script_ = std::move(script); }
+    const std::string& script() const { return script_; }
     // Take back the latest change (in memory when it is not saved yet, else through the journal). Throws
     // core::ApplyError("nothing to undo").
     void undo();
@@ -193,6 +202,20 @@ public:
     // asset, read as the book reads its project.json); none when that state is not held (an older Genko's genko gc took
     // it, the journal cannot be read) or past the changes done.
     std::optional<DocPtr> state_at(std::size_t done) const;
+    // (PC5 H-f, 最後の状態を切り替え) The last step through the history was back — an undo (in memory or through the journal),
+    // no redo nor change since —: the next toggle goes forward again.
+    bool stepped_back() const { return stepped_back_; }
+    // (PC5 H-f, メモリをクリア → 取り消し・ヒストリー; the coordinator's decision: memory only) What memory holds of the
+    // history let go: the journal's states read for 履歴 and the History Brush (state_at), the journal as read, and this
+    // session's changes already saved — but the latest — (each holds the book as it was before it), as the history's
+    // limit lets them go (Options::history_changes): Undo still reaches all of them, through the journal, which keeps
+    // every change. What is not saved yet, and the changes undone, stay.
+    struct Purged {
+        std::size_t changes = 0;  // the changes that left memory
+        std::size_t states = 0;   // the journal's states let go
+        std::size_t bytes = 0;    // the precise colour pictures only those changes held
+    };
+    Purged purge_history();
 
     // --- the disk -------------------------------------------------------------------------------------------
     SaveStatus status() const;
@@ -269,6 +292,8 @@ private:
         DocPtr before;
         DocPtr after;
         bool recover = false;          // adopting a recovery point (saved as action "recover")
+        std::string script;            // (PC5 I-0) the script it came from: the journal's "script"
+        std::optional<core::Actor> actor;  // (PC5 J-g) apply_as's actor: the journal's (none: the session's person)
         bool whole = false;            // 復帰: the book put back whole (its ops are not made again on another book)
         std::string txn;               // the transaction that first saved it (the journal's entry for it)
         bool on_disk = false;          // that transaction is committed: undo and redo now go through the journal
@@ -309,7 +334,10 @@ private:
     static JobResult execute(const Job& job);
 
     // apply()'s change of `result` (its ops applied to the book as it is, new_id() giving `ids`) kept, shown and saved.
-    core::ApplyResult keep_applied(const core::Json& ops, core::ApplyResult result, std::vector<std::string> ids);
+    core::ApplyResult keep_applied(const core::Json& ops, core::ApplyResult result, std::vector<std::string> ids,
+                                   std::optional<core::Actor> actor = std::nullopt);
+    // The actor a change was made as (apply_as's, else the person's).
+    core::Actor actor_of(const Change& change) const { return change.actor ? *change.actor : core::Actor(actor_); }
     void touch(BookChange change);
     void schedule_save();
     void start_job();
@@ -361,6 +389,8 @@ private:
     std::optional<std::int64_t> recover_floor_;
     bool trimmed_ = false;        // trim_history let changes of this session go to the journal
     std::uint64_t redo_floor_ = 0;  // apply(): what was undone before it (an action's seq below this) is not redone
+    std::string script_;            // (PC5 I-0) set_script
+    bool stepped_back_ = false;     // (PC5 H-f) stepped_back
     mutable std::shared_ptr<const JournalRead> journal_read_;  // history(): the journal as last read
     // state_at(): the journal's states read last, by their refs (at most kStatesKept, the latest last: a book of many pages
     // read again and again — the History Brush's source changed — is not held without end)

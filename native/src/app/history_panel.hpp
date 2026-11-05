@@ -36,6 +36,9 @@ public:
 
     // The list again from the session: （はじめ）, the changes done, the present (▶, bold, chosen), the ones undone.
     void refresh();
+    // (PC5 H-e, 環境設定 → パフォーマンス → ヒストリー数: the latest changes done listed, the older ones left out of the list —
+    // （はじめ） kept; the journal keeps every one, and undo still reaches them)
+    int states = 1000;
     // Undo or redo until `target` changes are done (a refusal said in the status line).
     void go_to(int target);
     // How many changes are done now (the present's row).

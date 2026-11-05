@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <stop_token>
 #include <string>
@@ -12,6 +13,7 @@
 
 #include "core/json.hpp"
 #include "render/image.hpp"
+#include "render/plugin_bands.hpp"
 
 // Filter plugins (プラグイン, Python's genko/plugins.py, with docs/cpp-migration/SPEC.md COMP-04): a Python file a person
 // puts in <config>/plugins/ (NAME, PARAMS, run(image, **params) on a PIL RGBA picture) becomes a filter for paint layers
@@ -41,6 +43,17 @@
 // RGBA pixels) and writes the reply (one JSON line {"ok": true, "width", "height"}, then the RGBA pixels; or {"ok":
 // false, "error"}), as the runner does. The same limits in time and in what it may write back. A plugin's process (the
 // runner's too) starts a process group of its own on POSIX, stopped whole when it is stopped (Windows: the process).
+//
+// PC5 J-f (plugins:WASM-ABI-v1, docs/PLUGIN_WASM.md): WebAssembly plugins, a third kind — <config>/plugins/<key>.wasm
+// (and the *.wasm of the additional plugins folder, when it is used; not recursive): a module of PhotoCraft's plug-in ABI
+// v1, run by genko-plugin-host (native/wasm-host: PhotoCraft's wasmi sandbox — no imports, an instruction, time and
+// memory budget, a fresh instance for each band —, a process of its own beside genko), over protocol 2: the picture in
+// bands of f32 samples in its own colour model (render/plugin_bands). Off until chosen, as the others: chosen as the
+// module's bytes are (sha256; changed: chosen again); listing reads the file's name and size only (nothing runs before
+// it is chosen); the bytes checked are the bytes the host gets. Native plugins of protocol 2 (plugin.json "protocol":
+// 2, docs/PLUGIN_NATIVE.md) take the same bands. Both work on every kind of paint layer — 8 bits, precise colour, a
+// page's inks — and on an alpha channel or a Quick Mask (one grey channel); Python's plugins and native ones of
+// protocol 1 stay 8-bit RGBA as before.
 
 namespace genko::render::plugins {
 
@@ -61,6 +74,11 @@ struct Listed {
     bool chosen = false;               // chosen to run, as it is now
     bool native = false;               // a native plugin (a program), not a Python file
     std::optional<std::string> problem;  // why a native plugin cannot be chosen (its plugin.json or its program)
+    // (PC5 J-f) a WebAssembly module (<key>.wasm): its file, its size; its manifest only once described (chosen)
+    bool wasm = false;
+    std::string path;          // where the file is (a .wasm: the plugins' folder or the additional one)
+    std::uintmax_t bytes = 0;  // its size (a .wasm)
+    int protocol = 0;          // a native plugin's plugin.json protocol (1, 2), when it can be used
 };
 std::vector<Listed> listed();
 // A plugin of this key is installed: <key>.py or <key>/plugin.json in the folder (nothing read or run).
@@ -72,6 +90,10 @@ struct Settings {
     bool enabled = false;
     std::string python;
     core::Json chosen = core::Json::object();
+    // (PC5 J-f, edit.preferences.plugIns: Photoshop's 追加のプラグインフォルダー — its *.wasm listed after the plugins
+    // folder's, while it is used)
+    bool use_extra_folder = false;
+    std::string extra_folder;
 };
 Settings settings();
 void save_settings(const Settings& settings);
@@ -94,6 +116,10 @@ struct Described {
     std::string key;
     std::string name;
     core::Json params = core::Json::object();
+    // (PC5 J-f) "python", "native" or "wasm"; a WebAssembly module's manifest as it says it (id, name, version, author,
+    // description, params in its own form, overlap, area)
+    std::string kind = "python";
+    std::optional<core::Json> manifest;
 };
 Described describe(const std::string& key);
 // The chosen plugins that can be described (plugins.available for the filter list; the others left out).
@@ -110,5 +136,62 @@ std::vector<std::tuple<std::string, std::string, double, double, double>> fields
 Image run(std::string_view kind, const Image& image, const core::Json& params = core::Json::object(), const std::stop_token& stop = {});
 // The pictures kept forgotten (tests).
 void forget_made();
+
+// --- PC5 J-f: WebAssembly modules, protocol 2, installing ------------------------------------------------------------
+
+inline constexpr std::uintmax_t kMostModuleBytes = std::uintmax_t{32} << 20;  // (PhotoCraft's Limits::max_module_bytes)
+
+// The plugin takes the picture in bands of f32 samples in its own colour model (a WebAssembly module, a native plugin
+// of protocol 2), so it works on precise and ink layers and channels too; else it takes 8-bit RGBA only.
+bool works_in_bands(const std::string& key);
+// The program that runs WebAssembly modules: genko-plugin-host beside this program (none: the WebAssembly plugins cannot
+// run, said as the runner's trouble). Tests give theirs (set_host_for_testing): no environment variable chooses it.
+std::optional<std::filesystem::path> host_program();
+
+// plugins.run on samples (render/plugin_bands): a chosen plugin that works in bands over `picture`, in place;
+// `coverage` the selection (one value a pixel). Its errors as run's; a plugin that takes 8-bit RGBA only:
+// core::Error("plugin_8bit").
+void run_samples(std::string_view kind, plugin_bands::Samples& picture, const std::vector<float>* coverage, const core::Json& params,
+                 const std::stop_token& stop = {});
+// The same over a picture read and written where it is kept (render/plugin_bands::Picture: an 8-bit picture, a precise
+// raster, a page's inks), band by band — never held whole in f32 (review P2-1).
+void run_picture(std::string_view kind, plugin_bands::Picture& picture, const core::Json& params, const std::stop_token& stop = {});
+// The pictures the 8-bit ways give the bands (written in place into `rgba`, RGBA: a copy of the caller's): its RGB and
+// alpha, or (a channel lent as a paint layer) its grey alone, written back grey and opaque; `cover` ("L", its size): the
+// selection's coverage, and a mask's coverage a row at a time.
+plugin_bands::Picture rgba_picture(Image& rgba, const Image* cover);
+plugin_bands::Picture grey_picture(Image& rgba, const Image* cover);
+std::function<void(int, int, int, float*)> mask_coverage(const Image& mask);
+// The 8-bit way of a plugin that works in bands, inside a coverage ("L", the picture's size; none: all of it): the
+// picture as RGB with its alpha (render/plugin_bands, 8 bits). run() is this without a coverage for such a plugin.
+Image run_8bit(std::string_view kind, const Image& image, const Image* coverage, const core::Json& params, const std::stop_token& stop = {});
+
+// The WebAssembly host's limits lowered for tests (the keys of PhotoCraft's Limits: fuel_base, wall_time_ms, …; null:
+// as they are). Never raised.
+void set_wasm_limits_for_testing(const core::Json& limits);
+// Tests: the host program to start (an empty path: none; nullopt: the one beside this program), and a run's time for each
+// 8 million pixels of protocol 2 (0 s: kRunTime).
+void set_host_for_testing(const std::optional<std::filesystem::path>& host);
+void set_run_time_for_testing(std::chrono::seconds unit);
+// What a plugin runs as now: its chosen digest while it is allowed, else "" (what a drawing that ran it remembers it by).
+std::string run_digest(const std::string& key);
+
+// plugin.install: a file put into the plugins' folder (a .wasm module: its size and its header looked at, nothing run;
+// a .py file as it is), replacing one of the same name; it is not chosen to run. Its key. core::Error("plugin_install",
+// …) for what cannot be installed (not a file, another kind, too large, not a module, a name a plugin of another kind
+// has, a name not usable).
+std::string install(const std::filesystem::path& file);
+// plugin.remove: the plugin's file taken out of the plugins' folder (a .wasm or .py), and its choice. core::Error(
+// "plugin_install", …) for a native plugin's folder or a module of the additional folder (removed there by hand) and
+// PyValueError("no plugin x") for none.
+void remove(const std::string& key);
+// plugin.reload: everything remembered of the plugins forgotten (their descriptions, digests, pictures made) and the
+// list read again; each chosen WebAssembly module described again, a broken one with its reason (`problem`).
+std::vector<Listed> reload();
+// plugin.list (read only — `genko plugins list`, MCP's inspect plugins "installed"): a plugin as listed, as JSON —
+// {"key", "kind": "python" | "native" | "wasm", "filter": "plugin:<key>", "chosen", "sha256", "problem"?, and what is
+// known without running it: a native plugin's "name", "params", "protocol"; a module's "size", "path" and, once described,
+// its manifest's "id", "name", "version", "author", "description", "params", "overlap", "area"}.
+core::Json listed_json(const Listed& item);
 
 }  // namespace genko::render::plugins

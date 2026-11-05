@@ -714,7 +714,7 @@ Reply Api::routes(const std::string& method, const std::string& route, const std
         out["job_id"] = core::new_id();
         if (result.has_warnings) out["warnings"] = result.warnings;
         if (!result.results.empty()) out["results"] = result.results;
-        if (!dry_run) {
+        if (!dry_run && !result.unchanged) {  // (PC5 G-0: questions alone — type_info — are a dry run)
             storage::SaveRequest save;
             save.actor = actor;
             save.base_revision = loaded.document.revision;

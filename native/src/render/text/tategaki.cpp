@@ -443,6 +443,22 @@ std::pair<std::u32string, std::vector<std::size_t>> without_periods_mapped(std::
     return {std::move(out), std::move(from)};
 }
 
+std::u32string mark_spans(std::u32string_view text, const std::vector<std::pair<std::size_t, std::size_t>>& spans) {
+    if (spans.empty()) return std::u32string(text);
+    std::u32string out;
+    std::size_t at = 0;
+    for (const auto& [start, end] : spans) {
+        if (start < at || end <= start || end > text.size() || text.substr(start, end - start).find(U'\n') != std::u32string_view::npos) continue;
+        out += text.substr(at, start - at);
+        out.push_back(kTcyOpen);
+        out += text.substr(start, end - start);
+        out.push_back(kTcyClose);
+        at = end;
+    }
+    out += text.substr(at);
+    return out;
+}
+
 std::u32string mark_tcy(std::u32string_view text, const StyleRuns& style_runs) {
     std::u32string out(text);
     std::size_t pos = 0;
@@ -623,18 +639,12 @@ Image raw_glyph(std::u32string_view ch, const TrueTypeFont& font, const Rgb& fil
 
 }  // namespace
 
-Image glyph(std::u32string_view ch, const TrueTypeFont& font, std::int64_t em, const Rgb& fill, int bold) {
+namespace {
+
+// A letter's own picture (cut to its ink) set in its em square as glyph() sets it: 、。 in its upper right, small kana
+// smaller in its upper right, any other letter in its middle (turned a quarter when `rotate`).
+Image placed(Image raw, std::u32string_view drawn, std::int64_t em, bool rotate) {
     Image img = blank(em, em);
-    bool rotate = member(kRotateCw, ch);
-    std::u32string drawn(ch);
-    const auto form = vertical_form(ch);
-    if (form && has_drawn_glyph(font, std::u32string(1, *form))) {
-        drawn = std::u32string(1, *form);
-        rotate = false;
-    } else if (form) {
-        rotate = true;
-    }
-    Image raw = raw_glyph(drawn, font, fill, bold);
     std::int64_t gw = raw.width();
     std::int64_t gh = raw.height();
     const std::int64_t margin = std::max<std::int64_t>(1, floordiv(em, 12));
@@ -666,6 +676,37 @@ Image glyph(std::u32string_view ch, const TrueTypeFont& font, std::int64_t em, c
     img.paste(raw, Point{static_cast<int>(ox), static_cast<int>(oy)}, &raw);
     if (rotate) img = img.rotate(-90, Resample::Bicubic, false);
     return img;
+}
+
+}  // namespace
+
+Image glyph(std::u32string_view ch, const TrueTypeFont& font, std::int64_t em, const Rgb& fill, int bold) {
+    bool rotate = member(kRotateCw, ch);
+    std::u32string drawn(ch);
+    const auto form = vertical_form(ch);
+    if (form && has_drawn_glyph(font, std::u32string(1, *form))) {
+        drawn = std::u32string(1, *form);
+        rotate = false;
+    } else if (form) {
+        rotate = true;
+    }
+    return placed(raw_glyph(drawn, font, fill, bold), drawn, em, rotate);
+}
+
+Image glyph_by_id(std::uint32_t id, std::u32string_view ch, const TrueTypeFont& font, std::int64_t em, const Rgb& fill, int bold) {
+    // (as _raw_glyph draws a letter: on a canvas four times its size, its stroke in its colour, cut to its ink)
+    const int size = std::max(16, font.size());
+    Image canvas = blank(size * 4, size * 4);
+    {
+        Draw draw(canvas);
+        const Ink ink = opaque(fill);
+        const GlyphPlace place{id, 0.0, 0.0};
+        draw.glyphs(PointD{static_cast<double>(size), static_cast<double>(size) + font.getmetrics().first}, std::span<const GlyphPlace>(&place, 1), font, ink,
+                    {}, bold, bold != 0 ? std::optional<Ink>(ink) : std::nullopt);
+    }
+    const auto bbox = canvas.getbbox();
+    Image raw = bbox ? canvas.crop(*bbox) : blank(size / 2, size / 2);
+    return placed(std::move(raw), ch, em, false);
 }
 
 Image tcy_glyph(std::u32string_view cell, const TrueTypeFont& font, std::int64_t em, const Rgb& fill, int bold) {
@@ -803,7 +844,8 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
     for (const char32_t c : args.text) {
         if (c != U'\n') plain.push_back(c);
     }
-    const std::u32string text = mark_tcy(args.text, args.style_runs);  // (縦中横 chosen word by word)
+    // (縦中横 chosen word by word — PC5 G-d: and the record's ranges that ask for it, by place)
+    const std::u32string text = mark_tcy(mark_spans(args.text, args.tcy_spans), args.style_runs);
     const std::vector<Json> ruby_runs = args.mono_ruby ? mono_runs(args.ruby_runs) : args.ruby_runs;
     // the style of each cell, in reading order (cells never change order when they wrap)
     std::vector<Cell> seq;
@@ -811,11 +853,18 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
         if (cell != U"\n") seq.push_back(std::move(cell));
     }
     const int level = std::clamp(args.bold, 0, 2);
-    const std::vector<Json> per_char = char_styles(plain, args.style_runs, level ? Json{{"bold", level}} : Json());
+    std::vector<Json> per_char = char_styles(plain, args.style_runs, level ? Json{{"bold", level}} : Json());
+    for (std::size_t k = 0; k < args.looks.size() && k < per_char.size(); ++k) {  // (PC5 G-b: each letter's own look)
+        if (!args.looks[k].is_object() || args.looks[k].empty()) continue;
+        if (!per_char[k].is_object()) per_char[k] = Json::object();
+        for (const auto& [key, value] : args.looks[k].items()) per_char[k][key] = value;
+    }
     std::vector<Json> styles;
+    std::vector<std::size_t> letter_at;  // (each cell's first letter among the text's letters)
     std::size_t at = 0;
     for (const Cell& cell : seq) {
         styles.push_back(at < per_char.size() ? per_char[at] : Json::object());
+        letter_at.push_back(at);
         at += cell_text(cell).size();
     }
     const auto size_of = [&](const Json& style) -> std::int64_t {
@@ -980,7 +1029,11 @@ Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args) {
                 composite_at(out, image, cx + floordiv(widths[c] - image.width(), 2), y);
                 continue;
             }
-            const Image image = across ? tcy_glyph(cell, font_for(U"0", size), size, rgb, thick) : glyph(cell, font_for(cell, size), size, rgb, thick);
+            std::optional<Image> chosen;  // (PC5 G-b: the glyph HarfBuzz chooses for a one-letter cell, where it chooses another)
+            if (!across && args.opentype_cell) chosen = args.opentype_cell(letter_at[i], cell, size, rgb, thick);
+            const Image image = chosen ? std::move(*chosen)
+                                : across ? tcy_glyph(cell, font_for(U"0", size), size, rgb, thick)
+                                         : glyph(cell, font_for(cell, size), size, rgb, thick);
             composite_at(out, image, cx + floordiv(widths[c] - size, 2), y);
             if (marked.contains({c, row})) {
                 draw_mark(out, static_cast<double>(cx + widths[c]) + static_cast<double>(mark_w) / 2,

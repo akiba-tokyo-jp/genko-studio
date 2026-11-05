@@ -8,6 +8,7 @@
 
 #include "core/json.hpp"
 #include "core/model.hpp"
+#include "core/units.hpp"
 
 class QCheckBox;
 class QComboBox;
@@ -34,7 +35,7 @@ public:
     core::Json op() const;
 
     QComboBox* scope = nullptr;       // page | all
-    QComboBox* unit = nullptr;        // mm | px
+    QComboBox* unit = nullptr;        // mm | px — PC5 H-b: and cm, in, pt, pica, percent, columns (環境設定 → 単位・定規's first)
     QDoubleSpinBox* width = nullptr;
     QDoubleSpinBox* height = nullptr;
     QCheckBox* keep_ratio = nullptr;  // 縦横比を固定
@@ -47,8 +48,11 @@ public:
 private:
     void follow(bool from_width);
     void show_unit();
-    double mm_of(double value) const;
-    double value_of(double mm) const;
+    // (a length along the width — `across` — or the height in the unit chosen: px at the resolution in the window, a percent
+    // of the page's size now)
+    core::units::Basis basis(bool across) const;
+    double mm_of(double value, bool across) const;
+    double value_of(double mm, bool across) const;
 
     const core::Page& page_;
     double ratio_ = 1;
@@ -69,6 +73,7 @@ public:
     void choose_anchor(const QString& anchor);
 
     QComboBox* scope = nullptr;
+    QComboBox* unit = nullptr;  // (PC5 H-b: mm, px, cm, in, pt, pica, percent, columns — 環境設定 → 単位・定規's first)
     QDoubleSpinBox* width = nullptr;
     QDoubleSpinBox* height = nullptr;
     QCheckBox* relative = nullptr;
@@ -79,7 +84,10 @@ public:
     QDialogButtonBox* buttons = nullptr;
 
 private:
+    core::units::Basis basis(bool across) const;
+    void show_unit();
     const core::Page& page_;
+    core::units::Unit unit_now_ = core::units::Unit::Mm;
     QString anchor_ = QStringLiteral("center");
     std::array<int, 3> chosen_{255, 255, 255};
 };

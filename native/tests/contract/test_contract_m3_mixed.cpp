@@ -189,6 +189,7 @@ std::string step_difference(const Pair& r, bool dry, const std::set<std::string>
     }
     Json want = genko::test::one_line(r.py.out);
     if (!want.is_object()) return "Python printed " + want.dump();
+    genko::test::with_words_of_2026_10_28(want);  // (the words the person changed on 2026-10-28, put into Python's)
     if (got.value("ok", false)) {
         const bool has_revision = got.contains("revision") && got["revision"].is_number_integer();
         const bool has_txn = dry || is_hex(got.value("txn", Json()), 32);

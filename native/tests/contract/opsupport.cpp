@@ -171,9 +171,12 @@ std::string without_addresses(std::string text) {
 
 std::string with_decided_words(std::string text) {
     // PC3 C-b (vector@1): a gradient fill layer takes Photoshop's angle, reflected and diamond shapes too, so add_layer
-    // names them when it refuses another (gradient_fill's own shapes are as they were)
+    // names them when it refuses another (gradient_fill's own shapes are as they were);
     static const std::pair<std::string_view, std::string_view> decided[] = {
         {"add_layer: shape must be linear, radial or ellipse", "add_layer: shape must be linear, radial, ellipse, angle, reflected or diamond"},
+        // PC5 J-e1 (timeline@1): set_animation takes the fps of 0.5..120 (1..60 written as before), so it names those when it
+        // refuses another
+        {"set_animation: fps is 1 to 60", "set_animation: fps is 0.5 to 120"},
     };
     for (const auto& [python, cpp] : decided) {
         for (std::size_t at = text.find(python); at != std::string::npos; at = text.find(python, at + cpp.size())) {

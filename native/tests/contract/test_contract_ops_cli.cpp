@@ -210,6 +210,7 @@ private slots:
                 ++tracebacks;
             } else {
                 Json want = genko::test::one_line(py.out);
+                genko::test::with_words_of_2026_10_28(want);  // (the words the person changed on 2026-10-28, put into Python's)
                 if (got.value("ok", false)) {
                     // the keys of a v4 book, and the job's new id
                     const bool has_revision = got.contains("revision") && got["revision"].is_number_integer();

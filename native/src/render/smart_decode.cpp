@@ -19,6 +19,7 @@
 #include "core/error.hpp"
 #include "core/smart.hpp"
 #include "render/codecs/codecs.hpp"
+#include "render/color_canvas.hpp"
 #include "render/imaging.hpp"
 #include "render/ink.hpp"
 #include "render/not_yet_ported.hpp"
@@ -689,12 +690,10 @@ DeepPicture deep_picture(std::string_view bytes) {
                 out.mode = std::string(merged->colours == 1 ? "gray" : "rgb") + (out.alpha ? "a" : "");
                 out.samples = std::move(merged->samples);
                 if (f.depth() == 32) {
-                    // (a 32-bit file's colours are linear light: encoded as the 8-bit picture encodes them, 1/2.2, its
-                    // values past 1 kept)
-                    for (std::size_t i = 0; i < out.samples.size(); ++i) {
-                        if (out.alpha && i % out.channels == out.channels - 1) continue;
-                        out.samples[i] = static_cast<float>(std::pow(std::max(0.0f, out.samples[i]), 1.0 / 2.2));
-                    }
+                    // (a 32-bit file's colours are linear light: encoded by the tone curve of the file's own profile — the
+                    // inverse of the 32-bit PSD this build writes, PC5-0, Z0's review P2-1; before it 1/2.2 —, values past
+                    // 0..1 kept, NaN 0)
+                    encode_by_profile(out.samples, out.channels, out.alpha, f.icc());
                 }
                 return out;
             }

@@ -62,8 +62,8 @@ const std::vector<ShapeTool>& shape_tools() {
         {"act_shape_ellipse", "楕円形ツール", "shape_ellipse", "ellipse", "楕円形", "ドラッグで楕円のシェイプを描きます（Shift で正円、Alt で中心から）"},
         {"act_shape_triangle", "三角形ツール", "shape_triangle", "triangle", "三角形", "ドラッグで三角形のシェイプを描きます（Shift で縦横が同じ、Alt で中心から）"},
         {"act_shape_polygon", "多角形ツール", "shape_polygon", "polygon", "多角形",
-         "ドラッグで多角形・星形のシェイプを描きます（辺の数と星の比率はツールの設定で。Alt で中心から）"},
-        {"act_shape_line", "ラインツール", "shape_line", "line", "ライン", "ドラッグで直線のシェイプを描きます（Shift で 45° 刻み、太さはツールの設定で）"},
+         "ドラッグで多角形・星形のシェイプを描きます（辺の数と星の比率はオプションで。Alt で中心から）"},
+        {"act_shape_line", "ラインツール", "shape_line", "line", "ライン", "ドラッグで直線のシェイプを描きます（Shift で 45° 刻み、太さはオプションで）"},
         {"act_shape_custom", "カスタムシェイプツール", "shape_custom", "custom", "シェイプ",
          "シェイプ パネルで選んだ形をドラッグで描きます（Shift で縦横比を保つ、Alt で中心から）"},
     };
@@ -507,7 +507,7 @@ bool MainWindow::add_shape_part_op(Json what, bool closed, const std::optional<v
 void MainWindow::shape_part_drawn(const Json& shape, const QString& mode) {
     const std::optional<vec::Path> path = figure_path(shape);
     if (!path || path->empty()) {
-        if (shape.value("shape", std::string()) == "custom") flash(QStringLiteral("カスタムシェイプをシェイプ パネルかツールの設定で選びます"), 3000);
+        if (shape.value("shape", std::string()) == "custom") flash(QStringLiteral("カスタムシェイプをシェイプ パネルかオプションで選びます"), 3000);
         return;
     }
     const std::string kind = shape.value("shape", std::string());
@@ -709,11 +709,14 @@ bool MainWindow::selection_to_shape() {
 }
 
 bool MainWindow::line_to_shape() {
-    if (!canvas_->selected_line_id) {
-        flash(QStringLiteral("先に台詞を選びます（選択ツールで台詞をクリック）"), 3000);
+    // (PC5 G-a review P2-6: the chosen type layer's text too — 書式 → シェイプに変換; the shape on a new pen layer then)
+    const std::optional<Json> target = type_target(false);
+    if (!target) {
+        flash(QStringLiteral("先にテキストレイヤー（レイヤー パネル）か台詞（選択ツールでクリック）を選びます"), 3000);
         return false;
     }
-    Json op{{"op", "text_to_path"}, {"id", *canvas_->selected_line_id}, {"to", "shape"}};
+    Json op = target->contains("layer_id") ? Json{{"op", "text_to_path"}, {"page", (*target)["page"]}, {"id", (*target)["layer_id"]}, {"to", "shape"}}
+                                           : Json{{"op", "text_to_path"}, {"id", (*target)["line"]}, {"to", "shape"}};
     const core::Layer* layer = target_layer();
     if (layer != nullptr && layer->kind == core::LayerKind::Strokes && !layer->locked && !(shape_new_layer_ != nullptr && shape_new_layer_->isChecked()))
         op["layer_id"] = layer->id;

@@ -119,4 +119,12 @@ void copy_tree(const QString& from, const QString& to);
 // "" when nothing is.
 std::string book_problems(const QString& dir);
 
+// The user's decisions of 2026-10-28 (PC5-0) in the public catalogue (`genko schema`, the MCP resource genko://ops, the
+// HTTP API's /schema): Python's words where this build's changed — filter_raster's glow named as フィルター → 漫画 names
+// it, add_layer's kind saying a paint layer of a page of 16 or 32 bits is at the page's depth. `text` as Python wrote
+// it (its JSON with or without ensure_ascii, or such a JSON inside a JSON string) → this build's.
+std::string with_words_of_2026_10_28(std::string text);
+// The same in every string of `value` (a record of Python's replies, compared with this build's).
+void with_words_of_2026_10_28(core::Json& value);
+
 }  // namespace genko::test

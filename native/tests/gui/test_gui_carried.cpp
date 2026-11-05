@@ -1,4 +1,4 @@
-// The features carried over to M6 (Python's test_h4, test_i0, test_f6, test_m10, test_j9): オートアクション (recorded,
+// The features carried over to M6 (Python's test_h4, test_i0, test_f6, test_m10, test_j9): アクション (recorded,
 // played on another page with new ids as one step to undo, aimed at the layer drawn on and the chosen panel, managed,
 // played on every page), 画像を読み込む (into the chosen panel, kept in the book), マスクを編集する (the pen paints the
 // mask, not lines), 枠線の間隔・破線の長さ・揺れ, and 本の形でプレビュー (the spreads as the book is bound, a page turning).
@@ -6,12 +6,14 @@
 #include <QtTest>
 
 #include <QDialog>
+#include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QImage>
 #include <QLabel>
 #include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
+#include <QToolButton>
 #include <QTextBrowser>
 #include <QPainter>
 #include <QRegularExpression>
@@ -19,6 +21,7 @@
 #include <memory>
 
 #include "app/actions.hpp"
+#include "app/actions_panel.hpp"
 #include "app/bookview.hpp"
 #include "app/canvas.hpp"
 #include "app/config.hpp"
@@ -28,7 +31,10 @@
 #include "app/main_window.hpp"
 #include "gui_support.hpp"
 #include "core/smart.hpp"
+#include "service/script_events.hpp"
 #include "storage/asset_store.hpp"
+#include "storage/fsutil.hpp"
+#include "storage/journal.hpp"
 #include "storage/reader.hpp"
 
 using namespace genko;
@@ -127,6 +133,60 @@ private slots:
         QVERIFY(!w->recording() && !w->status_label()->text().contains(QStringLiteral("記録中")));
     }
 
+    // PC5 J-g (window.panel.actions): ウィンドウ → アクション — the dock (Alt+F9 in Photoshop's keys), the actions kept and the
+    // steps of the one chosen, 記録 (a name first) → 停止 kept under it, 再生 on the page in front, 削除; ファイル → アクション ▸
+    // (オートアクション before) the same actions
+    void theActionsPanel() {
+        Book book;
+        app::MainWindow* w = book.window.get();
+        QAction* toggle = book.act("act_panel_actions");
+        QVERIFY(toggle != nullptr && toggle->isCheckable() && toggle->text() == QStringLiteral("アクション"));
+        QVERIFY(!w->actions_dock()->isVisible());
+        toggle->trigger();
+        QVERIFY(w->actions_dock()->isVisible() && toggle->isChecked());
+        QCOMPARE(w->actions_dock()->objectName(), QStringLiteral("アクション"));
+        app::ActionsPanel* panel = w->actions_panel();
+        QVERIFY(panel != nullptr && panel->record->isEnabled() && !panel->stop->isEnabled());
+        // 記録: the name asked first, then what is done is recorded
+        book.answers.responder->get_text = [](const QString&, const QString&, const QString&) { return std::optional<QString>(QStringLiteral("影を足す")); };
+        panel->record->click();
+        QVERIFY(w->recording() && panel->stop->isEnabled() && !panel->record->isEnabled());
+        QVERIFY(panel->state->text().contains(QStringLiteral("記録中")) && panel->state->text().contains(QStringLiteral("影を足す")));
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"name", "影"}, {"id", "shade"}}})));
+        QVERIFY(panel->state->text().contains(QStringLiteral("1 手")));
+        panel->stop->click();
+        QVERIFY(!w->recording());
+        QVERIFY(app::actions::load().contains("影を足す"));
+        QVERIFY(!panel->names->findItems(QStringLiteral("影を足す"), Qt::MatchExactly).isEmpty());
+        QCOMPARE(*panel->current(), QStringLiteral("影を足す"));
+        QCOMPARE(panel->steps->count(), 1);
+        QVERIFY(panel->steps->item(0)->text().startsWith(QStringLiteral("1. ")));
+        // 再生 on page 3: one Undo
+        w->go_to_page(3);
+        const std::size_t before = book.page(2).layers.size();
+        const std::size_t steps = w->session().history().done.size();
+        panel->play->click();
+        QCOMPARE(book.page(2).layers.size(), before + 1);
+        QCOMPARE(w->session().history().done.size(), steps + 1);
+        // ファイル → アクション ▸ holds the same
+        QCOMPARE(w->actions_menu()->title(), QStringLiteral("アクション"));
+        emit w->actions_menu()->aboutToShow();
+        QStringList titles;
+        for (QAction* a : w->actions_menu()->actions()) titles << a->text();
+        QVERIFY(titles.contains(QStringLiteral("実行: 影を足す")));
+        // 削除 (asked first)
+        panel->remove->click();
+        QVERIFY(!app::actions::load().contains("影を足す"));
+        QCOMPARE(panel->names->count(), 0);
+        QVERIFY(!panel->play->isEnabled() && panel->state->text().contains(QStringLiteral("まだありません")));
+        // 記録 without a name: nothing recorded
+        book.answers.responder->get_text = [](const QString&, const QString&, const QString&) { return std::optional<QString>(); };
+        panel->record->click();
+        QVERIFY(!w->recording());
+        toggle->trigger();
+        QVERIFY(!w->actions_dock()->isVisible());
+    }
+
     void replayAimsAtTheCurrentLayerAndPanel() {
         const Json ops = Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "old"}, {"points", Json::array({Json::array({1, 1}), Json::array({2, 2})})}},
                                       Json{{"op", "filter_raster"}, {"page", 1}, {"id", "old"}, {"kind", "blur"}},
@@ -169,6 +229,79 @@ private slots:
         for (const core::Layer& l : book.window->current_page()->layers) found = found || l.title == "足した";
         QVERIFY(found);
         for (const char* name : {"影", "混ぜ"}) app::actions::remove(QString::fromUtf8(name));
+    }
+
+    // PC5 I-0 (SPEC.md AUTO-01): steps run in the window — checked first (a gate never a step), the journal naming the
+    // change —, a pseudo op made ops on the book as it is; the script events bound to an action run as the window's
+    // person, a table changed outside Genko runs nothing, no event while an event's steps run; ファイル → 自動処理 ▸ hidden
+    // until a group puts a command in it, スクリプト ▸ beside it.
+    void stepsAndScriptEventsRunInTheWindow() {
+        Book book;
+        app::MainWindow* w = book.window.get();
+        w->go_to_page(1);
+        const std::size_t steps = w->session().history().done.size();
+        QVERIFY(!w->run_steps(Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "a"}}, Json{{"op", "name_ok"}, {"page", 1}}}), false,
+                              QStringLiteral("承認")));
+        QCOMPARE(w->session().history().done.size(), steps);  // (refused before anything ran)
+        QVERIFY(w->status_label()->text().contains(QStringLiteral("手順に入れられません")));
+        // an オートアクション recorded before (an approval in it): 実行 and 全ページに実行 refuse it, saying which op
+        QVERIFY(!app::actions::store(QStringLiteral("古い"), Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "old"}},
+                                                                       Json{{"op", "approve"}, {"gate", "name"}, {"page", 1}}})));
+        QVERIFY(!w->play_action(QStringLiteral("古い")));
+        QVERIFY(w->status_label()->text().contains(QStringLiteral("approve は手順に入れられません")));
+        QVERIFY(w->status_label()->text().contains(QStringLiteral("管理")));
+        QVERIFY(!w->play_action_on_all(QStringLiteral("古い")));
+        QCOMPARE(w->session().history().done.size(), steps);
+        QVERIFY(book.page(0).note != "old");
+        app::actions::remove(QStringLiteral("古い"));
+        // a recording takes in no step a script runs
+        w->start_recording();
+        QVERIFY(w->run_steps(Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "x"}}}), false, QStringLiteral("記録の外")));
+        QVERIFY(w->recording().has_value());
+        QVERIFY(w->recording()->empty());
+        w->drop_recording();
+        QVERIFY(w->run_steps(Json::array({Json{{"op", "set_note"}, {"page", 1}, {"note", "スクリプト"}}}), false, QStringLiteral("メモ")));
+        QCOMPARE(book.page(0).note, std::string("スクリプト"));
+        w->session().save_now();
+        QVERIFY(w->session().wait_saved(std::chrono::milliseconds(30000)));
+        QCOMPARE(storage::journal::stacks(book.path).undo.back().script, std::string("メモ"));
+        // a recorded action, played on the page in front, by a script event
+        QVERIFY(!app::actions::store(QStringLiteral("影"), Json::array({Json{{"op", "add_layer"}, {"page", 3}, {"kind", "paint"}, {"name", "影"}, {"id", "s"}}})));
+        namespace events = service::script_events;
+        events::Table table;
+        table.enabled = true;
+        table.bindings.push_back({"saveDocument", "影を足す", std::nullopt, events::action_sha256(app::actions::load()["影"]["ops"]), std::string("影")});
+        QVERIFY(!events::save(table));
+        const auto shades = [&book] {
+            int n = 0;
+            for (const core::Layer& l : book.page(0).layers) n += l.title == "影" ? 1 : 0;
+            return n;
+        };
+        w->script_event(events::Event::SaveDocument);
+        QCOMPARE(shades(), 1);
+        w->script_event(events::Event::Print);  // (not bound)
+        QCOMPARE(shades(), 1);
+        {
+            const events::Firing running;  // (an event's steps running: no event)
+            w->script_event(events::Event::SaveDocument);
+        }
+        QCOMPARE(shades(), 1);
+        w->session().save_now();
+        QVERIFY(w->session().wait_saved(std::chrono::milliseconds(30000)));
+        QCOMPARE(storage::journal::stacks(book.path).undo.back().script, std::string("影を足す（ドキュメントを保存）"));
+        // the table changed outside Genko: nothing runs, said
+        const std::string bytes = storage::read_file(events::path());
+        storage::write_atomic(events::path(), bytes + "\n");
+        w->script_event(events::Event::SaveDocument);
+        QCOMPARE(shades(), 1);
+        QVERIFY(w->status_label()->text().contains(QStringLiteral("Genko の外で変わりました")));
+        std::filesystem::remove(events::path());
+        std::filesystem::remove(events::seal_path());
+        app::actions::remove(QStringLiteral("影"));
+        // ファイル → 自動処理 ▸ (hidden while empty — shown since PC5 I-e put its commands in it) and スクリプト ▸
+        QVERIFY(w->automate_menu() != nullptr && w->scripts_menu() != nullptr);
+        QVERIFY(w->automate_menu()->menuAction()->isVisible());
+        QVERIFY(w->scripts_menu()->actions().contains(book.act("act_flatten_masks")));
     }
 
     // --- 画像を読み込む --------------------------------------------------------------------------------------------
@@ -315,14 +448,14 @@ private slots:
         }
         const QString guide = app::help::guide(w);
         QVERIFY(guide.contains(QStringLiteral("「ファイル → 新規…」")));  // (PC4 F-0: Photoshop's name)
-        QVERIFY(guide.contains(QStringLiteral("「ウィンドウ → 作業の段階」の「ネームの並び」「作画の並び」")));  // (where the stages are: Python's guide said 表示)
+        QVERIFY(guide.contains(QStringLiteral("「ウィンドウ → ワークスペース → 作業の段階」の「ネームの並び」「作画の並び」")));  // (where the stages are: Python's guide said 表示; PC5 H-d: in ワークスペース ▸)
         QVERIFY(guide.contains(QStringLiteral("ブラシツール（B）")));  // (PC4 E-0, decision 2)
         QVERIFY(guide.contains(QStringLiteral("[ と ] で太さ")));
         QVERIFY(guide.contains(QStringLiteral("「ページ → 台詞 → フキダシを手で描く」")));
         const QString faq = app::help::faq(w);
-        QVERIFY(faq.contains(QStringLiteral("「ウィンドウ → ワークスペース → はじめの配置に戻す」")));  // (a menu filled as it opens)
+        QVERIFY(faq.contains(QStringLiteral("「ウィンドウ → ワークスペース → 初期設定」")));  // (a menu filled as it opens; PC5 H-d: Photoshop's 初期設定)
         QVERIFY(faq.contains(QStringLiteral("「マスク ▾」、または「レイヤー → レイヤーマスク → マスクを編集する（ブラシで見せる・消しゴムで隠す）」")));
-        QVERIFY(app::help::shortcut_html(w).contains(QStringLiteral("キーは「ファイル → 環境設定…」で変えられます")));
+        QVERIFY(app::help::shortcut_html(w).contains(QStringLiteral("キーは「編集 → キーボードショートカット…」で変えられます")));  // (PC5 H-0)
         // a key changed: the guide and the list say the new one
         book.act("act_pen")->setShortcut(QKeySequence(QStringLiteral("P")));
         QVERIFY(app::help::guide(w).contains(QStringLiteral("ブラシツール（P）")));
@@ -392,7 +525,7 @@ private slots:
         preview.view->repaint();
         QVERIFY(!preview.pixmap(0).isNull());
         preview.close();
-        QVERIFY(book.act("act_book_preview") != nullptr && book.act("act_book_preview")->shortcut() == QKeySequence(QStringLiteral("Ctrl+Shift+B")));
+        QVERIFY(book.act("act_book_preview") != nullptr && book.act("act_book_preview")->shortcut().isEmpty());  // (PC5 H-0, the Photoshop key set: Ctrl+Shift+B is 自動カラー補正's)
     }
 };
 

@@ -455,7 +455,7 @@ void PageCanvas::draw_selection_mask(QPainter& painter) const {
 
 void PageCanvas::draw_marquee(QPainter& painter) const {
     if (selection_) {
-        if (show_selection_edges) draw_selection_mask(painter);
+        if (shows(show_selection_edges)) draw_selection_mask(painter);  // (PC5 H-b: エクストラ too)
         std::vector<QPointF> outline = selection_->outline;
         if (sel_drag_ && sel_drag_->matrix) outline = through(*sel_drag_->matrix, outline);
         QPolygonF shown;
@@ -486,7 +486,7 @@ void PageCanvas::draw_marquee(QPainter& painter) const {
                 // (points that fold the area: no grid until they are pulled apart)
             }
         }
-        if (show_selection_edges) {  // (表示 → 選択範囲の境界線)
+        if (shows(show_selection_edges)) {  // (表示 → 表示・非表示 ▸ 選択範囲のエッジ, and エクストラ)
             painter.setPen(QPen(Qt::white, 1.5));
             painter.drawPolygon(shown);
             painter.setPen(QPen(transform_outline ? theme::accent() : kSelection, 1.5, Qt::DashLine));

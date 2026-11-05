@@ -122,8 +122,8 @@ private slots:
     void theToolsAndMenus() {
         Book b;
         QCOMPARE(b.act("act_shape")->text(), QStringLiteral("長方形ツール"));
-        QCOMPARE(b.act("act_shape")->shortcut(), QKeySequence(QStringLiteral("O")));
-        QCOMPARE(b.act("act_next_shape_tool")->shortcut(), QKeySequence(QStringLiteral("Shift+O")));
+        QCOMPARE(b.act("act_shape")->shortcut(), QKeySequence(QStringLiteral("U")));  // (PC5 H-0: the Photoshop key set)
+        QCOMPARE(b.act("act_next_shape_tool")->shortcut(), QKeySequence(QStringLiteral("Shift+U")));
         QCOMPARE(b.act("act_vector")->text(), QStringLiteral("部分選択ツール"));
         QMenu* tools = top(b.window.get(), QStringLiteral("ツール"));
         const std::vector<std::pair<const char*, const char*>> kinds{{"act_shape", "rect"},          {"act_shape_ellipse", "ellipse"}, {"act_shape_triangle", "triangle"},

@@ -27,6 +27,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
+#include <vector>
 
 #include "app/ask.hpp"
 #include "app/brush_panel.hpp"
@@ -35,6 +37,7 @@
 #include "app/fields.hpp"
 #include "app/main_window.hpp"
 #include "app/material_tabs.hpp"
+#include "app/preferences.hpp"
 #include "app/theme.hpp"
 #include "app/tool_settings.hpp"
 #include "service/wording.hpp"
@@ -78,6 +81,18 @@ void MainWindow::build_tool_settings() {
 
     tool_settings_ = new ToolSettings;
     ToolSettings* ts = tool_settings_;
+    // (PC5 H-0: the title's keys are the tool's command's own now — the key set chosen, the person's own)
+    ts->keys_of = [this](const QString& tool) {
+        static const std::map<QString, std::vector<const char*>> groups{{QStringLiteral("marquee"), {"act_marquee", "act_lasso", "act_wand"}},
+                                                                        {QStringLiteral("shape"), {"act_shape", "act_next_shape_tool"}}};
+        std::vector<const QAction*> commands;
+        if (const auto group = groups.find(tool); group != groups.end()) {
+            for (const char* name : group->second) commands.push_back(action(QString::fromLatin1(name)));
+        } else if (const auto own = tool_actions_.find(tool); own != tool_actions_.end()) {
+            commands.push_back(own->second);
+        }
+        return preferences::keys_in_words(commands);
+    };
     // (the panel in its scroll area and its dock first, its pages added after: a widget that changes parent has the app's
     // style sheet given again to everything under it, so each page is styled once as it is added — not twice more with
     // all the others, as the whole panel goes into the scroll area and the dock; it opens the window quicker). Nothing
@@ -186,7 +201,7 @@ void MainWindow::build_tool_settings() {
     build_selection_pages(ts);  // (the selection tools and マジック消しゴムツール: main_window_select.cpp)
     build_retouch_pages(ts);    // (PC3 B4: the retouching tools: retouch_tools.cpp)
     build_paint_tool_pages(ts);  // (PC4 E5: the brushes that change pixels: paint_tools.cpp)
-    ts->add({QStringLiteral("text")}, text_settings_);  // (the text tool: main_window_lines.cpp)
+    ts->add({QStringLiteral("text"), QStringLiteral("text_h")}, text_settings_);  // (the text tools: main_window_lines.cpp, PC5 G-a main_window_type.cpp)
     ts->add({QStringLiteral("select")}, line_select_page());  // (the chosen line's lettering, then the view)
     build_move_page(ts);  // (PC3 C-d: 自動選択, バウンディングボックスを表示, スナップ, 整列・分布: main_window_align.cpp)
     build_paint_pages(ts);  // (図形・色混ぜ・ゆがみ・グラデーション: main_window_paint.cpp)
@@ -194,6 +209,7 @@ void MainWindow::build_tool_settings() {
     build_crop_page(ts);     // (PC3 C-e, 切り抜きツール: main_window_page_size.cpp)
     build_guide_pages(ts);   // (定規・3D: main_window_guides.cpp)
     build_material_pages(ts);  // (効果線・素材を置く: main_window_materials.cpp)
+    build_view_pages(ts);      // (PC5 H-a: 手のひらツール・ズームツール: main_window_view.cpp)
 
     dock->setObjectName(QStringLiteral("ツールの設定"));
     dock->setTitleBarWidget(new QWidget);  // (the tool's own name heads the panel; no second title above it)

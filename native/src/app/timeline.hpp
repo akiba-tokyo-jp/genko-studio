@@ -6,7 +6,9 @@
 
 #include <filesystem>
 
+#include <array>
 #include <cstdint>
+#include <list>
 #include <map>
 #include <optional>
 #include <string>
@@ -24,6 +26,7 @@ class QPushButton;
 class QSpinBox;
 class QTableWidget;
 class QTimer;
+class QToolButton;
 
 // The timeline (タイムライン, Python's genko/app/timeline.py) of an animation page: a row per animation folder, a
 // column per frame; each cell shows which cel is exposed there. Click a frame to see it (and draw on its cel),
@@ -54,7 +57,8 @@ public:
     // One frame on while playing.
     void tick();
 
-    // The commands (Python's _start, _add_folder, _add_cel, _camera_here, _export; the cell menu).
+    // The commands (Python's _start, _add_folder, _add_cel, _camera_here, _export; the cell menu). export_animation is
+    // ビデオをレンダリング… (PC5 J-e1: its window — the frames, the size, the speed — then where).
     void start_animation();
     void add_folder();
     void add_cel();
@@ -62,10 +66,21 @@ public:
     void export_animation();
     QMenu* cell_menu(int row, int column);
 
+    // PC5 J-e1 (timeline.nextFrame・previousFrame・setFrame): the frame shown moved — "next", "previous", "first", "last",
+    // "work_start", "work_end" (the frames played: the work area, else all) —, or asked for (フレームへ移動…). Playing stops;
+    // a page that is not an animation is said so. The frame is the window's (the book is not changed).
+    void go(const QString& where_to);
+    void ask_frame();
+    // The work area (timeline@1): [first, last] of the frames, none: all of them (set_animation's work).
+    void set_work(std::optional<std::array<std::int64_t, 2>> work);
+    // 作業範囲の開始点を設定 (`start`) / 終了点を設定: the frame shown as the work area's first or last frame.
+    void set_work_end(bool start);
+    void delete_timeline();  // (timeline.delete: set_animation off — the cels stay as layers)
+
     QCheckBox* onion = nullptr;
     QPushButton* start = nullptr;
     QPushButton* play_button = nullptr;
-    QSpinBox* fps = nullptr;
+    QDoubleSpinBox* fps = nullptr;  // (PC5 J-e1: 0.5..120, timeline@1 past 1..60)
     QSpinBox* frames = nullptr;
     QCheckBox* loop = nullptr;
     QLabel* where = nullptr;
@@ -75,6 +90,31 @@ public:
     QPushButton* camera = nullptr;
     QPushButton* export_button = nullptr;
     QTimer* timer = nullptr;
+    // PC5 J-e1: the frame before and after (the commands' buttons), the work area (作業範囲: on, its first and last frame)
+    // and the panel's menu (ビデオタイムラインを作成, タイムラインを削除, 移動 ▸, 作業範囲 ▸, ビデオをレンダリング…; J-e2 adds
+    // the video layers' items to it).
+    QToolButton* previous_button = nullptr;
+    QToolButton* next_button = nullptr;
+    QCheckBox* work = nullptr;
+    QSpinBox* work_first = nullptr;
+    QSpinBox* work_last = nullptr;
+    QToolButton* menu_button = nullptr;
+    QMenu* panel_menu = nullptr;
+    // Its menu's commands and buttons made from the window's commands once they are made (MainWindow::build_anim_dock); safe
+    // to call again (the menu made anew: J-e2 adds the video layers' items in it, before ビデオをレンダリング…).
+    void build_menu();
+
+    // (PC5 J-e2, the review's P2-7; 節 J 4.3) the frames drawn for playing kept up to this many bytes, the oldest let go
+    // first (a frame let go is drawn again when it plays again); how many they hold now.
+    std::int64_t played_most = 256ll << 20;
+    std::int64_t played_bytes() const { return played_bytes_; }
+    // (PC5 H-f, メモリをクリア → ビデオキャッシュ・すべて) The frames drawn for playing let go (drawn again when they play again);
+    // the bytes they held.
+    std::int64_t purge_played() {
+        const std::int64_t bytes = played_bytes_;
+        forget_played();
+        return bytes;
+    }
 
 private:
     const core::Page* page() const;
@@ -85,6 +125,38 @@ private:
 
     MainWindow* window_;
     std::map<std::int64_t, QImage> played_;
+    std::list<std::int64_t> played_order_;  // (the latest last)
+    std::int64_t played_bytes_ = 0;
+    void forget_played();
+    double fps_shown_ = -1;  // (the fps box's value as refresh put it: left as it is, nothing is written)
+    QMetaObject::Connection menu_shown_;  // (build_menu's: made again with it)
+};
+
+// ビデオをレンダリング (PC5 J-e1, file.export.renderVideo): which frames — すべてのフレーム, 作業範囲 (the page's, when it
+// has one), or from one frame to another —, the size (the width in pixels; none: the page's at 100 dpi) and the speed
+// (0.5..120 fps, the page's at first). Where and in which format is asked after it (the panel's export_animation).
+class RenderVideoDialog : public QDialog {
+    Q_OBJECT
+
+public:
+    RenderVideoDialog(QWidget* parent, const core::Page& page);
+    // [first, last] of the page's frames.
+    std::array<std::int64_t, 2> frames() const;
+    // The width asked for (none: as the page draws).
+    std::optional<int> width_px() const;
+    // The speed asked for (none: the page's own).
+    std::optional<double> speed() const;
+
+    QComboBox* range = nullptr;  // (data: "all" | "work" | "custom")
+    QSpinBox* first = nullptr;
+    QSpinBox* last = nullptr;
+    QSpinBox* size = nullptr;  // (0: as the page draws)
+    QDoubleSpinBox* fps = nullptr;
+
+private:
+    std::int64_t count_ = 1;
+    std::array<std::int64_t, 2> work_{1, 1};
+    double page_fps_ = 12;
 };
 
 // タイムラプスを書き出す (Python's TimelapseDialog): the recorded making-of as a moving picture, every page in the order

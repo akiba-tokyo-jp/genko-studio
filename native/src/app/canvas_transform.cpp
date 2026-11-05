@@ -3,12 +3,14 @@
 // commands' own ways), Warp's Bézier mesh, Puppet Warp's pins and Perspective Warp's planes. Each drag let go sends the
 // spec for a preview, Enter for the op (transform_layers); the window builds the op (app/main_window_transform.cpp).
 
+#include <QFontMetricsF>
 #include <QKeyEvent>
 #include <QPainter>
 #include <QPainterPath>
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 #include "app/canvas.hpp"
 #include "app/theme.hpp"
@@ -317,7 +319,7 @@ bool PageCanvas::transform_move(const QPointF& pointer, Qt::KeyboardModifiers mo
         } else if (d.kind == QLatin1String("pin") || d.kind == QLatin1String("plane")) {
             mm = snap_point(pointer, modifiers);
         } else {
-            snap_lines_.clear();
+            forget_snap();
         }
         if (grip) mm = snap_point(*grip + (pointer - d.start), modifiers) - *grip + d.start;
     }
@@ -505,27 +507,32 @@ void PageCanvas::draw_transform(QPainter& painter) const {
         }
         painter.setBrush(Qt::NoBrush);
     };
+    // (PC5 H-b: 表示・非表示 ▸ メッシュ and 編集ピン — the grid and the box, the anchors, handles and pins; hidden, the warp
+    // goes on as it was)
+    const bool mesh = shows(show_mesh), pins = shows(show_edit_pins);
     if (t.mode == QLatin1String("warp")) {
-        try {
-            const auto w = render::layer_transform::warp_from_json(t.warp, t.box);
-            painter.setPen(QPen(theme::accent(), 1.2));
-            constexpr int kSteps = 24;
-            for (int k = 0; k <= 4; ++k) {
-                const double f = k / 4.0;
-                QPolygonF across, down;
-                for (int i = 0; i <= kSteps; ++i) {
-                    const auto a = w.map(t.box[0] + (t.box[2] - t.box[0]) * i / kSteps, t.box[1] + (t.box[3] - t.box[1]) * f);
-                    const auto c = w.map(t.box[0] + (t.box[2] - t.box[0]) * f, t.box[1] + (t.box[3] - t.box[1]) * i / kSteps);
-                    across << pt(a.x, a.y);
-                    down << pt(c.x, c.y);
+        if (mesh) {  // (メッシュ hidden: no grid)
+            try {
+                const auto w = render::layer_transform::warp_from_json(t.warp, t.box);
+                painter.setPen(QPen(theme::accent(), 1.2));
+                constexpr int kSteps = 24;
+                for (int k = 0; k <= 4; ++k) {
+                    const double f = k / 4.0;
+                    QPolygonF across, down;
+                    for (int i = 0; i <= kSteps; ++i) {
+                        const auto a = w.map(t.box[0] + (t.box[2] - t.box[0]) * i / kSteps, t.box[1] + (t.box[3] - t.box[1]) * f);
+                        const auto c = w.map(t.box[0] + (t.box[2] - t.box[0]) * f, t.box[1] + (t.box[3] - t.box[1]) * i / kSteps);
+                        across << pt(a.x, a.y);
+                        down << pt(c.x, c.y);
+                    }
+                    painter.drawPolyline(across);
+                    painter.drawPolyline(down);
                 }
-                painter.drawPolyline(across);
-                painter.drawPolyline(down);
+            } catch (const std::exception&) {
             }
-        } catch (const std::exception&) {
         }
         const std::vector<QPointF> points = t.mesh_points();
-        if (!points.empty()) {
+        if (!points.empty() && pins) {
             const std::size_t nx = t.warp["mesh"]["us"].size() * 3 - 2;
             painter.setPen(QPen(QColor(120, 120, 120), 1, Qt::DotLine));
             for (std::size_t i = 0; i < points.size(); ++i) {
@@ -542,8 +549,9 @@ void PageCanvas::draw_transform(QPainter& painter) const {
         }
     } else if (t.mode == QLatin1String("puppet")) {
         painter.setPen(QPen(kBox, 1, Qt::DashLine));
-        painter.drawPolygon(poly(corners_of(t.box)));
+        if (mesh) painter.drawPolygon(poly(corners_of(t.box)));
         for (const auto& [src, dst] : t.pins) {
+            if (!pins) break;
             painter.setPen(QPen(QColor(120, 120, 120), 1, Qt::DotLine));
             painter.drawLine(pt(src.x(), src.y()), pt(dst.x(), dst.y()));
             const QPointF h = pt(dst.x(), dst.y());
@@ -558,14 +566,16 @@ void PageCanvas::draw_transform(QPainter& painter) const {
             painter.setPen(QPen(t.warping ? theme::accent() : kBox, 1.5));
             painter.drawPolygon(poly(q));
             painter.setPen(QPen(t.warping ? theme::accent() : kBox, 0.8, Qt::DotLine));
-            for (int k = 1; k < 4; ++k) {
+            for (int k = 1; k < 4 && mesh; ++k) {
                 const double f = k / 4.0;
                 const QPointF a = q[0] + (q[1] - q[0]) * f, c = q[3] + (q[2] - q[3]) * f;
                 const QPointF e = q[0] + (q[3] - q[0]) * f, g = q[1] + (q[2] - q[1]) * f;
                 painter.drawLine(pt(a.x(), a.y()), pt(c.x(), c.y()));
                 painter.drawLine(pt(e.x(), e.y()), pt(g.x(), g.y()));
             }
-            for (const QPointF& c : q) dot(c, false);
+            if (pins) {
+                for (const QPointF& c : q) dot(c, false);
+            }
         }
         if (t.drag && t.drag->kind == QLatin1String("new_plane") && t.drag->moved) {
             painter.setPen(QPen(kBox, 1, Qt::DashLine));
@@ -582,6 +592,32 @@ void PageCanvas::draw_transform(QPainter& painter) const {
         const QPointF h = pt(c.x(), c.y());
         painter.setPen(QPen(kBox, 1.2));
         painter.drawEllipse(h, 4, 4);  // (the reference point: what it turns about)
+        // (PC5 H-e, 環境設定 → ツール → 変形値を表示: by the pointer while the box is dragged — how far it moved, its turn, or its
+        // width and height —, in the ruler's unit)
+        if (transform_values && t.drag && t.drag->moved) {
+            const auto& m = t.matrix;
+            const auto& was = t.drag->matrix;
+            QString words;
+            if (t.drag->kind == QLatin1String("move")) {
+                words = QStringLiteral("X: %1  Y: %2").arg(length_words(m[4] - was[4], true), length_words(m[5] - was[5], false));
+            } else if (t.drag->kind == QLatin1String("rotate")) {
+                words = QStringLiteral("%1°").arg(QString::number(std::atan2(m[1], m[0]) * 180.0 / std::numbers::pi, 'f', 1));
+            } else {
+                const QPointF across = t.quad[1] - t.quad[0];
+                const QPointF down = t.quad[3] - t.quad[0];
+                words = QStringLiteral("W: %1  H: %2").arg(length_words(std::hypot(across.x(), across.y()), true),
+                                                           length_words(std::hypot(down.x(), down.y()), false));
+            }
+            const QPointF at = pt(t.drag->at.x(), t.drag->at.y()) + QPointF(16, 18);
+            const QFontMetricsF metrics(painter.font());
+            const QRectF box = metrics.boundingRect(words).adjusted(-6, -3, 6, 3).translated(at - metrics.boundingRect(words).topLeft());
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(30, 30, 30, 210));
+            painter.drawRoundedRect(box, 4, 4);
+            painter.setPen(Qt::white);
+            painter.drawText(box, Qt::AlignCenter, words);
+            painter.setBrush(Qt::NoBrush);
+        }
     }
     painter.restore();
 }

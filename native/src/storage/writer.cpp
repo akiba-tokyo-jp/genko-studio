@@ -25,7 +25,16 @@
 #include "core/version.hpp"
 #include "core/brush_dabs.hpp"
 #include "core/layer_styles.hpp"
+// PC5 J-0 (制作の補助)
+#include "core/video.hpp"
 #include "core/patterns.hpp"
+#include "core/groups.hpp"
+#include "core/layer_basics.hpp"
+#include "core/artboards.hpp"
+#include "core/pixel_aspect.hpp"
+#include "core/type_text.hpp"
+#include "core/variables.hpp"
+#include "core/image_assets.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/reader.hpp"
 
@@ -124,6 +133,8 @@ Json frame_json(const core::Frame& frame) {
     return out;
 }
 
+Json record_json(const core::StoryLine& record);  // (type@1, PC5 G-0: below)
+
 // io._layer_to_dict(layer, strokes=False) without "strokes" and "raster_relpath", then io._layer_to_v3.
 Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& space) {
     const bool placed = layer.kind == core::LayerKind::Placed;
@@ -192,8 +203,18 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
     if (layer.vector_mask) out["vector_mask"] = core::vector::to_json(*layer.vector_mask);
     if (layer.link) out["link"] = *layer.link;
     if (layer.lock_position) out["lock_position"] = true;
-    if (layer.native_psd) out["native_psd"] = core::to_json(*layer.native_psd);  // (psd-keep@1, PC4)
+    // (psd-keep@1, PC4; PC5 G-e: a text layer's block kept only by a type layer)
+    if (const std::optional<core::PsdLayerKeep> keep = core::written_keep(layer)) out["native_psd"] = core::to_json(*keep);
     if (layer.style) out["style"] = *layer.style;  // (layer-styles@1, PC4 E6)
+    if (layer.group) out["group"] = true;  // (groups@1, PC5 I-b)
+    // (PC5 I-a: layer-locks@1's locks, blend-channels@1's channels — none: nothing written)
+    if (layer.lock_all) out["lock_all"] = true;
+    if (layer.lock_nest) out["lock_nest"] = true;
+    if (!layer.blend_channels.empty()) {
+        Json channels = Json::array();
+        for (const bool on : layer.blend_channels) channels.push_back(on);
+        out["blend_channels"] = std::move(channels);
+    }
     if (placed) {
         out["asset"] = opt_string(layer.asset);
         out["frame_id"] = opt_string(layer.frame_id);
@@ -209,6 +230,10 @@ Json layer_json(const core::Layer& layer, AssetStore& store, const std::string& 
         out["clip_to"] = layer.clip_to;
         if (truthy(layer.finish)) out["finish"] = *layer.finish;
         out["smart"] = layer.smart ? *layer.smart : Json::object();
+        return out;
+    }
+    if (layer.kind == core::LayerKind::Type) {  // (type@1, PC5 G-0: its record; no pixels or lines of its own)
+        if (layer.type) out["type"] = record_json(*layer.type);
         return out;
     }
     if (layer.raster_png && !layer.raster_png->empty()) {
@@ -278,6 +303,14 @@ Json line_json(const core::StoryLine& line) {
         for (const auto& tail : line.tails) tails.push_back(tail);
         out["tails"] = std::move(tails);
     }
+    if (line.native_type) out["native_type"] = *line.native_type;  // (type@1, PC5 G-0)
+    return out;
+}
+
+// type@1 (PC5 G-0): a type layer's record — a line's, without what only the story has.
+Json record_json(const core::StoryLine& record) {
+    Json out = line_json(record);
+    for (const char* key : {"id", "page_index", "speaker", "frame_id"}) out.erase(key);
     return out;
 }
 
@@ -329,6 +362,16 @@ Json page_json(const core::Page& page, AssetStore& store) {
     // (PC4: file-info@1's source file, psd-keep@1's kept resources and blocks — none: nothing written)
     if (page.native_source) out["native_source"] = core::to_json(*page.native_source);
     if (page.native_psd) out["native_psd"] = core::to_json(*page.native_psd);
+    // (PC5 J-0: layer-comps@1's comps, slices@1's slices, annotations@1's notes, measure@1's measuring — none or empty:
+    // nothing written)
+    if (page.layer_comps && !page.layer_comps->empty()) out[std::string(core::kLayerCompsKey)] = core::to_json(*page.layer_comps);
+    if (page.slices && !page.slices->empty()) out[std::string(core::kSlicesKey)] = core::to_json(*page.slices);
+    if (!page.annotations.empty()) out[std::string(core::kAnnotationsKey)] = core::to_json(page.annotations);
+    if (page.measure && !page.measure->empty()) out[std::string(core::kMeasureKey)] = core::to_json(*page.measure);
+    // (PC5 I-c: artboards@1's mark — none: nothing written)
+    if (page.artboard) out[std::string(core::kArtboardKey)] = core::to_json(*page.artboard);
+    // (PC5 H-f: pixel-aspect@1's ratio — square: nothing written)
+    if (!core::square_pixels(page.pixel_aspect)) out[std::string(core::kPixelAspectKey)] = page.pixel_aspect;
     for (const auto& [key, value] : page.extra.items()) {
         if (!is_known_page_key(key)) out[key] = value;
     }
@@ -393,6 +436,12 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     }
     for (const auto& line : doc.story) {
         if (core::ruby::uses_feature(line)) features.emplace_back(core::kRubyLayoutFeature);
+    }
+    // (PC5 G-a review P3-3: a type layer's record holding its rubies by place says so too)
+    for (const core::smart::WrittenPage& written : core::smart::written_pages(doc)) {
+        for (const core::Layer& layer : written.page->layers) {
+            if (layer.type && core::ruby::uses_feature(*layer.type)) features.emplace_back(core::kRubyLayoutFeature);
+        }
     }
     // PC2a (adjustments@1): the 3D lookup tables the book's color_lookup corrections use (only those) — on its pages and
     // (PC4 F-f review P1-3) on the pages of the smart objects' contents its pages show, which the reader reads too
@@ -488,6 +537,13 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
     }
     std::erase(features, std::string(core::kFiltersFeature));
     if (core::uses_filters(doc) || !filter_files.empty()) features.emplace_back(core::kFiltersFeature);
+    // PC5 J-f (plugin-filters@1): the pictures plugin filters keep (what they made, shown where the plugin is not), and the
+    // feature while a smart object holds a plugin's filter
+    for (const auto& [ref, suffix] : core::smart::kept_pictures(doc)) {
+        if (const auto file = doc.smart_files.find(ref); file != doc.smart_files.end() && file->second) store.put_known(ref, *file->second, suffix);
+    }
+    std::erase(features, std::string(core::smart::kPluginFiltersFeature));
+    if (core::smart::uses_plugin_filters(doc)) features.emplace_back(core::smart::kPluginFiltersFeature);
     // PC4 節 D6 (vanishing-point@1): a page's planes of 消点 (its "vanishing"), the feature while a page keeps them
     core::validate_vanishing(doc);
     std::erase(features, std::string(core::kVanishingFeature));
@@ -555,6 +611,62 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
         std::erase(features, std::string(feature));
         if (used) features.emplace_back(feature);
     }
+    // PC5 G-0: type@1 (lines' native_type, type layers and the book's type styles), named while the book uses it
+    core::type_text::validate_type(doc);
+    std::erase(features, std::string(core::kTypeFeature));
+    if (core::type_text::uses_type(doc)) features.emplace_back(core::kTypeFeature);
+    // PC5 I-b: groups@1 (folders drawn as groups), named while the book uses it
+    core::validate_groups(doc);
+    std::erase(features, std::string(core::kGroupsFeature));
+    if (core::uses_groups(doc)) features.emplace_back(core::kGroupsFeature);
+    // PC5 J-0 (SPEC.md PROD-01): layer-comps@1, slices@1, annotations@1, measure@1 (a page's own keys) and timeline@1,
+    // video@1 (in a page's anim), each named while the book uses it
+    core::validate_layer_comps(doc);
+    core::validate_slices(doc);
+    core::validate_annotations(doc);
+    core::validate_measure(doc);  // (timeline@1, video@1: named only for a work area, an fps, a video row of their shapes)
+    const std::pair<std::string_view, bool> pc5j[] = {{core::kLayerCompsFeature, core::uses_layer_comps(doc)},
+                                                      {core::kSlicesFeature, core::uses_slices(doc)},
+                                                      {core::kAnnotationsFeature, core::uses_annotations(doc)},
+                                                      {core::kMeasureFeature, core::uses_measure(doc)},
+                                                      {core::kTimelineFeature, core::uses_timeline(doc)},
+                                                      {core::kVideoFeature, core::uses_video(doc)}};
+    for (const auto& [feature, used] : pc5j) {
+        std::erase(features, std::string(feature));
+        if (used) features.emplace_back(feature);
+    }
+    // (PC5 J-e2, video@1: the footage frames its video rows show that only the book in memory holds)
+    for (const std::string& ref : core::footage_refs(doc)) {
+        if (const auto held = doc.smart_files.find(ref); held != doc.smart_files.end() && held->second) store.put_known(ref, *held->second, core::kFootageSuffix);
+    }
+    // PC5 I-d: variables@1 (the book's variables and data sets, and the pictures their values name — those only the book in
+    // memory holds), named while the book has them
+    core::validate_variables(doc);
+    for (const auto& [ref, suffix] : core::variable_pictures(doc)) {
+        if (const auto held = doc.smart_files.find(ref); held != doc.smart_files.end() && held->second) store.put_known(ref, *held->second, suffix);
+    }
+    std::erase(features, std::string(core::kVariablesFeature));
+    if (core::uses_variables(doc)) features.emplace_back(core::kVariablesFeature);
+    // PC5 I-a: layer-locks@1 (すべてをロック, the auto-nesting lock) and blend-channels@1 (channels left out), named while a layer
+    // has them
+    core::validate_layer_basics(doc);
+    const std::pair<std::string_view, bool> pc5a[] = {{core::kLayerLocksFeature, core::uses_layer_locks(doc)},
+                                                      {core::kBlendChannelsFeature, core::uses_blend_channels(doc)}};
+    for (const auto& [feature, used] : pc5a) {
+        std::erase(features, std::string(feature));
+        if (used) features.emplace_back(feature);
+    }
+    // PC5 I-c: artboards@1 (a page's artboard mark), named while a page is an artboard
+    core::validate_artboards(doc);
+    std::erase(features, std::string(core::kArtboardsFeature));
+    if (core::uses_artboards(doc)) features.emplace_back(core::kArtboardsFeature);
+    // PC5 I-f: image-assets@1 (生成 → 画像アセット), named while it is on
+    std::erase(features, std::string(core::kImageAssetsFeature));
+    if (doc.image_assets) features.emplace_back(core::kImageAssetsFeature);
+    // PC5 H-f: pixel-aspect@1 (a page's pixel aspect ratio, for the view only), named while a page's pixels are not square
+    core::validate_pixel_aspect(doc);
+    std::erase(features, std::string(core::kPixelAspectFeature));
+    if (core::uses_pixel_aspect(doc)) features.emplace_back(core::kPixelAspectFeature);
     std::sort(features.begin(), features.end());
     features.erase(std::unique(features.begin(), features.end()), features.end());
 
@@ -590,6 +702,9 @@ Json project_payload_v4(const core::Document& doc, AssetStore& store) {
         out["patterns"] = std::move(patterns);
     }
     if (doc.global_light) out["global_light"] = core::global_light_json(*doc.global_light);  // (layer-styles@1, PC4 E6)
+    if (doc.type_styles) out["type_styles"] = *doc.type_styles;  // (type@1, PC5 G-0)
+    if (doc.variables) out["variables"] = *doc.variables;  // (variables@1, PC5 I-d)
+    if (doc.image_assets) out["generator"] = core::image_assets_json();  // (image-assets@1, PC5 I-f)
     out["spec"] = spec_to_json(doc.spec);
     if (Json color = color_json(store, doc.color, doc.rgb); !color.is_null() || doc.text_gamma) {
         // (the book's text_gamma, last, under its colour model: a default RGB one written for it)

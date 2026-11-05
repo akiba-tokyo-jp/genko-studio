@@ -60,6 +60,8 @@ std::pair<std::u32string, std::vector<std::size_t>> without_periods_mapped(std::
 
 // mark_tcy(text, style_runs), mono_runs(ruby_runs), char_styles(text, style_runs, base) (base: a dict or null)
 std::u32string mark_tcy(std::u32string_view text, const StyleRuns& style_runs);
+// PC5 G-d: the text with each of `spans` (code points [start, end), in order, none across a line break) marked for 縦中横.
+std::u32string mark_spans(std::u32string_view text, const std::vector<std::pair<std::size_t, std::size_t>>& spans);
 std::vector<core::Json> mono_runs(const std::vector<core::Json>& ruby_runs);
 std::vector<core::Json> char_styles(std::u32string_view text, const StyleRuns& style_runs, const core::Json& base);
 
@@ -84,6 +86,9 @@ std::set<std::pair<std::size_t, std::size_t>> emphasis_cells(const std::vector<C
 Image glyph(std::u32string_view ch, const TrueTypeFont& font, std::int64_t em, const Rgb& fill, int bold = 0);
 Image tcy_glyph(std::u32string_view cell, const TrueTypeFont& font, std::int64_t em, const Rgb& fill, int bold = 0);
 Image latin_glyph(std::u32string_view word, const TrueTypeFont& font, std::int64_t em, const Rgb& fill, int bold = 0);
+// PC5 G-b (the OpenType typesetting, down): the glyph `id` of the font (HarfBuzz's choice for the cell `ch`: its vertical
+// form, an alternate the record's features ask for) set in the em square as glyph() sets `ch`'s, never turned.
+Image glyph_by_id(std::uint32_t id, std::u32string_view ch, const TrueTypeFont& font, std::int64_t em, const Rgb& fill, int bold = 0);
 // draw_mark(image, centre, size, kind, fill, vertical): a sesame (﹅) or, for "dot", a dot (・).
 void draw_mark(Image& image, double cx, double cy, double size, std::string_view kind, const Rgb& fill, bool vertical = true);
 
@@ -182,6 +187,15 @@ struct ComposeArgs {
     bool draw_text = true;
     bool draw_ruby = true;
     std::vector<SetRow>* cells = nullptr;
+    // PC5 G-b (the OpenType typesetting, down — a record of type@1 that asks for it): each letter's look against the line's
+    // ({scale, bold, rgb} as a style run's, laid over style_runs'; by the letter's place in the text without its line
+    // breaks), and a one-letter cell's picture as HarfBuzz chooses its glyph (vert, vrt2, the record's features) — none: the
+    // cell drawn as before. The grid, kinsoku, 縦中横, rubies and 傍点 stay Genko's.
+    std::vector<core::Json> looks;
+    std::function<std::optional<Image>(std::size_t letter, std::u32string_view cell, std::int64_t size, const Rgb& rgb, int bold)> opentype_cell;
+    // PC5 G-d: the ranges of the text (code points [start, end), none across a line break, in order) a record's own 縦中横
+    // (its ranges' character attribute tcy) sets in one cell each, as style_runs' words set so.
+    std::vector<std::pair<std::size_t, std::size_t>> tcy_spans;
 };
 Image compose(Fonts& fonts, const Face& face, const ComposeArgs& args);
 

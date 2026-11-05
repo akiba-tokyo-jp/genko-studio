@@ -71,6 +71,10 @@ struct Layer {
     bool visible = true;
     std::string blend = "normal";
     bool clip = false;
+    // (groups@1, PC5 I-b) a folder's group settings past psd.py's: its blend 通過 (the record's key or its section's
+    // "pass"; `blend` reads it "normal", as psd.py does) and its clipping
+    bool pass_through = false;
+    bool group_clip = false;
     std::optional<std::size_t> parent;  // the index (in layers()) of the folder it is in
     std::string kind = "pixels";        // pixels | folder | text | adjust | smart | shape (pen-shapes@1, PC3 C-b)
     bool has_mask = false;
@@ -235,6 +239,8 @@ public:
     // core::Error("format") for a block that cannot be read.
     std::optional<TextLayer> text(const Layer& layer) const;
     std::optional<Stroke> stroke(const Layer& layer) const;
+    // (PC5 G-e) A layer's TySh block's payload as the file holds it; nothing for a layer without one.
+    std::optional<std::string_view> text_block(const Layer& layer) const;
     // vector@1 (PC3 C-a, render/psd_paths): a layer's vmsk (or vsms) block's payload — its vector mask —, nothing for a layer
     // without one; and the file's path resources (its saved paths 2000–2997 with their names, its work path 1025, its
     // clipping path 2999), in the file's order.
@@ -272,6 +278,7 @@ public:
         bool clip = false;
         bool visible = true;
         std::string blend = "normal";
+        bool pass_through = false;  // (groups@1, PC5 I-b: a group's 通過 — its record's key or its section's)
         std::string name;
         std::uint32_t section = 0;
         std::string kind = "pixels";

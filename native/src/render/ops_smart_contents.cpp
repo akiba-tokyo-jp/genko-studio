@@ -475,6 +475,12 @@ void smart_to_page(OpContext& c) {
         }
         inner.layers = work.page(0).layers;
         inner.native_psd = work.page(0).native_psd;  // (psd-keep@1: the file's own resources and global blocks)
+        // (PC5 節 J: what import_psd copied onto the page from the blocks it marked copied — the notes (J-c), the layer
+        // comps (J-a) —: with them, or the marks would say the page holds none any more and the blocks not be written)
+        inner.annotations = work.page(0).annotations;
+        inner.layer_comps = work.page(0).layer_comps;
+        inner.slices = work.page(0).slices;
+        inner.measure = work.page(0).measure;
         for (Layer& layer : inner.layers) {
             layer.panel_clip = false;
             layer.panel_each = false;

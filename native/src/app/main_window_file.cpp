@@ -31,6 +31,7 @@
 #include "app/documents.hpp"
 #include "app/file_info_dialog.hpp"
 #include "app/look.hpp"
+#include "app/history_log.hpp"
 #include "app/main_window.hpp"
 #include "app/off_ui.hpp"
 #include "app/open_dialog.hpp"
@@ -100,7 +101,44 @@ void MainWindow::build_file_actions() {
     // (画像 → 複製…, image.duplicate: placed in ページ's menu after the paper's commands)
     make(QStringLiteral("act_duplicate_image"), QStringLiteral("複製…"), [this] { duplicate_dialog(); }, {},
          QStringLiteral("このページを、名前の無い 1 ページの原稿として複製します（統合した画像だけにもできます）"));
+    build_automate_actions();  // (PC5 I-0: 自動処理 ▸・スクリプト ▸'s commands, app/main_window_automate.cpp)
     setAcceptDrops(true);
+}
+
+QMenu* MainWindow::import_menu(QMenu* file) {
+    if (import_menu_ != nullptr) return import_menu_;
+    for (QAction* item : file->actions()) {
+        if (item->menu() != nullptr && item->menu()->objectName() == QLatin1String("menu_import")) import_menu_ = item->menu();
+    }
+    if (import_menu_ != nullptr) return import_menu_;
+    import_menu_ = new QMenu(QStringLiteral("読み込み"), file);
+    import_menu_->setObjectName(QStringLiteral("menu_import"));
+    const QList<QAction*> items = file->actions();
+    const auto psd = std::find(items.begin(), items.end(), action(QStringLiteral("act_import_psd")));
+    if (psd != items.end() && std::next(psd) != items.end()) {
+        file->insertMenu(*std::next(psd), import_menu_);
+    } else {
+        file->addMenu(import_menu_);
+    }
+    return import_menu_;
+}
+
+void MainWindow::add_to_import_menu(QMenu* file, QAction* command) {
+    // (Photoshop's order of 読み込み ▸; a command not listed goes last)
+    static const QStringList kOrder{QStringLiteral("act_import_data_sets"), QStringLiteral("act_video_frames_to_layers"),
+                                    QStringLiteral("act_import_notes")};
+    QMenu* menu = import_menu(file);
+    const auto rank = [](const QAction* a) {
+        const qsizetype at = kOrder.indexOf(a->property("genko_attribute").toString());
+        return at < 0 ? kOrder.size() : at;
+    };
+    for (QAction* item : menu->actions()) {
+        if (rank(item) > rank(command)) {
+            menu->insertAction(item, command);
+            return;
+        }
+    }
+    menu->addAction(command);
 }
 
 void MainWindow::build_file_menu(QMenu* file) {
@@ -154,12 +192,17 @@ void MainWindow::build_file_menu(QMenu* file) {
     file->addSeparator();
     for (const char* name : {"act_timelapse", "act_timelapse_export"}) file->addAction(action(name));
     file->addSeparator();
-    file->addMenu(QStringLiteral("スクリプト"))->addAction(action("act_flatten_masks"));  // (PC3 B2: file.scripts.*)
-    actions_menu_ = file->addMenu(QStringLiteral("オートアクション"));
+    // (PC5 I-0: 自動処理 ▸ above スクリプト ▸, as Photoshop's; their commands: app/main_window_automate.cpp)
+    automate_menu_ = file->addMenu(QStringLiteral("自動処理"));
+    automate_menu_->setObjectName(QStringLiteral("menu_automate"));
+    scripts_menu_ = file->addMenu(QStringLiteral("スクリプト"));
+    scripts_menu_->setObjectName(QStringLiteral("menu_scripts"));
+    scripts_menu_->addAction(action("act_flatten_masks"));  // (PC3 B2: file.scripts.*)
+    build_automate_menus();
+    actions_menu_ = file->addMenu(QStringLiteral("アクション"));  // (PC5 J-g: オートアクション before — Photoshop's name)
     actions_menu_->setProperty("remade", true);
     connect(actions_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_actions_menu);
     fill_actions_menu();
-    file->addAction(action("act_prefs"));
     file->addSeparator();
     file->addAction(action("act_quit"));
 }
@@ -221,6 +264,7 @@ void MainWindow::open_path(const fs::path& path, std::optional<render::codecs::F
         watcher->deleteLater();
         flash_timer_.stop();
         if (!read.first) {
+            start_pending_ = false;  // (PC5 I-e: the first book not opened — no アプリケーションを起動 later)
             ask::warning(this, QStringLiteral("Genko"), QStringLiteral("ファイルを開けませんでした:\n%1\n%2").arg(QDir::toNativeSeparators(qpath(path)), wording::error(read.second)));
             refresh_status();
             return;
@@ -231,7 +275,9 @@ void MainWindow::open_path(const fs::path& path, std::optional<render::codecs::F
     watcher->setFuture(QtConcurrent::run([path, options]() -> Read {
         try {
             const std::string bytes = file_bytes(path);
-            return {formats::open_file(bytes, core::path_to_utf8(path.filename()), options), QString()};
+            formats::OpenOptions here = options;
+            here.folder = path.parent_path();  // (PC5 I-d: a .pcraft's data sets' pictures beside it)
+            return {formats::open_file(bytes, core::path_to_utf8(path.filename()), here), QString()};
         } catch (const std::exception& error) {
             return {std::nullopt, QString::fromUtf8(error.what())};
         }
@@ -250,6 +296,7 @@ void MainWindow::open_pcraft_folder(const fs::path& path) {
         watcher->deleteLater();
         flash_timer_.stop();
         if (!read.first) {
+            start_pending_ = false;  // (PC5 I-e: the first book not opened — no アプリケーションを起動 later)
             ask::warning(this, QStringLiteral("Genko"), QStringLiteral("ファイルを開けませんでした:\n%1\n%2").arg(QDir::toNativeSeparators(qpath(path)), wording::error(read.second)));
             refresh_status();
             return;
@@ -298,6 +345,11 @@ void MainWindow::ask_missing_profile(formats::Opened& opened) {
 }
 
 void MainWindow::add_picture_book(core::Document doc, const std::vector<std::string>& notes, std::optional<fs::path> source) {
+    // (PC5 H-e: ドキュメントをタブで開く off — a window of its own)
+    if (MainWindow* there = window_to_open_in(); there != this) {
+        there->add_picture_book(std::move(doc), notes, std::move(source));
+        return;
+    }
     Session::Options options;
     options.idle = std::min(options.longest, std::chrono::milliseconds(preferences::save_after_ms()));
     // (PC4 F-e: a camera RAW's colours are its development's — Camera Raw's ワークフロー chose its space —, never the
@@ -310,6 +362,7 @@ void MainWindow::add_picture_book(core::Document doc, const std::vector<std::str
         if (documents_[i].session != added) continue;
         documents_[i].picture = true;
         documents_[i].source = source;
+        history_log::follow(added.get(), source);  // (PC5 H-e: ヒストリーログ — never written to the picture it came from)
         doc_tabs_->setTabText(static_cast<int>(i), documents_[i].title());
     }
     if (session_ == added) {
@@ -321,23 +374,38 @@ void MainWindow::add_picture_book(core::Document doc, const std::vector<std::str
         for (const std::string& note : notes) said << QString::fromStdString(note);
         flash(said.join(QStringLiteral("。")), 8000);
     }
+    if (source && session_ == added) raise_opened(service::script_events::Event::OpenDocument);  // (PC5 I-e: a file opened)
 }
 
 // --- 閉じる (file.closeAll, file.closeOthers) ------------------------------------------------------------------------
 
 bool MainWindow::close_all() {
     // (each asked first as 閉じる asks; the last one closes into an untitled book, the window staying)
-    while (documents_.size() > 1) {
-        if (!close_document(static_cast<int>(documents_.size()) - 1)) return false;
+    // (PC5 I-e, the review's P2-4: ドキュメントを閉じる raised once, at the end, not once a book on the book left in front)
+    bool closed = false;
+    bool settled = true;
+    {
+        const service::script_events::Firing quiet;
+        while (settled && documents_.size() > 1) {
+            settled = close_document(static_cast<int>(documents_.size()) - 1);
+            closed = closed || settled;
+        }
+        if (settled) {
+            const std::shared_ptr<Session> last = documents_.front().session;
+            settled = documents::open_elsewhere(last.get(), this) || settle(0);
+        }
     }
-    const std::shared_ptr<Session> last = documents_.front().session;
-    if (!documents::open_elsewhere(last.get(), this) && !settle(0)) return false;
+    if (!settled) {  // (キャンセル: those closed said once)
+        if (closed) script_event(service::script_events::Event::CloseDocument);
+        return false;
+    }
     auto fresh = std::make_shared<Session>(core::new_episode("無題", core::Num(std::int64_t{1}), 8, core::PageSpec::a4_mono()), std::nullopt);
     documents_.front() = Document{fresh};
     doc_ = -1;
     show_document(0);
     canvas_->fit_page();
     flash(QStringLiteral("原稿をすべて閉じました"), 3000);
+    script_event(service::script_events::Event::CloseDocument);
     return true;
 }
 
@@ -345,11 +413,22 @@ bool MainWindow::close_others() {
     // (from the last tab down: closing one never moves the tabs still to be looked at; the kept book's tabs — its
     // contents' too — stay)
     const std::shared_ptr<Session> kept = session_;
-    for (int i = static_cast<int>(documents_.size()) - 1; i >= 0; --i) {
-        if (documents_[static_cast<std::size_t>(i)].session == kept) continue;
-        if (!close_document(i)) return false;
+    // (PC5 I-e, the review's P2-4: ドキュメントを閉じる raised once, at the end — not once a book on the book kept)
+    bool closed = false;
+    bool all = true;
+    {
+        const service::script_events::Firing quiet;
+        for (int i = static_cast<int>(documents_.size()) - 1; i >= 0; --i) {
+            if (documents_[static_cast<std::size_t>(i)].session == kept) continue;
+            if (!close_document(i)) {
+                all = false;
+                break;
+            }
+            closed = true;
+        }
     }
-    return true;
+    if (closed) script_event(service::script_events::Event::CloseDocument);
+    return all;
 }
 
 // --- 保存 (file.saveAs, file.saveACopy, file.revert) ----------------------------------------------------------------
@@ -463,6 +542,7 @@ bool MainWindow::save_copy_to(const QString& chosen) {
         QString words = QStringLiteral("コピーを保存しました（原稿はそのままです）: %1").arg(QDir::toNativeSeparators(path));
         flash(words, 6000);
         remember_file(fpath(path));
+        script_event(service::script_events::Event::Export);  // (PC5 I-e: スクリプトイベント — a picture's copy is an export)
         return true;
     } catch (const std::exception& error) {
         flash(QStringLiteral("コピーを保存できませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);

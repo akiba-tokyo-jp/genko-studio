@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/channels.hpp"
+#include "core/groups.hpp"
 #include "core/masks.hpp"
 #include "core/ops_util.hpp"
 #include "core/pyconv.hpp"
@@ -98,7 +99,7 @@ MaskLending::MaskLending(core::Document& doc, std::size_t at, Json& op, std::str
     page_id_ = seen.id;
     const std::size_t index = owner_of(seen, op, name);
     const core::Layer& owner = seen.layers[index];
-    if (owner.kind == core::LayerKind::Folder) throw core::OpError("layer_mask: a folder cannot take a mask (mask the layers in it)");
+    if (owner.kind == core::LayerKind::Folder && !core::is_group(owner)) throw core::OpError("layer_mask: a folder cannot take a mask (mask the layers in it)");  // (groups@1: a group can)
     if (owner.locked) throw core::OpError("the layer is locked");
     owner_ = owner.id;
     lent_size_ = page_size(seen, raster::kWorkingDpi);

@@ -18,6 +18,12 @@
 #include "core/ink.hpp"
 #include "core/json.hpp"
 #include "core/psd_keep.hpp"
+#include "core/artboards.hpp"
+// PC5 節 J (layer-comps@1, slices@1, annotations@1, measure@1)
+#include "core/annotations.hpp"
+#include "core/layer_comps.hpp"
+#include "core/measure.hpp"
+#include "core/slices.hpp"
 #include "core/pynum.hpp"
 #include "core/vector.hpp"
 
@@ -33,7 +39,8 @@ namespace genko::core {
 
 enum class Binding { Right, Left };
 enum class LayerRole { Name, Draft, Ink, Bg, Finish, Tone, Effect, Frames, Text, User };
-enum class LayerKind { Raster, Strokes, Fill, Tone, Folder, Placed, Adjust, Smart };
+// (type@1, PC5 G-0: Type — a type layer, core/type_text.hpp)
+enum class LayerKind { Raster, Strokes, Fill, Tone, Folder, Placed, Adjust, Smart, Type };
 
 std::string_view to_string(Binding binding);
 std::string_view to_string(LayerRole role);
@@ -174,6 +181,8 @@ struct Patch {
     Json after_asset = Json::object();
 };
 
+struct StoryLine;  // (below: a type layer holds one, type@1)
+
 struct Layer {
     std::string id;
     LayerRole role = LayerRole::User;
@@ -240,6 +249,21 @@ struct Layer {
     // emboss, satin, the overlays, the stroke), its fill opacity and Blend If — in its normal form (none: no style, as every
     // layer before it)
     std::optional<Json> style;
+    // PC5 G-0 (type@1, core/type_text.hpp): a type layer's record (kind "type") — a line's record without what only the
+    // story has (its id, page, speaker, panel and reading order), drawn by the lines' typesetting as the layer's picture;
+    // null on any other layer. Shared between copies and never changed once made (an op makes a new one).
+    std::shared_ptr<const StoryLine> type;
+    // PC5 I-b (groups@1, core/groups.hpp): a folder drawn as Photoshop's group — what is in it hidden with it, its opacity,
+    // its blend (pass_through, 通過, a group's only), its mask and vector mask; false: a folder as before, an order of layers
+    bool group = false;
+    // PC5 I-a (layer-locks@1, core/layer_basics.hpp): すべてをロック — nothing drawn on it, moved, its look (opacity, blend,
+    // style, mask…) changed or deleted, whatever its other locks — and アートボードの内外への自動ネストを防ぐ (kept for PSD and
+    // .pcraft: Genko's artboards are pages, PC5 I-c)
+    bool lock_all = false;
+    bool lock_nest = false;
+    // PC5 I-a (blend-channels@1): 混合オプション → チャンネル — for each colour channel of its page (RGB, CMYK, Lab, grey) whether
+    // it blends; one left out keeps what is under the layer there. Empty: every channel blends (as every layer before it).
+    std::vector<bool> blend_channels;
 
     std::size_t stroke_count() const { return strokes ? strokes->items.size() : 0; }
 };
@@ -306,6 +330,10 @@ struct StoryLine {
     std::vector<std::pair<std::string, Json>> style_runs;  // [[words, {scale, bold, rgb}]]
     Json style = Json::object();
     std::vector<Json> tails;
+    // PC5 G-0 (type@1, core/type_text.hpp): Photoshop's type settings past the style — its shape (point or box), anti-alias,
+    // OpenType typesetting, matrix, character and paragraph attributes, the styles it takes and its ranges — in their
+    // normal form (none: the line set as before it)
+    std::optional<Json> native_type;
 };
 
 // channels@1 (core/channels.hpp, docs/cpp-migration/schema-v4.md「チャンネル」): a page's alpha or spot channel — one plane
@@ -373,6 +401,19 @@ struct Page {
     // PSD it was read from held that this build does not read — its image resources and global blocks
     std::optional<NativeSource> native_source;
     std::optional<PsdPageKeep> native_psd;
+    // PC5 節 J (SPEC.md PROD-01): its layer comps (layer-comps@1, core/layer_comps.hpp), slices (slices@1, core/slices.hpp),
+    // notes placed on it (annotations@1, core/annotations.hpp) and measuring (measure@1, core/measure.hpp) — none or empty:
+    // nothing written. (timeline@1 and video@1 are in its anim, `extra["anim"]`: core/video.hpp)
+    std::optional<LayerComps> layer_comps;
+    std::optional<Slices> slices;
+    std::vector<Annotation> annotations;
+    std::optional<Measure> measure;
+    // PC5 I-c (artboards@1, core/artboards.hpp): the page as an artboard (none: a page as every page)
+    std::optional<Artboard> artboard;
+    // PC5 H-f (pixel-aspect@1, core/pixel_aspect.hpp; the user's decision 10): the width of a pixel over its height, for the
+    // view only — ピクセル縦横比を補正 widens the view by it; the pixels, the drawing and every file written stay square (1:
+    // nothing written)
+    double pixel_aspect = 1.0;
 
     Rect paper_rect_mm() const;
     Rect trim_rect_mm() const;
@@ -488,6 +529,14 @@ struct Document {
     // PC4 E6 (layer-styles@1, core/layer_styles.hpp): 包括光源 — the angle and altitude (degrees) of the light its layer
     // styles' effects take when they use the global light (none: Photoshop's 120° and 30°)
     std::optional<std::array<double, 2>> global_light;
+    // PC5 G-0 (type@1, core/type_text.hpp): its character styles, paragraph styles and Basic Paragraph
+    // ({"character": […], "paragraph": […], "basic": {…}} in their normal form; none: none)
+    std::optional<Json> type_styles;
+    // PC5 I-d (variables@1, core/variables.hpp): its variables and data sets in their normal form (none: none)
+    std::optional<Json> variables;
+    // PC5 I-f (image-assets@1, core/image_assets.hpp): 生成 → 画像アセット is on — the layers named as files are written
+    // beside the book on each save the person makes (written as "generator": {"image_assets": true}; off: not written)
+    bool image_assets = false;
     // PC2a (adjustments@1): the 3D lookup tables its color_lookup corrections use (their "lut"), by their asset ref
     // (core/lut3d: GKLU bytes). Written as assets/<ab>/<64 hex>.gklut; only those a correction uses are written and read.
     std::map<std::string, Bytes> luts;
@@ -495,7 +544,8 @@ struct Document {
     // layer shows (on a page, or inside other contents) are written.
     std::map<std::string, std::shared_ptr<const SmartContents>> smart_contents;
     // smart-objects@1: the bytes of the files ops were given (their "data") that are not in assets/ yet, by their asset ref;
-    // the writer writes those its contents use (with their suffix), as it writes luts.
+    // the writer writes those its contents use (with their suffix), as it writes luts — and (variables@1, PC5 I-d) those
+    // the data sets' pictures name.
     std::map<std::string, Bytes> smart_files;
     // PC4 (file-info@1, core/file_info.hpp): its File Info (none: nothing said)
     std::optional<FileInfo> file_info;

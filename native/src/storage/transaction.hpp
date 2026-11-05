@@ -48,6 +48,9 @@ struct SaveRequest {
     // that this folder does not hold is copied from there first (copy_named_assets) — a smart object's file, filter mask,
     // PSD record and assigned profile, a placed picture: what only the assets hold, not the book in memory.
     std::optional<std::filesystem::path> assets_from;
+    // (PC5 I-0, SPEC.md AUTO-01) The script, batch, droplet or script event that made the change — its name, and the
+    // event in parentheses for a script event —, kept in the prepare line as "script"; empty: none (no key written).
+    std::string script;
 };
 
 struct SaveResult {

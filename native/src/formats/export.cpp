@@ -167,8 +167,8 @@ void check_dpi(std::int64_t dpi) {
 Image crop_to(const Image& image, const core::Page& page, std::string_view area, int dpi) {
     if (area == "paper") return image;
     const core::Rect r = area == "bleed" ? page.bleed_rect_mm() : page.trim_rect_mm();
-    const int x0 = render::mm_to_px(r.x.value(), dpi);
-    const int y0 = render::mm_to_px(r.y.value(), dpi);
+    const int x0 = render::edge_px(r.x.value(), dpi);
+    const int y0 = render::edge_px(r.y.value(), dpi);
     return image.crop(render::Box{x0, y0, x0 + render::mm_to_px(r.width.value(), dpi), y0 + render::mm_to_px(r.height.value(), dpi)});
 }
 
@@ -269,8 +269,8 @@ static std::string values_crop_to(const std::string& values, const core::Page& p
     if (area == "paper") return values;
     const core::ColorRasterView view(values);
     const core::Rect r = area == "bleed" ? page.bleed_rect_mm() : page.trim_rect_mm();
-    const int x0 = std::clamp(render::mm_to_px(r.x.value(), dpi), 0, static_cast<int>(view.width()));
-    const int y0 = std::clamp(render::mm_to_px(r.y.value(), dpi), 0, static_cast<int>(view.height()));
+    const int x0 = std::clamp(render::edge_px(r.x.value(), dpi), 0, static_cast<int>(view.width()));
+    const int y0 = std::clamp(render::edge_px(r.y.value(), dpi), 0, static_cast<int>(view.height()));
     const int x1 = std::clamp(x0 + render::mm_to_px(r.width.value(), dpi), x0 + 1, static_cast<int>(view.width()));
     const int y1 = std::clamp(y0 + render::mm_to_px(r.height.value(), dpi), y0 + 1, static_cast<int>(view.height()));
     const auto width = static_cast<std::size_t>(x1 - x0);
@@ -282,8 +282,8 @@ static std::string values_crop_to(const std::string& values, const core::Page& p
 core::InkPixels inks_crop_to(const core::InkPixels& inks, const core::Page& page, std::string_view area, int dpi) {
     if (area == "paper") return inks;
     const core::Rect r = area == "bleed" ? page.bleed_rect_mm() : page.trim_rect_mm();
-    const int x0 = render::mm_to_px(r.x.value(), dpi);
-    const int y0 = render::mm_to_px(r.y.value(), dpi);
+    const int x0 = render::edge_px(r.x.value(), dpi);
+    const int y0 = render::edge_px(r.y.value(), dpi);
     render::Box box{x0, y0, x0 + render::mm_to_px(r.width.value(), dpi), y0 + render::mm_to_px(r.height.value(), dpi)};
     box.x0 = std::clamp(box.x0, 0, static_cast<int>(inks.width));
     box.x1 = std::clamp(box.x1, box.x0, static_cast<int>(inks.width));

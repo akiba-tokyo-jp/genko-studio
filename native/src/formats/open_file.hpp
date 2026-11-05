@@ -56,6 +56,9 @@ struct OpenOptions {
     std::optional<core::Json> raw;
     double raw_dpi = 300;
     bool raw_smart = false;
+    // PC5 I-d: the folder the file is in — a .pcraft's data sets name their pictures by paths beside it (none: such pictures
+    // are left out, said)
+    std::optional<std::filesystem::path> folder;
 };
 
 struct Opened {

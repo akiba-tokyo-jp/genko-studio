@@ -104,6 +104,11 @@ void MainWindow::build_page_size_actions() {
     tools_->addAction(crop);
     tool_actions_[QStringLiteral("crop")] = crop;
     connect(canvas_, &PageCanvas::cropRequested, this, [this](const QRectF& box, double angle) { crop_drawn(box, angle); });
+    // (PC5 H-c review P2-1: the book the crop box is drawn on — Enter crops that book only)
+    connect(canvas_, &PageCanvas::cropChanged, this, [this] {
+        crop_book_ = session_.get();
+        crop_contents_ = contents_;
+    });
 }
 
 void MainWindow::build_page_size_menu(QMenu* pages) {
@@ -250,6 +255,10 @@ void MainWindow::crop_to_selection() {
 void MainWindow::crop_drawn(const QRectF& box, double angle) {
     const core::Page* page = current_page();
     if (page == nullptr || box.width() <= 0 || box.height() <= 0) return;
+    if (!begun_here(crop_book_, crop_contents_)) {  // (PC5 H-c review P2-1)
+        flash(QStringLiteral("切り抜きの枠を描いた原稿が前にないため、切り抜きを取りやめました"), 4000);
+        return;
+    }
     const auto r3 = [](double v) { return std::round(v * 1000.0) / 1000.0; };
     Json op{{"op", "crop_page"}, {"page", page->index.json()}, {"rect", Json::array({r3(box.x()), r3(box.y()), r3(box.width()), r3(box.height())})}};
     if (std::abs(angle) > 1e-9) op["angle"] = std::round(angle * 100.0) / 100.0;

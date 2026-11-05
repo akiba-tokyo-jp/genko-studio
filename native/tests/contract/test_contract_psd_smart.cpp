@@ -4,6 +4,7 @@
 // the files embedded (a file's own bytes; a page's, a PSD of its layers), where their boxes land —; a PSD's placed layer
 // imported as a smart object (Photoshop's picture shown, its file drawn once it changes, as upstream's
 // smart_cmds/tests.rs:359-397), saved, undone and redone, and written back with the block and item it was read with.
+// And a layer's style (layer-styles@1) in the page's PSD read by psd-tools as Photoshop's effects.
 
 #include <QtTest>
 
@@ -11,17 +12,24 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <string>
+#include <vector>
 
 #include "core/base64.hpp"
+#include "core/command_bus.hpp"
 #include "core/ink.hpp"
 #include "core/json.hpp"
+#include "core/paths.hpp"
+#include "formats/export.hpp"
 #include "render/image.hpp"
+#include "render/ops_registry.hpp"
 #include "render/png.hpp"
 #include "render/psd.hpp"
 #include "render/psd_smart.hpp"
+#include "render/raster.hpp"
 #include "psd_build.hpp"
 #include "testsupport.hpp"
 
@@ -311,6 +319,74 @@ private slots:
         const psd::File filtered_psd = psd::File::read(genko::test::read_bytes(path(QStringLiteral("filtered.psd"))));
         for (const psd::Layer& l : filtered_psd.layers())
             if (l.kind == "smart") QCOMPARE(std::string(filtered_psd.placed_block(l)), sold);
+    }
+
+    // PC4 E6 (layer-styles@1, SPEC.md COLOR-09「レイヤースタイル」; moved here from test_layer_styles's psdWrittenAndRead,
+    // which Windows runs without the reference Python): a layer's style written into the page's PSD (lfx2, iOpa) read by
+    // psd-tools (tools/migration/psd_effects_check.py) as Photoshop's effects — the layer's effects on, a drop shadow
+    // (1.27 mm: 10 px at 200 dpi; opacity 50 %), a pattern overlay and a stroke (0.762 mm: 6 px), the fill opacity 128 of
+    // 255. The same book as there: a grey square on a page of 2 inches at 200 dpi, its style.
+    void layerStylesReadByPsdTools() {
+        QVERIFY2(!genko::test::python_ref().isEmpty(), "the reference Python (GENKO_PYREF) reads the PSD with psd-tools");
+        namespace core = genko::core;
+        constexpr double kInch = 25.4;
+        constexpr int kSide = 400;
+        core::Document doc = core::new_episode("スタイル", core::Num(1), 1, core::PageSpec::custom(2 * kInch, 2 * kInch, 40, 40, 1, 2, 2, 2, 2, 200, "color"));
+        doc.edit_page(0).frames.clear();
+        doc.edit_page(0).numero = false;
+        {
+            auto& p = doc.edit_page(0);
+            p.layers.clear();
+            core::Layer layer;
+            layer.id = "paint";
+            layer.title = "四角";
+            layer.role = core::LayerRole::User;
+            layer.kind = core::LayerKind::Raster;
+            layer.panel_clip = false;
+            std::string bytes;
+            for (int y = 0; y < kSide; ++y)
+                for (int x = 0; x < kSide; ++x)
+                    bytes += (x >= 100 && x < 300 && y >= 100 && y < 300) ? std::string("\xC8\xC8\xC8\xFF", 4) : std::string(4, '\0');
+            render::raster::save_raster(p, layer, render::Image::frombytes("RGBA", render::Size{kSide, kSide}, bytes));
+            p.layers.push_back(layer);
+        }
+        std::string checker;  // (a 2 × 2 picture of red and blue)
+        for (int i = 0; i < 4; ++i) checker += (i == 0 || i == 3) ? std::string("\xFF\x00\x00\xFF", 4) : std::string("\x00\x00\xFF\xFF", 4);
+        const Json pattern{{"name", "チェック"}, {"png", core::b64encode(render::write_png(render::Image::frombytes("RGBA", render::Size{2, 2}, checker)))},
+                           {"mode", "rgb"}, {"depth", 8}, {"dpi", 300}};
+        const Json style{{"effects", Json::array({Json{{"kind", "stroke"}, {"size_mm", 0.762}, {"rgb", Json::array({255, 0, 0})}},
+                                                  Json{{"kind", "drop_shadow"}, {"distance_mm", 1.27}, {"size_mm", 0.508}, {"opacity", 0.5}, {"rgb", Json::array({10, 20, 30})}},
+                                                  Json{{"kind", "pattern_overlay"}, {"pattern", pattern}}})},
+                         {"fill_opacity", 0.5},
+                         {"blend_if", Json::array({Json{{"channel", "gray"}, {"this", Json::array({0, 10, 240, 250})}, {"under", Json::array({0, 0, 255, 255})}}})}};
+        doc = core::CommandBus(render::ops_registry())
+                  .apply(doc, Json::array({Json{{"op", "set_layer_style"}, {"page", 1}, {"id", "paint"}, {"style", style}}}), core::Actor("human:test"))
+                  .doc;
+        const QString file = path(QStringLiteral("styles.psd"));
+        genko::formats::export_page_psd(doc, doc.page(0), core::path_from_utf8(file.toStdString()), 200);
+        const QString answer = path(QStringLiteral("styles.json"));
+        const auto ran = genko::test::run(genko::test::python_ref(),
+                                          {QStringLiteral("-I"), genko::test::repo_root() + QStringLiteral("/tools/migration/psd_effects_check.py"), answer, file},
+                                          genko::test::python_env(path(QStringLiteral("pyenv"))));
+        QVERIFY2(ran.exit_code == 0, qPrintable(ran.described()));
+        const Json seen = genko::test::read_json(answer);
+        Json layer;
+        for (const Json& l : seen["layers"])
+            if (!l["effects"].empty()) layer = l;
+        QVERIFY2(layer.is_object(), seen.dump().c_str());
+        QCOMPARE(layer["enabled"], Json(true));
+        std::vector<std::string> kinds;
+        for (const Json& e : layer["effects"]) kinds.push_back(e["kind"].get<std::string>());
+        std::sort(kinds.begin(), kinds.end());
+        QCOMPARE(kinds, (std::vector<std::string>{"DropShadow", "PatternOverlay", "Stroke"}));
+        for (const Json& e : layer["effects"]) {
+            if (e["kind"] == Json("DropShadow")) {
+                QVERIFY2(std::abs(e["distance"].get<double>() - 10) < 0.6, e.dump().c_str());  // (1.27 mm at 200 dpi)
+                QVERIFY2(std::abs(e["opacity"].get<double>() - 50) < 0.6, e.dump().c_str());
+            }
+            if (e["kind"] == Json("Stroke")) QVERIFY2(std::abs(e["size"].get<double>() - 6) < 0.6, e.dump().c_str());
+        }
+        QVERIFY2(std::abs(layer["fill_opacity"].get<double>() - 128) <= 1, layer.dump().c_str());
     }
 };
 

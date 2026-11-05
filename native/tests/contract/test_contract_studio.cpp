@@ -41,8 +41,10 @@
 #include <QFileInfo>
 #include <QTemporaryDir>
 
+#include <cstdint>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <string>
 
 #include "core/base64.hpp"
@@ -72,6 +74,39 @@
 using genko::core::Json;
 
 namespace {
+
+// A PSD's bytes without its image resource `id` (the section's length less by it); none when it has none or is cut short.
+std::optional<std::string> without_resource(const std::string& psd, unsigned id) {
+    const auto u32 = [&psd](std::size_t at) -> std::uint32_t {
+        std::uint32_t v = 0;
+        for (std::size_t k = 0; k < 4; ++k) v = (v << 8) | static_cast<unsigned char>(psd[at + k]);
+        return v;
+    };
+    if (psd.size() < 34) return std::nullopt;
+    const std::size_t length_at = 26 + 4 + u32(26);  // (after the header and the colour mode data)
+    if (length_at + 4 > psd.size()) return std::nullopt;
+    const std::uint32_t length = u32(length_at);
+    const std::size_t end = length_at + 4 + length;
+    if (end > psd.size()) return std::nullopt;
+    for (std::size_t at = length_at + 4; at + 12 <= end;) {
+        const unsigned rid = (static_cast<unsigned>(static_cast<unsigned char>(psd[at + 4])) << 8) | static_cast<unsigned char>(psd[at + 5]);
+        std::size_t name = 1 + static_cast<unsigned char>(psd[at + 6]);
+        name += name % 2;
+        const std::size_t size_at = at + 6 + name;
+        if (size_at + 4 > end) return std::nullopt;
+        const std::uint32_t size = u32(size_at);
+        const std::size_t next = size_at + 4 + size + size % 2;
+        if (next > end) return std::nullopt;
+        if (rid == id) {
+            std::string out = psd.substr(0, at) + psd.substr(next);
+            const std::uint32_t less = length - static_cast<std::uint32_t>(next - at);
+            for (std::size_t k = 0; k < 4; ++k) out[length_at + k] = static_cast<char>((less >> (8 * (3 - k))) & 0xff);
+            return out;
+        }
+        at = next;
+    }
+    return std::nullopt;
+}
 
 // tools/migration/studio_harness.py <args>, run by the Python reference.
 genko::test::Run studio_harness(const QStringList& args, const QString& scratch, int timeout_ms = 1800000) {
@@ -1072,6 +1107,7 @@ private slots:
         // correction layer the view's very bytes
         int psd_adjustments = 0;
         int psd_same = 0;
+        int psd_guides = 0;  // (pages whose own PSD has their guides, 1032: the fifth)
         {
             const QString own = dir + "/own_psd";
             const auto written = genko::formats::export_psd_pages(doc, genko::core::path_from_utf8(own.toStdString()), 40);
@@ -1100,16 +1136,29 @@ private slots:
                 if (layer_pictures(ours, &adjustments) != layer_pictures(theirs, &view_adjustments) || view_adjustments != 0) {
                     failures.push_back("own psd " + name.toStdString() + ": not the view's with its adjustment layers");
                 } else if (adjustments == 0 && mine != view) {
-                    failures.push_back("own psd " + name.toStdString() + ": no correction layer, yet not the view's bytes");
+                    // (PC5 H-b: a page with guide rulers — this book's fifth page — has them as image resource 1032, which psd.py
+                    // writes none of, nor the view: the view's very bytes but for that resource)
+                    if (without_resource(mine, 1032) != std::optional<std::string>(view)) {
+                        failures.push_back("own psd " + name.toStdString() + ": no correction layer, yet not the view's bytes (but for its guides)");
+                    } else {
+                        ++psd_guides;
+                    }
                 }
                 psd_adjustments += adjustments;
                 psd_same += adjustments == 0 ? 1 : 0;
             }
         }
 
+        if (const QByteArray keep = qgetenv("GENKO_TEST_KEEP"); !keep.isEmpty() && !failures.empty()) {
+            std::error_code ec;  // (GENKO_TEST_KEEP=<folder>: the book and both builds' drawings and exports kept there, to read what differs)
+            std::filesystem::copy(genko::core::path_from_utf8(dir.toStdString()),
+                                  genko::core::path_from_utf8((QString::fromLocal8Bit(keep) + "/placed").toStdString()),
+                                  std::filesystem::copy_options::recursive, ec);
+        }
         for (const auto& f : failures) qWarning("%s", f.c_str());
         QVERIFY2(failures.empty(), (std::to_string(failures.size()) + " drawings differ from Python's").c_str());
-        QVERIFY2(psd_adjustments >= 1 && psd_same >= 1, (std::to_string(psd_adjustments) + " " + std::to_string(psd_same)).c_str());
+        QVERIFY2(psd_adjustments >= 1 && psd_same >= 1 && psd_guides >= 1,
+                 (std::to_string(psd_adjustments) + " " + std::to_string(psd_same) + " " + std::to_string(psd_guides)).c_str());
         // C++ only: a finish whose value is not a number where the finish uses it is refused (Python fails with its
         // own TypeError inside Pillow's point())
         {

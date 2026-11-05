@@ -3,6 +3,9 @@
 // the whole page from nothing; the same page again with one more line (the remembered lines are drawn on); and a
 // 512 × 512 part of the page (a screen tile) from nothing. And test_h1.test_small_pictures_draw_lines_plainly: a page
 // of 200 lines drawn at 12 dpi for the proof in under 0.5 s, its lines there.
+// And (PC5 I-b review P2-4) a B4 RGB PSD of groups at 350 dpi (GENKO_PERF_GROUPS_PSD, made by perf/make_groups_psd.py)
+// read by import_psd onto a B4 colour page: the whole page and a 512 x 512 part, from nothing. Where this build draws
+// groups (groups@1), also the same page with its groups made plain folders again, as builds before groups read them.
 
 #include <QtTest>
 
@@ -22,9 +25,15 @@
 #include "core/pyrandom.hpp"
 #include "core/smart.hpp"
 #include "render/image.hpp"
+#include "render/import_psd.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/smart.hpp"
+
+#if __has_include("core/groups.hpp")
+#include "core/groups.hpp"
+#define GENKO_PERF_GROUPS 1
+#endif
 
 namespace render = genko::render;
 using genko::core::Document;
@@ -150,6 +159,57 @@ private slots:
         qInfo("F1 page (B4, 1500 lines) at 350 dpi (%d x %d px): whole page %lld ms; with one more line (remembered "
               "lines) %lld ms; a 512x512 part from nothing %lld ms",
               whole.image.width(), whole.image.height(), cold, warm, part);
+    }
+
+    // (PC5 I-b review P2-4: shown, not judged) the PSD of groups: a page's timings before and after groups@1
+    void psd_of_groups_at_350dpi() {
+        const QString path = qEnvironmentVariable("GENKO_PERF_GROUPS_PSD");
+        if (path.isEmpty()) QSKIP("GENKO_PERF_GROUPS_PSD: a PSD of groups (python tests/perf/make_groups_psd.py OUT.psd)");
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QByteArray bytes = file.readAll();
+        genko::core::PageSpec spec = genko::core::PageSpec::b4_comic();
+        spec.expression = "color";
+        Document doc = genko::core::new_episode("グループ", genko::core::Num(1), 1, spec);
+        doc.edit_page(0).numero = false;
+        QElapsedTimer timer;
+        timer.start();
+        (void)render::import_psd_data(doc, genko::core::Json{{"op", "import_psd"}, {"page", 1}, {"fit", "paper"}},
+                                      std::string(bytes.constData(), static_cast<std::size_t>(bytes.size())));
+        const qint64 read = timer.elapsed();
+        std::size_t groups = 0;
+#ifdef GENKO_PERF_GROUPS
+        for (const auto& layer : doc.page(0).layers)
+            if (genko::core::is_group(layer)) ++groups;
+#endif
+        const auto times = [](const Document& d, const char* what) {
+            render::RenderOptions options;
+            render::clear_render_caches();
+            QElapsedTimer clock;
+            clock.start();
+            const render::RenderResult whole = render::render_page(d.page(0), 350, options, &d);
+            const qint64 cold = clock.elapsed();
+            render::clear_render_caches();
+            render::RenderOptions tile = options;
+            tile.region = render::RenderRegion{1200, 1800, 512, 512};
+            clock.restart();
+            (void)render::render_page(d.page(0), 350, tile, &d);
+            const qint64 part = clock.elapsed();
+            qInfo("%s at 350 dpi (%d x %d px): whole page %lld ms; a 512x512 part from nothing %lld ms", what, whole.image.width(),
+                  whole.image.height(), static_cast<long long>(cold), static_cast<long long>(part));
+        };
+        qInfo("the PSD of groups read in %lld ms: %zu layers, %zu of them drawn as groups", static_cast<long long>(read),
+              doc.page(0).layers.size(), groups);
+        times(doc, "the page of the PSD");
+#ifdef GENKO_PERF_GROUPS
+        Document plain = doc;
+        for (auto& layer : plain.edit_page(0).layers) {
+            if (!layer.group) continue;
+            layer.group = false;
+            layer.blend = "normal";
+        }
+        times(plain, "the same page, its groups plain folders");
+#endif
     }
 
     // test_h1.test_small_pictures_draw_lines_plainly (_thick(1, 200)): judged, as Python's

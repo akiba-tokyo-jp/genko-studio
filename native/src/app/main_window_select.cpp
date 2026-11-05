@@ -53,8 +53,6 @@ using core::Json;
 
 namespace {
 
-using Std = QKeySequence::StandardKey;
-
 // The marquee tool's ways, by the window's tool names (Python's _tool; PC3 B1: 色域選択 is 自動選択ツール's 色の近さ now).
 const std::map<QString, QString>& marquee_ways() {
     static const std::map<QString, QString> ways{{QStringLiteral("rect"), QStringLiteral("rect")},         {QStringLiteral("lasso"), QStringLiteral("lasso")},
@@ -125,7 +123,7 @@ void MainWindow::build_selection_actions() {
          QStringLiteral("ドラッグで選ぶ。中をドラッグで移動、□で拡大縮小、○で回転（Shift で 15° 刻み・縦横比を保つ）"));
     tool("act_lasso", QStringLiteral("なげなわツール"), QStringLiteral("lasso"), {QKeySequence(QStringLiteral("L"))}, QStringLiteral("ドラッグで囲んで選びます"));
     tool("act_wand", QStringLiteral("自動選択ツール"), QStringLiteral("wand"), {QKeySequence(QStringLiteral("W"))},
-         QStringLiteral("クリックした所を選びます（基準はツールの設定: 線で囲まれた所・色の近さ）"));
+         QStringLiteral("クリックした所を選びます（基準はオプション: 線で囲まれた所・色の近さ）"));
     tool("act_sel_ellipse", QStringLiteral("楕円形選択ツール"), QStringLiteral("ellipse"), {}, QStringLiteral("ドラッグで楕円に選ぶ（Shift で足す、Alt で引く）"));
     tool("act_sel_polyline", QStringLiteral("多角形選択ツール"), QStringLiteral("polyline"), {}, QStringLiteral("クリックで角を置き、ダブルクリックか Enter で閉じる"));
     tool("act_sel_pen", QStringLiteral("選択ペン"), QStringLiteral("selpen"), {}, QStringLiteral("なぞった所を選択範囲に足す"));
@@ -133,7 +131,7 @@ void MainWindow::build_selection_actions() {
     tool("act_magic_eraser", QStringLiteral("マジック消しゴムツール"), QStringLiteral("magiceraser"), {},
          QStringLiteral("クリックした所に近い色の所を透明にします（描く先のペイントのレイヤー）"));
 
-    make("act_select_all", QStringLiteral("すべてを選択"), [this] { select_all(); }, {QKeySequence(Std::SelectAll)});
+    make("act_select_all", QStringLiteral("すべてを選択"), [this] { select_all(); }, {QKeySequence(QStringLiteral("Ctrl+A"))});
     make("act_deselect", QStringLiteral("選択を解除"), [this] { canvas_->set_selection(std::nullopt); }, {QKeySequence(QStringLiteral("Ctrl+D"))});
     make("act_sel_invert", QStringLiteral("選択範囲を反転"), [this] { change_selection(Json{{"invert", true}}); }, {QKeySequence(QStringLiteral("Ctrl+Alt+I"))});
     make("act_sel_reselect", QStringLiteral("再選択"), [this] { reselect(); }, {QKeySequence(QStringLiteral("Ctrl+Shift+D"))},
@@ -152,7 +150,8 @@ void MainWindow::build_selection_actions() {
          QStringLiteral("枠のつまみで選択範囲の形だけを動かす・拡大縮小・回転する（中身は動かない）。Enter で終わる"));
     make("act_sel_load", QStringLiteral("選択範囲を読み込む…"), [this] { load_selection_dialog(); }, {},
          QStringLiteral("チャンネル・色の版・透明部分・マスクから選択範囲を作る（反転・追加・削除・共通範囲も）"));
-    QAction* edges = make("act_sel_edges", QStringLiteral("選択範囲の境界線"), [] {}, {}, QStringLiteral("選択範囲の点線を表示する・隠す"), true);
+    // (PC5 H-b: Photoshop's 表示 → 表示・非表示 ▸ 選択範囲のエッジ)
+    QAction* edges = make("act_sel_edges", QStringLiteral("選択範囲のエッジ"), [] {}, {}, QStringLiteral("選択範囲の点線を表示する・隠す"), true);
     edges->setChecked(true);
     connect(edges, &QAction::toggled, this, [this](bool on) {
         canvas_->show_selection_edges = on;
@@ -165,14 +164,13 @@ void MainWindow::build_selection_actions() {
          QStringLiteral("名前を付けてページに残す（後で「ストックから選ぶ」）"));
     QAction* quick = make("act_quick_mask", QStringLiteral("クイックマスクモードで編集"), [] {}, {}, QStringLiteral("選択範囲を赤で見せ、ブラシなどの道具で直す"), true);
     connect(quick, &QAction::toggled, this, [this](bool on) { quick_mask(on); });
-    make("act_copy", QStringLiteral("コピー"), [this] { copy(); }, {QKeySequence(Std::Copy)});
-    make("act_cut", QStringLiteral("カット"), [this] { cut(); }, {QKeySequence(Std::Cut)});
-    make("act_paste", QStringLiteral("ペースト"), [this] { paste(); }, {QKeySequence(Std::Paste)}, QStringLiteral("新しいレイヤーにペーストします（そのまま動かせます）"));
+    make("act_copy", QStringLiteral("コピー"), [this] { copy(); }, {QKeySequence(QStringLiteral("Ctrl+C"))});
+    make("act_cut", QStringLiteral("カット"), [this] { cut(); }, {QKeySequence(QStringLiteral("Ctrl+X"))});
+    make("act_paste", QStringLiteral("ペースト"), [this] { paste(); }, {QKeySequence(QStringLiteral("Ctrl+V"))}, QStringLiteral("新しいレイヤーにペーストします（そのまま動かせます）"));
     // (Python's: the platform's first key of Delete, and Backspace — not all of Delete's keys: on X11 they hold Ctrl+D, which
-    // is 選択を解除's, and a key two commands share does neither)
-    QList<QKeySequence> delete_keys = {QKeySequence(Std::Delete)};
-    if (!delete_keys.contains(QKeySequence(QStringLiteral("Backspace")))) delete_keys << QKeySequence(QStringLiteral("Backspace"));
-    make("act_delete_area", QStringLiteral("消去"), [this] { delete_area(); }, delete_keys);
+    // is 選択を解除's, and a key two commands share does neither. The same keys on every system — PC5 V3: the system's
+    // standard keys differ by system, the commands' keys do not — as main_window_actions' keys())
+    make("act_delete_area", QStringLiteral("消去"), [this] { delete_area(); }, {QKeySequence(QStringLiteral("Del")), QKeySequence(QStringLiteral("Backspace"))});
     make("act_flip_h", QStringLiteral("水平方向に反転"), [this] { flip(-1, 1); });
     make("act_flip_v", QStringLiteral("垂直方向に反転"), [this] { flip(1, -1); });
     make("act_fill_selection", QStringLiteral("描画色で塗りつぶし"), [this] { fill_selection(); }, {QKeySequence(QStringLiteral("Alt+Backspace"))});

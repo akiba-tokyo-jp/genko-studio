@@ -27,6 +27,7 @@
 #include "render/not_yet_ported.hpp"
 #include "render/png.hpp"
 #include "render/text/fonts.hpp"
+#include "render/text/opentype.hpp"
 #include "render/text/lettering.hpp"
 #include "render/text/tategaki.hpp"
 #include "opsupport.hpp"
@@ -278,6 +279,7 @@ private slots:
         int errors = 0;
         int warps_exact = 0;
         int warps_near = 0;
+        int opentype_now = 0;
         const Json& cases = data_.at("cases");
         for (std::size_t n = 0; n < cases.size(); ++n) {
             const Json& c = cases[n];
@@ -365,8 +367,16 @@ private slots:
                                                            render::Ink{255, 255, 255});
                 text::paint_text(page, line, dpi, c.at("show_speaker").get<bool>(), font_path);
                 if (!c.contains("painted")) {
-                    qWarning("%s: Python raised %s, C++ painted", id.c_str(), c.value("error", Json()).dump().c_str());
-                    ++failures;
+                    // (PC5 G-b, the coordinator's decision for G: a line across asking for OpenType features — Pillow's
+                    // BASIC layout raised KeyError without raqm — is set by HarfBuzz now: drawn, where Python drew nothing)
+                    const Json& raised = c.value("error", Json());
+                    if (text::sets_opentype(line) && raised.is_array() && !raised.empty() && raised[0] == Json("KeyError") &&
+                        raised.dump().find("without libraqm") != std::string::npos && page.getbbox().has_value()) {
+                        ++opentype_now;
+                    } else {
+                        qWarning("%s: Python raised %s, C++ painted", id.c_str(), raised.dump().c_str());
+                        ++failures;
+                    }
                 } else {
                     if (!same_picture(page, picture(c["painted"]), QStringLiteral("text-%1-painted").arg(QString::fromStdString(id)), id)) {
                         ++failures;
@@ -384,8 +394,9 @@ private slots:
             }
         }
         qInfo("%zu lines: %d layouts and %d paintings compared byte for byte, %d of Python's errors raised alike; %d warped "
-              "lines: %d byte for byte, %d within ARCHITECTURE.md §9 (numpy's SVD); %d differ",
-              cases.size(), layouts, painted, errors, warps_exact + warps_near, warps_exact, warps_near, failures);
+              "lines: %d byte for byte, %d within ARCHITECTURE.md §9 (numpy's SVD); %d with OpenType features across drawn now "
+              "(PC5 G-b); %d differ",
+              cases.size(), layouts, painted, errors, warps_exact + warps_near, warps_exact, warps_near, opentype_now, failures);
         QCOMPARE(failures, 0);
     }
 };

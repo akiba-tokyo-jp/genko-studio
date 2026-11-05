@@ -220,7 +220,7 @@ bool precise_first(core::OpContext& c) {
     const std::string wanted = id->get<std::string>();
     bool make = false;
     for (const core::Layer& layer : c.doc.page(at).layers) {
-        if (layer.id == wanted) make = !layer.locked && paint_fill::becomes_precise(c.doc.page(at), layer);
+        if (layer.id == wanted) make = !layer.locked && paint_fill::becomes_precise(c.doc, at, layer, &c.notes);
     }
     if (make) paint_fill::make_precise(c.doc, at, wanted);
     return make;

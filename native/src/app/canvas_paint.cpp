@@ -90,12 +90,19 @@ void PageCanvas::draw_in_page_px(QPainter& painter, const QImage& image, const Q
     const double mm = 25.4 / dpi;
     QTransform t = QTransform::fromScale(mm, mm) * QTransform(view_.scale, 0, 0, view_.scale, view_.pan.x(), view_.pan.y()) * view_transform();
     // (exactly one page pixel per screen pixel at 100 %, as the tiles are drawn)
-    if (std::abs(t.m11() - 1.0) < 1e-9 && std::abs(t.m22() - 1.0) < 1e-9 && std::abs(t.m12()) < 1e-12 && std::abs(t.m21()) < 1e-12) {
-        t = QTransform::fromTranslate(std::round(t.dx()), std::round(t.dy()));
+    if (std::abs(std::abs(t.m11()) - 1.0) < 1e-9 && std::abs(std::abs(t.m22()) - 1.0) < 1e-9 && std::abs(t.m12()) < 1e-12 && std::abs(t.m21()) < 1e-12) {
+        t = QTransform(t.m11() < 0 ? -1 : 1, 0, 0, t.m22() < 0 ? -1 : 1, std::round(t.dx()), std::round(t.dy()));  // (mirrored too: PC5 H-a)
     }
     const QTransform kept = painter.transform();
     painter.setTransform(t);
+    // (PC5 H-a: the page's own pixels enlarged — 画素の段 — and ピクセルアートのプレビュー: nearest, as the tiles are laid)
+    const bool smooth = painter.testRenderHint(QPainter::SmoothPixmapTransform);
+    const int pixel = renderer_->pixel_dpi();
+    if (renderer_->pixel_art() || (std::abs(t.determinant()) > 1.0 + 1e-9 && pixel > 0 && dpi >= pixel)) {
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+    }
     painter.drawImage(box.topLeft(), image);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, smooth);
     painter.setTransform(kept);
 }
 
@@ -155,13 +162,18 @@ void PageCanvas::paint_page(QPainter& painter) {
     // the lines committed a moment ago, exactly as their tiles will be, until the tiles are drawn
     for (const Overlay& overlay : overlays_) draw_in_page_px(painter, overlay.ink->image(), overlay.ink->box(), overlay.ink->dpi());
     if (committing_) draw_in_page_px(painter, committing_->image(), committing_->box(), committing_->dpi());
+    draw_pixel_grid(painter);  // (PC5 H-a: ピクセルグリッド, over the page's pixels and under the guides: canvas_view.cpp)
     painter.setRenderHint(QPainter::Antialiasing);
     if (show_guides) draw_guides(painter, page_rect);
     if (phone_view) draw_phone(painter);  // (the phone screens: canvas_scale.cpp)
     draw_grid(painter);    // (canvas_guides.cpp)
+    draw_guide_lines(painter);  // (PC5 H-b: the guides placed — canvas_guide_lines.cpp)
+    draw_artboard_name(painter);  // (PC5 I-c: アートボード名)
     draw_rulers(painter);
+    draw_layer_edges(painter);  // (PC5 H-b: レイヤーエッジ)
     draw_selection(painter);
     draw_lines(painter);  // (the balloons' boxes and the chosen one's handles: canvas_lines.cpp)
+    draw_extras(painter);  // (PC5 J-0: the slices, notes, count marks and the ruler line — エクストラ: canvas.cpp)
     if (tool_drag_ && tool_ == QLatin1String("move") && !move_image_.isNull()) {
         // the layer being moved: its picture following the pen
         const QPointF d = tool_drag_->second - tool_drag_->first;
@@ -178,8 +190,10 @@ void PageCanvas::paint_page(QPainter& painter) {
     draw_crop(painter);       // (the crop tool's box: canvas_crop.cpp)
     draw_transform(painter);  // (自由変形 and the warps' box: canvas_transform.cpp)
     draw_tools(painter);      // (the area being filled, the gradient's drag, the figure being drawn: canvas_tools.cpp)
+    draw_slice_drag(painter);  // (PC5 J-b: the slice being drawn, moved or sized: canvas_slices.cpp)
     draw_move_box(painter);   // (the move tool's バウンディングボックス: canvas_snap.cpp)
     draw_snap(painter);       // (what a drag snapped to: canvas_snap.cpp)
+    draw_spacing(painter);    // (PC5 H-b: the equal gaps of a moved box, スマートガイド)
     draw_prims(painter);    // (the 3D tool's handles: canvas_guides.cpp)
     draw_effect_handles(painter);  // (the effect tool's centres: canvas_effects.cpp)
     if (work_ && work_->paint) {   // (PC4 D4: a piece of work over the page — ぼかしギャラリー's pins)
@@ -194,6 +208,7 @@ void PageCanvas::paint_page(QPainter& painter) {
         painter.drawRect(QRectF(zoom_drag_->first, zoom_drag_->second).normalized());
     }
     draw_balloon_stroke(painter);  // (the balloon pen's outline)
+    draw_type(painter);            // (PC5 G-a: a box text dragged, the chosen type layer's box: canvas_lines.cpp)
     if (!stroke_.empty() && draws_line(tool_) && live_) {
         if (live_snapped_) {
             for (const auto& copy : live_copies_) draw_in_page_px(painter, copy->image(), copy->box(), copy->dpi());
@@ -300,6 +315,16 @@ void PageCanvas::draw_shadow(QPainter& painter, const QRectF& page_rect) const {
     // this paint is all under the sheet's white)
     if (painted_within(painter, painting_, page_rect)) return;
     const double scale = std::max(0.2, std::sqrt(std::abs(painter.transform().determinant())));
+    // (PC5 H-e, 環境設定 → インターフェイス → 境界線: ドロップシャドウ — this —, ライン — a thin grey line round the sheet — or なし)
+    if (page_border == QLatin1String("none")) return;
+    if (page_border == QLatin1String("line")) {
+        painter.setPen(QPen(QColor(0, 0, 0, theme::tokens().dark ? 150 : 90), 1.0 / scale));
+        painter.setBrush(Qt::NoBrush);
+        const double out = 0.5 / scale;
+        painter.drawRect(page_rect.adjusted(-out, -out, out, out));
+        painter.setPen(Qt::NoPen);
+        return;
+    }
     painter.setPen(Qt::NoPen);
     const bool dark = theme::tokens().dark;
     for (int i = 6; i >= 1; --i) {

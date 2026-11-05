@@ -8,8 +8,12 @@
 #include <QAction>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QPushButton>
@@ -17,18 +21,23 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QTableWidget>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include "gui_support.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
 #include "app/plugins_dialog.hpp"
+#include "app/preferences.hpp"
 #include "app/tiles.hpp"
 #include "app/timeline.hpp"
 #include "service/wording.hpp"
 #include "core/anim.hpp"
+#include "core/video.hpp"
+#include "render/movie.hpp"
 #include "render/plugins.hpp"
 #include "render/timelapse.hpp"
+#include "storage/asset_store.hpp"
 #include "testsupport.hpp"
 using namespace genko;
 using core::Json;
@@ -161,7 +170,11 @@ private slots:
         panel->set_frame(3);
         panel->camera_here();
         QVERIFY(core::anim::camera_at(s.page(), 3).has_value());
-        // written out (the format from the file's name)
+        // written out (PC5 J-e1: ビデオをレンダリング's window — all the frames, as it opens — then where; the format from the
+        // file's name)
+        s.answers.responder->exec = [](QDialog* dialog) {
+            return qobject_cast<app::RenderVideoDialog*>(dialog) != nullptr ? int(QDialog::Accepted) : int(QDialog::Rejected);
+        };
         const QString gif = s.tmp.path() + "/w.gif";
         s.answers.responder->save_path_filtered = [gif](const QString&, const QString&, const QString&) {
             return std::pair<QString, QString>(gif, QStringLiteral("GIF (*.gif)"));
@@ -187,6 +200,401 @@ private slots:
         panel->refresh();
         QVERIFY(panel->start->isVisible());
         QVERIFY(!panel->table->isEnabled());
+    }
+
+    // PC5 J-e1 (SPEC.md PROD-01: timeline.*, window.panel.timeline, file.export.renderVideo): Photoshop's names (ページ →
+    // ビデオタイムラインを作成 — its old name read —, ウィンドウ → タイムライン, ファイル → 書き出し ▸ ビデオをレンダリング…), the
+    // panel's menu, the frame moved by the keys while the panel has the focus (← → Home End, Shift ← → to the work area's
+    // ends; the canvas keeps its arrows) and by フレームへ移動…, the work area (its boxes; played within it; the page names
+    // timeline@1), an fps past 60, ビデオをレンダリング's range and speed, タイムラインを削除, the words of the refusals.
+    void theTimelineMovesAndRenders() {
+        Studio s;
+        app::MainWindow* w = s.window.get();
+        // the names
+        QCOMPARE(w->action("act_timeline")->text(), QStringLiteral("ビデオタイムラインを作成"));
+        QVERIFY(app::preferences::old_names(QStringLiteral("ビデオタイムラインを作成")).contains(QStringLiteral("アニメーション（タイムライン）")));
+        QCOMPARE(w->findChild<QDockWidget*>(QStringLiteral("タイムライン"))->windowTitle(), QStringLiteral("タイムライン"));
+        QCOMPARE(w->action("act_render_video")->text(), QStringLiteral("ビデオをレンダリング…"));
+        QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_export"))->actions().contains(w->action("act_render_video")));
+        const std::vector<std::pair<const char*, QString>> moves{{"act_next_frame", QStringLiteral("次のフレーム")},
+                                                                  {"act_previous_frame", QStringLiteral("前のフレーム")},
+                                                                  {"act_first_frame", QStringLiteral("最初のフレーム")},
+                                                                  {"act_last_frame", QStringLiteral("最後のフレーム")},
+                                                                  {"act_work_start", QStringLiteral("作業範囲の開始点へ移動")},
+                                                                  {"act_work_end", QStringLiteral("作業範囲の終了点へ移動")},
+                                                                  {"act_go_to_frame", QStringLiteral("フレームへ移動…")}};
+        for (const auto& [name, text] : moves) QCOMPARE(w->action(name)->text(), text);
+        // a page that is not an animation: said so
+        w->action("act_next_frame")->trigger();
+        QVERIFY(w->last_notice().startsWith(QStringLiteral("このページはアニメーションではありません")));
+        // ビデオタイムラインを作成 from ページ: the panel shown and the page an animation
+        w->action("act_timeline")->trigger();
+        QVERIFY(core::anim::is_animation(s.page()));
+        // (one step: 取り消し takes the timeline, its folder and its first cel back at once)
+        const std::size_t plain_layers = s.page().layers.size();
+        w->action("act_undo")->trigger();
+        QVERIFY(!core::anim::is_animation(s.page()));
+        QCOMPARE(s.page().layers.size() + 2, plain_layers);
+        w->action("act_timeline")->trigger();
+        QVERIFY(core::anim::is_animation(s.page()));
+        app::TimelinePanel* panel = w->timeline();
+        QVERIFY(panel->isVisible());
+        QCOMPARE(core::anim::frames_of(s.page()), std::int64_t{24});
+        // its menu
+        QStringList items;
+        for (QAction* a : panel->panel_menu->actions()) items << (a->isSeparator() ? QStringLiteral("|") : a->menu() ? a->menu()->title() + QStringLiteral(" ▸") : a->text());
+        // (PC5 J-e2: ビデオレイヤー ▸ before ビデオをレンダリング…)
+        QCOMPARE(items, (QStringList{QStringLiteral("ビデオタイムラインを作成"), QStringLiteral("タイムラインを削除"), QStringLiteral("|"), QStringLiteral("移動 ▸"),
+                                     QStringLiteral("作業範囲 ▸"), QStringLiteral("|"), QStringLiteral("ビデオレイヤー ▸"), QStringLiteral("|"),
+                                     QStringLiteral("ビデオをレンダリング…")}));
+        // (made again — J-e2's items go in it —: the same menu, nothing left over, its items followed as it opens)
+        panel->build_menu();
+        panel->build_menu();
+        QStringList again;
+        for (QAction* a : panel->panel_menu->actions()) again << (a->isSeparator() ? QStringLiteral("|") : a->menu() ? a->menu()->title() + QStringLiteral(" ▸") : a->text());
+        QCOMPARE(again, items);
+        QCOMPARE(panel->panel_menu->findChildren<QMenu*>(QString(), Qt::FindDirectChildrenOnly).size(), qsizetype(3));
+        emit panel->panel_menu->aboutToShow();
+        QVERIFY(panel->findChild<QAction*>(QStringLiteral("timeline_delete"))->isEnabled());
+        // the keys: while the panel has the focus only, the same in both key sets
+        QCOMPARE(w->action("act_next_frame")->shortcuts(), QList<QKeySequence>{QKeySequence(Qt::Key_Right)});
+        QCOMPARE(w->action("act_work_end")->shortcuts(), QList<QKeySequence>{QKeySequence(Qt::SHIFT | Qt::Key_Right)});
+        QCOMPARE(w->action("act_next_frame")->shortcutContext(), Qt::WidgetWithChildrenShortcut);
+        w->activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(w));
+        panel->table->setFocus();
+        QVERIFY(gui_test::wait_for([&] { return panel->table->hasFocus(); }, 5000));
+        QTest::keyClick(panel->table, Qt::Key_Right);
+        QCOMPARE(w->current_frame(), std::int64_t{2});
+        QTest::keyClick(panel->table, Qt::Key_End);
+        QCOMPARE(w->current_frame(), std::int64_t{24});
+        QTest::keyClick(panel->table, Qt::Key_Right);  // (not past the last)
+        QCOMPARE(w->current_frame(), std::int64_t{24});
+        QTest::keyClick(panel->table, Qt::Key_Left);
+        QCOMPARE(w->current_frame(), std::int64_t{23});
+        QTest::keyClick(panel->table, Qt::Key_Home);
+        QCOMPARE(w->current_frame(), std::int64_t{1});
+        QCOMPARE(panel->where->text(), QStringLiteral("1 / 24（0.00 秒）"));
+        w->canvas()->setFocus();
+        QVERIFY(gui_test::wait_for([&] { return w->canvas()->hasFocus(); }, 5000));
+        QTest::keyClick(w->canvas(), Qt::Key_Right);  // (the canvas's arrow: not the timeline's)
+        QCOMPARE(w->current_frame(), std::int64_t{1});
+        // the work area, from its boxes: the book names timeline@1 — one step, taken back to the anim as it was
+        const Json anim_before = *core::anim::spec(s.page());
+        panel->work_first->setValue(5);
+        panel->work_last->setValue(10);
+        panel->work->setChecked(true);
+        QVERIFY(core::work_area(s.page()).has_value());
+        w->action("act_undo")->trigger();
+        QVERIFY(!core::work_area(s.page()).has_value());
+        QCOMPARE(core::anim::spec(s.page())->dump(), anim_before.dump());
+        QVERIFY(!panel->work->isChecked());
+        panel->work_first->setValue(5);
+        panel->work_last->setValue(10);
+        panel->work->setChecked(true);
+        QVERIFY(core::work_area(s.page()) == (std::optional<std::array<std::int64_t, 2>>(std::array<std::int64_t, 2>{5, 10})));
+        QVERIFY(core::page_uses_timeline(s.page()));
+        QVERIFY(panel->work_first->isEnabled());
+        panel->table->setFocus();
+        QVERIFY(gui_test::wait_for([&] { return panel->table->hasFocus(); }, 5000));
+        QTest::keyClick(panel->table, Qt::Key_Right, Qt::ShiftModifier);
+        QCOMPARE(w->current_frame(), std::int64_t{10});
+        QTest::keyClick(panel->table, Qt::Key_Left, Qt::ShiftModifier);
+        QCOMPARE(w->current_frame(), std::int64_t{5});
+        // played within it: from its first frame when the frame shown is at its end or outside it (Photoshop's), round again
+        // after its last
+        panel->set_frame(10);
+        panel->play_button->setChecked(true);
+        QCOMPARE(panel->frame, std::int64_t{5});
+        panel->tick();
+        QCOMPARE(panel->frame, std::int64_t{6});
+        panel->play_button->setChecked(false);
+        panel->set_frame(9);
+        panel->play_button->setChecked(true);
+        QCOMPARE(panel->frame, std::int64_t{9});
+        panel->tick();
+        panel->tick();
+        QCOMPARE(panel->frame, std::int64_t{5});
+        panel->play_button->setChecked(false);
+        panel->set_frame(20);  // (outside it, the loop off: still played from its first frame)
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "set_animation"}, {"page", 1}, {"loop", false}}})));
+        panel->play_button->setChecked(true);
+        QCOMPARE(panel->frame, std::int64_t{5});
+        panel->tick();
+        QCOMPARE(panel->frame, std::int64_t{6});
+        QVERIFY(panel->play_button->isChecked());
+        panel->play_button->setChecked(false);
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "set_animation"}, {"page", 1}, {"loop", true}}})));
+        // フレームへ移動…
+        s.answers.responder->get_int = [](const QString& title, const QString&, int, int lo, int hi) {
+            return title == QStringLiteral("フレームへ移動") && lo == 1 && hi == 24 ? std::optional<int>(7) : std::optional<int>();
+        };
+        w->action("act_go_to_frame")->trigger();
+        QCOMPARE(w->current_frame(), std::int64_t{7});
+        // an fps past 60
+        panel->fps->setValue(90);
+        emit panel->fps->editingFinished();
+        QCOMPARE(core::anim::fps_of(s.page()), 90.0);
+        // ビデオをレンダリング: the work area at 24 fps, as numbered PNGs (frames 5..10)
+        QString range_offered;
+        s.answers.responder->exec = [&](QDialog* dialog) {
+            auto* d = qobject_cast<app::RenderVideoDialog*>(dialog);
+            if (d == nullptr) return int(QDialog::Rejected);
+            range_offered = d->range->currentText();
+            d->fps->setValue(24);
+            return int(QDialog::Accepted);
+        };
+        const QString folder_out = s.tmp.path() + "/work";
+        s.answers.responder->save_path_filtered = [folder_out](const QString&, const QString&, const QString&) {
+            return std::pair<QString, QString>(folder_out, QStringLiteral("連番 PNG（フォルダー） (*)"));
+        };
+        w->action("act_render_video")->trigger();
+        QCOMPARE(range_offered, QStringLiteral("作業範囲（5〜10）"));
+        QCOMPARE(QDir(folder_out).entryList({QStringLiteral("frame_*.png")}, QDir::Files).size(), 6);
+        {
+            app::RenderVideoDialog d(w, s.page());
+            QCOMPARE(d.frames(), (std::array<std::int64_t, 2>{5, 10}));
+            QVERIFY(!d.speed().has_value());  // (the page's own)
+            d.range->setCurrentIndex(d.range->findData(QStringLiteral("all")));
+            QCOMPARE(d.frames(), (std::array<std::int64_t, 2>{1, 24}));
+            d.range->setCurrentIndex(d.range->findData(QStringLiteral("custom")));
+            d.first->setValue(12);
+            d.last->setValue(3);
+            QCOMPARE(d.frames(), (std::array<std::int64_t, 2>{3, 12}));
+            d.fps->setValue(0.5);
+            QCOMPARE(d.speed(), std::optional<double>(0.5));
+            d.size->setValue(320);
+            QCOMPARE(d.width_px(), std::optional<int>(320));
+        }
+        // the work area off, the fps back: as before (no timeline@1)
+        panel->work->setChecked(false);
+        QVERIFY(!core::work_area(s.page()).has_value());
+        panel->fps->setValue(12);
+        emit panel->fps->editingFinished();
+        QVERIFY(!core::page_uses_timeline(s.page()));
+        // the words
+        QCOMPARE(genko::wording::error(QStringLiteral("ops[0] set_animation: fps is 0.5 to 120")), QStringLiteral("フレームレートは 0.5〜120 fps です"));
+        QCOMPARE(genko::wording::error(QStringLiteral("ops[0] set_animation: work is [first, last]: frames of 1 to 24, or null")),
+                 QStringLiteral("作業範囲は 1〜24 のフレームの［開始点, 終了点］で指定します"));
+        // タイムラインを削除: an ordinary page again (the cels stay as layers)
+        const std::size_t layers = s.page().layers.size();
+        QAction* gone = panel->findChild<QAction*>(QStringLiteral("timeline_delete"));
+        QVERIFY(gone != nullptr);
+        gone->trigger();
+        QVERIFY(!core::anim::is_animation(s.page()));
+        QCOMPARE(s.page().layers.size(), layers);
+    }
+
+    // (PC5 J-e1, the review's P3-4) A page someone else holds: ビデオタイムラインを作成 changes nothing — the refusal said, the book
+    // as it was —, and the page stays an ordinary one.
+    // PC5 J-e2 (video@1): レイヤー → ビデオレイヤー ▸ in the window — a video layer from a GIF (its frames the book's pictures,
+    // the page made an animation, the timeline's row of its frames), a blank one; the frame shown altered by a stroke begun
+    // on it (paint_layer: its cel made and drawn on) and taken back with one Undo; 変更されたビデオを表示 off and on; a frame
+    // inserted, duplicated, deleted, restored; フッテージを解釈… (its window), フレームを再読み込み (the file again; gone: said);
+    // ラスタライズ → ビデオ; ビデオフレームからレイヤー… (its window); a locked video layer refused; the panel's menu and a cell's.
+    void videoLayersInTheWindow() {
+        Studio s;
+        app::MainWindow* w = s.window.get();
+        const QString gif = s.tmp.path() + QStringLiteral("/four.gif");
+        {
+            std::vector<render::Image> pictures;
+            for (const auto& rgb : {std::array<int, 3>{255, 0, 0}, {0, 255, 0}, {0, 0, 255}, {255, 255, 0}}) {
+                pictures.push_back(render::Image::create("RGBA", render::Size{32, 24}, render::Ink{rgb[0], rgb[1], rgb[2], 255}).convert("RGB"));
+            }
+            (void)render::movie::write_movie(pictures, gui_test::path_of(gif), 10, "gif");
+        }
+        // the commands made real: none says it is not in this build
+        for (const char* name : {"act_video_from_file", "act_video_blank", "act_video_insert_blank", "act_video_duplicate", "act_video_delete",
+                                 "act_video_replace", "act_video_interpret", "act_video_show_altered", "act_video_restore", "act_video_restore_all",
+                                 "act_video_reload", "act_video_rasterize", "act_rasterize_video", "act_video_frames_to_layers"}) {
+            QVERIFY2(w->action(name) != nullptr, name);
+        }
+        QCOMPARE(w->action("act_rasterize_video")->text(), QStringLiteral("ビデオ"));
+        QMenu* rasterize = w->findChild<QMenu*>(QStringLiteral("menu_rasterize"));
+        const QList<QAction*> in_rasterize = rasterize->actions();
+        QCOMPARE(in_rasterize.indexOf(w->action("act_rasterize_video")), in_rasterize.indexOf(w->action("act_rasterize_smart")) + 1);
+        // nothing chosen: said
+        w->action("act_video_insert_blank")->trigger();
+        QVERIFY(w->last_error().contains(QStringLiteral("ビデオレイヤーを選んでください")));
+        // from a file
+        s.answers.responder->open_path = [gif](const QString&, const QString&) { return gif; };
+        w->action("act_video_from_file")->trigger();
+        QVERIFY2(core::anim::is_animation(s.page()), qPrintable(w->last_error()));
+        const auto folder = w->video_folder();
+        QVERIFY(folder.has_value());
+        const Json* video = core::video_row(s.page(), Json(*folder));
+        QVERIFY(video != nullptr);
+        QCOMPARE(video->at("frames").size(), std::size_t(4));
+        QCOMPARE(core::anim::frames_of(s.page()), std::int64_t(4));
+        for (const Json& ref : video->at("footage").at("frames")) QVERIFY(storage::AssetStore(s.book).has(ref.get<std::string>(), ".png"));
+        app::TimelinePanel* panel = w->timeline();
+        panel->refresh();
+        QCOMPARE(panel->table->item(0, 0)->text(), QStringLiteral("▪"));
+        QVERIFY(panel->table->verticalHeaderItem(0)->text().endsWith(QStringLiteral("（ビデオ）")));
+        // a stroke drawn on it: the frame altered — its cel the layer drawn on —, one Undo takes the stroke and the cel back
+        panel->set_frame(2, false);
+        w->set_target_layer(*folder);
+        const std::size_t layers = s.page().layers.size();
+        app::StrokeInput stroke;
+        stroke.tool = QStringLiteral("pen");
+        for (int i = 0; i <= 10; ++i) stroke.points.push_back(core::PenPoint{40.0 + i * 3, 60.0, 0.5});
+        emit w->canvas()->strokeCommitted(stroke);
+        QVERIFY2(gui_test::wait_for([&] { return s.page().layers.size() == layers + 1; }, 10000), qPrintable(w->last_error()));
+        const core::Layer* cel = w->target_layer();
+        QVERIFY2(cel != nullptr && cel->kind == core::LayerKind::Raster && cel->parent_id == Json(*folder),
+                 cel == nullptr ? "none" : (cel->id + " " + cel->parent_id.dump() + " " + std::to_string(static_cast<int>(cel->kind))).c_str());
+        QVERIFY(core::video_row(s.page(), Json(*folder))->at("frames")[1][1] == Json(cel->id));
+        panel->refresh();
+        QCOMPARE(panel->table->item(0, 1)->text(), QStringLiteral("✎"));
+        w->action("act_undo")->trigger();
+        QCOMPARE(s.page().layers.size(), layers);
+        QVERIFY(core::video_row(s.page(), Json(*folder))->at("frames")[1][1].is_null());
+        w->action("act_redo")->trigger();
+        QCOMPARE(s.page().layers.size(), layers + 1);
+        // 変更されたビデオを表示 off and on (the menu's check follows the layer)
+        w->set_target_layer(*folder);
+        w->action("act_video_show_altered")->trigger();
+        QCOMPARE(core::video_row(s.page(), Json(*folder))->at("show_altered"), Json(false));
+        emit w->findChild<QMenu*>(QStringLiteral("menu_video_layers"))->aboutToShow();
+        QVERIFY(!w->action("act_video_show_altered")->isChecked());
+        w->action("act_video_show_altered")->trigger();
+        QCOMPARE(core::video_row(s.page(), Json(*folder))->at("show_altered"), Json(true));
+        // insert, duplicate, delete, restore at the frame shown (2)
+        w->action("act_video_insert_blank")->trigger();
+        QCOMPARE(core::video_row(s.page(), Json(*folder))->at("frames").size(), std::size_t(5));
+        QVERIFY(core::video_row(s.page(), Json(*folder))->at("frames")[1][0].is_null());
+        w->action("act_video_delete")->trigger();
+        QCOMPARE(core::video_row(s.page(), Json(*folder))->at("frames").size(), std::size_t(4));
+        panel->set_frame(2, false);
+        w->action("act_video_duplicate")->trigger();
+        QCOMPARE(core::video_row(s.page(), Json(*folder))->at("frames").size(), std::size_t(5));
+        QCOMPARE(core::anim::cels_of(s.page(), Json(*folder)).size(), std::size_t(2));
+        w->action("act_video_restore_all")->trigger();
+        QVERIFY(core::anim::cels_of(s.page(), Json(*folder)).empty());
+        // フッテージを解釈…: its window
+        s.answers.responder->exec = [](QDialog* dialog) {
+            if (auto* fps = dialog->findChild<QDoubleSpinBox*>(QStringLiteral("interpret_fps"))) fps->setValue(5);
+            return 1;
+        };
+        w->action("act_video_interpret")->trigger();
+        QCOMPARE(core::video_row(s.page(), Json(*folder))->at("footage").at("fps"), Json(5.0));
+        QCOMPARE(core::video_row(s.page(), Json(*folder))->at("frames").size(), std::size_t(8));
+        // フレームを再読み込み: the file named shown and asked first (no: nothing read), then read again; gone: said
+        const Json frames_before = core::video_row(s.page(), Json(*folder))->at("frames");
+        QStringList asked;
+        s.answers.responder->question = [&asked](const QString& title, const QString& text) {
+            asked << title + QStringLiteral(": ") + text;
+            return false;
+        };
+        w->action("act_video_reload")->trigger();
+        QVERIFY(!asked.isEmpty() && asked.back().contains(gif) && asked.back().contains(QStringLiteral("同じ中身")));
+        QCOMPARE(core::video_row(s.page(), Json(*folder))->at("frames"), frames_before);
+        s.answers.responder->question = [](const QString&, const QString&) { return true; };
+        w->action("act_video_reload")->trigger();
+        QVERIFY2(w->last_error().isEmpty() || !w->last_error().contains(QStringLiteral("見つかりません")), qPrintable(w->last_error()));
+        QCOMPARE(core::video_row(s.page(), Json(*folder))->at("footage").at("fps"), Json(5.0));
+        QCOMPARE(core::video_row(s.page(), Json(*folder))->at("frames"), frames_before);
+        QFile::rename(gif, gif + QStringLiteral(".moved"));
+        w->action("act_video_reload")->trigger();
+        QVERIFY(w->last_error().contains(QStringLiteral("元のファイルが見つかりません")));
+        QFile::rename(gif + QStringLiteral(".moved"), gif);
+        // locked: refused
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", *folder}, {"locked", true}}})));
+        const std::int64_t revision = w->book().revision;
+        w->set_target_layer(*folder);
+        w->action("act_video_insert_blank")->trigger();
+        QCOMPARE(w->book().revision, revision);
+        QVERIFY(w->last_error().contains(QStringLiteral("ロック")) || !w->last_error().isEmpty());
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "set_layer"}, {"page", 1}, {"id", *folder}, {"locked", false}}})));
+        // the panel's menu: ビデオレイヤー ▸ before ビデオをレンダリング…; a cell's menu of a video row
+        QMenu* in_panel = panel->findChild<QMenu*>(QStringLiteral("timeline_video_menu"));
+        QVERIFY(in_panel != nullptr && in_panel->actions().contains(w->action("act_video_insert_blank")));
+        QMenu* cell = panel->cell_menu(0, 0);
+        QVERIFY(cell != nullptr);
+        QStringList cell_items;
+        for (QAction* a : cell->actions()) if (!a->isSeparator()) cell_items << a->text();
+        QVERIFY(cell_items.contains(QStringLiteral("空白フレームを挿入")) && cell_items.contains(QStringLiteral("フレームを復元")));
+        delete cell;
+        // ラスタライズ → ビデオ: a paint layer in its place
+        w->set_target_layer(*folder);
+        panel->set_frame(3, false);
+        w->action("act_rasterize_video")->trigger();
+        QVERIFY(core::video_row(s.page(), Json(*folder)) == nullptr);
+        QVERIFY(w->target_layer() != nullptr && w->target_layer()->kind == core::LayerKind::Raster);
+        // a blank video layer, then ビデオフレームからレイヤー… (its window: every 2nd frame, as layers)
+        w->action("act_video_blank")->trigger();
+        QVERIFY(w->video_folder().has_value());
+        QVERIFY(core::video_row(s.page(), Json(*w->video_folder()))->at("footage").is_null());
+        s.answers.responder->exec = [](QDialog* dialog) {
+            if (auto* every = dialog->findChild<QSpinBox*>(QStringLiteral("frames_every"))) every->setValue(2);
+            return 1;
+        };
+        const std::size_t before = s.page().layers.size();
+        w->action("act_video_frames_to_layers")->trigger();
+        QCOMPARE(s.page().layers.size(), before + 2);
+    }
+
+    // (the review's P2-3) フレームを再読み込み of a GIF of frames of other lengths (1/10 s, 3/10 s, 1/10 s: shown 1, 3 and 1
+    // times at 10 fps): the same frames after it, its interpreted speed kept.
+    void videoReloadKeepsLongFrames() {
+        Studio s;
+        app::MainWindow* w = s.window.get();
+        const QString gif = s.tmp.path() + QStringLiteral("/long.gif");
+        {
+            std::vector<render::Image> pictures;  // (the same picture in a row: one frame shown as long — movie::Writer's)
+            for (const auto& rgb : {std::array<int, 3>{255, 0, 0}, {0, 255, 0}, {0, 255, 0}, {0, 255, 0}, {0, 0, 255}}) {
+                pictures.push_back(render::Image::create("RGBA", render::Size{16, 12}, render::Ink{rgb[0], rgb[1], rgb[2], 255}).convert("RGB"));
+            }
+            (void)render::movie::write_movie(pictures, gui_test::path_of(gif), 10, "gif");
+        }
+        w->new_video_layer(gif);
+        const auto folder = w->video_folder();
+        QVERIFY2(folder.has_value(), qPrintable(w->last_error()));
+        const Json before = core::video_row(s.page(), Json(*folder))->at("footage").at("frames");
+        QCOMPARE(before.size(), std::size_t(5));
+        QVERIFY(before[1] == before[2] && before[2] == before[3] && before[0] != before[1]);
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "set_video_layer"}, {"page", 1}, {"folder", *folder}, {"fps", 20}}})));
+        s.answers.responder->question = [](const QString&, const QString&) { return true; };
+        w->action("act_video_reload")->trigger();
+        const Json* after = core::video_row(s.page(), Json(*folder));
+        QCOMPARE(after->at("footage").at("frames"), before);
+        QCOMPARE(after->at("footage").at("fps"), Json(20.0));
+        for (const Json& f : after->at("frames")) QVERIFY(f[0].is_number_integer() && f[0].get<std::int64_t>() < 5);
+    }
+
+    // (the review's P2-7; 節 J 4.3) The frames drawn for playing kept within their bytes, the oldest let go first.
+    void playedFramesKeptWithinBounds() {
+        Studio s;
+        app::MainWindow* w = s.window.get();
+        w->action("act_timeline")->trigger();
+        app::TimelinePanel* panel = w->timeline();
+        QVERIFY(w->apply_ops(Json::array({Json{{"op", "set_animation"}, {"page", 1}, {"frames", 12}}})));
+        panel->played_most = 1;  // (one frame at most kept: the latest)
+        panel->play(true);
+        std::int64_t most = 0;
+        for (int i = 0; i < 12; ++i) {
+            panel->tick();
+            most = std::max(most, panel->played_bytes());
+        }
+        panel->play(false);
+        QVERIFY(most > 0);
+        QVERIFY2(most <= 5 * 1024 * 1024, std::to_string(most).c_str());  // (one A4 frame at 100 dpi, never twelve)
+        panel->played_most = 256ll << 20;
+    }
+
+    void aHeldPageIsNotMadeAnAnimation() {
+        core::Document doc = book_doc();
+        doc.page_locks[doc.page(0).id] = "human:other";
+        Studio s(doc);
+        app::MainWindow* w = s.window.get();
+        const std::int64_t revision = w->book().revision;
+        const std::size_t layers = s.page().layers.size();
+        w->action("act_timeline")->trigger();
+        QVERIFY(!core::anim::is_animation(s.page()));
+        QCOMPARE(w->book().revision, revision);
+        QCOMPARE(s.page().layers.size(), layers);
+        QVERIFY(!w->last_error().isEmpty());
+        QVERIFY(w->timeline()->start->isVisible());
     }
 
     void timelapseRecordsAndExports() {
@@ -289,7 +697,7 @@ private slots:
         std::ofstream(folder / "tint" / "plugin.json")
             << R"({"protocol": 1, "name": "色づけ", "executable": "tint", "args": ["--soft", "a b"], "params": {"amount": {"label": "強さ", "min": 0, "max": 1, "default": 0.5}}})";
         std::ofstream(folder / "tint" / "tint") << "not a program: never started here";
-        std::ofstream(folder / "broken" / "plugin.json") << R"({"protocol": 2, "name": "x", "executable": "x"})";
+        std::ofstream(folder / "broken" / "plugin.json") << R"({"protocol": 3, "name": "x", "executable": "x"})";  // (PC5 J-f: 2 is protocol 2 now)
         QString question;
         s.answers.responder->question = [&](const QString& title, const QString& text) {
             question = text;
@@ -319,7 +727,7 @@ private slots:
         w->action("act_plugin_settings")->trigger();
         QCOMPARE(tint_row, QStringLiteral("tint（プログラム） — 色づけ"));
         QCOMPARE(broken_row, QStringLiteral("broken（プログラム）（使えません）"));
-        QCOMPARE(broken_tip, QStringLiteral("プラグイン「broken」の plugin.json が使えません（protocol は 1 にします）"));
+        QCOMPARE(broken_tip, QStringLiteral("プラグイン「broken」の plugin.json が使えません（protocol は 1 か 2 にします）"));
         QVERIFY(!broken_checkable);
         QVERIFY(question.startsWith(QStringLiteral("「tint」（プログラム）を動かしてよいですか。")));
         QVERIFY2(question.contains(QStringLiteral("動かすプログラム: tint\n引数: --soft \"a b\"")), qPrintable(question));  // (what will run, as plugin.json says)
@@ -393,6 +801,117 @@ private slots:
         render::plugins::save_settings(off);
         std::filesystem::remove(folder / "twin.py");
         std::filesystem::remove_all(folder / "twin");
+    }
+
+    // PC5 J-f (edit.preferences.plugIns, plugin.install, plugin.remove, plugin.reload): 編集 → 環境設定 ▸ プラグイン… — a
+    // WebAssembly module listed by its file and size (nothing run), chosen with its own question (a sandbox), then named by
+    // its manifest and offered among the filters; インストール… copies one in unchosen, 取り除く takes it out, the additional
+    // folder is kept and read; フィルター → プラグイン ▸ プラグインをインストール… does the same as インストール….
+    void webAssemblyPluginsInTheirPane() {
+        Studio s;
+        app::MainWindow* w = s.window.get();
+        if (QFileInfo::exists(QStringLiteral(GENKO_TEST_PLUGIN_HOST))) render::plugins::set_host_for_testing(std::filesystem::path(GENKO_TEST_PLUGIN_HOST));
+        const bool host = QFileInfo::exists(QStringLiteral(GENKO_TEST_PLUGIN_HOST));
+        const std::filesystem::path folder = render::plugins::folder();
+        std::filesystem::create_directories(folder);
+        std::filesystem::copy_file(GENKO_TEST_DATA "/plugins/invert.wasm", folder / "invert.wasm", std::filesystem::copy_options::overwrite_existing);
+        QCOMPARE(w->action("act_plugin_settings")->text(), QStringLiteral("プラグイン…"));
+        QVERIFY(w->findChild<QMenu*>(QStringLiteral("menu_preferences"))->actions().contains(w->action("act_plugin_settings")));
+        QString question, row_text, row_after;
+        const QString extra = QDir::tempPath() + QStringLiteral("/genko-gui-extra-%1").arg(QCoreApplication::applicationPid());
+        QDir().mkpath(extra);
+        s.answers.responder->question = [&](const QString& title, const QString& text) {
+            if (title == QStringLiteral("プラグインを動かす")) question = text;
+            return true;
+        };
+        s.answers.responder->exec = [&](QDialog* dialog) {
+            auto* d = qobject_cast<app::PluginsDialog*>(dialog);
+            if (d == nullptr) return int(QDialog::Rejected);
+            if (d->windowTitle() != QStringLiteral("プラグイン")) return int(QDialog::Rejected);
+            d->enabled->setChecked(true);
+            d->use_extra->setChecked(true);
+            d->extra->setText(extra);
+            for (int i = 0; i < d->list->count(); ++i) {
+                QListWidgetItem* row = d->list->item(i);
+                if (row->data(Qt::UserRole).toString() == QStringLiteral("invert")) {
+                    row_text = row->text();
+                    row->setCheckState(Qt::Checked);
+                }
+            }
+            return d->keep() ? int(QDialog::Accepted) : int(QDialog::Rejected);
+        };
+        w->action("act_plugin_settings")->trigger();
+        QCOMPARE(row_text, QStringLiteral("invert.wasm  1 KB"));  // (its file and size: nothing ran to list it)
+        QVERIFY2(question.startsWith(QStringLiteral("「invert.wasm」（WebAssembly）を動かしてよいですか。")), qPrintable(question));
+        QVERIFY(question.contains(QStringLiteral("ファイルもネットも使えません")));
+        QVERIFY(render::plugins::allowed("invert"));
+        QVERIFY(render::plugins::settings().use_extra_folder);
+        QCOMPARE(QString::fromStdString(render::plugins::settings().extra_folder), extra);
+        if (host) {  // (named by its manifest once chosen, among the filters)
+            QCOMPARE(plugin_filters(w).at(QStringLiteral("plugin:invert")), QStringLiteral("Invert (WebAssembly)"));
+            s.answers.responder->exec = [&](QDialog* dialog) {
+                auto* d = qobject_cast<app::PluginsDialog*>(dialog);
+                if (d == nullptr) return int(QDialog::Rejected);
+                for (int i = 0; i < d->list->count(); ++i) {
+                    if (d->list->item(i)->data(Qt::UserRole).toString() == QStringLiteral("invert")) row_after = d->list->item(i)->text();
+                }
+                return int(QDialog::Rejected);
+            };
+            w->action("act_plugin_settings")->trigger();
+            QCOMPARE(row_after, QStringLiteral("invert.wasm — Invert (WebAssembly) 1.0.0（PhotoCraft contributors）  1 KB"));
+        }
+        // インストール… / 取り除く / 読み直す; the menu's プラグインをインストール…
+        QFile::copy(QStringLiteral(GENKO_TEST_DATA "/plugins/invert.wasm"), extra + QStringLiteral("/../genko-gui-copy.wasm"));
+        const QString copy = QDir(extra + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("genko-gui-copy.wasm"));
+        bool installed = false, removed = false;
+        int rows_extra = -1;
+        s.answers.responder->exec = [&](QDialog* dialog) {
+            auto* d = qobject_cast<app::PluginsDialog*>(dialog);
+            if (d == nullptr) return int(QDialog::Rejected);
+            installed = d->install_file(copy);
+            int at = -1;
+            for (int i = 0; i < d->list->count(); ++i) {
+                if (d->list->item(i)->data(Qt::UserRole).toString() == QStringLiteral("genko-gui-copy")) at = i;
+            }
+            QFile::copy(QStringLiteral(GENKO_TEST_DATA "/plugins/invert.wasm"), extra + QStringLiteral("/fromextra.wasm"));
+            d->reload();
+            rows_extra = 0;
+            for (int i = 0; i < d->list->count(); ++i) rows_extra += d->list->item(i)->data(Qt::UserRole).toString() == QStringLiteral("fromextra") ? 1 : 0;
+            for (int i = 0; i < d->list->count(); ++i) {
+                if (d->list->item(i)->data(Qt::UserRole).toString() == QStringLiteral("genko-gui-copy")) at = i;
+            }
+            removed = at >= 0 && d->remove_row(at);
+            return int(QDialog::Rejected);
+        };
+        w->action("act_plugin_settings")->trigger();
+        QVERIFY(installed);
+        QVERIFY(removed);
+        QCOMPARE(rows_extra, 1);
+        QVERIFY(!std::filesystem::exists(folder / "genko-gui-copy.wasm"));
+        s.answers.responder->open_path = [&](const QString&, const QString&) { return copy; };
+        w->action("act_plugin_install")->trigger();
+        QVERIFY(std::filesystem::exists(folder / "genko-gui-copy.wasm"));
+        QVERIFY(!render::plugins::allowed("genko-gui-copy"));  // (installed: not chosen)
+        QVERIFY(w->last_notice().startsWith(QStringLiteral("プラグイン「genko-gui-copy」を入れました")));
+        // the WebAssembly plugins' words
+        QCOMPARE(genko::wording::error(QStringLiteral("ops[0] filter_raster: plugin loop failed (plug-in exceeded its instruction budget)")),
+                 QStringLiteral("プラグイン「loop」が命令の数の上限を超えたため止めました（終わらない繰り返しの可能性があります）"));
+        QCOMPARE(genko::wording::error(QStringLiteral("the module of plugin imports cannot be used (plug-in ABI: the module imports `wasi_snapshot_preview1.fd_write`, "
+                                                    "but plug-ins get no host imports (no WASI, files or network))")),
+                 QStringLiteral("プラグイン「imports」の WebAssembly のモジュールが使えません（外の機能（wasi_snapshot_preview1.fd_write）を読み込もうとしています。"
+                                "プラグインはファイル・ネット・WASI を使えません）"));
+        QCOMPARE(genko::wording::error(QStringLiteral("the WebAssembly plugins need genko-plugin-host beside Genko (it was not found), so plugin x cannot run")),
+                 QStringLiteral("WebAssembly のプラグインを動かす genko-plugin-host が Genko と同じフォルダーに無いため、プラグイン「x」を動かせません"));
+        std::filesystem::remove(folder / "genko-gui-copy.wasm");
+        std::filesystem::remove(folder / "invert.wasm");
+        QFile::remove(copy);
+        QDir(extra).removeRecursively();
+        render::plugins::Settings off = render::plugins::settings();
+        off.enabled = false;
+        off.use_extra_folder = false;
+        off.extra_folder.clear();
+        off.chosen = Json::object();
+        render::plugins::save_settings(off);
     }
 
     void timelapseNeedsASavedBook() {

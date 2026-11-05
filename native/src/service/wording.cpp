@@ -188,6 +188,12 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(the pattern nests too deeply \(groups and look-arounds at most (\d+) levels.*)",
                          "正規表現のかっこの入れ子が深すぎます（\\1 段まで）"));
         r.push_back(rule("gradient_fill needs from and to.*", "グラデーションは、始めと終わりの点で指定します"));
+        // (groups@1, PC5 I-b: what this build does not do yet with groups — before the general words below)
+        r.push_back(rule("not yet ported: group_nesting",
+                         "グループの入れ子が深く、一度に描けません（不透明度・描画モード・マスクのあるグループの入れ子を減らすか、解像度を下げてください）"));
+        r.push_back(rule("not yet ported: merging what shows through groups on a page in precise colour.*",
+                         "高精度のページでは、グループを通して見えるレイヤーの結合・画像の統合はまだできません"
+                         "（そのグループの「グループとして描く」を外すと結合できます。見え方は変わります）"));
         // what this build does not do yet (render::NotYetPorted, the studio's official export)
         r.push_back(rule("not yet ported: (.*)", [](const QRegularExpressionMatch& m) {
             return QStringLiteral("この版の Genko では、まだ扱えないもの（%1）があるため、できませんでした（原稿は変わりません）").arg(unported_element(m.captured(1)));
@@ -295,15 +301,83 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the page is not an animation.*", "このページはアニメーションではありません（先にタイムラインでアニメーションにする）"));
         r.push_back(rule(R"(rect is \[x, y, width, height\] in mm)", "カメラの範囲は［左, 上, 幅, 高さ］（mm）で指定します"));
         r.push_back(rule("cel must be a layer in the animation folder", "セルはそのアニメーションフォルダーの中のレイヤーです"));
+        // (PC5 J-e1, timeline@1: the speed, the work area, the frames rendered)
+        r.push_back(rule(R"(fps is 0\.5 to 120)", "フレームレートは 0.5〜120 fps です"));
+        r.push_back(rule(R"(work is \[first, last\]: frames of 1 to (\d+), or null)", "作業範囲は 1〜\\1 のフレームの［開始点, 終了点］で指定します"));
+        r.push_back(rule(R"(range is \[first, last\] of the frames 1 to (\d+))", "書き出すフレームは 1〜\\1 の［最初, 最後］で指定します"));
+        // (PC5 J-f: WebAssembly plugins — genko-plugin-host's limits and refusals, docs/PLUGIN_WASM.md —, protocol 2, installing)
+        r.push_back(rule(R"(plugin (.*?) failed \(plug-in exceeded its instruction budget\))",
+                         "プラグイン「\\1」が命令の数の上限を超えたため止めました（終わらない繰り返しの可能性があります）"));
+        r.push_back(rule(R"(plugin (.*?) failed \(plug-in exceeded its time budget\))", "プラグイン「\\1」が時間の上限（1 回 60 秒）を超えたため止めました"));
+        r.push_back(rule(R"(plugin (.*?) failed \(plug-in exceeded its memory budget.*\))", "プラグイン「\\1」がメモリの上限（512 MB）を超えたため止めました"));
+        r.push_back(rule(R"(plugin (.*?) failed \(plug-in trapped: (.*)\))", "プラグイン「\\1」が実行の途中で止まりました（WebAssembly のトラップ: \\2）"));
+        r.push_back(rule(R"(plugin (.*?) failed \(plug-in failed: pc_filter returned error code (-?\d+)\))", "プラグイン「\\1」が処理を断りました（コード \\2）"));
+        r.push_back(rule(R"(plugin (.*?) failed \(plug-in parameters: (.*)\))", "プラグイン「\\1」の設定が正しくありません（\\2）"));
+        r.push_back(rule(R"(the module of plugin (.*?) cannot be used \((.*)\))", [](const QRegularExpressionMatch& m) {
+            static const std::vector<std::pair<QRegularExpression, QString>> reasons = [] {
+                std::vector<std::pair<QRegularExpression, QString>> out;
+                const auto add = [&out](const char* pattern, const char* words) {
+                    out.emplace_back(QRegularExpression(QRegularExpression::anchoredPattern(QString::fromUtf8(pattern)), QRegularExpression::DotMatchesEverythingOption),
+                                     QString::fromUtf8(words));
+                };
+                add("a plugin of the same name comes first", "同じ名前のプラグインが先にあります");
+                add("it is larger than 32 MB", "32 MB を超えています");
+                add("it is not a WebAssembly module", "WebAssembly のモジュールではありません");
+                add("it cannot be read", "読めません");
+                add("its name must end in .wasm in lower case", "ファイルの名前は小文字の .wasm で終わるようにします");
+                add(R"(plug-in ABI: the module imports `(.*?)`.*)", "外の機能（\\1）を読み込もうとしています。プラグインはファイル・ネット・WASI を使えません");
+                add(R"(plug-in ABI: pc_abi_version returned (-?\d+).*)", "プラグインの ABI の版が 1 ではありません（\\1）");
+                add(R"(plug-in ABI: (.*))", "プラグインの ABI に合っていません（\\1）");
+                add(R"(plug-in manifest: (.*))", "manifest が正しくありません（\\1）");
+                add(R"(not a valid plug-in module: (.*))", "WebAssembly のモジュールとして正しくありません（\\1）");
+                add("plug-in exceeded its instruction budget", "読み込みの間に命令の数の上限を超えました");
+                add("plug-in exceeded its time budget", "読み込みの間に時間の上限を超えました");
+                add(R"(plug-in trapped: (.*))", "読み込みの間に止まりました（\\1）");
+                add(R"(module is (\d+) bytes \(limit (\d+)\))", "\\1 バイトあり、上限（\\2 バイト）を超えています");
+                return out;
+            }();
+            QString why = m.captured(2);
+            for (const auto& [pattern, words] : reasons) {
+                if (const auto found = pattern.match(why); found.hasMatch()) {
+                    why = words.contains(QLatin1Char('\\')) ? expand(words, found) : words;
+                    break;
+                }
+            }
+            return QStringLiteral("プラグイン「%1」の WebAssembly のモジュールが使えません（%2）").arg(m.captured(1), why);
+        }));
+        r.push_back(rule(R"(the WebAssembly plugins need genko-plugin-host beside Genko \(it was not found\), so plugin (.*) cannot run)",
+                         "WebAssembly のプラグインを動かす genko-plugin-host が Genko と同じフォルダーに無いため、プラグイン「\\1」を動かせません"));
+        r.push_back(rule(R"(the plugin host for plugin (.*?) could not be started.*)", "プラグイン「\\1」を動かす genko-plugin-host を起動できませんでした"));
+        r.push_back(rule(R"(plugin (.*?) works on 8-bit paint layers only.*)",
+                         "プラグイン「\\1」は 8 bit のペイントレイヤーにだけ使えます（WebAssembly のプラグインと、プロトコル 2 のネイティブのプラグインは、高精度・インキのレイヤーやチャンネルにも使えます）"));
+        r.push_back(rule(R"(plugin (.*?) cannot run here: its smart filter shows the picture it made last)",
+                         "プラグイン「\\1」はここでは動かないため、そのスマートフィルターは最後に作った絵で表示しています"));
+        r.push_back(rule(R"(plugin (.*?)'s smart filter could not be drawn to keep its picture.*)", "プラグイン「\\1」のスマートフィルターの絵を残せませんでした"));
+        r.push_back(rule("a filter plugin of 8 bits cannot be a smart filter on a page of inks.*",
+                         "8 bit のプラグインは、インキのページではスマートフィルターにできません（WebAssembly のプラグインと、プロトコル 2 のネイティブのプラグインはできます）"));
+        r.push_back(rule("a band of the picture does not fit in the plugin's memory", "絵の帯がプラグインのメモリに収まりません"));
+        r.push_back(rule("the picture is too large for a filter plugin to work on in memory",
+                         "絵が大きく、プラグインのフィルターに使えるメモリが足りません（解像度を下げるか、範囲を選んでからかけます）"));
+        r.push_back(rule(R"(plugin (.*?) could not be removed \((.*)\))", "プラグイン「\\1」を取り除けませんでした（\\2）"));
+        r.push_back(rule(R"(only WebAssembly modules \(\.wasm\) and Python plugins \(\.py\) are installed so: (.*))",
+                         "入れられるのは WebAssembly のモジュール（.wasm）と Python のプラグイン（.py）です（\\1）"));
+        r.push_back(rule(R"(the name (.*) cannot be a plugin's)", "「\\1」はプラグインの名前にできません（_ や . で始まる名前、/ や : を含む名前は使えません）"));
+        r.push_back(rule(R"((.*) is larger than (32|16) MB)", "「\\1」は \\2 MB を超えているため入れられません"));
+        r.push_back(rule(R"((.*) is not a WebAssembly module)", "「\\1」は WebAssembly のモジュールではありません"));
+        r.push_back(rule(R"(a plugin of the name (.*) of another kind is installed)", "「\\1」という名前の、別の種類のプラグインが入っています"));
+        r.push_back(rule(R"(plugin (.*?) is a program's folder \(remove the folder itself\))",
+                         "プラグイン「\\1」はプログラムのフォルダーです（プラグインのフォルダーから、フォルダーごと取り除きます）"));
+        r.push_back(rule(R"(plugin (.*?) is in the additional plugins folder \(remove it there: (.*)\))",
+                         "プラグイン「\\1」は追加のプラグインフォルダーにあります（そこから取り除きます: \\2）"));
         r.push_back(rule("no plugin (.*)", "プラグイン「\\1」が見つかりません（プラグインのフォルダーに入れます）"));
         r.push_back(rule("plugin (.*?) cannot be loaded.*", "プラグイン「\\1」を読み込めません"));
         r.push_back(rule(R"(plugin (.*?) has no run\(image\))", "プラグイン「\\1」に処理（run）がありません"));
         r.push_back(rule("plugin (.*?) failed.*", "プラグイン「\\1」の処理が失敗しました"));
         r.push_back(rule("plugin (.*?) did not return a picture", "プラグイン「\\1」が絵を返しませんでした"));
-        r.push_back(rule("plugins need Python on this computer.*", "プラグインを使うには、このパソコンに Python が要ります（レイヤー → プラグインの設定で選べます）"));
+        r.push_back(rule("plugins need Python on this computer.*", "プラグインを使うには、このパソコンに Python が要ります（編集 → 環境設定 → プラグイン… で選べます）"));
         r.push_back(rule("plugins need Pillow in the Python that runs them.*", "プラグインを動かす Python に Pillow が要ります（pip install Pillow）"));
-        r.push_back(rule("plugin (.*?) is not chosen to run.*", "プラグイン「\\1」は使う設定になっていません（レイヤー → プラグインの設定で選びます）"));
-        r.push_back(rule("plugin (.*?) could not be started.*", "プラグイン「\\1」を動かす Python を起動できませんでした（プラグインの設定で Python を確かめてください）"));
+        r.push_back(rule("plugin (.*?) is not chosen to run.*", "プラグイン「\\1」は使う設定になっていません（編集 → 環境設定 → プラグイン… で選びます）"));
+        r.push_back(rule("plugin (.*?) could not be started.*", "プラグイン「\\1」を動かす Python を起動できませんでした（編集 → 環境設定 → プラグイン… で Python を確かめてください）"));
         r.push_back(rule("plugin (.*?) stopped before it answered.*", "プラグイン「\\1」が途中で止まりました（落ちたか、メモリが足りなかった可能性があります）"));
         r.push_back(rule(R"(plugin (.*?) did not finish in (\d+) seconds)", "プラグイン「\\1」が \\2 秒で終わらなかったため止めました"));
         r.push_back(rule("plugin (.*?) wrote back more than a picture", "プラグイン「\\1」が絵より多くのデータを返したため止めました"));
@@ -322,6 +396,10 @@ const std::vector<Rule>& rules() {
                 add("it is not JSON", "plugin.json が JSON ではありません");
                 add("it is not a JSON object", "plugin.json が JSON のオブジェクトではありません");
                 add("its protocol must be 1", "protocol は 1 にします");
+                // (PC5 J-f: protocol 2, its overlap and area)
+                add("its protocol must be 1 or 2", "protocol は 1 か 2 にします");
+                add("its overlap must be a whole number from 0 to 256", "overlap は 0〜256 の整数にします");
+                add("its area must be content or canvas", "area は content か canvas にします");
                 add("its name must be a text", "name（名前）を文字で書きます");
                 add("its args must be a list of texts", "args は文字のリストにします");
                 add("its params must be an object", "params はオブジェクトにします");
@@ -558,6 +636,123 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(cannot write over a file the book links: (.*))", "配置・リンクした元のファイルには書き出しません。別の名前か場所を選んでください: \\1"));
         r.push_back(rule(R"(too many files of that name: (.*))", "同じ名前のファイルが多すぎて、クイック書き出しの名前を決められません: \\1"));
         r.push_back(rule(R"(cannot write over the picture a book was opened from: (.*))", "開いた元の画像には書き出しません。別の名前か場所を選んでください: \\1"));
+        // (PC5 I-0, SPEC.md AUTO-01: the steps of a script, a batch, a script event — service/automate, script_events)
+        r.push_back(rule(R"(step ([0-9.]+) \(([a-z_]+)\): (.*))", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("手順 %1（%2）: %3").arg(m.captured(1), m.captured(2), error(m.captured(3)));
+        }));
+        r.push_back(rule(R"(step ([0-9.]+): (\S+) cannot be a step .*)", "手順 \\1: \\2 は手順に入れられません（承認とページのロックは、人が画面でします）"));
+        r.push_back(rule(R"(step ([0-9.]+): undo is not a step.*)", "手順 \\1: 元に戻すは手順に入れられません（手順の変更はまとめて元に戻せます）"));
+        r.push_back(rule(R"(step ([0-9.]+): (\S+) is not an op an agent may run.*)", "手順 \\1: \\2 は AI が流せない操作です（MCP の apply_ops が受ける操作だけ）"));
+        r.push_back(rule(R"(step ([0-9.]+): (\S+) is a pseudo op and cannot be inside for_pages)",
+                         "手順 \\1: \\2 は手順の中だけの操作なので、for_pages の中には置けません（手順の上の段に置いてください）"));
+        r.push_back(rule(R"(the action was changed after it was bound: (.*))",
+                         "アクション「\\1」は結び付けた後で変わりました。スクリプトイベントマネージャーで選び直してください"));
+        r.push_back(rule(R"(the script's name is longer than (\d+) characters)", "スクリプトの名前が長すぎます（\\1 文字まで）"));
+        r.push_back(rule(R"(more than (\d+) files and folders to look through: choose fewer)", "見るファイルとフォルダーが多すぎます（\\1 個まで）"));
+        r.push_back(rule(R"(step ([0-9.]+): not an op.*)","手順 \\1 が操作の形ではありません（{\"op\": 操作の名前, …引数} で書きます）"));
+        r.push_back(rule(R"(steps, line (\d+): (.*))", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("手順の %1 行目が読めません（%2）").arg(m.captured(1), reason(m.captured(2)));
+        }));
+        r.push_back(rule("the steps are larger than 1 MiB", "手順のファイルが大きすぎます（1 MiB まで）"));
+        r.push_back(rule(R"(more than (\d+) steps)", "手順が多すぎます（\\1 まで）"));
+        r.push_back(rule(R"(the steps are run page by page: (.*))", "手順をページごとに流せません（\\1）"));
+        r.push_back(rule(R"(the script was changed after it was bound: (.*))",
+                         "スクリプト「\\1」は結び付けた後で変わりました。スクリプトイベントマネージャーで選び直してください"));
+        r.push_back(rule("a picture's own file is never written: write the batch into a folder", "元の画像には書きません。書き出すフォルダーを選んでください"));
+        r.push_back(rule(R"(more than (\d+) files to take: choose fewer)", "ファイルが多すぎます（\\1 個まで）"));
+        r.push_back(rule(R"(no action (.*))", "アクション \\1 がありません"));
+        // (PC5 I-e: 条件付きモード変更・画像プロセッサー・レンズ補正・ドロップレット — service/automate)
+        r.push_back(rule(R"(conditional_mode_change takes .*)", "条件付きモード変更には、ページと変換後のモードを指定します"));
+        r.push_back(rule(R"(conditional_mode_change: to is .*)", "条件付きモード変更の変換後のモードは、RGB・グレースケール・CMYK・Lab です"));
+        r.push_back(rule(R"(conditional_mode_change: from is .*)",
+                         "条件付きモード変更の変換元のモードは、モノクロ 2 階調・グレースケール・ダブルトーン・インデックスカラー・RGB・CMYK・Lab・マルチチャンネルの中から選びます"));
+        r.push_back(rule(R"(the folder to write into is not given)", "書き出すフォルダーを選んでください"));
+        r.push_back(rule(R"(the folder cannot be made: (.*))", "フォルダーを作れません: \\1"));
+        r.push_back(rule(R"(not a format this build writes: \.(.*))", "この形式（.\\1）には書き出せません"));
+        r.push_back(rule(R"(the image processor writes .*)", "画像プロセッサーで保存する形式は JPEG・PSD・TIFF・PNG です（それぞれ 1 回まで、1 つ以上）"));
+        r.push_back(rule(R"(the image processor's width and height are .*)", "サイズに合わせるの幅と高さは 1〜100000 pixel です"));
+        r.push_back(rule(R"(the lens correction's settings are .*)", "レンズ補正の設定が正しくありません"));
+        r.push_back(rule(R"(not a Genko droplet.*)", "Genko のドロップレット（.genkodroplet）ではありません"));
+        r.push_back(rule(R"(a droplet (holds|has|'s) .*)", "ドロップレットの中身が正しくありません（名前・手順・設定だけを持ちます）"));
+        r.push_back(rule(R"(the droplet is larger than 1 MiB)", "ドロップレットが大きすぎます（1 MiB まで）"));
+        r.push_back(rule(R"(cannot write over a link: (.*))", "リンクの上には書きません。別の名前か場所を選んでください: \\1"));
+        r.push_back(rule(R"(cannot write over a file that is not a droplet's launcher: (.*))",
+                         "同じ名前の、ドロップレットの起動ファイルでないファイルがあるので書きません。別の名前か場所を選んでください: \\1"));
+        r.push_back(rule(R"(the launcher cannot be made runnable: (.*))", "起動ファイルを実行できるようにできません: \\1"));
+        r.push_back(rule(R"(the launcher cannot be written: (.*))", "起動ファイルを書けません: \\1"));
+        r.push_back(rule(R"(the launcher's path holds a (control character|quotation mark): (.*))",
+                         "改行などの制御文字や引用符を含む場所・名前には、起動ファイルを作りません。別の場所か名前を選んでください: \\2"));
+        r.push_back(rule(R"(the launcher's path is too long)", "場所の名前が長すぎるので、起動ファイルを作れません"));
+        r.push_back(rule(R"(no file to run the droplet on)", "ドロップレットで処理するファイルがありません"));
+        // (PC5 I-h: HDR Pro に統合・写真の切り抜きと角度補正 — service/automate_photos, render/hdr_merge, render/scancrop)
+        r.push_back(rule(R"(Merge to HDR Pro takes (\d+) to (\d+) exposures \((\d+) given\))", "HDR Pro に統合できる画像は \\1〜\\2 枚です（\\3 枚）"));
+        r.push_back(rule(R"(the exposures must have the same pixel dimensions \((.*)\))", "HDR Pro に統合する画像は、すべて同じ大きさ（pixel）にしてください（\\1）"));
+        r.push_back(rule(R"(the exposures must be all of linear light .*)", "カメラ RAW・32 bit の画像（線形の光）と、ほかの画像は一緒に統合できません"));
+        r.push_back(rule(R"(the exposures are too large to merge at once \(about (\d+) MiB of work; at most (\d+) MiB\))",
+                         "画像が大きすぎて一度に統合できません（作業に約 \\1 MiB。\\2 MiB まで）。画像の枚数を減らすか、縮小してから統合してください"));
+        r.push_back(rule(R"(an exposure of CMYK cannot be merged.*)", "CMYK の画像は HDR に統合できません（RGB かグレースケールの画像を選んでください）"));
+        r.push_back(rule(R"(an exposure is RGB of 8 or 16 bits or floats)", "HDR に統合できるのは RGB の 8・16・32 bit の画像です"));
+        r.push_back(rule(R"(the HDR mode is 32, 16 or 8 bits)", "HDR Pro に統合のモードは 32・16・8 bit です"));
+        r.push_back(rule(R"(give one EV value an exposure|one exposure value an image)", "EV は画像 1 枚に 1 つずつ指定してください"));
+        r.push_back(rule(R"(an EV value is a number within -30\.\.30)", "EV は −30〜30 の数です"));
+        r.push_back(rule(R"(the ghosts' base is one of the exposures)", "ゴーストを除く基準の画像は、統合する画像の中から選んでください"));
+        r.push_back(rule(R"(the exposures must be positive)", "露出の値は正の数です"));
+        r.push_back(rule(R"(the HDR toning method is .*)", "トーンの方法は ローカル適応・露光量とガンマ・ハイライト圧縮・ヒストグラムの平均化 です"));
+        r.push_back(rule(R"(the toning's settings are a JSON object)", "トーンの設定が正しくありません"));
+        r.push_back(rule(R"(the toning (\S+) has no setting (\S+))", "このトーンの方法には \\2 の設定はありません"));
+        r.push_back(rule(R"(the toning's (\S+) is a number)", "トーンの設定の \\1 は数です"));
+        r.push_back(rule(R"(no exposure to merge)", "統合する画像がありません"));
+        r.push_back(rule(R"(the EV of (.*) is not a number within -30\.\.30)", "\\1 の EV は −30〜30 の数にしてください"));
+        r.push_back(rule(R"(the exposures hardly differ \((.*) EV from the darkest to the brightest\): .*)",
+                         "画像の露出がほとんど違いません（いちばん暗い画像から明るい画像まで \\1 EV）。露出の違う画像を選んでください"));
+        r.push_back(rule(R"(the merged light is past what a float holds .*)", "合成した明るさが大きすぎます（画像の値か EV が範囲の外です）"));
+        r.push_back(rule(R"(the photos are too large to cut out at once \(about (\d+) MiB of work; at most (\d+) MiB\))",
+                         "写真が大きすぎて一度に切り抜けません（作業に約 \\1 MiB。\\2 MiB まで）"));
+        r.push_back(rule(R"(too many photos on the scan \((\d+); at most (\d+)\))", "写真が多すぎます（\\1 枚。\\2 枚まで）。スキャンを分けてください"));
+        r.push_back(rule(R"(no photos found on a uniform background)", "一様な背景の上に写真が見つかりませんでした"));
+        r.push_back(rule(R"(the photo's corners cannot be mapped)", "写真の角を求められませんでした"));
+        // (PC5 I-f, SPEC.md AUTO-01: プリント… and `genko print` — formats/print_marks —, コンタクトシート II, 画像アセット)
+        r.push_back(rule(R"(the printer's profile is not an RGB profile.*)",
+                         "プリンタープロファイルが RGB のものではありません（プリンターには RGB の絵を渡すため、CMYK・グレーのプロファイルは選べません）"));
+        r.push_back(rule(R"(the printer's profile is not found: (.*))", "プリンタープロファイルが見つかりません: \\1"));
+        r.push_back(rule(R"(the printer's profile cannot be read)", "プリンタープロファイルを読み込めません"));
+        r.push_back(rule(R"(the printer's profile cannot be used.*)", "このプリンタープロファイルでは色を変換できません"));
+        r.push_back(rule(R"(the page's profile cannot be read)", "ページのカラープロファイルを読み込めません"));
+        r.push_back(rule(R"(the page's colours were not drawn at its size)", "ページの色を描けませんでした"));
+        r.push_back(rule(R"(Genko's colour management needs the printer's profile)", "Genko によるカラー管理には、プリンタープロファイルを選んでください"));
+        r.push_back(rule(R"(the rendering intent is .*)", "マッチング方法は、知覚的・彩度・相対的な色域を維持・絶対的な色域を維持から選びます"));
+        r.push_back(rule(R"(the area is trim, bleed or paper)", "範囲は、仕上がりで切る・裁ち落としまで・用紙全体から選びます"));
+        r.push_back(rule(R"(the scale is fit, actual or a percent)", "大きさは、用紙に合わせる・原寸・拡大・縮小から選びます"));
+        r.push_back(rule(R"(the scale is 1% to 1000%)", "拡大・縮小は 1〜1000% です"));
+        r.push_back(rule(R"(the copies are 1 to 999)", "部数は 1〜999 です"));
+        r.push_back(rule(R"(the position is within 1000 mm of the paper's corner)", "位置は、用紙の角から 1000 mm までです"));
+        r.push_back(rule(R"(the resolution is 72 to 600 dpi)", "解像度は 72〜600 dpi です"));
+        r.push_back(rule(R"(the paper is a4, .*)", "用紙は a4・a3・a5・b4・b5・letter・legal・tabloid・4x6・5x7 か、幅x高さ（mm、25〜2000）です"));
+        r.push_back(rule(R"(the marks are corner, .*)", "印は corner・center・registration・description・labels から選びます"));
+        r.push_back(rule(R"(the units are in, cm, mm or px)", "単位は inch・cm・mm・pixel から選びます"));
+        r.push_back(rule(R"(the sheet's width and height are above 0)", "シートの幅と高さは 0 より大きくします"));
+        r.push_back(rule(R"(the resolution is 72 to 1200 ppi)", "解像度は 72〜1200 pixel/inch です"));
+        r.push_back(rule(R"(the mode is rgb or gray)", "モードは RGB カラーかグレースケールです"));
+        r.push_back(rule(R"(the depth is 8 or 16)", "ビット数は 8 か 16 です"));
+        r.push_back(rule(R"(the columns and the rows are 1 to 100)", "列数と行数は 1〜100 です"));
+        r.push_back(rule(R"(the caption's size is 4 to 72 pt)", "キャプションのフォントサイズは 4〜72 pt です"));
+        r.push_back(rule(R"(the spacing is 0 or more)", "間隔は 0 以上です"));
+        r.push_back(rule(R"(the sheets' name is 1 to 200 bytes)", "シートの名前は 1〜200 バイトです"));
+        r.push_back(rule(R"(the sheet is at least 16 pixels a side)", "シートは 1 辺 16 pixel 以上にします"));
+        r.push_back(rule(R"(the sheet is too large \((\d+)×(\d+) pixels; its work would pass 2 GiB.*)",
+                         "シートが大きすぎます（\\1×\\2 pixel。作るのに 2 GiB を越えます）。シートを小さく・解像度を低く・8 bit にしてください"));
+        r.push_back(rule(R"(the sheet is too large \((\d+)×(\d+) pixels; a 16-bit sheet's layers would pass.*)",
+                         "16 bit のシートが大きすぎます（\\1×\\2 pixel。原稿の高精度の画素の上限 1 GiB を越えます）。シートを小さく・解像度を低く・8 bit にしてください"));
+        r.push_back(rule(R"(the sheets of (\d+) pictures would pass 2 GiB together \((\d+) sheets\).*)",
+                         "\\1 枚の画像のシート（\\2 枚）を開いたままにすると 2 GiB を越えます。画像を減らすか、列数・行数を増やすか、シートを小さくしてください"));
+        r.push_back(rule(R"(a sheet holds at most (\d+) pictures \(columns × rows\))", "1 枚のシートに置けるのは \\1 枚まで（列数 × 行数）です"));
+        r.push_back(rule(R"(the sheet is too large \((\d+)×(\d+) pixels;.*)", "シートが大きすぎます（\\1×\\2 pixel。1 億 2 千万 pixel・1 辺 10 万 pixel まで）"));
+        r.push_back(rule(R"(the asset's name is not a path inside the assets' folder)",
+                         "画像アセットの名前が、アセットのフォルダーの中の場所になっていません（..・\\・: と、Windows で使えない名前は使えません）"));
+        r.push_back(rule(R"(another layer writes an asset of this name)", "同じ名前の画像アセットを書き出すレイヤーがほかにあります"));
+        r.push_back(rule(R"(the group has nothing to write)", "このグループには書き出すものがありません"));
+        r.push_back(rule(R"((?:ops\[\d+\] set_image_assets: )?on is true or false.*)", "画像アセットの on は true か false です"));
+        r.push_back(rule(R"(the book's generator is .*)", "原稿の画像アセットの設定（generator）が正しくありません"));
         r.push_back(rule(R"(the colour profile cannot be read \((.*)\))", "カラープロファイルを読み込めません"));
         r.push_back(rule(R"(the file cannot be read \(it is larger than 2 GiB\))", "ファイルが大きすぎて読み込めません（2 GiB まで）"));
         // (this build's own: put_raster reads only a regular file — not a device or a pipe, whose reading may not end)
@@ -675,6 +870,155 @@ const std::vector<Rule>& rules() {
         r.push_back(rule(R"(vanishing_point: no planes to paste or stamp on.*)", "消点の面をすべて消すときは、貼り付けもスタンプもできません"));
         r.push_back(rule(R"(vanishing_point: (\d+) dabs reached toward the horizon.*)",
                          "消点のスタンプの跡のうち \\1 個は、地平線に近く大きくなりすぎるため描きませんでした"));
+        // (PC5 J-a, layer-comps@1 — the C++ build's own: the layer comps, render/ops_layer_comps)
+        r.push_back(rule("the page has no layer comps", "このページにはレイヤーカンプがありません"));
+        r.push_back(rule(R"(no layer comp with id (\S+))", "ID \\1 のレイヤーカンプはありません"));
+        r.push_back(rule("no layer comp named (.*)", "「\\1」という名前のレイヤーカンプはありません"));
+        r.push_back(rule("comp is a layer comp's id or name", "レイヤーカンプは ID か名前で指定します"));
+        r.push_back(rule("what is all, visibility, position or appearance", "更新するものは all・visibility・position・appearance から選びます"));
+        r.push_back(rule("give name, comment, visibility, position or appearance", "変える項目（名前・コメント・適用先）を指定します"));
+        r.push_back(rule("name is 1 to 255 characters|name is the layer comp's name", "レイヤーカンプの名前は 1〜255 文字です"));
+        r.push_back(rule("comment is text|comment is at most 65536 bytes", "レイヤーカンプのコメントは 65536 バイトまでの文字です"));
+        r.push_back(rule("a page holds at most 256 layer comps", "レイヤーカンプは 1 ページに 256 個までです"));
+        r.push_back(rule("no layer comp has been applied over the page's own state", "最後のドキュメントの状態はまだありません（レイヤーカンプを適用すると残ります）"));
+        r.push_back(rule("no layer comp of the page names a layer it does not have", "警告のあるレイヤーカンプはありません"));
+        r.push_back(rule("(visibility|position|appearance) is true or false", "レイヤーカンプの適用先（\\1）は true か false です"));
+        r.push_back(rule(R"(the comp's layer style of (\S+) is not one: .*)", "レイヤーカンプに記録したレイヤー \\1 のレイヤースタイルが読めません"));
+        // (PC5 J-c, annotations@1 — the C++ build's own: the notes, render/ops_annotations and formats/notes_import)
+        r.push_back(rule(R"(at_mm is \[x, y\] \(mm\))", "注釈の位置（at_mm）は [x, y]（mm）で指定します"));
+        r.push_back(rule(R"(popup_mm is \[x, y, w, h\] \(mm\) or null)", "注釈の本文の枠（popup_mm）は [x, y, 幅, 高さ]（mm）か null で指定します"));
+        r.push_back(rule("text is the note's text|a note's text is at most 65536 bytes", "注釈の本文は 65536 バイトまでの文字です"));
+        r.push_back(rule("author is the note's author's name|author is at most 1024 bytes", "注釈の作成者は 1024 バイトまでの文字です"));
+        r.push_back(rule("open is true or false", "注釈を開くか（open）は true か false です"));
+        r.push_back(rule(R"(color is \[r, g, b\] \(0\.\.255\) or #rrggbb)", "注釈の色は [r, g, b]（0〜255）か #rrggbb で指定します"));
+        r.push_back(rule(R"(modified is YYYY-MM-DDThh:mm:ssZ or "")", "注釈の更新日時は YYYY-MM-DDThh:mm:ssZ か空の文字です"));
+        r.push_back(rule("id is the note's id", "注釈は ID で指定します"));
+        r.push_back(rule(R"(no note (\S+) on the page)", "このページに注釈 \\1 はありません"));
+        r.push_back(rule("a page holds at most 1000 notes", "注釈は 1 ページに 1000 個までです"));
+        r.push_back(rule("give text, author, color, open, at_mm or popup_mm", "変える項目（本文・作成者・色・開閉・位置・枠）を指定します"));
+        r.push_back(rule(R"(give ids \(the notes' ids\) or all: true)", "消す注釈を ID の一覧（ids）か all: true で指定します"));
+        r.push_back(rule("the page has no notes", "このページには注釈がありません"));
+        r.push_back(rule(R"(a person wrote the note (\S+); only a person can change it)", "注釈 \\1 は人が書いたものです。変えられるのは人だけです"));
+        r.push_back(rule(R"(a person wrote the note (\S+); only a person can delete it)", "注釈 \\1 は人が書いたものです。削除できるのは人だけです"));
+        r.push_back(rule("the file has no notes", "このファイルには注釈がありません"));
+        r.push_back(rule(R"(notes are read from a PSD, a PSB or a \.pcraft)", "注釈は PSD・PSB・.pcraft のファイルから読み込みます"));
+        r.push_back(rule("the PSD's notes cannot be read|notes: .*", "ファイルの注釈が読めない形です"));
+        // (PC5 J-d1, measure@1 — the C++ build's own: the measurement scale, the count, the ruler line, render/ops_measure)
+        r.push_back(rule(R"((at_mm|to|start|end|protractor) is a place \[x, y\] \(mm\) on the page)", "位置（\\1）は、ページの上の [x, y]（mm）で指定します"));
+        r.push_back(rule(R"(give both start and end: places \[x, y\] \(mm\) on the page)", "ものさしの線は、始点（start）と終点（end）の両方を指定します"));
+        r.push_back(rule(R"(give start and end \(\[x, y\] mm\), protractor, or clear: true)", "ものさしの線の始点と終点（start・end）、分度器（protractor）か clear: true を指定します"));
+        r.push_back(rule("clear takes nothing else", "ものさしの線を消すとき（clear）は、ほかの項目を指定しません"));
+        r.push_back(rule(R"(the page has no ruler line.*)", "このページにはものさしの線がありません（先にものさしツールで線を引きます）"));
+        r.push_back(rule(R"(color is the count group's colour: .*)", "カウントグループの色は [r, g, b]（0〜255）か #rrggbb で指定します"));
+        r.push_back(rule("name is the count group's name|a count group's name is 1 to 1024 bytes", "カウントグループの名前は 1〜1024 バイトの文字です"));
+        r.push_back(rule("the page has no count group", "このページにはカウントグループがありません"));
+        r.push_back(rule(R"(no count group (\d+) on the page)", "このページにカウントグループ \\1 はありません"));
+        r.push_back(rule(R"(no count mark (\d+) in count group (\d+))", "カウントグループ \\2 に番号 \\1 の印はありません"));
+        r.push_back(rule("no count mark there", "そこにはカウントの印がありません"));
+        r.push_back(rule(R"(give index \(and group\) or at_mm)", "カウントの印を、番号（index・group）か位置（at_mm）で指定します"));
+        r.push_back(rule(R"(a count group holds at most (\d+) marks)", "カウントグループの印は \\1 個までです"));
+        r.push_back(rule(R"(a page holds at most (\d+) count groups)", "カウントグループは 1 ページに \\1 個までです"));
+        r.push_back(rule(R"(group is an index \(0 the first\) or "all")", "カウントグループは番号（0 から）か \"all\" で指定します"));
+        r.push_back(rule(R"((group|index) is an index \(0 the first\))", "\\1 は 0 から数える番号で指定します"));
+        r.push_back(rule("give group, name, color, marker_size, label_size, visible or active",
+                         "変える項目（グループ・名前・色・マーカーのサイズ・ラベルのサイズ・表示・使うグループ）を指定します"));
+        r.push_back(rule(R"((marker_size|label_size) is a whole number (\d+)\.\.(\d+))", "\\1 は \\2〜\\3 の整数で指定します"));
+        r.push_back(rule(R"((pixel_length|logical_length|radius_mm) must be a number greater than 0)", "\\1 は 0 より大きい数で指定します"));
+        r.push_back(rule("preset is custom, default or paper_mm", "計測スケールのプリセットは custom・default・paper_mm のどれかです"));
+        r.push_back(rule(R"(give pixel_length, logical_length and units, or a preset.*)", "計測スケールの長さと単位か、プリセットを指定します"));
+        r.push_back(rule("the (default|paper_mm) preset takes no lengths", "プリセット \\1 には長さを指定しません"));
+        r.push_back(rule(R"(units is the logical units' name.*|units must not be empty|units is at most 256 bytes)", "計測スケールの単位は 1〜256 バイトの文字です"));
+        r.push_back(rule(R"(give ids \(the layers to turn\) or crop: true.*)", "角度補正するレイヤー（ids）か、ページを回して切り抜く（crop: true）のどちらかを指定します"));
+        r.push_back(rule(R"(ids is \[layer id, …\])", "角度補正するレイヤーは ID の一覧で指定します"));
+        r.push_back(rule(R"((trim|bleed_mm|margins) is only for crop: true)", "\\1 は、ページを回して切り抜くとき（crop: true）だけ指定します"));
+        r.push_back(rule(R"(the page's count marks, ruler line or notes would lie past 1000 m from the page)",
+                         "カウントの印・ものさしの線・注釈が、ページから 1000 m より遠くへ出てしまうため、できません"));
+        // (PC5 J-d2 — the C++ build's own: 計測値を記録's values, 目盛りマーカーを配置; render/measure_features, render/ops_measure)
+        r.push_back(rule("the selection is empty", "選択範囲が空です"));
+        r.push_back(rule(R"(the (selection|page) measured is too large \(.*)", "選択範囲が大きすぎて数えられません（1 億 2 千万画素まで）"));
+        r.push_back(rule("source is auto, selection, ruler or count", "計測のソースは auto・selection・ruler・count のどれかです"));
+        r.push_back(rule(R"(area is the selection: only for source selection \(or auto\))", "選択範囲（area）は、ソースが selection（か auto）のときだけ指定します"));
+        r.push_back(rule(R"(a (\S+) (.+) bar is ([0-9.]+) pixels; it must fit the trim's ([0-9.]+) pixels inside its margins)",
+                         "目盛りの長さ \\1 \\2 は \\3 画素で、仕上がりの幅から余白を除いた \\4 画素に入りません（1 画素以上で、そこに入る長さにします）"));
+        r.push_back(rule(R"(the scale marker's letters of ([0-9.]+) pt do not fit the trim's height of ([0-9.]+) mm)",
+                         "目盛りマーカーの文字（\\1 pt）が、仕上がりの高さ（\\2 mm）に入りません（文字を小さくします）"));
+        r.push_back(rule(R"(the scale marker's label \(([0-9.]+) × ([0-9.]+) mm\) does not fit the trim)",
+                         "目盛りマーカーの文字（\\1 × \\2 mm）が仕上がりに入りません（文字を小さくするか短い長さにします）"));
+        r.push_back(rule(R"(the selection has (\d+) features: rows for the first (\d+) only \(the summary counts them all\))",
+                         "選択範囲の塊が \\1 個と多いため、塊ごとの行は先頭の \\2 個だけにしました（まとめの行は全部を数えています）"));
+        r.push_back(rule("the selection measured is too large to count in memory", "選択範囲が大きすぎて、記憶の中で数えられません（選択範囲を小さくします）"));
+        r.push_back(rule(R"((length|size_pt) must be a number greater than 0)", "\\1 は 0 より大きい数で指定します"));
+        r.push_back(rule("size_pt is 1 to 1000", "文字のサイズ（size_pt）は 1〜1000 pt で指定します"));
+        r.push_back(rule("font is a font's name", "フォントはフォントの名前で指定します"));
+        r.push_back(rule("position is top or bottom", "テキストの位置は top（上）か bottom（下）で指定します"));
+        r.push_back(rule("color is black or white", "目盛りマーカーのカラーは black（黒）か white（白）で指定します"));
+        // (PC5 J-b, slices@1 — the C++ build's own: the slices, render/ops_slices; Web 用に保存 by slices)
+        r.push_back(rule("the page's slices would lie past 1000 m from the page", "スライスが、ページから 1000 m より遠くへ出てしまうため、できません"));
+        r.push_back(rule(R"((rect_mm|rect_px) is \[x, y, width, height\].*)", "スライスの範囲（\\1）は [x, y, 幅, 高さ] で、幅と高さは 0 より大きくします"));
+        r.push_back(rule(R"((rect_mm|rect_px) lies past 1000 m from the page)", "スライスの範囲が、ページから 1000 m より遠くにあります"));
+        r.push_back(rule("give rect_mm or rect_px, not both", "スライスの範囲は rect_mm か rect_px のどちらかで指定します"));
+        r.push_back(rule(R"(give rect_mm or rect_px \(or layer, for a layer-based slice\))", "スライスの範囲（rect_mm か rect_px）か、レイヤーベースのスライスのレイヤー（layer）を指定します"));
+        r.push_back(rule("a layer-based slice follows its layer: give layer or a rect, not both", "レイヤーベースのスライスはレイヤーに付いていくため、範囲と一緒には指定しません"));
+        r.push_back(rule("the slice lies outside the page", "スライスがページの外にあります"));
+        r.push_back(rule("a fill or adjustment layer has no bounds to slice", "塗りつぶしレイヤー・調整レイヤーには範囲が無いため、レイヤーベースのスライスにできません"));
+        r.push_back(rule("the layer has a layer-based slice already", "このレイヤーにはもうレイヤーベースのスライスがあります"));
+        r.push_back(rule("the layer is empty: no layer-based slice can be made of it", "レイヤーが空のため、レイヤーベースのスライスを作れません"));
+        r.push_back(rule("outsets are a layer-based slice's", "外側の広げ（outsets）は、レイヤーベースのスライスだけのものです"));
+        r.push_back(rule(R"(a page holds at most (\d+) slices)", "スライスは 1 ページに \\1 個までです"));
+        r.push_back(rule(R"(no slice (\d+) on the page)", "このページに ID \\1 のスライスはありません"));
+        r.push_back(rule(R"(no slice number (\d+) on the page)", "このページに番号 \\1 のスライスはありません"));
+        r.push_back(rule(R"(slice number (\d+) is an auto slice)", "番号 \\1 は自動スライスです"));
+        r.push_back(rule(R"(give slice \(its id\) or number \(as shown\))", "スライスを ID（slice）か番号（number）で指定します"));
+        r.push_back(rule(R"(slices is a list of the slices' ids, or "all")", "削除するスライスは ID の一覧か \"all\" で指定します"));
+        r.push_back(rule("the page has no user or layer-based slices", "このページにはユーザー定義スライスもレイヤーベースのスライスもありません"));
+        r.push_back(rule(R"(give rows \(slices down\) or columns \(slices across\) above 1)", "分割する数（縦に並ぶ数 rows か横に並ぶ数 columns）を 2 以上で指定します"));
+        r.push_back(rule("the slice is too small to divide that many times", "スライスが小さすぎて、その数には分割できません"));
+        r.push_back(rule("the slice's layer shows nothing to divide", "スライスのレイヤーに描かれたものが無いため、分割できません"));
+        r.push_back(rule("the page has no guides inside its paper", "このページの用紙の中にガイドがありません"));
+        r.push_back(rule(R"(kind is image, noImage or table)", "スライスの種類は image・noImage・table のどれかです"));
+        r.push_back(rule(R"(background is "#rrggbb", "none" or null)", "スライスの背景は #rrggbb か \"none\" で指定します"));
+        r.push_back(rule("none of the slices asked for is on the page", "指定したスライスがページにありません"));
+        r.push_back(rule(R"(the slice's (name|url|target|message|alt|cell_text|kind) is text)", "スライスの \\1 は文字で指定します"));
+        r.push_back(rule(R"(the slice's (name|url|target|message|alt|cell_text|kind) is at most (\d+) bytes)", "スライスの \\1 は \\2 バイトまでの文字です"));
+        r.push_back(rule(R"((cell_text_is_html|promote) is true or false)", "\\1 は true か false です"));
+        r.push_back(rule(R"(align is \[horizontal, vertical\].*|align is a whole number.*)", "スライスの揃え（align）は [横, 縦] の 0〜4 の整数で指定します"));
+        r.push_back(rule(R"(outsets is \[top, left, bottom, right\].*|outsets is a whole number.*)", "外側の広げ（outsets）は [上, 左, 下, 右] のページの画素の整数で指定します"));
+        r.push_back(rule(R"((rows|columns) is a whole number 1\.\.1000)", "\\1 は 1〜1000 の整数で指定します"));
+        r.push_back(rule(R"(slice is a slice's id)", "スライスは ID（整数）で指定します"));
+        r.push_back(rule(R"(number is a slice's number as shown.*)", "スライスの番号は 1 から数えて指定します"));
+        // (PC5 J-b review: the ids' bound, the kept PSD slices read first, the overlapping slices written)
+        r.push_back(rule(R"(the page has used every slice id \(at most (\d+)\))", "このページのスライスの ID を使い切りました（\\1 まで）"));
+        r.push_back(rule(R"(the page's slices would not be read back: .*)", "スライスが読み直せない形になるため、できません"));
+        r.push_back(rule(R"(the page's (\d+) slices kept from its PSD were read as its own slices first)",
+                         "このページが PSD から持っていたスライス \\1 個を、先にこのページのスライスとして読み込みました"));
+        r.push_back(rule(R"(the page's (\d+) slices kept from its PSD are replaced by the ones made from the guides)",
+                         "このページが PSD から持っていたスライス \\1 個は、ガイドから作ったスライスに置き換わりました"));
+        r.push_back(rule("the slices overlap in too many places to be cut into cells", "スライスの重なりが多すぎて、書き出す形に分けられません"));
+        // (PC5 I-c, artboards@1 — the C++ build's own: render/ops_artboards, formats/artboards)
+        r.push_back(rule(R"(page \S+ is a cover: a cover cannot be an artboard)", "表紙のページはアートボードにできません"));
+        r.push_back(rule(R"(page \S+ is in a spread: a page of a spread cannot be an artboard)", "見開きのページはアートボードにできません"));
+        r.push_back(rule(R"(page \S+ is not an artboard.*)", "このページはアートボードではありません（レイヤー → 新規 → アートボード… で作ります）"));
+        r.push_back(rule(R"(no artboard preset (.*))", "「\\1」というアートボードのプリセットはありません"));
+        r.push_back(rule("background is white, black, transparent or custom", "アートボードの背景は 白・黒・透明・その他 から選びます"));
+        r.push_back(rule(R"(a custom background takes its colour.*)", "背景が「その他」のときは、その色（rgb）を指定します"));
+        r.push_back(rule("rgb is a custom background's colour", "色（rgb）は、背景が「その他」のときだけ指定します"));
+        r.push_back(rule(R"(the resolution is the whole book's \((\S+) dpi\).*)", "解像度は原稿全体のものです（\\1 dpi）。変えるときは イメージ → 画像解像度… で変えます"));
+        r.push_back(rule(R"((?:width|height)_px is 1 to (\d+) pixels)", "アートボードの幅と高さは 1〜\\1 pixel です"));
+        r.push_back(rule(R"((?:width|height)_px is a whole number of pixels)", "アートボードの幅と高さは pixel の整数で指定します"));
+        r.push_back(rule(R"(artboard is null .*)", "アートボードを外すときは、ほかの設定を一緒に指定しません"));
+        r.push_back(rule(R"(\S+ cannot go with artboard null)", "アートボードを外すときは、ほかの設定を一緒に指定しません"));
+        r.push_back(rule(R"(origin_px is \[x, y\].*)", "カンバスの上の位置は [x, y]（pixel の整数）で指定します"));
+        r.push_back(rule(R"(page \S+: artboard.*)", "アートボードの設定が正しくありません"));
+        r.push_back(rule(R"(the artboards are not of one colour mode and profile.*)",
+                         "アートボードのカラーモードかプロファイルが違うため、1 つの PSD にまとめられません（イメージ → モード で揃えるか、1 つずつのファイルに書き出します）"));
+        r.push_back(rule(R"(the artboards are of different depths.*)",
+                         "アートボードのビット数が違うため、1 つの PSD にまとめられません（イメージ → モード で揃えるか、1 つずつのファイルに書き出します）"));
+        r.push_back(rule("the book has no artboards", "この原稿にはアートボードがありません"));
+        r.push_back(rule(R"(no artboard named (.*))", "「\\1」という名前のアートボードはありません"));
+        r.push_back(rule("the artboards' canvas is too large", "アートボードを並べたカンバスが大きすぎます"));
+        // (PC5-0, Z0's review P1-1: a new layer of a 16- or 32-bit page painted at 8 bits for the book's precise budget)
+        r.push_back(rule(R"(the layer is painted at 8 bits: the book's precise pixels would pass their budget.*)",
+                         "本の高精度の画素の上限（1 GiB）を越えるか、本をまだ読み込み中のため、このレイヤーは 8 bit で塗りました"));
         r.push_back(rule(R"(vanishing_point needs the paint layer it lays on.*)", "消点で描くペイントのレイヤーを選ぶか、新しいレイヤーにします"));
         r.push_back(rule(R"(vanishing_point has no setting '(.*)'.*)", "消点に「\\1」という設定はありません"));
         r.push_back(rule(R"(vanishing_point has no kind.*)", "消点の種類の指定が違います"));
@@ -1122,6 +1466,191 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the smart object contents \\S+ show themselves.*", "スマートオブジェクトの中に、それ自身は置けません"));
         r.push_back(rule("smart objects inside smart objects go deeper than .*", "スマートオブジェクトの入れ子は 8 段までです"));
         r.push_back(rule("layer \\S+ is not a smart object", "スマートオブジェクトを選んでください"));
+        // (type@1, PC5 G-0 — the C++ build's own: type layers and the type record, render/ops_type, core/type_text)
+        r.push_back(rule("a type layer holds no pixels or lines of its own.*", "テキストレイヤーには直接描けません（先にテキストレイヤーをラスタライズします）"));
+        r.push_back(rule("layer \\S+ is not a type layer", "テキストレイヤーを選んでください"));
+        r.push_back(rule("the type layer \\S+ holds no text", "このテキストレイヤーには文字がありません"));
+        r.push_back(rule("text must not be empty", "文字が空です"));
+        r.push_back(rule("(\\S+) is a question: ask it alone.*", "問い合わせ（\\1）は、原稿を変える操作と一緒には使えません"));
+        r.push_back(rule("a \\S+ layer's type is not written back", "この層の type の鍵は保存されません"));
+        r.push_back(rule(R"(box \[x, y, w, h\] \(mm\) is required)", "文字の枠（box）が要ります"));
+        r.push_back(rule("the box's width and height must be above 0", "文字の枠の幅と高さは 0 より大きくします"));
+        r.push_back(rule("line or layer_id names the text.*|line \\(a line's id\\) or page and layer_id.*",
+                         "台詞（line）かテキストレイヤー（page と layer_id）を一つ指定します"));
+        r.push_back(rule("a type layer moves whole: transform it without a selection", "テキストレイヤーは選択範囲なしで変形します"));
+        // (PC5 G-a: point and box text, the edits in graphemes, a line and a type layer each other's)
+        r.push_back(rule(R"(point \[x, y\] or box \[x, y, w, h\] \(mm\) is required)", "文字を置く点（point）か枠（box）が要ります"));
+        r.push_back(rule("point or box shapes the text, not both", "ポイントテキスト（point）と段落テキスト（box）は、どちらか一つを指定します"));
+        r.push_back(rule(R"(\S+ \[x, y\] \(mm\) places a point text)", "点は [x, y]（mm）で指定します"));
+        r.push_back(rule(R"(\S+ \[x, y, w, h\] \(mm\) places a box text)", "枠は [x, y, w, h]（mm）で指定します"));
+        r.push_back(rule("a text in a balloon is set in it.*", "フキダシに入った文字は、ポイントテキスト・段落テキストにできません（先にフキダシを「なし」にします）"));
+        r.push_back(rule("text, replace or insert edits the text, one of them", "文字の直し方（text・replace・insert）は一つだけ指定します"));
+        r.push_back(rule(R"(.* must be within the text \(0\.\.(\d+) graphemes\))", "文字の位置が本文の外です（0〜\\1 文字）"));
+        r.push_back(rule(R"(.* must be a whole number \(graphemes\))", "文字の位置は整数（文字の数）で指定します"));
+        r.push_back(rule("replace end must not be before its start", "置き換える範囲の終わりが始まりより前です"));
+        r.push_back(rule(R"((?:replace is \{start, end, text\}|insert is \{at, text\}|replace text must be a string|insert text must be a string, not empty))",
+                         "文字の置き換え・挿入の指定が正しくありません"));
+        r.push_back(rule("anchor moves a point text's anchor.*", "基準点を動かせるのはポイントテキストだけです"));
+        r.push_back(rule("antialias must be one of .*", "アンチエイリアスは なし・シャープ・鮮明・強く・滑らかに・Windows LCD・Windows のどれかです"));
+        r.push_back(rule("(?:a line stays upright.*|the line \\S+ stays upright.*)", "台詞は回転・拡大・ゆがみができません（テキストレイヤーにしてから変形します）"));
+        r.push_back(rule("a type layer turned, scaled or slanted stays a type layer.*", "回転・拡大・ゆがみをかけたテキストレイヤーは台詞にできません（先に変形を外します）"));
+        r.push_back(rule("a type layer is bent by .*", "テキストレイヤーはワープテキストで曲げます（ほかの曲げ方はスマートオブジェクトにしてから）"));
+        r.push_back(rule("size_pt or style.size_mm sizes the text, not both", "文字の大きさは pt か mm のどちらかで指定します"));
+        r.push_back(rule("size_pt must be above 0 and at most 1296", "文字の大きさは 0 より大きく 1296 pt までです"));
+        r.push_back(rule("parent must be a folder of the page", "入れる先は、このページのフォルダーを指定します"));
+        r.push_back(rule("edit_type changes .*", "直す中身（文字・形・向き・アンチエイリアス・変形・名前）を指定します"));
+        r.push_back(rule("title names a type layer: a line has none", "名前はテキストレイヤーにだけ付けられます"));
+        r.push_back(rule("the type layer is too large to turn at this resolution", "テキストレイヤーが大きすぎて、この解像度では回して描けません"));
+        r.push_back(rule("page and layer_id name the type layer|line \\(a line's id\\) names the line", "台詞（line）かテキストレイヤー（page と layer_id）を指定します"));
+        // (PC5 G-a review)
+        r.push_back(rule(".* must lie within a metre of the page.*", "文字の位置と枠は、ページから 1 m の内（枠の幅と高さは 1 m まで）で指定します"));
+        r.push_back(rule("the text is too large to set.*", "文字が大きすぎて組めません（ポイントテキストの行が長すぎるか、段落テキストが枠から大きくはみ出しています）"));
+        r.push_back(rule("no panel \\S+ on the page", "そのページに無いコマです"));
+        r.push_back(rule("after names a line of the page", "読む順の位置（after）は、同じページの台詞を指定します"));
+        r.push_back(rule("a type layer turned, scaled or bent is not in this build yet",
+                         "テキストレイヤーの回転・拡大・縮小・ゆがみは、この版の Genko ではまだできません（移動はできます）"));
+        // (PC5 G-b: set_type — the character and paragraph attributes on the whole text or a range)
+        r.push_back(rule("unknown attribute \\S+ \\(a character or paragraph attribute of TEXT-02\\)", "文字・段落の属性の名前が正しくありません"));
+        r.push_back(rule("set_type sets a character or paragraph attribute.*", "変える文字・段落の属性を指定します"));
+        r.push_back(rule(R"(the text is too long to set \((\d+) letters at most\))", "文字が長すぎて組めません（\\1 文字まで）"));
+        r.push_back(rule(R"(range is \[start, end\] \(graphemes\))", "範囲は [始まり, 終わり]（文字の数）で指定します"));
+        r.push_back(rule(R"(range must lie in the text.*\(0\.\.(\d+) graphemes\))", "範囲が本文の外か、終わりが始まりより前です（0〜\\1 文字）"));
+        r.push_back(rule("an empty range takes paragraph attributes only", "空の範囲には段落の属性だけを指定できます"));
+        r.push_back(rule("size_pt or size_mm sizes the text, not both", "文字の大きさは pt か mm のどちらかで指定します"));
+        r.push_back(rule(".* takes the style \\S+, which the book does not keep", "原稿に無い文字スタイル・段落スタイルを指定しています"));
+        // (PC5 G-c: type_style — the character and paragraph styles)
+        r.push_back(rule("unknown key (\\S+) for type_style", "スタイルの操作に知らない鍵（\\1）があります"));
+        r.push_back(rule("kind is character or paragraph", "スタイルの種類（kind）は character（文字）か paragraph（段落）です"));
+        r.push_back(rule("action is new, duplicate, delete, rename, set, apply, redefine, clear_override or list",
+                         "スタイルの操作（action）は new・duplicate・delete・rename・set・apply・redefine・clear_override・list のどれかです"));
+        r.push_back(rule("id names the style", "スタイル（id）を指定します"));
+        r.push_back(rule("no character style (\\S+)", "文字スタイル（\\1）は原稿にありません"));
+        r.push_back(rule("no paragraph style (\\S+)", "段落スタイル（\\1）は原稿にありません"));
+        r.push_back(rule("Basic Paragraph cannot be deleted or renamed", "[基本段落] は削除・名前の変更ができません"));
+        r.push_back(rule("a character style has no paragraph attributes", "文字スタイルには段落の属性を入れられません"));
+        r.push_back(rule("the style's name must be a string|the style's name is 1 to 64 characters", "スタイルの名前は 1〜64 文字です"));
+        r.push_back(rule("the style's name must not hold a line break or a control character", "スタイルの名前に改行・制御文字は使えません"));
+        r.push_back(rule("the name (.*) is the panel's own: choose another name", "「\\1」はパネルが使う名前です（ほかの名前にします）"));
+        r.push_back(rule("the book has a character style named (.*) already", "「\\1」という名前の文字スタイルはもうあります"));
+        r.push_back(rule("the book has a paragraph style named (.*) already", "「\\1」という名前の段落スタイルはもうあります"));
+        r.push_back(rule("range is a range of the text named \\(line, or page and layer_id\\)",
+                         "範囲（range）は、台詞かテキストレイヤーを指定したときに使います"));
+        r.push_back(rule("type_style \\S+(?: with apply)? names the text: line, or page and layer_id",
+                         "スタイルを適用・再定義・上書きを消去する文字（台詞の line か、テキストレイヤーの page と layer_id）を指定します"));
+        r.push_back(rule("the chosen text takes no character style: name the style to redefine \\(id\\)",
+                         "選んだ文字には文字スタイルがありません（再定義するスタイルを指定します）"));
+        r.push_back(rule("an empty range takes a paragraph style only", "空の範囲には段落スタイルだけを適用できます"));
+        r.push_back(rule("attrs gives the attributes as \\{attribute: value\\}", "スタイルの属性（attrs）は {属性: 値} で指定します"));
+        r.push_back(rule("clear is a list of attribute names", "消す属性（clear）は属性の名前の一覧で指定します"));
+        r.push_back(rule("name gives the style its new name", "スタイルの新しい名前（name）を指定します"));
+        r.push_back(rule("(replace|from_selection|apply|clear_overrides) is true or false", "\\1 は true か false です"));
+        r.push_back(rule("a book keeps 512 (?:character|paragraph) styles at most", "文字スタイル・段落スタイルは、それぞれ 512 個までです"));
+        r.push_back(rule("(?:unknown )?(?:native_type|char|para|run char|paragraph para|type_styles)\\b.*",
+                         "文字の設定（文字・段落の属性、スタイル）の指定が正しくありません"));
+        r.push_back(rule("(?:a run(?:'s| must) |the runs must |a paragraph must |the paragraphs must |a style's (?:id|name) |two (?:character|paragraph) styles ).*",
+                         "文字の範囲・段落・スタイルの指定が正しくありません"));
+        // (PC5 G-d: replace_fonts — the missing fonts replaced)
+        r.push_back(rule("unknown key (\\S+) for replace_fonts", "書体の置き換えに知らない鍵（\\1）があります"));
+        r.push_back(rule("map must be \\{font: the font it becomes\\}", "置き換え（map）は {見つからない書体: 置き換える書体} で指定します"));
+        r.push_back(rule("unknown key (\\S+) for the font (.*) is to become", "「\\2」を置き換える書体に知らない鍵（\\1）があります"));
+        r.push_back(rule("map: the font (.*) is not on this computer", "置き換える書体「\\1」が、このパソコンにありません"));
+        r.push_back(rule("map: face_index must be a whole number 0..255", "書体の面の番号（face_index）は 0〜255 の整数です"));
+        r.push_back(rule("map: (family|font_style|postscript) must be a name of 1..256 characters", "\\1 は 1〜256 文字の名前です"));
+        r.push_back(rule("(?:map: )?face_index (\\d+) is past the faces of (.*) \\(it holds (\\d+)\\)", "書体「\\2」の面は \\3 個です（面の番号 \\1 はありません）"));
+        r.push_back(rule("map: .*", "置き換える書体の指定が正しくありません"));
+        // (variables@1, PC5 I-d — the C++ build's own: the variables and data sets, render/ops_variables, formats/datasets; a
+        // variable's name may hold spaces — the review's P3-3 — so a name is taken as (.+?), not (\S+))
+        r.push_back(rule(R"(variable (.+?): (.*))", [](const QRegularExpressionMatch& m) {
+            return QStringLiteral("変数「%1」: %2").arg(m.captured(1), error(m.captured(2)));
+        }));
+        r.push_back(rule("no data set at index (\\S+)", "\\1 番目のデータセットはありません"));
+        r.push_back(rule("no data set (.*)", "「\\1」という名前のデータセットはありません"));
+        r.push_back(rule("name or index names the data set", "データセットは名前か番号で指定します"));
+        r.push_back(rule("the book has no variables: define them first.*", "原稿に変数がありません（先に イメージ → 変数 → 定義… で定義します）"));
+        r.push_back(rule("the book has no data sets", "原稿にデータセットがありません"));
+        r.push_back(rule("no data sets chosen", "書き出すデータセットが選ばれていません"));
+        r.push_back(rule("no page to write: the variables name no page of the book", "変数のあるページがないため、書き出すページがありません"));
+        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?no variable (.*))", "「\\1」という変数はありません"));
+        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?(.+?) \(visibility\) takes true or false)", "変数「\\1」（表示）の値は true か false です"));
+        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?(.+?) \(text\) takes text)", "変数「\\1」（テキストの置き換え）の値は文字です"));
+        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?(.+?) \(pixels\) takes a picture.*)", "変数「\\1」（ピクセルの置き換え）の値は画像です"));
+        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?the picture cannot be read.*)", "データセットの画像が読めません"));
+        r.push_back(rule(R"((?:data_sets\[\d+\]\.values\[\d+\]: )?the picture is larger than 256 MiB)", "データセットの画像が大きすぎます（256 MiB まで）"));
+        r.push_back(rule("the data sets' pictures are larger than 4 GiB together", "データセットの画像が、あわせて 4 GiB を越えます"));
+        r.push_back(rule(R"(defs\[\d+\]: layer (\S+) is not a type layer)", "テキストの置き換えにできるのは文字レイヤーか台詞だけです"));
+        r.push_back(rule(R"(defs\[\d+\]: layer (\S+) is not a paint layer or a smart object)", "ピクセルの置き換えにできるのはペイントのレイヤーかスマートオブジェクトだけです"));
+        r.push_back(rule(R"(defs\[\d+\]: no line (.*))", "その台詞は原稿にありません"));
+        r.push_back(rule(R"(defs\[\d+\]: a line takes a text variable only)", "台詞に使えるのはテキストの置き換えの変数だけです"));
+        r.push_back(rule("two variables are named (.*)", "「\\1」という名前の変数が 2 つあります（変数の名前は 1 つずつ）"));
+        r.push_back(rule("two data sets are named (.*)", "「\\1」という名前のデータセットが 2 つあります（データセットの名前は 1 つずつ）"));
+        r.push_back(rule(R"(def \d+'s name must be 1 to 255 characters|data set \d+'s name must be 1 to 255 characters)", "変数・データセットの名前は 1〜255 文字です"));
+        r.push_back(rule(R"(data set \d+ gives (.*) two values)", "1 つのデータセットに変数「\\1」の値が 2 つあります"));
+        r.push_back(rule(R"(at most (\d+) (?:variables|defs))", "変数は \\1 個までです"));
+        r.push_back(rule(R"(at most (\d+) data sets)", "データセットは \\1 個までです"));
+        r.push_back(rule(R"(a printed layer's pixels change only after name_ok on page (\S+) \(strict_gates\))",
+                         "\\1 ページのネームが承認されるまで、印刷するレイヤーの画素は変えられません"));
+        r.push_back(rule("the text file is not UTF-8.*", "テキストファイルが UTF-8 ではありません（CSV UTF-8 で保存します）"));
+        r.push_back(rule("the text file is larger than 64 MiB", "テキストファイルが大きすぎます（64 MiB まで）"));
+        r.push_back(rule("the text file holds no line of names", "テキストファイルに変数の名前の行がありません"));
+        r.push_back(rule(R"(the text file holds more than (\d+) data sets)", "データセットは \\1 個までです"));
+        r.push_back(rule("a quoted field is not closed", "テキストファイルの \" で囲んだ欄が閉じていません"));
+        r.push_back(rule(R"(row (\d+): the picture (.*) cannot be read)", "\\1 行目の画像「\\2」が読めません"));
+        r.push_back(rule(R"(row (\d+): the picture (.*) is larger than 256 MiB)", "\\1 行目の画像「\\2」が大きすぎます（256 MiB まで）"));
+        // (groups@1, PC5 I-b — the C++ build's own: a folder drawn as a group, core/groups, render/ops_groups)
+        r.push_back(rule("group makes a folder.*|group is set on a folder|.*the layer \\S+ is marked a group but is not a folder",
+                         "グループとして描けるのはフォルダーだけです"));
+        r.push_back(rule(".*(?:blend pass_through is a group's|the blend pass_through is a group's only).*", "描画モード「通過」はグループだけのものです"));
+        r.push_back(rule("the layers to merge are in different groups.*", "別々のグループのレイヤーは一緒に結合できません（グループの中で結合します）"));
+        // (PC5 I-a — the C++ build's own: the layers' basics, core/ops_layers, core/layer_basics, render/ops_layer_styles)
+        r.push_back(rule("the layer \\S+ is locked \\(lock_all\\): it cannot be deleted", "すべてをロックしたレイヤーは削除できません（レイヤー パネルでロックを外します）"));
+        r.push_back(rule("the layer \\S+ is locked \\(lock_all\\)", "すべてをロックしたレイヤーは、描く・動かす・見た目を変えることができません（レイヤー パネルでロックを外します）"));
+        r.push_back(rule("delete_layers needs ids, hidden or empty", "消すレイヤー（選んだもの・非表示・空）を指定します"));
+        r.push_back(rule("ids name the layers of one page.*", "レイヤーを選んで消す・統合するのは 1 ページずつです"));
+        r.push_back(rule("the page to copy onto has another paper size or colour mode.*",
+                         "複製先のページは用紙の大きさか色モードが違います（コピーしてペーストします）"));
+        r.push_back(rule("new_ids is \\{layer id: the id of its copy\\}", "複製のレイヤーの名前（id）が正しくありません"));
+        r.push_back(rule("the layer \\S+ is not a group or folder", "グループを選びます（グループ解除はグループのものです）"));
+        r.push_back(rule("blend_channels: this page's colour mode.*", "このページの色モード（モノクロ 2 階調・インデックス・ダブルトーン・マルチチャンネル）では、チャンネルを外せません"));
+        r.push_back(rule("blend_channels is \\d+ flags.*", "チャンネルの指定がページの色のチャンネルの数と合いません"));
+        r.push_back(rule("blend_channels is a layer's, not a folder's", "チャンネルの指定はレイヤーのものです（グループには付けられません）"));
+        r.push_back(rule("not yet ported: high-precision merge of a clipped layer that leaves colour channels out.*",
+                         "高精度のページでは、下のレイヤーへクリップしたままチャンネルを外したレイヤーを結合することはまだできません（クリップを外すか、チャンネルを全部入れると結合できます）"));
+        // (PC5 I-g — the C++ build's own: レイヤーを自動整列・自動合成, Photomerge, ファイルをスタックとして読み込み・統計 —
+        // render/ops_align, service/automate_merge)
+        r.push_back(rule("auto-align found no matching detail between the layers.*",
+                         "レイヤーの間に対応が見つかりません（重なりがあって模様のある、画素のレイヤーを選びます）"));
+        r.push_back(rule("photomerge found no matching detail between the pictures.*", "画像の間に対応が見つかりません（重なりのある写真を選びます）"));
+        r.push_back(rule(R"(the panorama would be -?\d+ × -?\d+ px \(about (-?\d+) 万 pixels\).*)",
+                         "パノラマが大きすぎます（約 \\1 万画素）。画像を減らすか、縮小して読み込んでください"));
+        r.push_back(rule("ids is \\[layer id, …\\]: two or more paint layers|select two or more paint layers \\(ids\\)",
+                         "画素のレイヤーを 2 枚以上選びます（レイヤー パネルで Ctrl を押しながら選びます）"));
+        r.push_back(rule("ids names the layer \\S+ twice", "同じレイヤーを 2 度選んでいます"));
+        r.push_back(rule(R"(more than (\d+) layers: choose fewer)", "レイヤーは \\1 枚までです"));
+        r.push_back(rule(R"(more than (\d+) pictures: choose fewer)", "画像は \\1 枚までです"));
+        r.push_back(rule(R"(more than (\d+) pictures to align: choose fewer)", "位置合わせできる画像は \\1 枚までです"));
+        r.push_back(rule(R"(the pictures are too large to stitch at once \(about (-?\d+) 万 pixels in all\).*)",
+                         "画像が大きすぎて、一度につなげません（合わせて約 \\1 万画素）。画像を減らすか、縮小して読み込んでください"));
+        r.push_back(rule(R"(the stack would be too large to hold at once \(about (\d+) MiB of 2048\).*)",
+                         "スタックが大きすぎて、一度に持てません（約 \\1 MiB。2048 MiB まで）。画像を減らすか、小さな画像にしてください"));
+        r.push_back(rule(R"(the colours of the picture (.*) cannot be converted into the first picture's profile.*)",
+                         "画像「\\1」の色を、最初の画像のプロファイルに変換できません"));
+        r.push_back(rule("the layer \\S+ is not a paint layer \\(auto-align and auto-blend take paint layers\\)",
+                         "自動整列・自動合成できるのは、画素（ペイント）のレイヤーだけです"));
+        r.push_back(rule("projection is auto, perspective, cylindrical, spherical, collage or reposition|"
+                         "the layout is auto, perspective, cylindrical, spherical, collage or reposition",
+                         "投影法は 自動設定・遠近法・円筒法・球面法・コラージュ・位置の変更 のどれかです"));
+        r.push_back(rule("reference is one of the layers given \\(ids\\)", "基準のレイヤーは、選んだレイヤーの中から選びます"));
+        r.push_back(rule("interpolation is bicubic, bilinear or nearest", "補間方法は バイキュービック・バイリニア・ニアレストネイバー のどれかです"));
+        r.push_back(rule("focal_length is the mm of 35 mm film.*", "焦点距離は 35 mm 判に換算した mm（0 より大きく 2000 まで）です"));
+        r.push_back(rule("method is panorama or stack", "合成方法は パノラマ か 画像をスタック です"));
+        r.push_back(rule("the layers to blend hold different kinds of pixels.*",
+                         "選んだレイヤーの画素の種類（8 bit・高精度・インキ）が違います。そろえてから合成します"));
+        r.push_back(rule("Photomerge needs two or more pictures", "Photomerge には画像が 2 枚以上要ります"));
+        r.push_back(rule("no files to load into a stack", "読み込むファイルがありません"));
+        r.push_back(rule("the stack mode is entropy, .*", "スタックモードの名前が正しくありません"));
+        r.push_back(rule("the scale to read the pictures at is 10 to 100 %", "読み込むときの縮小は 10〜100 % です"));
+        r.push_back(rule("the picture (.*) could not be laid on the stack's page", "画像「\\1」をスタックのページに置けませんでした"));
+        r.push_back(rule("the picture has no pixels to load|a picture to load is missing", "読み込む画像の画素がありません"));
         r.push_back(rule("the layers have nothing to draw", "選んだレイヤーには、描かれたものがありません"));
         r.push_back(rule("layer \\S+ has nothing to rasterize", "このレイヤーには、ラスタライズするものがありません（すでに画素のレイヤーです）"));
         r.push_back(rule("the transform squashes the smart object flat|the picture would be laid too small", "スマートオブジェクトが潰れてしまう変形はできません"));

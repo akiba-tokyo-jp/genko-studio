@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <unordered_map>
 #include <mutex>
@@ -114,6 +115,85 @@ RgbSpace::RgbSpace(const core::RgbMode& mode) {
 }
 
 RgbSpace RgbSpace::of(const core::Page& page) { return page.rgb ? RgbSpace(*page.rgb) : RgbSpace(); }
+
+struct GrayCurve::Impl {
+    cmsToneCurve* curve = nullptr;     // (encoded → linear)
+    cmsToneCurve* reversed = nullptr;  // (linear → encoded)
+    std::optional<Parametric> exact;   // (the same in double precision, when it is parametric)
+    ~Impl() {
+        if (curve != nullptr) cmsFreeToneCurve(curve);
+        if (reversed != nullptr) cmsFreeToneCurve(reversed);
+    }
+};
+
+GrayCurve::GrayCurve(const core::PageColor& color) {
+    if (!color.icc) return;  // (sGray: the sRGB curve)
+    cmsHPROFILE profile = cmsOpenProfileFromMem(color.icc->data(), static_cast<cmsUInt32Number>(color.icc->size()));
+    if (profile == nullptr) throw core::Error("value", "the page's grey profile cannot be read");
+    const auto* curve = static_cast<const cmsToneCurve*>(cmsReadTag(profile, cmsSigGrayTRCTag));
+    if (curve == nullptr) {
+        cmsCloseProfile(profile);
+        throw core::Error("value", "the page's grey profile has no tone curve");
+    }
+    auto impl = std::make_shared<Impl>();
+    impl->curve = cmsDupToneCurve(curve);
+    impl->reversed = cmsReverseToneCurve(curve);
+    if (Parametric exact(curve); exact.type != 0) impl->exact = exact;
+    cmsCloseProfile(profile);
+    if (impl->curve == nullptr || impl->reversed == nullptr) throw core::Error("value", "the page's grey profile cannot be used");
+    impl_ = std::move(impl);
+}
+
+double finite_sample(double v) {
+    if (std::isnan(v)) return 0.0;
+    constexpr double most = std::numeric_limits<float>::max();
+    return std::clamp(v, -most, most);
+}
+
+void encode_by_profile(std::vector<float>& samples, unsigned channels, bool alpha, const std::string& icc) {
+    const unsigned colours = alpha ? channels - 1 : channels;
+    std::optional<RgbSpace> rgb;
+    std::optional<GrayCurve> grey;
+    if (colours == 3 && !icc.empty()) {
+        try {
+            core::RgbMode mode;
+            mode.icc = std::make_shared<const std::string>(icc);
+            mode.profile = core::bytes_ref(icc);
+            rgb.emplace(mode);
+        } catch (const core::Error&) {  // (not a matrix-shaper RGB profile: the sRGB curve)
+        }
+    }
+    if (colours == 1 && !icc.empty()) {
+        try {
+            core::PageColor color;
+            color.space = core::InkSpace::Gray;
+            color.icc = std::make_shared<const std::string>(icc);
+            grey.emplace(color);
+        } catch (const core::Error&) {  // (no grey tone curve: sGray's)
+        }
+    }
+    const RgbSpace srgb;
+    const GrayCurve sgray;
+    for (std::size_t i = 0; i < samples.size(); ++i) {
+        const auto c = static_cast<unsigned>(i % channels);
+        if (c >= colours) continue;
+        const double v = samples[i];
+        const double out = colours == 1 ? (grey ? grey->encode(v) : sgray.encode(v)) : (rgb ? rgb->encode(c, v) : srgb.encode(c % 3, v));
+        samples[i] = static_cast<float>(finite_sample(out));
+    }
+}
+
+double GrayCurve::decode(double encoded) const {
+    if (!impl_) return core::srgb_to_linear(encoded);
+    if (impl_->exact) return impl_->exact->linear(encoded);
+    return cmsEvalToneCurveFloat(impl_->curve, static_cast<cmsFloat32Number>(encoded));
+}
+
+double GrayCurve::encode(double linear) const {
+    if (!impl_) return core::linear_to_srgb(linear);
+    if (impl_->exact) return impl_->exact->encoded(linear);
+    return cmsEvalToneCurveFloat(impl_->reversed, static_cast<cmsFloat32Number>(linear));
+}
 
 double RgbSpace::decode(unsigned channel, double encoded) const {
     if (!impl_) return core::srgb_to_linear(encoded);
@@ -407,6 +487,49 @@ void ColorCanvas::blend(const ColorPicture& picture, double opacity, bool clip, 
     impl_->previous = true;
 }
 void ColorCanvas::forget_clip() { impl_->previous = false; }
+void ColorCanvas::mix_back(const ColorPicture& before, double opacity, const Image* mask) {
+    if (before.size != impl_->size || before.pixels.size() != impl_->pixels.size()) throw core::Error("value", "color canvas picture does not match");
+    if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "layer mask does not match");
+    for (int y = 0; y < impl_->size.height; ++y) {
+        const auto* shown = mask ? reinterpret_cast<const unsigned char*>(mask->raw()->image[y]) : nullptr;
+        for (int x = 0; x < impl_->size.width; ++x) {
+            const std::size_t i = std::size_t(y) * impl_->size.width + x;
+            const double k = std::clamp(opacity, 0.0, 1.0) * (shown ? shown[x] / 255.0 : 1.0);
+            if (k >= 1) continue;
+            auto& p = impl_->pixels[i];
+            const auto& b = before.pixels[i];
+            const double alpha = b[3] + (p[3] - b[3]) * k;
+            for (unsigned c = 0; c < 3; ++c) {
+                const double premultiplied = b[c] * b[3] + (p[c] * p[3] - b[c] * b[3]) * k;
+                p[c] = alpha > 0 ? premultiplied / alpha : 0.0;
+            }
+            p[3] = std::clamp(alpha, 0.0, 1.0);
+        }
+    }
+}
+void ColorCanvas::keep_channels(const ColorPicture& before, const std::vector<bool>& on) {
+    if (before.size != impl_->size || before.pixels.size() != impl_->pixels.size() || on.size() != 3) throw core::Error("value", "color canvas picture does not match");
+    for (std::size_t i = 0; i < impl_->pixels.size(); ++i) {
+        for (unsigned c = 0; c < 3; ++c)
+            if (!on[c]) impl_->pixels[i][c] = before.pixels[i][c];
+    }
+}
+Image ColorCanvas::clip_alpha() const {
+    std::string out(impl_->pixels.size(), static_cast<char>(255));
+    if (impl_->previous) {
+        for (std::size_t i = 0; i < out.size(); ++i)
+            out[i] = static_cast<char>(std::clamp<long>(std::lround(impl_->pixels[i][4] * 255.0), 0, 255));
+    }
+    return Image::frombytes("L", impl_->size, out);
+}
+void ColorCanvas::clip_to(const Image& alpha) {
+    if (alpha.mode() != "L" || alpha.size() != impl_->size) throw core::Error("value", "clipping alpha does not match");
+    for (int y = 0; y < impl_->size.height; ++y) {
+        const auto* a = reinterpret_cast<const unsigned char*>(alpha.raw()->image[y]);
+        for (int x = 0; x < impl_->size.width; ++x) impl_->pixels[std::size_t(y) * impl_->size.width + x][4] = a[x] / 255.0;
+    }
+    impl_->previous = true;
+}
 void ColorCanvas::correct(const core::ColorRasterView& changed, double opacity, bool clip, const Image* mask, std::string_view mode) {
     if (mask && (mask->mode() != "L" || mask->size() != impl_->size)) throw core::Error("value", "correction mask does not match");
     if (!supports_blend(mode)) throw core::Error("not_yet_ported", "high-precision blend:" + std::string(mode));
@@ -499,7 +622,7 @@ void ColorCanvas::adjust(const core::AdjustFunction& adjustment, double opacity,
         }
     }
 }
-void ColorCanvas::draw_8bit(const std::function<void(Image&)>& draw) {
+void ColorCanvas::draw_8bit(const std::function<void(Image&)>& draw, std::vector<unsigned char>* marks) {
     const Image before = image();
     Image drawn = before;
     draw(drawn);
@@ -525,6 +648,8 @@ void ColorCanvas::draw_8bit(const std::function<void(Image&)>& draw) {
         for (int x = 0; x < impl_->size.width; ++x) {
             const auto* d = now + x*4;
             if (std::equal(d, d+4, was + x*4) && std::equal(probe_now + x*4, probe_now + x*4 + 4, probe_was + x*4)) continue;
+            if (marks != nullptr && marks->size() == std::size_t(impl_->size.width) * impl_->size.height)
+                (*marks)[std::size_t(y)*impl_->size.width+x] = 255;  // (PC5 H-a: painted here)
             if (!converted) {  // (the row's colours, once a pixel of it is painted)
                 in.row(now, static_cast<std::size_t>(impl_->size.width), line);
                 converted = true;

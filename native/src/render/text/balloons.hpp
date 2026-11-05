@@ -78,6 +78,8 @@ EditableLine editable_line(const core::StoryLine& line, int dpi, const std::opti
 // The balloons' pictures remembered for drawing a page again in parts (the letters, the shapes' masks, a turned
 // balloon's sheet) are forgotten.
 void clear_balloon_cache();
+// (PC5 H-f, メモリをクリア) The bytes they hold now (the letters' too: layout_cache_bytes).
+std::int64_t balloon_cache_bytes();
 
 // The geometry of balloons.py, for the contract tests (points as Python's (x, y) floats).
 namespace balloon {

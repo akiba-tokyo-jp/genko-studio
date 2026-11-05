@@ -1,8 +1,13 @@
 #include "app/workspace.hpp"
 
 #include <QAction>
+#include <QCheckBox>
 #include <QDialogButtonBox>
+#include <QDockWidget>
 #include <QGridLayout>
+#include <QHBoxLayout>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -29,13 +34,14 @@
 
 namespace genko::app {
 
-const QStringList kDefaultCommandBar{QStringLiteral("元に戻す"), QStringLiteral("やり直す"), QStringLiteral("|"),
-                                     QStringLiteral("全体を表示"), QStringLiteral("縮小"), QStringLiteral("拡大"), QStringLiteral("|"),
+// (PC5 H-0: Photoshop's names — 取り消し, やり直し, 画面サイズに合わせる, ズームアウト, ズームイン, 水平方向に反転)
+const QStringList kDefaultCommandBar{QStringLiteral("取り消し"), QStringLiteral("やり直し"), QStringLiteral("|"),
+                                     QStringLiteral("画面サイズに合わせる"), QStringLiteral("ズームアウト"), QStringLiteral("ズームイン"), QStringLiteral("|"),
                                      QStringLiteral("◀ 前のページ"), QStringLiteral("次のページ ▶"), QStringLiteral("|"),
                                      QStringLiteral("原稿を書き出す…")};  // (PC4 F-0: 書き出し…'s new name)
-const QStringList kDefaultQuick{QStringLiteral("ブラシツール"), QStringLiteral("消しゴムツール"), QStringLiteral("塗りつぶしツール"), QStringLiteral("テキスト"),
+const QStringList kDefaultQuick{QStringLiteral("ブラシツール"), QStringLiteral("消しゴムツール"), QStringLiteral("塗りつぶしツール"), QStringLiteral("縦書き文字ツール"),
                                 QStringLiteral("コマ割り"), QStringLiteral("選択範囲・選んだコマにトーンを貼る"), QStringLiteral("集中線"),
-                                QStringLiteral("左右反転して見る")};
+                                QStringLiteral("水平方向に反転（表示）")};
 
 namespace {
 
@@ -123,7 +129,8 @@ std::map<const QAction*, QString> command_names(const std::vector<QAction*>& all
     std::optional<std::unordered_map<const QAction*, QString>> walked;
     for (const QAction* action : all) {
         QString place;
-        if (count[action->text()] > 1) {
+        // (one that keeps its place in its name though its words are its alone now — PC5 G-d: ラスタライズ ▸ テキスト)
+        if (count[action->text()] > 1 || action->property("genko_placed").toBool()) {
             if (known == nullptr) known = &walked.emplace(menu_places(window));
             place = place_of(*known, action);
         }
@@ -167,6 +174,16 @@ std::map<QString, QAction*> by_text(QMainWindow* window) {
     // (a name kept before others had the same words — the words alone: the first of them in the menus, the one that had
     // them then, as the layer panel's 色調補正のレイヤー's before レイヤー → 色調補正)
     for (QAction* action : listed) out.emplace(action->text(), action);
+    // (PC5 H-0: words a command came to share by a rename are the one's that had them before — preferences::words_owner;
+    // PC5 G-d: whatever its words are now, as the text tool's テキスト)
+    // (PC5 H-f: a panel's switch by its dock — "dock:<its object name>", as key_sets names it)
+    for (const auto& [words, attribute] : preferences::words_owner()) {
+        for (QAction* action : listed) {
+            const auto* dock = qobject_cast<const QDockWidget*>(action->parent());
+            const QString owner = dock != nullptr ? QStringLiteral("dock:") + dock->objectName() : action->property("genko_attribute").toString();
+            if (owner == attribute) out[words] = action;
+        }
+    }
     return out;
 }
 
@@ -195,15 +212,71 @@ std::vector<QAction*> search(QMainWindow* window, const QString& words) {
     std::vector<QAction*> out;
     const std::vector<QAction*> all = menu_commands(window);
     const auto known = menu_places(window);  // (the menus walked once: for the names and the places both)
-    for (QAction* action : commands(all, command_names(all, window, &known))) {
-        const QString text = (action->text() + QLatin1Char(' ') + place_of(known, action) + QLatin1Char(' ') + action->statusTip()).toLower();
+    // (PC5 H-0: a renamed command found by its old names too — 「コマンドを探す」 finds 検索)
+    std::map<QString, QString> before;
+    for (const auto& [now, old] : preferences::renamed()) before[now] += QLatin1Char(' ') + old;
+    const auto names = command_names(all, window, &known);
+    for (QAction* action : commands(all, names)) {
+        QString olds;
+        for (const QString& name : {command_name(names, action), action->text()}) {
+            if (const auto found = before.find(name); found != before.end()) olds += found->second;
+        }
+        const QString text =
+            (action->text() + QLatin1Char(' ') + place_of(known, action) + QLatin1Char(' ') + action->statusTip() + olds).toLower();
         if (std::all_of(parts.begin(), parts.end(), [&text](const QString& part) { return text.contains(part); })) out.push_back(action);
     }
     return out;
 }
 
+void lay_out_menu(QMenu* menu, const QStringList& rows) {
+    const QList<QAction*> before = menu->actions();
+    QSet<const QAction*> used;
+    const auto find = [&](const QString& row) -> QAction* {
+        for (QAction* item : before) {
+            if (item->isSeparator() || used.contains(item)) continue;
+            if (row.startsWith(QStringLiteral("▸"))) {
+                if (item->menu() != nullptr && item->menu()->title() == row.mid(1)) return item;
+            } else if (item->menu() == nullptr && item->property("genko_attribute").toString() == row) {
+                return item;
+            }
+        }
+        return nullptr;
+    };
+    std::vector<QAction*> order;  // (nullptr: a line)
+    for (const QString& row : rows) {
+        if (row == QLatin1String("|")) {
+            order.push_back(nullptr);
+        } else if (QAction* item = find(row)) {
+            order.push_back(item);
+            used.insert(item);
+        }
+    }
+    bool line = false;
+    for (QAction* item : before) {
+        if (item->isSeparator() || used.contains(item)) continue;
+        if (!line) order.push_back(nullptr);
+        line = true;
+        order.push_back(item);
+    }
+    for (QAction* item : before) {
+        menu->removeAction(item);
+        if (item->isSeparator() && item->parent() == menu) item->deleteLater();
+    }
+    bool last_line = true;  // (none at the start)
+    for (std::size_t i = 0; i < order.size(); ++i) {
+        if (order[i] == nullptr) {
+            const bool more = std::any_of(order.begin() + static_cast<std::ptrdiff_t>(i) + 1, order.end(), [](QAction* a) { return a != nullptr; });
+            if (!last_line && more) menu->addSeparator();
+            last_line = true;
+        } else {
+            menu->addAction(order[i]);
+            last_line = false;
+        }
+    }
+}
+
 CommandSearch::CommandSearch(QMainWindow* window) : QDialog(window), window_(window) {
-    setWindowTitle(QStringLiteral("コマンドを探す"));
+    setWindowTitle(QStringLiteral("検索"));  // (PC5 H-0: Photoshop's 編集 → 検索)
     setProperty("glass_wanted", true);  // (the system's frosted glass where there is one)
     resize(520, 420);
     query = new QLineEdit;
@@ -463,23 +536,203 @@ QStringList workspaces() {
     return names;
 }
 
-void save_workspace(QMainWindow* window, const QString& name) {
+namespace {
+
+// (a settings group's every key and value: the keys under shortcuts/, the colours under menus/colors/)
+QJsonObject group_of(const QString& group) {
     auto store = settings();
-    store->setValue(QStringLiteral("workspaces/%1/state").arg(name), QString::fromLatin1(window->saveState().toBase64()));
-    store->setValue(QStringLiteral("workspaces/%1/geometry").arg(name), QString::fromLatin1(window->saveGeometry().toBase64()));
+    QJsonObject out;
+    store->beginGroup(group);
+    for (const QString& key : store->allKeys()) out[key] = store->value(key).toString();
+    store->endGroup();
+    return out;
 }
 
-bool load_workspace(QMainWindow* window, const QString& name) {
+void put_group(const QString& group, const QJsonObject& values) {
+    auto store = settings();
+    store->remove(group);
+    for (auto it = values.begin(); it != values.end(); ++it) store->setValue(group + QLatin1Char('/') + it.key(), it.value().toString());
+}
+
+void put_value(const QString& key, const QJsonValue& value) {
+    if (value.toString().isEmpty()) {
+        settings()->remove(key);
+    } else {
+        settings()->setValue(key, value.toString());
+    }
+}
+
+QString json_text(const QJsonObject& object) { return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact)); }
+
+// (none when the text is not a JSON object — broken, or written by hand: never taken for "nothing kept", which would empty
+// the keys: the review's P3-5)
+std::optional<QJsonObject> json_of(const QString& text) {
+    QJsonParseError error{};
+    const QJsonDocument document = QJsonDocument::fromJson(text.toUtf8(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) return std::nullopt;
+    return document.object();
+}
+
+}  // namespace
+
+void save_workspace(QMainWindow* window, const QString& name, bool keys, bool menus, bool toolbar) {
+    auto store = settings();
+    const QString at = QStringLiteral("workspaces/%1").arg(name);
+    store->remove(at);  // (kept again whole: what was not chosen this time not left from before)
+    store->setValue(at + QStringLiteral("/state"), QString::fromLatin1(window->saveState().toBase64()));
+    store->setValue(at + QStringLiteral("/geometry"), QString::fromLatin1(window->saveGeometry().toBase64()));
+    if (keys) {
+        store->setValue(at + QStringLiteral("/keys"), json_text({{QStringLiteral("set"), store->value(QStringLiteral("ui/key_set")).toString()},
+                                                                 {QStringLiteral("own"), store->value(QStringLiteral("ui/key_set_own")).toString()},
+                                                                 {QStringLiteral("keys"), group_of(QStringLiteral("shortcuts"))}}));
+    }
+    if (menus) {
+        store->setValue(at + QStringLiteral("/menus"), json_text({{QStringLiteral("hidden"), store->value(QStringLiteral("menus/hidden")).toString()},
+                                                                  {QStringLiteral("colors"), group_of(QStringLiteral("menus/colors"))}}));
+    }
+    if (toolbar) {
+        store->setValue(at + QStringLiteral("/toolbar"), json_text({{QStringLiteral("order"), store->value(QStringLiteral("toolbar/order")).toString()},
+                                                                    {QStringLiteral("hidden"), store->value(QStringLiteral("toolbar/hidden")).toString()}}));
+    }
+}
+
+bool load_workspace(QMainWindow* window, const QString& name, bool geometry) {
     auto store = settings();
     const QString state = store->value(QStringLiteral("workspaces/%1/state").arg(name)).toString();
     if (state.isEmpty()) return false;
-    window->restoreGeometry(QByteArray::fromBase64(store->value(QStringLiteral("workspaces/%1/geometry").arg(name)).toString().toLatin1()));
+    if (geometry) window->restoreGeometry(QByteArray::fromBase64(store->value(QStringLiteral("workspaces/%1/geometry").arg(name)).toString().toLatin1()));
     const bool ok = window->restoreState(QByteArray::fromBase64(state.toLatin1()));
     store->setValue(QStringLiteral("ui/workspace"), name);
     return ok;
 }
 
-void delete_workspace(const QString& name) { settings()->remove(QStringLiteral("workspaces/%1").arg(name)); }
+bool load_workspace_extras(const QString& name) {
+    auto store = settings();
+    const QString at = QStringLiteral("workspaces/%1").arg(name);
+    bool any = false;
+    if (const auto keys = json_of(store->value(at + QStringLiteral("/keys")).toString());
+        keys && keys->value(QStringLiteral("keys")).isObject()) {
+        put_group(QStringLiteral("shortcuts"), keys->value(QStringLiteral("keys")).toObject());
+        put_value(QStringLiteral("ui/key_set"), keys->value(QStringLiteral("set")));
+        put_value(QStringLiteral("ui/key_set_own"), keys->value(QStringLiteral("own")));
+        any = true;
+    }
+    if (const auto menus = json_of(store->value(at + QStringLiteral("/menus")).toString());
+        menus && menus->value(QStringLiteral("colors")).isObject()) {
+        put_value(QStringLiteral("menus/hidden"), menus->value(QStringLiteral("hidden")));
+        put_group(QStringLiteral("menus/colors"), menus->value(QStringLiteral("colors")).toObject());
+        any = true;
+    }
+    if (const auto bar = json_of(store->value(at + QStringLiteral("/toolbar")).toString())) {
+        put_value(QStringLiteral("toolbar/order"), bar->value(QStringLiteral("order")));
+        put_value(QStringLiteral("toolbar/hidden"), bar->value(QStringLiteral("hidden")));
+        any = true;
+    }
+    return any;
+}
+
+std::vector<std::pair<QString, QString>> move_reserved_workspaces() {
+    std::vector<std::pair<QString, QString>> out;
+    auto store = settings();
+    for (const QString& name : workspaces()) {
+        if (!reserved_workspace(name)) continue;
+        QString to = QStringLiteral("%1（自分）").arg(name);
+        for (int n = 2; workspaces().contains(to) || reserved_workspace(to); ++n) to = QStringLiteral("%1（自分 %2）").arg(name).arg(n);
+        const QString from = QStringLiteral("workspaces/") + name;
+        store->beginGroup(from);
+        std::vector<std::pair<QString, QVariant>> values;
+        for (const QString& key : store->allKeys()) values.emplace_back(key, store->value(key));
+        store->endGroup();
+        for (const auto& [key, value] : values) store->setValue(QStringLiteral("workspaces/%1/%2").arg(to, key), value);
+        store->remove(from);
+        const QString left = QStringLiteral("workspace_changes/") + name;
+        if (store->contains(left)) {
+            store->setValue(QStringLiteral("workspace_changes/") + to, store->value(left));
+            store->remove(left);
+        }
+        if (store->value(QStringLiteral("ui/workspace")).toString() == name) store->setValue(QStringLiteral("ui/workspace"), to);
+        out.emplace_back(name, to);
+    }
+    return out;
+}
+
+void delete_workspace(const QString& name) {
+    settings()->remove(QStringLiteral("workspaces/%1").arg(name));
+    settings()->remove(QStringLiteral("workspace_changes/%1").arg(name));
+}
+
+const std::vector<Preset>& presets() {
+    // (Photoshop's workspaces, its menu's order, and the panels each brings — Genko's panels by their titles: オプション
+    // the tool's, ナビゲーター, ヒストリー; 文字・段落 PC5 G-d's — their docks titled so, test_gui_type_panels)
+    static const std::vector<Preset> all{
+        {QStringLiteral("essentials"), QStringLiteral("初期設定"), {}, {}},
+        {QStringLiteral("graphicAndWeb"), QStringLiteral("グラフィックと Web"),
+         {QStringLiteral("オプション"), QStringLiteral("ナビゲーター"), QStringLiteral("レイヤー"), QStringLiteral("台詞"), QStringLiteral("文字"),
+          QStringLiteral("段落"), QStringLiteral("シェイプ"), QStringLiteral("パス"), QStringLiteral("スタイル"), QStringLiteral("カラー")},
+         {QStringLiteral("レイヤー"), QStringLiteral("台詞")}},
+        {QStringLiteral("motion"), QStringLiteral("モーション"),
+         {QStringLiteral("オプション"), QStringLiteral("ナビゲーター"), QStringLiteral("レイヤー"), QStringLiteral("カラー"), QStringLiteral("タイムライン")},
+         {QStringLiteral("レイヤー")}},
+        {QStringLiteral("painting"), QStringLiteral("ペイント"),
+         {QStringLiteral("オプション"), QStringLiteral("ナビゲーター"), QStringLiteral("カラー"), QStringLiteral("ブラシ"), QStringLiteral("ブラシ設定"),
+          QStringLiteral("ツールプリセット"), QStringLiteral("レイヤー")},
+         {QStringLiteral("ブラシ"), QStringLiteral("レイヤー")}},
+        {QStringLiteral("photography"), QStringLiteral("写真"),
+         {QStringLiteral("オプション"), QStringLiteral("ナビゲーター"), QStringLiteral("ヒストグラム"), QStringLiteral("情報"), QStringLiteral("色調補正"),
+          QStringLiteral("属性"), QStringLiteral("レイヤー"), QStringLiteral("チャンネル"), QStringLiteral("パス"), QStringLiteral("ヒストリー")},
+         {QStringLiteral("ヒストグラム"), QStringLiteral("色調補正"), QStringLiteral("レイヤー")}},
+        {QStringLiteral("pixelArt"), QStringLiteral("ピクセルアート"),
+         {QStringLiteral("オプション"), QStringLiteral("ナビゲーター"), QStringLiteral("カラー"), QStringLiteral("レイヤー"), QStringLiteral("ヒストリー")},
+         {QStringLiteral("レイヤー")}},
+    };
+    return all;
+}
+
+const Preset* preset(const QString& label) {
+    for (const Preset& one : presets()) {
+        if (one.label == label) return &one;
+    }
+    return nullptr;
+}
+
+bool reserved_workspace(const QString& name) {
+    const QString trimmed = name.trimmed();
+    for (const Preset& one : presets()) {
+        if (trimmed == one.label || trimmed.compare(one.id, Qt::CaseInsensitive) == 0) return true;
+    }
+    // (Photoshop's English names too)
+    for (const char* english : {"Essentials", "Graphic and Web", "Motion", "Painting", "Photography", "Pixel Art"}) {
+        if (trimmed.compare(QString::fromLatin1(english), Qt::CaseInsensitive) == 0) return true;
+    }
+    return false;
+}
+
+NewWorkspaceDialog::NewWorkspaceDialog(QWidget* parent) : QDialog(parent) {
+    setWindowTitle(QStringLiteral("新規ワークスペース"));
+    setObjectName(QStringLiteral("newWorkspaceDialog"));
+    name = new QLineEdit;
+    name->setObjectName(QStringLiteral("workspace_name"));
+    name->setPlaceholderText(QStringLiteral("例: ペン入れ、写植"));
+    keys = new QCheckBox(QStringLiteral("キーボードショートカット"));
+    menus = new QCheckBox(QStringLiteral("メニュー"));
+    toolbar = new QCheckBox(QStringLiteral("ツールバー"));
+    auto* form = new QVBoxLayout;
+    auto* name_row = new QHBoxLayout;
+    name_row->addWidget(new QLabel(QStringLiteral("名前")));
+    name_row->addWidget(name, 1);
+    form->addLayout(name_row);
+    auto* note = new QLabel(QStringLiteral("取り込み: パネルの位置はいつも残ります。ほかに残すもの:"));
+    note->setWordWrap(true);
+    form->addWidget(note);
+    for (QCheckBox* box : {keys, menus, toolbar}) form->addWidget(box);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("保存"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("やめる"));
+    connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    form->addWidget(buttons);
+    setLayout(form);
+}
 
 // --- the cursor and the keys held ----------------------------------------------------------------------------------
 
@@ -521,7 +774,7 @@ QString modifier_tool(const QString& key) {
 const Choices& keyed_tools() {
     static const Choices all{{QStringLiteral("ブラシツール"), QStringLiteral("pen")},  {QStringLiteral("消しゴムツール"), QStringLiteral("eraser")},
                              {QStringLiteral("塗りつぶしツール"), QStringLiteral("fill")},    {QStringLiteral("選択範囲"), QStringLiteral("marquee")},
-                             {QStringLiteral("選択"), QStringLiteral("select")},        {QStringLiteral("テキスト"), QStringLiteral("text")},
+                             {QStringLiteral("選択"), QStringLiteral("select")},        {QStringLiteral("縦書き文字ツール"), QStringLiteral("text")},
                              {QStringLiteral("ベクター線の直し"), QStringLiteral("vector")}, {QStringLiteral("色混ぜ"), QStringLiteral("blend")},
                              {QStringLiteral("グラデーションツール"), QStringLiteral("gradient")}, {QStringLiteral("コマ"), QStringLiteral("frame")}};
     return all;

@@ -5,7 +5,10 @@
 
 #include <QtTest>
 
+#include <QOpenGLWidget>
 #include <QWheelEvent>
+
+#include <functional>
 
 #include <memory>
 
@@ -607,7 +610,7 @@ private slots:
         // a pinch: spread to zoom about the fingers
         const double before_pinch = c->scale();
         c->pinch(1.5, 0.0, at, QPointF());
-        QVERIFY(std::abs(c->scale() / before_pinch - 1.5) < 1e-6 || c->scale() == PageCanvas::kMaxScale);
+        QVERIFY(std::abs(c->scale() / before_pinch - 1.5) < 1e-6 || c->scale() == c->max_scale());
         // Space + drag: the page moves with the pointer
         c->setFocus();
         QTest::keyPress(c, Qt::Key_Space);
@@ -629,6 +632,164 @@ private slots:
         QVERIFY(std::abs(back.x() - mm.x()) < 1e-6 && std::abs(back.y() - mm.y()) < 1e-6);
         QCOMPARE(desk.page().id, before);
         QVERIFY(desk.ops.empty());
+    }
+
+    // render:GPU-CPU-parity (PC5 H-a, 節 H 4.3; the coordinator's 3 章: the processor composites, the card only shows): the
+    // page on the graphics card is the page the processor draws — within 1/255 everywhere as it is, mirrored, zoomed into
+    // its pixels and proofed. (The user's decision 2026-10-29:) turned, or zoomed off one tile pixel a screen pixel (fitted), the card's texture filter and the
+    // processor's painter resample the picture each their own way (both bilinear, their weights rounded otherwise — Qt's
+    // painter cuts the fraction off, Mesa rounds it: the edges of long sharp lines 2/255 apart all along): within 2/255 at
+    // all but the edges of sharp lines (the user's decision 2026-10-29, the second: at most 2 pixels in 1000 more than
+    // 2/255 apart, never by more than 12/255, Mesa's llvmpipe), and the sheet's edges and soft shadow (the
+    // polygons around the page, smoothed by the card's 4 samples a pixel) are left out. Where OpenGL cannot be had (the
+    // offscreen test screen), the card's surface gives up, the canvas draws by the processor again and says so
+    // (gpuFailed) — the same pixels; never skipped. (QT_QPA_PLATFORM=xcb on Xvfb and Mesa checks the card's way.)
+    void theCardShowsWhatTheProcessorDraws() {
+        Desk desk;
+        PageCanvas* c = desk.canvas();
+        c->show_guides = false;
+        c->actual_size();
+        c->center_on(105, 148);
+        QVERIFY(c->wait_rendered(30000));
+        const auto cpu = [c] { return c->grab().toImage().convertToFormat(QImage::Format_RGB32); };
+        QStringList failed;
+        QStringList apart;  // (the views where the card's picture is further from the processor's than allowed)
+        QObject::connect(c, &PageCanvas::gpuFailed, c, [&failed](const QString& message) { failed << message; });
+        // each view: the processor's picture, then the card's
+        struct Look {
+            const char* name;
+            std::function<void()> set;
+        };
+        const std::vector<Look> looks{
+            {"as it is", [] {}},
+            {"mirrored", [c] { c->flip_view(true); }},
+            {"its pixels", [c] { c->actual_pixels(800); }},
+            {"proofed", [c] { c->renderer().set_proof(true); }},
+            {"turned", [c] {
+                 c->renderer().set_proof(false);
+                 c->actual_size();
+                 c->center_on(105, 148);
+                 c->set_rotation(30);
+             }},
+            {"turned and mirrored", [c] { c->flip_view(false); }},
+            {"fitted", [c] {
+                 c->reset_view();
+                 c->fit_page();
+             }},
+            // (review P3-6) the gamut warning's mark over the tiles; the finer level (288 dpi, one tile pixel a screen
+            // pixel); the pixel art preview (107 dpi on the screen, the tiles at 96: laid nearest, made 1.11 times larger);
+            // the page's pixels turned (nearest, turned). (Not the pixel art preview made smaller: there nearest drops tile
+            // pixels, and which it drops is the card's or the painter's own rounding — a tile pixel shown by one may be
+            // shown by neither of the other's pixels — so how far apart they are has no bound to check; measured fitted on
+            // Xvfb: 2 pixels in 444122 at 14/255.)
+            {"gamut", [c] {
+                 c->actual_pixels(48);
+                 c->center_on(105, 148);
+                 c->renderer().set_gamut(genko::app::GamutLook{});
+             }},
+            {"finer level", [c] { c->renderer().set_gamut(std::nullopt); }},
+            {"pixel art", [c] {
+                 c->zoom_by(107.0 / 25.4 / c->devicePixelRatioF() / c->scale());
+                 c->center_on(105, 148);
+                 c->set_pixel_art(true);
+             }},
+            {"its pixels turned", [c] {
+                 c->set_pixel_art(false);
+                 c->actual_pixels(800);
+                 c->center_on(105, 148);
+                 c->set_rotation(30);
+             }},
+        };
+        for (const Look& look : looks) {
+            look.set();
+            if (std::string_view(look.name) == "pixel art") QCOMPARE(c->wanted_dpi(), 96);  // (the tiles coarser than the screen)
+            QVERIFY(c->wait_rendered(30000));
+            // (and once more after the zoom's own call for tiles, 160 ms on: else the tiles of the view before may still be
+            // the ones shown here or not, the lines' edges a part of a pixel apart — the same on the card and the processor,
+            // but not the same count of pixels past 1/255 from run to run)
+            QTest::qWait(250);
+            QVERIFY(c->wait_rendered(30000));
+            c->use_gpu(false);
+            const QImage processor = cpu();
+            c->use_gpu(true);
+            QVERIFY(c->renderer().texture_budget().has_value());
+            // (the card's context made — or given up, and the canvas back on the processor)
+            QTRY_VERIFY_WITH_TIMEOUT(!c->gpu() || qobject_cast<QOpenGLWidget*>(c->gpu_surface())->isValid(), 5000);
+            if (!c->gpu()) {
+                // (no OpenGL here: given up, drawn by the processor again, said once)
+                QVERIFY(!c->renderer().texture_budget());
+                QCOMPARE(failed.size(), 1);
+                QVERIFY(failed.front().contains(QStringLiteral("プロセッサー")));
+                QCOMPARE(cpu(), processor);
+                failed.clear();
+                continue;
+            }
+            auto* surface = qobject_cast<QOpenGLWidget*>(c->gpu_surface());
+            const QImage shown = surface->grabFramebuffer().convertToFormat(QImage::Format_RGB32).scaled(processor.size());
+            QCOMPARE(shown.size(), processor.size());
+            // (resampled: turned, or zoomed off one tile pixel a screen pixel — bilinear, or nearest turned; the pixel art preview
+            // made larger is held to 1/255, the card's pixel against the processor's next to it)
+            const bool nearest = std::string_view(look.name) == "pixel art";
+            const bool resampled = c->rotation() != 0.0 || std::string_view(look.name) == "fitted";
+            // (resampled: the pixels within 14 of the sheet's edges — its edge and its shadow, 1.6 to 12.6 screen pixels out —
+            // are not the page's)
+            const double w = c->page()->spec.width_mm.value(), h = c->page()->spec.height_mm.value();
+            const std::array<QPointF, 4> sheet{c->to_widget(QPointF(0, 0)), c->to_widget(QPointF(w, 0)), c->to_widget(QPointF(w, h)),
+                                               c->to_widget(QPointF(0, h))};
+            const auto on_edge = [&sheet](double x, double y) {
+                for (std::size_t i = 0; i < sheet.size(); ++i) {
+                    const QPointF a = sheet[i], d = sheet[(i + 1) % sheet.size()] - sheet[i];
+                    const double length = d.x() * d.x() + d.y() * d.y();
+                    if (length <= 0) continue;
+                    const double t = std::clamp(((x - a.x()) * d.x() + (y - a.y()) * d.y()) / length, 0.0, 1.0);
+                    if (std::hypot(x - (a.x() + t * d.x()), y - (a.y() + t * d.y())) < 14.0) return true;
+                }
+                return false;
+            };
+            int most = 0;
+            QPoint where;
+            std::size_t counted = 0, off = 0;
+            for (int y = 0; y < shown.height(); ++y) {
+                for (int x = 0; x < shown.width(); ++x) {
+                    if (resampled && on_edge(x + 0.5, y + 0.5)) continue;
+                    const QRgb a = shown.pixel(x, y);
+                    const auto apart_from = [&a](QRgb b) {
+                        return std::max({std::abs(qRed(a) - qRed(b)), std::abs(qGreen(a) - qGreen(b)), std::abs(qBlue(a) - qBlue(b))});
+                    };
+                    int apart_here = apart_from(processor.pixel(x, y));
+                    // (nearest made larger — ピクセルアートプレビュー —: where a screen pixel falls half way, the card and the
+                    // processor may each take the tile pixel on either side: the card's is one of the processor's next to it)
+                    if (nearest && apart_here > 1) {
+                        for (int dy = -1; dy <= 1; ++dy)
+                            for (int dx = -1; dx <= 1; ++dx)
+                                if (processor.rect().contains(x + dx, y + dy)) apart_here = std::min(apart_here, apart_from(processor.pixel(x + dx, y + dy)));
+                    }
+                    ++counted;
+                    if (apart_here > (resampled ? 2 : 1)) ++off;  // (resampled: past 2/255 — the user's decision 2026-10-29, the second)
+                    if (apart_here > most) {
+                        most = apart_here;
+                        where = QPoint(x, y);
+                    }
+                }
+            }
+            const bool within = resampled ? most <= 12 && off * 1000 <= counted * 2 : most <= 1;
+            if (!within) {
+                apart << QStringLiteral("%1: %2/255 at %3, %4 (%5 of %6 pixels past %7/255)")
+                             .arg(QString::fromLatin1(look.name))
+                             .arg(most)
+                             .arg(where.x())
+                             .arg(where.y())
+                             .arg(off)
+                             .arg(counted)
+                             .arg(resampled ? 2 : 1);
+            }
+            if (qEnvironmentVariableIsSet("HA_REPORT")) qInfo("%s: %d/255, %zu of %zu past %d/255", look.name, most, off, counted, resampled ? 2 : 1);
+            QVERIFY(failed.isEmpty());
+            QVERIFY(c->renderer().texture_bytes() > 0);  // (the tiles on the card counted)
+        }
+        QVERIFY2(apart.isEmpty(), qPrintable(apart.join(QStringLiteral("; "))));
+        c->use_gpu(false);
+        QVERIFY(!c->renderer().texture_budget());
     }
 };
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <QAction>
 #include <QActionGroup>
 #include <QFileSystemWatcher>
@@ -28,6 +29,8 @@
 #include "render/codecs/format.hpp"
 #include "render/image.hpp"
 #include "render/proof.hpp"
+#include "service/automate.hpp"
+#include "service/script_events.hpp"
 
 class QCheckBox;
 class QComboBox;
@@ -39,9 +42,12 @@ class QFormLayout;
 class QTabBar;
 class QToolBar;
 class QMenu;
+class QPrinter;
 class QDockWidget;
 class QPushButton;
 class QVBoxLayout;
+class QLineEdit;    // (PC5 J-c)
+class QToolButton;  // (PC5 J-c)
 
 // The main window (Python's genko/app/main.py MainWindow): the page in the middle, the tools on the left, the
 // commands and the open books' tabs above, the navigator and the page list beside it, and in the status bar the page,
@@ -62,9 +68,14 @@ struct WriteGuard;
 namespace genko::app {
 
 class BrushPanel;
+class SourceChoice;  // (PC5 I-e: app/automate_dialogs.hpp)
 class ChannelPanel;
 class CloneSourcePanel;
 class PathsPanel;
+class LayerCompsPanel;
+class NotesPanel;
+class MeasurementLogPanel;
+class ActionsPanel;  // (PC5 J-g: app/actions_panel.hpp)
 class PatternsPanel;
 class BrushesPanel;
 class BrushSettingsPanel;
@@ -89,6 +100,11 @@ class TextToolSettings;
 class StoryPanel;
 class StoryEditor;
 class ReplaceDialog;
+class CharacterPanel;  // (PC5 G-d: app/type_panels.hpp)
+class ParagraphPanel;
+class TypeStylesPanel;
+class GlyphsPanel;
+class InlineEditor;
 class ApprovalBox;
 class PanelView;
 class QuickAccess;
@@ -104,6 +120,12 @@ class PageList;
 class SaveFailureBar;
 class SaveStatusLabel;
 class ImeEntry;
+class DocArea;    // (PC5 H-c)
+class PaneView;   // (PC5 H-c)
+class PageRenderer;
+
+// (PC5 H-c) A new tab's own number (the cell of ウィンドウ → アレンジ follows a tab by it, wherever the tab moves).
+std::uint64_t new_tab_id();
 
 // 色の校正・校正の設定・色域外警告 of one book in a window (SPEC COLOR-03 PC1b; PhotoCraft's ProofView): display only,
 // never the book's.
@@ -118,6 +140,7 @@ struct ProofView {
     bool simulate_paper = false;
     bool on = false;      // 色の校正
     bool gamut = false;   // 色域外警告
+    render::HdrPreview hdr;  // (PC5 H-a) 32 bit プレビューオプション: a 32-bit page's look on the screen
 };
 
 // One open book in a window: its session and how the window last showed it.
@@ -137,6 +160,8 @@ struct Document {
     // duplicated): its tab named by its title alone; one opened from a file and not changed since is closed without asking.
     bool picture = false;
     std::optional<std::filesystem::path> source;
+    // PC5 H-c: the tab's own number (its cell in the window's arrangement).
+    std::uint64_t tab = new_tab_id();
     QString title() const;
 };
 
@@ -168,7 +193,8 @@ public:
     const core::Layer* target_layer() const;
     void set_target_layer(const std::string& layer_id);
     // A pen, paint or tone layer, not locked.
-    static bool drawable(const core::Layer& layer);
+    // (PC5 I-a: `page` the page the layer is on — a folder locked with すべてをロック locks it too)
+    static bool drawable(const core::Layer& layer, const core::Page* page = nullptr);
     // The selection as an op's area ({"poly": …} or {"mask": …}), or none.
     std::optional<core::Json> selection_area() const;
     // 自動選択ツール's 色の近さ: how different a colour may be and still be the same (許容値, 0..255); only the touching
@@ -484,6 +510,39 @@ public:
     QTabBar* doc_tabs() const { return doc_tabs_; }
     // (M6) The tool palette, the command bar under the menus and the quick-access panel (workspace.cpp).
     QToolBar* tool_palette() const { return palette_; }
+    // --- ウィンドウ → アレンジ (PC5 H-c, 節 H 5.3, the user's decision 7; main_window_arrange.cpp) ------------------------
+    // The middle of the window: the canvas alone (the tabs' way), or the books side by side in cells — the canvas in the
+    // cell in front, the others' pages in panes (PaneView, only looked at); a pane clicked brings its tab to the front.
+    DocArea* doc_area() const { return doc_area_; }
+    // An arrangement of DocArea::layouts() ("tabs": the canvas alone): the tab in front first, then the next ones in the
+    // tabs' order, each fitted to its cell (at most DocArea::kMostPanes; the rest by their tabs).
+    void arrange(const QString& layout);
+    // A pane's cell clicked: its tab to the front there (as its tab chosen: switch_document's way).
+    void activate_pane(int cell);
+    // ウィンドウを分離: the tab in front into a window of its own (moved: its page, view and layer with it); すべてのウィンドウを
+    // 分離 (cascade: 重ねて表示 — the windows 40 px apart, this one in front): every tab but the one in front so.
+    void float_in_window();
+    void float_all(bool cascade = false);
+    // すべてをタブに統合: every other window's tabs into this window's (a book open here already not twice), those windows
+    // closed (nothing asked: their books are open here), the tabs' way again.
+    void consolidate_all();
+    // (PC5 H-e, 環境設定 → ワークスペース; app/preferences_panes.cpp) ドキュメントをタブで開く off: the window a book is opened in —
+    // a new window of its own when this one shows a book already (an untouched untitled one gives its place, as before).
+    MainWindow* window_to_open_in();
+    // フローティングドキュメントウィンドウのドッキングを有効にする: this window of one book let go with the pointer at `global`
+    // over another window's tabs (its tab bar, or the top of its page when it has one tab) goes into that window's tabs and
+    // closes. False: not over one, more than one book here, or turned off.
+    bool dock_over(const QPoint& global);
+    // 環境設定 → 一般 → 画像補間法: how a selection's pixels are resampled when it is transformed, in a new window.
+    void set_default_interpolation(const std::string& how) { transform_interp_ = how; }
+    const std::string& interpolation() const { return transform_interp_; }
+    // 同じズーム倍率で表示・同じ位置に表示・同じ回転で表示・すべてを同じ表示にする: the view in front given to the window's panes and
+    // to the other windows' pages (the zoom by its %, the place by where it is on its page, the turn and the mirrors).
+    void match_views(bool zoom, bool location, bool rotation);
+    // 修飾キー (window.panel.modifierKeys): Shift, Ctrl and Alt kept down for the canvas's tools while their buttons are
+    // in (a touch screen, a pen without a keyboard).
+    Qt::KeyboardModifiers latched_keys() const { return latched_; }
+    void latch_key(Qt::KeyboardModifier key, bool on);
     // PC4 E-0 (paint_panels.cpp): the drawing tools' groups — Photoshop's ブラシ, 消しゴム, 塗り, ぼかし, 覆い焼き, スポイト —,
     // each its tools' ids (the first the palette's; a tool not made yet, its group's, is left out); a tool's group of the
     // tools made (none: it is in none).
@@ -500,9 +559,10 @@ public:
     CommandSearch* find_command();
     // 道具の名前を表示: icons alone, or icons with their names (kept in the settings unless `save` is off).
     void show_tool_names(bool on, bool save = true);
-    // 今の配置をワークスペースとして残す…: asked for a name when none is given; false when nothing was kept.
+    // 新規ワークスペース… (PC5 H-d; 今の配置をワークスペースとして残す… before): a name given, the panels kept under it; none, the
+    // dialog (new_workspace). False when nothing was kept.
     bool save_workspace(std::optional<QString> name = std::nullopt);
-    // はじめの配置に戻す: the panels as the window first showed them.
+    // 初期設定 (はじめの配置に戻す before): the panels as the window first showed them.
     void default_layout();
     // Over a book with nothing in it yet, the first steps (Python's first_steps bar: it goes with the first panel, line or
     // stroke, or with its ×); after the first panels, what comes next (I11: 描く・台詞・保存・書き出し, each marked when
@@ -512,10 +572,11 @@ public:
     // The canvas's menu (a panel's commands when one is under the pointer), filled (tests).
     void fill_context_menu(QMenu& menu, const QString& frame_id);
     // --- 環境設定 and comfort (M6: preferences.cpp, comfort.cpp) ---------------------------------------------------
-    // Each command's own keys (by its words), as the window made them (preferences::name_commands).
+    // Each command's own keys (by its words), as the key set chosen gives them (preferences::name_commands after
+    // key_sets::apply).
     std::map<QString, QList<QKeySequence>> default_shortcuts;
-    // 環境設定… (the dialog, exec'ed).
-    void open_preferences();
+    // 環境設定 (the dialog, exec'ed) — at a pane of 編集 → 環境設定 ▸ (preferences::panes' id; keyboardShortcuts: the keys).
+    void open_preferences(const QString& pane = {});
     // ヘルプ: keys | guide | faq | about, shown (modeless); the one shown last (tests).
     void show_help(const QString& what);
     QDialog* help_dialog() const { return help_dialog_; }
@@ -528,6 +589,24 @@ public:
     void refresh_first_steps();
     // 原稿だけを表示 (Tab), the rest reminder, and the round menu last opened at the pen (null: none open).
     CanvasOnly* canvas_only() const { return canvas_only_; }
+    // スクリーンモード (PC5 H-a, view.screenMode.*): 標準スクリーンモード (the window as it was), メニュー付きフルスクリーンモード
+    // (the whole screen, menus and panels kept), フルスクリーンモード (the whole screen, the page alone: menus, status line and
+    // panels hidden — a side's panels come back at its edge, as 原稿だけを表示). F goes round them (Photoshop's keys).
+    enum class ScreenMode { Standard, FullWithMenu, Full };
+    void set_screen_mode(ScreenMode mode);
+    ScreenMode screen_mode() const { return screen_mode_; }
+    // レイヤーを画面サイズに合わせる (PC5 H-a): the view on the box of the layers chosen (else the layer drawn on; none
+    // showing anything: the page).
+    void fit_layers();
+    // PC5 H-b (main_window_guide_view.cpp): 環境設定 → 単位・定規 and ガイド・グリッド・スライス on the canvas (its unit, the guides'
+    // and the grid's colours and styles, プリントサイズ's screen resolution — preferences::apply_all calls it); ガイドを消去 (every
+    // page: every_page) and カンバスガイドを消去 (the page in front); 新規ガイド… (a guide's id: that guide moved),
+    // 新規ガイドレイアウトを作成…, エクストラオプションを表示….
+    void apply_guide_prefs();
+    void clear_guides(bool every_page);
+    void ask_new_guide(const QString& moved = {});
+    void ask_guide_layout();
+    void ask_extras_options();
     RestReminder* rest() const { return rest_; }
     RadialMenu* radial() const;  // (out of line: RadialMenu is only declared here)
     // キーを押している間だけ持ち替え: the tool last chosen (its key), the one before and when (seconds); the key of the
@@ -555,6 +634,24 @@ public:
     // 管理（手順を見る・並べ替える・外す）… (shown, modeless; tests)
     QDialog* manage_actions();
     QMenu* actions_menu() const { return actions_menu_; }
+    // --- 自動処理・スクリプト (PC5 I-0, SPEC.md AUTO-01: app/main_window_automate.cpp) --------------------------------
+    // Steps (service/automate.hpp: a script's, or a recorded action's — `recorded` — played on the page in front) run on
+    // the book in front as the window's person, checked first (no gate op, no undo), the journal naming the changes
+    // `label`: a run of ops one change, a pseudo op made ops on the book as it is then (a change of its own). False:
+    // refused or failed (said in the status line), nothing more done.
+    bool run_steps(const core::Json& steps, bool recorded, const QString& label);
+    // Whether these ops may be steps for the window's person (service::automate::check_steps: no gate op, no undo — an
+    // オートアクション recorded before PC5 I-0 may hold an approval): when not, which op is said, and false.
+    bool steps_allowed(const core::Json& ops, const QString& label, const QString& hint = {});
+    // A script event raised by this window (I-e calls it where a book is made, opened, saved by the person, closed,
+    // printed or exported, and when the app starts): the steps bound to it run (service/script_events.hpp), unless steps
+    // of an event are running now; a table changed outside Genko is said once and runs nothing.
+    void script_event(service::script_events::Event event);
+    // PC5 I-e: アプリケーションを起動's event, raised once the book the app starts with is open (on it, before that book's
+    // ドキュメントを開く) — app/app_main.cpp.
+    void raise_at_start() { start_pending_ = true; }
+    QMenu* automate_menu() const { return automate_menu_; }
+    QMenu* scripts_menu() const { return scripts_menu_; }
     // マスクを編集する (the layer panel's マスク menu): the pen and the eraser paint the mask of the layer drawn on.
     bool mask_edit = false;
     // 画像を読み込む…: a picture into the chosen panel (else over the whole page, out to the bleed), kept in the book as a
@@ -701,6 +798,60 @@ protected:
 private:
     void build_actions();
     void build_menus();
+    // PC5 H-0 (節 H): 表示 laid out in Photoshop's order (main_window_view.cpp — H-a, H-b make its commands), ウィンドウ →
+    // アレンジ ▸ (main_window_arrange.cpp — H-c), 編集's 検索・キーボードショートカット…・環境設定 ▸ (main_window_edit.cpp —
+    // H-d, H-e, H-f)
+    void build_view_actions();
+    void build_view_menus(QMenu* view);
+    // 表示 → 表示・非表示 ▸ (objectName "menu_show"; its owner 節 H): found in 表示, or made and put there — the one way in
+    // for every part (H-b, J-b, J-c, J-d1: show_menu(view)->addAction(...)); laid out by H's show_rows() in build_view_menus
+    QMenu* show_menu(QMenu* view);
+    // PC5 H-a: 手のひらツール's and ズームツール's pages in オプション (main_window_view.cpp)
+    void build_view_pages(ToolSettings* ts);
+    // PC5 H-b (main_window_guide_view.cpp): エクストラ, 表示・非表示 ▸'s own (and ターゲットパス・選択範囲のエッジ・グリッド・
+    // ブラシプレビュー moved in), すべて・なし・エクストラオプションを表示…, ガイドをロック・ガイドを消去・カンバスガイドを消去・
+    // 新規ガイド…・新規ガイドレイアウトを作成…; apply_extras: the canvas's switches as the commands say (kept for the next window)
+    void build_guide_view_actions();
+    void build_guide_view_menus(QMenu* view);
+    void apply_extras();
+    void share_view_switch(const QString& attribute, bool on);  // (the other open windows the same)
+    void ask_32bit_preview();
+    void build_arrange_actions();
+    void build_arrange_menus(QMenu* arrange);
+    void build_arrange_docks();  // (PC5 H-c: ウィンドウ → ツール, 修飾キー)
+    // (PC5 H-c) the arrangement following the tab in front (show_document): its cell takes the canvas, or the cell in
+    // front shows it; tabs gone leave their cells. A pane given a tab; the panes' views kept in their tabs; the tabs'
+    // marks of their cells; a tab by its number (-1: gone).
+    void arrange_follow();
+    void fill_pane(PaneView* pane, std::uint64_t tab);
+    void keep_pane_views();
+    void mark_tabs();
+    int document_of(std::uint64_t tab) const;
+    // A tab of another window taken in as it was there (not brought to the front); a new window's first tab made so.
+    void take_document(const Document& doc);
+    void adopt_first(const Document& doc);
+    // The canvas's hand or zoom with Shift (or their すべてのウィンドウを… options): the same in the panes (and windows).
+    void hand_used(double factor, const QPointF& moved, bool every_window);
+    // 色の校正 and the 32 bit preview of a tab on a renderer (false: its proof profile could not be read — nothing proofed).
+    bool proof_renderer(PageRenderer& renderer, const ProofView& view);
+    // (PC5 H-c review) A pane shows over its page what the canvas in front shows (guides, grid, extras — the production's
+    // painters too); every pane again after a switch, a preference or the monitor changed; a tab's tooltip (its path and
+    // its cell); words being typed finished before a tab moves.
+    void pane_look(PaneView* pane);
+    void panes_follow();
+    QString tab_tip(int index) const;
+    void finish_typing();
+    // (review P2-1) The book a transform or the crop box was begun on: Enter there never lands on another book.
+    const Session* transform_book_ = nullptr;
+    std::optional<std::string> transform_contents_;
+    const Session* crop_book_ = nullptr;
+    std::optional<std::string> crop_contents_;
+    bool begun_here(const Session* book, const std::optional<std::string>& contents) const { return book == session_.get() && contents == contents_; }
+    void build_edit_actions();
+    void build_edit_menu_tail(QMenu* edit);
+    // PC5 H-0: the panels by Photoshop's names (ナビゲーター, オプション, ヒストリー), their object names — the workspaces' keys —
+    // kept
+    void name_panels();
     void build_toolbars();
     void build_docks();
     QAction* make(const QString& attribute, const QString& title, std::function<void()> slot, const QList<QKeySequence>& keys = {},
@@ -726,6 +877,39 @@ private:
     void build_file_actions();
     void build_file_menu(QMenu* file);
     QMenu* export_menu_ = nullptr;  // ファイル → 書き出し
+    // PC5 I-0 (app/main_window_automate.cpp): the commands of ファイル → 自動処理 ▸ and スクリプト ▸ (the later groups' own —
+    // I-e バッチ…・ドロップレットを作成…・画像プロセッサー…・スクリプトイベントマネージャー…・参照…, I-a すべての空のレイヤーを削除・
+    // すべてのレイヤー効果を統合, I-f コンタクトシート II…, I-g Photomerge…・ファイルをスタックとして読み込み…・統計…, I-h HDR Pro に統合…・
+    // 写真の切り抜きと角度補正 — made in build_automate_actions and put in build_automate_menus); 自動処理 ▸ is shown once it
+    // holds one.
+    void build_automate_actions();
+    void build_automate_menus();
+    // PC5 I-e (app/main_window_automate.cpp, app/automate_dialogs.hpp): the windows of 自動処理 ▸ and スクリプト ▸, and the
+    // runner they call — the files one by one through service::automate::run, the window's person the actor, a progress
+    // window that stops between files, what was done said (the errors listed) — and the inputs a SourceChoice names.
+    void batch_dialog();
+    void create_droplet_dialog();
+    void image_processor_dialog();
+    void fit_image_dialog();
+    void mode_change_dialog();
+    void lens_batch_dialog();
+    void script_events_dialog();
+    void browse_script();
+    // PC5 I-h (app/main_window_automate.cpp, app/hdr_dialog.hpp): 写真の切り抜きと角度補正 (the page in front: its photos new
+    // books) and HDR Pro に統合… (its two windows; the exposures read and merged on a worker, a progress window stopping it).
+    void crop_photos();
+    void merge_to_hdr_dialog();
+    std::optional<service::automate::Inputs> inputs_of(const SourceChoice& source);
+    bool run_automate(const QString& title, const std::vector<service::automate::Input>& inputs, const core::Json& steps,
+                      const service::automate::Output& output, service::automate::Options options, const core::Json& skipped);
+    QMenu* automate_menu_ = nullptr;  // ファイル → 自動処理
+    QMenu* scripts_menu_ = nullptr;   // ファイル → スクリプト
+    bool script_events_told_ = false;  // (a table changed outside Genko: said once)
+    // (PC5 I-e) the event open_project raises once the book is open (新規… sets 新規ドキュメント; none: ドキュメントを開く)
+    std::optional<service::script_events::Event> opened_event_;
+    bool start_pending_ = false;  // (raise_at_start)
+    // A book opened in this window: アプリケーションを起動 first when it is the app's first, then `event`.
+    void raise_opened(service::script_events::Event event);
 
 public:
     // PC4 F-b (app/main_window_file.cpp; SPEC.md FILE-01, the user's decision 4): ファイル's entrances.
@@ -1490,7 +1674,14 @@ private:
     double eraser_mm_ = 2.0;
 
     PageCanvas* canvas_ = nullptr;
+    DocArea* doc_area_ = nullptr;          // (PC5 H-c: the canvas, or the cells)
+    bool tabs_marked_ = false;             // (PC5 H-c: the tabs carry their cells' marks)
+    Qt::KeyboardModifiers latched_;        // (PC5 H-c: 修飾キー)
+    QDockWidget* modifier_dock_ = nullptr;
     CanvasOnly* canvas_only_ = nullptr;
+    ScreenMode screen_mode_ = ScreenMode::Standard;  // (PC5 H-a: set_screen_mode)
+    Qt::WindowStates screen_before_ = Qt::WindowNoState;
+    bool screen_hid_panels_ = false;
     RestReminder* rest_ = nullptr;
     QPointer<RadialMenu> radial_;
     std::optional<ToolSwitch> tool_switch_;
@@ -1582,6 +1773,7 @@ private:
     // page) and the book as the canvas draws it then (its contents' page as its only page, made once a snapshot); the
     // commands a contents' tab cannot use, greyed while it is in front; the linked files' states and their watcher.
     std::optional<std::string> contents_;
+    bool to_book_ = false;  // (PC5 G-c review P1-1: ops of the book's own — its type styles — sent from a contents' tab)
     QString contents_title_;
     mutable std::shared_ptr<const core::Document> contents_view_;
     mutable std::shared_ptr<const core::Document> contents_view_of_;
@@ -1626,6 +1818,489 @@ private:
     StylesPanel* styles_panel_ = nullptr;
     QDockWidget* styles_dock_ = nullptr;
     QMenu* layer_style_menu_ = nullptr;
+
+    // --- PC5 節 G (文字; type@1): the 書式 menu (app/main_window_type.cpp) ------------------------------------------------
+public:
+    QMenu* type_menu() const { return type_menu_; }
+    // PC5 G-a: what 書式's commands act on — the target layer when it is a type layer, else the chosen line ({page,
+    // layer_id} or {line}); none (and, `say`, said) when neither — and its record.
+    std::optional<core::Json> type_target(bool say = false);
+    const core::StoryLine* type_record(const core::Json& target) const;
+    // edit_type with these changes on the text chosen (type_target).
+    void type_command(const core::Json& change);
+    // A type layer made where a text tool clicked (a point text), dragged (a box text: `box`) or on the target path (a text
+    // on it): typed in the editor there, then add_type_layer — over the target layer, made the target.
+    void type_new_layer(double x_mm, double y_mm, std::optional<QRectF> box);
+    // A type layer's text typed over in place (edit_type: its text and the marks typed).
+    void edit_type_layer_inline(const std::string& layer_id);
+    // The chosen type layer's box on the canvas (and whether a box text runs past it), after a change or a new target.
+    void refresh_type_frame();
+    // 書式 → 方向 ▸, すべてのテキストレイヤーを更新, Lorem Ipsum をペースト; the menu's checks and what can be done.
+    void type_direction(bool vertical);
+    void update_all_type();
+    void paste_lorem();
+    void refresh_type_commands();
+    // The chosen line as a type layer, the target type layer as a line (line_to_type_layer, type_layer_to_line).
+    void line_to_type_layer();
+    void type_layer_to_line();
+    // PC5 G-b: set_type with these attributes on the whole of the text chosen (type_target) — 書式 → OpenType ▸ (an OpenType
+    // feature on or off; the font's own features alone can be chosen), 言語オプション ▸ (which features the menus show:
+    // 初期設定・東アジア言語・中東言語, kept in the settings; the paragraph's composer and, 中東言語, its direction).
+    void type_set(const core::Json& attrs);
+    void type_feature(const std::string& tag, bool on);
+    void type_language_features(const QString& which);
+    QString type_language_features() const;
+    // PC5 G-c (SPEC.md TEXT-02「文字スタイル・段落スタイル」): type_style {kind, action, …args} through apply_ops — on the text chosen
+    // (type_target, its line or page and layer_id laid in; `args` may give its range) when `on_text` — and what it reported
+    // (none: refused, said; or no text chosen). The 文字スタイル・段落スタイル panels (G-d) call it: new, duplicate, delete,
+    // rename, set (スタイルオプション), apply (Alt: clear_overrides), redefine, clear_override; what they show comes of
+    // core::type_styles::list and current (no op: a read-only book shows them too).
+    std::optional<core::Json> type_style(const std::string& kind, const std::string& what, const core::Json& args, bool on_text);
+    // 書式 → 初期設定の書式を保存 (the chosen text's formatting at its start, kept in the machine's settings) and 初期設定の書式を読み込み
+    // (laid on the chosen text's whole: its styles taken away, its own attributes cleared, then set_type — one step).
+    void save_default_type_styles();
+    void load_default_type_styles();
+    // --- PC5 G-d (app/main_window_type_panels.cpp, SPEC.md TEXT-02「文字・段落・スタイル・字形のパネル」…「書体の置き換え」) ---
+    // The range of the chosen text the editor typing over it has chosen (graphemes of its text, as set_type and type_style
+    // take them), while that text is still what the editor showed: none — the whole text (nothing chosen, a caret alone, or
+    // another text).
+    std::optional<std::pair<std::int64_t, std::int64_t>> type_range() const;
+    // The 文字・段落 panels' change on the chosen text: `attrs` (core::type_text's attributes, null taking one away) by
+    // set_type over the range chosen or the whole; a line of before (no native_type, not set by the OpenType typesetting)
+    // changed on its whole by what its style says (`style`, its keys: edit_line style — drawn as before) when `style` holds
+    // it.
+    void type_attrs(const core::Json& attrs, const core::Json& style);
+    // A line's own style keys (行間: style.leading) — edit_line style; a type layer: said that it is a line's.
+    void type_style_key(const core::Json& style);
+    // The panels shown again (the text chosen, its range, the book's styles).
+    void refresh_type_panels();
+    // 字形: a glyph put where the text is typed (the editor's caret), else where its caret was last, else at its end.
+    void insert_glyph(const QString& glyph);
+    // The fonts chosen last (文字 panel's list: "family:<name>" or a font), this one first.
+    void remember_font(const QString& data);
+    // 書式 → フォントプレビューのサイズ ▸ (環境設定 → テキスト's type.fontPreview: off, small, medium, large, extraLarge, huge).
+    QString font_preview() const;
+    void set_font_preview(const QString& size);
+    // 編集 → スペルチェック…; 書式 → 見つからないフォントを解決… (replace_fonts asked, then given the map chosen) and すべての見つから
+    // ないフォントを置換 (replace_fonts {all}).
+    void open_spelling();
+    void resolve_missing_fonts();
+    void replace_all_missing_fonts();
+    CharacterPanel* character_panel() const { return character_panel_; }
+    ParagraphPanel* paragraph_panel() const { return paragraph_panel_; }
+    TypeStylesPanel* character_styles_panel() const { return character_styles_panel_; }
+    TypeStylesPanel* paragraph_styles_panel() const { return paragraph_styles_panel_; }
+    GlyphsPanel* glyphs_panel() const { return glyphs_panel_; }
+
+private:
+    void build_type_actions();
+    void build_type_menu(QMenu* menu);
+    QMenu* type_menu_ = nullptr;
+    // (PC5 G-d)
+    void build_type_panel_actions();
+    void build_type_docks();
+    void watch_type_editor(InlineEditor* editor);
+    // 環境設定 → テキスト's 欠落グリフの保護: the letters of the record its font has not (drawn in another), said.
+    void note_missing_glyphs(const core::StoryLine& record);
+    CharacterPanel* character_panel_ = nullptr;
+    ParagraphPanel* paragraph_panel_ = nullptr;
+    TypeStylesPanel* character_styles_panel_ = nullptr;
+    TypeStylesPanel* paragraph_styles_panel_ = nullptr;
+    GlyphsPanel* glyphs_panel_ = nullptr;
+    std::vector<QDockWidget*> type_docks_;
+    // (what the editor typing over a text has chosen: that text as the editor shows it without its marks, and the graphemes)
+    struct TypeSelection {
+        std::string text;
+        std::int64_t start = 0;
+        std::int64_t end = 0;
+    };
+    std::optional<TypeSelection> type_selection_;
+    // --- PC5 節 J (制作の補助, SPEC.md PROD-01): main_window_production.cpp — the frames of イメージ → 解析 ▸, レイヤー →
+    // ビデオレイヤー ▸ and ウィンドウ's panels (アクション・レイヤーカンプ・計測ログ・注釈), until their groups ------------------
+public:
+    // "「<name>」は、この版ではまだ使えません" (a frame's command chosen).
+    void not_yet_command(const QString& name);
+
+private:
+    void build_production_actions();
+    void build_production_menus(QMenu* layers, QMenu* pages);
+    void build_production_docks();
+    // --- PC5 J-e2 (video@1): main_window_video.cpp — レイヤー → ビデオレイヤー ▸, ラスタライズ → ビデオ, ファイル → 読み込み →
+    // ビデオフレームからレイヤー…, the timeline panel's video items; each change of the book an op through apply_ops ----------
+public:
+    // The video layer chosen (the layer drawn on, or the folder it is in; else the timeline's row) on the page shown, and
+    // the frame shown of the page's timeline.
+    std::optional<std::string> video_folder() const;
+    std::int64_t video_frame() const;
+    // A video op on the page shown (its "page", "folder" and "at" put in where it takes them), said when refused.
+    bool video_op(core::Json op);
+    // A stroke (or any drawing) begins on the video layer: the frame shown altered (video_alter: its cel made, the footage's
+    // frame in it), its cel the layer drawn on. Null when it cannot be.
+    const core::Layer* alter_video_frame(const core::Layer& folder);
+    // ファイルから新規ビデオレイヤー… / フッテージを置き換え… / ビデオフレームからレイヤー…: the file (or folder) asked when none is
+    // given, its frames read into the book (render/footage), the op applied. フレームを再読み込み: the footage's file read again.
+    void new_video_layer(const QString& path = {});
+    void replace_video_footage(const QString& path = {});
+    void reload_video_footage();
+    void video_frames_to_layers(const QString& path = {}, std::int64_t every = 0, std::optional<bool> animation = std::nullopt);
+    // フッテージを解釈…: the footage's speed, alpha and pixel aspect ratio asked.
+    void interpret_video_footage();
+
+private:
+    void build_video_actions();
+    void build_video_menus(QMenu* file, QMenu* layers);
+    // How footage is read (render::footage::ReadOptions'): its speed, every n-th, at most so many frames, its long frames
+    // shown as long as they last, the video row it replaces (its footage not counted against the room).
+    struct VideoRead {
+        std::optional<double> fps;
+        std::int64_t every = 1;
+        std::int64_t most_frames = 3000;
+        bool repeat = true;
+        const core::Json* except = nullptr;
+    };
+    // The footage read into the book's assets on a worker (a progress window and 中止); `fresh`: the pictures new to the
+    // book (drop_fresh_footage gives them back when the op is refused). Said and none when it cannot be.
+    std::optional<core::Json> read_video_footage(const QString& path, const VideoRead& how, std::vector<std::string>* fresh);
+    void drop_fresh_footage(const std::vector<std::string>& fresh);
+    // The frame alter_video_frame altered just now (its op, its cel, the book's revision then): the next apply_ops takes it with
+    // its ops as one step (one Undo takes back the stroke and the cel).
+    struct VideoAlter {
+        core::Json op;
+        std::string cel;
+        std::int64_t revision = 0;
+    };
+    std::optional<VideoAlter> video_alter_;
+    // --- PC5 J-a (layer-comps@1): main_window_layer_comps.cpp — ウィンドウ → レイヤーカンプ (its dock and panel) and ファイル →
+    // 書き出し → レイヤーカンプからファイル…; each change of the book an op through apply_ops --------------------------------
+public:
+    LayerCompsPanel* layer_comps_panel() const { return layer_comps_panel_; }
+    QDockWidget* layer_comps_dock() const { return layer_comps_dock_; }
+    // A layer comps' op on the page shown (its "page" put in), shown at once (a refusal said in the status line).
+    bool layer_comp_op(core::Json op);
+    // 新規レイヤーカンプ… (none) and レイヤーカンプオプション… (the comp's id): the window asked, then new_layer_comp or
+    // set_layer_comp.
+    void layer_comp_options(std::optional<std::int64_t> comp = std::nullopt);
+    // レイヤーカンプからファイル…: the window asked, then formats::export_layer_comps off the window's thread.
+    void layer_comps_to_files();
+
+private:
+    void build_layer_comp_actions();
+    void build_layer_comps_dock();
+    LayerCompsPanel* layer_comps_panel_ = nullptr;
+    QDockWidget* layer_comps_dock_ = nullptr;
+    // --- PC5 I-d (variables@1): main_window_variables.cpp — ページ → 変数 ▸ 定義…・データセット…, データセットを適用…, ファイル
+    // → 書き出し → データセットからファイル…, ファイル → 読み込み → 変数データセット…; each change of the book an op through
+    // apply_ops --------------------------------------------------------------------------------------------------------
+public:
+    void define_variables();
+    void edit_data_sets();
+    void apply_data_set_dialog();
+    // データセットからファイル…: the window asked, then formats::export_data_sets off the window's thread.
+    void data_sets_to_files();
+    // 変数データセット…: the window asked, the text file read off the window's thread (formats::read_data_sets_csv), then
+    // set_data_sets.
+    void import_data_sets();
+
+private:
+    void build_variable_actions();
+    void build_variable_menus(QMenu* file, QMenu* pages);
+    bool variable_op(core::Json op);
+    // --- PC5 J-c (annotations@1): main_window_notes.cpp — the 注釈ツール and its options, ウィンドウ → 注釈 (its dock and
+    // panel), 表示 → 表示・非表示 → 注釈, ファイル → 読み込み → 注釈…; each change of the book an op through apply_ops -------
+public:
+    NotesPanel* notes_panel() const { return notes_panel_; }
+    QDockWidget* notes_dock() const { return notes_dock_; }
+    // A notes' op on the page shown (its "page" put in), shown at once (a refusal said in the status line).
+    bool note_op(core::Json op);
+    // The note the canvas draws chosen and the 注釈 panel shows ("": none).
+    void choose_note(const QString& id);
+    // The 注釈ツール's click: a new note there (the options' author and colour), shown in the 注釈 panel to type its text.
+    void add_note_at(double x_mm, double y_mm);
+    // すべてを消去 (the options'): every note of the page deleted (one Undo).
+    void clear_notes();
+    // ファイル → 読み込み → 注釈…: the file asked (none given), its notes read off the window's thread, put on the page.
+    void import_notes(const QString& path = {});
+
+private:
+    void build_note_actions();
+    void build_notes_menus(QMenu* file, QMenu* view);
+    void build_notes_dock();
+    void refresh_notes();
+    // --- PC5 J-d1 (measure@1): main_window_measure.cpp — イメージ → 解析 → 計測スケールを設定 ▸ (初期設定・カスタム…), the
+    // ものさしツール and the カウントツール (in the スポイト group; their options), 表示 → 表示・非表示 → カウント; each change of
+    // the book an op through apply_ops --------------------------------------------------------------------------------
+public:
+    // A measuring op on the page shown (its "page" put in), shown at once (a refusal said in the status line).
+    bool measure_op(core::Json op);
+    // 計測スケールを設定 → カスタム…: the window asked (ピクセルの長さ・論理的な長さ・論理的な単位, or the paper's mm), then
+    // set_measurement_scale.
+    void measurement_scale_dialog();
+    // レイヤーの角度補正 (the ものさしツール's options): the layers in hand turned so the line lies level or upright; `crop`
+    // (Alt): the page turned and cut to the rectangle inside it.
+    void straighten_by_ruler(bool crop);
+    // The ものさしツール's readout of a line (none: the page's, or none) in the options and the 情報 panel.
+    void show_ruler_readout(const std::optional<core::RulerLine>& line = std::nullopt);
+    QLabel* ruler_readout() const { return ruler_readout_; }
+    QComboBox* count_groups() const { return count_groups_; }
+    // (PC5 J-d2, main_window_measure.cpp) イメージ → 解析 → 計測値を記録: the page's rows (the selection — none: the whole page
+    // —, else the ruler line — this window's own too —, else the count) into the app's measurement log
+    // (app/measurement_log), kept to the data points, the 計測ログ panel shown. False: nothing recorded (said).
+    bool record_measurements();
+    // データポイントを選択 → カスタム…: the window of the points (共通・選択範囲・ものさしツール・カウントツール), this machine's.
+    void data_points_dialog();
+    // 目盛りマーカーを配置…: the window asked (長さ・フォント・サイズ・テキストを表示・テキストの位置・カラー), then place_scale_marker.
+    void scale_marker_dialog();
+    MeasurementLogPanel* measurement_log_panel() const { return measurement_log_panel_; }
+    // (計測値を記録 under way on a worker: the rows go into the log when it is done)
+    bool measuring() const { return measuring_; }
+
+    // --- PC5 J-b (slices@1): main_window_slices.cpp — the スライスツール and the スライス選択ツール (the 切り抜き group; their
+    // options), レイヤー → 新規レイヤーベースのスライス, 表示 → 表示・非表示 → スライス, スライスをロック, スライスを消去 (and スナップ
+    // 先 → スライス: main_window_align.cpp); each change of the book an op through apply_ops --------------------------------
+    // A slices op on the page shown (its "page" put in), shown at once (a refusal said in the status line).
+    bool slice_op(core::Json op);
+    // スライスオプション… / スライスを分割…: the chosen slice's (the スライス選択ツール's), the window asked, then set_slice /
+    // divide_slice (an auto slice made a user slice in the same step).
+    void slice_options_dialog();
+    void divide_slice_dialog();
+    // The page shown's slices now (made again when the page changes; none: no page).
+    const PageCanvas::SliceView* slice_view();
+    QLabel* slice_chosen_label() const { return slice_chosen_label_; }
+
+private:
+    void build_slice_actions();
+    void build_slice_menus(QMenu* view, QMenu* layers);
+    void build_slice_tools();
+    void refresh_slices();
+    bool slices_unlocked();  // (スライスをロック: false, said)
+    std::optional<std::int64_t> chosen_slice_id(bool promote);
+    // (PC5 J-b, H-c's pane: pane_look) A pane beside the canvas shows its own page's slices as the canvas shows its: their
+    // colour and numbers, each made again when its book or page changes.
+    void slices_in_pane(PageCanvas* pane);
+    PageCanvas::SliceView slice_view_;
+    const core::Page* slice_view_page_ = nullptr;
+    std::shared_ptr<const void> slice_view_keep_;  // (the book the view was made of, so its page is not another's)
+    bool slice_view_made_ = false;
+    QLabel* slice_chosen_label_ = nullptr;
+    void build_measure_actions();
+    void build_measure_menus(QMenu* view);
+    void build_measure_tools();
+    void refresh_measure();
+    void build_measurement_log_dock();  // (PC5 J-d2: ウィンドウ → 計測ログ, after レイヤーカンプ)
+    MeasurementLogPanel* measurement_log_panel_ = nullptr;
+    bool measuring_ = false;
+    QDockWidget* measurement_log_dock_ = nullptr;
+    QLabel* ruler_readout_ = nullptr;
+    QComboBox* count_groups_ = nullptr;
+    QToolButton* count_colour_ = nullptr;
+    QSpinBox* count_marker_ = nullptr;
+    QSpinBox* count_label_ = nullptr;
+    QCheckBox* count_visible_ = nullptr;
+    NotesPanel* notes_panel_ = nullptr;
+    QDockWidget* notes_dock_ = nullptr;
+    QLineEdit* note_author_ = nullptr;
+    QToolButton* note_colour_ = nullptr;
+    QMenu* import_menu_ = nullptr;  // ファイル → 読み込み (import_menu)
+    // ファイル → 読み込み ▸ (Photoshop's; PC5 I-d・J-c, later J-e2): found, or made after PSD をレイヤーのまま読み込む… when it is
+    // not yet ("menu_import": one, whichever group asks first); and a command put in it in Photoshop's order (変数データセット…,
+    // ビデオフレームからレイヤー…, 注釈…). main_window_file.cpp.
+    QMenu* import_menu(QMenu* file);
+    void add_to_import_menu(QMenu* file, QAction* command);
+    // --- PC5 H-d: main_window_workspace.cpp — ウィンドウ → ワークスペース ▸ (Photoshop's workspaces and the person's own, the
+    // one in use checked; ワークスペースをリセット, 新規ワークスペース…, ワークスペースを削除…, ワークスペースをロック; キーボードショートカット…;
+    // 作業の段階 ▸), 編集 → キーボードショートカット…・メニュー…・ツールバー… (app/shortcuts_dialog, app/toolbar_dialog), the palette
+    // in the person's order and 環境設定 → ワークスペース's (SPEC VIEW-01「ワークスペース」「キーボードショートカットとメニュー」
+    // 「ツールバー」) ----------------------------------------------------------------------------------------------------
+public:
+    // The workspace in use (ui/workspace: a built-in one's words or a kept one's name; 初期設定 when none or gone).
+    QString current_workspace() const;
+    // A workspace chosen: the one left kept as it is now (環境設定 → ワークスペース → ワークスペースの変更を記憶), this one's panels as
+    // they were left (or as it was kept), its keys, menus and toolbar when kept with it.
+    void choose_workspace(const QString& name);
+    // ワークスペースをリセット: the one in use as it was kept (Photoshop's 「…」をリセット).
+    void reset_workspace();
+    // 新規ワークスペース… (the dialog exec'ed): false when nothing was kept — refused for a built-in workspace's name.
+    bool new_workspace();
+    // ワークスペースを削除… (asked which): the one in use is refused.
+    bool delete_workspace_dialog();
+    // ワークスペースをロック: the panels cannot be moved nor taken out of the window (every window; ui/workspace_locked).
+    void lock_workspace(bool on);
+    // 編集 → キーボードショートカット… (tab 0) and メニュー… (tab 1), ツールバー… — exec'ed.
+    void open_keyboard_shortcuts(int tab = 0);
+    void open_toolbar_dialog();
+    // The palette laid out again in the person's order (ツールバー…), each button with its tool group; 余分なツール last.
+    void fill_palette();
+    QAction* extra_tools() const { return extra_tools_; }
+    // 環境設定's ワークスペース and ツールバー… applied to this window (preferences::apply_all).
+    void apply_workspace_prefs();
+    QMenu* workspace_menu() const { return workspace_menu_; }
+    // (a file written from a dialog of its own — キーボードショートカット…'s 概要…: never over a book open or its folder; said)
+    bool refuses_to_write(const std::filesystem::path& path) { return writes_over_a_source(path); }
+
+private:
+    void build_workspace_actions();
+    // (geometry: the window's size too — when chosen, never for a window opening: P2-3 of the review)
+    void lay_out_workspace(const QString& name, bool as_left, bool geometry = true);
+    void lay_out_panels(const QString& name, bool as_left, bool geometry);
+    // (P2-1 of the review) the approval's panels — 承認箱・コマの詳細・資料 — kept as they are over a layout restored
+    void keeping_approval_docks(const std::function<void()>& lay_out);
+    void apply_lock(bool on);
+    void restore_workspace_at_start();
+    QString palette_laid_;  // (the order and the tools away the palette was last laid out with)
+    QAction* extra_tools_ = nullptr;
+    QMenu* stage_menu_ = nullptr;  // (作業の段階 ▸, in ワークスペース ▸ — Genko's own)
+    // --- PC5 I-a (SPEC.md AUTO-01「レイヤーの基本」): main_window_layers.cpp — レイヤー → 新規 → 背景からレイヤーへ…・レイヤーからの
+    // グループ…, レイヤーを複製…, 非表示レイヤーを削除, クリッピングマスクを作成・解除, レイヤーのグループ解除, ファイル → スクリプト →
+    // すべての空のレイヤーを削除・すべてのレイヤー効果を統合; each change of the book an op through apply_ops ------------------
+public:
+    // レイヤーを複製…: the window (its name — one layer —, and 保存先: a page of the book of the same paper and mode), then
+    // duplicate_layers (a group or folder with what it holds).
+    void duplicate_layer_dialog();
+    // レイヤーからのグループ…: the name asked, then the layers chosen in a group (group_layers, 通過).
+    void group_from_layers();
+    // 背景からレイヤーへ…: the opened picture's 背景 (or a flattened one) an ordinary layer — its name asked (レイヤー 0), its
+    // transparency, position and すべて locks off (set_layer). A core layer (漫画の背景) is not Photoshop's 背景: said.
+    void layer_from_background();
+    // クリッピングマスクを作成 (Alt+Ctrl+G: again on a clipped layer, 解除) and クリッピングマスクを解除: the layers chosen.
+    void clipping_mask(std::optional<bool> on);
+    // すべての空のレイヤーを削除 (every page: delete_layers empty) and すべてのレイヤー効果を統合 (bake_layer_styles), asked first.
+    void delete_empty_layers();
+    void bake_all_layer_effects();
+
+private:
+    void build_layer_basic_actions();
+    void build_layer_basic_menus(QMenu* layers);
+
+    // --- PC5 I-c (artboards@1, SPEC.md AUTO-01「アートボード」): main_window_artboards.cpp — レイヤー → 新規 → アートボード…・
+    // グループからのアートボード…・レイヤーからのアートボード…, イメージ → アートボードの設定…, 表示 → アートボードを画面サイズに合わせる・
+    // 選択したアートボードのガイドを消去, ファイル → 書き出し → アートボードからファイル…・アートボードから PDF… ------------------------
+public:
+    // アートボード…: its window (app/artboard_dialog), then add_artboard after this page; the new page shown.
+    void new_artboard();
+    // アートボードの設定…: this artboard's window, then set_artboard.
+    void artboard_settings();
+    // グループからのアートボード… (`group`: one group chosen) and レイヤーからのアートボード…: the name asked, then artboard_from_layers.
+    void artboard_from(bool group);
+    // アートボードを画面サイズに合わせる: this artboard alone filling the view.
+    void fit_artboard();
+    // 選択したアートボードのガイドを消去: this artboard's guides (delete_ruler, kind guide).
+    void clear_artboard_guides();
+    // アートボードからファイル… (pdf false: a file each, or one PSD) and アートボードから PDF…: the window, then formats/artboards.
+    void artboards_to_files(bool pdf);
+
+private:
+    void build_artboard_actions();
+    void build_artboard_menus(QMenu* layers, QMenu* pages);
+    void build_artboard_view_menus(QMenu* view);
+    // --- PC5 I-g (SPEC.md AUTO-01「自動整列・自動合成」「Photomerge」「ファイルをスタックとして読み込み・統計」):
+    // main_window_photomerge.cpp — 編集 → レイヤーを自動整列…・レイヤーを自動合成… (auto_align_layers, auto_blend_layers through
+    // send_filter: on a worker, 中止 leaves the book as it was, one Undo), ファイル → 自動処理 → Photomerge…, スクリプト →
+    // ファイルをスタックとして読み込み…・統計… (service::automate's new books, made on a worker with 中止, each a book in a tab of its
+    // own) -----------------------------------------------------------------------------------------------------------------
+public:
+    void auto_align_dialog();
+    void auto_blend_dialog();
+    void photomerge_dialog();
+    void load_stack_dialog();
+    void statistics_dialog();
+    // The paint layers chosen in the layers panel on the page shown (two or more: the commands are on), the bottom first.
+    std::vector<std::string> chosen_paint_layers() const;
+
+private:
+    void build_photomerge_actions();
+    void build_photomerge_menus();
+    void build_auto_align_items(QMenu* edit);
+    // A new book made on a worker (`make`), the window waiting with its progress and 中止; the book in a tab of its own.
+    void made_book(const QString& title, const std::function<formats::Opened()>& make);
+
+public:
+    // PC5 I-f (app/main_window_print.cpp; SPEC.md AUTO-01「プリント」「コンタクトシート」「画像アセット」): 1 部プリント — the
+    // book's every page with the last プリント… settings, one copy, to the last printer (else the computer's default; none: said)
+    // or to `printer` given (tests), nothing asked —; ファイル → 生成 → 画像アセット on or off for the book (set_image_assets);
+    // the assets written after a save the person makes (never the automatic save: save() and the .genko 別名で保存 call it);
+    // コンタクトシート II… (its window, the sheets opened as new books).
+    bool print_one_copy(QPrinter* printer = nullptr);
+    void toggle_image_assets();
+    // (written on a worker thread: image_assets_written() counts the times they were done, said — tests wait on it)
+    void image_assets_after_save();
+    int image_assets_written() const { return image_assets_done_; }
+    void contact_sheet_dialog();
+
+private:
+    void build_print_actions();
+    void build_print_menus(QMenu* file);
+    int image_assets_done_ = 0;
+
+public:
+    // PC5 H-f (app/main_window_purge.cpp; SPEC.md VIEW-01「取り消しとメモリをクリア」): 編集 → 最後の状態を切り替え — Undo, or Redo
+    // when the last step through the history was back (Session::stepped_back): twice, the book as it was; another writer's
+    // change is never taken back (the journal's undo refuses it, as Undo's) —, and メモリをクリア ▸ (the coordinator's decision:
+    // memory only — the journal keeps every change, Undo still reaches them): what = "undo" (the book in front's history in
+    // memory), "clipboard" (every window's copy, and the computer's clipboard while it holds Genko's), "histories" (every
+    // open book's), "video" (the footage frames and the frames drawn for playing) or "all" (those, and every picture the
+    // drawing remembers — layers, placed pictures, letters, 3D, smart objects — and the finer tiles out of sight). The free
+    // room goes back to the system (memory::give_back); what was let go is said in the status line and returned.
+    struct Purged {
+        QStringList items;      // what was let go, in words (取り消し, クリップボード, …)
+        std::int64_t bytes = 0;  // about how much
+    };
+    Purged purge(const QString& what);
+    void toggle_last_state();
+    // PC5 H-f (app/main_window_pixel_aspect.cpp; the user's decision 10, pixel-aspect@1): 表示 → ピクセル縦横比 ▸ — the page's
+    // ratio set (set_pixel_aspect, one Undo; カスタムピクセル縦横比… asks for a ratio of its own, kept by its name on this
+    // computer) — and ピクセル縦横比を補正 (the canvas widened by it, the view's only).
+    bool set_pixel_aspect(double ratio);
+    void ask_custom_pixel_aspect();
+
+private:
+    void build_purge_actions();
+    void build_purge_menu(QMenu* edit);
+    // (main_window_clipboard.cpp: this window's copy, and the computer's while it is Genko's; true when anything was let go,
+    // about how much added to `bytes`)
+    bool purge_clipboard(std::int64_t& bytes);
+    void build_pixel_aspect_actions();
+    void build_pixel_aspect_menu(QMenu* view);
+    void refresh_pixel_aspect();
+    // --- PC5 J-g (SPEC.md PROD-01「アクション」「制御チャンネル」): app/actions_panel.cpp — ウィンドウ → アクション (Alt+F9 in
+    // Photoshop's set), the recorded actions in a dock; app/main_window_control.cpp — what the control channel
+    // (app/control_channel.hpp) does in this window: look, the view, the view's commands, the book's ops and the pen, as the
+    // token's actor with an agent's rights (service/control.hpp's rules) -------------------------------------------------
+public:
+    ActionsPanel* actions_panel() const { return actions_panel_; }
+    QDockWidget* actions_dock() const { return actions_dock_; }
+    // ui.inspect: the tool, the page and frame, the zoom, the panels (service::control::view_panels), the books open (their
+    // titles), the menus' tree (each command's words, attribute, whether it is on — and whether ui.menu.invoke takes it),
+    // the page's measurements. Never a path of a file.
+    core::Json control_inspect() const;
+    // ui.set {page?, frame?, zoom?, center?, fit?, tool?, panels?}: the view as asked (nothing of the book); what it is
+    // then. core::Error("bad_params") for a value it does not take (nothing changed).
+    core::Json control_set(const core::Json& params);
+    // ui.menu.invoke: one of the view's commands (service::control::view_command) chosen; core::Error("not_allowed") for
+    // any other, ("not_enabled") for one that is off.
+    core::Json control_menu(const QString& attribute);
+    // ui.screenshot: the canvas (or the whole window) as PNG, its longest side at most max_side (0: as it is).
+    QByteArray control_screenshot(bool whole_window, int max_side) const;
+    // engine.execute: ops on the book in front as `actor` (service::control::actor_of — MCP's apply_ops' ops and refusals);
+    // {applied, warnings, results} or core::Error / core::ApplyError.
+    core::Json control_execute(const core::Json& ops, const std::string& actor);
+    // ui.pointer's events [{kind: down | move | up, x, y (mm on the page in front), pressure?}]: a line drawn with the pen,
+    // the pencil or the eraser in hand, applied as `actor` when it is let go. `holding`: a line still being drawn after
+    // these events. {"events": n, "drawing": bool, "applied"?: bool} or core::Error.
+    core::Json control_pen(const core::Json& events, const std::string& actor, bool& holding);
+    // The line being drawn by the channel thrown away (the connection gone, the time up, Esc).
+    void control_pen_cancel();
+    // The status bar's words for the channel (empty: none shown); `drawing`: its pen is on the canvas.
+    void control_state(const QString& words, bool drawing);
+
+private:
+    void build_actions_dock();
+    ActionsPanel* actions_panel_ = nullptr;
+    QDockWidget* actions_dock_ = nullptr;
+    QLabel* control_label_ = nullptr;
+    // (the channel's pen: apply_ops applies as this actor, through service::control's rules, while it is set)
+    std::optional<core::Actor> control_actor_;
+    QString control_refused_;  // why apply_ops refused the pen's ops (its words)
+    bool control_applied_ = false;
 };
 
 // The app-wide watcher of key releases for キーを押している間だけ持ち替え: on from a tool's key until the next key let go

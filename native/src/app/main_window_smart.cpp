@@ -35,6 +35,7 @@
 #include "app/main_window.hpp"
 #include "app/open_dialog.hpp"
 #include "app/smart_panel.hpp"
+#include "core/prefs_table.hpp"
 #include "core/base64.hpp"
 #include "core/color_raster.hpp"
 #include "core/ids.hpp"
@@ -251,6 +252,9 @@ void MainWindow::build_smart_actions() {
     // レイヤー → ラスタライズ
     make("act_rasterize_type", QStringLiteral("テキスト"), [this] { rasterize_type(); }, {},
          QStringLiteral("選んだ台詞（フキダシと文字）を、見えているとおりの画素のレイヤーにします（台詞としては直せなくなります）"));
+    // (PC5 G-d review P2-3: its name テキスト（レイヤー → ラスタライズ） kept — the lists and keys kept under it stay its, and
+    // テキスト alone the text tool's — though the tool is 縦書き文字ツール now)
+    action("act_rasterize_type")->setProperty("genko_placed", true);
     make("act_rasterize_fill", QStringLiteral("塗りつぶし内容"), [this] { rasterize("fill"); }, {},
          QStringLiteral("選んだ塗りつぶし・グラデーションのレイヤーを、画素のレイヤーにします"));
     make("act_rasterize_smart", QStringLiteral("スマートオブジェクト"), [this] { rasterize("smart"); }, {},
@@ -386,6 +390,8 @@ bool MainWindow::place_smart(const QString& file, bool as_placed, bool linked) {
                {"title", named.completeBaseName().toStdString()}};
     place.update(use);
     if (link) place["link"] = *link;
+    // (PC5 H-e, 環境設定 → 一般 → 配置時に画像サイズを変更: off, a picture larger than the page placed at its own size)
+    if (!as_placed && !core::prefs::value("general.resizeImageDuringPlace").get<bool>()) place["scale"] = 100;
     const core::Frame* frame = as_placed ? selected_frame() : nullptr;
     if (as_placed) {
         if (frame != nullptr) {
@@ -561,6 +567,15 @@ void MainWindow::smart_stack(const std::string& mode) {
 }
 
 void MainWindow::rasterize_type() {
+    // (PC5 G-a: テキストレイヤーをラスタライズ — the target layer when it is a type layer, as rasterize_lines takes one)
+    if (const core::Layer* layer = target_layer(); layer != nullptr && layer->kind == core::LayerKind::Type && current_page() != nullptr) {
+        const std::string id = layer->id;
+        if (!apply_ops(Json::array({Json{{"op", "rasterize_lines"}, {"page", current_page()->index.json()}, {"layer_id", id}}}))) return;
+        set_target_layer(id);
+        if (layer_panel_ != nullptr) layer_panel_->refresh();
+        flash(QStringLiteral("テキストレイヤーを画素のレイヤーにしました（元に戻すで戻ります）"), 5000);
+        return;
+    }
     const core::StoryLine* line = selected_line_or_say();
     if (line == nullptr) return;
     const std::string id = core::new_id();
@@ -795,6 +810,7 @@ constexpr const char* kNotInContents[] = {
     // lines
     "act_text", "act_story_editor", "act_replace", "act_line_type", "act_balloon_pen", "act_line_edit", "act_line_delete", "act_line_wrap",
     "act_rasterize_type",
+    "act_text_h", "act_line_to_type_layer", "act_type_layer_to_line",  // (PC5 G-a: the text tools and a line made a type layer and back)
     // the studio
     "act_ai", "act_style", "act_chat_approval",
     // the book's own files
@@ -818,7 +834,7 @@ std::shared_ptr<const core::Document> MainWindow::shown_book() const {
 }
 
 Json MainWindow::with_contents_target(const Json& ops) const {
-    if (!contents_ || !ops.is_array()) return ops;
+    if (!contents_ || to_book_ || !ops.is_array()) return ops;
     Json out = ops;
     for (Json& op : out) {
         if (op.is_object() && !op.contains("contents")) op["contents"] = *contents_;

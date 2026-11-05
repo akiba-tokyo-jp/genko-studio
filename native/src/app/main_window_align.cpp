@@ -126,9 +126,11 @@ void MainWindow::build_align_actions() {
         guide_toggles();
     }, {}, QStringLiteral("グリッドに吸い付けます（定規 → グリッドにスナップ と同じ）"), true);
     make("act_snap_layers", QStringLiteral("レイヤー"), [this] { snap_toggles(); }, {}, QStringLiteral("ほかのレイヤーの端と中央に吸い付けます"), true);
+    // (PC5 J-b: スライス — the user and layer-based slices' edges)
+    make("act_snap_slices", QStringLiteral("スライス"), [this] { snap_toggles(); }, {}, QStringLiteral("スライスの端に吸い付けます"), true);
     make("act_snap_bounds", QStringLiteral("ドキュメントの境界"), [this] { snap_toggles(); }, {}, QStringLiteral("用紙の端と中央に吸い付けます"), true);
     const auto every = [this](bool on) {
-        for (const char* name : {"act_snap_guides", "act_snap_layers", "act_snap_bounds", "act_snap_grid", "act_grid_snap"}) {
+        for (const char* name : {"act_snap_guides", "act_snap_layers", "act_snap_slices", "act_snap_bounds", "act_snap_grid", "act_grid_snap"}) {
             QAction* act = action(QString::fromLatin1(name));
             const QSignalBlocker quiet(act);
             act->setChecked(on);
@@ -140,7 +142,7 @@ void MainWindow::build_align_actions() {
     make("act_snap_none", QStringLiteral("なし"), [every] { every(false); }, {}, QStringLiteral("スナップ先をすべて切ります"));
     {
         const auto store = settings();
-        for (const auto& [name, key] : {std::pair{"act_snap_on", "on"}, {"act_snap_guides", "guides"}, {"act_snap_layers", "layers"}, {"act_snap_bounds", "bounds"}}) {
+        for (const auto& [name, key] : {std::pair{"act_snap_on", "on"}, {"act_snap_guides", "guides"}, {"act_snap_layers", "layers"}, {"act_snap_slices", "slices"}, {"act_snap_bounds", "bounds"}}) {
             QAction* act = action(QString::fromLatin1(name));
             const QSignalBlocker quiet(act);
             act->setChecked(store->value(QStringLiteral("snap/%1").arg(QString::fromLatin1(key)), QStringLiteral("true")).toString().toLower() == QLatin1String("true"));
@@ -201,7 +203,7 @@ void MainWindow::build_align_menus(QMenu* layers, QMenu* view) {
     view->addSeparator();
     view->addAction(action("act_snap_on"));
     QMenu* to = view->addMenu(QStringLiteral("スナップ先"));
-    for (const char* name : {"act_snap_guides", "act_snap_grid", "act_snap_layers", "act_snap_bounds"}) to->addAction(action(QString::fromLatin1(name)));
+    for (const char* name : {"act_snap_guides", "act_snap_grid", "act_snap_layers", "act_snap_slices", "act_snap_bounds"}) to->addAction(action(QString::fromLatin1(name)));
     to->addSeparator();
     for (const char* name : {"act_snap_all", "act_snap_none"}) to->addAction(action(QString::fromLatin1(name)));
 }
@@ -236,8 +238,9 @@ void MainWindow::snap_toggles() {
     canvas_->snap_guides = action(QStringLiteral("act_snap_guides"))->isChecked();
     canvas_->snap_layers = action(QStringLiteral("act_snap_layers"))->isChecked();
     canvas_->snap_bounds = action(QStringLiteral("act_snap_bounds"))->isChecked();
+    canvas_->snap_slices = action(QStringLiteral("act_snap_slices"))->isChecked();  // (PC5 J-b)
     const auto store = settings();
-    for (const auto& [name, key] : {std::pair{"act_snap_on", "on"}, {"act_snap_guides", "guides"}, {"act_snap_layers", "layers"}, {"act_snap_bounds", "bounds"}})
+    for (const auto& [name, key] : {std::pair{"act_snap_on", "on"}, {"act_snap_guides", "guides"}, {"act_snap_layers", "layers"}, {"act_snap_slices", "slices"}, {"act_snap_bounds", "bounds"}})
         store->setValue(QStringLiteral("snap/%1").arg(QString::fromLatin1(key)), action(QString::fromLatin1(name))->isChecked());
     canvas_->update();
 }
@@ -441,17 +444,26 @@ void MainWindow::lock_layers_dialog() {
     auto* position = new QCheckBox(QStringLiteral("位置"));
     position->setObjectName(QStringLiteral("lock_position"));
     position->setToolTip(QStringLiteral("移動・変形・整列で動かないようにします"));
+    // (PC5 I-a, layer-locks@1: Photoshop's アートボードの内外への自動ネストを防ぐ — kept for PSD and .pcraft: Genko's artboards are
+    // pages — and すべて its own lock: the others shown on and not to be changed while it is on)
+    auto* nest = new QCheckBox(QStringLiteral("アートボードの内外への自動ネストを防ぐ"));
+    nest->setObjectName(QStringLiteral("lock_nest"));
+    nest->setToolTip(QStringLiteral("Photoshop で開いたときのための設定です（Genko のアートボードはページなので、ここでは何も変わりません）"));
+    every->setToolTip(QStringLiteral("描く・動かす・不透明度や描画モードを変える・削除をできなくします（表示・名前・重ね順は変えられます）"));
     alpha->setChecked(all([](const core::Layer* l) { return l->lock_alpha; }));
     pixels->setChecked(all([](const core::Layer* l) { return l->locked; }));
     position->setChecked(all([](const core::Layer* l) { return l->lock_position; }));
-    every->setChecked(alpha->isChecked() && pixels->isChecked() && position->isChecked());
+    nest->setChecked(all([](const core::Layer* l) { return l->lock_nest; }));
+    every->setChecked(all([](const core::Layer* l) { return l->lock_all; }));
+    const auto shown = [=] {
+        for (QCheckBox* box : {alpha, pixels, position, nest}) box->setEnabled(!every->isChecked());
+    };
     connect(every, &QCheckBox::clicked, &dialog, [=](bool on) {
         for (QCheckBox* box : {alpha, pixels, position}) box->setChecked(on);
+        shown();
     });
-    for (QCheckBox* box : {alpha, pixels, position}) {
-        connect(box, &QCheckBox::toggled, &dialog, [=] { every->setChecked(alpha->isChecked() && pixels->isChecked() && position->isChecked()); });
-    }
-    for (QCheckBox* box : {every, alpha, pixels, position}) layout->addWidget(box);
+    shown();
+    for (QCheckBox* box : {every, alpha, pixels, position, nest}) layout->addWidget(box);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -461,7 +473,8 @@ void MainWindow::lock_layers_dialog() {
     Json list = Json::array();
     for (const std::string& id : ids) list.push_back(id);
     apply_ops(Json::array({Json{{"op", "set_layers"}, {"page", page->index.json()}, {"ids", list}, {"lock_alpha", alpha->isChecked()},
-                                {"locked", pixels->isChecked()}, {"lock_position", position->isChecked()}}}));
+                                {"locked", pixels->isChecked()}, {"lock_position", position->isChecked()}, {"lock_nest", nest->isChecked()},
+                                {"lock_all", every->isChecked()}}}));
 }
 
 // --- the move tool ------------------------------------------------------------------------------------------------------

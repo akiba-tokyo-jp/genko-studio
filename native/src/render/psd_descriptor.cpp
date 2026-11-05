@@ -117,6 +117,14 @@ void Writer::units(std::string_view key, std::string_view unit, const std::vecto
         put_f64(body_, v);
     }
 }
+void Writer::integers(std::string_view key, const std::vector<std::int32_t>& values) {
+    head(key, "VlLs");
+    put_u32(body_, static_cast<std::uint32_t>(values.size()));
+    for (const std::int32_t v : values) {
+        body_ += "long";
+        put_i32(body_, v);
+    }
+}
 std::string Writer::structure(std::string_view class_id) const {
     std::string out;
     put_unicode(out, u"");

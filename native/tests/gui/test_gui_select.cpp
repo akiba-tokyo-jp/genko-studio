@@ -36,7 +36,6 @@ namespace inject = genko::app::inject;
 
 namespace {
 
-using Std = QKeySequence::StandardKey;
 
 struct Expected {
     const char* attribute;
@@ -55,15 +54,16 @@ const std::vector<Expected>& expected() {
     static const std::vector<Expected> list = {
         {"act_marquee", "長方形選択ツール", {s("M")}, "ドラッグで選ぶ。中をドラッグで移動、□で拡大縮小、○で回転（Shift で 15° 刻み・縦横比を保つ）", true, "ツール"},
         {"act_lasso", "なげなわツール", {s("L")}, "ドラッグで囲んで選びます", true, "ツール"},
-        {"act_wand", "自動選択ツール", {s("W")}, "クリックした所を選びます（基準はツールの設定: 線で囲まれた所・色の近さ）", true, "ツール"},
+        {"act_wand", "自動選択ツール", {s("W")}, "クリックした所を選びます（基準はオプション: 線で囲まれた所・色の近さ）", true, "ツール"},
         {"act_sel_ellipse", "楕円形選択ツール", {}, "ドラッグで楕円に選ぶ（Shift で足す、Alt で引く）", true, "ツール"},
         {"act_sel_polyline", "多角形選択ツール", {}, "クリックで角を置き、ダブルクリックか Enter で閉じる", true, "ツール"},
         {"act_sel_pen", "選択ペン", {}, "なぞった所を選択範囲に足す", true, "ツール"},
         {"act_sel_erase", "選択消し", {}, "なぞった所を選択範囲から外す", true, "ツール"},
         {"act_magic_eraser", "マジック消しゴムツール", {}, "クリックした所に近い色の所を透明にします（描く先のペイントのレイヤー）", true, "ツール"},
-        {"act_select_all", "すべてを選択", {QKeySequence(Std::SelectAll)}, "", false, "選択範囲"},
+        {"act_select_all", "すべてを選択", {s("Ctrl+A")}, "", false, "選択範囲"},
         {"act_deselect", "選択を解除", {s("Ctrl+D")}, "", false, "選択範囲"},
-        {"act_sel_invert", "選択範囲を反転", {s("Ctrl+Alt+I")}, "", false, "選択範囲"},
+        {"act_sel_invert", "選択範囲を反転", {s("Ctrl+Shift+I")},  // (PC5 H-0: the Photoshop key set)
+         "", false, "選択範囲"},
         {"act_sel_reselect", "再選択", {s("Ctrl+Shift+D")}, "最後に解除した選択範囲を戻す", false, "選択範囲"},
         {"act_color_range", "色域指定…", {}, "色（スポイトで拾う）・色の系統・明るさ・色域外で選ぶ", false, "選択範囲"},
         {"act_sel_border", "境界線…", {}, "選択範囲の縁を、その幅の帯にする", false, "選択範囲/選択範囲を変更"},
@@ -73,17 +73,18 @@ const std::vector<Expected>& expected() {
         {"act_sel_transform", "選択範囲を変形", {}, "枠のつまみで選択範囲の形だけを動かす・拡大縮小・回転する（中身は動かない）。Enter で終わる", false,
          "選択範囲"},
         {"act_sel_load", "選択範囲を読み込む…", {}, "チャンネル・色の版・透明部分・マスクから選択範囲を作る（反転・追加・削除・共通範囲も）", false, "選択範囲"},
-        {"act_sel_edges", "選択範囲の境界線", {}, "選択範囲の点線を表示する・隠す", true, "表示"},
+        // (PC5 H-b: Photoshop's 表示 → 表示・非表示 ▸ 選択範囲のエッジ)
+        {"act_sel_edges", "選択範囲のエッジ", {}, "選択範囲の点線を表示する・隠す", true, "表示/表示・非表示"},
         {"act_sel_grow", "拡張…", {}, "選択範囲の縁を外へ広げる", false, "選択範囲/選択範囲を変更"},
         {"act_sel_shrink", "縮小…", {}, "選択範囲の縁を内へ狭める", false, "選択範囲/選択範囲を変更"},
         {"act_sel_feather", "境界をぼかす…", {s("Shift+F6")}, "選択範囲の縁をなめらかにぼかす", false, "選択範囲/選択範囲を変更"},
         {"act_sel_layer", "ピクセルを選択", {}, "描く先のレイヤーで描いてある所を選ぶ", false, "選択範囲"},
         {"act_sel_keep", "選択範囲をストック…", {}, "名前を付けてページに残す（後で「ストックから選ぶ」）", false, "選択範囲"},
         {"act_quick_mask", "クイックマスクモードで編集", {}, "選択範囲を赤で見せ、ブラシなどの道具で直す", true, "選択範囲"},
-        {"act_copy", "コピー", {QKeySequence(Std::Copy)}, "", false, "編集"},
-        {"act_cut", "カット", {QKeySequence(Std::Cut)}, "", false, "編集"},
-        {"act_paste", "ペースト", {QKeySequence(Std::Paste)}, "新しいレイヤーにペーストします（そのまま動かせます）", false, "編集"},
-        {"act_delete_area", "消去", {}, "", false, "編集"},
+        {"act_copy", "コピー", {s("Ctrl+C")}, "", false, "編集"},
+        {"act_cut", "カット", {s("Ctrl+X")}, "", false, "編集"},
+        {"act_paste", "ペースト", {s("Ctrl+V")}, "新しいレイヤーにペーストします（そのまま動かせます）", false, "編集"},
+        {"act_delete_area", "消去", {s("Del"), s("Backspace")}, "", false, "編集"},
         {"act_flip_h", "水平方向に反転", {}, "", false, "編集/変形"},
         {"act_flip_v", "垂直方向に反転", {}, "", false, "編集/変形"},
         {"act_fill_selection", "描画色で塗りつぶし", {s("Alt+Backspace")}, "", false, "編集"},
@@ -189,7 +190,8 @@ private slots:
         // (すべてを選択 and 選択を解除 in 編集 too)
         for (const char* name : {"act_select_all", "act_deselect"})
             QVERIFY2(menu_at(studio.window.get(), QStringLiteral("編集"))->actions().contains(studio.window->action(QString::fromLatin1(name))), name);
-        QVERIFY(studio.window->action("act_delete_area")->shortcuts().contains(s("Backspace")));
+        // (the same keys on every system — PC5 V3 —: Delete's first and Backspace, not X11's Ctrl+D, 選択を解除's)
+        QCOMPARE(studio.window->action("act_delete_area")->shortcuts(), (QList<QKeySequence>{s("Del"), s("Backspace")}));
         // the tools: the marquee in its ways
         for (const auto& [name, way] : {std::pair{"act_marquee", "rect"}, {"act_lasso", "lasso"}, {"act_wand", "wand"}, {"act_sel_ellipse", "ellipse"},
                                         {"act_sel_polyline", "polyline"}, {"act_sel_pen", "pen"}, {"act_sel_erase", "erase"}}) {

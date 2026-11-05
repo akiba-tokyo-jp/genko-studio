@@ -1181,9 +1181,13 @@ private slots:
     // (SPEC COLOR-02: set_color_mode, set_inks, put_color_raster; COLOR-03: assign_profile, convert_profile, PC1b's
     // set_text_gamma and the channel ops of channels@1, PC1d's to_indexed, set_color_table, to_bitmap and set_duotone; COLOR-04:
     // PC2's set_adjustment, auto_adjust, hdr_toning, apply_image, calculations, trap and fade_layer; the public `genko schema`
-    // stays Python's).
+    // stays Python's). docs/ops.schema.json is Python's catalogue (the Python version's tests read it): this build's is
+    // that one with the words the user changed on 2026-10-28 (filter_raster's glow, add_layer's kind).
     void test_every_handled_op_is_in_the_catalog_and_docs() {
-        const Json docs = genko::test::read_json(genko::test::repo_root() + QStringLiteral("/docs/ops.schema.json"));
+        Json docs = genko::test::read_json(genko::test::repo_root() + QStringLiteral("/docs/ops.schema.json"));
+        const Json python = docs.at("ops");
+        genko::test::with_words_of_2026_10_28(docs);
+        QVERIFY(docs.at("ops") != python);
         std::string where;
         QVERIFY2(genko::test::same_content(docs.at("ops"), genko::core::ops_schema(), &where), where.c_str());
         std::set<std::string> listed;
@@ -1217,7 +1221,45 @@ private slots:
                                            "render_picture", "vanishing_point",
                                            // (PC4 E6: layer-styles@1, SPEC COLOR-09)
                                            "set_layer_style", "add_layer_effect", "set_global_light", "scale_layer_style",
-                                           "show_layer_effects", "layer_style_to_layers"};
+                                           "show_layer_effects", "layer_style_to_layers",
+                                           // (PC5 G-0: type@1, the type ops — G-0's and the later groups' frames, SPEC TEXT-02)
+                                           "add_type_layer", "edit_type", "type_info", "set_type", "type_style", "line_to_type_layer",
+                                           "type_layer_to_line", "replace_fonts",
+                                           // (PC5 J-0: 節 J's ops registered for its groups, SPEC PROD-01)
+                                           "new_layer_comp", "update_layer_comp", "apply_layer_comp", "set_layer_comp",
+                                           "duplicate_layer_comp", "delete_layer_comp", "clear_layer_comp_warnings", "add_slice",
+                                           "set_slice", "delete_slices", "divide_slice", "slices_from_guides", "add_annotation",
+                                           "set_annotation", "delete_annotations", "set_measurement_scale", "add_count",
+                                           "remove_count", "move_count", "clear_count", "new_count_group", "delete_count_group",
+                                           "set_count_group", "set_ruler_line", "straighten_layer", "place_scale_marker",
+                                           "add_video_layer", "video_insert_blank", "video_duplicate", "video_delete",
+                                           "video_restore", "video_restore_all", "video_alter", "set_video_layer", "replace_footage",
+                                           "rasterize_video", "footage_to_layers",
+
+                                           // (PC5 I-b: groups@1, レイヤーからのフレーム — SPEC AUTO-01)
+                                           "frame_from_layers",
+                                           // (PC5 H-b: 新規ガイドレイアウトを作成 — SPEC VIEW-01)
+                                           "add_guide_layout",
+                                           // (PC5 I-d: variables@1, 変数とデータセット — SPEC AUTO-01)
+                                           "set_variables", "set_data_sets", "apply_data_set",
+                                           // (PC5 J-d1: measure@1's question, image.analysis.info — SPEC PROD-01)
+                                           "measure_info",
+                                           // (PC5 I-a: レイヤーの基本の残り — SPEC AUTO-01)
+                                           "delete_layers", "duplicate_layers", "ungroup_layers", "bake_layer_styles",
+                                           // (PC5 J-b: slices@1's question, slice.list — SPEC PROD-01)
+                                           "slices_info",
+                                           // (PC5 I-c: artboards@1, アートボード — SPEC AUTO-01)
+                                           "add_artboard", "artboard_from_layers", "set_artboard",
+                                           // (PC5 J-d2: 計測値を記録's values asked — SPEC PROD-01)
+                                           "measure_values",
+                                           // (PC5 J-e1: timeline@1's question, timeline.info — SPEC PROD-01)
+                                           "timeline_info",
+                                           // (PC5 I-g: レイヤーを自動整列・レイヤーを自動合成 — SPEC AUTO-01)
+                                           "auto_align_layers", "auto_blend_layers",
+                                           // (PC5 I-f: image-assets@1, 生成 → 画像アセット — SPEC AUTO-01)
+                                           "set_image_assets",
+                                           // (PC5 H-f: pixel-aspect@1, 表示 → ピクセル縦横比 — SPEC VIEW-01)
+                                           "set_pixel_aspect"};
         for (const std::string& name : genko::render::ops_registry().names()) {
             if (listed.count(name) == 0 && own.count(name) == 0) missing += (missing.empty() ? "" : ", ") + name;
         }

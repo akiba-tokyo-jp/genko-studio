@@ -7,10 +7,12 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/frames.hpp"
+#include "core/measure.hpp"
 #include "core/pyops.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/smart.hpp"
+#include "core/type_text.hpp"
 
 // The warps: PhotoCraft v0.2.0 crates/geom/src/warp.rs (1-620), MIT: native/third_party/photocraft/NOTICE.md.
 // The turns' maps: crates/engine/src/canvas_geom.rs (200-235).
@@ -217,6 +219,22 @@ void map_frame(Frame& frame, const Mapping& m) {
 }
 
 void map_line(StoryLine& line, const Mapping& m) {
+    // (type@1, PC5 G-a: a type layer's record its matrix turns goes with the page by its matrix, the map in front of it —
+    // where its letters are set, and their lengths, stay)
+    if (const auto t = type_text::transform_of(line)) {
+        const auto& M = m.m;
+        const std::array<double, 6>& v = *t;
+        Json nt = *line.native_type;
+        nt["transform"] = Json::array({M[0] * v[0] + M[2] * v[1], M[1] * v[0] + M[3] * v[1], M[0] * v[2] + M[2] * v[3], M[1] * v[2] + M[3] * v[3],
+                                       M[0] * v[4] + M[2] * v[5] + M[4], M[1] * v[4] + M[3] * v[5] + M[5]});
+        try {
+            const Json normal = type_text::check_native_type(nt, line.text);
+            line.native_type = normal.is_null() ? std::nullopt : std::optional<Json>(normal);
+        } catch (const Error&) {
+            // (a map that takes it past its bounds: as it was)
+        }
+        return;
+    }
     const double k = m.scale();
     double w = line.w_mm.value() * k, h = line.h_mm.value() * k;
     if (m.swaps_axes()) std::swap(w, h);
@@ -240,6 +258,47 @@ void map_line(StoryLine& line, const Mapping& m) {
     if (std::fabs(k - 1.0) > 1e-12 && line.style.is_object()) {
         for (const char* key : {"size_mm", "outline_mm", "border_mm", "text_dx_mm", "text_dy_mm"}) {
             if (const auto it = line.style.find(key); it != line.style.end() && it->is_number()) *it = round3(it->get<double>() * k);
+        }
+    }
+    // (type@1, PC5 G-0: its point text's anchor and matrix with the page; a scale, its lengths too — in their normal form)
+    if (line.native_type && line.native_type->is_object()) {
+        Json nt = *line.native_type;
+        if (const auto a = nt.find("anchor_mm"); a != nt.end() && a->is_array() && a->size() == 2) {
+            const XY p = m.apply(XY{(*a)[0].get<double>(), (*a)[1].get<double>()});
+            *a = Json::array({p.x, p.y});
+        }
+        if (const auto t = nt.find("transform"); t != nt.end() && t->is_array() && t->size() == 6) {
+            std::array<double, 6> v{};
+            for (std::size_t i = 0; i < 6; ++i) v[i] = (*t)[i].get<double>();
+            const auto& M = m.m;
+            *t = Json::array({M[0] * v[0] + M[2] * v[1], M[1] * v[0] + M[3] * v[1], M[0] * v[2] + M[2] * v[3], M[1] * v[2] + M[3] * v[3],
+                              M[0] * v[4] + M[2] * v[5] + M[4], M[1] * v[4] + M[3] * v[5] + M[5]});
+        }
+        if (std::fabs(k - 1.0) > 1e-12) {
+            const auto scale = [&](Json& attrs, std::initializer_list<const char*> keys) {
+                if (!attrs.is_object()) return;
+                for (const char* key : keys)
+                    if (const auto it = attrs.find(key); it != attrs.end() && it->is_number()) *it = it->get<double>() * k;
+            };
+            const auto chars = [&](Json& holder) {
+                if (holder.is_object() && holder.contains("char")) scale(holder["char"], {"size_mm", "leading_mm", "baseline_shift_mm"});
+            };
+            const auto paras = [&](Json& holder) {
+                if (holder.is_object() && holder.contains("para"))
+                    scale(holder["para"], {"first_indent_mm", "start_indent_mm", "end_indent_mm", "space_before_mm", "space_after_mm"});
+            };
+            chars(nt);
+            paras(nt);
+            if (nt.contains("runs") && nt["runs"].is_array())
+                for (Json& run : nt["runs"]) chars(run);
+            if (nt.contains("paragraphs") && nt["paragraphs"].is_array())
+                for (Json& p : nt["paragraphs"]) paras(p);
+        }
+        try {
+            const Json normal = type_text::check_native_type(nt, line.text);
+            line.native_type = normal.is_null() ? std::nullopt : std::optional<Json>(normal);
+        } catch (const Error&) {
+            // (a scale that takes a length past its bounds: the settings kept as they were)
         }
     }
 }
@@ -462,6 +521,23 @@ void map_page(Document& doc, std::size_t at, const Mapping& m, const PixelHooks&
             const Rect& r = *layer.placement_mm;
             layer.placement_mm = rect_of(map_box({r.x.value(), r.y.value(), r.width.value(), r.height.value()}, m));
         }
+        // (type@1, PC5 G-0: a type layer's text mapped as a line's — upright, its box's centre where the map takes it; G-a:
+        // turned or mirrored with the page, by its matrix, as Photoshop turns a type layer)
+        if (layer.kind == LayerKind::Type && layer.type) {
+            StoryLine record = *layer.type;
+            if (!upright(m) && !type_text::transform_of(record)) {
+                Json nt = record.native_type ? *record.native_type : Json::object();
+                nt["transform"] = Json::array({m.m[0], m.m[1], m.m[2], m.m[3], m.m[4], m.m[5]});
+                try {
+                    record.native_type = type_text::check_native_type(nt, record.text);
+                } catch (const Error&) {
+                    map_line(record, m);  // (a map past its bounds: upright, as a line)
+                }
+            } else {
+                map_line(record, m);
+            }
+            layer.type = type_text::shared_record(std::move(record));
+        }
         // (smart-objects@1: its matrix after the map; its contents as they are)
         if (layer.kind == LayerKind::Smart) smart::transform_layer(layer, smart::Matrix{m.m[0], m.m[1], m.m[2], m.m[3], m.m[4], m.m[5]});
         if (layer.vector_mask) layer.vector_mask->path = map_path(layer.vector_mask->path, m);
@@ -483,6 +559,76 @@ void map_page(Document& doc, std::size_t at, const Mapping& m, const PixelHooks&
     if (page.rulers.is_array())
         for (Json& ruler : page.rulers) map_ruler(ruler, m);
     if (page.ruler && page.ruler->is_object()) move_points_at(*page.ruler, "points", m);
+    // (PC5 J-d1: the count marks and the ものさし's line where the map takes them — measure@1 —, and the notes' marks with
+    // their boxes along — annotations@1, upright: J-c's; the scale counts the page's pixels, as it was)
+    const auto mapped = [&m](const std::array<double, 2>& p) {
+        const XY q = m.apply(XY{p[0], p[1]});
+        return std::array<double, 2>{py_round(q.x, 4), py_round(q.y, 4)};
+    };
+    if (page.measure) {
+        for (CountGroup& g : page.measure->count_groups)
+            for (auto& p : g.points) p = mapped(p);
+        if (page.measure->ruler) {
+            RulerLine& r = *page.measure->ruler;
+            r.start = mapped(r.start);
+            r.end = mapped(r.end);
+            if (r.protractor) r.protractor = mapped(*r.protractor);
+        }
+    }
+    for (Annotation& note : page.annotations) {
+        const std::array<double, 2> was = note.at_mm;
+        note.at_mm = mapped(was);
+        if (note.popup_mm) {
+            (*note.popup_mm)[0] = py_round((*note.popup_mm)[0] + note.at_mm[0] - was[0], 4);
+            (*note.popup_mm)[1] = py_round((*note.popup_mm)[1] + note.at_mm[1] - was[1], 4);
+        }
+    }
+    // (the review's P2-2: a mark, a line or a note the map takes past the places a book holds — 1000 m from the page — would
+    // be written and never read: the op is refused, as J-c's notes are kept inside)
+    try {
+        if (page.measure) check_measure(*page.measure);
+        check_annotations(page.annotations);
+    } catch (const Error&) {
+        throw OpError("the page's count marks, ruler line or notes would lie past 1000 m from the page");
+    }
+    // (PC5 J-b, slices@1: each slice's rect the box of its corners through the map — upright still, a quarter turn its
+    // sides swapped —; a layer-based one is made again from its layer, its rect kept as the last one seen. Past 1000 m from
+    // the page: refused, as the marks above)
+    if (page.slices) {
+        // (review P3-8: a layer-based slice's outsets — top, left, bottom, right in the page's pixels — turned with the page
+        // onto the sides they face now, and scaled as a length of the page is, in the pixels the page has after)
+        const double was_px = page_px_per_mm(before), now_px = page_px_per_mm(after);
+        const double k = was_px > 0 && now_px > 0 ? m.scale() * now_px / was_px : 1.0;
+        constexpr std::array<std::array<double, 2>, 4> kSides{{{0, -1}, {-1, 0}, {0, 1}, {1, 0}}};  // (top, left, bottom, right)
+        std::array<std::size_t, 4> onto{0, 1, 2, 3};
+        for (std::size_t i = 0; i < 4; ++i) {
+            const XY v = m.linear(XY{kSides[i][0], kSides[i][1]});
+            double best = -1e300;
+            for (std::size_t j = 0; j < 4; ++j) {
+                const double dot = v.x * kSides[j][0] + v.y * kSides[j][1];
+                if (dot > best) {
+                    best = dot;
+                    onto[i] = j;
+                }
+            }
+        }
+        for (Slice& s : page.slices->list) {
+            const std::array<double, 4> b = map_box(s.rect_mm, m);
+            s.rect_mm = {py_round(b[0], 4), py_round(b[1], 4), py_round(b[2], 4), py_round(b[3], 4)};
+            if (s.outsets == std::array<int, 4>{}) continue;
+            std::array<int, 4> turned{};
+            for (std::size_t i = 0; i < 4; ++i) {
+                const double v = std::isfinite(k) ? std::round(s.outsets[i] * k) : 0.0;
+                turned[onto[i]] = static_cast<int>(std::clamp(v, double(-kSliceOutsetMax), double(kSliceOutsetMax)));
+            }
+            s.outsets = turned;
+        }
+        try {
+            check_slices(*page.slices);
+        } catch (const Error&) {
+            throw OpError("the page's slices would lie past 1000 m from the page");
+        }
+    }
     if (page.effects.is_array())
         for (Json& effect : page.effects) map_effect(effect, m);
     if (page.prims.is_array())

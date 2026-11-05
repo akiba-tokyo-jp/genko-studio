@@ -28,6 +28,7 @@
 #include "api/buildinfo.hpp"
 #include "api/server_cli.hpp"
 #include "api/studio_cli.hpp"
+#include "api/prefs_cli.hpp"
 #include "core/brush_dabs.hpp"
 #include "core/brushes.hpp"
 #include "core/filter_kinds.hpp"
@@ -35,6 +36,9 @@
 #include "core/base64.hpp"
 #include "core/config_dir.hpp"
 #include "core/actor.hpp"
+#include "core/anim.hpp"
+#include "render/footage.hpp"
+#include "core/video.hpp"
 #include "core/clock.hpp"
 #include "core/command_bus.hpp"
 #include "core/covers.hpp"
@@ -48,6 +52,18 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "formats/copy.hpp"
+#include "formats/datasets.hpp"
+#include "formats/image_assets.hpp"
+#include "formats/artboards.hpp"
+#include "render/ops_annotations.hpp"
+#include "render/ops_measure.hpp"
+#include "render/measure_features.hpp"
+#include "render/ops_slices.hpp"
+#include "render/ops_layer_comps.hpp"
+#include "render/ops_variables.hpp"
+#include "render/ops_align.hpp"
+#include "render/panorama.hpp"
+#include "render/stack.hpp"
 #include "formats/export.hpp"
 #include "formats/exporting.hpp"
 #include "formats/open_file.hpp"
@@ -78,8 +94,14 @@
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/codecs/codecs.hpp"
+#include "render/plugins.hpp"
 #include "render/png.hpp"
 #include "render/timelapse.hpp"
+#include "service/actions.hpp"
+#include "service/automate.hpp"
+#include "service/automate_photos.hpp"
+#include "service/spell.hpp"
+#include "core/prefs_table.hpp"
 #include "storage/doctor.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/gc.hpp"
@@ -173,9 +195,10 @@ bool negative_number(const QString& text) {
     return ok && text.startsWith(QLatin1Char('-'));
 }
 
-// The error message, or nothing when the arguments are right.
+// The error message, or nothing when the arguments are right. `more`: `positionals` or more of them (PC5 I-0: `genko
+// batch <inputs…>`).
 std::optional<std::string> parse_arguments(const QStringList& args, std::span<const Option> options,
-                                           std::size_t positionals, const char* names, Arguments& out) {
+                                           std::size_t positionals, const char* names, Arguments& out, bool more = false) {
     for (qsizetype i = 0; i < args.size(); ++i) {
         const QString& arg = args[i];
         if (!arg.startsWith(QLatin1String("--")) || arg.size() == 2) {
@@ -218,7 +241,7 @@ std::optional<std::string> parse_arguments(const QStringList& args, std::span<co
         out.values[match->name] = args[++i];
     }
     if (out.positional.size() < positionals) return std::string("the following arguments are required: ") + names;
-    if (out.positional.size() > positionals) return "unrecognized arguments: " + out.positional[positionals].toStdString();
+    if (!more && out.positional.size() > positionals) return "unrecognized arguments: " + out.positional[positionals].toStdString();
     return std::nullopt;
 }
 
@@ -251,28 +274,13 @@ core::ParseOptions text_file() {
     return options;
 }
 
-// A v1–v3 book is never written: found before anything is touched (no project.lock is made in it).
-void refuse_legacy(const fs::path& dir) {
-    const int version = storage::project_version(core::parse_python_json(storage::read_file(dir / "project.json"), nullptr, text_file()));
-    if (version < 4) throw storage::NeedsMigration(dir, version);
-}
+// A v1–v3 book is never written: found before anything is touched (no project.lock is made in it). (PC5 I-0: shared with
+// `genko batch --save`, service/automate.hpp)
+void refuse_legacy(const fs::path& dir) { service::automate::refuse_legacy(dir); }
 
 // Python's _is_studio_project: an agent's book (strict gates, studio state, or M0 sidecars) does not trust an unnamed
-// caller as a person.
-bool is_studio_project(const fs::path& dir) {
-    std::error_code ec;
-    if (fs::is_directory(dir / "studio" / "drafts", ec)) return true;
-    try {
-        const Json payload = core::parse_python_json(storage::read_file(dir / "project.json"), nullptr, text_file());
-        const auto truthy = [&payload](const char* key) {
-            const auto it = payload.find(key);
-            return it != payload.end() && core::py_truthy(*it);
-        };
-        return payload.is_object() && (truthy("strict_gates") || truthy("studio"));
-    } catch (const core::Error&) {
-        return false;
-    }
-}
+// caller as a person. (PC5 I-0: shared with `genko batch`, service/automate.hpp studio_book)
+bool is_studio_project(const fs::path& dir) { return service::automate::studio_book(dir); }
 
 // --- commands ----------------------------------------------------------------------------------------------------
 
@@ -310,6 +318,12 @@ int inspect(const QStringList& args, bool ascii) {
     QString area_text, page_text;  // (PC3 B1, the C++ build's own: --page N --area '<area>'; PC3 C-a: --paths [--page N])
     bool paths = false;  // (vector@1, PC3 C-a, the C++ build's own: --paths [--page N], path.list / path.info / layer.vectorMask.info)
     QString at_text;  // (PC3 C-d, the C++ build's own: --at <page>:<x_mm>,<y_mm>, layer.pickAt — the layers showing there)
+    bool comps = false;  // (PC5 J-a, the C++ build's own: --comps [--page N], layerComp.list — the pages' layer comps)
+    bool variables = false;  // (PC5 I-d, variables.list: --variables — the book's variables and data sets)
+    bool notes = false;  // (PC5 J-c, the C++ build's own: --annotations [--page N], notes.list — the pages' notes)
+    bool measuring = false;  // (PC5 J-d1, the C++ build's own: --measure [--page N], image.analysis.info — the pages' measuring)
+    bool slicing = false;  // (PC5 J-b, the C++ build's own: --slices [--page N], slice.list — the pages' slices, the auto ones too)
+    bool timing = false;  // (PC5 J-e1, the C++ build's own: --timeline [--page N], timeline.info — the pages' timelines)
     const auto value_of = [&](qsizetype& i, const char* name, QString& into) -> bool {
         const QString& arg = args[i];
         const QString flag = QString::fromLatin1(name);
@@ -333,6 +347,18 @@ int inspect(const QStringList& args, bool ascii) {
             file_info = true;
         } else if (arg == QLatin1String("--paths")) {
             paths = true;
+        } else if (arg == QLatin1String("--comps")) {
+            comps = true;
+        } else if (arg == QLatin1String("--variables")) {
+            variables = true;
+        } else if (arg == QLatin1String("--annotations")) {
+            notes = true;
+        } else if (arg == QLatin1String("--measure")) {
+            measuring = true;
+        } else if (arg == QLatin1String("--slices")) {
+            slicing = true;
+        } else if (arg == QLatin1String("--timeline")) {
+            timing = true;
         } else if (arg == QLatin1String("--stroke")) {
             if (i + 1 >= args.size()) return usage("argument --stroke: expected one argument");
             stroke = args[++i];
@@ -385,8 +411,21 @@ int inspect(const QStringList& args, bool ascii) {
     }
     if (!profile.isEmpty() && !pixel.isEmpty()) return usage("argument --profile: not with --pixel");
     if (!area_text.isEmpty() && page_text.isEmpty()) return usage("argument --area, --page: --area <area> with --page <N>");
-    if (!page_text.isEmpty() && area_text.isEmpty() && !paths) return usage("argument --page: only with --area or --paths");
+    if (!page_text.isEmpty() && area_text.isEmpty() && !paths && !comps && !notes && !measuring && !slicing && !timing)
+        return usage("argument --page: only with --area, --paths, --comps or --annotations");  // (and --measure: the words as before)
+    if (timing && (slicing || measuring || notes || comps || variables || paths || looks || filters || file_info || !area_text.isEmpty() ||
+                   !pixel.isEmpty() || !profile.isEmpty() || !at_text.isEmpty() || !stroke.isEmpty()))
+        return usage("argument --timeline: only with --page");
+    if (slicing && (measuring || notes || comps || variables || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty()))
+        return usage("argument --slices: not with --measure, --annotations, --comps, --variables, --paths, --area, --pixel or --profile");
+    if (measuring && (notes || comps || variables || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty()))
+        return usage("argument --measure: not with --annotations, --comps, --variables, --paths, --area, --pixel or --profile");
+    if (notes && (comps || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty()))
+        return usage("argument --annotations: not with --comps, --paths, --area, --pixel or --profile");
+    if (comps && (paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty())) return usage("argument --comps: not with --paths, --area, --pixel or --profile");
     if (paths && !area_text.isEmpty()) return usage("argument --paths: not with --area");
+    if (variables && (notes || comps || paths || !area_text.isEmpty() || !pixel.isEmpty() || !profile.isEmpty() || !page_text.isEmpty() || !at_text.isEmpty()))
+        return usage("argument --variables: not with --annotations, --comps, --paths, --area, --pixel, --profile, --page or --at");
     std::optional<std::int64_t> page_number;
     if (!page_text.isEmpty()) {
         bool ok = false;
@@ -437,6 +476,78 @@ int inspect(const QStringList& args, bool ascii) {
             return 0;
         }
         throw core::Error("key", "no page " + std::to_string(*at_page));
+    }
+    if (variables) {  // (PC5 I-d, variables.list: the book's variables — each def's page, target and whether it is gone —, data sets, the one applied last)
+        print_json(render::variables_listing(loaded.document), ascii);
+        return 0;
+    }
+    if (comps) {  // (PC5 J-a, layerComp.list: each page's layer comps — their options, the layers they record, the layers gone)
+        const core::Document& doc = loaded.document;
+        core::Json pages = core::Json::array();
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (page_number && doc.pages[i]->index != core::Num(*page_number)) continue;
+            if (doc.is_deferred(i)) continue;
+            core::Json one = render::layer_comps::listing(doc.page(i));
+            one["page"] = doc.pages[i]->index.json();
+            pages.push_back(std::move(one));
+        }
+        if (page_number && pages.empty()) throw core::Error("key", "no page " + std::to_string(*page_number));
+        print_json(core::Json{{"pages", std::move(pages)}}, ascii);
+        return 0;
+    }
+    if (timing) {  // (PC5 J-e1, timeline.info: each page's timeline — fps, frames, loop, its length, work area, tracks, camera keys)
+        const core::Document& doc = loaded.document;
+        core::Json pages = core::Json::array();
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (page_number && doc.pages[i]->index != core::Num(*page_number)) continue;
+            if (doc.is_deferred(i)) continue;
+            try {
+                pages.push_back(core::timeline_info(doc.page(i)));
+            } catch (const std::exception& error) {  // (an anim's values no op makes — frames of words —: said for that page alone)
+                pages.push_back(core::Json{{"page", doc.pages[i]->index.json()}, {"animation", true}, {"error", error.what()}});
+            }
+        }
+        if (page_number && pages.empty()) throw core::Error("key", "no page " + std::to_string(*page_number));
+        print_json(core::Json{{"pages", std::move(pages)}}, ascii);
+        return 0;
+    }
+    if (slicing) {  // (PC5 J-b, slice.list: each page's slices — the user, layer-based and auto ones, numbered, their options)
+        const core::Document& doc = loaded.document;
+        core::Json pages = core::Json::array();
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (page_number && doc.pages[i]->index != core::Num(*page_number)) continue;
+            if (doc.is_deferred(i)) continue;
+            pages.push_back(render::slices::listing(doc, doc.page(i)));
+        }
+        if (page_number && pages.empty()) throw core::Error("key", "no page " + std::to_string(*page_number));
+        print_json(core::Json{{"pages", std::move(pages)}}, ascii);
+        return 0;
+    }
+    if (measuring) {  // (PC5 J-d1, image.analysis.info: each page's measurement scale, ruler line and its readout, count groups, notes)
+        const core::Document& doc = loaded.document;
+        core::Json pages = core::Json::array();
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (page_number && doc.pages[i]->index != core::Num(*page_number)) continue;
+            if (doc.is_deferred(i)) continue;
+            pages.push_back(render::measure::listing(doc.page(i)));
+        }
+        if (page_number && pages.empty()) throw core::Error("key", "no page " + std::to_string(*page_number));
+        print_json(core::Json{{"pages", std::move(pages)}}, ascii);
+        return 0;
+    }
+    if (notes) {  // (PC5 J-c, notes.list: each page's notes — where, their text, author, colour, box, date and who wrote them)
+        const core::Document& doc = loaded.document;
+        core::Json pages = core::Json::array();
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (page_number && doc.pages[i]->index != core::Num(*page_number)) continue;
+            if (doc.is_deferred(i)) continue;
+            core::Json one = render::annotations::listing(doc.page(i));
+            one["page"] = doc.pages[i]->index.json();
+            pages.push_back(std::move(one));
+        }
+        if (page_number && pages.empty()) throw core::Error("key", "no page " + std::to_string(*page_number));
+        print_json(core::Json{{"pages", std::move(pages)}}, ascii);
+        return 0;
     }
     if (paths) {  // (vector@1: the pages' paths, work paths, clipping paths and the layers' vector masks and shapes)
         print_json(render::path_info::book_paths(loaded.document, page_number), ascii);
@@ -621,6 +732,7 @@ int render_command(const QStringList& args, bool ascii) {
     std::int64_t page_number = 1;
     std::int64_t dpi = 150;
     std::string mode = "print";
+    std::optional<std::int64_t> frame;  // (PC5 J-e1, the C++ build's own: --frame N, an animation page's frame N)
     const auto value_of = [&](qsizetype& i, const QString& arg, const QString& flag, QString& value) {
         if (arg == flag) {
             if (i + 1 >= args.size()) return 1;
@@ -647,6 +759,11 @@ int render_command(const QStringList& args, bool ascii) {
             const auto n = py_int_arg(value);
             if (!n) return usage("argument --dpi: invalid int value: '" + value.toStdString() + "'");
             dpi = *n;
+        } else if ((found = value_of(i, arg, QStringLiteral("--frame"), value)) != 0) {
+            if (found == 1) return usage("argument --frame: expected one argument");
+            const auto n = py_int_arg(value);
+            if (!n) return usage("argument --frame: invalid int value: '" + value.toStdString() + "'");
+            frame = *n;
         } else if ((found = value_of(i, arg, QStringLiteral("--mode"), value)) != 0) {
             if (found == 1) return usage("argument --mode: expected one argument");
             mode = value.toStdString();
@@ -709,7 +826,15 @@ int render_command(const QStringList& args, bool ascii) {
     if (page == nullptr) return fail("no page " + std::to_string(page_number), "not_found", ascii, 1);
     render::RenderOptions options;
     options.mode = mode;
-    const render::RenderResult result = render::render_page(*page, static_cast<int>(dpi), options, &doc);
+    if (frame) {  // (PC5 J-e1, timeline.setFrame: the page as it is at that frame — without it an animation draws its first)
+        if (!core::anim::is_animation(*page)) return fail("the page is not an animation (set_animation first)", "value", ascii, 1);
+        const std::int64_t count = core::anim::frames_of(*page);
+        if (*frame < 1 || *frame > count) return fail("frame is 1 to " + std::to_string(count), "value", ascii, 1);
+        options.at_frame = true;
+    }
+    const render::RenderResult result =
+        frame ? render::render_page(render::footage::frame_page(*page, *frame, &doc), static_cast<int>(dpi), options, &doc)
+              : render::render_page(*page, static_cast<int>(dpi), options, &doc);
     if (out_path.has_parent_path()) {  // (args.out.parent.mkdir, before image.save: the WebP is written beside it)
         std::error_code ec;
         std::filesystem::create_directories(out_path.parent_path(), ec);
@@ -726,6 +851,7 @@ int render_command(const QStringList& args, bool ascii) {
     json["ok"] = true;
     json["path"] = out_text;
     json["mode"] = mode;
+    if (frame) json["frame"] = *frame;
     print_json(json, ascii);
     return 0;
 }
@@ -806,6 +932,361 @@ int export_ai(const Arguments& a, bool ascii) {
     return 0;
 }
 
+// PC5 J-a (file.export.layerCompsToFiles, レイヤーカンプからファイル…, the C++ build's own): `genko export <book> <folder> --format
+// comps [--page N] [--comp-format png|jpg|psd|…] [--prefix P] [--comps ID,ID…] [--quality 0..12] [--json]` — page N's layer
+// comps (1 by default; every one, or those named), each applied to a copy of the book and written as one file in the
+// folder (formats::export_layer_comps); the paths one a line, or with --json {"ok": true, "count", "files"}.
+int export_comps(const Arguments& a, bool ascii) {
+    std::int64_t wanted = 1;
+    if (const auto value = a.value("--page")) {
+        const auto n = int_option(*value);
+        if (!n) return usage("genko export: argument --page: invalid int value: " + core::py_repr_str(value->toStdString()));
+        wanted = *n;
+    }
+    formats::CompFiles files;
+    if (const auto f = a.value("--comp-format")) {
+        files.extension = f->toLower().toStdString();
+        const auto exts = formats::copy_extensions();
+        if (std::find(exts.begin(), exts.end(), files.extension) == exts.end()) return usage("genko export: argument --comp-format: not a format this build writes: " + files.extension);
+    }
+    if (const auto prefix = a.value("--prefix")) files.prefix = prefix->toStdString();
+    if (const auto ids = a.value("--comps")) {
+        for (const QString& part : ids->split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+            const auto n = int_option(part.trimmed());
+            if (!n) return usage("genko export: argument --comps: the comps' ids, e.g. 1,3");
+            files.comps.push_back(*n);
+        }
+    }
+    if (const auto q = a.value("--quality")) {
+        bool ok = false;
+        const int v = q->toInt(&ok);
+        if (!ok || v < 0 || v > 12) return usage("genko export: argument --quality: an integer 0..12");
+        files.options.quality = v;
+    }
+    const fs::path src = path_arg(a.positional[0]);
+    const fs::path out = path_arg(a.positional[1]);
+    const auto loaded = storage::load_document(src);
+    const core::Document& doc = loaded.document;
+    std::optional<std::size_t> at;
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.pages[i]->index == core::Num(wanted) && !doc.is_deferred(i)) at = i;
+    }
+    if (!at) return usage("no page " + std::to_string(wanted), 1);
+    // (the coordinator's P3-8: never into the book or over a file it links)
+    const formats::WriteGuard guard = formats::write_guard(doc, src);
+    try {
+        formats::check_target(guard, out);
+    } catch (const core::Error& error) {
+        return usage(std::string("genko export: ") + error.what());
+    }
+    files.check = [guard](const fs::path& file) { formats::check_target(guard, file); };
+    fs::create_directories(out);
+    std::vector<formats::CopyResult> written;
+    try {
+        written = formats::export_layer_comps(doc, *at, out, files);
+    } catch (const core::Error& error) {
+        if (std::string_view(error.code()) == "refused_target") return usage(std::string("genko export: ") + error.what());
+        if (std::string_view(error.code()) == "value") return fail(error.what(), "export", ascii, 1);
+        throw;
+    }
+    core::Json listed = core::Json::array();
+    std::string lines;
+    for (const formats::CopyResult& r : written) {
+        listed.push_back(core::path_to_utf8(r.file));
+        lines += core::path_to_utf8(r.file) + "\n";
+    }
+    if (a.flag("--json")) {
+        print_json(core::Json{{"ok", true}, {"count", written.size()}, {"files", listed}}, ascii);
+    } else {
+        write_text(lines, stdout);
+    }
+    return 0;
+}
+
+// PC5 J-b (file.export.saveForWebLegacy by slices, the C++ build's own): `genko export <book> <folder> --format slices [--page N]
+// [--web '<Save for Web's settings, PhotoCraft's parameters>'] [--slices all|user] [--numbers N,N…] [--html] [--images NAME]
+// [--json]` — page N's slices (1 by default; the auto ones too, or only the user and layer-based ones, or those numbered) each
+// optimised as Web 用に保存 writes it, in the folder's images/ (formats::save_slices_for_web), and with --html the HTML table
+// of them (<base>.html); the paths one a line, or with --json {"ok": true, "count", "files", "html", "bytes", "slices"}.
+int export_slices(const Arguments& a, bool ascii) {
+    std::int64_t wanted = 1;
+    if (const auto value = a.value("--page")) {
+        const auto n = int_option(*value);
+        if (!n) return usage("genko export: argument --page: invalid int value: " + core::py_repr_str(value->toStdString()));
+        wanted = *n;
+    }
+    formats::WebSettings settings;
+    formats::WebSize size;
+    if (const auto text = a.value("--web")) {
+        try {
+            const Json params = core::parse_python_json(text->toStdString());
+            settings = formats::web_settings_from_json(params);
+            size = formats::web_size_from_json(params);
+        } catch (const core::Error& error) {
+            return usage(std::string("genko export: argument --web: ") + error.what());
+        } catch (const std::exception&) {
+            return usage("genko export: argument --web: Save for Web's settings as JSON, e.g. '{\"preset\": \"PNG-24\"}'");
+        }
+    }
+    formats::WebSliceOptions options;
+    options.html = a.flag("--html");
+    if (const auto which = a.value("--slices")) {
+        if (*which != QLatin1String("all") && *which != QLatin1String("user")) return usage("genko export: argument --slices: all or user");
+        options.user_only = *which == QLatin1String("user");
+    }
+    if (const auto numbers = a.value("--numbers")) {
+        for (const QString& part : numbers->split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+            const auto n = int_option(part.trimmed());
+            if (!n || *n < 1 || *n > 1000000) return usage("genko export: argument --numbers: the slices' numbers as shown, e.g. 1,3");
+            options.numbers.push_back(static_cast<int>(*n));
+        }
+        if (options.numbers.empty()) return usage("genko export: argument --numbers: the slices' numbers as shown, e.g. 1,3");
+    }
+    if (const auto images = a.value("--images")) {
+        options.images = images->toStdString();
+        if (options.images.find("..") != std::string::npos || options.images.find('/') != std::string::npos || options.images.find('\\') != std::string::npos)
+            return usage("genko export: argument --images: a folder's name in the folder given (\"\": beside the HTML)");
+    }
+    const fs::path src = path_arg(a.positional[0]);
+    const fs::path out = path_arg(a.positional[1]);
+    const auto loaded = storage::load_document(src);
+    const core::Document& doc = loaded.document;
+    std::optional<std::size_t> at;
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.pages[i]->index == core::Num(wanted) && !doc.is_deferred(i)) at = i;
+    }
+    if (!at) return usage("no page " + std::to_string(wanted), 1);
+    // (the coordinator's P3-8, F-c's write_guard: never into the book or over a file it links — every file asked first)
+    const formats::WriteGuard guard = formats::write_guard(doc, src);
+    options.check = [guard](const fs::path& file) { formats::check_target(guard, file); };
+    formats::WebSlicesResult written;
+    try {
+        written = formats::save_slices_for_web(doc, *at, settings, size, out, options);
+    } catch (const core::Error& error) {
+        if (std::string_view(error.code()) == "refused_target") return usage(std::string("genko export: ") + error.what());
+        if (std::string_view(error.code()) == "value" || std::string_view(error.code()) == "image_too_large") return fail(error.what(), "export", ascii, 1);
+        throw;
+    }
+    core::Json listed = core::Json::array();
+    std::string lines;
+    for (const fs::path& f : written.files) {
+        listed.push_back(core::path_to_utf8(f));
+        lines += core::path_to_utf8(f) + "\n";
+    }
+    if (written.html) lines += core::path_to_utf8(*written.html) + "\n";
+    if (a.flag("--json")) {
+        core::Json json{{"ok", true}, {"count", written.files.size()}, {"files", listed}, {"html", written.html ? core::Json(core::path_to_utf8(*written.html)) : core::Json(nullptr)},
+                        {"bytes", static_cast<std::int64_t>(written.bytes)}, {"slices", written.slices}, {"width", written.width}, {"height", written.height}};
+        if (!written.notes.empty()) json["notes"] = written.notes;
+        print_json(json, ascii);
+    } else {
+        write_text(lines, stdout);
+    }
+    return 0;
+}
+
+// PC5 I-d (file.export.dataSetsAsFiles, データセットからファイル…): `genko export <book> <folder> --format datasets [--page N]
+// [--dataset-format png|jpg|psd|…] [--datasets NAME,NAME…] [--naming "{name}|{index}|{document}"] [--quality 0..12] [--json]` —
+// each data set (or those named) applied to a copy of the book and its pages (page N; none: the pages its variables are on) written a file each in the folder (formats::export_data_sets);
+// the paths one a line, or with --json {"ok": true, "count", "files"}.
+int export_datasets(const Arguments& a, bool ascii) {
+    formats::DataSetFiles files;
+    if (const auto f = a.value("--dataset-format")) {
+        files.extension = f->toLower().toStdString();
+        const auto exts = formats::copy_extensions();
+        if (std::find(exts.begin(), exts.end(), files.extension) == exts.end()) return usage("genko export: argument --dataset-format: not a format this build writes: " + files.extension);
+    }
+    if (const auto names = a.value("--datasets")) {
+        for (const QString& part : names->split(QLatin1Char(','), Qt::SkipEmptyParts)) files.data_sets.push_back(part.trimmed().toStdString());
+        if (files.data_sets.empty()) return usage("genko export: argument --datasets: the data sets' names, e.g. A,B");
+    }
+    if (const auto naming = a.value("--naming")) files.naming = naming->toStdString();
+    if (const auto q = a.value("--quality")) {
+        bool ok = false;
+        const int v = q->toInt(&ok);
+        if (!ok || v < 0 || v > 12) return usage("genko export: argument --quality: an integer 0..12");
+        files.options.quality = v;
+    }
+    std::optional<std::int64_t> wanted;
+    if (const auto value = a.value("--page")) {
+        const auto n = int_option(*value);
+        if (!n) return usage("genko export: argument --page: invalid int value: " + core::py_repr_str(value->toStdString()));
+        wanted = *n;
+    }
+    const fs::path src = path_arg(a.positional[0]);
+    const fs::path out = path_arg(a.positional[1]);
+    const auto loaded = storage::load_document(src);
+    const core::Document& doc = loaded.document;
+    if (wanted) {
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+            if (doc.pages[i]->index == core::Num(*wanted) && !doc.is_deferred(i)) files.pages.push_back(i);
+        }
+        if (files.pages.empty()) return usage("no page " + std::to_string(*wanted), 1);
+    }
+    // (the coordinator's P3-8: never into the book or over a file it links)
+    const formats::WriteGuard guard = formats::write_guard(doc, src);
+    try {
+        formats::check_target(guard, out);
+    } catch (const core::Error& error) {
+        return usage(std::string("genko export: ") + error.what());
+    }
+    files.check = [guard](const fs::path& file) { formats::check_target(guard, file); };
+    fs::create_directories(out);
+    std::vector<formats::CopyResult> written;
+    try {
+        written = formats::export_data_sets(doc, out, files);
+    } catch (const core::Error& error) {
+        if (std::string_view(error.code()) == "refused_target") return usage(std::string("genko export: ") + error.what());
+        if (std::string_view(error.code()) == "value") return fail(error.what(), "export", ascii, 1);
+        throw;
+    }
+    core::Json listed = core::Json::array();
+    std::string lines;
+    for (const formats::CopyResult& r : written) {
+        listed.push_back(core::path_to_utf8(r.file));
+        lines += core::path_to_utf8(r.file) + "\n";
+    }
+    if (a.flag("--json")) {
+        print_json(core::Json{{"ok", true}, {"count", written.size()}, {"files", listed}}, ascii);
+    } else {
+        write_text(lines, stdout);
+    }
+    return 0;
+}
+
+// PC5 I-c (file.export.artboardsToFiles, file.export.artboardsToPdf, アートボードからファイル… / PDF…; artboards@1): `genko export
+// <book> <out> --format artboards [--artboard-format png|jpg|psd|…|pdf] [--artboards NAME,NAME…] [--prefix P] [--quality 0..12]
+// [--one-psd] [--json]` — the book's artboards (every one, or those named) each a file in the folder <out>
+// (<prefix>_<name>.<ext>: formats::export_artboards); with pdf the one PDF <out> of them (formats::export_artboards_pdf);
+// with --one-psd the one PSD (or .psb) <out> of them, each an artboard (formats::export_artboards_psd). The paths one a line,
+// or with --json {"ok": true, "count", "files"} (and "pages" for a PDF, "notes" when any).
+int export_artboards(const Arguments& a, bool ascii) {
+    std::string extension = "png";
+    if (const auto f = a.value("--artboard-format")) {
+        extension = f->toLower().toStdString();
+        const auto exts = formats::copy_extensions();
+        if (extension != "pdf" && std::find(exts.begin(), exts.end(), extension) == exts.end())
+            return usage("genko export: argument --artboard-format: not a format this build writes: " + extension);
+    }
+    const bool one_psd = a.flag("--one-psd");
+    if (one_psd && extension != "psd" && extension != "psb" && a.value("--artboard-format")) return usage("genko export: argument --one-psd: with --artboard-format psd or psb");
+    std::vector<std::string> names;
+    if (const auto given = a.value("--artboards")) {
+        for (const QString& part : given->split(QLatin1Char(','), Qt::SkipEmptyParts)) names.push_back(part.trimmed().toStdString());
+        if (names.empty()) return usage("genko export: argument --artboards: the artboards' names, e.g. A,B");
+    }
+    std::optional<int> quality;
+    if (const auto q = a.value("--quality")) {
+        bool ok = false;
+        const int v = q->toInt(&ok);
+        if (!ok || v < 0 || v > 12) return usage("genko export: argument --quality: an integer 0..12");
+        quality = v;
+    }
+    const fs::path src = path_arg(a.positional[0]);
+    const fs::path out = path_arg(a.positional[1]);
+    const auto loaded = storage::load_document(src);
+    const core::Document& doc = loaded.document;
+    // (the coordinator's P3-8, F-c's write_guard: never into the book or over a file it links — every file asked first)
+    const formats::WriteGuard guard = formats::write_guard(doc, src);
+    try {
+        formats::check_target(guard, out);
+    } catch (const core::Error& error) {
+        return usage(std::string("genko export: ") + error.what());
+    }
+    const auto check = [guard](const fs::path& file) { formats::check_target(guard, file); };
+    core::Json listed = core::Json::array();
+    core::Json json{{"ok", true}};
+    std::vector<std::string> notes;
+    try {
+        if (extension == "pdf") {
+            formats::ArtboardPdf pdf;
+            pdf.artboards = names;
+            pdf.quality = quality.value_or(10);
+            pdf.check = check;
+            const formats::ArtboardPdfResult made = formats::export_artboards_pdf(doc, out, pdf);
+            listed.push_back(core::path_to_utf8(made.file));
+            json["pages"] = made.pages;
+            notes = made.notes;
+        } else if (one_psd) {
+            formats::ArtboardPsd psd;
+            psd.artboards = names;
+            psd.psb = extension == "psb" || core::path_to_utf8(out.extension()) == ".psb";
+            psd.check = check;
+            const formats::CopyResult made = formats::export_artboards_psd(doc, out, psd);
+            listed.push_back(core::path_to_utf8(made.file));
+            notes = made.notes;
+        } else {
+            formats::ArtboardFiles files;
+            files.extension = extension;
+            if (const auto prefix = a.value("--prefix")) files.prefix = prefix->toStdString();
+            files.artboards = names;
+            files.options.quality = quality;
+            files.check = check;
+            fs::create_directories(out);
+            for (const formats::CopyResult& r : formats::export_artboards(doc, out, files)) {
+                listed.push_back(core::path_to_utf8(r.file));
+                for (const std::string& n : r.notes)
+                    if (std::find(notes.begin(), notes.end(), n) == notes.end()) notes.push_back(n);
+            }
+        }
+    } catch (const core::Error& error) {
+        if (std::string_view(error.code()) == "refused_target") return usage(std::string("genko export: ") + error.what());
+        if (std::string_view(error.code()) == "value" || std::string_view(error.code()) == "image_too_large" ||
+            std::string_view(error.code()) == "psd_too_large")
+            return fail(error.what(), "export", ascii, 1);
+        throw;
+    }
+    if (a.flag("--json")) {
+        json["count"] = listed.size();
+        json["files"] = listed;
+        if (!notes.empty()) json["notes"] = notes;
+        print_json(json, ascii);
+    } else {
+        std::string lines;
+        for (const core::Json& f : listed) lines += f.get<std::string>() + "\n";
+        write_text(lines, stdout);
+    }
+    return 0;
+}
+
+// PC5 I-f (file.generate.imageAssets, 生成 → 画像アセット): `genko export <book> <folder> --format image-assets [--json]` — the
+// layers (and groups) named as files ("logo.png", "200% logo@2x.png", "48x48 icons/a.png8", "photo.jpg80%") written into the
+// folder now (formats::image_assets::generate; never into the book or over a file it links); the paths one a line (what could
+// not be written on stderr), or with --json {"ok": no errors, "count", "files", "errors", "notes"}; 1 when one could not be written.
+int export_image_assets(const Arguments& a, bool ascii) {
+    for (const auto& [option, value] : a.values) {
+        if (option != "--format") return usage("genko export: argument " + option + ": not with --format image-assets");
+    }
+    const fs::path src = path_arg(a.positional[0]);
+    const fs::path out = path_arg(a.positional[1]);
+    const auto loaded = storage::load_document(src);
+    const formats::WriteGuard guard = formats::write_guard(loaded.document, src);
+    try {
+        formats::check_target(guard, out);
+    } catch (const core::Error& error) {
+        return usage(std::string("genko export: ") + error.what());
+    }
+    const formats::image_assets::Result result = formats::image_assets::generate(loaded.document, out, guard);
+    core::Json listed = core::Json::array();
+    std::string lines;
+    for (const fs::path& file : result.files) {
+        listed.push_back(core::path_to_utf8(file));
+        lines += core::path_to_utf8(file) + "\n";
+    }
+    if (a.flag("--json")) {
+        core::Json notes = core::Json::array();
+        for (const std::string& note : result.notes) notes.push_back(note);
+        print_json(core::Json{{"ok", result.errors.empty()}, {"count", result.files.size()}, {"files", listed}, {"errors", result.errors}, {"notes", notes}},
+                   ascii);
+    } else {
+        write_text(lines, stdout);
+        std::string said;
+        for (const core::Json& e : result.errors) said += "genko export: " + e.value("asset", std::string()) + ": " + e.value("error", std::string()) + "\n";
+        if (!said.empty()) write_text(said, stderr);
+    }
+    return result.errors.empty() ? 0 : 1;  // (an asset not written: 1, as a contact sheet's — the review's P3-3)
+}
+
 // `genko export <book> <out> [--format F] [options]` (Python's export command, genko/__main__.py): the book written
 // out in one format; the paths of the files one a line, or with --json {"ok": true, "count", "files"}.
 int export_command(const QStringList& args, bool ascii) {
@@ -816,7 +1297,17 @@ int export_command(const QStringList& args, bool ascii) {
                                           {"--psd-text", true},   {"--rasterize-unsupported", false}, {"--lut-size", true},
                                           {"--title", true},      {"--paths", true},
                                           // (PC4 F-c, --format layers: レイヤーからファイル…'s choices)
-                                          {"--layer-format", true}, {"--prefix", true}, {"--visible-only", true}, {"--quality", true}};
+                                          {"--layer-format", true}, {"--prefix", true}, {"--visible-only", true}, {"--quality", true},
+                                          // (PC5 J-a, --format comps: レイヤーカンプからファイル…'s choices)
+                                          {"--comp-format", true}, {"--comps", true},
+                                          // (PC5 I-d, --format datasets: データセットからファイル…'s choices)
+                                          {"--dataset-format", true}, {"--datasets", true}, {"--naming", true},
+                                          // (PC5 J-b, --format slices: Web 用に保存 by slices)
+                                          {"--web", true}, {"--slices", true}, {"--numbers", true}, {"--html", false}, {"--images", true},
+                                          // (PC5 J-e1, --format animation: ビデオをレンダリング…'s 作業範囲)
+                                          {"--work-area", false},
+                                          // (PC5 I-c, --format artboards: アートボードからファイル… / PDF…'s choices)
+                                          {"--artboard-format", true}, {"--artboards", true}, {"--one-psd", false}};
     Arguments a;
     if (auto error = parse_arguments(args, kOptions, 2, "src, out", a)) return usage("genko export: " + *error);
     // PC2a (file.export.colorLookupTables, the C++ build's own: not among Python's formats, whose choices it leaves as they
@@ -824,7 +1315,26 @@ int export_command(const QStringList& args, bool ascii) {
     if (a.value("--format") == std::optional<QString>(QStringLiteral("cube"))) return export_cube(a, ascii);
     // vector@1 (PC3 C-a, file.export.pathsToIllustrator, the C++ build's own): a page's paths as an Illustrator file
     if (a.value("--format") == std::optional<QString>(QStringLiteral("ai"))) return export_ai(a, ascii);
+    // PC5 J-a (file.export.layerCompsToFiles, the C++ build's own): a page's layer comps, a file each
+    if (a.value("--format") == std::optional<QString>(QStringLiteral("comps"))) return export_comps(a, ascii);
+    if (a.value("--comp-format") || a.value("--comps")) return usage("genko export: argument --comp-format, --comps: only with --format comps");
+    // PC5 J-b (file.export.saveForWebLegacy by slices): a page's slices, a file each, and their HTML
+    if (a.value("--format") == std::optional<QString>(QStringLiteral("slices"))) return export_slices(a, ascii);
+    if (a.value("--web") || a.value("--slices") || a.value("--numbers") || a.flag("--html") || a.value("--images"))
+        return usage("genko export: argument --web, --slices, --numbers, --html, --images: only with --format slices");
+    // PC5 I-d (file.export.dataSetsAsFiles): the book's data sets, a file each
+    if (a.value("--format") == std::optional<QString>(QStringLiteral("datasets"))) return export_datasets(a, ascii);
+    // PC5 I-f (file.generate.imageAssets): the layers named as files, written now
+    if (a.value("--format") == std::optional<QString>(QStringLiteral("image-assets"))) return export_image_assets(a, ascii);
+    if (a.value("--dataset-format") || a.value("--datasets") || a.value("--naming"))
+        return usage("genko export: argument --dataset-format, --datasets, --naming: only with --format datasets");
+    // PC5 I-c (file.export.artboardsToFiles, file.export.artboardsToPdf): the book's artboards, a file each, one PDF or one PSD
+    if (a.value("--format") == std::optional<QString>(QStringLiteral("artboards"))) return export_artboards(a, ascii);
+    if (a.value("--artboard-format") || a.value("--artboards") || a.flag("--one-psd"))
+        return usage("genko export: argument --artboard-format, --artboards, --one-psd: only with --format artboards");
     if (a.value("--paths")) return usage("genko export: argument --paths: only with --format ai");
+    if (a.flag("--work-area") && a.value("--format") != std::optional<QString>(QStringLiteral("animation")))
+        return usage("genko export: argument --work-area: only with --format animation");
     if (a.value("--lut-size") || a.value("--title")) return usage("genko export: argument --lut-size, --title: only with --format cube");
     // (PC4 F-c: レイヤーからファイル…'s choices, only with --format layers; none of them: the files as before)
     formats::LayerFiles layer_files;
@@ -994,7 +1504,10 @@ int export_command(const QStringList& args, bool ascii) {
             return usage("no page " + (ints["--page"] ? std::to_string(*ints["--page"]) : std::string("None")), 1);
         }
         const fs::path dest = file_given ? out : formats::detail::join(out, "p" + formats::detail::padded(page->index, 3) + ".gif");
-        paths = render::anim::export_animation(*page, dest, &doc, narrow(dpi.value_or(100)));
+        // (PC5 J-e1, --work-area: the page's work area only — all its frames when it has none)
+        std::optional<std::array<std::int64_t, 2>> range;
+        if (a.flag("--work-area") && core::anim::is_animation(*page)) range = core::played_frames(*page);
+        paths = render::anim::export_animation(*page, dest, &doc, narrow(dpi.value_or(100)), std::nullopt, true, "trim", std::nullopt, range);
         animated = page;
     } else if (f == "timelapse") {
         std::optional<Json> page;
@@ -1099,6 +1612,7 @@ int new_book_of(const Arguments& a, bool ascii) {
             options.raw = given;
         }
         const std::string file = pathlib_text(from->toStdString());
+        options.folder = storage::path_from_utf8(file).parent_path();  // (PC5 I-d: a .pcraft's data sets' pictures beside it)
         made = formats::open_file(storage::read_file(storage::path_from_utf8(file)), file, options);
         if (const auto title = a.value("--title")) made.doc.title = title->toStdString();
     } else {
@@ -1237,6 +1751,9 @@ int new_book(const QStringList& args, bool ascii) {
     return 0;
 }
 
+int apply_to(const fs::path& dir, const Json& ops, const std::string& agent, bool dry_run, std::optional<std::int64_t> expect,
+             const std::string& txn, const std::string* script, bool ascii);
+
 int apply(const QStringList& args, bool ascii) {
     static constexpr Option kOptions[] = {{"--dry-run", false}, {"--expect-revision", true}, {"--agent", true}, {"--txn", true}};
     Arguments a;
@@ -1265,6 +1782,13 @@ int apply(const QStringList& args, bool ascii) {
         a.value("--agent").value_or(QString()).isEmpty()
             ? (is_studio_project(dir) ? std::string("legacy:unknown") : std::string(core::kLegacyActor))
             : a.value("--agent")->toStdString();
+    return apply_to(dir, ops, agent, dry_run, expect, txn, nullptr, ascii);
+}
+
+// `genko apply`'s ops applied to the book in `dir` and saved; with `script` (PC5 I-0: `genko script`), steps — checked
+// and run by service/automate.hpp, their pseudo ops made ops — saved under the script's name in the journal.
+int apply_to(const fs::path& dir, const Json& ops, const std::string& agent, bool dry_run, std::optional<std::int64_t> expect,
+             const std::string& txn, const std::string* script, bool ascii) {
     refuse_legacy(dir);
     storage::ProjectLock lock(dir, agent);
     lock.try_acquire();
@@ -1272,6 +1796,7 @@ int apply(const QStringList& args, bool ascii) {
     // Read inside the lock, so a concurrent writer's changes are never overwritten.
     const storage::LoadResult loaded = storage::load_document(dir);
     if (loaded.report.source_version < 4) throw storage::NeedsMigration(dir, loaded.report.source_version);
+    if (script != nullptr) service::automate::check_steps(ops, core::Actor(agent));  // (no gate op, no undo; an agent's ops only)
 
     // A retry of a transaction saved before gets its revision back, whatever revision the book has reached since
     // (schema-v4 §4.3); then the base revision is checked.
@@ -1320,7 +1845,8 @@ int apply(const QStringList& args, bool ascii) {
     }
 
     const core::CommandBus bus(render::ops_registry());
-    const core::ApplyResult result = bus.apply(loaded.document, ops, core::Actor(agent), dry_run);
+    const core::ApplyResult result = script != nullptr ? service::automate::run_steps(loaded.document, ops, core::Actor(agent), dry_run)
+                                                       : bus.apply(loaded.document, ops, core::Actor(agent), dry_run);
     Json out = Json::object();
     out["ok"] = true;
     out["applied"] = result.applied;
@@ -1328,7 +1854,7 @@ int apply(const QStringList& args, bool ascii) {
     out["job_id"] = core::new_id();
     if (result.has_warnings) out["warnings"] = result.warnings;
     if (!result.results.empty()) out["results"] = result.results;
-    if (dry_run) {
+    if (dry_run || result.unchanged) {  // (PC5 G-0: questions alone — type_info — are a dry run)
         out["revision"] = loaded.document.revision;
     } else {
         storage::SaveRequest request;
@@ -1336,6 +1862,7 @@ int apply(const QStringList& args, bool ascii) {
         request.base_revision = loaded.document.revision;
         request.ops = result.journal_ops;
         request.txn = txn;
+        if (script != nullptr) request.script = *script;  // (PC5 I-0: the journal's 「スクリプト: <name>」)
         const bool lapse = render::timelapse::is_on(result.doc);  // (タイムラプス: the pages this save changes)
         Json before;
         if (lapse) {
@@ -1400,6 +1927,54 @@ int migrate(const QStringList& args, bool ascii) {
     } catch (const storage::ConvertError& error) {
         return fail(error.what(), error.code(), ascii, 1, &error.report());
     }
+    return 0;
+}
+
+// PC5 G-d (edit.checkSpelling, SPEC.md TEXT-02「スペルチェック」): `genko spell <dir> [--page N] [--json] [--sfx]
+// [--no-spelling] [--no-notation]` — the book's lines and type layers checked against the English dictionary and this
+// computer's user dictionary and notation table (環境設定 → テキスト's: read here, never by an op). One finding a line —
+// its page, its line or type layer, its graphemes, the word and what to write instead — or, --json, the findings as
+// JSON. Nothing is changed (edit_type and replace_text change them).
+int spell_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--page", true}, {"--json", false}, {"--sfx", false}, {"--no-spelling", false}, {"--no-notation", false}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 1, "src", a)) return usage("genko spell: " + *error);
+    const fs::path dir = path_arg(a.positional[0]);
+    refuse_legacy(dir);
+    service::spell::Options options;
+    if (const auto page = a.value("--page")) {
+        const auto n = py_int_arg(*page);
+        if (!n) return usage("genko spell: argument --page: the page is a number");
+        options.page = core::Num(*n);
+    }
+    options.sfx = a.flag("--sfx");
+    options.spelling = !a.flag("--no-spelling");
+    options.notation = !a.flag("--no-notation");
+    {
+        const auto settings = core::prefs::store();
+        const Json words = core::prefs::value(*settings, "type.userDictionary");
+        options.user = service::spell::user_words(words.is_string() ? words.get<std::string>() : std::string());
+        const Json table = core::prefs::value(*settings, "type.notations");
+        options.notations = service::spell::notations_of(table.is_string() ? Json::parse(table.get<std::string>(), nullptr, false) : Json());
+    }
+    const storage::LoadResult loaded = storage::load_document(dir);
+    const std::vector<service::spell::Finding> findings = service::spell::check(loaded.document, options);
+    if (a.flag("--json")) {
+        Json out = service::spell::to_json(findings);
+        out["ok"] = true;
+        print_json(out, ascii);
+        return 0;
+    }
+    std::string text;
+    for (const service::spell::Finding& f : findings) {
+        std::string where = "page " + f.page.repr() + (f.line.empty() ? "  layer " + f.layer_id : "  line " + f.line);
+        std::string instead;
+        for (const std::string& s : f.suggestions) instead += (instead.empty() ? "" : ", ") + s;
+        text += where + "  " + std::to_string(f.start) + "-" + std::to_string(f.end) + "  " + (f.kind == "notation" ? "表記" : "綴り") + "  " +
+                f.word + (instead.empty() ? std::string() : " → " + instead) + "\n";
+    }
+    text += std::to_string(findings.size()) + (findings.size() == 1 ? " finding\n" : " findings\n");
+    write_text(text, stdout);
     return 0;
 }
 
@@ -2560,6 +3135,917 @@ int copy_command(const QStringList& args, bool ascii) {
     return 0;
 }
 
+// `genko script <src> <steps>` (PC5 I-0, SPEC.md AUTO-01: スクリプト → 参照…'s command line): a script's steps — a JSON array
+// of ops, {"steps": […]} or one op a line — applied to the book as `genko apply` applies ops (its lock, journal, --agent,
+// --dry-run, --expect-revision and --txn, the same reply), checked first (no gate op, no undo; an agent's ops only), their
+// pseudo ops made ops; the journal names the change by the script (--name, else the file's stem).
+int script_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--dry-run", false}, {"--expect-revision", true}, {"--agent", true}, {"--txn", true}, {"--name", true}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 2, "src, steps", a)) return usage("genko script: " + *error);
+    std::optional<std::int64_t> expect;
+    if (const auto value = a.value("--expect-revision")) {
+        expect = int_option(*value);
+        if (!expect) return usage("genko script: argument --expect-revision: invalid int value: " + core::py_repr_str(value->toStdString()));
+    }
+    const std::string txn = a.value("--txn").value_or(QString()).toStdString();
+    if (!txn.empty() && !core::is_txn_id(txn)) return usage("genko script: --txn takes 32 lowercase hex digits");
+    const QString source = a.positional[1];
+    const Json steps = source == QLatin1String("-") ? service::automate::read_steps(read_stdin()) : service::automate::read_steps_file(path_arg(source));
+    std::string name = a.value("--name").value_or(QString()).trimmed().toStdString();
+    if (name.empty()) name = source == QLatin1String("-") ? std::string("script") : core::path_to_utf8(path_arg(source).stem());
+    try {
+        service::automate::check_script_name(name);
+    } catch (const core::Error& error) {
+        return usage(std::string("genko script: argument --name: ") + error.what());
+    }
+    const fs::path dir = path_arg(a.positional[0]);
+    const std::string agent =
+        a.value("--agent").value_or(QString()).isEmpty()
+            ? (is_studio_project(dir) ? std::string("legacy:unknown") : std::string(core::kLegacyActor))
+            : a.value("--agent")->toStdString();
+    return apply_to(dir, steps, agent, a.flag("--dry-run"), expect, txn, &name, ascii);
+}
+
+// What a batch did (`genko batch`, and PC5 I-e's `genko droplet`, `genko automate`): {"ok", "files", "errors", "skipped"} with
+// --json, else the files written one a line and the errors on stderr; exit 1 when a file failed.
+int print_run(const service::automate::Inputs& inputs, service::automate::Result result, bool json, bool ascii) {
+    Json skipped = inputs.skipped;
+    for (const Json& s : result.skipped) skipped.push_back(s);
+    result.skipped = std::move(skipped);
+    if (json) {
+        print_json(result.json(), ascii);
+    } else {
+        std::string lines;
+        for (const Json& done : result.files) {
+            // (every file once: "outputs" when there, else the picture's "output")
+            if (done.contains("outputs")) {
+                for (const Json& o : done["outputs"]) lines += o.get<std::string>() + "\n";
+            } else if (done.contains("output")) {
+                lines += done["output"].get<std::string>() + "\n";
+            }
+        }
+        write_text(lines, stdout);
+        for (const Json& e : result.errors) write_text(e["input"].get<std::string>() + ": " + e["error"].get<std::string>() + "\n", stderr);
+    }
+    return result.errors.empty() ? 0 : 1;
+}
+
+// `genko batch <inputs…>` (PC5 I-0, SPEC.md AUTO-01: ファイル → 自動処理 → バッチ…'s command line; PC5 I-e its window): each
+// picture (opened as a book of one page) or .genko book in turn through the steps (--steps <file>: a script's; --action
+// <name>: an オートアクション, played back on each page), then written — --out <folder>: each page a file (コピーを保存, the
+// format --format names, same: the picture's own), --save: each book in place (never a picture), --dry-run: nothing.
+// {"ok", "files", "errors", "skipped"} with --json; exit 1 when a file failed.
+int batch_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--out", true},     {"--save", false},    {"--dry-run", false},       {"--steps", true},
+                                          {"--action", true},  {"--format", true},   {"--quality", true},        {"--prefix", true},
+                                          {"--suffix", true},  {"--recurse", false}, {"--stop-on-error", false}, {"--agent", true},
+                                          {"--json", false},   {"--name", true}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 1, "inputs", a, true)) return usage("genko batch: " + *error);
+    if (a.value("--steps").has_value() == a.value("--action").has_value()) return usage("genko batch: give --steps <file> or --action <name>");
+    const int ways = (a.value("--out") ? 1 : 0) + (a.flag("--save") ? 1 : 0) + (a.flag("--dry-run") ? 1 : 0);
+    if (ways != 1) return usage("genko batch: give --out <folder>, --save or --dry-run");
+    service::automate::Output output;
+    if (const auto out = a.value("--out")) {
+        output.to = service::automate::Output::To::Folder;
+        output.folder = path_arg(*out);
+    } else {
+        output.to = a.flag("--save") ? service::automate::Output::To::Book : service::automate::Output::To::None;
+    }
+    if (const auto format = a.value("--format")) {
+        std::string f = format->trimmed().toLower().toStdString();
+        if (!f.empty() && f[0] == '.') f.erase(0, 1);
+        const auto exts = formats::copy_extensions();
+        const std::string ext = f == "jpeg" ? "jpg" : f == "tiff" ? "tif" : f;
+        if (f != "same" && std::find(exts.begin(), exts.end(), ext) == exts.end()) return usage("genko batch: not a format this build writes: ." + f);
+        output.format = f;
+    }
+    if (const auto q = a.value("--quality")) {
+        bool ok = false;
+        const int v = q->trimmed().toInt(&ok);
+        if (!ok || v < 0 || v > 12) return usage("genko batch: argument --quality: 0..12");
+        output.quality = v;
+    }
+    output.prefix = a.value("--prefix").value_or(QString()).toStdString();
+    output.suffix = a.value("--suffix").value_or(QString()).toStdString();
+
+    service::automate::Options options;
+    options.unnamed = a.value("--agent").value_or(QString()).isEmpty();  // (an agent's book: legacy:unknown, as `genko apply`)
+    options.actor = core::Actor(options.unnamed ? std::string(core::kLegacyActor) : a.value("--agent")->toStdString());
+    options.stop_on_error = a.flag("--stop-on-error");
+    Json steps;
+    std::string name;
+    if (const auto file = a.value("--steps")) {
+        steps = service::automate::read_steps_file(path_arg(*file));
+        name = core::path_to_utf8(path_arg(*file).stem());
+    } else {
+        name = a.value("--action")->toStdString();
+        const Json saved = service::actions::load();
+        const auto found = saved.find(name);
+        if (found == saved.end()) return fail("no action " + core::py_repr_str(name), "not_found", ascii, 1);
+        steps = (*found)["ops"];
+        options.recorded = true;
+    }
+    options.script = a.value("--name").value_or(QString()).trimmed().isEmpty() ? name : a.value("--name")->trimmed().toStdString();
+    try {
+        service::automate::check_script_name(options.script);
+    } catch (const core::Error& error) {
+        return usage(std::string("genko batch: argument --name: ") + error.what());
+    }
+    std::vector<fs::path> given;
+    for (const QString& p : a.positional) given.push_back(path_arg(p));
+    service::automate::InputOptions listing;
+    listing.recurse = a.flag("--recurse");
+    const service::automate::Inputs inputs = service::automate::list_inputs(given, listing);
+    service::automate::Result result = service::automate::run(inputs.items, steps, output, options);
+    return print_run(inputs, std::move(result), a.flag("--json"), ascii);
+}
+
+// --- PC5 I-e: ドロップレット・画像プロセッサー・画像を合わせる・条件付きモード変更・レンズ補正 -----------------------------------
+
+// The steps of --steps <file> or --action <name> (an オートアクション: recorded), and the name they go by; none of them:
+// no steps. core::Error "not_found" for an action not there.
+std::pair<Json, std::string> steps_option(const Arguments& a, bool* recorded) {
+    *recorded = false;
+    if (const auto file = a.value("--steps")) return {service::automate::read_steps_file(path_arg(*file)), core::path_to_utf8(path_arg(*file).stem())};
+    if (const auto action = a.value("--action")) {
+        const std::string name = action->toStdString();
+        const Json saved = service::actions::load();
+        const auto found = saved.find(name);
+        if (found == saved.end()) throw core::Error("not_found", "no action " + core::py_repr_str(name));
+        *recorded = true;
+        return {(*found)["ops"], name};
+    }
+    return {Json::array(), std::string()};
+}
+
+// --format's text as batch_command checks it (same, or an extension this build writes); none: not one.
+std::optional<std::string> format_option(const QString& text) {
+    std::string f = text.trimmed().toLower().toStdString();
+    if (!f.empty() && f[0] == '.') f.erase(0, 1);
+    const auto exts = formats::copy_extensions();
+    const std::string ext = f == "jpeg" ? "jpg" : f == "tiff" ? "tif" : f;
+    if (f != "same" && std::find(exts.begin(), exts.end(), ext) == exts.end()) return std::nullopt;
+    return f;
+}
+
+std::optional<int> quality_option(const QString& text) {
+    bool ok = false;
+    const int v = text.trimmed().toInt(&ok);
+    if (!ok || v < 0 || v > 12) return std::nullopt;
+    return v;
+}
+
+// `genko droplet <droplet> <inputs…>` (PC5 I-e, SPEC.md AUTO-01: file.automate.runDroplet — what a droplet's launcher calls):
+// the droplet's steps through each picture or book as `genko batch` takes them, written into --out, else the droplet's
+// folder, else droplet-output beside the first input; unnamed, as the person running it (legacy:unknown in an agent's book),
+// or --agent. `genko droplet --create <path> (--steps <file> | --action <name>)` (file.automate.createDroplet): the droplet
+// written there (.genkodroplet) with its launchers beside it (--no-launcher: none). {"ok", …} with --json.
+int droplet_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--create", true},  {"--steps", true},   {"--action", true},  {"--name", true},
+                                          {"--out", true},     {"--format", true},  {"--quality", true}, {"--prefix", true},
+                                          {"--suffix", true},  {"--no-launcher", false}, {"--recurse", false}, {"--stop-on-error", false},
+                                          {"--agent", true},   {"--json", false}};
+    Arguments a;
+    const bool create = std::any_of(args.begin(), args.end(), [](const QString& arg) { return arg.startsWith(QLatin1String("--create")); });
+    if (auto error = parse_arguments(args, kOptions, create ? 0 : 2, "droplet, inputs", a, !create)) return usage("genko droplet: " + *error);
+    if (create) {
+        for (const char* other : {"--recurse", "--stop-on-error", "--agent"}) {
+            if (a.flag(other) || a.value(other)) return usage(std::string("genko droplet --create: ") + other + " is for running a droplet");
+        }
+        if (a.value("--steps").has_value() == a.value("--action").has_value()) return usage("genko droplet --create: give --steps <file> or --action <name>");
+        service::automate::Droplet droplet;
+        std::string name;
+        std::tie(droplet.steps, name) = steps_option(a, &droplet.recorded);
+        const fs::path place = path_arg(*a.value("--create"));
+        droplet.name = a.value("--name").value_or(QString()).trimmed().toStdString();
+        if (droplet.name.empty()) {
+            fs::path stem = place.filename();
+            if (stem.extension() == ".genkodroplet") stem.replace_extension();
+            droplet.name = core::path_to_utf8(stem);
+        }
+        try {
+            service::automate::check_script_name(droplet.name);
+        } catch (const core::Error& error) {
+            return usage(std::string("genko droplet: argument --name: ") + error.what());
+        }
+        if (const auto out = a.value("--out")) droplet.output = fs::absolute(path_arg(*out));
+        if (const auto format = a.value("--format")) {
+            const auto f = format_option(*format);
+            if (!f) return usage("genko droplet: not a format this build writes: ." + format->toStdString());
+            droplet.format = *f;
+        }
+        if (const auto q = a.value("--quality")) {
+            droplet.quality = quality_option(*q);
+            if (!droplet.quality) return usage("genko droplet: argument --quality: 0..12");
+        }
+        droplet.prefix = a.value("--prefix").value_or(QString()).toStdString();
+        droplet.suffix = a.value("--suffix").value_or(QString()).toStdString();
+        service::automate::check_steps(droplet.steps, core::Actor(std::string(core::kLegacyActor)));  // (as the person who will run it)
+        const fs::path written = service::automate::write_droplet(place, droplet);
+        Json launchers = Json::array();
+        if (!a.flag("--no-launcher")) {
+            const fs::path genko = service::automate::launcher_program(core::path_from_utf8(QCoreApplication::applicationFilePath().toStdString()));
+            for (const fs::path& l : service::automate::write_launchers(written, genko)) launchers.push_back(core::path_to_utf8(l));
+        }
+        if (a.flag("--json")) {
+            print_json(Json{{"ok", true}, {"droplet", core::path_to_utf8(written)}, {"launchers", launchers}, {"steps", droplet.steps.size()}}, ascii);
+        } else {
+            std::string lines = core::path_to_utf8(written) + "\n";
+            for (const Json& l : launchers) lines += l.get<std::string>() + "\n";
+            write_text(lines, stdout);
+        }
+        return 0;
+    }
+    for (const char* other : {"--steps", "--action", "--name", "--format", "--quality", "--prefix", "--suffix"}) {
+        if (a.value(other)) return usage(std::string("genko droplet: ") + other + " is the droplet's own (made with --create)");
+    }
+    if (a.flag("--no-launcher")) return usage("genko droplet: --no-launcher is for --create");
+    const fs::path file = path_arg(a.positional[0]);
+    const service::automate::Droplet droplet = service::automate::read_droplet(file);
+    std::vector<fs::path> given;
+    for (std::size_t i = 1; i < a.positional.size(); ++i) given.push_back(path_arg(a.positional[i]));
+    service::automate::InputOptions listing;
+    listing.recurse = a.flag("--recurse");
+    const service::automate::Inputs inputs = service::automate::list_inputs(given, listing);
+    const std::optional<fs::path> out = a.value("--out") ? std::optional<fs::path>(path_arg(*a.value("--out"))) : std::nullopt;
+    const service::automate::Output output = service::automate::droplet_output(droplet, inputs.items, out);
+    service::automate::Options options;
+    options.unnamed = a.value("--agent").value_or(QString()).isEmpty();
+    options.actor = core::Actor(options.unnamed ? std::string(core::kLegacyActor) : a.value("--agent")->toStdString());
+    options.stop_on_error = a.flag("--stop-on-error");
+    options.recorded = droplet.recorded;
+    options.script = droplet.name;
+    service::automate::Result result = service::automate::run(inputs.items, droplet.steps, output, options);
+    return print_run(inputs, std::move(result), a.flag("--json"), ascii);
+}
+
+// PC5 I-h (SPEC.md AUTO-01): a new book written at `dest` as `genko new` writes one (never over a book), by the person who
+// runs the command line.
+void write_made_book(const fs::path& dest, const core::Document& doc) {
+    std::error_code ec;
+    if (fs::exists(dest / "project.json", ec)) throw core::Error("exists", "a book is there already: " + storage::path_to_utf8(dest / "project.json"));
+    storage::ProjectLock lock(dest, std::string(core::kLegacyActor));
+    lock.try_acquire();
+    if (fs::exists(dest / "project.json", ec)) throw core::Error("exists", "a book is there already: " + storage::path_to_utf8(dest / "project.json"));
+    storage::SaveRequest request;
+    request.actor = std::string(core::kLegacyActor);
+    request.base_revision = 0;
+    request.ops = Json::array();
+    storage::Saver(lock).save(doc, request);
+    lock.release();
+}
+
+// `genko automate hdr <pictures…> --book <new book> [--mode 32|16|8] [--method local_adaptation|exposure_gamma|
+// highlight_compression|equalize_histogram] [--settings '<JSON>'] [--ev a,b,…] [--no-align] [--remove-ghosts]
+// [--ghost-base N] [--title T] [--recurse] [--json]` (PC5 I-h, file.automate.mergeToHdrPro): the pictures (files, or the
+// pictures of a folder) merged by service/automate_photos into a new book of one page written at --book (32 bits: linear
+// light in linear-srgb; 16, 8: tone mapped), {"ok", "files": [book], "errors": [], "notes", "path", "hdr": report}.
+int hdr_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--book", true},     {"--mode", true},          {"--method", true}, {"--settings", true},
+                                          {"--ev", true},       {"--no-align", false},     {"--remove-ghosts", false},
+                                          {"--ghost-base", true}, {"--title", true},       {"--recurse", false}, {"--json", false}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 1, "inputs", a, true)) return usage("genko automate hdr: " + *error);
+    const std::string where = "genko automate hdr: ";
+    if (!a.value("--book")) return usage(where + "give --book <the new book's folder>");
+    service::automate::HdrSettings settings;
+    const auto mode = int_option(a.value("--mode").value_or(QStringLiteral("32")));
+    if (!mode || (*mode != 32 && *mode != 16 && *mode != 8)) return usage(where + "argument --mode: 32, 16 or 8");
+    settings.depth = static_cast<int>(*mode);
+    if ((a.value("--method") || a.value("--settings")) && settings.depth == 32) return usage(where + "--method and --settings are for --mode 16 or 8");
+    Json tone_settings = Json::object();
+    if (const auto text = a.value("--settings")) {
+        try {
+            tone_settings = core::parse_python_json(text->toStdString());
+        } catch (const core::Error& error) {
+            return usage(where + "argument --settings: not JSON (" + error.what() + ")");
+        }
+    }
+    try {
+        settings.tone = service::automate::hdr_tone(a.value("--method").value_or(QStringLiteral("local_adaptation")).trimmed().toStdString(), tone_settings);
+    } catch (const core::Error& error) {
+        return usage(where + error.what());
+    }
+    if (const auto text = a.value("--ev")) {
+        std::vector<double> ev;
+        for (const QString& part : text->split(QLatin1Char(','), Qt::KeepEmptyParts)) {
+            bool ok = false;
+            const double v = part.trimmed().toDouble(&ok);
+            if (!ok || !std::isfinite(v)) return usage(where + "argument --ev: numbers (one EV a picture) separated by commas");
+            if (std::abs(v) > 30) return usage(where + "argument --ev: each within -30..30");  // (before anything is read: the review's P3-3)
+            ev.push_back(v);
+        }
+        settings.ev = std::move(ev);
+    }
+    settings.align = !a.flag("--no-align");
+    settings.remove_ghosts = a.flag("--remove-ghosts");
+    if (const auto base = a.value("--ghost-base")) {
+        const auto n = int_option(*base);
+        if (!n || *n < 1) return usage(where + "argument --ghost-base: the number of a picture (1, 2, …)");
+        if (!settings.remove_ghosts) return usage(where + "--ghost-base is for --remove-ghosts");
+        settings.ghost_base = static_cast<std::size_t>(*n - 1);
+    }
+    settings.title = a.value("--title").value_or(QStringLiteral("HDR")).trimmed().toStdString();
+    std::vector<fs::path> given;
+    for (const QString& p : a.positional) given.push_back(path_arg(p));
+    service::automate::InputOptions listing;
+    listing.recurse = a.flag("--recurse");
+    const service::automate::Inputs inputs = service::automate::list_inputs(given, listing);
+    if (!inputs.skipped.empty()) {
+        const Json& first = inputs.skipped.front();
+        return fail(first.value("path", std::string()) + ": " + first.value("reason", std::string()), "not_found", ascii, 1);
+    }
+    std::vector<fs::path> files;
+    for (const service::automate::Input& input : inputs.items) {
+        if (input.book) return usage(where + "a book is not an exposure (give pictures): " + core::path_to_utf8(input.path));
+        files.push_back(input.path);
+    }
+    if (settings.ev && settings.ev->size() != files.size()) return usage(where + "argument --ev: one EV value a picture (" + std::to_string(files.size()) + ")");
+    if (settings.ghost_base && *settings.ghost_base >= files.size()) return usage(where + "argument --ghost-base: 1.." + std::to_string(files.size()));
+    const std::string dest_text = pathlib_text(a.value("--book")->toStdString());
+    std::error_code ec;
+    if (fs::exists(storage::path_from_utf8(dest_text) / "project.json", ec)) {
+        return fail("a book is there already: " + storage::path_to_utf8(storage::path_from_utf8(dest_text) / "project.json"), "exists", ascii, 1);
+    }
+    std::vector<render::hdr::Shot> shots = service::automate::hdr_shots(files, formats::OpenOptions{});
+    service::automate::HdrMade made = service::automate::merge_to_hdr(std::move(shots), settings);
+    write_made_book(storage::path_from_utf8(dest_text), made.book.doc);
+    if (!a.flag("--json")) {
+        write_text(dest_text + "\n", stdout);
+        for (const std::string& note : made.book.notes) write_text(note + "\n", stderr);
+        return 0;
+    }
+    Json notes = Json::array();
+    for (const std::string& note : made.book.notes) notes.push_back(note);
+    print_json(Json{{"ok", true}, {"files", Json::array({dest_text})}, {"errors", Json::array()}, {"notes", std::move(notes)}, {"path", dest_text},
+                    {"hdr", std::move(made.report)}},
+               ascii);
+    return 0;
+}
+
+// `genko automate crop-photos <scan> --out <folder> [--page N] [--json]` (PC5 I-h, file.automate.cropAndStraightenPhotos):
+// the photos on the scan (a picture, or a page of a book — N, 1 unless given) each a new book of one page written in the
+// folder as <the scan's name>-<n> (none written when one is there already), {"ok", "files": [books], "errors": [],
+// "notes", "photos": [{"width", "height", "angle", "center"}]}. No photo found: exit 1 (code "not_found").
+int crop_photos_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--out", true}, {"--page", true}, {"--json", false}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 1, "scan", a)) return usage("genko automate crop-photos: " + *error);
+    const std::string where = "genko automate crop-photos: ";
+    if (!a.value("--out")) return usage(where + "give --out <a folder for the books>");
+    // (a book's folder given with a / at its end: its name all the same — the review's P3-6)
+    fs::path scan = path_arg(a.positional[0]).lexically_normal();
+    if (scan.has_parent_path() && scan.filename().empty()) scan = scan.parent_path();
+    std::int64_t page_number = 1;
+    if (const auto p = a.value("--page")) {
+        const auto n = int_option(*p);
+        if (!n || *n < 1) return usage(where + "argument --page: a page's number (1, 2, …)");
+        page_number = *n;
+    }
+    std::error_code ec;
+    core::Document doc;
+    std::size_t at = 0;
+    std::string stem;
+    if (fs::is_directory(scan, ec)) {
+        refuse_legacy(scan);
+        doc = storage::load_document(scan).document;
+        std::optional<std::size_t> found;
+        for (std::size_t i = 0; i < doc.pages.size(); ++i)
+            if (core::py_int(doc.page(i).index.json()) == page_number) found = i;
+        if (!found) return fail("no page " + std::to_string(page_number) + " in the book", "not_found", ascii, 1);
+        at = *found;
+        stem = core::path_to_utf8(scan.filename()) + "-p" + std::to_string(page_number);
+    } else {
+        if (a.value("--page")) return usage(where + "--page is for a book");
+        doc = formats::open_file(storage::read_file(scan), core::path_to_utf8(scan.filename()), formats::OpenOptions{}).doc;
+        stem = core::path_to_utf8(scan.stem());
+    }
+    Json report;
+    std::vector<formats::Opened> books = service::automate::crop_and_straighten(doc, at, formats::OpenOptions{}, &report);
+    if (books.empty()) return fail("no photos found on a uniform background", "not_found", ascii, 1);
+    const fs::path out = path_arg(*a.value("--out"));
+    std::vector<fs::path> dests;
+    for (std::size_t k = 0; k < books.size(); ++k) {
+        dests.push_back(out / core::path_from_utf8(stem + "-" + std::to_string(k + 1)));
+        if (fs::exists(dests.back(), ec)) return fail("there is something there already: " + core::path_to_utf8(dests.back()), "exists", ascii, 1);
+    }
+    fs::create_directories(out, ec);
+    Json files = Json::array(), notes = Json::array();
+    for (std::size_t k = 0; k < books.size(); ++k) {
+        write_made_book(dests[k], books[k].doc);
+        files.push_back(core::path_to_utf8(dests[k]));
+        for (const std::string& note : books[k].notes) notes.push_back(note);
+    }
+    if (!a.flag("--json")) {
+        for (const Json& f : files) write_text(f.get<std::string>() + "\n", stdout);
+        return 0;
+    }
+    Json reply{{"ok", true}, {"files", std::move(files)}, {"errors", Json::array()}, {"notes", std::move(notes)}, {"photos", report.value("photos", Json::array())}};
+    if (report.contains("skipped")) reply["skipped"] = report["skipped"];
+    print_json(reply, ascii);
+    return 0;
+}
+
+// PC5 I-g (SPEC.md AUTO-01「ファイルをスタックとして読み込み・統計・Photomerge」): `genko automate stack|statistics|photomerge
+// <pictures…> --book <dest>` — the new book service/automate makes of the pictures (files, or folders of them: --recurse),
+// written to `dest` as `genko new` writes one (never over a book), {"ok", "path", "notes", "layers", …what it found}:
+//   - stack (ファイルをスタックとして読み込み): --smart (one smart object), --align (auto_align_layers);
+//   - statistics (統計): --mode <stack mode> (median), --align;
+//   - photomerge (Photomerge): --layout auto|perspective|cylindrical|spherical|collage|reposition (auto), --no-blend,
+//     --vignette, --geometric, --fill (透明な領域をコンテンツに応じて塗りつぶす), --focal-length <mm, 35 mm>, --scale <10..100 %>.
+// As the person (no --agent: an agent's tools never reach the files, design 節 I 3.5); a book among the inputs is refused.
+int automate_book_command(const QString& kind, const QStringList& rest, bool ascii) {
+    static constexpr Option kOptions[] = {{"--book", true},     {"--title", true},     {"--smart", false},    {"--align", false},
+                                          {"--mode", true},     {"--layout", true},    {"--no-blend", false}, {"--vignette", false},
+                                          {"--geometric", false}, {"--fill", false},   {"--focal-length", true}, {"--scale", true},
+                                          {"--recurse", false}};
+    const std::string where = "genko automate " + kind.toStdString() + ": ";
+    Arguments a;
+    if (auto error = parse_arguments(rest, kOptions, 1, "inputs", a, true)) return usage(where + *error);
+    static const std::map<QString, std::vector<const char*>> kOwn = {
+        {QStringLiteral("stack"), {"--smart", "--align"}},
+        {QStringLiteral("statistics"), {"--mode", "--align"}},
+        {QStringLiteral("photomerge"), {"--layout", "--no-blend", "--vignette", "--geometric", "--fill", "--focal-length", "--scale"}}};
+    for (const char* option : {"--smart", "--align", "--mode", "--layout", "--no-blend", "--vignette", "--geometric", "--fill", "--focal-length", "--scale"}) {
+        const auto& own = kOwn.at(kind);
+        if ((a.flag(option) || a.value(option)) && std::find_if(own.begin(), own.end(), [option](const char* o) { return std::string_view(o) == option; }) == own.end()) {
+            return usage(where + option + " is not one of its options");
+        }
+    }
+    const auto book = a.value("--book");
+    if (!book) return usage(where + "give --book <the new book's folder>");
+    const std::string dest_text = pathlib_text(book->toStdString());
+    const fs::path dest = storage::path_from_utf8(dest_text);
+    std::error_code ec;
+    if (fs::exists(dest / "project.json", ec)) {
+        return fail("a book is there already: " + storage::path_to_utf8(dest / "project.json") + " (genko automate never writes over a book)", "exists", ascii, 1);
+    }
+    // (the review's P3-2: what is asked checked before any file is read)
+    if (kind == QLatin1String("photomerge") && !render::panorama::layout_from(a.value("--layout").value_or(QStringLiteral("auto")).trimmed().toStdString())) {
+        return usage(where + "argument --layout: auto, perspective, cylindrical, spherical, collage or reposition");
+    }
+    if (kind == QLatin1String("statistics") && !render::stack::stat_of(a.value("--mode").value_or(QStringLiteral("median")).trimmed().toLower().toStdString())) {
+        return usage(where + "argument --mode: entropy, kurtosis, maximum, mean, median, minimum, range, skewness, standard_deviation, summation or variance");
+    }
+    std::vector<fs::path> given;
+    for (const QString& p : a.positional) given.push_back(path_arg(p));
+    service::automate::InputOptions listing;
+    listing.recurse = a.flag("--recurse");
+    const service::automate::Inputs inputs = service::automate::list_inputs(given, listing);
+    std::vector<fs::path> files;
+    for (const service::automate::Input& input : inputs.items) {
+        if (input.book) return usage(where + "pictures only (a book is not one): " + core::path_to_utf8(input.path));
+        files.push_back(input.path);
+    }
+    // (more pictures than it takes: said before any is read — Photomerge's and an aligned stack's 32)
+    if ((kind == QLatin1String("photomerge") || a.flag("--align")) && files.size() > render::align::kMaxLayers) {
+        throw core::Error("value", "more than " + std::to_string(render::align::kMaxLayers) + " pictures: choose fewer");
+    }
+    const core::Actor actor{std::string(core::kLegacyActor)};
+    formats::Opened made;
+    Json info = Json::object();
+    if (kind == QLatin1String("photomerge")) {
+        service::automate::PhotomergeOptions o;
+        o.layout = a.value("--layout").value_or(QStringLiteral("auto")).trimmed().toStdString();
+        o.blend = !a.flag("--no-blend");
+        o.vignette = a.flag("--vignette");
+        o.geometric = a.flag("--geometric");
+        o.content_aware_fill = a.flag("--fill");
+        if (const auto f = a.value("--focal-length")) {
+            bool ok = false;
+            const double v = f->trimmed().toDouble(&ok);
+            if (!ok || !std::isfinite(v) || v <= 0.0 || v > 2000.0) return usage(where + "argument --focal-length: mm of 35 mm film (more than 0, at most 2000)");
+            o.focal_length = v;
+        }
+        if (const auto s = a.value("--scale")) {
+            const auto v = int_option(*s);
+            if (!v || *v < 10 || *v > 100) return usage(where + "argument --scale: 10..100 (%)");
+            o.scale = static_cast<int>(*v);
+        }
+        service::automate::Panorama pano = service::automate::photomerge(service::automate::picture_files(files, o.open), o);
+        made = std::move(pano.opened);
+        info = std::move(pano.info);
+    } else {
+        service::automate::StackOptions o;
+        o.actor = actor;
+        o.align = a.flag("--align");
+        o.smart = a.flag("--smart");
+        const std::vector<service::automate::Picture> pictures = service::automate::picture_files(files, o.open);
+        if (kind == QLatin1String("statistics")) {
+            const std::string mode = a.value("--mode").value_or(QStringLiteral("median")).trimmed().toLower().toStdString();
+            made = service::automate::statistics(pictures, mode, o);
+            info["mode"] = mode;
+        } else {
+            made = service::automate::load_files_into_stack(pictures, o);
+        }
+        info["images"] = pictures.size();
+    }
+    if (const auto title = a.value("--title")) made.doc.title = title->toStdString();
+    storage::ProjectLock lock(dest, std::string(core::kLegacyActor));
+    lock.try_acquire();
+    if (fs::exists(dest / "project.json", ec)) return fail("a book is there already: " + storage::path_to_utf8(dest / "project.json"), "exists", ascii, 1);
+    storage::SaveRequest request;
+    request.actor = std::string(core::kLegacyActor);
+    request.base_revision = 0;
+    request.ops = Json::array();
+    storage::Saver(lock).save(made.doc, request);
+    lock.release();
+    Json notes = Json::array();
+    for (const std::string& note : made.notes) notes.push_back(note);
+    Json out = Json::object();
+    out["ok"] = true;
+    out["path"] = dest_text;
+    out["notes"] = std::move(notes);
+    out["layers"] = made.doc.page(0).layers.size();
+    for (auto it = info.begin(); it != info.end(); ++it) {
+        if (!out.contains(it.key())) out[it.key()] = it.value();
+    }
+    print_json(out, ascii);
+    return 0;
+}
+
+// `genko automate <kind> <inputs…>` (PC5 I-e, SPEC.md AUTO-01: ファイル → 自動処理 ▸・スクリプト ▸'s command line): each
+// picture or book as `genko batch` takes them (--out <folder> | --save | --dry-run; --format, --quality, --prefix, --suffix,
+// --recurse, --stop-on-error, --agent, --name, --json) through
+//   - image-processor (画像プロセッサー; --out only): --formats jpg,psd,tif,png (jpg), --quality (8), --width, --height (fit,
+//     never enlarged), --srgb, and an action (--steps | --action) after them;
+//   - fit (画像を合わせる): --width, --height, --dont-enlarge, --resample;
+//   - mode (条件付きモード変更): --to rgb|gray|cmyk|lab, --from <modes,…> | any (any);
+//   - lens (レンズ補正): --settings <JSON of the filter's settings> (the profile auto unless given).
+// PC5 I-f (file.automate.contactSheetII, コンタクトシート II…): `genko automate contact-sheet <inputs…> --out <folder>
+// [--format png|jpg|psd|tif|…] [--quality 0..12] [--width W] [--height H] [--units in|cm|mm|px] [--resolution R]
+// [--mode rgb|gray] [--depth 8|16] [--columns C] [--rows R] [--down] [--spacing <horizontal>,<vertical>] [--rotate]
+// [--no-caption] [--font-size PT] [--flatten] [--name N] [--recurse] [--stop-on-error] [--json]` — the pictures (a book's: its
+// pages) on new sheets (service::automate::contact_sheet), each sheet a file <name>-NNN.<format> in the folder (PSD keeps its
+// layers; a name taken gets -2 …; never into a book or over an input); the files one a line, or with --json
+// {"ok", "sheets", "images", "width", "height", "errors", "files"}.
+int contact_sheet_command(const QStringList& all, bool ascii) {
+    static constexpr Option kOptions[] = {{"--out", true},        {"--format", true},   {"--quality", true},  {"--width", true},
+                                          {"--height", true},     {"--units", true},    {"--resolution", true}, {"--mode", true},
+                                          {"--depth", true},      {"--columns", true},  {"--rows", true},     {"--down", false},
+                                          {"--spacing", true},    {"--rotate", false},  {"--no-caption", false}, {"--font-size", true},
+                                          {"--flatten", false},   {"--name", true},     {"--recurse", false}, {"--stop-on-error", false},
+                                          {"--json", false}};
+    const std::string where = "genko automate contact-sheet: ";
+    Arguments a;
+    if (auto error = parse_arguments(all, kOptions, 1, "inputs", a, true)) return usage(where + *error);
+    if (!a.value("--out")) return usage(where + "give --out <folder>");
+    service::automate::ContactSheet sheet;
+    const auto real = [&](const char* option, double& into) -> bool {
+        const auto text = a.value(option);
+        if (!text) return true;
+        bool ok = false;
+        const double v = text->trimmed().toDouble(&ok);
+        if (!ok || !std::isfinite(v)) return false;
+        into = v;
+        return true;
+    };
+    const auto whole = [&](const char* option, int& into) -> bool {
+        const auto text = a.value(option);
+        if (!text) return true;
+        bool ok = false;
+        const int v = text->trimmed().toInt(&ok);
+        if (!ok) return false;
+        into = v;
+        return true;
+    };
+    for (const char* option : {"--width", "--height", "--resolution", "--font-size"}) {
+        double* into = std::string_view(option) == "--width" ? &sheet.width : std::string_view(option) == "--height" ? &sheet.height
+                       : std::string_view(option) == "--resolution" ? &sheet.resolution : &sheet.font_pt;
+        if (!real(option, *into)) return usage(where + "argument " + option + ": a number");
+    }
+    if (!whole("--columns", sheet.columns) || !whole("--rows", sheet.rows) || !whole("--depth", sheet.depth)) {
+        return usage(where + "argument --columns, --rows, --depth: an integer");
+    }
+    if (const auto u = a.value("--units")) sheet.units = u->trimmed().toLower().toStdString();
+    if (const auto m = a.value("--mode")) sheet.mode = m->trimmed().toLower().toStdString();
+    if (const auto n = a.value("--name")) sheet.title = n->toStdString();
+    if (const auto spacing = a.value("--spacing")) {
+        const QStringList parts = spacing->split(QLatin1Char(','));
+        bool ok_h = false, ok_v = false;
+        if (parts.size() != 2) return usage(where + "argument --spacing: <horizontal>,<vertical> in the units");
+        sheet.horizontal = parts[0].trimmed().toDouble(&ok_h);
+        sheet.vertical = parts[1].trimmed().toDouble(&ok_v);
+        if (!ok_h || !ok_v) return usage(where + "argument --spacing: <horizontal>,<vertical> in the units");
+        sheet.auto_spacing = false;
+    }
+    sheet.across = !a.flag("--down");
+    sheet.rotate = a.flag("--rotate");
+    sheet.caption = !a.flag("--no-caption");
+    sheet.flatten = a.flag("--flatten");
+    try {
+        service::automate::check_contact_sheet(sheet);
+    } catch (const core::Error& error) {
+        return usage(where + error.what());
+    }
+    std::string extension = "png";
+    if (const auto format = a.value("--format")) {
+        const auto f = format_option(*format);
+        if (!f || *f == "same") return usage(where + "not a format this build writes: ." + format->toStdString());
+        extension = *f;
+    }
+    formats::CopyOptions copy;
+    if (const auto q = a.value("--quality")) {
+        copy.quality = quality_option(*q);
+        if (!copy.quality) return usage(where + "argument --quality: 0..12");
+    }
+    std::vector<fs::path> given;
+    for (const QString& p : a.positional) given.push_back(path_arg(p));
+    service::automate::InputOptions listing;
+    listing.recurse = a.flag("--recurse");
+    const service::automate::Inputs inputs = service::automate::list_inputs(given, listing);
+    const fs::path out = path_arg(*a.value("--out"));
+    // (never into a book, nor over an input picture)
+    std::vector<fs::path> sources;
+    for (const auto& input : inputs.items) {
+        if (!input.book) sources.push_back(input.path);
+    }
+    formats::WriteGuard guard = formats::write_guard(core::Document{}, std::nullopt, sources);
+    for (const auto& input : inputs.items) {
+        if (input.book) guard.books.push_back(input.path);
+    }
+    try {
+        formats::check_target(guard, out);
+        service::automate::check_output_folder(out);
+    } catch (const core::Error& error) {
+        return usage(where + error.what());
+    }
+    service::automate::Options options;
+    options.actor = core::Actor(std::string(core::kLegacyActor));
+    options.stop_on_error = a.flag("--stop-on-error");
+    std::error_code ec;
+    fs::create_directories(out, ec);
+    core::Json files = core::Json::array();
+    std::string lines;
+    // (each sheet written as soon as it is finished, then let go: never every sheet in memory — the review's P1-1)
+    const auto write_sheet = [&](core::Document&& book) {
+        fs::path file = out / core::path_from_utf8(formats::safe_name(book.title) + "." + extension);
+        for (int n = 2; fs::exists(file, ec) && n < 10000; ++n) {
+            file = out / core::path_from_utf8(formats::safe_name(book.title) + "-" + std::to_string(n) + "." + extension);
+        }
+        formats::check_target(guard, file);
+        const formats::CopyResult written = formats::write_copy(book, 0, file, copy);
+        files.push_back(core::path_to_utf8(written.file));
+        lines += core::path_to_utf8(written.file) + "\n";
+    };
+    service::automate::ContactSheetResult result;
+    try {
+        result = service::automate::contact_sheet(inputs.items, sheet, options, write_sheet);
+    } catch (const core::Error& error) {
+        return fail(error.what(), error.code(), ascii, 1);
+    }
+    if (a.flag("--json")) {
+        core::Json reply = result.json();
+        reply["files"] = files;
+        reply["skipped"] = inputs.skipped;
+        print_json(reply, ascii);
+    } else {
+        write_text(lines, stdout);
+        std::string said;
+        for (const core::Json& e : result.errors) said += where + e.value("input", std::string()) + ": " + e.value("error", std::string()) + "\n";
+        if (!said.empty()) write_text(said, stderr);
+    }
+    return result.errors.empty() ? 0 : 1;
+}
+
+int automate_command(const QStringList& all, bool ascii) {
+    static const std::map<QString, std::string> kKinds = {{QStringLiteral("image-processor"), "画像プロセッサー"},
+                                                          {QStringLiteral("fit"), "画像を合わせる"},
+                                                          {QStringLiteral("mode"), "条件付きモード変更"},
+                                                          {QStringLiteral("lens"), "レンズ補正"}};
+    // (PC5 I-f: コンタクトシート II — new sheets, not the runner's steps)
+    if (!all.isEmpty() && all.front() == QLatin1String("contact-sheet")) return contact_sheet_command(all.mid(1), ascii);
+    // (PC5 I-h: HDR Pro に統合 and 写真の切り抜きと角度補正 make new books — their own arguments)
+    if (!all.isEmpty() && all.front() == QLatin1String("hdr")) return hdr_command(all.mid(1), ascii);
+    if (!all.isEmpty() && all.front() == QLatin1String("crop-photos")) return crop_photos_command(all.mid(1), ascii);
+    // (PC5 I-g: the kinds that make a new book)
+    if (!all.isEmpty() && (all.front() == QLatin1String("stack") || all.front() == QLatin1String("statistics") || all.front() == QLatin1String("photomerge"))) {
+        return automate_book_command(all.front(), all.mid(1), ascii);
+    }
+    if (all.isEmpty() || !kKinds.contains(all.front()))return usage("genko automate: image-processor, fit, mode or lens");
+    const QString kind = all.front();
+    static constexpr Option kOptions[] = {{"--out", true},     {"--save", false},          {"--dry-run", false},      {"--format", true},
+                                          {"--formats", true}, {"--quality", true},        {"--prefix", true},        {"--suffix", true},
+                                          {"--recurse", false}, {"--stop-on-error", false}, {"--agent", true},        {"--json", false},
+                                          {"--name", true},    {"--width", true},          {"--height", true},        {"--dont-enlarge", false},
+                                          {"--resample", true}, {"--to", true},            {"--from", true},          {"--settings", true},
+                                          {"--srgb", false},   {"--steps", true},          {"--action", true}};
+    Arguments a;
+    if (auto error = parse_arguments(all.mid(1), kOptions, 1, "inputs", a, true)) return usage("genko automate " + kind.toStdString() + ": " + *error);
+    const std::string where = "genko automate " + kind.toStdString() + ": ";
+    // (each kind its own options)
+    static const std::map<QString, std::vector<const char*>> kOwn = {
+        {QStringLiteral("image-processor"), {"--formats", "--width", "--height", "--srgb", "--steps", "--action"}},
+        {QStringLiteral("fit"), {"--width", "--height", "--dont-enlarge", "--resample", "--format"}},
+        {QStringLiteral("mode"), {"--to", "--from", "--format"}},
+        {QStringLiteral("lens"), {"--settings", "--format"}}};
+    for (const char* option : {"--formats", "--width", "--height", "--srgb", "--steps", "--action", "--dont-enlarge", "--resample", "--to",
+                               "--from", "--settings", "--format"}) {
+        const auto& own = kOwn.at(kind);
+        if ((a.flag(option) || a.value(option)) && std::find_if(own.begin(), own.end(), [option](const char* o) { return std::string_view(o) == option; }) == own.end()) {
+            return usage(where + option + " is not one of its options");
+        }
+    }
+    const int ways = (a.value("--out") ? 1 : 0) + (a.flag("--save") ? 1 : 0) + (a.flag("--dry-run") ? 1 : 0);
+    if (kind == QLatin1String("image-processor") ? !a.value("--out") || ways != 1 : ways != 1) {
+        return usage(where + (kind == QLatin1String("image-processor") ? "give --out <folder>" : "give --out <folder>, --save or --dry-run"));
+    }
+    // (レンズ補正 flattens each page that shows more than one layer: never a book written so — the review's P3-14)
+    if (kind == QLatin1String("lens") && a.flag("--save")) return usage(where + "--save is not taken: it flattens the pages' layers (write into --out)");
+    const auto px = [&](const char* option) -> std::optional<int> {
+        const auto text = a.value(option);
+        if (!text) return std::nullopt;
+        bool ok = false;
+        const int v = text->trimmed().toInt(&ok);
+        if (!ok || v < 1 || v > 100000) throw core::Error("usage", std::string(option) + ": 1..100000 px");
+        return v;
+    };
+    service::automate::Options options;
+    options.unnamed = a.value("--agent").value_or(QString()).isEmpty();
+    options.actor = core::Actor(options.unnamed ? std::string(core::kLegacyActor) : a.value("--agent")->toStdString());
+    options.stop_on_error = a.flag("--stop-on-error");
+    service::automate::Output output;
+    Json steps = Json::array();
+    std::string name = kKinds.at(kind);
+    try {
+        if (kind == QLatin1String("image-processor")) {
+            if (a.value("--steps") && a.value("--action")) return usage(where + "give --steps <file> or --action <name>, not both");
+            service::automate::ImageProcessor processor;
+            processor.formats.clear();
+            for (const QString& f : a.value("--formats").value_or(QStringLiteral("jpg")).split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+                processor.formats.push_back(f.trimmed().toStdString());
+            }
+            if (const auto q = a.value("--quality")) {
+                const auto v = quality_option(*q);
+                if (!v) return usage(where + "argument --quality: 0..12");
+                processor.quality = *v;
+            }
+            processor.width_px = px("--width");
+            processor.height_px = px("--height");
+            processor.to_srgb = a.flag("--srgb");
+            std::string action;
+            std::tie(steps, action) = steps_option(a, &options.recorded);
+            output = service::automate::processor_output(processor, path_arg(*a.value("--out")));
+            options.first = [processor](const core::Document& doc, bool) { return service::automate::processor_steps(processor, doc); };
+        } else {
+            if (const auto out = a.value("--out")) {
+                output.to = service::automate::Output::To::Folder;
+                output.folder = path_arg(*out);
+            } else {
+                output.to = a.flag("--save") ? service::automate::Output::To::Book : service::automate::Output::To::None;
+            }
+            if (const auto format = a.value("--format")) {
+                const auto f = format_option(*format);
+                if (!f) return usage(where + "not a format this build writes: ." + format->toStdString());
+                output.format = *f;
+            }
+            if (const auto q = a.value("--quality")) {
+                output.quality = quality_option(*q);
+                if (!output.quality) return usage(where + "argument --quality: 0..12");
+            }
+            if (kind == QLatin1String("fit")) {
+                if (!a.value("--width") && !a.value("--height")) return usage(where + "give --width and --height (px)");
+                Json fit{{"op", "fit_image"}};
+                if (const auto w = px("--width")) fit["width_px"] = *w;
+                if (const auto h = px("--height")) fit["height_px"] = *h;
+                if (a.flag("--dont-enlarge")) fit["dont_enlarge"] = true;
+                if (const auto r = a.value("--resample")) fit["resample"] = r->toStdString();
+                steps.push_back(std::move(fit));
+            } else if (kind == QLatin1String("mode")) {
+                if (!a.value("--to")) return usage(where + "give --to rgb, gray, cmyk or lab");
+                Json mode{{"op", "conditional_mode_change"}, {"to", a.value("--to")->trimmed().toLower().toStdString()}};
+                const QString from = a.value("--from").value_or(QStringLiteral("any")).trimmed().toLower();
+                if (from == QLatin1String("any")) {
+                    mode["from"] = "any";
+                } else {
+                    Json list = Json::array();
+                    for (const QString& m : from.split(QLatin1Char(','), Qt::SkipEmptyParts)) list.push_back(m.trimmed().toStdString());
+                    mode["from"] = list;
+                }
+                steps.push_back(std::move(mode));
+            } else {
+                Json settings = Json::object();
+                if (const auto text = a.value("--settings")) {
+                    try {
+                        settings = core::parse_python_json(text->toStdString());
+                    } catch (const core::Error& error) {
+                        return usage(where + "argument --settings: not JSON (" + error.what() + ")");
+                    }
+                    if (!settings.is_object()) return usage(where + "argument --settings: a JSON object of the filter's settings");
+                }
+                options.first = [settings](const core::Document& doc, bool) { return service::automate::lens_steps(settings, doc); };
+            }
+        }
+    } catch (const core::Error& error) {
+        if (error.code() == "usage") return usage(where + error.what());
+        throw;
+    }
+    output.prefix = a.value("--prefix").value_or(QString()).toStdString();
+    output.suffix = a.value("--suffix").value_or(QString()).toStdString();
+    options.script = a.value("--name").value_or(QString()).trimmed().isEmpty() ? name : a.value("--name")->trimmed().toStdString();
+    try {
+        service::automate::check_script_name(options.script);
+    } catch (const core::Error& error) {
+        return usage(where + "argument --name: " + error.what());
+    }
+    std::vector<fs::path> given;
+    for (const QString& p : a.positional) given.push_back(path_arg(p));
+    service::automate::InputOptions listing;
+    listing.recurse = a.flag("--recurse");
+    const service::automate::Inputs inputs = service::automate::list_inputs(given, listing);
+    service::automate::Result result = service::automate::run(inputs.items, steps, output, options);
+    return print_run(inputs, std::move(result), a.flag("--json"), ascii);
+}
+
+// PC5 J-d2 (the C++ build's own, image.analysis.recordMeasurements): `genko measure <book> [--page N] [--source
+// auto|selection|ruler|count] [--area '<area>'] [--csv]` — the rows 計測値を記録 makes for the page (every data point of the
+// source; the selection: --area, none the whole page), as {"ok", "page", "source", "columns", "rows", "grid_dpi"?} or, with
+// --csv, as the measurement log's CSV. The book is only read; the log is the app's (nothing kept).
+int measure_command(const QStringList& args, bool ascii) {
+    static constexpr Option kOptions[] = {{"--page", true}, {"--source", true}, {"--area", true}, {"--csv", false}};
+    Arguments a;
+    if (auto error = parse_arguments(args, kOptions, 1, "src", a)) return usage("genko measure: " + *error);
+    std::int64_t wanted = 1;
+    if (const auto value = a.value("--page")) {
+        const auto n = int_option(*value);
+        if (!n) return usage("genko measure: argument --page: invalid int value: " + core::py_repr_str(value->toStdString()));
+        wanted = *n;
+    }
+    const std::string source = a.value("--source") ? a.value("--source")->toStdString() : std::string("auto");
+    if (source != "auto" && source != "selection" && source != "ruler" && source != "count")
+        return usage("genko measure: argument --source: invalid choice: " + core::py_repr_str(source) + " (choose from auto, selection, ruler, count)");
+    std::optional<Json> area;
+    if (const auto text = a.value("--area")) {
+        try {
+            area = Json::parse(text->toStdString());
+        } catch (const Json::exception&) {
+            return usage("genko measure: argument --area: not JSON");
+        }
+        if (source != "auto" && source != "selection") return usage("genko measure: argument --area: only with --source selection (or auto)");
+    }
+    const auto loaded = storage::load_document(path_arg(a.positional[0]));
+    const core::Document& doc = loaded.document;
+    const core::Page* page = nullptr;
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.pages[i]->index == core::Num(wanted) && !doc.is_deferred(i)) page = &doc.page(i);
+    }
+    if (page == nullptr) throw core::Error("key", "no page " + std::to_string(wanted));
+    render::measure::Recorded made;
+    try {
+        made = render::measure::record(doc, *page, source, area, 1, render::measure::now_text());
+    } catch (const core::OpError& error) {
+        return fail(error.what(), "apply", ascii, 1);
+    }
+    if (a.flag("--csv")) {
+        write_text(render::measure::csv(made.rows), stdout);
+        return 0;
+    }
+    Json columns = Json::array();
+    for (const std::string& key : render::measure::log_columns(made.rows)) columns.push_back(Json{{"key", key}, {"name", render::measure::column_name(key)}});
+    Json out{{"ok", true}, {"page", page->index.json()}, {"source", made.source}, {"columns", std::move(columns)}, {"rows", made.rows}};
+    if (made.grid_dpi > 0) out["grid_dpi"] = made.grid_dpi;
+    if (!made.notes.empty()) out["notes"] = made.notes;
+    print_json(out, ascii);
+    return 0;
+}
+
+// PC5 J-f (plugin.list, plugin.install, plugin.remove, plugin.reload; SPEC PROD-01, docs/PLUGIN_WASM.md): `genko plugins
+// list | reload | install FILE | remove KEY` — the plugins' folder as the app's 環境設定 → プラグイン… shows it. Never chooses
+// a plugin to run, nor turns plugins on (only the person does, in the app): an installed plugin stays off until chosen.
+int plugins_command(const QStringList& args, bool ascii) {
+    if (args.isEmpty()) return usage("genko plugins: list | reload | install FILE | remove KEY");
+    const QString what = args.front();
+    const auto listing = [&](const std::vector<render::plugins::Listed>& items) {
+        const render::plugins::Settings s = render::plugins::settings();
+        Json plugins = Json::array();
+        for (const render::plugins::Listed& item : items) plugins.push_back(render::plugins::listed_json(item));
+        Json out{{"ok", true}, {"enabled", s.enabled}, {"folder", core::path_to_utf8(render::plugins::folder())}, {"plugins", std::move(plugins)}};
+        if (s.use_extra_folder && !s.extra_folder.empty()) out["extra_folder"] = s.extra_folder;
+        print_json(out, ascii);
+        return 0;
+    };
+    try {
+        if (what == QLatin1String("list") && args.size() == 1) return listing(render::plugins::listed());
+        if (what == QLatin1String("reload") && args.size() == 1) return listing(render::plugins::reload());
+        if (what == QLatin1String("install") && args.size() == 2) {
+            const std::string key = render::plugins::install(path_arg(args[1]));
+            print_json(Json{{"ok", true}, {"key", key}, {"chosen", false}}, ascii);
+            return 0;
+        }
+        if (what == QLatin1String("remove") && args.size() == 2) {
+            const std::string key = args[1].toStdString();
+            render::plugins::remove(key);
+            print_json(Json{{"ok", true}, {"key", key}}, ascii);
+            return 0;
+        }
+    } catch (const core::Error& error) {
+        return fail(error.what(), error.code(), ascii, 1);
+    }
+    return usage("genko plugins: list | reload | install FILE | remove KEY");
+}
+
 }  // namespace
 
 int run_cli(int argc, char** argv) {
@@ -2598,6 +4084,7 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("export")) return export_command(args, ascii);
         if (command == QLatin1String("copy")) return copy_command(args, ascii);  // (PC4 F-c: コピーを保存・書き出し形式・Web 用に保存)
         if (command == QLatin1String("smart")) return smart_command(args, ascii);      // (smart-objects@1, PC3 A1)
+        if (command == QLatin1String("spell")) return spell_command(args, ascii);      // (PC5 G-d: スペルチェック)
         if (command == QLatin1String("package")) return package_command(args, ascii);  // (smart-objects@1, PC3 A1)
         if (command == QLatin1String("shapes")) return shapes_command(args, ascii);    // (pen-shapes@1, PC3 C-b)
         if (command == QLatin1String("brushes")) return brushes_command(args, ascii);  // (brushes@1, PC4 E1: brush.get)
@@ -2606,10 +4093,22 @@ int run_cli(int argc, char** argv) {
         if (command == QLatin1String("tool-presets")) return tool_presets_command(args, ascii);  // (PC4 E2: tool.presets.*)
         if (command == QLatin1String("presets")) return presets_command(args, ascii);  // (PC4 E2: edit.presets.*)
         if (command == QLatin1String("styles")) return styles_command(args, ascii);  // (PC4 E6: style.presets.*)
+        if (command == QLatin1String("script")) return script_command(args, ascii);  // (PC5 I-0: 自動処理の土台)
+        if (command == QLatin1String("batch")) return batch_command(args, ascii);    // (PC5 I-0: 自動処理の土台)
+        if (command == QLatin1String("droplet")) return droplet_command(args, ascii);    // (PC5 I-e: ドロップレット)
+        if (command == QLatin1String("automate")) return automate_command(args, ascii);  // (PC5 I-e: 画像プロセッサーほか)
+        if (command == QLatin1String("prefs")) return prefs_command(args, ascii);        // (PC5 H-e: prefs.get/set/reset)
+        if (command == QLatin1String("commands")) return commands_command(args, ascii);  // (PC5 H-e: command.list)
+        if (command == QLatin1String("session")) return session_command(args, ascii);    // (PC5 H-e: session.inspect)
+        if (command == QLatin1String("measure")) return measure_command(args, ascii);    // (PC5 J-d2: 計測値を記録)
+        if (command == QLatin1String("plugins")) return plugins_command(args, ascii);    // (PC5 J-f: plugin.list・install・remove・reload)
+        // (PC5 I-f: `genko print` is the app's — main.cpp sends it there; here when this build has no app, or --ascii came first)
+        if (command == QLatin1String("print")) return usage("genko print: give it first (genko print <book> … --ascii), in a build with the app");
         if (command == QLatin1String("studio")) return studio_command(args, ascii);
         if (command == QLatin1String("mcp")) return mcp_command(args);
         if (command == QLatin1String("serve")) return serve_command(args);
         if (command == QLatin1String("token")) return token_command(args, ascii);
+        if (command == QLatin1String("control")) return control_command(args, ascii);  // (PC5 J-g: 制御チャンネル)
         return usage("unknown command: " + command.toStdString());
     } catch (const storage::UnsupportedProjectVersion& error) {
         return fail(error.what(), error.code(), ascii, 2);

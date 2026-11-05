@@ -45,10 +45,21 @@ struct PsdLayerKeep {
     std::vector<std::pair<std::string, std::string>> blocks;  // its key (4 characters) and the block's bytes
     std::string ranges;                                       // the blending ranges' bytes, "" when every one is the default
     std::optional<std::int64_t> id;                           // the lyid it had
+    // (PC5 G-e, type@1: a type layer read from a text layer) the fingerprint of its record as read (render/psd_type's
+    // fingerprint: "sha256:…"; "" none) — its kept TySh block written back while the record, the dpi and the page's pixels
+    // are the same, else its text written anew. JSON "text"; kept with its TySh block, never on another kind of layer
+    // (written_keep).
+    std::string text;
 
-    bool empty() const { return blocks.empty() && ranges.empty() && !id; }
+    bool empty() const { return blocks.empty() && ranges.empty() && !id && text.empty(); }
     bool operator==(const PsdLayerKeep&) const = default;
 };
+
+// (PC5 G-e) A text layer's block (TySh, tySh): kept only by a type layer read from it.
+bool psd_text_key(std::string_view key);
+// (PC5 G-e) What a layer's native_psd is written as: a layer that is not a type layer (one rasterized, merged, …) keeps no
+// text layer's block or fingerprint (none at all when nothing else is left).
+std::optional<PsdLayerKeep> written_keep(const Layer& layer);
 
 struct PsdResource {
     int id = 0;        // 0..65535
@@ -74,13 +85,25 @@ struct PsdFrom {
     bool operator==(const PsdFrom&) const = default;
 };
 
+// (PC5 J-0, render/psd_production) A kept block the page's own was read from — a layer comps', slices', notes' or
+// measurement scale's —, and the fingerprint of what the page held right after: the kept bytes are written again while the
+// page's is the same, else the page's own (none: neither).
+struct PsdCopied {
+    int resource = -1;        // an image resource's id (a global block: -1)
+    std::string global;       // a global block's key (an image resource: "")
+    std::string fingerprint;  // (1..128 bytes)
+
+    bool operator==(const PsdCopied&) const = default;
+};
+
 struct PsdPageKeep {
     std::vector<PsdResource> resources;
     std::vector<PsdGlobal> globals;
     std::vector<std::int64_t> ids;  // (PC4 F-d) the lyids of the layers read with them (0..4294967295)
     std::optional<PsdFrom> from;
+    std::vector<PsdCopied> copied;  // (PC5 J-0: "copied": [[id | key, fingerprint], …], only while there is one)
 
-    bool empty() const { return resources.empty() && globals.empty() && ids.empty() && !from; }
+    bool empty() const { return resources.empty() && globals.empty() && ids.empty() && !from && copied.empty(); }
     bool operator==(const PsdPageKeep&) const = default;
 };
 

@@ -26,7 +26,8 @@ class QTimer;
 //
 // 情報: under the pointer on the page, its place (mm, and pixels at the book's resolution), the colour the screen shows
 // there (sRGB), the page's values there (render::pixel_at, as the status bar and `genko inspect --pixel` give them),
-// the colour in the proof profile's values (色の校正's: its CMYK ink, or its own channels), and the selection's size.
+// the colour in the proof profile's values (色の校正's: its CMYK ink, or its own channels), and the selection's size;
+// (PC5 J-d1) the ものさしツール's line: its angle, lengths, size and start (Photoshop's A・L1・L2・W・H・X・Y).
 
 namespace genko::app {
 
@@ -90,6 +91,9 @@ public:
     void show_at(std::optional<QPointF> mm);
     // The selection's size again.
     void show_selection();
+    // (PC5 J-d1) The ものさしツール's readout (core::to_json(RulerReadout); none: no line).
+    void show_ruler(const std::optional<core::Json>& readout);
+    QLabel* ruler() const { return ruler_; }
     // What is shown (tests): the place, the screen's colour, the page's values, the proof's values, the selection.
     QLabel* place() const { return place_; }
     QLabel* screen() const { return screen_; }
@@ -106,6 +110,7 @@ private:
     QLabel* values_ = nullptr;
     QLabel* proof_ = nullptr;
     QLabel* selection_ = nullptr;
+    QLabel* ruler_ = nullptr;  // (PC5 J-d1)
     std::optional<core::Json> at_;
 };
 

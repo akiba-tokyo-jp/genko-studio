@@ -21,6 +21,7 @@
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
 #include "core/strokes.hpp"
+#include "core/layer_basics.hpp"
 #include "render/color_canvas.hpp"
 #include "render/imaging.hpp"
 #include "render/ink.hpp"
@@ -46,6 +47,8 @@
 #include "render/text/balloons.hpp"
 #include "render/text/fonts.hpp"
 #include "render/text/lettering.hpp"
+#include "render/ops_annotations.hpp"
+#include "render/text/opentype.hpp"
 #include "render/tones.hpp"
 #include "render/vector_masks.hpp"
 #include "storage/asset_store.hpp"
@@ -134,7 +137,7 @@ std::vector<std::size_t> chosen_layers(const Page& page, const Json& op) {
 bool draws(const Layer& l) {
     return l.raster_png || l.color_raster || l.ink_raster || l.stroke_count() > 0 || !l.patches.empty() || (l.fill && core::py_truthy(*l.fill)) ||
            (l.fill_rgb && !l.fill_rgb->empty()) || l.kind == LayerKind::Tone || (l.tone && core::py_truthy(*l.tone)) || l.kind == LayerKind::Placed ||
-           l.kind == LayerKind::Smart || shape_parts::any(l);
+           l.kind == LayerKind::Smart || shape_parts::any(l) || l.kind == LayerKind::Type;  // (type@1, PC5 G-0: its text)
 }
 
 // A smart object's page made of the page it is on: its paper, panels and colour mode (the layers come next).
@@ -447,6 +450,7 @@ void place_pcraft(OpContext& c, std::size_t at, const std::string& bytes, const 
     std::vector<std::string> notes;
     std::string contents_id;
     try {
+        const annotations::ReadingActor reader(c.actor);  // (PC5 J-c: its notes the op's actor's)
         contents_id = pcraft::place_as_contents(doc, bytes, name.empty() ? std::string("contents.pcraft") : name, notes);
     } catch (const NotYetPorted&) {
         throw;
@@ -748,6 +752,7 @@ void smart_transform(OpContext& c) {
 bool rasterizable(const Layer& layer, const std::set<std::string>& kinds) {
     if (layer.kind == LayerKind::Smart) return kinds.contains("smart");
     if (layer.kind == LayerKind::Placed) return kinds.contains("placed");
+    if (layer.kind == LayerKind::Type) return kinds.contains("type");  // (type@1, PC5 G-0: its text drawn in)
     if (layer.kind == LayerKind::Fill && ((layer.fill && core::py_truthy(*layer.fill)) || (layer.fill_rgb && !layer.fill_rgb->empty())))
         return kinds.contains("fill");
     if (layer.kind == LayerKind::Tone || (layer.tone && core::py_truthy(*layer.tone))) return kinds.contains("tone");
@@ -890,6 +895,7 @@ void rasterize(Document& doc, std::size_t at, std::size_t i) {
     layer.effect.reset();
     layer.tone.reset();
     layer.smart.reset();
+    layer.type.reset();  // (type@1, PC5 G-0: its text drawn in)
     layer.asset.reset();
     layer.placement_mm.reset();
     layer.frame_id.reset();
@@ -940,14 +946,14 @@ void rasterize_layer(OpContext& c) {
         c.report = Json{{"ids", Json::array({page.layers[i].id})}};
         return;
     }
-    std::set<std::string> kinds{"smart", "fill", "tone", "placed"};
+    std::set<std::string> kinds{"smart", "fill", "tone", "placed", "type"};  // (type@1, PC5 G-0: a type layer)
     if (const Json* given = core::get(c.op, "kinds"); given != nullptr && !given->is_null()) {
-        if (!given->is_array()) throw OpError("kinds is a list of smart, fill, tone, placed, pen");
+        if (!given->is_array()) throw OpError("kinds is a list of smart, fill, tone, placed, pen, type");
         kinds.clear();
         for (const Json& kind : *given) {
             const std::string name = core::py_str(kind);
-            if (name != "smart" && name != "fill" && name != "tone" && name != "placed" && name != "pen")
-                throw OpError("kinds is a list of smart, fill, tone, placed, pen");
+            if (name != "smart" && name != "fill" && name != "tone" && name != "placed" && name != "pen" && name != "type")
+                throw OpError("kinds is a list of smart, fill, tone, placed, pen, type");
             kinds.insert(name);
         }
     }
@@ -957,8 +963,9 @@ void rasterize_layer(OpContext& c) {
     std::vector<std::string> done;
     if (core::truthy_at(c.op, "all")) {
         std::vector<std::string> ids;
-        for (const Layer& layer : doc.page(at).layers) {
-            if (rasterizable(layer, kinds) && !layer.locked) ids.push_back(layer.id);
+        const std::vector<Layer>& layers = doc.page(at).layers;
+        for (std::size_t i = 0; i < layers.size(); ++i) {  // (PC5 I-a: those locked with すべてをロック skipped as those locked)
+            if (rasterizable(layers[i], kinds) && !layers[i].locked && !core::locked_all(layers, i)) ids.push_back(layers[i].id);
         }
         for (const std::string& id : ids) {
             rasterize(doc, at, core::layer_by_id(doc.page(at), id));
@@ -967,7 +974,7 @@ void rasterize_layer(OpContext& c) {
     } else {
         const std::size_t i = core::layer_by_id(doc.page(at), core::truthy_at(c.op, "id") ? core::py_str(c.op["id"]) : std::string());
         const Layer& layer = doc.page(at).layers[i];
-        if (!rasterizable(layer, {"smart", "fill", "tone", "placed", "pen"})) throw OpError("layer " + layer.id + " has nothing to rasterize");
+        if (!rasterizable(layer, {"smart", "fill", "tone", "placed", "pen", "type"})) throw OpError("layer " + layer.id + " has nothing to rasterize");
         rasterize(doc, at, i);
         done.push_back(layer.id);
     }
@@ -1058,6 +1065,16 @@ void rasterize_lines(OpContext& c) {
     Document& doc = c.doc;
     const std::size_t at = core::require_page(doc, c.op);
     const Page& page = doc.page(at);
+    if (const Json* type_layer = core::get(c.op, "layer_id"); type_layer != nullptr && !type_layer->is_null()) {
+        // (type@1, PC5 G-0: a type layer — テキストレイヤーをラスタライズ — drawn into its own pixels, its settings kept, as
+        // rasterize_layer does)
+        const std::size_t i = core::layer_by_id(page, core::py_str(*type_layer));
+        if (page.layers[i].kind != LayerKind::Type) throw OpError("layer " + page.layers[i].id + " is not a type layer");
+        const std::string id = page.layers[i].id;
+        rasterize(doc, at, i);
+        c.report = Json{{"id", id}, {"lines", Json::array()}};
+        return;
+    }
     std::vector<std::string> named;
     if (const Json* given = core::get(c.op, "ids"); given != nullptr && !given->is_null()) {
         if (!given->is_array() || given->empty()) throw OpError("ids is a list of the lines' ids");
@@ -1112,6 +1129,7 @@ void rasterize_lines(OpContext& c) {
     core::Bytes inks;
     {
         const text::TextGamma gamma(doc.text_gamma);
+        const text::TypeStyles type_styles(doc.type_styles ? &*doc.type_styles : nullptr);  // (PC5 G-b review P3-9: the book's styles)
         if (page.color) {  // (a page of inks: taken in as it takes in the lines it draws, by its rules)
             InkCanvas canvas(*page.color, size);
             canvas.draw_8bit(draw);
@@ -1185,6 +1203,8 @@ void register_smart_ops(core::OpRegistry& registry) {
 // (PC3 C-e: a placed picture turned with its page, render/ops_pagesize.cpp)
 namespace smart_ops {
 core::Layer placed_to_smart(core::Document& doc, core::Layer placed, const std::string& id) { return render::placed_to_smart(doc, std::move(placed), id); }
+// (type@1, PC5 G-0: a type layer's picture, render/type_layer.cpp)
+Image drawn_alone(Size size, const std::function<void(Image&)>& draw) { return render::drawn_alone(size, draw); }
 
 void fits_deep_page(const core::Document& doc, const core::Page& page) {
     if (page.color || !page.rgb || page.rgb->depth <= 8) return;

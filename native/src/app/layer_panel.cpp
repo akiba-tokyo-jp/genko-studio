@@ -14,9 +14,11 @@
 #include <QMenu>
 #include <QPainter>
 #include <QPixmap>
+#include <QDropEvent>
 #include <QPushButton>
 #include <QSettings>
 #include <QSlider>
+#include <QStandardItemModel>
 #include <QStyle>
 #include <QStyledItemDelegate>
 #include <QVBoxLayout>
@@ -32,6 +34,8 @@
 #include "app/layer_dialogs.hpp"
 #include "app/main_window.hpp"
 #include "app/patterns_panel.hpp"
+#include "core/groups.hpp"
+#include "core/layer_basics.hpp"
 #include "core/patterns.hpp"
 #include "app/preferences.hpp"
 #include "app/theme.hpp"
@@ -58,12 +62,13 @@ QString kind_name(core::LayerKind kind) {
     switch (kind) {
     case core::LayerKind::Strokes: return QStringLiteral("ペンのレイヤー");
     case core::LayerKind::Raster: return QStringLiteral("ペイントのレイヤー");
-    case core::LayerKind::Folder: return QStringLiteral("フォルダ");
+    case core::LayerKind::Folder: return QStringLiteral("フォルダ");  // (a group: kind_name's caller says グループ)
     case core::LayerKind::Placed: return QStringLiteral("画像");
     case core::LayerKind::Tone: return QStringLiteral("トーン");
     case core::LayerKind::Fill: return QStringLiteral("塗り");
     case core::LayerKind::Adjust: return QStringLiteral("色調補正");
     case core::LayerKind::Smart: return QStringLiteral("スマートオブジェクト");
+    case core::LayerKind::Type: return QStringLiteral("テキストレイヤー");  // (type@1, PC5 G-0)
     default: return {};
     }
 }
@@ -151,6 +156,13 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     list_->setSelectionMode(QAbstractItemView::ExtendedSelection);  // Ctrl / Shift+click: several
     list_->setIconSize(QSize(30, 38));
     list_->setItemDelegate(new LayerRow(list_));
+    // (PC5 I-a, layer.moveTo: rows dragged and dropped above, into or below another — the drop is the panel's: eventFilter)
+    list_->setDragEnabled(true);
+    list_->setAcceptDrops(true);
+    list_->setDropIndicatorShown(true);
+    list_->setDragDropMode(QAbstractItemView::DragDrop);
+    list_->setDefaultDropAction(Qt::MoveAction);
+    list_->viewport()->installEventFilter(this);
     connect(list_, &QListWidget::itemChanged, this, [this](QListWidgetItem* item) { visibility(item); });
     connect(list_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
         const int kind = row_kind(list_->row(item));  // (PC3 A2: a smart filter's row — its window; the header: nothing)
@@ -181,6 +193,7 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     blend_ = new QComboBox;
     blend_->setObjectName(QStringLiteral("layer_blend"));
     for (const auto& [key, label] : blend_modes()) blend_->addItem(label, QString::fromStdString(key));
+    blend_->addItem(QStringLiteral("通過"), QStringLiteral("pass_through"));  // (PC5 I-b, groups@1: a group's only)
     connect(blend_, &QComboBox::activated, this, [this](int) {
         const auto [page, layer] = this->layer();
         const std::string blend = blend_->currentData().toString().toStdString();
@@ -201,14 +214,22 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
         return b;
     };
     clip_ = box(QStringLiteral("下のレイヤーでクリップ"), "layer_clip", [this](bool on) { set("clip", on); });
-    protect_ = box(QStringLiteral("透明部分を保護"), "layer_lock_alpha", [this](bool on) { set("lock_alpha", on); });
-    locked_ = box(QStringLiteral("ロック（描けなくする）"), "layer_locked", [this](bool on) { set("locked", on); });
+    // (PC5 I-a: Photoshop's names of the locks, and すべてをロック)
+    protect_ = box(QStringLiteral("透明部分をロック"), "layer_lock_alpha", [this](bool on) { set("lock_alpha", on); },
+                   QStringLiteral("描いてない所に描けなくします（透明部分の保護）"));
+    locked_ = box(QStringLiteral("画像ピクセルをロック"), "layer_locked", [this](bool on) { set("locked", on); },
+                  QStringLiteral("描く・消すをできなくします"));
+    lock_all_ = box(QStringLiteral("すべてをロック"), "layer_lock_all", [this](bool on) { set("lock_all", on); },
+                    QStringLiteral("描く・動かす・不透明度や描画モードを変える・削除をできなくします（表示・名前・重ね順は変えられます）"));
     overhang_ = box(QStringLiteral("コマの外にもはみ出す"), "layer_overhang", [this](bool on) { set("panel_clip", !on); },
                     QStringLiteral("このレイヤーの線を、コマの枠で切らずに間の白や外まで描きます"));
     each_panel_ = box(QStringLiteral("描き始めたコマの中だけに描く"), "layer_each_panel", [this](bool on) { set("panel_each", on); },
                       QStringLiteral("線を、描き始めたコマの枠で切ります（となりのコマにはみ出さない）。外すと、どのコマの中にも描けます"));
     draft_ = box(QStringLiteral("下描き（書き出さない）"), "layer_draft", [this](bool on) { set("exportable", !on); },
                  QStringLiteral("画面には見えますが、書き出し・印刷には出ません"));
+    group_ = box(QStringLiteral("グループとして描く"), "layer_group", [this](bool on) { draw_as_group(on); },
+                 QStringLiteral("フォルダーを Photoshop のグループとして描きます（隠すと中も隠れ、不透明度・描画モード・マスクが中にかかります）。"
+                                "外すと、前と同じに中のレイヤーをそのまま描きます"));
     reference_ = box(QStringLiteral("参照にする"), "layer_reference", [this](bool on) { set("reference", on); },
                      QStringLiteral("塗りつぶしの「見る範囲: 参照レイヤー」で、このレイヤーの線を見て塗ります。線画を参照にすれば、塗りは別のレイヤーに入れられます"));
     tint_ = new QComboBox;
@@ -253,11 +274,11 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
                                   QStringLiteral("Ctrl・Shift+クリックで選んだレイヤーをまとめて扱う。表示レイヤーの結合・変換・下描きの一括など"),
                                   QStringLiteral("layer_many"));
     many_ = new QMenu(several_button);
-    many_->addAction(QStringLiteral("選んだレイヤーを結合"), this, [this] { merge_selected(); });
-    QAction* group = many_->addAction(QStringLiteral("選んだレイヤーをフォルダにまとめる"), this, [this] { group_selected(); });
+    many_->addAction(QStringLiteral("レイヤーを結合"), this, [this] { merge_selected(); });
+    QAction* group = many_->addAction(QStringLiteral("レイヤーをグループ化"), this, [this] { group_selected(); });
     group->setShortcut(QKeySequence(QStringLiteral("Ctrl+G")));
-    many_->addAction(QStringLiteral("選んだレイヤーを見せる"), this, [this] { set_selected(Json{{"visible", true}}); });
-    many_->addAction(QStringLiteral("選んだレイヤーを隠す"), this, [this] { set_selected(Json{{"visible", false}}); });
+    many_->addAction(QStringLiteral("レイヤーを表示"), this, [this] { set_selected(Json{{"visible", true}}); });
+    many_->addAction(QStringLiteral("レイヤーを非表示"), this, [this] { set_selected(Json{{"visible", false}}); });
     many_->addAction(QStringLiteral("選んだレイヤーをロック"), this, [this] { set_selected(Json{{"locked", true}}); });
     many_->addAction(QStringLiteral("選んだレイヤーのロックを外す"), this, [this] { set_selected(Json{{"locked", false}}); });
     many_->addSeparator();
@@ -386,7 +407,7 @@ LayerPanel::LayerPanel(MainWindow* window) : window_(window) {
     props->addRow(QStringLiteral("不透明度"), opacity_);
     props->addRow(QStringLiteral("合成"), blend_);
     dl->addLayout(props);
-    for (QCheckBox* b : {clip_, protect_, locked_, each_panel_, overhang_, draft_, reference_}) dl->addWidget(b);
+    for (QCheckBox* b : {clip_, protect_, locked_, lock_all_, each_panel_, overhang_, draft_, reference_, group_}) dl->addWidget(b);
     dl->addWidget(tint_);
     dl->addLayout(row({mask_button_, effect_button_}));
     auto* frow = new QHBoxLayout;
@@ -449,9 +470,12 @@ void LayerPanel::refresh() {
             QStringList marks;
             if (!layer.exportable && layer.role != core::LayerRole::Name && layer.role != core::LayerRole::Draft) marks << QStringLiteral("下描き");
             if (layer.reference) marks << QStringLiteral("参照");
+            // (PC5 I-b, groups@1: a folder that is not drawn as a group — what it holds drawn as it is)
+            if (layer.kind == core::LayerKind::Folder && !layer.group) marks << QStringLiteral("まとめるだけ");
             if (layer.mask) marks << (layer.mask->linked ? QStringLiteral("マスク（リンク）") : QStringLiteral("マスク"));  // (PC3 B2: masks@1)
             if (layer.shapes && !layer.shapes->items.empty()) marks << QStringLiteral("形 %1").arg(layer.shapes->items.size());  // (pen-shapes@1)
-            if (layer.locked) marks << QStringLiteral("ロック");
+            if (layer.lock_all) marks << QStringLiteral("すべてロック");  // (PC5 I-a, layer-locks@1)
+            else if (layer.locked) marks << QStringLiteral("ロック");
             if (layer.lock_position) marks << QStringLiteral("位置ロック");  // (transform@1, PC3 C-d)
             // (psd-keep@1, PC4 F-d: a PSD's layer effects, kept and written back, which this build does not draw)
             const bool psd_effects = core::psd_effects_kept(layer);
@@ -482,8 +506,9 @@ void LayerPanel::refresh() {
             auto* item = new QListWidgetItem(indent + wording::layer_label(layer) + (marks.isEmpty() ? QString() : QStringLiteral("　· ") + marks.join(QStringLiteral(" · "))));
             item->setData(Qt::UserRole + 2, meta.join(QStringLiteral(" · ")));
             item->setData(Qt::UserRole + 3, indent + wording::layer_label(layer));  // (the name alone: the marks go right)
-            item->setToolTip(psd_effects ? kind_name(layer.kind) + QStringLiteral("\nPSD のレイヤー効果は Genko では描きません（PSD に書き戻すと Photoshop が描きます）")
-                                         : kind_name(layer.kind));
+            const QString kind = core::is_group(layer) ? QStringLiteral("グループ") : kind_name(layer.kind);  // (PC5 I-b)
+            item->setToolTip(psd_effects ? kind + QStringLiteral("\nPSD のレイヤー効果は Genko では描きません（PSD に書き戻すと Photoshop が描きます）")
+                                         : kind);
             // its picture, or (nothing drawn yet) a quiet mark of its kind; every row the same height
             const QIcon picture = thumbnail(*page, layer);
             item->setIcon(picture.isNull() ? kind_mark(layer.kind) : picture);
@@ -500,11 +525,7 @@ void LayerPanel::refresh() {
         const auto at = std::find(ids_.begin(), ids_.end(), target->id);
         if (at != ids_.end()) list_->setCurrentRow(static_cast<int>(at - ids_.begin()));
     }
-    if (chosen.size() > 1) {
-        for (int row = 0; row < list_->count() && row < static_cast<int>(ids_.size()); ++row)
-            if (row_kind(row) == kLayerRow && std::find(chosen.begin(), chosen.end(), ids_[static_cast<std::size_t>(row)]) != chosen.end())
-                list_->item(row)->setSelected(true);
-    }
+    if (chosen.size() > 1) select_ids(chosen, SelectMode::Add);
     loading_ = false;
     search_->setVisible(ids_.size() > 8 || !search_->text().isEmpty());  // (finding a layer by name: a thick page only)
     search(search_->text());
@@ -615,11 +636,24 @@ void LayerPanel::selected(bool from_list) {
     clip_->setChecked(layer->clip);
     protect_->setChecked(layer->lock_alpha);
     locked_->setChecked(layer->locked);
+    lock_all_->setChecked(layer->lock_all);
+    {  // (PC5 I-a: while すべてをロック holds — its own or its folder's — the other locks are not pressed, as Photoshop's)
+        const bool all = core::locked_all(page->layers, static_cast<std::size_t>(layer - page->layers.data()));
+        protect_->setEnabled(!all);
+        locked_->setEnabled(!all);
+    }
     overhang_->setChecked(!layer->panel_clip);
     each_panel_->setChecked(layer->panel_each);
     each_panel_->setEnabled(layer->panel_clip);
     draft_->setChecked(!layer->exportable);
     reference_->setChecked(layer->reference);
+    // (PC5 I-b, groups@1: a folder's グループとして描く; 通過 a group's blend only)
+    group_->setVisible(layer->kind == core::LayerKind::Folder);
+    group_->setChecked(core::is_group(*layer));
+    if (auto* modes = qobject_cast<QStandardItemModel*>(blend_->model())) {
+        const int pass = blend_->findData(QStringLiteral("pass_through"));
+        if (pass >= 0) modes->item(pass)->setEnabled(core::is_group(*layer));
+    }
     draft_->setEnabled(layer->role != core::LayerRole::Name && layer->role != core::LayerRole::Draft);  // (those never print)
     int tint = 0;
     if (layer->color && !layer->color->empty())
@@ -633,7 +667,7 @@ void LayerPanel::selected(bool from_list) {
     color_prints_->setChecked(layer->color_prints);
     effect_button_->setText(layer->effect && core::py_truthy(*layer->effect) ? QStringLiteral("効果 ✓ ▾") : QStringLiteral("効果 ▾"));
     loading_ = false;
-    const bool drawable = MainWindow::drawable(*layer);
+    const bool drawable = MainWindow::drawable(*layer, page);
     const bool prints = layer->exportable && layer->role != core::LayerRole::Name && layer->role != core::LayerRole::Draft;
     const QString note = prints ? QString() : QStringLiteral(" <span style='color:#c0392b'>（印刷されません）</span>");
     target_->setText(drawable ? QStringLiteral("描く先: <b>%1</b>%2").arg(wording::layer_label(*layer).toHtmlEscaped(), note)
@@ -703,6 +737,7 @@ void LayerPanel::add(const std::string& kind, const QString& title) {
     if (page == nullptr) return;
     const std::string id = core::new_id();
     Json op{{"op", "add_layer"}, {"page", page->index.json()}, {"kind", kind}, {"name", title.toStdString()}, {"id", id}};
+    if (kind == "folder") op["group"] = true;  // (PC5 I-b, the user's decision 2: a new folder is drawn as a group, 通過)
     if (layer != nullptr) op["after"] = layer->id;  // just in front of the chosen layer
     if (window_->apply_ops(Json::array({op})) && kind != "folder") {
         window_->set_target_layer(id);
@@ -714,7 +749,13 @@ void LayerPanel::duplicate() {
     const auto [page, layer] = this->layer();
     if (layer == nullptr) return;
     const std::string id = core::new_id();
-    if (window_->apply_ops(Json::array({Json{{"op", "duplicate_layer"}, {"page", page->index.json()}, {"id", layer->id}, {"new_id", id}}}))) {
+    // (PC5 I-a: the layers chosen — a group or folder with what it holds: duplicate_layers —; one layer as before)
+    std::vector<std::string> ids = selected_ids();
+    if (std::find(ids.begin(), ids.end(), layer->id) == ids.end()) ids = {layer->id};
+    Json op{{"op", "duplicate_layer"}, {"page", page->index.json()}, {"id", layer->id}, {"new_id", id}};
+    if (ids.size() > 1 || layer->kind == core::LayerKind::Folder)
+        op = Json{{"op", "duplicate_layers"}, {"page", page->index.json()}, {"ids", ids}, {"new_ids", Json{{layer->id, id}}}};
+    if (window_->apply_ops(Json::array({op}))) {
         window_->set_target_layer(id);
         refresh();
     }
@@ -758,23 +799,177 @@ void LayerPanel::move(int delta) {
     if (delta != 0) window_->arrange_layers(delta > 0 ? "forward" : "backward");
 }
 
-void LayerPanel::select_ids(const std::vector<std::string>& ids) {
+void LayerPanel::select_ids(const std::vector<std::string>& ids, SelectMode mode) {
+    const auto named = [&](int row) {
+        return row_kind(row) == kLayerRow && std::find(ids.begin(), ids.end(), ids_[static_cast<std::size_t>(row)]) != ids.end();
+    };
+    const int rows = std::min(list_->count(), static_cast<int>(ids_.size()));
+    std::optional<std::pair<int, int>> range;  // (Range: from the row drawn on to the last of them, as Shift+クリック)
+    if (mode == SelectMode::Range && !ids.empty()) {
+        int last = -1;
+        for (int row = 0; row < rows; ++row)
+            if (row_kind(row) == kLayerRow && ids_[static_cast<std::size_t>(row)] == ids.back()) last = row;
+        const int from = list_->currentRow() >= 0 ? list_->currentRow() : last;
+        if (last >= 0) range = std::minmax(from, last);
+    }
     loading_ = true;
-    list_->clearSelection();
-    for (int row = 0; row < list_->count() && row < static_cast<int>(ids_.size()); ++row) {
+    if (mode == SelectMode::Replace || mode == SelectMode::Range) list_->clearSelection();
+    for (int row = 0; row < rows; ++row) {
         if (row_kind(row) != kLayerRow) continue;
-        if (std::find(ids.begin(), ids.end(), ids_[static_cast<std::size_t>(row)]) != ids.end()) list_->item(row)->setSelected(true);
+        QListWidgetItem* item = list_->item(row);
+        if (mode == SelectMode::Range) {
+            if (range && row >= range->first && row <= range->second && !item->isHidden()) item->setSelected(true);
+        } else if (named(row)) {
+            item->setSelected(mode == SelectMode::Toggle ? !item->isSelected() : true);
+        }
     }
     loading_ = false;
+}
+
+LayerPanel::DropPlace LayerPanel::drop_place(bool folder, int y, int height) {
+    const int h = std::max(1, height);
+    if (!folder) return y * 2 < h ? DropPlace::Above : DropPlace::Below;
+    if (y * 4 < h) return DropPlace::Above;
+    if (y * 4 >= h * 3) return DropPlace::Below;
+    return DropPlace::Into;
+}
+
+bool LayerPanel::drop(const std::vector<std::string>& ids, const std::string& onto, DropPlace place) {
+    const core::Page* page = window_->current_page();
+    if (page == nullptr || ids.empty() || std::find(ids.begin(), ids.end(), onto) != ids.end()) return false;
+    const std::vector<core::Layer>& layers = page->layers;
+    const auto index_of = [&](const std::string& id) -> std::optional<std::size_t> {
+        for (std::size_t i = 0; i < layers.size(); ++i)
+            if (layers[i].id == id) return i;
+        return std::nullopt;
+    };
+    const auto t = index_of(onto);
+    if (!t) return false;
+    // (a folder moves with what it holds: its layers keep their folders, the roots dragged take the new one)
+    std::vector<bool> moved(layers.size(), false);
+    for (const std::string& id : ids) {
+        const auto i = index_of(id);
+        if (!i) return false;
+        moved[*i] = true;
+        if (layers[*i].kind == core::LayerKind::Folder)
+            for (const std::size_t k : core::folder_contents(layers, *i)) moved[k] = true;
+    }
+    if (moved[*t]) {  // (into or next to what is moved itself: nothing)
+        window_->flash(QStringLiteral("グループを、そのグループの中へは動かせません"), 3000);
+        return false;
+    }
+    const core::Layer& target = layers[*t];
+    if (place == DropPlace::Into && target.kind != core::LayerKind::Folder) place = DropPlace::Above;
+    // (the first layer under `from` that is not moved: what the moved ones go just in front of — none: the bottom)
+    const auto under = [&](std::size_t from) -> Json {
+        for (std::size_t k = from; k-- > 0;)
+            if (!moved[k]) return Json(layers[k].id);
+        return Json("bottom");
+    };
+    Json after;
+    Json parent = target.parent_id.is_string() ? target.parent_id : Json(nullptr);
+    if (place == DropPlace::Above) {
+        after = target.id;
+    } else if (place == DropPlace::Below) {
+        std::size_t lowest = *t;
+        if (target.kind == core::LayerKind::Folder)
+            for (const std::size_t k : core::folder_contents(layers, *t)) lowest = std::min(lowest, k);
+        after = under(lowest);
+    } else {
+        parent = target.id;
+        std::optional<std::size_t> top;  // (on the top of what it holds)
+        for (std::size_t k = 0; k < layers.size(); ++k)
+            if (!moved[k] && layers[k].parent_id.is_string() && layers[k].parent_id.get_ref<const std::string&>() == target.id) top = k;
+        after = top ? Json(layers[*top].id) : under(*t);
+    }
+    Json roots = Json::array();
+    Json all = Json::array();
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+        if (!moved[i]) continue;
+        all.push_back(layers[i].id);
+        if (std::find(ids.begin(), ids.end(), layers[i].id) != ids.end()) roots.push_back(layers[i].id);
+    }
+    const Json index = page->index.json();
+    return window_->apply_ops(Json::array({Json{{"op", "move_layers"}, {"page", index}, {"ids", roots}, {"parent", parent}},
+                                           Json{{"op", "move_layers"}, {"page", index}, {"ids", all}, {"after", after}}}));
+}
+
+bool LayerPanel::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == list_->viewport() && event->type() == QEvent::Drop) {
+        auto* dropped = static_cast<QDropEvent*>(event);
+        if (dropped->source() != list_) return false;
+        const QPoint at = dropped->position().toPoint();
+        QListWidgetItem* item = list_->itemAt(at);
+        const int row = item != nullptr ? list_->row(item) : -1;
+        std::vector<std::string> chosen;
+        for (const QListWidgetItem* picked : list_->selectedItems()) {
+            const int r = list_->row(picked);
+            if (r >= 0 && r < static_cast<int>(ids_.size()) && row_kind(r) == kLayerRow) chosen.push_back(ids_[static_cast<std::size_t>(r)]);
+        }
+        dropped->setDropAction(Qt::IgnoreAction);  // (the list's rows are the page's: made again from it)
+        dropped->accept();
+        const core::Page* page = window_->current_page();
+        if (row < 0 || row >= static_cast<int>(ids_.size()) || row_kind(row) != kLayerRow || page == nullptr || chosen.empty()) return true;
+        const std::string onto = ids_[static_cast<std::size_t>(row)];
+        const bool folder = std::any_of(page->layers.begin(), page->layers.end(), [&](const core::Layer& l) { return l.id == onto && l.kind == core::LayerKind::Folder; });
+        const QRect rect = list_->visualItemRect(item);
+        drop(chosen, onto, drop_place(folder, at.y() - rect.top(), rect.height()));
+        return true;
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 void LayerPanel::remove() {
     const auto [page, layer] = this->layer();
     if (layer == nullptr) return;
+    // (PC5 I-a: the layers chosen — a group or folder with what it holds —, the one drawn on when one is chosen)
+    std::vector<std::string> ids = selected_ids();
+    if (std::find(ids.begin(), ids.end(), layer->id) == ids.end()) ids = {layer->id};
+    const bool folder = std::any_of(page->layers.begin(), page->layers.end(), [&](const core::Layer& l) {
+        return l.kind == core::LayerKind::Folder && std::find(ids.begin(), ids.end(), l.id) != ids.end();
+    });
+    const QString what = ids.size() == 1 ? QStringLiteral("レイヤー「%1」").arg(wording::layer_label(*layer)) : QStringLiteral("%1 つのレイヤー").arg(ids.size());
     const auto asked = window_->asking();  // (the page and the layer stay as they are while asked, or nothing is done)
-    if (!ask::question(this, QStringLiteral("Genko"), QStringLiteral("レイヤー「%1」を消しますか？\n（元に戻す で取り消せます）").arg(wording::layer_label(*layer)))) return;
+    if (!ask::question(this, QStringLiteral("Genko"), QStringLiteral("%1を消しますか？%2\n（元に戻す で取り消せます）")
+                                                           .arg(what, folder ? QStringLiteral("（グループの中のレイヤーも消えます）") : QString())))
+        return;
     if (!window_->still(asked)) return;
-    window_->apply_ops(Json::array({Json{{"op", "delete_layer"}, {"page", page->index.json()}, {"id", layer->id}}}));
+    if (ids.size() == 1 && !folder) {  // (one layer: as before)
+        window_->apply_ops(Json::array({Json{{"op", "delete_layer"}, {"page", page->index.json()}, {"id", layer->id}}}));
+        return;
+    }
+    window_->apply_ops(Json::array({Json{{"op", "delete_layers"}, {"page", page->index.json()}, {"ids", ids}}}));
+}
+
+void LayerPanel::delete_hidden() {
+    const core::Page* page = window_->current_page();
+    if (page == nullptr) return;
+    const auto count = std::count_if(page->layers.begin(), page->layers.end(), [](const core::Layer& l) { return !l.visible; });
+    if (count == 0) {
+        window_->flash(QStringLiteral("このページに非表示のレイヤーはありません"), 3000);
+        return;
+    }
+    const auto asked = window_->asking();
+    if (!ask::question(this, QStringLiteral("Genko"), QStringLiteral("非表示のレイヤーを %1 つ消しますか？（ネーム・ペン入れ・背景・仕上げ、すべてをロックしたレイヤーは残します）\n（元に戻す で取り消せます）").arg(count)))
+        return;
+    if (!window_->still(asked)) return;
+    window_->apply_ops(Json::array({Json{{"op", "delete_layers"}, {"page", page->index.json()}, {"hidden", true}}}));
+}
+
+void LayerPanel::ungroup() {
+    const auto [page, layer] = this->layer();
+    if (layer == nullptr) return;
+    // (the group or folder drawn on, or the one the layer drawn on is in)
+    const core::Layer* folder = layer->kind == core::LayerKind::Folder ? layer : nullptr;
+    if (folder == nullptr && layer->parent_id.is_string()) {
+        for (const core::Layer& l : page->layers)
+            if (l.id == layer->parent_id.get_ref<const std::string&>() && l.kind == core::LayerKind::Folder) folder = &l;
+    }
+    if (folder == nullptr) {
+        window_->flash(QStringLiteral("グループを選びます（グループの中のレイヤーでも）"), 3000);
+        return;
+    }
+    window_->apply_ops(Json::array({Json{{"op", "ungroup_layers"}, {"page", page->index.json()}, {"id", folder->id}}}));
 }
 
 std::vector<std::string> LayerPanel::selected_ids() const {
@@ -831,7 +1026,25 @@ void LayerPanel::group_selected() {
     const auto ids = several(1);
     const core::Page* page = window_->current_page();
     if (ids && page != nullptr)
-        window_->apply_ops(Json::array({Json{{"op", "group_layers"}, {"page", page->index.json()}, {"ids", *ids}, {"id", core::new_id()}, {"name", "フォルダ"}}}));
+        window_->apply_ops(Json::array({Json{{"op", "group_layers"}, {"page", page->index.json()}, {"ids", *ids}, {"id", core::new_id()}, {"name", "グループ"},
+                                             {"group", true}}}));  // (PC5 I-b, the user's decision 2: a group, 通過)
+}
+
+void LayerPanel::frame_selected() {
+    const auto ids = several(1);
+    const core::Page* page = window_->current_page();
+    if (ids && page != nullptr)
+        window_->apply_ops(Json::array({Json{{"op", "frame_from_layers"}, {"page", page->index.json()}, {"ids", *ids}, {"id", core::new_id()}}}));
+}
+
+void LayerPanel::draw_as_group(bool on) {
+    const auto [page, layer] = this->layer();
+    if (layer == nullptr || loading_ || layer->kind != core::LayerKind::Folder || core::is_group(*layer) == on) return;
+    // (1 手: on, 通過 when its blend is 通常 — what it holds drawn as before, now hidden with it and under its opacity and
+    // mask; a blend of its own, a PSD's read before, kept: what it holds drawn alone. Off, as before: its blend kept, 通過 通常)
+    Json op{{"op", "set_layer"}, {"page", page->index.json()}, {"id", layer->id}, {"group", on}};
+    if (on && (layer->blend.empty() || layer->blend == "normal")) op["blend"] = "pass_through";
+    window_->apply_ops(Json::array({op}));
 }
 
 void LayerPanel::set_selected(const Json& fields) {
@@ -957,6 +1170,10 @@ void LayerPanel::edit_special() {
     if (layer == nullptr) return;
     if (layer->kind == core::LayerKind::Smart) {  // (smart-objects@1: レイヤーの内容オプション… — its contents)
         window_->content_options();
+        return;
+    }
+    if (layer->kind == core::LayerKind::Type) {  // (PC5 G-a: its text typed over in place, as Photoshop's double click on the T)
+        window_->edit_type_layer_inline(layer->id);
         return;
     }
     const auto asked = window_->asking();  // (each dialog's answer applied only to the book it was asked about)
@@ -1098,7 +1315,8 @@ QIcon LayerPanel::kind_mark(core::LayerKind kind) {
         {core::LayerKind::Adjust, "kind_adjust"},   {core::LayerKind::Smart, "kind_smart"}};
     const theme::Tokens t = theme::tokens();
     const auto found = names.find(kind);
-    const QString key = QString::fromLatin1(found != names.end() ? found->second : "kind_other") + t.muted;
+    const bool type = kind == core::LayerKind::Type;  // (type@1, PC5 G-0: Photoshop's "T" in the picture's room)
+    const QString key = QString::fromLatin1(type ? "kind_type" : found != names.end() ? found->second : "kind_other") + t.muted;
     if (const auto kept = marks_.find(key); kept != marks_.end()) return kept->second;
     const QSize size = list_->iconSize();
     QPixmap pixmap(size);
@@ -1106,8 +1324,17 @@ QIcon LayerPanel::kind_mark(core::LayerKind kind) {
     const int side = std::min({18, size.width(), size.height()});  // (a small quiet mark in the picture's room)
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
-    painter.drawPixmap((size.width() - side) / 2, (size.height() - side) / 2,
-                       icons::icon(found != names.end() ? found->second : "kind_other", t.muted, t.muted).pixmap(side, side));
+    if (type) {
+        QFont font = painter.font();
+        font.setBold(true);
+        font.setPixelSize(std::max(8, std::min(size.width(), size.height()) * 2 / 3));
+        painter.setFont(font);
+        painter.setPen(QColor(t.muted));
+        painter.drawText(QRect(QPoint(0, 0), size), Qt::AlignCenter, QStringLiteral("T"));
+    } else {
+        painter.drawPixmap((size.width() - side) / 2, (size.height() - side) / 2,
+                           icons::icon(found != names.end() ? found->second : "kind_other", t.muted, t.muted).pixmap(side, side));
+    }
     painter.end();
     QIcon mark;
     mark.addPixmap(pixmap, QIcon::Normal);

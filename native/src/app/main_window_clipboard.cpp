@@ -177,6 +177,7 @@ void MainWindow::build_clipboard_menu(QMenu* edit) {
     edit->addSeparator();
     build_transform_items(edit);  // (コンテンツに応じて拡大・縮小… パペットワープ 遠近法ワープ 自由変形: main_window_transform.cpp)
     build_transform_menu(edit->addMenu(QStringLiteral("変形")));  // (main_window_select.cpp; ゆがみ… is フィルター's: filter_menu.cpp)
+    build_auto_align_items(edit);  // (PC5 I-g: レイヤーを自動整列…・レイヤーを自動合成…, main_window_photomerge.cpp)
 }
 
 std::optional<Json> MainWindow::copied_items(const std::optional<Json>& area, const core::Layer* of) {
@@ -295,6 +296,28 @@ void MainWindow::copy_merged() {
 }
 
 void MainWindow::paste() { paste_special(QString()); }
+
+bool MainWindow::purge_clipboard(std::int64_t& bytes) {
+    // (PC5 H-f, メモリをクリア → クリップボード: this window's copy, and the computer's clipboard while what it holds is Genko's —
+    // put there by this program, or of Genko's kinds — so a paste finds nothing; another program's is left alone. The bytes
+    // are counted of Genko's items only — the pictures beside them never asked for: another process's copy would be
+    // fetched and converted, review P3-5)
+    const bool held = clipboard_.has_value();
+    if (clipboard_) bytes += clipboard_stamp_.isEmpty() ? static_cast<std::int64_t>(clipboard_->dump().size()) : clipboard_stamp_.size();
+    clipboard_.reset();
+    clipboard_area_.reset();
+    clipboard_outline_.clear();
+    clipboard_stamp_.clear();
+    QClipboard* clip = QGuiApplication::clipboard();
+    const QMimeData* data = clip != nullptr ? clip->mimeData() : nullptr;
+    if (data == nullptr) return held;
+    const QStringList formats = data->formats();
+    const bool genkos = std::any_of(formats.begin(), formats.end(), [](const QString& f) { return f.startsWith(QStringLiteral("application/x-genko")); });
+    if (!genkos && !clip->ownsClipboard()) return held;
+    if (!held && data->hasFormat(kGenkoItems)) bytes += data->data(kGenkoItems).size();  // (another window's or process's copy)
+    clip->clear();
+    return true;
+}
 
 void MainWindow::paste_special(const QString& how) {
     const core::Page* page = current_page();

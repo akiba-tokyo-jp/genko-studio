@@ -315,6 +315,8 @@ void MainWindow::start_layer_transform(const QString& mode, const std::vector<st
     }
     transform_ids_ = ids;
     transform_box_ = *box;
+    transform_book_ = session_.get();  // (PC5 H-c review P2-1: Enter lands on this book only)
+    transform_contents_ = contents_;
     try {  // (PC3 C-d: what the box moves is not snapped to)
         canvas_->snap_moving = lt::layers_moved(*page, ids);
     } catch (const std::exception&) {
@@ -341,6 +343,11 @@ void MainWindow::transform_previewed(const Json& spec) {
 void MainWindow::transform_committed(const Json& spec) {
     hide_transform_bar();
     preview_ops(std::nullopt);
+    if (!begun_here(transform_book_, transform_contents_)) {  // (PC5 H-c review P2-1: begun on another book — never put on this one)
+        refilter_.reset();
+        flash(QStringLiteral("変形を始めた原稿が前にないため、変形を取りやめました"), 4000);
+        return;
+    }
     const Json op = transform_op(spec);
     const std::optional<Json> area = transform_area_;
     if (refilter_) {  // (PC3 A5: a smart filter set again — not one for 再実行)
@@ -941,8 +948,11 @@ void MainWindow::liquify_dialog(const std::optional<std::pair<std::string, int>>
 // --- 台詞 → ワープテキスト… ----------------------------------------------------------------------------------------------
 
 void MainWindow::warp_text_dialog() {
-    const core::StoryLine* line = selected_line_or_say();
+    // (PC5 G-a review P2-6: the chosen type layer too — edit_type's warp —, else the chosen line)
+    const std::optional<Json> target = type_target(false);
+    const core::StoryLine* line = target ? type_record(*target) : selected_line_or_say();
     if (line == nullptr) return;
+    const std::optional<Json> layer_target = target && target->contains("layer_id") ? target : std::nullopt;
     const Json now = line->style.is_object() && line->style.contains("native_warp") ? line->style["native_warp"] : Json();
     QDialog dialog(this);
     dialog.setObjectName(QStringLiteral("warp_text_dialog"));
@@ -978,6 +988,7 @@ void MainWindow::warp_text_dialog() {
         const QString key = style->currentData().toString();
         const Json warp = key.isEmpty() ? Json() : Json{{"style", key.toStdString()}, {"bend", bend->value()}, {"h_distort", h->value()}, {"v_distort", v->value()},
                                                        {"vertical", vertical->isChecked()}};
+        if (layer_target) return Json{{"op", "edit_type"}, {"page", (*layer_target)["page"]}, {"layer_id", (*layer_target)["layer_id"]}, {"warp", warp}};
         return Json{{"op", "edit_line"}, {"id", id}, {"style", Json{{"native_warp", warp}}}};
     };
     const auto preview = [this, op_of] { preview_ops(Json::array({op_of()})); };

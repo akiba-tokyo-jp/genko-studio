@@ -18,6 +18,7 @@
 #include "app/ask.hpp"
 #include "app/book_dialogs.hpp"
 #include "app/theme.hpp"
+#include "app/view_units.hpp"
 
 namespace genko::app {
 
@@ -84,6 +85,24 @@ void put_trim(Json& op, const QComboBox* trim) {
 
 double r2(double v) { return std::round(v * 100.0) / 100.0; }
 
+// (PC5 H-b) The size windows' units: mm and the page's pixels as before, and 環境設定 → 単位・定規's others (列: its columns).
+QComboBox* size_units(const QString& name, bool pixels_at_resolution) {
+    auto* box = new QComboBox;
+    box->setObjectName(name);
+    box->addItem(QStringLiteral("mm"), QStringLiteral("mm"));
+    box->addItem(pixels_at_resolution ? QStringLiteral("pixel（解像度で）") : QStringLiteral("pixel"), QStringLiteral("px"));
+    for (const core::units::Unit u : {core::units::Unit::Cm, core::units::Unit::In, core::units::Unit::Pt, core::units::Unit::Pica,
+                                      core::units::Unit::Percent, core::units::Unit::Columns}) {
+        box->addItem(QString::fromStdString(core::units::label_of(u)), QString::fromStdString(core::units::key_of(u)));
+    }
+    box->setCurrentIndex(std::max(0, box->findData(QString::fromStdString(core::units::key_of(view_units::ruler())))));
+    return box;
+}
+
+core::units::Unit unit_in(const QComboBox* box) {
+    return core::units::unit_of(box->currentData().toString().toStdString()).value_or(core::units::Unit::Mm);
+}
+
 }  // namespace
 
 // --- 画像解像度 ---------------------------------------------------------------------------------------------------------
@@ -94,7 +113,7 @@ ImageSizeDialog::ImageSizeDialog(QWidget* parent, const core::Page& page) : QDia
     const double w = page.spec.width_mm.value(), h = page.spec.height_mm.value();
     ratio_ = h > 0 ? w / h : 1;
     scope = scope_box(page, QStringLiteral("image_size_scope"), true);
-    unit = combo(QStringLiteral("image_size_unit"), {{"mm", "mm"}, {"pixel（解像度で）", "px"}});
+    unit = size_units(QStringLiteral("image_size_unit"), true);
     width = mm_box(QStringLiteral("image_size_width"), 1, 100000, w);
     height = mm_box(QStringLiteral("image_size_height"), 1, 100000, h);
     keep_ratio = new QCheckBox(QStringLiteral("縦横比を固定"));
@@ -148,30 +167,48 @@ ImageSizeDialog::ImageSizeDialog(QWidget* parent, const core::Page& page) : QDia
     connect(resample, &QCheckBox::toggled, this, enable);
     connect(dpi, &QSpinBox::valueChanged, this, [this] { show_unit(); });
     enable();
+    if (data_of(unit) != QLatin1String("mm")) show_unit();  // (環境設定's unit: the sizes in it from the start)
     buttons = ok_cancel(this);
     lay_out_dialog(this, form, buttons);
 }
 
-double ImageSizeDialog::mm_of(double value) const { return unit_now_ == QLatin1String("px") ? value / dpi->value() * 25.4 : value; }
-double ImageSizeDialog::value_of(double mm) const { return unit_now_ == QLatin1String("px") ? mm / 25.4 * dpi->value() : mm; }
+core::units::Basis ImageSizeDialog::basis(bool across) const {
+    core::units::Basis b = view_units::basis(&page_, across);
+    b.dpi = dpi->value();
+    return b;
+}
+
+double ImageSizeDialog::mm_of(double value, bool across) const {
+    return core::units::to_mm(value, core::units::unit_of(unit_now_.toStdString()).value_or(core::units::Unit::Mm), basis(across));
+}
+double ImageSizeDialog::value_of(double mm, bool across) const {
+    return core::units::from_mm(mm, core::units::unit_of(unit_now_.toStdString()).value_or(core::units::Unit::Mm), basis(across));
+}
 
 void ImageSizeDialog::show_unit() {
     // (the same size in the unit chosen; without resampling, the pixels kept: the mm follow the resolution)
     const double page_dpi = page_.spec.dpi.value();
-    double w_mm = mm_of(width->value()), h_mm = mm_of(height->value());
+    double w_mm = mm_of(width->value(), true), h_mm = mm_of(height->value(), false);
     if (!resample->isChecked()) {
         w_mm = page_.spec.width_mm.value() * page_dpi / dpi->value();
         h_mm = page_.spec.height_mm.value() * page_dpi / dpi->value();
     }
     unit_now_ = data_of(unit);
     following_ = true;
-    const QString suffix = unit_now_ == QLatin1String("px") ? QStringLiteral(" px") : QStringLiteral(" mm");
+    const core::units::Unit now = unit_in(unit);
+    const QString suffix = QStringLiteral(" ") + QString::fromStdString(core::units::suffix_of(now));
     for (QDoubleSpinBox* box : {width, height}) {
         box->setSuffix(suffix);
-        box->setDecimals(unit_now_ == QLatin1String("px") ? 0 : 2);
+        box->setDecimals(unit_now_ == QLatin1String("px") ? 0 : now == core::units::Unit::Mm ? 2 : 3);
+        // (mm and px 1 … 100000 as before; another unit the same lengths as 1 … 100000 mm in it)
+        if (now == core::units::Unit::Mm || now == core::units::Unit::Px) {
+            box->setRange(1, 100000);
+        } else {
+            box->setRange(core::units::from_mm(1, now, basis(box == width)), core::units::from_mm(100000, now, basis(box == width)));
+        }
     }
-    width->setValue(value_of(w_mm));
-    height->setValue(value_of(h_mm));
+    width->setValue(value_of(w_mm, true));
+    height->setValue(value_of(h_mm, false));
     following_ = false;
     summary->setText(QStringLiteral("新しい用紙: %1 × %2 mm（%3 × %4 pixel、%5 dpi）")
                          .arg(r2(w_mm))
@@ -186,9 +223,9 @@ void ImageSizeDialog::follow(bool from_width) {
     if (keep_ratio->isChecked()) {
         following_ = true;
         if (from_width) {
-            height->setValue(value_of(mm_of(width->value()) / ratio_));
+            height->setValue(value_of(mm_of(width->value(), true) / ratio_, false));
         } else {
-            width->setValue(value_of(mm_of(height->value()) * ratio_));
+            width->setValue(value_of(mm_of(height->value(), false) * ratio_, true));
         }
         following_ = false;
     }
@@ -206,8 +243,8 @@ Json ImageSizeDialog::op() const {
     }
     op["resample"] = data_of(method).toStdString();
     const bool px = data_of(unit) == QLatin1String("px");
-    op[px ? "width_px" : "width_mm"] = px ? std::round(width->value()) : r2(width->value());
-    if (!keep_ratio->isChecked()) op[px ? "height_px" : "height_mm"] = px ? std::round(height->value()) : r2(height->value());
+    op[px ? "width_px" : "width_mm"] = px ? std::round(width->value()) : r2(mm_of(width->value(), true));
+    if (!keep_ratio->isChecked()) op[px ? "height_px" : "height_mm"] = px ? std::round(height->value()) : r2(mm_of(height->value(), false));
     if (dpi_changed) op["dpi"] = dpi->value();
     return op;
 }
@@ -232,9 +269,12 @@ CanvasSizeDialog::CanvasSizeDialog(QWidget* parent, const core::Page& page) : QD
     relative->setObjectName(QStringLiteral("canvas_size_relative"));
     relative->setToolTip(QStringLiteral("今の用紙に足す（引く）大きさで決めます"));
     connect(relative, &QCheckBox::toggled, this, [this](bool on) {
-        width->setValue(on ? 0.0 : page_.spec.width_mm.value());
-        height->setValue(on ? 0.0 : page_.spec.height_mm.value());
+        width->setValue(on ? 0.0 : core::units::from_mm(page_.spec.width_mm.value(), unit_now_, basis(true)));
+        height->setValue(on ? 0.0 : core::units::from_mm(page_.spec.height_mm.value(), unit_now_, basis(false)));
     });
+    unit = size_units(QStringLiteral("canvas_size_unit"), false);
+    connect(unit, &QComboBox::currentIndexChanged, this, [this] { show_unit(); });
+    show_unit();
     auto* grid_host = new QWidget;
     auto* grid = new QGridLayout(grid_host);
     grid->setContentsMargins(0, 0, 0, 0);
@@ -265,6 +305,7 @@ CanvasSizeDialog::CanvasSizeDialog(QWidget* parent, const core::Page& page) : QD
     trim = trim_box(QStringLiteral("canvas_size_trim"));
     auto* form = new QFormLayout;
     form->addRow(QStringLiteral("対象"), scope);
+    form->addRow(QStringLiteral("単位"), unit);
     form->addRow(QStringLiteral("幅"), width);
     form->addRow(QStringLiteral("高さ"), height);
     form->addRow(QString(), relative);
@@ -276,6 +317,25 @@ CanvasSizeDialog::CanvasSizeDialog(QWidget* parent, const core::Page& page) : QD
     lay_out_dialog(this, form, buttons);
 }
 
+core::units::Basis CanvasSizeDialog::basis(bool across) const { return view_units::basis(&page_, across); }
+
+void CanvasSizeDialog::show_unit() {
+    // (the same lengths in the unit chosen — a percent is of the page's size now)
+    const core::units::Unit now = unit_in(unit);
+    const double w_mm = core::units::to_mm(width->value(), unit_now_, basis(true));
+    const double h_mm = core::units::to_mm(height->value(), unit_now_, basis(false));
+    unit_now_ = now;
+    for (QDoubleSpinBox* box : {width, height}) {
+        const bool across = box == width;
+        const QSignalBlocker quiet(box);
+        box->setSuffix(QStringLiteral(" ") + QString::fromStdString(core::units::suffix_of(now)));
+        box->setDecimals(now == core::units::Unit::Px ? 0 : now == core::units::Unit::Mm ? 2 : 3);
+        const double top = std::abs(core::units::from_mm(100000, now, basis(across)));
+        box->setRange(-top, top);
+        box->setValue(core::units::from_mm(across ? w_mm : h_mm, now, basis(across)));
+    }
+}
+
 void CanvasSizeDialog::choose_anchor(const QString& anchor) {
     anchor_ = anchor;
     for (std::size_t i = 0; i < kAnchors.size(); ++i) anchors[i]->setChecked(QString::fromLatin1(kAnchors[i]) == anchor);
@@ -284,8 +344,8 @@ void CanvasSizeDialog::choose_anchor(const QString& anchor) {
 Json CanvasSizeDialog::op() const {
     Json op{{"op", "set_canvas_size"}};
     put_scope(op, scope, page_);
-    op["width_mm"] = r2(width->value());
-    op["height_mm"] = r2(height->value());
+    op["width_mm"] = r2(core::units::to_mm(width->value(), unit_now_, basis(true)));  // (PC5 H-b: from the unit chosen)
+    op["height_mm"] = r2(core::units::to_mm(height->value(), unit_now_, basis(false)));
     if (relative->isChecked()) op["relative"] = true;
     op["anchor"] = anchor_.toStdString();
     const QString how = data_of(extension);

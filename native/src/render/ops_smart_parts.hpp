@@ -1,12 +1,14 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <utility>
 
 #include "core/json.hpp"
 #include "core/model.hpp"
+#include "render/image.hpp"
 #include "render/smart_decode.hpp"
 
 // smart-objects@1: what the smart objects' ops share (render/ops_smart.cpp, PC3 A0) with the ops of their contents and
@@ -35,5 +37,9 @@ core::Layer placed_to_smart(core::Document& doc, core::Layer placed, const std::
 // keeps whole (core::kColorRasterMaxPixels), as smart_place takes one: OpError ("the picture is too large to keep its 16
 // or 32 bits on this page …") for a larger one on it. A page made so (set_color_mode, independent review A P1-1) asks it.
 void fits_deep_page(const core::Document& doc, const core::Page& page);
+// What `draw` paints as a layer's picture ("RGBA", `size`): drawn on black and on white, each pixel's cover its alpha and its
+// colour what it holds over black — laid over any page, the same as drawn on it (rasterize_lines'; type@1, PC5 G-0: a type
+// layer's picture, render/type_layer).
+Image drawn_alone(Size size, const std::function<void(Image&)>& draw);
 
 }  // namespace genko::render::smart_ops

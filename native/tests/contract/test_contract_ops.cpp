@@ -105,7 +105,11 @@ class TestContractOps : public QObject {
             return {};
         }
         std::vector<Json> out;
-        for (const Json& job : jobs) out.push_back(genko::test::read_json(QString::fromStdString(job["out"].get<std::string>())));
+        for (const Json& job : jobs) {
+            Json records = genko::test::read_json(QString::fromStdString(job["out"].get<std::string>()));
+            genko::test::with_words_of_2026_10_28(records);  // (the words the person changed on 2026-10-28, put into Python's)
+            out.push_back(std::move(records));
+        }
         return out;
     }
 

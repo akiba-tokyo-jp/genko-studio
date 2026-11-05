@@ -168,6 +168,9 @@ void register_color_ops(OpRegistry& registry);
 // Register the ops of M3-A that draw nothing (move_layers, group_layers, set_paper, set_timelapse, store_area,
 // forget_area: core/ops_arrange.cpp). The ones that draw are render's (render/ops_registry.hpp).
 void register_arrange_ops(OpRegistry& registry);
+// group_layers ({page, ids, id?, name?, group?}: the layers put in a new folder where the topmost was; groups@1, PC5 I-b:
+// with group true, a group of 通過) — for the ops that group as they go (render/ops_groups' frame_from_layers).
+void group_layers_op(OpContext& c);
 
 // Image.open(BytesIO(bytes)).verify() for a picture an op is given as base64 (a line's style.picture and
 // style.fill_png): render's (render/raster_ops.hpp). Throws PyValueError with Pillow's words for what Python raises as
@@ -178,6 +181,11 @@ using PictureCheck = std::function<void(const std::string& bytes)>;
 // set_balloon_path, replace_text: core/ops_lines.cpp). Without `check` a picture in a line's style is refused with
 // not_yet_ported (as an area that needs resolving is): render::ops_registry registers them again with its check.
 void register_line_ops(OpRegistry& registry, PictureCheck check = {});
+// (type@1, PC5 G-0) A line's style as add_line takes it (ops._merge_style over nothing: OpError for a key or value it does not
+// take; a picture in it, without `check`, not_yet_ported): a type layer's record's.
+Json line_style(const Json& style, const PictureCheck& check = {});
+// (type@1, PC5 G-0) A balloon's kind as add_line takes it (balloons.SHAPES; OpError "balloon must be one of …").
+std::string line_balloon(const Json& kind);
 // What the book and page ops of M4 need beyond core (render::register_bookpage_ops gives them; without them the ops
 // refuse that part with not_yet_ported).
 struct BookPageHooks {

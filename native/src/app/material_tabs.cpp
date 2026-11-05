@@ -306,8 +306,8 @@ MaterialPanel::MaterialPanel(MainWindow* window) : window_(window) {
         connect(button, &QPushButton::clicked, this, slot);
         effect_buttons->addWidget(button);
     }
-    effect_box = new QGroupBox(QStringLiteral("このページの効果線（K）"));
-    effect_box->setToolTip(QStringLiteral("効果線ツール（K）でコマの中をクリックすると入ります。中心の＋をドラッグで動かします"));
+    effect_box = new QGroupBox(QStringLiteral("このページの効果線"));  // (PC5 H-0: no key in the words: a key set changes it)
+    effect_box->setToolTip(QStringLiteral("効果線ツールでコマの中をクリックすると入ります。中心の＋をドラッグで動かします"));
     auto* el = new QVBoxLayout(effect_box);
     el->addWidget(effects);
     el->addLayout(effect_form);
