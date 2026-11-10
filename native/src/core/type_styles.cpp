@@ -1099,8 +1099,11 @@ void StyleCarry::bring(StoryLine& record) {
     }
     try {
         keep_look(record, doc_.type_styles ? &*doc_.type_styles : nullptr, before);
-    } catch (const Error&) {
-        throw OpError("a text brought would hold more than 4096 ranges to keep its look under this book's Basic Paragraph");
+    } catch (const Error& error) {
+        // (the ranges a record holds the one bound keeping its look may pass; any other said as it is — B2's P3-7)
+        if (std::string(error.what()).find("4096 runs") != std::string::npos)
+            throw OpError("a text brought would hold more than 4096 ranges to keep its look under this book's Basic Paragraph");
+        throw OpError(error.what());
     }
 }
 
