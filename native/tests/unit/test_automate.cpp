@@ -500,6 +500,20 @@ private slots:
         QCOMPARE(played[1]["id"], Json(doc.page(0).layers.back().id));
         QCOMPARE(automate::aim_steps(doc, Json::array(), true, false), Json::array());
         QCOMPARE(thrown([&] { automate::aim_steps(doc, Json::array({Json{{"op", "add_page"}}}), true, false); }).first, std::string("steps"));
+        // (PC6 review of B's P2-B) an action played on each page that makes a page among the book's — calculations into a
+        // new page, a channel copied to a new page, the channels split —: refused before anything is laid, as for_pages
+        // refuses it (the pages numbered then would be others by the next page's turn); into a channel, played as before
+        for (const Json& step : {Json{{"op", "calculations"}, {"page", 1}, {"source1", Json{{"layer", "old"}}}, {"source2", Json{{"layer", "old"}}}, {"result", "page"}},
+                                 Json{{"op", "duplicate_channel"}, {"page", 1}, {"channel", "red"}, {"to_page", "new"}}, Json{{"op", "split_channels"}, {"page", 1}}}) {
+            const auto [code, message] = thrown([&] { automate::aim_steps(doc, Json::array({step}), true, true); });
+            QCOMPARE(code, std::string("steps"));
+            QVERIFY2(message.find("the steps are run page by page: ") != std::string::npos && message.find("cannot be repeated page by page") != std::string::npos,
+                     message.c_str());
+        }
+        const Json into_channel = automate::aim_steps(
+            doc, Json::array({Json{{"op", "calculations"}, {"page", 3}, {"source1", Json{{"layer", "old"}}}, {"source2", Json{{"layer", "old"}}}}}), true, true);
+        QCOMPARE(into_channel.size(), std::size_t(1));
+        QCOMPARE(into_channel[0]["page"], Json(1));
     }
 
     // The inputs: a folder's pictures by name (hidden files and other kinds left out, inner folders with recurse), a book.

@@ -852,7 +852,9 @@ std::shared_ptr<const Made> make(const core::Document& doc, const core::Page& pa
     if (!held) throw core::Error("missing_asset", "the footage's frame " + ref + " is not in the book");
     const std::string alpha = footage.at("alpha").get<std::string>();
     const auto placement = core::footage_placement(video);
+    const auto turned = core::footage_transform(video);  // (PC6: turned with its page)
     Json key = Json::array({doc.asset_dir ? core::path_to_utf8(*doc.asset_dir) : std::string(), ref, alpha, core::rect_to_json(*placement),
+                            turned ? Json(*turned) : Json(),
                             page.spec.width_mm.value(), page.spec.height_mm.value(), page.spec.expression,
                             page.color ? core::to_json(*page.color) : Json(), page.rgb ? core::to_json(*page.rgb) : Json(),
                             core::py_get(core::py_or(core::py_get(doc.studio, "style"), Json::object()), "finish")});
@@ -892,6 +894,7 @@ std::shared_ptr<const Made> make(const core::Document& doc, const core::Page& pa
     const auto [cw, ch] = core::smart::size_mm(*contents);
     const core::Rect& r = *placement;
     core::smart::Matrix m{r.width.value() / cw, 0, 0, r.height.value() / ch, r.x.value(), r.y.value()};
+    if (turned) m = core::smart::multiply(core::smart::Matrix{(*turned)[0], (*turned)[1], (*turned)[2], (*turned)[3], (*turned)[4], (*turned)[5]}, m);
     auto alone = std::make_shared<core::Page>(page);
     alone->layers.clear();
     if (alone->extra.is_object()) alone->extra.erase("anim");

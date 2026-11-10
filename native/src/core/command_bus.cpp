@@ -829,6 +829,28 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
     }
 }
 
+void check_pages_kept(const Json& ops) {
+    if (!ops.is_array()) return;
+    for (const Json& item : ops) {
+        if (!item.is_object()) continue;
+        const Json* name = get(item, "op");
+        const std::string n = name != nullptr && name->is_string() ? name->get<std::string>() : std::string();
+        if (one_of(n, {"add_page", "delete_page", "duplicate_page", "import_pages", "reorder", "move_page", "add_cover", "split_channels",
+                       "merge_channels", "add_artboard", "artboard_from_layers"})) {
+            throw OpError(n + " cannot be repeated page by page");
+        }
+        // (channels@1: a channel copied into a new page makes a page)
+        const Json* to = get(item, "to_page");
+        if (n == "duplicate_channel" && to != nullptr && *to == Json("new")) throw OpError("duplicate_channel to a new page cannot be repeated page by page");
+        // (PC6 review B P2-2: 演算 into a new page puts it after the page and numbers the rest again — the next repeat's
+        // page number would be the page just made)
+        const Json* result = get(item, "result");
+        if (n == "calculations" && result != nullptr && *result == Json("page")) {
+            throw OpError("calculations into a new page (result \"page\") cannot be repeated page by page");
+        }
+    }
+}
+
 Json expand_for_pages(const Document& doc, const Json& op) {
     const Json* ops = get(op, "ops");
     if (ops == nullptr || !ops->is_array() || ops->empty()) throw OpError("ops is the list of ops to run on each page");
@@ -842,12 +864,7 @@ Json expand_for_pages(const Document& doc, const Json& op) {
     for (const std::string& name : names) {
         if (not_per_page(name)) throw OpError(name + " cannot be repeated page by page");
     }
-    for (const Json& item : *ops) {  // (channels@1: a channel copied into a new page makes a page)
-        const Json* to = get(item, "to_page");
-        if (is_op(item, "duplicate_channel") && to != nullptr && *to == Json("new")) {
-            throw OpError("duplicate_channel to a new page cannot be repeated page by page");
-        }
-    }
+    check_pages_kept(*ops);
     const Json* pages_value = get(op, "pages");
     const Json wanted = pages_value != nullptr && py_truthy(*pages_value) ? *pages_value : Json("body");
     std::vector<Json> indexes;

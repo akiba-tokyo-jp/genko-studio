@@ -10,6 +10,7 @@
 #include <functional>
 #include <set>
 
+#include "core/anim.hpp"
 #include "core/base64.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
@@ -298,6 +299,25 @@ void smart_convert(OpContext& c) {
     const std::vector<std::size_t> chosen = chosen_layers(doc.page(at), c.op);
     if (chosen.empty()) throw OpError("no layers to convert");
     const Page& seen = doc.page(at);
+    // (PC6 review B P2-4: an animation folder — a video layer's too — or a cel in one is timed by the page's timeline, which a
+    // smart object's contents do not have: refused, the rows and cels left as they are)
+    {
+        std::set<std::string> folders;
+        if (const Json* anim = core::anim::spec(seen)) {
+            if (const auto tracks = anim->find("tracks"); tracks != anim->end() && tracks->is_array()) {
+                for (const Json& track : *tracks) {
+                    const Json* folder = track.is_object() ? core::get(track, "folder") : nullptr;
+                    if (folder != nullptr && folder->is_string()) folders.insert(folder->get<std::string>());
+                }
+            }
+        }
+        const auto timed = [&](const Json& id) { return id.is_string() && folders.contains(id.get<std::string>()); };
+        for (const std::size_t i : chosen) {
+            if (timed(Json(seen.layers[i].id)) || timed(seen.layers[i].parent_id)) {
+                throw OpError("an animation folder or its cels (a video layer's too) cannot go into a smart object: they are timed by the page's timeline");
+            }
+        }
+    }
     if (std::none_of(chosen.begin(), chosen.end(), [&](std::size_t i) { return draws(seen.layers[i]); })) throw OpError("the layers have nothing to draw");
     const std::string id = fresh_layer_id(seen, c.op);
     std::string contents_id;

@@ -158,6 +158,12 @@ void check_strict(const Document& doc, const Json& op, const Actor& actor);
 // "pages" is "all", "body" or a list of ints: what else Python turns into page numbers (a text of digits, floats, a
 // dict's keys) is refused with OpError "pages must be all, body or a list of page numbers".
 Json expand_for_pages(const Document& doc, const Json& op);
+// The ops that make a page or put one among the book's (its pages after it numbered again: the next repeat's page number
+// would be another page) — add_page, duplicate_page, import_pages, split_channels, merge_channels, add_artboard,
+// duplicate_channel to a new page, calculations into a new page, … —: OpError "… cannot be repeated page by page".
+// expand_for_pages asks it (with the rest of bookops.NOT_PER_PAGE), and a recorded action run page by page (service/automate,
+// PC6 review of B's P2-B).
+void check_pages_kept(const Json& ops);
 
 // selops.needs_resolving: an area of a kind beyond {poly} and {mask} (rect, ellipse, layer, color, all, saved,
 // union, intersect, subtract, invert, grow_mm, feather_mm; channels@1: channel, this build's own; PC3: the kinds and

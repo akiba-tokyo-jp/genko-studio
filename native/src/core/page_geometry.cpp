@@ -8,11 +8,13 @@
 #include "core/error.hpp"
 #include "core/frames.hpp"
 #include "core/measure.hpp"
+#include "core/production_json.hpp"
 #include "core/pyops.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/smart.hpp"
 #include "core/type_text.hpp"
+#include "core/video.hpp"
 
 // The warps: PhotoCraft v0.2.0 crates/geom/src/warp.rs (1-620), MIT: native/third_party/photocraft/NOTICE.md.
 // The turns' maps: crates/engine/src/canvas_geom.rs (200-235).
@@ -642,6 +644,56 @@ void map_page(Document& doc, std::size_t at, const Mapping& m, const PixelHooks&
                 continue;
             }
             map_area(area, m);
+        }
+    }
+    // (video@1, PC6 review B P2-5: a video layer's footage where the map takes it, as its altered cels' pixels go — an
+    // upright map its box's, as before; a turn, a mirror or a skew the row's transform (the map after the one it holds, the
+    // box as it was), taken away again when it comes back to none. timeline: the camera's keys — the page's mm — with them)
+    if (const auto anim = page.extra.find("anim"); anim != page.extra.end() && anim->is_object()) {
+        if (const auto tracks = anim->find("tracks"); tracks != anim->end() && tracks->is_array()) {
+            for (Json& track : *tracks) {
+                if (!is_video_row(track)) continue;
+                Json& video = track["video"];
+                const std::optional<std::array<double, 6>> held = footage_transform(video);
+                if (!held && upright(m)) {
+                    Json& box = video["placement_mm"];
+                    const std::array<double, 4> b = map_box(production::rect_mm(box, "placement_mm"), m);
+                    box = Json::array({py_round(b[0], 4), py_round(b[1], 4), py_round(b[2], 4), py_round(b[3], 4)});
+                    try {
+                        (void)production::rect_mm(box, "placement_mm");
+                    } catch (const Error&) {
+                        throw OpError("a video layer's footage box would lie past the places a page holds");
+                    }
+                    continue;
+                }
+                const Affine t = held ? Affine{(*held)[0], (*held)[1], (*held)[2], (*held)[3], (*held)[4], (*held)[5]} : Affine{1, 0, 0, 1, 0, 0};
+                const Mapping both = then(Mapping{t}, m);
+                std::array<double, 6> v{};
+                for (std::size_t i = 0; i < 6; ++i) v[i] = py_round(both.m[i], i < 4 ? 9 : 4);
+                for (std::size_t i = 0; i < 4; ++i) v[i] = v[i] == 0 ? 0.0 : v[i];  // (no −0)
+                if (v == std::array<double, 6>{1, 0, 0, 1, 0, 0}) {
+                    video.erase("transform");
+                } else {
+                    video["transform"] = Json::array({v[0], v[1], v[2], v[3], v[4], v[5]});
+                    try {
+                        check_video(video);
+                    } catch (const Error&) {
+                        throw OpError("a video layer's footage would lie past the places a page holds");
+                    }
+                }
+            }
+        }
+        // (the camera's keys: each rect the box of its corners through the map — a quarter turn its sides swapped, a turn
+        // at an angle the box round it)
+        if (const auto camera = anim->find("camera"); camera != anim->end() && camera->is_array()) {
+            for (Json& key : *camera) {
+                const auto rect = key.is_object() ? key.find("rect") : key.end();
+                if (!key.is_object() || rect == key.end() || !rect->is_array() || rect->size() != 4 ||
+                    !std::all_of(rect->begin(), rect->end(), [](const Json& v) { return v.is_number() && std::isfinite(v.get<double>()); }))
+                    continue;  // (what Python reads otherwise, kept as it is)
+                const std::array<double, 4> b = map_box({(*rect)[0].get<double>(), (*rect)[1].get<double>(), (*rect)[2].get<double>(), (*rect)[3].get<double>()}, m);
+                *rect = Json::array({py_round(b[0], 4), py_round(b[1], 4), py_round(b[2], 4), py_round(b[3], 4)});
+            }
         }
     }
     for (StoryLine& line : doc.story) {
