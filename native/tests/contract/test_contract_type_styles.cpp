@@ -19,6 +19,7 @@
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
 #include "core/paths.hpp"
+#include "core/smart.hpp"
 #include "core/type_styles.hpp"
 #include "core/type_text.hpp"
 #include "render/image.hpp"
@@ -268,6 +269,149 @@ private slots:
         own = run(own, Json{{"op", "type_style"}, {"kind", "character"}, {"action", "redefine"}, {"line", "l0"}});
         own = run(own, Json{{"op", "type_style"}, {"kind", "character"}, {"action", "set"}, {"id", "cs-1"}, {"attrs", Json{{"rgb", Json::array({220, 0, 0})}}}});
         QVERIFY(count(drawn(own), {2, 2, 48, 20}).red > 50);
+    }
+
+    // PC6 review B P2-1: 作品の結合 (import_pages) brings the styles the pages' texts take — on the page, in its lines, in a
+    // smart object's contents —: into a book without styles as they are; into one that has a style of the same id and name
+    // but other attributes, under a new id and name (the book's own untouched); into one that has the same styles, those;
+    // into one whose Basic Paragraph differs, the texts' look kept. Drawn as in the book they came from; saved and read back.
+    void importedWithTheirStyles() {
+        QTemporaryDir scratch;
+        const fs::path root = core::path_from_utf8(scratch.path().toStdString());
+        core::Document from = styled_book();
+        from = run(from, Json{{"op", "type_style"}, {"kind", "paragraph"}, {"action", "new"}, {"from_selection", false}, {"attrs", Json{{"align", "center"}}}});
+        from = run(from, Json{{"op", "type_style"}, {"kind", "paragraph"}, {"action", "apply"}, {"id", "ps-1"}, {"line", "l1"}});
+        from = run(from, Json{{"op", "add_type_layer"}, {"page", 1}, {"text", "xyz"}, {"box", Json::array({3, 15, 44, 4})}, {"wrap", "horizontal"},
+                              {"new_id", "t2"}, {"style", Json{{"size_mm", 3}}}});
+        from = run(from, Json{{"op", "type_style"}, {"kind", "character"}, {"action", "apply"}, {"id", "cs-1"}, {"page", 1}, {"layer_id", "t2"}});
+        from = run(from, Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"t2"})}});
+        write_book(from, root / "from.genko");
+        const std::string page_was = drawn(from).tobytes();
+        const Json import{{"op", "import_pages"}, {"from", (root / "from.genko").string()}};
+        const auto drawn_at = [](const core::Document& doc, std::size_t i) {
+            return render::render_page(doc.page(i), kDpi, render::proof_options(), &doc).image.convert("RGB").tobytes();
+        };
+        const auto smart_record = [](const core::Document& doc, std::size_t page) -> const core::StoryLine& {
+            for (const core::Layer& l : doc.page(page).layers) {
+                if (l.kind != core::LayerKind::Smart) continue;
+                const auto contents = doc.smart_contents.at(*core::smart::contents_id(l));
+                return *contents->page->layers.at(0).type;
+            }
+            throw std::runtime_error("no smart object");
+        };
+        const auto line_of = [](const core::Document& doc, const core::Num& page) -> const core::StoryLine& {
+            for (const core::StoryLine& line : doc.story)
+                if (line.page_index == page && line.native_type) return line;
+            throw std::runtime_error("no line");
+        };
+        // (a book without styles: they come as they are — before, refused: "takes the style cs-1, which the book does not keep")
+        {
+            const core::ApplyResult done = run_ops(plain_book(), Json::array({import}));
+            QVERIFY(done.doc.type_styles.has_value());
+            QCOMPARE((*done.doc.type_styles)["character"], (*from.type_styles)["character"]);
+            QCOMPARE((*done.doc.type_styles)["paragraph"], (*from.type_styles)["paragraph"]);
+            QCOMPARE(drawn_at(done.doc, 1), page_was);
+            write_book(done.doc, root / "into-plain.genko");
+            const core::Document back = storage::load_document(root / "into-plain.genko").document;
+            QCOMPARE(back.read_only_reason, std::string());
+            QCOMPARE(drawn_at(back, 1), page_was);
+        }
+        // (a book of its own cs-1 「文字スタイル 1」, red: the texts brought take a new style of their own)
+        {
+            core::Document into = plain_book();
+            into = run(into, Json{{"op", "type_style"}, {"kind", "character"}, {"action", "new"}, {"from_selection", false},
+                                  {"attrs", Json{{"rgb", Json::array({220, 0, 0})}}}});
+            const Json own = (*into.type_styles)["character"][0];
+            const core::ApplyResult done = run_ops(into, Json::array({import}));
+            const Json& chars = (*done.doc.type_styles)["character"];
+            QCOMPARE(chars.size(), std::size_t(2));
+            QCOMPARE(chars[0], own);
+            QCOMPARE(chars[1]["id"], Json("cs-2"));
+            QCOMPARE(chars[1]["name"], Json("文字スタイル 1 2"));
+            QCOMPARE(chars[1]["char"], (*from.type_styles)["character"][0]["char"]);
+            QCOMPARE((*done.doc.type_styles)["paragraph"][0]["id"], Json("ps-1"));
+            const core::StoryLine* brought = nullptr;
+            for (const core::Layer& l : done.doc.page(1).layers)
+                if (l.kind == core::LayerKind::Type) brought = l.type.get();
+            QVERIFY(brought != nullptr);
+            QCOMPARE(brought->native_type->at("char_style"), Json("cs-2"));
+            QCOMPARE(smart_record(done.doc, 1).native_type->at("char_style"), Json("cs-2"));
+            QCOMPARE(line_of(done.doc, done.doc.page(1).index).native_type->at("char_style"), Json("cs-2"));
+            QCOMPARE(line_of(done.doc, done.doc.page(1).index).native_type->at("para_style"), Json("ps-1"));
+            QCOMPARE(drawn_at(done.doc, 1), page_was);
+            write_book(done.doc, root / "into-own.genko");
+        }
+        // (a book of the same styles — the book itself, read again: none added)
+        {
+            const core::Document same = storage::load_document(root / "from.genko").document;
+            const core::ApplyResult done = run_ops(same, Json::array({import}));
+            QCOMPARE(done.doc.type_styles->dump(), from.type_styles->dump());
+            QCOMPARE(line_of(done.doc, done.doc.page(1).index).native_type->at("char_style"), Json("cs-1"));
+            QCOMPARE(drawn_at(done.doc, 1), page_was);
+        }
+        // (a book whose Basic Paragraph tracks wide: the texts brought keep their look, the book's own take it)
+        {
+            core::Document wide = run(plain_book(), Json{{"op", "type_style"}, {"kind", "paragraph"}, {"action", "set"}, {"id", "basic"},
+                                                         {"attrs", Json{{"tracking", 0.4}}}});
+            const core::ApplyResult done = run_ops(wide, Json::array({import}));
+            QCOMPARE((*done.doc.type_styles)["basic"], (*wide.type_styles)["basic"]);
+            QCOMPARE(drawn_at(done.doc, 1), page_was);
+        }
+        // (the same book brought twice into one of its own 「文字スタイル 1」: the second time takes the 「文字スタイル 1 2」 the
+        // first made — none 「… 3」)
+        {
+            core::Document into = run(plain_book(), Json{{"op", "type_style"}, {"kind", "character"}, {"action", "new"}, {"from_selection", false},
+                                                         {"attrs", Json{{"rgb", Json::array({220, 0, 0})}}}});
+            const core::ApplyResult twice = run_ops(into, Json::array({import, import}));
+            const Json& chars = (*twice.doc.type_styles)["character"];
+            QCOMPARE(chars.size(), std::size_t(2));
+            QCOMPARE(chars[1]["name"], Json("文字スタイル 1 2"));
+            QCOMPARE(line_of(twice.doc, twice.doc.page(2).index).native_type->at("char_style"), Json("cs-2"));
+            QCOMPARE(drawn_at(twice.doc, 2), page_was);
+        }
+    }
+
+    // (the review of PC6-B's P2-A) The texts another book brings that the OpenType typesetting does not set — a line made
+    // point text (edit_type point: its native_type a shape and an anchor), a line of before — read no styles, Basic Paragraph
+    // neither: brought into a book whose Basic Paragraph differs, as they are (their records the same, set as before). A line
+    // across of OpenType features alone (style.features, no native_type) is set so and reads Basic Paragraph: left as it is
+    // too (a native_type laid on it to keep its look sets it otherwise), set under the book's Basic Paragraph.
+    void importedTextsSetAsBefore() {
+        QTemporaryDir scratch;
+        const fs::path root = core::path_from_utf8(scratch.path().toStdString());
+        core::Document from = plain_book();
+        from = run(from, Json{{"op", "add_line"}, {"page", 1}, {"id", "pt"}, {"text", "ABC abc"}, {"x_mm", 3}, {"y_mm", 5}, {"w_mm", 44}, {"h_mm", 12},
+                              {"balloon", "none"}, {"wrap", "horizontal"}, {"style", Json{{"size_mm", 6}}}});
+        from = run(from, Json{{"op", "edit_type"}, {"line", "pt"}, {"point", true}});
+        from = run(from, Json{{"op", "add_line"}, {"page", 1}, {"id", "ft"}, {"text", "fi ffl ABC"}, {"x_mm", 3}, {"y_mm", 30}, {"w_mm", 44}, {"h_mm", 12},
+                              {"balloon", "none"}, {"wrap", "horizontal"}, {"style", Json{{"size_mm", 6}, {"features", Json::array({"liga"})}}}});
+        const auto record = [](const core::Document& doc, const core::Num& page, const std::string& text) -> const core::StoryLine& {
+            for (const core::StoryLine& line : doc.story)
+                if (line.page_index == page && line.text == text) return line;
+            throw std::runtime_error("no line " + text);
+        };
+        const core::StoryLine& point = record(from, from.page(0).index, "ABC abc");
+        QVERIFY(point.native_type && !core::type_text::sets_opentype(point));
+        QVERIFY(core::type_text::sets_opentype(record(from, from.page(0).index, "fi ffl ABC")));
+        write_book(from, root / "lines.genko");
+        const std::string page_was = drawn(from).tobytes();
+        core::Document wide = run(plain_book(), Json{{"op", "type_style"}, {"kind", "paragraph"}, {"action", "set"}, {"id", "basic"},
+                                                     {"attrs", Json{{"tracking", 0.4}}}});
+        const core::ApplyResult done = run_ops(wide, Json::array({Json{{"op", "import_pages"}, {"from", (root / "lines.genko").string()}}}));
+        const core::StoryLine& point_in = record(done.doc, done.doc.page(1).index, "ABC abc");
+        QCOMPARE(*point_in.native_type, *point.native_type);
+        QVERIFY(!core::type_text::sets_opentype(point_in));
+        const render::Image brought = render::render_page(done.doc.page(1), kDpi, render::proof_options(), &done.doc).image.convert("RGB");
+        QVERIFY2(region(brought, {0, 0, 50, 22}) == region(drawn(from), {0, 0, 50, 22}), "the point text");
+        const core::StoryLine& ft = record(done.doc, done.doc.page(1).index, "fi ffl ABC");
+        // (the line of features alone: as it is — no native_type laid on it, which would set it otherwise —, set under the
+        // book's Basic Paragraph: the book's own tracking, wider)
+        QVERIFY(!ft.native_type);
+        QCOMPARE(ft.style, record(from, from.page(0).index, "fi ffl ABC").style);
+        QVERIFY(region(brought, {0, 24, 50, 50}) != region(drawn(from), {0, 24, 50, 50}));
+        // (and into a book of the same Basic Paragraph: drawn as it was, the whole page)
+        const core::ApplyResult same = run_ops(plain_book(), Json::array({Json{{"op", "import_pages"}, {"from", (root / "lines.genko").string()}}}));
+        QCOMPARE(render::render_page(same.doc.page(1), kDpi, render::proof_options(), &same.doc).image.convert("RGB").tobytes(), page_was);
     }
 
     // the refusals in the window's words

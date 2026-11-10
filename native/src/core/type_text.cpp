@@ -1003,6 +1003,24 @@ std::shared_ptr<const StoryLine> shared_record(StoryLine record) { return std::m
 
 bool is_type_layer(const Layer& layer) { return layer.kind == LayerKind::Type; }
 
+bool sets_opentype(const StoryLine& line) {
+    if (line.native_type && line.native_type->is_object()) {
+        const Json& nt = *line.native_type;
+        if (nt.value("shaping", Json()) == Json("opentype")) return true;
+        for (const char* key : {"char", "para", "runs", "paragraphs", "char_style", "para_style"}) {
+            if (nt.contains(key)) return true;
+        }
+    }
+    if (line.wrap == "vertical" || !line.style.is_object()) return false;
+    const auto it = line.style.find("features");
+    if (it == line.style.end() || !py_truthy(*it)) return false;
+    try {
+        return !iterate(*it).empty();
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 bool uses_type(const Document& doc) {
     if (doc.type_styles && !doc.type_styles->is_null()) return true;
     for (const StoryLine& line : doc.story) {

@@ -1252,7 +1252,7 @@ std::optional<Page> with_plain_layers(const Page& page, const Document* doc) {
 
 bool same_panels(const std::vector<Frame>& a, const std::vector<Frame>& b) { return same_frames(a, b); }
 
-void bring_contents(Document& doc, const Document& from, Page& page) {
+void bring_contents(Document& doc, const Document& from, Page& page, const std::function<void(Page&)>& each) {
     std::map<std::string, std::string> renamed;  // (their id → its id here)
     // (filters@1, PC4 節 D: the files its smart filters hold — a displacement map — that the book it comes from holds in
     // memory, as its contents' files)
@@ -1273,6 +1273,7 @@ void bring_contents(Document& doc, const Document& from, Page& page) {
         }
     };
     std::function<void(Page&)> bring = [&](Page& on) {
+        if (each) each(on);
         bring_patterns(doc, from, on);  // (patterns@1, PC4 E3: the patterns its fills name, under ids of this book)
         // (psd-keep@1, PC4 F-d: the PSD's blocks it and its layers keep that the book it comes from holds in memory)
         const auto bring_native = [&](const std::string& ref) {

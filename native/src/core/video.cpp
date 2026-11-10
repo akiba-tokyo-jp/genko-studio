@@ -155,6 +155,7 @@ Json timeline_info(const Page& page) {
             row["show_altered"] = video.at("show_altered");
             row["placement_mm"] = video.at("placement_mm");
             row["fit"] = video.at("fit");
+            if (video.contains("transform")) row["transform"] = video.at("transform");  // (PC6: turned with its page)
             track["video"] = std::move(row);
         }
         tracks.push_back(std::move(track));
@@ -216,7 +217,7 @@ void check_timeline(const Json& anim, bool video) {
 
 void check_video(const Json& video) {
     const std::string where = "anim.tracks[].video";
-    pj::only_keys(video, where, {"footage", "frames", "show_altered", "placement_mm", "fit"});
+    pj::only_keys(video, where, {"footage", "frames", "show_altered", "placement_mm", "fit", "transform"});
     if (const Json& footage = pj::field(video, "footage", where); !footage.is_null()) check_footage(footage, where + ".footage");
     const Json& frames = pj::field(video, "frames", where);
     if (!frames.is_array() || frames.size() > static_cast<std::size_t>(anim::kMaxFrames)) {
@@ -232,6 +233,24 @@ void check_video(const Json& video) {
     (void)pj::rect_mm(pj::field(video, "placement_mm", where), where + ".placement_mm");
     const std::string fit = pj::text(pj::field(video, "fit", where), where + ".fit", 16);
     if (fit != "contain" && fit != "cover" && fit != "stretch") pj::wrong(where + ".fit", "must be contain, cover or stretch");
+    // (PC6: the footage turned with its page — six finite numbers, a map that does not squash it flat)
+    if (const Json* t = pj::optional(video, "transform")) {
+        if (!t->is_array() || t->size() != 6) pj::wrong(where + ".transform", "must be [a, b, c, d, e, f]");
+        std::array<double, 6> v{};
+        for (std::size_t i = 0; i < 6; ++i) {
+            const double most = i < 4 ? kFootageTransformMax : pj::kCoordinateMaxMm;
+            v[i] = pj::number((*t)[i], where + ".transform", -most, most);
+        }
+        if (!(std::fabs(v[0] * v[3] - v[1] * v[2]) > 1e-12)) pj::wrong(where + ".transform", "must not squash the footage flat");
+    }
+}
+
+std::optional<std::array<double, 6>> footage_transform(const Json& video) {
+    const auto t = video.find("transform");
+    if (t == video.end() || !t->is_array() || t->size() != 6) return std::nullopt;
+    std::array<double, 6> out{};
+    for (std::size_t i = 0; i < 6; ++i) out[i] = (*t)[i].get<double>();
+    return out;
 }
 
 bool is_video_row(const Json& track) {

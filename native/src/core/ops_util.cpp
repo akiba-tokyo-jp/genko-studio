@@ -306,6 +306,15 @@ void remap_layer_refs(Page& page, const std::vector<StoryLine*>& lines, const Fr
         if (anim.is_object() && anim.contains("tracks") && anim["tracks"].is_array()) {
             for (Json& track : anim["tracks"]) {
                 remap_key(track, "folder");
+                // (video@1, PC6 review B P2-3: a video row's frames drawn over — [footage frame | null, altered cel id | null])
+                if (track.is_object() && track.contains("video") && track["video"].is_object()) {
+                    Json& video = track["video"];
+                    if (video.contains("frames") && video["frames"].is_array()) {
+                        for (Json& frame : video["frames"]) {
+                            if (frame.is_array() && frame.size() >= 2) remap(frame[1]);
+                        }
+                    }
+                }
                 if (!track.is_object() || !track.contains("cels") || !track["cels"].is_array()) continue;
                 for (Json& cel : track["cels"]) {  // [frame, cel layer id | null]
                     if (cel.is_array() && cel.size() >= 2) remap(cel[1]);

@@ -19,9 +19,11 @@
 #include <vector>
 
 #include "psd_book_hashes.hpp"
+#include "core/base64.hpp"
 #include "core/command_bus.hpp"
 #include "core/model.hpp"
 #include "core/paths.hpp"
+#include "core/smart.hpp"
 #include "formats/export.hpp"
 #include "formats/open_file.hpp"
 #include "formats/psd_text.hpp"
@@ -470,6 +472,47 @@ private slots:
         const QString image = path(QStringLiteral("type-again/image.psd"));
         (void)genko::formats::export_page_psd(loaded, loaded.page(0), genko::core::path_from_utf8(image.toStdString()), kDpi);
         QVERIFY(blocks(genko::test::read_bytes(image)).empty());
+    }
+
+    // PC6 review B P2-1: a PSD of named character and paragraph styles placed as a smart object and made a page
+    // (smart_to_page): the styles its type layers take are the book's — before, the op was refused ("… takes the style …,
+    // which the book does not keep") —, a style of the book's of the same name and other attributes kept as it is, the file's
+    // under a name of its own; saved and read back, not read-only.
+    void placedPsdMadeAPageBringsItsStyles() {
+        namespace core = genko::core;
+        const std::string bytes = genko::test::read_bytes(QString::fromStdString(
+            genko::formats::export_psd_pages(type_book(), core::path_from_utf8(path("type-placed").toStdString()), kDpi, genko::formats::PsdText{true, true})
+                .front()
+                .string()));
+        core::Document book = core::new_episode("置く", core::Num(1), 1, core::PageSpec::a4_mono());
+        book = run_ops(book, Json::array({Json{{"op", "type_style"}, {"kind", "character"}, {"action", "new"}, {"name", "強調"},
+                                               {"attrs", Json{{"rgb", Json::array({0, 0, 200})}}}}}));
+        const Json own = (*book.type_styles)["character"][0];
+        book = run_ops(book, Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(bytes)}, {"name", "type.psd"}, {"new_id", "so"}}}));
+        const core::Document paged = run_ops(book, Json::array({Json{{"op", "smart_to_page"}, {"page", 1}, {"id", "so"}, {"new_id", "in"}}}));
+        QVERIFY(paged.type_styles.has_value());
+        const Json& chars = (*paged.type_styles)["character"];
+        QCOMPARE(chars.size(), std::size_t(2));
+        QCOMPARE(chars[0], own);
+        QCOMPARE(chars[1]["name"], Json("強調 2"));
+        QCOMPARE((*paged.type_styles)["paragraph"][0]["name"], Json("見出し"));
+        const core::Layer* so = nullptr;
+        for (const core::Layer& l : paged.page(0).layers)
+            if (l.id == "so") so = &l;
+        QVERIFY(so != nullptr);
+        const core::SmartContents* contents = core::smart::contents_of(paged, *so);
+        QVERIFY(contents != nullptr && contents->page);
+        const core::Layer* across = nullptr;
+        for (const core::Layer& l : contents->page->layers)
+            if (l.title == "横") across = &l;
+        QVERIFY(across != nullptr && across->type && across->type->native_type);
+        const Json& runs = across->type->native_type->at("runs");
+        QVERIFY2(std::any_of(runs.begin(), runs.end(), [&](const Json& run) { return run.value("style", Json()) == chars[1]["id"]; }), runs.dump().c_str());
+        const QString saved = path(QStringLiteral("placed-type.genko"));
+        genko::test::write_project(paged, core::path_from_utf8(saved.toStdString()));
+        const core::Document loaded = genko::storage::load_document(core::path_from_utf8(saved.toStdString())).document;
+        QVERIFY2(loaded.read_only_reason.empty(), loaded.read_only_reason.c_str());
+        QCOMPARE(loaded.type_styles->dump(), paged.type_styles->dump());
     }
 
     // PC5 G-e (the review's P2-1): opening a PSD (the window's, the CLI's and MCP's 開く) says what of its text layers it

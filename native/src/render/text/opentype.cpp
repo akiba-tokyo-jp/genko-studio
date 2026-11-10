@@ -18,23 +18,7 @@ namespace genko::render::text {
 
 using core::Json;
 
-bool sets_opentype(const core::StoryLine& line) {
-    if (line.native_type && line.native_type->is_object()) {
-        const Json& nt = *line.native_type;
-        if (nt.value("shaping", Json()) == Json("opentype")) return true;
-        for (const char* key : {"char", "para", "runs", "paragraphs", "char_style", "para_style"}) {
-            if (nt.contains(key)) return true;
-        }
-    }
-    if (line.wrap == "vertical" || !line.style.is_object()) return false;
-    const auto it = line.style.find("features");
-    if (it == line.style.end() || !core::py_truthy(*it)) return false;
-    try {
-        return !core::iterate(*it).empty();
-    } catch (const std::exception&) {
-        return false;
-    }
-}
+bool sets_opentype(const core::StoryLine& line) { return core::type_text::sets_opentype(line); }
 
 namespace {
 

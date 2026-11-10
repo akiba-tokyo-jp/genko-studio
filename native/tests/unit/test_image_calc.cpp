@@ -327,6 +327,18 @@ private slots:
         QVERIFY(refusal(doc, wrong).starts_with("apply: "));
         const auto taken = run(doc, named).doc;
         QVERIFY(refusal(taken, named).starts_with("apply: "));
+        // (PC6 review B P2-2) page by page: a new page puts itself after the page and numbers the rest again, so the next
+        // repeat would land on it — refused before anything runs (told in Japanese as wording.cpp tells every op not
+        // repeated page by page); a new channel is repeated as usual
+        Json as_page_each = as_page;
+        as_page_each.erase("page");
+        const std::string each = refusal(doc, Json{{"op", "for_pages"}, {"pages", "all"}, {"ops", Json::array({as_page_each})}});
+        QVERIFY2(each.find("calculations into a new page (result \"page\") cannot be repeated page by page") != std::string::npos, each.c_str());
+        Json channel_each = base;
+        channel_each.erase("page");
+        const auto repeated = run(doc, Json{{"op", "for_pages"}, {"pages", Json::array({1})}, {"ops", Json::array({channel_each})}});
+        QCOMPARE(repeated.doc.pages.size(), doc.pages.size());
+        QCOMPARE(repeated.doc.page(0).channels.size(), std::size_t(1));
     }
 
     // --- trap ----------------------------------------------------------------------------------------------------------
