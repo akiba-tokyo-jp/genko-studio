@@ -1,0 +1,255 @@
+name: native
+
+# The C++ build (docs/cpp-migration). Runs beside the Python tests (ci.yml), which stay the baseline until M7.
+on:
+  push:
+    branches: [main, native/integration]
+  pull_request:
+    branches: [main, native/integration]
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: "integration=統合候補、milestone=工程出口の全構成"
+        type: choice
+        options: [milestone, integration]
+        default: milestone
+        required: true
+
+concurrency:
+  group: native-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}-${{ inputs.phase || 'integration' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  QT_VERSION: "6.11.2"
+  AQT_VERSION: "3.3.0"
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      has_native: ${{ steps.plan.outputs.has_native }}
+      linux_matrix: ${{ steps.plan.outputs.linux_matrix }}
+      windows_matrix: ${{ steps.plan.outputs.windows_matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: 検証方針の回帰試験と台帳
+        run: |
+          python3 -m unittest discover -s tools/ci/tests -v
+          python3 tools/migration/build_ledger.py --check
+      - name: 差分から検証範囲を決定
+        id: plan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT: ${{ github.event_name }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          MILESTONE_PR: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'native/milestone/') }}
+          BRANCH: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+          PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.phase || (github.event_name == 'pull_request' && 'development' || 'integration') }}
+        run: |
+          set -euo pipefail
+          # 実定義とcheckoutしたheadのworkflowが一致しなければ再baseが必要。
+          git cat-file -e "$WORKFLOW_SHA^{commit}" || git fetch --no-tags origin "$WORKFLOW_SHA"
+          git diff --quiet "$WORKFLOW_SHA" HEAD -- .github/workflows/native.yml
+          if [ "$MILESTONE_PR" = "true" ]; then PHASE=milestone; fi
+          base="$BASE_SHA"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then base="HEAD^"; fi
+          # PRはtarget基点、pushは直前commitではなく前回合格からの全変更を検査。
+          if [ "$EVENT" = "push" ]; then
+            python3 tools/ci/validation_policy.py --base "$base" --phase "$PHASE" --ci-baseline-branch "$BRANCH" --repository "$REPOSITORY" --output validation-plan.json --github-output "$GITHUB_OUTPUT"
+          else
+            python3 tools/ci/validation_policy.py --base "$base" --phase "$PHASE" --output validation-plan.json --github-output "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validation-plan
+          path: validation-plan.json
+          retention-days: 7
+
+  linux:
+    needs: plan
+    if: needs.plan.outputs.has_native == 'true'
+    runs-on: ubuntu-24.04
+    # Match the measured reference: NumPy 2.4.6, OpenBLAS Haswell, X86_V2 ufuncs.
+    # CPU auto-dispatch changes reduction rounding; keep all bitwise/pixel checks intact.
+    env:
+      OPENBLAS_CORETYPE: Haswell
+      NPY_DISABLE_CPU_FEATURES: "X86_V3,X86_V4,AVX512_ICL,AVX512_SPR"
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.linux_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: validation-plan
+      - name: System packages
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends ninja-build g++ cmake pkg-config ccache \
+            libgl-dev libegl-dev libopengl-dev libxkbcommon-dev libxkbcommon-x11-0 libfontconfig1-dev libfreetype-dev \
+            libharfbuzz-dev liblcms2-dev libpng-dev libjpeg-turbo8-dev libtiff-dev libwebp-dev zlib1g-dev libopenexr-dev libavif-dev libaom-dev libzstd-dev \
+            nlohmann-json3-dev libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
+            libxcb-xinerama0 libxcb-xkb1 libxcb-randr0 libxcb-shape0 xvfb fonts-ipafont-gothic fonts-ipafont-mincho poppler-utils
+      - name: LibRaw 0.22.2 (libraw.org's source, a shared library of its own — LGPL-2.1; PC4 F-e)
+        uses: actions/cache@v4
+        id: libraw-cache
+        with:
+          path: ${{ runner.temp }}/libraw
+          key: libraw-0.22.2-${{ hashFiles('tools/ci/build_libraw.sh') }}
+      - if: steps.libraw-cache.outputs.cache-hit != 'true'
+        run: bash tools/ci/build_libraw.sh "${{ runner.temp }}/libraw"
+      - name: genko-plugin-host (WebAssembly plugins, Rust — crates by native/wasm-host/Cargo.lock; PC5 J-f)
+        run: bash tools/ci/build_wasm_host.sh "${{ runner.temp }}/wasm-host"
+      - name: Qt (official binaries, LGPL modules only)
+        uses: actions/cache@v4
+        id: qt-cache
+        with:
+          path: ${{ runner.temp }}/qt
+          key: qt-${{ env.QT_VERSION }}-linux_gcc_64-imageformats
+      - if: steps.qt-cache.outputs.cache-hit != 'true'
+        run: |
+          pipx run "aqtinstall==${AQT_VERSION}" install-qt linux desktop "${QT_VERSION}" linux_gcc_64 -m qtimageformats -O "${{ runner.temp }}/qt"
+      - name: Python reference (contract tests only)
+        run: |
+          python3 -m venv /tmp/pyref
+          /tmp/pyref/bin/pip install -q 'pillow==12.3.0' 'numpy==2.4.6' 'psd-tools==1.10.9'
+          echo "GENKO_PYREF=/tmp/pyref/bin/python" >> "$GITHUB_ENV"
+          /tmp/pyref/bin/python tools/ci/check_pyref_numerics.py
+      - name: Configure, build, test
+        env:
+          CMAKE_PREFIX_PATH: ${{ runner.temp }}/qt/${{ env.QT_VERSION }}/gcc_64
+          GENKO_LIBRAW_ROOT: ${{ runner.temp }}/libraw
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          cd native
+          cmake --preset ${{ matrix.preset }}
+          cd ..
+          python3 tools/ci/validation_run.py --plan validation-plan.json --preset ${{ matrix.preset }} --build build/${{ matrix.preset }} --output validation/${{ matrix.preset }}
+
+      - name: 一回の試験のログと実行物証跡
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-${{ matrix.preset }}
+          path: validation/${{ matrix.preset }}
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    needs: plan
+    if: needs.plan.outputs.has_native == 'true'
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.windows_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: validation-plan
+      - name: Paths
+        shell: pwsh
+        run: |
+          "GENKO_VCPKG=$env:RUNNER_TEMP\vcpkg" >> $env:GITHUB_ENV
+          "VCPKG_DEFAULT_BINARY_CACHE=$env:RUNNER_TEMP\vcpkg-bin" >> $env:GITHUB_ENV
+          "VCPKG_BINARY_SOURCES=clear;files,$env:RUNNER_TEMP\vcpkg-bin,readwrite" >> $env:GITHUB_ENV
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Qt (official binaries, LGPL modules only)
+        uses: actions/cache@v4
+        id: qt-cache
+        with:
+          path: ${{ runner.temp }}\qt
+          key: qt-${{ env.QT_VERSION }}-win64_msvc2022_64-imageformats-v2
+      - if: steps.qt-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: python tools/ci/fetch_qt.py --os windows --out "$env:RUNNER_TEMP\qt"
+      - name: vcpkg at the manifest baseline
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $baseline = (Get-Content native/vcpkg.json -Raw | ConvertFrom-Json).'builtin-baseline'
+          # (msvc-dev-cmd sets VCPKG_ROOT to the copy bundled with Visual Studio; ours is GENKO_VCPKG)
+          git clone --quiet https://github.com/microsoft/vcpkg "$env:GENKO_VCPKG"
+          git -C "$env:GENKO_VCPKG" checkout --quiet $baseline
+          & "$env:GENKO_VCPKG\bootstrap-vcpkg.bat" -disableMetrics
+          New-Item -ItemType Directory -Force "$env:VCPKG_DEFAULT_BINARY_CACHE" | Out-Null
+      - name: vcpkg binary cache (restore)
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}\vcpkg-bin
+          key: vcpkg-bin-${{ hashFiles('native/vcpkg.json') }}-${{ matrix.preset }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-bin-${{ hashFiles('native/vcpkg.json') }}-${{ matrix.preset }}-
+            vcpkg-bin-${{ hashFiles('native/vcpkg.json') }}-
+      - name: Configure, build, test
+        id: build
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+            $vsNinja = Join-Path $env:VSINSTALLDIR 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja'
+            if (Test-Path (Join-Path $vsNinja 'ninja.exe')) { $env:PATH = "$vsNinja;$env:PATH" } else { choco install ninja --no-progress -y }
+          }
+          ninja --version
+          $env:VCPKG_ROOT = $env:GENKO_VCPKG
+          $env:CMAKE_PREFIX_PATH = "$env:RUNNER_TEMP\qt\$env:QT_VERSION\msvc2022_64"
+          $env:PATH = "$env:RUNNER_TEMP\qt\$env:QT_VERSION\msvc2022_64\bin;$env:PATH"
+          cd native
+          cmake --preset ${{ matrix.preset }}
+          Set-Location ..
+          python tools/ci/validation_run.py --plan validation-plan.json --preset ${{ matrix.preset }} --build build/${{ matrix.preset }} --output validation/${{ matrix.preset }}
+      - name: 一回の試験のログと実行物証跡
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-${{ matrix.preset }}
+          path: validation/${{ matrix.preset }}
+          if-no-files-found: error
+          retention-days: 7
+      - name: vcpkg binary cache (save, also after a failed build)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}\vcpkg-bin
+          key: vcpkg-bin-${{ hashFiles('native/vcpkg.json') }}-${{ matrix.preset }}-${{ github.run_id }}
+
+  audit:
+    needs: [plan, linux, windows]
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.has_native == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: validation-plan
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: validation-*
+          path: validation-artifacts
+      - name: 構成の完走とRelease未実施のDebug対照を照合
+        run: python3 tools/ci/validation_run.py --plan validation-plan.json --pair --output validation-artifacts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-matrix-audit
+          path: validation-artifacts/matrix-audit.json
+          if-no-files-found: error
+          retention-days: 7

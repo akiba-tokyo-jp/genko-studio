@@ -1,0 +1,295 @@
+{
+  "classification": "未統合M3-A1〜A9の主担当検証＋限定独立Debug動的受入。全M3/M7/統合後/CI受入ではない。",
+  "source_head_before_commit": "168788ac4f9273dd9197ee8965b1c507973c7f06",
+  "primary": {
+    "debug": {
+      "ctest": 37,
+      "cli": 23,
+      "exit_code": 0,
+      "audit": "/home/hermes/genko-test/cpp-impl/reviews/m3a8-formal-audit.json"
+    },
+    "release": {
+      "ctest": 37,
+      "cli": 23,
+      "exit_code": 0,
+      "fault_only_skips": 28,
+      "fault_rows_debug_passed": true
+    },
+    "asan": {
+      "ctest": 37,
+      "cli": 23,
+      "exit_code": 0,
+      "qt_passed": 575,
+      "skip": 0,
+      "sanitizers": "address,undefined,float-cast-overflow",
+      "audit": "/home/hermes/genko-test/cpp-impl/reviews/m3a9-formal-audit.json",
+      "limitations": [
+        "正式ASanのCTest #28実行中に主担当採取。最初の24対象の事前binary pinではない。",
+        "perfは別工程でnot_run。Qt等の外部共有ライブラリ全体のsanitizer計装は主張しない。",
+        "oom_deltaは独立CLI区間の値。全CTest区間の最終cgroupイベントの直接取得とは区別する。"
+      ]
+    }
+  },
+  "independent_debug": {
+    "scope_passed": true,
+    "findings": [],
+    "counts": {
+      "fixed_total": 474,
+      "fixed_differential": 471,
+      "fixed_intentional_cpp_refusals": 3,
+      "fixed_per_op_pairs": [
+        [
+          "convert_layer",
+          "13",
+          "10"
+        ],
+        [
+          "merge_down",
+          "13",
+          "7"
+        ],
+        [
+          "merge_layers",
+          "12",
+          "8"
+        ],
+        [
+          "merge_visible",
+          "9",
+          "5"
+        ],
+        [
+          "move_layers",
+          "11",
+          "7"
+        ],
+        [
+          "group_layers",
+          "10",
+          "5"
+        ],
+        [
+          "set_layer_mask",
+          "12",
+          "6"
+        ],
+        [
+          "paint_mask",
+          "10",
+          "5"
+        ],
+        [
+          "put_raster",
+          "10",
+          "9"
+        ],
+        [
+          "filter_raster",
+          "35",
+          "11"
+        ],
+        [
+          "fill",
+          "14",
+          "9"
+        ],
+        [
+          "fill_area",
+          "15",
+          "9"
+        ],
+        [
+          "fill_enclosed",
+          "10",
+          "6"
+        ],
+        [
+          "fill_gaps",
+          "9",
+          "5"
+        ],
+        [
+          "flood_fill",
+          "10",
+          "6"
+        ],
+        [
+          "gradient_fill",
+          "11",
+          "8"
+        ],
+        [
+          "delete_area",
+          "10",
+          "5"
+        ],
+        [
+          "transform_area",
+          "15",
+          "8"
+        ],
+        [
+          "paste",
+          "10",
+          "7"
+        ],
+        [
+          "store_area",
+          "10",
+          "6"
+        ],
+        [
+          "forget_area",
+          "8",
+          "5"
+        ],
+        [
+          "set_paper",
+          "10",
+          "6"
+        ],
+        [
+          "set_timelapse",
+          "10",
+          "5"
+        ],
+        [
+          "erase",
+          "11",
+          "4"
+        ],
+        [
+          "erase_raster",
+          "9",
+          "5"
+        ],
+        [
+          "_bus",
+          "3",
+          "4"
+        ]
+      ],
+      "fixed_png_references": 1872,
+      "random_sequences": 150,
+      "random_steps": 615,
+      "random_ops": 836,
+      "random_refused_steps": 175,
+      "random_unported_stops": 0,
+      "random_near_warps": 2,
+      "saved_readback": 300,
+      "saved_fixture_per_op": {
+        "convert_layer": 13,
+        "merge_down": 13,
+        "merge_layers": 12,
+        "merge_visible": 9,
+        "move_layers": 11,
+        "group_layers": 10,
+        "set_layer_mask": 12,
+        "paint_mask": 10,
+        "put_raster": 10,
+        "filter_raster": 35,
+        "fill": 14,
+        "fill_area": 15,
+        "fill_enclosed": 10,
+        "fill_gaps": 9,
+        "flood_fill": 10,
+        "gradient_fill": 11,
+        "delete_area": 10,
+        "transform_area": 15,
+        "paste": 10,
+        "store_area": 10,
+        "forget_area": 8,
+        "set_paper": 10,
+        "set_timelapse": 10,
+        "erase": 11,
+        "erase_raster": 9,
+        "_bus": 3
+      },
+      "saved_logged_per_op": {
+        "convert_layer": 13,
+        "merge_down": 13,
+        "merge_layers": 12,
+        "merge_visible": 9,
+        "move_layers": 11,
+        "group_layers": 10,
+        "set_layer_mask": 12,
+        "paint_mask": 10,
+        "put_raster": 10,
+        "filter_raster": 35,
+        "fill": 14,
+        "fill_area": 15,
+        "fill_enclosed": 10,
+        "fill_gaps": 9,
+        "flood_fill": 10,
+        "gradient_fill": 11,
+        "delete_area": 10,
+        "transform_area": 15,
+        "paste": 10,
+        "store_area": 10,
+        "forget_area": 8,
+        "set_paper": 10,
+        "set_timelapse": 10,
+        "erase": 11,
+        "erase_raster": 9
+      },
+      "saved_count_basis": "元fixtureの成功かつcpp指定なし300件。savedAndReadBack全slot PASS、failures.emptyとPython記録数=picked数のassertで全件完走。_bus 3件はサマリー表示のkOps外でありログの25op集計297件とは区別。",
+      "cli_python_batches": 185,
+      "cli_python_normal_batches": 106,
+      "cli_python_refused_batches": 79,
+      "cli23": 23,
+      "cli23_passed": 23,
+      "cli23_raw_calls": {
+        "calls": 219,
+        "success": 185,
+        "refusal": 34
+      },
+      "fixed_bus_log_label": "the bus's area resolution 3/4 (source op=_bus)"
+    },
+    "resource_summary": {
+      "cpu": 1,
+      "memory_limit_bytes": 2147483648,
+      "memory_peak_bytes_cumulative": 1381896192,
+      "memory_peak_gib": 1.2869911193847656,
+      "oom_delta": 0,
+      "oom_kill_delta": 0,
+      "test_minutes": 29.80195156094851
+    },
+    "binary_pins": {
+      "build/hermes-m3a-formal-debug/src/api/genko": "cd89e629e6cc11125895f55eb981a3d13ca2ef71c8e1cafeffb4b5debeae04b5",
+      "build/hermes-m3a-formal-debug/tests/test_contract_raster_ops": "fe80325062695db6a6935a0639c1806f4bebf4235161700a99644dd307120cbd",
+      "build/hermes-m3a-formal-debug/tests/test_contract_raster_cli": "195e78b908e262ed76fe3e3baa29cfe992f284bbf0eb617ae9e0a2382cc26a8f"
+    },
+    "report": "/home/hermes/genko-test/cpp-impl/reviews/m3a9-independent-review.json",
+    "limitations": [
+      "独立実行は正式Debugのraster ops・raster CLI・CLI23のみ。full37/Release/ASan/M7/統合後/CIは未検証。",
+      "透視変換の指定範囲のみ既存near許容を使用。全474件が無条件のpixel bit-exactだとは称さない。許容拡大なし。",
+      "固定3件のnot_yet_ported拒否は未移植機能の実装成功ではない。",
+      "CLI23拒否では全ディレクトリpathsとファイルSHA-256をfingerprintで比較。ただしproject.lockはreleased=true検査後released_atのみ除去する既存oracle仕様。PNG正常putの元bytes保持もassert。",
+      "別主担当ASan実行の停止・変更なし。",
+      "監視用の最初の端末待機のみ420秒でtool timeout。試験本体は止まらず完走。",
+      "memory.peakは直列3試験の累積。各試験単独ピークへの誤表示なし。"
+    ]
+  },
+  "resource_boundary": {
+    "cpu": 1,
+    "memory_bytes": 2147483648,
+    "build_jobs": 1
+  },
+  "acceptance_log_hashes": {
+    "m3a8-formal-debug.log": "659c5caafcf3e7575a955321e327cacc4e2e82d1a873b4b8be9f19cf40b7d709",
+    "m3a8-formal-release.log": "6773a49db954f7688a3598b3dec3d5dfcbf9e2d319edd65e7a5ced5bb92d9789",
+    "m3a9-formal-asan.log": "0e9bdd005051e2bea7147f1351f493c9358944eeab53346e8d6df3a9811db850",
+    "m3a9-independent-raster-ops.log": "8fbdb995764fc7f510433d2098e54ebe19478031972a9a0bcdf41eeb6babbe50",
+    "m3a9-independent-raster-cli.log": "4194b9285e30697a9f21effdb0cb9c8121a87c3a273c3f75269e8d54c69f6e11",
+    "m3a9-independent-cli23.log": "3e6940e2a246c0182d2e3cb7ce63e720730f4d024ccd703cff8478980f26b0d7"
+  },
+  "not_ported_refusals": 3,
+  "perspective_near_tolerance_not_expanded": true,
+  "pixel_and_saved_comparisons_not_reduced": true,
+  "post_acceptance_nonsemantic_delta": {
+    "file": "native/src/render/raster_ops.cpp",
+    "before_sha256": "cfbac92c3ec6b4ef5e8c8423ae6c07c1dc5702652b791fb07cb675c63c9d8c4b",
+    "after_sha256": "7164655486870e9a5a5f3a8644fd62b043572c7d159ab821a3edf2a6f0bf3e04",
+    "difference": "EOF余分空行1行だけ削除。実行コードは不変。統合後の再build/全検証は別途必要。"
+  }
+}

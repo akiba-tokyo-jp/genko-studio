@@ -1,0 +1,172 @@
+{
+  "updated_at": "2026-10-07T07:09:23.028704+09:00",
+  "base_commit": "5e07b9102b2768d062825744ecd83cfb44e64f05",
+  "worktree": "/home/hermes/genko-test/cpp-impl/wt/m2-material-previews",
+  "scope": "M2 built-in previews/list/search only; not placement/library/performance/full M2",
+  "status": "implemented-development-copy-tested-not-accepted",
+  "prebuild": {
+    "count": 86,
+    "two_runs_equal": true,
+    "audit": "/home/hermes/genko-test/cpp-impl/wt/m2-assets-resume/build/m2-material-preview-red/prebuild-reproducibility.json"
+  },
+  "tdd": {
+    "initial_red": "/home/hermes/genko-test/cpp-impl/wt/m2-assets-resume/build/m2-material-preview-red/execution.json",
+    "review_search_red": "/home/hermes/genko-test/cpp-impl/wt/m2-assets-resume/build/m2-material-search-red/execution.json",
+    "corrected_copy_green": "/home/hermes/genko-test/cpp-impl/wt/m2-assets-resume/build/m2-material-search-green-v2/execution.json",
+    "qt_pass": 15,
+    "failed": 0,
+    "skipped": 0,
+    "gui_counts": {
+      "test_gui_color": [
+        16,
+        0,
+        0
+      ],
+      "test_gui_layout": [
+        31,
+        0,
+        0
+      ],
+      "test_gui_actions": [
+        14,
+        0,
+        0
+      ]
+    },
+    "gui_execution": "/home/hermes/genko-test/cpp-impl/wt/m2-assets-resume/build/m2-material-search-green-v2/gui-regression/execution.json",
+    "preserved_failed_helper_attempt": "/home/hermes/genko-test/cpp-impl/wt/m2-assets-resume/build/m2-material-search-green/execution.json"
+  },
+  "review": {
+    "status": "collected-sha-verified",
+    "path": "/home/hermes/genko-test/cpp-impl/wt/m2-material-previews/build/material-preview-review/supplement/result.json",
+    "passed": true,
+    "suggestions": [
+      {
+        "file": "tools/migration/material_prebuild.py",
+        "lines": "21-26,35-52",
+        "title": "再現性の記録を描画の実依存へ広げる",
+        "details": "初回の非阻害提案を維持。固定ID/seed等は同一環境の安定化として妥当だが、MANIFEST.sourceは生成器自身・使用フォントbytes・Python/Pillow/NumPy/FreeType/zlib等の版を固定しない。再現環境、依存版、使用フォントSHA、生成器SHAとLFを固定し、独立出力2回の実比較を残す。本補足レビューも生成器を起動しておらず、再生成時のPNG bytesの再現を認定しない。"
+      },
+      {
+        "file": "native/tests/gui/test_gui_materials.cpp",
+        "lines": "18-44,48-99",
+        "title": "catalog自己一致とは別の86件保証と寿命/履歴対照を加える",
+        "details": "初回の非阻害提案の残件を維持。追加12queryは固定ID順序を持ち、今回の別名欠落、AND検索、大小文字、タブ/全角空白、生kindによる過剰一致の回帰を補う。一方、全86件の独立ID集合/件数保証、検索とフォルダの併用、履歴/dirty状態の直接対照、複数window破棄を狙う寿命試験、正式CMake resourceリンクと関連ASanの確認は未完。現在のcatalogにimageは0件であり、12queryはimage別名の動的正常対照を含まず、primの「立体」も直接検索しない。7分類語の定義一致は静的確認であり、全分類語の動的受入へ拡張しない。snapshot等式だけではUndo entry無しを直接証明しない。"
+      },
+      {
+        "file": "native/resources/genko_materials.qrc",
+        "title": "配布時のresource集合検査を機械ゲートにする",
+        "details": "初回の非阻害提案を維持。初回に確認したcatalog/qrc/MANIFEST/input/diskのresource集合一致は、該当ファイルの不変hashにより今回も保持される。生成器はqrcの出力/照合を行わないため、将来の追加・削除で手書きqrcが古くなる可能性がある。集合・hash・寸法検査を配布ゲートへ接続する。MANIFESTは開発時来歴であり実行時検証ではない。"
+      },
+      {
+        "file": "native/src/app/material_panel.cpp",
+        "lines": "49-57,83-96",
+        "title": "壊れた組込みresourceの診断を細分化する（防御的改善）",
+        "details": "初回の非阻害提案を維持。JSONのopen失敗/非arrayは安全な表示へ分岐するが、array内の行の型/必須id/name/previewと読めないPNGは個別に検証しない。今回変更していない固定resourceは初回検証時のhashと一致し、外部入力経路も追加されていないためblockingではない。破損配布時に原稿不変で欠損素材を明示し、previewを:/genko/materials/へ限定する防御を検討する。"
+      }
+    ]
+  },
+  "initial_nonblocking_suggestions": [
+    {
+      "file": "tools/migration/material_prebuild.py",
+      "lines": "21-26,35-52",
+      "title": "再現性の記録を描画の実依存へ広げる",
+      "details": "IDからの固定SHA、entry毎のID counter、乱数seed、stroke cache初期化、finallyでのmodels.new_id復元は同一環境の安定化として妥当。しかしMANIFEST.sourceはPythonファイルと旧catalogのみで、生成器自身・フォントbytes・Python/Pillow/NumPy/FreeType/zlib等の版を固定しない。旧thumbnailのletteringは fonts.face/text_image を通り同梱TTFに依存する。write_textの既定改行はOSにも依存する。現MANIFESTのsource147件が一致しても再生成時のPNG bytesの再現を証明しない。再現環境・依存版・使用フォントSHA・生成器SHAとLFを固定し、主担当が独立出力2回の実比較を残す。本レビューでは生成器を起動していない。"
+    },
+    {
+      "file": "native/tests/gui/test_gui_materials.cpp",
+      "lines": "39-71",
+      "title": "catalog自己一致とは別の86件保証と寿命/履歴対照を加える",
+      "details": "現試験は entries.size()>50 と同じcatalog由来のID/画像を比較するので、51〜85件へ欠落しても成立し得る。旧固定33件＋生成53件の独立ID集合/件数86、全種類語、複数語・全角/タブ空白・大小文字・フォルダ併用を固定する。snapshot等式はUndo entryが無いことの直接証明ではないので履歴/dirty状態も別に確認する。複数windowを作成/破棄して検索signalを送る寿命対照と正式CMake経由のresourceリンクも関連GUI/ASanで確認する。試験の実行は本レビューで禁止されており未実施。"
+    },
+    {
+      "file": "native/resources/genko_materials.qrc",
+      "title": "配布時のresource集合検査を機械ゲートにする",
+      "details": "現版はcatalog86件のpreview集合、qrcの86PNG、MANIFESTの86PNG、inputの86PNG、diskの86PNGが完全一致し、qrcの残り1件catalog.jsonもMANIFEST.filesと一致する。CMakeはqrcをgenko_app静的libraryのSOURCESへ含め、global Q_INIT_RESOURCE(genko_materials) がresource object参照を保持する設計である。ただし生成器はqrcを出力/照合しないため将来の追加・削除で手書きqrcが古くなり得る。この集合検査とhash/寸法を配布ゲートへ接続する。MANIFEST自体はqrcに含まれず、実行時検証ではなく開発時来歴として扱う。"
+    },
+    {
+      "file": "native/src/app/material_panel.cpp",
+      "lines": "48-57,72-87",
+      "title": "壊れた組込みresourceの診断を細分化する（防御的改善）",
+      "details": "JSONのopen失敗/非arrayは安全な表示へ分岐するが、array内の行の型/必須id/name/previewと読めないPNGは個別に検証せず空item/空iconへ進む。現固定resource86件では全字段・参照・PNGが正常であり、外部入力経路も無いため今回のblockingではない。破損配布時に原稿不変のまま欠損素材を明示し、previewを:/genko/materials/へ限定する防御を検討する。"
+    }
+  ],
+  "visual": {
+    "image": "/home/hermes/genko-test/cpp-impl/wt/m2-assets-resume/build/m2-material-preview-green/visual/materials.png",
+    "observations": "/home/hermes/genko-test/cpp-impl/wt/m2-assets-resume/build/m2-material-preview-green/visual/observations.json",
+    "source_scope": "pre-search-correction-copy; not a latest-source full GUI acceptance"
+  },
+  "formal_v1": {
+    "status": "waiting-for-owned-integrated-v2",
+    "session": "proc_9f17f3f260bb",
+    "pid": 2643963,
+    "after": "proc_3b1b9dd1c995/377c3e073516",
+    "execution": "/home/hermes/genko-test/cpp-impl/wt/m2-material-previews/build/material-formal-serial/execution.json",
+    "targets": [
+      "test_gui_materials",
+      "test_gui_layout",
+      "test_gui_actions",
+      "test_gui_color",
+      "test_storage"
+    ],
+    "settings": "Release/WERROR ON/fault OFF/sanitizer empty/1CPU/2GiB/parallel1/768MiB headroom"
+  },
+  "not_done": [
+    "formal CMake Release audit",
+    "ASan/UBSan",
+    "latest-source GUI visual acceptance",
+    "feature-group acceptance/commit/integration",
+    "user material library/preview persistent cache",
+    "placement tools",
+    "page lazy load",
+    "M2 performance",
+    "M3 remaining/PhotoCraft whole/M4-M7/Windows/package/delivery"
+  ],
+  "auxiliary_provenance_audit": {
+    "status": "stopped-unexecuted-after-wrapper-timeout-and-headroom-wait",
+    "foreground_exit": 124,
+    "owned_host_pid": 2648562,
+    "container_pid_stopped": 3654,
+    "reason": "primary contract still executing; memory.current 1800306688, anon709517312/file835067904/dirty44535808; OOM0 snapshot only, not final full-suite audit",
+    "source_not_changed": true,
+    "path": "/home/hermes/genko-test/cpp-impl/wt/m2-assets-resume/build/m2-material-prebuild-provenance",
+    "do_not_count_as_pass": true
+  },
+  "resource_checkout": {
+    "status": "related-checkout-transform-passed-not-windows-accepted",
+    "files_sha256": {
+      ".gitattributes": "d4428d1eea3f659a1708f7eb870117a23e74f53cc3b4b8ea00424a76c5e441ce",
+      "build/material-eol-check.py": "962f92bc1cdc01ebe5e99b3b81b5f984c746dc62a2d1335c2d6a8ee4e39b08a2"
+    },
+    "review": "build/material-eol-review/result.json",
+    "review_passed": true,
+    "nonblocking_unaddressed": [
+      "非阻害・再利用時の堅牢化: helperはos.environを継承するため、GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_COUNT等のGit動作を上書きする環境変数を除外するとfixture隔離をさらに明確にできる。今回の記録に既存repoへの書込みを示す証拠はない。",
+      "非阻害・判定の堅牢化: Pythonの-O/PYTHONOPTIMIZEで検査assertが無効化されることを避けるため、受入条件は明示的if/raiseにし、packageの正確な89file集合も検査するとよい。今回の実記録の集合・bytes・件数は独立照合で一致した。",
+      "非阻害・証拠の強化: execution.jsonに実行時helperのSHA、適用前.gitattributesのSHA、隔離環境の非機密設定、削除・再生成した列挙file集合を記録すると、過去REDと現在helperの対応をより直接確認できる。最初のredはhelper失敗として保持し、実REDとして数えない現状の区別は適切。"
+    ],
+    "red": "build/material-eol-red-v2/execution.json",
+    "green": "build/material-eol-green/execution.json",
+    "first_attempt": "build/material-eol-red/failure.json; helper failure, not product RED",
+    "package_file_count": 89,
+    "png_count": 86,
+    "original_fixture_lf_preserved": true,
+    "unrelated_text_crlf_preserved": true,
+    "limitations": [
+      "Windows native/MSVC/GUI not run",
+      "Python reference source SHA cross-platform design pending",
+      "helper remains untracked build evidence; relocate after frozen acceptance"
+    ]
+  },
+  "integrated_base_release_limited_audit": {
+    "path": "build/m2-integrated-release-limited-audit-v2.json",
+    "passed": true,
+    "ctest": 58,
+    "qt_pass": 1154,
+    "qt_skip": 33,
+    "cli23": 23,
+    "asan": "running; skip pairing and overall cgroup_after pending",
+    "performance": "not accepted",
+    "scope": "base 5e07b91, NOT new material panel formal acceptance"
+  }
+}

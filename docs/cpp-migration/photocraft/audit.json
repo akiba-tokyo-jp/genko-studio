@@ -1,0 +1,18 @@
+{
+  "scope": "V0 document-only upstream survey; not native feature acceptance",
+  "upstream_commit": "ad863217386440ca968fccc9bfff65ba24e61142",
+  "genko_base_commit": "f9bb7a10d0a808c838a2d6f5b65a646cbf59fd2c",
+  "source_catalog_and_engine_union": true,
+  "unique_ledger_ids": 961,
+  "counts_match": true,
+  "all_rows_implementation_unstarted": true,
+  "production_source_unchanged": true,
+  "upstream_probe_exit_codes": [
+    0,
+    0,
+    0
+  ],
+  "native_implementation_complete": false,
+  "native_build_required_for_document_only_changes": false,
+  "awaiting_decision": "storage model: integrated manga document feature extension vs dedicated image document mode"
+}

@@ -1,0 +1,8006 @@
+{
+  "upstream": {
+    "url": "https://github.com/storytold/photocraft",
+    "tag": "v0.2.0",
+    "commit": "ad863217386440ca968fccc9bfff65ba24e61142",
+    "release_date": "2026-10-05T04:42:21Z"
+  },
+  "genko_baseline": "f9bb7a10d0a808c838a2d6f5b65a646cbf59fd2c",
+  "evidence_level": "static_catalog_not_runtime_acceptance",
+  "unique_command_count": 626,
+  "menu_placement_count": 627,
+  "counts_by_menu": {
+    "File": 51,
+    "Edit": 75,
+    "Image": 61,
+    "Layer": 160,
+    "Type": 44,
+    "Select": 25,
+    "Filter": 75,
+    "View": 74,
+    "Window": 61
+  },
+  "items": [
+    {
+      "id": "file.new",
+      "menu": [
+        "File"
+      ],
+      "label": "New…",
+      "shortcut": "Some(\"Cmd+N\")",
+      "source_line": 7,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.open",
+      "menu": [
+        "File"
+      ],
+      "label": "Open…",
+      "shortcut": "Some(\"Cmd+O\")",
+      "source_line": 8,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.openAs",
+      "menu": [
+        "File"
+      ],
+      "label": "Open As…",
+      "shortcut": "Some(\"Cmd+Alt+Shift+O\")",
+      "source_line": 9,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.close",
+      "menu": [
+        "File"
+      ],
+      "label": "Close",
+      "shortcut": "Some(\"Cmd+W\")",
+      "source_line": 11,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.closeAll",
+      "menu": [
+        "File"
+      ],
+      "label": "Close All",
+      "shortcut": "Some(\"Cmd+Alt+W\")",
+      "source_line": 12,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.closeOthers",
+      "menu": [
+        "File"
+      ],
+      "label": "Close Others",
+      "shortcut": "Some(\"Cmd+Alt+P\")",
+      "source_line": 13,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.save",
+      "menu": [
+        "File"
+      ],
+      "label": "Save",
+      "shortcut": "Some(\"Cmd+S\")",
+      "source_line": 15,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.saveAs",
+      "menu": [
+        "File"
+      ],
+      "label": "Save As…",
+      "shortcut": "Some(\"Cmd+Shift+S\")",
+      "source_line": 16,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.saveACopy",
+      "menu": [
+        "File"
+      ],
+      "label": "Save a Copy…",
+      "shortcut": "Some(\"Cmd+Alt+S\")",
+      "source_line": 17,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.revert",
+      "menu": [
+        "File"
+      ],
+      "label": "Revert",
+      "shortcut": "Some(\"F12\")",
+      "source_line": 18,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.export.quickExportAsPng",
+      "menu": [
+        "File",
+        "Export"
+      ],
+      "label": "Quick Export as PNG",
+      "shortcut": "None",
+      "source_line": 20,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.export.exportAs",
+      "menu": [
+        "File",
+        "Export"
+      ],
+      "label": "Export As…",
+      "shortcut": "Some(\"Cmd+Alt+Shift+W\")",
+      "source_line": 21,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.export.exportPreferences",
+      "menu": [
+        "File",
+        "Export"
+      ],
+      "label": "Export Preferences…",
+      "shortcut": "None",
+      "source_line": 22,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.export.saveForWebLegacy",
+      "menu": [
+        "File",
+        "Export"
+      ],
+      "label": "Save for Web (Legacy)…",
+      "shortcut": "Some(\"Cmd+Alt+Shift+S\")",
+      "source_line": 24,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.export.artboardsToFiles",
+      "menu": [
+        "File",
+        "Export"
+      ],
+      "label": "Artboards to Files…",
+      "shortcut": "None",
+      "source_line": 26,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.export.artboardsToPdf",
+      "menu": [
+        "File",
+        "Export"
+      ],
+      "label": "Artboards to PDF…",
+      "shortcut": "None",
+      "source_line": 27,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.export.layersToFiles",
+      "menu": [
+        "File",
+        "Export"
+      ],
+      "label": "Layers to Files…",
+      "shortcut": "None",
+      "source_line": 28,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.export.layerCompsToFiles",
+      "menu": [
+        "File",
+        "Export"
+      ],
+      "label": "Layer Comps to Files…",
+      "shortcut": "None",
+      "source_line": 29,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.export.colorLookupTables",
+      "menu": [
+        "File",
+        "Export"
+      ],
+      "label": "Color Lookup Tables…",
+      "shortcut": "None",
+      "source_line": 31,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.export.dataSetsAsFiles",
+      "menu": [
+        "File",
+        "Export"
+      ],
+      "label": "Data Sets as Files…",
+      "shortcut": "None",
+      "source_line": 32,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.export.pathsToIllustrator",
+      "menu": [
+        "File",
+        "Export"
+      ],
+      "label": "Paths to Illustrator…",
+      "shortcut": "None",
+      "source_line": 33,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.export.renderVideo",
+      "menu": [
+        "File",
+        "Export"
+      ],
+      "label": "Render Video…",
+      "shortcut": "None",
+      "source_line": 34,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.generate.imageAssets",
+      "menu": [
+        "File",
+        "Generate"
+      ],
+      "label": "Image Assets",
+      "shortcut": "None",
+      "source_line": 35,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.placeEmbedded",
+      "menu": [
+        "File"
+      ],
+      "label": "Place Embedded…",
+      "shortcut": "None",
+      "source_line": 37,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.placeLinked",
+      "menu": [
+        "File"
+      ],
+      "label": "Place Linked…",
+      "shortcut": "None",
+      "source_line": 38,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.package",
+      "menu": [
+        "File"
+      ],
+      "label": "Package…",
+      "shortcut": "None",
+      "source_line": 40,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.automate.batch",
+      "menu": [
+        "File",
+        "Automate"
+      ],
+      "label": "Batch…",
+      "shortcut": "None",
+      "source_line": 42,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.automate.createDroplet",
+      "menu": [
+        "File",
+        "Automate"
+      ],
+      "label": "Create Droplet…",
+      "shortcut": "None",
+      "source_line": 43,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.automate.cropAndStraightenPhotos",
+      "menu": [
+        "File",
+        "Automate"
+      ],
+      "label": "Crop and Straighten Photos",
+      "shortcut": "None",
+      "source_line": 45,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.automate.contactSheetII",
+      "menu": [
+        "File",
+        "Automate"
+      ],
+      "label": "Contact Sheet II…",
+      "shortcut": "None",
+      "source_line": 46,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.automate.conditionalModeChange",
+      "menu": [
+        "File",
+        "Automate"
+      ],
+      "label": "Conditional Mode Change…",
+      "shortcut": "None",
+      "source_line": 47,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.automate.fitImage",
+      "menu": [
+        "File",
+        "Automate"
+      ],
+      "label": "Fit Image…",
+      "shortcut": "None",
+      "source_line": 48,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.automate.lensCorrection",
+      "menu": [
+        "File",
+        "Automate"
+      ],
+      "label": "Lens Correction…",
+      "shortcut": "None",
+      "source_line": 49,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.automate.mergeToHdrPro",
+      "menu": [
+        "File",
+        "Automate"
+      ],
+      "label": "Merge to HDR Pro…",
+      "shortcut": "None",
+      "source_line": 51,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.automate.photomerge",
+      "menu": [
+        "File",
+        "Automate"
+      ],
+      "label": "Photomerge…",
+      "shortcut": "None",
+      "source_line": 52,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.scripts.imageProcessor",
+      "menu": [
+        "File",
+        "Scripts"
+      ],
+      "label": "Image Processor…",
+      "shortcut": "None",
+      "source_line": 53,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.scripts.deleteAllEmptyLayers",
+      "menu": [
+        "File",
+        "Scripts"
+      ],
+      "label": "Delete All Empty Layers",
+      "shortcut": "None",
+      "source_line": 55,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.scripts.flattenAllLayerEffects",
+      "menu": [
+        "File",
+        "Scripts"
+      ],
+      "label": "Flatten All Layer Effects",
+      "shortcut": "None",
+      "source_line": 56,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.scripts.flattenAllMasks",
+      "menu": [
+        "File",
+        "Scripts"
+      ],
+      "label": "Flatten All Masks",
+      "shortcut": "None",
+      "source_line": 57,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.scripts.scriptEventsManager",
+      "menu": [
+        "File",
+        "Scripts"
+      ],
+      "label": "Script Events Manager…",
+      "shortcut": "None",
+      "source_line": 59,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.scripts.loadFilesIntoStack",
+      "menu": [
+        "File",
+        "Scripts"
+      ],
+      "label": "Load Files into Stack…",
+      "shortcut": "None",
+      "source_line": 61,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.scripts.statistics",
+      "menu": [
+        "File",
+        "Scripts"
+      ],
+      "label": "Statistics…",
+      "shortcut": "None",
+      "source_line": 62,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.scripts.browse",
+      "menu": [
+        "File",
+        "Scripts"
+      ],
+      "label": "Browse…",
+      "shortcut": "None",
+      "source_line": 64,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.import.variableDataSets",
+      "menu": [
+        "File",
+        "Import"
+      ],
+      "label": "Variable Data Sets…",
+      "shortcut": "None",
+      "source_line": 65,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.import.videoFramesToLayers",
+      "menu": [
+        "File",
+        "Import"
+      ],
+      "label": "Video Frames to Layers…",
+      "shortcut": "None",
+      "source_line": 66,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.import.notes",
+      "menu": [
+        "File",
+        "Import"
+      ],
+      "label": "Notes…",
+      "shortcut": "None",
+      "source_line": 67,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.import.wiaSupport",
+      "menu": [
+        "File",
+        "Import"
+      ],
+      "label": "WIA Support…",
+      "shortcut": "None",
+      "source_line": 68,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.fileInfo",
+      "menu": [
+        "File"
+      ],
+      "label": "File Info…",
+      "shortcut": "Some(\"Cmd+Alt+Shift+I\")",
+      "source_line": 70,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.print",
+      "menu": [
+        "File"
+      ],
+      "label": "Print…",
+      "shortcut": "Some(\"Cmd+P\")",
+      "source_line": 72,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.printOneCopy",
+      "menu": [
+        "File"
+      ],
+      "label": "Print One Copy",
+      "shortcut": "Some(\"Cmd+Alt+Shift+P\")",
+      "source_line": 73,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "file.exit",
+      "menu": [
+        "File"
+      ],
+      "label": "Exit",
+      "shortcut": "Some(\"Cmd+Q\")",
+      "source_line": 75,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.undo",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Undo",
+      "shortcut": "None",
+      "source_line": 76,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.redo",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Redo",
+      "shortcut": "None",
+      "source_line": 77,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.toggleLastState",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Toggle Last State",
+      "shortcut": "Some(\"Cmd+Alt+Z\")",
+      "source_line": 78,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.fade",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Fade…",
+      "shortcut": "Some(\"Cmd+Shift+F\")",
+      "source_line": 79,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.cut",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Cut",
+      "shortcut": "None",
+      "source_line": 81,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.copy",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Copy",
+      "shortcut": "None",
+      "source_line": 82,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.copyMerged",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Copy Merged",
+      "shortcut": "Some(\"Cmd+Shift+C\")",
+      "source_line": 83,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.paste",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Paste",
+      "shortcut": "None",
+      "source_line": 84,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.pasteSpecial.pasteInPlace",
+      "menu": [
+        "Edit",
+        "Paste Special"
+      ],
+      "label": "Paste in Place",
+      "shortcut": "Some(\"Cmd+Shift+V\")",
+      "source_line": 85,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.pasteSpecial.pasteInto",
+      "menu": [
+        "Edit",
+        "Paste Special"
+      ],
+      "label": "Paste Into",
+      "shortcut": "Some(\"Cmd+Alt+Shift+V\")",
+      "source_line": 86,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.pasteSpecial.pasteOutside",
+      "menu": [
+        "Edit",
+        "Paste Special"
+      ],
+      "label": "Paste Outside",
+      "shortcut": "None",
+      "source_line": 87,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.clear",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Clear",
+      "shortcut": "None",
+      "source_line": 88,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.search",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Search…",
+      "shortcut": "Some(\"Cmd+K\")",
+      "source_line": 90,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.checkSpelling",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Check Spelling…",
+      "shortcut": "None",
+      "source_line": 92,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.findAndReplaceText",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Find and Replace Text…",
+      "shortcut": "None",
+      "source_line": 93,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.fill",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Fill…",
+      "shortcut": "Some(\"Shift+F5\")",
+      "source_line": 95,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.stroke",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Stroke…",
+      "shortcut": "None",
+      "source_line": 96,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.contentAwareFill",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Content-Aware Fill…",
+      "shortcut": "None",
+      "source_line": 97,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.contentAwareScale",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Content-Aware Scale",
+      "shortcut": "Some(\"Cmd+Alt+Shift+C\")",
+      "source_line": 99,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.puppetWarp",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Puppet Warp",
+      "shortcut": "None",
+      "source_line": 100,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.perspectiveWarp",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Perspective Warp",
+      "shortcut": "None",
+      "source_line": 101,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.freeTransform",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Free Transform",
+      "shortcut": "Some(\"Cmd+T\")",
+      "source_line": 102,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.transform.again",
+      "menu": [
+        "Edit",
+        "Transform"
+      ],
+      "label": "Again",
+      "shortcut": "Some(\"Cmd+Shift+T\")",
+      "source_line": 103,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.transform.scale",
+      "menu": [
+        "Edit",
+        "Transform"
+      ],
+      "label": "Scale",
+      "shortcut": "None",
+      "source_line": 105,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.transform.rotate",
+      "menu": [
+        "Edit",
+        "Transform"
+      ],
+      "label": "Rotate",
+      "shortcut": "None",
+      "source_line": 106,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.transform.skew",
+      "menu": [
+        "Edit",
+        "Transform"
+      ],
+      "label": "Skew",
+      "shortcut": "None",
+      "source_line": 107,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.transform.distort",
+      "menu": [
+        "Edit",
+        "Transform"
+      ],
+      "label": "Distort",
+      "shortcut": "None",
+      "source_line": 108,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.transform.perspective",
+      "menu": [
+        "Edit",
+        "Transform"
+      ],
+      "label": "Perspective",
+      "shortcut": "None",
+      "source_line": 109,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.transform.warp",
+      "menu": [
+        "Edit",
+        "Transform"
+      ],
+      "label": "Warp",
+      "shortcut": "None",
+      "source_line": 110,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.transform.splitWarpHorizontally",
+      "menu": [
+        "Edit",
+        "Transform"
+      ],
+      "label": "Split Warp Horizontally",
+      "shortcut": "None",
+      "source_line": 112,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.transform.splitWarpVertically",
+      "menu": [
+        "Edit",
+        "Transform"
+      ],
+      "label": "Split Warp Vertically",
+      "shortcut": "None",
+      "source_line": 113,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.transform.splitWarpCrosswise",
+      "menu": [
+        "Edit",
+        "Transform"
+      ],
+      "label": "Split Warp Crosswise",
+      "shortcut": "None",
+      "source_line": 114,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.transform.removeWarpSplit",
+      "menu": [
+        "Edit",
+        "Transform"
+      ],
+      "label": "Remove Warp Split",
+      "shortcut": "None",
+      "source_line": 115,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.transform.rotate180",
+      "menu": [
+        "Edit",
+        "Transform"
+      ],
+      "label": "Rotate 180°",
+      "shortcut": "None",
+      "source_line": 117,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.transform.rotate90Cw",
+      "menu": [
+        "Edit",
+        "Transform"
+      ],
+      "label": "Rotate 90° Clockwise",
+      "shortcut": "None",
+      "source_line": 118,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.transform.rotate90Ccw",
+      "menu": [
+        "Edit",
+        "Transform"
+      ],
+      "label": "Rotate 90° Counter Clockwise",
+      "shortcut": "None",
+      "source_line": 119,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.transform.flipHorizontal",
+      "menu": [
+        "Edit",
+        "Transform"
+      ],
+      "label": "Flip Horizontal",
+      "shortcut": "None",
+      "source_line": 121,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.transform.flipVertical",
+      "menu": [
+        "Edit",
+        "Transform"
+      ],
+      "label": "Flip Vertical",
+      "shortcut": "None",
+      "source_line": 122,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.autoAlignLayers",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Auto-Align Layers…",
+      "shortcut": "None",
+      "source_line": 123,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.autoBlendLayers",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Auto-Blend Layers…",
+      "shortcut": "None",
+      "source_line": 124,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.defineBrushPreset",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Define Brush Preset…",
+      "shortcut": "None",
+      "source_line": 126,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.definePattern",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Define Pattern…",
+      "shortcut": "None",
+      "source_line": 127,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.defineCustomShape",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Define Custom Shape…",
+      "shortcut": "None",
+      "source_line": 128,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.purge.undo",
+      "menu": [
+        "Edit",
+        "Purge"
+      ],
+      "label": "Undo",
+      "shortcut": "None",
+      "source_line": 130,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.purge.clipboard",
+      "menu": [
+        "Edit",
+        "Purge"
+      ],
+      "label": "Clipboard",
+      "shortcut": "None",
+      "source_line": 131,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.purge.histories",
+      "menu": [
+        "Edit",
+        "Purge"
+      ],
+      "label": "Histories",
+      "shortcut": "None",
+      "source_line": 132,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.purge.videoCache",
+      "menu": [
+        "Edit",
+        "Purge"
+      ],
+      "label": "Video Cache",
+      "shortcut": "None",
+      "source_line": 133,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.purge.all",
+      "menu": [
+        "Edit",
+        "Purge"
+      ],
+      "label": "All",
+      "shortcut": "None",
+      "source_line": 135,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.presets.presetManager",
+      "menu": [
+        "Edit",
+        "Presets"
+      ],
+      "label": "Preset Manager…",
+      "shortcut": "None",
+      "source_line": 137,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.presets.migratePresets",
+      "menu": [
+        "Edit",
+        "Presets"
+      ],
+      "label": "Migrate Presets",
+      "shortcut": "None",
+      "source_line": 139,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.presets.exportImportPresets",
+      "menu": [
+        "Edit",
+        "Presets"
+      ],
+      "label": "Export/Import Presets…",
+      "shortcut": "None",
+      "source_line": 140,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.colorSettings",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Color Settings…",
+      "shortcut": "Some(\"Cmd+Shift+K\")",
+      "source_line": 142,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.assignProfile",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Assign Profile…",
+      "shortcut": "None",
+      "source_line": 143,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.convertToProfile",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Convert to Profile…",
+      "shortcut": "None",
+      "source_line": 144,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.keyboardShortcuts",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Keyboard Shortcuts…",
+      "shortcut": "Some(\"Cmd+Alt+Shift+K\")",
+      "source_line": 146,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": [
+        {
+          "menu": [
+            "Window",
+            "Workspace"
+          ],
+          "source_line": 736
+        }
+      ]
+    },
+    {
+      "id": "edit.menus",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Menus…",
+      "shortcut": "Some(\"Cmd+Alt+Shift+M\")",
+      "source_line": 147,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.toolbar",
+      "menu": [
+        "Edit"
+      ],
+      "label": "Toolbar…",
+      "shortcut": "None",
+      "source_line": 148,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.general",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "Settings…",
+      "shortcut": "None",
+      "source_line": 150,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.integrations",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "AI Integrations…",
+      "shortcut": "None",
+      "source_line": 151,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.interface",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "Interface…",
+      "shortcut": "None",
+      "source_line": 152,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.workspace",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "Workspace…",
+      "shortcut": "None",
+      "source_line": 153,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.tools",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "Tools…",
+      "shortcut": "None",
+      "source_line": 154,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.historyLog",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "History Log…",
+      "shortcut": "None",
+      "source_line": 155,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.fileHandling",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "File Handling…",
+      "shortcut": "None",
+      "source_line": 156,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.export",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "Export…",
+      "shortcut": "None",
+      "source_line": 157,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.performance",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "Performance…",
+      "shortcut": "None",
+      "source_line": 158,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.scratchDisks",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "Scratch Disks…",
+      "shortcut": "None",
+      "source_line": 159,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.cursors",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "Cursors…",
+      "shortcut": "None",
+      "source_line": 160,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.transparencyAndGamut",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "Transparency & Gamut…",
+      "shortcut": "None",
+      "source_line": 161,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.unitsAndRulers",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "Units & Rulers…",
+      "shortcut": "None",
+      "source_line": 162,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.guidesGridAndSlices",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "Guides, Grid & Slices…",
+      "shortcut": "None",
+      "source_line": 163,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.plugIns",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "Plug-ins…",
+      "shortcut": "None",
+      "source_line": 164,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.type",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "Type…",
+      "shortcut": "None",
+      "source_line": 165,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.enhancedControls",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "Enhanced Controls…",
+      "shortcut": "None",
+      "source_line": 166,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "edit.preferences.rawDefaults",
+      "menu": [
+        "Edit",
+        "Preferences"
+      ],
+      "label": "Raw Defaults…",
+      "shortcut": "None",
+      "source_line": 167,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.mode.bitmap",
+      "menu": [
+        "Image",
+        "Mode"
+      ],
+      "label": "Bitmap",
+      "shortcut": "None",
+      "source_line": 168,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.mode.grayscale",
+      "menu": [
+        "Image",
+        "Mode"
+      ],
+      "label": "Grayscale",
+      "shortcut": "None",
+      "source_line": 169,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.mode.duotone",
+      "menu": [
+        "Image",
+        "Mode"
+      ],
+      "label": "Duotone",
+      "shortcut": "None",
+      "source_line": 170,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.mode.indexedColor",
+      "menu": [
+        "Image",
+        "Mode"
+      ],
+      "label": "Indexed Color",
+      "shortcut": "None",
+      "source_line": 171,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.mode.rgb",
+      "menu": [
+        "Image",
+        "Mode"
+      ],
+      "label": "RGB Color",
+      "shortcut": "None",
+      "source_line": 172,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.mode.cmyk",
+      "menu": [
+        "Image",
+        "Mode"
+      ],
+      "label": "CMYK Color",
+      "shortcut": "None",
+      "source_line": 173,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.mode.lab",
+      "menu": [
+        "Image",
+        "Mode"
+      ],
+      "label": "Lab Color",
+      "shortcut": "None",
+      "source_line": 174,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.mode.multichannel",
+      "menu": [
+        "Image",
+        "Mode"
+      ],
+      "label": "Multichannel",
+      "shortcut": "None",
+      "source_line": 175,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.mode.bits8",
+      "menu": [
+        "Image",
+        "Mode"
+      ],
+      "label": "8 Bits/Channel",
+      "shortcut": "None",
+      "source_line": 177,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.mode.bits16",
+      "menu": [
+        "Image",
+        "Mode"
+      ],
+      "label": "16 Bits/Channel",
+      "shortcut": "None",
+      "source_line": 178,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.mode.bits32",
+      "menu": [
+        "Image",
+        "Mode"
+      ],
+      "label": "32 Bits/Channel",
+      "shortcut": "None",
+      "source_line": 179,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.mode.colorTable",
+      "menu": [
+        "Image",
+        "Mode"
+      ],
+      "label": "Color Table…",
+      "shortcut": "None",
+      "source_line": 181,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.brightnessContrast",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Brightness/Contrast…",
+      "shortcut": "None",
+      "source_line": 183,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.levels",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Levels…",
+      "shortcut": "Some(\"Cmd+L\")",
+      "source_line": 184,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.curves",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Curves…",
+      "shortcut": "Some(\"Cmd+M\")",
+      "source_line": 185,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.exposure",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Exposure…",
+      "shortcut": "None",
+      "source_line": 186,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.vibrance",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Vibrance…",
+      "shortcut": "None",
+      "source_line": 187,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.hueSaturation",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Hue/Saturation…",
+      "shortcut": "Some(\"Cmd+U\")",
+      "source_line": 188,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.colorBalance",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Color Balance…",
+      "shortcut": "Some(\"Cmd+B\")",
+      "source_line": 189,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.blackWhite",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Black & White…",
+      "shortcut": "Some(\"Cmd+Alt+Shift+B\")",
+      "source_line": 190,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.photoFilter",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Photo Filter…",
+      "shortcut": "None",
+      "source_line": 191,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.channelMixer",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Channel Mixer…",
+      "shortcut": "None",
+      "source_line": 192,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.colorLookup",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Color Lookup…",
+      "shortcut": "None",
+      "source_line": 193,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.invert",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Invert",
+      "shortcut": "Some(\"Cmd+I\")",
+      "source_line": 195,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.posterize",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Posterize…",
+      "shortcut": "None",
+      "source_line": 196,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.threshold",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Threshold…",
+      "shortcut": "None",
+      "source_line": 197,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.gradientMap",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Gradient Map…",
+      "shortcut": "None",
+      "source_line": 198,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.selectiveColor",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Selective Color…",
+      "shortcut": "None",
+      "source_line": 199,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.shadowsHighlights",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Shadows/Highlights…",
+      "shortcut": "None",
+      "source_line": 201,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.hdrToning",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "HDR Toning…",
+      "shortcut": "None",
+      "source_line": 202,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.desaturate",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Desaturate",
+      "shortcut": "Some(\"Cmd+Shift+U\")",
+      "source_line": 204,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.matchColor",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Match Color…",
+      "shortcut": "None",
+      "source_line": 205,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.replaceColor",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Replace Color…",
+      "shortcut": "None",
+      "source_line": 206,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.adjustments.equalize",
+      "menu": [
+        "Image",
+        "Adjustments"
+      ],
+      "label": "Equalize",
+      "shortcut": "None",
+      "source_line": 207,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.autoTone",
+      "menu": [
+        "Image"
+      ],
+      "label": "Auto Tone",
+      "shortcut": "Some(\"Cmd+Shift+L\")",
+      "source_line": 209,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.autoContrast",
+      "menu": [
+        "Image"
+      ],
+      "label": "Auto Contrast",
+      "shortcut": "Some(\"Cmd+Alt+Shift+L\")",
+      "source_line": 210,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.autoColor",
+      "menu": [
+        "Image"
+      ],
+      "label": "Auto Color",
+      "shortcut": "Some(\"Cmd+Shift+B\")",
+      "source_line": 211,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.imageSize",
+      "menu": [
+        "Image"
+      ],
+      "label": "Image Size…",
+      "shortcut": "Some(\"Cmd+Alt+I\")",
+      "source_line": 213,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.canvasSize",
+      "menu": [
+        "Image"
+      ],
+      "label": "Canvas Size…",
+      "shortcut": "Some(\"Cmd+Alt+C\")",
+      "source_line": 214,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.imageRotation.180",
+      "menu": [
+        "Image",
+        "Image Rotation"
+      ],
+      "label": "180°",
+      "shortcut": "None",
+      "source_line": 215,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.imageRotation.90cw",
+      "menu": [
+        "Image",
+        "Image Rotation"
+      ],
+      "label": "90° Clockwise",
+      "shortcut": "None",
+      "source_line": 216,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.imageRotation.90ccw",
+      "menu": [
+        "Image",
+        "Image Rotation"
+      ],
+      "label": "90° Counter Clockwise",
+      "shortcut": "None",
+      "source_line": 217,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.rotation.arbitrary",
+      "menu": [
+        "Image",
+        "Image Rotation"
+      ],
+      "label": "Arbitrary…",
+      "shortcut": "None",
+      "source_line": 218,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.imageRotation.flipCanvasHorizontal",
+      "menu": [
+        "Image",
+        "Image Rotation"
+      ],
+      "label": "Flip Canvas Horizontal",
+      "shortcut": "None",
+      "source_line": 220,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.imageRotation.flipCanvasVertical",
+      "menu": [
+        "Image",
+        "Image Rotation"
+      ],
+      "label": "Flip Canvas Vertical",
+      "shortcut": "None",
+      "source_line": 221,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.crop",
+      "menu": [
+        "Image"
+      ],
+      "label": "Crop",
+      "shortcut": "None",
+      "source_line": 222,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.trim",
+      "menu": [
+        "Image"
+      ],
+      "label": "Trim…",
+      "shortcut": "None",
+      "source_line": 223,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.revealAll",
+      "menu": [
+        "Image"
+      ],
+      "label": "Reveal All",
+      "shortcut": "None",
+      "source_line": 224,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.duplicate",
+      "menu": [
+        "Image"
+      ],
+      "label": "Duplicate…",
+      "shortcut": "None",
+      "source_line": 226,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.applyImage",
+      "menu": [
+        "Image"
+      ],
+      "label": "Apply Image…",
+      "shortcut": "None",
+      "source_line": 227,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.calculations",
+      "menu": [
+        "Image"
+      ],
+      "label": "Calculations…",
+      "shortcut": "None",
+      "source_line": 228,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.variables.define",
+      "menu": [
+        "Image",
+        "Variables"
+      ],
+      "label": "Define…",
+      "shortcut": "None",
+      "source_line": 230,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.variables.dataSets",
+      "menu": [
+        "Image",
+        "Variables"
+      ],
+      "label": "Data Sets…",
+      "shortcut": "None",
+      "source_line": 231,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.applyDataSet",
+      "menu": [
+        "Image"
+      ],
+      "label": "Apply Data Set…",
+      "shortcut": "None",
+      "source_line": 232,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.trap",
+      "menu": [
+        "Image"
+      ],
+      "label": "Trap…",
+      "shortcut": "None",
+      "source_line": 234,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.analysis.setMeasurementScale",
+      "menu": [
+        "Image",
+        "Analysis"
+      ],
+      "label": "Set Measurement Scale…",
+      "shortcut": "None",
+      "source_line": 236,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.analysis.selectDataPoints",
+      "menu": [
+        "Image",
+        "Analysis"
+      ],
+      "label": "Select Data Points…",
+      "shortcut": "None",
+      "source_line": 237,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.analysis.recordMeasurements",
+      "menu": [
+        "Image",
+        "Analysis"
+      ],
+      "label": "Record Measurements",
+      "shortcut": "None",
+      "source_line": 239,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.analysis.rulerTool",
+      "menu": [
+        "Image",
+        "Analysis"
+      ],
+      "label": "Ruler Tool",
+      "shortcut": "None",
+      "source_line": 241,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.analysis.countTool",
+      "menu": [
+        "Image",
+        "Analysis"
+      ],
+      "label": "Count Tool",
+      "shortcut": "None",
+      "source_line": 242,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "image.analysis.placeScaleMarker",
+      "menu": [
+        "Image",
+        "Analysis"
+      ],
+      "label": "Place Scale Marker…",
+      "shortcut": "None",
+      "source_line": 244,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.new.layer",
+      "menu": [
+        "Layer",
+        "New"
+      ],
+      "label": "Layer…",
+      "shortcut": "Some(\"Cmd+Shift+N\")",
+      "source_line": 245,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.new.layerFromBackground",
+      "menu": [
+        "Layer",
+        "New"
+      ],
+      "label": "Layer from Background…",
+      "shortcut": "None",
+      "source_line": 246,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.new.group",
+      "menu": [
+        "Layer",
+        "New"
+      ],
+      "label": "Group…",
+      "shortcut": "None",
+      "source_line": 247,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.new.groupFromLayers",
+      "menu": [
+        "Layer",
+        "New"
+      ],
+      "label": "Group from Layers…",
+      "shortcut": "None",
+      "source_line": 248,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.new.artboard",
+      "menu": [
+        "Layer",
+        "New"
+      ],
+      "label": "Artboard…",
+      "shortcut": "None",
+      "source_line": 250,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.new.artboardFromGroup",
+      "menu": [
+        "Layer",
+        "New"
+      ],
+      "label": "Artboard from Group…",
+      "shortcut": "None",
+      "source_line": 251,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.new.artboardFromLayers",
+      "menu": [
+        "Layer",
+        "New"
+      ],
+      "label": "Artboard from Layers…",
+      "shortcut": "None",
+      "source_line": 252,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.new.frameFromLayers",
+      "menu": [
+        "Layer",
+        "New"
+      ],
+      "label": "Frame from Layers",
+      "shortcut": "None",
+      "source_line": 253,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.new.layerViaCopy",
+      "menu": [
+        "Layer",
+        "New"
+      ],
+      "label": "Layer via Copy",
+      "shortcut": "Some(\"Cmd+J\")",
+      "source_line": 255,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.new.layerViaCut",
+      "menu": [
+        "Layer",
+        "New"
+      ],
+      "label": "Layer via Cut",
+      "shortcut": "Some(\"Cmd+Shift+J\")",
+      "source_line": 256,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.duplicate",
+      "menu": [
+        "Layer"
+      ],
+      "label": "Duplicate Layer…",
+      "shortcut": "None",
+      "source_line": 257,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.delete",
+      "menu": [
+        "Layer",
+        "Delete"
+      ],
+      "label": "Layer",
+      "shortcut": "None",
+      "source_line": 258,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.delete.hiddenLayers",
+      "menu": [
+        "Layer",
+        "Delete"
+      ],
+      "label": "Hidden Layers",
+      "shortcut": "None",
+      "source_line": 259,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.quickExportAsPng",
+      "menu": [
+        "Layer"
+      ],
+      "label": "Quick Export as PNG",
+      "shortcut": "Some(\"Cmd+Shift+'\")",
+      "source_line": 261,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.exportAs",
+      "menu": [
+        "Layer"
+      ],
+      "label": "Export As…",
+      "shortcut": "Some(\"Cmd+Alt+Shift+'\")",
+      "source_line": 262,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.renameLayer",
+      "menu": [
+        "Layer"
+      ],
+      "label": "Rename Layer",
+      "shortcut": "None",
+      "source_line": 264,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.blendingOptions",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Blending Options…",
+      "shortcut": "None",
+      "source_line": 265,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.bevelEmboss",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Bevel & Emboss…",
+      "shortcut": "None",
+      "source_line": 266,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.stroke",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Stroke…",
+      "shortcut": "None",
+      "source_line": 267,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.innerShadow",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Inner Shadow…",
+      "shortcut": "None",
+      "source_line": 268,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.innerGlow",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Inner Glow…",
+      "shortcut": "None",
+      "source_line": 269,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.satin",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Satin…",
+      "shortcut": "None",
+      "source_line": 270,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.colorOverlay",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Color Overlay…",
+      "shortcut": "None",
+      "source_line": 271,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.gradientOverlay",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Gradient Overlay…",
+      "shortcut": "None",
+      "source_line": 272,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.patternOverlay",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Pattern Overlay…",
+      "shortcut": "None",
+      "source_line": 273,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.outerGlow",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Outer Glow…",
+      "shortcut": "None",
+      "source_line": 274,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.dropShadow",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Drop Shadow…",
+      "shortcut": "None",
+      "source_line": 275,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.copyLayerStyle",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Copy Layer Style",
+      "shortcut": "None",
+      "source_line": 277,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.pasteLayerStyle",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Paste Layer Style",
+      "shortcut": "None",
+      "source_line": 278,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.clear",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Clear Layer Style",
+      "shortcut": "None",
+      "source_line": 279,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.globalLight",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Global Light…",
+      "shortcut": "None",
+      "source_line": 281,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.createLayer",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Create Layer",
+      "shortcut": "None",
+      "source_line": 282,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.hideAllEffects",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Hide All Effects",
+      "shortcut": "None",
+      "source_line": 283,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerStyle.scaleEffects",
+      "menu": [
+        "Layer",
+        "Layer Style"
+      ],
+      "label": "Scale Effects…",
+      "shortcut": "None",
+      "source_line": 284,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartFilter.disableSmartFilters",
+      "menu": [
+        "Layer",
+        "Smart Filter"
+      ],
+      "label": "Disable Smart Filters",
+      "shortcut": "None",
+      "source_line": 285,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartFilter.deleteFilterMask",
+      "menu": [
+        "Layer",
+        "Smart Filter"
+      ],
+      "label": "Delete Filter Mask",
+      "shortcut": "None",
+      "source_line": 287,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartFilter.disableFilterMask",
+      "menu": [
+        "Layer",
+        "Smart Filter"
+      ],
+      "label": "Disable Filter Mask",
+      "shortcut": "None",
+      "source_line": 288,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartFilter.blendingOptions",
+      "menu": [
+        "Layer",
+        "Smart Filter"
+      ],
+      "label": "Blending Options…",
+      "shortcut": "None",
+      "source_line": 289,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartFilter.clearSmartFilters",
+      "menu": [
+        "Layer",
+        "Smart Filter"
+      ],
+      "label": "Clear Smart Filters",
+      "shortcut": "None",
+      "source_line": 291,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newFillLayer.solidColor",
+      "menu": [
+        "Layer",
+        "New Fill Layer"
+      ],
+      "label": "Solid Color…",
+      "shortcut": "None",
+      "source_line": 293,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newFillLayer.gradient",
+      "menu": [
+        "Layer",
+        "New Fill Layer"
+      ],
+      "label": "Gradient…",
+      "shortcut": "None",
+      "source_line": 294,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newFillLayer.pattern",
+      "menu": [
+        "Layer",
+        "New Fill Layer"
+      ],
+      "label": "Pattern…",
+      "shortcut": "None",
+      "source_line": 295,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newAdjustmentLayer.brightnessContrast",
+      "menu": [
+        "Layer",
+        "New Adjustment Layer"
+      ],
+      "label": "Brightness/Contrast…",
+      "shortcut": "None",
+      "source_line": 296,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newAdjustmentLayer.levels",
+      "menu": [
+        "Layer",
+        "New Adjustment Layer"
+      ],
+      "label": "Levels…",
+      "shortcut": "None",
+      "source_line": 297,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newAdjustmentLayer.curves",
+      "menu": [
+        "Layer",
+        "New Adjustment Layer"
+      ],
+      "label": "Curves…",
+      "shortcut": "None",
+      "source_line": 298,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newAdjustmentLayer.exposure",
+      "menu": [
+        "Layer",
+        "New Adjustment Layer"
+      ],
+      "label": "Exposure…",
+      "shortcut": "None",
+      "source_line": 299,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newAdjustmentLayer.vibrance",
+      "menu": [
+        "Layer",
+        "New Adjustment Layer"
+      ],
+      "label": "Vibrance…",
+      "shortcut": "None",
+      "source_line": 300,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newAdjustmentLayer.hueSaturation",
+      "menu": [
+        "Layer",
+        "New Adjustment Layer"
+      ],
+      "label": "Hue/Saturation…",
+      "shortcut": "None",
+      "source_line": 301,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newAdjustmentLayer.colorBalance",
+      "menu": [
+        "Layer",
+        "New Adjustment Layer"
+      ],
+      "label": "Color Balance…",
+      "shortcut": "None",
+      "source_line": 302,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newAdjustmentLayer.blackWhite",
+      "menu": [
+        "Layer",
+        "New Adjustment Layer"
+      ],
+      "label": "Black & White…",
+      "shortcut": "None",
+      "source_line": 303,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newAdjustmentLayer.photoFilter",
+      "menu": [
+        "Layer",
+        "New Adjustment Layer"
+      ],
+      "label": "Photo Filter…",
+      "shortcut": "None",
+      "source_line": 304,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newAdjustmentLayer.channelMixer",
+      "menu": [
+        "Layer",
+        "New Adjustment Layer"
+      ],
+      "label": "Channel Mixer…",
+      "shortcut": "None",
+      "source_line": 305,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newAdjustmentLayer.colorLookup",
+      "menu": [
+        "Layer",
+        "New Adjustment Layer"
+      ],
+      "label": "Color Lookup…",
+      "shortcut": "None",
+      "source_line": 306,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newAdjustmentLayer.invert",
+      "menu": [
+        "Layer",
+        "New Adjustment Layer"
+      ],
+      "label": "Invert…",
+      "shortcut": "None",
+      "source_line": 308,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newAdjustmentLayer.posterize",
+      "menu": [
+        "Layer",
+        "New Adjustment Layer"
+      ],
+      "label": "Posterize…",
+      "shortcut": "None",
+      "source_line": 309,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newAdjustmentLayer.threshold",
+      "menu": [
+        "Layer",
+        "New Adjustment Layer"
+      ],
+      "label": "Threshold…",
+      "shortcut": "None",
+      "source_line": 310,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newAdjustmentLayer.gradientMap",
+      "menu": [
+        "Layer",
+        "New Adjustment Layer"
+      ],
+      "label": "Gradient Map…",
+      "shortcut": "None",
+      "source_line": 311,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newAdjustmentLayer.selectiveColor",
+      "menu": [
+        "Layer",
+        "New Adjustment Layer"
+      ],
+      "label": "Selective Color…",
+      "shortcut": "None",
+      "source_line": 312,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerContentOptions",
+      "menu": [
+        "Layer"
+      ],
+      "label": "Layer Content Options…",
+      "shortcut": "None",
+      "source_line": 313,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerMask.revealAll",
+      "menu": [
+        "Layer",
+        "Layer Mask"
+      ],
+      "label": "Reveal All",
+      "shortcut": "None",
+      "source_line": 315,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerMask.hideAll",
+      "menu": [
+        "Layer",
+        "Layer Mask"
+      ],
+      "label": "Hide All",
+      "shortcut": "None",
+      "source_line": 316,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerMask.revealSelection",
+      "menu": [
+        "Layer",
+        "Layer Mask"
+      ],
+      "label": "Reveal Selection",
+      "shortcut": "None",
+      "source_line": 318,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerMask.hideSelection",
+      "menu": [
+        "Layer",
+        "Layer Mask"
+      ],
+      "label": "Hide Selection",
+      "shortcut": "None",
+      "source_line": 319,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerMask.fromTransparency",
+      "menu": [
+        "Layer",
+        "Layer Mask"
+      ],
+      "label": "From Transparency",
+      "shortcut": "None",
+      "source_line": 320,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerMask.delete",
+      "menu": [
+        "Layer",
+        "Layer Mask"
+      ],
+      "label": "Delete",
+      "shortcut": "None",
+      "source_line": 322,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerMask.apply",
+      "menu": [
+        "Layer",
+        "Layer Mask"
+      ],
+      "label": "Apply",
+      "shortcut": "None",
+      "source_line": 323,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerMask.enabled",
+      "menu": [
+        "Layer",
+        "Layer Mask"
+      ],
+      "label": "Enable Layer Mask",
+      "shortcut": "None",
+      "source_line": 325,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.layerMask.linked",
+      "menu": [
+        "Layer",
+        "Layer Mask"
+      ],
+      "label": "Link Layer Mask",
+      "shortcut": "None",
+      "source_line": 326,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.maskAllObjects",
+      "menu": [
+        "Layer"
+      ],
+      "label": "Mask All Objects",
+      "shortcut": "None",
+      "source_line": 327,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.vectorMask.revealAll",
+      "menu": [
+        "Layer",
+        "Vector Mask"
+      ],
+      "label": "Reveal All",
+      "shortcut": "None",
+      "source_line": 328,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.vectorMask.hideAll",
+      "menu": [
+        "Layer",
+        "Vector Mask"
+      ],
+      "label": "Hide All",
+      "shortcut": "None",
+      "source_line": 329,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.vectorMask.currentPath",
+      "menu": [
+        "Layer",
+        "Vector Mask"
+      ],
+      "label": "Current Path",
+      "shortcut": "None",
+      "source_line": 330,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.vectorMask.delete",
+      "menu": [
+        "Layer",
+        "Vector Mask"
+      ],
+      "label": "Delete",
+      "shortcut": "None",
+      "source_line": 332,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.vectorMask.enabled",
+      "menu": [
+        "Layer",
+        "Vector Mask"
+      ],
+      "label": "Enable Vector Mask",
+      "shortcut": "None",
+      "source_line": 334,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.vectorMask.linked",
+      "menu": [
+        "Layer",
+        "Vector Mask"
+      ],
+      "label": "Link Vector Mask",
+      "shortcut": "None",
+      "source_line": 335,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.createClippingMask",
+      "menu": [
+        "Layer"
+      ],
+      "label": "Create Clipping Mask",
+      "shortcut": "Some(\"Cmd+Alt+G\")",
+      "source_line": 336,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.convertToSmartObject",
+      "menu": [
+        "Layer",
+        "Smart Objects"
+      ],
+      "label": "Convert to Smart Object",
+      "shortcut": "None",
+      "source_line": 338,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.newSmartObjectViaCopy",
+      "menu": [
+        "Layer",
+        "Smart Objects"
+      ],
+      "label": "New Smart Object via Copy",
+      "shortcut": "None",
+      "source_line": 339,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.revealInFinder",
+      "menu": [
+        "Layer",
+        "Smart Objects"
+      ],
+      "label": "Reveal in Finder",
+      "shortcut": "None",
+      "source_line": 341,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.updateModifiedContent",
+      "menu": [
+        "Layer",
+        "Smart Objects"
+      ],
+      "label": "Update Modified Content",
+      "shortcut": "None",
+      "source_line": 343,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.updateAllModifiedContent",
+      "menu": [
+        "Layer",
+        "Smart Objects"
+      ],
+      "label": "Update All Modified Content",
+      "shortcut": "None",
+      "source_line": 344,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.editContents",
+      "menu": [
+        "Layer",
+        "Smart Objects"
+      ],
+      "label": "Edit Contents",
+      "shortcut": "None",
+      "source_line": 346,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.relinkToFile",
+      "menu": [
+        "Layer",
+        "Smart Objects"
+      ],
+      "label": "Relink to File…",
+      "shortcut": "None",
+      "source_line": 347,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.replaceContents",
+      "menu": [
+        "Layer",
+        "Smart Objects"
+      ],
+      "label": "Replace Contents…",
+      "shortcut": "None",
+      "source_line": 348,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.exportContents",
+      "menu": [
+        "Layer",
+        "Smart Objects"
+      ],
+      "label": "Export Contents…",
+      "shortcut": "None",
+      "source_line": 349,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.convertToLinked",
+      "menu": [
+        "Layer",
+        "Smart Objects"
+      ],
+      "label": "Convert to Linked…",
+      "shortcut": "None",
+      "source_line": 351,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.convertToEmbedded",
+      "menu": [
+        "Layer",
+        "Smart Objects"
+      ],
+      "label": "Convert to Embedded",
+      "shortcut": "None",
+      "source_line": 352,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.stackMode.entropy",
+      "menu": [
+        "Layer",
+        "Smart Objects",
+        "Stack Mode"
+      ],
+      "label": "Entropy",
+      "shortcut": "None",
+      "source_line": 354,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.stackMode.kurtosis",
+      "menu": [
+        "Layer",
+        "Smart Objects",
+        "Stack Mode"
+      ],
+      "label": "Kurtosis",
+      "shortcut": "None",
+      "source_line": 355,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.stackMode.maximum",
+      "menu": [
+        "Layer",
+        "Smart Objects",
+        "Stack Mode"
+      ],
+      "label": "Maximum",
+      "shortcut": "None",
+      "source_line": 356,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.stackMode.mean",
+      "menu": [
+        "Layer",
+        "Smart Objects",
+        "Stack Mode"
+      ],
+      "label": "Mean",
+      "shortcut": "None",
+      "source_line": 357,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.stackMode.median",
+      "menu": [
+        "Layer",
+        "Smart Objects",
+        "Stack Mode"
+      ],
+      "label": "Median",
+      "shortcut": "None",
+      "source_line": 358,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.stackMode.minimum",
+      "menu": [
+        "Layer",
+        "Smart Objects",
+        "Stack Mode"
+      ],
+      "label": "Minimum",
+      "shortcut": "None",
+      "source_line": 359,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.stackMode.range",
+      "menu": [
+        "Layer",
+        "Smart Objects",
+        "Stack Mode"
+      ],
+      "label": "Range",
+      "shortcut": "None",
+      "source_line": 360,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.stackMode.skewness",
+      "menu": [
+        "Layer",
+        "Smart Objects",
+        "Stack Mode"
+      ],
+      "label": "Skewness",
+      "shortcut": "None",
+      "source_line": 361,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.stackMode.standardDeviation",
+      "menu": [
+        "Layer",
+        "Smart Objects",
+        "Stack Mode"
+      ],
+      "label": "Standard Deviation",
+      "shortcut": "None",
+      "source_line": 362,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.stackMode.summation",
+      "menu": [
+        "Layer",
+        "Smart Objects",
+        "Stack Mode"
+      ],
+      "label": "Summation",
+      "shortcut": "None",
+      "source_line": 363,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.stackMode.variance",
+      "menu": [
+        "Layer",
+        "Smart Objects",
+        "Stack Mode"
+      ],
+      "label": "Variance",
+      "shortcut": "None",
+      "source_line": 364,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.rasterize",
+      "menu": [
+        "Layer",
+        "Smart Objects"
+      ],
+      "label": "Rasterize",
+      "shortcut": "None",
+      "source_line": 366,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.warp",
+      "menu": [
+        "Layer",
+        "Smart Objects"
+      ],
+      "label": "Warp",
+      "shortcut": "None",
+      "source_line": 368,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.perspectiveWarp",
+      "menu": [
+        "Layer",
+        "Smart Objects"
+      ],
+      "label": "Perspective Warp",
+      "shortcut": "None",
+      "source_line": 369,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.smartObjects.puppetWarp",
+      "menu": [
+        "Layer",
+        "Smart Objects"
+      ],
+      "label": "Puppet Warp",
+      "shortcut": "None",
+      "source_line": 370,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.videoLayers.newBlankVideoLayer",
+      "menu": [
+        "Layer",
+        "Video Layers"
+      ],
+      "label": "New Blank Video Layer",
+      "shortcut": "None",
+      "source_line": 371,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.videoLayers.newVideoLayerFromFile",
+      "menu": [
+        "Layer",
+        "Video Layers"
+      ],
+      "label": "New Video Layer from File…",
+      "shortcut": "None",
+      "source_line": 372,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.videoLayers.insertBlankFrame",
+      "menu": [
+        "Layer",
+        "Video Layers"
+      ],
+      "label": "Insert Blank Frame",
+      "shortcut": "None",
+      "source_line": 374,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.videoLayers.duplicateFrame",
+      "menu": [
+        "Layer",
+        "Video Layers"
+      ],
+      "label": "Duplicate Frame",
+      "shortcut": "None",
+      "source_line": 375,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.videoLayers.deleteFrame",
+      "menu": [
+        "Layer",
+        "Video Layers"
+      ],
+      "label": "Delete Frame",
+      "shortcut": "None",
+      "source_line": 376,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.videoLayers.replaceFootage",
+      "menu": [
+        "Layer",
+        "Video Layers"
+      ],
+      "label": "Replace Footage…",
+      "shortcut": "None",
+      "source_line": 378,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.videoLayers.interpretFootage",
+      "menu": [
+        "Layer",
+        "Video Layers"
+      ],
+      "label": "Interpret Footage…",
+      "shortcut": "None",
+      "source_line": 379,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.videoLayers.showAlteredVideo",
+      "menu": [
+        "Layer",
+        "Video Layers"
+      ],
+      "label": "Show Altered Video",
+      "shortcut": "None",
+      "source_line": 381,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.videoLayers.restoreFrame",
+      "menu": [
+        "Layer",
+        "Video Layers"
+      ],
+      "label": "Restore Frame",
+      "shortcut": "None",
+      "source_line": 383,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.videoLayers.restoreAllFrames",
+      "menu": [
+        "Layer",
+        "Video Layers"
+      ],
+      "label": "Restore All Frames",
+      "shortcut": "None",
+      "source_line": 384,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.videoLayers.reloadFrame",
+      "menu": [
+        "Layer",
+        "Video Layers"
+      ],
+      "label": "Reload Frame",
+      "shortcut": "None",
+      "source_line": 385,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.videoLayers.rasterize",
+      "menu": [
+        "Layer",
+        "Video Layers"
+      ],
+      "label": "Rasterize",
+      "shortcut": "None",
+      "source_line": 387,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.rasterize.type",
+      "menu": [
+        "Layer",
+        "Rasterize"
+      ],
+      "label": "Type",
+      "shortcut": "None",
+      "source_line": 388,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.rasterize.shape",
+      "menu": [
+        "Layer",
+        "Rasterize"
+      ],
+      "label": "Shape",
+      "shortcut": "None",
+      "source_line": 389,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.rasterize.fillContent",
+      "menu": [
+        "Layer",
+        "Rasterize"
+      ],
+      "label": "Fill Content",
+      "shortcut": "None",
+      "source_line": 390,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.rasterize.vectorMask",
+      "menu": [
+        "Layer",
+        "Rasterize"
+      ],
+      "label": "Vector Mask",
+      "shortcut": "None",
+      "source_line": 391,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.rasterize.smartObject",
+      "menu": [
+        "Layer",
+        "Rasterize"
+      ],
+      "label": "Smart Object",
+      "shortcut": "None",
+      "source_line": 392,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.rasterize.video",
+      "menu": [
+        "Layer",
+        "Rasterize"
+      ],
+      "label": "Video",
+      "shortcut": "None",
+      "source_line": 393,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.rasterize.layer",
+      "menu": [
+        "Layer",
+        "Rasterize"
+      ],
+      "label": "Layer",
+      "shortcut": "None",
+      "source_line": 395,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.rasterize.allLayers",
+      "menu": [
+        "Layer",
+        "Rasterize"
+      ],
+      "label": "All Layers",
+      "shortcut": "None",
+      "source_line": 396,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.newLayerBasedSlice",
+      "menu": [
+        "Layer"
+      ],
+      "label": "New Layer Based Slice",
+      "shortcut": "None",
+      "source_line": 398,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.groupLayers",
+      "menu": [
+        "Layer"
+      ],
+      "label": "Group Layers",
+      "shortcut": "None",
+      "source_line": 400,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.ungroupLayers",
+      "menu": [
+        "Layer"
+      ],
+      "label": "Ungroup Layers",
+      "shortcut": "None",
+      "source_line": 401,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.hideLayers",
+      "menu": [
+        "Layer"
+      ],
+      "label": "Hide Layers",
+      "shortcut": "None",
+      "source_line": 402,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.arrange.bringToFront",
+      "menu": [
+        "Layer",
+        "Arrange"
+      ],
+      "label": "Bring to Front",
+      "shortcut": "Some(\"Cmd+Shift+]\")",
+      "source_line": 404,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.arrange.bringForward",
+      "menu": [
+        "Layer",
+        "Arrange"
+      ],
+      "label": "Bring Forward",
+      "shortcut": "Some(\"Cmd+]\")",
+      "source_line": 405,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.arrange.sendBackward",
+      "menu": [
+        "Layer",
+        "Arrange"
+      ],
+      "label": "Send Backward",
+      "shortcut": "Some(\"Cmd+[\")",
+      "source_line": 406,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.arrange.sendToBack",
+      "menu": [
+        "Layer",
+        "Arrange"
+      ],
+      "label": "Send to Back",
+      "shortcut": "Some(\"Cmd+Shift+[\")",
+      "source_line": 407,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.arrange.reverse",
+      "menu": [
+        "Layer",
+        "Arrange"
+      ],
+      "label": "Reverse",
+      "shortcut": "None",
+      "source_line": 409,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.combineShapes.unite",
+      "menu": [
+        "Layer",
+        "Combine Shapes"
+      ],
+      "label": "Unite Shapes",
+      "shortcut": "None",
+      "source_line": 410,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.combineShapes.subtractFrontShape",
+      "menu": [
+        "Layer",
+        "Combine Shapes"
+      ],
+      "label": "Subtract Front Shape",
+      "shortcut": "None",
+      "source_line": 411,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.combineShapes.intersectShapeAreas",
+      "menu": [
+        "Layer",
+        "Combine Shapes"
+      ],
+      "label": "Intersect Shape Areas",
+      "shortcut": "None",
+      "source_line": 412,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.combineShapes.excludeOverlappingShapes",
+      "menu": [
+        "Layer",
+        "Combine Shapes"
+      ],
+      "label": "Exclude Overlapping Shapes",
+      "shortcut": "None",
+      "source_line": 413,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.combineShapes.mergeShapeComponents",
+      "menu": [
+        "Layer",
+        "Combine Shapes"
+      ],
+      "label": "Merge Shape Components",
+      "shortcut": "None",
+      "source_line": 415,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.align.topEdges",
+      "menu": [
+        "Layer",
+        "Align"
+      ],
+      "label": "Top Edges",
+      "shortcut": "None",
+      "source_line": 416,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.align.verticalCenters",
+      "menu": [
+        "Layer",
+        "Align"
+      ],
+      "label": "Vertical Centers",
+      "shortcut": "None",
+      "source_line": 417,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.align.bottomEdges",
+      "menu": [
+        "Layer",
+        "Align"
+      ],
+      "label": "Bottom Edges",
+      "shortcut": "None",
+      "source_line": 418,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.align.leftEdges",
+      "menu": [
+        "Layer",
+        "Align"
+      ],
+      "label": "Left Edges",
+      "shortcut": "None",
+      "source_line": 420,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.align.horizontalCenters",
+      "menu": [
+        "Layer",
+        "Align"
+      ],
+      "label": "Horizontal Centers",
+      "shortcut": "None",
+      "source_line": 421,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.align.rightEdges",
+      "menu": [
+        "Layer",
+        "Align"
+      ],
+      "label": "Right Edges",
+      "shortcut": "None",
+      "source_line": 422,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.distribute.topEdges",
+      "menu": [
+        "Layer",
+        "Distribute"
+      ],
+      "label": "Top Edges",
+      "shortcut": "None",
+      "source_line": 423,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.distribute.verticalCenters",
+      "menu": [
+        "Layer",
+        "Distribute"
+      ],
+      "label": "Vertical Centers",
+      "shortcut": "None",
+      "source_line": 424,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.distribute.bottomEdges",
+      "menu": [
+        "Layer",
+        "Distribute"
+      ],
+      "label": "Bottom Edges",
+      "shortcut": "None",
+      "source_line": 425,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.distribute.leftEdges",
+      "menu": [
+        "Layer",
+        "Distribute"
+      ],
+      "label": "Left Edges",
+      "shortcut": "None",
+      "source_line": 427,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.distribute.horizontalCenters",
+      "menu": [
+        "Layer",
+        "Distribute"
+      ],
+      "label": "Horizontal Centers",
+      "shortcut": "None",
+      "source_line": 428,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.distribute.rightEdges",
+      "menu": [
+        "Layer",
+        "Distribute"
+      ],
+      "label": "Right Edges",
+      "shortcut": "None",
+      "source_line": 429,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.distribute.horizontally",
+      "menu": [
+        "Layer",
+        "Distribute"
+      ],
+      "label": "Horizontally",
+      "shortcut": "None",
+      "source_line": 431,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.distribute.vertically",
+      "menu": [
+        "Layer",
+        "Distribute"
+      ],
+      "label": "Vertically",
+      "shortcut": "None",
+      "source_line": 432,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.lockLayers",
+      "menu": [
+        "Layer"
+      ],
+      "label": "Lock Layers…",
+      "shortcut": "None",
+      "source_line": 434,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.linkLayers",
+      "menu": [
+        "Layer"
+      ],
+      "label": "Link Layers",
+      "shortcut": "None",
+      "source_line": 436,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.selectLinkedLayers",
+      "menu": [
+        "Layer"
+      ],
+      "label": "Select Linked Layers",
+      "shortcut": "None",
+      "source_line": 437,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.mergeLayers",
+      "menu": [
+        "Layer"
+      ],
+      "label": "Merge Layers",
+      "shortcut": "Some(\"Cmd+E\")",
+      "source_line": 439,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.mergeVisible",
+      "menu": [
+        "Layer"
+      ],
+      "label": "Merge Visible",
+      "shortcut": "Some(\"Cmd+Shift+E\")",
+      "source_line": 440,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.flattenImage",
+      "menu": [
+        "Layer"
+      ],
+      "label": "Flatten Image",
+      "shortcut": "None",
+      "source_line": 441,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.matting.colorDecontaminate",
+      "menu": [
+        "Layer",
+        "Matting"
+      ],
+      "label": "Color Decontaminate…",
+      "shortcut": "None",
+      "source_line": 443,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.matting.defringe",
+      "menu": [
+        "Layer",
+        "Matting"
+      ],
+      "label": "Defringe…",
+      "shortcut": "None",
+      "source_line": 444,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.matting.removeBlackMatte",
+      "menu": [
+        "Layer",
+        "Matting"
+      ],
+      "label": "Remove Black Matte",
+      "shortcut": "None",
+      "source_line": 445,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "layer.matting.removeWhiteMatte",
+      "menu": [
+        "Layer",
+        "Matting"
+      ],
+      "label": "Remove White Matte",
+      "shortcut": "None",
+      "source_line": 446,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.panels.character",
+      "menu": [
+        "Type",
+        "Panels"
+      ],
+      "label": "Character Panel",
+      "shortcut": "None",
+      "source_line": 447,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.panels.paragraph",
+      "menu": [
+        "Type",
+        "Panels"
+      ],
+      "label": "Paragraph Panel",
+      "shortcut": "None",
+      "source_line": 448,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.panels.glyphs",
+      "menu": [
+        "Type",
+        "Panels"
+      ],
+      "label": "Glyphs Panel",
+      "shortcut": "None",
+      "source_line": 449,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.panels.characterStyles",
+      "menu": [
+        "Type",
+        "Panels"
+      ],
+      "label": "Character Styles Panel",
+      "shortcut": "None",
+      "source_line": 450,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.panels.paragraphStyles",
+      "menu": [
+        "Type",
+        "Panels"
+      ],
+      "label": "Paragraph Styles Panel",
+      "shortcut": "None",
+      "source_line": 451,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.antiAlias.sharp",
+      "menu": [
+        "Type",
+        "Anti-Alias"
+      ],
+      "label": "Sharp",
+      "shortcut": "None",
+      "source_line": 453,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.antiAlias.crisp",
+      "menu": [
+        "Type",
+        "Anti-Alias"
+      ],
+      "label": "Crisp",
+      "shortcut": "None",
+      "source_line": 454,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.antiAlias.strong",
+      "menu": [
+        "Type",
+        "Anti-Alias"
+      ],
+      "label": "Strong",
+      "shortcut": "None",
+      "source_line": 455,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.antiAlias.smooth",
+      "menu": [
+        "Type",
+        "Anti-Alias"
+      ],
+      "label": "Smooth",
+      "shortcut": "None",
+      "source_line": 456,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.antiAlias.windowsLcd",
+      "menu": [
+        "Type",
+        "Anti-Alias"
+      ],
+      "label": "Windows LCD",
+      "shortcut": "None",
+      "source_line": 458,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.antiAlias.windows",
+      "menu": [
+        "Type",
+        "Anti-Alias"
+      ],
+      "label": "Windows",
+      "shortcut": "None",
+      "source_line": 459,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.orientation.horizontal",
+      "menu": [
+        "Type",
+        "Orientation"
+      ],
+      "label": "Horizontal",
+      "shortcut": "None",
+      "source_line": 460,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.orientation.vertical",
+      "menu": [
+        "Type",
+        "Orientation"
+      ],
+      "label": "Vertical",
+      "shortcut": "None",
+      "source_line": 461,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.openType.standardLigatures",
+      "menu": [
+        "Type",
+        "OpenType"
+      ],
+      "label": "Standard Ligatures",
+      "shortcut": "None",
+      "source_line": 462,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.openType.contextualAlternates",
+      "menu": [
+        "Type",
+        "OpenType"
+      ],
+      "label": "Contextual Alternates",
+      "shortcut": "None",
+      "source_line": 463,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.openType.discretionaryLigatures",
+      "menu": [
+        "Type",
+        "OpenType"
+      ],
+      "label": "Discretionary Ligatures",
+      "shortcut": "None",
+      "source_line": 464,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.openType.swash",
+      "menu": [
+        "Type",
+        "OpenType"
+      ],
+      "label": "Swash",
+      "shortcut": "None",
+      "source_line": 465,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.openType.oldstyle",
+      "menu": [
+        "Type",
+        "OpenType"
+      ],
+      "label": "Oldstyle",
+      "shortcut": "None",
+      "source_line": 466,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.openType.stylisticAlternates",
+      "menu": [
+        "Type",
+        "OpenType"
+      ],
+      "label": "Stylistic Alternates",
+      "shortcut": "None",
+      "source_line": 467,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.openType.titlingAlternates",
+      "menu": [
+        "Type",
+        "OpenType"
+      ],
+      "label": "Titling Alternates",
+      "shortcut": "None",
+      "source_line": 468,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.openType.ornaments",
+      "menu": [
+        "Type",
+        "OpenType"
+      ],
+      "label": "Ornaments",
+      "shortcut": "None",
+      "source_line": 469,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.openType.ordinals",
+      "menu": [
+        "Type",
+        "OpenType"
+      ],
+      "label": "Ordinals",
+      "shortcut": "None",
+      "source_line": 470,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.openType.fractions",
+      "menu": [
+        "Type",
+        "OpenType"
+      ],
+      "label": "Fractions",
+      "shortcut": "None",
+      "source_line": 471,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.createWorkPath",
+      "menu": [
+        "Type"
+      ],
+      "label": "Create Work Path",
+      "shortcut": "None",
+      "source_line": 473,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.convertToShape",
+      "menu": [
+        "Type"
+      ],
+      "label": "Convert to Shape",
+      "shortcut": "None",
+      "source_line": 474,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.rasterizeTypeLayer",
+      "menu": [
+        "Type"
+      ],
+      "label": "Rasterize Type Layer",
+      "shortcut": "None",
+      "source_line": 476,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.convertToParagraphText",
+      "menu": [
+        "Type"
+      ],
+      "label": "Convert to Paragraph Text",
+      "shortcut": "None",
+      "source_line": 478,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.convertToPointText",
+      "menu": [
+        "Type"
+      ],
+      "label": "Convert to Point Text",
+      "shortcut": "None",
+      "source_line": 479,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.warpText",
+      "menu": [
+        "Type"
+      ],
+      "label": "Warp Text…",
+      "shortcut": "None",
+      "source_line": 480,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.fontPreviewSize.small",
+      "menu": [
+        "Type",
+        "Font Preview Size"
+      ],
+      "label": "Small",
+      "shortcut": "None",
+      "source_line": 482,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.fontPreviewSize.medium",
+      "menu": [
+        "Type",
+        "Font Preview Size"
+      ],
+      "label": "Medium",
+      "shortcut": "None",
+      "source_line": 483,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.fontPreviewSize.large",
+      "menu": [
+        "Type",
+        "Font Preview Size"
+      ],
+      "label": "Large",
+      "shortcut": "None",
+      "source_line": 484,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.fontPreviewSize.extraLarge",
+      "menu": [
+        "Type",
+        "Font Preview Size"
+      ],
+      "label": "Extra Large",
+      "shortcut": "None",
+      "source_line": 485,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.fontPreviewSize.huge",
+      "menu": [
+        "Type",
+        "Font Preview Size"
+      ],
+      "label": "Huge",
+      "shortcut": "None",
+      "source_line": 486,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.languageOptions.defaultFeatures",
+      "menu": [
+        "Type",
+        "Language Options"
+      ],
+      "label": "Default Features",
+      "shortcut": "None",
+      "source_line": 487,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.languageOptions.eastAsianFeatures",
+      "menu": [
+        "Type",
+        "Language Options"
+      ],
+      "label": "East Asian Features",
+      "shortcut": "None",
+      "source_line": 488,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.languageOptions.middleEasternFeatures",
+      "menu": [
+        "Type",
+        "Language Options"
+      ],
+      "label": "Middle Eastern Features",
+      "shortcut": "None",
+      "source_line": 489,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.languageOptions.middleEasternAndSouthAsianComposer",
+      "menu": [
+        "Type",
+        "Language Options"
+      ],
+      "label": "Middle Eastern & South Asian Composer",
+      "shortcut": "None",
+      "source_line": 491,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.updateAllTextLayers",
+      "menu": [
+        "Type"
+      ],
+      "label": "Update All Text Layers",
+      "shortcut": "None",
+      "source_line": 493,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.replaceAllMissingFonts",
+      "menu": [
+        "Type"
+      ],
+      "label": "Replace All Missing Fonts",
+      "shortcut": "None",
+      "source_line": 494,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.resolveMissingFonts",
+      "menu": [
+        "Type"
+      ],
+      "label": "Resolve Missing Fonts…",
+      "shortcut": "None",
+      "source_line": 495,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.pasteLoremIpsum",
+      "menu": [
+        "Type"
+      ],
+      "label": "Paste Lorem Ipsum",
+      "shortcut": "None",
+      "source_line": 497,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.loadDefaultTypeStyles",
+      "menu": [
+        "Type"
+      ],
+      "label": "Load Default Type Styles",
+      "shortcut": "None",
+      "source_line": 499,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "type.saveDefaultTypeStyles",
+      "menu": [
+        "Type"
+      ],
+      "label": "Save Default Type Styles",
+      "shortcut": "None",
+      "source_line": 500,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.all",
+      "menu": [
+        "Select"
+      ],
+      "label": "All",
+      "shortcut": "Some(\"Cmd+A\")",
+      "source_line": 501,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.deselect",
+      "menu": [
+        "Select"
+      ],
+      "label": "Deselect",
+      "shortcut": "Some(\"Cmd+D\")",
+      "source_line": 502,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.reselect",
+      "menu": [
+        "Select"
+      ],
+      "label": "Reselect",
+      "shortcut": "Some(\"Cmd+Shift+D\")",
+      "source_line": 503,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.inverse",
+      "menu": [
+        "Select"
+      ],
+      "label": "Inverse Selection",
+      "shortcut": "None",
+      "source_line": 504,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.convertToShape",
+      "menu": [
+        "Select"
+      ],
+      "label": "Convert to Shape",
+      "shortcut": "None",
+      "source_line": 505,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.allLayers",
+      "menu": [
+        "Select"
+      ],
+      "label": "All Layers",
+      "shortcut": "Some(\"Cmd+Alt+A\")",
+      "source_line": 507,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.deselectLayers",
+      "menu": [
+        "Select"
+      ],
+      "label": "Deselect Layers",
+      "shortcut": "None",
+      "source_line": 508,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.findLayers",
+      "menu": [
+        "Select"
+      ],
+      "label": "Find Layers",
+      "shortcut": "Some(\"Cmd+Alt+Shift+F\")",
+      "source_line": 509,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.isolateLayers",
+      "menu": [
+        "Select"
+      ],
+      "label": "Isolate Layers",
+      "shortcut": "None",
+      "source_line": 510,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.colorRange",
+      "menu": [
+        "Select"
+      ],
+      "label": "Color Range…",
+      "shortcut": "None",
+      "source_line": 512,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.focusArea",
+      "menu": [
+        "Select"
+      ],
+      "label": "Focus Area…",
+      "shortcut": "None",
+      "source_line": 513,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.subject",
+      "menu": [
+        "Select"
+      ],
+      "label": "Subject",
+      "shortcut": "None",
+      "source_line": 514,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.sky",
+      "menu": [
+        "Select"
+      ],
+      "label": "Sky",
+      "shortcut": "None",
+      "source_line": 515,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.selectAndMask",
+      "menu": [
+        "Select"
+      ],
+      "label": "Select and Mask…",
+      "shortcut": "None",
+      "source_line": 516,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.modify.border",
+      "menu": [
+        "Select",
+        "Modify"
+      ],
+      "label": "Border…",
+      "shortcut": "None",
+      "source_line": 518,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.modify.smooth",
+      "menu": [
+        "Select",
+        "Modify"
+      ],
+      "label": "Smooth…",
+      "shortcut": "None",
+      "source_line": 519,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.modify.expand",
+      "menu": [
+        "Select",
+        "Modify"
+      ],
+      "label": "Expand…",
+      "shortcut": "None",
+      "source_line": 520,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.modify.contract",
+      "menu": [
+        "Select",
+        "Modify"
+      ],
+      "label": "Contract…",
+      "shortcut": "None",
+      "source_line": 521,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.modify.feather",
+      "menu": [
+        "Select",
+        "Modify"
+      ],
+      "label": "Feather…",
+      "shortcut": "Some(\"Shift+F6\")",
+      "source_line": 522,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.grow",
+      "menu": [
+        "Select"
+      ],
+      "label": "Grow",
+      "shortcut": "None",
+      "source_line": 524,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.similar",
+      "menu": [
+        "Select"
+      ],
+      "label": "Similar",
+      "shortcut": "None",
+      "source_line": 525,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.transformSelection",
+      "menu": [
+        "Select"
+      ],
+      "label": "Transform Selection",
+      "shortcut": "None",
+      "source_line": 527,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.editInQuickMaskMode",
+      "menu": [
+        "Select"
+      ],
+      "label": "Edit in Quick Mask Mode",
+      "shortcut": "Some(\"Q\")",
+      "source_line": 529,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.loadSelection",
+      "menu": [
+        "Select"
+      ],
+      "label": "Load Selection…",
+      "shortcut": "None",
+      "source_line": 531,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "select.saveSelection",
+      "menu": [
+        "Select"
+      ],
+      "label": "Save Selection…",
+      "shortcut": "None",
+      "source_line": 532,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.lastFilter",
+      "menu": [
+        "Filter"
+      ],
+      "label": "Last Filter",
+      "shortcut": "Some(\"Cmd+Alt+F\")",
+      "source_line": 533,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.convertForSmartFilters",
+      "menu": [
+        "Filter"
+      ],
+      "label": "Convert for Smart Filters",
+      "shortcut": "None",
+      "source_line": 535,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.filterGallery",
+      "menu": [
+        "Filter"
+      ],
+      "label": "Filter Gallery…",
+      "shortcut": "None",
+      "source_line": 537,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.cameraRaw",
+      "menu": [
+        "Filter"
+      ],
+      "label": "Camera Raw Filter…",
+      "shortcut": "None",
+      "source_line": 538,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.adaptiveWideAngle",
+      "menu": [
+        "Filter"
+      ],
+      "label": "Adaptive Wide Angle…",
+      "shortcut": "Some(\"Cmd+Alt+Shift+A\")",
+      "source_line": 539,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.lensCorrection",
+      "menu": [
+        "Filter"
+      ],
+      "label": "Lens Correction…",
+      "shortcut": "Some(\"Cmd+Shift+R\")",
+      "source_line": 540,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.liquify",
+      "menu": [
+        "Filter"
+      ],
+      "label": "Liquify…",
+      "shortcut": "Some(\"Cmd+Shift+X\")",
+      "source_line": 541,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.vanishingPoint",
+      "menu": [
+        "Filter"
+      ],
+      "label": "Vanishing Point…",
+      "shortcut": "Some(\"Cmd+Alt+V\")",
+      "source_line": 542,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.blur.average",
+      "menu": [
+        "Filter",
+        "Blur"
+      ],
+      "label": "Average",
+      "shortcut": "None",
+      "source_line": 544,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.blur.blur",
+      "menu": [
+        "Filter",
+        "Blur"
+      ],
+      "label": "Blur",
+      "shortcut": "None",
+      "source_line": 545,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.blur.blurMore",
+      "menu": [
+        "Filter",
+        "Blur"
+      ],
+      "label": "Blur More",
+      "shortcut": "None",
+      "source_line": 546,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.blur.boxBlur",
+      "menu": [
+        "Filter",
+        "Blur"
+      ],
+      "label": "Box Blur…",
+      "shortcut": "None",
+      "source_line": 547,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.blur.gaussianBlur",
+      "menu": [
+        "Filter",
+        "Blur"
+      ],
+      "label": "Gaussian Blur…",
+      "shortcut": "None",
+      "source_line": 548,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.blur.lensBlur",
+      "menu": [
+        "Filter",
+        "Blur"
+      ],
+      "label": "Lens Blur…",
+      "shortcut": "None",
+      "source_line": 549,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.blur.motionBlur",
+      "menu": [
+        "Filter",
+        "Blur"
+      ],
+      "label": "Motion Blur…",
+      "shortcut": "None",
+      "source_line": 550,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.blur.radialBlur",
+      "menu": [
+        "Filter",
+        "Blur"
+      ],
+      "label": "Radial Blur…",
+      "shortcut": "None",
+      "source_line": 551,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.blur.shapeBlur",
+      "menu": [
+        "Filter",
+        "Blur"
+      ],
+      "label": "Shape Blur…",
+      "shortcut": "None",
+      "source_line": 552,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.blur.smartBlur",
+      "menu": [
+        "Filter",
+        "Blur"
+      ],
+      "label": "Smart Blur…",
+      "shortcut": "None",
+      "source_line": 553,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.blur.surfaceBlur",
+      "menu": [
+        "Filter",
+        "Blur"
+      ],
+      "label": "Surface Blur…",
+      "shortcut": "None",
+      "source_line": 554,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.blurGallery.fieldBlur",
+      "menu": [
+        "Filter",
+        "Blur Gallery"
+      ],
+      "label": "Field Blur…",
+      "shortcut": "None",
+      "source_line": 555,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.blurGallery.irisBlur",
+      "menu": [
+        "Filter",
+        "Blur Gallery"
+      ],
+      "label": "Iris Blur…",
+      "shortcut": "None",
+      "source_line": 556,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.blurGallery.tiltShift",
+      "menu": [
+        "Filter",
+        "Blur Gallery"
+      ],
+      "label": "Tilt-Shift…",
+      "shortcut": "None",
+      "source_line": 557,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.blurGallery.pathBlur",
+      "menu": [
+        "Filter",
+        "Blur Gallery"
+      ],
+      "label": "Path Blur…",
+      "shortcut": "None",
+      "source_line": 558,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.blurGallery.spinBlur",
+      "menu": [
+        "Filter",
+        "Blur Gallery"
+      ],
+      "label": "Spin Blur…",
+      "shortcut": "None",
+      "source_line": 559,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.distort.displace",
+      "menu": [
+        "Filter",
+        "Distort"
+      ],
+      "label": "Displace…",
+      "shortcut": "None",
+      "source_line": 560,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.distort.pinch",
+      "menu": [
+        "Filter",
+        "Distort"
+      ],
+      "label": "Pinch…",
+      "shortcut": "None",
+      "source_line": 561,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.distort.polarCoordinates",
+      "menu": [
+        "Filter",
+        "Distort"
+      ],
+      "label": "Polar Coordinates…",
+      "shortcut": "None",
+      "source_line": 562,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.distort.ripple",
+      "menu": [
+        "Filter",
+        "Distort"
+      ],
+      "label": "Ripple…",
+      "shortcut": "None",
+      "source_line": 563,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.distort.shear",
+      "menu": [
+        "Filter",
+        "Distort"
+      ],
+      "label": "Shear…",
+      "shortcut": "None",
+      "source_line": 564,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.distort.spherize",
+      "menu": [
+        "Filter",
+        "Distort"
+      ],
+      "label": "Spherize…",
+      "shortcut": "None",
+      "source_line": 565,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.distort.twirl",
+      "menu": [
+        "Filter",
+        "Distort"
+      ],
+      "label": "Twirl…",
+      "shortcut": "None",
+      "source_line": 566,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.distort.wave",
+      "menu": [
+        "Filter",
+        "Distort"
+      ],
+      "label": "Wave…",
+      "shortcut": "None",
+      "source_line": 567,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.distort.zigZag",
+      "menu": [
+        "Filter",
+        "Distort"
+      ],
+      "label": "ZigZag…",
+      "shortcut": "None",
+      "source_line": 568,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.noise.addNoise",
+      "menu": [
+        "Filter",
+        "Noise"
+      ],
+      "label": "Add Noise…",
+      "shortcut": "None",
+      "source_line": 569,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.noise.despeckle",
+      "menu": [
+        "Filter",
+        "Noise"
+      ],
+      "label": "Despeckle",
+      "shortcut": "None",
+      "source_line": 570,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.noise.dustAndScratches",
+      "menu": [
+        "Filter",
+        "Noise"
+      ],
+      "label": "Dust & Scratches…",
+      "shortcut": "None",
+      "source_line": 571,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.noise.median",
+      "menu": [
+        "Filter",
+        "Noise"
+      ],
+      "label": "Median…",
+      "shortcut": "None",
+      "source_line": 572,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.noise.reduceNoise",
+      "menu": [
+        "Filter",
+        "Noise"
+      ],
+      "label": "Reduce Noise…",
+      "shortcut": "None",
+      "source_line": 573,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.pixelate.colorHalftone",
+      "menu": [
+        "Filter",
+        "Pixelate"
+      ],
+      "label": "Color Halftone…",
+      "shortcut": "None",
+      "source_line": 574,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.pixelate.crystallize",
+      "menu": [
+        "Filter",
+        "Pixelate"
+      ],
+      "label": "Crystallize…",
+      "shortcut": "None",
+      "source_line": 575,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.pixelate.facet",
+      "menu": [
+        "Filter",
+        "Pixelate"
+      ],
+      "label": "Facet",
+      "shortcut": "None",
+      "source_line": 576,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.pixelate.fragment",
+      "menu": [
+        "Filter",
+        "Pixelate"
+      ],
+      "label": "Fragment",
+      "shortcut": "None",
+      "source_line": 577,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.pixelate.mezzotint",
+      "menu": [
+        "Filter",
+        "Pixelate"
+      ],
+      "label": "Mezzotint…",
+      "shortcut": "None",
+      "source_line": 578,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.pixelate.mosaic",
+      "menu": [
+        "Filter",
+        "Pixelate"
+      ],
+      "label": "Mosaic…",
+      "shortcut": "None",
+      "source_line": 579,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.pixelate.pointillize",
+      "menu": [
+        "Filter",
+        "Pixelate"
+      ],
+      "label": "Pointillize…",
+      "shortcut": "None",
+      "source_line": 580,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.render.flame",
+      "menu": [
+        "Filter",
+        "Render"
+      ],
+      "label": "Flame…",
+      "shortcut": "None",
+      "source_line": 581,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.render.pictureFrame",
+      "menu": [
+        "Filter",
+        "Render"
+      ],
+      "label": "Picture Frame…",
+      "shortcut": "None",
+      "source_line": 582,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.render.tree",
+      "menu": [
+        "Filter",
+        "Render"
+      ],
+      "label": "Tree…",
+      "shortcut": "None",
+      "source_line": 583,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.render.clouds",
+      "menu": [
+        "Filter",
+        "Render"
+      ],
+      "label": "Clouds",
+      "shortcut": "None",
+      "source_line": 585,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.render.differenceClouds",
+      "menu": [
+        "Filter",
+        "Render"
+      ],
+      "label": "Difference Clouds",
+      "shortcut": "None",
+      "source_line": 586,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.render.fibers",
+      "menu": [
+        "Filter",
+        "Render"
+      ],
+      "label": "Fibers…",
+      "shortcut": "None",
+      "source_line": 587,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.render.lensFlare",
+      "menu": [
+        "Filter",
+        "Render"
+      ],
+      "label": "Lens Flare…",
+      "shortcut": "None",
+      "source_line": 588,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.render.lightingEffects",
+      "menu": [
+        "Filter",
+        "Render"
+      ],
+      "label": "Lighting Effects…",
+      "shortcut": "None",
+      "source_line": 589,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.sharpen.sharpen",
+      "menu": [
+        "Filter",
+        "Sharpen"
+      ],
+      "label": "Sharpen",
+      "shortcut": "None",
+      "source_line": 590,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.sharpen.sharpenEdges",
+      "menu": [
+        "Filter",
+        "Sharpen"
+      ],
+      "label": "Sharpen Edges",
+      "shortcut": "None",
+      "source_line": 591,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.sharpen.sharpenMore",
+      "menu": [
+        "Filter",
+        "Sharpen"
+      ],
+      "label": "Sharpen More",
+      "shortcut": "None",
+      "source_line": 592,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.sharpen.smartSharpen",
+      "menu": [
+        "Filter",
+        "Sharpen"
+      ],
+      "label": "Smart Sharpen…",
+      "shortcut": "None",
+      "source_line": 593,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.sharpen.unsharpMask",
+      "menu": [
+        "Filter",
+        "Sharpen"
+      ],
+      "label": "Unsharp Mask…",
+      "shortcut": "None",
+      "source_line": 594,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.stylize.diffuse",
+      "menu": [
+        "Filter",
+        "Stylize"
+      ],
+      "label": "Diffuse…",
+      "shortcut": "None",
+      "source_line": 595,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.stylize.emboss",
+      "menu": [
+        "Filter",
+        "Stylize"
+      ],
+      "label": "Emboss…",
+      "shortcut": "None",
+      "source_line": 596,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.stylize.extrude",
+      "menu": [
+        "Filter",
+        "Stylize"
+      ],
+      "label": "Extrude…",
+      "shortcut": "None",
+      "source_line": 597,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.stylize.findEdges",
+      "menu": [
+        "Filter",
+        "Stylize"
+      ],
+      "label": "Find Edges",
+      "shortcut": "None",
+      "source_line": 598,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.stylize.oilPaint",
+      "menu": [
+        "Filter",
+        "Stylize"
+      ],
+      "label": "Oil Paint…",
+      "shortcut": "None",
+      "source_line": 599,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.stylize.solarize",
+      "menu": [
+        "Filter",
+        "Stylize"
+      ],
+      "label": "Solarize",
+      "shortcut": "None",
+      "source_line": 600,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.stylize.tiles",
+      "menu": [
+        "Filter",
+        "Stylize"
+      ],
+      "label": "Tiles…",
+      "shortcut": "None",
+      "source_line": 601,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.stylize.traceContour",
+      "menu": [
+        "Filter",
+        "Stylize"
+      ],
+      "label": "Trace Contour…",
+      "shortcut": "None",
+      "source_line": 602,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.stylize.wind",
+      "menu": [
+        "Filter",
+        "Stylize"
+      ],
+      "label": "Wind…",
+      "shortcut": "None",
+      "source_line": 603,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.video.deInterlace",
+      "menu": [
+        "Filter",
+        "Video"
+      ],
+      "label": "De-Interlace…",
+      "shortcut": "None",
+      "source_line": 604,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.video.ntscColors",
+      "menu": [
+        "Filter",
+        "Video"
+      ],
+      "label": "NTSC Colors",
+      "shortcut": "None",
+      "source_line": 605,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.other.custom",
+      "menu": [
+        "Filter",
+        "Other…"
+      ],
+      "label": "Custom…",
+      "shortcut": "None",
+      "source_line": 606,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.other.hsbHsl",
+      "menu": [
+        "Filter",
+        "Other…"
+      ],
+      "label": "HSB/HSL",
+      "shortcut": "None",
+      "source_line": 607,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.other.highPass",
+      "menu": [
+        "Filter",
+        "Other…"
+      ],
+      "label": "High Pass…",
+      "shortcut": "None",
+      "source_line": 608,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.other.maximum",
+      "menu": [
+        "Filter",
+        "Other…"
+      ],
+      "label": "Maximum…",
+      "shortcut": "None",
+      "source_line": 609,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.other.minimum",
+      "menu": [
+        "Filter",
+        "Other…"
+      ],
+      "label": "Minimum…",
+      "shortcut": "None",
+      "source_line": 610,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "filter.other.offset",
+      "menu": [
+        "Filter",
+        "Other…"
+      ],
+      "label": "Offset…",
+      "shortcut": "None",
+      "source_line": 611,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.proofSetup.custom",
+      "menu": [
+        "View",
+        "Proof Setup"
+      ],
+      "label": "Custom…",
+      "shortcut": "None",
+      "source_line": 612,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.proofSetup.workingCmyk",
+      "menu": [
+        "View",
+        "Proof Setup"
+      ],
+      "label": "Working CMYK",
+      "shortcut": "None",
+      "source_line": 614,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.proofSetup.workingCyanPlate",
+      "menu": [
+        "View",
+        "Proof Setup"
+      ],
+      "label": "Working Cyan Plate",
+      "shortcut": "None",
+      "source_line": 615,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.proofSetup.workingMagentaPlate",
+      "menu": [
+        "View",
+        "Proof Setup"
+      ],
+      "label": "Working Magenta Plate",
+      "shortcut": "None",
+      "source_line": 616,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.proofSetup.workingYellowPlate",
+      "menu": [
+        "View",
+        "Proof Setup"
+      ],
+      "label": "Working Yellow Plate",
+      "shortcut": "None",
+      "source_line": 617,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.proofSetup.workingBlackPlate",
+      "menu": [
+        "View",
+        "Proof Setup"
+      ],
+      "label": "Working Black Plate",
+      "shortcut": "None",
+      "source_line": 618,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.proofSetup.workingCmyPlate",
+      "menu": [
+        "View",
+        "Proof Setup"
+      ],
+      "label": "Working CMY Plate",
+      "shortcut": "None",
+      "source_line": 619,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.proofSetup.legacyMacintoshRgb",
+      "menu": [
+        "View",
+        "Proof Setup"
+      ],
+      "label": "Legacy Macintosh RGB",
+      "shortcut": "None",
+      "source_line": 621,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.proofSetup.internetStandardRgb",
+      "menu": [
+        "View",
+        "Proof Setup"
+      ],
+      "label": "Internet Standard RGB",
+      "shortcut": "None",
+      "source_line": 622,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.proofSetup.monitorRgb",
+      "menu": [
+        "View",
+        "Proof Setup"
+      ],
+      "label": "Monitor RGB",
+      "shortcut": "None",
+      "source_line": 623,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.proofSetup.colorBlindnessProtanopia",
+      "menu": [
+        "View",
+        "Proof Setup"
+      ],
+      "label": "Color Blindness — Protanopia-type",
+      "shortcut": "None",
+      "source_line": 625,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.proofSetup.colorBlindnessDeuteranopia",
+      "menu": [
+        "View",
+        "Proof Setup"
+      ],
+      "label": "Color Blindness — Deuteranopia-type",
+      "shortcut": "None",
+      "source_line": 626,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.proofColors",
+      "menu": [
+        "View"
+      ],
+      "label": "Proof Colors",
+      "shortcut": "Some(\"Cmd+Y\")",
+      "source_line": 627,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.gamutWarning",
+      "menu": [
+        "View"
+      ],
+      "label": "Gamut Warning",
+      "shortcut": "Some(\"Cmd+Shift+Y\")",
+      "source_line": 628,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.pixelAspectRatio.custom",
+      "menu": [
+        "View",
+        "Pixel Aspect Ratio"
+      ],
+      "label": "Custom Pixel Aspect Ratio…",
+      "shortcut": "None",
+      "source_line": 630,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.pixelAspectRatio.square",
+      "menu": [
+        "View",
+        "Pixel Aspect Ratio"
+      ],
+      "label": "Square",
+      "shortcut": "None",
+      "source_line": 632,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.pixelAspectRatio.d1DvNtsc",
+      "menu": [
+        "View",
+        "Pixel Aspect Ratio"
+      ],
+      "label": "D1/DV NTSC (0.91)",
+      "shortcut": "None",
+      "source_line": 633,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.pixelAspectRatio.d1DvPal",
+      "menu": [
+        "View",
+        "Pixel Aspect Ratio"
+      ],
+      "label": "D1/DV PAL (1.09)",
+      "shortcut": "None",
+      "source_line": 634,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.pixelAspectRatio.d1DvNtscWidescreen",
+      "menu": [
+        "View",
+        "Pixel Aspect Ratio"
+      ],
+      "label": "D1/DV NTSC Widescreen (1.21)",
+      "shortcut": "None",
+      "source_line": 635,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.pixelAspectRatio.hdv1080",
+      "menu": [
+        "View",
+        "Pixel Aspect Ratio"
+      ],
+      "label": "HDV 1080/DVCPRO HD 720 (1.33)",
+      "shortcut": "None",
+      "source_line": 636,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.pixelAspectRatio.d1DvPalWidescreen",
+      "menu": [
+        "View",
+        "Pixel Aspect Ratio"
+      ],
+      "label": "D1/DV PAL Widescreen (1.46)",
+      "shortcut": "None",
+      "source_line": 637,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.pixelAspectRatio.dvcproHd1080",
+      "menu": [
+        "View",
+        "Pixel Aspect Ratio"
+      ],
+      "label": "DVCPRO HD 1080/HDV 1080 (1.5)",
+      "shortcut": "None",
+      "source_line": 638,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.pixelAspectRatio.anamorphic2To1",
+      "menu": [
+        "View",
+        "Pixel Aspect Ratio"
+      ],
+      "label": "Anamorphic 2:1 (2)",
+      "shortcut": "None",
+      "source_line": 639,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.pixelAspectRatioCorrection",
+      "menu": [
+        "View"
+      ],
+      "label": "Pixel Aspect Ratio Correction",
+      "shortcut": "None",
+      "source_line": 640,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.thirtyTwoBitPreviewOptions",
+      "menu": [
+        "View"
+      ],
+      "label": "32-bit Preview Options…",
+      "shortcut": "None",
+      "source_line": 642,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.zoomIn",
+      "menu": [
+        "View"
+      ],
+      "label": "Zoom In",
+      "shortcut": "Some(\"Cmd+=\")",
+      "source_line": 644,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.zoomOut",
+      "menu": [
+        "View"
+      ],
+      "label": "Zoom Out",
+      "shortcut": "Some(\"Cmd+-\")",
+      "source_line": 645,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.fitOnScreen",
+      "menu": [
+        "View"
+      ],
+      "label": "Fit on Screen",
+      "shortcut": "None",
+      "source_line": 646,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.fitLayersOnScreen",
+      "menu": [
+        "View"
+      ],
+      "label": "Fit Layer(s) on Screen",
+      "shortcut": "None",
+      "source_line": 647,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.fitArtboardOnScreen",
+      "menu": [
+        "View"
+      ],
+      "label": "Fit Artboard on Screen",
+      "shortcut": "None",
+      "source_line": 648,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.actualPixels",
+      "menu": [
+        "View"
+      ],
+      "label": "100%",
+      "shortcut": "Some(\"Cmd+1\")",
+      "source_line": 649,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.twoHundredPercent",
+      "menu": [
+        "View"
+      ],
+      "label": "200%",
+      "shortcut": "None",
+      "source_line": 650,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.printSize",
+      "menu": [
+        "View"
+      ],
+      "label": "Print Size",
+      "shortcut": "None",
+      "source_line": 651,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.flipHorizontal",
+      "menu": [
+        "View"
+      ],
+      "label": "Flip Horizontal",
+      "shortcut": "None",
+      "source_line": 653,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.screenMode.standard",
+      "menu": [
+        "View",
+        "Screen Mode"
+      ],
+      "label": "Standard Screen Mode",
+      "shortcut": "None",
+      "source_line": 654,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.screenMode.fullScreenWithMenuBar",
+      "menu": [
+        "View",
+        "Screen Mode"
+      ],
+      "label": "Full Screen Mode With Menu Bar",
+      "shortcut": "None",
+      "source_line": 655,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.screenMode.fullScreen",
+      "menu": [
+        "View",
+        "Screen Mode"
+      ],
+      "label": "Full Screen Mode",
+      "shortcut": "None",
+      "source_line": 656,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.extras",
+      "menu": [
+        "View"
+      ],
+      "label": "Extras",
+      "shortcut": "Some(\"Cmd+H\")",
+      "source_line": 658,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.layerEdges",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "Layer Edges",
+      "shortcut": "None",
+      "source_line": 659,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.selectionEdges",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "Selection Edges",
+      "shortcut": "None",
+      "source_line": 660,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.targetPath",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "Target Path",
+      "shortcut": "Some(\"Cmd+Shift+H\")",
+      "source_line": 661,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.grid",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "Grid",
+      "shortcut": "Some(\"Cmd+'\")",
+      "source_line": 662,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.guides",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "Guides",
+      "shortcut": "Some(\"Cmd+;\")",
+      "source_line": 663,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.canvasGuides",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "Canvas Guides",
+      "shortcut": "None",
+      "source_line": 664,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.artboardGuides",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "Artboard Guides",
+      "shortcut": "None",
+      "source_line": 665,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.count",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "Count",
+      "shortcut": "None",
+      "source_line": 666,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.smartGuides",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "Smart Guides",
+      "shortcut": "None",
+      "source_line": 667,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.slices",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "Slices",
+      "shortcut": "None",
+      "source_line": 668,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.notes",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "Notes",
+      "shortcut": "None",
+      "source_line": 669,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.pixelGrid",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "Pixel Grid",
+      "shortcut": "None",
+      "source_line": 670,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.brushPreview",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "Brush Preview",
+      "shortcut": "None",
+      "source_line": 671,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.mesh",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "Mesh",
+      "shortcut": "None",
+      "source_line": 672,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.editPins",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "Edit Pins",
+      "shortcut": "None",
+      "source_line": 673,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.all",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "All",
+      "shortcut": "None",
+      "source_line": 675,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.show.showExtrasOptions",
+      "menu": [
+        "View",
+        "Show"
+      ],
+      "label": "Show Extras Options…",
+      "shortcut": "None",
+      "source_line": 676,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.rulers",
+      "menu": [
+        "View"
+      ],
+      "label": "Rulers",
+      "shortcut": "Some(\"Cmd+R\")",
+      "source_line": 678,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.snap",
+      "menu": [
+        "View"
+      ],
+      "label": "Snap",
+      "shortcut": "Some(\"Cmd+Shift+;\")",
+      "source_line": 680,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.snapTo.guides",
+      "menu": [
+        "View",
+        "Snap To"
+      ],
+      "label": "Guides",
+      "shortcut": "None",
+      "source_line": 681,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.snapTo.grid",
+      "menu": [
+        "View",
+        "Snap To"
+      ],
+      "label": "Grid",
+      "shortcut": "None",
+      "source_line": 682,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.snapTo.layers",
+      "menu": [
+        "View",
+        "Snap To"
+      ],
+      "label": "Layers",
+      "shortcut": "None",
+      "source_line": 683,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.snapTo.slices",
+      "menu": [
+        "View",
+        "Snap To"
+      ],
+      "label": "Slices",
+      "shortcut": "None",
+      "source_line": 684,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.snapTo.documentBounds",
+      "menu": [
+        "View",
+        "Snap To"
+      ],
+      "label": "Document Bounds",
+      "shortcut": "None",
+      "source_line": 685,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.snapTo.all",
+      "menu": [
+        "View",
+        "Snap To"
+      ],
+      "label": "All",
+      "shortcut": "None",
+      "source_line": 687,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.lockGuides",
+      "menu": [
+        "View"
+      ],
+      "label": "Lock Guides",
+      "shortcut": "Some(\"Cmd+Alt+;\")",
+      "source_line": 689,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.clearGuides",
+      "menu": [
+        "View"
+      ],
+      "label": "Clear Guides",
+      "shortcut": "None",
+      "source_line": 690,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.clearSelectedArtboardGuides",
+      "menu": [
+        "View"
+      ],
+      "label": "Clear Selected Artboard Guides",
+      "shortcut": "None",
+      "source_line": 691,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.clearCanvasGuides",
+      "menu": [
+        "View"
+      ],
+      "label": "Clear Canvas Guides",
+      "shortcut": "None",
+      "source_line": 692,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.newGuide",
+      "menu": [
+        "View"
+      ],
+      "label": "New Guide…",
+      "shortcut": "None",
+      "source_line": 693,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.newGuideLayout",
+      "menu": [
+        "View"
+      ],
+      "label": "New Guide Layout…",
+      "shortcut": "None",
+      "source_line": 694,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.newGuidesFromShape",
+      "menu": [
+        "View"
+      ],
+      "label": "New Guides From Shape",
+      "shortcut": "None",
+      "source_line": 695,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.lockSlices",
+      "menu": [
+        "View"
+      ],
+      "label": "Lock Slices",
+      "shortcut": "None",
+      "source_line": 697,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.clearSlices",
+      "menu": [
+        "View"
+      ],
+      "label": "Clear Slices",
+      "shortcut": "None",
+      "source_line": 698,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.patternPreview",
+      "menu": [
+        "View"
+      ],
+      "label": "Pattern Preview",
+      "shortcut": "None",
+      "source_line": 700,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "view.pixelArtPreview",
+      "menu": [
+        "View"
+      ],
+      "label": "Pixel Art Preview",
+      "shortcut": "None",
+      "source_line": 701,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.tileAllVertically",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "Tile All Vertically",
+      "shortcut": "None",
+      "source_line": 702,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.tileAllHorizontally",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "Tile All Horizontally",
+      "shortcut": "None",
+      "source_line": 703,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.twoUpVertical",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "2-up Vertical",
+      "shortcut": "None",
+      "source_line": 704,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.twoUpHorizontal",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "2-up Horizontal",
+      "shortcut": "None",
+      "source_line": 705,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.threeUpVertical",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "3-up Vertical",
+      "shortcut": "None",
+      "source_line": 706,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.threeUpHorizontal",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "3-up Horizontal",
+      "shortcut": "None",
+      "source_line": 707,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.threeUpStacked",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "3-up Stacked",
+      "shortcut": "None",
+      "source_line": 708,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.fourUp",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "4-up",
+      "shortcut": "None",
+      "source_line": 709,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.sixUp",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "6-up",
+      "shortcut": "None",
+      "source_line": 710,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.consolidateAllToTabs",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "Consolidate All to Tabs",
+      "shortcut": "None",
+      "source_line": 712,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.cascade",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "Cascade",
+      "shortcut": "None",
+      "source_line": 713,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.tile",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "Tile",
+      "shortcut": "None",
+      "source_line": 714,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.floatInWindow",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "Float in Window",
+      "shortcut": "None",
+      "source_line": 716,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.floatAllInWindows",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "Float All in Windows",
+      "shortcut": "None",
+      "source_line": 717,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.newWindowForDocument",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "New Window for Document",
+      "shortcut": "None",
+      "source_line": 719,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.matchZoom",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "Match Zoom",
+      "shortcut": "None",
+      "source_line": 721,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.matchLocation",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "Match Location",
+      "shortcut": "None",
+      "source_line": 722,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.matchRotation",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "Match Rotation",
+      "shortcut": "None",
+      "source_line": 723,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.arrange.matchAll",
+      "menu": [
+        "Window",
+        "Arrange"
+      ],
+      "label": "Match All",
+      "shortcut": "None",
+      "source_line": 724,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.workspace.essentials",
+      "menu": [
+        "Window",
+        "Workspace"
+      ],
+      "label": "Essentials",
+      "shortcut": "None",
+      "source_line": 725,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.workspace.photography",
+      "menu": [
+        "Window",
+        "Workspace"
+      ],
+      "label": "Photography",
+      "shortcut": "None",
+      "source_line": 726,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.workspace.painting",
+      "menu": [
+        "Window",
+        "Workspace"
+      ],
+      "label": "Painting",
+      "shortcut": "None",
+      "source_line": 727,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.workspace.pixelArt",
+      "menu": [
+        "Window",
+        "Workspace"
+      ],
+      "label": "Pixel Art",
+      "shortcut": "None",
+      "source_line": 728,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.workspace.graphicAndWeb",
+      "menu": [
+        "Window",
+        "Workspace"
+      ],
+      "label": "Graphic and Web",
+      "shortcut": "None",
+      "source_line": 729,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.workspace.motion",
+      "menu": [
+        "Window",
+        "Workspace"
+      ],
+      "label": "Motion",
+      "shortcut": "None",
+      "source_line": 730,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.workspace.resetWorkspace",
+      "menu": [
+        "Window",
+        "Workspace"
+      ],
+      "label": "Reset Workspace",
+      "shortcut": "None",
+      "source_line": 732,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.workspace.newWorkspace",
+      "menu": [
+        "Window",
+        "Workspace"
+      ],
+      "label": "New Workspace…",
+      "shortcut": "None",
+      "source_line": 733,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.workspace.deleteWorkspace",
+      "menu": [
+        "Window",
+        "Workspace"
+      ],
+      "label": "Delete Workspace…",
+      "shortcut": "None",
+      "source_line": 734,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.workspace.lockWorkspace",
+      "menu": [
+        "Window",
+        "Workspace"
+      ],
+      "label": "Lock Workspace",
+      "shortcut": "None",
+      "source_line": 737,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.actions",
+      "menu": [
+        "Window"
+      ],
+      "label": "Actions",
+      "shortcut": "Some(\"Alt+F9\")",
+      "source_line": 739,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.adjustments",
+      "menu": [
+        "Window"
+      ],
+      "label": "Adjustments",
+      "shortcut": "None",
+      "source_line": 740,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.brushSettings",
+      "menu": [
+        "Window"
+      ],
+      "label": "Brush Settings",
+      "shortcut": "Some(\"F5\")",
+      "source_line": 741,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.brushes",
+      "menu": [
+        "Window"
+      ],
+      "label": "Brushes",
+      "shortcut": "None",
+      "source_line": 742,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.channels",
+      "menu": [
+        "Window"
+      ],
+      "label": "Channels",
+      "shortcut": "None",
+      "source_line": 743,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.character",
+      "menu": [
+        "Window"
+      ],
+      "label": "Character",
+      "shortcut": "None",
+      "source_line": 744,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.characterStyles",
+      "menu": [
+        "Window"
+      ],
+      "label": "Character Styles",
+      "shortcut": "None",
+      "source_line": 745,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.cloneSource",
+      "menu": [
+        "Window"
+      ],
+      "label": "Clone Source",
+      "shortcut": "None",
+      "source_line": 746,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.color",
+      "menu": [
+        "Window"
+      ],
+      "label": "Color",
+      "shortcut": "Some(\"F6\")",
+      "source_line": 747,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.glyphs",
+      "menu": [
+        "Window"
+      ],
+      "label": "Glyphs",
+      "shortcut": "None",
+      "source_line": 748,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.gradients",
+      "menu": [
+        "Window"
+      ],
+      "label": "Gradients",
+      "shortcut": "None",
+      "source_line": 749,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.histogram",
+      "menu": [
+        "Window"
+      ],
+      "label": "Histogram",
+      "shortcut": "None",
+      "source_line": 750,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.history",
+      "menu": [
+        "Window"
+      ],
+      "label": "History",
+      "shortcut": "None",
+      "source_line": 751,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.info",
+      "menu": [
+        "Window"
+      ],
+      "label": "Info",
+      "shortcut": "Some(\"F8\")",
+      "source_line": 752,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.layerComps",
+      "menu": [
+        "Window"
+      ],
+      "label": "Layer Comps",
+      "shortcut": "None",
+      "source_line": 753,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.layers",
+      "menu": [
+        "Window"
+      ],
+      "label": "Layers",
+      "shortcut": "Some(\"F7\")",
+      "source_line": 754,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.measurementLog",
+      "menu": [
+        "Window"
+      ],
+      "label": "Measurement Log",
+      "shortcut": "None",
+      "source_line": 755,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.modifierKeys",
+      "menu": [
+        "Window"
+      ],
+      "label": "Modifier Keys",
+      "shortcut": "None",
+      "source_line": 756,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.navigator",
+      "menu": [
+        "Window"
+      ],
+      "label": "Navigator",
+      "shortcut": "None",
+      "source_line": 757,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.notes",
+      "menu": [
+        "Window"
+      ],
+      "label": "Notes",
+      "shortcut": "None",
+      "source_line": 758,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.paragraph",
+      "menu": [
+        "Window"
+      ],
+      "label": "Paragraph",
+      "shortcut": "None",
+      "source_line": 759,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.paragraphStyles",
+      "menu": [
+        "Window"
+      ],
+      "label": "Paragraph Styles",
+      "shortcut": "None",
+      "source_line": 760,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.paths",
+      "menu": [
+        "Window"
+      ],
+      "label": "Paths",
+      "shortcut": "None",
+      "source_line": 761,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.patterns",
+      "menu": [
+        "Window"
+      ],
+      "label": "Patterns",
+      "shortcut": "None",
+      "source_line": 762,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.properties",
+      "menu": [
+        "Window"
+      ],
+      "label": "Properties",
+      "shortcut": "None",
+      "source_line": 763,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.shapes",
+      "menu": [
+        "Window"
+      ],
+      "label": "Shapes",
+      "shortcut": "None",
+      "source_line": 764,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.styles",
+      "menu": [
+        "Window"
+      ],
+      "label": "Styles",
+      "shortcut": "None",
+      "source_line": 765,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.swatches",
+      "menu": [
+        "Window"
+      ],
+      "label": "Swatches",
+      "shortcut": "None",
+      "source_line": 766,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.timeline",
+      "menu": [
+        "Window"
+      ],
+      "label": "Timeline",
+      "shortcut": "None",
+      "source_line": 767,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.toolPresets",
+      "menu": [
+        "Window"
+      ],
+      "label": "Tool Presets",
+      "shortcut": "None",
+      "source_line": 768,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.options",
+      "menu": [
+        "Window"
+      ],
+      "label": "Options",
+      "shortcut": "None",
+      "source_line": 770,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    },
+    {
+      "id": "window.panel.tools",
+      "menu": [
+        "Window"
+      ],
+      "label": "Tools",
+      "shortcut": "None",
+      "source_line": 771,
+      "genko_status": "未判定",
+      "implementation_status": "未着手",
+      "alternate_menus": []
+    }
+  ]
+}

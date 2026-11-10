@@ -8,3 +8,9 @@ build/
 .genko-work/
 *.png
 !docs/**
+# the C++ build (docs/cpp-migration): its test books keep their pictures
+!native/tests/data/**
+# Packaged built-in material previews (generated before distribution, not user manuscript pictures).
+!native/resources/materials/*.png
+.ccache/
+aqtinstall.log

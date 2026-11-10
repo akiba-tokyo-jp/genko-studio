@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-06",
+  "storage_integration": {
+    "status": "user_selected",
+    "source": "この会話のclarify実結果",
+    "source_session_id": "20261005_230353_45e717f4",
+    "source_message_id": 160231,
+    "evidence_file": "docs/cpp-migration/photocraft/storage-approval-evidence.json",
+    "question": "高精度カラー・スマートオブジェクトなどの新機能を、どの保存方法でGenkoに統合しますか？ どちらもC++版への実装で、既存原稿の原本は変更しません。漫画原稿へ統合する場合、新機能を使った原稿は未対応の旧版では編集できなくなります。",
+    "user_response": "漫画原稿へ全機能を統合し、C++版の原稿形式を拡張する",
+    "integrate_into_manga_document": true,
+    "extend_native_document_format": true,
+    "preserve_original_documents": true,
+    "reject_edits_in_unsupported_readers": true
+  },
+  "color_creation": {
+    "status": "user_required",
+    "source": "この会話の最新の利用者発言",
+    "user_text": "カラーもC++では可能にします",
+    "requirement": "COLOR-01",
+    "cpp_must_not_be_monochrome_only": true,
+    "include_color_creation_editing_display_save_reopen_export": true,
+    "preserve_monochrome_workflow": true
+  },
+  "scope_boundaries": {
+    "implementation_language": "C++20 / Qt",
+    "new_fees_or_permissions_authorized": false,
+    "new_automation_authorized": false,
+    "github_actions_reenable_authorized": false,
+    "production_manuscripts_authorized": false,
+    "new_platforms_authorized": false
+  },
+  "implementation_complete": false,
+  "acceptance_complete": false,
+  "prior_audit_scope": "audit.jsonは保存モデルの選択前に実施した初回調査のV0記録。現在の承認状態は本ファイルを参照する。"
+}

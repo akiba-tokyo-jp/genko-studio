@@ -1,0 +1,869 @@
+# Genko C++ 引継ぎ（2026-10-08）
+
+## 進め方（2026-10-14 の再計画。利用者の指示で、重複する全体試験を省く。これ以降の工程すべてに当てる。VALIDATION.md の範囲・合格値は変えない）
+- 前提（VALIDATION.md）: V1 は関係する試験だけ、V2 は統合した候補に一度、V3 は工程の出口。同じソース・実行物・構成・対象で合格した証跡は使い回す。`--pair` は 3 構成が同じ計画（plan_hash）・同じソースであることを求める。
+- 漏れ（CMYK・Lab の工程）: 実装とレビューが揃っていた群B・C・D に群ごとの V2 を順に流した（約 20 時間）、凍結前に Release の全体を事前に流した、最後の群の V2 と出口の V3 が同じコードで重なった、V3 の 3 構成を順に流した。2026-10-07 の最速計画（重い V2・V3 は候補・出口に集約、同じ条件の合格は使い回す）の文書がリポジトリに無く、/goal の「群ごとに V2」をそのまま当てたのが原因。
+- R1 開発中（V1）は変更に関係する試験だけ（RED→GREEN、関係する契約・GUI）。全体試験と「凍結前の事前の全体試験」はしない。
+- R2 一つの工程の群は「実装（関係する試験）→レビュー1回→直し」までを群ごとに。統合は工程の候補 1 本にまとめ、群ごとの V2 は流さない（V3 が V2 を含む）。V2 を流すのは、次の群がその群の合格を前提にしていて、失敗の切り分けが要るときだけ。
+- R3 V3 は一つの計画（`validation_policy.py --phase milestone`）で 1 回。ASan と Release を同時に始め、Debug はビルドが済み次第並べる。実 xcb の GUI は Release・Debug の後、性能は ASan の後の静かな機械で、最後に `--pair`。
+- R4 失敗したら残りの構成を止める。コードを直したら（全構成のソースが変わるので `--pair` のため）3 構成をやり直す。環境だけが原因なら、その構成だけやり直す。
+- R5 計画の違う結果は `--pair` で使えないので、最後の群は V2 を流さず、V3 へ直行する。
+- R6 M7 の最終候補が M6 の出口の V3 と同じソース・実行物なら、全体試験は使い回し、M7 に固有の受入（最終配布物での起動・保存・出力、2 時間試験、全 PERF、IME の注入、全出力、MCP SDK での外部接続、独立レビュー、別のインストール先への導入）だけを行う。
+- R7 統合前の群の commit は、作業ツリーだけに置かず、native/integration ではない作業ブランチへ push して保全する（CI は無効なので試験は走らない）。
+- 当て方: CMYK・Lab の工程の出口の V3（e099da5）から。ASan の後に Release・Debug を流す順をやめ、ASan を走らせたまま Release・Debug を並べた（`run.sh` の親だけ止め、ASan の validation_run は続けた）。残る重複は群D の V2 と同じ中身の ASan 1 回分だけ（計画が違うので `--pair` に使えない）。
+- 次: M6・M7 は Linux で合格（凍結 962faa4）。PhotoCraft の取り込みは PC1〜PC5 の各工程と PC6（台帳全件の突き合わせ・独立レビュー・配布物を含む V3）が Linux で合格（PC6 の凍結 de0f5e9、下の「PC6 の出口 V3」）。Windows 実機は、下の利用者の決定のとおりマージ後に別の環境で行う。
+- **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
+
+
+## PhotoCraft の全機能の取り込み（PC 工程）— 2026-10-16 計画（この節が最新）
+
+### 利用者の決定
+- （2026-10-16）PhotoCraft の台帳 `docs/cpp-migration/photocraft/feature-ledger.json` の **全 961 行**を、この移行で取り込む（Windows の作業の前）。2026-10-06 の決定（DECISIONS.json: 漫画原稿へ統合し C++ 版の原稿形式を広げる、原本は変えない、未対応の版では編集を断る。カラー制作 COLOR-01）はそのまま。
+
+### 出発点
+- 参照: PhotoCraft v0.2.0（`ad863217386440ca968fccc9bfff65ba24e61142`、MIT OR Apache-2.0。移植する所は MIT を選び表示を残す。ArtCraft の商標・ブランドは使わない）。SOURCE.md の参照コピーの場所はこの機械にないので、同じ pin を作業用に取得して読む（変更しない）。
+- 台帳は既存の feature-ledger.json を正本とする（新しい台帳は作らない）。2026-10-06 に当時の C++（f9bb7a1）と比べて作ったもので、930 行が「未照合」、実装に手を付けたのは 2 行（露光量の調整層・色深度のモデル）。その後の工程（M3〜M7・CMYK/Lab）で C++ が持った機能は、まだ台帳に反映されていない。
+- 行の内訳: 操作 892（layer 181・filter 122・edit 77・view 77・type 70・image 64・window 61・file 53・tool 47・select 32・channel 21 ほか）、道具 42、形式 13、横断の要件 14。
+
+### 照合の結果（PC0、2026-10-16、C++ 962faa4 と上流 ad86321。feature-ledger.json の各行の pc0 欄）
+- 961 行: 同等 73・一部 299・なし 589。作業の大きさ S 592・M 207・L 75・XL 14（目安で S 0.5・M 1.5・L 4・XL 10 人日として約 1,050 人日）。同等はすべて C++ の試験が確かめているもの。
+- 大きな土台: 色深度 32 ビット・色モデル・チャンネル（PC1）、スマートオブジェクト・スマートフィルター、レイヤースタイルの効果、ベクトルマスク・シェイプ・ベジェのパス、ラスタのブラシエンジン・修復ブラシ、文字スタイル・HarfBuzz の字形、フィルターギャラリー、自動処理・Photomerge・HDR、WASM のプラグイン、RAW。
+
+### 利用者の決定（2026-10-16、照合の後）
+- 統合は**群ごと**: PC1〜PC5 をそれぞれ一つの工程にし、工程の出口で V3 を 1 回流して native/integration へ push する。
+- 台帳の macOS とブラウザ（WebAssembly）の 2 行は**加えない**（SPEC・DECISIONS のとおり対象外。台帳に利用者の判断として記録）。
+- カメラの RAW は **LibRaw** を使う（LGPL-2.1 / CDDL-1.0。動的リンク、差し替えの案内とライセンス文を配布物に足す）。
+- 新しい外部ライブラリ（OpenEXR か tinyexr・libavif＋libaom・zstd・BLAKE3・WASM の実行系）は**入れてよい**（要る群で入れ、THIRD_PARTY.md・SBOM・ライセンス文に記録）。
+
+### PC1 の設計と利用者の決定（2026-10-16）
+- 設計: 原稿の拡張 `color-model@1`（ページ・本の色モデル: RGB のプロファイルと 16/32 bit、グレー・2 階調・インデックス・ダブルトーン・マルチチャンネル、CMYK/Lab の 32 bit、黒点補正の指定。GKIR 版 2）と `channels@1`（アルファ・特色チャンネル）。RGB 8 bit・sRGB のページは Python と同じバイト。小群 PC1a（形式・深度・グレー・RGB プロファイル・変換・inspect）→ PC1b（カラー設定・校正・色域外警告）→ PC1c（チャンネル）→ PC1d（インデックス・2 階調・ダブルトーン・マルチチャンネル）。新しい外部ライブラリは要らない（Little CMS）。仕様は実装とともに SPEC.md（COLOR-03）・schema-v4.md に書く。
+- 利用者の決定: (1) インデックス・2 階調・マルチチャンネルへの変換と特色の合成は**上流どおり統合する**（画素レイヤーを 1 枚に。要素は要素のまま）。(2) 高精度の画素の本の上限（GKCR の予算）を **256 MiB → 1 GiB**。(3) 文字のガンマは画素に効かせる・カラー設定の方針は開いた原稿にも当てる・作業用 CMYK の既定は coated-cmyk・チャンネルの分割/統合は元のページを置き換える（**上流に合わせる**）。既定の設定のままの RGB 8 bit・sRGB のページは Python と同じ。
+
+### PC1 の出口 V3 — 凍結 af06f45 で Linux 合格（2026-10-17）
+- **凍結SHA**: `af06f454149d571cd51f7e9e16cf70d34978c63f`（native/wip-pc に push 済み）。計画は `validation_policy.py --base 962faa4 --head af06f45 --phase milestone`（基点は M6・M7 の出口の凍結。tier full、構成は linux-debug・linux-release・linux-asan・windows-debug・windows-release）。4 回目の実行 2026-10-17 03:58〜08:43 UTC。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.80GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44-fc-v139。Qt 6.11.2、GCC 13.3、参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、GENKO_MCP_PYTHON、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。R3 のとおり Release と ASan を同時に始め、Debug を並べた（各構成内 ctest 1 並列）。Debug は空き容量のため一から `-gz`（デバッグ情報の圧縮。コードとデバッグ情報は同じ。validation_run が確かめる構成の値 — build type・故障注入・-Werror・サニタイザー — は preset のまま）でビルドした。
+- **結果**（validation_run.py の result.json。3 構成とも status finished・passed true・failures 空、除いた契約なし、CLI23 合格、同じ plan_hash）:
+  - linux-release: 139/139 合格（03:58–05:16）。故障注入が Debug・ASan だけのための SKIP はこれまでの出口と同じ組で、合格に数えない。
+  - linux-debug: 139/139 合格（04:00–05:50）。
+  - linux-asan: 139/139 合格、サニタイザの指摘なし（03:58–08:32）。
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1 件のみ＝Windows 2 構成が開発中 deferred。Linux 3 構成どうしの照合は指摘なし。**Windows を含む --pair 合格ではない。**
+- **実 xcb（Xvfb 1920×1080）GUI・E2E**（凍結のビルド）: Release で test_gui_* 29 本すべて合格（新しい test_gui_channels を含む。save は故障注入の SKIP）。Debug で test_gui_save・test_app_e2e（開く→描く→Undo→保存→終了→別プロセスで再開）合格。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線、始まりの負荷 1.37。表示のみで合否判定なし。測定機は基準クラスではない＝ACCEPTANCE §6）: 開いて最初の頁 1065 ms・全頁 1234 ms／入力→ライブ線 p95 1.79・p99 5.33 ms（n=43780）／線確定→表示 p95 21.2 ms／Undo→表示 p95 32.6 ms／頁切替 最初 p95 37.2・精細 p95 120 ms（n=4）／自動保存 p95 2.16 s（n=31）／保存中（計 31.4 s）のイベントループ: 5 ms ごとの刻みの遅れ p99 9.81 ms、250 ms を超える停止 0、4 ms を超えた停止の分布 p99 74.1・最大 89.1 ms（n=110）。走行全体の 4 ms を超えた停止の最大 638 ms（1 回、保存の外）。test_perf_render: F1 の頁 350 dpi 全体 861 ms・線を足した後 485 ms・512×512 の部分 31 ms、線 200 本の小さな絵 5 ms。**M6 の出口（962faa4）より遅い**: 最初の頁 626→1065 ms、全頁 805→1234 ms、自動保存 p95 1.64→2.16 s、保存中の停止 p99 54.4→74.1 ms、走行全体の停止の最大 54→638 ms（負荷 1.04→1.37 の違いもある）。合否のない表示の値。**調べた結果（2026-10-17）: PC1 による遅れではない。** 静かな時間に 962faa4 と同じ実行物を交互に流すと全項目が揺れの範囲（例 最初の頁 HEAD 735・587／M6 704・480 ms、自動保存 p95 1754・1735／1731・1736 ms）、callgrind の命令数も同じ（全体 27.16 G 対 27.10 G。PC1 で増えたのは開くときの約 4 ms だけ）。V3 の値は、計測の 3 秒前に Debug・ASan のオブジェクト約 5 GB を消した（discard 付きの ext4）ことと負荷 1.37 によるもの。次の V3 から、オブジェクトの削除は計測の後に回し、sync して静まるのを待ち、1 回温めてから 2 回計り、生ログ（GENKO_PERF_LOG）を残す。638 ms の停止は生ログが無く特定できない（キャッシュが冷えると M6 の版でも開く途中に 344 ms の停止が出る）。PC1 より前からある停止の元（線ごとの色の履歴の設定の書き込みと fsync、窓の影と枠の大きな塗り）は PC2 で直す。
+- **PERF-F**（Release、test_perf_pipeline、ctest 経由。合否判定あり）: F3 の工程 61.0 秒・88 作業。全呼び出し n=314 p95 805 ms／情報取得 p95 680 ms／編集の確定 p95 86.0 ms／候補の採用 p95 1.44 s／頁の仕上げ p95 821 ms（合格値は各 p95 2 秒）／8 ページの校正出力 10 回 6.80〜7.20 s（各 30 秒以内）。**全項目合格**。
+- **台帳**: feature-ledger.json の PC1 の 56 行のうち 55 行を実装済み（PC1a 11・PC1b 18・PC1c 20・PC1d 6）。document:color-depth-model は、高精度・インキのページでまだ断る処理（トーンの層・描画モードの補正層・形を動かす補正・書式を持つ高精度の線など）が残るため、PC2 以降まで開けたまま（行の note）。
+- **群の経過**: PC1a（形式・深度・グレー・RGB プロファイル・変換・問い合わせ）→ PC1b（カラー設定・色の校正・色域外警告・文字のガンマ）→ PC1c（アルファ・特色チャンネル）→ PC1d（インデックス・カラーテーブル・2 階調・ダブルトーン・マルチチャンネル・色版の削除）。どれも 実装（関係する試験）→読取専用の独立レビュー 1 回→直し。指摘: PC1a 21（P1 2）、PC1b 約 18（P1 1）、PC1c 約 17（P1 2）、PC1d 7（P1 1: 統合で残すネーム・下描きの層の画素を寄せていた）。すべて直した。群を重ねた所の食い違い 2 件（文字のガンマだけを持つ本が読み取り専用になる・16 bit のページの方針の試験）も直した。
+- **V3 の中で起きたこと（R4: 1〜3 回目の記録は使わない。記録は scratchpad の pc1-v3/attempt1〜3）**:
+  - 1 回目（凍結 ac43bde）: Release 合格。実 xcb で test_gui_actions noTwoCommandsShareAKey（PC1b で足したキーの重なりの試験）が落ちた。**製品の不具合**: 「選択範囲を消す」が X11 の標準の Delete のキーを全部取り、その中の Ctrl+D が「選択を解除」と重なっていた（Qt はあいまいなキーをどちらも動かさない。PC1 より前からの違い）。Python と同じ Delete の最初のキーと Backspace にした（66f07ba）。
+  - 2 回目（凍結 66f07ba）: Release 合格。実 xcb で test_gui_color theProofAsItComesIsTheWorkingCoatedCmyk が落ちた（試験の書き方: 窓を前に出さずにショートカットを送っていた）。activateWindow と qWaitForWindowActive で待つ形に直し、やり直す前に Release の GUI 試験を全部実 xcb で流して確かめた（b4fafbf）。
+  - 3 回目（凍結 b4fafbf）: Release・Debug・実 xcb の GUI 31 本は合格。ASan で test_color_model だけが落ちた（試験の確保の数え方が nothrow の new を置き換えず、ライブラリの一時領域が置き換えた delete で返された alloc-dealloc-mismatch。製品のコードではない）。test_image_split_oom と同じく nothrow の形も置き換えた（af06f45、ASan で合格）。
+- **工数の較正**（利用者の問い「1,050 人日は人が行う場合の工数？」への答え）: 1,050 人日は人が行う場合の目安。PC1 の 56 行の目安は 78 人日（S 33・M 13・L 8・XL 1）。実際は、実装の始め（10-16 10:21 UTC）から最後の凍結（10-17 03:38）まで約 17 時間（作業役の延べ約 16 時間、並行 3〜4）、V3 は 4 回で約 13 時間（合格した回は 4 時間 45 分）、合わせて約 1 日。
+- **残課題**: Windows（deferred、配布前の実機受入は必須）。上の停止の元の直し（PC2）。document:color-depth-model の残り（PC2 以降）。マルチチャンネル・特色・インデックスの PSD は psd-tools では確かめたが Photoshop の実機では確かめていない（SPEC COLOR-03 の既知の制限）。
+
+### PC2 の出口 V3 — 凍結 5ebcbe6 で Linux 合格（2026-10-18）
+- **凍結SHA**: `5ebcbe61bc9c74437ab0f4e499bca6dad953bebc`（native/wip-pc に push 済み）。計画は `validation_policy.py --base af06f45 --head 5ebcbe6 --phase milestone`（基点は PC1 の出口の凍結。tier full、構成は linux-debug・linux-release・linux-asan・windows-debug・windows-release、plan_hash cdf04ff2c9aa…）。3 回目の実行 2026-10-17 22:25〜10-18 03:29 UTC。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.80GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44-fc-v139。Qt 6.11.2、GCC 13.3、参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、GENKO_MCP_PYTHON、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。R3 のとおり Release と ASan を同時に始め、Debug を並べた（各構成内 ctest 1 並列）。Debug は `-gz` で組み、試験の実行物はリンクの後にデバッグ情報を外した（`objcopy --strip-debug`。1 本約 190 MB・計 13 GB で空き容量に入らなかったため。コードは同じで、validation_run が確かめる構成の値 — build type・故障注入・-Werror・サニタイザー — は preset のまま）。
+- **結果**（validation_run.py の result.json。3 構成とも status finished・passed true・failures 空、除いた契約なし、CLI23 合格、同じ plan_hash）:
+  - linux-release: 152/152 合格（22:26–23:46）。故障注入が Debug・ASan だけのための SKIP はこれまでの出口と同じ組で、合格に数えない。
+  - linux-debug: 152/152 合格（22:36–00:29）。
+  - linux-asan: 152/152 合格、サニタイザの指摘なし（22:26–03:12）。
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1 件のみ＝Windows 2 構成が開発中 deferred。Linux 3 構成どうしの照合は指摘なし。**Windows を含む --pair 合格ではない。**
+- **実 xcb（Xvfb 1920×1080）GUI・E2E**（凍結のビルド）: Release で test_gui_* 33 本すべて合格（save は故障注入の SKIP）。Debug で test_gui_save・test_app_e2e（開く→描く→Undo→保存→終了→別プロセスで再開）合格。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線。表示のみで合否判定なし。測定機は基準クラスではない＝ACCEPTANCE §6）。計り方は PC1 の調べのとおり: 計測の前に sync して静まるのを待ち（始まりの負荷 0.48）、Debug・ASan のオブジェクトは消さず、1 回温めてから 2 回計り、生ログ（GENKO_PERF_LOG）を残した。2 回の値（1 回目／2 回目）: 開いて最初の頁 518／491 ms・全頁 714／669 ms／入力→ライブ線 p95 1.13／1.05・p99 3.28／3.27 ms（n=43780）／線確定→表示 p95 19.1／19.1 ms／Undo→表示 p95 32.4／30.7 ms／頁切替 最初 p95 23.5／40.9・精細 p95 108／139 ms（n=4）／自動保存 p95 1.51／1.54 s（n=31）／保存中のイベントループ: 刻みの遅れ p99 6.89／7.24 ms、250 ms を超える停止 0、4 ms を超えた停止 p99 51.6／47.4 ms／走行全体の 4 ms を超えた停止の最大 51.6／76.3 ms。test_perf_render: F1 の頁 350 dpi 全体 782 ms・線を足した後 422 ms・512×512 の部分 28 ms、線 200 本の小さな絵 4 ms。PC1 の出口（af06f45）の値（最初の頁 1065 ms・自動保存 p95 2.16 s・走行全体の停止の最大 638 ms）より速い。PC2d で直した停止の元（線ごとの色の履歴の設定の書き込み、窓の影と枠の大きな塗り）と、計り方の直しによる。
+- **PERF-F**（Release、test_perf_pipeline、ctest 経由。合否判定あり）: F3 の工程 57.0 秒・88 作業。全呼び出し n=314 p95 752 ms／情報取得 p95 663 ms／編集の確定 p95 80.2 ms／候補の採用 p95 1.31 s／頁の仕上げ p95 772 ms（合格値は各 p95 2 秒）／8 ページの校正出力 10 回 6.44〜7.00 s（各 30 秒以内）。**全項目合格**。
+- **台帳**: feature-ledger.json の PC2 の 57 行を実装済み・受入済みに（PC2a 27・PC2b 15・PC2c 8・PC2d 7。PC1 で開けたままだった document:color-depth-model も PC2d で閉じた）。
+- **群の経過**: PC2-0（補正の土台: 種類の表・`native`・adjustments@1・3 つの道・op と窓と PSD の枠）→ PC2a（階調の補正・3D LUT・パネル）・PC2b（色の補正）・PC2c（局所の補正・画像の演算・トラッピング・フェード）・PC2d（色管理と高精度の合成の残り・停止の元）を並行 → 統合のときの直し（C++ 版だけの設定の警告、PSD の hue2・notes・記述子、利用者の決定 8 のコマンドの名前）→ 読取専用の独立レビュー 2 回（A: 補正・LUT・PSD・画面、B: 高精度の合成・局所の補正・色管理）→ 直し（A: P1 3・P2 4・P3 9、B: P1 1・P3 4。すべて直した）。
+- **V3 の中で起きたこと（R4: 1・2 回目の記録は使わない。記録は scratchpad の pc2-v3/attempt1・attempt2）**:
+  - 1 回目（凍結 cda6a36）: Release で 2 本が落ちた。どちらも試験の期待が利用者の決定 5（PSD の調整レイヤーはいつも書く）に追いついていなかった（群の関係試験に入っていなかった）: test_contract_studio の配置画像の本の PSD、test_contract_export_cli の PSD（61787b0・50572e2。調整レイヤーを除いた層・統合画像が同じで、調整レイヤーが 1 枚以上あることを確かめる形に）。Debug はビルドの途中で空き容量が尽きた（上の strip で対処）。
+  - 2 回目（凍結 50572e2）: Release・Debug・実 xcb は合格。ASan で test_contract_adjust の everyPageThroughTheCommandLine が QtTest の 1 関数 5 分を超えた（指摘なし。Release では 21 秒）。ほかの長い契約試験と同じ QTEST_FUNCTION_TIMEOUT を足した（1b62552）。やり直しの前に、PC2 で触った試験と GUI・E2E の残りを ASan で先に流し、レベル補正・トーンカーブの窓のメモリの漏れ（状態とその表示の関数が shared_ptr で互いを持つ。913b9ec で weak_ptr に）と、test_gui_color の ctest の上限（ASan で約 270 秒、上限 300 秒。止まった試験の見張りなので 900 秒に。5ebcbe6）を見つけて直した。
+  - 3 回目（凍結 5ebcbe6）: 上のとおり合格。
+- **工数の較正**: PC2 の 57 行の目安は 94.5 人日。実際は、設計と利用者の決定（10-17 08:45〜09:20）の後、実装の始め（09:30 ごろ）から V3 の凍結候補（16:05）まで約 6.5 時間（並行 4〜5）、V3 は 3 回で約 11.5 時間（合格した回は 5 時間 4 分）。
+- **残課題**: Windows（deferred、配布前の実機受入は必須）。インキのページで、写した画素のかけらを貼るとはみ出し off でもコマで切らない（PC1 からの動き。レビュー B で残した）。PSD の調整レイヤーは psd-tools とこのビルドでは確かめたが Photoshop の実機では確かめていない（SPEC COLOR-04 の既知の制限）。
+
+### PC3 の出口 V3 — 凍結 e9ee13c で Linux 合格（2026-10-22）
+- **凍結SHA**: `e9ee13ca9ea51cea81f63ea399308a794ad3d459`（native/wip-pc に push 済み）。計画は `validation_policy.py --base 5ebcbe6 --head e9ee13c --phase milestone`（基点は PC2 の出口の凍結。tier full、構成は linux-debug・linux-release・linux-asan・windows-debug・windows-release、plan_hash 64aa42d08b4b…）。5 回目の実行 2026-10-21 12:02〜10-22 01:20 UTC（Release・Debug は 12:37〜14:53、ASan は流し直しの 22:18〜01:01）。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.80GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44-fc-v139。Qt 6.11.2、GCC 13.3、参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、GENKO_MCP_PYTHON、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。空き容量（約 40 GB の割り当て）で 3 構成のビルドが同時に置けないので、Release（ctest 1 並列）と Debug（ctest 3 並列）を並べて流し、Debug のビルドを消してから ASan をビルドして流した（ctest 3 並列。result.json の ctest_parallel）。ASan の流し直しだけ、QTEST_FUNCTION_TIMEOUT=1700000・M3A_FLOOD_DEADLINE=5 を環境に置いた（下の 5 回目）。Debug は空き容量のため、デバッグ情報なし（`-g0`。GCC は -g の有無で作るコードを変えない。validation_run が確かめる構成の値 — build type・故障注入・-Werror・サニタイザー — は preset のまま）でビルドした（2 回目に、-gz と試験の実行物の strip でも 11 GB になり、空き容量が尽きたため）。
+- **結果**（validation_run.py の result.json。3 構成とも status finished・passed true・failures 空、除いた契約なし、CLI23 合格、同じ plan_hash）:
+  - linux-release: 197/197 合格（12:37–14:53、ctest 1 並列）。故障注入が Debug・ASan だけのための SKIP はこれまでの出口と同じ組で、合格に数えない。
+  - linux-debug: 197/197 合格（12:37–13:46、ctest 3 並列）。
+  - linux-asan: 197/197 合格、サニタイザの指摘なし（10-21 22:18–10-22 01:01、ctest 3 並列。下の 5 回目の流し直し）。
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1 件のみ＝Windows 2 構成が開発中 deferred。Linux 3 構成どうしの照合は指摘なし。**Windows を含む --pair 合格ではない。**
+- **実 xcb（Xvfb 1920×1080）GUI・E2E**（凍結のビルド）: Release で test_gui_* 43 本すべて合格（save は故障注入の SKIP）。Debug で test_gui_save（36）・test_app_e2e（開く→描く→Undo→保存→終了→別プロセスで再開、8）合格。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線。表示のみで合否判定なし。測定機は基準クラスではない＝ACCEPTANCE §6。）。計り方は PC1 の調べのとおり: 計測の前に sync して静まるのを待ち（始まりの負荷 0.46）、1 回温めてから 2 回計り、生ログ（GENKO_PERF_LOG）を残した。2 回の値（1 回目／2 回目）: 開いて最初の頁 743／810 ms・全頁 771／810 ms／入力→ライブ線 p95 1.28／1.88・p99 5.28／7.56 ms（n=43780）／線確定→表示 p95 23.6／21.0 ms／Undo→表示 p95 43.3／42.7 ms／頁切替 最初 p95 32.6／36.7・精細 p95 153／170 ms（n=4）／自動保存 p95 1.85／1.80 s（n=31）／保存中のイベントループ: 刻みの遅れ p99 8.68／10.0 ms、250 ms を超える停止 0、4 ms を超えた停止 p99 57.7／83.2 ms／走行全体の 4 ms を超えた停止の最大 71.2／254 ms。test_perf_render: F1 の頁 350 dpi 全体 1143 ms・線を足した後 545 ms・512×512 の部分 35 ms、線 200 本の小さな絵 1 ms、深い SO の 6 タイル 1 枚ずつ 7.7 s・4 枚同時 2.5 s（デコード 1 回、最大 699 MB）。**PC2 の出口（5ebcbe6）より遅い**（最初の頁 518／491 ms、自動保存 p95 1.51／1.54 s、350 dpi 全体 782 ms）。同じ凍結の 4 回目の計測（c06c5cd、製品のコードは同じ）も同じくらい（最初の頁 854／837 ms・350 dpi 全体 1381 ms）。**調べた結果（10-22、PC2 の凍結 5ebcbe6 の Release を同じ機械で組み、交互に 2 回ずつ計った）: 描画・入力・保存・PERF-F は PC2 と同じ**（350 dpi 全体 PC2 1192／1207・PC3 1175／1194 ms、入力→ライブ線 p95 1.2／1.0 と 1.1／1.6 ms、自動保存 p95 1.79／2.09 と 1.78／2.08 s）。遅く見えたのは機械の日による違い（PC2 の凍結もこの日は同じだけ遅い）。**開いて最初の頁だけは PC3 が遅い**（開くだけをさらに 6 回ずつ交互に計り、8 回ずつの中央値で PC2 720・PC3 827 ms、約 0.1 秒）。PC3 で増えた窓・パネル・メニューを開くときに組む分だった。PC4 の P0 で、パネルを先に dock・scroll に入れてから中身を足し（足すたびに大きさを測り直さない）、メニューの道筋を 1 回だけたどるように直した（窓を開くまでの命令数 PC3 21.0 億 → 15.6 億で PC2 の 17.5 億を下回り、壁の時間で約 0.1 秒縮んで PC2 と +20 ms ほど。PC4 の出口の計測で 689／675 ms）（記録は scratchpad の perf-ab）。
+- **PERF-F**（Release、test_perf_pipeline、ctest 経由。合否判定あり）: F3 の工程 107.5 秒・88 作業（PC2 の出口は 57.0 秒。この V3 の 4 回目は 84.3 秒）。全呼び出し n=314 p95 1.42 s／情報取得 p95 739 ms／編集の確定 p95 107 ms／候補の採用 p95 1.52 s／頁の仕上げ p95 848 ms（合格値は各 p95 2 秒）／8 ページの校正出力 10 回 7.61〜8.18 s（各 30 秒以内）。**全項目合格**（合格値は変えていない）。工程全体と全呼び出しが PC2 の出口より遅く見えたのは機械の日による違い（同じ機械で交互に計ると F3 は PC2 67.8／70.5 秒・PC3 66.5／72.5 秒、各 p95 も同じ）。
+- **台帳**: feature-ledger.json の PC3 の 250 行を実装済み・受入済みに（A0 9・A1 12・A2 10・A4 15・A5 3・B1 27・B2 25・B3 14・B4 15・C-a 26・C-b 28・C-c 23・C-d 31・C-e 12。A3 は行を持たない PSD の SO の読み書き）。edit.fill は、パターンの塗りが PC4（パターンのライブラリの後）なので一部実装のまま開けておく（行の note）。
+- **群の経過**: 土台 PC3-0（選択・マスク・パス・変形・判型の土台と、選択・編集の名前の変更）・A0（スマートオブジェクトの土台と絵の取り込み）→ 波: A1（中身とリンク）・A2（スマートフィルター）・A3（PSD の SO）・A4（スタックモードと台詞のラスタライズ）・B1（選択の基本と選択範囲の編集）・C-a（パスとベクトルマスク）・C-e（判型）・B2（編集・マスク・レイヤーの選択）・B4（修復）・C-b（シェイプ）・C-c（変形）・B3（賢い選択・選択とマスク・マッティング）・C-d（移動・整列・吸着）・A5（SO の変形とワープ系のスマートフィルター）。読取専用の独立レビュー 3 回（節 A＋C-d: P1 2・P2 5、節 B: P2 8・P3 約 12、節 C: P1 2・P2 8・P3 13）→ 直し 1〜5（保存・判型・ページの写し／選択範囲の格子・クリップボード・マスクの描き方・修復／変形・PSD・道具の状態／SO・保存・重さ／調整役の判断の残り）。P1・P2 はすべて直した。P3 は直したか、SPEC の既知の制限（COLOR-06・COLOR-07）に書いた。取り込みのときに群の重なり（同じ id・同じ言葉・メニューの並び・クリップボードと形の部品・リンクしたマスクの変形）を直した。直し 4 の報告から、復旧点が SO の素材を持たない不具合と、保存していない SO を持つ復旧点を採用すると本が無い素材を指す不具合（原稿の欠損）を見つけて直した（d85063f）。
+- **V3 の中で起きたこと（R4: 合格に使うのは 5 回目の Release・Debug と、5 回目の ASan の流し直しだけ。ほかの記録は scratchpad の pc3-v3/attempt1〜attempt5）**:
+  - 1 回目（凍結 d85063f）: 15:18 に機械が再起動して止まった（Release は 85 本まで失敗なし、ASan はビルドの途中）。
+  - 2 回目（同じ凍結）: Release で test_contract_ops（C-b がグラデーションの形を足して、断る言葉が変わった。この言葉だけ期待を C++ 版に。新しい言葉に日本語の読み替えが無かったので足した: e131935）と test_gui_adjust（ファイル メニューの並びが C-a の「パスを Illustrator へ…」に追いついていなかった）。ASan で試験のコードの誤り 2 つ（test_psd_smart が一時の文字列の中を読む heap-use-after-free、test_retouch の int のあふれ。製品のコードではない）。Debug のビルドで空き容量が尽き、ほかの試験が巻き込まれた（4711b5f で直し、Debug を -g0 に）。
+  - 2 回目と 3 回目の間: 2 回目の ASan が届かなかった試験 118 本を ASan で流すと、test_retouch の 1 関数が QtTest の 5 分を越えた（試験が層を 1 画素ごとに丸ごと読み直していた。Release で 83 秒 → 2.7 秒: 7055484）。重い負荷の下で test_contract_mcp が 1 回落ち、MCP の initialize の前に読んだ要求を、作業スレッドが遅れて動くと initialize の後の状態で答える製品の誤りを見つけて直した（受け取った時点の状態で断る。test_mcp_connection を足した: 8a89e43）。
+  - 3 回目（凍結 8a89e43）: 01:18 と 06:49 に機械が再起動して 2 度止まった（記録は attempt3・attempt3b。止まるまでに失敗はない。Release は 3b で合格まで流れたが、ASan が止まったので使わない）。再起動で背景の処理が消えるので、ここから ASan・Debug は 1 構成の中で ctest を 3 本並べた（validation_run.py に `--jobs` を足し、result.json の ctest_parallel に残す: c06c5cd）。
+  - 4 回目（凍結 c06c5cd）: Release・Debug は合格。ASan で、3 本並べて遅くなった分だけ見張りを越えたもの（test_contract_adjust の genko 1 回の 300 秒、test_smart_filters の ctest の 900 秒）と、test_mcp_api_e2e のトークンの渡し方（URL 安全な base64 の先頭が「-」だと `--id -…` がオプションと読まれる。負荷と関係なく 64 回に 1 回落ちる。`--id=…` に）。見張りの 75〜89% を使った試験の ctest の上限も 2 倍に（e9ee13c。止まった試験の見張りで、性能の合格値ではない）。CLI23 の flood_termination は、ASan の起動（約 1.2 秒、計装した共有ライブラリ約 860 MB を読む）だけで 1 秒の締め切りを越えた（断り自体は即座）。
+  - 5 回目（凍結 e9ee13c）: Release（ctest 1 並列）・Debug（3 並列）は合格。ASan（3 並列）は見張りの 2 つだけで落ちた: test_smart_stack の精密・インキの頁の階調が QtTest の 1 関数 5 分を越えた（4 回目は試験全体で 753 秒）ことと、CLI23 の flood の 1 秒。ソースを変えずに（R6 で Release・Debug の結果はそのまま使う）、QtTest の 1 関数の上限を 1,700 秒（ctest の各試験の上限は変えない＝止まったものはそこで捕まる）・M3A_FLOOD_DEADLINE を 5 秒（その検査自身の設定）にして ASan だけ流し直した。1 度目の流し直しは 20:44 に容器が回収されて止まり（31 本まで失敗なし、記録は attempt5/validation-linux-asan-2-stopped）、2 度目（22:18 から）で 197/197 合格（CLI23 も合格）。見張りの上限をそろえる直し（遅い 26 本の QtTest の 1 関数の上限を ctest の上限から 100 秒引いた値に）は、統合の後に入れる。
+- **工数の較正**: PC3 の 251 行の目安は約 264 人日（pc0 で約 280、重ね数えを直した見込み）。実際は、実装の始め（10-18 03:30 ごろ）から最後の凍結まで、API の週の上限で止まった約 42 時間（10-18 12:30〜10-20 06:00）を除いて約 17 時間（並行 4）、V3 は 5 回で約 35.5 時間（10-20 13:46〜10-22 01:20。直しと、容器の再起動・回収で止まった 3 回を含む。合格した記録は Release 2 時間 16 分・Debug 1 時間 9 分・ASan 2 時間 43 分）。
+- **残課題**: Windows（deferred、配布前の実機受入は必須）。開いて最初の頁が PC2 より約 0.1 秒遅い（→ PC4 P0 で直した）。遅い試験の QtTest の 1 関数の上限を ctest の上限にそろえる直し（→ 統合の後に 0e7c7c0 で直した）。tools/ci の test_validation_policy が M6（c287a75）からの test_gui_look の QSKIP で落ちる（製品の試験ではなく、V3 の対象外。→ PC4 P0 で参照 Python の確かめを契約試験 test_contract_materials へ移して直した: 3c7c1d7）。SPEC COLOR-05〜07 の既知の制限（200 dpi のまま残る所、PSD のフォルダーのマスク、変形のプレビューの重さ、表紙のある本の用紙、網の位相、自由変形の数の欄など）。PSD の SO・パス・シェイプ・ベクトルマスクは psd-tools とこのビルドで確かめたが、Photoshop の実機では確かめていない。
+
+### PC4 の出口 V3 — 凍結 7fb07f8 で Linux 合格（2026-10-28）
+- **凍結SHA**: `7fb07f8298fb4afd44004491c1254ffec831239f`（native/wip-pc に push 済み）。計画は `validation_policy.py --base e9ee13c --head 7fb07f8 --phase milestone`（基点は PC3 の出口の凍結。tier full、構成は linux-debug・linux-release・linux-asan・windows-debug・windows-release、plan_hash 954219e66707…）。3 回目の実行 2026-10-28 03:48〜15:47 UTC。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon。05:30 の再起動の前は @ 2.10GHz、合格に使った実行はすべて再起動の後の @ 2.80GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44-fc-v180。Qt 6.11.2、GCC 13.3、参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、GENKO_MCP_PYTHON、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。PC4 から要るもの: `GENKO_LIBRAW_ROOT`（LibRaw 0.22.x を組んだ場所。構成のときに要る）、`GENKO_PCRAFT_CHECK`（test_contract_pcraft の上流の読み手。tools/migration/pcraft_fixtures を上流 PhotoCraft v0.2.0 に当ててオフラインで cargo で組んだ。無いと SKIP になり V3 は落ちる）、apt の libopenexr-dev・libavif-dev・libaom-dev・libzstd-dev。空き容量（約 40 GB の割り当て）で 2 構成のビルドが同時に置けないので、1 構成ずつ組んで流し、流し終えたビルドを消した（ASan → Release → Debug。ctest の並列は ASan 3・Release 2・Debug 3、result.json の ctest_parallel）。ASan だけ M3A_FLOOD_DEADLINE=5（PC3 と同じ。CLI23 の flood の検査自身の設定）を環境に置いた。Debug は PC3 と同じく `-g0`。
+- **結果**（validation_run.py の result.json。3 構成とも status finished・passed true・failures 空、除いた契約なし、CLI23 合格、同じ plan_hash）:
+  - linux-asan: 241/241 合格、サニタイザの指摘なし（05:32–10:11、ctest 3 並列）。test_contract_pcraft は上流の読み手で 21 件すべて確かめた（SKIP なし）。
+  - linux-release: 241/241 合格（11:06–12:03、ctest 2 並列）。故障注入が Debug・ASan だけのための SKIP はこれまでの出口と同じ組で、合格に数えない。
+  - linux-debug: 241/241 合格（14:03–15:45、ctest 3 並列）。
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1 件のみ＝Windows 2 構成が開発中 deferred。Linux 3 構成どうしの照合は指摘なし。**Windows を含む --pair 合格ではない。**
+- **実 xcb（Xvfb 1920×1080）GUI・E2E**（凍結のビルド）: Release で test_gui_* 51 本すべて合格（save は故障注入の SKIP）。Debug で test_gui_save（36）・test_app_e2e（開く→描く→Undo→保存→終了→別プロセスで再開、8）合格。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線。表示のみで合否判定なし。測定機は基準クラスではない＝ACCEPTANCE §6）。計り方は PC1 からのとおり（sync して静まるのを待ち、始まりの負荷 0.46、1 回温めてから 2 回計る）。2 回の値（1 回目／2 回目）: 開いて最初の頁 689／675 ms・全頁 846／763 ms／入力→ライブ線 p95 1.52／1.33・p99 5.17／5.40 ms（n=43780）／線確定→表示 p95 21.1／21.3 ms／Undo→表示 p95 39.7／45.6 ms／頁切替 最初 p95 31.0／29.2・精細 p95 116／152 ms（n=4）／自動保存 p95 1.89／1.98 s（n=31）／保存中のイベントループ: 刻みの遅れ p99 8.00／9.18 ms、250 ms を超える停止 0、4 ms を超えた停止 p99 52.3／70.9 ms／走行全体の 4 ms を超えた停止の最大 61.1／71.1 ms。test_perf_render: F1 の頁 350 dpi 全体 926 ms・線を足した後 434 ms・512×512 の部分 31 ms、線 200 本の小さな絵 1 ms、深い SO の 6 タイル 1 枚ずつ 5.75 s・4 枚同時 2.22 s（デコード 1 回、最大 702 MB）。**開いて最初の頁は PC3 の出口（743／810 ms）より速く**、P0 の直し（パネルを先に dock・scroll に入れてから中身を足す・メニューの道筋を 1 回だけたどる。窓を開くまでの命令数 PC3 21.0 億 → 15.6 億で PC2 の 17.5 億を下回る）が効いた。ほかの値も PC3 の出口と同じか速い。
+- **PERF-F**（Release、test_perf_pipeline、ctest 経由。合否判定あり）: F3 の工程 64.6 秒・88 作業。全呼び出し n=314 p95 803 ms／情報取得 p95 704 ms／編集の確定 p95 110 ms／候補の採用 p95 1.53 s／頁の仕上げ p95 862 ms（合格値は各 p95 2 秒）／8 ページの校正出力 10 回 7.06〜7.94 s（各 30 秒以内）。**全項目合格**（合格値は変えていない）。
+- **台帳**: feature-ledger.json の PC4 の 261 行を実装済み・受入済みに（D0 5・D1 25・D2 25・D3 48・D4 13・D5 1・D6 3・E1 9・E2 18・E3 16・E4 18・E5 16・E6 25・F-a 13・F-b 13・F-c 9・F-d 1・F-e 2・F-f 1。D7・E-0・F-0・P0 は行を持たない土台・対応表・後始末）。PC3 で開けておいた edit.fill は E3 のパターンの塗りで閉じた。
+- **群の経過**: 土台 PC4-0（F-0 形式の土台・P0 PC3 の後始末・E-0 描く道具の土台・D0 フィルターの土台）→ 波 1: D1（ぼかし・シャープ・ノイズ・その他・ビデオ）・D3（フィルターギャラリー）・E1（点を打つブラシと鉛筆）・F-b（ファイルの入口・画像を開く）→ 波 2: D2（変形・ピクセレート・表現手法）・E3（パターン）・E4（塗りつぶし・グラデーション・描画色と背景色）・F-a（コーデック 13）→ 波 3: D6（レンズ補正・広角補正・消点）・E5（覆い焼き・焼き込み・スポンジ・ぼかし・シャープ・指先・混合ブラシ・背景消しゴム・色の置き換え）・F-d（PSD/PSB の全精度と知らない塊の保持）・F-f（.pcraft の読み書き）→ 波 4: D4（描画・ぼかしギャラリー）・D5（Camera Raw フィルター）・E2（プリセットとパネル）・F-c（書き出し形式・クイック書き出し・コピーを保存）→ 波 5: D7（PSD の filterFX と .pcraft のスマートフィルターの対応表）・F-e（カメラ RAW、LibRaw 0.22.x 動的リンク）・E6（レイヤースタイル 17 行）と F-c の上書きの守り。群ごとに読取専用のレビュー 1 回（23 回: P1 は F-b 1・E3 3・E4 1・F-a 1・F-d 3・F-f 3・E5 1・E2 2・E6 1・D0 1 の 17、P2 は約 90、P3 は約 300）→ 直し。P1・P2 はすべて直した。P3 は直したか、SPEC の既知の制限に書いた。取り込みのときに群の重なり（fx.hpp の Kernel::prepare と D4 の大きなぼかしの準備＝halo が全体のときだけ準備する、フィルター メニューと窓の一覧、op の一覧、メニューの項目数、環境設定のタブ）を直した。
+- **調整役の判断（推奨どおり・設計と利用者の決定による。詳しくは SPEC と台帳の各行）**: 重いフィルターは断らずに裏で進み、窓を閉じたら止める。SO に確かめずにスマートフィルターとして足す（SO が Photoshop の絵やフィルターマスクを持つときだけ確かめる）。Lab の明るさの向きのフィルターは L だけ。輪郭のトレースは「輪郭のトレース…」。8 bit の層の通常のモードのグラデーションは線を焼かずにパッチとして置く（描画モードのときだけ画素に）。インキのページの色混ぜは線を含めて読みインキにだけ書く。透明な画素の見えない色はフィルターで混ぜない。書き出しは本のファイル・フォルダー・配置の元・開いた元の画像の上には書かない（クイック書き出しは同じ名前なら番号を足す、すべてのページは 1 回尋ねる。CLI は上書きのまま）。写せないフィルターを持つ .pcraft の SO・隠した写せないフィルターは外して SO を残す、PSD の書き戻しはフィルターが同じなら SoLd をそのまま。RAW を中身に持つ SO は PSD では Photoshop の shown を残す。描画レイヤーに変換はスタイルを残して描き込まない。16・32 bit のページの新しい層（panel_clip の既定）は 8 bit のまま（公開の op の既定）。30000 px を超える PSD は断って PSB を勧める。
+- **V3 の中で起きたこと（R4: 合格に使うのは 3 回目だけ。ほかの記録は scratchpad の pc4-v3・pc4-v3b・pc4-v3c/attempt1）**:
+  - 1 回目（凍結 9527394、10-27 14:21〜）: ビルドの間に機械の再起動 2 回と容器の回収 1 回で止まり、その後 Release と Debug を並べて組んで空き容量が尽きた（Release・Debug は使わない）。ASan で落ちたのは 11 本: **製品の不具合 4 つ**（RAW の現像が、高精度の面がその場で読む f32 の画素を先に放していた use-after-free、Camera Raw の窓が一時の文字列の上の色の見方を持っていた use-after-free、ぼかしギャラリーの作業と欄の間の shared_ptr の輪による漏れ、Camera Raw の編集の窓の親の無い欄によるフォントの漏れ）、**試験の誤り 3 つ**（test_contract_copy が一時の値の中を回る、test_gui_pen が放した後のページの dpi を読む、test_gui_brush_settings の new/delete の不一致）、3 本並べた ASan での見張りの越え 4 本（test_fx・test_fx_render・test_contract_paint_tools・test_fx_lens）。df1382f・…・ebedbd4 で直した（見張りは ctest の上限と QtTest の 1 関数の上限で、性能の合格値ではない）。
+  - 2 回目（凍結 ebedbd4、10-27 22:40〜）: 1 構成ずつ組んで、途中から再開できる形に。00:15 に機械が再起動（ASan の途中、失敗なし）。ASan で、test_fx_d2・test_fx_lens が QtTest の 1 関数の上限を越え、test_contract_pcraft が GENKO_PCRAFT_CHECK の無い SKIP（合格に数えない）、CLI23 の flood_termination が ASan の起動（約 1.1 秒）だけで 1 秒を越えた。7fb07f8 で 2 本の上限を上げ test_fx_lens を 1 本ずつに、上流の読み手を組んで環境に、M3A_FLOOD_DEADLINE を 5 秒に。
+  - 3 回目（凍結 7fb07f8、10-28 03:48〜）: 05:30 に機械が再起動（ASan の 57 本まで失敗なし、attempt1）。流し直した ASan・Release・実 xcb の GUI・性能が合格。Debug は、私の流す手順が PC3 の `-g0` を書き漏らして `-g` で組み、試験の前に空き容量を使い切った（1005/1706 で止まった。試験は 1 本も流れていない、attempt2）。`-g0` で組み直して合格（ソースと ASan・Release の実行物は同じなので R6 でそのまま使う）。
+- **工数の較正**: PC4 の約 260 行の目安は約 293.5 人日（pc0 で約 270）。実際は、実装の始め（10-20 21:30 UTC）から最後の凍結（10-28 03:48）まで、API の週の上限で止まった約 96 時間（10-23 05:55〜10-27 06:00）を除いて約 64 時間（並行 4）、V3 は 3 回で約 25.5 時間（10-27 14:21〜10-28 15:47。直しと、機械の再起動・容器の回収で止まった 5 回を含む。合格した記録は ASan 4 時間 39 分・Release 57 分・Debug 1 時間 42 分）。
+- **残課題**: Windows（deferred、配布前の実機受入は必須。PC4 の宿題: LibRaw の DLL を同梱して開けること、PSD の filterFXList の並びとフィルターマスクの id を Photoshop の実機の PSD で確かめること、Windows の静的なライブラリ（libdeflate・openjph・libyuv）のライセンス文と SBOM）。（PC6 の台帳の照合で訂正: レイヤー効果・Blend If・塗りの不透明度は PC4 E6 で PSD から読んで描く。残るのはラベルの色だけ）.pcraft は RAW を中身に持つ SO の shown を持てない。32 bit の sRGB のページの PSD は値をそのまま書く（Photoshop は 32 bit を線形として読む）。インキのページの色混ぜで、透明が混じる縁の色が前の黒への寄りなしになった（これから描く筆だけ）。E4 の make_precise は層全体を予算の外で作る。F-b のレビューの P3 のうち直さなかったもの（ほかの書き手の変更も戻ることの知らせ・色の表の画像の ICC・最近使用したファイルほか）。genko review の HTML の「書き出し…」と ops_schema.json の「glow (光彩拡散)」の言葉（公開の出力・契約なので残した。利用者に報告）。SPEC COLOR-05〜09 の既知の制限。tools/ci の test_validation_policy（Windows で流す試験は参照 Python が無いことで SKIP しない）が、E6 の test_layer_styles::psdWrittenAndRead の psd-tools の確かめの QSKIP で落ちる（製品の試験ではなく V3 の対象外。直すと凍結と違うソースになり 3 構成をやり直すので、PC3 の前例どおり PC5 の最初の群で契約試験に移す。Windows の実機受入の前に要る）。（PC5 で test_contract_psd_smart の layerStylesReadByPsdTools に移して済み）
+
+### PC5 の出口 V3 — 凍結 98b180b で Linux 合格（2026-11-05）
+- **凍結SHA**: `98b180bee5cef076bc3d58441b7164bc8611b9e4`（native/wip-pc に push 済み）。計画は `validation_policy.py --base 7fb07f8 --head 98b180b --phase milestone`（基点は PC4 の出口の凍結。tier full、構成は linux-debug・linux-release・linux-asan・windows-debug・windows-release、plan_hash 9060b596267d…）。4 回目の実行 2026-11-05 04:45〜20:44 UTC（JST 13:45〜翌 05:44）。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.10GHz）/ RAM 16GB（cgroup の上限も約 16GB）/ Ubuntu 24.04.5 / kernel 6.18.44-fc-v236。Qt 6.11.2、GCC 13.3、参照 Python 3.12＋Pillow・numpy・psd-tools（PC4 と同じ）、GENKO_MCP_PYTHON、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。PC4 から要るもの（`GENKO_LIBRAW_ROOT`＝LibRaw 0.22.2、`GENKO_PCRAFT_CHECK`、apt の libopenexr-dev・libavif-dev・libaom-dev・libzstd-dev）はそのまま。PC5 から要るもの: Rust（cargo・rustc 1.97.0、`GENKO_CARGO`。J-f の `genko-plugin-host` を native/wasm-host から組む。wasmi 2.0.0 などは crates.io の固定の版と Cargo.lock の checksum）。空き容量（ビルドの無いときの空き約 21 GB）で 2 構成のビルドが同時に置けないので、PC4 と同じく 1 構成ずつ組んで流し、流し終えたビルドを消した（ASan → Release → Debug。ctest の並列は ASan 2・Release 2・Debug 3、result.json の ctest_parallel）。ASan だけ M3A_FLOOD_DEADLINE=5（PC3 からと同じ）。Debug は `-g0` と `-DGENKO_SHARED_LIBRARIES=ON`（下の 3 回目。試験の実行物が静的だと 1 本約 140 MB×約 290 本で約 35 GB になり容量に入らないため。この option の既定は OFF で、製品の Release・Debug は今までどおり静的、ASan は前から共有）。
+- **結果**（validation_run.py の result.json。3 構成とも status finished・passed true・failures 空、除いた契約なし、CLI23 合格、同じ plan_hash）:
+  - linux-asan: 293/293 合格（試験の関数 5,500、SKIP なし）、サニタイザの指摘なし（11:05–16:36、ctest 2 並列）。test_contract_pcraft は上流の読み手で確かめた（SKIP なし）。
+  - linux-release: 293/293 合格（17:28–18:14、ctest 2 並列）。SKIP 33 件は故障注入が Debug・ASan だけのためのもの（test_transaction・test_contract_save・test_save_e2e・test_migrate_e2e・test_session・test_gui_save・test_app_e2e。これまでの出口と同じ組で、合格に数えない）。
+  - linux-debug: 293/293 合格（試験の関数 5,500、SKIP なし。19:20–20:42、ctest 3 並列）。
+  - 試験の数は PC4 の出口の 241 本から 293 本に（PC5 の群の新しい試験と、test_contract_plugins から分けた test_contract_wasm_plugins）。
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1 件のみ＝Windows 2 構成が開発中 deferred（PC4 と同じ）。Linux 3 構成どうしの照合は指摘なし。**Windows を含む --pair 合格ではない。**
+- **実 xcb（Xvfb 1920×1080）GUI・E2E**（凍結のビルド）: Release で test_gui_* 63 本すべて exit 0（関数 1,167 合格、save は故障注入の SKIP）。Debug で test_gui_save（36）・test_app_e2e（開く→描く→Undo→保存→終了→別プロセスで再開、8）合格。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線。表示のみで合否判定なし。測定機は基準クラスではない＝ACCEPTANCE §6）。計り方は PC1 からのとおり（sync して静まるのを待ち、始まりの負荷 0.42、1 回温めてから 2 回計る）。2 回の値（1 回目／2 回目）: 開いて最初の頁 657／1062 ms・全頁 748／1149 ms／入力→ライブ線 p95 1.29／1.42・p99 2.97／3.54 ms（n=43780）／線確定→表示 p95 13.4／13.8 ms／Undo→表示 p95 28.2／29.8 ms／頁切替 最初 p95 23.4／21.6・精細 p95 102／96.8 ms（n=4）／自動保存 p95 1.56／1.87 s（n=31）／保存中のイベントループ: 刻みの遅れ p99 5.40／6.45 ms、250 ms を超える停止 0、4 ms を超えた停止 p99 33.9／55.0 ms／走行全体の 4 ms を超えた停止の最大 37.7／98.7 ms。test_perf_render: F1 の頁 350 dpi 全体 800 ms・線を足した後 454 ms・512×512 の部分 23 ms、線 200 本の小さな絵 1 ms、深い SO の 6 タイル 1 枚ずつ 4.32 s・4 枚同時 1.99 s（デコード 1 回、最大 703 MB）。グループの PSD の頁（I-b で足した計測）は GENKO_PERF_GROUPS_PSD を渡していないので SKIP（任意の計測）。**test_perf_app の 1 回目はどの値も PC4 の出口（開いて最初の頁 689／675 ms ほか）より速い**。2 回目は開くのが約 0.4 秒遅く、走行全体の停止の最大も大きかった（同じビルド・同じ機械の続けての実行。原因は調べていない、合否判定のない値）。test_perf_render は線を足した後だけ PC4（434 ms）より少し遅く、ほかは速い。
+- **PERF-F**（Release、test_perf_pipeline、ctest 経由。合否判定あり）: F3 の工程 48.1 秒・88 作業。全呼び出し n=314 p95 651 ms／情報取得 p95 511 ms／編集の確定 p95 73.7 ms／候補の採用 p95 1.09 s／頁の仕上げ p95 615 ms（合格値は各 p95 2 秒）／8 ページの校正出力 10 回 5.02〜5.43 s（各 30 秒以内）。**全項目合格**（合格値は変えていない）。
+- **台帳**: feature-ledger.json の PC5 の 334 行を実装済み・受入済みに（G-a 18・G-b 16・G-c 20・G-d 20／H-a 17・H-b 19・H-b・J-b 1・H-c 25・H-d 14・H-d・H-e 1・H-e 12・H-f 18／I-a 23・I-b 1・I-c 9・I-d 6・I-e 9・I-f 6・I-g 5・I-h 2／J-a 15・J-b 14・J-c 8・J-d1 15・J-d2 7・J-e1 9・J-e2 14・J-f 7・J-g 3。節ごとに G 74・H 105・I 61・J 92、2 群にまたがる行 2。Z0・G-0・H-0・I-0・J-0 は行を持たない土台、G-e は G-a〜G-d の行の PSD・.pcraft の分で行を持たない）。render:GPU-CPU-parity は下の利用者の決定（2026-10-29）の許しを書いたまま。最後の edit.preferences.integrations は J-g の「連携」の面で閉じた（cf21ef8）。台帳の残りは platform:Windows・platform:Linux（PC6 の配布、未着手）と対象外 2 行だけ。
+- **群の経過**: 設計（4 節を読取専用で、10-28 21:40〜22:19、利用者の決定 1〜12）→ 土台 PC5-0（Z0 PC4 の出口の決定 4 つと tools/ci・G-0 文字の土台・H-0 メニューの骨組みと名前と環境設定の表・I-0 自動処理の土台、続けて J-0 拡張 6 つの枠と重ね描きと PSD・.pcraft の口）→ 波 1: G-a（文字レイヤーと文字ツール）・H-a（表示と画素・% の意味）・I-b（グループとフレーム）・J-a（レイヤーカンプ）→ 波 2: G-b（組版・OpenType・書体・右から左、SheenBidi）・H-b（ガイド・グリッド・エクストラ・単位）・I-d（変数とデータセット）・J-c（注釈）→ 波 3: G-c（文字スタイル・段落スタイル）・H-c（窓の区画とパネル）・I-e（バッチ・ドロップレット・スクリプト・イベント）・J-d1（ものさし・カウント・計測）→ 波 4: G-d（パネル・スペルチェック・検索と置換・書体の置き換え、SCOWL 50）・H-d（ワークスペース・キーの組・メニュー・ツールバー）・I-a（レイヤーの基本の残り）・J-b（スライス）→ 波 5: G-e（PSD・.pcraft の文字）・H-e（環境設定と API）・I-c（アートボード）・J-d2（計測ログ・目盛りマーカー）→ 波 6: H-f（取り消し・メモリをクリア・画素の縦横比）・I-f（プリント・コンタクトシート・画像アセット）・J-e1（タイムライン）・J-e2（ビデオレイヤー）→ 波 7: I-g（自動整列・自動合成・Photomerge・スタック・統計）・I-h（HDR Pro・写真の切り抜き）・J-f（WASM のプラグイン）・J-g（制御チャンネルとアクション）。実際は枠が空き次第次の群を始め、波 5〜7 は重なった（多いときに 6 群が並行）。群ごとに読取専用のレビュー 1 回（33 回）→ 直し。P1・P2 は直した（H-a の GPU と CPU の一致の許しは利用者の決定で）。P3 は直したか、SPEC の既知の制限に書いた。取り込みは群ごとに native/wip-pc へ merge し、合わせた確認（w0〜w7a: 関係する単体・契約・GUI と tools/ci）を挟んだ。取り込みで直した群の重なり: メニューの表示・非表示 ▸（menu_show）と読み込み ▸（menu_import）を探して無ければ作るに一本化、is_query のあいまいさ（command_bus.hpp）、命令の数（最後は 820）と commands.json の作り直し、環境設定の面（G-d のテキスト・J-f のプラグイン・J-g の連携を H-e の作りに）、test_contract_studio の配置画像の PSD の回帰（H-b の 1032 のガイドの書き方、aefcf6c）。新しい外部の物: SheenBidi（Apache-2.0、third_party に源）・SCOWL size 50（同梱）・wasmi 2.0.0 ほかの Rust の crate（MIT/Apache-2.0）。新しい拡張: type@1・groups@1・image-assets@1・layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1・pixel-aspect@1・layer-locks@1・blend-channels@1・plugin-filters@1。
+- **調整役の判断と利用者の決定（設計の決定 1〜12 は上の「PC5 の設計と利用者の決定」の節。詳しくは SPEC と台帳の各行）**:
+  - 利用者の決定（PC5 の途中）: H-0 で、Photoshop の組で Genko だけの道具（選択・効果線・3D 操作・線の修正・塗りつぶしツール）に修飾キー付きのキー（Shift+N・K・D・R・Q）を付け、初めての起動でキーの組の変更を知らせる。H-a（2026-10-29）で、GPU と CPU の表示の一致は、再標本しない表示（今のまま・反転・画素の段・色の校正）は 1/255、回転・画面に合わせた倍率は 2/255 を超える画素 2‰ まで・差 12/255 まで（Mesa のテクスチャと Qt の双一次の重みの丸めの違い）。
+  - **決定 13（10-29、キー）**: Photoshop の組の Shift+Ctrl+M は「計測値を記録」に。「コマを結合」（act_merge）は Photoshop の組で Ctrl+Alt+M に移した（Genko の組は今のまま）。
+  - **決定 14（11-03、WASM）**: 「PhotoCraft に合わせて実装するだけで良い」。設計の WAMR は原本がこのセッションの GitHub の範囲外で取れず、J-f を止めて利用者に聞いた。調整役の読みで WAMR をやめ、上流と同じ wasmi 2.0.0（Rust）で上流 crates/plugins の作り（ABI v1・manifest・燃料・記憶の上限・帯）をそのまま写し、別の実行ファイル `genko-plugin-host`（genko と同じフォルダー）で動かす。プラグインのフィルターはスマートフィルターにもなる（plugin-filters@1）。既定無効・明示選択・sha256 の同意、入れる・選ぶ・同意の入口は MCP・HTTP・制御チャンネルに作らない。
+  - **決定 15（11-03、余白の無いページの辺）**: render::mm_to_px の最小 1 のため、余白・塗り足しの無いページ（画像を開いた本・Webtoon の型など）を仕上がり／裁ち落としで切る書き出しが上と左の 1 列を落として 1 列ずれていた前からの誤りを直した（書き出し・EPUB・Kindle など、見開き・表紙の背と袖・下見の枠も）。当たる本の書き出しのバイトは変わる。余白のある本・paper・原稿の保存は変えない。置いた画像の切り抜きの箱（rect_px）は余白のあるページのバイトを変えるので直さない（調整役、SPEC に書いた）。
+  - 調整役の判断（推奨どおり）: 文字・グループ・アートボード・カンプ・スライス・注釈・画像アセットなど PC5 の新しい op は MCP の agent_op に入れない（PC3・PC4 と同じ。CLI・窓・HTTP の apply からは通る）。MCP・HTTP から自動処理は使えない。古いアクションが承認・ロック・取り消しを持てば、どの op かを言って断る（全入口で同じ）。新しい op は strict_gates の関門に入れる。J-e2 の 16 bit の素材は 16 bit の PNG（スマートオブジェクトの画像の道にそろえる）。ドロップレットの起動ファイルは Windows では .lnk。スライスの道具 2 つは余分なツールの側。メモリをクリアの名前は場所つき（取り消し（編集）・ヒストリー（ウィンドウ）、決定 8 の決まり）。V3 の中で、キーをどの平台でも同じにした（下の 3 回目）。
+- **V3 の中で起きたこと（R4: 合格に使うのは 4 回目だけ。ほかの記録は scratchpad の pc5-v3/attempt1〜3・attempt4-asan、直しの報告は pc5-v3/asan-fix-report.md・xcb-debug-fix-report.md）**:
+  - 1 回目（凍結 cf21ef8、11-04 09:04〜）: ASan のビルドの間に機械の再起動 3 回（09:30・10:05・10:36。run.sh は途中から再開できる形なので流し直した）。待ちの間に容器が回収されるらしいので、見張りの背景の Bash を常に動かして容器を起こしておいた。ASan のビルドの後の空きは 3.6 GB で、取り込み済みの worktree 35 個を消して 6.3 GB に。ASan で 292 本中 72 本が落ちた（14:02）: **製品の不具合**（UBSan の破棄中の呼び出し＝H-c の修飾キーの Latch が `~MainWindow` の後の子の破棄の event で窓を呼ぶ 61 本、同じ種類の G-a のその場の文字の編集の callback と J-a・J-c・J-d1・J-0 ほかのパネルの `visibilityChanged` の lambda、LSan の fontconfig の漏れ（test_gui_layout ほか）＝G-d が窓を作る途中で同梱の書体を足してキャッシュを捨てていた→起動のときに一度だけ足す、16 bit のページのスマートフィルターに 0..1 の外の値が来て描画ごと例外＝Release でも落ちる物）、**試験の誤り**（一時の値の中を回る heap-use-after-free 6 本、利用者の決定 2026-10-28 で変えた add_layer の断りの言葉の読み替えが 2 本の契約試験で漏れ、プラグインのスマートフィルターを許した J-f の後の古い期待、test_type_styles の時間の上限を最適化しない build では比で見る＝regex_timing の前例どおり）。86c16b0 で直した。
+  - 2 回目（凍結 86c16b0、11-04 17:13〜）: ASan の ctest は 292/292 合格だが、validation_run の「Totals は 1 本に 1 行」を test_contract_plugins（1 本に 2 つの QtTest）が満たさなかった。WebAssembly の組を test_contract_wasm_plugins に分けた（5f7283f、確かめる中身は同じ）。
+  - 3 回目（凍結 5f7283f、11-04 20:15〜）: ASan（23:10）・Release（01:37）は合格。Release の途中で容器の再起動 2 回（00:06・00:34、28 分おき）で Release を流し直し、待ちの間の回収を防ぐ見張りの作業役を出した。実 xcb の GUI で 2 本落ちた: test_gui_prefs commandsJsonIsTheMenus（いくつかの命令のキーを QKeySequence::StandardKey で作っていて、offscreen と xcb で違った: やり直し Ctrl+Y／Ctrl+Shift+Z、閉じる、終了 Ctrl+Q）と test_gui_workspace theMenusHideAndColourTheirItems（試験の待ち方の誤り: xcb では窓が前に出る前にキーを押していた）。Debug は `-g0` でも静的な試験の実行物が容量を使い切った（02:45、空き 40 MB）。f55e812 でキーを全部明示してどの平台でも同じに（どこかの平台で使えたキーはどこでも使える: Genko の組のやり直しは Ctrl+Y・Ctrl+Shift+Z、終了は両方の組で Ctrl+Q。SPEC VIEW-01 に書いた）、試験は `QApplication::activeWindow()` を待つ。98b180b で `GENKO_SHARED_LIBRARIES`（既定 OFF）を足し Debug を共有ライブラリで組む（約 3 GB）。共有の Debug で、PSD の書き出しが PSD から何も持たないページで空の optional を読む未定義の動作（test_contract_studio の SIGSEGV）が見つかり直した。
+  - 4 回目（凍結 98b180b、11-05 04:45〜）: ASan（3 並列、05:45–10:12）で 293 本中 1 本、test_contract_m3_mixed の 1 手で genko が exit -1。dmesg で cgroup のメモリ不足による OOM killer（genko、anon-rss 約 1 GB）と分かった。単独で流し直すと合格。コードは変えず、ASan の並列を 3→2 にして ASan だけ流し直し（11:05–16:36）合格、続けて Release・実 xcb の GUI・性能・Debug・--pair（20:43）。4 回目に機械の再起動・容器の回収は無かった。
+  - ディスク: ビルドの無いときの空き約 21 GB。ASan のビルドで約 12 GB、Release で約 15 GB、共有の Debug で約 3 GB。
+- **工数の較正**: PC5 の 338 行（PC5 の 334 行と行を持たない土台）の目安は約 306.5 人日（設計）。実際は、設計の始め（10-28 21:40 UTC）から V3 の合格（11-05 20:44 UTC）まで、API の週の上限で止まった約 99 時間（10-30 03:10〜11-03 06:00）を除いて約 92 時間。うち実装（設計から最初の凍結 cf21ef8 の 11-04 09:04 まで）が約 56.5 時間（並行 4、多いときに 6。容器の再起動 5 回で作業役を再開した）、V3 は 4 回で約 35.5 時間（11-04 09:04〜11-05 20:44。直しと、機械の再起動・容器の回収で止まった 5 回と OOM の 1 回を含む。合格した記録は ASan 5 時間 31 分（2 並列）・Release 46 分・Debug 1 時間 22 分）。
+- **残課題**:
+  - Windows（deferred、配布前の実機受入は必須）。PC5 で増えた Windows の宿題: 制御チャンネルの名前付きパイプの相手の確かめ（GetNamedPipeServerProcessId・ClientProcessId と SID、UserAccessOption。Linux ではコンパイルされない）、native/wasm-host の cargo（MSVC）での組み方と genko-plugin-host.exe の置き場所・SBOM の対応、印刷（プリンターの一覧・ICC・`genko print --printer`）、ドロップレットの .lnk（% の入ったパス・エクスプローラーの引数）、GPU の表示の実機のドライバー（区画を移すときの GL の文脈）、OS に依る環境設定の項目（UI の拡大・縮小、カラーピッカーの窓、ビープ音、クリップボードを残す）、32 bit の PSD を Photoshop で 1 枚開いて見ること。PC4 からの宿題（LibRaw の DLL を同梱して開けること、PSD の filterFXList の並びとフィルターマスクの id、静的なライブラリのライセンス文と SBOM）は残る。
+  - MCP の stdio・HTTP の深い JSON の読み方（J-g のレビューで見つかった、J-g より前からの「読んでからコピー」の形。制御チャンネルは J-g で直した）。（PC6 のレビューで閉じた: MCP の stdio・MCP の HTTP・genko serve は読むときに深さを数え、255・255・1000 で断る。genko serve の深さ 1000 の再帰は Windows のスタックで未確認）
+  - Photomerge の大きな写真の見積もりは安全側: 2400 万画素の写真 2 枚（半分ずつ重なる）は読み込むときの縮小をおおよそ 45 % 以下にしないと断る（全体を記憶の中で作るため、2 GiB の見積もり）。WASM のプラグインは 1 つのホストで帯を順に流す（上流は並べる。重いプラグインは遅い）、余白 256 のプラグインは B4・600 dpi で約 155 MiB を借りる。
+  - HDR Pro の位置合わせ（MTB、上流・Photoshop と同じ算法）は、一方向の傾きだけの絵や、いちばん明るい画像の半分近くが白く飛ぶ場面で 2 px ずれることがある。
+  - PSD は Photoshop の実機で確かめていない: 文字レイヤー（TySh・EngineData。Photoshop が書いた実物の見本が無く、この版の書き手・psd-tools・手で組んだ EngineData で確かめた）、アートボード、カンプ（1065）・スライス（1050）・計測（1074）・ガイド（1032）、32 bit の PSD の線形の値。
+  - 日本語の項目名・窓の欄の名前（文字・段落スタイル、パネル・環境設定、窓の並べ方、スクリプトイベント、アートボード、変数・データセット、自動処理・画像プロセッサー、プリント・コンタクトシート・画像アセット、自動整列〜統計、HDR Pro・写真の切り抜き、計測ログの列）は Photoshop の実機と照合していない。
+  - そのほか: 高精度のページでグループを通して見える層の結合・統合は断る（言葉で逃げ道を言う）。RGB の 32 bit のページの PSD の層は 8 bit の絵から（統合画像と中身の PSD だけが全精度）。コンタクトシートは 1 枚 1 レイヤー、画像アセットの png8 はフルカラーの PNG で書いて知らせる。テキストレイヤーの文字のガンマは色の文字・色の下地で台詞と少し違う。LSan の件で、字形パネルでパソコンの書体ファイルを見せるときの書体の追加・削除は今も実行中に起きる（古い QFontEngineData を持ち続ける Qt の中の物は突き止めていない）。16 bit のスマートフィルターに 0..1 の外の値が来るようになった commit は突き止めていない。SPEC の各節の既知の制限。
+  - 次の V3 のための覚え: 命令やキーを足したら commands.json を作り直す（`GENKO_WRITE_COMMANDS=1 ./test_gui_prefs commandsJsonIsTheMenus` → genko_core・genko・test_gui_prefs・test_contract_prefs を組み直す）。この機械（16 GB）では ASan は 2 並列、Debug は `-g0`・`-DGENKO_SHARED_LIBRARIES=ON`。実 xcb の GUI は offscreen と違う所（キー・窓の前に出る時）を見るので省かない。
+  - 次は PC6（台帳全件の同等性、独立レビュー、V3（Linux 3 構成・実 xcb の GUI・性能・配布物））。
+
+### PC2 の設計と利用者の決定（2026-10-17）
+- 設計: 補正・色管理（PLAN 工程 3）の 57 行（pc0 の目安 94.5 人日）。中心は image.adjustments.*（23）・layer.newAdjustmentLayer.*（16）・setAdjustment・自動トーン/コントラスト/カラー、色管理の残り（プロファイルの不一致・情報、取り込む画像の埋め込みプロファイル、モニター表示）、画像操作・演算・トラッピング・フェード、補正・属性・ヒストグラム・情報のパネル、PC1 で開けたままの document:color-depth-model（高精度・インキのページでまだ断る合成: トーンの層・描画モードの補正層・形を動かす補正・フォルダーの中・線や絵や書式・効果を持つ高精度の層）。今の補正 10 種（Python の 9 種と露光量）は作り直さずに広げ、C++ 版だけの設定は補正の中の `native` 1 か所に、新しい種類 8 つ（色相・彩度、自然な彩度、カラーバランス、白黒、レンズフィルター、チャンネルミキサー、特定色域の選択、カラールックアップ）。原稿の拡張 `adjustments@1`。新しい外部ライブラリは要らない。補正以外の image.* 23 行は PC3（判型・回転・切り抜き 11）と PC5（計測・複製・変数 12）へ。小群: PC2-0（補正の土台）→ PC2a（階調の補正・3D LUT・補正のパネル）・PC2b（色の補正）・PC2c（局所の補正と画像の演算）・PC2d（色管理と高精度の合成の残り）を並行。
+- 利用者の決定: (1) 範囲は 57 行すべて。(2) 補正レイヤーの描画モードは補正の中に持ち、どのページでも効かせる。(3) 画面で新しく作る補正は上流（Photoshop 型）の形を既定に（今ある層は元の形のまま直せる）。(4) レベル補正・トーンカーブは上流の式も選べるようにする。(5) **PSD の調整レイヤーはいつも読み書きする**（補正レイヤーを持つ原稿・PSD では Python とのバイト一致と取り込みの結果の一致をやめる。補正レイヤーの無いものは今と同じバイト）。(6) 高精度の層の効果も高精度で作り直す。(7) ほかの原稿を使う操作は同じ原稿の中だけ（色の一致だけ、ほかの原稿の色の統計を画面が計算して渡す）。 (8)（PC2a の後）レイヤー → 色調補正 のコマンドとレイヤーパネルの補正レイヤーの項目は Photoshop と同じ名前にし（「レベル補正…」など）、コマンドを探す窓では置き場所で区別する（GUI 試験の「名前は重ならない」の決まりをこの決定で変える）。
+- PC1 の出口で遅く見えた AC-PERF の表示の値は、調べた結果 PC1 によるものではなかった（上の PC1 の出口の記録）。PC1 より前からある停止の元（線ごとの色の履歴の設定の書き込み、窓の影と枠の塗り）を PC2 で直し、V3 の計り方を直す。
+
+### 利用者の指示（2026-10-17、PC2 の V3 の間）
+- 旧 Python 版は今後消す。**取り込み済みの機能は Python 版を比べる手本にしない**（手本は、取り込み済みの機能は今の C++ 版、新しい機能は上流 PhotoCraft）。仕様・ヘルプ・HANDOFF などの文書に Python 版との違いを書かない。
+- **Python 版からの引き継ぎ（設定・データの移し替え）と、Python 版と同時に動かす考えは要らない**。C++ 版ができたら、すべて新しく入れて載せ替える。
+- 当て方（PC3 から）: 新しい機能の設計に、Python とのバイト・画素の一致・Python が読める形・引き継ぎ・同時に動かすための仕組みや費用を入れない。今の原稿は今と同じに開けて同じに描ける（壊さない）。新しい機能を持つ原稿は今までどおり拡張（features）に。公開の契約（op の引数・MCP の道具表・CLI の出力）は使い手との約束として変えない（足すのはよい）。src/genko は変えない。Python と比べる今の試験は、振る舞いを変えない所の見張りとして流し続け、決定で振る舞いを変える所は期待を C++ 版の正の値に置き換える（理由は commit に）。Python と比べる試験を C++ の正の値に移す作業と、今ある同時に動かすための仕組みを消す作業は、Python 版を消すときの別の作業にする。
+
+### PC3 の設計と利用者の決定（2026-10-17）
+- 設計: PLAN 工程 4 の 251 行（pc0 の目安で約 280 人日、重ね数えを直した見込み約 264 人日）を 3 つの節に。A スマートオブジェクト・スマートフィルター（49 行）、B 選択・マスク・修復（82 行）、C パス・ベクトル・変形・判型（120 行。PC2 から回した判型・回転・切り抜きを含む）。ほかの工程へ: PC4 にパターンの塗り・背景消しゴム・色の置き換え・レンズ補正・広角補正・消点、PC5 にアートボード・レイヤーを自動整列・スライス。土台 2 つ（PC3-0: 選択・マスク・パス・変形の土台と名前の変更、A0: スマートオブジェクトの土台）を先に並行し、その後 4 つずつ並行。
+- 利用者の決定: (1) コンテンツを編集は同じ原稿の別のタブで開く。(2) 「画像を読み込む…」もスマートオブジェクトにする（スタジオの候補の採用・op `place_asset` は配置画像のまま）。(3) PSD のスマートオブジェクト・パス・シェイプ・ベクトルマスク・マスクのリンクはいつも読み書きする（今ある塗りの層は画素のまま）。(4) 選択範囲は今のまま窓の状態（クイックマスクだけ原稿のチャンネル）。(5) 選択の道具・編集の項目は、今あるものも全部 Photoshop の名前にする（項目の id は変えず、利用者のショートカットなどの読み替えを足す）。(6) 賢い選択（被写体・空・オブジェクト・クイック選択・境界の調整）は上流どおり古典的な算法（学習モデルなし）。(7) シェイプはペンの層を広げて持つ（形の部品、拡張 `pen-shapes@1`。部品の無いペンの層は今と同じ）。(8) 判型は本全体（画像解像度・カンバスサイズ）とページごと（切り抜き・トリミング・回転、拡張 `page-spec@1`）の両方。
+- 調整役の判断（推奨どおり・上の指示による）: 範囲は 251 行すべて。リンクした SO は原稿に写しを持つ。スマートフィルターは描く解像度で掛ける。高精度・インキのページの選択範囲とマスクはページの画素の細かさ（600 dpi まで）。新しく作るレイヤーマスクはリンクを既定（今のマスクはページに固定のまま）。回転・反転で台詞の文字は立てたまま。切り抜いた画素は残さない。整列・分布は層と台詞を同じ op で。
+
+### PC4 の設計と利用者の決定（2026-10-20、PC3 の V3 の間に読取専用で）
+- 設計: PLAN 工程 5（ブラシ・フィルター群・RAW・形式の互換）の約 260 行（pc0 の目安で約 270 人日、見込み約 293.5 人日）を 3 つの節に。D フィルター（120 行: 新しい フィルター メニュー・ぼかし・シャープ・ノイズ・変形・ピクセレート・表現手法・フィルターギャラリー・描画・ぼかしギャラリー・Camera Raw フィルター・レンズ補正・広角補正・消点）、E 描く道具・プリセット（84 行＋レイヤースタイル 17 行: 上流の点を打つブラシ・鉛筆・覆い焼き・焼き込み・スポンジ・ぼかし・シャープ・指先・混合ブラシ・背景消しゴム・色の置き換え・塗りつぶしツール・グラデーションツール・描画色と背景色・パターン・各プリセットとパネル）、F 形式（39 行: コーデック 13・PSD/PSB の全精度と知らない塊の保持・カメラ RAW（LibRaw、動的リンク）・.pcraft の読み書き・ファイル メニューの入口と書き出し）。ほかの工程へ: file.automate.lensCorrection は PC5。文字・表示・窓・自動処理・タイムライン・プラグイン・レイヤーカンプ・スライス・注釈・計測・アートボードの 359 行は PC5。土台 3 つ（D0・E-0・F-0）を先に並行し、その後 4 つずつ 5 つの波。新しいライブラリ: OpenEXR（BSD-3）・libavif＋libaom（BSD-2）・LibRaw（LGPL-2.1/CDDL、動的リンク: 2026-10-16 の決定）・zstd（BSD-3）・BLAKE3（CC0/Apache-2.0、同梱）。GPL・ML のモデル・外部の素材・新しい費用は要らない。新しい拡張: filters@1・vanishing-point@1・brushes@1・patterns@1・file-info@1・image-grid@1・psd-keep@1・formats@1・camera-raw@1。
+- 利用者の決定: (1) フィルターは新しい フィルター メニュー（Photoshop の名前）に一本化する。今の 22 種は op・スマートフィルター・今の原稿でそのまま効くが、画面からは新しく選べない（Genko だけの 5 つは フィルター → 漫画）。(2) 描く道具の名前も Photoshop にそろえる（ペン → ブラシツール など 13 か所。項目の id とキーは変えず読み替え。層・線・ブラシの名前は変えない）。(3) ブラシの線は今どおりベクトルの線として持ち、上流の点を打つ描き方を線の描き方の 1 つとして足す。(4) 画像・PSD・RAW・.pcraft を開くとメモリの中の名前の無い 1 ページの本になり、保存で .genko の置き場所を尋ねる（元のファイルは変えない）。
+- 調整役の判断（推奨どおり）: PSD の Photoshop のスマートフィルターは対応表にあるものを読む（書き出しは画素）。レンズのプロファイルは上流の一般のもの（lensfun は配布の条件が変わるので使わない）。重いフィルターは断らず画面は裏で進み具合とやめる。プリセットは機械の設定のライブラリ、原稿は使ったものの写し。レイヤースタイル 17 行を PC4 に入れる。Adobe の形式は ABR・GRD・PAT・PSD の Patt・ASL。画像から開いた 8 bit のページは一番細かい層の格子を作業の格子に。RAW を開くときは Camera Raw の窓を出す。LibRaw は Linux・Windows とも同じ 0.22.x を組んで同梱。.pcraft の Genko が持てない中身は画素にするか外して知らせる。
+
+### PC6 の出口 V3 — 凍結 de0f5e9 で Linux 合格（2026-11-11）。PhotoCraft の取り込み（PC1〜PC6）は Linux で完了
+- **凍結SHA**: `de0f5e94444c55a3451b89d4911dadaa6087726e`（native/wip-pc に push 済み）。計画は `validation_policy.py --base 98b180b --head de0f5e9 --phase milestone`（基点は PC5 の出口の凍結。tier full、構成は linux-debug・linux-release・linux-asan・windows-debug・windows-release、plan_hash 063ed23139b9…）。1 回で通った: 2026-11-10 13:23〜22:04 UTC（JST 22:23〜翌 07:04）。この節と台帳の platform:Linux の行は、凍結の後の文書だけの commit。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.10GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44-fc-v338。Qt 6.11.2、GCC 13.3、cargo・rustc 1.97.0、参照 Python 3.12＋Pillow 12.3.0・numpy・psd-tools、GENKO_MCP_PYTHON、GENKO_LIBRAW_ROOT（LibRaw 0.22.2）、GENKO_PCRAFT_CHECK、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。配布物の試験は Docker 29.9.2。PC5 と同じく 1 構成ずつ組んで流し、流し終えたビルドを消した（ASan → Release → Debug。ctest の並列は ASan 2・Release 2・Debug 3。ASan だけ M3A_FLOOD_DEADLINE=5。Debug は `-g0` と `-DGENKO_SHARED_LIBRARIES=ON`）。
+- **結果**（validation_run.py の result.json。3 構成とも status finished・passed true・failures 空、除いた契約なし、CLI23 合格、同じ plan_hash）:
+  - WebAssembly のホスト（tools/ci/build_wasm_host.sh: cargo test と genko-plugin-host）合格。
+  - linux-asan: 293/293 合格（試験の関数 5,537、SKIP なし）、サニタイザの指摘なし（14:18–18:49、ctest 2 並列）。
+  - linux-release: 293/293 合格（関数 5,462、19:10–19:53、ctest 2 並列）。SKIP 33 件は故障注入が Debug・ASan だけのためのもの（test_transaction・test_contract_save・test_save_e2e・test_migrate_e2e・test_session・test_gui_save・test_app_e2e。これまでの出口と同じ組で、合格に数えない）。
+  - linux-debug: 293/293 合格（関数 5,537、SKIP なし。20:54–22:02、ctest 3 並列）。
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1 件のみ＝Windows 2 構成が開発中 deferred（PC5 と同じ）。Linux 3 構成どうしの照合は指摘なし。**Windows を含む --pair 合格ではない。**
+- **実 xcb（Xvfb 1920×1080）GUI・E2E**（凍結のビルド）: Release で test_gui_* 63 本すべて exit 0（関数 1,175 合格、SKIP 1 は save の故障注入）。Debug で test_gui_save（36）・test_app_e2e（8）合格。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線。表示のみで合否判定なし。測定機は基準クラスではない＝ACCEPTANCE §6）。始まりの負荷 0.48、1 回温めてから 2 回（1 回目／2 回目）: 開いて最初の頁 536／658 ms／入力→ライブ線 p95 0.90／1.28・p99 2.77／2.75 ms（n=43780）／線確定→表示 p95 13.8／13.6 ms／Undo→表示 p95 28.7／28.0 ms／頁切替 最初 p95 25.0／21.6・精細 p95 111／97.6 ms（n=4）／自動保存 p95 1.19／1.23 s（n=31）／保存中のイベントループ: 刻みの遅れ p99 5.44／5.19 ms、4 ms を超えた停止 p99 36.9／43.0 ms／走行全体の 4 ms を超えた停止の最大 66.2／43.0 ms。test_perf_render: F1 の頁 350 dpi 全体 717 ms・線を足した後 393 ms・512×512 の部分 25 ms、線 200 本の小さな絵 1 ms、深い SO の 6 タイル 1 枚ずつ 3.74 s・4 枚同時 1.53 s（デコード 1 回、最大 704 MB）。どの値も PC5 の出口と同じ程度か速い。
+- **PERF-F**（Release、test_perf_pipeline、ctest 経由。合否判定あり）: F3 の工程 42.0 秒・88 作業。全呼び出し n=314 p95 552 ms／情報取得 p95 496 ms／編集の確定 p95 63.2 ms／候補の採用 p95 944 ms／頁の仕上げ p95 569 ms（合格値は各 p95 2 秒）／8 ページの校正出力 10 回 4.91〜5.23 s（各 30 秒以内）。**全項目合格**（合格値は変えていない）。
+- **配布物**（platform:Linux。Release のビルドから `cpack`）: `genko-studio-0.1.0-linux-x86_64.tar.gz`（74,896,106 バイト、sha256 `bf7246ce5a87edb1c2a8eec24dbca49e6073417136060a9382bb3682ed9eaebe`）。まっさらな Ubuntu 24.04.5 の容器（ubuntu:24.04 に README-ja.md の実行時の apt の物と xvfb・xdotool・x11-utils・x11-apps・fonts-noto-cjk だけを足した像、sha256:d3cf6e6023…。Python・CMake・コンパイラ・qmake・uv が無いことを確かめた）に、root でない人（u）がネットワークなし（`--network none`）で:
+  - install.sh で `~/.local/opt/genko-studio-0.1.0` に入れ、`~/.local/bin/genko-studio` と .desktop ができる。ldd で genko・genko-plugin-host・xcb と offscreen のプラットフォームに欠けなし（任意の Qt のプラグインが要る物は一覧に書くだけ）。`--version` に genko 0.1.0・LibRaw 0.22.2・Qt 6.11.2。
+  - `genko new` の本を窓（Xvfb・xcb）で開き、マウスでブラシの線を描いて Ctrl+S、終える → 開き直して終える。inspect が同じで、8 ページの画素も同じ（PNG のバイトは ICC のプロファイルに作った時刻が入るので比べない）。
+  - 16 形式（png tiff pdf strip psd psb epub pack webtoon sns cmyk layers kindle timelapse animation pcraft）を書き出せる（113 ファイル）。MCP stdio で initialize・tools/list（41 道具）。WASM のプラグインを入れて一覧に出る（人が選ぶまで動かない）。
+  - 書いたファイルは本・`~/.config/genko-studio`・入れた先（と fontconfig のキャッシュ）だけ。uninstall.sh で本体が消え、本と設定は残る。結果「ALL OK」。
+- **PC6 の進め方**（plan: 台帳全件の突き合わせ → 独立レビュー → 直し → V3）:
+  - 台帳の突き合わせ（読取専用、5 組並行、HEAD 6d75518）: 957 行（961 行から platform の 2 行と対象外の 2 行を除く）のうち OK 944・証跡の古さ 9・欠け 4（どれも証跡の誤りか試験の不足で、機能の抜けは無かった）。古さは 549dcbb で直した。
+  - 独立レビュー（読取専用、3 観点、PC 工程 962faa4..6d75518 の横断）: A 入口と承認（P1 1・P2 1。MCP の agent_op と道具の表は 962faa4 から 1 字も変わっていない）、B 原稿の完全さ（P1 なし・P2 5）、C 頑丈さ（P1 1・P2 5）。
+  - 直しは 5 群（群ごとに 実装→関係する試験→読取専用のレビュー 1 回→直し、R1・R2）。A 承認の関門（9fd6bde）・B 原稿の整合（c801d35・e2f19df、追加分を 2 回目のレビュー）・C 記憶の予算と大きな入力（9ba1b9d）・D 長い作業とスレッド（d5bb6ac）・E .pcraft のスタイルと GUI（85e8746）。統合のたびに関係する試験を流した。台帳は群 A〜E の直しに合わせて 156 行を直した（de0f5e9）。
+  - 群 A: ネームの承認の後、承認できない actor（ai:・legacy:unknown・agent の権限）のページの大きさの op がコマ割りを動かすのを断る。ネームの承認の前に、PC の画素の op（40 個、`core::strict_drawing_ops`）で印刷される層に描くのを人も含めて断る（今の raster_edit_op と同じ規則。未公開の機能）。SO の中身を替える op は印刷される SO の絵が変わるなら断る。exportable の判定に高精度・インキの層。actions.json が読めないときは退けてから書く。
+  - 群 B: ビデオレイヤーとアニメのカメラを、判型・回転・反転・任意の角度・角度付きの切り抜き・縦横の倍率が違う画像解像度で写す（video@1 の行に任意の `transform`。恒等や畳み込める形なら書かないので、回していない本は形も保存のバイトも前と同じ。古い版は transform のある本を読み取り専用で開く。schema-v4.md）。ほかの本から来る文字のスタイルを StyleCarry に一本化（.pcraft の中・配置も、群 E）。記録したアクションのバッチで 2 ページ以上の本のページを作る・消す手を断る。duplicate_layers でビデオの行を写す。
+  - 群 C: Photomerge・スタック・統計・HDR・画像を開く道で、本の高精度の上限（1 GiB）を作る前に確かめる。SO のスタックの作り方を置き場の予算に入れる。データセットの画像を素材にする。CSV の外の画像の確かめ。
+  - 群 D: 長い作業を窓のスレッドの外へ、中止の数と一覧、窓の破棄、ffmpeg とプラグインは親が終われば止まる（Linux は PR_SET_PDEATHSIG）、リンクの大きなファイルを読まずに確かめる。
+  - 群 E: .pcraft のレイヤースタイルは効果ごとに読めない値を外して知らせる（全体が読めないときは前の振る舞い）、カンプの状態ごとに捕まえる、照らし直し、psd_raw・lmfx の扱い。
+- **台帳**: platform:Linux を閉じた（上の配布物）。台帳の残りは platform:Windows（deferred、配布前の実機受入は必須）と対象外 2 行だけ。
+- **利用者の決定（PC6）**:
+  - 決定 16（2026-11-10、strict_gates）: 承認できない actor（HTTP の `/v1/apply` の ai: のトークン、`genko apply` の legacy:unknown・`--agent ai:…`）が `set_meta` で本の strict_gates を外せ、外した後は名前の承認の関門が当たらない。前からの振る舞いで、Python と比べる契約試験 test_contract_ops の randomSequences もこれを合格の条件にしている。**今のまま、既知の制限として記録する**（SPEC AUTO-01 と台帳の関門の行の limitations）。MCP と制御チャンネルからは set_meta の strict_gates に届かない。
+- **既知の制限・残課題（PC6 の出口の時点）**:
+  - Windows（deferred、配布前の実機受入は必須。PC4・PC5 の宿題はそのまま。ffmpeg とプラグインの「親が終われば止まる」は Linux だけ。Windows の 6 GiB 級の疎なファイルの試験は 257 MiB の形に替えた）。
+  - SO の中身（"contents"）の道は strict_gates を外して当てる（前から。fill なども同じ）。
+  - features だけの横書きの台詞（native_type なし）を基本段落の違う本へ持ち込むと、持ち込んだ本の基本段落で組む（見え方を保つには描き手の側の直しが要る。SPEC）。
+  - 細かい物（P3、直していない）: アートボードの箱がフッテージの箱を見ない、smart_convert が祖先をたどらない、置き場の予算と 1 枚の上限の間の大きさのスタックが 2 つあると交互に追い出す、部分の道の結果を WorkHold に数えない、needs_whole_page の中身で帯ごとに全体を作る、中を指す絶対パスの CSV も断る、終了で進み具合の窓が先に閉じる、コンタクトシートの途中で窓を閉じると作りかけのシートを開いてから本ごとに保存を聞く、bytes の無いリンクで窓（読む）と CLI（modified）が違う、浮動小数の完全一致で比べる所がある、カンプのスタイルで "value" 以外の core::Error はカンプの読みが断る、グレーの PSD の Blend If の名前 "gray" が合成と重なる。
+  - 保存していない原稿の 変数データセット… は、画像が合わせて 256 MiB を越えると断る（保存すれば 4 GiB まで）。
+- **次**: native/integration へ統合（この節の commit の後）。Windows の実機の build・受入（windows-debug・windows-release と、それを含む `--pair`）と配布は、利用者の決定（2026-10-15）のとおりマージ後に別の環境で。
+
+### PC5 の設計と利用者の決定（2026-10-28、PC4 の出口の後に読取専用で）
+- 設計: 台帳の残りの 338 行すべて（PC5 が最後の工程で、行を後へ回せない）を 4 つの節に。G 文字（74 行: 文字レイヤー・文字ツール・組版と OpenType・右から左・文字／段落スタイル・パネル・スペルチェックと表記の点検・検索と置換・書体の置き換え・PSD と .pcraft の文字、約 69.5 人日）、H 表示・窓・環境設定（約 111 行: 画素の段と % の意味・ピクセルグリッド・32 bit のプレビュー・手のひら・スクリーンモード・ガイドとグリッドと単位・窓の区画と並べ方・パネル・ワークスペース・キーの組・メニュー・ツールバー・環境設定と API・取り消しとメモリをクリア・画素の縦横比・GPU と CPU の表示の一致、約 61 人日）、I レイヤー・アートボード・自動処理（61 行: レイヤーの基本の残り・グループとフレーム・アートボード・変数とデータセット・バッチ／ドロップレット／スクリプト／イベント／画像プロセッサー・プリント・コンタクトシート・画像アセット・自動整列／自動合成／Photomerge／スタック／統計・HDR Pro・写真の切り抜き、約 73.5 人日）、J 制作の補助（92 行: レイヤーカンプ・スライス・注釈・ものさし／カウント／計測・計測ログ・タイムライン・ビデオレイヤー・WASM のプラグイン・制御チャンネル・アクション、約 99.5 人日）。PC4 の出口の決定 4 つと tools/ci の直し（Z0、約 3 人日）。計約 306.5 人日。土台 PC5-0（Z0・G-0・H-0・I-0、続けて J-0）の後、4 つずつ 7 つの波。新しいライブラリ: WAMR（Apache-2.0 WITH LLVM-exception）・SheenBidi（Apache-2.0）・英語の辞書 SCOWL。GPL・FFmpeg・ML のモデル・新しい費用は要らない。新しい拡張: type@1・groups@1・image-assets@1・layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1・pixel-aspect@1。
+- 利用者の決定（PC4 の出口の報告で）: (1) genko review の HTML の「書き出し…」を今のメニュー名に直す。(2) ops_schema の glow の説明文を今のフィルター メニューの名前に（op・引数は変えない）。(3) 32 bit の PSD は線形の値で書く（読むときも対に）。(4) 16・32 bit のページで新しく作る層はページの深さ（add_layer の既定が変わる）。
+- 利用者の決定（PC5 の設計で）: (1) 文字レイヤーは層の種類「文字」を足し、中身と組版は台詞と同じ（縦書き・ルビも効く。台詞と行き来できる。台詞は今のまま）。(2) 新しく作るグループと PSD・.pcraft から読んだグループを Photoshop のグループとして描く（今の原稿のフォルダーは今の見え方のまま、1 手で切り替えられる）。(3) アートボード＝ページ。(4) 動画ファイル（MP4・MOV・WebM）は読まない（連番と動く画像だけ。MP4 の書き出しは今のまま）。(5) スクリプトは操作（op）の手順だけ。(6) 制御チャンネルは見る＋MCP と同じ関門の op＋キャンバスへのペンの入力（窓・メニュー・承認・パネルには届かない。既定は切、持ち主だけのローカル接続）。(7) 複数の原稿は 1 つの窓の中の区画に並べる。(8) 既定のキーを Photoshop の組にする（今のキーは「Genko」の組として残して選べる）。(9) 右から左の文字は横組みで並べ替える（SheenBidi）。(10) 画素の縦横比は表示だけの補正を作る。(11) 表示倍率の % はページの画素の倍率（100%＝画素等倍）。(12) 表示の「目盛り」を「定規」に、描く定規の表示は「描画定規」に。
+- 調整役の判断（推奨どおり）: 横書きの OpenType の台詞だけ OpenType で組む（今描けていない文字が描ける。縦書きは今のまま）。スペルチェックは英語の辞書と利用者の表記の表。台詞パネルの書式の欄は文字・段落パネルへ。メモリをクリアは記憶の中だけ（原稿の取り消しは残る）。合成は CPU が正本、GPU は表示だけ。AI（MCP）は環境設定を読むだけ。画素を仮想記憶ディスクに退避しない。単位は定規・ガイド・グリッドなどに効き、漫画の道具の mm の欄はそのまま。MCP・HTTP から自動処理は使えない。WASM のプラグインは別プロセスで WAMR、既定無効・明示選択・sha256 の同意。設計の控えは scratchpad の pc5/design.md と節のファイル。
+
+### 群（R1〜R7 のとおり: 群の中は 実装（関係する試験）→レビュー 1 回→直し。群ごとに一つの工程とし、その出口で V3 1 回・統合）
+- PC0 照合: 961 行を今の C++ と上流の実装（crates/…）で突き合わせ、行ごとに「同等（C++ のソースと試験を示す）／一部（足りないものを書く）／ない」を feature-ledger.json の既存の欄に書く。以後の群の範囲はこれで決める。
+- PC1 色・精度の土台（PLAN 工程 2。台帳の中心 56 行: image.mode.*・channel.*・document.*・プロファイルの指定と変換・カラー設定・色校正・色域警告・document:color-depth-model）: 8/16/32 ビット・float/HDR、色モデル（Gray・Indexed・Bitmap・Duotone・Multichannel を含む）、任意のチャンネル、文書のプロファイル・ソフトプルーフ・色域警告、保存・Undo・復旧・GC。
+- PC2 補正・色管理（工程 3）。
+- PC3 非破壊（スマートオブジェクト・スマートフィルター）、選択・修復、パス・変形（工程 4）。
+- PC4 ブラシ・フィルター群、RAW・形式の互換（工程 5。.pcraft の読み書きもここ）。新しい外部ライブラリが要る形式は、ライセンスを THIRD_PARTY.md・SBOM に記録して入れる（GPL など配布の条件が変わるものは止めて確かめる）。
+- PC5 制作の補助・バッチ・タイムライン・プラグイン・JSON の制御（工程 6。MCP の承認を迂回する別の入口は作らない）。
+- PC6 出口: 台帳全件の同等性、独立レビュー、V3（Linux 3 構成・実 xcb の GUI・性能・配布物）。Windows は従来どおりマージ後に別の環境で。
+
+
+## M6 導入・ヘルプ・制作導線・配布候補と M7 の受入（Linux）— 2026-10-14〜16 記録
+
+### 利用者の決定
+- （2026-10-14）設定は旧版と分け、初回に尋ねる: この版は自分の設定のフォルダーを持ち、初めての起動で旧版の設定があれば「引き継ぎますか？」と一度だけ聞き、「はい」のときだけ写す。旧版の設定は変えない。
+- （2026-10-15）Windows の実機の作業は M7 まで保留。MCP の `inspect` の説明文は Python と同じ文のまま。Qt のソースの入手先は download.qt.io を案内する。
+- （2026-10-15）**Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md の「配布前の Windows 実機受入は必須」は変えない。両 OS の配布完了とは言わない）。
+
+### 群（作業ブランチ native/wip-m6。8cc498c・84c2b49・07656c7・c287a75・0794797・b72f851〜f96c119・a7b5be7）
+- 群B1 画面の仕上げ: コマンドを探す・クイックアクセス・コマンドバー・ワークスペース、メニューの残り、最初の一歩と次の作業の案内（I11）、パネルの配置、レイヤーパネルの見た目、選択範囲ランチャー、書き出しのプレビューは初めからページ全体（I08）、書き出し先の全文・コピー（I12）。
+- 群B2 環境設定と快適さ: ショートカット・筆圧の試し書き・サイドボタン・見た目・カーソル・修飾キー・道具ごとの修飾キー・押している間だけ持ち替え・円形メニュー・休憩・動きを減らす・GPU 表示・バックアップ（zip64 も書ける）・保存の間隔、原稿だけを表示、システムのガラス、数値欄の入力。
+- 群B3 持ち越しの機能: オートアクション、画像を読み込む、マスクを編集する、枠線の間隔・長さ・揺れ、本の形でプレビュー、TIFF・WebP の読み込み（Pillow 12 と同じ手順。色を面ごとに分けた TIFF は未移植と言う）。
+- 群B4 ヘルプ（I10）: 使い方・キー一覧・よくある質問・バージョン情報を実際のメニューの経路から作る（help.cpp）。
+- 群C 設定の分離と引き継ぎ（UX-01）: core::config_dir（~/.config/genko-studio・%APPDATA%\GenkoStudio・settings.ini）、migration.cpp（初回に一度だけ聞く、写さないもの、リンクの規則、ロック、失敗は次回また聞く）、引き継ぐ前はコマンドラインが知らせる。
+- 群D 配布物（I03・AC-PACKAGE）: cmake --install と cpack（GenkoPackage.cmake）、SBOM（SPDX 2.3、SHA1・SHA256）、README-ja・QT-LGPL-ja、Linux の install.sh・uninstall.sh、THIRD_PARTY.md v1.1（ICU・xcb-util・MSVC ランタイム・PhotoCraft）、ライセンス文。
+- レビュー（群ごと 1 回、4 本並行）の指摘は c287a75 で直した。
+
+### 関係試験（R1）で直した所（a7b5be7）
+- 31 本（関係する GUI・契約・単体・配布）のうち 10 本が落ちた。製品の直し: 最初の一歩・次の作業の案内の帯が窓を画面より広げていた（横にスクロールする 1 行の帯に）、クイックアクセスをスクロールの中に（最小の高さ）、ごく小さい画面のキャンバスの最小幅の下限 160→100px、窓の組み立て中に題名の帯を外す前のレイアウトで窓が高く広がったまま残る（最後に決め直して画面に収め直す）、ブラシの詳細の窓を共通の部品で（UI-G）、キャンバスだけ表示で端に出したパネルが離れても隠れない（タブの裏のパネルを除いて端を測る。Python も同じ書き方）、レイヤーの目のアイコン、PA の画像のパレット、配布物に offscreen のプラグイン。
+- 試験の前提の誤り（合格の基準は変えていない）: パネルが見えているかを visibleRegion で見ていた（題名の帯を外すと中身が覆うので空）→ 窓の中にあるか、短い窓のパレットの試験を Python の test_every_tool_is_within_reach_on_a_short_screen と同じ 1366×700 に、メニューの並び・ツールチップの形・コマンドの数を Python に、ほか。
+- 31 本すべて合格（アニメの試験は 5 回続けて合格）。
+
+### M7 の 2 時間試験を M6 の候補に入れた（R6）
+- M7 は M6 の出口の V3 と同じソースなら全体試験を使い回す（R6）。M7 に固有の「2 時間の連続制作（入力の注入）」と PERF-G（メモリと安定性）の試験 `test_soak_app`（perf の印。V3 の全体試験 132 本には入らない）を、M6 の凍結の前に入れた。F1 を主の窓で開き、Xvfb の上で G ペンの線・取り消し・やり直し・ページ送り・拡大縮小・台詞を実時間で注入する。最初の 20 分で全ページを回ってキャッシュを満たし、その後 100 分を 2 分ごとの巡回（90 秒の作業、描画のキャッシュの解放、30 秒の休み、私用メモリ（Private_Clean＋Private_Dirty）の読み取り）にする。判定: VmHWM 8 GB 以内、最後の 10 分の平均が最初の 10 分の平均から 128 MiB 以内、最小二乗の増え方 1 MiB/分 以下、描いた線・取り消し・やり直し・台詞の数がページごとに窓の本と一致し、閉じて読み直した本とも一致。
+- 試しで見つけた漏れ（製品の直し）: 取り消しの履歴は、メモリに置く量を「精密なカラー画像の分で 1 GiB まで」と数えていて、線の変更（その前のページの版を持つ）を 0 と数えていた。線を描く作業では履歴がいつまでもメモリに残り、暖機の後も 1 分あたり約 7.5 MiB 増えた（F1、40 分の試し）。Python は保存した変更をメモリに置かない（取り消しは日誌を通す）。C++ はメモリに置く変更を直近 100 件まで（Session::Options::history_changes）にし、古いものは既存の仕組み（trim_history、日誌を通す取り消し・やり直し）へ回す。試験: test_session aLongLineHistoryLeavesMemory（上限 3 件で 6 本の線を引き、保存の後メモリに 3 件、6 回の取り消しが日誌を通って本と画面が 1 本ずつ戻り、6 回のやり直しで元に戻る）。
+- 履歴の上限の後も 1 分あたり約 2.2 MiB 増えた（40 分の試し: 巡回 25 分で 29.8 MiB）。巡回ごとに C ライブラリの割り当て器の内訳を記録すると、プログラムが使っている分は 172→175 MiB でほぼ一定、増えたのは「解放済みで割り当て器が手元に残している分」（99→124 MiB）だった（漏れではなく、描画の作業スレッドなどが返した領域を OS に返していない）。製品の直し（app/memory.cpp、画面のアプリだけ。コマンドライン・MCP は変えない）: (1) `genko app` の始まり（スレッドを作る前）に一度、glibc の割り当て器を arena 2 つまで（M_ARENA_MAX。描画の作業スレッドが領域を分け合う）、256 KiB 以上は mmap（M_MMAP_THRESHOLD。タイル・絵は使い終われば OS に返る）にする（memory::tune）、(2) 入力が 10 秒止まったら一度、割り当て器の空きを OS に返す（Linux は malloc_trim、Windows は _heapmin。memory::watch_idle）。キャッシュ・履歴は捨てない。(2) だけでは水準は下がった（305→223 MiB）が増え方は残った。(1) を主の窓を作るときに設定すると、作業スレッドがすでに arena を作った後で効かず（傾き 6.1 MiB/分）、同じ値を GLIBC_TUNABLES（プロセスの始まりから効く）で与えると 19 分の試しで傾き 0.80 MiB/分・増分 6.3 MiB だったので、プログラムの始まりで設定する形にした。性能の試験（test_perf_app・test_soak_app）も、アプリと同じく始まりで設定する。
+
+- 2 時間の試し（凍結前、試験の木 fab4aea＋直し、2026-10-15 09:39〜11:43 UTC）は不合格だった。暖機の後の巡回 30 分までは「メモリに置く変更」が上限の 100 件で私用メモリ 258〜375 MiB だったが、巡回 34 分（開始から 54 分）から変更が 1 巡回あたり約 58 件ずつ溜まり（98 分で 668 件）、私用メモリは 531 MiB、VmHWM 633 MiB まで増え、最後の「保存済みになるまで 5 分待つ」で落ちた。原因（製品の漏れ）: 保存の 1 歩ごとに原稿の journal（studio/journal.jsonl。試しの終わりで 38 MB・6,736 行）を 2 回（修復と取引の確認）全部読み直して JSON を解いていた（1 回 1〜2 秒。`genko doctor` で 38 MB の読みに 2.3 秒）。journal が 15〜20 MB を超えると保存が描く速さ（1.5 秒に 1 本）に追いつかず、保存を待つ変更がメモリに残った（履歴の上限は保存済みの変更だけを外す）。Python の journal.entries は読んだ行を覚えていて、ファイルが伸びた分だけを解く（_PARSED。先頭と前回の終わりの 64 バイトで同じファイルか確かめる）。直し: `storage::journal::read_lines_without_ops`（同じ確かめ方で、伸びた分の行だけを解いて覚える。覚えるのは各行から ops（変更の操作。journal の大部分）を除いたもの: 修復・取引・やり直しの積み・版の番号はそれを読まない）を、保存のたびに読む所（修復、Saver の取引の確認、stacks、Session の committed_revision・読み直し）で使う。ops を読む所（履歴パネル・gc・migrate・doctor）は今までの read_lines。試験: test_journal readLinesWithoutOps（ops を除く・伸びた分だけ・書き直されたら全部・短くなったら全部）。
+- journal の直しの後の 60 分の試し（暖機 20 分＋巡回 40 分、試しの木の Release、2026-10-15 13:12〜14:12 UTC）: メモリに置く変更は終わりまで 100 件、保存の遅れはなくなった。私用メモリは巡回 30 分まで 219〜232 MiB で横ばいだったが、巡回 32 分で 296 MiB に上がってそのまま残り、傾き（1 MiB/分以下）で不合格。arena ごとの内訳（試験に GENKO_SOAK_TRACE を足して malloc_info と 16 MiB 以上の無名の割り当てを巡回ごとに記録した 2 回目の 60 分の試し）: 作業のスレッドの arena は確保 106 MiB・空き 62 MiB で一定のまま、その 2 つの領域（63 MiB・49 MiB）が巡回 15・16・18・20 では丸ごと常駐し、17 では元に戻っていた（漏れではない）。入力が 10 秒止まったときに一度だけ空きを返していたので、その後に終わる裏の仕事（キャッシュを消した後のページの精細な描き直し — 線が増えた後半ほど長い）が汚した空きが、次の入力の後の休みまで残っていた。直し（app/memory.cpp）: 入力が止まっている間は、10 秒の後も 5 秒ごとに空きを返す（止まっている間だけ。描く間は何もしない）。あわせて、journal の覚えは解いた値（小さな割り当て数万個が保存のスレッドの arena に散らばり残る）でなく、ops を除いた行の文字列 1 本で持つ（読むたびに解く。2 時間の終わりで約 1.7 MB）。
+- 原稿のフォルダーの大きさ: 2 時間で 4.3 GB（assets 4.2 GB・6,300 ファイル）。描くたびに、その層の線の全部（strokes.json、1 本で約 1.6 MB）を新しい資産として書き、取り消しのために残す。Python の v3 と同じ作り（変更ごとの資産、gc は手動）で、この版の不具合ではない（知られた性質として記録する。`genko gc` で減らせる）。
+
+### M7 群（移植の漏れ・試験の漏れ・独立レビューの直し・PERF-G）の R2 レビュー（1 回、2 並行、読取専用）と直し
+- app・配布の側: P1×2・P2×1・P3×2。
+  - P1 採用した復旧用コピーを、原稿に書く前に取り消すと（頁の読み込み中、または別の書き手が原稿を持っていて保存が断られた間）、今回の「やり直しの欠落」の直しが取り消しを journal に書く側に回し、保存で復旧の内容が原稿に書かれ、その取り消しは journal が断り、読み直しで復旧の内容が戻っていた → 復旧の採用（recover）は書く前なら必ずメモリだけで取り消す。試験 test_session anAdoptedRecoveryPointUndoneBeforeItIsWrittenIsNeverWritten。
+  - P1 復旧用コピーを別のスレッドにした（バックアップ中も止まらない）ため、保存が先に終わって「原稿がすべてを持った」後に、書き終わった復旧用コピーが残り、次に開いたとき原稿より新しいとして勧められ得た → 保存（別名保存・閉じるときも）が終わったとき書き中の復旧用コピーがあれば、その後に消す（復旧のスレッドは順に動く）。その書き終わりは「書いた」と数えない。試験 aRecoveryPointWrittenBehindASaveIsRemoved（20 回、両方の順番）。
+  - P2 最初の一歩のボタンのキーが起動のときの既定のまま（環境設定のキーの前に作られる）→ 案内を出し直すたびと環境設定の適用のときに今のキーを出す。
+  - P3 ストックのメニューの子のメニューが開くたびに残る → 作り直す前に消す。復旧の採用の所で「元に戻す」が押せる → 押せない。
+- core・storage・描画・API の側: P1×1・P2×4・P3×9。
+  - P1 journal の読みの覚え（PERF-G の直し）の鍵が Windows で ANSI にない文字のパスで例外 → UTF-8 の鍵。
+  - P2 フォントの代わり（G5）を汎用の読み込み（ImageFont.truetype 相当）に入れていたため、render._font（次の候補へ進む）とフォントの一覧（壊れたファイルを飛ばす）が変わった → 代わりは genko.fonts.truetype 相当（text::Fonts）だけ。
+  - P2 面ごとの TIFF で、Pillow が除く「意味の決まっていない追加の面」も読んでいた（色がずれる、大きな数の面でメモリを使い切る）→ 画像の帯の数だけ読む。YCbCr（JPEG の面ごと）は Pillow と同じく libtiff の RGBA の読み、1 つの面だけのものは続いた形と同じに読む。
+  - P2 絵柄カタログのトークンが転送（リダイレクト）先の別のホストに付いて行き得た → トークンを付けるときは転送を自分でたどり、別のホストへはトークンなしで（最大 50 回、https から http へは行かない）。
+  - P2 `genko render --out 新しいフォルダー/p1.webp` が失敗 → 書く前にフォルダーを作る（Python と同じ順）。
+  - P3: .dib はファイルの見出しなし（_dib_save）、BMP の 4 GiB 超は ValueError、Pillow だけの形式の見分けを各プラグインの _accept に合わせた（netpbm P0〜P6・Pf・Py、CUR、AVIF の mif1・msf1）、文字の大きさを測る所のフォントの上限も 256 MB、journal の読みの覚えは解き終わってから入れ替える（例外で半端に残らない）・解く間は鍵を持たない、無圧縮 TIFF は 1 つのストリップ（Pillow が自分で書くとき）。
+  - 直さずに記録: doctor の問題の並び（同梱のフォントがないときだけ。Python は資産・フォント・パスの順、この版はフォントが最後）。無圧縮 TIFF のバイトの並び（画素とストリップは同じ。libtiff はデータを目次の前に書く）。
+
+### M7 群の関係試験（R1、作業の木の Release、4 CPU・15 GB・Ubuntu 24.04.5）
+- 43 本（変えた所に関係する単体・契約・E2E・GUI・配布と、新しい試験 6 本）: 36 本合格、7 本不合格。
+- 製品の直し:
+  - (1) 自分自身を指すリンク（ループ）を `--root` に与えた `genko serve` が断らずに動き続けた（今回の resolve_path の直しの退行。Python 3.12 の Path.resolve はループで RuntimeError）→ HTTP の場所の確かめはループを断る（core::symlink_loop）。
+  - (2) お知らせを出している間、回転・反転の表示（表示 46% ・ 回転 +30° ・ 左右反転）とコマンドの状態が更新されなかった → お知らせの間も更新する（Python の _refresh_zoom と同じ）。
+  - (3) 1024×640 で台詞パネル（フキダシの種類の選択が 211 px）と文字の道具の設定がパネルの幅（230 px）からはみ出した。Python は右のパネルとツールの設定のすべてに tool_settings.fit_narrow を掛ける（選択は 6 字ぶんに縮んで開くと広い、長いラベルは折り返す、入力行は狭ければ欄を名前の下に、枠の注記は題の下に、ボタンは文字の幅）が、C++ にはなかった（移植の漏れ）→ app::fit_narrow を移し、同じパネルに掛ける。
+- 試験の前提の誤り（合格の基準は変えていない）:
+  - test_placed: 読めない形式の画像の見本を PPM にしたが、PPM は配置のときに断る（大きさが読めない。記録した制限どおり）→ 配置は image_format で断り、Python が置いた本の PPM は描かずに知らせる、の 2 つに分けた。
+  - test_ops_e2e: 下地混色を「この版ではしない」例にしていた → 移したので、適用して本と inspect が一致することを確かめる。
+  - test_gui_workspace: 2 つ目の窓を作った後に環境設定を確かめ、答えの記録が 2 つ目の窓に移っていた → その前に確かめる。
+  - test_gui_actions: 台詞のあるページへのテンプレートは「コマと台詞を消して、テンプレートで割り直します」と先に尋ねる（Python と同じ）→ はいと答える。
+  - test_gui_ledger_a: 読み直した本の余白（Python の読み込みと同じく 16.0）と既定（16）を JSON の文字で比べていた → Python の == と同じく値で比べる。
+- test_session theAutosaveWaitsForAPauseAndAtMostTenSeconds は重い並行の中の 1 回だけ「20 秒以内に保存済み」にならなかった。単独で 4 回・4 本同時でも合格。凍結後の V3 の 3 構成の全体試験で合格（合格の基準は変えていない）。
+
+### 台帳の突き合わせ（LEDGER.md の M6 の 20 行）
+- gui_action 11（act_prefs・act_help_keys・act_help_guide・act_help_faq・act_about・act_find_command・act_edit_commandbar・act_edit_quick・act_save_workspace・act_tool_names・act_quick_mask）、gui_action_group 1（launcher_actions）、cli 1（genko register-links。src/api/main.cpp の入口）、python_module 7（comfort・dialog_look・glass・help・links・preferences・workspace）: すべて C++ にあり、試験（test_gui_actions・test_gui_carried・test_gui_workspace・test_gui_look・test_gui_select・test_gui_studio）がある。ledger.json の status は手で変えない（生成物。M7 の機械集計で）。
+
+### V3（M6 の出口、M7 は R6 で使い回す）— 凍結 962faa4 で Linux 合格
+- **凍結SHA**: `962faa4f87dd7dbe05908937e2e54d3ff3488e29`（native/wip-m7-freeze に push 済み）。計画は `validation_policy.py --base e099da5 --head 962faa4 --phase milestone`（基点は CMYK・Lab の工程の出口の凍結。tier full、plan_hash `deb05491…`、構成は linux-debug・linux-release・linux-asan・windows-debug・windows-release）。2026-10-16 01:11〜07:38 UTC。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.80GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44-fc-v139。Qt 6.11.2、GCC 13.3。参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、GENKO_MCP_PYTHON（mcp 2.2.0）、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。R3 のとおり Release と ASan を同時に始め、Debug はビルドが済み次第並べた（各構成内 ctest 1 並列）。
+- **結果**（validation_run.py の result.json。3 構成とも status finished・passed true・failures 空、除いた契約なし、CLI23 合格、同じ plan_hash）:
+  - linux-release: 132/132 合格（01:13–02:33 UTC）。故障注入が Debug・ASan だけのための SKIP 33（test_transaction 10・test_save_e2e 16・test_session 3・test_contract_save 1・test_migrate_e2e 1・test_gui_save 1・test_app_e2e 1。これまでの出口と同じ組）は合格に数えない。
+  - linux-debug: 132/132 合格、SKIP 0（01:28–03:14）。
+  - linux-asan: 132/132 合格、サニタイザの指摘なし、SKIP 0（01:13–05:25）。
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1 件のみ＝Windows 2 構成が開発中 deferred。Linux 3 構成どうしの照合は指摘なし。**Windows を含む --pair 合格ではない。**
+- **実 xcb（Xvfb 1920×1080）GUI・E2E**（凍結のビルド）: Release で test_gui_* 28 本すべて合格（actions 14・ai 62・anim 8・book 32・brushes 8・canvas 78・carried 11・color 60・colours 4・effects 15・guides 7・layers 12・layout 32・ledger_a 34・ledger_b 39・ledger_c 27・lines 20・look 42・materials 36・output 23・paint 11・paper 14・pen 51・ruby 18・save は故障注入の SKIP・select 13・studio 29・workspace 10）。Debug で test_gui_save 36・test_app_e2e 8（開く→描く→Undo→保存→終了→別プロセスで再開）。IME の注入（QInputMethodEvent: test_gui_ruby・test_gui_layout・test_gui_lines・test_gui_studio）もこの中で合格。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線、静かな機械: 始まりの負荷 1.04。試験は表示のみで合否判定なし。測定機は基準クラスではない＝ACCEPTANCE §6、基準クラスでの合否とは呼ばない）: 開いて最初の頁 626 ms・全頁 805 ms／入力→ライブ線 p95 1.06・p99 3.65 ms、入力→描画 p95 1.79 ms（n=43780）／線確定→表示 p95 18.9 ms／Undo→表示 p95 38.2 ms／頁切替 最初 p95 32.3・精細 p95 113 ms（n=4）／自動保存 p95 1.64 s（n=31）／保存中（計 25.3 s）のイベントループ: 5 ms ごとの刻みの遅れ p99 5.71 ms、250 ms を超える停止 0、4 ms を超えた停止だけの分布では p99・最大とも 54.4 ms（n=65。前の出口の記録はこの分布で 46.1 ms）。test_perf_render: F1 の頁 350 dpi 全体 796 ms・線を足した後 431 ms・512×512 の部分 27 ms、線 200 本の小さな絵 4 ms。
+- **PERF-F**（Release、test_perf_pipeline、ctest 経由。合否判定あり。測定機は基準クラスではない）: F3 の工程 59.4 秒・88 作業。全呼び出し n=314 p95 810 ms・p99 1360 ms（MCP の道具 306 件 p95 777 ms、人の `genko studio` 8 件 p95 5.45 s、書き出し 4 件 最大 7.34 s を含む）／情報取得 n=100 p95 681 ms／編集の確定 p95 87.9 ms／候補の採用 p95 1.40 s／頁の仕上げ p95 799 ms（合格値は各 p95 2 秒）／8 ページの校正出力 10 回: 呼び出しから PDF の完成まで 6.82〜7.33 s（各 30 秒以内。仕事の記録は呼び出しから開始まで最大 6.2 ms）。**全項目合格**（ctest exit 0）。
+- **PERF-G（M7、2 時間の連続制作、test_soak_app）**: 実 xcb で 118.2 分（暖機 20 分＋2 分ごとの巡回 49 回、30 秒の休み）。線 3729 本・取り消し 372・やり直し 186・台詞 62、問題 0、窓の本と閉じて読み直した本の違い 0 頁。VmHWM 407 MiB（≤ 8 GB）、私用メモリ 最初 218 → 最後 248 MiB、増分 29.8 MiB（≤ 128）、傾き 0.365 MiB/分（≤ 1）。**合格**。
+- **配布物（AC-PACKAGE、M7 の最終配布物での確かめ）**: 同じ Release のビルドから cmake --install → genko-studio-0.1.0-linux-x86_64.tar.gz（58 MB）。docker の素の Ubuntu 24.04.5（python・cmake・gcc・qmake なし、管理者権限なしの利用者）で: 導入（~/.local/opt）→ --version → 引き継ぐ前はコマンドラインが知らせる → 起動してマウスで描いて終了 → 線が保存された → 開き直して同じ → PNG・PDF の書き出し → MCP（stdio の initialize・tools/list、道具 41 件）→ **全 14 形式**（png・tiff・pdf・strip・psd・epub・pack・cmyk・layers・webtoon・sns・kindle・timelapse・animation、31 ファイル）→ 設定は ~/.config/genko-studio だけ → 外す（原稿・設定・旧版の設定は残る）: すべて合格。別の場所に展開した配布物の `genko --version` 合格、その genko に対する test_contract_mcp（公式 MCP SDK のクライアントで stdio・HTTP、11 項目）合格。
+- **台帳**: `build_ledger.py --check` 一致（763 行: ported 757・in_progress 3・not_applicable 3。in_progress は Pillow だけの画像形式の 3 モジュール。下の利用者の判断待ち）。
+- **V3 の中で起きたこと（R4: 1 回目・2 回目の記録は使わない）**:
+  - 1 回目（凍結 108b515、2026-10-15 16:24〜19:13 UTC）: Release 132/132・CLI23 合格、ASan 49 本・Debug 52 本まで失敗なし。実 xcb の GUI（Release 28 本）で test_gui_workspace の pythonsMenus だけが落ちた（Ctrl+G でフォルダができない）。試験の書き方の誤り: activateWindow の直後にキーを送っていて、実 xcb では窓が作業中になる前のキーがショートカットに届かない（offscreen ではすぐ作業中になる）。ほかの GUI 試験と同じく qWaitForWindowActive で待つ形に直した（4f04b86。製品・合格の基準は変えていない）。直した試験は実 xcb で 3 回・offscreen で 1 回合格。R4 に従って ASan・Debug を止め、3 構成を初めからやり直した（1 回目の記録は使わない）。
+  - 2 回目（凍結 4f04b86、2026-10-15 19:16〜10-16 01:00 UTC）: Release 132/132・CLI23、Debug 132/132・CLI23、実 xcb の GUI（Release 28 本・Debug の保存の GUI と E2E）は合格。ASan で 4 本が落ちた（M6・M7 で入った GUI・配布の試験は、これまで ASan で流していなかった）。
+    - test_gui_carried（解放後使用、試験のコード）: 読み直した本の一時オブジェクトの部分を範囲 for で回していた → 本を変数に持つ。
+    - test_gui_look（LeakSanitizer、416 バイト）: OpenGL の文脈を作れない画面（offscreen）で、Qt の QOpenGLWidget は大きさの変化・表示のたびに文脈を作り直し、前のものを解放しない（QOpenGLWidgetPrivate::initialize）。製品の直し（app/canvas_gpu.cpp）: 失敗した後は作り直さない（1 回だけ試す）。製品は gpu_available() で文脈が作れるときだけ GPU 表示にするので、利用者の動きは変わらない。漏れの抑止（suppression）は使っていない。
+    - test_package（ASan の構成だけ）: サニタイザーの構成では Genko のライブラリが共有ライブラリで（GenkoFlags.cmake）、Qt の配布の道具が lib/ に写したそれにビルドのフォルダーの探し先（RUNPATH）が残り、libpillow_imaging.so をビルドのフォルダーから読んでいた。SBOM もそれらを数えていなかった。直し: 導入のとき写した libgenko_*.so の RUNPATH を $ORIGIN に（GenkoPackage.cmake）、SBOM は libgenko_*.so を Genko Studio、libpillow_imaging.so を Pillow libImaging の部品として数える（package/sbom.cmake）、test_package はその構成でだけそれらを lib/ に許す（Release・Debug と配布物の確かめは今までどおり Qt・ICU・xcb だけ）。配布物（Release、静的）は変わらない。
+    - test_gui_actions（解放後使用、製品）: 自分のテンプレートの割り付け（app/templates.cpp の plan）が、根のコマの id を作業中の本の中の文字列への参照のまま build に渡していて、最初の操作で本が置き換わった後にそれを読んでいた（Release では読めないコマの id・落ちることがあり得た）→ id を写してから渡す。
+    - 直した 4 本は ASan で合格（test_package は Release でも合格）。凍結 962faa4。R4 に従い、3 構成を初めからやり直した（2 回目の記録は使わない。やり直しの前に機械が再起動した: kernel 6.18.44-fc-v139）。
+
+### M7 の受入（R6: 上の V3 を使い回す。同じソース・実行物）— Linux の分は合格
+- 最終配布物での起動・保存・出力: 上の配布物の確かめ（素の Ubuntu 24.04.5、管理者権限なし）で合格。
+- 2 時間試験（PERF-G）: 合格（試験の判定、上）。PERF-F: 合格（試験の判定、上）。PERF-A〜E: この開発機で測って記録した（上。表示のみで、基準クラスでの合否とは呼ばない: ACCEPTANCE §6）。
+- IME の注入: 実 xcb の GUI（QInputMethodEvent の注入を含む 4 本を含む 28 本）で合格。全出力: 14 形式を配布物で合格。
+- MCP SDK での外部接続: 配布物の genko に対して公式 SDK のクライアント（stdio・HTTP）で合格。
+- 独立レビュー: M7 群の R2 レビュー（上、2 並行・読取専用）と、凍結前の独立レビューの直し（P1×2・P2・P3）。直さずに記録したのは下の P3 の 2 件だけ。
+- 別のインストール先への導入: ~/.local/opt（install.sh）と、別の場所に展開した配布物の両方で合格。
+- **Windows の実機の build・受入（windows-debug・windows-release と、それを含む `--pair`）は未実施**（利用者の決定: マージ後に別の環境で）。それが済むまで、両 OS の配布の完了とは言わない。
+- **AC-RELEASE（最終判定）はまだ**: Windows の受入と、台帳の in_progress 3 行（Pillow だけの画像形式。下の判断待ち）が残る。
+
+### 既知の制限（M6・M7 の出口の時点）
+- Windows の実機の build・受入は未実施（利用者の決定: マージ後に別の環境で）。
+- 色を面ごとに分けた TIFF（PlanarConfiguration 2）のうち、1 画素の深さが 8 ビットの倍数でないものは未移植（置けるが描かずに知らせる）。8・16 ビットの面ごと、YCbCr は Pillow と同じに読む。
+- Pillow だけが読む画像の形式（netpbm・ICO・CUR・icns・QOI・DDS・SGI・JPEG 2000・AVIF）は置くときに image_format で断り、Python が置いた本のその画像は描かずに知らせる（利用者の決定待ち: 既知の制限として記録を推奨）。
+- Lab のページの編集可能な文字の色は RGB で書く。書いた PSD の Photoshop での確認はしていない。
+- Qt が中に含む第三者のソフトウェアの帰属表示の全文は配布物に入れていない（QT-LGPL-ja.md で案内）。
+- アプリのアイコンはまだない。
+- MCP の `inspect` の説明文のプラグインの置き場所の例は旧版の場所のまま（利用者の決定）。
+- `genko render --out` の Pillow だけが書く形式（GIF・ICO・PPM・TGA・JPEG 2000 など）は NotYetPorted format:<ext> と言う（PNG・JPEG・TIFF・PDF・WebP・BMP・DIB は書く）。
+- 原稿のフォルダーは描くたびに変更ごとの資産で大きくなる（2 時間で 4.3 GB。Python の v3 と同じ作り、`genko gc` で減らせる）。
+- R2 レビューで直さずに記録した P3: doctor の問題の並び（同梱のフォントがないときだけ順が違う）、無圧縮 TIFF のバイトの並び（画素とストリップは同じ）。
+
+### 利用者の判断（2026-10-16）
+- コマンドラインからの設定の引き継ぎ（`genko settings import`）: **作らない**。引き継ぎはアプリの初回の問いだけ（README-ja の既知の制限に書く）。
+- Pillow だけが読む・書く画像の形式: **既知の制限にする**。台帳の 3 行（__main__・materials/__init__・studio/importer）はその理由を注記して閉じる（README-ja にも書く）。
+- PhotoCraft: **全 961 行をこの移行に入れる**（Windows の作業の前。下の「PhotoCraft の全機能の取り込み」の節）。
+- 既定の起動: **手順書だけ**（README-ja の「この版をふだん使う版にする（Linux）」。配布物・install.sh の既定は変えない）。
+
+### 次
+- PhotoCraft の全機能の取り込み（上の節）。そのあと native/integration をマージし、別の環境で Windows（windows-debug・windows-release の全体試験、実機の GUI、配布物の導入、`--pair`）。
+
+
+## CMYK・Lab の編集（color-mode@1、COLOR-02）— 2026-10-13〜15 記録（M5 の後、M6 の前の独立した工程）
+
+### 工程の出口 V3（e099da5）— Linux で合格
+- **凍結SHA**: `e099da5a09ecc1653c1caa4da6f09bafdd921cc8`（群D の統合の記録）。V3 は main tree の HEAD 2404922（その上は docs/ の再計画だけ。固定するフォルダー native・src・tools は凍結と同じことを確かめてから流した）。計画は `validation_policy.py --base 9f97117 --head e099da5 --phase milestone`（基点は M5 出口の凍結。tier full、各 120 試験、性能は別に必須）。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.80GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44。Qt 6.11.2、GCC 13.3。参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、GENKO_MCP_PYTHON（mcp 2.2.0）、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。R3 のとおり ASan を走らせたまま Release・Debug を並べた（各構成内 ctest 1 並列）。
+- **結果**（validation_run.py の result.json。3 構成とも failures は空、除いた契約なし、CLI23 合格）:
+  - linux-release: 120/120 合格（10/15 00:19–01:47 UTC）。故障注入が Debug・ASan だけのための SKIP 33（test_transaction 10・test_save_e2e 16・test_session 3・test_contract_save 1・test_migrate_e2e 1・test_gui_save 1・test_app_e2e 1。M4・M5 出口と同じ組）は合格に数えない。
+  - linux-debug: 120/120 合格、SKIP 0（03:30–05:37）。
+  - linux-asan: 120/120 合格、サニタイザ指摘なし、SKIP 0（03:05–08:55）。
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1 件のみ＝Windows 2 構成が開発中 deferred。Linux 3 構成どうしの照合は指摘なし。**Windows を含む --pair 合格ではない。**
+- **実 xcb（Xvfb 1920×1080）GUI・E2E**（凍結のビルド）: Release で gui_actions 14・gui_ai 62・gui_anim 8・gui_book 32・gui_brushes 8・gui_canvas 78・gui_color 60・gui_colours 4・gui_effects 15・gui_guides 7・gui_layers 12・gui_layout 32・gui_lines 20・gui_materials 36・gui_output 21・gui_paint 11・gui_paper 14・gui_pen 51・gui_ruby 18・gui_select 13・gui_studio 29、Debug で gui_save 36・app_e2e 8、全合格・FAIL 0。Release の gui_save は故障注入が Debug だけのため SKIP 1（Debug で 36 合格）。
+- **PERF-F**（Release、test_perf_pipeline、ctest 経由。合否判定あり。測定機は基準クラスではない）: F3 の工程 80.2 秒・88 作業。全呼び出し n=314 p95 1034 ms・p99 1919 ms（除外なし。MCP の道具 306 件 p95 1020 ms、人の `genko studio` 8 件 p95 7.03 s、書き出し 4 件 最大 9.62 s を含む）／情報取得 n=100 p95 862 ms／編集の確定 p95 149 ms／候補の採用 p95 1782 ms／ページの仕上げ p95 991 ms（合格値は各 p95 2 秒）／8 ページの校正出力 10 回: 呼び出しから PDF の完成まで 8.27〜9.32 s（各 30 秒以内。仕事の記録は呼び出しから開始まで最大 8.1 ms）。**全項目合格**（Totals 3 passed、ctest exit 0。08:55 以降、load 1.1〜1.9）。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線。表示のみで合否判定なし）: 開いて最初の頁 1536 ms・全頁 1536 ms／入力→ライブ線 p95 1.56・p99 7.06 ms（n=43780）／線確定→表示 p95 21.8 ms／Undo→表示 p95 37.2 ms／頁切替 最初 p95 26.9・精細 p95 113 ms（n=4）／自動保存 p95 2.34 s／保存中のイベントループの遅れ p99 11.8 ms（250 ms 超 0）。F1頁 350dpi 全描画 1359 ms・1線追加 682 ms・512px部分 68 ms。M5 出口とほぼ同じ。
+- **V3 の中で起きたこと（製品の失敗ではない。R4 の環境だけの原因として、その構成だけやり直した）**: (1) ディスクが満杯（Errno 28）になり、Release の test_contract_raster_ops が書けずに失敗し、Debug のビルドが止まった。空きを作って Release を流し直した（上の値）。(2) 機械が再起動し（10/15 03:00 UTC ごろ）、走っていた ASan（70/120）と Debug（53/120）が止まった（失敗なし）。2 構成を初めから流し直した（上の値。止まった分の記録は使わない）。Debug は空きのため、試験の実行物のデバッグ情報を `objcopy --compress-debug-sections=zlib` で圧縮してから流した（同じコード、ninja は作り直すものなしと確認）。
+- **CMYK・Lab の工程の出口は Linux で合格**（Windows は開発中 deferred。上の利用者の決定のとおり、マージ後に別の環境で受入）。
+
+### 進め方
+- 群ごとに「実装（対象試験）→レビュー1回→凍結→V2（Release＋ASan）→統合」。工程の出口だけ V3。群A（CL-A: 色モードの土台）→群B（描画道具・色パネル・スポイト）→群C（補正・フィルター）→群D（文字・トーン・効果・編集可能な文字の PSD・レイヤースタイル）→出口 V3。
+- M6（Windows 実機）は着手前に止めて利用者に確かめる。
+
+### 利用者の決定（2026-10-13）
+- 色モードはページごと（RGB・CMYK・Lab。新しいページは本の既定 `color`）。
+- この工程で CMYK・Lab のページで全部を使えるようにする（群に分けて順に統合）。
+- ICC は原稿に埋め込む（`.icc` の素材、16 MiB まで。CMYK にするとき選ぶ）。
+- 精度は 8bit と 16bit（32bit は RGB だけ）。
+
+### V2（群D）— 統合済み（Release は出口の V3 で）
+- **凍結SHA**: `a686c8010ea7a86aa3252dcc6d71fec17fc8e040`（native/integration へ早送り。8d7a2a3 の上に 66e5fac・51104ab・26c7336・a686c80）。計画は `validation_policy.py --base 8d7a2a3 --head a686c80 --phase integration`（tier full、各 120 試験、性能は別・必須でない）。
+- **実行環境**: 群B と同じ。
+- **結果**（validation_run.py の result.json。ASan は failures が空、除いた契約なし）:
+  - linux-asan: 120/120 合格、サニタイザ指摘なし、CLI23 合格、SKIP 0（10/14 17:36–23:01 UTC）
+  - linux-release: 流さずに止めた（10/14 23:20 UTC、120 試験中 46 まで失敗なし）。利用者の決定（2026-10-14）: 最後の群の V2 と出口の V3 は同じコード（違いは HANDOFF の記録だけ）なので、Release は V3 で確かめる。V2 の Release の result.json は無い（止めたため）。
+
+### 群D（CL-D。66e5fac・51104ab・26c7336・a686c80）
+- レイヤースタイル: インキのペイントレイヤーの効果は 8 bit の層と同じ形（効果の届く分だけ広く描いて切る）でインキに掛ける（`render/composite` の `ink_layer_effects`）。水彩の縁は縁の α だけ Genko の墨へ寄せ（層の α はそのまま）、フチはその色の規則のインキを下に敷く（形は 8 bit の絵の α から）。表示の色（`color`）は画面でその色の規則のインキ（印刷では `color_prints` のときだけ）。トーン化（`screen`）は網点にするときだけ、インキが意味する灰色を 8 bit で網点にして規則で（K）。ノイズのトーン化は分けて描くときも上の帯から同じ粒で作る（全体と同じ画素）。
+- 編集可能な文字の PSD（PSD-01）を CMYK・Lab のページでも書く（`psd_text_ink` の断りを外した）。文字の層の画素はインキ、グループの記録はページの版の数。CMYK のページの文字の色は規則のインキ（EngineData の FillColor Type 2: α・C・M・Y・K）、縁取り（lfx2）の色は CMYC（%）。Lab のページの縁取りは LbCl、文字の色は RGB（Type 1）。8・16 bit。
+- 試験（QtTest の Totals: test_ink_filters 55・test_psd_text 32・test_contract_ink 6）: test_ink_filters inkLayerStyles・stylesInPartsAsWhole（範囲を分けて描いた結果が全体と同じ。フチとノイズのトーン化）、test_psd_text editableOnInkPages（このビルドの読み手）、test_contract_ink editableTextKeepsTheInks（psd-tools で CMYK 8・16 bit と Lab の文字の色・縁取り・版の数・精度）。`tools/migration/ink_check.py` に文字の層の色を読む `texts`。
+- レビュー（1回。P2×1・P3×2）で直した所: ノイズのトーン化を分けて描くとき上の帯を表示の RGB で作っていた（P2。インキが意味する灰色で作る）、古い説明（P3）、16 bit の編集可能な PSD の試験が無かった（P3）。
+- 凍結の前に作業ツリーで Release の全体（性能を除く 120 試験）を 1 回流し、全合格を確かめてから凍結した（群B の V2 の ASan と並べて最低優先度で。その記録は残さない。上の V2 が証跡）。
+
+### 既知の制限（群D の時点）
+- Lab のページの編集可能な文字の色は RGB（Type 1）で書く。Lab の Type の値を確かめる手段（Photoshop・仕様）が無いため。
+- 書いた PSD は psd-tools とこのビルドの読み手で照合した。Photoshop での確認はしていない。
+
+### V2（群C）— 統合済み
+- **凍結SHA**: `d592657710e81365b6ba0537dd033d950b232152`（native/integration へ早送り。24d60dd の上に ea85cf0・186785e・d592657）。計画は `validation_policy.py --base 24d60dd --head d592657 --phase integration`（tier full、各 120 試験、性能は別・必須でない）。
+- **実行環境**: 群B と同じ（4 CPU / RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44、Qt 6.11.2、参照 Python 3.12＋Pillow 12.3.0、CAP を外して実行。ASan（ctest 1並列）→ Release）。
+- **結果**（validation_run.py の result.json。failures は空、除いた契約なし）:
+  - linux-asan: 120/120 合格、サニタイザ指摘なし、CLI23 合格、SKIP 0（10/14 10:01–15:49 UTC）
+  - linux-release: 120/120 合格、CLI23 合格（10/14 15:52–17:31 UTC）。故障注入が Debug・ASan だけのための SKIP（群B と同じ組）は合格に数えない。
+
+### 利用者の決定（2026-10-14、群C）
+- 補正は「画面の色に掛ける」: RGB の式をインキが意味する色に掛け、ページの規則でインキに戻す（灰色は K だけ、変えなかった画素はインキのまま）。
+- フィルターはインキの版ごとに 16 bit のまま掛け、K だけの線は K だけのまま。
+
+### 群C（CL-C。ea85cf0・186785e・d592657）
+- 補正（レベル・トーンカーブ・色相/彩度・反転・ポスタリゼーション・2階調化・グラデーションマップ・明るさ/コントラスト・露出。補正レイヤーと `filter_raster` の両方）は利用者の決定どおり「画面の色に掛ける」: インキが規則で意味する RGB（K だけは灰色、色の表のインキは表の RGB、ほかは表示の sRGB）に RGB のページと同じ式を掛け、ページの規則でインキに戻す（`render/ink` の `meaning_of`・`inks_by_rules`・`correct`、`ink::Rules` で色の表を一度だけ引く）。変えなかった画素はインキのまま（16 bit も）。補正レイヤーはページの合成で描く（`InkCanvas::recolour`。不透明度・マスク・クリップはインキの値で。描画モードのある補正レイヤー・形を動かす補正・plugin の補正は高精度と同じく省いて記録）。
+- フィルター 21 種はインキの版ごとに層の精度のまま（`render/ink_filters`）。動かす・ぼかすは α を掛けた値で、暗くするのは K を足す・明るくするのはインキを減らす（Lab は L）、新しく置く色は規則のインキ。K だけの線はどのフィルターでも K だけ。ペンの線・絵は先に規則でインキに描き（透明保護の層は自分の画素の中だけ）、掛けた層はペイントレイヤー。plugin のフィルターは群B の「表示の絵を貸す」方式。
+- 群B の取りこぼしを直した: 高精度の線（`color_rgb`）を持つ層の結合は、op が高精度の画素で返してもインキで合成し直す。透明保護のインキの層に置いた絵は自分の画素の中だけ。
+- 画面: レベル・カーブの窓のヒストグラムは、インキの層では意味する色の明るさで数える。
+- 試験: test_ink_filters 53（CMYK・Lab の全種で K だけの線は K だけ・16 bit のまま、ぼかし、補正の規則、補正レイヤー、ペンの線、高精度の線、透明保護、掛けた層の種類）、test_ink（断りの試験を補正レイヤーの省きに）、test_ink_edit、test_contract_plugins（CMYK のページの plugin）。
+- レビュー（1回。P1×1・P2×2・P3×2）で直した所: 光彩が透明の画素（インキなし＝白）を光と数えて線が薄くなっていた（P1。8 bit と同じく透明は暗い）、モザイクの透明の見本が不透明な線の画素にインキなしを入れていた（P2。透明の見本は黒）、線・絵の焼き込みが透明保護を無視していた（P2）、フィルターを掛けた層の種類・色の表の引き直し（P3）。
+- 凍結の前に作業ツリーで Release の全体（性能を除く 120 試験）を 1 回流し、全合格を確かめてから凍結した（群B の V2 の ASan と並べて最低優先度で。その記録は残さない。上の V2 が証跡）。
+- 私の判断: 補正の「変えなかった画素」は往復の丸め 1e-9 以内で決める（8 bit の ±2 ではない。補正は画素ごとの式なので、変えない補正なら意味する RGB はちょうど同じに戻る）。
+
+### 既知の制限（群C の時点）
+- 補正で変わった画素は、意味する RGB（float）からページの規則で戻す（色の表の色は 8 bit の値ちょうどのときだけ表のインキ）。リッチブラックなど表に無い色は「変えない補正」でだけインキが保たれ、色を変えれば意味する RGB から規則で戻す（灰色なら K だけ、ほかはプロファイル）。
+- 描画モードのある補正レイヤーは高精度のページと同じく省く（画面は記録、書き出しは not_yet_ported）。
+- レイヤースタイル（水彩の縁・フチ・表示の色・トーン化）のあるインキの層は描かずに `ink_layer_style` と記録し（書き出しは not_yet_ported）、インキのページの編集可能な文字の PSD は `psd_text_ink` で断る（どちらも群D）。
+
+### V2（群B）— 統合済み
+- **凍結SHA**: `994238a44d97117aa0fd30d081bff2ca078cfd54`（native/integration へ早送り。d1ca8e8 の上に 6e8f65e・99dff23・411c8e4・994238a）。計画は `validation_policy.py --base d1ca8e8 --head 994238a --phase integration`（tier full、各 119 試験、性能は別・必須でない）。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU / RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44、Qt 6.11.2、参照 Python 3.12＋Pillow 12.3.0（lcms 2.19。C++ 側は lcms 2.14）。root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。ASan（ctest 1並列）→ Release。ASan の間、別の作業ツリー（群C・群D）のビルドと事前の全体試験を最低優先度（nice 19）で並べた。
+- **結果**（validation_run.py の result.json。failures は空、除いた契約なし）:
+  - linux-asan: 119/119 合格、サニタイザ指摘なし、CLI23 合格、SKIP 0（10/14 02:43–08:01 UTC）
+  - linux-release: 119/119 合格、CLI23 合格（10/14 08:18–09:54 UTC）。故障注入が Debug・ASan だけのための SKIP（test_transaction 10・test_save_e2e 16・test_session 3・test_contract_save 1・test_migrate_e2e 1・test_gui_save 1・test_app_e2e 1。これまでと同じ組）は合格に数えない。ASan では SKIP 0。
+
+### 群B（CL-B。6e8f65e・99dff23・411c8e4・994238a）
+- 画素を消す・動かすだけの操作はインキの値のまま（`render/ink_edit`。高精度の層の color_edit と同じ形）: 消しゴム（ぼかし・ざらつきは 8 bit と同じ形で α を減らす）・範囲の削除・変形とワープ（α を掛けたインキで再標本化、触れない画素は 16 bit のまま）・判型の変更（`relayout_inks`、200 dpi・バイリニア）・インキの断片の貼り付け（画面のコピーは範囲のインキを `gkir` の断片として持ち、同じ色モード・精度のペイントレイヤーへの回さない貼り付けならインキのまま置く。`gkir` は C++ の画面だけの鍵で保存しない。ほかは表示の絵として貼る）。
+- 結合と変換（merge_down・merge_layers・merge_visible・convert_layer のペイントへ）は、op の前の層をページの合成と同じ形でインキで合成し直す（`render::composite_ink_layers`。下地・不透明度・描画モード・クリップ・紙は 8 bit の結合と同じ取り方）。リッチブラックの上に Genko の墨の線を結合しても、線は K だけ、下はリッチブラックのまま。
+- 新しい色を描く・混ぜる操作（色混ぜ・ゆがみ・塗りつぶし・グラデーション・図形・塗り残し・定規から・ライトテーブル・3D・高精度の画素）だけ、対象の層（ページ全体の操作はそのページのインキの層すべて）を表示の絵にして 8 bit の操作に渡し、インキに戻す（変えない画素はインキのまま、色の表 → 貸した層の色 → 墨・白・規則の色 → 灰色は K → 2 以内の近い色 → プロファイル）。`page` の無い op は CMYK・Lab のページごとに貸す。flood_fill は Python と同じく役割の層を塗るので、貸すのも役割の層。
+- op がペイントレイヤーに絵として置いたもの（表示の絵として貼った絵・素材・塗り（fill 系）のパッチ）は、高精度の層と同じくその場でインキに描く（`ink_edit::bake_marks`。色はページの規則）。core の消しゴムがインキの層を「消す画素なし」で終えていたのを、続けてインキを消すように直した。
+- 画面: スポイトはその点のインキ（見えている色はページを描いた値、描く先のレイヤーはその画素）を拾う。色の窓にインキの値（CMYK %・Lab）と色域外の印、値で選べる（値を変えたときだけ。欄から出ただけでは何もしない）。選んだインキの表示の RGB は、規則がそのインキを当てる灰色・墨・白を先に探し、無ければ表示の色を墨・白・表のほかの色から 1〜数段ずらす。規則が別のインキを当てるときは同じ色空間・同じプロファイルのページすべての色の表に組を入れる（一つの取り消しで戻る）。知らせは スポイト「色を拾いました」・色の窓「色を選びました」。
+- 試験: test_ink_edit 34（変えない画素・消しゴム・移動・結合・全 op・リッチブラック・判型・高精度の画素・貼った絵・flood_fill の層・フィルターの断り・スポイトと色の窓の値）、test_gui_book inksInTheColourPanel、test_ink（断りの試験を filter_raster に）。
+- レビュー（1回。P1×2・P2×2・P3×2）で直した所: 結合と絵の焼き込みが不透明な紙から合成して空いた所を埋めていた（P1。透明から合成）、色混ぜなどが貸した層に置いた絵を規則で焼いて混ぜなかった画素のインキを失っていた（P1。貸した絵に描いてから戻す）、消しゴムの「線全体」「交点まで」・トーンの層で画素を消していた（P2）、色の窓がほかのページの色の表の組を上書きできた（P2）、値の欄の印・インキの断片のプロファイル（P3）。
+- 1 回目の V2 の ASan で test_ink_edit が heap-use-after-free（貼った絵の試験が一時のインキの画素を指したまま読んでいた。製品の誤りではない）。試験を直して（994238a）凍結し直し、V2 をはじめからやり直した（上の結果）。
+- 私の判断: 最初の版（全部の画素の操作を表示の絵を通す方式）は、結合でリッチブラックが墨と同じ表示色になるため線と区別できない欠陥があった（自分の見直しで P1 相当）。動かす・消す・結合はインキのまま扱う方式に作り直した（利用者に伝えた方針どおり）。
+
+### 既知の制限（群B の時点）
+- 新しい色を描く操作で変わった画素は 8 bit の表示の色から戻す（16 bit のページでも）。塗りつぶし（flood_fill）は 8 bit の操作と同じく 72 dpi。
+- フィルター（filter_raster）と補正レイヤーは CMYK・Lab のページで not_yet_ported（群C）。
+- 回した・裏返した貼り付けのインキの断片は表示の絵として貼る（色はページの規則）。
+- 本を開いた直後でまだ読み込んでいないページがあると、色の窓で選んだ組の色の表への追加は断られる（ペンの色だけ変わる）。
+- 高精度の線（`color_rgb`）を持つ層を結合して op が高精度の画素で返したときは、インキで合成し直さずにプロファイルで戻す。透明保護のインキの層に置いた絵は、自分の画素の外にもインキを置く（どちらも群C で直す）。
+
+### V2（群A）— 統合済み
+- **凍結SHA**: `276a799173f346e615a6fefd20a5a9b443e62ff2`（native/integration へ早送り。9318f03 の上に 2fe5986・db695a8・ec075d5・e801ece・276a799）。計画は `validation_policy.py --base 9318f03 --head 276a799 --phase integration`（tier full、各 118 試験、性能は別・必須でない）。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU / RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44、Qt 6.11.2、参照 Python 3.12＋Pillow 12.3.0（lcms 2.19。C++ 側は lcms 2.14）。root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。ASan（ctest 1並列）→ Release。ASan の間、別の作業ツリー（群B）のビルドを最低優先度（nice 19）で並べた。
+- **結果**（validation_run.py の result.json。failures は空、除いた契約なし）:
+  - linux-asan: 118/118 合格、サニタイザ指摘なし、CLI23 合格（10/13 15:03–20:41 UTC）
+  - linux-release: 118/118 合格、CLI23 合格（10/13 21:08–22:38 UTC）。故障注入が Debug・ASan だけのための SKIP（test_transaction 10・test_save_e2e 16・test_session 3・test_contract_save 1・test_migrate_e2e 1・test_gui_save 1・test_app_e2e 1。これまでと同じ組）は合格に数えない。ASan では SKIP 0。
+- 統合の前に Release の全体（性能を除く）を 1 回流して 5 件の古い期待（Lab の PSD を断る前提、op の一覧、メニューの並び）を見つけ、直してから凍結した（その記録は残さない。上の V2 が証跡）。
+
+### 群A（CL-A。2fe5986・db695a8・ec075d5・e801ece・276a799）
+- 形式: schema-v4.md「色モード（color-mode@1）」。ページと本の `color`、レイヤーの `ink_raster`（.gkir）、機能 `color-mode@1`。読み込みは ICC・GKIR を確かめ、合わない原稿は断る（RGB のページの絵はインキのページで not_yet_ported）。
+- 合成と表示: render/ink_canvas（インキの値で合成。CMYK は版を反転して、Lab は 8 種の合成だけ）、8bit で描く要素（文字・コマ枠・トーン・効果・ノンブル）は黒と白に描いて取り出す（不透明な画素は完全一致だけを表・墨・白に寄せる）。表示は sRGB（相対・BPC）。
+- 操作: `set_color_mode`（RGB に戻すとき depth 8 は PNG、16 は精密 u16）、`set_inks`。まだの画素の操作はインキのページで not_yet_ported（群B・C で順に）。
+- 書き出し: PDF・TIFF はインキのまま（auto、CMYK のページの cmyk）、PSD はいつもインキのまま（モード 4・9、ICC は資源 1039）。RGB だけの形式は `notes`（CLI の JSON にも）。
+- 取り込み: put_raster・import_psd（CMYK は絵の ICC からページの ICC へ黒を保って、Lab はそのまま）。Lab の PSD は Pillow の "LAB" として開く（RGB への変換は Pillow と同じ Lab V2・4 バイト目をそのまま）。RGB のページへの import_psd は Python と同じく断る。
+- 画面: 「ページの色モード…」、ステータスの「CMYK 8 bit」、タイル・サムネイル・レイヤーの小絵の再描画。
+- 試験: test_ink 12、test_contract_ink 5（Pillow の ImageCms・psd-tools・poppler と照合。Little CMS の版が違うので ±1。Pillow は 16bit の PSD を開けないので psd-tools で、16bit の CMYK の TIFF は上位バイトで読む）、test_gui_book colourModeOfPages、raster_cases の「put_raster PSD lab」は Python と照合（C++ の断りの印を外した）。Lab の PSD が開くことに合わせて test_contract_psd（Pillow の "LAB" の画素とバイトで照合。RGBA は lcms の版の差で照合しない）・test_placed・test_contract_studio（配置した Lab の PSD は Pillow と同じく透明で、ページと書き出しは置く前と同じ）・test_command_bus（op の一覧に set_color_mode・set_inks）を直した。色モードのメニューは Python の項目の後ろ（Python の並びを崩さない）。
+- レビュー（1回。P1 なし、P2×2・P3×7）で直した所: 塗り・トーンの参照（参照レイヤー・このレイヤーだけ）にインキの層の線を入れる（P2）、sRGB にして書いた書き出しは CLI だけでなく書き出しの窓・MCP の export（`notes`）・HTTP の /v1/export・正式な書き出し・動画の書き出しでも知らせる（P2。入稿セットは「PNG だけ変換、TIFF はインキのまま」）、まだの op のページを ops と同じ探し方で照合（1.0・true でもすり抜けない）、読み込みで validate_ink_document（Lab で使えない描画モードなど、どの op も作らない原稿は読み取り専用と理由）、インキのページは補正レイヤーで全頁描画にしない（画面は省いて記録、書き出しは not_yet_ported）、RGB に戻す窓は 8 bit を既定に、LAB からほかの形式への変換の文言を Pillow と同じ `conversion from LAB to RGB not supported` に。
+- 私の判断: 高精度の線の色（`color_rgb`）は RGB のページの精度で、インキのページでは線の `rgb`（8 bit）を規則に当てる（schema-v4 を直した。インキの精度は色の表とプロファイル）。インキのページのトーンは RGB のカラーのページと同じく網点にしない濃さ（SPEC を直した）。
+
+### 既知の制限（群A の時点）
+- まだの画素の操作（消しゴム・範囲・貼り付け・色混ぜ・ゆがみ・塗り・結合・変換・3D・定規・判型の変更・フィルター）は CMYK・Lab のページで not_yet_ported（群B・C）。
+- 二色の境の画素はプロファイルで写す（表の色にはしない）。
+- スポイトは表示の RGB を拾う（群B）。描いている途中の線の表示は RGB。
+- インキのページの編集可能な文字の PSD は not_yet_ported（群D）。
+- CLI の `--color` に auto が無いので Lab のページは CLI では RGB と notes（CMYK は `--color cmyk` でインキのまま）。
+- 16bit の PSD の取り込みは 8bit で読む。
+
+### 残課題・次
+- ~~工程の出口 V3~~ 済み（上の「工程の出口 V3」）。
+- Windows は開発中 deferred（配布前の実機受入は必須。利用者の決定（2026-10-15）: マージ後に別の環境で）。
+
+## M5出口受入（Linux）— 2026-10-13 記録
+
+- **凍結SHA**: `9f97117d478f1877c304a8e9e93a3f28ac57fd68`（native/integration。M5②③ の上に M5④ a8e6e67・0c4aae4・3567cd1、出口の準備 ad0f49e、出口のレビュー 9f97117）。計画は `validation_policy.py --base 65f8333 --head 9f97117 --phase milestone`（基点は M4 出口の凍結。tier full、Linux 各116試験、性能は別に必須）。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.80GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44。Qt 6.11.2、GCC 13.3。参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、MCP の参照 Python は GENKO_MCP_PYTHON（mcp 2.2.0）、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。ASan（各構成内 ctest 1並列）→ ASan のビルドを消して Release と Debug を同時に。
+- **結果**（validation_run.py の result.json。failures は空、除いた契約なし）:
+  - linux-asan: 116/116 合格、サニタイザ指摘なし、CLI23 合格（10/13 00:54–06:15 UTC）
+  - linux-release: 116/116 合格、CLI23 合格（07:13–08:49）。故障注入が Debug・ASan だけのための SKIP（test_transaction 10・test_save_e2e 16・test_session 3・test_contract_save 1・test_migrate_e2e 1・test_gui_save 1・test_app_e2e 1。M4 出口と同じ組）は合格に数えない。Debug・ASan では SKIP 0。
+  - linux-debug: 116/116 合格、CLI23 合格（07:13–09:18）
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1件のみ＝Windows 2構成が開発中 deferred。Linux 3構成どうしの照合は指摘なし。**Windowsを含む --pair 合格ではない。**
+- **M5 の出口（PLAN.md）の証拠**（3構成とも合格。件数は QtTest の Totals）:
+  - 公式 MCP SDK のクライアント（stdio・HTTP）、CLI、HTTP から同じ原稿へ安全に操作: test_contract_mcp 11（公式 `mcp.Client` の stdio・Streamable HTTP と生の JSON-RPC・HTTP API を C++ と Python のサーバーで照合。初期化・道具一覧・4リソース・成功・失敗・取消・画像・ジョブ）、test_mcp_api_e2e 22（承認・ページロック・チャット承認の切替・人が固定した欄・人の変更の Undo をエージェントが MCP・HTTP で通れない、41 の道具に人の道具が無い、HTTP の token・Host・Origin・root 外のパス・悪い絵・巨大な要求・chunked・接続の上限、外部コマンドの引数）、test_contract_service 11・test_service 32・test_contract_cli 9・test_cli_e2e 10・test_http_server 6。
+  - GUI 案内から初回クライアント設定・再接続・原稿と会話の選択・依頼・承認・結果反映: test_gui_ai 62（firstSetupToResult は代わりのサーバー、firstSetupWithGenkoMcp はこの版の `genko mcp`。変更案→バックアップ→確認→テスト接続（initialize と tools/list だけ）→原稿と会話→クライアントの再起動→二つの原稿 A・B へ別の会話から依頼→A の承認箱で確認待ち→承認と2行の返事→切断・再接続の後に AI へ結果、B は変わらない。tools.jsonl・presence は Python と同じ）、test_gui_studio 29、test_contract_studio_gui 7（参照 Python と照合）。利用者のクライアントでの初回導入は実施不要（ACCEPTANCE §6。waived、合格に数えない）。
+  - 合成画像によるオフライン 8 ページ工程: test_contract_pipeline 3（eightPagesLikePython。FakeAgent を公式 MCP SDK で `genko mcp` に、人役は `genko studio`。Python と全呼び出しの返事・絵・最後の本・監査・承認を照合し、書き出し（PDF・TIFF 8枚・校正 PDF）は最後の本を Python が書き出したものとバイトで照合。ASan・Debug でも合格）。
+  - 速度（PERF-F）: 下の計測。権限・保存は上の試験と test_save_e2e・test_session（Debug・ASan で故障注入まで）。
+- **PERF-F**（Release、test_perf_pipeline、F3 の工程。合否判定あり。測定機は基準クラスではない）: F3 の工程 80.1 秒・88 作業（人の PDF と TIFF 8 枚）。全呼び出し n=314 p95 1030 ms・p99 1825 ms（除外なし。MCP の道具 306 件 p95 996 ms、人の `genko studio` 8 件 p95 7.76 s、書き出し 4 件 最大 9.60 s を含む）／情報取得 n=100 p95 845 ms／編集の確定 p95 150 ms／候補の採用 p95 1751 ms／ページの仕上げ p95 989 ms（合格値は各 p95 2 秒。間の人の承認 p95 164 ms）／8 ページの校正出力 10 回（新しい出力先 studio/proofs/r<版>）: 呼び出しから PDF の完成まで 8.25〜9.88 s（各 30 秒以内。仕事の記録は呼び出しから開始まで最大 13.9 ms、開始から終了まで最大 9.87 s。MCP の export_proof は最大 40 秒仕事を待つので、返事は仕事の終わりと同じ時刻）。**全項目合格**（Totals 3 passed・0 skipped、ctest exit 0。10/13 09:36–09:44 UTC、load 1.3〜1.6）。
+- **V3 の手順の誤り（私の誤り、製品の失敗ではない）**: V3 のスクリプトが test_perf_pipeline を ctest を通さずに実行したため、CMake に登録した `QTEST_FUNCTION_TIMEOUT=3500000`（と TIMEOUT 3600）が渡らず、QtTest の既定 300 秒で productionApi が打ち切られた（exit 134、計測の途中）。打ち切りで親を失った harness と `genko mcp` が残ったので止めた。同じ凍結のビルドで `ctest -R '^test_perf_pipeline$'` からやり直した（上の値）。
+- **実xcb（Xvfb 1920×1080）GUI・E2E**（凍結SHAのビルド）: Release で gui_actions 14・gui_ai 62・gui_anim 8・gui_book 30・gui_brushes 8・gui_canvas 78・gui_color 60・gui_colours 4・gui_effects 15・gui_guides 7・gui_layers 12・gui_layout 32・gui_lines 20・gui_materials 36・gui_output 21・gui_paint 11・gui_paper 14・gui_pen 51・gui_ruby 18・gui_select 13・gui_studio 29、Debug で gui_save 36・app_e2e 8、全合格・FAIL 0。Release の gui_save は故障注入が Debug だけのため SKIP 1（合格に数えない。Debug で 36 合格）。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線。表示のみで合否判定なし）: 開いて最初の頁 641 ms、全頁 757 ms／入力→ライブ線 p95 1.23・p99 5.88 ms（n=43780）／線確定→表示 p95 20.5 ms／Undo→表示 p95 33.0 ms／頁切替 最初 p95 28.8・精細 p95 105 ms（n=4）／自動保存 p95 2.41 s／保存中のタイマーの遅れ p99 11.5 ms・イベントループの停止 p99 44.6 ms（最大 49.6 ms、250 ms 超 0）。F1頁 350dpi 全描画 1227 ms・1線追加 583 ms・512px部分 37 ms。M4 出口とほぼ同じ。基準機での測定は M7。
+- **M5 の出口は Linux で合格**（Windows は開発中 deferred。配布前の Windows 実機受入は必須）。
+
+### M5④（a8e6e67・0c4aae4・3567cd1）
+- app/review_model・ai_link・client_config・mcp_probe・reply_box・viewer・studio_widgets・ai_dialog・links・main_window_studio・style_picker: Python の画面（承認箱、工程、コマの詳細、資料、AI と作る、絵柄を選ぶ、genko:// のリンク）。
+- I07: 接続の状態（未設定・設定済み・未接続・接続済み・処理中・人の確認待ち・失敗）と事実（設定・テスト接続・依頼先・最後の呼び出しと誤り・作業・確認待ち）。テスト接続は initialize と tools/list だけ（生成・課金・原稿の変更をしない）。I13: 複数行の返事（Ctrl+Enter で送る、IME の変換中は送らない）、送る前の確認、下書き（原稿の studio/reply_drafts/、genko-reply-draft@1）。
+- クライアントの設定（Claude Desktop の JSON・Hermes Agent の YAML）は変更案・写し・確認・取りやめ・元に戻す。旧版の `genko gc` が v4 の古い履歴を消しても壊れない（Undo/Redo は history_missing で断り、doctor が報告）。
+- レビュー（P1・P2）で直した所: 確認窓の間に原稿・ページ・コマ・依頼・下書きが変わったら送らない（キーを値で取り、答えの後に確かめる）、Hermes の YAML の書けない形は書かずに理由を出す・コメントと空行と BOM を残す、正式な書き出しは保存が終わってから、doctor の判断を Undo と同じに、下書きのリンクのフォルダー・知らない版・gc、shared_ptr の循環、試験の子プロセスに一時の HOME・APPDATA。
+
+### M5 出口の準備と出口のレビュー（ad0f49e・9f97117）
+- test_contract_pipeline（F3、上）と test_perf_pipeline（PERF-F）。FIXTURES.md F3 に書いた。
+- 1 回目の PERF-F の計測（V2 と同時、load 2〜3）で候補の採用の p95 が 3.07 秒で 2 秒を超えた。合格値は緩めず、Pillow の拡大・アンシャープマスク・ぼかし・配置画像の縮小を行の帯ごとに並列にし（出力のバイトは同じ）、Genko がこのプロセスで今書いた絵（sha256 一致）だけは採用時の全展開の確かめを省く（外から来た絵は今までどおり。SPEC に記載）。
+- GUI の選択（select_frame）は、AI がページを並べ替えても ID で付け直す（消えたら外す）。中身を変える変更は競合として未保存で残す（既知の制限、SPEC）。
+- ASan の test_gui_studio の LeakSanitizer（ViewerDialog のページ送りの部品）を直した。
+- 出口のレビューで直した所: ページ一覧・コマ・台詞の右クリックのメニューはページの id で答えの後の番号を探して当てる、ファイル → 書き出し の正式な書き出しは保存を待つ、Hermes の YAML で genko の値にアンカー・別名・タグがあれば書かない、帯の並列のスレッドはプロセス全体で CPU 数 − 1 本まで（作れなければ呼んだ側で、失敗は逐次でやり直す）、描画の覚えに入れるのは sha256 が合うときと adopt のときだけ。
+
+### 利用者の決定（2026-10-12、M5④）
+- 返事の下書きは原稿に残す（studio/reply_drafts/<sha256>.json、Undo・journal の対象外、v1〜v3 には書かない）。
+- クライアント設定のバックアップは設定ファイルの隣（<名前>.genko-backup-<日時>）。
+- 旧版（Python 版）の `genko gc` が v4 の原稿の古い履歴を消す件は、C++ を強くして記録（既知の制限）。
+
+### 既知の制限（M5 出口の時点）
+- `genko studio` の --agent で人として振る舞える（Python と同じ。利用者決定）。書体のパスは root に閉じない（利用者決定）。
+- 画面の中身を変える変更は、保存待ちの間に AI がページの番号と ID の対応を変えると ID で付け直さず、競合として未保存で残す（SPEC）。
+- C++ 版の原稿（v4）に旧版の `genko gc`・`genko undo` を使わない（SPEC・schema-v4 §8）。
+- 下書きの排他はない（二つのアプリで同じ依頼に書くと後勝ち）。
+- Windows: プラグインの子の子の停止（Job Object）、MSIX 版の Claude の設定の場所、コンソールの窓は M6 の実機で確かめる。
+- cli の手順 42 の一度だけの失敗（M5②）は原因不明のまま（以後再現なし）。
+
+### 残課題・次
+- CMYK/Lab 編集の工程（M5 の後、M6 の前の独立工程。Lab の PSD を含む）。
+- M6 は Windows 実機の実行場所が要るため、着手前に止めて利用者に確認する。
+- Windows 実機受入（配布前に必須）。
+
+## M5②（Studio のサービスと genko studio）・M5③（MCP と HTTP）— 2026-10-12 記録
+
+### V2 — 統合済み
+- 凍結 `17a22bf7ebb6660db7838b72a677d2c7d3727b75`。計画 `validation_policy.py --base 3192b93 --head 17a22bf --phase integration`（tier full、Linux 各 112 試験）。
+  - linux-asan: 112/112 合格・CLI23 合格・サニタイザ指摘なし（10/12 11:24–16:47 UTC）。result.json の failures は空。
+  - linux-release: 112/112 合格・CLI23 合格（10/12 17:25–18:55 UTC）。result.json の failures は空。
+- 1 回目（凍結 ef14b1d）は ASan で test_contract_mcp の jobs（client_stdio）が落ちた。取り消した export_status がサーバーで最大 3 秒動き続け、SDK の stdio クライアントは会話の終わりの 2 秒後にサーバーを止めるので、その呼び出しが道具の記録に残るかが速さで変わっていた。照合を緩めず、取り消しの後は記録に書かれるまで待つ形に直し（17a22bf）、ASan から V2 をやり直した。
+- その前の試み（凍結 6b0d6b7）は、ASan のビルドが 23 GB（874 段の 861 段目）に達して空きが尽きかけたので止めた（結果は使わない）。サニタイザーのビルドに限り Genko のライブラリと同梱の Pillow を共有ライブラリにした（ef14b1d。全体で約 4 GB。genko_render_ops は共有のときだけ genko_render に入れる。zlib を直接使う 2 試験の DEPS を書いた）。デバッグ情報も行の表だけ（-g1、6b0d6b7）。Release・Debug・Windows は静的のまま。
+- 参照の MCP の Python は GENKO_MCP_PYTHON（tools/migration/mcp_reference_requirements.txt、mcp 2.2.0）。無いと test_contract_mcp は SKIP になり、validation_run の監査が不合格にする。
+- Windows は開発中 deferred（配布前の Windows 実機受入は必須）。
+
+### M5②（1998525・6e5a24b）
+- native/src/service/: StudioService と HumanService の全メソッド（エージェントの道具 39 と projects・create_project・upscalers を Python と同じ引数・ToolResult で `StudioService::call` から呼ぶ）、絵の道具、ネームの取り込みと解析、点検・書き出し・仕事（jobs）・正式な書き出し。api/studio_cli.cpp に `genko studio` の全命令。
+- test_contract_service（参照 Python と flow・style・drafts・art・ship・atari・cli・palette を照合。cli は同じプロセスで本・監査・ファイルまで厳密に、別のプロセスでも stdout と終了コードを照合）と test_service。
+- レビュー（P1×2・P2×12）で直した所: for_pages の内側の op にもエージェントの op 一覧と path の閉じ込め（Python にもある穴。AC-API の root 外パス）、プレビューのファイル名の id を安全に、消えたページを参照しない、v1〜v3 の本は副作用の前に needs_migration（genko studio は終了コード 3）、request_approval の人物を 1 回で保存、チャット承認をロックの中で確かめ直す、正式な書き出しは承認の保存までロックを持つ、アプリの正式な書き出しを service::run_export に、画素を展開する前にヘッダーで 64 MP、PDF の数をロケールに依らず、confine を call のキーワードから外す、パレットの絵（モード P）を Pillow と同じバイトで書く、ほか。
+- 一度だけの失敗（cli の手順 42、stdout が空で exit 1）は 3300 回で再現せず、原因は不明。リトライは入れず、試験の Run が crashed・stderr などを出すようにした。
+
+### M5③（f65dd12・4d930f9）
+- api/mcp_*: Python と同じ道具 41 と 4 リソース、JSON-RPC（初期化・道具・リソース・取り消し・ジョブ）、stdio と Streamable HTTP（`genko mcp --transport streamable-http --host --port`。既定は stdio。名前と既定値は公式 SDK）。api/headless_server・http_server・tokens: `genko serve`（server.py の HTTP API）、`genko token`。
+- test_contract_mcp（公式 mcp.Client の stdio・HTTP と生の JSON-RPC・HTTP API を C++ と Python のサーバーで照合）、test_mcp_api_e2e（エージェントが人だけの操作を通れない、人の道具が無い、外部コマンドの引数、HTTP の検査）、test_http_server。
+- レビュー（P1×1・P2×3・P3×13）で直した所: /v1/apply の import_pages の from を root の中に（Python にもある穴）、ヘッダーの段階で Host→Origin→Content-Type→token を確かめて断る要求の本文は読まない、許可した Origin への断りにも ACAO・Vary、token は SHA-256 を全件と同じ手間で比べる、chunked を厳しく、tokens.json は要求ごとに読み直す、スレッド 64・1 アドレス 32 接続・ヘッダー 10 秒の上限、ほか。
+
+### 利用者の決定（2026-10-12）
+- 正式な書き出しの screen は指定どおり使う（Python は真偽値で上書きして使わない）。CLI の裏の仕事は終わるまで待ってから終える。C++ だけの扱い（承認依頼の人物・下書きの採用は全部確かめてから 1 回で保存、作品はロックの下で作る、v3 の本への書き込みは needs_migration、CLI の失敗 JSON に code）を確定。
+- `genko studio` の --agent（human:x などで人として振る舞える）は Python と同じにする（制限しない。既知の制限）。
+- `genko mcp --transport streamable-http --host --port` の形を確定（MCP の HTTP は SDK と同じく認証なし）。
+- 書体のパス（style.font・set_nombre.font）は、システムの書体を指す正当な使い方があるので root に閉じない（あるかどうかだけが分かる。既知の制限）。
+
+### 残課題
+- M5④（画面）と M5 出口の準備（F3・PERF-F）は上の M5 出口の節で統合済み。
+- Windows 実機受入（配布前に必須）。
+
+## M5 と M3・M4 の残り群E — 2026-10-11 記録
+
+### 進め方
+- 群ごとに「実装（対象試験）→レビュー1回→凍結→V2（Linux ASan＋Release、validation_run.py）→native/integration へ統合」。群E（M3・M4 の残り、worktree `m4-rest`）と M5①（worktree `m5-dev`）は並行して作り、それぞれ独立レビュー1回の指摘を直した後、M5① を群E の上へ載せ直して、2群をまとめて1つの候補に凍結し V2 を1回行った。
+- 群E だけで先に回した V2（凍結 6a8d1b0）は、ASan で test_pyre が落ちた（正規表現の探す手間の上限の試験が Release の実測で決めた 10 秒で、-O0＋ASan では 62 秒かかる）。試験を「同じプロセスで測った単価×予算×3」（最適化した構成では 10 秒・15 秒も残す）に直し（5a5f650）、ASan の段の途中で止めた。結果は使わない。直した版で群E に関わる 15 本を ASan で先に確かめた（15/15 合格）。
+- 実行環境（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU / RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44。Qt 6.11.2、参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9。
+
+### V2（群E＋M5①）— 統合済み
+- 凍結 `13a425d25fbece4e173191ae7229d4b23c9a3b06`。計画 `validation_policy.py --base b95eaf9 --head 13a425d --phase integration`（tier full）。
+  - linux-asan: 107/107 合格・CLI23 合格・サニタイザ指摘なし（10/11 15:57–20:48 UTC）。result.json の failures は空。
+  - linux-release: 107/107 合格・CLI23 合格（10/11 21:20–22:40 UTC）。result.json の failures は空。
+- Windows は開発中 deferred（計画の windows-debug/release は実行しない。配布前の Windows 実機受入は必須）。
+
+### 群E（M3・M4 の残り。a6342f2・6a8d1b0・5a5f650）
+- replace_text の `regex: true` と台詞の検索・置換の窓を、CPython 3.12.3 の `re`（sre）の移植で行う（`native/src/core/pyre*`、Unicode の表と名前は生成。CPython・Secret Labs AB・Unicode License v3 の許諾文を `native/third_party/cpython/` に同梱）。参照 Python と照合（手書き約 770 件・乱択 3 万件の型、置換テンプレート、エラー文と位置）。
+- COMP-04 のネイティブ拡張: `<設定>/plugins/<名前>/plugin.json`（`docs/PLUGIN_NATIVE.md`）。既定で無効、同意は plugin.json と本体の sha256 に結び付け、同意したバイトを設定フォルダーの非公開の写しへ書き出して動かす（差し替えたものは動かない）。シェルなし、環境変数は許可リスト、時間・出力の上限、POSIX ではプロセスグループごと止める（Windows は子の子を止められない＝限界として記載）。
+- PSD を Pillow 12.3 と同じに一枚の絵として開く（`render/psd_image`）。Lab の PSD は Little CMS を通すため未移植として断る。
+- 素材ライブラリの一覧（library.json・folders.json）の上限 16 MB。素材一覧のダブルクリックは Python と同じく「貼る」（置く所をクリックで選ぶ）。
+- レビュー（P1×1・P2×4・P3）で直した所: 正規表現の手数の数え漏れ（印の写し・選択肢・文字集合）、数字のあふれ（Python と同じ OverflowError・invalid group reference に。正規表現でない置換テンプレートの退行も）、同じ名前の .py と plugin.json の同意を取り消せない、確かめてから動かすまでの差し替え、ライセンス表示、読めない本体・リンク・リンクのフォルダー、標準エラーの末尾、同意の問いに本体と引数、folders.json の上限。
+
+### M5①（Studio の状態と制作の操作。1a3f544・d6d4039・13a425d）
+- 制作の操作 46 種（`core/ops_studio.cpp`。絵の大きさが要るものは render から差し込む）、`native/src/studio/`（presence・toollog・claims・依頼のフォルダー・道具の登録・入力の型・本から読む状態）、配置画像と白黒の仕上げの描画（`render/placed`・`render/screentone`）。頁・レイヤー・PSD・書き出しの NotYetPorted（placed・finish）を外した。群E の上へ載せ直して、PSD の配置画像も Python と同じ画素で描く。
+- 試験データの誤り（M4 出口の残課題）を直した: 「大きな声で約束する」のルビを「声」[3,4)・「約束」[5,7) に（psd_text_book.json・F4）。PSD の 1 頁目の hash が Python の PSD と同じことを照合で確かめる。
+- test_contract_studio（457 件の操作、保存・Undo/Redo と監査、studio のファイル、配置画像 48 頁・83 ファイル・48 タイル）を参照 Python と照合。
+- レビュー（P1×1・P2×4・P3）で直した所: 巨大な有限値の配置で頁全体が描けなくなる、SPEC の書き方が実装より強い、C++ だけの拒否の試験、claim の一時ファイル名、O(n²)、picture_size はヘッダーだけ、`:` を含む参照、数のあふれ、変えない操作で頁を複製しない、網が粗すぎるときの拒否を SPEC に、配置画像のキャッシュの解放。
+
+### 利用者の決定（2026-10-11）
+- 群E: Esc で素材の配置待ちを取りやめる（C++ の追加。SPEC に記載）を残す。plugin.json の形式を確定。Lab の PSD は CMYK/Lab 編集の工程（M5 の後、M6 の前）で扱う。正規表現の C++ だけの上限（1 億ステップ／戻る場所 100 万・データ 400 万／入れ子 200 段）を確定。
+- M5①: 操作は core に置き、絵の大きさは render から差し込む配置で ARCHITECTURE.md を直す。C++ だけの拒否（Inf/NaN、set_bible の characters、assets/ の外の参照、読めない絵・256 MiB 超、数でない仕上げ、presence/claims の壊れた項目）を確定。tools.jsonl は Python と同じ（整数の ms は整数、Windows は CRLF）。
+- M5①: AI（human: でない actor）は、人が描いた範囲（set_panel の regions）、人物の承認（locked の付け外し・承認済みの人物の設定画と顔。set_bible・upsert_character）、承認済みの人物の削除、承認依頼のチケット、絵柄の固定を変えられない（Python は通す。ACCEPTANCE AC-API・SPEC の「固定欄・承認を維持」に合わせた C++ だけの拒否）。承認済みの人物が消えたことを audit.jsonl に残す（Python は残さない）。
+- M5①: 読めない絵（形式を問わず）は配置のとき（place_asset・adopt_candidate・候補のない set_placement）に全部展開して確かめて断る。大きさだけのときはヘッダーだけ読む。
+
+### 残課題
+- Windows 実機受入（配布前に必須）。Windows でのプラグインの子の子の停止（Job Object）。
+- Lab の PSD（CMYK/Lab 編集の工程で）。
+- 配置画像の仕上げが 4000 万画素を超えるとタイルごとに作り直す、白黒の頁の色のレイヤーの仕上げをタイルごとに頁全体で作り直す（性能。正しさは同じ）。
+- 編集可能の PSD の書き出しが縁取りのある台詞で遅い（M4 から）。
+- M5②〜④（StudioService・CLI、MCP・HTTP、画面）と M5 出口。M5② は m5-2 で作業中。
+
+## M4出口受入（Linux）— 2026-10-11 記録
+
+- **凍結SHA**: `65f833353c548bc5f28c9e0f4c775c96f5fa4635`（native/integration。M4 の群A・群B・群C と M3 の残り BRUSH-01 を統合した後の記録の版）。計画は `validation_policy.py --base 9b344f5 --head 65f8333 --phase milestone`（基点は M3 出口の凍結。tier full、Linux 各100試験）。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.80GHz。M3 出口とは別の機種）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44 / cgroup v1。Qt 6.11.2、GCC 13.3。参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。ASan（各構成内 ctest 1並列）→ ASan のビルドを消して Release と Debug を同時に。
+- **結果**（validation_run.py の result.json）:
+  - linux-asan: 100/100 合格、サニタイザ指摘なし、CLI23 合格（10/10 22:54–10/11 02:55 UTC）
+  - linux-release: 100/100 合格、CLI23 合格（03:17–04:30）
+  - linux-debug: 100/100 合格、CLI23 合格（03:17–04:50）
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1件のみ＝Windows 2構成が開発中 deferred。Linux 3構成どうしの照合は指摘なし。**Windowsを含む --pair 合格ではない。**
+- **実xcb（Xvfb 1920×1080）GUI・E2E**（凍結SHAのビルド）: Release で gui_actions 14・gui_anim 6・gui_book 29・gui_brushes 8・gui_canvas 78・gui_color 60・gui_colours 4・gui_effects 14・gui_guides 7・gui_layers 12・gui_layout 32・gui_lines 20・gui_materials 35・gui_output 20・gui_paint 11・gui_paper 14・gui_pen 51・gui_ruby 18・gui_select 13、Debug で gui_save 36・app_e2e 8（開く→描く→Undo→保存→終了→別プロセスで再開）、全合格・FAIL 0。Release の gui_save は故障注入が Debug だけのため SKIP 1（合格に数えない。Debug で 36 合格）。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線。試験は表示のみで合否判定なし。測定機は基準クラスではない）: 開いて最初の頁 548 ms、全頁 795 ms／入力→ライブ線 p95 1.56・p99 4.38 ms（n=43780）／線確定→表示 p95 18.3 ms／Undo→表示 p95 30.5 ms／頁切替 最初 p95 23.7・精細 p95 93.8 ms（n=4）／自動保存 p95 2.43 s／保存中のタイマーの遅れ p99 9.40 ms・イベントループの停止 p99 46.1 ms（最大 46 ms）。F1頁 350dpi 全描画 1114 ms・1線追加 598 ms・512px部分 45 ms。空いた状態での再計測もほぼ同じ（入力→ライブ線 p95 1.50 ms、停止 p99 52.8 ms、タイマーの遅れ p99 9.71 ms）。M3 出口（別の機種）と比べ、入力→ライブ線は約3倍・タイマーの遅れは約2倍、停止の最大は 309→46 ms。どれも合格値（PERF-B 33/50 ms、PERF-E 50 ms）より小さいが、基準機での測定は M7。
+- **AC-PSD（§6 の代替検査）**: 編集可能な PSD（`native/tests/data/psd_text_book.json`、150 dpi、文字レイヤー19・ルビのレイヤー13、画像にした台詞 0、書体の注意 0）を Krita 5.2.2（Ubuntu の 1:5.2.2+dfsg-2build8、Xvfb）で開いて PNG に書き出せた（4頁とも 1240×1754 px、Genko の PNG との差は 0.01〜0.08% の画素で見た目は同じ、効果文字の縁取りあり）。Krita の .kra に書き出した層の構造でも「台詞 …」のグループの中に「フキダシ」「本文 #<id>」「ルビ「…」 #<id>-r<n>」、効果文字の本文にレイヤースタイルがある。Krita 5.2 は文字レイヤーを画素の層として読む（文字として直せることは求めない）。Photoshop・CLIP STUDIO PAINT での再編集は waived（未確認として既知制限に書く）。構造は test_psd_text（自前の読み手）と test_contract_psd_text（psd-tools）で検査。
+- **AC-TEXT の目視**: 同じ本の PNG（150 dpi）と PDF（pdftocairo で 150 dpi に戻した頁）を拡大して見た。文字・句読点・ルビの欠けはない（縦書き・横書き、縦中横の AI・12、禁則、異体字セレクタの 葛󠄀・辻︀、ルビの書体・揃え・距離・字間・大きさ、二列にまたがるルビ、回転・斜体・効果文字）。書体は ZenKakuGothicNew-Bold・ZenOldMincho-SemiBold・DelaGothicOne-Regular・ZenMaruGothic-Bold。**試験データの誤り（残課題）**: psd_text_book.json と test_ruby_render の F4 の本の「大きな声で約束する」の ruby_spans が [4,5)「こえ」・[6,8)「やくそく」で、書記素で数えると「で」「束す」に付く（意図は「声」[3,4)・「約束」[5,7)）。描画はデータの通りで製品の誤りではない。M5 の最初の群で直す。IME の Windows での確認は deferred。
+- **M3 の出口**: 下の M3 出口受入（2026-10-09）で欠けていた BRUSH-01（紙質を別PCへ持ち出して再現できる）は、この凍結で合わせて受け入れた（test_paper・test_gui_paper・test_contract_paper が3構成とも合格、GUI は gui_paper 14）。**M3・M4 とも Linux の出口受入は合格**（Windows は deferred）。
+- **残課題・利用者判断**: Windows 実機受入（配布前に必須）、上の試験データの誤り、編集可能の PSD の書き出しが縁取りのある台詞で遅い（部分ごとに文字組を計算し直す）、replace_text の正規表現（not_yet_ported、利用者判断）、COMP-04 のネイティブ拡張の登録形式（公開契約の追加、利用者確認待ち）、CMYK/Lab の扱い、素材ライブラリ一覧の 1 MB 上限、素材一覧のダブルクリック、PSD を画像として開く（Pillow の平坦化、NotYetPorted）。置いた絵（place_asset）と正式な書き出しは M5。
+
+## 利用者の判断（2026-10-11）
+
+保留していた判断項目への回答。M3・M4 の残りの群として M5 と並行して実装する（CMYK/Lab は別工程）。
+- replace_text の正規表現（regex: true）: Python の re を全部移す（Python と同じ結果。通常の置換は既に Python と同じ）。
+- COMP-04 のネイティブ拡張: plugins フォルダーの plugin.json（名前・実行ファイル・引数・設定項目）で登録する形を設計して入れる。既定は無効、選んだものだけ同意の上で実行。
+- PSD を 1 枚の画像として開く・読み込む: Python と同じ（Pillow の PsdImagePlugin の平坦化）に入れる。
+- 素材ライブラリの一覧（library.json）の上限: 1 MB → 16 MB。
+- 素材一覧のダブルクリック: Python と同じ（ページでクリックした所に置く）。
+- CMYK・Lab での編集: 足す。M5 の後、M6 の前の独立した工程（設計・実装・検証）。
+
+## M4 — 2026-10-09 記録
+
+### M3・M4 の残り（2026-10-09 訂正）
+- **M3 出口の記録の訂正**: 下の「M3出口受入（Linux）」は BRUSH-01（紙質の画像を使うブラシ。改善 I06、AC-BRUSH の紙質、schema-v4 の `paper-texture@1`、PLAN の M3 出口「紙質を別PCへ持ち出して再現できる」）が未実装のまま記録した。その節の試験結果は正しいが、**M3 は完了していない**。BRUSH-01 を実装し、M4 出口の V3 で合わせて受け入れる。
+- **M4 の残り**: TEXT-01（ルビの詳細組版と書記素範囲の追従、`ruby-layout@1`、改善 I04、AC-TEXT）、PSD-01（PSD の編集可能な文字、`psd-text@1`、改善 I05、AC-PSD の構造検査と Krita 読込）。M4 出口（AC-TEXT・AC-PSD・AC-EXPORT）はこれらの後。
+- 2026-10-09 に一度始めた M4 出口の V3（凍結 2461338）は、M4 が未完成と分かったので ASan の途中で止めた。結果は使わない。
+
+### M3 の残り BRUSH-01 紙質のブラシ（paper-texture@1、改善 I06）（aeaf239…7857af9）— 統合済み
+- 凍結 7857af9。計画 `validation_policy.py --base 145530d --head 7857af9 --phase integration`（tier full、Linux 各95試験）。
+  - linux-asan: 95/95 合格・CLI23 合格・サニタイザ指摘なし（10/10 00:29–03:21 UTC）。
+  - linux-release: 95/95 合格・CLI23 合格（09:28–10:50 UTC）。1回目は作業プロセスの再起動で 59/95 の途中で止まり（interrupted として残す）、同じ計画で Release だけ回し直した。
+- 内容: 本のブラシに任意の paper（素材 sha256 の灰色 PNG、濃度・倍率〔1 画素 = 1/300 インチ〕・回転・左右/上下反転・濃淡反転・乗算/減算・紙に固定/線の始点から・繰り返し/鏡映・seed）。合成順は被覆→筆圧→紙質→不透明度。整数の双一次補間と四則だけの sin/cos で OS に依らない。define_brush の paper、初めて使った時に features へ paper-texture@1。紙質の画像が無い・描けない・ハッシュ違いの本は読み取り専用。自分のブラシの紙質は brushes.json（Python と共有）を変えず brush_papers.json・brush_papers/。画面はブラシの「紙質」タブ。
+- 利用者の決定（10/09）: 期待画像 native/tests/data/paper/expected/paper-settings.png・inherited-brushes.png を承認。保存先は別ファイル。公開契約の追加（define_brush の paper、brush.custom[*].paper と paper-texture@1、.genkobrush の paper.png）とこの細部（灰色だけ、1辺 4096 px・64 MiB、乗算・減算、反転、倍率の基準）を確定。
+- レビュー1回（P1×1: 紙質の画像の欠けた本で描くと Qt の処理から例外で落ちる、P2×4: ハッシュ違いの画像の登録、印刷の試験の skip、16 ビットの灰色、ライブラリの紙質の消失）と修正の再確認（P3 のうち利用者のファイルを消しうる2件と Windows の skip を直した）。
+- 印刷の検査は poppler の pdftocairo で PDF を同じ画素数に戻して差 0。Linux では pdftocairo が無ければ失敗（native.yml の apt に poppler-utils を足した。CI は有効にしていない）。Windows の受入にも poppler が要る。
+- push 済み（145530d..7857af9）。M3 の出口（紙質を別PCへ持ち出して再現できる）は M4 出口の V3 で合わせて受け入れる。
+
+### 群C ルビの詳細組版と範囲追従（TEXT-01、ruby-layout@1、改善 I04）・編集可能な文字の PSD（PSD-01、改善 I05）（…c91288a）— 統合済み
+- PSD-01 は TEXT-01 のルビの位置（render::text::ruby_places）に依るので1群にした。凍結 c91288a。計画 `validation_policy.py --base 2b5fe41 --head c91288a --phase integration`（tier full、Linux 各100試験）。
+  - linux-asan: 100/100 合格・CLI23 合格・サニタイザ指摘なし（10/10 16:52–21:11 UTC）。
+  - linux-release: 100/100 合格・CLI23 合格（21:34–22:53 UTC）。
+  - 前の凍結 8629b46 は ASan で test_psd_text が QtTest の1関数 300 秒を超えて止められた（試験の画素の読み方が遅い。製品の不具合ではない）。時間の上限は変えず、試験を速くして関数を分けた（c91288a、ASan で test_psd_text 134 秒）。ほかの 99 試験は合格していた。
+- TEXT-01: 台詞の ruby_spans（拡張書記素クラスタの [start,end)、Qt 6.11.2 の Unicode 17.0）にルビごとの書体・大きさ・揃え・本文との距離・字間。追従の規則（前は動かす、後ろ・末尾は変えない、親文字にかかる編集は要確認、全削除・全置換は外して Undo で戻る、長い台詞は前後両方から比べ、別の語に載せない）。要確認がある間は正式な書き出しを止め、点検に ruby_review。Python の台詞は Python と同じ結果の間は Python の形のまま。画面は記法を正とし、ルビの一覧で振り直す・外す・ルビごとの設定。
+- PSD-01: genko export --format psd --psd-text editable で台詞ごとのグループ（フキダシ・本文・ルビごとの文字レイヤー、TySh/TxLr/EngineData、縦横・run・字間・揃え・変形・縁取り）。既定（image）は Python とバイトまで同じ。未対応（グラデーション・画像の塗り・パスの文字・円弧・ワープ・傍点・組み方の変わる旧形式のルビ）は厳密で断り、--rasterize-unsupported の時だけその台詞を画像に。書体は PostScript 名だけで埋め込まない。対応表 docs/PSD_TEXT_SUPPORT.md。受取アプリでの再編集は §6 で waived（psd-tools と自前の読み手で構造を照合。Krita での読込は M4 出口で行う）。
+- 利用者の決定（10/09–10）: ルビの設定はルビごと、親文字の全置換は外す（Python と同じ）、ルビの公開契約の追加を確定。PSD の CLI、未対応に円弧と傍点、層の名前と対応 ID を確定。
+- レビュー: TEXT-01 は群レビュー（P1×3・P2×7）と修正の再確認3回（別の語に載る・黙って外れる不具合が無くなるまで）。PSD-01 は群レビュー（P2×4: 縁の太さ、縦書きの立てた半角、旧形式のルビ、試験の弱さ）。
+- 既知の制限: 編集可能の PSD は縁取りのある台詞の文字組を部分ごとに数回計算し直し、効果文字の多い頁は画像の書き出しより数倍遅い。
+- push 済み（2b5fe41..c91288a）。
+
+### 進め方
+- M3 と同じく群ごとに「実装（対象試験）→レビュー1回→凍結→V2（Linux Release＋ASan、validation_run.py）→native/integrationへ統合」。V3 は M4 出口だけ。開発は worktree の m4-dev。
+- 実行環境（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Xeon 2.1GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18 / cgroup v1。参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。V2 は ASan と Release を順に（各構成内 ctest 1並列）。Windows は開発中 deferred（配布前の Windows 実機受入は必須のまま）。
+
+### 群A 台詞・フキダシ・縦書き（M4①）と本とページ・PSD の取込み（M4②a・②b）（b885c30…44789a9）— 統合済み
+- 凍結 44789a9。計画 `validation_policy.py --base c8e140e --head 44789a9 --phase integration`（tier full、Linux 各87試験）。
+  - linux-asan: 87/87 合格・CLI23 合格・サニタイザ指摘なし（11:36–14:31 UTC）。
+  - linux-release: 87/87 合格・CLI23 合格（14:47–15:45 UTC）。result.json の failures は空。
+- 経緯（同じ群の前の凍結）:
+  - 9ad99e0: linux-release 87/87・CLI23 合格。linux-asan はリンク中に書込み枠を使い切って止まった（試験 87 本で ASan の構成が 27 GB を超えた）。→ 956e541: サニタイザの構成だけ、リンカーが受け付ければ `-z pack-relative-relocs` と `--compress-debug-sections=zlib` でリンク（試験の中身と報告のファイル・行は同じ。330 MB の試験が 198 MB、構成全体で約 19 GB）。Release・Debug は変えない。
+  - 956e541: linux-asan 85/87。test_contract_psd が UBSan（幅 0 の層の画像の複製で Pillow の行ごとの memcpy が null の行を読む）、test_gui_lines が ASan（試験が一時の JSON の items() を range-for で回していた）。→ 44789a9: render::Image の複製は画素の無い画像を新しく作る（Genko 側で直した。libImaging は変えない）、試験の一時オブジェクトを名前のある変数に。test_image に幅・高さ 0 の画像の複製（直す前は ASan で落ちることを確かめた）。
+- 当初は ① と ② を別の群にする予定だったが、渦巻きの float32 の修正（d352fd5）の試験が ②a の判型の変更に依るため1群にした。群レビューは2回（①の指摘 12c1c75、群全体の指摘 2f2c54a・9ad99e0）。
+- push 済み（c8e140e..44789a9）。
+
+### 群B 本とページの画面（M4②c）・書き出し14形式と genko export（M4③a）・書き出し・印刷・履歴・スマホ・目盛り・入稿前の点検の画面と点検（M4③b）（6f26dbc…cd402bb）— 統合済み
+- 凍結 cd402bb。計画 `validation_policy.py --base 6b81e31 --head cd402bb --phase integration`（tier full、Linux 各92試験）。
+  - linux-asan: 92/92 合格・CLI23 合格・サニタイザ指摘なし（16:14–19:06 UTC）。
+  - linux-release: 92/92 合格・CLI23 合格（19:17–20:14 UTC）。result.json の failures は空。
+- 群レビューは3人で分担（②c・③a・③b）、指摘 P1×1・P2×6・P3×11（1件は指摘の誤り）。セッションの直しは読取専用の再確認を5回（P1・P2 が無くなるまで）。
+- push 済み（6b81e31..cd402bb）。
+
+### 群B のレビューで直した所
+- P1: 大きな本を読み込み中の書き出し・印刷・点検が、読んでいない頁を白紙で出し、点検も見落としていた → 読込み中は日本語で断る（formats::run・印刷・checks::book も読み残しのある本を断る）。
+- 書き出し: 一時ファイル名に出力名を含めていたため日本語80字の題名で ENAMETOOLONG → 固定長の名前。頁ごとの PSD と pack も失敗時に何も残さない。置き換えは全行き先を先に確かめ、途中で失敗したら元に戻し、戻せない古いファイルの場所をすべて示す。行き先の状態が読めなければ何も置き換えない。dpi は全形式 1〜100000（CLI の断りは code value）、strip は大きさを確かめてから行を作る、PNG の行が int に入らなければ断る。頁の指定の大きすぎる数は Python と同じ「…ページはありません」。
+- 作品の結合: コピーしない素材（リンク・中身が名前と合わない）を参照する頁があれば日本語で断り何も変えない（Python はリンクを辿ってコピーする）。読み取り専用でしか開けない本の理由を日本語に。
+- 印刷の見本が描けない物を黙って白紙にしていた → 知らせる。プラグインの頁はプラグイン自身の断り。
+- 時間のかかる操作（表紙を作る・頁を取り込む等）は Python の SLOW_OPS と同じく状態欄と待ちのカーソル。コマの道具の設定に「原稿」と原稿用紙の設定…・形を戻す。
+- 履歴とセッション（保存・ジャーナル）: 履歴の並びの指摘から、セッションの非同期の取り消し・やり直しを直した。M2 から残っていた保存の不整合も含む（ほかの書き手の保存と重なった取り消しで保存の衝突が続き以後保存されない、書き込みの最後だけ失敗した編集が読み直しで二重に適用される、保存した復旧用コピーの採用の取り消しで衝突が続く、ジャーナルの取り消しの待ち中のやり直しで衝突が続く）。
+  - ジャーナルの取り消し・やり直しの数は、最後に読み書きした深さと待ち行列を順にたどる一か所（journal_after）で決める。
+  - 原稿に渡した段は取り下げない（書き込み中のやり直しは「書き終わってから」と断る）。
+  - 読み直しの衝突は保ち、その間は何も書かない。読み直しは失敗しても再試行する。
+  - 読み直しで写し直さない取り消し・やり直しは行わずに知らせる。原稿が取り込んだ段は写し直さない。
+  - C++ だけの知らせ・断り（busy、行わなかった取り消し・やり直しの知らせ、recover_undo）は SPEC COMP-01a。
+  - 既知の違い（残す）: 書いていない変更を、やり直すものが無い時にジャーナルの取り消しの前に取り消すと、その読み直しの後にやり直せない（本は一貫している。Python はやり直せる）。
+
+### 群B の Python との違い（SPEC.md COMP-01a）
+- この build が描けない台詞・絵（NotYetPorted）は点検・書き出し・印刷で黙って省かず日本語で知らせる（ARCHITECTURE §4a）。印刷は先に 10 dpi で描き、失敗する頁があればプリンターへ何も送らない。
+- 書き出し: PNG・JPEG・TIFF・PDF・CMYK・PSD・pack は Pillow／Python とバイトまで一致（formats の Pillow と同じ書き手）。EPUB・Kindle と RGB の sRGB プロファイルは時刻の刻印だけ違う（Python 同士でも違う）。原稿の中の PNG（render::write_png）は変えない（ARCHITECTURE §4a）。失敗した書き出しはファイルを残さない。Python が例外の表示で終わる所は JSON の誤りで返す。置いた絵のある頁と official の書き出しは not_yet_ported（M5）。
+- 点検が古くなるのは原稿が変わった時と別の原稿を出した時だけ（Python は頁を移っただけで「原稿が変わりました」）。高精度の色のレイヤーは画素として数える（C++ だけ）。点検に畳み込む preflight は checks.book が使わない dpi の表を省く。
+- 履歴の並びは C++ のセッションの順。書き出しのダイアログの最小幅は画面に収める。履歴・点検の枠はページの枠とタブ。
+- 本とページの画面: 「PSD をレイヤーのまま読み込む…」はファイルを尋ねる。ダイアログの間に原稿や頁が変わったら適用せず知らせる。読めないノンブルの値・巨大な頁の範囲は日本語で断る。原稿用紙で dpi だけ変えると数値を送る（Python は dpi を落とす）。新しい原稿のダイアログの名前は Python と同じ genko.export.safe_name。
+
+### 利用者の決定（2026-10-09）— Python と意図して違う所
+- D1 判型の変更（set_page_spec）: Python は表紙・カバー・帯のペイントの画素を本の用紙に切って消し、マスクも中身とずれる。C++ は各ページ自身の新しい用紙（カバー・帯は spec_for）の大きさで画素を動かし、マスクも中身と同じく旧基本枠から新基本枠へ動かす（SPEC §2「既知の不具合を再現しない」）。開けないマスクは Python と同じく触らない。
+- D2 頁の取込み（import_pages）と頁の複製（duplicate_page）: Python はレイヤーに新しい id を振るのに参照を直さない。C++ は parent_id・台詞の style.below_layer・定規の layer_id・アニメーションのフォルダ・セル・ライトテーブル・saved_areas の {"layer": id} を新しい id へ付け替える（頁の複製は M1/M2 からの振る舞いも変わる）。
+- 照合の印: 意図して違う所は契約の場合に `"cpp": "deviates"` と `cpp_says`（決定）・`cpp_differs`（違ってよい場所を正確に）・`cpp_keeps`（C++ が守ること）を書き、実際に違うこと・守れていること・保存と読み直しでも守れていること・Python の本では守れないことを確かめる。それ以外は Python と完全一致。SPEC.md COMP-01a に行を足した。
+
+### 群A の C++ だけの断り（Python の検査の後。SPEC.md COMP-01a）
+- 台詞: 文字列・null 以外の frame_id、有限でない数、画素を読めない style の画像。素材の画像の絶対パス・".."・ライブラリの外・リンク・64 MB 超。
+- 本とページ: 有限でない紙・塗り足し・余白、画素を持てない大きさの紙、この build が読み取り専用で開く原稿からの取込み、copy_assets は1件 256 MiB まで（リンクを辿らない）。
+- PSD: 1チャンネル 480 MB・絵 120 M 画素・合計 8 GiB・ファイル 2 GiB、取込み全体で画素の層の数 ×（頁の層＋画布の画素）が 128 × 120 M 画素まで（A4 600 dpi で約 210 層）。
+
+### 群A の数値・描き方の判断
+- 文字組は Pillow 12.3 の BASIC（raqm なし）に固定（render_harness・pyref_harness も）。OpenType 機能・32 MB を超える書体・読めない書体は頁全体を失敗させず、その台詞の文字だけ省いて知らせる（NotYetPorted text_features・large_font・default_font）。
+- 文字のゆがみ（warped_letters）32 行のうち 3 行は numpy の SVD の誤差で ARCHITECTURE §9 の近似照合（compare_picture_near）の範囲内。他は画素まで一致。
+- sinf・cosf・powf は Arm optimized-routines v25.01（MIT、glibc 2.39 の実装）を render/libm_float に移植し、全 2^32 の float でシステムの libm とビット一致。渦巻き・波・トーン・PSD がこれを使い OS に依らない。
+- 高精度の色の頁（C++ だけの機能）のレイヤーの下の台詞は 8 ビットの頁と同じに描き、塗った画素だけを線形の光として戻す（塗った画素は 8 ビットの精度）。
+- 台詞の描画は render/text/ に置いた（頁の描画がレイヤーの間にフキダシを描くため。ARCHITECTURE §1 の text/ 層とは違う）。
+- 台詞パネルの色の欄が壊れている時は既定の色でダイアログを開く（Python は誤りを記録してダイアログを出さない）。
+
+### 群A の先送り・未移植（理由）
+- replace_text の regex: true は not_yet_ported（Python の re 全体の移植が要る。リテラルの検索と IGNORECASE は CPython 3.12 と全符号位置で照合済み）。採るかは利用者判断。
+- Pillow の PsdImagePlugin（PSD を画像として開く平坦化）は別の読み手なので NotYetPorted。高精度の色の画素の判型の変更は NotYetPorted（C++ だけの機能）。
+
+## M3出口受入（Linux）— 2026-10-09 記録
+
+- **凍結SHA**: `9b344f5f74c9d7d8b2dc679dc89ea1e39a1645a8`（native/integration。M3 の4群を統合した後の記録の版）。計画は `validation_policy.py --base 61e2e2c --head 9b344f5 --phase milestone`（tier full、Linux 各81試験、Windows 各51試験＋契約30除外）。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Xeon 2.1GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18 / cgroup v1。Qt 6.11.2（aqtinstall 3.3.0）、GCC 13.3。参照 Python 3.12＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、`OPENBLAS_CORETYPE=Haswell`・`NPY_DISABLE_CPU_FEATURES` は native.yml と同じ。root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。ディスクの書込み枠のため構成は順に実行: ASan（各構成内 ctest 1並列）→ ASan のビルドを消して Release と Debug を同時に。
+- **結果**（validation_run.py の result.json）:
+  - linux-asan: 81/81 合格、サニタイザ指摘なし、CLI23 合格
+  - linux-release: 81/81 合格、CLI23 合格
+  - linux-debug: 81/81 合格、CLI23 合格
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1件のみ＝Windows 2構成が開発中 deferred。Linux 3構成どうしの照合（計画・範囲・source/binary pins・生ログ・CLI23）は指摘なし。**Windowsを含む --pair 合格ではない。**
+- **実xcb（Xvfb 1920×1080）GUI・E2E**（凍結SHAのビルド）: Release で gui_actions 14・gui_anim 6・gui_brushes 8・gui_canvas 76・gui_color 60・gui_colours 4・gui_effects 12・gui_guides 7・gui_layers 12・gui_layout 32・gui_materials 35・gui_paint 11・gui_pen 51・gui_select 13、Debug で gui_save 36・app_e2e 8（開く→描く→Undo→保存→終了→別プロセスで再開）、全合格・FAIL 0。Release の gui_save は故障注入が Debug だけのため SKIP 1（合格に数えない。Debug で 36 合格）。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線。試験は表示のみで合否判定なし。測定機は上記コンテナで基準クラスの合否ではない）: 開いて最初の頁 456 ms、全頁の読込完了 568 ms／入力→ライブ線 p95 0.56・p99 2.90 ms（n=43780）／入力→描画 p95 1.44 ms／線確定→表示 p95 19.4 ms／Undo→表示 p95 26.5 ms／頁切替 最初 p95 36.3・精細 p95 89.3 ms（n=4）／保存中のイベントループ遅れ p99 4.46 ms／自動保存 p95 1.80 s（複数線の一括保存）。F1頁 350dpi 全描画 947 ms・1線追加 491 ms・512px部分 26 ms。
+- **Windows**: 開発中 deferred（実 build・試験なし）。配布前の Windows 実機受入は必須のまま。
+- **M3 の群**（各群の V2 と Python との差は下の「M3」の節）: ①高精度フィルター・補正・色管理・レイヤーパネル・範囲選択、②ABR・ブラシ、③アニメ・タイムラプス・プラグイン、④描画道具・線の編集・定規と3D・素材・トーン・効果線・サブビュー。
+- **M3 の残課題・利用者判断**: 素材一覧のダブルクリックの振る舞い、COMP-04 のネイティブ拡張（実行ファイル型プラグインの登録形式＝公開契約の追加）、CMYK/Lab の扱い、素材ライブラリ一覧の 1 MB 上限。画像を読み込む（act_import）は M5、TIFF/WebP/PSD を画像として開く（Pillow の PSD 平坦化を含む）は M4 の形式。
+
+## M3 — 2026-10-08 記録
+
+### 進め方
+- 群ごとに「実装（対象試験）→レビュー1回→凍結→V2（Linux Release＋ASan、validation_run.py）→native/integrationへ統合」。V3はマイルストーン出口だけ。
+- Windows は開発中 deferred（計画に windows-debug/release は出るが実行しない）。配布前の Windows 実機受入は必須のまま。
+- 実行環境（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU / RAM 16GB / Ubuntu 24.04.5 / kernel 6.18 / cgroup v1。参照 Python 3.12（Pillow 12.3.0）と native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。V2 は Release と ASan を順に（各構成内 ctest 1並列）。
+
+### ①-1 高精度画素の消しゴム・範囲削除・移動・変形・貼り付け・マスク（5cdefd6, fd48310）— 統合済み
+- 計画 `validation_policy.py --base a5e9466 --head fd48310 --phase integration`（tier full、Linux 各65試験）。
+- linux-release: 65/65 合格・CLI23 合格。linux-asan: 65/65 合格・CLI23 合格・サニタイザ指摘なし。
+- push 済み（a5e9466..fd48310）。
+
+### ① 高精度フィルター21種・補正レイヤー9種・色管理・レイヤーパネル・範囲選択（2f13472…1bac9e7、試験修正 0d7f2bf）— 統合済み
+- 凍結 1bac9e7。計画 `--base fd48310 --head 1bac9e7 --phase integration`（tier full、Linux 各69試験）。
+  - linux-release: 69/69 合格・CLI23 合格。
+  - linux-asan: 68/69・CLI23 合格。test_color_filters で heap-use-after-free。試験が edit() の返した本を一時のまま view() に渡し、画素を読む前に解放していた（製品コードではない）。
+- 試験の修正 0d7f2bf（名前のある変数に保ってから読む）。計画 `--base 1bac9e7 --head 0d7f2bf --phase integration`: linux-release 全69/69・CLI23 合格、linux-asan 関連16/16（test_color_filters を含む）合格・サニタイザ指摘なし（この計画では ASan の CLI23 は対象外）。
+- push 済み（fd48310..0d7f2bf）。
+
+### ② Photoshopブラシ（.abr）の読込・自分のブラシ・ブラシパネルとツールの設定（1733e3a…4d423bb）— 統合済み
+- 凍結 4d423bb。計画 `--base 6d0924f --head 4d423bb --phase integration`（tier full、Linux 各71試験）。
+- linux-release: 71/71 合格・CLI23 合格。linux-asan: 71/71 合格・CLI23 合格・サニタイザ指摘なし。
+- push 済み（6d0924f..4d423bb）。
+
+### ③ アニメーション・タイムラプス・フィルターのプラグイン（2e5f9d9…26cc5ac）— 統合済み
+- 凍結 26cc5ac。計画 `--base d51a1f8 --head 26cc5ac --phase integration`（tier full、Linux 各74試験）。
+- linux-release: 74/74 合格・CLI23 合格。
+- linux-asan: 1回目は試験の前のビルドで止まった（リンク中に "No space left on device"。このセッションの書込み枠を使い切った）。古い試験の一時フォルダ・pip/uv のキャッシュ・Debug のビルド（M3出口で作り直す）を消して空きを作り、同じ計画で ASan だけ再実行: 74/74 合格・CLI23 合格・サニタイザ指摘なし。
+- push 済み（d51a1f8..26cc5ac）。
+
+### ④ 描画道具・線の編集・定規と3D・素材とトーンと効果線・サブビュー（aae4fcc…dd868fd）— 統合済み
+- 凍結 dd868fd。計画 `--base 69152b6 --head dd868fd --phase integration`（tier full、Linux 各81試験）。
+- linux-release: 81/81 合格・CLI23 合格。linux-asan: 81/81 合格・CLI23 合格・サニタイザ指摘なし。（1回目はコンテナの再起動で途中で止まり、同じ計画で最初から再実行した。）
+- 群レビュー後に直した所（Python との差の記録）:
+  - Python より守る側: 素材パックの pack.json の "file" はパックの中だけを読む（".."・絶対パス・リンクのフォルダを通る項目は飛ばす。Python 3.12 はパックの外も読む）。素材ライブラリの一覧は 1 MB まで（超える変更は断り、画像を残さない）。スキャナー（WIA）の保存先は Windows の区切りで渡し ' を '' にする。素材フォルダのリンク拒否（M2 の安全検査）は緩めない。
+  - Python に揃えた: 置いたガイド線は描かない（ドラッグ中だけ見える。目盛りとガイドの引き出しは台帳上 M4）。定規へ吸着中のペンは描いている間も吸着後の線と対称コピーを見せる。サブビューの枠は最初は隠す（出したままだと 1024×640・1366×768 の 200% で窓がはみ出した）。
+  - 見落としの修正: M3④で足した add_shape・smudge・liquify を test_command_bus の登録一覧に入れた（④の対象試験に含めていなかった）。
+- push 済み（69152b6..dd868fd）。
+
+### 未決・利用者判断（M3出口で報告）
+- 素材一覧のダブルクリック: M2 の振る舞い（ページ中央にすぐ貼る）を維持。Python は「クリックした所に置く」待ちになる（「貼る」ボタンは Python 通り）。
+- COMP-04 のネイティブ拡張（Python 以外の別プロセス画像フィルター）: 実行ファイル型プラグインの登録形式は公開契約の追加になるため利用者確認待ち。
+- CMYK/Lab の扱い（既出の判断項目）。
+
+## M2出口受入（Linux）— 2026-10-08 記録（下の旧節の「マージ後未実施」はこの節で置き換わる）
+
+- **凍結SHA**: `61e2e2c99857c26c634960f090403e53d339a0c4`（native/integration）。計画は `validation_policy.py --base 5e07b91 --phase milestone`（tier full、Linux各64試験、Windows各41試験＋契約23除外）。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Xeon 2.8GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18 / cgroup v1。Qt 6.11.2（aqtinstall 3.3.0）、GCC 13.3。参照 Python 3.12.3＋Pillow 12.3.0・numpy 2.4.6・psd-tools 1.10.9、`OPENBLAS_CORETYPE=Haswell`・`NPY_DISABLE_CPU_FEATURES` は native.yml と同じ。root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行（書込不能の試験を成立させるため）。3構成を同時実行、各構成内は ctest 1並列。
+- **結果**（validation_run.py の result.json）:
+  - linux-debug: 64/64 CTest 合格、CLI23 合格
+  - linux-release: 64/64 合格（既知の故障注入SKIPのみ）、CLI23 合格
+  - linux-asan: 64/64 合格、サニタイザ指摘なし、CLI23 合格
+  - `--pair`: 失敗は「構成artifactの欠落」1件のみ＝Windows 2構成が開発中 deferred（VALIDATION §0）。Linux 3構成どうしの照合（Release SKIP↔ASan PASS、source/binary pins、生ログ）は指摘なし。**Windowsを含む --pair 合格ではない。**
+- **実xcb（Xvfb 1920×1080）GUI・E2E**: Release で gui_materials 34・gui_color 57・gui_pen 51・gui_actions 14・gui_canvas 76・gui_layout 32、Debug で gui_save 36・app_e2e 8（開く→描く→Undo→保存→終了→別プロセスで再開）、全合格・FAIL/SKIP 0。7a22bda の実行物で実行し、61e2e2c と Release/Debug の66実行物が同一バイトであることを result.json の binary pins で照合。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線。試験は表示のみで合否判定なし。測定機は上記コンテナで基準クラスの合否ではない）: 開いて最初の頁 214 ms、残り頁の読込完了 833 ms／入力→ライブ線 p95 1.14・p99 4.05 ms（n=43780）／線確定→表示 p95 18.1 ms／Undo→表示 p95 19.4 ms／頁切替 最初 p95 18.9・精細 p95 92.8 ms（n=4）／保存中のイベントループ遅れ p99 4.09 ms・250 ms超 0／自動保存 p95 2.42 s（複数線の一括保存で、PERF-E の「1線追加の差分保存」は別途未測）。F1頁 350dpi 全描画 1478 ms・1線追加 646 ms・512px部分 31 ms。
+- **Windows**: 開発中 deferred（実 build・試験なし）。配布前の Windows 実機受入は必須のまま。
+- **利用者判断（2026-10-08）**: M2出口は Linux 分で完了とし、M3以降の改修をすべて終わらせる。Windows の確認（windows-debug/release の実行と、それを含む --pair）は、すべての改修が終わった後に別の環境で行う。受入のための変更（test_precision_merge_controls の上限1200秒、CLI23 の cgroup v1 記録）は残す。
+
+### この候補での変更（c2fd22a→61e2e2c）
+- 頁の必要時読込（SPEC PERF-01）: 窓は最初の頁の素材だけ読んで表示・編集を受け付け、残りは Session の worker で読み、読込中の未保存変更を全体へ載せ直す。未読込の頁を持つ本は writer が書かない（"partial"）、CommandBus は未読込の頁に届く操作を拒否（"page_not_loaded"）、描画・サムネイル・キャッシュは未読込の頁を扱わない。
+- test_material_preview_cache を QtTest 化・CTest 登録。test_gui_actions の操作数を 60（Bの6操作）に訂正。
+- 公開スキーマ（genko schema）を Python 版に戻す（Bの merge_visible.flatten）。flatten / preserve_precision は「無視した未知キー」と報告しない。
+- merge_down の strict_gates を Python 版に戻す（利用者判断）。L6-gate 試験は拒否と原稿不変だけを確認。
+- 描画契約: ノンブル（Aで移植済み）を参照側でも描いて比べ、参照の文字組は raqm なし（BASIC）に固定。
+- CLI23 は cgroup v1 の記録も読む（v1は oom = oom_kill + under_oom）。app E2E は wait_read で全頁読込を待ってジャーナルUndoを確認。test_precision_merge_controls の CTest 上限 1200 秒（ASan で約460秒）。
+- レビュー: 独立レビュー（マージ解消箇所＋手順3差分）P1なし・P2 8件→7件修正（P2-7は残課題）、限定再レビュー P1なし・P2 5件→全修正。3周目のレビューは行っていない。
+
+### 残課題
+- Windows Debug/Release（deferred）と配布前の実機受入。
+- 読込中に閉じると読込完了まで待つ（データは失われない。レビューP2-7）。
+- 素材ライブラリの編集GUI（画像を追加・範囲を登録・名前・消す・タグ・素材パック）は台帳上 M3。
+- このbuildだけのキー（flatten、preserve_precision）を公開スキーマ外で扱う方針を M5 の MCP/CLI 契約で整理。
+- ledger.json / improvements.json の status は未更新のまま。
+- 環境メモ: 参照 Python は 3.12（python3 が 3.13 の環境では JSON エラー文言が変わる）と native.yml の数値用環境変数が必要。tools/ci/fetch_qt.py の Linux 版は ICU を取らず使えない（aqtinstall を使う）。
+- 次の工程: M3 ①高精度フィルター・消しゴム・選択＋色モデル/チャンネル/補正。
+
+## 再開位置
+- 作業場所: `/home/hermes/genko-test/cpp-impl/wt/integration`
+- 現在のブランチ: `native/integration`。利用者のマージ指示により、引継ぎ用branchのmerge commit `131c8e7`をfast-forwardで取り込み済み。
+- 現在のintegrationは未受入WIPを含む。最後の受入済み基点は `5e07b9102b2768d062825744ecd83cfb44e64f05`であり、履歴に保持。Python stable/mainは変更していない。
+- 元A: `native/m2-material-previews` / `9756f25e021e2bb2e2991118a1d2e193cf24ea14`（本体snapshot `2ec250a`、PNG保全 `9756f25`）。元B: `native/m2-user-material-cache` / `835d4dd2c75b0ac036977ee050071c93e56f42e2`。両元作業木は保全し、削除しない。
+
+## 依頼と境界
+- 最新依頼は「今の状態をマージして別のセッションで引き継げるようにして」。引継ぎを製品完成/受入済みと扱わない。
+- 主担当は接続済みgpt-6.1-solによるHermesの直接実装。別AIは読取専用レビューのみ。Claudeと自己紹介した先の回答は誤りであり、モデル/担当の根拠にしない。
+- 新費用/権限/認証変更/CI再有効化/cron/observerを追加しない。契約上限では停止して報告し、自動切替しない。
+- 本番原稿/認証は扱わない。元CPU1/RAM2GiB/-j1、fixture/安全検査/画素閾値を維持。Windows開発中deferred、最終配布前native受入必須。waivedは合格ではない。
+
+## 読む正本
+1. `genko-cpp-migration` skill
+2. `/home/hermes/genko-test/cpp-impl/PROGRESS.md` と `EXECUTION-QUEUE.json`
+3. 本branchの `docs/cpp-migration/{SPEC,PLAN,ACCEPTANCE,VALIDATION,ARCHITECTURE}.md` と既存機能/改善/PhotoCraft台帳
+4. PhotoCraft固定参照 `/home/hermes/genko-test/references/photocraft-v0.2.0`、commit `ad863217386440ca968fccc9bfff65ba24e61142`（変更禁止）
+- `handoff/PROGRESS.snapshot.md` と `handoff/EXECUTION-QUEUE.snapshot.json` は引継ぎ時点の保全コピー。通常の更新正本は上記rootファイルであり、新台帳を増やさない。
+
+## マージした変更と検査状態
+- A: 組込み素材preview/検索/配置、FreeType字形基盤、ノンブルのGUI/描画/保存契約、素材cache本体。
+- B: 高精度結合/flatten/変換、u16/f32画像↔精密ペン線、保存feature `native.color_stroke_v1`、編集時色保持、安全拒否、素材cache単体試験。
+- 明示競合はmain_window.hppとmain_window_actions.cpp。nombre_dialogとlayer_operationの両方を保持して解消。共有render/core/CMakeの自動マージ部分も変更されているため、旧受入をそのまま新候補に拡張しない。
+- 元snapshotの全変更パスSHAを照合済み。元ソースは各親branchに完全保全。fixture MANIFESTの70項目は実bytes一致、ノンブルPNG64枚をGitへ追加保全。
+- このマージ後のcompile/製品試験/独立レビュー/V2/V3は未実施。マージ保存は受入合格ではない。
+
+## 中断した文字作業
+- `native/tests/unit/test_render_page.cpp`の未実行plainTextCases 2slotは稼働試験から外し、`handoff/unfinished-text-tests.patch`へ保存。元A snapshotにも完全に残る。
+- 対応するtext-cases.jsonは未生成。RED未確認、renderer未実装。patchを今すぐapplyして全試験を起動しない。
+- 元A `build/nombre-reference.py` のtext生成分岐と `build/material-v1.py` のtext phaseは準備のみ。実API/region型/registryを読んでから再開する。build失敗をREDと数えない。
+
+## 証拠の場所（既存結果を再実行しない）
+- A `/home/hermes/genko-test/cpp-impl/wt/m2-material-previews/build/`
+  - `material-formal-v1/execution.json`: 旧限定Releaseの5suite/95QtPASS。後続18source変更のため現候補全体へ流用不可。
+  - `material-stamp-review/`、`material-preview-review/`、`material-stamp-asan/font-glyphs-v2/`: 素材/字形の限定review・sanitizer証拠。
+  - `gui-xcb-material-stamp-fixes/execution.json`: 限定GUI passed。
+- B `/home/hermes/genko-test/cpp-impl/wt/m2-user-material-cache/build/`
+  - `material-cache-review/result.json`: 3source限定合格、GUI library入口は対象外。
+  - `m2-shared-color/precision-pen-related-v4/execution.json`: マージ前10suite/347QtPASS、fail/skip0、source不変、OOM0。
+  - `m2-shared-color/gui-xcb-precision-pen/{execution.json,visual-review.json}`: マージ前の実xcb限定4QtPASS・画像所見。
+  - `m2-shared-color/precision-pen-review/fixes/review.json`: 旧4P1の安全修正合格。filter/高精度pixel編集は明示拒否であり機能未完成。
+- 旧ログ・build・失敗attempt・raw/JSON/画像は元作業木に保持。このGit snapshotに全build binaryは含まれない。同一ホストの別セッションで参照できる。
+
+## 残作業と次の具体操作
+- 次はこのマージ差分のcompileと関連正常/拒否/保存/画素/GUIの確認。共通境界を変えたので規定に従って対象拡大。先に差分/実APIを読み、driverを新設しない。
+- M2残: ユーザー素材libraryのGUI/cache接続、頁の必要時読込、既存StartDialogの1024x640/初期preview不足分、開く→描く→Undo→保存→終了→別process再開とAC-PERF。既存E2E/perf/開始画面を作り直さず現物確認する。
+- 再構成手順はrootの単一EXECUTION-QUEUE.json。M2出口の不足を閉じる→変更/競合だけreview→凍結→VALIDATIONの必要構成/実GUI/性能→現integration候補の受入を閉じる。今回の利用者指定マージを受入合格の代わりにしない。
+- 続くM3/PhotoCraft: 高精度filter/画素消去・選択、色モデル/チャンネル/補正、紙質/ブラシ/ABR、残描画/アニメ/タイムラプス/plugin。M4写植/ルビ/フキダシ/全出力/PSD、M5制作サービスとMCP/HTTP/CLI、M6両OS配布、M7最終受入は未完。
+- 計画/台帳を全件再生成しない。短試験→review→必須修正→凍結→規定重受入→統合の単位を保ち、合格済みの同一source/binary/config/fixture/scopeを再利用する。review1回/受入1回は目安であり、重大不具合や無効化された証拠の再確認を禁止する意味ではない。
+
+## GitHub反映済み
+- `native/integration`へマージ済み。GitHubへのpushは再試行で成功し、remote SHA `faf2b01027e319b79c616b554ac70d3496e2e540`を照合済み。本記録更新はその後の文書commit。
+- 先行push/REST書込みでのHTTP500は解消し、通常pushで反映した。force push、認証・権限変更、CI再有効化は行っていない。
+- 再開先はGitHubの `native/integration` と `docs/cpp-migration/HANDOFF.md`。新規buildや再mergeは引継ぎだけのためには不要。マージ後の製品受入が未実施であることは変わらない。
+- `/home/hermes/genko-test/cpp-impl/genko-integration-handoff-20261008.bundle` はGitHubに既存のb4f8fc3を前提とする差分bundle。既存repositoryへfetchでき、ソースと引継ぎ書を別環境へ持ち出せる。旧証拠/binaryは元ホストに残る。
+
+## 他セッションへ渡す文
+「Genko C++作業を引き継いでください。`/home/hermes/genko-test/cpp-impl/wt/integration/docs/cpp-migration/HANDOFF.md` を読み、native/integrationの未受入マージ候補から、既存キューのM2出口を継続してください。Python安定版・元作業木・証拠を保全し、主担当が直接実装してください。」

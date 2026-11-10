@@ -1,0 +1,865 @@
+// Storage without the Python reference: the asset store, atomic writes, what the reader refuses or reports (versions,
+// missing and broken assets, values it cannot hold, unknown keys and features) and v4 round trips.
+
+#include <QtTest>
+
+#include <QDir>
+#include <QDirIterator>
+#include <QFile>
+#include <QTemporaryDir>
+
+#include <algorithm>
+#include <cstdint>
+#include <functional>
+#include <filesystem>
+#include <map>
+#include <string>
+
+#include "core/error.hpp"
+#include "core/ids.hpp"
+#include "core/model.hpp"
+#include "core/actor.hpp"
+#include "core/command_bus.hpp"
+#include "core/video.hpp"
+#include "core/strokes.hpp"
+#include "storage/asset_store.hpp"
+#include "storage/fsutil.hpp"
+#include "storage/lock.hpp"
+#include "storage/reader.hpp"
+#include "storage/snapshot.hpp"
+#include "storage/transaction.hpp"
+#include "storage/writer.hpp"
+#include "testsupport.hpp"
+
+namespace fs = std::filesystem;
+using genko::core::Json;
+using genko::storage::AssetStore;
+using genko::storage::LoadResult;
+
+namespace {
+
+fs::path to_path(const QString& path) { return genko::storage::path_from_utf8(path.toStdString()); }
+
+void write_file(const fs::path& path, const std::string& bytes) {
+    fs::create_directories(path.parent_path());
+    QFile file(QString::fromStdString(genko::storage::path_to_utf8(path)));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(bytes.data(), static_cast<qint64>(bytes.size()));
+}
+
+// A book folder from a payload and some files (relative path → bytes).
+fs::path make_book(const QTemporaryDir& tmp, const std::string& name, const Json& payload,
+                   const std::map<std::string, std::string>& files = {}) {
+    const fs::path dir = to_path(tmp.path()) / name;
+    fs::create_directories(dir);
+    write_file(dir / "project.json", genko::core::dump_python_indent2(payload));
+    for (const auto& [rel, bytes] : files) write_file(dir / genko::storage::path_from_utf8(rel), bytes);
+    return dir;
+}
+
+Json minimal_book(int version = 3) {
+    Json book = genko::core::parse_python_json(R"({
+        "title": "t", "episode": 1,
+        "spec": {"width_mm": 210, "height_mm": 297, "dpi": 600, "bleed_mm": 3, "inner_margin_mm": 10},
+        "pages": [{"index": 1, "frames": [{"id": "f1", "rect": {"x": 13, "y": 13, "width": 184, "height": 271}}],
+                   "layers": [{"id": "l1", "role": "ink", "kind": "strokes"}]}]})");
+    book["version"] = version;
+    return book;
+}
+
+std::string load_error(const fs::path& dir) {
+    try {
+        genko::storage::load_document(dir);
+    } catch (const genko::storage::UnsupportedProjectVersion& error) {
+        return "unsupported: " + std::string(error.what());
+    } catch (const genko::core::Error& error) {
+        return error.code() + ": " + error.what();
+    }
+    return "(no error)";
+}
+
+bool has_issue(const LoadResult& result, const std::string& kind, const std::string& pointer) {
+    for (const auto& issue : result.report.issues) {
+        if (issue.kind == kind && issue.pointer == pointer) return true;
+    }
+    qWarning("no %s at %s in %s", kind.c_str(), pointer.c_str(), genko::core::dump_python(result.report.to_json()).c_str());
+    return false;
+}
+
+void copy_tree(const QString& from, const QString& to) {
+    QDirIterator it(from, QDir::Files | QDir::Hidden, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        const QString file = it.next();
+        const QString target = to + file.mid(from.size());
+        QDir().mkpath(QFileInfo(target).path());
+        QVERIFY(QFile::copy(file, target));
+    }
+}
+
+std::vector<std::string> keys_of(const Json& object) {
+    std::vector<std::string> out;
+    for (const auto& [key, value] : object.items()) out.push_back(key);
+    return out;
+}
+
+}  // namespace
+
+class TestStorage : public QObject {
+    Q_OBJECT
+
+private slots:
+    void testDataMatchesItsManifests() {
+        // (docs/cpp-migration/FIXTURES.md: fixed test assets are listed with their sha256; no test may change them)
+        for (const char* folder : {"legacy", "pyref"}) {
+            const QString root = genko::test::test_data(folder);
+            const Json manifest = genko::test::read_json(root + "/MANIFEST.json");
+            QSet<QString> listed;
+            for (const auto& [rel, sha] : manifest["files"].items()) {
+                const std::string bytes = genko::test::read_bytes(root + "/" + QString::fromStdString(rel));
+                QVERIFY2(AssetStore::ref(bytes) == "sha256:" + sha.get<std::string>(), rel.c_str());
+                listed.insert(QString::fromStdString(rel));
+            }
+            QDirIterator it(root, QDir::Files | QDir::Hidden, QDirIterator::Subdirectories);
+            while (it.hasNext()) {
+                const QString rel = it.next().mid(root.size() + 1);
+                if (rel == "MANIFEST.json" || rel.endsWith("project.lock")) continue;
+                QVERIFY2(listed.contains(rel), qPrintable("not in " + root + "/MANIFEST.json: " + rel));
+            }
+        }
+    }
+
+    void assetRefsAndPaths() {
+        const std::string empty = AssetStore::ref("");
+        QCOMPARE(empty, std::string("sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
+        QCOMPARE(AssetStore::relpath(empty, ".png"),
+                 std::string("assets/e3/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.png"));
+        for (const char* bad : {"sha256:XYZ", "md5:abc", "sha256:E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+                                "sha256:../../../../../../../../../../../../../../../../../../../../../../etc/passwd", ""}) {
+            QVERIFY2(!AssetStore::is_ref(bad), bad);
+            QVERIFY_THROWS_EXCEPTION(genko::core::Error, AssetStore::relpath(bad, ".png"));
+        }
+        for (const char* bad : {"png", "", ".a/b", ".a\\b", "..png", ".x..y"}) {
+            QVERIFY2(!AssetStore::is_suffix(bad), bad);
+            QVERIFY_THROWS_EXCEPTION(genko::core::Error, AssetStore::relpath(empty, bad));
+        }
+        QVERIFY(AssetStore::is_suffix(".strokes.json") && AssetStore::is_suffix(".state.json"));
+    }
+
+    void assetStorePutGetAll() {
+        QTemporaryDir tmp;
+        AssetStore store(to_path(tmp.path()));
+        const std::string ref = store.put_bytes("hello", ".png");
+        QCOMPARE(ref, AssetStore::ref("hello"));
+        QVERIFY(store.has(ref, ".png"));
+        QVERIFY(!store.has(ref, ".strokes.json"));
+        QCOMPARE(store.get_bytes(ref, ".png").value(), std::string("hello"));
+        QCOMPARE(store.put_bytes("hello", ".png"), ref);  // already there: not written again
+        QVERIFY(!store.get_bytes(AssetStore::ref("other"), ".png").has_value());
+        write_file(store.root() / "ab" / "leftover.png.123.tmp", "x");
+        const auto files = store.all_files();
+        QCOMPARE(files.size(), std::size_t{1});
+        QCOMPARE(files[0], store.path(ref, ".png"));
+        store.put_known(AssetStore::ref("x"), "x", ".png");
+        QCOMPARE(store.all_files().size(), std::size_t{2});
+    }
+
+    // merge.copy_assets (作品の結合): the other book's assets, those this book has left as they are; only files laid out
+    // as assets whose bytes hash to their names; links neither to files nor to folders followed, assets/ itself a link
+    // not read; temporary files left behind
+    void copyAssetsOfAnotherBook() {
+        QTemporaryDir tmp;
+        const fs::path src = to_path(tmp.path()) / "src.genko";
+        const fs::path dest = to_path(tmp.path()) / "dest.genko";
+        AssetStore from(src);
+        AssetStore to(dest);
+        const std::string a = from.put_bytes("picture a", ".png");
+        const std::string b = from.put_bytes("lines b", ".strokes.json");
+        const std::string kept = from.put_bytes("both have it", ".png");
+        to.put_known(kept, "both have it", ".png");
+        const std::string wrong = AssetStore::ref("what the name says");
+        write_file(from.path(wrong, ".png"), "something else");                       // (does not hold what its name says)
+        write_file(from.root() / "ab" / "leftover.png.123.tmp", "x");                 // (an unfinished write)
+        write_file(from.root() / "notes.txt", "not an asset");                         // (not laid out as one)
+        const std::string misplaced = AssetStore::ref("misplaced");
+        write_file(from.root() / "00" / (misplaced.substr(7) + ".png"), "misplaced");  // (in another asset's folder)
+        const fs::path outside = to_path(tmp.path()) / "outside";
+        write_file(outside / "secret.png", "outside the book");
+        const std::string secret = AssetStore::ref("outside the book");
+        std::error_code ec;
+        fs::create_directories(from.path(secret, ".png").parent_path());
+        fs::create_symlink(outside / "secret.png", from.path(secret, ".png"), ec);
+        const bool links = !ec;  // (a file system without links: the rest still holds)
+        const std::string far = AssetStore::ref("far away");
+        write_file(outside / far.substr(7, 2) / (far.substr(7) + ".png"), "far away");
+        fs::create_symlink(outside / far.substr(7, 2), from.root() / "zz", ec);
+        QCOMPARE(genko::storage::copy_assets(src, dest), std::size_t{2});
+        QCOMPARE(to.get_bytes(a, ".png").value(), std::string("picture a"));
+        QCOMPARE(to.get_bytes(b, ".strokes.json").value(), std::string("lines b"));
+        QCOMPARE(to.get_bytes(kept, ".png").value(), std::string("both have it"));
+        QVERIFY(!to.has(wrong, ".png"));
+        QVERIFY(!to.has(misplaced, ".png"));
+        QVERIFY(!to.has(secret, ".png"));
+        QVERIFY(!to.has(far, ".png"));
+        QVERIFY(!fs::exists(to.root() / "notes.txt"));
+        QCOMPARE(to.all_files().size(), std::size_t{3});
+        QCOMPARE(genko::storage::copy_assets(src, dest), std::size_t{0});  // (all there now)
+        // assets/ a link to another book's assets: not read; no assets/ at all: nothing
+        const fs::path linked = to_path(tmp.path()) / "linked.genko";
+        fs::create_directories(linked);
+        fs::create_directory_symlink(src / "assets", linked / "assets", ec);
+        if (links && !ec) QCOMPARE(genko::storage::copy_assets(linked, to_path(tmp.path()) / "third.genko"), std::size_t{0});
+        QCOMPARE(genko::storage::copy_assets(to_path(tmp.path()) / "none.genko", dest), std::size_t{0});
+    }
+
+    // copy_assets streams each file (hashed on the way into a temporary file, renamed into place when it holds what its
+    // name says), so it never holds one whole: a file past the store's cap for one asset (kAssetMaxBytes) is refused
+    // before any of it is read, leaving nothing behind; one whose bytes are not its name's leaves no temporary file;
+    // one of many pieces arrives as it was.
+    void copyAssetsStreamsWithACap() {
+        QTemporaryDir tmp;
+        const fs::path src = to_path(tmp.path()) / "src.genko";
+        const fs::path dest = to_path(tmp.path()) / "dest.genko";
+        AssetStore from(src);
+        AssetStore to(dest);
+        std::string big;  // (several pieces of the copy)
+        for (std::uint32_t i = 0; i < 300000; ++i) big += static_cast<char>((i * 7919U) % 251U);
+        const std::string ref = from.put_bytes(big, ".png");
+        const std::string wrong = AssetStore::ref("what the name says");
+        write_file(from.path(wrong, ".png"), "something else");
+        // a file past the cap (sparse: nothing written), named as an asset
+        const std::string huge = "sha256:" + std::string(64, '0');
+        fs::create_directories(from.path(huge, ".png").parent_path());
+        write_file(from.path(huge, ".png"), "");
+        fs::resize_file(from.path(huge, ".png"), genko::storage::kAssetMaxBytes + 1);
+        const auto temporaries = [&dest] {
+            int n = 0;
+            std::error_code ec;
+            for (auto it = fs::recursive_directory_iterator(dest, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+                if (it->path().extension() == ".tmp") ++n;
+            }
+            return n;
+        };
+        try {
+            genko::storage::copy_assets(src, dest);
+            QFAIL("a file past the cap was copied");
+        } catch (const genko::core::Error& error) {
+            QCOMPARE(error.code(), std::string("memory"));
+            QVERIFY2(std::string(error.what()).find("too large to copy") != std::string::npos, error.what());
+        }
+        QVERIFY(!to.has(huge, ".png"));
+        QCOMPARE(temporaries(), 0);
+        fs::remove(from.path(huge, ".png"));
+        QCOMPARE(genko::storage::copy_assets(src, dest), std::size_t{1});
+        QCOMPARE(to.get_bytes(ref, ".png").value(), big);
+        QVERIFY(!to.has(wrong, ".png"));
+        QCOMPARE(temporaries(), 0);
+        QCOMPARE(to.all_files().size(), std::size_t{1});
+    }
+
+    void writeAtomic() {
+        QTemporaryDir tmp;
+        const fs::path target = to_path(tmp.path()) / "a" / "b" / "file.json";
+        genko::storage::write_atomic(target, "one");
+        QCOMPARE(genko::storage::read_file(target), std::string("one"));
+        genko::storage::write_atomic(target, "two");
+        QCOMPARE(genko::storage::read_file(target), std::string("two"));
+        QCOMPARE(QDir(QString::fromStdString(genko::storage::path_to_utf8(target.parent_path()))).entryList(QDir::Files),
+                 QStringList({"file.json"}));  // no temporary file left behind
+    }
+
+    void readFileErrors() {
+        QTemporaryDir tmp;
+        const fs::path missing = to_path(tmp.path()) / "nope" / "project.json";
+        try {
+            genko::storage::read_file(missing);
+            QFAIL("no error");
+        } catch (const genko::core::Error& error) {
+            QCOMPARE(error.code(), std::string("not_found"));
+            QCOMPARE(std::string(error.what()),
+                     "[Errno 2] No such file or directory: '" + genko::storage::path_to_utf8(missing) + "'");
+        }
+        try {
+            genko::storage::read_file(to_path(tmp.path()));
+            QFAIL("no error");
+        } catch (const genko::core::Error& error) {
+            QCOMPARE(error.code(), std::string("io"));
+            QVERIFY(std::string(error.what()).starts_with("[Errno 21] Is a directory"));
+        }
+    }
+
+    void versions() {
+        QTemporaryDir tmp;
+        Json book = minimal_book();
+        book["version"] = 99;
+        QCOMPARE(load_error(make_book(tmp, "v99", book)),
+                 std::string("unsupported: project.json version 99 is newer than this build supports (4); update Genko"));
+        book["version"] = "3";
+        QCOMPARE(load_error(make_book(tmp, "vs", book)),
+                 std::string("unsupported: project.json version 3 is newer than this build supports (4); update Genko"));
+        book["version"] = 3.0;
+        QVERIFY(load_error(make_book(tmp, "vf", book)).starts_with("unsupported: project.json version 3.0"));
+        book["version"] = genko::core::parse_python_json("18446744073709551616");
+        QVERIFY(load_error(make_book(tmp, "vbig", book)).starts_with("unsupported:"));
+        book["version"] = true;  // (Python: a bool is an int, so this is version 1)
+        QCOMPARE(genko::storage::load_document(make_book(tmp, "vb", book)).report.source_version, 1);
+        book.erase("version");
+        QCOMPARE(genko::storage::load_document(make_book(tmp, "v1", book)).report.source_version, 1);
+        book["version"] = 4;
+        book["min_reader"] = 5;
+        QVERIFY(load_error(make_book(tmp, "mr5", book)).starts_with("unsupported: project.json needs Genko that reads version 5"));
+        book["min_reader"] = "4";
+        QVERIFY(load_error(make_book(tmp, "mrs", book)).starts_with("unsupported:"));
+        book["min_reader"] = 4;
+        const auto v4 = genko::storage::load_document(make_book(tmp, "v4", book));
+        QCOMPARE(v4.report.source_version, 4);
+        QVERIFY(has_issue(v4, "repair", "/book_id"));  // a v4 book must carry its id
+        QVERIFY(!v4.document.read_only_reason.empty());
+        QVERIFY(genko::core::is_book_id(v4.document.book_id));
+    }
+
+    void malformedFiles() {
+        QTemporaryDir tmp;
+        const fs::path dir = to_path(tmp.path()) / "bad";
+        write_file(dir / "project.json", "{\"title\": ");
+        QCOMPARE(load_error(dir), std::string("json: Expecting value: line 1 column 11 (char 10)"));
+        write_file(dir / "project.json", "\xEF\xBB\xBF{}");
+        QCOMPARE(load_error(dir), std::string("json: Unexpected UTF-8 BOM (decode using utf-8-sig): line 1 column 1 (char 0)"));
+        write_file(dir / "project.json", "[]");
+        QVERIFY(load_error(dir).starts_with("format: project.json must hold an object"));
+        Json book = minimal_book();
+        book.erase("spec");
+        QVERIFY(load_error(make_book(tmp, "nospec", book)).starts_with("format: missing key 'spec'"));
+        book = minimal_book();
+        book["binding"] = "up";
+        QVERIFY(load_error(make_book(tmp, "binding", book)).starts_with("format: 'up' is not a valid Binding"));
+        book = minimal_book();
+        book["pages"][0]["layers"][0]["role"] = "hero";
+        QVERIFY(load_error(make_book(tmp, "role", book)).starts_with("format: 'hero' is not a valid LayerRole"));
+        book = minimal_book();
+        book["pages"][0]["layers"][0]["opacity"] = "half";
+        QVERIFY(load_error(make_book(tmp, "opacity", book)).starts_with("format: could not convert string to float: 'half'"));
+    }
+
+    void missingAndBrokenAssetsAreReported() {
+        QTemporaryDir tmp;
+        const std::string png = "\x89PNG picture";
+        const std::string ref = AssetStore::ref(png);
+        const std::string absent = AssetStore::ref("absent");
+        Json book = minimal_book();
+        Json& layers = book["pages"][0]["layers"];
+        layers.push_back(Json::object({{"id", "r1"}, {"role", "bg"}, {"kind", "raster"}, {"asset", absent}}));
+        layers.push_back(Json::object({{"id", "r2"}, {"role", "bg"}, {"kind", "raster"}, {"asset", "sha256:zz"}}));
+        layers.push_back(Json::object({{"id", "r3"}, {"role", "bg"}, {"kind", "raster"}, {"asset", ref},
+                                       {"mask", Json::object({{"enabled", true}, {"asset", absent}})},
+                                       {"patches", Json::array({Json::object({{"id", "p1"}, {"asset", absent}}),
+                                                                Json::object({{"id", "p2"}, {"asset", ref}})})}}));
+        layers.push_back(Json::object({{"id", "s1"}, {"role", "ink"}, {"kind", "strokes"}, {"strokes_blob", absent}}));
+        const auto result = genko::storage::load_document(make_book(tmp, "assets", book, {{AssetStore::relpath(ref, ".png"), png}}));
+        QVERIFY(has_issue(result, "missing_asset", "/pages/0/layers/1/asset"));
+        QVERIFY(has_issue(result, "broken_ref", "/pages/0/layers/2/asset"));
+        QVERIFY(has_issue(result, "missing_asset", "/pages/0/layers/3/mask/asset"));
+        QVERIFY(has_issue(result, "missing_asset", "/pages/0/layers/3/patches/0/asset"));
+        QVERIFY(has_issue(result, "missing_asset", "/pages/0/layers/4/strokes_blob"));
+        QCOMPARE(result.report.issues.size(), std::size_t{5});
+        const auto& page = result.document.page(0);
+        QVERIFY(!page.layers[1].raster_png && !page.layers[2].raster_png);
+        QCOMPARE(*page.layers[3].raster_png, png);
+        QVERIFY(!page.layers[3].mask);                  // (Python drops a mask whose picture is missing)
+        QCOMPARE(page.layers[3].patches.size(), std::size_t{2});
+        QVERIFY(!page.layers[3].patches[0].png && page.layers[3].patches[1].png);
+        QCOMPARE(page.layers[4].stroke_count(), std::size_t{0});
+        QVERIFY(result.document.read_only_reason.find("needs repairs") != std::string::npos);
+        genko::storage::ProjectLock lock(to_path(tmp.path()) / "out");
+        lock.try_acquire();
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error,
+                                 genko::storage::Saver(lock).save(result.document, genko::storage::SaveRequest{}));
+        QVERIFY(!QFile::exists(tmp.path() + "/out/project.json"));
+    }
+
+    void brokenAssetsAreReported() {
+        QTemporaryDir tmp;
+        const std::string png = "real bytes";
+        const std::string wrong = AssetStore::ref("other bytes");
+        const std::string blob = "[{\"xy\": \"not base64!\"}]";
+        const std::string blob_ref = AssetStore::ref(blob);
+        Json book = minimal_book();
+        Json& layers = book["pages"][0]["layers"];
+        layers.push_back(Json::object({{"id", "r1"}, {"role", "bg"}, {"kind", "raster"}, {"asset", wrong}}));
+        layers[0]["strokes_blob"] = blob_ref;
+        const auto result = genko::storage::load_document(make_book(
+            tmp, "broken", book,
+            {{AssetStore::relpath(wrong, ".png"), png}, {AssetStore::relpath(blob_ref, ".strokes.json"), blob}}));
+        QVERIFY(has_issue(result, "hash_mismatch", "/pages/0/layers/1/asset"));
+        QVERIFY(has_issue(result, "broken_asset", "/pages/0/layers/0/strokes_blob"));
+        QCOMPARE(*result.document.page(0).layers[1].raster_png, png);  // used, as Python uses it
+        QVERIFY(!result.document.read_only_reason.empty());
+    }
+
+    void valuesThatCannotBeHeldAreRepairs() {
+        QTemporaryDir tmp;
+        Json book = minimal_book();
+        book["future"] = Json::object({{"big", 1}});
+        std::string text = genko::core::dump_python_indent2(book);
+        // NaN where a float belongs, an integer beyond 64 bits in an unknown key, a string where a bool belongs
+        text.replace(text.find("\"kind\": \"strokes\""), 17, "\"kind\": \"strokes\", \"opacity\": NaN, \"visible\": \"yes\"");
+        text.replace(text.find("\"big\": 1"), 8, "\"big\": 123456789012345678901234567890");
+        const fs::path dir = to_path(tmp.path()) / "repairs";
+        write_file(dir / "project.json", text);
+        const auto result = genko::storage::load_document(dir);
+        QVERIFY2(has_issue(result, "repair", "/pages/0/layers/0/opacity"), genko::core::dump_python(result.report.to_json()).c_str());
+        QVERIFY(has_issue(result, "repair", "/future/big"));
+        QVERIFY(has_issue(result, "repair", "/pages/0/layers/0/visible"));
+        const auto& layer = result.document.page(0).layers[0];
+        QCOMPARE(layer.opacity, 1.0);  // the default instead of NaN
+        QVERIFY(layer.visible);        // "yes" is true
+        QVERIFY(!result.document.read_only_reason.empty());
+    }
+
+    void unknownKeysAndFeatures() {
+        QTemporaryDir tmp;
+        Json book = minimal_book(4);
+        book["book_id"] = genko::core::new_book_id();
+        book["features"] = Json::array({"ruby-layout@1", "ruby-layout@1", "zeta@2"});
+        book["pages"][0]["layers"][0]["mystery"] = 1;
+        book["pages"][0]["frames"][0]["zzz"] = true;
+        book["pages"][0]["layers"][0]["fit"] = "cover";  // a placed layer's key on a strokes layer
+        book["pages"][0]["future_page_key"] = "kept";
+        book["future_top"] = Json::array({1});
+        const auto result = genko::storage::load_document(make_book(tmp, "unknown", book));
+        QVERIFY(has_issue(result, "unknown_key", "/pages/0/layers/0/mystery"));
+        QVERIFY(has_issue(result, "unknown_key", "/pages/0/frames/0/zzz"));
+        QVERIFY(has_issue(result, "unknown_key", "/pages/0/layers/0/fit"));
+        QCOMPARE(result.document.features, std::vector<std::string>({"ruby-layout@1", "zeta@2"}));
+        QVERIFY(result.document.read_only_reason.starts_with("this book uses features this build does not support"));
+        QCOMPARE(result.document.page(0).extra["future_page_key"].get<std::string>(), std::string("kept"));
+        QCOMPARE(result.document.extra["future_top"].size(), std::size_t{1});
+        try {
+            genko::storage::ProjectLock lock(to_path(tmp.path()) / "out");
+            lock.try_acquire();
+            genko::storage::Saver(lock).save(result.document, genko::storage::SaveRequest{});
+            QFAIL("a read-only book was saved");
+        } catch (const genko::core::Error& error) {
+            QCOMPARE(error.code(), std::string("read_only"));
+        }
+    }
+
+    void placedLayersKeepOnlyTheirPicture() {
+        QTemporaryDir tmp;
+        Json book = minimal_book();
+        book["pages"][0]["layers"].push_back(genko::core::parse_python_json(R"({"id": "p", "role": "user", "kind": "placed",
+            "asset": "sha256:00", "strokes": [[[0, 0], [1, 1]]], "patches": [{"id": "x"}], "fit": "", "source": [1]})"));
+        const auto result = genko::storage::load_document(make_book(tmp, "placed", book));
+        QVERIFY(has_issue(result, "unknown_key", "/pages/0/layers/1/strokes"));
+        QVERIFY(has_issue(result, "unknown_key", "/pages/0/layers/1/patches"));
+        QCOMPARE(result.report.issues.size(), std::size_t{2});
+        const auto& layer = result.document.page(0).layers[1];
+        QCOMPARE(layer.stroke_count(), std::size_t{1});  // (as Python: read and counted, but never written)
+        QVERIFY(layer.patches.empty());
+        QCOMPARE(layer.asset.value(), std::string("sha256:00"));
+        QCOMPARE(layer.fit, std::string("cover"));
+        QCOMPARE(genko::core::dump_python(layer.source.value()), std::string("[1]"));
+    }
+
+    void legacyRasterPathsStayInside() {
+        QTemporaryDir tmp;
+        write_file(to_path(tmp.path()) / "outside.png", "secret");
+        Json book = minimal_book(2);
+        Json& layers = book["pages"][0]["layers"];
+        layers.push_back(Json::object({{"id", "a"}, {"role", "bg"}, {"kind", "raster"}, {"raster_relpath", "../outside.png"}}));
+        layers.push_back(Json::object({{"id", "b"}, {"role", "bg"}, {"kind", "raster"}, {"raster_relpath", "pages/001/b.png"}}));
+        layers.push_back(Json::object({{"id", "c"}, {"role", "bg"}, {"kind", "raster"}, {"raster_relpath", "pages/001/c.png"}}));
+        const auto result = genko::storage::load_document(make_book(tmp, "legacy", book, {{"pages/001/c.png", "C"}}));
+        QVERIFY(has_issue(result, "broken_ref", "/pages/0/layers/1/raster_relpath"));
+        QVERIFY(has_issue(result, "missing_asset", "/pages/0/layers/2/raster_relpath"));
+        const auto& page = result.document.page(0);
+        QVERIFY(!page.layers[1].raster_png);
+        QCOMPARE(*page.layers[3].raster_png, std::string("C"));
+    }
+
+    void v4RoundTrip() {
+        QTemporaryDir tmp;
+        const auto first = genko::storage::load_document(to_path(genko::test::test_data("legacy/book-v3.genko")));
+        QVERIFY2(first.report.clean(), genko::core::dump_python(first.report.to_json()).c_str());
+        QCOMPARE(first.report.source_version, 3);
+        const fs::path out = to_path(tmp.path()) / "book.genko";
+        genko::test::write_project(first.document, out);
+        const std::string text = genko::storage::read_file(out / "project.json");
+        const Json payload = genko::core::parse_python_json(text);
+        QCOMPARE(keys_of(payload),
+                 std::vector<std::string>({"future_top", "version", "min_reader", "writer", "book_id", "features", "revision",
+                                           "title", "episode", "binding", "start_side", "strict_gates", "autosave",
+                                           "font_path", "page_locks", "brush", "spec", "bible", "tickets", "studio", "pages",
+                                           "story"}));
+        QCOMPARE(payload["version"].get<int>(), 4);
+        QCOMPARE(payload["min_reader"].get<int>(), 4);
+        QCOMPARE(genko::core::dump_python(payload["writer"]), std::string("{\"app\": \"genko-native\", \"version\": \"0.1.0\"}"));
+        QCOMPARE(payload["features"], Json::array());
+        QCOMPARE(payload["book_id"].get<std::string>(), first.document.book_id);
+        QCOMPARE(payload["future_top"]["n"].get<std::int64_t>(), std::int64_t{12345678901234});
+        QVERIFY(text.back() == '}' && text.find('\r') == std::string::npos);
+
+        const auto second = genko::storage::load_document(out);
+        QVERIFY2(second.report.clean(), genko::core::dump_python(second.report.to_json()).c_str());
+        QCOMPARE(second.report.source_version, 4);
+        QCOMPARE(second.document.book_id, first.document.book_id);
+        QCOMPARE(second.document.revision, first.document.revision);
+        std::string where;
+        QVERIFY2(genko::test::strict_equal(genko::storage::snapshot(second.document, true),
+                                           genko::storage::snapshot(first.document, true), &where),
+                 where.c_str());
+        // writing the same book again changes nothing and adds no asset
+        AssetStore store(out);
+        const auto files = store.all_files();
+        genko::test::write_project(second.document, out);
+        QCOMPARE(genko::storage::read_file(out / "project.json"), text);
+        QCOMPARE(store.all_files(), files);
+    }
+
+    void loadedBlobsAreReusedInTheirOwnBook() {
+        QTemporaryDir tmp;
+        // a blob as an older writer might have left it (an int width): the same folder keeps it, as Python's
+        // blobcache does; a new folder gets the canonical blob of the strokes
+        const std::string blob = "[{\"id\":\"s1\",\"kind\":\"gpen\",\"width_mm\":1,\"xy\":\"AAAAAAAA8D8AAAAAAAAAQA==\"}]";
+        const std::string ref = AssetStore::ref(blob);
+        Json book = minimal_book();
+        book["pages"][0]["layers"][0]["strokes_blob"] = ref;
+        const fs::path dir = make_book(tmp, "blob", book, {{AssetStore::relpath(ref, ".strokes.json"), blob}});
+        const auto loaded = genko::storage::load_document(dir);
+        QVERIFY(loaded.report.clean());
+        const auto& strokes = *loaded.document.page(0).layers[0].strokes;
+        QCOMPARE(strokes.blob_ref, ref);
+        AssetStore same(dir);
+        QCOMPARE(genko::storage::project_payload_v4(loaded.document, same)["pages"][0]["layers"][0]["strokes_blob"].get<std::string>(), ref);
+        AssetStore other(to_path(tmp.path()) / "elsewhere");
+        const std::string fresh =
+            genko::storage::project_payload_v4(loaded.document, other)["pages"][0]["layers"][0]["strokes_blob"].get<std::string>();
+        QVERIFY(fresh != ref);
+        QCOMPARE(other.get_bytes(fresh, ".strokes.json").value(),
+                 std::string("[{\"id\":\"s1\",\"kind\":\"gpen\",\"width_mm\":1.0,\"xy\":\"AAAAAAAA8D8AAAAAAAAAQA==\"}]"));
+        // an edited list is written afresh
+        auto doc = loaded.document;
+        auto items = doc.page(0).layers[0].strokes->items;
+        items.pop_back();
+        doc.edit_page(0).layers[0].strokes = genko::core::make_strokes(items);
+        QVERIFY(!genko::storage::project_payload_v4(doc, same)["pages"][0]["layers"][0].contains("strokes_blob"));
+    }
+
+    void newBooksKeepTheirNumbers() {
+        QTemporaryDir tmp;
+        auto doc = genko::core::new_episode("新しい本", 2, 2, genko::core::PageSpec::b4_comic(), genko::core::Binding::Left);
+        doc.revision = 1;
+        auto& page = doc.edit_page(0);
+        page.split_frame(page.frames[0].id, "vertical", 0.4, 5);
+        doc.add_line(1, "台詞", "A");
+        const fs::path out = to_path(tmp.path()) / "new.genko";
+        genko::test::write_project(doc, out);
+        const auto loaded = genko::storage::load_document(out);
+        QVERIFY(loaded.report.clean());
+        const Json payload = genko::core::parse_python_json(genko::storage::read_file(out / "project.json"));
+        QVERIFY(payload["spec"]["width_mm"].is_number_integer());       // the preset's ints stay ints
+        QVERIFY(payload["spec"]["margins_mm"][0].is_number_integer());
+        QVERIFY(payload["story"][0]["x_mm"].is_number_integer());       // add_line's 0, as Python writes it
+        QVERIFY(loaded.document.story[0].x_mm.same(genko::core::Num(0.0)));  // and read back as a float (float())
+        QCOMPARE(loaded.document.page(0).leaf_frames().size(), std::size_t{2});
+        QCOMPARE(payload["binding"].get<std::string>(), std::string("left"));
+    }
+
+    // PC5 J-0 (SPEC.md PROD-01): the production's six extensions. A page's layer comps, slices, notes and measuring, and the
+    // work area, a fractional fps and a video row in its anim, written with their features and read back the same (the
+    // same bytes written again); empty ones written as none, naming nothing; a value this build does not know (a key,
+    // a type, a range) opens the book read-only, kept as read; the old book's bytes as before, naming none of them.
+    void productionExtensions() {
+        namespace core = genko::core;
+        const std::vector<std::string> six{"layer-comps@1", "slices@1", "annotations@1", "measure@1", "timeline@1", "video@1"};
+        for (const std::string& feature : six) QVERIFY(genko::storage::is_known_feature(feature));
+        const auto names_none = [&](const std::vector<std::string>& features) {
+            return std::none_of(six.begin(), six.end(), [&](const std::string& f) { return std::find(features.begin(), features.end(), f) != features.end(); });
+        };
+        QTemporaryDir tmp;
+        // the old book: none of them, its bytes as before (written twice the same)
+        {
+            const auto old = genko::storage::load_document(to_path(genko::test::test_data("legacy/book-v3.genko")));
+            const fs::path out = to_path(tmp.path()) / "old.genko";
+            genko::test::write_project(old.document, out);
+            const std::string text = genko::storage::read_file(out / "project.json");
+            const auto again = genko::storage::load_document(out);
+            QVERIFY(names_none(again.document.features));
+            for (const char* key : {"layer_comps", "slices", "annotations", "measure"}) QVERIFY(text.find(std::string("\"") + key + "\"") == std::string::npos);
+            genko::test::write_project(again.document, out);
+            QCOMPARE(genko::storage::read_file(out / "project.json"), text);
+        }
+        Json payload = minimal_book(4);
+        payload["book_id"] = core::new_book_id();
+        payload["pages"][0]["id"] = "pg_000000000001";
+        const auto base = genko::storage::load_document(make_book(tmp, "base", payload));
+        QVERIFY2(base.document.read_only_reason.empty(), base.document.read_only_reason.c_str());
+        // empty ones: none written, no feature
+        core::Document empty = base.document;
+        {
+            core::Page& page = empty.edit_page(0);
+            page.layer_comps = core::LayerComps{};
+            page.slices = core::Slices{};
+            page.measure = core::Measure{};
+            const fs::path out = to_path(tmp.path()) / "empty.genko";
+            genko::test::write_project(empty, out);
+            const Json written = genko::core::parse_python_json(genko::storage::read_file(out / "project.json"));
+            QVERIFY(names_none(written["features"].get<std::vector<std::string>>()));
+            for (const char* key : {"layer_comps", "slices", "annotations", "measure"}) QVERIFY(!written["pages"][0].contains(key));
+        }
+        // each of them
+        core::Document doc = base.document;
+        {
+            core::Page& page = doc.edit_page(0);
+            core::LayerComps comps;
+            core::LayerComp comp;
+            comp.id = 7;
+            comp.name = "台詞なし";
+            comp.comment = "メモ";
+            comp.apply_appearance = false;
+            core::CompLayerState state;
+            state.layer = "l1";
+            state.visible = false;
+            state.has_position = true;
+            state.position = std::array<double, 2>{1.5, 2.25};
+            state.appearance = core::CompAppearance{"multiply", 0.5, std::nullopt};
+            comp.layers.push_back(state);
+            core::CompLayerState bare;
+            bare.layer = "l2";
+            bare.has_position = true;  // (recorded: no bounds)
+            comp.layers.push_back(bare);
+            comps.comps.push_back(comp);
+            comps.last_applied = 7;
+            comps.last_state = std::vector<core::CompLayerState>{state};
+            page.layer_comps = comps;
+            core::Slices slices;
+            slices.group = "p001";
+            slices.next_id = 3;
+            core::Slice slice;
+            slice.id = 2;
+            slice.name = "header";
+            slice.rect_mm = {0, 0, 100, 20.5};
+            slice.url = "https://example.com/";
+            slice.align = {1, 2};
+            slice.background = "#ff8800";
+            slices.list.push_back(slice);
+            core::Slice by_layer = slice;
+            by_layer.id = 1;
+            by_layer.origin = "layer";
+            by_layer.layer = "l1";
+            by_layer.kind = "noImage";
+            by_layer.background.reset();
+            by_layer.outsets = {1, 2, 3, 4};
+            slices.list.push_back(by_layer);
+            page.slices = slices;
+            core::Annotation note;
+            note.id = "an_0123456789ab";
+            note.at_mm = {10, 20};
+            note.popup_mm = std::array<double, 4>{10, 20, 50, 30};
+            note.text = "ここを直す\n2 行目";
+            note.author = "編集";
+            note.open = true;
+            note.modified = "2026-10-29T01:02:03Z";
+            note.actor = "human:test";
+            page.annotations.push_back(note);
+            core::Measure measure;
+            measure.scale = core::MeasurementScale{600 / 25.4, 1, "mm"};
+            core::CountGroup group;
+            group.name = "コマ";
+            group.points = {{1, 2}, {3, 4}};
+            measure.count_groups.push_back(group);
+            measure.ruler = core::RulerLine{{0, 0}, {10, 0}, std::array<double, 2>{0, 10}};
+            page.measure = measure;
+            page.extra["anim"] = Json{{"fps", 12.5}, {"frames", 24}, {"loop", true}, {"work", Json::array({2, 12})},
+                                      {"tracks", Json::array({Json{{"folder", "l1"}, {"cels", Json::array()},
+                                                                   {"video", Json{{"footage", nullptr},
+                                                                                  {"frames", Json::array({Json::array({nullptr, nullptr})})},
+                                                                                  {"show_altered", true},
+                                                                                  {"placement_mm", Json::array({0, 0, 210, 297})},
+                                                                                  {"fit", "contain"}}}}})}};
+        }
+        const fs::path out = to_path(tmp.path()) / "made.genko";
+        genko::test::write_project(doc, out);
+        const std::string text = genko::storage::read_file(out / "project.json");
+        const Json written = genko::core::parse_python_json(text);
+        for (const std::string& feature : six) {
+            const auto list = written["features"].get<std::vector<std::string>>();
+            QVERIFY2(std::find(list.begin(), list.end(), feature) != list.end(), feature.c_str());
+        }
+        const auto read = genko::storage::load_document(out);
+        QVERIFY2(read.document.read_only_reason.empty(), read.document.read_only_reason.c_str());
+        const core::Page& back = read.document.page(0);
+        QVERIFY(back.layer_comps && *back.layer_comps == *doc.page(0).layer_comps);
+        QVERIFY(back.slices && *back.slices == *doc.page(0).slices);
+        QVERIFY(back.annotations == doc.page(0).annotations);
+        QVERIFY(back.measure && *back.measure == *doc.page(0).measure);
+        QVERIFY(core::page_uses_timeline(back) && core::page_uses_video(back));
+        QVERIFY(!back.extra.contains("layer_comps") && !back.extra.contains("measure"));
+        genko::test::write_project(read.document, out);
+        QCOMPARE(genko::storage::read_file(out / "project.json"), text);
+        // the fps of the anims before it names nothing: any number of 1..60 (set_animation takes 8.5 as it is), and what no op
+        // makes but a book may hold (a 0, a 240.5, a word); only 0.5..1 and 60..120 do. A "work" or a "video" of another shape
+        // is an anim's before them too: kept, naming nothing.
+        for (const Json& fps : {Json(12), Json(60), Json(12.0), Json(8.5), Json(59.94), Json(1), Json(0), Json(0.3), Json(240.5), Json("12")}) {
+            core::Page plain = doc.page(0);
+            plain.extra["anim"] = Json{{"fps", fps}, {"frames", 24}, {"tracks", Json::array()}};
+            QVERIFY2(!core::page_uses_timeline(plain), core::dump_python(fps).c_str());
+        }
+        for (const Json& fps : {Json(0.5), Json(0.75), Json(60.5), Json(120)}) {
+            core::Page fast = doc.page(0);
+            fast.extra["anim"] = Json{{"fps", fps}, {"frames", 24}, {"tracks", Json::array()}};
+            QVERIFY2(core::page_uses_timeline(fast), core::dump_python(fps).c_str());
+        }
+        {
+            core::Page odd = doc.page(0);
+            odd.extra["anim"] = Json{{"fps", 12}, {"work", "all"}, {"tracks", Json::array({Json{{"folder", "l1"}, {"cels", Json::array()}, {"video", 1}}})}};
+            QVERIFY(!core::page_uses_timeline(odd) && !core::page_uses_video(odd));
+        }
+        // set_animation's fps 8.5 (the op as it is, "8.5" given as words too): the book written as before — no feature, the
+        // same bytes again — and an anim of the shapes before them (a hand-written 240.5, a "work" of words) opened as before
+        for (const Json& given : {Json(8.5), Json("8.5")}) {
+            const core::Document animated =
+                core::CommandBus().apply(base.document, Json::array({Json{{"op", "set_animation"}, {"page", 1}, {"fps", given}, {"frames", 24}}}), core::Actor()).doc;
+            QCOMPARE(animated.page(0).extra["anim"]["fps"].get<double>(), 8.5);
+            const fs::path at = to_path(tmp.path()) / "fps85.genko";
+            genko::test::write_project(animated, at);
+            const std::string bytes = genko::storage::read_file(at / "project.json");
+            const auto fps_back = genko::storage::load_document(at);
+            QVERIFY2(fps_back.document.read_only_reason.empty(), fps_back.document.read_only_reason.c_str());
+            QVERIFY(fps_back.document.features.empty());
+            genko::test::write_project(fps_back.document, at);
+            QCOMPARE(genko::storage::read_file(at / "project.json"), bytes);
+        }
+        {
+            Json old = payload;
+            old["pages"][0]["anim"] = Json{{"fps", 240.5}, {"frames", 24}, {"work", "all"}, {"tracks", Json::array()}};
+            const fs::path at = make_book(tmp, "old_anim", old);
+            const auto opened = genko::storage::load_document(at);
+            QVERIFY2(opened.document.read_only_reason.empty(), opened.document.read_only_reason.c_str());
+            genko::test::write_project(opened.document, at);
+            const Json again = genko::core::parse_python_json(genko::storage::read_file(at / "project.json"));
+            QVERIFY(names_none(again["features"].get<std::vector<std::string>>()));
+            QCOMPARE(again["pages"][0]["anim"], old["pages"][0]["anim"]);
+        }
+        // values this build does not know: read-only, kept as read
+        const auto broken = [&](const std::string& name, const std::function<void(Json&)>& twist, const std::string& pointer) {
+            Json bad = written;
+            twist(bad["pages"][0]);
+            const auto result = genko::storage::load_document(make_book(tmp, name, bad));
+            QVERIFY2(!result.document.read_only_reason.empty(), name.c_str());
+            QVERIFY2(has_issue(result, "broken_value", pointer), name.c_str());
+        };
+        broken("comp_key", [](Json& p) { p["layer_comps"]["comps"][0]["later"] = 1; }, "/pages/0/layer_comps");
+        broken("comp_last", [](Json& p) { p["layer_comps"]["last_applied"] = 99; }, "/pages/0/layer_comps");
+        broken("comp_twice", [](Json& p) { p["layer_comps"]["comps"].push_back(p["layer_comps"]["comps"][0]); }, "/pages/0/layer_comps");
+        broken("slice_kind", [](Json& p) { p["slices"]["list"][0]["kind"] = "movie"; }, "/pages/0/slices");
+        broken("slice_next", [](Json& p) { p["slices"]["next_id"] = 2; }, "/pages/0/slices");
+        broken("note_id", [](Json& p) { p["annotations"][0]["id"] = "n1"; }, "/pages/0/annotations");
+        broken("note_actor", [](Json& p) { p["annotations"][0]["actor"] = "robot"; }, "/pages/0/annotations");
+        broken("measure_group", [](Json& p) { p["measure"]["active_group"] = 3; }, "/pages/0/measure");
+        broken("measure_marker", [](Json& p) { p["measure"]["count_groups"][0]["marker_size"] = 11; }, "/pages/0/measure");
+        broken("work", [](Json& p) { p["anim"]["work"] = Json::array({12, 2}); }, "/pages");
+        broken("work_words", [](Json& p) { p["anim"]["work"] = "all"; }, "/pages");
+        broken("video_fit", [](Json& p) { p["anim"]["tracks"][0]["video"]["fit"] = "fill"; }, "/pages");
+        broken("video_movie", [](Json& p) {  // (the user's decision 4: no video file)
+            p["anim"]["tracks"][0]["video"]["footage"] = Json{{"kind", "movie"}, {"name", "a.mp4"}, {"frames", Json::array({"sha256:" + std::string(64, 'a')})},
+                                                              {"fps", 30}, {"size_px", Json::array({4, 4})}, {"depth", 8}, {"alpha", "ignore"}, {"par", 1}};
+        }, "/pages");
+        {  // (a book that names timeline@1 with an fps of the anims before it: read as it is)
+            Json fps = written;
+            fps["pages"][0]["anim"]["fps"] = 240.5;
+            const auto result = genko::storage::load_document(make_book(tmp, "fps_named", fps));
+            QVERIFY2(result.document.read_only_reason.empty(), result.document.read_only_reason.c_str());
+        }
+        {  // (slices@1: every slice deleted, its numbering kept — the next one is not numbered from 1 again)
+            core::Document cleared = doc;
+            cleared.edit_page(0).slices->list.clear();
+            const fs::path at = to_path(tmp.path()) / "cleared.genko";
+            genko::test::write_project(cleared, at);
+            const auto kept_back = genko::storage::load_document(at);
+            QVERIFY(kept_back.document.page(0).slices && kept_back.document.page(0).slices->next_id == 3 && kept_back.document.page(0).slices->group == "p001");
+        }
+        {
+            Json bad = written;
+            bad["pages"][0]["layer_comps"]["comps"][0]["later"] = 1;
+            const auto result = genko::storage::load_document(make_book(tmp, "kept", bad));
+            QVERIFY(!result.document.page(0).layer_comps);
+            QVERIFY(result.document.page(0).extra.contains("layer_comps"));  // (kept as read: never written without it)
+        }
+    }
+
+    // (PC5 H-f, pixel-aspect@1: a page's pixel aspect ratio for the view — written only when it is not square, and the book
+    // names the feature only then; the books without one written as before, byte for byte)
+    void pixelAspectExtension() {
+        namespace core = genko::core;
+        QVERIFY(genko::storage::is_known_feature("pixel-aspect@1"));
+        QTemporaryDir tmp;
+        {  // (the old book: none, its bytes as before)
+            const auto old = genko::storage::load_document(to_path(genko::test::test_data("legacy/book-v3.genko")));
+            const fs::path out = to_path(tmp.path()) / "old.genko";
+            genko::test::write_project(old.document, out);
+            const std::string text = genko::storage::read_file(out / "project.json");
+            QVERIFY(text.find("pixel_aspect") == std::string::npos && text.find("pixel-aspect@1") == std::string::npos);
+            for (const core::PagePtr& page : genko::storage::load_document(out).document.pages) QCOMPARE(page->pixel_aspect, 1.0);
+        }
+        Json payload = minimal_book(4);
+        payload["book_id"] = core::new_book_id();
+        payload["pages"][0]["id"] = "pg_000000000001";
+        const auto base = genko::storage::load_document(make_book(tmp, "base", payload));
+        QVERIFY2(base.document.read_only_reason.empty(), base.document.read_only_reason.c_str());
+        const fs::path square = to_path(tmp.path()) / "square.genko";
+        genko::test::write_project(base.document, square);
+        const std::string square_text = genko::storage::read_file(square / "project.json");
+        QVERIFY(square_text.find("pixel_aspect") == std::string::npos);
+        // a ratio: written and named, read back the same
+        core::Document doc = base.document;
+        doc.edit_page(0).pixel_aspect = 0.91;
+        const fs::path wide = to_path(tmp.path()) / "wide.genko";
+        genko::test::write_project(doc, wide);
+        const Json written = core::parse_python_json(genko::storage::read_file(wide / "project.json"));
+        QCOMPARE(written["pages"][0]["pixel_aspect"], Json(0.91));
+        const auto features = written["features"].get<std::vector<std::string>>();
+        QVERIFY(std::find(features.begin(), features.end(), "pixel-aspect@1") != features.end());
+        const auto back = genko::storage::load_document(wide);
+        QVERIFY2(back.document.read_only_reason.empty(), back.document.read_only_reason.c_str());
+        QCOMPARE(back.document.page(0).pixel_aspect, 0.91);
+        QVERIFY(!back.document.page(0).extra.contains("pixel_aspect"));
+        // square again: the bytes of the book that never had one
+        core::Document again = back.document;
+        again.edit_page(0).pixel_aspect = 1.0;
+        genko::test::write_project(again, square);
+        QCOMPARE(genko::storage::read_file(square / "project.json"), square_text);
+        // a ratio no page may have, or not a number: reported (the book read-only), kept as read
+        for (const Json& bad : {Json(20), Json(0.05), Json("2"), Json(true)}) {
+            Json broken = written;
+            broken["pages"][0]["pixel_aspect"] = bad;
+            const auto result = genko::storage::load_document(make_book(tmp, "bad", broken));
+            QVERIFY2(!result.document.read_only_reason.empty(), bad.dump().c_str());
+            QCOMPARE(result.document.page(0).pixel_aspect, 1.0);
+            QVERIFY(result.document.page(0).extra.contains("pixel_aspect"));
+        }
+        // the writer refuses a book of such a ratio
+        core::Document wrong = base.document;
+        wrong.edit_page(0).pixel_aspect = 12;
+        try {
+            genko::test::write_project(wrong, to_path(tmp.path()) / "wrong.genko");
+            QFAIL("a ratio past 10 was written");
+        } catch (const core::Error& error) {
+            QCOMPARE(error.code(), std::string("value"));
+        }
+    }
+
+    void projectJsonFromCopiedLegacyBookInPlace() {
+        // the v3 test book copied, then written as v4 in its own folder: every asset is reused
+        QTemporaryDir tmp;
+        const QString copy = tmp.path() + "/book-v3.genko";
+        copy_tree(genko::test::test_data("legacy/book-v3.genko"), copy);
+        const auto loaded = genko::storage::load_document(to_path(copy));
+        AssetStore store(to_path(copy));
+        const auto before = store.all_files();
+        genko::test::write_project(loaded.document, to_path(copy));
+        QCOMPARE(store.all_files(), before);
+    }
+};
+
+QTEST_GUILESS_MAIN(TestStorage)
+#include "test_storage.moc"

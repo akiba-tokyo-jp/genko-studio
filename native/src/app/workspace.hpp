@@ -1,0 +1,203 @@
+#pragma once
+
+#include <QDialog>
+#include <QPointer>
+#include <QString>
+#include <QStringList>
+#include <QWidget>
+
+#include <map>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+class QAction;
+class QCheckBox;
+class QGridLayout;
+class QLineEdit;
+class QListWidget;
+class QMainWindow;
+class QMenu;
+class QPushButton;
+class QToolBar;
+
+// The screen made one's own (Python's genko/app/workspace.py, J1): a search over every command, a quick-access panel
+// of chosen commands, a command bar that can be changed, and named workspaces (where the panels are). Everything is
+// kept in the settings, so it stays for every book.
+
+namespace genko::app {
+
+// The commands, as Python names them: every command in the menus (each once, by its name), in menu order. A command's
+// name is its words — and, when another command in the menus has the same words, its place after them (the user's
+// decision 8: レイヤー → 色調補正 → レベル補正… and the layer panel's 色調補正のレイヤー → レベル補正… are
+// 「レベル補正…（レイヤー → 色調補正）」 and 「レベル補正…（レイヤー → 塗り・グラデーション・色調補正のレイヤー → 色調補正のレイヤー）」):
+// what コマンドを探す, the quick access, the command bar and the keys (環境設定) know a command by.
+std::vector<QAction*> commands(QMainWindow* window);
+std::map<const QAction*, QString> command_names(QMainWindow* window);
+QString command_name(const std::map<const QAction*, QString>& names, const QAction* action);  // (not in the menus: its words)
+// The commands by their names (and a name kept before others had the same words — its words alone — the first of them in
+// the menus, which had them then).
+std::map<QString, QAction*> by_text(QMainWindow* window);
+// The menu path of a command ("ページ → コマ"; empty when it is in no menu).
+QString where(QMainWindow* window, const QAction* action);
+// Every item of the menu bar's menus with its menu path, as where() gives it (one in two menus: its first place) — in one
+// walk, for naming many commands at once (where() walks the menus again for each).
+std::unordered_map<const QAction*, QString> menu_places(QMainWindow* window);
+// An item a menu makes again each time it opens (recent books, オートアクション, ワークスペース, ストック: the menus with
+// the property "remade"), deleted then: not a command to keep in the quick access, the command bar or the keys, nor to
+// find.
+bool remade(const QAction* action);
+// The commands whose name, menu, explanation or old name (preferences::renamed) holds every word (in any order, any case).
+std::vector<QAction*> search(QMainWindow* window, const QString& words);
+// PC5 H-0: a menu laid out in an order — rows of a command's attribute ("act_fit"), a menu inside it by its title
+// ("▸校正の設定") and "|" for a line. A row naming nothing the menu holds is passed over (a later part's command not made
+// yet); what the menu holds that no row names stays after the rows, after a line, in its order. Lines are never doubled
+// nor at an end.
+void lay_out_menu(QMenu* menu, const QStringList& rows);
+
+// コマンドを探す (Ctrl+Shift+F): type part of a name, Enter does it.
+class CommandSearch : public QDialog {
+    Q_OBJECT
+
+public:
+    explicit CommandSearch(QMainWindow* window);
+
+    void refresh();
+    // The command chosen, done (the dialog closed first).
+    void run();
+    const std::vector<QAction*>& found() const { return found_; }
+
+    QLineEdit* query = nullptr;
+    QListWidget* results = nullptr;
+
+protected:
+    void keyPressEvent(QKeyEvent* event) override;
+
+private:
+    QMainWindow* window_;
+    std::vector<QAction*> found_;
+    // (the same, held so that one a menu has since deleted — its items made again as it opens — is not run: the window
+    // stays usable while this is open)
+    std::vector<QPointer<QAction>> alive_;
+};
+
+// The command names kept under a setting ("|" for a line between), and keep them. A command renamed since keeps its
+// place (preferences' RENAMED).
+QStringList chosen(const QString& key, const QStringList& defaults);
+void keep(const QString& key, const QStringList& names);
+extern const QStringList kDefaultCommandBar;
+extern const QStringList kDefaultQuick;
+
+// Pick and order commands: every command on the left, the chosen ones on the right.
+class ChooseCommands : public QDialog {
+    Q_OBJECT
+
+public:
+    ChooseCommands(QMainWindow* window, const QString& title, const QStringList& current, bool separators = false);
+
+    QStringList names() const;
+
+    QLineEdit* filter = nullptr;
+    QListWidget* all = nullptr;
+    QListWidget* mine = nullptr;
+    QPushButton* add = nullptr;
+    QPushButton* remove = nullptr;
+    QPushButton* up = nullptr;
+    QPushButton* down = nullptr;
+    QPushButton* line = nullptr;     // (区切りを足す: the command bar only)
+    QPushButton* restore = nullptr;  // はじめの並びに戻す
+
+private:
+    void fill_all();
+    void add_chosen();
+    void move_chosen(int delta);
+
+    QMainWindow* window_;
+};
+
+// クイックアクセス: the commands one uses most, as buttons in one place.
+class QuickAccess : public QWidget {
+    Q_OBJECT
+
+public:
+    explicit QuickAccess(QMainWindow* window);
+
+    QStringList names() const;
+    void refresh();
+    // 並べるものを選ぶ… (the dialog is exec'ed; true when it was shown).
+    bool edit();
+
+    std::vector<QPushButton*> buttons;
+
+private:
+    QMainWindow* window_;
+    QGridLayout* grid_ = nullptr;
+};
+
+// The command bar (under the menus) with the chosen commands: what is marked "keep" (the books' tabs, the room after
+// them) stays, the commands are put again.
+void fill_commandbar(QMainWindow* window, QToolBar* bar);
+void edit_commandbar(QMainWindow* window, QToolBar* bar);
+
+// --- the cursor and the keys held (環境設定) -------------------------------------------------------------------------
+
+using Choices = std::vector<std::pair<QString, QString>>;  // (the words shown, the value kept)
+// The pen's pointer: circle | circle_cross | cross | dot | tip (PC4 E1: a dab brush's tip) (default circle).
+const Choices& cursors();
+QString cursor_kind();
+// What a held Alt or Ctrl switches to ("": nothing): Alt スポイト and Ctrl 選択 unless chosen otherwise.
+const Choices& modifier_tool_choices();
+QString modifier_tool(const QString& key);
+// 道具ごとの修飾キー: the tools that can have their own Alt / Ctrl / Shift, and what those can switch to ("": the
+// common setting, "none": nothing).
+const Choices& keyed_tools();
+const Choices& held_tools();
+std::map<QString, std::map<QString, QString>> tool_modifiers();
+void set_tool_modifier(const QString& tool, const QString& key, const QString& value);
+// キーを押している間だけ持ち替え: a tool's key held down is that tool only while held (on unless turned off).
+bool hold_swap();
+
+// Workspaces: where the panels and the window are, kept under a name.
+QStringList workspaces();
+// (PC5 H-d, window.workspace.newWorkspace — Photoshop's 新規ワークスペース: the keys, the menus and the toolbar kept with the
+// panels when chosen — workspaces/<name>/keys, menus, toolbar —, laid again when it is chosen)
+void save_workspace(QMainWindow* window, const QString& name, bool keys = false, bool menus = false, bool toolbar = false);
+// (geometry: the window's size and place kept with it too — false for a window opening: its own)
+bool load_workspace(QMainWindow* window, const QString& name, bool geometry = true);
+// (the review of PC5 H-d, P2-2) Workspaces a person kept before H-d under a built-in one's name (写真, ペイント, 初期設定…) moved
+// to 「<名前>（自分）」 — their layouts (workspaces/, workspace_changes/) and ui/workspace with them; (old, new) each.
+std::vector<std::pair<QString, QString>> move_reserved_workspaces();
+// The keys, menus and toolbar kept with a workspace put back as this computer's (true when it had any: every window to be
+// applied again).
+bool load_workspace_extras(const QString& name);
+void delete_workspace(const QString& name);
+
+// PC5 H-d (window.workspace.*; PhotoCraft v0.2.0's workspace_ui.rs PRESETS, MIT; SPEC VIEW-01「ワークスペース」): Photoshop's
+// workspaces built in, in its menu's order — 初期設定 (the panels as the window first showed them), グラフィックと Web, モーション,
+// ペイント, 写真, ピクセルアート: the panels each shows (by title or object name; one Genko does not have yet passed over), the
+// ones in front. The approval's panels (承認箱, コマの詳細, 資料) are never touched by them.
+struct Preset {
+    QString id;
+    QString label;
+    QStringList show;  // (none: 初期設定 — the window's first layout)
+    QStringList front;
+};
+const std::vector<Preset>& presets();
+const Preset* preset(const QString& label);
+// A built-in workspace's name (its words or its id): never a workspace kept under it.
+bool reserved_workspace(const QString& name);
+
+// 新規ワークスペース…: the name, and what is kept with the panels.
+class NewWorkspaceDialog : public QDialog {
+    Q_OBJECT
+
+public:
+    explicit NewWorkspaceDialog(QWidget* parent);
+
+    QLineEdit* name = nullptr;
+    QCheckBox* keys = nullptr;
+    QCheckBox* menus = nullptr;
+    QCheckBox* toolbar = nullptr;
+};
+
+}  // namespace genko::app

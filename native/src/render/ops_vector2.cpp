@@ -1,0 +1,23 @@
+// PC3 節 C (SPEC.md COLOR-07): the paths', vector masks' and shape parts' ops — registered here; C-a and C-b write their
+// work in their files (the paths' JSON and checks: core/vector; their coverage: render/path_raster).
+
+#include "render/ops_paths.hpp"
+#include "render/ops_pc3.hpp"
+#include "render/ops_shapes.hpp"
+
+namespace genko::render {
+
+void register_vector2_ops(core::OpRegistry& registry) {
+    // C-a: the page's paths ({page, name?: "work" | a name, path, op?}, {page, name}, {page, name, to}), a work path from an
+    // area ({page, area, tolerance_mm?}), a line of dialogue's letters as a path or a shape ({id, to, …}), a path stroked as
+    // pen lines ({page, layer_id, name? | path?, tool, kind?, width_mm?, rgb?, opacity?, simulate_pressure?}), a layer's
+    // vector mask ({page, id, path? | path_name?, reveal_all? | hide_all?, enabled?, linked?, density?, feather_mm?,
+    // invert?, delete?})
+    // (render/ops_paths.cpp)
+    register_path_ops(registry);
+    // C-b: a pen layer's shape parts (決定 7, pen-shapes@1) — add_shape_part, edit_shape_part, combine_shape_parts,
+    // move_shape_parts — and the eraser and the line editor with them (render/ops_shapes.cpp)
+    register_shape_ops(registry);
+}
+
+}  // namespace genko::render

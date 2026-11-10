@@ -1,0 +1,64 @@
+{
+  "whole_product_complete": false,
+  "v2_status": "not_run",
+  "collected_at": "2026-10-04T15:33:48.605600+00:00",
+  "changed_source_sha256_at_collection": {
+    "docs/cpp-migration/SPEC.md": "3eb2189b91ab97f1e9554758117a5bc3e9a1c71cf7e3b49e65097c150af13292",
+    "native/src/app/tiles.cpp": "06ca92108fa22c1447eafee27b9db37a93f944cf273010a8bd5f4979d574b93b",
+    "native/src/core/pyconv.cpp": "cdbab87aa3aa16162c7da69e784e146bdab0c8b0c4b389123cb9b8481114f062",
+    "native/src/render/raster_ops.cpp": "9b478e03eb3e8bcf8f27d8978cf6e4671059d6e4525f6669808da384032558ae",
+    "native/src/render/raster_ops.hpp": "a7ff2853496a3efb9e066759a3b43977541cf405186c33d8323ed2c0fcaf60dd",
+    "native/tests/contract/raster_cases.json": "b0a820fa23b1974a3088e9cf34ce23be889e0cb8b54e32aa523a2dce5c3dd215",
+    "native/tests/contract/test_contract_raster_ops.cpp": "75e6b74a2c52ccb033327d1a5f49cf42f2d23ca3157639e42e22831edce24703",
+    "native/tests/contract/test_contract_save.cpp": "119d708fe59ffd1ae085f1cacb65a8e83ce7d292ef56f65ce6adfb26a152c7dd",
+    "native/tests/e2e/test_ops_e2e.cpp": "bf162da071d8954ca9b7d6be8e39658265fec6ea53ad55574dd39885fdedd18b",
+    "native/tests/gui/test_gui_canvas.cpp": "c4925e90f760d128d0c256eb8f26efac1519c7065cabdd50ee62fd2bda0eeccc",
+    "native/tests/unit/test_command_bus.cpp": "5794f32fe41a0f1dc90e46a6fbaf59bb68b5becd9b265737e3cd6ba0e16e9223",
+    "native/tests/unit/test_raster_ops.cpp": "0a8a0bcbe2e4252d33fe8640d1c1bf565cc69078e0b5eed7b831957ecd3202d2"
+  },
+  "security_findings": [],
+  "review_artifacts": [
+    "m3-preview-onion-review.json",
+    "m3-preview-float-rereview.json",
+    "m3-preview-lt-rereview.json"
+  ],
+  "related_asan": {
+    "process": "proc_fdc4b5ab8659",
+    "exit": 0,
+    "qt_pass_by_executable": {
+      "test_command_bus": 29,
+      "test_raster_ops_selected": 7,
+      "test_ops_e2e": 5,
+      "test_gui_canvas": 12
+    },
+    "qt_fail": 0,
+    "qt_skip": 0,
+    "total_pass": 53,
+    "instrumentation": "ldd確認: libasan.so.8 / libubsan.so.1",
+    "limitation": "今回のsource pinsは実行後採取。正式V2はrunnerのbefore/after pins・全契約が必要。関連ASanの53PASSを全体へ拡張しない。"
+  },
+  "cli_proof": "/home/hermes/genko-test/cpp-impl/wt/m3-preview/build/m3-preview-cli-proof-v2/result.json",
+  "actual_gui_evidence": "/home/hermes/genko-test/cpp-impl/reviews/m3-preview-gui-xcb-visual.json",
+  "remaining": [
+    "JPEG等の画像形式境界",
+    "全160乱数系列と全固定/保存契約・V2・Windows両構成",
+    "Qt取消job同一性の非blocking改善",
+    "M2出口条件",
+    "残M3紙質・素材/ABR・アニメーション・タイムラプス・プラグイン",
+    "M4写植/ルビ/PSD等全出力",
+    "M5 Studio/MCP41道具・4リソース/HTTP/CLI",
+    "M6配布・日本語導線",
+    "M7全性能・2時間・最終配布物受入"
+  ],
+  "float_unit_delta_verified": {
+    "reviewed_remainder_matches": true,
+    "additional_changes": [
+      "finite subnormal bit slot (8 actual Python comparisons)",
+      "two required includes",
+      "lt_convert in the two registry expectations"
+    ],
+    "all_current_command_bus_slots_asan_pass": 29
+  },
+  "scope": "オニオン設定・参照頁の実更新、set_lt、PNG版lt_convertの機能群。JPEG等の入力形式と残M3/M7は未完。",
+  "ci_acceptance": "V2全4構成はこれから。V1成功・レビューを全体合格へ代入しない。"
+}

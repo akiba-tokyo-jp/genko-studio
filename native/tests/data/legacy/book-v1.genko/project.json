@@ -1,0 +1,124 @@
+{
+  "title": "旧原稿 v1",
+  "episode": 1,
+  "binding": "right",
+  "spec": {
+    "width_mm": 210,
+    "height_mm": 297,
+    "dpi": 600,
+    "bleed_mm": 3,
+    "inner_margin_mm": 10,
+    "expression": "mono"
+  },
+  "pages": [
+    {
+      "index": 1,
+      "note": "",
+      "name_ok": true,
+      "stage": "name",
+      "frames": [
+        {
+          "id": "0879cea98c64",
+          "rect": {
+            "x": 13,
+            "y": 13,
+            "width": 184,
+            "height": 271
+          },
+          "split_axis": "horizontal",
+          "children": [
+            {
+              "id": "1f90750ba553",
+              "rect": {
+                "x": 13,
+                "y": 13,
+                "width": 184,
+                "height": 133.5
+              },
+              "split_axis": null,
+              "children": []
+            },
+            {
+              "id": "31f919e98541",
+              "rect": {
+                "x": 13,
+                "y": 150.5,
+                "width": 184,
+                "height": 133.5
+              },
+              "split_axis": null,
+              "children": []
+            }
+          ]
+        }
+      ],
+      "fills": {},
+      "name_strokes": [
+        [
+          [
+            10.0,
+            10.0
+          ],
+          [
+            20.5,
+            22.25
+          ],
+          [
+            31.125,
+            40.0
+          ]
+        ]
+      ],
+      "ink_strokes": [
+        [
+          [
+            50.0,
+            60.0
+          ],
+          [
+            70.0,
+            80.0
+          ]
+        ]
+      ]
+    },
+    {
+      "index": 2,
+      "note": "",
+      "name_ok": false,
+      "stage": "name",
+      "frames": [
+        {
+          "id": "6487f55fef23",
+          "rect": {
+            "x": 13,
+            "y": 13,
+            "width": 184,
+            "height": 271
+          },
+          "split_axis": null,
+          "children": []
+        }
+      ],
+      "fills": {},
+      "name_strokes": [],
+      "ink_strokes": []
+    }
+  ],
+  "story": [
+    {
+      "id": "bf444c78314a",
+      "page_index": 1,
+      "text": "始めよう。東京へ行く🙂",
+      "speaker": "主人公",
+      "frame_id": null
+    },
+    {
+      "id": "2f6b37c5bc39",
+      "page_index": 2,
+      "text": "二ページ目",
+      "speaker": "相手",
+      "frame_id": null
+    }
+  ]
+}

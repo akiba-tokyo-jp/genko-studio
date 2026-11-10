@@ -1,0 +1,212 @@
+#pragma once
+
+#include <QWidget>
+
+#include <map>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "core/json.hpp"
+#include "core/model.hpp"
+
+class QAction;
+class QCheckBox;
+class QComboBox;
+class QLabel;
+class QLineEdit;
+class QListWidget;
+class QListWidgetItem;
+class QMenu;
+class QPushButton;
+class QSlider;
+
+// The layer panel (Python's LayerPanel in genko/app/main.py): the page's layers, front first, the chosen one where
+// the pen and the eraser work. Adding (pen, paint, folder, fill, gradient, correction), deleting, duplicating, merging,
+// moving; each layer's settings (name, opacity, blend, clipping, protection, lock, panels, draft, reference, tint);
+// its mask and effects; several layers at once; a filter on the layer, with its result shown on the page while the
+// numbers change. Every change is an op through the window (apply_ops): Undo, saving and the journal as for any edit.
+
+namespace genko::app {
+
+class MainWindow;
+
+class LayerPanel : public QWidget {
+    Q_OBJECT
+public:
+    explicit LayerPanel(MainWindow* window);
+    // The page's layers again (after a change, another page).
+    void refresh();
+    // The kinds' marks drawn again in the look's colours now (after the screen's colours change).
+    void refresh_look();
+    // The layer drawn on chosen in the list (the list as it is: the other layers chosen with it stay chosen).
+    void show_target();
+    // The layers chosen in the list (Ctrl / Shift+click), bottom first.
+    std::vector<std::string> selected_ids() const;
+    // Tests and the window: the list, the filter button (かける…: the フィルター menu), the menus.
+    QListWidget* list() const { return list_; }
+    QPushButton* filter_button() const { return filter_apply_; }
+    QMenu* special_menu() const { return special_; }
+    QMenu* many_menu() const { return many_; }
+    QMenu* mask_menu() const { return mask_menu_; }
+    // マスクを編集する（ブラシで見せる・消しゴムで隠す）: checked while the pen and the eraser paint the mask (a layer without
+    // one gets a mask showing everything first).
+    QAction* mask_edit_action() const { return mask_edit_; }
+    void edit_mask(bool on);
+    QMenu* effects_menu() const { return effects_; }
+    const std::vector<std::string>& ids() const { return ids_; }
+    // The layer's settings folded away under ▸ (and the toggle); the search and the "drawn on" row (shown only when
+    // needed).
+    QPushButton* details_toggle() const { return details_toggle_; }
+    QWidget* details() const { return details_; }
+    QLineEdit* search_box() const { return search_; }
+    QLabel* target_row() const { return target_; }
+    // Alt+クリック: this layer alone shown; again: the others back.
+    void solo(const std::string& layer_id);
+    // The buttons' work (tests call them as the buttons do).
+    void add(const std::string& kind, const QString& title);
+    void add_adjust(const std::string& kind);
+    void add_fill();
+    void add_gradient();
+    void edit_special();
+    void apply_filter();
+    void remove();
+    void duplicate();
+    void merge_down();
+    // PC5 I-b (groups@1): レイヤーからのフレーム… (the chosen layers grouped, the group cut to the box of what it holds:
+    // frame_from_layers), and グループとして描く (a folder drawn as Photoshop's group — 通過 — or as before).
+    void frame_selected();
+    void draw_as_group(bool on);
+    // 前面へ (1) and 背面へ (-1): the window's arrange_layers (PC3 C-d).
+    void move(int delta);
+    // PC5 I-a (layer.select): the one place the list's choice of layers is changed — these layers chosen (Replace: they only;
+    // Add: they too; Toggle: each the other way; Range: every row from the layer drawn on to the last of them, as Shift+クリック),
+    // the layer drawn on as it is. リンクしたレイヤーを選択, 自動選択, すべてのレイヤー, レイヤーの選択を解除, レイヤーを検索 and (PC5
+    // J-g) the control channel's tools choose through it.
+    enum class SelectMode { Replace, Add, Toggle, Range };
+    void select_ids(const std::vector<std::string>& ids, SelectMode mode = SelectMode::Replace);
+    // PC5 I-a (layer.moveTo): a drag in the list — the rows dragged dropped on a row: above it (in front), into it (a group
+    // or folder: on the top of what it holds) or below it (behind; a folder with what it holds). Where on the row
+    // (`y` from its top, of `height`) says which: a folder's top quarter above, its bottom quarter below, between into; any
+    // other row's top half above, the rest below.
+    enum class DropPlace { Above, Into, Below };
+    static DropPlace drop_place(bool folder, int y, int height);
+    // The layers dropped (move_layers: one step; a core layer or a lock refused as the op refuses it).
+    bool drop(const std::vector<std::string>& ids, const std::string& onto, DropPlace place);
+    // PC5 I-a: レイヤーのグループ解除 (the group or folder drawn on), 削除 → 非表示レイヤー.
+    void ungroup();
+    void delete_hidden();
+    void set(const std::string& key, const core::Json& value);
+    void mask(const core::Json& change);
+    // PC3 B2 (app/layer_panel_masks.cpp): レイヤーマスク's own — 選択範囲をマスク (a mask hiding the selection), 透明部分から,
+    // 適用, リンク (checked: the mask moves with the layer) — and the layers' selection: すべてのレイヤー, レイヤーの選択を解除
+    // (the layer drawn on stays chosen), レイヤーを検索 (the search shown and the layers its words find chosen), レイヤーを分離
+    // (only the chosen layers listed, until it is turned off).
+    void hide_selection();
+    void mask_from_transparency();
+    void apply_mask();
+    QAction* mask_link_action() const { return mask_link_; }
+    void select_all_layers();
+    void deselect_layers();
+    void find_layers();
+    void choose_found();
+    void isolate_layers(bool on);
+    bool isolated() const { return !isolated_.empty(); }
+    // smart-objects@1, PC3 A2 (app/layer_panel_smart_filters.cpp): a smart object's smart filters under its row — a row
+    // スマートフィルター (its eye: all of them on or off; its marks: the filter mask) and a row for each filter, the top
+    // one first (its eye: shown; a double-click: スマートフィルターを編集…; the right button: 描画オプション…, moving it,
+    // deleting it). Each row's place in the list: its smart object's id in ids(), and what it is here (kLayerRow, kFiltersRow,
+    // or the filter's index from the bottom).
+    static constexpr int kLayerRow = -2;
+    static constexpr int kFiltersRow = -1;
+    int row_kind(int row) const;
+    // スマートフィルターを編集… (the filter's window with its settings now), 描画オプション… (its blend and opacity), and
+    // the rest of a filter's or the header's right-button menu.
+    void edit_smart_filter(int index);
+    void smart_filter_blending(int index);
+    void smart_filter_op(const core::Json& fields, const std::string& op = "smart_filter_set", const std::string& id = {});
+
+private:
+    void add_smart_filter_rows(const core::Layer& layer, const QString& indent);
+    void smart_filter_menu(const QPoint& at);
+    bool smart_filter_visibility(int row, bool shown);
+    std::pair<const core::Page*, const core::Layer*> layer() const;
+    void selected(bool from_list = true);
+    void visibility(QListWidgetItem* item);
+    void search(const QString& text);
+    std::optional<std::vector<std::string>> several(std::size_t least = 2);
+    bool eventFilter(QObject* watched, QEvent* event) override;  // (PC5 I-a: the list's drags)
+    std::vector<std::string> shown_ids() const;  // (the layers' rows the list shows: not hidden by a search or レイヤーを分離)
+    void set_selected(const core::Json& fields);
+    void merge_selected();
+    void group_selected();
+    void merge_visible(bool copy);
+    void convert(const std::string& to);
+    void drafts(const core::Json& fields);
+    void paper();
+    void add_special(const std::string& kind, const QString& title, const core::Json& fields);
+    std::optional<core::Json> adjust_fields(const std::string& kind, const core::Json& now = core::Json::object(), core::Json* opened = nullptr);
+    void border();
+    void water_edge();
+    void screen();
+    void mask_from_selection();
+    std::optional<std::vector<int>> histogram(const core::Page& page, const core::Layer& layer) const;
+    QIcon thumbnail(const core::Page& page, const core::Layer& layer);
+    void show_details(bool on, bool save = true);
+
+    MainWindow* window_;
+    std::vector<std::string> ids_;
+    std::vector<int> rows_;  // (each row's row_kind, alongside ids_)
+    bool loading_ = false;
+    QLabel* target_ = nullptr;
+    QLineEdit* search_ = nullptr;
+    QListWidget* list_ = nullptr;
+    QLineEdit* name_ = nullptr;
+    QSlider* opacity_ = nullptr;
+    QComboBox* blend_ = nullptr;
+    QCheckBox* clip_ = nullptr;
+    QCheckBox* protect_ = nullptr;
+    QCheckBox* locked_ = nullptr;
+    QCheckBox* overhang_ = nullptr;
+    QCheckBox* each_panel_ = nullptr;
+    QCheckBox* draft_ = nullptr;
+    QCheckBox* reference_ = nullptr;
+    QCheckBox* group_ = nullptr;  // (PC5 I-b: グループとして描く, a folder's)
+    QCheckBox* lock_all_ = nullptr;  // (PC5 I-a: すべてをロック)
+    QComboBox* tint_ = nullptr;
+    QPushButton* mask_button_ = nullptr;
+    QPushButton* effect_button_ = nullptr;
+    QAction* mask_link_ = nullptr;          // (PC3 B2: レイヤーマスク → リンク)
+    std::vector<std::string> isolated_;     // (PC3 B2: レイヤーを分離 — the layers listed alone; empty: all)
+    std::string listed_page_;               // (PC3 C-d: the page listed last — its layers chosen together kept)
+    std::string isolated_page_;             // (the page they are on: another page lists all)
+    std::map<QString, QIcon> marks_;  // (the kinds' marks, per colour)
+    QIcon kind_mark(core::LayerKind kind);
+    QMenu* special_ = nullptr;
+    QMenu* many_ = nullptr;
+    QMenu* mask_menu_ = nullptr;
+    QAction* mask_edit_ = nullptr;
+    QMenu* effects_ = nullptr;
+    QAction* mask_off_ = nullptr;
+    QAction* color_prints_ = nullptr;
+    QPushButton* filter_apply_ = nullptr;
+    QPushButton* details_toggle_ = nullptr;
+    QWidget* details_ = nullptr;
+    std::map<std::string, std::vector<std::string>> solo_hidden_;  // page id → the layers hidden by solo (this session)
+    // page id/layer id → its small picture and what it was made of (the lines' and pixels' own blocks held, so that
+    // one freed cannot come back at the same address and pass for it)
+    struct Thumb {
+        core::StrokeListPtr strokes;
+        core::Bytes raster;
+        core::Bytes color;
+        core::Bytes ink;
+        core::Bytes mask;
+        std::vector<core::Bytes> patches;
+        std::string state;
+        QIcon icon;
+        std::string checker;  // (what it is drawn over: the checker's size and colours)
+    };
+    std::map<std::string, Thumb> thumbs_;
+};
+
+}  // namespace genko::app

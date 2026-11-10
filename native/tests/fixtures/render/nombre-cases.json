@@ -1,0 +1,2219 @@
+{
+  "source": "unmodified genko.nombre.draw / bundled fonts",
+  "cases": [
+    {
+      "id": "antique-bottom_center-0",
+      "config": {
+        "font": "antique",
+        "position": "bottom_center",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-antique-bottom_center-0.png"
+    },
+    {
+      "id": "antique-bottom_center-1",
+      "config": {
+        "font": "antique",
+        "position": "bottom_center",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-antique-bottom_center-1.png"
+    },
+    {
+      "id": "antique-bottom_outside-0",
+      "config": {
+        "font": "antique",
+        "position": "bottom_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-antique-bottom_outside-0.png"
+    },
+    {
+      "id": "antique-bottom_outside-1",
+      "config": {
+        "font": "antique",
+        "position": "bottom_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-antique-bottom_outside-1.png"
+    },
+    {
+      "id": "antique-top_outside-0",
+      "config": {
+        "font": "antique",
+        "position": "top_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 9.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-antique-top_outside-0.png"
+    },
+    {
+      "id": "antique-top_outside-1",
+      "config": {
+        "font": "antique",
+        "position": "top_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 9.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-antique-top_outside-1.png"
+    },
+    {
+      "id": "antique-side_outside-0",
+      "config": {
+        "font": "antique",
+        "position": "side_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 62.0,
+          "y_mm": 47.5,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-antique-side_outside-0.png"
+    },
+    {
+      "id": "antique-side_outside-1",
+      "config": {
+        "font": "antique",
+        "position": "side_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 62.0,
+          "y_mm": 47.5,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-antique-side_outside-1.png"
+    },
+    {
+      "id": "gothic-bottom_center-0",
+      "config": {
+        "font": "gothic",
+        "position": "bottom_center",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-gothic-bottom_center-0.png"
+    },
+    {
+      "id": "gothic-bottom_center-1",
+      "config": {
+        "font": "gothic",
+        "position": "bottom_center",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-gothic-bottom_center-1.png"
+    },
+    {
+      "id": "gothic-bottom_outside-0",
+      "config": {
+        "font": "gothic",
+        "position": "bottom_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-gothic-bottom_outside-0.png"
+    },
+    {
+      "id": "gothic-bottom_outside-1",
+      "config": {
+        "font": "gothic",
+        "position": "bottom_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-gothic-bottom_outside-1.png"
+    },
+    {
+      "id": "gothic-top_outside-0",
+      "config": {
+        "font": "gothic",
+        "position": "top_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 9.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-gothic-top_outside-0.png"
+    },
+    {
+      "id": "gothic-top_outside-1",
+      "config": {
+        "font": "gothic",
+        "position": "top_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 9.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-gothic-top_outside-1.png"
+    },
+    {
+      "id": "gothic-side_outside-0",
+      "config": {
+        "font": "gothic",
+        "position": "side_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 62.0,
+          "y_mm": 47.5,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-gothic-side_outside-0.png"
+    },
+    {
+      "id": "gothic-side_outside-1",
+      "config": {
+        "font": "gothic",
+        "position": "side_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 62.0,
+          "y_mm": 47.5,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-gothic-side_outside-1.png"
+    },
+    {
+      "id": "mincho-bottom_center-0",
+      "config": {
+        "font": "mincho",
+        "position": "bottom_center",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-mincho-bottom_center-0.png"
+    },
+    {
+      "id": "mincho-bottom_center-1",
+      "config": {
+        "font": "mincho",
+        "position": "bottom_center",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-mincho-bottom_center-1.png"
+    },
+    {
+      "id": "mincho-bottom_outside-0",
+      "config": {
+        "font": "mincho",
+        "position": "bottom_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-mincho-bottom_outside-0.png"
+    },
+    {
+      "id": "mincho-bottom_outside-1",
+      "config": {
+        "font": "mincho",
+        "position": "bottom_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-mincho-bottom_outside-1.png"
+    },
+    {
+      "id": "mincho-top_outside-0",
+      "config": {
+        "font": "mincho",
+        "position": "top_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 9.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-mincho-top_outside-0.png"
+    },
+    {
+      "id": "mincho-top_outside-1",
+      "config": {
+        "font": "mincho",
+        "position": "top_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 9.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-mincho-top_outside-1.png"
+    },
+    {
+      "id": "mincho-side_outside-0",
+      "config": {
+        "font": "mincho",
+        "position": "side_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 62.0,
+          "y_mm": 47.5,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-mincho-side_outside-0.png"
+    },
+    {
+      "id": "mincho-side_outside-1",
+      "config": {
+        "font": "mincho",
+        "position": "side_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 62.0,
+          "y_mm": 47.5,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-mincho-side_outside-1.png"
+    },
+    {
+      "id": "maru-bottom_center-0",
+      "config": {
+        "font": "maru",
+        "position": "bottom_center",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-maru-bottom_center-0.png"
+    },
+    {
+      "id": "maru-bottom_center-1",
+      "config": {
+        "font": "maru",
+        "position": "bottom_center",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-maru-bottom_center-1.png"
+    },
+    {
+      "id": "maru-bottom_outside-0",
+      "config": {
+        "font": "maru",
+        "position": "bottom_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-maru-bottom_outside-0.png"
+    },
+    {
+      "id": "maru-bottom_outside-1",
+      "config": {
+        "font": "maru",
+        "position": "bottom_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-maru-bottom_outside-1.png"
+    },
+    {
+      "id": "maru-top_outside-0",
+      "config": {
+        "font": "maru",
+        "position": "top_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 9.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-maru-top_outside-0.png"
+    },
+    {
+      "id": "maru-top_outside-1",
+      "config": {
+        "font": "maru",
+        "position": "top_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 9.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-maru-top_outside-1.png"
+    },
+    {
+      "id": "maru-side_outside-0",
+      "config": {
+        "font": "maru",
+        "position": "side_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 62.0,
+          "y_mm": 47.5,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-maru-side_outside-0.png"
+    },
+    {
+      "id": "maru-side_outside-1",
+      "config": {
+        "font": "maru",
+        "position": "side_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 62.0,
+          "y_mm": 47.5,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-maru-side_outside-1.png"
+    },
+    {
+      "id": "hand-bottom_center-0",
+      "config": {
+        "font": "hand",
+        "position": "bottom_center",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-hand-bottom_center-0.png"
+    },
+    {
+      "id": "hand-bottom_center-1",
+      "config": {
+        "font": "hand",
+        "position": "bottom_center",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-hand-bottom_center-1.png"
+    },
+    {
+      "id": "hand-bottom_outside-0",
+      "config": {
+        "font": "hand",
+        "position": "bottom_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-hand-bottom_outside-0.png"
+    },
+    {
+      "id": "hand-bottom_outside-1",
+      "config": {
+        "font": "hand",
+        "position": "bottom_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-hand-bottom_outside-1.png"
+    },
+    {
+      "id": "hand-top_outside-0",
+      "config": {
+        "font": "hand",
+        "position": "top_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 9.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-hand-top_outside-0.png"
+    },
+    {
+      "id": "hand-top_outside-1",
+      "config": {
+        "font": "hand",
+        "position": "top_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 9.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-hand-top_outside-1.png"
+    },
+    {
+      "id": "hand-side_outside-0",
+      "config": {
+        "font": "hand",
+        "position": "side_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 62.0,
+          "y_mm": 47.5,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-hand-side_outside-0.png"
+    },
+    {
+      "id": "hand-side_outside-1",
+      "config": {
+        "font": "hand",
+        "position": "side_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 62.0,
+          "y_mm": 47.5,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-hand-side_outside-1.png"
+    },
+    {
+      "id": "sfx-bottom_center-0",
+      "config": {
+        "font": "sfx",
+        "position": "bottom_center",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-sfx-bottom_center-0.png"
+    },
+    {
+      "id": "sfx-bottom_center-1",
+      "config": {
+        "font": "sfx",
+        "position": "bottom_center",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-sfx-bottom_center-1.png"
+    },
+    {
+      "id": "sfx-bottom_outside-0",
+      "config": {
+        "font": "sfx",
+        "position": "bottom_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-sfx-bottom_outside-0.png"
+    },
+    {
+      "id": "sfx-bottom_outside-1",
+      "config": {
+        "font": "sfx",
+        "position": "bottom_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-sfx-bottom_outside-1.png"
+    },
+    {
+      "id": "sfx-top_outside-0",
+      "config": {
+        "font": "sfx",
+        "position": "top_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 9.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-sfx-top_outside-0.png"
+    },
+    {
+      "id": "sfx-top_outside-1",
+      "config": {
+        "font": "sfx",
+        "position": "top_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 9.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-sfx-top_outside-1.png"
+    },
+    {
+      "id": "sfx-side_outside-0",
+      "config": {
+        "font": "sfx",
+        "position": "side_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 62.0,
+          "y_mm": 47.5,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-sfx-side_outside-0.png"
+    },
+    {
+      "id": "sfx-side_outside-1",
+      "config": {
+        "font": "sfx",
+        "position": "side_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 62.0,
+          "y_mm": 47.5,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-sfx-side_outside-1.png"
+    },
+    {
+      "id": "sfx_pop-bottom_center-0",
+      "config": {
+        "font": "sfx_pop",
+        "position": "bottom_center",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-sfx_pop-bottom_center-0.png"
+    },
+    {
+      "id": "sfx_pop-bottom_center-1",
+      "config": {
+        "font": "sfx_pop",
+        "position": "bottom_center",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-sfx_pop-bottom_center-1.png"
+    },
+    {
+      "id": "sfx_pop-bottom_outside-0",
+      "config": {
+        "font": "sfx_pop",
+        "position": "bottom_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-sfx_pop-bottom_outside-0.png"
+    },
+    {
+      "id": "sfx_pop-bottom_outside-1",
+      "config": {
+        "font": "sfx_pop",
+        "position": "bottom_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-sfx_pop-bottom_outside-1.png"
+    },
+    {
+      "id": "sfx_pop-top_outside-0",
+      "config": {
+        "font": "sfx_pop",
+        "position": "top_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 9.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-sfx_pop-top_outside-0.png"
+    },
+    {
+      "id": "sfx_pop-top_outside-1",
+      "config": {
+        "font": "sfx_pop",
+        "position": "top_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 56.0,
+          "y_mm": 9.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-sfx_pop-top_outside-1.png"
+    },
+    {
+      "id": "sfx_pop-side_outside-0",
+      "config": {
+        "font": "sfx_pop",
+        "position": "side_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        255,
+        255,
+        255
+      ],
+      "dpi": 110,
+      "index": 1,
+      "numero": true,
+      "start_side": "right",
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 62.0,
+          "y_mm": 47.5,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-sfx_pop-side_outside-0.png"
+    },
+    {
+      "id": "sfx_pop-side_outside-1",
+      "config": {
+        "font": "sfx_pop",
+        "position": "side_outside",
+        "start": 12,
+        "hidden": true
+      },
+      "paper": [
+        32,
+        74,
+        105
+      ],
+      "dpi": 110,
+      "index": 2,
+      "numero": true,
+      "start_side": "left",
+      "cover_before": true,
+      "placements": [
+        {
+          "text": "12",
+          "x_mm": 62.0,
+          "y_mm": 47.5,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "12",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-sfx_pop-side_outside-1.png"
+    },
+    {
+      "id": "hidden-only",
+      "config": {
+        "show": false,
+        "hidden": true,
+        "font": "mincho"
+      },
+      "paper": [
+        70,
+        50,
+        30
+      ],
+      "dpi": 72,
+      "index": 2,
+      "numero": true,
+      "start_side": null,
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "2",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-hidden-only.png"
+    },
+    {
+      "id": "off",
+      "config": {
+        "show": false,
+        "hidden": false
+      },
+      "paper": [
+        70,
+        50,
+        30
+      ],
+      "dpi": 72,
+      "index": 1,
+      "numero": true,
+      "start_side": null,
+      "cover_before": false,
+      "placements": [],
+      "png": "nombre-off.png"
+    },
+    {
+      "id": "page-off",
+      "config": {
+        "show": true,
+        "hidden": true
+      },
+      "paper": [
+        70,
+        50,
+        30
+      ],
+      "dpi": 72,
+      "index": 1,
+      "numero": false,
+      "start_side": null,
+      "cover_before": false,
+      "placements": [],
+      "png": "nombre-page-off.png"
+    },
+    {
+      "id": "negative",
+      "config": {
+        "start": 0,
+        "hidden": true
+      },
+      "paper": [
+        70,
+        50,
+        30
+      ],
+      "dpi": 72,
+      "index": 0,
+      "numero": true,
+      "start_side": null,
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "-1",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        },
+        {
+          "text": "-1",
+          "x_mm": 7.0,
+          "y_mm": 75.0,
+          "size_mm": 2.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-negative.png"
+    },
+    {
+      "id": "large",
+      "config": {
+        "size_mm": 20,
+        "hidden_size_mm": 10,
+        "font": "maru",
+        "hidden": true
+      },
+      "paper": [
+        70,
+        50,
+        30
+      ],
+      "dpi": 150,
+      "index": 1,
+      "numero": true,
+      "start_side": null,
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "1",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 20.0,
+          "hidden": false
+        },
+        {
+          "text": "1",
+          "x_mm": 55.0,
+          "y_mm": 75.0,
+          "size_mm": 10.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-large.png"
+    },
+    {
+      "id": "small",
+      "config": {
+        "size_mm": 1,
+        "font": "hand",
+        "hidden": true,
+        "hidden_size_mm": 1
+      },
+      "paper": [
+        70,
+        50,
+        30
+      ],
+      "dpi": 72,
+      "index": 2,
+      "numero": true,
+      "start_side": null,
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "2",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 1.0,
+          "hidden": false
+        },
+        {
+          "text": "2",
+          "x_mm": 6.0,
+          "y_mm": 75.0,
+          "size_mm": 1.0,
+          "hidden": true
+        }
+      ],
+      "png": "nombre-small.png"
+    },
+    {
+      "id": "fallback",
+      "config": {
+        "font": "unknown"
+      },
+      "paper": [
+        70,
+        50,
+        30
+      ],
+      "dpi": 72,
+      "index": 1,
+      "numero": true,
+      "start_side": null,
+      "cover_before": false,
+      "placements": [
+        {
+          "text": "1",
+          "x_mm": 35.0,
+          "y_mm": 86.0,
+          "size_mm": 3.0,
+          "hidden": false
+        }
+      ],
+      "png": "nombre-fallback.png"
+    }
+  ]
+}

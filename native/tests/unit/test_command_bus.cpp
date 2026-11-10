@@ -1,0 +1,1278 @@
+// core::CommandBus and the M1 ops (set_note, set_meta, name_ok, lock_page, unlock_page, set_autosave, add_page,
+// delete_page): Python's behaviour and messages ("ops[i] <op>: <reason> ‖ <op> takes {…}"), the page locks and the
+// person-only gate, the warnings after a batch, the batch that fails leaving the book as it was, and the pages that
+// stay shared with the book they came from. (The same batches against Python's apply_ops: test_contract_save.)
+
+#include <QTemporaryDir>
+#include <QtTest>
+
+#include <bit>
+#include <cmath>
+#include <cstdint>
+#include <limits>
+#include <set>
+#include <stdexcept>
+#include <string>
+
+#include "core/base64.hpp"
+#include "core/color_raster.hpp"
+#include "core/command_bus.hpp"
+#include "core/error.hpp"
+#include "core/layer_basics.hpp"
+#include "core/model.hpp"
+#include "core/paths.hpp"
+#include "core/strict_ops.hpp"
+#include "render/image.hpp"
+#include "render/ops_production.hpp"
+#include "render/ops_registry.hpp"
+#include "render/page.hpp"
+#include "render/png.hpp"
+#include "render/raster.hpp"
+#include "storage/asset_store.hpp"
+#include "testsupport.hpp"
+
+using genko::core::ApplyError;
+using genko::core::Actor;
+using genko::core::CommandBus;
+using genko::core::Document;
+using genko::core::Json;
+using genko::core::Num;
+
+namespace {
+
+Json ops(const char* text) { return genko::core::parse_python_json(text); }
+
+Document book(int pages = 3) {
+    Document doc = genko::core::new_episode("t", 1, pages, genko::core::PageSpec::a4_mono());
+    doc.revision = 4;
+    return doc;
+}
+
+// The bus with every op of this build, as the command line has it.
+const CommandBus& bus() {
+    static const CommandBus b(genko::render::ops_registry());
+    return b;
+}
+
+// The error of a batch: "code: message".
+std::string error_of(const Document& doc, const Json& batch, const std::string& actor = "genko", bool dry_run = false) {
+    try {
+        bus().apply(doc, batch, Actor(actor), dry_run);
+    } catch (const ApplyError& error) {
+        return error.code() + ": " + error.what();
+    }
+    return "(applied)";
+}
+
+genko::core::ApplyResult apply(const Document& doc, const char* batch, const std::string& actor = "genko") {
+    return bus().apply(doc, ops(batch), Actor(actor));
+}
+
+std::vector<std::string> strings(const Json& list) {
+    std::vector<std::string> out;
+    for (const Json& item : list) out.push_back(item.get<std::string>());
+    return out;
+}
+
+}  // namespace
+
+class TestCommandBus : public QObject {
+    Q_OBJECT
+
+private slots:
+    void nombreRejectsOutsideContract_data() {
+        QTest::addColumn<QString>("input");
+        for(const auto& row:{std::pair{"visible-small",R"({"size_mm":0.5})"},std::pair{"hidden-small",R"({"hidden_size_mm":0.5})"},std::pair{"hidden-large",R"({"hidden_size_mm":11})"},std::pair{"start-negative",R"({"start":-1})"},std::pair{"start-string-negative",R"({"start":"-1"})"},std::pair{"font-unknown",R"({"font":"not-a-font"})"},std::pair{"font-number",R"({"font":1})"},std::pair{"font-list",R"({"font":["hand"]})"},std::pair{"font-boolean",R"({"font":true})"}})QTest::newRow(row.first)<<QString::fromLatin1(row.second);
+    }
+    void nombreRejectsOutsideContract() {
+        QFETCH(QString,input);const auto doc=book(2);const auto pages=doc.pages;Json bad=ops(input.toUtf8().constData());bad["op"]="set_nombre";bad["page"]=1;bad["numero"]=false;
+        bool refused=false;try{(void)bus().apply(doc,Json::array({Json{{"op","set_note"},{"page",2},{"note","must not survive"}},bad}),Actor("human:test"));}catch(const ApplyError& error){refused=true;QVERIFY(error.code()!="not_yet_ported");}
+        QVERIFY2(refused,"nombre contract must refuse invalid size/start/font");QCOMPARE(doc.pages,pages);QVERIFY(doc.page(0).numero);QVERIFY(doc.page(1).note.empty());QVERIFY(doc.nombre.empty());
+        for(const Json& valid:Json::array({Json{{"size_mm",1},{"hidden_size_mm",10},{"start",0},{"font","hand"}},Json{{"font",nullptr}},Json{{"font",false}},Json{{"font",""}}})) {
+            Json good=valid;good["op"]="set_nombre";const auto changed=bus().apply(doc,Json::array({good}),Actor("human:test")).doc;
+            for(const auto& [key,value]:valid.items())QCOMPARE(changed.nombre.at(key),value);
+        }
+    }
+    void nombreOptionsAreAtomicAndEditable() {
+        const auto doc = book(2); const auto pages = doc.pages;
+        const Json options = {{"op","set_nombre"},{"page",1},{"numero",false},{"font","hand"},{"position","top_outside"},{"size_mm",4},{"start",12},{"show",true},{"hidden",true},{"hidden_size_mm",1.5}};
+        Document changed; bool accepted = false; std::string reason;
+        try { changed = bus().apply(doc, Json::array({options}), Actor("human:test")).doc; accepted = true; }
+        catch (const ApplyError& error) { reason = error.what(); }
+        QVERIFY2(accepted, ("nombre editing must be implemented: " + reason).c_str());
+        QVERIFY(!changed.page(0).numero); QVERIFY(doc.page(0).numero); QCOMPARE(changed.pages[1], pages[1]);
+        for (const auto& [key, value] : options.items()) if (key != "op" && key != "page" && key != "numero") QCOMPARE(changed.nombre.at(key), value);
+        const auto enabled = bus().apply(changed, Json::array({Json{{"op","set_nombre"},{"page",1},{"numero",true}}}), Actor("human:test")).doc;
+        QVERIFY(enabled.page(0).numero); QCOMPARE(enabled.nombre, changed.nombre);
+        for (const Json& invalid : Json::array({Json{{"position","invalid"}}, Json{{"size_mm",0}},Json{{"size_mm",21}},Json{{"hidden_size_mm","inf"}},Json{{"start","inf"}},Json{{"start","not a number"}}})) {
+            Json bad = invalid; bad["op"]="set_nombre";bad["page"]=1;bad["numero"]=false;
+            QVERIFY_THROWS_EXCEPTION(ApplyError, bus().apply(doc,Json::array({Json{{"op","set_note"},{"page",2},{"note","must not survive"}},bad}),Actor("human:test")));
+            QCOMPARE(doc.pages,pages); QVERIFY(doc.page(1).note.empty()); QVERIFY(doc.nombre.empty());
+        }
+        auto locked = doc; locked.page_locks[locked.page(0).id]="human:other";
+        QVERIFY_THROWS_EXCEPTION(ApplyError,bus().apply(locked,Json::array({options}),Actor("ai:test")));
+        QCOMPARE(doc.pages,pages);
+    }
+    void lightTableFiniteSubnormalsKeepTheirBits() {
+        struct Case { const char* text; std::uint64_t bits; };
+        // Bit patterns cross-checked against Python float(), including the half-denormal rounding boundary.
+        const Case cases[] = {
+            {"4.9406564584124654e-324", 0x1ULL},
+            {"2.4703282292062328e-324", 0x1ULL},
+            {"2.4703282292062327e-324", 0x0ULL},
+            {"-4.9406564584124654e-324", 0x8000000000000001ULL},
+            {"-2.4703282292062327e-324", 0x8000000000000000ULL},
+            {"1e-320", 0x7e8ULL},
+            {"-1e-320", 0x80000000000007e8ULL},
+            {"0e99999999999999999999999999999999999999", 0x0ULL}};
+        for (const Case& c : cases) {
+            const auto changed = CommandBus(genko::render::ops_registry()).apply(book(),
+                Json::array({Json::object({{"op", "set_lt"}, {"page", 2}, {"threshold", c.text}})}), Actor("genko"));
+            QCOMPARE(std::bit_cast<std::uint64_t>(changed.doc.page(1).lt_threshold.value().value()), c.bits);
+        }
+    }
+
+    void lightTableOverflowRejectsDespiteANegativeExponent() {
+        const Document doc = book();
+        for (const std::string& sign : {std::string(), std::string("-")}) {
+            const std::string threshold = sign + "1" + std::string(400, '0') + "e-1";
+            const Json batch = Json::array({Json::object({{"op", "set_note"}, {"page", 2}, {"note", "must not survive"}}),
+                Json::object({{"op", "set_lt"}, {"page", 2}, {"threshold", threshold}})});
+            const auto error = error_of(doc, batch);
+            QVERIFY2(error.find("finite") != std::string::npos, error.c_str());
+            QCOMPARE(doc.page(1).note, std::string());
+            QVERIFY(!doc.page(1).lt_threshold);
+        }
+    }
+
+    void lightTableUnderflowKeepsSignedZeroWithoutAnExponent() {
+        const Document doc = book();
+        for (const std::string& sign : {std::string(), std::string("-")}) {
+            for (const std::string& exponent : {std::string(), std::string("e+1")}) {
+                const std::string threshold = sign + "0." + std::string(400, '0') + "1" + exponent;
+                const Json batch = Json::array({Json::object({{"op", "set_lt"}, {"page", 2}, {"threshold", threshold}})});
+                const auto error = error_of(doc, batch);
+                QVERIFY2(error == "(applied)", error.c_str());
+                const auto result = bus().apply(doc, batch, Actor("genko"));
+                QVERIFY(result.doc.page(1).lt_threshold);
+                const double value = result.doc.page(1).lt_threshold->value();
+                QCOMPARE(value, 0.0);
+                QCOMPARE(std::signbit(value), !sign.empty());
+            }
+        }
+    }
+
+    void onionReferenceCanBeSetAndCleared() {
+        const Document doc = book();
+        const Json first = ops(R"([{"op":"set_onion","page":2,"from":"1"}])");
+        const std::string error = error_of(doc, first);
+        QVERIFY2(error == "(applied)", error.c_str());
+        auto result = bus().apply(doc, first, Actor("genko"));
+        QVERIFY(result.doc.page(1).onion_from.has_value());
+        QVERIFY(result.doc.page(1).onion_from->same(Num(1)));
+        QVERIFY(!doc.page(1).onion_from.has_value());
+        QVERIFY(result.doc.pages[0] == doc.pages[0]);
+        QVERIFY(result.doc.pages[2] == doc.pages[2]);
+        for (const char* batch : {
+                 R"([{"op":"set_onion","page":2}])",
+                 R"([{"op":"set_onion","page":2,"from":null}])",
+                 R"([{"op":"set_onion","page":2,"from":""}])",
+                 R"([{"op":"set_onion","page":2,"from":0}])",
+                 R"([{"op":"set_onion","page":2,"from":0.0}])",
+                 R"([{"op":"set_onion","page":2,"from":false}])"}) {
+            const auto cleared = apply(result.doc, batch);
+            QVERIFY(!cleared.doc.page(1).onion_from.has_value());
+            QVERIFY(result.doc.page(1).onion_from->same(Num(1)));
+        }
+        const auto same_page = apply(doc, R"([{"op":"set_onion","page":2,"from":2.9}])");
+        QVERIFY(same_page.doc.page(1).onion_from->same(Num(2)));
+        const auto outside = apply(doc, R"([{"op":"set_onion","page":2,"from":-8}])");
+        QVERIFY(outside.doc.page(1).onion_from->same(Num(-8)));
+    }
+
+    void onionStepClampsAndAvoidsTheCurrentPage() {
+        const Document doc = book();
+        const Json first = ops(R"([{"op":"step_onion","page":2}])");
+        const std::string error = error_of(doc, first);
+        QVERIFY2(error == "(applied)", error.c_str());
+        const auto result = bus().apply(doc, first, Actor("genko"));
+        QVERIFY(result.doc.page(1).onion_from->same(Num(1)));
+        const auto next = apply(doc, R"([{"op":"step_onion","page":2,"delta":1}])");
+        QVERIFY(next.doc.page(1).onion_from->same(Num(3)));
+        for (const char* batch : {
+                 R"([{"op":"step_onion","page":2,"delta":0}])",
+                 R"([{"op":"step_onion","page":2,"delta":false}])",
+                 R"([{"op":"step_onion","page":2,"delta":null}])",
+                 R"([{"op":"step_onion","page":2,"delta":"0"}])",
+                 R"([{"op":"step_onion","page":2,"delta":0.9}])",
+                 R"([{"op":"step_onion","page":2,"delta":-100}])"}) {
+            const auto lower = apply(doc, batch);
+            QVERIFY(lower.doc.page(1).onion_from->same(Num(1)));
+        }
+        const auto upper = apply(doc, R"([{"op":"step_onion","page":2,"delta":100}])");
+        QVERIFY(upper.doc.page(1).onion_from->same(Num(3)));
+        const auto back = apply(next.doc, R"([{"op":"step_onion","page":2}])");
+        QVERIFY(back.doc.page(1).onion_from->same(Num(1)));
+        const auto first_page = apply(doc, R"([{"op":"step_onion","page":1}])");
+        QVERIFY(first_page.doc.page(0).onion_from->same(Num(1)));
+        QVERIFY(!doc.page(1).onion_from.has_value());
+    }
+
+    void onionStepSupportsWideOffsetsWithoutRoundingCancellation() {
+        Document doc = book();
+        doc.edit_page(2).onion_from = Num(std::numeric_limits<std::int64_t>::min());
+        const Json batch = ops(R"([{"op":"step_onion","page":3,"delta":"9223372036854775810"}])");
+        const std::string error = error_of(doc, batch);
+        QVERIFY2(error == "(applied)", error.c_str());
+        const auto result = bus().apply(doc, batch, Actor("genko"));
+        QVERIFY(result.doc.page(2).onion_from->same(Num(2)));
+        const auto huge = apply(doc, R"([{"op":"step_onion","page":1,"delta":1e100}])");
+        QVERIFY(huge.doc.page(0).onion_from->same(Num(3)));
+        doc.edit_page(2).onion_from = Num(1e20);
+        const auto cancelled = apply(doc, R"([{"op":"step_onion","page":3,"delta":"-99999999999999999998"}])");
+        QVERIFY(cancelled.doc.page(2).onion_from->same(Num(2)));
+    }
+
+    void onionIntegerStringsKeepPythonsDigitLimit() {
+        const Document doc = book();
+        const std::string long_zeroes(4300, '0');
+        for (const char* name : {"set_onion", "step_onion"}) {
+          for (const std::string& text : {long_zeroes + "1", std::string(4301, '9')}) {
+            Json op = Json::object({{"op", name}, {"page", 2}});
+            op[std::string(name) == "set_onion" ? "from" : "delta"] = text;
+            const Json batch = Json::array({Json::object({{"op", "set_note"}, {"page", 2}, {"note", "前置"}}), op});
+            const std::string error = error_of(doc, batch);
+            QVERIFY2(error.find("Exceeds the limit (4300 digits)") != std::string::npos, error.c_str());
+            QVERIFY(doc.page(1).note.empty());
+            QVERIFY(!doc.page(1).onion_from.has_value());
+            QVERIFY(doc.page(2).note.empty());
+            QVERIFY(!doc.page(2).onion_from.has_value());
+          }
+        }
+    }
+
+    void onionZeroInputsRetainTheirDifferentMeanings() {
+        const Document doc = book();
+        const auto source = apply(doc, R"([{"op":"set_onion","page":3,"from":2}])");
+        for (const char* batch : {
+                 R"([{"op":"step_onion","page":3,"delta":0}])",
+                 R"([{"op":"step_onion","page":3,"delta":false}])",
+                 R"([{"op":"step_onion","page":3,"delta":null}])"}) {
+            const auto stepped = apply(source.doc, batch);
+            QVERIFY(stepped.doc.page(2).onion_from->same(Num(1)));
+        }
+        for (const char* batch : {
+                 R"([{"op":"step_onion","page":3,"delta":"0"}])",
+                 R"([{"op":"step_onion","page":3,"delta":0.9}])",
+                 R"([{"op":"step_onion","page":3,"delta":-0.9}])"}) {
+            const auto stepped = apply(source.doc, batch);
+            QVERIFY(stepped.doc.page(2).onion_from->same(Num(2)));
+        }
+        const auto zero = apply(doc, R"([{"op":"set_onion","page":3,"from":0.9}])");
+        QVERIFY(zero.doc.page(2).onion_from.has_value());
+        QVERIFY(zero.doc.page(2).onion_from->same(Num(0)));
+        const auto from_page = apply(zero.doc, R"([{"op":"step_onion","page":3,"delta":1}])");
+        QVERIFY(from_page.doc.page(2).onion_from->same(Num(2)));
+    }
+
+    void lightTableThresholdKeepsFinitePythonValues() {
+        const Document doc = book();
+        const Json first = ops(R"([{"op":"set_lt","page":2,"threshold":"-17.25"}])");
+        const std::string error = error_of(doc, first);
+        QVERIFY2(error == "(applied)", error.c_str());
+        const auto set = apply(doc, R"([{"op":"set_lt","page":2,"threshold":"-17.25"}])");
+        QVERIFY(set.doc.page(0).lt_threshold == std::nullopt);
+        QVERIFY(set.doc.page(1).lt_threshold->same(Num(-17.25)));
+        const auto big = apply(set.doc, R"([{"op":"set_lt","page":2,"threshold":1e308}])");
+        QVERIFY(big.doc.page(1).lt_threshold->same(Num(1e308)));
+        const auto zero = apply(big.doc, R"([{"op":"set_lt","page":2,"threshold":false}])");
+        QVERIFY(zero.doc.page(1).lt_threshold->same(Num(0.0)));
+        QVERIFY(doc.page(1).lt_threshold == std::nullopt);
+    }
+
+    void lightTableThresholdRejectsNonFiniteAtomically() {
+        const Document doc = book();
+        for (const char* raw : {"NaN", "Infinity", "-Infinity", "\"nan\"", "\"inf\"", "\"-inf\""}) {
+            const std::string text = std::string("[{\"op\":\"set_note\",\"page\":2,\"note\":\"前置\"},{\"op\":\"set_lt\",\"page\":2,\"threshold\":") + raw + "}]";
+            const Json batch = ops(text.c_str());
+            const std::string error = error_of(doc, batch);
+            // JSON's existing parser repairs bare non-finite constants to null.
+            const char* expected = raw[0] == '"' ? "threshold must be a finite number" : "NoneType";
+            QVERIFY2(error.find(expected) != std::string::npos, error.c_str());
+            QVERIFY(doc.page(1).note.empty());
+            QVERIFY(doc.page(1).lt_threshold == std::nullopt);
+        }
+        for (const double value : {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()}) {
+            const Json batch = Json::array({Json::object({{"op", "set_note"}, {"page", 2}, {"note", "前置"}}),
+                Json::object({{"op", "set_lt"}, {"page", 2}, {"threshold", value}})});
+            const std::string error = error_of(doc, batch);
+            QVERIFY2(error.find("threshold must be a finite number") != std::string::npos, error.c_str());
+            QVERIFY(doc.page(1).note.empty());
+            QVERIFY(doc.page(1).lt_threshold == std::nullopt);
+        }
+        const auto normal = apply(doc, R"([{"op":"set_lt","page":2,"threshold":"0.25"}])");
+        QVERIFY(normal.doc.page(1).lt_threshold->same(Num(0.25)));
+    }
+
+    // The book and page ops of M4 that need more than core: core's own bus refuses a paint layer's pixels moved by
+    // set_page_spec and the other book import_pages reads (not_yet_ported), and does the rest; this build's precise
+    // colour pixels, which Python does not have, are moved by the drawing build (PC3 C-e: at their own resolution;
+    // core's own bus refuses them), and the paper alone changes with move false.
+    void bookPageOpsNeedTheDrawingBuild() {
+        const Json move = ops(R"([{"op": "set_page_spec", "preset": "b5"}])");
+        const Json paper = ops(R"([{"op": "set_page_spec", "preset": "b5", "move": false}])");
+        const auto code_of = [](const CommandBus& on, const Document& doc, const Json& batch) {
+            try {
+                on.apply(doc, batch, Actor("genko"));
+            } catch (const ApplyError& error) {
+                return error.code() + ": " + error.what();
+            }
+            return std::string("(applied)");
+        };
+        Document doc = book();
+        QCOMPARE(code_of(CommandBus(), doc, move), std::string("(applied)"));  // (nothing on the pages that needs drawing)
+        genko::core::Layer paint;
+        paint.id = "paint";
+        paint.kind = genko::core::LayerKind::Raster;
+        paint.raster_png = std::make_shared<const std::string>(
+            genko::render::write_png(genko::render::Image::create("RGBA", {8, 6}, genko::render::Ink{200, 20, 20, 255})));
+        doc.edit_page(1).layers.push_back(paint);
+        const std::string refused = code_of(CommandBus(), doc, move);
+        QVERIFY2(refused.starts_with("not_yet_ported: ops[0] set_page_spec: set_page_spec moving a paint layer's pixels"), refused.c_str());
+        QCOMPARE(code_of(CommandBus(), doc, paper), std::string("(applied)"));
+        // (a picture at raster.WORKING_DPI onto the new paper, 208 × 283 mm, at that 200 dpi; one of another resolution —
+        // the 8 × 6 picture over the page — keeps it, never taken for one at 200 dpi: the review of PC3, fix 1)
+        genko::core::Layer working = paint;
+        working.id = "working";
+        const genko::core::PageSpec was = doc.page(1).spec;
+        working.raster_png = std::make_shared<const std::string>(genko::render::write_png(genko::render::Image::create(
+            "RGBA", {genko::render::mm_to_px(was.width_mm.value(), 200), genko::render::mm_to_px(was.height_mm.value(), 200)},
+            genko::render::Ink{200, 20, 20, 255})));
+        doc.edit_page(1).layers.push_back(working);
+        const Document moved = bus().apply(doc, move, Actor("genko")).doc;
+        const genko::render::Image picture = genko::render::read_png(*moved.page(1).layers.back().raster_png);
+        QCOMPARE(picture.width(), 1638);
+        QCOMPARE(picture.height(), 2228);
+        const genko::render::Image small = genko::render::read_png(*moved.page(1).layers.at(moved.page(1).layers.size() - 2).raster_png);
+        const genko::core::PageSpec& now = moved.page(1).spec;
+        QCOMPARE(small.width(), static_cast<int>(std::lround(now.width_mm.value() * 8 / was.width_mm.value())));
+        QCOMPARE(small.height(), static_cast<int>(std::lround(now.height_mm.value() * 6 / was.height_mm.value())));
+        const std::string imported = code_of(CommandBus(), book(), ops(R"([{"op": "import_pages", "from": "nowhere.genko"}])"));
+        QVERIFY2(imported.starts_with("not_yet_ported: ops[0] import_pages: import_pages reads the other book"), imported.c_str());
+        // precise colour pixels
+        Document precise = book();
+        genko::core::Layer colour;
+        colour.id = "precise";
+        colour.kind = genko::core::LayerKind::Raster;
+        colour.panel_clip = false;
+        colour.color_raster = std::make_shared<const std::string>(genko::core::encode_color_raster(
+            Json{{"width", 1}, {"height", 1}, {"precision", "u16"}, {"pixels", Json::array({65535, 0, 0, 65535})}}));
+        precise.edit_page(0).layers.push_back(colour);
+        const std::string kept = code_of(CommandBus(), precise, move);
+        QVERIFY2(kept.starts_with("not_yet_ported: ops[0] set_page_spec: set_page_spec moving high-precision colour pixels"), kept.c_str());
+        const Document moved_precise = bus().apply(precise, move, Actor("genko")).doc;
+        const auto& precise_layer = moved_precise.page(0).layers.back();
+        QVERIFY(precise_layer.color_raster && precise_layer.color_raster != colour.color_raster);
+        const genko::core::ColorRasterView view(*precise_layer.color_raster);
+        QCOMPARE(view.width(), 1u);  // (its resolution kept: a pixel over the page's 208 mm)
+        QCOMPARE(view.pixel(0)[0], 1.0);
+        const Document repapered = bus().apply(precise, paper, Actor("genko")).doc;
+        QVERIFY(repapered.page(0).layers.back().color_raster == colour.color_raster);
+        QCOMPARE(repapered.spec.preset.value(), std::string("doujin-b5"));
+    }
+
+    // set_page_spec moves a layer's mask with what it masks (the user's decision D1), but a mask whose bytes are no
+    // picture that can be read (not a picture at all, a PNG cut short) is left exactly as it is and the op goes on, as
+    // Python's, which never reads a mask there.
+    void aMaskThatCannotBeReadStaysAsItIs() {
+        namespace render = genko::render;
+        Document doc = book();
+        render::Image corner = render::Image::create("L", {31, 44}, render::Ink(255));  // (hides its top left corner)
+        corner.paste(render::Ink(0), render::Box{0, 0, 10, 10});
+        const std::string png = render::write_png(corner);
+        const std::vector<std::pair<std::string, std::string>> masks{
+            {"junk", "not a picture"}, {"cut", png.substr(0, png.size() - 20)}, {"read", png}};
+        for (const auto& [id, bytes] : masks) {
+            genko::core::Layer layer;
+            layer.id = id;
+            layer.mask.emplace();
+            layer.mask->png = std::make_shared<const std::string>(bytes);
+            doc.edit_page(1).layers.push_back(layer);
+        }
+        const Document moved = bus().apply(doc, ops(R"([{"op": "set_page_spec", "preset": "b5"}])"), Actor("genko")).doc;
+        for (const auto& [id, bytes] : masks) {
+            const genko::core::Layer* found = nullptr;
+            for (const genko::core::Layer& layer : moved.page(1).layers) {
+                if (layer.id == id) found = &layer;
+            }
+            QVERIFY(found != nullptr && found->mask && found->mask->png && found->mask->enabled);
+            if (id == "read") {
+                QVERIFY(*found->mask->png != bytes);  // (moved onto the new paper)
+            } else {
+                QCOMPARE(*found->mask->png, bytes);
+            }
+        }
+    }
+
+    // One registry for the whole build (render::ops_registry: core's ops and the ops that draw), each module's ops
+    // registered by its own register_*_ops; core::OpRegistry::builtin() has core's alone.
+    void registries() {
+        const auto& core_ops = genko::core::OpRegistry::builtin();
+        const auto& all = genko::render::ops_registry();
+        for (const char* name : {"set_note", "add_page", "split_frame", "add_stroke", "erase", "add_layer", "add_ruler",
+                                 "ruler_to_layer"}) {
+            QVERIFY2(core_ops.find(name) != nullptr, name);
+            QVERIFY2(all.find(name) != nullptr, name);
+        }
+        for (const char* name : {"add_tone", "set_tone", "delete_tone", "add_effect", "effect_to_layer", "add_figure",
+                                 "render_prims", "trace_prims", "camera_from_ruler", "set_stroke_width", "reshape_stroke", "lt_convert",
+                                 "import_psd"}) {
+            QVERIFY2(core_ops.find(name) == nullptr, name);
+            QVERIFY2(all.find(name) != nullptr, name);
+        }
+        const std::vector<std::string> core_names = core_ops.names();
+        const std::vector<std::string> all_names = all.names();
+        for (const std::string& name : core_names) QVERIFY2(all.find(name) != nullptr, name.c_str());
+        std::set<std::string> expected(core_names.begin(), core_names.end());
+        // Every module's public names, including the two deliberate erase overrides.
+        const std::set<std::string> drawing_names{
+            "add_tone", "set_tone", "delete_tone", "add_effect", "edit_effect",
+            "delete_effect", "effect_to_layer", "add_figure", "pose_figure", "add_head",
+            "add_hand", "import_model", "set_camera", "set_light", "render_prims",
+            "add_mannequin", "pose_mannequin", "add_prim3d", "add_scene", "edit_prim",
+            "delete_prim", "trace_prims", "ruler_from_3d", "camera_from_ruler", "convert_layer",
+            "merge_down", "merge_layers", "merge_visible", "set_layer_mask", "paint_mask",
+            "put_raster", "filter_raster", "fill", "fill_area", "fill_enclosed",
+            "fill_gaps", "flood_fill", "gradient_fill", "delete_area", "transform_area",
+            "paste", "erase", "erase_raster", "set_stroke_width", "reshape_stroke", "lt_convert", "stamp_material",
+            "add_shape", "smudge", "liquify", "import_psd",
+            "set_color_mode", "set_inks",  // (color-mode@1: the C++ build's own, SPEC.md COLOR-02)
+            "assign_profile", "convert_profile",  // (color-model@1: the C++ build's own, SPEC.md COLOR-03)
+            "set_text_gamma",  // (color-model@1's book text_gamma, PC1b: the C++ build's own, SPEC.md COLOR-03)
+            "add_channel", "duplicate_channel", "delete_channel", "rename_channel", "move_channel", "set_channel",
+            "merge_spot_channel", "split_channels", "merge_channels",  // (channels@1: the C++ build's own, SPEC.md COLOR-03)
+            "to_indexed", "set_color_table", "to_bitmap", "set_duotone",  // (color-model@1's own modes, PC1d: the C++ build's own, SPEC.md COLOR-03)
+            "set_adjustment", "auto_adjust", "hdr_toning", "apply_image", "calculations", "trap",
+            "fade_layer",  // (PC2's corrections, adjustments@1: the C++ build's own, SPEC.md COLOR-04)
+            "smart_convert", "smart_place", "smart_profile", "smart_copy", "smart_transform", "rasterize_layer",
+            "smart_replace", "smart_relink", "smart_update", "smart_embed", "smart_link", "smart_to_page",
+            "smart_filter_add", "smart_filter_set", "smart_filter_move", "smart_filter_delete", "smart_filter_state",
+            "smart_stack", "rasterize_lines",  // (PC3 A0, smart-objects@1: the C++ build's own and the later steps', SPEC.md COLOR-05)
+            "quick_mask", "magic_erase", "outline_area", "apply_layer_mask", "mask_from_transparency", "matting", "clone_stamp",
+            "healing_brush", "spot_healing", "history_brush", "content_aware_fill",  // (PC3 節 B's ops, frames until their groups: SPEC.md COLOR-06)
+            "set_path", "delete_path", "rename_path", "make_work_path", "text_to_path", "stroke_path", "set_vector_mask", "add_shape_part",
+            "edit_shape_part", "combine_shape_parts", "move_shape_parts", "transform_layers", "content_aware_scale", "align_layers",
+            "distribute_layers", "arrange_layers", "link_layers", "resize_pages", "set_canvas_size", "crop_page", "trim_page", "reveal_all",
+            "rotate_pages",  // (PC3 節 C's ops, frames until their groups: SPEC.md COLOR-07)
+            "set_file_info", "set_camera_raw",  // (PC4 節 F's ops, frames until F-b and F-e: SPEC.md FILE-01)
+            "dodge", "burn", "sponge", "blur_brush", "sharpen_brush", "smudge_brush", "mixer_brush", "background_eraser",
+            "color_replacement", "add_pattern", "rename_pattern", "delete_pattern",  // (PC4 節 E's ops, frames until their groups: SPEC.md COLOR-09)
+            "render_picture", "vanishing_point",  // (PC4 節 D's ops: D4 炎・額縁・木, D6 消点 — SPEC.md COLOR-08)
+            "set_layer_style", "add_layer_effect", "set_global_light", "scale_layer_style", "show_layer_effects",
+            "layer_style_to_layers",  // (PC4 E6: layer-styles@1, SPEC.md COLOR-09)
+            "add_type_layer", "edit_type", "type_info", "set_type", "type_style", "line_to_type_layer", "type_layer_to_line",
+            "replace_fonts",  // (PC5 G-0: type@1, the type ops — G-0's and the later groups' frames, SPEC.md TEXT-02)
+            "new_layer_comp", "update_layer_comp", "apply_layer_comp", "set_layer_comp", "duplicate_layer_comp", "delete_layer_comp",
+            "clear_layer_comp_warnings", "add_slice", "set_slice", "delete_slices", "divide_slice", "slices_from_guides",
+            "add_annotation", "set_annotation", "delete_annotations", "set_measurement_scale", "add_count", "remove_count",
+            "move_count", "clear_count", "new_count_group", "delete_count_group", "set_count_group", "set_ruler_line",
+            "straighten_layer", "place_scale_marker", "add_video_layer", "video_insert_blank", "video_duplicate", "video_delete",
+            "video_restore", "video_restore_all", "video_alter", "set_video_layer", "replace_footage", "rasterize_video",
+            "footage_to_layers",  // (PC5 節 J's ops, frames until their groups: SPEC.md PROD-01)
+
+            "frame_from_layers",  // (PC5 I-b: groups@1, レイヤーからのフレーム — SPEC.md AUTO-01)
+            "set_variables", "set_data_sets", "apply_data_set",  // (PC5 I-d: variables@1, 変数とデータセット — SPEC.md AUTO-01)
+            "measure_info",  // (PC5 J-d1: measure@1's question, image.analysis.info — SPEC.md PROD-01)
+            "bake_layer_styles",  // (PC5 I-a: すべてのレイヤー効果を統合 — SPEC.md AUTO-01; delete_layers, duplicate_layers, ungroup_layers are core's)
+            "slices_info",  // (PC5 J-b: slices@1's question, slice.list — SPEC.md PROD-01)
+            "add_artboard", "artboard_from_layers", "set_artboard",  // (PC5 I-c: artboards@1, アートボード — SPEC.md AUTO-01)
+            "measure_values",  // (PC5 J-d2: 計測値を記録's values asked, image.analysis.recordMeasurements — SPEC.md PROD-01)
+            "timeline_info",  // (PC5 J-e1: timeline@1's question, timeline.info — SPEC.md PROD-01)
+            "auto_align_layers", "auto_blend_layers",  // (PC5 I-g: レイヤーを自動整列・レイヤーを自動合成 — SPEC.md AUTO-01)
+            "set_image_assets",  // (PC5 I-f: image-assets@1, 生成 → 画像アセット — SPEC.md AUTO-01)
+            "set_pixel_aspect"};  // (PC5 H-f: pixel-aspect@1, 表示 → ピクセル縦横比 — SPEC.md VIEW-01)
+        expected.insert(drawing_names.begin(), drawing_names.end());
+        const std::set<std::string> actual(all_names.begin(), all_names.end());
+        QCOMPARE(actual, expected);
+        QCOMPARE(all_names.size(), expected.size());
+        QVERIFY(all.area_resolver());
+        QVERIFY(!core_ops.area_resolver());
+        QVERIFY(all.find("erase") != core_ops.find("erase"));
+        // (PC5 J-0: 節 J's frames refuse, naming the op, and leave the book as it was)
+        for (const std::string_view name : genko::render::production_op_names()) {
+            try {
+                bus().apply(book(), Json::array({Json{{"op", std::string(name)}, {"page", 1}}}), Actor());
+                QFAIL("a frame did something");
+            } catch (const ApplyError& error) {
+                QCOMPARE(error.code(), std::string("not_yet_ported"));
+                QVERIFY2(std::string(error.what()).find(std::string(name)) != std::string::npos, error.what());
+            }
+        }
+        QVERIFY(all.find("erase_raster") != core_ops.find("erase_raster"));
+        // the bus without a registry has core's
+        QCOMPARE(error_of(book(), ops(R"([{"op": "add_tone", "page": 1}])")).substr(0, 7), std::string("(applie"));
+        try {
+            CommandBus().apply(book(), ops(R"([{"op": "add_tone", "page": 1}])"), Actor());
+            QFAIL("core's bus has no tone ops");
+        } catch (const ApplyError& error) {
+            QCOMPARE(error.code(), std::string("not_yet_ported"));
+        }
+        const Document with_line = bus().apply(book(), ops(R"([{"op":"add_stroke","page":1,"layer":"ink","stabilize":0,"points":[[10,10],[20,20]]}])"), Actor()).doc;
+        const auto line = with_line.page(0).first_layer(genko::core::LayerRole::Ink)->strokes->items.front();
+        for (const Json& request : {Json::object({{"op","set_stroke_width"},{"page",1},{"layer","ink"},{"ids",Json::array({line->id})},{"width_mm",0.3}}),
+                                   Json::object({{"op","reshape_stroke"},{"page",1},{"layer","ink"},{"stroke_id",line->id},{"width_mm",0.4}})}) {
+            const Json batch = Json::array({request});
+            try {
+                CommandBus().apply(with_line, batch, Actor());
+                QFAIL("core-only must refuse a raster stroke edit");
+            } catch (const ApplyError& error) { QCOMPARE(error.code(), std::string("not_yet_ported")); }
+            const auto changed = bus().apply(with_line, batch, Actor());
+            QCOMPARE(changed.doc.page(0).first_layer(genko::core::LayerRole::Ink)->strokes->items.front()->width_mm,
+                     request["width_mm"].get<double>());
+            QVERIFY(with_line.page(0).first_layer(genko::core::LayerRole::Ink)->strokes->items.front() == line);
+        }
+    }
+
+    // An op's area, resolved before the op as Python's apply_ops does (selops.resolve): a rect or an ellipse alone is its
+    // polygon for every op; richer areas are resolved by render, refused by core-only; the page comes first.
+    void areas() {
+        const Document doc = book();
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1, "note": "x", "area": {"rect": [0, 0, 10, 5]}}])")),
+                 std::string("(applied)"));
+        const auto rect = genko::core::resolve_plain_area(ops(R"({"rect": [1, 2, 10, "5"]})"));
+        QVERIFY(rect.has_value());
+        QCOMPARE(genko::core::dump_python(*rect), std::string("{\"poly\": [[1.0, 2.0], [11.0, 2.0], [11.0, 7.0], [1.0, 7.0]]}"));
+        const auto ellipse = genko::core::resolve_plain_area(ops(R"({"ellipse": [0, 0, 20, 10]})"));
+        QVERIFY(ellipse.has_value());
+        QCOMPARE((*ellipse)["poly"].size(), std::size_t{72});
+        QCOMPARE(genko::core::dump_python((*ellipse)["poly"][0]), std::string("[20.0, 5.0]"));
+        QVERIFY(!genko::core::resolve_plain_area(ops(R"({"rect": [0, 0, 1, 1], "invert": true})")).has_value());
+        QVERIFY(!genko::core::resolve_plain_area(ops(R"({"poly": [[0, 0], [1, 0], [1, 1]]})")).has_value());
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1, "area": {"rect": [0, 0, 10]}}])")),
+                 std::string("apply: ops[0] set_note: a value of the wrong type (not enough values to unpack (expected 4, got 3)) ‖ "
+                             "set_note takes {page: int}"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "note": "x", "area": {"rect": [0, 0, 10, 5]}}])")),
+                 std::string("apply: ops[0] set_note: page (int) is required ‖ set_note takes {page: int}"));
+        const Json full_area = ops(R"([{"op": "set_note", "page": 1, "note": "area resolved", "area": {"all": true}}])");
+        const auto resolved = bus().apply(doc, full_area, Actor());
+        QCOMPARE(resolved.doc.page(0).note, std::string("area resolved"));
+        QCOMPARE(doc.page(0).note, std::string(""));
+        // The core-only refusal is still required; the GUI/CLI registry now resolves this area.
+        try {
+            CommandBus().apply(doc, full_area, Actor());
+            QFAIL("core's bus must not resolve a raster area");
+        } catch (const ApplyError& error) {
+            QCOMPARE(error.code(), std::string("not_yet_ported"));
+            QVERIFY(std::string(error.what()).starts_with("ops[0] set_note: an area of this kind"));
+        }
+    }
+
+    // The line ops are core's; a picture in a line's style is looked at by the drawing ops' check (Pillow's Image.open
+    // and verify()), so core's own bus refuses one with not_yet_ported, after reading its base64 as Python does, and the
+    // bus of the whole build takes it. (The ops against Python: test_contract_lines.)
+    void linePictures() {
+        const std::string png = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGM8ISf3n4GBgYGJAQoAHxICB2m00JwAAAAASUVORK5CYII=";
+        const Json batch = Json::array({Json::object({{"op", "add_line"}, {"page", 1}, {"text", "絵"}, {"style", {{"picture", png}}}})});
+        try {
+            CommandBus().apply(book(), batch, Actor());
+            QFAIL("core's bus cannot look at a picture");
+        } catch (const ApplyError& error) {
+            QCOMPARE(error.code(), std::string("not_yet_ported"));
+            QVERIFY2(std::string(error.what()).starts_with("ops[0] add_line: a picture in a line's style (style.picture)"), error.what());
+        }
+        try {
+            CommandBus().apply(book(), ops(R"([{"op": "add_line", "page": 1, "text": "x", "style": {"fill_png": "abc"}}])"), Actor());
+            QFAIL("the base64 is read first");
+        } catch (const ApplyError& error) {
+            QCOMPARE(error.code(), std::string("apply"));
+            QVERIFY2(std::string(error.what()).starts_with("ops[0] add_line: style fill_png: Incorrect padding ‖ "), error.what());
+        }
+        const auto drawn = bus().apply(book(), batch, Actor());
+        QCOMPARE(drawn.doc.story.size(), std::size_t{1});
+        QCOMPARE(drawn.doc.story[0].style["picture"].get<std::string>(), png);
+        const auto plain = CommandBus().apply(book(), ops(R"([{"op": "add_line", "page": 1, "text": "x", "style": {"font": "gothic"}}])"), Actor());
+        QCOMPARE(plain.doc.story.size(), std::size_t{1});
+    }
+
+    void canApprove() {
+        QVERIFY(genko::core::can_approve("genko"));
+        QVERIFY(genko::core::can_approve("human"));
+        QVERIFY(genko::core::can_approve("human:作者"));
+        QVERIFY(!genko::core::can_approve("ai:hermes"));
+        QVERIFY(!genko::core::can_approve("legacy:unknown"));
+        QVERIFY(!genko::core::can_approve("humanoid"));
+        QVERIFY(!genko::core::can_approve(""));
+    }
+
+    void setNoteSharesTheOtherPages() {
+        const Document doc = book();
+        const auto result = apply(doc, R"([{"op": "set_note", "page": 2, "note": "メモ"}])");
+        QCOMPARE(result.doc.page(1).note, std::string("メモ"));
+        QCOMPARE(doc.page(1).note, std::string(""));  // (the book read is not changed)
+        QVERIFY(result.doc.pages[0].get() == doc.pages[0].get());  // (copy-on-write: only page 2 was copied)
+        QVERIFY(result.doc.pages[2].get() == doc.pages[2].get());
+        QVERIFY(result.doc.pages[1].get() != doc.pages[1].get());
+        QCOMPARE(strings(result.applied), std::vector<std::string>({"set_note"}));
+        QVERIFY(result.warnings.empty());
+        QCOMPARE(apply(doc, R"([{"op": "set_note", "page": "3", "note": 5}])").doc.page(2).note, std::string("5"));
+        QCOMPARE(apply(doc, R"([{"op": "set_note", "page": 1.9, "note": null}])").doc.page(0).note, std::string("None"));
+    }
+
+    void pageErrors() {
+        const Document doc = book();
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "note": "x"}])")),
+                 std::string("apply: ops[0] set_note: page (int) is required ‖ set_note takes {page: int}"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 9}])")),
+                 std::string("apply: ops[0] set_note: no page 9 ‖ set_note takes {page: int}"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": [1], "colour": 1}])")),
+                 std::string("apply: ops[0] set_note: page (int) is required ‖ unknown keys: colour ‖ set_note takes {page: int}"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "delete_page", "page": "x"}])")),
+                 std::string("apply: ops[0] delete_page: page (int) is required ‖ delete_page takes {page: int}"));
+    }
+
+    void batchErrors() {
+        const Document doc = book();
+        QCOMPARE(error_of(doc, ops(R"({"op": "set_note"})")), std::string("apply: ops must be a JSON array"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_autosave"}, 5])")), std::string("apply: ops[1] must be an object"));
+        QCOMPARE(error_of(doc, ops(R"([{"page": 1}])")), std::string("apply: ops[0] None: op is required"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "frobnicate"}])")), std::string("apply: ops[0] frobnicate: unknown op: frobnicate"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": 5}])")), std::string("apply: ops[0] 5: unknown op: 5"));
+        // an op of the public list that this build does not have: refused, never skipped
+        const Json fill = ops(R"([{"op": "fill", "page": 1, "x_mm": 1, "y_mm": 2}])");
+        QCOMPARE(error_of(doc, fill), std::string("(applied)"));
+        try {
+            CommandBus().apply(doc, fill, Actor());
+            QFAIL("core's bus has no raster fill");
+        } catch (const ApplyError& error) {
+            QCOMPARE(error.code() + ": " + error.what(),
+                     std::string("not_yet_ported: ops[0] fill: fill is not in the C++ build yet"));
+        }
+        // the studio's ops are core's since M5① (Python's words; a person's approval refused for an agent)
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1}, {"op": "approve", "page": 1}])")),
+                 std::string("apply: ops[1] approve: gate must be one of ('bible', 'script', 'sheet', 'name', 'art', 'export') ‖ approve "
+                             "takes {gate: bible|script|sheet|name|art|export, page: int?, character_id: str?, candidate_id: str?, "
+                             "face_asset: str?}"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1}, {"op": "approve", "gate": "name", "page": 1}])"), "ai:hermes"),
+                 std::string("apply: ops[1] approve: approve needs a person (actor ai:hermes cannot approve) ‖ approve takes {gate: "
+                             "bible|script|sheet|name|art|export, page: int?, character_id: str?, candidate_id: str?, face_asset: str?}"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "for_pages", "pages": "all", "ops": []}])")),
+                 std::string("apply: ops[0] for_pages: ops is the list of ops to run on each page"));
+        // undo is an op only on its own (Python's _apply_one does not know it)
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1}, {"op": "undo"}])")),
+                 std::string("apply: ops[1] undo: unknown op: undo ‖ undo takes {}"));
+        // an op name Python cannot look up in its sets of ops: before the ops run (where Python stops with a
+        // traceback), or, after an op that may change any page, when the op is checked
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_note", "page": 1}, {"op": ["set_note"], "page": 1}])")),
+                 std::string("python_error: ops[1] ['set_note']: TypeError: unhashable type: 'list'"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "add_page"}, {"op": {"a": 1}, "page": 1}])")),
+                 std::string("apply: ops[1] {'a': 1}: a value of the wrong type (unhashable type: 'dict')"));
+        // the page lock is checked before the op is looked up (Python's order)
+        Document locked = book();
+        locked.page_locks[locked.page(0).id] = "ai:x";
+        QCOMPARE(error_of(locked, ops(R"([{"op": "frobnicate", "page": 1}])"), "ai:y"),
+                 std::string("apply: ops[0] frobnicate: page 1 locked by ai:x"));
+    }
+
+    void undoOfTheSession() {
+        const Document doc = book();
+        QCOMPARE(error_of(doc, ops(R"([{"op": "undo"}])")), std::string("nothing_to_undo: nothing to undo"));
+        const auto dry = bus().apply(doc, ops(R"([{"op": "undo"}])"), Actor(), true);
+        QCOMPARE(strings(dry.applied), std::vector<std::string>({"undo"}));
+        QVERIFY(!dry.has_warnings);
+        QVERIFY(dry.doc.pages[0].get() == doc.pages[0].get());
+    }
+
+    void failedBatchChangesNothing() {
+        const Document doc = book();
+        const auto pages = doc.pages;
+        QVERIFY(error_of(doc, ops(R"([{"op": "set_note", "page": 1, "note": "x"}, {"op": "set_meta", "title": "T"},
+                                      {"op": "delete_page", "page": 1}, {"op": "set_note", "page": 9}])"))
+                    .starts_with("apply: ops[3] set_note: no page 9"));
+        QCOMPARE(doc.page(0).note, std::string(""));
+        QCOMPARE(doc.title, std::string("t"));
+        QCOMPARE(doc.pages.size(), std::size_t{3});
+        for (std::size_t i = 0; i < pages.size(); ++i) QVERIFY(doc.pages[i].get() == pages[i].get());
+    }
+
+    void setMeta() {
+        Document doc = book();
+        auto result = apply(doc, R"([{"op": "set_meta", "title": "新題", "episode": "7", "binding": "left", "start_side": "right",
+                                      "strict_gates": 1, "font_path": "/fonts/明朝.otf"}])");
+        QCOMPARE(result.doc.title, std::string("新題"));
+        QVERIFY(result.doc.episode.same(Num(7)));
+        QCOMPARE(int(result.doc.binding), int(genko::core::Binding::Left));
+        for (const auto& page : result.doc.pages) QCOMPARE(int(page->binding), int(genko::core::Binding::Left));
+        QCOMPARE(result.doc.start_side.value(), std::string("right"));
+        QVERIFY(result.doc.strict_gates);
+        QCOMPARE(result.doc.font_path, std::string("/fonts/明朝.otf"));
+        QVERIFY(!apply(result.doc, R"([{"op": "set_meta", "start_side": null}])").doc.start_side.has_value());
+        const auto preset = apply(doc, R"([{"op": "set_meta", "preset": " Shueisha "}])");
+        QCOMPARE(preset.doc.spec.preset.value(), std::string("shueisha"));
+        QVERIFY(preset.doc.page(2).spec.width_mm.same(Num(257)));
+        const auto webtoon = apply(doc, R"([{"op": "set_meta", "webtoon": true}])");
+        QCOMPARE(webtoon.doc.spec.preset.value(), std::string("webtoon"));
+        QCOMPARE(strings(webtoon.warnings), std::vector<std::string>({"ops[0] set_meta: unknown keys ignored: webtoon"}));
+        const std::string usage = " ‖ set_meta takes {title: str?, episode: int?, preset: str?, binding: right|left?, "
+                                  "start_side: left|right|null?, strict_gates: bool?, font_path: str?}";
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_meta", "episode": "x"}])")),
+                 "apply: ops[0] set_meta: a value of the wrong type (invalid literal for int() with base 10: 'x')" + usage);
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_meta", "binding": "up"}])")),
+                 "apply: ops[0] set_meta: a value of the wrong type ('up' is not a valid Binding)" + usage);
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_meta", "start_side": "top"}])")),
+                 "apply: ops[0] set_meta: start_side must be left, right or null" + usage);
+    }
+
+    void covers() {
+        Document doc = book(2);
+        doc.edit_page(1).extra["cover"] = Json::object({{"kind", "jacket"}, {"spine_mm", 12.5}, {"flap_mm", 80}});
+        const auto result = apply(doc, R"([{"op": "set_meta", "preset": "b4"}])");
+        QVERIFY(result.doc.page(1).spec.width_mm.value() > result.doc.page(0).spec.width_mm.value());  // (a jacket's own paper)
+        QCOMPARE(result.doc.page(1).spec.preset.value(), std::string("cover"));
+        // new pages go before the covers at the end
+        const auto added = apply(doc, R"([{"op": "add_page", "count": 2}])");
+        QCOMPARE(added.doc.pages.size(), std::size_t{4});
+        QVERIFY(added.doc.page(3).extra.contains("cover"));
+        QVERIFY(added.doc.page(3).id == doc.page(1).id);
+        QVERIFY(added.doc.page(3).index.same(Num(4)));
+    }
+
+    void nameOkNeedsAPerson() {
+        const Document doc = book();
+        QCOMPARE(error_of(doc, ops(R"([{"op": "name_ok", "page": 1}])"), "ai:hermes"),
+                 std::string("apply: ops[0] name_ok: name_ok needs a person (actor ai:hermes cannot approve) ‖ name_ok takes "
+                             "{page: int, optional (all pages if omitted)}"));
+        const auto one = apply(doc, R"([{"op": "name_ok", "page": 2}])", "human:作者");
+        QVERIFY(one.doc.page(1).name_ok && one.doc.page(1).stage == "ink");
+        QVERIFY(!one.doc.page(0).name_ok);
+        const auto all = apply(doc, R"([{"op": "name_ok"}])");
+        for (const auto& page : all.doc.pages) QVERIFY(page->name_ok && page->stage == "ink");
+    }
+
+    void pageLocks() {
+        const Document doc = book();
+        const std::string id1 = doc.page(0).id;
+        QCOMPARE(error_of(doc, ops(R"([{"op": "lock_page", "page": 1, "agent": "ai:y"}])"), "ai:x"),
+                 std::string("apply: ops[0] lock_page: cannot lock page 1 as ai:y (actor is ai:x) ‖ lock_page takes {page: int, agent: str}"));
+        const auto locked = apply(doc, R"([{"op": "lock_page", "page": 1}])", "ai:x");
+        QCOMPARE(locked.doc.page_locks[id1], Json("ai:x"));
+        QCOMPARE(error_of(locked.doc, ops(R"([{"op": "set_note", "page": 1, "note": "x"}])"), "ai:y"),
+                 std::string("apply: ops[0] set_note: page 1 locked by ai:x ‖ set_note takes {page: int}"));
+        QCOMPARE(error_of(locked.doc, ops(R"([{"op": "delete_page", "page": 1}])"), "ai:y"),
+                 std::string("apply: ops[0] delete_page: page 1 locked by ai:x ‖ delete_page takes {page: int}"));
+        apply(locked.doc, R"([{"op": "set_note", "page": 1, "note": "x"}, {"op": "set_meta", "title": "y"}])", "ai:x");
+        apply(locked.doc, R"([{"op": "set_meta", "title": "y"}, {"op": "set_autosave", "enabled": false}])", "ai:y");  // (book ops)
+        // a person takes over an AI's lock; an AI cannot take or open a person's
+        const auto human = apply(locked.doc, R"([{"op": "lock_page", "page": 1}])", "human:作者");
+        QCOMPARE(human.doc.page_locks[id1], Json("human:作者"));
+        QCOMPARE(error_of(human.doc, ops(R"([{"op": "lock_page", "page": 1}])"), "ai:x"),
+                 std::string("apply: ops[0] lock_page: page 1 locked by human:作者 ‖ lock_page takes {page: int, agent: str}"));
+        QCOMPARE(error_of(human.doc, ops(R"([{"op": "unlock_page", "page": 1}])"), "ai:x"),
+                 std::string("apply: ops[0] unlock_page: page 1 locked by human:作者; ai:x cannot unlock it ‖ unlock_page takes {page: int}"));
+        const auto unlocked = apply(human.doc, R"([{"op": "unlock_page", "page": 1}])", "human:other");
+        QVERIFY(!unlocked.doc.page_locks.contains(id1));
+        // the unnamed caller may lock in anyone's name; a page that is not there is refused (Python locks nothing and
+        // says nothing)
+        QCOMPARE(apply(doc, R"([{"op": "lock_page", "page": 2, "agent": "ai:z"}])").doc.page_locks[doc.page(1).id], Json("ai:z"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "lock_page", "page": 9}])"), "ai:x"),
+                 std::string("apply: ops[0] lock_page: no page 9 ‖ lock_page takes {page: int, agent: str}"));
+        QCOMPARE(error_of(doc, ops(R"([{"op": "unlock_page", "page": 9}])"), "ai:x"),
+                 std::string("apply: ops[0] unlock_page: no page 9 ‖ unlock_page takes {page: int}"));
+        // within one batch, later ops see the lock
+        QVERIFY(error_of(doc, ops(R"([{"op": "lock_page", "page": 3}, {"op": "set_note", "page": 3}])"), "ai:x") == "(applied)");
+    }
+
+    void autosave() {
+        const Document doc = book();
+        QVERIFY(apply(doc, R"([{"op": "set_autosave"}])").doc.autosave);
+        QVERIFY(!apply(doc, R"([{"op": "set_autosave", "enabled": 0}])").doc.autosave);
+    }
+
+    void addPage() {
+        Document doc = book(3);
+        doc.add_line(Num(2), "二");
+        doc.add_line(Num(3), "三");
+        doc.edit_page(1).spread_with = Num(3);
+        doc.edit_page(2).onion_from = Num(2);
+        doc.tickets = ops(R"([{"page_index": 2, "role": "ink"}, {"page_index": null}, {"page_index": "2"}, {"role": "x"}])");
+        const std::string id2 = doc.page(1).id;
+        const auto result = apply(doc, R"([{"op": "add_page", "count": 2, "after": 1}])");
+        QCOMPARE(result.doc.pages.size(), std::size_t{5});
+        for (std::size_t i = 0; i < 5; ++i) QVERIFY(result.doc.page(i).index.same(Num(static_cast<std::int64_t>(i + 1))));
+        QCOMPARE(result.doc.page(3).id, id2);  // (old page 2 is page 4 now)
+        QVERIFY(result.doc.page(1).id.starts_with("pg_") && result.doc.page(1).layers.size() == 4);
+        QCOMPARE(result.doc.page(1).frames.size(), std::size_t{1});
+        QVERIFY(result.doc.story[0].page_index.same(Num(4)));
+        QVERIFY(result.doc.story[1].page_index.same(Num(5)));
+        QVERIFY(result.doc.page(3).spread_with->same(Num(5)));
+        QVERIFY(result.doc.page(4).onion_from->same(Num(4)));
+        QCOMPARE(result.doc.tickets[0]["page_index"], Json(4));
+        QVERIFY(result.doc.tickets[1]["page_index"].is_null());
+        QCOMPARE(result.doc.tickets[2]["status"], Json("orphaned"));  // (Python: "2" is no page number)
+        QVERIFY(!result.doc.tickets[3].contains("status"));
+        QVERIFY(result.warnings.empty());  // (pages 4 and 5 face each other, as 2 and 3 did)
+        // at the end by default; after 0 first; the page numbers' checks
+        QCOMPARE(apply(doc, R"([{"op": "add_page"}])").doc.pages.size(), std::size_t{4});
+        QVERIFY(apply(doc, R"([{"op": "add_page", "after": 0}])").doc.page(1).id == doc.page(0).id);
+        const std::string usage = " ‖ add_page takes {count: int, after: int? (insert after this page; default after the last story "
+                                  "page, before any covers)}";
+        QCOMPARE(error_of(doc, ops(R"([{"op": "add_page", "count": 0}])")), "apply: ops[0] add_page: count is 1 to 200" + usage);
+        QCOMPARE(error_of(doc, ops(R"([{"op": "add_page", "count": 201}])")), "apply: ops[0] add_page: count is 1 to 200" + usage);
+        QCOMPARE(error_of(doc, ops(R"([{"op": "add_page", "after": 9}])")), "apply: ops[0] add_page: no page 9" + usage);
+        QCOMPARE(error_of(doc, ops(R"([{"op": "add_page", "after": 9.5}])")), "apply: ops[0] add_page: no page 9.5" + usage);
+        QVERIFY(apply(doc, R"([{"op": "add_page", "after": 2.5}])").doc.page(2).id != doc.page(2).id);  // (int(2.5): after page 2)
+        QCOMPARE(error_of(doc, ops(R"([{"op": "add_page", "count": "many"}])")),
+                 "apply: ops[0] add_page: a value of the wrong type (invalid literal for int() with base 10: 'many')" + usage);
+    }
+
+    void deletePage() {
+        Document doc = book(3);
+        doc.add_line(Num(1), "一");
+        doc.add_line(Num(2), "二");
+        doc.add_line(Num(3), "三");
+        doc.edit_page(0).spread_with = Num(2);
+        doc.page_locks[doc.page(1).id] = "ai:x";
+        doc.tickets = ops(R"([{"page_index": 2}, {"page_index": 3}])");
+        const std::string id3 = doc.page(2).id;
+        const auto result = apply(doc, R"([{"op": "delete_page", "page": 2}])", "ai:x");
+        QCOMPARE(result.doc.pages.size(), std::size_t{2});
+        QCOMPARE(result.doc.page(1).id, id3);
+        QVERIFY(result.doc.page(1).index.same(Num(2)));
+        QCOMPARE(result.doc.story.size(), std::size_t{2});
+        QCOMPARE(result.doc.story[1].text, std::string("三"));
+        QVERIFY(result.doc.story[1].page_index.same(Num(2)));
+        QVERIFY(!result.doc.page(0).spread_with.has_value());  // (its partner went away)
+        QVERIFY(result.doc.page_locks.empty());
+        QCOMPARE(result.doc.tickets[0]["status"], Json("orphaned"));
+        QCOMPARE(result.doc.tickets[0]["page_index"], Json(2));
+        QCOMPARE(result.doc.tickets[1]["page_index"], Json(2));
+        QCOMPARE(error_of(book(1), ops(R"([{"op": "delete_page", "page": 1}])")),
+                 std::string("apply: ops[0] delete_page: cannot delete the last page ‖ delete_page takes {page: int}"));
+    }
+
+    void warnings() {
+        Document doc = book(2);
+        doc.add_line(Num(7), "nowhere");
+        doc.add_line(Num(1), "framed", "", std::string("no-such-frame"));
+        doc.page_locks["pg_gone"] = "ai:x";
+        doc.edit_page(1).spread_with = Num(9);
+        doc.edit_page(0).spread_with = Num(2);  // (a right-bound book: 1 and 2 are the two sides of one leaf)
+        const auto result = apply(doc, R"([{"op": "set_autosave", "enabled": true, "speed": 2}])");
+        std::vector<std::string> want{"line " + doc.story[0].id + ": page 7 does not exist",
+                                      "line " + doc.story[1].id + ": frame no-such-frame is not on page 1",
+                                      "page lock on unknown page pg_gone",
+                                      "spread 1-2: pages 1 and 2 are two sides of one leaf, not a spread",
+                                      "spread 2-9: spread partner 9 missing", "ops[0] set_autosave: unknown keys ignored: speed"};
+        QCOMPARE(strings(result.warnings), want);
+    }
+
+    // The C++ build's own settings an op of Python's is given are used, so not said to be ignored (PC2, SPEC COLOR-04):
+    // filter_raster's kind of the C++ build's own and its settings (the kinds' table, core/adjust_kinds — a local
+    // correction's too), a correction kind's native; put_raster's embedded_profile and what it reads (intent and bpc when
+    // it converts or assigns, profile when it assigns). What Python says stays as Python says it: a Python kind's own
+    // settings (not in the public list) and a key nothing reads.
+    void ownSettingsAreNotSaidIgnored() {
+        Document doc = apply(book(1), R"([{"op": "add_layer", "page": 1, "kind": "paint", "id": "pic"}])").doc;
+        const auto warned = [&doc](const Json& op) { return strings(bus().apply(doc, Json::array({op}), Actor("genko")).warnings); };
+        const auto with = [](Json op, const Json& more) {
+            for (const auto& [key, value] : more.items()) op[key] = value;
+            return op;
+        };
+        using Said = std::vector<std::string>;
+        const Json filter{{"op", "filter_raster"}, {"page", 1}, {"id", "pic"}};
+        QCOMPARE(warned(with(filter, Json{{"kind", "shadows_highlights"}, {"shadow_amount", 40}, {"highlight_amount", 10}})), Said{});
+        QCOMPARE(warned(with(filter, Json{{"kind", "vibrance"}, {"vibrance", 30}, {"saturation", -10}})), Said{});
+        QCOMPARE(warned(with(filter, Json{{"kind", "desaturate"}, {"native", Json::object()}})), Said{});
+        QCOMPARE(warned(with(filter, Json{{"kind", "levels"}, {"black", 10}, {"native", Json{{"method", "upstream"}}}})),
+                 Said{"ops[0] filter_raster: unknown keys ignored: black"});
+        QCOMPARE(warned(with(filter, Json{{"kind", "invert"}, {"strength", 2}})), Said{"ops[0] filter_raster: unknown keys ignored: strength"});
+        QCOMPARE(warned(with(filter, Json{{"kind", "blur"}, {"radius", 2}, {"shadow_amount", 40}})),
+                 Said{"ops[0] filter_raster: unknown keys ignored: radius, shadow_amount"});
+        // (nor in the words of a refusal: the setting is the kind's, its value wrong)
+        const std::string refused = error_of(doc, Json::array({with(filter, Json{{"kind", "vibrance"}, {"vibrance", "x"}, {"saturation", 5}})}));
+        QVERIFY2(refused.find("unknown keys") == std::string::npos && refused.find("filter_raster takes") != std::string::npos, refused.c_str());
+        const std::string png = genko::core::b64encode(
+            genko::render::write_png(genko::render::Image::create("RGBA", genko::render::Size{4, 4}, genko::render::Ink{200, 100, 50, 255})));
+        const Json put{{"op", "put_raster"}, {"page", 1}, {"layer", "bg"}, {"png_base64", png}};
+        QCOMPARE(warned(with(put, Json{{"embedded_profile", "keep"}})), Said{});
+        QCOMPARE(warned(with(put, Json{{"embedded_profile", "convert"}, {"intent", "perceptual"}, {"bpc", false}})), Said{});
+        QCOMPARE(warned(with(put, Json{{"embedded_profile", "assign"}, {"profile", "adobe-rgb-compat"}, {"intent", "relative"}})), Said{});
+        QCOMPARE(warned(with(put, Json{{"embedded_profile", "keep"}, {"intent", "perceptual"}})), Said{"ops[0] put_raster: unknown keys ignored: intent"});
+        QCOMPARE(warned(with(put, Json{{"embedded_profile", "convert"}, {"profile", "adobe-rgb-compat"}})),
+                 Said{"ops[0] put_raster: unknown keys ignored: profile"});
+    }
+
+    void journalRecord() {
+        const Json op = ops(R"({"op": "put_raster", "page": 1, "png_base64": "iVBORw0KGgo=", "layer": "bg"})");
+        QCOMPARE(genko::core::journal_op(op).dump(), std::string(R"({"op":"put_raster","page":1,"png_base64":"<12 base64 chars>","layer":"bg"})"));
+        const auto result = apply(book(), R"([{"op": "set_note", "page": 1, "note": "n", "png_base64": "AAAA"}])");
+        QCOMPARE(result.journal_ops[0]["png_base64"], Json("<4 base64 chars>"));
+    }
+
+    // (PC5 H-f, pixel-aspect@1) set_pixel_aspect: a ratio or a preset of 表示 → ピクセル縦横比, the page's only, nothing drawn
+    // changed; refusals; the page's lock asked as any op on it; strict_gates lets it be (the view's only, nothing printed).
+    void pixelAspectOp() {
+        const Document doc = book();
+        const auto wide = apply(doc, R"([{"op": "set_pixel_aspect", "page": 2, "ratio": 1.5}])");
+        QCOMPARE(wide.doc.page(1).pixel_aspect, 1.5);
+        QCOMPARE(wide.doc.page(0).pixel_aspect, 1.0);
+        QCOMPARE(wide.doc.page(1).layers.size(), doc.page(1).layers.size());
+        QVERIFY(wide.doc.page(0).layers.size() == doc.page(0).layers.size() && wide.doc.pages[0] == doc.pages[0]);  // (the others not copied)
+        QCOMPARE(wide.results[0]["pixel_aspect"], Json(1.5));
+        QCOMPARE(wide.results[0]["page"], Json(2));
+        QCOMPARE(apply(doc, R"([{"op": "set_pixel_aspect", "page": 1, "preset": "d1DvNtsc"}])").doc.page(0).pixel_aspect, 0.91);
+        QCOMPARE(apply(doc, R"([{"op": "set_pixel_aspect", "page": 1, "preset": "anamorphic2To1"}])").doc.page(0).pixel_aspect, 2.0);
+        QCOMPARE(apply(wide.doc, R"([{"op": "set_pixel_aspect", "page": 2, "preset": "square"}])").doc.page(1).pixel_aspect, 1.0);
+        QCOMPARE(apply(doc, R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 10}])").doc.page(0).pixel_aspect, 10.0);
+        QCOMPARE(apply(doc, R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 0.1}])").doc.page(0).pixel_aspect, 0.1);
+        const auto refused = [&](const char* batch, const char* words) {
+            const std::string error = error_of(doc, ops(batch));
+            QVERIFY2(error.find(words) != std::string::npos, error.c_str());
+        };
+        refused(R"([{"op": "set_pixel_aspect", "page": 1}])", "give ratio");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 2, "preset": "square"}])", "give ratio");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 10.5}])", "between 0.1 and 10");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 0}])", "between 0.1 and 10");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": "2"}])", "ratio is a number");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": true}])", "ratio is a number");
+        refused(R"([{"op": "set_pixel_aspect", "page": 1, "preset": "cinema"}])", "no pixel aspect ratio 'cinema'");
+        refused(R"([{"op": "set_pixel_aspect", "page": 9, "ratio": 2}])", "page");
+        // another's lock on the page refuses it; strict_gates before the name's approval does not
+        const auto locked = apply(doc, R"([{"op": "lock_page", "page": 1}])", "ai:x");
+        const std::string error = error_of(locked.doc, ops(R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 2}])"), "ai:y");
+        QVERIFY2(error.find("locked by ai:x") != std::string::npos, error.c_str());
+        Document strict = doc;
+        strict.strict_gates = true;
+        QCOMPARE(apply(strict, R"([{"op": "set_pixel_aspect", "page": 1, "ratio": 2}])", "ai:y").doc.page(0).pixel_aspect, 2.0);
+    }
+
+    // (PC6, the review's P1-1) strict_gates keeps an approved name's layout for a person: the page's size — rotate_pages,
+    // crop_page, set_canvas_size, resize_pages, trim_page, reveal_all, set_artboard's size — moves its panels with it, and one
+    // who cannot approve (an agent, legacy:unknown) is refused it on that page as a layout op is, the book as it was; a
+    // person does it; a page whose name is not approved, a new resolution alone (no size changed) and set_page_spec (the
+    // book's paper, Python's) go through.
+    void anApprovedNameKeepsItsLayout() {
+        Document doc = book(2);
+        doc.strict_gates = true;
+        const std::string root = doc.page(0).leaf_frames()[0]->id;  // (panels not the same mirrored: a flip moves them)
+        doc = bus().apply(doc, Json::array({Json{{"op", "split_frame"}, {"page", 1}, {"frame_id", root}, {"axis", "vertical"}, {"ratio", 0.3}, {"gutter_mm", 2}}}),
+                          Actor("human:owner"))
+                  .doc;
+        doc = apply(doc, R"([{"op": "name_ok", "page": 1}, {"op": "add_stroke", "page": 1, "layer": "draft", "points": [[-30, -30], [-20, -20]]},
+                             {"op": "add_artboard", "width_px": 400, "height_px": 400}])",
+                    "human:owner")
+                  .doc;
+        const Num board = doc.pages.back()->index;
+        doc = bus().apply(doc, Json::array({Json{{"op", "name_ok"}, {"page", board.json()}}}), Actor("human:owner")).doc;
+        QVERIFY(doc.page(0).name_ok && !doc.page(1).name_ok && doc.pages.back()->name_ok);
+        const std::string words = "the name is approved; a person must revoke it before the layout changes (strict_gates)";
+        const std::vector<Json> sized = {
+            Json{{"op", "rotate_pages"}, {"page", 1}, {"turn", "90cw"}},
+            Json{{"op", "rotate_pages"}, {"pages", "all"}, {"turn", "180"}},
+            Json{{"op", "rotate_pages"}, {"page", 1}, {"turn", "flip_h"}},
+            Json{{"op", "crop_page"}, {"page", 1}, {"rect", Json::array({10, 10, 150, 200})}, {"trim", "fit"}},
+            Json{{"op", "set_canvas_size"}, {"page", 1}, {"width_mm", 20}, {"height_mm", 20}, {"relative", true}, {"anchor", "top_left"}},
+            Json{{"op", "set_canvas_size"}, {"width_mm", 20}, {"height_mm", 20}, {"relative", true}},
+            Json{{"op", "resize_pages"}, {"width_mm", 100}},
+            Json{{"op", "reveal_all"}, {"page", 1}},
+            Json{{"op", "trim_page"}, {"page", 1}, {"trim", "fit"}},
+            Json{{"op", "set_artboard"}, {"page", board.json()}, {"width_px", 600}, {"height_px", 300}},
+        };
+        for (const Json& op : sized) {
+            for (const char* actor : {"ai:bot", "legacy:unknown"}) {
+                const std::string error = error_of(doc, Json::array({op}), actor);
+                QVERIFY2(error.find(words) != std::string::npos, (op.dump() + " " + actor + " → " + error).c_str());
+            }
+            const std::string person = error_of(doc, Json::array({op}), "human:owner");  // (a person: as before — applied)
+            QVERIFY2(person == "(applied)", (op.dump() + " → " + person).c_str());
+        }
+        QCOMPARE(error_of(doc, Json::array({sized[0]}), "human:owner"), std::string("(applied)"));
+        // (its panels and lines turned with the page: as before for a person)
+        QVERIFY(!(bus().apply(doc, Json::array({sized[0]}), Actor("human:owner")).doc.page(0).frames[0].rect.width == doc.page(0).frames[0].rect.width));
+        // the page whose name is not approved, a new resolution alone, the book's paper: an agent's
+        QCOMPARE(error_of(doc, ops(R"([{"op": "rotate_pages", "page": 2, "turn": "90cw"}])"), "ai:bot"), std::string("(applied)"));
+        {  // (an artboard keeps its pixels: a new resolution changes its size in mm — refused while its name is approved)
+            Document plain = doc;
+            plain.pages.pop_back();
+            QCOMPARE(error_of(plain, ops(R"([{"op": "resize_pages", "dpi": 600}])"), "ai:bot"), std::string("(applied)"));
+            QVERIFY(error_of(doc, ops(R"([{"op": "resize_pages", "dpi": 600}])"), "ai:bot").find("page " + board.repr() + ": " + words) != std::string::npos);
+        }
+        QCOMPARE(error_of(doc, ops(R"([{"op": "set_page_spec", "preset": "b5", "move": true}])"), "ai:bot"), std::string("(applied)"));
+        // set_frame's border, bleed and bowed edges are not the layout (Python's: open to anyone after the name)
+        const std::string frame = doc.page(0).leaf_frames()[0]->id;
+        QCOMPARE(error_of(doc, Json::array({Json{{"op", "set_frame"}, {"page", 1}, {"frame_id", frame}, {"border_mm", 1.5}, {"bleed", true}}}), "ai:bot"),
+                 std::string("(applied)"));
+        // a book without strict_gates: as before
+        Document free = doc;
+        free.strict_gates = false;
+        QCOMPARE(error_of(free, Json::array({sized[0]}), "ai:bot"), std::string("(applied)"));
+    }
+
+    // (PC6, the review's P2-1) strict_gates decides by what is drawn on: this build's ops that change a layer's pixels —
+    // the painting tools, retouching, apply_image, render_picture, outline_area, magic_erase… — are refused on a printed
+    // layer before the page's name is approved, whoever asks (fill's rule), and so is a printed layer one makes for what it
+    // draws; a draft layer they change, a page whose name is approved, a book without strict_gates: as before.
+    void pixelToolsWaitForTheName() {
+        constexpr double side = 25.4;
+        Document doc = genko::core::new_episode("画素", 1, 1, genko::core::PageSpec::custom(side, side, 20, 20, 1, 2, 2, 2, 2, 200, "color"));
+        {
+            genko::core::Page& page = doc.edit_page(0);
+            page.numero = false;
+            page.frames.clear();
+            page.layers.clear();
+            std::string bytes;
+            for (int y = 0; y < 200; ++y)
+                for (int x = 0; x < 200; ++x) {
+                    const char v = static_cast<char>(60 + x / 2 + (y % 20 < 10 ? 30 : 0));
+                    bytes += std::string{v, v, v, static_cast<char>(255)};
+                }
+            const genko::render::Image picture = genko::render::Image::frombytes("RGBA", genko::render::Size{200, 200}, bytes);
+            for (const auto& [id, role] : {std::pair{"paint", genko::core::LayerRole::User}, std::pair{"rough", genko::core::LayerRole::Draft}}) {
+                genko::core::Layer layer;
+                layer.id = id;
+                layer.role = role;
+                layer.kind = genko::core::LayerKind::Raster;
+                layer.panel_clip = false;
+                genko::render::raster::save_raster(page, layer, picture);
+                page.layers.push_back(layer);
+            }
+        }
+        const auto on = [](const char* layer, Json op) {
+            op["page"] = 1;
+            if (op.contains("layer_id")) op["layer_id"] = layer;
+            if (op.contains("id")) op["id"] = layer;
+            return op;
+        };
+        const std::vector<Json> drawing = {
+            Json{{"op", "dodge"}, {"layer_id", ""}, {"points", Json::array({Json::array({5, 5}), Json::array({20, 20})})}, {"width_mm", 4}},
+            Json{{"op", "smudge_brush"}, {"layer_id", ""}, {"points", Json::array({Json::array({5, 12}), Json::array({20, 12})})}, {"width_mm", 4}},
+            Json{{"op", "clone_stamp"}, {"layer_id", ""}, {"points", Json::array({Json::array({5, 5}), Json::array({8, 20})})}, {"width_mm", 3}, {"offset_mm", Json::array({6, 0})}},
+            Json{{"op", "outline_area"}, {"layer_id", ""}, {"area", Json{{"rect", Json::array({4, 4, 12, 12})}}}, {"width_mm", 1}, {"rgb", Json::array({0, 0, 0})}},
+            Json{{"op", "magic_erase"}, {"layer_id", ""}, {"x_mm", 3}, {"y_mm", 3}},
+            Json{{"op", "auto_adjust"}, {"id", ""}, {"mode", "contrast"}},
+        };
+        const auto drawn_words = [](const Json& op) { return op["op"].get<std::string>() + " on a printed layer needs name_ok on page 1 (strict_gates)"; };
+        const auto layer_of = [](const Document& d, const char* id) -> const genko::core::Layer& {
+            for (const auto& layer : d.page(0).layers)
+                if (layer.id == id) return layer;
+            throw std::runtime_error(std::string("no layer ") + id);
+        };
+        Document strict = doc;
+        strict.strict_gates = true;
+        for (const Json& each : drawing) {
+            const Json printed = on("paint", each);
+            // (each draws: the book without strict_gates changes the layer)
+            QVERIFY2(!genko::core::same_locked_look(layer_of(bus().apply(doc, Json::array({printed}), Actor("ai:bot")).doc, "paint"), layer_of(doc, "paint")),
+                     printed.dump().c_str());
+            for (const char* actor : {"ai:bot", "human:owner", "legacy:unknown"}) {
+                const std::string error = error_of(strict, Json::array({printed}), actor);
+                QVERIFY2(error.find(drawn_words(each)) != std::string::npos, (printed.dump() + " " + actor + " → " + error).c_str());
+            }
+            QCOMPARE(error_of(strict, Json::array({on("rough", each)}), "ai:bot"), std::string("(applied)"));  // (a draft: tried out)
+        }
+        // a printed layer made for what is drawn (render_picture's new layer) is drawing on the page too
+        const Json tree = ops(R"([{"op": "render_picture", "page": 1, "kind": "picture_frame"}])");
+        QVERIFY2(error_of(strict, tree, "ai:bot").find("render_picture on a printed layer needs name_ok on page 1 (strict_gates)") != std::string::npos,
+                 error_of(strict, tree, "ai:bot").c_str());
+        // the name approved: the same ops, anyone's
+        const Document named = bus().apply(strict, ops(R"([{"op": "name_ok", "page": 1}])"), Actor("human:owner")).doc;
+        for (const Json& each : drawing) QCOMPARE(error_of(named, Json::array({on("paint", each)}), "ai:bot"), std::string("(applied)"));
+        QCOMPARE(error_of(named, tree, "ai:bot"), std::string("(applied)"));
+        // only moving a layer is not drawing (SPEC AUTO-01: transform_layers)
+        QCOMPARE(error_of(strict, ops(R"([{"op": "transform_layers", "page": 1, "ids": ["paint"], "move": [2, 0]}])"), "ai:bot"), std::string("(applied)"));
+    }
+
+    // (PC6, the review of pc6-A's P2-3 and P3-8) Every op of strict_gates' table of drawing ops, one by one, on a printed
+    // layer of a page whose name is not approved: it draws (a book without strict_gates changes), it is refused for an agent
+    // and for a person with the table's words, and once the name is approved it is applied. Each name is one the build has.
+    void everyDrawingOpWaitsForTheName() {
+        namespace core = genko::core;
+        namespace render = genko::render;
+        QTemporaryDir folder;
+        QVERIFY(folder.isValid());
+        constexpr double side = 25.4;
+        const auto picture = [](bool other) {
+            std::string bytes;
+            for (int y = 0; y < 200; ++y)
+                for (int x = 0; x < 200; ++x) {
+                    const char v = static_cast<char>((other ? 200 - x / 2 : 60 + x / 2) + (y % 20 < 10 ? 30 : 0));
+                    bytes += std::string{v, static_cast<char>(v / 2), v, static_cast<char>(x >= 180 ? 0 : 255)};
+                }
+            return render::Image::frombytes("RGBA", render::Size{200, 200}, bytes);
+        };
+        const auto raster = [](core::Page& page, const char* id, core::LayerRole role, const render::Image& image) {
+            core::Layer layer;
+            layer.id = id;
+            layer.role = role;
+            layer.kind = core::LayerKind::Raster;
+            layer.panel_clip = false;
+            render::raster::save_raster(page, layer, image);
+            page.layers.push_back(layer);
+        };
+        const auto blank_book = [&]() {
+            Document doc = core::new_episode("描く op", 1, 1, core::PageSpec::custom(side, side, 20, 20, 1, 2, 2, 2, 2, 200, "color"));
+            doc.asset_dir = core::path_from_utf8(folder.path().toStdString());
+            core::Page& page = doc.edit_page(0);
+            page.numero = false;
+            page.frames.clear();
+            page.layers.clear();
+            for (const char* id : {"paint", "pic", "styled", "masked"}) raster(page, id, core::LayerRole::User, picture(false));
+            return doc;
+        };
+        const auto by_person = [](const Document& doc, const Json& batch) { return bus().apply(doc, batch, Actor("human:owner")).doc; };
+        const auto rect = [](double x, double y, double w, double h) {
+            return Json{{"subpaths", Json::array({Json{{"closed", true}, {"knots", Json::array({Json::array({x, y}), Json::array({x + w, y}), Json::array({x + w, y + h}),
+                                                                                                 Json::array({x, y + h})})}}})}};
+        };
+        const std::string png_a = core::b64encode(render::write_png(picture(false)));
+        const std::string png_b = core::b64encode(render::write_png(picture(true)));
+        Document doc = blank_book();
+        doc = by_person(doc, Json::array({
+                                 Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen"}},
+                                 Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen2"}},
+                                 Json{{"op", "add_shape_part"}, {"page", 1}, {"layer_id", "pen"}, {"id", "s1"},
+                                      {"shape", Json{{"kind", "rect"}, {"rect", Json::array({2, 2, 6, 4})}}}, {"fill", Json{{"rgb", Json::array({0, 0, 0})}}}},
+                                 Json{{"op", "add_shape_part"}, {"page", 1}, {"layer_id", "pen"}, {"id", "s2"},
+                                      {"shape", Json{{"kind", "rect"}, {"rect", Json::array({5, 3, 6, 4})}}}, {"fill", Json{{"rgb", Json::array({0, 0, 0})}}}},
+                                 Json{{"op", "set_path"}, {"page", 1}, {"name", "線"}, {"path", rect(4, 4, 10, 8)}},
+                                 Json{{"op", "set_layer_style"}, {"page", 1}, {"id", "styled"},
+                                      {"style", Json{{"effects", Json::array({Json{{"kind", "stroke"}, {"size_mm", 0.762}, {"rgb", Json::array({255, 0, 0})}}})}}}},
+                                 Json{{"op", "mask_from_transparency"}, {"page", 1}, {"id", "masked"}},
+                                 Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic"})}, {"new_id", "so"}},
+                                 Json{{"op", "smart_relink"}, {"page", 1}, {"id", "so"}, {"data", png_a}, {"link", Json{{"path", "a.png"}}}},
+                                 Json{{"op", "add_line"}, {"page", 1}, {"text", "台詞"}, {"x_mm", 5}, {"y_mm", 5}},
+                             }));
+        QVERIFY(!doc.story.empty());
+        const std::string line = doc.story.back().id;
+        const std::string from = genko::storage::AssetStore(*doc.asset_dir).put_bytes(render::write_png(picture(true)), ".png");
+        // (trap: a CMYK page's inks)
+        Document inks = blank_book();
+        inks = by_person(inks, ops(R"([{"op": "set_color_mode", "page": 1, "mode": "cmyk", "profile": "coated-cmyk", "depth": 16}])"));
+        const auto brush = [](const char* name) {
+            return Json{{"op", name}, {"page", 1}, {"layer_id", "paint"}, {"points", Json::array({Json::array({4, 4}), Json::array({18, 16})})}, {"width_mm", 4}};
+        };
+        struct Case {
+            Json op;
+            const Document* on;
+        };
+        std::vector<Case> cases;
+        for (const char* name : {"dodge", "burn", "sponge", "blur_brush", "sharpen_brush", "smudge_brush", "mixer_brush", "background_eraser", "color_replacement",
+                                 "spot_healing"}) {
+            cases.push_back({brush(name), &doc});
+        }
+        Json op = brush("clone_stamp");
+        op["offset_mm"] = Json::array({6, 0});
+        cases.push_back({op, &doc});
+        op = brush("healing_brush");
+        op["source_mm"] = Json::array({10, 12});
+        cases.push_back({op, &doc});
+        op = brush("history_brush");
+        op["from"] = from;
+        cases.push_back({op, &doc});
+        const auto one = [](const char* name, Json fields) {
+            fields["op"] = name;
+            fields["page"] = 1;
+            return fields;
+        };
+        const std::vector<Json> others = {
+            one("content_aware_fill", Json{{"layer_id", "paint"}, {"area", Json{{"rect", Json::array({6, 6, 4, 4})}}}, {"output", "new"}, {"new_id", "filled"}}),
+            one("apply_image", Json{{"id", "paint"}, {"blending", "screen"}, {"opacity", 40}}),
+            one("auto_adjust", Json{{"id", "paint"}, {"mode", "contrast"}}),
+            one("fade_layer", Json{{"id", "paint"}, {"from", from}, {"opacity", 50}}),
+            one("render_picture", Json{{"kind", "picture_frame"}}),
+            one("vanishing_point", Json{{"id", "paint"},
+                                        {"planes", Json::array({Json{{"corners_mm", Json::array({Json::array({4, 4}), Json::array({18, 4}), Json::array({20, 18}),
+                                                                                                 Json::array({2, 18})})}}})},
+                                        {"clone", Json::array({Json{{"source", Json::array({6, 6})}, {"points", Json::array({Json::array({12, 12}), Json::array({14, 14})})}}})}}),
+            one("content_aware_scale", Json{{"id", "paint"}, {"scale_x", 60}}),
+            one("magic_erase", Json{{"layer_id", "paint"}, {"x_mm", 3}, {"y_mm", 3}}),
+            one("matting", Json{{"id", "paint"}, {"kind", "defringe"}}),
+            one("outline_area", Json{{"layer_id", "paint"}, {"area", Json{{"rect", Json::array({4, 4, 12, 12})}}}, {"width_mm", 1}, {"rgb", Json::array({0, 0, 0})}}),
+            one("stroke_path", Json{{"layer_id", "pen"}, {"name", "線"}, {"width_mm", 0.5}}),
+            one("add_shape_part", Json{{"layer_id", "pen"}, {"shape", Json{{"kind", "ellipse"}, {"rect", Json::array({10, 10, 6, 6})}}}, {"fill", Json{{"rgb", Json::array({0, 0, 0})}}}}),
+            one("edit_shape_part", Json{{"layer_id", "pen"}, {"id", "s1"}, {"move_mm", Json::array({1, 1})}}),
+            one("combine_shape_parts", Json{{"layer_id", "pen"}, {"ids", Json::array({"s1", "s2"})}}),
+            one("move_shape_parts", Json{{"layer_id", "pen"}, {"ids", Json::array({"s2"})}, {"to_layer", "pen2"}}),
+            one("rasterize_layer", Json{{"id", "pen"}}),
+            one("rasterize_lines", Json{{"ids", Json::array({line})}}),
+            one("layer_style_to_layers", Json{{"id", "styled"}}),
+            one("apply_layer_mask", Json{{"id", "masked"}}),
+            one("mask_from_transparency", Json{{"id", "paint"}}),
+            one("smart_convert", Json{{"ids", Json::array({"paint"})}}),
+            one("smart_stack", Json{{"id", "so"}, {"mode", "median"}}),
+            one("smart_replace", Json{{"id", "so"}, {"data", png_b}}),
+            one("smart_relink", Json{{"id", "so"}, {"data", png_b}, {"link", Json{{"path", "b.png"}}}}),
+            one("smart_update", Json{{"id", "so"}, {"data", png_b}}),
+        };
+        for (const Json& each : others) cases.push_back({each, &doc});
+        cases.push_back({one("trap", Json{{"id", "paint"}, {"width_mm", 0.2}}), &inks});
+        const Document plain = blank_book();  // (hdr_toning flattens the page: no smart object on it)
+        cases.push_back({one("hdr_toning", Json{{"strength", 1.5}}), &plain});
+        // every name of the table has its case, and the build has it
+        std::set<std::string> named;
+        for (const Case& c : cases) named.insert(c.op["op"].get<std::string>());
+        std::set<std::string> table;
+        for (const std::string_view name : core::strict_drawing_ops()) {
+            table.insert(std::string(name));
+            QVERIFY2(genko::render::ops_registry().find(name) != nullptr, std::string(name).c_str());
+        }
+        QVERIFY2(named == table, Json(std::vector<std::string>(table.begin(), table.end())).dump().c_str());
+        std::vector<std::string> wrong;
+        for (const Case& c : cases) {
+            const std::string name = c.op["op"].get<std::string>();
+            const Json batch = Json::array({c.op});
+            try {  // (it draws: the book without strict_gates is not the book it was)
+                const Document drawn = bus().apply(*c.on, batch, Actor("ai:bot")).doc;
+                if (drawn.pages[0] == c.on->pages[0] && drawn.smart_contents == c.on->smart_contents) wrong.push_back(name + ": changes nothing");
+            } catch (const ApplyError& error) {
+                wrong.push_back(name + ": " + error.what());
+                continue;
+            }
+            Document strict = *c.on;
+            strict.strict_gates = true;
+            // (hdr_toning flattens the page first: the flatten's rule refuses it, merge_visible's words)
+            const std::string words = (name == "hdr_toning" ? std::string("merge_visible") : name) + " on a printed layer needs name_ok on page 1 (strict_gates)";
+            for (const char* actor : {"ai:bot", "human:owner"}) {
+                const std::string error = error_of(strict, batch, actor);
+                if (error.find(words) == std::string::npos) wrong.push_back(name + " " + actor + ": " + error);
+            }
+            const Document named_page = by_person(strict, ops(R"([{"op": "name_ok", "page": 1}])"));
+            if (const std::string after = error_of(named_page, batch, "ai:bot"); after != "(applied)") wrong.push_back(name + " after name_ok: " + after);
+        }
+        QVERIFY2(wrong.empty(), Json(wrong).dump(1).c_str());
+    }
+
+    // (PC6, the review of pc6-A's P2-2) set_layer exportable:true on a drawn layer before the name: a precise page's pixels
+    // (color_raster) and a CMYK page's (ink_raster) are drawn too — kept out of print, drawn on, put back is refused.
+    void aDrawnLayerOfEveryKindWaitsToPrint() {
+        namespace core = genko::core;
+        namespace render = genko::render;
+        for (const char* mode : {R"({"op": "set_color_mode", "page": 1, "mode": "rgb", "depth": 16})",
+                                 R"({"op": "set_color_mode", "page": 1, "mode": "cmyk", "profile": "coated-cmyk", "depth": 16})"}) {
+            Document doc = core::new_episode("版", 1, 1, core::PageSpec::custom(25.4, 25.4, 20, 20, 1, 2, 2, 2, 2, 200, "color"));
+            {
+                core::Page& page = doc.edit_page(0);
+                page.frames.clear();
+                page.layers.clear();
+                core::Layer layer;
+                layer.id = "paint";
+                layer.role = core::LayerRole::User;
+                layer.kind = core::LayerKind::Raster;
+                layer.panel_clip = false;
+                render::raster::save_raster(page, layer, render::Image::create("RGBA", render::Size{200, 200}, render::Ink{90, 40, 120, 255}));
+                page.layers.push_back(layer);
+            }
+            doc = bus().apply(doc, Json::array({ops(mode)}), Actor("human:owner")).doc;
+            const genko::core::Layer& kept = doc.page(0).layers[0];
+            QVERIFY(!kept.raster_png || kept.raster_png->empty());
+            QVERIFY((kept.color_raster && !kept.color_raster->empty()) || (kept.ink_raster && !kept.ink_raster->empty()));
+            doc.strict_gates = true;
+            const std::string error = error_of(doc, ops(R"([{"op": "set_layer", "page": 1, "id": "paint", "exportable": false},
+                                                           {"op": "set_layer", "page": 1, "id": "paint", "exportable": true}])"),
+                                               "ai:bot");
+            QVERIFY2(error.find("set_layer exportable on a drawn layer needs name_ok on page 1 (strict_gates)") != std::string::npos, error.c_str());
+        }
+    }
+};
+
+QTEST_GUILESS_MAIN(TestCommandBus)
+#include "test_command_bus.moc"

@@ -1,0 +1,2064 @@
+// The book going out and what it went through (M4③b, Python's genko/app/main.py with dialogs.ExportDialog,
+// printing.py, history.py, check_panel.py and checks.py): 書き出し… (Ctrl+E), 印刷… (Ctrl+P), 履歴… (Ctrl+H),
+// スマホの画面の範囲を表示, 目盛りを表示 (Ctrl+R) and 入稿前の点検 (F9) — Python's words, keys, tips, menus and checks;
+//   - the export dialog's fields as Python lays them out for each format, the pages it writes, its preview, and every
+//     format it writes through formats::run: the same files as `genko export` writes for the same choices; the check
+//     before writing (write anyway, fix it — the 点検 panel opens —, or stop), the refusals and the result in Japanese;
+//     the official export through the studio (service::run_export → HumanService.export): its preflight's refusal, or
+//     the pages written and the export approval recorded in the book;
+//   - printing to a PDF: the sheets (a spread on one), each page's picture as render_page draws it at the printer's
+//     resolution as Python computes it, fitted or at its real size, centred; the dialog's pages, its words, its preview;
+//   - 履歴: the changes listed with Python's words (history.describe, the saved times), a click undoes or redoes to just
+//     after a change, the changes saved before this session and other people's (in Python's order while the journal
+//     undoes), the list of the book in front;
+//   - 点検: the issues listed as Python lists them (the stopping ones first, by page), each shown on its page (its place
+//     marked, its line chosen, its layer drawn on), out of date after an edit; the select tool's page has the row;
+//   - (PC5 I-f) プリント…'s position and size, marks, colour management and PDF に出力… (kept for the next time), print_sheets'
+//     pictures and places, 1 部プリント, 生成 → 画像アセット written after the person's save only;
+//   - (PC5 H-f) 最後の状態を切り替え (twice: as it was; another person's change never taken back) and メモリをクリア ▸ (the
+//     copy gone — nothing to paste —, the history's memory let go while Undo still reaches every change through the journal,
+//     what the drawing remembers emptied and the page drawn again the same);
+//   - nothing goes out of a book still being read, nor is it checked;
+//   - the phone screens (where they end down a tall page, kept as chosen), the scales (a guide pulled from each,
+//     add_ruler as Python's window sends it, none when let go on the scale or with the scales off).
+
+#include <QtTest>
+
+#include <QApplication>
+#include <QCheckBox>
+#include <QClipboard>
+#include <QComboBox>
+#include <QDialogButtonBox>
+#include <QDockWidget>
+#include <QDoubleSpinBox>
+#include <QElapsedTimer>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QMenu>
+#include <QMenuBar>
+#include <QMessageBox>
+#include <QMimeData>
+#include <QMouseEvent>
+#include <QPrintDialog>
+#include <QPrintPreviewDialog>
+#include <QPrinter>
+#include <QProcess>
+#include <QPushButton>
+#include <QSpinBox>
+#include <QStandardItemModel>
+#include <QStatusBar>
+#include <QTabWidget>
+#include <QToolBar>
+
+#include <functional>
+
+#include "../contract/export_files.hpp"
+#include "app/canvas.hpp"
+#include "app/check_panel.hpp"
+#include "app/config.hpp"
+#include "app/export_as_dialog.hpp"
+#include "app/export_dialog.hpp"
+#include "app/fit_preview.hpp"
+#include "app/path_label.hpp"
+#include "app/history_panel.hpp"
+#include "app/icons.hpp"
+#include "app/main_window.hpp"
+#include "app/workspace.hpp"
+#include "app/preferences.hpp"
+#include "app/print_dialog.hpp"
+#include "core/color_model.hpp"
+#include "formats/print_marks.hpp"
+#include "app/save_for_web_dialog.hpp"
+#include "app/theme.hpp"
+#include "app/tool_settings.hpp"
+#include "service/wording.hpp"
+#include "core/base64.hpp"
+#include "core/pynum.hpp"
+#include "formats/checks.hpp"
+#include "formats/export.hpp"
+#include "formats/web_export.hpp"
+#include "core/paths.hpp"
+#include "storage/fsutil.hpp"
+#include "gui_support.hpp"
+#include "render/page.hpp"
+#include "render/png.hpp"
+#include "storage/asset_store.hpp"
+#include "storage/reader.hpp"
+
+using namespace genko;
+using core::Json;
+namespace fs = std::filesystem;
+
+namespace {
+
+QStringList menus_of(app::MainWindow* window, QAction* action) {
+    QStringList found;
+    const std::function<void(QMenu*, const QString&)> walk = [&](QMenu* menu, const QString& path) {
+        for (QAction* a : menu->actions()) {
+            if (a == action) found << path;
+            if (a->menu() != nullptr) walk(a->menu(), path + QStringLiteral("/") + a->menu()->title());
+        }
+    };
+    for (QAction* top : window->menuBar()->actions()) {
+        if (top->menu() != nullptr) walk(top->menu(), top->menu()->title());
+    }
+    return found;
+}
+
+// The actions of a menu in order (separators as "|").
+QStringList menu_items(app::MainWindow* window, const QString& title) {
+    QStringList out;
+    for (QAction* top : window->menuBar()->actions()) {
+        if (top->menu() == nullptr || top->menu()->title() != title) continue;
+        for (QAction* a : top->menu()->actions()) out << (a->isSeparator() ? QStringLiteral("|") : a->text());
+    }
+    return out;
+}
+
+void mouse(QWidget* w, QEvent::Type type, const QPointF& pos, Qt::MouseButtons buttons) {
+    QMouseEvent e(type, pos, w->mapToGlobal(pos), type == QEvent::MouseMove ? Qt::NoButton : Qt::LeftButton, buttons, Qt::NoModifier);
+    QCoreApplication::sendEvent(w, &e);
+}
+
+// A book in a window (the session saves 50 ms after a change), the window's questions answered by the test: message
+// boxes by the text of the button to click (none: the box's escape), the dialogs by a function each.
+struct Studio {
+    QTemporaryDir tmp;
+    fs::path path;
+    std::shared_ptr<app::Session> session;
+    std::unique_ptr<app::MainWindow> window;
+    gui_test::Answers answers;
+    std::vector<Json> ops;
+    QStringList clicks;                                // the buttons to click in the next message boxes, in order
+    QStringList boxes;                                 // the message boxes shown (their text)
+    std::function<void(app::ExportDialog*)> on_export;
+    std::function<void(app::PrintDialog*)> on_print;
+
+    explicit Studio(core::Document doc = gui_test::new_doc(3), bool on_disk = true) {
+        (void)gui_test::config_folder();
+        if (on_disk) {
+            path = gui_test::path_of(tmp.path() + QStringLiteral("/book.genko"));
+            gui_test::write_book(path, doc);
+            session = app::Session::open(path, gui_test::quick(gui_test::path_of(tmp.path() + QStringLiteral("/recovery"))));
+        } else {
+            app::Session::Options options;
+            options.actor = "human:tester";
+            options.autosave = false;
+            options.recovery_root = gui_test::path_of(tmp.path() + QStringLiteral("/recovery"));
+            session = std::make_shared<app::Session>(std::move(doc), std::nullopt, options);
+        }
+        window = std::make_unique<app::MainWindow>(session);
+        window->resize(1280, 860);
+        window->show();
+        QObject::connect(session.get(), &app::Session::changed, window.get(), [this](const app::BookChange& c) {
+            if (c.why == app::BookChange::Why::Edit) ops.push_back(c.ops);
+        });
+        answers.responder->exec = [this](QDialog* dialog) -> int {
+            answers.asked << QString::fromLatin1(dialog->metaObject()->className());
+            if (auto* box = qobject_cast<QMessageBox*>(dialog)) {
+                boxes << box->text();
+                const QString wanted = clicks.isEmpty() ? QString() : clicks.takeFirst();
+                for (QAbstractButton* b : box->buttons()) {
+                    if (b->text() == wanted) b->click();
+                }
+                return box->result();
+            }
+            if (auto* e = qobject_cast<app::ExportDialog*>(dialog); e != nullptr && on_export) {
+                on_export(e);
+                return e->result();
+            }
+            if (auto* p = qobject_cast<app::PrintDialog*>(dialog); p != nullptr && on_print) {
+                on_print(p);
+                return p->result();
+            }
+            return QDialog::Rejected;
+        };
+    }
+    ~Studio() {
+        window.reset();
+        session.reset();
+    }
+    const core::Document& doc() const { return window->book(); }
+    app::PageCanvas* canvas() const { return window->canvas(); }
+    QAction* act(const char* name) const { return window->action(QString::fromLatin1(name)); }
+    QDockWidget* dock(const QString& title) const {
+        for (QDockWidget* d : window->findChildren<QDockWidget*>()) {
+            if (d->windowTitle() == title) return d;
+        }
+        return nullptr;
+    }
+    std::string ink(int page = 0) const { return gui_test::ink_of(doc().page(static_cast<std::size_t>(page)))->id; }
+    bool saved() { return session->wait_saved(std::chrono::milliseconds(10000)); }
+};
+
+QString qs(const std::string& s) { return QString::fromStdString(s); }
+
+// The pixels of a picture as RGB rows (a QImage's rows are padded to 4 bytes).
+std::string rgb_rows(const QImage& image) {
+    const QImage rgb = image.convertToFormat(QImage::Format_RGB888);
+    std::string out;
+    for (int y = 0; y < rgb.height(); ++y) out.append(reinterpret_cast<const char*>(rgb.constScanLine(y)), static_cast<std::size_t>(rgb.width()) * 3);
+    return out;
+}
+
+// A page as Python's print_pages draws it: render_page in print mode at dpi, crop_to the area, as RGB.
+render::Image printed(const core::Document& doc, const core::Page& page, const std::string& area, int dpi) {
+    render::RenderOptions o;
+    o.mode = "print";
+    o.crop_marks = area == "paper";
+    return formats::crop_to(render::render_page(page, dpi, o, &doc).image, page, area, dpi).convert("RGB");
+}
+
+}  // namespace
+
+class TestGuiOutput : public QObject {
+    Q_OBJECT
+
+private slots:
+    void initTestCase() {
+        (void)gui_test::config_folder();
+        qRegisterMetaType<app::BookChange>();
+        app::icons::init_resources();
+        app::theme::apply(qApp);
+    }
+
+    void init() { app::settings()->remove(QStringLiteral("ui/phone_view")); }
+
+    // The six commands as Python's window has them (_build_actions): words, keys, tips (the tooltip "<title>  <key>\n
+    // <tip>"), checkable, the menus and their places; 書き出し in the command bar with its picture; the panels hidden.
+    void commandsAsPythonsWindowHasThem() {
+        Studio s;
+        app::MainWindow* w = s.window.get();
+        struct Want {
+            const char* name;
+            const char* text;
+            const char* key;
+            const char* tip;
+            bool checkable;
+            const char* menu;
+        };
+        const std::vector<Want> wanted = {
+            // (PC4 F-0, 節 F 5.1: 書き出し… is ファイル → 書き出し → 原稿を書き出す…, 印刷… is プリント…)
+            {"act_export", "原稿を書き出す…", "",  // (PC5 H-0, the Photoshop key set: Ctrl+E is 下のレイヤーと結合's)
+             "PDF・TIFF・PSD・縦読み・SNS 用などに書き出します", false, "ファイル/書き出し"},
+            {"act_print", "プリント…", "Ctrl+P", "プリンターで紙に印刷します（仕上がりで切る・用紙全体）", false, "ファイル"},
+            {"act_history", "ヒストリー…", "",  // (PC5 H-0: Photoshop's name; Ctrl+H is エクストラ's)
+             "変更の一覧。クリックでその時点まで戻る・進む", false, "編集"},
+            {"act_phone", "スマホの画面の範囲を表示", "", "縦読みの原稿で、スマホ 1 画面に入る範囲と画面の切れ目", true, "表示"},
+            {"act_scale", "定規", "Ctrl+R", "上と左に mm の定規。定規からドラッグするとガイド線を引けます", true, "表示"},
+            {"act_checks", "入稿前の点検", "F9", "はみ出し・文字の重なりや小ささ・解像度などを探します", false, "ページ"},
+        };
+        for (const Want& e : wanted) {
+            QAction* a = w->action(QString::fromLatin1(e.name));
+            QVERIFY2(a != nullptr, e.name);
+            QCOMPARE(a->text(), QString::fromUtf8(e.text));
+            QCOMPARE(a->shortcuts(), *e.key == '\0' ? QList<QKeySequence>() : QList<QKeySequence>{QKeySequence(QString::fromLatin1(e.key))});
+            QCOMPARE(a->statusTip(), QString::fromUtf8(e.tip));
+            // (as Python's window has it: preferences.retip at its start — the name, its keys now in （）, what it does)
+            const QString keys = a->shortcut().toString(QKeySequence::NativeText);
+            // (its name: its place too when another command has the same words — PC5 H-0's 定規（表示）, the 定規 tool's words)
+            const QString called = genko::app::command_name(genko::app::command_names(w), a);
+            QCOMPARE(a->toolTip(), called + (keys.isEmpty() ? QString() : QStringLiteral("（%1）").arg(keys)) + QStringLiteral("\n") + QString::fromUtf8(e.tip));
+            QCOMPARE(a->isCheckable(), e.checkable);
+            QVERIFY2(menus_of(w, a) == QStringList{QString::fromUtf8(e.menu)}, e.name);
+        }
+        // their places (PC4 F-0, 節 F 5.2: Photoshop's ファイル — the book's export in 書き出し ▸, then PC3 C-a's パスを
+        // Illustrator へ…; プリント… its own group after ファイル情報…: test_gui_actions' theFileMenuIsPhotoshops)
+        const QStringList file = menu_items(w, QStringLiteral("ファイル"));
+        QCOMPARE(file.indexOf(QStringLiteral("プリント…")), file.indexOf(QStringLiteral("ファイル情報…")) + 2);
+        QCOMPARE(file.at(file.indexOf(QStringLiteral("プリント…")) - 1), QStringLiteral("|"));
+        QCOMPARE(file.at(file.indexOf(QStringLiteral("プリント…")) + 1), QStringLiteral("1 部プリント"));  // (PC5 I-f: in its group)
+        QCOMPARE(file.at(file.indexOf(QStringLiteral("プリント…")) + 2), QStringLiteral("|"));
+        QStringList exports;
+        for (QAction* a : w->findChild<QMenu*>(QStringLiteral("menu_export"))->actions()) exports << (a->isSeparator() ? QStringLiteral("|") : a->text());
+        // (PC5 I-c: Photoshop's アートボードからファイル… and アートボードから PDF… first in that group, then PC4 F-c's レイヤーから
+        // ファイル…)
+        QCOMPARE(exports.indexOf(QStringLiteral("アートボードからファイル…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 2);
+        QCOMPARE(exports.indexOf(QStringLiteral("アートボードから PDF…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 3);
+        QCOMPARE(exports.indexOf(QStringLiteral("レイヤーからファイル…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 4);
+        // (PC5 J-a: レイヤーカンプからファイル… after it, as Photoshop's)
+        QCOMPARE(exports.indexOf(QStringLiteral("レイヤーカンプからファイル…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 5);
+        QCOMPARE(exports.indexOf(QStringLiteral("パスを Illustrator へ…")), exports.indexOf(QStringLiteral("原稿を書き出す…")) + 6);
+        const QStringList edit = menu_items(w, QStringLiteral("編集"));
+        // (PC5 H-f: 最後の状態を切り替え after やり直し, as Photoshop's)
+        QCOMPARE(edit.mid(0, 5), (QStringList{QStringLiteral("取り消し"), QStringLiteral("やり直し"), QStringLiteral("最後の状態を切り替え"),
+                                              QStringLiteral("ヒストリー…"), QStringLiteral("|")}));
+        const QStringList view = menu_items(w, QStringLiteral("表示"));
+        const int guides = view.indexOf(QStringLiteral("仕上がり線・基本枠を表示"));
+        // (PC5 H-0, 節 H 5.1: 表示 in Photoshop's order — 定規 (目盛りを表示 before), ブラシプレビュー and パターンプレビュー in their
+        // places, test_gui_actions' theMenusOfPC5 —, Genko's own after a line)
+        // (PC5 H-b: 選択範囲の境界線 and ブラシプレビュー in 表示・非表示 ▸ — 選択範囲のエッジ —, before 定規)
+        QCOMPARE(view.mid(guides, 3), (QStringList{QStringLiteral("仕上がり線・基本枠を表示"), QStringLiteral("スマホの画面の範囲を表示"),
+                                                   QStringLiteral("前のページを透かす（オニオンスキン）")}));
+        QVERIFY(view.indexOf(QStringLiteral("定規")) < guides && view.indexOf(QStringLiteral("表示・非表示")) >= 0 && view.indexOf(QStringLiteral("表示・非表示")) < view.indexOf(QStringLiteral("定規")));
+        const QStringList pages = menu_items(w, QStringLiteral("ページ"));
+        // (Python's row: 台詞の検索・置換…, 本の形でプレビュー… (M6), 入稿前の点検; PC5 G-d: 台詞の検索・置換… is 編集 → 検索と置換…)
+        QVERIFY(pages.indexOf(QStringLiteral("本の形でプレビュー…")) > 0 && !pages.contains(QStringLiteral("検索と置換…")));
+        QCOMPARE(edit.indexOf(QStringLiteral("検索と置換…")), edit.indexOf(QStringLiteral("スペルチェック…")) + 1);
+        QCOMPARE(pages.indexOf(QStringLiteral("入稿前の点検")), pages.indexOf(QStringLiteral("本の形でプレビュー…")) + 1);
+        QCOMPARE(pages.at(pages.indexOf(QStringLiteral("入稿前の点検")) + 1), QStringLiteral("|"));
+        // 原稿を書き出す… (書き出し…) at the end of the command bar (workspace.DEFAULT_COMMANDBAR), with its picture
+        QToolBar* bar = w->findChild<QToolBar*>(QStringLiteral("commands"));
+        QVERIFY(bar != nullptr);
+        QCOMPARE(bar->actions().back(), s.act("act_export"));
+        QVERIFY(bar->actions().at(bar->actions().size() - 2)->isSeparator());
+        QVERIFY(!s.act("act_export")->icon().isNull());
+        // off at first: the phone screens (an A4 book, nothing chosen), the scales; the two panels hidden (Python's
+        // OCCASIONAL_PANELS), closable, in the ウィンドウ menu
+        QVERIFY(!s.act("act_phone")->isChecked());
+        QVERIFY(!s.canvas()->phone_view);
+        QVERIFY(!s.act("act_scale")->isChecked());
+        QVERIFY(!s.canvas()->show_scale);
+        for (const QString& title : {QStringLiteral("ヒストリー"), QStringLiteral("点検")}) {
+            QDockWidget* d = s.dock(title);
+            QVERIFY(d != nullptr);
+            QVERIFY(d->isHidden());
+            QVERIFY(d->features() & QDockWidget::DockWidgetClosable);
+            QVERIFY(menus_of(w, d->toggleViewAction()).contains(QStringLiteral("ウィンドウ")));
+        }
+        // the select tool's page: 表示 (全体を表示, 原寸), 原稿 (ストーリーエディター, 入稿前の点検)
+        QWidget* select = w->tool_settings()->page_for(QStringLiteral("select"));
+        QVERIFY(select != nullptr);
+        QPushButton* row = nullptr;
+        for (QPushButton* b : select->findChildren<QPushButton*>()) {
+            if (b->text() == QStringLiteral("入稿前の点検")) row = b;
+        }
+        QVERIFY(row != nullptr);
+        row->click();
+        QVERIFY(s.dock(QStringLiteral("点検"))->isVisible());
+        QVERIFY(w->checks()->report().has_value());
+    }
+
+    // 書き出し…: the dialog as Python lays it out for each format (only the options it takes, the colours a PNG has, the
+    // dpi it starts at, the official switch where it exists), the pages it writes, its preview.
+    void exportDialogFields() {
+        core::Document book = gui_test::new_doc(4);
+        book.edit_page(1).spread_with = core::Num(3);
+        book.edit_page(2).spread_with = core::Num(2);
+        Studio s(book);
+        s.window->go_to_page(2);
+        bool seen = false;
+        s.on_export = [&](app::ExportDialog* d) {
+            seen = true;
+            QCOMPARE(d->windowTitle(), QStringLiteral("書き出し"));
+            QCOMPARE(d->format->currentData().toString(), QStringLiteral("png"));  // (PNG unless another is chosen)
+            QStringList keys;
+            for (int i = 0; i < d->format->count(); ++i) keys << d->format->itemData(i).toString();
+            QCOMPARE(keys, (QStringList{"pdf", "tiff", "png", "cmyk", "layers", "psd", "pack", "webtoon", "sns", "epub", "kindle", "strip"}));
+            QCOMPARE(d->format->itemText(d->format->findData(QStringLiteral("webtoon"))), QStringLiteral("縦読み（Webtoon）"));
+            QCOMPARE(d->folder->text(), QDir::toNativeSeparators(s.tmp.path() + QStringLiteral("/book_書き出し")));
+            QCOMPARE(d->which->itemText(1), QStringLiteral("今のページ（2）"));
+            QCOMPARE(d->area->currentData().toString(), QStringLiteral("bleed"));
+            QCOMPARE(d->area->itemText(0), QStringLiteral("用紙全体（トンボ付き）"));
+            const auto shown = [&](const char* key) { return !d->rows.at(key)->isHidden(); };
+            const auto check = [&](const QString& key, std::initializer_list<const char*> options) {
+                d->format->setCurrentIndex(d->format->findData(key));
+                for (const auto& [option, widget] : d->rows) {
+                    const bool want = std::any_of(options.begin(), options.end(), [&](const char* o) { return option == o; });
+                    QVERIFY2(shown(option.c_str()) == want, qPrintable(key + QStringLiteral(": ") + QString::fromStdString(option)));
+                }
+            };
+            check(QStringLiteral("pdf"), {"dpi", "area", "color", "icc", "screen"});
+            QVERIFY(!d->official->isHidden());
+            QVERIFY(!d->colour_head->isHidden());
+            QCOMPARE(d->dpi->value(), 600);  // (default_dpi: the book's)
+            check(QStringLiteral("webtoon"), {"width", "max_height", "jpeg"});
+            QVERIFY(d->colour_head->isHidden());
+            QVERIFY(!d->jpeg->isChecked());
+            check(QStringLiteral("sns"), {"long_edge", "jpeg", "spreads"});
+            QVERIFY(d->jpeg->isChecked());
+            QCOMPARE(d->long_edge->value(), 2048);
+            check(QStringLiteral("kindle"), {"long_edge"});
+            QCOMPARE(d->long_edge->value(), 2560);
+            QVERIFY(d->official->isHidden());
+            check(QStringLiteral("epub"), {"dpi"});
+            QCOMPARE(d->dpi->value(), 150);
+            check(QStringLiteral("cmyk"), {"dpi", "area", "icc"});
+            d->color->setCurrentIndex(d->color->findData(QStringLiteral("cmyk")));
+            check(QStringLiteral("png"), {"dpi", "area", "color", "screen"});
+            // (a PNG has no CMYK)
+            auto* model = qobject_cast<QStandardItemModel*>(d->color->model());
+            QVERIFY(!model->item(d->color->findData(QStringLiteral("cmyk")))->isEnabled());
+            QCOMPARE(d->color->currentData().toString(), QStringLiteral("auto"));
+            QVERIFY(!d->screen_row->isEnabled());  // (greys become dots only in black and white)
+            d->color->setCurrentIndex(d->color->findData(QStringLiteral("bitonal")));
+            QVERIFY(d->screen_row->isEnabled());
+            d->screen_on->setChecked(true);
+            QCOMPARE(d->options().screen.value(), (Json{{"lpi", 60.0}, {"shape", "round"}}));
+            // the pages: all, this one, its spread, a range (Python's words when it cannot be read)
+            QCOMPARE(d->pages(), (std::vector<std::int64_t>{1, 2, 3, 4}));
+            d->which->setCurrentIndex(1);
+            QCOMPARE(d->pages(), (std::vector<std::int64_t>{2}));
+            d->which->setCurrentIndex(2);
+            QCOMPARE(d->pages(), (std::vector<std::int64_t>{2, 3}));
+            d->which->setCurrentIndex(3);
+            QVERIFY(!d->range->isHidden());
+            d->range->setText(QStringLiteral("4, 1〜2"));
+            QCOMPARE(d->pages(), (std::vector<std::int64_t>{1, 2, 4}));
+            d->range->setText(QStringLiteral("x"));
+            emit d->range->editingFinished();
+            QCOMPARE(d->preview_note->text(), QStringLiteral("ページの指定が読めません: x"));
+            d->run();
+            QVERIFY(s.answers.asked.contains(QStringLiteral("Genko: ページの指定が読めません: x")));
+            d->range->setText(QStringLiteral("2-3"));
+            emit d->range->editingFinished();
+            QCOMPARE(d->preview_note->text(), QStringLiteral("2 ページ（全 2 ページを書き出す）"));
+            QVERIFY(!d->preview->image().isNull());
+            // the official switch takes all the pages
+            d->format->setCurrentIndex(d->format->findData(QStringLiteral("pdf")));
+            d->official->setChecked(true);
+            QVERIFY(!d->which->isEnabled());
+            QCOMPARE(d->which->currentIndex(), 0);
+            d->format->setCurrentIndex(d->format->findData(QStringLiteral("layers")));
+            QVERIFY(!d->official->isChecked());
+        };
+        s.act("act_export")->trigger();
+        QVERIFY(seen);
+    }
+
+    // I08 (UX-02): 書き出し…'s preview holds the whole page from the first time it is shown, its proportions kept, and
+    // again after the window changes size — a page wider than it is tall too. What the preview cuts (the area chosen)
+    // is checked apart from what is written (the file's size at the dpi chosen).
+    void exportPreviewShowsTheWholePage() {
+        core::Document book = gui_test::new_doc(2);
+        core::PageSpec& wide = book.edit_page(0).spec;
+        std::swap(wide.width_mm, wide.height_mm);  // (a page wider than it is tall)
+        if (wide.trim_w_mm && wide.trim_h_mm) std::swap(*wide.trim_w_mm, *wide.trim_h_mm);
+        Studio s(book);
+        s.window->go_to_page(1);
+        const auto whole = [](app::FitPreview* shown, const QString& when) {
+            const QImage& picture = shown->image();
+            QVERIFY2(!picture.isNull(), qPrintable(when));
+            const QRectF at = shown->shown_rect();
+            // (all of it where the person sees it: in the preview and in the part of the scrolling body in sight)
+            QVERIFY2(shown->visibleRegion().boundingRect().contains(at.adjusted(1, 1, -1, -1).toAlignedRect()),
+                     qPrintable(when + QStringLiteral(": the page is not wholly in sight")));
+            QVERIFY2(std::abs(at.width() / at.height() - static_cast<double>(picture.width()) / picture.height()) < 0.01,
+                     qPrintable(when + QStringLiteral(": the page is not in its proportions")));
+            // (as large as the part in sight lets it be: one side meets the margin)
+            const QRect room = shown->in_sight();
+            QVERIFY2(at.width() >= room.width() - 13 || at.height() >= room.height() - 13, qPrintable(when + QStringLiteral(": the page is not fitted")));
+        };
+        bool seen = false;
+        s.on_export = [&](app::ExportDialog* d) {
+            seen = true;
+            d->show();
+            for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+            auto* shown = qobject_cast<app::FitPreview*>(d->findChild<QWidget*>(QStringLiteral("preview")));
+            QVERIFY(shown != nullptr);
+            whole(shown, QStringLiteral("the first time"));
+            for (const std::string_view key : formats::kAreas) {
+                d->area->setCurrentIndex(d->area->findData(qs(std::string(key))));
+                QCoreApplication::processEvents();
+                // the preview cuts what the area cuts (the page as it is written, at the preview's 30 dpi)
+                const render::Image cut = printed(s.doc(), s.doc().page(0), std::string(key), 30);
+                QCOMPARE(shown->image().size(), QSize(cut.width(), cut.height()));
+                whole(shown, qs(std::string(key)));
+            }
+            // (the last two narrow: the page above the choices, in sight without scrolling)
+            for (const QSize size : {QSize(640, 420), QSize(1400, 900), QSize(820, 1000), QSize(560, 420), QSize(500, 320)}) {
+                d->resize(size);
+                for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
+                whole(shown, QStringLiteral("at %1×%2").arg(d->size().width()).arg(d->size().height()));
+            }
+            d->reject();
+        };
+        s.act("act_export")->trigger();
+        QVERIFY(seen);
+        // what is written, cut by itself: the file of each area at its dpi
+        for (const std::string_view key : formats::kAreas) {
+            const QString out = s.tmp.path() + QStringLiteral("/cut-") + qs(std::string(key));
+            s.on_export = [&](app::ExportDialog* d) {
+                d->format->setCurrentIndex(d->format->findData(QStringLiteral("png")));
+                d->which->setCurrentIndex(d->which->findData(QStringLiteral("range")));
+                d->range->setText(QStringLiteral("1"));
+                d->dpi->setValue(72);
+                d->area->setCurrentIndex(d->area->findData(qs(std::string(key))));
+                d->folder->setText(out);
+                s.clicks << QStringLiteral("閉じる");
+                d->run();
+            };
+            s.act("act_export")->trigger();
+            const QStringList files = QDir(out).entryList(QDir::Files);
+            QCOMPARE(files.size(), 1);
+            const render::Image cut = printed(s.doc(), s.doc().page(0), std::string(key), 72);
+            QCOMPARE(QImage(out + QStringLiteral("/") + files.front()).size(), QSize(cut.width(), cut.height()));
+        }
+    }
+
+    // I12 (UX-02): 書き出し…'s folder, however long its Japanese name: the whole of it in a window (全文…) to read, copy
+    // or open (off while it is not made yet), its tooltip the whole of it; after writing, the path copied whole.
+    void exportFolderShownWhole() {
+        Studio s;
+        const QString deep = s.tmp.path() + QStringLiteral("/") + QStringLiteral("とても長い日本語のフォルダー名").repeated(5) + QStringLiteral("/第一話の書き出し");
+        bool seen = false;
+        s.on_export = [&](app::ExportDialog* d) {
+            seen = true;
+            QVERIFY(d->folder_whole != nullptr && d->folder_whole->isVisibleTo(d));
+            d->folder->setText(deep);
+            QCOMPARE(d->folder->toolTip(), deep);
+            app::PathDialog* whole = d->show_folder();
+            QCOMPARE(whole->shown(), QDir::toNativeSeparators(deep));
+            QVERIFY(!whole->open_button()->isEnabled());  // (not made yet)
+            QApplication::clipboard()->clear();
+            whole->copy_button()->click();
+            QCOMPARE(QApplication::clipboard()->text(), QDir::toNativeSeparators(deep));
+            whole->close();
+            d->format->setCurrentIndex(d->format->findData(QStringLiteral("png")));
+            d->which->setCurrentIndex(d->which->findData(QStringLiteral("range")));
+            d->range->setText(QStringLiteral("1"));
+            d->dpi->setValue(72);
+            QApplication::clipboard()->clear();
+            s.clicks << QStringLiteral("パスをコピー");
+            d->run();
+            QCOMPARE(d->result(), static_cast<int>(QDialog::Accepted));
+            QCOMPARE(QApplication::clipboard()->text(), QDir::toNativeSeparators(deep));
+            app::PathDialog* made = d->show_folder();
+            QVERIFY(made->open_button()->isEnabled());  // (made now: it can be opened)
+            made->close();
+        };
+        s.act("act_export")->trigger();
+        QVERIFY(seen);
+        QCOMPARE(QDir(deep).entryList(QDir::Files).size(), 1);
+    }
+
+    // 書き出す for every format: formats::run writes the same files as `genko export` does for the same choices.
+    void exportWritesWhatGenkoExportWrites() {
+        core::Document book = gui_test::new_doc(3, "出力の試し");
+        book.add_line(core::Num(1), "台詞です", "", std::nullopt, "", core::Num(60.0), core::Num(60.0), core::Num(30.0), core::Num(20.0));
+        Studio s(book);
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", s.ink()},
+                                                      {"points", Json::array({Json::array({30, 40, 0.5}), Json::array({120, 200, 0.8})})}, {"width_mm", 1.5}},
+                                                 Json{{"op", "set_nombre"}, {"show", true}}})));
+        QVERIFY(s.saved());
+        const std::string stem = formats::stem(s.doc());
+        struct Case {
+            QString key;
+            std::function<void(app::ExportDialog*)> set;
+            QStringList cli;
+            QString file;  // the CLI's output file in the folder (none: the folder)
+        };
+        const std::vector<Case> cases = {
+            {"png", [](app::ExportDialog* d) { d->color->setCurrentIndex(d->color->findData(QStringLiteral("rgb"))); },
+             {"--format", "png", "--dpi", "72", "--area", "bleed", "--color", "rgb"}, {}},
+            {"pdf", [](app::ExportDialog* d) {
+                 d->color->setCurrentIndex(d->color->findData(QStringLiteral("gray")));
+                 d->area->setCurrentIndex(d->area->findData(QStringLiteral("trim")));
+             },
+             {"--format", "pdf", "--dpi", "72", "--area", "trim", "--color", "gray"}, {}},
+            {"tiff", [](app::ExportDialog* d) {
+                 d->color->setCurrentIndex(d->color->findData(QStringLiteral("rgb")));
+                 d->area->setCurrentIndex(d->area->findData(QStringLiteral("paper")));
+             },
+             {"--format", "tiff", "--dpi", "72", "--area", "paper"}, {}},
+            {"cmyk", [](app::ExportDialog*) {}, {"--format", "cmyk", "--dpi", "72", "--area", "bleed"}, {}},
+            {"layers", [](app::ExportDialog* d) { d->area->setCurrentIndex(d->area->findData(QStringLiteral("trim"))); },
+             {"--format", "layers", "--dpi", "72", "--area", "trim"}, {}},
+            {"psd", [](app::ExportDialog*) {}, {"--format", "psd", "--dpi", "72"}, {}},
+            {"pack", [](app::ExportDialog*) {}, {"--format", "pack", "--dpi", "72"}, {}},
+            {"webtoon", [](app::ExportDialog* d) {
+                 d->width->setValue(300);
+                 d->max_height->setValue(500);
+             },
+             {"--format", "webtoon", "--width", "300", "--max-height", "500"}, {}},
+            {"sns", [](app::ExportDialog* d) {
+                 d->long_edge->setValue(600);
+                 d->spreads->setChecked(true);
+             },
+             {"--format", "sns", "--long-edge", "600", "--jpeg", "--spreads"}, {}},
+            {"epub", [](app::ExportDialog*) {}, {"--format", "epub", "--dpi", "72"}, qs(stem + ".epub")},
+            {"kindle", [](app::ExportDialog* d) { d->long_edge->setValue(400); }, {"--format", "kindle", "--long-edge", "400"}, qs(stem + "_kindle.epub")},
+            {"strip", [](app::ExportDialog*) {}, {"--format", "strip", "--dpi", "72"}, qs(stem + "_strip.png")},
+        };
+        for (const Case& c : cases) {
+            const QString app_out = s.tmp.path() + QStringLiteral("/app-") + c.key;
+            const QString cli_out = s.tmp.path() + QStringLiteral("/cli-") + c.key;
+            s.on_export = [&](app::ExportDialog* d) {
+                d->format->setCurrentIndex(d->format->findData(c.key));
+                if (!d->rows.at("dpi")->isHidden()) d->dpi->setValue(72);
+                c.set(d);
+                d->folder->setText(app_out);
+                s.clicks << QStringLiteral("閉じる");
+                d->run();
+                QCOMPARE(d->result(), static_cast<int>(QDialog::Accepted));
+                QVERIFY(d->reply.has_value());
+                QCOMPARE(QString::fromStdString(s.boxes.back().toStdString()),
+                         QStringLiteral("%1 個のファイルを書き出しました。\n%2").arg((*d->reply)["files"].size()).arg(app_out));
+            };
+            s.act("act_export")->trigger();
+            QProcess cli;
+            QStringList args{QStringLiteral("export"), gui_test::qpath(s.path), c.file.isEmpty() ? cli_out : cli_out + QStringLiteral("/") + c.file};
+            args << c.cli;
+            cli.start(QStringLiteral(GENKO_CLI), args);
+            QVERIFY(cli.waitForFinished(300000));
+            QVERIFY2(cli.exitCode() == 0, cli.readAllStandardError().constData());
+            QVERIFY2(!test::exports::tree(app_out).empty(), qPrintable(c.key));
+            const QString difference = test::exports::tree_difference(app_out, cli_out);
+            QVERIFY2(difference.isEmpty(), qPrintable(c.key + QStringLiteral(": ") + difference));
+        }
+        // only the pages chosen
+        const QString part = s.tmp.path() + QStringLiteral("/part");
+        s.on_export = [&](app::ExportDialog* d) {
+            d->dpi->setValue(72);
+            d->which->setCurrentIndex(3);
+            d->range->setText(QStringLiteral("3, 1"));
+            d->folder->setText(part);
+            s.clicks << QStringLiteral("閉じる");
+            d->run();
+        };
+        s.act("act_export")->trigger();
+        QCOMPARE(QDir(part).entryList(QDir::Files).size(), 2);
+        QCOMPARE(s.boxes.back(), QStringLiteral("2 個のファイルを書き出しました。\n%1").arg(part));
+    }
+
+    // PSD-01 in 書き出し…: a PSD's 文字 — as pictures (the default, Python's PSD) or kept as text layers — what the
+    // editable PSD cannot keep listed before anything is written with what becomes of it, the fonts it names and that
+    // they are not put in the file, the ruby that does not follow its text in other apps; the strict way stops (said,
+    // nothing written), the appearance way asks first and draws those lines as pictures: the files `genko export
+    // --psd-text editable --rasterize-unsupported` writes.
+    void exportDialogPsdText() {
+        Studio s(gui_test::new_doc(2, "PSDの文字"));
+        QVERIFY(s.window->apply_ops(Json::parse(R"([
+            {"op": "add_line", "page": 1, "id": "ok", "text": "東京と東京", "x_mm": 140, "y_mm": 20, "w_mm": 30, "h_mm": 60, "wrap": "vertical",
+             "ruby_spans": [{"start": 3, "end": 5, "ruby": "とうきょう"}]},
+            {"op": "add_line", "page": 2, "id": "grad", "text": "グラデ", "x_mm": 100, "y_mm": 20, "w_mm": 30, "h_mm": 60, "wrap": "vertical",
+             "style": {"gradient": {"rgb_from": [0, 0, 0], "rgb_to": [200, 0, 0]}}}])")));
+        QVERIFY(s.saved());
+        const QString strict = s.tmp.path() + QStringLiteral("/psd-strict");
+        const QString app_out = s.tmp.path() + QStringLiteral("/psd-app");
+        bool seen = false;
+        s.on_export = [&](app::ExportDialog* d) {
+            seen = true;
+            d->format->setCurrentIndex(d->format->findData(QStringLiteral("pdf")));
+            QVERIFY(d->rows.at("psd_text")->isHidden());
+            d->format->setCurrentIndex(d->format->findData(QStringLiteral("psd")));
+            QVERIFY(!d->rows.at("psd_text")->isHidden());
+            QCOMPARE(d->psd_text->currentData().toString(), QStringLiteral("image"));
+            QCOMPARE(d->psd_text->itemText(0), QStringLiteral("見た目優先で画像化（従来どおり）"));
+            QCOMPARE(d->psd_text->itemText(1), QStringLiteral("文字を編集可能なレイヤーとして保持"));
+            QVERIFY(d->psd_unsupported->isHidden());
+            QVERIFY(d->psd_notes->isHidden());
+            QCOMPARE(d->options().psd_text, std::string("image"));
+            d->psd_text->setCurrentIndex(d->psd_text->findData(QStringLiteral("editable")));
+            QVERIFY(!d->psd_unsupported->isHidden());
+            QCOMPARE(d->psd_unsupported->currentData().toString(), QStringLiteral("stop"));
+            QVERIFY(!d->psd_notes->isHidden());
+            const QString notes = d->psd_notes->text();
+            QVERIFY2(notes.contains(QStringLiteral("2 ページ「グラデ」: グラデーションの文字塗り")), qPrintable(notes));
+            QVERIFY2(notes.contains(QStringLiteral("書き出しを止めます")), qPrintable(notes));
+            QVERIFY2(notes.contains(QStringLiteral("ZenKakuGothicNew-Bold")), qPrintable(notes));
+            QVERIFY2(notes.contains(QStringLiteral("埋め込みません")), qPrintable(notes));
+            QVERIFY2(notes.contains(QStringLiteral("ルビは自動では追従しません")), qPrintable(notes));
+            QCOMPARE(d->options().psd_text, std::string("editable"));
+            QVERIFY(!d->options().psd_rasterize);
+            // only the pages written: page 1 alone has nothing PSD text cannot keep
+            d->which->setCurrentIndex(3);
+            d->range->setText(QStringLiteral("1"));
+            emit d->range->editingFinished();
+            QVERIFY2(d->psd_notes->text().contains(QStringLiteral("表せない装飾のある台詞はありません")), qPrintable(d->psd_notes->text()));
+            d->which->setCurrentIndex(0);
+            QVERIFY(d->psd_notes->text().contains(QStringLiteral("グラデ")));
+            // strict: said before anything is written, nothing written
+            d->dpi->setValue(72);
+            d->folder->setText(strict);
+            d->run();
+            QVERIFY(d->result() != QDialog::Accepted);
+            QVERIFY(!QDir(strict).exists());
+            QVERIFY2(s.answers.asked.last().startsWith(QStringLiteral("Genko: PSD の文字に表せない装飾のある台詞が 1 つあるため")),
+                     qPrintable(s.answers.asked.last()));
+            QVERIFY(s.answers.asked.last().contains(QStringLiteral("2 ページ「グラデ」: グラデーションの文字塗り")));
+            // the appearance way: asked first (stopping writes nothing), then those lines drawn as pictures
+            d->psd_unsupported->setCurrentIndex(d->psd_unsupported->findData(QStringLiteral("rasterize")));
+            QVERIFY(d->options().psd_rasterize);
+            d->folder->setText(app_out);
+            s.clicks << QStringLiteral("やめる");
+            d->run();
+            QVERIFY2(s.boxes.last().contains(QStringLiteral("2 ページ「グラデ」")), qPrintable(s.boxes.last()));
+            QVERIFY(!QDir(app_out).exists());
+            s.clicks << QStringLiteral("画像にして書き出す") << QStringLiteral("閉じる");
+            d->run();
+            QCOMPARE(d->result(), static_cast<int>(QDialog::Accepted));
+            QCOMPARE((*d->reply)["psd_text"]["rasterized"][0]["line"], Json("grad"));
+            QVERIFY2(s.boxes.last().contains(QStringLiteral("画像にした台詞: 1")), qPrintable(s.boxes.last()));
+            QVERIFY(s.boxes.last().contains(QStringLiteral("ルビは自動では追従しません")));
+        };
+        s.act("act_export")->trigger();
+        QVERIFY(seen);
+        QProcess cli;
+        const QString cli_out = s.tmp.path() + QStringLiteral("/psd-cli");
+        cli.start(QStringLiteral(GENKO_CLI), {QStringLiteral("export"), gui_test::qpath(s.path), cli_out, QStringLiteral("--format"), QStringLiteral("psd"),
+                                             QStringLiteral("--dpi"), QStringLiteral("72"), QStringLiteral("--psd-text"), QStringLiteral("editable"),
+                                             QStringLiteral("--rasterize-unsupported")});
+        QVERIFY(cli.waitForFinished(300000));
+        QVERIFY2(cli.exitCode() == 0, cli.readAllStandardError().constData());
+        QVERIFY(!test::exports::tree(app_out).empty());
+        const QString difference = test::exports::tree_difference(app_out, cli_out);
+        QVERIFY2(difference.isEmpty(), qPrintable(difference));
+    }
+
+    // The check before writing (書き出す runs 入稿前の点検 first): what stops a print, on the pages written, asked about —
+    // stop (nothing written), fix it (the dialog closes, 点検 opens with the problem), or write anyway; the official
+    // export stopped by the studio's preflight, in Japanese.
+    void exportAsksAboutWhatStopsAPrint() {
+        core::Document book = gui_test::new_doc(3);
+        book.add_line(core::Num(2), "はみ出した台詞", "", std::nullopt, "", core::Num(-3.0), core::Num(40.0), core::Num(30.0), core::Num(20.0));
+        Studio s(book);
+        const QString out = s.tmp.path() + QStringLiteral("/out");
+        const QString question = QStringLiteral("書き出す前に点検したところ、止まる問題が 1 件ありました。\n・2 ページ: 台詞「はみ出した台詞」が仕上がり線の外にはみ出している（裁ち落とされる）");
+        // stop: nothing written; only page 1: nothing stops it
+        s.on_export = [&](app::ExportDialog* d) {
+            d->dpi->setValue(72);
+            d->folder->setText(out);
+            s.clicks << QStringLiteral("やめる");
+            d->run();
+            QCOMPARE(s.boxes.back(), question);
+            QVERIFY(!QFileInfo::exists(out));
+            QCOMPARE(d->result(), 0);
+            d->which->setCurrentIndex(1);
+            const auto asked = s.boxes.size();
+            s.clicks << QStringLiteral("閉じる");
+            d->run();
+            QCOMPARE(s.boxes.size(), asked + 1);
+            QCOMPARE(s.boxes.back(), QStringLiteral("1 個のファイルを書き出しました。\n%1").arg(out));
+            QCOMPARE(d->result(), static_cast<int>(QDialog::Accepted));
+        };
+        s.act("act_export")->trigger();
+        QCOMPARE(QDir(out).entryList(QDir::Files).size(), 1);
+        QDir(out).removeRecursively();
+        // fix it: the dialog closes and 点検 opens with the problem
+        s.on_export = [&](app::ExportDialog* d) {
+            d->dpi->setValue(72);
+            d->folder->setText(out);
+            s.clicks << QStringLiteral("直す（点検パネルを開く）");
+            d->run();
+            QVERIFY(d->fix_requested);
+            QCOMPARE(d->result(), static_cast<int>(QDialog::Rejected));
+        };
+        s.act("act_export")->trigger();
+        QVERIFY(!QFileInfo::exists(out));
+        QVERIFY(s.dock(QStringLiteral("点検"))->isVisible());
+        QCOMPARE(s.window->checks()->list->item(0)->text(), QStringLiteral("⛔ 2 ページ ・ 台詞「はみ出した台詞」が仕上がり線の外にはみ出している（裁ち落とされる）"));
+        // write anyway: every page
+        s.on_export = [&](app::ExportDialog* d) {
+            d->dpi->setValue(72);
+            d->folder->setText(out);
+            s.clicks << QStringLiteral("このまま書き出す") << QStringLiteral("閉じる");
+            d->run();
+        };
+        s.act("act_export")->trigger();
+        QCOMPARE(QDir(out).entryList(QDir::Files).size(), 3);
+        // the official export: the studio's (HumanService.export), stopped by its preflight (the pages are not finished),
+        // in Japanese, nothing written
+        s.on_export = [&](app::ExportDialog* d) {
+            d->format->setCurrentIndex(d->format->findData(QStringLiteral("pdf")));
+            d->official->setChecked(true);
+            d->folder->setText(s.tmp.path() + QStringLiteral("/official"));
+            d->run();
+        };
+        s.answers.asked.clear();
+        s.act("act_export")->trigger();
+        QVERIFY2(s.answers.asked.contains(QStringLiteral("Genko: 書き出せませんでした。\n1 ページが仕上げ（finish）に進んでいない\n"
+                                                         "2 ページが仕上げ（finish）に進んでいない\n3 ページが仕上げ（finish）に進んでいない")),
+                 qPrintable(s.answers.asked.join(QStringLiteral(" | "))));
+        QVERIFY(!QFileInfo::exists(s.tmp.path() + QStringLiteral("/official")));
+    }
+
+    // The official export from the app goes through the studio (service::run_export → HumanService.export, as `genko
+    // studio export` does): a finished book's pages written and the export approval recorded in the book, by the app's
+    // person, at the revision written.
+    void officialExportFromTheApp() {
+        core::Document book = gui_test::new_doc(2);
+        for (std::size_t i = 0; i < book.pages.size(); ++i) book.edit_page(i).stage = "finish";
+        Studio s(book);
+        const std::int64_t revision = storage::load_document(s.path).document.revision;
+        const QString out = s.tmp.path() + QStringLiteral("/official");
+        s.on_export = [&](app::ExportDialog* d) {
+            d->format->setCurrentIndex(d->format->findData(QStringLiteral("png")));
+            d->official->setChecked(true);
+            d->dpi->setValue(72);
+            d->folder->setText(out);
+            s.clicks << QStringLiteral("閉じる");
+            d->run();
+            QCOMPARE(d->result(), static_cast<int>(QDialog::Accepted));
+        };
+        s.act("act_export")->trigger();
+        QCOMPARE(QDir(out).entryList(QDir::Files).size(), 2);
+        QCOMPARE(s.boxes.back(), QStringLiteral("2 個のファイルを書き出しました。\n%1").arg(out));
+        const core::Document saved = storage::load_document(s.path).document;
+        const Json& approvals = saved.studio.at("approvals");
+        QCOMPARE(approvals.back()["gate"], Json("export"));
+        QCOMPARE(approvals.back()["rev"], Json(revision));
+        QVERIFY(approvals.back()["by"].get<std::string>().starts_with("human:"));
+        QCOMPARE(saved.revision, revision + 1);
+    }
+
+    // 印刷: the pages to a PDF printer — each sheet's picture is render_page's at the printer's resolution (Python's
+    // max(150, min(600, resolution))), cut to the area, a spread's two pages side by side (left first), fitted to the
+    // paper and centred or at the page's real size; the PDF has a page for each sheet.
+    void printingToAPdf() {
+        core::Document book = gui_test::new_doc(3);
+        book.edit_page(1).spread_with = core::Num(3);
+        book.edit_page(2).spread_with = core::Num(2);
+        Studio s(book);
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", s.ink()},
+                                                      {"points", Json::array({Json::array({20, 30, 0.5}), Json::array({150, 250, 0.9})})}, {"width_mm", 2}},
+                                                 Json{{"op", "add_stroke"}, {"page", 3}, {"layer_id", s.ink(2)},
+                                                      {"points", Json::array({Json::array({40, 30, 0.5}), Json::array({100, 50, 0.9})})}, {"width_mm", 3}}})));
+        const core::Document& doc = s.doc();
+        // the sheets: a spread's pages on one (left first), the others one each
+        const auto one_each = app::printing::sheets(doc, {1, 2, 3}, false);
+        QCOMPARE(one_each.size(), std::size_t{3});
+        const auto spread = app::printing::sheets(doc, {1, 2, 3}, true);
+        QCOMPARE(spread.size(), std::size_t{2});
+        QCOMPARE(spread[1].size(), std::size_t{2});
+        QCOMPARE(spread[1][0]->side(), std::string("left"));
+        QCOMPARE(app::printing::sheets(doc, {2, 1}, true).size(), std::size_t{2});  // (its partner not printed: alone)
+        const QString pdf = s.tmp.path() + QStringLiteral("/print.pdf");
+        QPrinter printer(QPrinter::ScreenResolution);
+        printer.setOutputFormat(QPrinter::PdfFormat);
+        printer.setOutputFileName(pdf);
+        const int resolution = printer.resolution();
+        const int dpi = app::printing::print_dpi(printer);
+        QCOMPARE(dpi, std::max(150, std::min(600, resolution != 0 ? resolution : 300)));
+        std::vector<QImage> pictures;
+        std::vector<QRectF> targets;
+        std::vector<std::pair<int, int>> progress;
+        QCOMPARE(app::printing::print_pages(
+                     doc, printer, {1, 3}, QStringLiteral("trim"), [&](int done, int of) { progress.emplace_back(done, of); }, QStringLiteral("fit"), false,
+                     [&](const QImage& picture, const QRectF& target) {
+                         pictures.push_back(picture);
+                         targets.push_back(target);
+                     }),
+                 2);
+        QCOMPARE(progress, (std::vector<std::pair<int, int>>{{1, 2}, {2, 2}}));
+        for (std::size_t i = 0; i < 2; ++i) {
+            const render::Image want = printed(doc, doc.page(i == 0 ? 0 : 2), "trim", dpi);
+            QCOMPARE(pictures[i].size(), QSize(want.width(), want.height()));
+            QVERIFY(rgb_rows(pictures[i]) == want.tobytes());
+        }
+        const QByteArray data = [&] {
+            QFile f(pdf);
+            return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+        }();
+        QVERIFY(data.startsWith("%PDF"));
+        QCOMPARE(data.count("/Type /Page") - data.count("/Type /Pages"), 2);
+        // fitted and centred on the paper (the printer's whole paint area: QPainter's viewport on it)
+        const QRectF room(0, 0, printer.width(), printer.height());
+        for (const QRectF& t : targets) {
+            QVERIFY(std::abs(t.center().x() - room.center().x()) < 1e-6 && std::abs(t.center().y() - room.center().y()) < 1e-6);
+            QVERIFY(std::abs(t.width() - room.width()) < 1e-6 || std::abs(t.height() - room.height()) < 1e-6);
+        }
+        // a spread on one sheet, the whole paper with its crop marks, at the page's real size
+        const QString pdf2 = s.tmp.path() + QStringLiteral("/spread.pdf");
+        QPrinter second(QPrinter::ScreenResolution);
+        second.setOutputFormat(QPrinter::PdfFormat);
+        second.setOutputFileName(pdf2);
+        pictures.clear();
+        targets.clear();
+        QCOMPARE(app::printing::print_pages(doc, second, {2, 3}, QStringLiteral("paper"), {}, QStringLiteral("actual"), true,
+                                            [&](const QImage& picture, const QRectF& target) {
+                                                pictures.push_back(picture);
+                                                targets.push_back(target);
+                                            }),
+                 1);
+        const render::Image left = printed(doc, *spread[1][0], "paper", dpi);
+        const render::Image right = printed(doc, *spread[1][1], "paper", dpi);
+        render::Image joined = render::Image::create("RGB", render::Size{left.width() + right.width(), std::max(left.height(), right.height())},
+                                                     render::Ink{255, 255, 255});
+        joined.paste(left, render::Point{0, 0});
+        joined.paste(right, render::Point{left.width(), 0});
+        QVERIFY(rgb_rows(pictures[0]) == joined.tobytes());
+        const double factor = static_cast<double>(second.resolution() != 0 ? second.resolution() : dpi) / dpi;
+        QCOMPARE(targets[0].width(), pictures[0].width() * factor);
+        QCOMPARE(targets[0].height(), pictures[0].height() * factor);
+    }
+
+    // 印刷…: the dialog's pages (1-N, このページだけ, Python's words for pages it cannot read), printing to the printer
+    // given (the status line says how many sheets), none without a printer chosen, its preview.
+    void printDialog() {
+        core::Document book = core::new_episode("小さな本", core::Num(1), 3, core::PageSpec::custom(60, 60, 54, 54, 2, 5, 5, 4, 4, 600));
+        Studio s(book);
+        s.window->go_to_page(2);
+        const QString pdf = s.tmp.path() + QStringLiteral("/p.pdf");
+        bool seen = false;
+        s.on_print = [&](app::PrintDialog* d) {
+            seen = true;
+            QCOMPARE(d->windowTitle(), QStringLiteral("印刷"));
+            QCOMPARE(d->pages->text(), QStringLiteral("1-3"));
+            QCOMPARE(d->pages->toolTip(), QStringLiteral("例: 1-4, 7（全ページなら 1-3）"));
+            QCOMPARE(d->chosen(), (std::vector<std::int64_t>{1, 2, 3}));
+            QStringList areas, scales;
+            for (int i = 0; i < d->area->count(); ++i) areas << d->area->itemText(i);
+            for (int i = 0; i < d->scale->count(); ++i) scales << d->scale->itemText(i);
+            QCOMPARE(areas, (QStringList{QStringLiteral("仕上がりで切る"), QStringLiteral("裁ち落としまで"), QStringLiteral("用紙全体（トンボ付き）")}));
+            // (PC5 I-f: Photoshop's 拡大・縮小 % after them)
+            QCOMPARE(scales, (QStringList{QStringLiteral("用紙に合わせる"), QStringLiteral("原寸（100%）"), QStringLiteral("拡大・縮小")}));
+            QCOMPARE(d->spreads->text(), QStringLiteral("見開きは 2 ページを 1 枚に"));
+            QCOMPARE(d->print_button->text(), QStringLiteral("プリンターを選んで印刷…"));
+            d->this_page->click();
+            QCOMPARE(d->pages->text(), QStringLiteral("2"));
+            d->pages->setText(QString());
+            d->print();
+            QVERIFY(s.answers.asked.contains(QStringLiteral("印刷: 印刷するページがありません")));
+            d->pages->setText(QStringLiteral("9"));
+            d->print();
+            QVERIFY(s.answers.asked.contains(QStringLiteral("印刷: 9 ページはありません（1〜3）")));
+            // no printer chosen (the system's dialog cancelled): nothing printed
+            d->pages->setText(QStringLiteral("1-3"));
+            d->print();
+            QVERIFY(s.answers.asked.contains(QStringLiteral("QPrintDialog")));
+            QCOMPARE(d->result(), 0);
+            // its preview
+            QPrintPreviewDialog* preview = d->preview();
+            QVERIFY(preview != nullptr);
+            QCOMPARE(preview->windowTitle(), QStringLiteral("印刷のプレビュー"));
+            preview->close();
+            QPrinter printer(QPrinter::ScreenResolution);
+            printer.setOutputFormat(QPrinter::PdfFormat);
+            printer.setOutputFileName(pdf);
+            d->pages->setText(QStringLiteral("1, 3"));
+            d->print(&printer);
+            QCOMPARE(d->result(), static_cast<int>(QDialog::Accepted));
+        };
+        s.act("act_print")->trigger();
+        QVERIFY(seen);
+        QCOMPARE(s.window->statusBar()->currentMessage(), QStringLiteral("2 枚を印刷に送りました"));
+        QFile f(pdf);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        const QByteArray data = f.readAll();
+        QCOMPARE(data.count("/Type /Page") - data.count("/Type /Pages"), 2);
+    }
+
+    // 履歴: Python's words for the changes (history.describe), the present marked, a click undoes or redoes to just
+    // after a change (the book and the list follow), the saved times; a book's changes saved before this session and
+    // another's, from the journal.
+    void historyPanel() {
+        QCOMPARE(app::history::describe(Json::array()), QStringLiteral("原稿を変えた"));
+        QCOMPARE(app::history::describe(Json::array({Json{{"op", "add_stroke"}}, Json{{"op", "add_stroke"}}})), QStringLiteral("ブラシで描いた（2 回）"));
+        QCOMPARE(app::history::describe(Json::array({Json{{"op", "split_frame"}}, Json{{"op", "erase"}}, Json{{"op", "zzz"}}})),
+                 QStringLiteral("コマを割った ほか 2 件"));
+        QCOMPARE(app::history::describe(Json::array({Json{{"op", "no_such_op"}}})), QStringLiteral("原稿を変えた"));
+        QCOMPARE(app::history::when(std::nullopt), QString());
+        const QDateTime now = QDateTime::currentDateTime();
+        QCOMPARE(app::history::when(static_cast<double>(now.toSecsSinceEpoch())), QStringLiteral("　") + now.toString(QStringLiteral("HH:mm")));
+        const QDateTime before = now.addDays(-3);
+        QCOMPARE(app::history::when(static_cast<double>(before.toSecsSinceEpoch())), QStringLiteral("　") + before.toString(QStringLiteral("MM/dd HH:mm")));
+
+        // a book with two changes saved before this session: one by someone else
+        QTemporaryDir tmp;
+        const fs::path path = gui_test::path_of(tmp.path() + QStringLiteral("/book.genko"));
+        gui_test::write_book(path, gui_test::new_doc(2));
+        {
+            auto options = gui_test::quick(gui_test::path_of(tmp.path() + QStringLiteral("/recovery")));
+            options.actor = "ai:hermes";
+            auto other = app::Session::open(path, options);
+            other->apply(Json::array({Json{{"op", "add_page"}, {"count", 1}}}));
+            QVERIFY(other->wait_saved(std::chrono::milliseconds(10000)));
+        }
+        {
+            auto mine = app::Session::open(path, gui_test::quick(gui_test::path_of(tmp.path() + QStringLiteral("/recovery"))));
+            mine->apply(Json::array({Json{{"op", "set_nombre"}, {"show", true}}}));
+            QVERIFY(mine->wait_saved(std::chrono::milliseconds(10000)));
+        }
+        core::Document unused = gui_test::read_book(path);
+        QCOMPARE(unused.pages.size(), std::size_t{3});
+        Studio s(gui_test::new_doc(1), false);  // (the answers and the config folder; the window used is below)
+        auto session = app::Session::open(path, gui_test::quick(gui_test::path_of(tmp.path() + QStringLiteral("/recovery"))));
+        app::MainWindow w(session);
+        w.resize(1280, 860);
+        w.show();
+        QDockWidget* dock = nullptr;
+        for (QDockWidget* d : w.findChildren<QDockWidget*>()) {
+            if (d->windowTitle() == QStringLiteral("ヒストリー")) dock = d;
+        }
+        QVERIFY(dock != nullptr && dock->isHidden());
+        w.action(QStringLiteral("act_history"))->trigger();
+        QVERIFY(dock->isVisible());
+        app::HistoryPanel* panel = w.history();
+        QListWidget* list = panel->list();
+        const auto texts = [&] {
+            QStringList out;
+            for (int i = 0; i < list->count(); ++i) out << list->item(i)->text();
+            return out;
+        };
+        const auto stamp = [](const QString& text) { return text.section(QStringLiteral("　"), 0, -2); };  // (without the time)
+        QStringList shown = texts();
+        QCOMPARE(shown.size(), 3);
+        QCOMPARE(shown[0], QStringLiteral("（はじめ）"));
+        QCOMPARE(stamp(shown[1]), QStringLiteral("ページを足した　〔hermes〕"));
+        QVERIFY(shown[1].endsWith(QStringLiteral("　") + QDateTime::currentDateTime().toString(QStringLiteral("HH:mm"))) ||
+                shown[1].endsWith(QStringLiteral("　") + QDateTime::currentDateTime().addSecs(-60).toString(QStringLiteral("HH:mm"))));
+        QVERIFY(shown[2].startsWith(QStringLiteral("▶ ノンブルを変えた　")));
+        QVERIFY(list->item(2)->font().bold());
+        QCOMPARE(list->currentRow(), 2);
+        QCOMPARE(panel->done(), 2);
+        // this session's changes: in memory first, then saved (their time added)
+        QVERIFY(w.apply_ops(Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", gui_test::ink_of(w.book().page(0))->id},
+                                              {"points", Json::array({Json::array({10, 10, 0.5}), Json::array({50, 60, 0.5})})}}})));
+        QVERIFY(w.apply_ops(Json::array({Json{{"op", "split_frame"}, {"page", 1}, {"frame_id", w.book().page(0).leaf_frames().front()->id},
+                                              {"axis", "horizontal"}}, Json{{"op", "erase"}, {"page", 1},
+                                              {"layer_id", gui_test::ink_of(w.book().page(0))->id}, {"points", Json::array({Json::array({10, 10}), Json::array({20, 20})})},
+                                              {"width_mm", 2}}})));
+        QVERIFY(gui_test::wait_for([&] { return texts().size() == 5; }));
+        QVERIFY(texts()[3] == QStringLiteral("ブラシで描いた") || texts()[3].startsWith(QStringLiteral("ブラシで描いた　")));  // (saved by now, or not yet)
+        QVERIFY(texts()[4].startsWith(QStringLiteral("▶ コマを割った ほか 1 件")));
+        QVERIFY(session->wait_saved(std::chrono::milliseconds(10000)));
+        QVERIFY(gui_test::wait_for([&] { return texts()[4].startsWith(QStringLiteral("▶ コマを割った ほか 1 件　")); }));
+        // back to just after the stroke: the split and the erase undone, shown grey as undone
+        list->scrollToItem(list->item(3));
+        QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, list->visualItemRect(list->item(3)).center());
+        QCOMPARE(panel->done(), 3);
+        QCOMPARE(w.book().page(0).leaf_frames().size(), std::size_t{1});
+        QCOMPARE(gui_test::ink_strokes(w.book(), 0), std::size_t{1});
+        shown = texts();
+        QVERIFY(shown[3].startsWith(QStringLiteral("▶ ブラシで描いた")));
+        QVERIFY(shown[4].startsWith(QStringLiteral("コマを割った ほか 1 件（戻した操作）")));
+        QCOMPARE(list->item(4)->foreground().color(), QColor(app::theme::tokens().faint));
+        // forward again
+        QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, list->visualItemRect(list->item(4)).center());
+        QCOMPARE(panel->done(), 4);
+        QCOMPARE(w.book().page(0).leaf_frames().size(), std::size_t{2});
+        // back past this session: the change saved before it, undone through the journal
+        QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, list->visualItemRect(list->item(1)).center());
+        QVERIFY(gui_test::wait_for([&] { return session->wait_idle(std::chrono::milliseconds(50)) && !w.book().nombre.value("show", false); }));
+        QCOMPARE(w.book().pages.size(), std::size_t{3});
+        // (the book read again after the journal's undo: the changes undone, next first, as redo takes them)
+        QVERIFY2(gui_test::wait_for([&] {
+                     return panel->done() == 1 && texts().size() == 5 && texts()[2].startsWith(QStringLiteral("ノンブルを変えた（戻した操作）"));
+                 }),
+                 qPrintable(texts().join(QStringLiteral(" | "))));
+        QVERIFY(texts()[1].startsWith(QStringLiteral("▶ ページを足した　〔hermes〕")));
+        QVERIFY(texts()[3].startsWith(QStringLiteral("ブラシで描いた（戻した操作）")));
+        QVERIFY(texts()[4].startsWith(QStringLiteral("コマを割った ほか 1 件（戻した操作）")));
+        // and forward again through the journal: the nombre back
+        QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, list->visualItemRect(list->item(2)).center());
+        QVERIFY(gui_test::wait_for([&] { return session->wait_idle(std::chrono::milliseconds(50)) && w.book().nombre.value("show", false); }));
+        QVERIFY(gui_test::wait_for([&] { return panel->done() == 2 && texts()[2].startsWith(QStringLiteral("▶ ノンブルを変えた　")); }));
+        // a book not saved anywhere: its changes in memory, no times
+        Studio fresh(gui_test::new_doc(2), false);
+        fresh.act("act_history")->trigger();
+        QVERIFY(fresh.window->apply_ops(Json::array({Json{{"op", "add_page"}, {"count", 1}}})));
+        fresh.window->history()->refresh();
+        QCOMPARE(fresh.window->history()->list()->item(1)->text(), QStringLiteral("▶ ページを足した"));
+        fresh.window->history()->go_to(0);
+        QCOMPARE(fresh.doc().pages.size(), std::size_t{2});
+        QCOMPARE(fresh.window->history()->list()->item(1)->text(), QStringLiteral("ページを足した（戻した操作）"));
+    }
+
+    // 入稿前の点検 (F9) and the 点検 panel: Python's issues, the stopping ones first and by page, with Python's words;
+    // the summary and the status line; a click shows the problem on its page; after an edit the list is out of date.
+    void checksPanel() {
+        core::Document book = gui_test::new_doc(3);
+        book.add_line(core::Num(3), "はみ出した台詞", "", std::nullopt, "", core::Num(-3.0), core::Num(40.0), core::Num(30.0), core::Num(20.0));
+        core::Layer paint;
+        paint.id = "paintlayer01";
+        paint.kind = core::LayerKind::Raster;
+        paint.title = "塗り";
+        paint.raster_png = std::make_shared<const std::string>(render::write_png(render::Image::create("RGBA", render::Size{20, 20}, render::Ink{0, 0, 0, 255})));
+        book.edit_page(1).layers.push_back(paint);
+        Studio s(book);
+        s.window->go_to_page(1);
+        s.act("act_checks")->trigger();
+        app::CheckPanel* panel = s.window->checks();
+        QVERIFY(s.dock(QStringLiteral("点検"))->isVisible());
+        // Python's report (formats/checks is held to it by test_contract_checks), listed as Python lists it: the stopping
+        // ones first, then by page; "<mark> <page> ページ ・ <message>"
+        const Json report = formats::checks::book(s.doc(), s.session->path());
+        QCOMPARE(report["errors"].get<int>(), 1);
+        QCOMPARE(report["warnings"].get<int>(), 2);
+        QStringList rows;
+        for (int i = 0; i < panel->list->count(); ++i) rows << panel->list->item(i)->text();
+        QCOMPARE(rows, (QStringList{QStringLiteral("⛔ 3 ページ ・ 台詞「はみ出した台詞」が仕上がり線の外にはみ出している（裁ち落とされる）"),
+                                    QStringLiteral("⚠ 1 ページ ・ 1 ページに何も描かれていない"),
+                                    QStringLiteral("⚠ 2 ページ ・ ペイントのレイヤー「塗り」は 200 dpi で持っている（細い線はペンのレイヤーで描くと 600 dpi でもきれい）")}));
+        QCOMPARE(panel->list->item(0)->toolTip(), QStringLiteral("クリックでそのページのその場所を表示"));
+        QCOMPARE(panel->summary->text(), QStringLiteral("止まる問題 1 件、確かめた方がよいこと 2 件。"));
+        QCOMPARE(s.window->last_notice(), QStringLiteral("止まる問題 1 件・確かめた方がよいこと 2 件（点検パネル）"));
+        // a click: the page in front, the place marked, the line chosen, the words in the status line
+        QTest::mouseClick(panel->list->viewport(), Qt::LeftButton, {}, panel->list->visualItemRect(panel->list->item(0)).center());
+        QCOMPARE(s.window->page_index(), 2);
+        QVERIFY(s.canvas()->highlight_box.has_value());
+        QCOMPARE(*s.canvas()->highlight_box, (std::array<double, 4>{-3.0, 40.0, 30.0, 20.0}));
+        QCOMPARE(s.canvas()->selected_line_id.value(), s.doc().story.front().id);
+        QCOMPARE(s.window->last_notice(), QStringLiteral("台詞「はみ出した台詞」が仕上がり線の外にはみ出している（裁ち落とされる）"));
+        // a layer's problem: that layer drawn on; the mark gone with another page (the box of a page-wide problem: none)
+        QTest::mouseClick(panel->list->viewport(), Qt::LeftButton, {}, panel->list->visualItemRect(panel->list->item(2)).center());
+        QCOMPARE(s.window->page_index(), 1);
+        QCOMPARE(s.window->target_layer()->id, std::string("paintlayer01"));
+        QVERIFY(!s.canvas()->highlight_box.has_value());
+        // the list after an edit: out of date until run again
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_page"}, {"count", 1}}})));
+        QCOMPARE(panel->summary->text(), QStringLiteral("止まる問題 1 件、確かめた方がよいこと 2 件。\n原稿が変わりました。「点検する」で最新にします。"));
+        panel->run_button->click();
+        QCOMPARE(panel->summary->text(), QStringLiteral("止まる問題 1 件、確かめた方がよいこと 3 件。"));
+        // a book with nothing to fix
+        Studio clean(gui_test::new_doc(1));
+        QVERIFY(clean.window->apply_ops(Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", clean.ink()},
+                                                          {"points", Json::array({Json::array({40, 40, 0.5}), Json::array({60, 70, 0.5})})}}})));
+        clean.act("act_checks")->trigger();
+        QCOMPARE(clean.window->checks()->summary->text(), QStringLiteral("直すところは見つかりませんでした。書き出せます。"));
+        QCOMPARE(clean.window->last_notice(), QStringLiteral("直すところは見つかりませんでした"));
+        QCOMPARE(clean.window->checks()->list->count(), 0);
+    }
+
+    // スマホの画面の範囲を表示: where each screen ends on a tall page (the page's width filling a phone held upright),
+    // drawn over the page; the choice kept (ui/phone_view) and taken by the next window; on at first for a tall strip.
+    void phoneScreens() {
+        Studio tall(core::new_episode("縦読み", core::Num(1), 1, core::PageSpec::webtoon()));
+        QVERIFY(tall.act("act_phone")->isChecked());  // (nothing chosen: on for a tall strip)
+        QVERIFY(tall.canvas()->phone_view);
+        const core::Rect trim = tall.doc().page(0).trim_rect_mm();
+        const double step = trim.width.value() * (844.0 / 390.0);  // (Python's PHONE_ASPECT = 844 / 390, then times the width)
+        std::vector<double> want;
+        for (double y = trim.y.value() + step; y < trim.y.value() + trim.height.value() - 1e-6; y += step) want.push_back(y);
+        QCOMPARE(want.size(), std::size_t{2});  // (Python's test: two breaks on the webtoon paper)
+        QCOMPARE(tall.canvas()->phone_screens(), want);
+        tall.canvas()->fit_page();
+        const QImage on = tall.canvas()->grab().toImage();
+        tall.act("act_phone")->trigger();
+        QVERIFY(!tall.canvas()->phone_view);
+        QCOMPARE(app::settings()->value(QStringLiteral("ui/phone_view")).toString(), QStringLiteral("false"));
+        const QImage off = tall.canvas()->grab().toImage();
+        QVERIFY(on != off);  // (the screens' breaks were drawn)
+        Studio next(core::new_episode("縦読み", core::Num(1), 1, core::PageSpec::webtoon()));
+        QVERIFY(!next.act("act_phone")->isChecked());  // (as chosen)
+        next.act("act_phone")->trigger();
+        QCOMPARE(app::settings()->value(QStringLiteral("ui/phone_view")).toString(), QStringLiteral("true"));
+        Studio a4;
+        QVERIFY(a4.act("act_phone")->isChecked());  // (as chosen, whatever the paper)
+        QVERIFY(a4.canvas()->phone_view);
+    }
+
+    // 目盛りを表示: the scales along the top and the left; a guide pulled from the top (across) or the left (down) and
+    // let go on the page: add_ruler {"kind": "guide", "axis", "at"} as Python's window sends it, with its words; none
+    // when let go on a scale, none with the scales off.
+    void scalesAndGuides() {
+        Studio s;
+        app::PageCanvas* c = s.canvas();
+        c->fit_page();
+        const QImage before = c->grab().toImage();
+        s.act("act_scale")->trigger();
+        QVERIFY(c->show_scale);
+        const QImage after = c->grab().toImage();
+        QVERIFY(before != after);
+        QVERIFY(before.copy(0, 0, c->width(), 16) != after.copy(0, 0, c->width(), 16));  // (the strip along the top)
+        const auto pull = [&](const QPointF& from, const QPointF& to, const QPointF& release) {
+            mouse(c, QEvent::MouseButtonPress, from, Qt::LeftButton);
+            mouse(c, QEvent::MouseMove, (from + to) / 2, Qt::LeftButton);
+            mouse(c, QEvent::MouseMove, to, Qt::LeftButton);
+            mouse(c, QEvent::MouseButtonRelease, release, Qt::NoButton);
+        };
+        const int page_no = 1;
+        const QPointF across = c->to_widget(QPointF(50.0, 80.123));
+        s.ops.clear();
+        pull(QPointF(across.x(), 8), across, across);
+        QCOMPARE(s.ops.size(), std::size_t{1});
+        Json op = s.ops[0][0];
+        QVERIFY(op["id"].is_string() && op["id"].get<std::string>().size() == 12);
+        op.erase("id");
+        QCOMPARE(qs(op.dump()), qs(Json{{"op", "add_ruler"}, {"page", page_no}, {"kind", "guide"}, {"axis", "h"},
+                                        {"at", core::py_round(c->to_mm(across).y(), 2)}}.dump()));
+        // (PC5 H-b: a guide drawn now, moved with the move tool, taken away dragged off)
+        QCOMPARE(s.window->last_notice(), QStringLiteral("ガイドを引きました。移動ツールでドラッグして動かし、定規の上かキャンバスの外へ出すと消えます"));
+        const QPointF down = c->to_widget(QPointF(30.5, 100.0));
+        pull(QPointF(8, down.y()), down, down);
+        QCOMPARE(s.ops.size(), std::size_t{2});
+        QCOMPARE(qs(s.ops[1][0]["axis"].dump()), QStringLiteral("\"v\""));
+        QCOMPARE(s.ops[1][0]["at"].get<double>(), core::py_round(c->to_mm(down).x(), 2));
+        const Json& rulers = s.doc().page(0).rulers;
+        QCOMPARE(rulers.size(), std::size_t{2});
+        QCOMPARE(qs(rulers[0]["kind"].get<std::string>()), QStringLiteral("guide"));
+        // let go on the scale, or never moved: nothing
+        pull(QPointF(across.x(), 8), across, QPointF(across.x(), 6));
+        mouse(c, QEvent::MouseButtonPress, QPointF(across.x(), 8), Qt::LeftButton);
+        mouse(c, QEvent::MouseButtonRelease, across, Qt::NoButton);
+        QCOMPARE(s.ops.size(), std::size_t{2});
+        // the corner where the scales meet starts nothing; scales off: the top of the canvas is the page again
+        s.act("act_scale")->trigger();
+        QVERIFY(!c->show_scale);
+        pull(QPointF(across.x(), 8), across, across);
+        QCOMPARE(s.ops.size(), std::size_t{2});
+    }
+
+    // While the rest of a book is still being read (its first page shown first, SPEC PERF-01), nothing of it goes out
+    // and it is not checked — the pages not read yet would come out blank and be found empty: 書き出し, 印刷 and 入稿前の
+    // 点検 say so (as an op that reaches those pages is refused), and so do the 点検する button, printing and an export
+    // dialog holding such a book.
+    void nothingGoesOutWhileTheBookIsRead() {
+        QTemporaryDir tmp;
+        const fs::path path = gui_test::path_of(tmp.path() + QStringLiteral("/book.genko"));
+        const fs::path recovery = gui_test::path_of(tmp.path() + QStringLiteral("/recovery"));
+        gui_test::write_book(path, gui_test::new_doc(3));
+        {
+            auto drawing = app::Session::open(path, gui_test::quick(recovery));
+            for (int page = 1; page <= 3; ++page) {
+                drawing->apply(Json::array({Json{{"op", "add_stroke"}, {"page", page}, {"layer", "ink"},
+                                                 {"points", Json::array({Json::array({20, 30, 0.5}), Json::array({60, 90, 0.5})})}}}));
+            }
+            QVERIFY(drawing->wait_saved(std::chrono::milliseconds(10000)));
+        }
+        app::Session::Options options = gui_test::quick(recovery);
+        options.defer_pages = true;
+        options.read_rest_now = false;
+        auto session = app::Session::from(app::Session::read(path, options), path, options);
+        QVERIFY(session->loading());
+        Studio s(gui_test::new_doc(1), false);  // (the answers and the config folder; the window used is below)
+        app::MainWindow w(session);
+        w.resize(1280, 860);
+        w.show();
+        const QString wait = QStringLiteral("原稿の残りのページを読み込み中です。読み込みが終わってから、もう一度操作してください");
+        for (const char* name : {"act_export", "act_print", "act_checks"}) {
+            w.flash(QString(), 1, true);
+            w.action(QString::fromLatin1(name))->trigger();
+            QCOMPARE(w.last_error(), wait);
+        }
+        QVERIFY2(s.answers.asked.isEmpty(), qPrintable(s.answers.asked.join(QStringLiteral(" | "))));
+        w.checks()->run_button->click();
+        QCOMPARE(w.checks()->summary->text(), QStringLiteral("点検できませんでした。") + wait);
+        QCOMPARE(w.checks()->list->count(), 0);
+        QPrinter printer(QPrinter::ScreenResolution);
+        printer.setOutputFormat(QPrinter::PdfFormat);
+        printer.setOutputFileName(tmp.path() + QStringLiteral("/print.pdf"));
+        QString printed;
+        try {
+            app::printing::print_pages(*session->snapshot(), printer, {1, 2, 3});
+        } catch (const core::Error& e) {
+            printed = QString::fromStdString(e.code());
+        }
+        QCOMPARE(printed, QStringLiteral("page_not_loaded"));
+        app::ExportDialog dialog(&w, session->snapshot(), session->path(), session->actor());
+        dialog.folder->setText(tmp.path() + QStringLiteral("/out"));
+        dialog.run();
+        QCOMPARE(s.answers.asked, QStringList{QStringLiteral("Genko: ") + wait});
+        QVERIFY(!QFileInfo::exists(tmp.path() + QStringLiteral("/out")));
+        // read whole: checked
+        session->read_rest();
+        QVERIFY(gui_test::wait_for([&] { return !session->loading(); }));
+        w.action(QStringLiteral("act_checks"))->trigger();
+        QVERIFY(w.checks()->report().has_value());
+    }
+
+    // 履歴 while the journal undoes a change saved before this session (a click back past this session's changes,
+    // its undo held up by another writer): what can be redone is listed in the order Redo takes it — the journal's
+    // change first, then this session's (as Python's journal gives them back) —, a click forward while that undo is
+    // written waits (said; nothing changed), and the book is saved as before (no change it cannot take held back);
+    // then forward again in that order.
+    void historyWhileTheJournalUndoes() {
+        QTemporaryDir tmp;
+        const fs::path path = gui_test::path_of(tmp.path() + QStringLiteral("/book.genko"));
+        const fs::path recovery = gui_test::path_of(tmp.path() + QStringLiteral("/recovery"));
+        gui_test::write_book(path, gui_test::new_doc(2));
+        {
+            auto options = gui_test::quick(recovery);
+            options.actor = "ai:hermes";
+            auto other = app::Session::open(path, options);
+            other->apply(Json::array({Json{{"op", "add_page"}, {"count", 1}}}));
+            QVERIFY(other->wait_saved(std::chrono::milliseconds(10000)));
+        }
+        {
+            auto mine = app::Session::open(path, gui_test::quick(recovery));
+            mine->apply(Json::array({Json{{"op", "set_nombre"}, {"show", true}}}));
+            QVERIFY(mine->wait_saved(std::chrono::milliseconds(10000)));
+        }
+        Studio s(gui_test::new_doc(1), false);  // (the answers and the config folder; the window used is below)
+        auto session = app::Session::open(path, gui_test::quick(recovery));
+        app::MainWindow w(session);
+        w.resize(1280, 860);
+        w.show();
+        w.action(QStringLiteral("act_history"))->trigger();
+        app::HistoryPanel* panel = w.history();
+        QListWidget* list = panel->list();
+        const auto texts = [&] {
+            QStringList out;
+            for (int i = 0; i < list->count(); ++i) out << list->item(i)->text();
+            return out;
+        };
+        const auto click = [&](int row) {
+            list->scrollToItem(list->item(row));
+            QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, list->visualItemRect(list->item(row)).center());
+        };
+        QVERIFY(w.apply_ops(Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", gui_test::ink_of(w.book().page(0))->id},
+                                              {"points", Json::array({Json::array({10, 10, 0.5}), Json::array({50, 60, 0.5})})}}})));
+        QVERIFY(w.apply_ops(Json::array({Json{{"op", "split_frame"}, {"page", 1}, {"frame_id", w.book().page(0).leaf_frames().front()->id},
+                                              {"axis", "horizontal"}}})));
+        QVERIFY(session->wait_saved(std::chrono::milliseconds(10000)));
+        QVERIFY(gui_test::wait_for([&] { return texts().size() == 5 && texts()[4].startsWith(QStringLiteral("▶ コマを割った　")); }));
+        auto other = std::make_unique<storage::ProjectLock>(path, "ai:other");
+        other->try_acquire();
+        click(1);
+        QCOMPARE(panel->done(), 1);
+        QVERIFY(session->job_running());
+        const QStringList waiting = texts();
+        QVERIFY2(waiting.size() == 5 && waiting[2].startsWith(QStringLiteral("ノンブルを変えた（戻した操作）")) &&
+                     waiting[3].startsWith(QStringLiteral("ブラシで描いた（戻した操作）")) && waiting[4].startsWith(QStringLiteral("コマを割った（戻した操作）")),
+                 qPrintable(waiting.join(QStringLiteral(" | "))));
+        click(3);
+        QCOMPARE(panel->done(), 1);
+        QCOMPARE(w.last_error(), QStringLiteral("取り消しを原稿に書き込み中です。書き終わってからやり直してください。"));
+        other->release();
+        QVERIFY(gui_test::wait_for([&] { return session->wait_idle(std::chrono::milliseconds(50)); }));
+        QVERIFY2(session->status().kind == app::SaveKind::Saved, qPrintable(session->status().code));
+        QVERIFY(!w.book().nombre.value("show", false));
+        QCOMPARE(gui_test::ink_strokes(w.book(), 0), std::size_t{0});
+        // forward to just after the line: the nombre, then the line; the split stays undone
+        QVERIFY(gui_test::wait_for([&] { return texts().size() == 5 && texts()[1].startsWith(QStringLiteral("▶ ページを足した")); }));
+        click(3);
+        QVERIFY(gui_test::wait_for([&] { return session->wait_idle(std::chrono::milliseconds(50)) && gui_test::ink_strokes(w.book(), 0) == 1; }));
+        QVERIFY(w.book().nombre.value("show", false));
+        QCOMPARE(w.book().page(0).leaf_frames().size(), std::size_t{1});
+        QCOMPARE(session->status().kind, app::SaveKind::Saved);
+        QVERIFY2(gui_test::wait_for([&] {
+                     return texts().size() == 5 && texts()[3].startsWith(QStringLiteral("▶ ブラシで描いた")) &&
+                            texts()[4].startsWith(QStringLiteral("コマを割った（戻した操作）"));
+                 }),
+                 qPrintable(texts().join(QStringLiteral(" | "))));
+    }
+
+    // 履歴 follows the book in front: another book's tab brings its list at once (a click on it is about that book),
+    // and while the panel is behind another tab it is not read again after each change — only when it comes back.
+    void historyFollowsTheBookInFront() {
+        Studio s(gui_test::new_doc(2));
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_page"}, {"count", 1}}})));
+        QVERIFY(s.saved());
+        s.act("act_history")->trigger();
+        QListWidget* list = s.window->history()->list();
+        QVERIFY(gui_test::wait_for([&] { return list->count() == 2; }));
+        const fs::path second = gui_test::path_of(s.tmp.path() + QStringLiteral("/second.genko"));
+        gui_test::write_book(second, gui_test::new_doc(1));
+        s.window->add_document(app::Session::open(second, gui_test::quick(gui_test::path_of(s.tmp.path() + QStringLiteral("/recovery2")))));
+        QCOMPARE(s.window->current_document(), 1);
+        QCOMPARE(list->count(), 1);  // (its own: nothing done in it yet)
+        s.window->switch_document(0);
+        QCOMPARE(s.window->current_document(), 0);
+        QCOMPARE(list->count(), 2);
+        // behind the page list: left as it is until it is in front again
+        s.dock(QStringLiteral("ページ"))->raise();
+        QVERIFY(gui_test::wait_for([&] { return s.dock(QStringLiteral("ヒストリー"))->geometry().right() < 0; }));
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_page"}, {"count", 1}}})));
+        QTest::qWait(400);
+        QCOMPARE(list->count(), 2);
+        s.dock(QStringLiteral("ヒストリー"))->raise();
+        QVERIFY(gui_test::wait_for([&] { return list->count() == 3; }));
+    }
+
+    // 印刷のプレビュー of a book with something this build does not draw yet: said before the preview opens (an empty
+    // preview, and its own 印刷 button printing nothing, would say nothing); a sheet that cannot be drawn at the
+    // printer's resolution, said after the preview has tried it.
+    void printPreviewSaysWhatItCannotDraw() {
+        // (a picture placed on page 2 whose asset is a JPEG 2000 file: Python draws it, this build does not read JPEG 2000 —
+        // a recorded limit. Placed pictures themselves are drawn since M5①, TIFF and WebP since M6, the netpbm formats since
+        // PC4 F-a.)
+        const std::string webp = genko::core::a2b_base64("AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiA=");
+        core::Document book = gui_test::new_doc(2);
+        core::Layer placed;
+        placed.id = "placed000001";
+        placed.kind = core::LayerKind::Placed;
+        placed.asset = genko::storage::AssetStore::ref(webp);
+        placed.placement_mm = core::Rect{core::Num(10), core::Num(10), core::Num(40), core::Num(40)};
+        book.edit_page(1).layers.push_back(placed);
+        Studio s(book);
+        (void)genko::storage::AssetStore(s.path).put_bytes(webp, ".png");
+        bool seen = false;
+        s.on_print = [&](app::PrintDialog* d) {
+            seen = true;
+            QVERIFY(d->preview() == nullptr);
+            QCOMPARE(s.answers.asked.size(), 2);
+            QVERIFY2(s.answers.asked[1].startsWith(QStringLiteral("印刷: この版の Genko では、まだ扱えないもの（")), qPrintable(s.answers.asked[1]));
+            d->pages->setText(QStringLiteral("1"));  // (the page this build draws: its preview)
+            QPrintPreviewDialog* preview = d->preview();
+            QVERIFY(preview != nullptr);
+            preview->close();
+        };
+        s.act("act_print")->trigger();
+        QVERIFY(seen);
+        // a page too large to draw at the printer's resolution (2 m square): the preview opens, then says why it is empty
+        Studio huge(core::new_episode("大きな紙", core::Num(1), 1, core::PageSpec::custom(2000, 2000, 1990, 1990, 2, 5, 5, 4, 4, 600)));
+        bool opened = false;
+        huge.on_print = [&](app::PrintDialog* d) {
+            QPrintPreviewDialog* preview = d->preview();
+            opened = preview != nullptr;
+            if (!opened) return;
+            QVERIFY2(gui_test::wait_for([&] { return huge.answers.asked.size() >= 2; }), qPrintable(huge.answers.asked.join(QStringLiteral(" | "))));
+            QCOMPARE(huge.answers.asked[1], QStringLiteral("印刷: この解像度では絵が大きすぎて扱えません（解像度を下げてください）"));
+            preview->close();
+        };
+        huge.act("act_print")->trigger();
+        QVERIFY(opened);
+    }
+
+    // A filter plugin's correction layer (plugins off): printing says it as the plugin's refusal (not as something
+    // this build does not draw); one not installed does nothing, as in Python, and the page prints.
+    void printingSaysAPluginsOwnRefusal() {
+        const QString plugins = gui_test::config_folder().path() + QStringLiteral("/plugins");
+        QVERIFY(QDir().mkpath(plugins));
+        {
+            QFile file(plugins + QStringLiteral("/offplug.py"));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("NAME = 'off'\n\ndef run(image, **kw):\n    return image\n");
+        }
+        core::Document book = gui_test::new_doc(2);
+        for (const auto& [page, kind] : {std::pair{0, "plugin:offplug"}, std::pair{1, "plugin:absent"}}) {
+            core::Layer adjust;
+            adjust.id = "adjust00000" + std::to_string(page);
+            adjust.kind = core::LayerKind::Adjust;
+            adjust.adjust = Json{{"kind", kind}};
+            book.edit_page(static_cast<std::size_t>(page)).layers.push_back(adjust);
+        }
+        Studio s(book);
+        const auto print = [&](std::int64_t page) {
+            QPrinter printer(QPrinter::ScreenResolution);
+            printer.setOutputFormat(QPrinter::PdfFormat);
+            printer.setOutputFileName(s.tmp.path() + QStringLiteral("/p%1.pdf").arg(page));
+            try {
+                return QString::number(app::printing::print_pages(s.doc(), printer, {page}));
+            } catch (const core::Error& e) {
+                return genko::wording::error(QString::fromUtf8(e.what()));
+            }
+        };
+        QCOMPARE(print(1), QStringLiteral("プラグイン「offplug」は使う設定になっていません（編集 → 環境設定 → プラグイン… で選びます）"));
+        QCOMPARE(print(2), QStringLiteral("1"));
+        QFile::remove(plugins + QStringLiteral("/offplug.py"));
+    }
+
+    // An export that could not put back a file it had set aside (the files there before are kept until every new one
+    // is in place) says where that file is now — each of them, when it could not put back several.
+    void anExportSaysWhereAFileItCouldNotPutBackIs() {
+        QCOMPARE(genko::wording::error(QStringLiteral("[Errno 13] Permission denied: '/b/x.png'; the file that was there is kept as "
+                                                    "'/b/.genko-0123456789abcdef.old'")),
+                 QStringLiteral("書き出したファイルを置けず、前からあったファイルも元の場所に戻せませんでした。前のファイルは「/b/.genko-0123456789abcdef.old」にあります"));
+        QCOMPARE(genko::wording::error(QStringLiteral("[Errno 13] Permission denied: '/b/z.png'; the file that was there is kept as "
+                                                    "'/b/.genko-0123456789abcdef.old'; the file that was there is kept as "
+                                                    "'/c/.genko-fedcba9876543210.old'")),
+                 QStringLiteral("書き出したファイルを置けず、前からあったファイルも元の場所に戻せませんでした。前のファイルは"
+                                "「/b/.genko-0123456789abcdef.old」「/c/.genko-fedcba9876543210.old」にあります"));
+        // (the session's conflict for an adopted recovery point not yet written when another writer saved)
+        QCOMPARE(genko::wording::error(QStringLiteral("the recovery point was not taken: the book changed meanwhile")),
+                 QStringLiteral("その間に原稿が変わったため、復旧用コピーを採用していません（元に戻すか、別名で保存してください）"));
+    }
+
+    // PC4 F-c (SPEC.md FILE-01; 節 F 5.2・5.3・5.4): ファイル → 書き出し ▸ — 書き出し形式… (its estimate and preview made on a worker,
+    // following the choices; the page at half its size written where asked), PNG としてクイック書き出し (asked where while the
+    // preferences ask; beside the book, unasked, when they say so), 書き出しの環境設定… (its values kept, the same as 環境設定 →
+    // 書き出し), Web 用に保存（従来）… (its panes and estimate from a worker, a preset's settings, the file written), レイヤーからファイル…
+    // (a folder a page) — and レイヤー's: a layer of nothing says so and writes nothing.
+    void theExportMenuWritesPictures() {
+        core::PageSpec spec = core::PageSpec::a4_mono();
+        spec.dpi = core::Num(72);
+        Studio studio(core::new_episode("書き出し", core::Num(1), 2, spec));
+        app::MainWindow* w = studio.window.get();
+        const fs::path out = gui_test::path_of(studio.tmp.path() + QStringLiteral("/out"));
+        fs::create_directories(out);
+        QString save_to;
+        int asked_where = 0;
+        studio.answers.responder->save_path = [&](const QString&, const QString&) {
+            ++asked_where;
+            return save_to;
+        };
+        // (a window's work waited for: its estimates and panes come from a worker)
+        const auto wait_for = [](const std::function<bool()>& done, int ms) {
+            QElapsedTimer clock;
+            clock.start();
+            while (!done() && clock.elapsed() < ms) QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            return done();
+        };
+        std::function<int(QDialog*)> handle;
+        const auto previous = studio.answers.responder->exec;
+        studio.answers.responder->exec = [&](QDialog* dialog) -> int {
+            if (handle && (qobject_cast<app::ExportAsDialog*>(dialog) || qobject_cast<app::SaveForWebDialog*>(dialog) ||
+                           qobject_cast<app::ExportPreferencesDialog*>(dialog) || qobject_cast<app::LayersToFilesDialog*>(dialog))) {
+                return handle(dialog);
+            }
+            return previous(dialog);
+        };
+        // 書き出し形式…: the estimate and the preview follow the choices; JPEG at 50 % written
+        QStringList seen;
+        bool estimated = false, again = false, previewed = false;
+        int width_shown = 0;
+        handle = [&](QDialog* dialog) -> int {
+            auto* d = qobject_cast<app::ExportAsDialog*>(dialog);
+            estimated = wait_for([d] { return d->estimates() >= 1 && !d->estimating(); }, 20000);
+            seen << d->estimate->text();
+            previewed = !d->preview->pixmap().isNull();
+            const int done = d->estimates();
+            d->format->setCurrentIndex(d->format->findData(QStringLiteral("jpg")));
+            d->scale->setValue(50.0);
+            again = wait_for([d, done] { return d->estimates() > done && !d->estimating(); }, 20000);
+            seen << d->estimate->text();
+            width_shown = d->width->value();
+            return int(QDialog::Accepted);
+        };
+        save_to = qs(core::path_to_utf8(out / "half.jpg"));
+        studio.act("act_export_as")->trigger();
+        const int half_width = static_cast<int>(std::lround(render::mm_to_px(spec.width_mm.value(), 72) / 2.0));
+        QVERIFY(estimated && again && previewed);
+        QVERIFY2(seen.value(0).contains(QStringLiteral("約")) && seen.value(1).startsWith(QStringLiteral("JPG")), qPrintable(seen.join(QStringLiteral(" / "))));
+        QCOMPARE(width_shown, half_width);
+        QVERIFY2(fs::is_regular_file(out / "half.jpg"), qPrintable(w->last_notice()));
+        QCOMPARE(render::open_image(storage::read_file(out / "half.jpg")).width(), half_width);
+        // PNG としてクイック書き出し: asked where (the preferences ask); then beside the book, unasked
+        asked_where = 0;
+        save_to = qs(core::path_to_utf8(out / "quick.png"));
+        studio.act("act_quick_export_png")->trigger();
+        QCOMPARE(asked_where, 1);
+        QVERIFY2(fs::is_regular_file(out / "quick.png"), qPrintable(w->last_notice()));
+        formats::ExportPreferences prefs = app::export_preferences();
+        QCOMPARE(prefs.format, std::string("png"));
+        prefs.location = formats::QuickLocation::SameFolder;
+        app::set_export_preferences(prefs);
+        studio.act("act_quick_export_png")->trigger();
+        QCOMPARE(asked_where, 1);
+        QVERIFY2(fs::is_regular_file(studio.path.parent_path() / "book_p001.png"), qPrintable(w->last_notice()));
+        // (again: the file there kept, the next free name written — the coordinator's P3-8)
+        const std::string first = storage::read_file(studio.path.parent_path() / "book_p001.png");
+        studio.act("act_quick_export_png")->trigger();
+        QVERIFY2(fs::is_regular_file(studio.path.parent_path() / "book_p001-2.png"), qPrintable(w->last_notice()));
+        QCOMPARE(storage::read_file(studio.path.parent_path() / "book_p001.png"), first);
+        // 書き出しの環境設定…: JPG kept, and 環境設定 → 書き出し shows it
+        handle = [&](QDialog* dialog) -> int {
+            auto* d = qobject_cast<app::ExportPreferencesDialog*>(dialog);
+            d->form->format->setCurrentIndex(d->form->format->findData(QStringLiteral("jpg")));
+            d->form->quality->setValue(40);
+            d->buttons->button(QDialogButtonBox::Ok)->click();
+            return d->result();
+        };
+        studio.act("act_export_prefs")->trigger();
+        QCOMPARE(app::export_preferences().format, std::string("jpg"));
+        QCOMPARE(app::export_preferences().jpeg_quality, 40);
+        {
+            app::preferences::PreferencesDialog dialog(w);
+            QStringList pages;
+            for (int i = 0; i < dialog.tabs->count(); ++i) pages << dialog.tabs->tabText(i);
+            QVERIFY2(pages.contains(QStringLiteral("書き出し")), qPrintable(pages.join(QStringLiteral(" | "))));
+            QCOMPARE(dialog.export_form->format->currentData().toString(), QStringLiteral("jpg"));
+            dialog.export_form->srgb->setChecked(false);
+            dialog.save();
+            QVERIFY(!app::export_preferences().srgb);
+        }
+        studio.act("act_quick_export_png")->trigger();
+        QVERIFY2(fs::is_regular_file(studio.path.parent_path() / "book_p001.jpg"), qPrintable(w->last_notice()));
+        for (const char* key : {"export/quick_format", "export/quick_location", "export/jpeg_quality", "export/metadata", "export/srgb"})
+            app::settings()->remove(QString::fromLatin1(key));
+        // Web 用に保存（従来）…: a preset's settings, the panes and the estimate, the GIF written
+        seen.clear();
+        bool panes = false, four = false;
+        QString format_after, preset_after;
+        int colours_after = 0;
+        handle = [&](QDialog* dialog) -> int {
+            auto* d = qobject_cast<app::SaveForWebDialog*>(dialog);
+            panes = wait_for([d] { return d->previews() >= 1 && !d->working(); }, 20000);
+            seen << d->estimate->text();
+            const int done = d->previews();
+            d->preset->setCurrentIndex(d->preset->findData(QStringLiteral("GIF 32 Dithered")));
+            format_after = d->format->currentData().toString();
+            colours_after = d->colors->value();
+            again = wait_for([d, done] { return d->previews() > done && !d->working(); }, 20000);
+            seen << d->estimate->text();
+            d->views->setCurrentIndex(3);  // (4 アップ)
+            four = !d->pictures[3]->pixmap().isNull();
+            d->colors->setValue(20);  // (a hand's change: no preset's any more)
+            preset_after = d->preset->currentText();
+            return int(QDialog::Accepted);
+        };
+        save_to = qs(core::path_to_utf8(out / "web.gif"));
+        studio.act("act_save_for_web")->trigger();
+        QVERIFY(panes && again && four);
+        QVERIFY2(seen.value(0).startsWith(QStringLiteral("PNG-24")) && seen.value(1).startsWith(QStringLiteral("GIF")), qPrintable(seen.join(QStringLiteral(" / "))));
+        QCOMPARE(format_after, QStringLiteral("gif"));
+        QCOMPARE(colours_after, 32);
+        QCOMPARE(preset_after, QStringLiteral("（カスタム）"));
+        QVERIFY2(fs::is_regular_file(out / "web.gif"), qPrintable(w->last_notice()));
+        QVERIFY(storage::read_file(out / "web.gif").starts_with("GIF89a"));
+        // レイヤーからファイル…: a folder a page
+        handle = [&](QDialog* dialog) -> int {
+            auto* d = qobject_cast<app::LayersToFilesDialog*>(dialog);
+            d->folder->setText(qs(core::path_to_utf8(out / "layers")));
+            d->prefix->setText(QStringLiteral("p"));
+            return int(QDialog::Accepted);
+        };
+        studio.act("act_layers_to_files")->trigger();
+        QVERIFY2(fs::is_directory(out / "layers"), qPrintable(w->last_notice()));
+        int files = 0;
+        for (const auto& entry : fs::recursive_directory_iterator(out / "layers")) files += entry.is_regular_file() && core::path_to_utf8(entry.path().filename()).starts_with("p_");
+        QVERIFY2(files > 0, qPrintable(w->last_notice()));
+        // レイヤー → 書き出し形式…: 透明部分 on for a PNG; greyed and off for a JPEG (no alpha: over white); as it was again for
+        // a PNG (PC4 F-c's review P2-1)
+        w->set_target_layer(studio.ink());
+        std::vector<std::pair<bool, bool>> transparency;
+        handle = [&](QDialog* dialog) -> int {
+            auto* d = qobject_cast<app::ExportAsDialog*>(dialog);
+            for (const char* ext : {"png", "jpg", "png"}) {
+                d->format->setCurrentIndex(d->format->findData(QString::fromLatin1(ext)));
+                transparency.emplace_back(d->transparency->isEnabled(), d->transparency->isChecked());
+            }
+            return int(QDialog::Rejected);
+        };
+        studio.act("act_layer_export_as")->trigger();
+        QCOMPARE(transparency, (std::vector<std::pair<bool, bool>>{{true, true}, {false, false}, {true, true}}));
+        // the layer panel's right click on a layer: レイヤー's two (PNG としてクイック書き出し・書き出し形式…)
+        {
+            auto* list = w->findChild<QListWidget*>(QStringLiteral("layerList"));
+            QVERIFY(list != nullptr);
+            const int row = list->currentRow();  // (the layer chosen above)
+            QVERIFY(row >= 0);
+            QList<QAction*> offered;
+            QTimer::singleShot(0, [&offered] {
+                if (auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget())) {
+                    for (QAction* a : menu->actions())
+                        if (!a->isSeparator()) offered << a;  // (a separator is the menu's own: gone with it)
+                    menu->close();
+                }
+            });
+            const QRect place = list->visualItemRect(list->item(row));
+            QMetaObject::invokeMethod(list, "customContextMenuRequested", Qt::DirectConnection, Q_ARG(QPoint, place.center()));
+            // (PC4 E6 after them: 混合オプション…, レイヤースタイルをコピー・ペースト・消去)
+            QCOMPARE(offered, (QList<QAction*>{studio.act("act_layer_quick_export_png"), studio.act("act_layer_export_as"), studio.act("act_layer_style_blending"),
+                                               studio.act("act_layer_style_copy"), studio.act("act_layer_style_paste"), studio.act("act_layer_style_clear")}));
+        }
+        // レイヤー → PNG としてクイック書き出し of a layer of nothing: said, nothing written
+        save_to = qs(core::path_to_utf8(out / "nothing.png"));
+        studio.act("act_layer_quick_export_png")->trigger();
+        QVERIFY(!fs::exists(out / "nothing.png"));
+        QVERIFY2(w->last_notice().contains(QStringLiteral("書き出すものがありません")), qPrintable(w->last_notice()));
+    }
+
+    // (PC4 F-c, the coordinator's P3-8) No way out writes into the book: 書き出し形式… (a page, every page), Web 用に保存,
+    // PNG としてクイック書き出し and レイヤーからファイル… refuse its folder and what is in it, said in Japanese, nothing written.
+    // 書き出し形式…'s every page asks once — before anything is written — when files of those names are there: no keeps
+    // them, yes writes over them; a folder of none asks nothing.
+    void exportsGuardTheBookAndAskBeforeReplacing() {
+        core::PageSpec spec = core::PageSpec::a4_mono();
+        spec.dpi = core::Num(72);
+        Studio studio(core::new_episode("守り", core::Num(1), 2, spec));
+        const fs::path out = gui_test::path_of(studio.tmp.path() + QStringLiteral("/pages"));
+        fs::create_directories(out);
+        QString target = QStringLiteral("all");
+        QString folder = qs(core::path_to_utf8(out));
+        QString save_to;
+        int questions = 0;
+        bool replace = false;
+        const auto previous = studio.answers.responder->exec;
+        studio.answers.responder->exec = [&](QDialog* dialog) -> int {
+            if (auto* d = qobject_cast<app::ExportAsDialog*>(dialog)) {
+                d->target->setCurrentIndex(d->target->findData(target));
+                return int(QDialog::Accepted);
+            }
+            if (qobject_cast<app::SaveForWebDialog*>(dialog) != nullptr) return int(QDialog::Accepted);
+            if (auto* d = qobject_cast<app::LayersToFilesDialog*>(dialog)) {
+                d->folder->setText(folder);
+                return int(QDialog::Accepted);
+            }
+            return previous(dialog);
+        };
+        studio.answers.responder->existing_dir = [&](const QString&, const QString&) { return folder; };
+        studio.answers.responder->save_path = [&](const QString&, const QString&) { return save_to; };
+        studio.answers.responder->question = [&](const QString& title, const QString& text) {
+            ++questions;
+            studio.answers.asked << title + QStringLiteral(": ") + text;
+            return replace;
+        };
+        // every page into a folder of none: nothing asked
+        studio.act("act_export_as")->trigger();
+        QCOMPARE(questions, 0);
+        QVERIFY2(fs::is_regular_file(out / "p001.png") && fs::is_regular_file(out / "p002.png"), qPrintable(studio.window->last_notice()));
+        storage::write_atomic(out / "p001.png", "old");
+        // again: asked once; no — nothing written
+        studio.act("act_export_as")->trigger();
+        QCOMPARE(questions, 1);
+        QVERIFY2(studio.answers.asked.last().contains(QStringLiteral("置き換えますか")), qPrintable(studio.answers.asked.last()));
+        QCOMPARE(storage::read_file(out / "p001.png"), std::string("old"));
+        // yes — written over
+        replace = true;
+        studio.act("act_export_as")->trigger();
+        QCOMPARE(questions, 2);
+        QVERIFY(storage::read_file(out / "p001.png") != std::string("old"));
+        // the book's folder: refused by every way out, nothing written
+        const auto refused = [&](const char* what) {
+            const QString said = studio.answers.asked.isEmpty() ? QString() : studio.answers.asked.last();
+            return said.contains(QStringLiteral("原稿")) ? QString() : QString::fromLatin1(what) + QStringLiteral(": ") + said;
+        };
+        folder = qs(core::path_to_utf8(studio.path / "pages"));
+        studio.act("act_export_as")->trigger();
+        QCOMPARE(refused("every page"), QString());
+        QVERIFY(!fs::exists(studio.path / "pages"));
+        target = QStringLiteral("page");
+        save_to = qs(core::path_to_utf8(studio.path / "page.png"));
+        studio.act("act_export_as")->trigger();
+        QCOMPARE(refused("a page"), QString());
+        save_to = qs(core::path_to_utf8(studio.path));
+        studio.act("act_export_as")->trigger();
+        QVERIFY2(studio.answers.asked.last().contains(QStringLiteral("原稿そのもの")), qPrintable(studio.answers.asked.last()));
+        save_to = qs(core::path_to_utf8(studio.path / "web.png"));
+        studio.act("act_save_for_web")->trigger();
+        QCOMPARE(refused("Save for Web"), QString());
+        save_to = qs(core::path_to_utf8(studio.path / "quick.png"));
+        studio.act("act_quick_export_png")->trigger();
+        QCOMPARE(refused("quick"), QString());
+        folder = qs(core::path_to_utf8(studio.path / "layers"));
+        studio.act("act_layers_to_files")->trigger();
+        QCOMPARE(refused("layers"), QString());
+        for (const char* name : {"pages", "page.png", "web.png", "quick.png", "layers"}) QVERIFY2(!fs::exists(studio.path / name), name);
+        QVERIFY(fs::is_directory(studio.path));  // (the book as it was)
+        QVERIFY(fs::is_regular_file(studio.path / "project.json"));
+    }
+
+    // A book without pages: its export dialog opens, with nothing to show.
+    void exportDialogOfABookWithoutPages() {
+        Studio s;
+        core::Document empty = gui_test::new_doc(1);
+        empty.pages.clear();
+        app::ExportDialog dialog(s.window.get(), std::make_shared<const core::Document>(empty), std::nullopt, "human:tester");
+        QVERIFY(dialog.preview->image().isNull());
+        dialog.format->setCurrentIndex(dialog.format->findData(QStringLiteral("pdf")));
+        QVERIFY(dialog.preview->image().isNull());
+    }
+
+    // PC5 I-f (SPEC.md AUTO-01「プリント」): プリント…'s parts of Photoshop's — 位置と大きさ (拡大・縮小, 中央に配置 or 上・左),
+    // トンボと印 (corner marks off for the whole paper, which has Genko's own), カラーマネジメント (RGB printer profiles only, the four
+    // intents, 黒点の補正) — the settings into a PDF (PDF に出力…), kept for the next time (and 1 部プリント); a CMYK printer
+    // profile refused, said.
+    void printDialogOfPC5() {
+        core::Document book = core::new_episode("小さな本", core::Num(1), 2, core::PageSpec::custom(60, 60, 54, 54, 2, 5, 5, 4, 4, 600));
+        Studio s(book);
+        app::settings()->remove(QStringLiteral("print/last"));
+        const QString pdf = s.tmp.path() + QStringLiteral("/marks.pdf");
+        formats::print::Setup chosen;
+        bool seen = false;
+        s.on_print = [&](app::PrintDialog* d) {
+            seen = true;
+            QStringList tabs;
+            for (int i = 0; i < d->tabs->count(); ++i) tabs << d->tabs->tabText(i);
+            QCOMPARE(tabs, (QStringList{QStringLiteral("ページ"), QStringLiteral("位置と大きさ"), QStringLiteral("トンボと印"), QStringLiteral("カラーマネジメント")}));
+            QCOMPARE(d->setup(), formats::print::Setup{});  // (nothing kept yet: the defaults)
+            QStringList handling, intents, profiles;
+            for (int i = 0; i < d->color_handling->count(); ++i) handling << d->color_handling->itemText(i);
+            for (int i = 0; i < d->intent->count(); ++i) intents << d->intent->itemText(i);
+            for (int i = 0; i < d->printer_profile->count(); ++i) profiles << d->printer_profile->itemData(i).toString();
+            QCOMPARE(handling, (QStringList{QStringLiteral("プリンターによるカラー管理"), QStringLiteral("Genko によるカラー管理")}));
+            QCOMPARE(intents, (QStringList{QStringLiteral("知覚的"), QStringLiteral("彩度"), QStringLiteral("相対的な色域を維持"), QStringLiteral("絶対的な色域を維持")}));
+            QVERIFY(profiles.contains(QStringLiteral("display-p3")) && profiles.contains(QStringLiteral("srgb")));
+            QVERIFY(!profiles.contains(QStringLiteral("coated-cmyk")) && !profiles.contains(QStringLiteral("gray-gamma-2.2")));  // (Qt prints RGB)
+            QVERIFY(!d->printer_profile->isEnabled() && !d->percent->isEnabled() && !d->left->isEnabled());
+            d->area->setCurrentIndex(d->area->findData(QStringLiteral("paper")));
+            QVERIFY(!d->corner_marks->isEnabled());  // (the whole paper has Genko's crop marks)
+            d->area->setCurrentIndex(d->area->findData(QStringLiteral("bleed")));
+            QVERIFY(d->corner_marks->isEnabled());
+            d->scale->setCurrentIndex(d->scale->findData(QStringLiteral("percent")));
+            QVERIFY(d->percent->isEnabled());
+            d->percent->setValue(50);
+            d->center->setChecked(false);
+            QVERIFY(d->left->isEnabled() && d->top->isEnabled());
+            d->left->setValue(10);
+            d->top->setValue(20);
+            for (QCheckBox* box : {d->corner_marks, d->center_marks, d->registration_marks, d->labels}) box->setChecked(true);
+            d->color_handling->setCurrentIndex(1);
+            QVERIFY(d->printer_profile->isEnabled());
+            d->printer_profile->setCurrentIndex(d->printer_profile->findData(QStringLiteral("display-p3")));
+            d->intent->setCurrentIndex(d->intent->findData(QStringLiteral("perceptual")));
+            d->bpc->setChecked(false);
+            chosen = d->setup();
+            QCOMPARE(chosen.area, std::string("bleed"));
+            QCOMPARE(chosen.scale, std::string("percent"));
+            QCOMPARE(chosen.percent, 50.0);
+            QVERIFY(!chosen.center && chosen.left_mm == 10.0 && chosen.top_mm == 20.0);
+            QVERIFY(chosen.marks.corner && chosen.marks.center && chosen.marks.registration && chosen.marks.labels && !chosen.marks.description);
+            QCOMPARE(chosen.color, (formats::print::Color{true, "display-p3", "perceptual", false}));
+            d->print_pdf(pdf);
+            QCOMPARE(d->result(), static_cast<int>(QDialog::Accepted));
+        };
+        s.act("act_print")->trigger();
+        QVERIFY(seen);
+        QCOMPARE(s.window->statusBar()->currentMessage(), QStringLiteral("2 枚を PDF に書きました: %1").arg(pdf));
+        QFile f(pdf);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        const QByteArray data = f.readAll();
+        QVERIFY(data.startsWith("%PDF"));
+        QCOMPARE(data.count("/Type /Page") - data.count("/Type /Pages"), 2);
+        QCOMPARE(app::printing::last_setup(), chosen);
+        // never into the book's folder (the review's P2-1): said, nothing written
+        const std::string kept = storage::read_file(s.path / "project.json");
+        s.on_print = [&](app::PrintDialog* d) {
+            d->print_pdf(QString::fromStdString(core::path_to_utf8(s.path / "project.json")));
+            QVERIFY(d->result() != static_cast<int>(QDialog::Accepted));
+        };
+        s.act("act_print")->trigger();
+        QCOMPARE(storage::read_file(s.path / "project.json"), kept);
+        // opened again: as it was left; a CMYK printer profile (an ICC file) refused, said, nothing written
+        const QString cmyk = s.tmp.path() + QStringLiteral("/cmyk.icc");
+        storage::write_atomic(gui_test::path_of(cmyk), *core::builtin_profile("coated-cmyk")->bytes);
+        const QString refused = s.tmp.path() + QStringLiteral("/refused.pdf");
+        s.on_print = [&](app::PrintDialog* d) {
+            QCOMPARE(d->setup(), chosen);
+            formats::print::Setup other = chosen;
+            other.color.profile = cmyk.toStdString();
+            d->show_setup(other);
+            d->print_pdf(refused);
+            QVERIFY(d->result() != static_cast<int>(QDialog::Accepted));
+        };
+        s.act("act_print")->trigger();
+        QVERIFY2(s.answers.asked.join(QLatin1Char('|')).contains(QStringLiteral("印刷: プリンタープロファイルが RGB のものではありません")),
+                 qPrintable(s.answers.asked.join(QLatin1Char('|'))));
+        QVERIFY(!QFile::exists(refused));
+        app::settings()->remove(QStringLiteral("print/last"));
+    }
+
+    // PC5 I-f: print_sheets — each sheet's picture (Genko's colour management: formats::print::page_picture through the
+    // printer's profile, not the screen's colours) drawn where formats::print::place puts it on the printer's printable part,
+    // the marks on the finished size (the bleed's crop marks inside the picture's edges).
+    void printSheetsPlacesThemAndTheirMarks() {
+        core::Document book = core::new_episode("小さな本", core::Num(1), 1, core::PageSpec::custom(60, 60, 54, 54, 2, 5, 5, 4, 4, 600));
+        Studio s(book);
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", s.ink()},
+                                                      {"points", Json::array({Json::array({10, 10, 0.5}), Json::array({40, 45, 0.9})})}, {"width_mm", 3}}})));
+        const core::Document& doc = s.doc();
+        QPrinter printer(QPrinter::ScreenResolution);
+        printer.setOutputFormat(QPrinter::PdfFormat);
+        printer.setOutputFileName(s.tmp.path() + QStringLiteral("/sheet.pdf"));
+        formats::print::Setup setup;
+        setup.area = "bleed";
+        setup.scale = "actual";
+        setup.dpi = 150;
+        setup.marks = formats::print::marks_of("corner,center,registration,labels");
+        setup.color = formats::print::Color{true, "display-p3", "relative", true};
+        std::vector<QImage> pictures;
+        std::vector<QRectF> targets;
+        const std::vector<formats::print::Sheet> sheets = app::printing::print_sheets(doc, printer, {1}, setup, {}, [&](const QImage& picture, const QRectF& target) {
+            pictures.push_back(picture);
+            targets.push_back(target);
+        });
+        QCOMPARE(sheets.size(), std::size_t{1});
+        const formats::print::Sheet& sheet = sheets[0];
+        const render::Image want = formats::print::page_picture(doc, doc.page(0), "bleed", 150, setup.color);
+        QVERIFY(rgb_rows(pictures[0]) == want.tobytes());
+        const auto [paper, printable] = app::printing::paper_of(printer);
+        const double k = printer.resolution() / 25.4;
+        QVERIFY(std::abs(targets[0].x() - (sheet.image.x - printable.x) * k) < 1e-6 && std::abs(targets[0].width() - sheet.image.w * k) < 1e-6);
+        QVERIFY(std::abs(sheet.image.w - want.width() * 25.4 / 150) < 1e-6);  // (its real size)
+        // the bleed's finished size inside the picture, the marks on it, outside the picture
+        QVERIFY(sheet.trim.x > sheet.image.x + 1.0 && sheet.trim.x + sheet.trim.w < sheet.image.x + sheet.image.w - 1.0);
+        QCOMPARE(sheet.lines.size(), std::size_t{20});
+        QCOMPARE(sheet.circles.size(), std::size_t{4});
+        QCOMPARE(sheet.lines[0].y0, sheet.trim.y);
+        QVERIFY(sheet.lines[0].x0 < sheet.image.x && sheet.lines[0].x1 < sheet.lines[0].x0);
+        QCOMPARE(sheet.texts.size(), std::size_t{1});
+        QCOMPARE(sheet.texts[0].text, std::string("小さな本　1 ページ"));
+    }
+
+    // PC5 I-f: 1 部プリント (Alt+Shift+Ctrl+P, after プリント…) — the book's every page with the last settings, one copy, to the
+    // printer given (none asked); said.
+    void printOneCopy() {
+        Studio s(gui_test::new_doc(2));
+        QCOMPARE(s.act("act_print_one_copy")->text(), QStringLiteral("1 部プリント"));
+        QCOMPARE(s.act("act_print_one_copy")->shortcuts(), (QList<QKeySequence>{QKeySequence(QStringLiteral("Ctrl+Alt+Shift+P"))}));
+        const QStringList file = menu_items(s.window.get(), QStringLiteral("ファイル"));
+        QCOMPARE(file.indexOf(QStringLiteral("1 部プリント")), file.indexOf(QStringLiteral("プリント…")) + 1);
+        formats::print::Setup last;
+        last.copies = 3;
+        last.marks.labels = true;
+        last.dpi = 150;  // (not kept: the printer's)
+        app::printing::remember(last, QString());
+        QPrinter printer(QPrinter::ScreenResolution);
+        printer.setOutputFormat(QPrinter::PdfFormat);
+        const QString pdf = s.tmp.path() + QStringLiteral("/one.pdf");
+        printer.setOutputFileName(pdf);
+        printer.setCopyCount(4);
+        QVERIFY(s.window->print_one_copy(&printer));
+        QCOMPARE(printer.copyCount(), 1);
+        QCOMPARE(s.window->last_notice(), QStringLiteral("1 部プリントしました（2 枚）"));
+        QFile f(pdf);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        QCOMPARE(f.readAll().count("/Type /Page") - 1, 2);  // (and its /Type /Pages)
+        app::settings()->remove(QStringLiteral("print/last"));
+    }
+
+    // PC5 I-f (SPEC.md AUTO-01「画像アセット」): ファイル → 生成 → 画像アセット — on for the book (one change, undone as any), the
+    // named layer's files written into <book>-assets after the person's save and never on the automatic one; off: none.
+    void imageAssetsOnTheSave() {
+        core::Document book = core::new_episode("小さな本", core::Num(1), 1, core::PageSpec::custom(60, 60, 54, 54, 2, 5, 5, 4, 4, 600));
+        Studio s(book);
+        const QStringList file = menu_items(s.window.get(), QStringLiteral("ファイル"));
+        QCOMPARE(file.indexOf(QStringLiteral("生成")), file.indexOf(QStringLiteral("書き出し")) + 1);
+        QVERIFY(s.window->findChild<QMenu*>(QStringLiteral("menu_generate")) != nullptr);
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "logo"}, {"name", "logo.png, 50% half.png"}},
+                                                 Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", "logo"},
+                                                      {"points", Json::array({Json::array({10, 10, 0.5}), Json::array({30, 20, 0.9})})}, {"width_mm", 2}}})));
+        QAction* assets = s.act("act_image_assets");
+        QVERIFY(assets->isCheckable() && !assets->isChecked());
+        assets->trigger();
+        QVERIFY(s.doc().image_assets);
+        QVERIFY(assets->isChecked());
+        const fs::path dir = s.path.parent_path() / "book-assets";
+        QVERIFY(s.saved());  // (the automatic save: no assets)
+        QVERIFY(core::parse_python_json(storage::read_file(s.path / "project.json"))["generator"] == (Json{{"image_assets", true}}));
+        QVERIFY(!fs::exists(dir));
+        s.act("act_save")->trigger();
+        QVERIFY(gui_test::wait_for([&] { return s.window->image_assets_written() == 1; }));  // (on a worker thread)
+        QVERIFY(fs::exists(dir / "logo.png") && fs::exists(dir / "half.png"));
+        QVERIFY2(s.window->last_notice().startsWith(QStringLiteral("保存しました。画像アセット 2 個を書き出しました")), qPrintable(s.window->last_notice()));
+        // off (Undo): nothing written on the next save
+        s.act("act_undo")->trigger();
+        QVERIFY(!s.doc().image_assets);
+        QVERIFY(!assets->isChecked());
+        fs::remove_all(dir);
+        s.act("act_save")->trigger();
+        for (int i = 0; i < 20; ++i) QCoreApplication::processEvents();
+        QCOMPARE(s.window->image_assets_written(), 1);
+        QVERIFY(!fs::exists(dir));
+    }
+
+    // PC5 H-f (SPEC.md VIEW-01「取り消しとメモリをクリア」): 編集 → 最後の状態を切り替え (Ctrl+Alt+Z, after やり直し) — pressed twice,
+    // the book as it was; after an Undo it goes forward; a change another person saved since is not taken back (the journal's
+    // undo refuses it, as Undo's).
+    void toggleLastState() {
+        Studio s(gui_test::new_doc(2));
+        QAction* toggle = s.act("act_toggle_last_state");
+        QVERIFY(toggle != nullptr);
+        QCOMPARE(toggle->text(), QStringLiteral("最後の状態を切り替え"));
+        QVERIFY(toggle->shortcuts().contains(QKeySequence(QStringLiteral("Ctrl+Alt+Z"))));
+        const QStringList edit = menu_items(s.window.get(), QStringLiteral("編集"));
+        QCOMPARE(edit.indexOf(QStringLiteral("最後の状態を切り替え")), edit.indexOf(QStringLiteral("やり直し")) + 1);
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_page"}, {"count", 1}}})));
+        QCOMPARE(s.doc().pages.size(), std::size_t{3});
+        toggle->trigger();
+        QCOMPARE(s.doc().pages.size(), std::size_t{2});
+        toggle->trigger();
+        QCOMPARE(s.doc().pages.size(), std::size_t{3});
+        toggle->trigger();
+        QCOMPARE(s.doc().pages.size(), std::size_t{2});
+        toggle->trigger();
+        QCOMPARE(s.doc().pages.size(), std::size_t{3});
+        // after a plain Undo: forward again
+        s.act("act_undo")->trigger();
+        QCOMPARE(s.doc().pages.size(), std::size_t{2});
+        toggle->trigger();
+        QCOMPARE(s.doc().pages.size(), std::size_t{3});
+        // another person's change saved since: not taken back
+        QVERIFY(s.saved());
+        {
+            auto options = gui_test::quick(gui_test::path_of(s.tmp.path() + QStringLiteral("/recovery-other")));
+            options.actor = "ai:hermes";
+            auto other = app::Session::open(s.path, options);
+            other->apply(Json::array({Json{{"op", "add_page"}, {"count", 2}}}));
+            QVERIFY(other->wait_saved(std::chrono::milliseconds(10000)));
+        }
+        s.session->check_outside();
+        QVERIFY(gui_test::wait_for([&] { return s.doc().pages.size() == 5; }));
+        toggle->trigger();
+        QVERIFY(gui_test::wait_for([&] { return s.session->wait_idle(std::chrono::milliseconds(50)); }));
+        for (int i = 0; i < 20; ++i) QCoreApplication::processEvents();
+        QCOMPARE(s.doc().pages.size(), std::size_t{5});
+        QCOMPARE(gui_test::read_book(s.path).pages.size(), std::size_t{5});
+    }
+
+    // 編集 → メモリをクリア ▸ (取り消し・クリップボード・ヒストリー・すべて・ビデオキャッシュ, before 検索; the coordinator's decision:
+    // memory only, the journal keeps every change): クリップボード — nothing to paste after it, another program's clipboard
+    // left alone —; ヒストリー — the changes saved leave memory, Undo still takes them back through the journal —; すべて — what
+    // the drawing remembers empty, the page drawn again the same —; what was let go said.
+    void purgeMemory() {
+        Studio s(gui_test::new_doc(2));
+        QMenu* purge_menu = s.window->findChild<QMenu*>(QStringLiteral("menu_purge"));
+        QVERIFY(purge_menu != nullptr);
+        QCOMPARE(purge_menu->title(), QStringLiteral("メモリをクリア"));
+        QStringList names;
+        for (QAction* a : purge_menu->actions()) names << (a->isSeparator() ? QStringLiteral("|") : a->text());
+        QCOMPARE(names, (QStringList{QStringLiteral("取り消し"), QStringLiteral("クリップボード"), QStringLiteral("ヒストリー"), QStringLiteral("すべて"),
+                                     QStringLiteral("|"), QStringLiteral("ビデオキャッシュ")}));
+        // (its 取り消し and ヒストリー share their words with 編集's 取り消し and ウィンドウ's ヒストリー: those told apart by their
+        // places, keys and lists kept under the words alone still theirs)
+        const auto first = app::by_text(s.window.get());
+        QCOMPARE(first.at(QStringLiteral("取り消し")), s.act("act_undo"));
+        QCOMPARE(first.at(QStringLiteral("ヒストリー")), s.dock(QStringLiteral("ヒストリー"))->toggleViewAction());
+        const auto placed = app::command_names(s.window.get());
+        QCOMPARE(placed.at(s.act("act_undo")), QStringLiteral("取り消し（編集）"));
+        QCOMPARE(placed.at(s.act("act_purge_undo")), QStringLiteral("取り消し（編集 → メモリをクリア）"));
+        QCOMPARE(app::preferences::old_names(QStringLiteral("取り消し（編集）")), (QStringList{QStringLiteral("元に戻す"), QStringLiteral("取り消し")}));
+        QCOMPARE(app::preferences::old_names(QStringLiteral("ヒストリー（ウィンドウ）")), (QStringList{QStringLiteral("履歴"), QStringLiteral("ヒストリー")}));
+        const QStringList edit = menu_items(s.window.get(), QStringLiteral("編集"));
+        const qsizetype at = edit.indexOf(QStringLiteral("メモリをクリア"));
+        QVERIFY2(at > 0 && edit.indexOf(QStringLiteral("検索")) > at, qPrintable(edit.join(QStringLiteral(" / "))));
+        for (const char* name : {"act_purge_undo", "act_purge_histories", "act_purge_all"})
+            QVERIFY2(s.act(name)->statusTip().contains(QStringLiteral("取り消しの記録は原稿に残ります")), name);
+        // クリップボード: a copy, then cleared — the window's and the computer's —; a paste finds nothing
+        const std::string ink = s.ink();
+        QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_stroke"}, {"page", 1}, {"layer_id", ink},
+                                                      {"points", Json::array({Json::array({30, 30, 0.5}), Json::array({80, 90, 0.5})})}, {"width_mm", 1}}})));
+        s.window->set_target_layer(ink);
+        s.act("act_copy")->trigger();
+        QClipboard* clip = QGuiApplication::clipboard();
+        QVERIFY(clip->mimeData() != nullptr && clip->mimeData()->hasFormat(QStringLiteral("application/x-genko-items+json")));
+        app::MainWindow::Purged done = s.window->purge(QStringLiteral("clipboard"));
+        QCOMPARE(done.items, QStringList{QStringLiteral("クリップボード")});
+        QVERIFY(done.bytes > 0);
+        QVERIFY(clip->mimeData() == nullptr || !clip->mimeData()->hasFormat(QStringLiteral("application/x-genko-items+json")));
+        QVERIFY2(s.window->last_notice().startsWith(QStringLiteral("メモリをクリアしました：クリップボード（約 ")), qPrintable(s.window->last_notice()));
+        const std::size_t layers = s.doc().page(0).layers.size();
+        s.act("act_paste")->trigger();
+        QCOMPARE(s.doc().page(0).layers.size(), layers);
+        QVERIFY2(s.window->last_notice().contains(QStringLiteral("ペーストするものがありません")), qPrintable(s.window->last_notice()));
+        // (another program's clipboard is not Genko's: left as it is)
+        clip->setText(QStringLiteral("ほかのアプリの文字"));
+        if (!clip->ownsClipboard()) {
+            s.window->purge(QStringLiteral("clipboard"));
+            QCOMPARE(clip->text(), QStringLiteral("ほかのアプリの文字"));
+        }
+        // (review P3-6) the window's copy alone — the computer's clipboard taken by another since —: let go, and said
+        s.act("act_copy")->trigger();
+        clip->clear();
+        done = s.window->purge(QStringLiteral("clipboard"));
+        QCOMPARE(done.items, QStringList{QStringLiteral("クリップボード")});
+        QVERIFY2(s.window->last_notice().startsWith(QStringLiteral("メモリをクリアしました：クリップボード")), qPrintable(s.window->last_notice()));
+        s.act("act_paste")->trigger();
+        QCOMPARE(s.doc().page(0).layers.size(), layers);
+        // (review P3-7, P3-8) set_pixel_aspect in ヒストリー's words; the panel's switch keeps its own id
+        QCOMPARE(app::history::describe(Json::array({Json{{"op", "set_pixel_aspect"}, {"page", 1}, {"ratio", 2}}})), QStringLiteral("ピクセル縦横比"));
+        QCOMPARE(s.dock(QStringLiteral("ヒストリー"))->toggleViewAction()->property("genko_attribute").toString(), QStringLiteral("dock_history"));
+        // nothing left to clear: said
+        done = s.window->purge(QStringLiteral("video"));
+        QVERIFY(done.items.isEmpty());
+        QCOMPARE(s.window->last_notice(), QStringLiteral("クリアするものはありませんでした"));
+        // ヒストリー: the changes saved leave memory (the latest stays), the journal keeps them — Undo takes every one back
+        for (int i = 0; i < 3; ++i) QVERIFY(s.window->apply_ops(Json::array({Json{{"op", "add_page"}, {"count", 1}}})));
+        QCOMPARE(s.doc().pages.size(), std::size_t{5});
+        QVERIFY(s.saved());
+        QVERIFY(s.session->changes_in_memory() >= 4);
+        done = s.window->purge(QStringLiteral("histories"));
+        QVERIFY(done.items.contains(QStringLiteral("ヒストリー")));
+        QCOMPARE(s.session->changes_in_memory(), std::size_t{1});
+        QVERIFY(s.window->last_notice().contains(QStringLiteral("取り消しの記録は原稿に残っています")));
+        for (std::size_t want : {std::size_t{4}, std::size_t{3}, std::size_t{2}}) {
+            s.act("act_undo")->trigger();
+            QVERIFY2(gui_test::wait_for([&] { return s.session->wait_idle(std::chrono::milliseconds(50)) && s.doc().pages.size() == want; }),
+                     qPrintable(QString::number(s.doc().pages.size())));
+        }
+        QCOMPARE(gui_test::ink_strokes(s.doc(), 0), std::size_t{1});  // (the line drawn first: the next Undo's)
+        s.act("act_undo")->trigger();
+        QVERIFY(gui_test::wait_for([&] { return s.session->wait_idle(std::chrono::milliseconds(50)) && gui_test::ink_strokes(s.doc(), 0) == 0; }));
+        // すべて: what the drawing remembers let go; the page drawn again, the same picture
+        s.act("act_redo")->trigger();
+        QVERIFY(gui_test::wait_for([&] { return s.session->wait_idle(std::chrono::milliseconds(50)) && gui_test::ink_strokes(s.doc(), 0) == 1; }));
+        app::PageCanvas* c = s.canvas();
+        QVERIFY(c->wait_rendered(60000));
+        render::RenderOptions print;
+        print.mode = "print";
+        const render::Image drawn = render::render_page(s.doc().page(0), 100, print, &s.doc()).image;
+        QVERIFY(render::render_cache_bytes() > 0);
+        // (the level shown now — the base one, when the finer is not yet drawn: under ASan it was not, V3 — compared after with
+        // itself: the same picture at the same level)
+        const int shown_dpi = c->renderer().shown_dpi();
+        const QImage shown = c->renderer().compose(shown_dpi);
+        done = s.window->purge(QStringLiteral("all"));
+        QVERIFY2(done.items.contains(QStringLiteral("描いた絵の覚え")), qPrintable(done.items.join(QStringLiteral(","))));
+        QCOMPARE(render::render_cache_bytes(), std::int64_t{0});
+        QVERIFY(s.window->last_notice().startsWith(QStringLiteral("メモリをクリアしました：")));
+        QVERIFY(render::render_page(s.doc().page(0), 100, print, &s.doc()).image.tobytes() == drawn.tobytes());
+        c->renderer().set_screen_dots(!c->renderer().screen_dots());  // (every tile drawn again — twice)
+        c->renderer().set_screen_dots(!c->renderer().screen_dots());
+        QVERIFY(c->wait_rendered(60000));
+        QVERIFY(c->renderer().compose(shown_dpi) == shown);
+        // the book as it was: nothing of it changed by any of them
+        QCOMPARE(gui_test::ink_strokes(s.doc(), 0), std::size_t{1});
+    }
+};
+
+QTEST_MAIN(TestGuiOutput)
+#include "test_gui_output.moc"

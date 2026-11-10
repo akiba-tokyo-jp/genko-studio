@@ -1,0 +1,105 @@
+# Compiler flags shared by every Genko target (call genko_target_flags(<target>)).
+#
+# Determinism (docs/cpp-migration/ARCHITECTURE.md §6): the page pixels must be the same on every OS and
+# compiler, so floating point is never contracted into FMA and fast-math is never used.
+
+function(genko_target_flags target)
+  if(MSVC)
+    # (/wd4100: unused parameters are allowed, as with -Wno-unused-parameter below)
+    target_compile_options(${target} PRIVATE /W4 /wd4100 /permissive- /utf-8 /fp:precise /Zc:__cplusplus /EHsc /bigobj)
+    target_compile_definitions(${target} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS UNICODE _UNICODE)
+    if(GENKO_WERROR)
+      target_compile_options(${target} PRIVATE /WX)
+    endif()
+    # The main thread gets 8 MB of stack, as on Linux (Windows gives 1 MB): JSON up to the 1000 levels the readers
+    # accept is read recursively, and Debug frames are large.
+    get_target_property(_type ${target} TYPE)
+    if(_type STREQUAL "EXECUTABLE")
+      target_link_options(${target} PRIVATE /STACK:8388608)
+      target_sources(${target} PRIVATE "${GENKO_SOURCE_ROOT}/cmake/genko.manifest")
+    endif()
+  else()
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wshadow=local -Wno-unused-parameter
+                                              -ffp-contract=off -fno-fast-math -fno-strict-aliasing)
+    if(GENKO_WERROR)
+      target_compile_options(${target} PRIVATE -Werror)
+    endif()
+  endif()
+  if(GENKO_SANITIZE AND NOT MSVC)
+    target_compile_options(${target} PRIVATE -fsanitize=${GENKO_SANITIZE} -fno-omit-frame-pointer -fno-sanitize-recover=undefined)
+    target_link_options(${target} PRIVATE -fsanitize=${GENKO_SANITIZE})
+    if(GENKO_LINKER_PACKS)
+      target_link_options(${target} PRIVATE LINKER:-z,pack-relative-relocs LINKER:--compress-debug-sections=zlib)
+    endif()
+  endif()
+endfunction()
+
+# A sanitizer build links every library into each test program (about 0.6 GB each, most of it relocations and debug
+# information): where the linker can, pack the relative relocations and compress the debug sections, and keep only the
+# line tables of the debug information (-g1, for the third-party code too). The programs and the sanitizers' reports
+# (function, file and line) are the same.
+if(GENKO_SANITIZE AND NOT MSVC)
+  set(CMAKE_C_FLAGS_DEBUG "-g1")
+  set(CMAKE_CXX_FLAGS_DEBUG "-g1")
+  include(CheckLinkerFlag)
+  check_linker_flag(CXX "LINKER:-z,pack-relative-relocs,--compress-debug-sections=zlib" GENKO_LINKER_PACKS)
+endif()
+
+# Genko's libraries (and the vendored Pillow) are static, except in a sanitizer build, where they are shared: there each
+# test program would otherwise carry every library again, instrumented (about 0.4 GB each), and the build of all the
+# tests no longer fits the machines the suites run on. What is tested is the same code; only how it is linked differs.
+# GENKO_SHARED_LIBRARIES asks for the same in another build (off by default: Release and Debug static as before): the
+# exit's Debug validation (PC5 V3), whose some 300 test programs at -g0 each carry every library — 70 to 140 MB each,
+# about 28 GB — more than its machine holds.
+option(GENKO_SHARED_LIBRARIES "Build Genko's libraries shared, as a sanitizer build does (Linux; for test builds that must fit a small disk)" OFF)
+if(NOT MSVC AND (GENKO_SANITIZE OR GENKO_SHARED_LIBRARIES))
+  set(GENKO_LIBRARY_KIND SHARED)
+else()
+  set(GENKO_LIBRARY_KIND STATIC)
+endif()
+
+# A Genko library: static (shared in a sanitizer build, above), its include root is native/src, flags as above.
+function(genko_library name)
+  cmake_parse_arguments(GL "" "" "SOURCES;PUBLIC_DEPS;PRIVATE_DEPS" ${ARGN})
+  add_library(${name} ${GENKO_LIBRARY_KIND} ${GL_SOURCES})
+  target_include_directories(${name} PUBLIC "${GENKO_SOURCE_ROOT}/src")
+  target_link_libraries(${name} PUBLIC ${GL_PUBLIC_DEPS} PRIVATE ${GL_PRIVATE_DEPS})
+  genko_target_flags(${name})
+endfunction()
+
+# A Qt Test executable registered with CTest. GUI-less unless GUI is given.
+function(genko_test name)
+  cmake_parse_arguments(GT "GUI" "TIMEOUT" "SOURCES;DEPS;LABELS" ${ARGN})
+  add_executable(${name} ${GT_SOURCES})
+  target_link_libraries(${name} PRIVATE Qt6::Test ${GT_DEPS})
+  target_compile_definitions(${name} PRIVATE GENKO_REPO_ROOT="${GENKO_REPO_ROOT}"
+                                             GENKO_TEST_DATA="${GENKO_SOURCE_ROOT}/tests/data")
+  genko_target_flags(${name})
+  # WindowsのQtTestはconsoleへTotalsを出さない構成がある。
+  # CTestの一回の実行でファイルへ記録し、CIが同じ実行のrawログを監査する。
+  if(WIN32)
+    add_test(NAME ${name} COMMAND ${name} -o "${CMAKE_CURRENT_BINARY_DIR}/qtest-${name}.txt,txt")
+  else()
+    add_test(NAME ${name} COMMAND ${name})
+  endif()
+  set(_labels ${GT_LABELS})
+  if(GT_GUI)
+    list(APPEND _labels gui)
+  endif()
+  if(_labels)
+    set_tests_properties(${name} PROPERTIES LABELS "${_labels}")
+  endif()
+  if(GT_TIMEOUT)
+    set_tests_properties(${name} PROPERTIES TIMEOUT ${GT_TIMEOUT})
+  else()
+    set_tests_properties(${name} PROPERTIES TIMEOUT 300)
+  endif()
+  set(_env "QT_QPA_PLATFORM=offscreen")
+  if(GENKO_SANITIZE AND NOT MSVC)
+    # (the tests run genko in child processes and expect exit codes 1–3 from it: a sanitizer report must not pass
+    # for one of those)
+    list(APPEND _env "ASAN_OPTIONS=exitcode=99:detect_leaks=1" "UBSAN_OPTIONS=exitcode=98:print_stacktrace=1"
+                     "TSAN_OPTIONS=exitcode=97")
+  endif()
+  set_tests_properties(${name} PROPERTIES ENVIRONMENT "${_env}")
+endfunction()

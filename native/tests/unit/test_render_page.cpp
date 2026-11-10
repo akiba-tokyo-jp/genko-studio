@@ -1,0 +1,855 @@
+// render_page without the Python reference: what is not drawn yet stops the render (NotYetPorted) unless
+// skip_unported, a stop request cancels it, renders on several threads at once give the same pixels, parts of the
+// page are the same as the whole page cut, and the remembered lines are used (rough_needed).
+
+#include <QtTest>
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
+#include "render/draw.hpp"
+#include "core/covers.hpp"
+#include "core/pyconv.hpp"
+#include "core/pyops.hpp"
+
+#include <memory>
+#include <fstream>
+#include <filesystem>
+#include "render/selection.hpp"
+#include <stop_token>
+#include <thread>
+#include <vector>
+
+#include "core/base64.hpp"
+#include "core/error.hpp"
+#include "core/command_bus.hpp"
+#include "core/ids.hpp"
+#include "core/color_raster.hpp"
+#include "core/model.hpp"
+#include "render/color_canvas.hpp"
+#include "render/page.hpp"
+#include "render/png.hpp"
+#include "render/text/lettering.hpp"
+#include "render/text/memo.hpp"
+#include "storage/asset_store.hpp"
+
+namespace render = genko::render;
+using genko::core::Document;
+using genko::core::Json;
+using genko::core::Layer;
+using genko::core::LayerKind;
+using genko::core::LayerRole;
+using genko::core::Num;
+
+namespace {
+
+// A JPEG 2000 file's first boxes (its signature and its file type), as base64: Pillow opens JPEG 2000; this build does not
+// read it (render::NotYetPorted "image_format", known from its first bytes; M7: a recorded limit — PC4 F-a reads the
+// netpbm formats, the PPM this was before).
+const char* const kUnreadPicture = "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiA=";
+
+genko::core::StrokePtr line(double x, double y, double dx, double dy, std::string kind = "gpen") {
+    auto s = std::make_shared<genko::core::Stroke>();
+    s->id = genko::core::new_id();
+    for (int i = 0; i < 12; ++i) s->points.push_back({x + dx * i, y + dy * i * (i % 3 == 0 ? 1.0 : 0.5)});
+    for (int i = 0; i < 12; ++i) s->pressure.push_back(0.2 + 0.06 * i);
+    s->kind = std::move(kind);
+    s->width_mm = 0.8;
+    return s;
+}
+
+// A small book: split panels, ink lines, an effect on a layer, a paper colour; nothing that is not drawn yet.
+Document book() {
+    Document doc = genko::core::new_episode("試験", Num(1), 2, genko::core::PageSpec::custom(70, 95, 60, 85, 3, 8, 8, 7, 6));
+    for (std::size_t p = 0; p < doc.pages.size(); ++p) {
+        genko::core::Page& page = doc.edit_page(p);
+        page.numero = false;
+        page.split_frame(page.frames[0].id, "horizontal", Num(0.4), Num(3));
+        page.extra["paper_rgb"] = Json::array({250, 248, 240});
+        for (auto& layer : page.layers) {
+            if (layer.role != LayerRole::Ink) continue;
+            std::vector<genko::core::StrokePtr> items;
+            const char* kinds[] = {"gpen", "pencil", "fude", "spray", "water", "calligraphy"};
+            for (int i = 0; i < 24; ++i) items.push_back(line(5.0 + 2.1 * i, 8.0 + 3.0 * (i % 7), 1.7, 2.3, kinds[i % 6]));
+            layer.strokes = genko::core::make_strokes(std::move(items));
+            layer.effect = Json::object({{"border", Json::object({{"width_mm", 0.6}, {"rgb", Json::array({250, 20, 20})}})},
+                                         {"water_edge", Json::object({{"width_mm", 0.8}})}});
+        }
+    }
+    return doc;
+}
+
+std::string unported_element(const genko::core::Page& page, const Document& doc, render::RenderOptions options) {
+    try {
+        (void)render::render_page(page, 72, options, &doc);
+    } catch (const render::NotYetPorted& e) {
+        return e.element();
+    }
+    return {};
+}
+
+}  // namespace
+
+class TestRenderPage : public QObject {
+    Q_OBJECT
+
+private slots:
+    void init() { render::clear_render_caches(); }
+
+    void nombreCases_data() {
+        QTest::addColumn<QString>("data");
+        std::ifstream file(std::filesystem::path(GENKO_SOURCE_DIR) / "tests/fixtures/render/nombre-cases.json");
+        QVERIFY(file.good());
+        const Json reference = Json::parse(file);
+        for (const auto& c : reference.at("cases")) QTest::newRow(c.at("id").get<std::string>().c_str()) << QString::fromStdString(c.dump());
+    }
+    void nombreCases() {
+        QFETCH(QString, data);
+        const Json c = Json::parse(data.toStdString());
+        auto doc = genko::core::new_episode("nombre fixture", Num(1), 2, genko::core::PageSpec::custom(70, 95, 60, 85, 3, 8, 8, 7, 6));
+        doc.nombre = c.at("config");
+        if (c.at("start_side").is_string()) doc.start_side = c.at("start_side").get<std::string>();
+        if (c.at("cover_before").get<bool>()) doc.edit_page(0).extra["cover"] = {{"kind", "front"}};
+        auto& page = doc.edit_page(1); page.index = Num(c.at("index").get<int>()); page.numero = c.at("numero").get<bool>();
+        page.layers.clear(); page.frames.clear(); page.extra["paper_rgb"] = c.at("paper");
+        const int dpi = c.at("dpi").get<int>();
+        std::ifstream file(std::filesystem::path(GENKO_SOURCE_DIR) / "tests/fixtures/render" / c.at("png").get<std::string>(), std::ios::binary);
+        QVERIFY(file.good()); const std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        const auto expected = render::selection::open_picture(bytes).convert("RGB");
+        for (const std::string mode : {"proof", "print"}) {
+            render::RenderOptions options; options.mode = mode; options.finish = false;
+            const auto whole = render::render_page(page, dpi, options, &doc);
+            QVERIFY(whole.omitted.empty()); QCOMPARE(whole.image.size(), expected.size());
+            if (whole.image.tobytes() != expected.tobytes()) {
+                const auto out = std::filesystem::path(GENKO_SOURCE_DIR) / "../build/text-diagnostics";
+                std::filesystem::create_directories(out);
+                render::save_png(whole.image, out / (c.at("id").get<std::string>() + "-native.png"));
+                for (int size : {9,13}) {
+                    const auto mask = render::text_mask("12", c.at("config").value("font",std::string("gothic")),size,{0.5,0.5});
+                    qWarning() << "native mask" << size << mask.second[0] << mask.second[1] << mask.second[2] << mask.second[3];
+                    render::save_png(mask.first, out / (c.at("config").value("font",std::string("gothic")) + "-" + std::to_string(size) + "-native.png"));
+                }
+                QFAIL("nombre full pixels must match unmodified Python");
+            }
+            // Cut through every label, including fractional placement and white-edge neighbourhood.
+            for (const auto& p : c.at("placements")) {
+                const int x = render::mm_to_px(p.at("x_mm").get<double>(), dpi);
+                const int y = render::mm_to_px(p.at("y_mm").get<double>(), dpi);
+                render::RenderOptions part = options;
+                part.region = render::RenderRegion{std::max(0,x-2), std::max(0,y-2), 4, 4};
+                const auto roi = render::render_page(page, dpi, part, &doc);
+                const auto r = *part.region;
+                QCOMPARE(roi.image.tobytes(), expected.crop(render::Box{r.x,r.y,r.x+r.w,r.y+r.h}).tobytes());
+            }
+        }
+        render::RenderOptions name; name.mode = "name"; name.finish = false;
+        const auto named = render::render_page(page, dpi, name, &doc);
+        const auto blank = render::Image::create("RGB", expected.size(), render::Ink::tuple(genko::core::int_tuple(c.at("paper"))));
+        QCOMPARE(named.image.tobytes(), blank.tobytes());
+    }
+    void fontBrotliBudget() {
+        const std::string path=std::string(GENKO_SOURCE_DIR)+"/tests/fixtures/render/font-wide-glyph.woff2";
+        {
+            render::ImageAllocationBudget budget(4*1024*1024);
+            QVERIFY(!render::text_mask("A",path,6).first.empty());
+            QCOMPARE(budget.live(),std::uint64_t(0));
+        }
+        render::ImageAllocationBudget budget(48*1024);
+        QVERIFY2(([&](){try{(void)render::text_mask("A",path,6);return false;}catch(const genko::core::OpError&){return true;}}()),
+                 "WOFF2 Brotli temporary memory must be budgeted before decoding");
+        QCOMPARE(budget.live(),std::uint64_t(0));
+    }
+    void fontCodecBudget() {
+        const std::string path=std::string(GENKO_SOURCE_DIR)+"/tests/fixtures/render/font-png-profile.ttf";
+        {
+            render::ImageAllocationBudget budget(32*1024*1024);
+            QVERIFY(!render::text_mask("A",path,128).first.empty());
+            QCOMPARE(budget.live(),std::uint64_t(0));
+        }
+        render::ImageAllocationBudget budget(128*1024);
+        QVERIFY2(([&](){try{(void)render::text_mask("A",path,128);return false;}catch(const genko::core::OpError&){return true;}}()),
+                 "embedded PNG metadata must be budgeted before decoding");
+        QVERIFY(budget.peak()<=128*1024);QCOMPARE(budget.live(),std::uint64_t(0));
+    }
+    void fontRasterBudget() {
+        const std::string path=std::string(GENKO_SOURCE_DIR)+"/tests/fixtures/render/font-wide-glyph.ttf";
+        { // Positive control proves the font is valid and reaches the native renderer, rather than fallback.
+            render::ImageAllocationBudget budget(4*1024*1024);
+            const auto [mask,box]=render::text_mask("A",path,128);
+            QCOMPARE(mask.width(),512);QCOMPARE(mask.height(),480);
+            QVERIFY(mask.getbbox().has_value());QCOMPARE(box[2]-box[0],512);
+        }
+        { // Large glyph: the library cap refuses before a roughly 225 MiB bitmap can be allocated.
+            render::ImageAllocationBudget budget(4*1024*1024);
+            try { (void)render::text_mask("A",path,4096);QFAIL("large glyph must refuse before bitmap allocation"); }
+            catch(const genko::core::Error& e){QCOMPARE(e.code(),std::string("memory"));}
+            QVERIFY(budget.peak()<=4*1024*1024);QCOMPARE(budget.live(),std::uint64_t(0));
+        }
+        { // Stroke creates its own FreeType bitmap while the output mask is alive.
+            render::ImageAllocationBudget budget(32*1024*1024);
+            QVERIFY(!render::text_mask("A",path,128,{}, {},512).first.empty());
+            QCOMPARE(budget.live(),std::uint64_t(0));
+        }
+        { // The same valid stroke must refuse under the shared temporary/output limit and recover.
+            render::ImageAllocationBudget budget(4*1024*1024);
+            QVERIFY_THROWS_EXCEPTION(genko::core::OpError,render::text_mask("A",path,128,{}, {},512));
+            QVERIFY(budget.peak()<=4*1024*1024);QCOMPARE(budget.live(),std::uint64_t(0));
+        }
+        render::ImageAllocationBudget budget(128*1024);
+        QVERIFY_THROWS_EXCEPTION(genko::core::OpError,render::text_mask("A",path,128));
+        QVERIFY2(budget.peak()>0,"font work must participate in the image allocation budget before rasterization");
+        QVERIFY(budget.peak()<=128*1024);QCOMPARE(budget.live(),std::uint64_t(0));
+        const auto image=render::Image::create("L",{8,8},0);QVERIFY(!image.empty());
+    }
+    void fontGlyphs_data() {
+        QFile f(QString::fromUtf8(GENKO_SOURCE_DIR)+"/tests/fixtures/render/font-glyphs.json"); QVERIFY(f.open(QIODevice::ReadOnly));
+        const Json data=Json::parse(f.readAll().toStdString());QTest::addColumn<int>("index");
+        for(std::size_t n=0;n<data.at("cases").size();++n)QTest::newRow(data.at("cases")[n].at("id").get<std::string>().c_str())<<static_cast<int>(n);
+    }
+    void fontGlyphs() {
+        QFETCH(int,index);QFile f(QString::fromUtf8(GENKO_SOURCE_DIR)+"/tests/fixtures/render/font-glyphs.json");QVERIFY(f.open(QIODevice::ReadOnly));
+        const Json data=Json::parse(f.readAll().toStdString());const Json& c=data.at("cases")[static_cast<std::size_t>(index)];
+        std::string font=c.at("font").get<std::string>();if(font.starts_with("file:"))font=std::string(GENKO_REPO_ROOT)+"/"+font.substr(5);
+        const auto [image,box]=render::text_mask(c.at("text").get<std::string>(),font,c.at("size").get<int>());
+        const auto expected=c.at("bbox").get<std::array<int,4>>();
+        QCOMPARE(box[0],static_cast<int>(expected[0]));QCOMPARE(box[1],static_cast<int>(expected[1]));QCOMPARE(box[2],static_cast<int>(expected[2]));QCOMPARE(box[3],static_cast<int>(expected[3]));
+        QCOMPARE(image.width(),c.at("mask_size")[0].get<int>());QCOMPARE(image.height(),c.at("mask_size")[1].get<int>());
+        QCOMPARE(image.tobytes(),QByteArray::fromBase64(QByteArray::fromStdString(c.at("data").get<std::string>())).toStdString());
+        QCOMPARE(render::text_length(c.at("text").get<std::string>(),font,c.at("size").get<int>()),c.at("advance").get<double>());
+    }
+    void nombreSafety() {
+        const QString root = QString::fromUtf8(GENKO_SOURCE_DIR) + "/tests/fixtures/render/";
+        QFile file(root + "MANIFEST.json"); QVERIFY(file.open(QIODevice::ReadOnly));
+        const Json manifest = Json::parse(file.readAll().toStdString());
+        QStringList listed;
+        for (const auto& [name, hash] : manifest.items()) {
+            QFile fixture(root + QString::fromStdString(name)); QVERIFY(fixture.open(QIODevice::ReadOnly));
+            QCOMPARE(QCryptographicHash::hash(fixture.readAll(), QCryptographicHash::Sha256).toHex().toStdString(), hash.get<std::string>());
+            listed.push_back(QString::fromStdString(name));
+        }
+        auto actual = QDir(root).entryList(QDir::Files); actual.removeAll("MANIFEST.json"); listed.sort(); QCOMPARE(actual, listed);
+        for (const double size : {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN(), -1.0, 21.0}) {
+            auto doc = genko::core::new_episode("invalid", Num(1), 1, genko::core::PageSpec::custom(70,95,60,85,3,8,8,7,6));
+            doc.edit_page(0).frames.clear(); doc.edit_page(0).layers.clear(); doc.nombre = {{"size_mm",size}};
+            QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::render_page(*doc.pages[0], 110, {}, &doc));
+        }
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::text_mask("12", "gothic", 8193));
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::text_mask(std::string(65537,'a'), "gothic", 12));
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::text_mask("12", "gothic", 12, {1,0}));
+        std::stop_source stop; stop.request_stop();
+        QVERIFY_THROWS_EXCEPTION(render::Cancelled, render::text_mask("12", "gothic", 12, {}, stop.get_token()));
+        QTemporaryDir font_dir;QVERIFY(font_dir.isValid());
+        QFile huge(font_dir.path()+"/huge.ttf");QVERIFY(huge.open(QIODevice::WriteOnly));QVERIFY(huge.resize(32LL*1024*1024+1));huge.close();
+        QFile broken(font_dir.path()+"/broken.ttf");QVERIFY(broken.open(QIODevice::WriteOnly));QCOMPARE(broken.write("not a font"),qint64(10));broken.close();
+        for(const auto& font_file:{huge.fileName(),broken.fileName()}) {
+            QVERIFY_THROWS_EXCEPTION(genko::core::Error,render::text_mask("漢",font_file.toStdString(),12));
+            QVERIFY_THROWS_EXCEPTION(genko::core::Error,render::text_length("漢",font_file.toStdString(),12));
+        }
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error,render::text_mask(std::string("\xff",1),"gothic",12));
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error,render::text_font(std::string("\xff",1),"あ"));
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error,render::text_length("a","gothic",8193));
+        {
+            render::ImageAllocationBudget budget(1024);
+            const auto live = budget.live();
+            QVERIFY_THROWS_EXCEPTION(genko::core::OpError, render::text_mask("0123456789", "gothic", 512));
+            QCOMPARE(budget.live(), live);
+            QVERIFY(!render::Image::create("L",{8,8},0).empty());
+        }
+        // A glyph also owns font bytes/library scratch now; a 1 KiB budget cannot hold those.
+        // Verify normal glyph recovery after restoring the enclosing budget, not by ignoring font work.
+        QVERIFY(!render::text_mask("1", "gothic", 6).first.empty());
+    }
+    void nombreVisible_data(){QTest::addColumn<QString>("mode");QTest::newRow("proof")<<QString("proof");QTest::newRow("print")<<QString("print");}
+    void nombreVisible(){
+        QFETCH(QString,mode);
+        auto doc=genko::core::new_episode("nombre fixture",Num(1),1,genko::core::PageSpec::custom(70,95,60,85,3,8,8,7,6));
+        auto& page=doc.edit_page(0);page.frames.clear();page.layers.clear();doc.nombre={{"font","gothic"},{"start",12}};
+        render::RenderOptions options;options.mode=mode.toStdString();options.finish=false;
+        try{
+            const auto actual=render::render_page(page,110,options,&doc);
+            std::ifstream file(std::filesystem::path(GENKO_SOURCE_DIR)/"tests/fixtures/render/nombre-gothic-110.png",std::ios::binary);QVERIFY(file.good());
+            const std::string bytes((std::istreambuf_iterator<char>(file)),std::istreambuf_iterator<char>());const auto expected=render::selection::open_picture(bytes).convert("RGB");
+            QCOMPARE(actual.image.size(),expected.size());QCOMPARE(actual.image.tobytes(),expected.tobytes());
+        }catch(const render::NotYetPorted& e){QVERIFY(std::string(e.what()).find("nombre")!=std::string::npos);QFAIL("nombre component must be ported");}catch(const std::exception& e){QFAIL((std::string("unexpected nombre failure: ")+e.what()).c_str());}
+    }
+    void not_yet_ported_data() {
+        QTest::addColumn<QString>("what");
+        QTest::addColumn<QString>("mode");
+        // (tones, effect lines and screens are drawn since M3-B, the 3D guides since M3-C, a page's animation since
+        // M3-③: anim_is_drawn, lines and their balloons since M4: balloons_are_drawn, a jacket's folds since M4②:
+        // folds_are_drawn, placed pictures since M5①: placed_is_drawn, TIFF and WebP since M6; a placed TIFF whose
+        // samples lie in separate planes is not opened yet)
+        for (const char* what : {"image_format"}) QTest::newRow(what) << QString(what) << QString("print");
+    }
+
+    void not_yet_ported() {
+        QFETCH(QString, what);
+        QFETCH(QString, mode);
+        Document doc = book();
+        genko::core::Page& page = doc.edit_page(0);
+        const std::string w = what.toStdString();
+        if (w == "nombre") page.numero = true;
+        if (w == "anim") page.extra["anim"] = Json::object({{"fps", 12}, {"tracks", Json::array()}});
+        QTemporaryDir assets;
+        if (w == "image_format") {  // (a placed picture whose asset is a JPEG 2000 file, which Pillow opens)
+            QVERIFY(assets.isValid());
+            doc.asset_dir = std::filesystem::path(assets.path().toStdString());
+            Layer placed;
+            placed.id = genko::core::new_id();
+            placed.kind = LayerKind::Placed;
+            placed.asset = genko::storage::AssetStore(*doc.asset_dir)
+                               .put_bytes(genko::core::a2b_base64(kUnreadPicture), ".png");
+            placed.placement_mm = genko::core::Rect{Num(5), Num(5), Num(30), Num(30)};
+            page.layers.push_back(placed);
+        }
+        render::RenderOptions options;
+        options.mode = mode.toStdString();
+        if (w == "nombre") {
+            QVERIFY(unported_element(*doc.pages[0], doc, options).empty());
+            const auto result = render::render_page(*doc.pages[0], 72, options, &doc);
+            QVERIFY(result.omitted.empty());
+            QVERIFY(result.image.getextrema().front().first < 255);
+            return;
+        }
+        QCOMPARE(unported_element(*doc.pages[0], doc, options), w);
+        options.skip_unported = true;
+        const render::RenderResult r = render::render_page(*doc.pages[0], 72, options, &doc);
+        QVERIFY(std::find(r.omitted.begin(), r.omitted.end(), w) != r.omitted.end());
+        // the other page has none of it
+        options.skip_unported = false;
+        QVERIFY(unported_element(*doc.pages[1], doc, options).empty());
+    }
+
+    void folds_are_drawn() {
+        // a jacket's and a band's folds (dashed lines and the parts' names) in name and proof, never in print; nothing
+        // left out; parts of the page drawn alone the same as the whole page cut
+        for (const char* kind : {"jacket", "obi"}) {
+            Document doc = book();
+            Json cover = Json::object({{"kind", kind}, {"spine_mm", 5}, {"flap_mm", 10}});
+            if (std::string(kind) == "obi") cover["height_mm"] = 40;
+            genko::core::Page& page = doc.edit_page(0);
+            page.extra["cover"] = cover;
+            page.spec = genko::core::spec_for(doc.spec, cover);
+            for (const char* mode : {"print", "proof", "name"}) {
+                render::RenderOptions options;
+                options.mode = mode;
+                QVERIFY(unported_element(*doc.pages[0], doc, options).empty());
+                const render::RenderResult r = render::render_page(*doc.pages[0], 72, options, &doc);
+                QVERIFY(r.omitted.empty());
+                // (the folds' blue, (60, 140, 220), only where they are drawn)
+                const std::string bytes = r.image.tobytes();
+                bool blue = false;
+                for (std::size_t at = 0; at + 2 < bytes.size() && !blue; at += 3) {
+                    blue = static_cast<unsigned char>(bytes[at]) == 60 && static_cast<unsigned char>(bytes[at + 1]) == 140 &&
+                           static_cast<unsigned char>(bytes[at + 2]) == 220;
+                }
+                QCOMPARE(blue, std::string(mode) != "print");
+                if (std::string(mode) == "print") continue;
+                for (const render::RenderRegion region : {render::RenderRegion{3, 2, 40, 30}, render::RenderRegion{17, 0, 9, 50}}) {
+                    render::RenderOptions part = options;
+                    part.region = region;
+                    const render::Image got = render::render_page(*doc.pages[0], 72, part, &doc).image;
+                    const render::Image want = r.image.crop(render::Box{region.x, region.y, region.x + region.w, region.y + region.h});
+                    QVERIFY(got.tobytes() == want.tobytes());
+                }
+            }
+        }
+    }
+
+    void anim_is_drawn() {
+        Document doc = book();
+        doc.edit_page(0).extra["anim"] = Json::object({{"fps", 12}, {"tracks", Json::array()}});
+        for (const char* mode : {"print", "proof", "name"}) {
+            render::RenderOptions options;
+            options.mode = mode;
+            QVERIFY(unported_element(*doc.pages[0], doc, options).empty());
+            const render::RenderResult r = render::render_page(*doc.pages[0], 72, options, &doc);
+            QVERIFY(r.omitted.empty());
+        }
+    }
+
+    void balloons_are_drawn() {
+        // lines in balloons of several kinds (with tails, joined, turned, one set under the ink layer) and one not placed
+        // (a label): drawn in every mode with nothing left out, the page not the one without them, and parts of it
+        // drawn alone the same as the whole page cut
+        Document doc = book();
+        const Num index = doc.pages[0]->index;
+        std::string ink;
+        for (const auto& layer : doc.pages[0]->layers) {
+            if (layer.role == LayerRole::Ink) ink = layer.id;
+        }
+        doc.add_line(index, "台詞です", "A", std::nullopt, "", Num(10), Num(12)).tails.push_back(
+            Json::object({{"to", Json::array({30, 50})}, {"kind", "zigzag"}}));
+        doc.add_line(index, "叫び", "", std::nullopt, "", Num(30), Num(40), Num(25), Num(18), "shout").style["group"] = "g";
+        doc.add_line(index, "組の箱", "", std::nullopt, "", Num(40), Num(52), Num(22), Num(14), "box").style["group"] = "g";
+        doc.add_line(index, "回る雲", "B", std::nullopt, "", Num(8), Num(60), Num(26), Num(16), "cloud").style["rotate_deg"] = 20;
+        doc.add_line(index, "下の台詞", "", std::nullopt, "", Num(15), Num(30), Num(30), Num(16), "rounded").style["below_layer"] = ink;
+        doc.add_line(index, "置かれない台詞", "C", std::nullopt, "", Num(0), Num(0), Num(40), Num(20), "");  // (a label)
+        const Document plain = book();
+        for (const char* mode : {"print", "proof", "name"}) {
+            render::RenderOptions options;
+            options.mode = mode;
+            QVERIFY(unported_element(*doc.pages[0], doc, options).empty());
+            const render::RenderResult r = render::render_page(*doc.pages[0], 150, options, &doc);
+            QVERIFY(r.omitted.empty());
+            QVERIFY(r.image.tobytes() != render::render_page(*plain.pages[0], 150, options, &plain).image.tobytes());
+            for (const render::RenderRegion part : {render::RenderRegion{0, 0, 1, 1}, render::RenderRegion{40, 60, 150, 120},
+                                                    render::RenderRegion{0, 150, r.image.width(), 90},
+                                                    render::RenderRegion{r.image.width() - 70, r.image.height() - 60, 70, 60}}) {
+                for (const bool fresh : {true, false}) {
+                    if (fresh) render::clear_render_caches();
+                    render::RenderOptions o = options;
+                    o.region = part;
+                    const render::Image got = render::render_page(*doc.pages[0], 150, o, &doc).image;
+                    QVERIFY(got.tobytes() == r.image.crop(render::Box{part.x, part.y, part.x + part.w, part.y + part.h}).tobytes());
+                }
+            }
+        }
+        // each kind of line changes the page: the label, the line set under the ink, the joined and the turned balloons
+        render::RenderOptions proof;
+        proof.mode = "proof";
+        const std::string all = render::render_page(*doc.pages[0], 100, proof, &doc).image.tobytes();
+        for (std::size_t i = 0; i < doc.story.size(); ++i) {
+            Document fewer = doc;
+            fewer.story.erase(fewer.story.begin() + static_cast<std::ptrdiff_t>(i));
+            QVERIFY2(render::render_page(*fewer.pages[0], 100, proof, &fewer).image.tobytes() != all, doc.story[i].text.c_str());
+        }
+        // a line set under a layer of a page in precise colour: drawn into that canvas (as precise_page_balloons shows),
+        // nothing left out, and parts of the page the same as the whole page cut
+        Document precise = doc;
+        genko::core::Page& coloured_page = precise.edit_page(0);
+        genko::core::StrokePtr first;
+        for (const auto& layer : coloured_page.layers) {
+            if (layer.role == LayerRole::Ink) first = layer.strokes->items.front();
+        }
+        for (auto& layer : coloured_page.layers) {
+            if (layer.role != LayerRole::Finish) continue;
+            auto coloured = std::make_shared<genko::core::Stroke>(*first);
+            coloured->id = genko::core::new_id();
+            coloured->color_rgb = Json{{"precision", "f32"}, {"values", Json::array({1.25, 0.125, 0.5})}};
+            layer.strokes = genko::core::make_strokes({coloured});
+        }
+        render::RenderOptions print;
+        QVERIFY(render::uses_color_precision(*precise.pages[0], true));
+        QVERIFY(unported_element(*precise.pages[0], precise, print).empty());
+        const render::Image whole = render::render_page(*precise.pages[0], 150, print, &precise).image;
+        Document unset = precise;  // (without the line set under the ink)
+        std::erase_if(unset.story, [](const genko::core::StoryLine& l) { return l.text == "下の台詞"; });
+        QVERIFY(whole.tobytes() != render::render_page(*unset.pages[0], 150, print, &unset).image.tobytes());
+        for (const render::RenderRegion part :
+             {render::RenderRegion{40, 60, 150, 120}, render::RenderRegion{0, 150, whole.width(), 90}}) {
+            render::RenderOptions o = print;
+            o.region = part;
+            QVERIFY(render::render_page(*precise.pages[0], 150, o, &precise).image.tobytes() ==
+                    whole.crop(render::Box{part.x, part.y, part.x + part.w, part.y + part.h}).tobytes());
+        }
+    }
+
+    void lettering_it_cannot_draw_is_left_out() {
+        // What a line's letters need that this build cannot draw stops the page (NotYetPorted, by name) or, with
+        // skip_unported, is left out and reported — that line's letters: the page, the other lines and the balloons are
+        // drawn, and parts of the page are the same as the whole page cut. (1) letters filled with a picture this build
+        // cannot read yet (PC5 G-b: OpenType features across, once left out so — "text_features" —, are set by HarfBuzz
+        // now: the user's and the coordinator's decision for G); (2)
+        // a font file that cannot be read (33 MB of nothing), the book's, for a balloon's letters and for a line not
+        // placed (its label): drawn with Pillow's own default font, as genko.fonts.truetype falls back — nothing left out
+        // (M7).
+        const Document base = book();
+        const Num index = base.pages[0]->index;
+        Document plain = base;
+        plain.add_line(index, "普通の台詞", "", std::nullopt, "", Num(10), Num(12), Num(30), Num(20), "speech");
+        Document doc = plain;
+        {
+            genko::core::StoryLine& featured = doc.add_line(index, "ABC漢字", "", std::nullopt, "", Num(20), Num(50), Num(40), Num(20), "box");
+            featured.wrap = "horizontal";
+            genko::core::StoryLine across = featured;
+            across.style["features"] = Json::array({"jp78"});
+            QVERIFY(render::text::text_layout(across, 150).image.getbbox().has_value());  // (G-b: drawn)
+            featured.style["fill_png"] = std::string(kUnreadPicture);
+            QVERIFY_THROWS_EXCEPTION(render::NotYetPorted, render::text::text_layout(featured, 150));
+        }
+        for (const char* mode : {"print", "proof"}) {
+            render::RenderOptions options;
+            options.mode = mode;
+            QCOMPARE(unported_element(*doc.pages[0], doc, options), std::string("image_format"));
+            options.skip_unported = true;
+            const render::RenderResult r = render::render_page(*doc.pages[0], 150, options, &doc);
+            QCOMPARE(r.omitted, std::vector<std::string>{"image_format"});
+            // (the box drawn, its letters not; the other line drawn)
+            QVERIFY(r.image.tobytes() != render::render_page(*plain.pages[0], 150, options, &plain).image.tobytes());
+            QVERIFY(r.image.tobytes() != render::render_page(*base.pages[0], 150, options, &base).image.tobytes());
+            for (const render::RenderRegion part : {render::RenderRegion{0, 0, 1, 1}, render::RenderRegion{90, 260, 200, 120},
+                                                    render::RenderRegion{0, 150, r.image.width(), 90}}) {
+                for (const bool fresh : {true, false}) {
+                    if (fresh) render::clear_render_caches();
+                    render::RenderOptions o = options;
+                    o.region = part;
+                    const render::RenderResult got = render::render_page(*doc.pages[0], 150, o, &doc);
+                    QVERIFY(got.image.tobytes() == r.image.crop(render::Box{part.x, part.y, part.x + part.w, part.y + part.h}).tobytes());
+                }
+            }
+        }
+        // a font file of 33 MB (sparse: nothing written), the book's
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString big = dir.filePath(QStringLiteral("big.ttf"));
+        {
+            QFile file(big);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            QVERIFY(file.resize(33LL * 1024 * 1024));
+        }
+        for (const bool placed : {true, false}) {
+            Document fonted = base;
+            fonted.font_path = big.toStdString();
+            if (placed) {
+                fonted.add_line(index, "大きな書体", "", std::nullopt, "", Num(10), Num(12), Num(30), Num(20), "speech");
+            } else {
+                fonted.add_line(index, "置かれない台詞", "C", std::nullopt, "", Num(0), Num(0), Num(40), Num(20), "");  // (a label)
+            }
+            fonted.add_line(index, "自分の書体", "", std::nullopt, "", Num(20), Num(50), Num(30), Num(20), "box").style["font"] = "mincho";
+            render::RenderOptions options;
+            options.mode = "proof";
+            QCOMPARE(unported_element(*fonted.pages[0], fonted, options), std::string());
+            options.skip_unported = true;
+            const render::RenderResult r = render::render_page(*fonted.pages[0], 150, options, &fonted);
+            QVERIFY(r.omitted.empty());
+            QVERIFY(r.image.tobytes() != render::render_page(*base.pages[0], 150, options, &base).image.tobytes());
+        }
+        QVERIFY(QFile::remove(big));
+    }
+
+    void far_picture_balloons_are_not_opened() {
+        // A part of the page that a picture balloon does not reach does not open its picture, but decides as the whole
+        // page does (what the picture is, is known from its first bytes): one this build cannot read yet stops the whole
+        // page and the part away from it alike, or, with skip_unported, is left out of both and said so (a tile of the
+        // canvas, a region: the same pixels as the whole page cut).
+        Document doc = book();
+        const Document plain = doc;
+        const Num index = doc.pages[0]->index;
+        doc.add_line(index, "絵", "", std::nullopt, "", Num(2), Num(2), Num(12), Num(8), "picture").style["picture"] =
+            std::string(kUnreadPicture);
+        render::RenderOptions proof;
+        proof.mode = "proof";
+        QCOMPARE(unported_element(*doc.pages[0], doc, proof), std::string("image_format"));
+        const render::Image whole = render::render_page(*plain.pages[0], 150, proof, &plain).image;
+        const render::RenderRegion far{whole.width() - 80, whole.height() - 60, 80, 60};
+        proof.region = far;
+        QVERIFY_THROWS_EXCEPTION(render::NotYetPorted, render::render_page(*doc.pages[0], 150, proof, &doc));
+        proof.skip_unported = true;
+        const render::RenderResult got = render::render_page(*doc.pages[0], 150, proof, &doc);
+        QCOMPARE(got.omitted, std::vector<std::string>{"image_format"});
+        QVERIFY(got.image.tobytes() == whole.crop(render::Box{far.x, far.y, far.x + far.w, far.y + far.h}).tobytes());
+    }
+
+    void unported_picture_leaves_its_group_out_everywhere() {
+        // A joined group (style.group) with a picture balloon this build does not read (JPEG 2000): the whole page drawn with
+        // skip_unported leaves the whole group out and says so; so does every part of the page — one the picture reaches,
+        // and one it does not that the group's other balloon reaches — so each part is the whole page cut.
+        Document doc = book();
+        const Num index = doc.pages[0]->index;
+        {
+            genko::core::StoryLine& picture = doc.add_line(index, "絵", "", std::nullopt, "", Num(2), Num(2), Num(12), Num(8), "picture");
+            picture.style["picture"] = std::string(kUnreadPicture);
+            picture.style["group"] = "g";
+        }
+        doc.add_line(index, "遠くの台詞", "", std::nullopt, "", Num(40), Num(70), Num(25), Num(18), "speech").style["group"] = "g";
+        Document apart = doc;  // (the same balloon in a group of its own: drawn)
+        apart.story.back().style["group"] = "h";
+        for (const char* mode : {"proof", "print"}) {
+            render::RenderOptions options;
+            options.mode = mode;
+            options.skip_unported = true;
+            const render::RenderResult whole = render::render_page(*doc.pages[0], 150, options, &doc);
+            QCOMPARE(whole.omitted, std::vector<std::string>{"image_format"});
+            QVERIFY(whole.image.tobytes() != render::render_page(*apart.pages[0], 150, options, &apart).image.tobytes());
+            const int w = whole.image.width();
+            const int h = whole.image.height();
+            for (const render::RenderRegion part : {render::RenderRegion{220, 400, w - 220, h - 400},  // (the balloon, not the picture)
+                                                    render::RenderRegion{0, 0, 100, 80},              // (the picture)
+                                                    render::RenderRegion{0, 0, w, h / 2}, render::RenderRegion{0, h / 2, w, h - h / 2},
+                                                    render::RenderRegion{300, 450, 1, 1}}) {
+                for (const bool fresh : {true, false}) {
+                    if (fresh) render::clear_render_caches();
+                    render::RenderOptions o = options;
+                    o.region = part;
+                    const render::RenderResult got = render::render_page(*doc.pages[0], 150, o, &doc);
+                    QCOMPARE(got.omitted, std::vector<std::string>{"image_format"});
+                    QVERIFY2(got.image.tobytes() == whole.image.crop(render::Box{part.x, part.y, part.x + part.w, part.y + part.h}).tobytes(),
+                             (std::string(mode) + " region " + std::to_string(part.x) + "," + std::to_string(part.y)).c_str());
+                }
+            }
+        }
+    }
+
+    void remembered_keys_count() {
+        // What a remembered picture is kept by counts in the memory the pictures may take: a key of megabytes (a line's
+        // picture written into it) is not kept as if it were free.
+        render::text::detail::Memo<int> memo(16, 4096);
+        memo.put(std::string(2000, 'k'), std::make_shared<const int>(1), 1);
+        QVERIFY(memo.get(std::string(2000, 'k')) == nullptr);  // (more than a quarter of what may be kept, with its key)
+        memo.put("small", std::make_shared<const int>(2), 1);
+        QVERIFY(memo.get("small") != nullptr);
+        for (char c : {'a', 'b', 'c', 'd', 'e'}) memo.put(std::string(1000, c), std::make_shared<const int>(c), 1);
+        QVERIFY(memo.get(std::string(1000, 'a')) == nullptr);  // (the oldest gone: five keys of 1000 bytes are more than 4096)
+        QVERIFY(memo.get(std::string(1000, 'e')) != nullptr);
+    }
+
+    void precise_page_balloons() {
+        // A page in precise colour (a canvas Python does not have) draws the lines set under a layer as the 8-bit page
+        // draws them, on its own picture so far, and what they paint goes into the canvas. Where the canvas holds just
+        // what the 8-bit page holds — under the balloons a precise picture of whole 8-bit values and full alpha where
+        // the 8-bit page has a fill of that colour; above them layers that are opaque or clear — the two pages are the
+        // same pixels: the balloons over what is under them, covered where the layer above covers them.
+        const auto page_of = [](bool precise) {
+            Document doc =
+                genko::core::new_episode("精密な台詞", Num(1), 1, genko::core::PageSpec::custom(60, 80, 50, 70, 3, 5, 5, 5, 5, 600, "color"));
+            genko::core::Page& page = doc.edit_page(0);
+            page.numero = false;
+            page.layers.clear();
+            Layer base;
+            base.id = "base";
+            base.panel_clip = false;
+            if (precise) {  // (one pixel stretched over the page: 40, 160, 90 as 16-bit samples, opaque)
+                base.kind = LayerKind::Raster;
+                base.role = LayerRole::User;
+                const Json pixels = Json::array({40 * 257, 160 * 257, 90 * 257, 65535});
+                base.color_raster = std::make_shared<const std::string>(
+                    genko::core::encode_color_raster(Json{{"width", 1}, {"height", 1}, {"precision", "u16"}, {"pixels", pixels}}));
+            } else {
+                base.kind = LayerKind::Fill;
+                base.fill = Json{{"rgb", Json::array({40, 160, 90})}};
+            }
+            Layer cover;  // (the left half opaque, the right half clear: at 100 dpi, a pixel of it for each of the page's)
+            cover.id = "cover";
+            cover.kind = LayerKind::Raster;
+            cover.role = LayerRole::User;
+            cover.panel_clip = false;
+            render::Image half =
+                render::Image::create("RGBA", {render::mm_to_px(60, 100), render::mm_to_px(80, 100)}, render::Ink{0, 0, 0, 0});
+            half.paste(render::Ink{200, 30, 30, 255}, render::Box{0, 0, half.width() / 2, half.height()});
+            cover.raster_png = std::make_shared<const std::string>(render::write_png(half));
+            page.layers = {base, cover};
+            doc.add_line(page.index, "下に置く台詞", "", std::nullopt, "", Num(18), Num(20), Num(26), Num(16), "speech").style["below_layer"] =
+                "cover";
+            doc.add_line(page.index, "見える台詞", "", std::nullopt, "", Num(34), Num(45), Num(20), Num(14), "box").style["below_layer"] =
+                "cover";
+            doc.add_line(page.index, "上の台詞", "", std::nullopt, "", Num(8), Num(60), Num(22), Num(12), "rounded");
+            // (the same ids on both pages: a balloon's hand-drawn outline follows its line's id)
+            for (std::size_t i = 0; i < doc.story.size(); ++i) doc.story[i].id = "line-" + std::to_string(i);
+            return doc;
+        };
+        const Document eight = page_of(false);
+        const Document precise = page_of(true);
+        QVERIFY(!render::uses_color_precision(*eight.pages[0], true));
+        QVERIFY(render::uses_color_precision(*precise.pages[0], true));
+        for (const char* mode : {"print", "proof"}) {
+            render::RenderOptions options;
+            options.mode = mode;
+            const render::RenderResult got = render::render_page(*precise.pages[0], 100, options, &precise);
+            QVERIFY(got.omitted.empty());
+            const render::Image want = render::render_page(*eight.pages[0], 100, options, &eight).image;
+            QCOMPARE(got.image.size(), want.size());
+            QVERIFY2(got.image.tobytes() == want.tobytes(), mode);
+            // the lines under the cover are drawn (the page is not the one without them), and covered on its left half
+            Document bare = precise;
+            bare.story.erase(bare.story.begin(), bare.story.begin() + 2);
+            QVERIFY(render::render_page(*bare.pages[0], 100, options, &bare).image.tobytes() != got.image.tobytes());
+            Document over = precise;  // (the first line over everything instead: it shows where the cover hid it)
+            over.story[0].style.erase("below_layer");
+            QVERIFY(render::render_page(*over.pages[0], 100, options, &over).image.tobytes() != got.image.tobytes());
+        }
+        // what the balloons paint goes in as 8-bit pixels and covers the precise colour under them, though that rounds
+        // to the balloon's own colour (white over a white brighter than white); what they leave keeps its precise value,
+        // and a clipped layer still clips to the layer before them
+        render::ColorCanvas canvas(render::Image::create("RGBA", {4, 1}, render::Ink{255, 255, 255, 255}));
+        const std::string bright = genko::core::encode_color_raster(
+            Json{{"width", 1}, {"height", 1}, {"precision", "f32"}, {"pixels", Json::array({1.25, 1.25, 1.25, 0.5})}});
+        canvas.blend(genko::core::ColorRasterView(bright), {4, 1}, render::Box{0, 0, 4, 1}, 1.0, false);
+        const auto kept = canvas.linear_pixel(2);
+        QVERIFY(kept[0] > 1.0);
+        canvas.draw_8bit([](render::Image& picture) {
+            picture.paste(render::Ink{255, 255, 255, 255}, render::Box{0, 0, 1, 1});
+            picture.paste(render::Ink{0, 0, 0, 255}, render::Box{1, 0, 2, 1});
+        });
+        QCOMPARE(canvas.linear_pixel(0), (std::array<double, 4>{1.0, 1.0, 1.0, 1.0}));
+        QCOMPARE(canvas.linear_pixel(1), (std::array<double, 4>{0.0, 0.0, 0.0, 1.0}));
+        QCOMPARE(canvas.linear_pixel(2), kept);
+        canvas.blend(render::Image::create("RGBA", {4, 1}, render::Ink{255, 0, 0, 255}), 1.0, true);  // (clipped: half of it)
+        QCOMPARE(canvas.linear_pixel(0), (std::array<double, 4>{1.0, 0.5, 0.5, 1.0}));
+    }
+
+    void unported_only_where_drawn() {
+        Document doc = book();
+        genko::core::Page& page = doc.edit_page(0);
+        page.numero = true;  // nombres are printed and proofed, not shown in the name
+        render::RenderOptions name;
+        name.mode = "name";
+        QVERIFY(unported_element(*doc.pages[0], doc, name).empty());
+        // a hidden tone layer is not drawn
+        Layer tone;
+        tone.id = genko::core::new_id();
+        tone.role = LayerRole::Tone;
+        tone.visible = false;
+        page.layers.push_back(tone);
+        QVERIFY(unported_element(*doc.pages[0], doc, name).empty());
+        // nor nombres turned off for the book
+        doc.nombre = Json::object({{"show", false}, {"hidden", false}});
+        render::RenderOptions print;
+        QVERIFY(unported_element(*doc.pages[0], doc, print).empty());
+    }
+
+    void cancelled() {
+        const Document doc = book();
+        std::stop_source stop;
+        stop.request_stop();
+        render::RenderOptions options;
+        options.stop = stop.get_token();
+        QVERIFY_THROWS_EXCEPTION(render::Cancelled, render::render_page(*doc.pages[0], 150, options, &doc));
+    }
+
+    void threads() {
+        const Document doc = book();
+        render::RenderOptions options;
+        options.mode = "proof";
+        const std::string want = render::render_page(*doc.pages[0], 150, options, &doc).image.tobytes();
+        std::vector<std::string> got(6);
+        std::vector<std::thread> workers;
+        for (std::size_t i = 0; i < got.size(); ++i) {
+            workers.emplace_back([&, i] {
+                if (i % 2 == 0) render::clear_render_caches();
+                render::RenderOptions o = options;
+                if (i % 3 == 0) {
+                    o.region = render::RenderRegion{0, 0, 200, 300};
+                    got[i] = render::render_page(*doc.pages[0], 150, o, &doc).image.tobytes();
+                } else {
+                    got[i] = render::render_page(*doc.pages[0], 150, o, &doc).image.tobytes();
+                }
+            });
+        }
+        for (auto& w : workers) w.join();
+        const render::Image whole = render::Image::frombytes("RGB", render::Size{render::mm_to_px(70, 150), render::mm_to_px(95, 150)}, want);
+        for (std::size_t i = 0; i < got.size(); ++i) {
+            if (i % 3 == 0) {
+                QVERIFY(got[i] == whole.crop(render::Box{0, 0, 200, 300}).tobytes());
+            } else {
+                QVERIFY(got[i] == want);
+            }
+        }
+    }
+
+    void regions() {
+        const Document doc = book();
+        for (const char* mode : {"print", "proof", "name"}) {
+            render::RenderOptions options;
+            options.mode = mode;
+            const render::Image whole = render::render_page(*doc.pages[0], 150, options, &doc).image;
+            for (const render::RenderRegion r : {render::RenderRegion{0, 0, 1, 1}, render::RenderRegion{17, 33, 120, 77},
+                                                 render::RenderRegion{0, 200, whole.width(), 60},
+                                                 render::RenderRegion{whole.width() - 40, whole.height() - 25, 40, 25}}) {
+                for (const bool fresh : {true, false}) {
+                    if (fresh) render::clear_render_caches();
+                    render::RenderOptions part = options;
+                    part.region = r;
+                    const render::Image got = render::render_page(*doc.pages[0], 150, part, &doc).image;
+                    QCOMPARE(got.size(), (render::Size{r.w, r.h}));
+                    QVERIFY(got.tobytes() == whole.crop(render::Box{r.x, r.y, r.x + r.w, r.y + r.h}).tobytes());
+                }
+            }
+        }
+        render::RenderOptions outside;
+        outside.region = render::RenderRegion{-1, 0, 10, 10};
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::render_page(*doc.pages[0], 150, outside, &doc));
+        outside.region = render::RenderRegion{0, 0, 10000, 10};
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::render_page(*doc.pages[0], 150, outside, &doc));
+    }
+
+    void precise_layers_in_parts() {
+        // PC2d (document:color-depth-model): layers holding precise pixels drawn with what the 8-bit page draws on a
+        // layer — the ink layer's lines (each in the panel it begins in) and effects (a border and a water edge) over its
+        // pixels, a noise screen (トーン化) and a mask on another — give in a part of the page the whole page's pixels cut
+        // there, as the 8-bit page does: the effects worked on a box widened by their reach, the noise from the top of
+        // the page, nothing left out
+        Document doc = book();
+        genko::core::Page& page = doc.edit_page(0);
+        const auto precise = [](int w, int h, int shade) {
+            Json pixels = Json::array();
+            for (int y = 0; y < h; ++y) {
+                for (int x = 0; x < w; ++x) {
+                    const bool in = (x - w / 2) * (x - w / 2) + (y - h / 2) * (y - h / 2) < w * h / 6;
+                    for (const int v : {shade * 257, (255 - shade) * 257, (x * 9 % 256) * 257, in ? 65535 : 0}) pixels.push_back(v);
+                }
+            }
+            return std::make_shared<const std::string>(genko::core::encode_color_raster(Json{{"width", w}, {"height", h}, {"precision", "u16"}, {"pixels", pixels}}));
+        };
+        for (auto& layer : page.layers) {
+            if (layer.role == LayerRole::Ink) layer.color_raster = precise(16, 20, 90);  // (a layer of lines with precise pixels)
+        }
+        Layer screened;
+        screened.id = genko::core::new_id();
+        screened.kind = LayerKind::Raster;
+        screened.role = LayerRole::User;
+        screened.panel_clip = false;
+        screened.color_raster = precise(12, 14, 160);
+        screened.screen = Json::object({{"pattern", "noise"}});
+        render::Image half = render::Image::create("L", {40, 40}, render::Ink(255));
+        half.paste(render::Ink(0), render::Box{0, 0, 20, 40});
+        screened.mask = genko::core::Mask{};
+        screened.mask->png = std::make_shared<const std::string>(render::write_png(half));
+        screened.mask->enabled = true;
+        page.layers.push_back(screened);
+        QVERIFY(render::uses_color_precision(*doc.pages[0], true));
+        for (const char* mode : {"print", "proof"}) {
+            render::RenderOptions options;
+            options.mode = mode;
+            const render::RenderResult whole = render::render_page(*doc.pages[0], 150, options, &doc);
+            QVERIFY(whole.omitted.empty());
+            const render::Image all = whole.image;
+            for (const render::RenderRegion r : {render::RenderRegion{0, 0, 1, 1}, render::RenderRegion{17, 33, 120, 77},
+                                                 render::RenderRegion{0, 200, all.width(), 60},
+                                                 render::RenderRegion{all.width() - 40, all.height() - 25, 40, 25}}) {
+                render::clear_render_caches();
+                render::RenderOptions part = options;
+                part.region = r;
+                const render::Image got = render::render_page(*doc.pages[0], 150, part, &doc).image;
+                QCOMPARE(got.size(), (render::Size{r.w, r.h}));
+                QVERIFY2(got.tobytes() == all.crop(render::Box{r.x, r.y, r.x + r.w, r.y + r.h}).tobytes(), mode);
+            }
+        }
+    }
+
+    void remembered_lines() {
+        Document doc = book();
+        genko::core::Page& page = doc.edit_page(0);
+        for (auto& layer : page.layers) {
+            if (layer.role != LayerRole::Ink) continue;
+            std::vector<genko::core::StrokePtr> items = layer.strokes->items;
+            for (int i = 0; i < 320; ++i) items.push_back(line(3.0 + 0.15 * i, 40.0 + 0.1 * i, 0.4, 0.3));
+            layer.strokes = genko::core::make_strokes(std::move(items));
+            layer.panel_each = false;
+            layer.effect.reset();
+        }
+        QVERIFY(render::rough_needed(*doc.pages[0], 72));
+        render::RenderOptions options;
+        (void)render::render_page(*doc.pages[0], 72, options, &doc);
+        QVERIFY(!render::rough_needed(*doc.pages[0], 72));
+        QVERIFY(render::rough_needed(*doc.pages[0], 100));  // (another resolution has nothing remembered)
+    }
+
+    void frames_and_errors() {
+        const Document doc = book();
+        QVERIFY_THROWS_EXCEPTION(genko::core::Error, render::render_frame(*doc.pages[0], "no-such-frame", 72));
+        const auto leaves = doc.pages[0]->leaf_frames();
+        const render::Image panel = render::render_frame(*doc.pages[0], leaves.front()->id, 72);
+        QVERIFY(panel.width() > 0 && panel.height() > 0);
+        QCOMPARE(std::string(render::to_bitonal(panel).mode()), std::string("1"));
+        const Json dots = Json::object({{"pattern", "dot"}});
+        QCOMPARE(std::string(render::to_bitonal(panel, 180, &dots).mode()), std::string("1"));
+        QCOMPARE(render::export_plan(*doc.pages[0]).size(), std::size_t{7});
+        QCOMPARE(render::mm_to_px(0.0, 600), 1);
+        QCOMPARE(render::mm_to_px(25.4, 72), 72);
+        QCOMPARE(render::mm_to_px(0.1, 254), 1);  // round(1.0)
+    }
+};
+
+QTEST_GUILESS_MAIN(TestRenderPage)
+#include "test_render_page.moc"

@@ -1,0 +1,25 @@
+[
+  {
+    "name": "rgb24-header",
+    "data": "Qk2uAAAAAAAAADYAAAAoAAAABwAAAAUAAAABABgA",
+    "python_verify_accepts": false,
+    "python_error": "OSError",
+    "message": "Truncated File Read",
+    "cpp_error": "Truncated File Read",
+    "python_load_error": "OSError"
+  },
+  {
+    "name": "rgb24-half",
+    "data": "Qk2uAAAAAAAAADYAAAAoAAAABwAAAAUAAAABABgAAAAAAHgAAADEDgAAxA4AAAAAAAAAAAAAXOw0o/1Z6g5+MR+jeDDIv0HtBlISAAAARbEnjMJM09Nx",
+    "python_verify_accepts": true,
+    "cpp_error": "image file is truncated (9 bytes not processed)",
+    "python_load_error": "OSError"
+  },
+  {
+    "name": "rgb24-lastpixel",
+    "data": "Qk2uAAAAAAAAADYAAAAoAAAABwAAAAUAAAABABgAAAAAAHgAAADEDgAAxA4AAAAAAAAAAAAAXOw0o/1Z6g5+MR+jeDDIv0HtBlISAAAARbEnjMJM09NxGuSWYfW7qAbg7xcFAAAALnYadYc/vJhkA6mJSrqukcvT2Nz4AAAAFzsNXkwypV1X7G58M3+hepDGwaHrAAAAAAAARxEljiJK1TNvHESUY1W5qmY=",
+    "python_verify_accepts": true,
+    "cpp_error": "image file is truncated (20 bytes not processed)",
+    "python_load_error": "OSError"
+  }
+]

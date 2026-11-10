@@ -1,0 +1,150 @@
+#pragma once
+
+#include <cstdint>
+#include <filesystem>
+#include <map>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "core/brushes.hpp"
+#include "core/geometry.hpp"
+#include "core/json.hpp"
+#include "render/dabs/lines.hpp"
+#include "render/image.hpp"
+
+// How a vector line is drawn with its brush (Python's genko/brushes.py: draw and the parts it calls). The brushes
+// themselves (the presets, from_dict, to_dict, register) are core's (core/brushes.hpp); this keeps the brushes this
+// process knows (Python's CUSTOM), as brushes.brush(kind) looks them up when a line is drawn.
+
+namespace genko::render::brushes {
+
+using Brush = core::Brush;
+
+inline constexpr std::string_view kDefault = core::kDefaultBrush;
+
+// brush(key): LEGACY names first ("oil" → marker), then the built-in ones, then the registered ones, else the G pen.
+Brush brush(std::string_view key);
+
+// The built-in brushes and then the registered ones.
+std::vector<Brush> everything();
+
+// register(definitions): make a book's (or the library's) brushes known; ones that do not make sense are skipped,
+// and built-in names are never replaced. Thread-safe.
+void register_brushes(const core::Json& definitions);
+
+// A book read: its brushes made known (register), each in place of one of the same key, and kept as the book's last
+// known brushes for follow_book.
+void register_book(const core::Json& definitions);
+// After a change to the book: only its brushes that are new or changed since it was last followed (define_brush, as
+// Python's op puts the brush into CUSTOM) are made known again. The others stay as they are: the person's own brushes
+// and the edits made to them this session are never replaced by the book's older copy, and nothing is ever taken out.
+void follow_book(const core::Json& definitions);
+// The same for a book with the pictures of its brushes' papers (BRUSH-01), which are made known too (paper::keep_all).
+void register_book(const core::Document& doc);
+void follow_book(const core::Document& doc);
+
+// Forget the registered brushes and the book's last known ones (a new process starts without them; the tests use this
+// between books).
+void clear_custom();
+
+// CUSTOM[key] = from_dict(key, data): one brush made known, or made again in its place (Python's errors when its
+// settings do not make sense: PyValueError, PyTypeError …, and nothing changes); and one forgotten
+// (CUSTOM.pop(key, None)). A built-in name is never replaced (PyValueError).
+void define_brush(std::string_view key, const core::Json& data);
+void forget_brush(std::string_view key);
+
+// _decode_tip: the ink of an image tip given as base64 PNG (its alpha, or its darkness), or nothing for a picture that
+// cannot be opened.
+std::optional<Image> tip_ink(const std::string& base64_png);
+
+// The person's own brushes (key → settings) in the config folder's brushes.json (Python's library_path,
+// load_library, save_to_library; the folder is the app's: app/config.hpp). A file that cannot be read is an empty
+// library; saving writes json.dumps({"brushes": …}, ensure_ascii=False, indent=1). Beyond Python, so a library is
+// never lost: saving refuses (PyUncaught OSError "the brush library cannot be read, so it is left as it is: <path>")
+// when the file is there but cannot be read as a library, where Python would write only the one brush over it; and
+// the file is written whole or not at all (storage::write_atomic).
+std::filesystem::path library_path(const std::filesystem::path& config_dir);
+core::Json load_library(const std::filesystem::path& config_dir);
+// (BRUSH-01) A brush's "paper" is never written into brushes.json, which Python's app reads and writes too (its
+// edit would drop it): it goes to brush_papers.json beside it ({"genko_brush_papers": 1, "papers": {key: paper}},
+// written whole or not at all) with its picture in brush_papers/<64 hex>.png (from paper::bytes; written first). The
+// rest of the brush goes to brushes.json as before; forgetting a brush forgets its paper too. core::Error
+// ("missing_asset") for a paper whose picture this process does not know; PyUncaught OSError when a file cannot be
+// written (brushes.json is written first).
+void save_to_library(const std::filesystem::path& config_dir, std::string_view key, const std::optional<core::Json>& data);
+
+// (PC4 E2, brush.presets.*: SPEC.md COLOR-09「ブラシのプリセット」) Several of the person's brushes saved or forgotten at once
+// (each as save_to_library saves or forgets one, the file read again and written once), with:
+// - the order of the person's groups when `groups` is given (brushes.json's "groups": [names], beside "brushes" — written
+//   only when there is an order to keep, so a library without groups is written as before), else the file's own;
+// - a dab brush's pictures (its tip, the dual brush's tip, its texture: brushes@1) in brush_tips/<64 hex>.png beside it
+//   (as the papers' brush_papers/), each written before brushes.json names it — from `pictures` or the pictures this
+//   process knows (render/dabs/lines.hpp picture; core::Error("missing_asset") for one it does not) —, the ones no brush
+//   names any more (and not written in the last hour) taken away.
+// A brush's "group" is kept in its entry (the brushes read and drawn as before: no op or book reads it).
+void save_many(const std::filesystem::path& config_dir, const std::vector<std::pair<std::string, std::optional<core::Json>>>& changes,
+               const std::optional<std::vector<std::string>>& groups = std::nullopt,
+               const std::map<std::string, core::Bytes>& pictures = {});
+// The order of the person's groups as brushes.json keeps it (none: no "groups", or a file that cannot be read).
+std::vector<std::string> library_groups(const std::filesystem::path& config_dir);
+// Where the library keeps a dab brush's picture, and the picture there when it holds what its name says (else null).
+std::filesystem::path library_tip_path(const std::filesystem::path& config_dir, const std::string& ref);
+core::Bytes library_tip(const std::filesystem::path& config_dir, const std::string& ref);
+// A brush's settings with its dab pictures given as picture files ("tip": {"png": base64}, the dual brush's and the
+// texture's too: as define_brush and a .genkobrush take them) for a book or a computer that does not hold them, its paper
+// as with_paper_picture gives it; settings without them as they are. core::Error("missing_asset") for a picture this
+// process cannot find (render/dabs/lines.hpp picture: the library's too when the window reads it).
+core::Json with_pictures(const core::Json& definition);
+
+// BRUSH-01: the papers of the person's own brushes (this build only).
+std::filesystem::path library_papers_path(const std::filesystem::path& config_dir);
+// load_library with, for each brush brush_papers.json has a paper for, that paper ("paper", last) when its picture is
+// there and holds what its name says (made known: paper::keep); otherwise the brush as brushes.json has it. A
+// brush_papers.json that cannot be read gives no papers.
+core::Json load_own_brushes(const std::filesystem::path& config_dir);
+
+// A brush's settings with its paper's picture given as a picture file ("paper": {"png": base64, …}, as define_brush and a
+// .genkobrush take it) taken in (paper::take_in, made known) and given by its "asset"; settings without one as they
+// are. core::Error from take_in, core::Error("value") for a png that is not base64.
+core::Json with_paper_taken_in(const core::Json& definition);
+// The other way, for settings that go to another computer (a .genkobrush, define_brush into a book that does not keep
+// the picture): the paper's "asset" given as its picture ("png": base64 of the grey PNG). core::Error("missing_asset")
+// when this process does not know it.
+core::Json with_paper_picture(const core::Json& definition);
+
+// A line's coverage at a resolution, only around the line: an "L" picture and where its corner is on the page.
+struct Coverage {
+    Image mask;
+    Point origin;
+    // brushes@1 (PC4 E1): a dab brush's line as its dabs laid it — its coverage in float and, with the colour dynamics,
+    // the colour of each pixel (render/dabs/coverage.hpp LineCover; mask is it in 8 bits). `fine`: mask is that
+    // coverage alone (no paper and no light-touch shading laid on it), so a precise layer may lay the float instead.
+    std::shared_ptr<const dabs::LineCover> dabs = nullptr;
+    bool fine = false;
+};
+
+// draw(size, points, dpi, width_mm, kind, seed, rotation, pressure_opacity): nothing when the line has no points or
+// lies off the page. A brush with a paper (BRUSH-01) then lays it under the coverage (render/paper.hpp apply: the
+// line's seed and its first point for coords "stroke"); a brush without one draws exactly as Python's.
+// brushes@1 (PC4 E1): a dab brush (its "engine": "dabs") lays its dabs (render/dabs/lines.hpp) with the line's inputs
+// (none: a mouse's) — only over `within` when it is given (a part of the page: the same pixels there as the whole);
+// every other brush draws as before (`inputs` and `within` are not used).
+std::optional<Coverage> draw(Size size, const core::PenPoints& points, int dpi, double width_mm, std::string_view kind,
+                             std::string_view seed = {}, std::span<const double> rotation = {},
+                             double pressure_opacity = 0.0, const dabs::LineInputs* inputs = nullptr,
+                             std::optional<Box> within = std::nullopt);
+
+// The box draw() would cover, without drawing it (nothing where draw() returns nothing). A dab brush's: the line's
+// points with the largest reach of its dabs (their size, scatter and tip), so never less than what they cover.
+std::optional<Box> extent(Size size, const core::PenPoints& points, int dpi, double width_mm, std::string_view kind);
+
+// brushes@1 (PC4 E1): a line's inputs for its dab brush (render/dabs/lines.hpp), from the line and the colour it is drawn
+// in (`rgb`, 0..255: what the page lays; a precise line's color_rgb, its own float).
+dabs::LineInputs line_inputs(const core::Stroke& stroke, const std::vector<std::int64_t>& rgb);
+// Whether the brush of a kind is a dab brush.
+bool is_dab(std::string_view kind);
+
+}  // namespace genko::render::brushes

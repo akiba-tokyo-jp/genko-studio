@@ -1,0 +1,7121 @@
+{
+  "scope": "承認済み全対象の一度の分類と実行キュー。分類は完成認定でも全項目未実装認定でもない。",
+  "source_ledgers": {
+    "ledger.json": "ffa55c039e15fa18c67174afd94e35660d6747551545d19c3478cdfee13221dc",
+    "improvements.json": "c52b3cc3f49495d5b3378f052aea7454946c58868a94e47dd05e811013d88ed8",
+    "photocraft/feature-ledger.json": "185a7de77c766cb8b8ab68523c73849b73c0e6e1b370216ac0c61eb7a05774d9"
+  },
+  "counts": {
+    "ledger.json": 763,
+    "photocraft/feature-ledger.json": 961,
+    "improvements.json": 14
+  },
+  "rules": [
+    "基盤の既知重大不具合を優先",
+    "先頭の実行可能な重要経路を実装。待ち時だけ独立群を進める",
+    "既存証拠と照合し完了対象は再実装しない",
+    "描画等の大群は該当領域に着手時だけ算法単位へ分解し、全キューを再作成しない",
+    "先頭は次に閉じる工程出口の不足項目だけから選ぶ。出口が閉じる前に後工程の大群へ移らない",
+    "1機能群=1作業木=1候補。別工程の変更を同じ木に積まない",
+    "試験は宣言を読み対象compileを通してから証跡phaseを起動。build/fixture誤りで-vN phaseを増やさない",
+    "VALIDATION規定外の補助監査JSONを作らない。進捗は統合済み群と出口残で測る",
+    "各群は 実装(対象試験の直接実行)→review1回→凍結→重い受入を凍結sourceへ各構成1回→統合。独自driverにphaseを足さない",
+    "重い受入の実行中は、空いている既存作業木で次群のコードを書く"
+  ],
+  "active": {
+    "group": "m2-user-workflow",
+    "step": "native/handoff-20261008へ引継ぎWIPマージ。docs/cpp-migration/HANDOFF.mdを読みマージ後compile/関連確認から再開。"
+  },
+  "worktree": "/home/hermes/genko-test/cpp-impl/wt/m2-material-previews",
+  "recovered_cache_red": "build/material-cache-red-v2/execution.json・実persistent-reuse FAIL・再実行なし",
+  "groups": [
+    {
+      "id": "m2-user-workflow",
+      "status": "planned-not-accepted",
+      "targets": [
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_frame"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_layer"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_page"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_stroke"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:advance"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:cut_frame"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:delete_frame"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:delete_layer"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:delete_page"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:delete_stroke"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:duplicate_layer"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:duplicate_page"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:edit_stroke"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:erase"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:erase_raster"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:lock_page"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:merge_frame"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:move_gutter"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:name_ok"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:reorder"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:reorder_layers"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:resize_frame"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:select_frame"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_autosave"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_brush"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_frame"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_layer"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_layers"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_meta"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_note"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:simplify_stroke"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:split_frame"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:undo"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:unlock_page"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:app"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_new"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_open"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_save"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_save_as"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_undo"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_redo"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_fit"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_zoom_in"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_zoom_out"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_actual"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_turn_left"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_turn_right"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_turn_reset"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_zoom_tool"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_zoom_value"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_mirror"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_overview"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_prev"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_next"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_guides"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_select"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_pen"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_eraser"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_frame"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_move"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_point_wider"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_color"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_split_h"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_split_v"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_merge"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_delete_frame"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_frame_selection"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_gutters"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_border"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_corner"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_no_border"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_bleed"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_border_colour"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_frame_numbers"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_template"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_save_template"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_add_page"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_del_page"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_dup_page"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_page_up"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_page_down"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_name_ok"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_close"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_new_window"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_next_doc"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_prev_doc"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_quit"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui-group:stage_actions"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui-group:tool_actions"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui-group:border_kind_actions"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/__init__"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/canvas"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/dialogs"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/documents"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/fields"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/history"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/icons"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/inputs"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/live_ink"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/main"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/navigator"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/pages_panel"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/session"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/theme"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/viewer"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/wording"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:frames"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:render"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:stroke"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m10"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m7_gui"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m7_session"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_ui_look"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_ux"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_ux_review"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w14_speed"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w1_panels"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w1_panels_gui"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w9_view"
+        },
+        {
+          "ledger": "improvements.json",
+          "id": "I01"
+        },
+        {
+          "ledger": "improvements.json",
+          "id": "I02"
+        },
+        {
+          "ledger": "improvements.json",
+          "id": "I08"
+        },
+        {
+          "ledger": "improvements.json",
+          "id": "I09"
+        },
+        {
+          "ledger": "improvements.json",
+          "id": "I12"
+        }
+      ],
+      "depends_on": [],
+      "exit": "素材library/配置/cache/必要時読込と残るGUI・性能を閉じる。既存ThumbCache拡張を先に評価。",
+      "tests": [
+        "関連GUI/局所描画/保存",
+        "M2性能・規定出口"
+      ],
+      "next": "procedure 0→4",
+      "known_gaps": [
+        "A+B統合",
+        "ユーザー素材libraryのGUI入口",
+        "頁の必要時読込",
+        "開始案内のAC確認と不足分",
+        "M2出口受入(既存E2E/PERFの実行を含む)"
+      ]
+    },
+    {
+      "id": "precision-merge",
+      "status": "reviewed-candidate-not-accepted(M3)",
+      "targets": [
+        {
+          "ledger": "ledger.json",
+          "id": "op:convert_layer"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:merge_down"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:merge_layers"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:merge_visible"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.flattenImage"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.mergeDown"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.mergeLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.mergeVisible"
+        }
+      ],
+      "depends_on": [],
+      "exit": "既存高精度合成器を再利用し、16/32bitの結合・変換をGUI/正式操作/保存再開/Undo/出力へ接続。PhotoCraft IDの同等性とflatten差分を別照合。",
+      "tests": [
+        "color unit・旧8bit回帰",
+        "正式保存/Undo/Redo/GC・拒否不変",
+        "関連GUI/画素",
+        "規定V2"
+      ],
+      "current_evidence": "wt/m2-user-material-cache/build/precision-merge-review/{visual-fixes,flatten}/input.json; build/m2-shared-color/{flatten-related,formal-flatten-cli,gui-xcb-flatten-boundary}/execution.json 背景修正後: wt/m2-user-material-cache/build/m2-shared-color/flatten-background-related-v2/execution.json（304 PASS）、build/precision-merge-review/flatten-background/result.json（19SHA合格）。 20blend/HDR: hdr-fix/result.json 合格。修正後CLI/XCB: build/m2-shared-color/{formal-blend-cli-post-hdr,gui-xcb-blend-post-hdr}/execution.json passed（次のtile修正より前）。A4 600dpi: large-page-red-v2 raw2FAIL -> large-page-green4PASS; large-related74PASS/skip0、3SHA限定review deleg_29c71370待ち。",
+      "next": "完成分はM2出口候補へ同梱(procedure 0〜4)。拒否中のfilter/消しゴム/選択はprocedure 5①",
+      "known_gaps": [
+        "600dpi page > existing pixel limit",
+        "external clipping",
+        "high precision pen/vector conversion",
+        "real xcb visual/output acceptance",
+        "broader opacity/mask/mixed precision controls",
+        "high-precision filter consumer (currently explicit refusal)",
+        "high-precision pixel eraser/selection transform/delete (currently explicit refusal)"
+      ]
+    },
+    {
+      "id": "drawing-materials",
+      "status": "implementing-material-family-not-accepted",
+      "targets": [
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_anim_folder"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_cel"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_effect"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_figure"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_hand"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_head"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_mannequin"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_prim3d"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_ruler"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_scene"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_shape"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_tone"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:camera_from_ruler"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:define_brush"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:delete_area"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:delete_effect"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:delete_prim"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:delete_ruler"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:delete_tone"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:edit_effect"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:edit_prim"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:edit_ruler"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:effect_to_layer"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:fill"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:fill_area"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:fill_enclosed"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:fill_gaps"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:filter_raster"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:flood_fill"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:forget_area"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:gradient_fill"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:group_layers"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:import_model"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:liquify"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:lt_convert"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:move_layers"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:paint_mask"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:paste"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:pose_figure"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:pose_mannequin"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:put_raster"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:render_prims"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:reshape_stroke"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:ruler_from_3d"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:ruler_to_layer"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_animation"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_camera"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_camera_key"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_exposure"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_exposures"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_layer_mask"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_light"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_light_table"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_lt"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_onion"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_paper"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_ruler"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_stroke_width"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_timelapse"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_tone"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:smudge"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:stamp_material"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:step_onion"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:store_area"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:trace_edit"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:trace_prims"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:transform_area"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:vector_edit"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:render"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_view_flip_v"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_onion"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_import"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_import_scan"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_scanner"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_timelapse"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_screen_dots"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_picker"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_fill"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_lassofill"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_marquee"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_lasso"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_wand"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_reshape"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_ruler"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_3d"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_effect"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_stamp"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_gradient"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_shape"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_blend"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_liquify"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_vector"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_vector_join"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_vector_cut"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_vector_colour"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_vector_delete"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_vector_simplify"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_point_thinner"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_fill_gaps"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_swap_colour"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_transparent"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_sel_ellipse"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_sel_colour"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_sel_pen"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_sel_erase"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_select_all"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_deselect"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_sel_invert"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_sel_grow"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_sel_shrink"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_sel_feather"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_sel_layer"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_sel_keep"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_copy"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_cut"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_paste"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_delete_area"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_flip_h"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_flip_v"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_fill_selection"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_warp_perspective"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_warp_mesh"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_warp_mesh_grid"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_move_pivot"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_transform_numbers"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_warp_apply"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_snap"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_show_rulers"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_grid"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_grid_snap"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_grid_mm"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_del_ruler"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_ruler_layer"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_ruler_pen"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_ruler_selection"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_persp_grid"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_ruler_from_3d"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_camera_from_ruler"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_ruler_frame"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_ruler_fix"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_ruler_horizon"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_clear_rulers"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_add_figure"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_add_stick"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_add_head"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_add_hand"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_import_obj"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_add_box"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_add_cylinder"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_add_floor"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_add_sphere"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_add_cone"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_trace"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_del_prim"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_tone_here"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_tone_click"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_effect_within"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_effect_avoid"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_effect_clear"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_materials"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_thicker"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_thinner"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_reset_shape"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_layer_pen"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_layer_folder"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_layer_dup"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_layer_merge"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_layer_delete"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_layer_up"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_layer_down"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_layer_draft"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_plugins"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui-group:ruler_actions"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui-group:prop_actions"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui-group:scene_actions"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui-group:effect_actions"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui-group:pose_actions"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:abr"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:anim"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:animops"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/actions"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/brush_panel"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/canvas_guides"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/canvas_shapes"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/canvas_vector"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/colours"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/filter_dialog"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/gradient_editor"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/guide_panel"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/material_panel"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/subview"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/timeline"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/tool_settings"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:brushes"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:effects"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:fileops"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:fill"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:filters"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:layerops"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:lt"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:mannequin"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:materials/__init__"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:materials/builtin"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:mesh3d"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:persp3d"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:placement"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:plugins"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:poses"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:prim3d"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:raster"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:rulers"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:selection"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:selops"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:threeops"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:timelapse"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:tones"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:vectorize"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:warp"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_c_extras"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_f1"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_f2"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_f3"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_f5"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_g1"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_g2"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_g3"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_g4"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_g5"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_g6"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_h2"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_h4"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_h5"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_i0"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_j1"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_j12"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_j2"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_j3"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_j4"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_j5"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_j6"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_j7"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_j8"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_k1"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p4"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p5_erase"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p5_inspect_stroke"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p5_layers"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p5_lt"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p5_mannequin"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p5_materials"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p5_ruler"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p5_stroke"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p6_remaining"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p8_shell"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_render_clip"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w10_rulers"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w11_effects"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w12_figure"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w2_lines"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w3_fill"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w4_mend"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w5_snap_erase"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w7_tone"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w8_filters"
+        },
+        {
+          "ledger": "improvements.json",
+          "id": "I06"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "brush.defineFromSelection"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "brush.get"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "brush.presets.delete"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "brush.presets.importAbr"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "brush.presets.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "brush.presets.save"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "brush.texturePattern"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.adaptiveWideAngle"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.blur.average"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.blur.blur"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.blur.blurMore"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.blur.boxBlur"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.blur.gaussianBlur"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.blur.lensBlur"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.blur.motionBlur"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.blur.radialBlur"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.blur.shapeBlur"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.blur.smartBlur"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.blur.surfaceBlur"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.blurGallery.fieldBlur"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.blurGallery.irisBlur"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.blurGallery.pathBlur"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.blurGallery.spinBlur"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.blurGallery.tiltShift"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.cameraRaw"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.convertForSmartFilters"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.distort.displace"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.distort.pinch"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.distort.polarCoordinates"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.distort.ripple"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.distort.shear"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.distort.spherize"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.distort.twirl"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.distort.wave"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.distort.zigZag"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.filterGallery"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.accentedEdges"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.angledStrokes"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.basRelief"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.chalkCharcoal"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.charcoal"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.chrome"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.coloredPencil"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.conteCrayon"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.craquelure"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.crosshatch"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.cutout"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.darkStrokes"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.diffuseGlow"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.dryBrush"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.filmGrain"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.fresco"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.glass"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.glowingEdges"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.grain"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.graphicPen"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.halftonePattern"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.inkOutlines"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.mosaicTiles"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.neonGlow"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.notePaper"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.oceanRipple"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.paintDaubs"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.paletteKnife"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.patchwork"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.photocopy"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.plaster"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.plasticWrap"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.posterEdges"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.reticulation"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.roughPastels"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.smudgeStick"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.spatter"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.sponge"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.sprayedStrokes"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.stainedGlass"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.stamp"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.sumiE"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.texturizer"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.tornEdges"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.underpainting"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.waterPaper"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.gallery.watercolor"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.lastFilter"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.lensCorrection"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.liquify"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.noise.addNoise"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.noise.despeckle"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.noise.dustAndScratches"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.noise.median"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.noise.reduceNoise"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.other.custom"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.other.highPass"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.other.hsbHsl"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.other.maximum"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.other.minimum"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.other.offset"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.pixelate.colorHalftone"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.pixelate.crystallize"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.pixelate.facet"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.pixelate.fragment"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.pixelate.mezzotint"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.pixelate.mosaic"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.pixelate.pointillize"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.render.clouds"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.render.differenceClouds"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.render.fibers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.render.flame"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.render.lensFlare"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.render.lightingEffects"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.render.pictureFrame"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.render.tree"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.sharpen.sharpen"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.sharpen.sharpenEdges"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.sharpen.sharpenMore"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.sharpen.smartSharpen"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.sharpen.unsharpMask"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.stylize.diffuse"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.stylize.emboss"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.stylize.extrude"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.stylize.findEdges"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.stylize.oilPaint"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.stylize.solarize"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.stylize.tiles"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.stylize.traceContour"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.stylize.wind"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.vanishingPoint"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.video.deInterlace"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "filter.video.ntscColors"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.align.bottomEdges"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.align.horizontalCenters"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.align.leftEdges"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.align.rightEdges"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.align.topEdges"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.align.verticalCenters"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.arrange.bringForward"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.arrange.bringToFront"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.arrange.reverse"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.arrange.sendBackward"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.arrange.sendToBack"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.artboard.set"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.combineShapes.excludeOverlappingShapes"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.combineShapes.intersectShapeAreas"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.combineShapes.mergeShapeComponents"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.combineShapes.subtractFrontShape"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.combineShapes.unite"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.createClippingMask"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.delete"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.delete.hiddenLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.distribute.bottomEdges"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.distribute.horizontalCenters"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.distribute.horizontally"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.distribute.leftEdges"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.distribute.rightEdges"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.distribute.topEdges"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.distribute.verticalCenters"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.distribute.vertically"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.duplicate"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.exportAs"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.groupLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.hideLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerContentOptions"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerMask.apply"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerMask.delete"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerMask.enabled"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerMask.fromTransparency"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerMask.hideAll"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerMask.hideSelection"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerMask.linked"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerMask.revealAll"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerMask.revealSelection"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.bevelEmboss"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.blendingOptions"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.clear"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.colorOverlay"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.copyLayerStyle"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.createLayer"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.dropShadow"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.globalLight"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.gradientOverlay"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.hideAllEffects"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.innerGlow"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.innerShadow"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.outerGlow"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.pasteLayerStyle"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.patternOverlay"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.satin"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.scaleEffects"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.showAllEffects"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.layerStyle.stroke"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.linkLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.lockLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.maskAllObjects"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.matting.colorDecontaminate"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.matting.defringe"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.matting.removeBlackMatte"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.matting.removeWhiteMatte"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.moveTo"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.new.artboard"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.new.artboardFromGroup"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.new.artboardFromLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.new.frameFromLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.new.group"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.new.groupFromLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.new.layer"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.new.layerFromBackground"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.new.layerViaCopy"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.new.layerViaCut"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newFillLayer.gradient"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newFillLayer.pattern"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newFillLayer.solidColor"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newLayerBasedSlice"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.pickAt"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.quickExportAsPng"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.rasterize.allLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.rasterize.fillContent"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.rasterize.layer"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.rasterize.shape"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.rasterize.smartObject"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.rasterize.type"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.rasterize.vectorMask"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.rasterize.video"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.releaseClippingMask"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.renameLayer"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.select"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.selectLinkedLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.setAdjustment"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.setProps"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.showLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartFilter.blendingOptions"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartFilter.clearSmartFilters"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartFilter.delete"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartFilter.deleteFilterMask"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartFilter.disableFilterMask"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartFilter.disableSmartFilters"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartFilter.move"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartFilter.setParams"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartFilter.setVisible"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.convertToEmbedded"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.convertToLinked"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.convertToSmartObject"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.editContents"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.exportContents"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.newSmartObjectViaCopy"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.perspectiveWarp"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.puppetWarp"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.rasterize"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.relinkToFile"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.replaceContents"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.revealInFinder"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.saveContents"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.stackMode.entropy"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.stackMode.kurtosis"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.stackMode.maximum"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.stackMode.mean"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.stackMode.median"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.stackMode.minimum"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.stackMode.none"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.stackMode.range"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.stackMode.skewness"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.stackMode.standardDeviation"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.stackMode.summation"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.stackMode.variance"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.updateAllModifiedContent"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.updateModifiedContent"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.smartObjects.warp"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.translate"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.ungroupLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.vectorMask.add"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.vectorMask.currentPath"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.vectorMask.delete"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.vectorMask.edit"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.vectorMask.enabled"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.vectorMask.fromPath"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.vectorMask.hideAll"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.vectorMask.info"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.vectorMask.linked"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.vectorMask.revealAll"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.videoLayers.deleteFrame"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.videoLayers.duplicateFrame"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.videoLayers.insertBlankFrame"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.videoLayers.interpretFootage"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.videoLayers.newBlankVideoLayer"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.videoLayers.newVideoLayerFromFile"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.videoLayers.rasterize"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.videoLayers.reloadFrame"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.videoLayers.replaceFootage"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.videoLayers.restoreAllFrames"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.videoLayers.restoreFrame"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.videoLayers.showAlteredVideo"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.backgroundEraser"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.blur"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.bucket"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.burn"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.cloneStamp"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.colorReplacement"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.dodge"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.gradient"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.healingBrush"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.historyBrush"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.magicEraser"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.mixerBrush"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.pencil"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.sharpen"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.smudge"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.sponge"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.spotHealing"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint.stroke"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "path.delete"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "path.fill"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "path.info"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "path.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "path.rename"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "path.set"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "path.stroke"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "path.toSelection"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.all"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.allLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.colorRange"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.convertToShape"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.deselect"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.deselectLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.editInQuickMaskMode"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.findLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.focusArea"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.grow"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.inverse"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.isolateLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.lasso"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.loadSelection"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.magicWand"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.modify.border"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.modify.contract"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.modify.expand"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.modify.feather"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.modify.smooth"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.object"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.quick"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.rect"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.refineEdge"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.reselect"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.saveSelection"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.selectAndMask"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.similar"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.sky"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.subject"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.toWorkPath"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "select.transformSelection"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Move"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:RectMarquee"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:EllipseMarquee"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Lasso"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:PolygonLasso"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:MagicWand"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Crop"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Eyedropper"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Ruler"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Note"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Count"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Brush"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Eraser"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:BackgroundEraser"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:MagicEraser"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Gradient"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:PaintBucket"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Type"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Hand"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Zoom"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:SpotHealing"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Healing"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:CloneStamp"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:HistoryBrush"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Blur"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Sharpen"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Smudge"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Dodge"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Burn"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Sponge"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:QuickSelection"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:ObjectSelection"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Pen"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:PathSelection"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Rectangle"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:EllipseShape"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Triangle"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Polygon"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Line"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:CustomShape"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:Slice"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool:SliceSelect"
+        }
+      ],
+      "depends_on": [],
+      "exit": "既存描画・素材保持対象とPhotoCraft描画群の残機能を、各算法群ごとに実装出口まで閉じる。",
+      "tests": [
+        "領域契約",
+        "GUI/保存/出力",
+        "規定V2/V3"
+      ],
+      "current_evidence": "/home/hermes/genko-test/cpp-impl/wt/m2-material-previews/build/material-stamp-review/images-lines/fixes/result.json",
+      "next": "完成分(素材preview/検索/配置・ノンブル・字形基盤)はM2出口候補へ同梱。文字/フキダシはprocedure 6①"
+    },
+    {
+      "id": "color-model-adjustments",
+      "status": "planned-not-accepted",
+      "targets": [
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.delete"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.duplicate"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.merge"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.mergeSpot"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.move"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.new"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.newSpot"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.options"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.rename"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.setVisible"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.split"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.target"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.target.composite"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.target.slot3"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.target.slot4"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.target.slot5"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.target.slot6"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.target.slot7"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.target.slot8"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "channel.target.slot9"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.blackWhite"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.brightnessContrast"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.channelMixer"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.colorBalance"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.colorLookup"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.colorLookup.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.curves"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.desaturate"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.equalize"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.exposure"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.gradientMap"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.hdrToning"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.hueSaturation"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.invert"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.levels"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.matchColor"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.photoFilter"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.posterize"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.replaceColor"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.selectiveColor"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.shadowsHighlights"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.threshold"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.adjustments.vibrance"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.mode.bitmap"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.mode.bits16"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.mode.bits32"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.mode.bits8"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.mode.cmyk"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.mode.colorTable"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.mode.duotone"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.mode.grayscale"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.mode.indexedColor"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.mode.lab"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.mode.multichannel"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.mode.rgb"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newAdjustmentLayer.blackWhite"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newAdjustmentLayer.brightnessContrast"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newAdjustmentLayer.channelMixer"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newAdjustmentLayer.colorBalance"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newAdjustmentLayer.colorLookup"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newAdjustmentLayer.curves"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newAdjustmentLayer.exposure"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newAdjustmentLayer.gradientMap"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newAdjustmentLayer.hueSaturation"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newAdjustmentLayer.invert"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newAdjustmentLayer.levels"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newAdjustmentLayer.photoFilter"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newAdjustmentLayer.posterize"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newAdjustmentLayer.selectiveColor"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newAdjustmentLayer.threshold"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layer.newAdjustmentLayer.vibrance"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "document:color-depth-model"
+        }
+      ],
+      "depends_on": [
+        "precision-merge:適用する保存/合成境界"
+      ],
+      "exit": "色モデル/チャンネル/補正を同一モデルで編集・保存・出力できる。",
+      "tests": [
+        "深度/色/上流同等性",
+        "保存拒否・画素・Undo",
+        "規定V2"
+      ]
+    },
+    {
+      "id": "text-formats-export",
+      "status": "planned-not-accepted",
+      "targets": [
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_cover"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_line"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:cut_balloon"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:delete_line"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:edit_line"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:for_pages"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:import_pages"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:import_psd"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:move_line"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:reorder_lines"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:replace_text"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_assignee"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_balloon_path"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_nombre"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_page_spec"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_spread"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:export"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "export:png"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "export:tiff"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "export:pdf"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "export:strip"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "export:psd"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "export:epub"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "export:pack"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "export:webtoon"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "export:sns"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "export:cmyk"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "export:layers"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "export:kindle"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "export:timelapse"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "export:animation"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_export"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_print"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_history"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_phone"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_merge_book"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_import_psd"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_timelapse_export"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_cmyk_proof"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_text"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_sel_polyline"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_scale"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_line_width"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_spread"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_nombre"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_paper"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_page_nombre"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_story_editor"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_replace"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_add_cover"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_timeline"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_assignee"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_checks"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_line_type"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_balloon_pen"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_line_edit"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_line_delete"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_line_wrap"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/bookview"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/check_panel"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/exporting"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/lettering"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/printing"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/story_editor"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/text_style"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:balloons"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:bookops"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:checks"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:colour"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:covers"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:export"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:fonts"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:merge"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:nombre"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:pack"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:pagespec"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:profiles"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:psd"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:scanner"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:screentone"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:tategaki"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_b_lettering"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_effect_clearing"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_f4"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_f6"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_j10"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_j11"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_j9"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m2_format"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m4_units"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p5_balloon"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p5_pack"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p5_psd"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p5_spread"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_story_and_export"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_tategaki"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w13_scan"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w15_color"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w6_balloons"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_w6_lettering"
+        },
+        {
+          "ledger": "improvements.json",
+          "id": "I04"
+        },
+        {
+          "ledger": "improvements.json",
+          "id": "I05"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.automate.batch"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.automate.conditionalModeChange"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.automate.contactSheetII"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.automate.createDroplet"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.automate.cropAndStraightenPhotos"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.automate.fitImage"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.automate.lensCorrection"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.automate.mergeToHdrPro"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.automate.photomerge"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.automate.runDroplet"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.close"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.closeAll"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.closeOthers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.exit"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.export.artboardsToFiles"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.export.artboardsToPdf"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.export.colorLookupTables"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.export.dataSetsAsFiles"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.export.exportAs"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.export.exportPreferences"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.export.layerCompsToFiles"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.export.layersToFiles"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.export.pathsToIllustrator"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.export.quickExport"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.export.quickExportAsPng"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.export.renderVideo"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.export.saveForWebLegacy"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.fileInfo"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.generate.imageAssets"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.import.notes"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.import.variableDataSets"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.import.videoFramesToLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.import.wiaSupport"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.new"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.open"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.openAs"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.package"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.placeEmbedded"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.placeLinked"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.print"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.printOneCopy"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.revert"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.save"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.saveACopy"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.saveAs"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.scripts.browse"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.scripts.deleteAllEmptyLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.scripts.flattenAllLayerEffects"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.scripts.flattenAllMasks"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.scripts.imageProcessor"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.scripts.loadFilesIntoStack"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.scripts.scriptEventsManager"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "file.scripts.statistics"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.antiAlias.crisp"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.antiAlias.none"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.antiAlias.sharp"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.antiAlias.smooth"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.antiAlias.strong"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.antiAlias.windows"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.antiAlias.windowsLcd"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.characterStyle.apply"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.characterStyle.clearOverride"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.characterStyle.delete"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.characterStyle.duplicate"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.characterStyle.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.characterStyle.new"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.characterStyle.redefine"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.characterStyle.rename"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.characterStyle.set"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.convertToParagraphText"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.convertToPointText"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.convertToShape"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.create"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.createWorkPath"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.edit"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.fontPreviewSize.extraLarge"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.fontPreviewSize.huge"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.fontPreviewSize.large"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.fontPreviewSize.medium"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.fontPreviewSize.small"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.fonts"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.info"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.insertText"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.languageOptions.defaultFeatures"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.languageOptions.eastAsianFeatures"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.languageOptions.middleEasternAndSouthAsianComposer"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.languageOptions.middleEasternFeatures"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.loadDefaultTypeStyles"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.openType.contextualAlternates"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.openType.discretionaryLigatures"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.openType.fractions"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.openType.oldstyle"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.openType.ordinals"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.openType.ornaments"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.openType.standardLigatures"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.openType.stylisticAlternates"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.openType.swash"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.openType.titlingAlternates"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.orientation.horizontal"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.orientation.vertical"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.panels.character"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.panels.characterStyles"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.panels.glyphs"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.panels.paragraph"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.panels.paragraphStyles"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.paragraphStyle.apply"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.paragraphStyle.clearOverride"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.paragraphStyle.delete"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.paragraphStyle.duplicate"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.paragraphStyle.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.paragraphStyle.new"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.paragraphStyle.redefine"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.paragraphStyle.rename"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.paragraphStyle.set"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.pasteLoremIpsum"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.rasterize"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.rasterizeTypeLayer"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.replaceAllMissingFonts"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.resolveMissingFonts"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.saveDefaultTypeStyles"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.setStyle"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.updateAllTextLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "type.warpText"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "codec:Png"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "codec:Jpeg"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "codec:Tiff"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "codec:WebP"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "codec:Gif"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "codec:Bmp"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "codec:Tga"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "codec:Ico"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "codec:Pnm"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "codec:Qoi"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "codec:OpenExr"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "codec:Hdr"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "codec:Avif"
+        }
+      ],
+      "depends_on": [
+        "関連する色/描画/文字境界のみ"
+      ],
+      "exit": "写植/ルビ/PSD/PSB/RAW等の保持・カラー全出力・形式互換が成立。",
+      "tests": [
+        "文字構造/画素/形式往復",
+        "全出力/waived代替",
+        "規定V2/V3"
+      ]
+    },
+    {
+      "id": "services-production",
+      "status": "planned-not-accepted",
+      "targets": [
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_region"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:add_ticket"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:adopt_candidate"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:allow_chat_approval"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:approve"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:ask_human"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:attach_reference"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:bind_ref"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:close_request"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:delete_character"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:delete_location"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:delete_prop"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:delete_region"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:edit_region"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:import_candidates"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:open_request"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:place_asset"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:propose"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:record_review"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:register_assets"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:reject_sheet"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:reopen_ticket"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:replace_regions"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:request_approval"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:request_fix"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:resolve_proposal"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:resolve_ticket"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:review_candidates"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:revoke"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_bible"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_candidate"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_finish"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_layout"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_page_plan"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_panel"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_placement"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_script"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_studio"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_style_catalog"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:set_ticket"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:unadopt"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:unbind_ref"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:upsert_character"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:upsert_location"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:upsert_prop"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "op:withdraw_candidates"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:adopt"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:analyze_name"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:apply_ops"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:ask_human"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:candidates"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:check"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:create_project"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:derive"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:export"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:export_proof"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:export_status"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:finish_page"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:generation_request"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:import_image"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:import_images"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:import_name"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:inspect"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:next"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:preflight"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:projects"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:proposals"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:propose_lines"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:record_chat_approval"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:record_review"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:render"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:report_regions"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:request_approval"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:request_fix"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:resolve_ticket"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:review_candidates"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:review_page"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:set_bible"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:set_script"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:status"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:style_catalog"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:submit_name"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:take_panel_art"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:tickets"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:undo"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:upscale"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-tool:use_style"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-resource:genko://guide/drawing"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-resource:genko://guide/manga-rules"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-resource:genko://guide/skill"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "mcp-resource:genko://ops"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:apply"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:doctor"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:gc"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:inspect"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:mcp"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:new"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:redo"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:schema"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:serve"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:token"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:undo"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio accept"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio adopt-drafts"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio analyze"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio apply"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio approve"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio audit"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio call"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio chat-approval"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio close-ticket"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio comment"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio eval-atari"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio eval-sample"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio eval-score"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio export"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio import-image"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio import-name"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio init"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio inspect"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio next"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio proposals"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio record-review"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio reject"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio render"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio reopen-ticket"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio request-approval"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio review"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio revoke"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio set-bible"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio set-script"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio stats"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio status"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio submit-name"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio tickets"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio tools"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "cli:studio upscaler"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "http:/health"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "http:/openapi.json"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "http:/schema"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "http:/v1/apply"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "http:/v1/assets"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "http:/v1/export"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "http:/v1/inspect"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "http:/v1/new"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "http:/v1/jobs/*"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "http:/v1/pages/*"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "http:/v1/requests/*"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "http:/v1/spreads/*"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_ai"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_add_stairs"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_border_detail"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_style"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_chat_approval"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_book_preview"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_layer_paint"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:__init__"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:__main__"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/ai_link"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/review_model"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/studio_widgets"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/style_picker"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:assets"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:backup"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:blobcache"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:guide"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:headless"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:io"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:journal"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:lineart"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:lock"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:maintenance"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:mcp/__init__"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:mcp/server"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:migrate"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:models"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:ops"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:pipeline"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:server"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/__init__"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/adopt"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/atari"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/blocking"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/claims"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/cli"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/drafts"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/evaluate"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/finish"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/fxwords"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/genreq"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/importer"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/issues"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/jobs"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/jsonschema_lite"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/jsonutil"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/layout"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/letter"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/lint"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/preflight"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/presence"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/review"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/schemas"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/service"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/state"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/studio_ops"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/toollog"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/tools_registry"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/worklist"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:studio/xycut"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:stylecat"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:tokens"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:upscale"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_agent_economy"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_ai_feedback"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_battle_report"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_chat_approval"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_cli"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_frames"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_h1"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_hd_report"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_headless"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_io"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_l1_style"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_lock"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m11"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m12"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m13"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m14"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m15"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m16"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m1_report"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m1_security"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m2_group_b"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m3_art"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m3_report"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m4_pipeline"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m5"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m6"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m8"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_m9"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_migrate"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_ops"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p1"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p2"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p3"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p7_factory"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_p9_factory"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_project"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_quality_report"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_server"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_studio_flow"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_studio_mcp"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_studio_units"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_t_report"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "test:test_tibo_report"
+        },
+        {
+          "ledger": "improvements.json",
+          "id": "I07"
+        },
+        {
+          "ledger": "improvements.json",
+          "id": "I13"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "cloneSource.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "cloneSource.overlay"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "cloneSource.resetTransform"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "cloneSource.select"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "cloneSource.set"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "color.profileMismatch"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "command.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "count.add"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "count.clear"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "count.deleteGroup"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "count.move"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "count.newGroup"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "count.remove"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "count.setGroup"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "document.activate"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "document.inspect"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "document.pixel"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.assignProfile"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.autoAlignLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.autoBlendLayers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.checkSpelling"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.clear"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.colorSettings"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.contentAwareFill"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.contentAwareScale"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.convertToProfile"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.copy"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.copyMerged"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.cut"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.defineBrushPreset"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.defineCustomShape"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.definePattern"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.fade"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.fill"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.findAndReplaceText"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.freeTransform"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.keyboardShortcuts"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.menus"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.paste"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.pasteSpecial.pasteInPlace"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.pasteSpecial.pasteInto"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.pasteSpecial.pasteOutside"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.perspectiveWarp"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.cursors"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.enhancedControls"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.export"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.fileHandling"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.general"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.guidesGridAndSlices"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.historyLog"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.integrations"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.interface"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.performance"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.plugIns"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.rawDefaults"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.scratchDisks"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.tools"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.transparencyAndGamut"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.type"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.unitsAndRulers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.preferences.workspace"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.presets.exportImportPresets"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.presets.migratePresets"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.presets.presetManager"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.profileInfo"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.puppetWarp"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.purge.all"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.purge.clipboard"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.purge.histories"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.purge.undo"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.purge.videoCache"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.redo"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.search"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.stroke"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.toggleLastState"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.toolbar"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform.again"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform.distort"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform.flipHorizontal"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform.flipVertical"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform.perspective"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform.removeWarpSplit"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform.rotate"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform.rotate180"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform.rotate90Ccw"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform.rotate90Cw"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform.scale"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform.skew"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform.splitWarpCrosswise"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform.splitWarpHorizontally"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform.splitWarpVertically"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.transform.warp"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "edit.undo"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "gradient.presets.apply"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "gradient.presets.edit"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "gradient.presets.importGrd"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "gradient.presets.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "gradient.presets.new"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "gradient.presets.reset"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "gradient.presets.select"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.analysis.countTool"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.analysis.info"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.analysis.placeScaleMarker"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.analysis.recordMeasurements"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.analysis.rulerTool"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.analysis.selectDataPoints"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.analysis.setMeasurementScale"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.analysis.straightenLayer"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.applyDataSet"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.applyImage"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.autoColor"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.autoContrast"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.autoTone"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.calculations"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.canvasSize"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.crop"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.duplicate"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.imageRotation.180"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.imageRotation.90ccw"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.imageRotation.90cw"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.imageRotation.flipCanvasHorizontal"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.imageRotation.flipCanvasVertical"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.imageSize"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.revealAll"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.rotation.arbitrary"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.trap"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.trim"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.variables.dataSets"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "image.variables.define"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layerComp.apply"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layerComp.delete"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layerComp.duplicate"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layerComp.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layerComp.new"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layerComp.next"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layerComp.previous"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layerComp.rename"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layerComp.restoreLastDocumentState"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layerComp.setComment"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layerComp.setOptions"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layerComp.update"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "layerComp.updateWarnings"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "measurementLog.delete"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "measurementLog.export"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "measurementLog.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "notes.add"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "notes.delete"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "notes.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "notes.set"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "pattern.delete"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "pattern.export"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "pattern.import"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "pattern.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "pattern.presets.apply"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "pattern.presets.edit"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "pattern.presets.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "pattern.presets.new"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "pattern.presets.select"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "pattern.rename"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "plugin.install"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "plugin.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "plugin.reload"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "plugin.remove"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "plugin.run"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "prefs.get"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "prefs.reset"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "prefs.set"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "session.inspect"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "shape.create"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "shape.edit"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "shape.info"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "shape.presets.edit"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "shape.presets.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "shape.presets.new"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "shape.presets.place"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "shape.presets.reset"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "shape.rasterize"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "slice.delete"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "slice.divide"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "slice.fromGuides"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "slice.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "slice.new"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "slice.promote"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "slice.set"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "style.presets.apply"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "style.presets.edit"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "style.presets.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "style.presets.new"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "style.presets.reset"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "timeline.create"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "timeline.delete"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "timeline.info"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "timeline.nextFrame"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "timeline.previousFrame"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "timeline.setFrame"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "timeline.setProps"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool.presets.edit"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool.presets.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool.presets.new"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool.presets.reset"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tool.presets.select"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tools.defaultColors"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tools.setBrush"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tools.setColors"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "tools.swapColors"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "variables.list"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.actualPixels"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.clearCanvasGuides"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.clearGuides"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.clearSelectedArtboardGuides"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.clearSlices"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.deleteGuide"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.extras"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.fitArtboardOnScreen"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.fitLayersOnScreen"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.fitOnScreen"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.flipHorizontal"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.gamutWarning"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.lockGuides"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.lockSlices"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.moveGuide"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.newGuide"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.newGuideLayout"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.newGuidesFromShape"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.patternPreview"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.pixelArtPreview"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.pixelAspectRatio.anamorphic2To1"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.pixelAspectRatio.custom"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.pixelAspectRatio.d1DvNtsc"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.pixelAspectRatio.d1DvNtscWidescreen"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.pixelAspectRatio.d1DvPal"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.pixelAspectRatio.d1DvPalWidescreen"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.pixelAspectRatio.dvcproHd1080"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.pixelAspectRatio.hdv1080"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.pixelAspectRatio.square"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.pixelAspectRatioCorrection"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.printSize"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.proofColors"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.proofSetup"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.proofSetup.colorBlindnessDeuteranopia"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.proofSetup.colorBlindnessProtanopia"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.proofSetup.custom"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.proofSetup.internetStandardRgb"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.proofSetup.legacyMacintoshRgb"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.proofSetup.monitorRgb"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.proofSetup.workingBlackPlate"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.proofSetup.workingCmyPlate"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.proofSetup.workingCmyk"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.proofSetup.workingCyanPlate"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.proofSetup.workingMagentaPlate"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.proofSetup.workingYellowPlate"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.rulers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.screenMode.fullScreen"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.screenMode.fullScreenWithMenuBar"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.screenMode.standard"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.all"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.artboardGuides"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.brushPreview"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.canvasGuides"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.count"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.editPins"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.grid"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.guides"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.layerEdges"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.mesh"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.notes"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.pixelGrid"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.selectionEdges"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.showExtrasOptions"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.slices"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.smartGuides"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.show.targetPath"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.snap"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.snapTo.all"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.snapTo.documentBounds"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.snapTo.grid"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.snapTo.guides"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.snapTo.layers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.snapTo.slices"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.thirtyTwoBitPreviewOptions"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.twoHundredPercent"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.zoomIn"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "view.zoomOut"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.cascade"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.consolidateAllToTabs"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.floatAllInWindows"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.floatInWindow"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.fourUp"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.matchAll"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.matchLocation"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.matchRotation"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.matchZoom"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.newWindowForDocument"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.sixUp"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.threeUpHorizontal"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.threeUpStacked"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.threeUpVertical"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.tile"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.tileAllHorizontally"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.tileAllVertically"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.twoUpHorizontal"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.arrange.twoUpVertical"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.actions"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.adjustments"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.brushSettings"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.brushes"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.channels"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.character"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.characterStyles"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.cloneSource"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.color"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.glyphs"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.gradients"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.histogram"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.history"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.info"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.layerComps"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.layers"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.measurementLog"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.modifierKeys"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.navigator"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.notes"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.options"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.paragraph"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.paragraphStyles"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.paths"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.patterns"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.properties"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.shapes"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.styles"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.swatches"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.timeline"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.toolPresets"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.panel.tools"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.workspace.deleteWorkspace"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.workspace.essentials"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.workspace.graphicAndWeb"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.workspace.lockWorkspace"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.workspace.motion"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.workspace.newWorkspace"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.workspace.painting"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.workspace.photography"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.workspace.pixelArt"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "window.workspace.resetWorkspace"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "document:pcraft-format"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "format:PSD-PSB"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "format:camera-RAW"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "render:GPU-CPU-parity"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "render:ICC-display"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "paint:brush-dynamics"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "assets:adobe-presets"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "plugins:WASM-ABI-v1"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "automation:control-channel"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "platform:Windows"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "platform:Linux"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "platform:macOS"
+        },
+        {
+          "ledger": "photocraft/feature-ledger.json",
+          "id": "platform:browser"
+        }
+      ],
+      "depends_on": [],
+      "exit": "残る既存基盤を再実装せず確認し、Studio/CLI/API/MCP/HTTP/バッチ等を同じ原稿へ接続。",
+      "tests": [
+        "権限/承認/境界",
+        "正式実通信・合成制作",
+        "規定V2/V3"
+      ]
+    },
+    {
+      "id": "package-final",
+      "status": "planned-not-accepted",
+      "targets": [
+        {
+          "ledger": "ledger.json",
+          "id": "cli:register-links"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_prefs"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_help_keys"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_help_guide"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_help_faq"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_about"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_find_command"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_edit_commandbar"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_edit_quick"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_save_workspace"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_tool_names"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui:act_quick_mask"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "gui-group:launcher_actions"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/comfort"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/dialog_look"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/glass"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/help"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/links"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/preferences"
+        },
+        {
+          "ledger": "ledger.json",
+          "id": "module:app/workspace"
+        },
+        {
+          "ledger": "improvements.json",
+          "id": "I03"
+        },
+        {
+          "ledger": "improvements.json",
+          "id": "I10"
+        },
+        {
+          "ledger": "improvements.json",
+          "id": "I11"
+        },
+        {
+          "ledger": "improvements.json",
+          "id": "I14"
+        }
+      ],
+      "depends_on": [
+        "全実装群と必須受入の完了"
+      ],
+      "exit": "Python/開発環境なしの両OS配布とM7全必須受入・全件対応付けが成立。",
+      "tests": [
+        "Linux/Windows配布",
+        "性能/2時間/全出力/実接続",
+        "最終全件照合・waived代替"
+      ]
+    }
+  ],
+  "integration_evidence": {
+    "color_initial": "8fb309db9ba9f5256f3d4bc840fab7e1bf7a09dc",
+    "limited_acceptance": "527a65395aea164a3d85f6e29503b8ededae3848",
+    "shared_cache": "5e07b9102b2768d062825744ecd83cfb44e64f05"
+  },
+  "no_completion_claim": true,
+  "procedure": [
+    "0 片付け1回: A=wt/m2-material-previewsから未実行の文字試験追加を外しM4用patchで保存→A/Bを各branchでcommit→AへBをmerge(重複6file解消、material_preview_cacheは同一bytes)→Debug build→素材・ノンブル・カラー/高精度・保存の関連試験だけ直接実行",
+    "1 M2残りを同じ候補で実装: ユーザー素材libraryのGUI入口(review済みcache本体へ接続)/頁の必要時読込/開始案内(既存StartDialogを1024x640・初期previewの基準で確認し不足のみ)。RED→GREENは対象試験を直接実行",
+    "2 独立review1回: merge解消hunkと手順1の新規差分だけ。A/Bのreview済み範囲は再reviewしない。P1のみ修正→修正差分だけ限定再review",
+    "3 凍結→M2出口受入1回: VALIDATION §4入口でLinux Debug/Release/ASan全体+CLI23+実xcb GUI+既存E2E(開く→描く→Undo→保存→終了→別processで再開)+AC-PERF注入計測。Windowsはdeferred記録",
+    "4 integrationへ統合(同一bytesで証跡再利用)→M2完了(Linux。Windowsは配布前受入)",
+    "5 M3: 群ごとに[実装(対象試験)→review1回→凍結→V2(Release+ASan)→統合]。V2中は空いた既存作業木Bで次群を書く。群=①高精度filter/消しゴム/選択+PhotoCraft色モデル・チャンネル・補正 ②紙質+ブラシ/ABR ③アニメ・タイムラプス・plugin。出口でV3",
+    "6 M4: ①文字組(縦横・禁則・縦中横・書式・傍点・ルビ・フキダシ・効果文字・表紙/見開き) ②全出力形式・PSD/PSB読込・編集可能PSD。出口でV3",
+    "7 M5: Studio/MCP41道具4resource/HTTP/CLIを同じC++サービスへ。出口でV3+公式MCP SDK実接続+合成8頁",
+    "8 M6: Linux/Windows配布・案内/ヘルプ・SBOM。Windows実機の実行場所が未確保(M6前に利用者判断)",
+    "9 M7: 最終配布物で全PERF・2時間・全出力・IME注入・MCP実接続・Windows実機→独立review→別install先→利用者確認後に切替"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+ "about": "BRUSH-01 紙質 test files (test_paper, test_gui_paper). The expected pictures are this build's own, approved after a look (BRUSH-01 is new: there is no Python output to match).",
+ "generators": {
+  "samples.json": "PYTHONPATH=src <reference python> tools/migration/paper_reference.py samples native/tests/data/paper/samples.json",
+  "grain.png, grain.jpg, grain.gif, grain.bmp, grain-grey.json": "<reference python (Pillow 12.3.0)> tools/migration/paper_reference.py pictures native/tests/data/paper",
+  "expected/": "GENKO_PAPER_WRITE_EXPECTED=1 ctest -R '^test_paper$' (this build's render, then approved)"
+ },
+ "files": {
+  "expected/inherited-brushes.png": "34b3ecb2a9ae2513f076e16336141d960974f91ceecdf826e6a458216ace5bae",
+  "expected/paper-settings.png": "b9efb58c3edd3e50eae8a5973427faf8e67e19d4b45bee388d220665aeb1fe15",
+  "grain-grey.json": "70761adc419790267c1cbdea4841b91c690428def30bddd9fce899c8c5a9fe5d",
+  "grain.bmp": "45caa05a3be8a7765d3dc941d747806c9429b981dd3816905356340586e07a3a",
+  "grain.gif": "d0ba963d61c6567ffdabf3e319fefb1773960196f7745ea92bfab20192aeb28c",
+  "grain.jpg": "1cd0467e7d51e50d83851eb5ab39b7404b0905d28f51ba677ef63ade31b3ddc6",
+  "grain.png": "b7a2d4a928477d520162fba384574f7e399d2c50ff7deb778f1f8234f8c50b46",
+  "samples.json": "57d04131a073de90ae2f964d776a3f483346088182a2214da76e7d90ef670990"
+ }
+}

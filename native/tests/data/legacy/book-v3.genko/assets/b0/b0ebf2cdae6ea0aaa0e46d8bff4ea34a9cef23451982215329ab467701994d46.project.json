@@ -1,0 +1,358 @@
+{
+  "future_top": {
+    "kept": true,
+    "n": 12345678901234
+  },
+  "version": 3,
+  "revision": 2,
+  "title": "旧原稿 v3",
+  "episode": 1,
+  "binding": "right",
+  "start_side": null,
+  "strict_gates": false,
+  "autosave": false,
+  "font_path": "",
+  "page_locks": {},
+  "brush": {
+    "rgb": [
+      20,
+      20,
+      20
+    ],
+    "width_mm": 0.35,
+    "stabilize": 0,
+    "taper": false,
+    "curve": "linear"
+  },
+  "spec": {
+    "width_mm": 208,
+    "height_mm": 283,
+    "dpi": 600,
+    "bleed_mm": 3,
+    "inner_margin_mm": 16,
+    "expression": "mono",
+    "preset": "doujin-b5",
+    "trim_w_mm": 182,
+    "trim_h_mm": 257,
+    "margins_mm": [
+      18.5,
+      18.5,
+      16.0,
+      16.0
+    ]
+  },
+  "bible": {
+    "plot": "",
+    "characters": [],
+    "constraints": []
+  },
+  "tickets": [],
+  "studio": {},
+  "pages": [
+    {
+      "id": "pg_ae5e20264f27",
+      "index": 1,
+      "art_ok": false,
+      "plan": null,
+      "note": "",
+      "name_ok": false,
+      "stage": "name",
+      "spread_with": null,
+      "numero": true,
+      "onion_from": null,
+      "lt_threshold": null,
+      "effects": [],
+      "ruler": null,
+      "rulers": [],
+      "prims": [],
+      "frames": [
+        {
+          "id": "14e48641bb50",
+          "rect": {
+            "x": 29.0,
+            "y": 31.5,
+            "width": 150.0,
+            "height": 220.0
+          },
+          "split_axis": "horizontal",
+          "clip": true,
+          "bleed": false,
+          "border_mm": 0.8,
+          "children": [
+            {
+              "id": "da6a5f613922",
+              "rect": {
+                "x": 29.0,
+                "y": 31.5,
+                "width": 150.0,
+                "height": 108.0
+              },
+              "split_axis": null,
+              "clip": true,
+              "bleed": false,
+              "border_mm": 0.8,
+              "children": [],
+              "panel": null
+            },
+            {
+              "id": "84993996e4f1",
+              "rect": {
+                "x": 29.0,
+                "y": 143.5,
+                "width": 150.0,
+                "height": 108.0
+              },
+              "split_axis": null,
+              "clip": true,
+              "bleed": false,
+              "border_mm": 0.8,
+              "children": [],
+              "panel": null
+            }
+          ],
+          "panel": null,
+          "split": {
+            "a": [
+              0.0,
+              0.5
+            ],
+            "b": [
+              1.0,
+              0.5
+            ],
+            "gutter_mm": 4.0
+          }
+        }
+      ],
+      "layers": [
+        {
+          "id": "a72a8204e9f3",
+          "role": "bg",
+          "kind": "fill",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "86c66b379bc0",
+          "role": "name",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": false,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "199a8c0d8380",
+          "role": "ink",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null,
+          "panel_each": true,
+          "strokes_blob": "sha256:9036e17cadbc44ed96aa3ee57411c74f062d06acb589fb0075de1e8ad6fb0258",
+          "stroke_count": 2
+        },
+        {
+          "id": "82e92e322701",
+          "role": "finish",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        }
+      ],
+      "fills": {}
+    },
+    {
+      "id": "pg_4d23aed1e8cf",
+      "index": 2,
+      "art_ok": false,
+      "plan": null,
+      "note": "",
+      "name_ok": false,
+      "stage": "name",
+      "spread_with": null,
+      "numero": true,
+      "onion_from": null,
+      "lt_threshold": null,
+      "effects": [],
+      "ruler": null,
+      "rulers": [],
+      "prims": [],
+      "frames": [
+        {
+          "id": "633d6620d801",
+          "rect": {
+            "x": 29.0,
+            "y": 31.5,
+            "width": 150.0,
+            "height": 220.0
+          },
+          "split_axis": null,
+          "clip": true,
+          "bleed": false,
+          "border_mm": 0.8,
+          "children": [],
+          "panel": null
+        }
+      ],
+      "layers": [
+        {
+          "id": "9f356fcc5617",
+          "role": "bg",
+          "kind": "fill",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "82a5d151c2de",
+          "role": "name",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": false,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        },
+        {
+          "id": "61628fd8926b",
+          "role": "ink",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null,
+          "panel_each": true
+        },
+        {
+          "id": "00f2cbeba823",
+          "role": "finish",
+          "kind": "strokes",
+          "visible": true,
+          "exportable": true,
+          "fill_rgb": null,
+          "lpi": null,
+          "density": null,
+          "region": null,
+          "opacity": 1.0,
+          "material_id": null,
+          "angle": 45.0,
+          "title": "",
+          "blend": "normal",
+          "clip": false,
+          "lock_alpha": false,
+          "parent_id": null
+        }
+      ],
+      "fills": {},
+      "future_page": {
+        "a": [
+          1,
+          2
+        ]
+      }
+    }
+  ],
+  "story": [
+    {
+      "id": "41d718a38f78",
+      "page_index": 1,
+      "text": "東京と東京へ🙂",
+      "speaker": "主人公",
+      "frame_id": null,
+      "ruby": "",
+      "x_mm": 120.0,
+      "y_mm": 40.0,
+      "w_mm": 30.0,
+      "h_mm": 60.0,
+      "balloon": "speech",
+      "tail": null,
+      "wrap": "vertical",
+      "ruby_runs": [
+        [
+          "東京",
+          "とうきょう"
+        ]
+      ],
+      "path": null,
+      "emphasis_runs": [
+        "へ"
+      ]
+    }
+  ]
+}

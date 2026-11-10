@@ -1,0 +1,243 @@
+#pragma once
+
+#include <QPushButton>
+#include <QWidget>
+
+#include <array>
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "core/color_model.hpp"
+#include "core/ink.hpp"
+#include "core/json.hpp"
+
+class QCheckBox;
+class QComboBox;
+class QDoubleSpinBox;
+class QLabel;
+class QGridLayout;
+class QLineEdit;
+class QSpinBox;
+class QTabWidget;
+class QTimer;
+class QVBoxLayout;
+
+// カラー: the colour panel (Python's genko/app/colours.py, J4) — a square of saturation and brightness with a hue bar,
+// RGB and hex, the main and sub colours (X swaps them) and the transparent colour, colour sets, the colours used
+// lately, colours between four chosen ones (中間色) and colours near the current one (近似色).
+
+namespace genko::app {
+
+class BrushPanel;
+
+using Rgb = std::array<int, 3>;
+
+namespace colours {
+
+inline constexpr int kHistory = 24;
+
+using ColourSet = std::pair<std::string, std::vector<Rgb>>;
+
+// Python's colorsys (the same sums, so the same colours come out).
+std::array<double, 3> rgb_to_hsv(double r, double g, double b);
+std::array<double, 3> hsv_to_rgb(double h, double s, double v);
+
+// マンガのグレー, 基本の色, 肌・髪.
+const std::vector<ColourSet>& built_in_sets();
+bool is_built_in(const std::string& name);
+// The built-in sets and the person's own (the settings folder's colorsets.json), in that order (one's own set of a
+// built-in name takes the built-in's place). A file that cannot be read adds nothing; a set that cannot be read
+// stops the reading there, as in Python.
+std::vector<ColourSet> load_sets(const std::filesystem::path& config_dir);
+// One set kept (or, nullopt, forgotten) in colorsets.json, the others there left as they are. Throws core::Error.
+void save_set(const std::filesystem::path& config_dir, const std::string& name, const std::optional<std::vector<Rgb>>& colours);
+
+Rgb mix(const Rgb& a, const Rgb& b, double t);
+// 中間色: an n×n grid mixed from four corners (top-left, top-right, bottom-left, bottom-right).
+std::vector<std::vector<Rgb>> between(const std::array<Rgb, 4>& corners, int n = 5);
+// 近似色: rows of the colour with its hue turned a little, and lighter / darker, more / less vivid.
+std::vector<std::vector<Rgb>> nearby(const Rgb& rgb, int n = 5);  // (not "near": a macro on Windows)
+
+}  // namespace colours
+
+// A colour to click (22 px, 2 px apart: a 24 px target pitch, WCAG 2.5.8).
+class Swatch : public QPushButton {
+    Q_OBJECT
+public:
+    explicit Swatch(const Rgb& rgb = {0, 0, 0}, int size = 22, QWidget* parent = nullptr);
+    void set_rgb(const Rgb& rgb);
+    const Rgb& rgb() const { return rgb_; }
+    // (PC4 E4) the keys held as a swatch is clicked, while its picked() is said (none otherwise): Ctrl+click's 背景色.
+    static Qt::KeyboardModifiers held();
+
+signals:
+    void picked(const genko::app::Rgb& rgb);
+
+protected:
+    void mouseReleaseEvent(QMouseEvent* event) override;
+
+private:
+    Rgb rgb_{0, 0, 0};
+};
+
+// Saturation across, brightness up and down, for the hue chosen on the bar.
+class SVSquare : public QWidget {
+    Q_OBJECT
+public:
+    explicit SVSquare(QWidget* parent = nullptr);
+    double hue = 0.0, sat = 1.0, val = 1.0;
+    // A point picked (the widget's coordinates).
+    void pick(QPointF pos);
+
+signals:
+    void changed(double sat, double val);
+
+protected:
+    void paintEvent(QPaintEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+};
+
+class HueBar : public QWidget {
+    Q_OBJECT
+public:
+    explicit HueBar(QWidget* parent = nullptr);
+    double hue = 0.0;
+    void pick(QPointF pos);
+
+signals:
+    void changed(double hue);
+
+protected:
+    void paintEvent(QPaintEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+};
+
+// The pen's colour, chosen every way a painter chooses one. The colour itself is the brush panel's (brush/rgb).
+class ColourPanel : public QWidget {
+    Q_OBJECT
+public:
+    ColourPanel(BrushPanel* brush, QWidget* parent = nullptr);
+    ~ColourPanel() override;
+
+    Rgb rgb() const;
+    const Rgb& sub_rgb() const { return sub_rgb_; }
+    void choose(const Rgb& rgb);
+    void show_colour(const Rgb& rgb);
+    // 描画色と背景色を入れ替え (X).
+    void swap();
+    // 描画色と背景色を初期設定に戻す (D, PC4 E-0): Genko's black (20, 20, 20) and white.
+    void reset_defaults();
+    // PC4 E-0 (描画色・背景色の高精度): the colours as floats — straight sRGB 0..1 (32 bits: beyond 1 too), the form of a
+    // precise line's color_rgb (native.color_stroke_v1) — kept beside their 8-bit pictures. choose_precise() chooses the
+    // 描画色 so (its 8-bit picture the nearest); foreground() and background() give them, the 8-bit colour / 255 for one
+    // not chosen as floats (or an 8-bit colour chosen since, the same one too: BrushPanel::colour_set); is_precise() says
+    // whether the 描画色 holds more than its 8 bits.
+    using Precise = std::array<double, 3>;
+    void choose_precise(const Precise& srgb);
+    Precise foreground() const;
+    Precise background() const;
+    bool is_precise() const;
+    // The 描画色 as a line's color_rgb ({"precision": "u16" | "f32", "values": [r, g, b]}; u16: rounded to 16 bits, 0..1).
+    core::Json foreground_json(std::string_view precision) const;
+    // PC4 E4 (tools.setColors): the 背景色 chosen — an 8-bit colour (its floats let go), or floats (straight sRGB, its 8-bit
+    // picture the nearest) —, kept in the settings as the 背景色 is; and as color_rgb, as foreground_json.
+    void set_background(const Rgb& rgb);
+    void set_background_precise(const Precise& srgb);
+    core::Json background_json(std::string_view precision) const;
+    // A swatch clicked (スウォッチ, 履歴, 中間色, 近似色): the 描画色, or with Ctrl held the 背景色 (Photoshop's).
+    void pick_swatch(const Rgb& rgb);
+    // PC4 E4: the page's RGB depth (16 or 32: the 描画色's floats are shown and can be typed, 高精度; 8 or none: hidden).
+    void set_precise_depth(int depth);
+    // A colour just used goes to the front of 履歴.
+    void remember(const Rgb& rgb);
+    // The current colour added to the chosen set (a built-in set: to one's own copy of it).
+    void add_to_set();
+    // A new set of the current colour (no name: asked).
+    void new_set(const std::optional<QString>& name = std::nullopt);
+    // The current colour as a corner of 中間色 (0 左上, 1 右上, 2 左下, 3 右下).
+    void set_corner(int i);
+    // color-mode@1: the page's colour mode (none: an RGB page). On a CMYK or Lab page the colour's inks are shown and can
+    // be chosen (インキ), and an RGB colour the page cannot print as it is gets a mark (色域外).
+    void set_page_color(const std::optional<core::PageColor>& color);
+    // color-model@1 (PC1d): an indexed page's table (none: another page). The colour's index in it and the colour it is
+    // shown as (the nearest) are shown.
+    void set_color_table(const std::optional<core::ColorTable>& table);
+
+    const std::vector<Rgb>& history() const { return history_; }
+    const std::array<Rgb, 4>& corners() const { return corners_; }
+    const std::vector<colours::ColourSet>& sets() const { return sets_; }
+
+    // The fields (the window and the tests use them as Python's attributes).
+    Swatch* main = nullptr;
+    Swatch* sub = nullptr;
+    QPushButton* swap_button = nullptr;
+    QCheckBox* transparent = nullptr;
+    SVSquare* square = nullptr;
+    HueBar* bar = nullptr;
+    std::array<QSpinBox*, 3> spins{};
+    QLineEdit* hex = nullptr;
+    QTabWidget* tabs = nullptr;
+    QComboBox* set_choice = nullptr;
+    QWidget* set_box = nullptr;
+    QWidget* history_page = nullptr;
+    QWidget* between_page = nullptr;
+    QWidget* near_page = nullptr;
+    QComboBox* pick_source = nullptr;
+    QWidget* ink_box = nullptr;                    // (shown on a CMYK or Lab page)
+    std::array<QDoubleSpinBox*, 4> ink_spins{};    // C M Y K in %, or L a b
+    std::array<QLabel*, 4> ink_labels{};
+    QLabel* gamut = nullptr;
+    QLabel* table_index = nullptr;  // (an indexed page: the colour's index in its table)
+    QWidget* precise_box = nullptr;                // (PC4 E4: shown on an RGB page of 16 or 32 bits)
+    std::array<QDoubleSpinBox*, 3> precise_spins{};  // the 描画色's R G B as floats (0..1; 32 bits: past 1 too)
+
+signals:
+    // スポイト: where the picker takes its colour ("view" | "layer").
+    void pick_source_chosen(const QString& source);
+    // インキ: these inks chosen for the pen (CMYK 0..1, or L a b); the window gives them an RGB colour (set_inks).
+    void inks_chosen(const std::vector<double>& ink);
+    // (PC4 E4) the 背景色 chosen of its own (set_background).
+    void background_set();
+
+private:
+    void from_square();
+    void from_hue(double h);
+    void from_numbers();
+    void from_hex();
+    void show_inks(const Rgb& rgb);
+    void from_inks();
+    void show_precise();
+    void from_precise();
+    void fill_sets();
+    void fill_set();
+    void fill_history();
+    void fill_between();
+    void fill_near(const Rgb& rgb);
+    // A set kept in colorsets.json (a warning when it cannot be).
+    bool keep_set(const std::string& name);
+
+    BrushPanel* brush_ = nullptr;
+    std::optional<core::PageColor> page_color_;
+    std::optional<core::ColorTable> table_;  // (an indexed page's)
+    void show_table(const Rgb& rgb);
+    bool inks_edited_ = false;  // (an ink value changed by the user since it was shown)
+    bool loading_ = false;
+    Rgb sub_rgb_{255, 255, 255};
+    std::optional<Precise> fore_precise_, back_precise_;  // (PC4 E-0: as chosen; kept while their 8-bit pictures are shown)
+    int precise_depth_ = 0;
+    std::vector<Rgb> history_;
+    QTimer* history_write_ = nullptr;  // (履歴 written to the settings a moment after a run of lines)
+    std::array<Rgb, 4> corners_{};
+    std::vector<colours::ColourSet> sets_;
+    QGridLayout* set_grid_ = nullptr;
+    QGridLayout* history_grid_ = nullptr;
+    QVBoxLayout* between_layout_ = nullptr;
+    QVBoxLayout* near_layout_ = nullptr;
+};
+
+}  // namespace genko::app

@@ -1,0 +1,1050 @@
+// The lines of dialogue and their balloons (Python's ops._apply_one and bookops.replace_text): add_line, edit_line,
+// move_line, delete_line, reorder_lines, cut_balloon (フキダシ消しゴム), set_balloon_path (a balloon drawn by hand) and
+// replace_text (一括置換), with the helpers they share: the style keys a line takes (_merge_style), its tails
+// (_parse_tails, and _tails_outside for a balloon moved over its own tail), its ruby, dots (傍点) and styled words; and
+// the line stamp_material makes of a lettering material (the rest of that op is render's). Nothing is drawn.
+//
+// TEXT-01 (core/ruby.hpp): add_line and edit_line also take ruby_spans (the rubies by place, each with its own
+// settings: font, scale, align, gap_mm, tracking), and an edit of the text follows the rubies held by place (their
+// settings with them). A line of Python's (ruby_runs only) is changed as Python changes it as long as its runs still say where each
+// ruby is; when they no longer would (Python would draw a reading over another word, or keep one whose base was
+// edited), the line holds its rubies by place from then on (see edited_text and replaced_text).
+//
+// Python also keeps each page's lines in page.texts (the same objects as the story's, read from the story); this build
+// keeps the story alone. Every id page.texts holds is in the story too (add_line and delete_line change both, and the
+// ops that renumber pages keep the ids), so _find_line, which looks in the story first, finds the same line here.
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "core/balloon_tails.hpp"
+#include "core/base64.hpp"
+#include "core/command_bus.hpp"
+#include "core/layer_basics.hpp"
+#include "core/ops_util.hpp"
+#include "core/pyconv.hpp"
+#include "core/pynum.hpp"
+#include "core/pyops.hpp"
+#include "core/pyre.hpp"
+#include "core/ruby.hpp"
+#include "core/type_text.hpp"
+#include "core/vector.hpp"
+
+namespace genko::core {
+
+namespace {
+
+// balloons.SHAPES and balloons.TAIL_KINDS
+constexpr std::array<std::string_view, 16> kShapes{"speech", "rounded", "box",    "cloud",     "thought",  "shout",
+                                                   "electric", "flash", "whisper", "narration", "sfx",      "none",
+                                                   "picture", "dotted_box", "tone_box", "fancy_box"};
+constexpr std::array<std::string_view, 5> kTailKinds{"wedge", "straight", "zigzag", "fade", "bubbles"};
+
+// ops.FEATURES: the OpenType forms a line's style may ask for
+constexpr std::array<std::string_view, 25> kFeatures{"jp78", "jp83", "jp90", "jp04", "trad", "expt", "nlck", "hojo", "hwid",
+                                                     "fwid", "pwid", "palt", "twid", "qwid", "ruby", "liga", "kern", "smpl",
+                                                     "ital", "salt", "ss01", "ss02", "ss03", "ss04", "ss05"};
+
+// ops.STYLE_KEYS: each key and the kind of value it keeps, in Python's order (the order its error lists them in)
+enum class Kind { Str, Float, List, Bool, Int, Dict, Points, Tags, Png, Corners, Cuts };
+
+struct StyleKey {
+    std::string_view name;
+    Kind kind;
+};
+
+constexpr StyleKey kStyleKeys[] = {
+    {"font", Kind::Str},          {"size_mm", Kind::Float},      {"tracking", Kind::Float},     {"leading", Kind::Float},
+    {"align", Kind::Str},         {"outline_mm", Kind::Float},   {"rgb", Kind::List},           {"tcy", Kind::Bool},
+    {"border_mm", Kind::Float},   {"fill", Kind::Str},           {"group", Kind::Str},          {"rotate_deg", Kind::Float},
+    {"skew_deg", Kind::Float},    {"arc", Kind::Float},          {"latin", Kind::Str},          {"emphasis_mark", Kind::Str},
+    {"bold", Kind::Bool},         {"weight", Kind::Str},         {"italic", Kind::Bool},        {"outline_rgb", Kind::List},
+    {"wobble", Kind::Float},      {"double", Kind::Bool},        {"spikes", Kind::Int},         {"spike_depth", Kind::Float},
+    {"scale_x", Kind::Float},     {"gradient", Kind::Dict},      {"text_path", Kind::Points},   {"features", Kind::Tags},
+    {"yakumono", Kind::Bool},     {"spike_jitter", Kind::Float}, {"bumps", Kind::Int},          {"picture", Kind::Png},
+    {"fill_png", Kind::Png},      {"warp", Kind::Corners},       {"speaker_id", Kind::Str},     {"line_rgb", Kind::List},
+    {"fill_rgb", Kind::List},     {"fill_opacity", Kind::Float}, {"text_dx_mm", Kind::Float},   {"text_dy_mm", Kind::Float},
+    {"path_curve", Kind::Bool},   {"cuts", Kind::Cuts},          {"ruby_scale", Kind::Float},   {"mono_ruby", Kind::Bool},
+    {"below_layer", Kind::Str},   {"hand", Kind::Bool},          {"periods", Kind::Bool},
+};
+
+template <std::size_t N>
+std::string joined(const std::array<std::string_view, N>& names) {
+    std::string out;
+    for (const std::string_view name : names) out += (out.empty() ? "" : ", ") + std::string(name);
+    return out;
+}
+
+template <std::size_t N>
+bool listed(const std::array<std::string_view, N>& names, std::string_view name) {
+    return std::find(names.begin(), names.end(), name) != names.end();
+}
+
+Json op_value(const Json& op, std::string_view key) { return get_or(op, key, Json()); }
+
+// type@1 (PC5 G-0): a native_type in its normal form (null: none).
+std::optional<Json> optional_type(Json value) {
+    if (value.is_null()) return std::nullopt;
+    return value;
+}
+
+// add_line's and edit_line's native_type (type@1, PC5 G-0: Photoshop's type settings of the line, checked against its text;
+// null takes them away). The book names type@1 from then on.
+void given_native_type(Document& doc, StoryLine& line, const Json& raw) {
+    try {
+        line.native_type = optional_type(type_text::check_native_type(raw, line.text));
+    } catch (const Error& error) {
+        throw OpError(error.what());
+    }
+    type_text::add_feature(doc);
+}
+
+// Python's float / float: ZeroDivisionError ("float division by zero"), which apply_ops lets through
+double divided(double a, double b) {
+    if (b == 0.0) throw PyUncaught("ZeroDivisionError", "float division by zero");
+    return a / b;
+}
+
+// x ** 2 for a float (libm's pow, as Python calls it): OverflowError past the largest float, which apply_ops lets through
+double squared(double x) {
+    try {
+        return py_pow(x, 2.0);
+    } catch (const Error& error) {
+        throw PyUncaught("OverflowError", error.what());
+    }
+}
+
+// Python's min(values) and max(values) of floats: the first unless a later one is smaller (larger), as Python compares
+// them (a NaN met first stays)
+double min_of(const std::vector<double>& values) {
+    double out = values.front();
+    for (const double v : values) out = py_min(out, v);
+    return out;
+}
+
+double max_of(const std::vector<double>& values) {
+    double out = values.front();
+    for (const double v : values) out = py_max(out, v);
+    return out;
+}
+
+// [float(p[0]), float(p[1])]
+Json float_pair(const Json& p) {
+    const double x = to_float(subscript(p, 0));
+    const double y = to_float(subscript(p, 1));
+    return Json::array({x, y});
+}
+
+Json point_json(const Point& p) { return Json::array({p.x.json(), p.y.json()}); }
+
+// tuple(tail["to"]) as the line's single tail: Python keeps whatever the tail's "to" holds; this build's line keeps two
+// numbers, so anything else (only a hand-written book has it) is refused.
+Point tail_point(const Json& to) {
+    const std::vector<Json> items = iterate(to);
+    if (items.size() == 2) {
+        const auto x = Num::from_json(items[0]);
+        const auto y = Num::from_json(items[1]);
+        if (x && y) return Point{*x, *y};
+    }
+    throw OpError("a tail's to must be two numbers [x, y]");
+}
+
+// ops._parse_tail: None, or (float(value[0]), float(value[1]))
+std::optional<Point> parse_tail(const Json& value) {
+    if (value.is_null()) return std::nullopt;
+    const double x = to_float(subscript(value, 0));
+    const double y = to_float(subscript(value, 1));
+    return Point{Num(x), Num(y)};
+}
+
+// ops._parse_tails: [{"to": [x, y], "via"?, "vias"?, "width_mm"?, "kind"?}] (an item may be the [x, y] alone)
+std::vector<Json> parse_tails(const Json& raw) {
+    std::vector<Json> tails;
+    for (Json item : iterate(py_or(raw, Json::array()))) {
+        if (item.is_array()) item = Json::object({{"to", item}});
+        const Json* to = item.is_object() ? get(item, "to") : nullptr;
+        if (to == nullptr || !py_truthy(*to) || length(*to) < 2) throw OpError("a tail needs to: [x, y]");
+        Json tail = Json::object();
+        tail["to"] = float_pair(*to);
+        if (truthy_at(item, "via")) tail["via"] = float_pair(item["via"]);
+        if (truthy_at(item, "vias")) {  // 折れ線のしっぽ: it bends at each of these
+            Json vias = Json::array();
+            for (const Json& v : iterate(item["vias"])) vias.push_back(float_pair(v));
+            tail["vias"] = std::move(vias);
+            tail.erase("via");
+        }
+        if (truthy_at(item, "width_mm")) tail["width_mm"] = to_float(item["width_mm"]);
+        if (truthy_at(item, "kind") && item["kind"] != Json("wedge")) {
+            if (!item["kind"].is_string() || !listed(kTailKinds, item["kind"].get_ref<const std::string&>())) {
+                throw OpError("tail kind must be one of " + joined(kTailKinds));
+            }
+            tail["kind"] = py_str(item["kind"]);
+        }
+        tails.push_back(std::move(tail));
+    }
+    return tails;
+}
+
+// ops._balloon_kind: str(kind or "speech"), one of balloons.SHAPES
+std::string balloon_kind(const Json& kind) {
+    const std::string out = py_str(py_or(kind, Json("speech")));
+    if (!listed(kShapes, out)) throw OpError("balloon must be one of " + joined(kShapes));
+    return out;
+}
+
+// [tuple(item) for item in raw]: each ruby run as the list of what it holds
+std::vector<Json> ruby_runs_of(const Json& raw) {
+    std::vector<Json> out;
+    for (const Json& item : iterate(raw)) {
+        Json run = Json::array();
+        for (const Json& part : iterate(item)) run.push_back(part);
+        out.push_back(std::move(run));
+    }
+    return out;
+}
+
+// ops._emphasis: the words that carry dots (傍点)
+std::vector<std::string> emphasis(const Json& raw) {
+    if (!raw.is_array()) throw OpError("emphasis_runs must be a list of the words that carry dots");
+    std::vector<std::string> out;
+    for (const Json& item : raw) {
+        if (!py_truthy(item)) continue;
+        out.push_back(py_str(item.is_array() ? item[0] : item));
+    }
+    return out;
+}
+
+// ops._style_runs: [[words, {scale?, bold?, weight?, rgb?, tcy?}]] — part of a line styled
+std::vector<std::pair<std::string, Json>> style_runs(const Json& raw) {
+    std::vector<std::pair<std::string, Json>> out;
+    for (const Json& item : iterate(py_or(raw, Json::array()))) {
+        if (!item.is_array() || item.size() < 2 || !py_truthy(item[0]) || !item[1].is_object()) {
+            throw OpError("style_runs is [[words, {scale, bold, rgb}], ...]");
+        }
+        Json style = Json::object();
+        for (const auto& [key, value] : item[1].items()) {
+            if (key == "scale") {
+                const double scale = to_float(value);
+                if (!(0.3 <= scale && scale <= 3)) throw OpError("scale must be between 0.3 and 3");
+                style["scale"] = scale;
+            } else if (key == "bold") {
+                style["bold"] = py_equals(value, Json(2)) ? Json(2) : Json(py_truthy(value));  // (2: 極太)
+            } else if (key == "tcy") {
+                style["tcy"] = py_truthy(value);
+            } else if (key == "weight") {
+                if (!is_one_of(value, {"normal", "bold", "heavy"})) throw OpError("weight must be normal, bold or heavy");
+                const std::string& weight = value.get_ref<const std::string&>();
+                style["bold"] = weight == "normal" ? Json(0) : weight == "bold" ? Json(true) : Json(2);
+            } else if (key == "rgb") {
+                Json rgb = Json::array();
+                for (const Json& v : iterate(value)) rgb.push_back(to_int(v));
+                style["rgb"] = py_slice(rgb, 0, 3);
+            } else {
+                throw OpError("unknown style_runs key " + key + " (scale, bold, weight, rgb, tcy)");
+            }
+        }
+        out.emplace_back(py_str(item[0]), std::move(style));
+    }
+    return out;
+}
+
+// ops._set_path: a balloon drawn by hand — its outline, and the box becomes the outline's bounds
+void set_path(StoryLine& line, const Json& raw) {
+    if (!py_truthy(raw)) {
+        line.path.reset();
+        return;
+    }
+    std::vector<double> xs, ys;
+    try {
+        for (const Json& p : iterate(raw)) {
+            const double x = py_round(to_float(subscript(p, 0)), 3);
+            const double y = py_round(to_float(subscript(p, 1)), 3);
+            xs.push_back(x);
+            ys.push_back(y);
+        }
+    } catch (const PyTypeError&) {
+        throw OpError("path must be [[x_mm, y_mm], ...]");
+    } catch (const PyValueError&) {
+        throw OpError("path must be [[x_mm, y_mm], ...]");
+    } catch (const PyUncaught& error) {
+        if (error.type() != "IndexError") throw;
+        throw OpError("path must be [[x_mm, y_mm], ...]");
+    }
+    if (xs.size() < 3) throw OpError("a balloon outline needs at least three points");
+    const double x0 = min_of(xs), x1 = max_of(xs), y0 = min_of(ys), y1 = max_of(ys);
+    if (x1 - x0 < 2 || y1 - y0 < 2) throw OpError("the balloon outline is too small");
+    std::vector<Point> points;
+    for (std::size_t i = 0; i < xs.size(); ++i) points.push_back(Point{Num(xs[i]), Num(ys[i])});
+    line.path = std::move(points);
+    line.x_mm = Num(x0);
+    line.y_mm = Num(y0);
+    line.w_mm = Num(x1 - x0);
+    line.h_mm = Num(y1 - y0);
+}
+
+// [[round(float(p[0]), digits), round(float(p[1]), digits)] for p in value]
+Json rounded_points(const Json& value, int digits) {
+    Json out = Json::array();
+    for (const Json& p : iterate(value)) {
+        const double x = py_round(to_float(subscript(p, 0)), digits);
+        const double y = py_round(to_float(subscript(p, 1)), digits);
+        out.push_back(Json::array({x, y}));
+    }
+    return out;
+}
+
+// [int(v) for v in value][:3]
+Json int_list3(const Json& value) {
+    Json out = Json::array();
+    for (const Json& v : iterate(value)) out.push_back(to_int(v));
+    return py_slice(out, 0, 3);
+}
+
+// A style value converted as STYLE_KEYS says (inside _merge_style's try: Python's TypeError, ValueError, IndexError,
+// AttributeError and OSError become "style <key>: <message>" there)
+Json style_value(const StyleKey& spec, const Json& value, const PictureCheck& check) {
+    switch (spec.kind) {
+        case Kind::Corners: {
+            Json corners = rounded_points(value, 4);
+            const bool inside = std::all_of(corners.begin(), corners.end(), [](const Json& p) {
+                return std::all_of(p.begin(), p.end(), [](const Json& c) {
+                    const double v = c.get<double>();
+                    return -1 <= v && v <= 2;
+                });
+            });
+            if (corners.size() != 4 || !inside) throw PyValueError("warp is four corners [[x, y] ×4] as shares of the box (-1..2)");
+            return corners;
+        }
+        case Kind::Cuts: {
+            Json cuts = Json::array();
+            for (const Json& c : iterate(value)) {
+                Json points = rounded_points(subscript(c, "points"), 3);
+                const Json* width = get(c, "width_mm");
+                const double w = width != nullptr ? to_float(*width) : 2.0;
+                cuts.push_back(Json::object({{"points", std::move(points)}, {"width_mm", py_round(py_max(0.1, py_min(40.0, w)), 3)}}));
+            }
+            if (std::any_of(cuts.begin(), cuts.end(), [](const Json& c) { return c["points"].empty(); })) {
+                throw PyValueError("a cut needs its points");
+            }
+            return cuts;
+        }
+        case Kind::Points: {
+            Json points = rounded_points(value, 3);
+            if (points.size() < 2) throw PyValueError("a path needs two points or more");
+            return points;
+        }
+        case Kind::Tags: {
+            Json tags = Json::array();
+            for (const Json& v : iterate(value)) tags.push_back(py_str(v));
+            for (const Json& tag : tags) {
+                if (!listed(kFeatures, tag.get_ref<const std::string&>())) {
+                    throw PyValueError("unknown feature " + tag.get<std::string>());
+                }
+            }
+            return tags;
+        }
+        case Kind::Png: {
+            // str(value); Image.open(io.BytesIO(base64.b64decode(value))).verify()
+            const std::string text = py_str(value);
+            std::string bytes;
+            try {
+                bytes = a2b_base64(text);
+            } catch (const Error& error) {
+                throw PyValueError(error.what());  // (binascii.Error, and the ValueError of a text that is not ASCII)
+            }
+            if (!check) {
+                not_yet_ported("a picture in a line's style (style." + std::string(spec.name) +
+                               ") is checked by the drawing ops (render::ops_registry)");
+            }
+            check(bytes);
+            return text;
+        }
+        case Kind::Dict: {
+            if (!value.is_object()) throw PyValueError("gradient is {rgb_from, rgb_to, angle?}");
+            static const Json kFrom = Json::array({20, 20, 20}), kTo = Json::array({230, 40, 40});
+            const Json from = int_list3(get_else(value, "rgb_from", kFrom));
+            const Json to = int_list3(get_else(value, "rgb_to", kTo));
+            const Json* angle = get(value, "angle");
+            return Json::object({{"rgb_from", from}, {"rgb_to", to}, {"angle", angle != nullptr ? to_float(*angle) : 90.0}});
+        }
+        case Kind::List: return int_list3(value);
+        case Kind::Str: return py_str(value);
+        case Kind::Float: return to_float(value);
+        case Kind::Bool: return py_truthy(value);
+        case Kind::Int: return to_int_held(value);  // (an int past 64 bits held at its end: refused by the bounds below)
+    }
+    return value;
+}
+
+// _merge_style's refusal of a key that is not one of STYLE_KEYS (the key as Python's f-string writes it)
+[[noreturn]] void unknown_style_key(const std::string& key) {
+    std::string names;
+    for (const StyleKey& k : kStyleKeys) names += (names.empty() ? "" : ", ") + std::string(k.name);
+    throw OpError("unknown style key " + key + " (one of " + names + ")");
+}
+
+// ops._merge_style: style keys merged into a line's style; a key set to null (or "") goes back to the default
+Json merge_style(const Json& current, const Json& change, const PictureCheck& check) {
+    if (!change.is_object()) throw OpError("style must be an object");
+    Json out = current.is_object() ? current : Json::object();
+    for (const auto& [key, value] : change.items()) {
+        if (key == "native_warp") {  // (PC3 C-c, transform@1: Warp Text's styles, this build's own — not one of Python's keys)
+            if (value.is_null() || value == Json("")) {
+                out.erase(key);
+                continue;
+            }
+            try {
+                vector::check_native_warp(value);
+            } catch (const Error& error) {
+                throw OpError(std::string("style ") + error.what());
+            }
+            out[key] = value;
+            continue;
+        }
+        const auto* spec = std::find_if(std::begin(kStyleKeys), std::end(kStyleKeys), [&](const StyleKey& k) { return k.name == key; });
+        if (spec == std::end(kStyleKeys)) unknown_style_key(key);
+        if (value.is_null() || value == Json("")) {
+            out.erase(key);
+            continue;
+        }
+        Json kept;
+        try {
+            kept = style_value(*spec, value, check);
+        } catch (const PyValueError& error) {
+            throw OpError("style " + key + ": " + error.what());
+        } catch (const PyTypeError& error) {
+            throw OpError("style " + key + ": " + error.what());
+        } catch (const PyUncaught& error) {
+            const std::string& type = error.type();
+            if (type != "IndexError" && type != "AttributeError" && type != "OSError" && type != "PIL.UnidentifiedImageError") throw;
+            throw OpError("style " + key + ": " + error.what());
+        }
+        const auto must = [](bool ok, const char* words) {
+            if (!ok) throw OpError(words);
+        };
+        const auto number = [&kept] { return kept.is_number_integer() ? static_cast<double>(kept.get<std::int64_t>()) : kept.get<double>(); };
+        if (key == "align") {
+            must(is_one_of(kept, {"top", "center", "bottom", "left", "right", "justify"}),
+                 "align must be top, center, bottom, left, right or justify");
+        }
+        if (key == "fill") must(is_one_of(kept, {"white", "none"}), "fill must be white or none");
+        if (key == "latin") must(is_one_of(kept, {"rotate", "upright"}), "latin must be rotate or upright");
+        if (key == "emphasis_mark") must(is_one_of(kept, {"sesame", "dot"}), "emphasis_mark must be sesame or dot");
+        if (key == "weight") must(is_one_of(kept, {"normal", "bold", "heavy"}), "weight must be normal, bold or heavy");
+        if (key == "skew_deg") must(!(std::abs(number()) > 60), "skew_deg must be between -60 and 60");
+        if (key == "arc") must(!(std::abs(number()) > 1), "arc must be between -1 and 1");
+        if (key == "wobble") must(0 <= number() && number() <= 1, "wobble must be between 0 and 1");
+        if (key == "spikes") must(6 <= number() && number() <= 80, "spikes must be between 6 and 80");
+        if (key == "spike_depth") must(0.05 <= number() && number() <= 0.6, "spike_depth must be between 0.05 and 0.6");
+        if (key == "scale_x") must(0.3 <= number() && number() <= 3, "scale_x must be between 0.3 and 3");
+        if (key == "spike_jitter") must(0 <= number() && number() <= 1, "spike_jitter must be between 0 and 1");
+        if (key == "bumps") must(5 <= number() && number() <= 60, "bumps must be between 5 and 60");
+        out[key] = std::move(kept);
+    }
+    return out;
+}
+
+// _merge_style({}, dict(value or {})): the style of a lettering material. dict() takes a dict or a sequence of pairs
+// (Python's TypeError and ValueError for what it cannot take; a key it cannot hash is a TypeError too), a later pair
+// with an equal key keeping the first one's place; _merge_style then goes through the keys in that order, and a key
+// that is not a str is never one of STYLE_KEYS.
+Json lettering_style(const Json& value, const PictureCheck& check) {
+    if (!py_truthy(value)) return Json::object();
+    if (value.is_object()) return merge_style(Json::object(), value, check);
+    if (!value.is_array() && !value.is_string()) throw PyTypeError("'" + py_type_name(value) + "' object is not iterable");
+    std::vector<std::pair<Json, Json>> pairs;
+    std::size_t n = 0;
+    for (const Json& item : iterate(value)) {
+        if (!item.is_array() && !item.is_string() && !item.is_object()) {
+            throw PyTypeError("cannot convert dictionary update sequence element #" + std::to_string(n) + " to a sequence");
+        }
+        const std::vector<Json> pair = iterate(item);
+        if (pair.size() != 2) {
+            throw PyValueError("dictionary update sequence element #" + std::to_string(n) + " has length " +
+                               std::to_string(pair.size()) + "; 2 is required");
+        }
+        require_hashable(pair[0]);
+        const auto same = std::find_if(pairs.begin(), pairs.end(), [&](const auto& kept) { return py_equals(kept.first, pair[0]); });
+        if (same != pairs.end()) {
+            same->second = pair[1];
+        } else {
+            pairs.emplace_back(pair[0], pair[1]);
+        }
+        ++n;
+    }
+    Json out = Json::object();
+    for (const auto& [key, item] : pairs) {
+        if (!key.is_string()) unknown_style_key(py_str(key));
+        out = merge_style(out, Json::object({{key.get<std::string>(), item}}), check);
+    }
+    return out;
+}
+
+}  // namespace
+
+// ops.tail_hidden: whether a tail's tip lies inside its balloon (an ellipse for the round kinds, the box for the others)
+bool tail_hidden(const StoryLine& line, const Json& tip) {
+    const double w = line.w_mm.truthy() ? line.w_mm.value() : 40.0;
+    const double h = line.h_mm.truthy() ? line.h_mm.value() : 20.0;
+    const double cx = line.x_mm.value() + w / 2, cy = line.y_mm.value() + h / 2;
+    const double dx = to_float(subscript(tip, 0)) - cx;
+    const double dy = to_float(subscript(tip, 1)) - cy;
+    const std::string kind = line.balloon.empty() ? std::string("speech") : line.balloon;
+    if (kind == "box" || kind == "narration" || kind == "rounded" || kind == "none" || kind == "sfx") {
+        return std::abs(dx) < w / 2 && std::abs(dy) < h / 2;
+    }
+    return squared(divided(dx, w / 2)) + squared(divided(dy, h / 2)) < 1.0;
+}
+
+namespace {
+
+// ops._tails_outside: each tail's tip that the balloon now covers moved out past its outline, the same way from its
+// middle (a bigger or moved balloon must not swallow its tail)
+void tails_outside(StoryLine& line, double beyond = 3.0) {
+    const double w = line.w_mm.truthy() ? line.w_mm.value() : 40.0;
+    const double h = line.h_mm.truthy() ? line.h_mm.value() : 20.0;
+    const double cx = line.x_mm.value() + w / 2, cy = line.y_mm.value() + h / 2;
+    std::vector<Json> tails = line.tails;  // ([dict(t) for t in line.tails], or the single tail as one)
+    if (tails.empty() && line.tail) tails.push_back(Json::object({{"to", point_json(*line.tail)}}));
+    bool changed = false;
+    for (Json& tail : tails) {
+        const Json* tip = get(tail, "to");
+        if (tip == nullptr || !py_truthy(*tip) || !tail_hidden(line, *tip)) continue;
+        double dx = to_float(subscript(*tip, 0)) - cx;
+        double dy = to_float(subscript(*tip, 1)) - cy;
+        if (std::abs(dx) + std::abs(dy) < 1e-6) {
+            dx = 0.0;
+            dy = 1.0;
+        }
+        const double length = py_hypot(dx, dy);
+        const double ux = divided(dx, length), uy = divided(dy, length);
+        const double edge = divided(1.0, std::sqrt(squared(divided(ux, w / 2)) + squared(divided(uy, h / 2))));  // (the outline that way)
+        tail["to"] = Json::array({py_round(cx + ux * (edge + beyond), 2), py_round(cy + uy * (edge + beyond), 2)});
+        changed = true;
+    }
+    if (changed) {
+        line.tails = tails;
+        line.tail = tail_point(subscript(tails[0], "to"));
+    }
+}
+
+// What Python keeps that this build's book cannot hold, refused once the op has done everything Python does (so every
+// error Python gives comes first): a frame_id that is not a panel's id (Python keeps a number or a list there, which
+// this build's reader repairs), and a number that is not finite (Python writes NaN or Infinity into project.json).
+void require_kept(const StoryLine& line, const Json* frame_id = nullptr) {
+    if (frame_id != nullptr && !frame_id->is_null() && !frame_id->is_string()) throw OpError("frame_id must be a panel's id or null");
+    if (line.path) {
+        for (const Point& p : *line.path) {
+            if (!std::isfinite(p.x.value()) || !std::isfinite(p.y.value())) throw OpError("path must be a finite number");
+        }
+    }
+    const std::pair<const char*, const Num*> box[] = {{"x_mm", &line.x_mm}, {"y_mm", &line.y_mm}, {"w_mm", &line.w_mm}, {"h_mm", &line.h_mm}};
+    for (const auto& [name, value] : box) {
+        if (!std::isfinite(value->value())) throw OpError(std::string(name) + " must be a finite number");
+    }
+    if (line.tail && (!std::isfinite(line.tail->x.value()) || !std::isfinite(line.tail->y.value()))) {
+        throw OpError("tail must be a finite number");
+    }
+    for (const Json& tail : line.tails) require_finite(tail, "tails");
+    require_finite(line.style, "style");
+}
+
+// --- the ruby by place (TEXT-01) -------------------------------------------------------------------------------------
+
+// What an op did to a line's rubies, for its report: how many it made need review and how many it took away.
+struct RubyChange {
+    std::int64_t review = 0;
+    std::int64_t removed = 0;
+};
+
+// The op's report: the ruby keys added when there is something to say (a line of Python's left as Python leaves it
+// says nothing, as Python).
+void report_ruby(OpContext& c, const RubyChange& change) {
+    if (change.review <= 0 && change.removed <= 0) return;
+    Json report = c.report ? *c.report : Json::object();
+    if (change.review > 0) report["ruby_review"] = get_or(report, "ruby_review", Json(0)).get<std::int64_t>() + change.review;
+    if (change.removed > 0) report["ruby_removed"] = get_or(report, "ruby_removed", Json(0)).get<std::int64_t>() + change.removed;
+    c.report = std::move(report);
+}
+
+// The rubies an op gives by place (add_line, edit_line): ruby_spans against the line's text (null: none), never with
+// ruby_runs.
+void given_spans(StoryLine& line, const Json& op) {
+    if (py_truthy(get_or(op, "ruby_runs", Json()))) throw OpError("give the rubies as ruby_spans or as ruby_runs, not both");
+    const Json& raw = op["ruby_spans"];
+    line.ruby_spans = raw.is_null() ? std::vector<RubySpan>{} : ruby::parse(raw, line.text);
+}
+
+// A line's rubies after its text changed from `before`: by place, followed (core/ruby.hpp); of Python's (`runs` were
+// its runs), as Python leaves them (edit_line keeps the runs; replace_text the ones whose base is still in the text,
+// `python`) when the runs still say where each ruby is, else held by place from now on.
+RubyChange followed(StoryLine& line, const std::string& before, const std::vector<Json>& runs, const std::vector<Json>& python,
+                    const std::function<ruby::Followed(const std::vector<RubySpan>&)>& follow) {
+    RubyChange change;
+    const std::int64_t reviewed = ruby::review_count(line);
+    if (line.ruby_spans) {
+        ruby::Followed f = follow(*line.ruby_spans);
+        line.ruby_spans = std::move(f.spans);
+        change.removed = f.removed;
+        change.review = ruby::review_count(line) - reviewed;
+        return change;
+    }
+    line.ruby_runs = python;
+    const std::vector<RubySpan> had = ruby::from_runs(before, runs, true);
+    if (had.empty()) return change;
+    ruby::Followed f = follow(had);
+    if (ruby::same_drawn(f.spans, ruby::from_runs(line.text, python, false))) return change;
+    line.ruby_spans = std::move(f.spans);
+    change.removed = f.removed;
+    change.review = ruby::review_count(line);
+    return change;
+}
+
+// --- the ops -------------------------------------------------------------------------------------------------------------
+
+void add_line(OpContext& c, const PictureCheck& check) {
+    Document& doc = c.doc;
+    const Json& op = c.op;
+    const std::size_t at = require_page(doc, op);
+    const Num index = doc.page(at).index;
+    const Json text = op_value(op, "text");
+    if (!py_truthy(text)) throw OpError("text is required");
+    // episode.add_line(page.index, str(text), speaker=…, frame_id=…, …): the arguments in Python's order
+    std::string words = py_str(text);
+    std::string speaker = py_str(get_or(op, "speaker", Json("")));
+    const Json frame_id = op_value(op, "frame_id");
+    std::string ruby = py_str(get_or(op, "ruby", Json("")));
+    const double x = to_float(get_or(op, "x_mm", Json(0)));
+    const double y = to_float(get_or(op, "y_mm", Json(0)));
+    const double w = to_float(get_or(op, "w_mm", Json(40)));
+    const double h = to_float(get_or(op, "h_mm", Json(20)));
+    std::string balloon = py_str(get_or(op, "balloon", Json("speech")));
+    const std::optional<Point> tail = parse_tail(op_value(op, "tail"));
+    std::optional<std::string> frame;
+    if (frame_id.is_string()) frame = frame_id.get<std::string>();
+    StoryLine& line = doc.add_line(index, std::move(words), std::move(speaker), std::move(frame), std::move(ruby), Num(x), Num(y),
+                                   Num(w), Num(h), std::move(balloon), tail);
+    if (truthy_at(op, "id")) {
+        const std::string id = py_str(op["id"]);
+        for (const StoryLine& item : doc.story) {
+            if (item.id == id && &item != &line) throw OpError("line " + id + " already exists");
+        }
+        line.id = id;
+    }
+    // manga dialogue is set vertically unless asked otherwise (the app's text tool does the same)
+    line.wrap = py_str(py_or(op_value(op, "wrap"), Json("vertical")));
+    if (line.wrap != "vertical" && line.wrap != "horizontal") throw OpError("wrap must be vertical or horizontal");
+    if (truthy_at(op, "ruby_runs")) line.ruby_runs = ruby_runs_of(op["ruby_runs"]);
+    if (truthy_at(op, "emphasis_runs")) line.emphasis_runs = emphasis(op["emphasis_runs"]);
+    if (truthy_at(op, "style_runs")) line.style_runs = style_runs(op["style_runs"]);
+    if (truthy_at(op, "path")) set_path(line, op["path"]);
+    if (truthy_at(op, "style")) line.style = merge_style(Json::object(), op["style"], check);
+    if (truthy_at(op, "tails")) {
+        line.tails = parse_tails(op["tails"]);
+        line.tail = tail_point(line.tails.front()["to"]);
+    }
+    line.balloon = balloon_kind(Json(line.balloon));
+    if (has(op, "ruby_spans")) given_spans(line, op);
+    ruby::settle(doc, line);
+    if (has(op, "native_type")) given_native_type(doc, line, op["native_type"]);  // (type@1, PC5 G-0)
+    require_kept(line, &frame_id);
+}
+
+void reorder_lines(OpContext& c) {
+    Document& doc = c.doc;
+    const Num index = doc.page(require_page(doc, c.op)).index;
+    std::vector<std::string> order;
+    for (const Json& item : iterate(py_or(op_value(c.op, "order"), Json::array()))) order.push_back(py_str(item));
+    std::vector<std::string> mine;
+    std::map<std::string, StoryLine> by_id;  // (a dict: the last line with an id is the one kept for it)
+    for (const StoryLine& line : doc.story) {
+        if (!(line.page_index == index)) continue;
+        mine.push_back(line.id);
+        by_id[line.id] = line;
+    }
+    std::vector<std::string> wanted = order;
+    std::sort(wanted.begin(), wanted.end());  // (UTF-8 sorts as Python sorts str: by code point)
+    std::sort(mine.begin(), mine.end());
+    if (wanted != mine) throw OpError("order must list every line of the page exactly once");
+    // The page's lines take their places in the story in the new order. (Where an id repeats, Python puts that one line
+    // object in each of its places; here each place has a copy of it.)
+    std::size_t next = 0;
+    for (StoryLine& line : doc.story) {
+        if (line.page_index == index) line = by_id.at(order[next++]);
+    }
+}
+
+void edit_line(OpContext& c, const PictureCheck& check) {
+    const Json& op = c.op;
+    const Json* line_id = get(op, "id");
+    if (line_id == nullptr || !py_truthy(*line_id)) throw OpError("id is required");
+    StoryLine& line = find_line(c.doc, py_str(*line_id));
+    const std::string before = line.text;
+    const std::vector<Json> runs = line.ruby_runs;
+    const bool by_place = line.ruby_spans.has_value();
+    const std::int64_t reviewed = ruby::review_count(line);
+    if (has(op, "style")) line.style = merge_style(line.style, op["style"], check);
+    if (has(op, "tails")) {
+        line.tails = parse_tails(op["tails"]);
+        line.tail = line.tails.empty() ? std::nullopt : std::optional<Point>(tail_point(line.tails.front()["to"]));
+    }
+    if (has(op, "text")) line.text = py_str(op["text"]);
+    if (has(op, "speaker")) line.speaker = py_str(op["speaker"]);
+    if (has(op, "frame_id")) {
+        line.frame_id = op["frame_id"].is_string() ? std::optional<std::string>(op["frame_id"].get<std::string>()) : std::nullopt;
+    }
+    if (has(op, "ruby")) line.ruby = py_str(op["ruby"]);
+    if (has(op, "ruby_runs")) line.ruby_runs = ruby_runs_of(py_or(op["ruby_runs"], Json::array()));
+    if (has(op, "emphasis_runs")) line.emphasis_runs = emphasis(op["emphasis_runs"]);
+    if (has(op, "style_runs")) line.style_runs = style_runs(op["style_runs"]);
+    if (has(op, "balloon")) line.balloon = balloon_kind(op["balloon"]);
+    if (has(op, "wrap")) {
+        if (!is_one_of(op["wrap"], {"vertical", "horizontal"})) throw OpError("wrap must be vertical or horizontal");
+        line.wrap = py_str(op["wrap"]);
+    }
+    // the rubies: given by place; given as Python's runs to a line that holds them by place (its own runs sent back:
+    // its rubies, followed through the new text, as they are; others by the explicit rule, the runs not found kept as
+    // needing review); or followed through the new text
+    RubyChange change;
+    if (has(op, "ruby_spans")) {
+        given_spans(line, op);
+    } else if (has(op, "ruby_runs") && by_place) {
+        std::vector<RubySpan> now = *line.ruby_spans;
+        if (line.text != before) {
+            ruby::Followed f = ruby::follow_text(before, line.text, now);
+            now = std::move(f.spans);
+            change.removed = f.removed;
+        }
+        line.ruby_spans = ruby::from_runs_keeping(line.text, line.ruby_runs, now, runs);  // (runs: the line's before the op)
+    } else if (has(op, "text") && line.text != before && !has(op, "ruby_runs")) {
+        change = followed(line, before, runs, line.ruby_runs,
+                          [&](const std::vector<RubySpan>& spans) { return ruby::follow_text(before, line.text, spans); });
+    }
+    ruby::settle(c.doc, line);
+    // (type@1, PC5 G-0: Photoshop's type settings given, or their ranges followed through the new text)
+    if (has(op, "native_type")) {
+        given_native_type(c.doc, line, op["native_type"]);
+    }
+    std::int64_t type_removed = 0;
+    if (!has(op, "native_type") && line.native_type && line.text != before) {
+        const Json had = *line.native_type;
+        line.native_type = optional_type(type_text::follow(had, before, line.text, type_text::edits_between(before, line.text)));
+        type_removed = type_text::removed_by(had, line.native_type ? *line.native_type : Json());
+    }
+    change.review = std::max<std::int64_t>(0, ruby::review_count(line) - reviewed);
+    report_ruby(c, change);  // (a line of Python's left as Python leaves it: nothing, as Python)
+    if (type_removed > 0) {  // (type@1: ranges or paragraphs' settings the edit took away, said — a line of type@1 only)
+        Json report = c.report ? *c.report : Json::object();
+        report["type_removed"] = type_removed;
+        c.report = std::move(report);
+    }
+    require_kept(line, get(op, "frame_id"));
+}
+
+// フキダシ消しゴム: part of the balloon taken away where the eraser went (its points kept from the box's corner)
+void cut_balloon(OpContext& c, const PictureCheck& check) {
+    const Json& op = c.op;
+    StoryLine& line = find_line(c.doc, py_str(py_or(op_value(op, "id"), Json(""))));
+    // ops._parse_points: [x, y] or [x, y, pressure] each
+    std::vector<std::pair<double, double>> points;
+    for (const Json& item : iterate(py_or(op_value(op, "points"), Json::array()))) {
+        const std::size_t n = length(item);
+        if (n < 2) throw OpError("points needs [x_mm, y_mm]");
+        const double x = to_float(subscript(item, 0));
+        const double y = to_float(subscript(item, 1));
+        if (n >= 3) (void)to_float(subscript(item, 2));
+        points.emplace_back(x, y);
+    }
+    if (points.empty()) throw OpError("points: where the eraser went over the balloon");
+    Json cut_points = Json::array();
+    for (const auto& [x, y] : points) {
+        cut_points.push_back(Json::array({py_round(x - line.x_mm.value(), 3), py_round(y - line.y_mm.value(), 3)}));
+    }
+    const Json* width = get(op, "width_mm");
+    const double w = py_round(py_max(0.1, py_min(40.0, width != nullptr ? to_float(*width) : 2.0)), 3);
+    Json cuts = Json::array();
+    if (const Json* existing = get(line.style, "cuts"); existing != nullptr && py_truthy(*existing)) {
+        for (const Json& item : iterate(*existing)) cuts.push_back(item);
+    }
+    cuts.push_back(Json::object({{"points", std::move(cut_points)}, {"width_mm", w}}));
+    line.style = merge_style(line.style, Json::object({{"cuts", std::move(cuts)}}), check);
+    require_kept(line);
+}
+
+void move_line(OpContext& c) {
+    const Json& op = c.op;
+    const Json* line_id = get(op, "id");
+    if (line_id == nullptr || !py_truthy(*line_id)) throw OpError("id is required");
+    StoryLine& line = find_line(c.doc, py_str(*line_id));
+    const double was_x = line.x_mm.value(), was_y = line.y_mm.value();
+    if (has(op, "x_mm")) line.x_mm = Num(to_float(op["x_mm"]));
+    if (has(op, "y_mm")) line.y_mm = Num(to_float(op["y_mm"]));
+    type_text::move_anchor(line, line.x_mm.value() - was_x, line.y_mm.value() - was_y);  // (type@1, PC5 G-a: a point text's anchor with it)
+    if (has(op, "w_mm")) line.w_mm = Num(to_float(op["w_mm"]));
+    if (has(op, "h_mm")) line.h_mm = Num(to_float(op["h_mm"]));
+    if (has(op, "tail")) {
+        line.tail = parse_tail(op["tail"]);
+        line.tails.clear();
+        if (line.tail) line.tails.push_back(Json::object({{"to", point_json(*line.tail)}}));
+    }
+    if (has(op, "tails")) {
+        line.tails = parse_tails(op["tails"]);
+        line.tail = line.tails.empty() ? std::nullopt : std::optional<Point>(tail_point(line.tails.front()["to"]));
+    }
+    if (has(op, "balloon")) line.balloon = balloon_kind(op["balloon"]);
+    const bool moved = has(op, "x_mm") || has(op, "y_mm") || has(op, "w_mm") || has(op, "h_mm");
+    if (!(has(op, "tail") || has(op, "tails")) && moved) tails_outside(line);
+    require_kept(line);
+}
+
+void delete_line(OpContext& c) {
+    const Json* line_id = get(c.op, "id");
+    if (line_id == nullptr || !py_truthy(*line_id)) throw OpError("id is required");
+    const std::size_t before = c.doc.story.size();
+    // (line.id != line_id: the id as it is given — a number never matches a line's id)
+    if (line_id->is_string()) {
+        std::erase_if(c.doc.story, [&](const StoryLine& line) { return line.id == line_id->get_ref<const std::string&>(); });
+    }
+    if (c.doc.story.size() == before) throw OpError("no line " + py_str(*line_id));
+}
+
+void set_balloon_path(OpContext& c) {
+    const Json& op = c.op;
+    StoryLine& line = find_line(c.doc, py_str(py_or(op_value(op, "id"), Json(""))));
+    if (has(op, "path")) set_path(line, op["path"]);
+    if (has(op, "wrap")) line.wrap = py_str(op["wrap"]);
+    if (has(op, "ruby_runs")) line.ruby_runs = ruby_runs_of(op["ruby_runs"]);
+    if (has(op, "emphasis_runs")) line.emphasis_runs = emphasis(op["emphasis_runs"]);
+    if (has(op, "style_runs")) line.style_runs = style_runs(op["style_runs"]);
+    if (has(op, "ruby_runs") && line.ruby_spans) {  // (TEXT-01)
+        line.ruby_spans = ruby::from_runs_keeping(line.text, line.ruby_runs, *line.ruby_spans, ruby::runs_of(*line.ruby_spans));
+    }
+    ruby::settle(c.doc, line);
+    require_kept(line);
+}
+
+// The first `count` characters of a text (Python's text[:count], by code point)
+std::string first_characters(const std::string& text, std::size_t count) {
+    std::size_t at = 0;
+    for (std::size_t n = 0; n < count && at < text.size(); ++n) {
+        const auto c = static_cast<unsigned char>(text[at]);
+        at += c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : 4;
+    }
+    return text.substr(0, std::min(at, text.size()));
+}
+
+// `words in text` for a str on the left: PyTypeError for anything else, as Python's `in` gives it
+bool found_in(const Json& words, const std::string& text) {
+    if (!words.is_string()) {
+        throw PyTypeError("'in <string>' requires string as left operand, not " + py_type_name(words));
+    }
+    return text.find(words.get_ref<const std::string&>()) != std::string::npos;
+}
+
+// re.escape(text) as Python 3.12 escapes: its special characters with a backslash.
+std::string re_escaped(const std::string& text) {
+    static constexpr std::string_view kSpecial = "()[]{}?*+-|^$\\.&~# \t\n\r\v\f";
+    std::string out;
+    for (const char ch : text) {
+        if (kSpecial.find(ch) != std::string_view::npos) out.push_back('\\');
+        out.push_back(ch);
+    }
+    return out;
+}
+
+// bookops.replace_text (一括置換): every line's words (and speakers, if asked) with `find` swapped for `replace` — the
+// words as they are, or a pattern of re's own syntax ("regex", core/pyre: Python 3.12's re); `pages` limits it; how many
+// and where go back in the op's report. Beyond Python (SPEC COMP-01a): a pattern whose search takes more than
+// kRegexSteps steps over the book, or whose groups nest more than 200 deep, is refused (Python searches on for hours,
+// or stops with RecursionError). PC5 G-d (検索と置換…): whole_word, and a type@1 book's type layers as its lines (each
+// found reported with its page and layer_id).
+void replace_text(OpContext& c) {
+    const Json& op = c.op;
+    const std::string find = py_str(py_or(op_value(op, "find"), Json("")));
+    if (find.empty()) throw OpError("find is the words to look for");
+    const std::string replace = py_str(py_or(op_value(op, "replace"), Json("")));
+    const bool ignore_case = !py_truthy(get_or(op, "case", Json(true)));
+    // PC5 G-d (検索と置換…'s 単語単位): the words found only where no letter, digit or _ stands right before or after them
+    const bool whole_word = truthy_at(op, "whole_word");
+    // re.compile(find if op.get("regex") else re.escape(find), flags): re.error is the op's error, the others go through
+    std::optional<PyPattern> regex;
+    std::optional<PyLiteralPattern> literal;
+    if (truthy_at(op, "regex") || whole_word) {
+        const std::string body = truthy_at(op, "regex") ? find : re_escaped(find);
+        try {
+            regex.emplace(whole_word ? "(?<!\\w)(?:" + body + ")(?!\\w)" : body, ignore_case ? PyPattern::kIgnoreCase : 0);
+        } catch (const PyUncaught& error) {
+            if (error.type() == "re.error") throw OpError(std::string("the pattern cannot be read: ") + error.what());
+            throw;
+        } catch (const Error& error) {
+            if (error.code() == "regex_nested") throw OpError(error.what());
+            throw;
+        }
+    } else {
+        literal.emplace(find, ignore_case);
+    }
+    PyReBudget budget;  // (one for the whole book)
+    const auto subn = [&](const std::string& text, std::vector<PyReMatch>* matches) {
+        if (!regex) return literal->subn(replace, text, matches);
+        try {
+            return regex->subn(replace, text, matches, budget);
+        } catch (const Error& error) {
+            if (error.code() == "regex_too_slow") throw OpError(error.what());
+            throw;
+        }
+    };
+    std::vector<std::int64_t> pages;
+    for (const Json& p : iterate(py_or(op_value(op, "pages"), Json::array()))) pages.push_back(to_int_held(p));
+    std::int64_t count = 0;
+    std::int64_t ruby_review = 0;
+    std::int64_t ruby_removed = 0;
+    Json where = Json::array();
+    // one text's words replaced (a line's, or — PC5 G-d — a type layer's record): how many, its rubies, ranges and marks
+    // following them
+    const auto replace_in = [&](StoryLine& line, Json place) -> std::int64_t {
+        std::vector<PyReMatch> matches;
+        auto [text, n] = subn(line.text, &matches);
+        if (n > 0) {
+            place["count"] = n;
+            place["text"] = first_characters(text, 40);
+            where.push_back(std::move(place));
+            const std::string before = line.text;
+            line.text = text;
+            count += n;
+            // (ruby, dots and styled parts keep pointing at words that are still there)
+            std::vector<Json> kept;
+            for (const Json& run : line.ruby_runs) {
+                if (py_truthy(run) && found_in(subscript(run, 0), text)) kept.push_back(run);
+            }
+            // (TEXT-01: the rubies by place followed through the matches; Python's runs as Python leaves them while
+            // they still say where each ruby is)
+            std::vector<ruby::Replacement> edits;
+            for (const auto& m : matches) edits.push_back(ruby::Replacement{m.start, m.end, m.with});
+            const std::vector<Json> runs = line.ruby_runs;
+            const RubyChange change = followed(line, before, runs, kept, [&](const std::vector<RubySpan>& spans) {
+                return ruby::follow_replacements(before, text, edits, spans);
+            });
+            ruby::settle(c.doc, line);
+            // (type@1, PC5 G-0: its ranges of type settings followed through the matches)
+            if (line.native_type) line.native_type = optional_type(type_text::follow(*line.native_type, before, text, type_text::edits_of(before, text, edits)));
+            // (a line of Python's left as Python leaves it says nothing, as Python; one whose ruby this build takes away
+            // where Python would not — its base's word gone, the same word left elsewhere — says so)
+            ruby_review += change.review;
+            ruby_removed += change.removed;
+            std::erase_if(line.emphasis_runs, [&](const std::string& words) { return text.find(words) == std::string::npos; });
+            std::erase_if(line.style_runs, [&](const auto& run) { return text.find(run.first) == std::string::npos; });
+        }
+        return n;
+    };
+    std::vector<Num> changed;  // (the pages of the lines changed: their locks asked below)
+    for (StoryLine& line : c.doc.story) {
+        if (!pages.empty() && std::none_of(pages.begin(), pages.end(), [&](std::int64_t p) { return line.page_index == Num(p); })) {
+            continue;
+        }
+        if (replace_in(line, Json::object({{"line", line.id}, {"page", line.page_index.json()}})) > 0) changed.push_back(line.page_index);
+        if (truthy_at(op, "speakers")) {
+            auto [speaker, m] = subn(line.speaker, nullptr);
+            if (m > 0) {
+                where.push_back(Json::object({{"line", line.id}, {"page", line.page_index.json()}, {"count", m}, {"speaker", speaker}}));
+                line.speaker = speaker;
+                count += m;
+                changed.push_back(line.page_index);
+            }
+        }
+    }
+    // PC5 G-d (type@1): the pages' type layers too — a book of before has none, so its result is as before; a locked one is
+    // left as it is
+    for (std::size_t i = 0; i < c.doc.pages.size(); ++i) {
+        if (c.doc.is_deferred(i)) continue;
+        const Page& page = c.doc.page(i);
+        if (!pages.empty() && std::none_of(pages.begin(), pages.end(), [&](std::int64_t p) { return page.index == Num(p); })) continue;
+        for (std::size_t j = 0; j < page.layers.size(); ++j) {
+            const Layer& layer = page.layers[j];
+            // (locked, or — layer-locks@1, PC5 I-a — すべてをロック: left as it is)
+            if (!type_text::is_type_layer(layer) || !layer.type || layer.locked || locked_all(page.layers, j)) continue;
+            StoryLine record = *layer.type;
+            if (replace_in(record, Json::object({{"page", page.index.json()}, {"layer_id", layer.id}})) == 0) continue;
+            c.doc.edit_page(i).layers[j].type = type_text::shared_record(std::move(record));
+            changed.push_back(page.index);
+        }
+    }
+    // PC5 G-d (review P2-2): a page another has locked is not changed — its lines' words nor its type layers' — the op
+    // refused, as an edit_line or edit_type there is (Python asks no page's lock here)
+    for (std::size_t i = 0; i < c.doc.pages.size(); ++i) {
+        if (std::any_of(changed.begin(), changed.end(), [&](const Num& p) { return c.doc.pages[i]->index == p; })) check_page_held(c.doc, i, c.actor);
+    }
+    if (count == 0 && truthy_at(op, "must_find")) throw OpError("nothing matched");
+    c.report = Json::object({{"replaced", count}, {"where", py_slice(where, 0, 200)}});
+    report_ruby(c, RubyChange{ruby_review, ruby_removed});
+}
+
+}  // namespace
+
+std::vector<std::string> line_style_keys() {
+    std::vector<std::string> keys;
+    for (const StyleKey& key : kStyleKeys) keys.emplace_back(key.name);
+    return keys;
+}
+
+// ops._find_line: the first line of the story with this id (see the top of the file for page.texts)
+StoryLine& find_line(Document& doc, const std::string& line_id) {
+    for (StoryLine& line : doc.story) {
+        if (line.id == line_id) return line;
+    }
+    throw OpError("no line " + line_id);
+}
+
+Json line_style(const Json& style, const PictureCheck& check) { return merge_style(Json::object(), style, check); }
+std::string line_balloon(const Json& kind) { return balloon_kind(kind); }
+
+void stamp_lettering(Document& doc, std::size_t at, const Json& op, const Json& material, const PictureCheck& check) {
+    // (each value worked out in Python's order, so the first error is Python's)
+    const double width = to_float(py_or(py_or(op_value(op, "width_mm"), op_value(material, "w_mm")), Json(50)));
+    const double tall = width * to_float(py_or(op_value(material, "h_mm"), Json(30)));
+    const double height = divided(tall, to_float(py_or(op_value(material, "w_mm"), Json(50))));
+    const Page& page = doc.page(at);
+    const Json* x = get(op, "x_mm");
+    const double cx = x != nullptr ? to_float(*x) : page.spec.width_mm.value() / 2;
+    const Json* y = get(op, "y_mm");
+    const double cy = y != nullptr ? to_float(*y) : page.spec.height_mm.value() / 2;
+    // episode.add_line(page.index, str(material.get("text") or "ド"), x_mm=…, y_mm=…, w_mm=…, h_mm=…, balloon=…,
+    // frame_id=op.get("frame_id")): the balloon and the wrap as the material has them, unchecked
+    std::string text = py_str(py_or(op_value(material, "text"), Json("ド")));
+    const Num left(py_round(cx - width / 2, 2));
+    const Num top(py_round(cy - height / 2, 2));
+    const Num w(py_round(width, 2));
+    const Num h(py_round(height, 2));
+    std::string balloon = py_str(py_or(op_value(material, "balloon"), Json("sfx")));
+    const Json frame_id = op_value(op, "frame_id");
+    std::optional<std::string> frame;
+    if (frame_id.is_string()) frame = frame_id.get<std::string>();
+    StoryLine& line =
+        doc.add_line(page.index, std::move(text), "", std::move(frame), "", left, top, w, h, std::move(balloon), std::nullopt);
+    line.wrap = py_str(py_or(op_value(material, "wrap"), Json("horizontal")));
+    line.style = lettering_style(op_value(material, "style"), check);
+    if (truthy_at(op, "id")) line.id = py_str(op["id"]);  // (unchecked: Python keeps a second line with a line's id)
+    ruby::settle(doc, line);
+    require_kept(line, &frame_id);
+}
+
+void register_line_ops(OpRegistry& registry, PictureCheck check) {
+    registry.add("add_line", [check](OpContext& c) { add_line(c, check); });
+    registry.add("edit_line", [check](OpContext& c) { edit_line(c, check); });
+    registry.add("cut_balloon", [check](OpContext& c) { cut_balloon(c, check); });
+    registry.add("move_line", move_line);
+    registry.add("delete_line", delete_line);
+    registry.add("reorder_lines", reorder_lines);
+    registry.add("set_balloon_path", set_balloon_path);
+    registry.add("replace_text", replace_text);
+}
+
+}  // namespace genko::core

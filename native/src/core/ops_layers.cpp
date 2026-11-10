@@ -1,0 +1,878 @@
+// The layer ops (Python's ops._apply_one and layerops.set_layers): add_layer, delete_layer, duplicate_layer,
+// set_layer, set_layers and reorder_layers, with the checks of a fill (ベタ塗り・グラデーション), a correction layer's
+// adjustment (tried on its settings as Python tries it on a small picture), the layer effects and the screen.
+
+#include <algorithm>
+#include <cmath>
+#include <map>
+#include <optional>
+#include <set>
+#include <utility>
+
+#include "core/adjust.hpp"
+#include "core/anim.hpp"
+#include "core/adjust_kinds.hpp"
+#include "core/filters.hpp"
+#include "core/groups.hpp"
+#include "core/ids.hpp"
+#include "core/layer_basics.hpp"
+#include "core/lut3d.hpp"
+#include "core/patterns.hpp"
+#include "core/ops_util.hpp"
+#include "core/pyconv.hpp"
+#include "core/video.hpp"
+
+namespace genko::core {
+
+namespace {
+
+// ops._adjust_spec. PC2 (adjustments@1, the C++ build's own: core/adjust.hpp): a kind of the C++ build's own in its
+// normal form, a Python kind's `native` read (Python's own settings checked as Python checks them, kept as given).
+// `made`: the lookup tables it makes of a file's text (color_lookup's data), which the op keeps in its book.
+Json adjust_spec(const Json& raw_in, const Page* page, LookupTables& made) {
+    const bool own = uses_adjustments(raw_in);  // (an object, then)
+    const auto python_kind = [&raw_in] {
+        const Json* kind = get(raw_in, "kind");
+        return kind != nullptr && kind->is_string() && python_adjust_kind(kind->get<std::string>());
+    };
+    if (own && !python_kind()) return normalize_adjust(raw_in, page, &made);
+    const Json raw = without_native(raw_in);
+    std::string names;
+    // Preserve Python's legacy invalid-input response while accepting native exposure below.
+    constexpr std::array<std::string_view, 9> legacy_names{"levels", "curve", "hue", "invert", "posterize",
+        "threshold", "gradient_map", "bitonal", "brightness_contrast"};
+    for (const std::string_view name : legacy_names) names += (names.empty() ? "" : ", ") + std::string(name);
+    const Json* kind = get(raw, "kind");
+    const bool known = raw.is_object() && kind != nullptr && kind->is_string() &&
+                       std::find(kAdjustments.begin(), kAdjustments.end(), kind->get<std::string>()) != kAdjustments.end();
+    if (!known) throw OpError("adjust kind must be one of " + names);
+    Json params = Json::object();
+    for (const auto& [key, value] : raw.items()) {
+        if (key != "kind") params[key] = value;
+    }
+    // (Python tries the adjustment once on a small picture, where only its settings can fail: its tables here)
+    try {
+        (void)adjustment(kind->get<std::string>(), params);
+    } catch (const PyValueError& error) {
+        throw OpError(std::string("the adjustment cannot be used: ") + error.what());
+    } catch (const PyTypeError& error) {
+        throw OpError(std::string("the adjustment cannot be used: ") + error.what());
+    } catch (const OpKeyError& error) {
+        throw OpError(std::string("the adjustment cannot be used: ") + error.what());
+    }
+    if (!own) return raw;
+    // (its native read; one that says nothing leaves the layer Python's, as given)
+    const Json normal = normalize_adjust(raw_in, page, &made);
+    return normal.contains("native") ? normal : raw;
+}
+
+}  // namespace
+
+// ops._gradient_extras: 多色 (stops), 楕円 (ratio), 繰り返し (repeat).
+Json gradient_extras(const Json& g) {
+    Json out = Json::object();
+    if (truthy_at(g, "stops")) {
+        const std::string message = "stops are [[position 0..1, [r,g,b], opacity?], …]";
+        std::vector<std::pair<double, Json>> stops;
+        try {
+            for (const Json& s : iterate(g["stops"])) {
+                const double position = py_round(to_float(subscript(s, 0)), 4);
+                const std::vector<std::int64_t> rgb = rgb3(subscript(s, 1), "stops");
+                double opacity = 1.0;
+                if (length(s) > 2) {
+                    const Json third = subscript(s, 2);
+                    if (!third.is_null()) opacity = py_round(to_float(third), 3);
+                }
+                stops.emplace_back(position, Json::array({position, ints_json(rgb), opacity}));
+            }
+        } catch (const PyTypeError&) {
+            throw OpError(message);
+        } catch (const PyValueError&) {
+            throw OpError(message);
+        } catch (const OpError&) {  // (Python's ApplyError is a ValueError: _rgb3's is caught here too)
+            throw OpError(message);
+        } catch (const PyUncaught& error) {
+            if (error.type() != "IndexError") throw;
+            throw OpError(message);
+        }
+        if (stops.size() < 2 || stops.size() > 16) throw OpError(message);
+        for (const auto& [position, stop] : stops) {
+            const double opacity = stop[2].get<double>();
+            if (!(0 <= position && position <= 1) || !(0 <= opacity && opacity <= 1)) throw OpError(message);
+        }
+        std::stable_sort(stops.begin(), stops.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        Json sorted = Json::array();
+        for (auto& [position, stop] : stops) sorted.push_back(std::move(stop));
+        out["stops"] = std::move(sorted);
+    }
+    if (const Json* ratio = get(g, "ratio"); ratio != nullptr && !ratio->is_null()) out["ratio"] = py_clamp(to_float(*ratio), 0.05, 20.0);
+    const Json* repeat = get(g, "repeat");
+    if (repeat != nullptr && !repeat->is_null() && *repeat != Json("") && *repeat != Json("none")) {
+        if (*repeat != Json("repeat") && *repeat != Json("mirror")) throw OpError("repeat is none, repeat or mirror");
+        out["repeat"] = py_str(*repeat);
+    }
+    // (vector@1, PC4 E4: transparency stops beside the colour stops — PhotoCraft v0.2.0's gradients.rs:26-33, MIT —, the
+    // opacity at a place the colour stops' times theirs)
+    if (const Json* transparency = get(g, "transparency"); transparency != nullptr && !transparency->is_null()) {
+        out["transparency"] = transparency_stops(*transparency);
+    }
+    return out;
+}
+
+Json transparency_stops(const Json& value) {
+    const std::string message = "transparency is [[position 0..1, opacity 0..1], …] (2 to 16 stops)";
+    if (!value.is_array()) throw OpError(message);
+    std::vector<std::pair<double, double>> stops;
+    for (const Json& s : value) {
+        if (!s.is_array() || s.size() != 2 || !s[0].is_number() || !s[1].is_number()) throw OpError(message);
+        const double position = s[0].get<double>(), opacity = s[1].get<double>();
+        if (!(0 <= position && position <= 1) || !(0 <= opacity && opacity <= 1)) throw OpError(message);
+        stops.emplace_back(py_round(position, 4), py_round(opacity, 4));
+    }
+    if (stops.size() < 2 || stops.size() > 16) throw OpError(message);
+    std::stable_sort(stops.begin(), stops.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    Json out = Json::array();
+    for (const auto& [position, opacity] : stops) out.push_back(Json::array({position, opacity}));
+    return out;
+}
+
+Json live_colours(const Json& gradient, const Document& doc) {
+    if (!gradient.is_object()) return gradient;
+    std::vector<std::int64_t> fore = doc.brush_rgb;
+    fore.resize(3, 0);
+    std::vector<std::int64_t> back = doc.brush_background_rgb.value_or(std::vector<std::int64_t>{255, 255, 255});
+    back.resize(3, 0);
+    const auto colour = [&](const Json& v) -> std::optional<Json> {
+        if (v == Json("foreground")) return ints_json(fore);
+        if (v == Json("background")) return ints_json(back);
+        return std::nullopt;
+    };
+    Json out = gradient;
+    for (const char* key : {"rgb_from", "rgb_to"}) {
+        if (const Json* v = get(out, key); v != nullptr) {
+            if (auto c = colour(*v)) out[key] = *c;
+        }
+    }
+    if (Json* stops = out.contains("stops") ? &out["stops"] : nullptr; stops != nullptr && stops->is_array()) {
+        for (Json& s : *stops) {
+            if (s.is_array() && s.size() > 1) {
+                if (auto c = colour(s[1])) s[1] = *c;
+            }
+        }
+    }
+    return out;
+}
+
+// patterns@1 (PC4 E3): a pattern fill names a pattern the book keeps (add_pattern puts one in).
+void check_pattern_kept(const Document& doc, const Json& fill) {
+    const Json* pattern = pattern_of_fill(fill);
+    if (pattern == nullptr) return;
+    const std::string& id = (*pattern)["id"].get_ref<const std::string&>();
+    if (find_pattern(doc, id) == nullptr) throw OpError("the book has no pattern " + id + " (add_pattern puts one in)");
+}
+
+// ops._fill_spec: a fill layer's colour, or its gradient (also a shape part's fill's, pen-shapes@1: render/ops_shapes).
+Json fill_spec(const Json& raw) {
+    if (!raw.is_object()) throw OpError("fill is {rgb} or {gradient}");
+    if (const Json* pattern = pattern_of_fill(raw)) {  // (patterns@1, PC4 E3: a pattern the book keeps, by its id)
+        try {
+            return Json::object({{"pattern", pattern_fill_spec(*pattern)}});
+        } catch (const Error& error) {
+            throw OpError(error.what());
+        }
+    }
+    const Json* gradient = get(raw, "gradient");
+    if (gradient != nullptr && !gradient->is_null()) {
+        const Json g = gradient->is_object() ? *gradient : Json::object();
+        const auto floats_of = [&](const char* key, const Json& fallback) {
+            const Json* v = get(g, key);
+            Json list = Json::array();
+            for (const Json& item : iterate(v != nullptr && py_truthy(*v) ? *v : fallback)) list.push_back(to_float(item));
+            Json out = Json::array();
+            for (std::size_t i = 0; i < list.size() && i < 2; ++i) out.push_back(list[i]);
+            return out;
+        };
+        Json out = Json::object();
+        out["from"] = floats_of("from", Json::array({0, 0}));
+        out["to"] = floats_of("to", Json::array({0, 100}));
+        const Json* rgb_from = get(g, "rgb_from");
+        out["rgb_from"] = ints_json(rgb3(rgb_from != nullptr && py_truthy(*rgb_from) ? *rgb_from : Json::array({20, 20, 20}), "rgb_from"));
+        const Json* rgb_to = get(g, "rgb_to");
+        out["rgb_to"] = ints_json(rgb3(rgb_to != nullptr && py_truthy(*rgb_to) ? *rgb_to : Json::array({255, 255, 255}), "rgb_to"));
+        out["opacity_from"] = py_clamp(to_float(get_or(g, "opacity_from", Json(1.0))), 0.0, 1.0);
+        out["opacity_to"] = py_clamp(to_float(get_or(g, "opacity_to", Json(1.0))), 0.0, 1.0);
+        const Json* shape = get(g, "shape");
+        out["shape"] = shape != nullptr && py_truthy(*shape) ? py_str(*shape) : std::string("linear");
+        const Json extras = gradient_extras(g);
+        for (const auto& [key, value] : extras.items()) out[key] = value;
+        const std::string& s = out["shape"].get_ref<const std::string&>();
+        // (vector@1, PC3 C-b: Photoshop's angle, reflected and diamond gradients, and reverse)
+        if (s != "linear" && s != "radial" && s != "ellipse" && s != "angle" && s != "reflected" && s != "diamond") {
+            throw OpError("shape must be linear, radial, ellipse, angle, reflected or diamond");
+        }
+        if (const Json* reverse = get(g, "reverse"); reverse != nullptr && !reverse->is_null()) {
+            if (!reverse->is_boolean()) throw OpError("reverse must be true or false");
+            if (reverse->get<bool>()) out["reverse"] = true;
+        }
+        if (out["from"].size() != 2 || out["to"].size() != 2) throw OpError("from and to are [x_mm, y_mm]");
+        return Json::object({{"gradient", std::move(out)}});
+    }
+    const Json* rgb = get(raw, "rgb");
+    return Json::object({{"rgb", ints_json(rgb3(rgb != nullptr && py_truthy(*rgb) ? *rgb : Json::array({255, 255, 255}), "rgb"))}});
+}
+
+namespace {
+
+// ops._effect_spec: 境界効果 (a border round the layer's picture, a watercolour edge).
+Json effect_spec(const Json& raw) {
+    if (!raw.is_object()) throw OpError("effect is {border} and/or {water_edge}");
+    Json out = Json::object();
+    for (const auto& [key, item] : raw.items()) {
+        if (key == "border" && py_truthy(item)) {
+            const Json value = item.is_object() ? item : Json::object();
+            Json border = Json::object();
+            border["width_mm"] = py_clamp(to_float(get_or(value, "width_mm", Json(0.5))), 0.05, 10.0);
+            const Json* rgb = get(value, "rgb");
+            border["rgb"] = ints_json(rgb3(rgb != nullptr && py_truthy(*rgb) ? *rgb : Json::array({255, 255, 255}), "rgb"));
+            out["border"] = std::move(border);
+        } else if (key == "water_edge" && py_truthy(item)) {
+            const Json value = item.is_object() ? item : Json::object();
+            Json edge = Json::object();
+            edge["width_mm"] = py_clamp(to_float(get_or(value, "width_mm", Json(0.6))), 0.05, 10.0);
+            edge["strength"] = py_clamp(to_float(get_or(value, "strength", Json(0.6))), 0.0, 1.0);
+            out["water_edge"] = std::move(edge);
+        } else if (key != "border" && key != "water_edge") {
+            throw OpError("unknown effect " + key + " (border, water_edge)");
+        }
+    }
+    return out;
+}
+
+// The parent a layer may be put in: a folder layer of the page (layerops.move_layers' rule). Python's set_layer and
+// add_layer keep any value, so a layer could be in what is not a folder, or a folder in itself (the layer panel's
+// walk up the folders then never ends): refused here.
+void check_parent(const Page& page, const std::string& parent_id, const std::string* moved_id) {
+    const auto by_id = [&page](const std::string& id) -> const Layer* {
+        const Layer* found = nullptr;
+        for (const Layer& layer : page.layers) {
+            if (layer.id == id) found = &layer;  // (a dict: the last layer with the id)
+        }
+        return found;
+    };
+    const Layer* folder = by_id(parent_id);
+    if (folder == nullptr || folder->kind != LayerKind::Folder) throw OpError("parent must be a folder");
+    if (moved_id == nullptr) return;
+    // the folder, and every folder it is in, must not be the layer moved (layerops._inside)
+    std::set<std::string> seen;
+    for (const Layer* up = folder; up != nullptr && seen.insert(up->id).second;) {
+        if (up->id == *moved_id) throw OpError("a folder cannot hold itself");
+        up = up->parent_id.is_string() ? by_id(up->parent_id.get<std::string>()) : nullptr;
+    }
+}
+
+// A layer's blend from an op: a mode of blend_mode's, or (groups@1, PC5 I-b) pass_through on a group.
+std::string layer_blend(const Json& value, const Layer& layer) {
+    if (value.is_string() && value.get_ref<const std::string&>() == kPassThrough) {
+        if (!is_group(layer)) throw OpError("blend pass_through is a group's (a folder with group: true)");
+        return std::string(kPassThrough);
+    }
+    return blend_mode(value);
+}
+
+// blend-channels@1 (PC5 I-a): a layer's channels from an op — a flag for each colour channel of its page (RGB, CMYK, Lab,
+// grey), every one on (or null, or []) being none.
+std::vector<bool> channel_flags(const Page& page, const Json& value) {
+    if (value.is_null() || (value.is_array() && value.empty())) return {};
+    const unsigned count = blend_channel_count(page);
+    if (count == 0) throw OpError("blend_channels: this page's colour mode (bitmap, indexed, duotone, multichannel) has no channels to leave out");
+    if (!value.is_array() || value.size() != count || !std::all_of(value.begin(), value.end(), [](const Json& v) { return v.is_boolean(); })) {
+        throw OpError("blend_channels is " + std::to_string(count) + " flags, one for each colour channel of the page (true: it blends)");
+    }
+    std::vector<bool> out;
+    for (const Json& v : value) out.push_back(v.get<bool>());
+    if (std::all_of(out.begin(), out.end(), [](bool on) { return on; })) out.clear();
+    return out;
+}
+
+// set_layer on the book (also each layer of set_layers).
+void set_layer_with(Document& doc, const Json& op) {
+    const std::size_t at = require_page(doc, op);
+    Page& page = doc.edit_page(at);
+    std::optional<std::size_t> li;
+    if (truthy_at(op, "id")) {
+        const Json& id = op["id"];
+        for (std::size_t i = 0; i < page.layers.size(); ++i) {
+            if (id.is_string() && page.layers[i].id == id.get_ref<const std::string&>()) {
+                li = i;
+                break;
+            }
+        }
+    }
+    if (!li && truthy_at(op, "layer")) li = layer_for_role(page, role_from(Json(py_str(op["layer"]))));
+    if (!li) throw OpError("layer id or role required");
+    Layer& layer = page.layers[*li];
+    if (has(op, "visible")) layer.visible = py_truthy(op["visible"]);
+    if (has(op, "opacity")) layer.opacity = to_float(op["opacity"]);
+    if (has(op, "exportable") && layer.role != LayerRole::Name && layer.role != LayerRole::Draft) {
+        layer.exportable = py_truthy(op["exportable"]);
+    }
+    if (has(op, "group")) {  // (groups@1, PC5 I-b: グループとして描く — a folder only; off, its blend no longer 通過)
+        const bool on = py_truthy(op["group"]);
+        if (on && layer.kind != LayerKind::Folder) throw OpError("group is set on a folder");
+        layer.group = on;
+        if (!on && layer.blend == kPassThrough) layer.blend = "normal";
+    }
+    if (has(op, "blend")) layer.blend = layer_blend(op["blend"], layer);
+    if (has(op, "clip")) layer.clip = py_truthy(op["clip"]);
+    if (has(op, "lock_alpha")) layer.lock_alpha = py_truthy(op["lock_alpha"]);
+    if (has(op, "locked")) layer.locked = py_truthy(op["locked"]);
+    if (has(op, "lock_position")) layer.lock_position = py_truthy(op["lock_position"]);  // (transform@1, PC3 C-d: 位置をロック)
+    // (layer-locks@1, PC5 I-a: すべてをロック, and the artboards' auto-nesting lock — kept for PSD and .pcraft)
+    if (has(op, "lock_all")) {
+        layer.lock_all = py_truthy(op["lock_all"]);
+    } else if ((has(op, "locked") && !layer.locked) || (has(op, "lock_alpha") && !layer.lock_alpha) || (has(op, "lock_position") && !layer.lock_position)) {
+        layer.lock_all = false;  // (one of the three locks taken off: すべて no longer holds — as a client knowing only the three unlocks)
+    }
+    if (has(op, "lock_nest")) layer.lock_nest = py_truthy(op["lock_nest"]);
+    if (has(op, "blend_channels")) {  // (blend-channels@1, PC5 I-a: a layer's — a folder's are not drawn here)
+        layer.blend_channels = channel_flags(page, op["blend_channels"]);
+        if (!layer.blend_channels.empty() && layer.kind == LayerKind::Folder) throw OpError("blend_channels is a layer's, not a folder's");
+        if (layer.native_psd) {  // (a PSD's brst kept from before: the layer's own channels written now)
+            std::erase_if(layer.native_psd->blocks, [](const auto& block) { return block.first == "brst"; });
+            if (layer.native_psd->empty()) layer.native_psd.reset();
+        }
+    }
+    if (has(op, "panel_clip")) layer.panel_clip = py_truthy(op["panel_clip"]);
+    if (has(op, "panel_each")) layer.panel_each = py_truthy(op["panel_each"]);
+    if (has(op, "title")) layer.title = py_truthy(op["title"]) ? py_str(op["title"]) : "";
+    if (has(op, "parent")) {
+        const Json& parent = op["parent"];
+        if (!parent.is_null()) {
+            if (!parent.is_string()) throw OpError("parent must be a folder");
+            check_parent(page, parent.get<std::string>(), &layer.id);
+        }
+        layer.parent_id = parent;
+    }
+    if (has(op, "name")) layer.title = py_str(op["name"]);
+    if (has(op, "color")) {
+        if (py_truthy(op["color"])) {
+            std::vector<std::int64_t> color = int_tuple(op["color"]);
+            if (color.size() > 3) color.resize(3);
+            layer.color = std::move(color);
+        } else {
+            layer.color.reset();
+        }
+    }
+    if (has(op, "reference")) layer.reference = py_truthy(op["reference"]);
+    if (has(op, "color_prints")) layer.color_prints = py_truthy(op["color_prints"]);
+    if (has(op, "fill")) {
+        if (layer.kind != LayerKind::Fill) throw OpError("fill is set on a fill layer");
+        if (py_truthy(op["fill"])) {
+            // (PC4 E4: a gradient's "foreground" and "background" colours become the book's brush colours now)
+            Json given = op["fill"];
+            if (given.is_object() && given.contains("gradient")) given["gradient"] = live_colours(given["gradient"], doc);
+            layer.fill = fill_spec(given);
+            check_pattern_kept(doc, *layer.fill);  // (patterns@1, PC4 E3)
+        } else {
+            layer.fill.reset();
+        }
+    }
+    if (has(op, "adjust")) {
+        if (layer.kind != LayerKind::Adjust) throw OpError("adjust is set on a correction layer");
+        LookupTables made;
+        layer.adjust = adjust_spec(op["adjust"], &page, made);
+        lut3d::keep_luts(doc.luts, made, *layer.adjust);  // (PC2a: a color_lookup's table into the book)
+    }
+    if (has(op, "effect")) {
+        if (py_truthy(op["effect"])) {
+            layer.effect = effect_spec(op["effect"]);
+        } else {
+            layer.effect.reset();
+        }
+    }
+    if (has(op, "screen")) {
+        if (py_truthy(op["screen"])) {
+            layer.screen = screen_spec(op["screen"]);
+        } else {
+            layer.screen.reset();
+        }
+    }
+}
+
+void set_layer(OpContext& c) { set_layer_with(c.doc, c.op); }
+
+void add_layer(OpContext& c) {
+    Document& doc = c.doc;
+    const Json& op = c.op;
+    const std::size_t at = require_page(doc, op);
+    const std::string kind_name = truthy_at(op, "folder") ? std::string("folder")
+                                  : truthy_at(op, "kind") ? py_str(op["kind"])
+                                                          : std::string("paint");
+    static const std::pair<const char*, LayerKind> kKinds[] = {
+        {"folder", LayerKind::Folder}, {"pen", LayerKind::Strokes}, {"paint", LayerKind::Raster},
+        {"fill", LayerKind::Fill},     {"gradient", LayerKind::Fill}, {"adjust", LayerKind::Adjust}};
+    const auto kind = std::find_if(std::begin(kKinds), std::end(kKinds), [&](const auto& k) { return kind_name == k.first; });
+    if (kind == std::end(kKinds)) throw OpError("kind must be pen, paint, folder, fill, gradient or adjust");
+    Layer layer;
+    layer.id = truthy_at(op, "id") ? py_str(op["id"]) : new_id();
+    layer.role = LayerRole::User;
+    layer.kind = kind->second;
+    layer.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("layer");
+    // (groups@1, PC5 I-b: a folder drawn as Photoshop's group, 通過 unless a blend is given)
+    if (truthy_at(op, "group")) {
+        if (layer.kind != LayerKind::Folder) throw OpError("group makes a folder (kind: folder)");
+        layer.group = true;
+    }
+    layer.blend = truthy_at(op, "blend") ? layer_blend(op["blend"], layer) : layer.group ? std::string(kPassThrough) : std::string("normal");
+    layer.clip = truthy_at(op, "clip");
+    layer.lock_alpha = truthy_at(op, "lock_alpha");
+    layer.parent_id = truthy_at(op, "parent") ? Json(py_str(op["parent"])) : Json(nullptr);
+    layer.exportable = true;
+    // (a new drawing layer keeps each line in the panel it began in, as CLIP STUDIO's panel folders do)
+    layer.panel_each = op.contains("panel_each") ? py_truthy(op["panel_each"]) : (kind_name == "pen" || kind_name == "paint");
+    const Json* pattern_given = get(op, "pattern");  // (patterns@1, PC4 E3: Layer › New Fill Layer › Pattern…)
+    const bool with_pattern = pattern_given != nullptr && !pattern_given->is_null();
+    if (with_pattern && kind_name != "fill") throw OpError("pattern makes a fill layer (kind: fill)");
+    if (with_pattern) {  // (an empty or broken one refused: pattern_fill_spec)
+        layer.fill = fill_spec(Json::object({{"pattern", op["pattern"]}}));
+        check_pattern_kept(doc, *layer.fill);
+        layer.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("パターン");
+    } else if (kind_name == "fill") {
+        layer.fill = fill_spec(Json::object({{"rgb", truthy_at(op, "rgb") ? op["rgb"] : Json::array({255, 255, 255})}}));
+        layer.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("ベタ塗り");
+    } else if (kind_name == "gradient") {
+        layer.fill = fill_spec(Json::object({{"gradient", truthy_at(op, "gradient") ? live_colours(op["gradient"], doc) : Json::object()}}));
+        layer.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("グラデーション");
+    } else if (kind_name == "adjust") {
+        LookupTables made;
+        layer.adjust = adjust_spec(truthy_at(op, "adjust") ? op["adjust"] : Json::object({{"kind", "levels"}}), &doc.page(at), made);
+        lut3d::keep_luts(doc.luts, made, *layer.adjust);  // (PC2a: a color_lookup's table into the book)
+        layer.title = truthy_at(op, "name") ? py_str(op["name"]) : std::string("色調補正");
+    }
+    Page& page = doc.edit_page(at);
+    for (const Layer& item : page.layers) {
+        if (item.id == layer.id) throw OpError("layer " + layer.id + " exists");
+    }
+    if (layer.parent_id.is_string()) check_parent(page, layer.parent_id.get<std::string>(), nullptr);
+    std::size_t index = page.layers.size();
+    if (truthy_at(op, "after")) {
+        const Json& after = op["after"];
+        for (std::size_t i = 0; i < page.layers.size(); ++i) {
+            if (after.is_string() && page.layers[i].id == after.get_ref<const std::string&>()) {
+                index = i + 1;
+                break;
+            }
+        }
+    }
+    page.layers.insert(page.layers.begin() + static_cast<std::ptrdiff_t>(index), std::move(layer));
+}
+
+void delete_layer(OpContext& c) {
+    Document& doc = c.doc;
+    const std::size_t at = require_page(doc, c.op);
+    const std::string layer_id = truthy_at(c.op, "id") ? py_str(c.op["id"]) : std::string();
+    const Page& view = doc.page(at);
+    const auto found = std::find_if(view.layers.begin(), view.layers.end(), [&](const Layer& l) { return l.id == layer_id; });
+    if (found == view.layers.end()) throw OpError("layer not found");
+    const LayerRole role = found->role;
+    if (role == LayerRole::Name || role == LayerRole::Ink || role == LayerRole::Bg || role == LayerRole::Finish) {
+        throw OpError("cannot delete core layer");
+    }
+    std::erase_if(doc.edit_page(at).layers, [&](const Layer& l) { return l.id == layer_id; });
+}
+
+// A layer's copy (duplicate_layer's, duplicate_layers'): its own id, an ordinary layer (a book has one ink layer, one name
+// layer…), its lines, shape parts and patches with new ids; `titled`: named "<name> のコピー".
+Layer layer_copy(const Layer& source, std::string id, bool titled) {
+    Layer twin = source;
+    twin.id = std::move(id);
+    // the copy is an ordinary layer (a book has one ink layer, one name layer…)
+    // (type@1, PC5 G-0: a type layer's copy keeps the text role, as Photoshop's copy of a type layer is one)
+    if (source.kind != LayerKind::Placed && source.kind != LayerKind::Type) twin.role = LayerRole::User;
+    std::string base = source.title;
+    if (base.empty()) {
+        static const std::pair<LayerRole, const char*> kTitles[] = {{LayerRole::Name, "ネーム"},
+                                                                    {LayerRole::Draft, "下描き"},
+                                                                    {LayerRole::Ink, "ペン入れ"},
+                                                                    {LayerRole::Bg, "背景"},
+                                                                    {LayerRole::Finish, "仕上げ"}};
+        base = "レイヤー";
+        for (const auto& [role, title] : kTitles) {
+            if (role == source.role) base = title;
+        }
+    }
+    twin.title = titled ? base + " のコピー" : base;
+    std::vector<StrokePtr> strokes;
+    for (const StrokePtr& stroke : source.strokes->items) {
+        Stroke fresh = *stroke;
+        fresh.id = new_id();
+        strokes.push_back(std::make_shared<const Stroke>(std::move(fresh)));
+    }
+    twin.strokes = make_strokes(std::move(strokes));
+    if (twin.shapes && !twin.shapes->items.empty()) {  // (pen-shapes@1, PC3 C-b: its shape parts with new ids too)
+        std::vector<vector::ShapePart> parts = twin.shapes->items;
+        for (vector::ShapePart& part : parts) part.id = new_id();
+        twin.shapes = vector::make_shapes(std::move(parts));
+    }
+    for (Patch& patch : twin.patches) {
+        const std::string fresh = new_id();
+        if (patch.attrs.contains("id")) {
+            patch.attrs["id"] = fresh;
+        } else if (patch.asset) {
+            patch.after_asset["id"] = fresh;  // (Python's dict has "asset" by now: the new key comes after it)
+        } else {
+            patch.attrs["id"] = fresh;
+        }
+    }
+    return twin;
+}
+
+void duplicate_layer(OpContext& c) {
+    Document& doc = c.doc;
+    const std::size_t at = require_page(doc, c.op);
+    Page& page = doc.edit_page(at);
+    const std::size_t source_at = layer_by_id(page, truthy_at(c.op, "id") ? py_str(c.op["id"]) : std::string());
+    const Layer& source = page.layers[source_at];
+    if (source.kind == LayerKind::Folder) throw OpError("a folder cannot be duplicated");
+    std::string id = truthy_at(c.op, "new_id") ? py_str(c.op["new_id"]) : new_id();
+    for (const Layer& item : page.layers) {
+        if (item.id == id) throw OpError("layer " + id + " exists");
+    }
+    Layer twin = layer_copy(source, std::move(id), true);
+    page.layers.insert(page.layers.begin() + static_cast<std::ptrdiff_t>(source_at) + 1, std::move(twin));
+}
+
+void set_layers(OpContext& c) {
+    Document& doc = c.doc;
+    const Json& op = c.op;
+    const std::size_t at = require_page(doc, op);
+    const Page& page = doc.page(at);
+    std::vector<std::string> ids;
+    if (truthy_at(op, "all")) {
+        for (const Layer& layer : page.layers) {
+            if (layer.kind != LayerKind::Folder || has(op, "visible")) ids.push_back(layer.id);
+        }
+    } else {
+        std::vector<std::string> wanted;  // layerops._ids
+        const Json* given = get(op, "ids");
+        if (given != nullptr && py_truthy(*given)) {
+            for (const Json& v : iterate(*given)) wanted.push_back(py_str(v));
+        }
+        if (wanted.empty()) throw OpError("ids is the list of layer ids");
+        for (const std::string& id : wanted) {  // layerops._layers
+            const bool found = std::any_of(page.layers.begin(), page.layers.end(), [&](const Layer& l) { return l.id == id; });
+            if (!found) throw OpError("no layer " + id);
+        }
+        const std::set<std::string> chosen(wanted.begin(), wanted.end());
+        for (const Layer& layer : page.layers) {
+            if (chosen.contains(layer.id)) ids.push_back(layer.id);
+        }
+    }
+    static const char* const kSettable[] = {"visible", "opacity", "blend", "clip", "lock_alpha", "locked", "panel_clip",
+                                            "panel_each", "color", "reference", "exportable", "color_prints", "effect"};
+    Json fields = Json::object();
+    for (const char* key : kSettable) {
+        if (has(op, key)) fields[key] = op[key];
+    }
+    if (has(op, "lock_position")) fields["lock_position"] = op["lock_position"];  // (transform@1, PC3 C-d: レイヤーをロック…)
+    for (const char* key : {"lock_all", "lock_nest"}) {  // (layer-locks@1, PC5 I-a: レイヤーをロック…'s すべて and 自動ネスト)
+        if (has(op, key)) fields[key] = op[key];
+    }
+    if (fields.empty()) {
+        std::string names;
+        for (const char* key : kSettable) names += (names.empty() ? "" : ", ") + std::string(key);
+        throw OpError("set_layers needs something to set (" + names + ")");
+    }
+    const Json page_index = page.index.json();
+    for (const std::string& id : ids) {
+        Json one = Json::object();
+        one["op"] = "set_layer";
+        one["page"] = page_index;
+        one["id"] = id;
+        for (const auto& [key, value] : fields.items()) one[key] = value;
+        set_layer_with(doc, one);
+    }
+}
+
+void reorder_layers(OpContext& c) {
+    Document& doc = c.doc;
+    const std::size_t at = require_page(doc, c.op);
+    const Json* order_value = get(c.op, "order");
+    const Json order = order_value != nullptr && py_truthy(*order_value) ? *order_value : Json::array();
+    const std::vector<Json> items = iterate(order);
+    for (const Json& item : items) require_hashable(item);  // (Python looks each up in a dict of the layers)
+    // Python lists a layer given twice as the one object in two places (an edit of one shows in the other) and drops
+    // the layers not given (and so loses them, and with an empty order every layer): refused here. The order is the
+    // page's layers, each once.
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        for (std::size_t j = 0; j < i; ++j) {
+            if (py_equals(items[i], items[j])) throw OpError("ids must not repeat");
+        }
+    }
+    const std::vector<Layer>& now = doc.page(at).layers;
+    std::vector<std::size_t> positions;
+    for (const Json& item : items) {
+        std::vector<std::size_t> found;
+        for (std::size_t i = 0; i < now.size(); ++i) {
+            if (item.is_string() && now[i].id == item.get_ref<const std::string&>()) found.push_back(i);
+        }
+        if (found.size() != 1) break;  // (unknown, or not one layer: a page with two layers of one id)
+        positions.push_back(found.front());
+    }
+    if (positions.size() != items.size() || positions.size() != now.size()) {
+        throw OpError("order must list every layer of the page once");
+    }
+    Page& page = doc.edit_page(at);
+    std::vector<Layer> layers;
+    layers.reserve(positions.size());
+    for (const std::size_t i : positions) layers.push_back(std::move(page.layers[i]));
+    page.layers = std::move(layers);
+}
+
+// --- PC5 I-a: several layers, a folder with what it holds -------------------------------------------------------------
+
+// The pages an op of I-a works on: its "page" (a page's number), or every page ("all").
+std::vector<std::size_t> pages_named(const Document& doc, const Json& op) {
+    if (const Json* page = get(op, "page"); page != nullptr && page->is_string() && page->get_ref<const std::string&>() == "all") {
+        std::vector<std::size_t> out;
+        for (std::size_t i = 0; i < doc.pages.size(); ++i) out.push_back(i);
+        return out;
+    }
+    return {require_page(doc, op)};
+}
+
+// An op's "ids": the layers it names (at least one), each a str.
+std::vector<std::string> named_ids(const Json& op) {
+    const Json* given = get(op, "ids");
+    if (given == nullptr || !given->is_array() || given->empty()) throw OpError("ids is the list of layer ids");
+    std::vector<std::string> out;
+    for (const Json& id : *given) {
+        if (!id.is_string()) throw OpError("ids is the list of layer ids");
+        if (std::find(out.begin(), out.end(), id.get<std::string>()) == out.end()) out.push_back(id.get<std::string>());
+    }
+    return out;
+}
+
+// The positions of the layers named (each found on the page: OpError "no layer <id>"), a folder with what it holds.
+std::vector<bool> with_contents(const std::vector<Layer>& layers, const std::vector<std::string>& ids) {
+    std::vector<bool> chosen(layers.size(), false);
+    for (const std::string& id : ids) {
+        const auto found = std::find_if(layers.begin(), layers.end(), [&](const Layer& l) { return l.id == id; });
+        if (found == layers.end()) throw OpError("no layer " + id);
+        chosen[static_cast<std::size_t>(found - layers.begin())] = true;
+    }
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+        if (!chosen[i] || layers[i].kind != LayerKind::Folder) continue;
+        for (const std::size_t k : folder_contents(layers, i)) chosen[k] = true;
+    }
+    return chosen;
+}
+
+// delete_layers {"page": n | "all", "ids"?, "hidden"?, "empty"?} (レイヤー → 削除 ▸ レイヤー・非表示レイヤー, ファイル → スクリプト →
+// すべての空のレイヤーを削除): the layers named, hidden or holding nothing — a folder with what it holds —, but the core layers
+// (ネーム, ペン入れ, 背景, 仕上げ) and those locked with すべてをロック, which are kept and said (report "kept"). A layer kept
+// in a folder deleted goes up to the folder over it that stays. What named the layers deleted lets go (forget_layers).
+void delete_layers(OpContext& c) {
+    Document& doc = c.doc;
+    const Json& op = c.op;
+    const bool hidden = truthy_at(op, "hidden");
+    const bool empty = truthy_at(op, "empty");
+    const Json* given = get(op, "ids");
+    const bool named = given != nullptr && !given->is_null();
+    if (!named && !hidden && !empty) throw OpError("delete_layers needs ids, hidden or empty");
+    const std::vector<std::size_t> pages = pages_named(doc, op);
+    const Json* page_given = get(op, "page");
+    if (named && page_given != nullptr && page_given->is_string()) throw OpError("ids name the layers of one page (every page: hidden or empty)");
+    const std::vector<std::string> ids = named ? named_ids(op) : std::vector<std::string>{};
+    Json deleted = Json::array();
+    Json kept = Json::array();
+    for (const std::size_t at : pages) {
+        const Page& view = doc.page(at);
+        const std::vector<Layer>& layers = view.layers;
+        std::vector<bool> chosen = named ? with_contents(layers, ids) : std::vector<bool>(layers.size(), false);
+        for (std::size_t i = 0; i < layers.size(); ++i) {
+            if ((hidden && !layers[i].visible) || (empty && empty_layer(layers, i))) chosen[i] = true;
+        }
+        for (std::size_t i = 0; i < layers.size(); ++i) {  // (a hidden or empty folder: with what it holds)
+            if (!chosen[i] || layers[i].kind != LayerKind::Folder) continue;
+            for (const std::size_t k : folder_contents(layers, i)) chosen[k] = true;
+        }
+        std::set<std::string> gone;
+        for (std::size_t i = 0; i < layers.size(); ++i) {
+            if (!chosen[i]) continue;
+            if (core_layer(layers[i]) || locked_all(layers, i)) {  // (review P2-2: in a folder locked so, kept too)
+                kept.push_back(Json{{"page", view.index.json()}, {"id", layers[i].id}, {"why", core_layer(layers[i]) ? "core" : "lock_all"}});
+                continue;
+            }
+            gone.insert(layers[i].id);
+        }
+        if (gone.empty()) continue;
+        // (a layer kept in a folder deleted: in the folder over it that stays, or none)
+        std::map<std::string, Json> parent_of;
+        for (const Layer& layer : layers) parent_of[layer.id] = layer.parent_id;
+        const auto staying = [&](Json parent) {
+            std::set<std::string> seen;
+            while (parent.is_string() && gone.contains(parent.get<std::string>()) && seen.insert(parent.get<std::string>()).second) {
+                parent = parent_of[parent.get<std::string>()];
+            }
+            return parent;
+        };
+        for (const Layer& layer : layers) {
+            if (gone.contains(layer.id)) deleted.push_back(Json{{"page", view.index.json()}, {"id", layer.id}});
+        }
+        Page& page = doc.edit_page(at);  // (`view` may be this page: nothing of it read after)
+        std::erase_if(page.layers, [&](const Layer& l) { return gone.contains(l.id); });
+        for (Layer& layer : page.layers) {
+            if (layer.parent_id.is_string() && gone.contains(layer.parent_id.get<std::string>())) layer.parent_id = staying(layer.parent_id);
+        }
+        forget_layers(doc, at, gone);
+    }
+    c.report = Json{{"deleted", std::move(deleted)}, {"kept", std::move(kept)}};
+}
+
+// duplicate_layers {"page", "ids", "to_page"?, "new_ids"?: {old id: new id}} (レイヤー → レイヤーを複製…): the layers named — a
+// folder with what it holds, in their folders as they were — copied with new ids, just over the topmost of them, or on
+// the top of another page of the book of the same paper and colour mode (to_page; Photoshop's 保存先 is a document: Genko's
+// pages are the book's — another book takes a paste). The copies of those not in a folder copied are named "… のコピー".
+void duplicate_layers(OpContext& c) {
+    Document& doc = c.doc;
+    const Json& op = c.op;
+    const std::size_t at = require_page(doc, op);
+    const std::vector<std::string> ids = named_ids(op);
+    const Page& from = doc.page(at);
+    const std::vector<bool> chosen = with_contents(from.layers, ids);
+    std::size_t to = at;
+    if (const Json* other = get(op, "to_page"); other != nullptr && !other->is_null()) {
+        to = require_page(doc, Json{{"page", *other}});
+        const Page& target = doc.page(to);
+        const bool same_paper = target.spec.width_mm == from.spec.width_mm && target.spec.height_mm == from.spec.height_mm;
+        if (!same_paper || !(target.color == from.color) || !(target.rgb == from.rgb)) {
+            throw OpError("the page to copy onto has another paper size or colour mode (copy the layers and paste them there)");
+        }
+    }
+    const Json* asked = get(op, "new_ids");
+    if (asked != nullptr && !asked->is_null() && !asked->is_object()) throw OpError("new_ids is {layer id: the id of its copy}");
+    std::set<std::string> taken;
+    for (const Layer& layer : doc.page(to).layers) taken.insert(layer.id);
+    std::map<std::string, std::string> renamed;
+    std::vector<Layer> copies;
+    std::size_t top = 0;
+    for (std::size_t i = 0; i < from.layers.size(); ++i) {
+        if (!chosen[i]) continue;
+        top = i;
+        const Layer& source = from.layers[i];
+        std::string id = new_id();
+        if (asked != nullptr && asked->is_object() && asked->contains(source.id)) {
+            const Json& want = (*asked)[source.id];
+            if (!want.is_string() || want.get_ref<const std::string&>().empty()) throw OpError("new_ids is {layer id: the id of its copy}");
+            id = want.get<std::string>();
+        }
+        if (!taken.insert(id).second) throw OpError("layer " + id + " exists");
+        renamed[source.id] = id;
+        const bool inside = source.parent_id.is_string() && std::any_of(from.layers.begin(), from.layers.end(), [&](const Layer& l) {
+            return l.id == source.parent_id.get_ref<const std::string&>() && chosen[static_cast<std::size_t>(&l - from.layers.data())];
+        });
+        Layer copy = layer_copy(source, id, !inside);
+        if (!inside && to != at) copy.parent_id = nullptr;  // (on another page: in none of its folders)
+        copies.push_back(std::move(copy));
+    }
+    for (Layer& copy : copies) {
+        if (!copy.parent_id.is_string()) continue;
+        if (const auto inside = renamed.find(copy.parent_id.get<std::string>()); inside != renamed.end()) copy.parent_id = inside->second;
+    }
+    Json made = Json::array();
+    for (const Layer& copy : copies) made.push_back(copy.id);
+    // (video@1, PC6 review of B's P3-2: a video layer copied is a video layer — its row copied, the folder's and its altered
+    // cels' ids the copies'. Onto another page that is no animation: the page's timeline with it, as an artboard takes it.
+    // A folder of cels — the animation of before — is copied as before, without a track)
+    std::vector<Json> rows;
+    std::optional<Json> timing;
+    if (const Json* anim = anim::spec(from)) {
+        if (const auto tracks = anim->find("tracks"); tracks != anim->end() && tracks->is_array()) {
+            for (const Json& track : *tracks) {
+                if (!is_video_row(track) || !track.contains("folder") || !track.at("folder").is_string()) continue;
+                const auto folder = renamed.find(track.at("folder").get<std::string>());
+                if (folder == renamed.end()) continue;
+                Json row = track;
+                row["folder"] = folder->second;
+                const auto cel_of = [&](Json& id) {
+                    if (!id.is_string()) return;
+                    const auto cel = renamed.find(id.get<std::string>());
+                    id = cel != renamed.end() ? Json(cel->second) : Json(nullptr);
+                };
+                for (Json& frame : row["video"]["frames"]) cel_of(frame[1]);
+                if (row.contains("cels") && row["cels"].is_array()) {  // (B2's P3-4: its exposure sheet too, though a video row's is empty)
+                    for (Json& cel : row["cels"])
+                        if (cel.is_array() && cel.size() >= 2) cel_of(cel[1]);
+                }
+                rows.push_back(std::move(row));
+            }
+        }
+        if (!rows.empty()) {
+            timing = *anim;
+            (*timing)["tracks"] = Json::array();
+            timing->erase("camera");
+            timing->erase("light_table");
+        }
+    }
+    // (onto a page that is an animation of another speed: its footage laid at this page's would run at another — B2's P3-4)
+    if (!rows.empty() && to != at) {
+        if (const Json* there = anim::spec(doc.page(to)); there != nullptr && anim::fps_of(doc.page(to)) != anim::fps_of(from)) {
+            throw OpError("a video layer is copied onto an animation of the same frame rate only (set the page's frame rate first)");
+        }
+    }
+    Page& page = doc.edit_page(to);
+    const std::size_t place = to == at ? top + 1 : page.layers.size();
+    page.layers.insert(page.layers.begin() + static_cast<std::ptrdiff_t>(place), std::make_move_iterator(copies.begin()),
+                       std::make_move_iterator(copies.end()));
+    if (!rows.empty()) {
+        if (!page.extra.is_object()) page.extra = Json::object();
+        if (!page.extra.contains("anim") || !page.extra["anim"].is_object()) page.extra["anim"] = *timing;
+        Json& anim = page.extra["anim"];
+        if (!anim.contains("tracks") || !anim["tracks"].is_array()) anim["tracks"] = Json::array();
+        std::int64_t longest = 0;
+        for (const Json& row : rows) longest = std::max<std::int64_t>(longest, static_cast<std::int64_t>(row["video"]["frames"].size()));
+        for (Json& row : rows) anim["tracks"].push_back(std::move(row));
+        // (the timeline as long as the rows copied, as a video layer made lengthens it: 3000 frames at most)
+        if (anim::frames_of(page) < longest) anim["frames"] = std::min<std::int64_t>(longest, anim::kMaxFrames);
+    }
+    c.report = Json{{"ids", std::move(made)}};
+}
+
+// ungroup_layers {"page", "id"} (レイヤー → レイヤーのグループ解除): what the folder holds comes out where it is — in the
+// folder over it — and the folder goes, in one step. Its opacity, blend and masks go with it (Photoshop's).
+void ungroup_layers(OpContext& c) {
+    Document& doc = c.doc;
+    const std::size_t at = require_page(doc, c.op);
+    const std::size_t i = layer_by_id(doc.page(at), truthy_at(c.op, "id") ? py_str(c.op["id"]) : std::string());
+    const Layer folder = doc.page(at).layers[i];
+    if (folder.kind != LayerKind::Folder) throw OpError("the layer " + folder.id + " is not a group or folder");
+    Page& page = doc.edit_page(at);
+    Json out = Json::array();
+    for (Layer& layer : page.layers) {
+        if (layer.parent_id.is_string() && layer.parent_id.get_ref<const std::string&>() == folder.id) {
+            layer.parent_id = folder.parent_id;
+            out.push_back(layer.id);
+        }
+    }
+    page.layers.erase(page.layers.begin() + static_cast<std::ptrdiff_t>(i));
+    forget_layers(doc, at, {folder.id});
+    c.report = Json{{"ids", std::move(out)}};
+}
+
+}  // namespace
+
+void register_layer_ops(OpRegistry& registry) {
+    registry.add("add_layer", add_layer);
+    registry.add("delete_layer", delete_layer);
+    registry.add("duplicate_layer", duplicate_layer);
+    registry.add("set_layer", set_layer);
+    registry.add("set_layers", set_layers);
+    registry.add("reorder_layers", reorder_layers);
+    // PC5 I-a (SPEC.md AUTO-01「レイヤーの基本」)
+    registry.add("delete_layers", delete_layers);
+    registry.add("duplicate_layers", duplicate_layers);
+    registry.add("ungroup_layers", ungroup_layers);
+}
+
+}  // namespace genko::core

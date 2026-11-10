@@ -1,0 +1,925 @@
+// Python's genko/brushes.py: a line drawn with its brush (the brushes themselves are core's: core/brushes.hpp).
+
+#include "render/brushes.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <fstream>
+#include <iterator>
+#include <limits>
+#include <map>
+#include <mutex>
+#include <set>
+#include <shared_mutex>
+#include <utility>
+
+#include "core/base64.hpp"
+#include "core/paths.hpp"
+#include "core/error.hpp"
+#include "core/pyconv.hpp"
+#include "core/pynum.hpp"
+#include "core/pyrandom.hpp"
+#include "render/draw.hpp"
+#include "render/image_ops.hpp"
+#include "render/not_yet_ported.hpp"
+#include "render/paper.hpp"
+#include "render/png.hpp"
+#include "render/stroke.hpp"
+#include "storage/asset_store.hpp"
+#include "storage/fsutil.hpp"
+
+namespace genko::render::brushes {
+
+namespace {
+
+using core::Json;
+using core::py_max;
+using core::py_min;
+using core::py_round_int;
+using core::py_trunc;
+
+constexpr double kDegToRad = core::kPi / 180.0;
+constexpr double kRadToDeg = 180.0 / core::kPi;
+constexpr double kTau = 6.283185307179586;  // math.tau
+
+int clamp_int(double v) {
+    if (v > 2147483647.0) return 2147483647;
+    if (v < -2147483648.0) return -2147483647 - 1;
+    return static_cast<int>(v);
+}
+
+// CUSTOM: the registered brushes, in the order they were first registered (Python's dict).
+std::shared_mutex g_custom_mutex;
+std::vector<Brush> g_custom;
+// The book's brushes as last made known (register_book, follow_book).
+Json g_book_seen = Json::object();
+
+// --- drawing --------------------------------------------------------------------------------------------------------
+
+struct PPoint {
+    double x, y, p;
+};
+
+// _pressured: each point's pressure through the brush's curve (and thinned where the hand was quick).
+std::vector<PPoint> pressured(const core::PenPoints& points, const Brush& b) {
+    std::vector<PPoint> out;
+    out.reserve(points.size());
+    for (const core::PenPoint& pt : points) {
+        if (b.fixed_width || !pt.p) {
+            out.push_back(PPoint{pt.x, pt.y, 1.0});
+            continue;
+        }
+        const double p = core::py_pow(py_max(0.0, py_min(1.0, *pt.p)), b.gamma);
+        out.push_back(PPoint{pt.x, pt.y, b.min_pressure + (1 - b.min_pressure) * p});
+    }
+    if (b.speed > 0 && out.size() > 2) {
+        std::vector<double> steps;
+        for (std::size_t i = 0; i + 1 < out.size(); ++i) {
+            steps.push_back(core::py_dist(out[i].x, out[i].y, out[i + 1].x, out[i + 1].y));
+        }
+        double usual = core::py_median(steps);
+        if (usual == 0.0) usual = 1e-6;
+        std::vector<PPoint> thin;
+        for (std::size_t i = 0; i < out.size(); ++i) {
+            const double step = steps[std::min(i, steps.size() - 1)];
+            const double quick = py_max(0.0, py_min(1.0, (step / usual - 1.0) / 3.0));
+            thin.push_back(PPoint{out[i].x, out[i].y, out[i].p * (1 - 0.75 * b.speed * quick)});
+        }
+        out = std::move(thin);
+    }
+    return out;
+}
+
+bool stamped(const Brush& b) {
+    return !b.pattern.empty() || b.tip == "flat" || b.tip == "image" || b.scatter > 0 || b.spacing > 0;
+}
+
+// _decode_tip: the ink of an image tip (its alpha, or its darkness), or nothing for a picture that cannot be opened.
+std::optional<Image> decode_tip(const std::string& data) {
+    std::string bytes;
+    try {
+        bytes = core::a2b_base64(data);
+    } catch (const core::Error&) {
+        return std::nullopt;
+    }
+    Image image;
+    try {
+        image = open_image(bytes, kPillowOpenLimits);
+    } catch (const core::Error& e) {
+        // (Python catches what Image.open raises: a file it cannot identify, or one too large; a picture that breaks
+        // while it is decoded fails the draw)
+        if (e.code() == "unidentified_image" || e.code() == "image_too_large") return std::nullopt;
+        throw;
+    }
+    const std::string_view mode = image.mode();
+    if ((mode == "RGBA" || mode == "LA") && image.getextrema().back().first < 255) return image.split().back();
+    Image grey = image.convert("L");
+    long long total = 0;
+    const std::vector<long> hist = grey.histogram();
+    for (int v = 0; v < 256; ++v) total += static_cast<long long>(hist[static_cast<std::size_t>(v)]) * v;
+    const long long n = std::max<long long>(1, static_cast<long long>(grey.width()) * grey.height());
+    if (static_cast<double>(total) / static_cast<double>(n) > 127) return chops::invert(grey);
+    return grey;
+}
+
+// _shape: a stamp's shape ("L", ink 255), pointing along +x.
+Image shape(const std::string& pattern, std::int64_t size_in, const Brush& b) {
+    const int n = static_cast<int>(std::max<std::int64_t>(3, size_in));
+    Image tile = Image::create("L", Size{pattern == "dash" ? n * 3 : n, n}, Ink(0));
+    Draw d(tile);
+    const double w = tile.width();
+    const double h = tile.height();
+    if (pattern == "dash") {
+        d.rectangle(BoxF{0, h * 0.3, w - 1, h * 0.7}, Ink(255));
+    } else if (pattern == "lace") {
+        d.arc(BoxF{0, 0, w - 1, h * 2 - 1}, 180, 360, Ink(255), std::max(1, n / 8));
+        const double r = std::max(1, n / 10);
+        d.ellipse(BoxF{w / 2 - r, h * 0.55 - r, w / 2 + r, h * 0.55 + r}, Ink(255));
+    } else if (pattern == "grass") {
+        const std::vector<PointD> blade{{w * 0.35, h - 1}, {w * 0.65, h - 1}, {w * 0.55, 0}};
+        d.polygon(blade, Ink(255));
+    } else if (pattern == "leaves") {
+        d.ellipse(BoxF{0, h * 0.3, w - 1, h * 0.7}, Ink(255));
+        const std::vector<PointD> vein{{w * 0.1, h / 2}, {w * 0.95, h / 2}};
+        d.line(vein, Ink(90), std::max(1, n / 16));
+    } else if (pattern == "hearts") {
+        const double r = w / 4;
+        d.ellipse(BoxF{w * 0.05, h * 0.1, w * 0.05 + 2 * r, h * 0.1 + 2 * r}, Ink(255));
+        d.ellipse(BoxF{w * 0.95 - 2 * r, h * 0.1, w * 0.95, h * 0.1 + 2 * r}, Ink(255));
+        const std::vector<PointD> tip{{w * 0.07, h * 0.38}, {w * 0.93, h * 0.38}, {w / 2, h * 0.95}};
+        d.polygon(tip, Ink(255));
+    } else if (pattern == "stars") {
+        std::vector<PointD> pts;
+        for (int k = 0; k < 10; ++k) {
+            const double r = (w / 2) * (k % 2 == 0 ? 1.0 : 0.42);
+            const double a = -core::kPi / 2 + k * core::kPi / 5;
+            pts.push_back({w / 2 + r * core::py_cos(a), h / 2 + r * core::py_sin(a)});
+        }
+        d.polygon(pts, Ink(255));
+    } else if (b.tip == "flat") {
+        const double thin = py_max(1.0, h * b.tip_ratio);
+        d.ellipse(BoxF{0, h / 2 - thin / 2, w - 1, h / 2 + thin / 2}, Ink(255));
+    } else {
+        d.ellipse(BoxF{0, 0, w - 1, h - 1}, Ink(255));
+    }
+    return tile;
+}
+
+// _draw_stamps: the brush's stamp laid along the line (points in px with their radius).
+void draw_stamps(Image& mask, const std::vector<PPoint>& pts, const Brush& b, int dpi, double width_mm,
+                 std::string_view seed, std::span<const double> rotation) {
+    core::PyRandom rng = core::PyRandom::from_str(seed.empty() ? std::string_view("genko") : seed);
+    const double width_px = width_mm * dpi / 25.4;
+    const double step = py_max(1.0, (b.spacing != 0.0 ? b.spacing : 0.1) * width_px);
+    std::optional<Image> tip;
+    if (b.tip == "image" && !b.tip_png.empty()) tip = decode_tip(b.tip_png);
+    std::map<std::pair<std::int64_t, std::int64_t>, Image> cache;
+
+    struct Position {
+        double x, y, r, direction, turn;
+    };
+    std::vector<Position> positions;
+    double carry = 0.0;
+    const bool has_turns = !rotation.empty() && rotation.size() == pts.size();
+    const std::size_t pairs = pts.size() > 1 ? pts.size() - 1 : pts.size();
+    for (std::size_t i = 0; i < pairs; ++i) {
+        const PPoint& a = pts[i];
+        const PPoint& e = pts.size() > 1 ? pts[i + 1] : pts[i];
+        const double length = core::py_hypot(e.x - a.x, e.y - a.y);
+        const double direction = length > 1e-6 ? core::py_atan2(e.y - a.y, e.x - a.x) : 0.0;
+        const double ta = has_turns ? rotation[i] : 0.0;
+        const double tb = has_turns ? rotation[std::min(i + 1, rotation.size() - 1)] : 0.0;
+        double t = carry;
+        while (t <= length) {
+            const double f = length > 1e-6 ? t / length : 0.0;
+            positions.push_back(Position{a.x + (e.x - a.x) * f, a.y + (e.y - a.y) * f, a.p + (e.p - a.p) * f, direction,
+                                         ta + (tb - ta) * f});
+            t += step;
+        }
+        carry = t - length;
+        if (length <= 1e-6) break;
+    }
+    for (const Position& pos : positions) {
+        for (std::int64_t k = 0; k < b.count; ++k) {
+            const double size = py_max(1.5, 2 * pos.r * b.stamp_size * (1 - b.size_jitter * rng.random()));
+            double ox = 0.0;
+            double oy = 0.0;
+            if (b.scatter != 0.0) {
+                const double spread = b.scatter * width_px;
+                ox = rng.gauss(0, spread / 2);
+                oy = rng.gauss(0, spread / 2);
+            }
+            double angle = 0.0;
+            if (b.pattern == "grass") {
+                angle = rng.uniform(-0.35, 0.35);  // blades stand up, a little astray
+            } else if (b.turn_jitter) {
+                angle = rng.uniform(0, kTau);
+            } else if (b.tip == "flat" && b.tip_rotation && has_turns) {
+                angle = (b.tip_angle + pos.turn) * kDegToRad;  // (the nib turns as the pen is turned in the hand)
+            } else if (b.tip == "flat" && !b.tip_follow) {
+                angle = b.tip_angle * kDegToRad;
+            } else if (b.pattern == "dash" || b.pattern == "lace" || b.pattern == "leaves" || b.tip_follow) {
+                angle = pos.direction;
+            }
+            const std::pair<std::int64_t, std::int64_t> key{py_round_int(size), py_round_int(angle * kRadToDeg / 3)};
+            const Image* stamp = nullptr;
+            Image made;
+            const auto found = cache.find(key);
+            if (found != cache.end()) {
+                stamp = &found->second;
+            } else {
+                Image base;
+                if (tip) {
+                    const auto bw = std::max<std::int64_t>(1, py_round_int(size));
+                    const auto bh = std::max<std::int64_t>(1, py_round_int(size * tip->height() / std::max(1, tip->width())));
+                    base = tip->resize(Size{static_cast<int>(bw), static_cast<int>(bh)});
+                } else {
+                    base = shape(b.pattern, std::max<std::int64_t>(3, py_round_int(size)), b);
+                }
+                made = angle != 0.0 ? base.rotate(-(angle * kRadToDeg), Resample::Bicubic, true) : std::move(base);
+                if (cache.size() < 400) {
+                    stamp = &cache.emplace(key, std::move(made)).first->second;
+                } else {
+                    stamp = &made;
+                }
+            }
+            const auto px = py_round_int(pos.x + ox - stamp->width() / 2.0);
+            const auto py = py_round_int(pos.y + oy - stamp->height() / 2.0);
+            const Box box{clamp_int(static_cast<double>(px)), clamp_int(static_cast<double>(py)),
+                          clamp_int(static_cast<double>(px + stamp->width())), clamp_int(static_cast<double>(py + stamp->height()))};
+            if (box.x1 <= 0 || box.y1 <= 0 || box.x0 >= mask.width() || box.y0 >= mask.height()) continue;
+            mask.paste(chops::lighter(mask.crop(box), *stamp), Point{box.x0, box.y0});
+        }
+    }
+}
+
+// _finish_edges: 水彩 edges and the anti-aliasing choice.
+Image finish_edges(Image mask, const Brush& b, int dpi) {
+    if (b.texture == "water") {
+        const std::int64_t size = std::max<std::int64_t>(3, (py_round_int(dpi / 40.0) / 2) * 2 + 1);
+        const Image inner = mask.filter(Filter::min_filter(static_cast<int>(size)));
+        const Image rim = chops::subtract(mask, inner);
+        mask = chops::add(mask.point([](int v) { return v * 45 / 100; }), rim.point([](int v) { return v * 90 / 100; }));
+    }
+    if (b.aa == "none") {
+        mask = mask.point([](int v) { return v >= 128 ? 255 : 0; });
+    } else if (b.aa == "weak") {
+        mask = mask.point([](int v) { return v < 64 ? 0 : v > 192 ? 255 : (v - 64) * 2; });
+    } else if (b.aa == "strong") {
+        mask = mask.filter(Filter::gaussian_blur(py_max(0.6, dpi / 300.0)));
+    }
+    return mask;
+}
+
+struct Extent {
+    Box box;
+    std::vector<PPoint> pts;
+    double scale = 0.0;
+};
+
+std::optional<Extent> extent_of(const Brush& b, Size size, const core::PenPoints& points, int dpi, double width_mm) {
+    Extent e;
+    e.pts = pressured(points, b);
+    if (e.pts.empty()) return std::nullopt;
+    e.scale = dpi / 25.4;
+    double reach = 0.75;
+    if (stamped(b)) {  // stamps reach further: long dashes, stars, spray thrown off the line
+        reach = py_max(0.75, 0.75 * b.stamp_size * (b.pattern == "dash" ? 3 : 1.5) + 1.5 * b.scatter);
+    }
+    const double pad = width_mm * e.scale * (b.texture == "soft" ? 1.5 : reach) + 3;
+    // min()/max() of the coordinates (Python keeps the first of equal values)
+    double min_x = e.pts[0].x * e.scale;
+    double max_x = min_x;
+    double min_y = e.pts[0].y * e.scale;
+    double max_y = min_y;
+    for (const PPoint& p : e.pts) {
+        const double x = p.x * e.scale;
+        const double y = p.y * e.scale;
+        if (x < min_x) min_x = x;
+        if (x > max_x) max_x = x;
+        if (y < min_y) min_y = y;
+        if (y > max_y) max_y = y;
+    }
+    const double x0 = py_max(0.0, py_trunc(min_x - pad));
+    const double y0 = py_max(0.0, py_trunc(min_y - pad));
+    const double x1 = py_min(static_cast<double>(size.width), py_trunc(max_x + pad) + 1);
+    const double y1 = py_min(static_cast<double>(size.height), py_trunc(max_y + pad) + 1);
+    if (x1 <= x0 || y1 <= y0) return std::nullopt;
+    e.box = Box{clamp_int(x0), clamp_int(y0), clamp_int(x1), clamp_int(y1)};
+    return e;
+}
+
+// _shade: how dark each part of the line is (full where pressed hard, lighter where the touch was light).
+Image shade(const core::PenPoints& points, Size size, Point origin, int dpi, double width_mm, double amount) {
+    const double scale = dpi / 25.4;
+    Image out = Image::create("L", size, Ink(255));
+    Draw d(out);
+    const double reach = py_max(2.0, width_mm * scale * 1.6);
+    for (std::size_t i = 0; i + 1 < points.size(); ++i) {
+        const core::PenPoint& a = points[i];
+        const core::PenPoint& b = points[i + 1];
+        const double ax = a.x * scale - origin.x;
+        const double ay = a.y * scale - origin.y;
+        const double bx = b.x * scale - origin.x;
+        const double by = b.y * scale - origin.y;
+        const double pressure = py_max(0.0, py_min(1.0, (a.p.value_or(1.0) + b.p.value_or(1.0)) / 2));
+        const auto level = static_cast<int>(py_trunc(255 * (1 - amount * (1 - pressure))));
+        const std::vector<PointD> seg{{ax, ay}, {bx, by}};
+        d.line(seg, Ink(level), std::max(1, clamp_int(py_trunc(reach))));
+        d.ellipse(BoxF{bx - reach / 2, by - reach / 2, bx + reach / 2, by + reach / 2}, Ink(level));
+    }
+    return out;
+}
+
+std::optional<Coverage> draw_plain(const Brush& b, Size size, const core::PenPoints& points, int dpi, double width_mm,
+                                   std::string_view seed, std::span<const double> rotation) {
+    const auto e = extent_of(b, size, points, dpi, width_mm);
+    if (!e) return std::nullopt;
+    const double scale = e->scale;
+    const Box box = e->box;
+    core::PenPoints shift;
+    shift.reserve(e->pts.size());
+    for (const PPoint& p : e->pts) shift.push_back(core::PenPoint{p.x - box.x0 / scale, p.y - box.y0 / scale, p.p});
+    Image mask = Image::create("L", Size{box.width(), box.height()}, Ink(0));
+    if (stamped(b)) {
+        std::vector<PPoint> radius;
+        radius.reserve(shift.size());
+        for (const core::PenPoint& p : shift) {
+            radius.push_back(PPoint{p.x * scale, p.y * scale, py_max(0.5, width_mm * py_max(0.03, py_min(1.5, *p.p)) * scale / 2)});
+        }
+        draw_stamps(mask, radius, b, dpi, width_mm, seed, rotation);
+        return Coverage{finish_edges(std::move(mask), b, dpi), Point{box.x0, box.y0}};
+    }
+    if (b.texture == "soft") {
+        {
+            Draw d(mask);
+            draw_stroke_mm(d, shift, dpi, width_mm * 0.5, Ink(255));
+        }
+        return Coverage{mask.filter(Filter::gaussian_blur(py_max(1.0, width_mm * scale / 3))), Point{box.x0, box.y0}};
+    }
+    {
+        Draw d(mask);
+        draw_stroke_mm(d, shift, dpi, width_mm, Ink(255), true, b.min_pressure < 0.05 ? 0.03 : 0.15);
+    }
+    if (b.texture == "grain" || b.texture == "dry") {
+        core::PyRandom rng = core::PyRandom::from_str(seed.empty() ? std::string_view("genko") : seed);
+        const std::int64_t grain_px = b.texture == "grain" ? std::max<std::int64_t>(1, py_round_int(dpi / 150.0))
+                                                           : std::max<std::int64_t>(1, py_round_int(dpi / 60.0));
+        const int sw = static_cast<int>(std::max<std::int64_t>(1, mask.width() / grain_px));
+        const int sh = static_cast<int>(std::max<std::int64_t>(1, mask.height() / grain_px));
+        const double keep = b.texture == "grain" ? 0.72 : 0.9;
+        std::string data(static_cast<std::size_t>(sw) * static_cast<std::size_t>(sh), '\0');
+        for (char& v : data) v = static_cast<char>(rng.random() < keep ? 255 : 70);
+        const Image small = Image::frombytes("L", Size{sw, sh}, data);
+        mask = chops::multiply(mask, small.resize(mask.size(), Resample::Nearest));
+    }
+    return Coverage{finish_edges(std::move(mask), b, dpi), Point{box.x0, box.y0}};
+}
+
+}  // namespace
+
+// --- the brushes this process knows ---------------------------------------------------------------------------------
+
+Brush brush(std::string_view key) {
+    std::shared_lock lock(g_custom_mutex);
+    return core::find_brush(Json(std::string(key)), g_custom);
+}
+
+std::vector<Brush> everything() {
+    const std::span<const Brush> builtin = core::builtin_brushes();
+    std::vector<Brush> out(builtin.begin(), builtin.end());
+    std::shared_lock lock(g_custom_mutex);
+    out.insert(out.end(), g_custom.begin(), g_custom.end());
+    return out;
+}
+
+void register_brushes(const Json& definitions) {
+    std::unique_lock lock(g_custom_mutex);
+    core::register_brushes(definitions, g_custom);
+}
+
+void register_book(const Json& definitions) {
+    std::unique_lock lock(g_custom_mutex);
+    core::register_brushes(definitions, g_custom);
+    g_book_seen = definitions.is_object() ? definitions : Json::object();
+}
+
+void follow_book(const Json& definitions) {
+    std::unique_lock lock(g_custom_mutex);
+    const Json now = definitions.is_object() ? definitions : Json::object();
+    Json changed = Json::object();
+    for (const auto& [key, value] : now.items()) {
+        const auto seen = g_book_seen.find(key);
+        if (seen == g_book_seen.end() || *seen != value) changed[key] = value;
+    }
+    if (!changed.empty()) core::register_brushes(changed, g_custom);
+    g_book_seen = now;
+}
+
+void register_book(const core::Document& doc) {
+    paper::keep_all(doc.papers);  // (first: a brush is never known before its paper's picture)
+    dabs::keep_pictures(doc.brush_tips);  // (brushes@1: its dab brushes' tips and textures)
+    register_book(doc.brush_custom);
+}
+
+void follow_book(const core::Document& doc) {
+    paper::keep_all(doc.papers);
+    dabs::keep_pictures(doc.brush_tips);
+    follow_book(doc.brush_custom);
+}
+
+void clear_custom() {
+    std::unique_lock lock(g_custom_mutex);
+    g_custom.clear();
+    g_book_seen = Json::object();
+}
+
+void define_brush(std::string_view key, const Json& data) {
+    std::unique_lock lock(g_custom_mutex);
+    if (core::find_builtin(key) != nullptr) throw core::PyValueError("a built-in brush cannot be replaced: " + std::string(key));
+    Brush made = core::brush_from_dict(key, data, std::nullopt, g_custom);
+    for (Brush& existing : g_custom) {
+        if (existing.key == key) {
+            existing = std::move(made);
+            return;
+        }
+    }
+    g_custom.push_back(std::move(made));
+}
+
+void forget_brush(std::string_view key) {
+    std::unique_lock lock(g_custom_mutex);
+    std::erase_if(g_custom, [key](const Brush& b) { return b.key == key; });
+}
+
+std::optional<Image> tip_ink(const std::string& base64_png) { return decode_tip(base64_png); }
+
+std::filesystem::path library_path(const std::filesystem::path& config_dir) { return config_dir / "brushes.json"; }
+
+namespace {
+
+// The library as Python reads it: nothing (an empty library) for a file that is not there, cannot be read or is not
+// JSON; `strict`: only a file that is not there is an empty library, and any other that cannot be read throws.
+core::Json read_library(const std::filesystem::path& config_dir, bool strict) {
+    const std::filesystem::path path = library_path(config_dir);
+    const auto unreadable = [&]() -> core::Json {
+        if (strict) throw core::PyUncaught("OSError", "the brush library cannot be read, so it is left as it is: " + core::path_to_utf8(path));
+        return core::Json::object();
+    };
+    core::Json data;
+    try {
+        std::error_code missing;
+        if (!std::filesystem::exists(path, missing) && !missing) return core::Json::object();
+        std::ifstream file(path, std::ios::binary);
+        if (!file) return unreadable();
+        const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        if (file.bad()) return unreadable();
+        if (core::utf8_error(text)) return unreadable();  // (UnicodeDecodeError is a ValueError)
+        data = core::parse_python_json(text);
+    } catch (const core::PyUncaught&) {
+        throw;
+    } catch (const core::Error&) {
+        return unreadable();
+    }
+    core::Json out = core::Json::object();
+    if (!data.is_object()) return strict ? unreadable() : out;
+    const auto found = data.find("brushes");
+    if (found == data.end() || !core::py_truthy(*found)) return out;
+    if (!found->is_object()) throw core::PyUncaught("AttributeError", "'" + core::py_type_name(*found) + "' object has no attribute 'items'");
+    for (const auto& [key, value] : found->items()) {
+        if (!value.is_object()) throw core::PyValueError("dictionary update sequence element #0 has length 1; 2 is required");
+        out[key] = value;
+    }
+    return out;
+}
+
+// BRUSH-01: brush_papers.json's papers (key → settings): none for a file that is not there; nothing (std::nullopt) for
+// one that is there but cannot be read, or is not of this layout ("genko_brush_papers": 1; a later Genko's may name its
+// pictures otherwise): it is left as it is, and so are its pictures.
+std::optional<core::Json> read_library_papers(const std::filesystem::path& config_dir) {
+    const std::filesystem::path path = library_papers_path(config_dir);
+    std::error_code missing;
+    if (!std::filesystem::exists(path, missing) && !missing) return core::Json::object();
+    try {
+        const std::string text = storage::read_file_bounded(path, paper::kMaxFileBytes);
+        if (core::utf8_error(text)) return std::nullopt;
+        const core::Json data = core::parse_python_json(text);
+        if (!data.is_object()) return std::nullopt;
+        const auto version = data.find("genko_brush_papers");
+        if (version == data.end() || !version->is_number_integer() || *version != 1) return std::nullopt;
+        const auto papers = data.find("papers");
+        if (papers != data.end() && papers->is_object()) return *papers;
+    } catch (const core::Error&) {
+    }
+    return std::nullopt;
+}
+
+// Where the library keeps a paper's picture: brush_papers/<64 hex>.png.
+std::filesystem::path picture_path(const std::filesystem::path& config_dir, const std::string& ref) {
+    return config_dir / "brush_papers" / (ref.substr(ref.find(':') + 1) + ".png");
+}
+
+// The library's picture of a ref when it is there and holds what its name says (else nothing).
+core::Bytes library_picture(const std::filesystem::path& config_dir, const std::string& ref) {
+    const std::filesystem::path file = picture_path(config_dir, ref);
+    std::error_code missing;
+    if (!std::filesystem::is_regular_file(file, missing)) return nullptr;
+    try {
+        auto png = std::make_shared<const std::string>(storage::read_file_bounded(file, paper::kMaxFileBytes));
+        return storage::AssetStore::ref(*png) == ref ? png : nullptr;
+    } catch (const core::Error&) {
+        return nullptr;
+    }
+}
+
+// The library's pictures nothing in `papers` names (and that were not written in the last hour: another Genko may be
+// saving a brush that names it) taken away. Only files named as pictures are touched; one that cannot be is left.
+void forget_unnamed_pictures(const std::filesystem::path& config_dir, const core::Json& papers) {
+    std::set<std::string> named;
+    for (const auto& [key, paper] : papers.items()) {
+        if (const auto asset = paper.is_object() ? paper.find("asset") : paper.end(); asset != paper.end() && asset->is_string()) {
+            named.insert(asset->get<std::string>());
+        }
+    }
+    std::error_code ec;
+    const std::filesystem::path folder = config_dir / "brush_papers";
+    const auto old = std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
+    for (auto it = std::filesystem::directory_iterator(folder, ec); !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+        const std::string name = core::path_to_utf8(it->path().filename());
+        if (name.size() != 68 || !name.ends_with(".png") || !storage::AssetStore::is_ref("sha256:" + name.substr(0, 64))) continue;
+        if (named.contains("sha256:" + name.substr(0, 64))) continue;
+        std::error_code age;
+        const auto written = std::filesystem::last_write_time(it->path(), age);
+        if (age || written > old) continue;
+        std::error_code gone;
+        std::filesystem::remove(it->path(), gone);
+    }
+}
+
+}  // namespace
+
+core::Json load_library(const std::filesystem::path& config_dir) { return read_library(config_dir, false); }
+
+void save_to_library(const std::filesystem::path& config_dir, std::string_view key, const std::optional<core::Json>& data) {
+    save_many(config_dir, {{std::string(key), data}});
+}
+
+namespace {
+
+// (PC4 E2) The pictures brush_tips/ holds that no brush of the library names (and that were not written in the last hour:
+// another Genko may be saving a brush that names it) taken away. Only files named as pictures are touched.
+void forget_unnamed_tips(const std::filesystem::path& config_dir, const core::Json& brushes) {
+    std::set<std::string> named;
+    for (const auto& [key, entry] : brushes.items()) {
+        if (!core::is_dab_brush(entry)) continue;
+        try {
+            const core::Json& dabs = entry["dabs"];
+            for (const std::string& ref : core::dab_assets(core::dabs_from_json(dabs.is_null() ? core::Json::object() : dabs))) named.insert(ref);
+        } catch (const core::Error&) {
+            return;  // (a brush whose settings cannot be read: none of the pictures taken away)
+        }
+    }
+    std::error_code ec;
+    const std::filesystem::path folder = config_dir / "brush_tips";
+    const auto old = std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
+    for (auto it = std::filesystem::directory_iterator(folder, ec); !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+        const std::string name = core::path_to_utf8(it->path().filename());
+        if (name.size() != 68 || !name.ends_with(".png") || !storage::AssetStore::is_ref("sha256:" + name.substr(0, 64))) continue;
+        if (named.contains("sha256:" + name.substr(0, 64))) continue;
+        std::error_code age;
+        const auto written = std::filesystem::last_write_time(it->path(), age);
+        if (age || written > old) continue;
+        std::error_code gone;
+        std::filesystem::remove(it->path(), gone);
+    }
+}
+
+}  // namespace
+
+std::vector<std::string> library_groups(const std::filesystem::path& config_dir) {
+    std::vector<std::string> out;
+    try {
+        const std::filesystem::path path = library_path(config_dir);
+        std::error_code missing;
+        if (!std::filesystem::exists(path, missing)) return out;
+        const std::string text = storage::read_file_bounded(path, std::size_t(256) << 20);
+        if (core::utf8_error(text)) return out;
+        const core::Json data = core::parse_python_json(text);
+        const auto groups = data.is_object() ? data.find("groups") : data.end();
+        if (groups == data.end() || !groups->is_array()) return out;
+        for (const core::Json& g : *groups) {
+            if (g.is_string() && !g.get<std::string>().empty() && std::find(out.begin(), out.end(), g.get<std::string>()) == out.end()) {
+                out.push_back(g.get<std::string>());
+            }
+        }
+    } catch (const core::Error&) {
+        out.clear();
+    }
+    return out;
+}
+
+std::filesystem::path library_tip_path(const std::filesystem::path& config_dir, const std::string& ref) {
+    return config_dir / "brush_tips" / (ref.substr(ref.find(':') + 1) + ".png");
+}
+
+core::Bytes library_tip(const std::filesystem::path& config_dir, const std::string& ref) {
+    if (!storage::AssetStore::is_ref(ref)) return nullptr;
+    const std::filesystem::path file = library_tip_path(config_dir, ref);
+    std::error_code missing;
+    if (!std::filesystem::is_regular_file(file, missing)) return nullptr;
+    try {
+        auto png = std::make_shared<const std::string>(storage::read_file_bounded(file, paper::kMaxFileBytes));
+        return storage::AssetStore::ref(*png) == ref ? png : nullptr;
+    } catch (const core::Error&) {
+        return nullptr;
+    }
+}
+
+void save_many(const std::filesystem::path& config_dir, const std::vector<std::pair<std::string, std::optional<core::Json>>>& changes,
+               const std::optional<std::vector<std::string>>& groups, const std::map<std::string, core::Bytes>& pictures) {
+    core::Json brushes = read_library(config_dir, true);
+    std::vector<std::string> order = groups ? *groups : library_groups(config_dir);
+    // BRUSH-01: the papers beside brushes.json (Python's app reads and writes that file, and would drop them)
+    std::map<std::string, core::Paper> kept;
+    for (const auto& [key, data] : changes) {
+        if (data) {
+            core::Json entry = *data;
+            if (const auto given = entry.find("paper"); given != entry.end()) {
+                if (core::is_paper(*given)) kept[key] = core::paper_from_json(*given);
+                entry.erase(given);
+            }
+            brushes[key] = entry;
+        } else {
+            brushes.erase(key);
+            kept.erase(key);
+        }
+    }
+    // brush_papers.json: a brush with a paper needs it readable (else it is refused and the file left as it is); one that
+    // cannot be read is left as it is for the others, which are saved and forgotten as before
+    std::optional<core::Json> papers = read_library_papers(config_dir);
+    if (!kept.empty() && !papers) {
+        throw core::PyUncaught("OSError", "the brush paper library cannot be read, so it is left as it is: " +
+                                              core::path_to_utf8(library_papers_path(config_dir)));
+    }
+    const auto write = [&](const std::filesystem::path& path, std::string_view bytes) {
+        try {
+            std::filesystem::create_directories(path.parent_path());
+            storage::write_atomic(path, bytes);
+        } catch (const std::exception& error) {
+            throw core::PyUncaught("OSError", "the brush library cannot be written: " + core::path_to_utf8(path) + " (" + error.what() + ")");
+        }
+    };
+    // (a picture there already: made new, so another Genko that read the library before this names it does not take it
+    // for one nothing has named for an hour; written again when its time cannot be set)
+    const auto keep_file = [&](const std::filesystem::path& file, bool there, const core::Bytes& png) {
+        std::error_code touched;
+        if (there) {
+            std::filesystem::last_write_time(file, std::filesystem::file_time_type::clock::now(), touched);
+            if (touched) write(file, *png);
+        } else {
+            write(file, *png);
+        }
+    };
+    for (const auto& [key, paper_of] : kept) {  // (its picture first: brush_papers.json never names a picture that is not there)
+        const core::Bytes png = paper::bytes(paper_of.asset);
+        if (!png) throw core::Error("missing_asset", "the paper picture " + paper_of.asset + " is not known here");
+        keep_file(picture_path(config_dir, paper_of.asset), library_picture(config_dir, paper_of.asset) != nullptr, png);
+    }
+    // (PC4 E2) a dab brush's pictures, before brushes.json names them
+    for (const auto& [key, data] : changes) {
+        if (!data || !core::is_dab_brush(*data)) continue;
+        const core::Json& dabs = (*data)["dabs"];
+        std::vector<std::string> refs;
+        try {
+            refs = core::dab_assets(core::dabs_from_json(dabs.is_null() ? core::Json::object() : dabs));
+        } catch (const core::Error& error) {
+            throw core::Error("value", "brush " + std::string(error.what()));
+        }
+        for (const std::string& ref : refs) {
+            if (const core::Bytes there = library_tip(config_dir, ref)) {
+                keep_file(library_tip_path(config_dir, ref), true, there);
+                continue;
+            }
+            const auto given = pictures.find(ref);
+            const core::Bytes png = given != pictures.end() ? given->second : dabs::picture(ref);
+            if (!png || storage::AssetStore::ref(*png) != ref) throw core::Error("missing_asset", "the brush picture " + ref + " is not known here");
+            write(library_tip_path(config_dir, ref), *png);
+        }
+    }
+    core::DumpOptions options;
+    options.indent = 1;
+    options.item_separator = ",";
+    core::Json file{{"brushes", brushes}};
+    if (!order.empty()) file["groups"] = order;  // (PC4 E2: only when there is an order to keep)
+    write(library_path(config_dir), core::dump(file, options));
+    forget_unnamed_tips(config_dir, brushes);
+    if (!papers) return;  // (one that cannot be read, or of another layout: nothing in it dropped, none of its pictures)
+    // the keys' papers set or taken away, and the papers of brushes brushes.json no longer has (forgotten here or by
+    // Python's app) dropped
+    bool changed = false;
+    for (const auto& [key, paper_of] : kept) {
+        (*papers)[key] = core::paper_to_json(paper_of);
+        changed = true;
+    }
+    for (auto it = papers->begin(); it != papers->end();) {
+        if (!brushes.contains(it.key())) {
+            it = papers->erase(it);
+            changed = true;
+        } else {
+            ++it;
+        }
+    }
+    if (changed) write(library_papers_path(config_dir), core::dump(core::Json{{"genko_brush_papers", 1}, {"papers", *papers}}, options));
+    forget_unnamed_pictures(config_dir, *papers);
+}
+
+core::Json with_pictures(const core::Json& definition) {
+    core::Json out = with_paper_picture(definition);
+    if (!core::is_dab_brush(out) || !out.contains("dabs") || !out["dabs"].is_object()) return out;
+    core::Json& dabs = out["dabs"];
+    const auto give = [](core::Json& holder, const char* key) {
+        if (!holder.is_object() || !holder.contains(key)) return;
+        core::Json& v = holder[key];
+        if (!v.is_object() || !v.contains("asset") || !v["asset"].is_string()) return;
+        const std::string ref = v["asset"].get<std::string>();
+        const core::Bytes png = dabs::picture(ref);
+        if (!png) throw core::Error("missing_asset", "the brush picture " + ref + " is not known here");
+        v = core::Json{{"png", core::b64encode(*png)}};
+    };
+    give(dabs, "tip");
+    if (dabs.contains("dual")) give(dabs["dual"], "tip");
+    if (dabs.contains("texture") && dabs["texture"].is_object()) give(dabs["texture"], "pattern");
+    return out;
+}
+
+std::filesystem::path library_papers_path(const std::filesystem::path& config_dir) { return config_dir / "brush_papers.json"; }
+
+core::Json load_own_brushes(const std::filesystem::path& config_dir) {
+    core::Json out = load_library(config_dir);
+    const std::optional<core::Json> papers = read_library_papers(config_dir);
+    if (!papers) return out;
+    for (auto& [key, settings] : out.items()) {
+        const auto found = papers->find(key);
+        if (found == papers->end()) continue;
+        try {
+            const core::Paper own = core::paper_from_json(*found);
+            // (a picture missing or broken: the brush keeps its paper, and refuses to draw until it is taken in again)
+            if (const core::Bytes png = library_picture(config_dir, own.asset)) paper::keep(own.asset, png);
+            settings["paper"] = core::paper_to_json(own);
+        } catch (const core::Error&) {
+            // (settings that cannot be read: the brush as brushes.json has it)
+        }
+    }
+    return out;
+}
+
+core::Json with_paper_taken_in(const core::Json& definition) {
+    const auto given = definition.is_object() ? definition.find("paper") : definition.end();
+    if (given == definition.end() || !given->is_object() || !given->contains("png")) return definition;
+    core::Json out = definition;
+    core::Json& settings = out["paper"];
+    const core::Json text = settings["png"];
+    settings.erase("png");
+    std::string file;
+    try {
+        if (!text.is_string()) throw core::Error("value", "png is not text");
+        file = core::a2b_base64(text.get_ref<const std::string&>());
+    } catch (const core::Error&) {
+        throw core::Error("value", "the paper's picture cannot be read (png must be the picture file in base64)");
+    }
+    auto grey = std::make_shared<const std::string>(paper::take_in(file));
+    const std::string ref = storage::AssetStore::ref(*grey);
+    paper::keep(ref, std::move(grey));
+    settings["asset"] = ref;
+    return out;
+}
+
+core::Json with_paper_picture(const core::Json& definition) {
+    const auto given = definition.is_object() ? definition.find("paper") : definition.end();
+    if (given == definition.end() || !given->is_object()) return definition;
+    const auto asset = given->find("asset");
+    if (asset == given->end() || !asset->is_string()) return definition;
+    const core::Bytes png = paper::bytes(asset->get<std::string>());
+    if (!png) throw core::Error("missing_asset", "the paper picture " + asset->get<std::string>() + " is not known here");
+    core::Json out = definition;
+    out["paper"].erase("asset");
+    out["paper"]["png"] = core::b64encode(*png);
+    return out;
+}
+
+namespace {
+
+// brushes@1 (PC4 E1): a dab brush's line — its dabs laid (render/dabs/lines.hpp), the coverage in 8 bits (rounded half
+// up), then as every brush: the light touch's shading, the paper.
+std::optional<Box> dab_extent(const Brush& b, Size size, const core::PenPoints& points, int dpi, double width_mm);
+
+std::optional<Coverage> draw_dabs(const Brush& b, Size size, const core::PenPoints& points, int dpi, double width_mm, std::string_view seed,
+                                  std::span<const double> rotation, double pressure_opacity, const dabs::LineInputs* inputs,
+                                  std::optional<Box> within) {
+    if (points.empty()) return std::nullopt;
+    // (the memory, held in the imaging budget before it is had: over the most the line reaches in what is drawn, its
+    // coverage's tiles — with the colour dynamics' colours, the dual brush's —, their floats laid out and the 8-bit mask)
+    std::optional<Box> reach = dab_extent(b, size, points, dpi, width_mm);
+    if (reach && within) {
+        reach = Box{std::max(reach->x0, within->x0), std::max(reach->y0, within->y0), std::min(reach->x1, within->x1), std::min(reach->y1, within->y1)};
+    }
+    if (!reach || reach->x1 <= reach->x0 || reach->y1 <= reach->y0) return std::nullopt;
+    const std::uint64_t area = std::uint64_t(reach->width()) * std::uint64_t(reach->height());
+    const std::uint64_t per_pixel = 4 * (b.dabs->color.enabled ? 4 : 1) + (b.dabs->dual.enabled ? 4 : 0) + 4 + 1;
+    const image_ops::Held held(area * per_pixel);
+    const dabs::LineInputs mouse;
+    const auto laid = dabs::cover(*b.dabs, width_mm, seed, points, rotation, inputs != nullptr ? *inputs : mouse, dpi, size, within);
+    if (!laid) return std::nullopt;
+    const Box box = laid->box;
+    std::vector<float> values;
+    laid->fill(box, values);
+    std::string bytes(values.size(), '\0');
+    for (std::size_t i = 0; i < values.size(); ++i) bytes[i] = static_cast<char>(static_cast<int>(values[i] * 255.0f + 0.5f));
+    Coverage out{Image::frombytes("L", Size{box.width(), box.height()}, bytes), Point{box.x0, box.y0}, laid, true};
+    if (pressure_opacity > 0) {
+        const Image light = shade(points, out.mask.size(), out.origin, dpi, width_mm, py_min(1.0, pressure_opacity));
+        out.mask = chops::multiply(out.mask, light);
+        out.fine = false;
+    }
+    if (b.paper) {
+        paper::apply(out.mask, out.origin, dpi, *b.paper, seed, points.front().x, points.front().y);
+        out.fine = false;
+    }
+    return out;
+}
+
+// A dab brush's line's box: its points, with the farthest its dabs reach (the line's width at full pressure — the
+// dynamics only make a dab smaller —, a sampled tip's corners, the scatter) and the pixels' rounding.
+std::optional<Box> dab_extent(const Brush& b, Size size, const core::PenPoints& points, int dpi, double width_mm) {
+    if (points.empty()) return std::nullopt;
+    const core::DabSettings& s = *b.dabs;
+    const double radius = std::max(width_mm / 2.0, 0.5 * dabs::kPx);
+    double reach = s.tip.empty() ? radius : radius * 1.4142135623730951;
+    if (s.scatter.enabled) reach += s.scatter.scatter.jitter * radius * (s.scatter.both_axes ? 1.4142135623730951 : 1.0);
+    double x0 = points.front().x, x1 = x0, y0 = points.front().y, y1 = y0;
+    for (const core::PenPoint& p : points) {
+        x0 = std::min(x0, p.x);
+        x1 = std::max(x1, p.x);
+        y0 = std::min(y0, p.y);
+        y1 = std::max(y1, p.y);
+    }
+    const double k = dpi / 25.4;
+    const auto at = [](double v) { return static_cast<int>(std::clamp(v, -2.0e9, 2.0e9)); };
+    const Box box{std::max(0, at(std::floor((x0 - reach) * k)) - 3), std::max(0, at(std::floor((y0 - reach) * k)) - 3),
+                  std::min(size.width, at(std::ceil((x1 + reach) * k)) + 4), std::min(size.height, at(std::ceil((y1 + reach) * k)) + 4)};
+    if (box.x1 <= box.x0 || box.y1 <= box.y0) return std::nullopt;
+    return box;
+}
+
+}  // namespace
+
+std::optional<Coverage> draw(Size size, const core::PenPoints& points, int dpi, double width_mm, std::string_view kind,
+                             std::string_view seed, std::span<const double> rotation, double pressure_opacity, const dabs::LineInputs* inputs,
+                             std::optional<Box> within) {
+    const Brush b = brush(kind);
+    if (b.dabs) return draw_dabs(b, size, points, dpi, width_mm, seed, rotation, pressure_opacity, inputs, within);
+    auto drawn = draw_plain(b, size, points, dpi, width_mm, seed, rotation);
+    if (drawn && pressure_opacity > 0) {
+        const Image light = shade(points, drawn->mask.size(), drawn->origin, dpi, width_mm, py_min(1.0, pressure_opacity));
+        drawn->mask = chops::multiply(drawn->mask, light);
+    }
+    // BRUSH-01: the paper under the line, after its pressure (render/paper.hpp: the order)
+    if (drawn && b.paper) paper::apply(drawn->mask, drawn->origin, dpi, *b.paper, seed, points.front().x, points.front().y);
+    return drawn;
+}
+
+std::optional<Box> extent(Size size, const core::PenPoints& points, int dpi, double width_mm, std::string_view kind) {
+    const Brush b = brush(kind);
+    if (b.dabs) return dab_extent(b, size, points, dpi, width_mm);
+    const auto e = extent_of(b, size, points, dpi, width_mm);
+    if (!e) return std::nullopt;
+    return e->box;
+}
+
+dabs::LineInputs line_inputs(const core::Stroke& stroke, const std::vector<std::int64_t>& rgb) {
+    dabs::LineInputs in;
+    in.tilt = stroke.tilt;
+    in.time_ms = stroke.time_ms;
+    in.wheel = stroke.wheel;
+    in.flow = stroke.flow;
+    const auto byte = [&](std::size_t k) { return static_cast<float>(std::clamp<std::int64_t>(rgb.size() > k ? rgb[k] : 0, 0, 255)) / 255.0f; };
+    in.color = {byte(0), byte(1), byte(2)};
+    if (stroke.color_rgb && stroke.color_rgb->is_object() && stroke.color_rgb->contains("values")) {
+        const Json& v = (*stroke.color_rgb)["values"];
+        if (v.is_array() && v.size() == 3 && std::all_of(v.begin(), v.end(), [](const Json& x) { return x.is_number(); })) {
+            in.color = {v[0].get<float>(), v[1].get<float>(), v[2].get<float>()};
+        }
+    }
+    if (stroke.background_rgb && stroke.background_rgb->size() == 3) {
+        const auto& bg = *stroke.background_rgb;
+        in.background = std::array<float, 3>{static_cast<float>(std::clamp<std::int64_t>(bg[0], 0, 255)) / 255.0f,
+                                             static_cast<float>(std::clamp<std::int64_t>(bg[1], 0, 255)) / 255.0f,
+                                             static_cast<float>(std::clamp<std::int64_t>(bg[2], 0, 255)) / 255.0f};
+    }
+    return in;
+}
+
+bool is_dab(std::string_view kind) { return brush(kind).dabs.has_value(); }
+
+}  // namespace genko::render::brushes

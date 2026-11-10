@@ -1,0 +1,423 @@
+// timeline@1 and video@1 (PC5 J-0): what the timeline and the video layers add inside a page's anim, and their checks
+// (core/video.hpp). The work area after PhotoCraft v0.2.0's doc/src/video.rs Timeline (MIT,
+// native/third_party/photocraft/NOTICE.md); the video row is Genko's own (an animation folder's).
+
+#include "core/video.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <set>
+
+#include "core/anim.hpp"
+#include "core/error.hpp"
+#include "core/model.hpp"
+#include "core/placement.hpp"
+#include "core/production_json.hpp"
+#include "core/smart.hpp"
+
+namespace genko::core {
+
+namespace pj = production;
+
+namespace {
+
+constexpr std::int64_t kSidePxMax = 1'000'000;
+
+void check_footage(const Json& footage, const std::string& where) {
+    pj::only_keys(footage, where, {"kind", "name", "frames", "fps", "size_px", "depth", "alpha", "par", "source"});
+    const std::string kind = pj::text(pj::field(footage, "kind", where), where + ".kind", 16);
+    if (kind != "sequence" && kind != "animation" && kind != "image") pj::wrong(where + ".kind", "must be sequence, animation or image");
+    (void)pj::text(pj::field(footage, "name", where), where + ".name", 1024);
+    const Json& frames = pj::field(footage, "frames", where);
+    if (!frames.is_array() || frames.empty() || frames.size() > static_cast<std::size_t>(anim::kMaxFrames)) {
+        pj::wrong(where + ".frames", "must be a list of 1.." + std::to_string(anim::kMaxFrames) + " asset refs");
+    }
+    for (const Json& ref : frames) {
+        if (!ref.is_string() || !pj::asset_ref(ref.get_ref<const std::string&>())) pj::wrong(where + ".frames", "must hold asset refs (sha256:…)");
+    }
+    (void)pj::number(pj::field(footage, "fps", where), where + ".fps", std::numeric_limits<double>::min(), 1000);
+    const Json& size = pj::field(footage, "size_px", where);
+    if (!size.is_array() || size.size() != 2) pj::wrong(where + ".size_px", "must be [w, h]");
+    (void)pj::integer(size[0], where + ".size_px", 1, kSidePxMax);
+    (void)pj::integer(size[1], where + ".size_px", 1, kSidePxMax);
+    const std::int64_t depth = pj::integer(pj::field(footage, "depth", where), where + ".depth", 8, 16);
+    if (depth != 8 && depth != 16) pj::wrong(where + ".depth", "must be 8 or 16");
+    const std::string alpha = pj::text(pj::field(footage, "alpha", where), where + ".alpha", 16);
+    if (alpha != "straight" && alpha != "premultiplied" && alpha != "ignore") pj::wrong(where + ".alpha", "must be straight, premultiplied or ignore");
+    (void)pj::number(pj::field(footage, "par", where), where + ".par", 0.01, 100);
+    if (const Json* source = pj::optional(footage, "source")) {
+        const std::string at = where + ".source";
+        pj::only_keys(*source, at, {"path", "bytes", "sha256"});
+        (void)pj::text(pj::field(*source, "path", at), at + ".path", 4096);
+        (void)pj::integer(pj::field(*source, "bytes", at), at + ".bytes", 0, std::numeric_limits<std::int64_t>::max());
+        (void)pj::text(pj::field(*source, "sha256", at), at + ".sha256", 64);
+    }
+}
+
+}  // namespace
+
+bool timeline_fps(const Json& fps) {
+    if (!fps.is_number() || fps.is_boolean()) return false;
+    const double v = fps.get<double>();
+    // (1..60 — whole or not: set_animation takes any number there — and what no op makes, past 0.5..120: the anims before it)
+    return std::isfinite(v) && ((v >= kTimelineFpsMin && v < 1) || (v > 60 && v <= kTimelineFpsMax));
+}
+
+bool timeline_work(const Json& work) {
+    if (!work.is_array() || work.size() != 2) return false;
+    const auto frame = [](const Json& v) { return v.is_number_integer() && !v.is_number_unsigned() ? v.get<std::int64_t>() : std::int64_t{0}; };
+    const std::int64_t first = frame(work[0]), last = frame(work[1]);
+    return first >= 1 && first <= last && last <= anim::kMaxFrames;
+}
+
+namespace {
+thread_local int public_animation_depth = 0;
+}  // namespace
+
+PublicAnimationOps::PublicAnimationOps() { ++public_animation_depth; }
+PublicAnimationOps::~PublicAnimationOps() { --public_animation_depth; }
+bool public_animation_ops() { return public_animation_depth > 0; }
+
+std::optional<std::array<std::int64_t, 2>> work_area(const Page& page) {
+    const Json* spec = anim::spec(page);
+    if (spec == nullptr) return std::nullopt;
+    const auto work = spec->find("work");
+    if (work == spec->end() || !timeline_work(*work)) return std::nullopt;
+    const std::int64_t count = anim::frames_of(page);
+    const std::int64_t last = std::min((*work)[1].get<std::int64_t>(), count);
+    return std::array<std::int64_t, 2>{std::min((*work)[0].get<std::int64_t>(), last), last};
+}
+
+std::array<std::int64_t, 2> played_frames(const Page& page) {
+    if (const auto work = work_area(page)) return *work;
+    return {1, anim::frames_of(page)};
+}
+
+Json timeline_info(const Page& page) {
+    Json out = Json::object();
+    out["page"] = page.index.json();
+    const Json* spec = anim::spec(page);
+    out["animation"] = spec != nullptr;
+    if (spec == nullptr) return out;
+    const std::int64_t frames = anim::frames_of(page);
+    const double fps = anim::fps_of(page);
+    const auto work = work_area(page);
+    const auto played = played_frames(page);
+    out["fps"] = fps;
+    out["frames"] = frames;
+    out["loop"] = anim::loops(page);
+    const auto seconds = [fps](std::int64_t n) { return fps > 0 ? Json(static_cast<double>(n) / fps) : Json(); };
+    out["seconds"] = seconds(frames);
+    out["work"] = work ? Json::array({(*work)[0], (*work)[1]}) : Json();
+    out["played"] = Json::array({played[0], played[1]});
+    out["played_seconds"] = seconds(played[1] - played[0] + 1);
+    Json tracks = Json::array();
+    for (const Json& folder : anim::folders(page)) {
+        Json track = Json::object();
+        track["folder"] = folder;
+        track["name"] = nullptr;
+        for (const Layer& layer : page.layers) {
+            if (folder.is_string() && layer.id == folder.get_ref<const std::string&>()) track["name"] = layer.title;
+        }
+        Json cels = Json::array();
+        for (const Layer* cel : anim::cels_of(page, folder)) cels.push_back(cel->id);
+        track["cels"] = std::move(cels);
+        const Json* entry = anim::track(page, folder);
+        track["exposures"] = entry != nullptr && entry->is_object() && entry->contains("cels") ? entry->at("cels") : Json::array();
+        // (PC5 J-e2: a video row's footage and frames — the footage's frames counted, not listed)
+        if (entry != nullptr && is_video_row(*entry)) {
+            const Json& video = entry->at("video");
+            Json row = Json::object();
+            const Json& footage = video.at("footage");
+            if (footage.is_null()) {
+                row["footage"] = nullptr;
+            } else {
+                Json summary = Json::object();
+                for (const char* key : {"kind", "name", "fps", "size_px", "depth", "alpha", "par"}) summary[key] = footage.at(key);
+                summary["frames"] = footage.at("frames").size();
+                std::set<std::string> unique;
+                for (const Json& ref : footage.at("frames")) unique.insert(ref.get<std::string>());
+                summary["pictures"] = unique.size();
+                summary["bytes"] = footage_bytes(footage);
+                summary["source"] = footage.contains("source") ? footage.at("source") : Json();
+                row["footage"] = std::move(summary);
+            }
+            const Json& frames_of_row = video.at("frames");
+            std::int64_t altered = 0, blank = 0;
+            for (const Json& f : frames_of_row) {
+                if (!f[1].is_null()) ++altered;
+                if (f[0].is_null() && f[1].is_null()) ++blank;
+            }
+            row["frames"] = frames_of_row.size();
+            row["altered"] = altered;
+            row["blank"] = blank;
+            row["show_altered"] = video.at("show_altered");
+            row["placement_mm"] = video.at("placement_mm");
+            row["fit"] = video.at("fit");
+            if (video.contains("transform")) row["transform"] = video.at("transform");  // (PC6: turned with its page)
+            track["video"] = std::move(row);
+        }
+        tracks.push_back(std::move(track));
+    }
+    out["tracks"] = std::move(tracks);
+    Json keys = Json::array();
+    if (const auto camera = spec->find("camera"); camera != spec->end() && camera->is_array()) {
+        for (const Json& key : *camera) {
+            if (key.is_object() && key.contains("frame")) keys.push_back(key.at("frame"));
+        }
+    }
+    out["camera_keys"] = std::move(keys);
+    const auto light = spec->find("light_table");
+    out["light_table"] = light != spec->end() && light->is_array() ? *light : Json::array();
+    out["timeline@1"] = page_uses_timeline(page);
+    return out;
+}
+
+bool page_uses_timeline(const Page& page) {
+    const Json* spec = anim::spec(page);
+    if (spec == nullptr) return false;
+    if (const auto work = spec->find("work"); work != spec->end() && timeline_work(*work)) return true;
+    const auto fps = spec->find("fps");
+    return fps != spec->end() && timeline_fps(*fps);
+}
+
+bool page_uses_video(const Page& page) {
+    const Json* spec = anim::spec(page);
+    if (spec == nullptr) return false;
+    const auto tracks = spec->find("tracks");
+    if (tracks == spec->end() || !tracks->is_array()) return false;
+    for (const Json& track : *tracks) {
+        if (!track.is_object() || !track.contains("video")) continue;
+        try {
+            check_video(track.at("video"));
+            return true;
+        } catch (const Error&) {  // (not a video row: what an anim before it may hold, kept as it is)
+        }
+    }
+    return false;
+}
+
+void check_timeline(const Json& anim, bool video) {
+    if (!anim.is_object()) return;
+    // (its fps is not looked at: any value an anim before it held — a hand-written 240.5, a 0 — is read as anim reads it, and
+    // only 0.5..1 and 60..120 name timeline@1)
+    if (const auto work = anim.find("work"); work != anim.end()) {
+        if (!work->is_array() || work->size() != 2) pj::wrong("anim.work", "must be [first, last] (frames from 1)");
+        const std::int64_t first = pj::integer((*work)[0], "anim.work", 1, anim::kMaxFrames);
+        const std::int64_t last = pj::integer((*work)[1], "anim.work", 1, anim::kMaxFrames);
+        if (first > last) pj::wrong("anim.work", "must have its first frame at or before its last");
+    }
+    if (const auto tracks = anim.find("tracks"); video && tracks != anim.end() && tracks->is_array()) {
+        for (const Json& track : *tracks) {
+            if (track.is_object() && track.contains("video")) check_video(track.at("video"));
+        }
+    }
+}
+
+void check_video(const Json& video) {
+    const std::string where = "anim.tracks[].video";
+    pj::only_keys(video, where, {"footage", "frames", "show_altered", "placement_mm", "fit", "transform"});
+    if (const Json& footage = pj::field(video, "footage", where); !footage.is_null()) check_footage(footage, where + ".footage");
+    const Json& frames = pj::field(video, "frames", where);
+    if (!frames.is_array() || frames.size() > static_cast<std::size_t>(anim::kMaxFrames)) {
+        pj::wrong(where + ".frames", "must be a list of at most " + std::to_string(anim::kMaxFrames) + " frames");
+    }
+    for (const Json& f : frames) {
+        const bool shaped = f.is_array() && f.size() == 2 && (f[0].is_null() || (f[0].is_number_integer() && f[0].get<std::int64_t>() >= 0 &&
+                                                                                 f[0].get<std::int64_t>() < anim::kMaxFrames)) &&
+                            (f[1].is_null() || (f[1].is_string() && !f[1].get_ref<const std::string&>().empty()));
+        if (!shaped) pj::wrong(where + ".frames", "must hold [footage frame | null, cel id | null] for each frame");
+    }
+    (void)pj::boolean(pj::field(video, "show_altered", where), where + ".show_altered");
+    (void)pj::rect_mm(pj::field(video, "placement_mm", where), where + ".placement_mm");
+    const std::string fit = pj::text(pj::field(video, "fit", where), where + ".fit", 16);
+    if (fit != "contain" && fit != "cover" && fit != "stretch") pj::wrong(where + ".fit", "must be contain, cover or stretch");
+    // (PC6: the footage turned with its page — six finite numbers, a map that does not squash it flat)
+    if (const Json* t = pj::optional(video, "transform")) {
+        if (!t->is_array() || t->size() != 6) pj::wrong(where + ".transform", "must be [a, b, c, d, e, f]");
+        std::array<double, 6> v{};
+        for (std::size_t i = 0; i < 6; ++i) {
+            const double most = i < 4 ? kFootageTransformMax : pj::kCoordinateMaxMm;
+            v[i] = pj::number((*t)[i], where + ".transform", -most, most);
+        }
+        // (as flat as its own size goes: the determinant against the largest of its linear part, squared — review of
+        // PC6-B: B2's P3-5)
+        const double most = std::max({std::fabs(v[0]), std::fabs(v[1]), std::fabs(v[2]), std::fabs(v[3])});
+        if (!(std::fabs(v[0] * v[3] - v[1] * v[2]) > 1e-6 * most * most)) pj::wrong(where + ".transform", "must not squash the footage flat");
+    }
+}
+
+std::optional<std::array<double, 6>> footage_transform(const Json& video) {
+    const auto t = video.find("transform");
+    if (t == video.end() || !t->is_array() || t->size() != 6) return std::nullopt;
+    std::array<double, 6> out{};
+    for (std::size_t i = 0; i < 6; ++i) out[i] = (*t)[i].get<double>();
+    return out;
+}
+
+bool is_video_row(const Json& track) {
+    if (!track.is_object()) return false;
+    const auto video = track.find("video");
+    if (video == track.end()) return false;
+    try {
+        check_video(*video);
+        return true;
+    } catch (const Error&) {  // (not a video row: what an anim before it may hold)
+        return false;
+    }
+}
+
+const Json* video_row(const Page& page, const Json& folder_id) {
+    const Json* entry = anim::track(page, folder_id);
+    if (entry == nullptr || !is_video_row(*entry)) return nullptr;
+    return &entry->at("video");
+}
+
+VideoShown video_shown(const Page& page, const Json& folder_id, const Json& video, std::int64_t frame) {
+    VideoShown out;
+    const Json& frames = video.at("frames");
+    if (frame < 1 || frame > static_cast<std::int64_t>(frames.size())) return out;
+    const Json& entry = frames[static_cast<std::size_t>(frame - 1)];
+    if (video.at("show_altered").get<bool>() && entry[1].is_string()) {
+        const std::string& cel = entry[1].get_ref<const std::string&>();
+        for (const Layer* layer : anim::cels_of(page, folder_id)) {
+            if (layer->id == cel) {
+                out.kind = VideoShown::Kind::Cel;
+                out.cel = cel;
+                return out;
+            }
+        }
+    }
+    const Json& footage = video.at("footage");
+    if (entry[0].is_number_integer() && footage.is_object()) {
+        const std::int64_t index = entry[0].get<std::int64_t>();
+        if (index >= 0 && index < static_cast<std::int64_t>(footage.at("frames").size())) {
+            out.kind = VideoShown::Kind::Footage;
+            out.index = index;
+        }
+    }
+    return out;
+}
+
+std::optional<Rect> footage_placement(const Json& video) {
+    const Json& footage = video.at("footage");
+    if (!footage.is_object()) return std::nullopt;
+    const auto box = pj::rect_mm(video.at("placement_mm"), "placement_mm");
+    const double par = footage.at("par").get<double>();
+    const std::int64_t w = footage.at("size_px")[0].get<std::int64_t>(), h = footage.at("size_px")[1].get<std::int64_t>();
+    // (its pixels as wide as par makes them: the picture's width in square pixels, whole, for fit_rect)
+    const auto wide = std::max<std::int64_t>(1, static_cast<std::int64_t>(std::llround(static_cast<double>(w) * par)));
+    const Rect target{Num(box[0]), Num(box[1]), Num(box[2]), Num(box[3])};
+    return fit_rect(target, wide, h, video.at("fit").get<std::string>(), 0.0, 0.0, 1.0);
+}
+
+namespace {
+
+std::uint64_t picture_bytes(const Json& footage) {
+    const auto w = static_cast<std::uint64_t>(footage.at("size_px")[0].get<std::int64_t>());
+    const auto h = static_cast<std::uint64_t>(footage.at("size_px")[1].get<std::int64_t>());
+    return w * h * 4 * (footage.at("depth").get<std::int64_t>() > 8 ? 2 : 1);
+}
+
+// Each video row of the book (its pages and the pages of its smart objects' contents).
+template <typename Each>
+void each_video_row(const Document& doc, Each each) {
+    for (const smart::WrittenPage& written : smart::written_pages(doc)) {
+        const Json* spec = anim::spec(*written.page);
+        if (spec == nullptr) continue;
+        const auto tracks = spec->find("tracks");
+        if (tracks == spec->end() || !tracks->is_array()) continue;
+        for (const Json& track : *tracks) {
+            if (is_video_row(track)) each(track.at("video"));
+        }
+    }
+}
+
+}  // namespace
+
+std::uint64_t footage_bytes(const Json& footage) {
+    if (!footage.is_object()) return 0;
+    std::set<std::string> unique;
+    for (const Json& ref : footage.at("frames")) unique.insert(ref.get<std::string>());
+    return picture_bytes(footage) * unique.size();
+}
+
+std::uint64_t book_footage_bytes(const Document& doc, const Json* except) {
+    std::set<std::string> seen;
+    std::uint64_t total = 0;
+    each_video_row(doc, [&](const Json& video) {
+        if (&video == except) return;
+        const Json& footage = video.at("footage");
+        if (!footage.is_object()) return;
+        const std::uint64_t each = picture_bytes(footage);
+        for (const Json& ref : footage.at("frames")) {
+            if (seen.insert(ref.get<std::string>()).second) total += each;
+        }
+    });
+    return total;
+}
+
+std::uint64_t footage_room(const Document& doc, const Json* except) {
+    const std::uint64_t held = book_footage_bytes(doc, except);
+    return held >= kFootageMaxBytes ? 0 : kFootageMaxBytes - held;
+}
+
+std::vector<std::string> footage_refs(const Document& doc) {
+    std::vector<std::string> out;
+    std::set<std::string> seen;
+    each_video_row(doc, [&](const Json& video) {
+        const Json& footage = video.at("footage");
+        if (!footage.is_object()) return;
+        for (const Json& ref : footage.at("frames")) {
+            if (seen.insert(ref.get<std::string>()).second) out.push_back(ref.get<std::string>());
+        }
+    });
+    return out;
+}
+
+std::vector<std::int64_t> laid_footage(std::int64_t count, double footage_fps, double timeline_fps) {
+    std::vector<std::int64_t> out;
+    if (count <= 0 || !(footage_fps > 0) || !(timeline_fps > 0)) return out;
+    for (std::int64_t k = 0; static_cast<std::int64_t>(out.size()) < anim::kMaxFrames; ++k) {
+        // (the frame shown k frames after the start: floor(k × its fps ÷ the timeline's), a hair under a whole number
+        // taken as it)
+        const auto index = static_cast<std::int64_t>(std::floor(static_cast<double>(k) * footage_fps / timeline_fps + 1e-9));
+        if (index >= count) break;
+        out.push_back(index);
+    }
+    return out;
+}
+
+bool uses_timeline(const Document& doc) {
+    for (const smart::WrittenPage& written : smart::written_pages(doc)) {
+        if (page_uses_timeline(*written.page)) return true;
+    }
+    return false;
+}
+
+bool uses_video(const Document& doc) {
+    for (const smart::WrittenPage& written : smart::written_pages(doc)) {
+        if (page_uses_video(*written.page)) return true;
+    }
+    return false;
+}
+
+void validate_timeline(const Document& doc, bool timeline, bool video) {
+    if (!timeline && !video) return;
+    const auto check = [&](const Page& page) {
+        const Json* spec = anim::spec(page);
+        if (spec == nullptr) return;
+        if (timeline) {
+            check_timeline(*spec, video);
+        } else {
+            check_timeline(Json{{"tracks", spec->contains("tracks") ? spec->at("tracks") : Json::array()}}, true);
+        }
+    };
+    for (const PagePtr& page : doc.pages)
+        if (page) check(*page);
+    for (const smart::WrittenPage& written : smart::written_pages(doc))
+        if (!written.contents.empty()) check(*written.page);
+}
+
+}  // namespace genko::core

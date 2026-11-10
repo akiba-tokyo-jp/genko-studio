@@ -1,0 +1,330 @@
+# Drawing (docs/cpp-migration/ARCHITECTURE.md §4a): Pillow's libImaging with its Python layer ported, brushes, pages,
+# tones, effect lines, the 3D guides. QtCore only (no QtGui): pages are drawn the same with or without a display.
+qt_add_resources(GENKO_MATERIAL_RESOURCES "${GENKO_SOURCE_ROOT}/resources/genko_materials.qrc")
+qt_add_big_resources(GENKO_TEXT_RESOURCES "${GENKO_SOURCE_ROOT}/resources/genko_text.qrc")
+genko_library(genko_render
+  SOURCES
+    image.cpp
+    color_canvas.cpp
+    channels.cpp
+    inspect.cpp
+    draw.cpp
+    png.cpp
+    bmp.cpp
+    tiff_webp.cpp
+    gif.cpp
+    psd_image.cpp
+    stroke.cpp
+    brushes.cpp
+    paper.cpp
+    panels.cpp
+    composite.cpp
+    page.cpp
+    npcompat.cpp
+    libm_float.cpp
+    quantize.cpp
+    tones.cpp
+    effects.cpp
+    fill_patches.cpp
+    prims.cpp
+    fill.cpp
+    selection.cpp
+    warp.cpp
+    raster.cpp
+    filters.cpp
+    vectorize.cpp
+    color_edit.cpp
+    color_filters.cpp
+    abr.cpp
+    psd.cpp
+    psd_keep.cpp
+    psd_descriptor.cpp
+    psd_smart.cpp
+    psd_filters.cpp
+    psd_text.cpp
+    movie.cpp
+    anim.cpp
+    timelapse.cpp
+    plugins.cpp
+    plugin_bands.cpp
+    colour.cpp
+    proof.cpp
+    hdr_preview.cpp
+    import_profile.cpp
+    ink.cpp
+    ink_canvas.cpp
+    ink_edit.cpp
+    ink_filters.cpp
+    ops_ink.cpp
+    ops_channels.cpp
+    raster_ops.cpp
+    ops_paint.cpp
+    adjust.cpp
+    adjust_space.cpp
+    ops_adjust.cpp
+    tone_ops.cpp
+    image_ops.cpp
+    ops_calc.cpp
+    trap.cpp
+    ops_fade.cpp
+    psd_adjust.cpp
+    psd_adjust_color.cpp
+    zip.cpp
+    materials.cpp
+    covers.cpp
+    bookpages.cpp
+    placed.cpp
+    smart.cpp
+    smart_decode.cpp
+    ops_smart.cpp
+    ops_smart_contents.cpp
+    smart_filters.cpp
+    ops_smart_filters.cpp
+    stack.cpp
+    screentone.cpp
+    text/fonts.cpp
+    text/tategaki.cpp
+    text/lettering.cpp
+    text/balloons.cpp
+    # PC3 (選択・マスク・パス・変形・判型の土台: B-0, C-0)
+    selection_ext.cpp
+    area_kinds.cpp
+    layer_masks.cpp
+    mask_lending.cpp
+    path_raster.cpp
+    resample.cpp
+    ops_select.cpp
+    ops_retouch.cpp
+    # PC3 B2: レイヤーマスクの適用・透明部分から、境界線を描く
+    ops_masks.cpp
+    ops_vector2.cpp
+    ops_transform.cpp
+    ops_pagesize.cpp
+    # PC3 B1 (選択の基本と選択範囲の編集)
+    select_color.cpp
+    ops_quick_mask.cpp
+    erase_magic.cpp
+    # PC3 B4 (修復)
+    retouch_dabs.cpp
+    poisson.cpp
+    inpaint.cpp
+    content_aware.cpp
+    # PC3 B3 (賢い選択・選択とマスク・マット)
+    segment/mod.cpp
+    segment/maxflow.cpp
+    segment/gmm.cpp
+    segment/slic.cpp
+    segment/grabcut.cpp
+    segment/quick.cpp
+    segment/subject.cpp
+    segment/sky.cpp
+    segment/focus.cpp
+    matting.cpp
+    select_smart.cpp
+    ops_matting.cpp
+    # PC4 節 D (フィルター: the table's kinds by one formula on the three ways)
+    fx_engine.cpp
+    fx_blur.cpp
+    fx_blur2.cpp
+    fx_gallery.cpp
+    fx_noise.cpp
+    fx_other.cpp
+    fx_rank.cpp
+    fx_sharpen.cpp
+    fx_video.cpp
+    fx_distort.cpp
+    fx_pixelate.cpp
+    fx_stylize.cpp
+    fx_oil.cpp
+    fx_lens.cpp
+    fx_camera_raw.cpp
+    vanishing.cpp
+    ops_filters.cpp
+    # PC4 D4 (描画・ぼかしギャラリー, op render_picture)
+    fx_render.cpp
+    fx_gallery_blur.cpp
+    render_picture.cpp
+    # PC3 C-a (パスとベクトルマスク)
+    path_trace.cpp
+    path_areas.cpp
+    vector_masks.cpp
+    psd_paths.cpp
+    path_info.cpp
+    ops_paths.cpp
+    # PC3 C-e (判型)
+    page_pixels.cpp
+    # PC3 C-b (シェイプ: ペンの層の形の部品)
+    shape_parts.cpp
+    ops_shapes.cpp
+    psd_shapes.cpp
+    shape_presets.cpp
+    # PC3 C-c (変形: 自由変形・ワープ・パペットワープ・遠近法ワープ・コンテンツに応じて拡大・縮小・ゆがみ)
+    puppet.cpp
+    perspective_warp.cpp
+    liquify_field.cpp
+    seam.cpp
+    own_pixels.cpp
+    layer_transform.cpp
+    distort_ops.cpp
+    # PC3 C-d (移動・整列・分布・重ね順・リンク)
+    layer_bounds.cpp
+    layer_align.cpp
+    # PC3 A5 (スマートオブジェクトの上の変形: ゆがみ・遠近法ワープ・パペットワープのスマートフィルター)
+    smart_bends.cpp
+    # PC4 F-0 (形式の土台: コーデックの型・表・判定・書く計画と失うもの・上限、ファイルの op の枠)
+    codecs/image.cpp
+    codecs/format.cpp
+    codecs/fidelity.cpp
+    codecs/limits.cpp
+    codecs/codecs.cpp
+    ops_formats.cpp
+    # PC4 F-b (ファイルの入口: 開いたファイルの EXIF・XMP・向き・コマの数)
+    codecs/metadata.cpp
+    # PC4 F-a (コーデック: 形式ごとの読み手と書き手。OpenEXR と libavif＋libaom)
+    codecs/png.cpp
+    codecs/jpeg.cpp
+    codecs/tiff.cpp
+    codecs/webp.cpp
+    codecs/gif.cpp
+    codecs/bmp.cpp
+    codecs/tga.cpp
+    codecs/ico.cpp
+    codecs/pnm.cpp
+    codecs/qoi.cpp
+    codecs/exr.cpp
+    codecs/hdr.cpp
+    codecs/avif.cpp
+    # PC4 F-c (書き出し: Web 用に保存の GIF・PNG-8・WBMP の書き手、絵の大きさを変える)
+    codecs/web.cpp
+    codecs/resize.cpp
+    # PC4 E-0 (描く道具の土台: 層のタイル、プリセットの置き場、描く道具とパターンの op の枠)
+    tiled_pixels.cpp
+    preset_store.cpp
+    ops_paint_tools.cpp
+    ops_patterns.cpp
+    # PC4 E1 (ブラシエンジンと線: 上流の点を打つ描き方を線の描き方の 1 つとして、mm で)
+    dabs/maths.cpp
+    dabs/tile.cpp
+    dabs/procedural.cpp
+    dabs/dynamics.cpp
+    dabs/coverage.cpp
+    dabs/lines.cpp
+    dab_ops.cpp
+    # PC4 E3 (パターン: 模様の敷き詰め・.pat と PSD の Patt・ライブラリ)
+    patterns.cpp
+    pat.cpp
+    pattern_library.cpp
+    # PC4 E4 (塗りつぶし・グラデーション・色: 層の値に塗る道、グラデーションのプリセットと .grd)
+    paint_fill.cpp
+    gradient_presets.cpp
+    grd.cpp
+    # PC4 E5 (画素の道具: 覆い焼き・焼き込み・スポンジ・ぼかし・シャープ・指先・混合ブラシ・背景消しゴム・色の置き換え。修復の筆の引数は B4 と共通)
+    brushwork.cpp
+    paint_tools/tone.cpp
+    paint_tools/effects.cpp
+    # PC4 E2 (ブラシのプリセット・Adobe の読み込み・ツールプリセット・プリセット管理)
+    abr_map.cpp
+    brush_presets.cpp
+    tool_presets.cpp
+    preset_files.cpp
+    # PC4 E6 (レイヤースタイル: 効果の描き方・スタイルのプリセット・.asl と PSD の lfx2)
+    layer_styles.cpp
+    ops_layer_styles.cpp
+    psd_effects.cpp
+    asl.cpp
+    style_presets.cpp
+    # PC4 F-f (.pcraft: zip by name and stored, zstd, BLAKE3, the manifest, a .pcraft read as a page)
+    blake3.cpp
+    zstd.cpp
+    pcraft_manifest.cpp
+    pcraft_read.cpp
+    # PC6 (a .pcraft's layer styles: upstream's effects, fill opacity and Blend If both ways)
+    pcraft_styles.cpp
+    # PC4 F-e (カメラ RAW: LibRaw の包み・現像の設定と色・埋め込みプレビュー、RAW のスマートオブジェクトの op)
+    raw.cpp
+    ops_camera_raw.cpp
+    # PC5 G-0 (文字の土台: 文字の層の絵・type の op・HarfBuzz の組み方の口)
+    type_layer.cpp
+    ops_type.cpp
+    text/shaping.cpp
+    # PC5 G-b (組版・OpenType・書体・右から左: the OpenType typesetting's rows, SheenBidi's order, set_type)
+    text/bidi.cpp
+    text/opentype.cpp
+    ops_type_set.cpp
+    # PC5 I-b (グループとフレーム: レイヤーからのフレーム)
+    ops_groups.cpp
+    # PC5 J-0 (制作の補助の土台: the production's op frames, its PSD blocks and .pcraft keys)
+    ops_production.cpp
+    ops_layer_comps.cpp
+    psd_production.cpp
+    psd_guides.cpp
+    psd_comps.cpp
+    pcraft_production.cpp
+    pcraft_comps.cpp
+    # PC5 I-d (変数とデータセット: variables@1's ops and their .pcraft key)
+    ops_variables.cpp
+    pcraft_variables.cpp
+    # PC5 J-c (注釈: annotations@1 — the ops, PSD's Anno, a .pcraft's notes)
+    ops_annotations.cpp
+    psd_annotations.cpp
+    pcraft_annotations.cpp
+    # PC5 J-d1 (計測: measure@1 — the ops, a .pcraft's measurement; PSD's 1074 in psd_annotations.cpp)
+    ops_measure.cpp
+    pcraft_measure.cpp
+    # PC5 J-d2 (計測値を記録の値・計測ログの列と CSV)
+    measure_features.cpp
+    # PC5 J-b (スライス: slices@1 — the ops, PSD's 1050, a .pcraft's slices)
+    ops_slices.cpp
+    psd_slices.cpp
+    pcraft_slices.cpp
+    # PC5 G-c (文字スタイル・段落スタイル: type_style)
+    ops_type_styles.cpp
+    # PC5 G-d (書体の置き換え: replace_fonts)
+    ops_type_fonts.cpp
+    # PC5 G-e (PSD・.pcraft の文字: Photoshop's text layer and the type layer each other's)
+    psd_type.cpp
+    # PC5 I-c (アートボード: artboards@1 — the ops, PSD's artb)
+    ops_artboards.cpp
+    psd_artboards.cpp
+    # PC5 I-h (HDR Pro に統合・写真の切り抜きと角度補正: the exposures merged and tone mapped, the photos on a scan)
+    hdr_merge.cpp
+    scancrop.cpp
+    # PC5 I-g (自動整列・自動合成・Photomerge: features, panorama, pyramid and their ops)
+    features.cpp
+    panorama.cpp
+    pyramid.cpp
+    ops_align.cpp
+    # PC5 J-e2 (ビデオレイヤー: video@1 — the footage read and laid, the ops)
+    footage.cpp
+    ops_video.cpp
+    pcraft_timeline.cpp
+    # PC5 H-f (画素の縦横比: PSD's 1064)
+    psd_pixel_aspect.cpp
+    ${GENKO_MATERIAL_RESOURCES}
+    ${GENKO_TEXT_RESOURCES}
+  PUBLIC_DEPS genko_core Qt6::Core
+  PRIVATE_DEPS genko_storage pillow_imaging PNG::PNG JPEG::JPEG ZLIB::ZLIB TIFF::TIFF Freetype::Freetype ${GENKO_WEBP} ${GENKO_LCMS2}
+               ${GENKO_OPENEXR} ${GENKO_AVIF} ${GENKO_ZSTD} genko_blake3 ${GENKO_LIBRAW} ${GENKO_HARFBUZZ} genko_sheenbidi)
+# (sin, cos, atan2, hypot, pow, log go through core/pymath.cpp, which calls libm exactly as CPython does)
+# (numpy's float32 hypotf, atan2f: called in libm as numpy calls them; sinf, cosf, powf: glibc's, libm_float.cpp, with
+# std::fma where glibc's FMA build fuses. MSVC: /fp:precise, with which these have no intrinsic forms)
+if(NOT MSVC)
+  set_source_files_properties(npcompat.cpp PROPERTIES COMPILE_OPTIONS "-fno-builtin")
+endif()
+
+# The ops that draw (render/ops_registry.hpp): each module registers its own (register_tone_ops, register_effect_ops,
+# register_3d_ops) and ops_registry() holds them with core's ops; they are applied through core's CommandBus.
+set(GENKO_RENDER_OPS_SOURCES ops_registry.cpp ops_tones.cpp ops_effects.cpp ops_3d.cpp import_psd.cpp)
+if(GENKO_LIBRARY_KIND STREQUAL "SHARED")
+  # (shared libraries — a sanitizer build, or GENKO_SHARED_LIBRARIES: cmake/GenkoFlags.cmake —: stamp_material in genko_render applies ops through
+  # ops_registry(), held here — shared libraries cannot depend on each other both ways, so the two are one library)
+  target_sources(genko_render PRIVATE ${GENKO_RENDER_OPS_SOURCES})
+  add_library(genko_render_ops INTERFACE)
+  target_link_libraries(genko_render_ops INTERFACE genko_render genko_core Qt6::Core)
+else()
+  genko_library(genko_render_ops SOURCES ${GENKO_RENDER_OPS_SOURCES} PUBLIC_DEPS genko_render genko_core Qt6::Core)
+  # (PC3 A2: a smart object's smart filters are drawn with filter_raster's own ways, render/ops_adjust, whose local
+  # corrections apply ops through ops_registry(): a page drawn needs genko_render_ops too. Two static libraries that
+  # need each other: CMake links them as such, once more after each other)
+  target_link_libraries(genko_render INTERFACE genko_render_ops)
+endif()

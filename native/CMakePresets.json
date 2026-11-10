@@ -1,0 +1,70 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {"major": 3, "minor": 24, "patch": 0},
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../build/${presetName}",
+      "cacheVariables": {"GENKO_WERROR": "ON"}
+    },
+    {
+      "name": "linux-release",
+      "inherits": "base",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "GENKO_FAULT_INJECTION": "OFF"}
+    },
+    {
+      "name": "linux-debug",
+      "inherits": "base",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "GENKO_FAULT_INJECTION": "ON"}
+    },
+    {
+      "name": "linux-asan",
+      "inherits": "base",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "GENKO_SANITIZE": "address,undefined", "GENKO_FAULT_INJECTION": "ON"}
+    },
+    {
+      "name": "linux-tsan",
+      "inherits": "base",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "GENKO_SANITIZE": "thread", "GENKO_FAULT_INJECTION": "ON"}
+    },
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "inherits": "base",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static-md",
+        "VCPKG_MANIFEST_DIR": "${sourceDir}",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/triplets"
+      }
+    },
+    {
+      "name": "windows-release",
+      "inherits": "windows-base",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "GENKO_FAULT_INJECTION": "OFF"}
+    },
+    {
+      "name": "windows-debug",
+      "inherits": "windows-base",
+      "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "GENKO_FAULT_INJECTION": "ON"}
+    }
+  ],
+  "buildPresets": [
+    {"name": "linux-release", "configurePreset": "linux-release"},
+    {"name": "linux-debug", "configurePreset": "linux-debug"},
+    {"name": "linux-asan", "configurePreset": "linux-asan"},
+    {"name": "linux-tsan", "configurePreset": "linux-tsan"},
+    {"name": "windows-release", "configurePreset": "windows-release"},
+    {"name": "windows-debug", "configurePreset": "windows-debug"}
+  ],
+  "testPresets": [
+    {"name": "linux-release", "configurePreset": "linux-release", "output": {"outputOnFailure": true}},
+    {"name": "linux-debug", "configurePreset": "linux-debug", "output": {"outputOnFailure": true}},
+    {"name": "linux-asan", "configurePreset": "linux-asan", "output": {"outputOnFailure": true}},
+    {"name": "linux-tsan", "configurePreset": "linux-tsan", "output": {"outputOnFailure": true}},
+    {"name": "windows-release", "configurePreset": "windows-release", "output": {"outputOnFailure": true}},
+    {"name": "windows-debug", "configurePreset": "windows-debug", "output": {"outputOnFailure": true}}
+  ]
+}

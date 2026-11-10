@@ -1,0 +1,248 @@
+#pragma once
+
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <optional>
+#include <set>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "core/command_bus.hpp"
+#include "core/json.hpp"
+#include "core/model.hpp"
+#include "core/pyops.hpp"
+
+// Helpers shared by the op implementations of every module (Python's small functions in genko/ops.py): what an op
+// works on, found as Python finds it, with Python's messages (OpError: the batch reports "ops[i] <op>: <message>").
+
+namespace genko::core {
+
+// LayerRole(name): PyValueError "'xyz' is not a valid LayerRole".
+LayerRole role_from(const Json& value);
+
+// ops._layer_by_id: the first layer with this id. OpError "no layer <id>".
+std::size_t layer_by_id(const Page& page, std::string_view layer_id);
+
+// Page._layer(role): the first layer with the role, made (with a new id) and appended when there is none.
+std::size_t layer_for_role(Page& page, LayerRole role);
+
+// ops._paint_target: the layer op["layer_id"] names, else the first layer with the role op["layer"] ("ink" by
+// default; the page gets one when it has none). OpError when it is locked or is not a pen, paint or tone layer;
+// PyValueError for a role that is not one ("'x' is not a valid LayerRole").
+Layer& paint_target(Page& page, const Json& op);
+
+// ops._frame_or_fail: the panel page._find(str(frame_id)) finds; OpError "no panel <frame_id>".
+const Frame& frame_or_fail(const Page& page, const Json& frame_id);
+
+// ops._ruler: the position of the first ruler whose id == ruler_id; OpError "no ruler <ruler_id>".
+std::size_t ruler_index(const Page& page, const Json& ruler_id);
+
+// ops._screen_spec: レイヤーのトーン化 ({pattern, lpi, angle, black, white, shape?, offset_mm?}); OpError for what it
+// does not take.
+Json screen_spec(const Json& raw);
+
+// The op is refused when what it would keep holds a number that is not finite (Python keeps it, and its json.dumps
+// writes Infinity or NaN into project.json): OpError "<what> must be a finite number", `what` naming the key that holds
+// it ("<key>.<inner key>" inside objects; an empty `what` names an object's own keys). Ops call it once they have done
+// everything else, so every error Python gives comes first.
+void require_finite(const Json& value, const std::string& what = {});
+
+// The role a stroke op's "layer" names: ink, name, or any other role by its name (LayerRole(name)).
+LayerRole stroke_role(const std::string& layer_name);
+
+// ops._gated: strict gates or a studio (agents' books) enforce the name → art → finish order.
+bool gated(const Document& doc);
+
+// ops._rgb3: three ints 0..255. OpError "<what> is [r, g, b]".
+std::vector<std::int64_t> rgb3(const Json& value, std::string_view what);
+
+// ops._blend_mode: OpError "unknown blend mode <mode>".
+std::string blend_mode(const Json& value);
+
+// ops._gradient_extras(g): 多色 (stops), 楕円 (ratio), 繰り返し (repeat) of a gradient, checked (core/ops_layers.cpp; also
+// gradient_fill's). OpError with Python's words.
+Json gradient_extras(const Json& g);
+// PC4 E4 (vector@1): a gradient's transparency stops [[position 0..1, opacity 0..1], …] (2 to 16) checked, rounded and
+// sorted by place (OpError), and a gradient whose colours (rgb_from, rgb_to, a stop's colour) say "foreground" or
+// "background" with the book's brush colours put in their place (its 描画色 brush_rgb, its 背景色 brush_background_rgb —
+// white when it has none): a fill layer takes them when it is made.
+Json transparency_stops(const Json& value);
+Json live_colours(const Json& gradient, const Document& doc);
+// ops._fill_spec: a fill layer's {"rgb"} or {"gradient"} checked and in its normal form (core/ops_layers.cpp; also a
+// shape part's fill, pen-shapes@1). OpError with Python's words. (patterns@1, PC4 E3: {"pattern": …} too, in
+// core::pattern_fill_spec's normal form.)
+Json fill_spec(const Json& raw);
+// patterns@1 (PC4 E3): OpError unless a fill's pattern (when it is one) is a pattern the book keeps.
+void check_pattern_kept(const Document& doc, const Json& fill);
+
+// The JSON of a list of ints.
+Json ints_json(const std::vector<std::int64_t>& values);
+
+// models.stroke_to_dict: {"id", "points", "pressure", "width_mm", "kind"} and "rgb", "color_rgb", "opacity" when set.
+Json stroke_to_dict(const Stroke& stroke);
+
+// io._layer_to_dict(layer) (with its strokes as models.stroke_to_dict): what studio.orphans keeps of a layer.
+Json layer_to_dict(const Layer& layer);
+
+// The panel ids of a page (pre-order, with duplicates as they are).
+std::vector<std::string> frame_ids(const Page& page);
+
+// ops._placed_on: the placed layers of these panels (their positions in page.layers).
+std::vector<std::size_t> placed_on(const Page& page, const std::set<std::string>& frame_ids);
+
+// ops._orphan_art: placed art whose panel went away (the layers at `art` on the page) kept in studio.orphans
+// ({"kind": "layers", "page_id", "reason", "rev", "layers"}: asset refs stay alive for gc) and taken off the page.
+void orphan_art(Document& doc, Page& page, const std::vector<std::size_t>& art, const std::string& reason);
+
+// A dict of old panel id → new id, as ops._refresh_frame_ids fills it (a repeated id keeps its first place and its
+// last value).
+class FrameIdMap {
+public:
+    void set(const std::string& from, const std::string& to);
+    // The new id (null when the id is not in the map).
+    const std::string* get(const std::string& from) const;
+
+private:
+    std::vector<std::pair<std::string, std::string>> items_;
+};
+
+// ops._refresh_frame_ids: new ids for the panel and every panel under it (the panel first), each recorded in `map`
+// (duplicate_page and import_pages).
+void refresh_frame_ids(Frame& frame, FrameIdMap& map);
+
+// What on a copied page names one of its layers, pointed at the layer's new id (`layers`: old layer id → new, as
+// duplicate_page and import_pages give the copy's layers new ids): each layer's folder (parent_id), a ruler kept to one
+// layer (layer_id, the old single ruler's too), an animation's folders and cels (page.extra["anim"]: its tracks and its
+// light table), an area kept on the page that names a layer (page.extra["saved_areas"]: {"layer": id}, also inside a
+// union, intersect or subtract), and on the copied lines (`lines`) the layer a line is drawn under
+// (style.below_layer). An id the map does not hold (no layer of the page) is left as it is. Python leaves them all
+// naming the old page's layers (ops.py, duplicate_page and import_pages): a deliberate deviation of this build, the
+// user's decision D2 (SPEC §2: a known bug is not reproduced).
+void remap_layer_refs(Page& page, const std::vector<StoryLine*>& lines, const FrameIdMap& layers);
+
+// Register the ops of M2-O1 (frames, pages, strokes, layers, brush).
+void register_frame_ops(OpRegistry& registry);
+void register_page_ops(OpRegistry& registry);
+void register_stroke_ops(OpRegistry& registry);
+
+// BRUSH-01: a paper's picture file (its bytes, decoded from define_brush's paper "png") taken in as the grey PNG the book
+// keeps (render/paper.hpp's take_in). OpError with the reason for a picture that cannot be taken.
+using PaperTakeIn = std::function<std::string(std::string_view file_bytes)>;
+// define_brush again (core/ops_strokes.cpp), its "paper" taking a picture: render::ops_registry registers it with
+// render/paper's. Without `take_in` (core's own registry) a paper given as "png" is refused with not_yet_ported; one
+// given by the "asset" of a paper the book keeps is taken either way.
+void register_define_brush(OpRegistry& registry, PaperTakeIn take_in = {});
+// brushes@1 (PC4 E1): define_brush's dab brush — its pictures given as files ("png", base64) taken in as the grey PNG the
+// book keeps (`picture`: a tip's ink when `ink`, a texture's lightness; at most `edge` pixels a side; its ref and bytes),
+// and upstream's settings ("format": "photocraft") read as Genko's (`photocraft`: the dabs, the pictures they hold, the
+// settings that are not the brush's here). render's (render/dabs/lines.hpp); without them (core's own registry) such
+// a brush is refused with not_yet_ported. OpError with the reason for what cannot be taken.
+struct DabTakeIn {
+    std::function<std::pair<std::string, Bytes>(std::string_view file_bytes, bool ink, std::uint32_t edge)> picture;
+    std::function<Json(const Json& upstream, std::map<std::string, Bytes>& pictures, std::vector<std::string>& ignored)> photocraft;
+};
+void register_define_brush(OpRegistry& registry, PaperTakeIn take_in, DabTakeIn dabs);
+// ops._mixed_pieces (下地混色・色延び): a line drawn with `mix` > 0 on a layer that has something on it, as short pieces,
+// each in the brush's colour mixed with what is on the layer under it (`stretch`: how far the colour picked up is
+// carried). render's (render/raster.hpp mixed_pieces, which sees the layer's pixels).
+using MixPieces = std::function<std::vector<Stroke>(const Page& page, const Layer& layer, const Stroke& stroke, double mix, double stretch)>;
+// add_stroke again, able to mix (render::ops_registry registers it with render's mixed_pieces). Without `mix` (core's own
+// registry) such a line is refused with not_yet_ported.
+void register_add_stroke(OpRegistry& registry, MixPieces mix);
+// brushes@1 (PC4 E1): what add_stroke needs of render beyond the mixing — a dab brush's line checked before it is kept
+// (`check_dabs`: its dabs counted, OpError "too_large" past their limit), and a line with a blend (not normal) painted
+// into a paint layer's pixels (`blend`: the page, the layer's id, the line as it would be kept, the blend) instead of
+// kept as a line. Without them (core's own registry) a dab brush's line is kept unchecked and a blend refused with
+// not_yet_ported.
+struct StrokeHooks {
+    MixPieces mix;
+    std::function<void(const Document& doc, const Stroke& stroke)> check_dabs;
+    std::function<void(OpContext& c, std::size_t page, const std::string& layer_id, const Stroke& stroke, const std::string& blend)> blend;
+};
+void register_add_stroke(OpRegistry& registry, StrokeHooks hooks);
+void register_layer_ops(OpRegistry& registry);
+void register_color_ops(OpRegistry& registry);
+// Register the ops of M3-A that draw nothing (move_layers, group_layers, set_paper, set_timelapse, store_area,
+// forget_area: core/ops_arrange.cpp). The ones that draw are render's (render/ops_registry.hpp).
+void register_arrange_ops(OpRegistry& registry);
+// group_layers ({page, ids, id?, name?, group?}: the layers put in a new folder where the topmost was; groups@1, PC5 I-b:
+// with group true, a group of 通過) — for the ops that group as they go (render/ops_groups' frame_from_layers).
+void group_layers_op(OpContext& c);
+
+// Image.open(BytesIO(bytes)).verify() for a picture an op is given as base64 (a line's style.picture and
+// style.fill_png): render's (render/raster_ops.hpp). Throws PyValueError with Pillow's words for what Python raises as
+// OSError, ValueError or IndexError there, and PyUncaught for the others.
+using PictureCheck = std::function<void(const std::string& bytes)>;
+
+// Register the line ops of M4 (add_line, edit_line, move_line, delete_line, reorder_lines, cut_balloon,
+// set_balloon_path, replace_text: core/ops_lines.cpp). Without `check` a picture in a line's style is refused with
+// not_yet_ported (as an area that needs resolving is): render::ops_registry registers them again with its check.
+void register_line_ops(OpRegistry& registry, PictureCheck check = {});
+// (type@1, PC5 G-0) A line's style as add_line takes it (ops._merge_style over nothing: OpError for a key or value it does not
+// take; a picture in it, without `check`, not_yet_ported): a type layer's record's.
+Json line_style(const Json& style, const PictureCheck& check = {});
+// (type@1, PC5 G-0) A balloon's kind as add_line takes it (balloons.SHAPES; OpError "balloon must be one of …").
+std::string line_balloon(const Json& kind);
+// What the book and page ops of M4 need beyond core (render::register_bookpage_ops gives them; without them the ops
+// refuse that part with not_yet_ported).
+struct BookPageHooks {
+    // pagespec._raster: a whole-page paint layer's PNG (over the page's old paper `old_paper`) moved and resized from the
+    // old basic frame onto the new one, as big as the page's new paper `spec` at raster.WORKING_DPI. Pillow's errors as
+    // Python raises them (PyUncaught). (Python makes every page's pixels as big as the book's paper, which cuts off what a
+    // jacket or a band, wider than the book, has beyond it: here a cover's own paper, covers::spec_for — the user's
+    // decision D1.) A picture that is not at that 200 dpi (a PSD's, put_raster's, one Image Size kept without
+    // resampling) keeps its resolution, as relayout_color's (Python takes it for one at 200 dpi: the review of PC3).
+    std::function<std::string(const std::string& png, const PageSpec& old_paper, const PageSpec& spec, const Rect& old_frame, const Rect& new_frame)>
+        relayout_raster;
+    // A layer mask (its PNG over the page's old paper `old_paper`) moved as its layer's pixels and lines are, from the
+    // old basic frame onto the new one, over the page's new paper `paper` at the mask's resolution (ops.MASK_DPI's 150, a
+    // precise or ink page's finer grid — PC3 B2); nothing when that changes
+    // nothing (a mask of one value everywhere; the same paper and frame) and for a mask that cannot be read (left as it
+    // is). Python leaves a mask as it was, stretched over the new paper while what it masks moves (the user's decision
+    // D1).
+    std::function<std::optional<std::string>(const std::string& png, const PageSpec& old_paper, const PageSpec& paper,
+                                             const Rect& old_frame, const Rect& new_frame)>
+        relayout_mask;
+    // color-mode@1: a paint layer's inks (GKIR) on a CMYK or Lab page moved as relayout_raster moves a PNG (at 200 dpi
+    // onto 200 dpi, at any other resolution keeping it).
+    std::function<std::string(const std::string& gkir, const PageSpec& old_paper, const PageSpec& spec, const Rect& old_frame, const Rect& new_frame)>
+        relayout_inks;
+    // PC3 C-e: a precise paint layer's raster (GKCR over the page's old paper `old_paper`) moved as relayout_raster moves a
+    // PNG, over the new paper `paper` at the resolution it had (bilinear).
+    std::function<std::string(const std::string& gkcr, const PageSpec& old_paper, const PageSpec& paper, const Rect& old_frame, const Rect& new_frame)>
+        relayout_color;
+    // channels@1: a page's channel (its GKIR mask over the page's old paper `old_paper`) moved as its layers are, over the
+    // new paper `paper` at the resolution it had.
+    std::function<Bytes(const Bytes& gkir, const PageSpec& old_paper, const PageSpec& paper, const Rect& old_frame, const Rect& new_frame)>
+        relayout_channel;
+    // PC3 A2: a smart object's filter mask (a PNG of the book's files over the page, as a layer's mask) moved as
+    // relayout_mask moves a layer's; the smart object then names the moved one (held in `doc`'s smart_files). One that is
+    // not in the book, or that moving does not change, stays as it is.
+    std::function<void(Document& doc, Layer& layer, const PageSpec& old_paper, const PageSpec& paper, const Rect& old_frame, const Rect& new_frame)>
+        relayout_filter_mask;
+    // io.load_episode(Path(from)) for import_pages: the other book, read whole. OpError "the other book cannot be read
+    // (<why>)" for one that cannot be read, Python's words where Python has them.
+    std::function<Document(const std::string& from)> load_book;
+};
+
+// Register the book and page ops of M4 (set_page_spec, set_spread, add_cover, set_assignee, import_pages:
+// core/ops_bookpages.cpp; for_pages is the CommandBus's, replace_text a line op, set_nombre an M1 book op).
+void register_bookpage_ops(OpRegistry& registry, BookPageHooks hooks = {});
+
+// ops.STYLE_KEYS: the keys a line's style takes, in Python's order (the app's 既定の設定に戻す clears them).
+std::vector<std::string> line_style_keys();
+
+// ops._find_line: the first line of the story with this id. OpError "no line <id>".
+StoryLine& find_line(Document& doc, const std::string& line_id);
+
+// stamp_material's lettering material (描き文字, Python's ops._apply_one): a line on the page at `page` set as the
+// material has it ("text", "balloon", "wrap", "style", "w_mm", "h_mm"), centred on op's x_mm/y_mm (the page's middle by
+// default), op's width_mm wide (the material's w_mm by default), in op's frame_id; op's id is the line's id. The style
+// goes through _merge_style as add_line's does (`check` for its pictures); what this build's book cannot hold (a number
+// that is not finite, a frame_id that is not a panel's id) is refused last, as add_line refuses it.
+void stamp_lettering(Document& doc, std::size_t page, const Json& op, const Json& material, const PictureCheck& check);
+
+}  // namespace genko::core

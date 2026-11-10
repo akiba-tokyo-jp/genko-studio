@@ -1,0 +1,523 @@
+#include <QtTest/QtTest>
+#include <algorithm>
+#include <QTemporaryDir>
+#include "core/command_bus.hpp"
+#include "core/model.hpp"
+#include "core/color_raster.hpp"
+#include "storage/asset_store.hpp"
+#include "storage/reader.hpp"
+#include "storage/transaction.hpp"
+#include "storage/writer.hpp"
+#include "render/page.hpp"
+#include "render/png.hpp"
+#include "render/ops_registry.hpp"
+using namespace genko;
+using core::Json;
+class TestColorRaster : public QObject {
+    Q_OBJECT
+private slots:
+    void highPrecisionMergeAndConversion_data() {
+        QTest::addColumn<QString>("precision"); QTest::addColumn<QString>("operation");
+        for (const QString& precision : {QStringLiteral("u16"), QStringLiteral("f32")})
+            for (const QString& op : {QStringLiteral("merge_down"), QStringLiteral("merge_layers"),
+                                     QStringLiteral("merge_visible"), QStringLiteral("convert_layer")})
+                QTest::newRow((precision+"-"+op).toUtf8().constData()) << precision << op;
+    }
+    // A book whose other pages are still being read (Document::deferred, the first page shown first): its budget for
+    // precise colour pictures cannot count them, so no op may make them bigger until they are read.
+    void precisePicturesDoNotGrowWhilePagesAreRead() {
+        auto doc=core::new_episode("読込中",core::Num(1),2,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        auto& p=doc.edit_page(0); p.numero=false; p.frames.clear(); p.layers.clear();
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},{"precision","u16"},
+                        {"pixels",Json::array({1,2,3,65535})}};
+        auto base=core::CommandBus().apply(doc,Json::array({put,put}),core::Actor("human:test")).doc;
+        const Json copy={{"op","merge_visible"},{"page",1},{"copy",true}};
+        const auto merged=core::CommandBus(render::ops_registry()).apply(base,Json::array({copy}),core::Actor("human:test")).doc;
+        QCOMPARE(merged.page(0).layers.size(),std::size_t(3));
+        QVERIFY(merged.page(0).layers[2].color_raster);  // (read whole: the merged copy is one more precise picture)
+        base.deferred.push_back(base.pages[1]);
+        try {
+            core::CommandBus(render::ops_registry()).apply(base,Json::array({copy}),core::Actor("human:test"));
+            QFAIL("a precise picture grew while pages were not read");
+        } catch(const core::ApplyError& e) {
+            QCOMPARE(QString::fromStdString(e.code()),QStringLiteral("page_not_loaded"));
+        }
+        // a layer copied shares its picture: the precise pictures do not grow, and the op is taken
+        const Json duplicate={{"op","duplicate_layer"},{"page",1},{"id",base.page(0).layers[0].id}};
+        const auto copied=core::CommandBus(render::ops_registry()).apply(base,Json::array({duplicate}),core::Actor("human:test")).doc;
+        QCOMPARE(copied.page(0).layers.size(),std::size_t(3));
+    }
+
+    // The precise colour work's own keys (merge_visible's flatten) are not in Python's public list (`genko schema`,
+    // test_contract_cli): they are taken, and not reported as ignored; a key no op takes still is.
+    void nativeKeysAreNotReportedAsIgnored() {
+        auto doc=core::new_episode("拡張キー",core::Num(1),1,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        auto& p=doc.edit_page(0); p.numero=false; p.frames.clear(); p.layers.clear();
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},{"precision","u16"},
+                        {"pixels",Json::array({1,2,3,65535})}};
+        const auto base=core::CommandBus().apply(doc,Json::array({put,put}),core::Actor("human:test")).doc;
+        const Json flatten={{"op","merge_visible"},{"page",1},{"copy",false},{"flatten",true}};
+        const auto flat=core::CommandBus(render::ops_registry()).apply(base,Json::array({flatten}),core::Actor("human:test"));
+        for(const Json& warning:flat.warnings) QVERIFY2(warning.get<std::string>().find("unknown keys")==std::string::npos,warning.dump().c_str());
+        const Json odd={{"op","merge_visible"},{"page",1},{"copy",true},{"colour","red"}};
+        const auto other=core::CommandBus(render::ops_registry()).apply(base,Json::array({odd}),core::Actor("human:test"));
+        QVERIFY(std::any_of(other.warnings.begin(),other.warnings.end(),[](const Json& w){
+            return w.get<std::string>()=="ops[0] merge_visible: unknown keys ignored: colour";}));
+    }
+
+    void highPrecisionMergeAndConversion() {
+        QFETCH(QString,precision); QFETCH(QString,operation);
+        auto doc=core::new_episode("高精度結合",core::Num(1),2,
+            core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        auto& p=doc.edit_page(0); p.numero=false; p.frames.clear(); p.layers.clear();
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},
+            {"precision",precision.toStdString()},{"pixels",precision=="u16" ?
+                Json::array({1,2,3,65535}) : Json::array({-0.125,1.00000011920928955078125,2.0,1.0})}};
+        auto base=core::CommandBus().apply(doc,Json::array({put,put}),core::Actor("human:test")).doc;
+        const auto lower=base.page(0).layers[0].id, upper=base.page(0).layers[1].id;
+        const auto original=base.page(0).layers[1].color_raster;
+        const auto before=render::render_page(base.page(0),72).image;
+        Json op={{"op",operation.toStdString()},{"page",1}};
+        if(operation=="merge_down" || operation=="convert_layer") op["id"]=upper;
+        if(operation=="convert_layer") op["to"]="paint";
+        if(operation=="merge_layers") op["ids"]=Json::array({lower,upper});
+        if(operation=="merge_visible") op["copy"]=false;
+        std::optional<core::ApplyResult> result;
+        try { result=core::CommandBus(render::ops_registry()).apply(base,Json::array({op}),core::Actor("human:test")); }
+        catch(const std::exception& e) { QFAIL(e.what()); }
+        QVERIFY(result.has_value());
+        const auto& page=result->doc.page(0);
+        QCOMPARE(page.layers.size(),operation=="convert_layer" ? std::size_t(2) : std::size_t(1));
+        const auto bytes=operation=="convert_layer" ? page.layers[1].color_raster : page.layers[0].color_raster;
+        QVERIFY(bytes); QVERIFY(!page.layers[0].raster_png);
+        core::ColorRasterView pixels(*bytes);
+        QCOMPARE(pixels.metadata("x")["precision"].get<std::string>(),precision.toStdString());
+        const auto expected=core::ColorRasterView(*original).pixel(0);
+        const auto actual=pixels.pixel(0);
+        for(unsigned c=0;c<4;++c) QVERIFY2(std::abs(actual[c]-expected[c])<1e-8,"merge must retain low bits/negative/HDR values");
+        const auto after=render::render_page(page,72).image;
+        QCOMPARE(after.tobytes(),before.tobytes());
+        QTemporaryDir tmp; QVERIFY(tmp.isValid());
+        const std::filesystem::path dir(tmp.path().toStdString()); storage::AssetStore assets(dir);
+        const auto saved=storage::project_payload_v4(result->doc,assets);
+        const auto reloaded=storage::load_document_payload(saved,dir);
+        QVERIFY2(reloaded.document.read_only_reason.empty(),reloaded.document.read_only_reason.c_str());
+        const auto loaded=operation=="convert_layer" ? reloaded.document.page(0).layers[1].color_raster : reloaded.document.page(0).layers[0].color_raster;
+        QVERIFY(loaded); QCOMPARE(*loaded,*bytes);
+        QCOMPARE(base.page(0).layers[1].color_raster,original);
+    }
+    void repeatedColorAssetSharesBytes_data() {
+        QTest::addColumn<QString>("precision");
+        QTest::newRow("u16") << QStringLiteral("u16");
+        QTest::newRow("f32") << QStringLiteral("f32");
+    }
+    void repeatedColorAssetSharesBytes() {
+        QFETCH(QString,precision);
+        QTemporaryDir tmp; QVERIFY(tmp.isValid());
+        const std::filesystem::path dir(tmp.path().toStdString());
+        auto doc=core::new_episode("素材の構造共有",core::Num(1),2,
+            core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},
+            {"precision",precision.toStdString()},{"pixels",precision=="u16" ?
+                Json::array({1000,1001,1002,65535}) : Json::array({0.1,-0.125,2.0,1.0})}};
+        doc=core::CommandBus().apply(doc,Json::array({put}),core::Actor("human:test")).doc;
+        const auto original=doc.page(0).layers.back().color_raster;
+        auto copy=doc.page(0).layers.back(); copy.id="shared-second";
+        doc.edit_page(0).layers.push_back(copy);
+        storage::AssetStore assets(dir);
+        const auto payload=storage::project_payload_v4(doc,assets);
+        const auto loaded=storage::load_document_payload(payload,dir);
+        QVERIFY2(loaded.document.read_only_reason.empty(),loaded.document.read_only_reason.c_str());
+        const auto& layers=loaded.document.page(0).layers;
+        const auto a=layers.at(layers.size()-2).color_raster;
+        const auto b=layers.back().color_raster;
+        QVERIFY(a && b);
+        QCOMPARE(*a,*original); QCOMPARE(*b,*original);
+        QVERIFY2(a==b,"one immutable high-precision asset must not be allocated once per layer");
+    }
+    // color-model@1: a precise raster's "space" is "srgb" or (on an RGB page of a profile) that profile's ref; the
+    // metadata is checked with the space it says, and one that is neither is refused. The writer writes the page's.
+    void metadataSpace() {
+        auto doc=core::new_episode("空間",core::Num(1),1,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},
+            {"precision","u16"},{"pixels",Json::array({1,2,3,65535})}};
+        doc=core::CommandBus().apply(doc,Json::array({put}),core::Actor("human:test")).doc;
+        const core::ColorRasterView view(*doc.page(0).layers.back().color_raster);
+        const std::string ref="sha256:"+std::string(64,'a');
+        QCOMPARE(view.metadata("x")["space"],Json("srgb"));
+        QCOMPARE(view.metadata("x",ref)["space"],Json(ref));
+        view.check_metadata(view.metadata("x",ref));
+        view.check_metadata(view.metadata("x"));
+        QCOMPARE(core::color_raster_space_of(view.metadata("x",ref)),ref);
+        Json wrong=view.metadata("x");
+        wrong["space"]="display-p3";
+        QVERIFY_EXCEPTION_THROWN(view.check_metadata(wrong),core::Error);
+        QCOMPARE(core::color_raster_space_of(wrong),std::string());
+        core::check_tiled_metadata(view,core::tiled_metadata(view,{"a"},ref));
+        Json tiled=core::tiled_metadata(view,{"a"});
+        tiled["space"]=1;
+        QVERIFY_EXCEPTION_THROWN(core::check_tiled_metadata(view,tiled),core::Error);
+        // the writer: the page's space (an RGB page of a profile: its ref)
+        QTemporaryDir tmp; QVERIFY(tmp.isValid());
+        storage::AssetStore assets(std::filesystem::path(tmp.path().toStdString()));
+        QCOMPARE(storage::project_payload_v4(doc,assets)["pages"][0]["layers"].back()["color_raster"]["space"],Json("srgb"));
+    }
+    void sharedColorAssetBudget() {
+        QTemporaryDir tmp; QVERIFY(tmp.isValid());
+        const std::filesystem::path dir(tmp.path().toStdString());
+        auto doc=core::new_episode("共有素材の予算",core::Num(1),2,
+            core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},
+            {"precision","f32"},{"pixels",Json::array({0.1,-0.125,2.0,1.0})}};
+        doc=core::CommandBus().apply(doc,Json::array({put}),core::Actor("human:test")).doc;
+        storage::AssetStore assets(dir);
+        auto payload=storage::project_payload_v4(doc,assets);
+        // A valid 4096x4096 f32 fixture: one HDR pixel and transparent zero padding.
+        // Four references exceed 1GiB (the book's budget, PC1: the user's decision) only if the same allocation is
+        // charged four times.
+        auto bytes=*doc.page(0).layers.back().color_raster;
+        bytes.resize(16+std::size_t(4096)*4096*16,0);
+        for (const std::size_t offset : {std::size_t(8),std::size_t(12)}) {
+            bytes[offset]=0; bytes[offset+1]=16; bytes[offset+2]=0; bytes[offset+3]=0;
+        }
+        const auto ref=assets.put_bytes(bytes,core::kColorRasterSuffix);
+        auto layer=payload["pages"][0]["layers"].back();
+        layer["color_raster"]=core::ColorRasterView(bytes).metadata(ref);
+        for (int i=0;i<4;++i) {
+            layer["id"]="shared-large-"+std::to_string(i);
+            if (i==0) payload["pages"][0]["layers"].back()=layer;
+            else payload["pages"][i%2]["layers"].push_back(layer);
+        }
+        const auto loaded=storage::load_document_payload(payload,dir);
+        QVERIFY2(loaded.document.read_only_reason.empty(),loaded.document.read_only_reason.c_str());
+        core::Bytes shared;
+        int references=0;
+        for (const auto& page : loaded.document.pages) for (const auto& l : page->layers) {
+            if (!l.color_raster) continue;
+            if (!shared) shared=l.color_raster;
+            QVERIFY(l.color_raster==shared); ++references;
+        }
+        QCOMPARE(references,4); QCOMPARE(*shared,bytes);
+        auto independent=loaded.document;
+        for (std::size_t i=0;i<independent.pages.size();++i) {
+            auto& page=independent.edit_page(i);
+            for (auto& l : page.layers) if (l.color_raster)
+                l.color_raster=std::make_shared<const std::string>(*shared);
+        }
+        // Same content in separate live allocations still exceeds the unchanged cap.
+        QVERIFY_EXCEPTION_THROWN(core::validate_color_document(independent),core::Error);
+        const auto saved=storage::project_payload_v4(loaded.document,assets);
+        const auto reloaded=storage::load_document_payload(saved,dir);
+        QVERIFY(reloaded.document.read_only_reason.empty());
+        QCOMPARE(*reloaded.document.page(0).layers.back().color_raster,bytes);
+    }
+    void sharedColorAssetStillChecksEachLayer_data() {
+        QTest::addColumn<QString>("precision"); QTest::addColumn<QString>("badField");
+        for (const auto& precision : {QStringLiteral("u16"),QStringLiteral("f32")})
+            for (const auto& bad : {QStringLiteral("width"),QStringLiteral("precision"),QStringLiteral("kind")})
+                QTest::newRow((precision+"-"+bad).toUtf8().constData()) << precision << bad;
+    }
+    void sharedColorAssetStillChecksEachLayer() {
+        QFETCH(QString,precision); QFETCH(QString,badField);
+        QTemporaryDir tmp; QVERIFY(tmp.isValid());
+        const std::filesystem::path dir(tmp.path().toStdString());
+        auto doc=core::new_episode("共有素材の層検証",core::Num(1),2,
+            core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},
+            {"precision",precision.toStdString()},{"pixels",precision=="u16" ?
+                Json::array({1000,1001,1002,65535}) : Json::array({0.1,-0.125,2.0,1.0})}};
+        doc=core::CommandBus().apply(doc,Json::array({put}),core::Actor("human:test")).doc;
+        const auto original=doc.page(0).layers.back().color_raster;
+        auto copy=doc.page(0).layers.back(); copy.id="shared-invalid-second";
+        doc.edit_page(0).layers.push_back(copy);
+        storage::AssetStore assets(dir);
+        auto payload=storage::project_payload_v4(doc,assets);
+        auto& bad=payload["pages"][0]["layers"].back();
+        // (PC2d, document:color-depth-model: a tone layer holding precise pixels is drawn as a tone now — the 8-bit page's
+        // way —, so a layer of a kind that holds no pixels is the style no build draws)
+        if (badField=="kind") bad["kind"]="fill";
+        else if (badField=="width") bad["color_raster"]["width"]=2;
+        else bad["color_raster"]["precision"]=precision=="u16" ? "f32" : "u16";
+        const auto loaded=storage::load_document_payload(payload,dir);
+        QVERIFY(!loaded.document.read_only_reason.empty());
+        const auto& layers=loaded.document.page(0).layers;
+        const auto first=layers.at(layers.size()-2).color_raster;
+        QVERIFY(first); QCOMPARE(*first,*original);
+        if (badField=="kind") {
+            QVERIFY(first==layers.back().color_raster);
+            QVERIFY(loaded.document.read_only_reason.find("high-precision color layer style")!=std::string::npos);
+            auto toned=storage::project_payload_v4(doc,assets);
+            toned["pages"][0]["layers"].back()["role"]="tone";
+            QVERIFY(storage::load_document_payload(toned,dir).document.read_only_reason.empty());
+        } else {
+            QVERIFY(!layers.back().color_raster);
+            QVERIFY(std::any_of(loaded.report.issues.begin(),loaded.report.issues.end(),
+                [](const storage::LoadIssue& issue){return issue.kind=="broken_asset";}));
+        }
+    }
+    void inactiveHighPrecisionDoesNotChangeLegacyPixels_data() {
+        QTest::addColumn<QString>("precisionName"); QTest::addColumn<QString>("modeName");
+        QTest::addColumn<bool>("visible"); QTest::addColumn<bool>("exportable");
+        for (const QString& precision : {QStringLiteral("u16"),QStringLiteral("f32")}) {
+            for (const QString& mode : {QStringLiteral("print"),QStringLiteral("proof"),QStringLiteral("name")}) {
+                const auto label=precision+"-hidden-"+mode;
+                QTest::newRow(label.toUtf8().constData()) << precision << mode << false << true;
+            }
+            const auto label=precision+"-non-exported-print";
+            QTest::newRow(label.toUtf8().constData()) << precision << QStringLiteral("print") << true << false;
+        }
+    }
+    void inactiveHighPrecisionDoesNotChangeLegacyPixels() {
+        QFETCH(QString,precisionName); QFETCH(QString,modeName); QFETCH(bool,visible); QFETCH(bool,exportable);
+        auto doc=core::new_episode("非表示素材の画素対照",core::Num(1),2,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        auto& page=doc.edit_page(0); page.numero=false; page.frames.clear(); page.layers.clear();
+        core::Layer red; red.id="red"; red.kind=core::LayerKind::Fill; red.panel_clip=false;
+        red.fill=Json{{"rgb",Json::array({255,0,0})}}; red.opacity=0.5;
+        core::Layer blue=red; blue.id="blue"; blue.fill=Json{{"rgb",Json::array({0,0,255})}};
+        page.layers={red,blue};
+        render::RenderOptions options; options.mode=modeName.toStdString();
+        const auto baseline=render::render_page(page,72,options).image;
+        QCOMPARE(baseline.getpixel(baseline.width()/2,baseline.height()/2),(std::vector<double>{128,64,191}));
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},
+            {"precision",precisionName.toStdString()},{"pixels",precisionName=="u16" ? Json::array({1000,1001,1002,65535}) : Json::array({0.1,0.2,0.3,1.0})}};
+        auto withColor=core::CommandBus().apply(doc,Json::array({put}),core::Actor("human:test")).doc;
+        auto& layer=withColor.edit_page(0).layers.back(); layer.visible=visible; layer.exportable=exportable;
+        const auto originalBytes=layer.color_raster;
+        const auto actual=render::render_page(withColor.page(0),72,options).image;
+        QCOMPARE(actual.mode(),baseline.mode()); QCOMPARE(actual.width(),baseline.width()); QCOMPARE(actual.height(),baseline.height());
+        for (int y=0;y<baseline.height();++y) for (int x=0;x<baseline.width();++x)
+            QCOMPARE(actual.getpixel(x,y),baseline.getpixel(x,y));
+        QCOMPARE(withColor.page(0).layers.back().color_raster,originalBytes);
+    }
+    void invalidExposureOnOrdinaryBookBecomesReadOnly() {
+        QTemporaryDir tmp;
+        auto doc=core::new_episode("露光量保護",core::Num(1),2,core::PageSpec::b5_doujin());
+        const auto valid=core::CommandBus().apply(doc,Json::array({Json{{"op","add_layer"},{"page",1},{"layer","finish"},
+                            {"kind","adjust"},{"adjust",Json{{"kind","exposure"}}}}}),core::Actor("human:test")).doc;
+        storage::AssetStore assets(std::filesystem::path(tmp.path().toStdString()));
+        const auto original=storage::project_payload_v4(valid,assets);
+        QVERIFY(storage::load_document_payload(original,std::filesystem::path(tmp.path().toStdString())).document.read_only_reason.empty());
+        for (const Json& bad : {Json{{"kind","exposure"},{"gamma","nan"}},Json{{"kind","exposure"},{"gamma",Json::array({1})}},
+                               Json{{"kind","exposure"},{"unknown",1}}}) {
+            auto payload=original;
+            payload["pages"][0]["layers"].back()["adjust"]=bad;
+            payload["pages"][0]["layers"].back()["visible"]=false;
+            const auto loaded=storage::load_document_payload(payload,std::filesystem::path(tmp.path().toStdString()));
+            QVERIFY2(!loaded.document.read_only_reason.empty(),core::dump_canonical(bad).c_str());
+        }
+    }
+    void canonicalSnapshotRetainsHighPrecisionMetadata() {
+        QTemporaryDir tmp;
+        auto doc=core::new_episode("履歴",core::Num(1),2,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},
+                        {"precision","u16"},{"pixels",Json::array({1,2,3,65535})}};
+        const auto changed=core::CommandBus().apply(doc,Json::array({put}),core::Actor("human:test")).doc;
+        storage::AssetStore assets(std::filesystem::path(tmp.path().toStdString()));
+        const auto payload=storage::project_payload_v4(changed,assets);
+        const auto canonical=core::parse_python_json(core::dump_canonical(payload));
+        const auto loaded=storage::load_document_payload(canonical,std::filesystem::path(tmp.path().toStdString()));
+        QVERIFY2(loaded.document.read_only_reason.empty(),loaded.document.read_only_reason.c_str());
+        QCOMPARE(*loaded.document.page(0).layers.back().color_raster,*changed.page(0).layers.back().color_raster);
+    }
+    void boundedAssetReadEnforcesOpenedBytes() {
+        QTemporaryDir tmp;
+        storage::AssetStore assets(std::filesystem::path(tmp.path().toStdString()));
+        const auto ref=assets.put_bytes("0123456789abcdef", ".colorrgba");
+        QCOMPARE(*assets.get_bytes(ref,".colorrgba",16),std::string("0123456789abcdef"));
+        bool refused=false;
+        try { (void)assets.get_bytes(ref,".colorrgba",15); }
+        catch(const core::Error&) { refused=true; }
+        QVERIFY(refused);
+    }
+    // PC2d (document:color-depth-model): a tone layer holding precise pixels — refused before (read-only, not saved, not
+    // drawn) — is a tone as on the 8-bit page: read, saved and drawn as the same tone layer holding 8-bit pixels is.
+    void toneRolePreciseLayerIsDrawnAsATone() {
+        QTemporaryDir tmp;
+        auto doc=core::new_episode("トーン",core::Num(1),2,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},
+                        {"precision","u16"},{"pixels",Json::array({1000,1001,1002,65535})}};
+        auto base=core::CommandBus().apply(doc,Json::array({put}),core::Actor("human:test")).doc;
+        storage::AssetStore assets(std::filesystem::path(tmp.path().toStdString()));
+        auto payload=storage::project_payload_v4(base,assets);
+        payload["pages"][0]["layers"].back()["role"]="tone";
+        const auto loaded=storage::load_document_payload(payload,std::filesystem::path(tmp.path().toStdString()));
+        QVERIFY2(loaded.document.read_only_reason.empty(),loaded.document.read_only_reason.c_str());
+        base.edit_page(0).layers.back().role=core::LayerRole::Tone;
+        (void)storage::project_payload_v4(base,assets);  // (saved)
+        render::RenderOptions options;
+        const auto drawn=render::render_page(base.page(0),72,options,&base);
+        QVERIFY(drawn.omitted.empty());
+        auto eight=base;  // (the same tone layer with 8-bit pixels, on an 8-bit page)
+        auto& layer=eight.edit_page(0).layers.back();
+        layer.color_raster.reset();
+        layer.raster_png=std::make_shared<const std::string>(render::write_png(render::Image::create("RGBA",render::Size{1,1},render::Ink{4,4,4,255})));
+        QVERIFY(!render::uses_color_precision(eight.page(0),false));
+        const std::string a=drawn.image.convert("RGB").tobytes(), b=render::render_page(eight.page(0),72,options,&eight).image.convert("RGB").tobytes();
+        QCOMPARE(a.size(),b.size());
+        int worst=0;
+        for (std::size_t i=0;i<a.size();++i) worst=std::max(worst,std::abs(int(static_cast<unsigned char>(a[i]))-int(static_cast<unsigned char>(b[i]))));
+        QVERIFY2(worst<=1,qPrintable(QString::number(worst)));
+    }
+    void finiteHdrExposureStaysWhite() {
+        auto doc = core::new_episode("HDR",core::Num(1),2,core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        doc.edit_page(0).numero=false;
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},
+                        {"precision","f32"},{"pixels",Json::array({1e10,1e10,1e10,1.0})}};
+        const Json adjust={{"op","add_layer"},{"page",1},{"layer","finish"},{"kind","adjust"},
+                           {"adjust",Json{{"kind","exposure"}}}};
+        const auto changed=core::CommandBus().apply(doc,Json::array({put,adjust}),core::Actor("human:test")).doc;
+        const auto image=render::render_page(changed.page(0),72).image;
+        QCOMPARE(image.getpixel(image.width()/2,image.height()/2),(std::vector<double>{255,255,255}));
+    }
+    void mergeCannotEraseHighPrecisionSource() {
+        auto doc = core::new_episode("精度喪失拒否", core::Num(1), 2,
+            core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        const Json put = {{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},
+                         {"precision","u16"},{"pixels",Json::array({1000,1001,1002,65535})}};
+        const auto base = core::CommandBus().apply(doc,Json::array({put}),core::Actor("human:test")).doc;
+        const auto bytes = base.page(0).layers.back().color_raster;
+        const auto result = core::CommandBus(render::ops_registry()).apply(base,Json::array({
+            Json{{"op","set_note"},{"page",2},{"note","前置変更"}},
+            Json{{"op","merge_down"},{"page",1},{"id",base.page(0).layers.back().id}}}),core::Actor("human:test"));
+        const auto& merged = result.doc.page(0).layers.back().color_raster;
+        QVERIFY(merged);
+        QCOMPARE(core::ColorRasterView(*merged).pixel(0),core::ColorRasterView(*bytes).pixel(0));
+        QCOMPARE(result.doc.page(1).note,std::string("前置変更"));
+        QVERIFY(base.page(1).note.empty());
+        QCOMPARE(base.page(0).layers.back().color_raster,bytes);
+    }
+    void vectorConversionRefusesPrecisionLossAtomically() {
+        auto doc=core::new_episode("精度喪失拒否",core::Num(1),2,
+            core::PageSpec::custom(20,20,16,16,1,2,2,2,2,72,"color"));
+        const Json put={{"op","put_color_raster"},{"page",1},{"width",1},{"height",1},
+                        {"precision","u16"},{"pixels",Json::array({1000,1001,1002,65535})}};
+        const auto base=core::CommandBus().apply(doc,Json::array({put}),core::Actor("human:test")).doc;
+        const auto bytes=base.page(0).layers.back().color_raster;
+        bool rejected=false;
+        try {
+            (void)core::CommandBus(render::ops_registry()).apply(base,Json::array({
+                Json{{"op","set_note"},{"page",2},{"note","前置変更"}},
+                Json{{"op","convert_layer"},{"page",1},{"id",base.page(0).layers.back().id},{"to","pen"}}}),core::Actor("human:test"));
+        } catch (const core::ApplyError& e) { rejected=std::string(e.what()).find("high-precision")!=std::string::npos; }
+        QVERIFY(rejected);QVERIFY(base.page(1).note.empty());
+        QCOMPARE(base.page(0).layers.back().color_raster,bytes);
+    }
+    void exposureOnlyBookAdvertisesRequiredFeature() {
+        QTemporaryDir tmp;
+        auto doc = core::new_episode("８ビット露光量", core::Num(1), 2, core::PageSpec::b4_comic());
+        const Json op = {{"op", "add_layer"}, {"page", 1}, {"layer", "finish"}, {"kind", "adjust"},
+                         {"adjust", Json{{"kind", "exposure"}, {"exposure", 1.0}}}};
+        const auto result = core::CommandBus().apply(doc, Json::array({op}), core::Actor("human:test"));
+        storage::AssetStore assets(std::filesystem::path(tmp.path().toStdString()));
+        const auto payload = storage::project_payload_v4(result.doc, assets);
+        QVERIFY(std::find(payload.at("features").begin(), payload.at("features").end(), "native.exposure_v1") != payload.at("features").end());
+    }
+    // PC2d (document:color-depth-model): a precise layer's colour of its own — refused before (the whole batch rolled
+    // back) — is drawn as the 8-bit page draws a layer's colour: the batch goes through, the pixels keep their bytes,
+    // the page shows the colour where the layer is. (A batch rolled back whole: vectorConversionRefusesPrecisionLoss.)
+    void colourOfAPreciseLayerIsDrawn() {
+        auto doc = core::new_episode("層の色", core::Num(1), 2, core::PageSpec::custom(20, 20, 16, 16, 1, 2, 2, 2, 2, 72, "color"));
+        doc.edit_page(0).numero = false;
+        const Json put = {{"op", "put_color_raster"}, {"page", 1}, {"width", 1}, {"height", 1},
+                         {"precision", "u16"}, {"pixels", Json::array({1000, 1001, 1002, 65535})}};
+        const auto base = core::CommandBus().apply(doc, Json::array({put}), core::Actor("human:test")).doc;
+        const auto bytes = base.page(0).layers.back().color_raster;
+        const auto result = core::CommandBus().apply(base, Json::array({
+                Json{{"op", "set_note"}, {"page", 2}, {"note", "前置変更"}},
+                Json{{"op", "set_layer"}, {"page", 1}, {"id", base.page(0).layers.back().id}, {"color", Json::array({200, 40, 10})}}}),
+                core::Actor("human:test"));
+        QCOMPARE(result.doc.page(1).note, std::string("前置変更"));
+        QCOMPARE(result.doc.page(0).layers.back().color_raster, bytes);
+        const auto image = render::render_page(result.doc.page(0), 72).image;
+        QCOMPARE(image.getpixel(image.width() / 2, image.height() / 2), (std::vector<double>{200, 40, 10}));
+    }
+    void exposureAdjustmentSeesAllSixteenBits() {
+        auto doc = core::new_episode("露光量試験", core::Num(1), 2,
+            core::PageSpec::custom(20, 20, 16, 16, 1, 2, 2, 2, 2, 72, "color"));
+        doc.edit_page(0).numero = false;
+        const Json put = {{"op", "put_color_raster"}, {"page", 1}, {"width", 1}, {"height", 1},
+                         {"precision", "u16"}, {"pixels", Json::array({1, 2, 3, 65535})}};
+        const Json add = {{"op", "add_layer"}, {"page", 1}, {"layer", "finish"}, {"kind", "adjust"},
+                         {"adjust", Json{{"kind", "exposure"}, {"exposure", 10.0}}}};
+        std::optional<core::ApplyResult> changed;
+        try { changed = core::CommandBus().apply(doc, Json::array({put, add}), core::Actor("human:test")); }
+        catch (const std::exception& e) { QFAIL(e.what()); }
+        const auto raw = changed->doc.page(0).layers[changed->doc.page(0).layers.size()-2].color_raster;
+        const auto output = render::render_page(changed->doc.page(0), 72).image;
+        const auto rgb = output.getpixel(output.width()/2, output.height()/2);
+        QCOMPARE(rgb, (std::vector<double>{4, 8, 12}));
+        QCOMPARE(core::ColorRasterView(*raw).pixel(0)[0], 1.0/65535.0);
+    }
+    void rgba32RetainsNegativeHdrAndLowBits() {
+        auto doc = core::new_episode("カラー32試験", core::Num(1), 2, core::PageSpec::b4_comic());
+        const Json op = {{"op", "put_color_raster"}, {"page", 1}, {"width", 1}, {"height", 1},
+                         {"precision", "f32"}, {"pixels", Json::array({1.00000011920928955078125, -0.125, 2.0, 0.125})}};
+        std::optional<core::ApplyResult> changed;
+        try { changed = core::CommandBus().apply(doc, Json::array({op}), core::Actor("human:test")); }
+        catch (const std::exception& e) { QFAIL(e.what()); }
+        const auto& bytes = changed->doc.page(0).layers.back().color_raster;
+        QVERIFY(bytes != nullptr);
+        const core::ColorRasterView view(*bytes);
+        const auto pixel = view.pixel(0);
+        QCOMPARE(pixel[0], 1.00000011920928955078125);
+        QCOMPARE(pixel[1], -0.125);
+        QCOMPARE(pixel[2], 2.0);
+        QCOMPARE(pixel[3], 0.125);
+        QCOMPARE(view.metadata("x").at("precision").get<std::string>(), std::string("f32"));
+        QCOMPARE(bytes->size(), std::size_t(32));
+        QCOMPARE(static_cast<unsigned char>((*bytes)[16]), static_cast<unsigned char>(1));
+        QCOMPARE(doc.page(0).layers.size()+1, changed->doc.page(0).layers.size());
+    }
+    void rgba16SurvivesNormalSaveAndReload() {
+        QTemporaryDir tmp;
+        QVERIFY(tmp.isValid());
+        const std::filesystem::path dir(tmp.path().toStdString());
+        auto doc = core::new_episode("カラー試験", core::Num(1), 2, core::PageSpec::b4_comic());
+        core::CommandBus bus;
+        const Json pixels = Json::array({1000, 1001, 1002, 65535, 65535, 30000, 12000, 40000});
+        const Json op = {{"op", "put_color_raster"}, {"page", 1}, {"width", 2}, {"height", 1},
+                         {"precision", "u16"}, {"pixels", pixels}};
+        std::optional<core::ApplyResult> changed;
+        try { changed = bus.apply(doc, Json::array({op}), core::Actor("human:test")); }
+        catch (const std::exception& e) { QFAIL(e.what()); }
+        storage::ProjectLock lock(dir, "human:test");
+        lock.try_acquire();
+        storage::Saver saver(lock);
+        storage::SaveRequest req;
+        req.actor = "human:test";
+        req.ops = Json::array({op});
+        const auto saved = saver.save(changed->doc, req);
+        QCOMPARE(saved.revision, std::int64_t(1));
+        const auto payload = storage::read_disk_state(dir).payload;
+        const auto& features = payload.at("features");
+        QVERIFY(std::find(features.begin(), features.end(), "native.color_raster_v1") != features.end());
+        QVERIFY(std::find(features.begin(), features.end(), "native.color_raster_tiles_v1") != features.end());
+        const auto& layers = payload.at("pages").at(0).at("layers");
+        const Json* encoded = nullptr;
+        for (const auto& layer : layers) if (layer.contains("color_raster")) encoded = &layer.at("color_raster");
+        QVERIFY(encoded != nullptr);
+        QCOMPARE(encoded->at("precision").get<std::string>(), std::string("u16"));
+        QVERIFY(!encoded->contains("asset"));  // (saved in tiles: this one fits in one)
+        QCOMPARE(encoded->at("tile").get<int>(), 256);
+        QCOMPARE(encoded->at("tiles").size(), std::size_t(1));
+        const auto ref = encoded->at("tiles").at(0).get<std::string>();
+        storage::AssetStore assets(dir);
+        const auto raw = *assets.get_bytes(ref, ".colorrgba");
+        QCOMPARE(raw.size(), std::size_t(32)); // 16-byte header + eight little-endian u16 samples
+        QCOMPARE(static_cast<unsigned char>(raw[16]), static_cast<unsigned char>(0xe8));
+        QCOMPARE(static_cast<unsigned char>(raw[18]), static_cast<unsigned char>(0xe9));
+        QCOMPARE(static_cast<unsigned char>(raw[20]), static_cast<unsigned char>(0xea));
+        const auto loaded = storage::load_document(dir);
+        QVERIFY(loaded.document.read_only_reason.empty());
+        storage::AssetStore other(dir / "copy");
+        const auto rewritten = storage::project_payload_v4(loaded.document, other);
+        const Json* second = nullptr;
+        for (const auto& layer : rewritten.at("pages").at(0).at("layers"))
+            if (layer.contains("color_raster")) second = &layer.at("color_raster");
+        QVERIFY(second != nullptr);
+        QCOMPARE(*encoded, *second);
+        QCOMPARE(*other.get_bytes(ref, ".colorrgba"), raw);
+    }
+};
+QTEST_GUILESS_MAIN(TestColorRaster)
+#include "test_color_raster.moc"

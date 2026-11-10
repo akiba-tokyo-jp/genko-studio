@@ -1,0 +1,33 @@
+{
+  "base_commit": "5b7f267abba5c6890675dd72a7178684f21a6dda",
+  "source_pins": {
+    "native/src/render/raster_ops.cpp": "a188be4bbed1a97bc663e02623d715ff2b084d93bdf8c37f292de0504825604a",
+    "native/src/render/fill_patches.cpp": "84dd4402828d341f378f26c160d263985a7829122d11e5ee911fbb90d097ead5",
+    "native/src/render/fill_patches.hpp": "b89fa67acfe8535db46322e59e6e61b45cd92ce8daac095aaf106a03a28510dc",
+    "native/src/render/ops_tones.cpp": "5fdf1e2b8164124ecea2a07977ec69d4b4b6b1685ad1765bb29e39c34d029f59",
+    "native/src/render/ops_effects.cpp": "24b1822f4f88cf6d51ed2f85950cb5d3c878d1be758c846b9dac4c0aaea00d19",
+    "native/tests/unit/test_command_bus.cpp": "fe6ce82aea0191037bd10a2f93b5f2fd1b1e1a6c7d4f5d9f5aaebaa532d0237b",
+    "native/tests/unit/test_tones_effects.cpp": "8874b0ea93e6ee336da15a1d200d715ded60f0cd519f7dcc2257509609c1e364"
+  },
+  "red_log": "merged-registry-real-red.log",
+  "red_exit": 8,
+  "green_log": "merged-registry-green.log",
+  "green_exit": 0,
+  "normal_cases_removed": 0,
+  "assertions_reduced": false,
+  "purpose": "共存する操作集合・core-only拒否・全registry正常・tone/raster選択resolver・ADL/ODRリンク境界",
+  "first_formal_attempts": {
+    "debug": "compile_failed_exit1",
+    "release": "compile_failed_exit1",
+    "asan": "deliberately_stopped_before_tests_exit137"
+  },
+  "full_matrix": "not_run_on_corrected_source",
+  "qt_passed": 100,
+  "qt_skipped": 0,
+  "complete_drawing_name_set_count": 43,
+  "binary_pins": {
+    "test_command_bus": "95f70ccea988feaafce2bef32e30a419bef1f31966079050a45760b00baffacf",
+    "test_tones_effects": "77ac731bbcc42626b2ac386e97e0c944816d47b2fad06d45403b5df5e4b9a3ad",
+    "test_raster_ops": "abb888df514a54ce6de92d6e88c239007fd0c67e1c1fdf77cbd261b147ba81df"
+  }
+}

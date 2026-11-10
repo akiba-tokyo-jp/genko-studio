@@ -1,0 +1,734 @@
+#include "render/color_edit.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <memory>
+#include <optional>
+#include <vector>
+
+#include "core/base64.hpp"
+#include "core/color_raster.hpp"
+#include "core/command_bus.hpp"
+#include "core/error.hpp"
+#include "core/exposure.hpp"
+#include "core/pyops.hpp"
+#include "core/strokes.hpp"
+#include "core/color_model.hpp"
+#include "render/color_canvas.hpp"
+#include "render/fill.hpp"
+#include "render/selection.hpp"
+#include "render/op_limits.hpp"
+#include "render/page.hpp"
+#include "render/page_pixels.hpp"
+#include "render/raster.hpp"
+
+namespace genko::render::color_edit {
+
+namespace {
+
+using Rgba = std::array<double, 4>;
+
+// The page at the raster's own resolution (see the header).
+struct Grid {
+    int dpi = raster::kWorkingDpi;
+    Size page;                            // the page in pixels at dpi
+    std::uint32_t width = 0, height = 0;  // the raster's pixels
+    double sx = 1, sy = 1;                // raster pixels per mm
+    bool exact() const { return page.width == static_cast<int>(width) && page.height == static_cast<int>(height); }
+};
+
+Grid grid_of(const core::Page& page, const core::ColorRasterView& raster) {
+    const double w_mm = page.spec.width_mm.value(), h_mm = page.spec.height_mm.value();
+    if (!(w_mm > 0) || !(h_mm > 0)) throw core::OpError("the page has no size");
+    Grid g;
+    g.width = raster.width();
+    g.height = raster.height();
+    const double guess = std::round(g.width * 25.4 / w_mm);
+    for (const double d : {guess, guess - 1, guess + 1}) {
+        if (d < 1 || d > limits::kResolution) continue;
+        const int dpi = static_cast<int>(d);
+        if (mm_to_px(w_mm, dpi) == static_cast<int>(g.width) && mm_to_px(h_mm, dpi) == static_cast<int>(g.height)) {
+            g.dpi = dpi;
+            g.page = Size{static_cast<int>(g.width), static_cast<int>(g.height)};
+            g.sx = g.sy = dpi / 25.4;  // (drawn as an 8-bit paint layer at its dpi is)
+            return g;
+        }
+    }
+    // not a whole dpi: drawn at the raster's resolution or finer (the working dpi at least), then boxed down onto it
+    g.sx = g.width / w_mm;
+    g.sy = g.height / h_mm;
+    const double finest = std::ceil(std::max(g.sx, g.sy) * 25.4);
+    limits::check_count(finest, limits::kResolution, "the raster's resolution");
+    g.dpi = std::max(raster::kWorkingDpi, static_cast<int>(finest));
+    g.page = Size{mm_to_px(w_mm, g.dpi), mm_to_px(h_mm, g.dpi)};
+    limits::check_picture(g.page.width, g.page.height, "the page");
+    return g;
+}
+
+// A mask of the page (at the grid's dpi) on the raster's own pixels.
+Image on_raster(const Image& page_mask, const Grid& g) {
+    if (g.exact()) return page_mask;
+    return page_mask.resize(Size{static_cast<int>(g.width), static_cast<int>(g.height)}, Resample::Box);
+}
+
+Image area_on_raster(const core::Json& area, const Grid& g) {
+    const selection::AreaMask drawn = selection::area_mask(area, g.dpi);
+    Image page_mask = Image::create("L", g.page, Ink(0));
+    page_mask.paste(drawn.mask, Point{static_cast<int>(drawn.x0), static_cast<int>(drawn.y0)});
+    return on_raster(page_mask, g);
+}
+
+Rgba to_linear(const Rgba& p) { return {core::srgb_to_linear(p[0]), core::srgb_to_linear(p[1]), core::srgb_to_linear(p[2]), p[3]}; }
+
+// A pixel a canvas in the page's space drew (color-model@1: on an RGB page of a profile, sRGB colours drawn into it) in
+// the linear light the edits here mix in (the raster's values through sRGB's curve: the values themselves are kept).
+Rgba drawn_pixel(const ColorCanvas& drawn, std::size_t i) {
+    const auto p = drawn.linear_pixel(i);
+    if (drawn.space().is_srgb()) return p;
+    Rgba out{};
+    for (unsigned c = 0; c < 3; ++c) out[c] = core::srgb_to_linear(drawn.space().encode(c, p[c]));
+    out[3] = p[3];
+    return out;
+}
+
+// Straight linear colour back to the raster's samples: a u16 raster holds 0..1 (a resampling overshoot is cut).
+Rgba to_samples(const Rgba& linear, bool floating) {
+    Rgba out{};
+    for (unsigned c = 0; c < 3; ++c) {
+        out[c] = core::linear_to_srgb(linear[c]);
+        if (!std::isfinite(out[c])) throw core::Error("value", "high-precision edit exceeds finite working range");
+        if (!floating) out[c] = std::clamp(out[c], 0.0, 1.0);
+    }
+    out[3] = std::clamp(linear[3], 0.0, 1.0);
+    return out;
+}
+
+// `top` (straight linear colour, alpha) over the pixel, as ColorCanvas lays a normal layer: where nothing is under it or
+// it hides all, it is the pixel; else the colours mix in linear light.
+void lay(core::ColorRasterEdit& out, std::size_t i, const Rgba& top, bool keep_alpha = false) {
+    const Rgba under = out.pixel(i);
+    const double a = std::clamp(top[3], 0.0, 1.0) * (keep_alpha ? under[3] : 1.0);
+    if (!(a > 0)) return;
+    if (a == 1 || under[3] == 0) {
+        out.set(i, to_samples(Rgba{top[0], top[1], top[2], a}, out.floating()));
+        return;
+    }
+    const Rgba below = to_linear(under);
+    const double alpha = a + below[3] * (1 - a);
+    Rgba mixed{};
+    for (unsigned c = 0; c < 3; ++c) mixed[c] = (top[c] * a + below[c] * below[3] * (1 - a)) / alpha;
+    mixed[3] = alpha;
+    out.set(i, to_samples(mixed, out.floating()));
+}
+
+// The same for a pixel carried whole (one source pixel, nothing resampled): its own samples, when they cover all or
+// nothing is under them; mixed as above otherwise.
+void lay_whole(core::ColorRasterEdit& out, std::size_t i, const Rgba& samples) {
+    if (!(samples[3] > 0)) return;
+    if (samples[3] == 1 || out.pixel(i)[3] == 0) {
+        out.set(i, samples);
+        return;
+    }
+    lay(out, i, to_linear(samples));
+}
+
+// The pixels an area lifts: each its colour and its alpha × the area's coverage, read as one or resampled (in linear
+// light, premultiplied, as ColorCanvas resamples a raster).
+class Lifted {
+public:
+    Lifted(const core::ColorRasterView& source, const Image& inside, const Box& box)
+        : source_(source), inside_(inside.tobytes()), width_(static_cast<int>(source.width())), height_(static_cast<int>(source.height())),
+          box_(box), linear_(Image::create("RGBA", Size{box.width(), box.height()}, Ink{0, 0, 0, 0})) {
+        const Image shown = inside.crop(box);
+        linear_.blend(source, Size{width_, height_}, box, 1, false, "normal", &shown);
+    }
+    // The lifted pixel at (x, y) as it was: its samples, its alpha × the coverage (nothing outside the area).
+    std::optional<Rgba> whole(int x, int y) const {
+        if (x < box_.x0 || y < box_.y0 || x >= box_.x1 || y >= box_.y1) return std::nullopt;
+        const std::size_t i = std::size_t(y) * width_ + x;
+        const int m = static_cast<unsigned char>(inside_[i]);
+        if (m == 0) return std::nullopt;
+        Rgba p = source_.pixel(i);
+        p[3] = m == 255 ? p[3] : p[3] * (m / 255.0);
+        return p;
+    }
+    // Premultiplied linear colour and alpha at (x, y).
+    Rgba premultiplied(int x, int y) const {
+        if (x < box_.x0 || y < box_.y0 || x >= box_.x1 || y >= box_.y1) return {0, 0, 0, 0};
+        const Rgba p = linear_.linear_pixel(std::size_t(y - box_.y0) * box_.width() + (x - box_.x0));
+        return {p[0] * p[3], p[1] * p[3], p[2] * p[3], p[3]};
+    }
+    // Lays the lifted pixels seen at (u, v) (raster pixels, a pixel spanning [k, k + 1)) over out's pixel i.
+    void lay_at(core::ColorRasterEdit& out, std::size_t i, double u, double v, Resample resample) const {
+        if (!std::isfinite(u) || !std::isfinite(v)) return;
+        if (resample == Resample::Nearest) {
+            if (u < -1 || v < -1 || u > width_ + 1 || v > height_ + 1) return;
+            if (const auto p = whole(static_cast<int>(std::floor(u)), static_cast<int>(std::floor(v)))) lay_whole(out, i, *p);
+            return;
+        }
+        const bool cubic = resample == Resample::Bicubic;
+        const int reach = cubic ? 2 : 1;
+        if (u < box_.x0 - reach - 1 || v < box_.y0 - reach - 1 || u > box_.x1 + reach + 1 || v > box_.y1 + reach + 1) return;
+        // a position within a billionth of a pixel of a pixel's centre reads that pixel as it is
+        double fx = u - .5, fy = v - .5;
+        double x0 = std::floor(fx), y0 = std::floor(fy);
+        double tx = fx - x0, ty = fy - y0;
+        if (tx < 1e-9) tx = 0; else if (tx > 1 - 1e-9) { tx = 0; x0 += 1; }
+        if (ty < 1e-9) ty = 0; else if (ty > 1 - 1e-9) { ty = 0; y0 += 1; }
+        const int ix = static_cast<int>(x0), iy = static_cast<int>(y0);
+        if (tx == 0 && ty == 0) {
+            if (const auto p = whole(ix, iy)) lay_whole(out, i, *p);
+            return;
+        }
+        const auto weights = [cubic](double t) {
+            std::array<double, 4> w{};  // for the pixels at -1, 0, 1, 2 from the floor
+            if (!cubic) { w[1] = 1 - t; w[2] = t; return w; }
+            const auto k = [](double d) {  // Pillow's bicubic, a = -0.5
+                constexpr double a = -0.5;
+                d = std::abs(d);
+                if (d < 1) return ((a + 2) * d - (a + 3)) * d * d + 1;
+                if (d < 2) return ((a * d - 5 * a) * d + 8 * a) * d - 4 * a;
+                return 0.0;
+            };
+            w[0] = k(t + 1); w[1] = k(t); w[2] = k(1 - t); w[3] = k(2 - t);
+            return w;
+        };
+        const auto wx = weights(tx), wy = weights(ty);
+        Rgba sum{};
+        std::array<double, 3> lo{INFINITY, INFINITY, INFINITY}, hi{-INFINITY, -INFINITY, -INFINITY};
+        for (int j = 0; j < 4; ++j) {
+            if (wy[j] == 0) continue;
+            for (int k = 0; k < 4; ++k) {
+                if (wx[k] == 0) continue;
+                const Rgba p = premultiplied(ix + k - 1, iy + j - 1);
+                for (unsigned c = 0; c < 4; ++c) sum[c] += p[c] * wx[k] * wy[j];
+                if (p[3] > 0)
+                    for (unsigned c = 0; c < 3; ++c) { lo[c] = std::min(lo[c], p[c] / p[3]); hi[c] = std::max(hi[c], p[c] / p[3]); }
+            }
+        }
+        if (!(sum[3] > 1e-12)) return;
+        // (a cubic's overshoot, or a colour divided by almost no alpha, stays within the colours it was made of)
+        Rgba mixed{};
+        for (unsigned c = 0; c < 3; ++c) mixed[c] = std::clamp(sum[c] / sum[3], lo[c], hi[c]);
+        mixed[3] = std::min(1.0, sum[3]);
+        lay(out, i, mixed);
+    }
+
+private:
+    const core::ColorRasterView& source_;
+    std::string inside_;
+    int width_, height_;
+    Box box_;
+    ColorCanvas linear_;
+};
+
+// The area's pixels lose their alpha (what stays where they were); the area on the raster and its box, if any.
+std::optional<std::pair<Image, Box>> leave(core::ColorRasterEdit& out, const core::Json& area, const Grid& g) {
+    Image inside = area_on_raster(area, g);
+    const auto box = inside.getbbox();
+    if (!box) return std::nullopt;
+    const std::string covered = inside.tobytes();
+    for (int y = box->y0; y < box->y1; ++y) {
+        for (int x = box->x0; x < box->x1; ++x) {
+            const std::size_t i = std::size_t(y) * g.width + x;
+            const int m = static_cast<unsigned char>(covered[i]);
+            if (m == 0) continue;
+            out.set_alpha(i, m == 255 ? 0.0 : out.pixel(i)[3] * (1 - m / 255.0));
+        }
+    }
+    return std::make_pair(std::move(inside), *box);
+}
+
+Box intersection(const Box& a, const Box& b) {
+    const Box out{std::max(a.x0, b.x0), std::max(a.y0, b.y0), std::min(a.x1, b.x1), std::min(a.y1, b.y1)};
+    return out.x1 > out.x0 && out.y1 > out.y0 ? out : Box{0, 0, 0, 0};
+}
+
+// Raster pixels [x0, x1) × [y0, y1) covering the points (raster pixels), widened by `margin` and kept on the raster.
+Box covering(const std::vector<std::pair<double, double>>& points, int margin, const Grid& g) {
+    double x0 = INFINITY, y0 = INFINITY, x1 = -INFINITY, y1 = -INFINITY;
+    for (const auto& [x, y] : points) {
+        if (!std::isfinite(x) || !std::isfinite(y)) return Box{0, 0, static_cast<int>(g.width), static_cast<int>(g.height)};
+        x0 = std::min(x0, x); y0 = std::min(y0, y); x1 = std::max(x1, x); y1 = std::max(y1, y);
+    }
+    const auto clamp = [](double v, std::uint32_t hi) { return static_cast<int>(std::clamp(v, 0.0, static_cast<double>(hi))); };
+    return Box{clamp(std::floor(x0) - margin, g.width), clamp(std::floor(y0) - margin, g.height),
+               clamp(std::ceil(x1) + margin, g.width), clamp(std::ceil(y1) + margin, g.height)};
+}
+
+}  // namespace
+
+Image area_on(const core::Page& page, const core::ColorRasterView& raster, const core::Json& area) {
+    return area_on_raster(area, grid_of(page, raster));
+}
+
+double pixel_scale(const core::Page& page, const core::ColorRasterView& raster) {
+    const Grid g = grid_of(page, raster);
+    return std::sqrt(g.sx * g.sy) / (raster::kWorkingDpi / 25.4);
+}
+
+std::string erase(const core::Page& page, const core::Layer& layer, const core::PenPoints& points, double width_mm,
+                  std::string_view texture, const std::string& seed) {
+    core::ColorRasterEdit out(*layer.color_raster);
+    const Grid g = grid_of(page, core::ColorRasterView(*layer.color_raster));
+    const bool hard = texture != "soft" && texture != "rough";
+    const std::string taken = on_raster(raster::eraser_mask(g.page, points, width_mm, g.dpi, hard ? "" : texture, seed), g).tobytes();
+    for (std::size_t i = 0; i < taken.size(); ++i) {
+        const int m = static_cast<unsigned char>(taken[i]);
+        if (m == 0) continue;
+        if (hard && m == 255) {
+            out.set(i, Rgba{0, 0, 0, 0});  // (as the 8-bit eraser stamps a clear pixel)
+            continue;
+        }
+        out.set_alpha(i, std::max(0.0, out.pixel(i)[3] - m / 255.0));
+    }
+    return std::move(out).take();
+}
+
+std::string erase_masked(const core::Page& page, const core::Layer& layer, const std::function<Image(Size, int)>& mask_of) {
+    core::ColorRasterEdit out(*layer.color_raster);
+    const Grid g = grid_of(page, core::ColorRasterView(*layer.color_raster));
+    const std::string taken = on_raster(mask_of(g.page, g.dpi), g).tobytes();
+    for (std::size_t i = 0; i < taken.size(); ++i) {
+        const int m = static_cast<unsigned char>(taken[i]);
+        if (m != 0) out.set_alpha(i, std::max(0.0, out.pixel(i)[3] - m / 255.0));
+    }
+    return std::move(out).take();
+}
+
+std::string delete_area(const core::Page& page, const core::Layer& layer, const core::Json& area) {
+    core::ColorRasterEdit out(*layer.color_raster);
+    (void)leave(out, area, grid_of(page, core::ColorRasterView(*layer.color_raster)));
+    return std::move(out).take();
+}
+
+std::string move_area(const core::Page& page, const core::Layer& layer, const core::Json& area, const selection::Matrix& m,
+                      Resample resample) {
+    const core::ColorRasterView source(*layer.color_raster);
+    const Grid g = grid_of(page, source);
+    const selection::Matrix inverse = selection::invert(m);
+    core::ColorRasterEdit out(*layer.color_raster);
+    const auto left = leave(out, area, g);
+    if (!left) return std::move(out).take();
+    const auto& [inside, box] = *left;
+    const Lifted lifted(source, inside, box);
+    // where they go: the box's corners through m
+    std::vector<std::pair<double, double>> corners;
+    for (const auto& [x, y] : {std::pair{box.x0, box.y0}, std::pair{box.x1, box.y0}, std::pair{box.x1, box.y1}, std::pair{box.x0, box.y1}}) {
+        const double xm = x / g.sx, ym = y / g.sy;
+        corners.emplace_back((m[0] * xm + m[2] * ym + m[4]) * g.sx, (m[1] * xm + m[3] * ym + m[5]) * g.sy);
+    }
+    const Box to = covering(corners, 3, g);
+    for (int y = to.y0; y < to.y1; ++y) {
+        for (int x = to.x0; x < to.x1; ++x) {
+            const double xm = (x + .5) / g.sx, ym = (y + .5) / g.sy;
+            const double u = (inverse[0] * xm + inverse[2] * ym + inverse[4]) * g.sx;
+            const double v = (inverse[1] * xm + inverse[3] * ym + inverse[5]) * g.sy;
+            lifted.lay_at(out, std::size_t(y) * g.width + x, u, v, resample);
+        }
+    }
+    return std::move(out).take();
+}
+
+std::string warp_area(const core::Page& page, const core::Layer& layer, const core::Json& area, const warp::Go& go,
+                      Resample resample) {
+    const core::ColorRasterView source(*layer.color_raster);
+    const Grid g = grid_of(page, source);
+    core::ColorRasterEdit out(*layer.color_raster);
+    const auto left = leave(out, area, g);
+    if (!left) return std::move(out).take();
+    const auto& [inside, box] = *left;
+    const Lifted lifted(source, inside, box);
+    // warp.warp_image: the box in cells × cells, each cell two triangles, each triangle moved as a whole (affine)
+    constexpr int cells = 14;
+    using P = std::pair<double, double>;
+    std::vector<std::vector<P>> from(cells + 1), to(cells + 1);
+    std::vector<P> all;
+    for (int j = 0; j <= cells; ++j) {
+        for (int i = 0; i <= cells; ++i) {
+            const double x = box.x0 + static_cast<double>(box.width()) * i / cells, y = box.y0 + static_cast<double>(box.height()) * j / cells;
+            const auto [u, v] = go(x / g.sx, y / g.sy);
+            if (!std::isfinite(u) || !std::isfinite(v)) throw core::OpError("the transform stretches the area too far");
+            from[j].emplace_back(x, y);
+            to[j].emplace_back(u * g.sx, v * g.sy);
+            all.push_back(to[j].back());
+        }
+    }
+    const Box reach = covering(all, 3, g);
+    if (reach.width() <= 0 || reach.height() <= 0) return std::move(out).take();
+    std::vector<std::array<P, 3>> sources, places;
+    for (int j = 0; j < cells; ++j) {
+        for (int i = 0; i < cells; ++i) {
+            sources.push_back({from[j][i], from[j][i + 1], from[j + 1][i + 1]});
+            places.push_back({to[j][i], to[j][i + 1], to[j + 1][i + 1]});
+            sources.push_back({from[j][i], from[j + 1][i + 1], from[j + 1][i]});
+            places.push_back({to[j][i], to[j + 1][i + 1], to[j + 1][i]});
+        }
+    }
+    // where each triangle lands (barycentric weights of a pixel's centre, all of them at least 0), or nothing
+    const auto weights = [](const std::array<P, 3>& d, double x, double y) -> std::optional<std::array<double, 3>> {
+        const double ax = d[1].first - d[0].first, ay = d[1].second - d[0].second;
+        const double bx = d[2].first - d[0].first, by = d[2].second - d[0].second;
+        const double det = ax * by - ay * bx;
+        if (!(std::abs(det) >= 1e-12)) return std::nullopt;
+        const double px = x - d[0].first, py = y - d[0].second;
+        const double l1 = (px * by - py * bx) / det, l2 = (ax * py - ay * px) / det, l0 = 1 - l1 - l2;
+        if (!(l0 >= -1e-9 && l1 >= -1e-9 && l2 >= -1e-9)) return std::nullopt;
+        return std::array<double, 3>{l0, l1, l2};
+    };
+    // the last triangle over a pixel is the one it shows (warp.warp_image pastes its pieces in order)
+    constexpr std::uint16_t kNone = 0xffff;
+    std::vector<std::uint16_t> shown(std::size_t(reach.width()) * reach.height(), kNone);
+    for (std::size_t t = 0; t < places.size(); ++t) {
+        const Box part = intersection(covering({places[t][0], places[t][1], places[t][2]}, 1, g), reach);
+        for (int y = part.y0; y < part.y1; ++y)
+            for (int x = part.x0; x < part.x1; ++x)
+                if (weights(places[t], x + .5, y + .5)) shown[std::size_t(y - reach.y0) * reach.width() + (x - reach.x0)] = static_cast<std::uint16_t>(t);
+    }
+    for (int y = reach.y0; y < reach.y1; ++y) {
+        for (int x = reach.x0; x < reach.x1; ++x) {
+            const std::uint16_t t = shown[std::size_t(y - reach.y0) * reach.width() + (x - reach.x0)];
+            if (t == kNone) continue;
+            const auto l = weights(places[t], x + .5, y + .5);
+            if (!l) continue;
+            const auto& s = sources[t];
+            const double u = (*l)[0] * s[0].first + (*l)[1] * s[1].first + (*l)[2] * s[2].first;
+            const double v = (*l)[0] * s[0].second + (*l)[1] * s[1].second + (*l)[2] * s[2].second;
+            lifted.lay_at(out, std::size_t(y) * g.width + x, u, v, resample);
+        }
+    }
+    return std::move(out).take();
+}
+
+std::string paste(const core::Page& page, const core::Layer& layer, const core::Layer& pasted, const core::Document* episode) {
+    const core::ColorRasterView source(*layer.color_raster);
+    const Grid g = grid_of(page, source);
+    core::ColorRasterEdit out(*layer.color_raster);
+    if (core::has_color_strokes(pasted)) {
+        // precise lines keep their colour: drawn in linear light at the grid's dpi, over the box they can reach
+        if (!pasted.patches.empty()) {
+            // (PC3 B2: the pictures first, then the lines over them — the order a layer draws them in)
+            core::Layer pictures = pasted;
+            pictures.strokes = core::empty_strokes();
+            core::Layer lines = pasted;
+            lines.patches.clear();
+            core::Layer under = layer;
+            under.color_raster = std::make_shared<const std::string>(paste(page, layer, pictures, episode));
+            return paste(page, under, lines, episode);
+        }
+        std::vector<std::pair<double, double>> reach;
+        for (const core::StrokePtr& stroke : pasted.strokes->items) {
+            const double margin = (stroke->width_mm * 2 + 1) / 25.4 * g.dpi + 4;
+            for (const auto& p : stroke->points) {
+                const double x = p.x / 25.4 * g.dpi, y = p.y / 25.4 * g.dpi;
+                reach.emplace_back(x - margin, y - margin);
+                reach.emplace_back(x + margin, y + margin);
+            }
+        }
+        const Box all{0, 0, g.page.width, g.page.height};
+        Grid page_grid = g;  // (covering() keeps a box on the page's pixels here)
+        page_grid.width = static_cast<std::uint32_t>(g.page.width);
+        page_grid.height = static_cast<std::uint32_t>(g.page.height);
+        const Box box = reach.empty() ? Box{0, 0, 0, 0} : intersection(covering(reach, 0, page_grid), all);
+        if (box.width() <= 0 || box.height() <= 0) return std::move(out).take();
+        ColorCanvas drawn(Image::create("RGBA", Size{box.width(), box.height()}, Ink{0, 0, 0, 0}), RgbSpace::of(page));
+        blend_color_strokes(drawn, page, pasted, g.dpi, box, episode);
+        if (g.exact()) {
+            for (int y = box.y0; y < box.y1; ++y)
+                for (int x = box.x0; x < box.x1; ++x)
+                    lay(out, std::size_t(y) * g.width + x, drawn_pixel(drawn, std::size_t(y - box.y0) * box.width() + (x - box.x0)), layer.lock_alpha);
+            return std::move(out).take();
+        }
+        // boxed down onto the raster: each raster pixel the mean of the drawn pixels whose centres fall in it
+        // (premultiplied, in linear light)
+        const double kx = static_cast<double>(g.width) / g.page.width, ky = static_cast<double>(g.height) / g.page.height;
+        const Box onto = intersection(Box{static_cast<int>(std::floor(box.x0 * kx)), static_cast<int>(std::floor(box.y0 * ky)),
+                                          static_cast<int>(std::ceil(box.x1 * kx)), static_cast<int>(std::ceil(box.y1 * ky))},
+                                      Box{0, 0, static_cast<int>(g.width), static_cast<int>(g.height)});
+        for (int y = onto.y0; y < onto.y1; ++y) {
+            const int y0 = std::max(box.y0, static_cast<int>(std::ceil(y / ky - .5))), y1 = std::min(box.y1, static_cast<int>(std::ceil((y + 1) / ky - .5)));
+            for (int x = onto.x0; x < onto.x1; ++x) {
+                const int x0 = std::max(box.x0, static_cast<int>(std::ceil(x / kx - .5))), x1 = std::min(box.x1, static_cast<int>(std::ceil((x + 1) / kx - .5)));
+                Rgba sum{};
+                const double whole = std::max(1.0, (std::ceil((x + 1) / kx - .5) - std::ceil(x / kx - .5)) * (std::ceil((y + 1) / ky - .5) - std::ceil(y / ky - .5)));
+                for (int py = y0; py < y1; ++py) {
+                    for (int px = x0; px < x1; ++px) {
+                        const Rgba p = drawn_pixel(drawn, std::size_t(py - box.y0) * box.width() + (px - box.x0));
+                        for (unsigned c = 0; c < 3; ++c) sum[c] += p[c] * p[3];
+                        sum[3] += p[3];
+                    }
+                }
+                if (!(sum[3] > 0)) continue;
+                lay(out, std::size_t(y) * g.width + x, Rgba{sum[0] / sum[3], sum[1] / sum[3], sum[2] / sum[3], sum[3] / whole}, layer.lock_alpha);
+            }
+        }
+        return std::move(out).take();
+    }
+    auto picture = drawable_layer_image(page, pasted, g.dpi, episode);
+    if (!picture) return std::move(out).take();
+    if (!g.exact()) picture = picture->resize(Size{static_cast<int>(g.width), static_cast<int>(g.height)}, Resample::Box);
+    const auto box = picture->getbbox();
+    if (!box) return std::move(out).take();
+    ColorCanvas drawn(Image::create("RGBA", Size{box->width(), box->height()}, Ink{0, 0, 0, 0}), RgbSpace::of(page));
+    drawn.blend(picture->crop(*box), 1, false);  // (the picture's sRGB colours, into the page's space)
+    for (int y = box->y0; y < box->y1; ++y)
+        for (int x = box->x0; x < box->x1; ++x)
+            lay(out, std::size_t(y) * g.width + x, drawn_pixel(drawn, std::size_t(y - box->y0) * box->width() + (x - box->x0)), layer.lock_alpha);
+    return std::move(out).take();
+}
+
+void bake_marks(core::Document& doc) {
+    for (std::size_t p = 0; p < doc.pages.size(); ++p) {
+        if (doc.is_deferred(p)) continue;
+        const core::Page& seen = doc.page(p);
+        for (std::size_t l = 0; l < seen.layers.size(); ++l) {
+            const core::Layer& layer = seen.layers[l];
+            if (!layer.color_raster || (layer.stroke_count() == 0 && layer.patches.empty())) continue;
+            core::Page& page = doc.edit_page(p);
+            core::Layer& target = page.layers[l];
+            core::Layer marks;  // (its lines and pictures as the layer draws them: cut at the panels as its own are)
+            marks.id = target.id;
+            marks.role = core::LayerRole::User;
+            marks.kind = core::LayerKind::Raster;
+            marks.panel_clip = target.panel_clip;
+            marks.panel_each = target.panel_each;
+            marks.strokes = target.strokes;
+            marks.patches = target.patches;
+            std::string pixels = paste(page, target, marks, &doc);
+            if (pixels != *target.color_raster) target.color_raster = std::make_shared<const std::string>(std::move(pixels));
+            target.strokes = core::empty_strokes();
+            target.patches.clear();
+        }
+    }
+}
+
+namespace {
+
+// A profile's bytes by its ref: a built-in one's, or one the book holds (an RGB page's); none when neither.
+core::Bytes rgb_profile_bytes(const core::Document& doc, const std::string& ref) {
+    if (const core::BuiltinProfile* builtin = core::builtin_profile_by_ref(ref); builtin != nullptr && builtin->space == core::ProfileSpace::Rgb) {
+        return builtin->bytes;
+    }
+    if (doc.rgb && doc.rgb->profile == ref && doc.rgb->icc) return doc.rgb->icc;
+    for (std::size_t p = 0; p < doc.pages.size(); ++p) {
+        if (doc.is_deferred(p)) continue;
+        const core::Page& page = doc.page(p);
+        if (page.rgb && page.rgb->profile == ref && page.rgb->icc) return page.rgb->icc;
+    }
+    return nullptr;
+}
+
+bool keyed(const core::Patch& patch) { return patch.attrs.is_object() && patch.attrs.contains(kPatchProfileKey); }
+
+}  // namespace
+
+void patch_to_srgb(core::Patch& patch, const core::Document& doc) {
+    if (!keyed(patch)) return;
+    const core::Json key = patch.attrs[std::string(kPatchProfileKey)];
+    patch.attrs.erase(std::string(kPatchProfileKey));
+    if (!key.is_string() || !patch.png || patch.png->empty()) return;
+    core::RgbMode mode;
+    mode.profile = key.get<std::string>();
+    mode.icc = rgb_profile_bytes(doc, mode.profile);
+    if (!mode.icc) return;  // (a profile the book does not hold: its values taken as sRGB)
+    try {
+        const RgbSpace space(mode);
+        patch.png = fills::png_bytes(srgb_from(selection::open_picture(*patch.png).convert("RGBA"), space));
+    } catch (const core::Error&) {  // (a profile that cannot be used: as sRGB)
+    }
+}
+
+void bake_page_values(core::Document& doc) {
+    for (std::size_t p = 0; p < doc.pages.size(); ++p) {
+        if (doc.is_deferred(p)) continue;
+        const core::Page& seen = doc.page(p);
+        const bool any = std::any_of(seen.layers.begin(), seen.layers.end(), [](const core::Layer& layer) {
+            return std::any_of(layer.patches.begin(), layer.patches.end(), keyed);
+        });
+        if (!any) continue;
+        core::Page& page = doc.edit_page(p);
+        for (core::Layer& layer : page.layers) {
+            if (std::none_of(layer.patches.begin(), layer.patches.end(), keyed)) continue;
+            // (its own page's values onto a paint layer's 8-bit pixels: laid as they are)
+            const bool here = core::profiled_rgb(page) && !layer.color_raster && !layer.ink_raster &&
+                              (layer.kind == core::LayerKind::Raster || layer.kind == core::LayerKind::Strokes);
+            std::vector<core::Patch> kept, laid;
+            for (core::Patch& patch : layer.patches) {
+                if (!keyed(patch)) {
+                    kept.push_back(std::move(patch));
+                } else if (here && patch.attrs[std::string(kPatchProfileKey)] == core::Json(page.rgb->profile)) {
+                    patch.attrs.erase(std::string(kPatchProfileKey));
+                    laid.push_back(std::move(patch));
+                } else {
+                    patch_to_srgb(patch, doc);
+                    kept.push_back(std::move(patch));
+                }
+            }
+            layer.patches = std::move(kept);
+            if (laid.empty()) continue;
+            core::Layer marks = layer;
+            marks.strokes = core::empty_strokes();
+            marks.shapes = core::vector::empty_shapes();  // (pen-shapes@1: the layer keeps its shape parts)
+            marks.patches = std::move(laid);
+            raster::bake_vectors(page, marks, &doc);  // (the page's values onto its values: as they are)
+            layer.raster_png = marks.raster_png;
+            layer.raster_relpath = marks.raster_relpath;
+            layer.raster_memo = {};
+            if (layer.kind == core::LayerKind::Strokes && layer.stroke_count() == 0 && (!layer.shapes || layer.shapes->items.empty()))
+                layer.kind = core::LayerKind::Raster;
+        }
+    }
+}
+
+std::string relayout(const std::string& gkcr, const core::PageSpec& old_paper, const core::PageSpec& paper, const core::Rect& old_frame,
+                     const core::Rect& new_frame) {
+    // (as set_page_spec's map moves a point: the old basic frame onto the new one, x and y each by its own scale)
+    return page_pixels::move_precise(gkcr, page_pixels::frame_how(), page_pixels::frame_map(old_frame, new_frame), old_paper, paper);
+}
+
+// --- pieces of precise pixels (PC3 B2) ----------------------------------------------------------------------------------
+
+namespace {
+
+std::string precision_of(const core::ColorRasterView& view) { return view.metadata("")["precision"].get<std::string>(); }
+
+// A page's precise pixels' space: its RGB profile's ref, or "srgb".
+std::string space_of(const core::Page& page) { return core::profiled_rgb(page) ? page.rgb->profile : std::string("srgb"); }
+
+// The RGB space a ref names (sRGB for "srgb"); none when the book does not hold the profile.
+std::optional<RgbSpace> space_named(const std::string& ref, const core::Document* episode) {
+    if (ref == "srgb" || ref.empty()) return RgbSpace{};
+    if (episode == nullptr) return std::nullopt;
+    core::RgbMode mode;
+    mode.profile = ref;
+    mode.icc = rgb_profile_bytes(*episode, ref);
+    if (!mode.icc) return std::nullopt;
+    try {
+        return RgbSpace(mode);
+    } catch (const core::Error&) {
+        return std::nullopt;
+    }
+}
+
+}  // namespace
+
+std::optional<Piece> lift_piece(const core::Page& page, const core::Layer& layer, const core::Json& area) {
+    if (!layer.color_raster) return std::nullopt;
+    const core::ColorRasterView source(*layer.color_raster);
+    const Grid g = grid_of(page, source);
+    const std::string inside = area_on_raster(area, g).tobytes();
+    int x0 = static_cast<int>(g.width), y0 = static_cast<int>(g.height), x1 = 0, y1 = 0;
+    for (int y = 0; y < static_cast<int>(g.height); ++y) {
+        for (int x = 0; x < static_cast<int>(g.width); ++x) {
+            const std::size_t i = std::size_t(y) * g.width + x;
+            if (static_cast<unsigned char>(inside[i]) == 0 || !(source.pixel(i)[3] > 0)) continue;
+            x0 = std::min(x0, x); y0 = std::min(y0, y); x1 = std::max(x1, x + 1); y1 = std::max(y1, y + 1);
+        }
+    }
+    if (x1 <= x0 || y1 <= y0) return std::nullopt;
+    const auto w = static_cast<std::uint32_t>(x1 - x0), h = static_cast<std::uint32_t>(y1 - y0);
+    Piece piece;
+    piece.samples = core::encode_color_pixels(w, h, precision_of(source), [&](std::size_t k) {
+        const std::size_t i = (std::size_t(y0) + k / w) * g.width + std::size_t(x0) + k % w;
+        const int m = static_cast<unsigned char>(inside[i]);
+        if (m == 0) return Rgba{0, 0, 0, 0};
+        Rgba p = source.pixel(i);
+        if (m != 255) p[3] *= m / 255.0;
+        return p;
+    });
+    piece.box_mm = {x0 / g.sx, y0 / g.sy, w / g.sx, h / g.sy};
+    piece.space = space_of(page);
+    return piece;
+}
+
+core::Patch piece_patch(const Piece& piece) {
+    const core::ColorRasterView view(piece.samples);
+    std::string rgba(std::size_t(view.width()) * view.height() * 4, '\0');
+    for (std::size_t i = 0; i < std::size_t(view.width()) * view.height(); ++i) {
+        const Rgba p = view.pixel(i);
+        for (unsigned c = 0; c < 4; ++c) rgba[i * 4 + c] = static_cast<char>(std::lround(std::clamp(std::isfinite(p[c]) ? p[c] : 0.0, 0.0, 1.0) * 255.0));
+    }
+    core::Patch patch;
+    patch.attrs = core::Json{{"mode", "image"},
+                             {"opacity", 1.0},
+                             {"box", core::Json::array({piece.box_mm[0], piece.box_mm[1], piece.box_mm[2], piece.box_mm[3]})},
+                             {std::string(kPieceKey), core::b64encode(piece.samples)},
+                             {std::string(kPieceSpaceKey), piece.space}};
+    // (its picture: the values as they are — on a page of a profile, that profile's, said as a lifted picture says it)
+    if (piece.space != "srgb") patch.attrs[std::string(kPatchProfileKey)] = piece.space;
+    patch.png = fills::png_bytes(Image::frombytes("RGBA", Size{static_cast<int>(view.width()), static_cast<int>(view.height())}, rgba));
+    return patch;
+}
+
+std::optional<std::string> patch_samples(const core::Patch& patch, const core::Page& page, const core::Document* episode) {
+    const core::Json* samples = core::get(patch.attrs, kPieceKey);
+    if (samples == nullptr || !samples->is_string()) return std::nullopt;
+    const core::Json* named = core::get(patch.attrs, kPieceSpaceKey);
+    const std::string from = named != nullptr && named->is_string() ? named->get<std::string>() : std::string("srgb");
+    std::string bytes;
+    try {
+        bytes = core::a2b_base64(samples->get<std::string>());
+        const core::ColorRasterView view(bytes);
+        if (view.width() == 0 || view.height() == 0) return std::nullopt;
+        const std::string to = space_of(page);
+        if (from == to) return bytes;
+        // (another RGB space: its colours through sRGB into the page's, the alpha as it is)
+        const auto source = space_named(from, episode);
+        const auto target = space_named(to, episode);
+        if (!source || !target) return std::nullopt;
+        const std::size_t n = std::size_t(view.width()) * view.height();
+        std::vector<double> rgb(n * 3);
+        for (std::size_t i = 0; i < n; ++i) {
+            const Rgba p = view.pixel(i);
+            for (unsigned c = 0; c < 3; ++c) rgb[i * 3 + c] = p[c];
+        }
+        if (!source->is_srgb()) source->to_srgb(rgb.data(), n);
+        if (!target->is_srgb()) target->from_srgb(rgb.data(), n);
+        return core::encode_color_pixels(view.width(), view.height(), precision_of(view), [&](std::size_t i) {
+            return Rgba{rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2], view.pixel(i)[3]};
+        });
+    } catch (const core::Error&) {  // (not a whole raster: drawn as its picture)
+        return std::nullopt;
+    }
+}
+
+std::string lay_piece(const core::Page& page, const core::Layer& layer, const std::string& samples, const std::array<double, 4>& box_mm,
+                      const selection::Matrix& m, Resample resample) {
+    const core::ColorRasterView piece(samples);
+    const auto pw = static_cast<int>(piece.width()), ph = static_cast<int>(piece.height());
+    if (pw <= 0 || ph <= 0 || !(box_mm[2] > 0) || !(box_mm[3] > 0)) throw core::Error("value", "the piece has no size");
+    std::string base;
+    if (layer.color_raster) {
+        base = *layer.color_raster;
+    } else {
+        // (a layer with no precise pixels yet: clear ones at the piece's resolution, in the page's precision)
+        const double dpi = std::clamp(std::round(pw * 25.4 / box_mm[2]), static_cast<double>(raster::kWorkingDpi), 600.0);
+        const int w = mm_to_px(page.spec.width_mm.value(), static_cast<int>(dpi)), h = mm_to_px(page.spec.height_mm.value(), static_cast<int>(dpi));
+        limits::check_picture(w, h, "the layer's precise pixels");
+        const std::string precision = page.rgb && page.rgb->depth == 32 ? "f32" : "u16";
+        base = core::encode_color_pixels(static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), precision, [](std::size_t) { return Rgba{0, 0, 0, 0}; });
+    }
+    const core::ColorRasterView raster(base);
+    const Grid g = grid_of(page, raster);
+    const selection::Matrix inverse = selection::invert(m);
+    core::ColorRasterEdit out(std::move(base));
+    const Lifted lifted(piece, Image::create("L", Size{pw, ph}, Ink(255)), Box{0, 0, pw, ph});
+    const double kx = pw / box_mm[2], ky = ph / box_mm[3];  // (the piece's pixels per mm)
+    std::vector<std::pair<double, double>> corners;
+    for (const auto& [x, y] : {std::pair{box_mm[0], box_mm[1]}, std::pair{box_mm[0] + box_mm[2], box_mm[1]},
+                               std::pair{box_mm[0] + box_mm[2], box_mm[1] + box_mm[3]}, std::pair{box_mm[0], box_mm[1] + box_mm[3]}}) {
+        corners.emplace_back((m[0] * x + m[2] * y + m[4]) * g.sx, (m[1] * x + m[3] * y + m[5]) * g.sy);
+    }
+    const Box to = covering(corners, 3, g);
+    for (int y = to.y0; y < to.y1; ++y) {
+        for (int x = to.x0; x < to.x1; ++x) {
+            const double xm = (x + .5) / g.sx, ym = (y + .5) / g.sy;
+            const double sx = inverse[0] * xm + inverse[2] * ym + inverse[4], sy = inverse[1] * xm + inverse[3] * ym + inverse[5];
+            lifted.lay_at(out, std::size_t(y) * g.width + x, (sx - box_mm[0]) * kx, (sy - box_mm[1]) * ky, resample);
+        }
+    }
+    return std::move(out).take();
+}
+
+}  // namespace genko::render::color_edit

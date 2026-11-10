@@ -1,0 +1,83 @@
+The regular expression engine ported in native/src/core/pyre*.cpp (from CPython v3.12.3's Lib/re/__init__.py,
+_parser.py, _compiler.py, _constants.py and Modules/_sre/sre.c, sre_lib.h) is Secret Labs' Regular Expression Engine.
+Its notices, as they stand in those files:
+
+From Lib/re/__init__.py:
+
+#
+# Secret Labs' Regular Expression Engine
+#
+# re-compatible interface for the sre matching engine
+#
+# Copyright (c) 1998-2001 by Secret Labs AB.  All rights reserved.
+#
+# This version of the SRE library can be redistributed under CNRI's
+# Python 1.6 license.  For any other use, please contact Secret Labs
+# AB (info@pythonware.com).
+#
+# Portions of this engine have been developed in cooperation with
+# CNRI.  Hewlett-Packard provided funding for 1.6 integration and
+# other compatibility work.
+#
+
+From Modules/_sre/sre.c:
+
+/*
+ * Secret Labs' Regular Expression Engine
+ *
+ * regular expression matching engine
+ *
+ * partial history:
+ * 1999-10-24 fl   created (based on existing template matcher code)
+ * 2000-03-06 fl   first alpha, sort of
+ * 2000-08-01 fl   fixes for 1.6b1
+ * 2000-08-07 fl   use PyOS_CheckStack() if available
+ * 2000-09-20 fl   added expand method
+ * 2001-03-20 fl   lots of fixes for 2.1b2
+ * 2001-04-15 fl   export copyright as Python attribute, not global
+ * 2001-04-28 fl   added __copy__ methods (work in progress)
+ * 2001-05-14 fl   fixes for 1.5.2 compatibility
+ * 2001-07-01 fl   added BIGCHARSET support (from Martin von Loewis)
+ * 2001-10-18 fl   fixed group reset issue (from Matthew Mueller)
+ * 2001-10-20 fl   added split primitive; re-enable unicode for 1.6/2.0/2.1
+ * 2001-10-21 fl   added sub/subn primitive
+ * 2001-10-24 fl   added finditer primitive (for 2.2 only)
+ * 2001-12-07 fl   fixed memory leak in sub/subn (Guido van Rossum)
+ * 2002-11-09 fl   fixed empty sub/subn return type
+ * 2003-04-18 mvl  fully support 4-byte codes
+ * 2003-10-17 gn   implemented non recursive scheme
+ * 2013-02-04 mrab added fullmatch primitive
+ *
+ * Copyright (c) 1997-2001 by Secret Labs AB.  All rights reserved.
+ *
+ * This version of the SRE library can be redistributed under CNRI's
+ * Python 1.6 license.  For any other use, please contact Secret Labs
+ * AB (info@pythonware.com).
+ *
+ * Portions of this engine have been developed in cooperation with
+ * CNRI.  Hewlett-Packard provided funding for 1.6 integration and
+ * other compatibility work.
+ */
+
+static const char copyright[] =
+    " SRE 2.2.2 Copyright (c) 1997-2002 by Secret Labs AB ";
+
+From Modules/_sre/sre_lib.h:
+
+/*
+ * Secret Labs' Regular Expression Engine
+ *
+ * regular expression matching engine
+ *
+ * Copyright (c) 1997-2001 by Secret Labs AB.  All rights reserved.
+ *
+ * See the sre.c file for information on usage and redistribution.
+ */
+
+Lib/re/_parser.py, _compiler.py and _constants.py carry "Copyright (c) 1997-2001" (_compiler.py) or
+"Copyright (c) 1998-2001" (_parser.py, _constants.py) "by Secret Labs AB.  All rights reserved." and "See the
+__init__.py file for information on usage and redistribution."
+
+CNRI's Python 1.6 license (the "CNRI LICENSE AGREEMENT FOR PYTHON 1.6.1") is in LICENSE in this folder (part B, "TERMS AND
+CONDITIONS FOR ACCESSING OR OTHERWISE USING PYTHON"), with the rest of Python's licenses (PSF License Agreement for
+Python 3.12.3).

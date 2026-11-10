@@ -1,0 +1,46 @@
+{
+ "what": "WebAssembly filter plugins for Genko's tests (PC5 J-f, plugins:WASM-ABI-v1, docs/PLUGIN_WASM.md): PhotoCraft's example invert.wasm, and modules made once from the WAT beside them (the hostile and broken ones too)",
+ "upstream": {
+  "project": "PhotoCraft",
+  "url": "https://github.com/storytold/photocraft",
+  "version": "v0.2.0",
+  "commit": "ad863217386440ca968fccc9bfff65ba24e61142",
+  "license": "MIT",
+  "file": "crates/plugins/tests/fixtures/invert.wasm (built from examples/plugins/invert-rs)"
+ },
+ "tool": {
+  "path": "native/wasm-host/examples/wat2wasm.rs",
+  "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+  "crates": "wat 1.261.0 by native/wasm-host/Cargo.lock",
+  "made": "2026-11-03",
+  "commands": [
+   "cargo run --release --locked --example wat2wasm -- <name>.wat <name>.wasm (double, shift, canvas, params, nan: checked to load as plug-ins)",
+   "cargo run --release --locked --example wat2wasm -- <name>.wat <name>.wasm --any (loop, bomb, trap, refuses, imports, badmanifest)"
+  ]
+ },
+ "files": {
+  "badmanifest.wasm": "2e4ac8ad98aaba4ba3d96c6f380de35ad506cef90460c4673f288d655e7453a7",
+  "badmanifest.wat": "4ada23405d13850a912f6d81df150c25df0f2a077206fc8715a1c9ffdea2d5df",
+  "bomb.wasm": "4e608e4761e166bcb21afaf55a767bc962d2f744763e37268265a95d040d9f20",
+  "bomb.wat": "e65a9ef830bc9ed950f0a1e977e6b17403262da3940fecea13440af6b1ec0567",
+  "canvas.wasm": "3bb367e1da22de8d4eda62c5b0f51d6b8fc4ae4a56680d0de879cbbd4ab8df31",
+  "canvas.wat": "1e26d5f11cd8762b59c7c709430ae06656ae7f262c6f6e9eda0984eaa4555538",
+  "double.wasm": "f83052b03c0ff379b285474d54267541aebf55d81a999914092cd0e8a0eb640f",
+  "double.wat": "16d5c5eb590e6d4fd05a6f9f4043400dd084b2da91cf7e45e478223733203086",
+  "imports.wasm": "c8155ac88e266d9e94401a69bb5c4e345c1e311610b5ef609b9c5c247566cb2f",
+  "imports.wat": "d88df2351191f89a35879a5d6896f98eb0923a03741c9f3eb6d6ae0cbbc68a6a",
+  "invert.wasm": "ab312ea83ea25f6b3e51d5c071fe1e364c06ca67735628f9c5cac7f6313f88f4",
+  "loop.wasm": "893eb65fb4eb17c045f231f7c3bd55646d1702804863443706af21793931267e",
+  "loop.wat": "82b9b8af9df9ac9f80dc01ad3ad3b9de414aee188ba080a05ab6198b11e0288d",
+  "nan.wasm": "ece62145a3d40a66953ec19453644378d98ed0c5aa3c5f68edb632f9330d5f82",
+  "nan.wat": "a6a373a3f1d31c29241f8c875f487bef01aa889b5300c3f8a9c85ac2a96bffe1",
+  "params.wasm": "85c1ae8b7cbbf7e981112f5af390bde74772b13854bd4b5019d5335acbbd5858",
+  "params.wat": "da67532c0f81066d0b1a285eaf2014909e93a66f57ebac0f58e5808f31be8454",
+  "refuses.wasm": "efb59011f24d2bc079a74f56cb9cccb8272956d424592090ad3e46fed62d5805",
+  "refuses.wat": "b5db7e90dbc68a936cbd7507e8b4ba532bdbfa7bc341aaa1fe2239d76c6bd134",
+  "shift.wasm": "e1d445fb920f6b307a8cd4e7a565a9ae3679948409896402184009c2cc86816f",
+  "shift.wat": "44fa5b3e3d044f3b7a8f657bb5720e944fb4f8903fbb0b00e59df5a790da0f11",
+  "trap.wasm": "04b3b376af297fd1b8f4f3be73c1d5d49d5655ab371f131d4ac024cf0bcf32d3",
+  "trap.wat": "8407c5a344355697ff0654d706d6992ebe580738283102898a7ac7ff92ced588"
+ }
+}

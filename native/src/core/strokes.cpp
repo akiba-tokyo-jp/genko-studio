@@ -1,0 +1,276 @@
+#include "core/strokes.hpp"
+
+#include <bit>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <cstdint>
+#include <cstring>
+
+#include "core/base64.hpp"
+#include "core/brush_dabs.hpp"
+#include "core/error.hpp"
+#include "core/ids.hpp"
+#include "core/pyconv.hpp"
+#include "core/pyops.hpp"
+
+namespace genko::core {
+
+namespace {
+
+// raw.get(key) or new_id()
+std::string stroke_id(const Json& raw) {
+    const Json* id = raw.is_object() ? get(raw, "id") : nullptr;
+    if (id == nullptr || !py_truthy(*id)) return new_id();
+    if (!id->is_string()) throw Error("format", "a stroke id must be a string, not " + py_repr(*id));
+    return id->get<std::string>();
+}
+
+std::vector<std::int64_t> int_list(const Json& value) {
+    std::vector<std::int64_t> out;
+    for (const auto& v : py_list(value)) out.push_back(py_int(v));
+    return out;
+}
+
+// Python's `pt[i]` for a point read from JSON.
+const Json& item(const Json& pt, std::size_t i) {
+    if (!pt.is_array()) throw Error("format", "a stroke point must be a list, not " + py_repr(pt));
+    if (i >= pt.size()) throw Error("format", "list index out of range");
+    return pt[i];
+}
+
+// brushes@1: a line's flow (a number, not a bool), none when not given.
+void read_flow(const Json& raw, Stroke& stroke) {
+    const Json* flow = get(raw, "flow");
+    if (flow != nullptr && !flow->is_null()) {
+        if (!flow->is_number()) throw Error("format", "a line's flow is between 0 and 1");
+        stroke.flow = flow->get<double>();
+    }
+    // (PC4 E1: the 背景色 of its colour dynamics, three whole numbers 0..255)
+    const Json* bg = get(raw, "background_rgb");
+    if (bg == nullptr || bg->is_null()) return;
+    if (!bg->is_array() || bg->size() != 3 || !std::all_of(bg->begin(), bg->end(), [](const Json& v) { return v.is_number_integer(); })) {
+        throw Error("format", "a line's background_rgb is three whole numbers 0..255");
+    }
+    std::vector<std::int64_t> rgb;
+    for (const Json& v : *bg) rgb.push_back(v.is_number_unsigned() && v.get<std::uint64_t>() > 255 ? 256 : v.get<std::int64_t>());
+    stroke.background_rgb = std::move(rgb);
+}
+
+}  // namespace
+
+std::string pack_doubles(std::span<const double> values) {
+    std::string bytes(values.size() * 8, '\0');
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        auto bits = std::bit_cast<std::uint64_t>(values[i]);
+        for (int b = 0; b < 8; ++b) {  // little-endian on every system
+            bytes[i * 8 + static_cast<std::size_t>(b)] = static_cast<char>(bits & 0xFF);
+            bits >>= 8;
+        }
+    }
+    return b64encode(bytes);
+}
+
+std::vector<double> unpack_doubles(std::string_view base64) {
+    const std::string bytes = a2b_base64(base64);
+    if (bytes.size() % 8 != 0) throw Error("format", "bytes length not a multiple of item size");
+    std::vector<double> out(bytes.size() / 8);
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        std::uint64_t bits = 0;
+        for (int b = 7; b >= 0; --b) {
+            bits = (bits << 8) | static_cast<unsigned char>(bytes[i * 8 + static_cast<std::size_t>(b)]);
+        }
+        out[i] = std::bit_cast<double>(bits);
+    }
+    return out;
+}
+
+void validate_stroke_color(const Json& color) {
+    if (!color.is_object() || color.size() != 2 || !color.contains("precision") || !color.contains("values") ||
+        (color["precision"] != "u16" && color["precision"] != "f32") || !color["values"].is_array() || color["values"].size() != 3)
+        throw Error("format", "color_rgb is {precision: u16|f32, values: [r,g,b]}");
+    for (const auto& v : color["values"]) {
+        if (!v.is_number()) throw Error("format", "color_rgb values must be finite numbers");
+        const double x = v.get<double>();
+        if (!std::isfinite(x) || std::abs(x) > std::numeric_limits<float>::max() ||
+            (color["precision"] == "u16" && (x < 0 || x > 1)))
+            throw Error("format", "color_rgb sample exceeds its precision range");
+    }
+}
+bool has_color_strokes(const Layer& layer) {
+    return layer.strokes && std::any_of(layer.strokes->items.begin(), layer.strokes->items.end(),
+        [](const StrokePtr& s) { return s && s->color_rgb.has_value(); });
+}
+Json stroke_to_packed(const Stroke& stroke) {
+    Json out = Json::object();
+    out["id"] = stroke.id;
+    out["kind"] = stroke.kind;
+    out["width_mm"] = stroke.width_mm;
+    std::vector<double> xy;
+    xy.reserve(stroke.points.size() * 2);
+    for (const PointF& p : stroke.points) {
+        xy.push_back(p.x);
+        xy.push_back(p.y);
+    }
+    out["xy"] = pack_doubles(xy);
+    if (!stroke.pressure.empty()) out["p"] = pack_doubles(stroke.pressure);
+    if (stroke.rgb) {
+        Json rgb = Json::array();
+        for (const auto v : *stroke.rgb) rgb.push_back(v);
+        out["rgb"] = std::move(rgb);
+    }
+    if (stroke.color_rgb) { validate_stroke_color(*stroke.color_rgb); out["color_rgb"] = *stroke.color_rgb; }
+    if (stroke.opacity != 1.0) out["opacity"] = stroke.opacity;
+    if (!stroke.rotation.empty()) out["r"] = pack_doubles(stroke.rotation);
+    if (stroke.pressure_opacity != 0.0) out["po"] = stroke.pressure_opacity;
+    // brushes@1 (PC4): the pen's inputs a dab brush reads, packed as "r" is; none for a line without them (a list that
+    // is no longer one a point — its points changed by an op that does not carry them — is not written: inputs_fit)
+    if (has_stroke_inputs(stroke)) {
+        const std::size_t n = stroke.points.size();
+        if (inputs_fit(stroke.tilt, n, 2)) out["tilt"] = pack_doubles(stroke.tilt);
+        if (inputs_fit(stroke.time_ms, n, 1)) out["time_ms"] = pack_doubles(stroke.time_ms);
+        if (inputs_fit(stroke.wheel, n, 1)) out["wheel"] = pack_doubles(stroke.wheel);
+        if (stroke.flow) out["flow"] = *stroke.flow;
+        if (stroke.background_rgb) out["background_rgb"] = *stroke.background_rgb;
+    }
+    return out;
+}
+
+std::string strokes_blob(const StrokeList& strokes) {
+    Json list = Json::array();
+    for (const StrokePtr& stroke : strokes.items) list.push_back(stroke_to_packed(*stroke));
+    return dump_canonical(list);
+}
+
+Stroke coerce_stroke(const Json& raw) {
+    Stroke stroke;
+    if (const Json* color = get(raw, "color_rgb")) { validate_stroke_color(*color); stroke.color_rgb = *color; }
+    if (raw.is_object() && raw.contains("xy")) {
+        const Json& xy_text = raw["xy"];
+        if (!xy_text.is_string()) {
+            throw Error("format", "argument should be bytes, buffer or ASCII string, not '" + py_type_name(xy_text) + "'");
+        }
+        const std::vector<double> xy = unpack_doubles(xy_text.get_ref<const std::string&>());
+        stroke.id = stroke_id(raw);
+        for (std::size_t i = 0; i + 1 < xy.size(); i += 2) stroke.points.push_back(PointF{xy[i], xy[i + 1]});
+        const auto unpack_key = [&](std::string_view key) -> std::vector<double> {
+            const Json* v = get(raw, key);
+            if (v == nullptr || !py_truthy(*v)) return {};
+            if (!v->is_string()) {
+                throw Error("format", "argument should be bytes, buffer or ASCII string, not '" + py_type_name(*v) + "'");
+            }
+            return unpack_doubles(v->get_ref<const std::string&>());
+        };
+        stroke.pressure = unpack_key("p");
+        const Json* width = get(raw, "width_mm");
+        stroke.width_mm = width ? py_float(*width) : 0.35;
+        const Json* kind = get(raw, "kind");
+        stroke.kind = kind && py_truthy(*kind) ? py_str(*kind) : "gpen";
+        if (const Json* rgb = get(raw, "rgb"); rgb && py_truthy(*rgb)) stroke.rgb = int_list(*rgb);
+        const Json* opacity = get(raw, "opacity");
+        stroke.opacity = opacity ? py_float(*opacity) : 1.0;
+        stroke.rotation = unpack_key("r");
+        const Json* po = get(raw, "po");
+        stroke.pressure_opacity = po && py_truthy(*po) ? py_float(*po) : 0.0;
+        stroke.tilt = unpack_key("tilt");
+        stroke.time_ms = unpack_key("time_ms");
+        stroke.wheel = unpack_key("wheel");
+        read_flow(raw, stroke);
+        validate_stroke_inputs(stroke);
+        return stroke;
+    }
+    if (raw.is_object()) {
+        const Json* points_value = get(raw, "points");
+        const Json points = points_value && py_truthy(*points_value) ? py_list(*points_value) : Json::array();
+        std::vector<std::pair<Json, Json>> pairs;  // tuple(pt[:2])
+        for (const Json& pt : points) {
+            if (!pt.is_array()) throw Error("format", "a stroke point must be a list, not " + py_repr(pt));
+            if (pt.size() < 2) {
+                throw Error("format", "not enough values to unpack (expected 2, got " + std::to_string(pt.size()) + ")");
+            }
+            pairs.emplace_back(pt[0], pt[1]);
+        }
+        const Json* pressure_value = get(raw, "pressure");
+        if (pressure_value && py_truthy(*pressure_value)) {
+            for (const Json& p : py_list(*pressure_value)) stroke.pressure.push_back(py_float(p));
+        }
+        if (stroke.pressure.empty()) {
+            for (const Json& pt : points) {
+                if (pt.size() > 2) stroke.pressure.push_back(py_float(pt[2]));
+            }
+        }
+        stroke.id = stroke_id(raw);
+        for (const auto& [x, y] : pairs) stroke.points.push_back(PointF{py_float(x), py_float(y)});
+        const Json* width = get(raw, "width_mm");
+        stroke.width_mm = width ? py_float(*width) : 0.35;
+        const Json* kind = get(raw, "kind");
+        stroke.kind = kind && py_truthy(*kind) ? py_str(*kind) : "gpen";
+        if (const Json* rgb = get(raw, "rgb"); rgb && py_truthy(*rgb)) stroke.rgb = int_list(*rgb);
+        const Json* opacity = get(raw, "opacity");
+        stroke.opacity = opacity ? py_float(*opacity) : 1.0;
+        if (const Json* rotation = get(raw, "rotation"); rotation && py_truthy(*rotation)) {
+            for (const Json& v : py_list(*rotation)) stroke.rotation.push_back(py_float(v));
+        }
+        const Json* po = get(raw, "po");
+        if (po == nullptr) po = get(raw, "pressure_opacity");
+        stroke.pressure_opacity = po && py_truthy(*po) ? py_float(*po) : 0.0;
+        // (brushes@1: tilt as [[x, y]…], time_ms and wheel as lists, one a point)
+        if (const Json* tilt = get(raw, "tilt"); tilt && py_truthy(*tilt)) {
+            for (const Json& pt : py_list(*tilt)) {
+                stroke.tilt.push_back(py_float(item(pt, 0)));
+                stroke.tilt.push_back(py_float(item(pt, 1)));
+            }
+        }
+        for (const auto& [key, into] : {std::pair<const char*, std::vector<double>*>{"time_ms", &stroke.time_ms}, {"wheel", &stroke.wheel}}) {
+            if (const Json* values = get(raw, key); values && py_truthy(*values)) {
+                for (const Json& v : py_list(*values)) into->push_back(py_float(v));
+            }
+        }
+        read_flow(raw, stroke);
+        validate_stroke_inputs(stroke);
+        return stroke;
+    }
+    if (!raw.is_array()) throw Error("format", "'" + py_type_name(raw) + "' object is not iterable");
+    PenPoints points;
+    for (const Json& pt : raw) {
+        PenPoint p{py_float(item(pt, 0)), py_float(item(pt, 1)), std::nullopt};
+        if (pt.size() > 2) p.p = py_float(pt[2]);
+        points.push_back(p);
+    }
+    return coerce_stroke(points);
+}
+
+Stroke coerce_stroke(const PenPoints& points) {
+    Stroke stroke;
+    for (const PenPoint& p : points) {
+        stroke.points.push_back(PointF{p.x, p.y});
+        if (p.p) stroke.pressure.push_back(*p.p);
+    }
+    if (stroke.pressure.size() != stroke.points.size()) stroke.pressure.clear();
+    stroke.id = new_id();
+    return stroke;
+}
+
+PenPoints stroke_points(const Stroke& stroke) {
+    PenPoints out;
+    out.reserve(stroke.points.size());
+    const bool with_pressure = !stroke.pressure.empty() && stroke.pressure.size() == stroke.points.size();
+    for (std::size_t i = 0; i < stroke.points.size(); ++i) {
+        PenPoint p{stroke.points[i].x, stroke.points[i].y, std::nullopt};
+        if (with_pressure) p.p = stroke.pressure[i];
+        out.push_back(p);
+    }
+    return out;
+}
+
+Json stroke_points_json(const Stroke& stroke) {
+    Json out = Json::array();
+    for (const PenPoint& p : stroke_points(stroke)) {
+        Json pt = Json::array({p.x, p.y});
+        if (p.p) pt.push_back(*p.p);
+        out.push_back(std::move(pt));
+    }
+    return out;
+}
+
+}  // namespace genko::core

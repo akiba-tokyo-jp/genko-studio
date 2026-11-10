@@ -1,0 +1,1909 @@
+// The main window's commands: the actions with Python's words, keys and tips (MainWindow._build_actions), the menus,
+// the tool palette and the command bar, the docks, and what each command does.
+
+#include <QApplication>
+#include <QKeyEvent>
+#include <QClipboard>
+#include <QCryptographicHash>
+#include <QDialogButtonBox>
+#include <QPushButton>
+#include <QVBoxLayout>
+#include <QDir>
+#include <QDockWidget>
+#include <QScrollArea>
+#include <QDoubleSpinBox>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QLineEdit>
+#include <QFormLayout>
+#include <QFutureWatcher>
+#include <QLabel>
+#include <QListWidget>
+#include <QMenu>
+#include <QMenuBar>
+#include <QMessageBox>
+#include <QSizePolicy>
+#include <QTabBar>
+#include <QTabWidget>
+#include <QToolBar>
+#include <QHBoxLayout>
+#include <QToolButton>
+#include <QFrame>
+#include <QSignalBlocker>
+#include <QtConcurrent>
+
+#include <algorithm>
+#include <cmath>
+
+#include "app/actions.hpp"
+#include "app/actions_panel.hpp"
+#include "app/ask.hpp"
+#include "app/bookview.hpp"
+#include "app/brush_panel.hpp"
+#include "app/colours.hpp"
+#include "app/comfort.hpp"
+#include "app/config.hpp"
+#include "app/layer_panel.hpp"
+#include "app/dialogs.hpp"
+#include "app/frame_tools.hpp"
+#include "app/help.hpp"
+#include "app/icons.hpp"
+#include "app/material_panel.hpp"
+#include "app/material_tabs.hpp"
+#include "app/subview.hpp"
+#include "app/main_window.hpp"
+#include "app/tool_presets_panel.hpp"
+#include "app/studio_widgets.hpp"
+#include "app/navigator.hpp"
+#include "app/pages_panel.hpp"
+#include "app/perf.hpp"
+#include "app/preferences.hpp"
+#include "app/templates.hpp"
+#include "app/theme.hpp"
+#include "app/tool_settings.hpp"
+#include "app/workspace.hpp"
+#include "service/wording.hpp"
+#include "core/brushes.hpp"
+#include "core/error.hpp"
+#include "core/paths.hpp"
+#include "core/pyconv.hpp"
+#include "core/exposure.hpp"
+#include "core/pynum.hpp"
+#include "core/anim.hpp"
+#include "core/video.hpp"
+#include "render/brushes.hpp"
+#include "render/image.hpp"
+#include "render/layer_bounds.hpp"
+#include "render/page.hpp"
+
+namespace genko::app {
+
+using core::Json;
+
+namespace {
+
+// The keys of a command. Python's commands took the system's standard keys (QKeySequence(std.X): its first binding on
+// this system), which differ by system (Redo is Ctrl+Y on Windows, Ctrl+Shift+Z on X11; Quit has none on Windows, Ctrl+Q
+// on X11; Close Ctrl+F4 too on Windows): the keys here are the same on every system (PC5 V3 — commands.json, which
+// genko commands reads, is one catalogue for every system; the key sets are the same wherever the app runs). Where the
+// systems differed, a command keeps every key it had on any of them (Windows' and X11's: no one loses a key they used);
+// Qt's "Ctrl" is the Command key on macOS, as the standard keys there.
+QList<QKeySequence> keys(std::initializer_list<const char*> list) {
+    QList<QKeySequence> out;
+    for (const char* key : list) out << QKeySequence(QString::fromLatin1(key));
+    return out;
+}
+QList<QKeySequence> keys(std::initializer_list<QKeySequence> list) { return QList<QKeySequence>(list); }
+
+struct Stage {
+    const char* key;
+    const char* label;
+    std::vector<const char*> show;
+    std::vector<const char*> front;
+};
+
+const std::vector<Stage>& stages() {
+    // (comfort.STAGES: the panels each stage of the work uses most, by their titles — PC5 H-0: Photoshop's オプション,
+    // ナビゲーター, ヒストリー)
+    static const std::vector<Stage> list = {
+        {"name", "ネーム", {"オプション", "クイックアクセス", "ページ", "台詞", "点検"}, {"台詞", "ページ"}},
+        {"ink", "作画", {"オプション", "クイックアクセス", "ナビゲーター", "レイヤー", "カラー", "素材", "ヒストリー"}, {"レイヤー", "素材"}},
+        {"finish", "仕上げ", {"オプション", "クイックアクセス", "レイヤー", "素材", "定規・3D", "点検"}, {"レイヤー", "素材"}},
+        {"letter", "写植", {"オプション", "ページ", "台詞", "点検"}, {"台詞", "ページ"}},
+        {"review", "承認", {"承認箱", "コマの詳細", "資料", "ページ", "点検"}, {"承認箱", "ページ"}},
+    };
+    return list;
+}
+
+Json point_json(const QPointF& p) { return Json::array({core::py_round(p.x(), 2), core::py_round(p.y(), 2)}); }
+
+// Key releases for キーを押している間だけ持ち替え (Python's _KeyReleases): one watcher on the app, handing each to the window
+// in front. It is on the app only from a tool's key (not a click on its button) until the next key let go (an app-wide
+// watcher runs for every event of every widget, which slows drawing): a modifier let go meanwhile keeps it on.
+class KeyReleases : public QObject {
+public:
+    bool on = false;
+
+    bool eventFilter(QObject*, QEvent* event) override {
+        if (event->type() == QEvent::KeyRelease && !static_cast<QKeyEvent*>(event)->isAutoRepeat()) {
+            const int key = static_cast<QKeyEvent*>(event)->key();
+            if (auto* front = qobject_cast<MainWindow*>(QApplication::activeWindow()); front != nullptr && front->tool_switch()) {
+                front->hold_key_released(key);
+            }
+            if (key != Qt::Key_Shift && key != Qt::Key_Control && key != Qt::Key_Alt && key != Qt::Key_Meta && key != Qt::Key_AltGr &&
+                key != Qt::Key_Space) {
+                stop_key_releases();
+            }
+        }
+        return false;
+    }
+};
+
+KeyReleases* key_watch = nullptr;
+
+void watch_key_releases() {
+    auto* app = QCoreApplication::instance();
+    if (app == nullptr) return;
+    if (key_watch == nullptr) key_watch = new KeyReleases;
+    if (!key_watch->on) {
+        key_watch->on = true;
+        app->installEventFilter(key_watch);
+    }
+}
+
+// On each tool's action: chosen by its key (not a click), the key's release is watched from now (Python's _ByKey).
+class ByKey : public QObject {
+public:
+    bool eventFilter(QObject*, QEvent* event) override {
+        if (event->type() == QEvent::Shortcut) watch_key_releases();
+        return false;
+    }
+};
+
+}  // namespace
+
+void stop_key_releases() {
+    auto* app = QCoreApplication::instance();
+    if (key_watch != nullptr && app != nullptr && key_watch->on) {
+        key_watch->on = false;
+        app->removeEventFilter(key_watch);
+    }
+}
+
+bool key_releases_watched() { return key_watch != nullptr && key_watch->on; }
+
+// --- アクション (PC5 J-g: オートアクション before) -----------------------------------------------------------------------------
+
+void MainWindow::fill_actions_menu() {
+    QMenu* menu = actions_menu_;
+    for (QMenu* sub : menu->findChildren<QMenu*>(Qt::FindDirectChildrenOnly)) sub->deleteLater();  // (clear() leaves them)
+    menu->clear();
+    if (!recording_) {
+        menu->addAction(QStringLiteral("記録を始める"), this, [this] { start_recording(); });
+    } else {
+        menu->addAction(QStringLiteral("記録を止めて名前を付ける…（%1 手）").arg(recording_->size()), this, [this] { stop_recording(); });
+        menu->addAction(QStringLiteral("記録をやめる（残さない）"), this, [this] { drop_recording(); });
+    }
+    const Json saved = actions::load();
+    menu->addSeparator();
+    if (saved.empty()) {
+        menu->addAction(QStringLiteral("（記録したアクションはまだありません）"))->setEnabled(false);
+        return;
+    }
+    for (const auto& [key, data] : saved.items()) {
+        const QString name = QString::fromStdString(key);
+        QAction* run = menu->addAction(QStringLiteral("実行: %1").arg(name), this, [this, name] { play_action(name); });
+        run->setToolTip(actions::describe(data["ops"]));
+    }
+    QMenu* every = menu->addMenu(QStringLiteral("全ページに実行"));
+    for (const auto& [key, data] : saved.items()) {
+        const QString name = QString::fromStdString(key);
+        every->addAction(name, this, [this, name] { play_action_on_all(name); });
+    }
+    QMenu* gone = menu->addMenu(QStringLiteral("消す"));
+    for (const auto& [key, data] : saved.items()) {
+        const QString name = QString::fromStdString(key);
+        gone->addAction(name, this, [this, name] { remove_action(name); });
+    }
+    menu->addSeparator();
+    menu->addAction(QStringLiteral("管理（手順を見る・並べ替える・外す）…"), this, [this] { manage_actions(); });
+}
+
+QDialog* MainWindow::manage_actions() {
+    auto* dialog = new actions::ActionsDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->show();
+    return dialog;
+}
+
+void MainWindow::start_recording() {
+    recording_ = Json::array();
+    // (as Python's: the page's status at once, its 「● アクションを記録中」 showing that it records)
+    flash_timer_.stop();
+    refresh_status();
+    if (actions_panel_ != nullptr) actions_panel_->refresh();
+}
+
+void MainWindow::drop_recording() {
+    recording_.reset();
+    flash_timer_.stop();
+    refresh_status();
+    if (actions_panel_ != nullptr) actions_panel_->refresh();
+}
+
+bool MainWindow::stop_recording(std::optional<QString> name) {
+    const Json ops = recording_.value_or(Json::array());
+    recording_.reset();
+    refresh_status();
+    if (ops.empty()) {
+        flash(QStringLiteral("記録した操作がありません"), 3000);
+        return false;
+    }
+    if (!name) {
+        name = ask::get_text(this, QStringLiteral("アクション"), QStringLiteral("名前（%1 手: %2）").arg(ops.size()).arg(actions::describe(ops)));
+        if (!name || name->trimmed().isEmpty()) return false;
+    }
+    if (const auto failed = actions::store(name->trimmed(), ops)) {
+        ask::warning(this, QStringLiteral("アクション"), *failed);
+        return false;
+    }
+    flash(QStringLiteral("「%1」を残しました（ウィンドウ → アクション から再生）").arg(name->trimmed()), 4000);
+    if (actions_panel_ != nullptr) actions_panel_->refresh();
+    return true;
+}
+
+bool MainWindow::play_action(const QString& name) {
+    const Json saved = actions::load();
+    const auto found = saved.find(name.toStdString());
+    const core::Page* page = current_page();
+    if (found == saved.end() || page == nullptr) return false;
+    const core::Layer* layer = target_layer();
+    const core::Frame* frame = selected_frame();
+    const Json& recorded = (*found)["ops"];
+    const Json ops = actions::replay(recorded, page->index.json(), layer != nullptr ? std::optional<std::string>(layer->id) : std::nullopt,
+                                     frame != nullptr ? std::optional<std::string>(frame->id) : std::nullopt);
+    const std::size_t skipped = recorded.size() - ops.size();
+    if (ops.empty()) {
+        flash(QStringLiteral("「%1」の手順は、どれも記録したページの決まった物を変えるもので、このページではできません").arg(name), 5000);
+        return false;
+    }
+    // (PC5 I-0: every way in has the same rule — an approval, a page lock or undo recorded before is refused, said)
+    if (!steps_allowed(ops, name, QStringLiteral("。ウィンドウ → アクション の 管理… で、その手順を外してください"))) return false;
+    if (!apply_ops(ops)) return false;
+    const QString extra = skipped > 0 ? QStringLiteral("。%1 手はこのページではできないので飛ばしました").arg(skipped) : QString();
+    flash(QStringLiteral("「%1」を実行しました（%2 手。元に戻すは 1 回で%3）").arg(name, QString::number(ops.size()), extra), 4000);
+    return true;
+}
+
+bool MainWindow::play_action_on_all(const QString& name) {
+    const Json saved = actions::load();
+    const auto found = saved.find(name.toStdString());
+    if (found == saved.end()) return false;
+    Json steps = actions::replay((*found)["ops"], Json(0), std::nullopt, std::nullopt);
+    for (Json& op : steps) op.erase("page");
+    if (steps.empty()) {
+        flash(QStringLiteral("「%1」の手順は、どれも記録したページの決まった物を変えるもので、ほかのページではできません").arg(name), 5000);
+        return false;
+    }
+    if (!steps_allowed(steps, name, QStringLiteral("。ウィンドウ → アクション の 管理… で、その手順を外してください"))) return false;  // (PC5 I-0)
+    if (!ask::question(this, QStringLiteral("アクション"), QStringLiteral("「%1」を全ページ（表紙を除く）に実行しますか？（元に戻すは 1 回）").arg(name))) {
+        return false;
+    }
+    if (!apply_ops(Json::array({Json{{"op", "for_pages"}, {"pages", "body"}, {"ops", steps}}}))) return false;
+    flash(QStringLiteral("「%1」を全ページに実行しました").arg(name), 4000);
+    return true;
+}
+
+void MainWindow::remove_action(const QString& name) {
+    if (!ask::question(this, QStringLiteral("アクション"), QStringLiteral("「%1」を消しますか？").arg(name))) return;
+    if (const auto failed = actions::remove(name)) ask::warning(this, QStringLiteral("アクション"), *failed);
+}
+
+bool MainWindow::hold_key_released(int key, std::optional<double> now) {
+    if (!tool_switch_ || !hold_swap()) return false;
+    const ToolSwitch switched = *tool_switch_;
+    const auto act = tool_actions_.find(switched.tool);
+    bool plain = false;
+    if (act != tool_actions_.end()) {
+        for (const QKeySequence& keys : act->second->shortcuts()) {
+            if (keys.count() == 1 && keys[0].key() == key && keys[0].keyboardModifiers() == Qt::NoModifier) plain = true;
+        }
+    }
+    if (!plain) return false;
+    tool_switch_.reset();
+    if (now.value_or(monotonic_seconds()) - switched.since < kHoldSeconds) return false;  // (a tap: the tool stays)
+    QString back = switched.before;
+    if (!tool_actions_.contains(back) && back == QLatin1String("marquee")) back = QStringLiteral("rect");
+    if (back == QLatin1String("shape") && !shape_tool_of(canvas_->shape_kind).isEmpty()) back = shape_tool_of(canvas_->shape_kind);  // (PC3 C-b)
+    if (!tool_actions_.contains(back)) return false;
+    choose_tool(back);
+    tool_switch_.reset();
+    return true;
+}
+
+void MainWindow::show_help(const QString& what) {
+    // (each its own window, as Python's: the F1 list can stay open beside the guide; help_dialog() is the last one)
+    if (what == QLatin1String("keys")) {
+        help_dialog_ = new help::HelpDialog(this, QStringLiteral("ショートカット一覧"), help::shortcut_html(this));
+    } else if (what == QLatin1String("guide")) {
+        help_dialog_ = new help::HelpDialog(this, QStringLiteral("はじめての使い方"), help::guide(this));
+    } else if (what == QLatin1String("faq")) {
+        help_dialog_ = new help::HelpDialog(this, QStringLiteral("困ったとき"), help::faq(this));
+    } else {
+        help_dialog_ = new help::HelpDialog(this, QStringLiteral("Genko Studio について"), help::about());
+    }
+    help_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+    help_dialog_->show();
+}
+
+void MainWindow::open_preferences(const QString& pane) {
+    if (pane == QLatin1String("keyboardShortcuts")) {  // (PC5 H-d: the keys' own window)
+        open_keyboard_shortcuts();
+        return;
+    }
+    // (PC5 H-e: この面を初期設定に戻す and すべての環境設定をリセット… open it again at the pane, its values as they are now. The
+    // プラグイン pane — PC5 J-f — is a page of it too, J-f's review P3-6: what the plugins are allowed to do is the plugins' own
+    // window's, act_plugin_settings, opened from that page)
+    for (QString at = pane;;) {
+        preferences::PreferencesDialog dialog(this);
+        if (!at.isEmpty()) dialog.show_pane(at);  // (PC5 H-0: 編集 → 環境設定 ▸'s panes, キーボードショートカット…)
+        ask::exec(&dialog);
+        if (dialog.reopen.isEmpty()) break;
+        at = dialog.reopen;
+    }
+}
+
+QAction* MainWindow::action(const QString& attribute) const {
+    const auto it = actions_.find(attribute);
+    return it == actions_.end() ? nullptr : it->second;
+}
+
+QAction* MainWindow::make(const QString& attribute, const QString& title, std::function<void()> slot, const QList<QKeySequence>& shortcuts,
+                          const QString& tip, bool checkable) {
+    auto* act = new QAction(title, this);
+    // (each key once: where the system's standard key is one of the others — Redo is Ctrl+Y on Windows — Python's list
+    // binds it twice, and Qt takes a key bound twice as ambiguous and does nothing)
+    QList<QKeySequence> unique;
+    for (const QKeySequence& key : shortcuts) {
+        if (!key.isEmpty() && !unique.contains(key)) unique << key;
+    }
+    if (!unique.isEmpty()) act->setShortcuts(unique);
+    if (!tip.isEmpty()) {
+        act->setStatusTip(tip);
+        act->setToolTip((title + QStringLiteral("  ") + act->shortcut().toString(QKeySequence::NativeText) + QStringLiteral("\n") + tip).trimmed());
+    }
+    act->setCheckable(checkable);
+    act->setObjectName(QStringLiteral("cmd:%1").arg(title));
+    act->setProperty("genko_attribute", attribute);  // (the help names its menus and keys through it: help.cpp)
+    connect(act, &QAction::triggered, this, [slot = std::move(slot)](bool) { slot(); });
+    addAction(act);  // (its keys work wherever the window has the focus)
+    // (PC5 J-0: a command made again under an attribute — a frame a group made real — takes the old one's places in the
+    // menus and bars, and the old one goes: never two commands of one attribute for the keys, the search or the help)
+    if (const auto before = actions_.find(attribute); before != actions_.end() && before->second != nullptr && before->second != act) {
+        QAction* old = before->second;
+        for (QObject* holder : old->associatedObjects()) {
+            auto* widget = qobject_cast<QWidget*>(holder);
+            if (widget == nullptr || widget == this) continue;
+            widget->insertAction(old, act);
+            widget->removeAction(old);
+        }
+        removeAction(old);
+        old->setParent(nullptr);
+        old->deleteLater();
+    }
+    actions_[attribute] = act;
+    return act;
+}
+
+void MainWindow::build_actions() {
+    PageCanvas* c = canvas_;
+    // (PC4 F-0, 節 F 5.1: ファイル's commands by Photoshop's names — 新規…, 別名で保存…, 終了; preferences::renamed())
+    make("act_new", QStringLiteral("新規…"), [this] { new_book(); }, keys({"Ctrl+N"}));
+    make("act_open", QStringLiteral("開く…"), [this] { open_book(); }, keys({"Ctrl+O"}));
+    make("act_save", QStringLiteral("保存"), [this] { save(); }, keys({"Ctrl+S"}), QStringLiteral("変更は自動で保存されます。今すぐ書き込むときに使います"));
+    make("act_save_as", QStringLiteral("別名で保存…"), [this] { save_as(); }, keys({"Ctrl+Shift+S"}));
+    make("act_exposure", QStringLiteral("露光量の調整層…"), [this] { exposure_dialog(); });
+    make("act_undo", QStringLiteral("取り消し"), [this] { undo(); }, keys({"Ctrl+Z"}));
+    make("act_redo", QStringLiteral("やり直し"), [this] { redo(); }, keys({"Ctrl+Y", "Ctrl+Shift+Z"}));
+    make("act_fit", QStringLiteral("画面サイズに合わせる"), [c] { c->glide([c] { c->fit_page(); }); }, keys({QKeySequence(QStringLiteral("Ctrl+0"))}));
+    make("act_zoom_in", QStringLiteral("ズームイン"), [c] { c->glide([c] { c->zoom_by(1.25); }); },
+         keys({"Ctrl++", "Ctrl+="}));
+    make("act_zoom_out", QStringLiteral("ズームアウト"), [c] { c->glide([c] { c->zoom_by(0.8); }); }, keys({"Ctrl+-"}));
+    make("act_actual", QStringLiteral("プリントサイズ"), [c] { c->glide([c] { c->actual_size(); }); }, keys({QKeySequence(QStringLiteral("Ctrl+1"))}));
+    // (- and ^ as in CLIP STUDIO PAINT, too: Intel graphics drivers take Ctrl+Alt+arrows to turn the whole screen)
+    make("act_turn_left", QStringLiteral("左に回す（15°）"), [c] { c->rotate_view(-15); },
+         keys({QKeySequence(QStringLiteral("-")), QKeySequence(QStringLiteral("Ctrl+Alt+Left"))}),
+         QStringLiteral("表示だけを回します（原稿は回りません）。Shift＋スペースを押しながらドラッグでも回せます"));
+    make("act_turn_right", QStringLiteral("右に回す（15°）"), [c] { c->rotate_view(15); },
+         keys({QKeySequence(QStringLiteral("^")), QKeySequence(QStringLiteral("Ctrl+Alt+Right"))}), QStringLiteral("表示だけを回します（原稿は回りません）"));
+    make("act_turn_reset", QStringLiteral("回転・反転を戻す"), [c] { c->reset_view(); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+0"))}));
+    make("act_zoom_tool", QStringLiteral("ズームツール"), [this] { choose_tool(QStringLiteral("zoom")); }, keys({QKeySequence(QStringLiteral("Z"))}),
+         QStringLiteral("クリックで拡大、Alt＋クリックで縮小、ドラッグで囲んだ所を画面いっぱいに"), true);
+    make("act_zoom_value", QStringLiteral("表示倍率を打ち込む…"), [this] { ask_zoom(); }, {}, QStringLiteral("倍率（%）を数で決めます。ステータスバーの倍率でも"));
+    QAction* mirror = make("act_mirror", QStringLiteral("水平方向に反転"), [] {}, keys({QKeySequence(QStringLiteral("H"))}),
+                           QStringLiteral("表示だけを左右反転します（絵の歪みを見つける）。原稿は変わりません"), true);
+    connect(mirror, &QAction::triggered, this, [c](bool on) { c->flip_view(on); });
+    // (M6: workspace.cpp) コマンドを探す, the command bar and the quick access chosen, workspaces, the tools' names
+    make("act_help_keys", QStringLiteral("ショートカット一覧"), [this] { show_help(QStringLiteral("keys")); }, keys({QKeySequence(Qt::Key_F1)}));
+    make("act_help_guide", QStringLiteral("はじめての使い方"), [this] { show_help(QStringLiteral("guide")); });
+    make("act_help_faq", QStringLiteral("困ったとき（よくある質問）"), [this] { show_help(QStringLiteral("faq")); });
+    make("act_about", QStringLiteral("Genko Studio について"), [this] { show_help(QStringLiteral("about")); });
+    make("act_find_command", QStringLiteral("検索"), [this] { find_command(); }, keys({QKeySequence(QStringLiteral("Ctrl+Shift+F"))}),
+         QStringLiteral("名前の一部を打つと、メニューのどこにあるかが分かり、そのまま実行できます"));
+    make("act_edit_commandbar", QStringLiteral("コマンドバーを変える…"), [this] { edit_commandbar(this, commands_); }, {});
+    make("act_edit_quick", QStringLiteral("クイックアクセスを変える…"), [this] { quick_access_->edit(); }, {});
+    // (PC5 H-d: Photoshop's 新規ワークスペース… — its id kept, the old name in preferences::renamed())
+    make("act_save_workspace", QStringLiteral("新規ワークスペース…"), [this] { new_workspace(); }, {},
+         QStringLiteral("今のパネルの並びを、名前を付けたワークスペースとして残します（キー・メニュー・ツールバーも一緒に残せます）"));
+    QAction* tool_names = make("act_tool_names", QStringLiteral("道具の名前を表示"), [] {}, {},
+                               QStringLiteral("左の道具にアイコンと名前を並べます（環境に残ります）"), true);
+    connect(tool_names, &QAction::triggered, this, [this](bool on) { show_tool_names(on); });
+    QAction* hints = make("act_hints", QStringLiteral("パネルの説明を表示"), [] {}, {}, QStringLiteral("切ると、パネルの説明の文は隠れ、ツールチップで読めます"), true);
+    hints->setChecked(theme::show_hints());
+    connect(hints, &QAction::triggered, this, [](bool on) { theme::set_hints(on); });
+    QAction* next_steps = make("act_next_steps", QStringLiteral("次の作業の案内を表示"), [] {}, {},
+                               QStringLiteral("コマを割った後に、描く・台詞・保存・書き出しへ進むボタンを原稿の上に出します"), true);
+    next_steps->setChecked(settings()->value(QStringLiteral("ui/next_steps"), QStringLiteral("on")).toString() != QLatin1String("off"));
+    connect(next_steps, &QAction::toggled, this, [this](bool on) {
+        settings()->setValue(QStringLiteral("ui/next_steps"), on ? QStringLiteral("on") : QStringLiteral("off"));
+        refresh_first_steps();
+    });
+    make("act_ai", QStringLiteral("AI と作る…"), [this] { open_ai_dialog(); }, {}, QStringLiteral("Claude などの AI をつなぐ設定・この原稿で動いた AI・最初に頼むこと"));
+    make("act_overview", QStringLiteral("ページを並べて見る"), [this] { page_overview(); }, keys({QKeySequence(QStringLiteral("Ctrl+Shift+O"))}),
+         QStringLiteral("全ページを縮小図で並べ、ダブルクリックで開きます"));
+    make("act_prev", QStringLiteral("◀ 前のページ"), [this] { jump(-1); }, keys({"PgUp", "Ctrl+Left"}));
+    make("act_next", QStringLiteral("次のページ ▶"), [this] { jump(1); }, keys({"PgDown", "Ctrl+Right"}));
+    QAction* guides = make("act_guides", QStringLiteral("仕上がり線・基本枠を表示"), [] {}, keys({QKeySequence(QStringLiteral("Ctrl+;"))}),
+                           QStringLiteral("断ち切り（裁ち落とし）・仕上がり線・基本枠"), true);
+    guides->setChecked(true);
+    connect(guides, &QAction::triggered, this, [this, c, guides](bool) {
+        c->show_guides = guides->isChecked();
+        c->update();
+        panes_follow();  // (PC5 H-c review P3-4)
+    });
+    // 色の校正 (view.proofColors; Python's 「CMYK で見る（色校正）」, its id kept): the page as 校正の設定 shows it — the
+    // working CMYK unless another is chosen there (書き出しの CMYK: Python's own). Ctrl+Y is やり直す: Ctrl+Alt+Y.
+    QAction* proof = make("act_cmyk_proof", QStringLiteral("色の校正"), [] {}, keys({QKeySequence(QStringLiteral("Ctrl+Alt+Y"))}),
+                          QStringLiteral("印刷したときの色など、校正の設定で選んだ見え方で表示します（表示だけ。原稿は変わりません）"), true);
+    // (the CMYK profile chosen last for export, kept on this computer, while its file is there)
+    const auto profile = [] {
+        std::optional<std::filesystem::path> icc;
+        const QString chosen = settings()->value(QStringLiteral("color/icc")).toString();
+        if (!chosen.isEmpty() && QFileInfo(chosen).isFile()) icc = core::path_from_utf8(chosen.toStdString());
+        return icc;
+    };
+    c->renderer().set_proof_profile(profile);
+    connect(proof, &QAction::triggered, this, [this](bool on) {
+        if (documents_.empty()) return;
+        documents_[static_cast<std::size_t>(doc_)].proof.on = on;
+        apply_proof_view();
+    });
+    build_color_actions();  // (校正の設定, 色域外警告, カラー設定…: main_window_color.cpp)
+    // the tools (one at a time: tool_actions)
+    make("act_select", QStringLiteral("選択"), [this] { choose_tool(QStringLiteral("select")); }, keys({QKeySequence(QStringLiteral("V"))}),
+         QStringLiteral("コマを選ぶ・フキダシを動かす・ドラッグで表示を動かす"), true);
+    // (PC4 E-0, the user's decision 2: the drawing tools by Photoshop's names — their ids and keys kept,
+    // preferences::renamed(); the pen layers, lines and the G pen keep theirs)
+    make("act_pen", QStringLiteral("ブラシツール"), [this] { choose_tool(QStringLiteral("pen")); }, keys({QKeySequence(QStringLiteral("B"))}),
+         QStringLiteral("レイヤー パネルで選んだレイヤーに描きます"), true);
+    make("act_eraser", QStringLiteral("消しゴムツール"), [this] { choose_tool(QStringLiteral("eraser")); }, keys({QKeySequence(QStringLiteral("E"))}),
+         QStringLiteral("ペンの線は触れた所で切れます"), true);
+    make("act_frame", QStringLiteral("コマ割り"), [this] { choose_tool(QStringLiteral("frame")); }, keys({QKeySequence(QStringLiteral("F"))}),
+         QStringLiteral("コマの中をドラッグして割る（斜めも。水平・垂直に吸い付く、Alt で自由）・間の白をドラッグで間隔を動かす・選んだコマの角をドラッグで形を変える"), true);
+    make("act_move", QStringLiteral("移動ツール"), [this] { choose_tool(QStringLiteral("move")); }, keys({QKeySequence(QStringLiteral("Q"))}),
+         QStringLiteral("選んだレイヤーをリンクしたレイヤーと一緒にドラッグで動かす（Shift で縦・横・45°、Ctrl+クリックでそこのレイヤーを選ぶ）"), true);
+    tools_ = new QActionGroup(this);
+    for (const auto& [tool, name] : {std::pair{"select", "act_select"}, {"pen", "act_pen"}, {"eraser", "act_eraser"}, {"frame", "act_frame"},
+                                     {"move", "act_move"}, {"zoom", "act_zoom_tool"}}) {
+        QAction* act = actions_.at(QString::fromLatin1(name));
+        tools_->addAction(act);
+        act->setAutoRepeat(false);  // (a held key chooses the tool once)
+        tool_actions_[QString::fromLatin1(tool)] = act;
+    }
+    actions_.at("act_select")->setChecked(true);
+    build_selection_actions();  // (the selection's tools and commands: main_window_select.cpp)
+    build_smart_select_actions();  // (PC3 B3: クイック選択・オブジェクト選択, 被写体・空・フォーカス領域, 選択とマスク…, マッティング)
+    build_clipboard_actions();  // (PC3 B2: 結合部分をコピー, 特殊ペースト, 塗りつぶし…, 境界線を描く…: main_window_clipboard.cpp)
+    build_mask_actions();       // (PC3 B2: すべてのマスクを統合, the layers chosen: main_window_masks.cpp)
+    build_transform_actions();  // (PC3 C-c: 自由変形, 変形 ▸, パペットワープ, 遠近法ワープ, ゆがみ…, ワープテキスト…: main_window_transform.cpp)
+    build_anim_actions();      // (アニメーション, タイムラプス: main_window_anim.cpp)
+    build_channel_actions();    // (channels@1: the channel targets, the selection to a channel: main_window_channels.cpp)
+    build_paint_actions();      // (スポイト … ゆがみ, 色の入れ替え, 透明色, 太く・細く: main_window_paint.cpp)
+    build_vector_actions();     // (線の修正, 線の編集 and its commands: main_window_vector.cpp)
+    build_guide_actions();      // (定規, 3D and their commands: main_window_guides.cpp)
+    build_material_actions();   // (効果線, 素材を置く, トーン, the view's extras, the layer commands: main_window_materials.cpp)
+    build_line_actions();       // (テキスト, 台詞 and the book's lines, the 台詞 panel: main_window_lines.cpp)
+    build_type_actions();       // (PC5 G-a: 横書き文字ツール, 書式's commands, the text tools' type layers: main_window_type.cpp)
+    build_output_actions();     // (書き出し, 印刷, 履歴, 入稿前の点検, スマホの画面, 目盛り: main_window_output.cpp)
+    build_studio_actions();     // (チャットでの承認: main_window_studio.cpp)
+    build_smart_actions();      // (smart-objects@1: スマートオブジェクト, 埋め込みを配置…, ラスタライズ: main_window_smart.cpp)
+    build_path_actions();       // (vector@1, PC3 C-a: ペンツール, パス選択ツール, ベクトルマスク: main_window_paths.cpp)
+    build_page_size_actions();  // (PC3 C-e: 画像解像度…, カンバスサイズ…, 画像の回転, 切り抜き(ツール): main_window_page_size.cpp)
+    build_retouch_actions();    // (PC3 B4: the retouching tools, コンテンツに応じた塗りつぶし…: retouch_tools.cpp)
+    build_paint_tool_actions();  // (PC4 E5: the brushes that change pixels — ぼかし・シャープ・指先・覆い焼き・焼き込み・スポンジ・混合ブラシ・背景消しゴム・色の置き換え: paint_tools.cpp)
+    build_shape_actions();      // (pen-shapes@1, PC3 C-b: the shape tools, シェイプを結合…: main_window_shapes.cpp)
+    build_pattern_actions();    // (PC4 E3: パターンを定義…, パターンのレイヤー…, パターンプレビュー: main_window_patterns.cpp)
+    build_brush_preset_actions();  // (PC4 E2: ブラシを定義…, プリセット ▸: main_window_brush_presets.cpp)
+    build_layer_style_actions();  // (PC4 E6: レイヤー → レイヤースタイル ▸: main_window_styles.cpp)
+    build_production_actions();   // (PC5 J-0: 解析 ▸, ビデオレイヤー ▸, the production's panels — frames: main_window_production.cpp)
+    build_variable_actions();     // (PC5 I-d: 変数 ▸, データセットを適用…, データセットからファイル…, 変数データセット…: main_window_variables.cpp)
+    build_layer_basic_actions();  // (PC5 I-a: 背景からレイヤーへ…, レイヤーからのグループ…, グループ解除, クリッピングマスク, 非表示レイヤーを削除: main_window_layers.cpp)
+    build_artboard_actions();     // (PC5 I-c: アートボード…, グループ・レイヤーからのアートボード…, アートボードの設定…, 表示と書き出しの: main_window_artboards.cpp)
+    build_print_actions();  // (PC5 I-f: 1 部プリント, 生成 → 画像アセット, コンタクトシート II…: main_window_print.cpp)
+    build_align_actions();      // (PC3 C-d: 重ね順・整列・分布・リンク・ロック, スナップ (with 定規's グリッドにスナップ), the move tool's: main_window_align.cpp)
+    build_file_actions();       // (PC4 F-0: 節 F's new commands of ファイル, frames until F-b and F-c: main_window_file.cpp)
+    build_filter_actions();     // (PC4 節 D: フィルター's commands, 前回のフィルター: filter_menu.cpp)
+    build_view_actions();       // (PC5 H-0: 表示's commands of 節 H — H-a, H-b: main_window_view.cpp)
+    build_arrange_actions();    // (PC5 H-0: ウィンドウ → アレンジ ▸ — H-c: main_window_arrange.cpp)
+    build_edit_actions();       // (PC5 H-0: 編集's 環境設定 ▸, キーボードショートカット… — H-d, H-e, H-f: main_window_edit.cpp)
+    build_workspace_actions();  // (PC5 H-d: ウィンドウ → ワークスペース ▸ — main_window_workspace.cpp)
+    make("act_point_wider", QStringLiteral("選んだ点を太く"), [this] { point_width(1.25); }, keys({QKeySequence(QStringLiteral("Ctrl+Alt+]"))}),
+         QStringLiteral("部分選択ツールで選んだ制御点のところだけ、線を太くします"));
+    make("act_color", QStringLiteral("カラーピッカー（描画色）…"), [this] { pick_colour(); }, keys({QKeySequence(QStringLiteral("C"))}));
+    // (one chosen in a list, then merged with the one under it: named apart from Python's 下のレイヤーと結合, which
+    // merges the panel's chosen layer at once — a command's name says one thing)
+    make("act_layer_merge_down", QStringLiteral("レイヤーを選んで下と結合…"), [this] { layer_operation("merge_down"); });
+    // (PC5 I-a: Photoshop's names — their ids kept, preferences::renamed())
+    make("act_layer_merge_layers", QStringLiteral("レイヤーを結合…"), [this] { layer_operation("merge_layers"); });
+    make("act_layer_merge_visible", QStringLiteral("表示レイヤーを結合したレイヤーを作成"), [this] { layer_operation("merge_visible"); });
+    make("act_layer_flatten", QStringLiteral("画像を統合…"), [this] { layer_operation("flatten"); });
+    make("act_layer_convert_paint", QStringLiteral("ペイントレイヤーに変換"), [this] { layer_operation("convert_layer"); });
+    make("act_layer_convert_pen", QStringLiteral("ペンレイヤーに変換…"), [this] { layer_operation("convert_pen"); });
+    // panels
+    make("act_split_h", QStringLiteral("コマを横に割る（上下に分ける）"), [this] { split(QStringLiteral("horizontal")); },
+         keys({QKeySequence(QStringLiteral("Ctrl+Shift+H"))}));
+    make("act_split_v", QStringLiteral("コマを縦に割る（左右に分ける）"), [this] { split(QStringLiteral("vertical")); },
+         keys({QKeySequence(QStringLiteral("Ctrl+Shift+V"))}));
+    make("act_merge", QStringLiteral("コマを結合（割る前に戻す）"), [this] { merge(); }, keys({QKeySequence(QStringLiteral("Ctrl+Shift+M"))}));
+    make("act_delete_frame", QStringLiteral("このコマを消す（ほかのコマはそのまま）"), [this] { delete_frame(); });
+    make("act_frame_selection", QStringLiteral("このコマを選択範囲にする"), [this] { frame_to_selection(); }, {},
+         QStringLiteral("選んだコマの形を選択範囲にします（塗りつぶし・トーン・消去をコマの中だけに）"));
+    make("act_gutters", QStringLiteral("コマ間隔の設定…"), [this] { gutter_settings(); }, {}, QStringLiteral("新しく割るときの上下・左右の間隔"));
+    make("act_border", QStringLiteral("選んだコマの枠線の太さ…"), [this] { border_width(); });
+    make("act_corner", QStringLiteral("選んだコマの角の丸み…"), [this] { corner_radius(); }, {}, QStringLiteral("角を丸くします（0 で角ばる）"));
+    make("act_no_border", QStringLiteral("選んだコマの枠線をなくす"), [this] { set_selected_frame(Json::object({{"border_mm", 0}})); });
+    make("act_bleed", QStringLiteral("選んだコマを断ち切りにする（紙の端まで）"), [this] { toggle_bleed(); });
+    for (const auto& [key, label] : {std::pair{"solid", "実線"}, {"double", "二重線"}, {"dashed", "破線"}, {"dotted", "点線"}, {"rough", "手描き風"}}) {
+        auto* act = new QAction(QStringLiteral("枠線: %1").arg(QString::fromUtf8(label)), this);
+        act->setObjectName(QStringLiteral("cmd:枠線: %1").arg(QString::fromUtf8(label)));
+        const QString kind = QString::fromLatin1(key);
+        connect(act, &QAction::triggered, this, [this, kind] { border_kind(kind); });
+        addAction(act);
+        border_kind_actions_.push_back(act);
+    }
+    make("act_border_colour", QStringLiteral("選んだコマの枠線の色…"), [this] { border_colour(); });
+    make("act_book_preview", QStringLiteral("本の形でプレビュー…"), [this] {
+        session_->save_now();  // (Python's commit_now)
+        bookview::BookPreview preview(this);
+        ask::exec(&preview);
+    }, {QKeySequence(QStringLiteral("Ctrl+Shift+B"))}, QStringLiteral("見開きで、ページをめくって読むように見ます"));
+    make("act_border_detail", QStringLiteral("枠線の間隔・破線の長さ・揺れ…"), [this] { border_detail(); }, {},
+         QStringLiteral("二重線の 2 本の間・破線と点線の長さと間・手描き風の揺れを決めます"));
+    QAction* numbers = make("act_frame_numbers", QStringLiteral("コマ番号（読み順）を表示"), [] {}, {},
+                            QStringLiteral("コマの読み順を番号で見ます（印刷には出ません）"), true);
+    connect(numbers, &QAction::triggered, this, [this](bool on) {
+        canvas_->show_frame_numbers = on;
+        canvas_->binding = book().binding;
+        canvas_->update();
+        panes_follow();  // (PC5 H-c review P3-4)
+    });
+    make("act_template", QStringLiteral("テンプレートでコマを割る…"), [this] { templates_dialog(); }, {},
+         QStringLiteral("今のページのコマと台詞を作り直します"));
+    make("act_save_template", QStringLiteral("今のコマ割りをテンプレートに残す…"), [this] { save_template(); }, {},
+         QStringLiteral("このページのコマ割り（形・枠線・断ち切り・角の丸み）を、自分のテンプレートとして残します"));
+    // pages
+    make("act_add_page", QStringLiteral("ページを追加（この後ろに）"), [this] { add_page(); });
+    make("act_del_page", QStringLiteral("このページを消す…"), [this] { del_page(); });
+    make("act_dup_page", QStringLiteral("このページを複製"), [this] {
+        if (const core::Page* page = current_page()) duplicate_page(static_cast<int>(core::py_int(page->index.json())));
+    });
+    make("act_page_up", QStringLiteral("このページを前へ"), [this] {
+        const core::Page* page = current_page();
+        if (page == nullptr) return;
+        std::vector<int> order;
+        for (const auto& p : book().pages) order.push_back(static_cast<int>(core::py_int(p->index.json())));
+        const int i = page_index_;
+        if (i <= 0) return;
+        std::swap(order[static_cast<std::size_t>(i)], order[static_cast<std::size_t>(i - 1)]);
+        reorder_pages(order, static_cast<int>(core::py_int(page->index.json())));
+    }, keys({QKeySequence(QStringLiteral("Ctrl+Shift+Up"))}));
+    make("act_page_down", QStringLiteral("このページを後ろへ"), [this] {
+        const core::Page* page = current_page();
+        if (page == nullptr) return;
+        std::vector<int> order;
+        for (const auto& p : book().pages) order.push_back(static_cast<int>(core::py_int(p->index.json())));
+        const int i = page_index_;
+        if (i + 1 >= static_cast<int>(order.size())) return;
+        std::swap(order[static_cast<std::size_t>(i)], order[static_cast<std::size_t>(i + 1)]);
+        reorder_pages(order, static_cast<int>(core::py_int(page->index.json())));
+    }, keys({QKeySequence(QStringLiteral("Ctrl+Shift+Down"))}));
+    build_book_actions();  // (見開き, ノンブル, 原稿用紙, 表紙・カバー, 担当, 作品の結合, PSD: main_window_book.cpp)
+    make("act_name_ok", QStringLiteral("ネーム完了 → 作画へ進む"), [this] { name_ok(); }, {}, QStringLiteral("承認の要らない原稿（AI を使わない原稿）で使います"));
+    // books and windows
+    // (every key the systems have for Close — Windows' Ctrl+F4, Ctrl+W, the Close key; X11's Ctrl+W, the Close key —, not
+    // only the first as Python's QKeySequence(std.Close) gives: Ctrl+W closes a book — with its question — everywhere;
+    // SPEC SAVE-01, AC-SAVE 2)
+    make("act_close", QStringLiteral("閉じる"), [this] { close_document(); }, keys({"Ctrl+F4", "Ctrl+W", "Close"}),
+         QStringLiteral("この原稿を閉じます（最後の原稿ならウィンドウも）"));
+    make("act_next_doc", QStringLiteral("次の原稿"), [this] { next_document(1); }, keys({QKeySequence(QStringLiteral("Ctrl+Tab"))}));
+    make("act_prev_doc", QStringLiteral("前の原稿"), [this] { next_document(-1); }, keys({QKeySequence(QStringLiteral("Ctrl+Shift+Tab"))}));
+    make("act_quit", QStringLiteral("終了"), [] { QApplication::closeAllWindows(); }, keys({"Ctrl+Q"}));
+    // the tools' pictures and their tooltips with their keys
+    for (const auto& [name, attribute] : {std::pair{"select", "act_select"}, {"pen", "act_pen"}, {"eraser", "act_eraser"}, {"frame", "act_frame"},
+                                          {"picker", "act_picker"}, {"fill", "act_fill"}, {"lassofill", "act_lassofill"},
+                                          {"gradient", "act_gradient"}, {"shape", "act_shape"}, {"blend", "act_blend"}, {"reshape", "act_reshape"},
+                                          {"rect", "act_marquee"}, {"lasso", "act_lasso"}, {"wand", "act_wand"}, {"ruler", "act_ruler"},
+                                          {"text", "act_text"}, {"text", "act_text_h"},
+                                          {"3d", "act_3d"}, {"effect", "act_effect"}, {"stamp", "act_stamp"},
+                                          {"move", "act_move"}, {"undo", "act_undo"}, {"redo", "act_redo"}, {"fit", "act_fit"},
+                                          {"zoom_in", "act_zoom_in"}, {"zoom_out", "act_zoom_out"}, {"prev", "act_prev"}, {"next", "act_next"},
+                                          {"export", "act_export"}}) {
+        QAction* act = actions_.at(QString::fromLatin1(attribute));
+        theme::iconed(act, name);
+        const QString shortcut = act->shortcut().toString();
+        if (!shortcut.isEmpty() && std::any_of(tool_actions_.begin(), tool_actions_.end(), [act](const auto& t) { return t.second == act; })) {
+            act->setToolTip(QStringLiteral("%1（%2）").arg(act->text(), shortcut) + (act->statusTip().isEmpty() ? QString() : QStringLiteral("\n") + act->statusTip()));
+        }
+    }
+}
+
+void MainWindow::build_menus() {
+    QMenuBar* bar = menuBar();
+    QMenu* file = bar->addMenu(QStringLiteral("ファイル"));
+    build_file_menu(file);  // (PC4 F-0: Photoshop's order and names, 書き出し ▸, 節 F's frames: main_window_file.cpp)
+    QMenu* edit = bar->addMenu(QStringLiteral("編集"));
+    edit->addAction(action("act_undo"));
+    edit->addAction(action("act_redo"));
+    edit->addAction(action("act_toggle_last_state"));  // (PC5 H-f: main_window_purge.cpp)
+    edit->addAction(action("act_history"));
+    edit->addSeparator();
+    build_clipboard_menu(edit);  // (カット … 描画色で塗りつぶし, 変形: main_window_clipboard.cpp)
+    edit->addSeparator();
+    for (const char* name : {"act_select_all", "act_deselect"}) edit->addAction(action(name));
+    edit->addSeparator();
+    for (const char* name : {"act_assign_profile", "act_convert_profile", "act_color_settings", "act_profile_info"}) edit->addAction(action(name));  // (color-model@1; PC2d)
+    QMenu* view = bar->addMenu(QStringLiteral("表示"));
+    for (const char* name : {"act_fit", "act_zoom_in", "act_zoom_out", "act_actual", "act_zoom_value", "act_zoom_tool"}) view->addAction(action(name));
+    view->addSeparator();
+    for (const char* name : {"act_turn_left", "act_turn_right", "act_mirror", "act_view_flip_v", "act_turn_reset"}) view->addAction(action(name));
+    view->addSeparator();
+    for (const char* name : {"act_overview", "act_prev", "act_next"}) view->addAction(action(name));
+    view->addSeparator();
+    view->addAction(action("act_guides"));
+    view->addAction(action("act_phone"));
+    view->addAction(action("act_scale"));
+    view->addAction(action("act_sel_edges"));  // (PC3 B1: 選択範囲の境界線)
+    view->addAction(action("act_brush_preview"));  // (PC4 E1: ブラシプレビュー)
+    view->addAction(action("act_onion"));
+    view->addAction(action("act_cmyk_proof"));
+    // 校正の設定 (view.proofSetup.*): what 色の校正 shows; 色域外警告 (view.gamutWarning)
+    QMenu* proofs = view->addMenu(QStringLiteral("校正の設定"));
+    for (const char* name : {"act_proof_custom"}) proofs->addAction(action(name));
+    proofs->addSeparator();
+    for (const char* name : {"act_proof_working_cmyk", "act_proof_export", "act_proof_cyan", "act_proof_magenta", "act_proof_yellow", "act_proof_black",
+                             "act_proof_cmy"})
+        proofs->addAction(action(name));
+    proofs->addSeparator();
+    for (const char* name : {"act_proof_srgb", "act_proof_monitor", "act_proof_legacy_mac"}) proofs->addAction(action(name));
+    proofs->addSeparator();
+    for (const char* name : {"act_proof_protan", "act_proof_deutan"}) proofs->addAction(action(name));
+    view->addAction(action("act_gamut_warning"));
+    view->addAction(action("act_screen_dots"));
+    view->addSeparator();
+    view->addAction(action("act_tool_names"));
+    QMenu* tools = bar->addMenu(QStringLiteral("ツール"));
+    // (Python's order; the tools not ported yet join it as they come)
+    for (const char* name : {"act_select", "act_move", "act_pen", "act_eraser", "act_blend", "act_shape", "act_text", "act_text_h", "act_frame"})
+        tools->addAction(action(name));
+    tools->addSeparator();
+    for (const char* name : {"act_picker", "act_fill", "act_lassofill", "act_fill_gaps", "act_gradient", "act_reshape", "act_vector", "act_liquify"})
+        tools->addAction(action(name));
+    tools->addSeparator();
+    build_tool_groups(tools);  // (the selection's tools, the retouching's: main_window_select.cpp)
+    build_paint_tool_groups(tools);  // (PC4 E-0: the drawing tools' groups' tools the menu has not: paint_panels.cpp)
+    tools->addAction(action("act_crop_tool"));  // (PC3 C-e)
+    // (PC5 J-b: スライスツール・スライス選択ツール beside it — the 切り抜き group; moved here from the groups' place)
+    for (const char* name : {"act_slice_tool", "act_slice_select_tool"}) tools->addAction(action(name));
+    for (const char* name : {"act_ruler", "act_3d", "act_effect", "act_stamp"}) tools->addAction(action(name));
+    tools->addSeparator();
+    for (const char* name : {"act_thicker", "act_thinner"}) tools->addAction(action(name));
+    tools->addSeparator();
+    for (const char* name : {"act_swap_colour", "act_default_colours", "act_transparent"}) tools->addAction(action(name));
+    tools->addSeparator();
+    QMenu* tones = tools->addMenu(QStringLiteral("トーン・効果線"));
+    for (const char* name : {"act_tone_here", "act_tone_click"}) tones->addAction(action(name));
+    tones->addSeparator();
+    for (QAction* act : effect_actions_) tones->addAction(act);
+    tones->addSeparator();
+    for (const char* name : {"act_effect_within", "act_effect_avoid", "act_effect_clear"}) tones->addAction(action(name));
+    tones->addSeparator();
+    tones->addAction(action("act_materials"));
+    tools->addAction(action("act_color"));
+    tools->addAction(action("act_exposure"));
+    tools->addAction(action("act_point_wider"));
+    tools->addAction(action("act_point_thinner"));
+    tools->addSeparator();
+    build_guide_menus(tools);  // (定規 and 3D: main_window_guides.cpp)
+    build_selection_menu(bar->addMenu(QStringLiteral("選択範囲")));
+    QMenu* layers = bar->addMenu(QStringLiteral("レイヤー"));
+    for (const char* name : {"act_layer_pen", "act_layer_paint", "act_layer_folder"}) layers->addAction(action(name));
+    QMenu* made = layers->addMenu(QStringLiteral("新規"));  // (PC3 B2: Photoshop's レイヤー → 新規)
+    made->addAction(action("act_layer_frame"));  // (PC5 I-b: レイヤーからのフレーム…, before Photoshop's 選択範囲をコピーしたレイヤー)
+    for (const char* name : {"act_layer_via_copy", "act_layer_via_cut"}) made->addAction(action(name));
+    layers->addSeparator();
+    for (const char* name : {"act_layer_dup", "act_layer_merge", "act_layer_delete"}) layers->addAction(action(name));
+    // (PC4 F-c: Photoshop's place, after 削除 — the layer alone, cut to what it holds)
+    for (const char* name : {"act_layer_quick_export_png", "act_layer_export_as"}) layers->addAction(action(name));
+    layers->addSeparator();
+    // (Python's submenus, filled with the layer panel's own commands when it is made: their keys — Ctrl+G, Ctrl+Shift+Alt+E —
+    // work from the menu bar)
+    layer_special_menu_ = layers->addMenu(QStringLiteral("塗り・グラデーション・色調補正のレイヤー"));
+    layer_many_menu_ = layers->addMenu(QStringLiteral("まとめて（複数のレイヤー・表示レイヤー・変換）"));
+    layers->addSeparator();
+    QMenu* arrange = layers->addMenu(QStringLiteral("重ね順"));  // (decision 5; PC3 C-d: arrange_layers, among siblings)
+    for (const char* name : {"act_layer_front", "act_layer_up", "act_layer_down", "act_layer_back"}) arrange->addAction(action(name));
+    arrange->addSeparator();
+    arrange->addAction(action("act_layer_reverse"));
+    build_align_menus(layers, view);  // (PC3 C-d: 整列 ▸, 分布 ▸, レイヤーをリンク…; 表示 → スナップ・スナップ先: main_window_align.cpp)
+    layers->addSeparator();
+    layers->addAction(action("act_layer_draft"));
+    layer_effect_menu_ = layers->addMenu(QStringLiteral("境界効果・表示色の印刷"));
+    layer_mask_menu_ = layers->addMenu(QStringLiteral("レイヤーマスク"));  // (PC3 B2, decision 5: Photoshop's name)
+    layers->addAction(action("act_mask_all_objects"));  // (PC3 B3)
+    layers->addSeparator();
+    for (const char* name : {"act_layer_merge_down", "act_layer_merge_layers", "act_layer_merge_visible", "act_layer_flatten", "act_layer_convert_paint", "act_layer_convert_pen"})
+        layers->addAction(action(name));
+    layers->addSeparator();
+    build_matting_menu(layers);  // (PC3 B3: マッティング ▸, main_window_smart_select.cpp)
+    layers->addSeparator();
+    // (PC5 J-f: the plugins' folder and settings moved to フィルター → プラグイン ▸ and 編集 → 環境設定 ▸ プラグイン…)
+    build_adjust_menus(layers, edit);  // (PC2: レイヤー → 色調補正, app/main_window_adjust.cpp)
+    build_smart_menus(layers, file);   // (PC3: スマートオブジェクト and the placing commands, app/main_window_smart.cpp)
+    build_type_menu(bar->addMenu(QStringLiteral("書式")));  // (PC5 G-0: Photoshop's 書式 after レイヤー, app/main_window_type.cpp)
+    build_filter_menus(bar->addMenu(QStringLiteral("フィルター")));  // (PC4 節 D, after レイヤー: app/filter_menu.cpp)
+    QMenu* pages = bar->addMenu(QStringLiteral("ページ"));
+    for (const char* name : {"act_add_page", "act_dup_page", "act_del_page"}) pages->addAction(action(name));
+    pages->addSeparator();
+    pages->addAction(action("act_page_up"));
+    pages->addAction(action("act_page_down"));
+    pages->addAction(action("act_spread"));
+    pages->addSeparator();
+    // (Python's order; then the C++ build's own: the page's colour mode, color-mode@1 and color-model@1 — its modes and
+    // depths checked as the page is, and the dialog with the rest)
+    for (const char* name : {"act_paper", "act_style", "act_chat_approval", "act_nombre", "act_page_nombre", "act_add_cover", "act_assignee", "act_timeline"}) {
+        pages->addAction(action(name));
+    }
+    QMenu* modes = pages->addMenu(QStringLiteral("色モード"));
+    for (const char* name : {"act_mode_rgb", "act_mode_gray", "act_mode_cmyk", "act_mode_lab"}) modes->addAction(action(name));
+    // (color-model@1, PC1d: Image › Mode's own)
+    for (const char* name : {"act_mode_bitmap", "act_mode_indexed", "act_mode_duotone", "act_mode_multichannel"}) modes->addAction(action(name));
+    modes->addSeparator();
+    for (const char* name : {"act_depth_8", "act_depth_16", "act_depth_32"}) modes->addAction(action(name));
+    modes->addSeparator();
+    modes->addAction(action("act_color_table"));
+    modes->addAction(action("act_color_mode"));
+    connect(modes, &QMenu::aboutToShow, this, &MainWindow::show_color_mode);
+    pages->addSeparator();
+    QMenu* frames = pages->addMenu(QStringLiteral("コマ"));
+    for (const char* name : {"act_split_h", "act_split_v", "act_merge", "act_delete_frame", "act_frame_selection"}) frames->addAction(action(name));
+    frames->addSeparator();
+    frames->addAction(action("act_template"));
+    frames->addAction(action("act_save_template"));
+    frames->addSeparator();
+    for (const char* name : {"act_gutters", "act_border", "act_no_border"}) frames->addAction(action(name));
+    for (QAction* act : border_kind_actions_) frames->addAction(act);
+    frames->addAction(action("act_border_detail"));
+    frames->addAction(action("act_border_colour"));
+    frames->addAction(action("act_corner"));
+    frames->addAction(action("act_bleed"));
+    frames->addAction(action("act_reset_shape"));
+    frames->addSeparator();
+    frames->addAction(action("act_frame_numbers"));
+    pages->addSeparator();
+    build_page_size_menu(pages);  // (PC3 C-e: Photoshop's イメージ's paper commands, main_window_page_size.cpp)
+    pages->addAction(action("act_duplicate_image"));  // (PC4 F-b: イメージ → 複製…, after すべての領域を表示 as Photoshop's)
+    build_line_menus(pages);  // (台詞, ストーリーエディター, 台詞の検索・置換: main_window_lines.cpp)
+    build_path_menus(file, view, tools, layers);  // (PC3 C-a: the paths' commands — ページ → 台詞's too —, app/main_window_paths.cpp)
+    build_shape_menus(edit, view, tools, layers);  // (PC3 C-b: the shape tools and the shape parts' commands, app/main_window_shapes.cpp)
+    build_pattern_menus(edit, view);  // (PC4 E3: パターンを定義…, パターンプレビュー: app/main_window_patterns.cpp)
+    build_brush_preset_menus(edit);  // (PC4 E2: ブラシを定義…, プリセット ▸: app/main_window_brush_presets.cpp)
+    build_layer_style_menus(layers);  // (PC4 E6: レイヤースタイル ▸ before レイヤーマスク: app/main_window_styles.cpp)
+    build_production_menus(layers, pages);  // (PC5 J-0: ビデオレイヤー ▸ before ラスタライズ ▸, ページ → 解析 ▸: main_window_production.cpp)
+    build_variable_menus(file, pages);  // (PC5 I-d: ページ → 変数 ▸・データセットを適用…, 書き出し ▸・読み込み ▸ の項目: main_window_variables.cpp)
+    build_layer_basic_menus(layers);  // (PC5 I-a: 新規 ▸ の 背景からレイヤーへ…・レイヤーからのグループ…, 非表示レイヤーを削除, クリッピングマスク, グループ解除: main_window_layers.cpp)
+    build_artboard_menus(layers, pages);  // (PC5 I-c: 新規 ▸ のアートボード 3 つ, イメージ → アートボードの設定…, 書き出し ▸ のアートボード 2 つ: main_window_artboards.cpp)
+    build_notes_menus(file, view);  // (PC5 J-c: ファイル → 読み込み ▸ 注釈…, 表示 → 表示・非表示 ▸ 注釈: main_window_notes.cpp)
+    build_measure_menus(view);  // (PC5 J-d1: 表示 → 表示・非表示 ▸ カウント: main_window_measure.cpp)
+    build_slice_menus(view, layers);  // (PC5 J-b: 表示・非表示 ▸ スライス, スライスをロック・消去, レイヤー → 新規レイヤーベースのスライス: main_window_slices.cpp)
+    build_print_menus(file);  // (PC5 I-f: 生成 ▸ 画像アセット after 書き出し ▸, 1 部プリント after プリント…, 自動処理 ▸ コンタクトシート II…: main_window_print.cpp)
+    build_video_menus(file, layers);  // (PC5 J-e2: 読み込み ▸ ビデオフレームからレイヤー…, ラスタライズ ▸ ビデオ: main_window_video.cpp)
+    pages->addAction(action("act_book_preview"));
+    pages->addAction(action("act_checks"));
+    pages->addSeparator();
+    pages->addAction(action("act_name_ok"));
+    view_menu_ = bar->addMenu(QStringLiteral("ウィンドウ"));
+    // (PC5 H-0, 節 H 5.2: アレンジ ▸ and ワークスペース ▸ first, as Photoshop's)
+    build_arrange_menus(view_menu_->addMenu(QStringLiteral("アレンジ")));
+    workspace_menu_ = view_menu_->addMenu(QStringLiteral("ワークスペース"));
+    workspace_menu_->setProperty("remade", true);
+    connect(workspace_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_workspaces);
+    view_menu_->addSeparator();
+    view_menu_->addAction(action("act_next_doc"));
+    view_menu_->addAction(action("act_prev_doc"));
+    // the books open in this window, the one in front checked (document.activate): one chosen comes to the front
+    books_menu_ = view_menu_->addMenu(QStringLiteral("開いている原稿"));
+    books_menu_->setProperty("remade", true);
+    connect(books_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_books_menu);
+    fill_books_menu();
+    view_menu_->addSeparator();
+    view_menu_->addAction(action("act_edit_commandbar"));
+    view_menu_->addAction(action("act_edit_quick"));
+    view_menu_->addAction(action("act_hints"));
+    view_menu_->addSeparator();
+    // (PC5 H-d, 節 H 5.2: 作業の段階 ▸ — Genko's own — at the end of ワークスペース ▸: fill_workspaces)
+    stage_menu_ = new QMenu(QStringLiteral("作業の段階"), this);
+    for (const Stage& stage : stages()) {
+        const QString key = QString::fromLatin1(stage.key);
+        QAction* act = stage_menu_->addAction(QStringLiteral("%1の並び").arg(QString::fromUtf8(stage.label)), this, [this, key] { apply_stage(key); });
+        act->setStatusTip(QStringLiteral("この段階でよく使うパネルだけを出します"));
+        stage_actions_[key] = act;
+    }
+    fill_workspaces();  // (its commands in the menus from the start: the keys, 検索 and the help find them)
+    build_edit_menu_tail(edit);  // (PC5 H-0: 検索, キーボードショートカット…, 環境設定 ▸ — main_window_edit.cpp)
+    build_view_menus(view);      // (PC5 H-0: 表示 in Photoshop's order, every part's commands in it now — main_window_view.cpp)
+    QMenu* help = bar->addMenu(QStringLiteral("ヘルプ"));
+    for (const char* name : {"act_help_guide", "act_help_keys", "act_help_faq", "act_next_steps"}) help->addAction(action(name));
+    help->addSeparator();
+    help->addAction(action("act_about"));
+}
+
+void MainWindow::build_toolbars() {
+    palette_ = new QToolBar(QStringLiteral("ツール"));  // (PC5 H-0: Photoshop's name)
+    palette_->setObjectName(QStringLiteral("tools"));
+    palette_->setMovable(false);
+    palette_->setOrientation(Qt::Vertical);
+    palette_->setIconSize(QSize(24, 24));
+    palette_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    for (const auto& [name, label] : {std::pair{"act_marquee", "長方形選択"}, {"act_lasso", "なげなわ"}, {"act_reshape", "線の修正"}, {"act_3d", "3D"}})
+        action(QString::fromLatin1(name))->setIconText(QString::fromUtf8(label));  // (the palette's names stay short; menus keep the full name)
+    addToolBar(Qt::LeftToolBarArea, palette_);
+    // (Python's palette: select, move, pen, eraser, blend, shape, fill, lassofill, gradient, picker | frame | the selection —
+    // PC5 H-d: in the person's order, ツールバー…; each tool's group on a long press or a right click, PC4 E-0; 手のひらツール
+    // last with ズームツール in its group, PC5 H-a: main_window_workspace.cpp)
+    fill_palette();
+    {
+        QAction* names = action(QStringLiteral("act_tool_names"));
+        const QSignalBlocker quiet(names);
+        names->setChecked(settings()->value(QStringLiteral("ui/tool_names"), QStringLiteral("0")).toString() == QLatin1String("1"));
+        show_tool_names(names->isChecked(), false);
+    }
+    commands_ = new QToolBar(QStringLiteral("操作"));
+    commands_->setObjectName(QStringLiteral("commands"));
+    commands_->setMovable(false);
+    commands_->setIconSize(QSize(20, 20));
+    commands_->setToolButtonStyle(Qt::ToolButtonIconOnly);  // (the names are in the tooltips)
+    // the open books' tabs on the left of the bar, the commands on the right
+    QAction* tabs = commands_->addWidget(doc_tabs_);
+    auto* spacer = new QWidget;
+    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    QAction* room = commands_->addWidget(spacer);
+    for (QAction* kept : {tabs, room}) kept->setProperty("keep", true);
+    fill_commandbar(this, commands_);  // (the commands chosen in ウィンドウ → コマンドバーを変える)
+    addToolBar(commands_);
+    make_launcher();
+}
+
+void MainWindow::build_docks() {
+    build_tool_settings();  // (ツールの設定, on the left: main_window_brushes.cpp)
+    navigator_ = new Navigator(canvas_);
+    navigator_dock_ = new QDockWidget(QStringLiteral("全体図"), this);
+    navigator_dock_->setObjectName(QStringLiteral("全体図"));
+    navigator_dock_->setWidget(navigator_);
+    navigator_dock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
+    addDockWidget(Qt::LeftDockWidgetArea, navigator_dock_);
+    splitDockWidget(tool_settings_dock_, navigator_dock_, Qt::Vertical);
+    view_menu_->addAction(navigator_dock_->toggleViewAction());
+    // クイックアクセス: the commands one uses most, a tab beside the navigator
+    quick_access_ = new QuickAccess(this);
+    quick_dock_ = new QDockWidget(QStringLiteral("クイックアクセス"), this);
+    quick_dock_->setObjectName(QStringLiteral("クイックアクセス"));
+    // (scrolls on a small screen instead of making the window wider or taller, as the layers: SPEC UX-02)
+    auto* quick_scroll = new QScrollArea;
+    quick_scroll->setWidgetResizable(true);
+    quick_scroll->setFrameShape(QFrame::NoFrame);
+    quick_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);  // (its buttons reachable on a narrow panel too)
+    quick_dock_->setWidget(quick_scroll);  // (in the dock first, then the panel in it: styled once — build_tool_settings)
+    quick_scroll->setWidget(quick_access_);
+    quick_dock_->setFeatures(navigator_dock_->features());
+    addDockWidget(Qt::LeftDockWidgetArea, quick_dock_);
+    tabifyDockWidget(navigator_dock_, quick_dock_);
+    view_menu_->addAction(quick_dock_->toggleViewAction());
+    quick_access_->refresh();
+    build_anim_dock();  // (タイムライン, a tab beside the navigator: main_window_anim.cpp)
+    // サブビュー: the reference pictures, a tab beside the navigator too
+    subview_ = new SubView(this);
+    auto* sub_dock = new QDockWidget(QStringLiteral("サブビュー"), this);
+    sub_dock->setObjectName(QStringLiteral("サブビュー"));
+    sub_dock->setWidget(subview_);
+    sub_dock->setFeatures(navigator_dock_->features());
+    addDockWidget(Qt::LeftDockWidgetArea, sub_dock);
+    tabifyDockWidget(navigator_dock_, sub_dock);
+    navigator_dock_->raise();
+    sub_dock->hide();  // (for some work only, as Python's: ウィンドウ brings it; the tabs fit a small screen without it)
+    view_menu_->addAction(sub_dock->toggleViewAction());
+    pages_dock_ = new QDockWidget(QStringLiteral("ページ"), this);
+    pages_dock_->setObjectName(QStringLiteral("ページ"));
+    pages_dock_->setWidget(pages_);
+    pages_dock_->setMinimumWidth(170);
+    pages_dock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+    addDockWidget(Qt::RightDockWidgetArea, pages_dock_);
+    view_menu_->addAction(pages_dock_->toggleViewAction());
+    build_studio_docks();  // (承認箱 over the tabs; コマの詳細 and 資料 among them: main_window_studio.cpp)
+    layer_panel_ = new LayerPanel(this);
+    for (const auto& [into, from] : {std::pair{layer_mask_menu_, layer_panel_->mask_menu()}, {layer_special_menu_, layer_panel_->special_menu()},
+                                     {layer_many_menu_, layer_panel_->many_menu()}, {layer_effect_menu_, layer_panel_->effects_menu()}}) {
+        for (QAction* act : from->actions()) into->addAction(act);
+    }
+    auto* layers = new QDockWidget(QStringLiteral("レイヤー"), this);
+    layers->setObjectName(QStringLiteral("レイヤー"));
+    // (a tall panel scrolls on a small screen instead of making the window taller; a tab beside the pages)
+    auto* layer_scroll = new QScrollArea;
+    layer_scroll->setWidgetResizable(true);
+    layer_scroll->setFrameShape(QFrame::NoFrame);
+    layer_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    layers->setWidget(layer_scroll);  // (in the dock first, then the panel in it: styled once — build_tool_settings)
+    layer_scroll->setWidget(layer_panel_);
+    layers->setMinimumWidth(200);
+    layers->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
+    addDockWidget(Qt::RightDockWidgetArea, layers);
+    tabifyDockWidget(pages_dock_, layers);
+    view_menu_->addAction(layers->toggleViewAction());
+    layers_dock_ = layers;
+    build_channel_dock();  // (チャンネル, a tab beside the layers: main_window_channels.cpp)
+    build_path_dock();     // (パス, a tab beside the layers: main_window_paths.cpp)
+    build_clone_source_dock();  // (PC3 B4: コピーソース, when it is opened: retouch_tools.cpp)
+    build_shape_dock();    // (シェイプ, a tab beside the layers: main_window_shapes.cpp)
+    build_adjust_docks();  // (PC2a: 色調補正 and 属性, app/adjust_panels.cpp)
+    build_info_docks();    // (ヒストグラム, 情報: info_panels.cpp)
+    build_line_dock();  // (台詞, a tab beside the pages and the layers: main_window_lines.cpp)
+    pages_dock_->raise();
+    build_colour_dock();  // (カラー, a tab beside the pages and the layers: main_window_paint.cpp)
+    build_paint_docks();  // (PC4 E-0: ブラシ設定, ブラシ, パターン, スタイル, ツールプリセット, スウォッチ: paint_panels.cpp)
+    tabifyDockWidget(pages_dock_, panel_dock_);  // (コマの詳細 after カラー, as Python's row)
+    view_menu_->addAction(panel_dock_->toggleViewAction());
+    build_guide_dock();   // (定規・3D, a tab when it is opened: main_window_guides.cpp)
+    build_material_dock();  // (素材, トーン, 効果線: main_window_materials.cpp)
+    build_output_docks();   // (履歴 and 点検, tabs when they are opened: main_window_output.cpp)
+    build_production_docks();  // (PC5 J-0: アクション, レイヤーカンプ, 計測ログ, 注釈 — frames: main_window_production.cpp)
+    build_type_docks();  // (PC5 G-d: 文字, 段落, 文字スタイル, 段落スタイル, 字形 — tabs beside the layers when opened: main_window_type_panels.cpp)
+    tabifyDockWidget(pages_dock_, library_dock_);  // (資料 last)
+    view_menu_->addAction(library_dock_->toggleViewAction());
+    library_dock_->hide();
+    agent_view(agent_book());
+    build_arrange_docks();  // (PC5 H-c: ツール's switch and 修飾キー in ウィンドウ — main_window_arrange.cpp)
+    name_panels();  // (PC5 H-0: ナビゲーター, オプション, ヒストリー — main_window_arrange.cpp)
+    setTabPosition(Qt::LeftDockWidgetArea, QTabWidget::North);
+    setTabPosition(Qt::RightDockWidgetArea, QTabWidget::North);
+    // (Python's: the tabs name the panels — no second title above them; the room goes to the panel)
+    for (QDockWidget* dock : findChildren<QDockWidget*>()) {
+        if (dock->titleBarWidget() == nullptr) dock->setTitleBarWidget(new QWidget(dock));
+    }
+    // a tool chosen by its key: that key's release is watched (キーを押している間だけ持ち替え)
+    static ByKey* by_key = new ByKey;
+    for (const auto& [tool, act] : tool_actions_) act->installEventFilter(by_key);
+}
+
+// --- what the commands do ---------------------------------------------------------------------------------------------
+
+void MainWindow::choose_tool(const QString& tool) {
+    // (what was in hand before, for キーを押している間だけ持ち替え: hold_key_released)
+    const QString before = canvas_->tool();
+    const QString becomes = is_marquee_tool(tool) ? QStringLiteral("marquee") : is_shape_tool(tool) ? QStringLiteral("shape") : tool;
+    if (before != becomes) tool_switch_ = ToolSwitch{tool, before, monotonic_seconds()};
+    if (is_marquee_tool(tool)) {  // (範囲選択: the marquee tool, in one of its ways)
+        choose_marquee(tool);
+        if (marquee_mode_ != nullptr) marquee_mode_->setCurrentIndex(std::max(0, marquee_mode_->findData(tool)));
+    } else if (is_shape_tool(tool)) {  // (PC3 C-b: the shape tools, the canvas's 図形 in one of its figures)
+        choose_shape_tool(tool);
+    } else {
+        canvas_->set_tool(tool);
+    }
+    if (const auto it = tool_actions_.find(tool); it != tool_actions_.end()) it->second->setChecked(true);
+    if (tool == QLatin1String("effect")) set_effect_pictures(effect_actions_, {"focus", "speed", "uni_flash", "beta_flash"});  // (drawn when first needed)
+    if (tool_settings_ != nullptr) tool_settings_->show_tool(canvas_->tool());
+    if (brush_ != nullptr) brush_->set_pencil(tool == QLatin1String("pencil"));  // (PC4 E1: 自動消去)
+    if (tool == QLatin1String("pencil")) (void)pencil_key();
+    // (PC4 E4 after E3's merge: the 塗りつぶしツール's パターン as the book and the library hold them now)
+    if (tool == QLatin1String("fill") || tool == QLatin1String("lassofill")) refresh_fill_pattern();
+    panel_for_tool(becomes);  // (the lines for the text tool, the layers for the drawing tools: main_window_lines.cpp)
+    // (PC4 E2: ツールプリセット's 現在のツールのみ follows the tool in hand)
+    if (tool_presets_panel_ != nullptr && tool_presets_dock_->isVisible() && tool_presets_panel_->current_only->isChecked()) tool_presets_panel_->refresh();
+    pen_changed();
+}
+
+void MainWindow::undo() {
+    try {
+        perf::event("undo");
+        session_->undo();
+    } catch (const core::Error& error) {
+        flash(wording::error(QString::fromUtf8(error.what())), 3000);
+    }
+    watch();
+}
+
+void MainWindow::redo() {
+    try {
+        perf::event("redo");
+        session_->redo();
+    } catch (const core::Error& error) {
+        flash(wording::error(QString::fromUtf8(error.what())), 3000);
+    }
+    watch();
+}
+
+const core::Layer* MainWindow::paint_layer() {
+    const core::Page* page = current_page();
+    const core::Layer* layer = target_layer();
+    if (page == nullptr || layer == nullptr) return nullptr;
+    // (PC5 J-e2, video@1: drawing on a video layer alters the frame shown — its cel made, then drawn on: main_window_video.cpp)
+    if (layer->kind == core::LayerKind::Folder && core::anim::is_animation(*page) && core::video_row(*page, core::Json(layer->id)) != nullptr) {
+        layer = alter_video_frame(*layer);
+        page = current_page();
+        if (layer == nullptr || page == nullptr) return nullptr;
+    }
+    if (!drawable(*layer, page)) {
+        const bool kind = layer->kind == core::LayerKind::Strokes || layer->kind == core::LayerKind::Raster || layer->kind == core::LayerKind::Tone;
+        const QString why = kind ? QStringLiteral("ロックされています") : QStringLiteral("ペンかペイントのレイヤーではありません");
+        flash(QStringLiteral("「%1」には描けません（%2）。レイヤー パネルで選び直します").arg(wording::layer_label(*layer), why), 4000);
+        return nullptr;
+    }
+    return layer;
+}
+
+void MainWindow::on_stroke(const StrokeInput& stroke) {
+    const core::Page* page = current_page();
+    if (page == nullptr || target_layer() == nullptr) {
+        canvas_->stroke_dropped();
+        return;
+    }
+    if (effect_shape_stroke(stroke, *page)) return;  // (this stroke shapes an effect, not ink: main_window_materials.cpp)
+    if (text_path_stroke(stroke)) return;             // (or is the path a line's words follow: main_window_lines.cpp)
+    if (balloon_eraser_stroke(stroke, *page)) return;  // (or cuts the balloons it went over: フキダシを削る)
+    const core::Layer* layer = paint_layer();
+    if (layer == nullptr) {
+        canvas_->stroke_dropped();
+        return;
+    }
+    if (mask_edit && (PageCanvas::draws_line(stroke.tool) || stroke.tool == QLatin1String("eraser"))) {  // (PC4 E1: the pencil too)
+        // マスクを編集する: the pen shows the layer where it passes, the eraser hides it
+        const bool erase = stroke.tool == QLatin1String("eraser");
+        Json points = Json::array();
+        for (const core::PenPoint& p : stroke.points) points.push_back(Json::array({p.x, p.y}));
+        canvas_->stroke_dropped();
+        apply_ops(Json::array({Json{{"op", "paint_mask"}, {"page", page->index.json()}, {"id", layer->id}, {"points", points},
+                                    {"width_mm", erase ? eraser_mm_ : std::max(0.5, brush_->size->value())}, {"show", !erase}}}));
+        return;
+    }
+    if (retouch_stroke(stroke, *page, *layer)) return;  // (PC3 B4: the retouching brushes, retouch_tools.cpp)
+    if (pixel_tool_stroke(stroke, *page, *layer)) return;  // (PC4 E5: the brushes that change pixels, paint_tools.cpp)
+    if (paint_stroke(stroke, *page, *layer)) return;  // (透明色, ゆがみ, 色混ぜ: main_window_paint.cpp)
+    const bool rulers = canvas_->snap_rulers && page->rulers.is_array() && !page->rulers.empty();
+    if (stroke.tool == QLatin1String("eraser")) {
+        Json points = Json::array();
+        for (const core::PenPoint& p : stroke.points) points.push_back(Json::array({p.x, p.y}));
+        Json op = Json::object({{"op", "erase"}, {"page", page->index.json()}, {"layer_id", layer->id}, {"points", points}, {"width_mm", eraser_mm_}});
+        const Json eraser = eraser_fields(*layer);
+        for (const auto& [key, value] : eraser.items()) op[key] = value;
+        if (rulers) op["snap_ruler"] = true;
+        canvas_->stroke_dropped();
+        Json ops = Json::array();
+        // (brushes@1, PC4 E1: an eraser of a brush of one's own or the pencil's: the book keeps it first)
+        if (op.contains("brush") && !own_brush_op(op["brush"].get<std::string>(), ops)) return;
+        ops.push_back(op);
+        apply_ops(ops);
+        return;
+    }
+    Json points = Json::array();
+    for (const core::PenPoint& p : stroke.points) points.push_back(Json::array({p.x, p.y, p.p.value_or(0.7)}));
+    Json op = Json::object({{"op", "add_stroke"}, {"page", page->index.json()}, {"layer_id", layer->id}, {"points", points}});
+    const Json fields = pen_.stroke_fields();
+    for (const auto& [key, value] : fields.items()) op[key] = value;
+    // brushes@1 (PC4 E1): the 鉛筆ツール draws with its own brush (自動消去: from the 描画色, in the 背景色); a blend paints a
+    // paint layer's pixels; a dab brush's line keeps the pen's tilt, times and wheel
+    bool in_background = false;  // (自動消去: the 背景色's 8 bits, not the 描画色's precise values below)
+    if (stroke.tool == QLatin1String("pencil")) {
+        op["kind"] = pencil_key();
+        if (brush_ != nullptr && brush_->auto_erase->isChecked() && colours_ != nullptr && !stroke.points.empty()) {
+            const auto under = layer_colour_at(stroke.points.front().x, stroke.points.front().y);
+            const auto fore = brush_->rgb();
+            if (under && std::abs((*under)[0] - fore[0]) <= 1 && std::abs((*under)[1] - fore[1]) <= 1 && std::abs((*under)[2] - fore[2]) <= 1) {
+                const auto back = colours_->background();
+                op["rgb"] = Json::array({static_cast<int>(std::lround(std::clamp(back[0], 0.0, 1.0) * 255)),
+                                         static_cast<int>(std::lround(std::clamp(back[1], 0.0, 1.0) * 255)),
+                                         static_cast<int>(std::lround(std::clamp(back[2], 0.0, 1.0) * 255))});
+                op.erase("color_rgb");
+                in_background = true;
+            }
+        }
+    }
+    if (pen_.blend != "normal" && layer->kind == core::LayerKind::Raster) {
+        if (!blend_bakes_ok(*page, *layer)) {
+            canvas_->stroke_dropped();
+            return;
+        }
+        op["blend"] = pen_.blend;
+    }
+    if (render::brushes::is_dab(op.value("kind", std::string()))) {
+        add_background(op);  // (PC4 E2, review P2-4: the 背景色 a brush's colour moves to, with the line)
+        const std::size_t n = stroke.points.size();
+        if (stroke.tilt.size() == 2 * n && std::any_of(stroke.tilt.begin(), stroke.tilt.end(), [](double v) { return std::abs(v) > 0.05; })) {
+            Json tilt = Json::array();
+            for (std::size_t i = 0; i < n; ++i) tilt.push_back(Json::array({core::py_round(stroke.tilt[2 * i], 1), core::py_round(stroke.tilt[2 * i + 1], 1)}));
+            op["tilt"] = tilt;
+        }
+        if (stroke.time_ms.size() == n && n > 0 && stroke.time_ms.back() > 0) {
+            Json times = Json::array();
+            for (const double v : stroke.time_ms) times.push_back(core::py_round(v, 1));
+            op["time_ms"] = times;
+        }
+        if (stroke.wheel.size() == n && std::any_of(stroke.wheel.begin(), stroke.wheel.end(), [](double v) { return v < 0.999; })) {
+            Json wheel = Json::array();
+            for (const double v : stroke.wheel) wheel.push_back(core::py_round(v, 3));
+            op["wheel"] = wheel;
+        }
+    }
+    // (PC4 E-0: a 描画色 holding more than its 8 bits, on a page of 16 or 32 bits: its precise values as the line's colour —
+    // native.color_stroke_v1's color_rgb —, the 8-bit rgb its picture)
+    if (colours_ != nullptr && !in_background && op.contains("rgb") && colours_->is_precise() && !page->color && page->rgb && page->rgb->depth != 8) {
+        op["color_rgb"] = colours_->foreground_json(page->rgb->depth == 32 ? "f32" : "u16");
+    }
+    if (stroke.rotation.size() == stroke.points.size() &&
+        std::any_of(stroke.rotation.begin(), stroke.rotation.end(), [](double v) { return std::abs(v) > 0.5; })) {
+        Json turns = Json::array();
+        for (const double v : stroke.rotation) turns.push_back(core::py_round(v, 1));  // (a pen that reports its barrel turn)
+        op["rotation"] = turns;
+    }
+    Json ops = Json::array({op});
+    const std::string kind = op.value("kind", std::string());
+    // the book keeps the brush's settings, so the line looks the same on any computer (PC4 E2: a dab brush's pictures with
+    // them, a built-in dab brush's under its key: own_brush_op)
+    if (kind.starts_with("my_") && !book().brush_custom.contains(kind)) {
+        Json before = Json::array();
+        if (!own_brush_op(kind, before, true)) {
+            canvas_->stroke_dropped();
+            return;
+        }
+        for (auto it = before.rbegin(); it != before.rend(); ++it) ops.insert(ops.begin(), *it);
+    }
+    if (rulers) ops.back()["snap_ruler"] = true;
+    if (apply_ops(ops, {stroke.id})) {
+        canvas_->stroke_applied(stroke.id);
+        if (colours_ != nullptr) colours_->remember(brush_->rgb());  // (a colour just used: the front of 履歴)
+    } else {
+        canvas_->stroke_dropped();
+    }
+}
+
+void MainWindow::on_frame_selected(const QString& frame_id) {
+    const core::Page* page = current_page();
+    if (page == nullptr) return;
+    // (choosing goes through an op like every other change: no direct edits of the model)
+    if (panel_view_ != nullptr) panel_view_->frame_id = frame_id.toStdString();
+    if (!(page->selected_frame_id.is_string() && page->selected_frame_id.get<std::string>() == frame_id.toStdString())) {
+        apply_ops(Json::array({Json::object({{"op", "select_frame"}, {"page", page->index.json()}, {"frame_id", frame_id.toStdString()}})}));
+    }
+    if (panel_view_ != nullptr && agent_mode_.value_or(false)) panel_view_->refresh();  // (a deliberate click: the panel shown at once)
+}
+
+void MainWindow::context_menu(const QString& frame_id, const QPoint& global) {
+    if (selection_context_menu(global)) return;  // (PC3 B1: over the selection with a selection tool, Photoshop's menu)
+    // a drawing tool's right click: the round menu at the pen (Shift: the usual menu)
+    const bool shift = (QApplication::keyboardModifiers() & Qt::ShiftModifier) != 0;
+    if (radial_on() && radial_tool(canvas_->tool()) && !shift) {
+        radial_ = new RadialMenu(this, radial_actions(this), global);
+        radial_->show();
+        return;
+    }
+    QMenu menu(this);
+    fill_context_menu(menu, frame_id);
+    menu.exec(global);
+}
+
+void MainWindow::fill_context_menu(QMenu& menu, const QString& frame_id) {
+    if (!frame_id.isEmpty()) {
+        for (const char* name : {"act_split_h", "act_split_v", "act_merge", "act_delete_frame", "act_frame_selection"}) menu.addAction(action(name));
+        menu.addSeparator();
+        menu.addAction(QStringLiteral("このコマの詳細を見る"), this, [this] { show_dock(QStringLiteral("コマの詳細")); });
+        QAction* ref = menu.addAction(QStringLiteral("AI 用の参照をコピー"));
+        ref->setToolTip(QStringLiteral("このコマを AI に伝える言葉（ページ・読み順・AI の使う名前）をコピーします"));
+        connect(ref, &QAction::triggered, this, [this, frame_id] {
+            const core::Page* page = current_page();
+            if (page == nullptr) return;
+            const auto leaves = page->leaf_frames();
+            int order = 0;
+            for (std::size_t i = 0; i < leaves.size(); ++i) {
+                if (leaves[i]->id == frame_id.toStdString()) order = static_cast<int>(i) + 1;
+            }
+            const core::Frame* frame = page->find_frame(frame_id.toStdString());
+            if (frame == nullptr) {  // (the book read again while the menu was open: the panel is no longer on the page in front)
+                flash(QStringLiteral("確認中に対象の原稿・ページが変更されたため、操作を中止しました。やり直してください。"), 6000, true);
+                return;
+            }
+            QString slot;
+            if (frame != nullptr && frame->panel && frame->panel->is_object() && frame->panel->contains("slot")) slot = QString::fromStdString(core::py_str((*frame->panel)["slot"]));
+            const QString index = QString::fromStdString(page->index.repr());
+            const QString names = QStringLiteral("page %1, frame_id \"%2\"").arg(index, frame_id) + (slot.isEmpty() ? QString() : QStringLiteral(", slot \"%1\"").arg(slot));
+            const QString words = QStringLiteral("%1 ページ目の %2 コマ目（読み順）［%3］").arg(index).arg(order).arg(names);
+            QApplication::clipboard()->setText(words);
+            flash(QStringLiteral("コピーしました: %1").arg(words), 4000);
+        });
+        menu.addSeparator();
+    }
+    menu.addAction(action("act_fit"));
+}
+
+double MainWindow::gutter_mm(const QString& cut) const {
+    const double fallback = cut == QLatin1String("horizontal") ? 6.0 : 3.0;
+    bool ok = false;
+    const double value = settings()->value(QStringLiteral("gutter_%1").arg(cut), fallback).toDouble(&ok);
+    return ok ? value : fallback;
+}
+
+void MainWindow::split(const QString& axis) {
+    const core::Page* page = current_page();
+    if (page == nullptr) return;
+    if (!core::py_truthy(page->selected_frame_id)) {
+        flash(QStringLiteral("先にコマをクリックして選びます（選択ツール）"), 6000);
+        return;
+    }
+    apply_ops(Json::array({Json::object({{"op", "split_frame"},
+                                         {"page", page->index.json()},
+                                         {"axis", axis.toStdString()},
+                                         {"frame_id", page->selected_frame_id},
+                                         {"gutter_mm", gutter_mm(axis == QLatin1String("horizontal") ? QStringLiteral("horizontal") : QStringLiteral("vertical"))}})}));
+}
+
+void MainWindow::gutter_settings() {
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("コマ間隔"));
+    auto* form = new QFormLayout(&dialog);
+    std::map<QString, QDoubleSpinBox*> spins;
+    for (const auto& [key, label] : {std::pair{"horizontal", "上下の間隔（段と段の間）"}, {"vertical", "左右の間隔（横に並ぶコマの間）"}}) {
+        auto* spin = new QDoubleSpinBox;
+        spin->setObjectName(QString::fromLatin1(key));
+        spin->setRange(0, 30);
+        spin->setSingleStep(0.5);
+        spin->setSuffix(QStringLiteral(" mm"));
+        spin->setValue(gutter_mm(QString::fromLatin1(key)));
+        form->addRow(QString::fromUtf8(label), spin);
+        spins[QString::fromLatin1(key)] = spin;
+    }
+    auto* note = new QLabel(QStringLiteral("これから割るコマに使います。今ある間隔は、コマ割りツールで間の白をドラッグして変えます。"));
+    note->setWordWrap(true);
+    form->addRow(note);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    if (ask::exec(&dialog) == QDialog::Accepted) {
+        const auto store = settings();
+        for (const auto& [key, spin] : spins) store->setValue(QStringLiteral("gutter_%1").arg(key), spin->value());
+    }
+}
+
+const core::Frame* MainWindow::selected_frame() const {
+    const core::Page* page = current_page();
+    if (page == nullptr || !page->selected_frame_id.is_string()) return nullptr;
+    return page->find_frame(page->selected_frame_id.get<std::string>());
+}
+
+void MainWindow::set_selected_frame(const Json& change) {
+    const core::Frame* frame = selected_frame();
+    if (frame == nullptr) {
+        flash(QStringLiteral("先にコマをクリックして選びます"), 6000);
+        return;
+    }
+    Json op = Json::object({{"op", "set_frame"}, {"page", current_page()->index.json()}, {"frame_id", frame->id}});
+    for (const auto& [key, value] : change.items()) op[key] = value;
+    apply_ops(Json::array({op}));
+}
+
+bool MainWindow::modal_target_unchanged(const std::shared_ptr<Session>& origin, const DocPtr& snapshot, int page_index) {
+    if (session_ == origin && origin->snapshot() == snapshot && page_index_ == page_index) return true;
+    flash(QStringLiteral("確認中に対象の原稿・ページが変更されたため、操作を中止しました。やり直してください。"), 6000, true);
+    return false;
+}
+
+void MainWindow::border_width() {
+    const auto origin = session_;
+    const auto snapshot = origin->snapshot();
+    const int page_index = page_index_;
+    const core::Frame* frame = selected_frame();
+    if (frame == nullptr) {
+        flash(QStringLiteral("先にコマをクリックして選びます"), 6000);
+        return;
+    }
+    if (const auto value = ask::get_double(this, QStringLiteral("枠線の太さ"), QStringLiteral("枠線の太さ（mm）"), frame->border_mm, 0.0, 5.0, 2)) {
+        if (!modal_target_unchanged(origin, snapshot, page_index)) return;
+        set_selected_frame(Json::object({{"border_mm", *value}}));
+    }
+}
+
+void MainWindow::corner_radius() {
+    const auto origin = session_;
+    const auto snapshot = origin->snapshot();
+    const int page_index = page_index_;
+    const core::Frame* frame = selected_frame();
+    if (frame == nullptr) {
+        flash(QStringLiteral("先にコマをクリックして選びます"), 6000);
+        return;
+    }
+    if (const auto value = ask::get_double(this, QStringLiteral("角の丸み"), QStringLiteral("角の丸み（半径 mm、0 で角ばる）"), frame->corner_mm, 0.0, 50.0, 1)) {
+        if (!modal_target_unchanged(origin, snapshot, page_index)) return;
+        set_selected_frame(Json::object({{"corner_mm", *value}}));
+    }
+}
+
+void MainWindow::border_kind(const QString& kind) {
+    const core::Frame* frame = selected_frame();
+    if (frame == nullptr) {
+        flash(QStringLiteral("先にコマをクリックして選びます"), 6000);
+        return;
+    }
+    Json style = frame->line && frame->line->is_object() ? *frame->line : Json::object();
+    style["kind"] = kind.toStdString();
+    set_selected_frame(Json::object({{"line", style == Json::object({{"kind", "solid"}}) ? Json(nullptr) : style}}));
+}
+
+void MainWindow::layer_operation(const std::string& operation) {
+    const core::Page* current = current_page();
+    if (!current || !session_->read_only_reason().empty()) return;
+    const auto origin = session_;
+    const auto snapshot = origin->snapshot();
+    const int page_index = page_index_;
+    const core::Page page = *current;
+    const bool pen = operation == "convert_pen";
+    Json op = {{"op", pen ? "convert_layer" : operation}, {"page", page.index.json()}};
+    if (operation == "merge_visible") {
+        op["copy"] = true;
+    } else if (operation == "flatten") {
+        QMessageBox confirm(QMessageBox::Warning,QStringLiteral("画像を統合"),
+            QStringLiteral("用紙色を背景に、表示中の作画を1つの不透明レイヤーへ結合します。\n非表示の作画レイヤーは破棄します（ネーム・下描き・コマ枠は保持）。\n操作は取り消せます。続けますか？"),QMessageBox::Yes|QMessageBox::No,this);
+        confirm.setObjectName(QStringLiteral("flatten_layer_confirm"));confirm.setDefaultButton(QMessageBox::No);
+        confirm.button(QMessageBox::Yes)->setText(QStringLiteral("統合"));confirm.button(QMessageBox::No)->setText(QStringLiteral("取消"));
+        if (confirm.exec()!=QMessageBox::Yes) return;
+        op["op"]="merge_visible";op["copy"]=false;op["flatten"]=true;
+    } else {
+        const bool multi = operation == "merge_layers";
+        const int minimum = multi ? 2 : 1;
+        QDialog dialog(this); dialog.setObjectName("merge_layer_dialog");
+        dialog.setWindowTitle(multi ? QStringLiteral("結合するレイヤーを選ぶ") : QStringLiteral("対象レイヤーを選ぶ"));
+        auto* layout = new QVBoxLayout(&dialog);
+        layout->addWidget(new QLabel(multi ? QStringLiteral("2つ以上選びます。元に戻す操作で結合前に戻せます。") :
+                                             QStringLiteral("操作するレイヤーを1つ選びます。"), &dialog));
+        auto* choices = new QListWidget(&dialog); choices->setObjectName("merge_layer_choices");
+        choices->setSelectionMode(multi ? QAbstractItemView::ExtendedSelection : QAbstractItemView::SingleSelection);
+        for (const auto& layer : page.layers) {
+            auto* item = new QListWidgetItem(wording::layer_label(layer), choices);
+            item->setData(Qt::UserRole, QString::fromStdString(layer.id));
+            item->setToolTip(QString::fromStdString(layer.id));
+            if (layer.locked) item->setFlags(item->flags() & ~Qt::ItemIsSelectable);
+            else if (target_layer_id_ && *target_layer_id_ == layer.id) item->setSelected(true);
+        }
+        layout->addWidget(choices);
+        QDoubleSpinBox* minimum_length=nullptr;
+        if (pen) {
+            layout->addWidget(new QLabel(QStringLiteral("短い印を除く最小の線長（mm）"),&dialog));
+            minimum_length=new QDoubleSpinBox(&dialog);minimum_length->setObjectName("convert_pen_min_mm");
+            minimum_length->setRange(0,100);minimum_length->setDecimals(2);minimum_length->setValue(.8);
+            layout->addWidget(minimum_length);
+        }
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        buttons->button(QDialogButtonBox::Ok)->setText((operation == "convert_layer" || pen) ? QStringLiteral("変換") : QStringLiteral("結合"));
+        buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+        buttons->button(QDialogButtonBox::Ok)->setEnabled(choices->selectedItems().size() >= minimum);
+        connect(choices, &QListWidget::itemSelectionChanged, &dialog, [choices, buttons, minimum] {
+            buttons->button(QDialogButtonBox::Ok)->setEnabled(choices->selectedItems().size() >= minimum);
+        });
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        layout->addWidget(buttons);
+        if (dialog.exec() != QDialog::Accepted) return;
+        Json ids = Json::array();
+        for (const auto* item : choices->selectedItems()) ids.push_back(item->data(Qt::UserRole).toString().toStdString());
+        if (ids.size() < static_cast<std::size_t>(minimum)) return;
+        if (multi) op["ids"] = std::move(ids);
+        else op["id"] = ids.front();
+        if (pen) {op["to"]="pen";op["min_mm"]=minimum_length->value();op["preserve_precision"]=true;}
+        else if (operation == "convert_layer") op["to"] = "paint";
+    }
+    if (!modal_target_unchanged(origin, snapshot, page_index)) return;
+    (void)apply_ops(Json::array({op}));
+}
+
+void MainWindow::exposure_dialog() {
+    const auto origin = session_;
+    const auto snapshot = origin->snapshot();
+    const int page_index = page_index_;
+    if (!current_page() || !origin->read_only_reason().empty()) return;
+    const core::Layer* target = target_layer();
+    const bool editing = target && target->kind == core::LayerKind::Adjust && target->adjust && target->adjust->value("kind", Json()) == "exposure";
+    const std::string id = editing ? target->id : std::string();
+    core::Exposure now;
+    try {
+        if (editing) now = core::Exposure::parse(*target->adjust);
+    } catch (const std::exception&) {
+        flash(QStringLiteral("露光量の値が不正なため調整できません。原稿は変更していません。"), 8000);
+        return;
+    }
+    QDialog dialog(this);
+    dialog.setObjectName(QStringLiteral("exposure_dialog"));
+    dialog.setWindowTitle(editing ? QStringLiteral("露光量の調整") : QStringLiteral("露光量の調整層を追加"));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* explanation = new QLabel(QStringLiteral("元画像の画素は変更しません。調整層より下の色を補正します。"));
+    explanation->setWordWrap(true);
+    layout->addWidget(explanation);
+    auto* form = new QFormLayout;
+    auto* ev = new QDoubleSpinBox;
+    ev->setObjectName(QStringLiteral("exposure_ev"));
+    ev->setRange(-20, 20); ev->setDecimals(3); ev->setSingleStep(.1); ev->setValue(now.stops);
+    auto* offset = new QDoubleSpinBox;
+    offset->setObjectName(QStringLiteral("exposure_offset"));
+    offset->setRange(-.5, .5); offset->setDecimals(3); offset->setSingleStep(.01); offset->setValue(now.offset);
+    auto* gamma = new QDoubleSpinBox;
+    gamma->setObjectName(QStringLiteral("exposure_gamma"));
+    gamma->setRange(.01, 9.99); gamma->setDecimals(3); gamma->setSingleStep(.1); gamma->setValue(now.gamma);
+    form->addRow(QStringLiteral("露光量（EV）"), ev);
+    form->addRow(QStringLiteral("オフセット"), offset);
+    form->addRow(QStringLiteral("ガンマ"), gamma);
+    layout->addLayout(form);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    buttons->button(QDialogButtonBox::Ok)->setText(editing ? QStringLiteral("適用") : QStringLiteral("調整層を追加"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("キャンセル"));
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    dialog.resize(400, dialog.sizeHint().height());
+    if (ask::exec(&dialog) != QDialog::Accepted || !modal_target_unchanged(origin, snapshot, page_index)) return;
+    const Json spec = {{"kind", "exposure"}, {"exposure", ev->value()}, {"offset", offset->value()}, {"gamma", gamma->value()}};
+    Json op = {{"op", editing ? "set_layer" : "add_layer"},
+               {"page", snapshot->page(static_cast<std::size_t>(page_index)).index.json()}, {"adjust", spec}};
+    if (editing) op["id"] = id;
+    else { op["layer"] = "finish"; op["kind"] = "adjust"; op["title"] = "露光量"; }
+    apply_ops(Json::array({op}));
+}
+
+void MainWindow::border_colour() {
+    const auto origin = session_;
+    const auto snapshot = origin->snapshot();
+    const int page_index = page_index_;
+    const core::Frame* frame = selected_frame();
+    if (frame == nullptr) {
+        flash(QStringLiteral("先にコマをクリックして選びます"), 6000);
+        return;
+    }
+    QColor now(20, 20, 20);
+    if (frame->line && frame->line->is_object() && frame->line->contains("rgb") && core::py_truthy((*frame->line)["rgb"])) {
+        const Json& rgb = (*frame->line)["rgb"];
+        now = QColor(static_cast<int>(core::py_int(rgb[0])), static_cast<int>(core::py_int(rgb[1])), static_cast<int>(core::py_int(rgb[2])));
+    }
+    const auto colour = ask::colour(this, now, QStringLiteral("枠線の色"));
+    if (!colour) return;
+    if (!modal_target_unchanged(origin, snapshot, page_index)) return;
+    Json style = frame->line && frame->line->is_object() && !frame->line->empty() ? *frame->line : Json::object({{"kind", "solid"}});
+    style["rgb"] = Json::array({colour->red(), colour->green(), colour->blue()});
+    set_selected_frame(Json::object({{"line", style}}));
+}
+
+void MainWindow::border_detail() {
+    const auto origin = session_;
+    const auto snapshot = origin->snapshot();
+    const int page_index = page_index_;
+    const core::Frame* frame = selected_frame();
+    if (frame == nullptr) {
+        flash(QStringLiteral("先にコマをクリックして選びます"), 6000);
+        return;
+    }
+    Json style = frame->line && frame->line->is_object() ? *frame->line : Json::object({{"kind", "solid"}});
+    const double width = frame->border_mm;
+    const std::string kind = style.value("kind", std::string("solid"));
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("枠線の間隔・長さ・揺れ"));
+    auto* form = new QFormLayout(&dialog);
+    const auto now = [&style](const char* key, double fallback) {
+        return style.contains(key) && style[key].is_number() ? style[key].get<double>() : fallback;
+    };
+    struct Field {
+        const char* key;
+        QString label;
+        double lo, hi, value;
+    };
+    const double gap = kind == "dashed" ? 1.8 : kind == "double" ? std::max(0.6, width) : std::max(1.0, width * 2.2);
+    const std::vector<Field> fields{{"gap_mm", QStringLiteral("二重線の間・破線と点線の間（mm）"), 0.1, 10.0, now("gap_mm", gap)},
+                                    {"dash_mm", QStringLiteral("破線の長さ（mm）"), 0.01, 30.0, now("dash_mm", 3.0)},
+                                    {"wobble_mm", QStringLiteral("手描き風の揺れ（mm）"), 0.0, 3.0, now("wobble_mm", 0.35)}};
+    std::vector<QDoubleSpinBox*> boxes;
+    for (const Field& field : fields) {
+        auto* box = new QDoubleSpinBox;
+        box->setObjectName(QString::fromLatin1(field.key));
+        box->setRange(field.lo, field.hi);
+        box->setDecimals(2);
+        box->setSingleStep(0.1);
+        box->setValue(field.value);
+        form->addRow(field.label, box);
+        boxes.push_back(box);
+    }
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    if (ask::exec(&dialog) != QDialog::Accepted) return;
+    if (!modal_target_unchanged(origin, snapshot, page_index)) return;
+    const std::map<std::string, bool> wanted{{"gap_mm", kind == "double" || kind == "dashed" || kind == "dotted"}, {"dash_mm", kind == "dashed"}, {"wobble_mm", kind == "rough"}};
+    bool any = false;
+    for (std::size_t i = 0; i < fields.size(); ++i) {
+        if (wanted.at(fields[i].key)) {
+            style[fields[i].key] = core::py_round(boxes[i]->value(), 2);
+            any = true;
+        }
+    }
+    if (!any) {
+        flash(QStringLiteral("実線には間隔も長さもありません。先に枠線の種類（二重線・破線・点線・手描き風）を選びます"), 6000);
+        return;
+    }
+    set_selected_frame(Json::object({{"line", style}}));
+}
+
+void MainWindow::toggle_bleed() {
+    const core::Frame* frame = selected_frame();
+    if (frame == nullptr) {
+        flash(QStringLiteral("先にコマをクリックして選びます"), 6000);
+        return;
+    }
+    const bool was = frame->bleed;
+    set_selected_frame(Json::object({{"bleed", !was}}));
+    flash(!was ? QStringLiteral("断ち切りにしました（紙の端に接する辺は枠線なし）") : QStringLiteral("断ち切りをやめました"));
+}
+
+void MainWindow::frame_to_selection() {
+    const core::Page* page = current_page();
+    if (page == nullptr || !core::py_truthy(page->selected_frame_id)) {
+        flash(QStringLiteral("先にコマをクリックして選びます（コマツールか選択ツール）"), 6000);
+        return;
+    }
+    const core::Frame* frame = selected_frame();
+    if (frame == nullptr) return;
+    core::Json poly = core::Json::array();
+    for (const QPointF& p : outline_of(*frame)) poly.push_back(core::Json::array({core::py_round(p.x(), 3), core::py_round(p.y(), 3)}));
+    if (canvas_->tool() != QLatin1String("marquee")) choose_tool(QStringLiteral("rect"));
+    canvas_->set_selection(core::Json{{"poly", poly}});
+    flash(QStringLiteral("コマの形を選択範囲にしました"), 3000);
+}
+
+void MainWindow::templates_dialog() {
+    const auto origin = session_;
+    const auto snapshot = origin->snapshot();
+    const int page_index = page_index_;
+    const core::Page* page = current_page();
+    if (page == nullptr) return;
+    TemplateDialog dialog(this, session_->snapshot(), static_cast<std::size_t>(page_index_), session_->actor());
+    if (ask::exec(&dialog) != QDialog::Accepted || !dialog.plan) return;
+    if (!modal_target_unchanged(origin, snapshot, page_index)) return;
+    if (dialog.needs_clearing &&
+        !ask::question(this, QStringLiteral("Genko"),
+                       QStringLiteral("%1 ページのコマと台詞を消して、テンプレートで割り直します。\n（元に戻す で取り消せます）").arg(QString::fromStdString(page->index.repr())))) {
+        return;
+    }
+    if (!modal_target_unchanged(origin, snapshot, page_index)) return;
+    apply_ops(dialog.plan->ops, dialog.plan->ids);
+}
+
+void MainWindow::save_template() {
+    const auto origin = session_;
+    const auto snapshot = origin->snapshot();
+    const int page_index = page_index_;
+    const core::Page* page = current_page();
+    if (page == nullptr) return;
+    const QString suggested = QStringLiteral("%1 %2 ページ").arg(book().title.empty() ? QStringLiteral("無題") : QString::fromStdString(book().title),
+                                                              QString::fromStdString(page->index.repr()));
+    const auto typed = ask::get_text(this, QStringLiteral("テンプレートに残す"), QStringLiteral("テンプレートの名前"), suggested);
+    if (!typed) return;
+    if (!modal_target_unchanged(origin, snapshot, page_index)) return;
+    const QString name = typed->trimmed();
+    if (name.isEmpty()) return;
+    const auto existing = templates::mine();
+    if (std::any_of(existing.begin(), existing.end(), [&](const templates::Template& t) { return QString::fromStdString(t.key) == name; }) &&
+        !ask::question(this, QStringLiteral("Genko"), QStringLiteral("「%1」はもうあります。置き換えますか？").arg(name))) {
+        return;
+    }
+    try {
+        if (!modal_target_unchanged(origin, snapshot, page_index)) return;
+        templates::save_mine(name, *page);
+    } catch (const core::Error& error) {
+        flash(wording::error(QString::fromUtf8(error.what())), 6000, true);
+        return;
+    }
+    flash(QStringLiteral("コマ割りを「%1」として残しました（テンプレートでコマを割る… の最初に出ます）").arg(name), 6000);
+}
+
+void MainWindow::add_page() {
+    const core::Page* page = current_page();
+    if (page == nullptr) {
+        if (apply_ops(Json::array({Json::object({{"op", "add_page"}})}))) {
+            page_index_ = static_cast<int>(book().pages.size()) - 1;
+            reload_pages();
+        }
+        return;
+    }
+    const int index = static_cast<int>(core::py_int(page->index.json()));
+    if (apply_ops(Json::array({Json::object({{"op", "add_page"}, {"count", 1}, {"after", index}})}))) {
+        page_index_ = index;  // the new page
+        reload_pages();
+    }
+}
+
+void MainWindow::del_page() {
+    const auto origin = session_;
+    const auto snapshot = origin->snapshot();
+    const int page_index = page_index_;
+    const core::Page* page = current_page();
+    if (page == nullptr) return;
+    const QString extra = page->name_ok ? QStringLiteral("\nこのページのネームは承認済みです。") : QString();
+    if (ask::question(this, QStringLiteral("Genko"),
+                      QStringLiteral("%1 ページを消しますか？%2\n（元に戻す で取り消せます）").arg(QString::fromStdString(page->index.repr()), extra))) {
+        if (!modal_target_unchanged(origin, snapshot, page_index)) return;
+        apply_ops(Json::array({Json::object({{"op", "delete_page"}, {"page", page->index.json()}})}));
+    }
+}
+
+void MainWindow::duplicate_page(int index) {
+    if (apply_ops(Json::array({Json::object({{"op", "duplicate_page"}, {"page", index}, {"next_to", true}})}))) {
+        page_index_ = index;
+        reload_pages();
+    }
+}
+
+void MainWindow::reorder_pages(const std::vector<int>& order, int follow) {
+    if (apply_ops(Json::array({Json::object({{"op", "reorder"}, {"order", Json(order)}})}))) {
+        const auto it = std::find(order.begin(), order.end(), follow);
+        page_index_ = it == order.end() ? 0 : static_cast<int>(it - order.begin());
+    }
+    reload_pages();
+}
+
+void MainWindow::page_overview() {
+    auto* overview = new PageOverview(this, session_->snapshot(), current_page() != nullptr ? static_cast<int>(core::py_int(current_page()->index.json())) : 1);
+    overview->setAttribute(Qt::WA_DeleteOnClose);
+    connect(overview, &PageOverview::pageChosen, this, &MainWindow::go_to_page);
+    overview->show();
+}
+
+void MainWindow::name_ok() {
+    if (const core::Page* page = current_page()) apply_ops(Json::array({Json::object({{"op", "name_ok"}, {"page", page->index.json()}})}));
+}
+
+void MainWindow::point_width(double factor) {
+    // 制御点ごとの線幅: the chosen control point wider (the vector tool that chooses it comes with M3)
+    const std::vector<std::string> ids = canvas_->vector_ids;
+    const std::optional<int> point = canvas_->vector_point;
+    const core::Layer* layer = paint_layer();
+    if (ids.empty() || !point || layer == nullptr) {
+        flash(QStringLiteral("先に「部分選択ツール」で線を選び、□（制御点）をクリックします"), 4000);
+        return;
+    }
+    const core::Stroke* stroke = nullptr;
+    for (const auto& s : layer->strokes->items) {
+        if (s->id == ids.front()) {
+            stroke = s.get();
+            break;
+        }
+    }
+    if (stroke == nullptr || *point < 0) return;
+    const auto at = static_cast<std::size_t>(*point);
+    if (stroke->pressure.size() == stroke->points.size() && at >= stroke->pressure.size()) return;  // (no such point)
+    const double now = stroke->pressure.size() == stroke->points.size() ? stroke->pressure[at] : 0.7;
+    const Json change = Json::object({{"action", "set_pressure"},
+                                      {"stroke_id", ids.front()},
+                                      {"index", *point},
+                                      {"pressure", core::py_round(core::py_max(0.05, core::py_min(1.5, now * factor)), 3)}});
+    // (_vector_edit)
+    const core::Layer* target = paint_layer();
+    const core::Page* page = current_page();
+    if (target == nullptr || page == nullptr) return;
+    Json op = Json::object({{"op", "vector_edit"}, {"page", page->index.json()}, {"layer_id", target->id}});
+    for (const auto& [key, value] : change.items()) op[key] = value;
+    apply_ops(Json::array({op}));
+    canvas_->update();
+}
+
+void MainWindow::pick_colour() {
+    const QColor now(static_cast<int>(pen_.rgb[0]), static_cast<int>(pen_.rgb[1]), static_cast<int>(pen_.rgb[2]));
+    if (const auto colour = ask::colour(this, now, QStringLiteral("カラーピッカー（描画色）"))) brush_->set_colour({colour->red(), colour->green(), colour->blue()});
+}
+
+void MainWindow::ask_zoom() {
+    // (PC5 H-a, the user's decision 11: in the page's pixels — 100 one page pixel a screen pixel, up to 3200 —; the paper's
+    // size is プリントサイズ)
+    if (const auto value = ask::get_int(this, QStringLiteral("表示倍率"), QStringLiteral("倍率（%。100 で画素等倍）"), canvas_->zoom_percent(), 1, 3200)) {
+        const int percent = *value;
+        canvas_->glide([this, percent] { canvas_->set_zoom_percent(percent); });
+    }
+}
+
+void MainWindow::apply_stage(const QString& key) {
+    // show the panels a stage needs (in front, the ones used most), hide the rest
+    const auto it = std::find_if(stages().begin(), stages().end(), [&](const Stage& s) { return key == QLatin1String(s.key); });
+    if (it == stages().end()) return;
+    const auto docks = findChildren<QDockWidget*>(QString(), Qt::FindDirectChildrenOnly);
+    for (QDockWidget* dock : docks) {
+        const bool wanted = std::any_of(it->show.begin(), it->show.end(), [&](const char* t) { return dock->windowTitle() == QString::fromUtf8(t); });
+        dock->setVisible(wanted);
+    }
+    for (auto front = it->front.rbegin(); front != it->front.rend(); ++front) {
+        for (QDockWidget* dock : docks) {
+            if (dock->windowTitle() == QString::fromUtf8(*front) && dock->isVisible()) dock->raise();
+        }
+    }
+    settings()->setValue(QStringLiteral("ui/stage"), key);
+    flash(QStringLiteral("「%1」の並びにしました（ウィンドウ → ワークスペース → 作業の段階）").arg(QString::fromUtf8(it->label)), 2500);
+}
+
+void MainWindow::delete_frame() {
+    const core::Page* page = current_page();
+    if (page == nullptr || !core::py_truthy(page->selected_frame_id)) {
+        flash(QStringLiteral("先にコマをクリックして選びます（コマツールか選択ツール）"), 6000);
+        return;
+    }
+    apply_ops(Json::array({Json::object({{"op", "delete_frame"}, {"page", page->index.json()}, {"frame_id", page->selected_frame_id}})}));
+}
+
+void MainWindow::merge() {
+    const core::Page* page = current_page();
+    if (page == nullptr || !core::py_truthy(page->selected_frame_id)) {
+        flash(QStringLiteral("先にコマをクリックして選びます（選択ツール）"), 6000);
+        return;
+    }
+    apply_ops(Json::array({Json::object({{"op", "merge_frame"}, {"page", page->index.json()}, {"frame_id", page->selected_frame_id}})}));
+}
+
+void MainWindow::cut_frame(const QString& frame_id, const QPointF& p0, const QPointF& p1) {
+    const core::Page* page = current_page();
+    if (page == nullptr) return;
+    const bool horizontal = std::abs(p1.x() - p0.x()) >= std::abs(p1.y() - p0.y());
+    apply_ops(Json::array({Json::object({{"op", "cut_frame"},
+                                         {"page", page->index.json()},
+                                         {"frame_id", frame_id.toStdString()},
+                                         {"p0", point_json(p0)},
+                                         {"p1", point_json(p1)},
+                                         {"gutter_mm", gutter_mm(horizontal ? QStringLiteral("horizontal") : QStringLiteral("vertical"))}})}));
+}
+
+void MainWindow::frame_drawn(const QVector<QPointF>& points) {
+    // a panel drawn with the panel tool (長方形・折れ線・フリーハンド)
+    const core::Page* page = current_page();
+    if (page == nullptr) return;
+    const bool rect = points.size() == 4 && points[0].y() == points[1].y() && points[1].x() == points[2].x();
+    Json op = Json::object({{"op", "add_frame"}, {"page", page->index.json()}});
+    if (rect) {
+        op["rect"] = Json::array({points[0].x(), points[0].y(), core::py_round(points[2].x() - points[0].x(), 2), core::py_round(points[2].y() - points[0].y(), 2)});
+    } else {
+        Json list = Json::array();
+        for (const QPointF& p : points) list.push_back(Json::array({p.x(), p.y()}));
+        op["points"] = list;
+    }
+    const bool first = !(!page->frames.empty() && page->frames[0].split_axis && *page->frames[0].split_axis == "free");
+    if (apply_ops(Json::array({op})) && first) {
+        flash(QStringLiteral("コマを描きました。最初に描いたコマは、元の基本枠と入れ替わります（元に戻す: Ctrl+Z）"), 6000);
+    }
+}
+
+void MainWindow::layer_move_started() {
+    // the picture of the layers being moved (PC3 C-d: the layers chosen, their folders' and linked layers), for the
+    // canvas to carry under the pen (drawn on a worker thread); they are not snapped to
+    const core::Page* page = current_page();
+    const std::vector<std::string> moved = move_targets();
+    canvas_->snap_moving = moved;
+    if (page == nullptr || moved.empty()) return;
+    const int dpi = std::max(24, std::min(150, static_cast<int>(std::nearbyint(canvas_->scale() * 25.4))));
+    const auto doc = session_->snapshot();
+    const std::size_t index = static_cast<std::size_t>(page_index_);
+    const std::uint64_t ticket = ++move_ticket_;
+    auto* watcher = new QFutureWatcher<std::pair<QImage, QRectF>>(this);
+    connect(watcher, &QFutureWatcher<std::pair<QImage, QRectF>>::finished, this, [this, watcher, ticket] {
+        const auto [image, where] = watcher->result();
+        watcher->deleteLater();
+        if (ticket == move_ticket_ && !image.isNull()) canvas_->set_move_image(image, where);
+    });
+    watcher->setFuture(QtConcurrent::run([doc, index, moved, dpi]() -> std::pair<QImage, QRectF> {
+        try {
+            const core::Page& p = doc->page(index);
+            std::optional<render::Image> together;  // (the layers drawn one over another, in the page's order)
+            for (const core::Layer& l : p.layers) {
+                if (std::find(moved.begin(), moved.end(), l.id) == moved.end() || l.kind == core::LayerKind::Folder) continue;
+                render::Image drawn = render::layer_image(p, l, dpi, doc.get(), true);
+                if (drawn.mode() != "RGBA") drawn = drawn.convert("RGBA");
+                if (!together) {
+                    together = std::move(drawn);
+                } else if (together->size() == drawn.size()) {
+                    together = render::alpha_composite(*together, drawn);
+                }
+            }
+            if (together) {
+                const render::Image& image = *together;
+                const auto box = image.getbbox();
+                if (!box) return {};
+                const render::Image piece = image.crop(*box);
+                const std::string bytes = piece.tobytes();
+                const QImage q = QImage(reinterpret_cast<const uchar*>(bytes.data()), piece.width(), piece.height(), piece.width() * 4,
+                                        QImage::Format_RGBA8888)
+                                     .copy();
+                const double mm = 25.4 / dpi;
+                return {q, QRectF(box->x0 * mm, box->y0 * mm, piece.width() * mm, piece.height() * mm)};
+            }
+        } catch (const std::exception&) {
+        }
+        return {};
+    }));
+}
+
+void MainWindow::layer_moved(double dx, double dy) {
+    // (PC3 C-d, decision 5's 移動ツール: the layers chosen — else the layer drawn on —, their folders' and linked layers
+    // with them, by whole pixels of the page's working grid (200 dpi, as the paint layers hold their pixels), so their
+    // pixels move exactly: transform_layers' move; their linked masks with them)
+    canvas_->snap_moving.clear();
+    const core::Page* page = current_page();
+    const std::vector<std::string> ids = transform_targets();
+    if (page == nullptr || ids.empty()) return;
+    const auto g = render::layer_bounds::grid(*page);
+    const double mx = core::py_round(std::nearbyint(dx * g[0]) / g[0], 6), my = core::py_round(std::nearbyint(dy * g[1]) / g[1], 6);
+    if (mx == 0 && my == 0) return;
+    Json list = Json::array();
+    for (const std::string& id : ids) list.push_back(id);
+    apply_ops(Json::array({Json{{"op", "transform_layers"}, {"page", page->index.json()}, {"ids", list}, {"move", Json::array({mx, my})}, {"interp", transform_interp_}}}));
+}
+
+CommandSearch* MainWindow::find_command() {
+    auto* dialog = new CommandSearch(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->show();
+    dialog->query->setFocus();
+    return dialog;
+}
+
+void MainWindow::show_tool_names(bool on, bool save) {
+    palette_->setToolButtonStyle(on ? Qt::ToolButtonTextBesideIcon : Qt::ToolButtonIconOnly);
+    if (save) settings()->setValue(QStringLiteral("ui/tool_names"), on ? QStringLiteral("1") : QStringLiteral("0"));
+}
+
+void MainWindow::default_layout() {
+    keeping_approval_docks([this] {
+        if (!default_state_.isEmpty()) restoreState(default_state_);
+    });  // (PC5 H-d: the approval's panels as they are)
+}
+
+void MainWindow::make_launcher() {
+    // 選択範囲ランチャー: what is usually done next with a selection, right under it
+    auto* bar = new QFrame(canvas_);
+    bar->setObjectName(QStringLiteral("launcher"));
+    bar->setStyleSheet(QStringLiteral("QToolButton { padding: 2px 5px; }"));  // (its face and border come from the look: theme.cpp)
+    auto* row = new QHBoxLayout(bar);
+    row->setContentsMargins(3, 2, 3, 2);
+    row->setSpacing(2);
+    launcher_actions_ = {{QStringLiteral("塗りつぶし"), action("act_fill_selection")}, {QStringLiteral("消去"), action("act_delete_area")},
+                         {QStringLiteral("トーン"), action("act_tone_here")},    {QStringLiteral("反転"), action("act_sel_invert")},
+                         {QStringLiteral("拡張"), action("act_sel_grow")},     {QStringLiteral("変形"), action("act_warp_perspective")},
+                         {QStringLiteral("コピー"), action("act_copy")},
+                         {QStringLiteral("選択とマスク"), action("act_select_mask")},  // (PC3 B3)
+                         {QStringLiteral("選択を解除"), action("act_deselect")}};
+    for (const auto& [label, act] : launcher_actions_) {
+        auto* button = new QToolButton;
+        button->setText(label);
+        button->setToolTip(act->text());
+        connect(button, &QToolButton::clicked, act, &QAction::trigger);
+        row->addWidget(button);
+    }
+    bar->hide();
+    canvas_->launcher = bar;
+}
+
+}  // namespace genko::app

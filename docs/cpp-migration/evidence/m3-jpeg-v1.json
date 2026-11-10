@@ -1,0 +1,106 @@
+{
+  "scope": "JPEG機能群のV1。最終独立レビュー・V2を待つ候補でありM3/M7全体の受入ではない。",
+  "source_sha256": {
+    "native/src/render/png.cpp": "09c61a7a9b4f0e3c2309c962d122dcb324c40f26999cf45fd8d6e47e44db9e04",
+    "native/src/render/png.hpp": "e9f31dbcdb8463c8cbf8d68fb77ee01ad57aa3789dded2ff12475fe6b49bece4",
+    "native/src/render/CMakeLists.txt": "59d0315f0446748a653d315562a135bf3d7a89ef30044a44baab47f8588e10ec",
+    "native/src/render/raster_ops.cpp": "bd1ff6be6c9ae9d8ff3303f21f2fcf0f54d2cab2a48013fad92540433a2816a2",
+    "native/tests/unit/test_png.cpp": "94ee44f6c1bef02aeb6995b089a3ea80c55377aa8a532ab6147298b77f059215",
+    "native/tests/contract/opsupport.cpp": "627f65d4d052c0c0c58e9b623f0e8aff408cccac5f317ad3d611364235511b8c",
+    "native/tests/contract/raster_cases.json": "b0d95ca782f5b088e045ee9cdff9a1e54f44648d2392012e423896d832d2dde2",
+    "native/tests/gui/test_gui_canvas.cpp": "e5cc9b02351d0774ae1efc882a35f4500defca840d35c70564018c0be63d221f"
+  },
+  "asan": {
+    "qt_pass": 17,
+    "qt_fail": 0,
+    "qt_skip": 0,
+    "binary_sha256": "08c4b5c8188a7332d53294e476c66215c66539739542936a44b2b761e82055f1",
+    "actual_cgroup": {
+      "memory_max": 2147483648,
+      "cpu_max": "100000 100000",
+      "memory_peak": 1968947200,
+      "events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0,
+        "oom_group_kill": 0
+      }
+    },
+    "record": "/home/hermes/genko-test/cpp-impl/wt/m3-jpeg-input/build/m3-jpeg-final-v1-asan/result.json",
+    "raw": "/home/hermes/genko-test/cpp-impl/wt/m3-jpeg-input/build/m3-jpeg-final-v1-asan/raw.log",
+    "config": {
+      "type": "Debug",
+      "werror": true,
+      "fault": true,
+      "sanitize": "address,undefined"
+    },
+    "memory_peak_scope": "buildと検査を合わせたcgroup peak。製品の性能目標の受入値ではない。"
+  },
+  "gui": {
+    "qt_pass": 7,
+    "data_cases": 5,
+    "qt_fail": 0,
+    "qt_skip": 0,
+    "binary_sha256": "ee4d576522c487d3c693624e7eff04f7469a39828df166f07b42b87c7670e736",
+    "record": "/home/hermes/genko-test/cpp-impl/wt/m3-jpeg-input/build/m3-jpeg-gui-contract-v6/result.json",
+    "raw": "/home/hermes/genko-test/cpp-impl/wt/m3-jpeg-input/build/m3-jpeg-gui-contract-v6/gui-xcb.log",
+    "display": "actual xcb/Xvfb",
+    "checks": [
+      "現在DPIの全画素対照",
+      "JPEG可視信号",
+      "Undo/Redo実表示",
+      "保存再読込の全画素対照"
+    ],
+    "visual_record": "/home/hermes/genko-test/cpp-impl/reviews/m3-jpeg-gui-visual.json"
+  },
+  "fixed_contract": {
+    "cases": 9,
+    "matched_ok": 5,
+    "matched_refusal": 2,
+    "intentional_safety_refusal": 2,
+    "qt_pass": 3,
+    "qt_fail": 0,
+    "qt_skip": 0,
+    "compared_picture_refs": 35,
+    "raw": "/home/hermes/genko-test/cpp-impl/wt/m3-jpeg-input/build/m3-jpeg-gui-contract-v3/contract.log",
+    "old_cases_preserved": 522,
+    "current_total": 531,
+    "scope": "fixedCasesのみ。全保存契約はV2。"
+  },
+  "cli": {
+    "cases": 9,
+    "record": "/home/hermes/genko-test/cpp-impl/wt/m3-jpeg-input/build/m3-jpeg-cli-proof-v5/result.json",
+    "binary_sha256": "c7878cf9ff2a26045227fcb654077666afa1e0c8e377d23b719ddd7a7f37dc46",
+    "paired_whole_pixel_cases": 5
+  },
+  "remaining": [
+    "機能群V2全4構成・全契約/保存照合",
+    "他の画像入力形式",
+    "M2出口と残M3〜M7"
+  ],
+  "post_review_test_only_addition": {
+    "slot": "jpegBudgetIncludesAlreadyLivePixels",
+    "normalized_prior_source_hash_matches": true,
+    "raw": "/home/hermes/genko-test/cpp-impl/wt/m3-jpeg-input/build/m3-jpeg-budget-live-asan.log",
+    "qt_pass": 3,
+    "qt_fail": 0,
+    "qt_skip": 0,
+    "scope": "追加slotだけASan実行。旧17PASSのbinaryは保持された記録にのみ結合し新binaryへ付替えない。",
+    "prior_unit_sha256": "85ad571abe880de022b9bd90e0d8934b32dbcbc0ffe7ea2a1a6b544be2a36a55"
+  },
+  "static_review": {
+    "record": "/home/hermes/genko-test/cpp-impl/reviews/m3-jpeg-caller-gui-review.json",
+    "passed": true,
+    "matched_source_pins": 10,
+    "limits": "静的レビューは動的成功ではない。原JPEGレビューと追加差分レビューを分離。"
+  },
+  "caller_cap": {
+    "record": "/home/hermes/genko-test/cpp-impl/wt/m3-jpeg-input/build/m3-jpeg-caller-cap-proof/result.json",
+    "passed": true,
+    "fixture_pixels": 120012000,
+    "op_pixel_cap": 120000000,
+    "all_saved_paths_bytes_lock_unchanged": true
+  }
+}

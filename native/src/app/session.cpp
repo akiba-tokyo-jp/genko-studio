@@ -1,0 +1,2051 @@
+#include "app/session.hpp"
+
+#include <QPointer>
+
+#include <QCoreApplication>
+#include <QElapsedTimer>
+#include <QFileInfo>
+#include <QThread>
+
+#include <algorithm>
+#include <cerrno>
+#include <map>
+#include <set>
+#include <system_error>
+#include <utility>
+
+#include "app/config.hpp"
+#include "app/perf.hpp"
+#include "core/actor.hpp"
+#include "core/error.hpp"
+#include "core/ids.hpp"
+#include "core/paths.hpp"
+#include "core/pyconv.hpp"
+#include "render/ops_registry.hpp"
+#include "render/timelapse.hpp"
+#include "storage/asset_store.hpp"
+#include "storage/fsutil.hpp"
+#include "storage/gc.hpp"
+#include "storage/journal.hpp"
+#include "storage/lock.hpp"
+#include "storage/reader.hpp"
+#include "storage/state.hpp"
+#include "storage/transaction.hpp"
+#include "storage/undo.hpp"
+#include "storage/writer.hpp"
+
+namespace genko::app {
+
+namespace fs = std::filesystem;
+using core::Json;
+
+struct Session::Job {
+    enum class Kind { Save, Probe, Rebase, Recovery, DeleteRecovery, SaveAs, ReadRest, SaveCopy };
+    struct Step {
+        Action::Kind kind = Action::Kind::Edit;
+        DocPtr doc;            // Edit: the book to save
+        Json journal_ops = Json::array();
+        std::string action = "edit";
+        std::string script;    // Edit: (PC5 I-0) the script it came from
+        std::string actor;     // Edit: (PC5 J-g) who made it, when not the session's person (apply_as)
+        std::string txn;
+        std::string expect_top;  // Undo/Redo: the transaction that must be on top of the journal's stack
+    };
+    Kind kind = Kind::Save;
+    fs::path dir;
+    std::string actor;
+    std::chrono::milliseconds lock_wait{1500};
+    std::int64_t base_revision = 0;
+    std::vector<Step> steps;
+    // Recovery / DeleteRecovery / SaveAs
+    fs::path root;
+    std::string book_id;
+    DocPtr doc;
+    std::optional<fs::path> book;
+    std::uint64_t generation = 0;
+    std::uint64_t ticket = 0;
+    std::shared_ptr<storage::LoadCache> cache;  // ReadRest: what was read already
+    std::vector<std::string> txns;  // Rebase: the transactions given to the disk that may be there (a save that failed)
+};
+
+struct Session::JobResult {
+    struct Step {
+        std::int64_t revision = 0;
+        std::string txn;
+        bool repaired = false;
+        DocPtr reloaded;  // DiskUndo/DiskRedo: the book as it is now
+        std::int64_t undo_depth = 0;
+        std::int64_t redo_depth = 0;
+    };
+    Job::Kind kind = Job::Kind::Save;
+    bool ok = false;
+    QString code;
+    QString message;
+    std::vector<Step> steps;  // the steps that succeeded
+    std::int64_t revision = 0;
+    std::int64_t disk_revision = -1;  // Save: the book's revision when the job ended (still under its lock)
+    DocPtr doc;
+    std::int64_t undo_depth = 0;
+    std::int64_t redo_depth = 0;
+    fs::path recovery_path;
+    QDateTime recovery_time;
+    std::uint64_t generation = 0;
+    std::uint64_t ticket = 0;
+    std::set<std::string> written;  // Rebase: those of Job::txns the book has (committed, by the repair if not before)
+};
+
+namespace {
+
+QString qs(const std::string& text) { return QString::fromStdString(text); }
+
+// The journal's Undo and Redo depths (saved changes that have a state before them, and the ones undone).
+std::pair<std::int64_t, std::int64_t> journal_depths(const fs::path& dir) {
+    const auto stacks = storage::journal::stacks(dir);
+    std::int64_t undo = 0;
+    for (const auto& item : stacks.undo) {
+        if (item.before) ++undo;
+    }
+    return {undo, static_cast<std::int64_t>(stacks.redo.size())};
+}
+
+// The revision a committed transaction made, if it is committed.
+std::optional<std::int64_t> committed_revision(const fs::path& dir, const std::string& txn) {
+    if (txn.empty()) return std::nullopt;
+    const auto txns = storage::journal::transactions(storage::journal::read_lines_without_ops(storage::journal::journal_file(dir)));
+    if (const auto* done = storage::journal::find_committed(txns, txn)) return done->rev;
+    return std::nullopt;
+}
+
+DocPtr load_shared(const fs::path& dir) {
+    storage::LoadResult loaded = storage::load_document(dir);
+    return std::make_shared<const core::Document>(std::move(loaded.document));
+}
+
+// recovery.json: what a recovery point holds and where it belongs (shown before it is taken).
+Json recovery_meta(const core::Document& doc, const std::optional<fs::path>& book, std::int64_t base_revision,
+                   std::uint64_t generation, const std::string& actor, const std::string& state) {
+    Json meta = Json::object();
+    meta["book"] = book ? Json(core::path_to_utf8(*book)) : Json(nullptr);
+    meta["book_id"] = doc.book_id;
+    meta["base_revision"] = base_revision;
+    meta["generation"] = static_cast<std::int64_t>(generation);
+    meta["written"] = storage::journal::now_seconds();
+    meta["actor"] = actor;
+    meta["title"] = doc.title;
+    meta["pages"] = static_cast<std::int64_t>(doc.pages.size());
+    meta["state"] = state;
+    return meta;
+}
+
+// The bytes of the precise colour pictures `before` has and `after` no longer has (each picture once).
+std::size_t replaced_precise_bytes(const core::Document& before, const core::Document& after) {
+    std::vector<const std::string*> gone;
+    for (std::size_t i = 0; i < before.pages.size(); ++i) {
+        if (i < after.pages.size() && after.pages[i] == before.pages[i]) continue;
+        for (const core::Layer& layer : before.pages[i]->layers)
+            if (layer.color_raster) gone.push_back(layer.color_raster.get());
+    }
+    if (gone.empty()) return 0;
+    std::sort(gone.begin(), gone.end());
+    gone.erase(std::unique(gone.begin(), gone.end()), gone.end());
+    for (const core::PagePtr& page : after.pages) {
+        for (const core::Layer& layer : page->layers) {
+            if (!layer.color_raster) continue;
+            const auto at = std::lower_bound(gone.begin(), gone.end(), layer.color_raster.get());
+            if (at != gone.end() && *at == layer.color_raster.get()) gone.erase(at);
+        }
+    }
+    std::size_t bytes = 0;
+    for (const std::string* picture : gone) bytes += picture->size();
+    return bytes;
+}
+
+// A change that only chooses a panel (select_frame): the choice is not saved in the book (schema-v4: not in
+// project.json), so it is not a change to the book's content.
+bool only_chooses(const Json& ops) {
+    if (!ops.is_array() || ops.empty()) return false;
+    return std::all_of(ops.begin(), ops.end(), [](const Json& op) { return op.is_object() && op.value("op", Json()) == Json("select_frame"); });
+}
+
+// The choice made on `before`, again on `base`: each op's page found by its id (another writer may have moved the
+// pages since), at the number it has now. None when a page or its panel is not in `base` any more (nothing to choose).
+std::optional<Json> choice_on(const Json& ops, const core::Document& before, const core::Document& base) {
+    Json again = Json::array();
+    for (const Json& op : ops) {
+        const auto named = op.find("page");
+        if (named == op.end()) return std::nullopt;
+        const auto then = std::find_if(before.pages.begin(), before.pages.end(), [&](const core::PagePtr& page) { return page->index.json() == *named; });
+        if (then == before.pages.end()) return std::nullopt;
+        const auto now = std::find_if(base.pages.begin(), base.pages.end(), [&](const core::PagePtr& page) { return page->id == (*then)->id; });
+        if (now == base.pages.end()) return std::nullopt;
+        const auto frame_id = op.find("frame_id");
+        if (frame_id == op.end() || !frame_id->is_string() || (*now)->find_frame(frame_id->get_ref<const std::string&>()) == nullptr) {
+            return std::nullopt;
+        }
+        Json moved = op;
+        moved["page"] = (*now)->index.json();
+        again.push_back(std::move(moved));
+    }
+    return again;
+}
+
+}  // namespace
+
+// --- the worker's side -------------------------------------------------------------------------------------------
+
+Session::JobResult Session::execute(const Job& job) {
+    JobResult r;
+    r.kind = job.kind;
+    r.generation = job.generation;
+    r.ticket = job.ticket;
+    try {
+        switch (job.kind) {
+        case Job::Kind::Save: {
+            storage::ProjectLock lock(job.dir, job.actor);
+            lock.acquire(job.lock_wait);
+            std::int64_t base = job.base_revision;
+            for (const Job::Step& step : job.steps) {
+                JobResult::Step done;
+                if (step.kind == Action::Kind::Edit) {
+                    storage::SaveRequest request;
+                    request.actor = step.actor.empty() ? job.actor : step.actor;
+                    request.base_revision = base;
+                    request.ops = step.journal_ops;
+                    request.action = step.action;
+                    request.txn = step.txn;
+                    request.script = step.script;
+                    // (タイムラプス: the book as it was on disk, to know the pages this save changes)
+                    const bool lapse = render::timelapse::is_on(*step.doc);
+                    Json before;
+                    if (lapse) {
+                        try {
+                            before = storage::read_disk_state(job.dir).payload;
+                        } catch (const std::exception&) {
+                        }
+                    }
+                    const storage::SaveResult saved = storage::Saver(lock).save(*step.doc, request);
+                    if (lapse && !saved.already_committed) render::timelapse::after_save(job.dir, *step.doc, before);
+                    done.revision = saved.revision;
+                    done.txn = saved.txn;
+                    done.repaired = saved.repaired;
+                } else {
+                    const bool redo = step.kind == Action::Kind::Redo || step.kind == Action::Kind::DiskRedo;
+                    storage::journal::repair(job.dir);
+                    if (const auto rev = committed_revision(job.dir, step.txn)) {
+                        done.revision = *rev;  // (saved before a failure was reported: once only)
+                        done.txn = step.txn;
+                    } else {
+                        const storage::DiskState disk = storage::read_disk_state(job.dir);
+                        if (disk.revision != base) throw storage::RevisionConflict(base, disk.revision);
+                        if (!step.expect_top.empty()) {
+                            const auto stacks = storage::journal::stacks(job.dir);
+                            const auto& stack = redo ? stacks.redo : stacks.undo;
+                            if (stack.empty() || stack.back().id != step.expect_top) {
+                                throw core::Error("external_change",
+                                                  "the latest saved change is not the one this session " +
+                                                      std::string(redo ? "undid" : "made"));
+                            }
+                        }
+                        const storage::RestoreResult restored = storage::restore(lock, job.actor, redo, false, step.txn);
+                        done.revision = restored.revision;
+                        done.txn = restored.txn;
+                    }
+                    if (step.kind == Action::Kind::DiskUndo || step.kind == Action::Kind::DiskRedo) {
+                        done.reloaded = load_shared(job.dir);
+                        std::tie(done.undo_depth, done.redo_depth) = journal_depths(job.dir);
+                    }
+                }
+                base = done.revision;
+                r.steps.push_back(std::move(done));
+            }
+            r.revision = base;
+            // (a step found already committed — by a repair, after a failure was reported — leaves base at that
+            // revision: the book may have moved on since, by another writer)
+            r.disk_revision = storage::read_disk_state(job.dir).revision;
+            r.ok = true;
+            break;
+        }
+        case Job::Kind::Probe: {
+            const storage::DiskState disk = storage::read_disk_state(job.dir);
+            r.revision = disk.exists ? disk.revision : -1;
+            r.ok = true;
+            break;
+        }
+        case Job::Kind::Rebase: {
+            storage::ProjectLock lock(job.dir, job.actor);
+            lock.acquire(job.lock_wait);
+            storage::journal::repair(job.dir);
+            if (!job.txns.empty()) {
+                const auto txns = storage::journal::transactions(storage::journal::read_lines_without_ops(storage::journal::journal_file(job.dir)));
+                for (const std::string& txn : job.txns) {
+                    if (storage::journal::find_committed(txns, txn) != nullptr) r.written.insert(txn);
+                }
+            }
+            r.doc = load_shared(job.dir);
+            r.revision = r.doc->revision;
+            std::tie(r.undo_depth, r.redo_depth) = journal_depths(job.dir);
+            r.ok = true;
+            break;
+        }
+        case Job::Kind::Recovery: {
+            const fs::path folder = job.root / job.book_id;
+            storage::make_dirs_durable(folder);
+            storage::AssetStore store(folder);
+            Json payload = storage::project_payload_v4(*job.doc, store);
+            // (what the book names that only its folder holds — a smart object's file, filter mask, PSD record and
+            // assigned profile, a placed picture — goes with the recovery point, which is read from its own folder; when
+            // the book's folder cannot be read, the point is written all the same: the changes it keeps come first)
+            if (job.doc->asset_dir) {
+                std::set<std::string> named;
+                storage::refs_in(payload, named);
+                try {
+                    storage::copy_named_assets(*job.doc->asset_dir, folder, named);
+                } catch (const core::Error&) {
+                }
+            }
+            payload["revision"] = job.base_revision;
+            const std::string state = storage::state_ref(payload);
+            storage::write_atomic(folder / "state.json", core::dump_python_indent2(payload));
+            storage::write_atomic(folder / "recovery.json",
+                                  core::dump_python_indent2(
+                                      recovery_meta(*job.doc, job.book, job.base_revision, job.generation, job.actor, state)));
+            r.recovery_path = folder;
+            r.recovery_time = QDateTime::currentDateTime();
+            r.ok = true;
+            break;
+        }
+        case Job::Kind::DeleteRecovery: {
+            std::error_code ec;
+            fs::remove_all(job.root / job.book_id, ec);
+            r.ok = !ec;
+            break;
+        }
+        case Job::Kind::SaveAs:
+        case Job::Kind::SaveCopy: {  // (PC4 F-b: コピーを保存… as a book, written as a book saved elsewhere is)
+            std::error_code ec;
+            if (fs::exists(job.dir / "project.json", ec)) {
+                throw core::Error("exists", "a book is there already: " + core::path_to_utf8(job.dir / "project.json"));
+            }
+            storage::ProjectLock lock(job.dir, job.actor);
+            lock.acquire(job.lock_wait);
+            if (fs::exists(job.dir / "project.json", ec)) {
+                throw core::Error("exists", "a book is there already: " + core::path_to_utf8(job.dir / "project.json"));
+            }
+            storage::SaveRequest request;
+            request.actor = job.actor;
+            request.base_revision = 0;
+            request.ops = Json::array();
+            // (what the book names that only its folder's assets hold — a smart object's file, filter mask, PSD record
+            // and assigned profile, a placed picture — goes with it: independent review A P1-2)
+            request.assets_from = job.doc->asset_dir;
+            const storage::SaveResult saved = storage::Saver(lock).save(*job.doc, request);
+            render::timelapse::after_save(job.dir, *job.doc, Json());  // (a new book: every page, when it is on)
+            r.revision = saved.revision;
+            r.doc = job.doc;
+            r.ok = true;
+            break;
+        }
+        case Job::Kind::ReadRest: {
+            storage::LoadOptions load;
+            load.cache = job.cache;
+            r.doc = std::make_shared<const core::Document>(std::move(storage::load_document(job.dir, load).document));
+            r.revision = r.doc->revision;
+            try {
+                std::tie(r.undo_depth, r.redo_depth) = journal_depths(job.dir);
+            } catch (const core::Error&) {
+            }
+            r.ok = true;
+            break;
+        }
+        }
+    } catch (const storage::LockedError& error) {
+        r.code = QStringLiteral("locked");
+        r.message = QString::fromUtf8(error.what());
+    } catch (const core::Error& error) {
+        r.code = qs(error.code());
+        r.message = QString::fromUtf8(error.what());
+    } catch (const std::exception& error) {
+        r.code = QStringLiteral("internal");
+        r.message = QString::fromUtf8(error.what());
+    }
+    return r;
+}
+
+// --- opening ---------------------------------------------------------------------------------------------------
+
+std::shared_ptr<Session> Session::open(const fs::path& dir) { return open(dir, Options{}); }
+
+Session::Opened Session::read(const fs::path& dir, const Options& options) {
+    const std::string actor = options.actor.empty() ? default_actor() : options.actor;
+    const storage::DiskState disk = storage::read_disk_state(dir);
+    if (!disk.exists) {
+        throw core::Error("not_found", storage::os_error_text(ENOENT, dir / "project.json"), core::path_to_utf8(dir / "project.json"));
+    }
+    if (disk.version >= 4) {
+        // a save that stopped half way is settled before the book is read (when no one else is writing it now)
+        try {
+            storage::ProjectLock lock(dir, actor, storage::ProjectLock::Options{false, true});
+            lock.acquire(options.lock_wait);
+            storage::journal::repair(dir);
+        } catch (const core::Error&) {
+            // (another writer has it: the book is read as it is)
+        }
+    }
+    Opened out;
+    storage::LoadOptions load;
+    if (options.defer_pages && disk.version >= 4) {
+        // (the first page now, the others on the session's worker: read_rest())
+        load.cache = std::make_shared<storage::LoadCache>();
+        load.assets_of_page = 0;
+    }
+    out.doc = std::move(storage::load_document(dir, load).document);
+    if (!out.doc.deferred.empty()) out.read_so_far = load.cache;
+    if (disk.version >= 4) {
+        try {
+            std::tie(out.undo_depth, out.redo_depth) = journal_depths(dir);
+        } catch (const core::Error&) {
+        }
+    }
+    // a recovery point written after the book's last save (a save that failed, a crash after it)
+    const fs::path root = options.recovery_root.empty() ? recovery_root() : options.recovery_root;
+    if (!out.doc.book_id.empty()) {
+        if (auto point = find_recovery(root, out.doc.book_id)) {
+            out.recovery_present = true;
+            out.recovery_folder = point->folder;
+            const storage::DiskState now = storage::read_disk_state(dir);
+            const QDateTime file_time = QFileInfo(QString::fromStdString(core::path_to_utf8(dir / "project.json"))).lastModified();
+            if (point->state_ref != now.state_ref && (point->base_revision >= now.revision || point->written > file_time)) {
+                out.offer = std::move(point);
+            }
+        }
+    }
+    return out;
+}
+
+std::shared_ptr<Session> Session::from(Opened opened, const fs::path& dir, Options options) {
+    if (options.actor.empty()) options.actor = default_actor();
+    auto session = std::make_shared<Session>(std::move(opened.doc), dir, options);
+    session->journal_undo_ = opened.undo_depth;
+    session->journal_redo_ = opened.redo_depth;
+    // (a recovery point is kept until the book holds everything: the next save that leaves nothing unsaved removes it)
+    session->recovery_written_ = opened.recovery_present;
+    session->recovery_path_ = opened.recovery_folder;
+    session->recovery_offer_ = std::move(opened.offer);
+    session->read_so_far_ = std::move(opened.read_so_far);
+    if (options.read_rest_now) session->read_rest();
+    return session;
+}
+
+void Session::read_rest() {
+    if (!loading_ || reading_rest_ || !path_ || discarded_) return;
+    reading_rest_ = true;
+    Job job;
+    job.kind = Job::Kind::ReadRest;
+    job.dir = *path_;
+    job.cache = read_so_far_;
+    run(std::move(job));
+}
+
+void Session::finish_reading(const JobResult& r) {
+    if (!r.ok) {
+        if (++read_failures_ < 3) {
+            // (a drive back, a folder reachable again: read again a little later)
+            emit notice(QStringLiteral("原稿の残りのページを読み込めませんでした。もう一度読み込みます（%1）").arg(r.message), false);
+            read_retry_pending_ = true;
+            QTimer::singleShot(options_.read_retry * read_failures_, this, [this] {
+                read_retry_pending_ = false;
+                read_rest();
+            });
+            emit statusChanged();
+            return;
+        }
+        // the pages read stay shown; nothing can be changed or written, as for any book that cannot be read whole
+        read_failed_ = true;
+        read_so_far_.reset();
+        read_only_ = "the rest of the book could not be read: " + r.message.toStdString();
+        idle_timer_.stop();
+        longest_timer_.stop();
+        save_wanted_ = false;
+        emit notice(QStringLiteral("原稿の残りのページを読み込めませんでした。読み取り専用で開いています（%1）").arg(r.message), true);
+        if (save_as_after_reading_) {
+            save_as_after_reading_.reset();
+            emit savedAs(false, QString::fromStdString(read_only_));
+        }
+        emit statusChanged();
+        return;
+    }
+    read_so_far_.reset();
+    loading_ = false;
+    const DocPtr before = doc_;
+    if (!revert_to_ || !revert_to_->deferred.empty()) set_revert_to(r.doc);  // (復帰: the whole book as it was read)
+    base_revision_ = r.revision;
+    last_revision_ = r.revision;
+    journal_undo_ = r.undo_depth;
+    journal_redo_ = r.redo_depth;
+    if (!r.doc->read_only_reason.empty()) {
+        // A problem on a page read just now: the book opens read-only, as it would have at once. The changes made
+        // meanwhile cannot be saved to it, so they are not kept as if they could be.
+        const bool told = !before->read_only_reason.empty();  // (read-only from its first page on: nothing new to say)
+        const std::size_t dropped = done_.size();
+        doc_ = r.doc;
+        done_.clear();
+        undone_.clear();
+        queue_.clear();
+        read_only_ = doc_->read_only_reason;
+        idle_timer_.stop();
+        longest_timer_.stop();
+        save_wanted_ = false;
+        ++generation_;
+        touch(BookChange{BookChange::Why::Reload, Json::array(), before, doc_});
+        if (!told) {
+            emit notice(dropped == 0 ? QStringLiteral("後のページに問題が見つかったため、原稿を読み取り専用で開きました。")
+                                     : QStringLiteral("後のページに問題が見つかったため、原稿を読み取り専用で開きました。読み込み中の変更 %1 件は保存できないため取り消しました。")
+                                           .arg(dropped),
+                        true);
+        }
+        if (const auto target = std::exchange(save_as_after_reading_, std::nullopt)) save_as(*target);  // (refused: read-only)
+        return;
+    }
+    // The changes made meanwhile, again on the whole book: they kept to the page that was read (CommandBus refused
+    // any other), so they apply as they did. (Nothing else is queued while pages are read: no save has run.) Another
+    // writer may have saved meanwhile: a page number that now names another page is not written to (as in a rebase).
+    const core::CommandBus bus(*registry_);
+    QStringList conflicts_found;
+    QStringList* failures = &conflicts_found;
+    QStringList redo_lost;
+    const auto replay = [&](const std::shared_ptr<Change>& change, const DocPtr& base) -> std::shared_ptr<Change> {
+        auto again = std::make_shared<Change>();
+        again->id = new_change_id();
+        again->ops = change->ops;
+        again->recover = change->recover;
+        again->script = change->script;
+        again->actor = change->actor;
+        again->before = base;
+        if (change->whole) {  // (復帰 is refused while pages are read: never made again on another book)
+            *failures << QStringLiteral("復帰は、ほかの変更の後には当てませんでした");
+            return nullptr;
+        }
+        if (change->recover) {
+            // (an adopted recovery point is the whole book already)
+            again->journal_ops = change->journal_ops;
+            again->after = change->after;
+            return again;
+        }
+        // (a choice of a panel follows its page, or goes with it: SPEC COMP-01a — not a conflict)
+        std::optional<Json> moved;
+        if (only_chooses(change->ops)) {
+            moved = choice_on(change->ops, *change->before, *base);
+            if (!moved) return nullptr;
+            again->ops = *moved;
+        }
+        try {
+            // (the pages its ops name by number — while pages are read, only ops on a read page carry one; a choice was
+            // found by its page's id above)
+            if (!moved) {
+                for (const Json& op : change->ops) {
+                    const auto named = op.is_object() ? op.find("page") : op.end();
+                    if (!op.is_object() || named == op.end()) continue;
+                    const auto page_named = [&](const DocPtr& doc) -> const core::Page* {
+                        for (const auto& page : doc->pages) {
+                            if (page->index.json() == *named) return page.get();
+                        }
+                        return nullptr;
+                    };
+                    const core::Page* then = page_named(change->before);
+                    const core::Page* now = page_named(base);
+                    if ((then == nullptr) != (now == nullptr) || (then != nullptr && then->id != now->id)) {
+                        throw core::ApplyError("ページの番号とIDの対応が変わったため、読み込み中の変更を適用しませんでした。", "rebase_conflict");
+                    }
+                }
+            }
+            core::ScopedIdScript script(change->ids);
+            core::ApplyResult result = bus.apply(*base, again->ops, actor_of(*change));
+            again->journal_ops = result.journal_ops;
+            again->ids = script.taken();
+            again->after = std::make_shared<const core::Document>(std::move(result.doc));
+            return again;
+        } catch (const core::Error& error) {
+            if (!moved) *failures << QString::fromUtf8(error.what());  // (a choice that cannot be made: let go)
+            return nullptr;
+        }
+    };
+    const bool changed_meanwhile = !done_.empty() || !undone_.empty();
+    DocPtr current = r.doc;
+    std::vector<std::shared_ptr<Change>> replayed;
+    std::map<const Change*, std::shared_ptr<Change>> again_of;
+    std::deque<Action> keep;
+    for (const Action& action : queue_) {
+        if (!action.change) continue;
+        if (action.kind != Action::Kind::Edit) {
+            // (a change made and undone meanwhile that is written as such, Change::journal: as it was)
+            const auto found = again_of.find(action.change.get());
+            if (found == again_of.end() || action.kind != Action::Kind::Undo || replayed.empty() || replayed.back() != found->second) continue;
+            replayed.pop_back();
+            current = found->second->before;
+            keep.push_back(Action{Action::Kind::Undo, found->second, core::new_txn_id(), ++next_seq_, false});
+            continue;
+        }
+        if (auto again = replay(action.change, current)) {
+            again->undone_seq = action.change->undone_seq;
+            again->journal = action.change->journal;
+            again_of[action.change.get()] = again;
+            current = again->after;
+            replayed.push_back(again);
+            keep.push_back(Action{Action::Kind::Edit, again, core::new_txn_id(), ++next_seq_, false});
+        }
+    }
+    // what was undone meanwhile (in memory) can be redone, on top of the changes kept
+    std::vector<std::shared_ptr<Change>> redo_chain;
+    DocPtr tip = current;
+    failures = &redo_lost;  // (not in the book: only the chance to redo them is lost)
+    for (auto it = undone_.rbegin(); it != undone_.rend(); ++it) {
+        if (const auto found = again_of.find(it->get()); found != again_of.end()) {  // (made again above, and undone)
+            tip = found->second->after;
+            redo_chain.push_back(found->second);
+            continue;
+        }
+        auto again = replay(*it, tip);
+        if (!again && only_chooses((*it)->ops)) continue;  // (a choice gone with its panel: the book is the same without it)
+        if (!again) break;  // (the ones after it were made on top of it)
+        again->undone_seq = (*it)->undone_seq;
+        tip = again->after;
+        redo_chain.push_back(again);
+    }
+    doc_ = current;
+    done_ = std::move(replayed);
+    undone_.assign(redo_chain.rbegin(), redo_chain.rend());
+    queue_ = std::move(keep);
+    // (a change made meanwhile, kept or undone in memory, replaced the journal's redo, as apply() does)
+    if (changed_meanwhile) journal_redo_ = 0;
+    read_only_ = doc_->read_only_reason;
+    ++generation_;
+    touch(BookChange{BookChange::Why::Reload, Json::array(), before, doc_});
+    if (!conflicts_found.isEmpty()) emit conflicts(conflicts_found);
+    if (const auto target = std::exchange(save_as_after_reading_, std::nullopt)) {
+        save_as(*target);  // (the changes made meanwhile go with it)
+    } else if (!queue_.empty()) {
+        if (save_wanted_) {
+            save_now();
+        } else {
+            schedule_save();
+        }
+    }
+    // (the window's file watcher was not heeded while pages were read: the book may have moved on since)
+    check_outside();
+}
+
+std::shared_ptr<Session> Session::open(const fs::path& dir, Options options) {
+    Opened opened = read(dir, options);
+    return from(std::move(opened), dir, std::move(options));
+}
+
+std::optional<RecoveryPoint> find_recovery(const fs::path& root, const std::string& book_id) {
+    if (book_id.empty() || !core::is_book_id(book_id)) return std::nullopt;
+    const fs::path folder = root / book_id;
+    std::error_code ec;
+    if (!fs::exists(folder / "recovery.json", ec) || !fs::exists(folder / "state.json", ec)) return std::nullopt;
+    try {
+        const Json meta = core::parse_python_json(storage::read_file(folder / "recovery.json"));
+        if (!meta.is_object()) return std::nullopt;
+        RecoveryPoint point;
+        point.folder = folder;
+        const double written = meta.value("written", 0.0);
+        point.written = QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(written * 1000.0));
+        point.base_revision = meta.value("base_revision", std::int64_t{0});
+        point.pages = static_cast<std::size_t>(meta.value("pages", std::int64_t{0}));
+        point.title = qs(meta.value("title", std::string()));
+        point.state_ref = meta.value("state", std::string());
+        return point;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+Session::Session(core::Document doc, std::optional<fs::path> dir) : Session(std::move(doc), std::move(dir), Options{}) {}
+
+Session::Session(core::Document doc, std::optional<fs::path> dir, Options options) : options_(std::move(options)) {
+    registry_ = options_.registry != nullptr ? options_.registry : &render::ops_registry();
+    actor_ = options_.actor.empty() ? default_actor() : options_.actor;
+    path_ = std::move(dir);
+    base_revision_ = doc.revision;
+    last_revision_ = doc.revision;
+    read_only_ = doc.read_only_reason;
+    loading_ = !doc.deferred.empty();
+    read_in_parts_ = loading_;
+    doc_ = std::make_shared<const core::Document>(std::move(doc));
+    set_revert_to(doc_);  // (復帰: as it was opened, until 保存 is chosen)
+    idle_timer_.setSingleShot(true);
+    longest_timer_.setSingleShot(true);
+    retry_timer_.setSingleShot(true);
+    // (Qt's usual timers may fire 5 % late: the autosave's 2 s and 10 s are kept to the millisecond)
+    idle_timer_.setTimerType(Qt::PreciseTimer);
+    longest_timer_.setTimerType(Qt::PreciseTimer);
+    const auto checkpoint_due = [this] {
+        // A lock on the book must not prevent the independently stored recovery
+        // snapshot from being queued at the idle/continuous-edit deadline.
+        request_recovery();
+        save_now();
+    };
+    connect(&idle_timer_, &QTimer::timeout, this, checkpoint_due);
+    connect(&longest_timer_, &QTimer::timeout, this, checkpoint_due);
+    connect(&retry_timer_, &QTimer::timeout, this, &Session::save_now);
+    worker_ = new QObject;
+    worker_->moveToThread(&thread_);
+    thread_.setObjectName(QStringLiteral("genko-save"));
+    thread_.start();
+    recovery_worker_ = new QObject;
+    recovery_worker_->moveToThread(&recovery_thread_);
+    recovery_thread_.setObjectName(QStringLiteral("genko-recovery"));
+    recovery_thread_.start();
+}
+
+Session::~Session() {
+    idle_timer_.stop();
+    longest_timer_.stop();
+    retry_timer_.stop();
+    // The jobs already asked for are done first, then the thread stops: a save that has begun is finished (the book is
+    // never left half written by closing), and the recovery point of work thrown away is removed.
+    QThread* thread = &thread_;
+    QMetaObject::invokeMethod(worker_, [thread] { thread->quit(); }, Qt::QueuedConnection);
+    QThread* recovery = &recovery_thread_;
+    QMetaObject::invokeMethod(recovery_worker_, [recovery] { recovery->quit(); }, Qt::QueuedConnection);
+    thread_.wait();
+    recovery_thread_.wait();
+    delete worker_;
+    delete recovery_worker_;
+}
+
+// --- editing -------------------------------------------------------------------------------------------------------
+
+core::ApplyResult Session::apply(const Json& ops, const std::vector<std::string>& ids) {
+    if (saving_as_) throw core::ApplyError("別名保存中です。完了してから編集してください。", "save_as_busy");
+    if (ops.is_array() && ops.size() == 1 && ops[0].is_object()) {
+        const auto name = ops[0].find("op");
+        if (name != ops[0].end() && *name == Json("undo")) {
+            undo();
+            core::ApplyResult out{*doc_};
+            out.applied = Json::array({"undo"});
+            out.has_warnings = false;
+            return out;
+        }
+    }
+    if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
+    if (discarded_) throw core::ApplyError("the book was closed", "closed");
+    const core::CommandBus bus(*registry_);
+    core::ScopedIdScript script(ids);
+    core::ApplyResult result = bus.apply(*doc_, ops, core::Actor(actor_));
+    if (result.unchanged) return result;  // (PC5 G-0: questions alone — type_info —: no change, no history, nothing to save)
+    return keep_applied(ops, std::move(result), script.taken());
+}
+
+core::ApplyResult Session::apply_as(const Json& ops, const core::Actor& actor, const std::vector<std::string>& ids) {
+    if (saving_as_) throw core::ApplyError("別名保存中です。完了してから編集してください。", "save_as_busy");
+    if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
+    if (discarded_) throw core::ApplyError("the book was closed", "closed");
+    const core::CommandBus bus(*registry_);
+    core::ScopedIdScript script(ids);
+    core::ApplyResult result = bus.apply(*doc_, ops, actor);
+    if (result.unchanged) return result;
+    return keep_applied(ops, std::move(result), script.taken(), actor);
+}
+
+core::ApplyResult Session::apply_worked(const Json& ops, const DocPtr& base, core::ApplyResult result, const std::vector<std::string>& taken) {
+    if (base != doc_) return apply(ops, taken);  // (the book changed meanwhile: worked out again on it, the same ids first)
+    if (saving_as_) throw core::ApplyError("別名保存中です。完了してから編集してください。", "save_as_busy");
+    if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
+    if (discarded_) throw core::ApplyError("the book was closed", "closed");
+    if (result.unchanged) return result;  // (PC5 G-0: questions alone)
+    return keep_applied(ops, std::move(result), taken);
+}
+
+core::ApplyResult Session::keep_applied(const Json& ops, core::ApplyResult result, std::vector<std::string> ids, std::optional<core::Actor> actor) {
+    auto change = std::make_shared<Change>();
+    change->id = new_change_id();
+    change->ops = ops;
+    change->actor = std::move(actor);
+    change->journal_ops = result.journal_ops;
+    change->script = script_;
+    change->ids = std::move(ids);
+    change->before = doc_;
+    change->after = std::make_shared<const core::Document>(std::move(result.doc));
+    change->held = replaced_precise_bytes(*change->before, *change->after);
+    // (the journal will hold changes this one ends — to redo, undone by this session (written so or to be), or a journal
+    // undo or redo still to be written: Python's journal ends them as the change is written, so it is written even if
+    // undone before it is saved, and no later read of the journal brings them back)
+    change->journal = journal_after().redo_all > 0 || disk_step_waits();
+    doc_ = change->after;
+    done_.push_back(change);
+    undone_.clear();
+    queue_.push_back(Action{Action::Kind::Edit, change, core::new_txn_id(), ++next_seq_, false});
+    redo_floor_ = next_seq_;
+    stepped_back_ = false;
+    ++generation_;
+    touch(BookChange{BookChange::Why::Edit, ops, change->before, change->after});
+    schedule_save();
+    return result;
+}
+
+
+void Session::trim_history() {
+    std::size_t held = 0;
+    for (const auto& change : done_) held += change->held;
+    while ((held > options_.history_bytes || done_.size() > options_.history_changes) && done_.size() > 1 && path_) {
+        const std::shared_ptr<Change> oldest = done_.front();
+        if (!oldest->on_disk || oldest->undone_on_disk) break;
+        if (waits(oldest)) break;
+        // (an adopted recovery point, saved, goes too — or the history would stay in memory from then on — and Undo
+        // still stops at it: recover_floor_)
+        if (oldest->recover) recover_floor_ = journal_undo_;
+        // (復帰's book, held by this change alone once it leaves — the history's limit holds it too —: let go, read back
+        // from the journal's state of the change when 復帰 is chosen; PC4 F-b)
+        if (revert_to_ && revert_to_ != doc_ && !oldest->txn.empty() && (revert_to_ == oldest->before || revert_to_ == oldest->after)) {
+            revert_state_ = std::make_pair(oldest->txn, revert_to_ == oldest->after);
+            revert_to_.reset();
+        }
+        held -= oldest->held;
+        done_.erase(done_.begin());
+        forget(*oldest);  // (in the journal, under the changes still in memory)
+        trimmed_ = true;
+    }
+}
+
+Session::Purged Session::purge_history() {
+    Purged out;
+    out.states = states_read_.size();
+    states_read_.clear();
+    journal_read_.reset();
+    const auto held_now = [this] {
+        std::size_t held = 0;
+        for (const auto& change : done_) held += change->held;
+        return held;
+    };
+    const std::size_t changes = done_.size();
+    const std::size_t held = held_now();
+    // (as the history's limit lets them go, the limit nothing for once: every change saved but the latest)
+    const std::size_t bytes_limit = options_.history_bytes;
+    const std::size_t changes_limit = options_.history_changes;
+    options_.history_bytes = 0;
+    options_.history_changes = 0;
+    trim_history();
+    options_.history_bytes = bytes_limit;
+    options_.history_changes = changes_limit;
+    out.changes = changes - done_.size();
+    out.bytes = held - std::min(held, held_now());
+    if (out.changes > 0) emit statusChanged();
+    return out;
+}
+
+void Session::undo() {
+    if (saving_as_) throw core::ApplyError("別名保存中です。完了してからUndoしてください。", "save_as_busy");
+    if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
+    if (!done_.empty()) {
+        const std::shared_ptr<Change> change = done_.back();
+        const auto given = [&](const Action& a) { return a.change == change && (a.in_flight || a.sent); };
+        if (change->recover && (change->on_disk || std::any_of(queue_.begin(), queue_.end(), given))) {
+            // (an adopted recovery point is not on the journal's stacks: once it reached the disk, nothing takes it back)
+            throw core::ApplyError("復旧用コピーの採用は、原稿に保存した後は元に戻せません", "recover_undo");
+        }
+        done_.pop_back();
+        undone_.push_back(change);
+        change->undone_seq = ++next_seq_;
+        const auto queued = [&](Action::Kind kind) {
+            return std::find_if(queue_.rbegin(), queue_.rend(),
+                                [&](const Action& a) { return a.kind == kind && a.change == change && !a.in_flight && !a.sent; });
+        };
+        // A change made and undone before it was saved stays off the disk only while nothing can read the journal back
+        // under it (Python commits before each undo, so its journal has every change, and a redo after a later read of the
+        // journal still finds it): not when the journal holds a change below this session's ones that an Undo reaching past
+        // them takes (the book read again, its redo from the journal), nor when the history may be trimmed (trim_history)
+        // before this change is redone or let go.
+        if (path_ && !change->journal && !change->recover) {  // (a recovery point not written yet: never written)
+            std::size_t held = 0;
+            for (const auto& c : done_) held += c->held;
+            if (trimmed_ || journal_after().undo > 0 || done_.size() > options_.history_changes || held > options_.history_bytes) {
+                change->journal = true;
+            }
+        }
+        if (auto it = queued(Action::Kind::Edit); it != queue_.rend() && !change->journal) {
+            queue_.erase(std::next(it).base());  // (it never reached the disk: undone in memory only)
+        } else if (it != queue_.rend()) {
+            // Once changes of this session are undone through the journal (trim_history), an Undo reaching past
+            // them reads the book again and its redo comes from the journal: a change undone before it was saved
+            // goes to the journal too (made and undone), so that redo still finds it. So does a change that ends what
+            // the journal holds to redo (Change::journal).
+            queue_.push_back(Action{Action::Kind::Undo, change, core::new_txn_id(), ++next_seq_, false});
+        } else if (auto redo = queued(Action::Kind::Redo); redo != queue_.rend()) {
+            queue_.erase(std::next(redo).base());
+        } else {
+            queue_.push_back(Action{Action::Kind::Undo, change, core::new_txn_id(), ++next_seq_, false});
+        }
+        doc_ = change->before;
+        stepped_back_ = true;
+        ++generation_;
+        touch(BookChange{BookChange::Why::Undo, change->ops, change->after, change->before});
+        schedule_save();
+        return;
+    }
+    if (loading_) throw core::ApplyError("原稿の残りのページを読み込み中です。読み込みが終わってから元に戻してください。", "loading");
+    if (!queue_.empty() && queue_.back().kind == Action::Kind::DiskRedo && !queue_.back().in_flight && !queue_.back().sent) {
+        // the journal redo asked last, not given to the disk yet: taken back, nothing written for either
+        queue_.pop_back();
+        stepped_back_ = true;
+        emit statusChanged();
+        return;
+    }
+    if (recover_floor_ && journal_after().undo <= *recover_floor_) {
+        throw core::ApplyError("復旧用コピーの採用は、原稿に保存した後は元に戻せません", "recover_undo");
+    }
+    if (path_ && journal_after().undo > 0) {
+        // a change saved before this session: undone through the journal, and the book read again after it
+        queue_.push_back(Action{Action::Kind::DiskUndo, nullptr, core::new_txn_id(), ++next_seq_, false});
+        stepped_back_ = true;
+        save_now();
+        emit statusChanged();
+        return;
+    }
+    throw core::ApplyError("nothing to undo", "nothing_to_undo");
+}
+
+// A journal undo or redo waits (or is being written).
+bool Session::disk_step_waits() const {
+    return std::any_of(queue_.begin(), queue_.end(), [](const Action& a) {
+        return a.kind == Action::Kind::DiskUndo || a.kind == Action::Kind::DiskRedo;
+    });
+}
+
+// The journal's depths as last read or written, then the queue in order, as the journal takes each (a change ends its
+// redo; a recovery point is not stacked): the one source of what can be undone and redone through it.
+Session::JournalAfter Session::journal_after() const {
+    JournalAfter j{journal_undo_, journal_redo_, journal_redo_};
+    for (const auto* list : {&done_, &undone_}) {
+        j.redo_all += std::count_if(list->begin(), list->end(), [](const std::shared_ptr<Change>& c) { return c->on_disk && c->undone_on_disk; });
+    }
+    for (const Action& action : queue_) {
+        switch (action.kind) {
+        case Action::Kind::Edit:
+            if (!action.change->recover) j.redo = j.redo_all = 0;
+            break;
+        case Action::Kind::Undo:
+            ++j.redo_all;
+            break;
+        case Action::Kind::Redo:
+            --j.redo_all;
+            break;
+        case Action::Kind::DiskUndo:
+            --j.undo;
+            ++j.redo;
+            ++j.redo_all;
+            break;
+        case Action::Kind::DiskRedo:
+            ++j.undo;
+            --j.redo;
+            --j.redo_all;
+            break;
+        }
+    }
+    j.undo = std::max<std::int64_t>(0, j.undo);
+    j.redo = std::max<std::int64_t>(0, j.redo);
+    j.redo_all = std::max<std::int64_t>(0, j.redo_all);
+    return j;
+}
+
+// What the disk now has of an action: its transaction committed.
+void Session::mark_written(const Action& action, const std::string& txn) {
+    const std::shared_ptr<Change>& change = action.change;
+    if (!change) return;
+    if (action.kind == Action::Kind::Edit) {
+        if (change->txn.empty() || !change->on_disk) change->txn = txn;
+        change->on_disk = true;
+    }
+    change->undone_on_disk = action.kind == Action::Kind::Undo;
+}
+
+// A change of this session that has left memory, nothing of it waiting: where the journal has it is counted with the
+// saved changes before this session (the base of journal_after()).
+void Session::forget(const Change& change) {
+    if (!change.on_disk || change.recover) return;  // (a recovery point is not on the journal's stacks)
+    ++(change.undone_on_disk ? journal_redo_ : journal_undo_);
+}
+
+// Something of this change waits to be written.
+bool Session::waits(const std::shared_ptr<Change>& change) const {
+    return std::any_of(queue_.begin(), queue_.end(), [&](const Action& a) { return a.change == change; });
+}
+
+// The journal's undos not written yet (or being written) that redo() takes before the changes undone in memory: those
+// asked after the latest of them was undone and after the last edit, the latest first (Python's order: its journal's redo
+// stack, the latest undone on top).
+std::size_t Session::disk_undos_first() const {
+    const std::uint64_t after = std::max(redo_floor_, undone_.empty() ? std::uint64_t{0} : undone_.back()->undone_seq);
+    std::size_t n = 0;
+    for (auto it = queue_.rbegin(); it != queue_.rend(); ++it) {
+        if (it->kind != Action::Kind::DiskUndo) continue;
+        if (it->seq < after) break;
+        ++n;
+    }
+    return std::min(n, static_cast<std::size_t>(journal_after().redo));
+}
+
+void Session::redo() {
+    if (saving_as_) throw core::ApplyError("別名保存中です。完了してからRedoしてください。", "save_as_busy");
+    if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
+    if (disk_undos_first() > 0) {
+        // a saved change the journal is still to undo comes back first: its undo not given to the disk yet, it is not
+        // made at all; once given (it may be there, even if that save failed), Redo waits for it (the book read again
+        // after it takes the ones undone in memory)
+        const auto last = std::find_if(queue_.rbegin(), queue_.rend(), [](const Action& a) { return a.kind == Action::Kind::DiskUndo; });
+        if (last->in_flight || last->sent) throw core::ApplyError("取り消しを原稿に書き込み中です。書き終わってからやり直してください。", "busy");
+        queue_.erase(std::next(last).base());
+        stepped_back_ = false;
+        emit statusChanged();
+        return;
+    }
+    if (!undone_.empty()) {
+        const std::shared_ptr<Change> change = undone_.back();
+        undone_.pop_back();
+        done_.push_back(change);
+        const auto queued = std::find_if(queue_.rbegin(), queue_.rend(), [&](const Action& a) {
+            return a.kind == Action::Kind::Undo && a.change == change && !a.in_flight && !a.sent;
+        });
+        const bool undo_given =
+            std::any_of(queue_.begin(), queue_.end(), [&](const Action& a) { return a.change == change && (a.in_flight || a.sent); });
+        if (queued != queue_.rend()) {
+            queue_.erase(std::next(queued).base());
+        } else if (change->on_disk || undo_given) {
+            queue_.push_back(Action{Action::Kind::Redo, change, core::new_txn_id(), ++next_seq_, false});
+        } else {
+            queue_.push_back(Action{Action::Kind::Edit, change, core::new_txn_id(), ++next_seq_, false});
+        }
+        doc_ = change->after;
+        stepped_back_ = false;
+        ++generation_;
+        touch(BookChange{BookChange::Why::Redo, change->ops, change->before, change->after});
+        schedule_save();
+        return;
+    }
+    if (loading_) throw core::ApplyError("原稿の残りのページを読み込み中です。読み込みが終わってからやり直してください。", "loading");
+    if (path_ && journal_after().redo > 0) {
+        queue_.push_back(Action{Action::Kind::DiskRedo, nullptr, core::new_txn_id(), ++next_seq_, false});
+        stepped_back_ = false;
+        save_now();
+        emit statusChanged();
+        return;
+    }
+    throw core::ApplyError("nothing to redo", "nothing_to_redo");
+}
+
+// What history() reads of the book's journal: kept while the journal file is the one it was read from (its place, size
+// and time), so that 履歴 in front reads it again only when it has changed.
+struct Session::JournalRead {
+    fs::path file;
+    std::uintmax_t size = 0;
+    fs::file_time_type time{};
+    std::map<std::string, Json> prepared;  // a committed transaction's prepare line
+    // the saved changes in the order of the timeline: the undo stack (those with a state before them), then the
+    // redo stack, the next to redo first; each by its transaction
+    std::vector<std::pair<std::string, HistoryEntry>> undo;
+    std::vector<std::pair<std::string, HistoryEntry>> redo;
+};
+
+std::shared_ptr<const Session::JournalRead> Session::read_journal() const {
+    const fs::path file = storage::journal::journal_file(*path_);
+    std::error_code ec;
+    const std::uintmax_t size = fs::file_size(file, ec);
+    const fs::file_time_type time = ec ? fs::file_time_type{} : fs::last_write_time(file, ec);
+    if (!ec && journal_read_ && journal_read_->file == file && journal_read_->size == size && journal_read_->time == time) return journal_read_;
+    auto read = std::make_shared<JournalRead>();
+    for (const auto& t : storage::journal::transactions(storage::journal::read_lines(file))) {
+        if (t.status == storage::journal::Transaction::Status::committed) read->prepared[t.txn] = t.prepare;
+    }
+    const storage::journal::Stacks stacks = storage::journal::stacks(*path_);
+    std::vector<Json> legacy;  // the old journal's lines (legacy:<n> is line n)
+    const bool any_legacy = std::any_of(stacks.undo.begin(), stacks.undo.end(), [](const auto& i) { return i.legacy; }) ||
+                            std::any_of(stacks.redo.begin(), stacks.redo.end(), [](const auto& i) { return i.legacy; });
+    if (any_legacy) legacy = storage::journal::read_lines(*path_ / "legacy" / "journal.jsonl").values;
+    const auto entry_of = [&](const storage::journal::HistoryItem& item) {
+        HistoryEntry entry;
+        entry.actor = item.actor;
+        entry.saved = true;
+        const Json* line = nullptr;
+        if (item.legacy) {
+            const std::size_t n = static_cast<std::size_t>(std::stoull(item.id.substr(7)));
+            if (n < legacy.size()) line = &legacy[n];
+        } else if (const auto it = read->prepared.find(item.id); it != read->prepared.end()) {
+            line = &it->second;
+        }
+        if (line != nullptr && line->is_object()) {
+            if (const auto ops = line->find("ops"); ops != line->end() && core::py_truthy(*ops)) entry.ops = *ops;
+            if (const auto at = line->find("at"); at != line->end() && at->is_number()) entry.at = at->get<double>();
+        }
+        return std::pair{item.id, entry};
+    };
+    for (const auto& item : stacks.undo) {
+        if (item.before) read->undo.push_back(entry_of(item));  // (nothing before it: the book being made)
+    }
+    for (auto it = stacks.redo.rbegin(); it != stacks.redo.rend(); ++it) read->redo.push_back(entry_of(*it));
+    if (!ec) {
+        read->file = file;
+        read->size = size;
+        read->time = time;
+        journal_read_ = read;
+    }
+    return read;
+}
+
+Session::History Session::history() const {
+    History out;
+    // this session's changes, by the transaction that first saved each (the journal's entry for it)
+    std::set<std::string> mine;
+    for (const auto* list : {&done_, &undone_}) {
+        for (const auto& change : *list) {
+            if (!change->txn.empty()) mine.insert(change->txn);
+        }
+    }
+    std::shared_ptr<const JournalRead> read;
+    std::vector<HistoryEntry> journal;  // the saved changes before this session, in the order of the timeline
+    if (path_) {
+        try {
+            read = read_journal();
+            for (const auto* stack : {&read->undo, &read->redo}) {
+                for (const auto& [id, entry] : *stack) {
+                    if (mine.count(id) == 0) journal.push_back(entry);
+                }
+            }
+        } catch (const std::exception&) {
+            read.reset();
+            journal.clear();  // (a journal that cannot be read: the changes in memory only)
+        }
+    }
+    const auto of_change = [&](const Change& change) {
+        HistoryEntry entry;
+        entry.ops = change.ops;
+        entry.actor = actor_of(change).name();
+        entry.saved = change.on_disk;
+        if (change.on_disk && read) {
+            if (const auto it = read->prepared.find(change.txn); it != read->prepared.end()) {
+                if (const auto at = it->second.find("at"); at != it->second.end() && at->is_number()) entry.at = at->get<double>();
+            }
+        }
+        return entry;
+    };
+    const JournalAfter depths = journal_after();
+    const std::size_t before = std::min(journal.size(), static_cast<std::size_t>(depths.undo));
+    out.done.assign(journal.begin(), journal.begin() + static_cast<std::ptrdiff_t>(before));
+    for (const auto& change : done_) out.done.push_back(of_change(*change));
+    const std::size_t after = std::min(journal.size(), before + static_cast<std::size_t>(depths.redo));
+    // (in the order redo() takes them: the journal's undos asked last, then the changes undone in memory, then the rest)
+    const auto first = static_cast<std::ptrdiff_t>(before + std::min(disk_undos_first(), after - before));
+    out.later.insert(out.later.end(), journal.begin() + static_cast<std::ptrdiff_t>(before), journal.begin() + first);
+    for (auto it = undone_.rbegin(); it != undone_.rend(); ++it) out.later.push_back(of_change(**it));
+    out.later.insert(out.later.end(), journal.begin() + first, journal.begin() + static_cast<std::ptrdiff_t>(after));
+    return out;
+}
+
+std::optional<DocPtr> Session::state_at(std::size_t done) const {
+    // (the timeline as history() lays it: the saved changes before this session that are done, then this session's)
+    std::set<std::string> mine;
+    for (const auto* list : {&done_, &undone_}) {
+        for (const auto& change : *list) {
+            if (!change->txn.empty()) mine.insert(change->txn);
+        }
+    }
+    std::vector<std::string> journal;
+    if (path_) {
+        try {
+            const std::shared_ptr<const JournalRead> read = read_journal();
+            for (const auto* stack : {&read->undo, &read->redo}) {
+                for (const auto& [id, entry] : *stack) {
+                    if (mine.count(id) == 0) journal.push_back(id);
+                }
+            }
+        } catch (const std::exception&) {
+            journal.clear();
+        }
+    }
+    const std::size_t before = std::min(journal.size(), static_cast<std::size_t>(std::max<std::int64_t>(journal_after().undo, 0)));
+    if (done > before + done_.size()) return std::nullopt;
+    if (done > before) return DocPtr(done_[done - before - 1]->after);
+    if (done == before) return done_.empty() ? doc_ : done_.front()->before;
+    // a saved change's state: the one after it (（はじめ）: the one before the first)
+    if (journal.empty()) return std::nullopt;
+    return journal_state(journal[done == 0 ? 0 : done - 1], done != 0);
+}
+
+std::optional<DocPtr> Session::journal_state(const std::string& txn, bool after) const {
+    if (!path_) return std::nullopt;
+    try {
+        const storage::journal::Stacks stacks = storage::journal::stacks(*path_);
+        std::optional<std::string> ref;
+        for (const auto* stack : {&stacks.undo, &stacks.redo}) {
+            for (const storage::journal::HistoryItem& item : *stack) {
+                if (item.id == txn) ref = after ? item.after : item.before;
+            }
+        }
+        if (!ref) return std::nullopt;
+        for (const auto& [seen, state] : states_read_) {
+            if (seen == *ref) return state;
+        }
+        const storage::AssetStore store(*path_);
+        const auto data = store.get_bytes(*ref, storage::kStateSuffix);
+        if (!data) return std::nullopt;
+        const core::Json state = core::parse_python_json(*data);
+        if (!state.is_object()) return std::nullopt;
+        storage::LoadResult loaded = storage::load_document_payload(state, *path_);
+        if (!loaded.report.clean()) return std::nullopt;
+        auto made = std::make_shared<const core::Document>(std::move(loaded.document));
+        states_read_.emplace_back(*ref, made);
+        if (states_read_.size() > kStatesKept) states_read_.erase(states_read_.begin());
+        return DocPtr(made);
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+bool Session::can_undo() const {
+    const std::int64_t undo = journal_after().undo;
+    return !saving_as_ && read_only_.empty() &&
+           (!done_.empty() || (path_ && !loading_ && undo > 0 && !(recover_floor_ && undo <= *recover_floor_)));
+}
+
+bool Session::can_redo() const {
+    return !saving_as_ && read_only_.empty() && (!undone_.empty() || (path_ && !loading_ && journal_after().redo > 0));
+}
+
+void Session::touch(BookChange change) {
+    emit changed(change);
+    emit statusChanged();
+}
+
+// --- saving --------------------------------------------------------------------------------------------------------
+
+void Session::schedule_save() {
+    if (!options_.autosave || discarded_) {
+        emit statusChanged();
+        return;
+    }
+    // (a book without a folder yet gets a recovery point at the same moments instead)
+    idle_timer_.start(options_.idle);
+    if (!longest_timer_.isActive()) longest_timer_.start(options_.longest);
+    emit statusChanged();
+}
+
+void Session::set_idle(std::chrono::milliseconds idle) {
+    options_.idle = std::clamp(idle, std::chrono::milliseconds(1), options_.longest);
+}
+
+void Session::save_now() {
+    idle_timer_.stop();
+    longest_timer_.stop();
+    if (discarded_) return;
+    if (loading_) {
+        // (written when the rest of the book is read: a book missing pages is never written)
+        save_wanted_ = true;
+        emit statusChanged();
+        return;
+    }
+    if (!path_) {
+        if (!done_.empty()) request_recovery();
+        return;
+    }
+    if (failure_code_ == QLatin1String("rebase_conflict") && !job_running_ && !rebasing_ && !saving_as_) {
+        start_rebase();
+        return;
+    }
+    if (job_running_ || rebasing_ || saving_as_) {
+        save_wanted_ = true;
+        return;
+    }
+    start_job();
+}
+
+void Session::run(Job job) {
+    Session* self = this;
+    ++worker_jobs_;
+    const bool recovery = job.kind == Job::Kind::Recovery || job.kind == Job::Kind::DeleteRecovery;
+    QMetaObject::invokeMethod(
+        recovery ? recovery_worker_ : worker_,
+        [self, job = std::move(job)]() {
+            JobResult result = execute(job);
+            QMetaObject::invokeMethod(self, [self, result = std::move(result)]() { self->job_done(result); }, Qt::QueuedConnection);
+        },
+        Qt::QueuedConnection);
+}
+
+void Session::beside_saves(std::function<QString()> work, std::function<void(const QString&)> done) {
+    ++worker_jobs_;
+    QPointer<Session> self(this);
+    QMetaObject::invokeMethod(
+        worker_,
+        [self, work = std::move(work), done = std::move(done)]() {
+            const QString result = work();
+            QMetaObject::invokeMethod(
+                QCoreApplication::instance(),
+                [self, result, done]() {
+                    if (self && self->worker_jobs_ > 0) --self->worker_jobs_;
+                    done(result);
+                },
+                Qt::QueuedConnection);
+        },
+        Qt::QueuedConnection);
+}
+
+void Session::start_job() {
+    if (job_running_ || rebasing_ || saving_as_ || queue_.empty() || !path_ || discarded_) return;
+    if (failure_code_ == QLatin1String("rebase_conflict")) return;
+    simplify_queue();
+    if (queue_.empty()) {
+        emit statusChanged();
+        return;
+    }
+    Job job;
+    job.kind = Job::Kind::Save;
+    job.dir = *path_;
+    job.actor = actor_;
+    job.lock_wait = options_.lock_wait;
+    job.base_revision = base_revision_;
+    job.generation = generation_;
+    for (Action& action : queue_) {
+        Job::Step step;
+        step.kind = action.kind;
+        step.txn = action.txn;
+        if (action.kind == Action::Kind::Edit) {
+            step.doc = action.change->after;
+            step.journal_ops = action.change->journal_ops;
+            step.action = action.change->recover ? "recover" : "edit";
+            step.script = action.change->script;
+            if (action.change->actor) step.actor = action.change->actor->name();
+        } else if (action.kind == Action::Kind::Undo || action.kind == Action::Kind::Redo) {
+            step.expect_top = action.change->txn;
+        }
+        action.in_flight = true;
+        action.sent_before = action.sent;
+        action.sent = true;
+        job.steps.push_back(std::move(step));
+        // (the book is read again after an undo or redo of a change from before this session: what comes after it is
+        // applied to that book first)
+        if (action.kind == Action::Kind::DiskUndo || action.kind == Action::Kind::DiskRedo) break;
+    }
+    job_running_ = true;
+    save_wanted_ = false;
+    perf::event("save_start", {{"steps", static_cast<std::int64_t>(job.steps.size())}});
+    emit statusChanged();
+    run(std::move(job));
+}
+
+void Session::job_done(const JobResult& r) {
+    if (worker_jobs_ > 0) --worker_jobs_;
+    switch (r.kind) {
+    case Job::Kind::Save: {
+        job_running_ = false;
+        perf::event("save_end", {{"ok", r.ok}, {"steps", static_cast<std::int64_t>(r.steps.size())}});
+        DocPtr reloaded;
+        const auto in_memory = [this](const std::shared_ptr<Change>& change) {
+            return std::find(done_.begin(), done_.end(), change) != done_.end() ||
+                   std::find(undone_.begin(), undone_.end(), change) != undone_.end();
+        };
+        for (const JobResult::Step& step : r.steps) {
+            if (queue_.empty() || !queue_.front().in_flight) break;
+            const Action action = queue_.front();
+            queue_.pop_front();
+            mark_written(action, step.txn);
+            if (action.kind == Action::Kind::Edit && !action.change->recover) journal_redo_ = 0;  // (a change ends its redo)
+            if (action.change && !in_memory(action.change) && !waits(action.change)) forget(*action.change);
+            if (step.reloaded) {
+                // (the journal as read just now: the base of what waits, also when that cannot be made on the book read)
+                reloaded = step.reloaded;
+                journal_undo_ = step.undo_depth;
+                journal_redo_ = step.redo_depth;
+            }
+            base_revision_ = step.revision;
+            last_revision_ = step.revision;
+            last_saved_ = QDateTime::currentDateTime();
+        }
+        std::optional<Action> refused;
+        for (Action& action : queue_) {
+            if (action.in_flight && !r.ok) {
+                // (the step that failed may have reached the disk — not when the book could not be locked, or its revision
+                // was found moved, before this try wrote anything —; the steps after it did not run: those stand as before
+                // this try, when an earlier one may have written them)
+                if (refused || r.code == QLatin1String("locked") || r.code == QLatin1String("revision_conflict")) {
+                    action.sent = action.sent_before;
+                }
+                if (!refused) refused = action;
+            }
+            action.in_flight = false;
+        }
+        if (r.ok) {
+            failed_ = false;
+            failure_.clear();
+            failure_code_.clear();
+            recovery_failed_ = false;
+        } else {
+            // (external_change: the book is not what the change on top of the journal left — a recovery point taken,
+            // a change made outside the journal —, which reading it again does not change)
+            static const QStringList kRefusals = {QStringLiteral("other_actor"), QStringLiteral("needs_person"),
+                                                  QStringLiteral("nothing_to_undo"), QStringLiteral("nothing_to_redo"),
+                                                  QStringLiteral("no_before"), QStringLiteral("missing_snapshot"),
+                                                  QStringLiteral("history_missing"), QStringLiteral("external_change")};
+            const bool undo_refused = refused && refused->kind != Action::Kind::Edit && kRefusals.contains(r.code);
+            if (undo_refused) {
+                // the journal will not take this undo or redo back (another person's change, an approval…): the book stays
+                // as the disk has it
+                queue_.erase(std::find_if(queue_.begin(), queue_.end(), [&](const Action& a) { return a.seq == refused->seq; }));
+                emit notice(r.message, true);
+                if (refused->kind == Action::Kind::DiskUndo || refused->kind == Action::Kind::DiskRedo) {
+                    // (it, and the journal's undos and redos asked after it — those meant to take it back too: not tried,
+                    // as Python's 履歴 stops at the first refusal)
+                    std::erase_if(queue_, [](const Action& a) { return a.kind == Action::Kind::DiskUndo || a.kind == Action::Kind::DiskRedo; });
+                }
+                // (an undo of this session's change that was shown already: the book is read again)
+                if (refused->kind == Action::Kind::Undo || refused->kind == Action::Kind::Redo) start_rebase();
+            } else if (r.code == QLatin1String("revision_conflict")) {
+                start_rebase();
+            } else if (r.code == QLatin1String("locked")) {
+                failed_ = true;
+                failure_code_ = r.code;
+                failure_ = r.message;
+                retry_timer_.start(3000);  // (another writer: try again soon)
+            } else {
+                after_failure(r.code, r.message);
+            }
+        }
+        if (reloaded) {
+            rebase_onto(reloaded, base_revision_, journal_undo_, journal_redo_, true);
+        } else if (r.ok && r.disk_revision >= 0 && r.disk_revision != base_revision_) {
+            start_rebase();  // (another writer's change after ours: read the book again, ours kept on top)
+        }
+        simplify_queue();
+        trim_history();  // (the changes just written may leave memory now)
+        if (r.ok && queue_.empty() && (recovery_written_ || recovery_job_) && doc_ && !doc_->book_id.empty()) {
+            // the book holds everything now: its recovery point is of no more use (one still being written is removed
+            // after it: the jobs of the recovery thread run in order)
+            Job remove;
+            remove.kind = Job::Kind::DeleteRecovery;
+            remove.root = options_.recovery_root.empty() ? recovery_root() : options_.recovery_root;
+            remove.book_id = doc_->book_id;
+            recovery_written_ = false;
+            recovery_superseded_ = recovery_job_;
+            run(std::move(remove));
+        }
+        if (save_wanted_ && !queue_.empty() && !rebasing_) start_job();
+        emit statusChanged();
+        break;
+    }
+    case Job::Kind::Probe:
+        if (r.ok && r.revision >= 0 && r.revision != base_revision_ && !job_running_ && !rebasing_ && !saving_as_) start_rebase();
+        break;
+    case Job::Kind::Rebase:
+        rebasing_ = false;
+        if (r.ok) {
+            // (read after the book's repair: a step given to the disk that is not there now was not written — an
+            // adopted recovery point among them can be undone again)
+            for (Action& action : queue_) {
+                if (action.sent && r.written.count(action.txn) == 0) action.sent = false;
+            }
+            rebase_onto(r.doc, r.revision, r.undo_depth, r.redo_depth, false, r.written);
+        } else if (failure_code_ == QLatin1String("rebase_conflict")) {
+            // (the conflict stands until a read of the book takes what waits — nothing is written over the book
+            // meanwhile —: read again soon)
+            retry_timer_.start(3000);
+        } else if (r.code == QLatin1String("locked")) {
+            retry_timer_.start(3000);
+            failed_ = true;
+            failure_code_ = r.code;
+            failure_ = r.message;
+        } else {
+            after_failure(r.code, r.message);
+        }
+        if (!queue_.empty() && !rebasing_) start_job();
+        emit statusChanged();
+        break;
+    case Job::Kind::Recovery:
+        recovery_job_ = false;
+        if (std::exchange(recovery_superseded_, false)) {
+            // (removed again after it: the book came to hold everything while it was written)
+        } else if (r.ok) {
+            recovery_written_ = true;
+            recovery_failed_ = false;
+            recovery_failure_.clear();
+            recovery_failure_code_.clear();
+            recovery_generation_ = r.generation;
+            recovery_time_ = r.recovery_time;
+            recovery_path_ = r.recovery_path;
+        } else {
+            recovery_failed_ = true;
+            recovery_failure_ = r.message;
+            recovery_failure_code_ = r.code;
+            emit notice(r.message, true);
+        }
+        if (recovery_requested_ && !saving_as_) {
+            recovery_requested_ = false;
+            if (!discarded_ && unsaved() && recovery_generation_ != generation_) request_recovery();
+        }
+        emit statusChanged();
+        break;
+    case Job::Kind::DeleteRecovery:
+        break;
+    case Job::Kind::SaveAs: {
+        const std::optional<fs::path> target = saving_as_;
+        saving_as_.reset();
+        if (r.ok && target && r.ticket == save_as_ticket_) {
+            const std::string old_book = doc_ ? doc_->book_id : std::string();
+            // the changes asked for before the copy are in it; the ones made since go on in the new place
+            std::erase_if(queue_, [&](const Action& a) {
+                return std::find(before_save_as_.begin(), before_save_as_.end(), a.seq) != before_save_as_.end();
+            });
+            before_save_as_.clear();
+            path_ = target;
+            failed_ = false;
+            failure_.clear();
+            failure_code_.clear();
+            journal_undo_ = 0;
+            journal_redo_ = 0;
+            recover_floor_.reset();
+            auto copy = std::make_shared<core::Document>(*r.doc);
+            copy->revision = r.revision;
+            // (the book's folder now — where its pictures and files are read from, the window puts what it imports and
+            // import_psd reads a relative path from: every asset it names was copied there)
+            copy->asset_dir = target;
+            last_saved_ = QDateTime::currentDateTime();
+            last_revision_ = r.revision;
+            rebase_onto(copy, r.revision, 0, 0);
+            // (復帰 goes back to the book as it was saved here — the new place's, its files there —, whoever asks; PC4 F-b)
+            if (!loading_) set_revert_to(copy);
+            recovery_requested_ = false;  // the latest snapshot is durable in the confirmed copy
+            if ((recovery_written_ || recovery_job_) && !old_book.empty()) {
+                Job remove;
+                remove.kind = Job::Kind::DeleteRecovery;
+                remove.root = options_.recovery_root.empty() ? recovery_root() : options_.recovery_root;
+                remove.book_id = old_book;
+                recovery_written_ = false;
+                recovery_superseded_ = recovery_job_;
+                run(std::move(remove));
+            }
+            emit savedAs(true, QString());
+        } else {
+            before_save_as_.clear();
+            if (recovery_requested_) {
+                recovery_requested_ = false;
+                if (!discarded_) request_recovery();
+            }
+            if (!discarded_ && unsaved()) schedule_save();
+            emit savedAs(false, r.message);
+            emit notice(r.message, true);
+        }
+        if (save_wanted_ || !queue_.empty()) start_job();
+        emit statusChanged();
+        break;
+    }
+    case Job::Kind::ReadRest:
+        reading_rest_ = false;
+        if (loading_ && !discarded_) finish_reading(r);
+        break;
+    case Job::Kind::SaveCopy:
+        if (!r.ok) emit notice(r.message, true);
+        emit savedCopy(r.ok, r.message);
+        emit statusChanged();
+        break;
+    }
+}
+
+void Session::simplify_queue() {
+    // an edit and its undo, an undo and its redo (neither written yet) cancel out
+    bool again = true;
+    while (again) {
+        again = false;
+        for (std::size_t i = 0; i + 1 < queue_.size(); ++i) {
+            const Action& a = queue_[i];
+            const Action& b = queue_[i + 1];
+            if (a.in_flight || b.in_flight || a.sent || b.sent || !a.change || a.change != b.change) continue;
+            const bool pair = (a.kind == Action::Kind::Edit && b.kind == Action::Kind::Undo) ||
+                              (a.kind == Action::Kind::Undo && b.kind == Action::Kind::Redo) ||
+                              (a.kind == Action::Kind::Redo && b.kind == Action::Kind::Undo);
+            if (!pair) continue;
+            if (a.kind == Action::Kind::Edit && (a.change->on_disk || trimmed_ || a.change->journal)) continue;  // (see undo())
+            queue_.erase(queue_.begin() + static_cast<std::ptrdiff_t>(i), queue_.begin() + static_cast<std::ptrdiff_t>(i) + 2);
+            again = true;
+            break;
+        }
+    }
+}
+
+void Session::after_failure(const QString& code, const QString& message) {
+    failed_ = true;
+    failure_code_ = code;
+    failure_ = message;
+    request_recovery();
+    emit statusChanged();
+}
+
+void Session::request_recovery() {
+    if (discarded_ || loading_ || !doc_ || doc_->book_id.empty()) return;
+    if (recovery_job_) {
+        recovery_requested_ = true;
+        return;
+    }
+    if (recovery_written_ && recovery_generation_ == generation_) return;
+    Job job;
+    job.kind = Job::Kind::Recovery;
+    job.root = options_.recovery_root.empty() ? recovery_root() : options_.recovery_root;
+    job.book_id = doc_->book_id;
+    job.doc = doc_;
+    job.book = path_;
+    job.base_revision = base_revision_;
+    job.generation = generation_;
+    job.actor = actor_;
+    recovery_job_ = true;
+    run(std::move(job));
+}
+
+void Session::write_recovery_copy() {
+    recovery_written_ = recovery_written_ && recovery_generation_ == generation_;
+    request_recovery();
+}
+
+void Session::start_rebase() {
+    if (rebasing_ || saving_as_ || loading_ || !path_ || discarded_) return;
+    rebasing_ = true;
+    Job job;
+    job.kind = Job::Kind::Rebase;
+    job.dir = *path_;
+    job.actor = actor_;
+    job.lock_wait = options_.lock_wait;
+    for (const Action& action : queue_) {
+        if (action.sent) job.txns.push_back(action.txn);  // (a save reported failed may have written it: the repair says)
+    }
+    run(std::move(job));
+    emit statusChanged();
+}
+
+void Session::rebase_onto(DocPtr fresh, std::int64_t revision, std::int64_t undo_depth, std::int64_t redo_depth, bool after_own_step,
+                          const std::set<std::string>& written) {
+    // What waits, on the book as it is read now, in order. A step the book has already (`written`: a save reported
+    // failed that reached it, settled since) is not made again. The journal's undos and redos still asked for are made
+    // on the book read right after this session's own (under the same lock: nobody else wrote in between, and the next
+    // one checks that nobody did since); on a book read again for another reason (another writer's change) they could
+    // take back or bring back another change than the one asked. Those, and an undo or redo of a change not made again
+    // here (one in the book already), are not made, and that is said.
+    const core::CommandBus bus(*registry_);
+    QStringList conflicts_found;
+    bool dropped = false;
+    DocPtr current = std::move(fresh);
+    std::vector<std::shared_ptr<Change>> replayed;
+    std::vector<std::shared_ptr<Change>> replayed_undone;  // replayed, then undone by an Undo waiting after it
+    std::map<const Change*, std::shared_ptr<Change>> again_of;
+    std::deque<Action> keep;
+    std::set<std::uint64_t> adds_nothing;  // the undo of a change made, then undone, that cannot be made on this book
+    std::set<const Change*> choices_gone;  // a choice of a panel that is not in the book any more
+    for (auto it = queue_.begin(); it != queue_.end(); ++it) {
+        const Action& action = *it;
+        if (adds_nothing.count(action.seq) != 0) continue;
+        if (action.change && choices_gone.count(action.change.get()) != 0) continue;  // (its undo or redo: nothing to do)
+        if (written.count(action.txn) != 0) {
+            mark_written(action, action.txn);
+            continue;
+        }
+        if (action.kind == Action::Kind::DiskUndo || action.kind == Action::Kind::DiskRedo) {
+            if (after_own_step) {
+                keep.push_back(action);
+            } else {
+                dropped = true;
+            }
+            continue;
+        }
+        if (action.kind != Action::Kind::Edit) {
+            // an undo or redo of a change made again here (made, then undone, before it was written): as it was
+            const auto found = action.change ? again_of.find(action.change.get()) : again_of.end();
+            auto& from = action.kind == Action::Kind::Undo ? replayed : replayed_undone;
+            auto& to = action.kind == Action::Kind::Undo ? replayed_undone : replayed;
+            if (found != again_of.end() && !from.empty() && from.back() == found->second) {
+                from.pop_back();
+                to.push_back(found->second);
+                current = action.kind == Action::Kind::Undo ? found->second->before : found->second->after;
+                keep.push_back(Action{action.kind, found->second, core::new_txn_id(), ++next_seq_, false});
+            } else {
+                dropped = true;
+            }
+            continue;
+        }
+        const std::shared_ptr<Change>& change = action.change;
+        if (!change) continue;
+        if (change->recover) {
+            conflicts_found << QStringLiteral("the recovery point was not taken: the book changed meanwhile");
+            continue;
+        }
+        if (change->whole) {  // (PC4 F-b: 復帰 does not write over a change another writer saved meanwhile)
+            conflicts_found << QStringLiteral("復帰は、その間にほかの変更が保存されたため、当てませんでした");
+            continue;
+        }
+        // A choice of a panel (select_frame) is not in the book: it follows its page by id to the number the page has
+        // now, and goes when its page or panel did (SPEC COMP-01a). It never holds the saves up as a conflict; the
+        // changes to the book's content keep the rule below.
+        std::optional<Json> moved;
+        if (only_chooses(change->ops)) {
+            moved = choice_on(change->ops, *change->before, *current);
+            if (!moved) {
+                choices_gone.insert(change.get());
+                continue;
+            }
+        }
+        try {
+            if (!moved) {
+                // Page numbers are positional, not identity. Never replay against a
+                // number that another writer has assigned to a different page.
+                // Refuse changed placement instead of guessing the author's intent;
+                // the conflict path below retains the complete local snapshot/history.
+                const bool creates_page = std::any_of(change->ops.begin(), change->ops.end(), [](const Json& op) {
+                    const auto name = op.value("op", std::string());
+                    return name == "add_page" || name == "duplicate_page" ||
+                           name == "add_artboard" || name == "artboard_from_layers";  // (PC5 I-c: an artboard is a page made)
+                });
+                if (creates_page && change->ops.size() > 1 && current->pages.size() != change->before->pages.size()) {
+                    // A later op can reference a page created inside this same batch.
+                    // Its number did not exist in before and cannot be checked below.
+                    throw core::ApplyError("ページ構成が変わったため、一括操作の対象を変更せず保持しました。", "rebase_conflict");
+                }
+                for (const auto& original : change->before->pages) {
+                    const auto at_number = std::find_if(current->pages.begin(), current->pages.end(),
+                        [&](const core::PagePtr& page) { return page->index == original->index; });
+                    if (at_number != current->pages.end() && (*at_number)->id != original->id) {
+                        throw core::ApplyError("ページの番号とIDの対応が変わったため、未保存の操作を保持しました。", "rebase_conflict");
+                    }
+                }
+            }
+            core::ScopedIdScript script(change->ids);
+            core::ApplyResult result = bus.apply(*current, moved ? *moved : change->ops, actor_of(*change));
+            auto again = std::make_shared<Change>();
+            again->id = new_change_id();
+            again->ops = moved ? *moved : change->ops;
+            again->script = change->script;
+            again->actor = change->actor;
+            again->journal_ops = result.journal_ops;
+            again->ids = script.taken();
+            again->before = current;
+            again->after = std::make_shared<const core::Document>(std::move(result.doc));
+            again->held = replaced_precise_bytes(*again->before, *again->after);
+            again->undone_seq = change->undone_seq;
+            again->journal = change->journal;
+            current = again->after;
+            replayed.push_back(again);
+            again_of[change.get()] = again;
+            keep.push_back(Action{Action::Kind::Edit, again, core::new_txn_id(), ++next_seq_, false});
+        } catch (const core::Error& error) {
+            if (moved) {  // (a choice that cannot be made: let go, as one whose panel is gone)
+                choices_gone.insert(change.get());
+                continue;
+            }
+            // A change made, then undone, that waits only to end what the journal held to redo (Change::journal) adds
+            // nothing to the book: when it cannot be made on it, neither is written (the journal as read tells what it
+            // holds now).
+            const auto of_it = [&](const Action& a) { return a.change == change; };
+            const auto next = std::find_if(std::next(it), queue_.end(), of_it);
+            if (next != queue_.end() && next->kind == Action::Kind::Undo && std::none_of(std::next(next), queue_.end(), of_it)) {
+                adds_nothing.insert(next->seq);
+                continue;
+            }
+            conflicts_found << QString::fromUtf8(error.what());
+        }
+    }
+    if (!conflicts_found.isEmpty()) {
+        save_wanted_ = false;
+        retry_timer_.stop();
+        after_failure(QStringLiteral("rebase_conflict"),
+            QStringLiteral("他の変更と競合したため、未保存の原稿を保持しています。"));
+        emit conflicts(conflicts_found);
+        return;
+    }
+    const DocPtr before = doc_;
+    doc_ = current;
+    done_ = std::move(replayed);
+    undone_ = std::move(replayed_undone);
+    queue_ = std::move(keep);
+    base_revision_ = revision;
+    journal_undo_ = undo_depth;  // (all of it: none of this session's changes in memory is in the journal now)
+    journal_redo_ = redo_depth;
+    read_only_ = doc_->read_only_reason;
+    failed_ = false;
+    failure_.clear();
+    failure_code_.clear();
+    ++generation_;
+    touch(BookChange{BookChange::Why::Rebase, Json::array(), before, doc_});
+    if (dropped) {
+        emit notice(QStringLiteral("原稿を読み直しました。まだ原稿に書いていなかった「元に戻す」「やり直す」は行っていません（履歴で確かめてください）"), true);
+    }
+}
+
+void Session::check_outside() {
+    // (while pages are read, the rest of the read sees the book as it is on disk)
+    if (!path_ || job_running_ || rebasing_ || saving_as_ || loading_ || discarded_) return;
+    Job job;
+    job.kind = Job::Kind::Probe;
+    job.dir = *path_;
+    run(std::move(job));
+}
+
+void Session::save_as(const fs::path& dir) {
+    if (saving_as_ || discarded_) return;
+    if (loading_) {
+        if (read_failed_) {
+            emit savedAs(false, QString::fromStdString(read_only_));
+            return;
+        }
+        // (written when the rest of the book is read: a book missing pages is never written)
+        save_as_after_reading_ = dir;
+        emit statusChanged();
+        return;
+    }
+    if (job_running_ || rebasing_) {
+        emit savedAs(false, QStringLiteral("現在の保存・再照合が完了してから、別名保存を再試行してください。"));
+        return;
+    }
+    auto copy = std::make_shared<core::Document>(*doc_);
+    copy->book_id = core::new_book_id();  // (a copy is another book: schema-v4 §2)
+    copy->revision = 0;
+    copy->read_only_reason.clear();
+    if (!read_only_.empty()) {
+        // (a book open read-only for want of something can be saved elsewhere only when nothing would be lost)
+        emit savedAs(false, qs(read_only_));
+        return;
+    }
+    saving_as_ = dir;
+    save_as_ticket_ = ++next_ticket_;
+    before_save_as_.clear();
+    for (const Action& action : queue_) before_save_as_.push_back(action.seq);
+    idle_timer_.stop();
+    longest_timer_.stop();
+    Job job;
+    job.kind = Job::Kind::SaveAs;
+    job.dir = dir;
+    job.actor = actor_;
+    job.lock_wait = options_.lock_wait;
+    job.doc = copy;
+    job.ticket = save_as_ticket_;
+    run(std::move(job));
+    emit statusChanged();
+}
+
+void Session::discard() {
+    discarded_ = true;
+    idle_timer_.stop();
+    longest_timer_.stop();
+    retry_timer_.stop();
+    queue_.clear();
+    if ((recovery_written_ || recovery_job_) && doc_ && !doc_->book_id.empty()) {
+        Job remove;
+        remove.kind = Job::Kind::DeleteRecovery;
+        remove.root = options_.recovery_root.empty() ? recovery_root() : options_.recovery_root;
+        remove.book_id = doc_->book_id;
+        recovery_superseded_ = recovery_job_;
+        run(std::move(remove));
+    }
+    recovery_written_ = false;
+    emit statusChanged();
+}
+
+void Session::adopt_recovery() {
+    if (!recovery_offer_) return;
+    if (!read_only_.empty()) throw core::Error("read_only", read_only_);
+    const RecoveryPoint point = *recovery_offer_;
+    const Json payload = core::parse_python_json(storage::read_file(point.folder / "state.json"));
+    storage::LoadResult loaded = storage::load_document_payload(payload, point.folder);
+    if (!loaded.document.read_only_reason.empty()) throw core::Error("read_only", loaded.document.read_only_reason);
+    // (what the point holds that the book does not — a smart object placed and not saved, its filter mask and PSD
+    // record — goes into the book's assets first: the book reads its pictures from its own folder, and the point is
+    // removed once saved. Nothing is taken when they cannot be written.)
+    if (doc_->asset_dir) {
+        std::set<std::string> named;
+        storage::refs_in(payload, named);
+        storage::copy_named_assets(point.folder, *doc_->asset_dir, named);
+    }
+    core::Document doc = std::move(loaded.document);
+    doc.revision = doc_->revision;
+    doc.book_id = doc_->book_id;
+    // (the pictures are read from the recovery point; the book's folder stays the book's, where import_psd reads a
+    // relative path from, as Python's Episode keeps its asset_dir)
+    doc.asset_dir = doc_->asset_dir;
+    auto change = std::make_shared<Change>();
+    change->id = new_change_id();
+    change->ops = Json::array({Json::object({{"op", "recover"}})});
+    change->journal_ops = Json::array();
+    change->recover = true;
+    change->before = doc_;
+    change->after = std::make_shared<const core::Document>(std::move(doc));
+    recovery_offer_.reset();
+    doc_ = change->after;
+    set_revert_to(doc_);  // (復帰: to the recovery point taken, saved now as a new generation)
+    // (a recovery is not an undoable edit in the journal: the history starts again from it — the changes of this session
+    // already in the journal stay there, counted with the saved changes before them now, or once written)
+    for (const auto* list : {&done_, &undone_}) {
+        for (const auto& left : *list) {
+            if (!waits(left)) forget(*left);
+        }
+    }
+    done_.clear();
+    undone_.clear();
+    done_.push_back(change);
+    queue_.push_back(Action{Action::Kind::Edit, change, core::new_txn_id(), ++next_seq_, false});
+    ++generation_;
+    touch(BookChange{BookChange::Why::Recover, Json::array(), change->before, change->after});
+    save_now();
+}
+
+void Session::decline_recovery() { recovery_offer_.reset(); }
+
+// --- 復帰 and コピーを保存 (PC4 F-b) ------------------------------------------------------------------------------------
+
+bool Session::can_revert() const {
+    return read_only_.empty() && !loading_ && !saving_as_ && !discarded_ && ((revert_to_ && revert_to_ != doc_) || (!revert_to_ && revert_state_));
+}
+
+void Session::set_revert_to(DocPtr doc) {
+    revert_to_ = std::move(doc);
+    revert_state_.reset();
+}
+
+void Session::mark_saved() {
+    if (!loading_) set_revert_to(doc_);
+}
+
+void Session::revert() {
+    if (saving_as_) throw core::ApplyError("別名保存中です。完了してから復帰してください。", "save_as_busy");
+    if (!read_only_.empty()) throw core::ApplyError("this book is open read-only: " + read_only_, "read_only");
+    if (discarded_) throw core::ApplyError("the book was closed", "closed");
+    if (loading_) throw core::ApplyError("ページを読み込んでいる間は、復帰できません", "page_not_loaded");
+    DocPtr then = revert_to_;
+    if (!then && revert_state_) {  // (left memory with the history: the journal's state of it)
+        const std::optional<DocPtr> read = journal_state(revert_state_->first, revert_state_->second);
+        if (!read || !*read) throw core::ApplyError("最後に保存したときの状態を原稿の履歴から読めないため、復帰できません", "revert_lost");
+        then = *read;
+    }
+    if (!then || then == doc_) throw core::ApplyError("最後に保存したときから変わっていません", "nothing_to_revert");
+    // (the book as it was then, as this book: its id, revision and folder its own now)
+    core::Document back = *then;
+    back.book_id = doc_->book_id;
+    back.revision = doc_->revision;
+    back.asset_dir = doc_->asset_dir;
+    back.read_only_reason.clear();
+    core::ApplyResult result{std::move(back)};
+    const Json ops = Json::array({Json::object({{"op", "revert"}})});
+    result.applied = Json::array({"revert"});
+    result.journal_ops = ops;
+    keep_applied(ops, std::move(result), {});
+    done_.back()->whole = true;
+    set_revert_to(doc_);  // (the book as it was then: 復帰 again has nothing to do — after 取り消し, it comes back here)
+}
+
+void Session::save_copy(const fs::path& dir) {
+    if (discarded_) return;
+    if (loading_) {
+        emit savedCopy(false, QStringLiteral("ページを読み込んでいる間は、コピーを保存できません。読み込みが終わってから、もう一度選んでください。"));
+        return;
+    }
+    if (!read_only_.empty()) {
+        // (a book open read-only for want of something is not written anywhere: nothing would be lost)
+        emit savedCopy(false, qs(read_only_));
+        return;
+    }
+    auto copy = std::make_shared<core::Document>(*doc_);
+    copy->book_id = core::new_book_id();  // (a copy is another book: schema-v4 §2)
+    copy->revision = 0;
+    copy->read_only_reason.clear();
+    Job job;
+    job.kind = Job::Kind::SaveCopy;
+    job.dir = dir;
+    job.actor = actor_;
+    job.lock_wait = options_.lock_wait;
+    job.doc = copy;
+    run(std::move(job));
+}
+
+bool Session::wait_idle(std::chrono::milliseconds timeout) {
+    QElapsedTimer clock;
+    clock.start();
+    while (job_running_ || rebasing_ || saving_as_ || recovery_job_ || reading_rest_ || worker_jobs_ > 0) {
+        if (clock.elapsed() >= timeout.count()) return false;
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        QThread::msleep(2);
+    }
+    return true;
+}
+
+bool Session::wait_saved(std::chrono::milliseconds timeout) {
+    QElapsedTimer clock;
+    clock.start();
+    for (;;) {
+        // (pages not read and no read of them under way — it failed, or was not asked for: nothing will be written)
+        if (loading_ && !reading_rest_ && !read_retry_pending_) return false;
+        if (!job_running_ && !rebasing_ && !saving_as_ && !loading_) {
+            if (queue_.empty()) return path_.has_value() && status().kind == SaveKind::Saved;
+            if (failed_ || !path_ || discarded_) return false;
+            save_now();
+        }
+        if (clock.elapsed() >= timeout.count()) return false;
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        QThread::msleep(2);
+    }
+}
+
+SaveStatus Session::status() const {
+    SaveStatus s;
+    s.target = path_;
+    s.last_saved = last_saved_;
+    s.last_revision = last_revision_;
+    const bool waiting_now = std::any_of(queue_.begin(), queue_.end(), [](const Action& a) { return !a.in_flight; });
+    if (job_running_ || rebasing_ || saving_as_) {
+        s.kind = SaveKind::Saving;
+        s.newer_waiting = waiting_now;
+        if (failed_) {
+            s.retrying = true;
+            s.reason = failure_;
+            s.code = failure_code_;
+        }
+        return s;
+    }
+    if (!path_) {
+        // a book never given a folder: only in memory (or in a recovery copy)
+        s.kind = recovery_failed_ ? SaveKind::Failed :
+            (recovery_written_ && recovery_generation_ == generation_ ? SaveKind::RecoveryOnly : SaveKind::Dirty);
+        if (recovery_failed_) {
+            s.reason = recovery_failure_;
+            s.code = recovery_failure_code_;
+            s.nowhere = true;
+        }
+        s.recovery_time = recovery_time_;
+        s.recovery_path = recovery_path_;
+        return s;
+    }
+    if (failure_code_ == QLatin1String("rebase_conflict")) {
+        s.kind = SaveKind::Failed;
+        s.reason = failure_;
+        s.code = failure_code_;
+        s.nowhere = recovery_failed_;
+        s.recovery_time = recovery_time_;
+        s.recovery_path = recovery_path_;
+        return s;
+    }
+    if (queue_.empty()) {
+        s.kind = SaveKind::Saved;
+        return s;
+    }
+    if (failed_) {
+        s.reason = failure_;
+        s.code = failure_code_;
+        s.nowhere = recovery_failed_;
+        if (recovery_written_ && recovery_generation_ == generation_) {
+            s.kind = SaveKind::RecoveryOnly;
+            s.recovery_time = recovery_time_;
+            s.recovery_path = recovery_path_;
+        } else {
+            s.kind = SaveKind::Failed;
+            if (recovery_written_) {  // (an older recovery point: the newest changes are not in it)
+                s.recovery_time = recovery_time_;
+                s.recovery_path = recovery_path_;
+            }
+        }
+        return s;
+    }
+    s.kind = SaveKind::Dirty;
+    return s;
+}
+
+}  // namespace genko::app
