@@ -479,12 +479,12 @@ private slots:
             // the box's middle: the order the maps are made one in, fixed; and the transform's value itself — the turn, then
             // the crop's move)
             QVERIFY(near(at_mm(cut.doc, 0, 2, c[0], c[1]), kColours[1]));
-            const Json& offset = cut.results[0]["pages"][0]["offset_mm"];
+            const Json& moved_by = cut.results[0]["pages"][0]["offset_mm"];
             const Json& t = row.at("transform");
             const Json& t0 = core::video_row(quarter.page(0), Json("v"))->at("transform");
             for (int k = 0; k < 4; ++k) QCOMPARE(t[k], t0[k]);
-            QVERIFY(std::fabs(t[4].get<double>() - (t0[4].get<double>() + offset[0].get<double>())) < 1e-3);
-            QVERIFY(std::fabs(t[5].get<double>() - (t0[5].get<double>() + offset[1].get<double>())) < 1e-3);
+            QVERIFY(std::fabs(t[4].get<double>() - (t0[4].get<double>() + moved_by[0].get<double>())) < 1e-3);
+            QVERIFY(std::fabs(t[5].get<double>() - (t0[5].get<double>() + moved_by[1].get<double>())) < 1e-3);
         }
         // (a turn and a flip, which do not commute, and a crop at an angle: the footage and the cel where the transform says)
         for (const std::vector<Json>& turns : {std::vector<Json>{Json{{"turn", "90cw"}}, Json{{"turn", "flip_h"}}},
@@ -511,9 +511,9 @@ private slots:
             const Json& row = *core::video_row(back_again.page(0), Json("v"));
             QVERIFY2(!row.contains("transform"), row.dump().c_str());
             const Json& box = row.at("placement_mm");
-            const double cx = box[0].get<double>() + box[2].get<double>() / 2, cy = box[1].get<double>() + box[3].get<double>() / 2;
-            QVERIFY(near(at_mm(back_again, 0, 3, cx, cy), kColours[2]));
-            QVERIFY(near(at_mm(back_again, 0, 2, cx, cy), kColours[1]));
+            const double mx = box[0].get<double>() + box[2].get<double>() / 2, my = box[1].get<double>() + box[3].get<double>() / 2;
+            QVERIFY(near(at_mm(back_again, 0, 3, mx, my), kColours[2]));
+            QVERIFY(near(at_mm(back_again, 0, 2, mx, my), kColours[1]));
         }
         // (B2's P2-2: a box given after the turn is the page's as it is now — the transform taken away, the footage upright in it)
         {
