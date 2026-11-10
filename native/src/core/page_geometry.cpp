@@ -647,32 +647,38 @@ void map_page(Document& doc, std::size_t at, const Mapping& m, const PixelHooks&
         }
     }
     // (video@1, PC6 review B P2-5: a video layer's footage where the map takes it, as its altered cels' pixels go — an
-    // upright map its box's, as before; a turn, a mirror or a skew the row's transform (the map after the one it holds, the
-    // box as it was), taken away again when it comes back to none. timeline: the camera's keys — the page's mm — with them)
+    // the map after the transform it holds: one that keeps the footage upright and its shape — a move, the same scale both
+    // ways (or any, for a footage stretched over its box) — its box's, the transform none; any other — a turn, a mirror, a
+    // skew, one scale across and another down for a footage that keeps its shape — the row's transform, the box as it was
+    // (review of PC6-B: B2's P3-2, P3-3). timeline: the camera's keys — the page's mm — with them)
     if (const auto anim = page.extra.find("anim"); anim != page.extra.end() && anim->is_object()) {
         if (const auto tracks = anim->find("tracks"); tracks != anim->end() && tracks->is_array()) {
             for (Json& track : *tracks) {
                 if (!is_video_row(track)) continue;
                 Json& video = track["video"];
                 const std::optional<std::array<double, 6>> held = footage_transform(video);
-                if (!held && upright(m)) {
+                const Affine t = held ? Affine{(*held)[0], (*held)[1], (*held)[2], (*held)[3], (*held)[4], (*held)[5]} : Affine{1, 0, 0, 1, 0, 0};
+                const Mapping both = then(Mapping{t}, m);
+                std::array<double, 6> v{};
+                for (std::size_t i = 0; i < 6; ++i) {
+                    v[i] = py_round(both.m[i], i < 4 ? 9 : 4);
+                    if (v[i] == 0) v[i] = 0.0;  // (no −0)
+                }
+                const bool stretched = video.value("fit", std::string()) == "stretch";
+                const bool same_scale = std::fabs(v[0] - v[3]) <= 1e-9 * std::max(std::fabs(v[0]), std::fabs(v[3]));
+                if (v[1] == 0 && v[2] == 0 && v[0] > 0 && v[3] > 0 && (same_scale || stretched)) {
+                    // (upright and its shape kept: the box where the map takes it — a row without a transform under an
+                    // upright map of the same scale both ways is mapped as before, to the value)
                     Json& box = video["placement_mm"];
-                    const std::array<double, 4> b = map_box(production::rect_mm(box, "placement_mm"), m);
+                    const Mapping onto = held ? Mapping{{both.m[0], 0, 0, both.m[3], both.m[4], both.m[5]}} : m;
+                    const std::array<double, 4> b = map_box(production::rect_mm(box, "placement_mm"), onto);
                     box = Json::array({py_round(b[0], 4), py_round(b[1], 4), py_round(b[2], 4), py_round(b[3], 4)});
+                    video.erase("transform");
                     try {
                         (void)production::rect_mm(box, "placement_mm");
                     } catch (const Error&) {
                         throw OpError("a video layer's footage box would lie past the places a page holds");
                     }
-                    continue;
-                }
-                const Affine t = held ? Affine{(*held)[0], (*held)[1], (*held)[2], (*held)[3], (*held)[4], (*held)[5]} : Affine{1, 0, 0, 1, 0, 0};
-                const Mapping both = then(Mapping{t}, m);
-                std::array<double, 6> v{};
-                for (std::size_t i = 0; i < 6; ++i) v[i] = py_round(both.m[i], i < 4 ? 9 : 4);
-                for (std::size_t i = 0; i < 4; ++i) v[i] = v[i] == 0 ? 0.0 : v[i];  // (no −0)
-                if (v == std::array<double, 6>{1, 0, 0, 1, 0, 0}) {
-                    video.erase("transform");
                 } else {
                     video["transform"] = Json::array({v[0], v[1], v[2], v[3], v[4], v[5]});
                     try {

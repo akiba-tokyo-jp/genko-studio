@@ -1674,6 +1674,8 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("an animation folder or its cels \\(a video layer's too\\) cannot go into a smart object.*",
                          "アニメーションフォルダーとそのセル（ビデオレイヤーも）は、タイムラインで時間を決めているため、スマートオブジェクトにできません"));
         r.push_back(rule("a video layer's footage (?:box )?would lie past the places a page holds", "ビデオレイヤーのフッテージが、ページから遠すぎる所に出てしまいます"));
+        r.push_back(rule("a video layer is copied onto an animation of the same frame rate only.*",
+                         "ビデオレイヤーは、フレームレートの同じアニメーションのページにだけ複製できます（先にそのページのフレームレートを合わせてください）"));
         r.push_back(rule("layer \\S+ has nothing to rasterize", "このレイヤーには、ラスタライズするものがありません（すでに画素のレイヤーです）"));
         r.push_back(rule("the transform squashes the smart object flat|the picture would be laid too small", "スマートオブジェクトが潰れてしまう変形はできません"));
         r.push_back(rule("the picture is too large to keep its 16 or 32 bits on this page.*", "画像が大きすぎて、このページでは 16・32 bit のまま置けません"));

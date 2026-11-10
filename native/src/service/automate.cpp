@@ -412,10 +412,15 @@ Json aim_steps(const core::Document& doc, const Json& steps, bool picture, bool 
     if (recorded) {
         // (PC6 review of B's P2-B: what makes a page among the book's — calculations into a new page, … — never played on
         // each page in turn: the pages numbered when the steps were laid would be others by then)
-        try {
-            core::check_pages_kept(steps);
-        } catch (const core::OpError& error) {
-            throw StepsError(std::string("the steps are run page by page: ") + error.what());
+        // (on one page only — a picture's, a book of one page — nothing is numbered again before it: played as before, the
+        // pages it adds written: review of PC6-B, B2's P2-1)
+        const auto pages = static_cast<std::size_t>(std::count_if(doc.pages.begin(), doc.pages.end(), [&](const auto& page) { return picture || !core::is_cover(*page); }));
+        if (pages > 1) {
+            try {
+                core::check_pages_kept(steps);
+            } catch (const core::OpError& error) {
+                throw StepsError(std::string("the steps are run page by page: ") + error.what());
+            }
         }
         for (const auto& page : doc.pages) {
             if (!picture && core::is_cover(*page)) continue;

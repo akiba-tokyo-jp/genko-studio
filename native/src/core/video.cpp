@@ -241,7 +241,10 @@ void check_video(const Json& video) {
             const double most = i < 4 ? kFootageTransformMax : pj::kCoordinateMaxMm;
             v[i] = pj::number((*t)[i], where + ".transform", -most, most);
         }
-        if (!(std::fabs(v[0] * v[3] - v[1] * v[2]) > 1e-12)) pj::wrong(where + ".transform", "must not squash the footage flat");
+        // (as flat as its own size goes: the determinant against the largest of its linear part, squared — review of
+        // PC6-B: B2's P3-5)
+        const double most = std::max({std::fabs(v[0]), std::fabs(v[1]), std::fabs(v[2]), std::fabs(v[3])});
+        if (!(std::fabs(v[0] * v[3] - v[1] * v[2]) > 1e-6 * most * most)) pj::wrong(where + ".transform", "must not squash the footage flat");
     }
 }
 

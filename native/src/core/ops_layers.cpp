@@ -795,10 +795,15 @@ void duplicate_layers(OpContext& c) {
                 if (folder == renamed.end()) continue;
                 Json row = track;
                 row["folder"] = folder->second;
-                for (Json& frame : row["video"]["frames"]) {
-                    if (!frame[1].is_string()) continue;
-                    const auto cel = renamed.find(frame[1].get<std::string>());
-                    frame[1] = cel != renamed.end() ? Json(cel->second) : Json(nullptr);
+                const auto cel_of = [&](Json& id) {
+                    if (!id.is_string()) return;
+                    const auto cel = renamed.find(id.get<std::string>());
+                    id = cel != renamed.end() ? Json(cel->second) : Json(nullptr);
+                };
+                for (Json& frame : row["video"]["frames"]) cel_of(frame[1]);
+                if (row.contains("cels") && row["cels"].is_array()) {  // (B2's P3-4: its exposure sheet too, though a video row's is empty)
+                    for (Json& cel : row["cels"])
+                        if (cel.is_array() && cel.size() >= 2) cel_of(cel[1]);
                 }
                 rows.push_back(std::move(row));
             }
@@ -810,6 +815,12 @@ void duplicate_layers(OpContext& c) {
             timing->erase("light_table");
         }
     }
+    // (onto a page that is an animation of another speed: its footage laid at this page's would run at another — B2's P3-4)
+    if (!rows.empty() && to != at) {
+        if (const Json* there = anim::spec(doc.page(to)); there != nullptr && anim::fps_of(doc.page(to)) != anim::fps_of(from)) {
+            throw OpError("a video layer is copied onto an animation of the same frame rate only (set the page's frame rate first)");
+        }
+    }
     Page& page = doc.edit_page(to);
     const std::size_t place = to == at ? top + 1 : page.layers.size();
     page.layers.insert(page.layers.begin() + static_cast<std::ptrdiff_t>(place), std::make_move_iterator(copies.begin()),
@@ -819,7 +830,11 @@ void duplicate_layers(OpContext& c) {
         if (!page.extra.contains("anim") || !page.extra["anim"].is_object()) page.extra["anim"] = *timing;
         Json& anim = page.extra["anim"];
         if (!anim.contains("tracks") || !anim["tracks"].is_array()) anim["tracks"] = Json::array();
+        std::int64_t longest = 0;
+        for (const Json& row : rows) longest = std::max<std::int64_t>(longest, static_cast<std::int64_t>(row["video"]["frames"].size()));
         for (Json& row : rows) anim["tracks"].push_back(std::move(row));
+        // (the timeline as long as the rows copied, as a video layer made lengthens it: 3000 frames at most)
+        if (anim::frames_of(page) < longest) anim["frames"] = std::min<std::int64_t>(longest, anim::kMaxFrames);
     }
     c.report = Json{{"ids", std::move(made)}};
 }

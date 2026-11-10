@@ -500,20 +500,51 @@ private slots:
         QCOMPARE(played[1]["id"], Json(doc.page(0).layers.back().id));
         QCOMPARE(automate::aim_steps(doc, Json::array(), true, false), Json::array());
         QCOMPARE(thrown([&] { automate::aim_steps(doc, Json::array({Json{{"op", "add_page"}}}), true, false); }).first, std::string("steps"));
-        // (PC6 review of B's P2-B) an action played on each page that makes a page among the book's — calculations into a
-        // new page, a channel copied to a new page, the channels split —: refused before anything is laid, as for_pages
-        // refuses it (the pages numbered then would be others by the next page's turn); into a channel, played as before
-        for (const Json& step : {Json{{"op", "calculations"}, {"page", 1}, {"source1", Json{{"layer", "old"}}}, {"source2", Json{{"layer", "old"}}}, {"result", "page"}},
-                                 Json{{"op", "duplicate_channel"}, {"page", 1}, {"channel", "red"}, {"to_page", "new"}}, Json{{"op", "split_channels"}, {"page", 1}}}) {
-            const auto [code, message] = thrown([&] { automate::aim_steps(doc, Json::array({step}), true, true); });
+        // (PC6 review of B's P2-B) an action played on each page of a book of two pages or more that makes a page among the
+        // book's — calculations into a new page, a channel copied to a new page, the channels split —: refused before
+        // anything is laid, as for_pages refuses it (the pages numbered then would be others by the next page's turn)
+        core::Document two = doc;
+        {
+            core::Page second = *doc.pages[0];
+            second.id = "pg_second";
+            second.index = core::Num(2);
+            two.pages.push_back(std::make_shared<core::Page>(std::move(second)));
+        }
+        const std::vector<Json> making{Json{{"op", "calculations"}, {"page", 1}, {"source1", Json{{"layer", "old"}}}, {"source2", Json{{"layer", "old"}}}, {"result", "page"}},
+                                       Json{{"op", "duplicate_channel"}, {"page", 1}, {"channel", "red"}, {"to_page", "new"}}, Json{{"op", "split_channels"}, {"page", 1}}};
+        for (const Json& step : making) {
+            const auto [code, message] = thrown([&] { automate::aim_steps(two, Json::array({step}), true, true); });
             QCOMPARE(code, std::string("steps"));
             QVERIFY2(message.find("the steps are run page by page: ") != std::string::npos && message.find("cannot be repeated page by page") != std::string::npos,
                      message.c_str());
+            // (B2's P2-1: on a picture of one page nothing is numbered again before it — played as before)
+            const Json once = automate::aim_steps(doc, Json::array({step}), true, true);
+            QCOMPARE(once.size(), std::size_t(1));
+            QCOMPARE(once[0]["page"], Json(1));
         }
         const Json into_channel = automate::aim_steps(
-            doc, Json::array({Json{{"op", "calculations"}, {"page", 3}, {"source1", Json{{"layer", "old"}}}, {"source2", Json{{"layer", "old"}}}}}), true, true);
-        QCOMPARE(into_channel.size(), std::size_t(1));
+            two, Json::array({Json{{"op", "calculations"}, {"page", 3}, {"source1", Json{{"layer", "old"}}}, {"source2", Json{{"layer", "old"}}}}}), true, true);
+        QCOMPARE(into_channel.size(), std::size_t(2));
         QCOMPARE(into_channel[0]["page"], Json(1));
+    }
+
+    // (the review of PC6-B, B2's P2-1) A batch of a recorded action that splits a picture's channels: the picture is a book of
+    // one page, so the steps are played on it as before, and every page they make is written.
+    void recordedSplitOfOnePictureWritten() {
+        QTemporaryDir tmp;
+        const fs::path root = core::path_from_utf8(tmp.path().toStdString());
+        fs::create_directories(root / "in");
+        write(root / "in" / "a.png", png(8, 4));
+        automate::Output out;
+        out.folder = root / "out";
+        automate::Options options;
+        options.recorded = true;
+        const automate::Result result = automate::run({automate::Input{root / "in" / "a.png", false}}, Json::array({Json{{"op", "split_channels"}, {"page", 1}}}), out, options);
+        QVERIFY2(result.errors.empty(), result.json().dump().c_str());
+        QCOMPARE(result.files.size(), std::size_t(1));
+        const Json& outputs = result.files[0]["outputs"];
+        QVERIFY2(outputs.is_array() && outputs.size() >= 3, result.json().dump().c_str());  // (red, green and blue: a page each)
+        for (const Json& file : outputs) QVERIFY(fs::exists(core::path_from_utf8(file.get<std::string>())));
     }
 
     // The inputs: a folder's pictures by name (hidden files and other kinds left out, inner folders with recurse), a book.
