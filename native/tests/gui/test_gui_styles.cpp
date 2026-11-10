@@ -17,6 +17,9 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QMimeData>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTreeWidget>
@@ -225,6 +228,16 @@ private slots:
         s.trigger("act_layer_style_copy");  // (review P3-10: a layer of no style copies nothing — what was copied kept)
         s.trigger("act_layer_style_paste");
         QCOMPARE(kinds_of(s.ink()), (QStringList{QStringLiteral("drop_shadow"), QStringLiteral("color_overlay")}));
+        // (PC6, review C's P3-2) a style another program put there nested deeper than the control channel's lines: never
+        // read, nothing changed, nothing falls
+        {
+            auto* deep = new QMimeData;
+            deep->setData(QStringLiteral("application/x-genko-layer-style"),
+                          QByteArray::fromStdString("{\"style\": " + std::string(200000, '[') + std::string(200000, ']') + "}"));
+            QGuiApplication::clipboard()->setMimeData(deep);
+            QVERIFY(!s.window->paste_layer_style());
+            QCOMPARE(kinds_of(s.ink()), (QStringList{QStringLiteral("drop_shadow"), QStringLiteral("color_overlay")}));
+        }
         // 包括光源…
         s.answers.responder->exec = [](QDialog* dialog) {
             if (dialog->objectName() != QStringLiteral("global_light_dialog")) return int(QDialog::Rejected);

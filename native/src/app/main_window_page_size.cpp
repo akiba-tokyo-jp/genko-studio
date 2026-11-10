@@ -150,7 +150,10 @@ void MainWindow::build_crop_page(ToolSettings* ts) {
         box.angle = value;
         canvas_->set_crop(box);
     });
-    connect(canvas_, &PageCanvas::cropChanged, angle, [this, angle] {
+    // (the window the context — its parts' signals let go of it as it goes, ~MainWindow: PC6, the review's P3-5 —, the
+    // field looked for)
+    connect(canvas_, &PageCanvas::cropChanged, this, [this, angle = QPointer<QDoubleSpinBox>(angle)] {
+        if (!angle) return;
         const QSignalBlocker quiet(angle);
         angle->setValue(canvas_->crop() ? canvas_->crop()->angle : 0.0);
     });

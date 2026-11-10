@@ -15,6 +15,7 @@
 #include <unistd.h>
 #endif
 #ifdef __linux__
+#include <sys/prctl.h>
 #include <sys/statvfs.h>
 #endif
 
@@ -181,9 +182,19 @@ QProcessEnvironment plugin_environment() {
 
 // A plugin's process starts a process group of its own (POSIX), so that stopping it stops what it started too.
 // (Windows: only the process itself is stopped — what it started itself runs on; that would need a Job Object.)
+// (PC6: out of Genko's group, a Ctrl+C or a kill of Genko no longer reaches it: on Linux it is stopped when the thread that
+// started it — and waits for it, to its end — goes, Genko killed: PR_SET_PDEATHSIG; already gone before that: it ends.)
 void own_process_group(QProcess& process) {
 #ifdef Q_OS_UNIX
-    process.setChildProcessModifier([] { (void)::setpgid(0, 0); });
+    process.setChildProcessModifier([parent = ::getpid()] {
+        (void)::setpgid(0, 0);
+#ifdef __linux__
+        (void)::prctl(PR_SET_PDEATHSIG, SIGKILL);
+        if (::getppid() != parent) ::_exit(127);
+#else
+        (void)parent;
+#endif
+    });
 #else
     (void)process;
 #endif

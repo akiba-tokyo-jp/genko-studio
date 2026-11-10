@@ -17,6 +17,10 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <optional>
+#include <stop_token>
+#include <thread>
 #include <map>
 #include <random>
 #include <string>
@@ -31,6 +35,7 @@
 #include "render/movie.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
+#include "render/segment/segment.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 
@@ -478,6 +483,65 @@ private slots:
         QVERIFY(ft::cache_bytes() > 0);
         genko::render::clear_render_caches();
         QCOMPARE(ft::cache_bytes(), std::int64_t(0));
+    }
+
+    // PC6 (review C's P2-4, P3-4): MP4's ffmpeg is waited for a little at a time — stopped when the thread's work is to
+    // stop (render::segment's StopScope: the window's 中止), its process group with it (what it started stops too) —,
+    // nothing left written. (An ffmpeg of the test's own on PATH that never ends; POSIX.)
+    void mp4sFfmpegStopsWithItsGroup() {
+#ifdef Q_OS_LINUX
+        const fs::path bin = at("fake-ffmpeg");
+        fs::create_directories(bin);
+        const fs::path child = at("fake-ffmpeg/child.pid");
+        put(bin / "ffmpeg", "#!/bin/sh\nsleep 120 &\necho $! > '" + child.string() + "'\nwait\n");
+        fs::permissions(bin / "ffmpeg", fs::perms::owner_all);
+        const QByteArray path_was = qgetenv("PATH");
+        qputenv("PATH", QByteArray::fromStdString(bin.string()) + ":" + path_was);
+        const fs::path out = at("stopped/movie.mp4");
+        std::stop_source stop;
+        std::optional<std::string> ended;
+        QElapsedTimer clock;
+        clock.start();
+        std::thread worker([&] {
+            const genko::render::segment::StopScope scope(stop.get_token());
+            try {
+                genko::render::movie::Writer writer(out, 8, "mp4");
+                writer.add(picture(16, 8, 255, 0, 0));
+                (void)writer.finish();
+                ended = "finished";
+            } catch (const genko::render::Cancelled&) {
+                ended = "cancelled";
+            } catch (const std::exception& error) {
+                ended = std::string("error: ") + error.what();
+            }
+        });
+        QTRY_VERIFY_WITH_TIMEOUT(fs::exists(child) && fs::file_size(child) > 0, 20000);  // (ffmpeg started, and its child)
+        stop.request_stop();
+        worker.join();
+        qputenv("PATH", path_was);
+        QCOMPARE(ended.value_or("none"), std::string("cancelled"));
+        QVERIFY2(clock.elapsed() < 60000, "stopped long before ffmpeg's own end");
+        const std::string pid = [&] {
+            std::string text = genko::storage::read_file(child);
+            while (!text.empty() && (text.back() == '\n' || text.back() == ' ')) text.pop_back();
+            return text;
+        }();
+        // (its child gone with it — or only a zombie left for init to reap)
+        QTRY_VERIFY_WITH_TIMEOUT(
+            [&] {
+                std::ifstream stat("/proc/" + pid + "/stat");
+                if (!stat) return true;
+                std::string line;
+                std::getline(stat, line);
+                const auto close = line.rfind(')');
+                return close != std::string::npos && close + 2 < line.size() && (line[close + 2] == 'Z' || line[close + 2] == 'X');
+            }(),
+            10000);
+        QVERIFY(!fs::exists(out));
+        for (const auto& entry : fs::directory_iterator(out.parent_path())) QFAIL(("left behind: " + entry.path().string()).c_str());
+#else
+        QSKIP("POSIX process groups");
+#endif
     }
 };
 

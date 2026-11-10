@@ -29,6 +29,7 @@
 #include "render/pattern_library.hpp"
 #include "render/preset_store.hpp"
 #include "render/style_presets.hpp"
+#include "service/control.hpp"
 
 namespace genko::app {
 
@@ -129,8 +130,12 @@ bool MainWindow::paste_layer_style() {
     const QMimeData* data = QGuiApplication::clipboard()->mimeData();
     if (page == nullptr || data == nullptr || !data->hasFormat(QString::fromLatin1(kStyleMime))) return false;
     Json copied;
+    const QByteArray bytes = data->data(QString::fromLatin1(kStyleMime));
+    const std::string_view text(bytes.constData(), static_cast<std::size_t>(bytes.size()));
+    // (another program's: brackets deeper than the control channel's are never read — PC6, the review's P3-2)
+    if (service::control::nesting(text) > service::control::kMaxDepth) return false;
     try {
-        copied = Json::parse(data->data(QString::fromLatin1(kStyleMime)).toStdString());
+        copied = Json::parse(text);
     } catch (const std::exception&) {
         return false;
     }

@@ -204,34 +204,39 @@ std::optional<service::automate::Inputs> MainWindow::inputs_of(const SourceChoic
 bool MainWindow::run_automate(const QString& title, const std::vector<service::automate::Input>& inputs, const Json& steps,
                               const service::automate::Output& output, service::automate::Options options, const Json& skipped) {
     namespace automate = service::automate;
-    QProgressDialog progress(QStringLiteral("%1を実行しています…").arg(title), QStringLiteral("中止"), 0, static_cast<int>(inputs.size()), this);
-    progress.setWindowTitle(title);
-    progress.setWindowModality(Qt::WindowModal);
-    progress.setMinimumDuration(500);
     options.actor = core::Actor(session_->actor());  // (the window's person)
     options.open = file_open_options();
     options.book_brushes = false;  // (the app follows its brushes itself)
-    options.cancelled = [&progress] {
-        QCoreApplication::processEvents();
-        return progress.wasCanceled();
-    };
-    options.progress = [&progress](std::size_t done, std::size_t, const fs::path& now) {
-        progress.setValue(static_cast<int>(done));
-        if (!now.empty()) progress.setLabelText(QStringLiteral("%1").arg(QDir::toNativeSeparators(qpath(now.filename()))));
-    };
-    automate::Result result;
-    {
+    // (PC6, the review's P2-4: on a worker with its progress window and 中止 — app/stoppable.hpp —, the files and the book's
+    // copy all it reads; what it did kept when it is stopped: the files written so far said, as before)
+    const QPointer<MainWindow> alive(this);
+    auto told = std::make_shared<StoppableTold>();
+    auto ran = std::make_shared<std::optional<automate::Result>>();
+    try {
         // (the files the run writes and the books it saves raise no script event: Photoshop's batch neither)
         const service::script_events::Firing quiet;
-        try {
-            result = automate::run(inputs, steps, output, options);
-        } catch (const std::exception& error) {
-            progress.reset();
-            flash(QStringLiteral("%1: %2").arg(title, wording::error(QString::fromUtf8(error.what()))), 8000, true);
-            return false;
-        }
+        (void)run_stoppable(
+            this, title, QStringLiteral("%1を実行しています…").arg(title),
+            [inputs, steps, output, options, told, ran](const std::function<bool()>& stopped) mutable {
+                options.cancelled = stopped;
+                options.progress = [told](std::size_t done, std::size_t total, const fs::path& now) {
+                    told->put(total == 0 ? 1.0 : static_cast<double>(done) / static_cast<double>(total),
+                              now.empty() ? QString() : QDir::toNativeSeparators(qpath(now.filename())));
+                };
+                *ran = automate::run(inputs, steps, output, options);
+                return true;
+            },
+            told);
+    } catch (const std::exception& error) {
+        if (alive) flash(QStringLiteral("%1: %2").arg(title, wording::error(QString::fromUtf8(error.what()))), 8000, true);
+        return false;
     }
-    progress.reset();
+    if (!alive) return false;
+    if (!*ran) {  // (stopped before it could say anything)
+        flash(QStringLiteral("%1を中止しました").arg(title), 4000);
+        return false;
+    }
+    automate::Result result = std::move(**ran);
     QStringList said;
     for (const Json& e : result.errors) {
         said << QStringLiteral("%1: %2").arg(QDir::toNativeSeparators(QString::fromStdString(e.value("input", std::string()))),
