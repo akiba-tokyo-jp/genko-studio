@@ -14,10 +14,12 @@
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/pyops.hpp"
+#include "render/fx.hpp"
 #include "render/movie.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/segment/segment.hpp"
 #include "storage/transaction.hpp"
 
 namespace genko::render::timelapse {
@@ -323,8 +325,11 @@ std::filesystem::path export_timelapse(const std::filesystem::path& project, con
     std::filesystem::path out = dest;
     out.replace_extension("." + format);
     std::optional<movie::Writer> writer;
-    for (const auto& path : files) {
-        const auto image = open_recorded(path);
+    for (std::size_t i = 0; i < files.size(); ++i) {
+        // (PC6: stopped between the pictures when this thread's work is to stop — the window's 中止 —, said how far)
+        segment::check_stop();
+        fx::ProgressScope::put(static_cast<double>(i) / static_cast<double>(files.size()));
+        const auto image = open_recorded(files[i]);
         if (!image) continue;
         if (!writer) writer.emplace(out, fps, format, hold, true);
         Image framed = Image::create("RGB", board, Ink{128, 128, 128});

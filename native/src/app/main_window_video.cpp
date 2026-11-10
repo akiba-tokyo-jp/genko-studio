@@ -226,6 +226,7 @@ std::optional<Json> MainWindow::read_video_footage(const QString& path, const Vi
     };
     const std::filesystem::path source = core::path_from_utf8(path.toStdString());
     const QString title = QStringLiteral("素材の読み込み");
+    const QPointer<MainWindow> alive(this);  // (PC6, the review's P3-1: the window looked for before it is touched)
     try {
         const auto read = run_stoppable(this, title, QStringLiteral("素材を読み込んでいます…"),
                                         [source, options, into](const std::function<bool()>& stopped) {
@@ -234,6 +235,10 @@ std::optional<Json> MainWindow::read_video_footage(const QString& path, const Vi
                                             mine.progress = [](double done) { render::fx::ProgressScope::put(done); };
                                             return render::footage::read_footage(source, mine, into);
                                         });
+        if (!alive) {  // (the window gone meanwhile: the pictures new to the book given back, nothing of it touched)
+            for (const std::string& ref : *made) options.drop(ref);
+            return std::nullopt;
+        }
         if (!read) {
             for (const std::string& ref : *made) options.drop(ref);  // (stopped after it was read: nothing kept)
             flash(QStringLiteral("素材の読み込みを中止しました"), 4000);
@@ -243,7 +248,7 @@ std::optional<Json> MainWindow::read_video_footage(const QString& path, const Vi
         if (fresh != nullptr) *fresh = *made;
         return read->json;
     } catch (const std::exception& error) {
-        flash(QStringLiteral("素材を読み込めません:\n%1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
+        if (alive) flash(QStringLiteral("素材を読み込めません:\n%1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
         return std::nullopt;
     }
 }

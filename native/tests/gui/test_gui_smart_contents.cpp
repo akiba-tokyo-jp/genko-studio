@@ -9,7 +9,9 @@
 #include <QtTest>
 
 #include <QDockWidget>
+#include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QLabel>
 #include <QListWidget>
 #include <QTabBar>
@@ -307,6 +309,44 @@ private slots:
         QCOMPARE(written.readAll().toStdString(), second);
         w->check_links();
         QCOMPARE(w->link_status(*core::smart::contents_id(*book.layer(so))), std::string("ok"));
+    }
+
+    // PC6 (review A's P3-7): a linked file the book names — an agent's op may name any — larger than a file taken in (256
+    // MiB), or of another size than its link says, is not read as the window looks (no sha256 of it each time): 更新あり
+    // at once; one of its size and bytes: ok.
+    void largeLinkedFilesAreNotRead() {
+        Book book;
+        app::MainWindow* w = book.window.get();
+        const std::string first = one_colour(40, 30, render::Ink{200, 40, 90});
+        QVERIFY(w->place_embedded(book.write(QStringLiteral("leaf.png"), first)));
+        const std::string so = book.smart_id();
+        const QString big = book.tmp.path() + QStringLiteral("/big.bin");
+        constexpr qint64 kBig = qint64(6) << 30;  // (sparse: nothing written, but read whole it would take seconds)
+        {
+            QFile file(big);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            QVERIFY(file.resize(kBig));
+        }
+        const std::string sha = core::bytes_ref(first).substr(7);
+        const auto relink = [&](const QString& path, qint64 bytes) {
+            return w->apply_ops(Json::array({Json{{"op", "smart_relink"}, {"page", 1}, {"id", so}, {"data", core::b64encode(first)},
+                                                  {"link", Json{{"path", QFileInfo(path).absoluteFilePath().toStdString()}, {"sha256", sha},
+                                                                {"bytes", static_cast<std::int64_t>(bytes)}}}}}));
+        };
+        const std::string id = *core::smart::contents_id(*book.layer(so));
+        for (const qint64 said : {kBig, qint64(first.size())}) {  // (its own size; another)
+            QVERIFY(relink(big, said));
+            QElapsedTimer clock;
+            clock.start();
+            w->check_links();
+            QVERIFY2(clock.elapsed() < 2000, qPrintable(QString::number(clock.elapsed())));
+            QCOMPARE(w->link_status(id), std::string("modified"));
+        }
+        // (a file of the link's size and bytes: read, ok)
+        const QString same = book.write(QStringLiteral("same.png"), first);
+        QVERIFY(relink(same, static_cast<qint64>(first.size())));
+        w->check_links();
+        QCOMPARE(w->link_status(id), std::string("ok"));
     }
 
     void writtenOutReplacedAndPacked() {

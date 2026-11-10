@@ -21,14 +21,19 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QPointer>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QTableWidget>
 #include <QSpinBox>
 #include <QTabBar>
 #include <QTemporaryDir>
+#include <QTimer>
+#include <QApplication>
 
 #include <array>
 #include <cmath>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -132,6 +137,32 @@ struct Book {
         for (int i = 0; i < 5; ++i) QCoreApplication::processEvents();
     }
 };
+
+// (PC6) `then` given the long work's progress window (app/stoppable.hpp's, while the work runs on its worker) once it is
+// there — the window's own thread going on meanwhile: this timer runs.
+void when_stoppable(std::function<void(QProgressDialog*)> then) {
+    auto* timer = new QTimer;
+    timer->setInterval(10);
+    QObject::connect(timer, &QTimer::timeout, timer, [timer, then] {
+        for (QWidget* w : QApplication::topLevelWidgets()) {
+            auto* progress = qobject_cast<QProgressDialog*>(w);
+            if (progress == nullptr || progress->objectName() != QStringLiteral("stoppable_progress")) continue;
+            if (progress->windowModality() != Qt::ApplicationModal) qWarning("the work's progress does not hold every window");
+            timer->stop();
+            timer->deleteLater();
+            then(progress);
+            return;
+        }
+    });
+    timer->start();
+}
+
+std::size_t files_in(const fs::path& folder) {
+    std::size_t n = 0;
+    std::error_code ec;
+    for (fs::recursive_directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec)) n += it->is_regular_file() ? 1 : 0;
+    return n;
+}
 
 void choose(QComboBox* box, const QString& data) {
     const int at = box->findData(data);
@@ -347,6 +378,110 @@ private slots:
         b.act("act_contact_sheet")->trigger();
         QVERIFY(said);
         QCOMPARE(b.window->doc_tabs()->count(), now);
+    }
+
+    // PC6 (review C's P2-4): バッチ… on a worker with its progress window over every window. 中止: stopped between the files
+    // (those written kept, said); the window's close, and Genko を終わる from another window, while it works: asked to stop,
+    // the window kept until the work is back (nothing falls), then closed.
+    void batchStopsAndTheWindowClosesAfter() {
+        Book b;
+        fs::create_directories(b.root / "in");
+        constexpr std::size_t kFiles = 120;
+        for (std::size_t i = 0; i < kFiles; ++i) picture(b.root / "in" / ("p" + std::to_string(i) + ".png"), 600, 400);
+        QVERIFY(!app::actions::store(QStringLiteral("小さく"), Json::array({Json{{"op", "fit_image"}, {"page", 1}, {"width_px", 30}, {"height_px", 30}}})));
+        const fs::path in = b.root / "in";
+        const auto batch = [in](Book& book, const fs::path& out) {
+            book.answer<app::BatchDialog>([in, out](app::BatchDialog* d) {
+                choose(d->steps.box, QStringLiteral("action:小さく"));
+                choose(d->source.box, QStringLiteral("folder"));
+                d->source.folder->setText(q(in));
+                choose(d->destination, QStringLiteral("folder"));
+                d->folder->setText(q(out));
+                return !d->problem();
+            });
+        };
+        const auto into = [&b, &batch](const fs::path& out) { batch(b, out); };
+        // 中止
+        into(b.root / "stopped");
+        bool pressed = false;
+        when_stoppable([&](QProgressDialog* progress) {
+            pressed = true;
+            emit progress->canceled();
+        });
+        b.act("act_batch")->trigger();
+        QVERIFY(pressed);
+        QVERIFY2(files_in(b.root / "stopped") < kFiles, qPrintable(QString::number(files_in(b.root / "stopped"))));
+        QVERIFY2(b.window->status_label()->text().contains(QStringLiteral("（中止しました）")), qPrintable(b.window->status_label()->text()));
+        // the whole of it: as before
+        into(b.root / "all");
+        b.act("act_batch")->trigger();
+        QCOMPARE(files_in(b.root / "all"), kFiles);
+        const formats::Opened one = formats::open_file(storage::read_file(b.root / "all" / "p7.png"), "p7.png");
+        QCOMPARE(px(one.doc.page(0)), (std::pair<double, double>{30.0, 20.0}));
+        // the window's own close while it works: kept until the work is back, then closed
+        into(b.root / "closed");
+        bool closed = false;
+        when_stoppable([&](QProgressDialog*) {
+            closed = true;
+            b.window->close();
+        });
+        b.act("act_batch")->trigger();
+        QVERIFY(closed);
+        QVERIFY(b.window->isVisible());  // (its close left for when the work is back)
+        QVERIFY(files_in(b.root / "closed") < kFiles);
+        QTRY_VERIFY(!b.window->isVisible());
+        {  // Genko を終わる from a second window of the book while it works
+            Book c;
+            QPointer<app::MainWindow> second = c.window->new_window();
+            QVERIFY(second);
+            batch(c, c.root / "quit");
+            bool quit = false;
+            when_stoppable([&](QProgressDialog*) {
+                quit = true;
+                QApplication::closeAllWindows();
+            });
+            c.act("act_batch")->trigger();
+            QVERIFY(quit);
+            QVERIFY(files_in(c.root / "quit") < kFiles);
+            QTRY_VERIFY(!c.window->isVisible());  // (closed once the work was back)
+            if (second) second->close();
+            QTRY_VERIFY(!second);
+        }
+        app::actions::remove(QStringLiteral("小さく"));
+    }
+
+    // PC6 (review C's P2-4): コンタクトシート II… and 画像プロセッサー… on a worker too; 中止 keeps what was made so far.
+    void contactSheetAndProcessorStop() {
+        Book b;
+        fs::create_directories(b.root / "in");
+        constexpr int kFiles = 80;
+        for (int i = 0; i < kFiles; ++i) picture(b.root / "in" / ("p" + std::to_string(i) + ".png"), 600, 400);
+        const int before = b.window->doc_tabs()->count();
+        b.answer<app::ContactSheetDialog>([&b](app::ContactSheetDialog* d) {
+            choose(d->units, QStringLiteral("px"));
+            d->width->setValue(300);
+            d->height->setValue(200);
+            d->resolution->setValue(72);
+            d->columns->setValue(1);
+            d->rows->setValue(1);
+            choose(d->source.box, QStringLiteral("folder"));
+            d->source.folder->setText(q(b.root / "in"));
+            return !d->problem();
+        });
+        when_stoppable([](QProgressDialog* progress) { emit progress->canceled(); });
+        b.act("act_contact_sheet")->trigger();
+        QVERIFY2(b.window->status_label()->text().contains(QStringLiteral("（中止しました）")), qPrintable(b.window->status_label()->text()));
+        QVERIFY(b.window->doc_tabs()->count() < before + kFiles);
+        b.answer<app::ImageProcessorDialog>([&b](app::ImageProcessorDialog* d) {
+            d->source.folder->setText(q(b.root / "in"));
+            d->folder->setText(q(b.root / "out"));
+            d->png->setChecked(true);
+            return !d->problem();
+        });
+        when_stoppable([](QProgressDialog* progress) { emit progress->canceled(); });
+        b.act("act_image_processor")->trigger();
+        QVERIFY2(b.window->status_label()->text().contains(QStringLiteral("（中止しました）")), qPrintable(b.window->status_label()->text()));
+        QVERIFY(files_in(b.root / "out") < static_cast<std::size_t>(kFiles));
     }
 
     // 画像を合わせる… and 条件付きモード変更…: the page in front, one Undo each; a mode not listed left as it is (said).

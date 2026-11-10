@@ -13,6 +13,7 @@
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/smart.hpp"
+#include "render/smart_decode.hpp"
 #include "storage/asset_store.hpp"
 #include "storage/fsutil.hpp"
 #include "storage/lock.hpp"
@@ -83,7 +84,9 @@ std::vector<LinkState> link_states(const core::Document& doc) {
             std::error_code ec;
             const auto size = fs::file_size(*state.found, ec);
             const Json* bytes = core::get(link, "bytes");
-            const bool same_size = !ec && bytes != nullptr && bytes->is_number_integer() && static_cast<std::uintmax_t>(bytes->get<std::int64_t>()) == size;
+            // (PC6, the review A's P3-7: a file larger than a file taken in — 256 MiB — is not read: modified)
+            const bool same_size = !ec && size <= render::smart::kFileMaxBytes && bytes != nullptr && bytes->is_number_integer() &&
+                                   static_cast<std::uintmax_t>(bytes->get<std::int64_t>()) == size;
             std::string sha;
             if (same_size) {
                 try {

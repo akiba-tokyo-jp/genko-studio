@@ -20,6 +20,7 @@
 #include "app/canvas.hpp"
 #include "app/layer_panel.hpp"
 #include "app/main_window.hpp"
+#include "service/control.hpp"
 #include "service/wording.hpp"
 #include "core/base64.hpp"
 #include "core/color_raster.hpp"
@@ -339,8 +340,11 @@ void MainWindow::paste_special(const QString& how) {
             items = clipboard_;
             was = clipboard_area_;
             outline = clipboard_outline_;
-        } else {
-            const Json parsed = Json::parse(bytes.toStdString(), nullptr, false);
+        } else if (const std::string_view text(bytes.constData(), static_cast<std::size_t>(bytes.size()));
+                   service::control::nesting(text) <= service::control::kMaxDepth) {
+            // (another program's: brackets deeper than the control channel's are never read — nlohmann's copies and its
+            // writing go down them by recursion: PC6, the review's P3-2)
+            const Json parsed = Json::parse(text, nullptr, false);
             if (parsed.is_object() && (parsed.contains("strokes") || parsed.contains("patches"))) items = parsed;
         }
     } else if (data != nullptr && data->hasImage()) {

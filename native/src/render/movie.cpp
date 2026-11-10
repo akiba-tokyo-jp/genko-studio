@@ -1,5 +1,6 @@
 #include "render/movie.hpp"
 
+#include <QElapsedTimer>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QString>
@@ -20,14 +21,40 @@
 #include <webp/mux.h>
 #include <zlib.h>
 
+#ifdef Q_OS_UNIX
+#include <signal.h>
+#include <unistd.h>
+#endif
+
 #include "core/error.hpp"
 #include "core/paths.hpp"
 #include "core/pynum.hpp"
+#include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/segment/segment.hpp"
 
 namespace genko::render::movie {
 
 namespace {
+
+// (PC6, the review's P3-4) ffmpeg starts a process group of its own (POSIX), stopped as a whole — as a plugin's process
+// (render/plugins.cpp's own_process_group): what it started stops with it. (Windows: the process itself only.)
+void own_process_group(QProcess& process) {
+#ifdef Q_OS_UNIX
+    process.setChildProcessModifier([] { (void)::setpgid(0, 0); });
+#else
+    (void)process;
+#endif
+}
+
+void stop_group(QProcess& process) {
+#ifdef Q_OS_UNIX
+    const qint64 pid = process.processId();
+    if (pid > 0) (void)::kill(-static_cast<pid_t>(pid), SIGKILL);  // (its group: what it started too)
+#endif
+    process.kill();
+    process.waitForFinished(5000);
+}
 
 [[noreturn]] void io_error(const std::filesystem::path& path, const std::string& what) {
     throw core::Error("io", what + ": " + core::path_to_utf8(path));
@@ -548,15 +575,27 @@ std::filesystem::path Writer::finish(int* frames) {
                           QString::fromStdString(core::py_float_repr(w.fps)), QStringLiteral("-i"), w.frames_dir->filePath(QStringLiteral("%06d.png")),
                           QStringLiteral("-c:v"), QStringLiteral("libx264"), QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
                           QString::fromStdString(core::path_to_utf8(w.part))});
+        own_process_group(run);
         run.start();
         if (!run.waitForStarted(30000)) throw core::PyValueError("ffmpeg failed: it could not be started");
         run.closeWriteChannel();  // (nothing to read: ffmpeg never waits on its input)
-        // (a long movie takes long; one that never ends is stopped: half an hour and a second a frame)
+        // (a long movie takes long; one that never ends is stopped: half an hour and a second a frame. PC6, the review's
+        // P2-4: waited for a little at a time, and stopped — render::Cancelled — when this thread's work is to stop:
+        // render::segment's StopScope, the window's 中止)
         const int limit_s = 1800 + w.mp4_count;
-        if (!run.waitForFinished(limit_s * 1000)) {
-            run.kill();
-            run.waitForFinished(5000);
-            throw core::PyValueError("ffmpeg failed: it did not finish in " + std::to_string(limit_s / 60) + " minutes");
+        const std::stop_token* stop = segment::current_stop();
+        QElapsedTimer clock;
+        clock.start();
+        while (run.state() != QProcess::NotRunning && !run.waitForFinished(200)) {
+            if (run.state() == QProcess::NotRunning) break;
+            if (stop != nullptr && stop->stop_requested()) {
+                stop_group(run);
+                throw Cancelled();
+            }
+            if (clock.elapsed() > static_cast<qint64>(limit_s) * 1000) {
+                stop_group(run);
+                throw core::PyValueError("ffmpeg failed: it did not finish in " + std::to_string(limit_s / 60) + " minutes");
+            }
         }
         if (run.exitStatus() != QProcess::NormalExit || run.exitCode() != 0) {
             const QString err = QString::fromUtf8(run.readAllStandardError()).trimmed();

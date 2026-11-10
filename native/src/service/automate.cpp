@@ -791,6 +791,9 @@ Result run(const std::vector<Input>& inputs, const Json& steps, const Output& ou
                 }
             }
             result.files.push_back(std::move(done));
+        } catch (const render::Cancelled&) {  // (PC6: the window's 中止 inside a file — its worker's StopScope —: stopped there)
+            result.cancelled = true;
+            break;
         } catch (const core::Error& error) {
             result.errors.push_back(Json{{"input", where}, {"error", error.what()}, {"code", error.code()}});
             if (!outputs.empty()) result.errors.back()["outputs"] = outputs;  // (written before it failed: kept)
@@ -1530,6 +1533,9 @@ ContactSheetResult contact_sheet(const std::vector<Input>& inputs, const Contact
                 const formats::Opened opened = formats::open_file(storage::read_file(input.path), core::path_to_utf8(input.path.filename()), reading);
                 put(drawn(opened.doc.page(0), opened.doc), stem);
             }
+        } catch (const render::Cancelled&) {  // (PC6: the window's 中止 inside a picture: the sheets so far kept)
+            result.cancelled = true;
+            break;
         } catch (const core::Error& error) {
             result.errors.push_back(Json{{"input", where}, {"error", error.what()}, {"code", error.code()}});
             if (options.stop_on_error) break;
