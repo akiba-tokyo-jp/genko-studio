@@ -216,6 +216,42 @@ private slots:
         QVERIFY(own.image.convert(codecs::Layout::Rgb, codecs::Sample::U16).data() == values.data());
     }
 
+    // (PC6, review C P2-2) A 32-bit picture whose layer would pass the book's precise pixels (OpenOptions::precise_most, made
+    // small here) opens at 16 bits — its values clamped to 0..1 —, past that at 8, said; within them as it is. The real
+    // limit: 1 GiB of RGBA floats is 6700 万 pixels.
+    void aDeepPictureOpensWithinTheBooksPrecisePixels() {
+        const std::uint32_t w = 10, h = 8;
+        codecs::CodecImage light = codecs::CodecImage::blank(w, h, codecs::Layout::Rgb, codecs::Sample::F32);
+        for (std::size_t i = 0; i < std::size_t(w) * h; ++i) {
+            const float rgb[3] = {2.0f, 0.25f, 0.0f};
+            std::memcpy(light.data().data() + i * 12, rgb, 12);
+        }
+        const std::string exr = codecs::encode(light, codecs::Format::OpenExr);
+        formats::OpenOptions options;
+        const formats::Opened as_is = formats::open_file(exr, "light.exr", options);
+        QVERIFY(as_is.doc.page(0).rgb && as_is.doc.page(0).rgb->depth == 32);
+        for (const std::string& note : as_is.notes) QVERIFY2(note.find("1 GiB") == std::string::npos, note.c_str());
+        options.precise_most = 16 + std::uint64_t(w) * h * 8;  // (16 bits fit, 32 do not)
+        const formats::Opened sixteen = formats::open_file(exr, "light.exr", options);
+        QVERIFY(sixteen.doc.page(0).rgb && sixteen.doc.page(0).rgb->depth == 16);
+        const core::ColorRasterView view(*sixteen.doc.page(0).layers[0].color_raster);
+        QCOMPARE(view.pixel(5)[0], 1.0);
+        QVERIFY(std::abs(view.pixel(5)[1] - 0.25) < 1e-4);
+        QVERIFY(std::any_of(sixteen.notes.begin(), sixteen.notes.end(), [](const std::string& n) { return n.find("画像を 16 bit で開きました") != std::string::npos; }));
+        core::validate_color_document(sixteen.doc);
+        options.precise_most = 100;  // (neither)
+        const formats::Opened eight = formats::open_file(exr, "light.exr", options);
+        QVERIFY(!eight.doc.page(0).rgb || eight.doc.page(0).rgb->depth == 8);
+        QVERIFY(eight.doc.page(0).layers[0].raster_png && !eight.doc.page(0).layers[0].color_raster);
+        QVERIFY(std::any_of(eight.notes.begin(), eight.notes.end(), [](const std::string& n) { return n.find("画像を 8 bit で開きました") != std::string::npos; }));
+        // (the book's own limit: the review's 9000 × 8000 at 32 bits opens at 16; 8000 × 8000 fits; 16 bits always fit the
+        // codecs' 120 million pixels)
+        QCOMPARE(formats::precise_depth_within(9000, 8000, 32, core::kColorRasterBookBytes), 16);
+        QCOMPARE(formats::precise_depth_within(8000, 8000, 32, core::kColorRasterBookBytes), 32);
+        QCOMPARE(formats::precise_depth_within(12000, 10000, 16, core::kColorRasterBookBytes), 16);
+        QCOMPARE(formats::precise_depth_within(12000, 10000, 8, core::kColorRasterBookBytes), 8);
+    }
+
     void aGreyPictureOpensAsInks() {
         const std::string bytes = data_file("pyref/png/l8.png");
         const render::Image file = render::open_image(bytes);

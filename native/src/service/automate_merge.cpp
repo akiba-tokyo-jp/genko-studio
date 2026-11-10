@@ -216,6 +216,12 @@ std::pair<std::int64_t, std::int64_t> picture_size(const Picture& picture) {
     return {picture.width, picture.height};
 }
 
+std::uint64_t precise_layers_bytes(std::uint64_t layers, std::uint64_t width, std::uint64_t height, int depth) {
+    if (depth <= 8) return 0;
+    const std::uint64_t each = 16 + width * height * 4 * (depth == 16 ? 2 : 4);
+    return layers * each;
+}
+
 namespace {
 
 std::uint64_t stack_bytes(const std::vector<Picture>& pictures, int bytes_per_pixel) {
@@ -240,6 +246,23 @@ void check_stack(const std::vector<Picture>& pictures, int bytes_per_pixel) {
     }
 }
 
+// (PC6, review C P2-1) A 16- or 32-bit RGB stack's layers — each the largest picture's size — within the book's precise
+// pixels (`most`: 1 GiB), weighed once the first picture's mode and depth are read, before the others are opened.
+void check_stack_book(const std::vector<Picture>& pictures, const std::string& mode, int depth, std::uint64_t most) {
+    if (mode != "rgb" || depth <= 8) return;
+    std::int64_t w = 0, h = 0;
+    for (const Picture& p : pictures) {
+        const auto [pw, ph] = picture_size(p);
+        w = std::max(w, pw);
+        h = std::max(h, ph);
+    }
+    const std::uint64_t bytes = precise_layers_bytes(pictures.size(), std::uint64_t(std::max<std::int64_t>(w, 1)), std::uint64_t(std::max<std::int64_t>(h, 1)), depth);
+    if (bytes > most) {
+        throw core::Error("value", "the stack's " + std::to_string(depth) + "-bit layers would pass the book's 1 GiB of precise pixels (about " +
+                                       std::to_string(bytes >> 20) + " MiB): use fewer or smaller pictures, or 8-bit ones");
+    }
+}
+
 }  // namespace
 
 formats::Opened load_files_into_stack(const std::vector<Picture>& pictures, const StackOptions& options) {
@@ -257,6 +280,7 @@ formats::Opened load_files_into_stack(const std::vector<Picture>& pictures, cons
     const std::string mode = stack_mode(base.page(0));
     const int depth = depth_of(base.page(0));
     check_stack(pictures, 4 * std::max(depth, 8) / 8);
+    check_stack_book(pictures, mode, depth, options.open.precise_most);
     base = conformed(std::move(base), mode, depth, options.actor);
     const std::optional<Profile> profile = profile_of(base.page(0));
     std::int64_t w = 0, h = 0;
@@ -415,6 +439,18 @@ Panorama photomerge(const std::vector<Picture>& pictures, const PhotomergeOption
     for (const auto& part : merged.masks) made += std::uint64_t(part.plane.v.size()) * sizeof(float);
     if (merged.fill) made += std::uint64_t(merged.fill->v.size()) * sizeof(float);
     const render::image_ops::Held parts(made);
+    // (PC6, review C P1-1: a precise panorama's layers — each of the panorama's size — within the book's precise pixels: past
+    // them made at 16 bits, then at 8, and said, as a PSD's layers are read — the book can then be saved and changed)
+    std::string fewer_bits;
+    {
+        const std::uint64_t count = merged.layers.size() + (merged.fill ? 1 : 0);
+        const int was = depth;
+        while (depth > 8 && precise_layers_bytes(count, std::uint64_t(std::max(1, merged.width)), std::uint64_t(std::max(1, merged.height)), depth) >
+                                options.open.precise_most) {
+            depth = depth == 32 ? 16 : 8;
+        }
+        if (depth != was) fewer_bits = "高精度の画素が本の上限（1 GiB）を越えるため、パノラマを " + std::to_string(depth) + " bit で作りました";
+    }
     // (the book: an image of the panorama's size, RGB at the first picture's depth and profile, transparent)
     formats::NewImage image;
     image.title = "パノラマ";
@@ -506,6 +542,7 @@ Panorama photomerge(const std::vector<Picture>& pictures, const PhotomergeOption
     out.info["width"] = merged.width;
     out.info["height"] = merged.height;
     out.info["layers"] = doc.page(0).layers.size();
+    if (!fewer_bits.empty()) out.opened.notes.push_back(fewer_bits);
     if (!merged.failed.empty()) out.opened.notes.push_back("つなげなかった画像があります（" + std::to_string(merged.failed.size()) + " 枚）");
     return out;
 }

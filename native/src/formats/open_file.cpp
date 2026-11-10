@@ -228,6 +228,13 @@ Opened open_folder(const std::filesystem::path& folder, const OpenOptions&) {
     return pcraft_book(render::pcraft::read_folder(folder, stem_of(name), limits), name);
 }
 
+int precise_depth_within(std::uint64_t width, std::uint64_t height, int depth, std::uint64_t most) {
+    const auto bytes = [&](int d) { return d <= 8 ? 0 : 16 + width * height * 4 * (d == 16 ? 2 : 4); };
+    if (depth > 16 && bytes(depth) > most) depth = 16;
+    if (depth > 8 && bytes(depth) > most) depth = 8;
+    return depth;
+}
+
 Opened picture_book(CodecImage picture, std::string_view title, const OpenOptions& options) {
     if (picture.empty()) throw core::Error("value", "a picture of no pixels cannot be opened");
     options.limits.check(picture.width(), picture.height(), picture.layout(), picture.sample());
@@ -268,7 +275,14 @@ Opened picture_book(CodecImage picture, std::string_view title, const OpenOption
         doc.color = color;
     } else {
         std::optional<core::RgbMode> mode;
-        const int depth = picture.sample() == Sample::U8 ? 8 : picture.sample() == Sample::U16 ? 16 : 32;
+        int depth = picture.sample() == Sample::U8 ? 8 : picture.sample() == Sample::U16 ? 16 : 32;
+        // (PC6, review C P2-2: the layer's precise raster within the book's high-precision budget — OpenOptions::precise_most,
+        // core::kColorRasterBookBytes —, as a PSD's and a .pcraft's layers are: past it at 16 bits — its values clamped to
+        // 0..1 —, past that at 8, and said)
+        if (const int fits = precise_depth_within(w, h, depth, options.precise_most); fits != depth) {
+            out.notes.push_back("高精度の画素が本の上限（1 GiB）を越えるため、画像を " + std::to_string(fits) + " bit で開きました");
+            depth = fits;
+        }
         // (the file's own profile — one that shows its numbers as sRGB does is the page's without a profile, Little CMS
         // telling by its colours —; a file that carries none takes the working RGB, an sRGB one being none either)
         const std::string chosen = own ? *own : options.working_rgb;
@@ -287,8 +301,13 @@ Opened picture_book(CodecImage picture, std::string_view title, const OpenOption
             layer.raster_png = std::make_shared<const std::string>(render::write_png(image));
         } else {
             const unsigned all = render::codecs::channels(picture.layout());
+            const bool clamped = depth == 16 && picture.sample() == Sample::F32;  // (a float picture opened at 16 bits)
             layer.color_raster = std::make_shared<const std::string>(core::encode_color_pixels(w, h, depth == 16 ? "u16" : "f32", [&](std::size_t i) {
-                return std::array<double, 4>{picture.value(i * all), picture.value(i * all + 1), picture.value(i * all + 2),
+                const auto colour = [&](std::size_t c) {
+                    const double v = picture.value(i * all + c);
+                    return clamped ? std::clamp(std::isfinite(v) ? v : 0.0, 0.0, 1.0) : v;
+                };
+                return std::array<double, 4>{colour(0), colour(1), colour(2),
                                              alpha ? std::clamp(static_cast<double>(picture.value(i * all + 3)), 0.0, 1.0) : 1.0};
             }));
         }

@@ -4,6 +4,7 @@
 #include "formats/artboards.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <random>
 #include <array>
 #include <cctype>
@@ -525,7 +526,9 @@ PlannedCopy plan_copy(const core::Document& doc, std::size_t at, const fs::path&
         plan.height = picture.image.height();
         const double file_dpi = picture.image.meta.dpi ? picture.image.meta.dpi->first : dpi;
         std::vector<std::string> notes = std::move(picture.notes);
-        alone = picture_book(std::move(picture.image), layer_of(page, *options.layer).title);
+        OpenOptions written;  // (a book only to be written as the file, never kept: its layer at the picture's own bits)
+        written.precise_most = std::numeric_limits<std::uint64_t>::max();
+        alone = picture_book(std::move(picture.image), layer_of(page, *options.layer).title, written);
         alone->doc.file_info = doc.file_info;
         alone->doc.native_files = doc.native_files;
         alone->doc.asset_dir = doc.asset_dir;

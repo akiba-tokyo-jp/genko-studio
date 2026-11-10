@@ -13,6 +13,8 @@
 #include <QSpinBox>
 
 #include <algorithm>
+#include <memory>
+#include <vector>
 
 #include "app/ask.hpp"
 #include "app/main_window.hpp"
@@ -25,6 +27,7 @@
 #include "formats/copy.hpp"
 #include "formats/datasets.hpp"
 #include "service/wording.hpp"
+#include "storage/asset_store.hpp"
 
 namespace genko::app {
 
@@ -178,6 +181,26 @@ void MainWindow::import_data_sets() {
     formats::CsvOptions options;
     options.delimiter = static_cast<char>(dialog.delimiter->currentData().toInt());
     options.folder = file.parent_path();
+    // (review C P2-5: a saved book's pictures put in its asset store as they are read — on the worker —, the op carrying their
+    // refs alone; those new to the store taken away again when the op is refused)
+    auto fresh = std::make_shared<std::vector<fs::path>>();
+    if (session_->path()) {
+        const fs::path book_dir = *session_->path();
+        options.store = [book_dir, fresh](const std::string& bytes, const std::string& suffix) {
+            storage::AssetStore store(book_dir);
+            const std::string ref = storage::AssetStore::ref(bytes);
+            const bool there = store.has(ref, suffix);
+            (void)store.put_bytes(bytes, suffix);
+            if (!there) fresh->push_back(store.path(ref, suffix));
+            return ref;
+        };
+    }
+    const auto drop_fresh = [fresh] {
+        for (const fs::path& made : *fresh) {
+            std::error_code ec;
+            fs::remove(made, ec);
+        }
+    };
     formats::CsvRead read;
     try {
         read = off_ui([file, variables, options] {
@@ -188,10 +211,14 @@ void MainWindow::import_data_sets() {
             return formats::read_data_sets_csv(std::string_view(bytes.constData(), static_cast<std::size_t>(bytes.size())), variables, options);
         });
     } catch (const std::exception& error) {
+        drop_fresh();
         flash(QStringLiteral("読み込めませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
         return;
     }
-    if (!variable_op(Json{{"op", "set_data_sets"}, {"data_sets", read.data_sets}, {"append", !dialog.replace->isChecked()}})) return;
+    if (!variable_op(Json{{"op", "set_data_sets"}, {"data_sets", read.data_sets}, {"append", !dialog.replace->isChecked()}})) {
+        drop_fresh();
+        return;
+    }
     QString said = QStringLiteral("データセットを %1 個読み込みました").arg(read.data_sets.size());
     for (const std::string& note : read.notes) said += QStringLiteral("（%1）").arg(QString::fromStdString(note));
     flash(said, 6000);

@@ -409,6 +409,68 @@ private slots:
         QVERIFY(render::align::photomerge_bytes(20'000'000, 24'000'000, true, false) > 2'000'000'000ULL);
     }
 
+    // (PC6, review C P1-1, P2-1) The book's precise pixels (OpenOptions::precise_most, made small here): a 16-bit panorama past
+    // them made at 8 bits and said — the book then within them —; a 16-bit stack past them refused before the pictures after
+    // the first are opened, in words; within them each as before.
+    void deepResultsWithinTheBooksPrecisePixels() {
+        const render::Image sc = scene(640, 300, 3);
+        std::vector<service::automate::Picture> pictures;
+        for (const auto& [x, y] : {std::pair{20, 30}, std::pair{190, 40}}) {
+            const std::string name = "p" + std::to_string(x) + ".png";
+            formats::Opened o = formats::open_file(render::write_png(crop(sc, x, y, 260, 220)), name);
+            pictures.push_back(service::automate::Picture::of(name, std::make_shared<const core::Document>(run(o.doc, Json::array({kSixteen})))));
+        }
+        const auto said = [](const std::function<void()>& f) -> std::string {
+            try {
+                f();
+            } catch (const std::exception& e) {
+                return e.what();
+            }
+            return {};
+        };
+        service::automate::PhotomergeOptions options;
+        options.layout = "reposition";
+        options.blend = false;
+        const service::automate::Panorama deep = service::automate::photomerge(pictures, options);
+        QVERIFY(deep.opened.doc.page(0).rgb && deep.opened.doc.page(0).rgb->depth == 16);
+        for (const core::Layer& l : deep.opened.doc.page(0).layers) QVERIFY(l.color_raster != nullptr);
+        for (const std::string& note : deep.opened.notes) QVERIFY2(note.find("1 GiB") == std::string::npos, note.c_str());
+        const auto w = deep.info["width"].get<std::uint64_t>(), h = deep.info["height"].get<std::uint64_t>();
+        const std::uint64_t layers = deep.opened.doc.page(0).layers.size();
+        QCOMPARE(service::automate::precise_layers_bytes(layers, w, h, 16), layers * (16 + w * h * 8));
+        QCOMPARE(service::automate::precise_layers_bytes(layers, w, h, 8), std::uint64_t(0));
+        options.open.precise_most = service::automate::precise_layers_bytes(layers, w, h, 16) - 1;
+        const service::automate::Panorama shallow = service::automate::photomerge(pictures, options);
+        const core::Page& page = shallow.opened.doc.page(0);
+        QVERIFY(!page.rgb || page.rgb->depth == 8);
+        QCOMPARE(page.layers.size(), std::size_t(layers));
+        for (const core::Layer& l : page.layers) QVERIFY(l.color_raster == nullptr && l.raster_png != nullptr);
+        QVERIFY(std::any_of(shallow.opened.notes.begin(), shallow.opened.notes.end(),
+                            [](const std::string& n) { return n.find("パノラマを 8 bit で作りました") != std::string::npos; }));
+        // (the stack: its second picture a file that is not there — weighed, never opened)
+        service::automate::Picture missing;
+        missing.name = "gone.png";
+        missing.file = fs::path("/nonexistent-genko-dir/gone.png");
+        missing.width = 260;
+        missing.height = 220;
+        service::automate::StackOptions stack;
+        stack.actor = core::Actor("human:作者");
+        stack.open.precise_most = service::automate::precise_layers_bytes(2, 260, 220, 16) - 1;
+        for (const bool align : {false, true}) {
+            stack.align = align;
+            std::string what = said([&] { (void)service::automate::load_files_into_stack({pictures[0], missing}, stack); });
+            QVERIFY2(what.find("the stack's 16-bit layers would pass the book's 1 GiB of precise pixels") != std::string::npos, what.c_str());
+            QVERIFY(genko::wording::error(QString::fromStdString(what)).contains(QStringLiteral("原稿の高精度の画素の上限（1 GiB）を越えます")));
+            what = said([&] { (void)service::automate::statistics({pictures[0], missing}, "median", stack); });
+            QVERIFY2(what.find("the stack's 16-bit layers would pass") != std::string::npos, what.c_str());
+        }
+        stack.align = false;
+        stack.open.precise_most = service::automate::precise_layers_bytes(2, 260, 220, 16);
+        const formats::Opened kept = service::automate::load_files_into_stack(pictures, stack);
+        QVERIFY(kept.doc.page(0).rgb && kept.doc.page(0).rgb->depth == 16);
+        QCOMPARE(kept.doc.page(0).layers.size(), std::size_t(2));
+    }
+
     void refusesWhatItShould() {
         const core::Document doc = two_layers(300, 240, texture(300, 240, 20, 20), texture(300, 240, 31, 13));
         const Json op{{"op", "auto_align_layers"}, {"page", 1}, {"ids", Json::array({"A", "B"})}};

@@ -426,6 +426,29 @@ private slots:
                 std::uint64_t(8) * 1000 * 1000);
     }
 
+    // (PC6, review C P2-2) A 32-bit result's layer (RGBA floats) within the book's 1 GiB of precise pixels, seen before
+    // anything is merged: the review's 9000 × 8000 refused (the work's 40 bytes a pixel first, the book's 16 too), and the
+    // largest the work lets through keeps its layer within the book's limit, so the merge never makes a book it cannot keep.
+    void thirtyTwoBitsWithinTheBooksPrecisePixels() {
+        automate::HdrSettings settings;
+        settings.depth = 32;
+        QVERIFY_THROWS_EXCEPTION(core::Error, automate::check_work(9000, 8000, 0, settings));
+        std::uint32_t lo = 1, hi = 100000;  // (the largest square side the work allows)
+        while (lo < hi) {
+            const std::uint32_t mid = (lo + hi + 1) / 2;
+            if (automate::hdr_work_bytes(mid, mid, 0, settings) <= codecs::kAllocBudget) lo = mid;
+            else hi = mid - 1;
+        }
+        automate::check_work(lo, lo, 0, settings);
+        QVERIFY(16 + std::uint64_t(lo) * lo * 16 <= core::kColorRasterBookBytes);
+        try {
+            automate::check_work(lo + 1, lo + 1, 0, settings);
+            QFAIL("not refused");
+        } catch (const core::Error& error) {
+            QCOMPARE(error.code(), std::string("image_too_large"));
+        }
+    }
+
     void aStopStopsIt() {
         const std::size_t w = 64, h = 64;
         const auto sc = scene(w, h);

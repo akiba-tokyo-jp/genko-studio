@@ -224,7 +224,7 @@ genko_test(test_layer_comps SOURCES unit/test_layer_comps.cpp DEPS genko_test_su
 # PC5 I-d (variables@1, SPEC.md AUTO-01「変数とデータセット」): the variables' normal form and refusals, defined, given and
 # applied (visibility, a type layer's and a line's text) in one step, a picture's bytes kept out of the journal, a text file of
 # data sets (PhotoCraft's variables_cmds/tests.rs).
-genko_test(test_variables SOURCES unit/test_variables.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
+genko_test(test_variables SOURCES unit/test_variables.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service LABELS unit TIMEOUT 600)
 # PC5 J-c (annotations@1, SPEC.md PROD-01「注釈」): the notes as PhotoCraft's tests check them (add, edit, move with its box,
 # delete, the refusals; an Anno block read and written again, a sound note kept, the dates) with Genko's actors (an agent
 # never changes a person's note), the JSON, a .pcraft's notes, the import's ops, MCP's apply_ops not taking the ops.

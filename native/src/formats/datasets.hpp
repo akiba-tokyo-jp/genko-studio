@@ -29,10 +29,20 @@ namespace genko::formats {
 // of is left out (said). The result: set_data_sets's data_sets, ready to be applied. core::Error("value") for a file that
 // is not one (not UTF-8, larger than 64 MiB, more than kDataSetsMax lines, two data sets of one name, a picture that cannot
 // be read).
+// PC6 (review A P3-6): a picture's path is read only inside the text file's folder (its folders too: no absolute path, none
+// that leads out of it — "..", a link —; core::Error("value") "row N: the picture P is not in the text file's folder"), as a
+// .pcraft's data sets read theirs. PC6 (review C P2-5): with `store` (the window's, beside a saved book) each picture is put
+// in the book's asset store as it is read and given by its asset ref alone ({asset, name}: the op carries no picture's
+// bytes); without it the bytes are given ({data, name}), at most kDataSetsCarriedMost of them together (core::Error("value")
+// past it: the book saved first takes more).
+inline constexpr std::uint64_t kDataSetsCarriedMost = 256ull << 20;
 struct CsvOptions {
     char delimiter = 0;              // ',' or '\t'; 0: a tab when the first line has tabs and no commas, else a comma
     std::filesystem::path folder;    // where a picture's relative path is read from (the text file's folder)
     std::uint64_t pictures_most = core::kVariablePicturesMax;  // (the pictures' bytes together: the book's 4 GiB; less in tests)
+    // (a picture's bytes and its suffix — ".png" … — kept, its asset ref given back)
+    std::function<std::string(const std::string& bytes, const std::string& suffix)> store;
+    std::uint64_t carried_most = kDataSetsCarriedMost;  // (without `store`; less in tests)
 };
 struct CsvRead {
     core::Json data_sets = core::Json::array();

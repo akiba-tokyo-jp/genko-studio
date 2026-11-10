@@ -26,12 +26,15 @@
 #include "app/main_window.hpp"
 #include "app/variables_dialog.hpp"
 #include "core/command_bus.hpp"
+#include "core/ink.hpp"
+#include "core/json.hpp"
 #include "core/variables.hpp"
 #include "gui_support.hpp"
 #include "render/image.hpp"
 #include "render/ops_registry.hpp"
 #include "render/png.hpp"
 #include "service/wording.hpp"
+#include "storage/asset_store.hpp"
 
 using namespace genko;
 using core::Json;
@@ -290,6 +293,45 @@ private slots:
         QVERIFY2(written.front().startsWith(QStringLiteral("001")), qPrintable(written.join(QStringLiteral(", "))));
         QCOMPARE(b.doc().story.front().text, before);
         QCOMPARE(core::variables_of(b.doc()).active, std::optional<std::int64_t>());
+    }
+
+    // (PC6, review C P2-5) 変数データセット… of a saved book: each picture put in the book's asset store as it is read, the op
+    // carrying its ref alone (the book holds no copy of its bytes in memory), the data set applied from it; an op refused
+    // takes the pictures it put there away again (one there before stays).
+    void csvPicturesGoIntoTheBooksAssets() {
+        Book b;
+        QVERIFY(b.apply(Json{{"op", "set_variables"},
+                             {"defs", Json::array({Json{{"name", "img"}, {"type", "pixels"}, {"page", 1}, {"layer", "photo"}}})}}));
+        const std::string blue = png_of(4, 4, {0, 0, 255, 255}), red = png_of(4, 4, {255, 0, 0, 255});
+        write_bytes(b.tmp.path() + QStringLiteral("/blue.png"), blue);
+        write_bytes(b.tmp.path() + QStringLiteral("/red.png"), red);
+        const QString csv = b.tmp.path() + QStringLiteral("/sets.csv"), more = b.tmp.path() + QStringLiteral("/more.csv");
+        write_bytes(csv, "DataSet,img\n青,blue.png\n");
+        write_bytes(more, "DataSet,img\n青,red.png\n");
+        const auto import = [&b](const QString& file, bool replace) {
+            b.answers.responder->exec = [file, replace](QDialog* dialog) {
+                auto* d = qobject_cast<app::ImportDataSetsDialog*>(dialog);
+                if (d == nullptr) return int(QDialog::Rejected);
+                d->file->setText(file);
+                d->replace->setChecked(replace);
+                return int(QDialog::Accepted);
+            };
+            b.act("act_import_data_sets")->trigger();
+        };
+        import(csv, true);
+        const storage::AssetStore store(b.path);
+        const std::string blue_ref = core::bytes_ref(blue), red_ref = core::bytes_ref(red);
+        QVERIFY(store.has(blue_ref, ".png"));
+        QCOMPARE(core::variables_of(b.doc()).data_sets.size(), std::size_t(1));
+        QCOMPARE(std::get<core::PictureValue>(core::variables_of(b.doc()).data_sets[0].values[0].value).asset, blue_ref);
+        QVERIFY(!b.doc().smart_files.contains(blue_ref));
+        QVERIFY(b.apply(Json{{"op", "apply_data_set"}, {"name", "青"}}));
+        QVERIFY(b.layer("photo").raster_png != nullptr);
+        // (added after: two data sets of one name — the op refuses, red.png's asset taken away again, blue's kept)
+        import(more, false);
+        QCOMPARE(core::variables_of(b.doc()).data_sets.size(), std::size_t(1));
+        QVERIFY(!store.has(red_ref, ".png"));
+        QVERIFY(store.has(blue_ref, ".png"));
     }
 
     // The review's P1-1: a book whose variables cannot be read opens read only — the commands that change the book greyed (and
