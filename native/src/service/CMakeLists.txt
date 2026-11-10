@@ -3,15 +3,15 @@
 # by `genko studio`, MCP, HTTP and the app; and the words people see in errors (Python's genko/app/wording.py). Above
 # formats: the tools draw previews and write the exports.
 
-# The studio's own data, embedded from the Python baseline's files as they are (a change to one re-runs CMake): the
-# page layout templates, the words of the art requests, the rules and drawing guide an agent reads, and the skill the
-# MCP server hands an agent (genko://guide/skill).
+# The studio's own data (resources/studio/), embedded as they are (a change to one re-runs CMake): the page layout
+# templates, the words of the art requests, the rules and drawing guide an agent reads, and the skill the MCP server
+# hands an agent (genko://guide/skill).
 set(_genko_studio_data
-  "LAYOUTS|${GENKO_REPO_ROOT}/src/genko/studio/layouts.json"
-  "VOCAB|${GENKO_REPO_ROOT}/src/genko/studio/vocab.json"
-  "RULES|${GENKO_REPO_ROOT}/src/genko/studio/guide/manga_rules.md"
-  "DRAWING|${GENKO_REPO_ROOT}/src/genko/studio/guide/drawing.md"
-  "SKILL|${GENKO_REPO_ROOT}/src/genko/studio/guide/SKILL.md")
+  "LAYOUTS|${GENKO_SOURCE_ROOT}/resources/studio/layouts.json"
+  "VOCAB|${GENKO_SOURCE_ROOT}/resources/studio/vocab.json"
+  "RULES|${GENKO_SOURCE_ROOT}/resources/studio/guide/manga_rules.md"
+  "DRAWING|${GENKO_SOURCE_ROOT}/resources/studio/guide/drawing.md"
+  "SKILL|${GENKO_SOURCE_ROOT}/resources/studio/guide/SKILL.md")
 set(_b "0x[0-9a-f][0-9a-f],")
 foreach(_entry IN LISTS _genko_studio_data)
   string(REPLACE "|" ";" _parts "${_entry}")

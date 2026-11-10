@@ -3890,7 +3890,7 @@
     },
     {
       "id": "g216",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "あ",
       "size": 3,
       "bbox": [
@@ -3908,7 +3908,7 @@
     },
     {
       "id": "g217",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "あ",
       "size": 12,
       "bbox": [
@@ -3926,7 +3926,7 @@
     },
     {
       "id": "g218",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "あ",
       "size": 36,
       "bbox": [
@@ -3944,7 +3944,7 @@
     },
     {
       "id": "g219",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "漢",
       "size": 3,
       "bbox": [
@@ -3962,7 +3962,7 @@
     },
     {
       "id": "g220",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "漢",
       "size": 12,
       "bbox": [
@@ -3980,7 +3980,7 @@
     },
     {
       "id": "g221",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "漢",
       "size": 36,
       "bbox": [
@@ -3998,7 +3998,7 @@
     },
     {
       "id": "g222",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "―",
       "size": 3,
       "bbox": [
@@ -4016,7 +4016,7 @@
     },
     {
       "id": "g223",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "―",
       "size": 12,
       "bbox": [
@@ -4034,7 +4034,7 @@
     },
     {
       "id": "g224",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "―",
       "size": 36,
       "bbox": [
@@ -4052,7 +4052,7 @@
     },
     {
       "id": "g225",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "〜",
       "size": 3,
       "bbox": [
@@ -4070,7 +4070,7 @@
     },
     {
       "id": "g226",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "〜",
       "size": 12,
       "bbox": [
@@ -4088,7 +4088,7 @@
     },
     {
       "id": "g227",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "〜",
       "size": 36,
       "bbox": [
@@ -4106,7 +4106,7 @@
     },
     {
       "id": "g228",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "。",
       "size": 3,
       "bbox": [
@@ -4124,7 +4124,7 @@
     },
     {
       "id": "g229",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "。",
       "size": 12,
       "bbox": [
@@ -4142,7 +4142,7 @@
     },
     {
       "id": "g230",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "。",
       "size": 36,
       "bbox": [
@@ -4160,7 +4160,7 @@
     },
     {
       "id": "g231",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "A",
       "size": 3,
       "bbox": [
@@ -4178,7 +4178,7 @@
     },
     {
       "id": "g232",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "A",
       "size": 12,
       "bbox": [
@@ -4196,7 +4196,7 @@
     },
     {
       "id": "g233",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "A",
       "size": 36,
       "bbox": [
@@ -4214,7 +4214,7 @@
     },
     {
       "id": "g234",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "ß",
       "size": 3,
       "bbox": [
@@ -4232,7 +4232,7 @@
     },
     {
       "id": "g235",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "ß",
       "size": 12,
       "bbox": [
@@ -4250,7 +4250,7 @@
     },
     {
       "id": "g236",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "ß",
       "size": 36,
       "bbox": [
@@ -4268,7 +4268,7 @@
     },
     {
       "id": "g237",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "🙂",
       "size": 3,
       "bbox": [
@@ -4286,7 +4286,7 @@
     },
     {
       "id": "g238",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "🙂",
       "size": 12,
       "bbox": [
@@ -4304,7 +4304,7 @@
     },
     {
       "id": "g239",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": "🙂",
       "size": 36,
       "bbox": [
@@ -4322,7 +4322,7 @@
     },
     {
       "id": "g240",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": " ",
       "size": 3,
       "bbox": [
@@ -4340,7 +4340,7 @@
     },
     {
       "id": "g241",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": " ",
       "size": 12,
       "bbox": [
@@ -4358,7 +4358,7 @@
     },
     {
       "id": "g242",
-      "font": "file:src/genko/fonts/Yomogi-Regular.ttf",
+      "font": "file:native/resources/fonts/Yomogi-Regular.ttf",
       "text": " ",
       "size": 36,
       "bbox": [

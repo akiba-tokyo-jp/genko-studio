@@ -1101,7 +1101,7 @@ private slots:
     // A font's PostScript name is written with only A–Z, a–z, 0–9 and . _ + - (a backslash at its end would end the
     // text engine's text for psd-tools).
     void fontNamesAreTokens() {
-        std::string font = genko::test::read_bytes(genko::test::repo_root() + "/src/genko/fonts/Yomogi-Regular.ttf");
+        std::string font = genko::test::read_bytes(genko::test::repo_root() + "/native/resources/fonts/Yomogi-Regular.ttf");
         QVERIFY(!font.empty());
         QVERIFY(spoil_postscript_name(font));
         const QString file = tmp_.path() + "/spoilt-name.ttf";

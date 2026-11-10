@@ -237,7 +237,7 @@ private slots:
 
     // A font whose PostScript name ends in a backslash: written without it, and psd-tools reads the text.
     void fontNameAsPsdToolsReadsIt() {
-        std::string font = genko::test::read_bytes(genko::test::repo_root() + QStringLiteral("/src/genko/fonts/Yomogi-Regular.ttf"));
+        std::string font = genko::test::read_bytes(genko::test::repo_root() + QStringLiteral("/native/resources/fonts/Yomogi-Regular.ttf"));
         const auto be16 = [&](std::size_t at) { return (static_cast<unsigned char>(font[at]) << 8) | static_cast<unsigned char>(font[at + 1]); };
         const auto be32 = [&](std::size_t at) { return (static_cast<std::size_t>(be16(at)) << 16) | static_cast<std::size_t>(be16(at + 2)); };
         for (std::size_t i = 0; i < static_cast<std::size_t>(be16(4)); ++i) {  // (each PostScript name record's last character a backslash)
