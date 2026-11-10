@@ -33,6 +33,8 @@ struct StyleRead {
                                             const std::array<double, 2>& phase)>
         pattern;
     std::function<void(const std::string&)> say;
+    // (the caller keeps the effects' psd_raw — a layer's, as its PSD block —: not said)
+    bool psd_raw_kept = false;
 };
 
 // The style an upstream layer (LayerM) holds — its effects, fill opacity and Blend If — as Genko's style in its normal

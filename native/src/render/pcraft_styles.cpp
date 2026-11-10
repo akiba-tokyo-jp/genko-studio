@@ -29,7 +29,9 @@ struct Reader {
     const StyleRead& in;
 
     double mm(const Json& object, std::string_view key, std::string_view what) const {
-        return r4(std::clamp(number(field(object, key, what), what) * in.mm, 0.0, core::kEffectMaxMm));
+        const double v = number(field(object, key, what), what) * in.mm;
+        if (v > core::kEffectMaxMm) in.say("100 mm を超える効果の大きさ・距離は 100 mm にしました");
+        return r4(std::clamp(v, 0.0, core::kEffectMaxMm));
     }
     double angle(const Json& object, std::string_view key, std::string_view what) const { return clamped(field(object, key, what), what, -360.0, 360.0); }
 
@@ -115,7 +117,7 @@ struct Reader {
         return out;
     }
 
-    std::optional<Json> pattern(const Json& d, bool placed) const {
+    std::optional<Json> pattern(const Json& d, bool placed, bool texture = false) const {
         const Json* id = optional_field(d, "id");
         const std::string name = text(field(d, "name", "pattern"), "pattern.name");
         std::array<double, 2> phase{0, 0};
@@ -124,14 +126,15 @@ struct Reader {
         if (placed) {  // (a pattern overlay's and a bevel's texture: its angle, link and phase)
             if (const Json* p = optional_field(d, "phase")) {
                 if (!p->is_array() || p->size() != 2) throw Unreadable("pattern: phase is 2 numbers");
-                phase = {number((*p)[0], "pattern.phase"), number((*p)[1], "pattern.phase")};
+                const double most = 100000.0 / std::max(in.mm, 1e-9);  // (core::pattern_fill_spec's ±100000 mm)
+                phase = {std::clamp(number((*p)[0], "pattern.phase"), -most, most), std::clamp(number((*p)[1], "pattern.phase"), -most, most)};
             }
             if (const Json* a = optional_field(d, "angle")) rotation = std::clamp(number(*a, "pattern.angle"), -360.0, 360.0);
             if (const Json* l = optional_field(d, "link")) link = boolean(*l, "pattern.link");
         }
         auto fill = in.pattern(id != nullptr && id->is_string() ? id->get<std::string>() : std::string(), name,
                                number(field(d, "scale", "pattern"), "pattern.scale"), rotation, link, phase);
-        if (!fill) in.say("原稿に無いパターンの効果は外しました");
+        if (!fill) in.say(texture ? "ベベルとエンボスのテクスチャは、原稿に無いパターンのため外しました" : "原稿に無いパターンの効果は外しました");
         return fill;
     }
 
@@ -247,7 +250,7 @@ struct Reader {
             out["contour"] = std::move(element);
         }
         if (const Json* t = optional_field(d, "texture")) {
-            if (auto p = pattern(*t, true)) {
+            if (auto p = pattern(*t, true, true)) {
                 out["texture"] = Json{{"pattern", std::move(*p)},
                                       {"depth", r4(clamped(field(*t, "depth", "bevel.texture"), "bevel.texture.depth", -10.0, 10.0))},
                                       {"invert", boolean(field(*t, "invert", "bevel.texture"), "bevel.texture.invert")}};
@@ -380,6 +383,20 @@ Json blend_if_from(const Json& blend_if, Mode mode, const StyleRead& in) {
     return out;
 }
 
+// An upstream effect's kind by Photoshop's name (the variant's; another: その他).
+std::string effect_name(const Json& item) {
+    static const std::pair<const char*, const char*> kNames[] = {
+        {"DropShadow", "ドロップシャドウ"}, {"InnerShadow", "シャドウ（内側）"},   {"OuterGlow", "光彩（外側）"},
+        {"InnerGlow", "光彩（内側）"},       {"Stroke", "境界線"},                 {"ColorOverlay", "カラーオーバーレイ"},
+        {"GradientOverlay", "グラデーションオーバーレイ"}, {"PatternOverlay", "パターンオーバーレイ"}, {"Satin", "サテン"},
+        {"BevelEmboss", "ベベルとエンボス"}};
+    if (item.is_object() && item.size() == 1) {
+        for (const auto& [key, name] : kNames)
+            if (item.begin().key() == key) return name;
+    }
+    return "その他";
+}
+
 }  // namespace
 
 bool has_upstream_effects(const Json& layer) {
@@ -419,24 +436,35 @@ Json style_from_upstream(const Json& layer, const StyleRead& in) {
                     in.say("レイヤー効果が " + std::to_string(core::kMaxEffects) + " を超えるため、残りは外しました");
                     break;
                 }
-                std::optional<Json> made = reader.effect(item);
+                std::optional<Json> made;
+                try {
+                    made = reader.effect(item);
+                } catch (const Unreadable&) {
+                    in.say("読めない値のあるレイヤー効果を外しました（" + effect_name(item) + "）");
+                    continue;
+                }
                 if (!made) continue;
                 try {
                     effects.push_back(core::layer_effect_spec(*made));
                 } catch (const core::Error& error) {
-                    in.say(std::string("読めないレイヤー効果を外しました（") + error.what() + "）");
+                    (void)error;
+                    in.say("読めない値のあるレイヤー効果を外しました（" + effect_name(item) + "）");
                 }
             }
         }
         const Json* enabled = optional_field(*fx, "enabled");
         if (enabled != nullptr && !boolean(*enabled, "effects.enabled") && !effects.empty()) style["enabled"] = false;
-        if (optional_field(*fx, "psd_raw") != nullptr) in.say("レイヤー効果の PSD の元の設定は Genko に無いため外しました（効果は読みました）");
+        if (optional_field(*fx, "psd_raw") != nullptr && !in.psd_raw_kept) in.say("レイヤー効果の PSD の元の設定は Genko に無いため外しました（効果は読みました）");
         if (optional_field(*fx, "reference") != nullptr) in.say("レイヤー効果の基準点は Genko に無いため、レイヤーの左上にしました");
     }
     style["effects"] = std::move(effects);
     if (const Json* fill = optional_field(layer, "fill_opacity")) style["fill_opacity"] = r4(std::clamp(number(*fill, "layer.fill_opacity"), 0.0, 1.0));
     if (const Json* blend_if = optional_field(layer, "blend_if")) {
-        if (Json made = blend_if_from(*blend_if, in.mode, in); !made.empty()) style["blend_if"] = std::move(made);
+        try {
+            if (Json made = blend_if_from(*blend_if, in.mode, in); !made.empty()) style["blend_if"] = std::move(made);
+        } catch (const Unreadable&) {
+            in.say("読めないブレンド条件（Blend If）を外しました");
+        }
     }
     return core::layer_style_spec(style);
 }
@@ -485,9 +513,9 @@ struct Writer {
                     {"scale", d(g, "scale", 1)},     {"reverse", b(g, "reverse")},      {"align", b(g, "align", true)},
                     {"offset", Json::array({offset[0].get<double>(), offset[1].get<double>()})}};
     }
-    std::optional<Json> pattern(const Json& fill) const {
+    std::optional<Json> pattern(const Json& fill, bool texture = false) const {
         auto p = out.pattern(fill);
-        if (!p) out.say("本に無いパターンのレイヤー効果は書きませんでした");
+        if (!p) out.say(texture ? "ベベルとエンボスのテクスチャは、本に無いパターンのため書きませんでした" : "本に無いパターンのレイヤー効果は書きませんでした");
         return p;
     }
     // A stroke's or a glow's paint (FxPaint).
@@ -604,11 +632,9 @@ struct Writer {
             }
             if (const Json* t = core::get(e, "texture"); t != nullptr && t->is_object()) {
                 const Json* fill = core::get(*t, "pattern");
-                if (auto p = fill != nullptr ? pattern(*fill) : std::nullopt) {
+                if (auto p = fill != nullptr ? pattern(*fill, true) : std::nullopt) {
                     body["texture"] = Json{{"name", (*p)["name"]}, {"id", (*p)["id"]}, {"scale", (*p)["scale"]}, {"depth", d(*t, "depth", 1)},
                                            {"invert", b(*t, "invert")}, {"link", (*p)["link"]}, {"phase", (*p)["phase"]}};
-                } else {
-                    out.say("ベベルとエンボスのテクスチャは、本に無いパターンのため外しました");
                 }
             }
             return Json{{"BevelEmboss", std::move(body)}};

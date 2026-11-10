@@ -1122,28 +1122,60 @@ StyleRead style_reading(Ctx& ctx, std::function<void(const std::string&)> say) {
 // PC6 (layer-styles@1, render/pcraft_styles): the layer's effects, fill opacity and Blend If as its style (core/
 // layer_styles.hpp) once its kind is known — what Genko's style cannot hold of them left out and said —; a folder's and a
 // correction layer's (Genko's take no style) fill opacity in their opacity, as before, their effects and Blend If left out
-// and said.
+// and said. (An effect not read is left out alone, Blend If not read alone: render/pcraft_styles.)
+void unread_style(Ctx& ctx, core::Layer& layer, double fill, const std::string& name);
+
 void take_style(Ctx& ctx, core::Layer& layer, const Json& m, const std::string& name) {
     const double fill = std::clamp(number(field(m, "fill_opacity", "layer"), "layer.fill_opacity"), 0.0, 1.0);
     if (!core::takes_layer_style(layer)) {
         if (fill < 1.0) layer.opacity = std::round(layer.opacity * fill * 1000.0) / 1000.0;
-        const std::string what = layer.kind == core::LayerKind::Folder ? "グループ" : "調整レイヤー";
+        const std::string what = layer.kind == core::LayerKind::Folder ? "グループ" : "補正レイヤー";
         if (has_upstream_effects(m)) ctx.notes.name("Genko の" + what + "はレイヤー効果を持てないため、効果を外しました", name);
         if (has_upstream_blend_if(m)) ctx.notes.name("Genko の" + what + "はブレンド条件（Blend If）を持てないため外しました", name);
         return;
     }
-    const StyleRead in = style_reading(ctx, [&ctx, &name](const std::string& note) { ctx.notes.name(note, name); });
+    StyleRead in = style_reading(ctx, [&ctx, &name](const std::string& note) { ctx.notes.name(note, name); });
+    in.psd_raw_kept = true;
     try {
         Json style = style_from_upstream(m, in);
         if (style.is_null()) return;
         layer.style = std::move(style);
         ctx.styled = true;
+        // (the review's P3-2: the effects' psd_raw — the PSD's lfx2 the effects were read from — the layer's PSD block, as a
+        // PSD's reader keeps it: written back as it was while the style is unchanged, by a PSD and a .pcraft)
+        const Json* fx = optional_field(m, "effects");
+        const Json* raw = fx != nullptr ? optional_field(*fx, "psd_raw") : nullptr;
+        const bool has = layer.native_psd && std::any_of(layer.native_psd->blocks.begin(), layer.native_psd->blocks.end(),
+                                                         [](const auto& b) { return b.first == "lfx2"; });  // (an lmfx beside it, as a PSD has)
+        bool kept = false;
+        if (raw != nullptr && raw->is_string() && !has && !(*layer.style)["effects"].empty() &&
+            (!layer.native_psd || layer.native_psd->blocks.size() < core::kPsdKeptMax)) {
+            try {
+                const core::Bytes bytes = ctx.load.kept_blob(raw->get<std::string>());
+                const std::string ref = core::bytes_ref(*bytes);
+                ctx.doc.native_files[ref] = bytes;
+                if (!layer.native_psd) layer.native_psd = core::PsdLayerKeep{};
+                layer.native_psd->blocks.emplace_back("lfx2", ref);
+                kept = true;
+            } catch (const Unreadable&) {
+            } catch (const core::Error& error) {
+                if (error.code() == "image_too_large") throw;
+            }
+        }
+        if (raw != nullptr && !kept) ctx.notes.name("レイヤー効果の PSD の元の設定は外しました（効果は読みました）", name);
     } catch (const Unreadable&) {
-        ctx.notes.name("レイヤースタイル（効果・塗りの不透明度・ブレンド条件）が読めないため外しました", name);
+        unread_style(ctx, layer, fill, name);
     } catch (const core::Error& error) {
         if (error.code() != "value") throw;
-        ctx.notes.name("レイヤースタイル（効果・塗りの不透明度・ブレンド条件）が読めないため外しました", name);
+        unread_style(ctx, layer, fill, name);
     }
+}
+
+// (the review's P2-2) A style not read as a whole: none, the fill opacity in the layer's opacity as before PC6, said.
+void unread_style(Ctx& ctx, core::Layer& layer, double fill, const std::string& name) {
+    layer.style.reset();
+    if (fill < 1.0) layer.opacity = std::round(layer.opacity * fill * 1000.0) / 1000.0;
+    ctx.notes.name("レイヤースタイルが読めないため効果とブレンド条件を外し、塗りの不透明度は不透明度に掛けました", name);
 }
 
 // The layer's own frame in pixels (upstream's compose fill_frame: a hide-all mask's painted area on the canvas, then the
@@ -1329,19 +1361,36 @@ void each_read_page(core::Document& doc, const std::function<void(core::Page&)>&
 void relight(core::Document& doc, const std::array<double, 2>& light) {
     const std::array<double, 2> own = core::global_light(doc);
     if (own == light) return;
+    // (a style's effects that took the light: their own now; whether one did)
+    const auto lit = [&](std::optional<Json>& style) {
+        if (!style || !style->is_object() || !style->contains("effects")) return false;
+        Json changed_style = *style;
+        bool changed = false;
+        for (Json& e : changed_style["effects"]) {
+            if (!e.is_object() || !e.value("global_light", false)) continue;
+            e["global_light"] = false;
+            e["angle"] = own[0];
+            if (e.contains("altitude")) e["altitude"] = own[1];
+            changed = true;
+        }
+        if (changed) style = core::layer_style_spec(changed_style);
+        return changed;
+    };
     each_read_page(doc, [&](core::Page& page) {
         for (core::Layer& layer : page.layers) {
-            if (!layer.style || !layer.style->is_object() || !layer.style->contains("effects")) continue;
-            Json style = *layer.style;
-            bool changed = false;
-            for (Json& e : style["effects"]) {
-                if (!e.is_object() || !e.value("global_light", false)) continue;
-                e["global_light"] = false;
-                e["angle"] = own[0];
-                if (e.contains("altitude")) e["altitude"] = own[1];
-                changed = true;
-            }
-            if (changed) layer.style = core::layer_style_spec(style);
+            if (!lit(layer.style) || !layer.native_psd) continue;
+            // (the review's P3-1: the PSD's effects block it kept takes the book's light — forgotten, the effects written from
+            // the style, as import_psd does when it relights)
+            std::erase_if(layer.native_psd->blocks, [](const auto& block) { return core::psd_effect_key(block.first); });
+            if (layer.native_psd->empty()) layer.native_psd.reset();
+        }
+        if (page.layer_comps) {  // (and its layer comps' appearances)
+            for (core::LayerComp& comp : page.layer_comps->comps)
+                for (core::CompLayerState& state : comp.layers)
+                    if (state.appearance) lit(state.appearance->style);
+            if (page.layer_comps->last_state)
+                for (core::CompLayerState& state : *page.layer_comps->last_state)
+                    if (state.appearance) lit(state.appearance->style);
         }
     });
 }

@@ -782,15 +782,17 @@ Json layer_json(Ctx& ctx, const std::string& name, const core::Layer* layer, Jso
         if (shown->vector_mask) out["vector_mask"] = pc::vector_mask_json(*shown->vector_mask, ctx.px);
     }
     // (PC6, layer-styles@1: its style as upstream's effects, fill opacity and Blend If — a placed picture's, given without
-    // its layer, too —; a pen layer's group of parts not: its parts carry it, as a PSD's records do)
+    // its layer, too —; a pen layer written as a group of its parts and lines: the group's — the review's P2-1: upstream
+    // draws a group's effects over what is in it, as Genko draws the pen layer's over its parts —, its parts given none)
     const core::Layer* styled = layer != nullptr ? layer : shown != nullptr ? shown->styled : nullptr;
-    if (styled != nullptr && core::has_layer_style(*styled) && out["content"].value("kind", std::string()) != "group") style_json(ctx, name, *styled, out);
+    if (styled != nullptr && core::has_layer_style(*styled)) style_json(ctx, name, *styled, out);
     return out;
 }
 
 // PC6 (layer-styles@1, render/pcraft_styles): the layer's style onto its upstream layer — its effects (their patterns the
-// document's), fill opacity and Blend If —, the PSD's effects and fill opacity blocks it kept left out (upstream writes them
-// anew from these, and never keeps them among its blocks).
+// document's), fill opacity and Blend If —; of the PSD's blocks it kept (Genko keeps them only while the style is as it was
+// read: ops_layer_styles forgets them), as upstream holds them (io/src/psd_import.rs REGENERATED): its lfx2 the effects'
+// psd_raw, its lfxs and iOpa left out (upstream writes them from the fields), its lmfx and lrFX among the blocks.
 pc::StyleWrite style_writing(Ctx& ctx, const std::string& name) {
     pc::StyleWrite w;
     w.px = ctx.px;
@@ -821,8 +823,12 @@ void style_json(Ctx& ctx, const std::string& name, const core::Layer& layer, Jso
     if (out["psd_blocks"].is_array()) {
         Json kept = Json::array();
         for (Json& b : out["psd_blocks"]) {
-            const std::optional<std::string> key = b.is_array() && !b.empty() && b[0].is_string() ? pc::key_from_hex(b[0].get<std::string>()) : std::nullopt;
-            if (key && (core::psd_effect_key(*key) || *key == "iOpa")) continue;
+            const std::optional<std::string> key = b.is_array() && b.size() == 2 && b[0].is_string() ? pc::key_from_hex(b[0].get<std::string>()) : std::nullopt;
+            if (key && *key == "lfx2") {
+                out["effects"]["psd_raw"] = b[1];
+                continue;
+            }
+            if (key && (*key == "lfxs" || *key == "iOpa")) continue;
             kept.push_back(std::move(b));
         }
         out["psd_blocks"] = std::move(kept);
@@ -1412,6 +1418,7 @@ Json document_json(Ctx& ctx) {
     std::set<std::string> more;
     std::set_difference(patterns.begin(), patterns.end(), written_patterns.begin(), written_patterns.end(), std::inserter(more, more.end()));
     if (!more.empty()) add_patterns(doc["patterns"], more);
+    ctx.patterns = nullptr;  // (the review's P3-7: the set was this function's)
     return doc;
 }
 

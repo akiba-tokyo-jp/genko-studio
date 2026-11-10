@@ -1376,8 +1376,21 @@ private slots:
             QVERIFY2(said(opened.notes, part), qPrintable(QString::fromUtf8(part) + QStringLiteral("\n") + QString::fromStdString(joined(opened.notes))));
         }
         QVERIFY2(!said(opened.notes, "描けない") && !said(opened.notes, "ブレンド条件"), joined(opened.notes).c_str());
-        // (the book's styles drawn: the drop shadow's is beside the square, where its pixels are clear)
+        // (the book's styles drawn: the drop shadow under the square — the document's light from above, 90°, 6 pixels down —
+        // where its pixels are clear; above it, clear of its strokes, the paper — the review's P3-8)
         core::validate_layer_styles(doc);
+        {
+            const render::Image drawn = render::render_page(page, 150, render::proof_options(), &doc).image;
+            core::Document bare = doc;
+            for (core::Layer& l : bare.edit_page(0).layers) l.style.reset();
+            const render::Image plain_page = render::render_page(bare.page(0), 150, render::proof_options(), &bare).image;
+            const auto grey = [](const render::Image& image, int x, int y) {
+                const std::vector<double> v = image.getpixel(x, y);
+                return (v[0] + v[1] + v[2]) / 3;
+            };
+            QVERIFY2(grey(plain_page, 25, 42) > 250 && grey(drawn, 25, 42) < 245, std::to_string(grey(drawn, 25, 42)).c_str());
+            QVERIFY2(grey(drawn, 25, 3) > 250, std::to_string(grey(drawn, 25, 3)).c_str());
+        }
 
         // written back in upstream's form
         std::vector<std::string> notes;
@@ -1448,6 +1461,32 @@ private slots:
         const core::Layer* lit = titled(*inside, "Shadows");
         QVERIFY(lit && lit->style);
         QVERIFY2((*lit->style)["effects"][0]["global_light"] == Json(false) && near((*lit->style)["effects"][0]["angle"], 90), lit->style->dump().c_str());
+        // (inside a .pcraft opened — the outer's light Photoshop's —: the same — the review's P3-8)
+        {
+            const std::string outer_bytes = formats::pcraft_bytes(small_book(), 0);
+            Json nm = manifest_of(outer_bytes);
+            const std::string fx = fixture("effects.pcraft");
+            const auto [blob_name, blob_frame] = blob_of(fx);
+            nm["document"]["layers"].push_back(upstream_layer("中の効果", Json{{"kind", "smart"},
+                                                                         {"source", Json{{"kind", "embedded"}, {"file_name", "fx.pcraft"}, {"blob", render::blake3::hex(fx)}}},
+                                                                         {"transform", Json{{"m", Json::array({1.0, 0.0, 0.0, 1.0, 0.0, 0.0})}}},
+                                                                         {"smart_filters", Json::array()},
+                                                                         {"cache", nullptr},
+                                                                         {"psd_raw", nullptr},
+                                                                         {"filters_enabled", true},
+                                                                         {"filter_mask", nullptr},
+                                                                         {"warp", nullptr},
+                                                                         {"stack_mode", nullptr}}));
+            const formats::Opened nested = formats::open_file(bundle(nm, outer_bytes, {{blob_name, blob_frame}}), "outer.pcraft");
+            QVERIFY(!nested.doc.global_light);
+            const core::Page* in_page = nullptr;
+            for (const auto& [id, contents] : nested.doc.smart_contents)
+                if (contents->kind == "page") in_page = contents->page.get();
+            QVERIFY(in_page != nullptr);
+            const core::Layer* in_lit = titled(*in_page, "Shadows");
+            QVERIFY(in_lit && in_lit->style);
+            QVERIFY2((*in_lit->style)["effects"][0]["global_light"] == Json(false) && near((*in_lit->style)["effects"][0]["angle"], 90), in_lit->style->dump().c_str());
+        }
 
         // upstream's reader: the effects as its own (its manifest as it reads it), the file loaded
         const QString tool = qEnvironmentVariable("GENKO_PCRAFT_CHECK");
@@ -1490,6 +1529,152 @@ private slots:
                 if (l["name"] == Json("Hidden") && near(l["fill_opacity"], 0.4)) ++hidden_fill;
         }
         QCOMPARE(hidden_fill, 1);
+    }
+
+    // PC6 (the review of pc6-E's P2-2, P3-1, P3-2, P3-6): what of a style cannot be read is left out alone — an effect of a
+    // value this build does not know (the others, the fill opacity and Blend If kept), Blend If not read (the effects kept)
+    // —, said by the effect's name; a style not read at all leaves the fill opacity in the layer's opacity, said; a group's
+    // fill opacity in its opacity; a layer comp's appearance the same, the comp kept. The effects' psd_raw is the layer's
+    // PSD block (lfx2), written back as psd_raw — lmfx kept among the blocks, iOpa not —; relit when placed, forgotten.
+    void stylesNotReadWhole() {
+        const std::string bytes = fixture("effects.pcraft");
+        Json m = manifest_of(bytes);
+        const auto layer_named = [&](const char* name) -> Json& {
+            for (Json& l : m["document"]["layers"])
+                if (l["name"] == Json(name)) return l;
+            QTest::qFail(name, __FILE__, __LINE__);
+            return m;
+        };
+        layer_named("Shadows")["effects"]["items"][0]["DropShadow"]["common"]["blend"] = "LaterBlend";  // (one of a later version)
+        layer_named("Overlays")["effects"]["items"][1]["GradientOverlay"]["gradient"]["style"] = "Spiral";
+        layer_named("Hidden")["effects"]["items"] = "not a list";  // (the style as a whole not read)
+        layer_named("Blend If")["fill_opacity"] = 0.5;
+        layer_named("Blend If")["blend_if"]["ranges"] = "broken";
+        layer_named("FX Group")["fill_opacity"] = 0.5;
+        const std::string raw("lfx2 payload of a PSD");  // (the PSD's block upstream kept: not read, carried)
+        const auto [raw_name, raw_frame] = blob_of(raw);
+        layer_named("Bevelled")["effects"]["psd_raw"] = render::blake3::hex(raw);
+        layer_named("Bevelled")["psd_blocks"] = Json::array({Json::array({std::string("6c6d6678"), render::blake3::hex(raw)})});
+        // (a comp: one state of an effect not read — the others kept —, one of a style not read — its fill in its opacity —)
+        std::map<std::string, std::uint64_t> ids;
+        for (const Json& l : m["document"]["layers"]) ids[l["name"].get<std::string>()] = l["id"].get<std::uint64_t>();
+        Json bad_effect = layer_named("Shadows")["effects"];
+        Json bad_whole = Json{{"enabled", true}, {"items", 7}, {"psd_raw", nullptr}, {"reference", nullptr}};
+        m["document"]["layer_comps"] = Json::array({Json{{"id", 1}, {"name", "C"}, {"comment", ""}, {"apply_visibility", true}, {"apply_position", false},
+                                                         {"apply_appearance", true},
+                                                         {"states", Json::array({Json{{"layer", ids["Shadows"]}, {"visible", true}, {"position", nullptr},
+                                                                                      {"appearance", Json{{"blend", "Normal"}, {"opacity", 1.0}, {"fill_opacity", 1.0}, {"effects", bad_effect}}}},
+                                                                                 Json{{"layer", ids["Glows"]}, {"visible", true}, {"position", nullptr},
+                                                                                      {"appearance", Json{{"blend", "Normal"}, {"opacity", 0.8}, {"fill_opacity", 0.5}, {"effects", bad_whole}}}},
+                                                                                 Json{{"layer", ids["FX Group"]}, {"visible", true}, {"position", nullptr},
+                                                                                      {"appearance", Json{{"blend", "Normal"}, {"opacity", 1.0}, {"fill_opacity", 0.5},
+                                                                                                          {"effects", layer_named("FX Group")["effects"]}}}}})}}});
+        const formats::Opened opened = formats::open_file(bundle(m, bytes, {{raw_name, raw_frame}}), "odd_effects.pcraft");
+        const core::Page& page = opened.doc.page(0);
+        const auto notes = joined(opened.notes);
+        const core::Layer* shadows = titled(page, "Shadows");
+        QVERIFY(shadows && shadows->style);
+        QCOMPARE((*shadows->style)["effects"].size(), std::size_t(3));  // (its drop shadow out, its inner shadow and strokes in)
+        QCOMPARE((*shadows->style)["effects"][0]["kind"], Json("inner_shadow"));
+        QVERIFY2(said(opened.notes, "読めない値のあるレイヤー効果を外しました（ドロップシャドウ）（「Shadows」）"), notes.c_str());
+        const core::Layer* overlays = titled(page, "Overlays");
+        QVERIFY(overlays && overlays->style && (*overlays->style)["effects"].size() == 2);
+        QVERIFY2(said(opened.notes, "読めない値のあるレイヤー効果を外しました（グラデーションオーバーレイ）（「Overlays」）"), notes.c_str());
+        const core::Layer* hidden = titled(page, "Hidden");
+        QVERIFY(hidden && !hidden->style && std::abs(hidden->opacity - 0.4) < 1e-9);
+        QVERIFY2(said(opened.notes, "レイヤースタイルが読めないため効果とブレンド条件を外し、塗りの不透明度は不透明度に掛けました（「Hidden」）"), notes.c_str());
+        const core::Layer* blending = titled(page, "Blend If");
+        QVERIFY2(blending && blending->style && !blending->style->contains("blend_if") && (*blending->style)["fill_opacity"] == Json(0.5), notes.c_str());
+        QVERIFY2(said(opened.notes, "読めないブレンド条件（Blend If）を外しました（「Blend If」）"), notes.c_str());
+        const core::Layer* group = titled(page, "FX Group");
+        QVERIFY(group && group->kind == core::LayerKind::Folder && std::abs(group->opacity - 0.5) < 1e-9);
+        for (const std::string& n : opened.notes) QVERIFY2(n.find("layer style") == std::string::npos, n.c_str());  // (Japanese only)
+        // (the psd_raw: the layer's lfx2 block; the lmfx among its blocks)
+        const core::Layer* bevelled = titled(page, "Bevelled");
+        const core::Layer* glows = titled(page, "Glows");
+        QVERIFY(bevelled && bevelled->style && bevelled->native_psd);
+        std::set<std::string> keys;
+        for (const auto& [key, ref] : bevelled->native_psd->blocks) keys.insert(key);
+        QVERIFY2((keys == std::set<std::string>{"lfx2", "lmfx"}), (Json(keys).dump() + " " + notes).c_str());
+        QVERIFY2(!said(opened.notes, "PSD の元の設定"), notes.c_str());
+        // (the comp kept: the effect not read out, the style not read its fill in its opacity, the group's fill its opacity)
+        QVERIFY2(page.layer_comps && page.layer_comps->comps.size() == 1, notes.c_str());
+        const auto state_of = [&](const core::Layer* l) -> const core::CompLayerState* {
+            for (const core::CompLayerState& s : page.layer_comps->comps[0].layers)
+                if (l != nullptr && s.layer == l->id) return &s;
+            return nullptr;
+        };
+        const core::CompLayerState* s1 = state_of(shadows);
+        QVERIFY(s1 && s1->appearance && s1->appearance->style && (*s1->appearance->style)["effects"].size() == 3);
+        const core::CompLayerState* s2 = state_of(glows);
+        QVERIFY(s2 && s2->appearance && !s2->appearance->style && std::abs(s2->appearance->opacity - 0.4) < 1e-9);
+        QVERIFY2(said(opened.notes, "レイヤーカンプのレイヤースタイルが読めないため"), notes.c_str());
+        const core::CompLayerState* s3 = state_of(group);
+        QVERIFY(s3 && s3->appearance && !s3->appearance->style && std::abs(s3->appearance->opacity - 0.5) < 1e-9);
+        // written: the lfx2 the effects' psd_raw, the lmfx a block, no iOpa
+        const Json w = manifest_of(formats::pcraft_bytes(opened.doc, 0));
+        for (const Json& l : w["document"]["layers"]) {
+            if (l["name"] != Json("Bevelled")) continue;
+            QCOMPARE(l["effects"]["psd_raw"], Json(render::blake3::hex(raw)));
+            QCOMPARE(l["psd_blocks"].size(), std::size_t(1));
+            QCOMPARE(l["psd_blocks"][0][0], Json(std::string("6c6d6678")));
+        }
+        // placed in a book of another light: relit, its effects block (taking the book's light) forgotten
+        const core::Document placed = run(small_book(), Json::array({Json{{"op", "smart_place"}, {"page", 1},
+                                                                          {"data", core::b64encode(bundle(m, bytes, {{raw_name, raw_frame}}))}, {"name", "fx.pcraft"}}}));
+        const core::Page* inside = nullptr;
+        for (const auto& [id, contents] : placed.smart_contents)
+            if (contents->kind == "page") inside = contents->page.get();
+        QVERIFY(inside != nullptr);
+        const core::Layer* lit = titled(*inside, "Bevelled");
+        QVERIFY(lit && lit->style);
+        QVERIFY2(!lit->native_psd || std::none_of(lit->native_psd->blocks.begin(), lit->native_psd->blocks.end(),
+                                                  [](const auto& b) { return core::psd_effect_key(b.first); }),
+                 lit->style->dump().c_str());
+    }
+
+    // PC6 (the review of pc6-E's P2-1): a pen layer of two shape parts (with lines, and without) carries its style where it is
+    // written as one layer — a styled pen layer is written as its picture (render/psd_shapes plan: Pixels), its record
+    // carrying the style; were it a group of its parts, the group's (a .pcraft's group, a PSD's lfxs) —; no other layer:
+    // never lost silently.
+    void aPenLayersStyleGoesOnItsGroup() {
+        for (const bool lines : {true, false}) {
+            Json ops = Json::parse(R"([
+                {"op": "add_layer", "page": 1, "kind": "pen", "id": "pen", "name": "形と線"},
+                {"op": "add_shape_part", "page": 1, "layer_id": "pen", "shape": {"kind": "rect", "rect": [10, 10, 20, 15]}, "fill": {"rgb": [0, 0, 0]}},
+                {"op": "add_shape_part", "page": 1, "layer_id": "pen", "shape": {"kind": "ellipse", "rect": [30, 40, 15, 15]}, "fill": {"rgb": [200, 0, 0]}},
+                {"op": "set_layer_style", "page": 1, "id": "pen", "style": {"effects": [{"kind": "stroke", "size_mm": 0.5}], "fill_opacity": 0.7}}])");
+            if (lines) ops.insert(ops.begin() + 1, Json::parse(R"({"op": "add_stroke", "page": 1, "layer_id": "pen", "points": [[5, 5], [30, 30]]})"));
+            const core::Document book = run(small_book(), ops);
+            const std::string what = lines ? "with lines" : "parts alone";
+            const Json m = manifest_of(formats::pcraft_bytes(book, 0));
+            int styled = 0;
+            const std::function<void(const Json&)> each = [&](const Json& list) {
+                for (const Json& l : list) {
+                    if (!l["effects"]["items"].empty()) {
+                        ++styled;
+                        QVERIFY2(l["name"] == Json("形と線") && l["effects"]["items"][0].contains("Stroke") && std::abs(l["fill_opacity"].get<double>() - 0.7) < 1e-9,
+                                 (what + " " + l["name"].dump()).c_str());
+                    }
+                    if (l["content"]["kind"] == Json("group")) each(l["content"]["children"]);
+                }
+            };
+            each(m["document"]["layers"]);
+            QVERIFY2(styled == 1, (what + " " + std::to_string(styled)).c_str());
+            // the PSD: the record of the pen layer — its group's when it is one — holds its effects and fill; no other
+            const fs::path psd = at("pen_group_" + std::string(lines ? "lines" : "parts") + ".psd");
+            formats::export_page_psd(book, book.page(0), psd, 150);
+            const render::psd::File file = render::psd::File::read(genko::test::read_bytes(QString::fromStdString(core::path_to_utf8(psd))));
+            int records = 0;
+            for (const render::psd::Layer& l : file.layers()) {
+                std::set<std::string> keys;
+                for (const auto& b : file.blocks(l)) keys.insert(std::string(b.key));
+                if (!keys.contains("lfx2") && !keys.contains("lfxs")) continue;
+                ++records;
+                QVERIFY2(l.name == "形と線" && keys.contains(l.folder ? "lfxs" : "lfx2") && keys.contains("iOpa"), (what + " " + l.name).c_str());
+            }
+            QVERIFY2(records == 1, (what + " " + std::to_string(records)).c_str());
+        }
     }
 
     // PC6 (type@1, the review's P2-1): a .pcraft inside whose type layers take its text styles — placed as a smart object's
