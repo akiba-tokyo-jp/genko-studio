@@ -49,34 +49,70 @@ bool shown(const std::string& cell) {
 }
 
 // The pictures a text file names, each file read once (by its resolved place) and each picture's bytes given once (by their
-// sha256): the first naming it carries its bytes, the others its asset ref; all of them together within the book's 4 GiB,
-// refused before a file past it is read.
+// sha256): the first naming it carries its bytes — or, with `store`, puts them there —, the others its asset ref; all of them
+// together within the book's 4 GiB, refused before a file past it is read; a file outside the text file's folder only when
+// `outside` (the person said so). With `scan`, nothing is read: the files outside are listed there.
 struct Pictures {
     std::map<fs::path, std::string> refs;  // (a file's resolved place → its asset ref)
     std::set<std::string> given;           // (the refs whose bytes are given)
     std::uint64_t total = 0;
     std::uint64_t most = core::kVariablePicturesMax;
+    std::function<std::string(const std::string&, const std::string&)> store;
+    std::uint64_t carried = kDataSetsCarriedMost;
+    bool outside = false;
+    std::vector<CsvOutside>* scan = nullptr;
 
     Json value(const std::string& path, const fs::path& folder, std::size_t row) {
-        fs::path file = core::path_from_utf8(trimmed(path));
-        if (file.is_relative()) file = folder / file;
+        const std::string at = "row " + std::to_string(row) + ": the picture " + path;
+        const fs::path given_path = core::path_from_utf8(trimmed(path));
+        // (review A P3-6: inside the text file's folder — a relative path or an absolute one, compared where its links lead,
+        // as a .pcraft's data sets read theirs —; one outside it only when the person said so)
         std::error_code ec;
-        fs::path key = fs::weakly_canonical(file, ec);
-        if (ec) key = file.lexically_normal();
-        const std::string name = core::path_to_utf8(file.filename());
+        const fs::path base = fs::canonical(folder.empty() ? fs::current_path(ec) : folder, ec);
+        if (ec) {
+            if (scan != nullptr) return Json();
+            bad(at + " cannot be read");
+        }
+        const fs::path key = fs::canonical(base / given_path, ec);  // (an absolute path is itself)
+        if (ec) {
+            if (scan != nullptr) return Json();  // (said when it is read)
+            bad(at + " cannot be read");
+        }
+        const fs::path inside = key.lexically_relative(base);
+        if (inside.empty() || *inside.begin() == ".." || inside.is_absolute()) {
+            if (scan != nullptr) {
+                scan->push_back(CsvOutside{row, trimmed(path)});
+                return Json();
+            }
+            if (!outside) bad(at + " is not in the text file's folder");
+        }
+        if (scan != nullptr) return Json();
+        const std::string name = core::path_to_utf8(given_path.filename());
         if (const auto known = refs.find(key); known != refs.end()) return Json{{"asset", known->second}, {"name", name}};
-        const auto size = fs::is_regular_file(file, ec) ? fs::file_size(file, ec) : 0;
-        if (ec || size == 0) bad("row " + std::to_string(row) + ": the picture " + path + " cannot be read");
-        if (size > render::smart::kFileMaxBytes) bad("row " + std::to_string(row) + ": the picture " + path + " is larger than 256 MiB");
+        const auto size = fs::is_regular_file(key, ec) ? fs::file_size(key, ec) : 0;
+        if (ec || size == 0) bad(at + " cannot be read");
+        if (size > render::smart::kFileMaxBytes) bad(at + " is larger than 256 MiB");
         if (total + size > most) bad("the data sets' pictures are larger than 4 GiB together");
-        std::ifstream in(file, std::ios::binary);
+        // (review C P2-5: carried in the op, as base64, only so much — a saved book's are put in its asset store first)
+        if (!store && total + size > carried) bad("the data sets' pictures are larger than 256 MiB together: save the book first");
+        std::ifstream in(key, std::ios::binary);
         std::string bytes(static_cast<std::size_t>(size), '\0');
-        if (!in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()))) bad("row " + std::to_string(row) + ": the picture " + path + " cannot be read");
+        if (!in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()))) bad(at + " cannot be read");
         ++reads;
         const std::string ref = core::bytes_ref(bytes);
         refs.emplace(key, ref);
         if (!given.insert(ref).second) return Json{{"asset", ref}, {"name", name}};  // (another file of the same bytes)
         total += size;
+        if (store) {
+            std::string suffix;
+            try {
+                suffix = render::smart::look_at(bytes, "").suffix;
+            } catch (const std::exception&) {
+                bad(at + " cannot be read");  // (not a picture this build reads: as the op would refuse it)
+            }
+            if (store(bytes, suffix) != ref) bad(at + " cannot be read");
+            return Json{{"asset", ref}, {"name", name}};
+        }
         return Json{{"data", core::b64encode(bytes)}, {"name", name}};
     }
     std::size_t reads = 0;
@@ -137,7 +173,9 @@ std::vector<std::vector<std::string>> csv_rows(std::string_view text, char delim
     return rows;
 }
 
-CsvRead read_data_sets_csv(std::string_view text, const core::Variables& variables, const CsvOptions& options) {
+namespace {
+
+CsvRead read_csv(std::string_view text, const core::Variables& variables, const CsvOptions& options, std::vector<CsvOutside>* scan) {
     if (text.size() > kCsvMaxBytes) bad("the text file is larger than 64 MiB");
     if (text.starts_with("\xEF\xBB\xBF")) text.remove_prefix(3);
     if (core::utf8_error(text)) bad("the text file is not UTF-8 (save it as UTF-8 — CSV UTF-8)");
@@ -167,6 +205,10 @@ CsvRead read_data_sets_csv(std::string_view text, const core::Variables& variabl
     std::set<std::string> names;
     Pictures pictures;
     pictures.most = options.pictures_most;
+    pictures.store = options.store;
+    pictures.carried = options.carried_most;
+    pictures.outside = options.outside;
+    pictures.scan = scan;
     for (std::size_t r = 1; r < rows.size(); ++r) {
         const std::vector<std::string>& cells = rows[r];
         std::string name = named && !cells.empty() ? trimmed(cells.front()) : std::string();
@@ -192,6 +234,22 @@ CsvRead read_data_sets_csv(std::string_view text, const core::Variables& variabl
     }
     out.files_read = pictures.reads;
     return out;
+}
+
+}  // namespace
+
+CsvRead read_data_sets_csv(std::string_view text, const core::Variables& variables, const CsvOptions& options) {
+    return read_csv(text, variables, options, nullptr);
+}
+
+std::vector<CsvOutside> data_sets_outside(std::string_view text, const core::Variables& variables, const CsvOptions& options) {
+    std::vector<CsvOutside> out;
+    (void)read_csv(text, variables, options, &out);
+    return out;
+}
+
+std::string outside_refusal(const CsvOutside& outside) {
+    return "row " + std::to_string(outside.row) + ": the picture " + outside.path + " is not in the text file's folder";
 }
 
 std::vector<std::size_t> data_set_pages(const core::Document& doc) {

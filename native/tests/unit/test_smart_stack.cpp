@@ -13,9 +13,11 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <filesystem>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "core/base64.hpp"
@@ -26,9 +28,11 @@
 #include "core/paths.hpp"
 #include "core/smart.hpp"
 #include "render/image.hpp"
+#include "render/ink_canvas.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
+#include "render/smart.hpp"
 #include "render/stack.hpp"
 #include "storage/reader.hpp"
 #include "testsupport.hpp"
@@ -305,6 +309,79 @@ private slots:
                                           Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"f0", "f1", "f2"})}, {"new_id", "so"}},
                                           stacked("maximum")}));
         QVERIFY(std::abs(shown(drawn(hidden), kBlock) - grey) <= 1);
+    }
+
+    // (PC6, review C P2-3) The stack made once while the tiles drawn together wait for it — 8 bits, 16 bits, CMYK —; one too
+    // large to remember made a tile's part at a time, the same pixels.
+    void madeOnceWhileTheTilesWait() {
+        // (each way as it lies, and moved by whole pixels at 100 dpi — 10 and 20 px: the part's place shifted, the rework
+        // review's P3-4)
+        for (const bool moved : {false, true})
+        for (const Json& mode : {Json(), kSixteen, kCmyk}) {
+            Document doc = run(shots(mode), Json::array({stacked("median")}));
+            if (moved) doc = run(doc, Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so"}, {"set_matrix", Json::array({1, 0, 0, 1, 2.54, 5.08})}}}));
+            render::clear_render_caches();
+            std::uint64_t before = render::smart::counts().contents_drawn;
+            (void)drawn(doc, 100, render::RenderRegion{0, 0, 60, 60});
+            const std::uint64_t once = render::smart::counts().contents_drawn - before;
+            QVERIFY(once >= 1);
+            render::clear_render_caches();
+            before = render::smart::counts().contents_drawn;
+            std::atomic<int> failed{0};
+            {
+                std::vector<std::thread> tiles;
+                for (int k = 0; k < 4; ++k) {
+                    tiles.emplace_back([&doc, &failed, k] {
+                        try {
+                            (void)drawn(doc, 100, render::RenderRegion{k * 60, 0, 60, 60});
+                        } catch (...) {
+                            ++failed;
+                        }
+                    });
+                }
+                for (std::thread& t : tiles) t.join();
+            }
+            QCOMPARE(failed.load(), 0);
+            QCOMPARE(render::smart::counts().contents_drawn - before, once);
+            // (too large to remember: a tile's part alone, as the whole cut there)
+            const render::RenderResult whole = drawn(doc, 100);
+            const render::RenderRegion part{150, 210, 90, 60};
+            render::smart::set_budget_for_testing(1);
+            render::smart::set_single_for_testing(1);
+            render::clear_render_caches();
+            const render::RenderResult alone = drawn(doc, 100, part);
+            render::smart::set_budget_for_testing(0);
+            render::smart::set_single_for_testing(0);
+            QVERIFY2(alone.image.tobytes() == whole.image.crop(render::Box{part.x, part.y, part.x + part.w, part.y + part.h}).tobytes(), mode.dump().c_str());
+            if (whole.precise) {
+                QVERIFY(alone.precise.has_value());
+                const core::ColorRasterView a(*alone.precise), w(*whole.precise);
+                for (int y = 0; y < part.h; y += 7)
+                    for (int x = 0; x < part.w; x += 7) QCOMPARE(a.pixel(std::size_t(y) * part.w + x), w.pixel(std::size_t(part.y + y) * w.width() + part.x + x));
+            }
+            if (whole.inks) {
+                QVERIFY(alone.inks.has_value());
+                for (int y = 0; y < part.h; y += 7)
+                    for (int x = 0; x < part.w; x += 7)
+                        for (unsigned c = 0; c <= whole.inks->colours(); ++c)
+                            QCOMPARE(alone.inks->value(std::size_t(y) * part.w + x, c), whole.inks->value(std::size_t(part.y + y) * whole.inks->width + part.x + x, c));
+            }
+        }
+    }
+
+    // (PC6, review C P3-3) A page of inks' layers composited over a part alone are the whole cut there (what a stack of inks is
+    // made of, band by band).
+    void inksOfAPartAreTheWholeCutThere() {
+        const Document doc = shots(kCmyk, {102, 102, 102}, false, false);
+        const core::Page& page = doc.page(0);
+        const core::InkPixels all = render::composite_ink_layers(page, page.layers, 100, &doc);
+        for (const render::Box box : {render::Box{0, 0, 64, 64}, render::Box{150, 210, 240, 270}, render::Box{0, 100, int(all.width), 117}}) {
+            const core::InkPixels part = render::composite_ink_layers(page, page.layers, 100, &doc, false, box);
+            const core::InkPixels cut = render::crop_inks(all, box);
+            QCOMPARE(part.width, cut.width);
+            QCOMPARE(part.height, cut.height);
+            QVERIFY(part.samples == cut.samples && part.floats == cut.floats);
+        }
     }
 
     // A part of the page is the whole cut there: moved by whole pixels, scaled and turned.

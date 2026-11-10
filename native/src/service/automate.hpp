@@ -303,6 +303,10 @@ inline constexpr std::size_t kMaxStackFiles = 100;
 std::vector<Picture> picture_files(const std::vector<fs::path>& files, const formats::OpenOptions& open);
 // A picture's pixels across and down (its header's, or its page's).
 std::pair<std::int64_t, std::int64_t> picture_size(const Picture& picture);
+// The bytes of the book's precise pixels `layers` RGB paint layers of width × height take at `depth` (each its page's size:
+// a raster's 16 bytes and RGBA of 2 bytes a sample at 16 bits, 4 at 32; none at 8) — what the book holds at most
+// core::kColorRasterBookBytes of (OpenOptions::precise_most; PC6, review C P1-1, P2-1).
+std::uint64_t precise_layers_bytes(std::uint64_t layers, std::uint64_t width, std::uint64_t height, int depth);
 
 struct StackOptions {
     core::Actor actor;
@@ -314,6 +318,9 @@ struct StackOptions {
 // resolution, as wide and as high as the largest picture; each picture one layer at the top left at its own pixels (converted
 // to the first's mode and depth — set_color_mode —, its numbers kept in its profile), named by its name, the first at the
 // bottom. Then `align`, then `smart`. core::Error("value") for no picture or more than kMaxStackFiles; the ops' OpError.
+// Weighed before the pictures after the first are opened (the first's mode and depth read): the stack's memory past the 2 GiB
+// of the imaging budget, and a 16- or 32-bit RGB stack's layers past the book's 1 GiB of precise pixels
+// (OpenOptions::precise_most), are refused (core::Error("value")).
 formats::Opened load_files_into_stack(const std::vector<Picture>& pictures, const StackOptions& options);
 // 統計… (file.scripts.statistics): the stack, aligned with `align`, made one smart object and its stack mode set (smart_stack:
 // render/stack's 11 — entropy, kurtosis, maximum, mean, median, minimum, range, skewness, standard_deviation, summation,
@@ -340,7 +347,9 @@ struct Panorama {
 // Photomerge… (file.automate.photomerge): a book of the panorama — each picture placed one layer (its name; with blend its mask
 // shows its part, the seams where they agree, tones evened), with content_aware_fill a layer of the filled edges on top —, RGB
 // (a CMYK, Lab or grey picture's colours as they show in RGB), of the first picture's depth (precise when it is) and profile.
-// render::align's errors (対応が見つかりません, パノラマが大きすぎます).
+// render::align's errors (対応が見つかりません, パノラマが大きすぎます). A precise panorama whose layers would pass the book's 1 GiB
+// of precise pixels (OpenOptions::precise_most; PC6, review C P1-1) is made at 16 bits (from 32) or at 8, as a PSD's layers
+// are read, and said in its notes.
 Panorama photomerge(const std::vector<Picture>& pictures, const PhotomergeOptions& options);
 
 // --- PC5 I-f: コンタクトシート II -----------------------------------------------------------------------------------------

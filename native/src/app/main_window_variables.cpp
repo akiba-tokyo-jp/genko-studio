@@ -13,6 +13,11 @@
 #include <QSpinBox>
 
 #include <algorithm>
+#include <memory>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 #include "app/ask.hpp"
 #include "app/main_window.hpp"
@@ -25,6 +30,7 @@
 #include "formats/copy.hpp"
 #include "formats/datasets.hpp"
 #include "service/wording.hpp"
+#include "storage/asset_store.hpp"
 
 namespace genko::app {
 
@@ -178,20 +184,86 @@ void MainWindow::import_data_sets() {
     formats::CsvOptions options;
     options.delimiter = static_cast<char>(dialog.delimiter->currentData().toInt());
     options.folder = file.parent_path();
-    formats::CsvRead read;
+    // (review C P2-5: a saved book's pictures put in its asset store as they are read — on the worker —, the op carrying their
+    // refs alone; those new to the store taken away again when the op is refused)
+    auto fresh = std::make_shared<std::vector<std::pair<std::string, fs::path>>>();
+    if (session_->path()) {
+        const fs::path book_dir = *session_->path();
+        options.store = [book_dir, fresh](const std::string& bytes, const std::string& suffix) {
+            storage::AssetStore store(book_dir);
+            const std::string ref = storage::AssetStore::ref(bytes);
+            const bool there = store.has(ref, suffix);
+            (void)store.put_bytes(bytes, suffix);
+            if (!there) fresh->emplace_back(ref, store.path(ref, suffix));
+            return ref;
+        };
+    }
+    // (the rework review's P3-6: one the book holds after all — its bytes in memory, which a save in between may have counted
+    // on the file for, or a data set's value — is kept, as drop_fresh_footage keeps one)
+    const auto drop_fresh = [this, fresh] {
+        const core::Variables now = core::variables_of(book());
+        for (const auto& [ref, made] : *fresh) {
+            if (book().smart_files.contains(ref)) continue;
+            bool named = false;
+            for (const core::DataSet& set : now.data_sets) {
+                for (const core::DataValue& value : set.values) {
+                    const auto* picture = std::get_if<core::PictureValue>(&value.value);
+                    if (picture != nullptr && picture->asset == ref) named = true;
+                }
+            }
+            if (named) continue;
+            std::error_code ec;
+            fs::remove(made, ec);
+        }
+    };
+    // (the text file read, and the pictures it names outside its folder seen — none read yet —; those the person is asked
+    // about first, いいえ the default: refused, nothing is taken in — PC6, review A P3-6)
+    std::string text;
+    std::vector<formats::CsvOutside> outside;
     try {
-        read = off_ui([file, variables, options] {
+        std::tie(text, outside) = off_ui([file, variables, options] {
             QFile in(qpath(file));
             if (!in.open(QIODevice::ReadOnly)) throw core::Error("value", "the text file cannot be read");
             if (in.size() > (64ll << 20)) throw core::Error("value", "the text file is larger than 64 MiB");
             const QByteArray bytes = in.readAll();
-            return formats::read_data_sets_csv(std::string_view(bytes.constData(), static_cast<std::size_t>(bytes.size())), variables, options);
+            std::string read_text(bytes.constData(), static_cast<std::size_t>(bytes.size()));
+            std::vector<formats::CsvOutside> seen = formats::data_sets_outside(read_text, variables, options);
+            return std::pair<std::string, std::vector<formats::CsvOutside>>{std::move(read_text), std::move(seen)};
         });
     } catch (const std::exception& error) {
         flash(QStringLiteral("読み込めませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
         return;
     }
-    if (!variable_op(Json{{"op", "set_data_sets"}, {"data_sets", read.data_sets}, {"append", !dialog.replace->isChecked()}})) return;
+    if (!outside.empty()) {
+        QStringList paths;
+        for (const formats::CsvOutside& o : outside) {
+            const QString path = QString::fromStdString(o.path);
+            if (!paths.contains(path)) paths << path;
+        }
+        constexpr qsizetype kShown = 5;
+        QString listed = paths.mid(0, kShown).join(QStringLiteral("\n"));
+        if (paths.size() > kShown) listed += QStringLiteral("\n…ほか %1 件").arg(paths.size() - kShown);
+        const QString asked = QStringLiteral("CSV が次のフォルダーの外の画像を名指しています（%1 件）。読み込みますか？\n\nフォルダー: %2\n\n%3")
+                                  .arg(paths.size())
+                                  .arg(QDir::toNativeSeparators(qpath(options.folder)), listed);
+        if (!ask::question_default_no(this, QStringLiteral("変数データセット"), asked)) {
+            flash(QStringLiteral("読み込めませんでした: %1").arg(wording::error(QString::fromStdString(formats::outside_refusal(outside.front())))), 6000, true);
+            return;
+        }
+        options.outside = true;
+    }
+    formats::CsvRead read;
+    try {
+        read = off_ui([text, variables, options] { return formats::read_data_sets_csv(text, variables, options); });
+    } catch (const std::exception& error) {
+        drop_fresh();
+        flash(QStringLiteral("読み込めませんでした: %1").arg(wording::error(QString::fromUtf8(error.what()))), 6000, true);
+        return;
+    }
+    if (!variable_op(Json{{"op", "set_data_sets"}, {"data_sets", read.data_sets}, {"append", !dialog.replace->isChecked()}})) {
+        drop_fresh();
+        return;
+    }
     QString said = QStringLiteral("データセットを %1 個読み込みました").arg(read.data_sets.size());
     for (const std::string& note : read.notes) said += QStringLiteral("（%1）").arg(QString::fromStdString(note));
     flash(said, 6000);
