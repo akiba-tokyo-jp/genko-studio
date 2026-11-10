@@ -1729,6 +1729,34 @@ private:
         QCOMPARE((*placed.type_styles)["paragraph"].size(), std::size_t(1));
         QCOMPARE(style_named(placed, "character", "cs-1"), std::string("外の"));
         check_inside(placed, "placed");
+        // (a book of 512 character styles: 強調 does not come — said, as a PSD's reader says it —, its text naming none of
+        // it, its look kept: underlined; 見出し the book's)
+        {
+            core::Document crowded = book;
+            Json all = *crowded.type_styles;
+            for (int n = static_cast<int>(all["character"].size()) + 1; all["character"].size() < 512; ++n)
+                all["character"].push_back(Json{{"id", "cs-" + std::to_string(n + 100)}, {"name", "多い " + std::to_string(n)}, {"char", Json{{"rgb", Json::array({n % 256, 0, 0})}}}});
+            crowded.type_styles = core::type_text::check_type_styles(all);
+            std::vector<std::string> placed_notes;
+            (void)pc::place_as_contents(crowded, inner_bytes, "in.pcraft", placed_notes);
+            QVERIFY2(said(placed_notes, "文字スタイル・段落スタイルが 512 を超えるため、残りは読みませんでした（文字の見え方はそのまま）"), joined(placed_notes).c_str());
+            QCOMPARE((*crowded.type_styles)["character"].size(), std::size_t(512));
+            const core::Page* page = nullptr;
+            for (const auto& [id, contents] : crowded.smart_contents)
+                if (contents->kind == "page") page = contents->page.get();
+            QVERIFY(page != nullptr);
+            const core::Layer* text = titled(*page, "中");
+            QVERIFY(text && text->type && text->type->native_type);
+            const Json& nt = *text->type->native_type;
+            bool underlined = nt.contains("char") && nt["char"].value("underline", false), names = nt.contains("char_style");
+            if (nt.contains("runs"))
+                for (const Json& run : nt["runs"]) {
+                    names = names || run.contains("style");
+                    underlined = underlined || (run.contains("char") && run["char"].value("underline", false));
+                }
+            QVERIFY2(!names && underlined, nt.dump().c_str());
+            core::type_text::validate_type(crowded);
+        }
         if (QTest::currentTestFailed()) return;
         // inside a .pcraft opened: a document of its own style (外の, its first) and text, with a smart object of the .pcraft
         // above inside (its first 強調) — opened, the text inside takes 強調, the outer's 外の

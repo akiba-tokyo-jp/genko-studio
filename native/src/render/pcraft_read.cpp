@@ -1333,7 +1333,8 @@ std::optional<core::vector::ShapePart> shape_part(Ctx& ctx, const Json& d) {
 
 // --- a document read brought into a book (a .pcraft inside, a .pcraft placed) ------------------------------------------
 
-inline constexpr const char* kStylesFull = "文字スタイル・段落スタイルが 512 を超えるため、残りのスタイルを使う文字はスタイルを外しました";
+// (PC6: the styles a .pcraft inside brings past a kind's 512, as a PSD's reader says it: render/import_psd)
+inline constexpr const char* kStylesFull = "文字スタイル・段落スタイルが 512 を超えるため、残りは読みませんでした（文字の見え方はそのまま）";
 
 // Does a page of the document read (or of its contents) hold a layer style?
 bool styles_read(const core::Document& doc) {
@@ -1395,85 +1396,16 @@ void relight(core::Document& doc, const std::array<double, 2>& light) {
     });
 }
 
-// PC6 (type@1, the review's P2-1): the character and paragraph styles of the document read taken into the book `into` —
-// one of the same name and attributes the book has already is that one, another a new style of the book's (a new id, a
-// name the book's others do not have) — and its texts' references to them changed to the book's; the document then keeps
-// the book's styles, so that what is brought in of it names only the book's. Past a kind's 512, a text's reference goes
-// (its look Basic Paragraph's, or no character style's): true then, to be said.
-bool carry_type_styles(core::Document& into, core::Document& from) {
-    namespace ts = core::type_styles;
-    if (!from.type_styles || !from.type_styles->is_object()) return false;
-    Json all = into.type_styles && into.type_styles->is_object() ? *into.type_styles : Json::object();
-    std::map<std::string, std::optional<std::string>> ids[2];  // (character, paragraph: the document's id → the book's)
-    bool full = false;
-    for (int k = 0; k < 2; ++k) {
-        const ts::Kind kind = k == 0 ? ts::Kind::Character : ts::Kind::Paragraph;
-        const char* list_key = k == 0 ? "character" : "paragraph";
-        const Json* theirs = core::get(*from.type_styles, list_key);
-        if (theirs == nullptr || !theirs->is_array()) continue;
-        for (const Json& s : *theirs) {
-            const std::string id = s.value("id", std::string()), name = s.value("name", std::string());
-            if (!all.contains(list_key) || !all[list_key].is_array()) all[list_key] = Json::array();
-            Json& mine = all[list_key];
-            const auto same = std::find_if(mine.begin(), mine.end(), [&](const Json& t) {
-                return t.value("name", std::string()) == name && t.value("char", Json::object()) == s.value("char", Json::object()) &&
-                       t.value("para", Json::object()) == s.value("para", Json::object());
-            });
-            if (same != mine.end()) {
-                ids[k][id] = same->value("id", std::string());
-                continue;
-            }
-            if (mine.size() >= 512) {
-                ids[k][id] = std::nullopt;
-                full = true;
-                continue;
-            }
-            Json made = s;
-            made["id"] = ts::next_id(&all, kind);
-            made["name"] = ts::unique_name(&all, kind, name, false);
-            ids[k][id] = made["id"].get<std::string>();
-            mine.push_back(std::move(made));
-        }
+// (PC6, review B's P2-1) The page of a document read brought into the book with what it names (core::smart::bring_contents)
+// and the text styles its type layers — and those of the contents in it — take (`styles`); the book names type@1 when
+// it keeps them. The OpError StyleCarry gives for a text past a record's ranges: the .pcraft not read (format).
+void bring_with_styles(core::Document& doc, const core::Document& from, core::Page& page, core::type_styles::StyleCarry& styles) {
+    try {
+        core::smart::bring_contents(doc, from, page, [&](core::Page& on) { styles.bring_page(on); });
+    } catch (const core::OpError& error) {
+        throw core::Error("format", std::string("the .pcraft's texts cannot be brought into the book (") + error.what() + ")");
     }
-    const auto changed = [&](const Json& nt) {
-        Json out = nt;
-        const auto point = [&](Json& holder, const char* key, int k) {
-            if (!holder.is_object() || !holder.contains(key) || !holder[key].is_string()) return;
-            const auto it = ids[k].find(holder[key].get<std::string>());
-            if (it == ids[k].end()) return;
-            if (it->second) holder[key] = *it->second;
-            else holder.erase(key);
-        };
-        point(out, "char_style", 0);
-        point(out, "para_style", 1);
-        // (a range or a paragraph left with nothing of its own goes: the normal form holds nothing empty)
-        for (const auto& [key, k, bare] : {std::tuple{"runs", 0, std::size_t(2)}, std::tuple{"paragraphs", 1, std::size_t(1)}}) {
-            if (!out.contains(key) || !out[key].is_array()) continue;
-            Json kept = Json::array();
-            for (Json& item : out[key]) {
-                point(item, "style", k);
-                if (item.size() > bare) kept.push_back(std::move(item));
-            }
-            if (kept.empty()) out.erase(key);
-            else out[key] = std::move(kept);
-        }
-        return out;
-    };
-    each_read_page(from, [&](core::Page& page) {
-        for (core::Layer& layer : page.layers) {
-            if (!layer.type || !layer.type->native_type) continue;
-            core::StoryLine record = *layer.type;
-            record.native_type = changed(*record.native_type);
-            layer.type = core::type_text::shared_record(std::move(record));
-        }
-    });
-    for (core::StoryLine& line : from.story) {
-        if (line.native_type) line.native_type = changed(*line.native_type);
-    }
-    into.type_styles = core::type_text::check_type_styles(all);
-    from.type_styles = into.type_styles;
-    core::type_text::add_feature(into);
-    return full;
+    core::type_text::add_feature(doc);
 }
 
 // A .pcraft inside a smart object of one, read within the outer read's limits (below).
@@ -1496,14 +1428,16 @@ std::optional<std::string> contents_of(Ctx& ctx, const std::string& file_name, c
         ctx.load.contents();
         Read read = read_nested(*bytes, file_name, inner, ctx.load.tally());
         for (std::string& note : read.notes) ctx.notes.add("埋め込まれた .pcraft「" + file_name + "」: " + note);
-        // (PC6: its effects lit as they were under this document's light; its text styles the book's — the review's P2-1)
+        // (PC6: its effects lit as they were under this document's light; its text styles the book's — review B's P2-1:
+        // core::type_styles::StyleCarry, those past 512 left out, said)
         relight(read.doc, ctx.light);
         if (styles_read(read.doc)) ctx.styled = true;
-        if (carry_type_styles(ctx.doc, read.doc)) ctx.notes.add("埋め込まれた .pcraft「" + file_name + "」: " + kStylesFull);
+        core::type_styles::StyleCarry styles(ctx.doc, read.doc.type_styles ? &*read.doc.type_styles : nullptr, true);
         core::Page page = read.doc.page(0);
         page.index = core::Num(std::int64_t{1});
         page.native_source.reset();
-        core::smart::bring_contents(ctx.doc, read.doc, page);
+        bring_with_styles(ctx.doc, read.doc, page, styles);
+        if (styles.dropped()) ctx.notes.add("埋め込まれた .pcraft「" + file_name + "」: " + kStylesFull);
         auto contents = std::make_shared<core::SmartContents>();
         contents->kind = "page";
         contents->name = first_chars(file_name, core::smart::kNameMax);
@@ -2442,11 +2376,12 @@ std::string place_as_contents(core::Document& doc, std::string_view bytes, std::
     // (PC6: its effects lit as they were under its own light, the book's another; its text styles the book's — the
     // review's P2-1)
     relight(read.doc, core::global_light(doc));
-    if (carry_type_styles(doc, read.doc)) notes.emplace_back(kStylesFull);
+    core::type_styles::StyleCarry styles(doc, read.doc.type_styles ? &*read.doc.type_styles : nullptr, true);
     core::Page page = read.doc.page(0);
     page.index = core::Num(std::int64_t{1});
     page.native_source.reset();
-    core::smart::bring_contents(doc, read.doc, page);
+    bring_with_styles(doc, read.doc, page, styles);
+    if (styles.dropped()) notes.emplace_back(kStylesFull);
     auto contents = std::make_shared<core::SmartContents>();
     contents->kind = "page";
     contents->name = first_chars(core::utf8_replaced(name), core::smart::kNameMax);
