@@ -3,6 +3,7 @@
 // person-only gate, the warnings after a batch, the batch that fails leaving the book as it was, and the pages that
 // stay shared with the book they came from. (The same batches against Python's apply_ops: test_contract_save.)
 
+#include <QTemporaryDir>
 #include <QtTest>
 
 #include <bit>
@@ -19,12 +20,15 @@
 #include "core/error.hpp"
 #include "core/layer_basics.hpp"
 #include "core/model.hpp"
+#include "core/paths.hpp"
+#include "core/strict_ops.hpp"
 #include "render/image.hpp"
 #include "render/ops_production.hpp"
 #include "render/ops_registry.hpp"
 #include "render/page.hpp"
 #include "render/png.hpp"
 #include "render/raster.hpp"
+#include "storage/asset_store.hpp"
 #include "testsupport.hpp"
 
 using genko::core::ApplyError;
@@ -978,8 +982,8 @@ private slots:
                 const std::string error = error_of(doc, Json::array({op}), actor);
                 QVERIFY2(error.find(words) != std::string::npos, (op.dump() + " " + actor + " → " + error).c_str());
             }
-            const std::string person = error_of(doc, Json::array({op}), "human:owner");  // (a person: as before)
-            QVERIFY2(person == "(applied)" || person.find(words) == std::string::npos, (op.dump() + " → " + person).c_str());
+            const std::string person = error_of(doc, Json::array({op}), "human:owner");  // (a person: as before — applied)
+            QVERIFY2(person == "(applied)", (op.dump() + " → " + person).c_str());
         }
         QCOMPARE(error_of(doc, Json::array({sized[0]}), "human:owner"), std::string("(applied)"));
         // (its panels and lines turned with the page: as before for a person)
@@ -1075,6 +1079,223 @@ private slots:
         QCOMPARE(error_of(named, tree, "ai:bot"), std::string("(applied)"));
         // only moving a layer is not drawing (SPEC AUTO-01: transform_layers)
         QCOMPARE(error_of(strict, ops(R"([{"op": "transform_layers", "page": 1, "ids": ["paint"], "move": [2, 0]}])"), "ai:bot"), std::string("(applied)"));
+    }
+
+    // (PC6, the review of pc6-A's P2-3 and P3-8) Every op of strict_gates' table of drawing ops, one by one, on a printed
+    // layer of a page whose name is not approved: it draws (a book without strict_gates changes), it is refused for an agent
+    // and for a person with the table's words, and once the name is approved it is applied. Each name is one the build has.
+    void everyDrawingOpWaitsForTheName() {
+        namespace core = genko::core;
+        namespace render = genko::render;
+        QTemporaryDir folder;
+        QVERIFY(folder.isValid());
+        constexpr double side = 25.4;
+        const auto picture = [](bool other) {
+            std::string bytes;
+            for (int y = 0; y < 200; ++y)
+                for (int x = 0; x < 200; ++x) {
+                    const char v = static_cast<char>((other ? 200 - x / 2 : 60 + x / 2) + (y % 20 < 10 ? 30 : 0));
+                    bytes += std::string{v, static_cast<char>(v / 2), v, static_cast<char>(x >= 180 ? 0 : 255)};
+                }
+            return render::Image::frombytes("RGBA", render::Size{200, 200}, bytes);
+        };
+        const auto raster = [](core::Page& page, const char* id, core::LayerRole role, const render::Image& image) {
+            core::Layer layer;
+            layer.id = id;
+            layer.role = role;
+            layer.kind = core::LayerKind::Raster;
+            layer.panel_clip = false;
+            render::raster::save_raster(page, layer, image);
+            page.layers.push_back(layer);
+        };
+        const auto blank_book = [&]() {
+            Document doc = core::new_episode("描く op", 1, 1, core::PageSpec::custom(side, side, 20, 20, 1, 2, 2, 2, 2, 200, "color"));
+            doc.asset_dir = core::path_from_utf8(folder.path().toStdString());
+            core::Page& page = doc.edit_page(0);
+            page.numero = false;
+            page.frames.clear();
+            page.layers.clear();
+            for (const char* id : {"paint", "pic", "styled", "masked"}) raster(page, id, core::LayerRole::User, picture(false));
+            return doc;
+        };
+        const auto by_person = [](const Document& doc, const Json& batch) { return bus().apply(doc, batch, Actor("human:owner")).doc; };
+        const auto rect = [](double x, double y, double w, double h) {
+            return Json{{"subpaths", Json::array({Json{{"closed", true}, {"knots", Json::array({Json::array({x, y}), Json::array({x + w, y}), Json::array({x + w, y + h}),
+                                                                                                 Json::array({x, y + h})})}}})}};
+        };
+        const std::string png_a = core::b64encode(render::write_png(picture(false)));
+        const std::string png_b = core::b64encode(render::write_png(picture(true)));
+        Document doc = blank_book();
+        doc = by_person(doc, Json::array({
+                                 Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen"}},
+                                 Json{{"op", "add_layer"}, {"page", 1}, {"kind", "pen"}, {"id", "pen2"}},
+                                 Json{{"op", "add_shape_part"}, {"page", 1}, {"layer_id", "pen"}, {"id", "s1"},
+                                      {"shape", Json{{"kind", "rect"}, {"rect", Json::array({2, 2, 6, 4})}}}, {"fill", Json{{"rgb", Json::array({0, 0, 0})}}}},
+                                 Json{{"op", "add_shape_part"}, {"page", 1}, {"layer_id", "pen"}, {"id", "s2"},
+                                      {"shape", Json{{"kind", "rect"}, {"rect", Json::array({5, 3, 6, 4})}}}, {"fill", Json{{"rgb", Json::array({0, 0, 0})}}}},
+                                 Json{{"op", "set_path"}, {"page", 1}, {"name", "線"}, {"path", rect(4, 4, 10, 8)}},
+                                 Json{{"op", "set_layer_style"}, {"page", 1}, {"id", "styled"},
+                                      {"style", Json{{"effects", Json::array({Json{{"kind", "stroke"}, {"size_mm", 0.762}, {"rgb", Json::array({255, 0, 0})}}})}}}},
+                                 Json{{"op", "mask_from_transparency"}, {"page", 1}, {"id", "masked"}},
+                                 Json{{"op", "smart_convert"}, {"page", 1}, {"ids", Json::array({"pic"})}, {"new_id", "so"}},
+                                 Json{{"op", "smart_relink"}, {"page", 1}, {"id", "so"}, {"data", png_a}, {"link", Json{{"path", "a.png"}}}},
+                                 Json{{"op", "add_line"}, {"page", 1}, {"text", "台詞"}, {"x_mm", 5}, {"y_mm", 5}},
+                             }));
+        QVERIFY(!doc.story.empty());
+        const std::string line = doc.story.back().id;
+        const std::string from = genko::storage::AssetStore(*doc.asset_dir).put_bytes(render::write_png(picture(true)), ".png");
+        // (trap: a CMYK page's inks)
+        Document inks = blank_book();
+        inks = by_person(inks, ops(R"([{"op": "set_color_mode", "page": 1, "mode": "cmyk", "profile": "coated-cmyk", "depth": 16}])"));
+        const auto brush = [](const char* name) {
+            return Json{{"op", name}, {"page", 1}, {"layer_id", "paint"}, {"points", Json::array({Json::array({4, 4}), Json::array({18, 16})})}, {"width_mm", 4}};
+        };
+        struct Case {
+            Json op;
+            const Document* on;
+        };
+        std::vector<Case> cases;
+        for (const char* name : {"dodge", "burn", "sponge", "blur_brush", "sharpen_brush", "smudge_brush", "mixer_brush", "background_eraser", "color_replacement",
+                                 "spot_healing"}) {
+            cases.push_back({brush(name), &doc});
+        }
+        Json op = brush("clone_stamp");
+        op["offset_mm"] = Json::array({6, 0});
+        cases.push_back({op, &doc});
+        op = brush("healing_brush");
+        op["source_mm"] = Json::array({10, 12});
+        cases.push_back({op, &doc});
+        op = brush("history_brush");
+        op["from"] = from;
+        cases.push_back({op, &doc});
+        const auto one = [](const char* name, Json fields) {
+            fields["op"] = name;
+            fields["page"] = 1;
+            return fields;
+        };
+        const std::vector<Json> others = {
+            one("content_aware_fill", Json{{"layer_id", "paint"}, {"area", Json{{"rect", Json::array({6, 6, 4, 4})}}}, {"output", "new"}, {"new_id", "filled"}}),
+            one("apply_image", Json{{"id", "paint"}, {"blending", "screen"}, {"opacity", 40}}),
+            one("hdr_toning", Json{{"strength", 1.5}}),
+            one("auto_adjust", Json{{"id", "paint"}, {"mode", "contrast"}}),
+            one("fade_layer", Json{{"id", "paint"}, {"from", from}, {"opacity", 50}}),
+            one("render_picture", Json{{"kind", "picture_frame"}}),
+            one("vanishing_point", Json{{"id", "paint"},
+                                        {"planes", Json::array({Json{{"corners_mm", Json::array({Json::array({4, 4}), Json::array({18, 4}), Json::array({20, 18}),
+                                                                                                 Json::array({2, 18})})}}})},
+                                        {"clone", Json::array({Json{{"source", Json::array({6, 6})}, {"points", Json::array({Json::array({12, 12}), Json::array({14, 14})})}}})}}),
+            one("content_aware_scale", Json{{"id", "paint"}, {"scale_x", 60}}),
+            one("magic_erase", Json{{"layer_id", "paint"}, {"x_mm", 3}, {"y_mm", 3}}),
+            one("matting", Json{{"id", "paint"}, {"kind", "defringe"}}),
+            one("outline_area", Json{{"layer_id", "paint"}, {"area", Json{{"rect", Json::array({4, 4, 12, 12})}}}, {"width_mm", 1}, {"rgb", Json::array({0, 0, 0})}}),
+            one("stroke_path", Json{{"layer_id", "pen"}, {"name", "線"}, {"width_mm", 0.5}}),
+            one("add_shape_part", Json{{"layer_id", "pen"}, {"shape", Json{{"kind", "ellipse"}, {"rect", Json::array({10, 10, 6, 6})}}}, {"fill", Json{{"rgb", Json::array({0, 0, 0})}}}}),
+            one("edit_shape_part", Json{{"layer_id", "pen"}, {"id", "s1"}, {"move_mm", Json::array({1, 1})}}),
+            one("combine_shape_parts", Json{{"layer_id", "pen"}, {"ids", Json::array({"s1", "s2"})}}),
+            one("move_shape_parts", Json{{"layer_id", "pen"}, {"ids", Json::array({"s2"})}, {"to_layer", "pen2"}}),
+            one("rasterize_layer", Json{{"id", "pen"}}),
+            one("rasterize_lines", Json{{"ids", Json::array({line})}}),
+            one("layer_style_to_layers", Json{{"id", "styled"}}),
+            one("apply_layer_mask", Json{{"id", "masked"}}),
+            one("mask_from_transparency", Json{{"id", "paint"}}),
+            one("smart_convert", Json{{"ids", Json::array({"paint"})}}),
+            one("smart_stack", Json{{"id", "so"}, {"mode", "median"}}),
+            one("smart_replace", Json{{"id", "so"}, {"data", png_b}}),
+            one("smart_relink", Json{{"id", "so"}, {"data", png_b}, {"link", Json{{"path", "b.png"}}}}),
+            one("smart_update", Json{{"id", "so"}, {"data", png_b}}),
+        };
+        for (const Json& each : others) cases.push_back({each, &doc});
+        cases.push_back({one("trap", Json{{"id", "paint"}, {"width_mm", 0.2}}), &inks});
+        // every name of the table has its case, and the build has it
+        std::set<std::string> named;
+        for (const Case& c : cases) named.insert(c.op["op"].get<std::string>());
+        std::set<std::string> table;
+        for (const std::string_view name : core::strict_drawing_ops()) {
+            table.insert(std::string(name));
+            QVERIFY2(genko::render::ops_registry().find(name) != nullptr, std::string(name).c_str());
+        }
+        QVERIFY2(named == table, Json(std::vector<std::string>(table.begin(), table.end())).dump().c_str());
+        std::vector<std::string> wrong;
+        for (const Case& c : cases) {
+            const std::string name = c.op["op"].get<std::string>();
+            const Json batch = Json::array({c.op});
+            try {  // (it draws: the book without strict_gates is not the book it was)
+                const Document drawn = bus().apply(*c.on, batch, Actor("ai:bot")).doc;
+                if (drawn.pages[0] == c.on->pages[0] && drawn.smart_contents == c.on->smart_contents) wrong.push_back(name + ": changes nothing");
+            } catch (const ApplyError& error) {
+                wrong.push_back(name + ": " + error.what());
+                continue;
+            }
+            Document strict = *c.on;
+            strict.strict_gates = true;
+            const std::string words = name + " on a printed layer needs name_ok on page 1 (strict_gates)";
+            for (const char* actor : {"ai:bot", "human:owner"}) {
+                const std::string error = error_of(strict, batch, actor);
+                if (error.find(words) == std::string::npos) wrong.push_back(name + " " + actor + ": " + error);
+            }
+            const Document named_page = by_person(strict, ops(R"([{"op": "name_ok", "page": 1}])"));
+            if (const std::string after = error_of(named_page, batch, "ai:bot"); after != "(applied)") wrong.push_back(name + " after name_ok: " + after);
+        }
+        QVERIFY2(wrong.empty(), Json(wrong).dump(1).c_str());
+    }
+
+    // (PC6, the review of pc6-A's P2-1) strict_gates set or taken off with set_meta by a person only: an agent, legacy:unknown
+    // or an agent's rights are refused it (the book as it was, and the gate after it with it); the same value, the book's
+    // other settings, and a person: as before.
+    void strictGatesAreAPersonsToChange() {
+        Document strict = book(2);
+        strict.strict_gates = true;
+        strict = apply(strict, R"([{"op": "name_ok", "page": 1}])", "human:owner").doc;
+        const std::string words = "set_meta strict_gates needs a person";
+        for (const char* actor : {"ai:bot", "legacy:unknown"}) {
+            QVERIFY2(error_of(strict, ops(R"([{"op": "set_meta", "strict_gates": false}])"), actor).find(words) != std::string::npos, actor);
+            // (taken off and then the layout changed, in one batch: refused at the first)
+            const std::string both = error_of(strict, ops(R"([{"op": "set_meta", "strict_gates": false}, {"op": "rotate_pages", "page": 1, "turn": "90cw"}])"), actor);
+            QVERIFY2(both.find("ops[0] set_meta: " + words) != std::string::npos, both.c_str());
+            QVERIFY2(error_of(book(), ops(R"([{"op": "set_meta", "strict_gates": true}])"), actor).find(words) != std::string::npos, actor);
+            QCOMPARE(error_of(strict, ops(R"([{"op": "set_meta", "strict_gates": true}])"), actor), std::string("(applied)"));  // (as it is)
+            QCOMPARE(error_of(strict, ops(R"([{"op": "set_meta", "title": "別の題"}])"), actor), std::string("(applied)"));
+        }
+        try {
+            bus().apply(strict, ops(R"([{"op": "set_meta", "strict_gates": false}])"), Actor::with_agent_rights("human:owner"));
+            QFAIL("an agent's rights took strict_gates off");
+        } catch (const ApplyError& error) {
+            QVERIFY2(std::string(error.what()).find(words) != std::string::npos, error.what());
+        }
+        QVERIFY(!apply(strict, R"([{"op": "set_meta", "strict_gates": false}])", "human:owner").doc.strict_gates);
+        QVERIFY(!apply(strict, R"([{"op": "set_meta", "strict_gates": false}])").doc.strict_gates);  // (genko: Python's own)
+    }
+
+    // (PC6, the review of pc6-A's P2-2) set_layer exportable:true on a drawn layer before the name: a precise page's pixels
+    // (color_raster) and a CMYK page's (ink_raster) are drawn too — kept out of print, drawn on, put back is refused.
+    void aDrawnLayerOfEveryKindWaitsToPrint() {
+        namespace core = genko::core;
+        namespace render = genko::render;
+        for (const char* mode : {R"({"op": "set_color_mode", "page": 1, "mode": "rgb", "depth": 16})",
+                                 R"({"op": "set_color_mode", "page": 1, "mode": "cmyk", "profile": "coated-cmyk", "depth": 16})"}) {
+            Document doc = core::new_episode("版", 1, 1, core::PageSpec::custom(25.4, 25.4, 20, 20, 1, 2, 2, 2, 2, 200, "color"));
+            {
+                core::Page& page = doc.edit_page(0);
+                page.frames.clear();
+                page.layers.clear();
+                core::Layer layer;
+                layer.id = "paint";
+                layer.role = core::LayerRole::User;
+                layer.kind = core::LayerKind::Raster;
+                layer.panel_clip = false;
+                render::raster::save_raster(page, layer, render::Image::create("RGBA", render::Size{200, 200}, render::Ink{90, 40, 120, 255}));
+                page.layers.push_back(layer);
+            }
+            doc = bus().apply(doc, Json::array({ops(mode)}), Actor("human:owner")).doc;
+            const genko::core::Layer& kept = doc.page(0).layers[0];
+            QVERIFY(!kept.raster_png || kept.raster_png->empty());
+            QVERIFY((kept.color_raster && !kept.color_raster->empty()) || (kept.ink_raster && !kept.ink_raster->empty()));
+            doc.strict_gates = true;
+            const std::string error = error_of(doc, ops(R"([{"op": "set_layer", "page": 1, "id": "paint", "exportable": false},
+                                                           {"op": "set_layer", "page": 1, "id": "paint", "exportable": true}])"),
+                                               "ai:bot");
+            QVERIFY2(error.find("set_layer exportable on a drawn layer needs name_ok on page 1 (strict_gates)") != std::string::npos, error.c_str());
+        }
     }
 };
 

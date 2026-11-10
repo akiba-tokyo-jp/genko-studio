@@ -1,4 +1,5 @@
 #include "core/command_bus.hpp"
+#include "core/strict_ops.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -288,11 +289,22 @@ bool raster_edit_op(std::string_view name) {
 // after it too: a printed layer it drew or made is refused, CommandBus::apply. The ops that only move a layer —
 // transform_layers, align_layers, distribute_layers, straighten_layer — are not drawing: SPEC AUTO-01's
 // auto_align_layers)
-bool pixel_tool_op(std::string_view name) {
-    return one_of(name, {"dodge", "burn", "sponge", "blur_brush", "sharpen_brush", "smudge_brush", "mixer_brush", "background_eraser",
+constexpr std::string_view kDrawingOps[] = {"dodge", "burn", "sponge", "blur_brush", "sharpen_brush", "smudge_brush", "mixer_brush", "background_eraser",
                          "color_replacement", "clone_stamp", "healing_brush", "spot_healing", "history_brush", "content_aware_fill",
                          "apply_image", "hdr_toning", "auto_adjust", "fade_layer", "trap", "render_picture", "vanishing_point",
-                         "content_aware_scale", "magic_erase", "matting", "outline_area", "stroke_path"});
+                         "content_aware_scale", "magic_erase", "matting", "outline_area", "stroke_path",
+                         // (the review of pc6-A's P2-3: a pen layer's shape parts, as add_shape; a layer made again with its
+                         // look kept — rasterized, its style made layers, its mask applied or made of its transparency,
+                         // layers made one smart object — as convert_layer, bake_layer_styles and set_layer_mask; a smart
+                         // object's picture changed — stacked, its contents replaced, relinked or brought up to date — as
+                         // put_raster. Not here: what draws nothing on a layer's pixels — smart filters, layer styles,
+                         // corrections, the vector mask, the scale marker, a page's colour mode or profile: SPEC AUTO-01)
+                         "add_shape_part", "edit_shape_part", "combine_shape_parts", "move_shape_parts", "rasterize_layer",
+                         "rasterize_lines", "layer_style_to_layers", "apply_layer_mask", "mask_from_transparency", "smart_convert",
+                         "smart_stack", "smart_replace", "smart_relink", "smart_update"};
+
+bool pixel_tool_op(std::string_view name) {
+    return std::find(std::begin(kDrawingOps), std::end(kDrawingOps), name) != std::end(kDrawingOps);
 }
 
 // The key a drawing op reads the id of the layer it works on from (without it, the op takes the role in "layer"):
@@ -380,14 +392,31 @@ void check_approved_layouts(const std::vector<PagePtr>& before, const Document& 
 
 // (PC6, the review's P2-1: pixel_tool_op's ops, after them — a printed layer of a page whose name is not approved yet
 // that they drew on, or made, is refused as drawing on it before the op is, check_strict)
-void check_unnamed_drawing(const std::vector<PagePtr>& before, const Document& after, const std::string& name) {
+// `contents`: the book's smart object contents before the op — a printed smart object whose contents it replaced (smart_replace,
+// smart_relink, smart_update: the layer the same, its picture not) is drawn on too.
+void check_unnamed_drawing(const std::vector<PagePtr>& before, const std::map<std::string, std::shared_ptr<const SmartContents>>& contents,
+                           const Document& after, const std::string& name) {
+    const auto replaced = [&](const Layer& layer) {
+        const std::optional<std::string> id = smart::contents_id(layer);
+        if (!id) return false;
+        const auto was = contents.find(*id);
+        const auto now = after.smart_contents.find(*id);
+        return was == contents.end() || now == after.smart_contents.end() || was->second != now->second;
+    };
     for (const PagePtr& was : before) {
         const Page* now = page_now(after, was);
         if (now == nullptr || now == was.get()) continue;
         for (const Layer& layer : now->layers) {
             if (!printed(layer) || !layer.exportable) continue;
             const auto old = std::find_if(was->layers.begin(), was->layers.end(), [&](const Layer& l) { return l.id == layer.id; });
-            if (old == was->layers.end() || !same_locked_look(*old, layer)) {
+            if (old == was->layers.end() || !same_locked_look(*old, layer) || replaced(layer)) {
+                throw OpError(name + " on a printed layer needs name_ok on page " + now->index.repr() + " (strict_gates)");
+            }
+        }
+        // (a printed layer it took away is drawing on the page too, as delete_layers: the review of pc6-A's P3-5)
+        for (const Layer& layer : was->layers) {
+            if (!printed(layer) || !layer.exportable) continue;
+            if (std::none_of(now->layers.begin(), now->layers.end(), [&](const Layer& l) { return l.id == layer.id; })) {
                 throw OpError(name + " on a printed layer needs name_ok on page " + now->index.repr() + " (strict_gates)");
             }
         }
@@ -450,6 +479,8 @@ void read_as_touched_pages_does(const Json& ops) {
 }
 
 }  // namespace
+
+std::vector<std::string_view> strict_drawing_ops() { return {std::begin(kDrawingOps), std::end(kDrawingOps)}; }
 
 void check_page_held(const Document& doc, std::size_t row, const Actor& actor) {
     if (row < doc.pages.size()) check_held(doc, *doc.pages[row], doc.pages[row]->index, actor);
@@ -650,6 +681,12 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
     const bool named = name_value != nullptr && name_value->is_string();
     if (named && name == "name_ok" && !actor.can_approve()) {  // (GATE_OPS)
         throw OpError(name + " needs a person (actor " + actor.name() + " cannot approve)");
+    }
+    // (PC6, the review of pc6-A's P2-1: strict_gates — the book's rules of the approvals — set or taken off by a person only,
+    // as the control channel takes no op that changes them (SPEC AUTO-01). Python lets anyone; the coordinator's decision)
+    if (const Json* strict = named && name == "set_meta" ? get(op, "strict_gates") : nullptr;
+        strict != nullptr && py_truthy(*strict) != doc.strict_gates && !actor.can_approve()) {
+        throw OpError("set_meta strict_gates needs a person (actor " + actor.name() + " cannot approve)");
     }
     if (named && (name == "undo" || name == "set_meta" || name == "set_bible" || name == "set_autosave")) return;
     if (named && (name == "set_paper" || name == "set_color_mode" || name == "set_inks" || name == "assign_profile" || name == "convert_profile" ||
@@ -895,7 +932,10 @@ void check_strict(const Document& doc, const Json& op_in, const Actor& actor) {
             }
         }
         const bool drawn = target != nullptr && (target->stroke_count() > 0 || !target->patches.empty() || (target->shapes && !target->shapes->items.empty()) ||
-                                                 (target->raster_png && !target->raster_png->empty()));
+                                                 (target->raster_png && !target->raster_png->empty()) ||
+                                                 // (PC6, the review of pc6-A's P2-2: a precise page's pixels, a CMYK or Lab page's)
+                                                 (target->color_raster && !target->color_raster->empty()) ||
+                                                 (target->ink_raster && !target->ink_raster->empty()));
         if (drawn && printed(*target) && !target->exportable && !page.name_ok) {
             throw OpError("set_layer exportable on a drawn layer needs name_ok on page " + page.index.repr() +
                           " (strict_gates)");
@@ -1511,12 +1551,14 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                 const bool strict = work.strict_gates;
                 const std::vector<PagePtr> approved =
                     strict && !actor.can_approve() && name_text != "set_page_spec" ? pages_named(work, true) : std::vector<PagePtr>();
-                const std::vector<PagePtr> unnamed = strict && pixel_tool_op(name_text) ? pages_named(work, false) : std::vector<PagePtr>();
+                const bool drawing = strict && pixel_tool_op(name_text);
+                const std::vector<PagePtr> unnamed = drawing ? pages_named(work, false) : std::vector<PagePtr>();
+                const auto contents_before = drawing ? work.smart_contents : decltype(work.smart_contents)();
                 OpContext context{work, *current, actor};
                 (*function)(context);
                 check_locked_layers(locked, work, *current);
                 check_approved_layouts(approved, work);
-                check_unnamed_drawing(unnamed, work, name_text);
+                check_unnamed_drawing(unnamed, contents_before, work, name_text);
                 settle_blend_channels(work);  // (blend-channels@1: a page whose mode changed blends every channel again)
                 validate_color_document(work);
                 try {

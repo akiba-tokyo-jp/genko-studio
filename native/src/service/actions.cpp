@@ -6,9 +6,11 @@
 #include <QString>
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <system_error>
 
 #include "core/config_dir.hpp"
 #include "core/ids.hpp"
@@ -101,10 +103,33 @@ Json load() {
     return out;
 }
 
+// (PC6, the review of pc6-A's P3-6) Is the file there one that load() could not read — too deep, not JSON, not an object?
+// Read as no actions, it is kept aside before a save writes over it: what it held is not lost.
+static bool unreadable_there() {
+    std::ifstream in(path(), std::ios::binary);
+    if (!in) return false;
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (core::too_deep(text)) return true;
+    const Json data = Json::parse(text, nullptr, false);
+    return data.is_discarded() || !data.is_object();
+}
+
 std::optional<std::string> save(const Json& all) {
     core::DumpOptions options;
     options.indent = 1;
     options.item_separator = ",";
+    if (unreadable_there()) {  // (actions.json.unreadable-<when>: the file as it was, beside the new one)
+        const std::string when = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz")).toStdString();
+        std::filesystem::path aside = path();
+        aside += ".unreadable-" + when;
+        std::error_code ec;
+        std::filesystem::rename(path(), aside, ec);
+        if (ec) {
+            return QStringLiteral("読めない actions.json を別の名前に退けられないので、アクションを書きませんでした（%1）")
+                .arg(QString::fromStdString(ec.message()))
+                .toStdString();
+        }
+    }
     try {
         storage::write_atomic(path(), core::dump(all, options));
     } catch (const std::exception& error) {

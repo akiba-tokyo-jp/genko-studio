@@ -687,6 +687,24 @@ private slots:
             out << R"({"影": {"ops": [{"op": "add_layer", "page": 1, "x": )" << std::string(500000, '[') << std::string(500000, ']') << "}]}}";
         }
         QVERIFY(service::actions::load().empty());
+        // (the review of pc6-A's P3-6: the next save keeps the file it could not read aside, as it was, before it writes)
+        const std::string unreadable = storage::read_file(service::actions::path());
+        QVERIFY(!service::actions::store("影", Json::array({Json{{"op", "add_layer"}, {"page", 1}}}), "2026-10-28 12:00"));
+        QCOMPARE(service::actions::load()["影"]["made"], Json("2026-10-28 12:00"));
+        std::vector<std::filesystem::path> aside;
+        for (const auto& entry : std::filesystem::directory_iterator(service::actions::path().parent_path())) {
+            if (entry.path().filename().string().starts_with("actions.json.unreadable-")) aside.push_back(entry.path());
+        }
+        QCOMPARE(aside.size(), std::size_t{1});
+        QVERIFY(storage::read_file(aside[0]) == unreadable);
+        // (a file it reads is written over as before: nothing more kept aside)
+        QVERIFY(!service::actions::remove("影"));
+        std::size_t kept = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(service::actions::path().parent_path())) {
+            if (entry.path().filename().string().starts_with("actions.json.unreadable-")) ++kept;
+        }
+        QCOMPARE(kept, std::size_t{1});
+        std::filesystem::remove(aside[0]);
         std::filesystem::remove(service::actions::path());
     }
 
