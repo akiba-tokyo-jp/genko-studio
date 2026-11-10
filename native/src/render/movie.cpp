@@ -25,6 +25,9 @@
 #include <signal.h>
 #include <unistd.h>
 #endif
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
 #include "core/error.hpp"
 #include "core/paths.hpp"
@@ -38,10 +41,20 @@ namespace genko::render::movie {
 namespace {
 
 // (PC6, the review's P3-4) ffmpeg starts a process group of its own (POSIX), stopped as a whole — as a plugin's process
-// (render/plugins.cpp's own_process_group): what it started stops with it. (Windows: the process itself only.)
+// (render/plugins.cpp's own_process_group): what it started stops with it. (Windows: the process itself only.) Out of
+// Genko's group a Ctrl+C or a kill of Genko no longer reaches it: on Linux it is stopped when the thread that started it —
+// and waits for it, to its end — goes (PR_SET_PDEATHSIG; already gone before that: it ends), as a plugin's process.
 void own_process_group(QProcess& process) {
 #ifdef Q_OS_UNIX
-    process.setChildProcessModifier([] { (void)::setpgid(0, 0); });
+    process.setChildProcessModifier([parent = ::getpid()] {
+        (void)::setpgid(0, 0);
+#ifdef __linux__
+        (void)::prctl(PR_SET_PDEATHSIG, SIGKILL);
+        if (::getppid() != parent) ::_exit(127);
+#else
+        (void)parent;
+#endif
+    });
 #else
     (void)process;
 #endif

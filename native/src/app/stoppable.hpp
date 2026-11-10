@@ -82,6 +82,41 @@ inline QWidget* outermost(QWidget* widget) {
     return widget;
 }
 
+// A work's place among its window's while it runs (whatever way it leaves): a window asked to close already stops it at
+// once; the last one gone closes the window again when it was asked to close meanwhile.
+class Registered {
+public:
+    Registered(QWidget* window, std::shared_ptr<std::stop_source> stop) : window_(window), alive_(window), stop_(std::move(stop)) {
+        if (window_ == nullptr) return;
+        Busy& here = busy()[window_];
+        here.stops.push_back(stop_);
+        if (here.close_after) stop_->request_stop();
+    }
+    ~Registered() {
+        if (window_ == nullptr) return;
+        auto& windows = busy();
+        const auto found = windows.find(window_);
+        if (found == windows.end()) return;
+        auto& stops = found->second.stops;
+        stops.erase(std::remove(stops.begin(), stops.end(), stop_), stops.end());
+        if (!stops.empty()) return;
+        const bool close_again = found->second.close_after;
+        windows.erase(found);
+        if (close_again && alive_) {  // (asked to close while it worked: closed now that it is back)
+            QTimer::singleShot(0, alive_.data(), [w = alive_] {
+                if (w) w->close();
+            });
+        }
+    }
+    Registered(const Registered&) = delete;
+    Registered& operator=(const Registered&) = delete;
+
+private:
+    QWidget* window_;
+    QPointer<QWidget> alive_;
+    std::shared_ptr<std::stop_source> stop_;
+};
+
 }  // namespace stoppable_detail
 
 // `window` has long work running (run_stoppable for it, or for a widget or a window over it): each is asked to stop and
@@ -100,9 +135,7 @@ auto run_stoppable(QWidget* parent, const QString& title, const QString& label, 
     -> std::optional<std::invoke_result_t<Work&, const std::function<bool()>&>> {
     using Result = std::invoke_result_t<Work&, const std::function<bool()>&>;
     auto stop = std::make_shared<std::stop_source>();
-    QWidget* const window = stoppable_detail::outermost(parent);
-    const QPointer<QWidget> window_alive(window);
-    if (window != nullptr) stoppable_detail::busy()[window].stops.push_back(stop);
+    const stoppable_detail::Registered registered(stoppable_detail::outermost(parent), stop);
     const QPointer<QProgressDialog> progress = new QProgressDialog(label, QStringLiteral("中止"), 0, 0, parent);
     progress->setObjectName(QStringLiteral("stoppable_progress"));
     progress->setWindowTitle(title);
@@ -159,23 +192,6 @@ auto run_stoppable(QWidget* parent, const QString& title, const QString& label, 
     if (progress) {
         progress->hide();
         progress->deleteLater();
-    }
-    bool close_again = false;
-    if (window != nullptr) {
-        auto& busy = stoppable_detail::busy();
-        if (const auto found = busy.find(window); found != busy.end()) {
-            auto& stops = found->second.stops;
-            stops.erase(std::remove(stops.begin(), stops.end(), stop), stops.end());
-            if (stops.empty()) {
-                close_again = found->second.close_after;
-                busy.erase(found);
-            }
-        }
-    }
-    if (close_again && window_alive) {  // (asked to close while it worked: closed now that it is back)
-        QTimer::singleShot(0, window_alive.data(), [w = window_alive] {
-            if (w) w->close();
-        });
     }
     if (done->error) std::rethrow_exception(done->error);
     if (done->cancelled || stop->stop_requested()) return std::nullopt;

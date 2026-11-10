@@ -616,6 +616,20 @@ private slots:
         out.format = "jpg";
         out.quality = 13;
         QCOMPARE(thrown([&] { automate::run(inputs.items, Json::array(), out, options); }).second, std::string("the quality is 0 to 12"));
+        // (PC6) stopped between the files of one input (画像プロセッサー's JPEG written, its PNG not yet): the JPEG kept and
+        // said — in `files`, "cancelled" in its row —, nothing more written
+        automate::ImageProcessor two;
+        two.formats = {"jpg", "png"};
+        const automate::Output both = automate::processor_output(two, root / "two");
+        options.cancelled = [&root] { return fs::exists(root / "two" / "JPEG" / "a.jpg"); };
+        result = automate::run({inputs.items[0]}, Json::array(), both, options);
+        QVERIFY(result.cancelled);
+        QCOMPARE(result.files.size(), std::size_t(1));
+        QCOMPARE(result.files[0]["cancelled"], Json(true));
+        QCOMPARE(result.files[0]["output"], Json(core::path_to_utf8(root / "two" / "JPEG" / "a.jpg")));
+        QVERIFY(!fs::exists(root / "two" / "PNG" / "a.png"));
+        QVERIFY(result.errors.empty());
+        options.cancelled = {};
     }
 
     // The books and folders guarded: an agent's book known (an unnamed caller is legacy:unknown there), a v1–v3 book

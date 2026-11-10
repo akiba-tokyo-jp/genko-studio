@@ -139,7 +139,9 @@ struct Book {
 };
 
 // (PC6) `then` given the long work's progress window (app/stoppable.hpp's, while the work runs on its worker) once it is
-// there — the window's own thread going on meanwhile: this timer runs.
+// there — the window's own thread going on meanwhile: this timer runs. One that does not hold every window
+// (ApplicationModal) counted in `unheld`, looked at by the test.
+int unheld = 0;
 void when_stoppable(std::function<void(QProgressDialog*)> then) {
     auto* timer = new QTimer;
     timer->setInterval(10);
@@ -147,7 +149,7 @@ void when_stoppable(std::function<void(QProgressDialog*)> then) {
         for (QWidget* w : QApplication::topLevelWidgets()) {
             auto* progress = qobject_cast<QProgressDialog*>(w);
             if (progress == nullptr || progress->objectName() != QStringLiteral("stoppable_progress")) continue;
-            if (progress->windowModality() != Qt::ApplicationModal) qWarning("the work's progress does not hold every window");
+            if (progress->windowModality() != Qt::ApplicationModal) ++unheld;
             timer->stop();
             timer->deleteLater();
             then(progress);
@@ -447,6 +449,7 @@ private slots:
             if (second) second->close();
             QTRY_VERIFY(!second);
         }
+        QCOMPARE(unheld, 0);  // (each time its progress window over every window)
         app::actions::remove(QStringLiteral("小さく"));
     }
 
@@ -482,6 +485,7 @@ private slots:
         b.act("act_image_processor")->trigger();
         QVERIFY2(b.window->status_label()->text().contains(QStringLiteral("（中止しました）")), qPrintable(b.window->status_label()->text()));
         QVERIFY(files_in(b.root / "out") < static_cast<std::size_t>(kFiles));
+        QCOMPARE(unheld, 0);
     }
 
     // 画像を合わせる… and 条件付きモード変更…: the page in front, one Undo each; a mode not listed left as it is (said).

@@ -26,6 +26,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QProcess>
 #include <QTemporaryDir>
 
 #include <filesystem>
@@ -52,6 +53,10 @@
 #include "storage/reader.hpp"
 #include "storage/transaction.hpp"
 #include "testsupport.hpp"
+
+#ifdef Q_OS_LINUX
+#include <signal.h>
+#endif
 
 namespace fs = std::filesystem;
 using genko::core::Json;
@@ -698,6 +703,41 @@ private slots:
         (void)ranim::export_animation(worked.page(1), genko::storage::path_from_utf8(every_want.toStdString()), &worked, 100);
         QVERIFY(genko::test::read_bytes(every) == genko::test::read_bytes(every_want));
         QVERIFY(genko::test::read_bytes(every) != genko::test::read_bytes(got));
+#ifdef Q_OS_LINUX
+        {  // (PC6, the review's P3-4) genko killed by Ctrl+C while ffmpeg — in a process group of its own — works on its MP4:
+           // ffmpeg goes with it (its parent's death its SIGKILL), not left running for half an hour
+            const QString bin = path("fake-ffmpeg");
+            QVERIFY(QDir().mkpath(bin));
+            const QString started = bin + "/pid";
+            {
+                QFile script(bin + "/ffmpeg");
+                QVERIFY(script.open(QIODevice::WriteOnly));
+                script.write(("#!/bin/sh\necho $$ > '" + started + "'\nexec sleep 120\n").toUtf8());
+                script.close();
+                QVERIFY(script.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+            }
+            QProcess killed;
+            QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+            env.insert(QStringLiteral("PATH"), bin + ":" + env.value(QStringLiteral("PATH")));
+            killed.setProcessEnvironment(env);
+            killed.start(genko::test::genko_cli(), {"export", book, path("range/killed.mp4"), "--format", "animation", "--page", "2"});
+            QVERIFY(killed.waitForStarted(30000));
+            QTRY_VERIFY_WITH_TIMEOUT(QFile(started).size() > 0, 120000);
+            QFile pid_file(started);
+            QVERIFY(pid_file.open(QIODevice::ReadOnly));
+            const QString pid = QString::fromLatin1(pid_file.readAll()).trimmed();
+            QVERIFY(::kill(static_cast<pid_t>(killed.processId()), SIGINT) == 0);
+            QVERIFY(killed.waitForFinished(30000));
+            const auto gone = [&pid] {
+                QFile stat(QStringLiteral("/proc/") + pid + QStringLiteral("/stat"));
+                if (!stat.open(QIODevice::ReadOnly)) return true;
+                const QByteArray line = stat.readAll();
+                const qsizetype close = line.lastIndexOf(')');
+                return close >= 0 && close + 2 < line.size() && (line[close + 2] == 'Z' || line[close + 2] == 'X');
+            };
+            QTRY_VERIFY_WITH_TIMEOUT(gone(), 10000);
+        }
+#endif
         const auto wrong = genko::test::run_genko({"export", book, path("range/x.png"), "--format", "png", "--work-area"});
         QCOMPARE(wrong.exit_code, 2);
         QVERIFY2(wrong.err.contains("--work-area: only with --format animation"), wrong.err.constData());

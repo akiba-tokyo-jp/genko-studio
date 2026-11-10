@@ -605,7 +605,7 @@ private slots:
     // (here one of the test's own that never ends) waited for there — 中止 stops it, nothing written, said; the window's
     // close while it works is kept until the work is back, then the window closes. (POSIX: the test's ffmpeg a shell script)
     void renderingStopsWhileFfmpegWorks() {
-#ifdef Q_OS_LINUX
+#ifdef Q_OS_UNIX
         Studio s;
         app::MainWindow* w = s.window.get();
         w->show_dock(QStringLiteral("タイムライン"));
@@ -673,6 +673,8 @@ private slots:
         QVERIFY(w->isVisible());  // (its close left for when the work is back)
         QVERIFY(!QFile::exists(mp4));
         QTRY_VERIFY(!w->isVisible());
+#else
+        QSKIP("the test's own ffmpeg is a shell script (POSIX)");
 #endif
     }
 
