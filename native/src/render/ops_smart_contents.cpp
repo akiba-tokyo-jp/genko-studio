@@ -470,6 +470,9 @@ void smart_to_page(OpContext& c) {
         doc.patterns = work.patterns;
         doc.pattern_files = work.pattern_files;
         doc.native_files = work.native_files;
+        // (type@1, PC6 review B P2-1: the PSD's named character and paragraph styles its type layers take — import_psd added
+        // them to the book's, or found them there)
+        doc.type_styles = work.type_styles;
         for (const std::string& feature : work.features) {
             if (std::find(doc.features.begin(), doc.features.end(), feature) == doc.features.end()) doc.features.push_back(feature);
         }

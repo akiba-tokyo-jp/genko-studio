@@ -194,6 +194,9 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("not yet ported: merging what shows through groups on a page in precise colour.*",
                          "高精度のページでは、グループを通して見えるレイヤーの結合・画像の統合はまだできません"
                          "（そのグループの「グループとして描く」を外すと結合できます。見え方は変わります）"));
+        // (video@1, PC6 review B P2-5: a page turned or mirrored with a video layer)
+        r.push_back(rule("not yet ported: a video layer turned or mirrored with the page.*",
+                         "ビデオレイヤーのあるページは回転・反転できません（フッテージは箱の中に立てて置くため。先にビデオレイヤーをラスタライズしてください。原稿は変わりません）"));
         // what this build does not do yet (render::NotYetPorted, the studio's official export)
         r.push_back(rule("not yet ported: (.*)", [](const QRegularExpressionMatch& m) {
             return QStringLiteral("この版の Genko では、まだ扱えないもの（%1）があるため、できませんでした（原稿は変わりません）").arg(unported_element(m.captured(1)));
@@ -1652,6 +1655,10 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("the picture (.*) could not be laid on the stack's page", "画像「\\1」をスタックのページに置けませんでした"));
         r.push_back(rule("the picture has no pixels to load|a picture to load is missing", "読み込む画像の画素がありません"));
         r.push_back(rule("the layers have nothing to draw", "選んだレイヤーには、描かれたものがありません"));
+        // (PC6 review B P2-4, P2-5: what an animation's timeline times, and a video layer's box)
+        r.push_back(rule("an animation folder or its cels \\(a video layer's too\\) cannot go into a smart object.*",
+                         "アニメーションフォルダーとそのセル（ビデオレイヤーも）は、タイムラインで時間を決めているため、スマートオブジェクトにできません"));
+        r.push_back(rule("a video layer's footage box would lie past the places a page holds", "ビデオレイヤーのフッテージを置く箱が、ページから遠すぎる所に出てしまいます"));
         r.push_back(rule("layer \\S+ has nothing to rasterize", "このレイヤーには、ラスタライズするものがありません（すでに画素のレイヤーです）"));
         r.push_back(rule("the transform squashes the smart object flat|the picture would be laid too small", "スマートオブジェクトが潰れてしまう変形はできません"));
         r.push_back(rule("the picture is too large to keep its 16 or 32 bits on this page.*", "画像が大きすぎて、このページでは 16・32 bit のまま置けません"));

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -148,5 +149,31 @@ Json list(const Document& doc, Kind kind);
 
 // Every text of the book (its lines, its pages' type layers, the type layers in the contents of its smart objects).
 std::vector<const StoryLine*> texts(const Document& doc);
+
+// --- texts brought from another book --------------------------------------------------------------------------------------
+
+// PC6 review B P2-1: the styles texts of another book take (作品の結合 — import_pages —, a PSD's contents made a page) come
+// into this one with them. Each style a text names is this book's style of the same name (or that name with the number
+// unique_name gives it) and the same attributes, else a copy of it under a new id and a name the book's styles do not have;
+// the text then names that id, and its look under this book's styles — Basic Paragraph too — is kept as it was under the
+// other's (keep_look). A style the other book does not have is left as named (the book was not whole: validate_type says
+// so); Basic Paragraph is the book's own. core::OpError when the book would keep more than 512 styles of a kind.
+class StyleCarry {
+public:
+    // `from`: the other book's type_styles (nullptr: none), which must outlive the carry.
+    StyleCarry(Document& doc, const Json* from);
+    // A record of the other book: the styles it names brought, its look kept. `typeset`: a type layer's (always drawn by
+    // its attributes); a line's record without native_type is left as it is (it names no style).
+    void bring(StoryLine& record, bool typeset);
+    // Every type layer of the page (not inside its smart objects' contents: core::smart::bring_contents' `each` reaches
+    // those).
+    void bring_page(Page& page);
+
+private:
+    std::string mapped(Kind kind, const std::string& id);
+    Document& doc_;
+    const Json* from_;
+    std::map<std::pair<int, std::string>, std::string> ids_;  // (kind, their id) → the id here
+};
 
 }  // namespace genko::core::type_styles

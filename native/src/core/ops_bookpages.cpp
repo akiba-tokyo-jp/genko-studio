@@ -27,6 +27,7 @@
 #include "core/pyconv.hpp"
 #include "core/pyops.hpp"
 #include "core/smart.hpp"
+#include "core/type_styles.hpp"
 
 namespace genko::core {
 
@@ -643,6 +644,8 @@ void import_pages(OpContext& c, const BookPageHooks& hooks) {
         if (source_of(index) == nullptr) throw OpError("the other book has no page " + index.text);
     }
     const std::size_t start = doc.pages.size();
+    // (type@1, PC6 review B P2-1: the character and paragraph styles their texts take come with them)
+    type_styles::StyleCarry styles(doc, other.type_styles ? &*other.type_styles : nullptr);
     for (std::size_t n = 0; n < wanted.size(); ++n) {
         const Page& source = *source_of(wanted[n]);
         Page clone = source;
@@ -686,8 +689,13 @@ void import_pages(OpContext& c, const BookPageHooks& hooks) {
         for (const std::string& ref : lut3d::refs_of(clone)) {
             if (const auto table = other.luts.find(ref); table != other.luts.end() && table->second) doc.luts.emplace(ref, table->second);
         }
-        smart::bring_contents(doc, other, clone);  // (smart-objects@1: its smart objects' contents, under ids of this book)
-        for (StoryLine& line : lines) doc.story.push_back(std::move(line));
+        // (smart-objects@1: its smart objects' contents, under ids of this book — the type layers on it and in them taking
+        // the styles brought)
+        smart::bring_contents(doc, other, clone, [&styles](Page& on) { styles.bring_page(on); });
+        for (StoryLine& line : lines) {
+            styles.bring(line, false);
+            doc.story.push_back(std::move(line));
+        }
         doc.pages.push_back(std::make_shared<Page>(std::move(clone)));
     }
     // what the pages' pictures are: the other book's studio assets this book does not have

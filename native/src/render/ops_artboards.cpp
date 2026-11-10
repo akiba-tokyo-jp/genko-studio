@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "core/anim.hpp"
 #include "core/artboards.hpp"
 #include "core/covers.hpp"
 #include "core/error.hpp"
@@ -266,6 +267,30 @@ void artboard_from_layers(core::OpContext& c) {
     made.onion_from.reset();
     made.lt_threshold.reset();
     for (const char* key : {"cover", "anim", "saved_areas", "quick_mask"}) made.extra.erase(key);
+    // (PC6 review B P2-4: the animation folders taken — a video layer's too — bring their rows: the page's timeline (its
+    // speed, length, loop and work area) with only their tracks and the cels of the light table taken. The camera work is
+    // the page's view, not theirs: it stays. The rows on the page go with the folders deleted, as delete_layers takes them)
+    if (const Json* anim = core::anim::spec(source)) {
+        Json tracks = Json::array();
+        if (const auto all = anim->find("tracks"); all != anim->end() && all->is_array()) {
+            for (const Json& track : *all) {
+                const Json* folder = track.is_object() ? core::get(track, "folder") : nullptr;
+                if (folder != nullptr && folder->is_string() && taken.contains(folder->get<std::string>())) tracks.push_back(track);
+            }
+        }
+        if (!tracks.empty()) {
+            Json moved = *anim;
+            moved["tracks"] = std::move(tracks);
+            moved.erase("camera");
+            if (const auto light = moved.find("light_table"); light != moved.end() && light->is_array()) {
+                Json kept = Json::array();
+                for (const Json& cel : *light)
+                    if (cel.is_string() && taken.contains(cel.get<std::string>())) kept.push_back(cel);
+                *light = std::move(kept);
+            }
+            made.extra["anim"] = std::move(moved);
+        }
+    }
     made.channels.clear();
     made.paths.clear();
     made.work_path.reset();

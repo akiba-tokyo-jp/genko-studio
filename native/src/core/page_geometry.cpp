@@ -8,11 +8,13 @@
 #include "core/error.hpp"
 #include "core/frames.hpp"
 #include "core/measure.hpp"
+#include "core/production_json.hpp"
 #include "core/pyops.hpp"
 #include "core/pyconv.hpp"
 #include "core/pynum.hpp"
 #include "core/smart.hpp"
 #include "core/type_text.hpp"
+#include "core/video.hpp"
 
 // The warps: PhotoCraft v0.2.0 crates/geom/src/warp.rs (1-620), MIT: native/third_party/photocraft/NOTICE.md.
 // The turns' maps: crates/engine/src/canvas_geom.rs (200-235).
@@ -482,6 +484,11 @@ void map_fill(Json& fill, const Mapping& m) {
 }
 
 void map_page(Document& doc, std::size_t at, const Mapping& m, const PixelHooks& hooks) {
+    // (video@1, PC6 review B P2-5: a video layer's footage is laid upright in its box — the row holds no turn —, so the page
+    // is not turned or mirrored with one: refused before anything moves)
+    if (!upright(m) && page_uses_video(doc.page(at))) {
+        not_yet_ported("a video layer turned or mirrored with the page: its footage is laid upright in its box (rasterize the video layer first)");
+    }
     const Page before = doc.page(at);  // (a copy: its paper and pixels as they were)
     Page& page = doc.edit_page(at);
     const Page& after = page;
@@ -642,6 +649,31 @@ void map_page(Document& doc, std::size_t at, const Mapping& m, const PixelHooks&
                 continue;
             }
             map_area(area, m);
+        }
+    }
+    // (video@1, PC6 review B P2-5: a video layer's footage box — the page's mm — where the map takes it, as its altered
+    // cels' pixels go — upright: a turn or a mirror was refused at the top)
+    if (const auto anim = page.extra.find("anim"); anim != page.extra.end() && anim->is_object()) {
+        if (const auto tracks = anim->find("tracks"); tracks != anim->end() && tracks->is_array()) {
+            for (Json& track : *tracks) {
+                if (!is_video_row(track)) continue;
+                Json& video = track["video"];
+                const auto box = video.find("placement_mm");
+                if (box == video.end() || !box->is_array() || box->size() != 4) continue;
+                std::array<double, 4> r{};
+                try {
+                    r = production::rect_mm(*box, "placement_mm");
+                } catch (const Error&) {
+                    continue;  // (a box the book could not hold: check_video says so)
+                }
+                const std::array<double, 4> b = map_box(r, m);
+                *box = Json::array({py_round(b[0], 4), py_round(b[1], 4), py_round(b[2], 4), py_round(b[3], 4)});
+                try {
+                    (void)production::rect_mm(*box, "placement_mm");
+                } catch (const Error&) {
+                    throw OpError("a video layer's footage box would lie past the places a page holds");
+                }
+            }
         }
     }
     for (StoryLine& line : doc.story) {

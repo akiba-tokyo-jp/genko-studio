@@ -979,4 +979,128 @@ Json list(const Document& doc, Kind kind) {
     return out;
 }
 
+// --- texts brought from another book (PC6 review B P2-1) ---------------------------------------------------------------
+
+namespace {
+
+constexpr std::size_t kStylesMax = 512;  // (of a kind: type_text's check_type_styles)
+
+// The book's style of the kind with this name — or the name with the number unique_name gave it when it met another of the
+// name — and these attributes (what it holds of char and para; an empty part as none), or none.
+const Json* same_style(const Json* styles, Kind kind, const std::string& name, const Json& item) {
+    if (styles == nullptr || !styles->is_object()) return nullptr;
+    const Json* list = get(*styles, kind_name(kind));
+    if (list == nullptr || !list->is_array()) return nullptr;
+    const auto named = [&](const std::string& given) {
+        if (given == name) return true;
+        if (given.size() <= name.size() + 1 || given.compare(0, name.size() + 1, name + " ") != 0) return false;
+        return std::all_of(given.begin() + static_cast<std::ptrdiff_t>(name.size() + 1), given.end(), [](char c) { return c >= '0' && c <= '9'; });
+    };
+    const auto part = [](const Json& s, const char* key) -> const Json* {
+        const Json* p = get(s, key);
+        return p != nullptr && p->is_object() && !p->empty() ? p : nullptr;
+    };
+    for (const Json& s : *list) {
+        const Json* given = get(s, "name");
+        if (given == nullptr || !given->is_string() || !named(given->get<std::string>())) continue;
+        bool same = true;
+        for (const char* key : {"char", "para"}) {
+            const Json* theirs = part(s, key);
+            const Json* mine = part(item, key);
+            if ((theirs == nullptr) != (mine == nullptr) || (theirs != nullptr && *theirs != *mine)) same = false;
+        }
+        if (same) return &s;
+    }
+    return nullptr;
+}
+
+// Each style id the record's native_type names (the whole's, the ranges', the paragraphs'), given to `each` to change.
+template <typename Each>
+void each_style_ref(Json& nt, Each each) {
+    if (!nt.is_object()) return;
+    const auto at = [&](Json& holder, const char* key, Kind kind) {
+        if (const auto it = holder.find(key); it != holder.end() && it->is_string()) each(kind, *it);
+    };
+    at(nt, "char_style", Kind::Character);
+    at(nt, "para_style", Kind::Paragraph);
+    if (const auto runs = nt.find("runs"); runs != nt.end() && runs->is_array()) {
+        for (Json& run : *runs)
+            if (run.is_object()) at(run, "style", Kind::Character);
+    }
+    if (const auto ps = nt.find("paragraphs"); ps != nt.end() && ps->is_array()) {
+        for (Json& p : *ps)
+            if (p.is_object()) at(p, "style", Kind::Paragraph);
+    }
+}
+
+}  // namespace
+
+StyleCarry::StyleCarry(Document& doc, const Json* from) : doc_(doc), from_(from) {}
+
+std::string StyleCarry::mapped(Kind kind, const std::string& id) {
+    if (kind == Kind::Paragraph && id == kBasic) return id;  // (the book's own Basic Paragraph)
+    const auto key = std::make_pair(static_cast<int>(kind), id);
+    if (const auto known = ids_.find(key); known != ids_.end()) return known->second;
+    const Json* theirs = from_ != nullptr ? find(from_, kind, id) : nullptr;
+    if (theirs == nullptr || !theirs->is_object()) return id;  // (a style the other book does not have: validate_type says so)
+    const std::string name = theirs->value("name", std::string(kind == Kind::Character ? kCharacterBase : kParagraphBase));
+    const Json* styles = doc_.type_styles ? &*doc_.type_styles : nullptr;
+    std::string mine;
+    if (const Json* same = same_style(styles, kind, name, *theirs)) {
+        mine = same->value("id", std::string());
+    } else {
+        const Json* list = styles != nullptr && styles->is_object() ? get(*styles, kind_name(kind)) : nullptr;
+        if (list != nullptr && list->is_array() && list->size() >= kStylesMax) {
+            throw OpError("the book would keep more than 512 " + std::string(kind_name(kind)) + " styles with those the pages bring");
+        }
+        mine = next_id(styles, kind);
+        Json item = Json::object({{"id", mine}, {"name", unique_name(styles, kind, name, false)}});
+        for (const char* part : {"para", "char"}) {
+            if (const Json* p = get(*theirs, part); p != nullptr && p->is_object() && !p->empty()) item[part] = *p;
+        }
+        Json all = styles != nullptr && styles->is_object() ? *styles : Json::object();
+        Json& into = all[std::string(kind_name(kind))];
+        if (!into.is_array()) into = Json::array();
+        into.push_back(std::move(item));
+        try {
+            doc_.type_styles = type_text::check_type_styles(all);
+        } catch (const Error& error) {
+            throw OpError(error.what());
+        }
+    }
+    ids_.emplace(key, mine);
+    return mine;
+}
+
+void StyleCarry::bring(StoryLine& record, bool typeset) {
+    if (!record.native_type && !typeset) return;
+    // (nothing to do: no style named, and the two books' Basic Paragraph alike)
+    bool names = false;
+    if (record.native_type) {
+        Json probe = *record.native_type;
+        each_style_ref(probe, [&](Kind kind, const Json& id) { names = names || !(kind == Kind::Paragraph && id == Json(std::string(kBasic))); });
+    }
+    const auto basic_of = [](const Json* styles) {
+        const Json* b = styles != nullptr && styles->is_object() ? get(*styles, "basic") : nullptr;
+        return b != nullptr ? *b : Json();
+    };
+    if (!names && basic_of(from_) == basic_of(doc_.type_styles ? &*doc_.type_styles : nullptr)) return;
+    const Look before = look_of(record, from_);
+    if (record.native_type) {
+        Json nt = *record.native_type;
+        each_style_ref(nt, [&](Kind kind, Json& id) { id = mapped(kind, id.get<std::string>()); });
+        record.native_type = std::move(nt);
+    }
+    keep_look(record, doc_.type_styles ? &*doc_.type_styles : nullptr, before);
+}
+
+void StyleCarry::bring_page(Page& page) {
+    for (Layer& layer : page.layers) {
+        if (!type_text::is_type_layer(layer) || !layer.type) continue;
+        StoryLine record = *layer.type;
+        bring(record, true);
+        layer.type = type_text::shared_record(std::move(record));
+    }
+}
+
 }  // namespace genko::core::type_styles

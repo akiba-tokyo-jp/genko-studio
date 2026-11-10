@@ -847,6 +847,12 @@ Json expand_for_pages(const Document& doc, const Json& op) {
         if (is_op(item, "duplicate_channel") && to != nullptr && *to == Json("new")) {
             throw OpError("duplicate_channel to a new page cannot be repeated page by page");
         }
+        // (PC6 review B P2-2: 演算 into a new page puts it after the page and numbers the rest again — the next repeat's
+        // page number would be the page just made)
+        const Json* result = get(item, "result");
+        if (is_op(item, "calculations") && result != nullptr && *result == Json("page")) {
+            throw OpError("calculations into a new page (result \"page\") cannot be repeated page by page");
+        }
     }
     const Json* pages_value = get(op, "pages");
     const Json wanted = pages_value != nullptr && py_truthy(*pages_value) ? *pages_value : Json("body");
