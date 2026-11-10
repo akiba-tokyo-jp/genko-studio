@@ -985,8 +985,8 @@ namespace {
 
 constexpr std::size_t kStylesMax = 512;  // (of a kind: type_text's check_type_styles)
 
-// The book's style of the kind with this name — or the name with the number unique_name gave it when it met another of the
-// name — and these attributes (what it holds of char and para; an empty part as none), or none.
+}  // namespace
+
 const Json* same_style(const Json* styles, Kind kind, const std::string& name, const Json& item) {
     if (styles == nullptr || !styles->is_object()) return nullptr;
     const Json* list = get(*styles, kind_name(kind));
@@ -1013,6 +1013,8 @@ const Json* same_style(const Json* styles, Kind kind, const std::string& name, c
     }
     return nullptr;
 }
+
+namespace {
 
 // Each style id the record's native_type names (the whole's, the ranges', the paragraphs'), given to `each` to change.
 template <typename Each>
@@ -1072,8 +1074,10 @@ std::string StyleCarry::mapped(Kind kind, const std::string& id) {
     return mine;
 }
 
-void StyleCarry::bring(StoryLine& record, bool typeset) {
-    if (!record.native_type && !typeset) return;
+void StyleCarry::bring(StoryLine& record) {
+    // (a record the OpenType typesetting does not set reads no styles — Basic Paragraph neither — and names none: as it is.
+    // Laying its look on it would set it so: the review of PC6-B's P2-A)
+    if (!type_text::sets_opentype(record)) return;
     // (nothing to do: no style named, and the two books' Basic Paragraph alike)
     bool names = false;
     if (record.native_type) {
@@ -1091,14 +1095,18 @@ void StyleCarry::bring(StoryLine& record, bool typeset) {
         each_style_ref(nt, [&](Kind kind, Json& id) { id = mapped(kind, id.get<std::string>()); });
         record.native_type = std::move(nt);
     }
-    keep_look(record, doc_.type_styles ? &*doc_.type_styles : nullptr, before);
+    try {
+        keep_look(record, doc_.type_styles ? &*doc_.type_styles : nullptr, before);
+    } catch (const Error&) {
+        throw OpError("a text brought would hold more than 4096 ranges to keep its look under this book's Basic Paragraph");
+    }
 }
 
 void StyleCarry::bring_page(Page& page) {
     for (Layer& layer : page.layers) {
         if (!type_text::is_type_layer(layer) || !layer.type) continue;
         StoryLine record = *layer.type;
-        bring(record, true);
+        bring(record);
         layer.type = type_text::shared_record(std::move(record));
     }
 }

@@ -693,7 +693,7 @@ void import_pages(OpContext& c, const BookPageHooks& hooks) {
         // the styles brought)
         smart::bring_contents(doc, other, clone, [&styles](Page& on) { styles.bring_page(on); });
         for (StoryLine& line : lines) {
-            styles.bring(line, false);
+            styles.bring(line);
             doc.story.push_back(std::move(line));
         }
         doc.pages.push_back(std::make_shared<Page>(std::move(clone)));

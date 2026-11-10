@@ -408,6 +408,13 @@ Json aim_steps(const core::Document& doc, const Json& steps, bool picture, bool 
     Json out = Json::array();
     if (steps.empty()) return out;
     if (recorded) {
+        // (PC6 review of B's P2-B: what makes a page among the book's — calculations into a new page, … — never played on
+        // each page in turn: the pages numbered when the steps were laid would be others by then)
+        try {
+            core::check_pages_kept(steps);
+        } catch (const core::OpError& error) {
+            throw StepsError(std::string("the steps are run page by page: ") + error.what());
+        }
         for (const auto& page : doc.pages) {
             if (!picture && core::is_cover(*page)) continue;
             std::optional<std::string> layer;

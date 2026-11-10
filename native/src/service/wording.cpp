@@ -1545,6 +1545,11 @@ const std::vector<Rule>& rules() {
         r.push_back(rule("name gives the style its new name", "スタイルの新しい名前（name）を指定します"));
         r.push_back(rule("(replace|from_selection|apply|clear_overrides) is true or false", "\\1 は true か false です"));
         r.push_back(rule("a book keeps 512 (?:character|paragraph) styles at most", "文字スタイル・段落スタイルは、それぞれ 512 個までです"));
+        // (PC6-B: the styles and texts another book's pages bring — import_pages)
+        r.push_back(rule("the book would keep more than 512 (?:character|paragraph) styles with those the pages bring",
+                         "持ち込む文字スタイル・段落スタイルを合わせると、それぞれ 512 個を越えるため、取り込めません"));
+        r.push_back(rule("a text brought would hold more than 4096 ranges to keep its look.*",
+                         "持ち込む文字の見え方を保つと、文字の範囲が 4096 を越えるため、取り込めません（本の基本段落の違いを減らしてください）"));
         r.push_back(rule("(?:unknown )?(?:native_type|char|para|run char|paragraph para|type_styles)\\b.*",
                          "文字の設定（文字・段落の属性、スタイル）の指定が正しくありません"));
         r.push_back(rule("(?:a run(?:'s| must) |the runs must |a paragraph must |the paragraphs must |a style's (?:id|name) |two (?:character|paragraph) styles ).*",

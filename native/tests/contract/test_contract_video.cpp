@@ -178,6 +178,12 @@ class TestContractVideo : public QObject {
         const Json f = footage(doc);
         return run(doc, op("add_video_layer", {{"footage", f}, {"id", "v"}}));
     }
+    // The same with its footage in a box off the page's middle — 20 × 15 mm at (10, 10), the four colours' 4:3 filling it —
+    // and frame 2 altered (its cel the footage's green there): a footage or a cel left where it was would show elsewhere.
+    core::Document off_book() {
+        core::Document doc = run(video_book(), op("set_video_layer", {{"folder", "v"}, {"placement_mm", Json::array({10, 10, 20, 15})}}));
+        return run(doc, op("video_alter", {{"folder", "v"}, {"at", 2}}));
+    }
     static const Json& frames_of(const core::Document& doc) { return core::video_row(doc.page(0), Json("v"))->at("frames"); }
 
 private slots:
@@ -320,11 +326,42 @@ private slots:
         QVERIFY2(brought.first, brought.second.c_str());
     }
 
+    // (the review of PC6-B's P3-2) A video layer copied (duplicate_layers, on its page or onto another) is a video layer:
+    // its row copied with the copy's folder and altered cel; onto a page that is no animation, the page's timeline with it.
+    void videoLayersCopied() {
+        const core::Document doc = run(off_book(), Json{{"op", "add_page"}});
+        QCOMPARE(doc.pages.size(), std::size_t(2));
+        const std::string cel = frames_of(doc)[1][1].get<std::string>();
+        const auto copied_on = [&](const core::Document& d, std::size_t page, const std::string& folder) {
+            const Json* row = core::video_row(d.page(page), Json(folder));
+            QVERIFY(row != nullptr);
+            const Json& altered = row->at("frames")[1][1];
+            QVERIFY(altered.is_string() && altered != Json(cel));
+            QVERIFY(std::any_of(d.page(page).layers.begin(), d.page(page).layers.end(),
+                                [&](const core::Layer& l) { return l.id == altered.get<std::string>() && l.parent_id == Json(folder); }));
+            QCOMPARE(row->at("footage"), core::video_row(doc.page(0), Json("v"))->at("footage"));
+        };
+        const core::ApplyResult here = core::CommandBus(render::ops_registry()).apply(doc, Json::array({op("duplicate_layers", {{"ids", Json::array({"v"})}})}),
+                                                                                    core::Actor("human:test"));
+        const std::string folder = here.results[0]["ids"][0].get<std::string>();
+        QCOMPARE(core::anim::spec(here.doc.page(0))->at("tracks").size(), std::size_t(2));
+        copied_on(here.doc, 0, folder);
+        const core::ApplyResult there = core::CommandBus(render::ops_registry()).apply(
+            doc, Json::array({op("duplicate_layers", {{"ids", Json::array({"v"})}, {"to_page", 2}})}), core::Actor("human:test"));
+        const std::string moved = there.results[0]["ids"][0].get<std::string>();
+        QVERIFY(core::anim::spec(there.doc.page(1)) != nullptr);
+        QCOMPARE(core::anim::fps_of(there.doc.page(1)), core::anim::fps_of(doc.page(0)));
+        QCOMPARE(core::anim::frames_of(there.doc.page(1)), core::anim::frames_of(doc.page(0)));
+        copied_on(there.doc, 1, moved);
+        QVERIFY(near(at_mm(there.doc, 1, 3, 20, 17.5), kColours[2]));  // (its footage there)
+        QVERIFY(near(at_mm(there.doc, 1, 2, 20, 17.5), kColours[1]));  // (its altered frame)
+    }
+
     // PC6 review B P2-4: an artboard made of a video layer (artboard_from_layers) takes its row — the page's timeline with
     // it, the altered cel named under its new id —, the page it came from losing the row with the folder; a smart object is
     // not made of an animation folder or its cels (refused, in the window's words).
     void videoLayersMovedOrRefused() {
-        core::Document doc = run(video_book(), op("video_alter", {{"folder", "v"}, {"at", 2}}));
+        core::Document doc = off_book();
         const std::string cel = frames_of(doc)[1][1].get<std::string>();
         const core::ApplyResult made = core::CommandBus(render::ops_registry()).apply(doc, Json::array({op("artboard_from_layers", {{"ids", Json::array({"v"})}})}),
                                                                                     core::Actor("human:test"));
@@ -359,9 +396,9 @@ private slots:
     // image size's scale), so the footage and its altered cels stay together; a turn or a mirror of the page is refused (the
     // footage is laid upright in its box), in the window's words.
     void footageBoxMovesWithThePage() {
-        core::Document doc = run(video_book(), op("video_alter", {{"folder", "v"}, {"at", 2}}));
+        core::Document doc = off_book();
         const Json was = core::video_row(doc.page(0), Json("v"))->at("placement_mm");
-        const core::ApplyResult cropped = core::CommandBus(render::ops_registry()).apply(doc, Json::array({op("crop_page", {{"rect", Json::array({30, 20, 50, 40})}})}),
+        const core::ApplyResult cropped = core::CommandBus(render::ops_registry()).apply(doc, Json::array({op("crop_page", {{"rect", Json::array({5, 5, 60, 50})}})}),
                                                                                        core::Actor("human:test"));
         const Json& offset = cropped.results[0]["pages"][0]["offset_mm"];
         const Json now = core::video_row(cropped.doc.page(0), Json("v"))->at("placement_mm");
@@ -379,8 +416,7 @@ private slots:
         for (int k = 0; k < 4; ++k) QVERIFY2(std::fabs(big[k].get<double>() - 2 * was[k].get<double>()) < 1e-3, big.dump().c_str());
         // (turned, mirrored or at an angle — PhotoCraft's, PC6 —: the footage turns with the page, the row's transform;
         // a box off the page's middle, so a footage left where it was would show elsewhere)
-        core::Document off = run(video_book(), op("set_video_layer", {{"folder", "v"}, {"placement_mm", Json::array({10, 10, 20, 15})}}));
-        off = run(off, op("video_alter", {{"folder", "v"}, {"at", 2}}));
+        const core::Document off = doc;
         const Json row_was = *core::video_row(off.page(0), Json("v"));
         const auto through = [](const Json& t, double x, double y) {
             return std::array<double, 2>{t[0].get<double>() * x + t[2].get<double>() * y + t[4].get<double>(),

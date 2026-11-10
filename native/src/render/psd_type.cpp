@@ -162,33 +162,6 @@ std::string style_name(const Json* styles, core::type_styles::Kind kind, std::u1
     return core::type_styles::unique_name(styles, kind, name, name == base);
 }
 
-// The book's style of the kind with this name and these attributes (an earlier import of the same file's), or none.
-const Json* same_style(const Json* styles, core::type_styles::Kind kind, const std::string& name, const Json& item) {
-    if (styles == nullptr) return nullptr;
-    const Json* list = key(*styles, kind == core::type_styles::Kind::Character ? "character" : "paragraph");
-    if (list == nullptr || !list->is_array()) return nullptr;
-    // (the name, or the name with the number unique_name gave it when it met another of the name: the review's P3-1)
-    const auto named = [&](const std::string& given) {
-        if (given == name) return true;
-        if (given.size() <= name.size() + 1 || given.compare(0, name.size() + 1, name + " ") != 0) return false;
-        return std::all_of(given.begin() + static_cast<std::ptrdiff_t>(name.size() + 1), given.end(), [](char c) { return c >= '0' && c <= '9'; });
-    };
-    for (const Json& s : *list) {
-        const Json* given = key(s, "name");
-        if (given == nullptr || !given->is_string() || !named(given->get<std::string>())) continue;
-        // (its attributes the same: what it holds of char and para — an empty part not written)
-        bool same = true;
-        for (const char* part : {"char", "para"}) {
-            const Json* theirs = key(s, part);
-            const Json* mine = key(item, part);
-            const bool none_theirs = theirs == nullptr || theirs->empty(), none_mine = mine == nullptr || mine->empty();
-            if (none_theirs != none_mine || (!none_theirs && *theirs != *mine)) same = false;
-        }
-        if (same) return &s;
-    }
-    return nullptr;
-}
-
 // A named sheet taken into the book (its id), or none past the kind's 512.
 std::optional<std::string> take_sheet(core::Document& doc, Sheets& sheets, core::type_styles::Kind kind, const psd::NamedSheet& sheet, double mm,
                                       bool vertical, std::vector<std::string>& missing) {
@@ -206,7 +179,7 @@ std::optional<std::string> take_sheet(core::Document& doc, Sheets& sheets, core:
     }
     // (an earlier import's style of the same name and attributes: that one)
     const std::string wanted = style_name(nullptr, kind, sheet.name);
-    if (const Json* same = same_style(styles, kind, wanted, item)) {
+    if (const Json* same = core::type_styles::same_style(styles, kind, wanted, item)) {
         const std::string id = same->value("id", std::string());
         sheets.taken.emplace(seen, id);
         return id;
