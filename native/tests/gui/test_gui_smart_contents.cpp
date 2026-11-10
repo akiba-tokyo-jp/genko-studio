@@ -335,9 +335,9 @@ private slots:
         };
         const std::string id = *core::smart::contents_id(*book.layer(so));
         for (const qint64 said : {kBig, qint64(first.size())}) {  // (its own size; another)
-            QVERIFY(relink(big, said));
-            QElapsedTimer clock;
+            QElapsedTimer clock;  // (the op and the window's look after it, and its look again)
             clock.start();
+            QVERIFY(relink(big, said));
             w->check_links();
             QVERIFY2(clock.elapsed() < 2000, qPrintable(QString::number(clock.elapsed())));
             QCOMPARE(w->link_status(id), std::string("modified"));
