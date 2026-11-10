@@ -1,6 +1,5 @@
 // core/stroke_geom (the one C++ stroke.py: the ops draw and erase with it, the renderer smooths with it) against
-// Python's genko/stroke.py (and brushes.smoothed): the table of tools/migration/render_harness.py unit-tables, every
-// coordinate bit for bit; and where Python fails, the same exceptions as the ops report them.
+// the recorded table (data/pyref/render_unit_tables.json), every coordinate bit for bit; and where Python fails, the same exceptions as the ops report them.
 
 #include <QtTest>
 

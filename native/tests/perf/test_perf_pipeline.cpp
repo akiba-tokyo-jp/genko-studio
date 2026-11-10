@@ -1,8 +1,8 @@
 // PERF-F 制作API (ACCEPTANCE.md §4), judged against its pass values (label perf, not in the usual CI; run it in a Release
-// build): F3's default offline making (FIXTURES.md: tests/test_m4_pipeline.py's 8 pages, the fixed synthetic pictures,
-// no AI) on this build's `genko mcp` (stdio) through the MCP SDK's own client, driven by Python's FakeAgent, with the
+// build): F3's default offline making (FIXTURES.md: 8 pages, the fixed synthetic pictures, no AI) on this build's
+// `genko mcp` (stdio) through the MCP SDK's own client, driven by the FakeAgent (native/tests/support/agents), with the
 // person's `genko studio` processes, as tools/migration/pipeline_harness.py runs it (test_contract_pipeline checks the
-// same run against Python's). Each time is the caller's: from sending the call until its whole answer (a tool over
+// same run's book). Each time is the caller's: from sending the call until its whole answer (a tool over
 // JSON-RPC; a command, the process run).
 //   - every call of the making, the export included and nothing left out: p95 ≤ 2 s;
 //   - then, on the same book, each kind at least 100 times: information (status, inspect of a page and a panel,
@@ -15,8 +15,8 @@
 //     taken (the reply) and the time it was done are kept apart.
 // Shown: n, p50, p95, p99, mean and max (the ceil(p × n)-th of the sorted n, 1-based) for each, and the machine. It is
 // this development machine, not the reference class (ACCEPTANCE.md §6): the pass values are judged here as the stand-in
-// the user chose, not as the reference machine's result. Skipped without a Python that has the mcp extra
-// ($GENKO_MCP_PYTHON), as test_contract_mcp is.
+// the user chose, not as the reference machine's result. Skipped without a Python that has the MCP SDK
+// ($GENKO_MCP_PYTHON), as test_contract_pipeline is.
 
 #include <QtTest>
 

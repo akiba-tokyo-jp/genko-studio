@@ -18,7 +18,6 @@
 #include <string>
 #include <vector>
 
-#include "psd_book_hashes.hpp"
 #include "core/base64.hpp"
 #include "core/command_bus.hpp"
 #include "core/model.hpp"
@@ -207,32 +206,6 @@ private slots:
         QCOMPARE(p4["layers"]["台詞 均等に割り付けた縦の行/本文 #p4c"]["text"]["shape"], Json("box"));
         QVERIFY(p4["layers"].contains("/ノンブル"));
         QCOMPARE(p4["layers"]["/ノンブル"]["kind"], Json("pixel"));
-    }
-
-    // The image way (the default PSD) is Python's: the PSD book as Python makes it (its rubies as ruby_runs — Python's
-    // book has none by place) written by Python's psd.export_psd_pages — its text laid out by Pillow's BASIC layout, without
-    // raqm, as render_harness holds the reference — and by this build, byte for byte. (The unit test holds the PSD book's
-    // own image-way bytes to those of the build before PSD-01.)
-    void imageWayIsPythons() {
-        const QString script = genko::test::repo_root() + QStringLiteral("/tools/migration/psd_text_check.py");
-        const QString book = path(QStringLiteral("python.genko"));
-        auto ran = genko::test::run(genko::test::python_ref(), {script, QStringLiteral("python-book"), genko::test::test_data(QStringLiteral("psd_text_book.json")), book},
-                                    genko::test::python_env(path(QStringLiteral("pyenv"))));
-        QVERIFY2(ran.exit_code == 0, ran.err.constData());
-        ran = genko::test::run(genko::test::python_ref(), {script, QStringLiteral("python-psd"), book, path(QStringLiteral("python-psd")), QStringLiteral("150")},
-                               genko::test::python_env(path(QStringLiteral("pyenv"))));
-        QVERIFY2(ran.exit_code == 0, ran.err.constData());
-        const auto loaded = genko::storage::load_document(genko::core::path_from_utf8(book.toStdString()));
-        const auto files = genko::formats::export_psd_pages(loaded.document, genko::core::path_from_utf8(path("cpp-psd").toStdString()), kDpi);
-        QCOMPARE(files.size(), std::size_t{4});
-        const auto theirs = genko::test::tree_hashes(path(QStringLiteral("python-psd")));
-        const auto mine = genko::test::tree_hashes(path(QStringLiteral("cpp-psd")));
-        QCOMPARE(mine.size(), std::size_t{4});
-        QVERIFY(mine == theirs);
-        // page 1 of Python's PSD is the page 1 the unit test holds this build's book to (psd_book_hashes.hpp: since M5① the
-        // book's rubies on 「声」 and 「約束」, a page Python's book and this build's lay out alike)
-        QCOMPARE(QString::fromStdString(theirs.begin()->first), QStringLiteral("PSD文字_ep01_p001.psd"));
-        QCOMPARE(QString::fromStdString(theirs.begin()->second), QString::fromLatin1(genko::test::kPsdBookImageWay[0]));
     }
 
     // A font whose PostScript name ends in a backslash: written without it, and psd-tools reads the text.

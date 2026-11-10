@@ -1,7 +1,6 @@
 #pragma once
 
-// Helpers for the 3D tests (header only; not part of the product): the digests tools/migration/geom3d_harness.py
-// writes, made the same way from the C++ values.
+// Helpers for the 3D tests (header only; not part of the product): digests of the 3D state and of pictures.
 
 #include <QCryptographicHash>
 #include <QString>
@@ -71,14 +70,7 @@ inline core::Json edges_digest(const std::vector<core::prim3d::Edge>& edges) {
     return core::Json::object({{"count", static_cast<std::int64_t>(edges.size())}, {"sha", sha256(text)}});
 }
 
-// tools/migration/geom3d_harness.py <args>, run by the Python reference
-inline Run geom3d_harness(const QStringList& args, const QString& scratch, int timeout_ms = 3600000) {
-    QStringList full{repo_root() + QStringLiteral("/tools/migration/geom3d_harness.py")};
-    full += args;
-    return run(python_ref(), full, python_env(scratch), timeout_ms);
-}
-
-// project.json v4 as Python's v3 writer would write it
+// project.json v4 as a v3 writer would write it
 inline core::Json as_v3(core::Json payload) {
     for (const char* key : {"min_reader", "writer", "book_id", "features", "revision"}) payload.erase(key);
     payload["version"] = 3;
@@ -90,7 +82,7 @@ inline std::string replace_all(std::string text, const std::string& from, const 
     return text;
 }
 
-// geom3d_harness._png_pixels_sha: the mode Pillow opens a picture in, its size and the sha256 of its RGBA pixels
+// The mode a picture opens in, its size and the sha256 of its RGBA pixels
 inline core::Json raster_digest(const core::Bytes& png) {
     if (!png || png->empty()) return core::Json();
     const render::Image im = render::open_image(*png);
@@ -99,7 +91,7 @@ inline core::Json raster_digest(const core::Bytes& png) {
                                {"sha", sha256(im.convert("RGBA").tobytes())}});
 }
 
-// geom3d_harness.state_of: every page's prims, rulers and extra keys, and each layer's strokes (the bytes of its
+// Every page's prims, rulers and extra keys, and each layer's strokes (the bytes of its
 // .strokes.json), pixels and screen
 inline core::Json state_of(const core::Document& doc) {
     core::Json pages = core::Json::array();

@@ -1,7 +1,7 @@
 // 紙質 (BRUSH-01, this build only) in the app on the offscreen platform: the brush dialog's 紙質 tab (a picture file
 // taken in, refused in Japanese when it cannot be, its settings, the patch of paper and the sample line drawn with it);
-// one's own brush with a paper kept in the person's library without touching what Python's app reads (brushes.json:
-// read by Python's own reader, which still writes beside it); a line drawn with it brings the brush, its paper's picture
+// one's own brush with a paper kept in the person's library beside brushes.json (which stays as before, without the
+// paper); a line drawn with it brings the brush, its paper's picture
 // and the feature into the book; the source file deleted, the book saved and opened on "another computer" (nothing
 // known to the process, no library) draws the same pixels; the zoom never changes them; Undo and Redo; a .genkobrush
 // with its paper's picture in it.
@@ -222,8 +222,7 @@ private slots:
         for (const auto& [english, japanese] : cases) QCOMPARE(genko::wording::error(english), japanese);
     }
 
-    // One's own brush with a paper: the library keeps it beside Python's file (which Python's reader reads as before and
-    // its app still writes); a line drawn with it brings the brush, the picture and the feature into the book, which is
+    // One's own brush with a paper: the library keeps it beside brushes.json (which stays as before); a line drawn with it brings the brush, the picture and the feature into the book, which is
     // saved with them; Undo and Redo; the zoom changes nothing; a .genkobrush carries the picture.
     void ownBrushWithPaper() {
         Studio studio;
@@ -246,7 +245,7 @@ private slots:
         const core::Brush made = render::brushes::brush(key);
         QVERIFY(made.paper.has_value());
         QCOMPARE(made.paper->density, 0.9);
-        // the library: brushes.json as Python's app writes it (no paper), the paper beside it with its picture
+        // the library: brushes.json as before (no paper), the paper beside it with its picture
         const Json raw = read_json_file(render::brushes::library_path(app::config_dir()));
         QVERIFY(raw["brushes"].contains(key));
         QVERIFY(!raw["brushes"][key].contains("paper"));
@@ -256,29 +255,6 @@ private slots:
         const std::string hex = made.paper->asset.substr(7);
         QVERIFY(fs::exists(app::config_dir() / "brush_papers" / (hex + ".png")));
         QVERIFY(render::brushes::load_own_brushes(app::config_dir())[key].contains("paper"));
-        // Python's own reader: the library reads as before (the brush without its paper), and Python's app still saves
-        // its brushes into it without losing ours
-        if (!genko::test::python_ref().isEmpty()) {
-            QProcessEnvironment env = genko::test::python_env(studio.tmp.path() + "/py");
-            env.insert(QStringLiteral("GENKO_CONFIG_DIR"), gui_test::qpath(app::config_dir()));
-            const QString script = QStringLiteral(
-                "import json\n"
-                "from genko import brushes\n"
-                "lib = brushes.load_library()\n"
-                "brushes.register(lib)\n"
-                "brushes.save_to_library('my_python', {'label': 'パイソン', 'width_mm': 1.5})\n"
-                "print(json.dumps({'keys': sorted(lib), 'custom': {k: brushes.to_dict(brushes.CUSTOM[k]) for k in lib}}, ensure_ascii=False))\n");
-            const auto run = genko::test::run(genko::test::python_ref(), {QStringLiteral("-c"), script}, env);
-            QVERIFY2(run.finished && run.exit_code == 0, run.err.constData());
-            qInfo("Python's reader of the library: %s", run.out.trimmed().constData());
-            const Json seen = genko::test::one_line(run.out);
-            QVERIFY2(seen["custom"].contains(key), run.out.constData());
-            QCOMPARE(seen["custom"][key]["label"], Json("ざらざら紙"));
-            QVERIFY(!seen["custom"][key].contains("paper"));
-            const Json own = render::brushes::load_own_brushes(app::config_dir());
-            QVERIFY(own.contains("my_python"));
-            QVERIFY(own[key].contains("paper"));  // (beside Python's file: untouched by its save)
-        }
         // drawn with: the book gets the brush with its paper and the picture; the source file is not needed
         QVERIFY(QFile::remove(source));
         studio.draw({QPointF(10, 15), QPointF(30, 25), QPointF(50, 15)});

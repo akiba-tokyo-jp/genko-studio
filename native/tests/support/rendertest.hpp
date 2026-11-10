@@ -29,17 +29,10 @@ inline std::string bits_of(double x) {
     return buf;
 }
 
-// A colour as the harness writes it: an int, or a list (a Python tuple).
+// A colour as the recorded tables write it: an int, or a list (a tuple).
 inline render::Ink ink_of(const core::Json& j) {
     if (j.is_array()) return render::Ink::tuple(j.get<std::vector<std::int64_t>>());
     return render::Ink(static_cast<int>(j.get<std::int64_t>()));
-}
-
-// tools/migration/render_harness.py <args>, run by the Python reference.
-inline Run render_harness(const QStringList& args, const QString& scratch, int timeout_ms = 1800000) {
-    QStringList full{repo_root() + QStringLiteral("/tools/migration/render_harness.py")};
-    full += args;
-    return run(python_ref(), full, python_env(scratch), timeout_ms);
 }
 
 // How two pictures of one mode and size differ: the number of different pixels and the largest difference of a band.

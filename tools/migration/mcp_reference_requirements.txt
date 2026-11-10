@@ -1,8 +1,9 @@
-# The Python of the MCP and HTTP contract test (native/tests/contract/test_contract_mcp.cpp, tools/migration/mcp_harness.py):
-# uv.lock's `mcp` extra of pyproject.toml (mcp 2.2.0 and what it needs) with the reference's Pillow and numpy
-# (ARCHITECTURE.md §9). A venv of its own, not the reference Python of the other contract tests:
+# The Python of the tests that drive `genko mcp` through the MCP SDK's own client (native/tests/contract/
+# test_contract_pipeline.cpp, unit/test_ledger_service_b.cpp, perf/test_perf_pipeline.cpp; tools/migration/mcp_harness.py
+# and pipeline_harness.py): mcp 2.2.0 and what it needs, with Pillow and numpy. A venv of its own, not the reference
+# Python of the other tests:
 #   python3.12 -m venv /opt/pyref-mcp && /opt/pyref-mcp/bin/pip install -r tools/migration/mcp_reference_requirements.txt
-#   export GENKO_MCP_PYTHON=/opt/pyref-mcp/bin/python   (when unset, the test looks there)
+#   export GENKO_MCP_PYTHON=/opt/pyref-mcp/bin/python   (when unset, the tests look there)
 annotated-types==0.8.0
 anyio==4.15.1
 attrs==26.1.0

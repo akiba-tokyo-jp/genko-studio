@@ -1,6 +1,6 @@
 name: native
 
-# The C++ build (docs/cpp-migration). Runs beside the Python tests (ci.yml), which stay the baseline until M7.
+# Genko Studio (native/): build, test and package on Linux and Windows.
 on:
   push:
     branches: [main, native/integration]
@@ -38,10 +38,9 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-      - name: 検証方針の回帰試験と台帳
+      - name: 検証方針の回帰試験
         run: |
           python3 -m unittest discover -s tools/ci/tests -v
-          python3 tools/migration/build_ledger.py --check
       - name: 差分から検証範囲を決定
         id: plan
         env:
@@ -118,12 +117,11 @@ jobs:
       - if: steps.qt-cache.outputs.cache-hit != 'true'
         run: |
           pipx run "aqtinstall==${AQT_VERSION}" install-qt linux desktop "${QT_VERSION}" linux_gcc_64 -m qtimageformats -O "${{ runner.temp }}/qt"
-      - name: Python reference (contract tests only)
+      - name: Reference Python (Pillow and psd-tools, for the tests that read files with them)
         run: |
           python3 -m venv /tmp/pyref
           /tmp/pyref/bin/pip install -q 'pillow==12.3.0' 'numpy==2.4.6' 'psd-tools==1.10.9'
           echo "GENKO_PYREF=/tmp/pyref/bin/python" >> "$GITHUB_ENV"
-          /tmp/pyref/bin/python tools/ci/check_pyref_numerics.py
       - name: Configure, build, test
         env:
           CMAKE_PREFIX_PATH: ${{ runner.temp }}/qt/${{ env.QT_VERSION }}/gcc_64

@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
-"""F3 (ACCEPTANCE.md §2, FIXTURES.md): the 8-page offline making of tests/test_m4_pipeline.py — bible, script, names,
-the fixed synthetic candidate pictures, adoption, finishing and the export — run on Genko's MCP server and its command
-line, the C++ build's or Python's (src/genko on the MCP SDK of uv.lock): Python's FakeAgent (tests/agents/fake_agent.py)
-driving `genko mcp` over stdio through the MCP SDK's own client (mcp.Client), and the person of test_m4_pipeline.py's
-ScriptedHuman answering its requests with `genko studio …` (a process each time). Nothing goes out: the pictures are
-tests/agents/images.py's, no AI, no network. For native/tests/contract/test_contract_pipeline.cpp (the C++ build's run
-against Python's) and native/tests/perf/test_perf_pipeline.cpp (PERF-F). Development only; nothing here goes into the
-product. Run it with a Python that has the `mcp` extra of pyproject.toml and Pillow (as tools/migration/mcp_harness.py):
+"""F3 (ACCEPTANCE.md §2, FIXTURES.md): the 8-page offline making — bible, script, names, the fixed synthetic candidate
+pictures, adoption, finishing and the export — run on Genko's MCP server and its command line: the FakeAgent
+(native/tests/support/agents/fake_agent.py) driving `genko mcp` over stdio through the MCP SDK's own client (mcp.Client),
+and a scripted person answering its requests with `genko studio …` (a process each time). Nothing goes out: the
+pictures are native/tests/support/agents/images.py's, no AI, no network. For native/tests/contract/
+test_contract_pipeline.cpp and native/tests/perf/test_perf_pipeline.cpp (PERF-F). Development only; nothing here goes
+into the product. Run it with a Python that has the MCP SDK and Pillow (tools/migration/mcp_reference_requirements.txt):
 
     python3 tools/migration/pipeline_harness.py run JOB OUT
-    python3 tools/migration/pipeline_harness.py normal IN OUT     (a side's records written as mcp_harness.py writes them)
-    python3 tools/migration/pipeline_harness.py redraw JOB        (Python drawing the C++ build's book: see redraw())
 
-JOB: {"server": {"kind": "cpp", "genko": EXE} | {"kind": "py", "python": EXE, "repo": REPO}, "root", "config", "out",
-"agent", "pages"?: 8, "perf"?: {"each": N, "proofs": M}}. The run writes OUT:
+JOB: {"server": {"kind": "cpp", "genko": EXE}, "root", "config", "out", "agent", "pages"?: 8,
+"perf"?: {"each": N, "proofs": M}, "time_limit_s"?}. The run writes OUT:
   "calls"   every call in the order made: the agent's tools ({"by": "agent", "tool", "args", "reply", "images", "ms"}:
             the reply as the tool's JSON text, its pictures as {"png": {mode, size, file}} with the file in
             OUT.images/NNN.png) and the person's commands ({"by": "person", "cli", "reply", "exit", "ms"}), "ms" the
@@ -21,8 +18,6 @@ JOB: {"server": {"kind": "cpp", "genko": EXE} | {"kind": "py", "python": EXE, "r
   "end"     `genko studio audit` and `genko studio stats` on the book at the end (their replies)
   "agent"   how many work items the agent did ("steps", "log"); "making_seconds": how long the making took (the
             server's start and "perf" left out), "seconds" the whole run
-  "python"  (Python's side only) the book as Python left it: project.json and its approval audit ({rev, actor, changes,
-            via} as service_harness.py reads it)
   "perf"    (with "perf") after the making, on the same book: "each" calls of each kind of PERF-F — information
             ("info": status, inspect of a page and a panel, candidates, next, tickets and a page's preview (render,
             1024 px) in turn), an edit committed ("edit": apply_ops with a page's note, committed), a candidate
@@ -33,12 +28,6 @@ JOB: {"server": {"kind": "cpp", "genko": EXE} | {"kind": "py", "python": EXE, "r
             times, each into a new folder (studio/proofs/r<revision>: a note committed first), with the time the job was
             taken ("accepted_ms": the reply that names the job, or its result when it ended within the tool's wait) and
             the time its file was whole ("done_ms": the job's result read back, the PDF there with its 8 pages)
-"normal" writes IN ({"calls", "end", "book", "audit", "root", "config", "out"}) to OUT with mcp_harness.Normal (the paths
-<root>, <config> and <out>, ids <id1>, <id2>, … in the order met, times, a job's id and its seconds; and the studio's ids
-made from them, <wi1>, <rq2>, <cd3>, …), the lists whose order follows the random ids put in an order of their own (the
-candidates tool's rows of the same rank, the reviews sent in that order, an audit entry's changes), the times of the
-calls ("ms") and of the tool log (stats' "ms_p50", "ms_p95") left out, and the command line's failure code left out
-(this build's failures carry one: ARCHITECTURE.md §8).
 """
 from __future__ import annotations
 
@@ -53,14 +42,14 @@ import sys
 import time
 from pathlib import Path
 
-sys.dont_write_bytecode = True  # (it imports tests/agents and mcp_harness from the repository: no __pycache__ left there)
+sys.dont_write_bytecode = True  # (it imports the agents and mcp_harness from the repository: no __pycache__ left there)
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(REPO / "tests"))
+sys.path.insert(0, str(REPO / "native" / "tests" / "support"))
 
-import mcp_harness as mh  # noqa: E402  (the servers' commands and environments, the normalising)
+import mcp_harness as mh  # noqa: E402  (the server's command and environment, the pictures)
 
 PROJECT = "story.genko"
 TITLE = "夏の午後の約束"
@@ -139,8 +128,8 @@ class Recorder:
 
 
 class Person:
-    """test_m4_pipeline.py's ScriptedHuman: answers the agent's approval requests with `genko studio …`, a process each
-    time (this build's genko, or Python's as `python -m genko`), reading what was asked from project.json."""
+    """The scripted person: answers the agent's approval requests with `genko studio …`, a process each time, reading
+    what was asked from project.json."""
 
     def __init__(self, job: dict, calls: list) -> None:
         self.job = job
@@ -153,7 +142,7 @@ class Person:
     def run(self, *args) -> dict:
         argv = ["studio", *map(str, args)]
         server = self.job["server"]
-        cmd = [server["genko"], *argv] if server["kind"] == "cpp" else mh._python_genko(server, argv)
+        cmd = [server["genko"], *argv]
         started = time.perf_counter()
         done = subprocess.run(cmd, env=mh._env(self.job), capture_output=True, timeout=1800)
         ms = (time.perf_counter() - started) * 1000.0
@@ -365,202 +354,11 @@ def run_job(job: dict, out_path: str) -> None:
     out["seconds"] = time.perf_counter() - started
     out["calls"] = calls
     out["root"], out["config"], out["out"] = job["root"], job["config"], job["out"]
-    if job["server"]["kind"] == "py":
-        sys.path.insert(0, str(REPO / "src"))
-        from genko import journal
-
-        book = Path(job["root"]) / PROJECT
-        out["python"] = {"book": json.loads((book / "project.json").read_text(encoding="utf-8")),
-                         "audit": [{k: e.get(k) for k in ("rev", "actor", "changes", "via")} for e in journal.audit_entries(book)]}
     Path(out_path).write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     folder = Path(out_path + ".images")
     folder.mkdir(exist_ok=True)
     for n, data in enumerate(mh.IMAGES, 1):
         (folder / f"{n:03d}.png").write_bytes(data)
-
-
-# --- normalising -------------------------------------------------------------------------------------------------------------
-
-
-class Normal(mh.Normal):
-    """mcp_harness.Normal with the folder the person exports to written <out>, and the studio's ids made from the random
-    ones (a work item's wi_…, a request's rq_…, a candidate's cd_…, a region's rg_…: a hash of a page's or panel's id)
-    written <wi1>, <rq2>, … in the order met."""
-
-    DERIVED = re.compile(r"(?<![0-9A-Za-z])([a-z]{2})_([0-9a-f]{6,11})(?![0-9a-f])")
-
-    def __init__(self, root: str, config: str, out: str, kept: frozenset[str] = frozenset()) -> None:
-        super().__init__(root, config)
-        self.out = out
-        self.derived: dict[str, str] = {}
-        self.kept = kept  # (ids made from no random id: compared as they are — _content_ids)
-
-    def text(self, value: str) -> str:
-        def one(m: re.Match) -> str:
-            key = m.group(0)
-            if key in self.kept:
-                return key
-            if key not in self.derived:
-                self.derived[key] = f"<{m.group(1)}{len(self.derived) + 1}>"
-            return self.derived[key]
-
-        return super().text(self.DERIVED.sub(one, value.replace(self.out, "<out>")))
-
-
-RANDOM = re.compile(r"(?<![0-9a-f])[0-9a-f]{12}(?![0-9a-f])|" + Normal.DERIVED.pattern)
-
-
-def _without_ids(value) -> str:
-    """The value as JSON with every random id (and the ids made from them) written *: what orders it apart from them."""
-    return RANDOM.sub("*", json.dumps(value, ensure_ascii=False, sort_keys=True))
-
-
-def _in_order(side: dict) -> None:
-    """The lists whose order follows the random ids, put in an order of their own on both sides: the candidates tool's
-    rows (ranked, then by id) and the reviews the agent sends in that order; the approval audit's changes of an entry
-    (by what they name: a page by its id), each page and panel named by where it is in the book at the end."""
-    for call in side["calls"]:
-        if call["by"] != "agent":
-            continue
-        if call["tool"] == "candidates" and isinstance(call["reply"], dict) and isinstance(call["reply"].get("candidates"), list):
-            call["reply"]["candidates"].sort(key=lambda r: ((r.get("metrics") or {}).get("rank", 0), _without_ids(r)))
-        if call["tool"] == "review_candidates" and isinstance(call["args"].get("reviews"), list):
-            call["args"]["reviews"].sort(key=_without_ids)
-    where: dict[str, str] = {}
-    for page in side["book"].get("pages", []):
-        where[page["id"].removeprefix("pg_")] = f"page{page['index']}"  # (a page's id is pg_ and 12 digits)
-        todo = list(page.get("frames", []))
-        n = 0
-        while todo:
-            frame = todo.pop(0)
-            n += 1
-            where[frame["id"]] = f"page{page['index']}.frame{n}"
-            todo[:0] = frame.get("children") or []
-
-    def placed(text: str) -> str:
-        return re.sub(r"(?<![0-9a-f])[0-9a-f]{12}(?![0-9a-f])", lambda m: where.get(m.group(0), m.group(0)), text)
-
-    def key(change) -> str:
-        return placed(json.dumps(change, ensure_ascii=False, sort_keys=True))
-
-    for entries in (side["end"]["audit"].get("entries", []), side["audit"]):
-        for entry in entries:
-            if isinstance(entry.get("changes"), list):
-                entry["changes"].sort(key=key)
-
-
-def _content_ids(book: dict) -> frozenset[str]:
-    """The candidates' ids made from no random id: Genko's enlargement's and a derived picture's ("cd_" and 10 digits of
-    content_hash of the source's asset — its bytes' hash — and the settings: StudioService.upscale, .derive). Each is
-    made again here from what the book says of it, and must be that (else the run fails): these are then compared as
-    they are, not written <cdN> as the ids drawn from random ones (a request's cd_ from its rq_, which is from the
-    panel's id)."""
-    sys.path.insert(0, str(REPO / "src"))
-    from genko.studio.jsonutil import content_hash
-
-    out = set()
-    for page in book.get("pages", []):
-        todo = list(page.get("frames", []))
-        while todo:
-            frame = todo.pop(0)
-            todo[:0] = frame.get("children") or []
-            candidates = (frame.get("panel") or {}).get("candidates") or []
-            by_id = {c.get("id"): c for c in candidates}
-            for c in candidates:
-                origin = c.get("origin") or {}
-                tool = str(origin.get("tool_id") or "")
-                parent = by_id.get(c.get("parent"))
-                if origin.get("kind") != "genko" or parent is None:
-                    continue
-                if c.get("mode") == "upscale" and tool.startswith("genko:upscale:"):
-                    marker = c.get("upscaled") or {}
-                    scale = marker.get("scale")
-                    scales = [scale] + ([int(scale)] if isinstance(scale, float) and scale.is_integer() else [])
-                    made = {"cd_" + content_hash({"upscale": marker.get("method"), "from": parent.get("asset"), "scale": x})[7:17] for x in scales}
-                elif c.get("mode") == "derive" and tool.startswith("genko:"):
-                    made = {"cd_" + content_hash({"derive": tool[len("genko:"):], "from": parent.get("asset"), "params": origin.get("params")})[7:17]}
-                else:
-                    continue
-                if c.get("id") not in made:
-                    raise RuntimeError(f"candidate {c.get('id')} is not made from its source and settings as StudioService makes it: {sorted(made)}")
-                out.add(c["id"])
-    return frozenset(out)
-
-
-def normal(in_path: str, out_path: str) -> None:
-    side = json.loads(Path(in_path).read_text(encoding="utf-8"))
-    _in_order(side)
-    norm = Normal(side["root"], side["config"], side["out"], _content_ids(side["book"]))
-    calls = []
-    for call in side["calls"]:
-        call = {k: v for k, v in call.items() if k != "ms"}
-        if call["by"] == "person" and isinstance(call["reply"], dict):
-            call["reply"].pop("code", None)  # (this build's failures also carry a code)
-        calls.append(call)
-    end = side["end"]
-    for name in ("audit", "stats"):
-        end[name].pop("code", None)
-    tool_calls = end["stats"].get("tool_calls") or {}
-    for key in ("ms_p50", "ms_p95"):
-        if key in tool_calls:
-            tool_calls[key] = f"<{key}>"
-    record = {"calls": norm.value(calls), "end": norm.value(end), "book": norm.value(side["book"]), "audit": norm.value(side["audit"])}
-    Path(out_path).write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
-
-
-# --- Python drawing the other build's book -------------------------------------------------------------------------------
-
-
-def redraw(job: dict) -> None:
-    """Python's drawing of a book this build made (its project.json written as Python's v3 writer writes it, beside its
-    assets): what is drawn from its random ids (a balloon's outline from its line's id, effect lines from the effect's)
-    can only be compared on the same book. Into job["out"]: each page as the agent's finish_page shows it
-    (preview-pNNN.png: render, mode proof, 1024 px), the proof as export_proof made it at job["proof_revision"]
-    (proof.pdf) and the person's official exports (pdf/, tiff/: `genko studio export … --dpi 72 --allow-fixture
-    --force --as human:test`). Text laid out with Pillow's BASIC layout, as the measured reference."""
-    _time_limit(job)
-    import contextlib
-    import io
-    import os
-    import shutil
-
-    mh._basic_layout()
-    sys.path.insert(0, str(REPO / "src"))
-    os.environ["GENKO_CONFIG_DIR"] = job["config"]
-    from genko.studio import cli
-    from genko.studio.service import StudioService
-
-    root = Path(job["root"])
-    book = root / PROJECT
-    out = Path(job["out"])
-    out.mkdir(parents=True, exist_ok=True)
-    agent = StudioService(root, "ai:test")
-    for page in range(1, int(job.get("pages", 8)) + 1):
-        shown = agent.render(PROJECT, page, mode="proof", max_px=1024)
-        if not shown.ok:
-            raise RuntimeError(f"render {page}: {shown.to_dict()}")
-        (out / f"preview-p{page:03d}.png").write_bytes(shown.images[0])
-    payload = json.loads((book / "project.json").read_text(encoding="utf-8"))
-    final_revision = payload.get("revision")
-    payload["revision"] = int(job["proof_revision"])
-    (book / "project.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    proof = agent.export_proof(PROJECT, "pdf")
-    if not proof.ok:
-        raise RuntimeError(f"export_proof: {proof.to_dict()}")
-    shutil.copyfile(proof.files[0], out / "proof.pdf")
-    payload["revision"] = final_revision
-    (book / "project.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    replies = []
-    for fmt in ("pdf", "tiff"):
-        printed = io.StringIO()
-        with contextlib.redirect_stdout(printed):
-            code = cli.main(["export", str(book), "--format", fmt, "--out", str(out / fmt), "--dpi", "72", "--allow-fixture", "--force",
-                             "--as", "human:test"])
-        reply = json.loads(printed.getvalue().strip().splitlines()[-1])
-        if code != 0 or not reply.get("ok"):
-            raise RuntimeError(f"export {fmt}: {reply}")
-        replies.append(reply)
-    (out / "exports.json").write_text(json.dumps(replies, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 def main(argv: list[str]) -> int:
@@ -569,18 +367,8 @@ def main(argv: list[str]) -> int:
     p = sub.add_parser("run")
     p.add_argument("job")
     p.add_argument("out")
-    p = sub.add_parser("normal")
-    p.add_argument("input")
-    p.add_argument("out")
-    p = sub.add_parser("redraw")
-    p.add_argument("job")
     args = parser.parse_args(argv)
-    if args.cmd == "run":
-        run_job(json.loads(Path(args.job).read_text(encoding="utf-8")), args.out)
-    elif args.cmd == "redraw":
-        redraw(json.loads(Path(args.job).read_text(encoding="utf-8")))
-    else:
-        normal(args.input, args.out)
+    run_job(json.loads(Path(args.job).read_text(encoding="utf-8")), args.out)
     return 0
 
 

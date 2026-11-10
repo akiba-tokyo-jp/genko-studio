@@ -1,7 +1,7 @@
 """A scripted agent that drives Genko only through MCP tools, the way Hermes Agent would.
 
-It follows `next`, writes the story from tests/agents/story.py, "generates" images
-with tests/agents/images.py into the request inbox, and imports them with
+It follows `next`, writes the story from native/tests/support/agents/story.py, "generates" images
+with native/tests/support/agents/images.py into the request inbox, and imports them with
 origin.kind = "fixture". A scripted human (a callback) answers the approval
 requests with the CLI. Everything runs offline.
 """

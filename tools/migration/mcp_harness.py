@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
-"""The reference runs of native/tests/contract/test_contract_mcp.cpp: Genko's MCP server (`genko mcp`, stdio and
-Streamable HTTP) and its HTTP API (`genko serve`), the C++ build's and Python's (src/genko on the MCP SDK of uv.lock),
-driven the same way and recorded the same way, so the test can compare the two. Development only; nothing here goes
-into the product. Run it with a Python that has the `mcp` extra of pyproject.toml (mcp>=2,<3, pinned by uv.lock) and
-Pillow:
+"""Runs of Genko's MCP server (`genko mcp`, stdio and Streamable HTTP) and its HTTP API (`genko serve`) through the
+MCP SDK's own client and raw JSON-RPC / HTTP, each record normalised; pipeline_harness.py and the tests that drive
+`genko mcp` with the FakeAgent (native/tests/unit/test_ledger_service_b.cpp) take its server commands and its
+normalising from here. Development only; nothing here goes into the product. Run it with a Python that has the MCP
+SDK (tools/migration/mcp_reference_requirements.txt) and Pillow:
 
     python3 tools/migration/mcp_harness.py run JOB OUT
-    python3 tools/migration/mcp_harness.py pyserve ROOT AGENT     (Python's MCP server on Streamable HTTP, a free port)
-    python3 tools/migration/mcp_harness.py pygenko ARGS...        (Python's `genko ARGS…`)
 
-Python's side lays its text out as the measured reference does: Pillow's BASIC layout, without raqm (render_harness and
-pyref_harness hold it the same way; the C++ drawing is BASIC's).
-
-JOB: {"server": {"kind": "cpp", "genko": EXE} | {"kind": "py", "python": EXE, "repo": REPO}, "root", "config",
-"agent", "steps"}. The steps, in order:
+JOB: {"server": {"kind": "cpp", "genko": EXE}, "root", "config", "agent", "steps"}. The steps, in order:
   {"write": REL, "text" | "base64" | "json"}          a file put under the root
   {"job_record": BOOK, "id", "status", "result"?}     studio/jobs/<id>.json of the book (started and beat now; a
                                                       running one's beat renewed every 5 s until the job's end)
@@ -42,8 +36,8 @@ JOB: {"server": {"kind": "cpp", "genko": EXE} | {"kind": "py", "python": EXE, "r
                                                       headers and the JSON body (a PNG as its pixels)
 Each record is normalised: the root's and the config folder's paths <root> and <config>, ids (12 hex digits) <id1>,
 <id2>, … in the order met, a session's id <session>, a job's id <job>, its "seconds" <seconds>, a time stamp <time>,
-how long ago another conversation wrote (<minutes_ago>, in the words too), pictures (PNG) as their mode and size, and the file (OUT.images/NNN.png, in the order met) the test compares the
-pixels of.
+how long ago another conversation wrote (<minutes_ago>, in the words too), pictures (PNG) as their mode and size, and the file (OUT.images/NNN.png, in the order met) that holds the
+pixels.
 """
 from __future__ import annotations
 
@@ -56,7 +50,6 @@ import json
 import os
 import re
 import signal
-import socket
 import subprocess
 import sys
 import threading
@@ -81,17 +74,15 @@ def _png_summary(data: bytes) -> dict:
 
 
 class Normal:
-    """Writes the run's own values (paths, random ids, times) as placeholders, the same way on both sides."""
+    """Writes the run's own values (paths, random ids, times) as placeholders."""
 
     def __init__(self, root: str, config: str) -> None:
         self.root = root
         self.config = config
         self.ids: dict[str, str] = {}
         # Once an Undo went through, the book holds what the C++ build restored from a state asset, which is canonical
-        # JSON (its objects' keys sorted: schema-v4.md), where Python puts back the keys in the order they had, and its
-        # revision counts on where Python's goes back; the replies after it are compared with their objects' keys
-        # sorted and without the revisions, on both sides (as test_contract_service compares a book an Undo restored).
-        # Before it, revisions are compared as they are.
+        # JSON (its objects' keys sorted: schema-v4.md), and its revision counts on; the replies after it are written
+        # with their objects' keys sorted and without the revisions. Before it, revisions are kept as they are.
         self.restored = False
 
     def text(self, value: str) -> str:
@@ -144,36 +135,15 @@ def _env(job: dict) -> dict:
     env = dict(os.environ)
     env["GENKO_CONFIG_DIR"] = job["config"]
     env.pop("PYTHONPATH", None)
-    if job["server"]["kind"] == "py":
-        env["PYTHONPATH"] = str(Path(job["server"]["repo"]) / "src")
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
     return env
 
 
 def _mcp_command(job: dict, transport: str) -> list[str]:
     server = job["server"]
-    if server["kind"] == "cpp":
-        cmd = [server["genko"], "mcp", "--root", job["root"], "--agent", job["agent"]]
-        if transport == "http":
-            cmd += ["--transport", "streamable-http", "--port", "0"]
-        return cmd
+    cmd = [server["genko"], "mcp", "--root", job["root"], "--agent", job["agent"]]
     if transport == "http":
-        return [server["python"], str(HERE / "mcp_harness.py"), "pyserve", job["root"], job["agent"]]
-    return _python_genko(server, ["mcp", "--root", job["root"], "--agent", job["agent"]])
-
-
-def _python_genko(server: dict, args: list[str]) -> list[str]:
-    """`python -m genko <args>` with the text laid out as the measured reference lays it out (pygenko)."""
-    return [server["python"], str(HERE / "mcp_harness.py"), "pygenko", *args]
-
-
-def _basic_layout() -> None:
-    try:  # (the measured reference's text layout: BASIC, without raqm, as render_harness and pyref_harness hold it)
-        from PIL import ImageFont
-
-        ImageFont.core.HAVE_RAQM = False
-    except ImportError:
-        pass
+        cmd += ["--transport", "streamable-http", "--port", "0"]
+    return cmd
 
 
 class Running:
@@ -385,21 +355,6 @@ def _content(norm: Normal, result) -> dict:
     return {"content": blocks, "is_error": bool(result.is_error)}
 
 
-# The user's decisions of 2026-10-28 (PC5-0): the op catalogue's words the C++ build changed (filter_raster's glow,
-# add_layer's kind), put into Python's resource before it is hashed — as native/tests/support/testsupport's
-# with_words_of_2026_10_28 does to the records compared whole.
-_KIND_PY = '"kind": "pen|paint|folder|fill|gradient|adjust?"'
-_KIND_CPP = ('"kind": "pen|paint|folder|fill|gradient|adjust? (paint on an RGB page of 16 or 32 bits: its pixels at the page\'s depth '
-             'once painted)"')
-
-
-def _words_of_2026_10_28(text: str) -> str:
-    for python, cpp in (("glow (光彩拡散) radius", "glow (光彩, フィルター → 漫画) radius"), (_KIND_PY, _KIND_CPP)):
-        text = text.replace(python, cpp)
-        text = text.replace(json.dumps(python)[1:-1], json.dumps(cpp)[1:-1])  # (as json.dumps with ensure_ascii writes it)
-    return text
-
-
 async def _client_ops(job: dict, step: dict, norm: Normal) -> list:
     import anyio
     from mcp import Client
@@ -441,9 +396,7 @@ async def _client_ops(job: dict, step: dict, norm: Normal) -> list:
                         out.append({"resources": [r.model_dump(mode="json", exclude_none=True) for r in res.resources]})
                     elif kind == "read_resource":
                         res = await client.read_resource(op["uri"])
-                        py = job["server"]["kind"] == "py"
-                        out.append({"read": [{"uri": str(c.uri), "mime": c.mime_type,
-                                              "sha256": hashlib.sha256((_words_of_2026_10_28(c.text) if py else c.text).encode()).hexdigest()}
+                        out.append({"read": [{"uri": str(c.uri), "mime": c.mime_type, "sha256": hashlib.sha256(c.text.encode()).hexdigest()}
                                              for c in res.contents]})
                     elif kind == "ping":
                         await client.send_ping()
@@ -562,10 +515,7 @@ def _api(job: dict, step: list, norm: Normal) -> dict:
     if not tokens.is_file():
         tokens.write_text(json.dumps(TOKENS, indent=2), encoding="utf-8")
     server = job["server"]
-    if server["kind"] == "cpp":
-        cmd = [server["genko"], "serve", "--root", job["root"], "--port", "0"]
-    else:
-        cmd = _python_genko(server, ["serve", "--root", job["root"], "--port", "0"])
+    cmd = [server["genko"], "serve", "--root", job["root"], "--port", "0"]
     for origin in job.get("allow_origins", []):
         cmd += ["--allow-origin", origin]
     running = Running(cmd, _env(job))
@@ -705,7 +655,7 @@ def _run_job(job: dict, out_path: str) -> None:
         elif "cli" in step:
             server = job["server"]
             args = [a.replace("$root", job["root"]) for a in step["cli"]]
-            cmd = [server["genko"], *args] if server["kind"] == "cpp" else _python_genko(server, args)
+            cmd = [server["genko"], *args]
             done = subprocess.run(cmd, env=_env(job), capture_output=True, timeout=300)
             text = done.stdout.decode("utf-8")
             reply = json.loads(text) if text.strip() else None
@@ -749,53 +699,14 @@ def _run_job(job: dict, out_path: str) -> None:
         (folder / f"{n:03d}.png").write_bytes(data)
 
 
-def pyserve(root: str, agent: str) -> None:
-    """Python's MCP server (build_server, as `genko mcp` makes it) on Streamable HTTP as MCPServer.run("streamable-http")
-    serves it, on a socket bound to a free port first (no race for the port)."""
-    import uvicorn
-
-    _basic_layout()
-    sys.path.insert(0, str(HERE.parents[1] / "src"))
-    from genko.mcp.server import build_server
-
-    Path(root).mkdir(parents=True, exist_ok=True)
-    app = build_server(Path(root), agent).streamable_http_app(host="127.0.0.1")
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(("127.0.0.1", 0))
-    sock.listen(128)
-    print(f"genko mcp http://127.0.0.1:{sock.getsockname()[1]}/mcp root={root}", file=sys.stderr, flush=True)
-    uvicorn.Server(uvicorn.Config(app, log_level="warning")).run(sockets=[sock])
-
-
-def pygenko(args: list[str]) -> None:
-    """Python's genko as `python -m genko <args>` runs it (src/genko on PYTHONPATH), its text laid out with Pillow's
-    BASIC layout (the C++ drawing is BASIC's; a Pillow with raqm would otherwise use raqm)."""
-    import runpy
-
-    _basic_layout()
-    sys.path[0] = os.getcwd()  # (as -m puts it)
-    sys.argv = ["genko", *args]
-    runpy.run_module("genko", run_name="__main__", alter_sys=True)
-
-
 def main(argv: list[str]) -> int:
-    if argv and argv[0] == "pygenko":
-        pygenko(argv[1:])
-        return 0
     parser = argparse.ArgumentParser(prog="mcp_harness.py")
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("run")
     p.add_argument("job")
     p.add_argument("out")
-    p = sub.add_parser("pyserve")
-    p.add_argument("root")
-    p.add_argument("agent")
     args = parser.parse_args(argv)
-    if args.cmd == "run":
-        run_job(json.loads(Path(args.job).read_text(encoding="utf-8")), args.out)
-    else:
-        pyserve(args.root, args.agent)
+    run_job(json.loads(Path(args.job).read_text(encoding="utf-8")), args.out)
     return 0
 
 

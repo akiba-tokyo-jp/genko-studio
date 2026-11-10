@@ -83,9 +83,9 @@ const char* const kBible = R"({"title": "雨の日", "author": "山田", "charac
 
 Json parsed(const char* text) { return genko::core::parse_python_json(text); }
 
-// tests/fixtures/studio/demo4/<name> as the Python tests' _load reads it (json.loads).
+// native/tests/fixtures/studio/demo4/<name> as the Python tests' _load reads it (json.loads).
 Json fixture(const std::string& name) {
-    return genko::test::read_json(genko::test::repo_root() + QStringLiteral("/tests/fixtures/studio/demo4/") + QString::fromStdString(name));
+    return genko::test::read_json(genko::test::repo_root() + QStringLiteral("/native/tests/fixtures/studio/demo4/") + QString::fromStdString(name));
 }
 
 // value[key][key]…, or null when a step is not there.

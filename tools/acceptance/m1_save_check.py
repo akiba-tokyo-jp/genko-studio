@@ -8,7 +8,6 @@ from pathlib import Path
 
 DBG = "/src/build/linux-debug/src/api/genko"
 REL = "/src/build/linux-release/src/api/genko"
-PY = "/opt/pyref/bin/python"
 results = []
 
 
@@ -114,21 +113,7 @@ st = json.loads((book / "project.json").read_text(encoding="utf-8"))
 check("AI cannot undo an approval (even with --force)", c != 0 and c2 != 0 and st["pages"][0]["name_ok"] is True,
       f"undo={c} {o} force={c2} {o2}")
 
-# 4) Python 版が project.lock を持っている間は C++ が書かない
-book = work / "lock.genko"
-shutil.copytree(base, book)
-holder = subprocess.Popen([PY, "-c", (
-    "import sys,time; sys.path.insert(0,'/src/src'); from pathlib import Path; from genko.lock import ProjectLock\n"
-    f"l=ProjectLock(Path({str(book)!r}), agent='human:py'); l.__enter__(); print('held', flush=True); time.sleep(20)")],
-    stdout=subprocess.PIPE, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
-holder.stdout.readline()
-rb = json.loads((book / "project.json").read_text(encoding="utf-8"))["revision"]
-c, o, e = run(REL, "apply", str(book), "-", "--agent", "human:a", inp=json.dumps([{"op": "set_note", "page": 1, "note": "z"}]))
-ra = json.loads((book / "project.json").read_text(encoding="utf-8"))["revision"]
-holder.kill(); holder.wait()
-check("Python lock blocks the C++ writer", c != 0 and ra == rb, f"code={c} out={o}")
-
-# 5) 旧原稿の変換: 原本は無変更、変換後に旧履歴まで Undo できる、version 4・世代は増える
+# 4) 旧原稿の変換: 原本は無変更、変換後に旧履歴まで Undo できる、version 4・世代は増える
 for v in ("v1", "v2", "v3"):
     src = work / f"src-{v}.genko"
     shutil.copytree(f"/src/native/tests/data/legacy/book-{v}.genko", src)
@@ -155,7 +140,7 @@ for v in ("v1", "v2", "v3"):
         detail += f" undone={undone} redo={cr} revs={revs}"
     check(f"migrate {v}", ok, detail)
 
-# 6) v3 原稿に直接書こうとすると、書き換えずに変換を案内する
+# 5) v3 原稿に直接書こうとすると、書き換えずに変換を案内する
 src = work / "direct-v3.genko"
 shutil.copytree("/src/native/tests/data/legacy/book-v3.genko", src)
 h0 = tree_hash(src)
@@ -163,7 +148,7 @@ c, o, e = run(REL, "apply", str(src), "-", "--agent", "human:a", inp=json.dumps(
 check("v3 book is not written (needs_migration)", c == 3 and tree_hash(src) == h0 and not (src / "project.lock").exists(),
       f"code={c} out={o}")
 
-# 7) Release 版は GENKO_FAULT を無視する
+# 6) Release 版は GENKO_FAULT を無視する
 book = work / "release-fault.genko"
 shutil.copytree(base, book)
 c, o, e = run(REL, "apply", str(book), "-", "--agent", "human:a", env={"GENKO_FAULT": "project:crash"},

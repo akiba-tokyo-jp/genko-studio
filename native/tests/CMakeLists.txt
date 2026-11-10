@@ -6,7 +6,7 @@ genko_target_flags(genko_lock_helper)
 add_executable(genko_argv_helper support/argv_helper.cpp)
 genko_target_flags(genko_argv_helper)
 
-# Shared test helpers (strict JSON comparison, the Python reference, running the CLI).
+# Shared test helpers (strict JSON comparison, the reference Python, running the CLI).
 add_library(genko_test_support STATIC support/testsupport.cpp)
 target_include_directories(genko_test_support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/support")
 target_link_libraries(genko_test_support PUBLIC genko_storage Qt6::Core)
@@ -32,15 +32,15 @@ genko_test(test_storage SOURCES unit/test_storage.cpp DEPS genko_test_support LA
 genko_test(test_lock SOURCES unit/test_lock.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_journal SOURCES unit/test_journal.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_command_bus SOURCES unit/test_command_bus.cpp DEPS genko_test_support genko_render_ops LABELS unit)
-# The studio (M5): its files where this build goes past Python, and its ops' refusals and changes this build alone makes.
+# The studio (M5): its files, and its ops' refusals and changes.
 genko_test(test_studio_files SOURCES unit/test_studio_files.cpp DEPS genko_test_support genko_studio LABELS unit)
 genko_test(test_studio_ops SOURCES unit/test_studio_ops.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_placed SOURCES unit/test_placed.cpp DEPS genko_test_support genko_formats genko_render_ops LABELS unit)
 genko_test(test_ops SOURCES unit/test_ops.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_transaction SOURCES unit/test_transaction.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 
-# Drawing (M2-R1): Python's random and stroke geometry, Pillow's Image layer and PNG reading, against tables made by
-# tools/migration/render_harness.py unit-tables (data/pyref/render_unit_tables.json).
+# Drawing (M2-R1): random numbers and stroke geometry, the Image layer and PNG reading, against recorded tables
+# (data/pyref/render_unit_tables.json).
 genko_test(test_pyrandom SOURCES unit/test_pyrandom.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_stroke_geom SOURCES unit/test_stroke_geom.cpp DEPS genko_test_support LABELS unit)
 genko_test(test_image SOURCES unit/test_image.cpp DEPS genko_test_support genko_render LABELS unit)
@@ -66,18 +66,18 @@ target_compile_definitions(test_render_page PRIVATE GENKO_SOURCE_DIR="${GENKO_SO
 # Tones, effect lines and rulers (M3-B).
 genko_test(test_rulers SOURCES unit/test_rulers.cpp DEPS genko_test_support genko_render_ops LABELS unit)
 genko_test(test_tones_effects SOURCES unit/test_tones_effects.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
-# 3D (M3-C): the ops, their refusals, Undo and saving, the pose library, the guides drawn (no Python needed).
+# 3D (M3-C): the ops, their refusals, Undo and saving, the pose library, the guides drawn.
 genko_test(test_ops_3d SOURCES unit/test_ops_3d.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
-# The ops of M3-A1 (layers, masks, pixels, fills, areas, paper) without Python.
+# The ops of M3-A1 (layers, masks, pixels, fills, areas, paper).
 genko_test(test_raster_ops SOURCES unit/test_raster_ops.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 900)
 genko_test(test_material_stamp SOURCES unit/test_material_stamp.cpp DEPS genko_core genko_storage genko_render_ops LABELS unit)
 # 紙質 (BRUSH-01, this build only): the arithmetic against the independent reference (data/paper/samples.json), the
 # pictures taken in, define_brush's paper, the full-size reference pages, saved and opened elsewhere, Undo and Redo,
-# the print's PDF drawn back by poppler's pdftocairo, the command line (no Python: test_contract_paper has that part).
+# the print's PDF drawn back by poppler's pdftocairo, the command line.
 genko_test(test_paper SOURCES unit/test_paper.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
 
 # color-model@1 (SPEC.md COLOR-03): the built-in ICC profiles, the colour model's JSON, GKIR version 2, the conversions
-# between modes and depths, assign_profile and convert_profile, their refusals, without Python.
+# between modes and depths, assign_profile and convert_profile, their refusals,.
 genko_test(test_color_model SOURCES unit/test_color_model.cpp DEPS genko_test_support genko_render_ops genko_formats ${GENKO_LCMS2}
            LABELS unit TIMEOUT 600)
 
@@ -86,10 +86,10 @@ genko_test(test_color_model SOURCES unit/test_color_model.cpp DEPS genko_test_su
 genko_test(test_quantize SOURCES unit/test_quantize.cpp DEPS genko_test_support genko_render LABELS unit)
 
 # 色の校正・色域外警告・カラー設定 (SPEC.md COLOR-03, PC1b): render/proof against PhotoCraft's own tests, a picture's own
-# profile, set_text_gamma and the letters drawn in it, without Python.
+# profile, set_text_gamma and the letters drawn in it,.
 genko_test(test_proof SOURCES unit/test_proof.cpp DEPS genko_test_support genko_render_ops genko_storage genko_formats ZLIB::ZLIB LABELS unit TIMEOUT 600)
 
-# color-mode@1 (SPEC.md COLOR-02): CMYK and Lab pages without Python — GKIR, the colour mode, the ink rules, the ink
+# color-mode@1 (SPEC.md COLOR-02): CMYK and Lab pages — GKIR, the colour mode, the ink rules, the ink
 # canvas's blends, a page drawn in parts, set_color_mode and back, set_inks, the book on disk, Undo, the refusals.
 genko_test(test_ink SOURCES unit/test_ink.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
 # color-mode@1, step two: the pixel ops of CMYK and Lab pages through their pictures, the eyedropper's inks, a colour
@@ -97,7 +97,7 @@ genko_test(test_ink SOURCES unit/test_ink.cpp DEPS genko_test_support genko_rend
 genko_test(test_ink_edit SOURCES unit/test_ink_edit.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 1200)
 # color-mode@1, step three: the filters and the corrections of CMYK and Lab pages in their inks.
 genko_test(test_ink_filters SOURCES unit/test_ink_filters.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
-# channels@1 (SPEC.md COLOR-03): a page's alpha and spot channels without Python — their JSON, the channel ops and their
+# channels@1 (SPEC.md COLOR-03): a page's alpha and spot channels — their JSON, the channel ops and their
 # refusals, the selection from a channel, the pixel ops on a channel or one colour plate, split and merge back byte for
 # byte, Merge Spot Channel against PhotoCraft's formula, the spots printed and the panel's view, the book on disk.
 genko_test(test_channels SOURCES unit/test_channels.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
@@ -114,7 +114,7 @@ genko_test(test_select_color SOURCES unit/test_select_color.cpp DEPS genko_test_
 genko_test(test_magic_erase SOURCES unit/test_magic_erase.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # PC3 B2 (SPEC.md COLOR-06): a layer's mask applied and made from the transparency, a linked mask moved with its layer,
 # outline_area's bands, fill_area's preserve_transparency, paste's center_mm, the masks of a precise or ink page at its
-# finest grid — on 8-bit, precise (16, 32 bits) and CMYK pages, without Python.
+# finest grid — on 8-bit, precise (16, 32 bits) and CMYK pages,.
 genko_test(test_masks SOURCES unit/test_masks.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # PC3 B4 (SPEC.md COLOR-06「修復」): the fills (PhotoCraft's poisson.rs, inpaint.rs and content_aware.rs tests) and the
 # retouching ops (retouch_cmds/tests.rs: Clone Stamp, Healing Brush, Spot Healing, History Brush, Content-Aware Fill) on
@@ -250,19 +250,19 @@ genko_test(test_measure_features SOURCES unit/test_measure_features.cpp DEPS gen
 # ops and a duplicated page carrying them, PSD's 1050 (versions 6 and 7) onto a page and back, a .pcraft's slices, MCP's
 # apply_ops not taking the ops.
 genko_test(test_slices SOURCES unit/test_slices.cpp DEPS genko_test_support genko_render_ops genko_formats genko_service LABELS unit TIMEOUT 600)
-# PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground without Python — Python's form kept, a
+# PC2-0 (SPEC.md COLOR-04, adjustments@1): the corrections' common ground — Python's form kept, a
 # correction's native read and stored, native.method, the kinds' table and what is not in this build yet, one
 # AdjustFunction to the three ways, native.blend on 8 and 16 bits and on CMYK, the PSD's frame; and PC2a's tone kinds
 # (the upstream formulas, the channel records in their space, auto_adjust, equalize, set_adjustment, color_lookup's
 # asset, the PSD's tone codecs, the .cube export).
 genko_test(test_adjust SOURCES unit/test_adjust.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
 # PC2c (COLOR-04): the local corrections (PhotoCraft's algo/tone.rs tests; filter_raster's shadows_highlights,
-# replace_color and match_color on 8-bit, precise and CMYK layers) and hdr_toning's flatten, without Python.
+# replace_color and match_color on 8-bit, precise and CMYK layers) and hdr_toning's flatten,.
 genko_test(test_tone_ops SOURCES unit/test_tone_ops.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # PC4 節 D (COLOR-08): フィルター's engine (render/fx: PhotoCraft's own tests of its filter core, the same bytes whatever
 # the tiling and threads, the three ways, a page of inks' ways, 200 and 600 dpi, the budget, stopping, a heavy filter told,
 # the preview's copy, the new ops' frames) and its kinds' table (settings, presets, .pcraft's commands, places, filters@1,
-# the catalogue), without Python.
+# the catalogue),.
 genko_test(test_fx SOURCES unit/test_fx.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 3000)
 set_property(TEST test_fx APPEND PROPERTY ENVIRONMENT "QTEST_FUNCTION_TIMEOUT=1700000")
 genko_test(test_filter_kinds SOURCES unit/test_filter_kinds.cpp DEPS genko_test_support genko_render_ops LABELS unit)
@@ -297,7 +297,7 @@ genko_test(test_image_calc SOURCES unit/test_image_calc.cpp DEPS genko_test_supp
 # PC2b: the colour corrections' formulas (PhotoCraft's own tests), their settings read and stored, the three ways, the
 # PSD's colour adjustment layers (round trips, hand-built blocks, what is not read).
 genko_test(test_adjust_color SOURCES unit/test_adjust_color.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 600)
-# PC2a (SPEC.md COLOR-04): color_lookup's 3D tables without Python — the LUT files read as PhotoCraft reads them, the
+# PC2a (SPEC.md COLOR-04): color_lookup's 3D tables — the LUT files read as PhotoCraft reads them, the
 # generated looks, the lookup and its dither, the table as a book holds it.
 genko_test(test_lut3d SOURCES unit/test_lut3d.cpp DEPS genko_core LABELS unit)
 # PC3 A0 (SPEC.md「スマートオブジェクト」, smart-objects@1): the model's rules — the matrix, the book written and read back,
@@ -335,7 +335,7 @@ genko_test(test_smart_stack SOURCES unit/test_smart_stack.cpp DEPS genko_test_su
 genko_test(test_smart_warp SOURCES unit/test_smart_warp.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 1800)
 
 # core/pyre's own bounds (Python 3.12's re, ported; SPEC COMP-01a): a search that backtracks without end stopped when its
-# steps are spent, groups more than 200 deep refused, replace_text refused without a change; without Python.
+# steps are spent, groups more than 200 deep refused, replace_text refused without a change;.
 genko_test(test_pyre SOURCES unit/test_pyre.cpp DEPS genko_test_support genko_render_ops LABELS unit TIMEOUT 600)
 # TEXT-01 (ruby-layout@1): a line's ruby held by place — the table of edits (data/ruby_cases.json), the ops' refusals,
 # the feature, the book read back, the official export stopped while a ruby needs review; and drawn — by place as
@@ -372,26 +372,13 @@ genko_test(test_pcraft SOURCES unit/test_pcraft.cpp DEPS genko_test_support genk
 # (hostile.rs) —, and camera-raw@1's settings.
 genko_test(test_raw SOURCES unit/test_raw.cpp support/raw_testgen.cpp DEPS genko_test_support genko_render_ops genko_formats LABELS unit TIMEOUT 900)
 
-# Against the Python baseline (skipped when there is no reference Python: $GENKO_PYREF or /opt/pyref/bin/python).
+# The reader and writer on the legacy and hand-made old books; the numbers and JSON underneath against the reference
+# Python's own (skipped when there is no reference Python: $GENKO_PYREF or /opt/pyref/bin/python).
 genko_test(test_contract_storage SOURCES contract/test_contract_storage.cpp DEPS genko_test_support LABELS contract
            TIMEOUT 1200)
-genko_test(test_contract_cli SOURCES contract/test_contract_cli.cpp DEPS genko_test_support LABELS contract
-           TIMEOUT 600)
-genko_test(test_contract_save SOURCES contract/test_contract_save.cpp DEPS genko_test_support genko_render_ops
-           LABELS contract TIMEOUT 1200)
-genko_test(test_contract_draw SOURCES contract/test_contract_draw.cpp DEPS genko_test_support genko_render
-           LABELS contract TIMEOUT 600)
-genko_test(test_contract_brushes SOURCES contract/test_contract_brushes.cpp DEPS genko_test_support genko_render
-           LABELS contract TIMEOUT 900)
-genko_test(test_contract_render SOURCES contract/test_contract_render.cpp DEPS genko_test_support genko_render
-           LABELS contract TIMEOUT 7200)
-# (hundreds of pages in one test function: QtTest's 5-minute limit per function is raised; the whole test takes about
-# 12 minutes in Debug and 40 under ASan)
-set_tests_properties(test_contract_render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
+# `genko render`'s refusals.
 genko_test(test_contract_render_cli SOURCES contract/test_contract_render_cli.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 1800)
-# Tones, effect lines and rulers against Python (M3-B): the ops (fixed cases, random sequences, the command line), the
-# drawing, the snapping, and the pen lines and erasers that snap to the rulers (moved from M2-O1's cases).
 # PC4 節 D (COLOR-08) through the command line: フィルター's kinds on 8 and 16 bits, a selection, a channel, saved, undone,
 # the journal; as smart filters (filters@1, read-only for a reader that does not know it); a book without them as it was;
 # genko inspect --filters.
@@ -402,111 +389,51 @@ genko_test(test_contract_raw SOURCES contract/test_contract_raw.cpp support/raw_
            LABELS contract TIMEOUT 900)
 genko_test(test_contract_filters_pc4 SOURCES contract/test_contract_filters_pc4.cpp DEPS genko_test_support genko_render_ops genko_storage
            LABELS contract TIMEOUT 900)
-genko_test(test_contract_tone_ops SOURCES contract/test_contract_tone_ops.cpp DEPS genko_test_support genko_render_ops
-           LABELS contract TIMEOUT 3600)
-set_tests_properties(test_contract_tone_ops PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
-genko_test(test_contract_tone_render SOURCES contract/test_contract_tone_render.cpp DEPS genko_test_support genko_render_ops
-           LABELS contract TIMEOUT 7200)
-set_tests_properties(test_contract_tone_render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=7000000")
-genko_test(test_contract_rulers SOURCES contract/test_contract_rulers.cpp contract/opsupport.cpp
-           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
 set_tests_properties(test_contract_render_cli PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=1700000")
-# The ops of M2-O1 against Python's apply_ops (fixed cases, random sequences, saved and read back) and the command line.
-genko_test(test_contract_ops SOURCES contract/test_contract_ops.cpp contract/opsupport.cpp DEPS genko_test_support
-           genko_render_ops LABELS contract TIMEOUT 3600)
-genko_test(test_contract_ops_cli SOURCES contract/test_contract_ops_cli.cpp DEPS genko_test_support LABELS contract
-           TIMEOUT 3600)
-# The ops of M3-A1 (layers, masks, pixels, fills, areas, paper) against Python's apply_ops: fixed cases, random sequences,
-# saved and read back.
-genko_test(test_contract_raster_ops SOURCES contract/test_contract_raster_ops.cpp contract/opsupport.cpp
-           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 7200)
-# … the pages they make, drawn (whole and in parts), and the command line.
-genko_test(test_contract_raster_render SOURCES contract/test_contract_raster_render.cpp
-           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 3600)
-set_tests_properties(test_contract_raster_render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
-genko_test(test_contract_raster_cli SOURCES contract/test_contract_raster_cli.cpp contract/opsupport.cpp
-           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 5400)
-# core/filters, the correction layers' adjustments for the ops and the renderer, against Python's filters.apply_filter.
-genko_test(test_contract_filters SOURCES contract/test_contract_filters.cpp DEPS genko_test_support genko_render
-           LABELS contract TIMEOUT 600)
-# render/colour (CMYK, ICC, the screen proof) against Python's genko/colour.py.
+# render/colour: a CMYK profile read through a path of any name, and read again when the file changes.
 genko_test(test_contract_colour SOURCES contract/test_contract_colour.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 600)
-# 紙質 (BRUSH-01): the inherited brushes' reference page (data/paper/expected/inherited-brushes.png) is Python's own
-# drawing of the same lines, and this build's.
-genko_test(test_contract_paper SOURCES contract/test_contract_paper.cpp DEPS genko_test_support genko_render
-           LABELS contract TIMEOUT 600)
-# render/abr (Photoshop brush files) and the brush library against Python's genko/abr.py and brushes.py.
+# render/abr (Photoshop brush files) and the brush library: broken files stop early, a library that cannot be read
+# is never written over, `genko brushes import-abr`, the brushes' and presets' command line.
 genko_test(test_contract_abr SOURCES contract/test_contract_abr.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 600)
-# render/materials (the person's material library, packs) against Python's genko/materials/__init__.py.
+# render/materials (the person's material library, packs): never lost or reached outside; zip64 read by the reference
+# Python's zipfile.
 genko_test(test_contract_materials SOURCES contract/test_contract_materials.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 600)
-# The two together: a book made by the ops (C++ and Python), drawn by `genko render` and `python -m genko render`.
-genko_test(test_contract_drawn_by_ops SOURCES contract/test_contract_drawn_by_ops.cpp contract/opsupport.cpp
-           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
-# Animation (M3③): the ops against Python's apply_ops (anim_cases.json), an animation page drawn as its first frame.
-genko_test(test_contract_anim SOURCES contract/test_contract_anim.cpp contract/opsupport.cpp
-           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
-# The vector line edits (M3④): vector_edit and trace_edit against Python's apply_ops (vector_cases.json).
-genko_test(test_contract_vector SOURCES contract/test_contract_vector.cpp contract/opsupport.cpp
+# Animation (M3③): GIF's codes, timeline@1 (anim_cases.json's timeline_cases), the work area written out, a camera
+# that is not finite refused.
+genko_test(test_contract_anim SOURCES contract/test_contract_anim.cpp
            DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
 # core/pyre against Python 3.12's re (tools/migration/pyre_harness.py): every code point's properties and every name
 # re reads, the curated cases of contract/pyre_cases.json and 30000 random ones: compile errors, groups, spans, subn,
 # findall.
 genko_test(test_contract_pyre SOURCES contract/test_contract_pyre.cpp DEPS genko_test_support LABELS contract TIMEOUT 1800)
-# The line ops of M4: add_line, edit_line, move_line, delete_line, reorder_lines, cut_balloon, set_balloon_path,
-# replace_text (with re's patterns too) and stamp_material's lines (lettering materials, a picture material made a
-# balloon) against Python's apply_ops (lines_cases.json).
-genko_test(test_contract_lines SOURCES contract/test_contract_lines.cpp contract/opsupport.cpp
-           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
-# The book and page ops of M4: set_page_spec, set_spread, add_cover, for_pages, set_assignee and import_pages against
-# Python's apply_ops (book_cases.json), with what covers.py makes of the book; `genko apply` with import_pages copying
-# no asset file, as Python's.
-genko_test(test_contract_book SOURCES contract/test_contract_book.cpp contract/opsupport.cpp
-           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
-# The studio ops of M5 (studio_ops.py: the bible, briefs, regions, requests, candidates, adoption, placement, approvals,
-# tickets, proposals; set_bible, add_ticket, set_ticket) against Python's apply_ops (studio_cases.json on
-# studio_harness.py's studio book), and the same saved batch by batch with Undo and Redo by actor, the approval audit
-# compared with Python's.
-genko_test(test_contract_studio SOURCES contract/test_contract_studio.cpp contract/opsupport.cpp
-           DEPS genko_test_support genko_render_ops genko_studio genko_formats ZLIB::ZLIB LABELS contract TIMEOUT 2400)
-# The studio service (M5②: service.py's StudioService and HumanService, adopt-drafts, stats, the audit and `genko studio`)
-# against Python's: service_cases.json (make_service_cases.py) run here and by service_harness.py, step by step: each reply,
-# the books and the other files after it.
-genko_test(test_contract_service SOURCES contract/test_contract_service.cpp
-           DEPS genko_test_support genko_service genko_api ZLIB::ZLIB LABELS contract TIMEOUT 2400)
-# `genko mcp` (stdio, Streamable HTTP) and `genko serve` against Python's, through the MCP SDK's own client and raw
-# JSON-RPC / HTTP (tools/migration/mcp_harness.py on contract/mcp_cases.json; skipped without $GENKO_MCP_PYTHON).
-genko_test(test_contract_mcp SOURCES contract/test_contract_mcp.cpp DEPS genko_test_support genko_render LABELS contract TIMEOUT 3600)
-# F3 (ACCEPTANCE.md §2, M5's exit): tests/test_m4_pipeline.py's 8-page offline making on this build — Python's FakeAgent
-# through the MCP SDK's client on `genko mcp`, the person's `genko studio` — against the same run on Python's
-# (tools/migration/pipeline_harness.py): every call and reply, the pictures, the book, its audit and approvals; what was
-# written out (drawn from random ids: against Python's drawing of this build's book). Skipped without $GENKO_MCP_PYTHON,
-# as test_contract_mcp.
+# F3 (ACCEPTANCE.md §2): the 8-page offline making on this build — the FakeAgent through the MCP SDK's client on
+# `genko mcp`, a scripted person's `genko studio` (tools/migration/pipeline_harness.py): the book approved and finished,
+# its audit and approvals, what was written out. Skipped without $GENKO_MCP_PYTHON.
 genko_test(test_contract_pipeline SOURCES contract/test_contract_pipeline.cpp DEPS genko_test_support genko_render ZLIB::ZLIB
            LABELS contract TIMEOUT 7200)
 set_tests_properties(test_contract_pipeline PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=7100000")
-# The studio service where this build goes past Python (SPEC COMP-01a): background jobs (and a thread that cannot
+# The studio service (SPEC COMP-01a): background jobs (and a thread that cannot
 # start), a palette picture kept, the official export handed to the studio (holding the book, taking back its files,
 # printing the dots asked for), for_pages and put_raster's reads, preview names, pages gone meanwhile, v1–v3 books
 # refused (and `genko studio`'s exit 3), one save for several sheets, chat approvals checked under the lock, another
 # process's lock, confine kept from callers, the command line's own refusals, PDF numbers whatever the locale.
 genko_test(test_service SOURCES unit/test_service.cpp DEPS genko_test_support genko_service LABELS unit)
-# M7 (the ledger counted against the C++ tree): the checks of Python's tests no C++ test made before, ported a Python test
-# to a slot (tools/migration/build_ledger.py TEST_CPP names them)
+# M7 (the ledger counted against the C++ tree): the checks the ledger asked for that no other C++ test made
 genko_test(test_ledger_service_a SOURCES unit/test_ledger_service_a.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 900)
 genko_test(test_ledger_service_c SOURCES unit/test_ledger_service_c.cpp DEPS genko_test_support genko_service LABELS unit TIMEOUT 900)
 genko_test(test_ledger_service_b SOURCES unit/test_ledger_service_b.cpp DEPS genko_test_support genko_service genko_api LABELS unit TIMEOUT 2400)
 set_tests_properties(test_ledger_service_b PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=2300000")
-# import_psd (M4②b): psd.read_psd and the op against Python's on the PSD and PSB files of psd_cases.json (every file,
-# a few cut after every byte, all of them changed at a few bytes; each step's reply, snapshot and payload, the layers'
-# pixels, the book read back), and hostile files refused without the memory Python would take.
+# import_psd (M4②b) and the PSD reader on the PSD and PSB files of psd_cases.json: hostile files refused without the
+# memory they would take, the reader's budgets, a PSD opened as one picture as Pillow opens it (every file, a few cut
+# after every byte, all of them changed at a few bytes).
 # PC4 F-d (SPEC.md FILE-01「PSD・PSB」): psd-keep@1 — psd-tools' files (data/psd_keep) opened and written again, what
 # this build does not read back byte for byte (psd-tools, this reader), locks, layer ids, comps and slices dropped with
 # their layers, the book saved and read back —, the layers at their depth (16 and 32 bits, CMYK, Lab, grey, Lr16), PSB
 # written (psd-tools, this reader, lnk2), a page past 30000 px a PSB, hostile blocks bounded.
-genko_test(test_contract_psd SOURCES contract/test_contract_psd.cpp contract/opsupport.cpp
+genko_test(test_contract_psd SOURCES contract/test_contract_psd.cpp
            DEPS genko_test_support genko_render_ops genko_formats LABELS contract TIMEOUT 1800)
 # PSD-01 against psd-tools (ACCEPTANCE.md §6): the editable PSD book read by psd-tools (tools/migration/psd_text_check.py)
 # and by render::psd::File, the same layers, groups, texts, runs, fonts, transforms and strokes.
@@ -666,7 +593,7 @@ genko_test(test_contract_page_size SOURCES contract/test_contract_page_size.cpp 
 genko_test(test_contract_psd_text SOURCES contract/test_contract_psd_text.cpp DEPS genko_test_support genko_formats genko_render_ops
            LABELS contract TIMEOUT 1800)
 set_tests_properties(test_contract_psd_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-# TIFF and WebP read as the Python baseline's Pillow reads them (M6): every case made by the reference Pillow, the
+# TIFF and WebP read as the reference Pillow reads them (M6): every case made by the reference Pillow, the
 # same mode, size and bytes; a TIFF in planes said not yet read.
 genko_test(test_contract_tiff_webp SOURCES contract/test_contract_tiff_webp.cpp DEPS genko_test_support genko_render
            LABELS contract TIMEOUT 900)
@@ -743,44 +670,21 @@ add_dependencies(test_contract_auto_align genko)
 genko_test(test_contract_print SOURCES contract/test_contract_print.cpp DEPS genko_test_support genko_render_ops genko_formats ${GENKO_LCMS2}
            LABELS contract TIMEOUT 900)
 add_dependencies(test_contract_print genko)
-# The text of a line (M4): tategaki and the text side of balloons (cells, kinsoku, glyphs, ruby, 傍点, the letters set
-# across and down, their effects, text on a path) against Python's (render_harness.py text-cases), byte for byte (a
-# warped line's pictures within ARCHITECTURE.md §9: Python's homography comes from numpy's SVD).
-genko_test(test_contract_text SOURCES contract/test_contract_text.cpp contract/opsupport.cpp
-           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 3600)
-set_tests_properties(test_contract_text PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
-# Balloons (M4): the shapes, tails and joined balloons of balloons.py against Python's (render_harness.py
-# balloon-cases): the geometry bit for bit, draw_lines's pictures byte for byte, whole and drawn in parts.
-genko_test(test_contract_balloons SOURCES contract/test_contract_balloons.cpp
-           DEPS genko_test_support genko_render LABELS contract TIMEOUT 3600)
-set_tests_properties(test_contract_balloons PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
-# The paint ops of M3④: add_shape, smudge and liquify against Python's apply_ops (paint_cases.json).
-genko_test(test_contract_paint SOURCES contract/test_contract_paint.cpp contract/opsupport.cpp
-           DEPS genko_test_support genko_render_ops LABELS contract TIMEOUT 1800)
-# The exports (M4③a, formats/): every format of export.py, profiles.py, pack.py and psd.py's writer, and
-# app/exporting.run, against Python's on the same books (render_harness.py make-export-books, export-cases): what each
-# call returns or raises, and every file it writes, byte for byte (export_files.hpp leaves out only the times Python's
-# files carry: the sRGB profile's date, an EPUB's zip times and dcterms:modified); the encoders alone against Pillow's
-# (save-cases).
+# The exports (M4③a, formats/): what is not drawn yet, something in the way, a place that cannot be read, a pack
+# stopped part way, the resolutions, a strip too large, a book still being read.
 genko_test(test_contract_export SOURCES contract/test_contract_export.cpp DEPS genko_test_support genko_formats ZLIB::ZLIB
            LABELS contract TIMEOUT 1800)
 set_tests_properties(test_contract_export PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=1700000")
-# `genko export` against `python -m genko export`: every format and option, the output, the files, the refusals and
-# exit codes, a moving picture (animation, timelapse) as Pillow plays it.
+# `genko export`'s refusals: resolutions out of range for every format, usage errors.
 genko_test(test_contract_export_cli SOURCES contract/test_contract_export_cli.cpp DEPS genko_test_support genko_render ZLIB::ZLIB
            LABELS contract TIMEOUT 1800)
 set_tests_properties(test_contract_export_cli PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=1700000")
-# 入稿前の点検 (M4③b, formats/checks): checks.book (and the studio preflight it folds in) against Python's on chosen
-# books that reach every check and random drawing books (render_harness.py check-cases), each report byte for byte.
-genko_test(test_contract_checks SOURCES contract/test_contract_checks.cpp DEPS genko_test_support genko_formats
-           LABELS contract TIMEOUT 1800)
-set_tests_properties(test_contract_checks PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=1700000")
-# Filter plugins (M3③, COMP-04): the runner against Python's plugins.run, the choice, the bounds.
+# Filter plugins (M3③, COMP-04) run by the reference Python: the runner, the choice, the bounds.
 genko_test(test_contract_plugins SOURCES contract/test_contract_plugins.cpp DEPS genko_test_support genko_render_ops
            LABELS contract TIMEOUT 1800)
 # Native filter plugins (COMP-04's native extension, this build only: docs/PLUGIN_NATIVE.md) with a small program of the
 # test tree as the plugin: listed without running, chosen with consent, a picture filtered, and the refusals (plugin.json
-# that cannot be used, a missing program, a crash, too much written back, too slow); without Python.
+# that cannot be used, a missing program, a crash, too much written back, too slow);.
 add_executable(genko_test_native_plugin support/native_test_plugin.cpp)
 genko_target_flags(genko_test_native_plugin)
 genko_test(test_native_plugins SOURCES unit/test_native_plugins.cpp DEPS genko_render_ops LABELS unit TIMEOUT 900)
@@ -815,30 +719,6 @@ endif()
 target_link_libraries(test_contract_wasm_plugins PRIVATE genko_api)
 # (PC5 J-f: 環境設定 → プラグイン…'s WebAssembly rows — test_gui_anim is made further down)
 set(GENKO_TEST_PLUGIN_HOST_DEF "GENKO_TEST_PLUGIN_HOST=\"$<TARGET_FILE_DIR:genko>/genko-plugin-host${CMAKE_EXECUTABLE_SUFFIX}\"")
-
-# 3D (M3-C): the geometry of figures, guides and models bit for bit against Python, the ops, the drawing.
-genko_test(test_contract_3d_geometry SOURCES contract/test_contract_3d_geometry.cpp DEPS genko_test_support genko_render
-           LABELS contract TIMEOUT 3600)
-set_tests_properties(test_contract_3d_geometry PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
-genko_test(test_contract_3d_ops SOURCES contract/test_contract_3d_ops.cpp DEPS genko_test_support genko_render_ops
-           LABELS contract TIMEOUT 3600)
-set_tests_properties(test_contract_3d_ops PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
-genko_test(test_contract_3d_random SOURCES contract/test_contract_3d_random.cpp DEPS genko_test_support genko_render_ops
-           LABELS contract TIMEOUT 3600)
-set_tests_properties(test_contract_3d_random PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=3500000")
-genko_test(test_contract_3d_render SOURCES contract/test_contract_3d_render.cpp DEPS genko_test_support genko_render
-           LABELS contract TIMEOUT 5400)
-set_tests_properties(test_contract_3d_render PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=5000000")
-genko_test(test_contract_3d_cli SOURCES contract/test_contract_3d_cli.cpp DEPS genko_test_support genko_render
-           LABELS contract TIMEOUT 1800)
-set_tests_properties(test_contract_3d_cli PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=1700000")
-
-# The milestones together (M3-I): random books carrying tones, effect lines, rulers and 3D, and random op sequences
-# mixing their ops with M2's (add_stroke, add_layer, split_frame, …), given to `genko apply` and `python -m genko apply`:
-# each step's reply, the book at the end (`inspect --full`) and every page drawn by `genko render`.
-genko_test(test_contract_m3_mixed SOURCES contract/test_contract_m3_mixed.cpp DEPS genko_test_support genko_render
-           LABELS contract TIMEOUT 5400)
-set_tests_properties(test_contract_m3_mixed PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QTEST_FUNCTION_TIMEOUT=5000000")
 
 genko_test(test_cli_e2e SOURCES e2e/test_cli_e2e.cpp DEPS genko_test_support LABELS e2e)
 genko_test(test_save_e2e SOURCES e2e/test_save_e2e.cpp DEPS genko_test_support LABELS e2e TIMEOUT 1200)
@@ -914,8 +794,8 @@ if(GENKO_BUILD_APP)
   genko_test(test_gui_info SOURCES gui/test_gui_info.cpp DEPS genko_app GUI TIMEOUT 300)
   # the brush panel and ツールの設定: brushes kept per kind, one's own made, opened, given and read back (.abr too)
   genko_test(test_gui_brushes SOURCES gui/test_gui_brushes.cpp DEPS genko_app GUI TIMEOUT 600)
-  # 紙質 (BRUSH-01): the dialog's paper, one's own brush with a paper (the library beside Python's file, read by
-  # Python's reader), a book drawn with it saved and opened on another computer, the zoom, Undo, a .genkobrush
+  # 紙質 (BRUSH-01): the dialog's paper, one's own brush with a paper (the library beside brushes.json), a book drawn
+  # with it saved and opened on another computer, the zoom, Undo, a .genkobrush
   genko_test(test_gui_paper SOURCES gui/test_gui_paper.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_anim SOURCES gui/test_gui_anim.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   genko_test(test_gui_paint SOURCES gui/test_gui_paint.cpp DEPS genko_app GUI TIMEOUT 600)
@@ -1058,16 +938,13 @@ if(GENKO_BUILD_APP)
   # link over, a style from a catalog folder, `genko register-links`)
   genko_test(test_gui_studio SOURCES gui/test_gui_studio.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   add_dependencies(test_gui_studio genko)
-  # AI と作る (AI-01, I07): the dialog as Python's, the connection's six states, the clients' settings written after the
+  # AI と作る (AI-01, I07): the dialog, the connection's six states, the clients' settings written after the
   # change is seen and confirmed (copied first, put back), the test connection (nothing called, the book unchanged),
   # the book and conversation, and the first setup run through to the AI reading the person's decisions back (with the
   # stand-in server, and with this build's `genko mcp`)
   genko_test(test_gui_ai SOURCES gui/test_gui_ai.cpp DEPS genko_app genko_test_support GUI TIMEOUT 900)
   target_compile_definitions(test_gui_ai PRIVATE GENKO_FAKE_MCP="$<TARGET_FILE:genko_fake_mcp>")
   add_dependencies(test_gui_ai genko_fake_mcp genko)
-  # the approval box's model and the AI dialog's Qt-free part against Python's (review_model.py, ai_link.py, links.py);
-  # what `genko mcp` keeps in a book read by Python's readers; the reply drafts left alone by the Python version
-  genko_test(test_contract_studio_gui SOURCES contract/test_contract_studio_gui.cpp DEPS genko_app genko_test_support LABELS contract TIMEOUT 1800)
   # PC5 G-a (SPEC.md TEXT-02): the text tools' type layers — a click a point text, a drag a box text, a click on the path a
   # text on it, the input method's words —, a type layer typed over (its text clicked, its row double-clicked), 書式's
   # commands (アンチエイリアス, 方向, the conversions, ラスタライズ, 更新, Lorem ipsum, a line and a type layer each other's)
@@ -1105,10 +982,10 @@ endif()
 # for one function, five minutes — test_smart_stack's tone on the precise and ink pages passed it, its test taking 753 s
 # in all the time before. A function of these may take as long as its test's own limit, which still catches a hang,
 # less 100 s.)
-foreach(slow test_contract_raster_ops test_smart_stack test_contract_ops_cli test_contract_ops test_contract_raster_cli test_gui_color
-        test_smart_warp test_precision_merge_controls test_ink_edit test_gui_canvas test_contract_studio test_contract_page_size
-        test_gui_book test_gui_layout test_contract_service test_adjust test_contract_pyre test_contract_psd test_color_model
-        test_ink_filters test_gui_look test_pyre test_masks test_contract_book test_gui_pen test_gui_lines)
+foreach(slow test_smart_stack test_gui_color
+        test_smart_warp test_precision_merge_controls test_ink_edit test_gui_canvas test_contract_page_size
+        test_gui_book test_gui_layout test_adjust test_contract_pyre test_contract_psd test_color_model
+        test_ink_filters test_gui_look test_pyre test_masks test_gui_pen test_gui_lines)
   if(TEST ${slow})
     get_test_property(${slow} TIMEOUT limit)
     math(EXPR function_ms "(${limit} - 100) * 1000")

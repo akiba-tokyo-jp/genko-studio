@@ -9,8 +9,6 @@
 //
 // The expected pictures (data/paper/expected/) are this build's own (BRUSH-01 is new: no Python output to match),
 // approved after a look. GENKO_PAPER_WRITE_EXPECTED=1 writes them again from this build (then MANIFEST.json's hashes).
-// The inherited brushes' page is also Python's own drawing: test_contract_paper (no reference Python needed here, so
-// that this test runs as it is on Windows).
 
 #include <QtTest>
 
@@ -173,7 +171,7 @@ core::Document reference_book() {
     f1.rgb = std::vector<std::int64_t>{170, 40, 40};
     add(f1);
     ink_layer(doc, 0).strokes = core::make_strokes(std::move(items));
-    // page 2: every inherited brush, none with a paper (the lines test_contract_paper has Python draw)
+    // page 2: every inherited brush, none with a paper
     ink_layer(doc, 1).strokes = core::make_strokes(genko::test::paper_lines::inherited());
     return doc;
 }

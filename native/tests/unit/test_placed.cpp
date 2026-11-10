@@ -67,7 +67,7 @@ const Sample kSamples[] = {
      "iVBORw0KGgoAAAANSUhEUgAAAAkAAAAGCAIAAACepSOSAAAAMklEQVR4nGNkYGCQw4FYGDQYGBgEsSK4nBImQpYz"},
 };
 
-// Photoshop files of 9×6 with no layers and their merged picture (studio_harness.py's _psd): RGB, the same cut short in
+// Photoshop files of 9×6 with no layers and their merged picture: RGB, the same cut short in
 // its merged picture (Image.open reads its size, load() fails), and one of Lab colours (Pillow opens it; this build does
 // not turn Lab into RGB yet).
 const char* const kPsdRgb =

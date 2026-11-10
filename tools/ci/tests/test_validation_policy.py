@@ -47,8 +47,8 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(m['linux-release']['suite'], 'full')
         self.assertEqual(m['linux-asan']['suite'], 'related')
         self.assertNotIn('linux-debug', m)
-        self.assertNotIn('test_contract_3d_render', m['linux-asan']['tests'])
-        self.assertIn('test_contract_raster_ops', m['linux-asan']['tests'])
+        self.assertNotIn('test_contract_psd', m['linux-asan']['tests'])
+        self.assertIn('test_raster_ops', m['linux-asan']['tests'])
 
     def test_core_change_escalates_full_sanitizers(self):
         p = self.plan(['native/src/core/pynum.cpp'], 'integration')
@@ -66,12 +66,12 @@ class PolicyTests(unittest.TestCase):
         self.assertNotEqual(self.plan(['docs/x.md', 'native/src/app/canvas.cpp'])['tier'], 'documents')
 
     def test_ci_mixed_with_contract_never_drops_changed_contract(self):
-        paths = ['tools/ci/validation_policy.py', 'native/tests/contract/test_contract_raster_ops.cpp']
+        paths = ['tools/ci/validation_policy.py', 'native/tests/contract/test_contract_psd.cpp']
         for phase in ('development', 'integration'):
             rows = {r['preset']: r for r in policy.make_plan(paths, phase, ROOT)['matrix']['include']}
             for preset, row in rows.items():
                 if preset.startswith('linux'):
-                    self.assertIn('test_contract_raster_ops', row['tests'])
+                    self.assertIn('test_contract_psd', row['tests'])
             self.assertTrue({'linux-release', 'linux-asan', 'windows-debug', 'windows-release'} <= set(rows))
             for row in rows.values():
                 self.assertTrue(policy.inventory(ROOT)['normal'] <= set(row['tests']))
@@ -86,7 +86,7 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(len(p['matrix']['include']), 4)
         for r in p['matrix']['include']:
             self.assertIn('test_gui_layout', r['tests'])
-            self.assertNotIn('test_contract_3d_render', r['tests'])
+            self.assertNotIn('test_contract_psd', r['tests'])
 
     def test_changed_test_is_never_omitted(self):
         p = self.plan(['native/tests/unit/test_strokes.cpp'])

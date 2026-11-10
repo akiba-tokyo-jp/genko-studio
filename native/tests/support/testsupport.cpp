@@ -207,7 +207,7 @@ QString Run::described() const {
 
 QProcessEnvironment python_env(const QString& scratch) {
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    env.insert(QStringLiteral("PYTHONPATH"), repo_root() + QStringLiteral("/src"));
+    env.remove(QStringLiteral("PYTHONPATH"));
     env.insert(QStringLiteral("PYTHONDONTWRITEBYTECODE"), QStringLiteral("1"));
     env.insert(QStringLiteral("PYTHONHASHSEED"), QStringLiteral("0"));
     env.insert(QStringLiteral("PYTHONIOENCODING"), QStringLiteral("utf-8"));
@@ -218,12 +218,6 @@ QProcessEnvironment python_env(const QString& scratch) {
     QDir().mkpath(scratch + QStringLiteral("/config"));
     QDir().mkpath(scratch + QStringLiteral("/cache"));
     return env;
-}
-
-Run harness(const QStringList& args, const QString& scratch, int timeout_ms) {
-    QStringList full{repo_root() + QStringLiteral("/tools/migration/pyref_harness.py")};
-    full += args;
-    return run(python_ref(), full, python_env(scratch), timeout_ms);
 }
 
 Run run_genko(const QStringList& args, const QProcessEnvironment& env, const QByteArray& input, const QString& working_dir, int timeout_ms) {

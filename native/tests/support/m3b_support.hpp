@@ -68,7 +68,7 @@ inline Edited edit(const fs::path& dir, const core::Json& ops, const std::string
     return out;
 }
 
-// "px:" + sha256(mode|WxH|raw pixels) of a PNG (tone_harness.picture_digest), "bytes:" + sha256 when it is not one.
+// "px:" + sha256(mode|WxH|raw pixels) of a PNG, "bytes:" + sha256 when it is not one.
 inline std::string picture_digest(std::string_view bytes) {
     const auto sha = [](std::string_view data) {
         return QCryptographicHash::hash(QByteArrayView(data.data(), static_cast<qsizetype>(data.size())), QCryptographicHash::Sha256)

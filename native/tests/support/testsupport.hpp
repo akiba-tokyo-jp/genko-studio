@@ -53,11 +53,12 @@ std::string holder_seen(const std::string& agent);
 // The path of a book's project.lock as the messages write it (native separators).
 std::string lock_file_text(const QString& book);
 
-// The Python reference: $GENKO_PYREF, else /opt/pyref/bin/python; empty when neither exists.
+// The reference Python (Pillow, psd-tools; the plugins' runner): $GENKO_PYREF, else /opt/pyref/bin/python; empty when
+// neither exists.
 QString python_ref();
-// A Python with the `mcp` extra of pyproject.toml (the MCP SDK and its dependencies as uv.lock pins them, Pillow and
-// numpy: tools/migration/mcp_reference_requirements.txt): $GENKO_MCP_PYTHON, else /opt/pyref-mcp/bin/python; empty when
-// neither exists. The MCP and HTTP contract tests run the SDK's own client and Python's servers with it.
+// A Python with the MCP SDK (and Pillow and numpy: tools/migration/mcp_reference_requirements.txt): $GENKO_MCP_PYTHON,
+// else /opt/pyref-mcp/bin/python; empty when neither exists. The tests that drive `genko mcp` run the SDK's own client
+// with it.
 QString mcp_python();
 
 struct Run {
@@ -74,10 +75,8 @@ struct Run {
 
 Run run(const QString& program, const QStringList& args, const QProcessEnvironment& env, int timeout_ms = 600000,
         const QByteArray& input = {}, const QString& working_dir = {});
-// The environment for the Python reference: PYTHONPATH=<repo>/src, no .pyc files, config and caches in `scratch`.
+// The environment for the reference Python: no .pyc files, config and caches in `scratch`.
 QProcessEnvironment python_env(const QString& scratch);
-// tools/migration/pyref_harness.py <args> run by the Python reference.
-Run harness(const QStringList& args, const QString& scratch, int timeout_ms = 600000);
 
 // The genko command line of this build (GENKO_FAULT and GENKO_TEST_MIGRATE_HOOK from `env` only).
 // (`timeout_ms`: how long it may take before it is stopped as hung — the default for most commands)

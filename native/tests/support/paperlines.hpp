@@ -1,7 +1,7 @@
 #pragma once
 
 // The lines of BRUSH-01's reference pages (header only, not part of the product): test_paper draws them on its
-// full-size pages, test_contract_paper has Python's baseline draw the inherited brushes' page with the same lines.
+// full-size pages.
 
 #include <algorithm>
 #include <array>

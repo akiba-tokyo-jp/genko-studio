@@ -82,7 +82,7 @@ def configuration_errors(cache, preset):
 
 def source_pins(root):
     result = {}
-    for directory in ('native', 'src', 'tools/ci', 'tools/migration', 'tools/acceptance'):
+    for directory in ('native', 'tools/ci', 'tools/migration', 'tools/acceptance'):
         for path in (root / directory).rglob('*'):
             if path.is_file() and '__pycache__' not in path.parts:
                 result[str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()

@@ -4,7 +4,7 @@ import copy
 import json
 from pathlib import Path
 
-DEMO = Path(__file__).resolve().parents[1] / "fixtures" / "studio" / "demo4"
+DEMO = Path(__file__).resolve().parents[2] / "fixtures" / "studio" / "demo4"
 
 
 def _load(name: str) -> dict:

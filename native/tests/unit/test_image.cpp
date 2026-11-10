@@ -1,5 +1,5 @@
 // render::Image (Pillow's Image / ImageChops / ImageOps / ImageFilter layer over libImaging) against pixels made by
-// Pillow 12.3.0: tools/migration/render_harness.py unit-tables writes each operation's inputs and result.
+// Pillow 12.3.0, recorded with each operation's inputs and result (data/pyref/render_unit_tables.json).
 
 #include <QtTest>
 
@@ -27,7 +27,7 @@ const Json& tables() {
     return data;
 }
 
-// render_harness.pattern: band c of pixel (x, y) is (x * 31 + y * 17 + c * 59) % 251
+// The tables' pattern: band c of pixel (x, y) is (x * 31 + y * 17 + c * 59) % 251
 Image pattern(const std::string& mode, int w, int h) {
     const int n = mode == "L" ? 1 : mode == "LA" ? 2 : mode == "RGB" ? 3 : 4;
     std::string data;

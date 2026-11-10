@@ -288,7 +288,7 @@ private slots:
         const fs::path book = root / "d.genko";
         genko::storage::write_atomic(book / "studio" / "drafts" / "bible.json",
                                      genko::storage::read_file(genko::core::path_from_utf8(
-                                         (genko::test::repo_root() + "/tests/fixtures/studio/demo4/bible.json").toStdString())));
+                                         (genko::test::repo_root() + "/native/tests/fixtures/studio/demo4/bible.json").toStdString())));
         genko::storage::write_atomic(book / "studio" / "drafts.adopted" / "keep.txt", "already here");
         const std::int64_t before = genko::service::load_episode(book).revision;
         QVERIFY_THROWS_EXCEPTION(genko::core::PyUncaught, genko::service::adopt::adopt_drafts(book));
@@ -700,7 +700,7 @@ private slots:
         genko::service::StudioService service(root);
         QVERIFY(service.call("create_project", Json::array({"s.genko", "s", 1}), Json::object()).ok);
         const Json bible = genko::core::parse_python_json(genko::storage::read_file(genko::core::path_from_utf8(
-            (genko::test::repo_root() + "/tests/fixtures/studio/demo4/bible.json").toStdString())));
+            (genko::test::repo_root() + "/native/tests/fixtures/studio/demo4/bible.json").toStdString())));
         QVERIFY(service.call("set_bible", Json::array({"s.genko", bible}), Json{{"commit", true}}).ok);
         const fs::path book = root / "s.genko";
         const std::int64_t before = revision_of(book);
@@ -934,8 +934,7 @@ private slots:
     }
 
     // The tests' fixed clock is a time, written as each name asks: a job's id, an export's folder have no ":" (which
-    // Windows takes in no name); a text that is no such time is given as it is (tools/migration/studio_harness.py's
-    // fixed_clock does the same).
+    // Windows takes in no name); a text that is no such time is given as it is.
     void fixedClockWritesTheTimeAsAsked() {
         {
             const genko::core::ScopedClock clock("2026-10-01T09:00:00");

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """BRUSH-01 紙質: an independent reference of the paper texture's arithmetic (native/src/render/paper.hpp).
 
-The C++ build's paper is new (Python's Genko has none), so this is not the Python baseline: it is the algorithm of
-render/paper.hpp written again from its description, with Python's floats (IEEE double, no fused multiply-add) and
-integers, to fix the expected values of the small analysable fixture (ACCEPTANCE.md AC-BRUSH): from a pixel's mm
+It is the algorithm of render/paper.hpp written again from its description, with Python's floats (IEEE double, no
+fused multiply-add) and integers, to fix the expected values of the small analysable fixture (ACCEPTANCE.md AC-BRUSH): from a pixel's mm
 position to the paper's sample and the ink left, for fixed inputs, seeds and every setting. The test pictures (the
 paper picture files and what Pillow makes of them: laid over white, made grey) come from here too.
 

@@ -1,6 +1,6 @@
 // Python's numbers in C++: round(), repr(float), int/float arithmetic and comparison, sum(), %, the math module
 // functions the frame geometry uses, base64 and the built-in conversions the reader applies. Table cases are
-// Python's own results (tests/data/pyref/unit_tables.json, from tools/migration/pyref_harness.py unit-tables).
+// Python's own results, recorded (tests/data/pyref/unit_tables.json).
 
 #include <QtTest>
 

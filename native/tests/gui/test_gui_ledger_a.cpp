@@ -348,46 +348,6 @@ private slots:
 
     // --- tests/test_f2.py -------------------------------------------------------------------------------------------
 
-    // test_every_error_reads_in_japanese: every message Python's modules raise through ApplyError (and the ValueError,
-    // WarpError and PSDError that become it), read from Python's own sources as Python's test reads them (each {…}
-    // field written 3), reads in Japanese through wording::error — no English word of four letters or more left
-    // (names without a Japanese form aside); and the "ops[i] op: " lead is taken off first.
-    void test_every_error_reads_in_japanese() {
-        const QString src = genko::test::repo_root() + QStringLiteral("/src/genko/");
-        QVERIFY2(QFileInfo::exists(src + QStringLiteral("ops.py")), "Python's sources (src/genko) are part of the checkout");
-        const QStringList sources = {
-            "ops.py",       "layerops.py", "threeops.py", "bookops.py",  "fileops.py",  "plugins.py",   "anim.py",   "animops.py",
-            "psd.py",       "colour.py",   "timelapse.py", "export.py",  "rulers.py",   "tones.py",     "effects.py", "nombre.py",
-            "models.py",    "mannequin.py", "selection.py", "selops.py", "pagespec.py", "warp.py",      "brushes.py", "frames.py",
-            "materials/__init__.py", "lock.py", "journal.py", "app/session.py", "__main__.py"};
-        static const QRegularExpression raised(QStringLiteral("raise (?:ApplyError|ValueError|WarpError|PSDError)\\(f?\"([^\"]+)\""));
-        static const QRegularExpression field(QStringLiteral(R"(\{[^{}]*(\{[^{}]*\}[^{}]*)*\})"));
-        std::set<QString> messages;
-        for (const QString& name : sources) {
-            QFile file(src + name);
-            QVERIFY2(file.open(QIODevice::ReadOnly), qPrintable(name));
-            const QString text = QString::fromUtf8(file.readAll());
-            for (auto it = raised.globalMatch(text); it.hasNext();) {
-                QString message = it.next().captured(1);
-                message.replace(field, QStringLiteral("3"));
-                messages.insert(message);
-            }
-        }
-        QVERIFY2(messages.size() > 120, qPrintable(QString::number(messages.size())));
-        static const QRegularExpression japanese(QStringLiteral("[ぁ-んァ-ヶ一-龥]"));
-        static const QRegularExpression english(QStringLiteral("[A-Za-z]{4,}"));
-        QStringList left;
-        for (const QString& message : messages) {
-            if (japanese.match(message).hasMatch()) continue;  // (already Japanese)
-            QString shown = wording::error(message);
-            for (const char* name : {"Genko", "CMYK", "TIFF", "WebP", "ffmpeg"}) shown.remove(QString::fromLatin1(name));  // (no Japanese form)
-            if (english.match(shown).hasMatch()) left << message + QStringLiteral(" → ") + wording::error(message);
-        }
-        QVERIFY2(left.isEmpty(), qPrintable(QStringLiteral("%1 in English:\n").arg(left.size()) + left.join(QStringLiteral("\n"))));
-        // through the op's lead too
-        QVERIFY(wording::error(QStringLiteral("ops[2] fill: nothing to fill there (the click is on a line)")).startsWith(QStringLiteral("線の上なので塗れません")));
-    }
-
     // test_a_person_alone_inks_before_the_name_is_approved: a book drawn alone takes lines on the ink layer before any
     // name is approved (by the layer's id and by its role); a book made with agents (strict_gates) keeps the order and
     // says why in Japanese: 「AI と進める原稿」.

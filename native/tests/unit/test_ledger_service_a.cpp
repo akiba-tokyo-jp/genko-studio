@@ -92,9 +92,9 @@ bool has(const Json& text, const std::string& words) { return text.is_string() &
 
 bool starts(const Json& text, const std::string& words) { return text.is_string() && text.get<std::string>().starts_with(words); }
 
-// tests/fixtures/studio/demo4/<name>
+// native/tests/fixtures/studio/demo4/<name>
 Json fixture(const std::string& name) {
-    return genko::test::read_json(genko::test::repo_root() + QStringLiteral("/tests/fixtures/studio/demo4/") + QString::fromStdString(name));
+    return genko::test::read_json(genko::test::repo_root() + QStringLiteral("/native/tests/fixtures/studio/demo4/") + QString::fromStdString(name));
 }
 
 // While it lives, the environment variable `name` is `value` (and then as it was).
@@ -170,7 +170,7 @@ Json panel_of(const fs::path& book, const std::string& frame) {
     return found != nullptr && found->panel ? *found->panel : Json::object();
 }
 
-// tests/agents/images.panel(px, figures): a grey ground in bands, a grey body and a white head (outlined) where the
+// native/tests/support/agents/images.panel(px, figures): a grey ground in bands, a grey body and a white head (outlined) where the
 // request's pose guide puts each figure, as an RGB PNG of the request's size.
 std::string panel_png(const Json& px, const Json& figures) {
     const int w = static_cast<int>(px.at(std::size_t{0}).get<std::int64_t>());

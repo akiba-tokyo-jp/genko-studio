@@ -12,7 +12,7 @@ SAFETY = {
     'test_json', 'test_model', 'test_storage', 'test_lock', 'test_journal',
     'test_command_bus', 'test_transaction', 'test_session', 'test_save_e2e',
     'test_migrate_e2e', 'test_gui_save', 'test_app_e2e', 'test_cli_e2e',
-    'test_gui_layout', 'test_contract_save',
+    'test_gui_layout',
 }
 
 
@@ -51,7 +51,7 @@ def make_plan(paths, phase, root, gpu=False):
             broad = True
             native_change = True
             reasons.append('ビルド・依存・配布・登録の共通境界')
-        elif path.startswith(('native/src/core/', 'native/src/storage/', 'native/tests/support/', 'tools/migration/', 'tools/acceptance/', 'src/')):
+        elif path.startswith(('native/src/core/', 'native/src/storage/', 'native/tests/support/', 'tools/migration/', 'tools/acceptance/')):
             broad = True
             native_change = True
             reasons.append('共通モデル・保存・権限・oracle境界')
@@ -60,7 +60,7 @@ def make_plan(paths, phase, root, gpu=False):
             name = Path(path).stem
             related |= {n for n in inv['normal'] if any(k in n for k in ('image', 'png', 'render', 'stroke', 'raster', 'ops', 'pynum', 'pyrandom'))}
             if name in ('raster_ops', 'selection'):
-                related |= {n for n in inv['contract'] if 'raster' in n or n in ('test_contract_drawn_by_ops', 'test_contract_save')}
+                related |= {n for n in all_tests if 'raster' in n}
             elif any(k in name for k in ('tone', 'effect', 'ruler')):
                 related |= {n for n in all_tests if any(k in n for k in ('tone', 'ruler', 'm3_mixed'))}
             elif any(k in name for k in ('3d', 'mannequin')):
@@ -70,7 +70,7 @@ def make_plan(paths, phase, root, gpu=False):
                 reasons.append('共有描画経路')
         elif path.startswith('native/src/app/'):
             native_change = True
-            related |= {n for n in all_tests if n.startswith('test_gui_') or n in ('test_session', 'test_ops_e2e', 'test_contract_save')}
+            related |= {n for n in all_tests if n.startswith('test_gui_') or n in ('test_session', 'test_ops_e2e')}
         elif path.startswith('native/tests/'):
             native_change = True
             name = Path(path).stem
@@ -84,7 +84,7 @@ def make_plan(paths, phase, root, gpu=False):
             broad = True
             native_change = True
             reasons.append('未分類native変更を安全側で全体へ拡大')
-        elif path not in ('.github/workflows/ci.yml', 'pyproject.toml', 'uv.lock') and not path.startswith('tests/'):
+        else:
             broad = True
             reasons.append('未分類変更')
     if phase == 'milestone':

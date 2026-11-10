@@ -1,6 +1,5 @@
 // core::dump_* write the bytes Python's json.dumps writes; core::parse_python_json reads what json.loads reads.
-// The table cases are Python's own output (tools/migration/pyref_harness.py unit-tables →
-// tests/data/pyref/unit_tables.json).
+// The table cases are Python's own output, recorded (tests/data/pyref/unit_tables.json).
 
 #include <QtTest>
 

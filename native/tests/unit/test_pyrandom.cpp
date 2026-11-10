@@ -1,5 +1,5 @@
-// core::PyRandom against Python 3.12's random.Random: every call of the table (tools/migration/render_harness.py
-// unit-tables) gives the same number, floats bit for bit, for int, str and bytes seeds.
+// core::PyRandom against Python 3.12's random.Random: every call of the recorded table (data/pyref/
+// render_unit_tables.json) gives the same number, floats bit for bit, for int, str and bytes seeds.
 
 #include <QtTest>
 

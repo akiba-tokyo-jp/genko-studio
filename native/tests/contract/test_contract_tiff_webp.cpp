@@ -1,4 +1,4 @@
-// TIFF and WebP pictures read as the Python baseline's Pillow reads them (M6: Image.open and load through libtiff and
+// TIFF and WebP pictures read as the reference Pillow reads them (M6: Image.open and load through libtiff and
 // libwebp): each case is made by the reference Python's Pillow (the modes its TIFF writer writes — 1, L, LA, P, RGB, RGBA,
 // CMYK, I;16, I, F with compressions, I;16B (big-endian), LAB, PA — with no compression, LZW, Deflate, PackBits,
 // Group 4 and JPEG; strips and tiles; the EXIF orientation; big-endian 32-bit integers and floats and RGBA without an

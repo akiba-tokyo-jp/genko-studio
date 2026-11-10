@@ -5,10 +5,10 @@
 // reference carried into panel requests, one person at a time in a panel of two; a panel's picture over the HTTP API;
 // gc on a studio book; art on a bleed panel; focus lines without faces, a shout's room, a gate refusal in Japanese; the
 // audit's violation for an approval saved around the ops; the pack's default resolution; hand-drawn names (Python's
-// synthetic scans of tests/agents/atari.py drawn here the same way) detected, evaluated, accepted, rejected and
+// synthetic scans of native/tests/support/agents/atari.py drawn here the same way) detected, evaluated, accepted, rejected and
 // analysed again, and their MCP tools; a mannequin as the pose guide; the colour vocabulary; the shipped skills. The
 // studio service, the HTTP API and the MCP tools are called in process; the command line as Python's tests call it.
-// The runs of Python's FakeAgent (tests/agents/fake_agent.py) and of integrations/generic/mcp_client_example.py drive
+// The runs of the FakeAgent (native/tests/support/agents/fake_agent.py) and of integrations/generic/mcp_client_example.py drive
 // this build's `genko mcp` through the MCP SDK's own client, as test_contract_pipeline does: they are skipped without a
 // Python that has the mcp extra ($GENKO_MCP_PYTHON).
 //
@@ -103,10 +103,10 @@ void write_file(const fs::path& path, const std::string& bytes) {
     genko::storage::write_atomic(path, bytes);
 }
 
-// tests/fixtures/studio/demo4/<name>
+// native/tests/fixtures/studio/demo4/<name>
 Json fixture(const std::string& name) {
     return genko::core::parse_python_json(
-        genko::storage::read_file(utf8_path(genko::test::repo_root()) / "tests" / "fixtures" / "studio" / "demo4" / name));
+        genko::storage::read_file(utf8_path(genko::test::repo_root()) / "native" / "tests" / "fixtures" / "studio" / "demo4" / name));
 }
 
 // A picture of one colour as a PNG (test_m3_art.py's _png).
@@ -116,7 +116,7 @@ std::string flat_png(int width, int height, const render::Ink& colour) {
 
 int px_of(const Json& px, int i) { return static_cast<int>(genko::core::to_float(px.at(i))); }
 
-// A panel's picture of the size a request suggests (tests/agents/images.py's panel(): a grey ground and a darker body;
+// A panel's picture of the size a request suggests (native/tests/support/agents/images.py's panel(): a grey ground and a darker body;
 // what it shows does not matter here).
 std::string panel_png(const Json& px) {
     const int w = px_of(px, 0);
@@ -148,7 +148,7 @@ void as_person(const fs::path& book, const Json& ops) { apply_as(book, "human:le
 
 std::string failure_of(const char* what, const ToolResult& r) { return std::string(what) + ": " + r.to_dict().dump(); }
 
-// Python's _approved / _named / m5._project: the agent makes the demo book (4 pages) of tests/fixtures/studio/demo4 —
+// Python's _approved / _named / m5._project: the agent makes the demo book (4 pages) of native/tests/fixtures/studio/demo4 —
 // the bible, the script and the names of pages 1..named — and a person approves those names when `approve`. "" when
 // every step went through.
 std::string make_demo(StudioService& agent, int named = 4, bool approve = true) {
@@ -300,7 +300,7 @@ Json last_line(const QByteArray& out) {
     }
 }
 
-// --- tests/agents/atari.py ------------------------------------------------------------------------------------------
+// --- native/tests/support/agents/atari.py ------------------------------------------------------------------------------------------
 // Synthetic hand-drawn names with their true panel rectangles, drawn as Python draws them: random.Random through
 // core::PyRandom (number for number) and ImageDraw through render::Draw (the same pixels), so these are Python's scans.
 // Pen lines wobble, break and overshoot at the corners; panels hold stick figures and vertical scribbles of dialogue;
@@ -517,7 +517,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 REPO = Path(sys.argv[1])
 sys.path.insert(0, str(REPO / "tools" / "migration"))
-sys.path.insert(0, str(REPO / "tests"))
+sys.path.insert(0, str(REPO / "native" / "tests" / "support"))
 
 import mcp_harness as mh  # noqa: E402
 import pipeline_harness as ph  # noqa: E402
@@ -570,8 +570,8 @@ if __name__ == "__main__":
     raise SystemExit(main())
 )PY";
 
-// integrations/generic/mcp_client_example.py run as it is, its `python -m genko mcp …` replaced by the same command of
-// this build's genko (the example starts Python's genko; its calls are what is checked). Run as
+// integrations/generic/mcp_client_example.py run as it is, its `genko mcp …` started from this build's genko (the
+// example starts the `genko` on the PATH; its calls are what is checked). Run as
 // `<python> example_run.py <example> <genko> <root>`; prints the example's report.
 constexpr const char* kExampleRun = R"PY(import importlib.util
 import json
@@ -591,10 +591,10 @@ made = example.StdioServerParameters
 
 
 def this_build(command, args, **rest):
-    if list(args[:2]) != ["-m", "genko"]:
+    if command != "genko" or list(args[:1]) != ["mcp"]:
         raise SystemExit(f"the example starts something else: {command} {args}")
     rest.setdefault("env", dict(os.environ))
-    return made(command=genko, args=list(args[2:]), **rest)
+    return made(command=genko, args=list(args), **rest)
 
 
 example.StdioServerParameters = this_build
