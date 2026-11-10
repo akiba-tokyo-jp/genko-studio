@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "core/error.hpp"
@@ -364,7 +365,7 @@ Json blend_if_from(const Json& blend_if, Mode mode, const StyleRead& in) {
                 twice = true;
                 continue;
             }
-            grey = {self, under};
+            grey = std::make_pair(self, under);
             continue;
         }
         if (i - 1 >= names.size()) {

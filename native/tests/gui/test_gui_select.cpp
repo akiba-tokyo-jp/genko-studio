@@ -261,7 +261,7 @@ private slots:
         inject::click_mm(canvas, QPointF(10 + 4 * mm_a_px, 10 - 4 * mm_a_px));  // (about 5.7 pixels from the first: closed)
         QVERIFY(studio.area());
         QCOMPARE((*studio.area())["poly"].size(), std::size_t(4));
-        const Json& first = (*studio.area())["poly"][0];
+        const Json first = (*studio.area())["poly"][0];  // (a copy: area() gives the selection as it is now)
         QVERIFY2(std::abs(first[0].get<double>() - 10) < 2 * mm_a_px && std::abs(first[1].get<double>() - 10) < 2 * mm_a_px, first.dump().c_str());
         // (zoomed in: 8 pixels are less of the page — a press 6 pixels off closes it, one 12 pixels off does not)
         studio.trigger("act_deselect");

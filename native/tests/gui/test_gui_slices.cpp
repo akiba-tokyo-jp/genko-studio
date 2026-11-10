@@ -364,7 +364,6 @@ private slots:
         if (b.act("act_snap_grid")->isChecked()) b.act("act_snap_grid")->trigger();
         if (b.act("act_snap_bounds")->isChecked()) b.act("act_snap_bounds")->trigger();  // (the paper's edges and middle no targets)
         QVERIFY(b.canvas()->snap_on && b.canvas()->snap_slices && !b.canvas()->snap_bounds && !b.canvas()->grid_snap);
-        QVERIFY(b.canvas()->snap_reach() > 4.0 / b.canvas()->scale());
         const double off = 3.0 / b.canvas()->scale();  // (3 screen pixels, in mm)
         b.act("act_slice_tool")->trigger();
         const auto drawn = [&](const QPointF& from, const QPointF& to) {

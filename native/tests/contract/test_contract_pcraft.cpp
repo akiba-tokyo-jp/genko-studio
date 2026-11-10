@@ -1496,6 +1496,15 @@ private slots:
     // contents, or inside a .pcraft opened — brings those styles into the book (one of the same name and attributes the
     // book's own: that one), so that the book stays one an op and the writer take.
     void textStylesOfAPcraftInside() {
+        try {
+            text_styles_inside();
+        } catch (const std::exception& error) {
+            QFAIL(error.what());
+        }
+    }
+
+private:
+    void text_styles_inside() {
         const core::Document inner = run(small_book(), Json::parse(R"([
             {"op": "type_style", "kind": "character", "action": "new", "name": "強調", "attrs": {"underline": true}},
             {"op": "type_style", "kind": "paragraph", "action": "new", "name": "見出し", "attrs": {"align": "center"}},
@@ -1505,7 +1514,7 @@ private slots:
         const std::string inner_bytes = formats::pcraft_bytes(inner, 0);
         // (a book that has a character style of another name — its id cs-1 too —, and one of the same name and attributes)
         const core::Document book = run(small_book(), Json::parse(R"([
-            {"op": "type_style", "kind": "character", "action": "new", "name": "外の", "attrs": {"bold": true}},
+            {"op": "type_style", "kind": "character", "action": "new", "name": "外の", "attrs": {"rgb": [0, 0, 200]}},
             {"op": "type_style", "kind": "paragraph", "action": "new", "name": "見出し", "attrs": {"align": "center"}}])"));
         const auto style_named = [](const core::Document& doc, const char* kind, const std::string& id) -> std::string {
             for (const Json& s : (*doc.type_styles)[kind])
@@ -1527,7 +1536,7 @@ private slots:
             // (an op and the writer take the book)
             const core::Document after = run(doc, Json::array({Json{{"op", "add_layer"}, {"page", 1}, {"kind", "paint"}, {"id", "later"}}}));
             QVERIFY2(std::any_of(after.page(0).layers.begin(), after.page(0).layers.end(), [](const core::Layer& l) { return l.id == "later"; }), what.c_str());
-            write_book(after, at(what + ".genko"));
+            write_book(after, at("text_styles_" + what + ".genko"));
         };
         // placed (埋め込みを配置): the book's 外の kept, 強調 a new one, 見出し the book's
         const core::Document placed = run(book, Json::array({Json{{"op", "smart_place"}, {"page", 1}, {"data", core::b64encode(inner_bytes)}, {"name", "in.pcraft"}}}));
@@ -1539,7 +1548,7 @@ private slots:
         // inside a .pcraft opened: a document of its own style (外の, its first) and text, with a smart object of the .pcraft
         // above inside (its first 強調) — opened, the text inside takes 強調, the outer's 外の
         const core::Document own = run(small_book(), Json::parse(R"([
-            {"op": "type_style", "kind": "character", "action": "new", "name": "外の", "attrs": {"bold": true}},
+            {"op": "type_style", "kind": "character", "action": "new", "name": "外の", "attrs": {"rgb": [0, 0, 200]}},
             {"op": "add_type_layer", "page": 1, "text": "外の文字", "point": [5, 30], "wrap": "horizontal", "new_id": "t0", "title": "外"},
             {"op": "type_style", "kind": "character", "action": "apply", "id": "cs-1", "page": 1, "layer_id": "t0", "range": [0, 1]}])"));
         const std::string own_bytes = formats::pcraft_bytes(own, 0);
@@ -1563,6 +1572,7 @@ private slots:
         check_inside(opened.doc, "opened");
     }
 
+private slots:
     // PC5 G-e (type@1, design G 2.9): type layers as upstream's text layers and back — a point text across with a style on
     // a range, a box text down, its anti-alias and matrix; the book's styles upstream's TextStyles —; one set in its
     // balloon its pixels, said. With $GENKO_PCRAFT_CHECK, upstream's reader reads them as text layers of that text.
