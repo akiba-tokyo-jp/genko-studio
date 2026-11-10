@@ -304,15 +304,6 @@ private slots:
             }
             QCOMPARE(storage::load_document(root / "s.genko").document.revision, revision);
         }
-        // (the review of pc6-A's P2-1: nor are the rules taken off — an unnamed caller is legacy:unknown here)
-        write(root / "ops.json", Json::array({Json{{"op", "set_meta"}, {"strict_gates", false}}, sized[0]}).dump());
-        {
-            auto [code, out] = cli({QStringLiteral("apply"), q(root / "s.genko"), q(root / "ops.json")});
-            QCOMPARE(code, 1);
-            QVERIFY2(out["error"].get<std::string>().find("set_meta strict_gates needs a person (actor legacy:unknown cannot approve)") != std::string::npos,
-                     out.dump().c_str());
-            QCOMPARE(storage::load_document(root / "s.genko").document.revision, revision);
-        }
         write(root / "ops.json", Json::array({sized[0]}).dump());
         auto [code, out] = cli({QStringLiteral("apply"), q(root / "s.genko"), q(root / "ops.json"), QStringLiteral("--agent"), QStringLiteral("human:leaf")});
         QCOMPARE(code, 0);

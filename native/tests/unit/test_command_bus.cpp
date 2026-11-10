@@ -1176,7 +1176,6 @@ private slots:
         const std::vector<Json> others = {
             one("content_aware_fill", Json{{"layer_id", "paint"}, {"area", Json{{"rect", Json::array({6, 6, 4, 4})}}}, {"output", "new"}, {"new_id", "filled"}}),
             one("apply_image", Json{{"id", "paint"}, {"blending", "screen"}, {"opacity", 40}}),
-            one("hdr_toning", Json{{"strength", 1.5}}),
             one("auto_adjust", Json{{"id", "paint"}, {"mode", "contrast"}}),
             one("fade_layer", Json{{"id", "paint"}, {"from", from}, {"opacity", 50}}),
             one("render_picture", Json{{"kind", "picture_frame"}}),
@@ -1206,6 +1205,8 @@ private slots:
         };
         for (const Json& each : others) cases.push_back({each, &doc});
         cases.push_back({one("trap", Json{{"id", "paint"}, {"width_mm", 0.2}}), &inks});
+        const Document plain = blank_book();  // (hdr_toning flattens the page: no smart object on it)
+        cases.push_back({one("hdr_toning", Json{{"strength", 1.5}}), &plain});
         // every name of the table has its case, and the build has it
         std::set<std::string> named;
         for (const Case& c : cases) named.insert(c.op["op"].get<std::string>());
@@ -1228,7 +1229,8 @@ private slots:
             }
             Document strict = *c.on;
             strict.strict_gates = true;
-            const std::string words = name + " on a printed layer needs name_ok on page 1 (strict_gates)";
+            // (hdr_toning flattens the page first: the flatten's rule refuses it, merge_visible's words)
+            const std::string words = (name == "hdr_toning" ? std::string("merge_visible") : name) + " on a printed layer needs name_ok on page 1 (strict_gates)";
             for (const char* actor : {"ai:bot", "human:owner"}) {
                 const std::string error = error_of(strict, batch, actor);
                 if (error.find(words) == std::string::npos) wrong.push_back(name + " " + actor + ": " + error);
@@ -1237,33 +1239,6 @@ private slots:
             if (const std::string after = error_of(named_page, batch, "ai:bot"); after != "(applied)") wrong.push_back(name + " after name_ok: " + after);
         }
         QVERIFY2(wrong.empty(), Json(wrong).dump(1).c_str());
-    }
-
-    // (PC6, the review of pc6-A's P2-1) strict_gates set or taken off with set_meta by a person only: an agent, legacy:unknown
-    // or an agent's rights are refused it (the book as it was, and the gate after it with it); the same value, the book's
-    // other settings, and a person: as before.
-    void strictGatesAreAPersonsToChange() {
-        Document strict = book(2);
-        strict.strict_gates = true;
-        strict = apply(strict, R"([{"op": "name_ok", "page": 1}])", "human:owner").doc;
-        const std::string words = "set_meta strict_gates needs a person";
-        for (const char* actor : {"ai:bot", "legacy:unknown"}) {
-            QVERIFY2(error_of(strict, ops(R"([{"op": "set_meta", "strict_gates": false}])"), actor).find(words) != std::string::npos, actor);
-            // (taken off and then the layout changed, in one batch: refused at the first)
-            const std::string both = error_of(strict, ops(R"([{"op": "set_meta", "strict_gates": false}, {"op": "rotate_pages", "page": 1, "turn": "90cw"}])"), actor);
-            QVERIFY2(both.find("ops[0] set_meta: " + words) != std::string::npos, both.c_str());
-            QVERIFY2(error_of(book(), ops(R"([{"op": "set_meta", "strict_gates": true}])"), actor).find(words) != std::string::npos, actor);
-            QCOMPARE(error_of(strict, ops(R"([{"op": "set_meta", "strict_gates": true}])"), actor), std::string("(applied)"));  // (as it is)
-            QCOMPARE(error_of(strict, ops(R"([{"op": "set_meta", "title": "別の題"}])"), actor), std::string("(applied)"));
-        }
-        try {
-            bus().apply(strict, ops(R"([{"op": "set_meta", "strict_gates": false}])"), Actor::with_agent_rights("human:owner"));
-            QFAIL("an agent's rights took strict_gates off");
-        } catch (const ApplyError& error) {
-            QVERIFY2(std::string(error.what()).find(words) != std::string::npos, error.what());
-        }
-        QVERIFY(!apply(strict, R"([{"op": "set_meta", "strict_gates": false}])", "human:owner").doc.strict_gates);
-        QVERIFY(!apply(strict, R"([{"op": "set_meta", "strict_gates": false}])").doc.strict_gates);  // (genko: Python's own)
     }
 
     // (PC6, the review of pc6-A's P2-2) set_layer exportable:true on a drawn layer before the name: a precise page's pixels

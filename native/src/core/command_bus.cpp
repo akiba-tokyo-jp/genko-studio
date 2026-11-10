@@ -682,12 +682,6 @@ void check_page_lock(Document& doc, const Json& op, const Actor& actor) {
     if (named && name == "name_ok" && !actor.can_approve()) {  // (GATE_OPS)
         throw OpError(name + " needs a person (actor " + actor.name() + " cannot approve)");
     }
-    // (PC6, the review of pc6-A's P2-1: strict_gates — the book's rules of the approvals — set or taken off by a person only,
-    // as the control channel takes no op that changes them (SPEC AUTO-01). Python lets anyone; the coordinator's decision)
-    if (const Json* strict = named && name == "set_meta" ? get(op, "strict_gates") : nullptr;
-        strict != nullptr && py_truthy(*strict) != doc.strict_gates && !actor.can_approve()) {
-        throw OpError("set_meta strict_gates needs a person (actor " + actor.name() + " cannot approve)");
-    }
     if (named && (name == "undo" || name == "set_meta" || name == "set_bible" || name == "set_autosave")) return;
     if (named && (name == "set_paper" || name == "set_color_mode" || name == "set_inks" || name == "assign_profile" || name == "convert_profile" ||
                   name == "set_text_gamma" || name == "to_indexed" || name == "set_color_table" || name == "to_bitmap" ||

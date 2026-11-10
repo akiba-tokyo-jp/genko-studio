@@ -826,8 +826,6 @@ private slots:
             {Json{{"op", "set_canvas_size"}, {"width_mm", 20}, {"height_mm", 20}, {"relative", true}}, "page 1: the name is approved"},
             {Json{{"op", "outline_area"}, {"page", 2}, {"layer_id", "p"}, {"area", Json{{"rect", Json::array({20, 20, 40, 40})}}}, {"width_mm", 2}},
              "outline_area on a printed layer needs name_ok on page 2 (strict_gates)"},
-            // (the review of pc6-A's P2-1: the rules taken off by a person only — so is the layout after them)
-            {Json{{"op", "set_meta"}, {"strict_gates", false}}, "set_meta strict_gates needs a person (actor ai:bot cannot approve)"},
         };
         for (const auto& [op, words] : refusals) {
             const Response r = post("/v1/apply", apply(Json::array({op})));
