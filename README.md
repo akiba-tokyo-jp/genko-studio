@@ -73,6 +73,8 @@ ctest --test-dir ../build/linux-release
 
 Presets: `linux-release`, `linux-debug`, `linux-asan`, `linux-tsan`, `windows-release`, `windows-debug`.
 
+Some tests read the files written with Pillow and psd-tools, or drive `genko mcp` through the MCP SDK's client: point `GENKO_PYREF` at a Python with `pillow==12.3.0` and `psd-tools==1.10.9`, and `GENKO_MCP_PYTHON` at one made from `tools/migration/mcp_reference_requirements.txt` (the full `ctest` run expects both).
+
 ## Layout
 
 - `native/src/core` — model, command bus, features

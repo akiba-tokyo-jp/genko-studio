@@ -19,8 +19,8 @@
 // the lines a pen would draw (seen edges and outlines, the hidden ones left out).
 //
 // Page space is mm: x to the right, y down the page, z away from the viewer. A prim is a JSON object as the book keeps
-// it ({"kind", "pos", "size", "rot", …}); every number comes out as the Python baseline computes it, to the last bit
-// (core/linalg3.hpp: numpy's rounding). A camera is the page's {turn, tip, roll, focal_mm, target}, passed on its own
+// it ({"kind", "pos", "size", "rot", …}); every number is computed to the last bit as core/linalg3.hpp rounds
+// (numpy's rounding). A camera is the page's {turn, tip, roll, focal_mm, target}, passed on its own
 // (null: each prim is seen about its own centre); a value that is not truthy counts as none.
 
 namespace genko::core::mesh3d {

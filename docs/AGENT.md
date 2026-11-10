@@ -1,6 +1,6 @@
 # AGENT.md — Genko for generative AI
 
-Drive Genko **headless**. Do not open the GUI. Stdout is JSON. No Qt required.
+Drive Genko **headless**. Do not open the GUI. Stdout is JSON. No display needed.
 
 ## Loop
 
@@ -24,34 +24,35 @@ Drive Genko **headless**. Do not open the GUI. Stdout is JSON. No Qt required.
 ## CLI
 
 ```bash
-python -m genko new ./demo.genko --title 試作 --pages 8
-python -m genko new ./demo.genko --b4 --preset shueisha
-python -m genko inspect ./demo.genko
-python -m genko inspect ./demo.genko --full
-python -m genko apply ./demo.genko ops.json
-python -m genko apply ./demo.genko ops.json --dry-run
-python -m genko render ./demo.genko --page 1 --mode name --out p1.png
-python -m genko export ./demo.genko ./out --format tiff --json
-python -m genko schema
-python -m genko apply ./demo.genko ops.json --agent ai:myagent
-python -m genko serve --root ./manga --port 8765   # HTTP needs a token: genko token add --actor ai:myagent
+genko new ./demo.genko --title 試作 --pages 8
+genko new ./demo.genko --b4 --preset shueisha
+genko inspect ./demo.genko
+genko inspect ./demo.genko --full
+genko apply ./demo.genko ops.json
+genko apply ./demo.genko ops.json --dry-run
+genko render ./demo.genko --page 1 --mode name --out p1.png
+genko export ./demo.genko ./out --format tiff --json
+genko schema
+genko apply ./demo.genko ops.json --agent ai:myagent
+genko serve --root ./manga --port 8765   # HTTP needs a token: genko token add --actor ai:myagent
 ```
 
 Ops include: split/merge/resize/set_frame, add/edit/delete/move_line, name_ok, advance, add/delete/edit/simplify_stroke, put_raster, flood_fill, add/delete_tone, add_effect, add_prim3d, set_ruler, lt_convert, add/set_ticket, page CRUD, set_meta/bible/spread/autosave, undo.
 
-## Project format (v3)
+## Project format (v4)
 
-`project.json` holds decisions only (version 3, `revision` +1 per save). Raster bytes and strokes live in `assets/ab/<sha256>` and are never rewritten. Every save appends a line to `studio/journal.jsonl` with the project.json before and after, so:
+`project.json` holds decisions only (version 4, `revision` +1 per save; docs/cpp-migration/schema-v4.md). Raster bytes, strokes and the states the journal points at live in `assets/ab/<sha256>` and are never rewritten. Every save is a transaction in `studio/journal.jsonl`, so:
 
 ```bash
-python -m genko undo ./demo.genko --as ai:myagent     # only your own latest change (--force for others)
-python -m genko redo ./demo.genko --as ai:myagent
-python -m genko apply ./demo.genko ops.json --agent ai:myagent --expect-revision 12   # fail if someone saved since
-python -m genko doctor ./demo.genko                   # missing assets, font, long paths
-python -m genko gc ./demo.genko --dry-run             # unreferenced assets (--legacy removes the v2 pages/ folder)
+genko undo ./demo.genko --as ai:myagent     # only your own latest change (--force for others)
+genko redo ./demo.genko --as ai:myagent
+genko apply ./demo.genko ops.json --agent ai:myagent --expect-revision 12   # fail if someone saved since
+genko doctor ./demo.genko                   # missing assets, font, long paths
+genko gc ./demo.genko --dry-run             # unreferenced assets (--legacy removes the v2 pages/ folder)
+genko migrate ./old.genko ./new.genko       # a v1–v3 book converted into a new folder (the old one left as it is)
 ```
 
-Files written by a newer Genko are refused; v2 projects are read and upgraded on the first save (`project.v2.bak.json` keeps the original). Pages have stable ids; page locks follow the page. Spreads follow the binding: in a right-bound book the even page is on the right. `add_stroke{space:"spread"}` takes x from the spread's left edge. Studio projects are `strict_gates`: printed layers change only after `name_ok` (a layer set `exportable: false` can be drawn before it, as a trial, and turned printing once the name is approved), `add_line` with a frame needs coordinates, and spreads must face.
+Files written by a newer Genko are refused; a v1–v3 book is read, but written only after `genko migrate` (a command that would write it exits 3 with `needs_migration`). Pages have stable ids; page locks follow the page. Spreads follow the binding: in a right-bound book the even page is on the right. `add_stroke{space:"spread"}` takes x from the spread's left edge. Studio projects are `strict_gates`: printed layers change only after `name_ok` (a layer set `exportable: false` can be drawn before it, as a trial, and turned printing once the name is approved), `add_line` with a frame needs coordinates, and spreads must face.
 
 ## Actors
 
@@ -76,7 +77,7 @@ Locked writer → HTTP 409.
 
 ## Human
 
-`python -m genko app [PROJECT]` (needs the `app` extra). Without a project a start screen lists recent manuscripts and makes new ones (title, pages, paper: B4 / A4 / webtoon, binding, folder).
+`genko app [PROJECT]` (or `genko` alone). Without a project a start screen lists recent manuscripts and makes new ones (title, pages, paper: B4 / A4 / webtoon, binding, folder).
 
 - Layout: pages on the left, the page in the middle, panels on the right as tabs (承認箱, コマ, 台詞, レイヤー, ライブラリ; the パネル menu shows hidden ones). It fits a 1280×720 screen (the tall panel view scrolls). The status bar shows the page, its stage, the selected panel, whether changes are saved, who you are, the process counts and the zoom.
 - The page is shown as Genko renders it (name render before the name approval, proof after: placed art, tones, vertical lettering), re-rendered at the zoom's resolution. It opens fitted to the view. Ctrl+0 fits, Ctrl+1 is paper size, Ctrl+wheel / pinch / Ctrl+± zoom, the wheel or two fingers scroll, Space+drag or the middle button pan.
@@ -102,7 +103,7 @@ mcp_servers:
     args: ["mcp", "--root", "/home/you/manga", "--agent", "ai:hermes"]
 ```
 
-Install with the extra: `uv sync --extra mcp` (or `pip install "genko-studio[mcp]"`). The skill for Hermes is `integrations/hermes/genko-manga/SKILL.md`.
+`genko mcp` is part of `genko`; nothing else is installed. The skill for Hermes is `integrations/hermes/genko-manga/SKILL.md`.
 
 Tools: `projects`, `create_project`, `status`, `next`, `inspect` (bible / script / page / panel / studio / schemas / rules / snapshot), `render` (a page, one panel with `frame_id`, or `kind` compare / guides), `import_image`, `set_bible`, `set_script`, `submit_name`, `apply_ops` (allow-listed ops only), `record_review`, `request_approval` (gate name / art / sheet / export), `tickets`, `generation_request`, `import_images`, `candidates`, `review_candidates`, `adopt`, `request_fix`, `report_regions`, `finish_page`, `preflight`, `export_proof`, `review_page`, `ask_human`. Resources: `genko://guide/skill`, `genko://guide/manga-rules`, `genko://ops` (the ops `apply_ops` accepts).
 
@@ -203,7 +204,7 @@ Colour, screens, mannequins and other agents (M9):
 - Screen outputs: `--format webtoon` (all pages at `--width` px, default 800, stacked and cut into slices of at most `--max-height` px, default 1280: `001.png`, `002.png` …) and `--format sns` (one image per page, long edge `--long-edge` px, default 2048, JPEG; `--spreads` adds one image per spread). Both cut the bleed, skip the dot screen (tones are flat grey) and embed sRGB. `genko export` takes all options; `genko studio export --format webtoon|sns` (human, after preflight; no dpi check) uses the defaults.
 - Colour pages (`spec.expression` "color") are never screened, also in print. Their generation requests have `color: true`, the colour style in the prompt draft, and no "colour" in `avoid`.
 - Mannequins: `add_mannequin {page, pos (pelvis mm), height_mm?, rot?: [tip, turn, lean], preset?, id?}` and `pose_mannequin {page, id, preset?, joints?, rot?, pos?, height_mm?}`. Joints: neck, head, shoulders (`l_arm`/`r_arm`), elbows, wrists, hips (`l_leg`/`r_leg`), knees, ankles; each `{yaw, pitch}` in radians. Presets: stand, walk, run, sit, point, look_back, arms_up. The figure is eight heads tall and is drawn on name and proof only. A mannequin inside a panel is drawn into that panel's `guides/pose.png` and noted in `notes_for_agent`.
-- Other MCP clients (Claude Code, Claude Desktop, the Python SDK): `docs/OTHER_AGENTS.md`, `integrations/claude-code/`, `integrations/generic/mcp_client_example.py`. Genko has no content filter; what is drawn depends on the agent and its image tool.
+- Other MCP clients (Claude Code, Claude Desktop, the MCP SDK for Python): `docs/OTHER_AGENTS.md`, `integrations/claude-code/`, `integrations/generic/mcp_client_example.py`. Genko has no content filter; what is drawn depends on the agent and its image tool.
 
 Drawing (M10, see `docs/TOOLS_PLAN.md`):
 
@@ -215,7 +216,7 @@ Drawing (M10, see `docs/TOOLS_PLAN.md`):
 
 Lettering (M11):
 
-- Faces ship with Genko (SIL OFL, `src/genko/fonts/licenses/`): `antique` (the default for dialogue: kana in Zen Old Mincho, kanji in Zen Kaku Gothic New), `gothic`, `mincho`, `maru`, `hand`, `sfx` (Dela Gothic One, the default for sound effects), `sfx_pop`. A font file path works too. Characters a face lacks fall back to a look-alike or the Gothic.
+- Faces ship with Genko (SIL OFL, `native/resources/fonts/licenses/`): `antique` (the default for dialogue: kana in Zen Old Mincho, kanji in Zen Kaku Gothic New), `gothic`, `mincho`, `maru`, `hand`, `sfx` (Dela Gothic One, the default for sound effects), `sfx_pop`. A font file path works too. Characters a face lacks fall back to a look-alike or the Gothic.
 - `edit_line {style}` (and `add_line {style}`): `font`, `size_mm` (null = fit the balloon), `tracking`, `leading` (in em; columns are 0.15 em apart by default), `align` (top / center / bottom; left / center / right for horizontal text), `outline_mm` (white halo), `rgb`, `tcy` (縦中横 for 2-3 digits or letters and !? runs, on by default; full-width digits too), `border_mm`, `fill` (white / none), `group` (balloons with the same group are drawn as one, with one outline). A key set to null goes back to the default.
 - Balloon shapes (`balloon`): speech, rounded, box, cloud, thought, shout, flash, whisper, narration, sfx, none. The box is the balloon's outside; the text is centred in the space inside it and shrinks to fit unless it has a size.
 - Tails: `tails: [{to: [x, y], via?: [x, y], width_mm?}]` — several per balloon, curved through `via`. `tail` (one straight tail) still works.
@@ -280,7 +281,7 @@ HTTP: `GET /v1/pages/{n}/frames/{frame_id}.png` renders one panel; `POST /v1/ass
 ## Parity with the app (G6)
 
 Everything a person can do in the app can be done through `apply_ops`; the ops an agent may use are listed in
-`AGENT_OPS` (studio/service.py). Only the human steps stay out of reach: approvals and their undoing
+`AGENT_OPS` (native/src/service/studio_service.cpp). Only the human steps stay out of reach: approvals and their undoing
 (`approve`, `revoke`, `name_ok`, `advance`, `reject_sheet`, `resolve_proposal`), page locks and tickets, and
 `set_bible` / `set_script` (they have their own tools).
 
@@ -329,7 +330,7 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `sfx_at` ([x, y] 0..1: sound effects go there). Templates reveal_bleed, reveal_top, finale_bleed, action_slant,
   title_top (with their bleed / slant / title slot). lint: fx_unknown, unknown_prop, reveal_small, emphasis_small,
   finale_small, title_missing, author_missing, unknown_font.
-- fx words (studio/fxwords.py): effects, manga marks by the first reported face, rain streaks (layer 効果（仕上げ）),
+- fx words (native/src/service/fxwords.hpp): effects, manga marks by the first reported face, rain streaks (layer 効果（仕上げ）),
   or words for the art request. fx and emphasis go into the prompt. Props' references and the previous panel of the
   same place (refs/previous_panel.png) go with the art request. Sheet approval requests carry `written` (the
   bible's description) and review.html shows it beside the candidates.
@@ -515,13 +516,13 @@ Everything a person can do in the app can be done through `apply_ops`; the ops a
   `post_smooth`, `aa`. `add_stroke {post_smooth}` overrides the brush's.
 - `smudge {page, layer_id, points, width_mm, strength, mode: blur | smudge | blend}` on paint layers.
 - `erase {mode: cut | to_crossing | whole}`.
-- `genko/abr.py` reads Photoshop .abr sampled tips (people import them in the app).
+- Photoshop .abr sampled tips are read (people import them in the app, or `genko brushes import-abr`).
 
 ### J2 additions
 
 - `add_shape {shape: line | polyline | curve | rect | ellipse | polygon, points | box, sides?, radius_mm?, closed?,
   line?, fill?, rgb?, fill_rgb?, width_mm?, kind?}`.
-- Areas everywhere (`genko/selops.py`): besides `poly` and `mask`, `rect`, `ellipse`, `layer`, `color {x_mm, y_mm,
+- Areas everywhere: besides `poly` and `mask`, `rect`, `ellipse`, `layer`, `color {x_mm, y_mm,
   tolerance?, contiguous?}`, `all`, `saved` (kept with `store_area {name, area}` / `forget_area`), and
   `union` / `intersect` / `subtract` of areas, with `invert`, `grow_mm` (negative shrinks) and `feather_mm`.
   `apply_ops` turns them into a mask before the op runs.

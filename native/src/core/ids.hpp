@@ -54,7 +54,7 @@ public:
     ScopedIdsApart& operator=(const ScopedIdsApart&) = delete;
 };
 
-// "000000000001", "000000000002", … (tools/migration/pyref_harness.py --ids makes the same).
+// "000000000001", "000000000002", ….
 ScopedIdSource::Source counting_ids(std::uint64_t first = 1);
 
 // The ids new_id() gives on this thread while it lives: first `given` (in order), then new ones as usual; every id it

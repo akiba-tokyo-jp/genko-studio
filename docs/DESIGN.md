@@ -34,7 +34,7 @@ CLIP STUDIO PAINT EX の全描画エンジンを複製しない。連載工場�
 name → (name_ok) → ink → finish → export
 ```
 
-`advance(page, "ink")` は `name_ok` が False なら `InkBlockedError`。
+`advance(page, "ink")` は `name_ok` が False なら拒む。
 
 書き出しレイヤー順: BG → INK → FINISH → TONE → EFFECT → FRAMES → TEXT。NAME と DRAFT は乗らない。
 
@@ -44,22 +44,23 @@ name → (name_ok) → ink → finish → export
 
 ```
 title.genko/
-  project.json
+  project.json          # version 4（docs/cpp-migration/schema-v4.md）
   project.lock
-  pages/001/*.png
+  assets/ab/<sha256>.*  # 画素・線・状態。書き換えない
+  studio/journal.jsonl  # 保存ごとの取引（Undo・Redo）
 ```
 
 ページは木構造のコマを持つ。葉だけが描画領域。縦分割の葉の順は右が先（日本語）。
 
 ## モジュール
 
-- `genko.models` — Episode / Page / Frame / StoryLine / PageSpec
-- `genko.ops` — コマンドバス
-- `genko.pipeline` — ゲート
-- `genko.render` / `genko.export` — 合成と出荷
-- `genko.io` — 保存
-- `genko.app` — Qt UI（Windows / Linux）
-- `python -m genko` — CLI
+- `native/src/core` — 原稿のモデル（Document / Page / Frame / Line / PageSpec）、コマンドバス、ゲート
+- `native/src/storage` — 保存（v4 の形式、journal、復旧）
+- `native/src/render` — 合成、op、フィルター
+- `native/src/formats` — 読み込みと書き出し（出荷）
+- `native/src/service`・`native/src/studio` — AI と作る工程（台本、ネーム、承認）
+- `native/src/api` — CLI（`genko`）、HTTP、MCP
+- `native/src/app` — Qt UI（Windows / Linux）
 
 ## UI
 
@@ -68,14 +69,12 @@ title.genko/
 ## 実行
 
 ```
-uv sync --extra app --extra dev
-uv run python -m genko app
-uv run python -m genko new ./demo.genko --title 試作 --pages 8
-uv run python -m genko inspect ./demo.genko
-uv run python -m genko apply ./demo.genko ops.json
-uv run python -m genko serve --port 8765
-uv run python -m genko export ./demo.genko ./out --format tiff --json
-uv run pytest
+genko app
+genko new ./demo.genko --title 試作 --pages 8
+genko inspect ./demo.genko
+genko apply ./demo.genko ops.json
+genko serve --port 8765
+genko export ./demo.genko ./out --format tiff --json
 ```
 
-Python 3.11+。人は GUI（PySide6）。生成AIは Qt なし。操作仕様は `docs/AGENT.md`。JSON Schema は `docs/ops.schema.json`。
+組み立てと試験は README.md の「Build from source」（`cmake --preset linux-release`、`ctest`）。人は GUI（Qt）。生成AIは画面なしの CLI・HTTP・MCP。操作仕様は `docs/AGENT.md`。JSON Schema は `docs/ops.schema.json`。

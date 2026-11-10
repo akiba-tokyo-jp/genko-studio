@@ -12,8 +12,8 @@
 #include <vector>
 
 // Pillow's Image, ImageChops and ImageOps (the Python layer of Pillow 12.3.0) over its C library libImaging, which
-// is built in native/third_party/pillow. Each operation does what the same call does in the Python baseline, with the
-// same defaults, conversions and checks, so the pixels are the same (docs/cpp-migration/ARCHITECTURE.md §4a).
+// is built in native/third_party/pillow. Each operation does what the same call does in Pillow, with the same defaults,
+// conversions and checks, so the pixels are the same (docs/cpp-migration/ARCHITECTURE.md §4a).
 //
 // Errors are core::Error: "value" for what Pillow raises as ValueError/TypeError (with Pillow's message), "memory"
 // when an image cannot be allocated, "image_too_large" for what Pillow refuses as a decompression bomb.

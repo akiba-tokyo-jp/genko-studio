@@ -17,7 +17,7 @@
 // layer's region, its patches and its pen lines — lines paint tone, scrape lines take it away; every panel when it
 // has none of these) and how it looks (dots, lines, cross, noise, flat, and the pattern tones check, brick, wave,
 // grid, hatch, star, sand and image), with gradients, the dot shape and the screen moved; and a layer's greys as a
-// halftone (レイヤーのトーン化). The same pixels as the Python baseline, for the whole page or any box of it.
+// halftone (レイヤーのトーン化). The same pixels for the whole page or any box of it.
 
 namespace genko::render::tones {
 

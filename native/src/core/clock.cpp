@@ -16,8 +16,7 @@ std::optional<std::string>& fixed_text() {
 }
 
 // The fixed clock's time in `format`: the text read as "%Y-%m-%dT%H:%M:%S" and written as asked (a job's id and an
-// export's folder have no ":" then, which Windows takes in no name), or the text itself when it is no such time (as
-// tools/migration/studio_harness.py's fixed_clock does).
+// export's folder have no ":" then, which Windows takes in no name), or the text itself when it is no such time.
 std::string fixed_in(const std::string& text, const char* format) {
     std::tm at{};
     int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;

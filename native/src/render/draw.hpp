@@ -17,7 +17,7 @@ class QByteArray;  // (font_bytes, below)
 
 // Pillow's ImageDraw (PIL/ImageDraw.py and the draw methods of _imaging.c) over libImaging's Draw.c: the same
 // coordinates (each one truncated to an int as _imaging.c does), the same inks, the same Python-level joints of a
-// wide line (joint="curve"), so a shape covers the same pixels as in the Python baseline. Text (M4) goes through
+// wide line (joint="curve"), so a shape covers the same pixels as with Pillow. Text (M4) goes through
 // FreeType as Pillow's _imagingft.c lays it out without raqm (the BASIC layout the reference is held to).
 
 struct FT_FaceRec_;

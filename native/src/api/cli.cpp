@@ -721,9 +721,8 @@ std::string picture_bytes(const render::Image& image, const std::string& format,
     throw render::NotYetPorted("format:" + format);
 }
 
-// `genko render <dir> --page N [--dpi D] [--mode print|proof|name] --out file.png` (Python's render command): the
-// page drawn as `python -m genko render` draws it, written as PNG — or JPEG, TIFF, PDF, WebP or BMP by --out's
-// extension, as Image.save picks; {"ok": true, "path", "mode"}.
+// `genko render <dir> --page N [--dpi D] [--mode print|proof|name] --out file.png`: the page drawn, written as PNG — or
+// JPEG, TIFF, PDF, WebP or BMP by --out's extension, as Image.save picks; {"ok": true, "path", "mode"}.
 int render_command(const QStringList& args, bool ascii) {
     QString src;
     bool have_src = false;

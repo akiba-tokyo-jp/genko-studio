@@ -3,8 +3,8 @@
 #include <QIcon>
 #include <QString>
 
-// Tool and command icons (Python's genko/app/icons.py): Lucide (ISC licence; the SVGs of src/genko/app/lucide/ are
-// built into the app as Qt resources) for everything a general icon set has, and a few manga pictures Genko draws
+// Tool and command icons: Lucide (ISC licence; the SVGs of native/resources/lucide/ are built into the app as Qt
+// resources) for everything a general icon set has, and a few manga pictures Genko draws
 // itself in the same line weight. All are drawn in the look's text colour; a chosen tool's picture (a checked button)
 // turns the accent.
 

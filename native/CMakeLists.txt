@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
-# Genko Studio native (C++20 + Qt 6). The product being built by the C++ migration
-# (docs/cpp-migration/). Lives beside the Python baseline in src/genko until M7.
+# Genko Studio (C++20 + Qt 6): the app, the command line and the MCP server (docs/cpp-migration/: the specification,
+# the architecture, the acceptance).
 project(GenkoNative VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)

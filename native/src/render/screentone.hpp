@@ -6,9 +6,9 @@
 #include "core/json.hpp"
 #include "render/image.hpp"
 
-// The monochrome finish of Python's genko/screentone.py (finish_gray and what it uses: the line mask, the flat tone
-// steps, AM dots and FM noise): a greyscale picture turned into print (black and white with dots) or a proof (the
-// quantized greys). The AM threshold tile is tones::threshold_tile's. The same pixels as the Python baseline.
+// The monochrome finish (finish_gray and what it uses: the line mask, the flat tone steps, AM dots and FM noise): a
+// greyscale picture turned into print (black and white with dots) or a proof (the quantized greys). The AM threshold
+// tile is tones::threshold_tile's.
 
 namespace genko::render::screentone {
 

@@ -12,7 +12,7 @@
 
 // Python 3.12's random.Random (Lib/random.py over Modules/_randommodule.c): the Mersenne Twister (MT19937) seeded
 // and turned into numbers exactly as CPython does it, so that a seeded sequence is the same, number for number and
-// bit for bit, as the Python baseline's (a pencil's grain, a spray's drops, a rough panel border).
+// bit for bit, as CPython's (a pencil's grain, a spray's drops, a rough panel border).
 // docs/cpp-migration/ARCHITECTURE.md §4.
 
 namespace genko::core {

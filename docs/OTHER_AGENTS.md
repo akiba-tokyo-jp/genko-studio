@@ -13,7 +13,7 @@ Genko の MCP サーバーは `genko mcp --root <原稿のフォルダ> --agent 
 
 ## Claude Code
 
-1. Genko を入れる: `uv tool install "genko-studio[mcp] @ /path/to/genko-studio"`。
+1. Genko を入れる（README.md の「Install」）。`genko` のコマンドが PATH から使えること（`genko --version`）。
 2. サーバーを登録する（どちらか）:
 
    ```bash
@@ -46,14 +46,15 @@ Genko の MCP サーバーは `genko mcp --root <原稿のフォルダ> --agent 
 Claude Desktop は画像を inbox のフォルダに保存できないことが多い。そのときは HTTP の `POST /v1/assets` で渡すか、
 人間が画像を inbox に置いて `import_images` だけを頼む。
 
-## そのほかの MCP クライアント（Python SDK）
+## そのほかの MCP クライアント（MCP の Python SDK）
 
-`integrations/generic/mcp_client_example.py` が最小の例（公式の Python SDK、stdio）。サーバーを子プロセスで起こし、
+`integrations/generic/mcp_client_example.py` が最小の例（MCP の公式の Python SDK、stdio）。`genko mcp` を子プロセスで起こし、
 プロジェクトを作って企画書・脚本・1 ページのネームを送り、`next` が次に何を求めるかと、スキルの長さを JSON で出す:
 
 ```bash
-uv run --extra mcp python integrations/generic/mcp_client_example.py --root /tmp/manga
-# {"tools": 31, "create": true, "bible": true, "script": true, "name": true, "next": ["review_name"], "skill_chars": …}
+pip install mcp anyio
+python integrations/generic/mcp_client_example.py --root /tmp/manga
+# {"tools": 41, "create": true, "bible": true, "script": true, "name": true, "next": ["review_name"], "skill_chars": …}
 ```
 
 自分のエージェントに組み込むときは、固定の JSON をエージェントの出力に置き換え、`next` のループ（SKILL.md の「ループ」）を回す。
@@ -97,7 +98,7 @@ genko export PROJ ./sns --format sns --long-edge 1600 --spreads          # 見�
 
 Hermes 以外で `docs/STUDIO_EVAL.md` の「パイロットページの通し」を 1 回行い、次を確かめる:
 
-- [ ] 道具の一覧が出る（31 個）。`inspect`（`target: "rules"`）が読める。
+- [ ] 道具の一覧が出る（41 個）。`inspect`（`target: "rules"`）が読める。
 - [ ] スキルが読み込まれ、エージェントが `commit: false` → `commit: true` の順で書く。
 - [ ] ネームの承認待ちで止まり、`review_page` の場所を知らせてくる。
 - [ ] 依頼パックの参照画像・ガイドを画像ツールに渡し、inbox に置いて `import_images` できる。

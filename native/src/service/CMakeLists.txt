@@ -1,6 +1,6 @@
 # The studio service (docs/cpp-migration/ARCHITECTURE.md §1 service/): the tools an agent calls and the approvals a
-# person makes (Python's genko/studio/service.py: StudioService and HumanService, and the modules they use), shared
-# by `genko studio`, MCP, HTTP and the app; and the words people see in errors (Python's genko/app/wording.py). Above
+# person makes (StudioService and HumanService, and the modules they use), shared by `genko studio`, MCP, HTTP and the
+# app; and the words people see in errors (wording.cpp). Above
 # formats: the tools draw previews and write the exports.
 
 # The studio's own data (resources/studio/), embedded as they are (a change to one re-runs CMake): the page layout

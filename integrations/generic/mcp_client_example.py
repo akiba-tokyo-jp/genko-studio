@@ -1,8 +1,9 @@
 """Drive Genko from any MCP client: a short run with the official Python SDK over stdio.
 
-    uv run --extra mcp python integrations/generic/mcp_client_example.py --root /tmp/manga
+    pip install mcp anyio
+    python integrations/generic/mcp_client_example.py --root /tmp/manga
 
-It starts `genko mcp` as a subprocess (the same way Hermes Agent, Claude Code or Claude
+It starts `genko mcp` (the `genko` command on the PATH) as a subprocess (the same way Hermes Agent, Claude Code or Claude
 Desktop do), creates a project, writes a tiny bible and script, submits one name page,
 and prints what `next` asks for. Replace the fixed JSON with your own agent's output.
 """
@@ -11,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 import anyio
@@ -38,7 +38,7 @@ PLAN = {"page": 1, "turn_role": "normal", "template": None,
 
 
 async def run(root: Path, agent: str) -> dict:
-    params = StdioServerParameters(command=sys.executable, args=["-m", "genko", "mcp", "--root", str(root), "--agent", agent])
+    params = StdioServerParameters(command="genko", args=["mcp", "--root", str(root), "--agent", agent])
     report: dict = {}
     async with Client(params) as client:
         tools = sorted(t.name for t in (await client.list_tools()).tools)

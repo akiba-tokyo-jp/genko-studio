@@ -4,12 +4,11 @@
 #include <span>
 #include <vector>
 
-// numpy's arithmetic on the small vectors and matrices of the 3D guides (genko/mesh3d.py, prim3d.py, persp3d.py),
-// to the last bit of the Python baseline (numpy 2.4 with scipy-openblas 0.3.31 and its Haswell kernels).
+// numpy's arithmetic on the small vectors and matrices of the 3D guides, to the last bit (numpy 2.4 with
+// scipy-openblas 0.3.31 and its Haswell kernels: the numbers the 3D tests hold).
 //
 // Element-wise operations are plain IEEE operations, one rounding each, never contracted. matmul goes to OpenBLAS,
-// whose kernels round in their own orders (measured with tools/migration/geom3d_harness.py blas; the contract tests
-// check them on the reference machine first):
+// whose kernels round in their own orders (as measured on the reference machine):
 //  - a matrix product (dgemm), any size: each element is a fused multiply-add chain from +0.0 over k;
 //  - a 3×3 matrix times a vector (dgemv, the 3-row tail of the transposed kernel): 0.0 + fma(a2, x2, fma(a0, x0, a1 x1));
 //  - a 4×4 matrix times a vector (its 4-row block): 0.0 + ((a0 x0 + a2 x2) + (a1 x1 + a3 x3)), not fused;

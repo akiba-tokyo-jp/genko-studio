@@ -1,5 +1,5 @@
 # ~/.hermes/config.yaml に足す例（Genko は同じマシンで動かす）
-# 事前に: uv tool install "genko-studio[mcp] @ /path/to/genko-studio"  など、genko コマンドを使える状態にする
+# 事前に: Genko を入れて（README.md の「Install」）、genko コマンドを使える状態にする
 # 設定の書き方は Hermes の版で変わりうるので、Hermes の MCP の文書で確かめること。
 mcp_servers:
   genko:

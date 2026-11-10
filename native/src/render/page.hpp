@@ -19,8 +19,8 @@
 // lines with every brush, fills and gradients, corrections, effects, masks, blend modes, opacity, clipping), the
 // panel borders, a jacket's folds (render/covers.hpp), crop marks, the ruler's points, the lines of dialogue (in their
 // balloons, render/text/balloons.hpp, set under a layer when they ask; the others as labels) and the onion skin, the
-// same pixels as the Python baseline.
-// (A page in precise colour, which Python does not have, is composited in its own canvas: render/color_canvas.hpp.)
+// pixels fixed by docs/cpp-migration/ARCHITECTURE.md §4a.
+// (A page in precise colour is composited in its own canvas: render/color_canvas.hpp.)
 //
 // Not drawn in this step (render::NotYetPorted names them, unless RenderOptions::skip_unported): placed pictures
 // ("placed") and the monochrome finish of a painting app's colour layer ("finish");

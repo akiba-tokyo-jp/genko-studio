@@ -5,7 +5,7 @@ Genko の側で数えられるものは Genko が記録するので、人間が�
 
 ## 1. 準備
 
-1. Genko を入れる: `uv tool install "genko-studio[mcp] @ /path/to/genko-studio"`（`genko` コマンドが使えること）。
+1. Genko を入れる（README.md の「Install」。`genko` コマンドが使えること）。
 2. 原稿のフォルダを決める（例 `~/manga`）。
 3. Hermes の設定に `integrations/hermes/config.example.yaml` の `mcp_servers.genko` を足す。`--agent ai:hermes` のまま。
 4. スキルを入れる: `integrations/hermes/genko-manga/` を Hermes のスキルのフォルダに置く（同じ内容を MCP の resource `genko://guide/skill` でも読める）。

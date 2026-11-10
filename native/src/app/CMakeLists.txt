@@ -1,7 +1,7 @@
 # The desktop app (Qt Widgets): the editing session, the windows and the canvas (docs/cpp-migration/ARCHITECTURE.md §1).
 # Only this module depends on Qt Widgets.
 
-# The icons and the panel templates (taken from the Python baseline's files as they are), and the screen's letters
+# The icons and the panel templates (resources/lucide, resources/studio), and the screen's letters
 # (a big resource: compiled straight to an object file).
 qt_add_resources(GENKO_APP_RESOURCES "${GENKO_SOURCE_ROOT}/resources/genko_app.qrc")
 qt_add_big_resources(GENKO_APP_FONTS "${GENKO_SOURCE_ROOT}/resources/genko_fonts.qrc")

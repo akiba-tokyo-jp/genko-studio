@@ -220,7 +220,6 @@
           "native/src/service/studio_service.cpp:518"
         ],
         "tests": [
-          "native/tests/contract/service_cases.json:235",
           "native/tests/gui/test_gui_brushes.cpp:106"
         ],
         "gap": "MCP の inspect target=brushes で入っている・本の・自分のブラシ（キー・名前・太さ・質感）を一覧できる。full=true 相当（全設定）、硬さ・先端の種類、グループがない",
@@ -307,7 +306,6 @@
           "native/src/core/ops_strokes.cpp:509"
         ],
         "tests": [
-          "native/tests/contract/test_contract_paper.cpp",
           "native/tests/gui/test_gui_paper.cpp:228"
         ],
         "gap": "ブラシの「紙質」（取り込んだ画像・濃さ・倍率・回転・反転・濃淡反転・乗算/減算・紙面固定/線ごと）はある。パターン（パターンパネルの資産）から選ぶ入口、明るさ・コントラスト、各先端ごとの適用と深さの揺らぎ、PS のテクスチャの各モードがない",
@@ -349,7 +347,6 @@
           "native/src/app/main_window_select.cpp:318"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:7649",
           "native/tests/gui/test_gui_select.cpp:396"
         ],
         "gap": "Genko にはチャンネルの仕組みがなく、名前付きで保存した選択範囲（ストック）を forget_area で消せるだけ。アルファ・スポット・色チャンネル（R/G/B 等を消してマルチチャンネル化）の削除がない",
@@ -577,7 +574,6 @@
           "native/src/app/main_window_select.cpp:306"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:7249",
           "native/tests/gui/test_gui_select.cpp:379"
         ],
         "gap": "選択範囲を名前付きでページに残す store_area（選択範囲をストック）だけ。黒・白で塗った空のアルファチャンネル、表示色・不透明度、マスク/選択部分の指定、グレー画像として描いて直すチャンネルがない",
@@ -1298,10 +1294,7 @@
           "native/src/api/mcp_tools.cpp:1071",
           "native/src/app/main_window_actions.cpp:386"
         ],
-        "tests": [
-          "native/tests/contract/test_contract_cli.cpp",
-          "native/tests/contract/mcp_cases.json"
-        ],
+        "tests": [],
         "gap": "genko schema / genko://ops は op と引数の一覧のみ。表示名・メニュー位置・ショートカット・今使えるか（enabled）を返さず、画面の操作は含まない",
         "note": "画面では「コマンドを探す…」(act_find_command) が相当"
       }
@@ -1615,9 +1608,7 @@
           "native/src/api/mcp_tools.cpp:63",
           "native/src/storage/snapshot.cpp:99"
         ],
-        "tests": [
-          "native/tests/contract/mcp_cases.json:323"
-        ],
+        "tests": [],
         "gap": "inspect（target=snapshot）でページ・レイヤー・コマ・台詞は返るが、ページの色モード・ビット深度・ICC、選択範囲の有無と範囲、履歴、チャンネル、計測、変数の情報がない",
         "note": ""
       }
@@ -1655,7 +1646,6 @@
           "native/src/app/main_window_paint.cpp:65"
         ],
         "tests": [
-          "native/tests/contract/mcp_cases.json:168",
           "native/tests/gui/test_gui_actions.cpp:305"
         ],
         "gap": "1 点の合成色を返す問い合わせがない。render で合成画像を得て読むか、GUI のスポイトで拾うだけ。16/32 ビット・CMYK/Lab の値をそのまま返せない",
@@ -1910,7 +1900,6 @@
           "native/src/app/main_window_select.cpp:486"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:5597",
           "native/tests/gui/test_gui_select.cpp:333",
           "native/tests/gui/test_gui_lines.cpp:564"
         ],
@@ -2562,7 +2551,6 @@
           "native/src/app/main_window_select.cpp:557"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:3653",
           "native/tests/gui/test_gui_select.cpp:333"
         ],
         "gap": "選択範囲を色と不透明度で塗る（fill_area）はある。パターンで塗る（拡大率・角度）・アルファチャンネル/クイックマスクを対象にする・選択なしで層全体を塗るが無い。塗りは 8 bit の塗り（patch）で置き、高精度の層での扱いは未確認",
@@ -2618,7 +2606,6 @@
           "native/src/app/main_window_lines.cpp:625"
         ],
         "tests": [
-          "native/tests/contract/book_cases.json:147",
           "native/tests/gui/test_gui_lines.cpp:249"
         ],
         "gap": "全ページの台詞の一括置換（正規表現・話者名も）はある。1 件ずつの「次を探す」「置換して次へ」・単語単位・探す向きが無く、大文字小文字の区別は op（case）にだけあり画面に無い",
@@ -2835,8 +2822,7 @@
         ],
         "tests": [
           "native/tests/gui/test_gui_select.cpp:333",
-          "native/tests/gui/test_gui_ledger_a.cpp:427",
-          "native/tests/contract/raster_cases.json:6733"
+          "native/tests/gui/test_gui_ledger_a.cpp:427"
         ],
         "gap": "内部のクリップボードを新しいレイヤー「貼り付け」の元の位置に置く。表示の中央に置く（center）・ほかのアプリの画像（OS のクリップボード）を貼る入口が無い",
         "note": ""
@@ -2889,8 +2875,7 @@
           "native/src/render/raster_ops.cpp:1497"
         ],
         "tests": [
-          "native/tests/gui/test_gui_select.cpp:333",
-          "native/tests/contract/raster_cases.json:6733"
+          "native/tests/gui/test_gui_select.cpp:333"
         ],
         "gap": "",
         "note": "Genko の「貼り付け」が元の位置に置くので同じ動き（別のメニュー項目は無い）"
@@ -4594,8 +4579,7 @@
           "native/src/api/cli.cpp:980"
         ],
         "tests": [
-          "native/tests/e2e/test_app_e2e.cpp:175",
-          "native/tests/contract/test_contract_ops_cli.cpp:340"
+          "native/tests/e2e/test_app_e2e.cpp:175"
         ],
         "gap": "",
         "note": ""
@@ -4825,8 +4809,6 @@
           "native/src/render/warp.hpp:31"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:6284",
-          "native/tests/contract/test_contract_raster_ops.cpp",
           "native/tests/unit/test_raster_ops.cpp"
         ],
         "gap": "transform_area で範囲の中の線・塗り・画素を行列（matrix）か 4 隅（warp.perspective）で変形し、補間（nearest/bilinear/bicubic）も選べる。8 bit・高精度・CMYK/Lab のインキの層に効く。範囲（area）が必須で、フォルダー（グループ）・台詞・マスク・ほかの層をまとめて変形しない。4 隅は射影でなく区分的なアフィン（14×14 のます）",
@@ -4919,8 +4901,7 @@
           "native/src/render/warp.hpp:31"
         ],
         "tests": [
-          "native/tests/gui/test_gui_select.cpp:298",
-          "native/tests/contract/raster_cases.json:6284"
+          "native/tests/gui/test_gui_select.cpp:298"
         ],
         "gap": "",
         "note": "Genko では「自由変形（遠近・4 隅）」で 4 隅を自由に動かし Enter で確定"
@@ -5073,8 +5054,7 @@
           "native/src/render/warp.hpp:31"
         ],
         "tests": [
-          "native/tests/gui/test_gui_select.cpp:298",
-          "native/tests/contract/raster_cases.json:6284"
+          "native/tests/gui/test_gui_select.cpp:298"
         ],
         "gap": "",
         "note": "上流もこのメニューは同じ自由変形の箱に入るだけ。Genko は「自由変形（遠近・4 隅）」"
@@ -5617,7 +5597,6 @@
           "native/src/render/warp.hpp:31"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:6170",
           "native/tests/gui/test_gui_ledger_c.cpp:474",
           "native/tests/gui/test_gui_select.cpp:298"
         ],
@@ -5672,8 +5651,7 @@
           "native/src/api/cli.cpp:979"
         ],
         "tests": [
-          "native/tests/e2e/test_app_e2e.cpp:131",
-          "native/tests/contract/mcp_cases.json:2117"
+          "native/tests/e2e/test_app_e2e.cpp:131"
         ],
         "gap": "",
         "note": ""
@@ -6496,8 +6474,7 @@
           "native/src/formats/exporting.cpp:114"
         ],
         "tests": [
-          "native/tests/contract/test_contract_export.cpp",
-          "native/tests/contract/service_cases.json"
+          "native/tests/contract/test_contract_export.cpp"
         ],
         "gap": "画板がない。ページを 1 ページずつ JPEG で入れた PDF は書けるが、画板の選択と品質（0..12）の指定がない",
         "note": "画板の行が前提"
@@ -6797,8 +6774,7 @@
           "native/src/api/cli.cpp:623"
         ],
         "tests": [
-          "native/tests/contract/test_contract_export.cpp",
-          "native/tests/contract/opsupport.cpp"
+          "native/tests/contract/test_contract_export.cpp"
         ],
         "gap": "書き出し形式「レイヤーごとの PNG」はあるが PNG・8 ビットのみ。jpg/psd/tiff の選択、接頭辞、表示中だけ（visibleOnly）、品質の指定がない",
         "note": ""
@@ -6980,8 +6956,7 @@
         ],
         "tests": [
           "native/tests/contract/test_contract_anim.cpp",
-          "native/tests/contract/test_contract_export_cli.cpp",
-          "native/tests/contract/service_cases.json"
+          "native/tests/contract/test_contract_export_cli.cpp"
         ],
         "gap": "",
         "note": "アニメのページを GIF/WebP/APNG/MP4（ffmpeg があれば）または連番 PNG に書き出す。上流はタイムラインの全フレームを連番か GIF。Genko の動画は 8 ビット RGB"
@@ -7088,10 +7063,7 @@
         "cpp": [
           "native/src/core/ops_book.cpp:65"
         ],
-        "tests": [
-          "native/tests/contract/ops_cases.json",
-          "native/tests/contract/book_cases.json"
-        ],
+        "tests": [],
         "gap": "set_meta で題名・話数・綴じ等は持てるが、作者・肩書き・説明・キーワード・著作権（状態・URL）がなく、XMP として読み書き・埋め込みしない",
         "note": ""
       },
@@ -7406,7 +7378,6 @@
           "native/src/render/ops_ink.cpp:113"
         ],
         "tests": [
-          "native/tests/contract/studio_cases.json",
           "native/tests/gui/test_gui_actions.cpp",
           "native/tests/contract/test_contract_ink.cpp"
         ],
@@ -7625,7 +7596,6 @@
         ],
         "tests": [
           "native/tests/gui/test_gui_carried.cpp",
-          "native/tests/contract/test_contract_studio.cpp",
           "native/tests/unit/test_placed.cpp"
         ],
         "gap": "「画像を読み込む…」でコマ/ページに配置レイヤー（place_asset, 後で置き直せる）として埋め込めるが、8 ビット RGB/RGBA の PNG に変換して保存。倍率（%）・中心位置の指定なし。TIFF/WebP の配置画像はまだ描けない",
@@ -8025,10 +7995,7 @@
           "native/src/api/mcp_tools.cpp:216",
           "native/src/api/headless_server.cpp:674"
         ],
-        "tests": [
-          "native/tests/contract/book_cases.json",
-          "native/tests/contract/mcp_cases.json"
-        ],
+        "tests": [],
         "gap": "genko apply / MCP apply_ops / HTTP /v1/apply で op の JSON 配列を実行できるが、画面から台本ファイルを選んで実行する入口と「1 行 1 コマンド」のテキスト形式がない",
         "note": ""
       }
@@ -8553,7 +8520,6 @@
           "native/src/app/layer_dialogs.cpp:38"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2529",
           "native/tests/unit/test_color_filters.cpp:94",
           "native/tests/unit/test_ink_filters.cpp:147"
         ],
@@ -8616,7 +8582,6 @@
           "native/src/app/layer_dialogs.cpp:38"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2529",
           "native/tests/unit/test_color_filters.cpp:94",
           "native/tests/unit/test_ink_filters.cpp:147"
         ],
@@ -8737,7 +8702,6 @@
           "native/src/app/layer_dialogs.cpp:38"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2529",
           "native/tests/unit/test_color_filters.cpp:94",
           "native/tests/unit/test_ink_filters.cpp:147"
         ],
@@ -8856,7 +8820,6 @@
           "native/src/app/layer_dialogs.cpp:38"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2686",
           "native/tests/unit/test_color_filters.cpp:104",
           "native/tests/unit/test_ink_filters.cpp:151"
         ],
@@ -8922,10 +8885,8 @@
           "native/src/app/layer_dialogs.cpp:38"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2701",
           "native/tests/unit/test_color_filters.cpp:105",
           "native/tests/unit/test_ink_filters.cpp:152",
-          "native/tests/contract/raster_cases.json:2716",
           "native/tests/unit/test_color_filters.cpp:106",
           "native/tests/unit/test_ink_filters.cpp:153"
         ],
@@ -9315,7 +9276,6 @@
           "native/src/app/layer_dialogs.cpp:38"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2701",
           "native/tests/unit/test_color_filters.cpp:105",
           "native/tests/unit/test_ink_filters.cpp:152"
         ],
@@ -9428,8 +9388,6 @@
           "native/src/render/filters.cpp:555"
         ],
         "tests": [
-          "native/tests/contract/test_contract_filters.cpp",
-          "native/tests/contract/raster_cases.json:2571",
           "native/tests/unit/test_color_raster.cpp:262"
         ],
         "gap": "一つの Camera Raw フィルターはない。露光量（exposure）・明るさ・コントラスト・トーンカーブ（点・色別）・色相彩度は別の補正としてある。色温度・色かぶり・ハイライト/シャドウ/白/黒・テクスチャ・明瞭度・かすみの除去・自然な彩度・パラメトリックカーブ・HSL 8 色・カラーグレーディング・シャープの細部/マスク・ノイズ軽減・粒子・周辺光量がない",
@@ -9888,7 +9846,6 @@
           "native/src/app/layer_dialogs.cpp:38"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2775",
           "native/tests/unit/test_color_filters.cpp:110",
           "native/tests/unit/test_ink_filters.cpp:155"
         ],
@@ -9954,7 +9911,6 @@
           "native/src/app/layer_dialogs.cpp:38"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2760",
           "native/tests/unit/test_color_filters.cpp:109",
           "native/tests/unit/test_ink_filters.cpp:154"
         ],
@@ -10607,7 +10563,6 @@
           "native/src/app/layer_dialogs.cpp:38"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2975",
           "native/tests/unit/test_color_filters.cpp:122",
           "native/tests/unit/test_ink_filters.cpp:157"
         ],
@@ -10942,10 +10897,7 @@
           "native/src/app/layer_dialogs.cpp:597",
           "native/src/app/layer_panel.cpp:859"
         ],
-        "tests": [
-          "native/tests/contract/test_contract_tone_render.cpp",
-          "native/tests/contract/test_contract_render.cpp"
-        ],
+        "tests": [],
         "gap": "レイヤーのトーン化（網点・線・交差・砂目、線数・角度・網の形）は印刷と書き出しで黒 1 色の網になる非破壊の設定。画素を変えるフィルターとしてはない、同心円（circle）・コントラスト・描画色/背景色の 2 色がない",
         "note": ""
       },
@@ -12167,7 +12119,6 @@
           "native/src/render/ink_edit.cpp:827"
         ],
         "tests": [
-          "native/tests/contract/paint_cases.json:644",
           "native/tests/gui/test_gui_paint.cpp:110",
           "native/tests/unit/test_ink_edit.cpp:233"
         ],
@@ -12233,7 +12184,6 @@
           "native/src/app/layer_dialogs.cpp:38"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2731",
           "native/tests/unit/test_color_filters.cpp:107",
           "native/tests/unit/test_ink_filters.cpp:158"
         ],
@@ -12840,10 +12790,7 @@
           "native/src/app/layer_dialogs.cpp:597",
           "native/src/app/layer_panel.cpp:859"
         ],
-        "tests": [
-          "native/tests/contract/test_contract_tone_render.cpp",
-          "native/tests/contract/test_contract_render.cpp"
-        ],
+        "tests": [],
         "gap": "レイヤーのトーン化（網点・線数・角度・網の形、印刷と書き出しで網点になる）は黒 1 色だけ。色ごと（C/M/Y/K）に角度を変えた網点・最大半径の指定・画素を直接変えるフィルターがない",
         "note": "Genko のトーン化は非破壊のレイヤーの設定"
       },
@@ -13126,7 +13073,6 @@
           "native/src/app/layer_dialogs.cpp:38"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2658",
           "native/tests/unit/test_color_filters.cpp:102",
           "native/tests/unit/test_ink_filters.cpp:150"
         ],
@@ -13684,7 +13630,6 @@
           "native/src/app/layer_dialogs.cpp:38"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2556",
           "native/tests/unit/test_color_filters.cpp:95",
           "native/tests/unit/test_ink_filters.cpp:148"
         ],
@@ -13748,7 +13693,6 @@
           "native/src/app/layer_dialogs.cpp:38"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2556",
           "native/tests/unit/test_color_filters.cpp:95",
           "native/tests/unit/test_ink_filters.cpp:148"
         ],
@@ -13812,7 +13756,6 @@
           "native/src/app/layer_dialogs.cpp:38"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2556",
           "native/tests/unit/test_color_filters.cpp:95",
           "native/tests/unit/test_ink_filters.cpp:148"
         ],
@@ -13877,7 +13820,6 @@
           "native/src/app/layer_dialogs.cpp:38"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2556",
           "native/tests/unit/test_color_filters.cpp:95",
           "native/tests/unit/test_ink_filters.cpp:148"
         ],
@@ -13942,7 +13884,6 @@
           "native/src/app/layer_dialogs.cpp:38"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2556",
           "native/tests/unit/test_color_filters.cpp:95",
           "native/tests/unit/test_ink_filters.cpp:148"
         ],
@@ -14502,10 +14443,7 @@
           "native/src/app/main_window_select.cpp:111",
           "native/src/app/main_window_guides.cpp:143"
         ],
-        "tests": [
-          "native/tests/contract/raster_cases.json:6325",
-          "native/tests/contract/ruler_cases.json"
-        ],
+        "tests": [],
         "gap": "面（plane）の定義・面の継ぎ足し（角度）・面に沿った貼り付け（u,v・幅）・遠近に沿ったコピースタンプがない。Genko には 4 隅を手で決める自由変形（遠近）とパース定規（消失点）だけある",
         "note": ""
       },
@@ -14654,8 +14592,6 @@
           "native/src/app/layer_panel.cpp:784"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:590",
-          "native/tests/contract/ops_cases.json:671",
           "native/tests/gui/test_gui_layers.cpp:402"
         ],
         "gap": "グラデーション塗りレイヤー（add_layer kind=gradient: 色と不透明度の止め・linear/radial/ellipse・repeat/mirror）はあるが、プリセットから作る入口がない。angle/reflected/diamond の形、angle・scale の数値指定（向きと長さは from/to の点で表す）、reverse、描画色/背景色を止めにすること、透明度の止めを色の止めと別に持つことがない。8 ビット RGB だけ（上流は文書の深度 8/16/32 ビット）。",
@@ -14863,8 +14799,7 @@
           "native/src/render/raster_ops.cpp:2555"
         ],
         "tests": [
-          "native/tests/gui/test_gui_paint.cpp:227",
-          "native/tests/contract/raster_cases.json:5134"
+          "native/tests/gui/test_gui_paint.cpp:227"
         ],
         "gap": "グラデーションの道具の「色の変わり方」4 種（ペンの色→透明・ペンの色→白・黒→白・円）から選べるだけ。名前のプリセットや任意の止めを今のグラデーションにすること、選んだグラデーション塗りレイヤーへ当てる（applyToLayer）ことができない。",
         "note": "土台（グラデーションのプリセット保管）は gradient.presets.list に計上。素材ライブラリ（native/src/render/materials.cpp: フォルダ・名前変更・削除・パック）を流用できる。"
@@ -14985,7 +14920,6 @@
           "native/src/app/layer_dialogs.cpp:77"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2939",
           "native/tests/unit/test_color_filters.cpp:120",
           "native/tests/unit/test_ink_filters.cpp:164"
         ],
@@ -15252,7 +15186,6 @@
           "native/src/app/layer_dialogs.cpp:475"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2625",
           "native/tests/unit/test_color_filters.cpp:100",
           "native/tests/gui/test_gui_layers.cpp:416"
         ],
@@ -15420,7 +15353,6 @@
           "native/src/render/page.cpp:983"
         ],
         "tests": [
-          "native/tests/contract/test_contract_filters.cpp:122",
           "native/tests/gui/test_gui_color.cpp:490"
         ],
         "gap": "露光量・オフセット・ガンマは PhotoCraft の式のまま補正レイヤー（act_exposure）として入っている。画素を直接変える filter_raster の kind に exposure がない（render/filters.hpp:20 の 22 種に含まれない）。CMYK/Lab ページでの露光量は未確認",
@@ -15486,9 +15418,7 @@
           "native/src/core/filters.cpp:199"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2875",
-          "native/tests/unit/test_color_filters.cpp:115",
-          "native/tests/contract/test_contract_filters.cpp"
+          "native/tests/unit/test_color_filters.cpp:115"
         ],
         "gap": "gradient_map（stops/colors、8bit・u16/f32・CMYK/Lab、補正レイヤー、GUI）はある。逆順（reverse）とディザ（dither）がない",
         "note": "PSD の grdm 調整レイヤーの再編集もない"
@@ -15614,7 +15544,6 @@
           "native/src/app/layer_dialogs.cpp:94"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2579",
           "native/tests/unit/test_color_filters.cpp:97",
           "native/tests/gui/test_gui_layers.cpp:425"
         ],
@@ -15682,7 +15611,6 @@
           "native/src/core/filters.cpp:331"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2834",
           "native/tests/unit/test_color_filters.cpp:112",
           "native/tests/gui/test_gui_layers.cpp:472"
         ],
@@ -15751,7 +15679,6 @@
           "native/src/app/layer_dialogs.cpp:72"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2595",
           "native/tests/unit/test_color_filters.cpp:98",
           "native/tests/gui/test_gui_layers.cpp:416"
         ],
@@ -15924,7 +15851,6 @@
           "native/src/app/layer_dialogs.cpp:105"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2847",
           "native/tests/unit/test_color_filters.cpp:113",
           "native/tests/unit/test_ink_filters.cpp:165"
         ],
@@ -16148,7 +16074,6 @@
           "native/src/app/layer_dialogs.cpp:106"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2861",
           "native/tests/unit/test_color_filters.cpp:114"
         ],
         "gap": "",
@@ -16963,9 +16888,7 @@
           "native/src/core/ops_bookpages.cpp:321",
           "native/src/app/main_window_book.cpp:209"
         ],
-        "tests": [
-          "native/tests/contract/book_cases.json:5"
-        ],
+        "tests": [],
         "gap": "用紙サイズは set_page_spec（全ページ一括、mm 指定）で変えられ、move=false で中身はそのまま残る。px・相対指定、9 方向のアンカー、広げた所の色（背景色・透明・任意色）がない",
         "note": "Genko の入口: 「原稿用紙の設定…」（act_paper）"
       },
@@ -17077,7 +17000,6 @@
           "native/src/app/main_window_actions.cpp:357"
         ],
         "tests": [
-          "native/tests/contract/book_cases.json:195",
           "native/tests/gui/test_gui_actions.cpp:74"
         ],
         "gap": "原稿全体の複製は「別名で保存」、ページの複製は duplicate_page で代わりになる。開いたまま複製した文書を作る操作と、統合画像だけの複製（mergedOnly）がない",
@@ -17143,7 +17065,6 @@
           "native/src/app/main_window_actions.cpp:367"
         ],
         "tests": [
-          "native/tests/contract/opsupport.cpp:659",
           "native/tests/gui/test_gui_actions.cpp:81"
         ],
         "gap": "ページ全体（全レイヤー・マスク・コマ・台詞・ルーラー）の180° 回転がない。1 レイヤーの選択範囲を回す transform_area と、表示だけを回す act_turn_* があるだけ",
@@ -17211,7 +17132,6 @@
           "native/src/app/main_window_actions.cpp:367"
         ],
         "tests": [
-          "native/tests/contract/opsupport.cpp:659",
           "native/tests/gui/test_gui_actions.cpp:81"
         ],
         "gap": "ページ全体（全レイヤー・マスク・コマ・台詞・ルーラー）の左に 90° 回転がない、用紙の縦横の入れ替え。1 レイヤーの選択範囲を回す transform_area と、表示だけを回す act_turn_* があるだけ",
@@ -17279,7 +17199,6 @@
           "native/src/app/main_window_actions.cpp:367"
         ],
         "tests": [
-          "native/tests/contract/opsupport.cpp:659",
           "native/tests/gui/test_gui_actions.cpp:81"
         ],
         "gap": "ページ全体（全レイヤー・マスク・コマ・台詞・ルーラー）の右に 90° 回転がない、用紙の縦横の入れ替え。1 レイヤーの選択範囲を回す transform_area と、表示だけを回す act_turn_* があるだけ",
@@ -17485,9 +17404,7 @@
           "native/src/core/ops_bookpages.cpp:426",
           "native/src/core/ops_bookpages.cpp:321"
         ],
-        "tests": [
-          "native/tests/contract/book_cases.json:5"
-        ],
+        "tests": [],
         "gap": "set_page_spec（mm・dpi、move=true で中身を基本枠に合わせて拡縮）で用紙と出力解像度は変えられるが、px 指定と再サンプル方式（bicubic/bilinear/nearest/lanczos/preserveDetails/none）の選択がない。全ページ一括",
         "note": ""
       },
@@ -18348,7 +18265,6 @@
           "native/src/app/main_window_select.cpp:119"
         ],
         "tests": [
-          "native/tests/contract/opsupport.cpp:659",
           "native/tests/gui/test_gui_select.cpp:71"
         ],
         "gap": "1 レイヤーの選択範囲を任意の角度で回す transform_area（数値で変形）はあるが、ページ全体を角度・向き・補間方式（bicubic/bilinear/nearest）を指定して回し、用紙を広げる操作がない",
@@ -18922,8 +18838,7 @@
           "native/src/core/ops_layers.cpp:420"
         ],
         "tests": [
-          "native/tests/gui/test_gui_layers.cpp:118",
-          "native/tests/contract/ops_cases.json:713"
+          "native/tests/gui/test_gui_layers.cpp:118"
         ],
         "gap": "",
         "note": "act_layer_up（Ctrl+]）は reorder_layers で隣と入れ替える。Genko はフォルダーをまたいでも平らな並びの隣と入れ替える（上流は同じグループの中で 1 つ前へ）"
@@ -18977,10 +18892,7 @@
           "native/src/core/ops_arrange.cpp:121",
           "native/src/core/ops_layers.cpp:420"
         ],
-        "tests": [
-          "native/tests/contract/raster_cases.json:1148",
-          "native/tests/contract/ops_cases.json:714"
-        ],
+        "tests": [],
         "gap": "最前面へ（兄弟の中でいちばん上へ）の op・メニュー・ショートカット（Ctrl+Shift+]）が無い。move_layers の after に最上位の層を渡す・reorder_layers で並べ替えれば同じ並びにはできるが、フォルダーの中で兄弟の最上位へ動かす規則は無い",
         "note": "Genko の層は平らな並び＋parent_id。画面は「レイヤーを前へ」（1 段ずつ）だけ"
       }
@@ -19032,9 +18944,7 @@
         "cpp": [
           "native/src/core/ops_layers.cpp:420"
         ],
-        "tests": [
-          "native/tests/contract/ops_cases.json:713"
-        ],
+        "tests": [],
         "gap": "選んだレイヤーの順を逆にする命令・画面の入口がない（reorder_layers に逆順を渡せば同じ結果になる）",
         "note": ""
       }
@@ -19090,8 +19000,7 @@
         ],
         "tests": [
           "native/tests/gui/test_gui_layers.cpp",
-          "native/tests/gui/test_gui_effects.cpp",
-          "native/tests/contract/ops_cases.json:714"
+          "native/tests/gui/test_gui_effects.cpp"
         ],
         "gap": "「レイヤーを後ろへ」（Ctrl+[）は平らな並びで隣の層と入れ替えるだけ。上流の「兄弟（同じフォルダー）の中で 1 つ下へ・フォルダーは中身ごと動く」とは違い、フォルダーの境をまたぐと親が変わらないまま位置だけ動く。layer を指定する op は無く画面の選択だけ",
         "note": ""
@@ -19144,9 +19053,7 @@
         "cpp": [
           "native/src/core/ops_arrange.cpp:121"
         ],
-        "tests": [
-          "native/tests/contract/raster_cases.json:1132"
-        ],
+        "tests": [],
         "gap": "move_layers の after=bottom で一番下へ動かせるが、ページ全体の最下（フォルダーの中の最背面ではない）。画面の入口・ショートカット（Ctrl+Shift+[）がない",
         "note": ""
       }
@@ -19488,10 +19395,6 @@
           "native/src/render/page.cpp:1060"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:662",
-          "native/tests/contract/ops_cases.json:592",
-          "native/tests/contract/raster_cases.json:450",
-          "native/tests/contract/test_contract_render.cpp",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "",
@@ -19548,8 +19451,6 @@
           "native/src/app/main_window_materials.cpp:123"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:620",
-          "native/tests/contract/ops_cases.json:622",
           "native/tests/gui/test_gui_layers.cpp:118"
         ],
         "gap": "1 枚ずつで、選んだ複数をまとめて消せない。フォルダーを消しても中のレイヤーは残る（上流は中身ごと）。芯のレイヤー（ネーム・ペン入れ・背景・仕上げ）は消せない",
@@ -20058,8 +19959,6 @@
           "native/src/app/main_window_materials.cpp:121"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:639",
-          "native/tests/contract/ops_cases.json:652",
           "native/tests/gui/test_gui_layers.cpp:118"
         ],
         "gap": "1 枚ずつで、選んだ複数をまとめて複製できない。フォルダーは複製できない（拒否）",
@@ -20220,7 +20119,6 @@
           "native/src/app/layer_panel.cpp:698"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:1411",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "",
@@ -20271,7 +20169,6 @@
           "native/src/app/layer_panel.cpp:217"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:695",
           "native/tests/gui/test_gui_layers.cpp:240"
         ],
         "gap": "",
@@ -20380,9 +20277,7 @@
           "native/src/render/raster_ops.cpp:1276",
           "native/src/render/raster_ops.cpp:713"
         ],
-        "tests": [
-          "native/tests/contract/raster_cases.json:71"
-        ],
+        "tests": [],
         "gap": "マスクを適用する専用の命令・画面の入口がない。8bit は convert_layer(to=paint) でマスクが画素に焼き込まれるが、u16/f32（color_raster）のレイヤーはそのまま返り適用されない",
         "note": ""
       },
@@ -20434,7 +20329,6 @@
           "native/src/app/layer_panel.cpp:269"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:1715",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "",
@@ -20494,7 +20388,6 @@
           "native/src/app/layer_panel.cpp:266"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:1728",
           "native/tests/gui/test_gui_layers.cpp:338"
         ],
         "gap": "",
@@ -20552,9 +20445,7 @@
           "native/src/render/raster_ops.cpp:636",
           "native/src/render/selection.cpp:653"
         ],
-        "tests": [
-          "native/tests/contract/raster_cases.json:1761"
-        ],
+        "tests": [],
         "gap": "set_layer_mask の area {layer: 自分} で近いことはできるが、α>8 で 2 値にした 150 dpi・8 bit のマスクになり（上流は α の階調を文書の解像度のまま）、層の画素を不透明にしない。専用の op・メニューが無い",
         "note": ""
       },
@@ -20605,9 +20496,7 @@
           "native/src/render/raster_ops.cpp:636",
           "native/src/app/layer_panel.cpp:260"
         ],
-        "tests": [
-          "native/tests/contract/raster_cases.json:1675"
-        ],
+        "tests": [],
         "gap": "命令（set_layer_mask fill=hide）と試験はあるが、画面は「全部見せるマスクを作る」→「マスクを反転」の 2 手で、全部隠すマスクの 1 手の入口がない",
         "note": ""
       },
@@ -20660,7 +20549,6 @@
           "native/src/app/layer_panel.cpp:265"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:1803",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "op は area＋invert で同じ形にできるが、画面は「選択範囲からマスクを作る」→「マスクを反転」の 2 手で専用の項目が無い。マスクは 150 dpi・8 bit（上流は文書の解像度）。作った後に選択を解除しない",
@@ -20771,8 +20659,6 @@
           "native/src/app/layer_panel.cpp:260"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:1688",
-          "native/tests/contract/raster_cases.json:1675",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "",
@@ -20826,7 +20712,6 @@
           "native/src/app/layer_panel.cpp:622"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:1647",
           "native/tests/gui/test_gui_layers.cpp:338"
         ],
         "gap": "",
@@ -20938,8 +20823,6 @@
           "native/src/app/layer_panel.cpp:164"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:661",
-          "native/tests/contract/ops_cases.json:659",
           "native/tests/gui/test_gui_layers.cpp:168"
         ],
         "gap": "合成モードと不透明度だけ。塗りの不透明度（fillOpacity）とブレンド条件（Blend If：このレイヤー/下のレイヤー、チャンネル、分割点）がない。モードは 20 種で、ディザ合成・カラー比較（暗/明）・ビビッドライト・リニアライト・ピンライト・ハードミックス・通過がない",
@@ -20993,7 +20876,6 @@
           "native/src/app/layer_panel.cpp:236"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:675",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "",
@@ -21053,8 +20935,6 @@
           "native/src/app/layer_panel.cpp:241"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:667",
-          "native/tests/contract/ops_cases.json:669",
           "native/tests/gui/test_gui_layers.cpp:338"
         ],
         "gap": "レイヤーの「表示色」（color）を「表示色で印刷する」（color_prints）と合わせると不透明度 100%・通常の単色で塗り替えになるが、不透明度・合成モード・重ねがけ（add）がない。表示色は既定では画面だけ",
@@ -21567,9 +21447,7 @@
         "cpp": [
           "native/src/core/ops_layers.cpp:372"
         ],
-        "tests": [
-          "native/tests/contract/ops_cases.json:699"
-        ],
+        "tests": [],
         "gap": "レイヤースタイルのコピー・ペーストの命令と画面の入口がない（set_layers で effect・blend を複数のレイヤーへ同じ値で設定はできる）。塗りの不透明度はない",
         "note": ""
       },
@@ -21813,9 +21691,7 @@
           "native/src/app/layer_panel.cpp:835"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:674",
-          "native/tests/gui/test_gui_layers.cpp",
-          "native/tests/contract/test_contract_render.cpp"
+          "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "境界効果のフチ（外側・width_mm 0.05〜10・単色）だけ。位置（内側・中央）、不透明度、描画モード、グラデーションの塗り（from・to・style・angle）、px 指定が無い。PSD の lfx2 は台詞の縁取りだけで、層のフチは効果として書かない（formats/psd_export.cpp:433）",
         "note": "レイヤースタイルの土台（効果の並び・描く順・8/16/32 bit とインキのページでの描画・PSD の lfx2 の読み書き）を layerStyle.dropShadow 行で作り、その上に足す。Genko の効果は境界効果（フチ・水彩境界）だけ"
@@ -21921,8 +21797,6 @@
           "native/src/app/layer_panel.cpp:218"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:662",
-          "native/tests/contract/ops_cases.json:701",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "透明部分の保護（lock_alpha）と全ロック（locked）だけ。画素だけのロック・位置のロック・アートボードのロックが無い。引数なしで全ロックを切り替える形も無い",
@@ -22230,8 +22104,6 @@
           "native/src/app/main_window_materials.cpp:122"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:307",
-          "native/tests/contract/raster_cases.json:450",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "",
@@ -22285,8 +22157,6 @@
           "native/src/app/main_window_actions.cpp:465"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:599",
-          "native/tests/contract/raster_cases.json:307",
           "native/tests/unit/test_precision_merge_controls.cpp:240",
           "native/tests/unit/test_ink_edit.cpp:214",
           "native/tests/gui/test_gui_layers.cpp:240"
@@ -22342,8 +22212,6 @@
           "native/src/app/layer_panel.cpp:714"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:961",
-          "native/tests/contract/raster_cases.json:926",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "",
@@ -22380,10 +22248,7 @@
           "native/src/core/ops_arrange.cpp:121",
           "native/src/core/ops_layers.cpp:181"
         ],
-        "tests": [
-          "native/tests/contract/raster_cases.json:1163",
-          "native/tests/contract/raster_cases.json:1132"
-        ],
+        "tests": [],
         "gap": "命令（move_layers の parent・after、set_layer の parent）はあるが、画面からドラッグで並べ替える・フォルダーへ入れる入口がない",
         "note": ""
       }
@@ -22652,7 +22517,6 @@
           "native/src/app/layer_panel.cpp:196"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:588",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "",
@@ -22705,7 +22569,6 @@
           "native/src/app/layer_panel.cpp:698"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:1411",
           "native/tests/gui/test_gui_layers.cpp:240"
         ],
         "gap": "",
@@ -22760,7 +22623,6 @@
           "native/src/app/layer_panel.cpp:194"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:586",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "",
@@ -22812,7 +22674,6 @@
           "native/src/render/raster_ops.cpp:1016"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:662",
           "native/tests/gui/test_gui_layers.cpp:168"
         ],
         "gap": "フラット化したレイヤーは透明部分の保護（lock_alpha）になり、set_layer で外し名前を変えれば同じだが、背景から普通のレイヤーにする専用の命令・画面の入口がない",
@@ -22864,7 +22725,6 @@
           "native/src/app/main_window_materials.cpp:121"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:639",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "選択が無いときの複製（Ctrl+J の「レイヤーを複製」）はある。選択範囲の画素だけを新しい層に写す動き（対の「切り取りで新規」も）が無い",
@@ -23039,8 +22899,6 @@
           "native/src/app/layer_dialogs.cpp:77"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:673",
-          "native/tests/contract/raster_cases.json:2931",
           "native/tests/unit/test_color_filters.cpp:254",
           "native/tests/unit/test_ink_filters.cpp:245"
         ],
@@ -23280,8 +23138,6 @@
           "native/src/app/layer_dialogs.cpp:192"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:591",
-          "native/tests/contract/raster_cases.json:2631",
           "native/tests/unit/test_color_filters.cpp:254"
         ],
         "gap": "1 レイヤーに 1 本の曲線（全体か R・G・B のどれか 1 つ）だけで、合成＋各チャンネルを 1 枚に持てない。CMYK・Lab のページでもチャンネル（C/M/Y/K・L/a/b）ごとの曲線はなく RGB の意味で補正する。PSD に調整レイヤーとして書かない・読まない（書き出しの page_layers で落ち、読み込みは render/psd.cpp:701 で飛ばす）",
@@ -23344,7 +23200,6 @@
         "tests": [
           "native/tests/gui/test_gui_color.cpp",
           "native/tests/unit/test_color_raster.cpp",
-          "native/tests/contract/test_contract_filters.cpp",
           "native/tests/unit/test_ink_filters.cpp",
           "native/tests/unit/test_precision_merge_safety.cpp"
         ],
@@ -23409,8 +23264,6 @@
           "native/src/app/layer_panel.cpp:800"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:604",
-          "native/tests/contract/raster_cases.json:2867",
           "native/tests/unit/test_color_filters.cpp:254",
           "native/tests/gui/test_gui_ledger_b.cpp:755"
         ],
@@ -23479,8 +23332,6 @@
           "native/src/core/ops_layers.cpp:289"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:600",
-          "native/tests/contract/raster_cases.json:2571",
           "native/tests/unit/test_color_filters.cpp",
           "native/tests/gui/test_gui_layers.cpp"
         ],
@@ -23615,8 +23466,6 @@
           "native/src/core/ops_layers.cpp:289"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:603",
-          "native/tests/contract/raster_cases.json:2587",
           "native/tests/unit/test_color_filters.cpp",
           "native/tests/gui/test_gui_layers.cpp"
         ],
@@ -23736,9 +23585,6 @@
           "native/src/app/layer_dialogs.cpp:105"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:605",
-          "native/tests/contract/raster_cases.json:2839",
-          "native/tests/contract/test_contract_raster_render.cpp",
           "native/tests/unit/test_color_filters.cpp"
         ],
         "gap": "段階は 2〜64（上流 2〜255）。式が違う: Genko は round(i/step)·step、上流は Photoshop と同じ floor(x·n/256)·255/(n−1) の区切り（4 段で 43〜63 などの値が変わる）。PSD の post も無い",
@@ -23856,7 +23702,6 @@
           "native/src/app/layer_dialogs.cpp:106"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:2853",
           "native/tests/unit/test_color_filters.cpp",
           "native/tests/unit/test_ink_filters.cpp"
         ],
@@ -23969,7 +23814,6 @@
           "native/src/app/layer_panel.cpp:784"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:590",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "形は linear・radial・ellipse で両端は mm の点。上流の angle（角度で向きを決める）、angle・reflected・diamond の形、reverse が無い（Genko だけに楕円・多色・繰り返し・端の不透明度がある）。PSD の GdFl としては読み書きしない",
@@ -24030,9 +23874,7 @@
           "native/src/render/ops_tones.cpp:275",
           "native/src/render/tones.cpp:589"
         ],
-        "tests": [
-          "native/tests/contract/tone_cases.hpp:30"
-        ],
+        "tests": [],
         "gap": "トーンのレイヤーで画像の柄（pattern=image・tile_png・scale_mm）を敷けるが、白黒 2 値の網として描き色を持たない。パターンの一覧からの選択・phase・link がない。塗りレイヤー（fill）は単色とグラデーションだけ",
         "note": "パターンの塗りを fill の 1 種として持たせ、u16/f32・インクの描画と PSD（PtFl）も要る"
       },
@@ -24084,7 +23926,6 @@
           "native/src/app/layer_panel.cpp:777"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:589",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "",
@@ -24278,9 +24119,7 @@
           "native/src/render/raster_ops.cpp:1276",
           "native/src/app/layer_panel.cpp:225"
         ],
-        "tests": [
-          "native/tests/contract/raster_cases.json:6"
-        ],
+        "tests": [],
         "gap": "convert_layer（to: paint）は 1 枚ずつで、全部の層をまとめて画素にする入口が無い（「まとめて」メニューの変換も今の 1 枚だけ）。トーン層は変換できない",
         "note": ""
       },
@@ -24335,10 +24174,7 @@
           "native/src/app/main_window_actions.cpp:468",
           "native/src/app/layer_panel.cpp:729"
         ],
-        "tests": [
-          "native/tests/contract/raster_cases.json:32",
-          "native/tests/contract/raster_cases.json:45"
-        ],
+        "tests": [],
         "gap": "塗り（単色・グラデーション）は convert_layer(to=paint) でペイントにできるが、結果は 8bit PNG（u16/f32 のページでもグラデーションの階調が 8bit に落ちる）。パターンの塗りはない",
         "note": "インクのページは render/ink_edit.cpp で版のまま変換される"
       },
@@ -24394,11 +24230,7 @@
           "native/src/app/main_window_actions.cpp:468",
           "native/src/app/layer_panel.cpp:729"
         ],
-        "tests": [
-          "native/tests/contract/raster_cases.json:6",
-          "native/tests/contract/raster_cases.json:32",
-          "native/tests/contract/raster_cases.json:267"
-        ],
+        "tests": [],
         "gap": "ペン・塗り・グラデーション・貼った絵はペイントの層にできるが、トーン層は断る。マスクは画素に焼き込んで外す（上流はマスクを残す）。配置画像の変換は未確認",
         "note": ""
       },
@@ -24697,8 +24529,6 @@
           "native/src/render/page.cpp:1060"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:662",
-          "native/tests/contract/test_contract_render.cpp",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "",
@@ -24749,7 +24579,6 @@
           "native/src/app/layer_panel.cpp:151"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:666",
           "native/tests/gui/test_gui_layers.cpp:168"
         ],
         "gap": "",
@@ -24877,7 +24706,6 @@
           "native/src/app/layer_panel.cpp:811"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:673",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "set_layer の adjust は設定を丸ごと置き換える（上流は渡した値だけ今の値に重ね、何も渡さなければ既定に戻す）。直せる種類は Genko の 10 種だけ（足りない種類は各 newAdjustmentLayer 行）",
@@ -24929,10 +24757,6 @@
           "native/src/app/layer_panel.cpp:160"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:658",
-          "native/tests/contract/ops_cases.json:659",
-          "native/tests/contract/ops_cases.json:661",
-          "native/tests/contract/ops_cases.json:662",
           "native/tests/gui/test_gui_layers.cpp:168"
         ],
         "gap": "名前・表示・不透明度・合成・クリップ・ロック（全部）・透明部分の保護（=locks.transparency）はある。塗りの不透明度（fill）・ロックの種類（pixels・position・artboard）・チャンネルごとの合成（channels: RGB/CMYK/Lab）がない。合成モードの不足は blendingOptions と同じ",
@@ -24971,8 +24795,6 @@
           "native/src/app/layer_panel.cpp:216"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:658",
-          "native/tests/contract/ops_cases.json:697",
           "native/tests/gui/test_gui_layers.cpp"
         ],
         "gap": "",
@@ -25819,7 +25641,6 @@
           "native/src/app/main_window_select.cpp:111"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:6325",
           "native/tests/gui/test_gui_select.cpp"
         ],
         "gap": "自由変形（遠近・4 隅）で 1 枚の四角を画素・線に破壊的に掛けることはできる。複数の面（planes・重なった角のつながり）、straighten、補間の選択の一部、SO に非破壊で掛けて後から直す形が無い",
@@ -27031,8 +26852,7 @@
           "native/src/render/raster_ops.cpp:1406"
         ],
         "tests": [
-          "native/tests/gui/test_gui_ledger_a.cpp",
-          "native/tests/contract/raster_cases.json:5955"
+          "native/tests/gui/test_gui_ledger_a.cpp"
         ],
         "gap": "移動ツール（レイヤー移動、Q）は描く先の 1 枚（ペン・ペイント）だけを transform_area の matrix で mm 単位に動かす。選んだ複数の層・リンクした層・フォルダー・塗り・配置画像は動かせず、レイヤーマスクは一緒に動かない。dx・dy（px）を取る専用の op も無い",
         "note": "複数の層を動かす部分は整列・分布（layer.align.horizontalCenters 行）と共有"
@@ -27086,10 +26906,7 @@
           "native/src/core/ops_arrange.cpp:121",
           "native/src/core/ops_layers.cpp:311"
         ],
-        "tests": [
-          "native/tests/contract/raster_cases.json:1178",
-          "native/tests/contract/ops_cases.json:622"
-        ],
+        "tests": [],
         "gap": "フォルダーを解く 1 手の命令・画面の入口・ショートカット（Cmd+Shift+G）がない（move_layers で中身を外へ出し delete_layer でフォルダーを消す 2 手）",
         "note": ""
       }
@@ -27578,7 +27395,6 @@
           "native/src/app/timeline.cpp:333"
         ],
         "tests": [
-          "native/tests/contract/anim_cases.json:756",
           "native/tests/gui/test_gui_anim.cpp"
         ],
         "gap": "今のフレームを空にする（set_exposure の cel null）ことはできるが、フレームを抜いて後ろを詰める（長さが縮む）動きは無い",
@@ -27686,8 +27502,6 @@
           "native/src/app/timeline.cpp:306"
         ],
         "tests": [
-          "native/tests/contract/anim_cases.json:313",
-          "native/tests/contract/anim_cases.json:352",
           "native/tests/gui/test_gui_anim.cpp"
         ],
         "gap": "「＋セル」（add_cel の at）でこのフレームから新しい空のセルを出せるが、今のフレームの後ろに 1 フレーム差し込んで後ろをずらす（長さが伸びる）動きは無い",
@@ -27800,7 +27614,6 @@
           "native/src/app/timeline.cpp:303"
         ],
         "tests": [
-          "native/tests/contract/anim_cases.json:255",
           "native/tests/gui/test_gui_anim.cpp"
         ],
         "gap": "空のアニメーションフォルダー（add_anim_folder）は作れるが、上流のようにタイムラインの長さ分の空の画素フレームを持つビデオレイヤーではなく、セルを露出表で出す仕組み。フレームの画素形式も文書に合わせない（セルごとにペン・ペイント）",
@@ -28126,9 +27939,7 @@
           "native/src/core/ops_anim.cpp:204",
           "native/src/app/timeline.cpp:333"
         ],
-        "tests": [
-          "native/tests/contract/anim_cases.json:756"
-        ],
+        "tests": [],
         "gap": "上流は今のフレームを空に戻す（元の映像は持たない）。Genko は set_exposure の cel null でそのフレームに何も出さないことはできるが、「戻す」専用の入口は無い",
         "note": "Genko の相当はアニメーションフォルダーのセルと露出表（タイムラインパネル）。上流のビデオレイヤーはフレームごとに画素の束を持つ別の仕組み"
       }
@@ -28788,11 +28599,7 @@
           "native/src/core/ops_studio.cpp:2124",
           "native/src/service/human_service.cpp:117"
         ],
-        "tests": [
-          "native/tests/contract/ops_cases.json",
-          "native/tests/contract/studio_cases.json",
-          "native/tests/contract/mcp_cases.json"
-        ],
+        "tests": [],
         "gap": "ページのメモ（set_note, 1 ページ 1 つ）とページ/コマ単位のコメント・チケットはあるが、座標に置く注釈（作者・色・開閉・複数）がない",
         "note": ""
       }
@@ -28831,10 +28638,7 @@
           "native/src/core/ops_book.cpp:59",
           "native/src/core/ops_studio.cpp:2124"
         ],
-        "tests": [
-          "native/tests/contract/ops_cases.json",
-          "native/tests/contract/studio_cases.json"
-        ],
+        "tests": [],
         "gap": "set_note を空にする・チケットを閉じることはできるが、注釈を番号で消す/全部消す操作がない",
         "note": "notes.add のモデルが先"
       }
@@ -28871,9 +28675,7 @@
           "native/src/api/mcp_tools.cpp:229",
           "native/src/api/cli.cpp:247"
         ],
-        "tests": [
-          "native/tests/contract/mcp_cases.json"
-        ],
+        "tests": [],
         "gap": "inspect のページのメモと MCP tickets はあるが、注釈（番号・作者・本文・色・位置・開閉・更新日時）の一覧がない",
         "note": "notes.add のモデルが先"
       }
@@ -28913,10 +28715,7 @@
           "native/src/core/ops_book.cpp:59",
           "native/src/core/ops_studio.cpp:2124"
         ],
-        "tests": [
-          "native/tests/contract/ops_cases.json",
-          "native/tests/contract/studio_cases.json"
-        ],
+        "tests": [],
         "gap": "ページのメモの書き換え・set_ticket（状態・担当）はあるが、注釈の本文・作者・色・位置・開閉の編集がない",
         "note": "notes.add のモデルが先"
       }
@@ -28996,7 +28795,6 @@
           "native/src/app/main_window_paint.cpp:121"
         ],
         "tests": [
-          "native/tests/contract/paint_cases.json:454",
           "native/tests/gui/test_gui_paint.cpp:320"
         ],
         "gap": "「色混ぜ」の「ぼかし」でなぞった所をぼかせる（強さ 0.05..1・太さ mm）。硬さ・流量・間隔・不透明度の指定がなく、結果は 8 ビット RGBA の貼り付けとして重なる。16/32 ビット・CMYK/Lab での動作がない（高精度の画素では未確認）",
@@ -29042,7 +28840,6 @@
           "native/src/app/main_window_paint.cpp:293"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json",
           "native/tests/gui/test_gui_paint.cpp:172",
           "native/tests/gui/test_gui_ledger_c.cpp:918"
         ],
@@ -29241,7 +29038,6 @@
           "native/src/app/main_window_paint.cpp:350"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:5134",
           "native/tests/gui/test_gui_paint.cpp:223",
           "native/tests/gui/test_gui_ledger_c.cpp:858"
         ],
@@ -29453,7 +29249,6 @@
           "native/src/core/ops_strokes.cpp:574"
         ],
         "tests": [
-          "native/tests/contract/test_contract_brushes.cpp",
           "native/tests/gui/test_gui_brushes.cpp:106"
         ],
         "gap": "アンチエイリアスなし（aa=none）の自作ブラシで硬い縁の線は描ける（「鉛筆」の名のブラシはざらつきの質感で別物）。自動消去（autoErase）、描画モード、マスク/クイックマスク/チャンネル対象の指定がない。8 ビット RGB の画素だけ（上流は 8/16/32 ビット・CMYK/Lab 等の各色モデルで動く）",
@@ -29539,7 +29334,6 @@
           "native/src/app/main_window_paint.cpp:121"
         ],
         "tests": [
-          "native/tests/contract/paint_cases.json:454",
           "native/tests/gui/test_gui_paint.cpp:320"
         ],
         "gap": "「色混ぜ」の「指先」で色をのばせる（強さ・太さ）。フィンガーペイント（描画色から始める）、硬さ・流量・間隔・不透明度の指定がない。8 ビット RGB の画素だけ（上流は 8/16/32 ビット・CMYK/Lab 等の各色モデルで動く）",
@@ -29665,7 +29459,6 @@
           "native/src/app/pen.cpp:17"
         ],
         "tests": [
-          "native/tests/contract/test_contract_brushes.cpp",
           "native/tests/gui/test_gui_pen.cpp",
           "native/tests/gui/test_gui_color.cpp:159",
           "native/tests/gui/test_gui_carried.cpp:223"
@@ -29744,10 +29537,7 @@
           "native/src/render/selection.cpp:667",
           "native/src/render/selection.cpp:712"
         ],
-        "tests": [
-          "native/tests/contract/raster_cases.json:3654",
-          "native/tests/contract/opsupport.cpp:1040"
-        ],
+        "tests": [],
         "gap": "多角形やストックした範囲（area の poly / saved、feather_mm も可）を色と不透明度で塗る fill_area はある。ベジェのパス・作業パス・シェイプの輪郭からの塗り、合成モード（mode）、アンチエイリアスの切替がない。8 ビット。",
         "note": "パス（ベジェ・サブパス・作業パス）の型と保管は path.set に計上。選択範囲のストック（native/src/core/ops_arrange.cpp:228 store_area / :239 forget_area、名前つきの範囲）は土台に使えるがベジェではない。"
       }
@@ -29925,11 +29715,7 @@
           "native/src/render/ops_paint.cpp:165",
           "native/src/core/ops_strokes.cpp:419"
         ],
-        "tests": [
-          "native/tests/contract/anim_cases.json:2075",
-          "native/tests/contract/paint_cases.json:28",
-          "native/tests/contract/ops_cases.json:539"
-        ],
+        "tests": [],
         "gap": "点の列に沿ってペン線を引く（add_stroke、add_shape の polyline/curve）・消す（erase）はある。名前つきパス・ベジェを道具（brush/pencil/eraser）の今の設定でなぞる入口、硬さ（hardness）の指定がない。",
         "note": "パス（ベジェ・サブパス・作業パス）の型と保管は path.set に計上。選択範囲のストック（native/src/core/ops_arrange.cpp:228 store_area / :239 forget_area、名前つきの範囲）は土台に使えるがベジェではない。"
       },
@@ -29971,7 +29757,6 @@
           "native/src/app/main_window_select.cpp:343"
         ],
         "tests": [
-          "native/tests/contract/raster_cases.json:7249",
           "native/tests/gui/test_gui_select.cpp:379"
         ],
         "gap": "多角形やストックした範囲を選択範囲にして replace/add/subtract/intersect と feather_mm で合わせることはできる。ベジェのパス・作業パス・ベクトルマスクから選択範囲を作る入口がない。",
@@ -30170,10 +29955,7 @@
           "native/src/app/material_tabs.cpp:580"
         ],
         "tests": [
-          "native/tests/gui/test_gui_ledger_c.cpp:544",
-          "native/tests/contract/tone_cases.hpp:30",
-          "native/tests/contract/tone_cases.hpp:50",
-          "native/tests/contract/test_contract_tone_render.cpp"
+          "native/tests/gui/test_gui_ledger_c.cpp:544"
         ],
         "gap": "トーン素材を貼る stamp_material（トーンのレイヤーを作る）と画像の柄トーン（pattern=image・tile_png・scale_mm・角度）はある。柄は黒インクの二値（画像を LA にして閾値）で、色の模様塗りレイヤーではない。拡大率 1..1000%・プリセット名での指定がない。8 ビットのみ。",
         "note": "色の模様塗りレイヤー（Fill の一種）を足すなら M。"
@@ -30860,8 +30642,7 @@
           "native/src/render/selection.cpp:611"
         ],
         "tests": [
-          "native/tests/gui/test_gui_select.cpp:249",
-          "native/tests/contract/raster_cases.json:3909"
+          "native/tests/gui/test_gui_select.cpp:249"
         ],
         "gap": "色域選択はクリックした 1 点の色と許容値・つながり（contiguous）で選ぶ（ページの見えている色、8 bit）。色の系統（赤・黄…）・ハイライト/中間調/シャドウ・色域外の既定、なめらかな境（fuzziness）、複数の見本・引く見本、範囲を限る（localized）、反転の選択肢が無い",
         "note": ""
@@ -31996,8 +31777,7 @@
           "native/src/core/ops_arrange.cpp:228"
         ],
         "tests": [
-          "native/tests/gui/test_gui_select.cpp:373",
-          "native/tests/contract/raster_cases.json:7249"
+          "native/tests/gui/test_gui_select.cpp:373"
         ],
         "gap": "名前を付けてページに残す（store_area）はある。アルファチャンネルとして保存・既にあるものへの足す/引く/重なり・別の原稿への保存が無い",
         "note": "Genko にアルファチャンネルの仕組みが無い"
@@ -32319,9 +32099,7 @@
           "native/src/api/mcp_tools.cpp:56",
           "native/src/api/cli.cpp:247"
         ],
-        "tests": [
-          "native/tests/contract/mcp_cases.json"
-        ],
+        "tests": [],
         "gap": "開いている原稿の一覧（番号・保存済みか・revision）と描画色/背景色をまとめて返す問い合わせがない。CLI/MCP は 1 冊ずつの inspect・projects・status のみ",
         "note": "GUI の複数原稿（タブ）は app 内部にのみある"
       },
@@ -32370,7 +32148,6 @@
           "native/src/app/main_window_paint.cpp:69"
         ],
         "tests": [
-          "native/tests/contract/paint_cases.json:7",
           "native/tests/gui/test_gui_actions.cpp:306"
         ],
         "gap": "add_shape（line・polyline・curve・rect＋角丸 radius_mm・ellipse・polygon 3..24 辺）で塗り（パッチ）と輪郭のペン線を既存のレイヤーに描く。シェイプレイヤー（後から形を直せる生きた図形）・star・四隅別の角丸・グラデーション／模様の塗り・線の位置（inside/outside）・端・角・破線・addTo と合成（combine/subtract/intersect/exclude）がない。単位は mm、塗りは 8 ビットのパッチ。",
@@ -32415,10 +32192,7 @@
           "native/src/core/ops_vector.cpp:425",
           "native/src/render/raster_ops.cpp:2557"
         ],
-        "tests": [
-          "native/tests/contract/ops_cases.json:506",
-          "native/tests/contract/test_contract_vector.cpp:138"
-        ],
+        "tests": [],
         "gap": "輪郭のペン線は edit_stroke（幅・色）・vector_edit（点）・transform_area（移動・変形）で直せる。形の値（rect・radii・sides など）からの作り直し、塗りの変更、合成・fillRule の変更はできない（塗りはパッチ）。",
         "note": "シェイプレイヤー（生きた図形）の土台は shape.create に計上。path.set のパス型と共有。"
       },
@@ -33608,7 +33382,6 @@
           "native/src/app/main_window_brushes.cpp:58"
         ],
         "tests": [
-          "native/tests/contract/ops_cases.json:406",
           "native/tests/gui/test_gui_brushes.cpp:106"
         ],
         "gap": "set_brush（色・太さ・手ぶれ補正・入り抜き・筆圧曲線）とブラシパネルで今のブラシを変えられる。プリセット名での切り替え、reset、BrushSettings の各項目の深いマージは API にない",
@@ -34586,9 +34359,6 @@
           "native/src/app/main_window_lines.cpp:65"
         ],
         "tests": [
-          "native/tests/contract/lines_cases.json:6",
-          "native/tests/contract/test_contract_lines.cpp",
-          "native/tests/contract/test_contract_text.cpp",
           "native/tests/gui/test_gui_lines.cpp:324"
         ],
         "gap": "add_line で台詞（文字＋フキダシ）を作る: 枠（x_mm・y_mm・w_mm・h_mm）、縦書きが既定、font・size_mm など。点テキスト（基準線の点）、pt/px 単位、描画色を既定の色にすること、独立した文字レイヤー（台詞は物語に属しレイヤーではない）がない。文字は 8 ビット RGB で描く（上流は文書の深度 8/16/32 ビットで描く）。",
@@ -34681,9 +34451,6 @@
           "native/src/core/ops_lines.cpp:207"
         ],
         "tests": [
-          "native/tests/contract/lines_cases.json:161",
-          "native/tests/contract/lines_cases.json:171",
-          "native/tests/contract/lines_cases.json:208",
           "native/tests/gui/test_gui_lines.cpp:507"
         ],
         "gap": "edit_line（文字全体の置き換え・style・style_runs・縦横・フキダシ）と move_line（枠の位置・大きさ）はある。文字位置（start/end）での部分置き換え、文字位置の範囲で書式を当てる runs（Genko は語で当てる）、点⇄枠の切替、変換行列（transform）、antialias、名前の変更がない。回転・斜めは style の rotate_deg・skew_deg。",
@@ -34947,9 +34714,7 @@
           "native/src/storage/snapshot.cpp:31",
           "native/src/render/text/lettering.hpp:168"
         ],
-        "tests": [
-          "native/tests/contract/mcp_cases.json:3034"
-        ],
+        "tests": [],
         "gap": "inspect target=snapshot が台詞の文字・枠・縦横・フキダシ・style を返す。文字位置つきの書式の区切り（runs/paragraphs）、組んだ行と行ごとの位置、bounds、変換を返さない。",
         "note": "組んだ結果（remembered_layout の Layout）はあるので出力を足すだけ。"
       }
@@ -34987,7 +34752,6 @@
           "native/src/app/text_style.hpp:18"
         ],
         "tests": [
-          "native/tests/contract/lines_cases.json:161",
           "native/tests/gui/test_gui_lines.cpp:1095"
         ],
         "gap": "台詞の文字は edit_line の text で丸ごと置き換え、画面ではその場の編集で入れる（選んだ文字に記法を巻く text_style もある）。文字位置へ挿入・範囲を置き換える op と、字形パネルからの入力がない。",
@@ -35574,8 +35338,6 @@
           "native/src/render/text/balloons.cpp:613"
         ],
         "tests": [
-          "native/tests/contract/lines_cases.json:15",
-          "native/tests/contract/lines_cases.json:107",
           "native/tests/gui/test_gui_lines.cpp:1332"
         ],
         "gap": "style.features に liga を持てる（検査あり）が、描画は Pillow の BASIC 組版に合わせて機能を当てず、横組みのその台詞の文字は描かれず未移植（text_features）と報告される。文字の範囲・オンオフ切替の入口がない。",
@@ -35635,8 +35397,6 @@
           "native/src/render/text/balloons.cpp:613"
         ],
         "tests": [
-          "native/tests/contract/lines_cases.json:15",
-          "native/tests/contract/lines_cases.json:107",
           "native/tests/gui/test_gui_lines.cpp:1332"
         ],
         "gap": "style.features に salt を持てる（検査あり）が、描画は Pillow の BASIC 組版に合わせて機能を当てず、横組みのその台詞の文字は描かれず未移植（text_features）と報告される。文字の範囲・オンオフ切替の入口がない。",
@@ -35801,8 +35561,6 @@
           "native/src/app/main_window_lines.cpp:328"
         ],
         "tests": [
-          "native/tests/contract/lines_cases.json:171",
-          "native/tests/contract/test_contract_text.cpp",
           "native/tests/gui/test_gui_lines.cpp:516"
         ],
         "gap": "",
@@ -35861,8 +35619,6 @@
           "native/src/app/main_window_lines.cpp:328"
         ],
         "tests": [
-          "native/tests/contract/lines_cases.json:171",
-          "native/tests/contract/test_contract_text.cpp",
           "native/tests/gui/test_gui_lines.cpp:516"
         ],
         "gap": "",
@@ -36761,10 +36517,6 @@
           "native/src/render/text/lettering.cpp"
         ],
         "tests": [
-          "native/tests/contract/lines_cases.json:12",
-          "native/tests/contract/lines_cases.json:13",
-          "native/tests/contract/lines_cases.json:14",
-          "native/tests/contract/test_contract_text.cpp",
           "native/tests/gui/test_gui_lines.cpp:1095"
         ],
         "gap": "edit_line の style（font・size_mm・tracking・leading・align・rgb・weight/bold・italic・scale_x・skew_deg・outline など）で台詞全体、style_runs で語ごと（scale・bold・weight・rgb・tcy）に書式を当てる。文字位置の範囲、fontStyle、上下の伸縮、ベースライン移動、下線、取り消し線、カーニング方式、大文字、合字の切替、可変軸、言語、段落のインデントと前後の間隔、方向（RTL）、ハイフネーションがない。単位は mm（上流は pt）。8 ビットで描く。",
@@ -36873,11 +36625,7 @@
           "native/src/render/text/lettering.cpp:1490",
           "native/src/app/story_panel.hpp:78"
         ],
-        "tests": [
-          "native/tests/contract/lines_cases.json:13",
-          "native/tests/contract/lines_cases.json:15",
-          "native/tests/contract/test_contract_text.cpp"
-        ],
+        "tests": [],
         "gap": "style の arc（弧）・warp（四隅の変形）・text_path（線に沿わせる）で文字をゆがめられる。上流の 15 の形（arcLower・flag・wave・fish など）、bend と水平／垂直の歪み、向き（horizontal/vertical）がない。PSD 書き出しは常に warpNone（native/src/render/psd_text.cpp:870）。ゆがみは画像の変形（ベクトルではない）。",
         "note": ""
       },
@@ -37580,9 +37328,7 @@
         "cpp": [
           "native/src/core/ops_rulers.cpp:253"
         ],
-        "tests": [
-          "native/tests/contract/tone_cases.hpp:175"
-        ],
+        "tests": [],
         "gap": "edit_ruler で at を変えれば動くが、画面でガイドをドラッグして動かす操作・位置の数値欄がない",
         "note": "Genko のガイドは定規の一種（kind guide・axis h/v・at mm）でページごとに持つ"
       }
@@ -43830,8 +43576,7 @@
           "native/src/app/canvas_tools.cpp:123"
         ],
         "tests": [
-          "native/tests/gui/test_gui_paint.cpp:254",
-          "native/tests/contract/paint_cases.json:7"
+          "native/tests/gui/test_gui_paint.cpp:254"
         ],
         "gap": "「図形」の長方形で枠線（ペンの線）・塗り・角の丸み（radius_mm）を描ける。後から直せるシェイプレイヤーとして作れない、Alt で中心から描く操作がない",
         "note": "シェイプレイヤーは shape.create の行（rows-type）が前提"
@@ -43861,8 +43606,7 @@
           "native/src/app/canvas_tools.cpp:123"
         ],
         "tests": [
-          "native/tests/gui/test_gui_paint.cpp:254",
-          "native/tests/contract/paint_cases.json:7"
+          "native/tests/gui/test_gui_paint.cpp:254"
         ],
         "gap": "「図形」の楕円で枠線・塗りを描ける（Shift で正円）。シェイプレイヤーとして作れない、Alt で中心から描く操作がない",
         "note": "シェイプレイヤーは shape.create の行（rows-type）が前提"
@@ -43892,8 +43636,7 @@
           "native/src/app/canvas_tools.cpp:123"
         ],
         "tests": [
-          "native/tests/gui/test_gui_paint.cpp:254",
-          "native/tests/contract/paint_cases.json:7"
+          "native/tests/gui/test_gui_paint.cpp:254"
         ],
         "gap": "「図形」の多角形（辺の数 3）で三角形は描ける。三角形の道具、シェイプレイヤーとして作る操作がない",
         "note": "シェイプレイヤーは shape.create の行（rows-type）が前提"
@@ -43923,8 +43666,7 @@
           "native/src/app/canvas_tools.cpp:123"
         ],
         "tests": [
-          "native/tests/gui/test_gui_paint.cpp:254",
-          "native/tests/contract/paint_cases.json:7"
+          "native/tests/gui/test_gui_paint.cpp:254"
         ],
         "gap": "「図形」の多角形（辺の数・角度）で描ける。シェイプレイヤーとして作れない、Alt で中心から描く操作がない",
         "note": "シェイプレイヤーは shape.create の行（rows-type）が前提"
@@ -43954,8 +43696,7 @@
           "native/src/app/canvas_tools.cpp:123"
         ],
         "tests": [
-          "native/tests/gui/test_gui_paint.cpp:254",
-          "native/tests/contract/paint_cases.json:7"
+          "native/tests/gui/test_gui_paint.cpp:254"
         ],
         "gap": "「図形」の直線（Shift で 45°）をペンの線として描ける。太さ（weight）を持つシェイプレイヤーとしての線がない",
         "note": "シェイプレイヤーは shape.create の行（rows-type）が前提"
@@ -44262,8 +44003,7 @@
           "native/src/api/cli.cpp:316"
         ],
         "tests": [
-          "native/tests/unit/test_png.cpp",
-          "native/tests/contract/raster_cases.json"
+          "native/tests/unit/test_png.cpp"
         ],
         "gap": "読み込みは試験あり。書き込みは genko render --out *.bmp のみで、それを確かめる試験が見当たらない（未確認）。書き出しダイアログに BMP なし",
         "note": ""
@@ -44796,7 +44536,6 @@
           "native/src/core/ops_strokes.cpp:574"
         ],
         "tests": [
-          "native/tests/contract/test_contract_brushes.cpp",
           "native/tests/gui/test_gui_brushes.cpp",
           "native/tests/gui/test_gui_pen.cpp"
         ],
@@ -44902,7 +44641,6 @@
           "native/src/api/tokens.cpp"
         ],
         "tests": [
-          "native/tests/contract/test_contract_mcp.cpp",
           "native/tests/e2e/test_mcp_api_e2e.cpp",
           "native/tests/unit/test_http_server.cpp"
         ],

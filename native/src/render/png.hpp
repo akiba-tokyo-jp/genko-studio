@@ -28,7 +28,7 @@ inline bool beyond_side(std::int64_t w, std::int64_t h, const PngLimits& limits)
 }
 
 // What Pillow's Image.open refuses (DecompressionBombError above twice MAX_IMAGE_PIXELS): the drawing opens the
-// pictures of a book with this, as the Python baseline does.
+// pictures of a book with this.
 inline constexpr PngLimits kPillowOpenLimits{2 * kMaxImagePixels};
 
 // Throws core::Error("unidentified_image") for bytes that are not a PNG or whose chunks before the image data are
