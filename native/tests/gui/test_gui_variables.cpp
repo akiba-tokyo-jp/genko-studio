@@ -334,6 +334,51 @@ private slots:
         QVERIFY(store.has(blue_ref, ".png"));
     }
 
+    // (PC6, review A P3-6) 変数データセット… of a CSV that names a picture outside its folder: asked first (the folder and the
+    // paths shown), いいえ — nothing taken in, said —; はい — read as before. A picture inside named by its absolute path is
+    // read without asking.
+    void csvPicturesOutsideTheFolderAsked() {
+        Book b;
+        QVERIFY(b.apply(Json{{"op", "set_variables"},
+                             {"defs", Json::array({Json{{"name", "img"}, {"type", "pixels"}, {"page", 1}, {"layer", "photo"}}})}}));
+        QVERIFY(QDir(b.tmp.path()).mkpath(QStringLiteral("csv")));
+        write_bytes(b.tmp.path() + QStringLiteral("/outside.png"), png_of(4, 4, {0, 0, 255, 255}));
+        write_bytes(b.tmp.path() + QStringLiteral("/csv/in.png"), png_of(4, 4, {255, 0, 0, 255}));
+        const QString csv = b.tmp.path() + QStringLiteral("/csv/sets.csv"), inside = b.tmp.path() + QStringLiteral("/csv/inside.csv");
+        write_bytes(csv, "DataSet,img\n外,../outside.png\n中,in.png\n");
+        write_bytes(inside, ("DataSet,img\n中,\"" + (b.tmp.path() + QStringLiteral("/csv/in.png")).toStdString() + "\"\n").c_str());
+        const auto import = [&b](const QString& file) {
+            b.answers.responder->exec = [file](QDialog* dialog) {
+                auto* d = qobject_cast<app::ImportDataSetsDialog*>(dialog);
+                if (d == nullptr) return int(QDialog::Rejected);
+                d->file->setText(file);
+                return int(QDialog::Accepted);
+            };
+            b.act("act_import_data_sets")->trigger();
+        };
+        QStringList asked;
+        bool answer = false;
+        b.answers.responder->question = [&](const QString&, const QString& text) {
+            asked << text;
+            return answer;
+        };
+        import(inside);  // (absolute, inside: read, nothing asked)
+        QVERIFY(asked.isEmpty());
+        QCOMPARE(core::variables_of(b.doc()).data_sets.size(), std::size_t(1));
+        import(csv);  // (いいえ: nothing taken in)
+        QCOMPARE(asked.size(), qsizetype(1));
+        QVERIFY2(asked[0].contains(QStringLiteral("フォルダーの外の画像")) && asked[0].contains(QStringLiteral("../outside.png")), qPrintable(asked[0]));
+        QCOMPARE(core::variables_of(b.doc()).data_sets.size(), std::size_t(1));
+        QCOMPARE(core::variables_of(b.doc()).data_sets[0].name, std::string("中"));
+        answer = true;  // (はい: read as before)
+        import(csv);
+        QCOMPARE(asked.size(), qsizetype(2));
+        const core::Variables v = core::variables_of(b.doc());
+        QCOMPARE(v.data_sets.size(), std::size_t(2));
+        QCOMPARE(v.data_sets[0].name, std::string("外"));
+        QCOMPARE(std::get<core::PictureValue>(v.data_sets[0].values[0].value).name, std::string("outside.png"));
+    }
+
     // The review's P1-1: a book whose variables cannot be read opens read only — the commands that change the book greyed (and
     // refused, said, if reached), データセットからファイル… saying it cannot use them: no command throws out of the window.
     void unreadableVariables() {

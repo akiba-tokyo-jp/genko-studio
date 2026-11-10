@@ -29,9 +29,10 @@ namespace genko::formats {
 // of is left out (said). The result: set_data_sets's data_sets, ready to be applied. core::Error("value") for a file that
 // is not one (not UTF-8, larger than 64 MiB, more than kDataSetsMax lines, two data sets of one name, a picture that cannot
 // be read).
-// PC6 (review A P3-6): a picture's path is read only inside the text file's folder (its folders too: no absolute path, none
-// that leads out of it — "..", a link —; core::Error("value") "row N: the picture P is not in the text file's folder"), as a
-// .pcraft's data sets read theirs. PC6 (review C P2-5): with `store` (the window's, beside a saved book) each picture is put
+// PC6 (review A P3-6): a picture's path — relative to the text file's folder, or absolute — is read when it lies inside that
+// folder (its folders too), compared where its links lead, as a .pcraft's data sets read theirs; one outside it (an absolute
+// path elsewhere, "..", a link out) only with `outside` (the window asks the person first: data_sets_outside), else
+// core::Error("value") "row N: the picture P is not in the text file's folder". PC6 (review C P2-5): with `store` (the window's, beside a saved book) each picture is put
 // in the book's asset store as it is read and given by its asset ref alone ({asset, name}: the op carries no picture's
 // bytes); without it the bytes are given ({data, name}), at most kDataSetsCarriedMost of them together (core::Error("value")
 // past it: the book saved first takes more).
@@ -43,6 +44,12 @@ struct CsvOptions {
     // (a picture's bytes and its suffix — ".png" … — kept, its asset ref given back)
     std::function<std::string(const std::string& bytes, const std::string& suffix)> store;
     std::uint64_t carried_most = kDataSetsCarriedMost;  // (without `store`; less in tests)
+    bool outside = false;  // (pictures outside the text file's folder read: the person said so)
+};
+// A picture a text file names outside its folder: its row (from 1, the names' line 1) and the path as written.
+struct CsvOutside {
+    std::size_t row = 0;
+    std::string path;
 };
 struct CsvRead {
     core::Json data_sets = core::Json::array();
@@ -50,6 +57,10 @@ struct CsvRead {
     std::size_t files_read = 0;      // (the pictures' files read: each once)
 };
 CsvRead read_data_sets_csv(std::string_view text, const core::Variables& variables, const CsvOptions& options);
+// The pictures the text file names outside its folder (none read; read_data_sets_csv's errors but those of the pictures), and
+// the refusal read_data_sets_csv gives the first of them without `outside`.
+std::vector<CsvOutside> data_sets_outside(std::string_view text, const core::Variables& variables, const CsvOptions& options);
+std::string outside_refusal(const CsvOutside& outside);
 // The fields of a text file's lines (the parser read_data_sets_csv uses), each line a list of its fields.
 std::vector<std::vector<std::string>> csv_rows(std::string_view text, char delimiter);
 

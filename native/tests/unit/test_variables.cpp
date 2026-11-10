@@ -377,8 +377,9 @@ private slots:
         }
     }
 
-    // (PC6, review A P3-6) A picture's path is read only inside the text file's folder (its folders too): an absolute path, one
-    // that leads out of it and a link that does are refused, said in Japanese; one that comes back into it is read.
+    // (PC6, review A P3-6) A picture's path inside the text file's folder (its folders too) is read — relative, coming back
+    // into it, or absolute —; one outside it (an absolute path elsewhere, "..", a link out) is refused, said in Japanese,
+    // unless the person said so (`outside`: the window asks, the paths listed by data_sets_outside before anything is read).
     void csvPicturesStayInTheFolder() {
         QTemporaryDir dir;
         QVERIFY(QDir(dir.path()).mkpath(QStringLiteral("csv/sub")));
@@ -403,14 +404,31 @@ private slots:
             }
             QFAIL(path.c_str());
         };
-        refused(dir.path().toStdString() + "/outside.png");
-        refused(dir.path().toStdString() + "/csv/sub/in.png");  // (absolute, even inside)
+        const std::string outside_abs = dir.path().toStdString() + "/outside.png";
+        refused(outside_abs);
         refused("../outside.png");
         refused("sub/../../outside.png");
         refused("link.png");
-        const formats::CsvRead read = formats::read_data_sets_csv("DataSet,img\nA,sub/in.png\nB,sub/../sub/in.png\n", v, options);
+        // (inside: relative, coming back in, or absolute — compared where it leads — read as before)
+        const std::string inside_abs = dir.path().toStdString() + "/csv/sub/in.png";
+        const formats::CsvRead read = formats::read_data_sets_csv("DataSet,img\nA,sub/in.png\nB,sub/../sub/in.png\nC," + inside_abs + "\n", v, options);
         QCOMPARE(read.files_read, std::size_t(1));
         QCOMPARE(read.data_sets[0]["values"][0]["value"]["name"], Json("in.png"));
+        QCOMPARE(read.data_sets[2]["values"][0]["value"]["asset"], Json(core::bytes_ref(blue)));
+        // (those outside listed before anything is read — their rows and paths as written —, and read when the person says so)
+        const std::string text = "DataSet,img\nA,sub/in.png\nB,../outside.png\nC," + outside_abs + "\nD,link.png\n";
+        const std::vector<formats::CsvOutside> seen = formats::data_sets_outside(text, v, options);
+        QCOMPARE(seen.size(), std::size_t(3));
+        QCOMPARE(seen[0].row, std::size_t(3));
+        QCOMPARE(seen[0].path, std::string("../outside.png"));
+        QCOMPARE(seen[1].path, outside_abs);
+        QCOMPARE(formats::outside_refusal(seen[0]), std::string("row 3: the picture ../outside.png is not in the text file's folder"));
+        QVERIFY(formats::data_sets_outside("DataSet,img\nA,sub/in.png\nB," + inside_abs + "\n", v, options).empty());
+        options.outside = true;
+        const formats::CsvRead taken = formats::read_data_sets_csv(text, v, options);
+        QCOMPARE(taken.data_sets.size(), std::size_t(4));
+        QCOMPARE(taken.data_sets[1]["values"][0]["value"]["name"], Json("outside.png"));
+        QCOMPARE(taken.files_read, std::size_t(2));  // (in.png, and outside.png once — three ways of naming it)
     }
 
     // (PC6, review C P2-5) With a store (a saved book's asset store) each picture is put there as it is read and given by its
