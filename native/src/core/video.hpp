@@ -24,7 +24,11 @@
 //                "fps": >0, "size_px": [w, h], "depth": 8 | 16, "alpha": "straight" | "premultiplied" | "ignore",
 //                "par": >0, "source"?: {"path": str, "bytes": int, "sha256": str}},
 //    "frames": [[footage frame index | null, altered cel id | null], …],   (one a frame of the timeline)
-//    "show_altered": bool, "placement_mm": [x, y, w, h], "fit": "contain" | "cover" | "stretch"}
+//    "show_altered": bool, "placement_mm": [x, y, w, h], "fit": "contain" | "cover" | "stretch",
+//    "transform"?: [a, b, c, d, e, f]}   (PC6: the footage turned, mirrored or skewed with its page — rotate_pages, flips,
+//                                        a crop at an angle —: x' = a·x + c·y + e, y' = b·x + d·y + f, the page's mm to
+//                                        the page's mm, after it is laid in placement_mm; none: as laid. Never the
+//                                        identity: core::page_geometry::map_page writes it, and takes it away again)
 // The user's decision 4 (PC5): a video file (MP4・MOV・WebM) is never read — the footage is a numbered sequence of pictures
 // ("sequence"), a moving picture (GIF・APNG・WebP: "animation") or one picture ("image").
 //
@@ -97,6 +101,10 @@ VideoShown video_shown(const Page& page, const Json& folder_id, const Json& vide
 // Where the whole footage frame lands on the page (mm): fitted (contain, cover, stretch) in its placement_mm, its pixels
 // as wide as their aspect ratio (par) makes them. None for a row without footage.
 std::optional<Rect> footage_placement(const Json& video);
+// The row's "transform" (PC6: above) as a smart object's matrix; none for a row without one.
+std::optional<std::array<double, 6>> footage_transform(const Json& video);
+// The places a transform's values may take (its linear part, its move in mm).
+inline constexpr double kFootageTransformMax = 1e4;
 // The bytes the footage takes decoded (each picture once): w × h × 4 × (8 bits: 1, 16 bits: 2).
 std::uint64_t footage_bytes(const Json& footage);
 // The bytes all the book's footage takes decoded (each picture once, across the rows): kFootageMaxBytes at most.

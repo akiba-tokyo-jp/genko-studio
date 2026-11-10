@@ -377,15 +377,90 @@ private slots:
         const core::Document larger = run(doc, op("resize_pages", {{"width_mm", 192}, {"height_mm", 144}}));
         const Json big = core::video_row(larger.page(0), Json("v"))->at("placement_mm");
         for (int k = 0; k < 4; ++k) QVERIFY2(std::fabs(big[k].get<double>() - 2 * was[k].get<double>()) < 1e-3, big.dump().c_str());
-        // (turned or mirrored: refused, the book as it was)
-        for (const char* turn : {"90cw", "180", "flip_h"}) {
-            const std::string refused = refusal(doc, op("rotate_pages", {{"turn", turn}}));
-            QVERIFY2(refused.find("a video layer turned or mirrored with the page") != std::string::npos, refused.c_str());
-            QVERIFY2(wording::error(QString::fromStdString(refused)).contains(QStringLiteral("ビデオレイヤーのあるページは回転・反転できません")),
-                     qPrintable(QString::fromStdString(refused) + " → " + wording::error(QString::fromStdString(refused))));
+        // (turned, mirrored or at an angle — PhotoCraft's, PC6 —: the footage turns with the page, the row's transform;
+        // a box off the page's middle, so a footage left where it was would show elsewhere)
+        core::Document off = run(video_book(), op("set_video_layer", {{"folder", "v"}, {"placement_mm", Json::array({10, 10, 20, 15})}}));
+        off = run(off, op("video_alter", {{"folder", "v"}, {"at", 2}}));
+        const Json row_was = *core::video_row(off.page(0), Json("v"));
+        const auto through = [](const Json& t, double x, double y) {
+            return std::array<double, 2>{t[0].get<double>() * x + t[2].get<double>() * y + t[4].get<double>(),
+                                         t[1].get<double>() * x + t[3].get<double>() * y + t[5].get<double>()};
+        };
+        for (const Json& turn : {Json{{"turn", "90cw"}}, Json{{"turn", "90ccw"}}, Json{{"turn", "180"}}, Json{{"turn", "flip_h"}},
+                                 Json{{"turn", "flip_v"}}, Json{{"angle", 30}}}) {
+            const core::Document turned = run(off, op("rotate_pages", turn));
+            const Json& row = *core::video_row(turned.page(0), Json("v"));
+            QCOMPARE(row.at("placement_mm"), row_was.at("placement_mm"));
+            QVERIFY2(row.contains("transform"), turn.dump().c_str());
+            const auto c = through(row.at("transform"), 20, 17.5);  // (the box's middle, where the map takes it)
+            QVERIFY2(near(at_mm(turned, 0, 3, c[0], c[1]), kColours[2]), turn.dump().c_str());  // (the footage)
+            QVERIFY2(near(at_mm(turned, 0, 2, c[0], c[1]), kColours[1]), turn.dump().c_str());  // (the altered cel's pixels)
+            const core::Document shown = run(turned, op("set_video_layer", {{"folder", "v"}, {"show_altered", false}}));
+            QVERIFY2(near(at_mm(shown, 0, 2, c[0], c[1]), kColours[1]), turn.dump().c_str());
+            QVERIFY2(near(at_mm(turned, 0, 3, 20, 17.5), kWhite) || (std::fabs(c[0] - 20) < 10 && std::fabs(c[1] - 17.5) < 7.5), turn.dump().c_str());
         }
-        // (a page without a video row turns as before)
-        QCOMPARE(refusal(book(), op("rotate_pages", {{"turn", "90cw"}})), std::string());
+        // (turned back: the transform goes, the row as it was)
+        const core::Document there = run(off, op("rotate_pages", {{"turn", "180"}}));
+        QCOMPARE(*core::video_row(run(there, op("rotate_pages", {{"turn", "180"}})).page(0), Json("v")), row_was);
+        QCOMPARE(*core::video_row(run(run(off, op("rotate_pages", {{"turn", "flip_h"}})), op("rotate_pages", {{"turn", "flip_h"}})).page(0), Json("v")), row_was);
+        // (turned, then cropped: the crop after the turn, in the transform)
+        const core::Document quarter = run(off, op("rotate_pages", {{"turn", "90cw"}}));
+        const core::ApplyResult cut = core::CommandBus(render::ops_registry()).apply(quarter, Json::array({op("crop_page", {{"rect", Json::array({5, 5, 60, 60})}})}),
+                                                                                   core::Actor("human:test"));
+        {
+            const Json& row = *core::video_row(cut.doc.page(0), Json("v"));
+            QCOMPARE(row.at("placement_mm"), row_was.at("placement_mm"));
+            const auto c = through(row.at("transform"), 20, 17.5);
+            QVERIFY(near(at_mm(cut.doc, 0, 3, c[0], c[1]), kColours[2]));
+        }
+        // (saved and read back: the transform kept, drawn the same; written out — a GIF, a .pcraft — turned too)
+        const fs::path dir = fspath(QStringLiteral("turned.genko"));
+        genko::test::write_project(quarter, dir);
+        QVERIFY(storage::read_file(dir / "project.json").find("\"transform\"") != std::string::npos);
+        const auto back = storage::load_document(dir);
+        QVERIFY2(back.document.read_only_reason.empty(), back.document.read_only_reason.c_str());
+        QCOMPARE(*core::video_row(back.document.page(0), Json("v")), *core::video_row(quarter.page(0), Json("v")));
+        const auto c = through(core::video_row(quarter.page(0), Json("v"))->at("transform"), 20, 17.5);
+        QVERIFY(near(at_mm(back.document, 0, 3, c[0], c[1]), kColours[2]));
+        const fs::path gif = fspath(QStringLiteral("turned-out/video.gif"));
+        fs::create_directories(gif.parent_path());
+        (void)render::anim::export_animation(back.document.page(0), gif, &back.document, 40, std::string("frames"));
+        {
+            const render::Image image = render::read_png(storage::read_file(gif / "frame_0003.png")).convert("RGB");
+            QVERIFY(near(image.getpixel(static_cast<int>(c[0] / 25.4 * 40), static_cast<int>(c[1] / 25.4 * 40)), kColours[2]));
+        }
+        {
+            std::vector<std::string> notes;
+            const formats::Opened opened = formats::open_file(formats::pcraft_bytes(back.document, 0, {}, &notes), "turned.pcraft");
+            const render::Image drawn = render::render_page(opened.doc.page(0), 50, render::proof_options(), &opened.doc).image.convert("RGB");
+            QVERIFY(near(drawn.getpixel(static_cast<int>(c[0] / 25.4 * 50), static_cast<int>(c[1] / 25.4 * 50)), kColours[0]));
+        }
+        // (a book whose rows hold no transform — cropped, sized — writes none: the bytes of before)
+        genko::test::write_project(cropped.doc, fspath(QStringLiteral("cropped.genko")));
+        QVERIFY(storage::read_file(fspath(QStringLiteral("cropped.genko")) / "project.json").find("\"transform\"") == std::string::npos);
+    }
+
+    // PC6: the camera's keys (the page's mm) move with the page — cropped, sized, turned — as everything on it does.
+    void cameraMovesWithThePage() {
+        core::Document doc = run(book(), op("set_animation", {{"fps", 8}, {"frames", 4}}));
+        doc = run(doc, op("set_camera_key", {{"frame", 1}, {"rect", Json::array({10, 10, 40, 30})}}));
+        const auto rect_of = [](const core::Document& d) { return core::anim::spec(d.page(0))->at("camera")[0].at("rect"); };
+        const core::ApplyResult cut = core::CommandBus(render::ops_registry()).apply(doc, Json::array({op("crop_page", {{"rect", Json::array({5, 4, 60, 50})}})}),
+                                                                                   core::Actor("human:test"));
+        const Json& offset = cut.results[0]["pages"][0]["offset_mm"];
+        const Json moved = rect_of(cut.doc);
+        QVERIFY2(std::fabs(moved[0].get<double>() - (10 + offset[0].get<double>())) < 1e-3 && std::fabs(moved[1].get<double>() - (10 + offset[1].get<double>())) < 1e-3,
+                 moved.dump().c_str());
+        QCOMPARE(moved[2].get<double>(), 40.0);
+        QCOMPARE(moved[3].get<double>(), 30.0);
+        const Json big = rect_of(run(doc, op("resize_pages", {{"width_mm", 192}, {"height_mm", 144}})));
+        QCOMPARE(big, Json::array({20.0, 20.0, 80.0, 60.0}));
+        const Json turned = rect_of(run(doc, op("rotate_pages", {{"turn", "90cw"}})));  // (96 × 72: the page 72 wide after)
+        QCOMPARE(turned[2].get<double>(), 30.0);
+        QCOMPARE(turned[3].get<double>(), 40.0);
+        QVERIFY2(std::fabs(turned[0].get<double>() - (72 - 10 - 30)) < 1e-3 && std::fabs(turned[1].get<double>() - 10) < 1e-3, turned.dump().c_str());
+        // (the camera at that frame where the map takes it)
+        QVERIFY(core::anim::camera_at(cut.doc.page(0), 1).has_value());
     }
 
     void footageInterpretedReplacedRasterized() {
