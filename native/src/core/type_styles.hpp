@@ -162,11 +162,15 @@ const Json* same_style(const Json* styles, Kind kind, const std::string& name, c
 // unique_name gives it) and the same attributes, else a copy of it under a new id and a name the book's styles do not have;
 // the text then names that id, and its look under this book's styles — Basic Paragraph too — is kept as it was under the
 // other's (keep_look). A style the other book does not have is left as named (the book was not whole: validate_type says
-// so); Basic Paragraph is the book's own. core::OpError when the book would keep more than 512 styles of a kind.
+// so); Basic Paragraph is the book's own. core::OpError when the book would keep more than 512 styles of a kind — or, with
+// `drop_past_full` (a file read: PC6 E, render/pcraft_read's .pcraft inside), the texts' references to the styles past them
+// go, their look kept, and dropped() says so.
 class StyleCarry {
 public:
     // `from`: the other book's type_styles (nullptr: none), which must outlive the carry.
-    StyleCarry(Document& doc, const Json* from);
+    StyleCarry(Document& doc, const Json* from, bool drop_past_full = false);
+    // (drop_past_full) Did a style not come for the 512 of its kind?
+    bool dropped() const { return dropped_; }
     // A record of the other book: the styles it names brought, its look kept. One the OpenType typesetting does not set
     // (type_text::sets_opentype) is left as it is: it reads no style and names none. So is a line across of OpenType
     // features alone (no native_type): it names no style, and it is set under this book's Basic Paragraph (a native_type laid
@@ -181,7 +185,8 @@ private:
     std::string mapped(Kind kind, const std::string& id);
     Document& doc_;
     const Json* from_;
-    std::map<std::pair<int, std::string>, std::string> ids_;  // (kind, their id) → the id here
+    std::map<std::pair<int, std::string>, std::string> ids_;  // (kind, their id) → the id here ("": dropped)
+    bool drop_ = false, dropped_ = false;
 };
 
 }  // namespace genko::core::type_styles

@@ -23,6 +23,10 @@ use photocraft_doc::{
     LabelColor, Layer, LayerComp, LayerContent, LayerMask, LineCap, LineJoin, LiveShape, NamedPath, Note, Path, PathOp, Pattern, ShapeLayer, ShapeStroke,
     SmartFilter, SmartObject, SmartSource, StrokeAlign, Subpath, TextLayer, VectorMask,
 };
+use photocraft_doc::{
+    Bevel, BevelContour, BevelStyle, BevelTechnique, BevelTexture, BlendRange, Contour, FxPaint, GlobalLight, Glow, GlowSource, GlowTechnique,
+    Gradient, Satin, Shadow, StrokeFx, StrokePosition,
+};
 use photocraft_format::{SaveOptions, save_to_bytes};
 use photocraft_geom::{Affine, Point, Rect, Size};
 use photocraft_raster::{Rgba8Image, Surface};
@@ -337,6 +341,160 @@ fn curve(points: &[(f32, f32)]) -> Vec<CurvePoint> {
     points.iter().map(|&(i, o)| CurvePoint { input: i, output: o }).collect()
 }
 
+fn square(name: &str, pf: PixelFormat, x0: i32, y0: i32) -> Layer {
+    let mut l = Layer::raster(name, pf);
+    paint(l.surface_mut().unwrap(), x0, y0, x0 + 30, y0 + 24, |_, _, c| [0.5, 0.6, 0.7, 1.0][c]);
+    l
+}
+
+fn shadow(blend: BlendMode, color: Color, angle: f32, global: bool, distance: f32, spread: f32, size: f32, contour: Contour) -> Shadow {
+    Shadow { common: FxCommon::new(blend, 0.6), color, angle, use_global_light: global, distance, spread, size, contour, anti_alias: true, noise: 0.1, knocks_out: false }
+}
+
+fn gradient(style: GradientStyle) -> Gradient {
+    Gradient {
+        stops: vec![(0.0, rgb(1.0, 0.0, 0.0)), (0.4, rgb(0.0, 1.0, 0.0)), (1.0, rgb(0.0, 0.0, 1.0))],
+        opacity_stops: vec![(0.0, 1.0), (1.0, 0.25)],
+        style,
+        angle: 30.0,
+        scale: 0.8,
+        reverse: true,
+        align: false,
+        offset: (0.1, -0.2),
+    }
+}
+
+/// PC6 (layer-styles@1): RGB 8 bits at 150 ppi, each of the ten effects (two strokes of a kind, their paints a colour, a
+/// gradient and a pattern; custom contours; a bevel's contour and texture), effects switched off, a fill opacity, Blend If,
+/// a global light of its own — and what a style of Genko's cannot hold: a glow painted with a pattern, an effect's blend
+/// mode Genko has not, a group's effects.
+fn effects() -> Document {
+    let mut d = Document::with_background("Effects", Size::new(160, 120), ColorMode::Rgb, SampleType::U8, Color::WHITE);
+    d.resolution_dpi = 150.0;
+    d.global_light = GlobalLight { angle: 90.0, altitude: 40.0 };
+    let pf = d.pixel_format();
+    let mut pat = Surface::new(pf);
+    paint(&mut pat, 0, 0, 6, 6, |x, y, c| if c == 3 { 1.0 } else if (x + y) % 2 == 0 { 0.9 } else { 0.1 * c as f32 });
+    d.patterns.push(Pattern::new("Dots", pat, 6, 6));
+    let (pattern_name, pattern_id) = (d.patterns[0].name.clone(), d.patterns[0].id.clone());
+    let bump = Contour::Custom { name: "Bump".into(), points: curve(&[(0.0, 0.0), (0.5, 1.0), (1.0, 0.0)]) };
+
+    let mut shadows = square("Shadows", pf, 10, 10);
+    shadows.effects.items.push(Effect::DropShadow(Shadow { knocks_out: true, ..shadow(BlendMode::Multiply, rgb(0.1, 0.0, 0.2), 120.0, true, 6.0, 0.2, 9.0, bump.clone()) }));
+    shadows.effects.items.push(Effect::InnerShadow(shadow(BlendMode::Darken, rgb(0.0, 0.0, 0.0), 45.0, false, 3.0, 0.3, 4.0, Contour::Linear)));
+    shadows.effects.items.push(Effect::Stroke(StrokeFx { common: FxCommon::new(BlendMode::Normal, 1.0), size: 3.0, position: StrokePosition::Outside, paint: FxPaint::Color(rgb(1.0, 0.5, 0.0)) }));
+    shadows.effects.items.push(Effect::Stroke(StrokeFx { common: FxCommon::new(BlendMode::Screen, 0.7), size: 2.0, position: StrokePosition::Center, paint: FxPaint::Gradient(gradient(GradientStyle::Angle)) }));
+
+    let mut glows = square("Glows", pf, 60, 10);
+    glows.effects.items.push(Effect::OuterGlow(Glow {
+        common: FxCommon::new(BlendMode::Screen, 0.8),
+        paint: FxPaint::Color(rgb(1.0, 1.0, 0.5)),
+        technique: GlowTechnique::Precise,
+        spread: 0.1,
+        size: 8.0,
+        contour: Contour::Linear,
+        anti_alias: false,
+        range: 0.6,
+        jitter: 0.2,
+        noise: 0.0,
+        source: GlowSource::Edge,
+    }));
+    glows.effects.items.push(Effect::InnerGlow(Glow {
+        common: FxCommon::new(BlendMode::Overlay, 0.5),
+        paint: FxPaint::Gradient(gradient(GradientStyle::Radial)),
+        technique: GlowTechnique::Softer,
+        spread: 0.25,
+        size: 5.0,
+        contour: bump.clone(),
+        anti_alias: true,
+        range: 0.4,
+        jitter: 0.0,
+        noise: 0.3,
+        source: GlowSource::Center,
+    }));
+    glows.effects.items.push(Effect::Satin(Satin {
+        common: FxCommon::new(BlendMode::Multiply, 0.4),
+        color: rgb(0.2, 0.0, 0.0),
+        angle: 19.0,
+        distance: 7.0,
+        size: 10.0,
+        contour: Contour::Linear,
+        anti_alias: true,
+        invert: true,
+    }));
+
+    let mut overlays = square("Overlays", pf, 110, 10);
+    overlays.effects.items.push(Effect::ColorOverlay { common: FxCommon::new(BlendMode::Multiply, 0.5), color: rgb(0.0, 0.5, 1.0) });
+    overlays.effects.items.push(Effect::GradientOverlay { common: FxCommon::new(BlendMode::Normal, 0.9), gradient: gradient(GradientStyle::Reflected), dither: true });
+    overlays.effects.items.push(Effect::PatternOverlay {
+        common: FxCommon::new(BlendMode::Normal, 1.0),
+        name: pattern_name.clone(),
+        id: pattern_id.clone(),
+        scale: 2.0,
+        angle: 15.0,
+        link: false,
+        phase: (3.0, 4.0),
+    });
+
+    let mut bevelled = square("Bevelled", pf, 10, 60);
+    bevelled.effects.items.push(Effect::BevelEmboss(Bevel {
+        enabled: true,
+        style: BevelStyle::PillowEmboss,
+        technique: BevelTechnique::ChiselHard,
+        depth: 2.5,
+        up: false,
+        size: 6.0,
+        soften: 2.0,
+        angle: 60.0,
+        altitude: 25.0,
+        use_global_light: true,
+        gloss_contour: bump.clone(),
+        highlight: FxCommon::new(BlendMode::Screen, 0.7),
+        highlight_color: rgb(1.0, 1.0, 0.9),
+        shadow: FxCommon::new(BlendMode::Multiply, 0.6),
+        shadow_color: rgb(0.1, 0.1, 0.3),
+        contour: Some(BevelContour { contour: bump.clone(), range: 0.7, anti_alias: true }),
+        texture: Some(BevelTexture { name: pattern_name.clone(), id: pattern_id.clone(), scale: 1.5, depth: -2.0, invert: true, link: true, phase: (1.0, 2.0) }),
+    }));
+    bevelled.effects.items.push(Effect::Stroke(StrokeFx {
+        common: FxCommon::new(BlendMode::Normal, 1.0),
+        size: 4.0,
+        position: StrokePosition::Inside,
+        paint: FxPaint::Pattern { name: pattern_name.clone(), id: pattern_id.clone(), scale: 1.0 },
+    }));
+
+    let mut hidden = square("Hidden", pf, 60, 60);
+    hidden.effects.enabled = false;
+    hidden.effects.items.push(Effect::default_drop_shadow());
+    hidden.fill_opacity = 0.4;
+
+    let mut blending = square("Blend If", pf, 110, 60);
+    blending.blend_if.set(0, [BlendRange { black: [20, 40], white: [255, 255] }, BlendRange::FULL]);
+    blending.blend_if.set(1, [BlendRange::FULL, BlendRange { black: [0, 0], white: [200, 230] }]);
+
+    let mut odd = square("Odd", pf, 60, 90);
+    odd.effects.items.push(Effect::OuterGlow(Glow {
+        common: FxCommon::new(BlendMode::Normal, 1.0),
+        paint: FxPaint::Pattern { name: pattern_name.clone(), id: pattern_id.clone(), scale: 1.0 },
+        technique: GlowTechnique::Softer,
+        spread: 0.0,
+        size: 4.0,
+        contour: Contour::Linear,
+        anti_alias: false,
+        range: 0.5,
+        jitter: 0.0,
+        noise: 0.0,
+        source: GlowSource::Edge,
+    }));
+    odd.effects.items.push(Effect::ColorOverlay { common: FxCommon::new(BlendMode::Dissolve, 0.5), color: rgb(0.0, 1.0, 0.0) });
+
+    let mut group = Layer::group("FX Group", vec![square("In Group", pf, 110, 90)]);
+    group.effects.items.push(Effect::default_drop_shadow());
+
+    d.layers.extend([shadows, glows, overlays, bevelled, hidden, blending, odd, group]);
+    d
+}
+
 /// RGB 8 bits, a gradient under one adjustment layer of each kind (all hidden but the first, so each can be shown alone).
 fn adjustments() -> Document {
     let mut d = Document::new("Adjustments", Size::new(64, 32), ColorMode::Rgb, SampleType::U8);
@@ -443,6 +601,7 @@ fn make(dir: &FsPath) {
         ("cmyk8.pcraft", save(&plain("CMYK 8", ColorMode::Cmyk, SampleType::U8), false)),
         ("lab8.pcraft", save(&plain("Lab 8", ColorMode::Lab, SampleType::U8), false)),
         ("indexed.pcraft", save(&plain("Indexed", ColorMode::Indexed, SampleType::U8), false)),
+        ("effects.pcraft", save(&effects(), false)),
     ];
     for (name, bytes) in files {
         std::fs::write(dir.join(name), &bytes).expect("write");

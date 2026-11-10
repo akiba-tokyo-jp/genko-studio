@@ -243,6 +243,39 @@ private slots:
         QVERIFY(!studio.area());
     }
 
+    // PC6 (upstream's canvas.rs PolygonLasso): a polyline of three points or more closes when its first point is pressed
+    // again — within 8 screen pixels of it, at any zoom —; with two, a press there is a point of it; farther, a point too.
+    void aPolylineClosesAtItsFirstPoint() {
+        Studio studio;
+        auto* canvas = studio.canvas();
+        studio.trigger("act_sel_polyline");
+        const double mm_a_px = 1.0 / canvas->scale();
+        inject::click_mm(canvas, QPointF(10, 10));
+        inject::click_mm(canvas, QPointF(40, 10));
+        inject::click_mm(canvas, QPointF(10 + 3 * mm_a_px, 10));  // (two points: a third, near the first)
+        QVERIFY(!studio.area());
+        QTest::keyClick(canvas, Qt::Key_Escape);
+        for (const QPointF& p : {QPointF(10, 10), QPointF(40, 10), QPointF(10, 40)}) inject::click_mm(canvas, p);
+        inject::click_mm(canvas, QPointF(10 + 20 * mm_a_px, 10 + 20 * mm_a_px));  // (20 pixels off along each axis: a fourth point)
+        QVERIFY(!studio.area());
+        inject::click_mm(canvas, QPointF(10 + 4 * mm_a_px, 10 - 4 * mm_a_px));  // (about 5.7 pixels from the first: closed)
+        QVERIFY(studio.area());
+        QCOMPARE((*studio.area())["poly"].size(), std::size_t(4));
+        const Json first = (*studio.area())["poly"][0];  // (a copy: area() gives the selection as it is now)
+        QVERIFY2(std::abs(first[0].get<double>() - 10) < 2 * mm_a_px && std::abs(first[1].get<double>() - 10) < 2 * mm_a_px, first.dump().c_str());
+        // (zoomed in: 8 pixels are less of the page — a press 6 pixels off closes it, one 12 pixels off does not)
+        studio.trigger("act_deselect");
+        canvas->set_zoom_percent(canvas->zoom_percent() * 4);
+        const double zoomed = 1.0 / canvas->scale();
+        QVERIFY(zoomed < mm_a_px);
+        for (const QPointF& p : {QPointF(12, 12), QPointF(20, 12), QPointF(12, 20)}) inject::click_mm(canvas, p);
+        inject::click_mm(canvas, QPointF(12 + 12 * zoomed, 12));
+        QVERIFY(!studio.area());
+        inject::click_mm(canvas, QPointF(12, 12 + 6 * zoomed));
+        QVERIFY(studio.area());
+        QCOMPARE((*studio.area())["poly"].size(), std::size_t(4));
+    }
+
     // Shift adds, Alt takes away, both keep the overlap; Ctrl+D lets it go.
     void joined() {
         Studio studio;

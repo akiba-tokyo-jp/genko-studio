@@ -1037,7 +1037,7 @@ void each_style_ref(Json& nt, Each each) {
 
 }  // namespace
 
-StyleCarry::StyleCarry(Document& doc, const Json* from) : doc_(doc), from_(from) {}
+StyleCarry::StyleCarry(Document& doc, const Json* from, bool drop_past_full) : doc_(doc), from_(from), drop_(drop_past_full) {}
 
 std::string StyleCarry::mapped(Kind kind, const std::string& id) {
     if (kind == Kind::Paragraph && id == kBasic) return id;  // (the book's own Basic Paragraph)
@@ -1052,6 +1052,11 @@ std::string StyleCarry::mapped(Kind kind, const std::string& id) {
         mine = same->value("id", std::string());
     } else {
         const Json* list = styles != nullptr && styles->is_object() ? get(*styles, kind_name(kind)) : nullptr;
+        if (list != nullptr && list->is_array() && list->size() >= kStylesMax && drop_) {
+            dropped_ = true;
+            ids_.emplace(key, std::string());
+            return {};
+        }
         if (list != nullptr && list->is_array() && list->size() >= kStylesMax) {
             throw OpError("the book would keep more than 512 " + std::string(kind_name(kind)) + " styles with those the pages bring");
         }
@@ -1094,7 +1099,26 @@ void StyleCarry::bring(StoryLine& record) {
     const Look before = look_of(record, from_);
     if (record.native_type) {
         Json nt = *record.native_type;
-        each_style_ref(nt, [&](Kind kind, Json& id) { id = mapped(kind, id.get<std::string>()); });
+        bool gone = false;
+        each_style_ref(nt, [&](Kind kind, Json& id) {
+            id = mapped(kind, id.get<std::string>());
+            gone = gone || id == Json(std::string());
+        });
+        if (gone) {  // (drop_past_full: the references to styles past the 512 go — a range or a paragraph left with nothing of its own too)
+            for (const char* key : {"char_style", "para_style"})
+                if (const auto it = nt.find(key); it != nt.end() && *it == Json(std::string())) nt.erase(it);
+            for (const auto& [key, bare] : {std::pair{"runs", std::size_t(2)}, std::pair{"paragraphs", std::size_t(1)}}) {
+                const auto list = nt.find(key);
+                if (list == nt.end() || !list->is_array()) continue;
+                Json kept = Json::array();
+                for (Json& item : *list) {
+                    if (item.is_object() && item.contains("style") && item["style"] == Json(std::string())) item.erase("style");
+                    if (!item.is_object() || item.size() > bare) kept.push_back(std::move(item));
+                }
+                if (kept.empty()) nt.erase(key);
+                else nt[key] = std::move(kept);
+            }
+        }
         record.native_type = std::move(nt);
     }
     try {
