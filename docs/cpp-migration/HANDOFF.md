@@ -11,7 +11,7 @@
 - R6 M7 の最終候補が M6 の出口の V3 と同じソース・実行物なら、全体試験は使い回し、M7 に固有の受入（最終配布物での起動・保存・出力、2 時間試験、全 PERF、IME の注入、全出力、MCP SDK での外部接続、独立レビュー、別のインストール先への導入）だけを行う。
 - R7 統合前の群の commit は、作業ツリーだけに置かず、native/integration ではない作業ブランチへ push して保全する（CI は無効なので試験は走らない）。
 - 当て方: CMYK・Lab の工程の出口の V3（e099da5）から。ASan の後に Release・Debug を流す順をやめ、ASan を走らせたまま Release・Debug を並べた（`run.sh` の親だけ止め、ASan の validation_run は続けた）。残る重複は群D の V2 と同じ中身の ASan 1 回分だけ（計画が違うので `--pair` に使えない）。
-- 次: M6・M7 は Linux で合格（凍結 962faa4）。PhotoCraft の取り込みは PC1（色・精度の土台）が Linux で合格（凍結 af06f45）、PC2（補正・色管理）が Linux で合格（凍結 5ebcbe6、下の「PC2 の出口 V3」）。続いて PC3（設計と利用者の決定は下の節）。Windows 実機は、下の利用者の決定のとおりマージ後に別の環境で行う。
+- 次: M6・M7 は Linux で合格（凍結 962faa4）。PhotoCraft の取り込みは PC1〜PC5 の各工程と PC6（台帳全件の突き合わせ・独立レビュー・配布物を含む V3）が Linux で合格（PC6 の凍結 de0f5e9、下の「PC6 の出口 V3」）。Windows 実機は、下の利用者の決定のとおりマージ後に別の環境で行う。
 - **利用者の決定（2026-10-15）: Windows は、すべての実装と Linux での試験が終わり、マージした後に、別の環境で行う。** このセッションでは Windows の実機の build・受入をしない（VALIDATION.md §0 の「配布前の Windows 実機受入は必須」は変えない。Windows の受入が済むまで両 OS の配布完了とは言わない）。同じ日の決定: Windows の実機の作業は M7 まで保留、MCP の `inspect` の説明文は Python と同じ文のまま、Qt のソースの入手先は download.qt.io を案内する。
 
 
@@ -180,6 +180,43 @@
 - 設計: PLAN 工程 5（ブラシ・フィルター群・RAW・形式の互換）の約 260 行（pc0 の目安で約 270 人日、見込み約 293.5 人日）を 3 つの節に。D フィルター（120 行: 新しい フィルター メニュー・ぼかし・シャープ・ノイズ・変形・ピクセレート・表現手法・フィルターギャラリー・描画・ぼかしギャラリー・Camera Raw フィルター・レンズ補正・広角補正・消点）、E 描く道具・プリセット（84 行＋レイヤースタイル 17 行: 上流の点を打つブラシ・鉛筆・覆い焼き・焼き込み・スポンジ・ぼかし・シャープ・指先・混合ブラシ・背景消しゴム・色の置き換え・塗りつぶしツール・グラデーションツール・描画色と背景色・パターン・各プリセットとパネル）、F 形式（39 行: コーデック 13・PSD/PSB の全精度と知らない塊の保持・カメラ RAW（LibRaw、動的リンク）・.pcraft の読み書き・ファイル メニューの入口と書き出し）。ほかの工程へ: file.automate.lensCorrection は PC5。文字・表示・窓・自動処理・タイムライン・プラグイン・レイヤーカンプ・スライス・注釈・計測・アートボードの 359 行は PC5。土台 3 つ（D0・E-0・F-0）を先に並行し、その後 4 つずつ 5 つの波。新しいライブラリ: OpenEXR（BSD-3）・libavif＋libaom（BSD-2）・LibRaw（LGPL-2.1/CDDL、動的リンク: 2026-10-16 の決定）・zstd（BSD-3）・BLAKE3（CC0/Apache-2.0、同梱）。GPL・ML のモデル・外部の素材・新しい費用は要らない。新しい拡張: filters@1・vanishing-point@1・brushes@1・patterns@1・file-info@1・image-grid@1・psd-keep@1・formats@1・camera-raw@1。
 - 利用者の決定: (1) フィルターは新しい フィルター メニュー（Photoshop の名前）に一本化する。今の 22 種は op・スマートフィルター・今の原稿でそのまま効くが、画面からは新しく選べない（Genko だけの 5 つは フィルター → 漫画）。(2) 描く道具の名前も Photoshop にそろえる（ペン → ブラシツール など 13 か所。項目の id とキーは変えず読み替え。層・線・ブラシの名前は変えない）。(3) ブラシの線は今どおりベクトルの線として持ち、上流の点を打つ描き方を線の描き方の 1 つとして足す。(4) 画像・PSD・RAW・.pcraft を開くとメモリの中の名前の無い 1 ページの本になり、保存で .genko の置き場所を尋ねる（元のファイルは変えない）。
 - 調整役の判断（推奨どおり）: PSD の Photoshop のスマートフィルターは対応表にあるものを読む（書き出しは画素）。レンズのプロファイルは上流の一般のもの（lensfun は配布の条件が変わるので使わない）。重いフィルターは断らず画面は裏で進み具合とやめる。プリセットは機械の設定のライブラリ、原稿は使ったものの写し。レイヤースタイル 17 行を PC4 に入れる。Adobe の形式は ABR・GRD・PAT・PSD の Patt・ASL。画像から開いた 8 bit のページは一番細かい層の格子を作業の格子に。RAW を開くときは Camera Raw の窓を出す。LibRaw は Linux・Windows とも同じ 0.22.x を組んで同梱。.pcraft の Genko が持てない中身は画素にするか外して知らせる。
+
+### PC6 の出口 V3 — 凍結 de0f5e9 で Linux 合格（2026-11-11）。PhotoCraft の取り込み（PC1〜PC6）は Linux で完了
+- **凍結SHA**: `de0f5e94444c55a3451b89d4911dadaa6087726e`（native/wip-pc に push 済み）。計画は `validation_policy.py --base 98b180b --head de0f5e9 --phase milestone`（基点は PC5 の出口の凍結。tier full、構成は linux-debug・linux-release・linux-asan・windows-debug・windows-release、plan_hash 063ed23139b9…）。1 回で通った: 2026-11-10 13:23〜22:04 UTC（JST 22:23〜翌 07:04）。この節と台帳の platform:Linux の行は、凍結の後の文書だけの commit。
+- **実行環境**（資源上限は固定しない＝利用者決定）: Claude Code クラウドコンテナ、4 CPU（Intel Xeon @ 2.10GHz）/ RAM 16GB / Ubuntu 24.04.5 / kernel 6.18.44-fc-v338。Qt 6.11.2、GCC 13.3、cargo・rustc 1.97.0、参照 Python 3.12＋Pillow 12.3.0・numpy・psd-tools、GENKO_MCP_PYTHON、GENKO_LIBRAW_ROOT（LibRaw 0.22.2）、GENKO_PCRAFT_CHECK、native.yml の数値用環境変数、root から CAP_DAC_OVERRIDE/DAC_READ_SEARCH/FOWNER を外して実行。配布物の試験は Docker 29.9.2。PC5 と同じく 1 構成ずつ組んで流し、流し終えたビルドを消した（ASan → Release → Debug。ctest の並列は ASan 2・Release 2・Debug 3。ASan だけ M3A_FLOOD_DEADLINE=5。Debug は `-g0` と `-DGENKO_SHARED_LIBRARIES=ON`）。
+- **結果**（validation_run.py の result.json。3 構成とも status finished・passed true・failures 空、除いた契約なし、CLI23 合格、同じ plan_hash）:
+  - WebAssembly のホスト（tools/ci/build_wasm_host.sh: cargo test と genko-plugin-host）合格。
+  - linux-asan: 293/293 合格（試験の関数 5,537、SKIP なし）、サニタイザの指摘なし（14:18–18:49、ctest 2 並列）。
+  - linux-release: 293/293 合格（関数 5,462、19:10–19:53、ctest 2 並列）。SKIP 33 件は故障注入が Debug・ASan だけのためのもの（test_transaction・test_contract_save・test_save_e2e・test_migrate_e2e・test_session・test_gui_save・test_app_e2e。これまでの出口と同じ組で、合格に数えない）。
+  - linux-debug: 293/293 合格（関数 5,537、SKIP なし。20:54–22:02、ctest 3 並列）。
+  - `--pair`: 失敗は「構成artifactの欠落・重複」1 件のみ＝Windows 2 構成が開発中 deferred（PC5 と同じ）。Linux 3 構成どうしの照合は指摘なし。**Windows を含む --pair 合格ではない。**
+- **実 xcb（Xvfb 1920×1080）GUI・E2E**（凍結のビルド）: Release で test_gui_* 63 本すべて exit 0（関数 1,175 合格、SKIP 1 は save の故障注入）。Debug で test_gui_save（36）・test_app_e2e（8）合格。
+- **AC-PERF 注入計測**（Release、Xvfb、F1＝32頁×1500線。表示のみで合否判定なし。測定機は基準クラスではない＝ACCEPTANCE §6）。始まりの負荷 0.48、1 回温めてから 2 回（1 回目／2 回目）: 開いて最初の頁 536／658 ms／入力→ライブ線 p95 0.90／1.28・p99 2.77／2.75 ms（n=43780）／線確定→表示 p95 13.8／13.6 ms／Undo→表示 p95 28.7／28.0 ms／頁切替 最初 p95 25.0／21.6・精細 p95 111／97.6 ms（n=4）／自動保存 p95 1.19／1.23 s（n=31）／保存中のイベントループ: 刻みの遅れ p99 5.44／5.19 ms、4 ms を超えた停止 p99 36.9／43.0 ms／走行全体の 4 ms を超えた停止の最大 66.2／43.0 ms。test_perf_render: F1 の頁 350 dpi 全体 717 ms・線を足した後 393 ms・512×512 の部分 25 ms、線 200 本の小さな絵 1 ms、深い SO の 6 タイル 1 枚ずつ 3.74 s・4 枚同時 1.53 s（デコード 1 回、最大 704 MB）。どの値も PC5 の出口と同じ程度か速い。
+- **PERF-F**（Release、test_perf_pipeline、ctest 経由。合否判定あり）: F3 の工程 42.0 秒・88 作業。全呼び出し n=314 p95 552 ms／情報取得 p95 496 ms／編集の確定 p95 63.2 ms／候補の採用 p95 944 ms／頁の仕上げ p95 569 ms（合格値は各 p95 2 秒）／8 ページの校正出力 10 回 4.91〜5.23 s（各 30 秒以内）。**全項目合格**（合格値は変えていない）。
+- **配布物**（platform:Linux。Release のビルドから `cpack`）: `genko-studio-0.1.0-linux-x86_64.tar.gz`（74,896,106 バイト、sha256 `bf7246ce5a87edb1c2a8eec24dbca49e6073417136060a9382bb3682ed9eaebe`）。まっさらな Ubuntu 24.04.5 の容器（ubuntu:24.04 に README-ja.md の実行時の apt の物と xvfb・xdotool・x11-utils・x11-apps・fonts-noto-cjk だけを足した像、sha256:d3cf6e6023…。Python・CMake・コンパイラ・qmake・uv が無いことを確かめた）に、root でない人（u）がネットワークなし（`--network none`）で:
+  - install.sh で `~/.local/opt/genko-studio-0.1.0` に入れ、`~/.local/bin/genko-studio` と .desktop ができる。ldd で genko・genko-plugin-host・xcb と offscreen のプラットフォームに欠けなし（任意の Qt のプラグインが要る物は一覧に書くだけ）。`--version` に genko 0.1.0・LibRaw 0.22.2・Qt 6.11.2。
+  - `genko new` の本を窓（Xvfb・xcb）で開き、マウスでブラシの線を描いて Ctrl+S、終える → 開き直して終える。inspect が同じで、8 ページの画素も同じ（PNG のバイトは ICC のプロファイルに作った時刻が入るので比べない）。
+  - 16 形式（png tiff pdf strip psd psb epub pack webtoon sns cmyk layers kindle timelapse animation pcraft）を書き出せる（113 ファイル）。MCP stdio で initialize・tools/list（41 道具）。WASM のプラグインを入れて一覧に出る（人が選ぶまで動かない）。
+  - 書いたファイルは本・`~/.config/genko-studio`・入れた先（と fontconfig のキャッシュ）だけ。uninstall.sh で本体が消え、本と設定は残る。結果「ALL OK」。
+- **PC6 の進め方**（plan: 台帳全件の突き合わせ → 独立レビュー → 直し → V3）:
+  - 台帳の突き合わせ（読取専用、5 組並行、HEAD 6d75518）: 957 行（961 行から platform の 2 行と対象外の 2 行を除く）のうち OK 944・証跡の古さ 9・欠け 4（どれも証跡の誤りか試験の不足で、機能の抜けは無かった）。古さは 549dcbb で直した。
+  - 独立レビュー（読取専用、3 観点、PC 工程 962faa4..6d75518 の横断）: A 入口と承認（P1 1・P2 1。MCP の agent_op と道具の表は 962faa4 から 1 字も変わっていない）、B 原稿の完全さ（P1 なし・P2 5）、C 頑丈さ（P1 1・P2 5）。
+  - 直しは 5 群（群ごとに 実装→関係する試験→読取専用のレビュー 1 回→直し、R1・R2）。A 承認の関門（9fd6bde）・B 原稿の整合（c801d35・e2f19df、追加分を 2 回目のレビュー）・C 記憶の予算と大きな入力（9ba1b9d）・D 長い作業とスレッド（d5bb6ac）・E .pcraft のスタイルと GUI（85e8746）。統合のたびに関係する試験を流した。台帳は群 A〜E の直しに合わせて 156 行を直した（de0f5e9）。
+  - 群 A: ネームの承認の後、承認できない actor（ai:・legacy:unknown・agent の権限）のページの大きさの op がコマ割りを動かすのを断る。ネームの承認の前に、PC の画素の op（40 個、`core::strict_drawing_ops`）で印刷される層に描くのを人も含めて断る（今の raster_edit_op と同じ規則。未公開の機能）。SO の中身を替える op は印刷される SO の絵が変わるなら断る。exportable の判定に高精度・インキの層。actions.json が読めないときは退けてから書く。
+  - 群 B: ビデオレイヤーとアニメのカメラを、判型・回転・反転・任意の角度・角度付きの切り抜き・縦横の倍率が違う画像解像度で写す（video@1 の行に任意の `transform`。恒等や畳み込める形なら書かないので、回していない本は形も保存のバイトも前と同じ。古い版は transform のある本を読み取り専用で開く。schema-v4.md）。ほかの本から来る文字のスタイルを StyleCarry に一本化（.pcraft の中・配置も、群 E）。記録したアクションのバッチで 2 ページ以上の本のページを作る・消す手を断る。duplicate_layers でビデオの行を写す。
+  - 群 C: Photomerge・スタック・統計・HDR・画像を開く道で、本の高精度の上限（1 GiB）を作る前に確かめる。SO のスタックの作り方を置き場の予算に入れる。データセットの画像を素材にする。CSV の外の画像の確かめ。
+  - 群 D: 長い作業を窓のスレッドの外へ、中止の数と一覧、窓の破棄、ffmpeg とプラグインは親が終われば止まる（Linux は PR_SET_PDEATHSIG）、リンクの大きなファイルを読まずに確かめる。
+  - 群 E: .pcraft のレイヤースタイルは効果ごとに読めない値を外して知らせる（全体が読めないときは前の振る舞い）、カンプの状態ごとに捕まえる、照らし直し、psd_raw・lmfx の扱い。
+- **台帳**: platform:Linux を閉じた（上の配布物）。台帳の残りは platform:Windows（deferred、配布前の実機受入は必須）と対象外 2 行だけ。
+- **利用者の決定（PC6）**:
+  - 決定 16（2026-11-10、strict_gates）: 承認できない actor（HTTP の `/v1/apply` の ai: のトークン、`genko apply` の legacy:unknown・`--agent ai:…`）が `set_meta` で本の strict_gates を外せ、外した後は名前の承認の関門が当たらない。前からの振る舞いで、Python と比べる契約試験 test_contract_ops の randomSequences もこれを合格の条件にしている。**今のまま、既知の制限として記録する**（SPEC AUTO-01 と台帳の関門の行の limitations）。MCP と制御チャンネルからは set_meta の strict_gates に届かない。
+- **既知の制限・残課題（PC6 の出口の時点）**:
+  - Windows（deferred、配布前の実機受入は必須。PC4・PC5 の宿題はそのまま。ffmpeg とプラグインの「親が終われば止まる」は Linux だけ。Windows の 6 GiB 級の疎なファイルの試験は 257 MiB の形に替えた）。
+  - SO の中身（"contents"）の道は strict_gates を外して当てる（前から。fill なども同じ）。
+  - features だけの横書きの台詞（native_type なし）を基本段落の違う本へ持ち込むと、持ち込んだ本の基本段落で組む（見え方を保つには描き手の側の直しが要る。SPEC）。
+  - 細かい物（P3、直していない）: アートボードの箱がフッテージの箱を見ない、smart_convert が祖先をたどらない、置き場の予算と 1 枚の上限の間の大きさのスタックが 2 つあると交互に追い出す、部分の道の結果を WorkHold に数えない、needs_whole_page の中身で帯ごとに全体を作る、中を指す絶対パスの CSV も断る、終了で進み具合の窓が先に閉じる、コンタクトシートの途中で窓を閉じると作りかけのシートを開いてから本ごとに保存を聞く、bytes の無いリンクで窓（読む）と CLI（modified）が違う、浮動小数の完全一致で比べる所がある、カンプのスタイルで "value" 以外の core::Error はカンプの読みが断る、グレーの PSD の Blend If の名前 "gray" が合成と重なる。
+  - 保存していない原稿の 変数データセット… は、画像が合わせて 256 MiB を越えると断る（保存すれば 4 GiB まで）。
+- **次**: native/integration へ統合（この節の commit の後）。Windows の実機の build・受入（windows-debug・windows-release と、それを含む `--pair`）と配布は、利用者の決定（2026-10-15）のとおりマージ後に別の環境で。
 
 ### PC5 の設計と利用者の決定（2026-10-28、PC4 の出口の後に読取専用で）
 - 設計: 台帳の残りの 338 行すべて（PC5 が最後の工程で、行を後へ回せない）を 4 つの節に。G 文字（74 行: 文字レイヤー・文字ツール・組版と OpenType・右から左・文字／段落スタイル・パネル・スペルチェックと表記の点検・検索と置換・書体の置き換え・PSD と .pcraft の文字、約 69.5 人日）、H 表示・窓・環境設定（約 111 行: 画素の段と % の意味・ピクセルグリッド・32 bit のプレビュー・手のひら・スクリーンモード・ガイドとグリッドと単位・窓の区画と並べ方・パネル・ワークスペース・キーの組・メニュー・ツールバー・環境設定と API・取り消しとメモリをクリア・画素の縦横比・GPU と CPU の表示の一致、約 61 人日）、I レイヤー・アートボード・自動処理（61 行: レイヤーの基本の残り・グループとフレーム・アートボード・変数とデータセット・バッチ／ドロップレット／スクリプト／イベント／画像プロセッサー・プリント・コンタクトシート・画像アセット・自動整列／自動合成／Photomerge／スタック／統計・HDR Pro・写真の切り抜き、約 73.5 人日）、J 制作の補助（92 行: レイヤーカンプ・スライス・注釈・ものさし／カウント／計測・計測ログ・タイムライン・ビデオレイヤー・WASM のプラグイン・制御チャンネル・アクション、約 99.5 人日）。PC4 の出口の決定 4 つと tools/ci の直し（Z0、約 3 人日）。計約 306.5 人日。土台 PC5-0（Z0・G-0・H-0・I-0、続けて J-0）の後、4 つずつ 7 つの波。新しいライブラリ: WAMR（Apache-2.0 WITH LLVM-exception）・SheenBidi（Apache-2.0）・英語の辞書 SCOWL。GPL・FFmpeg・ML のモデル・新しい費用は要らない。新しい拡張: type@1・groups@1・image-assets@1・layer-comps@1・slices@1・annotations@1・measure@1・timeline@1・video@1・pixel-aspect@1。

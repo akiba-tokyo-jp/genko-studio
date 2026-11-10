@@ -44941,9 +44941,16 @@
       "label_ja": "既存正式対象",
       "kind": "cross_cutting",
       "genko_status": "同等（C++ のソースと試験あり。2026-10-16 照合）",
-      "implementation_status": "未着手",
-      "acceptance_status": "未実施",
-      "evidence": [],
+      "implementation_status": "実装済み（Linux の配布物: M6 の配布の作りに PC1〜PC5 で増えた物 — LibRaw・genko-plugin-host・辞書・書体・Qt のプラグイン — を入れ、PC6 で確かめた。凍結 de0f5e9）",
+      "acceptance_status": "Linux V3 合格（PC6 の出口、凍結 de0f5e9、2026-11-11）。cpack の tar.gz をまっさらな Ubuntu 24.04 の容器（Python・CMake・コンパイラ・Qt なし、root でない人、ネットワークなし）に入れ、窓で描いて保存・開き直し・16 形式の書き出し・MCP stdio・プラグインの登録・残すファイル・アンインストールを確かめた（HANDOFF の「PC6 の出口 V3」）",
+      "evidence": [
+        "native/cmake/GenkoPackage.cmake",
+        "native/package/linux/install.sh",
+        "native/package/linux/uninstall.sh",
+        "native/package/linux/genko-studio.desktop",
+        "native/tests/package/test_package.cpp",
+        "tools/ci/build_wasm_host.sh"
+      ],
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
