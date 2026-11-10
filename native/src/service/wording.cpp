@@ -195,7 +195,7 @@ const std::vector<Rule>& rules() {
                          "高精度のページでは、グループを通して見えるレイヤーの結合・画像の統合はまだできません"
                          "（そのグループの「グループとして描く」を外すと結合できます。見え方は変わります）"));
         // (video@1, PC6 review B P2-5: a page turned or mirrored with a video layer)
-        r.push_back(rule("not yet ported: a video layer turned or mirrored with the page.*",
+        r.push_back(rule("(?:not yet ported: )?a video layer turned or mirrored with the page.*",
                          "ビデオレイヤーのあるページは回転・反転できません（フッテージは箱の中に立てて置くため。先にビデオレイヤーをラスタライズしてください。原稿は変わりません）"));
         // what this build does not do yet (render::NotYetPorted, the studio's official export)
         r.push_back(rule("not yet ported: (.*)", [](const QRegularExpressionMatch& m) {

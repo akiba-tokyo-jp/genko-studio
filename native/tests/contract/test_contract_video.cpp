@@ -381,7 +381,8 @@ private slots:
         for (const char* turn : {"90cw", "180", "flip_h"}) {
             const std::string refused = refusal(doc, op("rotate_pages", {{"turn", turn}}));
             QVERIFY2(refused.find("a video layer turned or mirrored with the page") != std::string::npos, refused.c_str());
-            QVERIFY(wording::error(QString::fromStdString(refused)).contains(QStringLiteral("ビデオレイヤーのあるページは回転・反転できません")));
+            QVERIFY2(wording::error(QString::fromStdString(refused)).contains(QStringLiteral("ビデオレイヤーのあるページは回転・反転できません")),
+                     qPrintable(QString::fromStdString(refused) + " → " + wording::error(QString::fromStdString(refused))));
         }
         // (a page without a video row turns as before)
         QCOMPARE(refusal(book(), op("rotate_pages", {{"turn", "90cw"}})), std::string());

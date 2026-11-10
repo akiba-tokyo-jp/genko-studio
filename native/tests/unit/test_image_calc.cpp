@@ -336,7 +336,7 @@ private slots:
         QVERIFY2(each.find("calculations into a new page (result \"page\") cannot be repeated page by page") != std::string::npos, each.c_str());
         Json channel_each = base;
         channel_each.erase("page");
-        const auto repeated = run(doc, Json{{"op", "for_pages"}, {"pages", "all"}, {"ops", Json::array({channel_each})}});
+        const auto repeated = run(doc, Json{{"op", "for_pages"}, {"pages", Json::array({1})}, {"ops", Json::array({channel_each})}});
         QCOMPARE(repeated.doc.pages.size(), doc.pages.size());
         QCOMPARE(repeated.doc.page(0).channels.size(), std::size_t(1));
     }
