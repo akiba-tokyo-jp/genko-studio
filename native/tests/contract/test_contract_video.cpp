@@ -343,12 +343,18 @@ private slots:
         };
         const core::ApplyResult here = core::CommandBus(render::ops_registry()).apply(doc, Json::array({op("duplicate_layers", {{"ids", Json::array({"v"})}})}),
                                                                                     core::Actor("human:test"));
-        const std::string folder = here.results[0]["ids"][0].get<std::string>();
+        const auto folder_of = [](const core::Document& d, std::size_t page, const Json& ids) {
+            for (const Json& id : ids)
+                for (const core::Layer& l : d.page(page).layers)
+                    if (l.id == id.get<std::string>() && l.kind == core::LayerKind::Folder) return l.id;
+            return std::string();
+        };
+        const std::string folder = folder_of(here.doc, 0, here.results[0]["ids"]);
         QCOMPARE(core::anim::spec(here.doc.page(0))->at("tracks").size(), std::size_t(2));
         copied_on(here.doc, 0, folder);
         const core::ApplyResult there = core::CommandBus(render::ops_registry()).apply(
             doc, Json::array({op("duplicate_layers", {{"ids", Json::array({"v"})}, {"to_page", 2}})}), core::Actor("human:test"));
-        const std::string moved = there.results[0]["ids"][0].get<std::string>();
+        const std::string moved = folder_of(there.doc, 1, there.results[0]["ids"]);
         QVERIFY(core::anim::spec(there.doc.page(1)) != nullptr);
         QCOMPARE(core::anim::fps_of(there.doc.page(1)), core::anim::fps_of(doc.page(0)));
         QCOMPARE(core::anim::frames_of(there.doc.page(1)), core::anim::frames_of(doc.page(0)));
@@ -458,18 +464,22 @@ private slots:
         QCOMPARE(*core::video_row(back.document.page(0), Json("v")), *core::video_row(quarter.page(0), Json("v")));
         const auto c = through(core::video_row(quarter.page(0), Json("v"))->at("transform"), 20, 17.5);
         QVERIFY(near(at_mm(back.document, 0, 3, c[0], c[1]), kColours[2]));
+        // (written out turned — a GIF of the frames, a .pcraft —: the book of the footage over its finished size, the size a GIF
+        // of the frames takes, turned a quarter: the footage in the middle, where a footage laid upright in its box of before
+        // would leave it white)
+        const core::Document full = run(run(video_book(), op("video_alter", {{"folder", "v"}, {"at", 2}})), op("rotate_pages", {{"turn", "90cw"}}));
         const fs::path gif = fspath(QStringLiteral("turned-out/video.gif"));
         fs::create_directories(gif.parent_path());
-        (void)render::anim::export_animation(back.document.page(0), gif, &back.document, 40, std::string("frames"));
+        (void)render::anim::export_animation(full.page(0), gif, &full, 40, std::string("frames"));
         {
             const render::Image image = render::read_png(storage::read_file(gif / "frame_0003.png")).convert("RGB");
-            QVERIFY(near(image.getpixel(static_cast<int>(c[0] / 25.4 * 40), static_cast<int>(c[1] / 25.4 * 40)), kColours[2]));
+            QVERIFY(near(image.getpixel(image.width() / 2, image.height() / 2), kColours[2]));
         }
         {
             std::vector<std::string> notes;
-            const formats::Opened opened = formats::open_file(formats::pcraft_bytes(back.document, 0, {}, &notes), "turned.pcraft");
+            const formats::Opened opened = formats::open_file(formats::pcraft_bytes(full, 0, {}, &notes), "turned.pcraft");
             const render::Image drawn = render::render_page(opened.doc.page(0), 50, render::proof_options(), &opened.doc).image.convert("RGB");
-            QVERIFY(near(drawn.getpixel(static_cast<int>(c[0] / 25.4 * 50), static_cast<int>(c[1] / 25.4 * 50)), kColours[0]));
+            QVERIFY(near(drawn.getpixel(drawn.width() / 2, drawn.height() / 2), kColours[0]));  // (its first frame's footage)
         }
         // (a book whose rows hold no transform — cropped, sized — writes none: the bytes of before)
         genko::test::write_project(cropped.doc, fspath(QStringLiteral("cropped.genko")));

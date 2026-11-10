@@ -168,8 +168,10 @@ public:
     // `from`: the other book's type_styles (nullptr: none), which must outlive the carry.
     StyleCarry(Document& doc, const Json* from);
     // A record of the other book: the styles it names brought, its look kept. One the OpenType typesetting does not set
-    // (type_text::sets_opentype) is left as it is: it reads no style and names none. core::OpError when keeping its look
-    // would take it past the ranges a record holds.
+    // (type_text::sets_opentype) is left as it is: it reads no style and names none. So is a line across of OpenType
+    // features alone (no native_type): it names no style, and it is set under this book's Basic Paragraph (a native_type laid
+    // on it to keep its look would set it otherwise). core::OpError when keeping its look would take it past the ranges a
+    // record holds.
     void bring(StoryLine& record);
     // Every type layer of the page (not inside its smart objects' contents: core::smart::bring_contents' `each` reaches
     // those).

@@ -372,16 +372,17 @@ private slots:
     }
 
     // (the review of PC6-B's P2-A) The texts another book brings that the OpenType typesetting does not set — a line made
-    // point text (set_type point: its native_type a shape and an anchor), a line of before — read no styles, Basic Paragraph
-    // neither: brought into a book whose Basic Paragraph differs, as they are (their records the same, set as before); a line
-    // across of OpenType features alone (style.features) is set so and reads Basic Paragraph: its look kept as in its book.
+    // point text (edit_type point: its native_type a shape and an anchor), a line of before — read no styles, Basic Paragraph
+    // neither: brought into a book whose Basic Paragraph differs, as they are (their records the same, set as before). A line
+    // across of OpenType features alone (style.features, no native_type) is set so and reads Basic Paragraph: left as it is
+    // too (a native_type laid on it to keep its look sets it otherwise), set under the book's Basic Paragraph.
     void importedTextsSetAsBefore() {
         QTemporaryDir scratch;
         const fs::path root = core::path_from_utf8(scratch.path().toStdString());
         core::Document from = plain_book();
         from = run(from, Json{{"op", "add_line"}, {"page", 1}, {"id", "pt"}, {"text", "ABC abc"}, {"x_mm", 3}, {"y_mm", 5}, {"w_mm", 44}, {"h_mm", 12},
                               {"balloon", "none"}, {"wrap", "horizontal"}, {"style", Json{{"size_mm", 6}}}});
-        from = run(from, Json{{"op", "set_type"}, {"line", "pt"}, {"point", true}});
+        from = run(from, Json{{"op", "edit_type"}, {"line", "pt"}, {"point", true}});
         from = run(from, Json{{"op", "add_line"}, {"page", 1}, {"id", "ft"}, {"text", "fi ffl ABC"}, {"x_mm", 3}, {"y_mm", 30}, {"w_mm", 44}, {"h_mm", 12},
                               {"balloon", "none"}, {"wrap", "horizontal"}, {"style", Json{{"size_mm", 6}, {"features", Json::array({"liga"})}}}});
         const auto record = [](const core::Document& doc, const core::Num& page, const std::string& text) -> const core::StoryLine& {
@@ -400,7 +401,17 @@ private slots:
         const core::StoryLine& point_in = record(done.doc, done.doc.page(1).index, "ABC abc");
         QCOMPARE(*point_in.native_type, *point.native_type);
         QVERIFY(!core::type_text::sets_opentype(point_in));
-        QCOMPARE(render::render_page(done.doc.page(1), kDpi, render::proof_options(), &done.doc).image.convert("RGB").tobytes(), page_was);
+        const render::Image brought = render::render_page(done.doc.page(1), kDpi, render::proof_options(), &done.doc).image.convert("RGB");
+        QVERIFY2(region(brought, {0, 0, 50, 22}) == region(drawn(from), {0, 0, 50, 22}), "the point text");
+        const core::StoryLine& ft = record(done.doc, done.doc.page(1).index, "fi ffl ABC");
+        // (the line of features alone: as it is — no native_type laid on it, which would set it otherwise —, set under the
+        // book's Basic Paragraph: the book's own tracking, wider)
+        QVERIFY(!ft.native_type);
+        QCOMPARE(ft.style, record(from, from.page(0).index, "fi ffl ABC").style);
+        QVERIFY(region(brought, {0, 24, 50, 50}) != region(drawn(from), {0, 24, 50, 50}));
+        // (and into a book of the same Basic Paragraph: drawn as it was, the whole page)
+        const core::ApplyResult same = run_ops(plain_book(), Json::array({Json{{"op", "import_pages"}, {"from", (root / "lines.genko").string()}}}));
+        QCOMPARE(render::render_page(same.doc.page(1), kDpi, render::proof_options(), &same.doc).image.convert("RGB").tobytes(), page_was);
     }
 
     // the refusals in the window's words

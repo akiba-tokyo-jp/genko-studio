@@ -1076,8 +1076,10 @@ std::string StyleCarry::mapped(Kind kind, const std::string& id) {
 
 void StyleCarry::bring(StoryLine& record) {
     // (a record the OpenType typesetting does not set reads no styles — Basic Paragraph neither — and names none: as it is.
-    // Laying its look on it would set it so: the review of PC6-B's P2-A)
-    if (!type_text::sets_opentype(record)) return;
+    // Laying its look on it would set it so: the review of PC6-B's P2-A. A line across of features alone — set so, without
+    // native_type — names none either, and a native_type laid on it would set it otherwise than it is (its leading and size
+    // read from the record, not its fitted style): as it is too, set under this book's Basic Paragraph)
+    if (!record.native_type || !type_text::sets_opentype(record)) return;
     // (nothing to do: no style named, and the two books' Basic Paragraph alike)
     bool names = false;
     if (record.native_type) {
