@@ -64,6 +64,8 @@ struct OpenOptions {
     // 1 GiB; less in tests) — a 16- or 32-bit picture past it opens at fewer bits (picture_book), a panorama is made at fewer
     // bits (service::automate::photomerge), a stack is refused (load_files_into_stack, statistics).
     std::uint64_t precise_most = core::kColorRasterBookBytes;
+    // (and the most pixels one precise raster holds — core::kColorRasterMaxPixels, whatever its samples; less in tests)
+    std::uint64_t precise_pixels_most = core::kColorRasterMaxPixels;
 };
 
 struct Opened {
@@ -95,8 +97,10 @@ Opened open_folder(const std::filesystem::path& folder, const OpenOptions& optio
 // opens at 16 bits (a float picture's values clamped to 0..1), past that at 8, said in `notes` (PC6, review C P2-2).
 Opened picture_book(render::codecs::CodecImage picture, std::string_view title, const OpenOptions& options = {});
 // The most bits (`depth`, else 16, else 8) at which an RGB layer of width × height keeps its precise raster (16 bytes and
-// RGBA of 2 or 4 bytes a sample) within `most` bytes.
-int precise_depth_within(std::uint64_t width, std::uint64_t height, int depth, std::uint64_t most);
+// RGBA of 2 or 4 bytes a sample) within `most` bytes — 8 when its pixels are more than one precise raster holds
+// (`most_pixels`, at any depth).
+int precise_depth_within(std::uint64_t width, std::uint64_t height, int depth, std::uint64_t most,
+                         std::uint64_t most_pixels = core::kColorRasterMaxPixels);
 
 // 新規… → 画像 (file.new; PhotoCraft's commands.rs new_document): a book of one page in memory of `width` × `height`
 // pixels at `dpi` (72..100000), its mode (rgb, gray, cmyk, lab, bitmap) and depth (8, 16, 32; bitmap 8, lab 8 or 16), its

@@ -314,8 +314,12 @@ private slots:
     // (PC6, review C P2-3) The stack made once while the tiles drawn together wait for it — 8 bits, 16 bits, CMYK —; one too
     // large to remember made a tile's part at a time, the same pixels.
     void madeOnceWhileTheTilesWait() {
+        // (each way as it lies, and moved by whole pixels at 100 dpi — 10 and 20 px: the part's place shifted, the rework
+        // review's P3-4)
+        for (const bool moved : {false, true})
         for (const Json& mode : {Json(), kSixteen, kCmyk}) {
-            const Document doc = run(shots(mode), Json::array({stacked("median")}));
+            Document doc = run(shots(mode), Json::array({stacked("median")}));
+            if (moved) doc = run(doc, Json::array({Json{{"op", "smart_transform"}, {"page", 1}, {"id", "so"}, {"set_matrix", Json::array({1, 0, 0, 1, 2.54, 5.08})}}}));
             render::clear_render_caches();
             std::uint64_t before = render::smart::counts().contents_drawn;
             (void)drawn(doc, 100, render::RenderRegion{0, 0, 60, 60});

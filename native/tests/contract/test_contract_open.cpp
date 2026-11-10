@@ -244,12 +244,39 @@ private slots:
         QVERIFY(!eight.doc.page(0).rgb || eight.doc.page(0).rgb->depth == 8);
         QVERIFY(eight.doc.page(0).layers[0].raster_png && !eight.doc.page(0).layers[0].color_raster);
         QVERIFY(std::any_of(eight.notes.begin(), eight.notes.end(), [](const std::string& n) { return n.find("画像を 8 bit で開きました") != std::string::npos; }));
-        // (the book's own limit: the review's 9000 × 8000 at 32 bits opens at 16; 8000 × 8000 fits; 16 bits always fit the
-        // codecs' 120 million pixels)
-        QCOMPARE(formats::precise_depth_within(9000, 8000, 32, core::kColorRasterBookBytes), 16);
+        QVERIFY(eight.doc.page(0).spec.grid.has_value());  // (opened at 8 bits: its pixels' grid, as an 8-bit picture's)
+        // (past the pixels one precise raster holds — made few here —: 8 bits at once, 16 not tried)
+        options.precise_most = core::kColorRasterBookBytes;
+        options.precise_pixels_most = std::uint64_t(w) * h - 1;
+        const formats::Opened few = formats::open_file(exr, "light.exr", options);
+        QVERIFY(!few.doc.page(0).rgb || few.doc.page(0).rgb->depth == 8);
+        QVERIFY(few.doc.page(0).layers[0].raster_png && !few.doc.page(0).layers[0].color_raster);
+        QVERIFY(std::any_of(few.notes.begin(), few.notes.end(), [](const std::string& n) { return n.find("画像を 8 bit で開きました") != std::string::npos; }));
+        // (the book's own limits: a precise raster holds at most core::kColorRasterMaxPixels — 6710 万 — at any depth, so the
+        // review's 9000 × 8000 opens at 8 bits at 32 or 16; 8000 × 8000 fits at 32; 16 bits past 1 GiB are past it too)
+        QCOMPARE(formats::precise_depth_within(9000, 8000, 32, core::kColorRasterBookBytes), 8);
+        QCOMPARE(formats::precise_depth_within(9000, 8000, 16, core::kColorRasterBookBytes), 8);
         QCOMPARE(formats::precise_depth_within(8000, 8000, 32, core::kColorRasterBookBytes), 32);
-        QCOMPARE(formats::precise_depth_within(12000, 10000, 16, core::kColorRasterBookBytes), 16);
+        QCOMPARE(formats::precise_depth_within(8192, 8191, 16, core::kColorRasterBookBytes), 16);
+        QCOMPARE(formats::precise_depth_within(12000, 10000, 16, core::kColorRasterBookBytes), 8);
         QCOMPARE(formats::precise_depth_within(12000, 10000, 8, core::kColorRasterBookBytes), 8);
+    }
+
+    // (the rework review's P2-1) At the book's real limits: a 16-bit picture of 8192 × 8192 — one pixel more than a precise
+    // raster holds — opens at 8 bits, said, rather than being refused; one row fewer keeps its 16 bits.
+    void aPicturePastThePrecisePixelsOpensAtEightBits() {
+        QCOMPARE(std::uint64_t(8192) * 8192, std::uint64_t(core::kColorRasterMaxPixels) + 1);
+        {
+            const formats::Opened past = formats::picture_book(codecs::CodecImage::blank(8192, 8192, codecs::Layout::Rgb, codecs::Sample::U16), "past");
+            const core::Page& page = past.doc.page(0);
+            QVERIFY(!page.rgb || page.rgb->depth == 8);
+            QVERIFY(page.layers[0].raster_png && !page.layers[0].color_raster);
+            QVERIFY(std::any_of(past.notes.begin(), past.notes.end(), [](const std::string& n) { return n.find("画像を 8 bit で開きました") != std::string::npos; }));
+        }
+        const formats::Opened within = formats::picture_book(codecs::CodecImage::blank(8192, 8191, codecs::Layout::Rgb, codecs::Sample::U16), "within");
+        QVERIFY(within.doc.page(0).rgb && within.doc.page(0).rgb->depth == 16);
+        QVERIFY(within.doc.page(0).layers[0].color_raster != nullptr);
+        for (const std::string& note : within.notes) QVERIFY2(note.find("1 GiB") == std::string::npos, note.c_str());
     }
 
     void aGreyPictureOpensAsInks() {

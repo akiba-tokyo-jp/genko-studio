@@ -447,6 +447,12 @@ private slots:
         for (const core::Layer& l : page.layers) QVERIFY(l.color_raster == nullptr && l.raster_png != nullptr);
         QVERIFY(std::any_of(shallow.opened.notes.begin(), shallow.opened.notes.end(),
                             [](const std::string& n) { return n.find("パノラマを 8 bit で作りました") != std::string::npos; }));
+        // (past the pixels one precise raster holds — made few here —: 8 bits, whatever the bytes; the rework review's P2-1)
+        options.open.precise_most = core::kColorRasterBookBytes;
+        options.open.precise_pixels_most = w * h - 1;
+        const service::automate::Panorama few = service::automate::photomerge(pictures, options);
+        QVERIFY(!few.opened.doc.page(0).rgb || few.opened.doc.page(0).rgb->depth == 8);
+        for (const core::Layer& l : few.opened.doc.page(0).layers) QVERIFY(l.color_raster == nullptr && l.raster_png != nullptr);
         // (the stack: its second picture a file that is not there — weighed, never opened)
         service::automate::Picture missing;
         missing.name = "gone.png";

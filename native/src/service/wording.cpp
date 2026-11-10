@@ -1639,6 +1639,9 @@ const std::vector<Rule>& rules() {
                          "画像が大きすぎて、一度につなげません（合わせて約 \\1 万画素）。画像を減らすか、縮小して読み込んでください"));
         r.push_back(rule(R"(the stack would be too large to hold at once \(about (\d+) MiB of 2048\).*)",
                          "スタックが大きすぎて、一度に持てません（約 \\1 MiB。2048 MiB まで）。画像を減らすか、小さな画像にしてください"));
+        // (PC6: a precise raster past what one holds — core/color_raster's own refusal)
+        r.push_back(rule("invalid or oversized high-precision color raster",
+                         "高精度の画素が正しくないか、大きすぎて扱えません（1 枚 約 6,700 万画素まで）"));
         // (PC6, review C P2-1: a 16- or 32-bit stack past the book's precise pixels)
         r.push_back(rule(R"(the stack's (\d+)-bit layers would pass the book's 1 GiB of precise pixels \(about (\d+) MiB\).*)",
                          "\\1 bit のスタックが、原稿の高精度の画素の上限（1 GiB）を越えます（約 \\2 MiB）。画像を減らすか、小さな画像か 8 bit の画像にしてください"));

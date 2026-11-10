@@ -183,7 +183,7 @@ void MainWindow::import_data_sets() {
     options.folder = file.parent_path();
     // (review C P2-5: a saved book's pictures put in its asset store as they are read — on the worker —, the op carrying their
     // refs alone; those new to the store taken away again when the op is refused)
-    auto fresh = std::make_shared<std::vector<fs::path>>();
+    auto fresh = std::make_shared<std::vector<std::pair<std::string, fs::path>>>();
     if (session_->path()) {
         const fs::path book_dir = *session_->path();
         options.store = [book_dir, fresh](const std::string& bytes, const std::string& suffix) {
@@ -191,12 +191,24 @@ void MainWindow::import_data_sets() {
             const std::string ref = storage::AssetStore::ref(bytes);
             const bool there = store.has(ref, suffix);
             (void)store.put_bytes(bytes, suffix);
-            if (!there) fresh->push_back(store.path(ref, suffix));
+            if (!there) fresh->emplace_back(ref, store.path(ref, suffix));
             return ref;
         };
     }
-    const auto drop_fresh = [fresh] {
-        for (const fs::path& made : *fresh) {
+    // (the rework review's P3-6: one the book holds after all — its bytes in memory, which a save in between may have counted
+    // on the file for, or a data set's value — is kept, as drop_fresh_footage keeps one)
+    const auto drop_fresh = [this, fresh] {
+        const core::Variables now = core::variables_of(book());
+        for (const auto& [ref, made] : *fresh) {
+            if (book().smart_files.contains(ref)) continue;
+            bool named = false;
+            for (const core::DataSet& set : now.data_sets) {
+                for (const core::DataValue& value : set.values) {
+                    const auto* picture = std::get_if<core::PictureValue>(&value.value);
+                    if (picture != nullptr && picture->asset == ref) named = true;
+                }
+            }
+            if (named) continue;
             std::error_code ec;
             fs::remove(made, ec);
         }

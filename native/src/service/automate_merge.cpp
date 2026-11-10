@@ -445,10 +445,10 @@ Panorama photomerge(const std::vector<Picture>& pictures, const PhotomergeOption
     {
         const std::uint64_t count = merged.layers.size() + (merged.fill ? 1 : 0);
         const int was = depth;
-        while (depth > 8 && precise_layers_bytes(count, std::uint64_t(std::max(1, merged.width)), std::uint64_t(std::max(1, merged.height)), depth) >
-                                options.open.precise_most) {
-            depth = depth == 32 ? 16 : 8;
-        }
+        const std::uint64_t pw = std::uint64_t(std::max(1, merged.width)), ph = std::uint64_t(std::max(1, merged.height));
+        // (one precise raster holds at most so many pixels at any depth: past them 8 bits — the rework review's P2-1)
+        if (depth > 8 && pw * ph > options.open.precise_pixels_most) depth = 8;
+        while (depth > 8 && precise_layers_bytes(count, pw, ph, depth) > options.open.precise_most) depth = depth == 32 ? 16 : 8;
         if (depth != was) fewer_bits = "高精度の画素が本の上限（1 GiB）を越えるため、パノラマを " + std::to_string(depth) + " bit で作りました";
     }
     // (the book: an image of the panorama's size, RGB at the first picture's depth and profile, transparent)

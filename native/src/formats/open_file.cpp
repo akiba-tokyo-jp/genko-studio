@@ -228,7 +228,10 @@ Opened open_folder(const std::filesystem::path& folder, const OpenOptions&) {
     return pcraft_book(render::pcraft::read_folder(folder, stem_of(name), limits), name);
 }
 
-int precise_depth_within(std::uint64_t width, std::uint64_t height, int depth, std::uint64_t most) {
+int precise_depth_within(std::uint64_t width, std::uint64_t height, int depth, std::uint64_t most, std::uint64_t most_pixels) {
+    // (a precise raster holds at most most_pixels — core::kColorRasterMaxPixels — whatever its samples: past it 16 bits
+    // would not do either, so 8, as a .pcraft's layers are read — the rework review's P2-1)
+    if (depth > 8 && width * height > most_pixels) return 8;
     const auto bytes = [&](int d) { return d <= 8 ? 0 : 16 + width * height * 4 * (d == 16 ? 2 : 4); };
     if (depth > 16 && bytes(depth) > most) depth = 16;
     if (depth > 8 && bytes(depth) > most) depth = 8;
@@ -243,9 +246,13 @@ Opened picture_book(CodecImage picture, std::string_view title, const OpenOption
     const bool alpha = render::codecs::has_alpha(picture.layout());
     const bool gray = render::codecs::is_gray(picture.layout()), cmyk = render::codecs::is_cmyk(picture.layout());
     const bool eight = picture.sample() == Sample::U8;
+    // (an RGB picture's depth on the page: its own, or fewer bits within the book's precise pixels — PC6, review C P2-2 —;
+    // one opened at 8 bits works at its pixels' grid, as an 8-bit picture does)
+    const int file_depth = eight ? 8 : picture.sample() == Sample::U16 ? 16 : 32;
+    const int rgb_depth = gray || cmyk ? file_depth : precise_depth_within(w, h, file_depth, options.precise_most, options.precise_pixels_most);
     // (its resolution: the file's, 72 ppi when it says none or less, as Photoshop opens it)
     const double said = picture.meta.dpi ? picture.meta.dpi->first : 0.0;
-    core::Document doc = pixels_book(w, h, said, title, gray, eight && !gray && !cmyk);
+    core::Document doc = pixels_book(w, h, said, title, gray, rgb_depth == 8 && !gray && !cmyk);
     core::Page& page = doc.edit_page(0);
     core::Layer layer;
     layer.id = core::new_id();
@@ -275,14 +282,11 @@ Opened picture_book(CodecImage picture, std::string_view title, const OpenOption
         doc.color = color;
     } else {
         std::optional<core::RgbMode> mode;
-        int depth = picture.sample() == Sample::U8 ? 8 : picture.sample() == Sample::U16 ? 16 : 32;
         // (PC6, review C P2-2: the layer's precise raster within the book's high-precision budget — OpenOptions::precise_most,
-        // core::kColorRasterBookBytes —, as a PSD's and a .pcraft's layers are: past it at 16 bits — its values clamped to
-        // 0..1 —, past that at 8, and said)
-        if (const int fits = precise_depth_within(w, h, depth, options.precise_most); fits != depth) {
-            out.notes.push_back("高精度の画素が本の上限（1 GiB）を越えるため、画像を " + std::to_string(fits) + " bit で開きました");
-            depth = fits;
-        }
+        // core::kColorRasterBookBytes, and precise_pixels_most —, as a PSD's and a .pcraft's layers are: past it at 16 bits —
+        // its values clamped to 0..1 —, past that at 8, and said)
+        const int depth = rgb_depth;
+        if (depth != file_depth) out.notes.push_back("高精度の画素が本の上限（1 GiB）を越えるため、画像を " + std::to_string(depth) + " bit で開きました");
         // (the file's own profile — one that shows its numbers as sRGB does is the page's without a profile, Little CMS
         // telling by its colours —; a file that carries none takes the working RGB, an sRGB one being none either)
         const std::string chosen = own ? *own : options.working_rgb;
