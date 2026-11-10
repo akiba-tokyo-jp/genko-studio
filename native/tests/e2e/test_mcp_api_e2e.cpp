@@ -822,7 +822,7 @@ private slots:
         const auto book = tree(root + "/b.genko");
         const std::vector<std::pair<Json, std::string>> refusals = {
             {Json{{"op", "rotate_pages"}, {"page", 1}, {"turn", "90cw"}}, "page 1: the name is approved; a person must revoke it before the layout changes (strict_gates)"},
-            {Json{{"op", "crop_page"}, {"page", 1}, {"rect", Json::array({10, 10, 150, 200})}}, "page 1: the name is approved"},
+            {Json{{"op", "crop_page"}, {"page", 1}, {"rect", Json::array({10, 10, 150, 200})}, {"trim", "fit"}}, "page 1: the name is approved"},
             {Json{{"op", "set_canvas_size"}, {"width_mm", 20}, {"height_mm", 20}, {"relative", true}}, "page 1: the name is approved"},
             {Json{{"op", "outline_area"}, {"page", 2}, {"layer_id", "p"}, {"area", Json{{"rect", Json::array({20, 20, 40, 40})}}}, {"width_mm", 2}},
              "outline_area on a printed layer needs name_ok on page 2 (strict_gates)"},

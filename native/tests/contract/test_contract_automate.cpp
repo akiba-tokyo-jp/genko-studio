@@ -291,7 +291,7 @@ private slots:
         }
         const std::int64_t revision = storage::load_document(root / "s.genko").document.revision;
         const std::vector<Json> sized = {Json{{"op", "rotate_pages"}, {"page", 1}, {"turn", "90cw"}},
-                                         Json{{"op", "crop_page"}, {"page", 1}, {"rect", Json::array({10, 10, 150, 200})}},
+                                         Json{{"op", "crop_page"}, {"page", 1}, {"rect", Json::array({10, 10, 150, 200})}, {"trim", "fit"}},
                                          Json{{"op", "set_canvas_size"}, {"width_mm", 20}, {"height_mm", 20}, {"relative", true}}};
         for (const Json& op : sized) {
             write(root / "ops.json", Json::array({op}).dump());

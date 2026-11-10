@@ -10,12 +10,14 @@
 #include <cstdint>
 #include <limits>
 #include <set>
+#include <stdexcept>
 #include <string>
 
 #include "core/base64.hpp"
 #include "core/color_raster.hpp"
 #include "core/command_bus.hpp"
 #include "core/error.hpp"
+#include "core/layer_basics.hpp"
 #include "core/model.hpp"
 #include "render/image.hpp"
 #include "render/ops_production.hpp"
@@ -947,6 +949,10 @@ private slots:
     void anApprovedNameKeepsItsLayout() {
         Document doc = book(2);
         doc.strict_gates = true;
+        const std::string root = doc.page(0).leaf_frames()[0]->id;  // (panels not the same mirrored: a flip moves them)
+        doc = bus().apply(doc, Json::array({Json{{"op", "split_frame"}, {"page", 1}, {"frame_id", root}, {"axis", "vertical"}, {"ratio", 0.3}, {"gutter_mm", 2}}}),
+                          Actor("human:owner"))
+                  .doc;
         doc = apply(doc, R"([{"op": "name_ok", "page": 1}, {"op": "add_stroke", "page": 1, "layer": "draft", "points": [[-30, -30], [-20, -20]]},
                              {"op": "add_artboard", "width_px": 400, "height_px": 400}])",
                     "human:owner")
@@ -959,12 +965,12 @@ private slots:
             Json{{"op", "rotate_pages"}, {"page", 1}, {"turn", "90cw"}},
             Json{{"op", "rotate_pages"}, {"pages", "all"}, {"turn", "180"}},
             Json{{"op", "rotate_pages"}, {"page", 1}, {"turn", "flip_h"}},
-            Json{{"op", "crop_page"}, {"page", 1}, {"rect", Json::array({10, 10, 150, 200})}},
+            Json{{"op", "crop_page"}, {"page", 1}, {"rect", Json::array({10, 10, 150, 200})}, {"trim", "fit"}},
             Json{{"op", "set_canvas_size"}, {"page", 1}, {"width_mm", 20}, {"height_mm", 20}, {"relative", true}, {"anchor", "top_left"}},
             Json{{"op", "set_canvas_size"}, {"width_mm", 20}, {"height_mm", 20}, {"relative", true}},
             Json{{"op", "resize_pages"}, {"width_mm", 100}},
             Json{{"op", "reveal_all"}, {"page", 1}},
-            Json{{"op", "trim_page"}, {"page", 1}},
+            Json{{"op", "trim_page"}, {"page", 1}, {"trim", "fit"}},
             Json{{"op", "set_artboard"}, {"page", board.json()}, {"width_px", 600}, {"height_px", 300}},
         };
         for (const Json& op : sized) {
@@ -980,7 +986,12 @@ private slots:
         QVERIFY(!(bus().apply(doc, Json::array({sized[0]}), Actor("human:owner")).doc.page(0).frames[0].rect.width == doc.page(0).frames[0].rect.width));
         // the page whose name is not approved, a new resolution alone, the book's paper: an agent's
         QCOMPARE(error_of(doc, ops(R"([{"op": "rotate_pages", "page": 2, "turn": "90cw"}])"), "ai:bot"), std::string("(applied)"));
-        QCOMPARE(error_of(doc, ops(R"([{"op": "resize_pages", "dpi": 600}])"), "ai:bot"), std::string("(applied)"));
+        {  // (an artboard keeps its pixels: a new resolution changes its size in mm — refused while its name is approved)
+            Document plain = doc;
+            plain.pages.pop_back();
+            QCOMPARE(error_of(plain, ops(R"([{"op": "resize_pages", "dpi": 600}])"), "ai:bot"), std::string("(applied)"));
+            QVERIFY(error_of(doc, ops(R"([{"op": "resize_pages", "dpi": 600}])"), "ai:bot").find("page " + board.repr() + ": " + words) != std::string::npos);
+        }
         QCOMPARE(error_of(doc, ops(R"([{"op": "set_page_spec", "preset": "b5", "move": true}])"), "ai:bot"), std::string("(applied)"));
         // set_frame's border, bleed and bowed edges are not the layout (Python's: open to anyone after the name)
         const std::string frame = doc.page(0).leaf_frames()[0]->id;
@@ -1036,17 +1047,18 @@ private slots:
             Json{{"op", "auto_adjust"}, {"id", ""}, {"mode", "contrast"}},
         };
         const auto drawn_words = [](const Json& op) { return op["op"].get<std::string>() + " on a printed layer needs name_ok on page 1 (strict_gates)"; };
-        const auto layer_bytes = [](const Document& d, const char* id) {
+        const auto layer_of = [](const Document& d, const char* id) -> const genko::core::Layer& {
             for (const auto& layer : d.page(0).layers)
-                if (layer.id == id) return layer.raster_png;
-            return genko::core::Bytes();
+                if (layer.id == id) return layer;
+            throw std::runtime_error(std::string("no layer ") + id);
         };
         Document strict = doc;
         strict.strict_gates = true;
         for (const Json& each : drawing) {
             const Json printed = on("paint", each);
             // (each draws: the book without strict_gates changes the layer)
-            QVERIFY2(!(layer_bytes(bus().apply(doc, Json::array({printed}), Actor("ai:bot")).doc, "paint") == layer_bytes(doc, "paint")), printed.dump().c_str());
+            QVERIFY2(!genko::core::same_locked_look(layer_of(bus().apply(doc, Json::array({printed}), Actor("ai:bot")).doc, "paint"), layer_of(doc, "paint")),
+                     printed.dump().c_str());
             for (const char* actor : {"ai:bot", "human:owner", "legacy:unknown"}) {
                 const std::string error = error_of(strict, Json::array({printed}), actor);
                 QVERIFY2(error.find(drawn_words(each)) != std::string::npos, (printed.dump() + " " + actor + " → " + error).c_str());

@@ -22,6 +22,7 @@
 #include <functional>
 #include <vector>
 
+#include "core/json_depth.hpp"
 #include "core/ops_schema.hpp"
 #include "core/pyconv.hpp"
 #include "service/studio_service.hpp"
