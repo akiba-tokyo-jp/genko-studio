@@ -292,7 +292,8 @@
         "native/src/api/cli.cpp",
         "native/tests/unit/test_patterns.cpp",
         "native/tests/contract/test_contract_patterns.cpp",
-        "native/tests/gui/test_gui_patterns.cpp"
+        "native/tests/gui/test_gui_patterns.cpp",
+        "native/src/app/brush_settings_panel.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -312,7 +313,7 @@
         "gap": "ブラシの「紙質」（取り込んだ画像・濃さ・倍率・回転・反転・濃淡反転・乗算/減算・紙面固定/線ごと）はある。パターン（パターンパネルの資産）から選ぶ入口、明るさ・コントラスト、各先端ごとの適用と深さの揺らぎ、PS のテクスチャの各モードがない",
         "note": "パターン資産は pattern.* の行（rows-type）が前提"
       },
-      "remaining": "ダブのブラシのテクスチャをパターンから選ぶ窓は E2（ブラシ設定パネル）。今は genko patterns texture の絵を define_brush の dabs.texture.pattern に渡す"
+      "remaining": "ダブのブラシのテクスチャは ブラシ設定 パネルのテクスチャの節（パターンから…）でも選べる。CLI は genko patterns texture の絵を define_brush の dabs.texture.pattern に渡す"
     },
     {
       "id": "channel.delete",
@@ -2659,7 +2660,7 @@
         "gap": "選択範囲の枠の □・○・◇ で移動・拡大縮小・回転・傾き（Shift で 15°・縦横比）はある。ドラッグごとに確定・再標本化し、一度の確定にまとめる変形の箱（プレビュー・Enter/Esc）と Ctrl+T の入口が無い。選択範囲が要り、フォルダー・台詞・マスクは一緒に動かない",
         "note": ""
       },
-      "remaining": "上の欄に X・Y・W・H・角度・傾きの数の欄と基準点は無い（変形を数で決める… で）。吸着（C-d）はまだ使わない"
+      "remaining": "上の欄に X・Y・W・H・角度・傾きの数の欄と基準点は無い（変形を数で決める… で）"
     },
     {
       "id": "edit.keyboardShortcuts",
@@ -2751,7 +2752,8 @@
       "evidence": [
         "native/src/app/shortcuts_dialog.cpp",
         "native/src/app/menu_look.cpp",
-        "native/tests/gui/test_gui_workspace.cpp"
+        "native/tests/gui/test_gui_workspace.cpp",
+        "native/src/app/main_window_edit.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -3620,7 +3622,8 @@
         "native/src/app/main_window_edit.cpp",
         "native/src/app/preferences.cpp",
         "native/tests/gui/test_gui_anim.cpp",
-        "native/tests/gui/test_gui_actions.cpp"
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/tests/gui/test_gui_prefs.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -3638,7 +3641,8 @@
         ],
         "gap": "プラグインを使うか・どの Python か・動かしてよいものの設定と、フォルダーを開くはある。追加のプラグインフォルダー・拡張パネル・スクリプトの接続の設定が無い",
         "note": "画面だけの項目。Genko の入口は「プラグインの設定…」"
-      }
+      },
+      "note": "上流 prefs.rs の PlugIns の show_extension_panels・allow_scripts_to_connect・generator_enabled は値を保つだけで上流のどこからも読まれない欄なので作らない（スクリプトの接続にあたるものは 連携 の制御チャンネル、ジェネレーターは 画像アセット）。"
     },
     {
       "id": "edit.preferences.rawDefaults",
@@ -7285,7 +7289,9 @@
       "evidence": [
         "native/src/app/scanner.cpp",
         "native/src/app/main_window_file.cpp",
-        "native/tests/gui/test_gui_actions.cpp"
+        "native/tests/gui/test_gui_actions.cpp",
+        "native/src/app/main_window_materials.cpp",
+        "native/tests/gui/test_gui_effects.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -7387,7 +7393,9 @@
         "native/src/api/cli.cpp",
         "native/tests/contract/test_contract_open.cpp",
         "native/tests/contract/test_contract_file_info.cpp",
-        "native/tests/gui/test_gui_file.cpp"
+        "native/tests/gui/test_gui_file.cpp",
+        "native/tests/contract/test_contract_raw.cpp",
+        "native/tests/contract/test_contract_pcraft.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -7404,7 +7412,7 @@
         "gap": "開けるのは Genko の原稿（.genko）だけ。PNG/JPEG/TIFF/PSD などの画像ファイルを 1 つの文書として開けない（ページへの配置・PSD 取り込みで代替）",
         "note": "画像を開く形は「1 ページの原稿」を作る形にするか要設計"
       },
-      "remaining": "PSD・PSB（F-d）・カメラ RAW（F-e）・.pcraft（F-f）を 1 冊として開く枝は各群（今は断りの言葉を分けて知らせる）"
+      "remaining": "PSD・PSB・カメラ RAW・.pcraft も 1 冊として開く。各形式の制限は format:PSD-PSB・カメラ RAW・document:pcraft-format の行"
     },
     {
       "id": "file.openAs",
@@ -9410,7 +9418,9 @@
         "native/src/app/main_window_smart.cpp",
         "native/tests/unit/test_smart_filters.cpp",
         "native/tests/contract/test_contract_smart.cpp",
-        "native/tests/gui/test_gui_smart.cpp"
+        "native/tests/gui/test_gui_smart.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -12081,7 +12091,9 @@
         "native/src/app/main_window_transform.cpp",
         "native/tests/unit/test_transform.cpp",
         "native/tests/contract/test_contract_transform.cpp",
-        "native/tests/gui/test_gui_transform.cpp"
+        "native/tests/gui/test_gui_transform.cpp",
+        "native/src/app/filter_menu.cpp",
+        "native/tests/gui/test_gui_filters.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -12102,7 +12114,7 @@
         "gap": "ゆがみの道具（押す・縮める・ふくらませる・右/左回りの渦、幅・強さ）はあり、ペンの線の点も動かす（試験あり）。復元・滑らかに・左に押す・固定/解除・全体を復元・密度/筆圧/速さ・点ごとの筆圧・メッシュ・複数のなぞりを一度に流す入口がない。CMYK/Lab のページでは 8 ビットの絵を借りて処理、16/32 ビットのレイヤーは未確認",
         "note": ""
       },
-      "remaining": "Genko にフィルター メニューが無いので 編集 → ゆがみ…（Ctrl+Shift+X）に置いた。顔立ちを調整・ブラシの再構築の不透明度などの欄は無い"
+      "remaining": "入口は フィルター → ゆがみ…（Ctrl+Shift+X）。顔立ちを調整・ブラシの再構築の不透明度などの欄は無い"
     },
     {
       "id": "filter.noise.addNoise",
@@ -21644,7 +21656,9 @@
         "native/src/app/main_window_align.cpp",
         "native/src/app/layer_panel.cpp",
         "native/tests/contract/test_contract_align.cpp",
-        "native/tests/gui/test_gui_align.cpp"
+        "native/tests/gui/test_gui_align.cpp",
+        "native/tests/gui/test_gui_layers.cpp",
+        "native/tests/contract/test_contract_layers.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -21666,7 +21680,7 @@
         "gap": "透明部分の保護（lock_alpha）と全ロック（locked）だけ。画素だけのロック・位置のロック・アートボードのロックが無い。引数なしで全ロックを切り替える形も無い",
         "note": ""
       },
-      "remaining": "アートボードのロックは無い（アートボードは PC5）。画像（ピクセル）のロックは今の「ロック」（locked）で、Genko では移動・変形も止める"
+      "remaining": "アートボードの内外への自動ネストを防ぐロック（lock_nest）と すべて（lock_all）がある。lock_nest は PSD と .pcraft のために持ち、Genko のアートボードはページなので描き方は変わらない。画像（ピクセル）のロックは今の「ロック」（locked）で、Genko では移動・変形も止める"
     },
     {
       "id": "layer.maskAllObjects",
@@ -33962,7 +33976,9 @@
         "native/src/render/ops_paths.cpp",
         "native/src/render/ops_shapes.cpp",
         "native/src/app/main_window_shapes.cpp",
-        "native/tests/gui/test_gui_shapes.cpp"
+        "native/tests/gui/test_gui_shapes.cpp",
+        "native/src/app/main_window_type.cpp",
+        "native/tests/gui/test_gui_type.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -34059,7 +34075,9 @@
         "native/src/render/path_trace.cpp",
         "native/src/app/main_window_paths.cpp",
         "native/tests/contract/test_contract_paths.cpp",
-        "native/tests/gui/test_gui_paths.cpp"
+        "native/tests/gui/test_gui_paths.cpp",
+        "native/src/app/main_window_type.cpp",
+        "native/tests/gui/test_gui_type.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -35910,7 +35928,10 @@
         "native/src/render/ops_smart.cpp",
         "native/src/app/main_window_smart.cpp",
         "native/tests/unit/test_smart_stack.cpp",
-        "native/tests/gui/test_gui_smart.cpp"
+        "native/tests/gui/test_gui_smart.cpp",
+        "native/src/app/main_window_type.cpp",
+        "native/tests/gui/test_gui_type.cpp",
+        "native/tests/contract/test_contract_type.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -35923,7 +35944,7 @@
         "gap": "type.rasterize と同じ（メニューの入口）。",
         "note": "手間は type.rasterize に計上。"
       },
-      "remaining": "ラスタライズした台詞のレイヤーは、ほかのレイヤーと同じくコマの枠線・効果線の下に描く。高精度のページでは、ふちの半透明の画素をほかのレイヤーと同じく光の強さで混ぜる。Genko に 書式（Type）メニューは無いので、入口は レイヤー → ラスタライズ → テキスト と同じ op（rasterize_lines）"
+      "remaining": "ラスタライズした台詞のレイヤーは、ほかのレイヤーと同じくコマの枠線・効果線の下に描く。高精度のページでは、ふちの半透明の画素をほかのレイヤーと同じく光の強さで混ぜる。入口は 書式 → テキストレイヤーをラスタライズ と レイヤー → ラスタライズ → テキスト（同じ op rasterize_lines）"
     },
     {
       "id": "type.replaceAllMissingFonts",
@@ -36212,7 +36233,9 @@
         "native/src/app/main_window_transform.cpp",
         "native/tests/contract/test_contract_transform.cpp",
         "native/tests/gui/test_gui_transform.cpp",
-        "native/tests/unit/test_psd_text.cpp"
+        "native/tests/unit/test_psd_text.cpp",
+        "native/src/app/main_window_type.cpp",
+        "native/tests/gui/test_gui_type.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -38316,7 +38339,8 @@
         "native/src/app/canvas_scale.cpp",
         "native/src/core/units.cpp",
         "native/src/app/view_units.cpp",
-        "native/tests/gui/test_gui_guides.cpp"
+        "native/tests/gui/test_gui_guides.cpp",
+        "native/src/app/main_window_output.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -43804,8 +43828,6 @@
       "implementation_status": "実装済み（PC2d、PC2 として統合 5ebcbe6）",
       "acceptance_status": "Linux V3 合格（PC2 の出口、凍結 5ebcbe6、2026-10-18）。Windows は配布前に実機で（deferred）",
       "evidence": [
-        "build/photocraft-v1/regression-v6/execution.json",
-        "build/photocraft-v1/gui-settled-probe/visual-observations.json",
         "native/src/core/color_model.cpp",
         "native/src/core/ink.cpp",
         "native/src/core/channels.cpp",
@@ -43827,7 +43849,7 @@
         "native/src/render/color_edit.cpp",
         "native/src/render/ink_edit.cpp"
       ],
-      "implementation_scope": "RGBA16/32の元bytes保存・再読込、露光量調整層、実CLI/PNG出力/disk Undo-Redo/GC/資源拒否、実GUI。汎用ファイル入力・全描画style・形式互換・上流全画素同等性・復旧・全Release/ASan・Windows・配布は未完。",
+      "implementation_scope": "高精度（RGBA16/32）・インキ（CMYK・グレー・Lab・マルチチャンネル・ダブルトーン）のページの保存・再読込・合成・編集・書き出し（PC1〜PC2d）。断ったままの所は limitations のとおり。Windows の実機の受け入れは配布前（deferred）。",
       "pc0": {
         "date": "2026-10-16",
         "cpp_base": "962faa4",
@@ -43918,7 +43940,10 @@
         "native/tests/gui/test_gui_file.cpp",
         "native/src/render/psd_filters.cpp",
         "native/src/core/filter_upstream.cpp",
-        "native/tests/unit/test_psd_smart.cpp"
+        "native/tests/unit/test_psd_smart.cpp",
+        "native/src/render/psd_effects.cpp",
+        "native/tests/unit/test_layer_styles.cpp",
+        "native/tests/contract/test_contract_psd_smart.cpp"
       ],
       "pc0": {
         "date": "2026-10-16",
@@ -43942,7 +43967,7 @@
         "note": "上流は書き換えなければバイト単位で同じに戻る。document:color-depth-model が前提"
       },
       "note": "PSD のスマートオブジェクトは PC3 A3（未統合）で済み: 配置レイヤー（SoLd・SoLE・PlLd）と全体のブロック lnk2・lnk3・lnkD の埋め込みファイルを SO として読み、SO を配置レイヤーと lnk2 の liFD として書く（読んだブロックと項目は場所と中身が同じ間そのまま書き戻す）。PSD・PSB を SO の中身のファイルとして 16・32 bit のまま読む（render/psd_smart.cpp、render/import_psd.cpp、formats/psd_export.cpp、render/smart_decode.cpp、試験 test_psd_smart・test_contract_psd_smart）。この行の残り（未知のタグ付きブロック・リソースを保った往復、RGB の 16/32 bit のレイヤーの読み書き、レイヤースタイル・ベクターマスク等、PSB の書き出し）は PC4。",
-      "remaining": "レイヤー効果・Blend If・塗りの不透明度・ラベルの色は塊のまま保って書き戻すが、描かない・画面に出さない（PC5 のレイヤースタイル・混合オプション）。フォルダーは PSD のグループに書かないので、フォルダーの保った塊は書き戻さない。読み替え（embedded_profile の convert・assign）・引き伸ばしのある 16・32 bit の取り込み、深さの違うページへの取り込み、本の高精度の上限（1 GiB）を越える取り込みと配置レイヤーの絵は 8 bit（上限のときは知らせる）。PSD で書けない大きさは自動で PSB にせず、断って PSB を勧める。Photoshop の実機では確かめていない（psd-tools とこの版の読み手）配置レイヤーの Photoshop のスマートフィルター（filterFX）は表にあるものだけを Genko のスマートフィルターとして読む（PC4 D7。1 つでも表に無ければ、またはフィルターマスクが何かを隠せば Photoshop の絵のまま。フィルターマスクの絵は読まない。並びの向きは実機で未確認）。"
+      "remaining": "レイヤー効果（lmfx・lfx2）・塗りの不透明度（iOpa）・Blend If は層のスタイルとして読み、描き、変えていなければ塊をそのまま書き戻す（PC4 E6）。ラベルの色は塊のまま保って書き戻すが、画面に出さない。フォルダーは PSD のグループに書かないので、フォルダーの保った塊は書き戻さない。読み替え（embedded_profile の convert・assign）・引き伸ばしのある 16・32 bit の取り込み、深さの違うページへの取り込み、本の高精度の上限（1 GiB）を越える取り込みと配置レイヤーの絵は 8 bit（上限のときは知らせる）。PSD で書けない大きさは自動で PSB にせず、断って PSB を勧める。Photoshop の実機では確かめていない（psd-tools とこの版の読み手）配置レイヤーの Photoshop のスマートフィルター（filterFX）は表にあるものだけを Genko のスマートフィルターとして読む（PC4 D7。1 つでも表に無ければ、またはフィルターマスクが何かを隠せば Photoshop の絵のまま。フィルターマスクの絵は読まない。並びの向きは実機で未確認）。"
     },
     {
       "id": "format:camera-RAW",
@@ -44300,7 +44325,8 @@
     "qt_skip": 0,
     "all_platforms_accepted": false,
     "integration_done": false,
-    "review_final": "passed・現source照合済み"
+    "review_final": "passed・現source照合済み",
+    "note": "2026-10-06 の最初の RGBA16/32＋露光量の限定 V1 の記録（履歴）。今の実装と受け入れの状態は各行の implementation_status・acceptance_status と HANDOFF.md の PC1〜PC6 の出口の節が正。"
   },
   "pc0_summary": {
     "date": "2026-10-16",
