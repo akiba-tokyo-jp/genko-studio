@@ -799,6 +799,46 @@ private slots:
         QCOMPARE(server.stop(), 0);
     }
 
+    // (PC6, the review's P1-1 and P2-1) /v1/apply in a book of strict_gates: an agent's token is refused the size of a page
+    // whose name is approved (rotate_pages, crop_page, set_canvas_size — the panels move with the page), and a printed layer
+    // drawn on before the name (outline_area, a PC op), the book as it was; a person's token turns the page as before.
+    void httpStrictGates() {
+        const QString dir = fresh("strict");
+        const QString root = dir + "/root";
+        write_file(dir + "/config/tokens.json", R"({"tok-ai": {"actor": "ai:bot"}, "tok-human": {"actor": "human:owner"}})");
+        Server server({"serve", "--root", root, "--port", "0"}, dir + "/config");
+        QVERIFY(server.port != 0);
+        const std::uint16_t port = server.port;
+        const auto post = [port](const std::string& path, const std::string& body, const std::string& token = "tok-ai") {
+            return http(port, request_text("POST", path, port, token, body));
+        };
+        const auto apply = [](const Json& ops) { return genko::core::dump_python(Json::object({{"path", "b.genko"}, {"ops", ops}})); };
+        QCOMPARE(post("/v1/new", R"({"dest": "b.genko", "pages": 2})").status, 200);
+        const Response made = post("/v1/apply",
+                                   apply(Json::array({Json{{"op", "set_meta"}, {"strict_gates", true}}, Json{{"op", "name_ok"}, {"page", 1}},
+                                                      Json{{"op", "add_layer"}, {"page", 2}, {"kind", "paint"}, {"id", "p"}}})),
+                                   "tok-human");
+        QVERIFY2(made.status == 200, made.body.c_str());
+        const auto book = tree(root + "/b.genko");
+        const std::vector<std::pair<Json, std::string>> refusals = {
+            {Json{{"op", "rotate_pages"}, {"page", 1}, {"turn", "90cw"}}, "page 1: the name is approved; a person must revoke it before the layout changes (strict_gates)"},
+            {Json{{"op", "crop_page"}, {"page", 1}, {"rect", Json::array({10, 10, 150, 200})}, {"trim", "fit"}}, "page 1: the name is approved"},
+            {Json{{"op", "set_canvas_size"}, {"width_mm", 20}, {"height_mm", 20}, {"relative", true}}, "page 1: the name is approved"},
+            {Json{{"op", "outline_area"}, {"page", 2}, {"layer_id", "p"}, {"area", Json{{"rect", Json::array({20, 20, 40, 40})}}}, {"width_mm", 2}},
+             "outline_area on a printed layer needs name_ok on page 2 (strict_gates)"},
+        };
+        for (const auto& [op, words] : refusals) {
+            const Response r = post("/v1/apply", apply(Json::array({op})));
+            QVERIFY2((r.status == 400 || r.status == 409) && str(r.json()["error"]).find(words) != std::string::npos,
+                     (genko::core::dump_python(op) + " → " + r.body).c_str());
+        }
+        QVERIFY(tree(root + "/b.genko") == book);
+        // a person's token: as before
+        const Response turned = post("/v1/apply", apply(Json::array({refusals[0].first})), "tok-human");
+        QVERIFY2(turned.status == 200, turned.body.c_str());
+        QCOMPARE(server.stop(), 0);
+    }
+
     // `genko token`: add (owner-only file), list (8 characters of each), revoke by prefix; actors other than human: /
     // ai: refused.
     void tokens() {

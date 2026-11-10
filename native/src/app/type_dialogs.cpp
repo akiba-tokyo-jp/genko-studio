@@ -47,7 +47,7 @@ std::set<std::string> user_dictionary() {
 std::vector<service::spell::Notation> notation_table() {
     const auto store = settings();
     const Json table = core::prefs::value(*store, "type.notations");
-    return service::spell::notations_of(table.is_string() ? Json::parse(table.get<std::string>(), nullptr, false) : Json());
+    return service::spell::notations_of_text(table.is_string() ? table.get<std::string>() : std::string());
 }
 
 // The text a finding is in, as the book holds it now (none: gone).

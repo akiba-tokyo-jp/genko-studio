@@ -23,6 +23,7 @@
 #include "app/theme.hpp"
 #include "app/view_units.hpp"
 #include "core/error.hpp"
+#include "core/json_depth.hpp"
 
 namespace genko::app {
 
@@ -186,6 +187,7 @@ GuideLayoutDialog::GuideLayoutDialog(QWidget* parent, const core::Page& page, co
         const QString name = preset->currentData().toString();
         if (name.isEmpty()) return;
         const QString kept = settings()->value(QStringLiteral("guide_layouts/") + name).toString();
+        if (core::too_deep(kept.toStdString())) return;  // (PC6, the review's P3-2: as one that is not JSON)
         try {
             put(Json::parse(kept.toStdString()));
         } catch (const std::exception&) {

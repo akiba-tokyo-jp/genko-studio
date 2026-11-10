@@ -58,6 +58,7 @@
 #include "core/prefs_table.hpp"
 #include "core/pynum.hpp"
 #include "core/type_styles.hpp"
+#include "core/json_depth.hpp"
 
 namespace genko::app::preferences {
 
@@ -125,6 +126,7 @@ bool cross_while_drawing() { return pref("cursors.showOnlyCrosshairWhilePainting
 std::optional<core::Json> default_type_styles() {
     const QByteArray kept = settings()->value(QStringLiteral("type/default_styles")).toString().toUtf8();
     if (kept.isEmpty()) return std::nullopt;
+    if (core::too_deep(kept.toStdString())) return std::nullopt;  // (PC6, the review's P3-2: as one that is not JSON)
     try {
         const core::Json formatting = core::type_styles::checked_defaults(core::Json::parse(kept.toStdString()));
         if (formatting.is_null()) return std::nullopt;

@@ -109,6 +109,12 @@ private slots:
         QCOMPARE(QString::fromStdString(table[1].from), QStringLiteral("ヶ月"));
         QCOMPARE(sp::notations_json(table).dump(), std::string(R"([{"from":"出来る","to":"できる"},{"from":"ヶ月","to":"か月"}])"));
         QVERIFY(sp::notations_of(Json("not a list")).empty());
+        // (PC6, the review's P3-2: the setting's text — not JSON, or deeper than any reader of it goes — is no table)
+        QCOMPARE(sp::notations_of_text(R"([["出来る", "できる"]])").size(), std::size_t{1});
+        QVERIFY(sp::notations_of_text("not json").empty() && sp::notations_of_text("").empty());
+        const std::string deep = "[[\"a\", \"b\"], " + std::string(500000, '[') + std::string(500000, ']') + "]";
+        QVERIFY(sp::notations_of_text(deep).empty());
+        QCOMPARE(sp::notations_of_text("[" + std::string(250, '[') + std::string(250, ']') + ", [\"a\", \"b\"]]").size(), std::size_t{1});
     }
 
     // A book: its lines in reading order, then its type layers; graphemes; the sound effects left out; the notation table

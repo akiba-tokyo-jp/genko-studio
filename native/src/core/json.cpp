@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "core/error.hpp"
+#include "core/json_depth.hpp"
 #include "core/pynum.hpp"
 
 namespace genko::core {
@@ -653,6 +654,34 @@ std::string dump_canonical(const Json& value) {
     options.key_separator = ":";
     options.sort_keys = true;
     return dump(value, options);
+}
+
+int json_nesting(std::string_view text, int limit) {
+    int depth = 0;
+    int deepest = 0;
+    bool in_string = false;
+    bool escaped = false;
+    for (const char c : text) {
+        if (in_string) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                in_string = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            in_string = true;
+        } else if (c == '[' || c == '{') {
+            deepest = std::max(deepest, ++depth);
+            if (deepest >= limit) return deepest;
+        } else if (c == ']' || c == '}') {
+            if (depth > 0) --depth;
+        }
+    }
+    return deepest;
 }
 
 std::optional<std::string> utf8_error(std::string_view bytes) {

@@ -10,6 +10,7 @@
 #include <algorithm>
 
 #include "app/config.hpp"
+#include "core/json_depth.hpp"
 
 namespace genko::app {
 
@@ -78,7 +79,9 @@ render::measure::DataPoints MeasurementLog::data_points() {
     const QString text = settings()->value(QStringLiteral("measure/points")).toString();
     if (text.isEmpty()) return {};
     try {
-        return render::measure::data_points_from_json(Json::parse(text.toStdString()));
+        const std::string json = text.toStdString();
+        if (core::too_deep(json)) return {};  // (PC6, the review's P3-2: as a setting that is not JSON)
+        return render::measure::data_points_from_json(Json::parse(json));
     } catch (const Json::exception&) {  // (a setting that is not JSON: every point, as at first)
         return {};
     }

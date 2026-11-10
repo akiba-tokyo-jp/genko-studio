@@ -1955,7 +1955,7 @@ int spell_command(const QStringList& args, bool ascii) {
         const Json words = core::prefs::value(*settings, "type.userDictionary");
         options.user = service::spell::user_words(words.is_string() ? words.get<std::string>() : std::string());
         const Json table = core::prefs::value(*settings, "type.notations");
-        options.notations = service::spell::notations_of(table.is_string() ? Json::parse(table.get<std::string>(), nullptr, false) : Json());
+        options.notations = service::spell::notations_of_text(table.is_string() ? table.get<std::string>() : std::string());
     }
     const storage::LoadResult loaded = storage::load_document(dir);
     const std::vector<service::spell::Finding> findings = service::spell::check(loaded.document, options);

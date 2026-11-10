@@ -34,6 +34,7 @@
 #include "render/page.hpp"
 #include "render/raw.hpp"
 #include "service/wording.hpp"
+#include "core/json_depth.hpp"
 
 namespace genko::app::camera_raw_open {
 
@@ -85,7 +86,7 @@ void set_workflow(const Workflow& w) {
 std::optional<Json> remembered(const std::string& ref) {
     const auto store = settings();
     const QString text = store->value(QStringLiteral("raw/remembered/%1").arg(QString::fromStdString(ref).remove(QStringLiteral("sha256:")))).toString();
-    if (text.isEmpty()) return std::nullopt;
+    if (text.isEmpty() || core::too_deep(text.toStdString())) return std::nullopt;  // (PC6, the review's P3-2)
     try {
         Json read = Json::parse(text.toStdString());
         if (read.is_object()) return read;

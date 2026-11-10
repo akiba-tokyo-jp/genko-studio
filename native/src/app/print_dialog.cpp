@@ -41,6 +41,7 @@
 #include "render/image.hpp"
 #include "render/not_yet_ported.hpp"
 #include "render/page.hpp"
+#include "core/json_depth.hpp"
 
 namespace genko::app {
 
@@ -228,7 +229,7 @@ int print_pages(const core::Document& episode, QPrinter& printer, const std::vec
 
 fp::Setup last_setup() {
     const QString kept = settings()->value(QStringLiteral("print/last")).toString();
-    if (kept.isEmpty()) return {};
+    if (kept.isEmpty() || core::too_deep(kept.toStdString())) return {};  // (PC6, the review's P3-2: too deep, as not JSON)
     const core::Json value = core::Json::parse(kept.toStdString(), nullptr, false);
     return value.is_discarded() ? fp::Setup{} : fp::Setup::from_json(value);
 }

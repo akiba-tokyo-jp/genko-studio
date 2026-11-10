@@ -642,6 +642,15 @@ private slots:
         }
         doc.page_locks = Json{{doc.page(0).id, "human:other"}};
         QVERIFY(refusal(doc, one(Json{{"op", "rotate_pages"}, {"pages", "all"}, {"turn", "180"}})).find("locked by human:other") != std::string::npos);
+        // (PC6, the review's P3-3: as the bus asks of an op on a page — an actor with an agent's rights, the control
+        // channel's, goes through no lock, one under its own name either; the person of the name does)
+        try {
+            bus().apply(doc, one(Json{{"op", "rotate_pages"}, {"pages", "all"}, {"turn", "180"}}), core::Actor::with_agent_rights("human:other"));
+            QFAIL("an agent's rights through a lock");
+        } catch (const core::ApplyError& error) {
+            QVERIFY2(std::string(error.what()).find("page 1 locked by human:other") != std::string::npos, error.what());
+        }
+        QCOMPARE(refusal(doc, one(Json{{"op", "rotate_pages"}, {"pages", "all"}, {"turn", "180"}}), "human:other"), std::string("(applied)"));
     }
 
     // A tone's screen turned with its page, its look kept (the coordinator's decision after the PC3 review): lines across

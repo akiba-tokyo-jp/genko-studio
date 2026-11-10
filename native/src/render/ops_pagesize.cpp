@@ -107,15 +107,10 @@ std::vector<std::size_t> target_pages(const Document& doc, const Json& op, bool 
     return {core::require_page(doc, op)};
 }
 
-// Each page asked as an op on it is (a page someone else holds is refused).
+// Each page asked as an op on it is (a page someone else holds is refused; PC6, the review's P3-3: the bus's own check —
+// an actor with an agent's rights never goes through a lock, its own name's either: core::check_page_held).
 void check_locks(const Document& doc, const std::vector<std::size_t>& pages, const core::Actor& actor) {
-    for (const std::size_t at : pages) {
-        const Page& page = doc.page(at);
-        const Json* owner = core::get(doc.page_locks, page.id);
-        if (owner != nullptr && core::py_truthy(*owner) && !(owner->is_string() && owner->get<std::string>() == actor.name())) {
-            throw OpError("page " + page.index.repr() + " locked by " + core::py_str(*owner));
-        }
-    }
+    for (const std::size_t at : pages) core::check_page_held(doc, at, actor);
 }
 
 const Page* numbered(const Document& doc, const Num& index) {

@@ -16,6 +16,7 @@
 #include <tuple>
 
 #include "core/error.hpp"
+#include "core/json_depth.hpp"
 #include "core/layer_basics.hpp"
 #include "core/ruby.hpp"
 #include "core/type_text.hpp"
@@ -311,6 +312,11 @@ std::vector<Notation> notations_of(const Json& raw) {
         if (out.size() >= kMostNotations) break;
     }
     return out;
+}
+
+std::vector<Notation> notations_of_text(std::string_view text) {
+    if (core::too_deep(text)) return {};
+    return notations_of(Json::parse(text, nullptr, false));
 }
 
 Json notations_json(const std::vector<Notation>& table) {
