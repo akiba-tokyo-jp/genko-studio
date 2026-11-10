@@ -354,6 +354,43 @@ private slots:
         QVERIFY(b.canvas()->snap_slices);
     }
 
+    // PC6 (the audit's view.snapTo.slices): スナップ先 → スライス — with スナップ on, a slice drawn from near a user slice's
+    // edge (3 screen pixels off: within the reach of 8) starts on it; スライス off, it starts where it was pressed; the auto
+    // slices' edges are no targets (the paper's edge, an auto slice's left one, with ドキュメントの境界 off: not snapped to).
+    void slicesSnapToTheUserSlicesEdges() {
+        Book b;
+        b.window->apply_ops(Json::array({Json{{"op", "add_slice"}, {"page", 1}, {"rect_mm", {10, 5, 15, 10}}}}));  // (x 10..25, y 5..15)
+        if (!b.act("act_snap_on")->isChecked()) b.act("act_snap_on")->trigger();
+        if (b.act("act_snap_grid")->isChecked()) b.act("act_snap_grid")->trigger();
+        if (b.act("act_snap_bounds")->isChecked()) b.act("act_snap_bounds")->trigger();  // (the paper's edges and middle no targets)
+        QVERIFY(b.canvas()->snap_on && b.canvas()->snap_slices && !b.canvas()->snap_bounds && !b.canvas()->grid_snap);
+        QVERIFY(b.canvas()->snap_reach() > 4.0 / b.canvas()->scale());
+        const double off = 3.0 / b.canvas()->scale();  // (3 screen pixels, in mm)
+        b.act("act_slice_tool")->trigger();
+        const auto drawn = [&](const QPointF& from, const QPointF& to) {
+            const std::size_t before = b.slices().list.size();
+            b.drag(from, to);
+            if (b.slices().list.size() != before + 1) return std::array<double, 4>{-1, -1, -1, -1};
+            const auto r = b.slices().list.back().rect_mm;
+            b.act("act_undo")->trigger();
+            return r;
+        };
+        // (from 3 pixels right of its right edge, x 25, and below its bottom one, y 15: on both)
+        auto r = drawn(QPointF(25 + off, 15 + off), QPointF(35, 27));
+        QVERIFY2(std::fabs(r[0] - 25) < 1e-3 && std::fabs(r[1] - 15) < 1e-3, Json(r).dump().c_str());
+        // (スナップ先 → スライス off: where it was pressed)
+        b.act("act_snap_slices")->trigger();
+        QVERIFY(!b.canvas()->snap_slices);
+        r = drawn(QPointF(25 + off, 15 + off), QPointF(35, 27));
+        QVERIFY2(std::fabs(r[0] - 25) > off / 2 && std::fabs(r[1] - 15) > off / 2, Json(r).dump().c_str());
+        b.act("act_snap_slices")->trigger();
+        QVERIFY(b.canvas()->snap_slices);
+        // (the auto slice left of it, x 0..10 and y 5..15, has its left edge at x 0: pressed 3 pixels right of it, not on it —
+        // its top and bottom, the user slice's too, are)
+        r = drawn(QPointF(off, 5 + off), QPointF(6, 12));
+        QVERIFY2(std::fabs(r[0]) > off / 2 && std::fabs(r[1] - 5) < 1e-3, Json(r).dump().c_str());
+    }
+
     // Web 用に保存（従来）… by the page's slices: スライスごとに書き出す (on when the page has slices), a folder asked, a picture
     // a slice in its images/ and the HTML.
     void saveForWebBySlices() {

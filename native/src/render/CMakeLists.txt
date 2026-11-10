@@ -238,6 +238,8 @@ genko_library(genko_render
     zstd.cpp
     pcraft_manifest.cpp
     pcraft_read.cpp
+    # PC6 (a .pcraft's layer styles: upstream's effects, fill opacity and Blend If both ways)
+    pcraft_styles.cpp
     # PC4 F-e (カメラ RAW: LibRaw の包み・現像の設定と色・埋め込みプレビュー、RAW のスマートオブジェクトの op)
     raw.cpp
     ops_camera_raw.cpp

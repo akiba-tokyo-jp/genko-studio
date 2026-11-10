@@ -32,6 +32,9 @@ struct ReadContext {
     core::Document* book = nullptr;
     std::optional<std::filesystem::path> beside;
     std::uint64_t pictures_most = 4ull << 30;  // (the pictures read beside it together: the book's 4 GiB; less in tests)
+    // (PC6, layer-styles@1) an object holding upstream's "effects", "fill_opacity" (and "blend_if") — a layer comp's
+    // appearance — as Genko's style (render/pcraft_styles; null: none); none: such effects left out, said
+    std::function<core::Json(const core::Json& holder)> style;
 };
 
 struct WriteContext {
@@ -40,6 +43,8 @@ struct WriteContext {
     std::function<void(std::string)> say;               // a note of the writing
     core::Json* document = nullptr;                     // (PC5 J-a) the whole document (a row's keys beside its own)
     const core::Document* book = nullptr;               // (PC5 I-d) the book the page is written from
+    // (PC6, layer-styles@1) a style as upstream's EffectsM (render/pcraft_styles); none: a style's effects left out, said
+    std::function<core::Json(const core::Json& style)> effects;
 };
 
 struct Row {

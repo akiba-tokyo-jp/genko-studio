@@ -24,7 +24,8 @@
 // Python's kinds by the nearest, said), fill layers (a colour, a gradient laid out over the canvas, a pattern of the
 // book's), pen layers of one shape part as shape layers (more parts or lines with them: a group), smart objects as smart
 // objects of their file (contents of a page: a .pcraft inside, written the same way), with their smart filters PhotoCraft
-// has (core::to_upstream) and their mask; each layer's mask, vector mask, link, locks, clipping, opacity and blend; the
+// has (core::to_upstream) and their mask; each layer's mask, vector mask, link, locks, clipping, opacity and blend, and its
+// layer style as upstream's effects, fill opacity and Blend If (PC6: render/pcraft_styles; the book's global light); the
 // page's channels and Quick Mask, paths, guides, patterns its fills use, colour table, duotone inks, profile, the book's
 // File Info as XMP, the EXIF and the PSD's blocks it was opened with. What PhotoCraft has no place for — the pen's lines,
 // the panels' borders, the lines of dialogue, the tones, the effect lines, the 3D, the rulers, the paper of a book's page —

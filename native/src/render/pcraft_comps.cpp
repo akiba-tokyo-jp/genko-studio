@@ -11,6 +11,7 @@
 #include "core/layer_comps.hpp"
 #include "core/layer_styles.hpp"
 #include "core/pynum.hpp"
+#include "core/pyops.hpp"
 #include "render/pcraft_manifest.hpp"
 
 namespace genko::render::pcraft_comps {
@@ -78,10 +79,15 @@ std::vector<core::CompLayerState> states_of(const Json& comp, const pcraft_produ
             look.blend = pcraft::genko_blend(blend).value_or("normal");
             const double opacity = std::clamp(number(a->value("opacity", Json())), 0.0, 1.0);
             const double fill = a->contains("fill_opacity") ? std::clamp(number((*a)["fill_opacity"]), 0.0, 1.0) : 1.0;
-            look.opacity = std::round(opacity * fill * 1000.0) / 1000.0;  // (as a layer's: its effects left out)
-            if (const Json* fx = pcraft::optional_field(*a, "effects")) {
-                const Json* items = pcraft::optional_field(*fx, "items");
-                if ((items != nullptr && items->is_array() && !items->empty()) || pcraft::optional_field(*fx, "psd_raw") != nullptr) effects = true;
+            if (ctx.style) {  // (PC6, layer-styles@1: its effects and fill opacity its style, as a layer's)
+                look.opacity = std::round(opacity * 1000.0) / 1000.0;
+                if (Json style = ctx.style(*a); !style.is_null()) look.style = std::move(style);
+            } else {
+                look.opacity = std::round(opacity * fill * 1000.0) / 1000.0;
+                if (const Json* fx = pcraft::optional_field(*a, "effects")) {
+                    const Json* items = pcraft::optional_field(*fx, "items");
+                    if ((items != nullptr && items->is_array() && !items->empty()) || pcraft::optional_field(*fx, "psd_raw") != nullptr) effects = true;
+                }
             }
             state.appearance = std::move(look);
         }
@@ -132,13 +138,13 @@ void read(const Json& value, pcraft_production::ReadContext& context) {
         return;
     }
     if (comps.empty()) return;
-    if (effects && context.say) context.say("レイヤーカンプのレイヤー効果は Genko で描けないため外しました");
+    if (effects && context.say) context.say("レイヤーカンプのレイヤー効果は読んでいないため外しました");
     context.page->layer_comps = std::move(comps);
 }
 
 std::optional<Json> write(const core::Page& page, pcraft_production::WriteContext& context) {
     if (!page.layer_comps || page.layer_comps->comps.empty()) return std::nullopt;
-    bool styled = false;
+    bool styled = false, blend_if = false;
     const auto states = [&](const std::vector<core::CompLayerState>& list) {
         Json out = Json::array();
         for (const core::CompLayerState& s : list) {
@@ -151,11 +157,16 @@ std::optional<Json> write(const core::Page& page, pcraft_production::WriteContex
             }
             if (s.appearance) {
                 const double fill = s.appearance->style ? core::style_fill_opacity(*s.appearance->style) : 1.0;
-                if (s.appearance->style && core::style_shows_effects(*s.appearance->style)) styled = true;
+                Json fx{{"enabled", true}, {"items", Json::array()}, {"psd_raw", nullptr}, {"reference", nullptr}};
+                if (s.appearance->style) {  // (PC6, layer-styles@1: its effects upstream's; its Blend If upstream's comps have not)
+                    if (context.effects) fx = context.effects(*s.appearance->style);
+                    else if (core::style_shows_effects(*s.appearance->style)) styled = true;
+                    if (const Json* b = core::get(*s.appearance->style, "blend_if"); b != nullptr && b->is_array() && !b->empty()) blend_if = true;
+                }
                 item["appearance"] = Json{{"blend", pcraft::upstream_blend(s.appearance->blend)},
                                           {"opacity", s.appearance->opacity},
                                           {"fill_opacity", fill},
-                                          {"effects", Json{{"enabled", true}, {"items", Json::array()}, {"psd_raw", nullptr}, {"reference", nullptr}}}};
+                                          {"effects", std::move(fx)}};
             }
             out.push_back(std::move(item));
         }
@@ -176,6 +187,7 @@ std::optional<Json> write(const core::Page& page, pcraft_production::WriteContex
             page.layer_comps->last_state ? comp_json(0, "Last Document State", "", true, true, true, *page.layer_comps->last_state) : Json(nullptr);
     }
     if (styled && context.say) context.say("レイヤーカンプのレイヤー効果は .pcraft に書かないため外しました");
+    if (blend_if && context.say) context.say("レイヤーカンプのブレンド条件は PhotoCraft のレイヤーカンプに無いため書きませんでした");
     return list;
 }
 
