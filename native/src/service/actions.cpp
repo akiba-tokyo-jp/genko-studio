@@ -12,6 +12,7 @@
 
 #include "core/config_dir.hpp"
 #include "core/ids.hpp"
+#include "core/json_depth.hpp"
 #include "core/pyconv.hpp"
 #include "render/ops_registry.hpp"
 #include "service/wording.hpp"
@@ -87,6 +88,7 @@ Json load() {
         std::ifstream in(path(), std::ios::binary);
         if (!in) return Json::object();
         const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (core::too_deep(text)) return Json::object();  // (PC6, the review's P3-2: deeper than any reader of it goes, as not JSON)
         data = Json::parse(text);
     } catch (const std::exception&) {
         return Json::object();

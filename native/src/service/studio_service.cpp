@@ -527,7 +527,13 @@ ToolResult StudioService::inspect(const Json& a) {
             if (!out.ok) return fail(out.message, out.code, "/op");
             for (auto& [path, value] : out.values.items()) {
                 const core::prefs::Pref* pref = core::prefs::by_path(path);
-                if (pref == nullptr || pref->kind != core::prefs::Kind::Path || !value.is_string() || value.get<std::string>().empty()) continue;
+                if (pref == nullptr || !value.is_string() || value.get<std::string>().empty()) continue;
+                // (PC6, the review's P3-1: a text that names a file — カラー設定's working spaces and monitor profile hold
+                // a built-in name or an ICC file's full path — hidden as a path is; a built-in name is not a path)
+                const fs::path named = core::path_from_utf8(value.get<std::string>());
+                const bool a_path = pref->kind == core::prefs::Kind::Path ||
+                                    (pref->kind == core::prefs::Kind::Text && (named.has_root_name() || named.has_root_directory()));
+                if (!a_path) continue;
                 value = under_root(value.get<std::string>()).value_or("(root の外)");
             }
             return ToolResult(true, Json::object({{"prefs", out.values}}));

@@ -681,6 +681,13 @@ private slots:
         QCOMPARE(service::actions::load()["影"]["made"], Json("2026-10-28 12:00"));
         QVERIFY(!service::actions::remove("影"));
         QVERIFY(service::actions::load().empty());
+        // (PC6, the review's P3-2: an actions.json deeper than any reader of it goes — read as one that is not JSON, no crash)
+        {
+            std::ofstream out(service::actions::path(), std::ios::binary | std::ios::trunc);
+            out << R"({"影": {"ops": [{"op": "add_layer", "page": 1, "x": )" << std::string(500000, '[') << std::string(500000, ']') << "}]}}";
+        }
+        QVERIFY(service::actions::load().empty());
+        std::filesystem::remove(service::actions::path());
     }
 
     // PC5 J-g: the PC5 ops in the recording — the pages an artboard makes, the book's variables, the questions left out;

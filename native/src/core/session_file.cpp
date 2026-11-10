@@ -14,6 +14,7 @@
 #endif
 
 #include "core/config_dir.hpp"
+#include "core/json_depth.hpp"
 
 namespace genko::core::session_file {
 
@@ -40,6 +41,7 @@ Json read() {
     std::ifstream in(path(), std::ios::binary);
     if (!in) return none;
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (too_deep(text)) return none;  // (PC6, the review's P3-2: deeper than any reader of it goes, as not JSON)
     Json kept;
     try {
         kept = Json::parse(text);

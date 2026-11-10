@@ -627,10 +627,12 @@ void apply_data_set_op(OpContext& c) {
                 if (!picture.name.empty()) op["name"] = picture.name;
                 run_op(c, op, def->name);
             } else {
-                // (a page another holds: as the bus asks of an op on it)
-                const Json* owner = core::get(c.doc.page_locks, page.id);
-                if (owner != nullptr && core::py_truthy(*owner) && !(owner->is_string() && owner->get<std::string>() == c.actor.name())) {
-                    throw OpError("variable " + def->name + ": page " + page.index.repr() + " locked by " + core::py_str(*owner));
+                // (a page another holds: as the bus asks of an op on it — core::check_page_held, PC6 the review's P3-3: an
+                // actor with an agent's rights through no lock)
+                try {
+                    core::check_page_held(c.doc, *found->at, c.actor);
+                } catch (const OpError& error) {
+                    throw OpError("variable " + def->name + ": " + error.what());
                 }
                 const std::string bytes = picture_bytes(c.doc, picture.asset).first;
                 replace_pixels(c, *found->at, *def, bytes);

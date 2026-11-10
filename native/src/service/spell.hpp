@@ -66,6 +66,9 @@ struct Notation {
 // The table read from the settings' JSON ([{"from", "to"}] or [[from, to]]): entries with nothing to find or the same on
 // both sides left out, 2000 at most.
 std::vector<Notation> notations_of(const core::Json& raw);
+// (PC6, the review's P3-2) The table from the setting's text (type.notations): text that is not JSON, or goes deeper than
+// core::kMaxFileDepth, is no table.
+std::vector<Notation> notations_of_text(std::string_view text);
 core::Json notations_json(const std::vector<Notation>& table);
 // The user dictionary from the settings' words (one a line or a tab; blank ones left out), lowercase.
 std::set<std::string> user_words(std::string_view joined);

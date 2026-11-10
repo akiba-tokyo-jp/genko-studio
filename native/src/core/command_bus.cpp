@@ -280,6 +280,21 @@ bool raster_edit_op(std::string_view name) {
                          "smudge", "vector_edit", "fill_gaps", "liquify", "render_prims"});
 }
 
+// (PC6, the review's P2-1: this build's own ops that change a layer's pixels — PC2's apply_image, hdr_toning, auto_adjust
+// (a filter_raster of levels), fade_layer and trap, PC3's magic_erase, matting, outline_area, stroke_path,
+// content_aware_scale and vanishing_point, PC4's painting tools, retouching and render_picture — under raster_edit_op's
+// rule: on a printed layer only after the name is approved. They name their layer by "layer_id" or by "id" and take no
+// role in "layer"; one that makes a new layer for what it draws (new_layer, content_aware_fill's output) is looked at
+// after it too: a printed layer it drew or made is refused, CommandBus::apply. The ops that only move a layer —
+// transform_layers, align_layers, distribute_layers, straighten_layer — are not drawing: SPEC AUTO-01's
+// auto_align_layers)
+bool pixel_tool_op(std::string_view name) {
+    return one_of(name, {"dodge", "burn", "sponge", "blur_brush", "sharpen_brush", "smudge_brush", "mixer_brush", "background_eraser",
+                         "color_replacement", "clone_stamp", "healing_brush", "spot_healing", "history_brush", "content_aware_fill",
+                         "apply_image", "hdr_toning", "auto_adjust", "fade_layer", "trap", "render_picture", "vanishing_point",
+                         "content_aware_scale", "magic_erase", "matting", "outline_area", "stroke_path"});
+}
+
 // The key a drawing op reads the id of the layer it works on from (without it, the op takes the role in "layer"):
 // put_raster and filter_raster read "id", flood_fill a role only, add_stroke and the other drawing ops "layer_id".
 // strict_gates looks at that layer, found as the op finds it.
@@ -304,6 +319,80 @@ bool not_per_page(std::string_view name) {
 }
 
 bool printed(const Layer& layer) { return layer.role != LayerRole::Name && layer.role != LayerRole::Draft; }
+
+// The pages of the book whose name is (approved) or is not yet (!approved), as they are before an op (the pages stay
+// shared: an op that changes one changes a copy).
+std::vector<PagePtr> pages_named(const Document& doc, bool approved) {
+    std::vector<PagePtr> out;
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.pages[i] && !doc.is_deferred(i) && doc.pages[i]->name_ok == approved) out.push_back(doc.pages[i]);
+    }
+    return out;
+}
+
+// The page of `id` in the book after an op (none: deleted, or not read).
+const Page* page_now(const Document& doc, const PagePtr& was) {
+    for (std::size_t i = 0; i < doc.pages.size(); ++i) {
+        if (doc.pages[i] == was) return was.get();  // (not changed)
+        if (doc.pages[i] && !doc.is_deferred(i) && doc.pages[i]->id == was->id) return doc.pages[i].get();
+    }
+    return nullptr;
+}
+
+// The panels where they are on the page: each panel's id, box and drawn shape, and the panels in it (its border, its
+// look, the bow of its edges — set_frame's, open to anyone after the name as in Python — are not the layout).
+bool same_layout(const std::vector<Frame>& a, const std::vector<Frame>& b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        const Frame& x = a[i];
+        const Frame& y = b[i];
+        if (!(x.id == y.id && x.rect.x == y.rect.x && x.rect.y == y.rect.y && x.rect.width == y.rect.width && x.rect.height == y.rect.height))
+            return false;
+        if (x.poly.has_value() != y.poly.has_value()) return false;
+        if (x.poly) {
+            if (x.poly->size() != y.poly->size()) return false;
+            for (std::size_t k = 0; k < x.poly->size(); ++k) {
+                if (!((*x.poly)[k].x == (*y.poly)[k].x) || !((*x.poly)[k].y == (*y.poly)[k].y)) return false;
+            }
+        }
+        if (!same_layout(x.children, y.children)) return false;
+    }
+    return true;
+}
+
+bool same_rect_mm(const Rect& a, const Rect& b) { return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height; }
+
+// (PC6, the review's P1-1: strict_gates keeps an approved name's layout for a person to change — the layout ops by name
+// before the op, check_strict; and after any other op of one who cannot approve, the pages whose name was approved with
+// their panels and paper as they were: the page's size — rotate_pages, crop_page, set_canvas_size, trim_page, reveal_all,
+// resize_pages, set_artboard's size — moves the panels with the page. set_page_spec, the book's paper, is Python's and
+// left to anyone, as in Python)
+void check_approved_layouts(const std::vector<PagePtr>& before, const Document& after) {
+    for (const PagePtr& was : before) {
+        const Page* now = page_now(after, was);
+        if (now == nullptr || now == was.get()) continue;
+        if (!same_layout(was->frames, now->frames) || !same_rect_mm(was->paper_rect_mm(), now->paper_rect_mm()) ||
+            !same_rect_mm(was->trim_rect_mm(), now->trim_rect_mm())) {
+            throw OpError("page " + now->index.repr() + ": the name is approved; a person must revoke it before the layout changes (strict_gates)");
+        }
+    }
+}
+
+// (PC6, the review's P2-1: pixel_tool_op's ops, after them — a printed layer of a page whose name is not approved yet
+// that they drew on, or made, is refused as drawing on it before the op is, check_strict)
+void check_unnamed_drawing(const std::vector<PagePtr>& before, const Document& after, const std::string& name) {
+    for (const PagePtr& was : before) {
+        const Page* now = page_now(after, was);
+        if (now == nullptr || now == was.get()) continue;
+        for (const Layer& layer : now->layers) {
+            if (!printed(layer) || !layer.exportable) continue;
+            const auto old = std::find_if(was->layers.begin(), was->layers.end(), [&](const Layer& l) { return l.id == layer.id; });
+            if (old == was->layers.end() || !same_locked_look(*old, layer)) {
+                throw OpError(name + " on a printed layer needs name_ok on page " + now->index.repr() + " (strict_gates)");
+            }
+        }
+    }
+}
 
 // ops.PAGE_LOCAL_OPS, BOOK_OPS and LINE_OPS (the sets _touched_pages looks names up in)
 bool page_local_op(std::string_view name) {
@@ -1417,9 +1506,17 @@ ApplyResult CommandBus::apply(const Document& doc, const Json& ops_in, const Act
                 }
                 // (layer-locks@1, PC5 I-a: the layers locked with すべてをロック before the op — kept as they were after it)
                 const std::vector<LockedLayer> locked = locked_layers(work);
+                // (PC6, the review's P1-1 and P2-1: strict_gates looked at after the op too — an approved name's layout,
+                // a printed layer drawn on before the name)
+                const bool strict = work.strict_gates;
+                const std::vector<PagePtr> approved =
+                    strict && !actor.can_approve() && name_text != "set_page_spec" ? pages_named(work, true) : std::vector<PagePtr>();
+                const std::vector<PagePtr> unnamed = strict && pixel_tool_op(name_text) ? pages_named(work, false) : std::vector<PagePtr>();
                 OpContext context{work, *current, actor};
                 (*function)(context);
                 check_locked_layers(locked, work, *current);
+                check_approved_layouts(approved, work);
+                check_unnamed_drawing(unnamed, work, name_text);
                 settle_blend_channels(work);  // (blend-channels@1: a page whose mode changed blends every channel again)
                 validate_color_document(work);
                 try {

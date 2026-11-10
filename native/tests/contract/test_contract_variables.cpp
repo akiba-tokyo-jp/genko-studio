@@ -439,6 +439,21 @@ private slots:
         core::Document held = doc;
         held.page_locks[held.page(0).id] = "human:other";
         QVERIFY2(refusal(held).find("locked by") != std::string::npos, refusal(held).c_str());
+        {  // (PC6, the review's P3-3: the pixels' own check of the lock is the bus's — an actor with an agent's rights, the
+           // control channel's, goes through no lock, one under its own name either; the person of the name does)
+            core::Document pixels_only = run(held, Json{{"op", "set_data_sets"},
+                                                        {"data_sets", Json::array({Json{{"name", "B"}, {"values", Json::array({Json{{"variable", "img"},
+                                                                                                                                {"value", Json{{"data", core::b64encode(png_of(8, 4, {0, 255, 0, 255}))}}}}})}}})}});
+            const Json ops = Json::array({Json{{"op", "apply_data_set"}, {"name", "B"}}});
+            std::string error;
+            try {
+                core::CommandBus(render::ops_registry()).apply(pixels_only, ops, core::Actor::with_agent_rights("human:other"));
+            } catch (const core::ApplyError& e) {
+                error = e.what();
+            }
+            QVERIFY2(error.find("variable img: page 1 locked by human:other") != std::string::npos, error.c_str());
+            QCOMPARE(core::CommandBus(render::ops_registry()).apply(pixels_only, ops, core::Actor("human:other")).applied, Json::array({"apply_data_set"}));
+        }
         core::Document gated = doc;
         gated.strict_gates = true;
         QVERIFY2(refusal(gated).find("strict_gates") != std::string::npos, refusal(gated).c_str());

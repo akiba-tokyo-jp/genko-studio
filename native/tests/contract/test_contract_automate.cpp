@@ -268,6 +268,57 @@ private slots:
         QVERIFY(!fs::exists(root / "s.genko" / "out"));
     }
 
+    // (PC6, the review's P1-1 and P2-1) `genko apply` in an agent's book (strict_gates): an unnamed caller (legacy:unknown)
+    // and `--agent ai:…` are refused the size of a page whose name is approved (rotate_pages, crop_page, set_canvas_size),
+    // the book as it was; a person named does it. A printed layer drawn on before the name (outline_area, a PC op) is
+    // refused whoever asks.
+    void applyKeepsAnApprovedLayout() {
+        QTemporaryDir dir;
+        const fs::path root = path_of(dir.path());
+        core::Document doc = core::new_episode("t", core::Num(1), 2, core::PageSpec::b4_comic());
+        doc = core::CommandBus(render::ops_registry())
+                  .apply(doc, Json::array({Json{{"op", "add_layer"}, {"page", 2}, {"kind", "paint"}, {"id", "p"}}}), core::Actor("human:test"))
+                  .doc;
+        doc.strict_gates = true;
+        doc.pages[0]->name_ok = true;
+        {
+            storage::ProjectLock lock(root / "s.genko", "human:test");
+            lock.try_acquire();
+            storage::SaveRequest request;
+            request.actor = "human:test";
+            request.ops = Json::array();
+            storage::Saver(lock).save(doc, request);
+        }
+        const std::int64_t revision = storage::load_document(root / "s.genko").document.revision;
+        const std::vector<Json> sized = {Json{{"op", "rotate_pages"}, {"page", 1}, {"turn", "90cw"}},
+                                         Json{{"op", "crop_page"}, {"page", 1}, {"rect", Json::array({10, 10, 150, 200})}},
+                                         Json{{"op", "set_canvas_size"}, {"width_mm", 20}, {"height_mm", 20}, {"relative", true}}};
+        for (const Json& op : sized) {
+            write(root / "ops.json", Json::array({op}).dump());
+            for (const QStringList& agent : {QStringList(), QStringList{QStringLiteral("--agent"), QStringLiteral("ai:bot")}}) {
+                auto [code, out] = cli(QStringList{QStringLiteral("apply"), q(root / "s.genko"), q(root / "ops.json")} + agent);
+                QCOMPARE(code, 1);
+                QVERIFY2(out["error"].get<std::string>().find("page 1: the name is approved; a person must revoke it before the layout changes (strict_gates)") !=
+                             std::string::npos,
+                         out.dump().c_str());
+            }
+            QCOMPARE(storage::load_document(root / "s.genko").document.revision, revision);
+        }
+        write(root / "ops.json", Json::array({sized[0]}).dump());
+        auto [code, out] = cli({QStringLiteral("apply"), q(root / "s.genko"), q(root / "ops.json"), QStringLiteral("--agent"), QStringLiteral("human:leaf")});
+        QCOMPARE(code, 0);
+        QCOMPARE(storage::load_document(root / "s.genko").document.revision, revision + 1);
+        // before the name: a printed layer drawn on refused, whoever asks
+        const Json outline{{"op", "outline_area"}, {"page", 2}, {"layer_id", "p"}, {"area", Json{{"rect", Json::array({20, 20, 40, 40})}}}, {"width_mm", 2}};
+        write(root / "ops.json", Json::array({outline}).dump());
+        for (const char* agent : {"ai:bot", "human:leaf"}) {
+            std::tie(code, out) = cli({QStringLiteral("apply"), q(root / "s.genko"), q(root / "ops.json"), QStringLiteral("--agent"), QString::fromLatin1(agent)});
+            QCOMPARE(code, 1);
+            QVERIFY2(out["error"].get<std::string>().find("outline_area on a printed layer needs name_ok on page 2 (strict_gates)") != std::string::npos, out.dump().c_str());
+        }
+        QCOMPARE(storage::load_document(root / "s.genko").document.revision, revision + 1);
+    }
+
     void batchOfBooks() {
         QTemporaryDir dir;
         QTemporaryDir config;

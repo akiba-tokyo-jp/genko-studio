@@ -156,33 +156,7 @@ bool peer_is_mine(QLocalSocket& socket, bool server_side, QString* why) {
 #endif
 }
 
-int nesting(std::string_view line, int limit) {
-    int depth = 0;
-    int deepest = 0;
-    bool in_string = false;
-    bool escaped = false;
-    for (const char c : line) {
-        if (in_string) {
-            if (escaped) {
-                escaped = false;
-            } else if (c == '\\') {
-                escaped = true;
-            } else if (c == '"') {
-                in_string = false;
-            }
-            continue;
-        }
-        if (c == '"') {
-            in_string = true;
-        } else if (c == '[' || c == '{') {
-            deepest = std::max(deepest, ++depth);
-            if (deepest >= limit) return deepest;
-        } else if (c == ']' || c == '}') {
-            if (depth > 0) --depth;
-        }
-    }
-    return deepest;
-}
+int nesting(std::string_view line, int limit) { return core::json_nesting(line, limit); }
 
 std::span<const Method> methods() { return kMethods; }
 
